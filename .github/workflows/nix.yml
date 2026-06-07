@@ -1,0 +1,46 @@
+name: Nix checks
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@v22
+      - uses: DeterminateSystems/magic-nix-cache-action@v13
+      - name: Build, test, and lint
+        run: nix flake check --print-build-logs
+
+  resyntax:
+    name: Resyntax lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@v22
+      - uses: DeterminateSystems/magic-nix-cache-action@v13
+      # The default dev shell provisions Resyntax into the user scope, so the
+      # linter runs on the same nix-provided Racket as the rest of the build.
+      - name: Resyntax lint
+        run: |
+          nix develop .#ci --command bash -c '
+            set -euo pipefail
+            out=$(resyntax analyze --directory torchrkt --analyzer-timeout 30000 2>&1)
+            echo "$out"
+            if echo "$out" | grep -qE "resyntax: .*\.rkt:[0-9]+:[0-9]+ \["; then
+              echo "::error::Resyntax found refactoring suggestions. Run: resyntax fix --directory torchrkt"
+              exit 1
+            fi
+            timeouts=$(echo "$out" | grep -c "timed out" || true)
+            if [ "$timeouts" -gt 0 ]; then
+              echo "::warning::Resyntax analyzer timed out on $timeouts file(s); that part of the analysis was partial."
+            fi
+            echo "Resyntax: no suggestions."
+          '
