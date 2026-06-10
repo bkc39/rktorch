@@ -13,6 +13,10 @@
 (provide torch-version
          manual-seed!
          randn
+         rand
+         uniform!
+         item
+         to-dtype
          tensor-numel
          tensor-shape
          tensor->vector
@@ -32,6 +36,30 @@
   (unless h
     (error 'randn "randn failed: ~a" (tr-last-error/raw)))
   (wrap-tensor h))
+
+;; Uniform draws on [0, 1), torch.rand.
+(define (rand . dims)
+  (wrap-tensor
+   (check-handle 'rand (tr-rand/raw (list->s64vector dims) (length dims)))))
+
+;; In-place fill with uniform draws on [low, high) — torch.Tensor.uniform_,
+;; the RNG primitive behind PyTorch's nn.Linear init.
+(define (uniform! t low high)
+  (check-ok (tr-tensor-uniform!/raw t
+                                    (exact->inexact low)
+                                    (exact->inexact high))
+            'uniform!)
+  (void))
+
+;; The value of a one-element tensor as a Racket real (torch.Tensor.item).
+(define (item t)
+  (define-values (rc v) (tr-tensor-item/raw t))
+  (check-ok rc 'item)
+  v)
+
+;; Copy converted to 'float32 / 'float64 / 'int64 (torch.Tensor.to).
+(define (to-dtype t dtype)
+  (wrap-tensor (check-handle 'to-dtype (tr-tensor-to-dtype/raw t dtype))))
 
 (define (tensor-numel t)
   (define-values (rc n) (tr-tensor-numel/raw t))

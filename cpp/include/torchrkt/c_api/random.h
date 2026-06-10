@@ -16,6 +16,14 @@ extern "C" {
  * with the standard allocator/deallocator finalizer pair. */
 tr_tensor* tr_randn(const int64_t* dims, int64_t ndim);
 
+/* Like tr_randn but i.i.d. uniform on [0, 1) (torch.rand). */
+tr_tensor* tr_rand(const int64_t* dims, int64_t ndim);
+
+/* Fill `t` in place with i.i.d. uniform draws on [low, high), consuming the
+ * global RNG exactly like torch.Tensor.uniform_ — the primitive behind
+ * nn.init.kaiming_uniform_, so seeded init parity with PyTorch holds. */
+int tr_tensor_uniform_(tr_tensor* t, double low, double high);
+
 #ifdef __cplusplus
 }
 #endif

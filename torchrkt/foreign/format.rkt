@@ -39,8 +39,10 @@
 (define (fmt-fixed x)
   (or (fmt-special x) (~r x #:precision (list '= precision))))
 
+;; ~r with '(= 0) keeps the trailing decimal point, matching PyTorch's
+;; int-mode "2." exactly.
 (define (fmt-int x)
-  (or (fmt-special x) (string-append (~r x #:precision '(= 0)) ".")))
+  (or (fmt-special x) (~r x #:precision '(= 0))))
 
 (define (all-integral? flat)
   (for/and ([x (in-list flat)] #:when (finite-real? x))

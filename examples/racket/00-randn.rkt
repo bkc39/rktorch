@@ -1,6 +1,6 @@
 #lang scribble/lp2
 
-@(require (for-label racket/base
+@(require (for-label (except-in racket/base exp log sqrt max min)
                      torchrkt))
 
 @section[#:tag "ex-randn"]{Seeding the RNG and sampling a tensor}

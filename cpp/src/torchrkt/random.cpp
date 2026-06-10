@@ -7,7 +7,16 @@
 #include <vector>
 
 #include "torchrkt/detail/error.hpp"
+#include "torchrkt/detail/op_call.hpp"
 #include "torchrkt/detail/tensor_handle.hpp"
+
+namespace {
+
+torch::TensorOptions default_options() {
+  return torch::TensorOptions().dtype(torch::kFloat32).device(torch::kCPU);
+}
+
+}  // namespace
 
 extern "C" {
 
@@ -16,18 +25,29 @@ tr_tensor* tr_randn(const int64_t* dims, int64_t ndim) {
     torchrkt::set_error("tr_randn: ndim/dims inconsistent");
     return nullptr;
   }
-  try {
+  return torchrkt::alloc_result("tr_randn", [&] {
     const std::vector<int64_t> shape(dims, dims + ndim);
-    const auto options =
-        torch::TensorOptions().dtype(torch::kFloat32).device(torch::kCPU);
-    return new tr_tensor{torch::randn(shape, options)};
-  } catch (const std::exception& e) {
-    torchrkt::set_error(std::string("tr_randn: ") + e.what());
-    return nullptr;
-  } catch (...) {
-    torchrkt::set_error("tr_randn: unknown exception");
+    return torch::randn(shape, default_options());
+  });
+}
+
+tr_tensor* tr_rand(const int64_t* dims, int64_t ndim) {
+  if (ndim < 0 || (ndim > 0 && !dims)) {
+    torchrkt::set_error("tr_rand: ndim/dims inconsistent");
     return nullptr;
   }
+  return torchrkt::alloc_result("tr_rand", [&] {
+    const std::vector<int64_t> shape(dims, dims + ndim);
+    return torch::rand(shape, default_options());
+  });
+}
+
+int tr_tensor_uniform_(tr_tensor* t, double low, double high) {
+  if (!t) {
+    return torchrkt::null_arg_status("tr_tensor_uniform_");
+  }
+  return torchrkt::status_call("tr_tensor_uniform_",
+                               [&] { t->value.uniform_(low, high); });
 }
 
 }  // extern "C"

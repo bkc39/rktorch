@@ -1,0 +1,50 @@
+# Automatic Claude Code review on pull requests targeting master.
+# Requires the ANTHROPIC_API_KEY repository secret (Settings > Secrets and
+# variables > Actions). Posts findings as PR comments / inline annotations.
+
+name: claude-code-review
+
+on:
+  pull_request:
+    branches: [master]
+    types: [opened, synchronize]
+
+permissions:
+  contents: read
+  pull-requests: write
+  id-token: write
+
+jobs:
+  claude-review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Run Claude Code review
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          prompt: |
+            Review pull request #${{ github.event.pull_request.number }} in
+            ${{ github.repository }}.
+
+            This repository is torchrkt: Racket bindings to libtorch via a
+            hand-written extern "C" shim. Read AGENTS.md first for the
+            project's conventions, then review the diff for:
+            - correctness bugs (memory ownership across the FFI boundary,
+              the integer-status + tr_last_error contract, GC finalizer
+              registration on tensor-returning bindings)
+            - violations of repo conventions (files <= 500 lines, ops.cpp
+              boundary helpers in detail/op_call.hpp, allocator-wrapped raw
+              bindings, contracts at the foreign.rkt/nn.rkt facades,
+              the name-shadowing dispatch convention)
+            - missing test or parity coverage for new ops (gtest goldens,
+              example triples, python-cross-test entries)
+
+            Report genuine issues only; do not restate the diff or praise
+            style. Use inline comments for line-specific findings and a
+            single summary comment for overall feedback.
+          claude_args: |
+            --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Read,Grep,Glob"

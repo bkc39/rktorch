@@ -15,6 +15,13 @@ extern "C" {
  *      count and nothing is copied. */
 typedef struct tr_tensor tr_tensor;
 
+/* Element types reachable from Racket. Values are part of the C ABI. */
+typedef enum tr_dtype {
+  TR_DTYPE_FLOAT32 = 0,
+  TR_DTYPE_FLOAT64 = 1,
+  TR_DTYPE_INT64 = 2
+} tr_dtype;
+
 /* Free a handle returned by tr_randn. Safe on NULL. */
 void tr_tensor_free(tr_tensor* t);
 
@@ -35,6 +42,14 @@ int tr_tensor_shape(const tr_tensor* t, int64_t capacity, int64_t* out_dims,
  * numel. */
 int tr_tensor_copy_data(const tr_tensor* t, uint64_t capacity, float* out,
                         uint64_t* out_numel);
+
+/* Extract the value of a single-element tensor as a double (like
+ * torch.Tensor.item). Errors if the tensor has more than one element. */
+int tr_tensor_item(const tr_tensor* t, double* out);
+
+/* Copy converted to the given element type (like torch.Tensor.to). Returns a
+ * new handle, NULL on error. */
+tr_tensor* tr_tensor_to_dtype(const tr_tensor* t, tr_dtype dtype);
 
 /* Render the tensor via ATen's ostream operator into out_buffer (capacity in
  * bytes, no NUL terminator written). *out_len always receives the byte length;

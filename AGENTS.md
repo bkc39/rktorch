@@ -3,15 +3,18 @@
 ## Project Overview
 
 `torchrkt` provides Racket bindings to **libtorch** (the C++ core of PyTorch).
-This is the **v0 scaffold**: a thin vertical slice — seed the RNG, draw a tensor,
-read it back, and check it against PyTorch — wired through the full
-build/test/lint/CI pipeline. The point of v0 is the *pipeline*, not the API
-surface. See `plans/v0-scaffold.md` for scope and the decisions behind it.
+**v1** is in: the v0 scaffold (pipeline + handle/finalizer/last-error
+substrate, `plans/v0-scaffold.md`) plus the curated tensor-op tranche,
+autograd, and the `define-module` nn system — all validated against PyTorch.
+Design rationale and the closed nn-architecture decision:
+`docs/design/v1-codegen-nn.md`; task ledger: `plans/v1.md`.
 
 The Racket package is the `torchrkt` collection:
 
 - `(require torchrkt)` — the high-level API. A `tensor` is a wrapper struct whose
   native handle is reclaimed by Racket's GC; user code never frees it.
+- `(require torchrkt/nn)` — the nn layer (mirrors `import torch.nn`):
+  `define-module`, `gen:module`, `linear`, `sgd`, `mse-loss`, initializers.
 - `(require torchrkt/foreign)` — the contracted low-level layer. Same surface,
   applied contracts; this file is the authoritative description of the API.
 - `(require (submod torchrkt/foreign unsafe))` — adds `tensor-free!` for
@@ -22,11 +25,36 @@ The Racket package is the `torchrkt` collection:
 The native bridge is a C++ shared library, `libtorchrkt`, built with CMake and
 linked against libtorch via `find_package(Torch)`.
 
-### v0 surface
+### v1 surface
 
-`torch-version`, `manual-seed!`, `randn` (arbitrary shape, returns a tensor
-handle), `tensor-shape`, `tensor-numel`, `tensor->list`, `tensor->vector`,
-`tensor->repr`, `tensor->string`. CPU + float32 only.
+CPU + float32 only. From `torchrkt`:
+
+- v0 core: `torch-version manual-seed! randn tensor-shape tensor-numel
+  tensor->list tensor->vector tensor->repr tensor->string`
+- creation: `zeros ones full arange eye tensor rand` (+ in-place `uniform!`)
+- shape: `reshape view transpose permute squeeze unsqueeze cat stack`
+- elementwise: `add sub mul div pow neg exp log sqrt relu sigmoid tanh`
+  (binary ops take a real on either side)
+- reductions: `sum mean max min argmax softmax log-softmax`
+- linalg: `matmul mm mv dot`; out: `item to-dtype`
+- autograd: `requires-grad! requires-grad? backward! grad has-grad? detach
+  with-no-grad grad-enabled?`; in-place `sub! zero! mul! zero-grad!`
+
+**Name shadowing convention:** ops colliding with racket/base or racket/list
+(`exp log sqrt max min argmax`) are generic — tensors hit libtorch, anything
+else defers to the original — so `(require torchrkt)` never breaks numeric
+code. New ops that collide must follow the same dispatch pattern, and
+scribble examples need `(for-label (except-in racket/base ...))`.
+
+From `torchrkt/nn`: `define-module gen:module module? parameters
+named-parameters buffers forward linear sgd step! zero-grads! mse-loss
+kaiming-uniform uniform-init fan-in`. `define-module` is the Python-style
+`nn.Module` analog: fields are registered at expansion time, models are
+plain struct trees owned by the GC (no global parameter store), and
+`prop:procedure` makes `(net x)` work like `__call__`. Layer init mirrors
+PyTorch RNG consumption (`nn.Linear.reset_parameters`), so a shared
+`manual-seed!` yields bit-comparable parameters — the MLP cross-test relies
+on this.
 
 **REPL parity.** A tensor prints in the Racket REPL exactly as it does in the
 Python REPL — `tensor([[ 1.5410, -0.2934], [-2.1788, 0.5684]])` — via
@@ -101,15 +129,19 @@ Where python3 can't `import torch` (the sandboxed `nix build`, or the lean
 ### C++ (`cpp/`)
 
 - `include/torchrkt/c_api/*.h` — the `extern "C"` FFI surface (global, random,
-  tensor). Integer-status + size-then-fill + `tr_last_error` contract; the
-  opaque `tr_tensor` handle is returned by `tr_randn` and freed by
+  tensor, creation, shape_ops, elementwise, reduce, linalg, autograd).
+  Integer-status + size-then-fill + `tr_last_error` contract; opaque
+  `tr_tensor` handles are returned by constructors/ops and freed by
   `tr_tensor_free`.
 - `src/torchrkt/*.cpp` — translation layer; catches C++ exceptions, returns
-  status codes / NULL. `detail/tensor_handle.hpp` (in `src/`, private) completes
-  the opaque struct over a `torch::Tensor`.
-- `tests/torchrkt/random_test.cpp` — GoogleTest: shape, determinism (same seed →
-  same draws), the size-then-fill probes. `c_api_compile_test.c` proves the
-  headers are valid C.
+  status codes / NULL. `detail/tensor_handle.hpp` (in `src/`, private)
+  completes the opaque struct over a `torch::Tensor`;
+  `detail/op_call.hpp` holds the boundary helpers (`alloc_result`,
+  `status_call`, `null_arg`) every op body reduces to — new ops must use
+  them rather than hand-rolling try/catch.
+- `tests/torchrkt/{random,ops,autograd}_test.cpp` — GoogleTest goldens per
+  family. `c_api_compile_test.c` proves the headers are valid C (add a
+  function-pointer line per new op family).
 
 ### Racket (`torchrkt/`)
 
@@ -118,13 +150,26 @@ Thin re-export facades over small modules (target ≤ 500 lines/file):
 - `info.rkt` — package metadata + native-library pre-install hook.
 - `main.rkt` — high-level facade (re-exports `foreign.rkt`).
 - `foreign.rkt` — the contracted layer + the `unsafe` submodule.
-- `foreign/ops.rkt` — safe operations; `foreign/structs.rkt` — the `tensor`
+- `foreign/ops.rkt` — version/seed/randn + marshalling (`item`, `to-dtype`,
+  `rand`, `uniform!`); `foreign/tensor-ops.rkt` — the op tranche (and the
+  shadow-dispatch convention); `foreign/autograd-ops.rkt` — autograd +
+  `with-no-grad` + in-place ops; `foreign/structs.rkt` — the `tensor`
   wrapper (`prop:cpointer`, shape cached at wrap time, allocator/deallocator
-  finalizer); `foreign/error.rkt` — `check-ok` / `check-handle`.
-- `foreign/raw/*.rkt` — direct FFI: `library` (the definer), `global`, `tensor`
-  (`_Tensor` cpointer + deallocator), `random` (`tr-randn` + allocator).
+  finalizer); `foreign/error.rkt` — `check-ok` / `check-handle`;
+  `foreign/format.rkt` — the PyTorch-repr reproducer.
+- `foreign/raw/*.rkt` — direct FFI, one module per C translation unit:
+  `library` (the definer), `global`, `tensor` (`_Tensor` cpointer +
+  deallocator), `random`, `creation`, `shape-ops`, `elementwise`, `reduce`,
+  `linalg`, `autograd`. Tensor-returning bindings always carry
+  `#:wrap (allocator tr-tensor-free/raw)`.
+- `nn.rkt` — contracted facade over `nn/` (`module.rkt` = `gen:module` +
+  the `define-module` macro; `linear.rkt`, `init.rkt`, `optim.rkt`,
+  `loss.rkt`).
 - `private/install-torchrkt-native.rkt` — stages `libtorchrkt.*` into
   `native-libs/` from `TORCHRKT_NATIVE_LIB_PATH` (set by the Nix build/shell).
+  NOTE: the dev shell only re-stages on first provision (the `deps_stamp`
+  guard); after changing C++, re-copy from `nix build .#cpp
+  --print-out-paths` (or `nix run .#copy-native-libs`) before `raco test`.
 
 ## CI
 

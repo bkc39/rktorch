@@ -21,9 +21,15 @@ add_library(torchrkt::torchrkt ALIAS torchrkt)
 
 target_sources(torchrkt
   PRIVATE
+    src/torchrkt/autograd.cpp
+    src/torchrkt/creation.cpp
     src/torchrkt/detail/error.cpp
+    src/torchrkt/elementwise.cpp
     src/torchrkt/global.cpp
+    src/torchrkt/linalg.cpp
     src/torchrkt/random.cpp
+    src/torchrkt/reduce.cpp
+    src/torchrkt/shape_ops.cpp
     src/torchrkt/tensor.cpp
 )
 
@@ -66,6 +72,8 @@ if(BUILD_TESTING)
   torchrkt_apply_nix_cflags(torchrkt_c_api_compile_test)
 
   add_executable(torchrkt_tests
+    tests/torchrkt/autograd_test.cpp
+    tests/torchrkt/ops_test.cpp
     tests/torchrkt/random_test.cpp
     $<TARGET_OBJECTS:torchrkt_c_api_compile_test>
   )

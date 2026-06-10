@@ -10,4 +10,8 @@
 ;; with `raco test examples/test/`.
 
 (define test-timeouts
-  '(("00-randn.rkt" 300)))
+  '(("00-randn.rkt" 300)
+    ("01-arith.rkt" 300)
+    ("02-matmul.rkt" 300)
+    ("03-autograd.rkt" 300)
+    ("04-mlp.rkt" 300)))

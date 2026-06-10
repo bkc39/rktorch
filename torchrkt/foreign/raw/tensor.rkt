@@ -23,7 +23,10 @@
          tr-tensor-ndim/raw
          tr-tensor-shape/raw
          tr-tensor-copy-data/raw
-         tr-tensor-print/raw)
+         tr-tensor-print/raw
+         tr-tensor-item/raw
+         tr-tensor-to-dtype/raw
+         _tr-dtype)
 
 (define-cpointer-type _Tensor)
 
@@ -67,6 +70,24 @@
         -> (rc : _int)
         -> (values rc out-numel))
   #:c-id tr_tensor_copy_data)
+
+;; Mirrors the tr_dtype C enum (tensor.h).
+(define _tr-dtype
+  (_enum '(float32 = 0 float64 = 1 int64 = 2)))
+
+(define-torchrkt tr-tensor-item/raw
+  (_fun (t : _Tensor)
+        (out : (_ptr o _double))
+        -> (rc : _int)
+        -> (values rc out))
+  #:c-id tr_tensor_item)
+
+;; to-dtype allocates a fresh handle, so it carries the allocator wrap even
+;; though it lives with the accessors.
+(define-torchrkt tr-tensor-to-dtype/raw
+  (_fun (t : _Tensor) (dtype : _tr-dtype) -> _Tensor/null)
+  #:c-id tr_tensor_to_dtype
+  #:wrap (allocator tr-tensor-free/raw))
 
 ;; (raw t capacity buf) -> (values rc out-len), size-then-fill string probe.
 (define-torchrkt tr-tensor-print/raw
