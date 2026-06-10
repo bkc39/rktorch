@@ -50,6 +50,14 @@
     (define x (requires-grad! (tensor '(1 2))))
     (zero-grad! x))
 
+  (test-case "has-grad? and maybe-grad track gradient accumulation"
+    (define x (requires-grad! (tensor '(1 2))))
+    (check-false (has-grad? x))
+    (check-false (maybe-grad x))
+    (backward! (sum (mul x x)))
+    (check-true (has-grad? x))
+    (check-equal? (tensor->list (maybe-grad x)) '(2.0 4.0)))
+
   (test-case "manual SGD step: p -= lr * grad under with-no-grad"
     (define p (requires-grad! (tensor '(1.0 2.0))))
     (backward! (sum (mul p p)))

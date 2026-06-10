@@ -53,13 +53,16 @@
     (check-equal? (tensor->list (relu x)) '(1.0 0.0 3.0))
     (check-equal? (tensor->list (pow x 2)) '(1.0 4.0 9.0)))
 
-  (test-case "exp/log/sqrt/max/min fall back to racket/base on numbers"
+  (test-case "exp/log/sqrt/tanh/max/min fall back to racket/base on numbers"
     (check-equal? (exp 0) 1)
     (check-equal? (log 1) 0)
     (check-equal? (log 8 2) 3.0)
     (check-equal? (sqrt 4) 2)
+    (check-equal? (tanh 0) 0)
+    (check-= (tanh 0.5) 0.46211715726 1e-9)
     (check-equal? (max 1 2 3) 3)
     (check-equal? (min 1 2 3) 1)
+    (check-= (item (tanh (tensor '(0.5)))) 0.4621171 1e-5)
     (define x (tensor '(1 4 9)))
     (check-equal? (tensor->list (sqrt x)) '(1.0 2.0 3.0))
     (check-= (item (exp (tensor 0))) 1.0 1e-6)
@@ -94,6 +97,15 @@
     (check-exn exn:fail? (lambda () (item (tensor '(1 2)))))
     (define i (to-dtype (tensor '(1.5 2.5)) 'int64))
     (check-equal? (tensor->list i) '(1.0 2.0)))
+
+  (test-case "wrong call shapes get contract blame at the facade"
+    (check-exn exn:fail:contract? (lambda () (add 1 2)))
+    (check-exn exn:fail:contract? (lambda () (sub 1.0 2.0)))
+    (check-exn exn:fail:contract? (lambda () (log (tensor '(1 2)) 2)))
+    (check-exn exn:fail:contract? (lambda () (max (tensor '(1 2)) 3)))
+    (check-exn exn:fail:contract? (lambda () (argmax even?)))
+    (check-exn exn:fail:contract?
+               (lambda () (argmax even? '(1 2) #:keepdim #t))))
 
   (test-case "rand and uniform! stay in range"
     (manual-seed! 0)

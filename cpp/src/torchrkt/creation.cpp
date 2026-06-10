@@ -2,6 +2,7 @@
 
 #include <torch/torch.h>
 
+#include <limits>
 #include <vector>
 
 #include "torchrkt/detail/op_call.hpp"
@@ -71,11 +72,21 @@ tr_tensor* tr_from_data(const float* data, uint64_t numel, const int64_t* dims,
   }
   return torchrkt::alloc_result("tr_from_data", [&] {
     const auto shape = to_shape(dims, ndim);
-    int64_t expected = 1;
+    // Overflow-safe product: a crafted shape whose product wraps could
+    // otherwise pass the numel check and hand from_blob an undersized
+    // buffer.
+    uint64_t expected = 1;
     for (const int64_t d : shape) {
-      expected *= d;
+      if (d < 0) {
+        throw std::invalid_argument("negative dimension");
+      }
+      const auto u = static_cast<uint64_t>(d);
+      if (u != 0 && expected > std::numeric_limits<uint64_t>::max() / u) {
+        throw std::invalid_argument("dimension product overflows");
+      }
+      expected *= u;
     }
-    if (expected < 0 || static_cast<uint64_t>(expected) != numel) {
+    if (expected != numel) {
       throw std::invalid_argument("numel does not match the product of dims");
     }
     // from_blob borrows `data`; clone() copies it into tensor-owned storage.

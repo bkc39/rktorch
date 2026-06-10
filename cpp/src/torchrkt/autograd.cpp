@@ -27,6 +27,14 @@ int tr_tensor_requires_grad(const tr_tensor* t, int* out) {
   });
 }
 
+int tr_tensor_has_grad(const tr_tensor* t, int* out) {
+  if (!t || !out) {
+    return torchrkt::null_arg_status("tr_tensor_has_grad");
+  }
+  return torchrkt::status_call(
+      "tr_tensor_has_grad", [&] { *out = t->value.grad().defined() ? 1 : 0; });
+}
+
 int tr_tensor_backward(tr_tensor* t) {
   if (!t) {
     return torchrkt::null_arg_status("tr_tensor_backward");

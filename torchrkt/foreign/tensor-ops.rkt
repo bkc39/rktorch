@@ -4,9 +4,10 @@
 ;; reductions, linalg), built on the raw layer + the tensor wrapper struct.
 ;; Contracts live in ../foreign.rkt.
 ;;
-;; Naming: ops whose names collide with racket/base (exp log sqrt max min)
-;; are generic — given a tensor they hit libtorch, given numbers they defer
-;; to racket/base — so `(require torchrkt)` doesn't break numeric code.
+;; Naming: ops whose names collide with racket/base or racket/list
+;; (exp log sqrt tanh max min argmax) are generic — given a tensor they hit
+;; libtorch, given numbers they defer to the original — so
+;; `(require torchrkt)` doesn't break numeric code.
 ;; Binary arithmetic accepts a real on either side via the *_scalar shims.
 
 (require ffi/vector
@@ -16,6 +17,10 @@
                   [max base:max]
                   [min base:min]
                   [sqrt base:sqrt])
+         ;; tanh is not in racket/base, but the full `racket` language
+         ;; re-exports it from racket/math — so the dispatch shim still
+         ;; matters for #lang racket users.
+         (only-in racket/math [tanh base:tanh])
          (only-in racket/list [argmax base:argmax] flatten)
          "error.rkt"
          "raw/creation.rkt"
@@ -200,8 +205,8 @@
 (define (sigmoid t)
   (wrap 'sigmoid (tr-sigmoid/raw t)))
 
-(define (tanh t)
-  (wrap 'tanh (tr-tanh/raw t)))
+(define (tanh v)
+  (if (tensor? v) (wrap 'tanh (tr-tanh/raw v)) (base:tanh v)))
 
 ;; -------------------------------------------------------------- reductions
 

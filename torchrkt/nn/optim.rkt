@@ -22,12 +22,14 @@
   (make-sgd params lr))
 
 ;; One update step. Parameters that never received a gradient are skipped
-;; (PyTorch skips grad-is-None parameters the same way).
+;; (PyTorch skips grad-is-None parameters the same way). maybe-grad keeps it
+;; to one native grad-handle allocation per parameter per step.
 (define (step! opt)
   (with-no-grad
-    (for ([p (in-list (sgd-params opt))]
-          #:when (has-grad? p))
-      (sub! p (grad p) (sgd-lr opt)))))
+    (for ([p (in-list (sgd-params opt))])
+      (define g (maybe-grad p))
+      (when g
+        (sub! p g (sgd-lr opt))))))
 
 ;; optimizer.zero_grad(): reset every accumulated gradient to zero.
 (define (zero-grads! opt)

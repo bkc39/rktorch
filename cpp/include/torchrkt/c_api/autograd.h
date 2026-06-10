@@ -14,6 +14,11 @@ int tr_tensor_requires_grad_(tr_tensor* t, int requires_grad);
 
 int tr_tensor_requires_grad(const tr_tensor* t, int* out);
 
+/* 1 if a gradient has been accumulated (PyTorch: grad is not None). Cheap
+ * predicate — unlike tr_tensor_grad it neither allocates a handle nor
+ * reports "no gradient" through tr_last_error. */
+int tr_tensor_has_grad(const tr_tensor* t, int* out);
+
 /* Backpropagate from a scalar tensor (torch.Tensor.backward). */
 int tr_tensor_backward(tr_tensor* t);
 

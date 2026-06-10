@@ -13,6 +13,7 @@
          backward!
          grad
          has-grad?
+         maybe-grad
          detach
          grad-enabled?
          call-with-no-grad
@@ -43,9 +44,18 @@
   (wrap-tensor (check-handle 'grad (tr-tensor-grad/raw t))))
 
 ;; #t once backward has accumulated a gradient (PyTorch: grad is not None).
-;; The raw call returns NULL (-> #f) for an undefined grad.
+;; Uses the dedicated C predicate: no handle allocation and no stale
+;; tr_last_error on the "no gradient" path.
 (define (has-grad? t)
-  (and (tr-tensor-grad/raw t) #t))
+  (define-values (rc on?) (tr-tensor-has-grad/raw t))
+  (check-ok rc 'has-grad?)
+  on?)
+
+;; The gradient, or #f if none has been accumulated yet — the optimizer's
+;; single-allocation path (has-grad? + grad would allocate the handle and
+;; walk the FFI twice per parameter per step).
+(define (maybe-grad t)
+  (and (has-grad? t) (grad t)))
 
 (define (detach t)
   (wrap-tensor (check-handle 'detach (tr-tensor-detach/raw t))))

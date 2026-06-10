@@ -36,6 +36,44 @@
 (define index/c exact-integer?)
 (define tensor-or-real/c (or/c tensor? real?))
 
+;; Binary arithmetic: a real is welcome on either side, but at least one
+;; argument must be a tensor — (add 1 2) is a caller error and should get
+;; contract blame, not a runtime error from the dispatcher.
+(define binary-arith/c
+  (->i ([a (or/c tensor? real?)]
+        [b (a) (if (tensor? a) (or/c tensor? real?) tensor?)])
+       [result tensor?]))
+
+;; Shadow-dispatch unaries (exp sqrt tanh): tensors produce tensors,
+;; numbers defer to racket/base and produce numbers.
+(define unary-numeric/c
+  (->i ([v (or/c tensor? number?)])
+       [result (v) (if (tensor? v) tensor? number?)]))
+
+;; log: racket/base's optional base argument only makes sense for numbers;
+;; (log some-tensor 2) is blamed at the boundary.
+(define log/c
+  (->i ([v (or/c tensor? number?)])
+       ([base (v) (if (tensor? v) none/c number?)])
+       [result (v) (if (tensor? v) tensor? number?)]))
+
+;; max/min: a single tensor reduces; reals behave like racket/base's
+;; variadic max/min. Extra arguments after a tensor are blamed.
+(define reduce-or-variadic/c
+  (->i ([v (or/c tensor? real?)])
+       #:rest [rest (v) (if (tensor? v) null? (listof real?))]
+       [result (v) (if (tensor? v) tensor? real?)]))
+
+;; argmax: tensor form takes an optional dim + #:keepdim; procedure form is
+;; racket/list's (argmax proc lst) and the list is mandatory there.
+(define argmax/c
+  (->i ([v (or/c tensor? procedure?)])
+       ([dim (v) (if (tensor? v) index/c list?)]
+        #:keepdim [keepdim (v) (if (tensor? v) boolean? none/c)])
+       #:pre/name (v dim) "a list argument is required with a procedure"
+       (or (tensor? v) (not (unsupplied-arg? dim)))
+       [result any/c]))
+
 (provide
  (contract-out
   [torch-version (-> string?)]
@@ -72,30 +110,30 @@
   [unsqueeze (-> tensor? index/c tensor?)]
   [cat (->* ((non-empty-listof tensor?)) (index/c) tensor?)]
   [stack (->* ((non-empty-listof tensor?)) (index/c) tensor?)]
-  ;; elementwise (binary ops take a real on either side)
-  [add (-> tensor-or-real/c tensor-or-real/c tensor?)]
-  [sub (-> tensor-or-real/c tensor-or-real/c tensor?)]
-  [mul (-> tensor-or-real/c tensor-or-real/c tensor?)]
-  [div (-> tensor-or-real/c tensor-or-real/c tensor?)]
+  ;; elementwise (binary ops take a real on either side, tensor required
+  ;; on at least one)
+  [add binary-arith/c]
+  [sub binary-arith/c]
+  [mul binary-arith/c]
+  [div binary-arith/c]
   [pow (-> tensor? tensor-or-real/c tensor?)]
   [neg (-> tensor? tensor?)]
   [relu (-> tensor? tensor?)]
   [sigmoid (-> tensor? tensor?)]
-  [tanh (-> tensor? tensor?)]
-  ;; exp/log/sqrt/max/min shadow racket/base: tensors hit libtorch, anything
-  ;; else defers to the racket/base function, so requiring torchrkt is safe.
-  [exp (-> (or/c tensor? number?) (or/c tensor? number?))]
-  [log (->* ((or/c tensor? number?)) (number?) (or/c tensor? number?))]
-  [sqrt (-> (or/c tensor? number?) (or/c tensor? number?))]
-  [max (->* (tensor-or-real/c) #:rest (listof real?) tensor-or-real/c)]
-  [min (->* (tensor-or-real/c) #:rest (listof real?) tensor-or-real/c)]
+  ;; exp/log/sqrt/tanh/max/min shadow racket/base: tensors hit libtorch,
+  ;; anything else defers to the racket/base function, so requiring
+  ;; torchrkt never breaks numeric code.
+  [exp unary-numeric/c]
+  [log log/c]
+  [sqrt unary-numeric/c]
+  [tanh unary-numeric/c]
+  [max reduce-or-variadic/c]
+  [min reduce-or-variadic/c]
   ;; reductions
   [sum (-> tensor? tensor?)]
   [mean (-> tensor? tensor?)]
   ;; argmax shadows racket/list's: (argmax proc lst) delegates to it.
-  [argmax (->* ((or/c tensor? procedure?))
-               ((or/c index/c list?) #:keepdim boolean?)
-               any/c)]
+  [argmax argmax/c]
   [softmax (-> tensor? index/c tensor?)]
   [log-softmax (-> tensor? index/c tensor?)]
   ;; linalg
@@ -112,6 +150,7 @@
   [backward! (-> tensor? void?)]
   [grad (-> tensor? tensor?)]
   [has-grad? (-> tensor? boolean?)]
+  [maybe-grad (-> tensor? (or/c tensor? #f))]
   [detach (-> tensor? tensor?)]
   [grad-enabled? (-> boolean?)]
   [call-with-no-grad (-> (-> any) any)]

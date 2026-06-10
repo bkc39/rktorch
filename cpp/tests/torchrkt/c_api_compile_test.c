@@ -31,6 +31,7 @@ void torchrkt_c_api_compile_check(void) {
   tr_tensor* (*rand_fn)(const int64_t*, int64_t) = tr_rand;
   int (*uniform_fn)(tr_tensor*, double, double) = tr_tensor_uniform_;
   int (*requires_grad_set)(tr_tensor*, int) = tr_tensor_requires_grad_;
+  int (*has_grad)(const tr_tensor*, int*) = tr_tensor_has_grad;
   int (*backward)(tr_tensor*) = tr_tensor_backward;
   tr_tensor* (*grad)(const tr_tensor*) = tr_tensor_grad;
   int (*set_grad_enabled)(int) = tr_set_grad_enabled;
@@ -55,6 +56,7 @@ void torchrkt_c_api_compile_check(void) {
   (void)rand_fn;
   (void)uniform_fn;
   (void)requires_grad_set;
+  (void)has_grad;
   (void)backward;
   (void)grad;
   (void)set_grad_enabled;

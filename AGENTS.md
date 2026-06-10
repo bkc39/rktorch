@@ -37,14 +37,19 @@ CPU + float32 only. From `torchrkt`:
   (binary ops take a real on either side)
 - reductions: `sum mean max min argmax softmax log-softmax`
 - linalg: `matmul mm mv dot`; out: `item to-dtype`
-- autograd: `requires-grad! requires-grad? backward! grad has-grad? detach
-  with-no-grad grad-enabled?`; in-place `sub! zero! mul! zero-grad!`
+- autograd: `requires-grad! requires-grad? backward! grad has-grad?
+  maybe-grad detach with-no-grad grad-enabled?`; in-place
+  `sub! zero! mul! zero-grad!`
 
 **Name shadowing convention:** ops colliding with racket/base or racket/list
-(`exp log sqrt max min argmax`) are generic — tensors hit libtorch, anything
-else defers to the original — so `(require torchrkt)` never breaks numeric
-code. New ops that collide must follow the same dispatch pattern, and
-scribble examples need `(for-label (except-in racket/base ...))`.
+(`exp log sqrt tanh max min argmax`) are generic — tensors hit libtorch,
+anything else defers to the original — so `(require torchrkt)` never breaks
+numeric code. New ops that collide must follow the same dispatch pattern
+(check racket/base first — `tanh` was missed initially and broke numeric
+callers), and scribble examples need
+`(for-label (except-in racket/base ...))`. Dispatching ops carry dependent
+(`->i`) contracts so the wrong shape gets contract blame, not a runtime
+error.
 
 From `torchrkt/nn`: `define-module gen:module module? parameters
 named-parameters buffers forward linear sgd step! zero-grads! mse-loss
@@ -141,7 +146,8 @@ Where python3 can't `import torch` (the sandboxed `nix build`, or the lean
   them rather than hand-rolling try/catch.
 - `tests/torchrkt/{random,ops,autograd}_test.cpp` — GoogleTest goldens per
   family. `c_api_compile_test.c` proves the headers are valid C (add a
-  function-pointer line per new op family).
+  function-pointer line for at least one representative of each new op
+  family, plus any function whose signature shape is new).
 
 ### Racket (`torchrkt/`)
 

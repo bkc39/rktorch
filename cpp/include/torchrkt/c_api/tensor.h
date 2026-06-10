@@ -15,7 +15,10 @@ extern "C" {
  *      count and nothing is copied. */
 typedef struct tr_tensor tr_tensor;
 
-/* Element types reachable from Racket. Values are part of the C ABI. */
+/* Element types reachable from Racket. Values are part of the C ABI, and so
+ * is the enum's width: the Racket FFI marshals it as a C int, so a narrower
+ * base type would be an ABI break (and C can't specify one before C23). */
+/* NOLINTNEXTLINE(performance-enum-size) */
 typedef enum tr_dtype {
   TR_DTYPE_FLOAT32 = 0,
   TR_DTYPE_FLOAT64 = 1,

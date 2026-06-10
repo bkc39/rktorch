@@ -12,6 +12,7 @@
 
 (provide tr-tensor-requires-grad!/raw
          tr-tensor-requires-grad/raw
+         tr-tensor-has-grad/raw
          tr-tensor-backward/raw
          tr-tensor-grad/raw
          tr-tensor-detach/raw
@@ -31,6 +32,15 @@
         -> (rc : _int)
         -> (values rc (not (zero? out))))
   #:c-id tr_tensor_requires_grad)
+
+;; Cheap predicate: no handle allocation, no tr_last_error side effect on
+;; the "no gradient" path (unlike probing tr-tensor-grad/raw for NULL).
+(define-torchrkt tr-tensor-has-grad/raw
+  (_fun (t : _Tensor)
+        (out : (_ptr o _int))
+        -> (rc : _int)
+        -> (values rc (not (zero? out))))
+  #:c-id tr_tensor_has_grad)
 
 (define-torchrkt tr-tensor-backward/raw
   (_fun (t : _Tensor) -> _int)

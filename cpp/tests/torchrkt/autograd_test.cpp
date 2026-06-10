@@ -60,6 +60,33 @@ TEST(TorchrktAutograd, GradBeforeBackwardErrors) {
   EXPECT_EQ(tr_tensor_grad(x.t), nullptr);
 }
 
+TEST(TorchrktAutograd, HasGradPredicate) {
+  Handle x = make({1.0F, 2.0F}, {2});
+  ASSERT_EQ(tr_tensor_requires_grad_(x.t, 1), 0) << tr_last_error();
+
+  int has = -1;
+  ASSERT_EQ(tr_tensor_has_grad(x.t, &has), 0) << tr_last_error();
+  EXPECT_EQ(has, 0);
+
+  const Handle sq(tr_mul(x.t, x.t));
+  Handle y(tr_sum(sq.t));
+  ASSERT_EQ(tr_tensor_backward(y.t), 0) << tr_last_error();
+
+  ASSERT_EQ(tr_tensor_has_grad(x.t, &has), 0) << tr_last_error();
+  EXPECT_EQ(has, 1);
+
+  EXPECT_EQ(tr_tensor_has_grad(nullptr, &has), 1);
+}
+
+TEST(TorchrktAutograd, InplaceScalarMultiply) {
+  Handle x = make({1.0F, -2.0F}, {2});
+  ASSERT_EQ(tr_tensor_mul_(x.t, 2.5), 0) << tr_last_error();
+  EXPECT_EQ(data_of(x.t), (std::vector<float>{2.5F, -5.0F}));
+
+  // NULL surfaces as a status code, never an abort.
+  EXPECT_EQ(tr_tensor_mul_(nullptr, 2.0), 1);
+}
+
 TEST(TorchrktAutograd, GradModeScopesRecording) {
   int enabled = -1;
   ASSERT_EQ(tr_is_grad_enabled(&enabled), 0) << tr_last_error();

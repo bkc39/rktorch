@@ -63,10 +63,24 @@ TEST(TorchrktOps, FromDataRejectsNumelMismatch) {
             nullptr);
 }
 
+TEST(TorchrktOps, FromDataRejectsOverflowingShape) {
+  // A dim product that wraps uint64 must not bypass the numel check.
+  const std::vector<float> values = {1.0F, 2.0F};
+  const std::vector<int64_t> dims = {2, 9223372036854775807LL, 2};
+  EXPECT_EQ(tr_from_data(values.data(), values.size(), dims.data(), 3),
+            nullptr);
+  const std::vector<int64_t> negative = {-1, 2};
+  EXPECT_EQ(tr_from_data(values.data(), values.size(), negative.data(), 2),
+            nullptr);
+}
+
 TEST(TorchrktOps, CreationGoldens) {
   const std::vector<int64_t> dims = {2, 2};
   const Handle z(tr_zeros(dims.data(), 2));
   EXPECT_EQ(data_of(z.t), (std::vector<float>{0, 0, 0, 0}));
+
+  const Handle o(tr_ones(dims.data(), 2));
+  EXPECT_EQ(data_of(o.t), (std::vector<float>{1, 1, 1, 1}));
 
   const Handle f(tr_full(dims.data(), 2, 7.5));
   EXPECT_EQ(data_of(f.t), (std::vector<float>{7.5F, 7.5F, 7.5F, 7.5F}));
@@ -85,6 +99,16 @@ TEST(TorchrktOps, ShapeOps) {
   const Handle r(tr_reshape(t.t, flat.data(), 1));
   EXPECT_EQ(shape_of(r.t), flat);
 
+  const std::vector<int64_t> three_two = {3, 2};
+  const Handle v(tr_view(t.t, three_two.data(), 2));
+  EXPECT_EQ(shape_of(v.t), three_two);
+  EXPECT_EQ(data_of(v.t), (std::vector<float>{1, 2, 3, 4, 5, 6}));
+
+  const std::vector<int64_t> perm = {1, 0};
+  const Handle p(tr_permute(t.t, perm.data(), 2));
+  EXPECT_EQ(shape_of(p.t), (std::vector<int64_t>{3, 2}));
+  EXPECT_EQ(data_of(p.t), (std::vector<float>{1, 4, 2, 5, 3, 6}));
+
   const Handle tr(tr_transpose(t.t, 0, 1));
   EXPECT_EQ(shape_of(tr.t), (std::vector<int64_t>{3, 2}));
   EXPECT_EQ(data_of(tr.t), (std::vector<float>{1, 4, 2, 5, 3, 6}));
@@ -93,6 +117,8 @@ TEST(TorchrktOps, ShapeOps) {
   EXPECT_EQ(shape_of(u.t), (std::vector<int64_t>{1, 2, 3}));
   const Handle s(tr_squeeze(u.t));
   EXPECT_EQ(shape_of(s.t), (std::vector<int64_t>{2, 3}));
+  const Handle sd(tr_squeeze_dim(u.t, 0));
+  EXPECT_EQ(shape_of(sd.t), (std::vector<int64_t>{2, 3}));
 
   const tr_tensor* pair[] = {t.t, t.t};
   const Handle c(tr_cat(pair, 2, 0));
@@ -129,6 +155,14 @@ TEST(TorchrktOps, ReduceAndItem) {
   const Handle m(tr_mean(t.t));
   ASSERT_EQ(tr_tensor_item(m.t, &item), 0) << tr_last_error();
   EXPECT_DOUBLE_EQ(item, 2.5);
+
+  const Handle mx(tr_max(t.t));
+  ASSERT_EQ(tr_tensor_item(mx.t, &item), 0) << tr_last_error();
+  EXPECT_DOUBLE_EQ(item, 4.0);
+
+  const Handle mn(tr_min(t.t));
+  ASSERT_EQ(tr_tensor_item(mn.t, &item), 0) << tr_last_error();
+  EXPECT_DOUBLE_EQ(item, 1.0);
 
   const Handle am(tr_argmax_all(t.t));
   ASSERT_EQ(tr_tensor_item(am.t, &item), 0) << tr_last_error();
@@ -167,6 +201,9 @@ TEST(TorchrktOps, Linalg) {
 TEST(TorchrktOps, ToDtypeAndUniform) {
   const Handle t = make({1.5F, 2.5F}, {2});
   const Handle i(tr_tensor_to_dtype(t.t, TR_DTYPE_INT64));
+  // Reading an INT64 tensor through data_of is safe by contract:
+  // tr_tensor_copy_data converts to CPU float32 contiguous before copying
+  // (see c_api/tensor.h), so this is a conversion, not a reinterpret.
   EXPECT_EQ(data_of(i.t), (std::vector<float>{1, 2}));
 
   ASSERT_EQ(tr_manual_seed(0), 0) << tr_last_error();
