@@ -1,5 +1,8 @@
 # Automatic Claude Code review on pull requests targeting master.
-# Requires the ANTHROPIC_API_KEY repository secret (Settings > Secrets and
+# Authenticates with a Claude subscription (Pro/Max) OAuth token so reviews
+# draw on the account's token budget rather than API billing: run
+# `claude setup-token` locally, then store the result as the
+# CLAUDE_CODE_OAUTH_TOKEN repository secret (Settings > Secrets and
 # variables > Actions). Posts findings as PR comments / inline annotations.
 
 name: claude-code-review
@@ -25,7 +28,7 @@ jobs:
       - name: Run Claude Code review
         uses: anthropics/claude-code-action@v1
         with:
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           prompt: |
             Review pull request #${{ github.event.pull_request.number }} in
             ${{ github.repository }}.
