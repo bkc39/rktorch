@@ -12,11 +12,6 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
-    # GitHub's virtualized macOS runners cannot start binaries linked against
-    # libtorch (SIGABRT before main; fine on bare-metal Apple silicon), so the
-    # darwin leg is advisory until that's resolved. Local `nix flake check`
-    # on a real mac remains the supported darwin gate.
-    continue-on-error: ${{ matrix.os == 'macos-latest' }}
     steps:
       - uses: actions/checkout@v5
       - uses: DeterminateSystems/nix-installer-action@v22
