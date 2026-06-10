@@ -23,6 +23,27 @@
 
       torchPackageFor = pkgs:
         if torchSource == "python" then pkgs.python3Packages.torch
+        # nixpkgs' libtorch-bin on darwin leaves a Homebrew install name for
+        # OpenMP inside libtorch_cpu.dylib, so anything linking it aborts at
+        # dyld load on machines without Homebrew's libomp (e.g. GitHub's macOS
+        # runners) and silently depends on Homebrew everywhere else. Rewrite
+        # the reference to the nix-provided libomp and ad-hoc re-sign (the
+        # edit invalidates the auto-signature applied earlier in fixup).
+        else if pkgs.stdenv.isDarwin then
+          pkgs.libtorch-bin.overrideAttrs (old: {
+            nativeBuildInputs = (old.nativeBuildInputs or [ ])
+              ++ [ pkgs.darwin.cctools pkgs.darwin.sigtool ];
+            postFixup = (old.postFixup or "") + ''
+              for lib in $out/lib/*.dylib; do
+                if otool -L "$lib" | grep -q '/opt/homebrew/opt/libomp/lib/libomp.dylib'; then
+                  install_name_tool -change \
+                    /opt/homebrew/opt/libomp/lib/libomp.dylib \
+                    ${pkgs.llvmPackages.openmp}/lib/libomp.dylib "$lib"
+                  codesign -f -s - "$lib"
+                fi
+              done
+            '';
+          })
         else pkgs.libtorch-bin;
     in
     {
