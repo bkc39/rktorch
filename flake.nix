@@ -48,6 +48,11 @@
             doCheck = true;
             checkPhase = ''
               runHook preCheck
+              # Diagnostic: if the libtorch-linked binary can't start on this
+              # host (GitHub's virtualized macOS runners abort at startup),
+              # surface the dyld/runtime error that gtest discovery swallows.
+              ./torchrkt_tests --gtest_list_tests \
+                || echo "torchrkt_tests cannot run here (exit $?)"
               ctest --output-on-failure
               runHook postCheck
             '';
