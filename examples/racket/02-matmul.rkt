@@ -1,7 +1,7 @@
 #lang scribble/lp2
 
-@(require (for-label (except-in racket/base exp log sqrt max min)
-                     torchrkt))
+@(require (for-label (except-in racket/base exp log sqrt max min + - * /)
+                     torch))
 
 @section[#:tag "ex-matmul"]{Shape manipulation and matrix multiplication}
 
@@ -10,7 +10,7 @@
 build a small matrix with known contents.
 
 @chunk[<r02-require>
-(require torchrkt)]
+(require torch)]
 
 @chunk[<r02-provide>
 (provide run-example)]

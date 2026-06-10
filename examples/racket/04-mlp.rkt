@@ -1,7 +1,7 @@
 #lang scribble/lp2
 
-@(require (for-label (except-in racket/base exp log sqrt max min)
-                     torchrkt))
+@(require (for-label (except-in racket/base exp log sqrt max min + - * /)
+                     torch))
 
 @section[#:tag "ex-mlp"]{Training an MLP end to end}
 
@@ -12,8 +12,8 @@ optimizer updates, and the whole model is reclaimed by the garbage collector
 when dropped.
 
 @chunk[<r04-require>
-(require torchrkt
-         torchrkt/nn)]
+(require torch
+         torch/nn)]
 
 @chunk[<r04-provide>
 (provide run-example)]

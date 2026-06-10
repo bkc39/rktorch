@@ -1,7 +1,7 @@
 #lang scribble/lp2
 
-@(require (for-label (except-in racket/base exp log sqrt max min)
-                     torchrkt))
+@(require (for-label (except-in racket/base exp log sqrt max min + - * /)
+                     torch))
 
 @section[#:tag "ex-arith"]{Building tensors and elementwise arithmetic}
 
@@ -10,7 +10,7 @@ nested list, infers the shape from the nesting (here 2x2), and copies the
 values into a float32 tensor whose handle the garbage collector owns.
 
 @chunk[<r01-require>
-(require torchrkt)]
+(require torch)]
 
 @chunk[<r01-provide>
 (provide run-example)]

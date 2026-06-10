@@ -1,9 +1,9 @@
 ---
 name: cpp-dev
-description: Local C++ development loop for the torchrkt shim — format, lint, line-gate, build, and test every C++ change before calling it done. Use this whenever editing, adding, or reviewing anything under cpp/ (.cpp/.h/.hpp files, CMakeLists.txt, new ATen op bindings, gtest files), and whenever a C++ change needs to be picked up by the Racket tests. Also use it when CI fails on cpp-format, cpp-tidy, or cpp-line-count and the fix needs to be reproduced locally.
+description: Local C++ development loop for the torch shim — format, lint, line-gate, build, and test every C++ change before calling it done. Use this whenever editing, adding, or reviewing anything under cpp/ (.cpp/.h/.hpp files, CMakeLists.txt, new ATen op bindings, gtest files), and whenever a C++ change needs to be picked up by the Racket tests. Also use it when CI fails on cpp-format, cpp-tidy, or cpp-line-count and the fix needs to be reproduced locally.
 ---
 
-# C++ development loop (torchrkt)
+# C++ development loop (torch)
 
 All the gates that CI runs (`nix flake check`: `cpp`, `cpp-format`, `cpp-tidy`,
 `cpp-line-count`) are runnable locally, and running them *during* development
@@ -32,7 +32,7 @@ After writing or editing any `.c/.cpp/.h/.hpp` file:
 ```bash
 nix develop --command bash -c 'cd cpp && clang-format -i \
   include/torchrkt/c_api/*.h src/torchrkt/*.cpp src/torchrkt/detail/*.hpp \
-  tests/torchrkt/*.cpp tests/torchrkt/*.c'
+  tests/torch/*.cpp tests/torch/*.c'
 ```
 
 clang-format reflows lambda-heavy code (the `alloc_result`/`status_call`
@@ -89,21 +89,21 @@ Adding to the `extern "C"` surface requires updating, in the same change:
 
 ### 6. Re-stage the native lib before Racket tests
 
-The dev shell only copies `libtorchrkt` into `torchrkt/native-libs/` on first
+The dev shell only copies `libtorchrkt` into `torch/native-libs/` on first
 provision (the `deps_stamp` guard), so Racket tests silently run against the
 **stale** library after C++ changes — symptom: `dlsym ... symbol not found`.
 After any C++ change that Racket code will exercise:
 
 ```bash
 CPP_OUT=$(nix build .#cpp --print-out-paths | tail -1) \
-  && rm -f torchrkt/native-libs/libtorchrkt.* \
-  && cp "$CPP_OUT"/lib/libtorchrkt.* torchrkt/native-libs/ \
-  && chmod u+w torchrkt/native-libs/libtorchrkt.*
+  && rm -f torch/native-libs/libtorchrkt.* \
+  && cp "$CPP_OUT"/lib/libtorchrkt.* torch/native-libs/ \
+  && chmod u+w torch/native-libs/libtorchrkt.*
 ```
 
-Then `nix develop --command raco test torchrkt/`. If Racket modules fail with
+Then `nix develop --command raco test torch/`. If Racket modules fail with
 "reference to a variable that is not exported" or stale-binding errors, clear
-the project's `compiled/` dirs (`find torchrkt examples -type d -name
+the project's `compiled/` dirs (`find torch examples -type d -name
 compiled -exec rm -rf {} +`) and rerun.
 
 ### 7. Final gate

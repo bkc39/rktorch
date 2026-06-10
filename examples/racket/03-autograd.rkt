@@ -1,7 +1,7 @@
 #lang scribble/lp2
 
-@(require (for-label (except-in racket/base exp log sqrt max min)
-                     torchrkt))
+@(require (for-label (except-in racket/base exp log sqrt max min + - * /)
+                     torch))
 
 @section[#:tag "ex-autograd"]{Autograd: gradients by backpropagation}
 
@@ -11,7 +11,7 @@ to, @racket[backward!] runs backpropagation from the scalar @tt{y}, and
 @racket[grad] reads the accumulated gradient.
 
 @chunk[<r03-require>
-(require torchrkt)]
+(require torch)]
 
 @chunk[<r03-provide>
 (provide run-example)]

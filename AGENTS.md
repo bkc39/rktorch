@@ -2,32 +2,32 @@
 
 ## Project Overview
 
-`torchrkt` provides Racket bindings to **libtorch** (the C++ core of PyTorch).
+`torch` provides Racket bindings to **libtorch** (the C++ core of PyTorch).
 **v1** is in: the v0 scaffold (pipeline + handle/finalizer/last-error
 substrate, `plans/v0-scaffold.md`) plus the curated tensor-op tranche,
 autograd, and the `define-module` nn system — all validated against PyTorch.
 Design rationale and the closed nn-architecture decision:
-`docs/design/v1-codegen-nn.md`; task ledger: `plans/v1.md`.
+`docs/design/v1-codegen-nn.md`.
 
-The Racket package is the `torchrkt` collection:
+The Racket package is the `torch` collection:
 
-- `(require torchrkt)` — the high-level API. A `tensor` is a wrapper struct whose
+- `(require torch)` — the high-level API. A `tensor` is a wrapper struct whose
   native handle is reclaimed by Racket's GC; user code never frees it.
-- `(require torchrkt/nn)` — the nn layer (mirrors `import torch.nn`):
+- `(require torch/nn)` — the nn layer (mirrors `import torch.nn`):
   `define-module`, `gen:module`, `linear`, `sgd`, `mse-loss`, initializers.
-- `(require torchrkt/foreign)` — the contracted low-level layer. Same surface,
+- `(require torch/foreign)` — the contracted low-level layer. Same surface,
   applied contracts; this file is the authoritative description of the API.
-- `(require (submod torchrkt/foreign unsafe))` — adds `tensor-free!` for
+- `(require (submod torch/foreign unsafe))` — adds `tensor-free!` for
   deterministic release. Idempotent: a second free raises `exn:fail:contract`
   at the contract boundary instead of double-freeing.
-- `(require torchrkt/foreign/raw/*)` — the direct C FFI layer.
+- `(require torch/foreign/raw/*)` — the direct C FFI layer.
 
 The native bridge is a C++ shared library, `libtorchrkt`, built with CMake and
 linked against libtorch via `find_package(Torch)`.
 
 ### v1 surface
 
-CPU + float32 only. From `torchrkt`:
+CPU + float32 only. From `torch`:
 
 - v0 core: `torch-version manual-seed! randn tensor-shape tensor-numel
   tensor->list tensor->vector tensor->repr tensor->string`
@@ -35,6 +35,9 @@ CPU + float32 only. From `torchrkt`:
 - shape: `reshape view transpose permute squeeze unsqueeze cat stack`
 - elementwise: `add sub mul div pow neg exp log sqrt relu sigmoid tanh`
   (binary ops take a real on either side)
+- operators: `+ - * /` shadow racket/base rkt-polars-style (numeric fast
+  path to racket/base, tensor operands dispatch to add/sub/mul/div, chains
+  fold left); `@` is matmul, like Python's `a @ b`
 - reductions: `sum mean max min argmax softmax log-softmax`
 - linalg: `matmul mm mv dot`; out: `item to-dtype`
 - autograd: `requires-grad! requires-grad? backward! grad has-grad?
@@ -43,15 +46,17 @@ CPU + float32 only. From `torchrkt`:
 
 **Name shadowing convention:** ops colliding with racket/base or racket/list
 (`exp log sqrt tanh max min argmax`) are generic — tensors hit libtorch,
-anything else defers to the original — so `(require torchrkt)` never breaks
+anything else defers to the original — so `(require torch)` never breaks
 numeric code. New ops that collide must follow the same dispatch pattern
 (check racket/base first — `tanh` was missed initially and broke numeric
 callers), and scribble examples need
-`(for-label (except-in racket/base ...))`. Dispatching ops carry dependent
-(`->i`) contracts so the wrong shape gets contract blame, not a runtime
-error.
+`(for-label (except-in racket/base exp log sqrt max min + - * /))`.
+Dispatching named ops carry dependent (`->i`) contracts so the wrong shape
+gets contract blame, not a runtime error; the `+ - * / @` operators are
+provided as plain renames (no contract overhead on the numeric fast path),
+per `foreign/operators.rkt`.
 
-From `torchrkt/nn`: `define-module gen:module module? parameters
+From `torch/nn`: `define-module gen:module module? parameters
 named-parameters buffers forward linear sgd step! zero-grads! mse-loss
 kaiming-uniform uniform-init fan-in`. `define-module` is the Python-style
 `nn.Module` analog: fields are registered at expansion time, models are
@@ -94,7 +99,7 @@ nix build .#cpp        # CMake build + gtest only
 nix flake check        # everything: cpp, format, tidy, line-count, racket
 nix develop            # dev shell (includes a Python with `torch`)
 nix develop .#ci       # lean shell without Python torch (used by the lint job)
-./result/bin/torchrkt  # runs (module+ main): prints version + a 2x2 draw
+./result/bin/torch  # runs (module+ main): prints version + a 2x2 draw
 ```
 
 Inside `nix develop`:
@@ -104,13 +109,13 @@ cmake -S cpp -B cpp/build -G Ninja -DBUILD_TESTING=ON
 cmake --build cpp/build
 ctest --test-dir cpp/build --output-on-failure
 
-raco test torchrkt/          # FFI unit tests (+ self-skipping parity test)
+raco test torch/          # FFI unit tests (+ self-skipping parity test)
 raco test examples/test/     # literate-example runners
-racket -l torchrkt           # REPL with the package
+racket -l torch           # REPL with the package
 
-resyntax analyze --directory torchrkt   # lint gate (CI fails on any suggestion)
-resyntax fix --directory torchrkt
-raco review torchrkt/**/*.rkt
+resyntax analyze --directory torch   # lint gate (CI fails on any suggestion)
+resyntax fix --directory torch
+raco review torch/**/*.rkt
 ```
 
 `raco review` does not expand macros, so the pure re-export facades
@@ -123,7 +128,7 @@ PyTorch behaviour beside the Racket bindings and run the real cross-test:
 
 ```bash
 nix develop --command python3 -c 'import torch; print(torch.__version__)'
-nix develop --command raco test torchrkt/tests/python-cross-test.rkt
+nix develop --command raco test torch/tests/python-cross-test.rkt
 ```
 
 Where python3 can't `import torch` (the sandboxed `nix build`, or the lean
@@ -149,9 +154,16 @@ Where python3 can't `import torch` (the sandboxed `nix build`, or the lean
   function-pointer line for at least one representative of each new op
   family, plus any function whose signature shape is new).
 
-### Racket (`torchrkt/`)
+### Racket (`torch/`)
 
-Thin re-export facades over small modules (target ≤ 500 lines/file):
+Thin re-export facades over small modules (target ≤ 500 lines/file).
+
+**Import convention:** library modules use `(require (only-in ...))` with
+explicit, alphabetized name lists — never whole-module requires — so each
+file documents exactly what it pulls in. Exemptions, each marked with a
+comment at the require site: pure re-export facades (`main.rkt`,
+`foreign.rkt`, `nn.rkt`), and macro-heavy modules whose expansions need the
+module's full export set (`racket/runtime-path`, `syntax/parse/pre`).
 
 - `info.rkt` — package metadata + native-library pre-install hook.
 - `main.rkt` — high-level facade (re-exports `foreign.rkt`).

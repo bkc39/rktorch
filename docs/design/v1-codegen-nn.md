@@ -5,7 +5,7 @@ Status: **decided / implemented**. The nn.Module gate at the end is closed:
 generic interface, module-tree parameter registry, no VarStore). See *Open
 decision gate* at the end for the recorded rationale.
 
-Companion: `plans/v0-scaffold.md` (what shipped), `plans/v1.md` (task list).
+Companion: `plans/v0-scaffold.md` (what shipped).
 
 ---
 

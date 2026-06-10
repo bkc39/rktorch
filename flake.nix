@@ -1,5 +1,5 @@
 {
-  description = "torchrkt - Racket bindings to libtorch (PyTorch), v0 scaffold";
+  description = "rktorch - Racket bindings to libtorch (PyTorch)";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
@@ -142,7 +142,7 @@
           };
 
           racket = pkgs.stdenv.mkDerivation {
-            pname = "torchrkt";
+            pname = "torch-rkt";
             inherit version;
             src = ./.;
 
@@ -159,13 +159,13 @@
               # Stage the native lib so define-runtime-path resolves it during
               # testing.  libtorch itself is reached via the rpath Nix baked
               # into libtorchrkt, so it is NOT copied (it is multi-GB).
-              mkdir -p ./torchrkt/native-libs
-              cp ${cpp}/lib/libtorchrkt.* ./torchrkt/native-libs/
+              mkdir -p ./torch/native-libs
+              cp ${cpp}/lib/libtorchrkt.* ./torch/native-libs/
 
               raco pkg install --batch --deps fail --no-setup --copy --scope user \
-                --name torchrkt ./torchrkt
+                --name torch ./torch
 
-              raco setup --no-docs --pkgs torchrkt
+              raco setup --no-docs --pkgs torch
 
               runHook postBuild
             '';
@@ -174,7 +174,7 @@
             checkPhase = ''
               runHook preCheck
               # python-cross-test self-skips when python3 `torch` is absent.
-              raco test ./torchrkt/
+              raco test ./torch/
               # Each examples/racket/NN-name.rkt is a literate scribble/lp2
               # program; its runner + RackUnit checks live in examples/test/.
               raco test examples/test/
@@ -187,9 +187,9 @@
               mkdir -p $out/share $out/bin
               cp -r $PLTUSERHOME $out/share/racket-home
 
-              makeWrapper ${pkgs.racket}/bin/racket $out/bin/torchrkt \
+              makeWrapper ${pkgs.racket}/bin/racket $out/bin/torch \
                 --set PLTUSERHOME $out/share/racket-home \
-                --add-flags "-l torchrkt"
+                --add-flags "-l torch"
 
               runHook postInstall
             '';
@@ -198,7 +198,7 @@
           copy-native-libs = pkgs.writeShellApplication {
             name = "copy-native-libs";
             text = ''
-              DEST="$(pwd)/torchrkt/native-libs"
+              DEST="$(pwd)/torch/native-libs"
               mkdir -p "$DEST"
               cp -v --no-preserve=mode ${cpp}/lib/libtorchrkt.* "$DEST/"
               echo "Native library copied to $DEST"
@@ -248,20 +248,20 @@
             export TORCHRKT_NATIVE_LIB_PATH="${cpp}"
             export PLTUSERHOME="$PWD/.racket-user"
             _rkt_ver=$(racket --version 2>&1 | grep -oE 'v[0-9]+\.[0-9]+' | tr -d 'v' | tr '.' '-')
-            deps_stamp="$PLTUSERHOME/.deps-installed-''${_rkt_ver}"
+            deps_stamp="$PLTUSERHOME/.deps-installed-torch-''${_rkt_ver}"
             if [ ! -f "$deps_stamp" ]; then
               echo "Installing Racket package (link mode, Racket ''${_rkt_ver})..."
               mkdir -p "$PLTUSERHOME"
-              mkdir -p ./torchrkt/native-libs
-              cp ${cpp}/lib/libtorchrkt.* ./torchrkt/native-libs/ 2>/dev/null || true
+              mkdir -p ./torch/native-libs
+              cp ${cpp}/lib/libtorchrkt.* ./torch/native-libs/ 2>/dev/null || true
               raco pkg install --batch --auto --no-setup --link --scope user --skip-installed \
-                --name torchrkt "$PWD/torchrkt"
-              raco setup --no-docs --pkgs torchrkt
+                --name torch "$PWD/torch"
+              raco setup --no-docs --pkgs torch
               echo "Installing Racket linters (Resyntax + racket-review)..."
               raco pkg install --batch --auto --scope user --skip-installed \
                 resyntax review
               touch "$deps_stamp"
-              echo "Done. Lint: resyntax analyze --directory torchrkt  |  raco review <files>"
+              echo "Done. Lint: resyntax analyze --directory torch  |  raco review <files>"
             fi
             export PATH="$(racket -e '(require setup/dirs)(display (path->string (find-user-console-bin-dir)))'):$PATH"
           '';
@@ -271,7 +271,7 @@
           # python3`) has the Python `torch` on PATH, so you can explore
           # PyTorch behaviour beside the Racket bindings and run the parity
           # cross-test for real:
-          #   raco test torchrkt/tests/python-cross-test.rkt
+          #   raco test torch/tests/python-cross-test.rkt
           default = pkgs.mkShell {
             buildInputs = baseInputs ++ [ pythonEnv ];
             shellHook = provisionRacket;

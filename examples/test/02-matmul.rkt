@@ -2,7 +2,7 @@
 
 ;; Runner + tests for the literate example ../../examples/racket/02-matmul.rkt.
 
-(require torchrkt
+(require torch
          "../racket/02-matmul.rkt")
 
 (module+ main

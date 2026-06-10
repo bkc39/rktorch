@@ -5,7 +5,7 @@
 ;; lp2 submodules can't see chunk-level bindings, so main/test live here and
 ;; require the example's provides.
 
-(require torchrkt
+(require torch
          "../racket/00-randn.rkt")
 
 (module+ main

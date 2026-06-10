@@ -2,7 +2,7 @@
 
 ;; Runner + tests for the literate example ../../examples/racket/03-autograd.rkt.
 
-(require torchrkt
+(require torch
          "../racket/03-autograd.rkt")
 
 (module+ main
