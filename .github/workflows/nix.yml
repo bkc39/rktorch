@@ -19,6 +19,24 @@ jobs:
       - name: Build, test, and lint
         run: nix flake check --print-build-logs
 
+  # The same gates run inside `nix flake check` above; building the lint
+  # derivations as separate named steps attributes a failure to the specific
+  # tool (format vs tidy vs line gate) without digging through flake logs.
+  # Ordered cheapest-first so format errors fail in seconds.
+  cpp-lint:
+    name: C++ lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@v22
+      - uses: DeterminateSystems/magic-nix-cache-action@v13
+      - name: clang-format
+        run: nix build .#cpp-format --print-build-logs
+      - name: line-count gate (500 lines/file)
+        run: nix build .#cpp-line-count --print-build-logs
+      - name: clang-tidy
+        run: nix build .#cpp-tidy --print-build-logs
+
   resyntax:
     name: Resyntax lint
     runs-on: ubuntu-latest
