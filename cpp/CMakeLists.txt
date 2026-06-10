@@ -16,6 +16,15 @@ include(cmake/TorchrktTools.cmake)
 # CMAKE_PREFIX_PATH; see flake.nix's `torchSource` knob.
 find_package(Torch CONFIG REQUIRED)
 
+# Torch's bundled Caffe2 config leaks MKL stub link directories
+# ("/lib;/lib/intel64;...") into the RPATH CMake expects to rewrite at
+# install time, which makes `cmake --install` fail on x86_64-linux with
+# "file RPATH_CHANGE could not write new RPATH". The toolchain already
+# records the real libtorch RUNPATH at link time, so drop the stubs.
+if(TARGET caffe2::mkl)
+  set_property(TARGET caffe2::mkl PROPERTY INTERFACE_LINK_DIRECTORIES "")
+endif()
+
 add_library(torchrkt SHARED)
 add_library(torchrkt::torchrkt ALIAS torchrkt)
 
@@ -88,7 +97,12 @@ if(BUILD_TESTING)
   )
   torchrkt_enable_warnings(torchrkt_tests)
   torchrkt_apply_nix_cflags(torchrkt_tests)
-  gtest_discover_tests(torchrkt_tests)
+  # PRE_TEST defers test discovery from build time to ctest time: on CI
+  # runners the freshly linked binary aborts under the 5s build-time
+  # discovery probe (cold-loading libtorch's dylibs), killing the build
+  # before ctest ever runs. At ctest time discovery shares the test
+  # timeout and failures come with real output.
+  gtest_discover_tests(torchrkt_tests DISCOVERY_MODE PRE_TEST)
 endif()
 
 install(TARGETS torchrkt
