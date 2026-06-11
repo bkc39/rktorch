@@ -6,8 +6,12 @@
 
 (require (only-in ffi/unsafe _bool _fun _int64)
          (only-in ffi/unsafe/alloc allocator)
-         (only-in "syntax.rkt" define-torch)
-         (only-in "tensor.rkt" _Tensor _Tensor/null tr-tensor-free/raw))
+         (only-in "syntax.rkt"
+                  _Tensor
+                  _Tensor/null
+                  define-torch
+                  define-unary/raw
+                  tr-tensor-free/raw))
 
 (provide tr-sum/raw
          tr-mean/raw
@@ -18,17 +22,11 @@
          tr-softmax/raw
          tr-log-softmax/raw)
 
-(define-syntax-rule (define-whole/raw name c-id)
-  (define-torch name
-    (_fun (t : _Tensor) -> _Tensor/null)
-    #:c-id c-id
-    #:wrap (allocator tr-tensor-free/raw)))
-
-(define-whole/raw tr-sum/raw tr_sum)
-(define-whole/raw tr-mean/raw tr_mean)
-(define-whole/raw tr-max/raw tr_max)
-(define-whole/raw tr-min/raw tr_min)
-(define-whole/raw tr-argmax-all/raw tr_argmax_all)
+(define-unary/raw tr-sum/raw tr_sum)
+(define-unary/raw tr-mean/raw tr_mean)
+(define-unary/raw tr-max/raw tr_max)
+(define-unary/raw tr-min/raw tr_min)
+(define-unary/raw tr-argmax-all/raw tr_argmax_all)
 
 (define-torch tr-argmax/raw
   (_fun (t : _Tensor) (dim : _int64) (keepdim : _bool) -> _Tensor/null)

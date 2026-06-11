@@ -1,13 +1,12 @@
 #lang racket/base
 
-;; Raw elementwise ops (elementwise.h). Three uniform signatures — binary
-;; tensor-tensor, tensor-scalar, and unary — so a local definer macro per
-;; shape replaces the hand-copied _fun boilerplate.
+;; Raw elementwise ops (elementwise.h), via the shared op-definer macros
+;; in syntax.rkt (binary tensor-tensor, tensor-scalar, unary).
 
-(require (only-in ffi/unsafe _double _fun)
-         (only-in ffi/unsafe/alloc allocator)
-         (only-in "syntax.rkt" define-torch)
-         (only-in "tensor.rkt" _Tensor _Tensor/null tr-tensor-free/raw))
+(require (only-in "syntax.rkt"
+                  define-binary/raw
+                  define-scalar/raw
+                  define-unary/raw))
 
 (provide tr-add/raw
          tr-sub/raw
@@ -26,24 +25,6 @@
          tr-relu/raw
          tr-sigmoid/raw
          tr-tanh/raw)
-
-(define-syntax-rule (define-binary/raw name c-id)
-  (define-torch name
-    (_fun (a : _Tensor) (b : _Tensor) -> _Tensor/null)
-    #:c-id c-id
-    #:wrap (allocator tr-tensor-free/raw)))
-
-(define-syntax-rule (define-scalar/raw name c-id)
-  (define-torch name
-    (_fun (a : _Tensor) (b : _double) -> _Tensor/null)
-    #:c-id c-id
-    #:wrap (allocator tr-tensor-free/raw)))
-
-(define-syntax-rule (define-unary/raw name c-id)
-  (define-torch name
-    (_fun (t : _Tensor) -> _Tensor/null)
-    #:c-id c-id
-    #:wrap (allocator tr-tensor-free/raw)))
 
 (define-binary/raw tr-add/raw tr_add)
 (define-binary/raw tr-sub/raw tr_sub)

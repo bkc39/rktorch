@@ -15,35 +15,19 @@
                   [- base:-]
                   [* base:*]
                   [/ base:/])
+         (only-in "raw/syntax.rkt" define-arith)
          (only-in "structs.rkt" tensor?)
          (only-in "tensor-ops.rkt" add div matmul mul neg sub))
 
 (provide t+ t- t* t/ @)
 
-;; Used inside the define-arith template; raco review can't see that
-;; without expansion.
-(define (binary-arith tensor-op base-op a b) ;; noqa
-  (if (or (tensor? a) (tensor? b)) (tensor-op a b) (base-op a b)))
-
-(define-syntax-rule (define-arith name tensor-op base-op unary-tensor)
-  (define (name . args)
-    (cond
-      [(andmap number? args) (apply base-op args)]
-      [(null? args) (base-op)]
-      [(null? (cdr args))
-       (let ([a (car args)])
-         (if (tensor? a) (unary-tensor a) (base-op a)))]
-      [else
-       (foldl (lambda (b acc) (binary-arith tensor-op base-op acc b))
-              (car args)
-              (cdr args))])))
-
 ;; Unary forms mirror racket/base: (- t) negates, (/ t) is the reciprocal;
-;; (+ t) and (* t) are the identity, like (+ 5).
-(define-arith t+ add base:+ values)
-(define-arith t- sub base:- neg)
-(define-arith t* mul base:* values)
-(define-arith t/ div base:/ (lambda (t) (div 1.0 t)))
+;; (+ t) and (* t) are the identity, like (+ 5). define-arith (raw/syntax.rkt)
+;; takes the predicate and ops as arguments, so dispatch resolves here.
+(define-arith t+ tensor? add base:+ values)
+(define-arith t- tensor? sub base:- neg)
+(define-arith t* tensor? mul base:* values)
+(define-arith t/ tensor? div base:/ (lambda (t) (div 1.0 t)))
 
 ;; Matmul chains left like Python: (@ a b c) is ((a @ b) @ c).
 (define (@ a . rest)

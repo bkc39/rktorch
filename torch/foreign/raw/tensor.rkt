@@ -1,14 +1,8 @@
 #lang racket/base
 
-;; Tensor: opaque handle to a torch::Tensor.
-;;
-;; `define-cpointer-type` generates three names:
-;;   _Tensor       — non-null cpointer type (tag 'Tensor)
-;;   _Tensor/null  — nullable cpointer type (used for NULL-on-error returns)
-;;   Tensor?       — predicate
-;;
-;; The deallocator must be defined before any allocator that references it
-;; (tr-randn/raw in random.rkt wraps with `(allocator tr-tensor-free/raw)`).
+;; Raw accessors over the opaque _Tensor handle (the handle type itself
+;; and its deallocator live in syntax.rkt with the rest of the FFI
+;; substrate).
 
 (require (only-in ffi/unsafe
                   _bytes
@@ -18,18 +12,12 @@
                   _int
                   _int64
                   _ptr
-                  _uint64
-                  _void
-                  define-cpointer-type)
-         (only-in ffi/unsafe/alloc allocator deallocator)
+                  _uint64)
+         (only-in ffi/unsafe/alloc allocator)
          (only-in ffi/vector _f32vector _s64vector)
-         (only-in "syntax.rkt" define-torch))
+         (only-in "syntax.rkt" _Tensor _Tensor/null define-torch tr-tensor-free/raw))
 
-(provide _Tensor
-         _Tensor/null ;; noqa
-         Tensor? ;; noqa
-         tr-tensor-free/raw
-         tr-tensor-numel/raw
+(provide tr-tensor-numel/raw
          tr-tensor-ndim/raw
          tr-tensor-shape/raw
          tr-tensor-copy-data/raw
@@ -37,13 +25,6 @@
          tr-tensor-item/raw
          tr-tensor-to-dtype/raw
          _tr-dtype)
-
-(define-cpointer-type _Tensor)
-
-(define-torch tr-tensor-free/raw
-  (_fun _Tensor -> _void)
-  #:c-id tr_tensor_free
-  #:wrap (deallocator))
 
 (define-torch tr-tensor-numel/raw
   (_fun (t : _Tensor)

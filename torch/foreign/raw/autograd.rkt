@@ -7,8 +7,7 @@
 
 (require (only-in ffi/unsafe _bool _double _fun _int _ptr)
          (only-in ffi/unsafe/alloc allocator)
-         (only-in "syntax.rkt" define-torch)
-         (only-in "tensor.rkt" _Tensor _Tensor/null tr-tensor-free/raw))
+         (only-in "syntax.rkt" _Tensor _Tensor/null define-torch tr-tensor-free/raw))
 
 (provide tr-tensor-requires-grad!/raw
          tr-tensor-requires-grad/raw

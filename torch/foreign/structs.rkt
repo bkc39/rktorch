@@ -23,10 +23,9 @@
          (only-in racket/string string-join)
          (only-in "error.rkt" check-ok)
          (only-in "format.rkt" needs-sci-notation? tensor->pytorch-repr)
+         (only-in "raw/syntax.rkt" Tensor? tr-tensor-free/raw)
          (only-in "raw/tensor.rkt"
-                  Tensor?
                   tr-tensor-copy-data/raw
-                  tr-tensor-free/raw
                   tr-tensor-print/raw
                   tr-tensor-shape/raw))
 
