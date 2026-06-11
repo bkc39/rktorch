@@ -21,6 +21,7 @@
 
 (require ffi/vector
          racket/contract
+         "foreign/contracts.rkt"
          "foreign/structs.rkt"
          "foreign/ops.rkt"
          "foreign/tensor-ops.rkt"
@@ -37,50 +38,6 @@
 ;; errors as the named ops they delegate to (add/sub/mul/div/matmul).
 (provide (rename-out [t+ +] [t- -] [t* *] [t/ /])
          @)
-
-;; Shape arguments and the variadic creation ops.
-(define dims-rest/c (listof exact-nonnegative-integer?))
-;; reshape/view accept -1 ("infer this dimension"), so plain integers.
-(define index/c exact-integer?)
-(define tensor-or-real/c (or/c tensor? real?))
-
-;; Binary arithmetic: a real is welcome on either side, but at least one
-;; argument must be a tensor — (add 1 2) is a caller error and should get
-;; contract blame, not a runtime error from the dispatcher.
-(define binary-arith/c
-  (->i ([a (or/c tensor? real?)]
-        [b (a) (if (tensor? a) (or/c tensor? real?) tensor?)])
-       [result tensor?]))
-
-;; Shadow-dispatch unaries (exp sqrt tanh): tensors produce tensors,
-;; numbers defer to racket/base and produce numbers.
-(define unary-numeric/c
-  (->i ([v (or/c tensor? number?)])
-       [result (v) (if (tensor? v) tensor? number?)]))
-
-;; log: racket/base's optional base argument only makes sense for numbers;
-;; (log some-tensor 2) is blamed at the boundary.
-(define log/c
-  (->i ([v (or/c tensor? number?)])
-       ([base (v) (if (tensor? v) none/c number?)])
-       [result (v) (if (tensor? v) tensor? number?)]))
-
-;; max/min: a single tensor reduces; reals behave like racket/base's
-;; variadic max/min. Extra arguments after a tensor are blamed.
-(define reduce-or-variadic/c
-  (->i ([v (or/c tensor? real?)])
-       #:rest [rest (v) (if (tensor? v) null? (listof real?))]
-       [result (v) (if (tensor? v) tensor? real?)]))
-
-;; argmax: tensor form takes an optional dim + #:keepdim; procedure form is
-;; racket/list's (argmax proc lst) and the list is mandatory there.
-(define argmax/c
-  (->i ([v (or/c tensor? procedure?)])
-       ([dim (v) (if (tensor? v) index/c list?)]
-        #:keepdim [keepdim (v) (if (tensor? v) boolean? none/c)])
-       #:pre/name (v dim) "a list argument is required with a procedure"
-       (or (tensor? v) (not (unsupplied-arg? dim)))
-       [result any/c]))
 
 (provide
  (contract-out
@@ -102,9 +59,7 @@
   [zeros (->* () #:rest dims-rest/c tensor?)]
   [ones (->* () #:rest dims-rest/c tensor?)]
   [full (->* (real?) #:rest dims-rest/c tensor?)]
-  [arange (case-> (-> real? tensor?)
-                  (-> real? real? tensor?)
-                  (-> real? real? real? tensor?))]
+  [arange arange/c]
   [eye (->* (exact-nonnegative-integer?)
             (exact-nonnegative-integer?)
             tensor?)]
