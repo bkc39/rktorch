@@ -8,9 +8,14 @@
 ;; ergonomic surface; for v0 it is exactly the safe contracted layer from
 ;; `foreign.rkt`.  A `tensor` is GC-reclaimed, so user code never frees it.
 
-(require "foreign.rkt")
+(require "foreign.rkt"
+         (only-in threading ~> ~>> lambda~> lambda~>>))
 
-(provide (all-from-out "foreign.rkt"))
+;; Re-provide the threading library's pipeline operators so `(require torch)`
+;; yields `~>` for tensor pipelines (mirrors rkt-polars):
+;;   (~> x (* x) Σ)  ==  (Σ (* x x))
+(provide (all-from-out "foreign.rkt")
+         ~> ~>> lambda~> lambda~>>)
 
 (module+ main
   (printf "libtorch version: ~a\n" (torch-version))

@@ -1,6 +1,7 @@
 #lang racket/base
 
-;; Native library handle and FFI definer shared by every raw module.
+;; The core FFI-definer form (define-torchrkt) and the native library
+;; handle it binds against, shared by every raw module.
 ;;
 ;; `native-libs-dir` is resolved relative to this file, which lives at
 ;; torch/foreign/raw/ — two directories below the collection root — so the

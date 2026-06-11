@@ -15,14 +15,17 @@ build a small matrix with known contents.
 @chunk[<r02-provide>
 (provide run-example)]
 
-@bold{The Gram matrix of a 2x3.} @racket[transpose] swaps two dimensions and
-@racket[matmul] contracts them, so the result is the 2x2 product
-@tt{a @"@" a.T} — again deterministic, for an exact parity check.
+@bold{The Gram matrix of a 2x3.} @racket[t] (alias of @racket[transpose])
+swaps two dimensions and @racket[|@|] is matmul, exactly Python's
+@tt{a @"@" a.T} — again deterministic, for an exact parity check. (The
+literate reader reserves bare @litchar["@"], so the operator appears as
+@racket[|@|] in this rendered chunk; in ordinary code it is just
+@litchar["@"].)
 
 @chunk[<r02-run>
 (define (run-example)
   (define a (reshape (arange 6) 2 3))
-  (matmul a (transpose a 0 1)))]
+  (|@| a (t a 0 1)))]
 
 @chunk[<*>
   <r02-require>

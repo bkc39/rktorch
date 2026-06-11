@@ -108,11 +108,13 @@
   [eye (->* (exact-nonnegative-integer?)
             (exact-nonnegative-integer?)
             tensor?)]
-  [tensor (-> (or/c real? list?) tensor?)]
+  [tensor (->* ((or/c real? list?)) (#:requires-grad? boolean?) tensor?)]
   ;; shape
   [reshape (->* (tensor?) #:rest (listof index/c) tensor?)]
   [view (->* (tensor?) #:rest (listof index/c) tensor?)]
   [transpose (-> tensor? index/c index/c tensor?)]
+  ;; terse alias, PyTorch-flavored: (t a 0 1) == (transpose a 0 1)
+  [rename transpose t (-> tensor? index/c index/c tensor?)]
   [permute (->* (tensor?) #:rest (listof index/c) tensor?)]
   [squeeze (->* (tensor?) (index/c) tensor?)]
   [unsqueeze (-> tensor? index/c tensor?)]
@@ -137,8 +139,9 @@
   [tanh unary-numeric/c]
   [max reduce-or-variadic/c]
   [min reduce-or-variadic/c]
-  ;; reductions
+  ;; reductions (Σ is sum's unicode alias: (~> x (* x) Σ))
   [sum (-> tensor? tensor?)]
+  [rename sum Σ (-> tensor? tensor?)]
   [mean (-> tensor? tensor?)]
   ;; argmax shadows racket/list's: (argmax proc lst) delegates to it.
   [argmax argmax/c]

@@ -82,17 +82,17 @@
      (check-parity "python/01_arith.py"
                    (lambda ()
                      (define x (tensor '((1 -2) (3 -4))))
-                     (mul (add x 1) (relu x))))
+                     (* (+ x 1) (relu x))))
      ;; 02 — arange/reshape/transpose/matmul
      (check-parity "python/02_matmul.py"
                    (lambda ()
                      (define a (reshape (arange 6) 2 3))
-                     (matmul a (transpose a 0 1))))
+                     (@ a (t a 0 1))))
      ;; 03 — autograd: d(sum(x*x))/dx == 2x
      (check-parity "python/03_autograd.py"
                    (lambda ()
-                     (define x (requires-grad! (tensor '(1 2 3))))
-                     (backward! (sum (mul x x)))
+                     (define x (tensor '(1 2 3) #:requires-grad? #t))
+                     (backward! (~> x (* x) Σ))
                      (grad x)))
      ;; 04 — the v1 capstone: seeded MLP init + 5 SGD steps track PyTorch
      ;; (losses per step and every post-training parameter). No repr check:

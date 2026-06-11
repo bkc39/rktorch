@@ -120,6 +120,18 @@
     (check-equal? (tensor->list (@ a i)) '(1.0 2.0 3.0 4.0))
     (check-equal? (tensor->list (@ a i a)) (tensor->list (matmul a a))))
 
+  (test-case "t and Σ aliases, threading pipelines"
+    (define a (tensor '((1 2) (3 4))))
+    (check-equal? (tensor->list (t a 0 1)) (tensor->list (transpose a 0 1)))
+    (check-equal? (item (Σ a)) 10.0)
+    (define x (tensor '(1 2 3)))
+    (check-equal? (item (~> x (* x) Σ)) 14.0))
+
+  (test-case "tensor #:requires-grad? marks the leaf at construction"
+    (define x (tensor '(1 2) #:requires-grad? #t))
+    (check-true (requires-grad? x))
+    (check-false (requires-grad? (tensor '(1 2)))))
+
   (test-case "wrong call shapes get contract blame at the facade"
     (check-exn exn:fail:contract? (lambda () (add 1 2)))
     (check-exn exn:fail:contract? (lambda () (sub 1.0 2.0)))

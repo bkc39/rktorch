@@ -23,7 +23,7 @@
                   define-cpointer-type)
          (only-in ffi/unsafe/alloc allocator deallocator)
          (only-in ffi/vector _f32vector _s64vector)
-         (only-in "library.rkt" define-torchrkt))
+         (only-in "syntax.rkt" define-torchrkt))
 
 (provide _Tensor
          _Tensor/null ;; noqa

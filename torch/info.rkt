@@ -6,7 +6,7 @@
 
 (define collection "torch")
 (define version "0.1")
-(define deps '("base"))
+(define deps '("base" "threading-lib"))
 (define build-deps '("rackunit-lib" "racket-doc" "scribble-lib"))
 (define pkg-desc "Racket bindings for libtorch (PyTorch)")
 (define pkg-authors '("bkschemer@gmail.com"))

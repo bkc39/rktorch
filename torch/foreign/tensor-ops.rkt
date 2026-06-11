@@ -68,6 +68,7 @@
                   tr-transpose/raw
                   tr-unsqueeze/raw
                   tr-view/raw)
+         (only-in "autograd-ops.rkt" requires-grad!)
          (only-in "structs.rkt" tensor? wrap-tensor))
 
 (provide zeros
@@ -148,17 +149,19 @@
     [(null? data) '(0)]
     [else (cons (length data) (nested-dims (car data)))]))
 
-(define (tensor data)
+(define (tensor data #:requires-grad? [requires-grad? #f])
   (define dims (nested-dims data))
   (define flat (if (list? data) (flatten data) (list data)))
   (unless (= (length flat) (apply * dims))
     (error 'tensor "ragged nested list; dims ~a need ~a values, got ~a"
            dims (apply * dims) (length flat)))
-  (wrap 'tensor
-        (tr-from-data/raw (list->f32vector (map exact->inexact flat))
-                          (length flat)
-                          (list->s64vector dims)
-                          (length dims))))
+  (define out
+    (wrap 'tensor
+          (tr-from-data/raw (list->f32vector (map exact->inexact flat))
+                            (length flat)
+                            (list->s64vector dims)
+                            (length dims))))
+  (if requires-grad? (requires-grad! out) out))
 
 ;; --------------------------------------------------------------- shape ops
 

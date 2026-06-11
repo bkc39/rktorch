@@ -7,7 +7,7 @@
 (require (only-in ffi/unsafe _double _fun _int64 _uint64)
          (only-in ffi/unsafe/alloc allocator)
          (only-in ffi/vector _f32vector _s64vector)
-         (only-in "library.rkt" define-torchrkt)
+         (only-in "syntax.rkt" define-torchrkt)
          (only-in "tensor.rkt" _Tensor/null tr-tensor-free/raw))
 
 (provide tr-zeros/raw

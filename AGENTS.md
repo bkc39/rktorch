@@ -37,7 +37,10 @@ CPU + float32 only. From `torch`:
   (binary ops take a real on either side)
 - operators: `+ - * /` shadow racket/base rkt-polars-style (numeric fast
   path to racket/base, tensor operands dispatch to add/sub/mul/div, chains
-  fold left); `@` is matmul, like Python's `a @ b`
+  fold left); `@` is matmul, like Python's `a @ b`; `t`/`Σ` are terse
+  aliases for transpose/sum; `~> ~>> lambda~> lambda~>>` are re-provided
+  from the `threading` library (dep `threading-lib`, prefetched offline by
+  the `racket-deps` fixed-output derivation in flake.nix)
 - reductions: `sum mean max min argmax softmax log-softmax`
 - linalg: `matmul mm mv dot`; out: `item to-dtype`
 - autograd: `requires-grad! requires-grad? backward! grad has-grad?
@@ -176,7 +179,7 @@ module's full export set (`racket/runtime-path`, `syntax/parse/pre`).
   finalizer); `foreign/error.rkt` — `check-ok` / `check-handle`;
   `foreign/format.rkt` — the PyTorch-repr reproducer.
 - `foreign/raw/*.rkt` — direct FFI, one module per C translation unit:
-  `library` (the definer), `global`, `tensor` (`_Tensor` cpointer +
+  `syntax` (the FFI definer), `global`, `tensor` (`_Tensor` cpointer +
   deallocator), `random`, `creation`, `shape-ops`, `elementwise`, `reduce`,
   `linalg`, `autograd`. Tensor-returning bindings always carry
   `#:wrap (allocator tr-tensor-free/raw)`.

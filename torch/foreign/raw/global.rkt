@@ -3,7 +3,7 @@
 ;; Raw global torchrkt APIs: libtorch version, last-error, and RNG seeding.
 
 (require (only-in ffi/unsafe _fun _int _string/utf-8 _uint64)
-         (only-in "library.rkt" define-torchrkt))
+         (only-in "syntax.rkt" define-torchrkt))
 
 (provide tr-version/raw
          tr-last-error/raw

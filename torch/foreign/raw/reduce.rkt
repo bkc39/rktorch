@@ -6,7 +6,7 @@
 
 (require (only-in ffi/unsafe _bool _fun _int64)
          (only-in ffi/unsafe/alloc allocator)
-         (only-in "library.rkt" define-torchrkt)
+         (only-in "syntax.rkt" define-torchrkt)
          (only-in "tensor.rkt" _Tensor _Tensor/null tr-tensor-free/raw))
 
 (provide tr-sum/raw
