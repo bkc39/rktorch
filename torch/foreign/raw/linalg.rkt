@@ -4,7 +4,7 @@
 
 (require (only-in ffi/unsafe _fun)
          (only-in ffi/unsafe/alloc allocator)
-         (only-in "syntax.rkt" define-torchrkt)
+         (only-in "syntax.rkt" define-torch)
          (only-in "tensor.rkt" _Tensor _Tensor/null tr-tensor-free/raw))
 
 (provide tr-matmul/raw
@@ -13,7 +13,7 @@
          tr-dot/raw)
 
 (define-syntax-rule (define-binary/raw name c-id)
-  (define-torchrkt name
+  (define-torch name
     (_fun (a : _Tensor) (b : _Tensor) -> _Tensor/null)
     #:c-id c-id
     #:wrap (allocator tr-tensor-free/raw)))

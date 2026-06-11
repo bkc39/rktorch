@@ -7,7 +7,7 @@
 (require (only-in ffi/unsafe _double _fun _int64 _uint64)
          (only-in ffi/unsafe/alloc allocator)
          (only-in ffi/vector _f32vector _s64vector)
-         (only-in "syntax.rkt" define-torchrkt)
+         (only-in "syntax.rkt" define-torch)
          (only-in "tensor.rkt" _Tensor/null tr-tensor-free/raw))
 
 (provide tr-zeros/raw
@@ -17,32 +17,32 @@
          tr-eye/raw
          tr-from-data/raw)
 
-(define-torchrkt tr-zeros/raw
+(define-torch tr-zeros/raw
   (_fun (dims : (_s64vector i)) (ndim : _int64) -> _Tensor/null)
   #:c-id tr_zeros
   #:wrap (allocator tr-tensor-free/raw))
 
-(define-torchrkt tr-ones/raw
+(define-torch tr-ones/raw
   (_fun (dims : (_s64vector i)) (ndim : _int64) -> _Tensor/null)
   #:c-id tr_ones
   #:wrap (allocator tr-tensor-free/raw))
 
-(define-torchrkt tr-full/raw
+(define-torch tr-full/raw
   (_fun (dims : (_s64vector i)) (ndim : _int64) (value : _double) -> _Tensor/null)
   #:c-id tr_full
   #:wrap (allocator tr-tensor-free/raw))
 
-(define-torchrkt tr-arange/raw
+(define-torch tr-arange/raw
   (_fun (start : _double) (end : _double) (step : _double) -> _Tensor/null)
   #:c-id tr_arange
   #:wrap (allocator tr-tensor-free/raw))
 
-(define-torchrkt tr-eye/raw
+(define-torch tr-eye/raw
   (_fun (n : _int64) (m : _int64) -> _Tensor/null)
   #:c-id tr_eye
   #:wrap (allocator tr-tensor-free/raw))
 
-(define-torchrkt tr-from-data/raw
+(define-torch tr-from-data/raw
   (_fun (data : (_f32vector i))
         (numel : _uint64)
         (dims : (_s64vector i))

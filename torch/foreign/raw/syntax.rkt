@@ -1,6 +1,6 @@
 #lang racket/base
 
-;; The core FFI-definer form (define-torchrkt) and the native library
+;; The core FFI-definer form (define-torch) and the native library
 ;; handle it binds against, shared by every raw module.
 ;;
 ;; `native-libs-dir` is resolved relative to this file, which lives at
@@ -14,9 +14,9 @@
          ;; re-exports for-syntax; only-in strips them.
          racket/runtime-path)
 
-(provide define-torchrkt)
+(provide define-torch)
 
 (define-runtime-path native-libs-dir "../../native-libs")
 
-(define-ffi-definer define-torchrkt
+(define-ffi-definer define-torch
   (ffi-lib (build-path native-libs-dir "libtorchrkt")))
