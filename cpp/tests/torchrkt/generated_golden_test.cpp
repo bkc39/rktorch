@@ -95,6 +95,17 @@ TEST(GeneratedGolden, ReshapeMatchesHandWritten) {
   expect_bit_identical(expected.t, actual.t);
 }
 
+// A -1 *value* in the shape array is ATen's inferred dimension and must
+// pass the guard — only a negative *count* (shape_len) is rejected.
+TEST(GeneratedGolden, ReshapeInferredDimMatchesHandWritten) {
+  const Handle a = make({1.0F, 2.0F, 3.0F, 4.0F, 5.0F, 6.0F}, {2, 3});
+  const std::vector<int64_t> dims = {-1, 2};
+  const Handle expected(tr_reshape(a.t, dims.data(), 2));
+  const Handle actual(tr_gen_reshape(a.t, dims.data(), 2));
+  EXPECT_EQ(shape_of(actual.t), (std::vector<int64_t>{3, 2}));
+  expect_bit_identical(expected.t, actual.t);
+}
+
 TEST(GeneratedGolden, CatMatchesHandWritten) {
   const Handle a = make({1.0F, 2.0F, 3.0F, 4.0F}, {2, 2});
   const Handle b = make({5.0F, 6.0F, 7.0F, 8.0F}, {2, 2});
@@ -142,6 +153,10 @@ TEST(GeneratedGolden, ErrorsSurfaceAsNullNotAbort) {
   // (via the generated throw), never a crash.
   const tr_tensor* holey[] = {a.t, nullptr};
   EXPECT_EQ(tr_gen_cat(holey, 2, 0), nullptr);
+  expect_error_from("tr_gen_cat");
+  // A zero-length TensorList passes the pointer guard; ATen's own throw
+  // (cat of an empty list) surfaces through alloc_result as NULL.
+  EXPECT_EQ(tr_gen_cat(holey, 0, 0), nullptr);
   expect_error_from("tr_gen_cat");
   // Negative lengths are rejected before any pointer arithmetic.
   EXPECT_EQ(tr_gen_reshape(a.t, nullptr, -1), nullptr);

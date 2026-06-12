@@ -123,8 +123,6 @@ def classify(f: NativeFunction, shard: str) -> Op | Skip:
         return skip("method-only op without leading Tensor")
 
     base = func.name.name.base
-    if func.name.name.inplace:
-        base += "_"
     return Op(
         aten_name=aten_name,
         base=base,
