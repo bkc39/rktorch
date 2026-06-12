@@ -22,7 +22,6 @@ ALLOWLIST = ROOT / "codegen" / "allowlist.txt"
 CPP_INCLUDE = ROOT / "cpp" / "include" / "torchrkt" / "c_api" / "generated"
 CPP_UMBRELLA = ROOT / "cpp" / "include" / "torchrkt" / "c_api" / "generated.h"
 CPP_SRC = ROOT / "cpp" / "src" / "torchrkt" / "generated"
-RKT_RAW = ROOT / "torch" / "foreign" / "generated"
 RKT_WRAPPERS = ROOT / "torch" / "generated.rkt"
 MANIFEST = ROOT / "torch" / "tests" / "generated-parity.rktd"
 
@@ -100,7 +99,6 @@ def main() -> None:
 
     _clean(CPP_INCLUDE, (".h",))
     _clean(CPP_SRC, (".cpp", ".cmake"))
-    _clean(RKT_RAW, (".rkt",))
 
     cpp_paths = []
     for shard in shard_names:
@@ -109,10 +107,6 @@ def main() -> None:
         _write(header, emit_cpp.emit_header(shard, shards[shard]))
         _write(source, emit_cpp.emit_source(shard, shards[shard]))
         cpp_paths += [header, source]
-        _write(
-            RKT_RAW / f"{shard}.rkt",
-            emit_racket.emit_raw_shard(shard, shards[shard]),
-        )
     _write(CPP_UMBRELLA, emit_cpp.emit_umbrella(shard_names))
     cpp_paths.append(CPP_UMBRELLA)
     _write(CPP_SRC / "sources.cmake", emit_cpp.emit_sources_cmake(shard_names))

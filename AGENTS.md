@@ -204,9 +204,12 @@ headers:
 - `cpp/{include/torchrkt/c_api,src/torchrkt}/generated/<shard>.{h,cpp}` —
   bodies reduce to the `op_call.hpp` helpers; clang-format is run by the
   generator; `generated/sources.cmake` is included from `cpp/CMakeLists.txt`
-- `torch/foreign/generated/<shard>.rkt` + `torch/generated.rkt` (the
-  UNSTABLE uncontracted surface; promotion into `torch/foreign.rkt` is
-  hand-curated)
+- `torch/generated.rkt` — the UNSTABLE uncontracted surface: one compact
+  `define-generated-op` form per allowlist entry. The hand-written macro
+  in `torch/foreign/define-generated.rkt` owns the expansion into raw FFI
+  binding + wrapper, so Racket marshalling knowledge lives in Racket, not
+  in Python string templates. Promotion into `torch/foreign.rkt` is
+  hand-curated.
 - `torch/tests/generated-parity.rktd` — manifest driving the generated-op
   battery in `python-cross-test.rkt`; every new allowlist line needs an
   input recipe in that test
