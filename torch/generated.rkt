@@ -10,7 +10,7 @@
 
 (require (only-in "foreign/error.rkt" check-handle)
          (only-in "foreign/structs.rkt" wrap-tensor)
-         (only-in "foreign/raw/generated/linalg.rkt"
+         (only-in "foreign/generated/linalg.rkt"
                   tr-gen-dot/raw
                   tr-gen-matmul/raw
                   tr-gen-mm/raw

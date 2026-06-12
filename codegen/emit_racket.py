@@ -57,7 +57,7 @@ def emit_raw_shard(shard: str, ops: list[Op]) -> str:
     if INT_ARRAY in kinds:
         requires.append("(only-in ffi/vector _s64vector)")
     requires.append(
-        '(only-in "../syntax.rkt" _Tensor _Tensor/null'
+        '(only-in "../raw/syntax.rkt" _Tensor _Tensor/null'
         " define-torch tr-tensor-free/raw)"
     )
     lines = ["#lang racket/base", "", BANNER.rstrip()]
@@ -108,7 +108,7 @@ def emit_wrappers(shards: dict[str, list[Op]]) -> str:
     for shard in sorted(shards):
         names = sorted(op.racket_raw for op in shards[shard])
         requires.append(
-            f'(only-in "foreign/raw/generated/{shard}.rkt"\n'
+            f'(only-in "foreign/generated/{shard}.rkt"\n'
             + "\n".join(f"                  {n}" for n in names)
             + ")"
         )

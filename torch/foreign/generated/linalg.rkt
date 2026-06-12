@@ -6,7 +6,7 @@
 
 (require (only-in ffi/unsafe _fun)
          (only-in ffi/unsafe/alloc allocator)
-         (only-in "../syntax.rkt" _Tensor _Tensor/null define-torch tr-tensor-free/raw))
+         (only-in "../raw/syntax.rkt" _Tensor _Tensor/null define-torch tr-tensor-free/raw))
 
 (provide tr-gen-dot/raw
          tr-gen-matmul/raw

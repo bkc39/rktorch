@@ -21,7 +21,7 @@ ALLOWLIST = ROOT / "codegen" / "allowlist.txt"
 CPP_INCLUDE = ROOT / "cpp" / "include" / "torchrkt" / "c_api" / "generated"
 CPP_UMBRELLA = ROOT / "cpp" / "include" / "torchrkt" / "c_api" / "generated.h"
 CPP_SRC = ROOT / "cpp" / "src" / "torchrkt" / "generated"
-RKT_RAW = ROOT / "torch" / "foreign" / "raw" / "generated"
+RKT_RAW = ROOT / "torch" / "foreign" / "generated"
 RKT_WRAPPERS = ROOT / "torch" / "generated.rkt"
 MANIFEST = ROOT / "torch" / "tests" / "generated-parity.rktd"
 

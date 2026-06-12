@@ -203,7 +203,7 @@ headers:
 - `cpp/{include/torchrkt/c_api,src/torchrkt}/generated/<shard>.{h,cpp}` —
   bodies reduce to the `op_call.hpp` helpers; clang-format is run by the
   generator; `generated/sources.cmake` is included from `cpp/CMakeLists.txt`
-- `torch/foreign/raw/generated/<shard>.rkt` + `torch/generated.rkt` (the
+- `torch/foreign/generated/<shard>.rkt` + `torch/generated.rkt` (the
   UNSTABLE uncontracted surface; promotion into `torch/foreign.rkt` is
   hand-curated)
 - `torch/tests/generated-parity.rktd` — manifest driving the generated-op
