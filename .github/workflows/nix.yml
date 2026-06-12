@@ -49,9 +49,9 @@ jobs:
       # emitted-but-uncommitted files also fail.
       - name: Regenerate and diff
         run: |
-          nix develop --command python3 -m codegen
+          nix run .#codegen
           if [ -n "$(git status --porcelain)" ]; then
-            echo "::error::Generated output is stale. Run: python3 -m codegen (inside nix develop) and commit the result."
+            echo "::error::Generated output is stale. Run: nix run .#codegen and commit the result."
             git status --porcelain
             git diff
             exit 1

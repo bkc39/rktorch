@@ -1,6 +1,7 @@
 """Orchestrate generation: parse schema, filter by allowlist, classify,
-emit all layers, report. Run as `python3 -m codegen` from the repo root
-(or anywhere -- paths resolve relative to this file)."""
+emit all layers, report. Run as `nix run .#codegen` (or `python3 -m
+codegen` in the dev shell); output paths resolve relative to this file,
+so cwd only matters for the module lookup."""
 
 from __future__ import annotations
 

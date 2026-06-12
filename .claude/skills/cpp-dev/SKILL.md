@@ -15,7 +15,7 @@ sibling `xgboost-rkt` repo and is configured in-repo: `cpp/.clang-format`,
 
 ## Before hand-writing a new op: is it allowlist-eligible?
 
-The codegen generator (`nix develop --command python3 -m codegen`, see
+The codegen generator (`nix run .#codegen`, see
 `codegen/` and the AGENTS.md codegen section) emits the whole three-layer
 stack — `extern "C"` shim, raw Racket binding, uncontracted wrapper — for
 any ATen op whose signature fits the IR (Tensor / Scalar→double / int64 /

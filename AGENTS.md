@@ -194,8 +194,9 @@ module's full export set (`racket/runtime-path`, `syntax/parse/pre`).
 
 ### Codegen (`codegen/`)
 
-The ATen generator (v2/A, #2): `nix develop --command python3 -m codegen`
-reads `codegen/allowlist.txt` against the **vendored** schema in
+The ATen generator (v2/A, #2): `nix run .#codegen` (equivalently
+`nix develop --command python3 -m codegen`, but with a much smaller
+closure) reads `codegen/allowlist.txt` against the **vendored** schema in
 `codegen/aten/` (pinned to the C++ libtorch 2.9.0 — see the README there;
 never the dev-shell python torch's copy) and emits, with DO-NOT-EDIT
 headers:
