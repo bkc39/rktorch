@@ -22,7 +22,7 @@
   ([tensors tensor-list] [dim int64]))
 
 (define-generated-op dot tr_gen_dot
-  ([self tensor] [tensor tensor]))
+  ([self tensor] [tensor-arg tensor]))
 
 (define-generated-op matmul tr_gen_matmul
   ([self tensor] [other tensor]))

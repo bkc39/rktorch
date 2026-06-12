@@ -12,8 +12,11 @@ BANNER = (
 )
 
 
-def _rkt_arg(name: str) -> str:
-    return name.replace("_", "-")
+def _rkt_arg(name: str, kind: str) -> str:
+    arg = name.replace("_", "-")
+    # ATen sometimes names a parameter after its type (dot's `tensor`);
+    # suffix it so the emitted [arg kind] pair doesn't read as a pun.
+    return f"{arg}-arg" if arg == kind else arg
 
 
 def emit_wrappers(shards: dict[str, list[Op]]) -> str:
@@ -37,7 +40,7 @@ def emit_wrappers(shards: dict[str, list[Op]]) -> str:
     lines.append("(provide " + "\n         ".join(provides) + ")")
     for op in all_ops:
         args = " ".join(
-            f"[{_rkt_arg(p.name)} {p.kind}]" for p in op.params
+            f"[{_rkt_arg(p.name, p.kind)} {p.kind}]" for p in op.params
         )
         lines += [
             "",

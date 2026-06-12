@@ -37,14 +37,12 @@ class Param:
 
 @dataclass(frozen=True)
 class Op:
-    aten_name: str  # e.g. "add_.Tensor", "matmul"
-    base: str  # e.g. "add_", "matmul" (C++ callable name)
-    c_name: str  # e.g. "tr_gen_add__tensor"
-    racket_raw: str  # e.g. "tr-gen-matmul/raw"
-    racket_name: str  # e.g. "matmul", "add-tensor!"
+    aten_name: str  # e.g. "sum.dim_IntList", "matmul"
+    base: str  # e.g. "matmul" (the at::* callable name)
+    c_name: str  # e.g. "tr_gen_sum_dim_intlist"
+    racket_name: str  # e.g. "matmul", "sum-dim-intlist"
     python_name: str  # torch.<attr> for the parity battery
     params: tuple[Param, ...]
-    method_call: bool  # no function variant: call via first tensor param
     shard: str
 
 
@@ -54,6 +52,16 @@ class Skip:
     reason: str
     shard: str
 
+
+# Op names that collide with bindings the public facade shadow-dispatches
+# (racket/base, racket/math tanh, racket/list argmax/flatten). Emitting
+# these from generated.rkt would hand consumers a tensor-only binding
+# without the numeric fast path, so they skip — promote by hand with the
+# dispatch shim instead. Extend as collisions surface.
+_RACKET_COLLISIONS = frozenset({
+    "exp", "log", "sqrt", "tanh", "max", "min", "argmax", "flatten",
+    "abs", "round", "floor", "ceiling", "truncate",
+})
 
 _BASE_KINDS = {
     BaseTy.Tensor: TENSOR,
@@ -111,6 +119,11 @@ def classify(f: NativeFunction, shard: str) -> Op | Skip:
     ):
         return skip("return is not a single Tensor")
 
+    if Variant.function not in f.variants:
+        return skip("method-only op: the C++ shim calls at::* free "
+                    "functions and the parity battery calls torch.* — "
+                    "revisit alongside the in-place convention (#3)")
+
     params: list[Param] = []
     for a in func.arguments.flat_non_out:
         kind = _param_kind(a.type)
@@ -118,19 +131,18 @@ def classify(f: NativeFunction, shard: str) -> Op | Skip:
             return skip(f"unsupported arg type: {a.name}: {a.type}")
         params.append(Param(a.name, kind))
 
-    method_call = Variant.function not in f.variants
-    if method_call and (not params or params[0].kind != TENSOR):
-        return skip("method-only op without leading Tensor")
+    rkt_name = _racket_name(func.name)
+    if func.name.name.base in _RACKET_COLLISIONS:
+        return skip(f"name collides with a shadow-dispatched binding "
+                    f"({rkt_name}); promote by hand with the dispatch shim")
 
     base = func.name.name.base
     return Op(
         aten_name=aten_name,
         base=base,
         c_name=_c_name(aten_name),
-        racket_raw=_c_name(aten_name).replace("_", "-") + "/raw",
-        racket_name=_racket_name(func.name),
+        racket_name=rkt_name,
         python_name=base,
         params=tuple(params),
-        method_call=method_call,
         shard=shard,
     )

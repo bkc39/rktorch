@@ -83,13 +83,7 @@ def _emit_body(op: Op) -> list[str]:
             f'    return torchrkt::null_arg("{op.c_name}");',
             "  }",
         ]
-    args = ", ".join(_call_args(op))
-    if op.method_call:
-        recv = op.params[0].name
-        rest = ", ".join(_call_args(op)[1:])
-        call = f"{recv}->value.{op.base}({rest})"
-    else:
-        call = f"at::{op.base}({args})"
+    call = f"at::{op.base}({', '.join(_call_args(op))})"
     preamble = []
     for p in op.params:
         if p.kind == TENSOR_LIST:
