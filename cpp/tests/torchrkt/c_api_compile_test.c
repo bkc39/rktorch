@@ -36,10 +36,14 @@ void torchrkt_c_api_compile_check(void) {
   tr_tensor* (*grad)(const tr_tensor*) = tr_tensor_grad;
   int (*set_grad_enabled)(int) = tr_set_grad_enabled;
   int (*sub_inplace)(tr_tensor*, const tr_tensor*, double) = tr_tensor_sub_;
-  /* The generated surface: the golden linalg four are permanent allowlist
-   * entries, so their linkage is pinned here; other generated ops prove C
-   * compatibility via the c_api/generated.h include alone. */
+  /* The generated surface: one pin per generated *signature shape* (the
+   * include only proves the headers parse as C; the pointer assignment
+   * proves the symbol links with C linkage). matmul covers tensor-tensor,
+   * reshape covers IntArrayRef, cat covers TensorList. */
   tr_tensor* (*gen_matmul)(const tr_tensor*, const tr_tensor*) = tr_gen_matmul;
+  tr_tensor* (*gen_reshape)(const tr_tensor*, const int64_t*, int64_t) =
+      tr_gen_reshape;
+  tr_tensor* (*gen_cat)(const tr_tensor* const*, int64_t, int64_t) = tr_gen_cat;
 
   (void)version;
   (void)last_error;
@@ -66,4 +70,6 @@ void torchrkt_c_api_compile_check(void) {
   (void)set_grad_enabled;
   (void)sub_inplace;
   (void)gen_matmul;
+  (void)gen_reshape;
+  (void)gen_cat;
 }

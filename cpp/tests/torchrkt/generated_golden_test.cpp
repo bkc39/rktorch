@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <cstring>
 #include <vector>
 
 #include "torchrkt/c_api.h"
@@ -103,19 +104,48 @@ TEST(GeneratedGolden, CatMatchesHandWritten) {
   expect_bit_identical(expected.t, actual.t);
 }
 
+// tr_last_error is a sticky thread-local ("only valid after a failure"
+// contract — success does not clear it), so each check below asserts the
+// message is attributed to the op that just failed rather than merely
+// non-null, which would pass on a stale string from an earlier case.
+void expect_error_from(const char* who) {
+  const char* message = tr_last_error();
+  ASSERT_NE(message, nullptr);
+  EXPECT_NE(std::strstr(message, who), nullptr) << message;
+}
+
 TEST(GeneratedGolden, ErrorsSurfaceAsNullNotAbort) {
   const Handle a = make({1.0F, 2.0F, 3.0F, 4.0F}, {2, 2});
   const Handle v = make({1.0F, 2.0F, 3.0F}, {3});
   EXPECT_EQ(tr_gen_mm(a.t, v.t), nullptr);
-  EXPECT_NE(tr_last_error(), nullptr);
-  EXPECT_EQ(tr_gen_matmul(nullptr, a.t), nullptr);
+  expect_error_from("tr_gen_mm");
+
+  // Every generated binary op carries the same null-arg guard.
+  struct BinaryCase {
+    const char* name;
+    tr_tensor* (*fn)(const tr_tensor*, const tr_tensor*);
+  };
+  const BinaryCase binary_cases[] = {
+      {"tr_gen_matmul", tr_gen_matmul},
+      {"tr_gen_mm", tr_gen_mm},
+      {"tr_gen_mv", tr_gen_mv},
+      {"tr_gen_dot", tr_gen_dot},
+  };
+  for (const auto& c : binary_cases) {
+    EXPECT_EQ(c.fn(nullptr, a.t), nullptr) << c.name;
+    expect_error_from(c.name);
+    EXPECT_EQ(c.fn(a.t, nullptr), nullptr) << c.name;
+    expect_error_from(c.name);
+  }
+
   // The TensorList path converts a null element into the error contract
   // (via the generated throw), never a crash.
   const tr_tensor* holey[] = {a.t, nullptr};
   EXPECT_EQ(tr_gen_cat(holey, 2, 0), nullptr);
-  EXPECT_NE(tr_last_error(), nullptr);
+  expect_error_from("tr_gen_cat");
   // Negative lengths are rejected before any pointer arithmetic.
   EXPECT_EQ(tr_gen_reshape(a.t, nullptr, -1), nullptr);
+  expect_error_from("tr_gen_reshape");
 }
 
 }  // namespace
