@@ -1,7 +1,7 @@
 #lang scribble/lp2
 
-@(require (for-label racket/base
-                     torchrkt))
+@(require (for-label (except-in racket/base exp log sqrt max min + - * /)
+                     torch))
 
 @section[#:tag "ex-randn"]{Seeding the RNG and sampling a tensor}
 
@@ -11,7 +11,7 @@ exactly the computation our PyTorch parity check mirrors, so it doubles as the
 hello-world and the first cross-language correctness guarantee.
 
 @chunk[<r00-require>
-(require torchrkt)]
+(require torch)]
 
 Every example exports a @racket[run-example] thunk so the test harness in
 @filepath{examples/test/} and this documentation drive the same code.

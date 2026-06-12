@@ -1,4 +1,4 @@
-# torchrkt
+# torch
 
 Racket bindings to **libtorch** (the C++ core of PyTorch).
 
@@ -9,7 +9,7 @@ Racket bindings to **libtorch** (the C++ core of PyTorch).
 > and [`AGENTS.md`](AGENTS.md) for the build/dev guide.
 
 ```racket
-(require torchrkt)
+(require torch)
 
 (torch-version)            ; => "2.9.0"
 (manual-seed! 0)
@@ -23,7 +23,7 @@ Racket bindings to **libtorch** (the C++ core of PyTorch).
 
 ```bash
 nix build              # build native lib, install pkg, run tests
-./result/bin/torchrkt  # prints the libtorch version and a 2x2 draw
+./result/bin/torch  # prints the libtorch version and a 2x2 draw
 nix develop            # dev shell (raco test, cmake, resyntax, ...)
 ```
 

@@ -9,7 +9,24 @@
 #include <string>
 
 #include "torchrkt/detail/error.hpp"
+#include "torchrkt/detail/op_call.hpp"
 #include "torchrkt/detail/tensor_handle.hpp"
+
+namespace {
+
+torch::ScalarType to_scalar_type(tr_dtype dtype) {
+  switch (dtype) {
+    case TR_DTYPE_FLOAT32:
+      return torch::kFloat32;
+    case TR_DTYPE_FLOAT64:
+      return torch::kFloat64;
+    case TR_DTYPE_INT64:
+      return torch::kInt64;
+  }
+  throw std::invalid_argument("unknown tr_dtype");
+}
+
+}  // namespace
 
 extern "C" {
 
@@ -93,6 +110,22 @@ int tr_tensor_copy_data(const tr_tensor* t, uint64_t capacity, float* out,
     torchrkt::set_error(std::string("tr_tensor_copy_data: ") + e.what());
     return 1;
   }
+}
+
+int tr_tensor_item(const tr_tensor* t, double* out) {
+  if (!t || !out) {
+    return torchrkt::null_arg_status("tr_tensor_item");
+  }
+  return torchrkt::status_call("tr_tensor_item",
+                               [&] { *out = t->value.item<double>(); });
+}
+
+tr_tensor* tr_tensor_to_dtype(const tr_tensor* t, tr_dtype dtype) {
+  if (!t) {
+    return torchrkt::null_arg("tr_tensor_to_dtype");
+  }
+  return torchrkt::alloc_result(
+      "tr_tensor_to_dtype", [&] { return t->value.to(to_scalar_type(dtype)); });
 }
 
 int tr_tensor_print(const tr_tensor* t, uint64_t buffer_capacity,

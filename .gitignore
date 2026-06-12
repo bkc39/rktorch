@@ -2,7 +2,7 @@ result
 result-*
 .racket-user/
 cpp/build/
-torchrkt/native-libs/libtorchrkt.*
+torch/native-libs/libtorchrkt.*
 **/compiled/
 
 # Local-only planning notes; agents may drop plan files here without committing.
