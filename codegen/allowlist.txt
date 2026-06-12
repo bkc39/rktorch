@@ -1,0 +1,14 @@
+# Generated-op allowlist: one `<shard> <aten-op-name>` per line.
+# <shard> groups ops into one C++/Racket translation unit each;
+# <aten-op-name> is the full schema name (with overload, e.g.
+# `sum.dim_IntList`) from codegen/aten/native_functions.yaml.
+#
+# The linalg family doubles as the golden-equivalence proof: the
+# generated tr_gen_* ops are asserted bit-identical to the hand-written
+# tr_* ops in cpp/tests/torchrkt/generated_golden_test.cpp. The
+# hand-written family stays authoritative in v2.
+
+linalg matmul
+linalg mm
+linalg mv
+linalg dot

@@ -4,6 +4,7 @@ result-*
 cpp/build/
 torch/native-libs/libtorchrkt.*
 **/compiled/
+__pycache__/
 
 # Local-only planning notes; agents may drop plan files here without committing.
 # (The reviewed v0 plan is checked in as plans/v0-scaffold.md.)

@@ -3,6 +3,7 @@
 #include "torchrkt/c_api/autograd.h"
 #include "torchrkt/c_api/creation.h"
 #include "torchrkt/c_api/elementwise.h"
+#include "torchrkt/c_api/generated.h"
 #include "torchrkt/c_api/global.h"
 #include "torchrkt/c_api/linalg.h"
 #include "torchrkt/c_api/random.h"

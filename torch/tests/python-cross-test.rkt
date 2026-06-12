@@ -19,6 +19,7 @@
 (module+ test
   (require racket/port
            racket/runtime-path
+           racket/string
            racket/system
            json
            rackunit
@@ -26,6 +27,8 @@
            "../nn.rkt")
 
   (define-runtime-path examples-dir "../../examples")
+  (define-runtime-path generated-manifest "generated-parity.rktd")
+  (define-runtime-path generated-rkt "../generated.rkt")
 
   (define python (find-executable-path "python3"))
 
@@ -67,6 +70,86 @@
       (check-= r p tol (format "~a: value ~a parity" rel-path i)))
     (check-equal? (tensor->repr t) (hash-ref j 'repr)
                   (format "~a: repr parity" rel-path)))
+
+  ;; --- generated-op parity battery ---------------------------------------
+  ;; The codegen manifest (written by `python3 -m codegen`) names every
+  ;; generated op; each op needs an input recipe here. An op without a
+  ;; recipe fails loudly, so extending codegen/allowlist.txt forces a
+  ;; conscious choice of parity inputs. Recipe specs: (tensor dim ...)
+  ;; draws a seeded randn; (int64 v) / (double v) / (bool v) /
+  ;; (int-array (v ...)) pass literals.
+  (define generated-recipes
+    (hash 'matmul '((tensor 2 3) (tensor 3 2))
+          'mm '((tensor 2 2) (tensor 2 2))
+          'mv '((tensor 2 3) (tensor 3))
+          'dot '((tensor 4) (tensor 4))))
+
+  ;; Both sides draw tensor inputs left to right from the same seed, so the
+  ;; RNG streams line up exactly like the literate-example twins.
+  (define (spec->racket-arg spec)
+    (case (car spec)
+      [(tensor) (apply randn (cdr spec))]
+      [(int64 double bool int-array) (cadr spec)]
+      [else (error 'generated-parity "unknown recipe spec: ~a" spec)]))
+
+  (define (spec->python-expr spec)
+    (define (csv vs)
+      (string-join (map number->string vs) ", "))
+    (case (car spec)
+      [(tensor) (format "torch.randn(~a)" (csv (cdr spec)))]
+      [(int64 double) (number->string (cadr spec))]
+      [(bool) (if (cadr spec) "True" "False")]
+      [(int-array) (format "[~a]" (csv (cadr spec)))]
+      [else (error 'generated-parity "unknown recipe spec: ~a" spec)]))
+
+  (define (generated-python-result py-name specs)
+    (define code
+      (string-append
+       "import json, torch\n"
+       "torch.manual_seed(0)\n"
+       (apply string-append
+              (for/list ([s (in-list specs)]
+                         [i (in-naturals)])
+                (format "a~a = ~a\n" i (spec->python-expr s))))
+       (format "r = getattr(torch, ~s)(~a)\n"
+               py-name
+               (string-join (for/list ([i (in-range (length specs))])
+                              (format "a~a" i))
+                            ", "))
+       "print(json.dumps({\"shape\": list(r.shape),"
+       " \"values\": [float(v) for v in r.flatten().tolist()]}))"))
+    (define out (open-output-string))
+    (define ok?
+      (parameterize ([current-output-port out]
+                     [current-error-port (open-output-nowhere)])
+        (system* python "-c" code)))
+    (unless ok?
+      (error 'generated-parity "python failed for ~a" py-name))
+    (read-json (open-input-string (get-output-string out))))
+
+  (define (check-generated-parity entry)
+    (define name (car entry))
+    (define py-name (cadr entry))
+    (define kinds (caddr entry))
+    (define specs
+      (hash-ref generated-recipes name
+                (lambda ()
+                  (error 'generated-parity
+                         "no input recipe for generated op ~a; add one to ~a"
+                         name "python-cross-test.rkt"))))
+    (check-equal? (length specs) (length kinds)
+                  (format "~a: recipe arity matches manifest" name))
+    (define j (generated-python-result py-name specs))
+    (manual-seed! 0)
+    (define args (map spec->racket-arg specs))
+    (define op (dynamic-require generated-rkt name))
+    (define result (apply op args))
+    (check-equal? (tensor-shape result) (hash-ref j 'shape)
+                  (format "~a: generated shape parity" name))
+    (for ([r (in-list (tensor->list result))]
+          [p (in-list (hash-ref j 'values))]
+          [i (in-naturals)])
+      (check-= r p tol (format "~a: generated value ~a parity" name i))))
 
   (cond
     [(not (python-torch-available?))
@@ -129,4 +212,7 @@
        (for ([r (in-list (tensor->list flat-params))]
              [p (in-list (hash-ref j 'values))]
              [i (in-naturals)])
-         (check-= r p tol (format "04_mlp: parameter ~a parity" i))))]))
+         (check-= r p tol (format "04_mlp: parameter ~a parity" i))))
+     ;; generated surface — every op in the codegen manifest
+     (for-each check-generated-parity
+               (with-input-from-file generated-manifest read))]))

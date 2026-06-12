@@ -36,6 +36,10 @@ void torchrkt_c_api_compile_check(void) {
   tr_tensor* (*grad)(const tr_tensor*) = tr_tensor_grad;
   int (*set_grad_enabled)(int) = tr_set_grad_enabled;
   int (*sub_inplace)(tr_tensor*, const tr_tensor*, double) = tr_tensor_sub_;
+  /* The generated surface: the golden linalg four are permanent allowlist
+   * entries, so their linkage is pinned here; other generated ops prove C
+   * compatibility via the c_api/generated.h include alone. */
+  tr_tensor* (*gen_matmul)(const tr_tensor*, const tr_tensor*) = tr_gen_matmul;
 
   (void)version;
   (void)last_error;
@@ -61,4 +65,5 @@ void torchrkt_c_api_compile_check(void) {
   (void)grad;
   (void)set_grad_enabled;
   (void)sub_inplace;
+  (void)gen_matmul;
 }

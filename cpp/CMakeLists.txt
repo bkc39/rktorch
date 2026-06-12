@@ -42,6 +42,10 @@ target_sources(torchrkt
     src/torchrkt/tensor.cpp
 )
 
+# Generated shim sources; the file is owned by the codegen generator
+# (python3 -m codegen), which rewrites it on every run.
+include(src/torchrkt/generated/sources.cmake)
+
 target_include_directories(torchrkt
   PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -82,6 +86,7 @@ if(BUILD_TESTING)
 
   add_executable(torchrkt_tests
     tests/torchrkt/autograd_test.cpp
+    tests/torchrkt/generated_golden_test.cpp
     tests/torchrkt/ops_test.cpp
     tests/torchrkt/random_test.cpp
     $<TARGET_OBJECTS:torchrkt_c_api_compile_test>

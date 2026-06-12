@@ -37,6 +37,26 @@ jobs:
       - name: clang-tidy
         run: nix build .#cpp-tidy --print-build-logs
 
+  codegen-drift:
+    name: Codegen drift
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: DeterminateSystems/nix-installer-action@v22
+      - uses: DeterminateSystems/magic-nix-cache-action@v13
+      # Committed generated output must match what the generator emits from
+      # the vendored schema + allowlist. Porcelain (not just diff) so newly
+      # emitted-but-uncommitted files also fail.
+      - name: Regenerate and diff
+        run: |
+          nix develop --command python3 -m codegen
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "::error::Generated output is stale. Run: python3 -m codegen (inside nix develop) and commit the result."
+            git status --porcelain
+            git diff
+            exit 1
+          fi
+
   resyntax:
     name: Resyntax lint
     runs-on: ubuntu-latest

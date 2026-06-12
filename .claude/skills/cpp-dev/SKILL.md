@@ -13,6 +13,20 @@ sibling `xgboost-rkt` repo and is configured in-repo: `cpp/.clang-format`,
 `cpp/.clang-tidy`, the `format-check`/`tidy` CMake targets
 (`cpp/cmake/TorchrktTools.cmake`), and the 500-line gate in `flake.nix`.
 
+## Before hand-writing a new op: is it allowlist-eligible?
+
+The codegen generator (`nix develop --command python3 -m codegen`, see
+`codegen/` and the AGENTS.md codegen section) emits the whole three-layer
+stack — `extern "C"` shim, raw Racket binding, uncontracted wrapper — for
+any ATen op whose signature fits the IR (Tensor / Scalar→double / int64 /
+bool / IntArrayRef / TensorList args, single Tensor return). **If the op is
+IR-eligible, add a line to `codegen/allowlist.txt` + an input recipe in
+`torch/tests/python-cross-test.rkt`, regenerate, and skip hand-writing
+entirely.** Hand-write only ops outside the IR (multi-return, out-params,
+optional args, dtype/device knobs). Never edit files under a `generated/`
+path or `torch/generated.rkt` — CI's `codegen-drift` job fails on any
+divergence from the generator's output.
+
 ## The loop
 
 ### 0. Stage before any nix command
