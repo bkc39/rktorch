@@ -1,6 +1,6 @@
 #lang racket/base
 
-;; Pre-install hook: stage libtorchrkt.{so,dylib} into torchrkt/native-libs/ so
+;; Pre-install hook: stage libtorchrkt.{so,dylib} into torch/native-libs/ so
 ;; `define-runtime-path` in foreign/raw/syntax.rkt resolves it.
 ;;
 ;; v0 supports the Nix path: the flake's racket build (and the `nix develop`

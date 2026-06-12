@@ -107,8 +107,8 @@
 
 ;; Zero a parameter's accumulated gradient (optimizer.zero_grad for one
 ;; tensor). A tensor that never ran backward has no grad; treat as a no-op so
-;; (zero-grad!) is safe before the first step.
+;; (zero-grad!) is safe before the first step. has-grad? keeps that no-op
+;; path free of handle allocation and tr_last_error noise.
 (define (zero-grad! t)
-  (define h (tr-tensor-grad/raw t))
-  (when h
-    (zero! (wrap-tensor h))))
+  (when (has-grad? t)
+    (zero! (grad t))))

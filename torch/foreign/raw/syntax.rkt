@@ -97,8 +97,8 @@
         unary-tensor:expr)
      #'(define (name . args)
          (cond
+           ;; (andmap number? '()) is #t, so this also covers (+) => 0.
            [(andmap number? args) (apply base-op args)]
-           [(null? args) (base-op)]
            [(null? (cdr args))
             (let ([a (car args)])
               (if (tensor-pred a) (unary-tensor a) (base-op a)))]
