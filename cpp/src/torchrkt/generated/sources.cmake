@@ -2,4 +2,5 @@
 target_sources(torchrkt
   PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src/torchrkt/generated/linalg.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/torchrkt/generated/shape.cpp
 )

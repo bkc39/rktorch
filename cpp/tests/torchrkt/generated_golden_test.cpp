@@ -86,12 +86,36 @@ TEST(GeneratedGolden, DotMatchesHandWritten) {
   expect_bit_identical(expected.t, actual.t);
 }
 
+TEST(GeneratedGolden, ReshapeMatchesHandWritten) {
+  const Handle a = make({1.0F, 2.0F, 3.0F, 4.0F, 5.0F, 6.0F}, {2, 3});
+  const std::vector<int64_t> dims = {3, 2};
+  const Handle expected(tr_reshape(a.t, dims.data(), 2));
+  const Handle actual(tr_gen_reshape(a.t, dims.data(), 2));
+  expect_bit_identical(expected.t, actual.t);
+}
+
+TEST(GeneratedGolden, CatMatchesHandWritten) {
+  const Handle a = make({1.0F, 2.0F, 3.0F, 4.0F}, {2, 2});
+  const Handle b = make({5.0F, 6.0F, 7.0F, 8.0F}, {2, 2});
+  const tr_tensor* parts[] = {a.t, b.t};
+  const Handle expected(tr_cat(parts, 2, 0));
+  const Handle actual(tr_gen_cat(parts, 2, 0));
+  expect_bit_identical(expected.t, actual.t);
+}
+
 TEST(GeneratedGolden, ErrorsSurfaceAsNullNotAbort) {
   const Handle a = make({1.0F, 2.0F, 3.0F, 4.0F}, {2, 2});
   const Handle v = make({1.0F, 2.0F, 3.0F}, {3});
   EXPECT_EQ(tr_gen_mm(a.t, v.t), nullptr);
   EXPECT_NE(tr_last_error(), nullptr);
   EXPECT_EQ(tr_gen_matmul(nullptr, a.t), nullptr);
+  // The TensorList path converts a null element into the error contract
+  // (via the generated throw), never a crash.
+  const tr_tensor* holey[] = {a.t, nullptr};
+  EXPECT_EQ(tr_gen_cat(holey, 2, 0), nullptr);
+  EXPECT_NE(tr_last_error(), nullptr);
+  // Negative lengths are rejected before any pointer arithmetic.
+  EXPECT_EQ(tr_gen_reshape(a.t, nullptr, -1), nullptr);
 }
 
 }  // namespace

@@ -23,7 +23,9 @@ bool / IntArrayRef / TensorList args, single Tensor return). **If the op is
 IR-eligible, add a line to `codegen/allowlist.txt` + an input recipe in
 `torch/tests/python-cross-test.rkt`, regenerate, and skip hand-writing
 entirely.** Hand-write only ops outside the IR (multi-return, out-params,
-optional args, dtype/device knobs). Never edit files under a `generated/`
+optional argument *types* like `Tensor?`, in-place ops, dtype/device
+knobs — note schema *defaults* are fine: they become required args on the
+unstable surface). Never edit files under a `generated/`
 path or `torch/generated.rkt` — CI's `codegen-drift` job fails on any
 divergence from the generator's output.
 

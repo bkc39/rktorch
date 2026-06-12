@@ -8,18 +8,28 @@
 ;; promotion into the contracted public facade (torch/foreign.rkt)
 ;; is hand-curated.
 
-(require (only-in "foreign/error.rkt" check-handle)
+(require (only-in ffi/vector list->s64vector)
+         (only-in "foreign/error.rkt" check-handle)
          (only-in "foreign/structs.rkt" wrap-tensor)
          (only-in "foreign/generated/linalg.rkt"
                   tr-gen-dot/raw
                   tr-gen-matmul/raw
                   tr-gen-mm/raw
-                  tr-gen-mv/raw))
+                  tr-gen-mv/raw)
+         (only-in "foreign/generated/shape.rkt"
+                  tr-gen-cat/raw
+                  tr-gen-reshape/raw))
 
-(provide dot
+(provide cat
+         dot
          matmul
          mm
-         mv)
+         mv
+         reshape)
+
+(define (cat tensors dim)
+  (wrap-tensor
+   (check-handle 'cat (tr-gen-cat/raw tensors (length tensors) dim))))
 
 (define (dot self tensor)
   (wrap-tensor
@@ -36,3 +46,7 @@
 (define (mv self vec)
   (wrap-tensor
    (check-handle 'mv (tr-gen-mv/raw self vec))))
+
+(define (reshape self shape)
+  (wrap-tensor
+   (check-handle 'reshape (tr-gen-reshape/raw self (list->s64vector shape) (length shape)))))

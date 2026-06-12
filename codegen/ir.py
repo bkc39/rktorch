@@ -100,6 +100,10 @@ def classify(f: NativeFunction, shard: str) -> Op | Skip:
 
     if func.arguments.out:
         return skip("out variant")
+    if func.name.name.inplace:
+        return skip("in-place op: the C-side mutation convention "
+                    "(mutable handle + status, like tr_tensor_sub_) "
+                    "is a tranche-2 design decision (#3)")
     rets = func.returns
     if len(rets) != 1 or not (
         isinstance(rets[0].type, BaseType)

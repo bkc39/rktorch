@@ -4,3 +4,4 @@
 #pragma once
 
 #include "torchrkt/c_api/generated/linalg.h"
+#include "torchrkt/c_api/generated/shape.h"

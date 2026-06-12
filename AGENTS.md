@@ -217,6 +217,10 @@ Conventions:
   (Tensor / Scalar→double / int64 / bool / IntArrayRef / TensorList args,
   single Tensor return). Unsupported signatures are skipped with a report —
   widening the IR is a generator change, not a hand-written shim.
+- Optional *types* (`Tensor?`, `int?`) are outside the IR and skip; schema
+  *defaults* (`int dim=0`) are flattened to required arguments on the
+  unstable surface — defaults are a curated-facade concern. In-place ops
+  (`add_`) skip too: their C-side mutation convention is a #3 decision.
 - Generated output is committed (AOT); CI's `codegen-drift` job regenerates
   and fails on any diff, so never edit generated files by hand.
 - `generated/` is exempt from the C++ 500-line gate (shard size is the

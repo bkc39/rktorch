@@ -3,8 +3,10 @@
 ;; Parity manifest: (racket-name python-attr (arg kinds ...)).
 ;; Consumed by torch/tests/python-cross-test.rkt.
 (
+ (cat "cat" (tensor-list int64))
  (dot "dot" (tensor tensor))
  (matmul "matmul" (tensor tensor))
  (mm "mm" (tensor tensor))
  (mv "mv" (tensor tensor))
+ (reshape "reshape" (tensor int-array))
 )

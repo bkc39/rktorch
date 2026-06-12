@@ -28,16 +28,19 @@ MANIFEST = ROOT / "torch" / "tests" / "generated-parity.rktd"
 
 
 def read_allowlist() -> list[tuple[str, str]]:
-    entries = []
+    entries: list[tuple[str, str]] = []
     for raw_line in ALLOWLIST.read_text().splitlines():
         line = raw_line.split("#", 1)[0].strip()
         if not line:
             continue
-        shard, _, op = line.partition(" ")
-        if not op:
+        fields = line.split(None, 1)
+        if len(fields) != 2:
             sys.exit(f"allowlist: malformed line (want '<shard> <op>'): "
                      f"{raw_line!r}")
-        entries.append((shard, op.strip()))
+        entry = (fields[0], fields[1].strip())
+        if entry in entries:
+            sys.exit(f"allowlist: duplicate entry: {entry[0]} {entry[1]}")
+        entries.append(entry)
     return entries
 
 
@@ -83,6 +86,17 @@ def main() -> None:
     for ops in shards.values():
         ops.sort(key=lambda o: o.c_name)
     shard_names = sorted(shards)
+
+    # `.`->`_` flattening in c_name can collide (foo.bar vs foo_bar), and a
+    # collision means duplicate extern "C" definitions — fail, don't emit.
+    seen_c_names: dict[str, str] = {}
+    for ops in shards.values():
+        for op in ops:
+            clash = seen_c_names.get(op.c_name)
+            if clash is not None:
+                sys.exit(f"codegen: c_name collision: {op.aten_name!r} and "
+                         f"{clash!r} both map to {op.c_name}")
+            seen_c_names[op.c_name] = op.aten_name
 
     _clean(CPP_INCLUDE, (".h",))
     _clean(CPP_SRC, (".cpp", ".cmake"))

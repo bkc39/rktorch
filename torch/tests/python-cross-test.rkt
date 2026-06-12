@@ -76,19 +76,24 @@
   ;; generated op; each op needs an input recipe here. An op without a
   ;; recipe fails loudly, so extending codegen/allowlist.txt forces a
   ;; conscious choice of parity inputs. Recipe specs: (tensor dim ...)
-  ;; draws a seeded randn; (int64 v) / (double v) / (bool v) /
-  ;; (int-array (v ...)) pass literals.
+  ;; draws a seeded randn; (tensors (dim ...) ...) draws a list of them;
+  ;; (int64 v) / (double v) / (bool v) / (int-array (v ...)) pass literals.
   (define generated-recipes
     (hash 'matmul '((tensor 2 3) (tensor 3 2))
           'mm '((tensor 2 2) (tensor 2 2))
           'mv '((tensor 2 3) (tensor 3))
-          'dot '((tensor 4) (tensor 4))))
+          'dot '((tensor 4) (tensor 4))
+          'reshape '((tensor 2 3) (int-array (3 2)))
+          'cat '((tensors (2 3) (2 3)) (int64 0))))
 
   ;; Both sides draw tensor inputs left to right from the same seed, so the
   ;; RNG streams line up exactly like the literate-example twins.
   (define (spec->racket-arg spec)
     (case (car spec)
       [(tensor) (apply randn (cdr spec))]
+      [(tensors)
+       (for/list ([dims (in-list (cdr spec))])
+         (apply randn dims))]
       [(int64 double bool int-array) (cadr spec)]
       [else (error 'generated-parity "unknown recipe spec: ~a" spec)]))
 
@@ -97,6 +102,11 @@
       (string-join (map number->string vs) ", "))
     (case (car spec)
       [(tensor) (format "torch.randn(~a)" (csv (cdr spec)))]
+      [(tensors)
+       (format "[~a]"
+               (string-join (for/list ([dims (in-list (cdr spec))])
+                              (format "torch.randn(~a)" (csv dims)))
+                            ", "))]
       [(int64 double) (number->string (cadr spec))]
       [(bool) (if (cadr spec) "True" "False")]
       [(int-array) (format "[~a]" (csv (cadr spec)))]

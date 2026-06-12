@@ -69,12 +69,15 @@ def emit_umbrella(shards: list[str]) -> str:
 
 
 def _emit_body(op: Op) -> list[str]:
-    guarded = [
-        p.name for p in op.params if p.kind in (TENSOR, INT_ARRAY, TENSOR_LIST)
-    ]
+    guards = []
+    for p in op.params:
+        if p.kind in (TENSOR, INT_ARRAY, TENSOR_LIST):
+            guards.append(f"!{p.name}")
+        if p.kind in (INT_ARRAY, TENSOR_LIST):
+            guards.append(f"{p.name}_len < 0")
     lines = [f"tr_tensor* {op.c_name}({_c_params(op)}) {{"]
-    if guarded:
-        cond = " || ".join(f"!{n}" for n in guarded)
+    if guards:
+        cond = " || ".join(guards)
         lines += [
             f"  if ({cond}) {{",
             f'    return torchrkt::null_arg("{op.c_name}");',
@@ -95,6 +98,10 @@ def _emit_body(op: Op) -> list[str]:
                 f"    {p.name}_vec.reserve("
                 f"static_cast<size_t>({p.name}_len));",
                 f"    for (int64_t i = 0; i < {p.name}_len; ++i) {{",
+                f"      if (!{p.name}[i]) {{",
+                "        throw std::invalid_argument("
+                f'"null tensor in {p.name}");',
+                "      }",
                 f"      {p.name}_vec.push_back({p.name}[i]->value);",
                 "    }",
             ]
@@ -111,7 +118,7 @@ def emit_source(shard: str, ops: list[Op]) -> str:
     lines = [BANNER, f'#include "torchrkt/c_api/generated/{shard}.h"', ""]
     lines += ["#include <torch/torch.h>", ""]
     if needs_vector:
-        lines += ["#include <vector>", ""]
+        lines += ["#include <stdexcept>", "#include <vector>", ""]
     lines += [
         '#include "torchrkt/detail/op_call.hpp"',
         '#include "torchrkt/detail/tensor_handle.hpp"',
