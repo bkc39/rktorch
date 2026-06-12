@@ -169,7 +169,9 @@
                   echo "ERROR: $file has $lines lines; limit is 500" >&2
                   failed=1
                 fi
-              done < <(find . -type f \( -name '*.c' -o -name '*.h' -o -name '*.hpp' -o -name '*.cpp' \))
+              # generated/ shards are exempt: their size is the generator's
+              # concern, not a hand-maintainability gate.
+              done < <(find . -type f \( -name '*.c' -o -name '*.h' -o -name '*.hpp' -o -name '*.cpp' \) -not -path '*/generated/*')
               if [ "$failed" -ne 0 ]; then
                 exit 1
               fi
@@ -247,13 +249,38 @@
               ls -la "$DEST"
             '';
           };
+
+          # The ATen generator (`nix run .#codegen`): python3 with torchgen
+          # (from the python torch wheel) + the pinned clang-format the
+          # generator formats its C++ output with. Writes into the working
+          # tree, so it must run from the repo root — much lighter than the
+          # full dev shell when all you need is regeneration.
+          codegen = pkgs.writeShellApplication {
+            name = "codegen";
+            runtimeInputs = [
+              (pkgs.python3.withPackages (ps: [ ps.torch ]))
+              pkgs.clang-tools
+            ];
+            text = ''
+              if [ ! -f codegen/generate.py ]; then
+                echo "codegen: run from the repo root (codegen/ not found)" >&2
+                exit 1
+              fi
+              exec python3 -m codegen "$@"
+            '';
+          };
         in
         {
           default = racket;
-          inherit cpp cpp-format cpp-line-count cpp-tidy racket racket-deps copy-native-libs;
+          inherit cpp cpp-format cpp-line-count cpp-tidy racket racket-deps
+            codegen copy-native-libs;
         });
 
       apps = forAllSystems (system: {
+        codegen = {
+          type = "app";
+          program = "${self.packages.${system}.codegen}/bin/codegen";
+        };
         copy-native-libs = {
           type = "app";
           program = "${self.packages.${system}.copy-native-libs}/bin/copy-native-libs";

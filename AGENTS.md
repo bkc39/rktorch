@@ -192,9 +192,51 @@ module's full export set (`racket/runtime-path`, `syntax/parse/pre`).
   guard); after changing C++, re-copy from `nix build .#cpp
   --print-out-paths` (or `nix run .#copy-native-libs`) before `raco test`.
 
+### Codegen (`codegen/`)
+
+The ATen generator (v2/A, #2): `nix run .#codegen` (equivalently
+`nix develop --command python3 -m codegen`, but with a much smaller
+closure) reads `codegen/allowlist.txt` against the **vendored** schema in
+`codegen/aten/` (pinned to the C++ libtorch 2.9.0 — see the README there;
+never the dev-shell python torch's copy) and emits, with DO-NOT-EDIT
+headers:
+
+- `cpp/{include/torchrkt/c_api,src/torchrkt}/generated/<shard>.{h,cpp}` —
+  bodies reduce to the `op_call.hpp` helpers; clang-format is run by the
+  generator; `generated/sources.cmake` is included from `cpp/CMakeLists.txt`
+- `torch/generated.rkt` — the UNSTABLE uncontracted surface: one compact
+  `define-generated-op` form per allowlist entry. The hand-written macro
+  in `torch/foreign/define-generated.rkt` owns the expansion into raw FFI
+  binding + wrapper, so Racket marshalling knowledge lives in Racket, not
+  in Python string templates. Promotion into `torch/foreign.rkt` is
+  hand-curated.
+- `torch/tests/generated-parity.rktd` — manifest driving the generated-op
+  battery in `python-cross-test.rkt`; every new allowlist line needs an
+  input recipe in that test
+
+Conventions:
+
+- **Extend the allowlist instead of hand-writing** when an op fits the IR
+  (Tensor / Scalar→double / int64 / bool / IntArrayRef / TensorList args,
+  single Tensor return). Unsupported signatures are skipped with a report —
+  widening the IR is a generator change, not a hand-written shim.
+- Optional *types* (`Tensor?`, `int?`) are outside the IR and skip; schema
+  *defaults* (`int dim=0`) are flattened to required arguments on the
+  unstable surface — defaults are a curated-facade concern. In-place ops
+  (`add_`) skip too: their C-side mutation convention is a #3 decision.
+- Generated output is committed (AOT); CI's `codegen-drift` job regenerates
+  and fails on any diff, so never edit generated files by hand.
+- `generated/` is exempt from the C++ 500-line gate (shard size is the
+  generator's concern).
+- The golden-equivalence proof lives in
+  `cpp/tests/torchrkt/generated_golden_test.cpp`: the generated linalg four
+  (`tr_gen_{matmul,mm,mv,dot}`) stay permanently allowlisted and bit-checked
+  against the authoritative hand-written family.
+
 ## CI
 
 `.github/workflows/nix.yml`: `nix flake check` on `ubuntu-latest` +
-`macos-latest`, plus a `resyntax` lint gate. (A `raco-catalog` workflow is
-deferred until the portable native-candidate story exists — libtorch is too
-large to bundle the xgboost way.)
+`macos-latest`, a `resyntax` lint gate, and a `codegen-drift` job
+(regenerate + fail on porcelain). (A `raco-catalog` workflow is deferred
+until the portable native-candidate story exists — libtorch is too large to
+bundle the xgboost way.)
