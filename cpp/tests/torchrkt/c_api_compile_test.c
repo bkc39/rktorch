@@ -45,16 +45,19 @@ void torchrkt_c_api_compile_check(void) {
   tr_tensor* (*gen_reshape)(const tr_tensor*, const int64_t*, int64_t) =
       tr_gen_reshape;
   tr_tensor* (*gen_cat)(const tr_tensor* const*, int64_t, int64_t) = tr_gen_cat;
-  /* tranche-2 added three shapes: an int-status in-place op (mutable
-   * receiver), an optional-int-array carrying a `_has` presence flag, and an
-   * optional-tensor whose NULL encodes c10::nullopt (conv2d bias, loss
-   * weight). */
+  /* tranche-2 added four shapes: an int-status in-place op (mutable
+   * receiver), an optional-int-array with a `_has` presence flag, an
+   * optional-int64 (`int64_t n, bool n_has`), and an optional-tensor whose
+   * NULL encodes c10::nullopt (conv2d bias, loss weight). */
   int (*gen_mul_)(tr_tensor*, const tr_tensor*) = tr_gen_mul__tensor;
   tr_tensor* (*gen_sum_dim)(const tr_tensor*, const int64_t*, int64_t, bool,
                             bool, int32_t) = tr_gen_sum_dim_intlist;
   tr_tensor* (*gen_conv2d)(const tr_tensor*, const tr_tensor*, const tr_tensor*,
                            const int64_t*, int64_t, const int64_t*, int64_t,
                            const int64_t*, int64_t, int64_t) = tr_gen_conv2d;
+  tr_tensor* (*gen_avg_pool2d)(const tr_tensor*, const int64_t*, int64_t,
+                               const int64_t*, int64_t, const int64_t*, int64_t,
+                               bool, bool, int64_t, bool) = tr_gen_avg_pool2d;
 
   (void)version;
   (void)last_error;
@@ -86,4 +89,5 @@ void torchrkt_c_api_compile_check(void) {
   (void)gen_mul_;
   (void)gen_sum_dim;
   (void)gen_conv2d;
+  (void)gen_avg_pool2d;
 }

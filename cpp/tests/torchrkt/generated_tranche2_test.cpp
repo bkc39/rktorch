@@ -122,6 +122,12 @@ TEST(GeneratedTranche2, NllLossScalarOutput) {
   EXPECT_EQ(shape_of(loss.t), (std::vector<int64_t>{}));  // scalar
   // mean(-(-0.5), -(-0.2)) = mean(0.5, 0.2) = 0.35
   EXPECT_NEAR(data_of(loss.t).at(0), 0.35F, 1e-5F);
+  // optional-tensor weight present: weighted mean divides by the summed
+  // weights of the targets. w=(2,3,4), targets (0,1):
+  // (2*0.5 + 3*0.2) / (2+3) = 1.6/5 = 0.32.
+  const Handle weight = make({2.0F, 3.0F, 4.0F}, {3});
+  const Handle wloss(tr_gen_nll_loss(logp.t, target.t, weight.t, 1, -100));
+  EXPECT_NEAR(data_of(wloss.t).at(0), 0.32F, 1e-5F);
   EXPECT_EQ(tr_gen_nll_loss(nullptr, target.t, nullptr, 1, -100), nullptr);
   expect_error_from("tr_gen_nll_loss");
 }

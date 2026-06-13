@@ -155,6 +155,9 @@
          (apply randn dims))]
       [(optional-tensor)
        (if (equal? (cdr spec) '(#f)) #f (apply randn (cdr spec)))]
+      ;; a present optional tensor of all-ones (draws no RNG, so seed
+      ;; alignment holds; stable magnitude unlike a randn weight).
+      [(optional-tensor-ones) (apply ones (cdr spec))]
       [(int-tensor) (to-dtype (tensor (cadr spec)) 'int64)]
       [(int64 double bool int-array optional-int64 optional-int-array dtype)
        (cadr spec)]
@@ -174,6 +177,7 @@
       [(optional-tensor)
        (if (equal? (cdr spec) '(#f)) "None" (format "torch.randn(~a)"
                                                     (csv (cdr spec))))]
+      [(optional-tensor-ones) (format "torch.ones(~a)" (csv (cdr spec)))]
       [(int-tensor)
        (format "torch.tensor([~a], dtype=torch.int64)" (csv (cadr spec)))]
       [(int64 double) (number->string (cadr spec))]
@@ -331,4 +335,16 @@
         (assq 'avg-pool2d manifest)
         '((tensor 1 1 4 4) (int-array (2 2)) (int-array (2 2))
           (int-array (0 0)) (bool #f) (bool #t) (optional-int64 2))
-        "[divisor=2]"))]))
+        "[divisor=2]")
+       ;; the loss recipes leave weight absent; drive the optional-tensor
+       ;; weight-present branch too (ones weight: stable, exercises weight!=null).
+       (check-generated-parity
+        (assq 'nll-loss manifest)
+        '((tensor 4 3) (int-tensor (0 2 1 0)) (optional-tensor-ones 3)
+          (int64 1) (int64 -100))
+        "[weight]")
+       (check-generated-parity
+        (assq 'cross-entropy-loss manifest)
+        '((tensor 4 3) (int-tensor (0 2 1 0)) (optional-tensor-ones 3)
+          (int64 1) (int64 -100) (double 0.0))
+        "[weight]"))]))

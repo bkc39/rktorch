@@ -65,10 +65,12 @@
           (error 'flatten
                  "invalid dim range [~a, ~a] for a ~a-d tensor"
                  start-dim end-dim n))
+        ;; apply * over for/list, not for/product: the latter is a recent
+        ;; racket/base addition, and this keeps no version floor.
         (define collapsed
-          (for/product ([d (in-list shp)] [i (in-naturals)]
-                                          #:when (and (>= i s) (<= i e)))
-            d))
+          (apply * (for/list ([d (in-list shp)] [i (in-naturals)]
+                                                 #:when (and (>= i s) (<= i e)))
+                     d)))
         (apply reshape v (append (take shp s)
                                  (list collapsed)
                                  (drop shp (add1 e))))])]
