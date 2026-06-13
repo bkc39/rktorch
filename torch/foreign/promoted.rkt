@@ -49,7 +49,15 @@
      (define shp (tensor-shape v))
      (define n (length shp))
      (cond
-       [(zero? n) (reshape v 1)]
+       [(zero? n)
+        ;; A 0-d tensor only has the trivial [-1,0] dim range; reject
+        ;; out-of-range args instead of silently flattening to [1], matching
+        ;; PyTorch's IndexError.
+        (unless (and (memv start-dim '(0 -1)) (memv end-dim '(0 -1)))
+          (error 'flatten
+                 "invalid dim range [~a, ~a] for a 0-d tensor"
+                 start-dim end-dim))
+        (reshape v 1)]
        [else
         (define s (if (negative? start-dim) (+ n start-dim) start-dim))
         (define e (if (negative? end-dim) (+ n end-dim) end-dim))

@@ -43,16 +43,22 @@ _C_DECLS = {
 _BOOL_DECL_KINDS = frozenset({BOOL, OPTIONAL_INT64, OPTIONAL_INT_ARRAY})
 
 
-def _c_decl(p: Param, *, receiver: bool) -> str:
+def _c_decl(p: Param, *, receiver: bool, header: bool = False) -> str:
     # An in-place op's receiver is the mutable `self` handle.
     if receiver:
         return f"tr_tensor* {p.name}"
-    return _C_DECLS[p.kind].format(n=p.name)
+    decl = _C_DECLS[p.kind].format(n=p.name)
+    # A NULL optional-tensor is the valid c10::nullopt encoding, not an error;
+    # annotate it in the header so a C consumer can tell it apart from a
+    # required handle (the body keeps the bare decl for clang-format).
+    if header and p.kind == OPTIONAL_TENSOR:
+        decl += " /* nullable: NULL == no value */"
+    return decl
 
 
-def _c_params(op: Op) -> str:
+def _c_params(op: Op, *, header: bool = False) -> str:
     return ", ".join(
-        _c_decl(p, receiver=(op.inplace and i == 0))
+        _c_decl(p, receiver=(op.inplace and i == 0), header=header)
         for i, p in enumerate(op.params)
     )
 
@@ -100,7 +106,7 @@ def emit_header(shard: str, ops: list[Op]) -> str:
     ]
     for op in ops:
         ret = "int" if op.inplace else "tr_tensor*"
-        lines.append(f"{ret} {op.c_name}({_c_params(op)});")
+        lines.append(f"{ret} {op.c_name}({_c_params(op, header=True)});")
     lines += ["", "#ifdef __cplusplus", "}", "#endif"]
     return "\n".join(lines) + "\n"
 

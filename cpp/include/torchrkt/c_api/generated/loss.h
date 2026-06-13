@@ -13,14 +13,14 @@ extern "C" {
  * handle (NULL on error); an in-place op mutates its first handle
  * and returns an int status (0 ok, 1 with tr_last_error set). */
 
-tr_tensor* tr_gen_cross_entropy_loss(const tr_tensor* self,
-                                     const tr_tensor* target,
-                                     const tr_tensor* weight, int64_t reduction,
-                                     int64_t ignore_index,
-                                     double label_smoothing);
-tr_tensor* tr_gen_nll_loss(const tr_tensor* self, const tr_tensor* target,
-                           const tr_tensor* weight, int64_t reduction,
-                           int64_t ignore_index);
+tr_tensor* tr_gen_cross_entropy_loss(
+    const tr_tensor* self, const tr_tensor* target,
+    const tr_tensor* weight /* nullable: NULL == no value */, int64_t reduction,
+    int64_t ignore_index, double label_smoothing);
+tr_tensor* tr_gen_nll_loss(
+    const tr_tensor* self, const tr_tensor* target,
+    const tr_tensor* weight /* nullable: NULL == no value */, int64_t reduction,
+    int64_t ignore_index);
 
 #ifdef __cplusplus
 }

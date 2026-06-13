@@ -9,6 +9,7 @@
                   ->i
                   any/c
                   case->
+                  list/c
                   listof
                   none/c
                   or/c
@@ -75,7 +76,9 @@
        [result any/c]))
 
 ;; A conv/pool size argument: an int (broadcast to a square) or an [h w] list.
-(define pool-size/c (or/c index/c (listof index/c)))
+;; list/c, not listof: ATen rejects non-2-element lists, so blame at the
+;; facade boundary rather than deep inside at::conv2d.
+(define pool-size/c (or/c index/c (list/c index/c index/c)))
 
 ;; eq/ne/lt/le/gt/ge: tensor lhs, tensor-or-real rhs, tensor (float mask) out.
 (define compare/c (-> tensor? tensor-or-real/c tensor?))

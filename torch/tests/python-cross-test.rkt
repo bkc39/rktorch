@@ -225,7 +225,10 @@
       (error 'generated-parity "python failed for ~a" py-name))
     (read-json (open-input-string (get-output-string out))))
 
-  (define (check-generated-parity entry)
+  ;; specs-override drives an extra input set through an op already in the
+  ;; manifest (e.g. an optional param's present path that its default recipe
+  ;; leaves absent); label disambiguates the check names.
+  (define (check-generated-parity entry [specs-override #f] [label ""])
     (define name (car entry))
     (define py-name (cadr entry))
     (define kinds (caddr entry))
@@ -233,13 +236,14 @@
     ;; tranche-2 generator; default #f keeps older manifests readable.
     (define inplace? (and (>= (length entry) 4) (list-ref entry 3)))
     (define specs
-      (hash-ref generated-recipes name
-                (lambda ()
-                  (error 'generated-parity
-                         "no input recipe for generated op ~a; add one to ~a"
-                         name "python-cross-test.rkt"))))
+      (or specs-override
+          (hash-ref generated-recipes name
+                    (lambda ()
+                      (error 'generated-parity
+                             "no input recipe for generated op ~a; add one to ~a"
+                             name "python-cross-test.rkt")))))
     (check-equal? (length specs) (length kinds)
-                  (format "~a: recipe arity matches manifest" name))
+                  (format "~a~a: recipe arity matches manifest" name label))
     (define j (generated-python-result py-name specs inplace?))
     (manual-seed! 0)
     (define args (map spec->racket-arg specs))
@@ -248,11 +252,12 @@
     ;; result reads the mutation -- same as the functional path.
     (define result (apply op args))
     (check-equal? (tensor-shape result) (hash-ref j 'shape)
-                  (format "~a: generated shape parity" name))
+                  (format "~a~a: generated shape parity" name label))
     (for ([r (in-list (tensor->list result))]
           [p (in-list (hash-ref j 'values))]
           [i (in-naturals)])
-      (check-= r p tol (format "~a: generated value ~a parity" name i))))
+      (check-= r p tol
+               (format "~a~a: generated value ~a parity" name label i))))
 
   (cond
     [(not (python-torch-available?))
@@ -317,5 +322,13 @@
              [i (in-naturals)])
          (check-= r p tol (format "04_mlp: parameter ~a parity" i))))
      ;; generated surface — every op in the codegen manifest
-     (for-each check-generated-parity
-               (with-input-from-file generated-manifest read))]))
+     (let ([manifest (with-input-from-file generated-manifest read)])
+       (for-each check-generated-parity manifest)
+       ;; avg-pool2d's default recipe leaves divisor_override absent (nullopt);
+       ;; drive the optional-int64 *present* path too, or its marshalling is
+       ;; never compared to PyTorch.
+       (check-generated-parity
+        (assq 'avg-pool2d manifest)
+        '((tensor 1 1 4 4) (int-array (2 2)) (int-array (2 2))
+          (int-array (0 0)) (bool #f) (bool #t) (optional-int64 2))
+        "[divisor=2]"))]))
