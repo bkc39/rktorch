@@ -121,6 +121,11 @@ def _emit_body(op: Op) -> list[str]:
             guards.append(f"!{p.name}")
         if p.kind in (INT_ARRAY, TENSOR_LIST):
             guards.append(f"{p.name}_len < 0")
+        # When present, an optional int-array's pointer is dereferenced by
+        # IntArrayRef, so a true `_has` with a null/negative-length buffer is
+        # UB — guard it (absent is the valid nullopt encoding, left alone).
+        if p.kind == OPTIONAL_INT_ARRAY:
+            guards.append(f"({p.name}_has && (!{p.name} || {p.name}_len < 0))")
     ret_type = "int" if op.inplace else "tr_tensor*"
     lines = [f"{ret_type} {op.c_name}({_c_params(op)}) {{"]
     if guards:

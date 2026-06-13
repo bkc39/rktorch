@@ -14,6 +14,7 @@
                   [conv2d f:conv2d]
                   [flatten f:flatten]
                   [max-pool2d f:max-pool2d])
+         (only-in "../foreign/size.rkt" ->2d)
          (only-in "init.rkt" fan-in kaiming-uniform uniform-init)
          (only-in "module.rkt" define-module))
 
@@ -26,9 +27,6 @@
          flatten
          flatten? ;; noqa
          )
-
-;; A conv/pool size arg is an int (square) or an explicit [h w] list.
-(define (->2d x) (if (list? x) x (list x x)))
 
 ;; ------------------------------------------------------------------- conv2d
 

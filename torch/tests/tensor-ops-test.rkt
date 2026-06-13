@@ -149,4 +149,22 @@
     (define w (zeros 64))
     (uniform! w -2.0 -1.0)
     (for ([x (in-list (tensor->list w))])
-      (check-true (and (>= x -2.0) (< x -1.0))))))
+      (check-true (and (>= x -2.0) (< x -1.0)))))
+
+  (test-case "comparison dispatchers: tensor rhs and real rhs agree"
+    (define a (tensor '(1 2 3)))
+    ;; tensor-vs-tensor branch
+    (check-equal? (tensor->list (eq a (tensor '(1 5 3)))) '(1.0 0.0 1.0))
+    (check-equal? (tensor->list (lt a (tensor '(2 2 2)))) '(1.0 0.0 0.0))
+    ;; tensor-vs-real branch (exact->inexact path) -- same masks
+    (check-equal? (tensor->list (ge a 2)) '(0.0 1.0 1.0))
+    (check-equal? (tensor->list (ne a 2)) '(1.0 0.0 1.0))
+    (check-equal? (tensor->list (gt a 2.5)) '(0.0 0.0 1.0)))
+
+  (test-case "flatten collapses dims and rejects an invalid range"
+    (define t (reshape (arange 24) 2 3 4))
+    (check-equal? (tensor-shape (flatten t)) '(24))
+    (check-equal? (tensor-shape (flatten t 1)) '(2 12))
+    (check-equal? (tensor-shape (flatten t 1 2)) '(2 12))
+    ;; start > end after normalization is rejected, not silently mis-sliced.
+    (check-exn #rx"invalid dim range" (lambda () (flatten t 2 1)))))

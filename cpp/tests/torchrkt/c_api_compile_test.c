@@ -1,6 +1,7 @@
 /* Compile-only: prove the public headers are valid C and every entry point has
  * C linkage. Nothing here runs; it is linked into the gtest binary as an object
  * so a C++-only leak in the headers fails the build. */
+#include <stdbool.h>
 #include <stdint.h>
 
 #include "torchrkt/c_api.h"
@@ -44,6 +45,11 @@ void torchrkt_c_api_compile_check(void) {
   tr_tensor* (*gen_reshape)(const tr_tensor*, const int64_t*, int64_t) =
       tr_gen_reshape;
   tr_tensor* (*gen_cat)(const tr_tensor* const*, int64_t, int64_t) = tr_gen_cat;
+  /* tranche-2 added two shapes: an int-status in-place op (mutable receiver)
+   * and an optional-int-array carrying a `_has` presence flag. */
+  int (*gen_mul_)(tr_tensor*, const tr_tensor*) = tr_gen_mul__tensor;
+  tr_tensor* (*gen_sum_dim)(const tr_tensor*, const int64_t*, int64_t, bool,
+                            bool, int32_t) = tr_gen_sum_dim_intlist;
 
   (void)version;
   (void)last_error;
@@ -72,4 +78,6 @@ void torchrkt_c_api_compile_check(void) {
   (void)gen_matmul;
   (void)gen_reshape;
   (void)gen_cat;
+  (void)gen_mul_;
+  (void)gen_sum_dim;
 }

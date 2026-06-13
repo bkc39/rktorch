@@ -87,6 +87,7 @@ if(BUILD_TESTING)
   add_executable(torchrkt_tests
     tests/torchrkt/autograd_test.cpp
     tests/torchrkt/generated_golden_test.cpp
+    tests/torchrkt/generated_tranche2_test.cpp
     tests/torchrkt/ops_test.cpp
     tests/torchrkt/random_test.cpp
     $<TARGET_OBJECTS:torchrkt_c_api_compile_test>

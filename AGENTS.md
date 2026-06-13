@@ -149,11 +149,14 @@ Where python3 can't `import torch` (the sandboxed `nix build`, or the lean
 - `src/torchrkt/*.cpp` — translation layer; catches C++ exceptions, returns
   status codes / NULL. `detail/tensor_handle.hpp` (in `src/`, private)
   completes the opaque struct over a `torch::Tensor`;
-  `detail/op_call.hpp` holds the boundary helpers (`alloc_result`,
-  `status_call`, `null_arg`) every op body reduces to — new ops must use
-  them rather than hand-rolling try/catch.
-- `tests/torchrkt/{random,ops,autograd}_test.cpp` — GoogleTest goldens per
-  family. `c_api_compile_test.c` proves the headers are valid C (add a
+  `detail/op_call.hpp` holds the boundary helpers (`alloc_result` and
+  `null_arg` for tensor-returning ops; `status_call` and `null_arg_status`
+  for the int-status in-place shape) every op body reduces to — new ops
+  must use them rather than hand-rolling try/catch.
+- `tests/torchrkt/{random,ops,autograd,generated_golden,generated_tranche2}_test.cpp`
+  — GoogleTest goldens per family (generated families get a C-boundary
+  golden: a correctness case + a null/length-guard case).
+  `c_api_compile_test.c` proves the headers are valid C (add a
   function-pointer line for at least one representative of each new op
   family, plus any function whose signature shape is new).
 

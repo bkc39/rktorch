@@ -14,6 +14,7 @@
 
 (require (only-in racket/list [flatten list-flatten] take drop)
          (only-in "ops.rkt" tensor-shape)
+         (only-in "size.rkt" ->2d)
          (only-in "structs.rkt" tensor?)
          (only-in "tensor-ops.rkt" reshape)
          (prefix-in g: (only-in "../generated.rkt"
@@ -31,11 +32,10 @@
 
 (provide flatten
          eq ne lt le gt ge
-         conv2d max-pool2d avg-pool2d adaptive-avg-pool2d narrow)
-
-;; A pooling/conv size arg is an int (broadcast to a square) or an explicit
-;; [h w] list, mirroring PyTorch.
-(define (->2d x) (if (list? x) x (list x x)))
+         conv2d max-pool2d avg-pool2d adaptive-avg-pool2d
+         ;; narrow needs no wrapper (no keyword defaulting, no dispatch); the
+         ;; generated binding already has the right name and contract target.
+         (rename-out [g:narrow narrow]))
 
 ;; ------------------------------------------------------------ flatten shim
 
@@ -53,6 +53,10 @@
        [else
         (define s (if (negative? start-dim) (+ n start-dim) start-dim))
         (define e (if (negative? end-dim) (+ n end-dim) end-dim))
+        (unless (and (<= 0 s e) (< e n))
+          (error 'flatten
+                 "invalid dim range [~a, ~a] for a ~a-d tensor"
+                 start-dim end-dim n))
         (define collapsed
           (for/product ([d (in-list shp)] [i (in-naturals)]
                                           #:when (and (>= i s) (<= i e)))
@@ -67,17 +71,17 @@
 ;; eq/ne/lt/le/gt/ge over a tensor lhs and a tensor-or-real rhs. They yield
 ;; float32 masks today (the read path coerces the bool result); int/bool
 ;; dtype is v3 work.
-(define ((comparison who t-op s-op) a b)
+(define ((comparison t-op s-op) a b)
   (cond
     [(tensor? b) (t-op a b)]
     [else (s-op a (exact->inexact b))]))
 
-(define eq (comparison 'eq g:eq-tensor g:eq-scalar))
-(define ne (comparison 'ne g:ne-tensor g:ne-scalar))
-(define lt (comparison 'lt g:lt-tensor g:lt-scalar))
-(define le (comparison 'le g:le-tensor g:le-scalar))
-(define gt (comparison 'gt g:gt-tensor g:gt-scalar))
-(define ge (comparison 'ge g:ge-tensor g:ge-scalar))
+(define eq (comparison g:eq-tensor g:eq-scalar))
+(define ne (comparison g:ne-tensor g:ne-scalar))
+(define lt (comparison g:lt-tensor g:lt-scalar))
+(define le (comparison g:le-tensor g:le-scalar))
+(define gt (comparison g:gt-tensor g:gt-scalar))
+(define ge (comparison g:ge-tensor g:ge-scalar))
 
 ;; --------------------------------------------------- conv + pooling wrappers
 
@@ -115,6 +119,3 @@
 
 (define (adaptive-avg-pool2d input output-size)
   (g:adaptive-avg-pool2d input (->2d output-size)))
-
-(define (narrow input dim start length)
-  (g:narrow input dim start length))
