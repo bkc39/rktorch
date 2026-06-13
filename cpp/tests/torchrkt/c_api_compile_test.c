@@ -58,6 +58,12 @@ void torchrkt_c_api_compile_check(void) {
   tr_tensor* (*gen_avg_pool2d)(const tr_tensor*, const int64_t*, int64_t,
                                const int64_t*, int64_t, const int64_t*, int64_t,
                                bool, bool, int64_t, bool) = tr_gen_avg_pool2d;
+  /* one representative per new generated family header (compare.h, loss.h). */
+  tr_tensor* (*gen_eq_tensor)(const tr_tensor*, const tr_tensor*) =
+      tr_gen_eq_tensor;
+  tr_tensor* (*gen_nll_loss)(const tr_tensor*, const tr_tensor*,
+                             const tr_tensor*, int64_t, int64_t) =
+      tr_gen_nll_loss;
 
   (void)version;
   (void)last_error;
@@ -90,4 +96,6 @@ void torchrkt_c_api_compile_check(void) {
   (void)gen_sum_dim;
   (void)gen_conv2d;
   (void)gen_avg_pool2d;
+  (void)gen_eq_tensor;
+  (void)gen_nll_loss;
 }
