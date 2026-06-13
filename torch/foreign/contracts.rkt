@@ -18,11 +18,14 @@
 (provide dims-rest/c
          index/c
          tensor-or-real/c
+         pool-size/c
          binary-arith/c
          unary-numeric/c
          log/c
          reduce-or-variadic/c
          argmax/c
+         compare/c
+         flatten/c
          arange/c)
 
 ;; Shape arguments for the variadic creation ops.
@@ -69,6 +72,20 @@
         #:keepdim [keepdim (v) (if (tensor? v) boolean? none/c)])
        #:pre/name (v dim) "a list argument is required with a procedure"
        (or (tensor? v) (not (unsupplied-arg? dim)))
+       [result any/c]))
+
+;; A conv/pool size argument: an int (broadcast to a square) or an [h w] list.
+(define pool-size/c (or/c index/c (listof index/c)))
+
+;; eq/ne/lt/le/gt/ge: tensor lhs, tensor-or-real rhs, tensor (float mask) out.
+(define compare/c (-> tensor? tensor-or-real/c tensor?))
+
+;; flatten shadow-dispatches: a tensor collapses dims (optional start/end);
+;; anything else defers to racket/list's flatten, which takes its one value.
+(define flatten/c
+  (->i ([v any/c])
+       ([start (v) (if (tensor? v) index/c none/c)]
+        [end (v) (if (tensor? v) index/c none/c)])
        [result any/c]))
 
 ;; arange mirrors torch.arange's three arities.

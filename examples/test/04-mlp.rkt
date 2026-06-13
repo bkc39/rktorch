@@ -2,7 +2,7 @@
 
 ;; Runner + tests for the literate example ../../examples/racket/04-mlp.rkt.
 
-(require (except-in racket/list argmax)
+(require (except-in racket/list argmax flatten)
          torch
          torch/nn
          "../racket/04-mlp.rkt")

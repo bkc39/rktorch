@@ -3,5 +3,10 @@
 
 #pragma once
 
+#include "torchrkt/c_api/generated/compare.h"
+#include "torchrkt/c_api/generated/conv.h"
+#include "torchrkt/c_api/generated/inplace.h"
 #include "torchrkt/c_api/generated/linalg.h"
+#include "torchrkt/c_api/generated/loss.h"
+#include "torchrkt/c_api/generated/reduce.h"
 #include "torchrkt/c_api/generated/shape.h"

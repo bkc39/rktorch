@@ -11,27 +11,131 @@
 (require (only-in "foreign/define-generated.rkt"
                   define-generated-op))
 
-(provide cat
+(provide adaptive-avg-pool2d
+         add-tensor!
+         addcdiv!
+         addcmul!
+         avg-pool2d
+         cat
+         conv2d
+         cross-entropy-loss
          dot
+         eq-scalar
+         eq-tensor
+         ge-scalar
+         ge-tensor
+         gt-scalar
+         gt-tensor
+         le-scalar
+         le-tensor
+         lerp-tensor!
+         lt-scalar
+         lt-tensor
          matmul
+         max-pool2d
+         mean-dim
          mm
+         mul-tensor!
          mv
-         reshape)
+         narrow
+         ne-scalar
+         ne-tensor
+         nll-loss
+         reshape
+         sum-dim-intlist)
+
+(define-generated-op adaptive-avg-pool2d tr_gen_adaptive_avg_pool2d
+  ([self tensor] [output-size int-array]))
+
+(define-generated-op add-tensor! tr_gen_add__tensor #:inplace
+  ([self tensor] [other tensor] [alpha scalar]))
+
+(define-generated-op addcdiv! tr_gen_addcdiv_ #:inplace
+  ([self tensor] [tensor1 tensor] [tensor2 tensor] [value scalar]))
+
+(define-generated-op addcmul! tr_gen_addcmul_ #:inplace
+  ([self tensor] [tensor1 tensor] [tensor2 tensor] [value scalar]))
+
+(define-generated-op avg-pool2d tr_gen_avg_pool2d
+  ([self tensor] [kernel-size int-array] [stride int-array] [padding int-array] [ceil-mode bool] [count-include-pad bool] [divisor-override optional-int64]))
 
 (define-generated-op cat tr_gen_cat
   ([tensors tensor-list] [dim int64]))
 
+(define-generated-op conv2d tr_gen_conv2d
+  ([input tensor] [weight tensor] [bias optional-tensor] [stride int-array] [padding int-array] [dilation int-array] [groups int64]))
+
+(define-generated-op cross-entropy-loss tr_gen_cross_entropy_loss
+  ([self tensor] [target tensor] [weight optional-tensor] [reduction int64] [ignore-index int64] [label-smoothing double]))
+
 (define-generated-op dot tr_gen_dot
   ([self tensor] [tensor-arg tensor]))
+
+(define-generated-op eq-scalar tr_gen_eq_scalar
+  ([self tensor] [other scalar]))
+
+(define-generated-op eq-tensor tr_gen_eq_tensor
+  ([self tensor] [other tensor]))
+
+(define-generated-op ge-scalar tr_gen_ge_scalar
+  ([self tensor] [other scalar]))
+
+(define-generated-op ge-tensor tr_gen_ge_tensor
+  ([self tensor] [other tensor]))
+
+(define-generated-op gt-scalar tr_gen_gt_scalar
+  ([self tensor] [other scalar]))
+
+(define-generated-op gt-tensor tr_gen_gt_tensor
+  ([self tensor] [other tensor]))
+
+(define-generated-op le-scalar tr_gen_le_scalar
+  ([self tensor] [other scalar]))
+
+(define-generated-op le-tensor tr_gen_le_tensor
+  ([self tensor] [other tensor]))
+
+(define-generated-op lerp-tensor! tr_gen_lerp__tensor #:inplace
+  ([self tensor] [end tensor] [weight tensor]))
+
+(define-generated-op lt-scalar tr_gen_lt_scalar
+  ([self tensor] [other scalar]))
+
+(define-generated-op lt-tensor tr_gen_lt_tensor
+  ([self tensor] [other tensor]))
 
 (define-generated-op matmul tr_gen_matmul
   ([self tensor] [other tensor]))
 
+(define-generated-op max-pool2d tr_gen_max_pool2d
+  ([self tensor] [kernel-size int-array] [stride int-array] [padding int-array] [dilation int-array] [ceil-mode bool]))
+
+(define-generated-op mean-dim tr_gen_mean_dim
+  ([self tensor] [dim optional-int-array] [keepdim bool] [dtype optional-dtype]))
+
 (define-generated-op mm tr_gen_mm
   ([self tensor] [mat2 tensor]))
+
+(define-generated-op mul-tensor! tr_gen_mul__tensor #:inplace
+  ([self tensor] [other tensor]))
 
 (define-generated-op mv tr_gen_mv
   ([self tensor] [vec tensor]))
 
+(define-generated-op narrow tr_gen_narrow
+  ([self tensor] [dim int64] [start int64] [length int64]))
+
+(define-generated-op ne-scalar tr_gen_ne_scalar
+  ([self tensor] [other scalar]))
+
+(define-generated-op ne-tensor tr_gen_ne_tensor
+  ([self tensor] [other tensor]))
+
+(define-generated-op nll-loss tr_gen_nll_loss
+  ([self tensor] [target tensor] [weight optional-tensor] [reduction int64] [ignore-index int64]))
+
 (define-generated-op reshape tr_gen_reshape
   ([self tensor] [shape int-array]))
+
+(define-generated-op sum-dim-intlist tr_gen_sum_dim_intlist
+  ([self tensor] [dim optional-int-array] [keepdim bool] [dtype optional-dtype]))

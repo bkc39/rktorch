@@ -9,8 +9,9 @@
 extern "C" {
 #endif
 
-/* Generated ops (linalg). Each returns a new tr_tensor handle
- * (NULL on error, message in tr_last_error). */
+/* Generated ops (linalg). A functional op returns a new tr_tensor
+ * handle (NULL on error); an in-place op mutates its first handle
+ * and returns an int status (0 ok, 1 with tr_last_error set). */
 
 tr_tensor* tr_gen_dot(const tr_tensor* self, const tr_tensor* tensor);
 tr_tensor* tr_gen_matmul(const tr_tensor* self, const tr_tensor* other);

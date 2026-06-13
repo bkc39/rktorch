@@ -31,6 +31,16 @@ tr_tensor* tr_gen_cat(const tr_tensor* const* tensors, int64_t tensors_len,
   });
 }
 
+tr_tensor* tr_gen_narrow(const tr_tensor* self, int64_t dim, int64_t start,
+                         int64_t length) {
+  if (!self) {
+    return torchrkt::null_arg("tr_gen_narrow");
+  }
+  return torchrkt::alloc_result("tr_gen_narrow", [&] {
+    return at::narrow(self->value, dim, start, length);
+  });
+}
+
 tr_tensor* tr_gen_reshape(const tr_tensor* self, const int64_t* shape,
                           int64_t shape_len) {
   if (!self || !shape || shape_len < 0) {

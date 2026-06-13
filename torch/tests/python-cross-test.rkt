@@ -75,26 +75,87 @@
   ;; The codegen manifest (written by `python3 -m codegen`) names every
   ;; generated op; each op needs an input recipe here. An op without a
   ;; recipe fails loudly, so extending codegen/allowlist.txt forces a
-  ;; conscious choice of parity inputs. Recipe specs: (tensor dim ...)
-  ;; draws a seeded randn; (tensors (dim ...) ...) draws a list of them;
-  ;; (int64 v) / (double v) / (bool v) / (int-array (v ...)) pass literals.
+  ;; conscious choice of parity inputs. The reference call goes through
+  ;; `torch.ops.aten.<attr>` (the faithful at:: schema -- functional ops
+  ;; like adaptive_avg_pool2d that aren't on the torch top-level still
+  ;; resolve, and arg order matches the C++ shim). In-place ops call
+  ;; `torch.ops.aten.<attr>_` and read back the mutated receiver.
+  ;;
+  ;; Recipe specs:
+  ;;   (tensor dim ...)            seeded randn
+  ;;   (tensors (dim ...) ...)     a list of seeded randns
+  ;;   (optional-tensor dim ...)   seeded randn; (optional-tensor #f) -> None
+  ;;   (int64 v) (double v) (bool v) (int-array (v ...))   literals
+  ;;   (int-tensor (v ...))        a literal int64 tensor (loss targets)
+  ;;   (optional-int64 v|#f) (optional-int-array (v ...)|#f)  optional, #f=None
+  ;;   (dtype sym|#f)              a ScalarType (kwarg-only on the aten side)
+  ;;   (kwarg "name" v)            a scalar passed positionally to the Racket
+  ;;                               op but as name=v to the kwarg-only aten arg
   (define generated-recipes
     (hash 'matmul '((tensor 2 3) (tensor 3 2))
           'mm '((tensor 2 2) (tensor 2 2))
           'mv '((tensor 2 3) (tensor 3))
           'dot '((tensor 4) (tensor 4))
           'reshape '((tensor 2 3) (int-array (3 2)))
-          'cat '((tensors (2 3) (2 3)) (int64 0))))
+          'cat '((tensors (2 3) (2 3)) (int64 0))
+          'narrow '((tensor 4) (int64 0) (int64 1) (int64 2))
+          ;; conv + pooling
+          'conv2d '((tensor 1 1 5 5) (tensor 2 1 3 3) (optional-tensor 2)
+                    (int-array (1 1)) (int-array (0 0)) (int-array (1 1))
+                    (int64 1))
+          'max-pool2d '((tensor 1 1 4 4) (int-array (2 2)) (int-array (2 2))
+                        (int-array (0 0)) (int-array (1 1)) (bool #f))
+          'adaptive-avg-pool2d '((tensor 1 1 4 4) (int-array (2 2)))
+          ;; in-place family (receiver mutated, then read)
+          'add-tensor! '((tensor 3) (tensor 3) (kwarg "alpha" 2.0))
+          'mul-tensor! '((tensor 3) (tensor 3))
+          'addcmul! '((tensor 3) (tensor 3) (tensor 3) (kwarg "value" 0.5))
+          'addcdiv! '((tensor 3) (tensor 3) (tensor 3) (kwarg "value" 0.5))
+          'lerp-tensor! '((tensor 3) (tensor 3) (tensor 3))
+          ;; comparisons (tensor + scalar rhs) -> float32 masks
+          'eq-tensor '((tensor 3) (tensor 3))
+          'eq-scalar '((tensor 3) (double 0.0))
+          'ne-tensor '((tensor 3) (tensor 3))
+          'ne-scalar '((tensor 3) (double 0.0))
+          'lt-tensor '((tensor 3) (tensor 3))
+          'lt-scalar '((tensor 3) (double 0.0))
+          'le-tensor '((tensor 3) (tensor 3))
+          'le-scalar '((tensor 3) (double 0.0))
+          'gt-tensor '((tensor 3) (tensor 3))
+          'gt-scalar '((tensor 3) (double 0.0))
+          'ge-tensor '((tensor 3) (tensor 3))
+          'ge-scalar '((tensor 3) (double 0.0))
+          ;; losses: randn logits, literal int64 targets, no weight, Mean(=1)
+          'nll-loss '((tensor 4 3) (int-tensor (0 2 1 0)) (optional-tensor #f)
+                      (int64 1) (int64 -100))
+          'cross-entropy-loss '((tensor 4 3) (int-tensor (0 2 1 0))
+                                (optional-tensor #f) (int64 1) (int64 -100)
+                                (double 0.0))
+          ;; dim-wise reductions: dim=[1], keepdim=#f, dtype=None
+          'sum-dim-intlist '((tensor 2 3) (optional-int-array (1)) (bool #f)
+                             (dtype #f))
+          'mean-dim '((tensor 2 3) (optional-int-array (1)) (bool #f)
+                      (dtype #f))
+          ;; avg_pool2d: 2x2 window, default count_include_pad, no divisor
+          'avg-pool2d '((tensor 1 1 4 4) (int-array (2 2)) (int-array (2 2))
+                        (int-array (0 0)) (bool #f) (bool #t)
+                        (optional-int64 #f))))
 
   ;; Both sides draw tensor inputs left to right from the same seed, so the
-  ;; RNG streams line up exactly like the literate-example twins.
+  ;; RNG streams line up exactly like the literate-example twins. Specs that
+  ;; pass literals (incl. an absent optional tensor) draw nothing.
   (define (spec->racket-arg spec)
     (case (car spec)
       [(tensor) (apply randn (cdr spec))]
       [(tensors)
        (for/list ([dims (in-list (cdr spec))])
          (apply randn dims))]
-      [(int64 double bool int-array) (cadr spec)]
+      [(optional-tensor)
+       (if (equal? (cdr spec) '(#f)) #f (apply randn (cdr spec)))]
+      [(int-tensor) (to-dtype (tensor (cadr spec)) 'int64)]
+      [(int64 double bool int-array optional-int64 optional-int-array dtype)
+       (cadr spec)]
+      [(kwarg) (caddr spec)]
       [else (error 'generated-parity "unknown recipe spec: ~a" spec)]))
 
   (define (spec->python-expr spec)
@@ -107,12 +168,37 @@
                (string-join (for/list ([dims (in-list (cdr spec))])
                               (format "torch.randn(~a)" (csv dims)))
                             ", "))]
+      [(optional-tensor)
+       (if (equal? (cdr spec) '(#f)) "None" (format "torch.randn(~a)"
+                                                    (csv (cdr spec))))]
+      [(int-tensor)
+       (format "torch.tensor([~a], dtype=torch.int64)" (csv (cadr spec)))]
       [(int64 double) (number->string (cadr spec))]
+      [(kwarg) (number->string (caddr spec))]
       [(bool) (if (cadr spec) "True" "False")]
       [(int-array) (format "[~a]" (csv (cadr spec)))]
+      [(optional-int64) (if (cadr spec) (number->string (cadr spec)) "None")]
+      [(optional-int-array)
+       (if (cadr spec) (format "[~a]" (csv (cadr spec))) "None")]
+      [(dtype) (if (cadr spec) (format "torch.~a" (cadr spec)) "None")]
       [else (error 'generated-parity "unknown recipe spec: ~a" spec)]))
 
-  (define (generated-python-result py-name specs)
+  ;; The call argument for spec i. A kwarg-only scalar renders as name=ai;
+  ;; dtype is kwarg-only on the aten reductions (sum.dim_IntList/mean.dim);
+  ;; everything else is positional ai.
+  (define (spec->python-call-arg spec i)
+    (case (car spec)
+      [(kwarg) (format "~a=a~a" (cadr spec) i)]
+      [(dtype) (format "dtype=a~a" i)]
+      [else (format "a~a" i)]))
+
+  (define (generated-python-result py-name specs inplace?)
+    (define callee (if inplace? (string-append py-name "_") py-name))
+    (define call-args
+      (string-join (for/list ([s (in-list specs)] [i (in-naturals)])
+                     (spec->python-call-arg s i))
+                   ", "))
+    (define invoke (format "torch.ops.aten.~a(~a)" callee call-args))
     (define code
       (string-append
        "import json, torch\n"
@@ -121,11 +207,10 @@
               (for/list ([s (in-list specs)]
                          [i (in-naturals)])
                 (format "a~a = ~a\n" i (spec->python-expr s))))
-       (format "r = getattr(torch, ~s)(~a)\n"
-               py-name
-               (string-join (for/list ([i (in-range (length specs))])
-                              (format "a~a" i))
-                            ", "))
+       ;; in-place mutates a0 (the receiver); functional returns the result.
+       (if inplace?
+           (format "~a\nr = a0\n" invoke)
+           (format "r = ~a\n" invoke))
        "print(json.dumps({\"shape\": list(r.shape),"
        " \"values\": [float(v) for v in r.flatten().tolist()]}))"))
     (define out (open-output-string))
@@ -141,6 +226,9 @@
     (define name (car entry))
     (define py-name (cadr entry))
     (define kinds (caddr entry))
+    ;; 4th element (inplace?) is present for manifests written by the
+    ;; tranche-2 generator; default #f keeps older manifests readable.
+    (define inplace? (and (>= (length entry) 4) (list-ref entry 3)))
     (define specs
       (hash-ref generated-recipes name
                 (lambda ()
@@ -149,10 +237,12 @@
                          name "python-cross-test.rkt"))))
     (check-equal? (length specs) (length kinds)
                   (format "~a: recipe arity matches manifest" name))
-    (define j (generated-python-result py-name specs))
+    (define j (generated-python-result py-name specs inplace?))
     (manual-seed! 0)
     (define args (map spec->racket-arg specs))
     (define op (dynamic-require generated-rkt name))
+    ;; An in-place op returns its (now-mutated) receiver, so reading the
+    ;; result reads the mutation -- same as the functional path.
     (define result (apply op args))
     (check-equal? (tensor-shape result) (hash-ref j 'shape)
                   (format "~a: generated shape parity" name))

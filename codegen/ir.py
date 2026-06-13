@@ -3,7 +3,10 @@
 The IR admits exactly the signature shapes the hand-written v1 shim
 marshals: Tensor, Scalar -> double, float -> double, int64_t (incl.
 SymInt), bool, IntArrayRef -> (s64*, len), TensorList -> (ptr*, len),
-and a single Tensor return. Everything else is skipped with a reason --
+and a single Tensor return. The tranche-2 (#3) additions widen this to
+optional Tensor/int/IntArrayRef/ScalarType (marshalled as a NULL pointer
+or a sentinel) and in-place ops (a mutable receiver + integer status,
+the tr_tensor_sub_ shape). Everything else is skipped with a reason --
 the generator reports skips instead of guessing.
 """
 
@@ -16,6 +19,7 @@ from torchgen.model import (
     BaseType,
     ListType,
     NativeFunction,
+    OptionalType,
     Variant,
 )
 
@@ -27,6 +31,12 @@ INT64 = "int64"
 BOOL = "bool"
 INT_ARRAY = "int-array"
 TENSOR_LIST = "tensor-list"
+# Optional kinds (tranche 2): a NULL pointer (tensor/int-array) or a
+# sentinel (int64 -> has-value flag, dtype -> -1) marshals c10::nullopt.
+OPTIONAL_TENSOR = "optional-tensor"
+OPTIONAL_INT64 = "optional-int64"
+OPTIONAL_INT_ARRAY = "optional-int-array"
+OPTIONAL_DTYPE = "optional-dtype"
 
 
 @dataclass(frozen=True)
@@ -44,6 +54,10 @@ class Op:
     python_name: str  # torch.<attr> for the parity battery
     params: tuple[Param, ...]
     shard: str
+    # In-place ops mutate params[0] (the `self` receiver) and return an
+    # integer status instead of a fresh handle; the C++ body calls the
+    # `<base>_` method on the receiver rather than the at::* free function.
+    inplace: bool = False
 
 
 @dataclass(frozen=True)
@@ -73,6 +87,14 @@ _BASE_KINDS = {
 }
 
 
+def _int_list(ty) -> bool:
+    return (
+        isinstance(ty, ListType)
+        and isinstance(ty.elem, BaseType)
+        and ty.elem.name in (BaseTy.int, BaseTy.SymInt)
+    )
+
+
 def _param_kind(ty) -> str | None:
     if isinstance(ty, BaseType):
         return _BASE_KINDS.get(ty.name)
@@ -81,6 +103,17 @@ def _param_kind(ty) -> str | None:
             return INT_ARRAY
         if ty.elem.name is BaseTy.Tensor:
             return TENSOR_LIST
+    if isinstance(ty, OptionalType):
+        elem = ty.elem
+        if isinstance(elem, BaseType):
+            if elem.name is BaseTy.Tensor:
+                return OPTIONAL_TENSOR
+            if elem.name in (BaseTy.int, BaseTy.SymInt):
+                return OPTIONAL_INT64
+            if elem.name is BaseTy.ScalarType:
+                return OPTIONAL_DTYPE
+        if _int_list(elem):
+            return OPTIONAL_INT_ARRAY
     return None
 
 
@@ -108,10 +141,7 @@ def classify(f: NativeFunction, shard: str) -> Op | Skip:
 
     if func.arguments.out:
         return skip("out variant")
-    if func.name.name.inplace:
-        return skip("in-place op: the C-side mutation convention "
-                    "(mutable handle + status, like tr_tensor_sub_) "
-                    "is a tranche-2 design decision (#3)")
+    inplace = func.name.name.inplace
     rets = func.returns
     if len(rets) != 1 or not (
         isinstance(rets[0].type, BaseType)
@@ -119,10 +149,13 @@ def classify(f: NativeFunction, shard: str) -> Op | Skip:
     ):
         return skip("return is not a single Tensor")
 
-    if Variant.function not in f.variants:
+    # Functional ops are emitted as at::<base> free-function calls, so they
+    # must expose the function variant. In-place ops are emitted as a method
+    # call on the mutable receiver, so the method variant (which they all
+    # have) suffices -- no torch.* free function is needed.
+    if not inplace and Variant.function not in f.variants:
         return skip("method-only op: the C++ shim calls at::* free "
-                    "functions and the parity battery calls torch.* — "
-                    "revisit alongside the in-place convention (#3)")
+                    "functions and the parity battery calls torch.*")
 
     params: list[Param] = []
     for a in func.arguments.flat_non_out:
@@ -130,6 +163,10 @@ def classify(f: NativeFunction, shard: str) -> Op | Skip:
         if kind is None:
             return skip(f"unsupported arg type: {a.name}: {a.type}")
         params.append(Param(a.name, kind))
+
+    if inplace and not (params and params[0].kind == TENSOR):
+        return skip("in-place op without a Tensor receiver as the "
+                    "first argument")
 
     rkt_name = _racket_name(func.name)
     if func.name.name.base in _RACKET_COLLISIONS:
@@ -145,4 +182,5 @@ def classify(f: NativeFunction, shard: str) -> Op | Skip:
         python_name=base,
         params=tuple(params),
         shard=shard,
+        inplace=inplace,
     )

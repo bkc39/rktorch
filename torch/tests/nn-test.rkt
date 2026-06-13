@@ -5,7 +5,7 @@
 ;; with PyTorch's nn.Linear lives in python-cross-test.
 
 (module+ test
-  (require (except-in racket/list argmax)
+  (require (except-in racket/list argmax flatten)
            rackunit
            "../main.rkt"
            "../nn.rkt")
