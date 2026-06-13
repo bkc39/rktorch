@@ -13,7 +13,9 @@ when dropped.
 
 @chunk[<r04-require>
 (require torch
-         torch/nn)]
+         ;; conv2d/max-pool2d/flatten name both functional torch ops and nn
+         ;; layers; this MLP uses neither, so drop the layer names from nn.
+         (except-in torch/nn conv2d max-pool2d flatten))]
 
 @chunk[<r04-provide>
 (provide run-example)]

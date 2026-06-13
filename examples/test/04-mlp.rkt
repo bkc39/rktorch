@@ -4,7 +4,10 @@
 
 (require (except-in racket/list argmax flatten)
          torch
-         torch/nn
+         ;; conv2d/max-pool2d/flatten name both the functional torch ops and
+         ;; the nn layers; this MLP uses neither, so drop the nn layer names
+         ;; to avoid the require collision.
+         (except-in torch/nn conv2d max-pool2d flatten)
          "../racket/04-mlp.rkt")
 
 (module+ main

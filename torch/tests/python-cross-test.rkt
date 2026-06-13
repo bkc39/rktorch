@@ -24,7 +24,10 @@
            json
            rackunit
            "../main.rkt"
-           "../nn.rkt")
+           ;; conv2d/max-pool2d/flatten name both the functional ops (under
+           ;; torch, used here) and the nn layers; this suite exercises the
+           ;; functional surface, so drop the colliding layer names from nn.
+           (except-in "../nn.rkt" conv2d max-pool2d flatten))
 
   (define-runtime-path examples-dir "../../examples")
   (define-runtime-path generated-manifest "generated-parity.rktd")
