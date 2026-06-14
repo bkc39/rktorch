@@ -110,6 +110,13 @@ TEST(GeneratedTranche2, PoolingFamilyGoldens) {
   EXPECT_EQ(shape_of(mp.t), (std::vector<int64_t>{1, 1, 1, 1}));
   EXPECT_EQ(data_of(mp.t), (std::vector<float>{4.0F}));  // max
 
+  // max_pool2d empty stride (len 0) also defaults to kernel_size (same ATen
+  // passthrough as avg_pool2d; the facade fills stride for public callers).
+  const Handle mp_empty(tr_gen_max_pool2d(in.t, k.data(), 2, k.data(), 0,
+                                          z.data(), 2, one.data(), 2, false));
+  EXPECT_EQ(shape_of(mp_empty.t), (std::vector<int64_t>{1, 1, 1, 1}));
+  EXPECT_EQ(data_of(mp_empty.t), (std::vector<float>{4.0F}));
+
   const Handle ap(tr_gen_avg_pool2d(in.t, k.data(), 2, k.data(), 2, z.data(), 2,
                                     /*ceil=*/false, /*count_include_pad=*/true,
                                     /*divisor_override=*/0, /*has=*/false));
@@ -226,7 +233,9 @@ TEST(GeneratedTranche2, CrossEntropyLossGoldenAndGuard) {
                                               /*mean=*/1, /*ignore_index=*/-100,
                                               /*label_smoothing=*/0.0));
   EXPECT_EQ(shape_of(loss.t), (std::vector<int64_t>{}));  // scalar
-  EXPECT_TRUE(std::isfinite(data_of(loss.t).at(0)));
+  // label_smoothing=0 is exactly nll_loss(log_softmax(logits), target):
+  // row0 -log_softmax[0]=0.60413, row1 -log_softmax[1]=0.36311, mean 0.48362.
+  EXPECT_NEAR(data_of(loss.t).at(0), 0.48362F, 1e-4F);
   // optional-tensor weight present: a non-uniform class weighting changes
   // the loss vs the unweighted result, pinning the weight!=null path.
   const Handle weight = make({2.0F, 3.0F, 4.0F}, {3});
@@ -251,6 +260,10 @@ TEST(GeneratedTranche2, NarrowSlicesAndGuards) {
   const Handle s(tr_gen_narrow(a.t, /*dim=*/0, /*start=*/1, /*length=*/2));
   EXPECT_EQ(shape_of(s.t), (std::vector<int64_t>{2}));
   EXPECT_EQ(data_of(s.t), (std::vector<float>{20.0F, 30.0F}));
+  // the result aliases source storage: an in-place write through the view
+  // mutates the original (torch.narrow semantics), pinned at the C boundary.
+  EXPECT_EQ(tr_tensor_sub_(s.t, s.t, 1.0), 0) << tr_last_error();  // view -> 0
+  EXPECT_EQ(data_of(a.t), (std::vector<float>{10.0F, 0.0F, 0.0F, 40.0F}));
   EXPECT_EQ(tr_gen_narrow(nullptr, 0, 0, 1), nullptr);
   expect_error_from("tr_gen_narrow");
 }

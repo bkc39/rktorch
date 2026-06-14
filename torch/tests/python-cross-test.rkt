@@ -419,6 +419,18 @@
         '((tensor 4 3) (int-tensor (0 2 1 0)) (optional-tensor-ones 3)
           (int64 1) (int64 -100) (double 0.0))
         "[weight]")
+       ;; reduction=0 (None) returns per-sample losses (shape (N,)) instead
+       ;; of a scalar — catches a mis-wired reduction enum as a shape change.
+       (check-generated-parity
+        (assq 'nll-loss manifest)
+        '((tensor 4 3) (int-tensor (0 2 1 0)) (optional-tensor #f)
+          (int64 0) (int64 -100))
+        "[none]")
+       (check-generated-parity
+        (assq 'cross-entropy-loss manifest)
+        '((tensor 4 3) (int-tensor (0 2 1 0)) (optional-tensor #f)
+          (int64 0) (int64 -100) (double 0.0))
+        "[none]")
        ;; conv2d's recipe has bias present; cover the common bias=None path.
        (check-generated-parity
         (assq 'conv2d manifest)
