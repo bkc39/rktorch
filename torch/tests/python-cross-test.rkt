@@ -27,7 +27,10 @@
            ;; conv2d/max-pool2d/flatten name both the functional ops (under
            ;; torch, used here) and the nn layers; this suite exercises the
            ;; functional surface, so drop the colliding layer names from nn.
-           (except-in "../nn.rkt" conv2d max-pool2d flatten))
+           (except-in "../nn.rkt" conv2d max-pool2d flatten)
+           ;; the conv2d *layer* (for the seeded-init parity check) under a
+           ;; non-colliding name.
+           (only-in "../nn.rkt" [conv2d nn-conv2d]))
 
   (define-runtime-path examples-dir "../../examples")
   (define-runtime-path generated-manifest "generated-parity.rktd")
@@ -51,6 +54,17 @@
         (system* python (path->string py))))
     (unless ok?
       (error 'python-cross-test "python failed for ~a" rel-path))
+    (read-json (open-input-string (get-output-string out))))
+
+  ;; Run an inline python snippet (which must print one JSON line) and parse it.
+  (define (python-code code)
+    (define out (open-output-string))
+    (define ok?
+      (parameterize ([current-output-port out]
+                     [current-error-port (open-output-nowhere)])
+        (system* python "-c" code)))
+    (unless ok?
+      (error 'python-cross-test "inline python failed"))
     (read-json (open-input-string (get-output-string out))))
 
   (define tol 1e-4)
@@ -327,6 +341,32 @@
              [p (in-list (hash-ref j 'values))]
              [i (in-naturals)])
          (check-= r p tol (format "04_mlp: parameter ~a parity" i))))
+     ;; conv2d layer: the seeded init (kaiming-uniform weight + uniform bias,
+     ;; in that order) must match nn.Conv2d.reset_parameters value-for-value,
+     ;; which depends on fan-in = in*kH*kW being computed exactly like
+     ;; torch.nn.init._calculate_fan_in_and_fan_out.
+     (let ()
+       (define j (python-code
+                  (string-append
+                   "import json, torch, torch.nn as nn\n"
+                   "torch.manual_seed(0)\n"
+                   "m = nn.Conv2d(1, 8, 3)\n"
+                   "vals = ([float(v) for v in m.weight.detach().flatten()"
+                   ".tolist()] + [float(v) for v in m.bias.detach().flatten()"
+                   ".tolist()])\n"
+                   "print(json.dumps({\"values\": vals, \"shapes\":"
+                   " [list(m.weight.shape), list(m.bias.shape)]}))")))
+       (manual-seed! 0)
+       (define net (nn-conv2d 1 8 3))
+       (define ps (parameters net))  ; weight then bias, declaration order
+       (check-equal? (map tensor-shape ps) (hash-ref j 'shapes)
+                     "conv2d init: parameter shapes match nn.Conv2d")
+       (define rkt-vals (apply append (map tensor->list ps)))
+       (define py-vals (hash-ref j 'values))
+       (check-equal? (length rkt-vals) (length py-vals)
+                     "conv2d init: value count")
+       (for ([r (in-list rkt-vals)] [p (in-list py-vals)] [i (in-naturals)])
+         (check-= r p tol (format "conv2d init: value ~a parity" i))))
      ;; generated surface — every op in the codegen manifest
      (let ([manifest (with-input-from-file generated-manifest read)])
        (for-each check-generated-parity manifest)

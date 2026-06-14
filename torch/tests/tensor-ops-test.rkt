@@ -166,6 +166,9 @@
     (check-equal? (tensor-shape (flatten t)) '(24))
     (check-equal? (tensor-shape (flatten t 1)) '(2 12))
     (check-equal? (tensor-shape (flatten t 1 2)) '(2 12))
+    ;; an explicit negative end-dim passes the facade contract (index/c is
+    ;; exact-integer?, not nonnegative) and normalizes like PyTorch.
+    (check-equal? (tensor-shape (flatten t 0 -1)) '(24))
     ;; start > end after normalization is rejected, not silently mis-sliced.
     (check-exn #rx"invalid dim range" (lambda () (flatten t 2 1))))
 

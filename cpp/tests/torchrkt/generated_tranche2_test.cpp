@@ -119,6 +119,14 @@ TEST(GeneratedTranche2, PoolingFamilyGoldens) {
   EXPECT_EQ(shape_of(aap.t), (std::vector<int64_t>{1, 1, 1, 1}));
   EXPECT_NEAR(data_of(aap.t).at(0), 2.5F, 1e-5F);  // global avg
 
+  // optional-int64 present: divisor=2 -> sum(1,2,3,4)/2 = 5.0 (distinct from
+  // the absent-path mean of 2.5), pinning the has=true bit-pattern's effect.
+  const Handle ap_div(tr_gen_avg_pool2d(in.t, k.data(), 2, k.data(), 2,
+                                        z.data(), 2, /*ceil=*/false,
+                                        /*count_include_pad=*/true,
+                                        /*divisor_override=*/2, /*has=*/true));
+  EXPECT_NEAR(data_of(ap_div.t).at(0), 5.0F, 1e-5F);
+
   // null self and null int-array both surface as NULL + error.
   EXPECT_EQ(tr_gen_max_pool2d(nullptr, k.data(), 2, k.data(), 2, z.data(), 2,
                               one.data(), 2, false),
@@ -200,6 +208,24 @@ TEST(GeneratedTranche2, SumDimPresenceFlagAndGuard) {
       tr_gen_sum_dim_intlist(a.t, nullptr, 1, /*dim_has=*/true, false, -1),
       nullptr);
   expect_error_from("tr_gen_sum_dim_intlist");
+}
+
+TEST(GeneratedTranche2, MeanDimPresenceFlagAndGuard) {
+  const Handle a = make({1, 2, 3, 4, 5, 6}, {2, 3});
+  const std::vector<int64_t> dim = {1};
+  // dim present: mean along dim 1 -> {2, 5}.
+  const Handle along(tr_gen_mean_dim(a.t, dim.data(), 1, /*dim_has=*/true,
+                                     /*keepdim=*/false, /*dtype=*/-1));
+  EXPECT_EQ(shape_of(along.t), (std::vector<int64_t>{2}));
+  EXPECT_EQ(data_of(along.t), (std::vector<float>{2.0F, 5.0F}));
+  // dim absent: full mean -> scalar 3.5.
+  const Handle full(
+      tr_gen_mean_dim(a.t, nullptr, 0, /*dim_has=*/false, false, -1));
+  EXPECT_NEAR(data_of(full.t).at(0), 3.5F, 1e-5F);
+  // present-but-null hits the same shared guard.
+  EXPECT_EQ(tr_gen_mean_dim(a.t, nullptr, 1, /*dim_has=*/true, false, -1),
+            nullptr);
+  expect_error_from("tr_gen_mean_dim");
 }
 
 }  // namespace
