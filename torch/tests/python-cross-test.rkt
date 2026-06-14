@@ -371,6 +371,31 @@
                      "conv2d init: value count")
        (for ([r (in-list rkt-vals)] [p (in-list py-vals)] [i (in-naturals)])
          (check-= r p tol (format "conv2d init: value ~a parity" i))))
+     ;; the promoted max/avg-pool2d wrappers default #:stride to kernel-size
+     ;; (PyTorch's stride=None); the generated battery hits the raw bindings,
+     ;; so parity-check that facade default against F.* directly.
+     (let ()
+       (define j (python-code
+                  (string-append
+                   "import json, torch\n"
+                   "import torch.nn.functional as F\n"
+                   "torch.manual_seed(0)\n"
+                   "x = torch.randn(1, 1, 4, 4)\n"
+                   "mp = F.max_pool2d(x, 2)\n"
+                   "ap = F.avg_pool2d(x, 2)\n"
+                   "print(json.dumps({"
+                   "\"mp\": [float(v) for v in mp.flatten().tolist()],"
+                   " \"ap\": [float(v) for v in ap.flatten().tolist()]}))")))
+       (manual-seed! 0)
+       (define x (randn 1 1 4 4))
+       (define mp (max-pool2d x 2))  ; promoted: #:stride #f -> kernel-size
+       (define ap (avg-pool2d x 2))
+       (for ([a (in-list (tensor->list mp))] [b (in-list (hash-ref j 'mp))]
+             [i (in-naturals)])
+         (check-= a b tol (format "max-pool2d default-stride parity ~a" i)))
+       (for ([a (in-list (tensor->list ap))] [b (in-list (hash-ref j 'ap))]
+             [i (in-naturals)])
+         (check-= a b tol (format "avg-pool2d default-stride parity ~a" i))))
      ;; generated surface — every op in the codegen manifest
      (let ([manifest (with-input-from-file generated-manifest read)])
        (for-each check-generated-parity manifest)

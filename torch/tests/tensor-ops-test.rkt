@@ -162,15 +162,20 @@
     (check-equal? (tensor->list (gt a 2.5)) '(0.0 0.0 1.0)))
 
   (test-case "flatten collapses dims and rejects an invalid range"
-    (define t (reshape (arange 24) 2 3 4))
-    (check-equal? (tensor-shape (flatten t)) '(24))
-    (check-equal? (tensor-shape (flatten t 1)) '(2 12))
-    (check-equal? (tensor-shape (flatten t 1 2)) '(2 12))
+    ;; 4-d so end-dim=1 and end-dim=-1 give distinct shapes.
+    (define t (reshape (arange 120) 2 3 4 5))
+    (check-equal? (tensor-shape (flatten t)) '(120))
+    (check-equal? (tensor-shape (flatten t 1)) '(2 60))      ; end -1
+    (check-equal? (tensor-shape (flatten t 1 2)) '(2 12 5))  ; end 2
     ;; an explicit negative end-dim passes the facade contract (index/c is
     ;; exact-integer?, not nonnegative) and normalizes like PyTorch.
-    (check-equal? (tensor-shape (flatten t 0 -1)) '(24))
+    (check-equal? (tensor-shape (flatten t 0 -1)) '(120))
+    ;; 0-d tensor flattens to shape (1), matching PyTorch.
+    (check-equal? (tensor-shape (flatten (zeros))) '(1))
+    ;; a non-tensor defers to racket/list's flatten.
+    (check-equal? (flatten '(1 (2 3))) '(1 2 3))
     ;; start > end after normalization is rejected, not silently mis-sliced.
-    (check-exn #rx"invalid dim range" (lambda () (flatten t 2 1))))
+    (check-exn #rx"invalid dim range" (lambda () (flatten t 3 1))))
 
   (test-case "narrow returns a view aliasing the source storage"
     (define t (tensor '(1 2 3 4)))

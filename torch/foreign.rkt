@@ -129,7 +129,8 @@
   [avg-pool2d (->* (tensor? pool-size/c)
                    (#:stride (or/c pool-size/c #f) #:padding pool-size/c
                     #:ceil-mode boolean? #:count-include-pad boolean?
-                    #:divisor-override (or/c index/c #f))
+                    ;; positive: a 0 divisor is a divide-by-zero in ATen.
+                    #:divisor-override (or/c exact-positive-integer? #f))
                    tensor?)]
   [adaptive-avg-pool2d (-> tensor? pool-size/c tensor?)]
   ;; comparisons (tensor lhs, tensor-or-real rhs) -> float32 masks
