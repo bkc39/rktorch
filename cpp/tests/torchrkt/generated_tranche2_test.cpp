@@ -225,6 +225,13 @@ TEST(GeneratedTranche2, CrossEntropyLossGoldenAndGuard) {
                                               /*label_smoothing=*/0.0));
   EXPECT_EQ(shape_of(loss.t), (std::vector<int64_t>{}));  // scalar
   EXPECT_TRUE(std::isfinite(data_of(loss.t).at(0)));
+  // optional-tensor weight present: a non-uniform class weighting changes
+  // the loss vs the unweighted result, pinning the weight!=null path.
+  const Handle weight = make({2.0F, 3.0F, 4.0F}, {3});
+  const Handle wloss(
+      tr_gen_cross_entropy_loss(logits.t, target.t, weight.t, 1, -100, 0.0));
+  EXPECT_TRUE(std::isfinite(data_of(wloss.t).at(0)));
+  EXPECT_NE(data_of(wloss.t).at(0), data_of(loss.t).at(0));
   // pin that label_smoothing (double) isn't swapped with ignore_index (int):
   // a large smoothing shifts the loss measurably upward.
   const Handle smoothed(tr_gen_cross_entropy_loss(logits.t, target.t, nullptr,

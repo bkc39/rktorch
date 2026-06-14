@@ -15,6 +15,7 @@
          ;; conv2d/max-pool2d/flatten name the nn layers in this facade; the
          ;; functional ops keep those names under `torch` (the F.* vs nn.* split).
          (except-in "foreign.rkt" conv2d max-pool2d flatten)
+         (only-in "foreign/contracts.rkt" pos-size/c nonneg-size/c)
          "nn/conv.rkt"
          "nn/init.rkt"
          "nn/linear.rkt"
@@ -22,14 +23,8 @@
          "nn/module.rkt"
          "nn/optim.rkt")
 
-;; A conv/pool size arg: an int (square) or an explicit [h w] list. padding
-;; may be 0; kernel/stride are positive.
-(define pos-size/c
-  (or/c exact-positive-integer?
-        (list/c exact-positive-integer? exact-positive-integer?)))
-(define nonneg-size/c
-  (or/c exact-nonnegative-integer?
-        (list/c exact-nonnegative-integer? exact-nonnegative-integer?)))
+;; pos-size/c (positive kernel/stride) and nonneg-size/c (padding may be 0)
+;; are shared from foreign/contracts.rkt — see the require above.
 
 ;; Macro + generic interface (for hand-written gen:module layers).
 (provide define-module
