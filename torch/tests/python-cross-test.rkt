@@ -434,4 +434,13 @@
        (check-generated-parity
         (assq 'mean-dim manifest)
         '((tensor 2 3) (optional-int-array #f) (bool #f) (dtype #f))
-        "[full]"))]))
+        "[full]")
+       ;; default recipes use keepdim=#f; cover keepdim=#t (kept dim) too.
+       (check-generated-parity
+        (assq 'sum-dim-intlist manifest)
+        '((tensor 2 3) (optional-int-array (1)) (bool #t) (dtype #f))
+        "[keepdim]")
+       (check-generated-parity
+        (assq 'mean-dim manifest)
+        '((tensor 2 3) (optional-int-array (1)) (bool #t) (dtype #f))
+        "[keepdim]"))]))
