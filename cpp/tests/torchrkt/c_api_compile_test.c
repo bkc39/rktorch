@@ -64,12 +64,21 @@ void torchrkt_c_api_compile_check(void) {
   tr_tensor* (*gen_avg_pool2d)(const tr_tensor*, const int64_t*, int64_t,
                                const int64_t*, int64_t, const int64_t*, int64_t,
                                bool, bool, int64_t, bool) = tr_gen_avg_pool2d;
-  /* one representative per new generated family header (compare.h, loss.h). */
+  /* one representative per new generated family header (compare.h, loss.h)
+   * and per distinct signature shape within them. */
   tr_tensor* (*gen_eq_tensor)(const tr_tensor*, const tr_tensor*) =
       tr_gen_eq_tensor;
+  tr_tensor* (*gen_eq_scalar)(const tr_tensor*, double) = tr_gen_eq_scalar;
   tr_tensor* (*gen_nll_loss)(const tr_tensor*, const tr_tensor*,
                              const tr_tensor*, int64_t, int64_t) =
       tr_gen_nll_loss;
+  tr_tensor* (*gen_cross_entropy_loss)(const tr_tensor*, const tr_tensor*,
+                                       const tr_tensor*, int64_t, int64_t,
+                                       double) = tr_gen_cross_entropy_loss;
+  tr_tensor* (*gen_max_pool2d)(const tr_tensor*, const int64_t*, int64_t,
+                               const int64_t*, int64_t, const int64_t*, int64_t,
+                               const int64_t*, int64_t, bool) =
+      tr_gen_max_pool2d;
   /* narrow: tensor + three plain int64 scalars (a new shape). */
   tr_tensor* (*gen_narrow)(const tr_tensor*, int64_t, int64_t, int64_t) =
       tr_gen_narrow;
@@ -109,6 +118,9 @@ void torchrkt_c_api_compile_check(void) {
   (void)gen_conv2d;
   (void)gen_avg_pool2d;
   (void)gen_eq_tensor;
+  (void)gen_eq_scalar;
   (void)gen_nll_loss;
+  (void)gen_cross_entropy_loss;
+  (void)gen_max_pool2d;
   (void)gen_narrow;
 }
