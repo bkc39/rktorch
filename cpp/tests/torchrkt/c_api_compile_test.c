@@ -79,6 +79,8 @@ void torchrkt_c_api_compile_check(void) {
                                const int64_t*, int64_t, const int64_t*, int64_t,
                                const int64_t*, int64_t, bool) =
       tr_gen_max_pool2d;
+  tr_tensor* (*gen_adaptive_avg_pool2d)(const tr_tensor*, const int64_t*,
+                                        int64_t) = tr_gen_adaptive_avg_pool2d;
   /* narrow: tensor + three plain int64 scalars (a new shape). */
   tr_tensor* (*gen_narrow)(const tr_tensor*, int64_t, int64_t, int64_t) =
       tr_gen_narrow;
@@ -117,6 +119,7 @@ void torchrkt_c_api_compile_check(void) {
   (void)gen_sum_dim;
   (void)gen_conv2d;
   (void)gen_avg_pool2d;
+  (void)gen_adaptive_avg_pool2d;
   (void)gen_eq_tensor;
   (void)gen_eq_scalar;
   (void)gen_nll_loss;

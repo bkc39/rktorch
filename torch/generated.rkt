@@ -7,6 +7,11 @@
 ;; allowlist entry; the macro expands each into the raw FFI binding
 ;; and a thin uncontracted wrapper. Promotion into the contracted
 ;; public facade (torch/foreign.rkt) is hand-curated.
+;;
+;; Conventions: an optional tensor/int/int-array argument takes #f
+;; for "absent" (an empty list '() is also absent for int-arrays);
+;; loss ops follow ATen (nll_loss wants log-probabilities,
+;; cross_entropy_loss wants raw logits).
 
 (require (only-in "foreign/define-generated.rkt"
                   define-generated-op))

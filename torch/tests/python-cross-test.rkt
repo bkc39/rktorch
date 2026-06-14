@@ -396,6 +396,24 @@
        (for ([a (in-list (tensor->list ap))] [b (in-list (hash-ref j 'ap))]
              [i (in-naturals)])
          (check-= a b tol (format "avg-pool2d default-stride parity ~a" i))))
+     ;; flatten is Racket-side reshape logic, not a generated binding, so it's
+     ;; outside the manifest battery; parity-check it against torch.flatten.
+     (let ()
+       (define jf (python-code
+                   (string-append
+                    "import json, torch\n"
+                    "torch.manual_seed(0)\n"
+                    "x = torch.randn(2, 3, 4)\n"
+                    "r = torch.flatten(x, 1)\n"
+                    "print(json.dumps({\"shape\": list(r.shape),"
+                    " \"values\": [float(v) for v in r.flatten().tolist()]}))")))
+       (manual-seed! 0)
+       (define x (randn 2 3 4))
+       (define r (flatten x 1))
+       (check-equal? (tensor-shape r) (hash-ref jf 'shape) "flatten parity: shape")
+       (for ([a (in-list (tensor->list r))] [b (in-list (hash-ref jf 'values))]
+             [i (in-naturals)])
+         (check-= a b tol (format "flatten parity ~a" i))))
      ;; generated surface — every op in the codegen manifest
      (let ([manifest (with-input-from-file generated-manifest read)])
        (for-each check-generated-parity manifest)
