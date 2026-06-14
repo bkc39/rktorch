@@ -90,11 +90,13 @@
      (values (list #`(#,arg : _int64) #`(#,has-arg : _stdbool))
              (list #`(or #,arg 0) #`(and #,arg #t)))]
     [(optional-int-array)
+     ;; #f or '() is absent; pair? gates the has flag so an empty list never
+     ;; marshals as a present-but-empty dim (which is ambiguous).
      (values (list #`(#,arg : (_s64vector i)) #`(#,len-arg : _int64)
                    #`(#,has-arg : _stdbool))
              (list #`(list->s64vector (or #,arg '()))
-                   #`(if #,arg (length #,arg) 0)
-                   #`(and #,arg #t)))]
+                   #`(if (pair? #,arg) (length #,arg) 0)
+                   #`(and (pair? #,arg) #t)))]
     [(optional-dtype)
      (values (list #`(#,arg : _int32)) (list #`(opt-dtype->code #,arg)))]
     [else

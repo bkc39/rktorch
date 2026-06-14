@@ -13,7 +13,7 @@ extern "C" {
 tr_tensor* tr_gen_mean_dim(const tr_tensor* self, const int64_t* dim,
                            int64_t dim_len, bool dim_has, bool keepdim,
                            int32_t dtype) {
-  if (!self || (dim_has && (!dim || dim_len < 0))) {
+  if (!self || (dim_has && (!dim || dim_len <= 0))) {
     return torchrkt::null_arg("tr_gen_mean_dim");
   }
   return torchrkt::alloc_result("tr_gen_mean_dim", [&] {
@@ -31,7 +31,7 @@ tr_tensor* tr_gen_mean_dim(const tr_tensor* self, const int64_t* dim,
 tr_tensor* tr_gen_sum_dim_intlist(const tr_tensor* self, const int64_t* dim,
                                   int64_t dim_len, bool dim_has, bool keepdim,
                                   int32_t dtype) {
-  if (!self || (dim_has && (!dim || dim_len < 0))) {
+  if (!self || (dim_has && (!dim || dim_len <= 0))) {
     return torchrkt::null_arg("tr_gen_sum_dim_intlist");
   }
   return torchrkt::alloc_result("tr_gen_sum_dim_intlist", [&] {

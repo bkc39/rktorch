@@ -190,6 +190,8 @@ TEST(GeneratedTranche2, InplaceThreeTensorAndAddcShapes) {
   const Handle n2 = make({2.0F, 2.0F, 2.0F}, {3});
   EXPECT_EQ(tr_gen_addcdiv_(cd.t, n1.t, n2.t, 2.0), 0) << tr_last_error();
   EXPECT_EQ(data_of(cd.t), (std::vector<float>{5.0F, 6.0F, 7.0F}));
+  EXPECT_EQ(tr_gen_addcdiv_(cd.t, nullptr, n2.t, 2.0), 1);
+  expect_error_from("tr_gen_addcdiv_");
 }
 
 // ---- loss: int64 targets, scalar output, null guard --------------------
@@ -271,6 +273,13 @@ TEST(GeneratedTranche2, SumDimPresenceFlagAndGuard) {
   // present-but-null is rejected by the guard (was UB before the fix).
   EXPECT_EQ(
       tr_gen_sum_dim_intlist(a.t, nullptr, 1, /*dim_has=*/true, false, -1),
+      nullptr);
+  expect_error_from("tr_gen_sum_dim_intlist");
+  // present-but-empty (has=true, len=0) is ambiguous, so the optional
+  // int-array guard rejects it: a present dim must name >=1 axis. (The
+  // Racket macro also maps '() to absent, so this state can't arise there.)
+  EXPECT_EQ(
+      tr_gen_sum_dim_intlist(a.t, dim.data(), 0, /*dim_has=*/true, false, -1),
       nullptr);
   expect_error_from("tr_gen_sum_dim_intlist");
 }
