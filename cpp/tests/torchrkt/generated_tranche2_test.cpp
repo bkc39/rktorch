@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <vector>
@@ -127,6 +128,15 @@ TEST(GeneratedTranche2, PoolingFamilyGoldens) {
                                         /*divisor_override=*/2, /*has=*/true));
   EXPECT_NEAR(data_of(ap_div.t).at(0), 5.0F, 1e-5F);
 
+  // Empty stride (len 0, non-null ptr) is ATen's "default stride to
+  // kernel_size" — an intentional raw-surface passthrough (the promoted
+  // facade fills stride in instead, so public callers never hit it). Pinned
+  // here so the passthrough is documented behavior, not an accident.
+  const Handle ap_empty(tr_gen_avg_pool2d(in.t, k.data(), 2, k.data(), 0,
+                                          z.data(), 2, false, true, 0, false));
+  EXPECT_EQ(shape_of(ap_empty.t), (std::vector<int64_t>{1, 1, 1, 1}));
+  EXPECT_NEAR(data_of(ap_empty.t).at(0), 2.5F, 1e-5F);
+
   // null self and null int-array both surface as NULL + error.
   EXPECT_EQ(tr_gen_max_pool2d(nullptr, k.data(), 2, k.data(), 2, z.data(), 2,
                               one.data(), 2, false),
@@ -202,6 +212,27 @@ TEST(GeneratedTranche2, NllLossScalarOutput) {
   EXPECT_NEAR(data_of(wloss.t).at(0), 0.32F, 1e-5F);
   EXPECT_EQ(tr_gen_nll_loss(nullptr, target.t, nullptr, 1, -100), nullptr);
   expect_error_from("tr_gen_nll_loss");
+}
+
+TEST(GeneratedTranche2, CrossEntropyLossGoldenAndGuard) {
+  const Handle logits =
+      make({-0.5F, -1.0F, -2.0F, -2.0F, -0.2F, -1.5F}, {2, 3});
+  const Handle target_f = make({0.0F, 1.0F}, {2});
+  const Handle target(tr_tensor_to_dtype(target_f.t, TR_DTYPE_INT64));
+  // label_smoothing=0 reduces to nll_loss(log_softmax(logits), target).
+  const Handle loss(tr_gen_cross_entropy_loss(logits.t, target.t, nullptr,
+                                              /*mean=*/1, /*ignore_index=*/-100,
+                                              /*label_smoothing=*/0.0));
+  EXPECT_EQ(shape_of(loss.t), (std::vector<int64_t>{}));  // scalar
+  EXPECT_TRUE(std::isfinite(data_of(loss.t).at(0)));
+  // pin that label_smoothing (double) isn't swapped with ignore_index (int):
+  // a large smoothing shifts the loss measurably upward.
+  const Handle smoothed(tr_gen_cross_entropy_loss(logits.t, target.t, nullptr,
+                                                  1, -100, /*smoothing=*/0.5));
+  EXPECT_GT(data_of(smoothed.t).at(0), data_of(loss.t).at(0));
+  EXPECT_EQ(tr_gen_cross_entropy_loss(nullptr, target.t, nullptr, 1, -100, 0.0),
+            nullptr);
+  expect_error_from("tr_gen_cross_entropy_loss");
 }
 
 // ---- shape: narrow (tensor + three int64 scalars) ----------------------

@@ -85,8 +85,10 @@
      (values (list #`(#,arg : (_list i _Tensor)) #`(#,len-arg : _int64))
              (list arg #`(length #,arg)))]
     [(optional-int64)
+     ;; (or arg 0): the value when present, else a don't-care 0 paired with
+     ;; has=#f. (if arg arg 0) reads as if 0 meant "absent" — it doesn't.
      (values (list #`(#,arg : _int64) #`(#,has-arg : _stdbool))
-             (list #`(if #,arg #,arg 0) #`(and #,arg #t)))]
+             (list #`(or #,arg 0) #`(and #,arg #t)))]
     [(optional-int-array)
      (values (list #`(#,arg : (_s64vector i)) #`(#,len-arg : _int64)
                    #`(#,has-arg : _stdbool))
