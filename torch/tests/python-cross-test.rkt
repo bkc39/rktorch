@@ -347,4 +347,20 @@
         (assq 'cross-entropy-loss manifest)
         '((tensor 4 3) (int-tensor (0 2 1 0)) (optional-tensor-ones 3)
           (int64 1) (int64 -100) (double 0.0))
-        "[weight]"))]))
+        "[weight]")
+       ;; conv2d's recipe has bias present; cover the common bias=None path.
+       (check-generated-parity
+        (assq 'conv2d manifest)
+        '((tensor 1 1 5 5) (tensor 2 1 3 3) (optional-tensor #f)
+          (int-array (1 1)) (int-array (0 0)) (int-array (1 1)) (int64 1))
+        "[no-bias]")
+       ;; the dim-wise reductions only drive dim-present; cover the absent
+       ;; (full-reduction) path against PyTorch too.
+       (check-generated-parity
+        (assq 'sum-dim-intlist manifest)
+        '((tensor 2 3) (optional-int-array #f) (bool #f) (dtype #f))
+        "[full]")
+       (check-generated-parity
+        (assq 'mean-dim manifest)
+        '((tensor 2 3) (optional-int-array #f) (bool #f) (dtype #f))
+        "[full]"))]))

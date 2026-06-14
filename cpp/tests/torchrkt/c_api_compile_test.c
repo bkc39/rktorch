@@ -64,6 +64,9 @@ void torchrkt_c_api_compile_check(void) {
   tr_tensor* (*gen_nll_loss)(const tr_tensor*, const tr_tensor*,
                              const tr_tensor*, int64_t, int64_t) =
       tr_gen_nll_loss;
+  /* narrow: tensor + three plain int64 scalars (a new shape). */
+  tr_tensor* (*gen_narrow)(const tr_tensor*, int64_t, int64_t, int64_t) =
+      tr_gen_narrow;
 
   (void)version;
   (void)last_error;
@@ -98,4 +101,5 @@ void torchrkt_c_api_compile_check(void) {
   (void)gen_avg_pool2d;
   (void)gen_eq_tensor;
   (void)gen_nll_loss;
+  (void)gen_narrow;
 }

@@ -132,6 +132,17 @@ TEST(GeneratedTranche2, NllLossScalarOutput) {
   expect_error_from("tr_gen_nll_loss");
 }
 
+// ---- shape: narrow (tensor + three int64 scalars) ----------------------
+
+TEST(GeneratedTranche2, NarrowSlicesAndGuards) {
+  const Handle a = make({10.0F, 20.0F, 30.0F, 40.0F}, {4});
+  const Handle s(tr_gen_narrow(a.t, /*dim=*/0, /*start=*/1, /*length=*/2));
+  EXPECT_EQ(shape_of(s.t), (std::vector<int64_t>{2}));
+  EXPECT_EQ(data_of(s.t), (std::vector<float>{20.0F, 30.0F}));
+  EXPECT_EQ(tr_gen_narrow(nullptr, 0, 0, 1), nullptr);
+  expect_error_from("tr_gen_narrow");
+}
+
 // ---- reduce (optional-int-array presence flag + its guard) -------------
 
 TEST(GeneratedTranche2, SumDimPresenceFlagAndGuard) {
