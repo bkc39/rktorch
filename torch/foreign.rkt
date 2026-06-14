@@ -80,7 +80,8 @@
   [flatten flatten/c]
   ;; narrow returns a *view* into `self`: in-place writes to the result
   ;; mutate the original (shared storage; ATen refcount keeps it alive).
-  [narrow (-> tensor? index/c index/c index/c tensor?)]
+  ;; length is positive — ATen rejects a 0-length narrow.
+  [narrow (-> tensor? index/c index/c exact-positive-integer? tensor?)]
   ;; elementwise (binary ops take a real on either side, tensor required
   ;; on at least one)
   [add binary-arith/c]

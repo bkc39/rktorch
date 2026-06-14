@@ -12,7 +12,7 @@
 ;;
 ;; Contracts live in ../foreign.rkt.
 
-(require (only-in racket/list [flatten list-flatten] take drop)
+(require (only-in racket/list drop [flatten list-flatten] take)
          (only-in "ops.rkt" tensor-shape)
          (only-in "size.rkt" ->2d)
          (only-in "structs.rkt" tensor?)
