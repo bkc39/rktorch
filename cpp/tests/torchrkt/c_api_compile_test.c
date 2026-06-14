@@ -50,6 +50,12 @@ void torchrkt_c_api_compile_check(void) {
    * optional-int64 (`int64_t n, bool n_has`), and an optional-tensor whose
    * NULL encodes c10::nullopt (conv2d bias, loss weight). */
   int (*gen_mul_)(tr_tensor*, const tr_tensor*) = tr_gen_mul__tensor;
+  /* the in-place family has four distinct arg shapes; pin each. */
+  int (*gen_add_)(tr_tensor*, const tr_tensor*, double) = tr_gen_add__tensor;
+  int (*gen_lerp_)(tr_tensor*, const tr_tensor*, const tr_tensor*) =
+      tr_gen_lerp__tensor;
+  int (*gen_addcmul_)(tr_tensor*, const tr_tensor*, const tr_tensor*, double) =
+      tr_gen_addcmul_;
   tr_tensor* (*gen_sum_dim)(const tr_tensor*, const int64_t*, int64_t, bool,
                             bool, int32_t) = tr_gen_sum_dim_intlist;
   tr_tensor* (*gen_conv2d)(const tr_tensor*, const tr_tensor*, const tr_tensor*,
@@ -96,6 +102,9 @@ void torchrkt_c_api_compile_check(void) {
   (void)gen_reshape;
   (void)gen_cat;
   (void)gen_mul_;
+  (void)gen_add_;
+  (void)gen_lerp_;
+  (void)gen_addcmul_;
   (void)gen_sum_dim;
   (void)gen_conv2d;
   (void)gen_avg_pool2d;

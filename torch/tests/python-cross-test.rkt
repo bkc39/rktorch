@@ -56,15 +56,19 @@
       (error 'python-cross-test "python failed for ~a" rel-path))
     (read-json (open-input-string (get-output-string out))))
 
-  ;; Run an inline python snippet (which must print one JSON line) and parse it.
+  ;; Run an inline python snippet (which must print one JSON line) and parse
+  ;; it. Captures stderr so a crashing snippet surfaces its traceback rather
+  ;; than a bare "inline python failed".
   (define (python-code code)
     (define out (open-output-string))
+    (define err (open-output-string))
     (define ok?
       (parameterize ([current-output-port out]
-                     [current-error-port (open-output-nowhere)])
+                     [current-error-port err])
         (system* python "-c" code)))
     (unless ok?
-      (error 'python-cross-test "inline python failed"))
+      (error 'python-cross-test "inline python failed:\n~a"
+             (get-output-string err)))
     (read-json (open-input-string (get-output-string out))))
 
   (define tol 1e-4)

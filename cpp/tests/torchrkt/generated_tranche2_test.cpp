@@ -155,6 +155,33 @@ TEST(GeneratedTranche2, InplaceMulMutatesAndStatus) {
   expect_error_from("tr_gen_mul__tensor");
 }
 
+TEST(GeneratedTranche2, InplaceThreeTensorAndAddcShapes) {
+  // lerp_: self += weight * (end - self).
+  const Handle l = make({1.0F, 2.0F, 3.0F}, {3});
+  const Handle end = make({5.0F, 6.0F, 7.0F}, {3});
+  const Handle w = make({0.5F, 0.5F, 0.5F}, {3});
+  EXPECT_EQ(tr_gen_lerp__tensor(l.t, end.t, w.t), 0) << tr_last_error();
+  EXPECT_EQ(data_of(l.t), (std::vector<float>{3.0F, 4.0F, 5.0F}));
+  EXPECT_EQ(tr_gen_lerp__tensor(l.t, nullptr, w.t), 1);
+  expect_error_from("tr_gen_lerp__tensor");
+
+  // addcmul_: self += value * (t1 * t2).  1 + 2*(2*3) = 13, ...
+  const Handle cm = make({1.0F, 2.0F, 3.0F}, {3});
+  const Handle t1 = make({2.0F, 2.0F, 2.0F}, {3});
+  const Handle t2 = make({3.0F, 3.0F, 3.0F}, {3});
+  EXPECT_EQ(tr_gen_addcmul_(cm.t, t1.t, t2.t, 2.0), 0) << tr_last_error();
+  EXPECT_EQ(data_of(cm.t), (std::vector<float>{13.0F, 14.0F, 15.0F}));
+  EXPECT_EQ(tr_gen_addcmul_(cm.t, nullptr, t2.t, 2.0), 1);
+  expect_error_from("tr_gen_addcmul_");
+
+  // addcdiv_: self += value * (t1 / t2).  1 + 2*(4/2) = 5, ...
+  const Handle cd = make({1.0F, 2.0F, 3.0F}, {3});
+  const Handle n1 = make({4.0F, 4.0F, 4.0F}, {3});
+  const Handle n2 = make({2.0F, 2.0F, 2.0F}, {3});
+  EXPECT_EQ(tr_gen_addcdiv_(cd.t, n1.t, n2.t, 2.0), 0) << tr_last_error();
+  EXPECT_EQ(data_of(cd.t), (std::vector<float>{5.0F, 6.0F, 7.0F}));
+}
+
 // ---- loss: int64 targets, scalar output, null guard --------------------
 
 TEST(GeneratedTranche2, NllLossScalarOutput) {

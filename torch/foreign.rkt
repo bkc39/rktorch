@@ -78,6 +78,8 @@
   [stack (->* ((non-empty-listof tensor?)) (index/c) tensor?)]
   ;; flatten shadows racket/list's: a tensor collapses dims, else defers.
   [flatten flatten/c]
+  ;; narrow returns a *view* into `self`: in-place writes to the result
+  ;; mutate the original (shared storage; ATen refcount keeps it alive).
   [narrow (-> tensor? index/c index/c index/c tensor?)]
   ;; elementwise (binary ops take a real on either side, tensor required
   ;; on at least one)
@@ -118,10 +120,12 @@
                 #:padding pool-size/c #:dilation pool-size/c
                 #:groups index/c)
                tensor?)]
+  ;; #:stride #f means "default to kernel-size" (PyTorch's stride=None).
   [max-pool2d (->* (tensor? pool-size/c)
                    (#:stride (or/c pool-size/c #f) #:padding pool-size/c
                     #:dilation pool-size/c #:ceil-mode boolean?)
                    tensor?)]
+  ;; #:stride #f means "default to kernel-size" (PyTorch's stride=None).
   [avg-pool2d (->* (tensor? pool-size/c)
                    (#:stride (or/c pool-size/c #f) #:padding pool-size/c
                     #:ceil-mode boolean? #:count-include-pad boolean?
