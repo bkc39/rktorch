@@ -23,8 +23,10 @@
          avg-pool2d
          cat
          conv2d
+         copy!
          cross-entropy-loss
          dot
+         dropout
          eq-scalar
          eq-tensor
          ge-scalar
@@ -70,11 +72,17 @@
 (define-generated-op conv2d tr_gen_conv2d
   ([input tensor] [weight tensor] [bias optional-tensor] [stride int-array] [padding int-array] [dilation int-array] [groups int64]))
 
+(define-generated-op copy! tr_gen_copy_ #:inplace
+  ([self tensor] [src tensor] [non-blocking bool]))
+
 (define-generated-op cross-entropy-loss tr_gen_cross_entropy_loss
   ([self tensor] [target tensor] [weight optional-tensor] [reduction int64] [ignore-index int64] [label-smoothing double]))
 
 (define-generated-op dot tr_gen_dot
   ([self tensor] [tensor-arg tensor]))
+
+(define-generated-op dropout tr_gen_dropout
+  ([input tensor] [p double] [train bool]))
 
 (define-generated-op eq-scalar tr_gen_eq_scalar
   ([self tensor] [other scalar]))

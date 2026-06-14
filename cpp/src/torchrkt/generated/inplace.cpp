@@ -38,6 +38,14 @@ int tr_gen_addcmul_(tr_tensor* self, const tr_tensor* tensor1,
   });
 }
 
+int tr_gen_copy_(tr_tensor* self, const tr_tensor* src, bool non_blocking) {
+  if (!self || !src) {
+    return torchrkt::null_arg_status("tr_gen_copy_");
+  }
+  return torchrkt::status_call(
+      "tr_gen_copy_", [&] { self->value.copy_(src->value, non_blocking); });
+}
+
 int tr_gen_lerp__tensor(tr_tensor* self, const tr_tensor* end,
                         const tr_tensor* weight) {
   if (!self || !end || !weight) {

@@ -160,7 +160,12 @@
           ;; avg_pool2d: 2x2 window, default count_include_pad, no divisor
           'avg-pool2d '((tensor 1 1 4 4) (int-array (2 2)) (int-array (2 2))
                         (int-array (0 0)) (bool #f) (bool #t)
-                        (optional-int64 #f))))
+                        (optional-int64 #f))
+          ;; dropout with train=#f is the identity (deterministic); the train
+          ;; path is stochastic and parity-checked via the eval-mode result.
+          'dropout '((tensor 2 3) (double 0.5) (bool #f))
+          ;; copy_ overwrites self with src, so the seeded result equals src.
+          'copy! '((tensor 2 3) (tensor 2 3) (bool #f))))
 
   ;; Both sides draw tensor inputs left to right from the same seed, so the
   ;; RNG streams line up exactly like the literate-example twins. Specs that
