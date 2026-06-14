@@ -12,12 +12,19 @@
 ;; parameter store.
 
 (require racket/contract
-         "foreign.rkt"
+         ;; conv2d/max-pool2d/flatten name the nn layers in this facade; the
+         ;; functional ops keep those names under `torch` (the F.* vs nn.* split).
+         (except-in "foreign.rkt" conv2d max-pool2d flatten)
+         (only-in "foreign/contracts.rkt" pos-size/c nonneg-size/c)
+         "nn/conv.rkt"
          "nn/init.rkt"
          "nn/linear.rkt"
          "nn/loss.rkt"
          "nn/module.rkt"
          "nn/optim.rkt")
+
+;; pos-size/c (positive kernel/stride) and nonneg-size/c (padding may be 0)
+;; are shared from foreign/contracts.rkt — see the require above.
 
 ;; Macro + generic interface (for hand-written gen:module layers).
 (provide define-module
@@ -38,6 +45,17 @@
   ;; layers
   [linear (-> exact-positive-integer? exact-positive-integer? linear?)]
   [linear? (-> any/c boolean?)]
+  [conv2d (->* (exact-positive-integer? exact-positive-integer? pos-size/c)
+               (#:stride pos-size/c #:padding nonneg-size/c)
+               conv2d?)]
+  [conv2d? (-> any/c boolean?)]
+  [max-pool2d (->* (pos-size/c)
+                   (#:stride (or/c #f pos-size/c) #:padding nonneg-size/c)
+                   max-pool2d?)]
+  [max-pool2d? (-> any/c boolean?)]
+  [flatten (->* () (#:start-dim exact-integer? #:end-dim exact-integer?)
+                flatten?)]
+  [flatten? (-> any/c boolean?)]
   ;; initializers
   [uniform-init (-> (listof exact-nonnegative-integer?) real? real? tensor?)]
   [kaiming-uniform (->* ((listof exact-nonnegative-integer?)) (#:a real?)

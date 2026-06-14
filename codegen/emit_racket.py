@@ -31,6 +31,11 @@ def emit_wrappers(shards: dict[str, list[Op]]) -> str:
         ";; allowlist entry; the macro expands each into the raw FFI binding",
         ";; and a thin uncontracted wrapper. Promotion into the contracted",
         ";; public facade (torch/foreign.rkt) is hand-curated.",
+        ";;",
+        ";; Conventions: an optional tensor/int/int-array argument takes #f",
+        ";; for \"absent\" (an empty list '() is also absent for int-arrays);",
+        ";; loss ops follow ATen (nll_loss wants log-probabilities,",
+        ";; cross_entropy_loss wants raw logits).",
         "",
         '(require (only-in "foreign/define-generated.rkt"',
         "                  define-generated-op))",
@@ -42,9 +47,10 @@ def emit_wrappers(shards: dict[str, list[Op]]) -> str:
         args = " ".join(
             f"[{_rkt_arg(p.name, p.kind)} {p.kind}]" for p in op.params
         )
+        flag = " #:inplace" if op.inplace else ""
         lines += [
             "",
-            f"(define-generated-op {op.racket_name} {op.c_name}",
+            f"(define-generated-op {op.racket_name} {op.c_name}{flag}",
             f"  ({args}))",
         ]
     return "\n".join(lines) + "\n"
@@ -57,12 +63,16 @@ def emit_manifest(shards: dict[str, list[Op]]) -> str:
     )
     lines = [BANNER.rstrip()]
     lines += [
-        ";; Parity manifest: (racket-name python-attr (arg kinds ...)).",
-        ";; Consumed by torch/tests/python-cross-test.rkt.",
+        ";; Parity manifest: (racket-name python-attr (arg kinds ...) inplace?).",
+        ";; inplace? is #t for ops checked against torch.Tensor.<attr>_ on a",
+        ";; cloned receiver. Consumed by torch/tests/python-cross-test.rkt.",
         "(",
     ]
     for op in all_ops:
         kinds = " ".join(p.kind for p in op.params)
-        lines.append(f' ({op.racket_name} "{op.python_name}" ({kinds}))')
+        flag = "#t" if op.inplace else "#f"
+        lines.append(
+            f' ({op.racket_name} "{op.python_name}" ({kinds}) {flag})'
+        )
     lines.append(")")
     return "\n".join(lines) + "\n"

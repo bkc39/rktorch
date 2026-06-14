@@ -26,6 +26,7 @@
          "foreign/ops.rkt"
          "foreign/tensor-ops.rkt"
          "foreign/operators.rkt"
+         "foreign/promoted.rkt"
          "foreign/autograd-ops.rkt")
 
 ;; with-no-grad is a macro (a dynamic-extent form), so it bypasses
@@ -75,6 +76,12 @@
   [unsqueeze (-> tensor? index/c tensor?)]
   [cat (->* ((non-empty-listof tensor?)) (index/c) tensor?)]
   [stack (->* ((non-empty-listof tensor?)) (index/c) tensor?)]
+  ;; flatten shadows racket/list's: a tensor collapses dims, else defers.
+  [flatten flatten/c]
+  ;; narrow returns a *view* into `self`: in-place writes to the result
+  ;; mutate the original (shared storage; ATen refcount keeps it alive).
+  ;; length is positive — ATen rejects a 0-length narrow.
+  [narrow (-> tensor? index/c index/c exact-positive-integer? tensor?)]
   ;; elementwise (binary ops take a real on either side, tensor required
   ;; on at least one)
   [add binary-arith/c]
@@ -107,6 +114,33 @@
   [mm (-> tensor? tensor? tensor?)]
   [mv (-> tensor? tensor? tensor?)]
   [dot (-> tensor? tensor? tensor?)]
+  ;; conv + pooling (promoted from the generated surface, PyTorch-style
+  ;; keyword defaults; stride/padding/dilation take an int or an [h w] list)
+  [conv2d (->* (tensor? tensor?)
+               (#:bias (or/c tensor? #f) #:stride pool-size/c
+                #:padding pool-size/c #:dilation pool-size/c
+                #:groups index/c)
+               tensor?)]
+  ;; #:stride #f means "default to kernel-size" (PyTorch's stride=None).
+  [max-pool2d (->* (tensor? pool-size/c)
+                   (#:stride (or/c pool-size/c #f) #:padding pool-size/c
+                    #:dilation pool-size/c #:ceil-mode boolean?)
+                   tensor?)]
+  ;; #:stride #f means "default to kernel-size" (PyTorch's stride=None).
+  [avg-pool2d (->* (tensor? pool-size/c)
+                   (#:stride (or/c pool-size/c #f) #:padding pool-size/c
+                    #:ceil-mode boolean? #:count-include-pad boolean?
+                    ;; positive: a 0 divisor is a divide-by-zero in ATen.
+                    #:divisor-override (or/c exact-positive-integer? #f))
+                   tensor?)]
+  [adaptive-avg-pool2d (-> tensor? pool-size/c tensor?)]
+  ;; comparisons (tensor lhs, tensor-or-real rhs) -> float32 masks
+  [eq compare/c]
+  [ne compare/c]
+  [lt compare/c]
+  [le compare/c]
+  [gt compare/c]
+  [ge compare/c]
   ;; out-marshalling
   [item (-> tensor? real?)]
   [to-dtype (-> tensor? (or/c 'float32 'float64 'int64) tensor?)]

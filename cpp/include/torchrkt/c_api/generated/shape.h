@@ -9,11 +9,14 @@
 extern "C" {
 #endif
 
-/* Generated ops (shape). Each returns a new tr_tensor handle
- * (NULL on error, message in tr_last_error). */
+/* Generated ops (shape). A functional op returns a new tr_tensor
+ * handle (NULL on error); an in-place op mutates its first handle
+ * and returns an int status (0 ok, 1 with tr_last_error set). */
 
 tr_tensor* tr_gen_cat(const tr_tensor* const* tensors, int64_t tensors_len,
                       int64_t dim);
+tr_tensor* tr_gen_narrow(const tr_tensor* self, int64_t dim, int64_t start,
+                         int64_t length);
 tr_tensor* tr_gen_reshape(const tr_tensor* self, const int64_t* shape,
                           int64_t shape_len);
 

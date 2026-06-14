@@ -24,7 +24,13 @@
            json
            rackunit
            "../main.rkt"
-           "../nn.rkt")
+           ;; conv2d/max-pool2d/flatten name both the functional ops (under
+           ;; torch, used here) and the nn layers; this suite exercises the
+           ;; functional surface, so drop the colliding layer names from nn.
+           (except-in "../nn.rkt" conv2d max-pool2d flatten)
+           ;; the conv2d *layer* (for the seeded-init parity check) under a
+           ;; non-colliding name.
+           (only-in "../nn.rkt" [conv2d nn-conv2d]))
 
   (define-runtime-path examples-dir "../../examples")
   (define-runtime-path generated-manifest "generated-parity.rktd")
@@ -48,6 +54,21 @@
         (system* python (path->string py))))
     (unless ok?
       (error 'python-cross-test "python failed for ~a" rel-path))
+    (read-json (open-input-string (get-output-string out))))
+
+  ;; Run an inline python snippet (which must print one JSON line) and parse
+  ;; it. Captures stderr so a crashing snippet surfaces its traceback rather
+  ;; than a bare "inline python failed".
+  (define (python-code code)
+    (define out (open-output-string))
+    (define err (open-output-string))
+    (define ok?
+      (parameterize ([current-output-port out]
+                     [current-error-port err])
+        (system* python "-c" code)))
+    (unless ok?
+      (error 'python-cross-test "inline python failed:\n~a"
+             (get-output-string err)))
     (read-json (open-input-string (get-output-string out))))
 
   (define tol 1e-4)
@@ -75,26 +96,90 @@
   ;; The codegen manifest (written by `python3 -m codegen`) names every
   ;; generated op; each op needs an input recipe here. An op without a
   ;; recipe fails loudly, so extending codegen/allowlist.txt forces a
-  ;; conscious choice of parity inputs. Recipe specs: (tensor dim ...)
-  ;; draws a seeded randn; (tensors (dim ...) ...) draws a list of them;
-  ;; (int64 v) / (double v) / (bool v) / (int-array (v ...)) pass literals.
+  ;; conscious choice of parity inputs. The reference call goes through
+  ;; `torch.ops.aten.<attr>` (the faithful at:: schema -- functional ops
+  ;; like adaptive_avg_pool2d that aren't on the torch top-level still
+  ;; resolve, and arg order matches the C++ shim). In-place ops call
+  ;; `torch.ops.aten.<attr>_` and read back the mutated receiver.
+  ;;
+  ;; Recipe specs:
+  ;;   (tensor dim ...)            seeded randn
+  ;;   (tensors (dim ...) ...)     a list of seeded randns
+  ;;   (optional-tensor dim ...)   seeded randn; (optional-tensor #f) -> None
+  ;;   (int64 v) (double v) (bool v) (int-array (v ...))   literals
+  ;;   (int-tensor (v ...))        a literal int64 tensor (loss targets)
+  ;;   (optional-int64 v|#f) (optional-int-array (v ...)|#f)  optional, #f=None
+  ;;   (dtype sym|#f)              a ScalarType (kwarg-only on the aten side)
+  ;;   (kwarg "name" v)            a scalar passed positionally to the Racket
+  ;;                               op but as name=v to the kwarg-only aten arg
   (define generated-recipes
     (hash 'matmul '((tensor 2 3) (tensor 3 2))
           'mm '((tensor 2 2) (tensor 2 2))
           'mv '((tensor 2 3) (tensor 3))
           'dot '((tensor 4) (tensor 4))
           'reshape '((tensor 2 3) (int-array (3 2)))
-          'cat '((tensors (2 3) (2 3)) (int64 0))))
+          'cat '((tensors (2 3) (2 3)) (int64 0))
+          'narrow '((tensor 4) (int64 0) (int64 1) (int64 2))
+          ;; conv + pooling
+          'conv2d '((tensor 1 1 5 5) (tensor 2 1 3 3) (optional-tensor 2)
+                    (int-array (1 1)) (int-array (0 0)) (int-array (1 1))
+                    (int64 1))
+          'max-pool2d '((tensor 1 1 4 4) (int-array (2 2)) (int-array (2 2))
+                        (int-array (0 0)) (int-array (1 1)) (bool #f))
+          'adaptive-avg-pool2d '((tensor 1 1 4 4) (int-array (2 2)))
+          ;; in-place family (receiver mutated, then read)
+          'add-tensor! '((tensor 3) (tensor 3) (kwarg "alpha" 2.0))
+          'mul-tensor! '((tensor 3) (tensor 3))
+          'addcmul! '((tensor 3) (tensor 3) (tensor 3) (kwarg "value" 0.5))
+          'addcdiv! '((tensor 3) (tensor 3) (tensor 3) (kwarg "value" 0.5))
+          'lerp-tensor! '((tensor 3) (tensor 3) (tensor 3))
+          ;; comparisons (tensor + scalar rhs) -> float32 masks
+          'eq-tensor '((tensor 3) (tensor 3))
+          'eq-scalar '((tensor 3) (double 0.0))
+          'ne-tensor '((tensor 3) (tensor 3))
+          'ne-scalar '((tensor 3) (double 0.0))
+          'lt-tensor '((tensor 3) (tensor 3))
+          'lt-scalar '((tensor 3) (double 0.0))
+          'le-tensor '((tensor 3) (tensor 3))
+          'le-scalar '((tensor 3) (double 0.0))
+          'gt-tensor '((tensor 3) (tensor 3))
+          'gt-scalar '((tensor 3) (double 0.0))
+          'ge-tensor '((tensor 3) (tensor 3))
+          'ge-scalar '((tensor 3) (double 0.0))
+          ;; losses: randn logits, literal int64 targets, no weight, Mean(=1)
+          'nll-loss '((tensor 4 3) (int-tensor (0 2 1 0)) (optional-tensor #f)
+                      (int64 1) (int64 -100))
+          'cross-entropy-loss '((tensor 4 3) (int-tensor (0 2 1 0))
+                                (optional-tensor #f) (int64 1) (int64 -100)
+                                (double 0.0))
+          ;; dim-wise reductions: dim=[1], keepdim=#f, dtype=None
+          'sum-dim-intlist '((tensor 2 3) (optional-int-array (1)) (bool #f)
+                             (dtype #f))
+          'mean-dim '((tensor 2 3) (optional-int-array (1)) (bool #f)
+                      (dtype #f))
+          ;; avg_pool2d: 2x2 window, default count_include_pad, no divisor
+          'avg-pool2d '((tensor 1 1 4 4) (int-array (2 2)) (int-array (2 2))
+                        (int-array (0 0)) (bool #f) (bool #t)
+                        (optional-int64 #f))))
 
   ;; Both sides draw tensor inputs left to right from the same seed, so the
-  ;; RNG streams line up exactly like the literate-example twins.
+  ;; RNG streams line up exactly like the literate-example twins. Specs that
+  ;; pass literals (incl. an absent optional tensor) draw nothing.
   (define (spec->racket-arg spec)
     (case (car spec)
       [(tensor) (apply randn (cdr spec))]
       [(tensors)
        (for/list ([dims (in-list (cdr spec))])
          (apply randn dims))]
-      [(int64 double bool int-array) (cadr spec)]
+      [(optional-tensor)
+       (if (equal? (cdr spec) '(#f)) #f (apply randn (cdr spec)))]
+      ;; a present optional tensor of all-ones (draws no RNG, so seed
+      ;; alignment holds; stable magnitude unlike a randn weight).
+      [(optional-tensor-ones) (apply ones (cdr spec))]
+      [(int-tensor) (to-dtype (tensor (cadr spec)) 'int64)]
+      [(int64 double bool int-array optional-int64 optional-int-array dtype)
+       (cadr spec)]
+      [(kwarg) (caddr spec)]
       [else (error 'generated-parity "unknown recipe spec: ~a" spec)]))
 
   (define (spec->python-expr spec)
@@ -107,12 +192,40 @@
                (string-join (for/list ([dims (in-list (cdr spec))])
                               (format "torch.randn(~a)" (csv dims)))
                             ", "))]
+      [(optional-tensor)
+       (if (equal? (cdr spec) '(#f)) "None" (format "torch.randn(~a)"
+                                                    (csv (cdr spec))))]
+      [(optional-tensor-ones) (format "torch.ones(~a)" (csv (cdr spec)))]
+      [(int-tensor)
+       (format "torch.tensor([~a], dtype=torch.int64)" (csv (cadr spec)))]
       [(int64 double) (number->string (cadr spec))]
+      [(kwarg) (number->string (caddr spec))]
       [(bool) (if (cadr spec) "True" "False")]
       [(int-array) (format "[~a]" (csv (cadr spec)))]
+      [(optional-int64) (if (cadr spec) (number->string (cadr spec)) "None")]
+      [(optional-int-array)
+       (if (cadr spec) (format "[~a]" (csv (cadr spec))) "None")]
+      [(dtype) (if (cadr spec) (format "torch.~a" (cadr spec)) "None")]
       [else (error 'generated-parity "unknown recipe spec: ~a" spec)]))
 
-  (define (generated-python-result py-name specs)
+  ;; The call argument for spec i. A kwarg-only scalar renders as name=ai;
+  ;; dtype is kwarg-only on the aten reductions (sum.dim_IntList/mean.dim);
+  ;; everything else is positional ai.
+  (define (spec->python-call-arg spec i)
+    (case (car spec)
+      [(kwarg) (format "~a=a~a" (cadr spec) i)]
+      [(dtype) (format "dtype=a~a" i)]
+      [else (format "a~a" i)]))
+
+  (define (generated-python-result py-name specs inplace?)
+    ;; py-name is the full aten overload path (e.g. sum.dim_IntList,
+    ;; add_.Tensor) — call it explicitly, no overload guessing.
+    (define callee py-name)
+    (define call-args
+      (string-join (for/list ([s (in-list specs)] [i (in-naturals)])
+                     (spec->python-call-arg s i))
+                   ", "))
+    (define invoke (format "torch.ops.aten.~a(~a)" callee call-args))
     (define code
       (string-append
        "import json, torch\n"
@@ -121,11 +234,10 @@
               (for/list ([s (in-list specs)]
                          [i (in-naturals)])
                 (format "a~a = ~a\n" i (spec->python-expr s))))
-       (format "r = getattr(torch, ~s)(~a)\n"
-               py-name
-               (string-join (for/list ([i (in-range (length specs))])
-                              (format "a~a" i))
-                            ", "))
+       ;; in-place mutates a0 (the receiver); functional returns the result.
+       (if inplace?
+           (format "~a\nr = a0\n" invoke)
+           (format "r = ~a\n" invoke))
        "print(json.dumps({\"shape\": list(r.shape),"
        " \"values\": [float(v) for v in r.flatten().tolist()]}))"))
     (define out (open-output-string))
@@ -137,29 +249,39 @@
       (error 'generated-parity "python failed for ~a" py-name))
     (read-json (open-input-string (get-output-string out))))
 
-  (define (check-generated-parity entry)
+  ;; specs-override drives an extra input set through an op already in the
+  ;; manifest (e.g. an optional param's present path that its default recipe
+  ;; leaves absent); label disambiguates the check names.
+  (define (check-generated-parity entry [specs-override #f] [label ""])
     (define name (car entry))
     (define py-name (cadr entry))
     (define kinds (caddr entry))
+    ;; 4th element (inplace?) is present for manifests written by the
+    ;; tranche-2 generator; default #f keeps older manifests readable.
+    (define inplace? (and (>= (length entry) 4) (list-ref entry 3)))
     (define specs
-      (hash-ref generated-recipes name
-                (lambda ()
-                  (error 'generated-parity
-                         "no input recipe for generated op ~a; add one to ~a"
-                         name "python-cross-test.rkt"))))
+      (or specs-override
+          (hash-ref generated-recipes name
+                    (lambda ()
+                      (error 'generated-parity
+                             "no input recipe for generated op ~a; add one to ~a"
+                             name "python-cross-test.rkt")))))
     (check-equal? (length specs) (length kinds)
-                  (format "~a: recipe arity matches manifest" name))
-    (define j (generated-python-result py-name specs))
+                  (format "~a~a: recipe arity matches manifest" name label))
+    (define j (generated-python-result py-name specs inplace?))
     (manual-seed! 0)
     (define args (map spec->racket-arg specs))
     (define op (dynamic-require generated-rkt name))
+    ;; An in-place op returns its (now-mutated) receiver, so reading the
+    ;; result reads the mutation -- same as the functional path.
     (define result (apply op args))
     (check-equal? (tensor-shape result) (hash-ref j 'shape)
-                  (format "~a: generated shape parity" name))
+                  (format "~a~a: generated shape parity" name label))
     (for ([r (in-list (tensor->list result))]
           [p (in-list (hash-ref j 'values))]
           [i (in-naturals)])
-      (check-= r p tol (format "~a: generated value ~a parity" name i))))
+      (check-= r p tol
+               (format "~a~a: generated value ~a parity" name label i))))
 
   (cond
     [(not (python-torch-available?))
@@ -223,6 +345,132 @@
              [p (in-list (hash-ref j 'values))]
              [i (in-naturals)])
          (check-= r p tol (format "04_mlp: parameter ~a parity" i))))
+     ;; conv2d layer: the seeded init (kaiming-uniform weight + uniform bias,
+     ;; in that order) must match nn.Conv2d.reset_parameters value-for-value,
+     ;; which depends on fan-in = in*kH*kW being computed exactly like
+     ;; torch.nn.init._calculate_fan_in_and_fan_out.
+     (let ()
+       (define j (python-code
+                  (string-append
+                   "import json, torch, torch.nn as nn\n"
+                   "torch.manual_seed(0)\n"
+                   "m = nn.Conv2d(1, 8, 3)\n"
+                   "vals = ([float(v) for v in m.weight.detach().flatten()"
+                   ".tolist()] + [float(v) for v in m.bias.detach().flatten()"
+                   ".tolist()])\n"
+                   "print(json.dumps({\"values\": vals, \"shapes\":"
+                   " [list(m.weight.shape), list(m.bias.shape)]}))")))
+       (manual-seed! 0)
+       (define net (nn-conv2d 1 8 3))
+       (define ps (parameters net))  ; weight then bias, declaration order
+       (check-equal? (map tensor-shape ps) (hash-ref j 'shapes)
+                     "conv2d init: parameter shapes match nn.Conv2d")
+       (define rkt-vals (apply append (map tensor->list ps)))
+       (define py-vals (hash-ref j 'values))
+       (check-equal? (length rkt-vals) (length py-vals)
+                     "conv2d init: value count")
+       (for ([r (in-list rkt-vals)] [p (in-list py-vals)] [i (in-naturals)])
+         (check-= r p tol (format "conv2d init: value ~a parity" i))))
+     ;; the promoted max/avg-pool2d wrappers default #:stride to kernel-size
+     ;; (PyTorch's stride=None); the generated battery hits the raw bindings,
+     ;; so parity-check that facade default against F.* directly.
+     (let ()
+       (define j (python-code
+                  (string-append
+                   "import json, torch\n"
+                   "import torch.nn.functional as F\n"
+                   "torch.manual_seed(0)\n"
+                   "x = torch.randn(1, 1, 4, 4)\n"
+                   "mp = F.max_pool2d(x, 2)\n"
+                   "ap = F.avg_pool2d(x, 2)\n"
+                   "print(json.dumps({"
+                   "\"mp\": [float(v) for v in mp.flatten().tolist()],"
+                   " \"ap\": [float(v) for v in ap.flatten().tolist()]}))")))
+       (manual-seed! 0)
+       (define x (randn 1 1 4 4))
+       (define mp (max-pool2d x 2))  ; promoted: #:stride #f -> kernel-size
+       (define ap (avg-pool2d x 2))
+       (for ([a (in-list (tensor->list mp))] [b (in-list (hash-ref j 'mp))]
+             [i (in-naturals)])
+         (check-= a b tol (format "max-pool2d default-stride parity ~a" i)))
+       (for ([a (in-list (tensor->list ap))] [b (in-list (hash-ref j 'ap))]
+             [i (in-naturals)])
+         (check-= a b tol (format "avg-pool2d default-stride parity ~a" i))))
+     ;; flatten is Racket-side reshape logic, not a generated binding, so it's
+     ;; outside the manifest battery; parity-check it against torch.flatten.
+     (let ()
+       (define jf (python-code
+                   (string-append
+                    "import json, torch\n"
+                    "torch.manual_seed(0)\n"
+                    "x = torch.randn(2, 3, 4)\n"
+                    "r = torch.flatten(x, 1)\n"
+                    "print(json.dumps({\"shape\": list(r.shape),"
+                    " \"values\": [float(v) for v in r.flatten().tolist()]}))")))
+       (manual-seed! 0)
+       (define x (randn 2 3 4))
+       (define r (flatten x 1))
+       (check-equal? (tensor-shape r) (hash-ref jf 'shape) "flatten parity: shape")
+       (for ([a (in-list (tensor->list r))] [b (in-list (hash-ref jf 'values))]
+             [i (in-naturals)])
+         (check-= a b tol (format "flatten parity ~a" i))))
      ;; generated surface — every op in the codegen manifest
-     (for-each check-generated-parity
-               (with-input-from-file generated-manifest read))]))
+     (let ([manifest (with-input-from-file generated-manifest read)])
+       (for-each check-generated-parity manifest)
+       ;; avg-pool2d's default recipe leaves divisor_override absent (nullopt);
+       ;; drive the optional-int64 *present* path too, or its marshalling is
+       ;; never compared to PyTorch.
+       (check-generated-parity
+        (assq 'avg-pool2d manifest)
+        '((tensor 1 1 4 4) (int-array (2 2)) (int-array (2 2))
+          (int-array (0 0)) (bool #f) (bool #t) (optional-int64 2))
+        "[divisor=2]")
+       ;; the loss recipes leave weight absent; drive the optional-tensor
+       ;; weight-present branch too (ones weight: stable, exercises weight!=null).
+       (check-generated-parity
+        (assq 'nll-loss manifest)
+        '((tensor 4 3) (int-tensor (0 2 1 0)) (optional-tensor-ones 3)
+          (int64 1) (int64 -100))
+        "[weight]")
+       (check-generated-parity
+        (assq 'cross-entropy-loss manifest)
+        '((tensor 4 3) (int-tensor (0 2 1 0)) (optional-tensor-ones 3)
+          (int64 1) (int64 -100) (double 0.0))
+        "[weight]")
+       ;; reduction=0 (None) returns per-sample losses (shape (N,)) instead
+       ;; of a scalar — catches a mis-wired reduction enum as a shape change.
+       (check-generated-parity
+        (assq 'nll-loss manifest)
+        '((tensor 4 3) (int-tensor (0 2 1 0)) (optional-tensor #f)
+          (int64 0) (int64 -100))
+        "[none]")
+       (check-generated-parity
+        (assq 'cross-entropy-loss manifest)
+        '((tensor 4 3) (int-tensor (0 2 1 0)) (optional-tensor #f)
+          (int64 0) (int64 -100) (double 0.0))
+        "[none]")
+       ;; conv2d's recipe has bias present; cover the common bias=None path.
+       (check-generated-parity
+        (assq 'conv2d manifest)
+        '((tensor 1 1 5 5) (tensor 2 1 3 3) (optional-tensor #f)
+          (int-array (1 1)) (int-array (0 0)) (int-array (1 1)) (int64 1))
+        "[no-bias]")
+       ;; the dim-wise reductions only drive dim-present; cover the absent
+       ;; (full-reduction) path against PyTorch too.
+       (check-generated-parity
+        (assq 'sum-dim-intlist manifest)
+        '((tensor 2 3) (optional-int-array #f) (bool #f) (dtype #f))
+        "[full]")
+       (check-generated-parity
+        (assq 'mean-dim manifest)
+        '((tensor 2 3) (optional-int-array #f) (bool #f) (dtype #f))
+        "[full]")
+       ;; default recipes use keepdim=#f; cover keepdim=#t (kept dim) too.
+       (check-generated-parity
+        (assq 'sum-dim-intlist manifest)
+        '((tensor 2 3) (optional-int-array (1)) (bool #t) (dtype #f))
+        "[keepdim]")
+       (check-generated-parity
+        (assq 'mean-dim manifest)
+        '((tensor 2 3) (optional-int-array (1)) (bool #t) (dtype #f))
+        "[keepdim]"))]))

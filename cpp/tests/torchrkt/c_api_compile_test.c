@@ -1,6 +1,7 @@
 /* Compile-only: prove the public headers are valid C and every entry point has
  * C linkage. Nothing here runs; it is linked into the gtest binary as an object
  * so a C++-only leak in the headers fails the build. */
+#include <stdbool.h>
 #include <stdint.h>
 
 #include "torchrkt/c_api.h"
@@ -44,6 +45,45 @@ void torchrkt_c_api_compile_check(void) {
   tr_tensor* (*gen_reshape)(const tr_tensor*, const int64_t*, int64_t) =
       tr_gen_reshape;
   tr_tensor* (*gen_cat)(const tr_tensor* const*, int64_t, int64_t) = tr_gen_cat;
+  /* tranche-2 added four shapes: an int-status in-place op (mutable
+   * receiver), an optional-int-array with a `_has` presence flag, an
+   * optional-int64 (`int64_t n, bool n_has`), and an optional-tensor whose
+   * NULL encodes c10::nullopt (conv2d bias, loss weight). */
+  int (*gen_mul_)(tr_tensor*, const tr_tensor*) = tr_gen_mul__tensor;
+  /* the in-place family has four distinct arg shapes; pin each. */
+  int (*gen_add_)(tr_tensor*, const tr_tensor*, double) = tr_gen_add__tensor;
+  int (*gen_lerp_)(tr_tensor*, const tr_tensor*, const tr_tensor*) =
+      tr_gen_lerp__tensor;
+  int (*gen_addcmul_)(tr_tensor*, const tr_tensor*, const tr_tensor*, double) =
+      tr_gen_addcmul_;
+  tr_tensor* (*gen_sum_dim)(const tr_tensor*, const int64_t*, int64_t, bool,
+                            bool, int32_t) = tr_gen_sum_dim_intlist;
+  tr_tensor* (*gen_conv2d)(const tr_tensor*, const tr_tensor*, const tr_tensor*,
+                           const int64_t*, int64_t, const int64_t*, int64_t,
+                           const int64_t*, int64_t, int64_t) = tr_gen_conv2d;
+  tr_tensor* (*gen_avg_pool2d)(const tr_tensor*, const int64_t*, int64_t,
+                               const int64_t*, int64_t, const int64_t*, int64_t,
+                               bool, bool, int64_t, bool) = tr_gen_avg_pool2d;
+  /* one representative per new generated family header (compare.h, loss.h)
+   * and per distinct signature shape within them. */
+  tr_tensor* (*gen_eq_tensor)(const tr_tensor*, const tr_tensor*) =
+      tr_gen_eq_tensor;
+  tr_tensor* (*gen_eq_scalar)(const tr_tensor*, double) = tr_gen_eq_scalar;
+  tr_tensor* (*gen_nll_loss)(const tr_tensor*, const tr_tensor*,
+                             const tr_tensor*, int64_t, int64_t) =
+      tr_gen_nll_loss;
+  tr_tensor* (*gen_cross_entropy_loss)(const tr_tensor*, const tr_tensor*,
+                                       const tr_tensor*, int64_t, int64_t,
+                                       double) = tr_gen_cross_entropy_loss;
+  tr_tensor* (*gen_max_pool2d)(const tr_tensor*, const int64_t*, int64_t,
+                               const int64_t*, int64_t, const int64_t*, int64_t,
+                               const int64_t*, int64_t, bool) =
+      tr_gen_max_pool2d;
+  tr_tensor* (*gen_adaptive_avg_pool2d)(const tr_tensor*, const int64_t*,
+                                        int64_t) = tr_gen_adaptive_avg_pool2d;
+  /* narrow: tensor + three plain int64 scalars (a new shape). */
+  tr_tensor* (*gen_narrow)(const tr_tensor*, int64_t, int64_t, int64_t) =
+      tr_gen_narrow;
 
   (void)version;
   (void)last_error;
@@ -72,4 +112,18 @@ void torchrkt_c_api_compile_check(void) {
   (void)gen_matmul;
   (void)gen_reshape;
   (void)gen_cat;
+  (void)gen_mul_;
+  (void)gen_add_;
+  (void)gen_lerp_;
+  (void)gen_addcmul_;
+  (void)gen_sum_dim;
+  (void)gen_conv2d;
+  (void)gen_avg_pool2d;
+  (void)gen_adaptive_avg_pool2d;
+  (void)gen_eq_tensor;
+  (void)gen_eq_scalar;
+  (void)gen_nll_loss;
+  (void)gen_cross_entropy_loss;
+  (void)gen_max_pool2d;
+  (void)gen_narrow;
 }

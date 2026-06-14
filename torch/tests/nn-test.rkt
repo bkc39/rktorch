@@ -5,9 +5,12 @@
 ;; with PyTorch's nn.Linear lives in python-cross-test.
 
 (module+ test
-  (require (except-in racket/list argmax)
+  ;; conv2d/max-pool2d/flatten name the nn layers here; the colliding
+  ;; functional ops from the facade are excepted (the F.conv2d vs nn.Conv2d
+  ;; split), matching how a convnet model file imports them.
+  (require (except-in racket/list argmax flatten)
            rackunit
-           "../main.rkt"
+           (except-in "../main.rkt" conv2d max-pool2d flatten)
            "../nn.rkt")
 
   (define-module mlp (in hidden out)
@@ -81,6 +84,50 @@
     (for ([p (in-list (parameters l))])
       (check-equal? (tensor->list (grad p))
                     (map (lambda (_) 0.0) (tensor->list p)))))
+
+  (test-case "conv2d layer: param shapes, names, predicate, forward shape"
+    (manual-seed! 0)
+    (define c (conv2d 1 8 3 #:stride 1 #:padding 1))
+    (check-true (conv2d? c))
+    (check-true (module? c))
+    (define ps (parameters c))
+    (check-equal? (map tensor-shape ps) '((8 1 3 3) (8)))
+    (check-true (andmap requires-grad? ps))
+    (check-equal? (map car (named-parameters c)) '("weight" "bias"))
+    (check-equal? (tensor-shape (c (randn 4 1 28 28))) '(4 8 28 28)))
+
+  (test-case "conv2d non-square kernel + per-axis padding"
+    (manual-seed! 0)
+    (define c (conv2d 3 6 '(3 5) #:padding '(1 2)))
+    (check-equal? (tensor-shape (car (parameters c))) '(6 3 3 5))
+    (check-equal? (tensor-shape (c (randn 2 3 10 10))) '(2 6 10 10)))
+
+  (test-case "max-pool2d layer: stateless, default stride = kernel"
+    (define p (max-pool2d 2))
+    (check-true (max-pool2d? p))
+    (check-equal? (parameters p) '())
+    (check-equal? (tensor-shape (p (randn 4 8 28 28))) '(4 8 14 14)))
+
+  (test-case "flatten layer: collapses from start-dim, keeps batch"
+    (define f (flatten))
+    (check-true (flatten? f))
+    (check-equal? (parameters f) '())
+    (check-equal? (tensor-shape (f (randn 4 8 14 14))) '(4 1568)))
+
+  (test-case "conv -> pool -> flatten -> linear convnet composes"
+    (manual-seed! 0)
+    (define-module convnet ()
+      #:submodules ([c1 (conv2d 1 8 3 #:padding 1)]
+                    [pool (max-pool2d 2)]
+                    [flat (flatten)]
+                    [fc (linear (* 8 14 14) 10)])
+      #:forward (x)
+      (fc (flat (pool (relu (c1 x))))))
+    (define net (convnet))
+    (check-equal? (tensor-shape (net (randn 4 1 28 28))) '(4 10))
+    ;; stateless submodules contribute no params; order is depth-first
+    (check-equal? (map car (named-parameters net))
+                  '("c1.weight" "c1.bias" "fc.weight" "fc.bias")))
 
   (test-case "a few SGD steps reduce the training loss"
     (manual-seed! 0)

@@ -17,3 +17,47 @@ linalg dot
 # end to end (golden-tested against the hand-written twins like linalg).
 shape reshape
 shape cat
+shape narrow
+
+# --- tranche 2 (#3): the Conv-MNIST op closure ----------------------------
+
+# conv + pooling. conv2d exercises the optional-Tensor (bias) marshalling;
+# avg_pool2d the optional-int64 (divisor_override).
+conv conv2d
+conv max_pool2d
+conv avg_pool2d
+conv adaptive_avg_pool2d
+
+# loss primitives. weight is optional; targets are int64 (the to-dtype
+# bridge); reduction is the ATen enum int (Mean=1). Full dtype work is v3.
+loss nll_loss
+loss cross_entropy_loss
+
+# dim-wise reductions: int[1]? dim (optional-int-array) + ScalarType? dtype
+# (optional-dtype, always nullopt in float32-only v2).
+reduce sum.dim_IntList
+reduce mean.dim
+
+# Adam's in-place family: mutable receiver + integer status (the
+# tr_tensor_sub_ shape), emitted as a self->value.<op>_(...) method call.
+inplace add_.Tensor
+inplace mul_.Tensor
+inplace addcmul_
+inplace addcdiv_
+inplace lerp_.Tensor
+
+# Elementwise comparisons (tensor + scalar rhs). They return bool tensors;
+# the read path coerces to float32, so they surface as float32 masks (v3
+# does the int/bool dtype work).
+compare eq.Tensor
+compare eq.Scalar
+compare ne.Tensor
+compare ne.Scalar
+compare lt.Tensor
+compare lt.Scalar
+compare le.Tensor
+compare le.Scalar
+compare gt.Tensor
+compare gt.Scalar
+compare ge.Tensor
+compare ge.Scalar
