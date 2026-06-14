@@ -179,7 +179,11 @@ def classify(f: NativeFunction, shard: str) -> Op | Skip:
         base=base,
         c_name=_c_name(aten_name),
         racket_name=rkt_name,
-        python_name=base,
+        # the full overload path, so the parity battery calls the explicit
+        # torch.ops.aten.<base>.<overload> (e.g. sum.dim_IntList) instead of
+        # relying on arg-count overload disambiguation. For an in-place op
+        # this already carries the trailing-underscore base (add_.Tensor).
+        python_name=aten_name,
         params=tuple(params),
         shard=shard,
         inplace=inplace,

@@ -130,6 +130,9 @@
            (define-torch raw-name
              (_fun spec ... -> _int)
              #:c-id c-id)
+           ;; recv is the first formal, still live in this body, so returning
+           ;; it after the C call is GC-safe (the _fun call also pins it for
+           ;; the duration of the in-place mutation).
            (define (name arg ...)
              (check-ok (raw-name call-arg ...) 'name)
              recv)))]

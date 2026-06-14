@@ -35,6 +35,9 @@
          conv2d max-pool2d avg-pool2d adaptive-avg-pool2d
          ;; narrow needs no wrapper (no keyword defaulting, no dispatch); the
          ;; generated binding already has the right name and contract target.
+         ;; Like torch.narrow it returns a *view* aliasing the source storage
+         ;; (in-place writes to the result mutate the original); ATen
+         ;; refcounting keeps storage alive regardless of GC order.
          (rename-out [g:narrow narrow]))
 
 ;; ------------------------------------------------------------ flatten shim
@@ -50,9 +53,9 @@
      (define n (length shp))
      (cond
        [(zero? n)
-        ;; A 0-d tensor only has the trivial [-1,0] dim range; reject
-        ;; out-of-range args instead of silently flattening to [1], matching
-        ;; PyTorch's IndexError.
+        ;; A 0-d tensor admits only the trivial dim 0 (or -1, which PyTorch
+        ;; normalizes to 0); anything else is out of range (PyTorch raises
+        ;; IndexError) rather than a silent flatten to [1].
         (unless (and (memv start-dim '(0 -1)) (memv end-dim '(0 -1)))
           (error 'flatten
                  "invalid dim range [~a, ~a] for a 0-d tensor"

@@ -167,4 +167,13 @@
     (check-equal? (tensor-shape (flatten t 1)) '(2 12))
     (check-equal? (tensor-shape (flatten t 1 2)) '(2 12))
     ;; start > end after normalization is rejected, not silently mis-sliced.
-    (check-exn #rx"invalid dim range" (lambda () (flatten t 2 1)))))
+    (check-exn #rx"invalid dim range" (lambda () (flatten t 2 1))))
+
+  (test-case "narrow returns a view aliasing the source storage"
+    (define t (tensor '(1 2 3 4)))
+    (define v (narrow t 0 1 2))
+    (check-equal? (tensor->list v) '(2.0 3.0))
+    ;; an in-place write through the view mutates the original (torch.narrow
+    ;; semantics), proving the result aliases rather than copies.
+    (uniform! v 0.0 0.0)
+    (check-equal? (tensor->list t) '(1.0 0.0 0.0 4.0))))

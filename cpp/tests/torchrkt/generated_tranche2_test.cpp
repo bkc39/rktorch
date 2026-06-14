@@ -95,6 +95,43 @@ TEST(GeneratedTranche2, Conv2dShapeWithAndWithoutBias) {
   expect_error_from("tr_gen_conv2d");
 }
 
+// ---- pooling family: shape/value + null guards -------------------------
+
+TEST(GeneratedTranche2, PoolingFamilyGoldens) {
+  // 1x1x2x2 input {1,2,3,4}; a single 2x2 window.
+  const Handle in = make({1.0F, 2.0F, 3.0F, 4.0F}, {1, 1, 2, 2});
+  const std::vector<int64_t> k = {2, 2};
+  const std::vector<int64_t> z = {0, 0};
+  const std::vector<int64_t> one = {1, 1};
+
+  const Handle mp(tr_gen_max_pool2d(in.t, k.data(), 2, k.data(), 2, z.data(), 2,
+                                    one.data(), 2, /*ceil=*/false));
+  EXPECT_EQ(shape_of(mp.t), (std::vector<int64_t>{1, 1, 1, 1}));
+  EXPECT_EQ(data_of(mp.t), (std::vector<float>{4.0F}));  // max
+
+  const Handle ap(tr_gen_avg_pool2d(in.t, k.data(), 2, k.data(), 2, z.data(), 2,
+                                    /*ceil=*/false, /*count_include_pad=*/true,
+                                    /*divisor_override=*/0, /*has=*/false));
+  EXPECT_EQ(shape_of(ap.t), (std::vector<int64_t>{1, 1, 1, 1}));
+  EXPECT_NEAR(data_of(ap.t).at(0), 2.5F, 1e-5F);  // mean of 1,2,3,4
+
+  const Handle aap(tr_gen_adaptive_avg_pool2d(in.t, one.data(), 2));
+  EXPECT_EQ(shape_of(aap.t), (std::vector<int64_t>{1, 1, 1, 1}));
+  EXPECT_NEAR(data_of(aap.t).at(0), 2.5F, 1e-5F);  // global avg
+
+  // null self and null int-array both surface as NULL + error.
+  EXPECT_EQ(tr_gen_max_pool2d(nullptr, k.data(), 2, k.data(), 2, z.data(), 2,
+                              one.data(), 2, false),
+            nullptr);
+  expect_error_from("tr_gen_max_pool2d");
+  EXPECT_EQ(tr_gen_avg_pool2d(in.t, nullptr, 2, k.data(), 2, z.data(), 2, false,
+                              true, 0, false),
+            nullptr);
+  expect_error_from("tr_gen_avg_pool2d");
+  EXPECT_EQ(tr_gen_adaptive_avg_pool2d(nullptr, one.data(), 2), nullptr);
+  expect_error_from("tr_gen_adaptive_avg_pool2d");
+}
+
 // ---- in-place (int-status shape): mutate self, status, null guard ------
 
 TEST(GeneratedTranche2, InplaceMulMutatesAndStatus) {

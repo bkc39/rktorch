@@ -200,7 +200,9 @@
       [else (format "a~a" i)]))
 
   (define (generated-python-result py-name specs inplace?)
-    (define callee (if inplace? (string-append py-name "_") py-name))
+    ;; py-name is the full aten overload path (e.g. sum.dim_IntList,
+    ;; add_.Tensor) — call it explicitly, no overload guessing.
+    (define callee py-name)
     (define call-args
       (string-join (for/list ([s (in-list specs)] [i (in-naturals)])
                      (spec->python-call-arg s i))
