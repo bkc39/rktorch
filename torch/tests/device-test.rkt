@@ -39,6 +39,12 @@
   ;; raised GPU error (matmul/tensor->list can throw) still restores the
   ;; process-wide default to CPU and doesn't leak CUDA onto later tests.
   (when (cuda-available?)
+    (test-case "out-of-range cuda ordinal errors"
+      ;; the C++ set_default_device validates index < device_count(); this is
+      ;; the only place that rejection path has coverage on a real GPU host.
+      (check-exn exn:fail?
+                 (lambda () (set-default-device! (list 'cuda 9999))))
+      (check-equal? (default-device) 'cpu))
     (test-case "cuda round-trip"
       (check-true (> (cuda-device-count) 0))
       (dynamic-wind

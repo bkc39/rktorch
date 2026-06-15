@@ -67,15 +67,26 @@ void set_default_device(tr_device_type type, int64_t index) {
 
 extern "C" {
 
+// torch::cuda::is_available / device_count are not documented noexcept (a
+// driver/CUDA-init failure can throw), and these return result values, not the
+// int-status the op_call.hpp helpers expect, so they take a defensive catch-all
+// mirroring alloc_result rather than letting an exception cross extern "C".
 int tr_cuda_is_available(void) {
-  return torch::cuda::is_available() ? 1 : 0;
+  try {
+    return torch::cuda::is_available() ? 1 : 0;
+  } catch (...) {
+    return 0;
+  }
 }
 
 int tr_cuda_device_count(void) {
-  if (!torch::cuda::is_available()) {
+  try {
+    return torch::cuda::is_available()
+               ? static_cast<int>(torch::cuda::device_count())
+               : 0;
+  } catch (...) {
     return 0;
   }
-  return static_cast<int>(torch::cuda::device_count());
 }
 
 int tr_set_default_device(tr_device_type type, int64_t index) {

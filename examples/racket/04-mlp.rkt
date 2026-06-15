@@ -50,13 +50,15 @@ the RNG exactly like @tt{nn.Linear}, then the batch is sampled identically. (The
 GPU uses its own RNG, so CUDA runs train just as well but draw different values.)
 
 @bold{Restoring the default.} @racket[set-default-device!] is a process-wide
-side effect, so @racket[run-example] wraps the loop in @racket[dynamic-wind] to
-restore the CPU default on the way out (even if a step raises) — calling it must
-not silently move every later tensor onto the GPU. The device is also an
-optional argument so callers can pin it.
+side effect, so @racket[run-example] captures the prior default and wraps the
+loop in @racket[dynamic-wind] to restore it on the way out (even if a step
+raises) — calling it must neither leak the GPU onto later tensors nor clobber a
+default the caller had already chosen. The device is also an optional argument
+so callers can pin it.
 
 @chunk[<r04-run>
 (define (run-example [device (pick-device)])
+  (define saved (default-device))
   (dynamic-wind
     (lambda () (set-default-device! device))
     (lambda ()
@@ -73,7 +75,7 @@ optional argument so callers can pin it.
           (step! opt)
           (item loss)))
       (values losses net device))
-    (lambda () (set-default-device! 'cpu))))]
+    (lambda () (set-default-device! saved))))]
 
 @chunk[<*>
   <r04-require>
