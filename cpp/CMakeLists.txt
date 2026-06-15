@@ -33,6 +33,7 @@ target_sources(torchrkt
     src/torchrkt/autograd.cpp
     src/torchrkt/creation.cpp
     src/torchrkt/detail/error.cpp
+    src/torchrkt/device.cpp
     src/torchrkt/elementwise.cpp
     src/torchrkt/global.cpp
     src/torchrkt/linalg.cpp
@@ -86,6 +87,7 @@ if(BUILD_TESTING)
 
   add_executable(torchrkt_tests
     tests/torchrkt/autograd_test.cpp
+    tests/torchrkt/device_test.cpp
     tests/torchrkt/generated_golden_test.cpp
     tests/torchrkt/generated_tranche2_test.cpp
     tests/torchrkt/ops_test.cpp

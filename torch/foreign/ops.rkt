@@ -5,6 +5,13 @@
 
 (require (only-in ffi/vector f32vector->list list->s64vector make-f32vector)
          (only-in "error.rkt" check-handle check-ok)
+         (only-in "raw/device.rkt"
+                  tr-cuda-device-count/raw
+                  tr-cuda-is-available/raw
+                  tr-get-default-device/raw
+                  tr-set-default-device/raw
+                  tr-tensor-device/raw
+                  tr-tensor-to-device/raw)
          (only-in "raw/global.rkt" tr-last-error/raw tr-manual-seed/raw tr-version/raw)
          (only-in "raw/random.rkt" tr-rand/raw tr-randn/raw tr-tensor-uniform!/raw)
          (only-in "raw/tensor.rkt"
@@ -26,6 +33,12 @@
          uniform!
          item
          to-dtype
+         cuda-available?
+         cuda-device-count
+         set-default-device!
+         default-device
+         to-device
+         tensor-device
          tensor-numel
          tensor-shape
          tensor->vector
@@ -69,6 +82,49 @@
 ;; Copy converted to 'float32 / 'float64 / 'int64 (torch.Tensor.to).
 (define (to-dtype t dtype)
   (wrap-tensor (check-handle 'to-dtype (tr-tensor-to-dtype/raw t dtype))))
+
+;; A device is 'cpu, 'cuda (ordinal 0), or (list 'cuda ordinal). The FFI uses a
+;; separate type symbol + index; queries normalize back to 'cpu / (list 'cuda n).
+(define (device->type+index dev)
+  (cond
+    [(eq? dev 'cpu) (values 'cpu 0)]
+    [(eq? dev 'cuda) (values 'cuda 0)]
+    [(pair? dev) (values 'cuda (cadr dev))]
+    [else (error 'device "unsupported device: ~e" dev)]))
+
+(define (type+index->device type index)
+  (if (eq? type 'cpu) 'cpu (list 'cuda index)))
+
+;; #t when a CUDA device is present and usable (torch.cuda.is_available).
+(define (cuda-available?)
+  (= 1 (tr-cuda-is-available/raw)))
+
+;; Number of visible CUDA devices, 0 when CUDA is unavailable.
+(define (cuda-device-count)
+  (tr-cuda-device-count/raw))
+
+;; Set the device new tensors (randn/zeros/...) are created on. Errors if CUDA
+;; is requested but unavailable or the ordinal is out of range.
+(define (set-default-device! dev)
+  (define-values (type index) (device->type+index dev))
+  (check-ok (tr-set-default-device/raw type index) 'set-default-device!)
+  (void))
+
+(define (default-device)
+  (define-values (rc type index) (tr-get-default-device/raw))
+  (check-ok rc 'default-device)
+  (type+index->device type index))
+
+;; Copy a tensor onto `dev` (torch.Tensor.to(device)).
+(define (to-device t dev)
+  (define-values (type index) (device->type+index dev))
+  (wrap-tensor
+   (check-handle 'to-device (tr-tensor-to-device/raw t type index))))
+
+(define (tensor-device t)
+  (define-values (rc type index) (tr-tensor-device/raw t))
+  (check-ok rc 'tensor-device)
+  (type+index->device type index))
 
 (define (tensor-numel t)
   (define-values (rc n) (tr-tensor-numel/raw t))

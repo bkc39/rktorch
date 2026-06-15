@@ -5,14 +5,18 @@
 #include <limits>
 #include <vector>
 
+#include "torchrkt/detail/device.hpp"
 #include "torchrkt/detail/op_call.hpp"
 #include "torchrkt/detail/tensor_handle.hpp"
 
 namespace {
 
-// CPU float32, the only configuration v1 supports (matches tr_randn).
+// float32 on the process default device (CPU until tr_set_default_device flips
+// it to CUDA); tr_randn shares this convention via current_default_device.
 torch::TensorOptions default_options() {
-  return torch::TensorOptions().dtype(torch::kFloat32).device(torch::kCPU);
+  return torch::TensorOptions()
+      .dtype(torch::kFloat32)
+      .device(torchrkt::current_default_device());
 }
 
 bool bad_dims(const int64_t* dims, int64_t ndim) {

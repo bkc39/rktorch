@@ -6,14 +6,18 @@
 #include <string>
 #include <vector>
 
+#include "torchrkt/detail/device.hpp"
 #include "torchrkt/detail/error.hpp"
 #include "torchrkt/detail/op_call.hpp"
 #include "torchrkt/detail/tensor_handle.hpp"
 
 namespace {
 
+// float32 on the process default device; see creation.cpp / device.cpp.
 torch::TensorOptions default_options() {
-  return torch::TensorOptions().dtype(torch::kFloat32).device(torch::kCPU);
+  return torch::TensorOptions()
+      .dtype(torch::kFloat32)
+      .device(torchrkt::current_default_device());
 }
 
 }  // namespace

@@ -1,0 +1,113 @@
+#include <gtest/gtest.h>
+
+#include <cstdint>
+#include <vector>
+
+#include "torchrkt/c_api.h"
+
+// Device plumbing goldens. The CPU-only checks run everywhere (including the
+// nix sandbox, where no GPU is visible); the CUDA round-trip self-skips unless
+// a real device answers tr_cuda_is_available, so this same binary verifies the
+// GPU when run on the host.
+
+namespace {
+
+// RAII so a failed EXPECT can't leak handles past the test body.
+struct Handle {
+  tr_tensor* t;
+  explicit Handle(tr_tensor* p) : t(p) {
+    EXPECT_NE(t, nullptr) << tr_last_error();
+  }
+  Handle(const Handle&) = delete;
+  Handle& operator=(const Handle&) = delete;
+  ~Handle() {
+    tr_tensor_free(t);
+  }
+};
+
+std::vector<float> data_of(const tr_tensor* t) {
+  std::uint64_t numel = 0;
+  EXPECT_EQ(tr_tensor_copy_data(t, 0, nullptr, &numel), 2) << tr_last_error();
+  std::vector<float> out(numel);
+  EXPECT_EQ(tr_tensor_copy_data(t, numel, out.data(), &numel), 0)
+      << tr_last_error();
+  return out;
+}
+
+// Restore the process default to CPU on scope exit so a test that flips it to
+// CUDA cannot leak that onto the creation-based tests elsewhere in the binary.
+struct DefaultDeviceGuard {
+  DefaultDeviceGuard() = default;
+  DefaultDeviceGuard(const DefaultDeviceGuard&) = delete;
+  DefaultDeviceGuard& operator=(const DefaultDeviceGuard&) = delete;
+  ~DefaultDeviceGuard() {
+    tr_set_default_device(TR_DEVICE_CPU, 0);
+  }
+};
+
+TEST(TorchrktDevice, DefaultsToCpu) {
+  tr_device_type type = TR_DEVICE_CUDA;
+  int64_t index = -1;
+  EXPECT_EQ(tr_get_default_device(&type, &index), 0) << tr_last_error();
+  EXPECT_EQ(type, TR_DEVICE_CPU);
+  EXPECT_EQ(index, 0);
+}
+
+TEST(TorchrktDevice, NewTensorsLandOnDefaultDevice) {
+  const std::vector<int64_t> dims = {2, 2};
+  const Handle t(tr_zeros(dims.data(), 2));
+  tr_device_type type = TR_DEVICE_CUDA;
+  int64_t index = -1;
+  EXPECT_EQ(tr_tensor_device(t.t, &type, &index), 0) << tr_last_error();
+  EXPECT_EQ(type, TR_DEVICE_CPU);
+}
+
+TEST(TorchrktDevice, ToDeviceCpuIsIdentity) {
+  const std::vector<float> values = {1.0F, 2.0F, 3.0F};
+  const std::vector<int64_t> dims = {3};
+  const Handle src(tr_from_data(values.data(), values.size(), dims.data(), 1));
+  const Handle moved(tr_tensor_to_device(src.t, TR_DEVICE_CPU, 0));
+  EXPECT_EQ(data_of(moved.t), values);
+}
+
+TEST(TorchrktDevice, NullArgsReportStatus) {
+  EXPECT_EQ(tr_tensor_to_device(nullptr, TR_DEVICE_CPU, 0), nullptr);
+  EXPECT_EQ(tr_tensor_device(nullptr, nullptr, nullptr), 1);
+  EXPECT_EQ(tr_get_default_device(nullptr, nullptr), 1);
+}
+
+TEST(TorchrktDevice, SetCudaDefaultWhenUnavailableErrors) {
+  if (tr_cuda_is_available() != 0) {
+    GTEST_SKIP() << "CUDA present; the success path is CudaRoundTrip";
+  }
+  const DefaultDeviceGuard guard;
+  EXPECT_EQ(tr_set_default_device(TR_DEVICE_CUDA, 0), 1);
+  // A rejected set must leave the default untouched (still CPU).
+  tr_device_type type = TR_DEVICE_CUDA;
+  int64_t index = -1;
+  EXPECT_EQ(tr_get_default_device(&type, &index), 0) << tr_last_error();
+  EXPECT_EQ(type, TR_DEVICE_CPU);
+}
+
+TEST(TorchrktDevice, CudaRoundTrip) {
+  if (tr_cuda_is_available() == 0) {
+    GTEST_SKIP() << "no CUDA device visible";
+  }
+  EXPECT_GT(tr_cuda_device_count(), 0);
+  const DefaultDeviceGuard guard;
+  ASSERT_EQ(tr_set_default_device(TR_DEVICE_CUDA, 0), 0) << tr_last_error();
+
+  // A fresh constructor now lands on the GPU...
+  const std::vector<int64_t> dims = {2, 2};
+  const Handle on_gpu(tr_zeros(dims.data(), 2));
+  tr_device_type type = TR_DEVICE_CPU;
+  int64_t index = -1;
+  EXPECT_EQ(tr_tensor_device(on_gpu.t, &type, &index), 0) << tr_last_error();
+  EXPECT_EQ(type, TR_DEVICE_CUDA);
+
+  // ...and its data round-trips back through an explicit move to CPU.
+  const Handle back(tr_tensor_to_device(on_gpu.t, TR_DEVICE_CPU, 0));
+  EXPECT_EQ(data_of(back.t), (std::vector<float>{0.0F, 0.0F, 0.0F, 0.0F}));
+}
+
+}  // namespace
