@@ -16,7 +16,7 @@
       #   "bin"    -> pkgs.libtorch-bin: small prebuilt download, fast cached CI
       #               on both platforms; parity is tolerant (cross-test absorbs
       #               any patch-version drift vs the Python torch).
-      #   "python" -> pkgs.python3Packages.torch: the SAME libtorch the parity
+      #   "python" -> pkgs.python314Packages.torch: the SAME libtorch the parity
       #               script imports -> bit-exact randn, at the cost of a heavy
       #               (often uncached on darwin) from-source build.
       torchSource = "bin";
@@ -58,7 +58,7 @@
         };
 
       torchPackageFor = pkgs:
-        if torchSource == "python" then pkgs.python3Packages.torch
+        if torchSource == "python" then pkgs.python314Packages.torch
         # nixpkgs' libtorch-bin on darwin leaves a Homebrew install name for
         # OpenMP inside libtorch_cpu.dylib, so anything linking it aborts at
         # dyld load on machines without Homebrew's libomp (e.g. GitHub's macOS
@@ -258,7 +258,7 @@
           codegen = pkgs.writeShellApplication {
             name = "codegen";
             runtimeInputs = [
-              (pkgs.python3.withPackages (ps: [ ps.torch ]))
+              (pkgs.python314.withPackages (ps: [ ps.torch ]))
               pkgs.clang-tools
             ];
             text = ''
@@ -302,7 +302,7 @@
           # Python with the PyTorch wheel/lib, for interactive parity work
           # (`nix develop --command python3`) and the python-cross-test.  Cached
           # on both supported systems (a ~50 MiB fetch, not a source build).
-          pythonEnv = pkgs.python3.withPackages (ps: [ ps.torch ]);
+          pythonEnv = pkgs.python314.withPackages (ps: [ ps.torch ]);
 
           baseInputs = [
             pkgs.cmake
