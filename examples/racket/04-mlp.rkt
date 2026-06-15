@@ -49,23 +49,31 @@ update. On the CPU path, with the same seed this matches
 the RNG exactly like @tt{nn.Linear}, then the batch is sampled identically. (The
 GPU uses its own RNG, so CUDA runs train just as well but draw different values.)
 
+@bold{Restoring the default.} @racket[set-default-device!] is a process-wide
+side effect, so @racket[run-example] wraps the loop in @racket[dynamic-wind] to
+restore the CPU default on the way out (even if a step raises) — calling it must
+not silently move every later tensor onto the GPU. The device is also an
+optional argument so callers can pin it.
+
 @chunk[<r04-run>
-(define (run-example)
-  (define device (pick-device))
-  (set-default-device! device)
-  (manual-seed! 0)
-  (define net (mlp 4 8 2))
-  (define x (randn 16 4))
-  (define y (randn 16 2))
-  (define opt (sgd (parameters net) #:lr 0.1))
-  (define losses
-    (for/list ([_ (in-range 5)])
-      (zero-grads! opt)
-      (define loss (mse-loss (net x) y))
-      (backward! loss)
-      (step! opt)
-      (item loss)))
-  (values losses net device))]
+(define (run-example [device (pick-device)])
+  (dynamic-wind
+    (lambda () (set-default-device! device))
+    (lambda ()
+      (manual-seed! 0)
+      (define net (mlp 4 8 2))
+      (define x (randn 16 4))
+      (define y (randn 16 2))
+      (define opt (sgd (parameters net) #:lr 0.1))
+      (define losses
+        (for/list ([_ (in-range 5)])
+          (zero-grads! opt)
+          (define loss (mse-loss (net x) y))
+          (backward! loss)
+          (step! opt)
+          (item loss)))
+      (values losses net device))
+    (lambda () (set-default-device! 'cpu))))]
 
 @chunk[<*>
   <r04-require>

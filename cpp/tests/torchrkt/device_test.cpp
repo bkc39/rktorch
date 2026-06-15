@@ -108,6 +108,20 @@ TEST(TorchrktDevice, CudaRoundTrip) {
   // ...and its data round-trips back through an explicit move to CPU.
   const Handle back(tr_tensor_to_device(on_gpu.t, TR_DEVICE_CPU, 0));
   EXPECT_EQ(data_of(back.t), (std::vector<float>{0.0F, 0.0F, 0.0F, 0.0F}));
+
+  // tr_from_data takes the host-pointer path (from_blob on CPU, then .to the
+  // default device); exercise that move explicitly so a broken to() can't pass.
+  const std::vector<float> host_vals = {1.0F, 2.0F, 3.0F};
+  const std::vector<int64_t> src_dims = {3};
+  const Handle from_data_gpu(
+      tr_from_data(host_vals.data(), host_vals.size(), src_dims.data(), 1));
+  tr_device_type fd_type = TR_DEVICE_CPU;
+  int64_t fd_index = -1;
+  EXPECT_EQ(tr_tensor_device(from_data_gpu.t, &fd_type, &fd_index), 0)
+      << tr_last_error();
+  EXPECT_EQ(fd_type, TR_DEVICE_CUDA);
+  const Handle fd_back(tr_tensor_to_device(from_data_gpu.t, TR_DEVICE_CPU, 0));
+  EXPECT_EQ(data_of(fd_back.t), host_vals);
 }
 
 }  // namespace

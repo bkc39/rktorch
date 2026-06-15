@@ -40,7 +40,12 @@ torch::Device current_default_device() {
   const int64_t packed = g_default_device.load(std::memory_order_relaxed);
   const tr_device_type type =
       (packed & 1) != 0 ? TR_DEVICE_CUDA : TR_DEVICE_CPU;
-  return to_torch_device(type, packed >> 1);
+  // Unpack via an unsigned intermediate: right-shifting a negative signed
+  // int64_t is implementation-defined, and pack_device carries no guard of its
+  // own that the high bit is clear.
+  const int64_t index =
+      static_cast<int64_t>(static_cast<uint64_t>(packed) >> 1U);
+  return to_torch_device(type, index);
 }
 
 void set_default_device(tr_device_type type, int64_t index) {

@@ -35,20 +35,24 @@
       ;; the rejected set leaves the default untouched
       (check-equal? (default-device) 'cpu)))
 
-  ;; Only runs on a real CUDA host; a CPU build/box skips it.
+  ;; Only runs on a real CUDA host; a CPU build/box skips it. dynamic-wind so a
+  ;; raised GPU error (matmul/tensor->list can throw) still restores the
+  ;; process-wide default to CPU and doesn't leak CUDA onto later tests.
   (when (cuda-available?)
     (test-case "cuda round-trip"
       (check-true (> (cuda-device-count) 0))
-      (set-default-device! 'cuda)
-      (check-equal? (default-device) '(cuda 0))
-      (define g (zeros 2 2))
-      (check-equal? (tensor-device g) '(cuda 0))
-      (define back (to-device g 'cpu))
-      (check-equal? (tensor-device back) 'cpu)
-      (check-equal? (tensor->list back) '(0.0 0.0 0.0 0.0))
-      ;; a GPU matmul should match the CPU result
-      (define a (to-device (tensor '((1 2) (3 4))) 'cuda))
-      (define b (to-device (tensor '((5 6) (7 8))) 'cuda))
-      (check-equal? (tensor->list (to-device (matmul a b) 'cpu))
-                    '(19.0 22.0 43.0 50.0))
-      (set-default-device! 'cpu))))
+      (dynamic-wind
+        (lambda () (set-default-device! 'cuda))
+        (lambda ()
+          (check-equal? (default-device) '(cuda 0))
+          (define g (zeros 2 2))
+          (check-equal? (tensor-device g) '(cuda 0))
+          (define back (to-device g 'cpu))
+          (check-equal? (tensor-device back) 'cpu)
+          (check-equal? (tensor->list back) '(0.0 0.0 0.0 0.0))
+          ;; a GPU matmul should match the CPU result
+          (define a (to-device (tensor '((1 2) (3 4))) 'cuda))
+          (define b (to-device (tensor '((5 6) (7 8))) 'cuda))
+          (check-equal? (tensor->list (to-device (matmul a b) 'cpu))
+                        '(19.0 22.0 43.0 50.0)))
+        (lambda () (set-default-device! 'cpu))))))
