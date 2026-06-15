@@ -11,14 +11,17 @@
          "../racket/04-mlp.rkt")
 
 (module+ main
-  (define-values (losses net) (run-example))
+  (define-values (losses net device) (run-example))
+  (printf "device: ~a\n" device)
   (printf "losses: ~a\n" losses)
   (for ([nm+p (in-list (named-parameters net))])
     (printf "~a: ~a\n" (car nm+p) (tensor-shape (cdr nm+p)))))
 
 (module+ test
   (require rackunit)
-  (define-values (losses net) (run-example))
+  (define-values (losses net device) (run-example))
+  (check-not-false (memq device '(cpu cuda))
+                   (format "unexpected device: ~a" device))
   (check-equal? (length losses) 5)
   (check-true (< (last losses) (first losses))
               (format "losses did not decrease: ~a" losses))

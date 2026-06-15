@@ -32,13 +32,27 @@ clause and are callable in @racket[#:forward] like Python's
   #:forward (x)
   (fc2 (relu (fc1 x))))]
 
+@bold{The device.} Pick the accelerator the way PyTorch does
+(@tt{device = "cuda" if torch.cuda.is_available() else "cpu"}): set it as the
+process default and every tensor built afterwards — the module's parameters and
+the batch alike — is allocated there, so the whole loop runs on the GPU when one
+is present and on the CPU otherwise. @racket[run-example] returns the device it
+chose so callers can report it.
+
+@chunk[<r04-device>
+(define (pick-device)
+  (if (cuda-available?) 'cuda 'cpu))]
+
 @bold{The loop.} Each step: clear gradients, forward, MSE loss, backward,
-update. With the same seed, this matches @filepath{python/04_mlp.py}
-draw-for-draw: the two @racket[linear] inits consume the RNG exactly like
-@tt{nn.Linear}, then the batch is sampled identically.
+update. On the CPU path, with the same seed this matches
+@filepath{python/04_mlp.py} draw-for-draw: the two @racket[linear] inits consume
+the RNG exactly like @tt{nn.Linear}, then the batch is sampled identically. (The
+GPU uses its own RNG, so CUDA runs train just as well but draw different values.)
 
 @chunk[<r04-run>
 (define (run-example)
+  (define device (pick-device))
+  (set-default-device! device)
   (manual-seed! 0)
   (define net (mlp 4 8 2))
   (define x (randn 16 4))
@@ -51,10 +65,11 @@ draw-for-draw: the two @racket[linear] inits consume the RNG exactly like
       (backward! loss)
       (step! opt)
       (item loss)))
-  (values losses net))]
+  (values losses net device))]
 
 @chunk[<*>
   <r04-require>
   <r04-provide>
   <r04-model>
+  <r04-device>
   <r04-run>]
