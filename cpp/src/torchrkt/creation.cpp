@@ -93,9 +93,14 @@ tr_tensor* tr_from_data(const float* data, uint64_t numel, const int64_t* dims,
     if (expected != numel) {
       throw std::invalid_argument("numel does not match the product of dims");
     }
-    // from_blob borrows `data`; clone() copies it into tensor-owned storage.
-    return torch::from_blob(const_cast<float*>(data), shape, default_options())
-        .clone();
+    // `data` is host memory, so from_blob must wrap it as a CPU tensor (a CUDA
+    // default_options would make from_blob reject the host pointer); clone()
+    // copies it into tensor-owned storage, then to() honors the default device.
+    const torch::Tensor host =
+        torch::from_blob(const_cast<float*>(data), shape,
+                         torch::TensorOptions().dtype(torch::kFloat32))
+            .clone();
+    return host.to(torchrkt::current_default_device());
   });
 }
 
