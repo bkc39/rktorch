@@ -18,6 +18,7 @@
 
 (provide dims-rest/c
          index/c
+         device/c
          tensor-or-real/c
          pool-size/c
          pos-size/c
@@ -38,6 +39,12 @@
 (define index/c exact-integer?)
 
 (define tensor-or-real/c (or/c tensor? real?))
+
+;; A device argument: 'cpu, 'cuda (ordinal 0 shorthand), or (list 'cuda n).
+;; Queries (default-device/tensor-device) return the normalized 'cpu / (list
+;; 'cuda n) forms, both of which this also admits.
+(define device/c
+  (or/c 'cpu 'cuda (list/c 'cuda exact-nonnegative-integer?)))
 
 ;; Binary arithmetic: a real is welcome on either side, but at least one
 ;; argument must be a tensor — (add 1 2) is a caller error and should get

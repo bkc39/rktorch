@@ -5,14 +5,18 @@
 #include <limits>
 #include <vector>
 
+#include "torchrkt/detail/device.hpp"
 #include "torchrkt/detail/op_call.hpp"
 #include "torchrkt/detail/tensor_handle.hpp"
 
 namespace {
 
-// CPU float32, the only configuration v1 supports (matches tr_randn).
+// float32 on the process default device (CPU until tr_set_default_device flips
+// it to CUDA); tr_randn shares this convention via current_default_device.
 torch::TensorOptions default_options() {
-  return torch::TensorOptions().dtype(torch::kFloat32).device(torch::kCPU);
+  return torch::TensorOptions()
+      .dtype(torch::kFloat32)
+      .device(torchrkt::current_default_device());
 }
 
 bool bad_dims(const int64_t* dims, int64_t ndim) {
@@ -89,9 +93,14 @@ tr_tensor* tr_from_data(const float* data, uint64_t numel, const int64_t* dims,
     if (expected != numel) {
       throw std::invalid_argument("numel does not match the product of dims");
     }
-    // from_blob borrows `data`; clone() copies it into tensor-owned storage.
-    return torch::from_blob(const_cast<float*>(data), shape, default_options())
-        .clone();
+    // `data` is host memory, so from_blob must wrap it as a CPU tensor (a CUDA
+    // default_options would make from_blob reject the host pointer); clone()
+    // copies it into tensor-owned storage, then to() honors the default device.
+    const torch::Tensor host =
+        torch::from_blob(const_cast<float*>(data), shape,
+                         torch::TensorOptions().dtype(torch::kFloat32))
+            .clone();
+    return host.to(torchrkt::current_default_device());
   });
 }
 

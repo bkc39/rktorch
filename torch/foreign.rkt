@@ -144,6 +144,13 @@
   ;; out-marshalling
   [item (-> tensor? real?)]
   [to-dtype (-> tensor? (or/c 'float32 'float64 'int64) tensor?)]
+  ;; device placement (cuda)
+  [cuda-available? (-> boolean?)]
+  [cuda-device-count (-> exact-nonnegative-integer?)]
+  [set-default-device! (-> device/c void?)]
+  [default-device (-> device/c)]
+  [to-device (-> tensor? device/c tensor?)]
+  [tensor-device (-> tensor? device/c)]
   ;; autograd
   [requires-grad! (->* (tensor?) (boolean?) tensor?)]
   [requires-grad? (-> tensor? boolean?)]

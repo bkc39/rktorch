@@ -16,7 +16,7 @@
       #   "bin"    -> pkgs.libtorch-bin: small prebuilt download, fast cached CI
       #               on both platforms; parity is tolerant (cross-test absorbs
       #               any patch-version drift vs the Python torch).
-      #   "python" -> pkgs.python3Packages.torch: the SAME libtorch the parity
+      #   "python" -> pkgs.python314Packages.torch: the SAME libtorch the parity
       #               script imports -> bit-exact randn, at the cost of a heavy
       #               (often uncached on darwin) from-source build.
       torchSource = "bin";
@@ -58,7 +58,7 @@
         };
 
       torchPackageFor = pkgs:
-        if torchSource == "python" then pkgs.python3Packages.torch
+        if torchSource == "python" then pkgs.python314Packages.torch
         # nixpkgs' libtorch-bin on darwin leaves a Homebrew install name for
         # OpenMP inside libtorch_cpu.dylib, so anything linking it aborts at
         # dyld load on machines without Homebrew's libomp (e.g. GitHub's macOS
@@ -86,6 +86,17 @@
       packages = forAllSystems (system:
         let
           pkgs = import nixpkgs { inherit system; };
+          # A second instance with the unfree CUDA stack enabled, used only by
+          # the cpp-cuda output. cudaSupport flips libtorch-bin to the cu130
+          # "shared-with-deps" download (a bundled binary, not a from-source
+          # build), so this stays a download + patchelf, not a heavy compile.
+          pkgsCuda = import nixpkgs {
+            inherit system;
+            config = {
+              allowUnfree = true;
+              cudaSupport = true;
+            };
+          };
           torch = torchPackageFor pkgs;
           racket-deps = racketDepsFor pkgs;
 
@@ -96,24 +107,46 @@
             "-DCMAKE_CXX_STANDARD=20"
           ];
 
-          cpp = pkgs.stdenv.mkDerivation {
-            pname = "torchrkt-cpp";
-            inherit version;
-            src = ./cpp;
-            nativeBuildInputs = cppNativeInputs;
-            buildInputs = cppCommonInputs;
-            cmakeFlags = cppCmakeFlags;
-            doCheck = true;
-            checkPhase = ''
-              runHook preCheck
-              # Diagnostic: if the libtorch-linked binary can't start on this
-              # host (GitHub's virtualized macOS runners abort at startup),
-              # surface the dyld/runtime error that gtest discovery swallows.
-              ./torchrkt_tests --gtest_list_tests \
-                || echo "torchrkt_tests cannot run here (exit $?)"
-              ctest --output-on-failure
-              runHook postCheck
-            '';
+          # Build the C++ shim against a given package set's libtorch. `cpp`
+          # links the CPU libtorch-bin and runs its gtests in the sandbox;
+          # `cpp-cuda` links the CUDA libtorch from pkgsCuda with checks off —
+          # its gtest binary needs the host NVIDIA driver (libcuda.so.1), absent
+          # in the build sandbox, so GPU verification runs on the host instead
+          # (the device tests self-skip the CUDA cases without a real device).
+          # The CUDA libtorch's Caffe2 CMake config refuses to configure unless
+          # it can find a CUDA toolkit (even though the runtime libs are bundled
+          # in the cu130 download), so the cuda variant adds the matching
+          # cudaPackages_13 toolkit and points legacy/modern FindCUDA at it.
+          mkCpp = { p, doCheck ? true, cuda ? false }:
+            let cudaTk = p.cudaPackages_13.cudatoolkit;
+            in p.stdenv.mkDerivation {
+              pname = "torchrkt-cpp";
+              inherit version doCheck;
+              src = ./cpp;
+              nativeBuildInputs = [ p.cmake p.clang-tools p.ninja ]
+                ++ p.lib.optional cuda p.cudaPackages_13.cuda_nvcc;
+              buildInputs = [ (torchPackageFor p) p.gtest ]
+                ++ p.lib.optional cuda cudaTk;
+              cmakeFlags = cppCmakeFlags ++ p.lib.optionals cuda [
+                "-DCUDA_TOOLKIT_ROOT_DIR=${cudaTk}"
+                "-DCUDAToolkit_ROOT=${cudaTk}"
+              ];
+              checkPhase = ''
+                runHook preCheck
+                # Diagnostic: if the libtorch-linked binary can't start on this
+                # host (GitHub's virtualized macOS runners abort at startup),
+                # surface the dyld/runtime error that gtest discovery swallows.
+                ./torchrkt_tests --gtest_list_tests \
+                  || echo "torchrkt_tests cannot run here (exit $?)"
+                ctest --output-on-failure
+                runHook postCheck
+              '';
+            };
+          cpp = mkCpp { p = pkgs; };
+          cpp-cuda = mkCpp {
+            p = pkgsCuda;
+            doCheck = false;
+            cuda = true;
           };
 
           cpp-format = pkgs.stdenv.mkDerivation {
@@ -258,7 +291,7 @@
           codegen = pkgs.writeShellApplication {
             name = "codegen";
             runtimeInputs = [
-              (pkgs.python3.withPackages (ps: [ ps.torch ]))
+              (pkgs.python314.withPackages (ps: [ ps.torch ]))
               pkgs.clang-tools
             ];
             text = ''
@@ -272,8 +305,8 @@
         in
         {
           default = racket;
-          inherit cpp cpp-format cpp-line-count cpp-tidy racket racket-deps
-            codegen copy-native-libs;
+          inherit cpp cpp-cuda cpp-format cpp-line-count cpp-tidy racket
+            racket-deps codegen copy-native-libs;
         });
 
       apps = forAllSystems (system: {
@@ -298,11 +331,12 @@
           torch = torchPackageFor pkgs;
           racket-deps = racketDepsFor pkgs;
           cpp = self.packages.${system}.cpp;
+          cpp-cuda = self.packages.${system}.cpp-cuda;
 
           # Python with the PyTorch wheel/lib, for interactive parity work
           # (`nix develop --command python3`) and the python-cross-test.  Cached
           # on both supported systems (a ~50 MiB fetch, not a source build).
-          pythonEnv = pkgs.python3.withPackages (ps: [ ps.torch ]);
+          pythonEnv = pkgs.python314.withPackages (ps: [ ps.torch ]);
 
           baseInputs = [
             pkgs.cmake
@@ -337,6 +371,37 @@
             fi
             export PATH="$(racket -e '(require setup/dirs)(display (path->string (find-user-console-bin-dir)))'):$PATH"
           '';
+
+          # The CUDA verification shell: after the normal provisioning, swap the
+          # CPU native lib for the CUDA-linked one and expose the host NVIDIA
+          # driver. The nix libtorch's autoAddDriverRunpath points at
+          # /run/opengl-driver/lib (a NixOS path absent on this Ubuntu host), so
+          # we put just libcuda.so.1 / libnvidia-ml.so.1 on LD_LIBRARY_PATH —
+          # only the driver libs, so nix's own libs (glibc, libstdc++) are not
+          # shadowed by the system copies. Run:
+          #   nix develop .#cuda --command raco test torch/tests/device-test.rkt
+          cudaHook = ''
+            echo "Staging CUDA libtorchrkt + host NVIDIA driver..."
+            mkdir -p ./torch/native-libs
+            cp -f --no-preserve=mode ${cpp-cuda}/lib/libtorchrkt.* \
+              ./torch/native-libs/
+            _drv_farm="$PWD/.cuda-driver"
+            rm -rf "$_drv_farm"; mkdir -p "$_drv_farm"
+            for _l in libcuda.so.1 libnvidia-ml.so.1; do
+              # Match the lib name as a fixed string (its dots are ERE
+              # metacharacters), then take the path field of that ldconfig line.
+              _p=$(/sbin/ldconfig -p 2>/dev/null \
+                | grep -F "$_l" | grep -oE '/[^ ]+' | head -1)
+              if [ -n "$_p" ]; then
+                ln -sf "$_p" "$_drv_farm/$_l"
+              else
+                echo "WARNING: $_l not found via ldconfig; CUDA calls may fail" >&2
+              fi
+            done
+            export LD_LIBRARY_PATH="$_drv_farm''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+            echo "CUDA shell ready. Verify:"
+            echo "  raco test torch/tests/device-test.rkt"
+          '';
         in
         {
           # Full interactive shell. `nix develop` (or `nix develop --command
@@ -354,6 +419,15 @@
           ci = pkgs.mkShell {
             buildInputs = baseInputs;
             shellHook = provisionRacket;
+          };
+
+          # GPU verification shell: provisions Racket as usual, then stages the
+          # CUDA-linked native lib and the host driver (see cudaHook). The
+          # device tests' CUDA cases run for real here on a machine with an
+          # NVIDIA GPU; on a CPU-only box they self-skip.
+          cuda = pkgs.mkShell {
+            buildInputs = baseInputs;
+            shellHook = provisionRacket + cudaHook;
           };
         });
     };
