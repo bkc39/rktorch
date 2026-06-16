@@ -80,6 +80,20 @@ TEST(TorchrktDevice, NullArgsReportStatus) {
   EXPECT_EQ(tr_get_default_device(nullptr, nullptr), 1);
 }
 
+TEST(TorchrktDevice, SetCpuNonzeroIndexErrors) {
+  const DefaultDeviceGuard guard;
+  // CPU has no ordinal: a non-zero index is rejected (rc=1 + tr_last_error).
+  EXPECT_EQ(tr_set_default_device(TR_DEVICE_CPU, 1), 1);
+  EXPECT_STRNE(tr_last_error(), "")
+      << "expected an error for a non-zero CPU index";
+  // The rejected set leaves the default untouched.
+  tr_device_type type = TR_DEVICE_CUDA;
+  int64_t index = -1;
+  EXPECT_EQ(tr_get_default_device(&type, &index), 0) << tr_last_error();
+  EXPECT_EQ(type, TR_DEVICE_CPU);
+  EXPECT_EQ(index, 0);
+}
+
 TEST(TorchrktDevice, SetCudaDefaultWhenUnavailableErrors) {
   if (tr_cuda_is_available() != 0) {
     GTEST_SKIP() << "CUDA present; the success path is CudaRoundTrip";

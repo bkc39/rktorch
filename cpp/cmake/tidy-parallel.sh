@@ -7,7 +7,7 @@
 # shell. clang-tidy is single-threaded per file, so N processes ≈ N cores.
 #
 # Usage: tidy-parallel.sh <clang-tidy> <build-dir> <file>...
-set -uo pipefail
+set -euo pipefail
 
 clang_tidy="$1"
 build="$2"

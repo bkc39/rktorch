@@ -17,11 +17,14 @@ typedef enum tr_device_type {
   TR_DEVICE_CUDA = 1
 } tr_device_type;
 
-/* 1 if a CUDA device is present and usable, 0 otherwise. Never errors (a
- * CPU-only libtorch links this and simply reports 0). */
+/* 1 if a CUDA device is present and usable, 0 otherwise. Never returns a status
+ * error (a CPU-only libtorch links this and reports 0); but a 0 from a CUDA
+ * driver/init failure (rare) also records a message in tr_last_error, so a
+ * caller that wants to distinguish "no CUDA" from "CUDA broke" can check it. */
 int tr_cuda_is_available(void);
 
-/* Number of visible CUDA devices, 0 when CUDA is unavailable. Never errors. */
+/* Number of visible CUDA devices, 0 when CUDA is unavailable. Same
+ * tr_last_error behaviour as tr_cuda_is_available on a driver/init failure. */
 int tr_cuda_device_count(void);
 
 /* The device the new-tensor constructors (tr_zeros/tr_randn/...) place results

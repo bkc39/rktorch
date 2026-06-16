@@ -95,11 +95,14 @@
 (define (type+index->device type index)
   (if (eq? type 'cpu) 'cpu (list 'cuda index)))
 
-;; #t when a CUDA device is present and usable (torch.cuda.is_available).
+;; #t when a CUDA device is present and usable (torch.cuda.is_available). #f
+;; means no CUDA *or* a rare driver/init failure; the C side records the latter
+;; in tr_last_error, but this predicate doesn't surface it (it stays a boolean).
 (define (cuda-available?)
   (= 1 (tr-cuda-is-available/raw)))
 
-;; Number of visible CUDA devices, 0 when CUDA is unavailable.
+;; Number of visible CUDA devices, 0 when CUDA is unavailable (see
+;; cuda-available? re: a driver-failure 0).
 (define (cuda-device-count)
   (tr-cuda-device-count/raw))
 
