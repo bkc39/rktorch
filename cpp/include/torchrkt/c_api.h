@@ -2,6 +2,7 @@
 
 #include "torchrkt/c_api/autograd.h"
 #include "torchrkt/c_api/creation.h"
+#include "torchrkt/c_api/device.h"
 #include "torchrkt/c_api/elementwise.h"
 #include "torchrkt/c_api/generated.h"
 #include "torchrkt/c_api/global.h"

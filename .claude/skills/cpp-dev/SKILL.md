@@ -83,8 +83,21 @@ codes, never aborts). Watch for C++ keyword collisions in test code
 
 ### 4. clang-tidy
 
+clang-tidy re-parses the whole ATen header tree per TU (~50s/file), so for the
+inner loop lint **only the files you changed**:
+
+```bash
+nix develop --command scripts/tidy-changed
+```
+
+It lints the working-tree + staged `cpp/src/*.cpp` (one file ≈ one full sweep
+divided by ~18). Before pushing, run the **full** sweep (what CI's `cpp-tidy`
+gate runs — it fans the files out across cores via `cmake/tidy-parallel.sh`,
+sized from `$NIX_BUILD_CORES`):
+
 ```bash
 nix develop --command bash -c 'cmake --build cpp/build --target tidy'
+# or the exact CI derivation: nix build .#cpp-tidy
 ```
 
 Checks enabled: `bugprone-*`, `performance-*`, `readability-*` (cognitive

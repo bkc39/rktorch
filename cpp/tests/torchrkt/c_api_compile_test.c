@@ -84,6 +84,16 @@ void torchrkt_c_api_compile_check(void) {
   /* narrow: tensor + three plain int64 scalars (a new shape). */
   tr_tensor* (*gen_narrow)(const tr_tensor*, int64_t, int64_t, int64_t) =
       tr_gen_narrow;
+  /* device family (device.h): the cuda queries, the default-device pair, and
+   * the per-tensor to/from device functions. */
+  int (*cuda_available)(void) = tr_cuda_is_available;
+  int (*cuda_count)(void) = tr_cuda_device_count;
+  int (*set_default_device)(tr_device_type, int64_t) = tr_set_default_device;
+  int (*get_default_device)(tr_device_type*, int64_t*) = tr_get_default_device;
+  tr_tensor* (*to_device)(const tr_tensor*, tr_device_type, int64_t) =
+      tr_tensor_to_device;
+  int (*tensor_device)(const tr_tensor*, tr_device_type*, int64_t*) =
+      tr_tensor_device;
 
   (void)version;
   (void)last_error;
@@ -126,4 +136,10 @@ void torchrkt_c_api_compile_check(void) {
   (void)gen_cross_entropy_loss;
   (void)gen_max_pool2d;
   (void)gen_narrow;
+  (void)cuda_available;
+  (void)cuda_count;
+  (void)set_default_device;
+  (void)get_default_device;
+  (void)to_device;
+  (void)tensor_device;
 }

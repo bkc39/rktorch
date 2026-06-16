@@ -11,6 +11,14 @@
 // Boundary helpers shared by every op translation unit. Each op body reduces
 // to a null-argument guard plus one of these wrappers, so the
 // exception-to-status contract lives in exactly one place.
+//
+// These cover the two common extern "C" shapes: a tensor return (alloc_result)
+// and an integer status (status_call). A handful of functions return a plain
+// scalar *value* instead — e.g. the CUDA queries in device.cpp
+// (tr_cuda_is_available / tr_cuda_device_count) return an int count, not a
+// status — so they hand-roll try/catch (catch + set_error + return a benign
+// value). That deviation from "always use these helpers" is intentional, not an
+// oversight: the value-returning shape doesn't fit either wrapper.
 
 namespace torchrkt {
 
