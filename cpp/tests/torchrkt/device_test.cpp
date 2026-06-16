@@ -25,6 +25,9 @@ struct Handle {
   }
 };
 
+// Requires a CPU-resident tensor: tr_tensor_copy_data reaches
+// data_ptr<float>(), which is UB on CUDA storage. CUDA callers must
+// tr_tensor_to_device(..., CPU) first (as CudaRoundTrip does).
 std::vector<float> data_of(const tr_tensor* t) {
   std::uint64_t numel = 0;
   EXPECT_EQ(tr_tensor_copy_data(t, 0, nullptr, &numel), 2) << tr_last_error();

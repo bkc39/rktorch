@@ -38,17 +38,22 @@
       ;; the rejected set leaves the default untouched
       (check-equal? (default-device) 'cpu)))
 
-  ;; Only runs on a real CUDA host; a CPU build/box skips it. dynamic-wind so a
-  ;; raised GPU error (matmul/tensor->list can throw) still restores the
-  ;; process-wide default to CPU and doesn't leak CUDA onto later tests.
-  (when (cuda-available?)
-    (test-case "out-of-range cuda ordinal errors"
-      ;; the C++ set_default_device validates index < device_count(); this is
-      ;; the only place that rejection path has coverage on a real GPU host.
+  ;; The CUDA cases are always registered (so the test count is hardware-stable
+  ;; and the cases are visible in the run output); their bodies are guarded by
+  ;; `when` and only execute on a real CUDA host, exactly like the CPU-gated
+  ;; "requesting an unavailable cuda device errors" case above.
+  (test-case "out-of-range cuda ordinal errors"
+    ;; the C++ set_default_device validates index < device_count(); this is the
+    ;; only place that rejection path has coverage on a real GPU host.
+    (when (cuda-available?)
       (check-exn exn:fail?
                  (lambda () (set-default-device! (list 'cuda 9999))))
-      (check-equal? (default-device) 'cpu))
-    (test-case "cuda round-trip"
+      (check-equal? (default-device) 'cpu)))
+
+  (test-case "cuda round-trip"
+    ;; dynamic-wind so a raised GPU error (matmul/tensor->list can throw) still
+    ;; restores the process default to CPU and doesn't leak CUDA onto later tests.
+    (when (cuda-available?)
       (check-true (> (cuda-device-count) 0))
       (dynamic-wind
         (lambda () (set-default-device! 'cuda))

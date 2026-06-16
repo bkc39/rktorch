@@ -144,6 +144,12 @@ int tr_tensor_device(const tr_tensor* t, tr_device_type* out_type,
   }
   return torchrkt::status_call("tr_tensor_device", [&] {
     const torch::Device d = t->value.device();
+    // Reject device kinds outside the C ABI (e.g. a future MPS/XPU tensor, see
+    // #13) rather than silently labelling them CPU. (tr_get_default_device
+    // needs no such guard: current_default_device only ever yields CPU/CUDA.)
+    if (!d.is_cpu() && !d.is_cuda()) {
+      throw std::invalid_argument("tensor is on an unsupported device kind");
+    }
     *out_type = d.is_cuda() ? TR_DEVICE_CUDA : TR_DEVICE_CPU;
     *out_index = d.has_index() ? static_cast<int64_t>(d.index()) : 0;
   });
