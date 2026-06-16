@@ -9,6 +9,9 @@
            "../main.rkt")
 
   (test-case "default device is cpu"
+    ;; reset defensively (mirrors the C++ DefaultsToCpu): if a later CUDA case
+    ;; ever leaks the default, this case shouldn't depend on source order.
+    (set-default-device! 'cpu)
     (check-equal? (default-device) 'cpu))
 
   (test-case "cuda queries have sane types"
