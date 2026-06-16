@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+#
+# Fast clang-tidy for the edit->tidy inner loop: lint only the C++ sources
+# changed in the working tree (+ staged), not all of cpp/src. clang-tidy
+# re-parses the whole ATen header tree per file (~50s), so linting just the
+# files you touched is the win here.
+#
+# CI and the pre-push gate still run the full sweep (`nix flake check`, which
+# builds the `cpp-tidy` derivation / the cmake `tidy` target over every TU,
+# fanned out across cores).
+set -euo pipefail
+
+cd "$(git rev-parse --show-toplevel)"
+
+build=cpp/build
+if [ ! -f "$build/compile_commands.json" ]; then
+  echo "tidy-changed: configuring $build ..."
+  cmake -S cpp -B "$build" -G Ninja -DBUILD_TESTING=ON >/dev/null
+fi
+
+# Changed C++ TUs under cpp/src: unstaged + staged, added/copied/modified/
+# renamed, still present on disk. git pathspecs are directory-scoped; filter to
+# .cpp here (this naturally includes regenerated generated/ shards).
+mapfile -t files < <(
+  {
+    git diff --name-only --diff-filter=ACMR -- cpp/src
+    git diff --cached --name-only --diff-filter=ACMR -- cpp/src
+  } | grep -E '\.cpp$' | sort -u
+)
+existing=()
+for f in "${files[@]}"; do
+  [ -f "$f" ] && existing+=("$f")
+done
+
+if [ "${#existing[@]}" -eq 0 ]; then
+  echo "tidy-changed: no changed cpp/src/*.cpp files"
+  exit 0
+fi
+
+echo "tidy-changed: linting ${#existing[@]} file(s):"
+printf '  %s\n' "${existing[@]}"
+exec clang-tidy --quiet -p "$build" --extra-arg=-w "${existing[@]}"
