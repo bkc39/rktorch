@@ -31,13 +31,19 @@
          named-parameters
          buffers
          forward
+         module-set-training! ;; noqa
+         train!
+         eval!
          define-module)
 
 (define-generics module
   (module-forward module . inputs)
   (module-parameters module)
   (module-named-parameters module prefix)
-  (module-buffers module))
+  (module-buffers module)
+  ;; set training mode, recursing through submodules (mode-sensitive leaves
+  ;; like dropout hold the flag; structural modules just recurse).
+  (module-set-training! module training?))
 
 ;; Trainable tensors, depth-first: own params first, then each submodule's,
 ;; in declaration order — PyTorch's parameters() order, which seeded-init
@@ -55,6 +61,16 @@
 
 (define (forward m . inputs)
   (apply module-forward m inputs))
+
+;; torch.nn.Module.train()/eval(): flip the whole tree's mode, return the
+;; model for chaining.
+(define (train! m)
+  (module-set-training! m #t)
+  m)
+
+(define (eval! m)
+  (module-set-training! m #f)
+  m)
 
 (begin-for-syntax
   (define-syntax-class binding
@@ -109,6 +125,7 @@
                [(define/generic recur-parameters module-parameters)
                 (define/generic recur-named module-named-parameters)
                 (define/generic recur-buffers module-buffers)
+                (define/generic recur-set-training! module-set-training!)
                 ;; The generic is declared (module-forward module . inputs),
                 ;; so the method must accept a rest too; the inner lambda
                 ;; restores the declared #:forward arity (and its arity
@@ -131,7 +148,12 @@
                           ...))
                 (define (module-buffers self)
                   (append (list (b-acc self) ...)
-                          (recur-buffers (sm-acc self)) ...))])
+                          (recur-buffers (sm-acc self)) ...))
+                ;; struct modules hold no mode-sensitive state; just recurse
+                ;; into submodules (a no-op when there are none).
+                (define (module-set-training! self training?)
+                  (recur-set-training! (sm-acc self) training?) ...
+                  (void))])
              (define name? sid?)
              (define (name ctor-arg ...)
                (let* ([p (requires-grad! p-init)] ...

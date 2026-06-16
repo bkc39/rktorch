@@ -8,5 +8,6 @@
 #include "torchrkt/c_api/generated/inplace.h"
 #include "torchrkt/c_api/generated/linalg.h"
 #include "torchrkt/c_api/generated/loss.h"
+#include "torchrkt/c_api/generated/nn.h"
 #include "torchrkt/c_api/generated/reduce.h"
 #include "torchrkt/c_api/generated/shape.h"

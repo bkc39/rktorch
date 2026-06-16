@@ -9,6 +9,7 @@
   ;; functional ops from the facade are excepted (the F.conv2d vs nn.Conv2d
   ;; split), matching how a convnet model file imports them.
   (require (except-in racket/list argmax flatten)
+           (only-in racket/file make-temporary-file)
            rackunit
            (except-in "../main.rkt" conv2d max-pool2d flatten)
            "../nn.rkt")
@@ -143,4 +144,73 @@
         (step! opt)
         (item loss)))
     (check-true (< (last losses) (first losses))
-                (format "losses did not decrease: ~a" losses))))
+                (format "losses did not decrease: ~a" losses)))
+
+  (test-case "cross-entropy: known value, integer targets coerced to int64"
+    (define logits (tensor '((-0.5 -1.0 -2.0) (-2.0 -0.2 -1.5))))
+    (define targets (tensor '(0 1)))
+    ;; = nll_loss(log_softmax(logits), targets), mean reduction
+    (check-= (item (cross-entropy logits targets)) 0.48362 1e-4))
+
+  (test-case "a few Adam steps reduce the training loss"
+    (manual-seed! 0)
+    (define net (mlp 4 8 2))
+    (define opt (adam (parameters net) #:lr 0.05))
+    (define x (randn 16 4))
+    (define y (randn 16 2))
+    (define losses
+      (for/list ([_ (in-range 5)])
+        (zero-grads! opt)
+        (define loss (mse-loss (net x) y))
+        (backward! loss)
+        (step! opt)
+        (item loss)))
+    (check-true (< (last losses) (first losses))
+                (format "Adam losses did not decrease: ~a" losses)))
+
+  (test-case "dropout: train drops/scales, eval is identity, mode recurses"
+    (manual-seed! 0)
+    (define d (dropout #:p 0.5))
+    (define x (ones 100))
+    ;; training (default): each entry is 0 or 2.0 (kept and scaled by 1/(1-p))
+    (define tr (tensor->list (d x)))
+    (check-true (andmap (lambda (v) (or (= v 0.0) (= v 2.0))) tr))
+    (check-true (> (length (filter zero? tr)) 0) "nothing was dropped")
+    ;; eval: identity
+    (eval! d)
+    (check-equal? (tensor->list (d x)) (tensor->list x))
+    ;; train! flips back
+    (train! d)
+    (check-true (andmap (lambda (v) (or (= v 0.0) (= v 2.0)))
+                        (tensor->list (d x)))))
+
+  (test-case "dropout inside a model: eval! recurses through submodules"
+    (define net (sequential (linear 4 4) (dropout #:p 0.9)))
+    (eval! net)
+    ;; with dropout off, repeated forwards on the same input agree
+    (define x (randn 2 4))
+    (check-equal? (tensor->list (net x)) (tensor->list (net x))))
+
+  (test-case "sequential: forward, indexed dotted names, param order"
+    (manual-seed! 0)
+    (define net (sequential (linear 4 8) (dropout #:p 0.5) (linear 8 2)))
+    (check-equal? (tensor-shape (net (randn 3 4))) '(3 2))
+    (check-equal? (map car (named-parameters net))
+                  '("0.weight" "0.bias" "2.weight" "2.bias"))
+    (check-equal? (length (parameters net)) 4)
+    (check-true (sequential? net)))
+
+  (test-case "safetensors state-dict round-trips bit-exactly"
+    (manual-seed! 0)
+    (define net (sequential (linear 4 8) (dropout #:p 0.3) (linear 8 2)))
+    (define path (make-temporary-file "rkt-st-~a.safetensors"))
+    (save-state! net path)
+    ;; a differently-seeded model has different params...
+    (manual-seed! 99)
+    (define net2 (sequential (linear 4 8) (dropout #:p 0.3) (linear 8 2)))
+    (load-state! net2 path)
+    ;; ...and after load matches the saved model parameter-for-parameter.
+    (for ([a (in-list (state-dict net))] [b (in-list (state-dict net2))])
+      (check-equal? (car a) (car b))
+      (check-equal? (tensor->list (cdr a)) (tensor->list (cdr b))))
+    (delete-file path)))

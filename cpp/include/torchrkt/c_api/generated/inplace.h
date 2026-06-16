@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include <stdbool.h>
+
 #include "torchrkt/c_api/tensor.h"
 
 #ifdef __cplusplus
@@ -18,6 +20,7 @@ int tr_gen_addcdiv_(tr_tensor* self, const tr_tensor* tensor1,
                     const tr_tensor* tensor2, double value);
 int tr_gen_addcmul_(tr_tensor* self, const tr_tensor* tensor1,
                     const tr_tensor* tensor2, double value);
+int tr_gen_copy_(tr_tensor* self, const tr_tensor* src, bool non_blocking);
 int tr_gen_lerp__tensor(tr_tensor* self, const tr_tensor* end,
                         const tr_tensor* weight);
 int tr_gen_mul__tensor(tr_tensor* self, const tr_tensor* other);

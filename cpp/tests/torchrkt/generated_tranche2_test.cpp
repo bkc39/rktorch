@@ -157,7 +157,41 @@ TEST(GeneratedTranche2, PoolingFamilyGoldens) {
   expect_error_from("tr_gen_adaptive_avg_pool2d");
 }
 
+// ---- dropout (tensor + double + bool) ----------------------------------
+
+TEST(GeneratedTranche2, DropoutEvalIdentityTrainScales) {
+  const Handle x = make({1.0F, 2.0F, 3.0F, 4.0F}, {4});
+  // train=false is the identity (eval mode), whatever p.
+  const Handle ev(tr_gen_dropout(x.t, 0.5, /*train=*/false));
+  EXPECT_EQ(data_of(ev.t), (std::vector<float>{1.0F, 2.0F, 3.0F, 4.0F}));
+  // train=true, p=0 drops nothing.
+  const Handle tr0(tr_gen_dropout(x.t, 0.0, /*train=*/true));
+  EXPECT_EQ(data_of(tr0.t), (std::vector<float>{1.0F, 2.0F, 3.0F, 4.0F}));
+  // train=true, p=0.5: each entry is either dropped (0) or kept and scaled
+  // by 1/(1-p) = 2 (inverted dropout).
+  tr_manual_seed(0);
+  const Handle tr(tr_gen_dropout(x.t, 0.5, /*train=*/true));
+  const std::vector<float> in = {1.0F, 2.0F, 3.0F, 4.0F};
+  const std::vector<float> out = data_of(tr.t);
+  for (size_t i = 0; i < out.size(); ++i) {
+    EXPECT_TRUE(out[i] == 0.0F || out[i] == 2.0F * in[i]) << out[i];
+  }
+  EXPECT_EQ(tr_gen_dropout(nullptr, 0.5, false), nullptr);
+  expect_error_from("tr_gen_dropout");
+}
+
 // ---- in-place (int-status shape): mutate self, status, null guard ------
+
+TEST(GeneratedTranche2, InplaceCopyOverwritesSelf) {
+  const Handle a = make({1.0F, 2.0F, 3.0F}, {3});
+  const Handle src = make({4.0F, 5.0F, 6.0F}, {3});
+  // copy_ overwrites self's storage with src (the state-dict load path).
+  EXPECT_EQ(tr_gen_copy_(a.t, src.t, /*non_blocking=*/false), 0)
+      << tr_last_error();
+  EXPECT_EQ(data_of(a.t), (std::vector<float>{4.0F, 5.0F, 6.0F}));
+  EXPECT_EQ(tr_gen_copy_(a.t, nullptr, false), 1);
+  expect_error_from("tr_gen_copy_");
+}
 
 TEST(GeneratedTranche2, InplaceMulMutatesAndStatus) {
   const Handle a = make({1.0F, 2.0F, 3.0F}, {3});

@@ -61,3 +61,7 @@ compare gt.Tensor
 compare gt.Scalar
 compare ge.Tensor
 compare ge.Scalar
+
+# Regularization (dropout's train/eval mode flows from the layer).
+nn dropout
+inplace copy_

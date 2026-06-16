@@ -56,6 +56,8 @@ void torchrkt_c_api_compile_check(void) {
       tr_gen_lerp__tensor;
   int (*gen_addcmul_)(tr_tensor*, const tr_tensor*, const tr_tensor*, double) =
       tr_gen_addcmul_;
+  /* copy_: in-place with a trailing bool (a new in-place arg shape). */
+  int (*gen_copy_)(tr_tensor*, const tr_tensor*, bool) = tr_gen_copy_;
   tr_tensor* (*gen_sum_dim)(const tr_tensor*, const int64_t*, int64_t, bool,
                             bool, int32_t) = tr_gen_sum_dim_intlist;
   tr_tensor* (*gen_conv2d)(const tr_tensor*, const tr_tensor*, const tr_tensor*,
@@ -84,6 +86,8 @@ void torchrkt_c_api_compile_check(void) {
   /* narrow: tensor + three plain int64 scalars (a new shape). */
   tr_tensor* (*gen_narrow)(const tr_tensor*, int64_t, int64_t, int64_t) =
       tr_gen_narrow;
+  /* dropout: tensor + double + bool (a new shape). */
+  tr_tensor* (*gen_dropout)(const tr_tensor*, double, bool) = tr_gen_dropout;
   /* device family (device.h): the cuda queries, the default-device pair, and
    * the per-tensor to/from device functions. */
   int (*cuda_available)(void) = tr_cuda_is_available;
@@ -126,6 +130,7 @@ void torchrkt_c_api_compile_check(void) {
   (void)gen_add_;
   (void)gen_lerp_;
   (void)gen_addcmul_;
+  (void)gen_copy_;
   (void)gen_sum_dim;
   (void)gen_conv2d;
   (void)gen_avg_pool2d;
@@ -136,6 +141,7 @@ void torchrkt_c_api_compile_check(void) {
   (void)gen_cross_entropy_loss;
   (void)gen_max_pool2d;
   (void)gen_narrow;
+  (void)gen_dropout;
   (void)cuda_available;
   (void)cuda_count;
   (void)set_default_device;

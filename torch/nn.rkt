@@ -17,11 +17,14 @@
          (except-in "foreign.rkt" conv2d max-pool2d flatten)
          (only-in "foreign/contracts.rkt" pos-size/c nonneg-size/c)
          "nn/conv.rkt"
+         "nn/dropout.rkt"
          "nn/init.rkt"
          "nn/linear.rkt"
          "nn/loss.rkt"
          "nn/module.rkt"
-         "nn/optim.rkt")
+         "nn/optim.rkt"
+         "nn/sequential.rkt"
+         "nn/state-dict.rkt")
 
 ;; pos-size/c (positive kernel/stride) and nonneg-size/c (padding may be 0)
 ;; are shared from foreign/contracts.rkt — see the require above.
@@ -42,6 +45,9 @@
                          (listof (cons/c string? tensor?)))]
   [buffers (-> module? (listof tensor?))]
   [forward (->* (module?) #:rest (listof any/c) any)]
+  ;; train/eval mode (returns the model, like torch.nn.Module.train()/eval())
+  [train! (-> module? module?)]
+  [eval! (-> module? module?)]
   ;; layers
   [linear (-> exact-positive-integer? exact-positive-integer? linear?)]
   [linear? (-> any/c boolean?)]
@@ -56,16 +62,30 @@
   [flatten (->* () (#:start-dim exact-integer? #:end-dim exact-integer?)
                 flatten?)]
   [flatten? (-> any/c boolean?)]
+  [dropout (->* () (#:p (and/c (>=/c 0) (</c 1))) dropout?)]
+  [dropout? (-> any/c boolean?)]
+  ;; composition
+  [sequential (->* () #:rest (listof module?) sequential?)]
+  [sequential? (-> any/c boolean?)]
   ;; initializers
   [uniform-init (-> (listof exact-nonnegative-integer?) real? real? tensor?)]
   [kaiming-uniform (->* ((listof exact-nonnegative-integer?)) (#:a real?)
                         tensor?)]
   [fan-in (-> (listof exact-nonnegative-integer?)
               exact-nonnegative-integer?)]
-  ;; optimizer
+  ;; optimizers
   [sgd (-> (listof tensor?) #:lr real? sgd?)]
   [sgd? (-> any/c boolean?)]
-  [step! (-> sgd? void?)]
-  [zero-grads! (-> sgd? void?)]
+  [adam (->* ((listof tensor?))
+             (#:lr real? #:beta1 real? #:beta2 real? #:eps real?)
+             adam?)]
+  [adam? (-> any/c boolean?)]
+  [step! (-> optimizer? void?)]
+  [zero-grads! (-> optimizer? void?)]
   ;; losses
-  [mse-loss (-> tensor? tensor? tensor?)]))
+  [mse-loss (-> tensor? tensor? tensor?)]
+  [cross-entropy (-> tensor? tensor? tensor?)]
+  ;; safetensors state-dict
+  [state-dict (-> module? (listof (cons/c string? tensor?)))]
+  [save-state! (-> module? path-string? void?)]
+  [load-state! (-> module? path-string? void?)]))
