@@ -332,6 +332,15 @@
           racket-deps = racketDepsFor pkgs;
           cpp = self.packages.${system}.cpp;
           cpp-cuda = self.packages.${system}.cpp-cuda;
+          # The CUDA libtorch the shim links; its lib/ holds the bundled cuDNN
+          # (libcudnn_*.so.9) that conv/pool ops dlopen by soname at runtime.
+          cudaTorch = torchPackageFor (import nixpkgs {
+            inherit system;
+            config = {
+              allowUnfree = true;
+              cudaSupport = true;
+            };
+          });
 
           # Python with the PyTorch wheel/lib, for interactive parity work
           # (`nix develop --command python3`) and the python-cross-test.  Cached
@@ -398,7 +407,11 @@
                 echo "WARNING: $_l not found via ldconfig; CUDA calls may fail" >&2
               fi
             done
-            export LD_LIBRARY_PATH="$_drv_farm''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+            # Driver farm first (host libcuda), then the libtorch lib dir so its
+            # bundled cuDNN resolves — conv/pool dlopen libcudnn_*.so.9 by
+            # soname, and the autoAddDriverRunpath doesn't cover that. (matmul
+            # and friends worked without it; only the cuDNN-backed ops need it.)
+            export LD_LIBRARY_PATH="$_drv_farm:${cudaTorch}/lib''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
             echo "CUDA shell ready. Verify:"
             echo "  raco test torch/tests/device-test.rkt"
           '';
