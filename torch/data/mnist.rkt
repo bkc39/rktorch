@@ -65,8 +65,13 @@
 ;; The mirror PyTorch's torchvision uses (yann.lecun.com is gone).
 (define mnist-mirror "https://ossci-datasets.s3.amazonaws.com/mnist/")
 
+;; Cache location: $RKTORCH_MNIST_DIR if set (e.g. a big data disk), else the
+;; per-user system cache dir.
 (define (mnist-cache-dir)
-  (build-path (find-system-path 'cache-dir) "rktorch" "mnist"))
+  (define override (getenv "RKTORCH_MNIST_DIR"))
+  (if (and override (not (string=? override "")))
+      (string->path override)
+      (build-path (find-system-path 'cache-dir) "rktorch" "mnist")))
 
 ;; Fetch <name> (a .gz IDX file) into the cache once, then return its
 ;; gunzipped bytes.
