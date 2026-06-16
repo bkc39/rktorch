@@ -78,9 +78,14 @@ TEST(TorchrktDevice, ToDeviceCpuIsIdentity) {
 }
 
 TEST(TorchrktDevice, NullArgsReportStatus) {
+  // Each null-arg path also populates tr_last_error (the integer-status
+  // contract), matching the other failure-path tests in this file.
   EXPECT_EQ(tr_tensor_to_device(nullptr, TR_DEVICE_CPU, 0), nullptr);
+  EXPECT_STRNE(tr_last_error(), "");
   EXPECT_EQ(tr_tensor_device(nullptr, nullptr, nullptr), 1);
+  EXPECT_STRNE(tr_last_error(), "");
   EXPECT_EQ(tr_get_default_device(nullptr, nullptr), 1);
+  EXPECT_STRNE(tr_last_error(), "");
 }
 
 TEST(TorchrktDevice, SetCpuNonzeroIndexErrors) {
