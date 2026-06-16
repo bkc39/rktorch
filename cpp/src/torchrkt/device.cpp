@@ -4,9 +4,12 @@
 
 #include <atomic>
 #include <cstdint>
+#include <exception>
 #include <stdexcept>
+#include <string>
 
 #include "torchrkt/detail/device.hpp"
+#include "torchrkt/detail/error.hpp"
 #include "torchrkt/detail/op_call.hpp"
 #include "torchrkt/detail/tensor_handle.hpp"
 
@@ -14,9 +17,11 @@ namespace torchrkt {
 
 namespace {
 
-// The default device, packed so reads stay lock-free: the CUDA bit in bit 0,
-// the device ordinal above it. The zero state is CPU index 0, matching the v1
-// default, so a never-set process behaves exactly as before.
+// The default device, packed lock-free: the CUDA bit in bit 0, the device
+// ordinal above it. The zero state is CPU index 0, matching the v1 default, so
+// a never-set process behaves exactly as before. seq_cst (not relaxed) so a
+// store in one Racket place publishes to a load in another (e.g. ARM64, where
+// relaxed carries no cross-thread happens-before).
 std::atomic<int64_t> g_default_device{0};
 
 int64_t pack_device(tr_device_type type, int64_t index) {
@@ -37,7 +42,7 @@ torch::Device to_torch_device(tr_device_type type, int64_t index) {
 }
 
 torch::Device current_default_device() {
-  const int64_t packed = g_default_device.load(std::memory_order_relaxed);
+  const int64_t packed = g_default_device.load(std::memory_order_seq_cst);
   const tr_device_type type =
       (packed & 1) != 0 ? TR_DEVICE_CUDA : TR_DEVICE_CPU;
   // Unpack via an unsigned intermediate: right-shifting a negative signed
@@ -57,10 +62,17 @@ void set_default_device(tr_device_type type, int64_t index) {
         index >= static_cast<int64_t>(torch::cuda::device_count())) {
       throw std::invalid_argument("CUDA device index out of range");
     }
-  } else if (type != TR_DEVICE_CPU) {
+  } else if (type == TR_DEVICE_CPU) {
+    // CPU has no ordinal: a non-zero index would overflow pack_device's shift
+    // and fail to round-trip (torch::Device(kCPU) carries no index), so reject
+    // it rather than silently accept-and-lose it.
+    if (index != 0) {
+      throw std::invalid_argument("CPU device index must be 0");
+    }
+  } else {
     throw std::invalid_argument("unknown tr_device_type");
   }
-  g_default_device.store(pack_device(type, index), std::memory_order_relaxed);
+  g_default_device.store(pack_device(type, index), std::memory_order_seq_cst);
 }
 
 }  // namespace torchrkt
@@ -69,12 +81,17 @@ extern "C" {
 
 // torch::cuda::is_available / device_count are not documented noexcept (a
 // driver/CUDA-init failure can throw), and these return result values, not the
-// int-status the op_call.hpp helpers expect, so they take a defensive catch-all
-// mirroring alloc_result rather than letting an exception cross extern "C".
+// int-status the op_call.hpp helpers expect, so they catch all and return 0.
+// They still record the message in tr_last_error (like alloc_result), so a
+// driver-init failure is distinguishable from "genuinely no CUDA".
 int tr_cuda_is_available(void) {
   try {
     return torch::cuda::is_available() ? 1 : 0;
+  } catch (const std::exception& e) {
+    torchrkt::set_error(std::string("tr_cuda_is_available: ") + e.what());
+    return 0;
   } catch (...) {
+    torchrkt::set_error("tr_cuda_is_available: unknown exception");
     return 0;
   }
 }
@@ -84,7 +101,11 @@ int tr_cuda_device_count(void) {
     return torch::cuda::is_available()
                ? static_cast<int>(torch::cuda::device_count())
                : 0;
+  } catch (const std::exception& e) {
+    torchrkt::set_error(std::string("tr_cuda_device_count: ") + e.what());
+    return 0;
   } catch (...) {
+    torchrkt::set_error("tr_cuda_device_count: unknown exception");
     return 0;
   }
 }

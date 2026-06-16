@@ -46,6 +46,10 @@ struct DefaultDeviceGuard {
 };
 
 TEST(TorchrktDevice, DefaultsToCpu) {
+  // Reset to a known state: a CUDA test elsewhere that aborts before its guard
+  // runs could otherwise leak a CUDA default into this test under
+  // --gtest_shuffle.
+  tr_set_default_device(TR_DEVICE_CPU, 0);
   tr_device_type type = TR_DEVICE_CUDA;
   int64_t index = -1;
   EXPECT_EQ(tr_get_default_device(&type, &index), 0) << tr_last_error();
@@ -82,6 +86,8 @@ TEST(TorchrktDevice, SetCudaDefaultWhenUnavailableErrors) {
   }
   const DefaultDeviceGuard guard;
   EXPECT_EQ(tr_set_default_device(TR_DEVICE_CUDA, 0), 1);
+  // The integer-status contract: a rc=1 leaves a message in tr_last_error.
+  EXPECT_STRNE(tr_last_error(), "") << "expected an error after a failed set";
   // A rejected set must leave the default untouched (still CPU).
   tr_device_type type = TR_DEVICE_CUDA;
   int64_t index = -1;
@@ -122,6 +128,16 @@ TEST(TorchrktDevice, CudaRoundTrip) {
   EXPECT_EQ(fd_type, TR_DEVICE_CUDA);
   const Handle fd_back(tr_tensor_to_device(from_data_gpu.t, TR_DEVICE_CPU, 0));
   EXPECT_EQ(data_of(fd_back.t), host_vals);
+
+  // tr_randn also reads current_default_device(); confirm it lands on the GPU
+  // (shape/device only, not values).
+  const std::vector<int64_t> randn_dims = {4};
+  const Handle randn_gpu(tr_randn(randn_dims.data(), 1));
+  tr_device_type rd_type = TR_DEVICE_CPU;
+  int64_t rd_index = -1;
+  EXPECT_EQ(tr_tensor_device(randn_gpu.t, &rd_type, &rd_index), 0)
+      << tr_last_error();
+  EXPECT_EQ(rd_type, TR_DEVICE_CUDA);
 }
 
 }  // namespace

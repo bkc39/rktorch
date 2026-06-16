@@ -388,9 +388,15 @@
             _drv_farm="$PWD/.cuda-driver"
             rm -rf "$_drv_farm"; mkdir -p "$_drv_farm"
             for _l in libcuda.so.1 libnvidia-ml.so.1; do
+              # Match the lib name as a fixed string (its dots are ERE
+              # metacharacters), then take the path field of that ldconfig line.
               _p=$(/sbin/ldconfig -p 2>/dev/null \
-                | grep -oE "/[^ ]*/$_l" | head -1)
-              if [ -n "$_p" ]; then ln -sf "$_p" "$_drv_farm/$_l"; fi
+                | grep -F "$_l" | grep -oE '/[^ ]+' | head -1)
+              if [ -n "$_p" ]; then
+                ln -sf "$_p" "$_drv_farm/$_l"
+              else
+                echo "WARNING: $_l not found via ldconfig; CUDA calls may fail" >&2
+              fi
             done
             export LD_LIBRARY_PATH="$_drv_farm''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
             echo "CUDA shell ready. Verify:"
