@@ -30,14 +30,14 @@
 ;; are shared from foreign/contracts.rkt — see the require above.
 
 ;; Macro + generic interface (for hand-written gen:module layers).
-;; with-eval-mode is a macro (dynamic-extent form), exported as-is.
+;; in-eval-mode is a macro (dynamic-extent form), exported as-is.
 (provide define-module
          gen:module
          module-forward
          module-parameters
          module-named-parameters
          module-buffers
-         with-eval-mode)
+         in-eval-mode)
 
 (provide
  (contract-out

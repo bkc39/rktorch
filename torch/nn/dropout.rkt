@@ -14,7 +14,8 @@
                   module-parameters
                   module-named-parameters
                   module-buffers
-                  module-set-training!))
+                  module-set-training!
+                  module-training?))
 
 ;; dropout?/the constructor are the public names; the struct is dropout-impl.
 (provide dropout
@@ -35,7 +36,9 @@
    (define (module-named-parameters self prefix) '())
    (define (module-buffers self) '())
    (define (module-set-training! self training?)
-     (set-dropout-impl-training?! self training?))])
+     (set-dropout-impl-training?! self training?))
+   (define (module-training? self)
+     (dropout-impl-training? self))])
 
 (define (dropout #:p [p 0.5])
   (dropout-impl p #t))

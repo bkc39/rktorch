@@ -60,14 +60,14 @@ parameters and each batch alike --- lands there, so the whole loop follows.
 
 @bold{Accuracy.} Evaluated in @racket[eval!] mode under @racket[with-no-grad] (no
 autograd graph, no dropout), batched so the test set never has to live on the
-device all at once. @racket[with-eval-mode] flips to @racket[eval!] for the body
-and restores @racket[train!] on the way out, @emph{even if a batch raises} (it is
+device all at once. @racket[in-eval-mode] flips to @racket[eval!] for the body
+and restores the prior mode on the way out, @emph{even if a batch raises} (it is
 @racket[dynamic-wind] underneath) — so calling @racket[accuracy] mid-training
 can't leave the model stuck in eval mode.
 
 @chunk[<r05-accuracy>
 (define (accuracy net xs ys)
-  (with-eval-mode net
+  (in-eval-mode net
     (with-no-grad
       (define n (car (tensor-shape xs)))
       (define correct

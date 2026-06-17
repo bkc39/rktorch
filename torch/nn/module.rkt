@@ -32,10 +32,11 @@
          buffers
          forward
          module-set-training! ;; noqa
+         module-training? ;; noqa
          train!
          eval!
          call-with-eval-mode
-         with-eval-mode
+         in-eval-mode
          define-module)
 
 (define-generics module
@@ -45,7 +46,12 @@
   (module-buffers module)
   ;; set training mode, recursing through submodules (mode-sensitive leaves
   ;; like dropout hold the flag; structural modules just recurse).
-  (module-set-training! module training?))
+  (module-set-training! module training?)
+  ;; whether the module is in training mode: a mode-sensitive leaf reports its
+  ;; own flag; a structural module is training iff all its submodules are (and
+  ;; vacuously when it has none — modules default to training). Lets a transient
+  ;; eval! be undone to the real prior mode rather than assumed.
+  (module-training? module))
 
 ;; Trainable tensors, depth-first: own params first, then each submodule's,
 ;; in declaration order — PyTorch's parameters() order, which seeded-init
@@ -74,16 +80,18 @@
   (module-set-training! m #f)
   m)
 
-;; Run `thunk` with `m` in eval! mode, returning to train! mode on the way out
-;; (even on escape) — for inference/accuracy mid-training. Encapsulates the
-;; eval()/train() dynamic-wind so callers don't hand-roll it; restores to train,
-;; the resting mode of a model under optimization.
+;; Run `thunk` with `m` in eval! mode, restoring its prior mode on the way out
+;; (even on escape) — for inference/accuracy mid-training. Captures the mode
+;; before switching (via module-training?) so calling it on an already-eval
+;; model leaves it in eval, not train. Encapsulates the eval()/train()
+;; dynamic-wind so callers don't hand-roll it.
 (define (call-with-eval-mode m thunk)
+  (define was-training? (module-training? m))
   (dynamic-wind (lambda () (eval! m))
                 thunk
-                (lambda () (train! m))))
+                (lambda () (if was-training? (train! m) (eval! m)))))
 
-(define-syntax-rule (with-eval-mode m body ...)
+(define-syntax-rule (in-eval-mode m body ...)
   (call-with-eval-mode m (lambda () body ...)))
 
 (begin-for-syntax
@@ -140,6 +148,7 @@
                 (define/generic recur-named module-named-parameters)
                 (define/generic recur-buffers module-buffers)
                 (define/generic recur-set-training! module-set-training!)
+                (define/generic recur-training? module-training?)
                 ;; The generic is declared (module-forward module . inputs),
                 ;; so the method must accept a rest too; the inner lambda
                 ;; restores the declared #:forward arity (and its arity
@@ -167,7 +176,10 @@
                 ;; into submodules (a no-op when there are none).
                 (define (module-set-training! self training?)
                   (recur-set-training! (sm-acc self) training?) ...
-                  (void))])
+                  (void))
+                ;; training iff every submodule is (vacuously #t with none).
+                (define (module-training? self)
+                  (and (recur-training? (sm-acc self)) ... #t))])
              (define name? sid?)
              (define (name ctor-arg ...)
                (let* ([p (requires-grad! p-init)] ...

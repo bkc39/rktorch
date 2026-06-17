@@ -346,6 +346,14 @@
         (flatten 1) f1 relu
         f2))
 
+  ;; Structural guard against silent divergence from the example's convnet
+  ;; (which this re-declares — see the comment above): a changed layer size there
+  ;; trips this immediately, rather than only showing up as wrong parity numbers.
+  (check-equal? (map tensor-shape (parameters (convnet)))
+                '((16 1 3 3) (16) (32 16 3 3) (32)
+                  (128 800) (128) (10 128) (10))
+                "convnet shape must match examples/racket/05-mnist.rkt")
+
   (cond
     [(not (python-torch-available?))
      (printf "[python-cross-test] skipped: python3 `torch` not available ~a\n"
