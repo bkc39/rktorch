@@ -476,23 +476,19 @@
             buildInputs = baseInputs;
             shellHook = provisionRacket;
           };
-
-          # GPU verification shell: provisions Racket as usual, then stages the
-          # CUDA-linked native lib and the host driver (see cudaHook). The
-          # device tests' CUDA cases run for real here on a machine with an
-          # NVIDIA GPU; on a CPU-only box they self-skip.
-          # Linux-only: it stages the cu130 CUDA libtorch + the host NVIDIA
-          # driver. On aarch64-darwin cudaSupport is silently ignored, so the
-          # cudaHook would put a non-CUDA libtorch lib dir on LD_LIBRARY_PATH and
-          # print a misleading "CUDA shell ready" — fail loudly instead.
-          cuda =
-            if pkgs.stdenv.isLinux then
-              pkgs.mkShell {
-                buildInputs = baseInputs ++ [ pythonCudaEnv ];
-                shellHook = provisionRacket + cudaHook;
-              }
-            else
-              throw "The .#cuda devShell is Linux-only (CUDA libtorch + NVIDIA driver).";
+        }
+        # GPU verification shell: provisions Racket as usual, then stages the
+        # CUDA-linked native lib and the host driver (see cudaHook). The device
+        # tests' CUDA cases run for real here on an NVIDIA host; on a CPU-only
+        # box they self-skip. Linux-only — it stages the cu130 CUDA libtorch and
+        # the host driver. Omitted on non-Linux (rather than a `throw`, which
+        # would abort `nix flake check`'s eval of every devShell on darwin) so
+        # `nix develop .#cuda` there reports a plain "no such attribute".
+        // pkgs.lib.optionalAttrs pkgs.stdenv.isLinux {
+          cuda = pkgs.mkShell {
+            buildInputs = baseInputs ++ [ pythonCudaEnv ];
+            shellHook = provisionRacket + cudaHook;
+          };
         });
     };
 }
