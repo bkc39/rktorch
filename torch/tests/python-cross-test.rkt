@@ -349,6 +349,10 @@
   ;; Structural guard against silent divergence from the example's convnet
   ;; (which this re-declares — see the comment above): a changed layer size there
   ;; trips this immediately, rather than only showing up as wrong parity numbers.
+  ;; Shape only — it does NOT guard the forward body (activation choice, pooling
+  ;; order, threading): such a change would still pass here and instead surface
+  ;; as a step-1 parity-value mismatch, so treat a forward-pass edit in the
+  ;; example as a deliberate cue to re-audit this re-declaration.
   (check-equal? (map tensor-shape (parameters (convnet)))
                 '((16 1 3 3) (16) (32 16 3 3) (32)
                   (128 800) (128) (10 128) (10))
@@ -462,7 +466,10 @@
            (check-= r p dev-tol (format "05_mnist[~a]: loss at step ~a" device i)))
          (check-equal? (tensor-shape flat-params) (hash-ref j 'shape)
                        (format "05_mnist[~a]: parameter count" device))
-         (for ([r (in-list (tensor->list flat-params))]
+         ;; flat-params lives on `device`; copy to host explicitly before reading
+         ;; values, rather than relying on tensor->list to do it implicitly.
+         (define host-params (to-device flat-params 'cpu))
+         (for ([r (in-list (tensor->list host-params))]
                [p (in-list (hash-ref j 'values))]
                [i (in-naturals)])
            (check-= r p dev-tol

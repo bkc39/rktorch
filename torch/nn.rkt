@@ -37,6 +37,7 @@
          module-parameters
          module-named-parameters
          module-buffers
+         module-training?
          in-eval-mode)
 
 (provide
