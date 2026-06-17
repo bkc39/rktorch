@@ -40,29 +40,51 @@
 
   (define python (find-executable-path "python3"))
 
+  ;; Under the .#cuda shell the process LD_LIBRARY_PATH carries cudaTorch/lib
+  ;; (libtorch 2.9, there for Racket's cuDNN), which would shadow the Python
+  ;; torch-bin wheel's own 2.12 libtorch and break `import torch`
+  ;; (libtorch_python.so ABI clash). The cudaHook exports
+  ;; RKTORCH_CUDA_DRIVER_PATH (the host-driver farm only); pin each python
+  ;; child's LD_LIBRARY_PATH to it so the wheel loads its own libs + the driver.
+  ;; Unset (default/ci shell): leave the env alone so the CPU torch works.
+  (define cuda-driver-path (getenv "RKTORCH_CUDA_DRIVER_PATH"))
+  (define (call-with-python-env thunk)
+    (if cuda-driver-path
+        (let ([env (environment-variables-copy (current-environment-variables))])
+          (environment-variables-set! env #"LD_LIBRARY_PATH"
+                                      (string->bytes/utf-8 cuda-driver-path))
+          (parameterize ([current-environment-variables env]) (thunk)))
+        (thunk)))
+
   (define (python-torch-available?)
     (and python
-         (parameterize ([current-output-port (open-output-nowhere)]
-                        [current-error-port (open-output-nowhere)])
-           (system* python "-c" "import torch"))))
+         (call-with-python-env
+          (lambda ()
+            (parameterize ([current-output-port (open-output-nowhere)]
+                           [current-error-port (open-output-nowhere)])
+              (system* python "-c" "import torch"))))))
 
   ;; Does the Python torch on PATH see a CUDA device? True only under the cuda
   ;; dev shell (cu130 torch-bin) on a GPU host; gates the accelerator parity.
   (define (python-cuda-available?)
     (and python
-         (parameterize ([current-output-port (open-output-nowhere)]
-                        [current-error-port (open-output-nowhere)])
-           (system* python "-c"
-                    "import torch,sys; sys.exit(0 if torch.cuda.is_available() else 1)"))))
+         (call-with-python-env
+          (lambda ()
+            (parameterize ([current-output-port (open-output-nowhere)]
+                           [current-error-port (open-output-nowhere)])
+              (system* python "-c"
+                       "import torch,sys; sys.exit(0 if torch.cuda.is_available() else 1)"))))))
 
   ;; Run a Python reference file and return its parsed JSON hash.
   (define (python-result rel-path)
     (define py (build-path examples-dir rel-path))
     (define out (open-output-string))
     (define ok?
-      (parameterize ([current-output-port out]
-                     [current-error-port (open-output-nowhere)])
-        (system* python (path->string py))))
+      (call-with-python-env
+       (lambda ()
+         (parameterize ([current-output-port out]
+                        [current-error-port (open-output-nowhere)])
+           (system* python (path->string py))))))
     (unless ok?
       (error 'python-cross-test "python failed for ~a" rel-path))
     (read-json (open-input-string (get-output-string out))))
@@ -74,9 +96,11 @@
     (define out (open-output-string))
     (define err (open-output-string))
     (define ok?
-      (parameterize ([current-output-port out]
-                     [current-error-port err])
-        (system* python "-c" code)))
+      (call-with-python-env
+       (lambda ()
+         (parameterize ([current-output-port out]
+                        [current-error-port err])
+           (system* python "-c" code)))))
     (unless ok?
       (error 'python-cross-test "inline python failed:\n~a"
              (get-output-string err)))
@@ -258,9 +282,11 @@
        " \"values\": [float(v) for v in r.flatten().tolist()]}))"))
     (define out (open-output-string))
     (define ok?
-      (parameterize ([current-output-port out]
-                     [current-error-port (open-output-nowhere)])
-        (system* python "-c" code)))
+      (call-with-python-env
+       (lambda ()
+         (parameterize ([current-output-port out]
+                        [current-error-port (open-output-nowhere)])
+           (system* python "-c" code)))))
     (unless ok?
       (error 'generated-parity "python failed for ~a" py-name))
     (read-json (open-input-string (get-output-string out))))
@@ -403,7 +429,11 @@
            (lambda () (set-default-device! saved))))
        ;; Run the Python twin pinned to `device` and check the Racket run on the
        ;; same device agrees. CUDA values come back to host for the comparison.
-       (define (check-convnet device)
+       ;; `dev-tol`: CPU is bit-stable (the strict, CI-gating `tol`); the CUDA
+       ;; pass is looser because the two stacks (libtorch 2.9 vs Python torch
+       ;; 2.12) pick different cuDNN/cuBLAS algorithms and reduction orders, so
+       ;; values after 5 Adam steps drift ~1e-3 even though seeded init matches.
+       (define (check-convnet device dev-tol)
          (define prior (getenv "RKTORCH_PARITY_DEVICE"))
          (putenv "RKTORCH_PARITY_DEVICE" (symbol->string device))
          (define j
@@ -418,21 +448,21 @@
          (for ([r (in-list losses)]
                [p (in-list (hash-ref j 'losses))]
                [i (in-naturals)])
-           (check-= r p tol (format "05_mnist[~a]: loss at step ~a" device i)))
+           (check-= r p dev-tol (format "05_mnist[~a]: loss at step ~a" device i)))
          (check-equal? (tensor-shape flat-params) (hash-ref j 'shape)
                        (format "05_mnist[~a]: parameter count" device))
          (for ([r (in-list (tensor->list flat-params))]
                [p (in-list (hash-ref j 'values))]
                [i (in-naturals)])
-           (check-= r p tol
+           (check-= r p dev-tol
                     (format "05_mnist[~a]: parameter ~a parity" device i))))
-       (check-convnet 'cpu)
+       (check-convnet 'cpu tol)
        ;; the accelerator-parity pass: only when this host has a CUDA device AND
        ;; the Python torch here was built with CUDA (the cu130 torch-bin wheel,
        ;; staged by `nix develop .#cuda`). On a CPU-only box / CPU torch it skips.
        (when (and (cuda-available?)
                   (python-cuda-available?))
-         (check-convnet 'cuda)))
+         (check-convnet 'cuda 5e-3)))
      ;; conv2d layer: the seeded init (kaiming-uniform weight + uniform bias,
      ;; in that order) must match nn.Conv2d.reset_parameters value-for-value,
      ;; which depends on fan-in = in*kH*kW being computed exactly like
