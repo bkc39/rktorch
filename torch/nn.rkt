@@ -30,12 +30,14 @@
 ;; are shared from foreign/contracts.rkt — see the require above.
 
 ;; Macro + generic interface (for hand-written gen:module layers).
+;; with-eval-mode is a macro (dynamic-extent form), exported as-is.
 (provide define-module
          gen:module
          module-forward
          module-parameters
          module-named-parameters
-         module-buffers)
+         module-buffers
+         with-eval-mode)
 
 (provide
  (contract-out
@@ -48,6 +50,7 @@
   ;; train/eval mode (returns the model, like torch.nn.Module.train()/eval())
   [train! (-> module? module?)]
   [eval! (-> module? module?)]
+  [call-with-eval-mode (-> module? (-> any) any)]
   ;; layers
   [linear (-> exact-positive-integer? exact-positive-integer? linear?)]
   [linear? (-> any/c boolean?)]

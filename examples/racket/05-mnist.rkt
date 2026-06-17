@@ -43,10 +43,11 @@ PyTorch. The spatial arithmetic is the usual @tt{valid}-convolution bookkeeping:
                 [f1 (linear 800 128)]
                 [f2 (linear 128 10)])
   #:forward (x)
-  (let* ([h (max-pool2d (relu (c1 x)) 2)]
-         [h (max-pool2d (relu (c2 h)) 2)]
-         [h (relu (f1 (flatten h 1)))])
-    (f2 h)))]
+  (~> x
+      c1 relu (max-pool2d 2)
+      c2 relu (max-pool2d 2)
+      (flatten 1) f1 relu
+      f2))]
 
 @bold{The device.} Pick the accelerator the way PyTorch does
 (@tt{device = "cuda" if torch.cuda.is_available() else "cpu"}); setting it as
@@ -57,25 +58,24 @@ parameters and each batch alike --- lands there, so the whole loop follows.
 (define (pick-device)
   (if (cuda-available?) 'cuda 'cpu))]
 
-@bold{Accuracy.} Evaluated in @racket[eval!] mode under @racket[call-with-no-grad]
-(no autograd graph, no dropout), batched so the test set never has to live on the
-device all at once. @racket[begin0] restores @racket[train!] mode on the way out,
-including if a batch raises.
+@bold{Accuracy.} Evaluated in @racket[eval!] mode under @racket[with-no-grad] (no
+autograd graph, no dropout), batched so the test set never has to live on the
+device all at once. @racket[with-eval-mode] flips to @racket[eval!] for the body
+and restores @racket[train!] on the way out, @emph{even if a batch raises} (it is
+@racket[dynamic-wind] underneath) — so calling @racket[accuracy] mid-training
+can't leave the model stuck in eval mode.
 
 @chunk[<r05-accuracy>
 (define (accuracy net xs ys)
-  (eval! net)
-  (begin0
-    (call-with-no-grad
-     (lambda ()
-       (define n (car (tensor-shape xs)))
-       (define correct
-         (for/sum ([start (in-range 0 n 1000)])
-           (define len (min 1000 (- n start)))
-           (define preds (argmax (net (narrow xs 0 start len)) 1))
-           (item (sum (eq preds (narrow ys 0 start len))))))
-       (exact->inexact (/ correct n))))
-    (train! net)))]
+  (with-eval-mode net
+    (with-no-grad
+      (define n (car (tensor-shape xs)))
+      (define correct
+        (for/sum ([start (in-range 0 n 1000)])
+          (define len (min 1000 (- n start)))
+          (define preds (argmax (net (narrow xs 0 start len)) 1))
+          (item (sum (eq preds (narrow ys 0 start len))))))
+      (exact->inexact (/ correct n)))))]
 
 @bold{The deterministic core.} @racket[run-example] is the seeded, offline entry
 the test harness and the PyTorch parity twin both drive: it trains a fresh
@@ -85,28 +85,26 @@ the device. Full-batch (no shuffling, no minibatch indexing) keeps it trivially
 reproducible across both languages --- with the same seed the @racket[conv2d] and
 @racket[linear] inits draw value-for-value like @tt{nn.Conv2d}/@tt{nn.Linear},
 then the identical updates track @tt{torch.optim.Adam}. As in the MLP example the
-process default device is saved and restored with @racket[dynamic-wind] so calling
-this neither leaks the GPU onto later tensors nor clobbers a caller's choice.
+process default device is set for the dynamic extent of the run with
+@racket[with-default-device] (the device analogue of @racket[with-no-grad]), so
+calling this neither leaks the GPU onto later tensors nor clobbers a caller's
+choice — the prior default is restored even if a step raises.
 
 @chunk[<r05-run>
 (define (run-example #:steps [steps 5] #:device [device (pick-device)])
-  (define saved (default-device))
-  (dynamic-wind
-    (lambda () (set-default-device! device))
-    (lambda ()
-      (manual-seed! 0)
-      (define-values (xs ys) (load-mnist-fixture))
-      (define net (convnet))
-      (define opt (adam (parameters net) #:lr 0.001))
-      (define losses
-        (for/list ([_ (in-range steps)])
-          (zero-grads! opt)
-          (define loss (cross-entropy (net xs) ys))
-          (backward! loss)
-          (step! opt)
-          (item loss)))
-      (values losses net device))
-    (lambda () (set-default-device! saved))))]
+  (with-default-device device
+    (manual-seed! 0)
+    (define-values (xs ys) (load-mnist-fixture))
+    (define net (convnet))
+    (define opt (adam (parameters net) #:lr 0.001))
+    (define losses
+      (for/list ([_ (in-range steps)])
+        (zero-grads! opt)
+        (define loss (cross-entropy (net xs) ys))
+        (backward! loss)
+        (step! opt)
+        (item loss)))
+    (values losses net device)))]
 
 @bold{The real thing.} @racket[train-mnist] is the headline run: it downloads the
 full dataset (cached under @envvar{RKTORCH_MNIST_DIR} or the system cache dir),
@@ -117,26 +115,22 @@ fixture-sized shadow for testing.
 @chunk[<r05-train-mnist>
 (define (train-mnist #:epochs [epochs 3] #:batch [batch 128]
                      #:device [device (pick-device)])
-  (define saved (default-device))
-  (dynamic-wind
-    (lambda () (set-default-device! device))
-    (lambda ()
-      (manual-seed! 0)
-      (define-values (train-x train-y) (load-mnist 'train))
-      (define-values (test-x test-y) (load-mnist 'test))
-      (define n-train (car (tensor-shape train-x)))
-      (define net (convnet))
-      (define opt (adam (parameters net) #:lr 0.001))
-      (for/list ([epoch (in-range epochs)])
-        (for ([start (in-range 0 n-train batch)])
-          (define len (min batch (- n-train start)))
-          (zero-grads! opt)
-          (define loss (cross-entropy (net (narrow train-x 0 start len))
-                                      (narrow train-y 0 start len)))
-          (backward! loss)
-          (step! opt))
-        (accuracy net test-x test-y)))
-    (lambda () (set-default-device! saved))))]
+  (with-default-device device
+    (manual-seed! 0)
+    (define-values (train-x train-y) (load-mnist 'train))
+    (define-values (test-x test-y) (load-mnist 'test))
+    (define n-train (car (tensor-shape train-x)))
+    (define net (convnet))
+    (define opt (adam (parameters net) #:lr 0.001))
+    (for/list ([epoch (in-range epochs)])
+      (for ([start (in-range 0 n-train batch)])
+        (define len (min batch (- n-train start)))
+        (zero-grads! opt)
+        (define loss (cross-entropy (net (narrow train-x 0 start len))
+                                    (narrow train-y 0 start len)))
+        (backward! loss)
+        (step! opt))
+      (accuracy net test-x test-y))))]
 
 @chunk[<*>
   <r05-require>

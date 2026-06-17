@@ -481,10 +481,18 @@
           # CUDA-linked native lib and the host driver (see cudaHook). The
           # device tests' CUDA cases run for real here on a machine with an
           # NVIDIA GPU; on a CPU-only box they self-skip.
-          cuda = pkgs.mkShell {
-            buildInputs = baseInputs ++ [ pythonCudaEnv ];
-            shellHook = provisionRacket + cudaHook;
-          };
+          # Linux-only: it stages the cu130 CUDA libtorch + the host NVIDIA
+          # driver. On aarch64-darwin cudaSupport is silently ignored, so the
+          # cudaHook would put a non-CUDA libtorch lib dir on LD_LIBRARY_PATH and
+          # print a misleading "CUDA shell ready" — fail loudly instead.
+          cuda =
+            if pkgs.stdenv.isLinux then
+              pkgs.mkShell {
+                buildInputs = baseInputs ++ [ pythonCudaEnv ];
+                shellHook = provisionRacket + cudaHook;
+              }
+            else
+              throw "The .#cuda devShell is Linux-only (CUDA libtorch + NVIDIA driver).";
         });
     };
 }

@@ -29,9 +29,9 @@
          "foreign/promoted.rkt"
          "foreign/autograd-ops.rkt")
 
-;; with-no-grad is a macro (a dynamic-extent form), so it bypasses
-;; contract-out; its expansion bottoms out in the contracted procedures.
-(provide with-no-grad)
+;; with-no-grad / with-default-device are macros (dynamic-extent forms), so they
+;; bypass contract-out; their expansions bottom out in the contracted procedures.
+(provide with-no-grad with-default-device)
 
 ;; Arithmetic operators (+ - * / and matmul's @) shadow racket/base in the
 ;; rkt-polars style: plain renames rather than contract-out, so the numeric
@@ -149,6 +149,7 @@
   [cuda-device-count (-> exact-nonnegative-integer?)]
   [set-default-device! (-> device/c void?)]
   [default-device (-> device/c)]
+  [call-with-default-device (-> device/c (-> any) any)]
   [to-device (-> tensor? device/c tensor?)]
   [tensor-device (-> tensor? device/c)]
   ;; autograd

@@ -34,6 +34,8 @@
          module-set-training! ;; noqa
          train!
          eval!
+         call-with-eval-mode
+         with-eval-mode
          define-module)
 
 (define-generics module
@@ -71,6 +73,18 @@
 (define (eval! m)
   (module-set-training! m #f)
   m)
+
+;; Run `thunk` with `m` in eval! mode, returning to train! mode on the way out
+;; (even on escape) — for inference/accuracy mid-training. Encapsulates the
+;; eval()/train() dynamic-wind so callers don't hand-roll it; restores to train,
+;; the resting mode of a model under optimization.
+(define (call-with-eval-mode m thunk)
+  (dynamic-wind (lambda () (eval! m))
+                thunk
+                (lambda () (train! m))))
+
+(define-syntax-rule (with-eval-mode m body ...)
+  (call-with-eval-mode m (lambda () body ...)))
 
 (begin-for-syntax
   (define-syntax-class binding

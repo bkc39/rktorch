@@ -48,43 +48,50 @@
   ;; child's LD_LIBRARY_PATH to it so the wheel loads its own libs + the driver.
   ;; Unset (default/ci shell): leave the env alone so the CPU torch works.
   (define cuda-driver-path (getenv "RKTORCH_CUDA_DRIVER_PATH"))
-  (define (call-with-python-env thunk)
-    (if cuda-driver-path
-        (let ([env (environment-variables-copy (current-environment-variables))])
-          (environment-variables-set! env #"LD_LIBRARY_PATH"
-                                      (string->bytes/utf-8 cuda-driver-path))
-          (parameterize ([current-environment-variables env]) (thunk)))
-        (thunk)))
+  ;; Run `thunk` with the python child's environment adjusted on a *copy* (never
+  ;; the process-wide env): the CUDA driver-farm LD_LIBRARY_PATH pin when the
+  ;; cuda shell set RKTORCH_CUDA_DRIVER_PATH, plus any `extra` (name . value)
+  ;; string pairs (e.g. RKTORCH_PARITY_DEVICE). Nested uses compose — the inner
+  ;; copy inherits the outer's parameterized vars.
+  (define (call-with-python-env thunk #:env [extra '()])
+    (define env (environment-variables-copy (current-environment-variables)))
+    (when cuda-driver-path
+      (environment-variables-set! env #"LD_LIBRARY_PATH"
+                                  (string->bytes/utf-8 cuda-driver-path)))
+    (for ([nv (in-list extra)])
+      (environment-variables-set! env (string->bytes/utf-8 (car nv))
+                                  (string->bytes/utf-8 (cdr nv))))
+    (parameterize ([current-environment-variables env]) (thunk)))
+
+  (define-syntax-rule (with-python-env body ...)
+    (call-with-python-env (lambda () body ...)))
 
   (define (python-torch-available?)
     (and python
-         (call-with-python-env
-          (lambda ()
-            (parameterize ([current-output-port (open-output-nowhere)]
-                           [current-error-port (open-output-nowhere)])
-              (system* python "-c" "import torch"))))))
+         (with-python-env
+          (parameterize ([current-output-port (open-output-nowhere)]
+                         [current-error-port (open-output-nowhere)])
+            (system* python "-c" "import torch")))))
 
   ;; Does the Python torch on PATH see a CUDA device? True only under the cuda
   ;; dev shell (cu130 torch-bin) on a GPU host; gates the accelerator parity.
   (define (python-cuda-available?)
     (and python
-         (call-with-python-env
-          (lambda ()
-            (parameterize ([current-output-port (open-output-nowhere)]
-                           [current-error-port (open-output-nowhere)])
-              (system* python "-c"
-                       "import torch,sys; sys.exit(0 if torch.cuda.is_available() else 1)"))))))
+         (with-python-env
+          (parameterize ([current-output-port (open-output-nowhere)]
+                         [current-error-port (open-output-nowhere)])
+            (system* python "-c"
+                     "import torch,sys; sys.exit(0 if torch.cuda.is_available() else 1)")))))
 
   ;; Run a Python reference file and return its parsed JSON hash.
   (define (python-result rel-path)
     (define py (build-path examples-dir rel-path))
     (define out (open-output-string))
     (define ok?
-      (call-with-python-env
-       (lambda ()
-         (parameterize ([current-output-port out]
-                        [current-error-port (open-output-nowhere)])
-           (system* python (path->string py))))))
+      (with-python-env
+       (parameterize ([current-output-port out]
+                      [current-error-port (open-output-nowhere)])
+         (system* python (path->string py)))))
     (unless ok?
       (error 'python-cross-test "python failed for ~a" rel-path))
     (read-json (open-input-string (get-output-string out))))
@@ -96,11 +103,10 @@
     (define out (open-output-string))
     (define err (open-output-string))
     (define ok?
-      (call-with-python-env
-       (lambda ()
-         (parameterize ([current-output-port out]
-                        [current-error-port err])
-           (system* python "-c" code)))))
+      (with-python-env
+       (parameterize ([current-output-port out]
+                      [current-error-port err])
+         (system* python "-c" code))))
     (unless ok?
       (error 'python-cross-test "inline python failed:\n~a"
              (get-output-string err)))
@@ -282,11 +288,10 @@
        " \"values\": [float(v) for v in r.flatten().tolist()]}))"))
     (define out (open-output-string))
     (define ok?
-      (call-with-python-env
-       (lambda ()
-         (parameterize ([current-output-port out]
-                        [current-error-port (open-output-nowhere)])
-           (system* python "-c" code)))))
+      (with-python-env
+       (parameterize ([current-output-port out]
+                      [current-error-port (open-output-nowhere)])
+         (system* python "-c" code))))
     (unless ok?
       (error 'generated-parity "python failed for ~a" py-name))
     (read-json (open-input-string (get-output-string out))))
@@ -324,6 +329,22 @@
           [i (in-naturals)])
       (check-= r p tol
                (format "~a~a: generated value ~a parity" name label i))))
+
+  ;; The Conv-MNIST model for the 05 parity pass — a top-level form (kept in
+  ;; sync with examples/racket/05-mnist.rkt's convnet; the example test imports
+  ;; the real run-example, while this package-internal suite re-declares it,
+  ;; since torch/ can't reach examples/ once installed by copy in the nix build).
+  (define-module convnet ()
+    #:submodules ([c1 (nn-conv2d 1 16 3)]
+                  [c2 (nn-conv2d 16 32 3)]
+                  [f1 (linear 800 128)]
+                  [f2 (linear 128 10)])
+    #:forward (x)
+    (~> x
+        c1 relu (max-pool2d 2)
+        c2 relu (max-pool2d 2)
+        (flatten 1) f1 relu
+        f2))
 
   (cond
     [(not (python-torch-available?))
@@ -395,38 +416,24 @@
      ;; CUDA pass runs only when a GPU is present on both sides (the "accelerator
      ;; programs match PyTorch" check) and self-skips otherwise.
      (let ()
-       (define-module convnet ()
-         #:submodules ([c1 (nn-conv2d 1 16 3)]
-                       [c2 (nn-conv2d 16 32 3)]
-                       [f1 (linear 800 128)]
-                       [f2 (linear 128 10)])
-         #:forward (x)
-         (let* ([h (max-pool2d (relu (c1 x)) 2)]
-                [h (max-pool2d (relu (c2 h)) 2)]
-                [h (relu (f1 (flatten h 1)))])
-           (f2 h)))
        ;; Train on `device` and return (values losses flat-params), exactly as
        ;; examples/racket/05-mnist.rkt's run-example does.
        (define (train-on device)
-         (define saved (default-device))
-         (dynamic-wind
-           (lambda () (set-default-device! device))
-           (lambda ()
-             (manual-seed! 0)
-             (define-values (xs ys) (load-mnist-fixture))
-             (define net (convnet))
-             (define opt (adam (parameters net) #:lr 0.001))
-             (define losses
-               (for/list ([_ (in-range 5)])
-                 (zero-grads! opt)
-                 (define loss (cross-entropy (net xs) ys))
-                 (backward! loss)
-                 (step! opt)
-                 (item loss)))
-             (values losses
-                     (cat (for/list ([p (in-list (parameters net))])
-                            (reshape p -1)))))
-           (lambda () (set-default-device! saved))))
+         (with-default-device device
+           (manual-seed! 0)
+           (define-values (xs ys) (load-mnist-fixture))
+           (define net (convnet))
+           (define opt (adam (parameters net) #:lr 0.001))
+           (define losses
+             (for/list ([_ (in-range 5)])
+               (zero-grads! opt)
+               (define loss (cross-entropy (net xs) ys))
+               (backward! loss)
+               (step! opt)
+               (item loss)))
+           (values losses
+                   (cat (for/list ([p (in-list (parameters net))])
+                          (reshape p -1))))))
        ;; Run the Python twin pinned to `device` and check the Racket run on the
        ;; same device agrees. CUDA values come back to host for the comparison.
        ;; `dev-tol`: CPU is bit-stable (the strict, CI-gating `tol`); the CUDA
@@ -434,16 +441,12 @@
        ;; 2.12) pick different cuDNN/cuBLAS algorithms and reduction orders, so
        ;; values after 5 Adam steps drift ~1e-3 even though seeded init matches.
        (define (check-convnet device dev-tol)
-         (define prior (getenv "RKTORCH_PARITY_DEVICE"))
-         (putenv "RKTORCH_PARITY_DEVICE" (symbol->string device))
+         ;; Pin RKTORCH_PARITY_DEVICE for the twin via the env-copy wrapper
+         ;; (never the process-wide env), so the Python child trains on `device`.
          (define j
-           (dynamic-wind
-            void
-            (lambda () (python-result "python/05_mnist.py"))
-            (lambda ()
-              (if prior
-                  (putenv "RKTORCH_PARITY_DEVICE" prior)
-                  (putenv "RKTORCH_PARITY_DEVICE" "")))))
+           (call-with-python-env
+            #:env (list (cons "RKTORCH_PARITY_DEVICE" (symbol->string device)))
+            (lambda () (python-result "python/05_mnist.py"))))
          (define-values (losses flat-params) (train-on device))
          (for ([r (in-list losses)]
                [p (in-list (hash-ref j 'losses))]
