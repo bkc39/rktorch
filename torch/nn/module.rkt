@@ -85,6 +85,13 @@
 ;; before switching (via module-training?) so calling it on an already-eval
 ;; model leaves it in eval, not train. Encapsulates the eval()/train()
 ;; dynamic-wind so callers don't hand-roll it.
+;;
+;; Restores the *aggregate* mode (module-training? is true iff every leaf was
+;; training), then re-applies it tree-wide with train!/eval!. So a mixed-mode
+;; tree — some dropout leaves manually flipped to eval before the call — is not
+;; preserved leaf-by-leaf: it collapses to all-train or all-eval on exit. That's
+;; the intended mid-training-inference use (uniform mode); per-leaf snapshotting
+;; would be needed to preserve a hand-built mixed tree.
 (define (call-with-eval-mode m thunk)
   (define was-training? (module-training? m))
   (dynamic-wind (lambda () (eval! m))
