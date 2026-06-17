@@ -1,0 +1,39 @@
+#lang racket/base
+
+;; Runner + tests for the literate ../../examples/racket/05-mnist.rkt.
+
+(require (except-in racket/list argmax flatten)
+         (only-in racket/math nan?)
+         torch
+         ;; this harness only needs named-parameters/parameters from nn; the
+         ;; conv2d/max-pool2d/flatten layer names collide with torch and the
+         ;; example owns those imports internally, so drop them here (#11).
+         (except-in torch/nn conv2d max-pool2d flatten)
+         "../racket/05-mnist.rkt")
+
+(module+ main
+  ;; The headline run: full MNIST (downloads + caches), ~98% on a GPU. Pass
+  ;; EPOCHS to override. Use run-example for the quick offline smoke instead.
+  (define epochs (string->number (or (getenv "EPOCHS") "3")))
+  (printf "device: ~a\n" (pick-device))
+  (for ([acc (in-list (train-mnist #:epochs epochs))]
+        [epoch (in-naturals 1)])
+    (printf "epoch ~a: test acc ~a\n" epoch acc)))
+
+(module+ test
+  (require rackunit)
+  ;; Deterministic, offline: 5 full-batch steps on the committed fixture.
+  (define-values (losses net device) (run-example #:device 'cpu))
+  (check-equal? device 'cpu)
+  (check-equal? (length losses) 5)
+  (check-true (andmap (lambda (l) (and (rational? l) (not (nan? l)))) losses)
+              (format "non-finite loss: ~a" losses))
+  (check-true (< (last losses) (first losses))
+              (format "losses did not decrease: ~a" losses))
+  ;; the convnet's parameter tree: conv/linear weights+biases in decl order.
+  (check-equal? (map car (named-parameters net))
+                '("c1.weight" "c1.bias" "c2.weight" "c2.bias"
+                  "f1.weight" "f1.bias" "f2.weight" "f2.bias"))
+  (check-equal? (map tensor-shape (parameters net))
+                '((16 1 3 3) (16) (32 16 3 3) (32)
+                  (128 800) (128) (10 128) (10))))

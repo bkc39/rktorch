@@ -30,7 +30,9 @@
            (except-in "../nn.rkt" conv2d max-pool2d flatten)
            ;; the conv2d *layer* (for the seeded-init parity check) under a
            ;; non-colliding name.
-           (only-in "../nn.rkt" [conv2d nn-conv2d]))
+           (only-in "../nn.rkt" [conv2d nn-conv2d])
+           ;; the committed 256-image fixture for the Conv-MNIST parity twin.
+           (only-in "../data/mnist.rkt" load-mnist-fixture))
 
   (define-runtime-path examples-dir "../../examples")
   (define-runtime-path generated-manifest "generated-parity.rktd")
@@ -43,6 +45,15 @@
          (parameterize ([current-output-port (open-output-nowhere)]
                         [current-error-port (open-output-nowhere)])
            (system* python "-c" "import torch"))))
+
+  ;; Does the Python torch on PATH see a CUDA device? True only under the cuda
+  ;; dev shell (cu130 torch-bin) on a GPU host; gates the accelerator parity.
+  (define (python-cuda-available?)
+    (and python
+         (parameterize ([current-output-port (open-output-nowhere)]
+                        [current-error-port (open-output-nowhere)])
+           (system* python "-c"
+                    "import torch,sys; sys.exit(0 if torch.cuda.is_available() else 1)"))))
 
   ;; Run a Python reference file and return its parsed JSON hash.
   (define (python-result rel-path)
@@ -350,6 +361,78 @@
              [p (in-list (hash-ref j 'values))]
              [i (in-naturals)])
          (check-= r p tol (format "04_mlp: parameter ~a parity" i))))
+     ;; 05 — the v2 capstone: the Conv-MNIST convnet trained on the committed
+     ;; 256-image fixture. Seeded conv2d/linear init + 5 full-batch Adam steps
+     ;; track PyTorch (per-step losses and every post-training parameter). The
+     ;; helper trains on a chosen device; the Python twin reads its device from
+     ;; RKTORCH_PARITY_DEVICE. CPU runs always (deterministic, CI-gating); the
+     ;; CUDA pass runs only when a GPU is present on both sides (the "accelerator
+     ;; programs match PyTorch" check) and self-skips otherwise.
+     (let ()
+       (define-module convnet ()
+         #:submodules ([c1 (nn-conv2d 1 16 3)]
+                       [c2 (nn-conv2d 16 32 3)]
+                       [f1 (linear 800 128)]
+                       [f2 (linear 128 10)])
+         #:forward (x)
+         (let* ([h (max-pool2d (relu (c1 x)) 2)]
+                [h (max-pool2d (relu (c2 h)) 2)]
+                [h (relu (f1 (flatten h 1)))])
+           (f2 h)))
+       ;; Train on `device` and return (values losses flat-params), exactly as
+       ;; examples/racket/05-mnist.rkt's run-example does.
+       (define (train-on device)
+         (define saved (default-device))
+         (dynamic-wind
+           (lambda () (set-default-device! device))
+           (lambda ()
+             (manual-seed! 0)
+             (define-values (xs ys) (load-mnist-fixture))
+             (define net (convnet))
+             (define opt (adam (parameters net) #:lr 0.001))
+             (define losses
+               (for/list ([_ (in-range 5)])
+                 (zero-grads! opt)
+                 (define loss (cross-entropy (net xs) ys))
+                 (backward! loss)
+                 (step! opt)
+                 (item loss)))
+             (values losses
+                     (cat (for/list ([p (in-list (parameters net))])
+                            (reshape p -1)))))
+           (lambda () (set-default-device! saved))))
+       ;; Run the Python twin pinned to `device` and check the Racket run on the
+       ;; same device agrees. CUDA values come back to host for the comparison.
+       (define (check-convnet device)
+         (define prior (getenv "RKTORCH_PARITY_DEVICE"))
+         (putenv "RKTORCH_PARITY_DEVICE" (symbol->string device))
+         (define j
+           (dynamic-wind
+            void
+            (lambda () (python-result "python/05_mnist.py"))
+            (lambda ()
+              (if prior
+                  (putenv "RKTORCH_PARITY_DEVICE" prior)
+                  (putenv "RKTORCH_PARITY_DEVICE" "")))))
+         (define-values (losses flat-params) (train-on device))
+         (for ([r (in-list losses)]
+               [p (in-list (hash-ref j 'losses))]
+               [i (in-naturals)])
+           (check-= r p tol (format "05_mnist[~a]: loss at step ~a" device i)))
+         (check-equal? (tensor-shape flat-params) (hash-ref j 'shape)
+                       (format "05_mnist[~a]: parameter count" device))
+         (for ([r (in-list (tensor->list flat-params))]
+               [p (in-list (hash-ref j 'values))]
+               [i (in-naturals)])
+           (check-= r p tol
+                    (format "05_mnist[~a]: parameter ~a parity" device i))))
+       (check-convnet 'cpu)
+       ;; the accelerator-parity pass: only when this host has a CUDA device AND
+       ;; the Python torch here was built with CUDA (the cu130 torch-bin wheel,
+       ;; staged by `nix develop .#cuda`). On a CPU-only box / CPU torch it skips.
+       (when (and (cuda-available?)
+                  (python-cuda-available?))
+         (check-convnet 'cuda)))
      ;; conv2d layer: the seeded init (kaiming-uniform weight + uniform bias,
      ;; in that order) must match nn.Conv2d.reset_parameters value-for-value,
      ;; which depends on fan-in = in*kH*kW being computed exactly like
