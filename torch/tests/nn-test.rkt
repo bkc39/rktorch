@@ -191,6 +191,29 @@
     (define x (randn 2 4))
     (check-equal? (tensor->list (net x)) (tensor->list (net x))))
 
+  (test-case "module-training? + in-eval-mode: query and restore the prior mode"
+    ;; a mode-sensitive leaf reports + toggles its own flag
+    (define d (dropout #:p 0.5))
+    (check-true (module-training? d) "dropout defaults to training")
+    (in-eval-mode d (check-false (module-training? d) "eval inside the body"))
+    (check-true (module-training? d) "restored to train")
+    ;; restores to the *prior* mode, not unconditionally train: from eval -> eval
+    (eval! d)
+    (in-eval-mode d (check-false (module-training? d)))
+    (check-false (module-training? d) "restored to eval, not flipped to train")
+    ;; structural: module-training? recurses (define-module linear leaves are
+    ;; always #t; the dropout child carries the mode) and in-eval-mode restores
+    (train! d)
+    (define net (sequential (linear 4 4) (dropout #:p 0.5)))
+    (check-true (module-training? net))
+    (in-eval-mode net (check-false (module-training? net)))
+    (check-true (module-training? net) "model restored to train")
+    ;; a dropout-free define-module is vacuously training (eval! a no-op)
+    (define lin (linear 4 2))
+    (check-true (module-training? lin))
+    (in-eval-mode lin (check-true (module-training? lin)))
+    (check-true (module-training? lin)))
+
   (test-case "sequential: forward, indexed dotted names, param order"
     (manual-seed! 0)
     (define net (sequential (linear 4 8) (dropout #:p 0.5) (linear 8 2)))

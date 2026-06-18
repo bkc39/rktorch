@@ -51,22 +51,41 @@
       (check-equal? (default-device) 'cpu)))
 
   (test-case "cuda round-trip"
-    ;; dynamic-wind so a raised GPU error (matmul/tensor->list can throw) still
-    ;; restores the process default to CPU and doesn't leak CUDA onto later tests.
+    ;; with-default-device restores the prior default even if a GPU op raises
+    ;; (matmul/tensor->list can throw), so CUDA can't leak onto later tests.
     (when (cuda-available?)
       (check-true (> (cuda-device-count) 0))
-      (dynamic-wind
-        (lambda () (set-default-device! 'cuda))
-        (lambda ()
-          (check-equal? (default-device) '(cuda 0))
-          (define g (zeros 2 2))
-          (check-equal? (tensor-device g) '(cuda 0))
-          (define back (to-device g 'cpu))
-          (check-equal? (tensor-device back) 'cpu)
-          (check-equal? (tensor->list back) '(0.0 0.0 0.0 0.0))
-          ;; a GPU matmul should match the CPU result
-          (define a (to-device (tensor '((1 2) (3 4))) 'cuda))
-          (define b (to-device (tensor '((5 6) (7 8))) 'cuda))
-          (check-equal? (tensor->list (to-device (matmul a b) 'cpu))
-                        '(19.0 22.0 43.0 50.0)))
-        (lambda () (set-default-device! 'cpu))))))
+      (set-default-device! 'cpu)
+      (with-default-device 'cuda
+        (check-equal? (default-device) '(cuda 0))
+        (define g (zeros 2 2))
+        (check-equal? (tensor-device g) '(cuda 0))
+        (define back (to-device g 'cpu))
+        (check-equal? (tensor-device back) 'cpu)
+        (check-equal? (tensor->list back) '(0.0 0.0 0.0 0.0))
+        ;; a GPU matmul should match the CPU result
+        (define a (to-device (tensor '((1 2) (3 4))) 'cuda))
+        (define b (to-device (tensor '((5 6) (7 8))) 'cuda))
+        (check-equal? (tensor->list (to-device (matmul a b) 'cpu))
+                      '(19.0 22.0 43.0 50.0)))
+      (check-equal? (default-device) 'cpu)))
+
+  (test-case "with-default-device restores the prior default (return + raise)"
+    (set-default-device! 'cpu)
+    ;; normal return restores
+    (with-default-device 'cpu (check-equal? (default-device) 'cpu))
+    (check-equal? (default-device) 'cpu)
+    ;; restored even when the body raises — the dynamic-wind guarantee a
+    ;; hand-rolled set/reset would drop
+    (check-exn exn:fail? (lambda () (with-default-device 'cpu (error "boom"))))
+    (check-equal? (default-device) 'cpu)
+    ;; nesting restores to the *enclosing* device, not the pre-outer default
+    (when (cuda-available?)
+      (with-default-device 'cuda
+        (check-equal? (default-device) '(cuda 0))
+        (with-default-device 'cpu (check-equal? (default-device) 'cpu))
+        (check-equal? (default-device) '(cuda 0)))
+      (check-equal? (default-device) 'cpu)
+      (check-exn exn:fail?
+                 (lambda () (with-default-device 'cuda (error "boom"))))
+      (check-equal? (default-device) 'cpu))))

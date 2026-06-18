@@ -3,9 +3,18 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
+    # A newer nixpkgs pinned ONLY for the CUDA Python torch in the `.#cuda`
+    # devShell's parity pass (see pythonCudaEnv). The main `nixpkgs` pin still
+    # ships torch-bin 2.11+cu128, whose prebuilt wheel needs CUDA 12 libs and so
+    # can't link the cudaPackages_13 stack the cuda libtorch-bin uses; this pin
+    # carries torch-bin 2.12+cu130, matching cudaPackages_13 (so the heavy
+    # nccl/ucc/nvshmem build is shared with cpp-cuda's CUDA closure). Scoped to
+    # that one env so the cpp/racket builds stay on the main pin untouched.
+    nixpkgsCuda.url =
+      "github:NixOS/nixpkgs/3e41b24abd260e8f71dbe2f5737d24122f972158";
   };
 
-  outputs = { self, nixpkgs }:
+  outputs = { self, nixpkgs, nixpkgsCuda }:
     let
       # libtorch-bin ships only these two; the C++ side builds against it.
       supportedSystems = [ "aarch64-darwin" "x86_64-linux" ];
@@ -332,11 +341,48 @@
           racket-deps = racketDepsFor pkgs;
           cpp = self.packages.${system}.cpp;
           cpp-cuda = self.packages.${system}.cpp-cuda;
+          # The CUDA libtorch the shim links; its lib/ holds the bundled cuDNN
+          # (libcudnn_*.so.9) that conv/pool ops dlopen by soname at runtime.
+          cudaTorch = torchPackageFor (import nixpkgs {
+            inherit system;
+            config = {
+              allowUnfree = true;
+              cudaSupport = true;
+            };
+          });
 
           # Python with the PyTorch wheel/lib, for interactive parity work
           # (`nix develop --command python3`) and the python-cross-test.  Cached
           # on both supported systems (a ~50 MiB fetch, not a source build).
           pythonEnv = pkgs.python314.withPackages (ps: [ ps.torch ]);
+
+          # CUDA-capable Python torch for the accelerator parity pass of the
+          # cross-test (the `.#cuda` shell): the cu130 torch-bin wheel — the
+          # torch binary itself is a download, no from-source build — in the same
+          # CUDA family (cu130) as the cuda libtorch-bin the shim links, from the
+          # nixpkgsCuda pin (see inputs). Its NCCL/UCC/nvshmem deps build from
+          # source once, shared with cpp-cuda's cudaPackages_13 closure. nixpkgs
+          # marks the wheel broken here only because its cuda-bindings *metadata*
+          # package is stale (12.9.7 < the 13.0.3 the wheel wants); the wheel
+          # carries its own cu130 runtime, so we relax that one gate to "warn".
+          pkgsCudaPy = import nixpkgsCuda {
+            inherit system;
+            config = {
+              allowUnfree = true;
+              cudaSupport = true;
+              problems.handlers.torch.unsupported-cuda-version = "warn";
+            };
+          };
+          # cudaPackages_13 so the cu130 wheel patchelfs against .so.13 (and
+          # shares cpp-cuda's CUDA closure). dontCheckRuntimeDeps skips the
+          # pythonRuntimeDepsCheckHook, which otherwise rejects the wheel because
+          # this nixpkgs' cuda-bindings *metadata* pkg is 12.9.7 (< the >=13.0.3
+          # the 2.12 wheel declares); cuda-bindings (cuda-python) isn't on the
+          # path of the conv/linear/adam ops the parity pass exercises.
+          pythonCudaEnv = pkgsCudaPy.python314.withPackages
+            (ps: [ ((ps.torch-bin.override {
+              cudaPackages = pkgsCudaPy.cudaPackages_13;
+            }).overridePythonAttrs (_: { dontCheckRuntimeDeps = true; })) ]);
 
           baseInputs = [
             pkgs.cmake
@@ -398,7 +444,17 @@
                 echo "WARNING: $_l not found via ldconfig; CUDA calls may fail" >&2
               fi
             done
-            export LD_LIBRARY_PATH="$_drv_farm''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+            # Driver farm first (host libcuda), then the libtorch lib dir so its
+            # bundled cuDNN resolves — conv/pool dlopen libcudnn_*.so.9 by
+            # soname, and the autoAddDriverRunpath doesn't cover that. (matmul
+            # and friends worked without it; only the cuDNN-backed ops need it.)
+            export LD_LIBRARY_PATH="$_drv_farm:${cudaTorch}/lib''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+            # The Python torch-bin (cu130 wheel, pythonCudaEnv) finds its own
+            # bundled libtorch/cuDNN via RUNPATH and needs ONLY the host driver —
+            # NOT cudaTorch/lib, whose libtorch 2.9 libs would shadow the wheel's
+            # 2.12 ones (libtorch_python.so ABI clash). The cross-test pins the
+            # python child's LD_LIBRARY_PATH to just this farm when it's set.
+            export RKTORCH_CUDA_DRIVER_PATH="$_drv_farm"
             echo "CUDA shell ready. Verify:"
             echo "  raco test torch/tests/device-test.rkt"
           '';
@@ -420,13 +476,17 @@
             buildInputs = baseInputs;
             shellHook = provisionRacket;
           };
-
-          # GPU verification shell: provisions Racket as usual, then stages the
-          # CUDA-linked native lib and the host driver (see cudaHook). The
-          # device tests' CUDA cases run for real here on a machine with an
-          # NVIDIA GPU; on a CPU-only box they self-skip.
+        }
+        # GPU verification shell: provisions Racket as usual, then stages the
+        # CUDA-linked native lib and the host driver (see cudaHook). The device
+        # tests' CUDA cases run for real here on an NVIDIA host; on a CPU-only
+        # box they self-skip. Linux-only — it stages the cu130 CUDA libtorch and
+        # the host driver. Omitted on non-Linux (rather than a `throw`, which
+        # would abort `nix flake check`'s eval of every devShell on darwin) so
+        # `nix develop .#cuda` there reports a plain "no such attribute".
+        // pkgs.lib.optionalAttrs pkgs.stdenv.isLinux {
           cuda = pkgs.mkShell {
-            buildInputs = baseInputs;
+            buildInputs = baseInputs ++ [ pythonCudaEnv ];
             shellHook = provisionRacket + cudaHook;
           };
         });

@@ -37,6 +37,8 @@
          cuda-device-count
          set-default-device!
          default-device
+         call-with-default-device
+         with-default-device
          to-device
          tensor-device
          tensor-numel
@@ -117,6 +119,19 @@
   (define-values (rc type index) (tr-get-default-device/raw))
   (check-ok rc 'default-device)
   (type+index->device type index))
+
+;; Run `thunk` with the process default device set to `dev`, restoring the prior
+;; default on the way out (even on escape) — the device analogue of
+;; call-with-no-grad. Use this rather than a hand-rolled dynamic-wind so a
+;; transient device switch can't leak onto later tensors.
+(define (call-with-default-device dev thunk)
+  (define saved (default-device))
+  (dynamic-wind (lambda () (set-default-device! dev))
+                thunk
+                (lambda () (set-default-device! saved))))
+
+(define-syntax-rule (with-default-device dev body ...)
+  (call-with-default-device dev (lambda () body ...)))
 
 ;; Copy a tensor onto `dev` (torch.Tensor.to(device)).
 (define (to-device t dev)

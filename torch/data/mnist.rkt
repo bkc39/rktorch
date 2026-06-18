@@ -12,8 +12,9 @@
 (require racket/runtime-path
          (only-in racket/file file->bytes make-directory*)
          (only-in racket/port copy-port)
-         (only-in net/url string->url get-pure-port)
+         (only-in net/url string->url get-pure-port call/input-url)
          (only-in file/gunzip gunzip-through-ports)
+         (only-in "../private/util.rkt" with-temporary-file)
          (only-in "../main.rkt" tensor reshape to-dtype))
 
 (provide read-idx
@@ -65,8 +66,13 @@
 ;; The mirror PyTorch's torchvision uses (yann.lecun.com is gone).
 (define mnist-mirror "https://ossci-datasets.s3.amazonaws.com/mnist/")
 
+;; Cache location: $RKTORCH_MNIST_DIR if set (e.g. a big data disk), else the
+;; per-user system cache dir.
 (define (mnist-cache-dir)
-  (build-path (find-system-path 'cache-dir) "rktorch" "mnist"))
+  (define override (getenv "RKTORCH_MNIST_DIR"))
+  (if (and override (not (string=? override "")))
+      (string->path override)
+      (build-path (find-system-path 'cache-dir) "rktorch" "mnist")))
 
 ;; Fetch <name> (a .gz IDX file) into the cache once, then return its
 ;; gunzipped bytes.
@@ -74,9 +80,21 @@
   (define dest (build-path (mnist-cache-dir) name))
   (unless (file-exists? dest)
     (make-directory* (mnist-cache-dir))
-    (define in (get-pure-port (string->url (string-append mnist-mirror name))))
-    (call-with-output-file dest (lambda (out) (copy-port in out)))
-    (close-input-port in))
+    ;; Download to a temp file in the cache dir, then atomically rename on
+    ;; success, so an interrupted/failed fetch can't leave a partial file at
+    ;; `dest` that file-exists? would treat as a valid cache entry.
+    ;; with-temporary-file owns the temp's lifetime (removed on any escape) and
+    ;; call/input-url owns the URL port (opened via get-pure-port, closed even on
+    ;; error) — so neither the temp nor the port leaks on a network failure, with
+    ;; no hand-rolled dynamic-wind in this code.
+    (with-temporary-file (tmp #:template "mnist-~a.part"
+                              #:directory (mnist-cache-dir))
+      (call/input-url (string->url (string-append mnist-mirror name))
+                      get-pure-port
+                      (lambda (in)
+                        (call-with-output-file tmp #:exists 'truncate
+                          (lambda (out) (copy-port in out)))
+                        (rename-file-or-directory tmp dest #t)))))
   (define out (open-output-bytes))
   (gunzip-through-ports (open-input-bytes (file->bytes dest)) out)
   (get-output-bytes out))

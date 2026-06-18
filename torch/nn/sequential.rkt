@@ -14,7 +14,8 @@
                   module-parameters
                   module-named-parameters
                   module-buffers
-                  module-set-training!))
+                  module-set-training!
+                  module-training?))
 
 (provide sequential
          sequential?)
@@ -32,6 +33,7 @@
    (define/generic gen-named module-named-parameters)
    (define/generic gen-buffers module-buffers)
    (define/generic gen-set-training! module-set-training!)
+   (define/generic gen-training? module-training?)
    (define (module-forward self . inputs)
      (apply (lambda (x)
               (for/fold ([acc x])
@@ -50,7 +52,10 @@
      (append-map gen-buffers (sequential-impl-modules self)))
    (define (module-set-training! self training?)
      (for ([m (in-list (sequential-impl-modules self))])
-       (gen-set-training! m training?)))])
+       (gen-set-training! m training?)))
+   ;; training iff every contained module is (vacuously #t when empty).
+   (define (module-training? self)
+     (andmap gen-training? (sequential-impl-modules self)))])
 
 ;; (sequential m0 m1 ...) — variadic, like nn.Sequential(*modules).
 (define (sequential . modules)
