@@ -6,9 +6,9 @@
 ;; the whole stack end to end — data -> conv/pool/flatten/linear ->
 ;; cross-entropy -> backward! -> adam -> state-dict.
 ;;
-;; conv2d names the nn *layer* (torch/nn); the functional max-pool2d/flatten come
-;; from torch/nn/functional (F) since #11, and relu from `torch` — the model-file
-;; import pattern (mirrors `import torch.nn as nn, torch.nn.functional as F`).
+;; Conv2d/Linear are the nn *layers* (PascalCase, torch/nn); max-pool2d/flatten/
+;; relu are the lowercase functional ops on `torch` — the model-file import
+;; pattern, no collision (#11).
 
 (module+ test
   (require rackunit
@@ -16,16 +16,15 @@
            (only-in racket/file make-temporary-file)
            "../main.rkt"
            "../nn.rkt"
-           (prefix-in F: "../nn/functional.rkt")
            (only-in "../data/mnist.rkt" load-mnist-fixture))
 
   ;; [N,1,28,28] -> conv(1->8,k3) -> relu -> maxpool2 -> flatten -> fc(1352,10).
   ;; 28 -3 +1 = 26 after conv; /2 = 13 after pool; 8*13*13 = 1352.
   (define-module convnet ()
-    #:submodules ([c1 (conv2d 1 8 3)]
-                  [fc (linear 1352 10)])
+    #:submodules ([c1 (Conv2d 1 8 3)]
+                  [fc (Linear 1352 10)])
     #:forward (x)
-    (fc (F:flatten (F:max-pool2d (relu (c1 x)) 2) 1)))
+    (fc (flatten (max-pool2d (relu (c1 x)) 2) 1)))
 
   (test-case "convnet trains on the MNIST fixture (loss decreases)"
     (manual-seed! 0)

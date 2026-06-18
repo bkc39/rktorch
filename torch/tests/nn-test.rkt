@@ -5,10 +5,10 @@
 ;; with PyTorch's nn.Linear lives in python-cross-test.
 
 (module+ test
-  ;; conv2d/max-pool2d/flatten name the nn layers here. Since #11 the functional
-  ;; forms live in torch/nn/functional (not on `torch`), so `(require torch
-  ;; torch/nn)` no longer collides — no except-in needed. (racket/list's flatten
-  ;; still collides with the nn flatten layer, so that one is excepted.)
+  ;; Layers are PascalCase (Conv2d/MaxPool2d/Flatten/Linear/…) since #11, so
+  ;; `(require torch torch/nn)` no longer collides with the lowercase functional
+  ;; ops on `torch`. (racket/list's flatten/argmax still collide with torch's
+  ;; functional flatten/argmax, so those two are excepted.)
   (require (except-in racket/list argmax flatten)
            (only-in racket/file make-temporary-file)
            rackunit
@@ -16,8 +16,8 @@
            "../nn.rkt")
 
   (define-module mlp (in hidden out)
-    #:submodules ([fc1 (linear in hidden)]
-                  [fc2 (linear hidden out)])
+    #:submodules ([fc1 (Linear in hidden)]
+                  [fc2 (Linear hidden out)])
     #:forward (x)
     (fc2 (relu (fc1 x))))
 
@@ -28,8 +28,8 @@
 
   (test-case "linear layer: shapes, forward, predicate"
     (manual-seed! 0)
-    (define l (linear 4 3))
-    (check-true (linear? l))
+    (define l (Linear 4 3))
+    (check-true (Linear? l))
     (check-true (module? l))
     (define ps (parameters l))
     (check-equal? (map tensor-shape ps) '((3 4) (3)))
@@ -66,7 +66,7 @@
 
   (test-case "sgd step applies p -= lr * grad and zero-grads! resets"
     (manual-seed! 0)
-    (define l (linear 2 1))
+    (define l (Linear 2 1))
     (define opt (sgd (parameters l) #:lr 0.5))
     (define x (tensor '((1.0 2.0))))
     (define y (tensor '((1.0))))
@@ -89,8 +89,8 @@
 
   (test-case "conv2d layer: param shapes, names, predicate, forward shape"
     (manual-seed! 0)
-    (define c (conv2d 1 8 3 #:stride 1 #:padding 1))
-    (check-true (conv2d? c))
+    (define c (Conv2d 1 8 3 #:stride 1 #:padding 1))
+    (check-true (Conv2d? c))
     (check-true (module? c))
     (define ps (parameters c))
     (check-equal? (map tensor-shape ps) '((8 1 3 3) (8)))
@@ -100,29 +100,29 @@
 
   (test-case "conv2d non-square kernel + per-axis padding"
     (manual-seed! 0)
-    (define c (conv2d 3 6 '(3 5) #:padding '(1 2)))
+    (define c (Conv2d 3 6 '(3 5) #:padding '(1 2)))
     (check-equal? (tensor-shape (car (parameters c))) '(6 3 3 5))
     (check-equal? (tensor-shape (c (randn 2 3 10 10))) '(2 6 10 10)))
 
   (test-case "max-pool2d layer: stateless, default stride = kernel"
-    (define p (max-pool2d 2))
-    (check-true (max-pool2d? p))
+    (define p (MaxPool2d 2))
+    (check-true (MaxPool2d? p))
     (check-equal? (parameters p) '())
     (check-equal? (tensor-shape (p (randn 4 8 28 28))) '(4 8 14 14)))
 
   (test-case "flatten layer: collapses from start-dim, keeps batch"
-    (define f (flatten))
-    (check-true (flatten? f))
+    (define f (Flatten))
+    (check-true (Flatten? f))
     (check-equal? (parameters f) '())
     (check-equal? (tensor-shape (f (randn 4 8 14 14))) '(4 1568)))
 
   (test-case "conv -> pool -> flatten -> linear convnet composes"
     (manual-seed! 0)
     (define-module convnet ()
-      #:submodules ([c1 (conv2d 1 8 3 #:padding 1)]
-                    [pool (max-pool2d 2)]
-                    [flat (flatten)]
-                    [fc (linear (* 8 14 14) 10)])
+      #:submodules ([c1 (Conv2d 1 8 3 #:padding 1)]
+                    [pool (MaxPool2d 2)]
+                    [flat (Flatten)]
+                    [fc (Linear (* 8 14 14) 10)])
       #:forward (x)
       (fc (flat (pool (relu (c1 x))))))
     (define net (convnet))
@@ -171,7 +171,7 @@
 
   (test-case "dropout: train drops/scales, eval is identity, mode recurses"
     (manual-seed! 0)
-    (define d (dropout #:p 0.5))
+    (define d (Dropout #:p 0.5))
     (define x (ones 100))
     ;; training (default): each entry is 0 or 2.0 (kept and scaled by 1/(1-p))
     (define tr (tensor->list (d x)))
@@ -186,7 +186,7 @@
                         (tensor->list (d x)))))
 
   (test-case "dropout inside a model: eval! recurses through submodules"
-    (define net (sequential (linear 4 4) (dropout #:p 0.9)))
+    (define net (Sequential (Linear 4 4) (Dropout #:p 0.9)))
     (eval! net)
     ;; with dropout off, repeated forwards on the same input agree
     (define x (randn 2 4))
@@ -194,7 +194,7 @@
 
   (test-case "module-training? + in-eval-mode: query and restore the prior mode"
     ;; a mode-sensitive leaf reports + toggles its own flag
-    (define d (dropout #:p 0.5))
+    (define d (Dropout #:p 0.5))
     (check-true (module-training? d) "dropout defaults to training")
     (in-eval-mode d (check-false (module-training? d) "eval inside the body"))
     (check-true (module-training? d) "restored to train")
@@ -205,33 +205,33 @@
     ;; structural: module-training? recurses (define-module linear leaves are
     ;; always #t; the dropout child carries the mode) and in-eval-mode restores
     (train! d)
-    (define net (sequential (linear 4 4) (dropout #:p 0.5)))
+    (define net (Sequential (Linear 4 4) (Dropout #:p 0.5)))
     (check-true (module-training? net))
     (in-eval-mode net (check-false (module-training? net)))
     (check-true (module-training? net) "model restored to train")
     ;; a dropout-free define-module is vacuously training (eval! a no-op)
-    (define lin (linear 4 2))
+    (define lin (Linear 4 2))
     (check-true (module-training? lin))
     (in-eval-mode lin (check-true (module-training? lin)))
     (check-true (module-training? lin)))
 
   (test-case "sequential: forward, indexed dotted names, param order"
     (manual-seed! 0)
-    (define net (sequential (linear 4 8) (dropout #:p 0.5) (linear 8 2)))
+    (define net (Sequential (Linear 4 8) (Dropout #:p 0.5) (Linear 8 2)))
     (check-equal? (tensor-shape (net (randn 3 4))) '(3 2))
     (check-equal? (map car (named-parameters net))
                   '("0.weight" "0.bias" "2.weight" "2.bias"))
     (check-equal? (length (parameters net)) 4)
-    (check-true (sequential? net)))
+    (check-true (Sequential? net)))
 
   (test-case "safetensors state-dict round-trips bit-exactly"
     (manual-seed! 0)
-    (define net (sequential (linear 4 8) (dropout #:p 0.3) (linear 8 2)))
+    (define net (Sequential (Linear 4 8) (Dropout #:p 0.3) (Linear 8 2)))
     (define path (make-temporary-file "rkt-st-~a.safetensors"))
     (save-state! net path)
     ;; a differently-seeded model has different params...
     (manual-seed! 99)
-    (define net2 (sequential (linear 4 8) (dropout #:p 0.3) (linear 8 2)))
+    (define net2 (Sequential (Linear 4 8) (Dropout #:p 0.3) (Linear 8 2)))
     (load-state! net2 path)
     ;; ...and after load matches the saved model parameter-for-parameter.
     (for ([a (in-list (state-dict net))] [b (in-list (state-dict net2))])

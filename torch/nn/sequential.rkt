@@ -17,8 +17,9 @@
                   module-set-training!
                   module-training?))
 
-(provide sequential
-         sequential?)
+;; PascalCase like nn.Sequential.
+(provide Sequential
+         Sequential?)
 
 (struct sequential-impl (modules)
   #:reflection-name 'sequential
@@ -58,7 +59,7 @@
      (andmap gen-training? (sequential-impl-modules self)))])
 
 ;; (sequential m0 m1 ...) — variadic, like nn.Sequential(*modules).
-(define (sequential . modules)
+(define (Sequential . modules)
   (sequential-impl modules))
 
-(define sequential? sequential-impl?)
+(define Sequential? sequential-impl?)

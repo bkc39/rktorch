@@ -8,8 +8,10 @@
 ;; functional ops in the facade; they exist as modules so `sequential` can hold
 ;; them.
 
-;; The functional ops are renamed f:* so the layer constructors below can keep
-;; the PyTorch names (nn.Conv2d vs F.conv2d) without shadowing themselves.
+;; The layer constructors are PascalCase (Conv2d/MaxPool2d/Flatten), mirroring
+;; the torch.nn.* classes; the lowercase functional ops they call live on `torch`
+;; and are imported here as f:* (torch.conv2d vs nn.Conv2d). PascalCase layer
+;; names keep `(require torch torch/nn)` collision-free (#11).
 (require (only-in "../foreign.rkt"
                   [conv2d f:conv2d]
                   [flatten f:flatten]
@@ -18,14 +20,14 @@
          (only-in "init.rkt" fan-in kaiming-uniform uniform-init)
          (only-in "module.rkt" define-module))
 
-;; conv2d?/max-pool2d?/flatten? are produced by the define-module expansions
+;; Conv2d?/MaxPool2d?/Flatten? are produced by the define-module expansions
 ;; below (the conv2d%/... structs), invisible to raco review without expansion.
-(provide conv2d
-         conv2d? ;; noqa
-         max-pool2d
-         max-pool2d? ;; noqa
-         flatten
-         flatten? ;; noqa
+(provide Conv2d
+         Conv2d? ;; noqa
+         MaxPool2d
+         MaxPool2d? ;; noqa
+         Flatten
+         Flatten? ;; noqa
          )
 
 ;; ------------------------------------------------------------------- conv2d
@@ -42,13 +44,13 @@
   #:forward (x)
   (f:conv2d x weight #:bias bias #:stride stride #:padding padding))
 
-(define (conv2d in-channels out-channels kernel-size
+(define (Conv2d in-channels out-channels kernel-size
                 #:stride [stride 1]
                 #:padding [padding 0])
   (conv2d% in-channels out-channels
            (->2d kernel-size) (->2d stride) (->2d padding)))
 
-(define conv2d? conv2d%?)
+(define Conv2d? conv2d%?)
 
 ;; ---------------------------------------------------------------- max-pool2d
 
@@ -57,10 +59,10 @@
   #:forward (x)
   (f:max-pool2d x kernel-size #:stride stride #:padding padding))
 
-(define (max-pool2d kernel-size #:stride [stride #f] #:padding [padding 0])
+(define (MaxPool2d kernel-size #:stride [stride #f] #:padding [padding 0])
   (max-pool2d% kernel-size stride padding))
 
-(define max-pool2d? max-pool2d%?)
+(define MaxPool2d? max-pool2d%?)
 
 ;; ------------------------------------------------------------------- flatten
 
@@ -69,7 +71,7 @@
   #:forward (x)
   (f:flatten x start-dim end-dim))
 
-(define (flatten #:start-dim [start-dim 1] #:end-dim [end-dim -1])
+(define (Flatten #:start-dim [start-dim 1] #:end-dim [end-dim -1])
   (flatten% start-dim end-dim))
 
-(define flatten? flatten%?)
+(define Flatten? flatten%?)

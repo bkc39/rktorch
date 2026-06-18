@@ -17,9 +17,10 @@
                   module-set-training!
                   module-training?))
 
-;; dropout?/the constructor are the public names; the struct is dropout-impl.
-(provide dropout
-         dropout?)
+;; Dropout?/the constructor are the public names (PascalCase, like nn.Dropout);
+;; the struct is dropout-impl.
+(provide Dropout
+         Dropout?)
 
 ;; Modules default to training mode, like torch.nn (call eval! to switch).
 (struct dropout-impl (p [training? #:mutable])
@@ -40,7 +41,7 @@
    (define (module-training? self)
      (dropout-impl-training? self))])
 
-(define (dropout #:p [p 0.5])
+(define (Dropout #:p [p 0.5])
   (dropout-impl p #t))
 
-(define dropout? dropout-impl?)
+(define Dropout? dropout-impl?)

@@ -15,13 +15,11 @@
 ;; yields `~>` for tensor pipelines (mirrors rkt-polars):
 ;;   (~> x (* x) Σ)  ==  (Σ (* x x))
 ;;
-;; conv2d / max-pool2d / flatten are withheld from the top-level surface: their
-;; bare names are nn layer constructors (torch/nn), so exporting the functional
-;; forms here too would collide under `(require torch torch/nn)` (#11). The
-;; functional forms live in torch/nn/functional (F). avg-pool2d /
-;; adaptive-avg-pool2d have no layer twin, so they stay here.
-(provide (except-out (all-from-out "foreign.rkt")
-                     conv2d max-pool2d flatten)
+;; The functional ops keep their lowercase names here (conv2d / max-pool2d /
+;; flatten / …), mirroring `torch.conv2d`. The nn layer constructors are
+;; PascalCase (Conv2d / MaxPool2d / Flatten / Linear / …, mirroring the
+;; `torch.nn.*` classes), so `(require torch torch/nn)` never collides (#11).
+(provide (all-from-out "foreign.rkt")
          ~> ~>> lambda~> lambda~>>)
 
 (module+ main

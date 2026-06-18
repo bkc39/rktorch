@@ -1,7 +1,7 @@
 #lang scribble/lp2
 
 @(require (for-label (except-in racket/base exp log sqrt max min + - * /)
-                     torch))
+                     torch torch/nn))
 
 @section[#:tag "ex-mlp"]{Training an MLP end to end}
 
@@ -24,8 +24,8 @@ clause and are callable in @racket[#:forward] like Python's
 
 @chunk[<r04-model>
 (define-module mlp (d-in d-hidden d-out)
-  #:submodules ([fc1 (linear d-in d-hidden)]
-                [fc2 (linear d-hidden d-out)])
+  #:submodules ([fc1 (Linear d-in d-hidden)]
+                [fc2 (Linear d-hidden d-out)])
   #:forward (x)
   (fc2 (relu (fc1 x))))]
 
@@ -42,7 +42,7 @@ chose so callers can report it.
 
 @bold{The loop.} Each step: clear gradients, forward, MSE loss, backward,
 update. On the CPU path, with the same seed this matches
-@filepath{python/04_mlp.py} draw-for-draw: the two @racket[linear] inits consume
+@filepath{python/04_mlp.py} draw-for-draw: the two @racket[Linear] inits consume
 the RNG exactly like @tt{nn.Linear}, then the batch is sampled identically. (The
 GPU uses its own RNG, so CUDA runs train just as well but draw different values.)
 
