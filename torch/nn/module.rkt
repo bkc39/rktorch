@@ -107,9 +107,15 @@
     (pattern [id:id init:expr])))
 
 ;; (define-module name (ctor-arg ...)
-;;   #:params     ([p init] ...)     ; optional — registered trainable tensors
-;;   #:buffers    ([b init] ...)     ; optional — registered, not trainable
-;;   #:submodules ([m init] ...)     ; optional — nested gen:module values
+;;   #:params          ([p init] ...)  ; optional — registered trainable tensors
+;;   #:buffers         ([b init] ...)  ; optional — registered, not trainable
+;;   #:submodules      ([m init] ...)  ; optional — nested gen:module values
+;;   #:reflection-name 'Public         ; optional — struct name for object-name;
+;;                                      ;   defaults to `name`. Use when an
+;;                                      ;   internal `name%` struct is wrapped by
+;;                                      ;   a public smart constructor, so
+;;                                      ;   instances still reflect as the public
+;;                                      ;   name rather than `name%`.
 ;;   #:forward (input ...) body ...)
 ;;
 ;; Expands to a struct (one field per ctor-arg/param/buffer/submodule), a
@@ -122,7 +128,8 @@
     [(_ name:id (ctor-arg:id ...)
         (~alt (~optional (~seq #:params (param:binding ...)))
               (~optional (~seq #:buffers (buffer:binding ...)))
-              (~optional (~seq #:submodules (sub:binding ...)))) ...
+              (~optional (~seq #:submodules (sub:binding ...)))
+              (~optional (~seq #:reflection-name reflect:expr))) ...
         #:forward (input:id ...) body:expr ...+)
      (define (ids attr) (or attr '()))
      (define struct-id (generate-temporary #'name))
@@ -147,7 +154,7 @@
                      [(sm-name ...) (map name-string (syntax->list #'(sm ...)))])
          #'(begin
              (struct sid (ctor-arg ... p ... b ... sm ...)
-               #:reflection-name 'name
+               #:reflection-name (~? reflect 'name)
                #:property prop:procedure
                (lambda (self . inputs) (apply module-forward self inputs))
                #:methods gen:module

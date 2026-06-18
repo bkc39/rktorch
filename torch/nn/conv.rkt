@@ -35,6 +35,7 @@
 ;; kernel-size/stride/padding arrive already normalized to [h w] lists from the
 ;; smart constructor, so the weight shape and fan-in are straightforward.
 (define-module Conv2d% (in-channels out-channels kernel-size stride padding)
+  #:reflection-name 'Conv2d
   #:params ([weight (kaiming-uniform (list out-channels in-channels
                                             (car kernel-size) (cadr kernel-size)))]
             [bias (let ([bound (/ 1.0 (sqrt (fan-in (list out-channels in-channels
@@ -56,6 +57,7 @@
 
 ;; Stateless; stride #f means "default to kernel-size", matching nn.MaxPool2d.
 (define-module MaxPool2d% (kernel-size stride padding)
+  #:reflection-name 'MaxPool2d
   #:forward (x)
   (f:max-pool2d x kernel-size #:stride stride #:padding padding))
 
@@ -68,6 +70,7 @@
 
 ;; nn.Flatten defaults to start_dim=1, keeping the batch dim.
 (define-module Flatten% (start-dim end-dim)
+  #:reflection-name 'Flatten
   #:forward (x)
   (f:flatten x start-dim end-dim))
 
