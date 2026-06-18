@@ -9,6 +9,7 @@
          ;; conv2d/max-pool2d/flatten layer names collide with torch and the
          ;; example owns those imports internally, so drop them here (#11).
          (except-in torch/nn conv2d max-pool2d flatten)
+         (only-in torch/data/mnist load-mnist-fixture)
          "../racket/05-mnist.rkt")
 
 (module+ main
@@ -36,4 +37,12 @@
                   "f1.weight" "f1.bias" "f2.weight" "f2.bias"))
   (check-equal? (map tensor-shape (parameters net))
                 '((16 1 3 3) (16) (32 16 3 3) (32)
-                  (128 800) (128) (10 128) (10))))
+                  (128 800) (128) (10 128) (10)))
+  ;; smoke-test accuracy (the only exerciser of in-eval-mode at the example
+  ;; level): the loss-decreasing net should beat the 0.1 random-chance floor for
+  ;; 10 classes, and accuracy must leave the net back in train mode.
+  (define-values (xs ys) (load-mnist-fixture))
+  (define acc (accuracy net xs ys))
+  (check-true (and (> acc 0.1) (<= acc 1.0))
+              (format "accuracy out of expected range: ~a" acc))
+  (check-true (module-training? net) "accuracy left the net in eval mode"))

@@ -28,7 +28,7 @@ issue #11; this is the workaround until then.)
          (only-in torch/data/mnist load-mnist load-mnist-fixture))]
 
 @chunk[<r05-provide>
-(provide convnet pick-device run-example train-mnist)]
+(provide convnet pick-device accuracy run-example train-mnist)]
 
 @bold{The model.} @racket[define-module] builds the parameter tree; the
 submodules are callable in @racket[#:forward] exactly like @tt{self.c1(x)} in

@@ -330,34 +330,6 @@
       (check-= r p tol
                (format "~a~a: generated value ~a parity" name label i))))
 
-  ;; The Conv-MNIST model for the 05 parity pass — a top-level form (kept in
-  ;; sync with examples/racket/05-mnist.rkt's convnet; the example test imports
-  ;; the real run-example, while this package-internal suite re-declares it,
-  ;; since torch/ can't reach examples/ once installed by copy in the nix build).
-  (define-module convnet ()
-    #:submodules ([c1 (nn-conv2d 1 16 3)]
-                  [c2 (nn-conv2d 16 32 3)]
-                  [f1 (linear 800 128)]
-                  [f2 (linear 128 10)])
-    #:forward (x)
-    (~> x
-        c1 relu (max-pool2d 2)
-        c2 relu (max-pool2d 2)
-        (flatten 1) f1 relu
-        f2))
-
-  ;; Structural guard against silent divergence from the example's convnet
-  ;; (which this re-declares — see the comment above): a changed layer size there
-  ;; trips this immediately, rather than only showing up as wrong parity numbers.
-  ;; Shape only — it does NOT guard the forward body (activation choice, pooling
-  ;; order, threading): such a change would still pass here and instead surface
-  ;; as a step-1 parity-value mismatch, so treat a forward-pass edit in the
-  ;; example as a deliberate cue to re-audit this re-declaration.
-  (check-equal? (map tensor-shape (parameters (convnet)))
-                '((16 1 3 3) (16) (32 16 3 3) (32)
-                  (128 800) (128) (10 128) (10))
-                "convnet shape must match examples/racket/05-mnist.rkt")
-
   (cond
     [(not (python-torch-available?))
      (printf "[python-cross-test] skipped: python3 `torch` not available ~a\n"
@@ -428,8 +400,35 @@
      ;; CUDA pass runs only when a GPU is present on both sides (the "accelerator
      ;; programs match PyTorch" check) and self-skips otherwise.
      (let ()
+       ;; The Conv-MNIST model for the parity pass. Re-declared here (rather than
+       ;; imported from examples/racket/05-mnist.rkt) because torch/ can't reach
+       ;; examples/ once installed by copy in the nix build — and kept inside the
+       ;; python-available branch so its tensors aren't allocated when the suite
+       ;; skips. Must stay in sync with that example's convnet.
+       (define-module convnet ()
+         #:submodules ([c1 (nn-conv2d 1 16 3)]
+                       [c2 (nn-conv2d 16 32 3)]
+                       [f1 (linear 800 128)]
+                       [f2 (linear 128 10)])
+         #:forward (x)
+         (~> x
+             c1 relu (max-pool2d 2)
+             c2 relu (max-pool2d 2)
+             (flatten 1) f1 relu
+             f2))
+       ;; Structural guard against silent divergence from the example's convnet:
+       ;; a changed layer size there trips this immediately. Shape only — it does
+       ;; NOT guard the forward body (activation choice, pooling order,
+       ;; threading); such a change surfaces instead as a step-1 parity-value
+       ;; mismatch, so treat a forward edit in the example as a cue to re-audit.
+       (check-equal? (map tensor-shape (parameters (convnet)))
+                     '((16 1 3 3) (16) (32 16 3 3) (32)
+                       (128 800) (128) (10 128) (10))
+                     "convnet shape must match examples/racket/05-mnist.rkt")
        ;; Train on `device` and return (values losses flat-params), exactly as
-       ;; examples/racket/05-mnist.rkt's run-example does.
+       ;; examples/racket/05-mnist.rkt's run-example does. Must stay in sync with
+       ;; run-example: seed=0, steps=5, lr=0.001, full-batch on the fixture, no
+       ;; shuffling — a mismatch here shows up as a step-0 loss-parity failure.
        (define (train-on device)
          (with-default-device device
            (manual-seed! 0)
