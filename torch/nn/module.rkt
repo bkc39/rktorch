@@ -111,7 +111,9 @@
 ;;   #:buffers         ([b init] ...)  ; optional — registered, not trainable
 ;;   #:submodules      ([m init] ...)  ; optional — nested gen:module values
 ;;   #:reflection-name 'Public         ; optional — struct name for object-name;
-;;                                      ;   defaults to `name`. Use when an
+;;                                      ;   defaults to `name`. Must appear AFTER
+;;                                      ;   any #:params/#:buffers/#:submodules
+;;                                      ;   (and before #:forward). Use when an
 ;;                                      ;   internal `name%` struct is wrapped by
 ;;                                      ;   a public smart constructor, so
 ;;                                      ;   instances still reflect as the public

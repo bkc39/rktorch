@@ -96,7 +96,9 @@
     (check-equal? (map tensor-shape ps) '((8 1 3 3) (8)))
     (check-true (andmap requires-grad? ps))
     (check-equal? (map car (named-parameters c)) '("weight" "bias"))
-    (check-equal? (tensor-shape (c (randn 4 1 28 28))) '(4 8 28 28)))
+    (check-equal? (tensor-shape (c (randn 4 1 28 28))) '(4 8 28 28))
+    ;; reflection-name tracks the public constructor, not the internal Conv2d%
+    (check-equal? (object-name c) 'Conv2d))
 
   (test-case "Conv2d non-square kernel + per-axis padding"
     (manual-seed! 0)
@@ -108,13 +110,15 @@
     (define p (MaxPool2d 2))
     (check-true (MaxPool2d? p))
     (check-equal? (parameters p) '())
-    (check-equal? (tensor-shape (p (randn 4 8 28 28))) '(4 8 14 14)))
+    (check-equal? (tensor-shape (p (randn 4 8 28 28))) '(4 8 14 14))
+    (check-equal? (object-name p) 'MaxPool2d))
 
   (test-case "Flatten layer: collapses from start-dim, keeps batch"
     (define f (Flatten))
     (check-true (Flatten? f))
     (check-equal? (parameters f) '())
-    (check-equal? (tensor-shape (f (randn 4 8 14 14))) '(4 1568)))
+    (check-equal? (tensor-shape (f (randn 4 8 14 14))) '(4 1568))
+    (check-equal? (object-name f) 'Flatten))
 
   (test-case "conv -> pool -> flatten -> linear convnet composes"
     (manual-seed! 0)
