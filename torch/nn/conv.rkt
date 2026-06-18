@@ -21,7 +21,7 @@
          (only-in "module.rkt" define-module))
 
 ;; Conv2d?/MaxPool2d?/Flatten? are produced by the define-module expansions
-;; below (the conv2d%/... structs), invisible to raco review without expansion.
+;; below (the Conv2d%/... structs), invisible to raco review without expansion.
 (provide Conv2d
          Conv2d? ;; noqa
          MaxPool2d
@@ -34,7 +34,7 @@
 
 ;; kernel-size/stride/padding arrive already normalized to [h w] lists from the
 ;; smart constructor, so the weight shape and fan-in are straightforward.
-(define-module conv2d% (in-channels out-channels kernel-size stride padding)
+(define-module Conv2d% (in-channels out-channels kernel-size stride padding)
   #:params ([weight (kaiming-uniform (list out-channels in-channels
                                             (car kernel-size) (cadr kernel-size)))]
             [bias (let ([bound (/ 1.0 (sqrt (fan-in (list out-channels in-channels
@@ -47,31 +47,31 @@
 (define (Conv2d in-channels out-channels kernel-size
                 #:stride [stride 1]
                 #:padding [padding 0])
-  (conv2d% in-channels out-channels
+  (Conv2d% in-channels out-channels
            (->2d kernel-size) (->2d stride) (->2d padding)))
 
-(define Conv2d? conv2d%?)
+(define Conv2d? Conv2d%?)
 
 ;; ---------------------------------------------------------------- max-pool2d
 
 ;; Stateless; stride #f means "default to kernel-size", matching nn.MaxPool2d.
-(define-module max-pool2d% (kernel-size stride padding)
+(define-module MaxPool2d% (kernel-size stride padding)
   #:forward (x)
   (f:max-pool2d x kernel-size #:stride stride #:padding padding))
 
 (define (MaxPool2d kernel-size #:stride [stride #f] #:padding [padding 0])
-  (max-pool2d% kernel-size stride padding))
+  (MaxPool2d% kernel-size stride padding))
 
-(define MaxPool2d? max-pool2d%?)
+(define MaxPool2d? MaxPool2d%?)
 
 ;; ------------------------------------------------------------------- flatten
 
 ;; nn.Flatten defaults to start_dim=1, keeping the batch dim.
-(define-module flatten% (start-dim end-dim)
+(define-module Flatten% (start-dim end-dim)
   #:forward (x)
   (f:flatten x start-dim end-dim))
 
 (define (Flatten #:start-dim [start-dim 1] #:end-dim [end-dim -1])
-  (flatten% start-dim end-dim))
+  (Flatten% start-dim end-dim))
 
-(define Flatten? flatten%?)
+(define Flatten? Flatten%?)

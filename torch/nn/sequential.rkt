@@ -22,7 +22,7 @@
          Sequential?)
 
 (struct sequential-impl (modules)
-  #:reflection-name 'sequential
+  #:reflection-name 'Sequential
   #:property prop:procedure
   (lambda (self . inputs) (apply module-forward self inputs))
   #:methods gen:module

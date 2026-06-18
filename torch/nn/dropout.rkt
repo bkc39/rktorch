@@ -24,7 +24,7 @@
 
 ;; Modules default to training mode, like torch.nn (call eval! to switch).
 (struct dropout-impl (p [training? #:mutable])
-  #:reflection-name 'dropout
+  #:reflection-name 'Dropout
   #:property prop:procedure
   (lambda (self . inputs) (apply module-forward self inputs))
   #:methods gen:module
