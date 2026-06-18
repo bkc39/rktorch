@@ -31,6 +31,8 @@
     (define l (Linear 4 3))
     (check-true (Linear? l))
     (check-true (module? l))
+    ;; the default reflection path (no #:reflection-name override) -> 'Linear
+    (check-equal? (object-name l) 'Linear)
     (define ps (parameters l))
     (check-equal? (map tensor-shape ps) '((3 4) (3)))
     (check-true (andmap requires-grad? ps))
@@ -176,6 +178,7 @@
   (test-case "dropout: train drops/scales, eval is identity, mode recurses"
     (manual-seed! 0)
     (define d (Dropout #:p 0.5))
+    (check-equal? (object-name d) 'Dropout)
     (define x (ones 100))
     ;; training (default): each entry is 0 or 2.0 (kept and scaled by 1/(1-p))
     (define tr (tensor->list (d x)))
@@ -226,7 +229,8 @@
     (check-equal? (map car (named-parameters net))
                   '("0.weight" "0.bias" "2.weight" "2.bias"))
     (check-equal? (length (parameters net)) 4)
-    (check-true (Sequential? net)))
+    (check-true (Sequential? net))
+    (check-equal? (object-name net) 'Sequential))
 
   (test-case "safetensors state-dict round-trips bit-exactly"
     (manual-seed! 0)
