@@ -1,10 +1,7 @@
 #lang scribble/lp2
 
 @(require (for-label (except-in racket/base exp log sqrt max min + - * /)
-                     ;; keep the conv2d *layer* (torch/nn); drop the functional
-                     ;; torch conv2d so the doc binding agrees with the body.
-                     (except-in torch conv2d)
-                     (except-in torch/nn max-pool2d flatten)))
+                     torch torch/nn))
 
 @section[#:tag "ex-mnist"]{Training a convnet on MNIST}
 
@@ -15,16 +12,16 @@ same code path runs on the GPU when one is present and on the CPU otherwise; on
 an RTX 3090 Ti it reaches ~98% test accuracy in three epochs (~1.2s each), and
 ~97% in a single CPU epoch.
 
-Two surfaces share the name @racket[conv2d] (the functional op in @racketmodname[torch]
-and the layer in @racketmodname[torch/nn]); @racket[max-pool2d] and @racket[flatten]
-likewise. We keep the @racket[conv2d] @emph{layer} but the @racket[max-pool2d] /
-@racket[flatten] @emph{functions}, so the @racket[except-in] forms below drop the
-collisions in each direction. (Folding the F.* / nn.* split into one namespace is
-issue #11; this is the workaround until then.)
+The imports mirror PyTorch's @tt{import torch.nn as nn, torch.nn.functional as F}:
+the @racket[conv2d]/@racket[linear] @emph{layers} come from @racketmodname[torch/nn],
+and the functional pooling/flatten ops come from @racketmodname[torch/nn/functional]
+under an @racket[F:] prefix. (Since #11 the functional conv/pool/flatten forms live
+in @racketmodname[torch/nn/functional], off the @racketmodname[torch] top-level, so
+@racket[(require torch torch/nn)] no longer collides.)
 
 @chunk[<r05-require>
-(require (except-in torch conv2d)
-         (except-in torch/nn max-pool2d flatten)
+(require torch torch/nn
+         (prefix-in F: torch/nn/functional)
          (only-in torch/data/mnist load-mnist load-mnist-fixture))]
 
 @chunk[<r05-provide>
@@ -44,9 +41,9 @@ PyTorch. The spatial arithmetic is the usual @tt{valid}-convolution bookkeeping:
                 [f2 (linear 128 10)])
   #:forward (x)
   (~> x
-      c1 relu (max-pool2d 2)
-      c2 relu (max-pool2d 2)
-      (flatten 1) f1 relu
+      c1 relu (F:max-pool2d 2)
+      c2 relu (F:max-pool2d 2)
+      (F:flatten 1) f1 relu
       f2))]
 
 @bold{The device.} Pick the accelerator the way PyTorch does

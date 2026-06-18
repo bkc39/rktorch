@@ -24,13 +24,13 @@
            json
            rackunit
            "../main.rkt"
-           ;; conv2d/max-pool2d/flatten name both the functional ops (under
-           ;; torch, used here) and the nn layers; this suite exercises the
-           ;; functional surface, so drop the colliding layer names from nn.
-           (except-in "../nn.rkt" conv2d max-pool2d flatten)
-           ;; the conv2d *layer* (for the seeded-init parity check) under a
-           ;; non-colliding name.
-           (only-in "../nn.rkt" [conv2d nn-conv2d])
+           "../nn.rkt"
+           ;; the functional conv/pool/flatten forms (F.*) — since #11 they live
+           ;; in torch/nn/functional, off `torch`, so they no longer collide with
+           ;; the nn layers of the same name. This suite exercises both: the nn
+           ;; conv2d layer (seeded-init parity) and F:max-pool2d/F:avg-pool2d/
+           ;; F:flatten (functional parity).
+           (prefix-in F: "../nn/functional.rkt")
            ;; the committed 256-image fixture for the Conv-MNIST parity twin.
            (only-in "../data/mnist.rkt" load-mnist-fixture))
 
@@ -406,15 +406,15 @@
        ;; python-available branch so its tensors aren't allocated when the suite
        ;; skips. Must stay in sync with that example's convnet.
        (define-module convnet ()
-         #:submodules ([c1 (nn-conv2d 1 16 3)]
-                       [c2 (nn-conv2d 16 32 3)]
+         #:submodules ([c1 (conv2d 1 16 3)]
+                       [c2 (conv2d 16 32 3)]
                        [f1 (linear 800 128)]
                        [f2 (linear 128 10)])
          #:forward (x)
          (~> x
-             c1 relu (max-pool2d 2)
-             c2 relu (max-pool2d 2)
-             (flatten 1) f1 relu
+             c1 relu (F:max-pool2d 2)
+             c2 relu (F:max-pool2d 2)
+             (F:flatten 1) f1 relu
              f2))
        ;; Structural guard against silent divergence from the example's convnet:
        ;; a changed layer size there trips this immediately. Shape only — it does
@@ -496,7 +496,7 @@
                    "print(json.dumps({\"values\": vals, \"shapes\":"
                    " [list(m.weight.shape), list(m.bias.shape)]}))")))
        (manual-seed! 0)
-       (define net (nn-conv2d 1 8 3))
+       (define net (conv2d 1 8 3))
        (define ps (parameters net))  ; weight then bias, declaration order
        (check-equal? (map tensor-shape ps) (hash-ref j 'shapes)
                      "conv2d init: parameter shapes match nn.Conv2d")
@@ -523,8 +523,8 @@
                    " \"ap\": [float(v) for v in ap.flatten().tolist()]}))")))
        (manual-seed! 0)
        (define x (randn 1 1 4 4))
-       (define mp (max-pool2d x 2))  ; promoted: #:stride #f -> kernel-size
-       (define ap (avg-pool2d x 2))
+       (define mp (F:max-pool2d x 2))  ; promoted: #:stride #f -> kernel-size
+       (define ap (F:avg-pool2d x 2))
        (for ([a (in-list (tensor->list mp))] [b (in-list (hash-ref j 'mp))]
              [i (in-naturals)])
          (check-= a b tol (format "max-pool2d default-stride parity ~a" i)))
@@ -544,7 +544,7 @@
                     " \"values\": [float(v) for v in r.flatten().tolist()]}))")))
        (manual-seed! 0)
        (define x (randn 2 3 4))
-       (define r (flatten x 1))
+       (define r (F:flatten x 1))
        (check-equal? (tensor-shape r) (hash-ref jf 'shape) "flatten parity: shape")
        (for ([a (in-list (tensor->list r))] [b (in-list (hash-ref jf 'values))]
              [i (in-naturals)])

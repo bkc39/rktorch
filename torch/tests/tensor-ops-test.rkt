@@ -6,7 +6,11 @@
 
 (module+ test
   (require rackunit
-           "../main.rkt")
+           "../main.rkt"
+           ;; flatten is the functional tensor op; it now lives in
+           ;; torch/nn/functional (off the `torch` top-level) to avoid the nn
+           ;; layer collision (#11). These tests exercise that functional form.
+           (only-in "../nn/functional.rkt" flatten))
 
   (test-case "creation goldens"
     (check-equal? (tensor->list (zeros 2 2)) '(0.0 0.0 0.0 0.0))

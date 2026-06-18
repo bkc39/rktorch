@@ -12,10 +12,7 @@ optimizer updates, and the whole model is reclaimed by the garbage collector
 when dropped.
 
 @chunk[<r04-require>
-(require torch
-         ;; conv2d/max-pool2d/flatten name both functional torch ops and nn
-         ;; layers; this MLP uses neither, so drop the layer names from nn.
-         (except-in torch/nn conv2d max-pool2d flatten))]
+(require torch torch/nn)]
 
 @chunk[<r04-provide>
 (provide run-example)]

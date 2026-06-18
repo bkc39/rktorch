@@ -5,10 +5,7 @@
 (require (except-in racket/list argmax flatten)
          (only-in racket/math nan?)
          torch
-         ;; this harness only needs named-parameters/parameters from nn; the
-         ;; conv2d/max-pool2d/flatten layer names collide with torch and the
-         ;; example owns those imports internally, so drop them here (#11).
-         (except-in torch/nn conv2d max-pool2d flatten)
+         torch/nn
          (only-in torch/data/mnist load-mnist-fixture)
          "../racket/05-mnist.rkt")
 

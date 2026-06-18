@@ -5,13 +5,14 @@
 ;; with PyTorch's nn.Linear lives in python-cross-test.
 
 (module+ test
-  ;; conv2d/max-pool2d/flatten name the nn layers here; the colliding
-  ;; functional ops from the facade are excepted (the F.conv2d vs nn.Conv2d
-  ;; split), matching how a convnet model file imports them.
+  ;; conv2d/max-pool2d/flatten name the nn layers here. Since #11 the functional
+  ;; forms live in torch/nn/functional (not on `torch`), so `(require torch
+  ;; torch/nn)` no longer collides — no except-in needed. (racket/list's flatten
+  ;; still collides with the nn flatten layer, so that one is excepted.)
   (require (except-in racket/list argmax flatten)
            (only-in racket/file make-temporary-file)
            rackunit
-           (except-in "../main.rkt" conv2d max-pool2d flatten)
+           "../main.rkt"
            "../nn.rkt")
 
   (define-module mlp (in hidden out)
