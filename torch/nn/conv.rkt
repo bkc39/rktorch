@@ -35,13 +35,13 @@
 ;; kernel-size/stride/padding arrive already normalized to [h w] lists from the
 ;; smart constructor, so the weight shape and fan-in are straightforward.
 (define-module Conv2d% (in-channels out-channels kernel-size stride padding)
-  #:reflection-name 'Conv2d
   #:params ([weight (kaiming-uniform (list out-channels in-channels
                                             (car kernel-size) (cadr kernel-size)))]
             [bias (let ([bound (/ 1.0 (sqrt (fan-in (list out-channels in-channels
                                                           (car kernel-size)
                                                           (cadr kernel-size)))))])
                     (uniform-init (list out-channels) (- bound) bound))])
+  #:reflection-name 'Conv2d
   #:forward (x)
   (f:conv2d x weight #:bias bias #:stride stride #:padding padding))
 

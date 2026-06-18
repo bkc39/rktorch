@@ -128,8 +128,10 @@
     [(_ name:id (ctor-arg:id ...)
         (~alt (~optional (~seq #:params (param:binding ...)))
               (~optional (~seq #:buffers (buffer:binding ...)))
-              (~optional (~seq #:submodules (sub:binding ...)))
-              (~optional (~seq #:reflection-name reflect:expr))) ...
+              (~optional (~seq #:submodules (sub:binding ...)))) ...
+        ;; kept out of the ~alt group so `reflect` stays at ellipsis depth 0,
+        ;; making `(~? reflect 'name)` below unconditionally safe.
+        (~optional (~seq #:reflection-name reflect:expr))
         #:forward (input:id ...) body:expr ...+)
      (define (ids attr) (or attr '()))
      (define struct-id (generate-temporary #'name))

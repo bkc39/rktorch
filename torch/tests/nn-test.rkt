@@ -26,7 +26,7 @@
     #:forward (x)
     (add (mul x scale) shift))
 
-  (test-case "linear layer: shapes, forward, predicate"
+  (test-case "Linear layer: shapes, forward, predicate"
     (manual-seed! 0)
     (define l (Linear 4 3))
     (check-true (Linear? l))
@@ -87,7 +87,7 @@
       (check-equal? (tensor->list (grad p))
                     (map (lambda (_) 0.0) (tensor->list p)))))
 
-  (test-case "conv2d layer: param shapes, names, predicate, forward shape"
+  (test-case "Conv2d layer: param shapes, names, predicate, forward shape"
     (manual-seed! 0)
     (define c (Conv2d 1 8 3 #:stride 1 #:padding 1))
     (check-true (Conv2d? c))
@@ -98,19 +98,19 @@
     (check-equal? (map car (named-parameters c)) '("weight" "bias"))
     (check-equal? (tensor-shape (c (randn 4 1 28 28))) '(4 8 28 28)))
 
-  (test-case "conv2d non-square kernel + per-axis padding"
+  (test-case "Conv2d non-square kernel + per-axis padding"
     (manual-seed! 0)
     (define c (Conv2d 3 6 '(3 5) #:padding '(1 2)))
     (check-equal? (tensor-shape (car (parameters c))) '(6 3 3 5))
     (check-equal? (tensor-shape (c (randn 2 3 10 10))) '(2 6 10 10)))
 
-  (test-case "max-pool2d layer: stateless, default stride = kernel"
+  (test-case "MaxPool2d layer: stateless, default stride = kernel"
     (define p (MaxPool2d 2))
     (check-true (MaxPool2d? p))
     (check-equal? (parameters p) '())
     (check-equal? (tensor-shape (p (randn 4 8 28 28))) '(4 8 14 14)))
 
-  (test-case "flatten layer: collapses from start-dim, keeps batch"
+  (test-case "Flatten layer: collapses from start-dim, keeps batch"
     (define f (Flatten))
     (check-true (Flatten? f))
     (check-equal? (parameters f) '())
