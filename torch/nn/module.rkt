@@ -111,13 +111,12 @@
 ;;   #:buffers         ([b init] ...)  ; optional — registered, not trainable
 ;;   #:submodules      ([m init] ...)  ; optional — nested gen:module values
 ;;   #:reflection-name 'Public         ; optional — struct name for object-name;
-;;                                      ;   defaults to `name`. Must appear AFTER
-;;                                      ;   any #:params/#:buffers/#:submodules
-;;                                      ;   (and before #:forward). Use when an
-;;                                      ;   internal `name%` struct is wrapped by
-;;                                      ;   a public smart constructor, so
-;;                                      ;   instances still reflect as the public
-;;                                      ;   name rather than `name%`.
+;;                                      ;   defaults to `name`. May appear in any
+;;                                      ;   order among the optional clauses. Use
+;;                                      ;   when an internal `name%` struct is
+;;                                      ;   wrapped by a public smart constructor,
+;;                                      ;   so instances still reflect as the
+;;                                      ;   public name rather than `name%`.
 ;;   #:forward (input ...) body ...)
 ;;
 ;; Expands to a struct (one field per ctor-arg/param/buffer/submodule), a
@@ -130,13 +129,16 @@
     [(_ name:id (ctor-arg:id ...)
         (~alt (~optional (~seq #:params (param:binding ...)))
               (~optional (~seq #:buffers (buffer:binding ...)))
-              (~optional (~seq #:submodules (sub:binding ...)))) ...
-        ;; kept out of the ~alt group so `reflect` stays at ellipsis depth 0,
-        ;; making `(~? reflect 'name)` below unconditionally safe.
-        (~optional (~seq #:reflection-name reflect:expr))
+              (~optional (~seq #:submodules (sub:binding ...)))
+              ;; in the ~alt group, so it may appear in any order among the
+              ;; optional clauses; resolved at compile time below (not via a
+              ;; template `~?`), so its ellipsis depth here doesn't matter.
+              (~optional (~seq #:reflection-name reflect:expr))) ...
         #:forward (input:id ...) body:expr ...+)
      (define (ids attr) (or attr '()))
      (define struct-id (generate-temporary #'name))
+     ;; default the reflected struct name to `name` when no override is given.
+     (define reflect-stx (or (attribute reflect) #'(quote name)))
      (define (accessor field-id)
        (format-id struct-id "~a-~a" struct-id field-id))
      (define (name-string id)
@@ -144,6 +146,7 @@
      (with-syntax ([sid struct-id]
                    [sid? (format-id struct-id "~a?" struct-id)]
                    [name? (format-id #'name "~a?" #'name)]
+                   [reflect-name reflect-stx]
                    [(p ...) (ids (attribute param.id))]
                    [(p-init ...) (ids (attribute param.init))]
                    [(b ...) (ids (attribute buffer.id))]
@@ -158,7 +161,7 @@
                      [(sm-name ...) (map name-string (syntax->list #'(sm ...)))])
          #'(begin
              (struct sid (ctor-arg ... p ... b ... sm ...)
-               #:reflection-name (~? reflect 'name)
+               #:reflection-name reflect-name
                #:property prop:procedure
                (lambda (self . inputs) (apply module-forward self inputs))
                #:methods gen:module

@@ -9,13 +9,10 @@
 ;; them.
 
 ;; The layer constructors are PascalCase (Conv2d/MaxPool2d/Flatten), mirroring
-;; the torch.nn.* classes; the lowercase functional ops they call live on `torch`
-;; and are imported here as f:* (torch.conv2d vs nn.Conv2d). PascalCase layer
-;; names keep `(require torch torch/nn)` collision-free (#11).
-(require (only-in "../foreign.rkt"
-                  [conv2d f:conv2d]
-                  [flatten f:flatten]
-                  [max-pool2d f:max-pool2d])
+;; the torch.nn.* classes; the lowercase functional ops they call (conv2d/
+;; max-pool2d/flatten on `torch`) are imported directly — the differing case
+;; means no shadowing, and `(require torch torch/nn)` stays collision-free (#11).
+(require (only-in "../foreign.rkt" conv2d flatten max-pool2d)
          (only-in "../foreign/size.rkt" ->2d)
          (only-in "init.rkt" fan-in kaiming-uniform uniform-init)
          (only-in "module.rkt" define-module))
@@ -43,7 +40,7 @@
                     (uniform-init (list out-channels) (- bound) bound))])
   #:reflection-name 'Conv2d
   #:forward (x)
-  (f:conv2d x weight #:bias bias #:stride stride #:padding padding))
+  (conv2d x weight #:bias bias #:stride stride #:padding padding))
 
 (define (Conv2d in-channels out-channels kernel-size
                 #:stride [stride 1]
@@ -59,7 +56,7 @@
 (define-module MaxPool2d% (kernel-size stride padding)
   #:reflection-name 'MaxPool2d
   #:forward (x)
-  (f:max-pool2d x kernel-size #:stride stride #:padding padding))
+  (max-pool2d x kernel-size #:stride stride #:padding padding))
 
 (define (MaxPool2d kernel-size #:stride [stride #f] #:padding [padding 0])
   (MaxPool2d% kernel-size stride padding))
@@ -72,7 +69,7 @@
 (define-module Flatten% (start-dim end-dim)
   #:reflection-name 'Flatten
   #:forward (x)
-  (f:flatten x start-dim end-dim))
+  (flatten x start-dim end-dim))
 
 (define (Flatten #:start-dim [start-dim 1] #:end-dim [end-dim -1])
   (Flatten% start-dim end-dim))
