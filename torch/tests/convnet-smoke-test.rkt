@@ -6,23 +6,23 @@
 ;; the whole stack end to end — data -> conv/pool/flatten/linear ->
 ;; cross-entropy -> backward! -> adam -> state-dict.
 ;;
-;; conv2d names the nn *layer*; the functional max-pool2d/flatten/relu come
-;; from `torch` (the F.* vs nn.* split), so each facade drops the names the
-;; other owns — the model-file import pattern until issue #11 namespaces it.
+;; Conv2d/Linear are the nn *layers* (PascalCase, torch/nn); max-pool2d/flatten/
+;; relu are the lowercase functional ops on `torch` — the model-file import
+;; pattern, no collision (#11).
 
 (module+ test
   (require rackunit
            (only-in racket/list first last)
            (only-in racket/file make-temporary-file)
-           (except-in "../main.rkt" conv2d)
-           (except-in "../nn.rkt" max-pool2d flatten)
+           "../main.rkt"
+           "../nn.rkt"
            (only-in "../data/mnist.rkt" load-mnist-fixture))
 
   ;; [N,1,28,28] -> conv(1->8,k3) -> relu -> maxpool2 -> flatten -> fc(1352,10).
   ;; 28 -3 +1 = 26 after conv; /2 = 13 after pool; 8*13*13 = 1352.
   (define-module convnet ()
-    #:submodules ([c1 (conv2d 1 8 3)]
-                  [fc (linear 1352 10)])
+    #:submodules ([c1 (Conv2d 1 8 3)]
+                  [fc (Linear 1352 10)])
     #:forward (x)
     (fc (flatten (max-pool2d (relu (c1 x)) 2) 1)))
 

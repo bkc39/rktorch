@@ -12,9 +12,10 @@
 ;; parameter store.
 
 (require racket/contract
-         ;; conv2d/max-pool2d/flatten name the nn layers in this facade; the
-         ;; functional ops keep those names under `torch` (the F.* vs nn.* split).
-         (except-in "foreign.rkt" conv2d max-pool2d flatten)
+         ;; nn layer constructors are PascalCase (Conv2d/MaxPool2d/Flatten/…),
+         ;; so they don't collide with the lowercase functional ops on `torch`;
+         ;; `(require torch torch/nn)` is clean (#11).
+         "foreign.rkt"
          (only-in "foreign/contracts.rkt" pos-size/c nonneg-size/c)
          "nn/conv.rkt"
          "nn/dropout.rkt"
@@ -52,24 +53,24 @@
   [train! (-> module? module?)]
   [eval! (-> module? module?)]
   [call-with-eval-mode (-> module? (-> any) any)]
-  ;; layers
-  [linear (-> exact-positive-integer? exact-positive-integer? linear?)]
+  ;; layers: PascalCase constructors, lowercase predicates (Racket idiom)
+  [Linear (-> exact-positive-integer? exact-positive-integer? linear?)]
   [linear? (-> any/c boolean?)]
-  [conv2d (->* (exact-positive-integer? exact-positive-integer? pos-size/c)
+  [Conv2d (->* (exact-positive-integer? exact-positive-integer? pos-size/c)
                (#:stride pos-size/c #:padding nonneg-size/c)
                conv2d?)]
   [conv2d? (-> any/c boolean?)]
-  [max-pool2d (->* (pos-size/c)
+  [MaxPool2d (->* (pos-size/c)
                    (#:stride (or/c #f pos-size/c) #:padding nonneg-size/c)
                    max-pool2d?)]
   [max-pool2d? (-> any/c boolean?)]
-  [flatten (->* () (#:start-dim exact-integer? #:end-dim exact-integer?)
+  [Flatten (->* () (#:start-dim exact-integer? #:end-dim exact-integer?)
                 flatten?)]
   [flatten? (-> any/c boolean?)]
-  [dropout (->* () (#:p (and/c (>=/c 0) (</c 1))) dropout?)]
+  [Dropout (->* () (#:p (and/c (>=/c 0) (</c 1))) dropout?)]
   [dropout? (-> any/c boolean?)]
   ;; composition
-  [sequential (->* () #:rest (listof module?) sequential?)]
+  [Sequential (->* () #:rest (listof module?) sequential?)]
   [sequential? (-> any/c boolean?)]
   ;; initializers
   [uniform-init (-> (listof exact-nonnegative-integer?) real? real? tensor?)]

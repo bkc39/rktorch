@@ -10,13 +10,15 @@
          (only-in "init.rkt" kaiming-uniform uniform-init)
          (only-in "module.rkt" define-module))
 
-;; linear? is defined by the define-module expansion, invisible to raco
-;; review without expansion.
-(provide linear
-         linear? ;; noqa
+;; nn layer constructors are PascalCase, mirroring the torch.nn.* class names
+;; (and keeping them distinct from the lowercase functional ops on `torch`); the
+;; predicate is lowercase (Racket idiom). Linear/Linear? are define-module
+;; expansions, invisible to raco review; we export the predicate as linear?.
+(provide Linear
+         (rename-out [Linear? linear?]) ;; noqa
          )
 
-(define-module linear (in-features out-features)
+(define-module Linear (in-features out-features)
   #:params ([weight (kaiming-uniform (list out-features in-features))]
             [bias (let ([bound (/ 1.0 (sqrt in-features))])
                     (uniform-init (list out-features) (- bound) bound))])

@@ -23,14 +23,12 @@
            racket/system
            json
            rackunit
+           ;; layers are PascalCase (Conv2d/Linear) and the functional ops stay
+           ;; lowercase on `torch` (max-pool2d/avg-pool2d/flatten), so requiring
+           ;; both is collision-free (#11). This suite exercises both: the nn
+           ;; Conv2d layer (seeded-init parity) and the functional pool/flatten.
            "../main.rkt"
-           ;; conv2d/max-pool2d/flatten name both the functional ops (under
-           ;; torch, used here) and the nn layers; this suite exercises the
-           ;; functional surface, so drop the colliding layer names from nn.
-           (except-in "../nn.rkt" conv2d max-pool2d flatten)
-           ;; the conv2d *layer* (for the seeded-init parity check) under a
-           ;; non-colliding name.
-           (only-in "../nn.rkt" [conv2d nn-conv2d])
+           "../nn.rkt"
            ;; the committed 256-image fixture for the Conv-MNIST parity twin.
            (only-in "../data/mnist.rkt" load-mnist-fixture))
 
@@ -362,8 +360,8 @@
      ;; which the formatter doesn't reproduce.
      (let ()
        (define-module mlp (d-in d-hidden d-out)
-         #:submodules ([fc1 (linear d-in d-hidden)]
-                       [fc2 (linear d-hidden d-out)])
+         #:submodules ([fc1 (Linear d-in d-hidden)]
+                       [fc2 (Linear d-hidden d-out)])
          #:forward (x)
          (fc2 (relu (fc1 x))))
        (define j (python-result "python/04_mlp.py"))
@@ -406,10 +404,10 @@
        ;; python-available branch so its tensors aren't allocated when the suite
        ;; skips. Must stay in sync with that example's convnet.
        (define-module convnet ()
-         #:submodules ([c1 (nn-conv2d 1 16 3)]
-                       [c2 (nn-conv2d 16 32 3)]
-                       [f1 (linear 800 128)]
-                       [f2 (linear 128 10)])
+         #:submodules ([c1 (Conv2d 1 16 3)]
+                       [c2 (Conv2d 16 32 3)]
+                       [f1 (Linear 800 128)]
+                       [f2 (Linear 128 10)])
          #:forward (x)
          (~> x
              c1 relu (max-pool2d 2)
@@ -496,7 +494,7 @@
                    "print(json.dumps({\"values\": vals, \"shapes\":"
                    " [list(m.weight.shape), list(m.bias.shape)]}))")))
        (manual-seed! 0)
-       (define net (nn-conv2d 1 8 3))
+       (define net (Conv2d 1 8 3))
        (define ps (parameters net))  ; weight then bias, declaration order
        (check-equal? (map tensor-shape ps) (hash-ref j 'shapes)
                      "conv2d init: parameter shapes match nn.Conv2d")

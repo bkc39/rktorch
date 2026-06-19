@@ -1,30 +1,26 @@
 #lang scribble/lp2
 
 @(require (for-label (except-in racket/base exp log sqrt max min + - * /)
-                     ;; keep the conv2d *layer* (torch/nn); drop the functional
-                     ;; torch conv2d so the doc binding agrees with the body.
-                     (except-in torch conv2d)
-                     (except-in torch/nn max-pool2d flatten)))
+                     torch torch/nn))
 
 @section[#:tag "ex-mnist"]{Training a convnet on MNIST}
 
 The v2 capstone: a LeNet-ish convolutional network --- two
-@racket[conv2d]/@racket[max-pool2d] stages into two @racket[linear] layers ---
+@racket[Conv2d]/@racket[max-pool2d] stages into two @racket[Linear] layers ---
 trained on the handwritten-digit dataset with the @racket[adam] optimizer. The
 same code path runs on the GPU when one is present and on the CPU otherwise; on
 an RTX 3090 Ti it reaches ~98% test accuracy in three epochs (~1.2s each), and
 ~97% in a single CPU epoch.
 
-Two surfaces share the name @racket[conv2d] (the functional op in @racketmodname[torch]
-and the layer in @racketmodname[torch/nn]); @racket[max-pool2d] and @racket[flatten]
-likewise. We keep the @racket[conv2d] @emph{layer} but the @racket[max-pool2d] /
-@racket[flatten] @emph{functions}, so the @racket[except-in] forms below drop the
-collisions in each direction. (Folding the F.* / nn.* split into one namespace is
-issue #11; this is the workaround until then.)
+The @emph{layer} constructors are PascalCase (@racket[Conv2d], @racket[Linear]),
+mirroring PyTorch's @tt{torch.nn.Conv2d} classes; the @emph{functional} ops stay
+lowercase on @racketmodname[torch] (@racket[max-pool2d], @racket[flatten],
+@racket[relu], like @tt{torch.max_pool2d}). Because the two casings differ,
+@racket[(require torch torch/nn)] never collides (#11) --- no prefix or
+@racket[except-in] needed.
 
 @chunk[<r05-require>
-(require (except-in torch conv2d)
-         (except-in torch/nn max-pool2d flatten)
+(require torch torch/nn
          (only-in torch/data/mnist load-mnist load-mnist-fixture))]
 
 @chunk[<r05-provide>
@@ -38,10 +34,10 @@ PyTorch. The spatial arithmetic is the usual @tt{valid}-convolution bookkeeping:
 
 @chunk[<r05-model>
 (define-module convnet ()
-  #:submodules ([c1 (conv2d 1 16 3)]
-                [c2 (conv2d 16 32 3)]
-                [f1 (linear 800 128)]
-                [f2 (linear 128 10)])
+  #:submodules ([c1 (Conv2d 1 16 3)]
+                [c2 (Conv2d 16 32 3)]
+                [f1 (Linear 800 128)]
+                [f2 (Linear 128 10)])
   #:forward (x)
   (~> x
       c1 relu (max-pool2d 2)
@@ -82,8 +78,8 @@ the test harness and the PyTorch parity twin both drive: it trains a fresh
 @racket[convnet] for @racket[steps] full-batch @racket[adam] steps on the
 committed 256-image fixture and returns the per-step losses, the trained net, and
 the device. Full-batch (no shuffling, no minibatch indexing) keeps it trivially
-reproducible across both languages --- with the same seed the @racket[conv2d] and
-@racket[linear] inits draw value-for-value like @tt{nn.Conv2d}/@tt{nn.Linear},
+reproducible across both languages --- with the same seed the @racket[Conv2d] and
+@racket[Linear] inits draw value-for-value like @tt{nn.Conv2d}/@tt{nn.Linear},
 then the identical updates track @tt{torch.optim.Adam}. As in the MLP example the
 process default device is set for the dynamic extent of the run with
 @racket[with-default-device] (the device analogue of @racket[with-no-grad]), so
