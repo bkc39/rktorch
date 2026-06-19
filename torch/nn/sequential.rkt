@@ -21,7 +21,7 @@
 (provide Sequential
          Sequential?)
 
-(struct sequential-impl (modules)
+(struct Sequential% (modules)
   #:reflection-name 'Sequential
   #:property prop:procedure
   (lambda (self . inputs) (apply module-forward self inputs))
@@ -38,28 +38,28 @@
    (define (module-forward self . inputs)
      (apply (lambda (x)
               (for/fold ([acc x])
-                        ([m (in-list (sequential-impl-modules self))])
+                        ([m (in-list (Sequential%-modules self))])
                 (gen-forward m acc)))
             inputs))
    (define (module-parameters self)
-     (append-map gen-parameters (sequential-impl-modules self)))
+     (append-map gen-parameters (Sequential%-modules self)))
    (define (module-named-parameters self prefix)
-     (define ms (sequential-impl-modules self))
+     (define ms (Sequential%-modules self))
      (append-map
       (lambda (i m)
         (gen-named m (string-append prefix (number->string i) ".")))
       (range (length ms)) ms))
    (define (module-buffers self)
-     (append-map gen-buffers (sequential-impl-modules self)))
+     (append-map gen-buffers (Sequential%-modules self)))
    (define (module-set-training! self training?)
-     (for ([m (in-list (sequential-impl-modules self))])
+     (for ([m (in-list (Sequential%-modules self))])
        (gen-set-training! m training?)))
    ;; training iff every contained module is (vacuously #t when empty).
    (define (module-training? self)
-     (andmap gen-training? (sequential-impl-modules self)))])
+     (andmap gen-training? (Sequential%-modules self)))])
 
-;; (sequential m0 m1 ...) — variadic, like nn.Sequential(*modules).
+;; (Sequential m0 m1 ...) — variadic, like nn.Sequential(*modules).
 (define (Sequential . modules)
-  (sequential-impl modules))
+  (Sequential% modules))
 
-(define Sequential? sequential-impl?)
+(define Sequential? Sequential%?)

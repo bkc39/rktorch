@@ -18,30 +18,30 @@
                   module-training?))
 
 ;; Dropout?/the constructor are the public names (PascalCase, like nn.Dropout);
-;; the struct is dropout-impl.
+;; the struct is Dropout%.
 (provide Dropout
          Dropout?)
 
 ;; Modules default to training mode, like torch.nn (call eval! to switch).
-(struct dropout-impl (p [training? #:mutable])
+(struct Dropout% (p [training? #:mutable])
   #:reflection-name 'Dropout
   #:property prop:procedure
   (lambda (self . inputs) (apply module-forward self inputs))
   #:methods gen:module
   [(define (module-forward self . inputs)
      (apply (lambda (x)
-              (f:dropout x (dropout-impl-p self) (dropout-impl-training? self)))
+              (f:dropout x (Dropout%-p self) (Dropout%-training? self)))
             inputs))
    ;; dropout has no learnable params or buffers.
    (define (module-parameters self) '())
    (define (module-named-parameters self prefix) '())
    (define (module-buffers self) '())
    (define (module-set-training! self training?)
-     (set-dropout-impl-training?! self training?))
+     (set-Dropout%-training?! self training?))
    (define (module-training? self)
-     (dropout-impl-training? self))])
+     (Dropout%-training? self))])
 
 (define (Dropout #:p [p 0.5])
-  (dropout-impl p #t))
+  (Dropout% p #t))
 
-(define Dropout? dropout-impl?)
+(define Dropout? Dropout%?)
