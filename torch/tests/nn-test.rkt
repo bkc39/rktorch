@@ -122,6 +122,13 @@
     (check-equal? (tensor-shape (f (randn 4 8 14 14))) '(4 1568))
     (check-equal? (object-name f) 'Flatten))
 
+  (test-case "#:reflection-name may precede other clauses (any-order)"
+    (define-module early-refl% ()
+      #:reflection-name 'EarlyRefl
+      #:params ([w (zeros 2 2)])
+      #:forward (x) (matmul x w))
+    (check-equal? (object-name (early-refl%)) 'EarlyRefl))
+
   (test-case "conv -> pool -> flatten -> linear convnet composes"
     (manual-seed! 0)
     (define-module convnet ()
