@@ -53,25 +53,25 @@
   [train! (-> module? module?)]
   [eval! (-> module? module?)]
   [call-with-eval-mode (-> module? (-> any) any)]
-  ;; layers (PascalCase, mirroring torch.nn.* classes)
-  [Linear (-> exact-positive-integer? exact-positive-integer? Linear?)]
-  [Linear? (-> any/c boolean?)]
+  ;; layers: PascalCase constructors, lowercase predicates (Racket idiom)
+  [Linear (-> exact-positive-integer? exact-positive-integer? linear?)]
+  [linear? (-> any/c boolean?)]
   [Conv2d (->* (exact-positive-integer? exact-positive-integer? pos-size/c)
                (#:stride pos-size/c #:padding nonneg-size/c)
-               Conv2d?)]
-  [Conv2d? (-> any/c boolean?)]
+               conv2d?)]
+  [conv2d? (-> any/c boolean?)]
   [MaxPool2d (->* (pos-size/c)
                    (#:stride (or/c #f pos-size/c) #:padding nonneg-size/c)
-                   MaxPool2d?)]
-  [MaxPool2d? (-> any/c boolean?)]
+                   max-pool2d?)]
+  [max-pool2d? (-> any/c boolean?)]
   [Flatten (->* () (#:start-dim exact-integer? #:end-dim exact-integer?)
-                Flatten?)]
-  [Flatten? (-> any/c boolean?)]
-  [Dropout (->* () (#:p (and/c (>=/c 0) (</c 1))) Dropout?)]
-  [Dropout? (-> any/c boolean?)]
+                flatten?)]
+  [flatten? (-> any/c boolean?)]
+  [Dropout (->* () (#:p (and/c (>=/c 0) (</c 1))) dropout?)]
+  [dropout? (-> any/c boolean?)]
   ;; composition
-  [Sequential (->* () #:rest (listof module?) Sequential?)]
-  [Sequential? (-> any/c boolean?)]
+  [Sequential (->* () #:rest (listof module?) sequential?)]
+  [sequential? (-> any/c boolean?)]
   ;; initializers
   [uniform-init (-> (listof exact-nonnegative-integer?) real? real? tensor?)]
   [kaiming-uniform (->* ((listof exact-nonnegative-integer?)) (#:a real?)

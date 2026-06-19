@@ -15,11 +15,14 @@ The Racket package is the `torch` collection:
   native handle is reclaimed by Racket's GC; user code never frees it.
 - `(require torch/nn)` — the nn layer (mirrors `import torch.nn`):
   `define-module`, `gen:module`, `Linear`, `sgd`, `mse-loss`, initializers.
-  **Naming convention:** nn layer constructors are PascalCase (`Linear`,
+  **Naming convention:** nn layer *constructors* are PascalCase (`Linear`,
   `Conv2d`, `MaxPool2d`, `Flatten`, `Dropout`, `Sequential`), mirroring the
-  `torch.nn.*` classes; the functional ops keep lowercase names on `torch`
-  (`conv2d`, `max-pool2d`, `flatten`, like `torch.conv2d`). The differing case is
-  what lets `(require torch torch/nn)` coexist without collision (#11).
+  `torch.nn.*` classes; their *predicates* are lowercase (`linear?`, `conv2d?`,
+  `max-pool2d?`, `flatten?`, `dropout?`, `sequential?`), per Racket idiom
+  (`list?`, `hash?`). The functional ops keep lowercase names on `torch`
+  (`conv2d`, `max-pool2d`, `flatten`, like `torch.conv2d`). The PascalCase
+  constructors vs lowercase functional ops are what let `(require torch
+  torch/nn)` coexist without collision (#11).
 - `(require torch/foreign)` — the contracted low-level layer. Same surface,
   applied contracts; this file is the authoritative description of the API.
 - `(require (submod torch/foreign unsafe))` — adds `tensor-free!` for

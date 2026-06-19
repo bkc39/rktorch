@@ -7,7 +7,7 @@
 ;; hand-written gen:module (not define-module) because it carries mutable
 ;; mode state, flipped by the train!/eval! protocol.
 
-(require (only-in "../generated.rkt" [dropout f:dropout])
+(require (only-in "../generated.rkt" dropout)
          (only-in "module.rkt"
                   gen:module
                   module-forward
@@ -17,10 +17,10 @@
                   module-set-training!
                   module-training?))
 
-;; Dropout?/the constructor are the public names (PascalCase, like nn.Dropout);
-;; the struct is Dropout%.
+;; Dropout (PascalCase, like nn.Dropout) is the public constructor; dropout? the
+;; predicate (lowercase, Racket idiom); the struct is Dropout%.
 (provide Dropout
-         Dropout?)
+         dropout?)
 
 ;; Modules default to training mode, like torch.nn (call eval! to switch).
 (struct Dropout% (p [training? #:mutable])
@@ -30,7 +30,7 @@
   #:methods gen:module
   [(define (module-forward self . inputs)
      (apply (lambda (x)
-              (f:dropout x (Dropout%-p self) (Dropout%-training? self)))
+              (dropout x (Dropout%-p self) (Dropout%-training? self)))
             inputs))
    ;; dropout has no learnable params or buffers.
    (define (module-parameters self) '())
@@ -44,4 +44,4 @@
 (define (Dropout #:p [p 0.5])
   (Dropout% p #t))
 
-(define Dropout? Dropout%?)
+(define dropout? Dropout%?)

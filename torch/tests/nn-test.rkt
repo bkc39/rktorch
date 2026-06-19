@@ -29,7 +29,7 @@
   (test-case "Linear layer: shapes, forward, predicate"
     (manual-seed! 0)
     (define l (Linear 4 3))
-    (check-true (Linear? l))
+    (check-true (linear? l))
     (check-true (module? l))
     ;; the default reflection path (no #:reflection-name override) -> 'Linear
     (check-equal? (object-name l) 'Linear)
@@ -92,7 +92,7 @@
   (test-case "Conv2d layer: param shapes, names, predicate, forward shape"
     (manual-seed! 0)
     (define c (Conv2d 1 8 3 #:stride 1 #:padding 1))
-    (check-true (Conv2d? c))
+    (check-true (conv2d? c))
     (check-true (module? c))
     (define ps (parameters c))
     (check-equal? (map tensor-shape ps) '((8 1 3 3) (8)))
@@ -110,14 +110,14 @@
 
   (test-case "MaxPool2d layer: stateless, default stride = kernel"
     (define p (MaxPool2d 2))
-    (check-true (MaxPool2d? p))
+    (check-true (max-pool2d? p))
     (check-equal? (parameters p) '())
     (check-equal? (tensor-shape (p (randn 4 8 28 28))) '(4 8 14 14))
     (check-equal? (object-name p) 'MaxPool2d))
 
   (test-case "Flatten layer: collapses from start-dim, keeps batch"
     (define f (Flatten))
-    (check-true (Flatten? f))
+    (check-true (flatten? f))
     (check-equal? (parameters f) '())
     (check-equal? (tensor-shape (f (randn 4 8 14 14))) '(4 1568))
     (check-equal? (object-name f) 'Flatten))
@@ -229,7 +229,7 @@
     (check-equal? (map car (named-parameters net))
                   '("0.weight" "0.bias" "2.weight" "2.bias"))
     (check-equal? (length (parameters net)) 4)
-    (check-true (Sequential? net))
+    (check-true (sequential? net))
     (check-equal? (object-name net) 'Sequential))
 
   (test-case "safetensors state-dict round-trips bit-exactly"

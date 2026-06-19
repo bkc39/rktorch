@@ -17,9 +17,9 @@
                   module-set-training!
                   module-training?))
 
-;; PascalCase like nn.Sequential.
+;; Sequential (PascalCase, like nn.Sequential); sequential? predicate lowercase.
 (provide Sequential
-         Sequential?)
+         sequential?)
 
 (struct Sequential% (modules)
   #:reflection-name 'Sequential
@@ -62,4 +62,4 @@
 (define (Sequential . modules)
   (Sequential% modules))
 
-(define Sequential? Sequential%?)
+(define sequential? Sequential%?)

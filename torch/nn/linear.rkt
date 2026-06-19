@@ -11,10 +11,11 @@
          (only-in "module.rkt" define-module))
 
 ;; nn layer constructors are PascalCase, mirroring the torch.nn.* class names
-;; (and keeping them distinct from the lowercase functional ops on `torch`).
-;; Linear? is defined by the define-module expansion, invisible to raco review.
+;; (and keeping them distinct from the lowercase functional ops on `torch`); the
+;; predicate is lowercase (Racket idiom). Linear/Linear? are define-module
+;; expansions, invisible to raco review; we export the predicate as linear?.
 (provide Linear
-         Linear? ;; noqa
+         (rename-out [Linear? linear?]) ;; noqa
          )
 
 (define-module Linear (in-features out-features)

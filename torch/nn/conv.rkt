@@ -17,14 +17,15 @@
          (only-in "init.rkt" fan-in kaiming-uniform uniform-init)
          (only-in "module.rkt" define-module))
 
-;; Conv2d?/MaxPool2d?/Flatten? are produced by the define-module expansions
-;; below (the Conv2d%/... structs), invisible to raco review without expansion.
+;; Constructors are PascalCase (Conv2d/MaxPool2d/Flatten); predicates lowercase
+;; (conv2d?/max-pool2d?/flatten?, Racket idiom), aliasing the define-module
+;; struct predicates Conv2d%?/etc. (noqa: raco review can't see the aliases).
 (provide Conv2d
-         Conv2d? ;; noqa
+         conv2d? ;; noqa
          MaxPool2d
-         MaxPool2d? ;; noqa
+         max-pool2d? ;; noqa
          Flatten
-         Flatten? ;; noqa
+         flatten? ;; noqa
          )
 
 ;; ------------------------------------------------------------------- conv2d
@@ -48,7 +49,7 @@
   (Conv2d% in-channels out-channels
            (->2d kernel-size) (->2d stride) (->2d padding)))
 
-(define Conv2d? Conv2d%?)
+(define conv2d? Conv2d%?)
 
 ;; ---------------------------------------------------------------- max-pool2d
 
@@ -61,7 +62,7 @@
 (define (MaxPool2d kernel-size #:stride [stride #f] #:padding [padding 0])
   (MaxPool2d% kernel-size stride padding))
 
-(define MaxPool2d? MaxPool2d%?)
+(define max-pool2d? MaxPool2d%?)
 
 ;; ------------------------------------------------------------------- flatten
 
@@ -74,4 +75,4 @@
 (define (Flatten #:start-dim [start-dim 1] #:end-dim [end-dim -1])
   (Flatten% start-dim end-dim))
 
-(define Flatten? Flatten%?)
+(define flatten? Flatten%?)
