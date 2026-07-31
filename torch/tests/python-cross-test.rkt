@@ -571,6 +571,28 @@
        (for ([a (in-list (tensor->list r))] [b (in-list (hash-ref jf 'values))]
              [i (in-naturals)])
          (check-= a b tol (format "flatten parity ~a" i))))
+     ;; gelu is hand-written (kwarg-only `approximate` puts it outside the
+     ;; codegen IR/manifest); parity-check the erf-form default against
+     ;; F.gelu directly.
+     (let ()
+       (define jg (python-code
+                   (string-append
+                    "import json, torch\n"
+                    "import torch.nn.functional as F\n"
+                    "torch.manual_seed(0)\n"
+                    "x = torch.randn(2, 3)\n"
+                    "r = F.gelu(x)\n"
+                    "print(json.dumps({\"shape\": list(r.shape),"
+                    " \"values\": [float(v) for v in r.flatten().tolist()]}))")))
+       (manual-seed! 0)
+       (define xg (randn 2 3))
+       (define rg (gelu xg))
+       (check-equal? (tensor-shape rg) (hash-ref jg 'shape)
+                     "gelu parity: shape")
+       (for ([a (in-list (tensor->list rg))]
+             [b (in-list (hash-ref jg 'values))]
+             [i (in-naturals)])
+         (check-= a b tol (format "gelu parity ~a" i))))
      ;; generated surface — every op in the codegen manifest
      (let ([manifest (with-input-from-file generated-manifest read)])
        (for-each check-generated-parity manifest)

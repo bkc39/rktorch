@@ -24,7 +24,8 @@
          tr-sqrt/raw
          tr-relu/raw
          tr-sigmoid/raw
-         tr-tanh/raw)
+         tr-tanh/raw
+         tr-gelu/raw)
 
 (define-binary/raw tr-add/raw tr_add)
 (define-binary/raw tr-sub/raw tr_sub)
@@ -45,3 +46,4 @@
 (define-unary/raw tr-relu/raw tr_relu)
 (define-unary/raw tr-sigmoid/raw tr_sigmoid)
 (define-unary/raw tr-tanh/raw tr_tanh)
+(define-unary/raw tr-gelu/raw tr_gelu)

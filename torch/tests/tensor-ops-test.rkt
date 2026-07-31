@@ -53,6 +53,12 @@
     (check-equal? (tensor->list (relu x)) '(1.0 0.0 3.0))
     (check-equal? (tensor->list (pow x 2)) '(1.0 4.0 9.0)))
 
+  (test-case "gelu (exact erf form): x * Phi(x)"
+    (define g (gelu (tensor '(0 1 -1))))
+    (check-= (car (tensor->list g)) 0.0 1e-6)
+    (check-= (cadr (tensor->list g)) 0.841345 1e-5)
+    (check-= (caddr (tensor->list g)) -0.158655 1e-5))
+
   (test-case "exp/log/sqrt/tanh/max/min fall back to racket/base on numbers"
     (check-equal? (exp 0) 1)
     (check-equal? (log 1) 0)

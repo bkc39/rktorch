@@ -36,6 +36,7 @@
                   tr-div-scalar/raw
                   tr-div/raw
                   tr-exp/raw
+                  tr-gelu/raw
                   tr-log/raw
                   tr-mul-scalar/raw
                   tr-mul/raw
@@ -97,6 +98,7 @@
          relu
          sigmoid
          tanh
+         gelu
          sum
          mean
          max
@@ -250,6 +252,11 @@
 
 (define (tanh v)
   (if (tensor? v) (wrap 'tanh (tr-tanh/raw v)) (base:tanh v)))
+
+;; Exact (erf-based) gelu, approximate='none' — the transformer MLP
+;; activation. No racket/base collision, so no shadow dispatch.
+(define (gelu t)
+  (wrap 'gelu (tr-gelu/raw t)))
 
 ;; -------------------------------------------------------------- reductions
 

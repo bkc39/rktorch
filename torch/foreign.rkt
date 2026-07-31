@@ -92,6 +92,8 @@
   [neg (-> tensor? tensor?)]
   [relu (-> tensor? tensor?)]
   [sigmoid (-> tensor? tensor?)]
+  ;; exact (erf-based) gelu, approximate='none'
+  [gelu (-> tensor? tensor?)]
   ;; exp/log/sqrt/tanh/max/min shadow racket/base: tensors hit libtorch,
   ;; anything else defers to the racket/base function, so requiring
   ;; torch never breaks numeric code.
