@@ -589,14 +589,16 @@
              [i (in-naturals)])
          (check-= a b tol (format "gelu parity ~a" i))))
      ;; the causal-attention mask idiom, end to end: build the mask from
-     ;; tril + eq (a bool tensor), fill the upper triangle with -inf, and
-     ;; softmax — exactly what the 06-gpt capstone's attention will do. The
-     ;; recipe battery can't express -inf (not valid Python via
-     ;; number->string), so this facade-level composition is hand-checked.
+     ;; tril + eq (a bool tensor), fill the upper triangle of *batched*
+     ;; scores with -inf (the [T,T]-mask-over-[B,T,T] broadcast the
+     ;; training loop uses), and softmax — exactly what the 06-gpt
+     ;; capstone's attention will do. The recipe battery can't express
+     ;; -inf (not valid Python via number->string), so this facade-level
+     ;; composition is hand-checked.
      (let ()
        (define jm (python-check "causal_mask.py"))
        (manual-seed! 0)
-       (define scores (randn 4 4))
+       (define scores (randn 2 4 4))
        (define mask (eq (tril (ones 4 4)) 0))
        (define r (softmax (masked-fill scores mask -inf.0) -1))
        (check-equal? (tensor-shape r) (hash-ref jm 'shape)
@@ -672,6 +674,20 @@
       '((tensor 2 3) (int-array (3)) (optional-tensor #f)
         (optional-tensor #f) (double 1e-5) (bool #t))
       "[no-affine]")
+     ;; embedding with a real padding_idx: forward values are insensitive
+     ;; to it in ATen, so this pins the non-default marshalling path (the
+     ;; recipe's -1 is the #f mapping, never a real index).
+     (check-generated-parity
+      (assq 'embedding manifest)
+      '((tensor 5 3) (int-tensor (0 2 4 1)) (int64 2) (bool #f) (bool #f))
+      "[padding-idx=2]")
+     ;; layer_norm over trailing [2,3] dims jointly — the multi-dim
+     ;; normalized-shape the facade contract advertises.
+     (check-generated-parity
+      (assq 'layer-norm manifest)
+      '((tensor 2 2 3) (int-array (2 3)) (optional-tensor 2 3)
+        (optional-tensor 2 3) (double 1e-5) (bool #t))
+      "[multi-dim]")
      ;; tril/triu at offset diagonals (the GPT causal mask uses tril at 0;
      ;; the offsets pin the diagonal argument's sign convention).
      (check-generated-parity
