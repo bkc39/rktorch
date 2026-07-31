@@ -78,7 +78,7 @@
         ;; racket/base addition, and this keeps no version floor.
         (define collapsed
           (apply * (for/list ([d (in-list shp)] [i (in-naturals)]
-                                                 #:when (and (>= i s) (<= i e)))
+                                                 #:when (<= s i e))
                      d)))
         (apply reshape v (append (take shp s)
                                  (list collapsed)

@@ -50,7 +50,7 @@
   [named-parameters (->* (module?) (string?)
                          (listof (cons/c string? tensor?)))]
   [buffers (-> module? (listof tensor?))]
-  [forward (->* (module?) #:rest (listof any/c) any)]
+  [forward (-> module? any/c ... any)]
   ;; train/eval mode (returns the model, like torch.nn.Module.train()/eval())
   [train! (-> module? module?)]
   [eval! (-> module? module?)]
@@ -80,7 +80,7 @@
                   layer-norm?)]
   [layer-norm? (-> any/c boolean?)]
   ;; composition
-  [Sequential (->* () #:rest (listof module?) sequential?)]
+  [Sequential (-> module? ... sequential?)]
   [sequential? (-> any/c boolean?)]
   ;; initializers
   [uniform-init (-> (listof exact-nonnegative-integer?) real? real? tensor?)]

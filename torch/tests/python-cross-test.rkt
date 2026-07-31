@@ -663,79 +663,79 @@
              [i (in-naturals)])
          (check-= a b tol (format "causal mask parity ~a" i))))
      ;; generated surface — every op in the codegen manifest
-     (let ([manifest (with-input-from-file generated-manifest read)])
-       (for-each check-generated-parity manifest)
-       ;; avg-pool2d's default recipe leaves divisor_override absent (nullopt);
-       ;; drive the optional-int64 *present* path too, or its marshalling is
-       ;; never compared to PyTorch.
-       (check-generated-parity
-        (assq 'avg-pool2d manifest)
-        '((tensor 1 1 4 4) (int-array (2 2)) (int-array (2 2))
-          (int-array (0 0)) (bool #f) (bool #t) (optional-int64 2))
-        "[divisor=2]")
-       ;; the loss recipes leave weight absent; drive the optional-tensor
-       ;; weight-present branch too (ones weight: stable, exercises weight!=null).
-       (check-generated-parity
-        (assq 'nll-loss manifest)
-        '((tensor 4 3) (int-tensor (0 2 1 0)) (optional-tensor-ones 3)
-          (int64 1) (int64 -100))
-        "[weight]")
-       (check-generated-parity
-        (assq 'cross-entropy-loss manifest)
-        '((tensor 4 3) (int-tensor (0 2 1 0)) (optional-tensor-ones 3)
-          (int64 1) (int64 -100) (double 0.0))
-        "[weight]")
-       ;; reduction=0 (None) returns per-sample losses (shape (N,)) instead
-       ;; of a scalar — catches a mis-wired reduction enum as a shape change.
-       (check-generated-parity
-        (assq 'nll-loss manifest)
-        '((tensor 4 3) (int-tensor (0 2 1 0)) (optional-tensor #f)
-          (int64 0) (int64 -100))
-        "[none]")
-       (check-generated-parity
-        (assq 'cross-entropy-loss manifest)
-        '((tensor 4 3) (int-tensor (0 2 1 0)) (optional-tensor #f)
-          (int64 0) (int64 -100) (double 0.0))
-        "[none]")
-       ;; conv2d's recipe has bias present; cover the common bias=None path.
-       (check-generated-parity
-        (assq 'conv2d manifest)
-        '((tensor 1 1 5 5) (tensor 2 1 3 3) (optional-tensor #f)
-          (int-array (1 1)) (int-array (0 0)) (int-array (1 1)) (int64 1))
-        "[no-bias]")
-       ;; the dim-wise reductions only drive dim-present; cover the absent
-       ;; (full-reduction) path against PyTorch too.
-       (check-generated-parity
-        (assq 'sum-dim-intlist manifest)
-        '((tensor 2 3) (optional-int-array #f) (bool #f) (dtype #f))
-        "[full]")
-       (check-generated-parity
-        (assq 'mean-dim manifest)
-        '((tensor 2 3) (optional-int-array #f) (bool #f) (dtype #f))
-        "[full]")
-       ;; default recipes use keepdim=#f; cover keepdim=#t (kept dim) too.
-       (check-generated-parity
-        (assq 'sum-dim-intlist manifest)
-        '((tensor 2 3) (optional-int-array (1)) (bool #t) (dtype #f))
-        "[keepdim]")
-       (check-generated-parity
-        (assq 'mean-dim manifest)
-        '((tensor 2 3) (optional-int-array (1)) (bool #t) (dtype #f))
-        "[keepdim]")
-       ;; layer_norm's default recipe has affine weight+bias present; cover
-       ;; the bare (no-affine) path — both optionals nullopt.
-       (check-generated-parity
-        (assq 'layer-norm manifest)
-        '((tensor 2 3) (int-array (3)) (optional-tensor #f)
-          (optional-tensor #f) (double 1e-5) (bool #t))
-        "[no-affine]")
-       ;; tril/triu at offset diagonals (the GPT causal mask uses tril at 0;
-       ;; the offsets pin the diagonal argument's sign convention).
-       (check-generated-parity
-        (assq 'tril manifest)
-        '((tensor 4 4) (int64 -1))
-        "[diag=-1]")
-       (check-generated-parity
-        (assq 'triu manifest)
-        '((tensor 4 4) (int64 1))
-        "[diag=1]"))]))
+     (define manifest (with-input-from-file generated-manifest read))
+     (for-each check-generated-parity manifest)
+     ;; avg-pool2d's default recipe leaves divisor_override absent (nullopt);
+     ;; drive the optional-int64 *present* path too, or its marshalling is
+     ;; never compared to PyTorch.
+     (check-generated-parity
+      (assq 'avg-pool2d manifest)
+      '((tensor 1 1 4 4) (int-array (2 2)) (int-array (2 2))
+        (int-array (0 0)) (bool #f) (bool #t) (optional-int64 2))
+      "[divisor=2]")
+     ;; the loss recipes leave weight absent; drive the optional-tensor
+     ;; weight-present branch too (ones weight: stable, exercises weight!=null).
+     (check-generated-parity
+      (assq 'nll-loss manifest)
+      '((tensor 4 3) (int-tensor (0 2 1 0)) (optional-tensor-ones 3)
+        (int64 1) (int64 -100))
+      "[weight]")
+     (check-generated-parity
+      (assq 'cross-entropy-loss manifest)
+      '((tensor 4 3) (int-tensor (0 2 1 0)) (optional-tensor-ones 3)
+        (int64 1) (int64 -100) (double 0.0))
+      "[weight]")
+     ;; reduction=0 (None) returns per-sample losses (shape (N,)) instead
+     ;; of a scalar — catches a mis-wired reduction enum as a shape change.
+     (check-generated-parity
+      (assq 'nll-loss manifest)
+      '((tensor 4 3) (int-tensor (0 2 1 0)) (optional-tensor #f)
+        (int64 0) (int64 -100))
+      "[none]")
+     (check-generated-parity
+      (assq 'cross-entropy-loss manifest)
+      '((tensor 4 3) (int-tensor (0 2 1 0)) (optional-tensor #f)
+        (int64 0) (int64 -100) (double 0.0))
+      "[none]")
+     ;; conv2d's recipe has bias present; cover the common bias=None path.
+     (check-generated-parity
+      (assq 'conv2d manifest)
+      '((tensor 1 1 5 5) (tensor 2 1 3 3) (optional-tensor #f)
+        (int-array (1 1)) (int-array (0 0)) (int-array (1 1)) (int64 1))
+      "[no-bias]")
+     ;; the dim-wise reductions only drive dim-present; cover the absent
+     ;; (full-reduction) path against PyTorch too.
+     (check-generated-parity
+      (assq 'sum-dim-intlist manifest)
+      '((tensor 2 3) (optional-int-array #f) (bool #f) (dtype #f))
+      "[full]")
+     (check-generated-parity
+      (assq 'mean-dim manifest)
+      '((tensor 2 3) (optional-int-array #f) (bool #f) (dtype #f))
+      "[full]")
+     ;; default recipes use keepdim=#f; cover keepdim=#t (kept dim) too.
+     (check-generated-parity
+      (assq 'sum-dim-intlist manifest)
+      '((tensor 2 3) (optional-int-array (1)) (bool #t) (dtype #f))
+      "[keepdim]")
+     (check-generated-parity
+      (assq 'mean-dim manifest)
+      '((tensor 2 3) (optional-int-array (1)) (bool #t) (dtype #f))
+      "[keepdim]")
+     ;; layer_norm's default recipe has affine weight+bias present; cover
+     ;; the bare (no-affine) path — both optionals nullopt.
+     (check-generated-parity
+      (assq 'layer-norm manifest)
+      '((tensor 2 3) (int-array (3)) (optional-tensor #f)
+        (optional-tensor #f) (double 1e-5) (bool #t))
+      "[no-affine]")
+     ;; tril/triu at offset diagonals (the GPT causal mask uses tril at 0;
+     ;; the offsets pin the diagonal argument's sign convention).
+     (check-generated-parity
+      (assq 'tril manifest)
+      '((tensor 4 4) (int64 -1))
+      "[diag=-1]")
+     (check-generated-parity
+      (assq 'triu manifest)
+      '((tensor 4 4) (int64 1))
+      "[diag=1]")]))

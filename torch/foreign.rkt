@@ -66,12 +66,12 @@
             tensor?)]
   [tensor (->* ((or/c real? list?)) (#:requires-grad? boolean?) tensor?)]
   ;; shape
-  [reshape (->* (tensor?) #:rest (listof index/c) tensor?)]
-  [view (->* (tensor?) #:rest (listof index/c) tensor?)]
+  [reshape (-> tensor? index/c ... tensor?)]
+  [view (-> tensor? index/c ... tensor?)]
   [transpose (-> tensor? index/c index/c tensor?)]
   ;; terse alias, PyTorch-flavored: (t a 0 1) == (transpose a 0 1)
   [rename transpose t (-> tensor? index/c index/c tensor?)]
-  [permute (->* (tensor?) #:rest (listof index/c) tensor?)]
+  [permute (-> tensor? index/c ... tensor?)]
   [squeeze (->* (tensor?) (index/c) tensor?)]
   [unsqueeze (-> tensor? index/c tensor?)]
   [cat (->* ((non-empty-listof tensor?)) (index/c) tensor?)]
