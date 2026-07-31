@@ -59,6 +59,48 @@
     (check-= (cadr (tensor->list g)) 0.841345 1e-5)
     (check-= (caddr (tensor->list g)) -0.158655 1e-5))
 
+  (test-case "tril/triu default diagonal + offsets"
+    (define m (reshape (arange 1 10) 3 3))
+    (check-equal? (tensor->list (tril m))
+                  '(1.0 0.0 0.0 4.0 5.0 0.0 7.0 8.0 9.0))
+    (check-equal? (tensor->list (triu m))
+                  '(1.0 2.0 3.0 0.0 5.0 6.0 0.0 0.0 9.0))
+    (check-equal? (tensor->list (tril m -1))
+                  '(0.0 0.0 0.0 4.0 0.0 0.0 7.0 8.0 0.0))
+    (check-equal? (tensor->list (triu m 1))
+                  '(0.0 2.0 3.0 0.0 0.0 6.0 0.0 0.0 0.0)))
+
+  (test-case "masked-fill via a comparison-built bool mask"
+    (define x (tensor '(10 20 30 40)))
+    (define mask (ne (tensor '(0 1 0 1)) 0))
+    (check-equal? (tensor->list (masked-fill x mask -100))
+                  '(10.0 -100.0 30.0 -100.0))
+    ;; the causal-mask composition: upper triangle goes to the fill value.
+    (define causal (eq (tril (ones 2 2)) 0))
+    (check-equal? (tensor->list (masked-fill (ones 2 2) causal 0))
+                  '(1.0 0.0 1.0 1.0)))
+
+  (test-case "embedding gathers rows, F.embedding arg order"
+    (define weight (reshape (arange 1 9) 4 2))
+    (define indices (to-dtype (tensor '(2 0 2)) 'int64))
+    (define out (embedding indices weight))
+    (check-equal? (tensor-shape out) '(3 2))
+    (check-equal? (tensor->list out) '(5.0 6.0 1.0 2.0 5.0 6.0)))
+
+  (test-case "layer-norm: bare + affine, int normalized-shape"
+    (define x (tensor '((1 2 3) (4 6 8))))
+    (define bare (layer-norm x 3))
+    (check-equal? (tensor-shape bare) '(2 3))
+    (check-= (car (tensor->list bare)) -1.2247 1e-4)
+    (check-= (cadr (tensor->list bare)) 0.0 1e-4)
+    (check-= (caddr (tensor->list bare)) 1.2247 1e-4)
+    ;; affine: y = normalized * weight + bias.
+    (define affine
+      (layer-norm x '(3) #:weight (mul (ones 3) 2) #:bias (ones 3)))
+    (for ([a (in-list (tensor->list affine))]
+          [b (in-list (tensor->list bare))])
+      (check-= a (+ (* 2 b) 1) 1e-4)))
+
   (test-case "exp/log/sqrt/tanh/max/min fall back to racket/base on numbers"
     (check-equal? (exp 0) 1)
     (check-equal? (log 1) 0)

@@ -21,18 +21,24 @@
                                 adaptive-avg-pool2d
                                 avg-pool2d
                                 conv2d
+                                embedding
                                 eq-scalar eq-tensor
                                 ge-scalar ge-tensor
                                 gt-scalar gt-tensor
+                                layer-norm
                                 le-scalar le-tensor
                                 lt-scalar lt-tensor
+                                masked-fill-scalar
                                 max-pool2d
                                 narrow
+                                tril
+                                triu
                                 ne-scalar ne-tensor)))
 
 (provide flatten
          eq ne lt le gt ge
          conv2d max-pool2d avg-pool2d adaptive-avg-pool2d
+         tril triu masked-fill embedding layer-norm
          ;; narrow needs no wrapper (no keyword defaulting, no dispatch); the
          ;; generated binding already has the right name and contract target.
          ;; Like torch.narrow it returns a *view* aliasing the source storage
@@ -81,9 +87,9 @@
 
 ;; --------------------------------------------------- comparison dispatchers
 
-;; eq/ne/lt/le/gt/ge over a tensor lhs and a tensor-or-real rhs. They yield
-;; float32 masks today (the read path coerces the bool result); int/bool
-;; dtype is v3 work.
+;; eq/ne/lt/le/gt/ge over a tensor lhs and a tensor-or-real rhs. The result
+;; handle is a genuine bool tensor (what masked-fill demands); only the
+;; read path (tensor->list / repr) coerces the values to float32.
 (define ((comparison t-op s-op) a b)
   (cond
     [(tensor? b) (t-op a b)]
@@ -132,3 +138,34 @@
 
 (define (adaptive-avg-pool2d input output-size)
   (g:adaptive-avg-pool2d input (->2d output-size)))
+
+;; ------------------------------------------- transformer primitives (#22)
+
+;; tril/triu with PyTorch's default diagonal. The GPT causal mask is
+;; (eq (tril (ones T T)) 0) -- a bool tensor marking the *upper* triangle.
+(define (tril self [diagonal 0])
+  (g:tril self diagonal))
+
+(define (triu self [diagonal 0])
+  (g:triu self diagonal))
+
+;; masked-fill: mask must be a bool tensor (a comparison-op result) --
+;; ATen rejects float masks. `value` may be -inf.0 (the softmax mask).
+(define (masked-fill self mask value)
+  (g:masked-fill-scalar self mask (exact->inexact value)))
+
+;; F.embedding argument order (indices first); the unstable surface keeps
+;; ATen's weight-first order. #:padding-idx #f means "none" (ATen's -1).
+(define (embedding input weight #:padding-idx [padding-idx #f])
+  (g:embedding weight input (or padding-idx -1) #f #f))
+
+;; F.layer_norm defaults: no affine params unless given, eps 1e-5;
+;; cudnn_enable stays #t like torch.nn.functional.layer_norm.
+;; normalized-shape takes an int (the trailing dim) or an explicit list.
+(define (layer-norm input normalized-shape
+                    #:weight [weight #f]
+                    #:bias [bias #f]
+                    #:eps [eps 1e-5])
+  (define shape
+    (if (list? normalized-shape) normalized-shape (list normalized-shape)))
+  (g:layer-norm input shape weight bias eps #t))

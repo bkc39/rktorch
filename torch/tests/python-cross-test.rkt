@@ -593,6 +593,32 @@
              [b (in-list (hash-ref jg 'values))]
              [i (in-naturals)])
          (check-= a b tol (format "gelu parity ~a" i))))
+     ;; the causal-attention mask idiom, end to end: build the mask from
+     ;; tril + eq (a bool tensor), fill the upper triangle with -inf, and
+     ;; softmax — exactly what the 06-gpt capstone's attention will do. The
+     ;; recipe battery can't express -inf (not valid Python via
+     ;; number->string), so this facade-level composition is hand-checked.
+     (let ()
+       (define jm (python-code
+                   (string-append
+                    "import json, torch\n"
+                    "torch.manual_seed(0)\n"
+                    "scores = torch.randn(4, 4)\n"
+                    "mask = torch.tril(torch.ones(4, 4)) == 0\n"
+                    "r = torch.softmax(scores.masked_fill(mask,"
+                    " float(\"-inf\")), -1)\n"
+                    "print(json.dumps({\"shape\": list(r.shape),"
+                    " \"values\": [float(v) for v in r.flatten().tolist()]}))")))
+       (manual-seed! 0)
+       (define scores (randn 4 4))
+       (define mask (eq (tril (ones 4 4)) 0))
+       (define r (softmax (masked-fill scores mask -inf.0) -1))
+       (check-equal? (tensor-shape r) (hash-ref jm 'shape)
+                     "causal mask parity: shape")
+       (for ([a (in-list (tensor->list r))]
+             [b (in-list (hash-ref jm 'values))]
+             [i (in-naturals)])
+         (check-= a b tol (format "causal mask parity ~a" i))))
      ;; generated surface — every op in the codegen manifest
      (let ([manifest (with-input-from-file generated-manifest read)])
        (for-each check-generated-parity manifest)

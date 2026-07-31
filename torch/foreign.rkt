@@ -136,7 +136,26 @@
                     #:divisor-override (or/c exact-positive-integer? #f))
                    tensor?)]
   [adaptive-avg-pool2d (-> tensor? pool-size/c tensor?)]
-  ;; comparisons (tensor lhs, tensor-or-real rhs) -> float32 masks
+  ;; transformer primitives (promoted from the generated surface).
+  ;; embedding follows F.embedding's arg order (indices first); the
+  ;; causal-mask idiom is (masked-fill scores (eq (tril (ones T T)) 0) -inf.0).
+  [tril (->* (tensor?) (exact-integer?) tensor?)]
+  [triu (->* (tensor?) (exact-integer?) tensor?)]
+  ;; mask must be a bool tensor (a comparison result); value may be -inf.0.
+  [masked-fill (-> tensor? tensor? real? tensor?)]
+  [embedding (->* (tensor? tensor?)
+                  (#:padding-idx (or/c #f exact-nonnegative-integer?))
+                  tensor?)]
+  [layer-norm (->* (tensor?
+                    (or/c exact-positive-integer?
+                          (non-empty-listof exact-positive-integer?)))
+                   (#:weight (or/c tensor? #f)
+                    #:bias (or/c tensor? #f)
+                    #:eps real?)
+                   tensor?)]
+  ;; comparisons (tensor lhs, tensor-or-real rhs) -> bool masks whose
+  ;; *values* read back as float32 (the handles stay bool; masked-fill
+  ;; consumes them directly)
   [eq compare/c]
   [ne compare/c]
   [lt compare/c]
