@@ -1,0 +1,129 @@
+#lang racket/base
+
+;; End-to-end training-loop smoke for the v3/B transformer tranche (#22):
+;; a one-block char-level GPT trained to predict the next character of a
+;; short Heart of Darkness passage. Every tranche-3 primitive is on the
+;; hot path — nn.Embedding (token + positional), nn.LayerNorm, gelu, and
+;; the causal mask built from tril + eq + masked-fill — driven by adam and
+;; cross-entropy from the existing nn surface. Greedy generation at the
+;; end shows the model has memorized plausible fragments.
+;;
+;; Run:  nix develop --command racket scripts/v3b-train-demo.rkt
+;;
+;; This is a quick check, not the capstone: the real literate 06-gpt
+;; example (#24, with the Gutenberg loader from #23) supersedes it.
+
+(require (only-in racket/list remove-duplicates take take-right)
+         torch
+         torch/nn)
+
+;; --------------------------------------------------------------- the data
+
+;; The opening of Heart of Darkness (public domain) — enough structure to
+;; memorize in a few hundred full-batch steps on CPU.
+(define corpus
+  (string-append
+   "The Nellie, a cruising yawl, swung to her anchor without a flutter of"
+   " the sails, and was at rest. The flood had made, the wind was nearly"
+   " calm, and being bound down the river, the only thing for it was to"
+   " come to and wait for the turn of the tide. The sea-reach of the"
+   " Thames stretched before us like the beginning of an interminable"
+   " waterway. In the offing the sea and the sky were welded together"
+   " without a joint, and in the luminous space the tanned sails of the"
+   " barges drifting up with the tide seemed to stand still in red"
+   " clusters of canvas sharply peaked, with gleams of varnished sprits."))
+
+;; Sorted unique-char vocab; encode maps chars to int indices.
+(define vocab (sort (remove-duplicates (string->list corpus)) char<?))
+(define vocab-size (length vocab))
+(define char->id (for/hash ([c (in-list vocab)] [i (in-naturals)]) (values c i)))
+(define id->char (list->vector vocab))
+(define (encode str) (for/list ([c (in-string str)]) (hash-ref char->id c)))
+(define (decode ids) (list->string (for/list ([i (in-list ids)])
+                                     (vector-ref id->char i))))
+
+;; Contiguous [T]-char windows: x = chars [i, i+T), y = chars [i+1, i+T+1).
+(define block-size 32)
+(define (windows ids stride)
+  (for/list ([i (in-range 0 (- (length ids) block-size 1) stride)])
+    (cons (take (list-tail ids i) block-size)
+          (take (list-tail ids (add1 i)) block-size))))
+
+;; ---------------------------------------------------------------- the net
+
+(define embed-dim 32)
+
+;; One pre-LN transformer block + head, single attention head. Submodules
+;; are declared through the extended define-module — no wrapper structs.
+(define-module gpt-mini (vocab-size block-size embed-dim)
+  #:submodules ([tok-emb (Embedding vocab-size embed-dim)]
+                [pos-emb (Embedding block-size embed-dim)]
+                [ln1 (LayerNorm embed-dim)]
+                [wq (Linear embed-dim embed-dim)]
+                [wk (Linear embed-dim embed-dim)]
+                [wv (Linear embed-dim embed-dim)]
+                [wo (Linear embed-dim embed-dim)]
+                [ln2 (LayerNorm embed-dim)]
+                [fc1 (Linear embed-dim (* 4 embed-dim))]
+                [fc2 (Linear (* 4 embed-dim) embed-dim)]
+                [head (Linear embed-dim vocab-size)])
+  #:forward (idx)
+  (let* ([t (cadr (tensor-shape idx))]
+         [pos (to-dtype (arange t) 'int64)]
+         [h (add (tok-emb idx) (pos-emb pos))]        ; [B,T,d]
+         ;; causal self-attention (the #22 mask idiom)
+         [hn (ln1 h)]
+         [scores (div (matmul (wq hn) (transpose (wk hn) 1 2))
+                      (sqrt embed-dim))]              ; [B,T,T]
+         [mask (eq (tril (ones t t)) 0)]
+         [att (softmax (masked-fill scores mask -inf.0) 2)]
+         [h (add h (wo (matmul att (wv hn))))]
+         ;; MLP block with gelu
+         [h (add h (fc2 (gelu (fc1 (ln2 h)))))])
+    (head h)))                                        ; [B,T,V]
+
+;; -------------------------------------------------------------- the loop
+
+(module+ main
+  (manual-seed! 0)
+  (define ids (encode corpus))
+  (define ws (windows ids 4))
+  (define batch (length ws))
+  (printf "corpus: ~a chars, vocab ~a, ~a windows of ~a\n"
+          (length ids) vocab-size batch block-size)
+
+  (define x (to-dtype (tensor (map car ws)) 'int64))   ; [B,T]
+  (define y (to-dtype (tensor (map cdr ws)) 'int64))
+  (define y-flat (reshape y (* batch block-size)))
+
+  (define net (gpt-mini vocab-size block-size embed-dim))
+  (define opt (adam (parameters net) #:lr 1e-3))
+
+  (define (loss-now)
+    (cross-entropy (reshape (net x) (* batch block-size) vocab-size)
+                   y-flat))
+
+  (printf "initial loss ~a (ln vocab = ~a)\n"
+          (real->decimal-string (item (loss-now)) 4)
+          (real->decimal-string (log vocab-size) 4))
+  (for ([step (in-range 1 301)])
+    (define loss (loss-now))
+    (zero-grads! opt)
+    (backward! loss)
+    (step! opt)
+    (when (zero? (modulo step 50))
+      (printf "step ~a: loss ~a\n"
+              step (real->decimal-string (item loss) 4))))
+
+  ;; greedy generation from a seed — the capstone's sampling shape
+  (define (generate seed n)
+    (in-eval-mode net
+      (with-no-grad
+        (for/fold ([out (encode seed)]) ([_ (in-range n)])
+          (define ctx (take-right out (min block-size (length out))))
+          (define t (length ctx))
+          (define logits (net (to-dtype (tensor (list ctx)) 'int64)))
+          (define last-row (reshape (narrow logits 1 (- t 1) 1) vocab-size))
+          (append out (list (inexact->exact (item (argmax last-row)))))))))
+
+  (printf "sample: ~s\n" (decode (generate "The " 120))))
