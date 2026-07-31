@@ -16,9 +16,10 @@ The Racket package is the `torch` collection:
 - `(require torch/nn)` — the nn layer (mirrors `import torch.nn`):
   `define-module`, `gen:module`, `Linear`, `sgd`, `mse-loss`, initializers.
   **Naming convention:** nn layer *constructors* are PascalCase (`Linear`,
-  `Conv2d`, `MaxPool2d`, `Flatten`, `Dropout`, `Sequential`), mirroring the
-  `torch.nn.*` classes; their *predicates* are lowercase (`linear?`, `conv2d?`,
-  `max-pool2d?`, `flatten?`, `dropout?`, `sequential?`), per Racket idiom
+  `Conv2d`, `MaxPool2d`, `Flatten`, `Dropout`, `Sequential`, `Embedding`,
+  `LayerNorm`), mirroring the `torch.nn.*` classes; their *predicates* are
+  lowercase (`linear?`, `conv2d?`, `max-pool2d?`, `flatten?`, `dropout?`,
+  `sequential?`, `embedding?`, `layer-norm?`), per Racket idiom
   (`list?`, `hash?`). The functional ops keep lowercase names on `torch`
   (`conv2d`, `max-pool2d`, `flatten`, like `torch.conv2d`). The PascalCase
   constructors vs lowercase functional ops are what let `(require torch
@@ -69,8 +70,11 @@ per `foreign/operators.rkt`.
 
 From `torch/nn`: `define-module gen:module module? parameters
 named-parameters buffers forward Linear Conv2d MaxPool2d Flatten Dropout
-Sequential sgd adam step! zero-grads! cross-entropy mse-loss
-kaiming-uniform uniform-init fan-in`. `define-module` is the Python-style
+Sequential Embedding LayerNorm sgd adam step! zero-grads! cross-entropy
+mse-loss kaiming-uniform uniform-init normal-init fan-in`. The functional
+transformer primitives (`gelu tril triu masked-fill embedding layer-norm`,
+tranche 3, #22) live on `torch` beside the other functional ops; the GPT
+causal-mask idiom is `(masked-fill scores (eq (tril (ones T T)) 0) -inf.0)`. `define-module` is the Python-style
 `nn.Module` analog: fields are registered at expansion time, models are
 plain struct trees owned by the GC (no global parameter store), and
 `prop:procedure` makes `(net x)` work like `__call__`. Layer init mirrors

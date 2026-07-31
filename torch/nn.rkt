@@ -19,7 +19,9 @@
          (only-in "foreign/contracts.rkt" pos-size/c nonneg-size/c)
          "nn/conv.rkt"
          "nn/dropout.rkt"
+         "nn/embedding.rkt"
          "nn/init.rkt"
+         "nn/layer-norm.rkt"
          "nn/linear.rkt"
          "nn/loss.rkt"
          "nn/module.rkt"
@@ -69,11 +71,20 @@
   [flatten? (-> any/c boolean?)]
   [Dropout (->* () (#:p (and/c (>=/c 0) (</c 1))) dropout?)]
   [dropout? (-> any/c boolean?)]
+  [Embedding (-> exact-positive-integer? exact-positive-integer?
+                 embedding?)]
+  [embedding? (-> any/c boolean?)]
+  [LayerNorm (->* ((or/c exact-positive-integer?
+                         (non-empty-listof exact-positive-integer?)))
+                  (#:eps real?)
+                  layer-norm?)]
+  [layer-norm? (-> any/c boolean?)]
   ;; composition
   [Sequential (->* () #:rest (listof module?) sequential?)]
   [sequential? (-> any/c boolean?)]
   ;; initializers
   [uniform-init (-> (listof exact-nonnegative-integer?) real? real? tensor?)]
+  [normal-init (-> (listof exact-nonnegative-integer?) tensor?)]
   [kaiming-uniform (->* ((listof exact-nonnegative-integer?)) (#:a real?)
                         tensor?)]
   [fan-in (-> (listof exact-nonnegative-integer?)

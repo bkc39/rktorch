@@ -122,6 +122,43 @@
     (check-equal? (tensor-shape (f (randn 4 8 14 14))) '(4 1568))
     (check-equal? (object-name f) 'Flatten))
 
+  (test-case "Embedding layer: weight shape, gather forward, predicate"
+    (manual-seed! 0)
+    (define e (Embedding 7 4))
+    (check-true (embedding? e))
+    (check-true (module? e))
+    (define ps (parameters e))
+    (check-equal? (map tensor-shape ps) '((7 4)))
+    (check-true (andmap requires-grad? ps))
+    (check-equal? (map car (named-parameters e)) '("weight"))
+    ;; forward gathers rows of the weight table by index.
+    (define idx (to-dtype (tensor '(3 0 3)) 'int64))
+    (define out (e idx))
+    (check-equal? (tensor-shape out) '(3 4))
+    (define w-rows (tensor->list (car ps)))
+    (check-equal? (take (tensor->list out) 4)          ; row 3
+                  (take (drop w-rows 12) 4))
+    (check-equal? (object-name e) 'Embedding))
+
+  (test-case "LayerNorm layer: ones/zeros init, normalizing forward"
+    (define ln (LayerNorm 4))
+    (check-true (layer-norm? ln))
+    (check-true (module? ln))
+    (check-equal? (map car (named-parameters ln)) '("weight" "bias"))
+    (check-equal? (map tensor-shape (parameters ln)) '((4) (4)))
+    (check-equal? (tensor->list (car (parameters ln))) '(1.0 1.0 1.0 1.0))
+    (check-equal? (tensor->list (cadr (parameters ln))) '(0.0 0.0 0.0 0.0))
+    ;; with unit weight and zero bias the forward is pure normalization:
+    ;; each row comes out zero-mean.
+    (define out (ln (tensor '((1 2 3 4) (10 20 30 40)))))
+    (check-equal? (tensor-shape out) '(2 4))
+    (define rows (tensor->list out))
+    (check-= (apply + (take rows 4)) 0.0 1e-4)
+    (check-= (apply + (drop rows 4)) 0.0 1e-4)
+    ;; a list normalized-shape and a custom eps construct fine.
+    (check-true (layer-norm? (LayerNorm '(3 4) #:eps 1e-6)))
+    (check-equal? (object-name ln) 'LayerNorm))
+
   (test-case "#:reflection-name may precede other clauses (any-order)"
     (define-module early-refl% ()
       #:reflection-name 'EarlyRefl

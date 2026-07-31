@@ -7,9 +7,10 @@
 
 ;; Numeric math here stays racket/base (no tensors in the bounds), so only
 ;; the tensor constructors come from the facade.
-(require (only-in "../foreign.rkt" uniform! zeros))
+(require (only-in "../foreign.rkt" randn uniform! zeros))
 
 (provide uniform-init
+         normal-init
          kaiming-uniform
          fan-in)
 
@@ -19,6 +20,13 @@
   (define t (apply zeros dims))
   (uniform! t low high)
   t)
+
+;; A dims-shaped tensor of standard-normal draws. torch.randn is
+;; empty().normal_(), so the RNG consumption matches torch.nn.init.normal_
+;; draw for draw (nn.Embedding.reset_parameters); the seeded-init parity
+;; test in python-cross-test.rkt is the oracle.
+(define (normal-init dims)
+  (apply randn dims))
 
 ;; torch.nn.init._calculate_fan_in_and_fan_out's fan_in: for a [out in ...]
 ;; weight, the input fmaps times the receptive field.

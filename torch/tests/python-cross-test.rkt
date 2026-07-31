@@ -528,6 +528,49 @@
                      "conv2d init: value count")
        (for ([r (in-list rkt-vals)] [p (in-list py-vals)] [i (in-naturals)])
          (check-= r p tol (format "conv2d init: value ~a parity" i))))
+     ;; Embedding layer: the seeded standard-normal init (normal-init =
+     ;; randn) must match nn.Embedding.reset_parameters (init.normal_)
+     ;; value-for-value — randn is empty().normal_(), same RNG consumption.
+     (let ()
+       (define j (python-code
+                  (string-append
+                   "import json, torch, torch.nn as nn\n"
+                   "torch.manual_seed(0)\n"
+                   "m = nn.Embedding(7, 4)\n"
+                   "print(json.dumps({\"values\": [float(v) for v in"
+                   " m.weight.detach().flatten().tolist()],"
+                   " \"shape\": list(m.weight.shape)}))")))
+       (manual-seed! 0)
+       (define net (Embedding 7 4))
+       (define w (car (parameters net)))
+       (check-equal? (tensor-shape w) (hash-ref j 'shape)
+                     "embedding init: weight shape matches nn.Embedding")
+       (for ([r (in-list (tensor->list w))]
+             [p (in-list (hash-ref j 'values))]
+             [i (in-naturals)])
+         (check-= r p tol (format "embedding init: value ~a parity" i))))
+     ;; LayerNorm layer: init is deterministic (ones/zeros), so the forward
+     ;; on a seeded input is the meaningful parity check.
+     (let ()
+       (define j (python-code
+                  (string-append
+                   "import json, torch, torch.nn as nn\n"
+                   "torch.manual_seed(0)\n"
+                   "m = nn.LayerNorm(5)\n"
+                   "x = torch.randn(3, 5)\n"
+                   "r = m(x)\n"
+                   "print(json.dumps({\"shape\": list(r.shape),"
+                   " \"values\": [float(v) for v in"
+                   " r.detach().flatten().tolist()]}))")))
+       (manual-seed! 0)
+       (define ln (LayerNorm 5))
+       (define r (ln (randn 3 5)))
+       (check-equal? (tensor-shape r) (hash-ref j 'shape)
+                     "layer-norm forward: shape parity")
+       (for ([a (in-list (tensor->list r))]
+             [b (in-list (hash-ref j 'values))]
+             [i (in-naturals)])
+         (check-= a b tol (format "layer-norm forward: value ~a parity" i))))
      ;; the promoted max/avg-pool2d wrappers default #:stride to kernel-size
      ;; (PyTorch's stride=None); the generated battery hits the raw bindings,
      ;; so parity-check that facade default against F.* directly.
