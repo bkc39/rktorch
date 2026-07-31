@@ -99,7 +99,7 @@
     (check-true (andmap requires-grad? ps))
     (check-equal? (map car (named-parameters c)) '("weight" "bias"))
     (check-equal? (tensor-shape (c (randn 4 1 28 28))) '(4 8 28 28))
-    ;; reflection-name tracks the public constructor, not the internal Conv2d%
+    ;; object-name reflects the define-module name (no internal struct since #10)
     (check-equal? (object-name c) 'Conv2d))
 
   (test-case "Conv2d non-square kernel + per-axis padding"
