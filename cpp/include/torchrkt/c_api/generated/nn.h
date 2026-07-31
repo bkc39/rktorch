@@ -16,6 +16,15 @@ extern "C" {
  * and returns an int status (0 ok, 1 with tr_last_error set). */
 
 tr_tensor* tr_gen_dropout(const tr_tensor* input, double p, bool train);
+tr_tensor* tr_gen_embedding(const tr_tensor* weight, const tr_tensor* indices,
+                            int64_t padding_idx, bool scale_grad_by_freq,
+                            bool sparse);
+tr_tensor* tr_gen_layer_norm(
+    const tr_tensor* input, const int64_t* normalized_shape,
+    int64_t normalized_shape_len,
+    const tr_tensor* weight /* nullable: NULL == no value */,
+    const tr_tensor* bias /* nullable: NULL == no value */, double eps,
+    bool cudnn_enable);
 
 #ifdef __cplusplus
 }

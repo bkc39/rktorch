@@ -147,6 +147,9 @@
   ;;   (optional-tensor dim ...)   seeded randn; (optional-tensor #f) -> None
   ;;   (int64 v) (double v) (bool v) (int-array (v ...))   literals
   ;;   (int-tensor (v ...))        a literal int64 tensor (loss targets)
+  ;;   (bool-tensor (v ...))       a literal bool tensor (masked_fill masks);
+  ;;                               built via `ne 0` on the Racket side, so the
+  ;;                               handle is genuinely bool, as ATen requires
   ;;   (optional-int64 v|#f) (optional-int-array (v ...)|#f)  optional, #f=None
   ;;   (dtype sym|#f)              a ScalarType (kwarg-only on the aten side)
   ;;   (kwarg "name" v)            a scalar passed positionally to the Racket
@@ -172,7 +175,8 @@
           'addcmul! '((tensor 3) (tensor 3) (tensor 3) (kwarg "value" 0.5))
           'addcdiv! '((tensor 3) (tensor 3) (tensor 3) (kwarg "value" 0.5))
           'lerp-tensor! '((tensor 3) (tensor 3) (tensor 3))
-          ;; comparisons (tensor + scalar rhs) -> float32 masks
+          ;; comparisons (tensor + scalar rhs) -> bool masks (the read path
+          ;; floatifies the values; the handles stay bool)
           'eq-tensor '((tensor 3) (tensor 3))
           'eq-scalar '((tensor 3) (double 0.0))
           'ne-tensor '((tensor 3) (tensor 3))
@@ -204,7 +208,24 @@
           ;; path is stochastic and parity-checked via the eval-mode result.
           'dropout '((tensor 2 3) (double 0.5) (bool #f))
           ;; copy_ overwrites self with src, so the seeded result equals src.
-          'copy! '((tensor 2 3) (tensor 2 3) (bool #f))))
+          'copy! '((tensor 2 3) (tensor 2 3) (bool #f))
+          ;; --- tranche 3: the transformer op closure ---
+          ;; embedding: randn weight table, literal int64 indices (with a
+          ;; repeat, exercising the gather), no padding/scaling/sparse.
+          'embedding '((tensor 5 3) (int-tensor (0 2 4 1)) (int64 -1)
+                       (bool #f) (bool #f))
+          ;; layer_norm over the last dim with affine weight+bias present
+          ;; (both randn, drawn after the input so the streams align).
+          'layer-norm '((tensor 2 3) (int-array (3)) (optional-tensor 3)
+                        (optional-tensor 3) (double 1e-5) (bool #t))
+          ;; masked_fill: a finite fill value (the -inf causal-mask idiom is
+          ;; hand-checked in the facade block; number->string of -inf.0 isn't
+          ;; valid Python).
+          'masked-fill-scalar '((tensor 6) (bool-tensor (0 1 0 1 0 1))
+                                (double -100.0))
+          ;; causal-mask builders at the main diagonal (offsets driven below).
+          'tril '((tensor 4 4) (int64 0))
+          'triu '((tensor 4 4) (int64 0))))
 
   ;; Both sides draw tensor inputs left to right from the same seed, so the
   ;; RNG streams line up exactly like the literate-example twins. Specs that
@@ -221,6 +242,7 @@
       ;; alignment holds; stable magnitude unlike a randn weight).
       [(optional-tensor-ones) (apply ones (cdr spec))]
       [(int-tensor) (to-dtype (tensor (cadr spec)) 'int64)]
+      [(bool-tensor) (ne (tensor (cadr spec)) 0)]
       [(int64 double bool int-array optional-int64 optional-int-array dtype)
        (cadr spec)]
       [(kwarg) (caddr spec)]
@@ -242,6 +264,8 @@
       [(optional-tensor-ones) (format "torch.ones(~a)" (csv (cdr spec)))]
       [(int-tensor)
        (format "torch.tensor([~a], dtype=torch.int64)" (csv (cadr spec)))]
+      [(bool-tensor)
+       (format "torch.tensor([~a], dtype=torch.bool)" (csv (cadr spec)))]
       [(int64 double) (number->string (cadr spec))]
       [(kwarg) (number->string (caddr spec))]
       [(bool) (if (cadr spec) "True" "False")]
@@ -606,4 +630,21 @@
        (check-generated-parity
         (assq 'mean-dim manifest)
         '((tensor 2 3) (optional-int-array (1)) (bool #t) (dtype #f))
-        "[keepdim]"))]))
+        "[keepdim]")
+       ;; layer_norm's default recipe has affine weight+bias present; cover
+       ;; the bare (no-affine) path — both optionals nullopt.
+       (check-generated-parity
+        (assq 'layer-norm manifest)
+        '((tensor 2 3) (int-array (3)) (optional-tensor #f)
+          (optional-tensor #f) (double 1e-5) (bool #t))
+        "[no-affine]")
+       ;; tril/triu at offset diagonals (the GPT causal mask uses tril at 0;
+       ;; the offsets pin the diagonal argument's sign convention).
+       (check-generated-parity
+        (assq 'tril manifest)
+        '((tensor 4 4) (int64 -1))
+        "[diag=-1]")
+       (check-generated-parity
+        (assq 'triu manifest)
+        '((tensor 4 4) (int64 1))
+        "[diag=1]"))]))

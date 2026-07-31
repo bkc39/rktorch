@@ -23,6 +23,8 @@ tr_tensor* tr_gen_le_scalar(const tr_tensor* self, double other);
 tr_tensor* tr_gen_le_tensor(const tr_tensor* self, const tr_tensor* other);
 tr_tensor* tr_gen_lt_scalar(const tr_tensor* self, double other);
 tr_tensor* tr_gen_lt_tensor(const tr_tensor* self, const tr_tensor* other);
+tr_tensor* tr_gen_masked_fill_scalar(const tr_tensor* self,
+                                     const tr_tensor* mask, double value);
 tr_tensor* tr_gen_ne_scalar(const tr_tensor* self, double other);
 tr_tensor* tr_gen_ne_tensor(const tr_tensor* self, const tr_tensor* other);
 

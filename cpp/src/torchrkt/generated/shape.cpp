@@ -52,4 +52,20 @@ tr_tensor* tr_gen_reshape(const tr_tensor* self, const int64_t* shape,
   });
 }
 
+tr_tensor* tr_gen_tril(const tr_tensor* self, int64_t diagonal) {
+  if (!self) {
+    return torchrkt::null_arg("tr_gen_tril");
+  }
+  return torchrkt::alloc_result(
+      "tr_gen_tril", [&] { return at::tril(self->value, diagonal); });
+}
+
+tr_tensor* tr_gen_triu(const tr_tensor* self, int64_t diagonal) {
+  if (!self) {
+    return torchrkt::null_arg("tr_gen_triu");
+  }
+  return torchrkt::alloc_result(
+      "tr_gen_triu", [&] { return at::triu(self->value, diagonal); });
+}
+
 }  // extern "C"
