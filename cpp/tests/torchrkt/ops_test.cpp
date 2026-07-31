@@ -142,6 +142,16 @@ TEST(TorchrktOps, Elementwise) {
 
   const Handle squared(tr_pow_scalar(a.t, 2.0));
   EXPECT_EQ(data_of(squared.t), (std::vector<float>{1, 4, 9, 16}));
+
+  // gelu (exact form, approximate='none'): x * Phi(x). gelu(0)=0, and the
+  // +-1 values pin the erf-based branch against the tanh approximation.
+  const Handle unit = make({0.0F, 1.0F, -1.0F}, {3});
+  const Handle smoothed(tr_gelu(unit.t));
+  const std::vector<float> g = data_of(smoothed.t);
+  EXPECT_FLOAT_EQ(g.at(0), 0.0F);
+  EXPECT_NEAR(g.at(1), 0.841345F, 1e-5F);
+  EXPECT_NEAR(g.at(2), -0.158655F, 1e-5F);
+  EXPECT_EQ(tr_gelu(nullptr), nullptr);
 }
 
 TEST(TorchrktOps, ReduceAndItem) {

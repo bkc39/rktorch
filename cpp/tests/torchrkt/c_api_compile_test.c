@@ -25,6 +25,7 @@ void torchrkt_c_api_compile_check(void) {
   tr_tensor* (*cat)(const tr_tensor* const*, int64_t, int64_t) = tr_cat;
   tr_tensor* (*add)(const tr_tensor*, const tr_tensor*) = tr_add;
   tr_tensor* (*add_scalar)(const tr_tensor*, double) = tr_add_scalar;
+  tr_tensor* (*gelu)(const tr_tensor*) = tr_gelu;
   tr_tensor* (*softmax)(const tr_tensor*, int64_t) = tr_softmax;
   tr_tensor* (*matmul)(const tr_tensor*, const tr_tensor*) = tr_matmul;
   int (*item)(const tr_tensor*, double*) = tr_tensor_item;

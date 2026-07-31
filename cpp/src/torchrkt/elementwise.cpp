@@ -54,6 +54,10 @@ TR_UNARY_OP(tr_sqrt, t->value.sqrt())
 TR_UNARY_OP(tr_relu, t->value.relu())
 TR_UNARY_OP(tr_sigmoid, t->value.sigmoid())
 TR_UNARY_OP(tr_tanh, t->value.tanh())
+// gelu is hand-written (its kwarg-only `str approximate` arg is outside the
+// codegen IR); the one-arg free function is the approximate='none' default.
+// No method variant exists, hence at::gelu over t->value.gelu().
+TR_UNARY_OP(tr_gelu, at::gelu(t->value))
 
 }  // extern "C"
 
