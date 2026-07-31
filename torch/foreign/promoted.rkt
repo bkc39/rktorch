@@ -31,9 +31,9 @@
                                 masked-fill-scalar
                                 max-pool2d
                                 narrow
+                                ne-scalar ne-tensor
                                 tril
-                                triu
-                                ne-scalar ne-tensor)))
+                                triu)))
 
 (provide flatten
          eq ne lt le gt ge
