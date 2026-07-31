@@ -12,20 +12,14 @@
          (only-in "init.rkt" normal-init)
          (only-in "module.rkt" define-module))
 
-;; PascalCase constructor, lowercase predicate (the conv.rkt convention);
-;; embedding? aliases the struct predicate Embedding%? (noqa: raco review
-;; can't see the alias).
+;; PascalCase constructor, lowercase predicate (the linear.rkt convention).
+;; Embedding/Embedding? are define-module expansions, invisible to raco
+;; review; we export the predicate as embedding?.
 (provide Embedding
-         embedding? ;; noqa
+         (rename-out [Embedding? embedding?]) ;; noqa
          )
 
-(define-module Embedding% (num-embeddings embedding-dim)
+(define-module Embedding (num-embeddings embedding-dim)
   #:params ([weight (normal-init (list num-embeddings embedding-dim))])
-  #:reflection-name 'Embedding
   #:forward (indices)
   (embedding indices weight))
-
-(define (Embedding num-embeddings embedding-dim)
-  (Embedding% num-embeddings embedding-dim))
-
-(define embedding? Embedding%?)
