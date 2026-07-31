@@ -33,6 +33,7 @@
            (only-in "../data/mnist.rkt" load-mnist-fixture))
 
   (define-runtime-path examples-dir "../../examples")
+  (define-runtime-path python-checks-dir "python")
   (define-runtime-path generated-manifest "generated-parity.rktd")
   (define-runtime-path generated-rkt "../generated.rkt")
 
@@ -94,20 +95,21 @@
       (error 'python-cross-test "python failed for ~a" rel-path))
     (read-json (open-input-string (get-output-string out))))
 
-  ;; Run an inline python snippet (which must print one JSON line) and parse
-  ;; it. Captures stderr so a crashing snippet surfaces its traceback rather
-  ;; than a bare "inline python failed".
-  (define (python-code code)
+  ;; Run one of the standalone reference programs in torch/tests/python/
+  ;; (each prints one JSON line) and parse its output. Captures stderr so a
+  ;; crashing program surfaces its traceback rather than a bare "failed".
+  (define (python-check name)
+    (define py (build-path python-checks-dir name))
     (define out (open-output-string))
     (define err (open-output-string))
     (define ok?
       (with-python-env
        (parameterize ([current-output-port out]
                       [current-error-port err])
-         (system* python "-c" code))))
+         (system* python (path->string py)))))
     (unless ok?
-      (error 'python-cross-test "inline python failed:\n~a"
-             (get-output-string err)))
+      (error 'python-cross-test "python check ~a failed:\n~a"
+             name (get-output-string err)))
     (read-json (open-input-string (get-output-string out))))
 
   (define tol 1e-4)
@@ -507,16 +509,7 @@
      ;; which depends on fan-in = in*kH*kW being computed exactly like
      ;; torch.nn.init._calculate_fan_in_and_fan_out.
      (let ()
-       (define j (python-code
-                  (string-append
-                   "import json, torch, torch.nn as nn\n"
-                   "torch.manual_seed(0)\n"
-                   "m = nn.Conv2d(1, 8, 3)\n"
-                   "vals = ([float(v) for v in m.weight.detach().flatten()"
-                   ".tolist()] + [float(v) for v in m.bias.detach().flatten()"
-                   ".tolist()])\n"
-                   "print(json.dumps({\"values\": vals, \"shapes\":"
-                   " [list(m.weight.shape), list(m.bias.shape)]}))")))
+       (define j (python-check "conv2d_init.py"))
        (manual-seed! 0)
        (define net (Conv2d 1 8 3))
        (define ps (parameters net))  ; weight then bias, declaration order
@@ -532,14 +525,7 @@
      ;; randn) must match nn.Embedding.reset_parameters (init.normal_)
      ;; value-for-value — randn is empty().normal_(), same RNG consumption.
      (let ()
-       (define j (python-code
-                  (string-append
-                   "import json, torch, torch.nn as nn\n"
-                   "torch.manual_seed(0)\n"
-                   "m = nn.Embedding(7, 4)\n"
-                   "print(json.dumps({\"values\": [float(v) for v in"
-                   " m.weight.detach().flatten().tolist()],"
-                   " \"shape\": list(m.weight.shape)}))")))
+       (define j (python-check "embedding_init.py"))
        (manual-seed! 0)
        (define net (Embedding 7 4))
        (define w (car (parameters net)))
@@ -552,16 +538,7 @@
      ;; LayerNorm layer: init is deterministic (ones/zeros), so the forward
      ;; on a seeded input is the meaningful parity check.
      (let ()
-       (define j (python-code
-                  (string-append
-                   "import json, torch, torch.nn as nn\n"
-                   "torch.manual_seed(0)\n"
-                   "m = nn.LayerNorm(5)\n"
-                   "x = torch.randn(3, 5)\n"
-                   "r = m(x)\n"
-                   "print(json.dumps({\"shape\": list(r.shape),"
-                   " \"values\": [float(v) for v in"
-                   " r.detach().flatten().tolist()]}))")))
+       (define j (python-check "layer_norm_forward.py"))
        (manual-seed! 0)
        (define ln (LayerNorm 5))
        (define r (ln (randn 3 5)))
@@ -575,17 +552,7 @@
      ;; (PyTorch's stride=None); the generated battery hits the raw bindings,
      ;; so parity-check that facade default against F.* directly.
      (let ()
-       (define j (python-code
-                  (string-append
-                   "import json, torch\n"
-                   "import torch.nn.functional as F\n"
-                   "torch.manual_seed(0)\n"
-                   "x = torch.randn(1, 1, 4, 4)\n"
-                   "mp = F.max_pool2d(x, 2)\n"
-                   "ap = F.avg_pool2d(x, 2)\n"
-                   "print(json.dumps({"
-                   "\"mp\": [float(v) for v in mp.flatten().tolist()],"
-                   " \"ap\": [float(v) for v in ap.flatten().tolist()]}))")))
+       (define j (python-check "pool_default_stride.py"))
        (manual-seed! 0)
        (define x (randn 1 1 4 4))
        (define mp (max-pool2d x 2))  ; promoted: #:stride #f -> kernel-size
@@ -599,14 +566,7 @@
      ;; flatten is Racket-side reshape logic, not a generated binding, so it's
      ;; outside the manifest battery; parity-check it against torch.flatten.
      (let ()
-       (define jf (python-code
-                   (string-append
-                    "import json, torch\n"
-                    "torch.manual_seed(0)\n"
-                    "x = torch.randn(2, 3, 4)\n"
-                    "r = torch.flatten(x, 1)\n"
-                    "print(json.dumps({\"shape\": list(r.shape),"
-                    " \"values\": [float(v) for v in r.flatten().tolist()]}))")))
+       (define jf (python-check "flatten.py"))
        (manual-seed! 0)
        (define x (randn 2 3 4))
        (define r (flatten x 1))
@@ -618,15 +578,7 @@
      ;; codegen IR/manifest); parity-check the erf-form default against
      ;; F.gelu directly.
      (let ()
-       (define jg (python-code
-                   (string-append
-                    "import json, torch\n"
-                    "import torch.nn.functional as F\n"
-                    "torch.manual_seed(0)\n"
-                    "x = torch.randn(2, 3)\n"
-                    "r = F.gelu(x)\n"
-                    "print(json.dumps({\"shape\": list(r.shape),"
-                    " \"values\": [float(v) for v in r.flatten().tolist()]}))")))
+       (define jg (python-check "gelu.py"))
        (manual-seed! 0)
        (define xg (randn 2 3))
        (define rg (gelu xg))
@@ -642,16 +594,7 @@
      ;; recipe battery can't express -inf (not valid Python via
      ;; number->string), so this facade-level composition is hand-checked.
      (let ()
-       (define jm (python-code
-                   (string-append
-                    "import json, torch\n"
-                    "torch.manual_seed(0)\n"
-                    "scores = torch.randn(4, 4)\n"
-                    "mask = torch.tril(torch.ones(4, 4)) == 0\n"
-                    "r = torch.softmax(scores.masked_fill(mask,"
-                    " float(\"-inf\")), -1)\n"
-                    "print(json.dumps({\"shape\": list(r.shape),"
-                    " \"values\": [float(v) for v in r.flatten().tolist()]}))")))
+       (define jm (python-check "causal_mask.py"))
        (manual-seed! 0)
        (define scores (randn 4 4))
        (define mask (eq (tril (ones 4 4)) 0))
