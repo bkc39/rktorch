@@ -10,10 +10,13 @@
 ;; randn is stable across recent versions, but the tolerance absorbs any drift.
 ;; Flip the flake's `torchSource` to "python" for guaranteed bit-exact parity.
 
-(require json
-         racket/port
-         racket/runtime-path
-         racket/system)
+;; whole-module on purpose: define-runtime-path expands into phase-1 code
+;; that needs bindings (#%datum, ...) only-in would strip (the documented
+;; runtime-path exemption to the only-in convention).
+(require racket/runtime-path
+         (only-in json read-json)
+         (only-in racket/port open-output-nowhere)
+         (only-in racket/system system*))
 
 (provide python
          call-with-python-env
