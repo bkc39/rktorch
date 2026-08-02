@@ -18,4 +18,37 @@ tr_tensor* tr_gen_dropout(const tr_tensor* input, double p, bool train) {
       "tr_gen_dropout", [&] { return at::dropout(input->value, p, train); });
 }
 
+tr_tensor* tr_gen_embedding(const tr_tensor* weight, const tr_tensor* indices,
+                            int64_t padding_idx, bool scale_grad_by_freq,
+                            bool sparse) {
+  if (!weight || !indices) {
+    return torchrkt::null_arg("tr_gen_embedding");
+  }
+  return torchrkt::alloc_result("tr_gen_embedding", [&] {
+    return at::embedding(weight->value, indices->value, padding_idx,
+                         scale_grad_by_freq, sparse);
+  });
+}
+
+tr_tensor* tr_gen_layer_norm(const tr_tensor* input,
+                             const int64_t* normalized_shape,
+                             int64_t normalized_shape_len,
+                             const tr_tensor* weight, const tr_tensor* bias,
+                             double eps, bool cudnn_enable) {
+  if (!input || !normalized_shape || normalized_shape_len < 0) {
+    return torchrkt::null_arg("tr_gen_layer_norm");
+  }
+  return torchrkt::alloc_result("tr_gen_layer_norm", [&] {
+    return at::layer_norm(
+        input->value,
+        at::IntArrayRef(normalized_shape,
+                        static_cast<size_t>(normalized_shape_len)),
+        weight ? c10::optional<at::Tensor>(weight->value)
+               : c10::optional<at::Tensor>(),
+        bias ? c10::optional<at::Tensor>(bias->value)
+             : c10::optional<at::Tensor>(),
+        eps, cudnn_enable);
+  });
+}
+
 }  // extern "C"

@@ -90,6 +90,16 @@ tr_tensor* tr_gen_lt_tensor(const tr_tensor* self, const tr_tensor* other) {
       "tr_gen_lt_tensor", [&] { return at::lt(self->value, other->value); });
 }
 
+tr_tensor* tr_gen_masked_fill_scalar(const tr_tensor* self,
+                                     const tr_tensor* mask, double value) {
+  if (!self || !mask) {
+    return torchrkt::null_arg("tr_gen_masked_fill_scalar");
+  }
+  return torchrkt::alloc_result("tr_gen_masked_fill_scalar", [&] {
+    return at::masked_fill(self->value, mask->value, value);
+  });
+}
+
 tr_tensor* tr_gen_ne_scalar(const tr_tensor* self, double other) {
   if (!self) {
     return torchrkt::null_arg("tr_gen_ne_scalar");

@@ -66,12 +66,12 @@
             tensor?)]
   [tensor (->* ((or/c real? list?)) (#:requires-grad? boolean?) tensor?)]
   ;; shape
-  [reshape (->* (tensor?) #:rest (listof index/c) tensor?)]
-  [view (->* (tensor?) #:rest (listof index/c) tensor?)]
+  [reshape (-> tensor? index/c ... tensor?)]
+  [view (-> tensor? index/c ... tensor?)]
   [transpose (-> tensor? index/c index/c tensor?)]
   ;; terse alias, PyTorch-flavored: (t a 0 1) == (transpose a 0 1)
   [rename transpose t (-> tensor? index/c index/c tensor?)]
-  [permute (->* (tensor?) #:rest (listof index/c) tensor?)]
+  [permute (-> tensor? index/c ... tensor?)]
   [squeeze (->* (tensor?) (index/c) tensor?)]
   [unsqueeze (-> tensor? index/c tensor?)]
   [cat (->* ((non-empty-listof tensor?)) (index/c) tensor?)]
@@ -92,6 +92,8 @@
   [neg (-> tensor? tensor?)]
   [relu (-> tensor? tensor?)]
   [sigmoid (-> tensor? tensor?)]
+  ;; exact (erf-based) gelu, approximate='none'
+  [gelu (-> tensor? tensor?)]
   ;; exp/log/sqrt/tanh/max/min shadow racket/base: tensors hit libtorch,
   ;; anything else defers to the racket/base function, so requiring
   ;; torch never breaks numeric code.
@@ -134,7 +136,26 @@
                     #:divisor-override (or/c exact-positive-integer? #f))
                    tensor?)]
   [adaptive-avg-pool2d (-> tensor? pool-size/c tensor?)]
-  ;; comparisons (tensor lhs, tensor-or-real rhs) -> float32 masks
+  ;; transformer primitives (promoted from the generated surface).
+  ;; embedding follows F.embedding's arg order (indices first); the
+  ;; causal-mask idiom is (masked-fill scores (eq (tril (ones T T)) 0) -inf.0).
+  [tril (->* (tensor?) (exact-integer?) tensor?)]
+  [triu (->* (tensor?) (exact-integer?) tensor?)]
+  ;; mask must be a bool tensor (a comparison result); value may be -inf.0.
+  [masked-fill (-> tensor? tensor? real? tensor?)]
+  [embedding (->* (tensor? tensor?)
+                  (#:padding-idx (or/c #f exact-nonnegative-integer?))
+                  tensor?)]
+  [layer-norm (->* (tensor?
+                    (or/c exact-positive-integer?
+                          (non-empty-listof exact-positive-integer?)))
+                   (#:weight (or/c tensor? #f)
+                    #:bias (or/c tensor? #f)
+                    #:eps real?)
+                   tensor?)]
+  ;; comparisons (tensor lhs, tensor-or-real rhs) -> bool masks whose
+  ;; *values* read back as float32 (the handles stay bool; masked-fill
+  ;; consumes them directly)
   [eq compare/c]
   [ne compare/c]
   [lt compare/c]

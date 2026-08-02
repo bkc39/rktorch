@@ -65,3 +65,17 @@ compare ge.Scalar
 # Regularization (dropout's train/eval mode flows from the layer).
 nn dropout
 inplace copy_
+
+# --- tranche 3 (#22): the transformer op closure --------------------------
+
+# embedding exercises int64 indices (SymInt padding_idx flattens to int64);
+# layer_norm reuses conv2d's optional-Tensor + IntArrayRef shapes.
+nn embedding
+nn layer_norm
+
+# causal-mask builders: tril/triu carve the mask, masked_fill applies it.
+# The mask must be a genuine bool tensor — comparison ops already return
+# bool handles (only the read path coerces to float32).
+shape tril
+shape triu
+compare masked_fill.Scalar

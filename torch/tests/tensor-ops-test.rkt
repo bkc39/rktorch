@@ -5,7 +5,8 @@
 ;; these pin the Racket-facing behavior.
 
 (module+ test
-  (require rackunit
+  (require (only-in racket/list drop take)
+           rackunit
            "../main.rkt")
 
   (test-case "creation goldens"
@@ -52,6 +53,80 @@
     (check-equal? (tensor->list (neg x)) '(-1.0 2.0 -3.0))
     (check-equal? (tensor->list (relu x)) '(1.0 0.0 3.0))
     (check-equal? (tensor->list (pow x 2)) '(1.0 4.0 9.0)))
+
+  (test-case "gelu (exact erf form): x * Phi(x)"
+    (define g (gelu (tensor '(0 1 -1))))
+    (check-= (car (tensor->list g)) 0.0 1e-6)
+    (check-= (cadr (tensor->list g)) 0.841345 1e-5)
+    (check-= (caddr (tensor->list g)) -0.158655 1e-5))
+
+  (test-case "tril/triu default diagonal + offsets"
+    (define m (reshape (arange 1 10) 3 3))
+    (check-equal? (tensor->list (tril m))
+                  '(1.0 0.0 0.0 4.0 5.0 0.0 7.0 8.0 9.0))
+    (check-equal? (tensor->list (triu m))
+                  '(1.0 2.0 3.0 0.0 5.0 6.0 0.0 0.0 9.0))
+    (check-equal? (tensor->list (tril m -1))
+                  '(0.0 0.0 0.0 4.0 0.0 0.0 7.0 8.0 0.0))
+    (check-equal? (tensor->list (triu m 1))
+                  '(0.0 2.0 3.0 0.0 0.0 6.0 0.0 0.0 0.0)))
+
+  (test-case "masked-fill via a comparison-built bool mask"
+    (define x (tensor '(10 20 30 40)))
+    (define mask (ne (tensor '(0 1 0 1)) 0))
+    (check-equal? (tensor->list (masked-fill x mask -100))
+                  '(10.0 -100.0 30.0 -100.0))
+    ;; the causal-mask composition: upper triangle goes to the fill value.
+    (define causal (eq (tril (ones 2 2)) 0))
+    (check-equal? (tensor->list (masked-fill (ones 2 2) causal 0))
+                  '(1.0 0.0 1.0 1.0))
+    ;; a [T,T] mask broadcasts over batched [B,T,T] scores — the attention
+    ;; shape the training loop uses; each batch slice gets the same mask.
+    (check-equal? (tensor->list (masked-fill (ones 2 2 2) causal 0))
+                  '(1.0 0.0 1.0 1.0 1.0 0.0 1.0 1.0)))
+
+  (test-case "embedding #:padding-idx marshals a real index"
+    ;; forward output is padding-idx-insensitive in ATen (it gates the
+    ;; backward), so the check is that a non-#f index marshals and gathers
+    ;; identically — the #f->-1 default mapping isn't the only tested path.
+    (define weight (reshape (arange 1 9) 4 2))
+    (define indices (to-dtype (tensor '(2 0 2)) 'int64))
+    (check-equal? (tensor->list (embedding indices weight #:padding-idx 0))
+                  (tensor->list (embedding indices weight))))
+
+  (test-case "embedding gathers rows, F.embedding arg order"
+    (define weight (reshape (arange 1 9) 4 2))
+    (define indices (to-dtype (tensor '(2 0 2)) 'int64))
+    (define out (embedding indices weight))
+    (check-equal? (tensor-shape out) '(3 2))
+    (check-equal? (tensor->list out) '(5.0 6.0 1.0 2.0 5.0 6.0)))
+
+  (test-case "layer-norm: bare + affine, int normalized-shape"
+    (define x (tensor '((1 2 3) (4 6 8))))
+    (define bare (layer-norm x 3))
+    (check-equal? (tensor-shape bare) '(2 3))
+    (check-= (car (tensor->list bare)) -1.2247 1e-4)
+    (check-= (cadr (tensor->list bare)) 0.0 1e-4)
+    (check-= (caddr (tensor->list bare)) 1.2247 1e-4)
+    ;; affine: y = normalized * weight + bias.
+    (define affine
+      (layer-norm x '(3) #:weight (mul (ones 3) 2) #:bias (ones 3)))
+    (for ([a (in-list (tensor->list affine))]
+          [b (in-list (tensor->list bare))])
+      (check-= a (+ (* 2 b) 1) 1e-4))
+    ;; multi-dim normalized-shape: stats pool over the trailing [2,3] dims
+    ;; jointly, so each [2,3] slice comes out zero-mean — distinct from
+    ;; per-row normalization, which would zero each row separately.
+    (define m (tensor '(((1 2 3) (4 6 8)) ((10 20 30) (40 60 80)))))
+    (define nm (layer-norm m '(2 3)))
+    (check-equal? (tensor-shape nm) '(2 2 3))
+    (define vals (tensor->list nm))
+    (check-= (apply + (take vals 6)) 0.0 1e-3)
+    (check-= (apply + (drop vals 6)) 0.0 1e-3)
+    ;; rows within a slice keep distinct means (joint stats, not per-row).
+    (check-true (> (abs (- (apply + (take vals 3))
+                           (apply + (take (drop vals 3) 3))))
+                   0.1)))
 
   (test-case "exp/log/sqrt/tanh/max/min fall back to racket/base on numbers"
     (check-equal? (exp 0) 1)

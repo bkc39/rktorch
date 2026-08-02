@@ -25,6 +25,7 @@ void torchrkt_c_api_compile_check(void) {
   tr_tensor* (*cat)(const tr_tensor* const*, int64_t, int64_t) = tr_cat;
   tr_tensor* (*add)(const tr_tensor*, const tr_tensor*) = tr_add;
   tr_tensor* (*add_scalar)(const tr_tensor*, double) = tr_add_scalar;
+  tr_tensor* (*gelu)(const tr_tensor*) = tr_gelu;
   tr_tensor* (*softmax)(const tr_tensor*, int64_t) = tr_softmax;
   tr_tensor* (*matmul)(const tr_tensor*, const tr_tensor*) = tr_matmul;
   int (*item)(const tr_tensor*, double*) = tr_tensor_item;
@@ -81,6 +82,18 @@ void torchrkt_c_api_compile_check(void) {
                                const int64_t*, int64_t, const int64_t*, int64_t,
                                const int64_t*, int64_t, bool) =
       tr_gen_max_pool2d;
+  /* tranche-3 signature shapes: tensor-tensor with trailing int64+bools
+   * (embedding), IntArrayRef with two optional-tensors (layer_norm),
+   * tensor-tensor-scalar (masked_fill), and tensor+int64 (tril/triu; one
+   * pin covers both). */
+  tr_tensor* (*gen_embedding)(const tr_tensor*, const tr_tensor*, int64_t, bool,
+                              bool) = tr_gen_embedding;
+  tr_tensor* (*gen_layer_norm)(const tr_tensor*, const int64_t*, int64_t,
+                               const tr_tensor*, const tr_tensor*, double,
+                               bool) = tr_gen_layer_norm;
+  tr_tensor* (*gen_masked_fill)(const tr_tensor*, const tr_tensor*, double) =
+      tr_gen_masked_fill_scalar;
+  tr_tensor* (*gen_tril)(const tr_tensor*, int64_t) = tr_gen_tril;
   tr_tensor* (*gen_adaptive_avg_pool2d)(const tr_tensor*, const int64_t*,
                                         int64_t) = tr_gen_adaptive_avg_pool2d;
   /* narrow: tensor + three plain int64 scalars (a new shape). */

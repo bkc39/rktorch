@@ -17,62 +17,49 @@
          (only-in "init.rkt" fan-in kaiming-uniform uniform-init)
          (only-in "module.rkt" define-module))
 
-;; Constructors are PascalCase (Conv2d/MaxPool2d/Flatten); predicates lowercase
-;; (conv2d?/max-pool2d?/flatten?, Racket idiom), aliasing the define-module
-;; struct predicates Conv2d%?/etc. (noqa: raco review can't see the aliases).
+;; Constructors are PascalCase, predicates lowercase (the linear.rkt
+;; convention). Each layer is a single define-module form — keyword defaults
+;; and size coercion live in the macro's ctor formals + #:coerce (#10), no
+;; `%` struct or hand-written smart constructor. The definitions are macro
+;; expansions, invisible to raco review; predicates export via rename-out.
 (provide Conv2d
-         conv2d? ;; noqa
+         (rename-out [Conv2d? conv2d?]) ;; noqa
          MaxPool2d
-         max-pool2d? ;; noqa
+         (rename-out [MaxPool2d? max-pool2d?]) ;; noqa
          Flatten
-         flatten? ;; noqa
+         (rename-out [Flatten? flatten?]) ;; noqa
          )
 
 ;; ------------------------------------------------------------------- conv2d
 
-;; kernel-size/stride/padding arrive already normalized to [h w] lists from the
-;; smart constructor, so the weight shape and fan-in are straightforward.
-(define-module Conv2d% (in-channels out-channels kernel-size stride padding)
+(define-module Conv2d (in-channels out-channels kernel-size
+                       #:stride [stride 1]
+                       #:padding [padding 0])
+  #:coerce ([kernel-size (->2d kernel-size)]
+            [stride (->2d stride)]
+            [padding (->2d padding)])
   #:params ([weight (kaiming-uniform (list out-channels in-channels
                                             (car kernel-size) (cadr kernel-size)))]
             [bias (let ([bound (/ 1.0 (sqrt (fan-in (list out-channels in-channels
                                                           (car kernel-size)
                                                           (cadr kernel-size)))))])
                     (uniform-init (list out-channels) (- bound) bound))])
-  #:reflection-name 'Conv2d
   #:forward (x)
   (conv2d x weight #:bias bias #:stride stride #:padding padding))
 
-(define (Conv2d in-channels out-channels kernel-size
-                #:stride [stride 1]
-                #:padding [padding 0])
-  (Conv2d% in-channels out-channels
-           (->2d kernel-size) (->2d stride) (->2d padding)))
-
-(define conv2d? Conv2d%?)
-
 ;; ---------------------------------------------------------------- max-pool2d
 
-;; Stateless; stride #f means "default to kernel-size", matching nn.MaxPool2d.
-(define-module MaxPool2d% (kernel-size stride padding)
-  #:reflection-name 'MaxPool2d
+;; Stateless; stride #f means "default to kernel-size", matching nn.MaxPool2d
+;; (the functional max-pool2d handles the #f and the size normalization).
+(define-module MaxPool2d (kernel-size
+                          #:stride [stride #f]
+                          #:padding [padding 0])
   #:forward (x)
   (max-pool2d x kernel-size #:stride stride #:padding padding))
-
-(define (MaxPool2d kernel-size #:stride [stride #f] #:padding [padding 0])
-  (MaxPool2d% kernel-size stride padding))
-
-(define max-pool2d? MaxPool2d%?)
 
 ;; ------------------------------------------------------------------- flatten
 
 ;; nn.Flatten defaults to start_dim=1, keeping the batch dim.
-(define-module Flatten% (start-dim end-dim)
-  #:reflection-name 'Flatten
+(define-module Flatten (#:start-dim [start-dim 1] #:end-dim [end-dim -1])
   #:forward (x)
   (flatten x start-dim end-dim))
-
-(define (Flatten #:start-dim [start-dim 1] #:end-dim [end-dim -1])
-  (Flatten% start-dim end-dim))
-
-(define flatten? Flatten%?)

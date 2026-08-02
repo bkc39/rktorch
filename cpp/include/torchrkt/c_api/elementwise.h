@@ -29,6 +29,7 @@ tr_tensor* tr_sqrt(const tr_tensor* t);
 tr_tensor* tr_relu(const tr_tensor* t);
 tr_tensor* tr_sigmoid(const tr_tensor* t);
 tr_tensor* tr_tanh(const tr_tensor* t);
+tr_tensor* tr_gelu(const tr_tensor* t);
 
 #ifdef __cplusplus
 }

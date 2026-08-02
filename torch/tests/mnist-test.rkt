@@ -37,5 +37,5 @@
         (read-idx (download-cached "t10k-images-idx3-ubyte.gz")))
       (equal? dims '(10000 28 28))))
   (if ok?
-      (printf "[mnist-test] download-cached t10k header OK (10000x28x28)\n")
-      (printf "[mnist-test] skipped download (offline / mirror unreachable)\n")))
+      (displayln "[mnist-test] download-cached t10k header OK (10000x28x28)")
+      (displayln "[mnist-test] skipped download (offline / mirror unreachable)")))

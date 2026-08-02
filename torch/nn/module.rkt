@@ -104,30 +104,51 @@
 (begin-for-syntax
   (define-syntax-class binding
     #:description "[id init-expr] binding"
-    (pattern [id:id init:expr])))
+    (pattern [id:id init:expr]))
 
-;; (define-module name (ctor-arg ...)
+  ;; A racket-style constructor formal: a required positional, an optional
+  ;; positional with a default, or a keyword arg (with or without a default).
+  ;; `decl` is the piece(s) the formal contributes to the public
+  ;; constructor's argument list; `id` is the struct field it populates.
+  (define-splicing-syntax-class ctor-formal
+    #:description
+    "constructor formal (id, [id default], or #:kw id / #:kw [id default])"
+    (pattern id:id
+      #:with (decl ...) #'(id))
+    (pattern [id:id default:expr]
+      #:with (decl ...) #'([id default]))
+    (pattern (~seq kw:keyword id:id)
+      #:with (decl ...) #'(kw id))
+    (pattern (~seq kw:keyword [id:id default:expr])
+      #:with (decl ...) #'(kw [id default]))))
+
+;; (define-module name (ctor-formal ...)
+;;   #:coerce          ([arg expr] ...) ; optional — rebind ctor args (let*
+;;                                      ;   order) before any init sees them;
+;;                                      ;   e.g. normalize an int to [h w]
 ;;   #:params          ([p init] ...)  ; optional — registered trainable tensors
 ;;   #:buffers         ([b init] ...)  ; optional — registered, not trainable
 ;;   #:submodules      ([m init] ...)  ; optional — nested gen:module values
 ;;   #:reflection-name 'Public         ; optional — struct name for object-name;
 ;;                                      ;   defaults to `name`. May appear in any
-;;                                      ;   order among the optional clauses. Use
-;;                                      ;   when an internal `name%` struct is
-;;                                      ;   wrapped by a public smart constructor,
-;;                                      ;   so instances still reflect as the
-;;                                      ;   public name rather than `name%`.
+;;                                      ;   order among the optional clauses.
 ;;   #:forward (input ...) body ...)
+;;
+;; ctor-formal is racket-style: `id`, `[id default]`, or `#:kw id` /
+;; `#:kw [id default]` — so a layer with keyword defaults or argument
+;; coercion is one define-module form, no separate smart constructor (#10).
 ;;
 ;; Expands to a struct (one field per ctor-arg/param/buffer/submodule), a
 ;; gen:module implementation whose forward body sees every field by name, a
 ;; prop:procedure so (net x) applies forward, a `name?` predicate, and a
-;; constructor `name` that evaluates the inits left-to-right (params get
+;; constructor `name` carrying the declared formals that runs the #:coerce
+;; bindings, then evaluates the inits left-to-right (params get
 ;; requires-grad! set after init, so RNG-consuming inits match PyTorch).
 (define-syntax (define-module stx)
   (syntax-parse stx
-    [(_ name:id (ctor-arg:id ...)
-        (~alt (~optional (~seq #:params (param:binding ...)))
+    [(_ name:id (formal:ctor-formal ...)
+        (~alt (~optional (~seq #:coerce (coerce:binding ...)))
+              (~optional (~seq #:params (param:binding ...)))
               (~optional (~seq #:buffers (buffer:binding ...)))
               (~optional (~seq #:submodules (sub:binding ...)))
               ;; in the ~alt group, so it may appear in any order among the
@@ -147,6 +168,9 @@
                    [sid? (format-id struct-id "~a?" struct-id)]
                    [name? (format-id #'name "~a?" #'name)]
                    [reflect-name reflect-stx]
+                   [(ctor-arg ...) #'(formal.id ...)]
+                   [(c ...) (ids (attribute coerce.id))]
+                   [(c-init ...) (ids (attribute coerce.init))]
                    [(p ...) (ids (attribute param.id))]
                    [(p-init ...) (ids (attribute param.init))]
                    [(b ...) (ids (attribute buffer.id))]
@@ -202,8 +226,11 @@
                 (define (module-training? self)
                   (and (recur-training? (sm-acc self)) ... #t))])
              (define name? sid?)
-             (define (name ctor-arg ...)
-               (let* ([p (requires-grad! p-init)] ...
+             ;; #:coerce bindings run first and shadow the ctor args, so the
+             ;; stored fields and every init see the normalized values.
+             (define (name (~@ formal.decl ...) ...)
+               (let* ([c c-init] ...
+                      [p (requires-grad! p-init)] ...
                       [b b-init] ...
                       [sm sm-init] ...)
                  (sid ctor-arg ... p ... b ... sm ...))))))]))

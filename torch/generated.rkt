@@ -27,17 +27,20 @@
          cross-entropy-loss
          dot
          dropout
+         embedding
          eq-scalar
          eq-tensor
          ge-scalar
          ge-tensor
          gt-scalar
          gt-tensor
+         layer-norm
          le-scalar
          le-tensor
          lerp-tensor!
          lt-scalar
          lt-tensor
+         masked-fill-scalar
          matmul
          max-pool2d
          mean-dim
@@ -49,7 +52,9 @@
          ne-tensor
          nll-loss
          reshape
-         sum-dim-intlist)
+         sum-dim-intlist
+         tril
+         triu)
 
 (define-generated-op adaptive-avg-pool2d tr_gen_adaptive_avg_pool2d
   ([self tensor] [output-size int-array]))
@@ -84,6 +89,9 @@
 (define-generated-op dropout tr_gen_dropout
   ([input tensor] [p double] [train bool]))
 
+(define-generated-op embedding tr_gen_embedding
+  ([weight tensor] [indices tensor] [padding-idx int64] [scale-grad-by-freq bool] [sparse bool]))
+
 (define-generated-op eq-scalar tr_gen_eq_scalar
   ([self tensor] [other scalar]))
 
@@ -102,6 +110,9 @@
 (define-generated-op gt-tensor tr_gen_gt_tensor
   ([self tensor] [other tensor]))
 
+(define-generated-op layer-norm tr_gen_layer_norm
+  ([input tensor] [normalized-shape int-array] [weight optional-tensor] [bias optional-tensor] [eps double] [cudnn-enable bool]))
+
 (define-generated-op le-scalar tr_gen_le_scalar
   ([self tensor] [other scalar]))
 
@@ -116,6 +127,9 @@
 
 (define-generated-op lt-tensor tr_gen_lt_tensor
   ([self tensor] [other tensor]))
+
+(define-generated-op masked-fill-scalar tr_gen_masked_fill_scalar
+  ([self tensor] [mask tensor] [value scalar]))
 
 (define-generated-op matmul tr_gen_matmul
   ([self tensor] [other tensor]))
@@ -152,3 +166,9 @@
 
 (define-generated-op sum-dim-intlist tr_gen_sum_dim_intlist
   ([self tensor] [dim optional-int-array] [keepdim bool] [dtype optional-dtype]))
+
+(define-generated-op tril tr_gen_tril
+  ([self tensor] [diagonal int64]))
+
+(define-generated-op triu tr_gen_triu
+  ([self tensor] [diagonal int64]))
