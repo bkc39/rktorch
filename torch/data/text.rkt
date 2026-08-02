@@ -14,10 +14,10 @@
          (only-in racket/port copy-port)
          (only-in racket/set for/set set->list)
          (only-in racket/string string-replace string-trim)
-         (only-in net/url string->url get-pure-port call/input-url)
+         (only-in net/url call/input-url get-pure-port string->url)
          (only-in "../private/util.rkt" with-temporary-file)
-         (only-in "../main.rkt" tensor tensor? tensor-shape tensor->list
-                  to-dtype narrow reshape))
+         (only-in "../main.rkt" narrow reshape tensor tensor->list
+                  tensor-shape tensor? to-dtype))
 
 (provide strip-gutenberg-boilerplate
          text->vocab
@@ -130,7 +130,10 @@
 ;; file-exists? skips the download forever after, so a transient failure
 ;; would persist until the user deletes the file by hand. An invalid body
 ;; errors instead, and nothing is cached. A cache hit skips the check: only
-;; validated bytes ever reach `dest`.
+;; validated bytes ever reach `dest`. The error is exn:fail:network — a
+;; wrong body is an environmental transport failure (a rate-limited CI run
+;; must self-skip the live tests, same as an unreachable host), not a bug
+;; in this code.
 (define (download-text-cached name url #:valid? [valid? (lambda (text) #t)])
   (define dest (build-path (text-cache-dir) name))
   (unless (file-exists? dest)
@@ -151,9 +154,11 @@
                         (call-with-output-file tmp #:exists 'truncate
                           (lambda (out) (copy-port in out)))
                         (unless (valid? (file->string tmp))
-                          (error 'download-text-cached
-                                 "fetched ~a failed validation; not caching (bad response from ~a?)"
-                                 name url))
+                          (raise (exn:fail:network
+                                  (format
+                                   "download-text-cached: fetched ~a failed validation; not caching (bad response from ~a?)"
+                                   name url)
+                                  (current-continuation-marks))))
                         (rename-file-or-directory tmp dest #t)))))
   (file->string dest))
 

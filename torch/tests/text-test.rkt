@@ -98,10 +98,14 @@
          (putenv "RKTORCH_TEXT_DIR" (path->string scratch))
          (define (file-url p) (string-append "file://" (path->string p)))
          (define (has-markers? s) (string-contains? s "***"))
-         ;; a marker-less body errors and is NOT promoted into the cache
+         ;; a marker-less body errors (as exn:fail:network — environmental,
+         ;; so live tests self-skip on it) and is NOT promoted into the cache
          (define bad (build-path scratch "bad-source.txt"))
          (display-to-file "<html>429 Too Many Requests</html>" bad)
-         (check-exn #rx"failed validation"
+         (check-exn (lambda (e)
+                      (and (exn:fail:network? e)
+                           (regexp-match? #rx"failed validation"
+                                          (exn-message e))))
                     (lambda ()
                       (download-text-cached "corpus.txt" (file-url bad)
                                             #:valid? has-markers?)))
@@ -122,11 +126,12 @@
      (lambda () (delete-directory/files scratch))))
 
   ;; Full-corpus download path. Only an *environmental* failure may skip:
-  ;; network (offline box, Gutenberg unreachable) or filesystem (the
-  ;; sandboxed nix build's unwritable cache dir). Once a fetch succeeds, the
-  ;; strip and content checks are real assertions, and validation/marker
-  ;; errors raise plain exn:fail — a parser/cache/marker regression fails
-  ;; here rather than printing the skip line.
+  ;; network (offline box, Gutenberg unreachable, a rate-limit page —
+  ;; download-text-cached raises those as exn:fail:network) or filesystem
+  ;; (the sandboxed nix build's unwritable cache dir). Once a validated
+  ;; corpus is in hand, the strip and content checks are real assertions —
+  ;; a stripper/marker regression raises plain exn:fail and fails here
+  ;; rather than printing the skip line.
   (define prose
     (with-handlers ([exn:fail:network? (lambda (_) #f)]
                     [exn:fail:filesystem? (lambda (_) #f)])
