@@ -82,6 +82,12 @@
 ;; same block shifted one char ahead (the LM target). Deterministic — no
 ;; shuffling — so the PyTorch parity twin sees identical batches. The last
 ;; partial block (and its +1 target lookahead) is dropped.
+;;
+;; Aliasing: xs and ys are reshaped `narrow` *views* over ids' storage,
+;; overlapping each other one-char-shifted (see narrow's contract note in
+;; foreign.rkt). Treat ids, xs, and ys as read-only: an in-place op on any
+;; of them writes through to the others — in a training loop that means
+;; target chars silently leaking into the inputs, with no error raised.
 (define (contiguous-blocks ids block-size)
   (define n (car (tensor-shape ids)))
   (define b (quotient (- n 1) block-size))
@@ -118,8 +124,14 @@
       (build-path (find-system-path 'cache-dir) "rktorch" "text")))
 
 ;; Fetch `url` into the cache once (as `name`), then return the file's
-;; contents as a UTF-8 string.
-(define (download-text-cached name url)
+;; contents as a UTF-8 string. `valid?` gates the cache write: a server can
+;; "succeed" with a wrong body (a rate-limit HTML page, a body truncated by
+;; a clean close), and renaming that into place would poison the cache —
+;; file-exists? skips the download forever after, so a transient failure
+;; would persist until the user deletes the file by hand. An invalid body
+;; errors instead, and nothing is cached. A cache hit skips the check: only
+;; validated bytes ever reach `dest`.
+(define (download-text-cached name url #:valid? [valid? (lambda (text) #t)])
   (define dest (build-path (text-cache-dir) name))
   (unless (file-exists? dest)
     (make-directory* (text-cache-dir))
@@ -138,13 +150,24 @@
                       (lambda (in)
                         (call-with-output-file tmp #:exists 'truncate
                           (lambda (out) (copy-port in out)))
+                        (unless (valid? (file->string tmp))
+                          (error 'download-text-cached
+                                 "fetched ~a failed validation; not caching (bad response from ~a?)"
+                                 name url))
                         (rename-file-or-directory tmp dest #t)))))
   (file->string dest))
 
-;; The full Heart of Darkness prose: downloaded (cached), CRLF normalized to
-;; \n (PG serves DOS line endings; \r chars would pollute the char vocab),
-;; PG boilerplate stripped.
+;; A complete PG file carries both boilerplate markers; a rate-limit page
+;; has neither and a truncated body loses END. Gates the cache write above.
+(define (gutenberg-text? text)
+  (and (regexp-match? start-marker text)
+       (regexp-match? end-marker text)))
+
+;; The full Heart of Darkness prose: downloaded (cached, marker-validated),
+;; CRLF normalized to \n (PG serves DOS line endings; \r chars would pollute
+;; the char vocab), PG boilerplate stripped.
 (define (load-heart-of-darkness)
   (strip-gutenberg-boilerplate
-   (string-replace (download-text-cached "pg219.txt" heart-of-darkness-url)
+   (string-replace (download-text-cached "pg219.txt" heart-of-darkness-url
+                                         #:valid? gutenberg-text?)
                    "\r\n" "\n")))

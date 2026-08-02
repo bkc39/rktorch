@@ -7,6 +7,10 @@
 
 (module+ test
   (require rackunit
+           (only-in racket/file
+                    delete-directory/files
+                    display-to-file
+                    make-temporary-directory)
            (only-in racket/list take)
            (only-in racket/string string-contains?)
            (only-in "../main.rkt" tensor-shape tensor->list)
@@ -17,6 +21,7 @@
                     decode
                     contiguous-blocks
                     load-text-fixture
+                    download-text-cached
                     load-heart-of-darkness))
 
   (test-case "strip-gutenberg-boilerplate cuts to the prose"
@@ -76,17 +81,66 @@
     (check-exn #rx"too short"
                (lambda () (contiguous-blocks (encode vocab "ab") 16))))
 
-  ;; Full-corpus download path: fetch (cached) + strip, skipping when
-  ;; Gutenberg is unreachable. When it runs, the stripped prose must start at
-  ;; the title page (header gone), keep the novella text, and end before the
-  ;; license (end matter gone).
-  (define ok?
-    (with-handlers ([exn:fail? (lambda (_) #f)])
-      (define prose (load-heart-of-darkness))
-      (and (regexp-match? #rx"^Heart of Darkness" prose)
-           (string-contains? prose "The Nellie, a cruising yawl")
-           (not (string-contains? prose "PROJECT GUTENBERG"))
-           (> (string-length prose) 100000))))
-  (if ok?
-      (displayln "[text-test] load-heart-of-darkness OK (prose stripped)")
-      (displayln "[text-test] skipped download (offline / Gutenberg unreachable)")))
+  ;; Validation gates the cache write: a wrong-but-complete response (a
+  ;; rate-limit page, a truncated body) must error and leave nothing at the
+  ;; cache path — otherwise file-exists? would skip the download forever and
+  ;; a transient failure would poison the cache. Runs offline: the "server"
+  ;; is a file:// URL, and RKTORCH_TEXT_DIR points the cache at a scratch
+  ;; dir via an env copy (never the process-wide env).
+  (test-case "download-text-cached: validation gates the cache write"
+    (define scratch (make-temporary-directory "rktorch-text-test-~a"))
+    (dynamic-wind
+     void
+     (lambda ()
+       (parameterize ([current-environment-variables
+                       (environment-variables-copy
+                        (current-environment-variables))])
+         (putenv "RKTORCH_TEXT_DIR" (path->string scratch))
+         (define (file-url p) (string-append "file://" (path->string p)))
+         (define (has-markers? s) (string-contains? s "***"))
+         ;; a marker-less body errors and is NOT promoted into the cache
+         (define bad (build-path scratch "bad-source.txt"))
+         (display-to-file "<html>429 Too Many Requests</html>" bad)
+         (check-exn #rx"failed validation"
+                    (lambda ()
+                      (download-text-cached "corpus.txt" (file-url bad)
+                                            #:valid? has-markers?)))
+         (check-false (file-exists? (build-path scratch "corpus.txt"))
+                      "invalid body must not be cached")
+         ;; a valid body is cached; the second call is a pure cache hit
+         ;; (the source is deleted first, so a refetch would error)
+         (define good (build-path scratch "good-source.txt"))
+         (display-to-file "*** wrapped prose ***" good)
+         (check-equal? (download-text-cached "corpus.txt" (file-url good)
+                                             #:valid? has-markers?)
+                       "*** wrapped prose ***")
+         (delete-file good)
+         (check-equal? (download-text-cached "corpus.txt" (file-url good)
+                                             #:valid? has-markers?)
+                       "*** wrapped prose ***"
+                       "cache hit must not refetch")))
+     (lambda () (delete-directory/files scratch))))
+
+  ;; Full-corpus download path. Only an *environmental* failure may skip:
+  ;; network (offline box, Gutenberg unreachable) or filesystem (the
+  ;; sandboxed nix build's unwritable cache dir). Once a fetch succeeds, the
+  ;; strip and content checks are real assertions, and validation/marker
+  ;; errors raise plain exn:fail — a parser/cache/marker regression fails
+  ;; here rather than printing the skip line.
+  (define prose
+    (with-handlers ([exn:fail:network? (lambda (_) #f)]
+                    [exn:fail:filesystem? (lambda (_) #f)])
+      (load-heart-of-darkness)))
+  (cond
+    [prose
+     (check-true (regexp-match? #rx"^Heart of Darkness" prose)
+                 "prose starts at the title page (PG header stripped)")
+     (check-true (string-contains? prose "The Nellie, a cruising yawl")
+                 "novella text present")
+     (check-false (string-contains? prose "PROJECT GUTENBERG")
+                  "PG license/end matter stripped")
+     (check-true (> (string-length prose) 100000) "full corpus length")
+     (displayln "[text-test] load-heart-of-darkness OK (prose stripped)")]
+    [else
+     (displayln
+      "[text-test] skipped download (offline / Gutenberg unreachable)")]))
