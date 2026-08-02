@@ -1,8 +1,9 @@
 #lang racket/base
 
 ;; Unit tests for the v1 op tranche (creation, shape, elementwise, reductions,
-;; linalg, marshalling). Value parity with PyTorch lives in python-cross-test;
-;; these pin the Racket-facing behavior.
+;; linalg, marshalling). Value parity with PyTorch lives in
+;; generated-parity-test + python-cross-test; these pin the Racket-facing
+;; behavior.
 
 (module+ test
   (require (only-in racket/list drop take)

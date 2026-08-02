@@ -44,7 +44,7 @@ jobs:
               bindings, contracts at the foreign.rkt/nn.rkt facades,
               the name-shadowing dispatch convention)
             - missing test or parity coverage for new ops (gtest goldens,
-              example triples, python-cross-test entries)
+              example triples, generated-parity-test recipes)
 
             Report genuine issues only; do not restate the diff or praise
             style. Use inline comments for line-specific findings and a
