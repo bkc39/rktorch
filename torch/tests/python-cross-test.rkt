@@ -27,6 +27,9 @@
            "../nn.rkt"
            ;; the committed 256-image fixture for the Conv-MNIST parity twin.
            (only-in "../data/mnist.rkt" load-mnist-fixture)
+           ;; the committed prose fixture + char helpers for the GPT twin.
+           (only-in "../data/text.rkt"
+                    contiguous-blocks encode load-text-fixture text->vocab)
            "private/python-env.rkt")
 
   ;; Run the Python reference at rel-path and check the tensor produced by
@@ -110,6 +113,37 @@
              [p (in-list (hash-ref j 'values))]
              [i (in-naturals)])
          (check-= r p tol (format "04_mlp: parameter ~a parity" i))))
+     ;; Shared capstone-twin checker (generalized from the #19 check-convnet
+     ;; for the 06-gpt pass): run the Python twin at rel-path pinned to
+     ;; `device` — RKTORCH_PARITY_DEVICE set via the env-copy wrapper, never
+     ;; the process-wide env — and check the Racket `train-on` run on the same
+     ;; device agrees: per-step losses, parameter count, every flattened
+     ;; post-training parameter. train-on: device -> (values losses
+     ;; flat-params). CUDA values come back to host for the comparison.
+     ;; `dev-tol`: CPU is bit-stable (the strict, CI-gating `tol`); the CUDA
+     ;; pass is looser because the two stacks (libtorch 2.9 vs Python torch
+     ;; 2.12) pick different cuDNN/cuBLAS algorithms and reduction orders, so
+     ;; values after 5 Adam steps drift ~1e-3 even though seeded init matches.
+     (define (check-training-twin label rel-path train-on device dev-tol)
+       (define j
+         (call-with-python-env
+          #:env (list (cons "RKTORCH_PARITY_DEVICE" (symbol->string device)))
+          (lambda () (python-result rel-path))))
+       (define-values (losses flat-params) (train-on device))
+       (for ([r (in-list losses)]
+             [p (in-list (hash-ref j 'losses))]
+             [i (in-naturals)])
+         (check-= r p dev-tol (format "~a[~a]: loss at step ~a" label device i)))
+       (check-equal? (tensor-shape flat-params) (hash-ref j 'shape)
+                     (format "~a[~a]: parameter count" label device))
+       ;; flat-params lives on `device`; copy to host explicitly before reading
+       ;; values, rather than relying on tensor->list to do it implicitly.
+       (define host-params (to-device flat-params 'cpu))
+       (for ([r (in-list (tensor->list host-params))]
+             [p (in-list (hash-ref j 'values))]
+             [i (in-naturals)])
+         (check-= r p dev-tol
+                  (format "~a[~a]: parameter ~a parity" label device i))))
      ;; 05 — the v2 capstone: the Conv-MNIST convnet trained on the committed
      ;; 256-image fixture. Seeded conv2d/linear init + 5 full-batch Adam steps
      ;; track PyTorch (per-step losses and every post-training parameter). The
@@ -163,41 +197,106 @@
            (values losses
                    (cat (for/list ([p (in-list (parameters net))])
                           (reshape p -1))))))
-       ;; Run the Python twin pinned to `device` and check the Racket run on the
-       ;; same device agrees. CUDA values come back to host for the comparison.
-       ;; `dev-tol`: CPU is bit-stable (the strict, CI-gating `tol`); the CUDA
-       ;; pass is looser because the two stacks (libtorch 2.9 vs Python torch
-       ;; 2.12) pick different cuDNN/cuBLAS algorithms and reduction orders, so
-       ;; values after 5 Adam steps drift ~1e-3 even though seeded init matches.
-       (define (check-convnet device dev-tol)
-         ;; Pin RKTORCH_PARITY_DEVICE for the twin via the env-copy wrapper
-         ;; (never the process-wide env), so the Python child trains on `device`.
-         (define j
-           (call-with-python-env
-            #:env (list (cons "RKTORCH_PARITY_DEVICE" (symbol->string device)))
-            (lambda () (python-result "python/05_mnist.py"))))
-         (define-values (losses flat-params) (train-on device))
-         (for ([r (in-list losses)]
-               [p (in-list (hash-ref j 'losses))]
-               [i (in-naturals)])
-           (check-= r p dev-tol (format "05_mnist[~a]: loss at step ~a" device i)))
-         (check-equal? (tensor-shape flat-params) (hash-ref j 'shape)
-                       (format "05_mnist[~a]: parameter count" device))
-         ;; flat-params lives on `device`; copy to host explicitly before reading
-         ;; values, rather than relying on tensor->list to do it implicitly.
-         (define host-params (to-device flat-params 'cpu))
-         (for ([r (in-list (tensor->list host-params))]
-               [p (in-list (hash-ref j 'values))]
-               [i (in-naturals)])
-           (check-= r p dev-tol
-                    (format "05_mnist[~a]: parameter ~a parity" device i))))
-       (check-convnet 'cpu tol)
+       (check-training-twin "05_mnist" "python/05_mnist.py" train-on 'cpu tol)
        ;; the accelerator-parity pass: only when this host has a CUDA device AND
        ;; the Python torch here was built with CUDA (the cu130 torch-bin wheel,
        ;; staged by `nix develop .#cuda`). On a CPU-only box / CPU torch it skips.
        (when (and (cuda-available?)
                   (python-cuda-available?))
-         (check-convnet 'cuda 5e-3)))
+         (check-training-twin "05_mnist" "python/05_mnist.py" train-on
+                              'cuda 5e-3)))
+     ;; 06 — the v3 capstone: the char-GPT trained on the committed 841-char
+     ;; Heart of Darkness fixture, same shape as the 05 pass: seeded
+     ;; embedding/linear init + 5 full-batch Adam steps track PyTorch, CPU
+     ;; strict and CUDA looser/self-skipping via check-training-twin.
+     (let ()
+       ;; The GPT for the parity pass. Re-declared here (rather than imported
+       ;; from examples/racket/06-gpt.rkt) because torch/ can't reach
+       ;; examples/ once installed by copy in the nix build — and kept inside
+       ;; the python-available branch so its tensors aren't allocated when the
+       ;; suite skips. Must stay in sync with that example's gpt-block/gpt
+       ;; (fixture scale: block-size 16, n-embd 32, n-head 4, n-layer 2).
+       (define-module gpt-block (n-embd n-head)
+         #:submodules ([ln1 (LayerNorm n-embd)]
+                       [wq (Linear n-embd n-embd)]
+                       [wk (Linear n-embd n-embd)]
+                       [wv (Linear n-embd n-embd)]
+                       [wo (Linear n-embd n-embd)]
+                       [ln2 (LayerNorm n-embd)]
+                       [fc1 (Linear n-embd (* 4 n-embd))]
+                       [fc2 (Linear (* 4 n-embd) n-embd)])
+         #:forward (x)
+         (define shape (tensor-shape x))
+         (define batch (car shape))
+         (define seq-len (cadr shape))
+         (define head-dim (quotient n-embd n-head))
+         (define (split-heads m)
+           (transpose (reshape m batch seq-len n-head head-dim) 1 2))
+         (define xn (ln1 x))
+         (define q (split-heads (wq xn)))
+         (define k (split-heads (wk xn)))
+         (define v (split-heads (wv xn)))
+         (define scores (div (matmul q (transpose k 2 3)) (sqrt head-dim)))
+         (define causal (eq (tril (ones seq-len seq-len)) 0))
+         (define att (softmax (masked-fill scores causal -inf.0) -1))
+         (define ctx
+           (reshape (transpose (matmul att v) 1 2) batch seq-len n-embd))
+         (define x1 (add x (wo ctx)))
+         (add x1 (fc2 (gelu (fc1 (ln2 x1))))))
+       (define-module gpt (vocab-size block-size)
+         #:submodules ([tok-emb (Embedding vocab-size 32)]
+                       [pos-emb (Embedding block-size 32)]
+                       [blocks (Sequential (gpt-block 32 4) (gpt-block 32 4))]
+                       [ln-f (LayerNorm 32)]
+                       [head (Linear 32 vocab-size)])
+         #:forward (idx)
+         (define seq-len (cadr (tensor-shape idx)))
+         (define pos (to-dtype (arange seq-len) 'int64))
+         (~> (add (tok-emb idx) (pos-emb pos))
+             blocks ln-f head))
+       (define text (load-text-fixture))
+       (define vocab (text->vocab text))
+       (define v-size (vector-length vocab))
+       ;; Structural guard against silent divergence from the example's gpt
+       ;; (the convnet-guard pattern): shape only — a forward edit in the
+       ;; example surfaces as a step-0 loss-parity mismatch instead.
+       (define block-shapes
+         '((32) (32)                              ; ln1
+           (32 32) (32) (32 32) (32)              ; wq wk
+           (32 32) (32) (32 32) (32)              ; wv wo
+           (32) (32)                              ; ln2
+           (128 32) (128) (32 128) (32)))         ; fc1 fc2
+       (check-equal? (map tensor-shape (parameters (gpt v-size 16)))
+                     (append (list (list v-size 32) '(16 32))
+                             block-shapes block-shapes
+                             (list '(32) '(32) (list v-size 32)
+                                   (list v-size)))
+                     "gpt shape must match examples/racket/06-gpt.rkt")
+       ;; Train on `device`, exactly as run-example does: seed=0, steps=5,
+       ;; lr=0.001, full-batch 16-char blocks of the fixture. Must stay in
+       ;; sync with run-example — a mismatch shows as a step-0 loss failure.
+       (define (train-on device)
+         (with-default-device device
+           (manual-seed! 0)
+           (define-values (xs ys) (contiguous-blocks (encode vocab text) 16))
+           (define net (gpt v-size 16))
+           (define opt (adam (parameters net) #:lr 0.001))
+           (define losses
+             (for/list ([_ (in-range 5)])
+               (zero-grads! opt)
+               (define loss (cross-entropy (reshape (net xs) -1 v-size)
+                                           (reshape ys -1)))
+               (backward! loss)
+               (step! opt)
+               (item loss)))
+           (values losses
+                   (cat (for/list ([p (in-list (parameters net))])
+                          (reshape p -1))))))
+       (check-training-twin "06_gpt" "python/06_gpt.py" train-on 'cpu tol)
+       (when (and (cuda-available?)
+                  (python-cuda-available?))
+         (check-training-twin "06_gpt" "python/06_gpt.py" train-on
+                              'cuda 5e-3)))
      ;; conv2d layer: the seeded init (kaiming-uniform weight + uniform bias,
      ;; in that order) must match nn.Conv2d.reset_parameters value-for-value,
      ;; which depends on fan-in = in*kH*kW being computed exactly like

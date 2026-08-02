@@ -1,0 +1,226 @@
+#lang scribble/lp2
+
+@(require (for-label (except-in racket/base exp log sqrt max min + - * /)
+                     torch torch/nn))
+
+@section[#:tag "ex-gpt"]{Training a char-GPT on Heart of Darkness}
+
+The v3 capstone: a decoder-only transformer language model over characters,
+trained on Joseph Conrad's @emph{Heart of Darkness} (Project Gutenberg #219).
+The architecture is the standard pre-norm GPT: token + learned positional
+embeddings into @racket[n-layer] blocks of (layer-norm @tt{->} causal
+self-attention @tt{->} residual) and (layer-norm @tt{->} MLP @tt{->} residual),
+then a final layer-norm and a linear head back to vocabulary logits.
+
+Multi-head attention is built @emph{inline} from primitives ---
+@racket[Linear] projections, @racket[reshape]/@racket[transpose] head
+splitting, @racket[matmul] scores, the @racket[tril]-derived causal mask
+through @racket[masked-fill], and @racket[softmax] --- rather than hidden
+behind a helper, because watching the tensor shapes move is the point of the
+example. (A library-level @tt{TransformerEncoderBlock} is #32.)
+
+@chunk[<r06-require>
+(require (only-in racket/list take-right)
+         torch torch/nn
+         (only-in torch/data/text
+                  contiguous-blocks
+                  decode
+                  encode
+                  load-heart-of-darkness
+                  load-text-fixture
+                  text->vocab))]
+
+@chunk[<r06-provide>
+(provide gpt-block gpt pick-device run-example train-novel generate)]
+
+@bold{One transformer block.} Pre-norm, as GPT-2 settled it: the residual
+stream is only ever @emph{added to}, each sub-layer reading a normalized view.
+Attention first: the normalized input is projected to queries/keys/values,
+split into @racket[n-head] heads of @tt{head-dim = n-embd / n-head} (the
+@racket[reshape] + @racket[transpose] dance takes @tt{[B, T, C]} to
+@tt{[B, H, T, D]}), and scored against itself, scaled by @tt{sqrt(head-dim)}.
+The upper triangle of the @tt{[T, T]} score matrix --- pairs where a position
+would attend to its own future --- is filled with @tt{-inf} @emph{before}
+@racket[softmax], so those weights come out exactly zero: the causal mask that
+makes this a language model rather than an oracle. The @tt{[T, T]} bool mask
+broadcasts over the batched @tt{[B, H, T, T]} scores. Then the MLP: two
+@racket[Linear] layers through @racket[gelu], widened 4x inside, the
+GPT-standard shape.
+
+@chunk[<r06-block>
+(define-module gpt-block (n-embd n-head)
+  #:coerce ([n-head (if (zero? (remainder n-embd n-head))
+                        n-head
+                        (error 'gpt-block "n-embd ~a not divisible by n-head ~a"
+                               n-embd n-head))])
+  #:submodules ([ln1 (LayerNorm n-embd)]
+                [wq (Linear n-embd n-embd)]
+                [wk (Linear n-embd n-embd)]
+                [wv (Linear n-embd n-embd)]
+                [wo (Linear n-embd n-embd)]
+                [ln2 (LayerNorm n-embd)]
+                [fc1 (Linear n-embd (* 4 n-embd))]
+                [fc2 (Linear (* 4 n-embd) n-embd)])
+  #:forward (x)
+  (define shape (tensor-shape x))
+  (define batch (car shape))
+  (define seq-len (cadr shape))
+  (define head-dim (quotient n-embd n-head))
+  (define (split-heads m)
+    (transpose (reshape m batch seq-len n-head head-dim) 1 2))
+  (define xn (ln1 x))
+  (define q (split-heads (wq xn)))
+  (define k (split-heads (wk xn)))
+  (define v (split-heads (wv xn)))
+  (define scores (div (matmul q (transpose k 2 3)) (sqrt head-dim)))
+  (define causal (eq (tril (ones seq-len seq-len)) 0))
+  (define att (softmax (masked-fill scores causal -inf.0) -1))
+  (define ctx (reshape (transpose (matmul att v) 1 2) batch seq-len n-embd))
+  (define x1 (add x (wo ctx)))
+  (add x1 (fc2 (gelu (fc1 (ln2 x1))))))]
+
+@bold{The model.} Token ids gather rows from a learned @racket[Embedding]
+table; a second table indexed by @racket[(arange seq-len)] adds a learned
+position signal (its @tt{[T, C]} rows broadcast over the batch). The blocks
+stack in a @racket[Sequential], whose indexed naming gives PyTorch-style
+dotted paths (@tt{blocks.0.ln1.weight}). @racket[block-size] only sizes the
+position table --- cropping inputs to fit is the caller's job. The keyword
+defaults are the fixture-scale configuration that @racket[run-example] and the
+parity twin train; @racket[train-novel] passes something bigger.
+
+@chunk[<r06-model>
+(define-module gpt (vocab-size block-size
+                    #:n-embd [n-embd 32]
+                    #:n-head [n-head 4]
+                    #:n-layer [n-layer 2])
+  #:submodules ([tok-emb (Embedding vocab-size n-embd)]
+                [pos-emb (Embedding block-size n-embd)]
+                [blocks (apply Sequential
+                               (for/list ([_ (in-range n-layer)])
+                                 (gpt-block n-embd n-head)))]
+                [ln-f (LayerNorm n-embd)]
+                [head (Linear n-embd vocab-size)])
+  #:forward (idx)
+  (define seq-len (cadr (tensor-shape idx)))
+  (define pos (to-dtype (arange seq-len) 'int64))
+  (~> (add (tok-emb idx) (pos-emb pos))
+      blocks ln-f head))]
+
+@bold{The device.} As in the MNIST capstone: pick the accelerator when one is
+present, and let @racket[with-default-device] scope it so parameters and
+batches land together.
+
+@chunk[<r06-device>
+(define (pick-device)
+  (if (cuda-available?) 'cuda 'cpu))]
+
+@bold{The deterministic core.} @racket[run-example] is the seeded, offline
+entry the test harness and the PyTorch parity twin both drive: the committed
+841-char fixture becomes @racket[contiguous-blocks] of 16 chars, and a
+fixture-scale @racket[gpt] trains for @racket[steps] full-batch @racket[adam]
+steps. The next-char loss is @racket[cross-entropy] with the @tt{[B, T, V]}
+logits and @tt{[B, T]} targets flattened to one @tt{[B*T]}-row classification
+problem. Full-batch, no shuffling: with a shared seed the @racket[Embedding]
+and @racket[Linear] inits draw value-for-value like their @tt{nn.*}
+counterparts (declaration order is RNG-draw order on both sides), and the
+updates track @tt{torch.optim.Adam} within float tolerance.
+
+@chunk[<r06-run>
+(define fixture-block-size 16)
+
+(define (run-example #:steps [steps 5] #:device [device (pick-device)])
+  (with-default-device device
+    (manual-seed! 0)
+    (define text (load-text-fixture))
+    (define vocab (text->vocab text))
+    (define-values (xs ys)
+      (contiguous-blocks (encode vocab text) fixture-block-size))
+    (define net (gpt (vector-length vocab) fixture-block-size))
+    (define opt (adam (parameters net) #:lr 0.001))
+    (define losses
+      (for/list ([_ (in-range steps)])
+        (zero-grads! opt)
+        (define logits (net xs))
+        (define loss (cross-entropy (reshape logits -1 (vector-length vocab))
+                                    (reshape ys -1)))
+        (backward! loss)
+        (step! opt)
+        (item loss)))
+    (values losses net vocab device)))]
+
+@bold{The real thing.} @racket[train-novel] downloads the full novella
+(cached under @envvar{RKTORCH_TEXT_DIR} or the system cache dir; the Project
+Gutenberg boilerplate is stripped by the loader), carves it into ~3300
+64-char blocks, and trains a 4-layer model on deterministic contiguous
+minibatches --- the batch window just cycles through the text, since a
+shuffling loader would need @tt{randperm}, which isn't on the surface yet.
+On the CPU this is a coffee-length run; on a GPU it's minutes.
+
+@chunk[<r06-train-novel>
+(define (train-novel #:steps [steps 2000] #:batch [batch 64]
+                     #:block-size [block-size 64]
+                     #:device [device (pick-device)]
+                     #:log-every [log-every 100])
+  (with-default-device device
+    (manual-seed! 0)
+    (define text (load-heart-of-darkness))
+    (define vocab (text->vocab text))
+    (define-values (xs ys) (contiguous-blocks (encode vocab text) block-size))
+    (define n (car (tensor-shape xs)))
+    (define net (gpt (vector-length vocab) block-size
+                     #:n-embd 128 #:n-head 4 #:n-layer 4))
+    (define opt (adam (parameters net) #:lr 0.0003))
+    (for ([step (in-range steps)])
+      (define start (modulo (* step batch) (- n batch)))
+      (zero-grads! opt)
+      (define loss
+        (cross-entropy
+         (reshape (net (narrow xs 0 start batch)) -1 (vector-length vocab))
+         (reshape (narrow ys 0 start batch) -1)))
+      (backward! loss)
+      (step! opt)
+      (when (zero? (modulo step log-every))
+        (printf "step ~a: loss ~a\n" step (item loss))))
+    (values net vocab)))]
+
+@bold{Generation.} Autoregressive and greedy: run the context through the
+model, @racket[argmax] the logits at the @emph{last} position, append, repeat
+--- cropping the context to the trailing @racket[block-size] ids the position
+table can address. Greedy sampling is deterministic (no temperature knob to
+seed), which is what the smoke test wants; it also produces the
+characteristically repetitive prose greedy decoding is known for, which is
+half the fun. Inference-only, so the model runs under @racket[in-eval-mode]
+and @racket[with-no-grad] --- no autograd graph, and the prior training mode
+is restored on the way out. The prompt must be non-empty and drawn from the
+training vocabulary (@racket[encode] errors otherwise).
+
+@chunk[<r06-generate>
+(define (generate net vocab prompt
+                  #:steps [steps 256]
+                  #:block-size [block-size fixture-block-size]
+                  #:device [device 'cpu])
+  (with-default-device device
+    (in-eval-mode net
+      (with-no-grad
+        (define start
+          (map inexact->exact (tensor->list (encode vocab prompt))))
+        (define ids
+          (for/fold ([ids start]) ([_ (in-range steps)])
+            (define ctx (take-right ids (min (length ids) block-size)))
+            (define idx
+              (reshape (to-dtype (tensor ctx) 'int64) 1 (length ctx)))
+            (define logits (net idx))
+            (define next-logits (narrow logits 1 (- (length ctx) 1) 1))
+            (define next (inexact->exact (item (argmax next-logits))))
+            (append ids (list next))))
+        (decode vocab ids)))))]
+
+@chunk[<*>
+  <r06-require>
+  <r06-provide>
+  <r06-block>
+  <r06-model>
+  <r06-device>
+  <r06-run>
+  <r06-train-novel>
+  <r06-generate>]

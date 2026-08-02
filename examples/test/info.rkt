@@ -15,4 +15,5 @@
     ("02-matmul.rkt" 300)
     ("03-autograd.rkt" 300)
     ("04-mlp.rkt" 300)
-    ("05-mnist.rkt" 300)))
+    ("05-mnist.rkt" 300)
+    ("06-gpt.rkt" 300)))
