@@ -288,16 +288,17 @@
      ;; training loop uses), and softmax — exactly what the 06-gpt
      ;; capstone's attention will do. The recipe battery can't express
      ;; -inf (not valid Python via number->string), so this facade-level
-     ;; composition is hand-checked.
-     (let ()
-       (define jm (python-check "causal_mask.py"))
-       (manual-seed! 0)
-       (define scores (randn 2 4 4))
-       (define mask (eq (tril (ones 4 4)) 0))
-       (define r (softmax (masked-fill scores mask -inf.0) -1))
-       (check-equal? (tensor-shape r) (hash-ref jm 'shape)
-                     "causal mask parity: shape")
-       (for ([a (in-list (tensor->list r))]
-             [b (in-list (hash-ref jm 'values))]
-             [i (in-naturals)])
-         (check-= a b tol (format "causal mask parity ~a" i))))]))
+     ;; composition is hand-checked. (Bare defines, not a let block: this
+     ;; is the clause's last check, so nothing below can capture them —
+     ;; the earlier blocks keep their lets to scope their j/net/x names.)
+     (define jm (python-check "causal_mask.py"))
+     (manual-seed! 0)
+     (define scores (randn 2 4 4))
+     (define mask (eq (tril (ones 4 4)) 0))
+     (define r (softmax (masked-fill scores mask -inf.0) -1))
+     (check-equal? (tensor-shape r) (hash-ref jm 'shape)
+                   "causal mask parity: shape")
+     (for ([a (in-list (tensor->list r))]
+           [b (in-list (hash-ref jm 'values))]
+           [i (in-naturals)])
+       (check-= a b tol (format "causal mask parity ~a" i)))]))
