@@ -2,7 +2,7 @@
 ;; Schema: codegen/aten/native_functions.yaml (libtorch 2.9.0).
 ;; Parity manifest: (racket-name python-attr (arg kinds ...) inplace?).
 ;; inplace? is #t for ops checked against torch.Tensor.<attr>_ on a
-;; cloned receiver. Consumed by torch/tests/python-cross-test.rkt.
+;; cloned receiver. Consumed by torch/tests/generated-parity-test.rkt.
 (
  (adaptive-avg-pool2d "adaptive_avg_pool2d" (tensor int-array) #f)
  (add-tensor! "add_.Tensor" (tensor tensor scalar) #t)

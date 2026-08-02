@@ -65,7 +65,7 @@ def emit_manifest(shards: dict[str, list[Op]]) -> str:
     lines += [
         ";; Parity manifest: (racket-name python-attr (arg kinds ...) inplace?).",
         ";; inplace? is #t for ops checked against torch.Tensor.<attr>_ on a",
-        ";; cloned receiver. Consumed by torch/tests/python-cross-test.rkt.",
+        ";; cloned receiver. Consumed by torch/tests/generated-parity-test.rkt.",
         "(",
     ]
     for op in all_ops:

@@ -21,7 +21,7 @@ stack — `extern "C"` shim, raw Racket binding, uncontracted wrapper — for
 any ATen op whose signature fits the IR (Tensor / Scalar→double / int64 /
 bool / IntArrayRef / TensorList args, single Tensor return). **If the op is
 IR-eligible, add a line to `codegen/allowlist.txt` + an input recipe in
-`torch/tests/python-cross-test.rkt`, regenerate, and skip hand-writing
+`torch/tests/generated-parity-test.rkt`, regenerate, and skip hand-writing
 entirely.** Hand-write only ops outside the IR (multi-return, out-params,
 optional argument *types* like `Tensor?`, in-place ops, dtype/device
 knobs — note schema *defaults* are fine: they become required args on the
