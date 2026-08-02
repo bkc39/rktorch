@@ -364,13 +364,16 @@
           # source once, shared with cpp-cuda's cudaPackages_13 closure. nixpkgs
           # marks the wheel broken here only because its cuda-bindings *metadata*
           # package is stale (12.9.7 < the 13.0.3 the wheel wants); the wheel
-          # carries its own cu130 runtime, so we relax that one gate to "warn".
+          # carries its own cu130 runtime, so that one gate is a false positive
+          # here and is ignored outright — "warn" would repeat the (already
+          # settled) diagnosis on every `.#cuda` shell entry. Re-audit if the
+          # nixpkgsCuda pin or the torch-bin version moves.
           pkgsCudaPy = import nixpkgsCuda {
             inherit system;
             config = {
               allowUnfree = true;
               cudaSupport = true;
-              problems.handlers.torch.unsupported-cuda-version = "warn";
+              problems.handlers.torch.unsupported-cuda-version = "ignore";
             };
           };
           # cudaPackages_13 so the cu130 wheel patchelfs against .so.13 (and
