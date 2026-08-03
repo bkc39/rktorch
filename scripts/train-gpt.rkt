@@ -13,7 +13,9 @@
 ;; ~40 epochs ≈ 2000 minibatch steps, loss ~4.4 -> ~1.5 on an RTX 3090 Ti in
 ;; about two minutes.
 
-(require (only-in racket/format ~r)
+(require (only-in racket/file make-directory*)
+         (only-in racket/format ~r)
+         (only-in racket/path path-only)
          torch
          torch/nn
          (only-in torch/data/text
@@ -26,7 +28,14 @@
 (define epochs (string->number (or (getenv "EPOCHS") "40")))
 (define batch (string->number (or (getenv "BATCH") "64")))
 (define block-size (string->number (or (getenv "BLOCK") "64")))
+(define n-embd 128)
+(define n-head 4)
+(define n-layer 4)
 (define prompts '("The " "Marlow " "The river "))
+;; Post-training checkpoint prefix: <prefix>.safetensors holds the weights
+;; (Python-safetensors-compatible, via save-state!) and <prefix>.rktd the
+;; vocab + architecture sidecar scripts/generate-gpt.rkt rebuilds from.
+(define checkpoint (or (getenv "CHECKPOINT") "checkpoints/gpt-hod"))
 
 (define device (pick-device))
 (printf "device: ~a\n" device)
@@ -40,7 +49,8 @@
   (define n (car (tensor-shape xs)))
   (printf "corpus: ~a chars, vocab ~a; ~a blocks of ~a (~a minibatches/epoch)\n"
           (string-length text) v-size n block-size (quotient n batch))
-  (define net (gpt v-size block-size #:n-embd 128 #:n-head 4 #:n-layer 4))
+  (define net (gpt v-size block-size
+                   #:n-embd n-embd #:n-head n-head #:n-layer n-layer))
   (define opt (adam (parameters net) #:lr 0.0003))
   ;; An epoch is one deterministic pass over the contiguous minibatches (the
   ;; trailing partial batch is dropped); the printed loss is the mean over
@@ -60,6 +70,22 @@
     (printf "epoch ~a/~a: mean loss ~a\n"
             epoch epochs (~r (/ total steps) #:precision '(= 4)))
     (flush-output))
+  ;; Persist the trained weights + the sidecar generate-gpt.rkt needs to
+  ;; rebuild the exact model (vocab as a string in id order, architecture,
+  ;; and the run's epoch count for provenance).
+  (let ([dir (path-only (string->path checkpoint))])
+    (when dir (make-directory* dir)))
+  (save-state! net (string-append checkpoint ".safetensors"))
+  (call-with-output-file (string-append checkpoint ".rktd") #:exists 'replace
+    (lambda (out)
+      (write (list (cons 'vocab (list->string (vector->list vocab)))
+                   (cons 'block-size block-size)
+                   (cons 'n-embd n-embd)
+                   (cons 'n-head n-head)
+                   (cons 'n-layer n-layer)
+                   (cons 'epochs epochs))
+             out)))
+  (printf "\ncheckpoint: ~a.safetensors (+ .rktd sidecar)\n" checkpoint)
   (for ([prompt (in-list prompts)])
     (printf "\n--- prompt ~v ---\n~a\n" prompt
             (generate net vocab prompt
