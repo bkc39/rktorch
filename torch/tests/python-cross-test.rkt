@@ -217,6 +217,11 @@
        ;; suite skips. Must stay in sync with that example's gpt-block/gpt
        ;; (fixture scale: block-size 16, n-embd 32, n-head 4, n-layer 2).
        (define-module gpt-block (n-embd n-head)
+         #:coerce ([n-head (if (zero? (remainder n-embd n-head))
+                               n-head
+                               (error 'gpt-block
+                                      "n-embd ~a not divisible by n-head ~a"
+                                      n-embd n-head))])
          #:submodules ([ln1 (LayerNorm n-embd)]
                        [wq (Linear n-embd n-embd)]
                        [wk (Linear n-embd n-embd)]

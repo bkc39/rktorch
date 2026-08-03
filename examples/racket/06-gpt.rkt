@@ -167,11 +167,16 @@ On the CPU this is a coffee-length run; on a GPU it's minutes.
     (define vocab (text->vocab text))
     (define-values (xs ys) (contiguous-blocks (encode vocab text) block-size))
     (define n (car (tensor-shape xs)))
+    (unless (<= batch n)
+      (error 'train-novel "batch ~a exceeds the corpus's ~a blocks" batch n))
     (define net (gpt (vector-length vocab) block-size
                      #:n-embd 128 #:n-head 4 #:n-layer 4))
     (define opt (adam (parameters net) #:lr 0.0003))
     (for ([step (in-range steps)])
-      (define start (modulo (* step batch) (- n batch)))
+      ;; Wraparound start with modulus (n - batch) + 1: the final window at
+      ;; n - batch is reachable, and batch = n stays legal (always start 0)
+      ;; rather than a modulo-by-zero.
+      (define start (modulo (* step batch) (add1 (- n batch))))
       (zero-grads! opt)
       (define loss
         (cross-entropy
@@ -185,28 +190,39 @@ On the CPU this is a coffee-length run; on a GPU it's minutes.
 
 @bold{Generation.} Autoregressive and greedy: run the context through the
 model, @racket[argmax] the logits at the @emph{last} position, append, repeat
---- cropping the context to the trailing @racket[block-size] ids the position
-table can address. Greedy sampling is deterministic (no temperature knob to
-seed), which is what the smoke test wants; it also produces the
-characteristically repetitive prose greedy decoding is known for, which is
-half the fun. Inference-only, so the model runs under @racket[in-eval-mode]
-and @racket[with-no-grad] --- no autograd graph, and the prior training mode
-is restored on the way out. The prompt must be non-empty and drawn from the
-training vocabulary (@racket[encode] errors otherwise).
+--- cropping the context to the trailing ids the position table can address.
+Both defaults are @emph{derived from the net itself} rather than hardcoded:
+the device from where its parameters live (@racket[with-default-device] only
+steers @emph{newly created} tensors, so the rollout context must be built
+where the weights already are --- a @racket[train-novel] net on CUDA would
+otherwise device-mismatch), and the context limit from the position table's
+row count (the net's second parameter is @tt{pos-emb}'s
+@tt{[block-size, n-embd]} weight --- a 64-block net would otherwise be
+silently cropped to the fixture's 16). Greedy sampling is deterministic (no
+temperature knob to seed), which is what the smoke test wants; it also
+produces the characteristically repetitive prose greedy decoding is known
+for, which is half the fun. Inference-only, so the model runs under
+@racket[in-eval-mode] and @racket[with-no-grad] --- no autograd graph, and
+the prior training mode is restored on the way out. The prompt must be
+non-empty and drawn from the training vocabulary (@racket[encode] errors
+otherwise).
 
 @chunk[<r06-generate>
 (define (generate net vocab prompt
                   #:steps [steps 256]
-                  #:block-size [block-size fixture-block-size]
-                  #:device [device 'cpu])
-  (with-default-device device
+                  #:block-size [block-size #f]
+                  #:device [device #f])
+  (define dev (or device (tensor-device (car (parameters net)))))
+  (define ctx-limit
+    (or block-size (car (tensor-shape (cadr (parameters net))))))
+  (with-default-device dev
     (in-eval-mode net
       (with-no-grad
         (define start
           (map inexact->exact (tensor->list (encode vocab prompt))))
         (define ids
           (for/fold ([ids start]) ([_ (in-range steps)])
-            (define ctx (take-right ids (min (length ids) block-size)))
+            (define ctx (take-right ids (min (length ids) ctx-limit)))
             (define idx
               (reshape (to-dtype (tensor ctx) 'int64) 1 (length ctx)))
             (define logits (net idx))

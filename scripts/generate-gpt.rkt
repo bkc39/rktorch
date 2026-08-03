@@ -40,9 +40,7 @@
                    #:n-head (cfg 'n-head)
                    #:n-layer (cfg 'n-layer)))
   (load-state! net (string-append prefix ".safetensors"))
+  ;; generate derives the device and context limit from the net itself.
   (for ([prompt (in-list prompts)])
     (printf "\n--- prompt ~v ---\n~a\n" prompt
-            (generate net vocab prompt
-                      #:steps steps
-                      #:block-size (cfg 'block-size)
-                      #:device device))))
+            (generate net vocab prompt #:steps steps))))

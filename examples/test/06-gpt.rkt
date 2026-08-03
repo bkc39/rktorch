@@ -15,8 +15,8 @@
   (define steps (string->number (or (getenv "STEPS") "2000")))
   (printf "device: ~a\n" (pick-device))
   (define-values (net vocab) (train-novel #:steps steps))
-  (displayln (generate net vocab "The " #:steps 400 #:block-size 64
-                       #:device (pick-device))))
+  ;; generate derives the device and 64-char context limit from the net.
+  (displayln (generate net vocab "The " #:steps 400)))
 
 (module+ test
   (require rackunit)

@@ -47,6 +47,8 @@
   (define v-size (vector-length vocab))
   (define-values (xs ys) (contiguous-blocks (encode vocab text) block-size))
   (define n (car (tensor-shape xs)))
+  (unless (<= batch n)
+    (error 'train-gpt "batch ~a exceeds the corpus's ~a blocks" batch n))
   (printf "corpus: ~a chars, vocab ~a; ~a blocks of ~a (~a minibatches/epoch)\n"
           (string-length text) v-size n block-size (quotient n batch))
   (define net (gpt v-size block-size
@@ -57,8 +59,11 @@
   ;; the epoch's steps, so early epochs average in their fast initial drop.
   (for ([epoch (in-range 1 (add1 epochs))])
     (define-values (total steps)
+      ;; Inclusive of the final window at n - batch (in-range's end is
+      ;; exclusive), so an evenly divisible corpus trains its last batch
+      ;; and batch = n runs one full-batch step instead of zero.
       (for/fold ([total 0.0] [steps 0])
-                ([start (in-range 0 (- n batch) batch)])
+                ([start (in-range 0 (add1 (- n batch)) batch)])
         (zero-grads! opt)
         (define loss
           (cross-entropy
@@ -86,7 +91,7 @@
                    (cons 'epochs epochs))
              out)))
   (printf "\ncheckpoint: ~a.safetensors (+ .rktd sidecar)\n" checkpoint)
+  ;; generate derives the device and context limit from the net itself.
   (for ([prompt (in-list prompts)])
     (printf "\n--- prompt ~v ---\n~a\n" prompt
-            (generate net vocab prompt
-                      #:steps 300 #:block-size block-size #:device device))))
+            (generate net vocab prompt #:steps 300))))
