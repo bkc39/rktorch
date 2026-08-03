@@ -382,7 +382,24 @@
           # this nixpkgs' cuda-bindings *metadata* pkg is 12.9.7 (< the >=13.0.3
           # the 2.12 wheel declares); cuda-bindings (cuda-python) isn't on the
           # path of the conv/linear/adam ops the parity pass exercises.
-          pythonCudaEnv = pkgsCudaPy.python314.withPackages
+          # Self-enforcing re-audit tripwire for the "ignore" above: the
+          # suppression was justified against torch-bin 2.12 (cu130) on this
+          # exact nixpkgsCuda pin. If a pin bump moves the wheel version, fail
+          # eval loudly here instead of silently carrying the suppression
+          # forward — bump this prefix only after re-checking that the
+          # unsupported-cuda-version problem is still a metadata-only false
+          # positive for the new wheel.
+          auditedTorchBinPrefix = "2.12.";
+          pythonCudaEnv =
+            assert pkgsCudaPy.lib.assertMsg
+              (pkgsCudaPy.lib.hasPrefix auditedTorchBinPrefix
+                pkgsCudaPy.python314.pkgs.torch-bin.version)
+              ''
+                torch-bin moved to ${pkgsCudaPy.python314.pkgs.torch-bin.version}
+                (audited: ${auditedTorchBinPrefix}x): re-audit the
+                unsupported-cuda-version "ignore" above, then update
+                auditedTorchBinPrefix.'';
+            pkgsCudaPy.python314.withPackages
             (ps: [ ((ps.torch-bin.override {
               cudaPackages = pkgsCudaPy.cudaPackages_13;
             }).overridePythonAttrs (_: { dontCheckRuntimeDeps = true; })) ]);
