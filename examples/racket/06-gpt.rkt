@@ -20,7 +20,9 @@ behind a helper, because watching the tensor shapes move is the point of the
 example. (A library-level @tt{TransformerEncoderBlock} is #32.)
 
 @chunk[<r06-require>
-(require (only-in racket/list take-right)
+(require racket/runtime-path
+         (only-in racket/file file->string)
+         (only-in racket/list take-right)
          torch torch/nn
          (only-in torch/data/text
                   contiguous-blocks
@@ -31,7 +33,8 @@ example. (A library-level @tt{TransformerEncoderBlock} is #32.)
                   text->vocab))]
 
 @chunk[<r06-provide>
-(provide gpt-block gpt pick-device run-example train-novel generate)]
+(provide gpt-block gpt pick-device
+         load-excerpt run-example train-excerpt train-novel generate)]
 
 @bold{One transformer block.} Pre-norm, as GPT-2 settled it: the residual
 stream is only ever @emph{added to}, each sub-layer reading a normalized view.
@@ -148,6 +151,56 @@ updates track @tt{torch.optim.Adam} within float tolerance.
         (item loss)))
     (values losses net vocab device)))]
 
+@bold{The middle path: offline training on a committed excerpt.} Between the
+841-char parity fixture (too small to learn from) and the full-novella
+download sits @filepath{examples/data/heart-of-darkness-part-i.txt}: the
+opening ~31k characters of Part I, committed to the repo, so this trains a
+real --- if small --- language model with @emph{no network at all}. The loop
+is epoch-shaped (sequential passes over the excerpt's contiguous blocks,
+inclusive of the final window) with the per-epoch mean loss printed, so the
+run is watchable; the model is scaled down to match the data (64-dim,
+2 blocks, 32-char context). On a GPU the default 60 epochs finish in well
+under a minute; on CPU it's a few minutes.
+
+@chunk[<r06-train-excerpt>
+(define-runtime-path excerpt-path "../data/heart-of-darkness-part-i.txt")
+
+(define (load-excerpt)
+  (file->string excerpt-path))
+
+(define (train-excerpt #:epochs [epochs 60] #:batch [batch 32]
+                       #:block-size [block-size 32]
+                       #:device [device (pick-device)]
+                       #:log-every [log-every 10])
+  (with-default-device device
+    (manual-seed! 0)
+    (define text (load-excerpt))
+    (define vocab (text->vocab text))
+    (define v-size (vector-length vocab))
+    (define-values (xs ys)
+      (contiguous-blocks (encode vocab text) block-size))
+    (define n (car (tensor-shape xs)))
+    (unless (<= batch n)
+      (error 'train-excerpt "batch ~a exceeds the excerpt's ~a blocks"
+             batch n))
+    (define net (gpt v-size block-size #:n-embd 64 #:n-head 4 #:n-layer 2))
+    (define opt (adam (parameters net) #:lr 0.001))
+    (for ([epoch (in-range 1 (add1 epochs))])
+      (define-values (total steps)
+        (for/fold ([total 0.0] [steps 0])
+                  ([start (in-range 0 (add1 (- n batch)) batch)])
+          (zero-grads! opt)
+          (define loss
+            (cross-entropy
+             (reshape (net (narrow xs 0 start batch)) -1 v-size)
+             (reshape (narrow ys 0 start batch) -1)))
+          (backward! loss)
+          (step! opt)
+          (values (+ total (item loss)) (add1 steps))))
+      (when (zero? (modulo epoch log-every))
+        (printf "epoch ~a/~a: mean loss ~a\n" epoch epochs (/ total steps))))
+    (values net vocab)))]
+
 @bold{The real thing.} @racket[train-novel] downloads the full novella
 (cached under @envvar{RKTORCH_TEXT_DIR} or the system cache dir; the Project
 Gutenberg boilerplate is stripped by the loader), carves it into ~3300
@@ -238,5 +291,6 @@ otherwise).
   <r06-model>
   <r06-device>
   <r06-run>
+  <r06-train-excerpt>
   <r06-train-novel>
   <r06-generate>]
