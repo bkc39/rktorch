@@ -225,11 +225,15 @@ On the CPU this is a coffee-length run; on a GPU it's minutes.
     (define net (gpt (vector-length vocab) block-size
                      #:n-embd 128 #:n-head 4 #:n-layer 4))
     (define opt (adam (parameters net) #:lr 0.0003))
+    ;; Sequential wraparound sweep, aligned with scripts/train-gpt.rkt's
+    ;; epoch loop: batch-stride windows tile the corpus and every one is
+    ;; visited each `windows` steps. (A (* step batch)-mod-M cycle only
+    ;; covers all offsets when gcd(batch, M) = 1 — at the novella's size it
+    ;; would skip most of them, including the final window.) The trailing
+    ;; partial window (< batch blocks) is dropped, as in the script.
+    (define windows (quotient n batch))
     (for ([step (in-range steps)])
-      ;; Wraparound start with modulus (n - batch) + 1: the final window at
-      ;; n - batch is reachable, and batch = n stays legal (always start 0)
-      ;; rather than a modulo-by-zero.
-      (define start (modulo (* step batch) (add1 (- n batch))))
+      (define start (* batch (modulo step windows)))
       (zero-grads! opt)
       (define loss
         (cross-entropy
@@ -249,9 +253,9 @@ the device from where its parameters live (@racket[with-default-device] only
 steers @emph{newly created} tensors, so the rollout context must be built
 where the weights already are --- a @racket[train-novel] net on CUDA would
 otherwise device-mismatch), and the context limit from the position table's
-row count (the net's second parameter is @tt{pos-emb}'s
-@tt{[block-size, n-embd]} weight --- a 64-block net would otherwise be
-silently cropped to the fixture's 16). Greedy sampling is deterministic (no
+row count, looked up as @tt{"pos-emb.weight"} in
+@racket[named-parameters] (a 64-block net would otherwise be silently
+cropped to the fixture's 16). Greedy sampling is deterministic (no
 temperature knob to seed), which is what the smoke test wants; it also
 produces the characteristically repetitive prose greedy decoding is known
 for, which is half the fun. Inference-only, so the model runs under
@@ -265,9 +269,14 @@ otherwise).
                   #:steps [steps 256]
                   #:block-size [block-size #f]
                   #:device [device #f])
+  ;; Any parameter's device works (a module's tensors are colocated); the
+  ;; context limit comes from pos-emb's row count by *name*, so it survives
+  ;; a reordering of gpt's #:submodules list.
   (define dev (or device (tensor-device (car (parameters net)))))
   (define ctx-limit
-    (or block-size (car (tensor-shape (cadr (parameters net))))))
+    (or block-size
+        (car (tensor-shape
+              (cdr (assoc "pos-emb.weight" (named-parameters net)))))))
   (with-default-device dev
     (in-eval-mode net
       (with-no-grad
