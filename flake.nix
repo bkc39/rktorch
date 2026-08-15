@@ -364,13 +364,16 @@
           # source once, shared with cpp-cuda's cudaPackages_13 closure. nixpkgs
           # marks the wheel broken here only because its cuda-bindings *metadata*
           # package is stale (12.9.7 < the 13.0.3 the wheel wants); the wheel
-          # carries its own cu130 runtime, so we relax that one gate to "warn".
+          # carries its own cu130 runtime, so that one gate is a false positive
+          # here and is ignored outright — "warn" would repeat the (already
+          # settled) diagnosis on every `.#cuda` shell entry. Re-audit if the
+          # nixpkgsCuda pin or the torch-bin version moves.
           pkgsCudaPy = import nixpkgsCuda {
             inherit system;
             config = {
               allowUnfree = true;
               cudaSupport = true;
-              problems.handlers.torch.unsupported-cuda-version = "warn";
+              problems.handlers.torch.unsupported-cuda-version = "ignore";
             };
           };
           # cudaPackages_13 so the cu130 wheel patchelfs against .so.13 (and
@@ -379,7 +382,24 @@
           # this nixpkgs' cuda-bindings *metadata* pkg is 12.9.7 (< the >=13.0.3
           # the 2.12 wheel declares); cuda-bindings (cuda-python) isn't on the
           # path of the conv/linear/adam ops the parity pass exercises.
-          pythonCudaEnv = pkgsCudaPy.python314.withPackages
+          # Self-enforcing re-audit tripwire for the "ignore" above: the
+          # suppression was justified against torch-bin 2.12 (cu130) on this
+          # exact nixpkgsCuda pin. If a pin bump moves the wheel version, fail
+          # eval loudly here instead of silently carrying the suppression
+          # forward — bump this prefix only after re-checking that the
+          # unsupported-cuda-version problem is still a metadata-only false
+          # positive for the new wheel.
+          auditedTorchBinPrefix = "2.12.";
+          pythonCudaEnv =
+            assert pkgsCudaPy.lib.assertMsg
+              (pkgsCudaPy.lib.hasPrefix auditedTorchBinPrefix
+                pkgsCudaPy.python314.pkgs.torch-bin.version)
+              ''
+                torch-bin moved to ${pkgsCudaPy.python314.pkgs.torch-bin.version}
+                (audited: ${auditedTorchBinPrefix}x): re-audit the
+                unsupported-cuda-version "ignore" above, then update
+                auditedTorchBinPrefix.'';
+            pkgsCudaPy.python314.withPackages
             (ps: [ ((ps.torch-bin.override {
               cudaPackages = pkgsCudaPy.cudaPackages_13;
             }).overridePythonAttrs (_: { dontCheckRuntimeDeps = true; })) ]);
