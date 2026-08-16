@@ -65,29 +65,36 @@ GPT-standard shape.
                 [fc1 (Linear n-embd (* 4 n-embd))]
                 [fc2 (Linear (* 4 n-embd) n-embd)])
   #:forward (x)
-  (define shape (tensor-shape x))
-  (define batch (car shape))
-  (define seq-len (cadr shape))
-  (define head-dim (quotient n-embd n-head))
-  (define (split-heads m)
-    (transpose (reshape m batch seq-len n-head head-dim) 1 2))
-  (define xn (ln1 x))
-  (define q (split-heads (wq xn)))
-  (define k (split-heads (wk xn)))
-  (define v (split-heads (wv xn)))
-  (define scores (div (matmul q (transpose k 2 3)) (sqrt head-dim)))
-  (define causal (eq (tril (ones seq-len seq-len)) 0))
-  (define att (softmax (masked-fill scores causal -inf.0) -1))
-  (define ctx (reshape (transpose (matmul att v) 1 2) batch seq-len n-embd))
-  (define x1 (add x (wo ctx)))
-  (add x1 (fc2 (gelu (fc1 (ln2 x1))))))]
+  (with-default-device (tensor-device x)
+    (define shape (tensor-shape x))
+    (define batch (car shape))
+    (define seq-len (cadr shape))
+    (define head-dim (quotient n-embd n-head))
+    (define (split-heads m)
+      (transpose (reshape m batch seq-len n-head head-dim) 1 2))
+    (define xn (ln1 x))
+    (define q (split-heads (wq xn)))
+    (define k (split-heads (wk xn)))
+    (define v (split-heads (wv xn)))
+    (define scores (div (matmul q (transpose k 2 3)) (sqrt head-dim)))
+    (define causal (eq (tril (ones seq-len seq-len)) 0))
+    (define att (softmax (masked-fill scores causal -inf.0) -1))
+    (define ctx
+      (reshape (transpose (matmul att v) 1 2) batch seq-len n-embd))
+    (define x1 (add x (wo ctx)))
+    (add x1 (fc2 (gelu (fc1 (ln2 x1)))))))]
 
 @bold{The model.} Token ids gather rows from a learned @racket[Embedding]
 table; a second table indexed by @racket[(arange seq-len)] adds a learned
 position signal (its @tt{[T, C]} rows broadcast over the batch). The blocks
 stack in a @racket[Sequential], whose indexed naming gives PyTorch-style
 dotted paths (@tt{blocks.0.ln1.weight}). @racket[block-size] only sizes the
-position table --- cropping inputs to fit is the caller's job. The keyword
+position table --- cropping inputs to fit is the caller's job. Both forwards
+scope their temporaries --- the position @racket[arange] here, the
+causal-mask @racket[ones] in the block --- to the @emph{input's} device, so
+a CUDA-trained net can be applied directly, outside any
+@racket[with-default-device] extent, exactly like the Python twin's
+@tt{device=idx.device}. The keyword
 defaults are the fixture-scale configuration that @racket[run-example] and the
 parity twin train; @racket[train-novel] passes something bigger.
 
@@ -104,10 +111,11 @@ parity twin train; @racket[train-novel] passes something bigger.
                 [ln-f (LayerNorm n-embd)]
                 [head (Linear n-embd vocab-size)])
   #:forward (idx)
-  (define seq-len (cadr (tensor-shape idx)))
-  (define pos (to-dtype (arange seq-len) 'int64))
-  (~> (add (tok-emb idx) (pos-emb pos))
-      blocks ln-f head))]
+  (with-default-device (tensor-device idx)
+    (define seq-len (cadr (tensor-shape idx)))
+    (define pos (to-dtype (arange seq-len) 'int64))
+    (~> (add (tok-emb idx) (pos-emb pos))
+        blocks ln-f head)))]
 
 @bold{The device.} As in the MNIST capstone: pick the accelerator when one is
 present, and let @racket[with-default-device] scope it so parameters and
