@@ -83,6 +83,40 @@ Racket side — one choke point in `torch/foreign/raw/syntax.rkt`:
   (pressure just needs to scale with total native footprint to make
   finalizers timely); revisit weighting only if measurement demands.
 
+### Leg 1.5: graceful OOM — typed errors + collect-and-retry
+
+Failing *cleanly* (leg 0) is table stakes; failing *gracefully* needs
+two more pieces:
+
+**Typed OOM errors.** libtorch throws `c10::OutOfMemoryError` (a
+distinct subclass) for allocation exhaustion; the shim's catch-all
+currently flattens it into the generic message string. Add a kind
+channel beside `tr_last_error`:
+
+    int tr_last_error_kind(void);   /* 0 generic, 1 out-of-memory */
+
+set by every boundary catch (`catch (const c10::OutOfMemoryError&)`
+before the general handler). The Racket error path raises a
+distinguishable exn (`exn:fail:rktorch:oom`, a struct subtype of
+`exn:fail`) so callers catch OOM by type, not by regexing messages.
+
+**Collect-and-retry at the allocation choke point.** Purely
+Racket-side — no re-entrant C→Racket callback needed: when a raw call
+returns NULL and the error kind is OOM, the wrapper runs
+`(collect-garbage)` (finalizing dead handles returns their blocks to
+the caching allocator), optionally `tr_cuda_empty_cache`, and retries
+the raw call exactly once; a second failure raises the typed exn.
+Retrying is safe because the shim's failed calls are effect-free (the
+integer-status contract: on error, nothing was mutated). With leg 1's
+pressure this path is rare; it exists for the measured failure mode —
+an unlucky allocation striking between majors with dead handles
+pending — and turns it into transparent recovery instead of a
+user-visible error.
+
+The old "no GC-and-retry" non-goal below is narrowed: what stays out of
+scope is a C-side callback into Racket mid-allocation; the Racket-side
+retry above replaces it.
+
 ### Leg 2: observability + good-neighbor knobs
 
 - `tr_cuda_memory_allocated` / `tr_cuda_memory_reserved` (caching-
@@ -94,9 +128,9 @@ Racket side — one choke point in `torch/foreign/raw/syntax.rkt`:
 
 ### Explicit non-goals (for now)
 
-- No GC-and-retry on allocation failure inside the shim (re-entrant
-  callback into Racket from C — complexity not justified once pressure
-  keeps the footprint near the working set).
+- No C-side GC callback into Racket mid-allocation (the leg-1.5
+  Racket-side collect-and-retry covers the recoverable case without
+  the re-entrancy).
 - No per-storage accounting, no custodian scoping, no allocator
   configuration surface (`PYTORCH_CUDA_ALLOC_CONF` stays an env-var
   note in docs).
@@ -107,8 +141,11 @@ Racket side — one choke point in `torch/foreign/raw/syntax.rkt`:
    change to results.
 2. mem-probe at train-novel scale on an idle card: per-process VRAM
    (now via `tr_cuda_memory_allocated`) flat AND ≈ working set.
-3. The 22 GiB-balloon training run survives (or fails with one clean
-   exn post-#38 — never the cascade).
+3. The 22 GiB-balloon training run: with legs 1 + 1.5 it should
+   *complete* (collect-and-retry absorbs the squeeze); if genuinely
+   unsatisfiable it fails with one typed `exn:fail:rktorch:oom` —
+   never the cascade. The balloon probe gains a catch asserting the
+   exn type.
 4. Full parity suites green (accounting draws no RNG and must perturb
    no values): 273941 checks under the cuda shell.
 5. Op-throughput microbench (100k small elementwise ops) before/after —
@@ -121,7 +158,10 @@ Racket side — one choke point in `torch/foreign/raw/syntax.rkt`:
 |----|---------|------|
 | A | #38 noexcept free + void-fn audit | small, cpp only |
 | B | #37 nbytes probe + tensor-allocator wrap + codegen | medium, cpp + racket + codegen |
-| C | cuda memory stats + empty-cache + script/docs wiring | small |
+| C | leg 1.5: tr_last_error_kind + typed oom exn + collect-and-retry | medium, cpp + racket |
+| D | cuda memory stats + empty-cache + script/docs wiring | small |
 
 A lands first (kills the crash class); B makes the footprint honest;
-C makes both verifiable in-repo.
+C makes OOM catchable and usually invisible; D makes it all verifiable
+in-repo. C wants B's choke point but not its semantics — they can land
+in either order after A.
