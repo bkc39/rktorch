@@ -31,7 +31,18 @@ torch::ScalarType to_scalar_type(tr_dtype dtype) {
 extern "C" {
 
 void tr_tensor_free(tr_tensor* t) {
-  delete t;
+  // Runs inside Racket GC finalizers, where an escaping C++ exception is
+  // fatal: it resurfaces as "invalid memory reference" from whatever
+  // Racket code triggered the collection — including the error display
+  // handlers, which then loop (issue #38's cascade). Destroying a CUDA
+  // tensor goes through the caching allocator, which CAN throw once the
+  // context has hit an OOM/driver error, so the delete must be genuinely
+  // noexcept. Swallow: a finalizer has nowhere to report, and leaking one
+  // handle on an already-errored context beats crashing the process.
+  try {
+    delete t;
+  } catch (...) {  // NOLINT(bugprone-empty-catch): see above — must not throw
+  }
 }
 
 int tr_tensor_numel(const tr_tensor* t, int64_t* out) {

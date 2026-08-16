@@ -49,6 +49,14 @@ Handle make(const std::vector<float>& values,
                              static_cast<int64_t>(dims.size())));
 }
 
+// tr_tensor_free runs inside GC finalizers and must never throw or crash;
+// NULL is the documented no-op case. (The throwing-destructor case needs a
+// poisoned CUDA context and can't be provoked portably — the noexcept
+// guarantee lives in tensor.cpp's try/catch.)
+TEST(TorchrktOps, TensorFreeNullIsSafe) {
+  tr_tensor_free(nullptr);
+}
+
 TEST(TorchrktOps, FromDataRoundTrips) {
   const std::vector<float> values = {1.0F, 2.0F, 3.0F, 4.0F, 5.0F, 6.0F};
   const Handle t = make(values, {2, 3});

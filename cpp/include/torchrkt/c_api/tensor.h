@@ -25,7 +25,9 @@ typedef enum tr_dtype {
   TR_DTYPE_INT64 = 2
 } tr_dtype;
 
-/* Free a handle returned by tr_randn. Safe on NULL. */
+/* Free a handle returned by tr_randn. Safe on NULL, and guaranteed not to
+ * throw or crash even if the underlying free fails (it runs inside GC
+ * finalizers, which cannot report or recover — see tensor.cpp). */
 void tr_tensor_free(tr_tensor* t);
 
 /* Total number of elements. */
