@@ -164,10 +164,15 @@ updates track @tt{torch.optim.Adam} within float tolerance.
 download sits @filepath{examples/data/heart-of-darkness-part-i.txt}: the
 opening ~31k characters of Part I, committed to the repo, so this trains a
 real --- if small --- language model with @emph{no network at all}. The loop
-is epoch-shaped (sequential passes over the excerpt's contiguous blocks,
-inclusive of the final window) with the per-epoch mean loss printed, so the
-run is watchable; the model is scaled down to match the data (64-dim,
-2 blocks, 32-char context). On a GPU the default 60 epochs finish in well
+is epoch-shaped: sequential batch-stride passes over the excerpt's
+contiguous blocks, with the ragged trailing remainder --- fewer than
+@racket[batch] rows; 4 of 964 here --- dropped each epoch, the same
+tail-drop semantics as @racket[train-novel] and the train script
+(re-training the final @racket[n - batch] window instead would overlap
+most of it with the previous window every epoch, a worse bias than
+skipping under half a percent of the data). The per-epoch mean loss prints
+so the run is watchable; the model is scaled down to match the data
+(64-dim, 2 blocks, 32-char context). On a GPU the default 60 epochs finish in well
 under a minute; on CPU it's a few minutes.
 
 @chunk[<r06-train-excerpt>
