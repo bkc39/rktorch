@@ -36,17 +36,29 @@ allocations to the GC:
 
 ## Design: three legs, three PRs
 
-### Leg 0 (#38, first, small): noexcept boundary hardening
+### Leg 0 (#38, first, small): finalizer hardening — at the Racket layer
 
-- `tr_tensor_free`: `try { delete t; } catch (...) {}` — a finalizer
-  has nowhere to report; swallowing is correct. This is the one
-  boundary function violating the "nothing throws across the FFI line"
-  convention (assumed infallible; CUDA free paths can throw after a
-  context error).
-- Audit the other `void`-returning boundary fns (grad-mode/device
-  setters) for the same guarantee.
-- gtest: none can exercise a poisoned CUDA context portably; the
-  noexcept guarantee is the deliverable. Standard cpp-dev loop.
+- Empirical finding (finalizer_death_test.cpp, a throwing from_blob
+  deleter freed through the boundary): a throw during storage release
+  unwinds through libtorch's own implicitly-noexcept frames
+  (TensorBase's noexcept move-assign, ~TensorImpl/~StorageImpl/
+  ~DataPtr) and reaches std::terminate before ANY C++ catch at our
+  layer — two catch-based revisions of tr_tensor_free both still
+  aborted the child. C++-side hardening is impossible here.
+- So: `tr_tensor_free` stays a bare `delete` with the honest comment;
+  the death test pins the terminate behavior (EXPECT_DEATH) and flips
+  loudly if a libtorch upgrade ever makes the release path catchable.
+- The live guarantee is Racket-side: raw/syntax.rkt wraps the
+  deallocator (`with-handlers exn:fail? → void` around the C call), at
+  the single choke point every allocator wrap references. This
+  swallows the failure class actually observed in the #38 cascade —
+  faults the Racket runtime converts to exceptions — right at the
+  finalizer boundary, so error handlers never loop.
+- Honest scope: a genuine std::terminate/SIGABRT or unrecoverable
+  fault still kills the process — no layer can catch that — but it is
+  one clean death, not a cascade, and the caching allocator's normal
+  free path (block returned to pool, no CUDA call) makes it rare.
+- Audit result: tr_tensor_free is the only void boundary fn.
 
 ### Leg 1 (#37, the centerpiece): phantom-bytes accounting
 

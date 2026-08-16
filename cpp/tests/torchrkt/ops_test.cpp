@@ -49,12 +49,10 @@ Handle make(const std::vector<float>& values,
                              static_cast<int64_t>(dims.size())));
 }
 
-// Contract pin only, NOT a regression guard for the catch path:
-// tr_tensor_free(NULL) never reaches the release code, so this passes with
-// or without the try/catch. The throwing-release case needs a poisoned CUDA
-// context and can't be provoked portably; the guarantee (release as a
-// normal statement inside the try, before the implicitly-noexcept
-// destructor) is enforced by inspection of tensor.cpp.
+// Contract pin for the documented NULL no-op. The throwing-release
+// behavior is pinned separately by finalizer_death_test.cpp (it
+// terminates regardless of any C++ catch; the live guarantee is the
+// Racket-side deallocator wrap in raw/syntax.rkt).
 TEST(TorchrktOps, TensorFreeNullIsSafe) {
   tr_tensor_free(nullptr);
 }

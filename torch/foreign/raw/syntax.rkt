@@ -51,9 +51,24 @@
 
 ;; The deallocator must be defined before any allocator that references it;
 ;; every tensor-returning binding wraps with (allocator tr-tensor-free/raw).
-(define-torch tr-tensor-free/raw
+(define-torch tr-tensor-free/unguarded
   (_fun _Tensor -> _void)
   #:c-id tr_tensor_free)
+
+;; The deallocator runs inside GC finalization, where a raised exception
+;; resurfaces from whatever code triggered the collection — including the
+;; error display handlers, which then allocate, re-trigger GC, hit the next
+;; poisoned handle, and loop (issue #38's "invalid memory reference"
+;; cascade). C++-side hardening cannot deliver this guarantee: a throw
+;; during storage release unwinds through libtorch's own implicitly-noexcept
+;; frames and reaches std::terminate before any catch in tr_tensor_free
+;; (pinned empirically by cpp/tests/torchrkt/finalizer_death_test.cpp). The
+;; swallow therefore lives HERE, where the failure class actually observed —
+;; faults the Racket runtime converts to exceptions — is catchable. A
+;; finalizer has nowhere to report; leaking one handle beats a cascade.
+(define (tr-tensor-free/raw t)
+  (with-handlers ([exn:fail? void])
+    (tr-tensor-free/unguarded t)))
 
 ;; --- op-definer macros -------------------------------------------------
 ;; The three uniform op shapes. Each expands to a define-torch binding whose

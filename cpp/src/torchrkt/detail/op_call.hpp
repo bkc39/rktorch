@@ -17,11 +17,12 @@
 // intentionally: value-returning CUDA queries in device.cpp
 // (tr_cuda_is_available / tr_cuda_device_count) hand-roll try/catch (catch +
 // set_error + return a benign value); and void-returning *finalizer* bindings
-// (tr_tensor_free in tensor.cpp) must swallow everything and never set_error —
-// they run inside GC finalizers with nowhere to report, and the release must
-// happen as a normal statement inside the try, not in a (implicitly noexcept)
-// destructor where a throw would reach std::terminate. New boundary functions
-// should fit one of these four shapes.
+// (tr_tensor_free in tensor.cpp) carry NO catch and never set_error — a throw
+// on the storage-release path terminates inside libtorch's own noexcept
+// frames before any C++ handler (see finalizer_death_test.cpp), so their
+// safety guarantee lives in the Racket-side deallocator wrap
+// (torch/foreign/raw/syntax.rkt). New boundary functions should fit one of
+// these four shapes.
 
 namespace torchrkt {
 
