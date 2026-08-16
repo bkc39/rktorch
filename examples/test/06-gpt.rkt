@@ -54,6 +54,8 @@
                 (and (member c (vector->list vocab)) #t))
               (format "generated chars outside the vocab: ~v" sample))
   (check-true (module-training? net) "generate left the net in eval mode")
+  (check-exn #rx"prompt must be non-empty"
+             (lambda () (generate net vocab "")))
   ;; The committed Part I excerpt behind train-excerpt: data integrity only
   ;; (training it is minutes of CPU — the offline demo, not a CI job).
   (define excerpt (load-excerpt))

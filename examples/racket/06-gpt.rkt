@@ -274,14 +274,17 @@ produces the characteristically repetitive prose greedy decoding is known
 for, which is half the fun. Inference-only, so the model runs under
 @racket[in-eval-mode] and @racket[with-no-grad] --- no autograd graph, and
 the prior training mode is restored on the way out. The prompt must be
-non-empty and drawn from the training vocabulary (@racket[encode] errors
-otherwise).
+non-empty (checked here --- there is no position to read logits from
+otherwise) and drawn from the training vocabulary (@racket[encode] errors
+on any character outside it).
 
 @chunk[<r06-generate>
 (define (generate net vocab prompt
                   #:steps [steps 256]
                   #:block-size [block-size #f]
                   #:device [device #f])
+  (when (zero? (string-length prompt))
+    (error 'generate "prompt must be non-empty"))
   ;; Any parameter's device works (a module's tensors are colocated); the
   ;; context limit comes from pos-emb's row count by *name*, so it survives
   ;; a reordering of gpt's #:submodules list.
