@@ -107,6 +107,11 @@ if(BUILD_TESTING)
   target_include_directories(torchrkt_tests SYSTEM PRIVATE
     ${TORCH_INCLUDE_DIRS}
   )
+  # The death test's TU includes ATen headers directly, so it must match
+  # libtorch's ABI flags exactly like the library TUs above.
+  if(TORCH_CXX_FLAGS)
+    target_compile_options(torchrkt_tests PRIVATE ${TORCHRKT_TORCH_CXX_FLAGS})
+  endif()
   target_link_libraries(torchrkt_tests
     PRIVATE
       torchrkt

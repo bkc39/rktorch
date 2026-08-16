@@ -25,9 +25,12 @@ typedef enum tr_dtype {
   TR_DTYPE_INT64 = 2
 } tr_dtype;
 
-/* Free a handle returned by tr_randn. Safe on NULL, and guaranteed not to
- * throw or crash even if the underlying free fails (it runs inside GC
- * finalizers, which cannot report or recover — see tensor.cpp). */
+/* Free a handle returned by tr_randn. Safe on NULL. If the underlying
+ * storage release fails (e.g. a CUDA context error), the failure cannot be
+ * intercepted at this layer — it terminates inside libtorch's noexcept
+ * release path (see tests/torchrkt/finalizer_death_test.cpp) — so direct C
+ * callers get no error report; the Racket binding layer adds its own
+ * finalizer-side guard for the failure classes it can observe. */
 void tr_tensor_free(tr_tensor* t);
 
 /* Total number of elements. */

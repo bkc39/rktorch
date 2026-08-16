@@ -1,17 +1,27 @@
 #lang racket/base
 
-;; Reproduce issue #38: hold a ~19 GiB balloon (standing in for the user's
-;; concurrent V-JEPA jobs), then run the train-novel-scale loop so CUDA OOM
-;; strikes mid-step with a live autograd graph. Expected today: the
-;; "invalid memory reference" handler cascade instead of one clean exn.
-;; Run under `timeout` — the cascade loops forever.
+;; VRAM-squeeze repro for issue #38: hold a BALLOON-GiB allocation
+;; (standing in for other tenants on the card), then run a
+;; train-novel-scale loop so a CUDA OOM strikes mid-step with a live
+;; autograd graph.
+;;
+;; Run:  BALLOON=22 nix develop .#cuda --command racket scripts/oom-repro.rkt
+;;
+;; Expected behavior WITH the #38 hardening (this tree): one clean
+;; exception naming the failed op and the CUDA memory state, then a prompt
+;; exit — e.g. "tr_add: CUDA out of memory. Tried to allocate ...". The
+;; pre-fix failure mode this exists to detect was an infinite
+;; "invalid memory reference" handler cascade that pegged a core and grew
+;; host memory until the OOM killer fired; if you ever see that again, the
+;; finalizer guard in torch/foreign/raw/syntax.rkt has regressed.
+;; BALLOON defaults to 19 (survivable on an otherwise-idle 24 GiB card);
+;; 22-23 forces the OOM.
 
 (require torch
          torch/nn
          (only-in torch/data/text
                   contiguous-blocks encode load-heart-of-darkness text->vocab)
-         (only-in (file "/home/bkc/dev/rkt/rktorch/.claude/worktrees/gpu-memory-management/examples/racket/06-gpt.rkt")
-                  gpt))
+         (only-in "../examples/racket/06-gpt.rkt" gpt))
 
 (with-default-device 'cuda
   (manual-seed! 0)
@@ -39,4 +49,5 @@
                      (reshape (narrow ys 0 start 64) -1)))
     (backward! loss)
     (step! opt))
-  (printf "completed epoch without OOM?! balloon still ~a\n" (length balloon)))
+  (printf "completed epoch without OOM (balloon ~a GiB — raise BALLOON to force it)\n"
+          (length balloon)))

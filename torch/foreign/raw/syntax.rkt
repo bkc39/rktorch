@@ -59,13 +59,18 @@
 ;; resurfaces from whatever code triggered the collection — including the
 ;; error display handlers, which then allocate, re-trigger GC, hit the next
 ;; poisoned handle, and loop (issue #38's "invalid memory reference"
-;; cascade). C++-side hardening cannot deliver this guarantee: a throw
-;; during storage release unwinds through libtorch's own implicitly-noexcept
-;; frames and reaches std::terminate before any catch in tr_tensor_free
-;; (pinned empirically by cpp/tests/torchrkt/finalizer_death_test.cpp). The
-;; swallow therefore lives HERE, where the failure class actually observed —
-;; faults the Racket runtime converts to exceptions — is catchable. A
-;; finalizer has nowhere to report; leaking one handle beats a cascade.
+;; cascade). Free failures split into two disjoint classes:
+;;
+;;  * A C++ throw during storage release terminates inside libtorch's own
+;;    noexcept frames before ANY handler, C++ or Racket (pinned by
+;;    cpp/tests/torchrkt/finalizer_death_test.cpp) — one clean process
+;;    death; nothing at any layer can catch it, and this guard never runs.
+;;  * Failures the Racket runtime itself observes and raises as exceptions
+;;    at the finalizer boundary — e.g. faults converted to "invalid memory
+;;    reference" — which are exactly the looping class reported in #38.
+;;    Those ARE catchable, and only here: this handler swallows them so
+;;    the error machinery never re-enters GC. A finalizer has nowhere to
+;;    report; leaking one handle beats a cascade.
 (define (tr-tensor-free/raw t)
   (with-handlers ([exn:fail? void])
     (tr-tensor-free/unguarded t)))

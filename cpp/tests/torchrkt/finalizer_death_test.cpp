@@ -20,15 +20,23 @@
 namespace {
 
 // The child's whole life: build a handle whose storage release throws,
-// free it through the boundary function. (The exit(0) is unreachable
-// today; it exists so a future catchable-release libtorch flips this
-// test loudly instead of silently.)
+// free it through the boundary function. The try/catch matters for the
+// tripwire: today the throw terminates inside libtorch's noexcept frames
+// (never returning control), but if a future libtorch makes the release
+// path catchable, the exception propagates out of tr_tensor_free's bare
+// delete, is caught HERE, and the child exits 0 — flipping EXPECT_DEATH
+// loudly. Without this catch an escaping exception would also terminate
+// and the test could never deliver its signal.
 void free_throwing_tensor_then_exit() {
   static float data[4] = {1.0F, 2.0F, 3.0F, 4.0F};
   auto* t = new tr_tensor{torch::from_blob(
       data, {4}, [](void*) { throw std::runtime_error("boom"); },
       torch::TensorOptions().dtype(torch::kFloat32))};
-  tr_tensor_free(t);
+  try {
+    tr_tensor_free(t);
+  } catch (...) {
+    std::exit(0);
+  }
   std::exit(0);
 }
 
