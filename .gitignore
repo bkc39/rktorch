@@ -7,6 +7,8 @@ torch/native-libs/libtorchrkt.*
 .cuda-driver/
 **/compiled/
 __pycache__/
+# train-gpt checkpoint dumps (weights + sidecar)
+checkpoints/
 
 # Local-only planning notes; agents may drop plan files here without committing.
 # (The reviewed v0 plan is checked in as plans/v0-scaffold.md.)
