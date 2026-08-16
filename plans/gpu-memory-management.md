@@ -100,17 +100,49 @@ before the general handler). The Racket error path raises a
 distinguishable exn (`exn:fail:rktorch:oom`, a struct subtype of
 `exn:fail`) so callers catch OOM by type, not by regexing messages.
 
+Backend matrix for the classifier (probed on libtorch 2.9):
+
+- **CUDA**: caching allocator throws `c10::OutOfMemoryError` ("CUDA out
+  of memory ...") — the type-catch handles it.
+- **CPU**: `alloc_cpu.cpp` fails via the caffe2-style enforce ("[enforce
+  fail at alloc_cpu.cpp] ... DefaultCPUAllocator: can't allocate
+  memory ... Error code 12") — plain `c10::Error`, NOT
+  OutOfMemoryError, so the classifier needs a second, contained match
+  for this shape or the CPU case silently degrades to generic-kind and
+  skips the retry where it works best. Bonus: CPU OOM is portably
+  provokable (one absurd request), so leg 1.5 gets a real gtest
+  asserting the classification — the regression guard the CUDA path
+  can't have. Caveat: gradual host exhaustion under Linux overcommit
+  arrives as the OOM killer (SIGKILL), not an exception; leg 1's
+  pressure is the defense there, not this leg.
+- **MPS**: not on the device surface today (darwin CI runs CPU). When
+  added: MPS OOM has its own c10 error ("MPS backend out of memory" +
+  high-watermark numbers) — verify its type then; unified memory means
+  phantom-bytes accounting maps 1:1 (GPU bytes ARE host bytes), and
+  the finalizer hardening is already backend-agnostic.
+
 **Collect-and-retry at the allocation choke point.** Purely
 Racket-side — no re-entrant C→Racket callback needed: when a raw call
 returns NULL and the error kind is OOM, the wrapper runs
 `(collect-garbage)` (finalizing dead handles returns their blocks to
 the caching allocator), optionally `tr_cuda_empty_cache`, and retries
 the raw call exactly once; a second failure raises the typed exn.
-Retrying is safe because the shim's failed calls are effect-free (the
-integer-status contract: on error, nothing was mutated). With leg 1's
-pressure this path is rare; it exists for the measured failure mode —
-an unlucky allocation striking between majors with dead handles
-pending — and turns it into transparent recovery instead of a
+
+Retry eligibility: a retried call must be effect-free *on failure*,
+which the integer-status contract guarantees for handles and outputs
+but NOT for the global RNG stream — ATen ops that draw (randn/rand,
+dropout's training path) may consume generator state before the
+failing allocation, so a blind retry would advance the stream and
+silently break seeded parity. Policy: the retry wrap applies only to
+RNG-free bindings — a static property the binding layer knows
+(exclude the random.h creation family and dropout; everything else in
+the current surface is deterministic). If an RNG-consuming op ever
+needs the retry, snapshot/restore of generator state is the mechanism,
+as its own considered change.
+
+With leg 1's pressure this path is rare; it exists for the measured
+failure mode — an unlucky allocation striking between majors with dead
+handles pending — and turns it into transparent recovery instead of a
 user-visible error.
 
 The old "no GC-and-retry" non-goal below is narrowed: what stays out of

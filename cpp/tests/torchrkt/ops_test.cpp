@@ -49,10 +49,12 @@ Handle make(const std::vector<float>& values,
                              static_cast<int64_t>(dims.size())));
 }
 
-// tr_tensor_free runs inside GC finalizers and must never throw or crash;
-// NULL is the documented no-op case. (The throwing-destructor case needs a
-// poisoned CUDA context and can't be provoked portably — the noexcept
-// guarantee lives in tensor.cpp's try/catch.)
+// Contract pin only, NOT a regression guard for the catch path:
+// tr_tensor_free(NULL) never reaches the release code, so this passes with
+// or without the try/catch. The throwing-release case needs a poisoned CUDA
+// context and can't be provoked portably; the guarantee (release as a
+// normal statement inside the try, before the implicitly-noexcept
+// destructor) is enforced by inspection of tensor.cpp.
 TEST(TorchrktOps, TensorFreeNullIsSafe) {
   tr_tensor_free(nullptr);
 }

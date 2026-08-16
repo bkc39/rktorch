@@ -13,12 +13,15 @@
 // exception-to-status contract lives in exactly one place.
 //
 // These cover the two common extern "C" shapes: a tensor return (alloc_result)
-// and an integer status (status_call). A handful of functions return a plain
-// scalar *value* instead — e.g. the CUDA queries in device.cpp
-// (tr_cuda_is_available / tr_cuda_device_count) return an int count, not a
-// status — so they hand-roll try/catch (catch + set_error + return a benign
-// value). That deviation from "always use these helpers" is intentional, not an
-// oversight: the value-returning shape doesn't fit either wrapper.
+// and an integer status (status_call). Two further shapes deviate
+// intentionally: value-returning CUDA queries in device.cpp
+// (tr_cuda_is_available / tr_cuda_device_count) hand-roll try/catch (catch +
+// set_error + return a benign value); and void-returning *finalizer* bindings
+// (tr_tensor_free in tensor.cpp) must swallow everything and never set_error —
+// they run inside GC finalizers with nowhere to report, and the release must
+// happen as a normal statement inside the try, not in a (implicitly noexcept)
+// destructor where a throw would reach std::terminate. New boundary functions
+// should fit one of these four shapes.
 
 namespace torchrkt {
 
