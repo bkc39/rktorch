@@ -40,7 +40,8 @@
   (define n (car (tensor-shape xs)))
   (define net (gpt v-size 64 #:n-embd 128 #:n-head 4 #:n-layer 4))
   (define opt (adam (parameters net) #:lr 0.0003))
-  (for ([start (in-range 0 (- n 64) 64)])
+  ;; end bound inclusive of the final window (the train-gpt convention).
+  (for ([start (in-range 0 (add1 (- n 64)) 64)])
     (printf "step ~a\n" (quotient start 64))
     (flush-output)
     (zero-grads! opt)
