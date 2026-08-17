@@ -51,6 +51,12 @@
 ;;   Tensor?       — predicate
 (define-cpointer-type _Tensor)
 
+;; The bare C binding, private: composed into the two public entry points
+;; below, each carrying exactly the wrap its calling context needs.
+(define-torch tr-tensor-free/unwrapped
+  (_fun _Tensor -> _void)
+  #:c-id tr_tensor_free)
+
 ;; The raising direct binding: explicit, synchronous release paths
 ;; (structs.rkt's tensor-free! via the unsafe submodule) call THIS — a
 ;; deliberate caller can and should see marshalling/release failures. The
@@ -58,10 +64,8 @@
 ;; finalizer (structs.rkt's lifetime comment always claimed this; without
 ;; the wrap the finalizer stayed registered and later raised a freed-tag
 ;; marshalling error inside finalization — the #38 cascade class).
-(define-torch tr-tensor-free/checked
-  (_fun _Tensor -> _void)
-  #:c-id tr_tensor_free
-  #:wrap (deallocator))
+(define tr-tensor-free/checked
+  ((deallocator) tr-tensor-free/unwrapped))
 
 ;; Wrap a release procedure for use as a GC-finalizer deallocator: swallow
 ;; exn:fail so nothing raises out of finalization. Inside GC finalization a
@@ -97,8 +101,12 @@
 ;; The deallocator must be defined before any allocator that references it;
 ;; every tensor-returning binding wraps with (allocator tr-tensor-free/finalizer).
 ;; This name is the FINALIZER-context entry point only — explicit frees use
-;; tr-tensor-free/checked above.
-(define tr-tensor-free/finalizer (guard-finalizer tr-tensor-free/checked))
+;; tr-tensor-free/checked above. Built on the UNWRAPPED binding, not
+;; /checked: routing the finalizer through the (deallocator)-wrapped
+;; function would run its cancel-my-own-registration step from inside the
+;; very finalizer that registration refers to — a self-referential use of
+;; the allocator machinery we avoid by construction rather than trust.
+(define tr-tensor-free/finalizer (guard-finalizer tr-tensor-free/unwrapped))
 
 ;; --- op-definer macros -------------------------------------------------
 ;; The three uniform op shapes. Each expands to a define-torch binding whose
