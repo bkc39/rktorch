@@ -38,12 +38,12 @@
     (guarded 'b)
     (check-equal? released '(b a)))
 
-  (test-case "guard-finalizer's predicate is exn:fail?, nothing broader"
-    ;; a non-exn:fail raise (e.g. a raw symbol) passes through — the guard
-    ;; is a targeted swallow, not a sink for arbitrary control flow.
+  (test-case "guard-finalizer's catch is total — bare raises too"
+    ;; ffi/unsafe/alloc requires a deallocate argument that NEVER raises;
+    ;; a bare raised value escaping a finalizer re-enters the #38 cascade
+    ;; just like an exn:fail would, so it must be swallowed as well.
     (define guarded (guard-finalizer (lambda (_) (raise 'not-an-exn))))
-    (check-exn (lambda (v) (eq? v 'not-an-exn))
-               (lambda () (guarded 'handle))))
+    (check-equal? (guarded 'handle) (void)))
 
   (test-case "(deallocator) cancels the pending finalizer — observably"
     ;; The mechanism tensor-free! relies on, pinned with a recording free

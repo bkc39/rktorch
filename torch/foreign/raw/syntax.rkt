@@ -81,10 +81,17 @@
 ;;    error machinery never re-enters GC. A finalizer has nowhere to
 ;;    report; leaking one handle beats a cascade.
 ;;
+;; The catch is TOTAL — every raised value, not just exn:fail —
+;; because ffi/unsafe/alloc's contract for a deallocate argument is "a
+;; function that never raises an exception", full stop: a bare raised
+;; value or a break escaping here re-enters the cascade through the same
+;; choke point. This runs on the runtime's finalizer thread, so
+;; swallowing a break loses nothing from user threads.
+;;
 ;; Exposed as a combinator (not baked into one binding) so the swallow
 ;; semantics are unit-testable and reusable by future finalizer bindings.
 (define ((guard-finalizer release) t)
-  (with-handlers ([exn:fail? void])
+  (with-handlers ([(lambda (_) #t) void])
     (release t)))
 
 ;; The deallocator must be defined before any allocator that references it;
