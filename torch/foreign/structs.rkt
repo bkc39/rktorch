@@ -121,8 +121,16 @@
 (define (wrap-tensor h)
   (tensor-impl h (handle-shape h)))
 
+;; The tag flips even if the checked free raises (dynamic-wind): once the
+;; free has been ATTEMPTED, the (deallocator)-consumed finalizer backstop
+;; can no longer be relied on, so a live-looking tag would invite
+;; use-after-free and double-free attempts with no safety net. On the
+;; (exceptional) raising path the native handle may leak instead — the
+;; right trade, and the raise still reaches the caller.
 (define (tensor-free! t)
   (define h (tensor-handle t))
   (when (cpointer-has-tag? h 'Tensor)
-    (tr-tensor-free/checked h)
-    (set-cpointer-tag! h 'Tensor-freed)))
+    (dynamic-wind
+     void
+     (lambda () (tr-tensor-free/checked h))
+     (lambda () (set-cpointer-tag! h 'Tensor-freed)))))
