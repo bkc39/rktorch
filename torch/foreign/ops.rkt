@@ -4,6 +4,8 @@
 ;; the implementation behind the contracts in ../foreign.rkt.
 
 (require (only-in ffi/vector f32vector->list list->s64vector make-f32vector)
+         (only-in "device-type.rkt"
+                  cpu-device cuda-device device-index device-type device?)
          (only-in "error.rkt" check-handle check-ok)
          (only-in "raw/device.rkt"
                   tr-cuda-device-count/raw
@@ -85,17 +87,19 @@
 (define (to-dtype t dtype)
   (wrap-tensor (check-handle 'to-dtype (tr-tensor-to-dtype/raw t dtype))))
 
-;; A device is 'cpu, 'cuda (ordinal 0), or (list 'cuda ordinal). The FFI uses a
-;; separate type symbol + index; queries normalize back to 'cpu / (list 'cuda n).
+;; A device argument is a device struct (device-type.rkt) or a legacy form:
+;; 'cpu, 'cuda (ordinal 0), (list 'cuda ordinal). The FFI uses a separate
+;; type symbol + index; queries normalize to device structs.
 (define (device->type+index dev)
   (cond
+    [(device? dev) (values (device-type dev) (device-index dev))]
     [(eq? dev 'cpu) (values 'cpu 0)]
     [(eq? dev 'cuda) (values 'cuda 0)]
     [(pair? dev) (values 'cuda (cadr dev))]
     [else (error 'device "unsupported device: ~e" dev)]))
 
 (define (type+index->device type index)
-  (if (eq? type 'cpu) 'cpu (list 'cuda index)))
+  (if (eq? type 'cpu) (cpu-device) (cuda-device index)))
 
 ;; #t when a CUDA device is present and usable (torch.cuda.is_available). #f
 ;; means no CUDA *or* a rare driver/init failure; the C side records the latter
