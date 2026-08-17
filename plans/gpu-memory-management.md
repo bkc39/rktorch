@@ -73,11 +73,11 @@ storage under-charges, which is acceptable approximation (documented).
 
 Racket side — one choke point in `torch/foreign/raw/syntax.rkt`:
 
-    ;; replaces every bare (allocator tr-tensor-free/raw)
+    ;; replaces every bare (allocator tr-tensor-free/finalizer)
     (define tensor-allocator
       (let ([phantoms (make-weak-hasheq)])
         (lambda (raw-fn)
-          (define wrapped ((allocator tr-tensor-free/raw) raw-fn))
+          (define wrapped ((allocator tr-tensor-free/finalizer) raw-fn))
           (lambda args
             (define t (apply wrapped args))
             (when t (hash-set! phantoms t (make-phantom-bytes (nbytes t))))
