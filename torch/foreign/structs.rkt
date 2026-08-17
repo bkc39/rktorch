@@ -9,7 +9,7 @@
 ;; custom printer need no C round-trip.
 ;;
 ;; Lifetime: the raw constructor's `#:wrap (allocator ...)` auto-registers a
-;; finalizer that calls `tr-tensor-free/raw` (the guarded finalizer-context
+;; finalizer that calls `tr-tensor-free/finalizer` (the guarded finalizer-context
 ;; entry).  The explicit `tensor-free!` calls `tr-tensor-free/checked` — the
 ;; raising, `(deallocator)`-wrapped binding, so failures surface to the
 ;; deliberate caller and the pending finalizer is genuinely canceled — and

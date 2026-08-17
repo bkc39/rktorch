@@ -32,7 +32,7 @@
          _Tensor
          _Tensor/null ;; noqa
          Tensor? ;; noqa
-         tr-tensor-free/raw
+         tr-tensor-free/finalizer
          tr-tensor-free/checked
          guard-finalizer
          define-unary/raw
@@ -95,10 +95,10 @@
     (release t)))
 
 ;; The deallocator must be defined before any allocator that references it;
-;; every tensor-returning binding wraps with (allocator tr-tensor-free/raw).
+;; every tensor-returning binding wraps with (allocator tr-tensor-free/finalizer).
 ;; This name is the FINALIZER-context entry point only — explicit frees use
 ;; tr-tensor-free/checked above.
-(define tr-tensor-free/raw (guard-finalizer tr-tensor-free/checked))
+(define tr-tensor-free/finalizer (guard-finalizer tr-tensor-free/checked))
 
 ;; --- op-definer macros -------------------------------------------------
 ;; The three uniform op shapes. Each expands to a define-torch binding whose
@@ -110,7 +110,7 @@
      #'(define-torch name
          (_fun (t : _Tensor) -> _Tensor/null)
          #:c-id c-id
-         #:wrap (allocator tr-tensor-free/raw))]))
+         #:wrap (allocator tr-tensor-free/finalizer))]))
 
 (define-syntax (define-binary/raw stx)
   (syntax-parse stx
@@ -118,7 +118,7 @@
      #'(define-torch name
          (_fun (a : _Tensor) (b : _Tensor) -> _Tensor/null)
          #:c-id c-id
-         #:wrap (allocator tr-tensor-free/raw))]))
+         #:wrap (allocator tr-tensor-free/finalizer))]))
 
 (define-syntax (define-scalar/raw stx)
   (syntax-parse stx
@@ -126,7 +126,7 @@
      #'(define-torch name
          (_fun (a : _Tensor) (b : _double) -> _Tensor/null)
          #:c-id c-id
-         #:wrap (allocator tr-tensor-free/raw))]))
+         #:wrap (allocator tr-tensor-free/finalizer))]))
 
 ;; --- shadow-arithmetic generator -----------------------------------------
 ;; (define-arith name tensor-pred tensor-op base-op unary-tensor) defines a

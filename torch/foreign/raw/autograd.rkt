@@ -7,7 +7,7 @@
 
 (require (only-in ffi/unsafe _bool _double _fun _int _ptr)
          (only-in ffi/unsafe/alloc allocator)
-         (only-in "syntax.rkt" _Tensor _Tensor/null define-torch tr-tensor-free/raw))
+         (only-in "syntax.rkt" _Tensor _Tensor/null define-torch tr-tensor-free/finalizer))
 
 (provide tr-tensor-requires-grad!/raw
          tr-tensor-requires-grad/raw
@@ -48,12 +48,12 @@
 (define-torch tr-tensor-grad/raw
   (_fun (t : _Tensor) -> _Tensor/null)
   #:c-id tr_tensor_grad
-  #:wrap (allocator tr-tensor-free/raw))
+  #:wrap (allocator tr-tensor-free/finalizer))
 
 (define-torch tr-tensor-detach/raw
   (_fun (t : _Tensor) -> _Tensor/null)
   #:c-id tr_tensor_detach
-  #:wrap (allocator tr-tensor-free/raw))
+  #:wrap (allocator tr-tensor-free/finalizer))
 
 (define-torch tr-set-grad-enabled/raw
   (_fun (enabled? : _bool) -> _int)

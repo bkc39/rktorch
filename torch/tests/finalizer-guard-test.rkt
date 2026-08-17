@@ -46,27 +46,37 @@
     (check-equal? (guarded 'handle) (void)))
 
   (test-case "(deallocator) cancels the pending finalizer — observably"
-    ;; The mechanism tensor-free! relies on, pinned with a recording free
-    ;; (a tensor-level version could not observe cancellation: a stale
-    ;; finalizer's error would be swallowed by the very guard under test).
-    (define freed '())
-    (define (record-free p)
-      (set! freed (cons p freed))
+    ;; The mechanism tensor-free! relies on, mirrored in production
+    ;; topology: the allocator side registers a guard-finalizer-wrapped
+    ;; closure, the explicit side is a DIFFERENT (deallocator)-wrapped
+    ;; closure (matching (allocator tr-tensor-free/finalizer) vs the
+    ;; checked binding). Counters, not the pointers, are recorded — the
+    ;; earlier version consed the pointer into a list, keeping it strongly
+    ;; reachable so the negative assertion passed vacuously.
+    (define finalizer-count 0)
+    (define explicit-count 0)
+    (define (finalizer-release p)
+      (set! finalizer-count (add1 finalizer-count))
       (free p))
-    (define alloc ((allocator record-free) (lambda () (malloc 16 'raw))))
-    (define release ((deallocator) record-free))
+    (define (explicit-release p)
+      (set! explicit-count (add1 explicit-count))
+      (free p))
+    (define alloc
+      ((allocator (guard-finalizer finalizer-release))
+       (lambda () (malloc 16 'raw))))
+    (define release ((deallocator) explicit-release))
     ;; Path 1 — dropped without explicit free: the finalizer fires once.
     (void (alloc))
-    (collect-until (lambda () (pair? freed)))
-    (check-equal? (length freed) 1 "finalizer ran for the dropped alloc")
-    ;; Path 2 — explicit release, then drop: the (deallocator) wrap must
-    ;; cancel the registration, so the count rises by exactly one (the
-    ;; explicit call), and collection adds nothing.
+    (collect-until (lambda () (> finalizer-count 0)))
+    (check-equal? finalizer-count 1 "finalizer ran for the dropped alloc")
+    ;; Path 2 — explicit release through the distinct deallocator-wrapped
+    ;; closure, then out of scope: cancellation must hold across the two
+    ;; closures, so the finalizer count stays put after collections.
     (let ([p (alloc)])
       (release p))
-    (check-equal? (length freed) 2 "explicit release ran")
-    (collect-until (lambda () (> (length freed) 2)) #:tries 10)
-    (check-equal? (length freed) 2
+    (check-equal? explicit-count 1 "explicit release ran")
+    (collect-until (lambda () (> finalizer-count 1)) #:tries 10)
+    (check-equal? finalizer-count 1
                   "no finalizer fired after explicit release — canceled"))
 
   (test-case "explicit tensor-free! is unguarded; freed handles are inert"
