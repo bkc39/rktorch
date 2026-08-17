@@ -11,7 +11,7 @@
                   _Tensor
                   _Tensor/null
                   define-torch
-                  tr-tensor-free/raw))
+                  tr-tensor-free/finalizer))
 
 (provide _tr-device-type
          tr-cuda-is-available/raw
@@ -48,7 +48,7 @@
 (define-torch tr-tensor-to-device/raw
   (_fun (t : _Tensor) (type : _tr-device-type) (index : _int64) -> _Tensor/null)
   #:c-id tr_tensor_to_device
-  #:wrap (allocator tr-tensor-free/raw))
+  #:wrap (allocator tr-tensor-free/finalizer))
 
 ;; (raw t) -> (values rc type index): the device the tensor lives on.
 (define-torch tr-tensor-device/raw

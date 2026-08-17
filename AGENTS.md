@@ -199,7 +199,10 @@ module's full export set (`racket/runtime-path`, `syntax/parse/pre`).
   `syntax` (the FFI definer), `global`, `tensor` (`_Tensor` cpointer +
   deallocator), `random`, `creation`, `shape-ops`, `elementwise`, `reduce`,
   `linalg`, `autograd`. Tensor-returning bindings always carry
-  `#:wrap (allocator tr-tensor-free/raw)`.
+  `#:wrap (allocator tr-tensor-free/finalizer)` (the guarded,
+  finalizer-context free; explicit synchronous release goes through the
+  raising, finalizer-cancelling `tr-tensor-free/checked` — see
+  `raw/syntax.rkt`).
 - `nn.rkt` — contracted facade over `nn/` (`module.rkt` = `gen:module` +
   the `define-module` macro; `linear.rkt`, `init.rkt`, `optim.rkt`,
   `loss.rkt`).

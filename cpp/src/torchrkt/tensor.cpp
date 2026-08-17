@@ -31,6 +31,17 @@ torch::ScalarType to_scalar_type(tr_dtype dtype) {
 extern "C" {
 
 void tr_tensor_free(tr_tensor* t) {
+  // Called from Racket GC finalizers. Deliberately NO try/catch: none can
+  // work here. A throw during storage release (the CUDA caching allocator
+  // failing on an errored context) unwinds through libtorch's own
+  // implicitly-noexcept frames — TensorBase's noexcept move-assign,
+  // ~TensorImpl/~StorageImpl/~DataPtr — and reaches std::terminate before
+  // any handler at this layer, wherever the release statement is placed.
+  // Pinned empirically by finalizer_death_test.cpp (a catch-based version
+  // of this function still aborted the child). The finalizer-safety
+  // guarantee lives on the Racket side instead: raw/syntax.rkt wraps this
+  // binding's deallocator and swallows the runtime-converted failure class
+  // actually observed in issue #38.
   delete t;
 }
 

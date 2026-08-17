@@ -15,7 +15,7 @@
                   _uint64)
          (only-in ffi/unsafe/alloc allocator)
          (only-in ffi/vector _f32vector _s64vector)
-         (only-in "syntax.rkt" _Tensor _Tensor/null define-torch tr-tensor-free/raw))
+         (only-in "syntax.rkt" _Tensor _Tensor/null define-torch tr-tensor-free/finalizer))
 
 (provide tr-tensor-numel/raw
          tr-tensor-ndim/raw
@@ -78,7 +78,7 @@
 (define-torch tr-tensor-to-dtype/raw
   (_fun (t : _Tensor) (dtype : _tr-dtype) -> _Tensor/null)
   #:c-id tr_tensor_to_dtype
-  #:wrap (allocator tr-tensor-free/raw))
+  #:wrap (allocator tr-tensor-free/finalizer))
 
 ;; (raw t capacity buf) -> (values rc out-len), size-then-fill string probe.
 (define-torch tr-tensor-print/raw

@@ -13,12 +13,16 @@
 // exception-to-status contract lives in exactly one place.
 //
 // These cover the two common extern "C" shapes: a tensor return (alloc_result)
-// and an integer status (status_call). A handful of functions return a plain
-// scalar *value* instead — e.g. the CUDA queries in device.cpp
-// (tr_cuda_is_available / tr_cuda_device_count) return an int count, not a
-// status — so they hand-roll try/catch (catch + set_error + return a benign
-// value). That deviation from "always use these helpers" is intentional, not an
-// oversight: the value-returning shape doesn't fit either wrapper.
+// and an integer status (status_call). Two further shapes deviate
+// intentionally: value-returning CUDA queries in device.cpp
+// (tr_cuda_is_available / tr_cuda_device_count) hand-roll try/catch (catch +
+// set_error + return a benign value); and void-returning *finalizer* bindings
+// (tr_tensor_free in tensor.cpp) carry NO catch and never set_error — a throw
+// on the storage-release path terminates inside libtorch's own noexcept
+// frames before any C++ handler (see finalizer_death_test.cpp), so their
+// safety guarantee lives in the Racket-side deallocator wrap
+// (torch/foreign/raw/syntax.rkt). New boundary functions should fit one of
+// these four shapes.
 
 namespace torchrkt {
 

@@ -9,10 +9,12 @@
 ;; custom printer need no C round-trip.
 ;;
 ;; Lifetime: the raw constructor's `#:wrap (allocator ...)` auto-registers a
-;; finalizer that calls `tr-tensor-free/raw`.  The explicit `tensor-free!` runs
-;; the deallocator (which cancels the finalizer) and flips the cpointer tag, so
-;; a second free raises `exn:fail:contract` at the contract boundary instead of
-;; double-freeing at the C level.
+;; finalizer that calls `tr-tensor-free/finalizer` (the guarded finalizer-context
+;; entry).  The explicit `tensor-free!` calls `tr-tensor-free/checked` — the
+;; raising, `(deallocator)`-wrapped binding, so failures surface to the
+;; deliberate caller and the pending finalizer is genuinely canceled — and
+;; flips the cpointer tag, so a second free raises `exn:fail:contract` at
+;; the contract boundary instead of double-freeing at the C level.
 
 (require (only-in ffi/unsafe cpointer-has-tag? prop:cpointer set-cpointer-tag!)
          (only-in ffi/vector
@@ -23,7 +25,7 @@
          (only-in racket/string string-join)
          (only-in "error.rkt" check-ok)
          (only-in "format.rkt" needs-sci-notation? tensor->pytorch-repr)
-         (only-in "raw/syntax.rkt" Tensor? tr-tensor-free/raw)
+         (only-in "raw/syntax.rkt" Tensor? tr-tensor-free/checked)
          (only-in "raw/tensor.rkt"
                   tr-tensor-copy-data/raw
                   tr-tensor-print/raw
@@ -119,8 +121,16 @@
 (define (wrap-tensor h)
   (tensor-impl h (handle-shape h)))
 
+;; The tag flips even if the checked free raises (dynamic-wind): once the
+;; free has been ATTEMPTED, the (deallocator)-consumed finalizer backstop
+;; can no longer be relied on, so a live-looking tag would invite
+;; use-after-free and double-free attempts with no safety net. On the
+;; (exceptional) raising path the native handle may leak instead — the
+;; right trade, and the raise still reaches the caller.
 (define (tensor-free! t)
   (define h (tensor-handle t))
   (when (cpointer-has-tag? h 'Tensor)
-    (tr-tensor-free/raw h)
-    (set-cpointer-tag! h 'Tensor-freed)))
+    (dynamic-wind
+     void
+     (lambda () (tr-tensor-free/checked h))
+     (lambda () (set-cpointer-tag! h 'Tensor-freed)))))

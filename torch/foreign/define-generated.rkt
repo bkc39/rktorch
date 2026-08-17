@@ -44,7 +44,7 @@
                   _Tensor
                   _Tensor/null
                   define-torch
-                  tr-tensor-free/raw)
+                  tr-tensor-free/finalizer)
          (only-in "structs.rkt" wrap-tensor))
 
 (provide define-generated-op)
@@ -152,7 +152,7 @@
            (define-torch raw-name
              (_fun spec ... -> _Tensor/null)
              #:c-id c-id
-             #:wrap (allocator tr-tensor-free/raw))
+             #:wrap (allocator tr-tensor-free/finalizer))
            (define (name arg ...)
              (wrap-tensor
               (check-handle 'name (raw-name call-arg ...))))))]))

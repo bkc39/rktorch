@@ -88,6 +88,7 @@ if(BUILD_TESTING)
   add_executable(torchrkt_tests
     tests/torchrkt/autograd_test.cpp
     tests/torchrkt/device_test.cpp
+    tests/torchrkt/finalizer_death_test.cpp
     tests/torchrkt/generated_golden_test.cpp
     tests/torchrkt/generated_tranche2_test.cpp
     tests/torchrkt/generated_tranche3_test.cpp
@@ -98,10 +99,24 @@ if(BUILD_TESTING)
   target_include_directories(torchrkt_tests
     PRIVATE
       ${CMAKE_CURRENT_SOURCE_DIR}/tests
+      # finalizer_death_test is deliberately white-box: it builds a real
+      # tr_tensor around a throwing from_blob deleter, so it needs the
+      # private handle header and the torch headers other tests don't.
+      ${CMAKE_CURRENT_SOURCE_DIR}/src
   )
+  target_include_directories(torchrkt_tests SYSTEM PRIVATE
+    ${TORCH_INCLUDE_DIRS}
+  )
+  # The death test's TU includes ATen headers directly, so it must match
+  # libtorch's ABI flags exactly like the library TUs above.
+  if(TORCH_CXX_FLAGS)
+    target_compile_options(torchrkt_tests PRIVATE ${TORCHRKT_TORCH_CXX_FLAGS})
+  endif()
   target_link_libraries(torchrkt_tests
     PRIVATE
       torchrkt
+      # for the white-box finalizer death test's direct from_blob use.
+      ${TORCH_LIBRARIES}
       GTest::gtest_main
   )
   torchrkt_enable_warnings(torchrkt_tests)

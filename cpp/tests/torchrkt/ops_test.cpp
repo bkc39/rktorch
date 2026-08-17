@@ -49,6 +49,14 @@ Handle make(const std::vector<float>& values,
                              static_cast<int64_t>(dims.size())));
 }
 
+// Contract pin for the documented NULL no-op. The throwing-release
+// behavior is pinned separately by finalizer_death_test.cpp (it
+// terminates regardless of any C++ catch; the live guarantee is the
+// Racket-side deallocator wrap in raw/syntax.rkt).
+TEST(TorchrktOps, TensorFreeNullIsSafe) {
+  tr_tensor_free(nullptr);
+}
+
 TEST(TorchrktOps, FromDataRoundTrips) {
   const std::vector<float> values = {1.0F, 2.0F, 3.0F, 4.0F, 5.0F, 6.0F};
   const Handle t = make(values, {2, 3});

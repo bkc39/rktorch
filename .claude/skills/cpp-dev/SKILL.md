@@ -153,7 +153,7 @@ passes locally, the cpp jobs pass in CI.
   the FFI line. Use the `op_call.hpp` helpers; don't hand-roll.
 - Tensor-returning C functions follow `tr_<op>(...) -> tr_tensor*` (NULL on
   error) so the Racket side can wrap them with
-  `#:wrap (allocator tr-tensor-free/raw)` uniformly.
+  `#:wrap (allocator tr-tensor-free/finalizer)` uniformly.
 - Size-then-fill probes return rc=2 with the required size in the out-param.
 - Comment style: explain the constraint the code can't show (see existing
   files); match 2-space indent, 80-column format.
