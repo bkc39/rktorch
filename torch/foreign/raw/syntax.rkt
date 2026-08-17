@@ -33,6 +33,8 @@
          _Tensor/null ;; noqa
          Tensor? ;; noqa
          tr-tensor-free/raw
+         tr-tensor-free/checked
+         guard-finalizer
          define-unary/raw
          define-binary/raw
          define-scalar/raw
@@ -49,17 +51,24 @@
 ;;   Tensor?       — predicate
 (define-cpointer-type _Tensor)
 
-;; The deallocator must be defined before any allocator that references it;
-;; every tensor-returning binding wraps with (allocator tr-tensor-free/raw).
-(define-torch tr-tensor-free/unguarded
+;; The raising direct binding: explicit, synchronous release paths
+;; (structs.rkt's tensor-free! via the unsafe submodule) call THIS — a
+;; deliberate caller can and should see marshalling/release failures. The
+;; (deallocator) wrap makes an explicit call CANCEL the pending GC
+;; finalizer (structs.rkt's lifetime comment always claimed this; without
+;; the wrap the finalizer stayed registered and later raised a freed-tag
+;; marshalling error inside finalization — the #38 cascade class).
+(define-torch tr-tensor-free/checked
   (_fun _Tensor -> _void)
-  #:c-id tr_tensor_free)
+  #:c-id tr_tensor_free
+  #:wrap (deallocator))
 
-;; The deallocator runs inside GC finalization, where a raised exception
-;; resurfaces from whatever code triggered the collection — including the
-;; error display handlers, which then allocate, re-trigger GC, hit the next
-;; poisoned handle, and loop (issue #38's "invalid memory reference"
-;; cascade). Free failures split into two disjoint classes:
+;; Wrap a release procedure for use as a GC-finalizer deallocator: swallow
+;; exn:fail so nothing raises out of finalization. Inside GC finalization a
+;; raised exception resurfaces from whatever code triggered the collection —
+;; including the error display handlers, which then allocate, re-trigger GC,
+;; hit the next poisoned handle, and loop (issue #38's "invalid memory
+;; reference" cascade). Free failures split into two disjoint classes:
 ;;
 ;;  * A C++ throw during storage release terminates inside libtorch's own
 ;;    noexcept frames before ANY handler, C++ or Racket (pinned by
@@ -68,12 +77,21 @@
 ;;  * Failures the Racket runtime itself observes and raises as exceptions
 ;;    at the finalizer boundary — e.g. faults converted to "invalid memory
 ;;    reference" — which are exactly the looping class reported in #38.
-;;    Those ARE catchable, and only here: this handler swallows them so
-;;    the error machinery never re-enters GC. A finalizer has nowhere to
+;;    Those ARE catchable, and only here: the guard swallows them so the
+;;    error machinery never re-enters GC. A finalizer has nowhere to
 ;;    report; leaking one handle beats a cascade.
-(define (tr-tensor-free/raw t)
+;;
+;; Exposed as a combinator (not baked into one binding) so the swallow
+;; semantics are unit-testable and reusable by future finalizer bindings.
+(define ((guard-finalizer release) t)
   (with-handlers ([exn:fail? void])
-    (tr-tensor-free/unguarded t)))
+    (release t)))
+
+;; The deallocator must be defined before any allocator that references it;
+;; every tensor-returning binding wraps with (allocator tr-tensor-free/raw).
+;; This name is the FINALIZER-context entry point only — explicit frees use
+;; tr-tensor-free/checked above.
+(define tr-tensor-free/raw (guard-finalizer tr-tensor-free/checked))
 
 ;; --- op-definer macros -------------------------------------------------
 ;; The three uniform op shapes. Each expands to a define-torch binding whose

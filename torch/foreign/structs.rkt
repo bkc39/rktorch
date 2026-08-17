@@ -9,10 +9,12 @@
 ;; custom printer need no C round-trip.
 ;;
 ;; Lifetime: the raw constructor's `#:wrap (allocator ...)` auto-registers a
-;; finalizer that calls `tr-tensor-free/raw`.  The explicit `tensor-free!` runs
-;; the deallocator (which cancels the finalizer) and flips the cpointer tag, so
-;; a second free raises `exn:fail:contract` at the contract boundary instead of
-;; double-freeing at the C level.
+;; finalizer that calls `tr-tensor-free/raw` (the guarded finalizer-context
+;; entry).  The explicit `tensor-free!` calls `tr-tensor-free/checked` — the
+;; raising, `(deallocator)`-wrapped binding, so failures surface to the
+;; deliberate caller and the pending finalizer is genuinely canceled — and
+;; flips the cpointer tag, so a second free raises `exn:fail:contract` at
+;; the contract boundary instead of double-freeing at the C level.
 
 (require (only-in ffi/unsafe cpointer-has-tag? prop:cpointer set-cpointer-tag!)
          (only-in ffi/vector
@@ -23,7 +25,7 @@
          (only-in racket/string string-join)
          (only-in "error.rkt" check-ok)
          (only-in "format.rkt" needs-sci-notation? tensor->pytorch-repr)
-         (only-in "raw/syntax.rkt" Tensor? tr-tensor-free/raw)
+         (only-in "raw/syntax.rkt" Tensor? tr-tensor-free/checked)
          (only-in "raw/tensor.rkt"
                   tr-tensor-copy-data/raw
                   tr-tensor-print/raw
@@ -122,5 +124,5 @@
 (define (tensor-free! t)
   (define h (tensor-handle t))
   (when (cpointer-has-tag? h 'Tensor)
-    (tr-tensor-free/raw h)
+    (tr-tensor-free/checked h)
     (set-cpointer-tag! h 'Tensor-freed)))
