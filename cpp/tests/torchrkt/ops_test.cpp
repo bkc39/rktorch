@@ -69,6 +69,22 @@ TEST(TorchrktOps, NbytesTracksDtypeWidth) {
   EXPECT_EQ(tr_tensor_nbytes(nullptr, &nbytes), 1);
 }
 
+TEST(TorchrktOps, NbytesReportsViewExtentNotStorage) {
+  // The #37 ledger's documented approximation: a view charges what it
+  // ADDRESSES, not the (possibly larger, shared) storage behind it. A
+  // narrow over half the rows must report half the bytes even though its
+  // storage is the full tensor's.
+  const Handle t = make({1.0F, 2.0F, 3.0F, 4.0F, 5.0F, 6.0F, 7.0F, 8.0F},
+                        {4, 2});
+  const Handle half = Handle(tr_gen_narrow(t.t, 0, 0, 2));  // rows [0,2)
+  int64_t full_bytes = 0;
+  int64_t view_bytes = 0;
+  ASSERT_EQ(tr_tensor_nbytes(t.t, &full_bytes), 0) << tr_last_error();
+  ASSERT_EQ(tr_tensor_nbytes(half.t, &view_bytes), 0) << tr_last_error();
+  EXPECT_EQ(full_bytes, 32);  // 8 x float32
+  EXPECT_EQ(view_bytes, 16);  // the view's 4 elements, not storage's 8
+}
+
 TEST(TorchrktOps, FromDataRoundTrips) {
   const std::vector<float> values = {1.0F, 2.0F, 3.0F, 4.0F, 5.0F, 6.0F};
   const Handle t = make(values, {2, 3});
