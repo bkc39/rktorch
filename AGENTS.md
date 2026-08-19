@@ -40,6 +40,8 @@ CPU + float32 only. From `torch`:
 
 - v0 core: `torch-version manual-seed! randn tensor-shape tensor-numel
   tensor->list tensor->vector tensor->repr tensor->string`
+- memory: `native-memory-use` (per-device outstanding native bytes from
+  the #37 ledger), `tensor-free!` (explicit synchronous release)
 - creation: `zeros ones full arange eye tensor rand` (+ in-place `uniform!`)
 - shape: `reshape view transpose permute squeeze unsqueeze cat stack`
 - elementwise: `add sub mul div pow neg exp log sqrt relu sigmoid tanh`
@@ -199,10 +201,13 @@ module's full export set (`racket/runtime-path`, `syntax/parse/pre`).
   `syntax` (the FFI definer), `global`, `tensor` (`_Tensor` cpointer +
   deallocator), `random`, `creation`, `shape-ops`, `elementwise`, `reduce`,
   `linalg`, `autograd`. Tensor-returning bindings always carry
-  `#:wrap (allocator tr-tensor-free/finalizer)` (the guarded,
-  finalizer-context free; explicit synchronous release goes through the
-  raising, finalizer-cancelling `tr-tensor-free/checked` — see
-  `raw/syntax.rkt`).
+  `#:wrap tensor-allocator` (see `raw/syntax.rkt`), which composes the
+  finalizer registration (`allocator` over the guarded, finalizer-context
+  `tr-tensor-free/finalizer`) with the #37 memory-pressure ledger charge
+  (phantom bytes + per-device accounting). Never hand-write a bare
+  `(allocator ...)` wrap — it would skip the ledger. Explicit synchronous
+  release goes through the raising, finalizer-cancelling
+  `tr-tensor-free/checked`.
 - `nn.rkt` — contracted facade over `nn/` (`module.rkt` = `gen:module` +
   the `define-module` macro; `linear.rkt`, `init.rkt`, `optim.rkt`,
   `loss.rkt`).
