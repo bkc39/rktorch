@@ -27,6 +27,37 @@ std::vector<int64_t> to_shape(const int64_t* dims, int64_t ndim) {
   return {dims, dims + ndim};
 }
 
+// Shared body of tr_from_data / tr_from_data_on: validate numel against the
+// shape and copy the host data into tensor-owned CPU storage. The caller
+// applies the device move — the one place the two entry points differ.
+torch::Tensor host_from_data(const float* data, uint64_t numel,
+                             const int64_t* dims, int64_t ndim) {
+  const auto shape = to_shape(dims, ndim);
+  // Overflow-safe product: a crafted shape whose product wraps could
+  // otherwise pass the numel check and hand from_blob an undersized
+  // buffer.
+  uint64_t expected = 1;
+  for (const int64_t d : shape) {
+    if (d < 0) {
+      throw std::invalid_argument("negative dimension");
+    }
+    const auto u = static_cast<uint64_t>(d);
+    if (u != 0 && expected > std::numeric_limits<uint64_t>::max() / u) {
+      throw std::invalid_argument("dimension product overflows");
+    }
+    expected *= u;
+  }
+  if (expected != numel) {
+    throw std::invalid_argument("numel does not match the product of dims");
+  }
+  // `data` is host memory, so from_blob must wrap it as a CPU tensor (a CUDA
+  // default_options would make from_blob reject the host pointer); clone()
+  // copies it into tensor-owned storage.
+  return torch::from_blob(const_cast<float*>(data), shape,
+                          torch::TensorOptions().dtype(torch::kFloat32))
+      .clone();
+}
+
 }  // namespace
 
 extern "C" {
@@ -75,32 +106,20 @@ tr_tensor* tr_from_data(const float* data, uint64_t numel, const int64_t* dims,
     return torchrkt::null_arg("tr_from_data");
   }
   return torchrkt::alloc_result("tr_from_data", [&] {
-    const auto shape = to_shape(dims, ndim);
-    // Overflow-safe product: a crafted shape whose product wraps could
-    // otherwise pass the numel check and hand from_blob an undersized
-    // buffer.
-    uint64_t expected = 1;
-    for (const int64_t d : shape) {
-      if (d < 0) {
-        throw std::invalid_argument("negative dimension");
-      }
-      const auto u = static_cast<uint64_t>(d);
-      if (u != 0 && expected > std::numeric_limits<uint64_t>::max() / u) {
-        throw std::invalid_argument("dimension product overflows");
-      }
-      expected *= u;
-    }
-    if (expected != numel) {
-      throw std::invalid_argument("numel does not match the product of dims");
-    }
-    // `data` is host memory, so from_blob must wrap it as a CPU tensor (a CUDA
-    // default_options would make from_blob reject the host pointer); clone()
-    // copies it into tensor-owned storage, then to() honors the default device.
-    const torch::Tensor host =
-        torch::from_blob(const_cast<float*>(data), shape,
-                         torch::TensorOptions().dtype(torch::kFloat32))
-            .clone();
-    return host.to(torchrkt::current_default_device());
+    return host_from_data(data, numel, dims, ndim)
+        .to(torchrkt::current_default_device());
+  });
+}
+
+tr_tensor* tr_from_data_on(const float* data, uint64_t numel,
+                           const int64_t* dims, int64_t ndim,
+                           tr_device_type device_type, int64_t device_index) {
+  if (!data || bad_dims(dims, ndim)) {
+    return torchrkt::null_arg("tr_from_data_on");
+  }
+  return torchrkt::alloc_result("tr_from_data_on", [&] {
+    return host_from_data(data, numel, dims, ndim)
+        .to(torchrkt::to_torch_device(device_type, device_index));
   });
 }
 

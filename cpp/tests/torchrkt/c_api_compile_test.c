@@ -23,6 +23,8 @@ void torchrkt_c_api_compile_check(void) {
   tr_tensor* (*zeros)(const int64_t*, int64_t) = tr_zeros;
   tr_tensor* (*from_data)(const float*, uint64_t, const int64_t*, int64_t) =
       tr_from_data;
+  tr_tensor* (*from_data_on)(const float*, uint64_t, const int64_t*, int64_t,
+                             tr_device_type, int64_t) = tr_from_data_on;
   tr_tensor* (*cat)(const tr_tensor* const*, int64_t, int64_t) = tr_cat;
   tr_tensor* (*add)(const tr_tensor*, const tr_tensor*) = tr_add;
   tr_tensor* (*add_scalar)(const tr_tensor*, double) = tr_add_scalar;

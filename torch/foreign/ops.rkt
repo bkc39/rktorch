@@ -30,6 +30,7 @@
                   wrap-tensor))
 
 (provide torch-version
+         device->type+index
          native-memory-use
          manual-seed!
          randn

@@ -63,6 +63,13 @@
     (when (cuda-available?)
       (define g (tensor '(1 2 3) #:device (cuda-device)))
       (check-equal? (tensor-device g) (cuda-device 0))
+      (check-equal? (default-device) (cpu-device))
+      ;; placement is passed into native construction, so an explicitly-CPU
+      ;; tensor under a CUDA default lands on CPU (no host->GPU->CPU bounce)
+      (set-default-device! (cuda-device))
+      (check-equal? (tensor-device (tensor '(4 5) #:device (cpu-device)))
+                    (cpu-device))
+      (set-default-device! 'cpu)
       (check-equal? (default-device) (cpu-device))))
 
   (test-case "device arguments accept structs and legacy forms alike"

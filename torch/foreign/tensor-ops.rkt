@@ -23,10 +23,11 @@
          (only-in racket/math [tanh base:tanh])
          (only-in racket/list [argmax base:argmax] flatten)
          (only-in "error.rkt" check-handle)
-         (only-in "ops.rkt" to-device)
+         (only-in "ops.rkt" device->type+index)
          (only-in "raw/creation.rkt"
                   tr-arange/raw
                   tr-eye/raw
+                  tr-from-data-on/raw
                   tr-from-data/raw
                   tr-full/raw
                   tr-ones/raw
@@ -158,22 +159,26 @@
   (unless (= (length flat) (apply * dims))
     (error 'tensor "ragged nested list; dims ~a need ~a values, got ~a"
            dims (apply * dims) (length flat)))
-  ;; #:device is honored by construct-then-move, NOT by scoping the
-  ;; process-global default device (call-with-default-device): the global
-  ;; switch races concurrent constructors on other threads, which could
-  ;; observe the temporary default or restore over each other. to-device
-  ;; is a no-op when already on the target. Order matters: the move
-  ;; precedes requires-grad! so the result is a LEAF on the target device
-  ;; (moving a requires-grad tensor yields a non-leaf copy), matching
+  ;; #:device passes the placement into NATIVE construction
+  ;; (tr_from_data_on) rather than scoping the process-global default
+  ;; (races concurrent constructors) or constructing-then-moving (the
+  ;; construction itself routes host data through the default device, so
+  ;; an explicitly-CPU tensor under a CUDA default would bounce
+  ;; host->GPU->CPU — or CUDA-OOM). requires-grad! comes after placement
+  ;; so the result is a LEAF on the target device, matching
   ;; torch.tensor(data, device=..., requires_grad=True).
+  (define payload (list->f32vector (map exact->inexact flat)))
+  (define dim-vec (list->s64vector dims))
   (define out
     (wrap 'tensor
-          (tr-from-data/raw (list->f32vector (map exact->inexact flat))
-                            (length flat)
-                            (list->s64vector dims)
-                            (length dims))))
-  (define placed (if device (to-device out device) out))
-  (if requires-grad? (requires-grad! placed) placed))
+          (if device
+              (let-values ([(type index) (device->type+index device)])
+                (tr-from-data-on/raw payload (length flat)
+                                     dim-vec (length dims)
+                                     type index))
+              (tr-from-data/raw payload (length flat)
+                                dim-vec (length dims)))))
+  (if requires-grad? (requires-grad! out) out))
 
 ;; --------------------------------------------------------------- shape ops
 
