@@ -35,6 +35,13 @@ torch::Device to_torch_device(tr_device_type type, int64_t index) {
     case TR_DEVICE_CPU:
       return torch::Device(torch::kCPU);
     case TR_DEVICE_CUDA:
+      // Range-check BEFORE narrowing: torch::DeviceIndex is 8-bit, so an
+      // unvalidated ordinal like 256 would silently wrap to device 0 and
+      // place tensors on the wrong GPU instead of erroring.
+      if (index < 0 ||
+          index >= static_cast<int64_t>(torch::cuda::device_count())) {
+        throw std::invalid_argument("CUDA device index out of range");
+      }
       return torch::Device(torch::kCUDA,
                            static_cast<torch::DeviceIndex>(index));
   }

@@ -171,13 +171,15 @@
   (define dim-vec (list->s64vector dims))
   (define out
     (wrap 'tensor
-          (if device
-              (let-values ([(type index) (device->type+index device)])
-                (tr-from-data-on/raw payload (length flat)
-                                     dim-vec (length dims)
-                                     type index))
-              (tr-from-data/raw payload (length flat)
-                                dim-vec (length dims)))))
+          (cond
+            [device
+             (define-values (type index) (device->type+index device))
+             (tr-from-data-on/raw payload (length flat)
+                                  dim-vec (length dims)
+                                  type index)]
+            [else
+             (tr-from-data/raw payload (length flat)
+                               dim-vec (length dims))])))
   (if requires-grad? (requires-grad! out) out))
 
 ;; --------------------------------------------------------------- shape ops

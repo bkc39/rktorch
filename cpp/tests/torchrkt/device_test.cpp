@@ -90,6 +90,18 @@ TEST(TorchrktDevice, FromDataOnPlacesOnExplicitCpu) {
   EXPECT_EQ(data_of(t.t), values);
 }
 
+TEST(TorchrktDevice, FromDataOnRejectsOutOfRangeCudaIndex) {
+  // torch::DeviceIndex is 8-bit: an unvalidated ordinal of 256 would wrap
+  // to device 0 and silently misplace the tensor. Out of range everywhere:
+  // the sandbox has 0 CUDA devices and real hosts have < 256.
+  const std::vector<float> values = {1.0F};
+  const std::vector<int64_t> dims = {1};
+  EXPECT_EQ(tr_from_data_on(values.data(), values.size(), dims.data(), 1,
+                            TR_DEVICE_CUDA, 256),
+            nullptr);
+  EXPECT_STRNE(tr_last_error(), "");
+}
+
 TEST(TorchrktDevice, FromDataOnRejectsUnknownDeviceType) {
   const std::vector<float> values = {1.0F};
   const std::vector<int64_t> dims = {1};
