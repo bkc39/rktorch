@@ -63,6 +63,9 @@
     (when (cuda-available?)
       (define g (tensor '(1 2 3) #:device (cuda-device)))
       (check-equal? (tensor-device g) (cuda-device 0))
+      ;; the payload survives the CPU->CUDA construction leg, not just the
+      ;; device tag (marshalled back through an explicit move to CPU)
+      (check-equal? (tensor->list (to-device g (cpu-device))) '(1.0 2.0 3.0))
       (check-equal? (default-device) (cpu-device))
       ;; placement is passed into native construction, so an explicitly-CPU
       ;; tensor under a CUDA default lands on CPU (no host->GPU->CPU bounce)

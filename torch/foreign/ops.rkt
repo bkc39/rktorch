@@ -111,8 +111,11 @@
 (define (cuda-available?)
   (= 1 (tr-cuda-is-available/raw)))
 
-;; The pick-the-accelerator idiom every example re-defined as pick-device,
-;; promoted to the library: the GPU when one is usable, the CPU otherwise.
+;; The pick-the-accelerator idiom every example re-defines locally as
+;; pick-device, now offered by the library: the GPU when one is usable,
+;; the CPU otherwise. (The literate examples still teach their own
+;; pick-device — folding them over to this is deliberate follow-up work,
+;; since their prose walks through the idiom.)
 (define (cuda-if-available)
   (if (cuda-available?) (cuda-device) (cpu-device)))
 
