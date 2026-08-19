@@ -42,8 +42,9 @@
     (check-equal? (hash-count h) 2))
 
   (test-case "tensor #:device places construction; cuda-if-available picks"
-    ;; the smart constructor's keyword scopes the default device for the
-    ;; construction only — the ambient default is untouched after.
+    ;; the smart constructor's keyword places via construct-then-move
+    ;; (never by touching the process-global default device) — the
+    ;; ambient default is untouched after.
     (set-default-device! 'cpu)
     (define t (tensor '(1 2 3) #:device (cpu-device)))
     (check-equal? (tensor-device t) (cpu-device))
@@ -52,9 +53,13 @@
     ;; requires-grad composes with #:device
     (check-true (requires-grad?
                  (tensor '(1.0) #:device (cpu-device) #:requires-grad? #t)))
-    ;; cuda-if-available: the promoted pick-device idiom
-    (check-equal? (cuda-if-available)
-                  (if (cuda-available?) (cuda-device) (cpu-device)))
+    ;; cuda-if-available: the promoted pick-device idiom. The expected
+    ;; side is derived from device-TYPE symbols, not by mirroring the
+    ;; implementation's own constructor expression — a swapped branch in
+    ;; cuda-if-available must produce a mismatch here, not reproduce it.
+    (check-equal? (device-type (cuda-if-available))
+                  (if (cuda-available?) 'cuda 'cpu))
+    (check-equal? (device-index (cuda-if-available)) 0)
     (when (cuda-available?)
       (define g (tensor '(1 2 3) #:device (cuda-device)))
       (check-equal? (tensor-device g) (cuda-device 0))

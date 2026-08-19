@@ -23,7 +23,7 @@
          (only-in racket/math [tanh base:tanh])
          (only-in racket/list [argmax base:argmax] flatten)
          (only-in "error.rkt" check-handle)
-         (only-in "ops.rkt" call-with-default-device)
+         (only-in "ops.rkt" to-device)
          (only-in "raw/creation.rkt"
                   tr-arange/raw
                   tr-eye/raw
@@ -158,18 +158,22 @@
   (unless (= (length flat) (apply * dims))
     (error 'tensor "ragged nested list; dims ~a need ~a values, got ~a"
            dims (apply * dims) (length flat)))
-  ;; #:device scopes construction under that default (creation ops honor
-  ;; it, so the tensor is BORN there — no post-hoc copy), restoring the
-  ;; ambient default on the way out; #f means the ambient default as ever.
-  (define (make)
-    (define out
-      (wrap 'tensor
-            (tr-from-data/raw (list->f32vector (map exact->inexact flat))
-                              (length flat)
-                              (list->s64vector dims)
-                              (length dims))))
-    (if requires-grad? (requires-grad! out) out))
-  (if device (call-with-default-device device make) (make)))
+  ;; #:device is honored by construct-then-move, NOT by scoping the
+  ;; process-global default device (call-with-default-device): the global
+  ;; switch races concurrent constructors on other threads, which could
+  ;; observe the temporary default or restore over each other. to-device
+  ;; is a no-op when already on the target. Order matters: the move
+  ;; precedes requires-grad! so the result is a LEAF on the target device
+  ;; (moving a requires-grad tensor yields a non-leaf copy), matching
+  ;; torch.tensor(data, device=..., requires_grad=True).
+  (define out
+    (wrap 'tensor
+          (tr-from-data/raw (list->f32vector (map exact->inexact flat))
+                            (length flat)
+                            (list->s64vector dims)
+                            (length dims))))
+  (define placed (if device (to-device out device) out))
+  (if requires-grad? (requires-grad! placed) placed))
 
 ;; --------------------------------------------------------------- shape ops
 
