@@ -23,6 +23,11 @@
             (unless (exact-nonnegative-integer? index)
               (error name "index must be an exact nonnegative integer: ~e"
                      index))
+            ;; there is one CPU: a nonzero index would be rejected by
+            ;; set-default-device! but silently dropped by to-device (the
+            ;; C++ sides differ) — make the inconsistency unrepresentable.
+            (when (and (eq? type 'cpu) (not (zero? index)))
+              (error name "cpu device index must be 0: ~e" index))
             (values type index))
   #:property prop:custom-write
   (lambda (d port _mode)

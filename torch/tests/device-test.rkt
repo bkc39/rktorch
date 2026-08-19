@@ -19,6 +19,9 @@
     ;; the raw constructor validates — malformed devices unrepresentable
     (check-exn exn:fail? (lambda () (device 'mps 0)))
     (check-exn exn:fail? (lambda () (device 'cuda -1)))
+    ;; one CPU: nonzero index rejected here rather than inconsistently
+    ;; downstream (C++ set-default rejects it; to-device drops it)
+    (check-exn exn:fail? (lambda () (device 'cpu 1)))
     ;; torch.device-style printing
     (check-equal? (format "~a" (cpu-device)) "#<device cpu>")
     (check-equal? (format "~a" (cuda-device 1)) "#<device cuda:1>"))
