@@ -68,11 +68,12 @@
       (check-equal? (tensor->list (to-device g (cpu-device))) '(1.0 2.0 3.0))
       (check-equal? (default-device) (cpu-device))
       ;; placement is passed into native construction, so an explicitly-CPU
-      ;; tensor under a CUDA default lands on CPU (no host->GPU->CPU bounce)
-      (set-default-device! (cuda-device))
-      (check-equal? (tensor-device (tensor '(4 5) #:device (cpu-device)))
-                    (cpu-device))
-      (set-default-device! 'cpu)
+      ;; tensor under a CUDA default lands on CPU (no host->GPU->CPU
+      ;; bounce). with-default-device restores on ANY exit, so a failing
+      ;; check can't leak a CUDA default onto later test-cases.
+      (with-default-device (cuda-device)
+        (check-equal? (tensor-device (tensor '(4 5) #:device (cpu-device)))
+                      (cpu-device)))
       (check-equal? (default-device) (cpu-device))))
 
   (test-case "device arguments accept structs and legacy forms alike"
