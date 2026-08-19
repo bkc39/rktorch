@@ -57,6 +57,18 @@ TEST(TorchrktOps, TensorFreeNullIsSafe) {
   tr_tensor_free(nullptr);
 }
 
+TEST(TorchrktOps, NbytesTracksDtypeWidth) {
+  const Handle t = make({1.0F, 2.0F, 3.0F, 4.0F}, {2, 2});
+  int64_t nbytes = 0;
+  ASSERT_EQ(tr_tensor_nbytes(t.t, &nbytes), 0) << tr_last_error();
+  EXPECT_EQ(nbytes, 16);  // 4 x float32
+  const Handle i64 = Handle(tr_tensor_to_dtype(t.t, TR_DTYPE_INT64));
+  int64_t nbytes64 = 0;
+  ASSERT_EQ(tr_tensor_nbytes(i64.t, &nbytes64), 0) << tr_last_error();
+  EXPECT_EQ(nbytes64, 32);  // 4 x int64
+  EXPECT_EQ(tr_tensor_nbytes(nullptr, &nbytes), 1);
+}
+
 TEST(TorchrktOps, FromDataRoundTrips) {
   const std::vector<float> values = {1.0F, 2.0F, 3.0F, 4.0F, 5.0F, 6.0F};
   const Handle t = make(values, {2, 3});

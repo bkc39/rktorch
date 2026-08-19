@@ -6,12 +6,11 @@
 ;; move allocates a fresh handle, so it carries the GC allocator wrap.
 
 (require (only-in ffi/unsafe _enum _fun _int _int64 _ptr)
-         (only-in ffi/unsafe/alloc allocator)
          (only-in "syntax.rkt"
                   _Tensor
                   _Tensor/null
                   define-torch
-                  tr-tensor-free/finalizer))
+                  tensor-allocator))
 
 (provide _tr-device-type
          tr-cuda-is-available/raw
@@ -48,7 +47,7 @@
 (define-torch tr-tensor-to-device/raw
   (_fun (t : _Tensor) (type : _tr-device-type) (index : _int64) -> _Tensor/null)
   #:c-id tr_tensor_to_device
-  #:wrap (allocator tr-tensor-free/finalizer))
+  #:wrap tensor-allocator)
 
 ;; (raw t) -> (values rc type index): the device the tensor lives on.
 (define-torch tr-tensor-device/raw

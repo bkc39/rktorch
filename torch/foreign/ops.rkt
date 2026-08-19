@@ -7,6 +7,7 @@
          (only-in "device-type.rkt"
                   cpu-device cuda-device device-index device-type device?)
          (only-in "error.rkt" check-handle check-ok)
+         (only-in "raw/syntax.rkt" native-memory-use)
          (only-in "raw/device.rkt"
                   tr-cuda-device-count/raw
                   tr-cuda-is-available/raw
@@ -29,6 +30,7 @@
                   wrap-tensor))
 
 (provide torch-version
+         native-memory-use
          manual-seed!
          randn
          rand

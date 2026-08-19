@@ -36,6 +36,10 @@ void tr_tensor_free(tr_tensor* t);
 /* Total number of elements. */
 int tr_tensor_numel(const tr_tensor* t, int64_t* out);
 
+/* Total bytes of the tensor's element data: numel x element size — the
+ * view's extent, not the underlying (possibly shared) storage's. */
+int tr_tensor_nbytes(const tr_tensor* t, int64_t* out);
+
 /* Number of dimensions. */
 int tr_tensor_ndim(const tr_tensor* t, int64_t* out);
 

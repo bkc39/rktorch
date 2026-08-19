@@ -60,7 +60,13 @@ allocations to the GC:
   free path (block returned to pool, no CUDA call) makes it rare.
 - Audit result: tr_tensor_free is the only void boundary fn.
 
-### Leg 1 (#37, the centerpiece): phantom-bytes accounting
+### Leg 1 (#37, the centerpiece): phantom-bytes accounting — LANDED
+
+Shipped with the device-struct ledger (fold-on-query, per-device
+buckets), tensor-allocator choke point, and native-memory-use.
+Measured on landing: churn high-water 2267 MB -> 1021 MB; per-op
+overhead ~1.2%; the 22 GiB balloon squeeze that formerly OOMed at
+step 4 completes a full epoch. Original design notes follow.
 
 C surface (one new probe, standard three sync points + gtest):
 
