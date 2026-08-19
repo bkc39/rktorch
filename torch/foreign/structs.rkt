@@ -8,9 +8,10 @@
 ;; list of dimension sizes) queried once at wrap time, so `tensor-shape` and the
 ;; custom printer need no C round-trip.
 ;;
-;; Lifetime: the raw constructor's `#:wrap (allocator ...)` auto-registers a
+;; Lifetime: the raw constructor's `#:wrap tensor-allocator` auto-registers a
 ;; finalizer that calls `tr-tensor-free/finalizer` (the guarded finalizer-context
-;; entry).  The explicit `tensor-free!` calls `tr-tensor-free/checked` — the
+;; entry) and charges the #37 memory-pressure ledger.  The explicit
+;; `tensor-free!` calls `tr-tensor-free/checked` — the
 ;; raising, `(deallocator)`-wrapped binding, so failures surface to the
 ;; deliberate caller and the pending finalizer is genuinely canceled — and
 ;; flips the cpointer tag, so a second free raises `exn:fail:contract` at
