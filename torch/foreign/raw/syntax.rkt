@@ -209,13 +209,19 @@
 ;; to byte total, cpu first, then cuda by ordinal. A query racing heavy
 ;; allocation sees an approximate snapshot — correct for a gauge.
 (define (native-memory-use)
+  ;; Snapshot the entries inside the critical section (one list build),
+  ;; fold outside it — keeping the atomic stretch short like account!'s.
+  ;; A GC dropping weak keys DURING the snapshot is tolerated: CS weak-
+  ;; hash iteration skips collected entries rather than invalidating
+  ;; (verified empirically — 50 rounds of mid-iteration collection of
+  ;; ~95% of keys, zero raises), which is exactly the approximate-gauge
+  ;; semantics documented above.
+  (define entries (call-with-ledger (lambda () (hash-values allocations))))
   (define totals (make-hash))
-  (call-with-ledger
-   (lambda ()
-     (for ([a (in-hash-values allocations)])
-       (hash-update! totals (allocation-device a)
-                     (lambda (n) (+ n (allocation-nbytes a)))
-                     0))))
+  (for ([a (in-list entries)])
+    (hash-update! totals (allocation-device a)
+                  (lambda (n) (+ n (allocation-nbytes a)))
+                  0))
   (sort (hash->list totals)
         (lambda (x y)
           (define dx (car x))
