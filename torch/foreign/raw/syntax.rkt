@@ -24,6 +24,7 @@
                   _double _enum _fun _int _int64 _ptr _void
                   define-cpointer-type ffi-lib)
          (only-in ffi/unsafe/alloc allocator deallocator)
+         (only-in ffi/unsafe/atomic call-as-atomic)
          (only-in ffi/unsafe/define define-ffi-definer)
          ;; whole-module on purpose: define-runtime-path expands into
          ;; phase-1 code that needs bindings (e.g. #%datum) the full require
@@ -138,6 +139,18 @@
 
 (define allocations (make-weak-hasheq))
 
+;; Serializes ledger mutation against the query fold. account!/unaccount!
+;; run on user threads AND the finalizer context, and a hash-remove!
+;; landing between iterator steps of the fold (thread swaps can occur at
+;; allocation points inside it) would invalidate the iteration. The
+;; critical sections are guarded with ATOMIC MODE, not a semaphore:
+;; finalizers already run in atomic mode, where blocking on a semaphore
+;; is an internal error ("attempt to deschedule the current thread in
+;; atomic mode") — call-as-atomic is reentrant there and never blocks,
+;; and within a place atomic mode excludes all other green threads.
+(define (call-with-ledger thunk)
+  (call-as-atomic thunk))
+
 ;; Probes shared with raw/device.rkt, which requires this module — making
 ;; here the cycle-free canonical home for the device enum + query binding
 ;; (the #37 accounting below needs them too).
@@ -170,10 +183,11 @@
     (define-values (nb-rc nbytes) (tr-tensor-nbytes/raw t))
     (define-values (dev-rc type index) (tr-tensor-device/raw t))
     (when (and (zero? nb-rc) (zero? dev-rc))
-      (hash-set! allocations t
-                 (allocation (make-phantom-bytes nbytes)
-                             nbytes
-                             (device type (if (eq? type 'cpu) 0 index)))))))
+      (define entry
+        (allocation (make-phantom-bytes nbytes)
+                    nbytes
+                    (device type (if (eq? type 'cpu) 0 index))))
+      (call-with-ledger (lambda () (hash-set! allocations t entry))))))
 
 ;; Drop a handle's ledger entry and release its charged pressure NOW
 ;; (set-phantom-bytes! to 0 rather than waiting for the phantom's own
@@ -183,10 +197,12 @@
 ;; failure.
 (define (unaccount! t)
   (with-handlers ([exn:fail? void])
-    (define a (hash-ref allocations t #f))
-    (when a
-      (set-phantom-bytes! (allocation-phantom a) 0)
-      (hash-remove! allocations t))))
+    (call-with-ledger
+     (lambda ()
+       (define a (hash-ref allocations t #f))
+       (when a
+         (set-phantom-bytes! (allocation-phantom a) 0)
+         (hash-remove! allocations t))))))
 
 ;; Live handle-attributed native bytes per device, folded from the ledger
 ;; at query time (see the design comment above): an alist of device struct
@@ -194,10 +210,12 @@
 ;; allocation sees an approximate snapshot — correct for a gauge.
 (define (native-memory-use)
   (define totals (make-hash))
-  (for ([a (in-hash-values allocations)])
-    (hash-update! totals (allocation-device a)
-                  (lambda (n) (+ n (allocation-nbytes a)))
-                  0))
+  (call-with-ledger
+   (lambda ()
+     (for ([a (in-hash-values allocations)])
+       (hash-update! totals (allocation-device a)
+                     (lambda (n) (+ n (allocation-nbytes a)))
+                     0))))
   (sort (hash->list totals)
         (lambda (x y)
           (define dx (car x))
