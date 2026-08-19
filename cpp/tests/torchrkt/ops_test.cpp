@@ -74,8 +74,8 @@ TEST(TorchrktOps, NbytesReportsViewExtentNotStorage) {
   // ADDRESSES, not the (possibly larger, shared) storage behind it. A
   // narrow over half the rows must report half the bytes even though its
   // storage is the full tensor's.
-  const Handle t = make({1.0F, 2.0F, 3.0F, 4.0F, 5.0F, 6.0F, 7.0F, 8.0F},
-                        {4, 2});
+  const Handle t =
+      make({1.0F, 2.0F, 3.0F, 4.0F, 5.0F, 6.0F, 7.0F, 8.0F}, {4, 2});
   const Handle half = Handle(tr_gen_narrow(t.t, 0, 0, 2));  // rows [0,2)
   int64_t full_bytes = 0;
   int64_t view_bytes = 0;
