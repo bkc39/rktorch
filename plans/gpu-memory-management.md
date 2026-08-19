@@ -103,6 +103,13 @@ Racket side — one choke point in `torch/foreign/raw/syntax.rkt`:
 
 ### Leg 1.5: graceful OOM — typed errors + collect-and-retry
 
+Refactor note (from PR #43 review): `raw/syntax.rkt` currently hosts
+the two ledger probes (`tr-tensor-nbytes/raw`, `tr-tensor-device/raw`)
+inline because `tensor.rkt`/`device.rkt` require `syntax.rkt` and can't
+be required back. When this leg adds a second probe consumer, extract a
+`raw/probes.rkt` substrate (above `syntax.rkt`'s definer, below the op
+modules) so `syntax.rkt` returns to being the pure FFI-definer layer.
+
 Failing *cleanly* (leg 0) is table stakes; failing *gracefully* needs
 two more pieces:
 
