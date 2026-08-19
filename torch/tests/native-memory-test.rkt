@@ -60,6 +60,25 @@
     ;; no collect-garbage here on purpose: the checked path unaccounts
     (check-true (< (- (cpu-bytes) base) (* 512 1024))))
 
+  (test-case "pressure triggers collection WITHOUT manual collects"
+    ;; The end-to-end #37 claim, automated: churn 800 MiB of dropped
+    ;; tensors while never calling collect-garbage. The phantom charge
+    ;; must make the GC collect of its own accord, running finalizers
+    ;; that drop ledger entries — so the ledger's high-water stays well
+    ;; under the total churn. Without pressure the ledger would climb
+    ;; monotonically to the full 800 MiB (no collection means no
+    ;; finalization means entries never drop). Generous bound: GC
+    ;; heuristics vary, but any functioning pressure keeps the
+    ;; high-water far below everything-retained.
+    (define base (settled-baseline))
+    (define high-water
+      (for/fold ([hw 0]) ([_ (in-range 200)])
+        (void (zeros 1024 1024)) ;; 4 MiB, dropped
+        (max hw (- (cpu-bytes) base))))
+    (check-true (< high-water (* 600 1024 1024))
+                (format "high-water ~a of ~a churned — pressure never fired"
+                        high-water (* 800 1024 1024))))
+
   (test-case "churn returns to baseline — the engagement regression guard"
     (define base (settled-baseline))
     (for ([_ (in-range 50)])
