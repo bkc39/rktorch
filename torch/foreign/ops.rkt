@@ -38,6 +38,7 @@
          item
          to-dtype
          cuda-available?
+         cuda-if-available
          cuda-device-count
          set-default-device!
          default-device
@@ -108,6 +109,11 @@
 ;; in tr_last_error, but this predicate doesn't surface it (it stays a boolean).
 (define (cuda-available?)
   (= 1 (tr-cuda-is-available/raw)))
+
+;; The pick-the-accelerator idiom every example re-defined as pick-device,
+;; promoted to the library: the GPU when one is usable, the CPU otherwise.
+(define (cuda-if-available)
+  (if (cuda-available?) (cuda-device) (cpu-device)))
 
 ;; Number of visible CUDA devices, 0 when CUDA is unavailable (see
 ;; cuda-available? re: a driver-failure 0).

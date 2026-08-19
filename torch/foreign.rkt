@@ -65,7 +65,9 @@
   [eye (->* (exact-nonnegative-integer?)
             (exact-nonnegative-integer?)
             tensor?)]
-  [tensor (->* ((or/c real? list?)) (#:requires-grad? boolean?) tensor?)]
+  [tensor (->* ((or/c real? list?))
+               (#:requires-grad? boolean? #:device (or/c #f device/c))
+               tensor?)]
   ;; shape
   [reshape (-> tensor? index/c ... tensor?)]
   [view (-> tensor? index/c ... tensor?)]
@@ -180,6 +182,7 @@
   [cpu-device (-> device?)]
   [cuda-device (->* () (exact-nonnegative-integer?) device?)]
   [cuda-available? (-> boolean?)]
+  [cuda-if-available (-> device?)]
   [cuda-device-count (-> exact-nonnegative-integer?)]
   [set-default-device! (-> device/c void?)]
   [default-device (-> device?)]

@@ -23,6 +23,7 @@
          (only-in racket/math [tanh base:tanh])
          (only-in racket/list [argmax base:argmax] flatten)
          (only-in "error.rkt" check-handle)
+         (only-in "ops.rkt" call-with-default-device)
          (only-in "raw/creation.rkt"
                   tr-arange/raw
                   tr-eye/raw
@@ -151,19 +152,24 @@
     [(null? data) '(0)]
     [else (cons (length data) (nested-dims (car data)))]))
 
-(define (tensor data #:requires-grad? [requires-grad? #f])
+(define (tensor data #:requires-grad? [requires-grad? #f] #:device [device #f])
   (define dims (nested-dims data))
   (define flat (if (list? data) (flatten data) (list data)))
   (unless (= (length flat) (apply * dims))
     (error 'tensor "ragged nested list; dims ~a need ~a values, got ~a"
            dims (apply * dims) (length flat)))
-  (define out
-    (wrap 'tensor
-          (tr-from-data/raw (list->f32vector (map exact->inexact flat))
-                            (length flat)
-                            (list->s64vector dims)
-                            (length dims))))
-  (if requires-grad? (requires-grad! out) out))
+  ;; #:device scopes construction under that default (creation ops honor
+  ;; it, so the tensor is BORN there — no post-hoc copy), restoring the
+  ;; ambient default on the way out; #f means the ambient default as ever.
+  (define (make)
+    (define out
+      (wrap 'tensor
+            (tr-from-data/raw (list->f32vector (map exact->inexact flat))
+                              (length flat)
+                              (list->s64vector dims)
+                              (length dims))))
+    (if requires-grad? (requires-grad! out) out))
+  (if device (call-with-default-device device make) (make)))
 
 ;; --------------------------------------------------------------- shape ops
 
