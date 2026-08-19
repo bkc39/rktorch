@@ -166,6 +166,11 @@
   ;; out-marshalling
   [item (-> tensor? real?)]
   [to-dtype (-> tensor? (or/c 'float32 'float64 'int64) tensor?)]
+  ;; native-memory observability (#37): live handle-attributed bytes per
+  ;; device, folded from the accounting ledger — the view's extent per
+  ;; handle, not total device usage (see raw/syntax.rkt).
+  [native-memory-use
+   (-> (listof (cons/c device? exact-nonnegative-integer?)))]
   ;; device placement (cuda). Arguments admit device structs and the
   ;; legacy symbol/list forms; queries return device structs.
   [device (-> (or/c 'cpu 'cuda) exact-nonnegative-integer? device?)]

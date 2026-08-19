@@ -60,7 +60,13 @@ allocations to the GC:
   free path (block returned to pool, no CUDA call) makes it rare.
 - Audit result: tr_tensor_free is the only void boundary fn.
 
-### Leg 1 (#37, the centerpiece): phantom-bytes accounting
+### Leg 1 (#37, the centerpiece): phantom-bytes accounting — LANDED
+
+Shipped with the device-struct ledger (fold-on-query, per-device
+buckets), tensor-allocator choke point, and native-memory-use.
+Measured on landing: churn high-water 2267 MB -> 1021 MB; per-op
+overhead ~1.2%; the 22 GiB balloon squeeze that formerly OOMed at
+step 4 completes a full epoch. Original design notes follow.
 
 C surface (one new probe, standard three sync points + gtest):
 
@@ -96,6 +102,13 @@ Racket side — one choke point in `torch/foreign/raw/syntax.rkt`:
   finalizers timely); revisit weighting only if measurement demands.
 
 ### Leg 1.5: graceful OOM — typed errors + collect-and-retry
+
+Refactor note (from PR #43 review): `raw/syntax.rkt` currently hosts
+the two ledger probes (`tr-tensor-nbytes/raw`, `tr-tensor-device/raw`)
+inline because `tensor.rkt`/`device.rkt` require `syntax.rkt` and can't
+be required back. When this leg adds a second probe consumer, extract a
+`raw/probes.rkt` substrate (above `syntax.rkt`'s definer, below the op
+modules) so `syntax.rkt` returns to being the pure FFI-definer layer.
 
 Failing *cleanly* (leg 0) is table stakes; failing *gracefully* needs
 two more pieces:

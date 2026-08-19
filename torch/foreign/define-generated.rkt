@@ -37,14 +37,13 @@
                      ;; reference many exported bindings
                      syntax/parse/pre)
          (only-in ffi/unsafe _fun _int _int32 _int64 _double _list _stdbool)
-         (only-in ffi/unsafe/alloc allocator)
          (only-in ffi/vector _s64vector list->s64vector)
          (only-in "error.rkt" check-handle check-ok)
          (only-in "raw/syntax.rkt"
                   _Tensor
                   _Tensor/null
                   define-torch
-                  tr-tensor-free/finalizer)
+                  tensor-allocator)
          (only-in "structs.rkt" wrap-tensor))
 
 (provide define-generated-op)
@@ -152,7 +151,7 @@
            (define-torch raw-name
              (_fun spec ... -> _Tensor/null)
              #:c-id c-id
-             #:wrap (allocator tr-tensor-free/finalizer))
+             #:wrap tensor-allocator)
            (define (name arg ...)
              (wrap-tensor
               (check-handle 'name (raw-name call-arg ...))))))]))

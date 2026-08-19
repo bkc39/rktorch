@@ -8,9 +8,10 @@
 ;; list of dimension sizes) queried once at wrap time, so `tensor-shape` and the
 ;; custom printer need no C round-trip.
 ;;
-;; Lifetime: the raw constructor's `#:wrap (allocator ...)` auto-registers a
+;; Lifetime: the raw constructor's `#:wrap tensor-allocator` auto-registers a
 ;; finalizer that calls `tr-tensor-free/finalizer` (the guarded finalizer-context
-;; entry).  The explicit `tensor-free!` calls `tr-tensor-free/checked` — the
+;; entry) and charges the #37 memory-pressure ledger.  The explicit
+;; `tensor-free!` calls `tr-tensor-free/checked` — the
 ;; raising, `(deallocator)`-wrapped binding, so failures surface to the
 ;; deliberate caller and the pending finalizer is genuinely canceled — and
 ;; flips the cpointer tag, so a second free raises `exn:fail:contract` at
@@ -132,5 +133,11 @@
   (when (cpointer-has-tag? h 'Tensor)
     (dynamic-wind
      void
-     (lambda () (tr-tensor-free/checked h))
+     ;; Breaks are deferred across the release: a break landing between
+     ;; the ledger unaccount and the C free would propagate with the tag
+     ;; flip still guaranteed below — leaving a handle the finalizer can
+     ;; no longer free (tag mismatch, swallowed) — i.e. a permanent
+     ;; native leak. The free is short; the break is delivered right
+     ;; after.
+     (lambda () (parameterize-break #f (tr-tensor-free/checked h)))
      (lambda () (set-cpointer-tag! h 'Tensor-freed)))))

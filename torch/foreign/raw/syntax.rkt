@@ -20,13 +20,17 @@
                      ;; whole-module on purpose: syntax-parse patterns
                      ;; reference many exported bindings
                      syntax/parse/pre)
-         (only-in ffi/unsafe _double _fun _void define-cpointer-type ffi-lib)
+         (only-in ffi/unsafe
+                  _double _enum _fun _int _int64 _ptr _void
+                  define-cpointer-type ffi-lib)
          (only-in ffi/unsafe/alloc allocator deallocator)
+         (only-in ffi/unsafe/atomic call-as-atomic)
          (only-in ffi/unsafe/define define-ffi-definer)
          ;; whole-module on purpose: define-runtime-path expands into
          ;; phase-1 code that needs bindings (e.g. #%datum) the full require
          ;; re-exports for-syntax; only-in strips them.
-         racket/runtime-path)
+         racket/runtime-path
+         (only-in "../device-type.rkt" device device-index device-type))
 
 (provide define-torch
          _Tensor
@@ -35,6 +39,10 @@
          tr-tensor-free/finalizer
          tr-tensor-free/checked
          guard-finalizer
+         tensor-allocator
+         native-memory-use
+         _tr-device-type ;; noqa
+         tr-tensor-device/raw
          define-unary/raw
          define-binary/raw
          define-scalar/raw
@@ -64,8 +72,14 @@
 ;; finalizer (structs.rkt's lifetime comment always claimed this; without
 ;; the wrap the finalizer stayed registered and later raised a freed-tag
 ;; marshalling error inside finalization — the #38 cascade class).
+;; unaccount! (defined with the #37 ledger below) drops the handle's
+;; pressure charge before the release — a deliberate explicit free must
+;; leave the ledger as promptly as it leaves the allocator registration.
 (define tr-tensor-free/checked
-  ((deallocator) tr-tensor-free/unwrapped))
+  (let ([release ((deallocator) tr-tensor-free/unwrapped)])
+    (lambda (t)
+      (unaccount! t)
+      (release t))))
 
 ;; Wrap a release procedure for use as a GC-finalizer deallocator: swallow
 ;; exn:fail so nothing raises out of finalization. Inside GC finalization a
@@ -98,15 +112,150 @@
   (with-handlers ([(lambda (_) #t) void])
     (release t)))
 
+;; --- native-memory accounting (#37) --------------------------------------
+;; Racket's GC sees a tensor as a tiny wrapper, so native buffers pile up
+;; awaiting finalizers nothing prompts it to run (measured: a 2 GB churn of
+;; dropped tensors retained every byte). Each allocation therefore charges
+;; a phantom-bytes object — Racket's purpose-built external-allocation
+;; accounting — sized to the tensor's nbytes, so collection scheduling
+;; scales with native usage and finalizers run in proportion.
+;;
+;; The ledger is a weak-keyed side table: handle -> allocation record. Weak
+;; keys make it self-healing (a missed unaccount! drops with the handle and
+;; the phantom collects on its own). Per-device totals are FOLDED ON QUERY,
+;; never maintained incrementally: every hot-path operation is a single
+;; per-key hash-set!/remove!, leaving no read-modify-write to lose updates
+;; across green-thread yield points (finalizers run on the runtime's
+;; executor thread, so every program is effectively multi-threaded here).
+;;
+;; The ledger reports handle-attributed bytes — the view's extent, the
+;; signal GC pressure needs — NOT total device usage: views over-count
+;; shared storage, and ATen-internal buffers never cross this boundary.
+
+;; The per-handle entry. A named record, never an anonymous tuple: it is
+;; also the extension point later legs (typed-OOM retry, failure counters)
+;; hang fields on.
+(struct allocation (phantom nbytes device))
+
+(define allocations (make-weak-hasheq))
+
+;; Serializes ledger mutation against the query fold. account!/unaccount!
+;; run on user threads AND the finalizer context, and a hash-remove!
+;; landing between iterator steps of the fold (thread swaps can occur at
+;; allocation points inside it) would invalidate the iteration. The
+;; critical sections are guarded with ATOMIC MODE, not a semaphore:
+;; finalizers already run in atomic mode, where blocking on a semaphore
+;; is an internal error ("attempt to deschedule the current thread in
+;; atomic mode") — call-as-atomic is reentrant there and never blocks,
+;; and within a place atomic mode excludes all other green threads.
+(define (call-with-ledger thunk)
+  (call-as-atomic thunk))
+
+;; Probes shared with raw/device.rkt, which requires this module — making
+;; here the cycle-free canonical home for the device enum + query binding
+;; (the #37 accounting below needs them too).
+(define-torch tr-tensor-nbytes/raw
+  (_fun _Tensor (out : (_ptr o _int64)) -> (rc : _int) -> (values rc out))
+  #:c-id tr_tensor_nbytes)
+
+;; Mirrors the tr_device_type C enum (device.h); int-width, like _tr-dtype.
+(define _tr-device-type
+  (_enum '(cpu = 0 cuda = 1)))
+
+(define-torch tr-tensor-device/raw
+  (_fun _Tensor
+        (type : (_ptr o _tr-device-type))
+        (index : (_ptr o _int64))
+        -> (rc : _int)
+        -> (values rc type index))
+  #:c-id tr_tensor_device)
+
+;; Charge a fresh handle to the GC and record it in the ledger. Guarded
+;; and best-effort: accounting must never fail an allocation that
+;; succeeded (make-phantom-bytes itself can raise under memory pressure),
+;; so any exn:fail here simply skips the charge. The predicate is
+;; exn:fail?, NOT a total catch: this runs on the calling USER thread,
+;; where swallowing exn:break would silently discard a cancellation —
+;; breaks propagate. (The finalizer path stays totally guarded by
+;; guard-finalizer's own catch around everything, unaccount! included.)
+(define (account! t)
+  (with-handlers ([exn:fail? void])
+    (define-values (nb-rc nbytes) (tr-tensor-nbytes/raw t))
+    (define-values (dev-rc type index) (tr-tensor-device/raw t))
+    (when (and (zero? nb-rc) (zero? dev-rc))
+      (define entry
+        (allocation (make-phantom-bytes nbytes)
+                    nbytes
+                    (device type (if (eq? type 'cpu) 0 index))))
+      (call-with-ledger (lambda () (hash-set! allocations t entry))))))
+
+;; Drop a handle's ledger entry and release its charged pressure NOW
+;; (set-phantom-bytes! to 0 rather than waiting for the phantom's own
+;; collection). Guarded like account! (exn:fail? only — breaks propagate
+;; on the explicit user-thread path; the finalizer path's guard-finalizer
+;; supplies the total catch): bookkeeping must never turn a free into a
+;; failure.
+(define (unaccount! t)
+  (with-handlers ([exn:fail? void])
+    (call-with-ledger
+     (lambda ()
+       (define a (hash-ref allocations t #f))
+       (when a
+         (set-phantom-bytes! (allocation-phantom a) 0)
+         (hash-remove! allocations t))))))
+
+;; Live handle-attributed native bytes per device, folded from the ledger
+;; at query time (see the design comment above): an alist of device struct
+;; to byte total, cpu first, then cuda by ordinal. A query racing heavy
+;; allocation sees an approximate snapshot — correct for a gauge.
+(define (native-memory-use)
+  ;; Snapshot the entries inside the critical section (one list build),
+  ;; fold outside it — keeping the atomic stretch short like account!'s.
+  ;; A GC dropping weak keys DURING the snapshot is tolerated: CS weak-
+  ;; hash iteration skips collected entries rather than invalidating
+  ;; (verified empirically — 50 rounds of mid-iteration collection of
+  ;; ~95% of keys, zero raises), which is exactly the approximate-gauge
+  ;; semantics documented above.
+  (define entries (call-with-ledger (lambda () (hash-values allocations))))
+  (define totals (make-hash))
+  (for ([a (in-list entries)])
+    (hash-update! totals (allocation-device a)
+                  (lambda (n) (+ n (allocation-nbytes a)))
+                  0))
+  (sort (hash->list totals)
+        (lambda (x y)
+          (define dx (car x))
+          (define dy (car y))
+          (cond
+            [(eq? (device-type dx) (device-type dy))
+             (< (device-index dx) (device-index dy))]
+            [else (eq? (device-type dx) 'cpu)]))))
+
 ;; The deallocator must be defined before any allocator that references it;
-;; every tensor-returning binding wraps with (allocator tr-tensor-free/finalizer).
+;; every tensor-returning binding wraps with `tensor-allocator` below.
 ;; This name is the FINALIZER-context entry point only — explicit frees use
 ;; tr-tensor-free/checked above. Built on the UNWRAPPED binding, not
 ;; /checked: routing the finalizer through the (deallocator)-wrapped
 ;; function would run its cancel-my-own-registration step from inside the
 ;; very finalizer that registration refers to — a self-referential use of
 ;; the allocator machinery we avoid by construction rather than trust.
-(define tr-tensor-free/finalizer (guard-finalizer tr-tensor-free/unwrapped))
+(define tr-tensor-free/finalizer
+  (guard-finalizer
+   (lambda (t)
+     (unaccount! t)
+     (tr-tensor-free/unwrapped t))))
+
+;; The one wrap every tensor-returning raw binding carries (hand-written
+;; via the op-definer macros below and the explicit #:wrap sites; generated
+;; via define-generated.rkt): GC-managed lifetime via the allocator, plus
+;; the #37 pressure charge on each fresh handle. NULL (error) results are
+;; never charged.
+(define (tensor-allocator raw-fn)
+  (define wrapped ((allocator tr-tensor-free/finalizer) raw-fn))
+  (lambda args
+    (define t (apply wrapped args))
+    (when t (account! t))
+    t))
 
 ;; --- op-definer macros -------------------------------------------------
 ;; The three uniform op shapes. Each expands to a define-torch binding whose
@@ -118,7 +267,7 @@
      #'(define-torch name
          (_fun (t : _Tensor) -> _Tensor/null)
          #:c-id c-id
-         #:wrap (allocator tr-tensor-free/finalizer))]))
+         #:wrap tensor-allocator)]))
 
 (define-syntax (define-binary/raw stx)
   (syntax-parse stx
@@ -126,7 +275,7 @@
      #'(define-torch name
          (_fun (a : _Tensor) (b : _Tensor) -> _Tensor/null)
          #:c-id c-id
-         #:wrap (allocator tr-tensor-free/finalizer))]))
+         #:wrap tensor-allocator)]))
 
 (define-syntax (define-scalar/raw stx)
   (syntax-parse stx
@@ -134,7 +283,7 @@
      #'(define-torch name
          (_fun (a : _Tensor) (b : _double) -> _Tensor/null)
          #:c-id c-id
-         #:wrap (allocator tr-tensor-free/finalizer))]))
+         #:wrap tensor-allocator)]))
 
 ;; --- shadow-arithmetic generator -----------------------------------------
 ;; (define-arith name tensor-pred tensor-op base-op unary-tensor) defines a
