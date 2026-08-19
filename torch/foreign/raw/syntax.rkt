@@ -40,6 +40,8 @@
          guard-finalizer
          tensor-allocator
          native-memory-use
+         _tr-device-type ;; noqa
+         tr-tensor-device/raw
          define-unary/raw
          define-binary/raw
          define-scalar/raw
@@ -136,32 +138,37 @@
 
 (define allocations (make-weak-hasheq))
 
-;; Probes for the accounting path, bound here (device.rkt requires this
-;; module, so its bindings cannot be imported without a cycle).
+;; Probes shared with raw/device.rkt, which requires this module — making
+;; here the cycle-free canonical home for the device enum + query binding
+;; (the #37 accounting below needs them too).
 (define-torch tr-tensor-nbytes/raw
   (_fun _Tensor (out : (_ptr o _int64)) -> (rc : _int) -> (values rc out))
   #:c-id tr_tensor_nbytes)
 
-;; Mirrors the tr_device_type C enum (device.h), like raw/device.rkt's.
-(define _tr-device-type/accounting
+;; Mirrors the tr_device_type C enum (device.h); int-width, like _tr-dtype.
+(define _tr-device-type
   (_enum '(cpu = 0 cuda = 1)))
 
-(define-torch tr-tensor-device/accounting
+(define-torch tr-tensor-device/raw
   (_fun _Tensor
-        (type : (_ptr o _tr-device-type/accounting))
+        (type : (_ptr o _tr-device-type))
         (index : (_ptr o _int64))
         -> (rc : _int)
         -> (values rc type index))
   #:c-id tr_tensor_device)
 
-;; Charge a fresh handle to the GC and record it in the ledger. TOTALLY
-;; guarded and best-effort: accounting must never fail an allocation that
+;; Charge a fresh handle to the GC and record it in the ledger. Guarded
+;; and best-effort: accounting must never fail an allocation that
 ;; succeeded (make-phantom-bytes itself can raise under memory pressure),
-;; so any failure here simply skips the charge.
+;; so any exn:fail here simply skips the charge. The predicate is
+;; exn:fail?, NOT a total catch: this runs on the calling USER thread,
+;; where swallowing exn:break would silently discard a cancellation —
+;; breaks propagate. (The finalizer path stays totally guarded by
+;; guard-finalizer's own catch around everything, unaccount! included.)
 (define (account! t)
-  (with-handlers ([(lambda (_) #t) void])
+  (with-handlers ([exn:fail? void])
     (define-values (nb-rc nbytes) (tr-tensor-nbytes/raw t))
-    (define-values (dev-rc type index) (tr-tensor-device/accounting t))
+    (define-values (dev-rc type index) (tr-tensor-device/raw t))
     (when (and (zero? nb-rc) (zero? dev-rc))
       (hash-set! allocations t
                  (allocation (make-phantom-bytes nbytes)
@@ -170,10 +177,12 @@
 
 ;; Drop a handle's ledger entry and release its charged pressure NOW
 ;; (set-phantom-bytes! to 0 rather than waiting for the phantom's own
-;; collection). Guarded like account!: bookkeeping must never turn a free
-;; into a failure.
+;; collection). Guarded like account! (exn:fail? only — breaks propagate
+;; on the explicit user-thread path; the finalizer path's guard-finalizer
+;; supplies the total catch): bookkeeping must never turn a free into a
+;; failure.
 (define (unaccount! t)
-  (with-handlers ([(lambda (_) #t) void])
+  (with-handlers ([exn:fail? void])
     (define a (hash-ref allocations t #f))
     (when a
       (set-phantom-bytes! (allocation-phantom a) 0)
@@ -185,7 +194,7 @@
 ;; allocation sees an approximate snapshot — correct for a gauge.
 (define (native-memory-use)
   (define totals (make-hash))
-  (for ([(t a) (in-hash allocations)])
+  (for ([a (in-hash-values allocations)])
     (hash-update! totals (allocation-device a)
                   (lambda (n) (+ n (allocation-nbytes a)))
                   0))

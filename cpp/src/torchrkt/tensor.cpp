@@ -61,19 +61,14 @@ int tr_tensor_numel(const tr_tensor* t, int64_t* out) {
 
 int tr_tensor_nbytes(const tr_tensor* t, int64_t* out) {
   if (!t || !out) {
-    torchrkt::set_error("tr_tensor_nbytes: null argument");
-    return 1;
+    return torchrkt::null_arg_status("tr_tensor_nbytes");
   }
-  try {
-    // The view's extent (numel x element size), not the shared storage's:
-    // the Racket-side memory ledger charges each handle for what it
-    // addresses, a documented approximation for GC pressure (#37).
+  // The view's extent (numel x element size), not the shared storage's:
+  // the Racket-side memory ledger charges each handle for what it
+  // addresses, a documented approximation for GC pressure (#37).
+  return torchrkt::status_call("tr_tensor_nbytes", [&] {
     *out = static_cast<int64_t>(t->value.nbytes());
-    return 0;
-  } catch (const std::exception& e) {
-    torchrkt::set_error(std::string("tr_tensor_nbytes: ") + e.what());
-    return 1;
-  }
+  });
 }
 
 int tr_tensor_ndim(const tr_tensor* t, int64_t* out) {

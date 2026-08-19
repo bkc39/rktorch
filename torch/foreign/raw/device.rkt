@@ -5,12 +5,14 @@
 ;; get/query functions follow the integer-status, out-parameter contract; the
 ;; move allocates a fresh handle, so it carries the GC allocator wrap.
 
-(require (only-in ffi/unsafe _enum _fun _int _int64 _ptr)
+(require (only-in ffi/unsafe _fun _int _int64 _ptr)
          (only-in "syntax.rkt"
                   _Tensor
                   _Tensor/null
+                  _tr-device-type
                   define-torch
-                  tensor-allocator))
+                  tensor-allocator
+                  tr-tensor-device/raw))
 
 (provide _tr-device-type
          tr-cuda-is-available/raw
@@ -20,9 +22,9 @@
          tr-tensor-to-device/raw
          tr-tensor-device/raw)
 
-;; Mirrors the tr_device_type C enum (device.h); int-width, like _tr-dtype.
-(define _tr-device-type
-  (_enum '(cpu = 0 cuda = 1)))
+;; _tr-device-type and tr-tensor-device/raw live in syntax.rkt (the #37
+;; accounting there needs them too, and this module requires syntax.rkt, so
+;; that is the cycle-free canonical home); re-provided above unchanged.
 
 (define-torch tr-cuda-is-available/raw
   (_fun -> _int)
@@ -49,11 +51,3 @@
   #:c-id tr_tensor_to_device
   #:wrap tensor-allocator)
 
-;; (raw t) -> (values rc type index): the device the tensor lives on.
-(define-torch tr-tensor-device/raw
-  (_fun (t : _Tensor)
-        (type : (_ptr o _tr-device-type))
-        (index : (_ptr o _int64))
-        -> (rc : _int)
-        -> (values rc type index))
-  #:c-id tr_tensor_device)

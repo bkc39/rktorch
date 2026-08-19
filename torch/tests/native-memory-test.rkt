@@ -7,9 +7,19 @@
 
 (module+ test
   (require rackunit
+           (only-in racket/string string-split)
            (only-in "../foreign.rkt"
                     cpu-device native-memory-use ones zeros)
            (only-in (submod "../foreign.rkt" unsafe) tensor-free!))
+
+  ;; Process RSS in bytes via /proc (Linux); #f where /proc is absent.
+  (define (current-rss-bytes)
+    (and (file-exists? "/proc/self/status")
+         (call-with-input-file "/proc/self/status"
+           (lambda (in)
+             (for/first ([l (in-lines in)]
+                         #:when (regexp-match? #rx"^VmRSS" l))
+               (* 1024 (string->number (cadr (string-split l)))))))))
 
   ;; Live cpu bytes as the ledger reports them right now.
   (define (cpu-bytes)
@@ -24,8 +34,14 @@
         (sleep 0.01)
         (loop (add1 i)))))
 
+  ;; Settle honestly before baselining: earlier tests' finalizers may be
+  ;; in flight, so run a few unconditional collect+sleep rounds (a ready?
+  ;; predicate can't express "no more pending finalizers" — an immediately
+  ;; true one would stop after a single collection).
   (define (settled-baseline)
-    (collect-until (lambda () #t) #:tries 3)
+    (for ([_ (in-range 3)])
+      (collect-garbage)
+      (sleep 0.01))
     (cpu-bytes))
 
   (test-case "a live tensor is charged at its nbytes; GC releases it"
@@ -71,13 +87,20 @@
     ;; heuristics vary, but any functioning pressure keeps the
     ;; high-water far below everything-retained.
     (define base (settled-baseline))
+    (define rss-before (current-rss-bytes))
     (define high-water
       (for/fold ([hw 0]) ([_ (in-range 200)])
         (void (zeros 1024 1024)) ;; 4 MiB, dropped
         (max hw (- (cpu-bytes) base))))
     (check-true (< high-water (* 600 1024 1024))
                 (format "high-water ~a of ~a churned — pressure never fired"
-                        high-water (* 800 1024 1024))))
+                        high-water (* 800 1024 1024)))
+    ;; the ledger bound alone can't distinguish "native memory freed" from
+    ;; "weak entries dropped while the C free regressed" — the process's
+    ;; own footprint can (Linux only; /proc is absent on darwin).
+    (when rss-before
+      (check-true (< (- (current-rss-bytes) rss-before) (* 700 1024 1024))
+                  "RSS grew by ~the whole churn — native buffers not freed")))
 
   (test-case "churn returns to baseline — the engagement regression guard"
     (define base (settled-baseline))
