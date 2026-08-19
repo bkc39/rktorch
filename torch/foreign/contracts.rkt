@@ -14,6 +14,7 @@
                   none/c
                   or/c
                   unsupplied-arg?)
+         (only-in "device-type.rkt" device?)
          (only-in "structs.rkt" tensor?))
 
 (provide dims-rest/c
@@ -40,11 +41,12 @@
 
 (define tensor-or-real/c (or/c tensor? real?))
 
-;; A device argument: 'cpu, 'cuda (ordinal 0 shorthand), or (list 'cuda n).
-;; Queries (default-device/tensor-device) return the normalized 'cpu / (list
-;; 'cuda n) forms, both of which this also admits.
+;; A device argument: a first-class device struct (device-type.rkt), or a
+;; legacy form — 'cpu, 'cuda (ordinal 0 shorthand), (list 'cuda n) — all
+;; accepted everywhere, the PyTorch pattern of device objects beside
+;; strings. Queries (default-device/tensor-device) return device structs.
 (define device/c
-  (or/c 'cpu 'cuda (list/c 'cuda exact-nonnegative-integer?)))
+  (or/c device? 'cpu 'cuda (list/c 'cuda exact-nonnegative-integer?)))
 
 ;; Binary arithmetic: a real is welcome on either side, but at least one
 ;; argument must be a tensor — (add 1 2) is a caller error and should get

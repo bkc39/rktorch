@@ -8,11 +8,57 @@
   (require rackunit
            "../main.rkt")
 
+  (test-case "device structs: predicate, accessors, guard, printing"
+    (check-true (device? (cpu-device)))
+    (check-true (device? (cuda-device 1)))
+    (check-false (device? 'cpu))
+    (check-equal? (device-type (cpu-device)) 'cpu)
+    (check-equal? (device-type (cuda-device)) 'cuda)
+    (check-equal? (device-index (cuda-device 2)) 2)
+    (check-equal? (device-index (cuda-device)) 0)
+    ;; the raw constructor validates — malformed devices unrepresentable
+    (check-exn exn:fail? (lambda () (device 'mps 0)))
+    (check-exn exn:fail? (lambda () (device 'cuda -1)))
+    ;; one CPU: nonzero index rejected here rather than inconsistently
+    ;; downstream (C++ set-default rejects it; to-device drops it)
+    (check-exn exn:fail? (lambda () (device 'cpu 1)))
+    ;; torch.device-style printing
+    (check-equal? (format "~a" (cpu-device)) "#<device cpu>")
+    (check-equal? (format "~a" (cuda-device 1)) "#<device cuda:1>"))
+
+  (test-case "device structs are field-wise equal? and hash keys"
+    ;; transparent structs: distinct instances with equal fields are equal?
+    ;; and collide as equal-hash keys — the property the #37 memory ledger
+    ;; relies on for its per-device buckets.
+    (check-equal? (cpu-device) (cpu-device))
+    (check-equal? (cuda-device 1) (device 'cuda 1))
+    (check-false (equal? (cuda-device 0) (cuda-device 1)))
+    (define h (make-hash))
+    (hash-update! h (cpu-device) add1 0)
+    (hash-update! h (cpu-device) add1 0)
+    (hash-update! h (cuda-device 3) add1 0)
+    (check-equal? (hash-ref h (cpu-device)) 2)
+    (check-equal? (hash-ref h (cuda-device 3)) 1)
+    (check-equal? (hash-count h) 2))
+
+  (test-case "device arguments accept structs and legacy forms alike"
+    ;; the accept-both contract: every device-taking entry point normalizes
+    ;; struct and legacy inputs identically; queries return structs.
+    (set-default-device! (cpu-device))
+    (check-equal? (default-device) (cpu-device))
+    (set-default-device! 'cpu)
+    (check-equal? (default-device) (cpu-device))
+    (define t (zeros 2))
+    (check-equal? (tensor-device (to-device t (cpu-device))) (cpu-device))
+    (check-equal? (tensor-device (to-device t 'cpu)) (cpu-device))
+    (with-default-device (cpu-device)
+      (check-equal? (default-device) (cpu-device))))
+
   (test-case "default device is cpu"
     ;; reset defensively (mirrors the C++ DefaultsToCpu): if a later CUDA case
     ;; ever leaks the default, this case shouldn't depend on source order.
     (set-default-device! 'cpu)
-    (check-equal? (default-device) 'cpu))
+    (check-equal? (default-device) (cpu-device)))
 
   (test-case "cuda queries have sane types"
     (check-true (boolean? (cuda-available?)))
@@ -22,21 +68,21 @@
 
   (test-case "new tensors and to-device land on cpu"
     (define t (zeros 2 2))
-    (check-equal? (tensor-device t) 'cpu)
+    (check-equal? (tensor-device t) (cpu-device))
     (define c (to-device t 'cpu))
-    (check-equal? (tensor-device c) 'cpu)
+    (check-equal? (tensor-device c) (cpu-device))
     (check-equal? (tensor->list c) '(0.0 0.0 0.0 0.0)))
 
   (test-case "set-default-device! round-trips on cpu"
     (set-default-device! 'cpu)
-    (check-equal? (default-device) 'cpu)
-    (check-equal? (tensor-device (ones 3)) 'cpu))
+    (check-equal? (default-device) (cpu-device))
+    (check-equal? (tensor-device (ones 3)) (cpu-device)))
 
   (test-case "requesting an unavailable cuda device errors"
     (unless (cuda-available?)
       (check-exn exn:fail? (lambda () (set-default-device! 'cuda)))
       ;; the rejected set leaves the default untouched
-      (check-equal? (default-device) 'cpu)))
+      (check-equal? (default-device) (cpu-device))))
 
   ;; The CUDA cases are always registered (so the test count is hardware-stable
   ;; and the cases are visible in the run output); their bodies are guarded by
@@ -48,7 +94,7 @@
     (when (cuda-available?)
       (check-exn exn:fail?
                  (lambda () (set-default-device! (list 'cuda 9999))))
-      (check-equal? (default-device) 'cpu)))
+      (check-equal? (default-device) (cpu-device))))
 
   (test-case "cuda round-trip"
     ;; with-default-device restores the prior default even if a GPU op raises
@@ -57,18 +103,18 @@
       (check-true (> (cuda-device-count) 0))
       (set-default-device! 'cpu)
       (with-default-device 'cuda
-        (check-equal? (default-device) '(cuda 0))
+        (check-equal? (default-device) (cuda-device 0))
         (define g (zeros 2 2))
-        (check-equal? (tensor-device g) '(cuda 0))
+        (check-equal? (tensor-device g) (cuda-device 0))
         (define back (to-device g 'cpu))
-        (check-equal? (tensor-device back) 'cpu)
+        (check-equal? (tensor-device back) (cpu-device))
         (check-equal? (tensor->list back) '(0.0 0.0 0.0 0.0))
         ;; a GPU matmul should match the CPU result
         (define a (to-device (tensor '((1 2) (3 4))) 'cuda))
         (define b (to-device (tensor '((5 6) (7 8))) 'cuda))
         (check-equal? (tensor->list (to-device (matmul a b) 'cpu))
                       '(19.0 22.0 43.0 50.0)))
-      (check-equal? (default-device) 'cpu)))
+      (check-equal? (default-device) (cpu-device))))
 
   (test-case "tranche-3 ops run on cuda (gelu, embedding, layer-norm, mask)"
     ;; the GPU half of the #22 done-criterion until the 06-gpt capstone's
@@ -88,32 +134,32 @@
         ;; layer-norm with affine params on the device
         (define x (to-device (tensor '((1 2 3) (4 6 8))) 'cuda))
         (define ln (layer-norm x 3 #:weight (ones 3) #:bias (zeros 3)))
-        (check-equal? (tensor-device ln) '(cuda 0))
+        (check-equal? (tensor-device ln) (cuda-device 0))
         (check-= (car (tensor->list (to-device ln 'cpu))) -1.2247 1e-4)
         ;; the causal-mask chain: tril -> eq -> masked-fill, all on cuda
         (define mask (eq (tril (ones 2 2)) 0))
-        (check-equal? (tensor-device mask) '(cuda 0))
+        (check-equal? (tensor-device mask) (cuda-device 0))
         (check-equal? (tensor->list
                        (to-device (masked-fill (ones 2 2) mask 0) 'cpu))
                       '(1.0 0.0 1.0 1.0)))
-      (check-equal? (default-device) 'cpu)))
+      (check-equal? (default-device) (cpu-device))))
 
   (test-case "with-default-device restores the prior default (return + raise)"
     (set-default-device! 'cpu)
     ;; normal return restores
-    (with-default-device 'cpu (check-equal? (default-device) 'cpu))
-    (check-equal? (default-device) 'cpu)
+    (with-default-device 'cpu (check-equal? (default-device) (cpu-device)))
+    (check-equal? (default-device) (cpu-device))
     ;; restored even when the body raises — the dynamic-wind guarantee a
     ;; hand-rolled set/reset would drop
     (check-exn exn:fail? (lambda () (with-default-device 'cpu (error "boom"))))
-    (check-equal? (default-device) 'cpu)
+    (check-equal? (default-device) (cpu-device))
     ;; nesting restores to the *enclosing* device, not the pre-outer default
     (when (cuda-available?)
       (with-default-device 'cuda
-        (check-equal? (default-device) '(cuda 0))
-        (with-default-device 'cpu (check-equal? (default-device) 'cpu))
-        (check-equal? (default-device) '(cuda 0)))
-      (check-equal? (default-device) 'cpu)
+        (check-equal? (default-device) (cuda-device 0))
+        (with-default-device 'cpu (check-equal? (default-device) (cpu-device)))
+        (check-equal? (default-device) (cuda-device 0)))
+      (check-equal? (default-device) (cpu-device))
       (check-exn exn:fail?
                  (lambda () (with-default-device 'cuda (error "boom"))))
-      (check-equal? (default-device) 'cpu))))
+      (check-equal? (default-device) (cpu-device)))))

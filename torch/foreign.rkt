@@ -22,6 +22,7 @@
 (require ffi/vector
          racket/contract
          "foreign/contracts.rkt"
+         "foreign/device-type.rkt"
          "foreign/structs.rkt"
          "foreign/ops.rkt"
          "foreign/tensor-ops.rkt"
@@ -165,14 +166,21 @@
   ;; out-marshalling
   [item (-> tensor? real?)]
   [to-dtype (-> tensor? (or/c 'float32 'float64 'int64) tensor?)]
-  ;; device placement (cuda)
+  ;; device placement (cuda). Arguments admit device structs and the
+  ;; legacy symbol/list forms; queries return device structs.
+  [device (-> (or/c 'cpu 'cuda) exact-nonnegative-integer? device?)]
+  [device? (-> any/c boolean?)]
+  [device-type (-> device? (or/c 'cpu 'cuda))]
+  [device-index (-> device? exact-nonnegative-integer?)]
+  [cpu-device (-> device?)]
+  [cuda-device (->* () (exact-nonnegative-integer?) device?)]
   [cuda-available? (-> boolean?)]
   [cuda-device-count (-> exact-nonnegative-integer?)]
   [set-default-device! (-> device/c void?)]
-  [default-device (-> device/c)]
+  [default-device (-> device?)]
   [call-with-default-device (-> device/c (-> any) any)]
   [to-device (-> tensor? device/c tensor?)]
-  [tensor-device (-> tensor? device/c)]
+  [tensor-device (-> tensor? device?)]
   ;; autograd
   [requires-grad! (->* (tensor?) (boolean?) tensor?)]
   [requires-grad? (-> tensor? boolean?)]
