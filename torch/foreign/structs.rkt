@@ -132,5 +132,11 @@
   (when (cpointer-has-tag? h 'Tensor)
     (dynamic-wind
      void
-     (lambda () (tr-tensor-free/checked h))
+     ;; Breaks are deferred across the release: a break landing between
+     ;; the ledger unaccount and the C free would propagate with the tag
+     ;; flip still guaranteed below — leaving a handle the finalizer can
+     ;; no longer free (tag mismatch, swallowed) — i.e. a permanent
+     ;; native leak. The free is short; the break is delivered right
+     ;; after.
+     (lambda () (parameterize-break #f (tr-tensor-free/checked h)))
      (lambda () (set-cpointer-tag! h 'Tensor-freed)))))

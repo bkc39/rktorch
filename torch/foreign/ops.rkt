@@ -7,7 +7,6 @@
          (only-in "device-type.rkt"
                   cpu-device cuda-device device-index device-type device?)
          (only-in "error.rkt" check-handle check-ok)
-         (only-in "raw/syntax.rkt" native-memory-use)
          (only-in "raw/device.rkt"
                   tr-cuda-device-count/raw
                   tr-cuda-is-available/raw
@@ -17,6 +16,7 @@
                   tr-tensor-to-device/raw)
          (only-in "raw/global.rkt" tr-last-error/raw tr-manual-seed/raw tr-version/raw)
          (only-in "raw/random.rkt" tr-rand/raw tr-randn/raw tr-tensor-uniform!/raw)
+         (only-in "raw/syntax.rkt" native-memory-use)
          (only-in "raw/tensor.rkt"
                   tr-tensor-copy-data/raw
                   tr-tensor-item/raw
