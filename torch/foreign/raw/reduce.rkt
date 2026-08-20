@@ -5,12 +5,8 @@
 ;; float32 conversion).
 
 (require (only-in ffi/unsafe _bool _fun _int64)
-         (only-in "syntax.rkt"
-                  _Tensor
-                  _Tensor/null
-                  define-torch
-                  define-unary/raw
-                  tensor-allocator))
+         (only-in "memory.rkt" define-unary/raw tensor-allocator)
+         (only-in "syntax.rkt" _Tensor _Tensor/null define-torch))
 
 (provide tr-sum/raw
          tr-mean/raw

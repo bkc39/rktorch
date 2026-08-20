@@ -2,7 +2,7 @@
 
 ;; Raw linear-algebra ops (linalg.h).
 
-(require (only-in "syntax.rkt" define-binary/raw))
+(require (only-in "memory.rkt" define-binary/raw))
 
 (provide tr-matmul/raw
          tr-mm/raw

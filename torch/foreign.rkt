@@ -170,7 +170,7 @@
   [to-dtype (-> tensor? (or/c 'float32 'float64 'int64) tensor?)]
   ;; native-memory observability (#37): live handle-attributed bytes per
   ;; device, folded from the accounting ledger — the view's extent per
-  ;; handle, not total device usage (see raw/syntax.rkt).
+  ;; handle, not total device usage (see raw/memory.rkt).
   [native-memory-use
    (-> (listof (cons/c device? exact-nonnegative-integer?)))]
   ;; device placement (cuda). Arguments admit device structs and the

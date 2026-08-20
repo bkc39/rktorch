@@ -3,7 +3,7 @@
 ;; Raw elementwise ops (elementwise.h), via the shared op-definer macros
 ;; in syntax.rkt (binary tensor-tensor, tensor-scalar, unary).
 
-(require (only-in "syntax.rkt"
+(require (only-in "memory.rkt"
                   define-binary/raw
                   define-scalar/raw
                   define-unary/raw))

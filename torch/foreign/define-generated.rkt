@@ -39,11 +39,8 @@
          (only-in ffi/unsafe _fun _int _int32 _int64 _double _list _stdbool)
          (only-in ffi/vector _s64vector list->s64vector)
          (only-in "error.rkt" check-handle check-ok)
-         (only-in "raw/syntax.rkt"
-                  _Tensor
-                  _Tensor/null
-                  define-torch
-                  tensor-allocator)
+         (only-in "raw/memory.rkt" tensor-allocator)
+         (only-in "raw/syntax.rkt" _Tensor _Tensor/null define-torch)
          (only-in "structs.rkt" wrap-tensor))
 
 (provide define-generated-op)

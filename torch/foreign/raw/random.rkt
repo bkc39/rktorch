@@ -7,7 +7,8 @@
 
 (require (only-in ffi/unsafe _double _fun _int _int64)
          (only-in ffi/vector _s64vector)
-         (only-in "syntax.rkt" _Tensor _Tensor/null define-torch tensor-allocator))
+         (only-in "memory.rkt" tensor-allocator)
+         (only-in "syntax.rkt" _Tensor _Tensor/null define-torch))
 
 (provide tr-randn/raw
          tr-rand/raw

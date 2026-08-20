@@ -21,7 +21,7 @@
 // on the storage-release path terminates inside libtorch's own noexcept
 // frames before any C++ handler (see finalizer_death_test.cpp), so their
 // safety guarantee lives in the Racket-side deallocator wrap
-// (torch/foreign/raw/syntax.rkt). New boundary functions should fit one of
+// (torch/foreign/raw/memory.rkt). New boundary functions should fit one of
 // these four shapes.
 
 namespace torchrkt {

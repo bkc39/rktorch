@@ -6,7 +6,8 @@
 
 (require (only-in ffi/unsafe _fun _int64 _list)
          (only-in ffi/vector _s64vector)
-         (only-in "syntax.rkt" _Tensor _Tensor/null define-torch tensor-allocator))
+         (only-in "memory.rkt" tensor-allocator)
+         (only-in "syntax.rkt" _Tensor _Tensor/null define-torch))
 
 (provide tr-reshape/raw
          tr-view/raw

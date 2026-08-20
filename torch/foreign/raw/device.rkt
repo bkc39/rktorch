@@ -6,13 +6,11 @@
 ;; move allocates a fresh handle, so it carries the GC allocator wrap.
 
 (require (only-in ffi/unsafe _fun _int _int64 _ptr)
-         (only-in "syntax.rkt"
-                  _Tensor
-                  _Tensor/null
+         (only-in "memory.rkt"
                   _tr-device-type
-                  define-torch
                   tensor-allocator
-                  tr-tensor-device/raw))
+                  tr-tensor-device/raw)
+         (only-in "syntax.rkt" _Tensor _Tensor/null define-torch))
 
 (provide _tr-device-type
          tr-cuda-is-available/raw

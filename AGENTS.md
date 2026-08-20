@@ -198,10 +198,11 @@ module's full export set (`racket/runtime-path`, `syntax/parse/pre`).
   finalizer); `foreign/error.rkt` — `check-ok` / `check-handle`;
   `foreign/format.rkt` — the PyTorch-repr reproducer.
 - `foreign/raw/*.rkt` — direct FFI, one module per C translation unit:
-  `syntax` (the FFI definer), `global`, `tensor` (`_Tensor` cpointer +
-  deallocator), `random`, `creation`, `shape-ops`, `elementwise`, `reduce`,
-  `linalg`, `autograd`. Tensor-returning bindings always carry
-  `#:wrap tensor-allocator` (see `raw/syntax.rkt`), which composes the
+  `syntax` (the pure FFI definer + `_Tensor` cpointer), `memory` (the
+  lifetime/#37 substrate: frees, pressure ledger, `tensor-allocator`,
+  op-definer macros), `global`, `tensor`, `random`, `creation`,
+  `shape-ops`, `elementwise`, `reduce`, `linalg`, `autograd`. Tensor-returning bindings always carry
+  `#:wrap tensor-allocator` (see `raw/memory.rkt`), which composes the
   finalizer registration (`allocator` over the guarded, finalizer-context
   `tr-tensor-free/finalizer`) with the #37 memory-pressure ledger charge
   (phantom bytes + per-device accounting). Never hand-write a bare
