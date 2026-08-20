@@ -15,6 +15,10 @@
     # Scoped ONLY to the Racket toolchain (#41): the main pin carries
     # Racket 9.2; this rev carries 9.3. cpp/libtorch/clang stay on the
     # main pin, so a Racket bump can never move the native stack.
+    # Keep this rev AT LEAST as new as the main pin: the Racket binary
+    # from here dlopens libtorchrkt built on the main pin, and glibc
+    # symbol versioning is backward-compatible only in that direction
+    # (older-built lib into newer-glibc process, never the reverse).
     nixpkgsRacket.url =
       "github:NixOS/nixpkgs/07e1d92cdc0ed416cfa11ff3ca40d17e61cfba7a";
   };
@@ -296,7 +300,17 @@
           };
 
           racket = mkRacketPackage "torch-rkt" racketPkg;
-          racket92 = mkRacketPackage "torch-rkt-racket92" pkgs.racket;
+          # The floor check is only meaningful while the main pin actually
+          # carries 9.2: this assertion trips loudly when a main-pin update
+          # moves pkgs.racket, forcing a deliberate new-floor decision
+          # (re-point a scoped input at the old rev, or advance the floor —
+          # see #41/#50) instead of silently testing 9.3 twice.
+          racket92 = assert pkgs.lib.assertMsg
+            (pkgs.lib.hasPrefix "9.2" pkgs.racket.version)
+            ("racket92 floor check: the main pin's racket is now "
+             + pkgs.racket.version
+             + ", not 9.2 — re-point the supported floor (see #41/#50)");
+            mkRacketPackage "torch-rkt-racket92" pkgs.racket;
 
           copy-native-libs = pkgs.writeShellApplication {
             name = "copy-native-libs";
