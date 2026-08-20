@@ -98,7 +98,7 @@ int tr_cuda_is_available(void) {
     torchrkt::record_failure("tr_cuda_is_available", e);
     return 0;
   } catch (...) {
-    torchrkt::set_error("tr_cuda_is_available: unknown exception");
+    torchrkt::record_unknown_failure("tr_cuda_is_available");
     return 0;
   }
 }
@@ -112,7 +112,7 @@ int tr_cuda_device_count(void) {
     torchrkt::record_failure("tr_cuda_device_count", e);
     return 0;
   } catch (...) {
-    torchrkt::set_error("tr_cuda_device_count: unknown exception");
+    torchrkt::record_unknown_failure("tr_cuda_device_count");
     return 0;
   }
 }

@@ -37,7 +37,7 @@ int tr_manual_seed(uint64_t seed) {
     torchrkt::record_failure("tr_manual_seed", e);
     return 1;
   } catch (...) {
-    torchrkt::set_error("tr_manual_seed: unknown exception");
+    torchrkt::record_unknown_failure("tr_manual_seed");
     return 1;
   }
 }
