@@ -12,9 +12,14 @@
     # that one env so the cpp/racket builds stay on the main pin untouched.
     nixpkgsCuda.url =
       "github:NixOS/nixpkgs/3e41b24abd260e8f71dbe2f5737d24122f972158";
+    # Scoped ONLY to the Racket toolchain (#41): the main pin carries
+    # Racket 9.2; this rev carries 9.3. cpp/libtorch/clang stay on the
+    # main pin, so a Racket bump can never move the native stack.
+    nixpkgsRacket.url =
+      "github:NixOS/nixpkgs/07e1d92cdc0ed416cfa11ff3ca40d17e61cfba7a";
   };
 
-  outputs = { self, nixpkgs, nixpkgsCuda }:
+  outputs = { self, nixpkgs, nixpkgsCuda, nixpkgsRacket }:
     let
       # libtorch-bin ships only these two; the C++ side builds against it.
       supportedSystems = [ "aarch64-darwin" "x86_64-linux" ];
@@ -37,11 +42,11 @@
       # zips) so the output hash is mtime-free and platform-stable. Bump
       # outputHash when the threading version in the catalog changes or a
       # new runtime dep lands in torch/info.rkt.
-      racketDepsFor = pkgs:
+      racketDepsFor = pkgs: racketPkg:
         pkgs.stdenvNoCC.mkDerivation {
           name = "torch-rkt-racket-deps";
           dontUnpack = true;
-          nativeBuildInputs = [ pkgs.racket pkgs.cacert pkgs.unzip ];
+          nativeBuildInputs = [ racketPkg pkgs.cacert pkgs.unzip ];
           buildPhase = ''
             runHook preBuild
             export HOME=$TMPDIR/home
@@ -107,7 +112,11 @@
             };
           };
           torch = torchPackageFor pkgs;
-          racket-deps = racketDepsFor pkgs;
+          # Racket 9.3 from the scoped pin; everything else stays on the
+          # main pin (see the nixpkgsRacket input comment).
+          pkgsRacket = import nixpkgsRacket { inherit system; };
+          racketPkg = pkgsRacket.racket;
+          racket-deps = racketDepsFor pkgs racketPkg;
 
           cppCommonInputs = [ torch pkgs.gtest ];
           cppNativeInputs = [ pkgs.cmake pkgs.clang-tools pkgs.ninja ];
@@ -222,12 +231,17 @@
             '';
           };
 
-          racket = pkgs.stdenv.mkDerivation {
-            pname = "torch-rkt";
-            inherit version;
+          # One builder, two Racket versions: `racket` (the 9.3 default from
+          # the scoped pin) and `racket92` (the previous version from the main
+          # pin — the supported floor). Both live in `checks`, so every
+          # `nix flake check` — locally and in each CI cell — exercises both;
+          # racket-deps is shared (the prefetched package sources are
+          # version-independent).
+          mkRacketPackage = pname: racketPkg: pkgs.stdenv.mkDerivation {
+            inherit pname version;
             src = ./.;
 
-            nativeBuildInputs = [ pkgs.racket pkgs.makeWrapper ];
+            nativeBuildInputs = [ racketPkg pkgs.makeWrapper ];
             buildInputs = [ cpp ];
 
             buildPhase = ''
@@ -273,13 +287,16 @@
               mkdir -p $out/share $out/bin
               cp -r $PLTUSERHOME $out/share/racket-home
 
-              makeWrapper ${pkgs.racket}/bin/racket $out/bin/torch \
+              makeWrapper ${racketPkg}/bin/racket $out/bin/torch \
                 --set PLTUSERHOME $out/share/racket-home \
                 --add-flags "-l torch"
 
               runHook postInstall
             '';
           };
+
+          racket = mkRacketPackage "torch-rkt" racketPkg;
+          racket92 = mkRacketPackage "torch-rkt-racket92" pkgs.racket;
 
           copy-native-libs = pkgs.writeShellApplication {
             name = "copy-native-libs";
@@ -315,7 +332,7 @@
         {
           default = racket;
           inherit cpp cpp-cuda cpp-format cpp-line-count cpp-tidy racket
-            racket-deps codegen copy-native-libs;
+            racket92 racket-deps codegen copy-native-libs;
         });
 
       apps = forAllSystems (system: {
@@ -331,14 +348,16 @@
 
       checks = forAllSystems (system: {
         inherit (self.packages.${system})
-          cpp cpp-format cpp-line-count cpp-tidy racket;
+          cpp cpp-format cpp-line-count cpp-tidy racket racket92;
       });
 
       devShells = forAllSystems (system:
         let
           pkgs = import nixpkgs { inherit system; };
           torch = torchPackageFor pkgs;
-          racket-deps = racketDepsFor pkgs;
+          pkgsRacket = import nixpkgsRacket { inherit system; };
+          racketPkg = pkgsRacket.racket;
+          racket-deps = racketDepsFor pkgs racketPkg;
           cpp = self.packages.${system}.cpp;
           cpp-cuda = self.packages.${system}.cpp-cuda;
           # The CUDA libtorch the shim links; its lib/ holds the bundled cuDNN
@@ -409,7 +428,7 @@
             pkgs.clang-tools
             pkgs.gtest
             pkgs.ninja
-            pkgs.racket
+            racketPkg
             torch
             pkgs.stdenv.cc
           ];
