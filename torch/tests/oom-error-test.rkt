@@ -35,6 +35,14 @@
     (check-pred exn:fail? e)
     (check-regexp-match #rx"zeros" (exn-message e)))
 
+  (test-case "randn OOM surfaces typed through the no-retry RNG path"
+    ;; the RNG family skips the retry but its FINAL failure must still
+    ;; classify: allocation fails before any generator draw
+    (check-pred exn:fail:rktorch:oom?
+                (with-handlers ([exn:fail? values])
+                  (randn 1152921504606846976)
+                  (fail "absurd randn unexpectedly succeeded"))))
+
   (test-case "non-OOM failures stay plain exn:fail"
     (define e
       (with-handlers ([exn:fail? values])
