@@ -205,8 +205,15 @@ module's full export set (`racket/runtime-path`, `syntax/parse/pre`).
   `#:wrap tensor-allocator` (see `raw/memory.rkt`), which composes the
   finalizer registration (`allocator` over the guarded, finalizer-context
   `tr-tensor-free/finalizer`) with the #37 memory-pressure ledger charge
-  (phantom bytes + per-device accounting). Never hand-write a bare
-  `(allocator ...)` wrap — it would skip the ledger. Explicit synchronous
+  (phantom bytes + per-device accounting) and the #38 OOM
+  collect-and-retry (one GC + finalizer drain, then exactly one retry,
+  keyed off `tr_last_error_kind`). Bindings that draw from the global
+  RNG stream (randn/rand; generated ops flagged `rng` in the codegen
+  allowlist, e.g. dropout) take `tensor-allocator/rng` instead — the
+  same wrap minus the retry, so a retry can never double-draw and break
+  seeded parity. OOM-classified failures reach users as
+  `exn:fail:rktorch:oom` (catch by type, not message). Never hand-write
+  a bare `(allocator ...)` wrap — it would skip the ledger. Explicit synchronous
   release goes through the raising, finalizer-cancelling
   `tr-tensor-free/checked`.
 - `nn.rkt` — contracted facade over `nn/` (`module.rkt` = `gen:module` +

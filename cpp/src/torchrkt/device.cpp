@@ -95,8 +95,7 @@ int tr_cuda_is_available(void) {
   try {
     return torch::cuda::is_available() ? 1 : 0;
   } catch (const std::exception& e) {
-    torchrkt::set_error(std::string("tr_cuda_is_available: ") + e.what(),
-                        torchrkt::classify(e));
+    torchrkt::record_failure("tr_cuda_is_available", e);
     return 0;
   } catch (...) {
     torchrkt::set_error("tr_cuda_is_available: unknown exception");
@@ -110,8 +109,7 @@ int tr_cuda_device_count(void) {
                ? static_cast<int>(torch::cuda::device_count())
                : 0;
   } catch (const std::exception& e) {
-    torchrkt::set_error(std::string("tr_cuda_device_count: ") + e.what(),
-                        torchrkt::classify(e));
+    torchrkt::record_failure("tr_cuda_device_count", e);
     return 0;
   } catch (...) {
     torchrkt::set_error("tr_cuda_device_count: unknown exception");

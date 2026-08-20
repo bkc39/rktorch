@@ -65,7 +65,9 @@ inline void record_failure(const char* who, const std::exception& e) noexcept {
   try {
     set_error(std::string(who) + ": " + e.what(), kind);
   } catch (...) {
-    set_error_oom(who);
+    // Preserve the CLASSIFIED kind: a generic failure whose message
+    // build coincidentally hit exhaustion still reports generic.
+    set_error_fallback(who, kind);
   }
 }
 
@@ -73,7 +75,7 @@ inline void record_unknown_failure(const char* who) noexcept {
   try {
     set_error(std::string(who) + ": unknown exception");
   } catch (...) {
-    set_error_oom(who);
+    set_error_fallback(who, error_kind::generic);
   }
 }
 

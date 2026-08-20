@@ -54,8 +54,7 @@ int tr_tensor_numel(const tr_tensor* t, int64_t* out) {
     *out = t->value.numel();
     return 0;
   } catch (const std::exception& e) {
-    torchrkt::set_error(std::string("tr_tensor_numel: ") + e.what(),
-                        torchrkt::classify(e));
+    torchrkt::record_failure("tr_tensor_numel", e);
     return 1;
   }
 }
@@ -81,8 +80,7 @@ int tr_tensor_ndim(const tr_tensor* t, int64_t* out) {
     *out = t->value.dim();
     return 0;
   } catch (const std::exception& e) {
-    torchrkt::set_error(std::string("tr_tensor_ndim: ") + e.what(),
-                        torchrkt::classify(e));
+    torchrkt::record_failure("tr_tensor_ndim", e);
     return 1;
   }
 }
@@ -107,8 +105,7 @@ int tr_tensor_shape(const tr_tensor* t, int64_t capacity, int64_t* out_dims,
     }
     return 0;
   } catch (const std::exception& e) {
-    torchrkt::set_error(std::string("tr_tensor_shape: ") + e.what(),
-                        torchrkt::classify(e));
+    torchrkt::record_failure("tr_tensor_shape", e);
     return 1;
   }
 }

@@ -20,10 +20,16 @@ void set_error(const std::string& message);
 void set_error(const std::string& message, error_kind kind);
 
 // The exhaustion-safe recorder: never allocates on its own failure path,
-// so it is callable from a bad_alloc catch inside a noexcept boundary
-// (where a throwing message build would be std::terminate). Message is
-// best-effort; the OOM kind is always recorded.
-void set_error_oom(const char* who) noexcept;
+// so it is callable from inside a noexcept boundary when the rich
+// message build has itself failed (a throwing catch there would be
+// std::terminate). Message is best-effort; the given kind is always
+// recorded — pass the CLASSIFIED kind, so a generic failure whose
+// message build coincidentally hit exhaustion still reports generic.
+void set_error_fallback(const char* who, error_kind kind) noexcept;
+
+inline void set_error_oom(const char* who) noexcept {
+  set_error_fallback(who, error_kind::oom);
+}
 
 std::string last_error();
 error_kind last_error_kind();
