@@ -54,7 +54,8 @@ int tr_tensor_numel(const tr_tensor* t, int64_t* out) {
     *out = t->value.numel();
     return 0;
   } catch (const std::exception& e) {
-    torchrkt::set_error(std::string("tr_tensor_numel: ") + e.what());
+    torchrkt::set_error(std::string("tr_tensor_numel: ") + e.what(),
+                        torchrkt::classify(e));
     return 1;
   }
 }
@@ -80,7 +81,8 @@ int tr_tensor_ndim(const tr_tensor* t, int64_t* out) {
     *out = t->value.dim();
     return 0;
   } catch (const std::exception& e) {
-    torchrkt::set_error(std::string("tr_tensor_ndim: ") + e.what());
+    torchrkt::set_error(std::string("tr_tensor_ndim: ") + e.what(),
+                        torchrkt::classify(e));
     return 1;
   }
 }
@@ -105,7 +107,8 @@ int tr_tensor_shape(const tr_tensor* t, int64_t capacity, int64_t* out_dims,
     }
     return 0;
   } catch (const std::exception& e) {
-    torchrkt::set_error(std::string("tr_tensor_shape: ") + e.what());
+    torchrkt::set_error(std::string("tr_tensor_shape: ") + e.what(),
+                        torchrkt::classify(e));
     return 1;
   }
 }
@@ -130,7 +133,8 @@ int tr_tensor_copy_data(const tr_tensor* t, uint64_t capacity, float* out,
     }
     return 0;
   } catch (const std::exception& e) {
-    torchrkt::set_error(std::string("tr_tensor_copy_data: ") + e.what());
+    torchrkt::set_error(std::string("tr_tensor_copy_data: ") + e.what(),
+                        torchrkt::classify(e));
     return 1;
   }
 }
@@ -174,7 +178,8 @@ int tr_tensor_print(const tr_tensor* t, uint64_t buffer_capacity,
     }
     return 0;
   } catch (const std::exception& e) {
-    torchrkt::set_error(std::string("tr_tensor_print: ") + e.what());
+    torchrkt::set_error(std::string("tr_tensor_print: ") + e.what(),
+                        torchrkt::classify(e));
     return 1;
   }
 }

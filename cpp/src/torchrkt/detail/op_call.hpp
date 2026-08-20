@@ -3,6 +3,7 @@
 #include <c10/util/Exception.h>
 
 #include <exception>
+#include <new>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -37,6 +38,11 @@ namespace torchrkt {
 // plans/gpu-memory-management.md, leg 1.5).
 inline error_kind classify(const std::exception& e) noexcept {
   if (dynamic_cast<const c10::OutOfMemoryError*>(&e) != nullptr) {
+    return error_kind::oom;
+  }
+  // The handle wrapper's own `new tr_tensor` (and any std allocator on the
+  // boundary path) fails as std::bad_alloc — an allocation failure too.
+  if (dynamic_cast<const std::bad_alloc*>(&e) != nullptr) {
     return error_kind::oom;
   }
   if (std::string_view(e.what()).find("DefaultCPUAllocator") !=

@@ -12,8 +12,7 @@
 ;; layer's collect-and-retry (raw/memory.rkt) has already run for eligible
 ;; ops: an OOM surfacing to user code means one GC did not free enough.
 
-(require (only-in "raw/global.rkt" tr-last-error/raw)
-         (only-in "raw/memory.rkt" tr-last-error-kind/raw))
+(require (only-in "raw/global.rkt" tr-last-error-kind/raw tr-last-error/raw))
 
 (provide check-ok
          check-handle
@@ -26,9 +25,9 @@
 ;; unchanged either way).
 (define (raise-torch-failure who message)
   (define full (format "~a: ~a" who message))
-  (if (= 1 (tr-last-error-kind/raw))
-      (raise (exn:fail:rktorch:oom full (current-continuation-marks)))
-      (raise (exn:fail full (current-continuation-marks)))))
+  (when (= 1 (tr-last-error-kind/raw))
+    (raise (exn:fail:rktorch:oom full (current-continuation-marks))))
+  (raise (exn:fail full (current-continuation-marks))))
 
 (define (check-ok rc who)
   (unless (zero? rc)

@@ -18,7 +18,9 @@
                      ;; whole-module on purpose: syntax-parse patterns
                      ;; reference many exported bindings
                      syntax/parse/pre)
-         (only-in ffi/unsafe _double _enum _fun _int _int64 _ptr _void)
+         (only-in ffi/unsafe
+                  _double _enum _fun _int _int64 _ptr _void
+                  register-finalizer)
          (only-in ffi/unsafe/alloc allocator deallocator)
          (only-in ffi/unsafe/atomic call-as-atomic)
          (only-in "../device-type.rkt" device device-index device-type)
@@ -226,9 +228,9 @@
 
 ;; --- graceful OOM: kind probe + collect-and-retry (#38 leg 1.5) ----------
 
-;; The error-kind probe (third probe hosted here for the same cycle-free
-;; reason as the nbytes/device pair; raw/global.rkt re-provides it beside
-;; tr-last-error/raw). 0 generic, 1 out-of-memory — the C side records it
+;; The error-kind probe — third probe hosted here for the same
+;; cycle-free reason as the nbytes/device pair; raw/global.rkt
+;; re-provides it beside tr-last-error/raw (mirroring raw/device.rkt). 0 generic, 1 out-of-memory — the C side records it
 ;; together with every message, so it always describes the LAST failure.
 (define-torch tr-last-error-kind/raw
   (_fun -> _int)
@@ -237,7 +239,25 @@
 (define (last-error-oom?)
   (= 1 (tr-last-error-kind/raw)))
 
-;; Retry a NULL-returning raw call exactly once after a garbage collection
+;; Collect, then wait (bounded) for the finalizer executor to work
+;; through the frees the collection queued. register-finalizer callbacks
+;; run ASYNCHRONOUSLY on the runtime's executor thread — the repo's own
+;; finalizer tests settle with collect+wait rounds for exactly this
+;; reason — so a retry issued immediately after collect-garbage could
+;; refail against native memory whose release is still queued. The
+;; canary is registered after the dead handles' finalizers; observing it
+;; run is a strong (not guaranteed — execution order across objects is
+;; unspecified) signal the queue that includes them has drained, and the
+;; timeout bounds the wait when the canary survives this collection or
+;; the executor is busy. Worst case is a bounded pause on a path that
+;; has already failed once.
+(define (collect-and-drain!)
+  (define drained (make-semaphore 0))
+  (register-finalizer (box 0) (lambda (_) (semaphore-post drained)))
+  (collect-garbage)
+  (void (sync/timeout 0.5 drained)))
+
+;; Retry a NULL-returning raw call exactly once after a collect+drain
 ;; when the C side classified the failure as OOM: finalizing dead handles
 ;; returns their blocks to the allocator, so the one measured failure mode
 ;; leg 1's pressure can't fully close — an unlucky allocation striking
@@ -250,7 +270,7 @@
 ;; injectable probes so the mechanism is unit-testable without provoking
 ;; real exhaustion.
 (define ((oom-retry #:oom? [oom? last-error-oom?]
-                    #:collect! [collect! collect-garbage])
+                    #:collect! [collect! collect-and-drain!])
          raw-fn)
   (lambda args
     (define t (apply raw-fn args))
@@ -271,10 +291,15 @@
 ;; The one wrap every tensor-returning raw binding carries (hand-written
 ;; via the op-definer macros below and the explicit #:wrap sites; generated
 ;; via define-generated.rkt): GC-managed lifetime, the #37 pressure charge,
-;; and the OOM collect-and-retry. The retry sits INSIDE the allocator wrap
-;; so only the final, surviving handle gets a finalizer registered.
+;; and the OOM collect-and-retry. The retry composes OUTSIDE the allocator
+;; wrap: ffi/unsafe/alloc runs the wrapped call in ATOMIC MODE, where the
+;; drain's blocking wait is an internal error ("attempt to deschedule the
+;; current thread in atomic mode" — caught by the test suite when the
+;; retry sat inside). Correctness is unchanged: the allocator registers a
+;; finalizer only on a non-NULL result, so a failed first call registers
+;; nothing and the retried call's handle is registered exactly once.
 (define (tensor-allocator raw-fn)
-  (accounted ((allocator tr-tensor-free/finalizer) ((oom-retry) raw-fn))))
+  (accounted ((oom-retry) ((allocator tr-tensor-free/finalizer) raw-fn))))
 
 ;; tensor-allocator minus the retry, for bindings that consume the global
 ;; RNG stream (randn/rand; dropout via the generated layer's #:rng flag):

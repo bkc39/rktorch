@@ -35,13 +35,6 @@
 ;; bypass contract-out; their expansions bottom out in the contracted procedures.
 (provide with-no-grad with-default-device)
 
-;; The typed OOM predicate (plain provide, like the syntactic exports
-;; above: a predicate needs no contract). An allocation failure the C
-;; side classified as exhaustion raises exn:fail:rktorch:oom — catch it
-;; with this instead of regexing exn messages; everything else about the
-;; exn matches exn:fail.
-(provide exn:fail:rktorch:oom?)
-
 ;; Arithmetic operators (+ - * / and matmul's @) shadow racket/base in the
 ;; rkt-polars style: plain renames rather than contract-out, so the numeric
 ;; fast path pays no contract overhead; the tensor paths produce the same
@@ -57,6 +50,9 @@
   [rand (->* () #:rest dims-rest/c tensor?)]
   [uniform! (-> tensor? real? real? void?)]
   [tensor? (-> any/c boolean?)]
+  ;; #t for an allocation-exhaustion failure (a plain exn:fail subtype):
+  ;; catch OOM by type, never by regexing exn messages.
+  [exn:fail:rktorch:oom? (-> any/c boolean?)]
   [tensor-shape (-> tensor? (listof exact-nonnegative-integer?))]
   [tensor-numel (-> tensor? exact-nonnegative-integer?)]
   [tensor->vector (-> tensor? f32vector?)]

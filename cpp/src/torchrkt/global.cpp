@@ -7,6 +7,7 @@
 #include <string>
 
 #include "torchrkt/detail/error.hpp"
+#include "torchrkt/detail/op_call.hpp"
 
 extern "C" {
 
@@ -33,7 +34,8 @@ int tr_manual_seed(uint64_t seed) {
     torch::manual_seed(seed);
     return 0;
   } catch (const std::exception& e) {
-    torchrkt::set_error(std::string("tr_manual_seed: ") + e.what());
+    torchrkt::set_error(std::string("tr_manual_seed: ") + e.what(),
+                        torchrkt::classify(e));
     return 1;
   } catch (...) {
     torchrkt::set_error("tr_manual_seed: unknown exception");
