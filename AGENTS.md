@@ -201,8 +201,9 @@ module's full export set (`racket/runtime-path`, `syntax/parse/pre`).
   `syntax` (the pure FFI definer + `_Tensor` cpointer), `memory` (the
   lifetime/#37 substrate: frees, pressure ledger, `tensor-allocator`,
   op-definer macros), `global`, `tensor`, `random`, `creation`,
-  `shape-ops`, `elementwise`, `reduce`, `linalg`, `autograd`. Tensor-returning bindings always carry
-  `#:wrap tensor-allocator` (see `raw/memory.rkt`), which composes the
+  `shape-ops`, `elementwise`, `reduce`, `linalg`, `autograd`. Every
+  tensor-returning binding carries one of the two allocator wraps from
+  `raw/memory.rkt` — `tensor-allocator` by default — which composes the
   finalizer registration (`allocator` over the guarded, finalizer-context
   `tr-tensor-free/finalizer`) with the #37 memory-pressure ledger charge
   (phantom bytes + per-device accounting) and the #38 OOM
