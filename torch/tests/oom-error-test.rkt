@@ -3,10 +3,10 @@
 ;; Leg 1.5 (#38): typed OOM errors + the collect-and-retry mechanism.
 ;;
 ;; The end-to-end cases lean on the one portably provokable exhaustion:
-;; a CPU request beyond PTRDIFF_MAX, which malloc rejects upfront by
-;; policy on every 64-bit platform (no overcommit-then-OOM-killer
-;; hazard; the same shape the C-side gtest CpuOomClassifiesAsOomKind
-;; pins). The retry mechanism is
+;; a CPU request beyond the architectural user address space of every
+;; 64-bit platform, which no allocator can map regardless of kernel
+;; policy or overcommit mode (no OOM-killer hazard; the same shape the
+;; C-side gtest CpuOomClassifiesAsOomKind pins). The retry mechanism is
 ;; tested at the combinator level with injected probes, matching
 ;; finalizer-guard-test.rkt's style: provoking a real
 ;; fails-once-then-succeeds exhaustion would need a full memory squeeze,
@@ -17,10 +17,11 @@
            "../main.rkt"
            (only-in "../foreign/raw/memory.rkt" oom-retry))
 
-  ;; 2^60 floats = 4 EiB: beyond PTRDIFF_MAX, which malloc rejects
-  ;; upfront by policy on every 64-bit platform -- deterministic failure
-  ;; with no overcommit/fault-in hazard (and below INT64_MAX, so ATen's
-  ;; numel arithmetic can't overflow into a different error shape).
+  ;; 2^60 floats = 2^62 bytes (4 EiB): beyond the architectural user
+  ;; address space of any 64-bit platform (at most 2^56/2^57 VA bits
+  ;; even with 5-level paging) -- deterministic upfront failure, no
+  ;; overcommit/fault-in hazard, and below INT64_MAX so ATen's numel
+  ;; arithmetic can't overflow into a different error shape.
   (define (absurd-alloc!)
     (zeros 1152921504606846976))
 
@@ -54,7 +55,9 @@
     (with-handlers ([exn:fail:rktorch:oom? void]) (absurd-alloc!))
     (define e2
       (with-handlers ([exn:fail? values])
-        (reshape (zeros 2 2) 3 5)))
+        (reshape (zeros 2 2) 3 5)
+        (fail "bad reshape unexpectedly succeeded")))
+    (check-pred exn:fail? e2)
     (check-false (exn:fail:rktorch:oom? e2)))
 
   ;; --- the retry combinator, mechanism level (injected probes) ----------
