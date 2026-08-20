@@ -91,6 +91,12 @@ def main() -> None:
             skips.append(result)
         else:
             if rng:
+                # rng marks tensor-returning ops for the no-retry wrap;
+                # in-place ops never take an allocator wrap at all, so
+                # the combination is a spec error, not a no-op.
+                if result.inplace:
+                    sys.exit(f"allowlist: {name!r}: `rng` is meaningless "
+                             "on an inplace op (no allocator wrap)")
                 result = dataclasses.replace(result, rng=True)
             shards.setdefault(shard, []).append(result)
     for ops in shards.values():
