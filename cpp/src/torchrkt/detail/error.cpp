@@ -24,4 +24,17 @@ error_kind last_error_kind() {
   return g_last_error_kind;
 }
 
+void set_error_oom(const char* who) noexcept {
+  try {
+    g_last_error.assign(who);
+    g_last_error.append(": std::bad_alloc");
+  } catch (...) {
+    // Even the assign can allocate mid-exhaustion; clear() cannot. The
+    // message is lost, the kind below still tells the caller what
+    // happened.
+    g_last_error.clear();
+  }
+  g_last_error_kind = error_kind::oom;
+}
+
 }  // namespace torchrkt

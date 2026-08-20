@@ -1,10 +1,10 @@
 #lang racket/base
 
 ;; Raw tensor constructors. `tr-randn/raw` returns a freshly-allocated _Tensor
-;; (or NULL on error); `tensor-allocator/rng` registers the GC — these draw from
-;; the global RNG stream, so they take the NO-RETRY wrap (see memory.rkt)
-;; finalizer so the handle is reclaimed automatically, exactly like xgboost's
-;; DMatrix/Booster constructors.
+;; (or NULL on error); `tensor-allocator/rng` registers the GC finalizer so the
+;; handle is reclaimed automatically, exactly like xgboost's DMatrix/Booster
+;; constructors — and these draw from the global RNG stream, so they take the
+;; NO-RETRY wrap (see memory.rkt) instead of `tensor-allocator`.
 
 (require (only-in ffi/unsafe _double _fun _int _int64)
          (only-in ffi/vector _s64vector)

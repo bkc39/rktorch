@@ -58,6 +58,12 @@ template <typename Fn>
 tr_tensor* alloc_result(const char* who, Fn&& fn) noexcept {
   try {
     return new tr_tensor{std::forward<Fn>(fn)()};
+  } catch (const std::bad_alloc&) {
+    // Mid-exhaustion the usual message build below could itself throw
+    // inside this noexcept frame (= std::terminate); record without
+    // allocating instead.
+    set_error_oom(who);
+    return nullptr;
   } catch (const std::exception& e) {
     set_error(std::string(who) + ": " + e.what(), classify(e));
     return nullptr;
@@ -74,6 +80,10 @@ int status_call(const char* who, Fn&& fn) noexcept {
   try {
     std::forward<Fn>(fn)();
     return 0;
+  } catch (const std::bad_alloc&) {
+    // See alloc_result: no allocation on the exhaustion path.
+    set_error_oom(who);
+    return 1;
   } catch (const std::exception& e) {
     set_error(std::string(who) + ": " + e.what(), classify(e));
     return 1;
