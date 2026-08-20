@@ -20,8 +20,8 @@
          tr-tensor-to-device/raw
          tr-tensor-device/raw)
 
-;; _tr-device-type and tr-tensor-device/raw live in syntax.rkt (the #37
-;; accounting there needs them too, and this module requires syntax.rkt, so
+;; _tr-device-type and tr-tensor-device/raw live in memory.rkt (the #37
+;; accounting there needs them too, and this module requires memory.rkt, so
 ;; that is the cycle-free canonical home); re-provided above unchanged.
 
 (define-torch tr-cuda-is-available/raw

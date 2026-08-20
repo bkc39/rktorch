@@ -13,7 +13,7 @@
 ;; pre-fix failure mode this exists to detect was an infinite
 ;; "invalid memory reference" handler cascade that pegged a core and grew
 ;; host memory until the OOM killer fired; if you ever see that again, the
-;; finalizer guard in torch/foreign/raw/syntax.rkt has regressed.
+;; finalizer guard in torch/foreign/raw/memory.rkt has regressed.
 ;; BALLOON defaults to 19 (survivable on an otherwise-idle 24 GiB card);
 ;; 22-23 forces the OOM.
 

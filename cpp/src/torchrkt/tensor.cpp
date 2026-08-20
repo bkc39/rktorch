@@ -39,7 +39,7 @@ void tr_tensor_free(tr_tensor* t) {
   // any handler at this layer, wherever the release statement is placed.
   // Pinned empirically by finalizer_death_test.cpp (a catch-based version
   // of this function still aborted the child). The finalizer-safety
-  // guarantee lives on the Racket side instead: raw/syntax.rkt wraps this
+  // guarantee lives on the Racket side instead: raw/memory.rkt wraps this
   // binding's deallocator and swallows the runtime-converted failure class
   // actually observed in issue #38.
   delete t;

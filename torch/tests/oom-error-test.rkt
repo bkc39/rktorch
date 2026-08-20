@@ -3,9 +3,10 @@
 ;; Leg 1.5 (#38): typed OOM errors + the collect-and-retry mechanism.
 ;;
 ;; The end-to-end cases lean on the one portably provokable exhaustion:
-;; a CPU request beyond user address space (the allocator rejects it
-;; upfront — no overcommit-then-OOM-killer hazard; the same shape the
-;; C-side gtest CpuOomClassifiesAsOomKind pins). The retry mechanism is
+;; a CPU request beyond PTRDIFF_MAX, which malloc rejects upfront by
+;; policy on every 64-bit platform (no overcommit-then-OOM-killer
+;; hazard; the same shape the C-side gtest CpuOomClassifiesAsOomKind
+;; pins). The retry mechanism is
 ;; tested at the combinator level with injected probes, matching
 ;; finalizer-guard-test.rkt's style: provoking a real
 ;; fails-once-then-succeeds exhaustion would need a full memory squeeze,
@@ -16,9 +17,12 @@
            "../main.rkt"
            (only-in "../foreign/raw/memory.rkt" oom-retry))
 
-  ;; 2^40 x 2^10 = 2^50 floats = 4 PiB: beyond any host's address space.
+  ;; 2^60 floats = 4 EiB: beyond PTRDIFF_MAX, which malloc rejects
+  ;; upfront by policy on every 64-bit platform -- deterministic failure
+  ;; with no overcommit/fault-in hazard (and below INT64_MAX, so ATen's
+  ;; numel arithmetic can't overflow into a different error shape).
   (define (absurd-alloc!)
-    (zeros 1099511627776 1024))
+    (zeros 1152921504606846976))
 
   (test-case "CPU exhaustion raises the typed exn"
     (define e

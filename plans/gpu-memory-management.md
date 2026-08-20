@@ -48,7 +48,7 @@ allocations to the GC:
 - So: `tr_tensor_free` stays a bare `delete` with the honest comment;
   the death test pins the terminate behavior (EXPECT_DEATH) and flips
   loudly if a libtorch upgrade ever makes the release path catchable.
-- The live guarantee is Racket-side: raw/syntax.rkt wraps the
+- The live guarantee is Racket-side: raw/memory.rkt wraps the
   deallocator (`with-handlers exn:fail? → void` around the C call), at
   the single choke point every allocator wrap references. This
   swallows the failure class actually observed in the #38 cascade —
@@ -77,7 +77,8 @@ two views over one storage each charge their own extent — mild
 over-counting is safe for pressure; a narrow view pinning a large
 storage under-charges, which is acceptable approximation (documented).
 
-Racket side — one choke point in `torch/foreign/raw/syntax.rkt`:
+Racket side — one choke point in `torch/foreign/raw/memory.rkt`
+(hosted in syntax.rkt when this was written; extracted in PR C):
 
     ;; replaces every bare (allocator tr-tensor-free/finalizer)
     (define tensor-allocator
