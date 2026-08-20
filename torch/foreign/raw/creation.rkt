@@ -6,11 +6,8 @@
 
 (require (only-in ffi/unsafe _double _fun _int64 _uint64)
          (only-in ffi/vector _f32vector _s64vector)
-         (only-in "syntax.rkt"
-                  _Tensor/null
-                  _tr-device-type
-                  define-torch
-                  tensor-allocator))
+         (only-in "memory.rkt" _tr-device-type tensor-allocator)
+         (only-in "syntax.rkt" _Tensor/null define-torch))
 
 (provide tr-zeros/raw
          tr-ones/raw

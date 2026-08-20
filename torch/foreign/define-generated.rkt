@@ -39,11 +39,8 @@
          (only-in ffi/unsafe _fun _int _int32 _int64 _double _list _stdbool)
          (only-in ffi/vector _s64vector list->s64vector)
          (only-in "error.rkt" check-handle check-ok)
-         (only-in "raw/syntax.rkt"
-                  _Tensor
-                  _Tensor/null
-                  define-torch
-                  tensor-allocator)
+         (only-in "raw/memory.rkt" tensor-allocator tensor-allocator/rng)
+         (only-in "raw/syntax.rkt" _Tensor _Tensor/null define-torch)
          (only-in "structs.rkt" wrap-tensor))
 
 (provide define-generated-op)
@@ -139,6 +136,25 @@
            (define (name arg ...)
              (check-ok (raw-name call-arg ...) 'name)
              recv)))]
+    ;; RNG ops (allowlist `rng` flag): identical to the tensor-returning
+    ;; arm below, but the no-retry allocator wrap — a collect-and-retry
+    ;; would draw from the generator twice and break seeded parity.
+    [(_ name:id c-id:id #:rng ([arg:id kind:id] ...))
+     (define-values (specs call-args)
+       (build-pieces stx
+                     (syntax->list #'(arg ...))
+                     (syntax->datum #'(kind ...))))
+     (with-syntax ([raw-name (format-id #'name "~a/raw" #'name)]
+                   [(spec ...) specs]
+                   [(call-arg ...) call-args])
+       #'(begin
+           (define-torch raw-name
+             (_fun spec ... -> _Tensor/null)
+             #:c-id c-id
+             #:wrap tensor-allocator/rng)
+           (define (name arg ...)
+             (wrap-tensor
+              (check-handle 'name (raw-name call-arg ...))))))]
     [(_ name:id c-id:id ([arg:id kind:id] ...))
      (define-values (specs call-args)
        (build-pieces stx

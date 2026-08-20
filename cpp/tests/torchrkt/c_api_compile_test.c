@@ -11,6 +11,7 @@ void torchrkt_c_api_compile_check(void);
 void torchrkt_c_api_compile_check(void) {
   const char* (*version)(void) = tr_version;
   const char* (*last_error)(void) = tr_last_error;
+  int (*last_error_kind)(void) = tr_last_error_kind;
   int (*manual_seed)(uint64_t) = tr_manual_seed;
   tr_tensor* (*randn)(const int64_t*, int64_t) = tr_randn;
   void (*tensor_free)(tr_tensor*) = tr_tensor_free;
@@ -117,6 +118,7 @@ void torchrkt_c_api_compile_check(void) {
 
   (void)version;
   (void)last_error;
+  (void)last_error_kind;
   (void)manual_seed;
   (void)randn;
   (void)tensor_free;

@@ -5,6 +5,7 @@ so cwd only matters for the module lookup."""
 
 from __future__ import annotations
 
+import dataclasses
 import shutil
 import subprocess
 import sys
@@ -26,18 +27,26 @@ RKT_WRAPPERS = ROOT / "torch" / "generated.rkt"
 MANIFEST = ROOT / "torch" / "tests" / "generated-parity.rktd"
 
 
-def read_allowlist() -> list[tuple[str, str]]:
-    entries: list[tuple[str, str]] = []
+def read_allowlist() -> list[tuple[str, str, bool]]:
+    entries: list[tuple[str, str, bool]] = []
     for raw_line in ALLOWLIST.read_text().splitlines():
         line = raw_line.split("#", 1)[0].strip()
         if not line:
             continue
-        fields = line.split(None, 1)
+        fields = line.split()
+        # `<shard> <op>` with an optional trailing `rng` flag marking ops
+        # that draw from the global generator stream: the Racket emitter
+        # gives those the no-retry allocator wrap (seeded-parity safety;
+        # see torch/foreign/raw/memory.rkt).
+        rng = False
+        if len(fields) == 3 and fields[2] == "rng":
+            rng = True
+            fields = fields[:2]
         if len(fields) != 2:
-            sys.exit(f"allowlist: malformed line (want '<shard> <op>'): "
+            sys.exit(f"allowlist: malformed line (want '<shard> <op> [rng]'): "
                      f"{raw_line!r}")
-        entry = (fields[0], fields[1].strip())
-        if entry in entries:
+        entry = (fields[0], fields[1], rng)
+        if entry[:2] in [e[:2] for e in entries]:
             sys.exit(f"allowlist: duplicate entry: {entry[0]} {entry[1]}")
         entries.append(entry)
     return entries
@@ -73,7 +82,7 @@ def main() -> None:
 
     shards: dict[str, list[Op]] = {}
     skips: list[Skip] = []
-    for shard, name in read_allowlist():
+    for shard, name, rng in read_allowlist():
         f = by_name.get(name)
         if f is None:
             sys.exit(f"allowlist: {name!r} not found in native_functions.yaml")
@@ -81,6 +90,14 @@ def main() -> None:
         if isinstance(result, Skip):
             skips.append(result)
         else:
+            if rng:
+                # rng marks tensor-returning ops for the no-retry wrap;
+                # in-place ops never take an allocator wrap at all, so
+                # the combination is a spec error, not a no-op.
+                if result.inplace:
+                    sys.exit(f"allowlist: {name!r}: `rng` is meaningless "
+                             "on an inplace op (no allocator wrap)")
+                result = dataclasses.replace(result, rng=True)
             shards.setdefault(shard, []).append(result)
     for ops in shards.values():
         ops.sort(key=lambda o: o.c_name)

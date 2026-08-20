@@ -6,7 +6,8 @@
 ;; box releases one reference, not the gradient itself.
 
 (require (only-in ffi/unsafe _bool _double _fun _int _ptr)
-         (only-in "syntax.rkt" _Tensor _Tensor/null define-torch tensor-allocator))
+         (only-in "memory.rkt" tensor-allocator)
+         (only-in "syntax.rkt" _Tensor _Tensor/null define-torch))
 
 (provide tr-tensor-requires-grad!/raw
          tr-tensor-requires-grad/raw

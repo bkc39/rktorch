@@ -39,7 +39,7 @@ void tr_tensor_free(tr_tensor* t) {
   // any handler at this layer, wherever the release statement is placed.
   // Pinned empirically by finalizer_death_test.cpp (a catch-based version
   // of this function still aborted the child). The finalizer-safety
-  // guarantee lives on the Racket side instead: raw/syntax.rkt wraps this
+  // guarantee lives on the Racket side instead: raw/memory.rkt wraps this
   // binding's deallocator and swallows the runtime-converted failure class
   // actually observed in issue #38.
   delete t;
@@ -54,7 +54,7 @@ int tr_tensor_numel(const tr_tensor* t, int64_t* out) {
     *out = t->value.numel();
     return 0;
   } catch (const std::exception& e) {
-    torchrkt::set_error(std::string("tr_tensor_numel: ") + e.what());
+    torchrkt::record_failure("tr_tensor_numel", e);
     return 1;
   }
 }
@@ -80,7 +80,7 @@ int tr_tensor_ndim(const tr_tensor* t, int64_t* out) {
     *out = t->value.dim();
     return 0;
   } catch (const std::exception& e) {
-    torchrkt::set_error(std::string("tr_tensor_ndim: ") + e.what());
+    torchrkt::record_failure("tr_tensor_ndim", e);
     return 1;
   }
 }
@@ -105,7 +105,7 @@ int tr_tensor_shape(const tr_tensor* t, int64_t capacity, int64_t* out_dims,
     }
     return 0;
   } catch (const std::exception& e) {
-    torchrkt::set_error(std::string("tr_tensor_shape: ") + e.what());
+    torchrkt::record_failure("tr_tensor_shape", e);
     return 1;
   }
 }
@@ -130,7 +130,9 @@ int tr_tensor_copy_data(const tr_tensor* t, uint64_t capacity, float* out,
     }
     return 0;
   } catch (const std::exception& e) {
-    torchrkt::set_error(std::string("tr_tensor_copy_data: ") + e.what());
+    // The contiguous float copy above can be large: record noexcept-safely
+    // (rich message when it can allocate, kind-only when it can't).
+    torchrkt::record_failure("tr_tensor_copy_data", e);
     return 1;
   }
 }
@@ -174,7 +176,9 @@ int tr_tensor_print(const tr_tensor* t, uint64_t buffer_capacity,
     }
     return 0;
   } catch (const std::exception& e) {
-    torchrkt::set_error(std::string("tr_tensor_print: ") + e.what());
+    // The render allocates the whole text: same noexcept-safe recording
+    // as tr_tensor_copy_data.
+    torchrkt::record_failure("tr_tensor_print", e);
     return 1;
   }
 }

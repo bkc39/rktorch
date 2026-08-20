@@ -14,7 +14,7 @@
 // move-assign, ~TensorImpl/~StorageImpl/~DataPtr) and reaches
 // std::terminate before ANY catch at our layer — catch-based versions of
 // tr_tensor_free still aborted this child. The live finalizer-safety
-// guarantee is Racket-side (raw/syntax.rkt's deallocator wrap). If a
+// guarantee is Racket-side (raw/memory.rkt's deallocator wrap). If a
 // libtorch upgrade ever makes the release path catchable, this test fails
 // — the signal to reconsider a C++-side catch.
 namespace {

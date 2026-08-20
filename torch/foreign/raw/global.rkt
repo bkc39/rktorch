@@ -3,10 +3,17 @@
 ;; Raw global torchrkt APIs: libtorch version, last-error, and RNG seeding.
 
 (require (only-in ffi/unsafe _fun _int _string/utf-8 _uint64)
+         ;; the kind probe lives in memory.rkt (its retry needs it and
+         ;; global.rkt->memory.rkt would cycle the other way); re-provided
+         ;; here so the module mirroring global.cpp carries the full
+         ;; last-error API, like raw/device.rkt re-provides the device
+         ;; probe.
+         (only-in "memory.rkt" tr-last-error-kind/raw)
          (only-in "syntax.rkt" define-torch))
 
 (provide tr-version/raw
          tr-last-error/raw
+         tr-last-error-kind/raw
          tr-manual-seed/raw)
 
 (define-torch tr-version/raw

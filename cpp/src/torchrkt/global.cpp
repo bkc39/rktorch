@@ -7,6 +7,7 @@
 #include <string>
 
 #include "torchrkt/detail/error.hpp"
+#include "torchrkt/detail/op_call.hpp"
 
 extern "C" {
 
@@ -20,8 +21,20 @@ const char* tr_version(void) {
 
 const char* tr_last_error(void) {
   static thread_local std::string buf;
-  buf = torchrkt::last_error();
+  // The read must be as exhaustion-safe as the recording: both copies
+  // (last_error()'s by-value return and the assignment) allocate, and a
+  // throw here would cross the FFI boundary instead of letting the
+  // caller raise the typed exn. The literal fallback allocates nothing.
+  try {
+    buf = torchrkt::last_error();
+  } catch (...) {
+    return "torchrkt: message unavailable under memory exhaustion";
+  }
   return buf.c_str();
+}
+
+int tr_last_error_kind(void) {
+  return static_cast<int>(torchrkt::last_error_kind());
 }
 
 int tr_manual_seed(uint64_t seed) {
@@ -29,10 +42,10 @@ int tr_manual_seed(uint64_t seed) {
     torch::manual_seed(seed);
     return 0;
   } catch (const std::exception& e) {
-    torchrkt::set_error(std::string("tr_manual_seed: ") + e.what());
+    torchrkt::record_failure("tr_manual_seed", e);
     return 1;
   } catch (...) {
-    torchrkt::set_error("tr_manual_seed: unknown exception");
+    torchrkt::record_unknown_failure("tr_manual_seed");
     return 1;
   }
 }

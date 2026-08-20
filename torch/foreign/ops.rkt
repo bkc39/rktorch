@@ -14,9 +14,9 @@
                   tr-set-default-device/raw
                   tr-tensor-device/raw
                   tr-tensor-to-device/raw)
-         (only-in "raw/global.rkt" tr-last-error/raw tr-manual-seed/raw tr-version/raw)
+         (only-in "raw/global.rkt" tr-manual-seed/raw tr-version/raw)
+         (only-in "raw/memory.rkt" native-memory-use)
          (only-in "raw/random.rkt" tr-rand/raw tr-randn/raw tr-tensor-uniform!/raw)
-         (only-in "raw/syntax.rkt" native-memory-use)
          (only-in "raw/tensor.rkt"
                   tr-tensor-copy-data/raw
                   tr-tensor-item/raw
@@ -62,10 +62,8 @@
   (void))
 
 (define (randn . dims)
-  (define h (tr-randn/raw (list->s64vector dims) (length dims)))
-  (unless h
-    (error 'randn "randn failed: ~a" (tr-last-error/raw)))
-  (wrap-tensor h))
+  (wrap-tensor
+   (check-handle 'randn (tr-randn/raw (list->s64vector dims) (length dims)))))
 
 ;; Uniform draws on [0, 1), torch.rand.
 (define (rand . dims)

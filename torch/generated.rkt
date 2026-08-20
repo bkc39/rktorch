@@ -86,7 +86,7 @@
 (define-generated-op dot tr_gen_dot
   ([self tensor] [tensor-arg tensor]))
 
-(define-generated-op dropout tr_gen_dropout
+(define-generated-op dropout tr_gen_dropout #:rng
   ([input tensor] [p double] [train bool]))
 
 (define-generated-op embedding tr_gen_embedding

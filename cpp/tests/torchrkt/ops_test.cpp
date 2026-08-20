@@ -52,7 +52,7 @@ Handle make(const std::vector<float>& values,
 // Contract pin for the documented NULL no-op. The throwing-release
 // behavior is pinned separately by finalizer_death_test.cpp (it
 // terminates regardless of any C++ catch; the live guarantee is the
-// Racket-side deallocator wrap in raw/syntax.rkt).
+// Racket-side deallocator wrap in raw/memory.rkt).
 TEST(TorchrktOps, TensorFreeNullIsSafe) {
   tr_tensor_free(nullptr);
 }
@@ -108,6 +108,37 @@ TEST(TorchrktOps, FromDataRejectsOverflowingShape) {
   const std::vector<int64_t> negative = {-1, 2};
   EXPECT_EQ(tr_from_data(values.data(), values.size(), negative.data(), 2),
             nullptr);
+}
+
+TEST(TorchrktOps, CpuOomClassifiesAsOomKind) {
+  // The portable OOM regression guard leg 1.5's design leans on: CPU
+  // allocation failure arrives via the caffe2-style enforce (a plain
+  // c10::Error naming DefaultCPUAllocator, NOT c10::OutOfMemoryError),
+  // and the classifier must still report kind 1. 2^60 floats = 2^62
+  // bytes (4 EiB): beyond the ARCHITECTURAL user address space of every
+  // 64-bit platform -- at most 2^56/2^57 virtual bits even with x86-64
+  // 5-level paging or ARM64 52-bit VA -- so no allocator can map it
+  // regardless of kernel policy or overcommit mode (an architecture
+  // bound, not an assumption; no fault-in-pages hazard). nbytes stays
+  // below INT64_MAX so ATen's own arithmetic cannot overflow into a
+  // different error shape.
+  const std::vector<int64_t> dims = {int64_t{1} << 60};
+  EXPECT_EQ(tr_zeros(dims.data(), 1), nullptr);
+  EXPECT_EQ(tr_last_error_kind(), 1) << tr_last_error();
+  EXPECT_STRNE(tr_last_error(), "");
+}
+
+TEST(TorchrktOps, GenericErrorResetsKind) {
+  // kind and message are recorded together: after an OOM, a subsequent
+  // generic failure must report kind 0 again, never a stale 1.
+  // (2^60 floats: the beyond-architectural-VA request, see
+  // CpuOomClassifiesAsOomKind.)
+  const std::vector<int64_t> dims = {int64_t{1} << 60};
+  EXPECT_EQ(tr_zeros(dims.data(), 1), nullptr);
+  EXPECT_EQ(tr_last_error_kind(), 1) << tr_last_error();
+  int64_t out = 0;
+  EXPECT_EQ(tr_tensor_numel(nullptr, &out), 1);
+  EXPECT_EQ(tr_last_error_kind(), 0) << tr_last_error();
 }
 
 TEST(TorchrktOps, CreationGoldens) {

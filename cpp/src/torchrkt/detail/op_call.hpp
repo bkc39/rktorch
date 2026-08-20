@@ -1,7 +1,11 @@
 #pragma once
 
+#include <c10/util/Exception.h>
+
 #include <exception>
+#include <new>
 #include <string>
+#include <string_view>
 #include <utility>
 
 #include "torchrkt/c_api/tensor.h"
@@ -21,10 +25,59 @@
 // on the storage-release path terminates inside libtorch's own noexcept
 // frames before any C++ handler (see finalizer_death_test.cpp), so their
 // safety guarantee lives in the Racket-side deallocator wrap
-// (torch/foreign/raw/syntax.rkt). New boundary functions should fit one of
+// (torch/foreign/raw/memory.rkt). New boundary functions should fit one of
 // these four shapes.
 
 namespace torchrkt {
+
+// Classify an exception crossing the boundary for tr_last_error_kind.
+// CUDA (and MPS) allocation exhaustion throws the typed subclass
+// c10::OutOfMemoryError; CPU allocation failure arrives as a plain
+// c10::Error from the caffe2-style enforce in alloc_cpu.cpp, so a
+// contained message match covers that shape (see the backend matrix in
+// plans/gpu-memory-management.md, leg 1.5).
+inline error_kind classify(const std::exception& e) noexcept {
+  if (dynamic_cast<const c10::OutOfMemoryError*>(&e) != nullptr) {
+    return error_kind::oom;
+  }
+  // The handle wrapper's own `new tr_tensor` (and any std allocator on the
+  // boundary path) fails as std::bad_alloc — an allocation failure too.
+  if (dynamic_cast<const std::bad_alloc*>(&e) != nullptr) {
+    return error_kind::oom;
+  }
+  if (std::string_view(e.what()).find("DefaultCPUAllocator") !=
+      std::string_view::npos) {
+    return error_kind::oom;
+  }
+  return error_kind::generic;
+}
+
+// Record a boundary failure noexcept-safely: classify first, then ATTEMPT
+// the rich message — the concatenation itself allocates, and under genuine
+// host exhaustion (as opposed to the architectural-VA rejections the tests
+// use) it can throw inside a noexcept frame (= std::terminate, the crash
+// class this leg exists to eliminate). The fallback records the kind (and
+// a best-effort message) without allocating. This covers every failure
+// shape, including the CPU allocator's enforce-path c10::Error and
+// std::bad_alloc, in one path.
+inline void record_failure(const char* who, const std::exception& e) noexcept {
+  const error_kind kind = classify(e);
+  try {
+    set_error(std::string(who) + ": " + e.what(), kind);
+  } catch (...) {
+    // Preserve the CLASSIFIED kind: a generic failure whose message
+    // build coincidentally hit exhaustion still reports generic.
+    set_error_fallback(who, kind);
+  }
+}
+
+inline void record_unknown_failure(const char* who) noexcept {
+  try {
+    set_error(std::string(who) + ": unknown exception");
+  } catch (...) {
+    set_error_fallback(who, error_kind::generic);
+  }
+}
 
 // Run `fn` (returning a torch::Tensor) and wrap the result in a fresh heap
 // handle; on any exception, stash the message and return NULL.
@@ -33,10 +86,10 @@ tr_tensor* alloc_result(const char* who, Fn&& fn) noexcept {
   try {
     return new tr_tensor{std::forward<Fn>(fn)()};
   } catch (const std::exception& e) {
-    set_error(std::string(who) + ": " + e.what());
+    record_failure(who, e);
     return nullptr;
   } catch (...) {
-    set_error(std::string(who) + ": unknown exception");
+    record_unknown_failure(who);
     return nullptr;
   }
 }
@@ -49,10 +102,10 @@ int status_call(const char* who, Fn&& fn) noexcept {
     std::forward<Fn>(fn)();
     return 0;
   } catch (const std::exception& e) {
-    set_error(std::string(who) + ": " + e.what());
+    record_failure(who, e);
     return 1;
   } catch (...) {
-    set_error(std::string(who) + ": unknown exception");
+    record_unknown_failure(who);
     return 1;
   }
 }

@@ -23,6 +23,7 @@
          racket/contract
          "foreign/contracts.rkt"
          "foreign/device-type.rkt"
+         (only-in "foreign/error.rkt" exn:fail:rktorch:oom?)
          "foreign/structs.rkt"
          "foreign/ops.rkt"
          "foreign/tensor-ops.rkt"
@@ -49,6 +50,9 @@
   [rand (->* () #:rest dims-rest/c tensor?)]
   [uniform! (-> tensor? real? real? void?)]
   [tensor? (-> any/c boolean?)]
+  ;; #t for an allocation-exhaustion failure (a plain exn:fail subtype):
+  ;; catch OOM by type, never by regexing exn messages.
+  [exn:fail:rktorch:oom? (-> any/c boolean?)]
   [tensor-shape (-> tensor? (listof exact-nonnegative-integer?))]
   [tensor-numel (-> tensor? exact-nonnegative-integer?)]
   [tensor->vector (-> tensor? f32vector?)]
@@ -170,7 +174,7 @@
   [to-dtype (-> tensor? (or/c 'float32 'float64 'int64) tensor?)]
   ;; native-memory observability (#37): live handle-attributed bytes per
   ;; device, folded from the accounting ledger — the view's extent per
-  ;; handle, not total device usage (see raw/syntax.rkt).
+  ;; handle, not total device usage (see raw/memory.rkt).
   [native-memory-use
    (-> (listof (cons/c device? exact-nonnegative-integer?)))]
   ;; device placement (cuda). Arguments admit device structs and the
