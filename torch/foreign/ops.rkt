@@ -30,6 +30,7 @@
                   wrap-tensor))
 
 (provide torch-version
+         device->type+index
          native-memory-use
          manual-seed!
          randn
@@ -38,6 +39,7 @@
          item
          to-dtype
          cuda-available?
+         cuda-if-available
          cuda-device-count
          set-default-device!
          default-device
@@ -108,6 +110,14 @@
 ;; in tr_last_error, but this predicate doesn't surface it (it stays a boolean).
 (define (cuda-available?)
   (= 1 (tr-cuda-is-available/raw)))
+
+;; The pick-the-accelerator idiom every example re-defines locally as
+;; pick-device, now offered by the library: the GPU when one is usable,
+;; the CPU otherwise. (The literate examples still teach their own
+;; pick-device — folding them over to this is deliberate follow-up work,
+;; since their prose walks through the idiom.)
+(define (cuda-if-available)
+  (if (cuda-available?) (cuda-device) (cpu-device)))
 
 ;; Number of visible CUDA devices, 0 when CUDA is unavailable (see
 ;; cuda-available? re: a driver-failure 0).

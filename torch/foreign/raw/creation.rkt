@@ -6,14 +6,19 @@
 
 (require (only-in ffi/unsafe _double _fun _int64 _uint64)
          (only-in ffi/vector _f32vector _s64vector)
-         (only-in "syntax.rkt" _Tensor/null define-torch tensor-allocator))
+         (only-in "syntax.rkt"
+                  _Tensor/null
+                  _tr-device-type
+                  define-torch
+                  tensor-allocator))
 
 (provide tr-zeros/raw
          tr-ones/raw
          tr-full/raw
          tr-arange/raw
          tr-eye/raw
-         tr-from-data/raw)
+         tr-from-data/raw
+         tr-from-data-on/raw)
 
 (define-torch tr-zeros/raw
   (_fun (dims : (_s64vector i)) (ndim : _int64) -> _Tensor/null)
@@ -47,4 +52,18 @@
         (ndim : _int64)
         -> _Tensor/null)
   #:c-id tr_from_data
+  #:wrap tensor-allocator)
+
+;; tr-from-data/raw with an EXPLICIT device: placement never routes host
+;; data through the process default device (a CUDA default would cost an
+;; explicitly-CPU tensor a host->GPU->CPU bounce, or a CUDA OOM).
+(define-torch tr-from-data-on/raw
+  (_fun (data : (_f32vector i))
+        (numel : _uint64)
+        (dims : (_s64vector i))
+        (ndim : _int64)
+        (device-type : _tr-device-type)
+        (device-index : _int64)
+        -> _Tensor/null)
+  #:c-id tr_from_data_on
   #:wrap tensor-allocator)

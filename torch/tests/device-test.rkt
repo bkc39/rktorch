@@ -41,6 +41,41 @@
     (check-equal? (hash-ref h (cuda-device 3)) 1)
     (check-equal? (hash-count h) 2))
 
+  (test-case "tensor #:device places construction; cuda-if-available picks"
+    ;; the smart constructor's keyword places via construct-then-move
+    ;; (never by touching the process-global default device) — the
+    ;; ambient default is untouched after.
+    (set-default-device! 'cpu)
+    (define t (tensor '(1 2 3) #:device (cpu-device)))
+    (check-equal? (tensor-device t) (cpu-device))
+    (check-equal? (tensor-device (tensor '(1 2) #:device 'cpu)) (cpu-device))
+    (check-equal? (default-device) (cpu-device))
+    ;; requires-grad composes with #:device
+    (check-true (requires-grad?
+                 (tensor '(1.0) #:device (cpu-device) #:requires-grad? #t)))
+    ;; cuda-if-available: the promoted pick-device idiom. The expected
+    ;; side is derived from device-TYPE symbols, not by mirroring the
+    ;; implementation's own constructor expression — a swapped branch in
+    ;; cuda-if-available must produce a mismatch here, not reproduce it.
+    (check-equal? (device-type (cuda-if-available))
+                  (if (cuda-available?) 'cuda 'cpu))
+    (check-equal? (device-index (cuda-if-available)) 0)
+    (when (cuda-available?)
+      (define g (tensor '(1 2 3) #:device (cuda-device)))
+      (check-equal? (tensor-device g) (cuda-device 0))
+      ;; the payload survives the CPU->CUDA construction leg, not just the
+      ;; device tag (marshalled back through an explicit move to CPU)
+      (check-equal? (tensor->list (to-device g (cpu-device))) '(1.0 2.0 3.0))
+      (check-equal? (default-device) (cpu-device))
+      ;; placement is passed into native construction, so an explicitly-CPU
+      ;; tensor under a CUDA default lands on CPU (no host->GPU->CPU
+      ;; bounce). with-default-device restores on ANY exit, so a failing
+      ;; check can't leak a CUDA default onto later test-cases.
+      (with-default-device (cuda-device)
+        (check-equal? (tensor-device (tensor '(4 5) #:device (cpu-device)))
+                      (cpu-device)))
+      (check-equal? (default-device) (cpu-device))))
+
   (test-case "device arguments accept structs and legacy forms alike"
     ;; the accept-both contract: every device-taking entry point normalizes
     ;; struct and legacy inputs identically; queries return structs.

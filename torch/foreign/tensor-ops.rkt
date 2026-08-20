@@ -23,9 +23,11 @@
          (only-in racket/math [tanh base:tanh])
          (only-in racket/list [argmax base:argmax] flatten)
          (only-in "error.rkt" check-handle)
+         (only-in "ops.rkt" device->type+index)
          (only-in "raw/creation.rkt"
                   tr-arange/raw
                   tr-eye/raw
+                  tr-from-data-on/raw
                   tr-from-data/raw
                   tr-full/raw
                   tr-ones/raw
@@ -151,18 +153,33 @@
     [(null? data) '(0)]
     [else (cons (length data) (nested-dims (car data)))]))
 
-(define (tensor data #:requires-grad? [requires-grad? #f])
+(define (tensor data #:requires-grad? [requires-grad? #f] #:device [device #f])
   (define dims (nested-dims data))
   (define flat (if (list? data) (flatten data) (list data)))
   (unless (= (length flat) (apply * dims))
     (error 'tensor "ragged nested list; dims ~a need ~a values, got ~a"
            dims (apply * dims) (length flat)))
+  ;; #:device passes the placement into NATIVE construction
+  ;; (tr_from_data_on) rather than scoping the process-global default
+  ;; (races concurrent constructors) or constructing-then-moving (the
+  ;; construction itself routes host data through the default device, so
+  ;; an explicitly-CPU tensor under a CUDA default would bounce
+  ;; host->GPU->CPU — or CUDA-OOM). requires-grad! comes after placement
+  ;; so the result is a LEAF on the target device, matching
+  ;; torch.tensor(data, device=..., requires_grad=True).
+  (define payload (list->f32vector (map exact->inexact flat)))
+  (define dim-vec (list->s64vector dims))
   (define out
     (wrap 'tensor
-          (tr-from-data/raw (list->f32vector (map exact->inexact flat))
-                            (length flat)
-                            (list->s64vector dims)
-                            (length dims))))
+          (cond
+            [device
+             (define-values (type index) (device->type+index device))
+             (tr-from-data-on/raw payload (length flat)
+                                  dim-vec (length dims)
+                                  type index)]
+            [else
+             (tr-from-data/raw payload (length flat)
+                               dim-vec (length dims))])))
   (if requires-grad? (requires-grad! out) out))
 
 ;; --------------------------------------------------------------- shape ops

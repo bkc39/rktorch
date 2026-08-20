@@ -77,6 +77,40 @@ TEST(TorchrktDevice, ToDeviceCpuIsIdentity) {
   EXPECT_EQ(data_of(moved.t), values);
 }
 
+TEST(TorchrktDevice, FromDataOnPlacesOnExplicitCpu) {
+  const std::vector<float> values = {1.0F, 2.0F, 3.0F};
+  const std::vector<int64_t> dims = {3};
+  const Handle t(tr_from_data_on(values.data(), values.size(), dims.data(), 1,
+                                 TR_DEVICE_CPU, 0));
+  ASSERT_NE(t.t, nullptr) << tr_last_error();
+  tr_device_type type = TR_DEVICE_CUDA;
+  int64_t index = -1;
+  EXPECT_EQ(tr_tensor_device(t.t, &type, &index), 0) << tr_last_error();
+  EXPECT_EQ(type, TR_DEVICE_CPU);
+  EXPECT_EQ(data_of(t.t), values);
+}
+
+TEST(TorchrktDevice, FromDataOnRejectsOutOfRangeCudaIndex) {
+  // torch::DeviceIndex is 8-bit: an unvalidated ordinal of 256 would wrap
+  // to device 0 and silently misplace the tensor. Out of range everywhere:
+  // the sandbox has 0 CUDA devices and real hosts have < 256.
+  const std::vector<float> values = {1.0F};
+  const std::vector<int64_t> dims = {1};
+  EXPECT_EQ(tr_from_data_on(values.data(), values.size(), dims.data(), 1,
+                            TR_DEVICE_CUDA, 256),
+            nullptr);
+  EXPECT_STRNE(tr_last_error(), "");
+}
+
+TEST(TorchrktDevice, FromDataOnRejectsUnknownDeviceType) {
+  const std::vector<float> values = {1.0F};
+  const std::vector<int64_t> dims = {1};
+  EXPECT_EQ(tr_from_data_on(values.data(), values.size(), dims.data(), 1,
+                            static_cast<tr_device_type>(99), 0),
+            nullptr);
+  EXPECT_STRNE(tr_last_error(), "");
+}
+
 TEST(TorchrktDevice, NullArgsReportStatus) {
   // Each null-arg path also populates tr_last_error (the integer-status
   // contract), matching the other failure-path tests in this file.
@@ -150,6 +184,32 @@ TEST(TorchrktDevice, CudaRoundTrip) {
   EXPECT_EQ(fd_type, TR_DEVICE_CUDA);
   const Handle fd_back(tr_tensor_to_device(from_data_gpu.t, TR_DEVICE_CPU, 0));
   EXPECT_EQ(data_of(fd_back.t), host_vals);
+
+  // tr_from_data_on must honor its EXPLICIT device even under a CUDA
+  // default: an explicitly-CPU construction lands on CPU without routing
+  // host data through the default GPU.
+  const Handle explicit_cpu(tr_from_data_on(host_vals.data(), host_vals.size(),
+                                            src_dims.data(), 1, TR_DEVICE_CPU,
+                                            0));
+  tr_device_type ec_type = TR_DEVICE_CUDA;
+  int64_t ec_index = -1;
+  EXPECT_EQ(tr_tensor_device(explicit_cpu.t, &ec_type, &ec_index), 0)
+      << tr_last_error();
+  EXPECT_EQ(ec_type, TR_DEVICE_CPU);
+  EXPECT_EQ(data_of(explicit_cpu.t), host_vals);
+
+  // ...and tr_from_data_on constructing DIRECTLY onto CUDA round-trips the
+  // payload, not just the device tag: a bug corrupting data on the
+  // CPU->CUDA leg of host_from_data(...).to(target) must fail here.
+  const Handle on_cuda(tr_from_data_on(host_vals.data(), host_vals.size(),
+                                       src_dims.data(), 1, TR_DEVICE_CUDA, 0));
+  tr_device_type oc_type = TR_DEVICE_CPU;
+  int64_t oc_index = -1;
+  EXPECT_EQ(tr_tensor_device(on_cuda.t, &oc_type, &oc_index), 0)
+      << tr_last_error();
+  EXPECT_EQ(oc_type, TR_DEVICE_CUDA);
+  const Handle oc_back(tr_tensor_to_device(on_cuda.t, TR_DEVICE_CPU, 0));
+  EXPECT_EQ(data_of(oc_back.t), host_vals);
 
   // tr_randn also reads current_default_device(); confirm it lands on the GPU
   // (shape/device only, not values).
