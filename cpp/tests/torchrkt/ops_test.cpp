@@ -110,6 +110,30 @@ TEST(TorchrktOps, FromDataRejectsOverflowingShape) {
             nullptr);
 }
 
+TEST(TorchrktOps, CpuOomClassifiesAsOomKind) {
+  // The portable OOM regression guard leg 1.5's design leans on: CPU
+  // allocation failure arrives via the caffe2-style enforce (a plain
+  // c10::Error naming DefaultCPUAllocator, NOT c10::OutOfMemoryError),
+  // and the classifier must still report kind 1. 2^48 floats = 1 PiB
+  // exceeds user address space everywhere CI runs, so the allocator
+  // rejects it upfront -- no overcommit-then-OOM-killer hazard.
+  const std::vector<int64_t> dims = {int64_t{1} << 48};
+  EXPECT_EQ(tr_zeros(dims.data(), 1), nullptr);
+  EXPECT_EQ(tr_last_error_kind(), 1) << tr_last_error();
+  EXPECT_STRNE(tr_last_error(), "");
+}
+
+TEST(TorchrktOps, GenericErrorResetsKind) {
+  // kind and message are recorded together: after an OOM, a subsequent
+  // generic failure must report kind 0 again, never a stale 1.
+  const std::vector<int64_t> dims = {int64_t{1} << 48};
+  EXPECT_EQ(tr_zeros(dims.data(), 1), nullptr);
+  EXPECT_EQ(tr_last_error_kind(), 1) << tr_last_error();
+  int64_t out = 0;
+  EXPECT_EQ(tr_tensor_numel(nullptr, &out), 1);
+  EXPECT_EQ(tr_last_error_kind(), 0) << tr_last_error();
+}
+
 TEST(TorchrktOps, CreationGoldens) {
   const std::vector<int64_t> dims = {2, 2};
   const Handle z(tr_zeros(dims.data(), 2));

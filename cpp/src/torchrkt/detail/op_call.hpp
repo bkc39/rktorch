@@ -1,7 +1,10 @@
 #pragma once
 
+#include <c10/util/Exception.h>
+
 #include <exception>
 #include <string>
+#include <string_view>
 #include <utility>
 
 #include "torchrkt/c_api/tensor.h"
@@ -26,6 +29,23 @@
 
 namespace torchrkt {
 
+// Classify an exception crossing the boundary for tr_last_error_kind.
+// CUDA (and MPS) allocation exhaustion throws the typed subclass
+// c10::OutOfMemoryError; CPU allocation failure arrives as a plain
+// c10::Error from the caffe2-style enforce in alloc_cpu.cpp, so a
+// contained message match covers that shape (see the backend matrix in
+// plans/gpu-memory-management.md, leg 1.5).
+inline error_kind classify(const std::exception& e) noexcept {
+  if (dynamic_cast<const c10::OutOfMemoryError*>(&e) != nullptr) {
+    return error_kind::oom;
+  }
+  if (std::string_view(e.what()).find("DefaultCPUAllocator") !=
+      std::string_view::npos) {
+    return error_kind::oom;
+  }
+  return error_kind::generic;
+}
+
 // Run `fn` (returning a torch::Tensor) and wrap the result in a fresh heap
 // handle; on any exception, stash the message and return NULL.
 template <typename Fn>
@@ -33,7 +53,7 @@ tr_tensor* alloc_result(const char* who, Fn&& fn) noexcept {
   try {
     return new tr_tensor{std::forward<Fn>(fn)()};
   } catch (const std::exception& e) {
-    set_error(std::string(who) + ": " + e.what());
+    set_error(std::string(who) + ": " + e.what(), classify(e));
     return nullptr;
   } catch (...) {
     set_error(std::string(who) + ": unknown exception");
@@ -49,7 +69,7 @@ int status_call(const char* who, Fn&& fn) noexcept {
     std::forward<Fn>(fn)();
     return 0;
   } catch (const std::exception& e) {
-    set_error(std::string(who) + ": " + e.what());
+    set_error(std::string(who) + ": " + e.what(), classify(e));
     return 1;
   } catch (...) {
     set_error(std::string(who) + ": unknown exception");

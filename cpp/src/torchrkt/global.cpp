@@ -24,6 +24,10 @@ const char* tr_last_error(void) {
   return buf.c_str();
 }
 
+int tr_last_error_kind(void) {
+  return static_cast<int>(torchrkt::last_error_kind());
+}
+
 int tr_manual_seed(uint64_t seed) {
   try {
     torch::manual_seed(seed);
