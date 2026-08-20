@@ -251,6 +251,18 @@
 ;; timeout bounds the wait when the canary survives this collection or
 ;; the executor is busy. Worst case is a bounded pause on a path that
 ;; has already failed once.
+;;
+;; Known window, deliberate: a default-device constructor retried after
+;; the drain re-reads the process-global default, so a CONCURRENT
+;; set-default-device! landing during the wait can place the retried
+;; tensor per the new default. That is the documented semantics of the
+;; mutable global (any constructor racing set-default-device! has
+;; nondeterministic placement; the retry widens an existing window, it
+;; doesn't create one), and snapshot/re-set from in here would clobber
+;; the other thread's deliberate change — worse. Programs that need
+;; placement invariants under concurrency pass #:device / use
+;; with-default-device scoping; catalogued with the rest of the
+;; concurrent-default questions in #40.
 (define (collect-and-drain!)
   (define drained (make-semaphore 0))
   (register-finalizer (box 0) (lambda (_) (semaphore-post drained)))

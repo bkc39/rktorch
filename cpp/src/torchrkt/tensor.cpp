@@ -132,14 +132,10 @@ int tr_tensor_copy_data(const tr_tensor* t, uint64_t capacity, float* out,
       std::memcpy(out, c.data_ptr<float>(), numel * sizeof(float));
     }
     return 0;
-  } catch (const std::bad_alloc&) {
-    // The contiguous float copy above can be large; recording its
-    // failure must not allocate (see op_call.hpp's bad_alloc clause).
-    torchrkt::set_error_oom("tr_tensor_copy_data");
-    return 1;
   } catch (const std::exception& e) {
-    torchrkt::set_error(std::string("tr_tensor_copy_data: ") + e.what(),
-                        torchrkt::classify(e));
+    // The contiguous float copy above can be large: record noexcept-safely
+    // (rich message when it can allocate, kind-only when it can't).
+    torchrkt::record_failure("tr_tensor_copy_data", e);
     return 1;
   }
 }
@@ -183,8 +179,9 @@ int tr_tensor_print(const tr_tensor* t, uint64_t buffer_capacity,
     }
     return 0;
   } catch (const std::exception& e) {
-    torchrkt::set_error(std::string("tr_tensor_print: ") + e.what(),
-                        torchrkt::classify(e));
+    // The render allocates the whole text: same noexcept-safe recording
+    // as tr_tensor_copy_data.
+    torchrkt::record_failure("tr_tensor_print", e);
     return 1;
   }
 }

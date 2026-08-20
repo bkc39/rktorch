@@ -14,6 +14,7 @@
 
 (module+ test
   (require rackunit
+           (only-in "../generated.rkt" dropout)
            "../main.rkt"
            (only-in "../foreign/raw/memory.rkt" oom-retry))
 
@@ -116,4 +117,17 @@
     ;; advance the generator
     (with-handlers ([exn:fail:rktorch:oom? void]) (absurd-alloc!))
     (define b (tensor->list (randn 4)))
+    (check-equal? b a))
+
+  (test-case "dropout draws an identical stream across an interleaved OOM"
+    ;; same property through the GENERATED #:rng arm (a separate
+    ;; implementation from raw/random.rkt's hand-written bindings): the
+    ;; OOM's collect+drain — finalizer storm included — must not perturb
+    ;; the stream dropout's training path draws from
+    (define x (ones 64))
+    (manual-seed! 7)
+    (define a (tensor->list (dropout x 0.5 #t)))
+    (manual-seed! 7)
+    (with-handlers ([exn:fail:rktorch:oom? void]) (absurd-alloc!))
+    (define b (tensor->list (dropout x 0.5 #t)))
     (check-equal? b a)))
