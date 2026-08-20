@@ -103,12 +103,20 @@ Racket side — one choke point in `torch/foreign/raw/syntax.rkt`:
 
 ### Leg 1.5: graceful OOM — typed errors + collect-and-retry
 
-Refactor note (from PR #43 review): `raw/syntax.rkt` currently hosts
-the two ledger probes (`tr-tensor-nbytes/raw`, `tr-tensor-device/raw`)
-inline because `tensor.rkt`/`device.rkt` require `syntax.rkt` and can't
-be required back. When this leg adds a second probe consumer, extract a
-`raw/probes.rkt` substrate (above `syntax.rkt`'s definer, below the op
-modules) so `syntax.rkt` returns to being the pure FFI-definer layer.
+STATUS: implemented on mem/oom-typed-retry (PR C). Measured overhead
+of the retry wrap + kind channel, interleaved A/B on the lab host:
+micro add-8x8 +0.07% / +0.3% across two rounds (µs/op); GPU GPT
+per-epoch 1.76–1.96 s with the SIGN FLIPPING between rounds (+2.3%,
+−2.5%) — noise, no measurable cost. Seeded parity held in production:
+3-epoch GPU training losses bit-identical to master
+(3.1683/2.6523/2.5509). The kind probe runs only on the failure path;
+success pays one NULL-check branch (scripts/bench-oom-overhead.rkt).
+
+Refactor note (from PR #43 review): DONE in PR C — extracted as
+`raw/memory.rkt` (frees, guard-finalizer, ledger, probes,
+tensor-allocator + /rng, op-definer macros; named for its contents
+rather than the note's provisional `probes.rkt`), so `syntax.rkt` is
+again the pure FFI-definer layer.
 
 Failing *cleanly* (leg 0) is table stakes; failing *gracefully* needs
 two more pieces:
