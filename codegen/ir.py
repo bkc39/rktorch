@@ -58,6 +58,10 @@ class Op:
     # integer status instead of a fresh handle; the C++ body calls the
     # `<base>_` method on the receiver rather than the at::* free function.
     inplace: bool = False
+    # RNG ops draw from the global generator stream; the Racket emitter
+    # gives them the no-retry allocator wrap so an OOM collect-and-retry
+    # can never double-draw and break seeded parity (allowlist `rng` flag).
+    rng: bool = False
 
 
 @dataclass(frozen=True)

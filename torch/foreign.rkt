@@ -23,6 +23,7 @@
          racket/contract
          "foreign/contracts.rkt"
          "foreign/device-type.rkt"
+         (only-in "foreign/error.rkt" exn:fail:rktorch:oom?)
          "foreign/structs.rkt"
          "foreign/ops.rkt"
          "foreign/tensor-ops.rkt"
@@ -33,6 +34,13 @@
 ;; with-no-grad / with-default-device are macros (dynamic-extent forms), so they
 ;; bypass contract-out; their expansions bottom out in the contracted procedures.
 (provide with-no-grad with-default-device)
+
+;; The typed OOM predicate (plain provide, like the syntactic exports
+;; above: a predicate needs no contract). An allocation failure the C
+;; side classified as exhaustion raises exn:fail:rktorch:oom — catch it
+;; with this instead of regexing exn messages; everything else about the
+;; exn matches exn:fail.
+(provide exn:fail:rktorch:oom?)
 
 ;; Arithmetic operators (+ - * / and matmul's @) shadow racket/base in the
 ;; rkt-polars style: plain renames rather than contract-out, so the numeric

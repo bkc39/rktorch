@@ -62,8 +62,10 @@ compare gt.Scalar
 compare ge.Tensor
 compare ge.Scalar
 
-# Regularization (dropout's train/eval mode flows from the layer).
-nn dropout
+# Regularization (dropout's train/eval mode flows from the layer). The
+# rng flag: dropout's training path draws bernoulli masks from the global
+# generator, so its binding must not take the OOM collect-and-retry wrap.
+nn dropout rng
 inplace copy_
 
 # --- tranche 3 (#22): the transformer op closure --------------------------

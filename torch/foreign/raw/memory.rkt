@@ -28,6 +28,9 @@
          tr-tensor-free/checked
          guard-finalizer
          tensor-allocator
+         tensor-allocator/rng
+         oom-retry
+         tr-last-error-kind/raw
          native-memory-use
          _tr-device-type ;; noqa
          tr-tensor-device/raw
@@ -221,17 +224,65 @@
      (unaccount! t)
      (tr-tensor-free/unwrapped t))))
 
+;; --- graceful OOM: kind probe + collect-and-retry (#38 leg 1.5) ----------
+
+;; The error-kind probe (third probe hosted here for the same cycle-free
+;; reason as the nbytes/device pair; raw/global.rkt re-provides it beside
+;; tr-last-error/raw). 0 generic, 1 out-of-memory — the C side records it
+;; together with every message, so it always describes the LAST failure.
+(define-torch tr-last-error-kind/raw
+  (_fun -> _int)
+  #:c-id tr_last_error_kind)
+
+(define (last-error-oom?)
+  (= 1 (tr-last-error-kind/raw)))
+
+;; Retry a NULL-returning raw call exactly once after a garbage collection
+;; when the C side classified the failure as OOM: finalizing dead handles
+;; returns their blocks to the allocator, so the one measured failure mode
+;; leg 1's pressure can't fully close — an unlucky allocation striking
+;; between majors with dead handles pending — becomes transparent
+;; recovery. A second failure falls through to the caller (error.rkt
+;; raises the typed exn there). Retry is safe ONLY for calls that are
+;; effect-free on failure; ops that draw from the global RNG stream may
+;; consume generator state before the failing allocation, so they take
+;; tensor-allocator/rng below instead. Exposed as a combinator with
+;; injectable probes so the mechanism is unit-testable without provoking
+;; real exhaustion.
+(define ((oom-retry #:oom? [oom? last-error-oom?]
+                    #:collect! [collect! collect-garbage])
+         raw-fn)
+  (lambda args
+    (define t (apply raw-fn args))
+    (cond
+      [t t]
+      [(oom?)
+       (collect!)
+       (apply raw-fn args)]
+      [else #f])))
+
+;; Register the GC finalizer and charge the #37 ledger on each fresh
+;; handle. NULL (error) results are never charged.
+(define ((accounted wrapped) . args)
+  (define t (apply wrapped args))
+  (when t (account! t))
+  t)
+
 ;; The one wrap every tensor-returning raw binding carries (hand-written
 ;; via the op-definer macros below and the explicit #:wrap sites; generated
-;; via define-generated.rkt): GC-managed lifetime via the allocator, plus
-;; the #37 pressure charge on each fresh handle. NULL (error) results are
-;; never charged.
+;; via define-generated.rkt): GC-managed lifetime, the #37 pressure charge,
+;; and the OOM collect-and-retry. The retry sits INSIDE the allocator wrap
+;; so only the final, surviving handle gets a finalizer registered.
 (define (tensor-allocator raw-fn)
-  (define wrapped ((allocator tr-tensor-free/finalizer) raw-fn))
-  (lambda args
-    (define t (apply wrapped args))
-    (when t (account! t))
-    t))
+  (accounted ((allocator tr-tensor-free/finalizer) ((oom-retry) raw-fn))))
+
+;; tensor-allocator minus the retry, for bindings that consume the global
+;; RNG stream (randn/rand; dropout via the generated layer's #:rng flag):
+;; a blind retry would draw twice and silently break seeded parity. If an
+;; RNG op ever needs the retry, generator snapshot/restore is the
+;; mechanism, as its own considered change (see the plan).
+(define (tensor-allocator/rng raw-fn)
+  (accounted ((allocator tr-tensor-free/finalizer) raw-fn)))
 
 ;; --- op-definer macros -------------------------------------------------
 ;; The three uniform op shapes. Each expands to a define-torch binding whose

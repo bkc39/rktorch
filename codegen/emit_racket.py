@@ -47,7 +47,7 @@ def emit_wrappers(shards: dict[str, list[Op]]) -> str:
         args = " ".join(
             f"[{_rkt_arg(p.name, p.kind)} {p.kind}]" for p in op.params
         )
-        flag = " #:inplace" if op.inplace else ""
+        flag = " #:inplace" if op.inplace else (" #:rng" if op.rng else "")
         lines += [
             "",
             f"(define-generated-op {op.racket_name} {op.c_name}{flag}",
