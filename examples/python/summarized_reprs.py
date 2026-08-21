@@ -20,5 +20,7 @@ reprs = [
     repr(torch.arange(2000) * 1000000),
     repr(torch.arange(30) * 1000000),
     repr(torch.zeros(6, 6, 6, 5)),
+    repr(torch.zeros(2, 18)),
+    repr(torch.zeros(30)),
 ]
 print(json.dumps({"reprs": reprs}))

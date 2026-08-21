@@ -86,16 +86,22 @@
 ;; the whole tensor, then right-justifies every element to a common width.
 (define (make-formatter flat mode)
   (define any-finite? (for/or ([x (in-list flat)]) (finite-real? x)))
+  (define int-mode? (and (not mode) any-finite? (all-integral? flat)))
   (define fmt
     (cond
       [(eq? mode 'exact-integers) fmt-exact]
       [(eq? mode 'booleans) fmt-bool]
-      [(and any-finite? (all-integral? flat)) fmt-int]
+      [int-mode? fmt-int]
       [else fmt-fixed]))
   (define max-width
     (for/fold ([w 0]) ([x (in-list flat)])
       (max w (string-length (fmt x)))))
-  (values fmt max-width))
+  ;; PyTorch's _Formatter.width() EXCLUDES the trailing "." in int-mode
+  ;; ("0." reports width 1), so its line budget undercounts by one per
+  ;; element and int-mode rows legitimately overflow 80 columns —
+  ;; reproduced here or wide zero rows wrap where Python's don't.
+  (define wrap-width (if int-mode? (sub1 max-width) max-width))
+  (values fmt max-width wrap-width))
 
 (define (pad s width)
   (string-append (make-string (max 0 (- width (string-length s))) #\space) s))
@@ -110,7 +116,7 @@
      (for/list ([i (in-range (car dims))])
        (nest (take (drop flat (* i block)) block) (cdr dims)))]))
 
-(define (format-nested node dims indent fmt max-width)
+(define (format-nested node dims indent fmt max-width wrap-width)
   (cond
     [(null? dims) (pad (fmt node) max-width)]
     [(null? (cdr dims))
@@ -122,7 +128,7 @@
        (for/list ([v (in-list node)])
          (if (eq? v 'ellipsis) " ..." (pad (fmt v) max-width))))
      (define per-line
-       (max 1 (quotient (- linewidth indent 1) (+ max-width 2))))
+       (max 1 (quotient (- linewidth indent) (+ wrap-width 2))))
      (define lines
        (let loop ([xs rendered])
          (if (<= (length xs) per-line)
@@ -143,15 +149,16 @@
                     (if (eq? sub 'ellipsis)
                         "..."
                         (format-nested sub (cdr dims) (add1 indent) fmt
-                                       max-width)))
+                                       max-width wrap-width)))
                   sep #:before-first "[" #:after-last "]")]))
 
 ;; "tensor(" + data + ")", with continuation lines aligned under the data by the
 ;; width of "tensor(" (7) -- exactly PyTorch's layout.
 (define (tensor->pytorch-repr flat dims #:mode [mode #f])
-  (define-values (fmt max-width) (make-formatter flat mode))
+  (define-values (fmt max-width wrap-width) (make-formatter flat mode))
   (string-append "tensor("
-                 (format-nested (nest flat dims) dims 7 fmt max-width)
+                 (format-nested (nest flat dims) dims 7 fmt max-width
+                                wrap-width)
                  ")"))
 
 ;; The values present in a summarized tree, in order ('ellipsis markers
@@ -169,7 +176,8 @@
 ;; marker; `dims` supplies depth (for indent and last-dim detection), not
 ;; lengths.
 (define (tensor-tree->pytorch-repr tree dims #:mode [mode #f])
-  (define-values (fmt max-width) (make-formatter (tree-values tree) mode))
+  (define-values (fmt max-width wrap-width)
+    (make-formatter (tree-values tree) mode))
   (string-append "tensor("
-                 (format-nested tree dims 7 fmt max-width)
+                 (format-nested tree dims 7 fmt max-width wrap-width)
                  ")"))

@@ -101,7 +101,9 @@
                    (tensor (build-list 2000 (lambda (i) (* i 1000000)))))
                   (tensor->repr
                    (tensor (build-list 30 (lambda (i) (* i 1000000)))))
-                  (tensor->repr (zeros 6 6 6 5)))])
+                  (tensor->repr (zeros 6 6 6 5))
+                  (tensor->repr (zeros 2 18))
+                  (tensor->repr (zeros 30)))])
        (for ([r (in-list rkt)]
              [p (in-list py)]
              [i (in-naturals)])
