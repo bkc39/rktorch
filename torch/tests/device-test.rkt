@@ -76,6 +76,28 @@
                       (cpu-device)))
       (check-equal? (default-device) (cpu-device))))
 
+  (test-case "cuda allocator gauges (#51)"
+    (cond
+      [(cuda-available?)
+       ;; with a live GPU tensor the gauges are sane: allocated positive,
+       ;; peak >= allocated, reserved >= allocated
+       (define g (tensor '(1 2 3 4) #:device (cuda-device)))
+       (define stats (cuda-memory-stats))
+       (define (stat k) (cdr (assq k stats)))
+       (check-true (> (stat 'allocated) 0))
+       (check-true (>= (stat 'peak-allocated) (stat 'allocated)))
+       (check-true (>= (stat 'reserved) (stat 'allocated)))
+       ;; empty-cache succeeds and never raises reserved
+       (cuda-empty-cache!)
+       (check-true (<= (cdr (assq 'reserved (cuda-memory-stats)))
+                       (stat 'reserved)))
+       ;; keep g live through the gauge reads
+       (check-equal? (tensor-device g) (cuda-device 0))]
+      [else
+       ;; without CUDA the stats error cleanly and empty-cache! no-ops
+       (check-exn exn:fail? (lambda () (cuda-memory-stats)))
+       (check-not-exn cuda-empty-cache!)]))
+
   (test-case "device arguments accept structs and legacy forms alike"
     ;; the accept-both contract: every device-taking entry point normalizes
     ;; struct and legacy inputs identically; queries return structs.

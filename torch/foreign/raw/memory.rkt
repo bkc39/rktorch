@@ -29,9 +29,11 @@
 (provide tr-tensor-free/finalizer
          tr-tensor-free/checked
          guard-finalizer
+         finalizer-failures
          tensor-allocator
          tensor-allocator/rng
          oom-retry
+         tr-cuda-empty-cache/raw
          tr-last-error-kind/raw
          native-memory-use
          _tr-device-type ;; noqa
@@ -89,8 +91,24 @@
 ;;
 ;; Exposed as a combinator (not baked into one binding) so the swallow
 ;; semantics are unit-testable and reusable by future finalizer bindings.
+;;
+;; Swallows are silent BY DESIGN (a finalizer has nowhere to report) but
+;; not invisible: each one bumps a counter, so leak-by-swallow is
+;; observable (finalizer-failures, on the public surface) without
+;; reintroducing the cascade. The increment runs under the ledger's
+;; atomic guard — the handler itself must never raise.
+(define finalizer-failure-count (box 0))
+
+(define (finalizer-failures)
+  (unbox finalizer-failure-count))
+
 (define ((guard-finalizer release) t)
-  (with-handlers ([(lambda (_) #t) void])
+  (with-handlers ([(lambda (_) #t)
+                   (lambda (_e)
+                     (call-with-ledger
+                      (lambda ()
+                        (set-box! finalizer-failure-count
+                                  (add1 (unbox finalizer-failure-count))))))])
     (release t)))
 
 ;; --- native-memory accounting (#37) --------------------------------------
@@ -239,6 +257,14 @@
 (define (last-error-oom?)
   (= 1 (tr-last-error-kind/raw)))
 
+;; Fourth probe (same cycle-free rationale; raw/device.rkt re-provides):
+;; hands the CUDA caching allocator's unused cached blocks back to the
+;; driver. No-op success without CUDA (or in a CPU-only build), so the
+;; drain below calls it unconditionally.
+(define-torch tr-cuda-empty-cache/raw
+  (_fun -> _int)
+  #:c-id tr_cuda_empty_cache)
+
 ;; Collect, then wait (bounded) for the finalizer executor to work
 ;; through the frees the collection queued. register-finalizer callbacks
 ;; run ASYNCHRONOUSLY on the runtime's executor thread — the repo's own
@@ -267,7 +293,12 @@
   (define drained (make-semaphore 0))
   (register-finalizer (box 0) (lambda (_) (semaphore-post drained)))
   (collect-garbage)
-  (void (sync/timeout 0.5 drained)))
+  (void (sync/timeout 0.5 drained))
+  ;; The drained finalizers returned their blocks to the CACHING
+  ;; allocator; before the retry re-asks the driver, hand the cache's
+  ;; unused blocks back too (best-effort: rc ignored — a failure here
+  ;; must not preempt the retry, whose own failure raises properly).
+  (void (tr-cuda-empty-cache/raw)))
 
 ;; Retry a NULL-returning raw call exactly once after a collect+drain
 ;; when the C side classified the failure as OOM: finalizing dead handles

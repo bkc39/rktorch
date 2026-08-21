@@ -30,6 +30,15 @@
     ;; must return normally — a raise here is the #38 cascade class
     (check-equal? (guarded 'handle) (void)))
 
+  (test-case "guard-finalizer swallows are counted, not invisible (#51)"
+    (define before (finalizer-failures))
+    ((guard-finalizer (lambda (_t) (error 'boom "swallowed"))) 'handle)
+    ((guard-finalizer (lambda (_t) (raise 'bare))) 'handle)
+    (check-equal? (finalizer-failures) (+ before 2))
+    ;; successful releases don't count
+    ((guard-finalizer void) 'handle)
+    (check-equal? (finalizer-failures) (+ before 2)))
+
   (test-case "guard-finalizer passes successful releases through"
     (define released '())
     (define guarded

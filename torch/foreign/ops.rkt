@@ -9,13 +9,15 @@
          (only-in "error.rkt" check-handle check-ok)
          (only-in "raw/device.rkt"
                   tr-cuda-device-count/raw
+                  tr-cuda-empty-cache/raw
                   tr-cuda-is-available/raw
+                  tr-cuda-memory-stats/raw
                   tr-get-default-device/raw
                   tr-set-default-device/raw
                   tr-tensor-device/raw
                   tr-tensor-to-device/raw)
          (only-in "raw/global.rkt" tr-manual-seed/raw tr-version/raw)
-         (only-in "raw/memory.rkt" native-memory-use)
+         (only-in "raw/memory.rkt" finalizer-failures native-memory-use)
          (only-in "raw/random.rkt" tr-rand/raw tr-randn/raw tr-tensor-uniform!/raw)
          (only-in "raw/tensor.rkt"
                   tr-tensor-copy-data/raw
@@ -30,7 +32,10 @@
                   wrap-tensor))
 
 (provide torch-version
+         cuda-empty-cache!
+         cuda-memory-stats
          device->type+index
+         finalizer-failures
          native-memory-use
          manual-seed!
          randn
@@ -121,6 +126,29 @@
 ;; cuda-available? re: a driver-failure 0).
 (define (cuda-device-count)
   (tr-cuda-device-count/raw))
+
+;; The CUDA caching allocator's gauges for one device, in bytes — an
+;; alist of allocated (live blocks), reserved (live + cached), and
+;; peak-allocated. Complements native-memory-use: the ledger reports
+;; what rktorch's handles hold; this reports what the allocator holds.
+;; Errors without CUDA (torch.cuda.memory_allocated & co).
+(define (cuda-memory-stats [dev (cuda-device)])
+  (define-values (type index) (device->type+index dev))
+  (unless (eq? type 'cuda)
+    (error 'cuda-memory-stats "expected a CUDA device, given: ~e" dev))
+  (define-values (rc allocated reserved peak)
+    (tr-cuda-memory-stats/raw index))
+  (check-ok rc 'cuda-memory-stats)
+  (list (cons 'allocated allocated)
+        (cons 'reserved reserved)
+        (cons 'peak-allocated peak)))
+
+;; Hand the caching allocator's unused cached blocks back to the driver
+;; (torch.cuda.empty_cache). No-op without CUDA; the OOM retry already
+;; runs this automatically before retrying.
+(define (cuda-empty-cache!)
+  (check-ok (tr-cuda-empty-cache/raw) 'cuda-empty-cache!)
+  (void))
 
 ;; Set the device new tensors (randn/zeros/...) are created on. Errors if CUDA
 ;; is requested but unavailable or the ordinal is out of range.
