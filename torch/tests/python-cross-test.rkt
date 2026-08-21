@@ -104,6 +104,8 @@
                   (tensor->repr (zeros 6 6 6 5))
                   (tensor->repr (zeros 2 18))
                   (tensor->repr (zeros 30)))])
+       (check-equal? (length rkt) (length py)
+                     "summarized-repr form count")
        (for ([r (in-list rkt)]
              [p (in-list py)]
              [i (in-naturals)])
