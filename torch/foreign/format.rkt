@@ -96,11 +96,19 @@
   (define max-width
     (for/fold ([w 0]) ([x (in-list flat)])
       (max w (string-length (fmt x)))))
-  ;; PyTorch's _Formatter.width() EXCLUDES the trailing "." in int-mode
-  ;; ("0." reports width 1), so its line budget undercounts by one per
-  ;; element and int-mode rows legitimately overflow 80 columns —
-  ;; reproduced here or wide zero rows wrap where Python's don't.
-  (define wrap-width (if int-mode? (sub1 max-width) max-width))
+  ;; PyTorch's _Formatter computes width() over the NONZERO finite
+  ;; values only (each as digits+1 for the trailing dot), defaulting to
+  ;; 1 when that set is empty — so an all-zero tensor's budget
+  ;; undercounts ("0." renders 2 wide but budgets 1) and its rows
+  ;; legitimately overflow 80 columns, while ordinary int-mode rows
+  ;; budget with the dot included. Rendering always pads to the full
+  ;; rendered width; only the wrap budget follows _Formatter.
+  (define wrap-width
+    (if int-mode?
+        (for/fold ([w 1]) ([x (in-list flat)]
+                           #:when (and (finite-real? x) (not (zero? x))))
+          (max w (string-length (fmt-int x))))
+        max-width))
   (values fmt max-width wrap-width))
 
 (define (pad s width)

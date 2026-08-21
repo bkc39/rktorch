@@ -22,5 +22,6 @@ reprs = [
     repr(torch.zeros(6, 6, 6, 5)),
     repr(torch.zeros(2, 18)),
     repr(torch.zeros(30)),
+    repr(torch.full((30,), 100.0)),
 ]
 print(json.dumps({"reprs": reprs}))
