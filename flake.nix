@@ -306,7 +306,7 @@
           # (re-point a scoped input at the old rev, or advance the floor —
           # see #41/#50) instead of silently testing 9.3 twice.
           racket92 = assert pkgs.lib.assertMsg
-            (pkgs.lib.hasPrefix "9.2" pkgs.racket.version)
+            (pkgs.lib.versions.majorMinor pkgs.racket.version == "9.2")
             ("racket92 floor check: the main pin's racket is now "
              + pkgs.racket.version
              + ", not 9.2 — re-point the supported floor (see #41/#50)");
