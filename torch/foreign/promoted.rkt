@@ -13,7 +13,7 @@
 ;; Contracts live in ../foreign.rkt.
 
 (require (only-in racket/list drop [flatten list-flatten] take)
-         (only-in "ops.rkt" tensor-dtype tensor-shape)
+         (only-in "ops.rkt" tensor-device tensor-dtype tensor-shape)
          (only-in "size.rkt" ->2d)
          (only-in "structs.rkt" tensor?)
          (only-in "tensor-ops.rkt" reshape tensor)
@@ -99,7 +99,9 @@
   (cond
     [(tensor? b) (t-op a b)]
     [(and (exact-integer? b) (eq? (tensor-dtype a) 'int64))
-     (t-op a (tensor b))]
+     ;; construct the scalar BESIDE the lhs — the default device can
+     ;; differ from a's, and a cross-device comparison errors
+     (t-op a (tensor b #:device (tensor-device a)))]
     [else (s-op a (exact->inexact b))]))
 
 (define eq (comparison g:eq-tensor g:eq-scalar))

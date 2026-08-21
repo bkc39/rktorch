@@ -198,7 +198,16 @@
              (define payload
                (list->s64vector
                 (for/list ([x (in-list flat)])
-                  (if (exact-integer? x) x (inexact->exact (truncate x))))))
+                  (cond
+                    [(exact-integer? x) x]
+                    [(rational? x) (inexact->exact (truncate x))]
+                    [else
+                     ;; +inf.0/-inf.0/+nan.0 have no int64 value; raise
+                     ;; tensor's own error shape, not a raw conversion
+                     ;; failure (torch errors here too)
+                     (error 'tensor
+                            "cannot convert non-finite value to int64: ~e"
+                            x)]))))
              (if device
                  (tr-from-data-i64-on/raw payload (length flat)
                                           dim-vec (length dims)

@@ -93,25 +93,34 @@
 ;; torch's empty-tensor repr: "tensor([])" for the rank-1 float empty,
 ;; a size= clause whenever the shape isn't just (0), and a dtype suffix
 ;; exactly when the (absent) elements can't disambiguate int64.
-(define (empty-repr dims int64?)
+(define (empty-repr dims dtype)
   (string-append
    "tensor([]"
    (if (equal? dims '(0))
        ""
        (format ", size=(~a)"
                (string-join (map number->string dims) ", ")))
-   (if int64? ", dtype=torch.int64" "")
+   ;; torch appends the dtype exactly when the (absent) elements can't
+   ;; disambiguate it from the float32 default
+   (case dtype
+     [(int64) ", dtype=torch.int64"]
+     [(bool) ", dtype=torch.bool"]
+     [else ""])
    ")"))
 
 (define (handle->repr h dims)
   (define-values (dtype-rc code) (tr-tensor-dtype/raw h))
-  (define int64? (and (zero? dtype-rc)
-                      (eq? (dtype-code->symbol code) 'int64)))
+  (define dtype (and (zero? dtype-rc) (dtype-code->symbol code)))
   (cond
-    [(zero? (apply * dims)) (empty-repr dims int64?)]
-    [int64?
+    [(zero? (apply * dims)) (empty-repr dims dtype)]
+    [(eq? dtype 'int64)
      (tensor->pytorch-repr (handle->ints h dims) dims
-                           #:exact-integers? #t)]
+                           #:mode 'exact-integers)]
+    [(eq? dtype 'bool)
+     ;; the 0/1 mask arrives via the float copy path; the formatter
+     ;; renders True/False (torch.tensor([True, False]) parity)
+     (tensor->pytorch-repr (handle->floats h dims) dims
+                           #:mode 'booleans)]
     [else
      (define floats (handle->floats h dims))
      (if (needs-sci-notation? floats)

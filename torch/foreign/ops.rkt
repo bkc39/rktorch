@@ -112,7 +112,10 @@
 (define (item t)
   (cond
     [(and (int64-tensor? t) (= 1 (tensor-numel t)))
-     (s64vector-ref (tensor->vector t) 0)]
+     (define out (make-s64vector 1))
+     (define-values (rc _n) (tr-tensor-copy-data-i64/raw t 1 out))
+     (check-ok rc 'item)
+     (s64vector-ref out 0)]
     [else
      (define-values (rc v) (tr-tensor-item/raw t))
      (check-ok rc 'item)

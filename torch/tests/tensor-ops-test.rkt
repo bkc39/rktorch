@@ -66,8 +66,15 @@
       (check-exn exn:fail:contract? (lambda () (device 'cpu 1)))
       ;; ...but the one valid CPU ordinal stays accepted
       (check-equal? (device 'cpu 0) (cpu-device)))
-    ;; comparisons produce genuine bool tensors, and the query says so
+    ;; comparisons produce genuine bool tensors, the query says so, and
+    ;; the repr prints True/False like torch
     (check-equal? (dtype (eq (tensor '(1 2)) 1)) 'bool)
+    (check-equal? (tensor->repr (eq (tensor '(1 2)) 1))
+                  "tensor([ True, False])")
+    ;; non-finite values have no int64 representation — tensor's own
+    ;; error shape, as in torch
+    (check-exn #rx"non-finite"
+               (lambda () (tensor '(+inf.0) #:dtype 'int64)))
     ;; exact int64 comparisons never transit a double: 2^53 < 2^53+1
     ;; must hold (the scalar path would round the rhs down and flip it)
     (check-equal? (tensor->list (lt (tensor (expt 2 53))

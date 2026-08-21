@@ -68,13 +68,19 @@
 (define (fmt-exact x)
   (number->string x))
 
+;; bool tensors print True/False (values arrive as the float 0/1 mask
+;; from the copy path).
+(define (fmt-bool x)
+  (if (zero? x) "False" "True"))
+
 ;; Returns (values format-proc max-element-width).  PyTorch picks one format for
 ;; the whole tensor, then right-justifies every element to a common width.
-(define (make-formatter flat exact-integers?)
+(define (make-formatter flat mode)
   (define any-finite? (for/or ([x (in-list flat)]) (finite-real? x)))
   (define fmt
     (cond
-      [exact-integers? fmt-exact]
+      [(eq? mode 'exact-integers) fmt-exact]
+      [(eq? mode 'booleans) fmt-bool]
       [(and any-finite? (all-integral? flat)) fmt-int]
       [else fmt-fixed]))
   (define max-width
@@ -113,8 +119,8 @@
 
 ;; "tensor(" + data + ")", with continuation lines aligned under the data by the
 ;; width of "tensor(" (7) -- exactly PyTorch's layout.
-(define (tensor->pytorch-repr flat dims #:exact-integers? [exact-integers? #f])
-  (define-values (fmt max-width) (make-formatter flat exact-integers?))
+(define (tensor->pytorch-repr flat dims #:mode [mode #f])
+  (define-values (fmt max-width) (make-formatter flat mode))
   (string-append "tensor("
                  (format-nested (nest flat dims) dims 7 fmt max-width)
                  ")"))
