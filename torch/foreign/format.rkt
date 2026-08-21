@@ -32,6 +32,7 @@
          needs-sci-notation?)
 
 (define precision 4)
+(define linewidth 80)
 
 (define (finite-real? x)
   (and (rational? x) (not (nan? x))))
@@ -113,11 +114,25 @@
   (cond
     [(null? dims) (pad (fmt node) max-width)]
     [(null? (cdr dims))
-     (string-join (for/list ([v (in-list node)])
-                    (if (eq? v 'ellipsis)
-                        " ..."
-                        (pad (fmt v) max-width)))
-                  ", " #:before-first "[" #:after-last "]")]
+     ;; PyTorch wraps rows at linewidth 80: a fixed
+     ;; floor((80 - indent - 1) / (width + 2)) elements per line (the
+     ;; ellipsis occupies one slot), continuation lines indented one
+     ;; past the opening bracket.
+     (define rendered
+       (for/list ([v (in-list node)])
+         (if (eq? v 'ellipsis) " ..." (pad (fmt v) max-width))))
+     (define per-line
+       (max 1 (quotient (- linewidth indent 1) (+ max-width 2))))
+     (define lines
+       (let loop ([xs rendered])
+         (if (<= (length xs) per-line)
+             (list (string-join xs ", "))
+             (cons (string-join (take xs per-line) ", ")
+                   (loop (drop xs per-line))))))
+     (string-join lines
+                  (string-append ",
+" (make-string (add1 indent) #\space))
+                  #:before-first "[" #:after-last "]")]
     [else
      ;; Separator between sub-blocks: a comma, (rank-1) newlines, then enough
      ;; spaces to align the next sub-block under this one.

@@ -96,7 +96,12 @@
                   (tensor->repr (zeros 1024 2 2))
                   (tensor->repr (zeros 1001))
                   (tensor->repr (eq (tensor '(1 2)) 1))
-                  (tensor->repr (eq (zeros 2000) 1.0)))])
+                  (tensor->repr (eq (zeros 2000) 1.0))
+                  (tensor->repr
+                   (tensor (build-list 2000 (lambda (i) (* i 1000000)))))
+                  (tensor->repr
+                   (tensor (build-list 30 (lambda (i) (* i 1000000)))))
+                  (tensor->repr (zeros 6 6 6 5)))])
        (for ([r (in-list rkt)]
              [p (in-list py)]
              [i (in-naturals)])

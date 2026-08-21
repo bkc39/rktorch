@@ -156,7 +156,13 @@
   (define-values (dtype-rc code) (tr-tensor-dtype/raw h))
   (define dtype (and (zero? dtype-rc) (dtype-code->symbol code)))
   (define numel (apply * dims))
-  (define summarize? (> numel summarize-threshold))
+  ;; summarization only engages when some dimension can actually elide:
+  ;; above-threshold tensors whose dims are all <= 2*edgeitems print in
+  ;; full (PyTorch behavior), through the direct path — no per-element
+  ;; narrow slicing for a tree with nothing elided
+  (define summarize?
+    (and (> numel summarize-threshold)
+         (for/or ([n (in-list dims)]) (> n (* 2 edgeitems)))))
   (cond
     [(zero? numel) (empty-repr dims dtype)]
     [summarize?
