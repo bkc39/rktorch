@@ -64,7 +64,10 @@
      ;; 01 — deterministic elementwise arithmetic
      (check-parity "python/01_arith.py"
                    (lambda ()
-                     (define x (tensor '((1 -2) (3 -4))))
+                     ;; float literals, matching the twin's explicit
+                     ;; construction (the case previously leaned on the
+                     ;; scalar-promotion path to come out float)
+                     (define x (tensor '((1.0 -2.0) (3.0 -4.0))))
                      (* (+ x 1) (relu x))))
      ;; 02 — arange/reshape/transpose/matmul
      (check-parity "python/02_matmul.py"
@@ -74,9 +77,19 @@
      ;; 03 — autograd: d(sum(x*x))/dx == 2x
      (check-parity "python/03_autograd.py"
                    (lambda ()
-                     (define x (tensor '(1 2 3) #:requires-grad? #t))
+                     ;; float literals (#44): integer literals now infer
+                     ;; int64, and torch — ours and Python's — rejects
+                     ;; requires-grad on integer tensors
+                     (define x (tensor '(1.0 2.0 3.0) #:requires-grad? #t))
                      (backward! (~> x (* x) Σ))
                      (grad x)))
+     ;; int64 inference (#44): the byte-for-byte repr comparison IS the
+     ;; dtype pin — a float-inferring side prints "1." forms and fails
+     ;; even though values compare equal
+     (check-parity "python/int64_inference.py"
+                   (lambda ()
+                     (define x (tensor '((1 2) (3 4))))
+                     (@ x x)))
      ;; 04 — the v1 capstone: seeded MLP init + 5 SGD steps track PyTorch
      ;; (losses per step and every post-training parameter). No repr check:
      ;; the 58-value parameter vector would hit PyTorch's line wrapping,

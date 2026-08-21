@@ -11,6 +11,9 @@ differentiate with respect to, @racket[backward!] runs backpropagation from
 the scalar @tt{y}, and @racket[grad] reads the accumulated gradient. The
 loss pipeline threads left to right: @racket[(~> x (* x) Σ)] is
 @racket[(Σ (* x x))], with @racket[Σ] the unicode alias of @racket[sum].
+The literals are floats deliberately: integer literals infer an
+@racket['int64] tensor (mirroring @tt{torch.tensor}), and torch — in
+Racket exactly as in Python — refuses gradients on integer tensors.
 
 @chunk[<r03-require>
 (require torch)]
@@ -20,7 +23,7 @@ loss pipeline threads left to right: @racket[(~> x (* x) Σ)] is
 
 @chunk[<r03-run>
 (define (run-example)
-  (define x (tensor '(1 2 3) #:requires-grad? #t))
+  (define x (tensor '(1.0 2.0 3.0) #:requires-grad? #t))
   (backward! (~> x (* x) Σ))
   (grad x))]
 

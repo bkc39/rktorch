@@ -64,8 +64,9 @@
       (define g (tensor '(1 2 3) #:device (cuda-device)))
       (check-equal? (tensor-device g) (cuda-device 0))
       ;; the payload survives the CPU->CUDA construction leg, not just the
-      ;; device tag (marshalled back through an explicit move to CPU)
-      (check-equal? (tensor->list (to-device g (cpu-device))) '(1.0 2.0 3.0))
+      ;; device tag (marshalled back through an explicit move to CPU);
+      ;; integer literals infer int64 (#44), so exact integers out
+      (check-equal? (tensor->list (to-device g (cpu-device))) '(1 2 3))
       (check-equal? (default-device) (cpu-device))
       ;; placement is passed into native construction, so an explicitly-CPU
       ;; tensor under a CUDA default lands on CPU (no host->GPU->CPU
@@ -171,10 +172,18 @@
         (check-equal? (tensor-device back) (cpu-device))
         (check-equal? (tensor->list back) '(0.0 0.0 0.0 0.0))
         ;; a GPU matmul should match the CPU result
-        (define a (to-device (tensor '((1 2) (3 4))) 'cuda))
-        (define b (to-device (tensor '((5 6) (7 8))) 'cuda))
+        ;; float literals: cuBLAS has no int64 matmul — torch errors on
+        ;; GPU (Python identically), though the CPU int64 matmul works
+        ;; (covered in tensor-ops-test)
+        (define a (to-device (tensor '((1.0 2.0) (3.0 4.0))) 'cuda))
+        (define b (to-device (tensor '((5.0 6.0) (7.0 8.0))) 'cuda))
         (check-equal? (tensor->list (to-device (matmul a b) 'cpu))
-                      '(19.0 22.0 43.0 50.0)))
+                      '(19.0 22.0 43.0 50.0))
+        ;; ...and the int64-on-cuda rejection is itself parity behavior
+        (check-exn exn:fail?
+                   (lambda ()
+                     (matmul (to-device (tensor '((1 2) (3 4))) 'cuda)
+                             (to-device (tensor '((1 2) (3 4))) 'cuda)))))
       (check-equal? (default-device) (cpu-device))))
 
   (test-case "tranche-3 ops run on cuda (gelu, embedding, layer-norm, mask)"
@@ -185,7 +194,9 @@
       (set-default-device! 'cpu)
       (with-default-device 'cuda
         ;; gelu (hand-written path)
-        (define g (to-device (gelu (to-device (tensor '(0 1 -1)) 'cuda)) 'cpu))
+        ;; float literals: gelu is float-only (#44 inference)
+        (define g
+          (to-device (gelu (to-device (tensor '(0.0 1.0 -1.0)) 'cuda)) 'cpu))
         (check-= (cadr (tensor->list g)) 0.841345 1e-5)
         ;; embedding: int64 indices gathered on the device
         (define w (to-device (reshape (arange 1 9) 4 2) 'cuda))
@@ -193,7 +204,8 @@
         (check-equal? (tensor->list (to-device (embedding idx w) 'cpu))
                       '(5.0 6.0 1.0 2.0 5.0 6.0))
         ;; layer-norm with affine params on the device
-        (define x (to-device (tensor '((1 2 3) (4 6 8))) 'cuda))
+        ;; float literals: layer-norm is float-only (#44 inference)
+        (define x (to-device (tensor '((1.0 2.0 3.0) (4.0 6.0 8.0))) 'cuda))
         (define ln (layer-norm x 3 #:weight (ones 3) #:bias (zeros 3)))
         (check-equal? (tensor-device ln) (cuda-device 0))
         (check-= (car (tensor->list (to-device ln 'cpu))) -1.2247 1e-4)

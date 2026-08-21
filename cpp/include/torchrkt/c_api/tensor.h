@@ -22,7 +22,8 @@ typedef struct tr_tensor tr_tensor;
 typedef enum tr_dtype {
   TR_DTYPE_FLOAT32 = 0,
   TR_DTYPE_FLOAT64 = 1,
-  TR_DTYPE_INT64 = 2
+  TR_DTYPE_INT64 = 2,
+  TR_DTYPE_BOOL = 3
 } tr_dtype;
 
 /* Free a handle returned by tr_randn. Safe on NULL. If the underlying
@@ -62,6 +63,17 @@ int tr_tensor_item(const tr_tensor* t, double* out);
 /* Copy converted to the given element type (like torch.Tensor.to). Returns a
  * new handle, NULL on error. */
 tr_tensor* tr_tensor_to_dtype(const tr_tensor* t, tr_dtype dtype);
+
+/* Report a tensor's dtype. 0: success with *out set; 1 (see
+ * tr_last_error) for NULL args or a dtype outside the tr_dtype enum. */
+int tr_tensor_dtype(const tr_tensor* t, tr_dtype* out);
+
+/* tr_tensor_copy_data's int64 sibling (#44): copies via a CPU/int64/
+ * contiguous conversion, so integer tensors round-trip exactly instead
+ * of through float32. Same size-then-fill contract (rc=2 + required
+ * numel when capacity is short). */
+int tr_tensor_copy_data_i64(const tr_tensor* t, uint64_t capacity, int64_t* out,
+                            uint64_t* out_numel);
 
 /* Render the tensor via ATen's ostream operator into out_buffer (capacity in
  * bytes, no NUL terminator written). *out_len always receives the byte length;

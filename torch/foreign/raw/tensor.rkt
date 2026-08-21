@@ -17,10 +17,13 @@
          (only-in "memory.rkt" tensor-allocator)
          (only-in "syntax.rkt" _Tensor _Tensor/null define-torch))
 
-(provide tr-tensor-numel/raw
+(provide dtype-code->symbol
+         tr-tensor-numel/raw
          tr-tensor-ndim/raw
          tr-tensor-shape/raw
+         tr-tensor-copy-data-i64/raw
          tr-tensor-copy-data/raw
+         tr-tensor-dtype/raw
          tr-tensor-print/raw
          tr-tensor-item/raw
          tr-tensor-to-dtype/raw
@@ -64,7 +67,40 @@
 
 ;; Mirrors the tr_dtype C enum (tensor.h).
 (define _tr-dtype
-  (_enum '(float32 = 0 float64 = 1 int64 = 2)))
+  (_enum '(float32 = 0 float64 = 1 int64 = 2 bool = 3)))
+
+;; The one decoder for raw dtype codes (tr-tensor-dtype/raw returns the
+;; plain int so error paths can't poison an enum unmarshal): #f for
+;; codes outside the enum (e.g. bool masks). Shared by ops.rkt and
+;; structs.rkt so the encoding has a single source of truth.
+(define (dtype-code->symbol n)
+  (case n
+    [(0) 'float32]
+    [(1) 'float64]
+    [(2) 'int64]
+    [(3) 'bool]
+    [else #f]))
+
+;; The out param is a plain _int, NOT _tr-dtype: on the error path (a
+;; dtype outside the enum, e.g. a bool comparison mask) the C side never
+;; writes the out param, and an enum unmarshal of that garbage raises
+;; BEFORE the caller can check rc. Callers convert after the rc check
+;; (dtype-int->symbol in ops.rkt).
+(define-torch tr-tensor-dtype/raw
+  (_fun (t : _Tensor) (out : (_ptr o _int)) -> (rc : _int)
+        -> (values rc out))
+  #:c-id tr_tensor_dtype)
+
+;; tr-tensor-copy-data/raw's int64 sibling (#44): copies via a CPU/int64
+;; conversion so integer tensors round-trip exactly.
+(define-torch tr-tensor-copy-data-i64/raw
+  (_fun (t : _Tensor)
+        (capacity : _uint64)
+        (out : (_s64vector i))
+        (out-numel : (_ptr o _uint64))
+        -> (rc : _int)
+        -> (values rc out-numel))
+  #:c-id tr_tensor_copy_data_i64)
 
 (define-torch tr-tensor-item/raw
   (_fun (t : _Tensor)

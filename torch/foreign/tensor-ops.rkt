@@ -27,6 +27,8 @@
          (only-in "raw/creation.rkt"
                   tr-arange/raw
                   tr-eye/raw
+                  tr-from-data-i64-on/raw
+                  tr-from-data-i64/raw
                   tr-from-data-on/raw
                   tr-from-data/raw
                   tr-full/raw
@@ -153,12 +155,29 @@
     [(null? data) '(0)]
     [else (cons (length data) (nested-dims (car data)))]))
 
-(define (tensor data #:requires-grad? [requires-grad? #f] #:device [device #f])
+(define (tensor data
+                #:requires-grad? [requires-grad? #f]
+                #:device [device #f]
+                #:dtype [dtype #f])
   (define dims (nested-dims data))
   (define flat (if (list? data) (flatten data) (list data)))
   (unless (= (length flat) (apply * dims))
     (error 'tensor "ragged nested list; dims ~a need ~a values, got ~a"
            dims (apply * dims) (length flat)))
+  ;; dtype mirrors torch.tensor's inference (#44): all exact integers
+  ;; infer int64; anything inexact (or an exact rational) infers
+  ;; float32, PyTorch's default float dtype. #:dtype overrides either
+  ;; way ('int64 truncates toward zero, torch's cast semantics).
+  ;; Booleans and a float64 ingestion path are future work.
+  ;; empty data stays float32 — torch.tensor([]) is float32, and the
+  ;; vacuous andmap must not flip it to int64
+  (define chosen
+    (or dtype
+        (if (and (pair? flat) (andmap exact-integer? flat))
+            'int64
+            'float32)))
+  (unless (memq chosen '(float32 int64))
+    (error 'tensor "unsupported #:dtype (float32 or int64): ~e" dtype))
   ;; #:device passes the placement into NATIVE construction
   ;; (tr_from_data_on) rather than scoping the process-global default
   ;; (races concurrent constructors) or constructing-then-moving (the
@@ -167,19 +186,42 @@
   ;; host->GPU->CPU — or CUDA-OOM). requires-grad! comes after placement
   ;; so the result is a LEAF on the target device, matching
   ;; torch.tensor(data, device=..., requires_grad=True).
-  (define payload (list->f32vector (map exact->inexact flat)))
   (define dim-vec (list->s64vector dims))
+  (define-values (type index)
+    (if device (device->type+index device) (values #f #f)))
   (define out
     (wrap 'tensor
-          (cond
-            [device
-             (define-values (type index) (device->type+index device))
-             (tr-from-data-on/raw payload (length flat)
-                                  dim-vec (length dims)
-                                  type index)]
+          (case chosen
+            [(int64)
+             ;; exact integers marshal untouched — no float32 transit,
+             ;; so values beyond 2^24 (and 2^53) stay exact
+             (define payload
+               (list->s64vector
+                (for/list ([x (in-list flat)])
+                  (cond
+                    [(exact-integer? x) x]
+                    [(rational? x) (inexact->exact (truncate x))]
+                    [else
+                     ;; +inf.0/-inf.0/+nan.0 have no int64 value; raise
+                     ;; tensor's own error shape, not a raw conversion
+                     ;; failure (torch errors here too)
+                     (error 'tensor
+                            "cannot convert non-finite value to int64: ~e"
+                            x)]))))
+             (if device
+                 (tr-from-data-i64-on/raw payload (length flat)
+                                          dim-vec (length dims)
+                                          type index)
+                 (tr-from-data-i64/raw payload (length flat)
+                                       dim-vec (length dims)))]
             [else
-             (tr-from-data/raw payload (length flat)
-                               dim-vec (length dims))])))
+             (define payload (list->f32vector (map exact->inexact flat)))
+             (if device
+                 (tr-from-data-on/raw payload (length flat)
+                                      dim-vec (length dims)
+                                      type index)
+                 (tr-from-data/raw payload (length flat)
+                                   dim-vec (length dims)))])))
   (if requires-grad? (requires-grad! out) out))
 
 ;; --------------------------------------------------------------- shape ops

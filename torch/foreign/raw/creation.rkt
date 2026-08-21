@@ -15,6 +15,8 @@
          tr-arange/raw
          tr-eye/raw
          tr-from-data/raw
+         tr-from-data-i64-on/raw
+         tr-from-data-i64/raw
          tr-from-data-on/raw)
 
 (define-torch tr-zeros/raw
@@ -63,4 +65,26 @@
         (device-index : _int64)
         -> _Tensor/null)
   #:c-id tr_from_data_on
+  #:wrap tensor-allocator)
+
+;; The int64 ingestion pair (#44): same contracts with int64 payload and
+;; dtype, so exact integers never transit float32.
+(define-torch tr-from-data-i64/raw
+  (_fun (data : (_s64vector i))
+        (numel : _uint64)
+        (dims : (_s64vector i))
+        (ndim : _int64)
+        -> _Tensor/null)
+  #:c-id tr_from_data_i64
+  #:wrap tensor-allocator)
+
+(define-torch tr-from-data-i64-on/raw
+  (_fun (data : (_s64vector i))
+        (numel : _uint64)
+        (dims : (_s64vector i))
+        (ndim : _int64)
+        (device-type : _tr-device-type)
+        (device-index : _int64)
+        -> _Tensor/null)
+  #:c-id tr_from_data_i64_on
   #:wrap tensor-allocator)

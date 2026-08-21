@@ -22,7 +22,9 @@
 (require ffi/vector
          racket/contract
          "foreign/contracts.rkt"
-         "foreign/device-type.rkt"
+         ;; ops.rkt's hybrid `device` (query + construct) supersedes the
+         ;; bare struct constructor in the public surface
+         (except-in "foreign/device-type.rkt" device)
          (only-in "foreign/error.rkt" exn:fail:rktorch:oom?)
          "foreign/structs.rkt"
          "foreign/ops.rkt"
@@ -55,7 +57,8 @@
   [exn:fail:rktorch:oom? (-> any/c boolean?)]
   [tensor-shape (-> tensor? (listof exact-nonnegative-integer?))]
   [tensor-numel (-> tensor? exact-nonnegative-integer?)]
-  [tensor->vector (-> tensor? f32vector?)]
+  ;; int64 tensors marshal out as s64vector / exact integers (#44)
+  [tensor->vector (-> tensor? (or/c f32vector? s64vector?))]
   [tensor->list (-> tensor? (listof real?))]
   ;; tensor->repr: the PyTorch `repr` text (what the REPL prints);
   ;; tensor->string: ATen's C++ `operator<<` text.
@@ -70,7 +73,11 @@
             (exact-nonnegative-integer?)
             tensor?)]
   [tensor (->* ((or/c real? list?))
-               (#:requires-grad? boolean? #:device (or/c #f device/c))
+               (#:requires-grad? boolean?
+                #:device (or/c #f device/c)
+                ;; inference (#44): all-exact-integer data → int64,
+                ;; anything inexact → float32; #:dtype overrides
+                #:dtype (or/c #f 'float32 'int64))
                tensor?)]
   ;; shape
   [reshape (-> tensor? index/c ... tensor?)]
@@ -171,7 +178,13 @@
   [ge compare/c]
   ;; out-marshalling
   [item (-> tensor? real?)]
-  [to-dtype (-> tensor? (or/c 'float32 'float64 'int64) tensor?)]
+  [to-dtype (-> tensor? (or/c 'float32 'float64 'int64 'bool) tensor?)]
+  ;; the dtype query (#44): torch.Tensor.dtype as a symbol
+  [tensor-dtype (-> tensor? (or/c 'float32 'float64 'int64 'bool))]
+  ;; PyTorch-property short names; the tensor- forms stay as aliases
+  [shape (-> tensor? (listof exact-nonnegative-integer?))]
+  [dtype (-> tensor? (or/c 'float32 'float64 'int64 'bool))]
+  [numel (-> tensor? exact-nonnegative-integer?)]
   ;; native-memory observability (#37): live handle-attributed bytes per
   ;; device, folded from the accounting ledger — the view's extent per
   ;; handle, not total device usage (see raw/memory.rkt).
@@ -195,7 +208,17 @@
   [finalizer-failures (-> exact-nonnegative-integer?)]
   ;; device placement (cuda). Arguments admit device structs and the
   ;; legacy symbol/list forms; queries return device structs.
-  [device (-> (or/c 'cpu 'cuda) exact-nonnegative-integer? device?)]
+  ;; hybrid, the torch.device-vs-x.device split (query a tensor,
+  ;; construct from a type symbol + optional ordinal). The dependent
+  ;; contract permits the ordinal ONLY for 'cuda — (device t 1) and
+  ;; (device 'cpu 1) are boundary violations, not internal errors.
+  [device (->i ([target (or/c tensor? 'cpu 'cuda)])
+               ([index (target)
+                       (case target
+                         [(cuda) exact-nonnegative-integer?]
+                         [(cpu) 0]
+                         [else none/c])])
+               [result device?])]
   [device? (-> any/c boolean?)]
   [device-type (-> device? (or/c 'cpu 'cuda))]
   [device-index (-> device? exact-nonnegative-integer?)]

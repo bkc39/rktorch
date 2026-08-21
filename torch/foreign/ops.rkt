@@ -3,8 +3,16 @@
 ;; Safe tensor operations built on the raw layer + wrapper struct.  These are
 ;; the implementation behind the contracts in ../foreign.rkt.
 
-(require (only-in ffi/vector f32vector->list list->s64vector make-f32vector)
+(require (only-in ffi/vector
+                  f32vector->list
+                  list->s64vector
+                  make-f32vector
+                  make-s64vector
+                  s64vector->list
+                  s64vector-ref
+                  s64vector?)
          (only-in "device-type.rkt"
+                  [device make-device]
                   cpu-device cuda-device device-index device-type device?)
          (only-in "error.rkt" check-handle check-ok)
          (only-in "raw/device.rkt"
@@ -23,7 +31,10 @@
                   native-memory-use)
          (only-in "raw/random.rkt" tr-rand/raw tr-randn/raw tr-tensor-uniform!/raw)
          (only-in "raw/tensor.rkt"
+                  dtype-code->symbol
+                  tr-tensor-copy-data-i64/raw
                   tr-tensor-copy-data/raw
+                  tr-tensor-dtype/raw
                   tr-tensor-item/raw
                   tr-tensor-numel/raw
                   tr-tensor-to-dtype/raw)
@@ -32,13 +43,18 @@
                   handle->string
                   tensor-handle
                   tensor-impl-shape
+                  tensor?
                   wrap-tensor))
 
 (provide torch-version
          cuda-empty-cache!
          cuda-memory-stats
          reclaim-native-memory!
+         device
          device->type+index
+         dtype
+         numel
+         shape
          finalizer-failures
          native-memory-use
          manual-seed!
@@ -46,6 +62,7 @@
          rand
          uniform!
          item
+         tensor-dtype
          to-dtype
          cuda-available?
          cuda-if-available
@@ -89,14 +106,41 @@
   (void))
 
 ;; The value of a one-element tensor as a Racket real (torch.Tensor.item).
+;; int64 scalars come back EXACT via the int64 copy path — the C item
+;; extracts item<double>(), which silently rounds past 2^53 (Python's
+;; .item() returns an exact int there).
 (define (item t)
-  (define-values (rc v) (tr-tensor-item/raw t))
-  (check-ok rc 'item)
-  v)
+  (cond
+    [(and (int64-tensor? t) (= 1 (tensor-numel t)))
+     (define out (make-s64vector 1))
+     (define-values (rc _n) (tr-tensor-copy-data-i64/raw t 1 out))
+     (check-ok rc 'item)
+     (s64vector-ref out 0)]
+    [else
+     (define-values (rc v) (tr-tensor-item/raw t))
+     (check-ok rc 'item)
+     v]))
 
 ;; Copy converted to 'float32 / 'float64 / 'int64 (torch.Tensor.to).
 (define (to-dtype t dtype)
   (wrap-tensor (check-handle 'to-dtype (tr-tensor-to-dtype/raw t dtype))))
+
+;; A tensor's dtype as a symbol ('float32 / 'float64 / 'int64 / 'bool),
+;; the torch.Tensor.dtype query (#44). Raises only for dtypes outside
+;; the C enum entirely — int64-probe below is the tolerant internal
+;; variant.
+(define (tensor-dtype t)
+  (define-values (rc code) (tr-tensor-dtype/raw t))
+  (check-ok rc 'tensor-dtype)
+  (or (dtype-code->symbol code)
+      (error 'tensor-dtype "unsupported dtype code: ~a" code)))
+
+;; #t only when the dtype query SUCCEEDS and says int64 — errors (bool
+;; masks and other out-of-enum dtypes) answer #f, so marshalling paths
+;; fall back to the float route instead of raising.
+(define (int64-tensor? t)
+  (define-values (rc code) (tr-tensor-dtype/raw t))
+  (and (zero? rc) (eq? (dtype-code->symbol code) 'int64)))
 
 ;; A device argument is a device struct (device-type.rkt) or a legacy form:
 ;; 'cpu, 'cuda (ordinal 0), (list 'cuda ordinal). The FFI uses a separate
@@ -229,15 +273,47 @@
 (define (tensor-shape t)
   (tensor-impl-shape t))
 
-(define (tensor->vector t)
-  (define numel (tensor-numel t))
-  (define out (make-f32vector numel))
-  (define-values (rc _numel) (tr-tensor-copy-data/raw t numel out))
-  (check-ok rc 'tensor->vector)
-  out)
+;; --- PyTorch-property short names -----------------------------------
+;; shape/dtype/numel/device mirror x.shape / x.dtype / x.numel() /
+;; x.device; the tensor- prefixed forms remain as aliases. `device` is a
+;; hybrid, exactly like Python's torch.device-vs-x.device split: given a
+;; tensor it QUERIES; given a type symbol (+ optional ordinal, default
+;; 0 — torch.device("cuda") semantics) it CONSTRUCTS the device struct.
+(define shape tensor-shape)
+(define dtype tensor-dtype)
+(define numel tensor-numel)
 
+(define (device x [index #f])
+  (cond
+    [(tensor? x)
+     (when index
+       (error 'device "an ordinal makes no sense when querying a tensor: ~e"
+              index))
+     (tensor-device x)]
+    [else (make-device x (or index 0))]))
+
+;; Marshal out in the tensor's OWN dtype (#44): int64 tensors copy
+;; through the exact int64 path (an f32vector for them would corrupt
+;; values beyond 2^24), everything else through float32 as before.
+(define (tensor->vector t)
+  (define n (tensor-numel t))
+  (cond
+    [(int64-tensor? t)
+     (define out (make-s64vector n))
+     (define-values (rc _n) (tr-tensor-copy-data-i64/raw t n out))
+     (check-ok rc 'tensor->vector)
+     out]
+    [else
+     (define out (make-f32vector n))
+     (define-values (rc _n) (tr-tensor-copy-data/raw t n out))
+     (check-ok rc 'tensor->vector)
+     out]))
+
+;; Exact integers for int64 tensors, reals otherwise — torch.Tensor
+;; .tolist()'s int/float split.
 (define (tensor->list t)
-  (f32vector->list (tensor->vector t)))
+  (define v (tensor->vector t))
+  (if (s64vector? v) (s64vector->list v) (f32vector->list v)))
 
 ;; ATen's C++ `operator<<` text (the libtorch-native printer).
 (define (tensor->string t)
