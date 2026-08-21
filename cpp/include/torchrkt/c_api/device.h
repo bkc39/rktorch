@@ -40,7 +40,6 @@ int tr_get_default_device(tr_device_type* out_type, int64_t* out_index);
 tr_tensor* tr_tensor_to_device(const tr_tensor* t, tr_device_type type,
                                int64_t index);
 
-/* Report the device a tensor currently lives on. 0: success, 1: error. */
 /* Per-device CUDA caching-allocator gauges, in bytes: currently
  * allocated, currently reserved (cached), and peak allocated. 0 with the
  * outputs filled; 1 (see tr_last_error) when CUDA support is not
@@ -55,6 +54,7 @@ int tr_cuda_memory_stats(int64_t device_index, int64_t* out_allocated,
  * it is safe to call unconditionally (the OOM retry does). */
 int tr_cuda_empty_cache(void);
 
+/* Report the device a tensor currently lives on. 0: success, 1: error. */
 int tr_tensor_device(const tr_tensor* t, tr_device_type* out_type,
                      int64_t* out_index);
 

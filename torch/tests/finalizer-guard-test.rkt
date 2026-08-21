@@ -13,7 +13,7 @@
            (only-in ffi/unsafe/alloc allocator deallocator)
            (only-in "../foreign.rkt" add ones tensor-shape)
            (only-in (submod "../foreign.rkt" unsafe) tensor-free!)
-           (only-in "../foreign/raw/memory.rkt" guard-finalizer))
+           (only-in "../foreign/raw/memory.rkt" finalizer-failures guard-finalizer))
 
   ;; Finalizers run asynchronously after collection; poll with a bounded
   ;; wait so assertions are deterministic without being timing-fragile.

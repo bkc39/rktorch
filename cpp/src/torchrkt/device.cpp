@@ -127,6 +127,7 @@ int tr_cuda_memory_stats(int64_t device_index, int64_t* out_allocated,
     return torchrkt::null_arg_status("tr_cuda_memory_stats");
   }
 #ifndef TORCHRKT_WITH_CUDA_ALLOCATOR
+  (void)device_index;
   torchrkt::set_error(
       "tr_cuda_memory_stats: CUDA support is not compiled into this build");
   return 1;
@@ -139,25 +140,24 @@ int tr_cuda_memory_stats(int64_t device_index, int64_t* out_allocated,
         device_index >= static_cast<int64_t>(torch::cuda::device_count())) {
       throw std::invalid_argument("CUDA device index out of range");
     }
-    try {
-      const auto stats = c10::cuda::CUDACachingAllocator::getDeviceStats(
-          static_cast<c10::DeviceIndex>(device_index));
-      const auto agg =
-          static_cast<size_t>(c10::CachingDeviceAllocator::StatType::AGGREGATE);
-      *out_allocated = stats.allocated_bytes[agg].current;
-      *out_reserved = stats.reserved_bytes[agg].current;
-      *out_peak_allocated = stats.allocated_bytes[agg].peak;
-    } catch (const std::exception&) {
-      // getDeviceStats throws for a device the caching allocator has not
-      // been initialized on (no CUDA tensor allocated yet in this
-      // process). An untouched allocator holds nothing: report zeros,
-      // matching torch.cuda.memory_allocated() before first use. The
-      // ordinal range was validated above, so this path is init-state,
-      // not a bad argument.
+    // An allocator that has never been initialized (no CUDA tensor
+    // allocated yet in this process) holds nothing: report zeros,
+    // matching torch.cuda.memory_allocated() before first use. Probed
+    // EXPLICITLY rather than by catching getDeviceStats' throw — a
+    // catch-all would also mask real allocator failures as zero stats.
+    if (!c10::cuda::CUDACachingAllocator::get()->initialized()) {
       *out_allocated = 0;
       *out_reserved = 0;
       *out_peak_allocated = 0;
+      return;
     }
+    const auto stats = c10::cuda::CUDACachingAllocator::getDeviceStats(
+        static_cast<c10::DeviceIndex>(device_index));
+    const auto agg =
+        static_cast<size_t>(c10::CachingDeviceAllocator::StatType::AGGREGATE);
+    *out_allocated = stats.allocated_bytes[agg].current;
+    *out_reserved = stats.reserved_bytes[agg].current;
+    *out_peak_allocated = stats.allocated_bytes[agg].peak;
   });
 #endif
 }
