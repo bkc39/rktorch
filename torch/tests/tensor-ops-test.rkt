@@ -96,9 +96,13 @@
     ;; strict threshold: 1000 elements print in full, 1001 summarize
     (check-false (regexp-match? #rx"\\.\\.\\." (tensor->repr (zeros 1000))))
     (check-regexp-match #rx"\\.\\.\\." (tensor->repr (zeros 1001)))
-    ;; a dimension of exactly 2*edgeitems never elides
-    (check-false (regexp-match? #rx"\\.\\.\\."
-                                (tensor->repr (zeros 6 6)))))
+    ;; a dimension of exactly 2*edgeitems never elides, even inside a
+    ;; summarized tensor: (zeros 6 200) summarizes (1200 elements), the
+    ;; 200-wide rows elide inline, but all 6 rows print (no "...," row)
+    (let ([r (tensor->repr (zeros 6 200))])
+      (check-regexp-match #rx"\\.\\.\\." r)
+      (check-false (regexp-match? #rx"\n *\\.\\.\\.," r))
+      (check-equal? (length (regexp-match* #rx"\n" r)) 5)))
 
   (test-case "tensor from nested lists infers the shape"
     (define t (tensor '((1 2 3) (4 5 6))))

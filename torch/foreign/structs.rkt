@@ -25,7 +25,7 @@
                   s64vector->list
                   s64vector-ref)
          (only-in racket/string string-join)
-         (only-in "error.rkt" check-ok)
+         (only-in "error.rkt" check-handle check-ok)
          (only-in "format.rkt"
                   needs-sci-notation?
                   tensor->pytorch-repr
@@ -36,9 +36,9 @@
          (only-in "raw/tensor.rkt"
                   dtype-code->symbol
                   tr-tensor-copy-data-i64/raw
-                  tr-tensor-narrow/raw
                   tr-tensor-copy-data/raw
                   tr-tensor-dtype/raw
+                  tr-tensor-narrow/raw
                   tr-tensor-print/raw
                   tr-tensor-shape/raw))
 
@@ -125,11 +125,7 @@
 
 ;; Slice `len` entries starting at `start` along dimension `d` of `h`.
 (define (slice h d start len)
-  (check-handle-for-repr (tr-tensor-narrow/raw h d start len)))
-
-(define (check-handle-for-repr v)
-  (unless v (error 'tensor->repr "narrow failed: ~a" v))
-  v)
+  (check-handle 'tensor->repr (tr-tensor-narrow/raw h d start len)))
 
 ;; Build the summarized tree: recurse the leading dimensions (narrowing
 ;; per included index), marshal only leaf slices. `d` is the absolute
