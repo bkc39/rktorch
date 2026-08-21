@@ -46,6 +46,26 @@
       # zips) so the output hash is mtime-free and platform-stable. Bump
       # outputHash when the threading version in the catalog changes or a
       # new runtime dep lands in torch/info.rkt.
+      # The Racket toolchain from the scoped pin, guarded by the ordering
+      # invariant the nixpkgsRacket input comment documents: the Racket
+      # binary dlopens libtorchrkt built against the MAIN pin's glibc, and
+      # glibc symbol versioning only tolerates older-built-lib into
+      # newer-glibc-process — so the scoped pin's glibc must be at least
+      # as new. Enforced here (not just prose) so a re-pin in the wrong
+      # direction fails at evaluation, symmetric with racket92's floor
+      # assert. Darwin has no glibc; dyld versioning does not share the
+      # constraint.
+      racketFor = pkgs: pkgsRacket:
+        assert pkgs.lib.assertMsg
+          (!pkgs.stdenv.isLinux
+           || pkgs.lib.versionAtLeast pkgsRacket.glibc.version
+                pkgs.glibc.version)
+          ("nixpkgsRacket glibc " + pkgsRacket.glibc.version
+           + " is older than the main pin's " + pkgs.glibc.version
+           + " — re-pin nixpkgsRacket at least as new as the main pin "
+           + "(see the flake inputs comment)");
+        pkgsRacket.racket;
+
       racketDepsFor = pkgs: racketPkg:
         pkgs.stdenvNoCC.mkDerivation {
           name = "torch-rkt-racket-deps";
@@ -119,7 +139,7 @@
           # Racket 9.3 from the scoped pin; everything else stays on the
           # main pin (see the nixpkgsRacket input comment).
           pkgsRacket = import nixpkgsRacket { inherit system; };
-          racketPkg = pkgsRacket.racket;
+          racketPkg = racketFor pkgs pkgsRacket;
           racket-deps = racketDepsFor pkgs racketPkg;
 
           cppCommonInputs = [ torch pkgs.gtest ];
@@ -370,7 +390,7 @@
           pkgs = import nixpkgs { inherit system; };
           torch = torchPackageFor pkgs;
           pkgsRacket = import nixpkgsRacket { inherit system; };
-          racketPkg = pkgsRacket.racket;
+          racketPkg = racketFor pkgs pkgsRacket;
           racket-deps = racketDepsFor pkgs racketPkg;
           cpp = self.packages.${system}.cpp;
           cpp-cuda = self.packages.${system}.cpp-cuda;
