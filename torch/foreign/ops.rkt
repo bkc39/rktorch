@@ -160,13 +160,24 @@
 ;; collect (queues dead handles' finalizers), DRAIN the asynchronous
 ;; finalizer executor (their frees return blocks to the caching
 ;; allocator), then hand the cache's unused blocks to the driver. The
-;; same sequence the OOM retry runs internally; exposed because "free
-;; the VRAM before the next phase" is a legitimate program-level need
-;; (post-training, pre-handoff) and gc.collect-then-empty_cache without
-;; the drain races the executor.
+;; OOM retry runs one bounded round of this internally; the PUBLIC
+;; sequence settles instead — repeat while the ledger keeps shrinking
+;; (bounded rounds), so a queue longer than one drain window still
+;; empties — and the final cache release is CHECKED (an explicit
+;; reclaim should surface a driver failure, unlike the retry's
+;; best-effort pass).
 (define (reclaim-native-memory!)
-  (collect-and-drain!)
-  (void))
+  (let loop ([prev (ledger-total)] [rounds 4])
+    (collect-and-drain!)
+    (define now (ledger-total))
+    (when (and (> rounds 1) (< now prev))
+      (loop now (sub1 rounds))))
+  (cuda-empty-cache!))
+
+;; total handle-attributed bytes across devices (settling probe above)
+(define (ledger-total)
+  (for/sum ([entry (in-list (native-memory-use))])
+    (cdr entry)))
 
 ;; Set the device new tensors (randn/zeros/...) are created on. Errors if CUDA
 ;; is requested but unavailable or the ordinal is out of range.

@@ -42,7 +42,9 @@ CPU + float32 only. From `torch`:
   tensor->list tensor->vector tensor->repr tensor->string`
 - memory: `native-memory-use` (per-device outstanding native bytes from
   the #37 ledger), `cuda-memory-stats` / `cuda-empty-cache!` (the CUDA
-  caching allocator's own gauges + release, #51), `finalizer-failures`
+  caching allocator's own gauges + release, #51),
+  `reclaim-native-memory!` (collect -> finalizer drain -> cache release,
+  the phase-boundary release-now sequence), `finalizer-failures`
   (guarded-swallow counter), `tensor-free!` (explicit synchronous
   release)
 - creation: `zeros ones full arange eye tensor rand` (+ in-place `uniform!`)

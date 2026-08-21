@@ -77,6 +77,10 @@
       (check-equal? (default-device) (cpu-device))))
 
   (test-case "cuda allocator gauges (#51)"
+    ;; the device-argument guard rejects non-CUDA devices BEFORE any FFI
+    ;; call, so this arm is hardware-independent
+    (check-exn #rx"expected a CUDA device"
+               (lambda () (cuda-memory-stats (cpu-device))))
     (cond
       [(cuda-available?)
        ;; with a live GPU tensor the gauges are sane: allocated positive,

@@ -128,9 +128,12 @@ int tr_cuda_memory_stats(int64_t device_index, int64_t* out_allocated,
   }
 #ifndef TORCHRKT_WITH_CUDA_ALLOCATOR
   (void)device_index;
-  torchrkt::set_error(
-      "tr_cuda_memory_stats: CUDA support is not compiled into this build");
-  return 1;
+  // Throw through status_call so the recording rides the same
+  // noexcept-safe path as every other failure (the direct set_error
+  // would allocate outside any catch under host-memory pressure).
+  return torchrkt::status_call("tr_cuda_memory_stats", [] {
+    throw std::runtime_error("CUDA support is not compiled into this build");
+  });
 #else
   return torchrkt::status_call("tr_cuda_memory_stats", [&] {
     if (!torch::cuda::is_available()) {
