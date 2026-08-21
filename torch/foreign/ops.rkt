@@ -125,10 +125,10 @@
 (define (to-dtype t dtype)
   (wrap-tensor (check-handle 'to-dtype (tr-tensor-to-dtype/raw t dtype))))
 
-;; A tensor's dtype as a symbol ('float32 / 'float64 / 'int64), the
-;; torch.Tensor.dtype query (#44). Raises for dtypes outside the v1
-;; enum (e.g. the bool masks comparisons produce) — int64-probe below is
-;; the tolerant internal variant.
+;; A tensor's dtype as a symbol ('float32 / 'float64 / 'int64 / 'bool),
+;; the torch.Tensor.dtype query (#44). Raises only for dtypes outside
+;; the C enum entirely — int64-probe below is the tolerant internal
+;; variant.
 (define (tensor-dtype t)
   (define-values (rc code) (tr-tensor-dtype/raw t))
   (check-ok rc 'tensor-dtype)

@@ -103,6 +103,7 @@
    ;; torch appends the dtype exactly when the (absent) elements can't
    ;; disambiguate it from the float32 default
    (case dtype
+     [(float64) ", dtype=torch.float64"]
      [(int64) ", dtype=torch.int64"]
      [(bool) ", dtype=torch.bool"]
      [else ""])
