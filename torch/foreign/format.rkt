@@ -12,15 +12,23 @@
 ;; wide dynamic range), the caller falls back to ATen's own printer instead
 ;; (see structs.rkt) rather than emitting a subtly-wrong repr.
 ;;
-;; Not yet reproduced (v0 TODO): scientific notation, line wrapping of long
-;; rows, large-tensor "..." summarization, and dtype suffixes for non-float32.
+;; Large tensors (numel > 1000) summarize exactly like PyTorch (#45):
+;; callers hand this module a TREE with 'ellipsis markers where a
+;; dimension was elided to its edge items; the last dimension renders the
+;; marker as the literal " ..." joined by ", " (PyTorch's double-space),
+;; higher dimensions as a "..." block between the standard separators.
+;;
+;; Not yet reproduced (v0 TODO): scientific notation, line wrapping of
+;; long unsummarized rows, and dtype suffixes for non-float32.
 
 (require (only-in racket/format ~r)
-         (only-in racket/list drop take)
+         (only-in racket/list append-map drop take)
          (only-in racket/math infinite? nan?)
          (only-in racket/string string-join))
 
 (provide tensor->pytorch-repr
+         tensor-tree->pytorch-repr
+         tree-values
          needs-sci-notation?)
 
 (define precision 4)
@@ -105,7 +113,10 @@
   (cond
     [(null? dims) (pad (fmt node) max-width)]
     [(null? (cdr dims))
-     (string-join (for/list ([v (in-list node)]) (pad (fmt v) max-width))
+     (string-join (for/list ([v (in-list node)])
+                    (if (eq? v 'ellipsis)
+                        " ..."
+                        (pad (fmt v) max-width)))
                   ", " #:before-first "[" #:after-last "]")]
     [else
      ;; Separator between sub-blocks: a comma, (rank-1) newlines, then enough
@@ -114,7 +125,10 @@
        (string-append "," (make-string (sub1 (length dims)) #\newline)
                       (make-string (add1 indent) #\space)))
      (string-join (for/list ([sub (in-list node)])
-                    (format-nested sub (cdr dims) (add1 indent) fmt max-width))
+                    (if (eq? sub 'ellipsis)
+                        "..."
+                        (format-nested sub (cdr dims) (add1 indent) fmt
+                                       max-width)))
                   sep #:before-first "[" #:after-last "]")]))
 
 ;; "tensor(" + data + ")", with continuation lines aligned under the data by the
@@ -123,4 +137,24 @@
   (define-values (fmt max-width) (make-formatter flat mode))
   (string-append "tensor("
                  (format-nested (nest flat dims) dims 7 fmt max-width)
+                 ")"))
+
+;; The values present in a summarized tree, in order ('ellipsis markers
+;; skipped) — the population the formatter and the sci-notation heuristic
+;; run over, exactly PyTorch's behavior of formatting from the SELECTED
+;; elements.
+(define (tree-values node)
+  (cond
+    [(eq? node 'ellipsis) '()]
+    [(list? node) (append-map tree-values node)]
+    [else (list node)]))
+
+;; The summarized entry point: `tree` is nested per `dims`' structure but
+;; with elided dimensions holding only edge items around an 'ellipsis
+;; marker; `dims` supplies depth (for indent and last-dim detection), not
+;; lengths.
+(define (tensor-tree->pytorch-repr tree dims #:mode [mode #f])
+  (define-values (fmt max-width) (make-formatter (tree-values tree) mode))
+  (string-append "tensor("
+                 (format-nested tree dims 7 fmt max-width)
                  ")"))

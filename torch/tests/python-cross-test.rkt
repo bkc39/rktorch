@@ -83,6 +83,24 @@
                      (define x (tensor '(1.0 2.0 3.0) #:requires-grad? #t))
                      (backward! (~> x (* x) Σ))
                      (grad x)))
+     ;; summarized reprs (#45): each summarization form byte-compared
+     ;; against Python — 1-d inline ellipsis, 2-d row elision, rank-3
+     ;; last-dim-only, rank-3 leading-dim, the 1001 boundary, and the
+     ;; bool forms deferred from #53's review
+     (let* ([j (python-result "python/summarized_reprs.py")]
+            [py (hash-ref j 'reprs)]
+            [rkt (list
+                  (tensor->repr (tensor (build-list 2000 values)))
+                  (tensor->repr (zeros 1024 1024))
+                  (tensor->repr (zeros 3 4 500))
+                  (tensor->repr (zeros 1024 2 2))
+                  (tensor->repr (zeros 1001))
+                  (tensor->repr (eq (tensor '(1 2)) 1))
+                  (tensor->repr (eq (zeros 2000) 1.0)))])
+       (for ([r (in-list rkt)]
+             [p (in-list py)]
+             [i (in-naturals)])
+         (check-equal? r p (format "summarized repr ~a parity" i))))
      ;; int64 inference (#44): the byte-for-byte repr comparison IS the
      ;; dtype pin — a float-inferring side prints "1." forms and fails
      ;; even though values compare equal

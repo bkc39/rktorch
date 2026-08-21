@@ -84,6 +84,22 @@
                                     (expt 2 53)))
                   '(0.0)))
 
+  (test-case "large tensors summarize like PyTorch (#45)"
+    ;; the headline hang: a 2^20-element repr returns instantly with the
+    ;; edgeitems form (this test formerly hung the suite)
+    (define r (tensor->repr (zeros 1024 1024)))
+    (check-regexp-match #rx"\\.\\.\\." r)
+    (check-true (< (string-length r) 400))
+    (check-equal?
+     (tensor->repr (tensor (build-list 2000 values)))
+     "tensor([   0,    1,    2,  ..., 1997, 1998, 1999])")
+    ;; strict threshold: 1000 elements print in full, 1001 summarize
+    (check-false (regexp-match? #rx"\\.\\.\\." (tensor->repr (zeros 1000))))
+    (check-regexp-match #rx"\\.\\.\\." (tensor->repr (zeros 1001)))
+    ;; a dimension of exactly 2*edgeitems never elides
+    (check-false (regexp-match? #rx"\\.\\.\\."
+                                (tensor->repr (zeros 6 6)))))
+
   (test-case "tensor from nested lists infers the shape"
     (define t (tensor '((1 2 3) (4 5 6))))
     (check-equal? (tensor-shape t) '(2 3))

@@ -18,6 +18,7 @@
          (only-in "syntax.rkt" _Tensor _Tensor/null define-torch))
 
 (provide dtype-code->symbol
+         tr-tensor-narrow/raw
          tr-tensor-numel/raw
          tr-tensor-ndim/raw
          tr-tensor-shape/raw
@@ -101,6 +102,20 @@
         -> (rc : _int)
         -> (values rc out-numel))
   #:c-id tr_tensor_copy_data_i64)
+
+;; Bound against the GENERATED narrow shim (tr_gen_narrow): the repr
+;; summarizer in structs.rkt needs edge slices, and it sits below
+;; generated.rkt in the require graph (generated.rkt requires
+;; structs.rkt for wrap-tensor), so the raw layer carries its own
+;; binding to the same C symbol.
+(define-torch tr-tensor-narrow/raw
+  (_fun (t : _Tensor)
+        (dim : _int64)
+        (start : _int64)
+        (len : _int64)
+        -> _Tensor/null)
+  #:c-id tr_gen_narrow
+  #:wrap tensor-allocator)
 
 (define-torch tr-tensor-item/raw
   (_fun (t : _Tensor)

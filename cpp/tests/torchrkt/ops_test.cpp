@@ -179,6 +179,25 @@ TEST(TorchrktOps, FromDataI64OnPlacesOnExplicitCpu) {
             nullptr);
 }
 
+TEST(TorchrktOps, FromDataAcceptsNullForEmptyTensors) {
+  // numel==0 constructs with a NULL data pointer (an empty Racket
+  // vector marshals as NULL); nonzero numel still rejects NULL.
+  const std::vector<int64_t> rank1 = {0};
+  const Handle e1(tr_from_data(nullptr, 0, rank1.data(), 1));
+  ASSERT_NE(e1.t, nullptr) << tr_last_error();
+  std::uint64_t numel = 99;
+  EXPECT_EQ(tr_tensor_copy_data(e1.t, 0, nullptr, &numel), 0);
+  EXPECT_EQ(numel, 0U);
+  const std::vector<int64_t> rank2 = {2, 0};
+  const Handle e2(tr_from_data_i64(nullptr, 0, rank2.data(), 2));
+  ASSERT_NE(e2.t, nullptr) << tr_last_error();
+  tr_dtype dt = TR_DTYPE_FLOAT32;
+  EXPECT_EQ(tr_tensor_dtype(e2.t, &dt), 0) << tr_last_error();
+  EXPECT_EQ(dt, TR_DTYPE_INT64);
+  EXPECT_EQ(tr_from_data(nullptr, 3, rank1.data(), 1), nullptr);
+  EXPECT_STRNE(tr_last_error(), "");
+}
+
 TEST(TorchrktOps, FromDataRejectsNumelMismatch) {
   const std::vector<float> values = {1.0F, 2.0F, 3.0F};
   const std::vector<int64_t> dims = {2, 2};

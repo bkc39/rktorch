@@ -26,12 +26,17 @@
                   s64vector-ref)
          (only-in racket/string string-join)
          (only-in "error.rkt" check-ok)
-         (only-in "format.rkt" needs-sci-notation? tensor->pytorch-repr)
+         (only-in "format.rkt"
+                  needs-sci-notation?
+                  tensor->pytorch-repr
+                  tensor-tree->pytorch-repr
+                  tree-values)
          (only-in "raw/memory.rkt" tr-tensor-free/checked)
          (only-in "raw/syntax.rkt" Tensor?)
          (only-in "raw/tensor.rkt"
                   dtype-code->symbol
                   tr-tensor-copy-data-i64/raw
+                  tr-tensor-narrow/raw
                   tr-tensor-copy-data/raw
                   tr-tensor-dtype/raw
                   tr-tensor-print/raw
@@ -109,11 +114,67 @@
      [else ""])
    ")"))
 
+;; --- summarization (#45): PyTorch's edgeitems/threshold elision --------
+;; A tensor with more than `threshold` elements prints only `edgeitems`
+;; leading and trailing entries per oversized dimension, with 'ellipsis
+;; markers where the middle was dropped. The edges are extracted with
+;; native narrow slices, so the marshal-out cost scales with edgeitems,
+;; never numel — a (zeros 1024 1024) repr copies 36 floats, not 2^20.
+(define summarize-threshold 1000)
+(define edgeitems 3)
+
+;; Slice `len` entries starting at `start` along dimension `d` of `h`.
+(define (slice h d start len)
+  (check-handle-for-repr (tr-tensor-narrow/raw h d start len)))
+
+(define (check-handle-for-repr v)
+  (unless v (error 'tensor->repr "narrow failed: ~a" v))
+  v)
+
+;; Build the summarized tree: recurse the leading dimensions (narrowing
+;; per included index), marshal only leaf slices. `d` is the absolute
+;; dimension index into `h`, which keeps its full rank (leading
+;; length-1 dims) down the recursion; leaf copies flatten regardless.
+(define (handle->summarized-tree h dims d leaf-values)
+  (define n (car dims))
+  (define last? (null? (cdr dims)))
+  (define elide? (> n (* 2 edgeitems)))
+  (cond
+    [(and last? elide?)
+     (append (leaf-values (slice h d 0 edgeitems) (list edgeitems))
+             '(ellipsis)
+             (leaf-values (slice h d (- n edgeitems) edgeitems)
+                          (list edgeitems)))]
+    [last? (leaf-values h (list n))]
+    [else
+     (define (child i)
+       (handle->summarized-tree (slice h d i 1) (cdr dims) (add1 d)
+                                leaf-values))
+     (if elide?
+         (append (for/list ([i (in-range edgeitems)]) (child i))
+                 '(ellipsis)
+                 (for/list ([i (in-range (- n edgeitems) n)]) (child i)))
+         (for/list ([i (in-range n)]) (child i)))]))
+
 (define (handle->repr h dims)
   (define-values (dtype-rc code) (tr-tensor-dtype/raw h))
   (define dtype (and (zero? dtype-rc) (dtype-code->symbol code)))
+  (define numel (apply * dims))
+  (define summarize? (> numel summarize-threshold))
   (cond
-    [(zero? (apply * dims)) (empty-repr dims dtype)]
+    [(zero? numel) (empty-repr dims dtype)]
+    [summarize?
+     (define leaf-values
+       (if (eq? dtype 'int64) handle->ints handle->floats))
+     (define tree (handle->summarized-tree h dims 0 leaf-values))
+     (define mode
+       (case dtype [(int64) 'exact-integers] [(bool) 'booleans] [else #f]))
+     ;; sci-notation heuristic over the SELECTED values, as PyTorch
+     ;; formats from the summarized population; the ATen fallback
+     ;; summarizes natively, so it stays cheap
+     (if (and (not mode) (needs-sci-notation? (tree-values tree)))
+         (handle->string h)
+         (tensor-tree->pytorch-repr tree dims #:mode mode))]
     [(eq? dtype 'int64)
      (tensor->pytorch-repr (handle->ints h dims) dims
                            #:mode 'exact-integers)]
