@@ -150,7 +150,8 @@
     (check-equal? (tensor->list (cadr (parameters ln))) '(0.0 0.0 0.0 0.0))
     ;; with unit weight and zero bias the forward is pure normalization:
     ;; each row comes out zero-mean.
-    (define out (ln (tensor '((1 2 3 4) (10 20 30 40)))))
+    ;; float literals: layer-norm is float-only in torch
+    (define out (ln (tensor '((1.0 2.0 3.0 4.0) (10.0 20.0 30.0 40.0)))))
     (check-equal? (tensor-shape out) '(2 4))
     (define rows (tensor->list out))
     (check-= (apply + (take rows 4)) 0.0 1e-4)

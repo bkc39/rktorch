@@ -92,6 +92,40 @@ TEST(TorchrktOps, FromDataRoundTrips) {
   EXPECT_EQ(data_of(t.t), values);
 }
 
+TEST(TorchrktOps, FromDataI64RoundTripsExactly) {
+  // The #44 inference path: int64 in, int64 out — no float32 transit.
+  // 2^53+1 is NOT representable as a double, so a float32/64 transit
+  // would corrupt it; exact round-trip proves the path is integral.
+  const std::vector<int64_t> values = {1, -2, (int64_t{1} << 53) + 1};
+  const std::vector<int64_t> dims = {3};
+  const Handle t(
+      tr_from_data_i64(values.data(), values.size(), dims.data(), 1));
+  ASSERT_NE(t.t, nullptr) << tr_last_error();
+  tr_dtype dt = TR_DTYPE_FLOAT32;
+  EXPECT_EQ(tr_tensor_dtype(t.t, &dt), 0) << tr_last_error();
+  EXPECT_EQ(dt, TR_DTYPE_INT64);
+  std::uint64_t numel = 0;
+  EXPECT_EQ(tr_tensor_copy_data_i64(t.t, 0, nullptr, &numel), 2);
+  std::vector<int64_t> out(numel);
+  EXPECT_EQ(tr_tensor_copy_data_i64(t.t, numel, out.data(), &numel), 0)
+      << tr_last_error();
+  EXPECT_EQ(out, values);
+}
+
+TEST(TorchrktOps, DtypeGetterCoversTheEnum) {
+  const std::vector<float> values = {1.0F};
+  const std::vector<int64_t> dims = {1};
+  const Handle f32(tr_from_data(values.data(), values.size(), dims.data(), 1));
+  tr_dtype dt = TR_DTYPE_INT64;
+  EXPECT_EQ(tr_tensor_dtype(f32.t, &dt), 0) << tr_last_error();
+  EXPECT_EQ(dt, TR_DTYPE_FLOAT32);
+  const Handle f64(tr_tensor_to_dtype(f32.t, TR_DTYPE_FLOAT64));
+  EXPECT_EQ(tr_tensor_dtype(f64.t, &dt), 0) << tr_last_error();
+  EXPECT_EQ(dt, TR_DTYPE_FLOAT64);
+  EXPECT_EQ(tr_tensor_dtype(nullptr, &dt), 1);
+  EXPECT_STRNE(tr_last_error(), "");
+}
+
 TEST(TorchrktOps, FromDataRejectsNumelMismatch) {
   const std::vector<float> values = {1.0F, 2.0F, 3.0F};
   const std::vector<int64_t> dims = {2, 2};

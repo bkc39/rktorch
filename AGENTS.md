@@ -39,7 +39,8 @@ linked against libtorch via `find_package(Torch)`.
 CPU + float32 only. From `torch`:
 
 - v0 core: `torch-version manual-seed! randn tensor-shape tensor-numel
-  tensor->list tensor->vector tensor->repr tensor->string`
+  tensor->list tensor->vector tensor->repr tensor->string` (+
+  `tensor-dtype`; `tensor` infers int64 for all-integer data, #44)
 - memory: `native-memory-use` (per-device outstanding native bytes from
   the #37 ledger), `cuda-memory-stats` / `cuda-empty-cache!` (the CUDA
   caching allocator's own gauges + release, #51),

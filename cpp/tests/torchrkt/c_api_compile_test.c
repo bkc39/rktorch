@@ -26,6 +26,14 @@ void torchrkt_c_api_compile_check(void) {
       tr_from_data;
   tr_tensor* (*from_data_on)(const float*, uint64_t, const int64_t*, int64_t,
                              tr_device_type, int64_t) = tr_from_data_on;
+  tr_tensor* (*from_data_i64)(const int64_t*, uint64_t, const int64_t*,
+                              int64_t) = tr_from_data_i64;
+  tr_tensor* (*from_data_i64_on)(const int64_t*, uint64_t, const int64_t*,
+                                 int64_t, tr_device_type, int64_t) =
+      tr_from_data_i64_on;
+  int (*tensor_dtype)(const tr_tensor*, tr_dtype*) = tr_tensor_dtype;
+  int (*copy_data_i64)(const tr_tensor*, uint64_t, int64_t*, uint64_t*) =
+      tr_tensor_copy_data_i64;
   tr_tensor* (*cat)(const tr_tensor* const*, int64_t, int64_t) = tr_cat;
   tr_tensor* (*add)(const tr_tensor*, const tr_tensor*) = tr_add;
   tr_tensor* (*add_scalar)(const tr_tensor*, double) = tr_add_scalar;
@@ -130,6 +138,10 @@ void torchrkt_c_api_compile_check(void) {
   (void)copy_data;
   (void)zeros;
   (void)from_data;
+  (void)from_data_i64;
+  (void)from_data_i64_on;
+  (void)tensor_dtype;
+  (void)copy_data_i64;
   (void)cat;
   (void)add;
   (void)add_scalar;

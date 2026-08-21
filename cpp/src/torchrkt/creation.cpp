@@ -27,11 +27,13 @@ std::vector<int64_t> to_shape(const int64_t* dims, int64_t ndim) {
   return {dims, dims + ndim};
 }
 
-// Shared body of tr_from_data / tr_from_data_on: validate numel against the
-// shape and copy the host data into tensor-owned CPU storage. The caller
-// applies the device move — the one place the two entry points differ.
-torch::Tensor host_from_data(const float* data, uint64_t numel,
-                             const int64_t* dims, int64_t ndim) {
+// Shared body of the four tr_from_data* entry points: validate numel
+// against the shape and copy the host data into tensor-owned CPU storage
+// of the given dtype. The caller applies the device move — the one place
+// the *_on variants differ.
+template <typename T>
+torch::Tensor host_from_data(const T* data, uint64_t numel, const int64_t* dims,
+                             int64_t ndim, torch::ScalarType dtype) {
   const auto shape = to_shape(dims, ndim);
   // Overflow-safe product: a crafted shape whose product wraps could
   // otherwise pass the numel check and hand from_blob an undersized
@@ -53,8 +55,8 @@ torch::Tensor host_from_data(const float* data, uint64_t numel,
   // `data` is host memory, so from_blob must wrap it as a CPU tensor (a CUDA
   // default_options would make from_blob reject the host pointer); clone()
   // copies it into tensor-owned storage.
-  return torch::from_blob(const_cast<float*>(data), shape,
-                          torch::TensorOptions().dtype(torch::kFloat32))
+  return torch::from_blob(const_cast<T*>(data), shape,
+                          torch::TensorOptions().dtype(dtype))
       .clone();
 }
 
@@ -106,8 +108,32 @@ tr_tensor* tr_from_data(const float* data, uint64_t numel, const int64_t* dims,
     return torchrkt::null_arg("tr_from_data");
   }
   return torchrkt::alloc_result("tr_from_data", [&] {
-    return host_from_data(data, numel, dims, ndim)
+    return host_from_data(data, numel, dims, ndim, torch::kFloat32)
         .to(torchrkt::current_default_device());
+  });
+}
+
+tr_tensor* tr_from_data_i64(const int64_t* data, uint64_t numel,
+                            const int64_t* dims, int64_t ndim) {
+  if (!data || bad_dims(dims, ndim)) {
+    return torchrkt::null_arg("tr_from_data_i64");
+  }
+  return torchrkt::alloc_result("tr_from_data_i64", [&] {
+    return host_from_data(data, numel, dims, ndim, torch::kInt64)
+        .to(torchrkt::current_default_device());
+  });
+}
+
+tr_tensor* tr_from_data_i64_on(const int64_t* data, uint64_t numel,
+                               const int64_t* dims, int64_t ndim,
+                               tr_device_type device_type,
+                               int64_t device_index) {
+  if (!data || bad_dims(dims, ndim)) {
+    return torchrkt::null_arg("tr_from_data_i64_on");
+  }
+  return torchrkt::alloc_result("tr_from_data_i64_on", [&] {
+    return host_from_data(data, numel, dims, ndim, torch::kInt64)
+        .to(torchrkt::to_torch_device(device_type, device_index));
   });
 }
 
@@ -118,7 +144,7 @@ tr_tensor* tr_from_data_on(const float* data, uint64_t numel,
     return torchrkt::null_arg("tr_from_data_on");
   }
   return torchrkt::alloc_result("tr_from_data_on", [&] {
-    return host_from_data(data, numel, dims, ndim)
+    return host_from_data(data, numel, dims, ndim, torch::kFloat32)
         .to(torchrkt::to_torch_device(device_type, device_index));
   });
 }

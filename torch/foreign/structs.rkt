@@ -22,6 +22,7 @@
                   f32vector->list
                   make-f32vector
                   make-s64vector
+                  s64vector->list
                   s64vector-ref)
          (only-in racket/string string-join)
          (only-in "error.rkt" check-ok)
@@ -29,7 +30,9 @@
          (only-in "raw/memory.rkt" tr-tensor-free/checked)
          (only-in "raw/syntax.rkt" Tensor?)
          (only-in "raw/tensor.rkt"
+                  tr-tensor-copy-data-i64/raw
                   tr-tensor-copy-data/raw
+                  tr-tensor-dtype/raw
                   tr-tensor-print/raw
                   tr-tensor-shape/raw))
 
@@ -71,14 +74,33 @@
   (check-ok rc 'tensor->repr)
   (f32vector->list out))
 
+;; Copy an int64 handle's values out as a flat row-major list of EXACT
+;; integers (#44) — the float path would corrupt values beyond 2^24.
+(define (handle->ints h dims)
+  (define numel (apply * dims))
+  (define out (make-s64vector numel))
+  (define-values (rc _numel) (tr-tensor-copy-data-i64/raw h numel out))
+  (check-ok rc 'tensor->repr)
+  (s64vector->list out))
+
 ;; The PyTorch REPL form: `tensor([[...]])`, reproduced from the data + shape.
-;; Falls back to ATen's printer for values PyTorch would show in scientific
-;; notation (which the Racket-side formatter doesn't yet reproduce).
+;; int64 tensors render bare integers (torch.tensor([1, 2, 3]) parity);
+;; everything else falls back to ATen's printer for values PyTorch would
+;; show in scientific notation (which the Racket-side formatter doesn't
+;; yet reproduce). A failing dtype query falls through to the float path
+;; (printing must never raise — the custom-write handler depends on it).
 (define (handle->repr h dims)
-  (define floats (handle->floats h dims))
-  (if (needs-sci-notation? floats)
-      (handle->string h)
-      (tensor->pytorch-repr floats dims)))
+  (define-values (dtype-rc dtype) (tr-tensor-dtype/raw h))
+  (cond
+    ;; 2 = TR_DTYPE_INT64 (the raw binding returns the plain int so an
+    ;; out-of-enum dtype on the error path can't poison the unmarshal)
+    [(and (zero? dtype-rc) (eqv? dtype 2))
+     (tensor->pytorch-repr (handle->ints h dims) dims #:exact-integers? #t)]
+    [else
+     (define floats (handle->floats h dims))
+     (if (needs-sci-notation? floats)
+         (handle->string h)
+         (tensor->pytorch-repr floats dims))]))
 
 ;; The REPL/`print`/`write` form mirrors the Python REPL: show the tensor's
 ;; contents as `tensor(...)`, not an opaque handle.  A freed handle (tag

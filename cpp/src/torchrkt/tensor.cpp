@@ -110,6 +110,56 @@ int tr_tensor_shape(const tr_tensor* t, int64_t capacity, int64_t* out_dims,
   }
 }
 
+int tr_tensor_dtype(const tr_tensor* t, tr_dtype* out) {
+  if (!t || !out) {
+    return torchrkt::null_arg_status("tr_tensor_dtype");
+  }
+  return torchrkt::status_call("tr_tensor_dtype", [&] {
+    switch (t->value.scalar_type()) {
+      case torch::kFloat32:
+        *out = TR_DTYPE_FLOAT32;
+        return;
+      case torch::kFloat64:
+        *out = TR_DTYPE_FLOAT64;
+        return;
+      case torch::kInt64:
+        *out = TR_DTYPE_INT64;
+        return;
+      default:
+        // Reject rather than mislabel (the tr_tensor_device pattern for
+        // kinds outside the C ABI).
+        throw std::invalid_argument("tensor has an unsupported dtype");
+    }
+  });
+}
+
+int tr_tensor_copy_data_i64(const tr_tensor* t, uint64_t capacity, int64_t* out,
+                            uint64_t* out_numel) {
+  if (!t || !out_numel) {
+    torchrkt::set_error("tr_tensor_copy_data_i64: null argument");
+    return 1;
+  }
+  *out_numel = 0;
+  try {
+    const torch::Tensor c =
+        t->value.to(torch::kCPU).to(torch::kInt64).contiguous();
+    const uint64_t numel = static_cast<uint64_t>(c.numel());
+    *out_numel = numel;
+    if (capacity < numel) {
+      return 2;
+    }
+    if (out && numel > 0) {
+      std::memcpy(out, c.data_ptr<int64_t>(), numel * sizeof(int64_t));
+    }
+    return 0;
+  } catch (const std::exception& e) {
+    // Same noexcept-safe recording as tr_tensor_copy_data: the
+    // contiguous copy can be large.
+    torchrkt::record_failure("tr_tensor_copy_data_i64", e);
+    return 1;
+  }
+}
+
 int tr_tensor_copy_data(const tr_tensor* t, uint64_t capacity, float* out,
                         uint64_t* out_numel) {
   if (!t || !out_numel) {

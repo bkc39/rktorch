@@ -74,7 +74,10 @@
      ;; 03 — autograd: d(sum(x*x))/dx == 2x
      (check-parity "python/03_autograd.py"
                    (lambda ()
-                     (define x (tensor '(1 2 3) #:requires-grad? #t))
+                     ;; float literals (#44): integer literals now infer
+                     ;; int64, and torch — ours and Python's — rejects
+                     ;; requires-grad on integer tensors
+                     (define x (tensor '(1.0 2.0 3.0) #:requires-grad? #t))
                      (backward! (~> x (* x) Σ))
                      (grad x)))
      ;; 04 — the v1 capstone: seeded MLP init + 5 SGD steps track PyTorch

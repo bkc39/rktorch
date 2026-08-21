@@ -55,7 +55,8 @@
   [exn:fail:rktorch:oom? (-> any/c boolean?)]
   [tensor-shape (-> tensor? (listof exact-nonnegative-integer?))]
   [tensor-numel (-> tensor? exact-nonnegative-integer?)]
-  [tensor->vector (-> tensor? f32vector?)]
+  ;; int64 tensors marshal out as s64vector / exact integers (#44)
+  [tensor->vector (-> tensor? (or/c f32vector? s64vector?))]
   [tensor->list (-> tensor? (listof real?))]
   ;; tensor->repr: the PyTorch `repr` text (what the REPL prints);
   ;; tensor->string: ATen's C++ `operator<<` text.
@@ -70,7 +71,11 @@
             (exact-nonnegative-integer?)
             tensor?)]
   [tensor (->* ((or/c real? list?))
-               (#:requires-grad? boolean? #:device (or/c #f device/c))
+               (#:requires-grad? boolean?
+                #:device (or/c #f device/c)
+                ;; inference (#44): all-exact-integer data → int64,
+                ;; anything inexact → float32; #:dtype overrides
+                #:dtype (or/c #f 'float32 'int64))
                tensor?)]
   ;; shape
   [reshape (-> tensor? index/c ... tensor?)]
@@ -172,6 +177,8 @@
   ;; out-marshalling
   [item (-> tensor? real?)]
   [to-dtype (-> tensor? (or/c 'float32 'float64 'int64) tensor?)]
+  ;; the dtype query (#44): torch.Tensor.dtype as a symbol
+  [tensor-dtype (-> tensor? (or/c 'float32 'float64 'int64))]
   ;; native-memory observability (#37): live handle-attributed bytes per
   ;; device, folded from the accounting ledger — the view's extent per
   ;; handle, not total device usage (see raw/memory.rkt).

@@ -41,6 +41,16 @@ tr_tensor* tr_from_data_on(const float* data, uint64_t numel,
                            const int64_t* dims, int64_t ndim,
                            tr_device_type device_type, int64_t device_index);
 
+/* The int64 ingestion pair (#44): identical contracts to tr_from_data /
+ * tr_from_data_on with int64 payload and dtype. */
+tr_tensor* tr_from_data_i64(const int64_t* data, uint64_t numel,
+                            const int64_t* dims, int64_t ndim);
+
+tr_tensor* tr_from_data_i64_on(const int64_t* data, uint64_t numel,
+                               const int64_t* dims, int64_t ndim,
+                               tr_device_type device_type,
+                               int64_t device_index);
+
 #ifdef __cplusplus
 }
 #endif
