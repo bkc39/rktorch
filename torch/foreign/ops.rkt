@@ -17,7 +17,10 @@
                   tr-tensor-device/raw
                   tr-tensor-to-device/raw)
          (only-in "raw/global.rkt" tr-manual-seed/raw tr-version/raw)
-         (only-in "raw/memory.rkt" finalizer-failures native-memory-use)
+         (only-in "raw/memory.rkt"
+                  collect-and-drain!
+                  finalizer-failures
+                  native-memory-use)
          (only-in "raw/random.rkt" tr-rand/raw tr-randn/raw tr-tensor-uniform!/raw)
          (only-in "raw/tensor.rkt"
                   tr-tensor-copy-data/raw
@@ -34,6 +37,7 @@
 (provide torch-version
          cuda-empty-cache!
          cuda-memory-stats
+         reclaim-native-memory!
          device->type+index
          finalizer-failures
          native-memory-use
@@ -145,9 +149,23 @@
 
 ;; Hand the caching allocator's unused cached blocks back to the driver
 ;; (torch.cuda.empty_cache). No-op without CUDA; the OOM retry already
-;; runs this automatically before retrying.
+;; runs this automatically before retrying. NOTE: dead-but-unfinalized
+;; tensors' blocks are not yet IN the cache — for the full
+;; release-everything-now sequence use reclaim-native-memory!.
 (define (cuda-empty-cache!)
   (check-ok (tr-cuda-empty-cache/raw) 'cuda-empty-cache!)
+  (void))
+
+;; The release-it-all-now sequence, in the only order that works:
+;; collect (queues dead handles' finalizers), DRAIN the asynchronous
+;; finalizer executor (their frees return blocks to the caching
+;; allocator), then hand the cache's unused blocks to the driver. The
+;; same sequence the OOM retry runs internally; exposed because "free
+;; the VRAM before the next phase" is a legitimate program-level need
+;; (post-training, pre-handoff) and gc.collect-then-empty_cache without
+;; the drain races the executor.
+(define (reclaim-native-memory!)
+  (collect-and-drain!)
   (void))
 
 ;; Set the device new tensors (randn/zeros/...) are created on. Errors if CUDA

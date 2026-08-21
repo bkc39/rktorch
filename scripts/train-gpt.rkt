@@ -78,9 +78,10 @@
   ;; Training's per-step intermediates are dead now; return their cached
   ;; VRAM to the driver before the generation phase (and any co-tenant
   ;; jobs) so the epoch high-water doesn't linger as reserved-but-unused
-  ;; cache for the rest of the run.
-  (collect-garbage)
-  (cuda-empty-cache!)
+  ;; cache. reclaim-native-memory! runs the collect -> finalizer-drain ->
+  ;; empty-cache sequence in order (a bare collect+empty races the
+  ;; asynchronous finalizer executor).
+  (reclaim-native-memory!)
   ;; Persist the trained weights + the sidecar generate-gpt.rkt needs to
   ;; rebuild the exact model (vocab as a string in id order, architecture,
   ;; and the run's epoch count for provenance).

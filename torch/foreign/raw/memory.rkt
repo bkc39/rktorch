@@ -28,6 +28,7 @@
 
 (provide tr-tensor-free/finalizer
          tr-tensor-free/checked
+         collect-and-drain!
          guard-finalizer
          finalizer-failures
          tensor-allocator

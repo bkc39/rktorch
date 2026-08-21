@@ -185,6 +185,10 @@
         (listof (cons/c (or/c 'allocated 'reserved 'peak-allocated)
                         exact-nonnegative-integer?)))]
   [cuda-empty-cache! (-> void?)]
+  ;; collect -> drain the async finalizer executor -> empty the CUDA
+  ;; cache: the release-everything-now sequence (the OOM retry's own),
+  ;; for program-level phase boundaries.
+  [reclaim-native-memory! (-> void?)]
   ;; count of guarded-finalizer swallows since startup: swallows are
   ;; silent by design (a finalizer has nowhere to raise) but observable
   ;; here — a growing count means native handles are leaking (#51).
