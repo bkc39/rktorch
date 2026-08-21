@@ -42,8 +42,9 @@ CPU-first; float32 + inferred int64 (#44). From `torch`:
   tensor->list tensor->vector tensor->repr tensor->string` (+
   `tensor-dtype`; `tensor` infers int64 for all-integer data, #44; the
   unprefixed property names `shape`/`dtype`/`numel` alias the tensor-
-  forms, and `device` doubles as query-or-construct — the
-  torch.device-vs-x.device hybrid)
+  forms; `device` doubles as query-or-construct — the
+  torch.device-vs-x.device hybrid; comparison masks are first-class
+  `'bool` — the dtype queries answer it and `to-dtype` casts to it)
 - memory: `native-memory-use` (per-device outstanding native bytes from
   the #37 ledger), `cuda-memory-stats` / `cuda-empty-cache!` (the CUDA
   caching allocator's own gauges + release, #51),

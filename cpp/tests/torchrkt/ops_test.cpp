@@ -150,9 +150,9 @@ TEST(TorchrktOps, DtypeGetterReportsBoolMasks) {
   tr_dtype dt = TR_DTYPE_FLOAT32;
   EXPECT_EQ(tr_tensor_dtype(mask.t, &dt), 0) << tr_last_error();
   EXPECT_EQ(dt, TR_DTYPE_BOOL);
-  // and bool round-trips through to_dtype
-  const Handle back(tr_tensor_to_dtype(mask.t, TR_DTYPE_BOOL));
-  EXPECT_EQ(tr_tensor_dtype(back.t, &dt), 0) << tr_last_error();
+  // and to_dtype CASTS to bool (nonzero -> true), not just identity
+  const Handle cast(tr_tensor_to_dtype(t.t, TR_DTYPE_BOOL));
+  EXPECT_EQ(tr_tensor_dtype(cast.t, &dt), 0) << tr_last_error();
   EXPECT_EQ(dt, TR_DTYPE_BOOL);
 }
 
