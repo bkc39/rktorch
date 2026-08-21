@@ -36,7 +36,7 @@ linked against libtorch via `find_package(Torch)`.
 
 ### v1 surface
 
-CPU + float32 only. From `torch`:
+CPU-first; float32 + inferred int64 (#44). From `torch`:
 
 - v0 core: `torch-version manual-seed! randn tensor-shape tensor-numel
   tensor->list tensor->vector tensor->repr tensor->string` (+
