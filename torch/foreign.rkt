@@ -22,7 +22,9 @@
 (require ffi/vector
          racket/contract
          "foreign/contracts.rkt"
-         "foreign/device-type.rkt"
+         ;; ops.rkt's hybrid `device` (query + construct) supersedes the
+         ;; bare struct constructor in the public surface
+         (except-in "foreign/device-type.rkt" device)
          (only-in "foreign/error.rkt" exn:fail:rktorch:oom?)
          "foreign/structs.rkt"
          "foreign/ops.rkt"
@@ -179,6 +181,10 @@
   [to-dtype (-> tensor? (or/c 'float32 'float64 'int64) tensor?)]
   ;; the dtype query (#44): torch.Tensor.dtype as a symbol
   [tensor-dtype (-> tensor? (or/c 'float32 'float64 'int64))]
+  ;; PyTorch-property short names; the tensor- forms stay as aliases
+  [shape (-> tensor? (listof exact-nonnegative-integer?))]
+  [dtype (-> tensor? (or/c 'float32 'float64 'int64))]
+  [numel (-> tensor? exact-nonnegative-integer?)]
   ;; native-memory observability (#37): live handle-attributed bytes per
   ;; device, folded from the accounting ledger — the view's extent per
   ;; handle, not total device usage (see raw/memory.rkt).
@@ -202,7 +208,11 @@
   [finalizer-failures (-> exact-nonnegative-integer?)]
   ;; device placement (cuda). Arguments admit device structs and the
   ;; legacy symbol/list forms; queries return device structs.
-  [device (-> (or/c 'cpu 'cuda) exact-nonnegative-integer? device?)]
+  ;; hybrid, the torch.device-vs-x.device split (query a tensor,
+  ;; construct from a type symbol + optional ordinal)
+  [device (->* ((or/c tensor? 'cpu 'cuda))
+               (exact-nonnegative-integer?)
+               device?)]
   [device? (-> any/c boolean?)]
   [device-type (-> device? (or/c 'cpu 'cuda))]
   [device-index (-> device? exact-nonnegative-integer?)]

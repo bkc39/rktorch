@@ -11,6 +11,7 @@
                   s64vector->list
                   s64vector?)
          (only-in "device-type.rkt"
+                  [device make-device]
                   cpu-device cuda-device device-index device-type device?)
          (only-in "error.rkt" check-handle check-ok)
          (only-in "raw/device.rkt"
@@ -40,13 +41,18 @@
                   handle->string
                   tensor-handle
                   tensor-impl-shape
+                  tensor?
                   wrap-tensor))
 
 (provide torch-version
          cuda-empty-cache!
          cuda-memory-stats
          reclaim-native-memory!
+         device
          device->type+index
+         dtype
+         numel
+         shape
          finalizer-failures
          native-memory-use
          manual-seed!
@@ -257,6 +263,25 @@
 ;; Cached at wrap time, so no C round-trip.
 (define (tensor-shape t)
   (tensor-impl-shape t))
+
+;; --- PyTorch-property short names -----------------------------------
+;; shape/dtype/numel/device mirror x.shape / x.dtype / x.numel() /
+;; x.device; the tensor- prefixed forms remain as aliases. `device` is a
+;; hybrid, exactly like Python's torch.device-vs-x.device split: given a
+;; tensor it QUERIES; given a type symbol (+ optional ordinal, default
+;; 0 — torch.device("cuda") semantics) it CONSTRUCTS the device struct.
+(define shape tensor-shape)
+(define dtype tensor-dtype)
+(define numel tensor-numel)
+
+(define (device x [index #f])
+  (cond
+    [(tensor? x)
+     (when index
+       (error 'device "an ordinal makes no sense when querying a tensor: ~e"
+              index))
+     (tensor-device x)]
+    [else (make-device x (or index 0))]))
 
 ;; Marshal out in the tensor's OWN dtype (#44): int64 tensors copy
 ;; through the exact int64 path (an f32vector for them would corrupt
