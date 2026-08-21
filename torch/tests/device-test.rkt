@@ -64,8 +64,9 @@
       (define g (tensor '(1 2 3) #:device (cuda-device)))
       (check-equal? (tensor-device g) (cuda-device 0))
       ;; the payload survives the CPU->CUDA construction leg, not just the
-      ;; device tag (marshalled back through an explicit move to CPU)
-      (check-equal? (tensor->list (to-device g (cpu-device))) '(1.0 2.0 3.0))
+      ;; device tag (marshalled back through an explicit move to CPU);
+      ;; integer literals infer int64 (#44), so exact integers out
+      (check-equal? (tensor->list (to-device g (cpu-device))) '(1 2 3))
       (check-equal? (default-device) (cpu-device))
       ;; placement is passed into native construction, so an explicitly-CPU
       ;; tensor under a CUDA default lands on CPU (no host->GPU->CPU
@@ -171,12 +172,18 @@
         (check-equal? (tensor-device back) (cpu-device))
         (check-equal? (tensor->list back) '(0.0 0.0 0.0 0.0))
         ;; a GPU matmul should match the CPU result
-        ;; integer literals infer int64 (#44); cuda integer matmul
-        ;; matches cpu exactly
-        (define a (to-device (tensor '((1 2) (3 4))) 'cuda))
-        (define b (to-device (tensor '((5 6) (7 8))) 'cuda))
+        ;; float literals: cuBLAS has no int64 matmul — torch errors on
+        ;; GPU (Python identically), though the CPU int64 matmul works
+        ;; (covered in tensor-ops-test)
+        (define a (to-device (tensor '((1.0 2.0) (3.0 4.0))) 'cuda))
+        (define b (to-device (tensor '((5.0 6.0) (7.0 8.0))) 'cuda))
         (check-equal? (tensor->list (to-device (matmul a b) 'cpu))
-                      '(19 22 43 50)))
+                      '(19.0 22.0 43.0 50.0))
+        ;; ...and the int64-on-cuda rejection is itself parity behavior
+        (check-exn exn:fail?
+                   (lambda ()
+                     (matmul (to-device (tensor '((1 2) (3 4))) 'cuda)
+                             (to-device (tensor '((1 2) (3 4))) 'cuda)))))
       (check-equal? (default-device) (cpu-device))))
 
   (test-case "tranche-3 ops run on cuda (gelu, embedding, layer-norm, mask)"

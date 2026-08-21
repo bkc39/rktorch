@@ -112,6 +112,22 @@ TEST(TorchrktOps, FromDataI64RoundTripsExactly) {
   EXPECT_EQ(out, values);
 }
 
+TEST(TorchrktOps, FromDataI64RejectsBadShapes) {
+  // the float sibling's rejection battery, on the int64 path
+  const std::vector<int64_t> values = {1, 2, 3};
+  const std::vector<int64_t> dims = {2, 2};
+  EXPECT_EQ(tr_from_data_i64(values.data(), values.size(), dims.data(), 2),
+            nullptr);
+  EXPECT_STRNE(tr_last_error(), "");
+  const std::vector<int64_t> overflow = {2, 9223372036854775807LL, 2};
+  EXPECT_EQ(tr_from_data_i64(values.data(), values.size(), overflow.data(), 3),
+            nullptr);
+  const std::vector<int64_t> negative = {-1, 2};
+  EXPECT_EQ(tr_from_data_i64(values.data(), values.size(), negative.data(), 2),
+            nullptr);
+  EXPECT_EQ(tr_from_data_i64(nullptr, 3, dims.data(), 2), nullptr);
+}
+
 TEST(TorchrktOps, DtypeGetterCoversTheEnum) {
   const std::vector<float> values = {1.0F};
   const std::vector<int64_t> dims = {1};
