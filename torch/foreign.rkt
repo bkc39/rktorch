@@ -214,9 +214,10 @@
   ;; (device 'cpu 1) are boundary violations, not internal errors.
   [device (->i ([target (or/c tensor? 'cpu 'cuda)])
                ([index (target)
-                       (if (eq? target 'cuda)
-                           exact-nonnegative-integer?
-                           none/c)])
+                       (case target
+                         [(cuda) exact-nonnegative-integer?]
+                         [(cpu) 0]
+                         [else none/c])])
                [result device?])]
   [device? (-> any/c boolean?)]
   [device-type (-> device? (or/c 'cpu 'cuda))]
