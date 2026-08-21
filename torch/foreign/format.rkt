@@ -18,8 +18,8 @@
 ;; marker as the literal " ..." joined by ", " (PyTorch's double-space),
 ;; higher dimensions as a "..." block between the standard separators.
 ;;
-;; Not yet reproduced (v0 TODO): scientific notation, line wrapping of
-;; long unsummarized rows, and dtype suffixes for non-float32.
+;; Not yet reproduced (v0 TODO): scientific notation and dtype suffixes
+;; for non-float32 non-empty tensors.
 
 (require (only-in racket/format ~r)
          (only-in racket/list append-map drop take)
