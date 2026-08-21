@@ -17,7 +17,8 @@
          (only-in "memory.rkt" tensor-allocator)
          (only-in "syntax.rkt" _Tensor _Tensor/null define-torch))
 
-(provide tr-tensor-numel/raw
+(provide dtype-code->symbol
+         tr-tensor-numel/raw
          tr-tensor-ndim/raw
          tr-tensor-shape/raw
          tr-tensor-copy-data-i64/raw
@@ -67,6 +68,17 @@
 ;; Mirrors the tr_dtype C enum (tensor.h).
 (define _tr-dtype
   (_enum '(float32 = 0 float64 = 1 int64 = 2)))
+
+;; The one decoder for raw dtype codes (tr-tensor-dtype/raw returns the
+;; plain int so error paths can't poison an enum unmarshal): #f for
+;; codes outside the enum (e.g. bool masks). Shared by ops.rkt and
+;; structs.rkt so the encoding has a single source of truth.
+(define (dtype-code->symbol n)
+  (case n
+    [(0) 'float32]
+    [(1) 'float64]
+    [(2) 'int64]
+    [else #f]))
 
 ;; The out param is a plain _int, NOT _tr-dtype: on the error path (a
 ;; dtype outside the enum, e.g. a bool comparison mask) the C side never

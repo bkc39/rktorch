@@ -30,6 +30,7 @@
          (only-in "raw/memory.rkt" tr-tensor-free/checked)
          (only-in "raw/syntax.rkt" Tensor?)
          (only-in "raw/tensor.rkt"
+                  dtype-code->symbol
                   tr-tensor-copy-data-i64/raw
                   tr-tensor-copy-data/raw
                   tr-tensor-dtype/raw
@@ -90,12 +91,17 @@
 ;; yet reproduce). A failing dtype query falls through to the float path
 ;; (printing must never raise — the custom-write handler depends on it).
 (define (handle->repr h dims)
-  (define-values (dtype-rc dtype) (tr-tensor-dtype/raw h))
+  (define-values (dtype-rc code) (tr-tensor-dtype/raw h))
   (cond
-    ;; 2 = TR_DTYPE_INT64 (the raw binding returns the plain int so an
-    ;; out-of-enum dtype on the error path can't poison the unmarshal)
-    [(and (zero? dtype-rc) (eqv? dtype 2))
-     (tensor->pytorch-repr (handle->ints h dims) dims #:exact-integers? #t)]
+    [(and (zero? dtype-rc) (eq? (dtype-code->symbol code) 'int64))
+     ;; an EMPTY int64 tensor needs the dtype suffix (torch prints
+     ;; "tensor([], dtype=torch.int64)" — without it the repr reads as
+     ;; the float32 default); non-empty int64 is unambiguous from the
+     ;; bare-integer elements, as in Python
+     (if (equal? dims '(0))
+         "tensor([], dtype=torch.int64)"
+         (tensor->pytorch-repr (handle->ints h dims) dims
+                               #:exact-integers? #t))]
     [else
      (define floats (handle->floats h dims))
      (if (needs-sci-notation? floats)

@@ -31,6 +31,7 @@
                   native-memory-use)
          (only-in "raw/random.rkt" tr-rand/raw tr-randn/raw tr-tensor-uniform!/raw)
          (only-in "raw/tensor.rkt"
+                  dtype-code->symbol
                   tr-tensor-copy-data-i64/raw
                   tr-tensor-copy-data/raw
                   tr-tensor-dtype/raw
@@ -125,21 +126,18 @@
 ;; torch.Tensor.dtype query (#44). Raises for dtypes outside the v1
 ;; enum (e.g. the bool masks comparisons produce) — int64-probe below is
 ;; the tolerant internal variant.
-(define (dtype-int->symbol n)
-  (case n [(0) 'float32] [(1) 'float64] [(2) 'int64] [else #f]))
-
 (define (tensor-dtype t)
-  (define-values (rc dtype) (tr-tensor-dtype/raw t))
+  (define-values (rc code) (tr-tensor-dtype/raw t))
   (check-ok rc 'tensor-dtype)
-  (or (dtype-int->symbol dtype)
-      (error 'tensor-dtype "unsupported dtype code: ~a" dtype)))
+  (or (dtype-code->symbol code)
+      (error 'tensor-dtype "unsupported dtype code: ~a" code)))
 
 ;; #t only when the dtype query SUCCEEDS and says int64 — errors (bool
 ;; masks and other out-of-enum dtypes) answer #f, so marshalling paths
 ;; fall back to the float route instead of raising.
 (define (int64-tensor? t)
-  (define-values (rc dtype) (tr-tensor-dtype/raw t))
-  (and (zero? rc) (eq? (dtype-int->symbol dtype) 'int64)))
+  (define-values (rc code) (tr-tensor-dtype/raw t))
+  (and (zero? rc) (eq? (dtype-code->symbol code) 'int64)))
 
 ;; A device argument is a device struct (device-type.rkt) or a legacy form:
 ;; 'cpu, 'cuda (ordinal 0), (list 'cuda ordinal). The FFI uses a separate

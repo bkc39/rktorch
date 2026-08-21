@@ -64,7 +64,10 @@
      ;; 01 — deterministic elementwise arithmetic
      (check-parity "python/01_arith.py"
                    (lambda ()
-                     (define x (tensor '((1 -2) (3 -4))))
+                     ;; float literals, matching the twin's explicit
+                     ;; construction (the case previously leaned on the
+                     ;; scalar-promotion path to come out float)
+                     (define x (tensor '((1.0 -2.0) (3.0 -4.0))))
                      (* (+ x 1) (relu x))))
      ;; 02 — arange/reshape/transpose/matmul
      (check-parity "python/02_matmul.py"
