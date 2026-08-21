@@ -55,6 +55,20 @@ target_include_directories(torchrkt
     ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 
+# CUDA-only allocator surface (tr_cuda_memory_stats / tr_cuda_empty_cache):
+# compiled in only against the CUDA libtorch distribution. Probe for the
+# libtorch_cuda LIBRARY, not the c10/cuda headers — the CPU distribution
+# ships those headers too, but they #include CUDA toolkit headers it
+# does not carry. The CPU build keeps the same C API; those entry points
+# report "not compiled in" (stats) or no-op cleanly (empty_cache).
+# Probe beside the RESOLVED libtorch.so (TORCH_LIBRARY): with split nix
+# outputs, TORCH_INSTALL_PREFIX is the -dev output whose lib/ holds no
+# shared objects.
+get_filename_component(TORCHRKT_TORCH_LIBDIR "${TORCH_LIBRARY}" DIRECTORY)
+if(EXISTS "${TORCHRKT_TORCH_LIBDIR}/libtorch_cuda.so")
+  target_compile_definitions(torchrkt PRIVATE TORCHRKT_WITH_CUDA_ALLOCATOR)
+endif()
+
 # Treat libtorch headers as system headers so -Wall/-Wextra/-Wpedantic report
 # only our own code, not ATen's.
 target_include_directories(torchrkt SYSTEM PRIVATE ${TORCH_INCLUDE_DIRS})

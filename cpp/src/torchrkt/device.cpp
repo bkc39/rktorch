@@ -13,6 +13,10 @@
 #include "torchrkt/detail/op_call.hpp"
 #include "torchrkt/detail/tensor_handle.hpp"
 
+#ifdef TORCHRKT_WITH_CUDA_ALLOCATOR
+#include <c10/cuda/CUDACachingAllocator.h>
+#endif
+
 namespace torchrkt {
 
 namespace {
@@ -115,6 +119,63 @@ int tr_cuda_device_count(void) {
     torchrkt::record_unknown_failure("tr_cuda_device_count");
     return 0;
   }
+}
+
+int tr_cuda_memory_stats(int64_t device_index, int64_t* out_allocated,
+                         int64_t* out_reserved, int64_t* out_peak_allocated) {
+  if (!out_allocated || !out_reserved || !out_peak_allocated) {
+    return torchrkt::null_arg_status("tr_cuda_memory_stats");
+  }
+#ifndef TORCHRKT_WITH_CUDA_ALLOCATOR
+  (void)device_index;
+  // Throw through status_call so the recording rides the same
+  // noexcept-safe path as every other failure (the direct set_error
+  // would allocate outside any catch under host-memory pressure).
+  return torchrkt::status_call("tr_cuda_memory_stats", [] {
+    throw std::runtime_error("CUDA support is not compiled into this build");
+  });
+#else
+  return torchrkt::status_call("tr_cuda_memory_stats", [&] {
+    if (!torch::cuda::is_available()) {
+      throw std::runtime_error("CUDA is not available");
+    }
+    if (device_index < 0 ||
+        device_index >= static_cast<int64_t>(torch::cuda::device_count())) {
+      throw std::invalid_argument("CUDA device index out of range");
+    }
+    // An allocator that has never been initialized (no CUDA tensor
+    // allocated yet in this process) holds nothing: report zeros,
+    // matching torch.cuda.memory_allocated() before first use. Probed
+    // EXPLICITLY rather than by catching getDeviceStats' throw — a
+    // catch-all would also mask real allocator failures as zero stats.
+    if (!c10::cuda::CUDACachingAllocator::get()->initialized()) {
+      *out_allocated = 0;
+      *out_reserved = 0;
+      *out_peak_allocated = 0;
+      return;
+    }
+    const auto stats = c10::cuda::CUDACachingAllocator::getDeviceStats(
+        static_cast<c10::DeviceIndex>(device_index));
+    const auto agg =
+        static_cast<size_t>(c10::CachingDeviceAllocator::StatType::AGGREGATE);
+    *out_allocated = stats.allocated_bytes[agg].current;
+    *out_reserved = stats.reserved_bytes[agg].current;
+    *out_peak_allocated = stats.allocated_bytes[agg].peak;
+  });
+#endif
+}
+
+int tr_cuda_empty_cache(void) {
+  return torchrkt::status_call("tr_cuda_empty_cache", [&] {
+#ifdef TORCHRKT_WITH_CUDA_ALLOCATOR
+    // Only touch the allocator when a device is actually present; the
+    // no-CUDA (and CPU-build) paths are deliberate no-op successes so
+    // the OOM retry can call this unconditionally.
+    if (torch::cuda::is_available()) {
+      c10::cuda::CUDACachingAllocator::emptyCache();
+    }
+#endif
+  });
 }
 
 int tr_set_default_device(tr_device_type type, int64_t index) {

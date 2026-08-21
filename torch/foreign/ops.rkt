@@ -9,13 +9,18 @@
          (only-in "error.rkt" check-handle check-ok)
          (only-in "raw/device.rkt"
                   tr-cuda-device-count/raw
+                  tr-cuda-empty-cache/raw
                   tr-cuda-is-available/raw
+                  tr-cuda-memory-stats/raw
                   tr-get-default-device/raw
                   tr-set-default-device/raw
                   tr-tensor-device/raw
                   tr-tensor-to-device/raw)
          (only-in "raw/global.rkt" tr-manual-seed/raw tr-version/raw)
-         (only-in "raw/memory.rkt" native-memory-use)
+         (only-in "raw/memory.rkt"
+                  collect-and-drain!
+                  finalizer-failures
+                  native-memory-use)
          (only-in "raw/random.rkt" tr-rand/raw tr-randn/raw tr-tensor-uniform!/raw)
          (only-in "raw/tensor.rkt"
                   tr-tensor-copy-data/raw
@@ -30,7 +35,11 @@
                   wrap-tensor))
 
 (provide torch-version
+         cuda-empty-cache!
+         cuda-memory-stats
+         reclaim-native-memory!
          device->type+index
+         finalizer-failures
          native-memory-use
          manual-seed!
          randn
@@ -121,6 +130,59 @@
 ;; cuda-available? re: a driver-failure 0).
 (define (cuda-device-count)
   (tr-cuda-device-count/raw))
+
+;; The CUDA caching allocator's gauges for one device, in bytes — an
+;; alist of allocated (live blocks), reserved (live + cached), and
+;; peak-allocated. Complements native-memory-use: the ledger reports
+;; what rktorch's handles hold; this reports what the allocator holds.
+;; Errors without CUDA (torch.cuda.memory_allocated & co).
+(define (cuda-memory-stats [dev (cuda-device)])
+  (define-values (type index) (device->type+index dev))
+  (unless (eq? type 'cuda)
+    (error 'cuda-memory-stats "expected a CUDA device, given: ~e" dev))
+  (define-values (rc allocated reserved peak)
+    (tr-cuda-memory-stats/raw index))
+  (check-ok rc 'cuda-memory-stats)
+  (list (cons 'allocated allocated)
+        (cons 'reserved reserved)
+        (cons 'peak-allocated peak)))
+
+;; Hand the caching allocator's unused cached blocks back to the driver
+;; (torch.cuda.empty_cache). No-op without CUDA; the OOM retry already
+;; runs this automatically before retrying. NOTE: dead-but-unfinalized
+;; tensors' blocks are not yet IN the cache — for the full
+;; release-everything-now sequence use reclaim-native-memory!.
+(define (cuda-empty-cache!)
+  (check-ok (tr-cuda-empty-cache/raw) 'cuda-empty-cache!)
+  (void))
+
+;; The release-it-all-now sequence, in the only order that works:
+;; collect (queues dead handles' finalizers), DRAIN the asynchronous
+;; finalizer executor (their frees return blocks to the caching
+;; allocator), then hand the cache's unused blocks to the driver. The
+;; OOM retry runs one bounded round of this internally; the PUBLIC
+;; sequence settles instead — repeat while the ledger keeps shrinking
+;; (bounded rounds), so a queue longer than one drain window still
+;; empties — and the final cache release is CHECKED (an explicit
+;; reclaim should surface a driver failure, unlike the retry's
+;; best-effort pass).
+(define (reclaim-native-memory!)
+  (let loop ([prev (ledger-total)] [rounds 4])
+    (define drained? (collect-and-drain!))
+    (define now (ledger-total))
+    ;; go again while the ledger shrinks OR the drain went UNOBSERVED
+    ;; (a busy executor can make zero progress in one window without
+    ;; being done — no-progress only terminates once the canary was
+    ;; actually seen draining), always within the round bound.
+    (when (and (> rounds 1)
+               (or (< now prev) (not drained?)))
+      (loop now (sub1 rounds))))
+  (cuda-empty-cache!))
+
+;; total handle-attributed bytes across devices (settling probe above)
+(define (ledger-total)
+  (for/sum ([entry (in-list (native-memory-use))])
+    (cdr entry)))
 
 ;; Set the device new tensors (randn/zeros/...) are created on. Errors if CUDA
 ;; is requested but unavailable or the ordinal is out of range.

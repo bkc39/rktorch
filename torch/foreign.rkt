@@ -177,6 +177,22 @@
   ;; handle, not total device usage (see raw/memory.rkt).
   [native-memory-use
    (-> (listof (cons/c device? exact-nonnegative-integer?)))]
+  ;; the CUDA caching allocator's own gauges (#51): allocated / reserved /
+  ;; peak-allocated bytes for one device — what the ALLOCATOR holds,
+  ;; complementing the ledger's what-our-handles-hold view.
+  [cuda-memory-stats
+   (->* () (device/c)
+        (listof (cons/c (or/c 'allocated 'reserved 'peak-allocated)
+                        exact-nonnegative-integer?)))]
+  [cuda-empty-cache! (-> void?)]
+  ;; collect -> drain the async finalizer executor -> empty the CUDA
+  ;; cache: the release-everything-now sequence (the OOM retry's own),
+  ;; for program-level phase boundaries.
+  [reclaim-native-memory! (-> void?)]
+  ;; count of guarded-finalizer swallows since startup: swallows are
+  ;; silent by design (a finalizer has nowhere to raise) but observable
+  ;; here — a growing count means native handles are leaking (#51).
+  [finalizer-failures (-> exact-nonnegative-integer?)]
   ;; device placement (cuda). Arguments admit device structs and the
   ;; legacy symbol/list forms; queries return device structs.
   [device (-> (or/c 'cpu 'cuda) exact-nonnegative-integer? device?)]

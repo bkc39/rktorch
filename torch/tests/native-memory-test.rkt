@@ -9,7 +9,8 @@
   (require rackunit
            (only-in racket/string string-split)
            (only-in "../foreign.rkt"
-                    cpu-device native-memory-use ones zeros)
+                    cpu-device native-memory-use ones reclaim-native-memory!
+                    zeros)
            (only-in (submod "../foreign.rkt" unsafe) tensor-free!))
 
   ;; Process RSS in bytes via /proc (Linux); #f where /proc is absent.
@@ -109,4 +110,16 @@
     (collect-until (lambda () (< (- (cpu-bytes) base) (* 8 1024 1024))))
     (check-true (< (- (cpu-bytes) base) (* 8 1024 1024))
                 (format "ledger did not return toward baseline: ~a -> ~a"
+                        base (cpu-bytes))))
+
+  (test-case "reclaim-native-memory! drains dropped handles synchronously"
+    ;; the public release-now sequence: after it returns, the dropped
+    ;; churn is out of the ledger without any further collect-until
+    ;; polling (collect -> finalizer drain -> cache release, in order)
+    (define base (settled-baseline))
+    (for ([_ (in-range 25)])
+      (void (zeros 1024 1024)))
+    (reclaim-native-memory!)
+    (check-true (< (- (cpu-bytes) base) (* 8 1024 1024))
+                (format "reclaim left ledger bytes behind: ~a -> ~a"
                         base (cpu-bytes)))))

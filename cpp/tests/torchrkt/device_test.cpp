@@ -111,6 +111,28 @@ TEST(TorchrktDevice, FromDataOnRejectsUnknownDeviceType) {
   EXPECT_STRNE(tr_last_error(), "");
 }
 
+TEST(TorchrktDevice, CudaMemoryStatsFailsCleanlyWithoutCuda) {
+  if (tr_cuda_is_available() != 0) {
+    GTEST_SKIP() << "CUDA present; the success path is CudaRoundTrip";
+  }
+  // Whether the CUDA allocator is compiled out (CPU build) or merely has
+  // no device, stats must fail with rc=1 + message — never crash.
+  int64_t alloc = -1;
+  int64_t reserved = -1;
+  int64_t peak = -1;
+  EXPECT_EQ(tr_cuda_memory_stats(0, &alloc, &reserved, &peak), 1);
+  EXPECT_STRNE(tr_last_error(), "");
+  EXPECT_EQ(tr_cuda_memory_stats(0, nullptr, nullptr, nullptr), 1);
+}
+
+TEST(TorchrktDevice, EmptyCacheIsNoOpSuccessWithoutCuda) {
+  if (tr_cuda_is_available() != 0) {
+    GTEST_SKIP() << "CUDA present; the success path is CudaRoundTrip";
+  }
+  // No-op success by design: the OOM retry calls this unconditionally.
+  EXPECT_EQ(tr_cuda_empty_cache(), 0);
+}
+
 TEST(TorchrktDevice, NullArgsReportStatus) {
   // Each null-arg path also populates tr_last_error (the integer-status
   // contract), matching the other failure-path tests in this file.
@@ -210,6 +232,25 @@ TEST(TorchrktDevice, CudaRoundTrip) {
   EXPECT_EQ(oc_type, TR_DEVICE_CUDA);
   const Handle oc_back(tr_tensor_to_device(on_cuda.t, TR_DEVICE_CPU, 0));
   EXPECT_EQ(data_of(oc_back.t), host_vals);
+
+  // Allocator gauges: with live GPU tensors, allocated is positive and
+  // peak >= allocated; empty_cache succeeds and cannot raise reserved.
+  int64_t alloc = -1;
+  int64_t reserved = -1;
+  int64_t peak = -1;
+  ASSERT_EQ(tr_cuda_memory_stats(0, &alloc, &reserved, &peak), 0)
+      << tr_last_error();
+  EXPECT_GT(alloc, 0);
+  EXPECT_GE(peak, alloc);
+  EXPECT_GE(reserved, alloc);
+  EXPECT_EQ(tr_cuda_empty_cache(), 0) << tr_last_error();
+  int64_t reserved_after = -1;
+  ASSERT_EQ(tr_cuda_memory_stats(0, &alloc, &reserved_after, &peak), 0)
+      << tr_last_error();
+  EXPECT_LE(reserved_after, reserved);
+  // out-of-range ordinal rejects like the rest of the device surface
+  EXPECT_EQ(tr_cuda_memory_stats(256, &alloc, &reserved, &peak), 1);
+  EXPECT_STRNE(tr_last_error(), "");
 
   // tr_randn also reads current_default_device(); confirm it lands on the GPU
   // (shape/device only, not values).

@@ -13,7 +13,7 @@
            (only-in ffi/unsafe/alloc allocator deallocator)
            (only-in "../foreign.rkt" add ones tensor-shape)
            (only-in (submod "../foreign.rkt" unsafe) tensor-free!)
-           (only-in "../foreign/raw/memory.rkt" guard-finalizer))
+           (only-in "../foreign/raw/memory.rkt" finalizer-failures guard-finalizer))
 
   ;; Finalizers run asynchronously after collection; poll with a bounded
   ;; wait so assertions are deterministic without being timing-fragile.
@@ -29,6 +29,15 @@
       (guard-finalizer (lambda (t) (error 'release "boom: ~a" t))))
     ;; must return normally — a raise here is the #38 cascade class
     (check-equal? (guarded 'handle) (void)))
+
+  (test-case "guard-finalizer swallows are counted, not invisible (#51)"
+    (define before (finalizer-failures))
+    ((guard-finalizer (lambda (_t) (error 'boom "swallowed"))) 'handle)
+    ((guard-finalizer (lambda (_t) (raise 'bare))) 'handle)
+    (check-equal? (finalizer-failures) (+ before 2))
+    ;; successful releases don't count
+    ((guard-finalizer void) 'handle)
+    (check-equal? (finalizer-failures) (+ before 2)))
 
   (test-case "guard-finalizer passes successful releases through"
     (define released '())
