@@ -296,16 +296,16 @@
 ;; through the exact int64 path (an f32vector for them would corrupt
 ;; values beyond 2^24), everything else through float32 as before.
 (define (tensor->vector t)
-  (define numel (tensor-numel t))
+  (define n (tensor-numel t))
   (cond
     [(int64-tensor? t)
-     (define out (make-s64vector numel))
-     (define-values (rc _numel) (tr-tensor-copy-data-i64/raw t numel out))
+     (define out (make-s64vector n))
+     (define-values (rc _n) (tr-tensor-copy-data-i64/raw t n out))
      (check-ok rc 'tensor->vector)
      out]
     [else
-     (define out (make-f32vector numel))
-     (define-values (rc _numel) (tr-tensor-copy-data/raw t numel out))
+     (define out (make-f32vector n))
+     (define-values (rc _n) (tr-tensor-copy-data/raw t n out))
      (check-ok rc 'tensor->vector)
      out]))
 
