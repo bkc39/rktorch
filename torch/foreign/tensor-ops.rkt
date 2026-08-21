@@ -169,8 +169,13 @@
   ;; float32, PyTorch's default float dtype. #:dtype overrides either
   ;; way ('int64 truncates toward zero, torch's cast semantics).
   ;; Booleans and a float64 ingestion path are future work.
+  ;; empty data stays float32 — torch.tensor([]) is float32, and the
+  ;; vacuous andmap must not flip it to int64
   (define chosen
-    (or dtype (if (andmap exact-integer? flat) 'int64 'float32)))
+    (or dtype
+        (if (and (pair? flat) (andmap exact-integer? flat))
+            'int64
+            'float32)))
   (unless (memq chosen '(float32 int64))
     (error 'tensor "unsupported #:dtype (float32 or int64): ~e" dtype))
   ;; #:device passes the placement into NATIVE construction

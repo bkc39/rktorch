@@ -9,6 +9,7 @@
                   make-f32vector
                   make-s64vector
                   s64vector->list
+                  s64vector-ref
                   s64vector?)
          (only-in "device-type.rkt"
                   [device make-device]
@@ -104,10 +105,17 @@
   (void))
 
 ;; The value of a one-element tensor as a Racket real (torch.Tensor.item).
+;; int64 scalars come back EXACT via the int64 copy path — the C item
+;; extracts item<double>(), which silently rounds past 2^53 (Python's
+;; .item() returns an exact int there).
 (define (item t)
-  (define-values (rc v) (tr-tensor-item/raw t))
-  (check-ok rc 'item)
-  v)
+  (cond
+    [(and (int64-tensor? t) (= 1 (tensor-numel t)))
+     (s64vector-ref (tensor->vector t) 0)]
+    [else
+     (define-values (rc v) (tr-tensor-item/raw t))
+     (check-ok rc 'item)
+     v]))
 
 ;; Copy converted to 'float32 / 'float64 / 'int64 (torch.Tensor.to).
 (define (to-dtype t dtype)

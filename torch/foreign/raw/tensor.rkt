@@ -83,7 +83,7 @@
 (define-torch tr-tensor-copy-data-i64/raw
   (_fun (t : _Tensor)
         (capacity : _uint64)
-        (out : _s64vector)
+        (out : (_s64vector i))
         (out-numel : (_ptr o _uint64))
         -> (rc : _int)
         -> (values rc out-numel))

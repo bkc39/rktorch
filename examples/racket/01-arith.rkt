@@ -7,7 +7,10 @@
 
 Tensors are usually built from data, not sampled: @racket[tensor] takes a
 nested list, infers the shape from the nesting (here 2x2), and copies the
-values into a float32 tensor whose handle the garbage collector owns.
+values into a float32 tensor whose handle the garbage collector owns. The
+float literals are load-bearing: like @tt{torch.tensor}, all-integer data
+would infer an @racket['int64] tensor instead (and the Python twin uses
+float literals for the same reason).
 
 @chunk[<r01-require>
 (require torch)]
@@ -24,7 +27,7 @@ rather than seeded.
 
 @chunk[<r01-run>
 (define (run-example)
-  (define x (tensor '((1 -2) (3 -4))))
+  (define x (tensor '((1.0 -2.0) (3.0 -4.0))))
   (* (+ x 1) (relu x)))]
 
 The harness @filepath{test/01-arith.rkt} pins the expected values; the

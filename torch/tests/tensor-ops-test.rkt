@@ -40,7 +40,20 @@
     (check-exn exn:fail? (lambda () (tensor '(1 2) #:dtype 'float64)))
     ;; nested integer data flows through shape ops as int64
     (check-equal? (tensor->list (transpose (tensor '((1 2) (3 4))) 0 1))
-                  '(1 3 2 4)))
+                  '(1 3 2 4))
+    ;; empty data stays float32, exactly torch.tensor([])
+    (check-equal? (tensor-dtype (tensor '())) 'float32)
+    ;; the unprefixed property names alias the tensor- forms, and
+    ;; `device` doubles as query (tensor arg) and constructor (symbol +
+    ;; optional ordinal, default 0 — torch.device semantics)
+    (let ([q (tensor '((1 2 3)) #:device (device 'cpu))])
+      (check-equal? (shape q) '(1 3))
+      (check-equal? (dtype q) 'int64)
+      (check-equal? (numel q) 3)
+      (check-equal? (device q) (cpu-device))
+      (check-equal? (device 'cuda) (cuda-device 0))
+      (check-equal? (device 'cuda 1) (cuda-device 1))
+      (check-exn exn:fail? (lambda () (device q 1)))))
 
   (test-case "tensor from nested lists infers the shape"
     (define t (tensor '((1 2 3) (4 5 6))))
@@ -176,17 +189,18 @@
     (check-equal? (tensor->list (sqrt x)) '(1.0 2.0 3.0))
     (check-= (item (exp (tensor 0))) 1.0 1e-6)
     (check-= (item (log (tensor 1))) 0.0 1e-6)
-    (check-equal? (item (max x)) 9.0)
-    (check-equal? (item (min x)) 1.0))
+    (check-equal? (item (max x)) 9)
+    (check-equal? (item (min x)) 1))
 
   (test-case "reductions"
     ;; float literals: torch (ours and Python's) rejects mean on int64
     (define t (tensor '((1.0 2.0) (3.0 4.0))))
     (check-equal? (item (sum t)) 10.0)
     (check-equal? (item (mean t)) 2.5)
-    (check-equal? (item (argmax t)) 3.0)
-    ;; argmax returns int64 indices — exact integers out (#44)
+    ;; argmax returns int64 indices — exact integers out (#44), and
+    ;; item on an int64 scalar is exact too
     (check-equal? (tensor->list (argmax t 1)) '(1 1))
+    (check-equal? (item (argmax t)) 3)
     (check-equal? (tensor-shape (argmax t 1 #:keepdim #t)) '(2 1))
     (define p (softmax t 1))
     (define vals (tensor->list p))
@@ -199,12 +213,17 @@
     (check-equal? (tensor->list (matmul a a)) '(7 10 15 22))
     (check-equal? (tensor->list (mm a a)) '(7 10 15 22))
     (check-equal? (tensor->list (mv a v)) '(3 7))
-    (check-equal? (item (dot v v)) 2.0)
+    ;; int64 dot -> exact int64 item (#44)
+    (check-equal? (item (dot v v)) 2)
     ;; shape mismatch surfaces as a Racket error carrying the C++ message
     (check-exn exn:fail? (lambda () (mv a (tensor '(1 1 1))))))
 
   (test-case "item and to-dtype"
-    (check-equal? (item (tensor 42)) 42.0)
+    ;; int64 scalars item out EXACT (#44) — including past 2^53, where
+    ;; the double path would round
+    (check-equal? (item (tensor 42)) 42)
+    (check-equal? (item (tensor 42.0)) 42.0)
+    (check-equal? (item (tensor (+ (expt 2 53) 1))) (+ (expt 2 53) 1))
     (check-exn exn:fail? (lambda () (item (tensor '(1 2)))))
     (define i (to-dtype (tensor '(1.5 2.5)) 'int64))
     ;; int64 marshals out exact (#44)
@@ -240,9 +259,9 @@
   (test-case "t and Σ aliases, threading pipelines"
     (define a (tensor '((1 2) (3 4))))
     (check-equal? (tensor->list (t a 0 1)) (tensor->list (transpose a 0 1)))
-    (check-equal? (item (Σ a)) 10.0)
+    (check-equal? (item (Σ a)) 10)
     (define x (tensor '(1 2 3)))
-    (check-equal? (item (~> x (* x) Σ)) 14.0))
+    (check-equal? (item (~> x (* x) Σ)) 14))
 
   (test-case "tensor #:requires-grad? marks the leaf at construction"
     ;; float literals: integer literals infer int64 (#44), and torch

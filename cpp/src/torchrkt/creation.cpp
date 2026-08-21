@@ -52,6 +52,12 @@ torch::Tensor host_from_data(const T* data, uint64_t numel, const int64_t* dims,
   if (expected != numel) {
     throw std::invalid_argument("numel does not match the product of dims");
   }
+  // Empty tensors carry no data pointer (an empty Racket vector marshals
+  // as NULL): construct directly rather than handing from_blob a null.
+  // torch.tensor([]) parity — dtype inference keeps these float32.
+  if (numel == 0) {
+    return torch::empty(shape, torch::TensorOptions().dtype(dtype));
+  }
   // `data` is host memory, so from_blob must wrap it as a CPU tensor (a CUDA
   // default_options would make from_blob reject the host pointer); clone()
   // copies it into tensor-owned storage.
@@ -104,7 +110,7 @@ tr_tensor* tr_eye(int64_t n, int64_t m) {
 
 tr_tensor* tr_from_data(const float* data, uint64_t numel, const int64_t* dims,
                         int64_t ndim) {
-  if (!data || bad_dims(dims, ndim)) {
+  if ((!data && numel > 0) || bad_dims(dims, ndim)) {
     return torchrkt::null_arg("tr_from_data");
   }
   return torchrkt::alloc_result("tr_from_data", [&] {
@@ -115,7 +121,7 @@ tr_tensor* tr_from_data(const float* data, uint64_t numel, const int64_t* dims,
 
 tr_tensor* tr_from_data_i64(const int64_t* data, uint64_t numel,
                             const int64_t* dims, int64_t ndim) {
-  if (!data || bad_dims(dims, ndim)) {
+  if ((!data && numel > 0) || bad_dims(dims, ndim)) {
     return torchrkt::null_arg("tr_from_data_i64");
   }
   return torchrkt::alloc_result("tr_from_data_i64", [&] {
@@ -128,7 +134,7 @@ tr_tensor* tr_from_data_i64_on(const int64_t* data, uint64_t numel,
                                const int64_t* dims, int64_t ndim,
                                tr_device_type device_type,
                                int64_t device_index) {
-  if (!data || bad_dims(dims, ndim)) {
+  if ((!data && numel > 0) || bad_dims(dims, ndim)) {
     return torchrkt::null_arg("tr_from_data_i64_on");
   }
   return torchrkt::alloc_result("tr_from_data_i64_on", [&] {
@@ -140,7 +146,7 @@ tr_tensor* tr_from_data_i64_on(const int64_t* data, uint64_t numel,
 tr_tensor* tr_from_data_on(const float* data, uint64_t numel,
                            const int64_t* dims, int64_t ndim,
                            tr_device_type device_type, int64_t device_index) {
-  if (!data || bad_dims(dims, ndim)) {
+  if ((!data && numel > 0) || bad_dims(dims, ndim)) {
     return torchrkt::null_arg("tr_from_data_on");
   }
   return torchrkt::alloc_result("tr_from_data_on", [&] {
