@@ -40,7 +40,10 @@ CPU + float32 only. From `torch`:
 
 - v0 core: `torch-version manual-seed! randn tensor-shape tensor-numel
   tensor->list tensor->vector tensor->repr tensor->string` (+
-  `tensor-dtype`; `tensor` infers int64 for all-integer data, #44)
+  `tensor-dtype`; `tensor` infers int64 for all-integer data, #44; the
+  unprefixed property names `shape`/`dtype`/`numel` alias the tensor-
+  forms, and `device` doubles as query-or-construct — the
+  torch.device-vs-x.device hybrid)
 - memory: `native-memory-use` (per-device outstanding native bytes from
   the #37 ledger), `cuda-memory-stats` / `cuda-empty-cache!` (the CUDA
   caching allocator's own gauges + release, #51),

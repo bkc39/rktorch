@@ -43,6 +43,14 @@
                   '(1 3 2 4))
     ;; empty data stays float32, exactly torch.tensor([])
     (check-equal? (tensor-dtype (tensor '())) 'float32)
+    (check-equal? (tensor->repr (tensor '())) "tensor([])")
+    (check-equal? (tensor->repr (tensor '() #:dtype 'int64))
+                  "tensor([], dtype=torch.int64)")
+    ;; multi-dim empties carry torch's size= clause
+    (check-equal? (tensor->repr (tensor '(() ())))
+                  "tensor([], size=(2, 0))")
+    (check-equal? (tensor->repr (tensor '(() ()) #:dtype 'int64))
+                  "tensor([], size=(2, 0), dtype=torch.int64)")
     ;; the unprefixed property names alias the tensor- forms, and
     ;; `device` doubles as query (tensor arg) and constructor (symbol +
     ;; optional ordinal, default 0 — torch.device semantics)
@@ -53,7 +61,9 @@
       (check-equal? (device q) (cpu-device))
       (check-equal? (device 'cuda) (cuda-device 0))
       (check-equal? (device 'cuda 1) (cuda-device 1))
-      (check-exn exn:fail? (lambda () (device q 1)))))
+      ;; boundary rejections: an ordinal is only meaningful with 'cuda
+      (check-exn exn:fail:contract? (lambda () (device q 1)))
+      (check-exn exn:fail:contract? (lambda () (device 'cpu 1)))))
 
   (test-case "tensor from nested lists infers the shape"
     (define t (tensor '((1 2 3) (4 5 6))))

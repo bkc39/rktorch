@@ -209,12 +209,15 @@
   ;; device placement (cuda). Arguments admit device structs and the
   ;; legacy symbol/list forms; queries return device structs.
   ;; hybrid, the torch.device-vs-x.device split (query a tensor,
-  ;; construct from a type symbol + optional ordinal). case-> dispatches
-  ;; by arity, so a tensor + ordinal is a CONTRACT violation, not a
-  ;; runtime error inside the implementation.
-  [device (case-> (-> (or/c tensor? 'cpu 'cuda) device?)
-                  (-> (or/c 'cpu 'cuda) exact-nonnegative-integer?
-                      device?))]
+  ;; construct from a type symbol + optional ordinal). The dependent
+  ;; contract permits the ordinal ONLY for 'cuda — (device t 1) and
+  ;; (device 'cpu 1) are boundary violations, not internal errors.
+  [device (->i ([target (or/c tensor? 'cpu 'cuda)])
+               ([index (target)
+                       (if (eq? target 'cuda)
+                           exact-nonnegative-integer?
+                           none/c)])
+               [result device?])]
   [device? (-> any/c boolean?)]
   [device-type (-> device? (or/c 'cpu 'cuda))]
   [device-index (-> device? exact-nonnegative-integer?)]

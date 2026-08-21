@@ -90,18 +90,28 @@
 ;; show in scientific notation (which the Racket-side formatter doesn't
 ;; yet reproduce). A failing dtype query falls through to the float path
 ;; (printing must never raise — the custom-write handler depends on it).
+;; torch's empty-tensor repr: "tensor([])" for the rank-1 float empty,
+;; a size= clause whenever the shape isn't just (0), and a dtype suffix
+;; exactly when the (absent) elements can't disambiguate int64.
+(define (empty-repr dims int64?)
+  (string-append
+   "tensor([]"
+   (if (equal? dims '(0))
+       ""
+       (format ", size=(~a)"
+               (string-join (map number->string dims) ", ")))
+   (if int64? ", dtype=torch.int64" "")
+   ")"))
+
 (define (handle->repr h dims)
   (define-values (dtype-rc code) (tr-tensor-dtype/raw h))
+  (define int64? (and (zero? dtype-rc)
+                      (eq? (dtype-code->symbol code) 'int64)))
   (cond
-    [(and (zero? dtype-rc) (eq? (dtype-code->symbol code) 'int64))
-     ;; an EMPTY int64 tensor needs the dtype suffix (torch prints
-     ;; "tensor([], dtype=torch.int64)" — without it the repr reads as
-     ;; the float32 default); non-empty int64 is unambiguous from the
-     ;; bare-integer elements, as in Python
-     (if (equal? dims '(0))
-         "tensor([], dtype=torch.int64)"
-         (tensor->pytorch-repr (handle->ints h dims) dims
-                               #:exact-integers? #t))]
+    [(zero? (apply * dims)) (empty-repr dims int64?)]
+    [int64?
+     (tensor->pytorch-repr (handle->ints h dims) dims
+                           #:exact-integers? #t)]
     [else
      (define floats (handle->floats h dims))
      (if (needs-sci-notation? floats)
