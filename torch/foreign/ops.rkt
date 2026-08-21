@@ -168,9 +168,14 @@
 ;; best-effort pass).
 (define (reclaim-native-memory!)
   (let loop ([prev (ledger-total)] [rounds 4])
-    (collect-and-drain!)
+    (define drained? (collect-and-drain!))
     (define now (ledger-total))
-    (when (and (> rounds 1) (< now prev))
+    ;; go again while the ledger shrinks OR the drain went UNOBSERVED
+    ;; (a busy executor can make zero progress in one window without
+    ;; being done — no-progress only terminates once the canary was
+    ;; actually seen draining), always within the round bound.
+    (when (and (> rounds 1)
+               (or (< now prev) (not drained?)))
       (loop now (sub1 rounds))))
   (cuda-empty-cache!))
 

@@ -290,16 +290,20 @@
 ;; placement invariants under concurrency pass #:device / use
 ;; with-default-device scoping; catalogued with the rest of the
 ;; concurrent-default questions in #40.
+;; Returns #t when the canary was OBSERVED draining (the executor
+;; reached it inside the window), #f on timeout — callers that settle
+;; (reclaim-native-memory!) use #f as "executor still busy, go again".
 (define (collect-and-drain!)
   (define drained (make-semaphore 0))
   (register-finalizer (box 0) (lambda (_) (semaphore-post drained)))
   (collect-garbage)
-  (void (sync/timeout 0.5 drained))
+  (define observed (sync/timeout 0.5 drained))
   ;; The drained finalizers returned their blocks to the CACHING
   ;; allocator; before the retry re-asks the driver, hand the cache's
   ;; unused blocks back too (best-effort: rc ignored — a failure here
   ;; must not preempt the retry, whose own failure raises properly).
-  (void (tr-cuda-empty-cache/raw)))
+  (void (tr-cuda-empty-cache/raw))
+  (and observed #t))
 
 ;; Retry a NULL-returning raw call exactly once after a collect+drain
 ;; when the C side classified the failure as OOM: finalizing dead handles
