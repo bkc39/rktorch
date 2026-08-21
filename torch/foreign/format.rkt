@@ -120,10 +120,10 @@
   (cond
     [(null? dims) (pad (fmt node) max-width)]
     [(null? (cdr dims))
-     ;; PyTorch wraps rows at linewidth 80: a fixed
-     ;; floor((80 - indent - 1) / (width + 2)) elements per line (the
-     ;; ellipsis occupies one slot), continuation lines indented one
-     ;; past the opening bracket.
+     ;; PyTorch wraps rows at a fixed floor((80 - indent) / (wrap-width
+     ;; + 2)) elements per line (the ellipsis occupies one slot),
+     ;; continuation lines indented one past the opening bracket;
+     ;; wrap-width carries the int-mode dot quirk (see make-formatter).
      (define rendered
        (for/list ([v (in-list node)])
          (if (eq? v 'ellipsis) " ..." (pad (fmt v) max-width))))
