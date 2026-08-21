@@ -67,7 +67,7 @@
 
 ;; Mirrors the tr_dtype C enum (tensor.h).
 (define _tr-dtype
-  (_enum '(float32 = 0 float64 = 1 int64 = 2)))
+  (_enum '(float32 = 0 float64 = 1 int64 = 2 bool = 3)))
 
 ;; The one decoder for raw dtype codes (tr-tensor-dtype/raw returns the
 ;; plain int so error paths can't poison an enum unmarshal): #f for
@@ -78,6 +78,7 @@
     [(0) 'float32]
     [(1) 'float64]
     [(2) 'int64]
+    [(3) 'bool]
     [else #f]))
 
 ;; The out param is a plain _int, NOT _tr-dtype: on the error path (a

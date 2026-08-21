@@ -178,12 +178,12 @@
   [ge compare/c]
   ;; out-marshalling
   [item (-> tensor? real?)]
-  [to-dtype (-> tensor? (or/c 'float32 'float64 'int64) tensor?)]
+  [to-dtype (-> tensor? (or/c 'float32 'float64 'int64 'bool) tensor?)]
   ;; the dtype query (#44): torch.Tensor.dtype as a symbol
-  [tensor-dtype (-> tensor? (or/c 'float32 'float64 'int64))]
+  [tensor-dtype (-> tensor? (or/c 'float32 'float64 'int64 'bool))]
   ;; PyTorch-property short names; the tensor- forms stay as aliases
   [shape (-> tensor? (listof exact-nonnegative-integer?))]
-  [dtype (-> tensor? (or/c 'float32 'float64 'int64))]
+  [dtype (-> tensor? (or/c 'float32 'float64 'int64 'bool))]
   [numel (-> tensor? exact-nonnegative-integer?)]
   ;; native-memory observability (#37): live handle-attributed bytes per
   ;; device, folded from the accounting ledger — the view's extent per

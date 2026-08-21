@@ -142,6 +142,43 @@ TEST(TorchrktOps, DtypeGetterCoversTheEnum) {
   EXPECT_STRNE(tr_last_error(), "");
 }
 
+TEST(TorchrktOps, DtypeGetterReportsBoolMasks) {
+  const std::vector<float> values = {1.0F, 2.0F};
+  const std::vector<int64_t> dims = {2};
+  const Handle t(tr_from_data(values.data(), values.size(), dims.data(), 1));
+  const Handle mask(tr_gen_eq_scalar(t.t, 1.0));
+  tr_dtype dt = TR_DTYPE_FLOAT32;
+  EXPECT_EQ(tr_tensor_dtype(mask.t, &dt), 0) << tr_last_error();
+  EXPECT_EQ(dt, TR_DTYPE_BOOL);
+  // and bool round-trips through to_dtype
+  const Handle back(tr_tensor_to_dtype(mask.t, TR_DTYPE_BOOL));
+  EXPECT_EQ(tr_tensor_dtype(back.t, &dt), 0) << tr_last_error();
+  EXPECT_EQ(dt, TR_DTYPE_BOOL);
+}
+
+TEST(TorchrktOps, FromDataI64OnPlacesOnExplicitCpu) {
+  // the device-move leg of the int64 ingestion, exercised at the C
+  // boundary (its float sibling has the same coverage in device_test)
+  const std::vector<int64_t> values = {1, -2, (int64_t{1} << 53) + 1};
+  const std::vector<int64_t> dims = {3};
+  const Handle t(tr_from_data_i64_on(values.data(), values.size(), dims.data(),
+                                     1, TR_DEVICE_CPU, 0));
+  ASSERT_NE(t.t, nullptr) << tr_last_error();
+  tr_dtype dt = TR_DTYPE_FLOAT32;
+  EXPECT_EQ(tr_tensor_dtype(t.t, &dt), 0) << tr_last_error();
+  EXPECT_EQ(dt, TR_DTYPE_INT64);
+  std::uint64_t numel = 0;
+  EXPECT_EQ(tr_tensor_copy_data_i64(t.t, 0, nullptr, &numel), 2);
+  std::vector<int64_t> out(numel);
+  EXPECT_EQ(tr_tensor_copy_data_i64(t.t, numel, out.data(), &numel), 0)
+      << tr_last_error();
+  EXPECT_EQ(out, values);
+  // invalid device rejection mirrors the float sibling
+  EXPECT_EQ(tr_from_data_i64_on(values.data(), values.size(), dims.data(), 1,
+                                static_cast<tr_device_type>(99), 0),
+            nullptr);
+}
+
 TEST(TorchrktOps, FromDataRejectsNumelMismatch) {
   const std::vector<float> values = {1.0F, 2.0F, 3.0F};
   const std::vector<int64_t> dims = {2, 2};

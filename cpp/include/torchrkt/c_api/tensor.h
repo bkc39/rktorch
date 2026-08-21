@@ -22,7 +22,8 @@ typedef struct tr_tensor tr_tensor;
 typedef enum tr_dtype {
   TR_DTYPE_FLOAT32 = 0,
   TR_DTYPE_FLOAT64 = 1,
-  TR_DTYPE_INT64 = 2
+  TR_DTYPE_INT64 = 2,
+  TR_DTYPE_BOOL = 3
 } tr_dtype;
 
 /* Free a handle returned by tr_randn. Safe on NULL. If the underlying

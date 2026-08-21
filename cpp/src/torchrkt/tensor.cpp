@@ -22,6 +22,8 @@ torch::ScalarType to_scalar_type(tr_dtype dtype) {
       return torch::kFloat64;
     case TR_DTYPE_INT64:
       return torch::kInt64;
+    case TR_DTYPE_BOOL:
+      return torch::kBool;
   }
   throw std::invalid_argument("unknown tr_dtype");
 }
@@ -124,6 +126,11 @@ int tr_tensor_dtype(const tr_tensor* t, tr_dtype* out) {
         return;
       case torch::kInt64:
         *out = TR_DTYPE_INT64;
+        return;
+      case torch::kBool:
+        // comparisons produce genuine bool tensors; the query must
+        // answer for the library's own results
+        *out = TR_DTYPE_BOOL;
         return;
       default:
         // Reject rather than mislabel (the tr_tensor_device pattern for

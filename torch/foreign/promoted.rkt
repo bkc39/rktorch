@@ -13,10 +13,10 @@
 ;; Contracts live in ../foreign.rkt.
 
 (require (only-in racket/list drop [flatten list-flatten] take)
-         (only-in "ops.rkt" tensor-shape)
+         (only-in "ops.rkt" tensor-dtype tensor-shape)
          (only-in "size.rkt" ->2d)
          (only-in "structs.rkt" tensor?)
-         (only-in "tensor-ops.rkt" reshape)
+         (only-in "tensor-ops.rkt" reshape tensor)
          (prefix-in g: (only-in "../generated.rkt"
                                 adaptive-avg-pool2d
                                 avg-pool2d
@@ -90,9 +90,16 @@
 ;; eq/ne/lt/le/gt/ge over a tensor lhs and a tensor-or-real rhs. The result
 ;; handle is a genuine bool tensor (what masked-fill demands); only the
 ;; read path (tensor->list / repr) coerces the values to float32.
+;;
+;; An exact-integer rhs against an int64 lhs routes through a TENSOR rhs:
+;; the scalar path transits a C double, which rounds past 2^53 and could
+;; flip the comparison RESULT (not merely a dtype) — e.g.
+;; (lt (tensor (expt 2 53)) (add1 (expt 2 53))) must be true.
 (define ((comparison t-op s-op) a b)
   (cond
     [(tensor? b) (t-op a b)]
+    [(and (exact-integer? b) (eq? (tensor-dtype a) 'int64))
+     (t-op a (tensor b))]
     [else (s-op a (exact->inexact b))]))
 
 (define eq (comparison g:eq-tensor g:eq-scalar))

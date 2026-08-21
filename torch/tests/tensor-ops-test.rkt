@@ -63,7 +63,19 @@
       (check-equal? (device 'cuda 1) (cuda-device 1))
       ;; boundary rejections: an ordinal is only meaningful with 'cuda
       (check-exn exn:fail:contract? (lambda () (device q 1)))
-      (check-exn exn:fail:contract? (lambda () (device 'cpu 1)))))
+      (check-exn exn:fail:contract? (lambda () (device 'cpu 1)))
+      ;; ...but the one valid CPU ordinal stays accepted
+      (check-equal? (device 'cpu 0) (cpu-device)))
+    ;; comparisons produce genuine bool tensors, and the query says so
+    (check-equal? (dtype (eq (tensor '(1 2)) 1)) 'bool)
+    ;; exact int64 comparisons never transit a double: 2^53 < 2^53+1
+    ;; must hold (the scalar path would round the rhs down and flip it)
+    (check-equal? (tensor->list (lt (tensor (expt 2 53))
+                                    (+ (expt 2 53) 1)))
+                  '(1.0))
+    (check-equal? (tensor->list (eq (tensor (+ (expt 2 53) 1))
+                                    (expt 2 53)))
+                  '(0.0)))
 
   (test-case "tensor from nested lists infers the shape"
     (define t (tensor '((1 2 3) (4 5 6))))
