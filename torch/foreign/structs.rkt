@@ -137,9 +137,12 @@
 ;; Slices are internal to tree building — up to (2*edgeitems)^(rank-1)
 ;; of them for a high-rank fully-eliding tensor — so each is released
 ;; synchronously once consumed rather than left to accumulate finalizer
-;; and ledger charges until a GC. Same break-deferral discipline as
-;; `tensor-free!`; on a raising path the finalizer backstop still holds
-;; because the tag only flips after a completed free.
+;; and ledger charges until a GC. Release mirrors `tensor-free!`
+;; exactly, including its tag-flip-even-on-raise discipline (see its
+;; comment: an ATTEMPTED free consumes the finalizer backstop, so the
+;; tag must flip regardless of success). Only when `proc` itself raises
+;; — before any free attempt — does the slice fall back to its GC
+;; finalizer.
 (define (call-with-slice h d start len proc)
   (define s (check-handle 'tensor->repr (tr-tensor-narrow/raw h d start len)))
   (begin0
