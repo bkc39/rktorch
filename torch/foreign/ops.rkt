@@ -5,10 +5,10 @@
 
 (require (only-in ffi/vector
                   f32vector->list
-                  list->s64vector
-                  make-f32vector
                   f64vector->list
                   f64vector?
+                  list->s64vector
+                  make-f32vector
                   make-f64vector
                   make-s64vector
                   s64vector->list

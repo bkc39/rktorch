@@ -28,7 +28,11 @@ reprs = [
     repr(torch.tensor([1e10, 2.5e10, -3e-7])),
     repr(torch.tensor([1e8])),
     repr(torch.tensor([float("nan"), 5.0])),
+    repr((torch.arange(2000) + 1).to(torch.float32) * 12345.6789),
 ]
-torch.manual_seed(0)
-reprs.append(repr(torch.randn(2000) * 1e10))
-print(json.dumps({"reprs": reprs}))
+print(json.dumps({
+    "reprs": reprs,
+    # float64 marshal-out exactness: 2^24+1 dies in any float32 transit
+    "f64_values": torch.tensor([16777217, 1],
+                               dtype=torch.float64).tolist(),
+}))

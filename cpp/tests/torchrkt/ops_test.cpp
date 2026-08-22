@@ -212,6 +212,12 @@ TEST(TorchrktOps, CopyDataF64PreservesDoublePrecision) {
   float f32out = 0.0F;
   EXPECT_EQ(tr_tensor_copy_data(d.t, 1, &f32out, &numel), 0);
   EXPECT_EQ(f32out, 16777216.0F);
+  // the size-then-fill probe (rc=2) and null-arg (rc=1) contracts
+  EXPECT_EQ(tr_tensor_copy_data_f64(d.t, 0, nullptr, &numel), 2);
+  EXPECT_EQ(numel, 1U);
+  EXPECT_EQ(tr_tensor_copy_data_f64(nullptr, 1, &out, &numel), 1);
+  EXPECT_EQ(tr_tensor_copy_data_f64(d.t, 1, &out, nullptr), 1);
+  EXPECT_STRNE(tr_last_error(), "");
 }
 
 TEST(TorchrktOps, FromDataRejectsNumelMismatch) {

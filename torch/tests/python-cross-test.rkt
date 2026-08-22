@@ -113,11 +113,22 @@
                   (tensor->repr (tensor '(1e10 2.5e10 -3e-7)))
                   (tensor->repr (tensor '(1e8)))
                   (tensor->repr (tensor '(+nan.0 5.0)))
-                  (begin
-                    (manual-seed! 0)
-                    (tensor->repr (mul (randn 2000) 1e10))))])
+                  ;; deterministic wide-range sci (ratio > 1000): seeded
+                  ;; randn would be byte-fragile under libtorch/python
+                  ;; patch skew in the torchSource="bin" config
+                  (tensor->repr
+                   (tensor (build-list
+                            2000
+                            (lambda (i)
+                              (* (exact->inexact (add1 i))
+                                 12345.6789))))))])
        (check-equal? (length rkt) (length py)
                      "summarized-repr form count")
+       ;; the f64 marshal path against real PyTorch (repr byte-compare
+       ;; is blocked by the dtype-suffix TODO, so values compare exact)
+       (check-equal? (tensor->list (to-dtype (tensor '(16777217 1))
+                                             'float64))
+                     (hash-ref j 'f64_values))
        (for ([r (in-list rkt)]
              [p (in-list py)]
              [i (in-naturals)])
