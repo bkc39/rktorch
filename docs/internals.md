@@ -28,8 +28,8 @@ CUDA the caching allocator usually just returns the block to its pool.
 ## Tensor lifetime
 
 Every tensor-returning binding carries the `tensor-allocator` wrap
-from `torch/foreign/raw/memory.rkt` (the codegen emitter emits it for
-generated ops). The wrap does two things: registers a GC finalizer for
+from `torch/foreign/raw/memory.rkt` (for generated ops, the
+`define-generated-op` expansion inserts it). The wrap does two things: registers a GC finalizer for
 the handle, and charges the pressure ledger below. A bare
 `(allocator ...)` wrap is never written — it would skip the ledger.
 
@@ -42,7 +42,7 @@ Death has two paths:
 | finalizer | cancelled | is the finalizer |
 | when | deterministic release | the default |
 
-The explicit path releases a buffer *now*, cancels the pending
+The explicit path drops this handle's reference *now*, cancels the pending
 finalizer, and flips the cpointer tag to `'Tensor-freed` — even when
 the free raises, since an attempted free consumes the finalizer
 backstop and a live-looking tag would invite use-after-free.
@@ -50,7 +50,10 @@ backstop and a live-looking tag would invite use-after-free.
 The finalizer path is wrapped in `swallow-and-count-failure`, whose
 catch is total: Racket finalizers run in **atomic mode**, where
 raising or blocking is not an option, so a failed native free becomes
-an incremented counter (`finalizer-failures`) and nothing else.
+an incremented counter (`finalizer-failures`) and nothing else. One
+outcome bypasses both paths: a C++ throw during storage release
+unwinds through libtorch's own noexcept frames to `std::terminate`
+before any handler can run — `finalizer_death_test.cpp` pins this.
 
 ## Phantom-bytes accounting
 
@@ -86,8 +89,8 @@ host ones — user code never calls the collector by hand.
 ## Allocation failure
 
 When an allocation fails and classifies as out-of-memory, the wrapper
-collects, drains pending finalizers (canary-bounded, so freed blocks
-are really back), and retries the call exactly once; a second failure
+collects, drains pending finalizers (a bounded, best-effort drain),
+and retries the call exactly once; a second failure
 raises the typed `exn:fail:rktorch:oom`. Ops that draw from the global
 RNG stream use `tensor-allocator/rng` — the same wrap minus the retry,
 because a retried draw would advance the generator stream and break
@@ -102,10 +105,11 @@ seeded reproducibility.
   allocated/reserved/peak numbers for this process.
 - `cuda-empty-cache!` — return reserved-but-unused blocks to the
   driver.
-- `reclaim-native-memory!` — collect, drain, repeat until the ledger
-  settles, then empty the CUDA cache. For epoch boundaries and script
-  exits.
-- `tensor-free!` — deterministic release of one tensor (unsafe
-  submodule).
+- `reclaim-native-memory!` — collect, drain, repeat (a bounded number
+  of rounds) until the ledger stops shrinking, then empty the CUDA
+  cache. For epoch boundaries and script exits.
+- `tensor-free!` — deterministic release of one handle's reference
+  (unsafe submodule); the buffer goes when the last sharing handle
+  does.
 - `finalizer-failures` — the swallowed-failure counter; nonzero means
   frees failed silently and the process should be treated as wounded.
