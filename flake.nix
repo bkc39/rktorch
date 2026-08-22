@@ -472,6 +472,32 @@
             export PLTUSERHOME="$PWD/.racket-user"
             _rkt_ver=$(racket --version 2>&1 | grep -oE 'v[0-9]+\.[0-9]+' | tr -d 'v' | tr '.' '-')
             deps_stamp="$PLTUSERHOME/.deps2-installed-torch-''${_rkt_ver}"
+            # In-tree zo caches compiled piecewise across commits can defeat
+            # the compilation manager, so bytecode is keyed to HEAD by a
+            # stamp-and-clear (a per-rev PLTCOMPILEDROOTS would recompile
+            # the copied dep packages on every pull).
+            _rev=$(git rev-parse HEAD 2>/dev/null || echo norev)
+            _rev_stamp="$PLTUSERHOME/.provisioned-rev"
+            _old_rev=$(cat "$_rev_stamp" 2>/dev/null || echo none)
+            if [ "$_old_rev" != "$_rev" ]; then
+              _clear_ok=1
+              if [ "$_old_rev" != "none" ] || [ -f "$deps_stamp" ]; then
+                echo "bytecode cache: clearing compiled/ (''${_old_rev:0:12} -> ''${_rev:0:12})"
+                for _d in torch examples scripts codegen; do
+                  [ -d "$_d" ] || continue
+                  find "$_d" -type d -name compiled -prune -exec rm -rf {} + \
+                    || _clear_ok=0
+                done
+              else
+                echo "bytecode cache: fresh for ''${_rev:0:12}"
+              fi
+              if [ "$_clear_ok" = 1 ]; then
+                mkdir -p "$PLTUSERHOME"
+                echo "$_rev" > "$_rev_stamp"
+              else
+                echo "WARNING: stale bytecode not fully cleared; will retry on next shell entry" >&2
+              fi
+            fi
             if [ ! -f "$deps_stamp" ]; then
               echo "Installing Racket package (link mode, Racket ''${_rkt_ver})..."
               mkdir -p "$PLTUSERHOME"
