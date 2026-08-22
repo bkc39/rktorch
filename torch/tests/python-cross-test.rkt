@@ -117,11 +117,9 @@
                   ;; randn would be byte-fragile under libtorch/python
                   ;; patch skew in the torchSource="bin" config
                   (tensor->repr
-                   (tensor (build-list
-                            2000
-                            (lambda (i)
-                              (* (exact->inexact (add1 i))
-                                 12345.6789))))))])
+                   (tensor (for/list ([i (in-range 2000)])
+                             (* (exact->inexact (add1 i))
+                                12345.6789)))))])
        (check-equal? (length rkt) (length py)
                      "summarized-repr form count")
        ;; the f64 marshal path against real PyTorch (repr byte-compare
