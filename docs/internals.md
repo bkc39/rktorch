@@ -36,18 +36,24 @@ set as a pair. The Racket side checks the status/NULL, then reads both.
 
 The exception-to-status translation lives in one place,
 `cpp/src/torchrkt/detail/op_call.hpp`, as boundary-shape helpers
-(`alloc_result`, `status_call`, `copy_data_call`) plus two sanctioned
+(`alloc_result`, `status_call`, `copy_data_call`) plus three sanctioned
 deviations: the value-returning CUDA probes (which return a benign 0
-and record the failure — callers disambiguate via `tr_last_error`), and
-the finalizer free described below.
+and record the failure — the C contract lets a caller disambiguate via
+`tr_last_error`, though the current Racket wrappers deliberately fold
+probe failure into "unavailable" and fall back to CPU), the two
+size-probe entry points (`tr_tensor_shape`, `tr_tensor_print`) whose
+rc=2 capacity contract is hand-rolled, and the finalizer free described
+below.
 
-Error recording is allocation-free end to end on its fallback path.
-`record_failure` classifies the exception first, then *attempts* the
-rich message; if building that string itself throws (host exhaustion),
-`set_error_fallback` records the pre-classified kind without
-allocating. This matters because the recorder runs inside `noexcept`
-boundary frames: an allocation failure while reporting an allocation
-failure must not become `std::terminate`.
+Error recording never lets an exception escape, and the classified
+kind is always recorded. The message is best-effort: `record_failure`
+classifies first, then *attempts* the rich message; if that throws
+(host exhaustion), `set_error_fallback` still tries a short
+`who`-only message and clears the string if even that allocation
+fails — the kind survives regardless. This matters because the
+recorder runs inside `noexcept` boundary frames: an allocation failure
+while reporting an allocation failure must not become
+`std::terminate`.
 
 ## Tensor lifetime
 
@@ -140,13 +146,18 @@ either transparent recovery or one catchable error.
 **Classification.** The C boundary distinguishes OOM from everything
 else, per backend (probed on libtorch 2.9):
 
-- CUDA/MPS exhaustion throws the typed `c10::OutOfMemoryError` — a
-  `dynamic_cast` catches it.
+- CUDA exhaustion throws the typed `c10::OutOfMemoryError` — a
+  `dynamic_cast` catches it. (MPS is not on the device surface; its
+  distinct "MPS backend out of memory" error gets classified — and
+  tested — when the backend is added.)
 - CPU exhaustion arrives as a *plain* `c10::Error` from
   `alloc_cpu.cpp`'s enforce — classified by matching
   `DefaultCPUAllocator` in the message (and `std::bad_alloc` is OOM
-  too). CPU OOM is portably provokable with one absurd request, so
-  this classification has a real gtest; the CUDA path can't have one.
+  too). CPU OOM is portably provokable with one absurd request (a
+  4 EiB `zeros`), so the classification is pinned at both layers —
+  `CpuOomClassifiesAsOomKind` in `cpp/tests/torchrkt/ops_test.cpp` and
+  the typed-exn/retry behavior in `torch/tests/oom-error-test.rkt`;
+  the CUDA path can't have an equivalent test.
 - gradual host exhaustion under Linux overcommit arrives as the OOM
   killer (SIGKILL), not an exception — phantom-bytes pressure is the
   defense there, not this leg.

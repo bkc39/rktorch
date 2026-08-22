@@ -40,16 +40,10 @@ void tr_tensor_free(tr_tensor* t) {
 
 int tr_tensor_numel(const tr_tensor* t, int64_t* out) {
   if (!t || !out) {
-    torchrkt::set_error("tr_tensor_numel: null argument");
-    return 1;
+    return torchrkt::null_arg_status("tr_tensor_numel");
   }
-  try {
-    *out = t->value.numel();
-    return 0;
-  } catch (const std::exception& e) {
-    torchrkt::record_failure("tr_tensor_numel", e);
-    return 1;
-  }
+  return torchrkt::status_call("tr_tensor_numel",
+                               [&] { *out = t->value.numel(); });
 }
 
 int tr_tensor_nbytes(const tr_tensor* t, int64_t* out) {
@@ -63,16 +57,10 @@ int tr_tensor_nbytes(const tr_tensor* t, int64_t* out) {
 
 int tr_tensor_ndim(const tr_tensor* t, int64_t* out) {
   if (!t || !out) {
-    torchrkt::set_error("tr_tensor_ndim: null argument");
-    return 1;
+    return torchrkt::null_arg_status("tr_tensor_ndim");
   }
-  try {
-    *out = t->value.dim();
-    return 0;
-  } catch (const std::exception& e) {
-    torchrkt::record_failure("tr_tensor_ndim", e);
-    return 1;
-  }
+  return torchrkt::status_call("tr_tensor_ndim",
+                               [&] { *out = t->value.dim(); });
 }
 
 int tr_tensor_shape(const tr_tensor* t, int64_t capacity, int64_t* out_dims,
@@ -96,6 +84,9 @@ int tr_tensor_shape(const tr_tensor* t, int64_t capacity, int64_t* out_dims,
     return 0;
   } catch (const std::exception& e) {
     torchrkt::record_failure("tr_tensor_shape", e);
+    return 1;
+  } catch (...) {
+    torchrkt::record_unknown_failure("tr_tensor_shape");
     return 1;
   }
 }
@@ -194,6 +185,9 @@ int tr_tensor_print(const tr_tensor* t, uint64_t buffer_capacity,
     return 0;
   } catch (const std::exception& e) {
     torchrkt::record_failure("tr_tensor_print", e);
+    return 1;
+  } catch (...) {
+    torchrkt::record_unknown_failure("tr_tensor_print");
     return 1;
   }
 }

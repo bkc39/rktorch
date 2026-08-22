@@ -35,16 +35,8 @@ int tr_last_error_kind(void) {
 }
 
 int tr_manual_seed(uint64_t seed) {
-  try {
-    torch::manual_seed(seed);
-    return 0;
-  } catch (const std::exception& e) {
-    torchrkt::record_failure("tr_manual_seed", e);
-    return 1;
-  } catch (...) {
-    torchrkt::record_unknown_failure("tr_manual_seed");
-    return 1;
-  }
+  return torchrkt::status_call("tr_manual_seed",
+                               [seed] { torch::manual_seed(seed); });
 }
 
 }  // extern "C"
