@@ -316,6 +316,59 @@
     (check-exn #rx"ragged"
                (lambda () (tensor (list (list 1) 2)))))
 
+  (test-case "select views and tensor-ref sugar (#46)"
+    (define t (tensor '((1 2 3) (4 5 6))))
+    (check-equal? (tensor->list (select t 0 1)) '(4 5 6))
+    (check-equal? (tensor->list (select t 1 -1)) '(3 6))
+    (check-equal? (shape (select t 0 0)) '(3))
+    ;; like narrow, select returns a view over the source storage
+    (let ([m (tensor '((1.0 2.0) (3.0 4.0)))])
+      (sub! (select m 0 0) (select m 0 0))
+      (check-equal? (tensor->list m) '(0.0 0.0 3.0 4.0)))
+    (check-equal? (ref t 1 2) 6)
+    (check-equal? (tensor-ref t -1 -1) 6)
+    (check-equal? (ref (tensor '((1.5 2.5))) 0 1) 2.5)
+    (check-equal? (ref (tensor 7)) 7)
+    ;; device-resident until the final item: 2^53+1 stays exact
+    (check-equal? (ref (tensor (list (add1 (expt 2 53)))) 0)
+                  (add1 (expt 2 53)))
+    (check-exn exn:fail? (lambda () (select t 0 5))))
+
+  (test-case "ref mirrors python indexing: slices, ellipsis, None, masks (#46)"
+    (define t (tensor '((1 2 3) (4 5 6))))
+    ;; partial integer indexing keeps trailing dims, like t[0]
+    (check-equal? (tensor->list (ref t 0)) '(1 2 3))
+    ;; slices: t[1:3], t[::2], t[:, 1:]
+    (check-equal? (tensor->list (ref (arange 6) (:: 1 3))) '(1.0 2.0))
+    (check-equal? (tensor->list (ref (arange 6) (:: #f #f 2))) '(0.0 2.0 4.0))
+    (check-equal? (tensor->list (ref t (::) (:: 1 #f))) '(2 3 5 6))
+    (check-equal? (shape (ref t (:: 1) (:: 2))) '(1 2))
+    ;; slice results are views, like narrow
+    (let ([m (tensor '((1.0 2.0) (3.0 4.0)))])
+      (sub! (ref m (:: 0 1)) (ref m (:: 0 1)))
+      (check-equal? (tensor->list m) '(0.0 0.0 3.0 4.0)))
+    ;; ellipsis and new axes: t[..., 0], t[:, None]
+    (check-equal? (tensor->list (ref t '... 0)) '(1 4))
+    (check-equal? (shape (ref t (::) #f)) '(2 1 3))
+    (check-equal? (shape (ref t '... #f)) '(2 3 1))
+    ;; t[1, ..., 0] on shape (2 2 2)
+    (check-equal? (tensor->list
+                   (ref (tensor '(((1 2) (3 4)) ((5 6) (7 8)))) 1 '... 0))
+                  '(5 7))
+    ;; boolean mask: t[t > 4]
+    (check-equal? (tensor->list (ref t (gt t 4))) '(5 6))
+    ;; integer-array indexing: t[[0, 0, 1]] and int64-tensor form
+    (check-equal? (shape (ref t '(0 0 1))) '(3 3))
+    (check-equal? (tensor->list (ref t '(1 0) 0)) '(4 1))
+    (check-equal? (tensor->list
+                   (ref (arange 5) (to-dtype (tensor '(4 0)) 'int64)))
+                  '(4.0 0.0))
+    ;; error shapes
+    (check-exn #rx"too many indices" (lambda () (ref t 0 0 0)))
+    (check-exn #rx"at most one" (lambda () (ref t '... '...)))
+    (check-exn #rx"only index" (lambda () (ref t (gt t 4) 0)))
+    (check-exn exn:fail? (lambda () (ref (arange 6) (:: #f #f -1)))))
+
   (test-case "wrong call shapes get contract blame at the facade"
     (check-exn exn:fail:contract? (lambda () (add 1 2)))
     (check-exn exn:fail:contract? (lambda () (sub 1.0 2.0)))

@@ -251,6 +251,60 @@ TEST(GeneratedTranche2, NarrowSlicesAndGuards) {
   expect_error_from("tr_gen_narrow");
 }
 
+TEST(GeneratedTranche2, SelectViewsAndGuards) {
+  const Handle a = make({1.0F, 2.0F, 3.0F, 4.0F, 5.0F, 6.0F}, {2, 3});
+  const Handle row(tr_gen_select_int(a.t, /*dim=*/0, /*index=*/1));
+  EXPECT_EQ(shape_of(row.t), (std::vector<int64_t>{3}));
+  EXPECT_EQ(data_of(row.t), (std::vector<float>{4.0F, 5.0F, 6.0F}));
+  const Handle last(tr_gen_select_int(a.t, /*dim=*/1, /*index=*/-1));
+  EXPECT_EQ(data_of(last.t), (std::vector<float>{3.0F, 6.0F}));
+  EXPECT_EQ(tr_tensor_sub_(row.t, row.t, 1.0), 0) << tr_last_error();
+  EXPECT_EQ(data_of(a.t),
+            (std::vector<float>{1.0F, 2.0F, 3.0F, 0.0F, 0.0F, 0.0F}));
+  EXPECT_EQ(tr_gen_select_int(nullptr, 0, 0), nullptr);
+  expect_error_from("tr_gen_select_int");
+  EXPECT_EQ(tr_gen_select_int(a.t, 0, 5), nullptr);
+  expect_error_from("tr_gen_select_int");
+}
+
+TEST(GeneratedTranche2, SliceBoundsViewsAndGuards) {
+  const Handle a = make({1.0F, 2.0F, 3.0F, 4.0F, 5.0F, 6.0F}, {6});
+  const Handle s(tr_gen_slice_tensor(a.t, 0, 1, true, 5, true, 2));
+  EXPECT_EQ(data_of(s.t), (std::vector<float>{2.0F, 4.0F}));
+  const Handle open(tr_gen_slice_tensor(a.t, 0, 0, false, 0, false, 1));
+  EXPECT_EQ(shape_of(open.t), (std::vector<int64_t>{6}));
+  EXPECT_EQ(tr_tensor_sub_(s.t, s.t, 1.0), 0) << tr_last_error();
+  EXPECT_EQ(data_of(a.t),
+            (std::vector<float>{1.0F, 0.0F, 3.0F, 0.0F, 5.0F, 6.0F}));
+  EXPECT_EQ(tr_gen_slice_tensor(nullptr, 0, 0, false, 0, false, 1), nullptr);
+  expect_error_from("tr_gen_slice_tensor");
+  EXPECT_EQ(tr_gen_slice_tensor(a.t, 0, 0, false, 0, false, -1), nullptr);
+  expect_error_from("tr_gen_slice_tensor");
+}
+
+TEST(GeneratedTranche2, UnsqueezeIndexSelectMaskedSelectAndGuards) {
+  const Handle a = make({1.0F, 2.0F, 3.0F, 4.0F}, {4});
+  const Handle u(tr_gen_unsqueeze(a.t, 0));
+  EXPECT_EQ(shape_of(u.t), (std::vector<int64_t>{1, 4}));
+  EXPECT_EQ(tr_gen_unsqueeze(nullptr, 0), nullptr);
+  expect_error_from("tr_gen_unsqueeze");
+
+  const std::vector<int64_t> idx_vals = {3, 0};
+  const std::vector<int64_t> idx_dims = {2};
+  const Handle idx(
+      tr_from_data_i64(idx_vals.data(), idx_vals.size(), idx_dims.data(), 1));
+  const Handle picked(tr_gen_index_select(a.t, 0, idx.t));
+  EXPECT_EQ(data_of(picked.t), (std::vector<float>{4.0F, 1.0F}));
+  EXPECT_EQ(tr_gen_index_select(nullptr, 0, idx.t), nullptr);
+  expect_error_from("tr_gen_index_select");
+
+  const Handle mask(tr_gen_gt_scalar(a.t, 2.0));
+  const Handle kept(tr_gen_masked_select(a.t, mask.t));
+  EXPECT_EQ(data_of(kept.t), (std::vector<float>{3.0F, 4.0F}));
+  EXPECT_EQ(tr_gen_masked_select(a.t, nullptr), nullptr);
+  expect_error_from("tr_gen_masked_select");
+}
+
 TEST(GeneratedTranche2, SumDimPresenceFlagAndGuard) {
   const Handle a = make({1, 2, 3, 4, 5, 6}, {2, 3});
   const std::vector<int64_t> dim = {1};

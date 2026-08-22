@@ -93,6 +93,12 @@ void torchrkt_c_api_compile_check(void) {
                                         int64_t) = tr_gen_adaptive_avg_pool2d;
   tr_tensor* (*gen_narrow)(const tr_tensor*, int64_t, int64_t, int64_t) =
       tr_gen_narrow;
+  tr_tensor* (*gen_select)(const tr_tensor*, int64_t, int64_t) =
+      tr_gen_select_int;
+  tr_tensor* (*gen_slice)(const tr_tensor*, int64_t, int64_t, bool, int64_t,
+                          bool, int64_t) = tr_gen_slice_tensor;
+  tr_tensor* (*gen_index_select)(const tr_tensor*, int64_t, const tr_tensor*) =
+      tr_gen_index_select;
   tr_tensor* (*gen_dropout)(const tr_tensor*, double, bool) = tr_gen_dropout;
   int (*cuda_available)(void) = tr_cuda_is_available;
   int (*cuda_count)(void) = tr_cuda_device_count;

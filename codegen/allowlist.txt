@@ -21,6 +21,11 @@ shape narrow
 # ^ load-bearing beyond generated.rkt: torch/foreign/raw/tensor.rkt
 # hand-binds tr_gen_narrow for the repr summarizer (require-cycle
 # rationale there); removing this entry breaks lib load loudly.
+shape select.int
+shape slice.Tensor
+shape unsqueeze
+shape index_select
+shape masked_select
 
 # --- tranche 2 (#3): the Conv-MNIST op closure ----------------------------
 

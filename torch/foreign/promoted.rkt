@@ -1,7 +1,7 @@
 #lang racket/base
 
-(require (only-in racket/list drop [flatten list-flatten] take)
-         (only-in "ops.rkt" tensor-device tensor-dtype tensor-shape)
+(require (only-in racket/list append* drop [flatten list-flatten] take)
+         (only-in "ops.rkt" item tensor-device tensor-dtype tensor-shape)
          (only-in "size.rkt" ->2d)
          (only-in "structs.rkt" tensor?)
          (only-in "tensor-ops.rkt" reshape tensor)
@@ -18,16 +18,86 @@
                                 lt-scalar lt-tensor
                                 masked-fill-scalar
                                 max-pool2d
+                                index-select
+                                masked-select
                                 narrow
                                 ne-scalar ne-tensor
+                                select-int
+                                slice-tensor
                                 tril
-                                triu)))
+                                triu
+                                unsqueeze)))
 
 (provide flatten
          eq ne lt le gt ge
          conv2d max-pool2d avg-pool2d adaptive-avg-pool2d
          tril triu masked-fill embedding layer-norm
-         (rename-out [g:narrow narrow]))
+         ref :: slice?
+         (rename-out [ref tensor-ref]
+                     [g:narrow narrow]
+                     [g:select-int select]))
+
+;; :: follows python slice()'s argument convention: (::) is [:],
+;; (:: n) is [:n], (:: a b) is [a:b], (:: a b s) is [a:b:s]; #f leaves
+;; a bound open.
+(struct slice (start end step) #:transparent)
+(define ::
+  (case-lambda
+    [() (slice #f #f 1)]
+    [(end) (slice #f end 1)]
+    [(start end) (slice start end 1)]
+    [(start end step) (slice start end step)]))
+
+(define (bool-mask? s)
+  (and (tensor? s) (eq? (tensor-dtype s) 'bool)))
+
+(define (expand-ellipsis specs rank who)
+  (define consuming
+    (for/sum ([s (in-list specs)])
+      (if (or (eq? s '...) (eq? s #f)) 0 1)))
+  (unless (<= consuming rank)
+    (error who "too many indices for a ~a-d tensor: ~e" rank specs))
+  (define fills (- rank consuming))
+  (define ellipses (for/sum ([s (in-list specs)]) (if (eq? s '...) 1 0)))
+  (case ellipses
+    [(0) specs]
+    [(1) (append* (for/list ([s (in-list specs)])
+                    (if (eq? s '...) (build-list fills (lambda (_) (::)))
+                        (list s))))]
+    [else (error who "at most one '... allowed: ~e" specs)]))
+
+;; The python indexing surface, spec-for-spec: integers select (rank
+;; drops; a fully-indexed result auto-items to a scalar), slices/'...'
+;; stay views, #f is None (new axis), an int list or int64 tensor is
+;; index_select along that dim, and a bool tensor alone is
+;; masked_select. Deviation from numpy advanced indexing: multiple
+;; tensor indices apply per-dim sequentially, not broadcast-combined.
+(define (ref t . specs)
+  (cond
+    [(and (pair? specs) (null? (cdr specs)) (bool-mask? (car specs)))
+     (g:masked-select t (car specs))]
+    [(ormap bool-mask? specs)
+     (error 'ref "a boolean mask must be the only index: ~e" specs)]
+    [else
+     (define expanded
+       (expand-ellipsis specs (length (tensor-shape t)) 'ref))
+     (define result
+       (for/fold ([v t] [d 0] #:result v) ([s (in-list expanded)])
+         (cond
+           [(exact-integer? s) (values (g:select-int v d s) d)]
+           [(slice? s)
+            (values (g:slice-tensor v d (slice-start s) (slice-end s)
+                                    (slice-step s))
+                    (add1 d))]
+           [(eq? s #f) (values (g:unsqueeze v d) (add1 d))]
+           [(tensor? s) (values (g:index-select v d s) (add1 d))]
+           [(list? s)
+            (values (g:index-select
+                     v d
+                     (tensor s #:dtype 'int64 #:device (tensor-device v)))
+                    (add1 d))]
+           [else (error 'ref "not an index spec: ~e" s)])))
+     (if (null? (tensor-shape result)) (item result) result)]))
 
 (define (flatten v [start-dim 0] [end-dim -1])
   (cond

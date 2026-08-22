@@ -18,6 +18,9 @@
 
 (provide with-no-grad with-default-device)
 
+(define index-spec/c
+  (or/c exact-integer? slice? tensor? #f '... (listof exact-integer?)))
+
 (provide (rename-out [t+ +] [t- -] [t* *] [t/ /])
          @)
 
@@ -61,6 +64,21 @@
   [stack (->* ((non-empty-listof tensor?)) (index/c) tensor?)]
   [flatten flatten/c]
   [narrow (-> tensor? index/c index/c exact-positive-integer? tensor?)]
+  ;; select returns a VIEW sharing the input's storage, like narrow
+  [select (-> tensor? index/c index/c tensor?)]
+  ;; ref mirrors python's t[...]: integer/slice/'.../#f(new axis)/int
+  ;; list/int64 tensor specs; a bool tensor alone is a mask; slice
+  ;; results are VIEWS; fully-indexed results come back as scalars
+  [ref (->* (tensor?) #:rest (listof index-spec/c)
+            (or/c tensor? number? boolean?))]
+  [tensor-ref (->* (tensor?) #:rest (listof index-spec/c)
+                   (or/c tensor? number? boolean?))]
+  [:: (let ([bound/c (or/c #f exact-integer?)])
+        (case-> (-> slice?)
+                (-> bound/c slice?)
+                (-> bound/c bound/c slice?)
+                (-> bound/c bound/c exact-integer? slice?)))]
+  [slice? (-> any/c boolean?)]
   ;; elementwise
   [add binary-arith/c]
   [sub binary-arith/c]

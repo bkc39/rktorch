@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include <stdbool.h>
+
 #include "torchrkt/c_api/tensor.h"
 
 #ifdef __cplusplus
@@ -15,12 +17,20 @@ extern "C" {
 
 tr_tensor* tr_gen_cat(const tr_tensor* const* tensors, int64_t tensors_len,
                       int64_t dim);
+tr_tensor* tr_gen_index_select(const tr_tensor* self, int64_t dim,
+                               const tr_tensor* index);
+tr_tensor* tr_gen_masked_select(const tr_tensor* self, const tr_tensor* mask);
 tr_tensor* tr_gen_narrow(const tr_tensor* self, int64_t dim, int64_t start,
                          int64_t length);
 tr_tensor* tr_gen_reshape(const tr_tensor* self, const int64_t* shape,
                           int64_t shape_len);
+tr_tensor* tr_gen_select_int(const tr_tensor* self, int64_t dim, int64_t index);
+tr_tensor* tr_gen_slice_tensor(const tr_tensor* self, int64_t dim,
+                               int64_t start, bool start_has, int64_t end,
+                               bool end_has, int64_t step);
 tr_tensor* tr_gen_tril(const tr_tensor* self, int64_t diagonal);
 tr_tensor* tr_gen_triu(const tr_tensor* self, int64_t diagonal);
+tr_tensor* tr_gen_unsqueeze(const tr_tensor* self, int64_t dim);
 
 #ifdef __cplusplus
 }

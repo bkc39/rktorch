@@ -31,6 +31,25 @@ tr_tensor* tr_gen_cat(const tr_tensor* const* tensors, int64_t tensors_len,
   });
 }
 
+tr_tensor* tr_gen_index_select(const tr_tensor* self, int64_t dim,
+                               const tr_tensor* index) {
+  if (!self || !index) {
+    return torchrkt::null_arg("tr_gen_index_select");
+  }
+  return torchrkt::alloc_result("tr_gen_index_select", [&] {
+    return at::index_select(self->value, dim, index->value);
+  });
+}
+
+tr_tensor* tr_gen_masked_select(const tr_tensor* self, const tr_tensor* mask) {
+  if (!self || !mask) {
+    return torchrkt::null_arg("tr_gen_masked_select");
+  }
+  return torchrkt::alloc_result("tr_gen_masked_select", [&] {
+    return at::masked_select(self->value, mask->value);
+  });
+}
+
 tr_tensor* tr_gen_narrow(const tr_tensor* self, int64_t dim, int64_t start,
                          int64_t length) {
   if (!self) {
@@ -52,6 +71,29 @@ tr_tensor* tr_gen_reshape(const tr_tensor* self, const int64_t* shape,
   });
 }
 
+tr_tensor* tr_gen_select_int(const tr_tensor* self, int64_t dim,
+                             int64_t index) {
+  if (!self) {
+    return torchrkt::null_arg("tr_gen_select_int");
+  }
+  return torchrkt::alloc_result(
+      "tr_gen_select_int", [&] { return at::select(self->value, dim, index); });
+}
+
+tr_tensor* tr_gen_slice_tensor(const tr_tensor* self, int64_t dim,
+                               int64_t start, bool start_has, int64_t end,
+                               bool end_has, int64_t step) {
+  if (!self) {
+    return torchrkt::null_arg("tr_gen_slice_tensor");
+  }
+  return torchrkt::alloc_result("tr_gen_slice_tensor", [&] {
+    return at::slice(
+        self->value, dim,
+        start_has ? c10::optional<int64_t>(start) : c10::optional<int64_t>(),
+        end_has ? c10::optional<int64_t>(end) : c10::optional<int64_t>(), step);
+  });
+}
+
 tr_tensor* tr_gen_tril(const tr_tensor* self, int64_t diagonal) {
   if (!self) {
     return torchrkt::null_arg("tr_gen_tril");
@@ -66,6 +108,14 @@ tr_tensor* tr_gen_triu(const tr_tensor* self, int64_t diagonal) {
   }
   return torchrkt::alloc_result(
       "tr_gen_triu", [&] { return at::triu(self->value, diagonal); });
+}
+
+tr_tensor* tr_gen_unsqueeze(const tr_tensor* self, int64_t dim) {
+  if (!self) {
+    return torchrkt::null_arg("tr_gen_unsqueeze");
+  }
+  return torchrkt::alloc_result(
+      "tr_gen_unsqueeze", [&] { return at::unsqueeze(self->value, dim); });
 }
 
 }  // extern "C"
