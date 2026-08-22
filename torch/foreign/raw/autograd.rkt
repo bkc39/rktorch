@@ -1,10 +1,5 @@
 #lang racket/base
 
-;; Raw autograd bindings (autograd.h). tr-tensor-grad/raw returns a handle
-;; that SHARES storage with the live .grad — it still gets its own allocator
-;; finalizer because the C side wraps it in a fresh tr_tensor box; freeing the
-;; box releases one reference, not the gradient itself.
-
 (require (only-in ffi/unsafe _bool _double _fun _int _ptr)
          (only-in "memory.rkt" tensor-allocator)
          (only-in "syntax.rkt" _Tensor _Tensor/null define-torch))
@@ -32,8 +27,6 @@
         -> (values rc (not (zero? out))))
   #:c-id tr_tensor_requires_grad)
 
-;; Cheap predicate: no handle allocation, no tr_last_error side effect on
-;; the "no gradient" path (unlike probing tr-tensor-grad/raw for NULL).
 (define-torch tr-tensor-has-grad/raw
   (_fun (t : _Tensor)
         (out : (_ptr o _int))
@@ -65,7 +58,6 @@
         -> (values rc (not (zero? out))))
   #:c-id tr_is_grad_enabled)
 
-;; t -= alpha * other (ATen sub_'s alpha form), the SGD update primitive.
 (define-torch tr-tensor-sub!/raw
   (_fun (t : _Tensor) (other : _Tensor) (alpha : _double) -> _int)
   #:c-id tr_tensor_sub_)

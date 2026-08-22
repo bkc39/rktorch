@@ -1,12 +1,5 @@
 #lang racket/base
 
-;; nn.Dropout: during training, zero each activation independently with
-;; probability p and scale the survivors by 1/(1-p) (inverted dropout); in
-;; eval it's the identity. The generated functional op already honors its
-;; train flag, so forward just threads the layer's mode through. dropout is a
-;; hand-written gen:module (not define-module) because it carries mutable
-;; mode state, flipped by the train!/eval! protocol.
-
 (require (only-in "../generated.rkt" dropout)
          (only-in "module.rkt"
                   gen:module
@@ -17,12 +10,9 @@
                   module-set-training!
                   module-training?))
 
-;; Dropout (PascalCase, like nn.Dropout) is the public constructor; dropout? the
-;; predicate (lowercase, Racket idiom); the struct is Dropout%.
 (provide Dropout
          dropout?)
 
-;; Modules default to training mode, like torch.nn (call eval! to switch).
 (struct Dropout% (p [training? #:mutable])
   #:reflection-name 'Dropout
   #:property prop:procedure
@@ -32,7 +22,6 @@
      (apply (lambda (x)
               (dropout x (Dropout%-p self) (Dropout%-training? self)))
             inputs))
-   ;; dropout has no learnable params or buffers.
    (define (module-parameters self) '())
    (define (module-named-parameters self prefix) '())
    (define (module-buffers self) '())

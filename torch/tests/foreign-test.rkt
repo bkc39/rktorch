@@ -1,8 +1,5 @@
 #lang racket/base
 
-;; FFI smoke tests for the safe layer.  Requires the native library to be
-;; staged in ../native-libs (the Nix build + dev shell handle this).
-
 (module+ test
   (require rackunit
            ffi/vector
@@ -48,7 +45,7 @@
     (check-true (> (string-length (tensor->string (randn 2 2))) 0)))
 
   (test-case "tensor->repr matches PyTorch's REPL form"
-    ;; seed 0 -> the canonical PyTorch randn(2,2); locks the repr formatter.
+    ;; seed 0: the canonical PyTorch randn(2,2)
     (manual-seed! 0)
     (check-equal? (tensor->repr (randn 2 2))
                   "tensor([[ 1.5410, -0.2934],\n        [-2.1788,  0.5684]])"))
@@ -57,5 +54,4 @@
     (manual-seed! 0)
     (define t (randn 2 2))
     (tensor-free! t)
-    ;; second free hits the flipped tag -> contract violation, not a double free
     (check-exn exn:fail:contract? (lambda () (tensor-free! t)))))

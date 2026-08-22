@@ -1,14 +1,6 @@
 #lang racket/base
 
-;; Char-level text data layer for the GPT capstone: a download-with-cache
-;; loader for the Project Gutenberg corpus (Joseph Conrad, Heart of Darkness,
-;; ebook #219 — public domain), PG boilerplate stripping, a committed prose
-;; fixture so tests and parity runs stay offline, and the vocab / encode /
-;; decode / contiguous-block helpers a char-LM trains on.
-
-;; whole-module on purpose: define-runtime-path expands into phase-1 code
-;; that needs bindings (#%datum, ...) only-in would strip (the documented
-;; runtime-path exemption to the only-in convention).
+;; whole-module on purpose: the expansion needs bindings only-in would strip
 (require racket/runtime-path
          (only-in racket/file file->string make-directory*)
          (only-in racket/port copy-port)
@@ -28,16 +20,9 @@
          download-text-cached
          load-heart-of-darkness)
 
-;; --- Project Gutenberg boilerplate ---------------------------------------
-;; Every PG plain-text file wraps the work in `*** START/END OF THE PROJECT
-;; GUTENBERG EBOOK <TITLE> ***` marker lines, with a header before and the
-;; full PG license after.
 (define start-marker #rx"\\*\\*\\* START OF THE PROJECT GUTENBERG EBOOK [^\n]*\\*\\*\\*")
 (define end-marker #rx"\\*\\*\\* END OF THE PROJECT GUTENBERG EBOOK")
 
-;; Cut `text` down to the prose between the PG markers (whitespace-trimmed).
-;; Errors loudly when a marker is missing: silently returning the raw file
-;; would put the PG header/license in the training data.
 (define (strip-gutenberg-boilerplate text)
   (define start (regexp-match-positions start-marker text))
   (unless start
@@ -51,14 +36,9 @@
            "refusing to use the raw file (it would train on the license text)"))
   (string-trim (substring text (cdar start) (caar end))))
 
-;; --- char-level vocab ----------------------------------------------------
-;; The sorted unique characters of `text`, as a vector; a char's index in
-;; the vector is its token id.
 (define (text->vocab text)
   (list->vector (sort (set->list (for/set ([c (in-string text)]) c)) char<?)))
 
-;; Encode `str` as an [N] int64 token tensor; errors on a char outside the
-;; vocab (train/sample text must come from the same corpus as the vocab).
 (define (encode vocab str)
   (define char->id
     (for/hash ([c (in-vector vocab)] [i (in-naturals)])
@@ -68,26 +48,13 @@
               (lambda () (error 'encode "char ~v not in vocab" c))))
   (to-dtype (tensor (for/list ([c (in-string str)]) (id-of c))) 'int64))
 
-;; Decode token ids (an int64 tensor, or a list of naturals) back to a
-;; string. The tensor read path floatifies, so ids are re-exactified.
 (define (decode vocab ids)
   (define id-list
     (if (tensor? ids) (map inexact->exact (tensor->list ids)) ids))
   (list->string (for/list ([i (in-list id-list)]) (vector-ref vocab i))))
 
-;; --- contiguous-block batching -------------------------------------------
-;; Split `ids` (an [N] int64 token tensor) into next-char training pairs:
-;; (values xs ys), both [B, block-size] int64 with B = floor((N-1)/block-size),
-;; where row b of xs is the b-th contiguous block of the text and ys is the
-;; same block shifted one char ahead (the LM target). Deterministic — no
-;; shuffling — so the PyTorch parity twin sees identical batches. The last
-;; partial block (and its +1 target lookahead) is dropped.
-;;
-;; Aliasing: xs and ys are reshaped `narrow` *views* over ids' storage,
-;; overlapping each other one-char-shifted (see narrow's contract note in
-;; foreign.rkt). Treat ids, xs, and ys as read-only: an in-place op on any
-;; of them writes through to the others — in a training loop that means
-;; target chars silently leaking into the inputs, with no error raised.
+;; deterministic (no shuffle) so the PyTorch parity twin sees identical
+;; batches; xs and ys are overlapping narrow views over ids — read-only
 (define (contiguous-blocks ids block-size)
   (define n (car (tensor-shape ids)))
   (define b (quotient (- n 1) block-size))
@@ -98,53 +65,31 @@
   (values (reshape (narrow ids 0 0 (* b block-size)) b block-size)
           (reshape (narrow ids 0 1 (* b block-size)) b block-size)))
 
-;; --- committed fixture (offline) -----------------------------------------
 (define-runtime-path text-fixture "fixtures/heart-of-darkness-excerpt.txt")
 
-;; The committed excerpt (the novella's first two paragraphs, cut from the
-;; real pg219.txt): prose only, CRLF already normalized to \n.
 (define (load-text-fixture)
   (file->string text-fixture))
 
-;; --- full corpus (download + cache) --------------------------------------
 (define heart-of-darkness-url
   "https://www.gutenberg.org/cache/epub/219/pg219.txt")
 
-;; Gutenberg rate-limits clients with a bare/bot User-Agent; identify
-;; ourselves like a normal client.
+;; Gutenberg rate-limits clients with a bare/bot User-Agent.
 (define gutenberg-headers
   (list "User-Agent: rktorch/0.1 (+https://github.com/bkc39/rktorch)"))
 
-;; Cache location: $RKTORCH_TEXT_DIR if set (e.g. a big data disk), else the
-;; per-user system cache dir.
 (define (text-cache-dir)
   (define override (getenv "RKTORCH_TEXT_DIR"))
   (if (and override (not (string=? override "")))
       (string->path override)
       (build-path (find-system-path 'cache-dir) "rktorch" "text")))
 
-;; Fetch `url` into the cache once (as `name`), then return the file's
-;; contents as a UTF-8 string. `valid?` gates the cache write: a server can
-;; "succeed" with a wrong body (a rate-limit HTML page, a body truncated by
-;; a clean close), and renaming that into place would poison the cache —
-;; file-exists? skips the download forever after, so a transient failure
-;; would persist until the user deletes the file by hand. An invalid body
-;; errors instead, and nothing is cached. A cache hit skips the check: only
-;; validated bytes ever reach `dest`. The error is exn:fail:network — a
-;; wrong body is an environmental transport failure (a rate-limited CI run
-;; must self-skip the live tests, same as an unreachable host), not a bug
-;; in this code.
+;; valid? gates the cache write: a rate-limit page or truncated body must
+;; not poison the cache
 (define (download-text-cached name url #:valid? [valid? (lambda (text) #t)])
   (define dest (build-path (text-cache-dir) name))
   (unless (file-exists? dest)
     (make-directory* (text-cache-dir))
-    ;; Download to a temp file in the cache dir, then atomically rename on
-    ;; success, so an interrupted/failed fetch can't leave a partial file at
-    ;; `dest` that file-exists? would treat as a valid cache entry.
-    ;; with-temporary-file owns the temp's lifetime (removed on any escape) and
-    ;; call/input-url owns the URL port (closed even on error) — so neither the
-    ;; temp nor the port leaks on a network failure. Same dance as mnist.rkt's
-    ;; download-cached, plus the User-Agent header and redirect allowance.
+    ;; temp file + atomic rename: an interrupted fetch must not poison the cache
     (with-temporary-file (tmp #:template "text-~a.part"
                               #:directory (text-cache-dir))
       (call/input-url (string->url url)
@@ -162,15 +107,10 @@
                         (rename-file-or-directory tmp dest #t)))))
   (file->string dest))
 
-;; A complete PG file carries both boilerplate markers; a rate-limit page
-;; has neither and a truncated body loses END. Gates the cache write above.
 (define (gutenberg-text? text)
   (and (regexp-match? start-marker text)
        (regexp-match? end-marker text)))
 
-;; The full Heart of Darkness prose: downloaded (cached, marker-validated),
-;; CRLF normalized to \n (PG serves DOS line endings; \r chars would pollute
-;; the char vocab), PG boilerplate stripped.
 (define (load-heart-of-darkness)
   (strip-gutenberg-boilerplate
    (string-replace (download-text-cached "pg219.txt" heart-of-darkness-url

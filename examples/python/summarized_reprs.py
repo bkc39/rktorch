@@ -1,11 +1,4 @@
-"""Summarized-repr parity battery (#45).
-
-One JSON object with a list of reprs for fixed shapes covering each
-summarization form: 1-d inline ellipsis (int64 width-padding), 2-d row
-elision, rank-3 with only the last dim elided, rank-3 with the leading
-dim elided, the just-over-threshold 1-d float case, and the bool forms
-(small unsummarized + summarized) deferred from the #53 review.
-"""
+"""Summarized-repr parity battery (#45): one repr per summarization form."""
 import json
 import torch
 

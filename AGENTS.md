@@ -277,6 +277,33 @@ Conventions:
   (`tr_gen_{matmul,mm,mv,dot}`) stay permanently allowlisted and bit-checked
   against the authoritative hand-written family.
 
+## Comment policy
+
+Before submitting a PR, actively REMOVE comments — delete, don't
+shorten. Code should be self-documenting; when tempted to keep a
+comment, first try to encode it in a name or structure (rename, extract
+a helper, tighten a contract — renaming a function to make its behavior
+explicit beats any comment) and then delete it. A correct explanation of
+what the code visibly does is still noise. Contract narration on a
+declaration whose name and signature carry the meaning is noise.
+
+The rare comments that stay carry something no name or structure could
+express, in one or two lines:
+
+- a genuine invariant invisible in the code (finalizers run in atomic
+  mode; the OOM retry must compose OUTSIDE the allocator wrap)
+- a strange cross-boundary interaction (FFI marshalling gotchas, noexcept
+  walls, cuBLAS's missing int64 matmul)
+- a documented deviation from reference behavior (e.g. a PyTorch-parity
+  gap that is deliberate)
+
+Never keepers: narration of what the next line does, why a change was
+made (commit message's job), review-round archaeology, restated names, or
+issue-number tags on every mention of a mechanism. Exempt: the literate
+examples (`examples/racket/*.rkt`, prose-by-design) and the python
+parity twins (`examples/python/*.py`, whose docstrings identify the
+Racket twin they mirror).
+
 ## CI
 
 `.github/workflows/nix.yml`: `nix flake check` on `ubuntu-latest` +

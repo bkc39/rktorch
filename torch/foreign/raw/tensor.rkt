@@ -1,9 +1,5 @@
 #lang racket/base
 
-;; Raw accessors over the opaque _Tensor handle (the handle type itself
-;; and its deallocator live in syntax.rkt with the rest of the FFI
-;; substrate).
-
 (require (only-in ffi/unsafe
                   _bytes
                   _double
@@ -45,8 +41,6 @@
         -> (values rc out))
   #:c-id tr_tensor_ndim)
 
-;; (raw t capacity out-dims) -> (values rc out-ndim).  out-dims is a caller
-;; allocated s64vector written in place; out-ndim always holds the true ndim.
 (define-torch tr-tensor-shape/raw
   (_fun (t : _Tensor)
         (capacity : _int64)
@@ -56,8 +50,6 @@
         -> (values rc out-ndim))
   #:c-id tr_tensor_shape)
 
-;; (raw t capacity out) -> (values rc out-numel).  out is a caller-allocated
-;; f32vector written in place; out-numel always holds the true element count.
 (define-torch tr-tensor-copy-data/raw
   (_fun (t : _Tensor)
         (capacity : _uint64)
@@ -67,14 +59,9 @@
         -> (values rc out-numel))
   #:c-id tr_tensor_copy_data)
 
-;; Mirrors the tr_dtype C enum (tensor.h).
 (define _tr-dtype
   (_enum '(float32 = 0 float64 = 1 int64 = 2 bool = 3)))
 
-;; The one decoder for raw dtype codes (tr-tensor-dtype/raw returns the
-;; plain int so error paths can't poison an enum unmarshal): #f for
-;; codes outside the enum (e.g. bool masks). Shared by ops.rkt and
-;; structs.rkt so the encoding has a single source of truth.
 (define (dtype-code->symbol n)
   (case n
     [(0) 'float32]
@@ -83,17 +70,14 @@
     [(3) 'bool]
     [else #f]))
 
-;; The out param is a plain _int, NOT _tr-dtype: on the error path (a
-;; dtype outside the enum, e.g. a bool comparison mask) the C side never
-;; writes the out param, and an enum unmarshal of that garbage raises
-;; BEFORE the caller can check rc. Callers convert after the rc check
-;; (dtype-int->symbol in ops.rkt).
+;; out is a plain _int, not _tr-dtype: on the error path the C side never
+;; writes it, and an enum unmarshal of that garbage raises BEFORE the
+;; caller can check rc.
 (define-torch tr-tensor-dtype/raw
   (_fun (t : _Tensor) (out : (_ptr o _int)) -> (rc : _int)
         -> (values rc out))
   #:c-id tr_tensor_dtype)
 
-;; The float64 sibling: doubles marshal without float32 truncation.
 (define-torch tr-tensor-copy-data-f64/raw
   (_fun (t : _Tensor)
         (capacity : _uint64)
@@ -103,8 +87,6 @@
         -> (values rc out-numel))
   #:c-id tr_tensor_copy_data_f64)
 
-;; tr-tensor-copy-data/raw's int64 sibling (#44): copies via a CPU/int64
-;; conversion so integer tensors round-trip exactly.
 (define-torch tr-tensor-copy-data-i64/raw
   (_fun (t : _Tensor)
         (capacity : _uint64)
@@ -114,11 +96,6 @@
         -> (values rc out-numel))
   #:c-id tr_tensor_copy_data_i64)
 
-;; Bound against the GENERATED narrow shim (tr_gen_narrow): the repr
-;; summarizer in structs.rkt needs edge slices, and it sits below
-;; generated.rkt in the require graph (generated.rkt requires
-;; structs.rkt for wrap-tensor), so the raw layer carries its own
-;; binding to the same C symbol.
 (define-torch tr-tensor-narrow/raw
   (_fun (t : _Tensor)
         (dim : _int64)
@@ -135,14 +112,11 @@
         -> (values rc out))
   #:c-id tr_tensor_item)
 
-;; to-dtype allocates a fresh handle, so it carries the allocator wrap even
-;; though it lives with the accessors.
 (define-torch tr-tensor-to-dtype/raw
   (_fun (t : _Tensor) (dtype : _tr-dtype) -> _Tensor/null)
   #:c-id tr_tensor_to_dtype
   #:wrap tensor-allocator)
 
-;; (raw t capacity buf) -> (values rc out-len), size-then-fill string probe.
 (define-torch tr-tensor-print/raw
   (_fun (t : _Tensor)
         (capacity : _uint64)

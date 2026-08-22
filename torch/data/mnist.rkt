@@ -1,14 +1,6 @@
 #lang racket/base
 
-;; MNIST: a pure-Racket IDX reader (bytes -> float32 image tensors / int64
-;; label tensors) plus a download-with-cache helper for the full dataset. A
-;; small 256-image fixture is committed under data/fixtures/ so the tests and
-;; the convnet smoke train run offline; load-mnist fetches the real dataset
-;; (cached) for local training.
-
-;; whole-module on purpose: define-runtime-path expands into phase-1 code
-;; that needs bindings (#%datum, ...) only-in would strip (the documented
-;; runtime-path exemption to the only-in convention).
+;; whole-module on purpose: the expansion needs bindings only-in would strip
 (require racket/runtime-path
          (only-in racket/file file->bytes make-directory*)
          (only-in racket/port copy-port)
@@ -24,9 +16,6 @@
          download-cached
          load-mnist)
 
-;; Parse an IDX (uint8) buffer into (values dims data-bytes). The header is
-;; 0x00 0x00 <dtype> <ndim> then ndim big-endian int32 dimension sizes; we
-;; only handle the uint8 dtype (0x08) MNIST uses.
 (define (read-idx bs)
   (unless (and (>= (bytes-length bs) 4)
                (zero? (bytes-ref bs 0))
@@ -39,8 +28,6 @@
       (integer-bytes->integer bs #t #t (+ 4 (* i 4)) (+ 8 (* i 4)))))
   (values dims (subbytes bs (+ 4 (* ndim 4)))))
 
-;; IDX images (N x H x W uint8) -> an [N, 1, H, W] float32 tensor scaled to
-;; [0, 1], the NCHW layout conv2d wants.
 (define (idx->images bs)
   (define-values (dims data) (read-idx bs))
   (define floats
@@ -48,45 +35,31 @@
   (apply reshape (tensor floats)
          (list (car dims) 1 (cadr dims) (caddr dims))))
 
-;; IDX labels (N uint8) -> an [N] int64 tensor of class indices.
 (define (idx->labels bs)
   (define-values (_dims data) (read-idx bs))
   (to-dtype (tensor (for/list ([b (in-bytes data)]) b)) 'int64))
 
-;; --- committed fixture (offline) ----------------------------------------
 (define-runtime-path images-fixture "fixtures/mnist-256-images-idx3-ubyte")
 (define-runtime-path labels-fixture "fixtures/mnist-256-labels-idx1-ubyte")
 
-;; (values images labels) for the committed 256-image fixture.
 (define (load-mnist-fixture)
   (values (idx->images (file->bytes images-fixture))
           (idx->labels (file->bytes labels-fixture))))
 
-;; --- full dataset (download + cache) ------------------------------------
-;; The mirror PyTorch's torchvision uses (yann.lecun.com is gone).
+;; the mirror torchvision uses (yann.lecun.com is gone)
 (define mnist-mirror "https://ossci-datasets.s3.amazonaws.com/mnist/")
 
-;; Cache location: $RKTORCH_MNIST_DIR if set (e.g. a big data disk), else the
-;; per-user system cache dir.
 (define (mnist-cache-dir)
   (define override (getenv "RKTORCH_MNIST_DIR"))
   (if (and override (not (string=? override "")))
       (string->path override)
       (build-path (find-system-path 'cache-dir) "rktorch" "mnist")))
 
-;; Fetch <name> (a .gz IDX file) into the cache once, then return its
-;; gunzipped bytes.
 (define (download-cached name)
   (define dest (build-path (mnist-cache-dir) name))
   (unless (file-exists? dest)
     (make-directory* (mnist-cache-dir))
-    ;; Download to a temp file in the cache dir, then atomically rename on
-    ;; success, so an interrupted/failed fetch can't leave a partial file at
-    ;; `dest` that file-exists? would treat as a valid cache entry.
-    ;; with-temporary-file owns the temp's lifetime (removed on any escape) and
-    ;; call/input-url owns the URL port (opened via get-pure-port, closed even on
-    ;; error) — so neither the temp nor the port leaks on a network failure, with
-    ;; no hand-rolled dynamic-wind in this code.
+    ;; temp file + atomic rename: an interrupted fetch must not poison the cache
     (with-temporary-file (tmp #:template "mnist-~a.part"
                               #:directory (mnist-cache-dir))
       (call/input-url (string->url (string-append mnist-mirror name))
@@ -99,7 +72,6 @@
   (gunzip-through-ports (open-input-bytes (file->bytes dest)) out)
   (get-output-bytes out))
 
-;; (values images labels) for the real dataset; split is 'train or 'test.
 (define (load-mnist [split 'train])
   (define prefix (if (eq? split 'test) "t10k" "train"))
   (values

@@ -6,12 +6,6 @@
 
 #include "torchrkt/c_api.h"
 
-// Golden-equivalence proof for the codegen pipeline (#2): the generated
-// tr_gen_* linalg ops must be bit-identical to the hand-written tr_* ops
-// they shadow. The hand-written family stays authoritative; this test is
-// what licenses trusting the generator for ops that have no hand-written
-// twin.
-
 namespace {
 
 struct Handle {
@@ -95,8 +89,7 @@ TEST(GeneratedGolden, ReshapeMatchesHandWritten) {
   expect_bit_identical(expected.t, actual.t);
 }
 
-// A -1 *value* in the shape array is ATen's inferred dimension and must
-// pass the guard — only a negative *count* (shape_len) is rejected.
+// -1 in the shape array is ATen's inferred dimension, not an invalid count.
 TEST(GeneratedGolden, ReshapeInferredDimMatchesHandWritten) {
   const Handle a = make({1.0F, 2.0F, 3.0F, 4.0F, 5.0F, 6.0F}, {2, 3});
   const std::vector<int64_t> dims = {-1, 2};
@@ -115,10 +108,8 @@ TEST(GeneratedGolden, CatMatchesHandWritten) {
   expect_bit_identical(expected.t, actual.t);
 }
 
-// tr_last_error is a sticky thread-local ("only valid after a failure"
-// contract — success does not clear it), so each check below asserts the
-// message is attributed to the op that just failed rather than merely
-// non-null, which would pass on a stale string from an earlier case.
+// tr_last_error is sticky (success does not clear it): assert attribution,
+// not mere non-nullness, or a stale message could pass.
 void expect_error_from(const char* who) {
   const char* message = tr_last_error();
   ASSERT_NE(message, nullptr);
@@ -131,7 +122,6 @@ TEST(GeneratedGolden, ErrorsSurfaceAsNullNotAbort) {
   EXPECT_EQ(tr_gen_mm(a.t, v.t), nullptr);
   expect_error_from("tr_gen_mm");
 
-  // Every generated binary op carries the same null-arg guard.
   struct BinaryCase {
     const char* name;
     tr_tensor* (*fn)(const tr_tensor*, const tr_tensor*);
@@ -149,16 +139,11 @@ TEST(GeneratedGolden, ErrorsSurfaceAsNullNotAbort) {
     expect_error_from(c.name);
   }
 
-  // The TensorList path converts a null element into the error contract
-  // (via the generated throw), never a crash.
   const tr_tensor* holey[] = {a.t, nullptr};
   EXPECT_EQ(tr_gen_cat(holey, 2, 0), nullptr);
   expect_error_from("tr_gen_cat");
-  // A zero-length TensorList passes the pointer guard; ATen's own throw
-  // (cat of an empty list) surfaces through alloc_result as NULL.
   EXPECT_EQ(tr_gen_cat(holey, 0, 0), nullptr);
   expect_error_from("tr_gen_cat");
-  // Negative lengths are rejected before any pointer arithmetic.
   EXPECT_EQ(tr_gen_reshape(a.t, nullptr, -1), nullptr);
   expect_error_from("tr_gen_reshape");
 }

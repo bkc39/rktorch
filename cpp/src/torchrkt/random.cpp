@@ -13,7 +13,6 @@
 
 namespace {
 
-// float32 on the process default device; see creation.cpp / device.cpp.
 torch::TensorOptions default_options() {
   return torch::TensorOptions()
       .dtype(torch::kFloat32)

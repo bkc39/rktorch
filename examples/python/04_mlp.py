@@ -1,10 +1,5 @@
-"""Reference MLP training run for examples/racket/04-mlp.rkt.
-
-Same seed as the Racket side: build a 4-8-2 MLP (two nn.Linear layers, so
-the seeded init draws match), sample a fixed batch, take 5 SGD steps on MSE
-loss. Prints the per-step losses and the flattened post-training parameters
-as {"shape": ..., "values": ..., "losses": [...]}.
-"""
+"""Parity twin of examples/racket/04-mlp.rkt: seeded 4-8-2 MLP, 5 SGD steps;
+prints per-step losses + flattened post-training parameters."""
 
 import json
 

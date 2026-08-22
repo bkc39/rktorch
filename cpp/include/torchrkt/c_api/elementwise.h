@@ -6,10 +6,6 @@
 extern "C" {
 #endif
 
-/* Elementwise ops. Each returns a new tr_tensor handle (NULL on error).
- * Binary tensor-tensor forms broadcast like their torch counterparts; the
- * _scalar forms take a double on the right. */
-
 tr_tensor* tr_add(const tr_tensor* a, const tr_tensor* b);
 tr_tensor* tr_sub(const tr_tensor* a, const tr_tensor* b);
 tr_tensor* tr_mul(const tr_tensor* a, const tr_tensor* b);

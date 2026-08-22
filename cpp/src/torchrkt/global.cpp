@@ -21,10 +21,7 @@ const char* tr_version(void) {
 
 const char* tr_last_error(void) {
   static thread_local std::string buf;
-  // The read must be as exhaustion-safe as the recording: both copies
-  // (last_error()'s by-value return and the assignment) allocate, and a
-  // throw here would cross the FFI boundary instead of letting the
-  // caller raise the typed exn. The literal fallback allocates nothing.
+  // The copy can allocate mid-exhaustion; the literal fallback cannot.
   try {
     buf = torchrkt::last_error();
   } catch (...) {

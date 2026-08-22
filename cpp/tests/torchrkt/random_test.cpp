@@ -59,9 +59,6 @@ TEST(TorchrktRandom, ShapeProbeReportsRequiredNdim) {
   tr_tensor_free(t);
 }
 
-// The bedrock guarantee we rely on for PyTorch parity: the same seed yields the
-// same draws. (Bit-exact agreement with the Python torch lives in the Racket
-// python-cross-test.)
 TEST(TorchrktRandom, SeedIsDeterministic) {
   ASSERT_EQ(tr_manual_seed(0), 0) << tr_last_error();
   tr_tensor* a = make_randn({2, 2});

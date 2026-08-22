@@ -1,14 +1,6 @@
 #lang racket/base
 
-;; The nn layer: define-module expansion, parameter registration/recursion,
-;; the linear layer, SGD, and a tiny end-to-end training loop. Seeded parity
-;; with PyTorch's nn.Linear lives in python-cross-test.
-
 (module+ test
-  ;; Layers are PascalCase (Conv2d/MaxPool2d/Flatten/Linear/…) since #11, so
-  ;; `(require torch torch/nn)` no longer collides with the lowercase functional
-  ;; ops on `torch`. (racket/list's flatten/argmax still collide with torch's
-  ;; functional flatten/argmax, so those two are excepted.)
   (require (except-in racket/list argmax flatten)
            (only-in racket/file make-temporary-file)
            rackunit
@@ -31,14 +23,12 @@
     (define l (Linear 4 3))
     (check-true (linear? l))
     (check-true (module? l))
-    ;; the default reflection path (no #:reflection-name override) -> 'Linear
     (check-equal? (object-name l) 'Linear)
     (define ps (parameters l))
     (check-equal? (map tensor-shape ps) '((3 4) (3)))
     (check-true (andmap requires-grad? ps))
     (define y (l (randn 5 4)))
     (check-equal? (tensor-shape y) '(5 3))
-    ;; (forward l x) and (l x) are the same entry point
     (manual-seed! 1)
     (define x (randn 2 4))
     (check-equal? (tensor->list (forward l x)) (tensor->list (l x))))
@@ -46,7 +36,7 @@
   (test-case "kaiming-uniform stays within the PyTorch bound"
     (manual-seed! 0)
     (define w (kaiming-uniform '(8 4)))
-    ;; gain = sqrt(2/(1+5)) = sqrt(1/3); bound = sqrt(3)*gain/sqrt(4) = 0.5
+    ;; bound = sqrt(3) * sqrt(2/(1+5)) / sqrt(fan-in 4) = 0.5
     (for ([v (in-list (tensor->list w))])
       (check-true (and (>= v -0.5) (< v 0.5)))))
 
@@ -99,7 +89,6 @@
     (check-true (andmap requires-grad? ps))
     (check-equal? (map car (named-parameters c)) '("weight" "bias"))
     (check-equal? (tensor-shape (c (randn 4 1 28 28))) '(4 8 28 28))
-    ;; object-name reflects the define-module name (no internal struct since #10)
     (check-equal? (object-name c) 'Conv2d))
 
   (test-case "Conv2d non-square kernel + per-axis padding"
@@ -131,7 +120,6 @@
     (check-equal? (map tensor-shape ps) '((7 4)))
     (check-true (andmap requires-grad? ps))
     (check-equal? (map car (named-parameters e)) '("weight"))
-    ;; forward gathers rows of the weight table by index.
     (define idx (to-dtype (tensor '(3 0 3)) 'int64))
     (define out (e idx))
     (check-equal? (tensor-shape out) '(3 4))
@@ -148,15 +136,11 @@
     (check-equal? (map tensor-shape (parameters ln)) '((4) (4)))
     (check-equal? (tensor->list (car (parameters ln))) '(1.0 1.0 1.0 1.0))
     (check-equal? (tensor->list (cadr (parameters ln))) '(0.0 0.0 0.0 0.0))
-    ;; with unit weight and zero bias the forward is pure normalization:
-    ;; each row comes out zero-mean.
-    ;; float literals: layer-norm is float-only in torch
     (define out (ln (tensor '((1.0 2.0 3.0 4.0) (10.0 20.0 30.0 40.0)))))
     (check-equal? (tensor-shape out) '(2 4))
     (define rows (tensor->list out))
     (check-= (apply + (take rows 4)) 0.0 1e-4)
     (check-= (apply + (drop rows 4)) 0.0 1e-4)
-    ;; a list normalized-shape and a custom eps construct fine.
     (check-true (layer-norm? (LayerNorm '(3 4) #:eps 1e-6)))
     (check-equal? (object-name ln) 'LayerNorm))
 
@@ -178,7 +162,6 @@
       (fc (flat (pool (relu (c1 x))))))
     (define net (convnet))
     (check-equal? (tensor-shape (net (randn 4 1 28 28))) '(4 10))
-    ;; stateless submodules contribute no params; order is depth-first
     (check-equal? (map car (named-parameters net))
                   '("c1.weight" "c1.bias" "fc.weight" "fc.bias")))
 
@@ -201,7 +184,6 @@
   (test-case "cross-entropy: known value, integer targets coerced to int64"
     (define logits (tensor '((-0.5 -1.0 -2.0) (-2.0 -0.2 -1.5))))
     (define targets (tensor '(0 1)))
-    ;; = nll_loss(log_softmax(logits), targets), mean reduction
     (check-= (item (cross-entropy logits targets)) 0.48362 1e-4))
 
   (test-case "a few Adam steps reduce the training loss"
@@ -225,14 +207,11 @@
     (define d (Dropout #:p 0.5))
     (check-equal? (object-name d) 'Dropout)
     (define x (ones 100))
-    ;; training (default): each entry is 0 or 2.0 (kept and scaled by 1/(1-p))
     (define tr (tensor->list (d x)))
     (check-true (andmap (lambda (v) (or (= v 0.0) (= v 2.0))) tr))
     (check-true (> (length (filter zero? tr)) 0) "nothing was dropped")
-    ;; eval: identity
     (eval! d)
     (check-equal? (tensor->list (d x)) (tensor->list x))
-    ;; train! flips back
     (train! d)
     (check-true (andmap (lambda (v) (or (= v 0.0) (= v 2.0)))
                         (tensor->list (d x)))))
@@ -240,12 +219,10 @@
   (test-case "dropout inside a model: eval! recurses through submodules"
     (define net (Sequential (Linear 4 4) (Dropout #:p 0.9)))
     (eval! net)
-    ;; with dropout off, repeated forwards on the same input agree
     (define x (randn 2 4))
     (check-equal? (tensor->list (net x)) (tensor->list (net x))))
 
   (test-case "module-training? + in-eval-mode: query and restore the prior mode"
-    ;; a mode-sensitive leaf reports + toggles its own flag
     (define d (Dropout #:p 0.5))
     (check-true (module-training? d) "dropout defaults to training")
     (in-eval-mode d (check-false (module-training? d) "eval inside the body"))
@@ -254,14 +231,11 @@
     (eval! d)
     (in-eval-mode d (check-false (module-training? d)))
     (check-false (module-training? d) "restored to eval, not flipped to train")
-    ;; structural: module-training? recurses (define-module linear leaves are
-    ;; always #t; the dropout child carries the mode) and in-eval-mode restores
     (train! d)
     (define net (Sequential (Linear 4 4) (Dropout #:p 0.5)))
     (check-true (module-training? net))
     (in-eval-mode net (check-false (module-training? net)))
     (check-true (module-training? net) "model restored to train")
-    ;; a dropout-free define-module is vacuously training (eval! a no-op)
     (define lin (Linear 4 2))
     (check-true (module-training? lin))
     (in-eval-mode lin (check-true (module-training? lin)))
@@ -282,11 +256,10 @@
     (define net (Sequential (Linear 4 8) (Dropout #:p 0.3) (Linear 8 2)))
     (define path (make-temporary-file "rkt-st-~a.safetensors"))
     (save-state! net path)
-    ;; a differently-seeded model has different params...
+    ;; seed 99: net2 starts different, so post-load equality is non-vacuous
     (manual-seed! 99)
     (define net2 (Sequential (Linear 4 8) (Dropout #:p 0.3) (Linear 8 2)))
     (load-state! net2 path)
-    ;; ...and after load matches the saved model parameter-for-parameter.
     (for ([a (in-list (state-dict net))] [b (in-list (state-dict net2))])
       (check-equal? (car a) (car b))
       (check-equal? (tensor->list (cdr a)) (tensor->list (cdr b))))

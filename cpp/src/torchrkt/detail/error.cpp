@@ -29,9 +29,7 @@ void set_error_fallback(const char* who, error_kind kind) noexcept {
     g_last_error.assign(who);
     g_last_error.append(": message build failed under memory exhaustion");
   } catch (...) {
-    // Even the assign can allocate mid-exhaustion; clear() cannot. The
-    // message is lost, the kind below still tells the caller what
-    // happened.
+    // Even the assign can allocate mid-exhaustion; clear() cannot.
     g_last_error.clear();
   }
   g_last_error_kind = kind;

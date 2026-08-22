@@ -1,9 +1,5 @@
 #lang racket/base
 
-;; Raw shape-manipulation ops (shape_ops.h). All return new GC-managed
-;; _Tensor handles (views share storage at the ATen level, but each handle
-;; owns its own reference, so finalization order doesn't matter).
-
 (require (only-in ffi/unsafe _fun _int64 _list)
          (only-in ffi/vector _s64vector)
          (only-in "memory.rkt" tensor-allocator)

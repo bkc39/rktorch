@@ -1,8 +1,4 @@
-"""Reference computation for examples/racket/01-arith.rkt.
-
-Deterministic (no RNG): (x + 1) * relu(x) over a fixed 2x2 tensor, printed as
-{"shape": [...], "values": [...], "repr": "..."} for the parity cross-test.
-"""
+"""Parity twin of examples/racket/01-arith.rkt: (x + 1) * relu(x)."""
 
 import json
 

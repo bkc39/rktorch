@@ -1,22 +1,5 @@
 #lang racket/base
 
-;; The `tensor` wrapper struct over the raw _Tensor cpointer.
-;;
-;; The cpointer is field 0, so `prop:cpointer 0` makes the struct itself stand
-;; in for the handle — it threads straight through the raw layer's `_Tensor`
-;; arguments with no manual unwrapping.  The struct also caches the shape (a
-;; list of dimension sizes) queried once at wrap time, so `tensor-shape` and the
-;; custom printer need no C round-trip.
-;;
-;; Lifetime: the raw constructor's `#:wrap tensor-allocator` auto-registers a
-;; finalizer that calls `tr-tensor-free/finalizer` (the guarded finalizer-context
-;; entry) and charges the #37 memory-pressure ledger.  The explicit
-;; `tensor-free!` calls `tr-tensor-free/checked` — the
-;; raising, `(deallocator)`-wrapped binding, so failures surface to the
-;; deliberate caller and the pending finalizer is genuinely canceled — and
-;; flips the cpointer tag, so a second free raises `exn:fail:contract` at
-;; the contract boundary instead of double-freeing at the C level.
-
 (require (only-in ffi/unsafe cpointer-has-tag? prop:cpointer set-cpointer-tag!)
          (only-in ffi/vector
                   f32vector->list
@@ -55,13 +38,6 @@
 (define (shape->string dims)
   (if (null? dims) "scalar" (string-join (map number->string dims) "x")))
 
-;; Render a live handle via ATen's ostream operator (the size-then-fill probe).
-;; This is the same text libtorch's own `std::cout << tensor` produces, e.g.
-;;    1.5410 -0.2934
-;;   -2.1788  0.5684
-;;   [ CPUFloatType{2,2} ]
-;; It backs `tensor->string` and is the fallback when the PyTorch-style repr
-;; can't be reproduced (scientific notation).
 (define (handle->string h)
   (define-values (rc0 len0) (tr-tensor-print/raw h 0 (make-bytes 0)))
   (cond
@@ -73,7 +49,6 @@
      (bytes->string/utf-8 buf #f 0 len1)]
     [else (check-ok rc0 'tensor->string) ""]))
 
-;; Copy a live handle's values out as a flat row-major list of reals.
 (define (handle->floats h dims)
   (define numel (apply * dims))
   (define out (make-f32vector numel))
@@ -81,8 +56,6 @@
   (check-ok rc 'tensor->repr)
   (f32vector->list out))
 
-;; Copy a float64 handle's values out as doubles — full precision (the
-;; float32 path truncates mantissas past 2^24).
 (define (handle->doubles h dims)
   (define numel (apply * dims))
   (define out (make-f64vector numel))
@@ -90,8 +63,6 @@
   (check-ok rc 'tensor->repr)
   (f64vector->list out))
 
-;; Copy an int64 handle's values out as a flat row-major list of EXACT
-;; integers (#44) — the float path would corrupt values beyond 2^24.
 (define (handle->ints h dims)
   (define numel (apply * dims))
   (define out (make-s64vector numel))
@@ -99,15 +70,6 @@
   (check-ok rc 'tensor->repr)
   (s64vector->list out))
 
-;; The PyTorch REPL form: `tensor([[...]])`, reproduced from the data + shape.
-;; int64 tensors render bare integers (torch.tensor([1, 2, 3]) parity);
-;; everything else falls back to ATen's printer for values PyTorch would
-;; show in scientific notation (which the Racket-side formatter doesn't
-;; yet reproduce). A failing dtype query falls through to the float path
-;; (printing must never raise — the custom-write handler depends on it).
-;; torch's empty-tensor repr: "tensor([])" for the rank-1 float empty,
-;; a size= clause whenever the shape isn't just (0), and a dtype suffix
-;; exactly when the (absent) elements can't disambiguate int64.
 (define (empty-repr dims dtype)
   (string-append
    "tensor([]"
@@ -115,8 +77,6 @@
        ""
        (format ", size=(~a)"
                (string-join (map number->string dims) ", ")))
-   ;; torch appends the dtype exactly when the (absent) elements can't
-   ;; disambiguate it from the float32 default
    (case dtype
      [(float64) ", dtype=torch.float64"]
      [(int64) ", dtype=torch.int64"]
@@ -124,38 +84,24 @@
      [else ""])
    ")"))
 
-;; --- summarization (#45): PyTorch's edgeitems/threshold elision --------
-;; A tensor with more than `threshold` elements prints only `edgeitems`
-;; leading and trailing entries per oversized dimension, with 'ellipsis
-;; markers where the middle was dropped. The edges are extracted with
-;; native narrow slices, so the marshal-out cost scales with edgeitems,
-;; never numel — a (zeros 1024 1024) repr copies 36 floats, not 2^20.
 (define summarize-threshold 1000)
 (define edgeitems 3)
 
-;; Slice `len` entries starting at `start` along dimension `d` of `h`.
-;; Slices are internal to tree building — up to (2*edgeitems)^(rank-1)
-;; of them for a high-rank fully-eliding tensor — so each is released
-;; synchronously once consumed rather than left to accumulate finalizer
-;; and ledger charges until a GC. Release mirrors `tensor-free!`
-;; exactly, including its tag-flip-even-on-raise discipline (see its
-;; comment: an ATTEMPTED free consumes the finalizer backstop, so the
-;; tag must flip regardless of success). Only when `proc` itself raises
-;; — before any free attempt — does the slice fall back to its GC
-;; finalizer.
+;; The tag flips even when the free raises — an attempted free consumes the
+;; finalizer backstop, so a live-looking tag would invite use-after-free.
+;; Breaks stay deferred: one landing mid-free strands the handle forever.
+(define (free-handle! h)
+  (dynamic-wind
+   void
+   (lambda () (parameterize-break #f (tr-tensor-free/checked h)))
+   (lambda () (set-cpointer-tag! h 'Tensor-freed))))
+
 (define (call-with-slice h d start len proc)
   (define s (check-handle 'tensor->repr (tr-tensor-narrow/raw h d start len)))
   (begin0
     (proc s)
-    (dynamic-wind
-     void
-     (lambda () (parameterize-break #f (tr-tensor-free/checked s)))
-     (lambda () (set-cpointer-tag! s 'Tensor-freed)))))
+    (free-handle! s)))
 
-;; Build the summarized tree: recurse the leading dimensions (narrowing
-;; per included index), marshal only leaf slices. `d` is the absolute
-;; dimension index into `h`, which keeps its full rank (leading
-;; length-1 dims) down the recursion; leaf copies flatten regardless.
 (define (handle->summarized-tree h dims d leaf-values)
   (define n (car dims))
   (define last? (null? (cdr dims)))
@@ -184,10 +130,6 @@
   (define-values (dtype-rc code) (tr-tensor-dtype/raw h))
   (define dtype (and (zero? dtype-rc) (dtype-code->symbol code)))
   (define numel (apply * dims))
-  ;; summarization only engages when some dimension can actually elide:
-  ;; above-threshold tensors whose dims are all <= 2*edgeitems print in
-  ;; full (PyTorch behavior), through the direct path — no per-element
-  ;; narrow slicing for a tree with nothing elided
   (define summarize?
     (and (> numel summarize-threshold)
          (for/or ([n (in-list dims)]) (> n (* 2 edgeitems)))))
@@ -202,27 +144,17 @@
      (define tree (handle->summarized-tree h dims 0 leaf-values))
      (define mode
        (case dtype [(int64) 'exact-integers] [(bool) 'booleans] [else #f]))
-     ;; the formatter itself picks sci notation from the SELECTED
-     ;; values (PyTorch formats from the summarized population)
      (tensor-tree->pytorch-repr tree dims #:mode mode)]
     [(eq? dtype 'int64)
      (tensor->pytorch-repr (handle->ints h dims) dims
                            #:mode 'exact-integers)]
     [(eq? dtype 'bool)
-     ;; the 0/1 mask arrives via the float copy path; the formatter
-     ;; renders True/False (torch.tensor([True, False]) parity)
      (tensor->pytorch-repr (handle->floats h dims) dims
                            #:mode 'booleans)]
     [(eq? dtype 'float64)
-     ;; full-precision doubles: sci mantissas past float32's 2^24 stay
-     ;; right (the dtype suffix remains the documented TODO)
      (tensor->pytorch-repr (handle->doubles h dims) dims)]
     [else (tensor->pytorch-repr (handle->floats h dims) dims)]))
 
-;; The REPL/`print`/`write` form mirrors the Python REPL: show the tensor's
-;; contents as `tensor(...)`, not an opaque handle.  A freed handle (tag
-;; flipped) prints a marker instead of touching C; any rendering error falls
-;; back to the compact shape form so printing can never raise.
 (struct tensor-impl (handle shape)
   #:reflection-name 'tensor
   #:property prop:cpointer 0
@@ -244,9 +176,6 @@
 
 (define tensor-handle tensor-impl-handle)
 
-;; Query a handle's shape via the size-then-fill probe.  ndim==0 (a scalar)
-;; returns rc=0 from the zero-capacity probe; ndim>0 returns rc=2 with the
-;; required ndim, which we then allocate and fill.
 (define (handle-shape h)
   (define-values (rc0 ndim0) (tr-tensor-shape/raw h 0 (make-s64vector 0)))
   (cond
@@ -262,22 +191,7 @@
 (define (wrap-tensor h)
   (tensor-impl h (handle-shape h)))
 
-;; The tag flips even if the checked free raises (dynamic-wind): once the
-;; free has been ATTEMPTED, the (deallocator)-consumed finalizer backstop
-;; can no longer be relied on, so a live-looking tag would invite
-;; use-after-free and double-free attempts with no safety net. On the
-;; (exceptional) raising path the native handle may leak instead — the
-;; right trade, and the raise still reaches the caller.
 (define (tensor-free! t)
   (define h (tensor-handle t))
   (when (cpointer-has-tag? h 'Tensor)
-    (dynamic-wind
-     void
-     ;; Breaks are deferred across the release: a break landing between
-     ;; the ledger unaccount and the C free would propagate with the tag
-     ;; flip still guaranteed below — leaving a handle the finalizer can
-     ;; no longer free (tag mismatch, swallowed) — i.e. a permanent
-     ;; native leak. The free is short; the break is delivered right
-     ;; after.
-     (lambda () (parameterize-break #f (tr-tensor-free/checked h)))
-     (lambda () (set-cpointer-tag! h 'Tensor-freed)))))
+    (free-handle! h)))

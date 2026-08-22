@@ -5,10 +5,6 @@
 #include "torchrkt/detail/op_call.hpp"
 #include "torchrkt/detail/tensor_handle.hpp"
 
-// Every op here is the same null-guard + alloc_result shape; the macros keep
-// one op per stanza without hand-copying the boundary plumbing. They are
-// #undef'd at the end of the file.
-
 #define TR_BINARY_OP(name, expr)                                  \
   tr_tensor* name(const tr_tensor* a, const tr_tensor* b) {       \
     if (!a || !b) {                                               \
@@ -54,9 +50,6 @@ TR_UNARY_OP(tr_sqrt, t->value.sqrt())
 TR_UNARY_OP(tr_relu, t->value.relu())
 TR_UNARY_OP(tr_sigmoid, t->value.sigmoid())
 TR_UNARY_OP(tr_tanh, t->value.tanh())
-// gelu is hand-written (its kwarg-only `str approximate` arg is outside the
-// codegen IR); the one-arg free function is the approximate='none' default.
-// No method variant exists, hence at::gelu over t->value.gelu().
 TR_UNARY_OP(tr_gelu, at::gelu(t->value))
 
 }  // extern "C"

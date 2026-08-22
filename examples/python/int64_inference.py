@@ -1,11 +1,5 @@
-"""torch.tensor's integer-dtype inference (#44).
-
-The repr is the dtype pin: an int64 tensor prints bare integers
-("tensor([[19, 22], ...])"), so a float-inferring Racket side fails the
-byte-for-byte repr comparison even though the VALUES compare equal. The
-matmul keeps the case honest end-to-end (integer kernels, not just
-construction).
-"""
+"""Integer-dtype inference twin (#44): the bare-integer repr is the dtype
+pin — a float-inferring side fails it even though the values compare equal."""
 import json
 import torch
 
