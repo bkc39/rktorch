@@ -1,12 +1,7 @@
 #lang racket/base
 
-;; raco review lints without macro expansion and cannot see that every
-;; `contract-out` entry below re-exports an imported identifier.
+;; raco review lints without macro expansion and cannot see the re-exports.
 #|review: ignore|#
-
-;; Facade for the nn layer: `(require torch/nn)` beside `(require torch)`,
-;; mirroring `import torch.nn`. Models are plain struct trees owned by the
-;; GC — no global parameter store.
 
 (require racket/contract
          "foreign.rkt"
@@ -23,7 +18,6 @@
          "nn/sequential.rkt"
          "nn/state-dict.rkt")
 
-;; Macros and generics can't pass through contract-out; exported as-is.
 (provide define-module
          gen:module
          module-forward
@@ -44,9 +38,8 @@
   [train! (-> module? module?)]
   [eval! (-> module? module?)]
   [call-with-eval-mode (-> module? (-> any) any)]
-  ;; Layer constructors are PascalCase (mirroring the torch.nn.* classes) and
-  ;; the functional ops on `torch` lowercase, so `(require torch torch/nn)`
-  ;; never collides (#11); predicates are lowercase (Racket idiom).
+  ;; PascalCase constructors / lowercase predicates and functional ops keep
+  ;; `(require torch torch/nn)` collision-free (#11).
   [Linear (-> exact-positive-integer? exact-positive-integer? linear?)]
   [linear? (-> any/c boolean?)]
   [Conv2d (->* (exact-positive-integer? exact-positive-integer? pos-size/c)

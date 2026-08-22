@@ -1,10 +1,5 @@
 #lang racket/base
 
-;; Conv/pool layers, mirroring nn.Conv2d / nn.MaxPool2d / nn.Flatten. Conv2d
-;; init matches nn.Conv2d.reset_parameters — kaiming-uniform a=sqrt5 weight,
-;; then bias uniform on +/-1/sqrt(fan_in), in that order — so a shared seed
-;; yields parameters bit-identical to PyTorch.
-
 (require (only-in "../foreign.rkt" conv2d flatten max-pool2d)
          (only-in "../foreign/size.rkt" ->2d)
          (only-in "init.rkt" fan-in kaiming-uniform uniform-init)
@@ -24,6 +19,7 @@
   #:coerce ([kernel-size (->2d kernel-size)]
             [stride (->2d stride)]
             [padding (->2d padding)])
+  ;; weight before bias: nn.Conv2d.reset_parameters' RNG draw order
   #:params ([weight (kaiming-uniform (list out-channels in-channels
                                             (car kernel-size) (cadr kernel-size)))]
             [bias (let ([bound (/ 1.0 (sqrt (fan-in (list out-channels in-channels
@@ -33,8 +29,6 @@
   #:forward (x)
   (conv2d x weight #:bias bias #:stride stride #:padding padding))
 
-;; stride #f means "default to kernel-size", matching nn.MaxPool2d; the
-;; functional max-pool2d handles the #f.
 (define-module MaxPool2d (kernel-size
                           #:stride [stride #f]
                           #:padding [padding 0])

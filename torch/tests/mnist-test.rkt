@@ -1,10 +1,5 @@
 #lang racket/base
 
-;; Tests for the MNIST IDX reader + loaders. The committed-fixture cases run
-;; offline (and in the sandboxed nix build); the full-download case is
-;; network-guarded and self-skips when the mirror is unreachable, like
-;; python-cross-test.
-
 (module+ test
   (require rackunit
            (only-in racket/list take)
@@ -29,8 +24,6 @@
   (test-case "read-idx rejects a non-IDX buffer"
     (check-exn exn:fail? (lambda () (read-idx (bytes 1 2 3 4)))))
 
-  ;; Full-dataset download path: fetch + header-parse the test split (no full
-  ;; tensor materialization), skipping when the mirror is unreachable.
   (define ok?
     (with-handlers ([exn:fail? (lambda (_) #f)])
       (define-values (dims _data)

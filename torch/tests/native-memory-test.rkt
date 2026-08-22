@@ -1,10 +1,5 @@
 #lang racket/base
 
-;; Tests for the #37 native-memory accounting: the phantom-bytes pressure
-;; charge and the per-device fold-on-query ledger behind native-memory-use.
-;; The churn case is the permanent "the mechanism actually engages" guard:
-;; plausible-looking pressure wiring can be dead code.
-
 (module+ test
   (require rackunit
            (only-in racket/string string-split)
@@ -13,7 +8,6 @@
                     zeros)
            (only-in (submod "../foreign.rkt" unsafe) tensor-free!))
 
-  ;; Process RSS in bytes via /proc (Linux); #f where /proc is absent.
   (define (current-rss-bytes)
     (and (file-exists? "/proc/self/status")
          (call-with-input-file "/proc/self/status"
@@ -26,7 +20,6 @@
     (cond [(assoc (cpu-device) (native-memory-use)) => cdr]
           [else 0]))
 
-  ;; Collections + finalizers are asynchronous; poll with a bounded wait.
   (define (collect-until ready? #:tries [tries 50])
     (let loop ([i 0])
       (collect-garbage)
@@ -34,10 +27,7 @@
         (sleep 0.01)
         (loop (add1 i)))))
 
-  ;; Settle honestly before baselining: earlier tests' finalizers may be
-  ;; in flight, so run a few unconditional collect+sleep rounds (a ready?
-  ;; predicate can't express "no more pending finalizers" — an immediately
-  ;; true one would stop after a single collection).
+  ;; unconditional rounds: earlier tests' finalizers may still be in flight
   (define (settled-baseline)
     (for ([_ (in-range 3)])
       (collect-garbage)
@@ -49,16 +39,12 @@
     (define t (zeros 1024 1024)) ;; 4 MiB float32
     (check-true (>= (- (cpu-bytes) base) (* 4 1024 1024))
                 "ledger charged the allocation")
-    ;; dropping the only reference must bring the ledger back down via the
-    ;; finalizer path (weak entry + unaccount!)
     (set! t #f)
     (collect-until (lambda () (< (- (cpu-bytes) base) (* 1024 1024))))
     (check-true (< (- (cpu-bytes) base) (* 1024 1024))
                 "ledger released after GC"))
 
   (test-case "the phantom charge is visible to the GC's own accounting"
-    ;; current-memory-use counts phantom bytes, so a 64 MiB tensor must
-    ;; move it by tens of MiB — the direct proof charging engages.
     (define base (settled-baseline))
     (define before (current-memory-use))
     (define t (zeros 4096 4096)) ;; 64 MiB float32
@@ -73,15 +59,10 @@
     (define t (ones 512 512)) ;; 1 MiB
     (check-true (>= (- (cpu-bytes) base) (* 1024 1024)))
     (tensor-free! t)
-    ;; no collect-garbage here on purpose: the checked path unaccounts
+    ;; no collect-garbage on purpose — the free itself must unaccount
     (check-true (< (- (cpu-bytes) base) (* 512 1024))))
 
-  (test-case "pressure triggers collection WITHOUT manual collects"
-    ;; The end-to-end #37 claim: the phantom charge must make the GC
-    ;; collect of its own accord, so the ledger's high-water stays well
-    ;; under the 800 MiB churned; without pressure it would climb
-    ;; monotonically to the full churn. The bound is generous because GC
-    ;; heuristics vary.
+  (test-case "pressure triggers collection WITHOUT manual collects (#37)"
     (define base (settled-baseline))
     (define rss-before (current-rss-bytes))
     (define high-water
@@ -91,9 +72,8 @@
     (check-true (< high-water (* 600 1024 1024))
                 (format "high-water ~a of ~a churned — pressure never fired"
                         high-water (* 800 1024 1024)))
-    ;; the ledger bound alone can't distinguish "native memory freed" from
-    ;; "weak entries dropped while the C free regressed" — the process's
-    ;; own footprint can (Linux only; /proc is absent on darwin).
+    ;; RSS, not just the ledger: catches weak entries dropping while the C
+    ;; free regressed (Linux only; /proc is absent on darwin)
     (when rss-before
       (check-true (< (- (current-rss-bytes) rss-before) (* 700 1024 1024))
                   "RSS grew by ~the whole churn — native buffers not freed")))
@@ -108,9 +88,6 @@
                         base (cpu-bytes))))
 
   (test-case "reclaim-native-memory! drains dropped handles synchronously"
-    ;; the public release-now sequence: after it returns, the dropped
-    ;; churn is out of the ledger without any further collect-until
-    ;; polling (collect -> finalizer drain -> cache release, in order)
     (define base (settled-baseline))
     (for ([_ (in-range 25)])
       (void (zeros 1024 1024)))

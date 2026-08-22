@@ -1,25 +1,7 @@
 #lang racket/base
 
-;; define-generated-op — the expansion target for torch/generated.rkt.
-;; Each op form expands into the raw FFI binding (allocator-wrapped when
-;; tensor-returning) plus the public uncontracted wrapper, so the
-;; Racket-side marshalling knowledge lives here rather than in the Python
-;; codegen templates. Argument kinds mirror the generator IR:
-;;
-;;   tensor           _Tensor (the wrapper struct passes via prop:cpointer)
-;;   optional-tensor  _Tensor/null (a tensor or #f -> handle or NULL)
-;;   scalar           at::Scalar marshalled as _double
-;;   double / int64 / bool    _double / _int64 / _stdbool
-;;   int-array        list of exact integers -> (s64vector, length) pair
-;;   tensor-list      list of tensors -> (tensor array, length) pair
-;;
-;; #:inplace marks an op that mutates its first argument and returns it;
-;; its raw binding returns an int status, so it is not allocator-wrapped.
-
 (require (for-syntax racket/base
                      racket/syntax
-                     ;; whole-module on purpose: syntax-parse patterns
-                     ;; reference many exported bindings
                      syntax/parse/pre)
          (only-in ffi/unsafe _fun _int _int32 _int64 _double _list _stdbool)
          (only-in ffi/vector _s64vector list->s64vector)
@@ -30,8 +12,7 @@
 
 (provide define-generated-op)
 
-;; optional-dtype marshals a ScalarType as its at::ScalarType code, with
-;; -1 for #f (c10::nullopt); codes mirror tr_dtype.
+;; codes mirror the C tr_dtype enum; -1 is c10::nullopt
 (define (opt-dtype->code d)
   (case d
     [(#f) -1]
@@ -40,17 +21,12 @@
     [(float64) 7]
     [else (error 'define-generated-op "unsupported optional dtype: ~e" d)]))
 
-;; For one [arg kind] pair: the _fun param specs (array/optional kinds
-;; split into pointer/length/presence) and the raw-call argument
-;; expressions. Optional value kinds pass a presence flag or sentinel, so
-;; the wrapper never passes a NULL pointer for a value type.
 (define-for-syntax (kind-pieces stx arg kind)
   (define len-arg (format-id arg "~a-len" arg))
   (define has-arg (format-id arg "~a-has" arg))
   (case kind
     [(tensor) (values (list #`(#,arg : _Tensor)) (list arg))]
     [(optional-tensor)
-     ;; #f marshals to NULL (== c10::nullopt on the C side)
      (values (list #`(#,arg : _Tensor/null)) (list arg))]
     [(scalar double) (values (list #`(#,arg : _double)) (list arg))]
     [(int64) (values (list #`(#,arg : _int64)) (list arg))]
@@ -62,13 +38,9 @@
      (values (list #`(#,arg : (_list i _Tensor)) #`(#,len-arg : _int64))
              (list arg #`(length #,arg)))]
     [(optional-int64)
-     ;; (or arg 0): the value when present, else a don't-care 0 paired with
-     ;; has=#f. (if arg arg 0) reads as if 0 meant "absent" — it doesn't.
      (values (list #`(#,arg : _int64) #`(#,has-arg : _stdbool))
              (list #`(or #,arg 0) #`(and #,arg #t)))]
     [(optional-int-array)
-     ;; #f or '() is absent; pair? gates the has flag so an empty list never
-     ;; marshals as a present-but-empty dim (which is ambiguous).
      (values (list #`(#,arg : (_s64vector i)) #`(#,len-arg : _int64)
                    #`(#,has-arg : _stdbool))
              (list #`(list->s64vector (or #,arg '()))
@@ -106,13 +78,9 @@
            (define-torch raw-name
              (_fun spec ... -> _int)
              #:c-id c-id)
-           ;; recv stays live in this body, so returning it after the C
-           ;; call is GC-safe (_fun pins it for the mutation).
            (define (name arg ...)
              (check-ok (raw-name call-arg ...) 'name)
              recv)))]
-    ;; RNG ops get the no-retry allocator wrap — a collect-and-retry
-    ;; would draw from the generator twice and break seeded parity.
     [(_ name:id c-id:id #:rng ([arg:id kind:id] ...))
      (define-values (specs call-args)
        (build-pieces stx

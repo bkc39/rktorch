@@ -68,14 +68,9 @@ tr_tensor* tr_tensor_to_dtype(const tr_tensor* t, tr_dtype dtype);
  * tr_last_error) for NULL args or a dtype outside the tr_dtype enum. */
 int tr_tensor_dtype(const tr_tensor* t, tr_dtype* out);
 
-/* tr_tensor_copy_data's int64 sibling: copies via a CPU/int64/contiguous
- * conversion, so integer tensors round-trip exactly instead of through
- * float32. Same size-then-fill contract. */
 int tr_tensor_copy_data_i64(const tr_tensor* t, uint64_t capacity, int64_t* out,
                             uint64_t* out_numel);
 
-/* The float64 sibling: double-precision values marshal without float32
- * truncation. Same size-then-fill contract. */
 int tr_tensor_copy_data_f64(const tr_tensor* t, uint64_t capacity, double* out,
                             uint64_t* out_numel);
 

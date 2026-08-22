@@ -14,20 +14,8 @@
 #include "torchrkt/detail/error.hpp"
 #include "torchrkt/detail/tensor_handle.hpp"
 
-// Boundary helpers shared by every op translation unit: the
-// exception-to-status contract lives in exactly one place. Every extern "C"
-// function fits one of five shapes: tensor return (alloc_result), integer
-// status (status_call), size-then-fill probe (copy_data_call), the
-// value-returning CUDA queries in device.cpp (hand-rolled catch: benign value
-// + set_error), and the finalizer tr_tensor_free (NO catch — a throw on the
-// storage-release path terminates inside libtorch's noexcept frames, so its
-// safety guarantee is the Racket-side deallocator wrap in raw/memory.rkt).
-
 namespace torchrkt {
 
-// CUDA/MPS exhaustion throws the typed c10::OutOfMemoryError, but CPU
-// allocation failure arrives as a plain c10::Error from alloc_cpu.cpp's
-// caffe2-style enforce — hence the message match.
 inline error_kind classify(const std::exception& e) noexcept {
   if (dynamic_cast<const c10::OutOfMemoryError*>(&e) != nullptr) {
     return error_kind::oom;
@@ -42,10 +30,6 @@ inline error_kind classify(const std::exception& e) noexcept {
   return error_kind::generic;
 }
 
-// Classify first, then ATTEMPT the rich message: the concatenation allocates
-// and under genuine host exhaustion would throw inside this noexcept frame
-// (= std::terminate); the fallback records the classified kind without
-// allocating.
 inline void record_failure(const char* who, const std::exception& e) noexcept {
   const error_kind kind = classify(e);
   try {
@@ -63,7 +47,6 @@ inline void record_unknown_failure(const char* who) noexcept {
   }
 }
 
-// Tensor-return shape: a fresh heap handle, or NULL with tr_last_error set.
 template <typename Fn>
 tr_tensor* alloc_result(const char* who, Fn&& fn) noexcept {
   try {
@@ -77,7 +60,6 @@ tr_tensor* alloc_result(const char* who, Fn&& fn) noexcept {
   }
 }
 
-// Integer-status shape: 0 on success, 1 with tr_last_error set.
 template <typename Fn>
 int status_call(const char* who, Fn&& fn) noexcept {
   try {
@@ -92,9 +74,6 @@ int status_call(const char* who, Fn&& fn) noexcept {
   }
 }
 
-// Size-then-fill probe shape (`fn` yields the contiguous CPU tensor of the
-// target scalar type): 0 on success, 2 with *out_numel = required size when
-// `capacity` is too small, 1 with tr_last_error set on any exception.
 template <typename Scalar, typename Fn>
 int copy_data_call(const char* who, uint64_t capacity, Scalar* out,
                    uint64_t* out_numel, Fn&& fn) noexcept {

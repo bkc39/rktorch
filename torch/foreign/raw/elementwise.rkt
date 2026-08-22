@@ -1,8 +1,5 @@
 #lang racket/base
 
-;; Raw elementwise ops (elementwise.h), via the shared op-definer macros
-;; in memory.rkt (binary tensor-tensor, tensor-scalar, unary).
-
 (require (only-in "memory.rkt"
                   define-binary/raw
                   define-scalar/raw

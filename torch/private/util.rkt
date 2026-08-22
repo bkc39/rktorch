@@ -1,15 +1,12 @@
 #lang racket/base
 
-;; Small filesystem helpers shared across the package.
-
 (require (only-in racket/file make-temporary-file))
 
 (provide call-with-temporary-file
          with-temporary-file)
 
-;; Deletes the temp file on any escape; the file-exists? guard lets `proc`
-;; rename it away. Creation sits immediately before the dynamic-wind, so no
-;; user code can run between them and leak the file.
+;; deletes the temp file on any escape; the file-exists? guard lets `proc`
+;; rename it away
 (define (call-with-temporary-file proc
                                   #:template [template "rktorch-~a.tmp"]
                                   #:directory [directory #f])

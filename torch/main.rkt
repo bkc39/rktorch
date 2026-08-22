@@ -3,10 +3,6 @@
 ;; raco review lints without macro expansion and cannot see the re-export.
 #|review: ignore|#
 
-;; Facade for the high-level torch API.  `(require torch)` exposes the
-;; ergonomic surface; for v0 it is exactly the safe contracted layer from
-;; `foreign.rkt`.  A `tensor` is GC-reclaimed, so user code never frees it.
-
 (require "foreign.rkt"
          (only-in threading ~> ~>> lambda~> lambda~>>))
 

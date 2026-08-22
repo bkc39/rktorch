@@ -1,9 +1,5 @@
 #lang racket/base
 
-;; nn.Dropout (inverted dropout; identity in eval mode). Hand-written
-;; gen:module rather than define-module because it carries mutable mode
-;; state, flipped by the train!/eval! protocol.
-
 (require (only-in "../generated.rkt" dropout)
          (only-in "module.rkt"
                   gen:module

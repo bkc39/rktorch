@@ -1,7 +1,5 @@
 #lang racket/base
 
-;; Raw accessors over the opaque _Tensor handle.
-
 (require (only-in ffi/unsafe
                   _bytes
                   _double
@@ -43,8 +41,6 @@
         -> (values rc out))
   #:c-id tr_tensor_ndim)
 
-;; (raw t capacity out-dims) -> (values rc out-ndim).  out-dims is a caller
-;; allocated s64vector written in place; out-ndim always holds the true ndim.
 (define-torch tr-tensor-shape/raw
   (_fun (t : _Tensor)
         (capacity : _int64)
@@ -54,8 +50,6 @@
         -> (values rc out-ndim))
   #:c-id tr_tensor_shape)
 
-;; (raw t capacity out) -> (values rc out-numel).  out is a caller-allocated
-;; f32vector written in place; out-numel always holds the true element count.
 (define-torch tr-tensor-copy-data/raw
   (_fun (t : _Tensor)
         (capacity : _uint64)
@@ -65,11 +59,9 @@
         -> (values rc out-numel))
   #:c-id tr_tensor_copy_data)
 
-;; Mirrors the tr_dtype C enum (tensor.h).
 (define _tr-dtype
   (_enum '(float32 = 0 float64 = 1 int64 = 2 bool = 3)))
 
-;; #f for codes outside the enum (e.g. bool comparison masks).
 (define (dtype-code->symbol n)
   (case n
     [(0) 'float32]
@@ -78,15 +70,14 @@
     [(3) 'bool]
     [else #f]))
 
-;; out is a plain _int, NOT _tr-dtype: on the error path the C side never
+;; out is a plain _int, not _tr-dtype: on the error path the C side never
 ;; writes it, and an enum unmarshal of that garbage raises BEFORE the
-;; caller can check rc. Callers convert after the rc check.
+;; caller can check rc.
 (define-torch tr-tensor-dtype/raw
   (_fun (t : _Tensor) (out : (_ptr o _int)) -> (rc : _int)
         -> (values rc out))
   #:c-id tr_tensor_dtype)
 
-;; The float64 sibling: doubles marshal without float32 truncation.
 (define-torch tr-tensor-copy-data-f64/raw
   (_fun (t : _Tensor)
         (capacity : _uint64)
@@ -96,8 +87,6 @@
         -> (values rc out-numel))
   #:c-id tr_tensor_copy_data_f64)
 
-;; int64 sibling: copies via a CPU/int64 conversion so integer tensors
-;; round-trip exactly.
 (define-torch tr-tensor-copy-data-i64/raw
   (_fun (t : _Tensor)
         (capacity : _uint64)
@@ -107,9 +96,6 @@
         -> (values rc out-numel))
   #:c-id tr_tensor_copy_data_i64)
 
-;; Bound against the generated tr_gen_narrow: structs.rkt's repr
-;; summarizer needs slices but sits below generated.rkt in the require
-;; graph, so the raw layer carries its own binding to the same C symbol.
 (define-torch tr-tensor-narrow/raw
   (_fun (t : _Tensor)
         (dim : _int64)
@@ -131,7 +117,6 @@
   #:c-id tr_tensor_to_dtype
   #:wrap tensor-allocator)
 
-;; (raw t capacity buf) -> (values rc out-len), size-then-fill string probe.
 (define-torch tr-tensor-print/raw
   (_fun (t : _Tensor)
         (capacity : _uint64)

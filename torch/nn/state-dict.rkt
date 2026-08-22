@@ -1,11 +1,5 @@
 #lang racket/base
 
-;; safetensors save/load: 8-byte LE header length, UTF-8 JSON header of
-;; name -> {dtype, shape, data_offsets}, then contiguous LE f32 data — the
-;; exact layout Python's `safetensors` reads, so files interchange both ways.
-;; load-state! copies into the existing parameters in place via copy_ under
-;; with-no-grad (like load_state_dict), preserving the model tree.
-
 (require (only-in racket/file file->bytes)
          (only-in json jsexpr->string string->jsexpr)
          (only-in "module.rkt" named-parameters)
@@ -24,7 +18,6 @@
 (define (state-dict model)
   (named-parameters model))
 
-;; --- f32 <-> little-endian bytes ----------------------------------------
 (define (floats->bytes floats)
   (apply bytes-append
          (for/list ([f (in-list floats)])
@@ -35,7 +28,6 @@
   (for/list ([i (in-range n)])
     (floating-point-bytes->real bs #f (* i 4) (* (+ i 1) 4))))
 
-;; --- save ---------------------------------------------------------------
 (define (save-state! model path)
   (define-values (fields chunks total)
     (for/fold ([fields '()] [chunks '()] [offset 0])
@@ -59,7 +51,6 @@
       (write-bytes header-bytes out)
       (for ([bs (in-list (reverse chunks))]) (write-bytes bs out)))))
 
-;; --- load ---------------------------------------------------------------
 (define (load-state! model path)
   (define raw (file->bytes path))
   (define header-len (integer-bytes->integer raw #f #f 0 8))

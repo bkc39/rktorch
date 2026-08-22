@@ -1,8 +1,5 @@
 #lang racket/base
 
-;; nn.Sequential. The submodule's list index is its dotted-name prefix
-;; ("0.weight", "1.bias", ...), exactly like torch.nn.Sequential.
-
 (require (only-in racket/generic define/generic)
          (only-in racket/list append-map range)
          (only-in "module.rkt"
@@ -22,8 +19,8 @@
   #:property prop:procedure
   (lambda (self . inputs) (apply module-forward self inputs))
   #:methods gen:module
-  ;; bare method names in this block are the enclosing methods, not the
-  ;; generic — recursing into submodules must go through define/generic.
+  ;; bare method names here are the enclosing methods; recursion must use
+  ;; the define/generic aliases
   [(define/generic gen-forward module-forward)
    (define/generic gen-parameters module-parameters)
    (define/generic gen-named module-named-parameters)

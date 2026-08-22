@@ -1,10 +1,5 @@
 #lang racket/base
 
-;; Raw device APIs (device.h): the CUDA availability queries, the process-wide
-;; default device the constructors honor, and per-tensor device moves. The
-;; get/query functions follow the integer-status, out-parameter contract; the
-;; move allocates a fresh handle, so it carries the GC allocator wrap.
-
 (require (only-in ffi/unsafe _fun _int _int64 _ptr)
          (only-in "memory.rkt"
                   _tr-device-type
@@ -23,13 +18,6 @@
          tr-tensor-to-device/raw
          tr-tensor-device/raw)
 
-;; _tr-device-type and tr-tensor-device/raw live in memory.rkt (the #37
-;; accounting there needs them too, and this module requires memory.rkt, so
-;; that is the cycle-free canonical home); re-provided above unchanged.
-
-;; Caching-allocator gauges for one CUDA ordinal (bytes): current
-;; allocated, current reserved, peak allocated. Errors (rc=1) without
-;; CUDA or when the build compiled the allocator surface out.
 (define-torch tr-cuda-memory-stats/raw
   (_fun (index : _int64)
         (allocated : (_ptr o _int64))
@@ -51,7 +39,6 @@
   (_fun (type : _tr-device-type) (index : _int64) -> _int)
   #:c-id tr_set_default_device)
 
-;; (raw) -> (values rc type index): the current default device.
 (define-torch tr-get-default-device/raw
   (_fun (type : (_ptr o _tr-device-type))
         (index : (_ptr o _int64))

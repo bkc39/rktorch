@@ -279,13 +279,16 @@ Conventions:
 
 ## Comment policy
 
-Before submitting a PR, actively REMOVE comments. Code should be as
-self-documenting as possible; when a comment exists to compensate for
-unclear code, rearchitect (rename, extract a helper, tighten a contract)
-until the comment is redundant, then delete it.
+Before submitting a PR, actively REMOVE comments — delete, don't
+shorten. Code should be self-documenting; when tempted to keep a
+comment, first try to encode it in a name or structure (rename, extract
+a helper, tighten a contract — renaming a function to make its behavior
+explicit beats any comment) and then delete it. A correct explanation of
+what the code visibly does is still noise. Contract narration on a
+declaration whose name and signature carry the meaning is noise.
 
-The only comments that stay carry something the code cannot express, in
-one or two lines:
+The rare comments that stay carry something no name or structure could
+express, in one or two lines:
 
 - a genuine invariant invisible in the code (finalizers run in atomic
   mode; the OOM retry must compose OUTSIDE the allocator wrap)

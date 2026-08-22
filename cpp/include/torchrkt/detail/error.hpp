@@ -14,8 +14,6 @@ enum class error_kind : int { generic = 0, oom = 1 };
 extern thread_local std::string g_last_error;
 extern thread_local error_kind g_last_error_kind;
 
-// Every record updates message AND kind together (the one-argument form
-// records generic) so the pair can never desync across boundary calls.
 void set_error(const std::string& message);
 void set_error(const std::string& message, error_kind kind);
 

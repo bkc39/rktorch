@@ -6,13 +6,8 @@
 
 #include "torchrkt/c_api.h"
 
-// Goldens for representative ops per family (creation, shape, elementwise,
-// reduce, linalg, marshalling). Exhaustive value parity with PyTorch lives in
-// the Racket python-cross-test; these pin the C contract.
-
 namespace {
 
-// RAII so a failed EXPECT can't leak handles past the test body.
 struct Handle {
   tr_tensor* t;
   explicit Handle(tr_tensor* p) : t(p) {
@@ -49,8 +44,6 @@ Handle make(const std::vector<float>& values,
                              static_cast<int64_t>(dims.size())));
 }
 
-// Contract pin for the documented NULL no-op; the throwing-release behavior
-// is pinned separately by finalizer_death_test.cpp.
 TEST(TorchrktOps, TensorFreeNullIsSafe) {
   tr_tensor_free(nullptr);
 }
@@ -59,27 +52,24 @@ TEST(TorchrktOps, NbytesTracksDtypeWidth) {
   const Handle t = make({1.0F, 2.0F, 3.0F, 4.0F}, {2, 2});
   int64_t nbytes = 0;
   ASSERT_EQ(tr_tensor_nbytes(t.t, &nbytes), 0) << tr_last_error();
-  EXPECT_EQ(nbytes, 16);  // 4 x float32
+  EXPECT_EQ(nbytes, 16);
   const Handle i64 = Handle(tr_tensor_to_dtype(t.t, TR_DTYPE_INT64));
   int64_t nbytes64 = 0;
   ASSERT_EQ(tr_tensor_nbytes(i64.t, &nbytes64), 0) << tr_last_error();
-  EXPECT_EQ(nbytes64, 32);  // 4 x int64
+  EXPECT_EQ(nbytes64, 32);
   EXPECT_EQ(tr_tensor_nbytes(nullptr, &nbytes), 1);
 }
 
 TEST(TorchrktOps, NbytesReportsViewExtentNotStorage) {
-  // The memory ledger's documented approximation: a view charges what it
-  // ADDRESSES, not the (possibly larger, shared) storage behind it — a
-  // narrow over half the rows reports half the bytes.
   const Handle t =
       make({1.0F, 2.0F, 3.0F, 4.0F, 5.0F, 6.0F, 7.0F, 8.0F}, {4, 2});
-  const Handle half = Handle(tr_gen_narrow(t.t, 0, 0, 2));  // rows [0,2)
+  const Handle half = Handle(tr_gen_narrow(t.t, 0, 0, 2));
   int64_t full_bytes = 0;
   int64_t view_bytes = 0;
   ASSERT_EQ(tr_tensor_nbytes(t.t, &full_bytes), 0) << tr_last_error();
   ASSERT_EQ(tr_tensor_nbytes(half.t, &view_bytes), 0) << tr_last_error();
-  EXPECT_EQ(full_bytes, 32);  // 8 x float32
-  EXPECT_EQ(view_bytes, 16);  // the view's 4 elements, not storage's 8
+  EXPECT_EQ(full_bytes, 32);
+  EXPECT_EQ(view_bytes, 16);
 }
 
 TEST(TorchrktOps, FromDataRoundTrips) {
@@ -90,8 +80,8 @@ TEST(TorchrktOps, FromDataRoundTrips) {
 }
 
 TEST(TorchrktOps, FromDataI64RoundTripsExactly) {
-  // int64 in, int64 out — no float transit: 2^53+1 is NOT representable as a
-  // double, so exact round-trip proves the path is integral.
+  // 2^53+1 is not double-representable: an exact round-trip rules out
+  // any float transit.
   const std::vector<int64_t> values = {1, -2, (int64_t{1} << 53) + 1};
   const std::vector<int64_t> dims = {3};
   const Handle t(
@@ -109,7 +99,6 @@ TEST(TorchrktOps, FromDataI64RoundTripsExactly) {
 }
 
 TEST(TorchrktOps, FromDataI64RejectsBadShapes) {
-  // the float sibling's rejection battery, on the int64 path
   const std::vector<int64_t> values = {1, 2, 3};
   const std::vector<int64_t> dims = {2, 2};
   EXPECT_EQ(tr_from_data_i64(values.data(), values.size(), dims.data(), 2),
@@ -146,18 +135,16 @@ TEST(TorchrktOps, DtypeGetterReportsBoolMasks) {
   tr_dtype dt = TR_DTYPE_FLOAT32;
   EXPECT_EQ(tr_tensor_dtype(mask.t, &dt), 0) << tr_last_error();
   EXPECT_EQ(dt, TR_DTYPE_BOOL);
-  // and to_dtype CASTS to bool (nonzero -> true), not just identity
   const Handle cast(tr_tensor_to_dtype(t.t, TR_DTYPE_BOOL));
   EXPECT_EQ(tr_tensor_dtype(cast.t, &dt), 0) << tr_last_error();
   EXPECT_EQ(dt, TR_DTYPE_BOOL);
 }
 
 TEST(TorchrktOps, FromDataI64OnPlacesOnExplicitCpu) {
-  // the device-move leg of the int64 ingestion, exercised at the C boundary
   const std::vector<int64_t> values = {1, -2, (int64_t{1} << 53) + 1};
   const std::vector<int64_t> dims = {3};
-  const Handle t(tr_from_data_i64_on(values.data(), values.size(), dims.data(),
-                                     1, TR_DEVICE_CPU, 0));
+  const Handle t(tr_from_data_i64_on_device(values.data(), values.size(),
+                                            dims.data(), 1, TR_DEVICE_CPU, 0));
   ASSERT_NE(t.t, nullptr) << tr_last_error();
   tr_dtype dt = TR_DTYPE_FLOAT32;
   EXPECT_EQ(tr_tensor_dtype(t.t, &dt), 0) << tr_last_error();
@@ -168,15 +155,13 @@ TEST(TorchrktOps, FromDataI64OnPlacesOnExplicitCpu) {
   EXPECT_EQ(tr_tensor_copy_data_i64(t.t, numel, out.data(), &numel), 0)
       << tr_last_error();
   EXPECT_EQ(out, values);
-  // invalid device rejection mirrors the float sibling
-  EXPECT_EQ(tr_from_data_i64_on(values.data(), values.size(), dims.data(), 1,
-                                static_cast<tr_device_type>(99), 0),
-            nullptr);
+  EXPECT_EQ(
+      tr_from_data_i64_on_device(values.data(), values.size(), dims.data(), 1,
+                                 static_cast<tr_device_type>(99), 0),
+      nullptr);
 }
 
 TEST(TorchrktOps, FromDataAcceptsNullForEmptyTensors) {
-  // numel==0 constructs with a NULL data pointer (an empty Racket
-  // vector marshals as NULL); nonzero numel still rejects NULL.
   const std::vector<int64_t> rank1 = {0};
   const Handle e1(tr_from_data(nullptr, 0, rank1.data(), 1));
   ASSERT_NE(e1.t, nullptr) << tr_last_error();
@@ -207,7 +192,6 @@ TEST(TorchrktOps, CopyDataF64PreservesDoublePrecision) {
   float f32out = 0.0F;
   EXPECT_EQ(tr_tensor_copy_data(d.t, 1, &f32out, &numel), 0);
   EXPECT_EQ(f32out, 16777216.0F);
-  // the size-then-fill probe (rc=2) and null-arg (rc=1) contracts
   EXPECT_EQ(tr_tensor_copy_data_f64(d.t, 0, nullptr, &numel), 2);
   EXPECT_EQ(numel, 1U);
   EXPECT_EQ(tr_tensor_copy_data_f64(nullptr, 1, &out, &numel), 1);
@@ -223,7 +207,6 @@ TEST(TorchrktOps, FromDataRejectsNumelMismatch) {
 }
 
 TEST(TorchrktOps, FromDataRejectsOverflowingShape) {
-  // A dim product that wraps uint64 must not bypass the numel check.
   const std::vector<float> values = {1.0F, 2.0F};
   const std::vector<int64_t> dims = {2, 9223372036854775807LL, 2};
   EXPECT_EQ(tr_from_data(values.data(), values.size(), dims.data(), 3),
@@ -234,12 +217,8 @@ TEST(TorchrktOps, FromDataRejectsOverflowingShape) {
 }
 
 TEST(TorchrktOps, CpuOomClassifiesAsOomKind) {
-  // CPU allocation failure arrives via the caffe2-style enforce (a plain
-  // c10::Error naming DefaultCPUAllocator, NOT c10::OutOfMemoryError); the
-  // classifier must still report kind 1. 2^60 floats = 4 EiB exceeds the
-  // ARCHITECTURAL user address space of every 64-bit platform, so no
-  // allocator can map it regardless of overcommit mode; nbytes stays below
-  // INT64_MAX so ATen's own arithmetic cannot shift the error shape.
+  // 2^60 floats = 4 EiB: unmappable on every 64-bit platform regardless of
+  // overcommit, while nbytes stays below INT64_MAX.
   const std::vector<int64_t> dims = {int64_t{1} << 60};
   EXPECT_EQ(tr_zeros(dims.data(), 1), nullptr);
   EXPECT_EQ(tr_last_error_kind(), 1) << tr_last_error();
@@ -247,8 +226,6 @@ TEST(TorchrktOps, CpuOomClassifiesAsOomKind) {
 }
 
 TEST(TorchrktOps, GenericErrorResetsKind) {
-  // kind and message are recorded together: after an OOM, a subsequent
-  // generic failure must report kind 0 again, never a stale 1.
   const std::vector<int64_t> dims = {int64_t{1} << 60};
   EXPECT_EQ(tr_zeros(dims.data(), 1), nullptr);
   EXPECT_EQ(tr_last_error_kind(), 1) << tr_last_error();
@@ -326,8 +303,7 @@ TEST(TorchrktOps, Elementwise) {
   const Handle squared(tr_pow_scalar(a.t, 2.0));
   EXPECT_EQ(data_of(squared.t), (std::vector<float>{1, 4, 9, 16}));
 
-  // gelu (exact form, approximate='none'): x * Phi(x). gelu(0)=0, and the
-  // +-1 values pin the erf-based branch against the tanh approximation.
+  // the +-1 goldens pin exact (erf) gelu against the tanh approximation
   const Handle unit = make({0.0F, 1.0F, -1.0F}, {3});
   const Handle smoothed(tr_gelu(unit.t));
   const std::vector<float> g = data_of(smoothed.t);
@@ -366,7 +342,6 @@ TEST(TorchrktOps, ReduceAndItem) {
   EXPECT_NEAR(probs[0] + probs[1], 1.0F, 1e-6F);
   EXPECT_NEAR(probs[2] + probs[3], 1.0F, 1e-6F);
 
-  // item on a multi-element tensor must error, not crash.
   EXPECT_EQ(tr_tensor_item(t.t, &item), 1);
 }
 
@@ -386,7 +361,6 @@ TEST(TorchrktOps, Linalg) {
   ASSERT_EQ(tr_tensor_item(d.t, &item), 0) << tr_last_error();
   EXPECT_DOUBLE_EQ(item, 2.0);
 
-  // Shape mismatch surfaces as NULL + message, not an abort.
   const Handle bad = make({1, 2, 3}, {3});
   EXPECT_EQ(tr_mv(a.t, bad.t), nullptr);
 }
@@ -394,8 +368,6 @@ TEST(TorchrktOps, Linalg) {
 TEST(TorchrktOps, ToDtypeAndUniform) {
   const Handle t = make({1.5F, 2.5F}, {2});
   const Handle i(tr_tensor_to_dtype(t.t, TR_DTYPE_INT64));
-  // Reading an int64 tensor through data_of is a conversion by contract
-  // (tr_tensor_copy_data converts to float32 first), not a reinterpret.
   EXPECT_EQ(data_of(i.t), (std::vector<float>{1, 2}));
 
   ASSERT_EQ(tr_manual_seed(0), 0) << tr_last_error();

@@ -1,11 +1,5 @@
 #lang racket/base
 
-;; The Phase-1/2 capstone smoke test: a real convnet trains on the committed
-;; MNIST fixture and its cross-entropy loss falls over a few Adam steps, then
-;; its parameters survive a safetensors save/load round-trip. This exercises
-;; the whole stack end to end — data -> conv/pool/flatten/linear ->
-;; cross-entropy -> backward! -> adam -> state-dict.
-
 (module+ test
   (require rackunit
            (only-in racket/list first last)
@@ -14,8 +8,7 @@
            "../nn.rkt"
            (only-in "../data/mnist.rkt" load-mnist-fixture))
 
-  ;; [N,1,28,28] -> conv(1->8,k3) -> relu -> maxpool2 -> flatten -> fc(1352,10).
-  ;; 28 -3 +1 = 26 after conv; /2 = 13 after pool; 8*13*13 = 1352.
+  ;; fc in-features: 28-3+1 = 26 after conv, /2 = 13 after pool, 8*13*13 = 1352
   (define-module convnet ()
     #:submodules ([c1 (Conv2d 1 8 3)]
                   [fc (Linear 1352 10)])

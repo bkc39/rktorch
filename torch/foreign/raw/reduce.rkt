@@ -1,9 +1,5 @@
 #lang racket/base
 
-;; Raw reductions (reduce.h). Whole-tensor forms return 0-dim tensors; argmax
-;; returns int64 tensors (read them via tr-tensor-item/raw or copy-data's
-;; float32 conversion).
-
 (require (only-in ffi/unsafe _bool _fun _int64)
          (only-in "memory.rkt" define-unary/raw tensor-allocator)
          (only-in "syntax.rkt" _Tensor _Tensor/null define-torch))

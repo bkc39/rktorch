@@ -1,11 +1,5 @@
 #lang racket/base
 
-;; Shared error helpers for the safe layer.  torchrkt C functions either
-;; return an integer status (0 ok) with `tr_last_error` holding the message,
-;; or a handle that is NULL on failure. Failures the C side classified as
-;; allocation exhaustion raise the typed exn:fail:rktorch:oom, so callers
-;; catch OOM by TYPE — never by regexing messages.
-
 (require (only-in ffi/unsafe/atomic call-as-atomic)
          (only-in "raw/global.rkt" tr-last-error-kind/raw tr-last-error/raw))
 
@@ -15,8 +9,7 @@
 
 (struct exn:fail:rktorch:oom exn:fail ())
 
-;; Atomic so another thread's torchrkt failure can't land between the two
-;; FFI reads — the (message, kind) pair raised from stays consistent.
+;; Atomic so the (message, kind) pair comes from ONE failure, not two.
 (define (last-failure)
   (call-as-atomic
    (lambda () (values (tr-last-error/raw) (tr-last-error-kind/raw)))))

@@ -1,9 +1,5 @@
 #lang racket/base
 
-;; Safe autograd surface: requires-grad / backward / grad / detach, the
-;; with-no-grad dynamic extent, and the in-place ops the optimizer uses.
-;; Contracts live in ../foreign.rkt (with-no-grad is a macro, exported as-is).
-
 (require (only-in "error.rkt" check-handle check-ok)
          (only-in "raw/autograd.rkt"
                   tr-is-grad-enabled/raw
@@ -34,7 +30,6 @@
          mul!
          zero-grad!)
 
-;; Returns the tensor so it chains in constructors.
 (define (requires-grad! t [on? #t])
   (check-ok (tr-tensor-requires-grad!/raw t on?) 'requires-grad!)
   t)
@@ -48,19 +43,14 @@
   (check-ok (tr-tensor-backward/raw t) 'backward!)
   (void))
 
-;; Shares storage with the live .grad, so (zero! (grad t)) really zeroes
-;; the gradient backward will next accumulate into.
 (define (grad t)
   (wrap-tensor (check-handle 'grad (tr-tensor-grad/raw t))))
 
-;; PyTorch's "grad is not None". The dedicated C predicate avoids handle
-;; allocation and stale tr_last_error on the no-gradient path.
 (define (has-grad? t)
   (define-values (rc on?) (tr-tensor-has-grad/raw t))
   (check-ok rc 'has-grad?)
   on?)
 
-;; The gradient, or #f if none has been accumulated yet.
 (define (maybe-grad t)
   (and (has-grad? t) (grad t)))
 
@@ -75,8 +65,6 @@
 (define (set-grad-enabled! on?)
   (check-ok (tr-set-grad-enabled/raw on?) 'set-grad-enabled!))
 
-;; Grad mode is thread-local on the C++ side and every FFI call happens on
-;; Racket's OS thread, so dynamic-wind gives torch.no_grad() semantics.
 (define (call-with-no-grad thunk)
   (define was? (grad-enabled?))
   (dynamic-wind (lambda () (set-grad-enabled! #f))
@@ -86,7 +74,6 @@
 (define-syntax-rule (with-no-grad body ...)
   (call-with-no-grad (lambda () body ...)))
 
-;; In-place update primitives (use under with-no-grad, like torch.optim).
 (define (sub! t other [alpha 1.0])
   (check-ok (tr-tensor-sub!/raw t other (exact->inexact alpha)) 'sub!)
   (void))
@@ -99,8 +86,6 @@
   (check-ok (tr-tensor-mul!/raw t (exact->inexact value)) 'mul!)
   (void))
 
-;; optimizer.zero_grad for one tensor; no grad yet is a no-op, so this is
-;; safe before the first step.
 (define (zero-grad! t)
   (when (has-grad? t)
     (zero! (grad t))))

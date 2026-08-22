@@ -1,10 +1,5 @@
 #lang racket/base
 
-;; Tests for the char-level text data layer. The committed-fixture cases run
-;; offline (and in the sandboxed nix build); the full-download case is
-;; network-guarded and self-skips when Gutenberg is unreachable, like
-;; mnist-test.
-
 (module+ test
   (require rackunit
            (only-in racket/file
@@ -51,13 +46,11 @@
   (test-case "vocab is sorted + unique; encode/decode round-trips"
     (define s (load-text-fixture))
     (define vocab (text->vocab s))
-    ;; strictly increasing == sorted with no duplicates
     (for ([a (in-vector vocab)] [b (in-vector vocab 1)])
       (check-true (char<? a b) "vocab must be strictly increasing"))
     (define ids (encode vocab s))
     (check-equal? (tensor-shape ids) (list (string-length s)))
     (check-equal? (decode vocab ids) s "encode/decode round-trip")
-    ;; decode also accepts a plain id list (the generation loop's case)
     (check-equal? (decode vocab '(0)) (string (vector-ref vocab 0))))
 
   (test-case "encode rejects a char outside the vocab"
@@ -69,10 +62,8 @@
     (define vocab (text->vocab s))
     (define ids (encode vocab s))
     (define-values (xs ys) (contiguous-blocks ids 16))
-    ;; 841 chars -> floor(840/16) = 52 blocks
     (check-equal? (tensor-shape xs) '(52 16))
     (check-equal? (tensor-shape ys) '(52 16))
-    ;; xs is the text's first 52*16 ids in order; ys the same shifted by one
     (define id-list (map inexact->exact (tensor->list ids)))
     (check-equal? (map inexact->exact (tensor->list xs))
                   (take id-list (* 52 16)))
@@ -81,13 +72,7 @@
     (check-exn #rx"too short"
                (lambda () (contiguous-blocks (encode vocab "ab") 16))))
 
-  ;; Validation gates the cache write: a wrong-but-complete response (a
-  ;; rate-limit page, a truncated body) must error and leave nothing at the
-  ;; cache path — otherwise file-exists? would skip the download forever and
-  ;; a transient failure would poison the cache. Runs offline: the "server"
-  ;; is a file:// URL, and RKTORCH_TEXT_DIR points the cache at a scratch
-  ;; dir via an env copy (never the process-wide env).
-  (test-case "download-text-cached: validation gates the cache write"
+  (test-case "download-text-cached: a failed validation must not poison the cache"
     (define scratch (make-temporary-directory "rktorch-text-test-~a"))
     (dynamic-wind
      void
@@ -98,8 +83,6 @@
          (putenv "RKTORCH_TEXT_DIR" (path->string scratch))
          (define (file-url p) (string-append "file://" (path->string p)))
          (define (has-markers? s) (string-contains? s "***"))
-         ;; a marker-less body errors (as exn:fail:network — environmental,
-         ;; so live tests self-skip on it) and is NOT promoted into the cache
          (define bad (build-path scratch "bad-source.txt"))
          (display-to-file "<html>429 Too Many Requests</html>" bad)
          (check-exn (lambda (e)
@@ -111,8 +94,6 @@
                                             #:valid? has-markers?)))
          (check-false (file-exists? (build-path scratch "corpus.txt"))
                       "invalid body must not be cached")
-         ;; a valid body is cached; the second call is a pure cache hit
-         ;; (the source is deleted first, so a refetch would error)
          (define good (build-path scratch "good-source.txt"))
          (display-to-file "*** wrapped prose ***" good)
          (check-equal? (download-text-cached "corpus.txt" (file-url good)
@@ -125,13 +106,8 @@
                        "cache hit must not refetch")))
      (lambda () (delete-directory/files scratch))))
 
-  ;; Full-corpus download path. Only an *environmental* failure may skip:
-  ;; network (offline box, Gutenberg unreachable, a rate-limit page —
-  ;; download-text-cached raises those as exn:fail:network) or filesystem
-  ;; (the sandboxed nix build's unwritable cache dir). Once a validated
-  ;; corpus is in hand, the strip and content checks are real assertions —
-  ;; a stripper/marker regression raises plain exn:fail and fails here
-  ;; rather than printing the skip line.
+  ;; Only environmental failures (network/filesystem) may skip; a stripper
+  ;; regression raises plain exn:fail and fails.
   (define prose
     (with-handlers ([exn:fail:network? (lambda (_) #f)]
                     [exn:fail:filesystem? (lambda (_) #f)])

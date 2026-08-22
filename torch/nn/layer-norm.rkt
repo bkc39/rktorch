@@ -1,8 +1,5 @@
 #lang racket/base
 
-;; nn.LayerNorm. Weight starts at ones, bias at zeros, matching
-;; nn.LayerNorm.reset_parameters — deterministic, no RNG draw.
-
 (require (only-in "../foreign.rkt" layer-norm ones zeros)
          (only-in "module.rkt" define-module))
 

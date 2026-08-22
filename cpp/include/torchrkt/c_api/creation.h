@@ -33,19 +33,14 @@ tr_tensor* tr_eye(int64_t n, int64_t m);
 tr_tensor* tr_from_data(const float* data, uint64_t numel, const int64_t* dims,
                         int64_t ndim);
 
-/* tr_from_data placed on an EXPLICIT device instead of the process default:
- * host data never routes through a CUDA default for an explicitly-CPU
- * tensor. */
-tr_tensor* tr_from_data_on(const float* data, uint64_t numel,
+tr_tensor* tr_from_data_on_device(const float* data, uint64_t numel,
                            const int64_t* dims, int64_t ndim,
                            tr_device_type device_type, int64_t device_index);
 
-/* The int64 ingestion pair: identical contracts to tr_from_data /
- * tr_from_data_on with int64 payload and dtype. */
 tr_tensor* tr_from_data_i64(const int64_t* data, uint64_t numel,
                             const int64_t* dims, int64_t ndim);
 
-tr_tensor* tr_from_data_i64_on(const int64_t* data, uint64_t numel,
+tr_tensor* tr_from_data_i64_on_device(const int64_t* data, uint64_t numel,
                                const int64_t* dims, int64_t ndim,
                                tr_device_type device_type,
                                int64_t device_index);

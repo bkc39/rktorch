@@ -114,7 +114,8 @@ per-epoch 1.76–1.96 s with the SIGN FLIPPING between rounds (+2.3%,
 success pays one NULL-check branch (scripts/bench-oom-overhead.rkt).
 
 Refactor note (from PR #43 review): DONE in PR C — extracted as
-`raw/memory.rkt` (frees, guard-finalizer, ledger, probes,
+`raw/memory.rkt` (frees, the finalizer guard (now
+`swallow-and-count-failure`), ledger, probes,
 tensor-allocator + /rng, op-definer macros; named for its contents
 rather than the note's provisional `probes.rkt`), so `syntax.rkt` is
 again the pure FFI-definer layer.

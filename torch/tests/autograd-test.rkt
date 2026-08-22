@@ -1,15 +1,9 @@
 #lang racket/base
 
-;; Autograd surface tests: backward/grad, grad sharing, with-no-grad
-;; scoping, and the in-place optimizer primitives.
-
 (module+ test
   (require rackunit
            "../main.rkt")
 
-  ;; Float literals throughout the requires-grad cases (#44): integer
-  ;; literals now infer int64, and torch — ours and Python's — rejects
-  ;; gradients on integer tensors.
   (test-case "grad of sum(x*x) is 2x"
     (define x (requires-grad! (tensor '(1.0 2.0 3.0))))
     (check-true (requires-grad? x))
@@ -25,7 +19,6 @@
     (define x (requires-grad! (tensor '(1.0 2.0))))
     (define y (with-no-grad (mul x x)))
     (check-true (grad-enabled?))
-    ;; y was computed off the tape: backward through it must fail.
     (check-exn exn:fail? (lambda () (backward! (sum y)))))
 
   (test-case "with-no-grad restores the mode on escape"
@@ -45,7 +38,6 @@
     (check-equal? (tensor->list (grad x)) '(2.0 4.0))
     (zero-grad! x)
     (check-equal? (tensor->list (grad x)) '(0.0 0.0))
-    ;; backward accumulates into the zeroed grad
     (backward! (sum (mul x x)))
     (check-equal? (tensor->list (grad x)) '(2.0 4.0)))
 
@@ -69,8 +61,6 @@
     (check-true (requires-grad? p)))
 
   (test-case "in-place zero! and mul!"
-    ;; float literals: mul!'s scalar marshals as double, and torch
-    ;; rejects writing a Float result into a Long tensor in place
     (define t (tensor '(1.0 2.0)))
     (mul! t 3)
     (check-equal? (tensor->list t) '(3.0 6.0))

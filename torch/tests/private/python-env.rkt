@@ -1,18 +1,9 @@
 #lang racket/base
 
-;; Shared python-subprocess infrastructure for the PyTorch parity suites
-;; (python-cross-test.rkt and generated-parity-test.rkt): locating
-;; python3, the CUDA LD_LIBRARY_PATH pinning, torch-availability probes,
-;; the reference-program runners, and the shared float tolerance.
-;;
-;; Tolerance, not bit-exactness: v0 builds the C++ side against libtorch-bin,
-;; which may differ in patch version from the Python torch here.  Seeded CPU
-;; randn is stable across recent versions, but the tolerance absorbs any drift.
-;; Flip the flake's `torchSource` to "python" for guaranteed bit-exact parity.
+;; Shared python-subprocess infra for the PyTorch parity suites.
 
-;; whole-module on purpose: define-runtime-path expands into phase-1 code
-;; that needs bindings (#%datum, ...) only-in would strip (the documented
-;; runtime-path exemption to the only-in convention).
+;; whole-module require: define-runtime-path needs phase-1 bindings only-in
+;; would strip
 (require racket/runtime-path
          (only-in json read-json)
          (only-in racket/port open-output-nowhere)
@@ -32,20 +23,12 @@
 
 (define python (find-executable-path "python3"))
 
-;; Under the .#cuda shell the process LD_LIBRARY_PATH carries cudaTorch/lib
-;; (libtorch 2.9, there for Racket's cuDNN), which would shadow the Python
-;; torch-bin wheel's own 2.12 libtorch and break `import torch`
-;; (libtorch_python.so ABI clash). The cudaHook exports
-;; RKTORCH_CUDA_DRIVER_PATH (the host-driver farm only); pin each python
-;; child's LD_LIBRARY_PATH to it so the wheel loads its own libs + the driver.
-;; Unset (default/ci shell): leave the env alone so the CPU torch works.
+;; Under the .#cuda shell the process LD_LIBRARY_PATH (Racket's libtorch 2.9)
+;; would shadow the Python wheel's own libtorch and break `import torch`;
+;; pin each python child to the host-driver farm the cudaHook exports.
 (define cuda-driver-path (getenv "RKTORCH_CUDA_DRIVER_PATH"))
 
-;; Run `thunk` with the python child's environment adjusted on a *copy* (never
-;; the process-wide env): the CUDA driver-farm LD_LIBRARY_PATH pin when the
-;; cuda shell set RKTORCH_CUDA_DRIVER_PATH, plus any `extra` (name . value)
-;; string pairs (e.g. RKTORCH_PARITY_DEVICE). Nested uses compose — the inner
-;; copy inherits the outer's parameterized vars.
+;; Adjusts a *copy* of the environment, never the process-wide one.
 (define (call-with-python-env thunk #:env [extra '()])
   (define env (environment-variables-copy (current-environment-variables)))
   (when cuda-driver-path
@@ -66,8 +49,6 @@
                        [current-error-port (open-output-nowhere)])
           (system* python "-c" "import torch")))))
 
-;; Does the Python torch on PATH see a CUDA device? True only under the cuda
-;; dev shell (cu130 torch-bin) on a GPU host; gates the accelerator parity.
 (define (python-cuda-available?)
   (and python
        (with-python-env
@@ -76,8 +57,7 @@
           (system* python "-c"
                    "import torch,sys; sys.exit(0 if torch.cuda.is_available() else 1)")))))
 
-;; Run a Python reference file (relative to examples/) and return its parsed
-;; JSON hash.
+;; Runs a Python reference file relative to examples/.
 (define (python-result rel-path)
   (define py (build-path examples-dir rel-path))
   (define out (open-output-string))
@@ -90,9 +70,7 @@
     (error 'python-cross-test "python failed for ~a" rel-path))
   (read-json (open-input-string (get-output-string out))))
 
-;; Run one of the standalone reference programs in torch/tests/python/
-;; (each prints one JSON line) and parse its output. Captures stderr so a
-;; crashing program surfaces its traceback rather than a bare "failed".
+;; Runs a standalone reference program in torch/tests/python/.
 (define (python-check name)
   (define py (build-path python-checks-dir name))
   (define out (open-output-string))
@@ -107,4 +85,6 @@
            name (get-output-string err)))
   (read-json (open-input-string (get-output-string out))))
 
+;; Absorbs libtorch-bin vs Python-torch patch skew; flip the flake's
+;; torchSource to "python" for bit-exact parity.
 (define tol 1e-4)

@@ -1,11 +1,5 @@
 #lang racket/base
 
-;; Safe wrappers for creation, shape, elementwise, reduction, and linalg
-;; ops; contracts live in ../foreign.rkt.  Ops whose names collide with
-;; racket/base or racket/list (exp log sqrt tanh max min argmax) shadow-
-;; dispatch: a tensor hits libtorch, anything else defers to the original,
-;; so `(require torch)` doesn't break numeric code.
-
 (require (only-in ffi/vector
                   f32vector->list
                   f32vector-length
@@ -21,9 +15,6 @@
                   [max base:max]
                   [min base:min]
                   [sqrt base:sqrt])
-         ;; tanh is not in racket/base, but the full `racket` language
-         ;; re-exports it from racket/math — so the dispatch shim still
-         ;; matters for #lang racket users.
          (only-in racket/math [tanh base:tanh])
          (only-in racket/list append-map [argmax base:argmax])
          (only-in "error.rkt" check-handle)
@@ -31,9 +22,9 @@
          (only-in "raw/creation.rkt"
                   tr-arange/raw
                   tr-eye/raw
-                  tr-from-data-i64-on/raw
+                  tr-from-data-i64-on-device/raw
                   tr-from-data-i64/raw
-                  tr-from-data-on/raw
+                  tr-from-data-on-device/raw
                   tr-from-data/raw
                   tr-full/raw
                   tr-ones/raw
@@ -130,8 +121,6 @@
 (define (ones . dims)
   (wrap 'ones (tr-ones/raw (list->s64vector dims) (length dims))))
 
-;; (full value dim ...) — argument order flipped from torch.full(shape, value)
-;; so the shape can stay variadic like zeros/ones/randn.
 (define (full value . dims)
   (wrap 'full
         (tr-full/raw (list->s64vector dims)
@@ -151,9 +140,6 @@
 (define (eye n [m n])
   (wrap 'eye (tr-eye/raw n m)))
 
-;; Shape inference walks the first element of each nesting level, like
-;; torch.tensor; check-regular then holds every sibling to these dims.
-;; Mixed list/vector/homogeneous-leaf nesting is fine.
 (define (nested-dims data)
   (cond
     [(list? data)
@@ -178,9 +164,6 @@
   (define kids (sequence-children data))
   (if kids (append-map sequence-flatten kids) (list data)))
 
-;; A flat leaf count against (apply * dims) cannot catch depth-ragged
-;; input like ((1 2) ((3) (4))) — 4 leaves satisfy 2x2 while the second
-;; row nests deeper — so validate recursively, as torch.tensor does.
 (define (check-regular data dims d)
   (define kids (sequence-children data))
   (cond
@@ -208,9 +191,13 @@
     [(exact-integer? x) x]
     [(rational? x) (inexact->exact (truncate x))]
     [else
-     ;; non-finite values have no int64 value; raise tensor's own error
-     ;; shape, not a raw conversion failure (torch errors here too)
      (error 'tensor "cannot convert non-finite value to int64: ~e" x)]))
+
+(define (infer-dtype flat)
+  (cond
+    [(null? flat) 'float32]
+    [(andmap exact-integer? flat) 'int64]
+    [else 'float32]))
 
 (define (tensor data
                 #:requires-grad? [requires-grad? #f]
@@ -219,12 +206,6 @@
   (unless (memq dtype '(#f float32 int64))
     (error 'tensor "unsupported #:dtype (float32 or int64): ~e" dtype))
   (define dims (nested-dims data))
-  ;; dtype inference (#44) mirrors torch.tensor: all exact integers infer
-  ;; int64, anything inexact infers float32; #:dtype overrides ('int64
-  ;; truncates toward zero). Empty data stays float32 — the vacuous andmap
-  ;; must not flip torch.tensor([])'s dtype. A top-level f32vector/
-  ;; s64vector matching the target dtype passes to the FFI as-is (the C
-  ;; side clones, so no lifetime coupling to the buffer).
   (define-values (chosen payload numel)
     (cond
       [(and (f32vector? data) (not (eq? dtype 'int64)))
@@ -234,12 +215,7 @@
       [else
        (check-regular data dims 0)
        (define flat (sequence-flatten data))
-       (define inferred
-         (or dtype
-             (if (and (pair? flat) (andmap exact-integer? flat))
-                 'int64
-                 'float32)))
-       (case inferred
+       (case (or dtype (infer-dtype flat))
          [(int64)
           (values 'int64
                   (list->s64vector (map exact-int64 flat))
@@ -248,12 +224,6 @@
           (values 'float32
                   (list->f32vector (map exact->inexact flat))
                   (length flat))])]))
-  ;; #:device feeds NATIVE construction rather than scoping the global
-  ;; default (races concurrent constructors) or constructing-then-moving
-  ;; (host data routes through the default device, so an explicitly-CPU
-  ;; tensor under a CUDA default would bounce host->GPU->CPU, or OOM).
-  ;; requires-grad! comes after placement so the result is a LEAF on the
-  ;; target device.
   (define dim-vec (list->s64vector dims))
   (define-values (type index)
     (if device (device->type+index device) (values #f #f)))
@@ -262,14 +232,14 @@
           (case chosen
             [(int64)
              (if device
-                 (tr-from-data-i64-on/raw payload numel
+                 (tr-from-data-i64-on-device/raw payload numel
                                           dim-vec (length dims)
                                           type index)
                  (tr-from-data-i64/raw payload numel
                                        dim-vec (length dims)))]
             [else
              (if device
-                 (tr-from-data-on/raw payload numel
+                 (tr-from-data-on-device/raw payload numel
                                       dim-vec (length dims)
                                       type index)
                  (tr-from-data/raw payload numel
@@ -306,8 +276,6 @@
 
 ;; -------------------------------------------------------------- elementwise
 
-;; swapped-scalar handles (op real tensor) and must be the algebraic
-;; rewrite of putting the scalar on the left.
 (define (binary-dispatch who t-op s-op a b swapped-scalar)
   (cond
     [(and (tensor? a) (tensor? b)) (wrap who (t-op a b))]
@@ -363,7 +331,6 @@
 (define (tanh v)
   (if (tensor? v) (wrap 'tanh (tr-tanh/raw v)) (base:tanh v)))
 
-;; Exact (erf-based) gelu, approximate='none'.
 (define (gelu t)
   (wrap 'gelu (tr-gelu/raw t)))
 

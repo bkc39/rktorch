@@ -33,11 +33,8 @@ torch::ScalarType to_scalar_type(tr_dtype dtype) {
 extern "C" {
 
 void tr_tensor_free(tr_tensor* t) {
-  // Racket GC finalizer; deliberately NO try/catch. A throw during storage
-  // release unwinds through libtorch's implicitly-noexcept frames and reaches
-  // std::terminate before any handler here (pinned by
-  // finalizer_death_test.cpp); the safety guarantee is the Racket-side
-  // deallocator wrap in raw/memory.rkt.
+  // GC finalizer; deliberately NO try/catch — a throw terminates inside
+  // libtorch's noexcept release first (pinned by finalizer_death_test.cpp).
   delete t;
 }
 
@@ -59,8 +56,6 @@ int tr_tensor_nbytes(const tr_tensor* t, int64_t* out) {
   if (!t || !out) {
     return torchrkt::null_arg_status("tr_tensor_nbytes");
   }
-  // The view's extent, not the shared storage's: the Racket memory ledger
-  // charges each handle for what it addresses.
   return torchrkt::status_call("tr_tensor_nbytes", [&] {
     *out = static_cast<int64_t>(t->value.nbytes());
   });
@@ -124,7 +119,6 @@ int tr_tensor_dtype(const tr_tensor* t, tr_dtype* out) {
         *out = TR_DTYPE_BOOL;
         return;
       default:
-        // Reject dtypes outside the C ABI rather than mislabel them.
         throw std::invalid_argument("tensor has an unsupported dtype");
     }
   });
@@ -195,8 +189,6 @@ int tr_tensor_print(const tr_tensor* t, uint64_t buffer_capacity,
       return 2;
     }
     if (out_buffer && len > 0) {
-      // std::copy (not memcpy) keeps clang-tidy's not-null-terminated check
-      // quiet: the size-then-fill contract deliberately omits the NUL.
       std::copy(rendered.data(), rendered.data() + len, out_buffer);
     }
     return 0;

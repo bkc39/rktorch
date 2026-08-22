@@ -1,16 +1,5 @@
-"""Reference Conv-MNIST training run for examples/racket/05-mnist.rkt.
-
-The deterministic shadow of run-example: same seed, the same LeNet-ish convnet
-(layers declared in the same order so the seeded conv2d/linear inits draw
-value-for-value), trained for 5 full-batch Adam steps on the committed 256-image
-fixture. Full-batch (no shuffling/minibatching) keeps both languages bit-for-bit
-comparable. Prints the per-step losses and the flattened post-training parameters
-as {"shape": ..., "values": ..., "losses": [...]}, which torch/tests/
-python-cross-test.rkt checks the Racket side against within a float tolerance.
-
-The headline ~98% full-MNIST run lives on the Racket side (train-mnist); this twin
-exists for parity, so it stays small and offline against the same fixture.
-"""
+"""Parity twin of examples/racket/05-mnist.rkt: same seed, same convnet in
+the same declaration order, 5 full-batch Adam steps on the committed fixture."""
 
 import json
 import os
@@ -22,14 +11,10 @@ from torch import nn
 FIXTURES = os.path.join(
     os.path.dirname(__file__), "..", "..", "torch", "data", "fixtures")
 
-# The parity twin trains on the device the cross-test pins here ("cpu" or
-# "cuda"); the CUDA pass mirrors set-default-device! 'cuda on the Racket side,
-# so the model is constructed on the device (seeded init uses that generator).
 DEVICE = os.environ.get("RKTORCH_PARITY_DEVICE") or "cpu"
 
 
 def read_idx(path):
-    """Parse a uint8 IDX file into (dims, data-bytes), matching read-idx."""
     with open(path, "rb") as f:
         bs = f.read()
     assert bs[0] == 0 and bs[1] == 0 and bs[2] == 8, "not a uint8 IDX buffer"
@@ -40,8 +25,6 @@ def read_idx(path):
 
 
 def load_fixture():
-    """(images, labels) for the committed 256-image fixture: an [N,1,H,W]
-    float32 tensor scaled to [0,1] and an [N] int64 label tensor."""
     idims, idata = read_idx(os.path.join(FIXTURES, "mnist-256-images-idx3-ubyte"))
     ldims, ldata = read_idx(os.path.join(FIXTURES, "mnist-256-labels-idx1-ubyte"))
     n, h, w = idims
@@ -68,9 +51,7 @@ class ConvNet(nn.Module):
 
 torch.manual_seed(0)
 
-# Construct on DEVICE so the seeded init draws from that device's generator,
-# matching set-default-device! on the Racket side; data values are device-
-# independent (read from the fixture) but must live where the model does.
+# construct on DEVICE: the seeded init must draw from that device's generator
 with torch.device(DEVICE):
     net = ConvNet()
 xs, ys = load_fixture()

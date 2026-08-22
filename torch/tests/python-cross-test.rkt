@@ -1,21 +1,7 @@
 #lang racket/base
 
-;; Live cross-validation of the Racket bindings against upstream PyTorch.
-;;
-;; For each reference example we run the adjacent Python file (examples/python/
-;; NN-*.py, which prints {"shape": [...], "values": [...]}) and check our Racket
-;; result agrees within a float tolerance.  The `nix develop` shell provides
-;; Python `torch`; when python3 can't `import torch` (e.g. the sandboxed
-;; `nix build`, or the lean `.#ci` shell) this test SKIPS -- keeping
-;; `raco test` and `nix build` green without it.
-;;
-;; This file holds the literate-example twins and the hand-written
-;; reference checks (torch/tests/python/*.py); the generated-op battery
-;; over the codegen manifest lives in generated-parity-test.rkt. Shared
-;; python-subprocess infra (env pinning, runners, tolerance rationale) is
-;; in private/python-env.rkt.
-;;
-;; Run for real:  raco test torch/tests/python-cross-test.rkt
+;; Run: raco test torch/tests/python-cross-test.rkt (inside `nix develop`,
+;; which provides Python torch; SKIPS when python3 can't import torch).
 
 (module+ test
   (require rackunit
@@ -26,9 +12,6 @@
                     contiguous-blocks encode load-text-fixture text->vocab)
            "private/python-env.rkt")
 
-  ;; Run the Python reference at rel-path and check the tensor produced by
-  ;; `compute` agrees: shape exactly, values within tol, repr byte-for-byte
-  ;; (the headline: racket repl == python repl).
   (define (check-parity rel-path compute)
     (define j (python-result rel-path))
     (define py-values (hash-ref j 'values))
@@ -56,7 +39,6 @@
                      (randn 2 2)))
      (check-parity "python/01_arith.py"
                    (lambda ()
-                     ;; float literals, matching the twin's construction
                      (define x (tensor '((1.0 -2.0) (3.0 -4.0))))
                      (* (+ x 1) (relu x))))
      (check-parity "python/02_matmul.py"
@@ -65,14 +47,9 @@
                      (@ a (t a 0 1))))
      (check-parity "python/03_autograd.py"
                    (lambda ()
-                     ;; float literals (#44): integer literals now infer
-                     ;; int64, and torch — ours and Python's — rejects
-                     ;; requires-grad on integer tensors
                      (define x (tensor '(1.0 2.0 3.0) #:requires-grad? #t))
                      (backward! (~> x (* x) Σ))
                      (grad x)))
-     ;; summarized reprs (#45): each summarization form byte-compared
-     ;; against Python
      (let* ([j (python-result "python/summarized_reprs.py")]
             [py (hash-ref j 'reprs)]
             [rkt (list
@@ -99,20 +76,13 @@
                   (tensor->repr (tensor '(1e10 2.5e10 -3e-7)))
                   (tensor->repr (tensor '(1e8)))
                   (tensor->repr (tensor '(+nan.0 5.0)))
-                  ;; deterministic wide-range sci (ratio > 1000): seeded
-                  ;; randn would be byte-fragile under libtorch/python
-                  ;; patch skew in the torchSource="bin" config
                   (tensor->repr
                    (tensor (for/list ([i (in-range 2000)])
                              (* (exact->inexact (add1 i))
                                 12345.6789))))
-                  ;; rank 5, every dim eliding: exercises the recursive
-                  ;; slice fan-out ((2*edgeitems)^4 internal narrows)
                   (tensor->repr (zeros 7 7 7 7 7)))])
        (check-equal? (length rkt) (length py)
                      "summarized-repr form count")
-       ;; the f64 marshal path against real PyTorch (repr byte-compare
-       ;; is blocked by the dtype-suffix TODO, so values compare exact)
        (check-equal? (tensor->list (to-dtype (tensor '(16777217 1))
                                              'float64))
                      (hash-ref j 'f64_values))
@@ -120,17 +90,10 @@
              [p (in-list py)]
              [i (in-naturals)])
          (check-equal? r p (format "summarized repr ~a parity" i))))
-     ;; int64 inference (#44): the byte-for-byte repr comparison IS the
-     ;; dtype pin — a float-inferring side prints "1." forms and fails
-     ;; even though values compare equal
      (check-parity "python/int64_inference.py"
                    (lambda ()
                      (define x (tensor '((1 2) (3 4))))
                      (@ x x)))
-     ;; 04: seeded MLP init + 5 SGD steps track PyTorch (per-step losses
-     ;; and every post-training parameter). No repr check: the 58-value
-     ;; parameter vector would hit PyTorch's line wrapping, which the
-     ;; formatter doesn't reproduce.
      (let ()
        (define-module mlp (d-in d-hidden d-out)
          #:submodules ([fc1 (Linear d-in d-hidden)]
@@ -163,15 +126,9 @@
              [p (in-list (hash-ref j 'values))]
              [i (in-naturals)])
          (check-= r p tol (format "04_mlp: parameter ~a parity" i))))
-     ;; Shared capstone-twin checker: run the Python twin at rel-path
-     ;; pinned to `device` — RKTORCH_PARITY_DEVICE set via the env-copy
-     ;; wrapper, never the process-wide env — and check the Racket
-     ;; `train-on` run (device -> (values losses flat-params)) agrees.
-     ;; `dev-tol`: CPU is bit-stable (the strict, CI-gating `tol`); the
-     ;; CUDA pass is looser because the two stacks (libtorch 2.9 vs Python
-     ;; torch 2.12) pick different cuDNN/cuBLAS algorithms and reduction
-     ;; orders, so values after 5 Adam steps drift ~1e-3 even though the
-     ;; seeded init matches.
+     ;; dev-tol: CPU is bit-stable (the strict, CI-gating `tol`); CUDA is
+     ;; looser because libtorch 2.9 and Python torch 2.12 pick different
+     ;; cuDNN/cuBLAS algorithms, drifting ~1e-3 over 5 Adam steps.
      (define (check-training-twin label rel-path train-on device dev-tol)
        (define j
          (call-with-python-env
@@ -184,24 +141,18 @@
          (check-= r p dev-tol (format "~a[~a]: loss at step ~a" label device i)))
        (check-equal? (tensor-shape flat-params) (hash-ref j 'shape)
                      (format "~a[~a]: parameter count" label device))
-       ;; flat-params lives on `device`; copy to host explicitly before reading
-       ;; values, rather than relying on tensor->list to do it implicitly.
        (define host-params (to-device flat-params 'cpu))
        (for ([r (in-list (tensor->list host-params))]
              [p (in-list (hash-ref j 'values))]
              [i (in-naturals)])
          (check-= r p dev-tol
                   (format "~a[~a]: parameter ~a parity" label device i))))
-     ;; 05: the Conv-MNIST convnet trained on the committed 256-image
-     ;; fixture. CPU runs always (deterministic, CI-gating); the CUDA pass
-     ;; runs only when a GPU is present on both sides and self-skips
-     ;; otherwise.
      (let ()
-       ;; Re-declared (rather than imported from examples/racket/
-       ;; 05-mnist.rkt) because torch/ can't reach examples/ once
-       ;; installed by copy in the nix build — and kept inside the
-       ;; python-available branch so its tensors aren't allocated when the
-       ;; suite skips. Must stay in sync with that example's convnet.
+       ;; Re-declared (torch/ can't reach examples/ once installed by copy in
+       ;; the nix build): MUST stay in sync with examples/racket/05-mnist.rkt
+       ;; — model, seed, steps, lr, full-batch regime. The shape guard below
+       ;; catches structural drift; a forward/recipe edit surfaces as a
+       ;; loss-parity mismatch. Same contract for the 06 gpt twin below.
        (define-module convnet ()
          #:submodules ([c1 (Conv2d 1 16 3)]
                        [c2 (Conv2d 16 32 3)]
@@ -213,16 +164,10 @@
              c2 relu (max-pool2d 2)
              (flatten 1) f1 relu
              f2))
-       ;; Structural guard against silent divergence from the example's
-       ;; convnet. Shape only — it does NOT guard the forward body; a
-       ;; forward edit there surfaces as a step-1 parity-value mismatch.
        (check-equal? (map tensor-shape (parameters (convnet)))
                      '((16 1 3 3) (16) (32 16 3 3) (32)
                        (128 800) (128) (10 128) (10))
                      "convnet shape must match examples/racket/05-mnist.rkt")
-       ;; Must stay in sync with the example's run-example: seed=0,
-       ;; steps=5, lr=0.001, full-batch on the fixture, no shuffling — a
-       ;; mismatch shows up as a step-0 loss-parity failure.
        (define (train-on device)
          (with-default-device device
            (manual-seed! 0)
@@ -244,12 +189,7 @@
                   (python-cuda-available?))
          (check-training-twin "05_mnist" "python/05_mnist.py" train-on
                               'cuda 5e-3)))
-     ;; 06: the char-GPT trained on the committed 841-char Heart of
-     ;; Darkness fixture, same shape as the 05 pass.
      (let ()
-       ;; Re-declared for the same reasons as the 05 convnet above. Must
-       ;; stay in sync with the example's gpt-block/gpt (fixture scale:
-       ;; block-size 16, n-embd 32, n-head 4, n-layer 2).
        (define-module gpt-block (n-embd n-head)
          #:coerce ([n-head (if (zero? (remainder n-embd n-head))
                                n-head
@@ -298,24 +238,18 @@
        (define text (load-text-fixture))
        (define vocab (text->vocab text))
        (define v-size (vector-length vocab))
-       ;; Structural guard against silent divergence from the example's
-       ;; gpt: shape only — a forward edit in the example surfaces as a
-       ;; step-0 loss-parity mismatch instead.
        (define block-shapes
-         '((32) (32)                              ; ln1
-           (32 32) (32) (32 32) (32)              ; wq wk
-           (32 32) (32) (32 32) (32)              ; wv wo
-           (32) (32)                              ; ln2
-           (128 32) (128) (32 128) (32)))         ; fc1 fc2
+         '((32) (32)
+           (32 32) (32) (32 32) (32)
+           (32 32) (32) (32 32) (32)
+           (32) (32)
+           (128 32) (128) (32 128) (32)))
        (check-equal? (map tensor-shape (parameters (gpt v-size 16)))
                      (append (list (list v-size 32) '(16 32))
                              block-shapes block-shapes
                              (list '(32) '(32) (list v-size 32)
                                    (list v-size)))
                      "gpt shape must match examples/racket/06-gpt.rkt")
-       ;; Must stay in sync with the example's run-example: seed=0,
-       ;; steps=5, lr=0.001, full-batch 16-char blocks of the fixture — a
-       ;; mismatch shows as a step-0 loss failure.
        (define (train-on device)
          (with-default-device device
            (manual-seed! 0)
@@ -338,15 +272,11 @@
                   (python-cuda-available?))
          (check-training-twin "06_gpt" "python/06_gpt.py" train-on
                               'cuda 5e-3)))
-     ;; conv2d layer: the seeded init (kaiming-uniform weight + uniform bias,
-     ;; in that order) must match nn.Conv2d.reset_parameters value-for-value,
-     ;; which depends on fan-in = in*kH*kW being computed exactly like
-     ;; torch.nn.init._calculate_fan_in_and_fan_out.
      (let ()
        (define j (python-check "conv2d_init.py"))
        (manual-seed! 0)
        (define net (Conv2d 1 8 3))
-       (define ps (parameters net))  ; weight then bias, declaration order
+       (define ps (parameters net))
        (check-equal? (map tensor-shape ps) (hash-ref j 'shapes)
                      "conv2d init: parameter shapes match nn.Conv2d")
        (define rkt-vals (apply append (map tensor->list ps)))
@@ -355,9 +285,6 @@
                      "conv2d init: value count")
        (for ([r (in-list rkt-vals)] [p (in-list py-vals)] [i (in-naturals)])
          (check-= r p tol (format "conv2d init: value ~a parity" i))))
-     ;; Embedding layer: the seeded standard-normal init (normal-init =
-     ;; randn) must match nn.Embedding.reset_parameters (init.normal_)
-     ;; value-for-value — randn is empty().normal_(), same RNG consumption.
      (let ()
        (define j (python-check "embedding_init.py"))
        (manual-seed! 0)
@@ -369,8 +296,6 @@
              [p (in-list (hash-ref j 'values))]
              [i (in-naturals)])
          (check-= r p tol (format "embedding init: value ~a parity" i))))
-     ;; LayerNorm layer: init is deterministic (ones/zeros), so the forward
-     ;; on a seeded input is the meaningful parity check.
      (let ()
        (define j (python-check "layer_norm_forward.py"))
        (manual-seed! 0)
@@ -382,14 +307,11 @@
              [b (in-list (hash-ref j 'values))]
              [i (in-naturals)])
          (check-= a b tol (format "layer-norm forward: value ~a parity" i))))
-     ;; the promoted max/avg-pool2d wrappers default #:stride to kernel-size
-     ;; (PyTorch's stride=None); the generated battery hits the raw bindings,
-     ;; so parity-check that facade default against F.* directly.
      (let ()
        (define j (python-check "pool_default_stride.py"))
        (manual-seed! 0)
        (define x (randn 1 1 4 4))
-       (define mp (max-pool2d x 2))  ; promoted: #:stride #f -> kernel-size
+       (define mp (max-pool2d x 2))
        (define ap (avg-pool2d x 2))
        (for ([a (in-list (tensor->list mp))] [b (in-list (hash-ref j 'mp))]
              [i (in-naturals)])
@@ -397,8 +319,6 @@
        (for ([a (in-list (tensor->list ap))] [b (in-list (hash-ref j 'ap))]
              [i (in-naturals)])
          (check-= a b tol (format "avg-pool2d default-stride parity ~a" i))))
-     ;; flatten is Racket-side reshape logic, not a generated binding, so it's
-     ;; outside the manifest battery; parity-check it against torch.flatten.
      (let ()
        (define jf (python-check "flatten.py"))
        (manual-seed! 0)
@@ -408,9 +328,6 @@
        (for ([a (in-list (tensor->list r))] [b (in-list (hash-ref jf 'values))]
              [i (in-naturals)])
          (check-= a b tol (format "flatten parity ~a" i))))
-     ;; gelu is hand-written (kwarg-only `approximate` puts it outside the
-     ;; codegen IR/manifest); parity-check the erf-form default against
-     ;; F.gelu directly.
      (let ()
        (define jg (python-check "gelu.py"))
        (manual-seed! 0)
@@ -422,11 +339,6 @@
              [b (in-list (hash-ref jg 'values))]
              [i (in-naturals)])
          (check-= a b tol (format "gelu parity ~a" i))))
-     ;; the causal-attention mask idiom, end to end (tril + eq mask, -inf
-     ;; fill over batched scores, softmax): the recipe battery can't
-     ;; express -inf (not valid Python via number->string), so this
-     ;; facade-level composition is hand-checked. Bare defines are safe:
-     ;; this is the clause's last check, so nothing below can capture them.
      (define jm (python-check "causal_mask.py"))
      (manual-seed! 0)
      (define scores (randn 2 4 4))

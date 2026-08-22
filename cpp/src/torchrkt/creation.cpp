@@ -25,14 +25,10 @@ std::vector<int64_t> to_shape(const int64_t* dims, int64_t ndim) {
   return {dims, dims + ndim};
 }
 
-// Shared body of the tr_from_data* entry points; the caller applies the
-// device move — the one place the *_on variants differ.
 template <typename T>
 torch::Tensor host_from_data(const T* data, uint64_t numel, const int64_t* dims,
                              int64_t ndim, torch::ScalarType dtype) {
   const auto shape = to_shape(dims, ndim);
-  // Overflow-safe product: a shape whose product wraps could otherwise pass
-  // the numel check and hand from_blob an undersized buffer.
   uint64_t expected = 1;
   for (const int64_t d : shape) {
     if (d < 0) {
@@ -47,14 +43,11 @@ torch::Tensor host_from_data(const T* data, uint64_t numel, const int64_t* dims,
   if (expected != numel) {
     throw std::invalid_argument("numel does not match the product of dims");
   }
-  // An empty Racket vector marshals as NULL: construct directly rather than
-  // handing from_blob a null.
+  // An empty Racket vector marshals as a NULL `data`.
   if (numel == 0) {
     return torch::empty(shape, torch::TensorOptions().dtype(dtype));
   }
-  // `data` is host memory: from_blob must wrap it as a CPU tensor (a CUDA
-  // option set would reject the host pointer); clone() copies it into
-  // tensor-owned storage.
+  // clone(): the tensor must own its storage, not borrow the caller's buffer.
   return torch::from_blob(const_cast<T*>(data), shape,
                           torch::TensorOptions().dtype(dtype))
       .clone();
@@ -124,26 +117,27 @@ tr_tensor* tr_from_data_i64(const int64_t* data, uint64_t numel,
   });
 }
 
-tr_tensor* tr_from_data_i64_on(const int64_t* data, uint64_t numel,
-                               const int64_t* dims, int64_t ndim,
-                               tr_device_type device_type,
-                               int64_t device_index) {
+tr_tensor* tr_from_data_i64_on_device(const int64_t* data, uint64_t numel,
+                                      const int64_t* dims, int64_t ndim,
+                                      tr_device_type device_type,
+                                      int64_t device_index) {
   if ((!data && numel > 0) || bad_dims(dims, ndim)) {
-    return torchrkt::null_arg("tr_from_data_i64_on");
+    return torchrkt::null_arg("tr_from_data_i64_on_device");
   }
-  return torchrkt::alloc_result("tr_from_data_i64_on", [&] {
+  return torchrkt::alloc_result("tr_from_data_i64_on_device", [&] {
     return host_from_data(data, numel, dims, ndim, torch::kInt64)
         .to(torchrkt::to_torch_device(device_type, device_index));
   });
 }
 
-tr_tensor* tr_from_data_on(const float* data, uint64_t numel,
-                           const int64_t* dims, int64_t ndim,
-                           tr_device_type device_type, int64_t device_index) {
+tr_tensor* tr_from_data_on_device(const float* data, uint64_t numel,
+                                  const int64_t* dims, int64_t ndim,
+                                  tr_device_type device_type,
+                                  int64_t device_index) {
   if ((!data && numel > 0) || bad_dims(dims, ndim)) {
-    return torchrkt::null_arg("tr_from_data_on");
+    return torchrkt::null_arg("tr_from_data_on_device");
   }
-  return torchrkt::alloc_result("tr_from_data_on", [&] {
+  return torchrkt::alloc_result("tr_from_data_on_device", [&] {
     return host_from_data(data, numel, dims, ndim, torch::kFloat32)
         .to(torchrkt::to_torch_device(device_type, device_index));
   });

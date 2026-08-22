@@ -1,16 +1,7 @@
 #lang racket/base
 
-;; Load a scripts/train-gpt.rkt checkpoint and run autoregressive greedy
-;; rollouts — no training, just forward passes, so it runs comfortably on
-;; CPU (or DEVICE=cuda).
-;;
-;; Usage:
-;;   racket scripts/generate-gpt.rkt [prefix] [prompt ...]
-;;
-;; `prefix` defaults to checkpoints/gpt-hod (the train script's default);
-;; <prefix>.safetensors holds the weights, <prefix>.rktd the vocab +
-;; architecture sidecar. Each prompt gets a STEPS-char rollout (default
-;; 300). Prompts must use only characters from the training vocab.
+;; Greedy rollouts from a scripts/train-gpt.rkt checkpoint (CPU-friendly).
+;; Run:  racket scripts/generate-gpt.rkt [prefix] [prompt ...]
 
 (require torch
          torch/nn
@@ -32,8 +23,6 @@
         prefix (cfg 'epochs) (vector-length vocab) device)
 
 (with-default-device device
-  ;; load-state! overwrites the seeded init; the seed only keeps
-  ;; construction deterministic
   (manual-seed! 0)
   (define net (gpt (vector-length vocab) (cfg 'block-size)
                    #:n-embd (cfg 'n-embd)

@@ -1,16 +1,9 @@
 #lang racket/base
 
-;; First-class device values: a transparent struct, so equal?/equal-hash
-;; work field-wise (devices are the memory ledger's hash keys), with a
-;; torch.device-style printed form. The legacy 'cpu / 'cuda /
-;; (list 'cuda n) forms stay accepted as arguments; queries return structs.
-
 (provide (struct-out device)
          cpu-device
          cuda-device)
 
-;; The guard makes malformed devices unrepresentable rather than deferring
-;; to a downstream marshalling error.
 (struct device (type index)
   #:transparent
   #:guard (lambda (type index name)
@@ -19,8 +12,6 @@
             (unless (exact-nonnegative-integer? index)
               (error name "index must be an exact nonnegative integer: ~e"
                      index))
-            ;; a nonzero cpu index would be rejected by set-default-device!
-            ;; but silently dropped by to-device (the C++ sides differ)
             (when (and (eq? type 'cpu) (not (zero? index)))
               (error name "cpu device index must be 0: ~e" index))
             (values type index))

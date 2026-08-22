@@ -1,22 +1,13 @@
 #lang racket/base
 
-;; Training-loop smoke for the transformer tranche (#22): a one-block
-;; char-level GPT with every tranche-3 primitive on the hot path —
-;; nn.Embedding (token + positional), nn.LayerNorm, gelu, and the causal
-;; mask built from tril + eq + masked-fill. Greedy generation at the end
-;; shows the model has memorized plausible fragments.
-;;
+;; One-block char-GPT smoke for the transformer tranche (#22); superseded
+;; by the literate 06-gpt example.
 ;; Run:  nix develop --command racket scripts/v3b-train-demo.rkt
-;;
-;; A quick check, not the capstone: the literate 06-gpt example
-;; supersedes it.
 
 (require (only-in racket/list remove-duplicates take take-right)
          torch
          torch/nn)
 
-;; The opening of Heart of Darkness (public domain) — enough structure to
-;; memorize in a few hundred full-batch steps on CPU.
 (define corpus
   (string-append
    "The Nellie, a cruising yawl, swung to her anchor without a flutter of"
@@ -37,7 +28,6 @@
 (define (decode ids) (list->string (for/list ([i (in-list ids)])
                                      (vector-ref id->char i))))
 
-;; x = chars [i, i+T), y = chars [i+1, i+T+1)
 (define block-size 32)
 (define (windows ids stride)
   (for/list ([i (in-range 0 (- (length ids) block-size 1) stride)])
@@ -46,7 +36,6 @@
 
 (define embed-dim 32)
 
-;; One pre-LN transformer block + head, single attention head.
 (define-module gpt-mini (vocab-size block-size embed-dim)
   #:submodules ([tok-emb (Embedding vocab-size embed-dim)]
                 [pos-emb (Embedding block-size embed-dim)]
@@ -62,15 +51,15 @@
   #:forward (idx)
   (let* ([t (cadr (tensor-shape idx))]
          [pos (to-dtype (arange t) 'int64)]
-         [h (add (tok-emb idx) (pos-emb pos))]        ; [B,T,d]
+         [h (add (tok-emb idx) (pos-emb pos))]
          [hn (ln1 h)]
          [scores (div (matmul (wq hn) (transpose (wk hn) 1 2))
-                      (sqrt embed-dim))]              ; [B,T,T]
+                      (sqrt embed-dim))]
          [mask (eq (tril (ones t t)) 0)]
          [att (softmax (masked-fill scores mask -inf.0) 2)]
          [h (add h (wo (matmul att (wv hn))))]
          [h (add h (fc2 (gelu (fc1 (ln2 h)))))])
-    (head h)))                                        ; [B,T,V]
+    (head h)))
 
 (module+ main
   (manual-seed! 0)
@@ -80,7 +69,7 @@
   (printf "corpus: ~a chars, vocab ~a, ~a windows of ~a\n"
           (length ids) vocab-size batch block-size)
 
-  (define x (to-dtype (tensor (map car ws)) 'int64))   ; [B,T]
+  (define x (to-dtype (tensor (map car ws)) 'int64))
   (define y (to-dtype (tensor (map cdr ws)) 'int64))
   (define y-flat (reshape y (* batch block-size)))
 

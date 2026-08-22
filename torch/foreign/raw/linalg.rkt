@@ -1,7 +1,5 @@
 #lang racket/base
 
-;; Raw linear-algebra ops (linalg.h).
-
 (require (only-in "memory.rkt" define-binary/raw))
 
 (provide tr-matmul/raw

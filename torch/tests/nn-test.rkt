@@ -1,12 +1,6 @@
 #lang racket/base
 
-;; The nn layer: define-module expansion, parameter registration/recursion,
-;; the linear layer, SGD, and a tiny end-to-end training loop. Seeded parity
-;; with PyTorch's nn.Linear lives in python-cross-test.
-
 (module+ test
-  ;; racket/list's flatten/argmax collide with torch's functional
-  ;; flatten/argmax, so those two are excepted
   (require (except-in racket/list argmax flatten)
            (only-in racket/file make-temporary-file)
            rackunit
@@ -29,7 +23,6 @@
     (define l (Linear 4 3))
     (check-true (linear? l))
     (check-true (module? l))
-    ;; the default reflection path (no #:reflection-name override) -> 'Linear
     (check-equal? (object-name l) 'Linear)
     (define ps (parameters l))
     (check-equal? (map tensor-shape ps) '((3 4) (3)))
@@ -43,7 +36,7 @@
   (test-case "kaiming-uniform stays within the PyTorch bound"
     (manual-seed! 0)
     (define w (kaiming-uniform '(8 4)))
-    ;; gain = sqrt(2/(1+5)) = sqrt(1/3); bound = sqrt(3)*gain/sqrt(4) = 0.5
+    ;; bound = sqrt(3) * sqrt(2/(1+5)) / sqrt(fan-in 4) = 0.5
     (for ([v (in-list (tensor->list w))])
       (check-true (and (>= v -0.5) (< v 0.5)))))
 
@@ -143,9 +136,6 @@
     (check-equal? (map tensor-shape (parameters ln)) '((4) (4)))
     (check-equal? (tensor->list (car (parameters ln))) '(1.0 1.0 1.0 1.0))
     (check-equal? (tensor->list (cadr (parameters ln))) '(0.0 0.0 0.0 0.0))
-    ;; with unit weight and zero bias the forward is pure normalization:
-    ;; each row comes out zero-mean.
-    ;; float literals: layer-norm is float-only in torch
     (define out (ln (tensor '((1.0 2.0 3.0 4.0) (10.0 20.0 30.0 40.0)))))
     (check-equal? (tensor-shape out) '(2 4))
     (define rows (tensor->list out))
@@ -172,7 +162,6 @@
       (fc (flat (pool (relu (c1 x))))))
     (define net (convnet))
     (check-equal? (tensor-shape (net (randn 4 1 28 28))) '(4 10))
-    ;; stateless submodules contribute no params; order is depth-first
     (check-equal? (map car (named-parameters net))
                   '("c1.weight" "c1.bias" "fc.weight" "fc.bias")))
 
@@ -195,7 +184,6 @@
   (test-case "cross-entropy: known value, integer targets coerced to int64"
     (define logits (tensor '((-0.5 -1.0 -2.0) (-2.0 -0.2 -1.5))))
     (define targets (tensor '(0 1)))
-    ;; = nll_loss(log_softmax(logits), targets), mean reduction
     (check-= (item (cross-entropy logits targets)) 0.48362 1e-4))
 
   (test-case "a few Adam steps reduce the training loss"
@@ -219,7 +207,6 @@
     (define d (Dropout #:p 0.5))
     (check-equal? (object-name d) 'Dropout)
     (define x (ones 100))
-    ;; training (default): each entry is 0 or 2.0 (kept and scaled by 1/(1-p))
     (define tr (tensor->list (d x)))
     (check-true (andmap (lambda (v) (or (= v 0.0) (= v 2.0))) tr))
     (check-true (> (length (filter zero? tr)) 0) "nothing was dropped")
@@ -244,14 +231,11 @@
     (eval! d)
     (in-eval-mode d (check-false (module-training? d)))
     (check-false (module-training? d) "restored to eval, not flipped to train")
-    ;; module-training? recurses: define-module linear leaves are always
-    ;; #t; the dropout child carries the mode
     (train! d)
     (define net (Sequential (Linear 4 4) (Dropout #:p 0.5)))
     (check-true (module-training? net))
     (in-eval-mode net (check-false (module-training? net)))
     (check-true (module-training? net) "model restored to train")
-    ;; a dropout-free define-module is vacuously training (eval! a no-op)
     (define lin (Linear 4 2))
     (check-true (module-training? lin))
     (in-eval-mode lin (check-true (module-training? lin)))
@@ -272,8 +256,7 @@
     (define net (Sequential (Linear 4 8) (Dropout #:p 0.3) (Linear 8 2)))
     (define path (make-temporary-file "rkt-st-~a.safetensors"))
     (save-state! net path)
-    ;; seed 99: net2 must start with different params, or the post-load
-    ;; equality would be vacuous
+    ;; seed 99: net2 starts different, so post-load equality is non-vacuous
     (manual-seed! 99)
     (define net2 (Sequential (Linear 4 8) (Dropout #:p 0.3) (Linear 8 2)))
     (load-state! net2 path)

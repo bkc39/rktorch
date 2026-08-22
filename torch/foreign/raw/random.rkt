@@ -1,7 +1,6 @@
 #lang racket/base
 
-;; Raw RNG tensor constructors. These draw from the global RNG stream, so
-;; they take the NO-RETRY wrap (tensor-allocator/rng — see memory.rkt).
+;; Everything here draws the global RNG stream: no-retry wrap only.
 
 (require (only-in ffi/unsafe _double _fun _int _int64)
          (only-in ffi/vector _s64vector)
@@ -26,8 +25,6 @@
   #:c-id tr_rand
   #:wrap tensor-allocator/rng)
 
-;; In-place fill on [low, high); consumes the global RNG exactly like
-;; torch.Tensor.uniform_, which nn init parity depends on.
 (define-torch tr-tensor-uniform!/raw
   (_fun (t : _Tensor) (low : _double) (high : _double) -> _int)
   #:c-id tr_tensor_uniform_)

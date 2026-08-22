@@ -1,21 +1,14 @@
 #lang racket/base
 
-;; The nn.Module system: `gen:module` is the interface, `define-module` the
-;; Python-style sugar. Where Python registers fields at runtime via
-;; __setattr__, the macro knows the field list at expansion time; models are
-;; plain struct trees with no global store — drop one and the GC finalizers
-;; release every native handle.
-
 (require (for-syntax racket/base
                      (only-in racket/syntax format-id generate-temporary)
-                     ;; whole-module on purpose: syntax-parse patterns need many
-                     ;; exported bindings only-in would strip
+                     ;; whole-module on purpose: the expansion needs bindings
+                     ;; only-in would strip
                      syntax/parse/pre)
          (only-in racket/generic define-generics define/generic)
          (only-in "../foreign.rkt" requires-grad!))
 
-;; The noqa'd exports are define-generics/define-module expansions, which
-;; raco review cannot see without macro expansion.
+;; the noqa'd exports are macro expansions raco review cannot see
 (provide gen:module
          module?
          module-forward ;; noqa
@@ -39,10 +32,7 @@
   (module-parameters module)
   (module-named-parameters module prefix)
   (module-buffers module)
-  ;; mode-sensitive leaves (dropout) hold the flag; structural modules recurse.
   (module-set-training! module training?)
-  ;; a structural module is training iff all its submodules are, vacuously #t
-  ;; with none (modules default to training).
   (module-training? module))
 
 ;; Depth-first, own params before submodules', in declaration order —
@@ -50,7 +40,6 @@
 (define (parameters m)
   (module-parameters m))
 
-;; (name . tensor) pairs with dotted paths: '("fc1.weight" . #<tensor>).
 (define (named-parameters m [prefix ""])
   (module-named-parameters m prefix))
 
@@ -68,9 +57,8 @@
   (module-set-training! m #f)
   m)
 
-;; Restores the *aggregate* prior mode tree-wide, so a hand-mixed tree (some
-;; leaves manually flipped) collapses to all-train or all-eval on exit —
-;; per-leaf snapshotting would be needed to preserve a mixed tree.
+;; restores the aggregate prior mode tree-wide: a hand-mixed tree collapses
+;; to all-train or all-eval on exit
 (define (call-with-eval-mode m thunk)
   (define was-training? (module-training? m))
   (dynamic-wind (lambda () (eval! m))
@@ -85,8 +73,6 @@
     #:description "[id init-expr] binding"
     (pattern [id:id init:expr]))
 
-  ;; `decl` is what the formal contributes to the public constructor's
-  ;; argument list; `id` is the struct field it populates.
   (define-splicing-syntax-class ctor-formal
     #:description
     "constructor formal (id, [id default], or #:kw id / #:kw [id default])"
@@ -99,10 +85,6 @@
     (pattern (~seq kw:keyword [id:id default:expr])
       #:with (decl ...) #'(kw [id default]))))
 
-;; #:coerce rebinds ctor args (let* order) before any init sees them;
-;; #:params are registered trainable tensors (requires-grad! is set after
-;; init, so RNG-consuming inits match PyTorch); #:buffers are registered but
-;; not trainable; #:submodules nest gen:module values.
 (define-syntax (define-module stx)
   (syntax-parse stx
     [(_ name:id (formal:ctor-formal ...)
@@ -110,8 +92,6 @@
               (~optional (~seq #:params (param:binding ...)))
               (~optional (~seq #:buffers (buffer:binding ...)))
               (~optional (~seq #:submodules (sub:binding ...)))
-              ;; resolved at compile time below (not via a template `~?`), so
-              ;; its ellipsis depth here doesn't matter.
               (~optional (~seq #:reflection-name reflect:expr))) ...
         #:forward (input:id ...) body:expr ...+)
      (define (ids attr) (or attr '()))
@@ -151,8 +131,6 @@
                 (define/generic recur-buffers module-buffers)
                 (define/generic recur-set-training! module-set-training!)
                 (define/generic recur-training? module-training?)
-                ;; the generic forces a rest arg; the inner lambda restores
-                ;; the declared #:forward arity (and its arity errors).
                 (define (module-forward self . inputs)
                   (let ([ctor-arg (arg-acc self)] ...
                         [p (p-acc self)] ...
@@ -172,7 +150,6 @@
                 (define (module-buffers self)
                   (append (list (b-acc self) ...)
                           (recur-buffers (sm-acc self)) ...))
-                ;; define-module structs are never mode-sensitive leaves.
                 (define (module-set-training! self training?)
                   (recur-set-training! (sm-acc self) training?) ...
                   (void))
