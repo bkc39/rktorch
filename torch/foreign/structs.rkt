@@ -27,10 +27,8 @@
          (only-in racket/string string-join)
          (only-in "error.rkt" check-handle check-ok)
          (only-in "format.rkt"
-                  needs-sci-notation?
                   tensor->pytorch-repr
-                  tensor-tree->pytorch-repr
-                  tree-values)
+                  tensor-tree->pytorch-repr)
          (only-in "raw/memory.rkt" tr-tensor-free/checked)
          (only-in "raw/syntax.rkt" Tensor?)
          (only-in "raw/tensor.rkt"
@@ -171,12 +169,9 @@
      (define tree (handle->summarized-tree h dims 0 leaf-values))
      (define mode
        (case dtype [(int64) 'exact-integers] [(bool) 'booleans] [else #f]))
-     ;; sci-notation heuristic over the SELECTED values, as PyTorch
-     ;; formats from the summarized population; the ATen fallback
-     ;; summarizes natively, so it stays cheap
-     (if (and (not mode) (needs-sci-notation? (tree-values tree)))
-         (handle->string h)
-         (tensor-tree->pytorch-repr tree dims #:mode mode))]
+     ;; the formatter itself picks sci notation from the SELECTED
+     ;; values (PyTorch formats from the summarized population)
+     (tensor-tree->pytorch-repr tree dims #:mode mode)]
     [(eq? dtype 'int64)
      (tensor->pytorch-repr (handle->ints h dims) dims
                            #:mode 'exact-integers)]
@@ -185,11 +180,7 @@
      ;; renders True/False (torch.tensor([True, False]) parity)
      (tensor->pytorch-repr (handle->floats h dims) dims
                            #:mode 'booleans)]
-    [else
-     (define floats (handle->floats h dims))
-     (if (needs-sci-notation? floats)
-         (handle->string h)
-         (tensor->pytorch-repr floats dims))]))
+    [else (tensor->pytorch-repr (handle->floats h dims) dims)]))
 
 ;; The REPL/`print`/`write` form mirrors the Python REPL: show the tensor's
 ;; contents as `tensor(...)`, not an opaque handle.  A freed handle (tag

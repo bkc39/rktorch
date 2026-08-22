@@ -96,6 +96,13 @@
     ;; strict threshold: 1000 elements print in full, 1001 summarize
     (check-false (regexp-match? #rx"\\.\\.\\." (tensor->repr (zeros 1000))))
     (check-regexp-match #rx"\\.\\.\\." (tensor->repr (zeros 1001)))
+    ;; wide-dynamic-range large floats summarize in sci notation
+    ;; (formerly the ATen fallback — which never summarized and would
+    ;; have resurrected the hang)
+    (manual-seed! 0)
+    (let ([r (tensor->repr (mul (randn 2000) 1e10))])
+      (check-regexp-match #rx"e[+][0-9][0-9]" r)
+      (check-true (< (string-length r) 400)))
     ;; a dimension of exactly 2*edgeitems never elides, even inside a
     ;; summarized tensor: (zeros 6 200) summarizes (1200 elements), the
     ;; 200-wide rows elide inline, but all 6 rows print (no "...," row)

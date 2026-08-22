@@ -12,14 +12,18 @@
 ;; wide dynamic range), the caller falls back to ATen's own printer instead
 ;; (see structs.rkt) rather than emitting a subtly-wrong repr.
 ;;
+;; Scientific notation is now reproduced (fmt-sci, the '{:.4e}' form),
+;; so the ATen-printer fallback is gone — it never summarized, which
+;; would have resurrected the large-tensor hang for wide-range floats.
+;;
 ;; Large tensors (numel > 1000) summarize exactly like PyTorch (#45):
 ;; callers hand this module a TREE with 'ellipsis markers where a
 ;; dimension was elided to its edge items; the last dimension renders the
 ;; marker as the literal " ..." joined by ", " (PyTorch's double-space),
 ;; higher dimensions as a "..." block between the standard separators.
 ;;
-;; Not yet reproduced (v0 TODO): scientific notation and dtype suffixes
-;; for non-float32 non-empty tensors.
+;; Not yet reproduced (v0 TODO): dtype suffixes for non-float32
+;; non-empty tensors.
 
 (require (only-in racket/format ~r)
          (only-in racket/list append-map drop take)
@@ -47,6 +51,19 @@
 
 (define (fmt-fixed x)
   (or (fmt-special x) (~r x #:precision (list '= precision))))
+
+;; PyTorch's scientific form: '{:.4e}' — 4-decimal mantissa, sign on the
+;; exponent, exponent zero-padded to at least two digits.
+(define (fmt-sci x)
+  (or (fmt-special x)
+      (~r x
+          #:notation 'exponential
+          #:precision (list '= precision)
+          #:format-exponent
+          (lambda (e)
+            (format "e~a~a"
+                    (if (negative? e) "-" "+")
+                    (~r (abs e) #:min-width 2 #:pad-string "0"))))))
 
 ;; ~r with '(= 0) keeps the trailing decimal point, matching PyTorch's
 ;; int-mode "2." exactly.
@@ -86,11 +103,16 @@
 ;; the whole tensor, then right-justifies every element to a common width.
 (define (make-formatter flat mode)
   (define any-finite? (for/or ([x (in-list flat)]) (finite-real? x)))
-  (define int-mode? (and (not mode) any-finite? (all-integral? flat)))
+  ;; sci wins before int-mode: torch.tensor([1e10]) is integral AND
+  ;; large, and prints 1.0000e+10
+  (define sci? (and (not mode) (needs-sci-notation? flat)))
+  (define int-mode?
+    (and (not mode) (not sci?) any-finite? (all-integral? flat)))
   (define fmt
     (cond
       [(eq? mode 'exact-integers) fmt-exact]
       [(eq? mode 'booleans) fmt-bool]
+      [sci? fmt-sci]
       [int-mode? fmt-int]
       [else fmt-fixed]))
   (define max-width
@@ -103,12 +125,16 @@
   ;; legitimately overflow 80 columns, while ordinary int-mode rows
   ;; budget with the dot included. Rendering always pads to the full
   ;; rendered width; only the wrap budget follows _Formatter.
+  ;; ...and for FLOATING tensors (int-mode AND fixed alike) the budget
+  ;; population is the nonzero FINITE values, default 1 when empty — an
+  ;; all-inf row budgets 1 exactly like an all-zero one. Integer/bool
+  ;; tensors budget over all values.
   (define wrap-width
-    (if int-mode?
+    (if (memq mode '(exact-integers booleans))
+        max-width
         (for/fold ([w 1]) ([x (in-list flat)]
                            #:when (and (finite-real? x) (not (zero? x))))
-          (max w (string-length (fmt-int x))))
-        max-width))
+          (max w (string-length (fmt x))))))
   (values fmt max-width wrap-width))
 
 (define (pad s width)
