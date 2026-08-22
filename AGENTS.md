@@ -209,24 +209,19 @@ module's full export set (`racket/runtime-path`, `syntax/parse/pre`).
   `foreign/format.rkt` — the PyTorch-repr reproducer.
 - `foreign/raw/*.rkt` — direct FFI, one module per C translation unit:
   `syntax` (the pure FFI definer + `_Tensor` cpointer), `memory` (the
-  lifetime/#37 substrate: frees, pressure ledger, `tensor-allocator`,
+  lifetime substrate: frees, pressure ledger, `tensor-allocator`,
   op-definer macros), `global`, `tensor`, `random`, `creation`,
-  `shape-ops`, `elementwise`, `reduce`, `linalg`, `autograd`. Every
-  tensor-returning binding carries one of the two allocator wraps from
-  `raw/memory.rkt` — `tensor-allocator` by default — which composes the
-  finalizer registration (`allocator` over the guarded, finalizer-context
-  `tr-tensor-free/finalizer`) with the #37 memory-pressure ledger charge
-  (phantom bytes + per-device accounting) and the #38 OOM
-  collect-and-retry (one GC + finalizer drain, then exactly one retry,
-  keyed off `tr_last_error_kind`). Bindings that draw from the global
-  RNG stream (randn/rand; generated ops flagged `rng` in the codegen
-  allowlist, e.g. dropout) take `tensor-allocator/rng` instead — the
-  same wrap minus the retry, so a retry can never double-draw and break
-  seeded parity. OOM-classified failures reach users as
-  `exn:fail:rktorch:oom` (catch by type, not message). Never hand-write
-  a bare `(allocator ...)` wrap — it would skip the ledger. Explicit synchronous
-  release goes through the raising, finalizer-cancelling
-  `tr-tensor-free/checked`.
+  `shape-ops`, `elementwise`, `reduce`, `linalg`, `autograd`.
+  **`docs/internals.md` is the canonical memory-management narrative**
+  (lifetime chain, phantom-bytes pressure, typed OOM + retry). The
+  rules agents must not break: every tensor-returning binding carries
+  `tensor-allocator` — or `tensor-allocator/rng` for bindings that draw
+  from the global RNG stream (randn/rand; ops flagged `rng` in the
+  codegen allowlist) so a retry can never double-draw and break seeded
+  parity; never a bare `(allocator ...)` wrap (skips the ledger).
+  Explicit synchronous release goes through the raising,
+  finalizer-cancelling `tr-tensor-free/checked`; OOM reaches users as
+  `exn:fail:rktorch:oom` (catch by type, not message).
 - `nn.rkt` — contracted facade over `nn/` (`module.rkt` = `gen:module` +
   the `define-module` macro; `linear.rkt`, `init.rkt`, `optim.rkt`,
   `loss.rkt`).
