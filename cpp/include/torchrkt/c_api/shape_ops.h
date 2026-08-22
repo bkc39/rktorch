@@ -8,6 +8,8 @@
 extern "C" {
 #endif
 
+/* Results may share storage with the input (writes can reach it); each
+ * handle owns an independent reference and frees in either order. */
 tr_tensor* tr_reshape(const tr_tensor* t, const int64_t* dims, int64_t ndim);
 
 tr_tensor* tr_view(const tr_tensor* t, const int64_t* dims, int64_t ndim);

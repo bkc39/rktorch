@@ -20,6 +20,7 @@ tr_tensor* tr_tensor_grad(const tr_tensor* t);
 
 tr_tensor* tr_tensor_detach(const tr_tensor* t);
 
+/* Grad mode is per calling thread (c10::GradMode), not process-wide. */
 int tr_set_grad_enabled(int enabled);
 
 int tr_is_grad_enabled(int* out);

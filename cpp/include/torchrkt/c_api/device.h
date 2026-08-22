@@ -15,6 +15,8 @@ typedef enum tr_device_type {
   TR_DEVICE_CUDA = 1
 } tr_device_type;
 
+/* Both probes return 0 when CUDA is absent AND when driver init throws
+ * (failure recorded in tr_last_error) — check it to tell them apart. */
 int tr_cuda_is_available(void);
 
 int tr_cuda_device_count(void);

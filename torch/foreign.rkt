@@ -134,6 +134,9 @@
   [dtype (-> tensor? (or/c 'float32 'float64 'int64 'bool))]
   [numel (-> tensor? exact-nonnegative-integer?)]
   ;; memory
+  ;; native-memory-use is a handle-attributed estimate: views charge
+  ;; their full extents (shared storage double-counts) and
+  ;; ATen-internal allocations are absent
   [native-memory-use
    (-> (listof (cons/c device? exact-nonnegative-integer?)))]
   [cuda-memory-stats
