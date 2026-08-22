@@ -299,8 +299,10 @@ express, in one or two lines:
 
 Never keepers: narration of what the next line does, why a change was
 made (commit message's job), review-round archaeology, restated names, or
-issue-number tags on every mention of a mechanism. The literate examples
-(`examples/racket/*.rkt`) are prose-by-design and exempt.
+issue-number tags on every mention of a mechanism. Exempt: the literate
+examples (`examples/racket/*.rkt`, prose-by-design) and the python
+parity twins (`examples/python/*.py`, whose docstrings identify the
+Racket twin they mirror).
 
 ## CI
 

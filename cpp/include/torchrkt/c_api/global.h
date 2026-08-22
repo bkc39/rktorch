@@ -8,6 +8,7 @@ extern "C" {
 
 const char* tr_version(void);
 
+/* Thread-local, as is tr_last_error_kind. */
 const char* tr_last_error(void);
 
 /* 0 generic, 1 out-of-memory. */

@@ -14,6 +14,8 @@ int tr_tensor_has_grad(const tr_tensor* t, int* out);
 
 int tr_tensor_backward(tr_tensor* t);
 
+/* Aliases the live .grad (mutation reaches the optimizer); errors if no
+ * gradient has accumulated. */
 tr_tensor* tr_tensor_grad(const tr_tensor* t);
 
 tr_tensor* tr_tensor_detach(const tr_tensor* t);
