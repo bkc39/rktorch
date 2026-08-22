@@ -10,7 +10,15 @@
 ;; `(require torch)` doesn't break numeric code.
 ;; Binary arithmetic accepts a real on either side via the *_scalar shims.
 
-(require (only-in ffi/vector list->f32vector list->s64vector)
+(require (only-in ffi/vector
+                  f32vector->list
+                  f32vector-length
+                  f32vector?
+                  list->f32vector
+                  list->s64vector
+                  s64vector->list
+                  s64vector-length
+                  s64vector?)
          (only-in racket/base
                   [exp base:exp]
                   [log base:log]
@@ -21,7 +29,7 @@
          ;; re-exports it from racket/math — so the dispatch shim still
          ;; matters for #lang racket users.
          (only-in racket/math [tanh base:tanh])
-         (only-in racket/list [argmax base:argmax] flatten)
+         (only-in racket/list append-map [argmax base:argmax])
          (only-in "error.rkt" check-handle)
          (only-in "ops.rkt" device->type+index)
          (only-in "raw/creation.rkt"
@@ -149,35 +157,84 @@
 
 ;; Shape inference walks the first element of each nesting level, exactly like
 ;; torch.tensor; the numel check below (and again in C) rejects ragged input.
+;; Any level may be a list, a vector, or (as a leaf run) a homogeneous
+;; f32vector/s64vector — mixed nesting is fine, matching torch.tensor's
+;; acceptance of any reasonable sequence nesting.
 (define (nested-dims data)
   (cond
-    [(not (list? data)) '()]
-    [(null? data) '(0)]
-    [else (cons (length data) (nested-dims (car data)))]))
+    [(list? data)
+     (if (null? data) '(0) (cons (length data) (nested-dims (car data))))]
+    [(vector? data)
+     (if (zero? (vector-length data))
+         '(0)
+         (cons (vector-length data) (nested-dims (vector-ref data 0))))]
+    [(f32vector? data) (list (f32vector-length data))]
+    [(s64vector? data) (list (s64vector-length data))]
+    [else '()]))
+
+(define (sequence-flatten data)
+  (cond
+    [(list? data) (append-map sequence-flatten data)]
+    [(vector? data)
+     (append-map sequence-flatten (vector->list data))]
+    [(f32vector? data) (f32vector->list data)]
+    [(s64vector? data) (s64vector->list data)]
+    [else (list data)]))
+
+(define (exact-int64 x)
+  (cond
+    [(exact-integer? x) x]
+    [(rational? x) (inexact->exact (truncate x))]
+    [else
+     ;; +inf.0/-inf.0/+nan.0 have no int64 value; raise tensor's own
+     ;; error shape, not a raw conversion failure (torch errors here too)
+     (error 'tensor "cannot convert non-finite value to int64: ~e" x)]))
 
 (define (tensor data
                 #:requires-grad? [requires-grad? #f]
                 #:device [device #f]
                 #:dtype [dtype #f])
+  (unless (memq dtype '(#f float32 int64))
+    (error 'tensor "unsupported #:dtype (float32 or int64): ~e" dtype))
   (define dims (nested-dims data))
-  (define flat (if (list? data) (flatten data) (list data)))
-  (unless (= (length flat) (apply * dims))
-    (error 'tensor "ragged nested list; dims ~a need ~a values, got ~a"
-           dims (apply * dims) (length flat)))
   ;; dtype mirrors torch.tensor's inference (#44): all exact integers
   ;; infer int64; anything inexact (or an exact rational) infers
   ;; float32, PyTorch's default float dtype. #:dtype overrides either
   ;; way ('int64 truncates toward zero, torch's cast semantics).
   ;; Booleans and a float64 ingestion path are future work.
   ;; empty data stays float32 — torch.tensor([]) is float32, and the
-  ;; vacuous andmap must not flip it to int64
-  (define chosen
-    (or dtype
-        (if (and (pair? flat) (andmap exact-integer? flat))
-            'int64
-            'float32)))
-  (unless (memq chosen '(float32 int64))
-    (error 'tensor "unsupported #:dtype (float32 or int64): ~e" dtype))
+  ;; vacuous andmap must not flip it to int64.
+  ;; A top-level f32vector/s64vector already matching the target dtype
+  ;; is handed to the FFI as-is — zero conversion copies (the C side
+  ;; still clones, so there is no lifetime coupling to the buffer).
+  (define-values (chosen payload numel)
+    (cond
+      [(and (f32vector? data) (not (eq? dtype 'int64)))
+       (values 'float32 data (f32vector-length data))]
+      [(and (s64vector? data) (not (eq? dtype 'float32)))
+       (values 'int64 data (s64vector-length data))]
+      [else
+       (define flat (sequence-flatten data))
+       (unless (= (length flat) (apply * dims))
+         (error 'tensor
+                "ragged nested sequence; dims ~a need ~a values, got ~a"
+                dims (apply * dims) (length flat)))
+       (define inferred
+         (or dtype
+             (if (and (pair? flat) (andmap exact-integer? flat))
+                 'int64
+                 'float32)))
+       (case inferred
+         [(int64)
+          ;; exact integers marshal untouched — no float32 transit, so
+          ;; values beyond 2^24 (and 2^53) stay exact
+          (values 'int64
+                  (list->s64vector (map exact-int64 flat))
+                  (length flat))]
+         [else
+          (values 'float32
+                  (list->f32vector (map exact->inexact flat))
+                  (length flat))])]))
   ;; #:device passes the placement into NATIVE construction
   ;; (tr_from_data_on) rather than scoping the process-global default
   ;; (races concurrent constructors) or constructing-then-moving (the
@@ -193,34 +250,18 @@
     (wrap 'tensor
           (case chosen
             [(int64)
-             ;; exact integers marshal untouched — no float32 transit,
-             ;; so values beyond 2^24 (and 2^53) stay exact
-             (define payload
-               (list->s64vector
-                (for/list ([x (in-list flat)])
-                  (cond
-                    [(exact-integer? x) x]
-                    [(rational? x) (inexact->exact (truncate x))]
-                    [else
-                     ;; +inf.0/-inf.0/+nan.0 have no int64 value; raise
-                     ;; tensor's own error shape, not a raw conversion
-                     ;; failure (torch errors here too)
-                     (error 'tensor
-                            "cannot convert non-finite value to int64: ~e"
-                            x)]))))
              (if device
-                 (tr-from-data-i64-on/raw payload (length flat)
+                 (tr-from-data-i64-on/raw payload numel
                                           dim-vec (length dims)
                                           type index)
-                 (tr-from-data-i64/raw payload (length flat)
+                 (tr-from-data-i64/raw payload numel
                                        dim-vec (length dims)))]
             [else
-             (define payload (list->f32vector (map exact->inexact flat)))
              (if device
-                 (tr-from-data-on/raw payload (length flat)
+                 (tr-from-data-on/raw payload numel
                                       dim-vec (length dims)
                                       type index)
-                 (tr-from-data/raw payload (length flat)
+                 (tr-from-data/raw payload numel
                                    dim-vec (length dims)))])))
   (if requires-grad? (requires-grad! out) out))
 
