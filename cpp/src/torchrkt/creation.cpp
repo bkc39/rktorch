@@ -11,8 +11,6 @@
 
 namespace {
 
-// float32 on the process default device (CPU until tr_set_default_device flips
-// it to CUDA); tr_randn shares this convention via current_default_device.
 torch::TensorOptions default_options() {
   return torch::TensorOptions()
       .dtype(torch::kFloat32)
@@ -27,17 +25,14 @@ std::vector<int64_t> to_shape(const int64_t* dims, int64_t ndim) {
   return {dims, dims + ndim};
 }
 
-// Shared body of the four tr_from_data* entry points: validate numel
-// against the shape and copy the host data into tensor-owned CPU storage
-// of the given dtype. The caller applies the device move — the one place
-// the *_on variants differ.
+// Shared body of the tr_from_data* entry points; the caller applies the
+// device move — the one place the *_on variants differ.
 template <typename T>
 torch::Tensor host_from_data(const T* data, uint64_t numel, const int64_t* dims,
                              int64_t ndim, torch::ScalarType dtype) {
   const auto shape = to_shape(dims, ndim);
-  // Overflow-safe product: a crafted shape whose product wraps could
-  // otherwise pass the numel check and hand from_blob an undersized
-  // buffer.
+  // Overflow-safe product: a shape whose product wraps could otherwise pass
+  // the numel check and hand from_blob an undersized buffer.
   uint64_t expected = 1;
   for (const int64_t d : shape) {
     if (d < 0) {
@@ -52,15 +47,14 @@ torch::Tensor host_from_data(const T* data, uint64_t numel, const int64_t* dims,
   if (expected != numel) {
     throw std::invalid_argument("numel does not match the product of dims");
   }
-  // Empty tensors carry no data pointer (an empty Racket vector marshals
-  // as NULL): construct directly rather than handing from_blob a null.
-  // torch.tensor([]) parity — dtype inference keeps these float32.
+  // An empty Racket vector marshals as NULL: construct directly rather than
+  // handing from_blob a null.
   if (numel == 0) {
     return torch::empty(shape, torch::TensorOptions().dtype(dtype));
   }
-  // `data` is host memory, so from_blob must wrap it as a CPU tensor (a CUDA
-  // default_options would make from_blob reject the host pointer); clone()
-  // copies it into tensor-owned storage.
+  // `data` is host memory: from_blob must wrap it as a CPU tensor (a CUDA
+  // option set would reject the host pointer); clone() copies it into
+  // tensor-owned storage.
   return torch::from_blob(const_cast<T*>(data), shape,
                           torch::TensorOptions().dtype(dtype))
       .clone();

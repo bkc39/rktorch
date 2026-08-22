@@ -9,25 +9,19 @@
 ;; `nix build`, or the lean `.#ci` shell) this test SKIPS -- keeping
 ;; `raco test` and `nix build` green without it.
 ;;
-;; This file holds the literate-example twins (00-05) and the hand-written
-;; reference checks (torch/tests/python/*.py); the generated-op battery over
-;; the codegen manifest lives in generated-parity-test.rkt (#29). Shared
-;; python-subprocess infra (env pinning, runners, tolerance rationale) is in
-;; private/python-env.rkt.
+;; This file holds the literate-example twins and the hand-written
+;; reference checks (torch/tests/python/*.py); the generated-op battery
+;; over the codegen manifest lives in generated-parity-test.rkt. Shared
+;; python-subprocess infra (env pinning, runners, tolerance rationale) is
+;; in private/python-env.rkt.
 ;;
 ;; Run for real:  raco test torch/tests/python-cross-test.rkt
 
 (module+ test
   (require rackunit
-           ;; layers are PascalCase (Conv2d/Linear) and the functional ops stay
-           ;; lowercase on `torch` (max-pool2d/avg-pool2d/flatten), so requiring
-           ;; both is collision-free (#11). This suite exercises both: the nn
-           ;; Conv2d layer (seeded-init parity) and the functional pool/flatten.
            "../main.rkt"
            "../nn.rkt"
-           ;; the committed 256-image fixture for the Conv-MNIST parity twin.
            (only-in "../data/mnist.rkt" load-mnist-fixture)
-           ;; the committed prose fixture + char helpers for the GPT twin.
            (only-in "../data/text.rkt"
                     contiguous-blocks encode load-text-fixture text->vocab)
            "private/python-env.rkt")
@@ -56,25 +50,19 @@
      (printf "[python-cross-test] skipped: python3 `torch` not available ~a\n"
              "(run inside `nix develop`)")]
     [else
-     ;; 00 — seeded randn 2x2
      (check-parity "python/00_randn.py"
                    (lambda ()
                      (manual-seed! 0)
                      (randn 2 2)))
-     ;; 01 — deterministic elementwise arithmetic
      (check-parity "python/01_arith.py"
                    (lambda ()
-                     ;; float literals, matching the twin's explicit
-                     ;; construction (the case previously leaned on the
-                     ;; scalar-promotion path to come out float)
+                     ;; float literals, matching the twin's construction
                      (define x (tensor '((1.0 -2.0) (3.0 -4.0))))
                      (* (+ x 1) (relu x))))
-     ;; 02 — arange/reshape/transpose/matmul
      (check-parity "python/02_matmul.py"
                    (lambda ()
                      (define a (reshape (arange 6) 2 3))
                      (@ a (t a 0 1))))
-     ;; 03 — autograd: d(sum(x*x))/dx == 2x
      (check-parity "python/03_autograd.py"
                    (lambda ()
                      ;; float literals (#44): integer literals now infer
@@ -84,9 +72,7 @@
                      (backward! (~> x (* x) Σ))
                      (grad x)))
      ;; summarized reprs (#45): each summarization form byte-compared
-     ;; against Python — 1-d inline ellipsis, 2-d row elision, rank-3
-     ;; last-dim-only, rank-3 leading-dim, the 1001 boundary, and the
-     ;; bool forms deferred from #53's review
+     ;; against Python
      (let* ([j (python-result "python/summarized_reprs.py")]
             [py (hash-ref j 'reprs)]
             [rkt (list
@@ -141,10 +127,10 @@
                    (lambda ()
                      (define x (tensor '((1 2) (3 4))))
                      (@ x x)))
-     ;; 04 — the v1 capstone: seeded MLP init + 5 SGD steps track PyTorch
-     ;; (losses per step and every post-training parameter). No repr check:
-     ;; the 58-value parameter vector would hit PyTorch's line wrapping,
-     ;; which the formatter doesn't reproduce.
+     ;; 04: seeded MLP init + 5 SGD steps track PyTorch (per-step losses
+     ;; and every post-training parameter). No repr check: the 58-value
+     ;; parameter vector would hit PyTorch's line wrapping, which the
+     ;; formatter doesn't reproduce.
      (let ()
        (define-module mlp (d-in d-hidden d-out)
          #:submodules ([fc1 (Linear d-in d-hidden)]
@@ -177,17 +163,15 @@
              [p (in-list (hash-ref j 'values))]
              [i (in-naturals)])
          (check-= r p tol (format "04_mlp: parameter ~a parity" i))))
-     ;; Shared capstone-twin checker (generalized from the #19 check-convnet
-     ;; for the 06-gpt pass): run the Python twin at rel-path pinned to
-     ;; `device` — RKTORCH_PARITY_DEVICE set via the env-copy wrapper, never
-     ;; the process-wide env — and check the Racket `train-on` run on the same
-     ;; device agrees: per-step losses, parameter count, every flattened
-     ;; post-training parameter. train-on: device -> (values losses
-     ;; flat-params). CUDA values come back to host for the comparison.
-     ;; `dev-tol`: CPU is bit-stable (the strict, CI-gating `tol`); the CUDA
-     ;; pass is looser because the two stacks (libtorch 2.9 vs Python torch
-     ;; 2.12) pick different cuDNN/cuBLAS algorithms and reduction orders, so
-     ;; values after 5 Adam steps drift ~1e-3 even though seeded init matches.
+     ;; Shared capstone-twin checker: run the Python twin at rel-path
+     ;; pinned to `device` — RKTORCH_PARITY_DEVICE set via the env-copy
+     ;; wrapper, never the process-wide env — and check the Racket
+     ;; `train-on` run (device -> (values losses flat-params)) agrees.
+     ;; `dev-tol`: CPU is bit-stable (the strict, CI-gating `tol`); the
+     ;; CUDA pass is looser because the two stacks (libtorch 2.9 vs Python
+     ;; torch 2.12) pick different cuDNN/cuBLAS algorithms and reduction
+     ;; orders, so values after 5 Adam steps drift ~1e-3 even though the
+     ;; seeded init matches.
      (define (check-training-twin label rel-path train-on device dev-tol)
        (define j
          (call-with-python-env
@@ -208,19 +192,16 @@
              [i (in-naturals)])
          (check-= r p dev-tol
                   (format "~a[~a]: parameter ~a parity" label device i))))
-     ;; 05 — the v2 capstone: the Conv-MNIST convnet trained on the committed
-     ;; 256-image fixture. Seeded conv2d/linear init + 5 full-batch Adam steps
-     ;; track PyTorch (per-step losses and every post-training parameter). The
-     ;; helper trains on a chosen device; the Python twin reads its device from
-     ;; RKTORCH_PARITY_DEVICE. CPU runs always (deterministic, CI-gating); the
-     ;; CUDA pass runs only when a GPU is present on both sides (the "accelerator
-     ;; programs match PyTorch" check) and self-skips otherwise.
+     ;; 05: the Conv-MNIST convnet trained on the committed 256-image
+     ;; fixture. CPU runs always (deterministic, CI-gating); the CUDA pass
+     ;; runs only when a GPU is present on both sides and self-skips
+     ;; otherwise.
      (let ()
-       ;; The Conv-MNIST model for the parity pass. Re-declared here (rather than
-       ;; imported from examples/racket/05-mnist.rkt) because torch/ can't reach
-       ;; examples/ once installed by copy in the nix build — and kept inside the
-       ;; python-available branch so its tensors aren't allocated when the suite
-       ;; skips. Must stay in sync with that example's convnet.
+       ;; Re-declared (rather than imported from examples/racket/
+       ;; 05-mnist.rkt) because torch/ can't reach examples/ once
+       ;; installed by copy in the nix build — and kept inside the
+       ;; python-available branch so its tensors aren't allocated when the
+       ;; suite skips. Must stay in sync with that example's convnet.
        (define-module convnet ()
          #:submodules ([c1 (Conv2d 1 16 3)]
                        [c2 (Conv2d 16 32 3)]
@@ -232,19 +213,16 @@
              c2 relu (max-pool2d 2)
              (flatten 1) f1 relu
              f2))
-       ;; Structural guard against silent divergence from the example's convnet:
-       ;; a changed layer size there trips this immediately. Shape only — it does
-       ;; NOT guard the forward body (activation choice, pooling order,
-       ;; threading); such a change surfaces instead as a step-1 parity-value
-       ;; mismatch, so treat a forward edit in the example as a cue to re-audit.
+       ;; Structural guard against silent divergence from the example's
+       ;; convnet. Shape only — it does NOT guard the forward body; a
+       ;; forward edit there surfaces as a step-1 parity-value mismatch.
        (check-equal? (map tensor-shape (parameters (convnet)))
                      '((16 1 3 3) (16) (32 16 3 3) (32)
                        (128 800) (128) (10 128) (10))
                      "convnet shape must match examples/racket/05-mnist.rkt")
-       ;; Train on `device` and return (values losses flat-params), exactly as
-       ;; examples/racket/05-mnist.rkt's run-example does. Must stay in sync with
-       ;; run-example: seed=0, steps=5, lr=0.001, full-batch on the fixture, no
-       ;; shuffling — a mismatch here shows up as a step-0 loss-parity failure.
+       ;; Must stay in sync with the example's run-example: seed=0,
+       ;; steps=5, lr=0.001, full-batch on the fixture, no shuffling — a
+       ;; mismatch shows up as a step-0 loss-parity failure.
        (define (train-on device)
          (with-default-device device
            (manual-seed! 0)
@@ -262,24 +240,16 @@
                    (cat (for/list ([p (in-list (parameters net))])
                           (reshape p -1))))))
        (check-training-twin "05_mnist" "python/05_mnist.py" train-on 'cpu tol)
-       ;; the accelerator-parity pass: only when this host has a CUDA device AND
-       ;; the Python torch here was built with CUDA (the cu130 torch-bin wheel,
-       ;; staged by `nix develop .#cuda`). On a CPU-only box / CPU torch it skips.
        (when (and (cuda-available?)
                   (python-cuda-available?))
          (check-training-twin "05_mnist" "python/05_mnist.py" train-on
                               'cuda 5e-3)))
-     ;; 06 — the v3 capstone: the char-GPT trained on the committed 841-char
-     ;; Heart of Darkness fixture, same shape as the 05 pass: seeded
-     ;; embedding/linear init + 5 full-batch Adam steps track PyTorch, CPU
-     ;; strict and CUDA looser/self-skipping via check-training-twin.
+     ;; 06: the char-GPT trained on the committed 841-char Heart of
+     ;; Darkness fixture, same shape as the 05 pass.
      (let ()
-       ;; The GPT for the parity pass. Re-declared here (rather than imported
-       ;; from examples/racket/06-gpt.rkt) because torch/ can't reach
-       ;; examples/ once installed by copy in the nix build — and kept inside
-       ;; the python-available branch so its tensors aren't allocated when the
-       ;; suite skips. Must stay in sync with that example's gpt-block/gpt
-       ;; (fixture scale: block-size 16, n-embd 32, n-head 4, n-layer 2).
+       ;; Re-declared for the same reasons as the 05 convnet above. Must
+       ;; stay in sync with the example's gpt-block/gpt (fixture scale:
+       ;; block-size 16, n-embd 32, n-head 4, n-layer 2).
        (define-module gpt-block (n-embd n-head)
          #:coerce ([n-head (if (zero? (remainder n-embd n-head))
                                n-head
@@ -328,9 +298,9 @@
        (define text (load-text-fixture))
        (define vocab (text->vocab text))
        (define v-size (vector-length vocab))
-       ;; Structural guard against silent divergence from the example's gpt
-       ;; (the convnet-guard pattern): shape only — a forward edit in the
-       ;; example surfaces as a step-0 loss-parity mismatch instead.
+       ;; Structural guard against silent divergence from the example's
+       ;; gpt: shape only — a forward edit in the example surfaces as a
+       ;; step-0 loss-parity mismatch instead.
        (define block-shapes
          '((32) (32)                              ; ln1
            (32 32) (32) (32 32) (32)              ; wq wk
@@ -343,9 +313,9 @@
                              (list '(32) '(32) (list v-size 32)
                                    (list v-size)))
                      "gpt shape must match examples/racket/06-gpt.rkt")
-       ;; Train on `device`, exactly as run-example does: seed=0, steps=5,
-       ;; lr=0.001, full-batch 16-char blocks of the fixture. Must stay in
-       ;; sync with run-example — a mismatch shows as a step-0 loss failure.
+       ;; Must stay in sync with the example's run-example: seed=0,
+       ;; steps=5, lr=0.001, full-batch 16-char blocks of the fixture — a
+       ;; mismatch shows as a step-0 loss failure.
        (define (train-on device)
          (with-default-device device
            (manual-seed! 0)
@@ -452,15 +422,11 @@
              [b (in-list (hash-ref jg 'values))]
              [i (in-naturals)])
          (check-= a b tol (format "gelu parity ~a" i))))
-     ;; the causal-attention mask idiom, end to end: build the mask from
-     ;; tril + eq (a bool tensor), fill the upper triangle of *batched*
-     ;; scores with -inf (the [T,T]-mask-over-[B,T,T] broadcast the
-     ;; training loop uses), and softmax — exactly what the 06-gpt
-     ;; capstone's attention will do. The recipe battery can't express
-     ;; -inf (not valid Python via number->string), so this facade-level
-     ;; composition is hand-checked. (Bare defines, not a let block: this
-     ;; is the clause's last check, so nothing below can capture them —
-     ;; the earlier blocks keep their lets to scope their j/net/x names.)
+     ;; the causal-attention mask idiom, end to end (tril + eq mask, -inf
+     ;; fill over batched scores, softmax): the recipe battery can't
+     ;; express -inf (not valid Python via number->string), so this
+     ;; facade-level composition is hand-checked. Bare defines are safe:
+     ;; this is the clause's last check, so nothing below can capture them.
      (define jm (python-check "causal_mask.py"))
      (manual-seed! 0)
      (define scores (randn 2 4 4))

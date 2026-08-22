@@ -6,7 +6,7 @@
 
 #include "torchrkt/c_api.h"
 
-// C-boundary goldens for the tranche-3 generated families (#22): one
+// C-boundary goldens for the tranche-3 generated families: one
 // correctness case + one error-path case per family. Value parity with
 // PyTorch is the Racket python-cross-test's job; these pin the C contract
 // the parity battery can't see — null guards, the optional-tensor nullopt

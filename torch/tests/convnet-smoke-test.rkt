@@ -5,10 +5,6 @@
 ;; its parameters survive a safetensors save/load round-trip. This exercises
 ;; the whole stack end to end — data -> conv/pool/flatten/linear ->
 ;; cross-entropy -> backward! -> adam -> state-dict.
-;;
-;; Conv2d/Linear are the nn *layers* (PascalCase, torch/nn); max-pool2d/flatten/
-;; relu are the lowercase functional ops on `torch` — the model-file import
-;; pattern, no collision (#11).
 
 (module+ test
   (require rackunit
@@ -60,6 +56,5 @@
     (for ([a (in-list (state-dict net))] [b (in-list (state-dict net2))])
       (check-equal? (car a) (car b))
       (check-equal? (tensor->list (cdr a)) (tensor->list (cdr b))))
-    ;; same params => identical predictions
     (check-equal? (tensor->list (net imgs)) (tensor->list (net2 imgs)))
     (delete-file path)))

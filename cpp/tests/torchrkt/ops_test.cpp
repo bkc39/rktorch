@@ -49,10 +49,8 @@ Handle make(const std::vector<float>& values,
                              static_cast<int64_t>(dims.size())));
 }
 
-// Contract pin for the documented NULL no-op. The throwing-release
-// behavior is pinned separately by finalizer_death_test.cpp (it
-// terminates regardless of any C++ catch; the live guarantee is the
-// Racket-side deallocator wrap in raw/memory.rkt).
+// Contract pin for the documented NULL no-op; the throwing-release behavior
+// is pinned separately by finalizer_death_test.cpp.
 TEST(TorchrktOps, TensorFreeNullIsSafe) {
   tr_tensor_free(nullptr);
 }
@@ -70,10 +68,9 @@ TEST(TorchrktOps, NbytesTracksDtypeWidth) {
 }
 
 TEST(TorchrktOps, NbytesReportsViewExtentNotStorage) {
-  // The #37 ledger's documented approximation: a view charges what it
-  // ADDRESSES, not the (possibly larger, shared) storage behind it. A
-  // narrow over half the rows must report half the bytes even though its
-  // storage is the full tensor's.
+  // The memory ledger's documented approximation: a view charges what it
+  // ADDRESSES, not the (possibly larger, shared) storage behind it — a
+  // narrow over half the rows reports half the bytes.
   const Handle t =
       make({1.0F, 2.0F, 3.0F, 4.0F, 5.0F, 6.0F, 7.0F, 8.0F}, {4, 2});
   const Handle half = Handle(tr_gen_narrow(t.t, 0, 0, 2));  // rows [0,2)
@@ -93,9 +90,8 @@ TEST(TorchrktOps, FromDataRoundTrips) {
 }
 
 TEST(TorchrktOps, FromDataI64RoundTripsExactly) {
-  // The #44 inference path: int64 in, int64 out — no float32 transit.
-  // 2^53+1 is NOT representable as a double, so a float32/64 transit
-  // would corrupt it; exact round-trip proves the path is integral.
+  // int64 in, int64 out — no float transit: 2^53+1 is NOT representable as a
+  // double, so exact round-trip proves the path is integral.
   const std::vector<int64_t> values = {1, -2, (int64_t{1} << 53) + 1};
   const std::vector<int64_t> dims = {3};
   const Handle t(
@@ -157,8 +153,7 @@ TEST(TorchrktOps, DtypeGetterReportsBoolMasks) {
 }
 
 TEST(TorchrktOps, FromDataI64OnPlacesOnExplicitCpu) {
-  // the device-move leg of the int64 ingestion, exercised at the C
-  // boundary (its float sibling has the same coverage in device_test)
+  // the device-move leg of the int64 ingestion, exercised at the C boundary
   const std::vector<int64_t> values = {1, -2, (int64_t{1} << 53) + 1};
   const std::vector<int64_t> dims = {3};
   const Handle t(tr_from_data_i64_on(values.data(), values.size(), dims.data(),
@@ -239,17 +234,12 @@ TEST(TorchrktOps, FromDataRejectsOverflowingShape) {
 }
 
 TEST(TorchrktOps, CpuOomClassifiesAsOomKind) {
-  // The portable OOM regression guard leg 1.5's design leans on: CPU
-  // allocation failure arrives via the caffe2-style enforce (a plain
-  // c10::Error naming DefaultCPUAllocator, NOT c10::OutOfMemoryError),
-  // and the classifier must still report kind 1. 2^60 floats = 2^62
-  // bytes (4 EiB): beyond the ARCHITECTURAL user address space of every
-  // 64-bit platform -- at most 2^56/2^57 virtual bits even with x86-64
-  // 5-level paging or ARM64 52-bit VA -- so no allocator can map it
-  // regardless of kernel policy or overcommit mode (an architecture
-  // bound, not an assumption; no fault-in-pages hazard). nbytes stays
-  // below INT64_MAX so ATen's own arithmetic cannot overflow into a
-  // different error shape.
+  // CPU allocation failure arrives via the caffe2-style enforce (a plain
+  // c10::Error naming DefaultCPUAllocator, NOT c10::OutOfMemoryError); the
+  // classifier must still report kind 1. 2^60 floats = 4 EiB exceeds the
+  // ARCHITECTURAL user address space of every 64-bit platform, so no
+  // allocator can map it regardless of overcommit mode; nbytes stays below
+  // INT64_MAX so ATen's own arithmetic cannot shift the error shape.
   const std::vector<int64_t> dims = {int64_t{1} << 60};
   EXPECT_EQ(tr_zeros(dims.data(), 1), nullptr);
   EXPECT_EQ(tr_last_error_kind(), 1) << tr_last_error();
@@ -259,8 +249,6 @@ TEST(TorchrktOps, CpuOomClassifiesAsOomKind) {
 TEST(TorchrktOps, GenericErrorResetsKind) {
   // kind and message are recorded together: after an OOM, a subsequent
   // generic failure must report kind 0 again, never a stale 1.
-  // (2^60 floats: the beyond-architectural-VA request, see
-  // CpuOomClassifiesAsOomKind.)
   const std::vector<int64_t> dims = {int64_t{1} << 60};
   EXPECT_EQ(tr_zeros(dims.data(), 1), nullptr);
   EXPECT_EQ(tr_last_error_kind(), 1) << tr_last_error();
@@ -406,9 +394,8 @@ TEST(TorchrktOps, Linalg) {
 TEST(TorchrktOps, ToDtypeAndUniform) {
   const Handle t = make({1.5F, 2.5F}, {2});
   const Handle i(tr_tensor_to_dtype(t.t, TR_DTYPE_INT64));
-  // Reading an INT64 tensor through data_of is safe by contract:
-  // tr_tensor_copy_data converts to CPU float32 contiguous before copying
-  // (see c_api/tensor.h), so this is a conversion, not a reinterpret.
+  // Reading an int64 tensor through data_of is a conversion by contract
+  // (tr_tensor_copy_data converts to float32 first), not a reinterpret.
   EXPECT_EQ(data_of(i.t), (std::vector<float>{1, 2}));
 
   ASSERT_EQ(tr_manual_seed(0), 0) << tr_last_error();

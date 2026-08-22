@@ -1,17 +1,16 @@
 #lang racket/base
 
-;; PR C overhead benchmark: does the OOM-kind check + retry wrap cost
-;; anything measurable? The kind probe runs ONLY on the failure path; the
-;; success path pays one extra NULL-check branch per raw call. This script
-;; measures that empirically on the real examples — run it on master and
-;; on the branch, same host, and compare.
+;; Overhead benchmark for the OOM-kind check + retry wrap. The kind probe
+;; runs ONLY on the failure path; the success path pays one extra
+;; NULL-check branch per raw call. Run on master and on the branch, same
+;; host, and compare:
 ;;
-;;   raco make scripts/bench-oom-overhead.rkt   # bytecode first, always
+;;   raco make scripts/bench-oom-overhead.rkt
 ;;   racket scripts/bench-oom-overhead.rkt
 ;;
-;; Each timing runs 3 times after a double collect-garbage; take the best
-;; (min) of the runs — the steady-state number, insulated from finalizer
-;; backlog carried in from a previous section.
+;; Best (min) of 3 runs after a double collect-garbage — the steady-state
+;; number, insulated from finalizer backlog carried in from a previous
+;; section.
 
 (require racket/format
          torch
@@ -38,8 +37,7 @@
   (printf "== bench-oom-overhead ==\n")
   (manual-seed! 0)
 
-  ;; micro: the per-op floor. 8x8 add — small enough that wrapper
-  ;; overhead, not kernel time, dominates.
+  ;; 8x8: small enough that wrapper overhead, not kernel time, dominates
   (define a (randn 8 8))
   (define b (randn 8 8))
   (define n 200000)
@@ -47,8 +45,8 @@
                     (lambda () (for ([_ (in-range n)]) (add a b)))))
   (printf "  -> ~a us/op\n" (~r (/ (* ms 1000.0) n) #:precision '(= 3)))
 
-  ;; the three examples' deterministic offline cores, on CPU for stable
-  ;; comparison (the wrap cost is device-independent Racket-side work)
+  ;; CPU for stable comparison — the wrap cost is device-independent
+  ;; Racket-side work
   (bench "04-mlp run-example (cpu)" (lambda () (mlp-run 'cpu)))
   (bench "05-mnist run-example (cpu)"
          (lambda () (mnist-run #:steps 5 #:device 'cpu)))

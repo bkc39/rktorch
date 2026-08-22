@@ -1,29 +1,17 @@
 #lang racket/base
 
-;; Reproduce PyTorch's tensor `repr` -- the form shown in the Python REPL --
-;; from a flat, row-major list of values plus a shape.  (The `tensor([[...]])`
-;; framing lives in Python's torch._tensor_str, not in libtorch, so we rebuild
-;; it here rather than getting it from the C++ printer.)
+;; Reproduce PyTorch's tensor `repr` from a flat, row-major list of values
+;; plus a shape.  The `tensor([[...]])` framing lives in Python's
+;; torch._tensor_str, not libtorch, so it is rebuilt here; fidelity rules
+;; below are pinned from the _tensor_str/_Formatter source.
 ;;
-;; Faithful for the common case: CPU float32, fixed-point notation, the default
-;; precision of 4, with PyTorch's per-tensor column alignment and the `tensor(`
-;; continuation indent.  Integer-valued tensors print in int-mode (`2.`).  When
-;; PyTorch would switch to scientific notation (very large/small magnitudes or a
-;; wide dynamic range), the caller falls back to ATen's own printer instead
-;; (see structs.rkt) rather than emitting a subtly-wrong repr.
+;; Summarized tensors arrive as a TREE with 'ellipsis markers where a
+;; dimension was elided to its edge items: the last dimension renders the
+;; marker as " ..." joined by ", " (PyTorch's double-space), higher
+;; dimensions as a "..." block between the standard separators.
 ;;
-;; Scientific notation is now reproduced (fmt-sci, the '{:.4e}' form),
-;; so the ATen-printer fallback is gone — it never summarized, which
-;; would have resurrected the large-tensor hang for wide-range floats.
-;;
-;; Large tensors (numel > 1000) summarize exactly like PyTorch (#45):
-;; callers hand this module a TREE with 'ellipsis markers where a
-;; dimension was elided to its edge items; the last dimension renders the
-;; marker as the literal " ..." joined by ", " (PyTorch's double-space),
-;; higher dimensions as a "..." block between the standard separators.
-;;
-;; Not yet reproduced (v0 TODO): dtype suffixes for non-float32
-;; non-empty tensors.
+;; Not yet reproduced (TODO): dtype suffixes for non-float32 non-empty
+;; tensors.
 
 (require (only-in racket/format ~r)
          (only-in racket/list append-map drop take)
@@ -88,9 +76,8 @@
          (> mx 1e8)
          (< mn 1e-4))]))
 
-;; int64 tensors print bare integers ("1", never "1.") — exactly
-;; torch.tensor([1, 2, 3])'s repr. The values arrive as exact integers
-;; from the int64 copy-out, so number->string is already faithful.
+;; int64 tensors print bare integers ("1", never "1."); the values arrive
+;; exact from the int64 copy-out, so number->string is already faithful.
 (define (fmt-exact x)
   (number->string x))
 
@@ -115,13 +102,10 @@
       [sci? fmt-sci]
       [int-mode? fmt-int]
       [else fmt-fixed]))
-  ;; ONE width governs both padding and the wrap budget, exactly
-  ;; _Formatter's max_width: for FLOATING tensors (int-mode, fixed and
-  ;; sci alike) it folds over the NONZERO FINITE values only (default 1
-  ;; when empty) — so "0." and "nan" can render wider than the width
-  ;; and simply go unpadded, and all-zero/all-non-finite rows
-  ;; legitimately overflow 80 columns; integer and bool tensors fold
-  ;; over all values.
+  ;; ONE width governs padding and the wrap budget (_Formatter's
+  ;; max_width): floating tensors fold over the NONZERO FINITE values only
+  ;; (default 1), so "0."/"nan" can exceed the width and go unpadded and
+  ;; all-zero rows may overflow 80 columns; integer/bool fold over all.
   (define width
     (if (memq mode '(exact-integers booleans))
         (for/fold ([w 0]) ([x (in-list flat)])
@@ -134,7 +118,6 @@
 (define (pad s width)
   (string-append (make-string (max 0 (- width (string-length s))) #\space) s))
 
-;; Rebuild nested lists from the flat row-major data, per the shape.
 (define (nest flat dims)
   (cond
     [(null? dims) (car flat)]
@@ -148,10 +131,9 @@
   (cond
     [(null? dims) (pad (fmt node) max-width)]
     [(null? (cdr dims))
-     ;; PyTorch wraps rows at a fixed floor((80 - indent) / (wrap-width
-     ;; + 2)) elements per line (the ellipsis occupies one slot),
-     ;; continuation lines indented one past the opening bracket;
-     ;; wrap-width carries the int-mode dot quirk (see make-formatter).
+     ;; PyTorch wraps rows at floor((80 - indent) / (width + 2)) elements
+     ;; per line (the ellipsis occupies one slot), continuation lines
+     ;; indented one past the opening bracket.
      (define rendered
        (for/list ([v (in-list node)])
          (if (eq? v 'ellipsis) " ..." (pad (fmt v) max-width))))
@@ -168,8 +150,6 @@
 " (make-string (add1 indent) #\space))
                   #:before-first "[" #:after-last "]")]
     [else
-     ;; Separator between sub-blocks: a comma, (rank-1) newlines, then enough
-     ;; spaces to align the next sub-block under this one.
      (define sep
        (string-append "," (make-string (sub1 (length dims)) #\newline)
                       (make-string (add1 indent) #\space)))
@@ -188,20 +168,16 @@
                  (format-nested (nest flat dims) dims 7 fmt max-width)
                  ")"))
 
-;; The values present in a summarized tree, in order ('ellipsis markers
-;; skipped) — the population the formatter and the sci-notation heuristic
-;; run over, exactly PyTorch's behavior of formatting from the SELECTED
-;; elements.
+;; The population the formatter and sci heuristic run over — PyTorch
+;; formats from the SELECTED elements, 'ellipsis markers skipped.
 (define (tree-values node)
   (cond
     [(eq? node 'ellipsis) '()]
     [(list? node) (append-map tree-values node)]
     [else (list node)]))
 
-;; The summarized entry point: `tree` is nested per `dims`' structure but
-;; with elided dimensions holding only edge items around an 'ellipsis
-;; marker; `dims` supplies depth (for indent and last-dim detection), not
-;; lengths.
+;; Summarized entry point: `dims` supplies depth (indent and last-dim
+;; detection), not lengths — elided dimensions hold only edge items.
 (define (tensor-tree->pytorch-repr tree dims #:mode [mode #f])
   (define-values (fmt max-width) (make-formatter (tree-values tree) mode))
   (string-append "tensor("

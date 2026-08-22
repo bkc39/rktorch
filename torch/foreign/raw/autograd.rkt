@@ -1,9 +1,8 @@
 #lang racket/base
 
-;; Raw autograd bindings (autograd.h). tr-tensor-grad/raw returns a handle
-;; that SHARES storage with the live .grad — it still gets its own allocator
-;; finalizer because the C side wraps it in a fresh tr_tensor box; freeing the
-;; box releases one reference, not the gradient itself.
+;; Raw autograd bindings (autograd.h). tr-tensor-grad/raw returns a fresh
+;; tr_tensor box SHARING storage with the live .grad — freeing the box
+;; releases one reference, not the gradient itself.
 
 (require (only-in ffi/unsafe _bool _double _fun _int _ptr)
          (only-in "memory.rkt" tensor-allocator)

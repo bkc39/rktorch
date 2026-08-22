@@ -1,9 +1,9 @@
 #lang racket/base
 
 ;; Shared python-subprocess infrastructure for the PyTorch parity suites
-;; (python-cross-test.rkt and generated-parity-test.rkt, split per #29):
-;; locating python3, the CUDA LD_LIBRARY_PATH pinning, torch-availability
-;; probes, the reference-program runners, and the shared float tolerance.
+;; (python-cross-test.rkt and generated-parity-test.rkt): locating
+;; python3, the CUDA LD_LIBRARY_PATH pinning, torch-availability probes,
+;; the reference-program runners, and the shared float tolerance.
 ;;
 ;; Tolerance, not bit-exactness: v0 builds the C++ side against libtorch-bin,
 ;; which may differ in patch version from the Python torch here.  Seeded CPU

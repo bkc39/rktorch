@@ -1,16 +1,10 @@
 #lang racket/base
 
-;; Hand-curated promotions of the generated surface into the contracted
-;; public facade. The codegen generator emits uncontracted bindings into
-;; torch/generated.rkt (the unstable surface); this module wraps the ones
-;; whose ergonomics are settled (issue #3): ergonomic conv/pool wrappers
-;; with PyTorch-style keyword defaults, comparison dispatchers that take a
-;; tensor or real rhs, and a `flatten` that shadow-dispatches like
-;; max/min/argmax (tensors collapse dims; anything else defers to
-;; racket/list). The Adam in-place family and loss primitives stay
-;; uncontracted in torch/generated.rkt -- the nn layer (#4) wraps those.
-;;
-;; Contracts live in ../foreign.rkt.
+;; Hand-curated promotions of the generated surface (torch/generated.rkt,
+;; uncontracted) into the contracted public facade: conv/pool wrappers
+;; with PyTorch-style keyword defaults, comparison dispatchers over a
+;; tensor-or-real rhs, and a shadow-dispatching `flatten`.  Contracts
+;; live in ../foreign.rkt.
 
 (require (only-in racket/list drop [flatten list-flatten] take)
          (only-in "ops.rkt" tensor-device tensor-dtype tensor-shape)
@@ -39,19 +33,16 @@
          eq ne lt le gt ge
          conv2d max-pool2d avg-pool2d adaptive-avg-pool2d
          tril triu masked-fill embedding layer-norm
-         ;; narrow needs no wrapper (no keyword defaulting, no dispatch); the
-         ;; generated binding already has the right name and contract target.
-         ;; Like torch.narrow it returns a *view* aliasing the source storage
-         ;; (in-place writes to the result mutate the original); ATen
-         ;; refcounting keeps storage alive regardless of GC order.
+         ;; narrow needs no wrapper. Like torch.narrow it returns a *view*
+         ;; aliasing the source storage (in-place writes to the result
+         ;; mutate the original); ATen refcounting keeps the storage alive
+         ;; regardless of GC order.
          (rename-out [g:narrow narrow]))
 
 ;; ------------------------------------------------------------ flatten shim
 
-;; (flatten tensor [start-dim] [end-dim]) collapses dims start..end into one,
-;; via reshape over the queried shape -- so no new C op is needed. Given a
-;; non-tensor it defers to racket/list's flatten, keeping `(require torch)`
-;; safe for list code (the max/min/argmax convention).
+;; Collapses dims start..end into one via reshape over the cached shape;
+;; a non-tensor defers to racket/list's flatten.
 (define (flatten v [start-dim 0] [end-dim -1])
   (cond
     [(tensor? v)
@@ -59,9 +50,8 @@
      (define n (length shp))
      (cond
        [(zero? n)
-        ;; A 0-d tensor admits only the trivial dim 0 (or -1, which PyTorch
-        ;; normalizes to 0); anything else is out of range (PyTorch raises
-        ;; IndexError) rather than a silent flatten to [1].
+        ;; A 0-d tensor admits only dim 0 (or -1, which PyTorch normalizes
+        ;; to 0); anything else raises, as PyTorch's IndexError does.
         (unless (and (memv start-dim '(0 -1)) (memv end-dim '(0 -1)))
           (error 'flatten
                  "invalid dim range [~a, ~a] for a 0-d tensor"
@@ -74,8 +64,8 @@
           (error 'flatten
                  "invalid dim range [~a, ~a] for a ~a-d tensor"
                  start-dim end-dim n))
-        ;; apply * over for/list, not for/product: the latter is a recent
-        ;; racket/base addition, and this keeps no version floor.
+        ;; not for/product: a recent racket/base addition; this keeps no
+        ;; version floor
         (define collapsed
           (apply * (for/list ([d (in-list shp)] [i (in-naturals)]
                                                  #:when (<= s i e))
@@ -87,14 +77,11 @@
 
 ;; --------------------------------------------------- comparison dispatchers
 
-;; eq/ne/lt/le/gt/ge over a tensor lhs and a tensor-or-real rhs. The result
-;; handle is a genuine bool tensor (what masked-fill demands); only the
-;; read path (tensor->list / repr) coerces the values to float32.
-;;
-;; An exact-integer rhs against an int64 lhs routes through a TENSOR rhs:
-;; the scalar path transits a C double, which rounds past 2^53 and could
-;; flip the comparison RESULT (not merely a dtype) — e.g.
-;; (lt (tensor (expt 2 53)) (add1 (expt 2 53))) must be true.
+;; The result handle is a genuine bool tensor (what masked-fill demands);
+;; only the read path coerces the values to float32.  An exact-integer rhs
+;; against an int64 lhs routes through a TENSOR rhs: the scalar path
+;; transits a C double, which rounds past 2^53 and could flip the
+;; comparison RESULT.
 (define ((comparison t-op s-op) a b)
   (cond
     [(tensor? b) (t-op a b)]
@@ -148,18 +135,16 @@
 (define (adaptive-avg-pool2d input output-size)
   (g:adaptive-avg-pool2d input (->2d output-size)))
 
-;; ------------------------------------------- transformer primitives (#22)
+;; ------------------------------------------- transformer primitives
 
-;; tril/triu with PyTorch's default diagonal. The GPT causal mask is
-;; (eq (tril (ones T T)) 0) -- a bool tensor marking the *upper* triangle.
 (define (tril self [diagonal 0])
   (g:tril self diagonal))
 
 (define (triu self [diagonal 0])
   (g:triu self diagonal))
 
-;; masked-fill: mask must be a bool tensor (a comparison-op result) --
-;; ATen rejects float masks. `value` may be -inf.0 (the softmax mask).
+;; mask must be a bool tensor (a comparison-op result) — ATen rejects
+;; float masks. `value` may be -inf.0.
 (define (masked-fill self mask value)
   (g:masked-fill-scalar self mask (exact->inexact value)))
 
@@ -168,9 +153,8 @@
 (define (embedding input weight #:padding-idx [padding-idx #f])
   (g:embedding weight input (or padding-idx -1) #f #f))
 
-;; F.layer_norm defaults: no affine params unless given, eps 1e-5;
-;; cudnn_enable stays #t like torch.nn.functional.layer_norm.
-;; normalized-shape takes an int (the trailing dim) or an explicit list.
+;; F.layer_norm defaults: no affine params unless given, eps 1e-5,
+;; cudnn_enable #t. normalized-shape takes an int or an explicit list.
 (define (layer-norm input normalized-shape
                     #:weight [weight #f]
                     #:bias [bias #f]

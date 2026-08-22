@@ -27,7 +27,6 @@
     ;; any inexact demotes the whole tensor to float32
     (check-equal? (tensor-dtype (tensor '(1 2.0 3))) 'float32)
     (check-equal? (tensor-dtype (tensor '(1.0 2.0))) 'float32)
-    ;; scalars follow the same rule
     (check-equal? (tensor-dtype (tensor 5)) 'int64)
     (check-equal? (tensor-dtype (tensor 5.0)) 'float32)
     ;; int64 data round-trips exactly — (2^53)+1 is unrepresentable as a
@@ -54,7 +53,6 @@
     (check-equal? (tensor->repr (tensor '())) "tensor([])")
     (check-equal? (tensor->repr (tensor '() #:dtype 'int64))
                   "tensor([], dtype=torch.int64)")
-    ;; multi-dim empties carry torch's size= clause
     (check-equal? (tensor->repr (tensor '(() ())))
                   "tensor([], size=(2, 0))")
     (check-equal? (tensor->repr (tensor '(() ()) #:dtype 'int64))
@@ -74,8 +72,7 @@
       (check-exn exn:fail:contract? (lambda () (device 'cpu 1)))
       ;; ...but the one valid CPU ordinal stays accepted
       (check-equal? (device 'cpu 0) (cpu-device)))
-    ;; comparisons produce genuine bool tensors, the query says so, and
-    ;; the repr prints True/False like torch
+    ;; bool tensors print True/False like torch
     (check-equal? (dtype (eq (tensor '(1 2)) 1)) 'bool)
     (check-equal? (tensor->repr (eq (tensor '(1 2)) 1))
                   "tensor([ True, False])")
@@ -144,7 +141,7 @@
 
   (test-case "elementwise with scalar dispatch on either side"
     (define x (tensor '(1 -2 3)))
-    ;; tensor⊕tensor stays int64 — torch's integer arithmetic (#44)
+    ;; tensor⊕tensor stays int64 — torch's integer arithmetic
     (check-equal? (tensor->list (add x x)) '(2 -4 6))
     ;; KNOWN DEVIATION: scalar operands marshal as C doubles, so an
     ;; int64 tensor ⊕ exact-integer scalar promotes to float32 — PyTorch
@@ -185,7 +182,6 @@
     (define mask (ne (tensor '(0 1 0 1)) 0))
     (check-equal? (tensor->list (masked-fill x mask -100))
                   '(10 -100 30 -100))
-    ;; the causal-mask composition: upper triangle goes to the fill value.
     (define causal (eq (tril (ones 2 2)) 0))
     (check-equal? (tensor->list (masked-fill (ones 2 2) causal 0))
                   '(1.0 0.0 1.0 1.0))
@@ -261,8 +257,7 @@
     (define t (tensor '((1.0 2.0) (3.0 4.0))))
     (check-equal? (item (sum t)) 10.0)
     (check-equal? (item (mean t)) 2.5)
-    ;; argmax returns int64 indices — exact integers out (#44), and
-    ;; item on an int64 scalar is exact too
+    ;; argmax returns int64 indices — exact integers out
     (check-equal? (tensor->list (argmax t 1)) '(1 1))
     (check-equal? (item (argmax t)) 3)
     (check-equal? (tensor-shape (argmax t 1 #:keepdim #t)) '(2 1))
@@ -277,7 +272,7 @@
     (check-equal? (tensor->list (matmul a a)) '(7 10 15 22))
     (check-equal? (tensor->list (mm a a)) '(7 10 15 22))
     (check-equal? (tensor->list (mv a v)) '(3 7))
-    ;; int64 dot -> exact int64 item (#44)
+    ;; int64 dot -> exact int64 item
     (check-equal? (item (dot v v)) 2)
     ;; shape mismatch surfaces as a Racket error carrying the C++ message
     (check-exn exn:fail? (lambda () (mv a (tensor '(1 1 1))))))
@@ -290,7 +285,6 @@
     (check-equal? (item (tensor (+ (expt 2 53) 1))) (+ (expt 2 53) 1))
     (check-exn exn:fail? (lambda () (item (tensor '(1 2)))))
     (define i (to-dtype (tensor '(1.5 2.5)) 'int64))
-    ;; int64 marshals out exact (#44)
     (check-equal? (tensor->list i) '(1 2)))
 
   (test-case "+ - * / dispatch on tensors and stay racket/base on numbers"
@@ -344,7 +338,6 @@
     (check-equal? (dtype (tensor (vector 1 2.0))) 'float32)
     (check-equal? (shape (tensor (vector (vector 1.0 2.0) (vector 3.0 4.0))))
                   '(2 2))
-    ;; nesting levels can mix container types freely
     (check-equal? (tensor->list (tensor (list (vector 1 2) (list 3 4))))
                   '(1 2 3 4))
     (check-equal? (shape (tensor (vector '((1.0) (2.0)) '((3.0) (4.0)))))
@@ -367,7 +360,6 @@
                   '(1))
     (check-equal? (tensor->list (tensor (s64vector 3) #:dtype 'float32))
                   '(3.0))
-    ;; empties and raggedness behave exactly like the list path
     (check-equal? (dtype (tensor (vector))) 'float32)
     (check-equal? (tensor->repr (tensor (vector (vector) (vector))))
                   "tensor([], size=(2, 0))")
@@ -411,7 +403,6 @@
 
   (test-case "comparison dispatchers: tensor rhs and real rhs agree"
     (define a (tensor '(1 2 3)))
-    ;; tensor-vs-tensor branch
     (check-equal? (tensor->list (eq a (tensor '(1 5 3)))) '(1.0 0.0 1.0))
     (check-equal? (tensor->list (lt a (tensor '(2 2 2)))) '(1.0 0.0 0.0))
     ;; tensor-vs-real branch (exact->inexact path) -- same masks

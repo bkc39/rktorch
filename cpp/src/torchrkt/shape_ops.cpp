@@ -17,7 +17,6 @@ std::vector<int64_t> to_shape(const int64_t* dims, int64_t ndim) {
   return {dims, dims + ndim};
 }
 
-// Gather an array of handles into torch::Tensor values, rejecting NULLs.
 std::vector<torch::Tensor> collect(const tr_tensor* const* tensors, int64_t n) {
   std::vector<torch::Tensor> values;
   values.reserve(static_cast<size_t>(n));

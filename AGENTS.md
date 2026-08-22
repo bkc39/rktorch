@@ -277,6 +277,28 @@ Conventions:
   (`tr_gen_{matmul,mm,mv,dot}`) stay permanently allowlisted and bit-checked
   against the authoritative hand-written family.
 
+## Comment policy
+
+Before submitting a PR, actively REMOVE comments. Code should be as
+self-documenting as possible; when a comment exists to compensate for
+unclear code, rearchitect (rename, extract a helper, tighten a contract)
+until the comment is redundant, then delete it.
+
+The only comments that stay carry something the code cannot express, in
+one or two lines:
+
+- a genuine invariant invisible in the code (finalizers run in atomic
+  mode; the OOM retry must compose OUTSIDE the allocator wrap)
+- a strange cross-boundary interaction (FFI marshalling gotchas, noexcept
+  walls, cuBLAS's missing int64 matmul)
+- a documented deviation from reference behavior (e.g. a PyTorch-parity
+  gap that is deliberate)
+
+Never keepers: narration of what the next line does, why a change was
+made (commit message's job), review-round archaeology, restated names, or
+issue-number tags on every mention of a mechanism. The literate examples
+(`examples/racket/*.rkt`) are prose-by-design and exempt.
+
 ## CI
 
 `.github/workflows/nix.yml`: `nix flake check` on `ubuntu-latest` +

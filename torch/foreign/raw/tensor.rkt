@@ -1,8 +1,6 @@
 #lang racket/base
 
-;; Raw accessors over the opaque _Tensor handle (the handle type itself
-;; and its deallocator live in syntax.rkt with the rest of the FFI
-;; substrate).
+;; Raw accessors over the opaque _Tensor handle.
 
 (require (only-in ffi/unsafe
                   _bytes
@@ -71,10 +69,7 @@
 (define _tr-dtype
   (_enum '(float32 = 0 float64 = 1 int64 = 2 bool = 3)))
 
-;; The one decoder for raw dtype codes (tr-tensor-dtype/raw returns the
-;; plain int so error paths can't poison an enum unmarshal): #f for
-;; codes outside the enum (e.g. bool masks). Shared by ops.rkt and
-;; structs.rkt so the encoding has a single source of truth.
+;; #f for codes outside the enum (e.g. bool comparison masks).
 (define (dtype-code->symbol n)
   (case n
     [(0) 'float32]
@@ -83,11 +78,9 @@
     [(3) 'bool]
     [else #f]))
 
-;; The out param is a plain _int, NOT _tr-dtype: on the error path (a
-;; dtype outside the enum, e.g. a bool comparison mask) the C side never
-;; writes the out param, and an enum unmarshal of that garbage raises
-;; BEFORE the caller can check rc. Callers convert after the rc check
-;; (dtype-int->symbol in ops.rkt).
+;; out is a plain _int, NOT _tr-dtype: on the error path the C side never
+;; writes it, and an enum unmarshal of that garbage raises BEFORE the
+;; caller can check rc. Callers convert after the rc check.
 (define-torch tr-tensor-dtype/raw
   (_fun (t : _Tensor) (out : (_ptr o _int)) -> (rc : _int)
         -> (values rc out))
@@ -103,8 +96,8 @@
         -> (values rc out-numel))
   #:c-id tr_tensor_copy_data_f64)
 
-;; tr-tensor-copy-data/raw's int64 sibling (#44): copies via a CPU/int64
-;; conversion so integer tensors round-trip exactly.
+;; int64 sibling: copies via a CPU/int64 conversion so integer tensors
+;; round-trip exactly.
 (define-torch tr-tensor-copy-data-i64/raw
   (_fun (t : _Tensor)
         (capacity : _uint64)
@@ -114,11 +107,9 @@
         -> (values rc out-numel))
   #:c-id tr_tensor_copy_data_i64)
 
-;; Bound against the GENERATED narrow shim (tr_gen_narrow): the repr
-;; summarizer in structs.rkt needs edge slices, and it sits below
-;; generated.rkt in the require graph (generated.rkt requires
-;; structs.rkt for wrap-tensor), so the raw layer carries its own
-;; binding to the same C symbol.
+;; Bound against the generated tr_gen_narrow: structs.rkt's repr
+;; summarizer needs slices but sits below generated.rkt in the require
+;; graph, so the raw layer carries its own binding to the same C symbol.
 (define-torch tr-tensor-narrow/raw
   (_fun (t : _Tensor)
         (dim : _int64)
@@ -135,8 +126,6 @@
         -> (values rc out))
   #:c-id tr_tensor_item)
 
-;; to-dtype allocates a fresh handle, so it carries the allocator wrap even
-;; though it lives with the accessors.
 (define-torch tr-tensor-to-dtype/raw
   (_fun (t : _Tensor) (dtype : _tr-dtype) -> _Tensor/null)
   #:c-id tr_tensor_to_dtype

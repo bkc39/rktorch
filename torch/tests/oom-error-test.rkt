@@ -1,6 +1,6 @@
 #lang racket/base
 
-;; Leg 1.5 (#38): typed OOM errors + the collect-and-retry mechanism.
+;; Typed OOM errors (#38) + the collect-and-retry mechanism.
 ;;
 ;; The end-to-end cases lean on the one portably provokable exhaustion:
 ;; a CPU request beyond the architectural user address space of every

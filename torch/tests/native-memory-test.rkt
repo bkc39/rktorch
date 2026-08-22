@@ -2,8 +2,8 @@
 
 ;; Tests for the #37 native-memory accounting: the phantom-bytes pressure
 ;; charge and the per-device fold-on-query ledger behind native-memory-use.
-;; The churn case is the permanent "the mechanism actually engages" guard —
-;; the PR-A lesson that plausible-looking wiring can be dead code.
+;; The churn case is the permanent "the mechanism actually engages" guard:
+;; plausible-looking pressure wiring can be dead code.
 
 (module+ test
   (require rackunit
@@ -22,7 +22,6 @@
                          #:when (regexp-match? #rx"^VmRSS" l))
                (* 1024 (string->number (cadr (string-split l)))))))))
 
-  ;; Live cpu bytes as the ledger reports them right now.
   (define (cpu-bytes)
     (cond [(assoc (cpu-device) (native-memory-use)) => cdr]
           [else 0]))
@@ -50,8 +49,8 @@
     (define t (zeros 1024 1024)) ;; 4 MiB float32
     (check-true (>= (- (cpu-bytes) base) (* 4 1024 1024))
                 "ledger charged the allocation")
-    ;; the identity round-trip: dropping the only reference must bring the
-    ;; ledger back down via the finalizer path (weak entry + unaccount!)
+    ;; dropping the only reference must bring the ledger back down via the
+    ;; finalizer path (weak entry + unaccount!)
     (set! t #f)
     (collect-until (lambda () (< (- (cpu-bytes) base) (* 1024 1024))))
     (check-true (< (- (cpu-bytes) base) (* 1024 1024))
@@ -78,15 +77,11 @@
     (check-true (< (- (cpu-bytes) base) (* 512 1024))))
 
   (test-case "pressure triggers collection WITHOUT manual collects"
-    ;; The end-to-end #37 claim, automated: churn 800 MiB of dropped
-    ;; tensors while never calling collect-garbage. The phantom charge
-    ;; must make the GC collect of its own accord, running finalizers
-    ;; that drop ledger entries — so the ledger's high-water stays well
-    ;; under the total churn. Without pressure the ledger would climb
-    ;; monotonically to the full 800 MiB (no collection means no
-    ;; finalization means entries never drop). Generous bound: GC
-    ;; heuristics vary, but any functioning pressure keeps the
-    ;; high-water far below everything-retained.
+    ;; The end-to-end #37 claim: the phantom charge must make the GC
+    ;; collect of its own accord, so the ledger's high-water stays well
+    ;; under the 800 MiB churned; without pressure it would climb
+    ;; monotonically to the full churn. The bound is generous because GC
+    ;; heuristics vary.
     (define base (settled-baseline))
     (define rss-before (current-rss-bytes))
     (define high-water

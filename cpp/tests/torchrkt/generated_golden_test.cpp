@@ -6,7 +6,7 @@
 
 #include "torchrkt/c_api.h"
 
-// Golden-equivalence proof for the codegen pipeline (#2): the generated
+// Golden-equivalence proof for the codegen pipeline: the generated
 // tr_gen_* linalg ops must be bit-identical to the hand-written tr_* ops
 // they shadow. The hand-written family stays authoritative; this test is
 // what licenses trusting the generator for ops that have no hand-written

@@ -32,9 +32,8 @@
 (define n-head 4)
 (define n-layer 4)
 (define prompts '("The " "Marlow " "The river "))
-;; Post-training checkpoint prefix: <prefix>.safetensors holds the weights
-;; (Python-safetensors-compatible, via save-state!) and <prefix>.rktd the
-;; vocab + architecture sidecar scripts/generate-gpt.rkt rebuilds from.
+;; <prefix>.safetensors holds the weights, <prefix>.rktd the vocab +
+;; architecture sidecar scripts/generate-gpt.rkt rebuilds from
 (define checkpoint (or (getenv "CHECKPOINT") "checkpoints/gpt-hod"))
 
 (define device (pick-device))
@@ -54,14 +53,13 @@
   (define net (gpt v-size block-size
                    #:n-embd n-embd #:n-head n-head #:n-layer n-layer))
   (define opt (adam (parameters net) #:lr 0.0003))
-  ;; An epoch is one deterministic pass over the contiguous minibatches (the
-  ;; trailing partial batch is dropped); the printed loss is the mean over
-  ;; the epoch's steps, so early epochs average in their fast initial drop.
+  ;; The printed loss is the mean over the epoch's steps, so early epochs
+  ;; average in their fast initial drop; the trailing partial batch drops.
   (for ([epoch (in-range 1 (add1 epochs))])
     (define-values (total steps)
-      ;; Inclusive of the final window at n - batch (in-range's end is
-      ;; exclusive), so an evenly divisible corpus trains its last batch
-      ;; and batch = n runs one full-batch step instead of zero.
+      ;; add1: inclusive of the final window at n - batch, so an evenly
+      ;; divisible corpus trains its last batch and batch = n runs one
+      ;; full-batch step instead of zero
       (for/fold ([total 0.0] [steps 0])
                 ([start (in-range 0 (add1 (- n batch)) batch)])
         (zero-grads! opt)
@@ -75,16 +73,11 @@
     (printf "epoch ~a/~a: mean loss ~a\n"
             epoch epochs (~r (/ total steps) #:precision '(= 4)))
     (flush-output))
-  ;; Training's per-step intermediates are dead now; return their cached
-  ;; VRAM to the driver before the generation phase (and any co-tenant
-  ;; jobs) so the epoch high-water doesn't linger as reserved-but-unused
-  ;; cache. reclaim-native-memory! runs the collect -> finalizer-drain ->
-  ;; empty-cache sequence in order (a bare collect+empty races the
+  ;; Return the epoch high-water's cached VRAM to the driver before the
+  ;; generation phase; reclaim-native-memory! sequences collect ->
+  ;; finalizer-drain -> empty-cache (a bare collect+empty races the
   ;; asynchronous finalizer executor).
   (reclaim-native-memory!)
-  ;; Persist the trained weights + the sidecar generate-gpt.rkt needs to
-  ;; rebuild the exact model (vocab as a string in id order, architecture,
-  ;; and the run's epoch count for provenance).
   (let ([dir (path-only (string->path checkpoint))])
     (when dir (make-directory* dir)))
   (save-state! net (string-append checkpoint ".safetensors"))
@@ -98,7 +91,6 @@
                    (cons 'epochs epochs))
              out)))
   (printf "\ncheckpoint: ~a.safetensors (+ .rktd sidecar)\n" checkpoint)
-  ;; generate derives the device and context limit from the net itself.
   (for ([prompt (in-list prompts)])
     (printf "\n--- prompt ~v ---\n~a\n" prompt
             (generate net vocab prompt #:steps 300))))

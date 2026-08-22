@@ -1,14 +1,10 @@
 #lang racket/base
 
-;; Safe wrappers for the v1 op tranche (creation, shape, elementwise,
-;; reductions, linalg), built on the raw layer + the tensor wrapper struct.
-;; Contracts live in ../foreign.rkt.
-;;
-;; Naming: ops whose names collide with racket/base or racket/list
-;; (exp log sqrt tanh max min argmax) are generic — given a tensor they hit
-;; libtorch, given numbers they defer to the original — so
-;; `(require torch)` doesn't break numeric code.
-;; Binary arithmetic accepts a real on either side via the *_scalar shims.
+;; Safe wrappers for creation, shape, elementwise, reduction, and linalg
+;; ops; contracts live in ../foreign.rkt.  Ops whose names collide with
+;; racket/base or racket/list (exp log sqrt tanh max min argmax) shadow-
+;; dispatch: a tensor hits libtorch, anything else defers to the original,
+;; so `(require torch)` doesn't break numeric code.
 
 (require (only-in ffi/vector
                   f32vector->list
@@ -155,11 +151,9 @@
 (define (eye n [m n])
   (wrap 'eye (tr-eye/raw n m)))
 
-;; Shape inference walks the first element of each nesting level, exactly like
+;; Shape inference walks the first element of each nesting level, like
 ;; torch.tensor; check-regular then holds every sibling to these dims.
-;; Any level may be a list, a vector, or (as a leaf run) a homogeneous
-;; f32vector/s64vector — mixed nesting is fine, matching torch.tensor's
-;; acceptance of any reasonable sequence nesting.
+;; Mixed list/vector/homogeneous-leaf nesting is fine.
 (define (nested-dims data)
   (cond
     [(list? data)
@@ -184,11 +178,9 @@
   (define kids (sequence-children data))
   (if kids (append-map sequence-flatten kids) (list data)))
 
-;; Every sibling must match the dims inferred from the first element at
-;; each level — a leaf count times out against (apply * dims) cannot
-;; catch depth-ragged input like ((1 2) ((3) (4))), whose 4 leaves
-;; satisfy 2x2 while the second row nests one level deeper.
-;; torch.tensor validates recursively and raises here too.
+;; A flat leaf count against (apply * dims) cannot catch depth-ragged
+;; input like ((1 2) ((3) (4))) — 4 leaves satisfy 2x2 while the second
+;; row nests deeper — so validate recursively, as torch.tensor does.
 (define (check-regular data dims d)
   (define kids (sequence-children data))
   (cond
@@ -216,8 +208,8 @@
     [(exact-integer? x) x]
     [(rational? x) (inexact->exact (truncate x))]
     [else
-     ;; +inf.0/-inf.0/+nan.0 have no int64 value; raise tensor's own
-     ;; error shape, not a raw conversion failure (torch errors here too)
+     ;; non-finite values have no int64 value; raise tensor's own error
+     ;; shape, not a raw conversion failure (torch errors here too)
      (error 'tensor "cannot convert non-finite value to int64: ~e" x)]))
 
 (define (tensor data
@@ -227,16 +219,12 @@
   (unless (memq dtype '(#f float32 int64))
     (error 'tensor "unsupported #:dtype (float32 or int64): ~e" dtype))
   (define dims (nested-dims data))
-  ;; dtype mirrors torch.tensor's inference (#44): all exact integers
-  ;; infer int64; anything inexact (or an exact rational) infers
-  ;; float32, PyTorch's default float dtype. #:dtype overrides either
-  ;; way ('int64 truncates toward zero, torch's cast semantics).
-  ;; Booleans and a float64 ingestion path are future work.
-  ;; empty data stays float32 — torch.tensor([]) is float32, and the
-  ;; vacuous andmap must not flip it to int64.
-  ;; A top-level f32vector/s64vector already matching the target dtype
-  ;; is handed to the FFI as-is — zero conversion copies (the C side
-  ;; still clones, so there is no lifetime coupling to the buffer).
+  ;; dtype inference (#44) mirrors torch.tensor: all exact integers infer
+  ;; int64, anything inexact infers float32; #:dtype overrides ('int64
+  ;; truncates toward zero). Empty data stays float32 — the vacuous andmap
+  ;; must not flip torch.tensor([])'s dtype. A top-level f32vector/
+  ;; s64vector matching the target dtype passes to the FFI as-is (the C
+  ;; side clones, so no lifetime coupling to the buffer).
   (define-values (chosen payload numel)
     (cond
       [(and (f32vector? data) (not (eq? dtype 'int64)))
@@ -253,8 +241,6 @@
                  'float32)))
        (case inferred
          [(int64)
-          ;; exact integers marshal untouched — no float32 transit, so
-          ;; values beyond 2^24 (and 2^53) stay exact
           (values 'int64
                   (list->s64vector (map exact-int64 flat))
                   (length flat))]
@@ -262,14 +248,12 @@
           (values 'float32
                   (list->f32vector (map exact->inexact flat))
                   (length flat))])]))
-  ;; #:device passes the placement into NATIVE construction
-  ;; (tr_from_data_on) rather than scoping the process-global default
-  ;; (races concurrent constructors) or constructing-then-moving (the
-  ;; construction itself routes host data through the default device, so
-  ;; an explicitly-CPU tensor under a CUDA default would bounce
-  ;; host->GPU->CPU — or CUDA-OOM). requires-grad! comes after placement
-  ;; so the result is a LEAF on the target device, matching
-  ;; torch.tensor(data, device=..., requires_grad=True).
+  ;; #:device feeds NATIVE construction rather than scoping the global
+  ;; default (races concurrent constructors) or constructing-then-moving
+  ;; (host data routes through the default device, so an explicitly-CPU
+  ;; tensor under a CUDA default would bounce host->GPU->CPU, or OOM).
+  ;; requires-grad! comes after placement so the result is a LEAF on the
+  ;; target device.
   (define dim-vec (list->s64vector dims))
   (define-values (type index)
     (if device (device->type+index device) (values #f #f)))
@@ -322,9 +306,8 @@
 
 ;; -------------------------------------------------------------- elementwise
 
-;; Dispatch one binary op over tensor/real argument combinations.
-;; swapped-scalar handles (op real tensor) and must be the algebraic rewrite
-;; of putting the scalar on the left.
+;; swapped-scalar handles (op real tensor) and must be the algebraic
+;; rewrite of putting the scalar on the left.
 (define (binary-dispatch who t-op s-op a b swapped-scalar)
   (cond
     [(and (tensor? a) (tensor? b)) (wrap who (t-op a b))]
@@ -380,8 +363,7 @@
 (define (tanh v)
   (if (tensor? v) (wrap 'tanh (tr-tanh/raw v)) (base:tanh v)))
 
-;; Exact (erf-based) gelu, approximate='none' — the transformer MLP
-;; activation. No racket/base collision, so no shadow dispatch.
+;; Exact (erf-based) gelu, approximate='none'.
 (define (gelu t)
   (wrap 'gelu (tr-gelu/raw t)))
 
@@ -407,8 +389,6 @@
           (error 'min "tensor min takes a single tensor"))
       (apply base:min v rest)))
 
-;; Shadows racket/list's argmax the same way exp/log shadow racket/base:
-;; (argmax proc lst) still reaches the list version.
 (define (argmax t [dim #f] #:keepdim [keepdim #f])
   (cond
     [(tensor? t)

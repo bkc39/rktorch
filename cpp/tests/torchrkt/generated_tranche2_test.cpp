@@ -7,7 +7,7 @@
 
 #include "torchrkt/c_api.h"
 
-// C-boundary goldens for the tranche-2 generated families (#3): one
+// C-boundary goldens for the tranche-2 generated families: one
 // correctness case + one error-path case per family. Value parity with
 // PyTorch is the Racket python-cross-test's job; these pin the C contract
 // the parity battery can't see — null/length guards, the int-status
@@ -317,7 +317,7 @@ TEST(GeneratedTranche2, SumDimPresenceFlagAndGuard) {
   const Handle full(
       tr_gen_sum_dim_intlist(a.t, nullptr, 0, /*dim_has=*/false, false, -1));
   EXPECT_NEAR(data_of(full.t).at(0), 21.0F, 1e-5F);
-  // present-but-null is rejected by the guard (was UB before the fix).
+  // present-but-null is rejected by the guard.
   EXPECT_EQ(
       tr_gen_sum_dim_intlist(a.t, nullptr, 1, /*dim_has=*/true, false, -1),
       nullptr);

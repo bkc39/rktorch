@@ -5,10 +5,8 @@
 ;; with PyTorch's nn.Linear lives in python-cross-test.
 
 (module+ test
-  ;; Layers are PascalCase (Conv2d/MaxPool2d/Flatten/Linear/…) since #11, so
-  ;; `(require torch torch/nn)` no longer collides with the lowercase functional
-  ;; ops on `torch`. (racket/list's flatten/argmax still collide with torch's
-  ;; functional flatten/argmax, so those two are excepted.)
+  ;; racket/list's flatten/argmax collide with torch's functional
+  ;; flatten/argmax, so those two are excepted
   (require (except-in racket/list argmax flatten)
            (only-in racket/file make-temporary-file)
            rackunit
@@ -38,7 +36,6 @@
     (check-true (andmap requires-grad? ps))
     (define y (l (randn 5 4)))
     (check-equal? (tensor-shape y) '(5 3))
-    ;; (forward l x) and (l x) are the same entry point
     (manual-seed! 1)
     (define x (randn 2 4))
     (check-equal? (tensor->list (forward l x)) (tensor->list (l x))))
@@ -99,7 +96,6 @@
     (check-true (andmap requires-grad? ps))
     (check-equal? (map car (named-parameters c)) '("weight" "bias"))
     (check-equal? (tensor-shape (c (randn 4 1 28 28))) '(4 8 28 28))
-    ;; object-name reflects the define-module name (no internal struct since #10)
     (check-equal? (object-name c) 'Conv2d))
 
   (test-case "Conv2d non-square kernel + per-axis padding"
@@ -131,7 +127,6 @@
     (check-equal? (map tensor-shape ps) '((7 4)))
     (check-true (andmap requires-grad? ps))
     (check-equal? (map car (named-parameters e)) '("weight"))
-    ;; forward gathers rows of the weight table by index.
     (define idx (to-dtype (tensor '(3 0 3)) 'int64))
     (define out (e idx))
     (check-equal? (tensor-shape out) '(3 4))
@@ -156,7 +151,6 @@
     (define rows (tensor->list out))
     (check-= (apply + (take rows 4)) 0.0 1e-4)
     (check-= (apply + (drop rows 4)) 0.0 1e-4)
-    ;; a list normalized-shape and a custom eps construct fine.
     (check-true (layer-norm? (LayerNorm '(3 4) #:eps 1e-6)))
     (check-equal? (object-name ln) 'LayerNorm))
 
@@ -229,10 +223,8 @@
     (define tr (tensor->list (d x)))
     (check-true (andmap (lambda (v) (or (= v 0.0) (= v 2.0))) tr))
     (check-true (> (length (filter zero? tr)) 0) "nothing was dropped")
-    ;; eval: identity
     (eval! d)
     (check-equal? (tensor->list (d x)) (tensor->list x))
-    ;; train! flips back
     (train! d)
     (check-true (andmap (lambda (v) (or (= v 0.0) (= v 2.0)))
                         (tensor->list (d x)))))
@@ -240,12 +232,10 @@
   (test-case "dropout inside a model: eval! recurses through submodules"
     (define net (Sequential (Linear 4 4) (Dropout #:p 0.9)))
     (eval! net)
-    ;; with dropout off, repeated forwards on the same input agree
     (define x (randn 2 4))
     (check-equal? (tensor->list (net x)) (tensor->list (net x))))
 
   (test-case "module-training? + in-eval-mode: query and restore the prior mode"
-    ;; a mode-sensitive leaf reports + toggles its own flag
     (define d (Dropout #:p 0.5))
     (check-true (module-training? d) "dropout defaults to training")
     (in-eval-mode d (check-false (module-training? d) "eval inside the body"))
@@ -254,8 +244,8 @@
     (eval! d)
     (in-eval-mode d (check-false (module-training? d)))
     (check-false (module-training? d) "restored to eval, not flipped to train")
-    ;; structural: module-training? recurses (define-module linear leaves are
-    ;; always #t; the dropout child carries the mode) and in-eval-mode restores
+    ;; module-training? recurses: define-module linear leaves are always
+    ;; #t; the dropout child carries the mode
     (train! d)
     (define net (Sequential (Linear 4 4) (Dropout #:p 0.5)))
     (check-true (module-training? net))
@@ -282,11 +272,11 @@
     (define net (Sequential (Linear 4 8) (Dropout #:p 0.3) (Linear 8 2)))
     (define path (make-temporary-file "rkt-st-~a.safetensors"))
     (save-state! net path)
-    ;; a differently-seeded model has different params...
+    ;; seed 99: net2 must start with different params, or the post-load
+    ;; equality would be vacuous
     (manual-seed! 99)
     (define net2 (Sequential (Linear 4 8) (Dropout #:p 0.3) (Linear 8 2)))
     (load-state! net2 path)
-    ;; ...and after load matches the saved model parameter-for-parameter.
     (for ([a (in-list (state-dict net))] [b (in-list (state-dict net2))])
       (check-equal? (car a) (car b))
       (check-equal? (tensor->list (cdr a)) (tensor->list (cdr b))))

@@ -2,9 +2,9 @@
 
 ;; The generated-op parity battery: live cross-validation of every op in the
 ;; codegen manifest against upstream PyTorch, plus the override drives that
-;; cover optional-argument paths the default recipes leave absent. Split out
-;; of python-cross-test.rkt (#29); the literate-example twins and the
-;; hand-written reference checks stay there.
+;; cover optional-argument paths the default recipes leave absent. The
+;; literate-example twins and the hand-written reference checks live in
+;; python-cross-test.rkt.
 ;;
 ;; The `nix develop` shell provides Python `torch`; when python3 can't
 ;; `import torch` (e.g. the sandboxed `nix build`, or the lean `.#ci` shell)
@@ -55,7 +55,6 @@
           'reshape '((tensor 2 3) (int-array (3 2)))
           'cat '((tensors (2 3) (2 3)) (int64 0))
           'narrow '((tensor 4) (int64 0) (int64 1) (int64 2))
-          ;; conv + pooling
           'conv2d '((tensor 1 1 5 5) (tensor 2 1 3 3) (optional-tensor 2)
                     (int-array (1 1)) (int-array (0 0)) (int-array (1 1))
                     (int64 1))
@@ -102,7 +101,6 @@
           'dropout '((tensor 2 3) (double 0.5) (bool #f))
           ;; copy_ overwrites self with src, so the seeded result equals src.
           'copy! '((tensor 2 3) (tensor 2 3) (bool #f))
-          ;; --- tranche 3: the transformer op closure ---
           ;; embedding: randn weight table, literal int64 indices (with a
           ;; repeat, exercising the gather), no padding/scaling/sparse.
           'embedding '((tensor 5 3) (int-tensor (0 2 4 1)) (int64 -1)

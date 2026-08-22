@@ -33,17 +33,11 @@ torch::ScalarType to_scalar_type(tr_dtype dtype) {
 extern "C" {
 
 void tr_tensor_free(tr_tensor* t) {
-  // Called from Racket GC finalizers. Deliberately NO try/catch: none can
-  // work here. A throw during storage release (the CUDA caching allocator
-  // failing on an errored context) unwinds through libtorch's own
-  // implicitly-noexcept frames — TensorBase's noexcept move-assign,
-  // ~TensorImpl/~StorageImpl/~DataPtr — and reaches std::terminate before
-  // any handler at this layer, wherever the release statement is placed.
-  // Pinned empirically by finalizer_death_test.cpp (a catch-based version
-  // of this function still aborted the child). The finalizer-safety
-  // guarantee lives on the Racket side instead: raw/memory.rkt wraps this
-  // binding's deallocator and swallows the runtime-converted failure class
-  // actually observed in issue #38.
+  // Racket GC finalizer; deliberately NO try/catch. A throw during storage
+  // release unwinds through libtorch's implicitly-noexcept frames and reaches
+  // std::terminate before any handler here (pinned by
+  // finalizer_death_test.cpp); the safety guarantee is the Racket-side
+  // deallocator wrap in raw/memory.rkt.
   delete t;
 }
 
@@ -65,9 +59,8 @@ int tr_tensor_nbytes(const tr_tensor* t, int64_t* out) {
   if (!t || !out) {
     return torchrkt::null_arg_status("tr_tensor_nbytes");
   }
-  // The view's extent (numel x element size), not the shared storage's:
-  // the Racket-side memory ledger charges each handle for what it
-  // addresses, a documented approximation for GC pressure (#37).
+  // The view's extent, not the shared storage's: the Racket memory ledger
+  // charges each handle for what it addresses.
   return torchrkt::status_call("tr_tensor_nbytes", [&] {
     *out = static_cast<int64_t>(t->value.nbytes());
   });
@@ -128,13 +121,10 @@ int tr_tensor_dtype(const tr_tensor* t, tr_dtype* out) {
         *out = TR_DTYPE_INT64;
         return;
       case torch::kBool:
-        // comparisons produce genuine bool tensors; the query must
-        // answer for the library's own results
         *out = TR_DTYPE_BOOL;
         return;
       default:
-        // Reject rather than mislabel (the tr_tensor_device pattern for
-        // kinds outside the C ABI).
+        // Reject dtypes outside the C ABI rather than mislabel them.
         throw std::invalid_argument("tensor has an unsupported dtype");
     }
   });
@@ -211,8 +201,6 @@ int tr_tensor_print(const tr_tensor* t, uint64_t buffer_capacity,
     }
     return 0;
   } catch (const std::exception& e) {
-    // The render allocates the whole text: same noexcept-safe recording
-    // as tr_tensor_copy_data.
     torchrkt::record_failure("tr_tensor_print", e);
     return 1;
   }

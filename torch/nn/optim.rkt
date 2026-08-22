@@ -1,10 +1,8 @@
 #lang racket/base
 
-;; Optimizers over a parameter list (what (parameters model) returns). The
-;; updates run under with-no-grad exactly like torch.optim and mutate each
-;; parameter in place; the per-step math is pure Racket over the shadow
-;; arithmetic operators (so number*tensor is a scalar scale, tensor*tensor is
-;; elementwise, etc.).
+;; Optimizers over a parameter list. Updates run under with-no-grad and
+;; mutate in place, like torch.optim; the step math uses foreign.rkt's shadow
+;; arithmetic operators (number*tensor scales, tensor*tensor is elementwise).
 
 (require (only-in racket/generic define-generics)
          (only-in "../foreign.rkt"
@@ -21,15 +19,14 @@
          step!
          zero-grads!)
 
-;; The optimizer interface: one update step + the parameter list (so
-;; zero-grads! is shared across optimizers).
+;; parameters are part of the interface so zero-grads! is shared.
 (define-generics optimizer
   (optimizer-step! optimizer)
   (optimizer-parameters optimizer))
 
 ;; --- SGD ----------------------------------------------------------------
-;; p -= lr * p.grad. Parameters that never received a gradient are skipped
-;; (PyTorch skips grad-is-None params the same way).
+;; Parameters that never received a gradient are skipped, mirroring how
+;; PyTorch skips grad-is-None params.
 (struct sgd (params lr)
   #:constructor-name make-sgd
   #:name sgd-optimizer ;; noqa
@@ -46,9 +43,8 @@
   (make-sgd params lr))
 
 ;; --- Adam ---------------------------------------------------------------
-;; torch.optim.Adam: per-parameter first/second moment EMAs with bias
-;; correction. Moments are lazily allocated (zeros) the first time a parameter
-;; is seen and kept in eq?-hashes keyed by the parameter tensor.
+;; torch.optim.Adam (moment EMAs + bias correction). Moments are lazily
+;; allocated per parameter, in eq?-hashes keyed by the parameter tensor.
 (struct adam (params lr beta1 beta2 eps step-box m v)
   #:constructor-name make-adam
   #:name adam-optimizer ;; noqa
@@ -74,7 +70,6 @@
     (define b2 (adam-beta2 opt))
     (define lr (adam-lr opt))
     (define eps (adam-eps opt))
-    ;; bias corrections (plain numbers)
     (define bc1 (- 1.0 (expt b1 t)))
     (define bc2 (- 1.0 (expt b2 t)))
     (for ([p (in-list (adam-params opt))])
@@ -82,12 +77,10 @@
       (when g
         (define m (hash-ref! (adam-m opt) p (lambda () (zeros-like p))))
         (define v (hash-ref! (adam-v opt) p (lambda () (zeros-like p))))
-        ;; m <- b1*m + (1-b1)*g ;  v <- b2*v + (1-b2)*g^2
         (define m* (+ (* b1 m) (* (- 1.0 b1) g)))
         (define v* (+ (* b2 v) (* (- 1.0 b2) (* g g))))
         (hash-set! (adam-m opt) p m*)
         (hash-set! (adam-v opt) p v*)
-        ;; p -= lr * (m/bc1) / (sqrt(v/bc2) + eps)  (torch.optim.Adam)
         (define denom (+ (sqrt (/ v* bc2)) eps))
         (sub! p (/ (/ m* bc1) denom) lr)))))
 

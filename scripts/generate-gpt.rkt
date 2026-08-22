@@ -32,15 +32,14 @@
         prefix (cfg 'epochs) (vector-length vocab) device)
 
 (with-default-device device
-  ;; The seeded init is immediately overwritten by load-state!; seeding just
-  ;; keeps construction deterministic.
+  ;; load-state! overwrites the seeded init; the seed only keeps
+  ;; construction deterministic
   (manual-seed! 0)
   (define net (gpt (vector-length vocab) (cfg 'block-size)
                    #:n-embd (cfg 'n-embd)
                    #:n-head (cfg 'n-head)
                    #:n-layer (cfg 'n-layer)))
   (load-state! net (string-append prefix ".safetensors"))
-  ;; generate derives the device and context limit from the net itself.
   (for ([prompt (in-list prompts)])
     (printf "\n--- prompt ~v ---\n~a\n" prompt
             (generate net vocab prompt #:steps steps))))

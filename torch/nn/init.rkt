@@ -1,12 +1,9 @@
 #lang racket/base
 
-;; Parameter initializers, built purely from tensor ops — no new C++. Each
-;; allocates the tensor and fills it with uniform! (ATen's uniform_), so the
-;; global-RNG consumption matches torch.nn.init exactly; that is what makes
-;; seeded layer init bit-comparable with PyTorch.
+;; Parameter initializers. Each fills its tensor through ATen's own RNG ops,
+;; so the global-RNG consumption matches torch.nn.init draw for draw — that
+;; is what makes seeded layer init bit-comparable with PyTorch.
 
-;; Numeric math here stays racket/base (no tensors in the bounds), so only
-;; the tensor constructors come from the facade.
 (require (only-in "../foreign.rkt" randn uniform! zeros))
 
 (provide uniform-init
@@ -14,22 +11,20 @@
          kaiming-uniform
          fan-in)
 
-;; A dims-shaped tensor of uniform draws on [low, high). PyTorch fills
-;; torch.empty via uniform_; zeros + uniform! consumes the RNG identically.
+;; PyTorch fills torch.empty via uniform_; zeros + uniform! consumes the RNG
+;; identically.
 (define (uniform-init dims low high)
   (define t (apply zeros dims))
   (uniform! t low high)
   t)
 
-;; A dims-shaped tensor of standard-normal draws. torch.randn is
-;; empty().normal_(), so the RNG consumption matches torch.nn.init.normal_
-;; draw for draw (nn.Embedding.reset_parameters); the seeded-init parity
-;; test in python-cross-test.rkt is the oracle.
+;; torch.randn is empty().normal_(), so the RNG consumption matches
+;; torch.nn.init.normal_ draw for draw.
 (define (normal-init dims)
   (apply randn dims))
 
-;; torch.nn.init._calculate_fan_in_and_fan_out's fan_in: for a [out in ...]
-;; weight, the input fmaps times the receptive field.
+;; torch.nn.init._calculate_fan_in_and_fan_out's fan_in for a [out in ...]
+;; weight: input fmaps times receptive field.
 (define (fan-in dims)
   (apply * (cdr dims)))
 

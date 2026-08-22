@@ -55,13 +55,11 @@
     (check-equal? (guarded 'handle) (void)))
 
   (test-case "(deallocator) cancels the pending finalizer — observably"
-    ;; The mechanism tensor-free! relies on, mirrored in production
-    ;; topology: the allocator side registers a guard-finalizer-wrapped
-    ;; closure, the explicit side is a DIFFERENT (deallocator)-wrapped
-    ;; closure (matching (allocator tr-tensor-free/finalizer) vs the
-    ;; checked binding). Counters, not the pointers, are recorded — the
-    ;; earlier version consed the pointer into a list, keeping it strongly
-    ;; reachable so the negative assertion passed vacuously.
+    ;; Mirrors tensor-free!'s production topology: the allocator side
+    ;; registers a guard-finalizer-wrapped closure, the explicit side is a
+    ;; DIFFERENT (deallocator)-wrapped closure. Counters, not pointers,
+    ;; are recorded — a recorded pointer would stay strongly reachable and
+    ;; the negative assertion would pass vacuously.
     (define finalizer-count 0)
     (define explicit-count 0)
     (define (finalizer-release p)
@@ -74,13 +72,11 @@
       ((allocator (guard-finalizer finalizer-release))
        (lambda () (malloc 16 'raw))))
     (define release ((deallocator) explicit-release))
-    ;; Path 1 — dropped without explicit free: the finalizer fires once.
     (void (alloc))
     (collect-until (lambda () (> finalizer-count 0)))
     (check-equal? finalizer-count 1 "finalizer ran for the dropped alloc")
-    ;; Path 2 — explicit release through the distinct deallocator-wrapped
-    ;; closure, then out of scope: cancellation must hold across the two
-    ;; closures, so the finalizer count stays put after collections.
+    ;; cancellation must hold across the two distinct closures, so the
+    ;; finalizer count stays put after collections
     (let ([p (alloc)])
       (release p))
     (check-equal? explicit-count 1 "explicit release ran")
@@ -89,11 +85,9 @@
                   "no finalizer fired after explicit release — canceled"))
 
   (test-case "explicit tensor-free! is unguarded; freed handles are inert"
-    ;; the deliberate-release path at tensor level: frees synchronously,
-    ;; flips the tag (using the tensor afterwards raises at the marshal
-    ;; boundary; a second free is rejected by the tensor? contract), and
-    ;; collections after the free stay quiet — cancellation itself is
-    ;; pinned observably by the mechanism test above.
+    ;; the free flips the tag: later use raises at the marshal boundary, a
+    ;; second free is rejected by the tensor? contract, and the trailing
+    ;; collections must stay quiet (cancellation pinned above)
     (define t (ones 2 2))
     (check-equal? (tensor-shape t) '(2 2))
     (tensor-free! t)

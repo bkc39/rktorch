@@ -1,13 +1,10 @@
 #lang racket/base
 
-;; safetensors save/load for a model's parameters. The format is a small
-;; binary: an 8-byte little-endian header length, a UTF-8 JSON header mapping
-;; each (dotted) parameter name to {dtype, shape, data_offsets}, then the raw
-;; little-endian f32 bytes laid out contiguously in named-parameters order.
-;; That's exactly the layout Python's `safetensors` reads, so a file written
-;; here loads there (and vice versa). load-state! copies into the existing
-;; parameters in place via copy_ (under with-no-grad, like torch's
-;; load_state_dict), so the model tree is preserved.
+;; safetensors save/load: 8-byte LE header length, UTF-8 JSON header of
+;; name -> {dtype, shape, data_offsets}, then contiguous LE f32 data — the
+;; exact layout Python's `safetensors` reads, so files interchange both ways.
+;; load-state! copies into the existing parameters in place via copy_ under
+;; with-no-grad (like load_state_dict), preserving the model tree.
 
 (require (only-in racket/file file->bytes)
          (only-in json jsexpr->string string->jsexpr)
@@ -24,7 +21,6 @@
          save-state!
          load-state!)
 
-;; The model's parameters as (dotted-name . tensor) pairs, in PyTorch order.
 (define (state-dict model)
   (named-parameters model))
 
@@ -58,7 +54,6 @@
      (jsexpr->string (make-immutable-hasheq (reverse fields)))))
   (call-with-output-file path #:exists 'replace
     (lambda (out)
-      ;; 8-byte little-endian unsigned header length, header, then data.
       (write-bytes (integer->integer-bytes (bytes-length header-bytes) 8 #f #f)
                    out)
       (write-bytes header-bytes out)

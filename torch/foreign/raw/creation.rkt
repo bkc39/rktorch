@@ -1,8 +1,6 @@
 #lang racket/base
 
-;; Raw tensor constructors (creation.h). Every function returns a freshly
-;; allocated _Tensor (or NULL on error); `tensor-allocator`
-;; registers the GC finalizer, exactly like tr-randn/raw.
+;; Raw tensor constructors (creation.h).
 
 (require (only-in ffi/unsafe _double _fun _int64 _uint64)
          (only-in ffi/vector _f32vector _s64vector)
@@ -53,9 +51,9 @@
   #:c-id tr_from_data
   #:wrap tensor-allocator)
 
-;; tr-from-data/raw with an EXPLICIT device: placement never routes host
-;; data through the process default device (a CUDA default would cost an
-;; explicitly-CPU tensor a host->GPU->CPU bounce, or a CUDA OOM).
+;; EXPLICIT device: placement never routes host data through the process
+;; default (a CUDA default would cost an explicitly-CPU tensor a
+;; host->GPU->CPU bounce, or a CUDA OOM).
 (define-torch tr-from-data-on/raw
   (_fun (data : (_f32vector i))
         (numel : _uint64)
@@ -67,8 +65,8 @@
   #:c-id tr_from_data_on
   #:wrap tensor-allocator)
 
-;; The int64 ingestion pair (#44): same contracts with int64 payload and
-;; dtype, so exact integers never transit float32.
+;; int64 ingestion pair (#44): int64 payload and dtype, so exact integers
+;; never transit float32.
 (define-torch tr-from-data-i64/raw
   (_fun (data : (_s64vector i))
         (numel : _uint64)

@@ -50,7 +50,6 @@
     (check-equal? (tensor-device t) (cpu-device))
     (check-equal? (tensor-device (tensor '(1 2) #:device 'cpu)) (cpu-device))
     (check-equal? (default-device) (cpu-device))
-    ;; requires-grad composes with #:device
     (check-true (requires-grad?
                  (tensor '(1.0) #:device (cpu-device) #:requires-grad? #t)))
     ;; cuda-if-available: the promoted pick-device idiom. The expected
@@ -84,28 +83,22 @@
                (lambda () (cuda-memory-stats (cpu-device))))
     (cond
       [(cuda-available?)
-       ;; with a live GPU tensor the gauges are sane: allocated positive,
-       ;; peak >= allocated, reserved >= allocated
        (define g (tensor '(1 2 3 4) #:device (cuda-device)))
        (define stats (cuda-memory-stats))
        (define (stat k) (cdr (assq k stats)))
        (check-true (> (stat 'allocated) 0))
        (check-true (>= (stat 'peak-allocated) (stat 'allocated)))
        (check-true (>= (stat 'reserved) (stat 'allocated)))
-       ;; empty-cache succeeds and never raises reserved
        (cuda-empty-cache!)
        (check-true (<= (cdr (assq 'reserved (cuda-memory-stats)))
                        (stat 'reserved)))
        ;; keep g live through the gauge reads
        (check-equal? (tensor-device g) (cuda-device 0))]
       [else
-       ;; without CUDA the stats error cleanly and empty-cache! no-ops
        (check-exn exn:fail? (lambda () (cuda-memory-stats)))
        (check-not-exn cuda-empty-cache!)]))
 
   (test-case "device arguments accept structs and legacy forms alike"
-    ;; the accept-both contract: every device-taking entry point normalizes
-    ;; struct and legacy inputs identically; queries return structs.
     (set-default-device! (cpu-device))
     (check-equal? (default-device) (cpu-device))
     (set-default-device! 'cpu)
@@ -125,7 +118,6 @@
   (test-case "cuda queries have sane types"
     (check-true (boolean? (cuda-available?)))
     (check-pred exact-nonnegative-integer? (cuda-device-count))
-    ;; the count is positive exactly when a device is available
     (check-equal? (> (cuda-device-count) 0) (cuda-available?)))
 
   (test-case "new tensors and to-device land on cpu"
@@ -143,7 +135,6 @@
   (test-case "requesting an unavailable cuda device errors"
     (unless (cuda-available?)
       (check-exn exn:fail? (lambda () (set-default-device! 'cuda)))
-      ;; the rejected set leaves the default untouched
       (check-equal? (default-device) (cpu-device))))
 
   ;; The CUDA cases are always registered (so the test count is hardware-stable
@@ -159,8 +150,6 @@
       (check-equal? (default-device) (cpu-device))))
 
   (test-case "cuda round-trip"
-    ;; with-default-device restores the prior default even if a GPU op raises
-    ;; (matmul/tensor->list can throw), so CUDA can't leak onto later tests.
     (when (cuda-available?)
       (check-true (> (cuda-device-count) 0))
       (set-default-device! 'cpu)
@@ -171,7 +160,6 @@
         (define back (to-device g 'cpu))
         (check-equal? (tensor-device back) (cpu-device))
         (check-equal? (tensor->list back) '(0.0 0.0 0.0 0.0))
-        ;; a GPU matmul should match the CPU result
         ;; float literals: cuBLAS has no int64 matmul — torch errors on
         ;; GPU (Python identically), though the CPU int64 matmul works
         ;; (covered in tensor-ops-test)
@@ -193,23 +181,19 @@
     (when (cuda-available?)
       (set-default-device! 'cpu)
       (with-default-device 'cuda
-        ;; gelu (hand-written path)
         ;; float literals: gelu is float-only (#44 inference)
         (define g
           (to-device (gelu (to-device (tensor '(0.0 1.0 -1.0)) 'cuda)) 'cpu))
         (check-= (cadr (tensor->list g)) 0.841345 1e-5)
-        ;; embedding: int64 indices gathered on the device
         (define w (to-device (reshape (arange 1 9) 4 2) 'cuda))
         (define idx (to-device (to-dtype (tensor '(2 0 2)) 'int64) 'cuda))
         (check-equal? (tensor->list (to-device (embedding idx w) 'cpu))
                       '(5.0 6.0 1.0 2.0 5.0 6.0))
-        ;; layer-norm with affine params on the device
-        ;; float literals: layer-norm is float-only (#44 inference)
+        ;; float literals: layer-norm is float-only
         (define x (to-device (tensor '((1.0 2.0 3.0) (4.0 6.0 8.0))) 'cuda))
         (define ln (layer-norm x 3 #:weight (ones 3) #:bias (zeros 3)))
         (check-equal? (tensor-device ln) (cuda-device 0))
         (check-= (car (tensor->list (to-device ln 'cpu))) -1.2247 1e-4)
-        ;; the causal-mask chain: tril -> eq -> masked-fill, all on cuda
         (define mask (eq (tril (ones 2 2)) 0))
         (check-equal? (tensor-device mask) (cuda-device 0))
         (check-equal? (tensor->list
@@ -219,7 +203,6 @@
 
   (test-case "with-default-device restores the prior default (return + raise)"
     (set-default-device! 'cpu)
-    ;; normal return restores
     (with-default-device 'cpu (check-equal? (default-device) (cpu-device)))
     (check-equal? (default-device) (cpu-device))
     ;; restored even when the body raises — the dynamic-wind guarantee a
