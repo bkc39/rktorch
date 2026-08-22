@@ -2,6 +2,8 @@
 
 #include <c10/util/Exception.h>
 
+#include <cstdint>
+#include <cstring>
 #include <exception>
 #include <new>
 #include <string>
@@ -16,8 +18,9 @@
 // to a null-argument guard plus one of these wrappers, so the
 // exception-to-status contract lives in exactly one place.
 //
-// These cover the two common extern "C" shapes: a tensor return (alloc_result)
-// and an integer status (status_call). Two further shapes deviate
+// These cover the three common extern "C" shapes: a tensor return
+// (alloc_result), an integer status (status_call), and the size-then-fill
+// marshal-out probe (copy_data_call). Two further shapes deviate
 // intentionally: value-returning CUDA queries in device.cpp
 // (tr_cuda_is_available / tr_cuda_device_count) hand-roll try/catch (catch +
 // set_error + return a benign value); and void-returning *finalizer* bindings
@@ -26,7 +29,7 @@
 // frames before any C++ handler (see finalizer_death_test.cpp), so their
 // safety guarantee lives in the Racket-side deallocator wrap
 // (torch/foreign/raw/memory.rkt). New boundary functions should fit one of
-// these four shapes.
+// these five shapes.
 
 namespace torchrkt {
 
@@ -100,6 +103,35 @@ template <typename Fn>
 int status_call(const char* who, Fn&& fn) noexcept {
   try {
     std::forward<Fn>(fn)();
+    return 0;
+  } catch (const std::exception& e) {
+    record_failure(who, e);
+    return 1;
+  } catch (...) {
+    record_unknown_failure(who);
+    return 1;
+  }
+}
+
+// Run `fn` (returning the contiguous CPU tensor of the target scalar type)
+// under the size-then-fill probe contract shared by the tr_tensor_copy_data*
+// family: 0 on success, 2 when `capacity` is too small (with *out_numel
+// reporting the required size), 1 with tr_last_error set on any exception.
+// The conversion copy can be large, so recording is noexcept-safe.
+template <typename Scalar, typename Fn>
+int copy_data_call(const char* who, uint64_t capacity, Scalar* out,
+                   uint64_t* out_numel, Fn&& fn) noexcept {
+  *out_numel = 0;
+  try {
+    const torch::Tensor c = std::forward<Fn>(fn)();
+    const auto numel = static_cast<uint64_t>(c.numel());
+    *out_numel = numel;
+    if (capacity < numel) {
+      return 2;
+    }
+    if (out && numel > 0) {
+      std::memcpy(out, c.template data_ptr<Scalar>(), numel * sizeof(Scalar));
+    }
     return 0;
   } catch (const std::exception& e) {
     record_failure(who, e);

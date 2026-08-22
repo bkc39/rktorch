@@ -179,6 +179,47 @@ TEST(TorchrktOps, FromDataI64OnPlacesOnExplicitCpu) {
             nullptr);
 }
 
+TEST(TorchrktOps, FromDataAcceptsNullForEmptyTensors) {
+  // numel==0 constructs with a NULL data pointer (an empty Racket
+  // vector marshals as NULL); nonzero numel still rejects NULL.
+  const std::vector<int64_t> rank1 = {0};
+  const Handle e1(tr_from_data(nullptr, 0, rank1.data(), 1));
+  ASSERT_NE(e1.t, nullptr) << tr_last_error();
+  std::uint64_t numel = 99;
+  EXPECT_EQ(tr_tensor_copy_data(e1.t, 0, nullptr, &numel), 0);
+  EXPECT_EQ(numel, 0U);
+  const std::vector<int64_t> rank2 = {2, 0};
+  const Handle e2(tr_from_data_i64(nullptr, 0, rank2.data(), 2));
+  ASSERT_NE(e2.t, nullptr) << tr_last_error();
+  tr_dtype dt = TR_DTYPE_FLOAT32;
+  EXPECT_EQ(tr_tensor_dtype(e2.t, &dt), 0) << tr_last_error();
+  EXPECT_EQ(dt, TR_DTYPE_INT64);
+  EXPECT_EQ(tr_from_data(nullptr, 3, rank1.data(), 1), nullptr);
+  EXPECT_STRNE(tr_last_error(), "");
+}
+
+TEST(TorchrktOps, CopyDataF64PreservesDoublePrecision) {
+  // 2^24+1 is unrepresentable in float32; the f64 path keeps it exact
+  const std::vector<int64_t> ival = {16777217};
+  const std::vector<int64_t> dims = {1};
+  const Handle i(tr_from_data_i64(ival.data(), 1, dims.data(), 1));
+  const Handle d(tr_tensor_to_dtype(i.t, TR_DTYPE_FLOAT64));
+  std::uint64_t numel = 0;
+  double out = 0.0;
+  EXPECT_EQ(tr_tensor_copy_data_f64(d.t, 1, &out, &numel), 0)
+      << tr_last_error();
+  EXPECT_EQ(out, 16777217.0);
+  float f32out = 0.0F;
+  EXPECT_EQ(tr_tensor_copy_data(d.t, 1, &f32out, &numel), 0);
+  EXPECT_EQ(f32out, 16777216.0F);
+  // the size-then-fill probe (rc=2) and null-arg (rc=1) contracts
+  EXPECT_EQ(tr_tensor_copy_data_f64(d.t, 0, nullptr, &numel), 2);
+  EXPECT_EQ(numel, 1U);
+  EXPECT_EQ(tr_tensor_copy_data_f64(nullptr, 1, &out, &numel), 1);
+  EXPECT_EQ(tr_tensor_copy_data_f64(d.t, 1, &out, nullptr), 1);
+  EXPECT_STRNE(tr_last_error(), "");
+}
+
 TEST(TorchrktOps, FromDataRejectsNumelMismatch) {
   const std::vector<float> values = {1.0F, 2.0F, 3.0F};
   const std::vector<int64_t> dims = {2, 2};

@@ -83,6 +83,57 @@
                      (define x (tensor '(1.0 2.0 3.0) #:requires-grad? #t))
                      (backward! (~> x (* x) Σ))
                      (grad x)))
+     ;; summarized reprs (#45): each summarization form byte-compared
+     ;; against Python — 1-d inline ellipsis, 2-d row elision, rank-3
+     ;; last-dim-only, rank-3 leading-dim, the 1001 boundary, and the
+     ;; bool forms deferred from #53's review
+     (let* ([j (python-result "python/summarized_reprs.py")]
+            [py (hash-ref j 'reprs)]
+            [rkt (list
+                  (tensor->repr (tensor (build-list 2000 values)))
+                  (tensor->repr (zeros 1024 1024))
+                  (tensor->repr (zeros 3 4 500))
+                  (tensor->repr (zeros 1024 2 2))
+                  (tensor->repr (zeros 1001))
+                  (tensor->repr (eq (tensor '(1 2)) 1))
+                  (tensor->repr (eq (zeros 2000) 1.0))
+                  (tensor->repr
+                   (tensor (build-list 2000 (lambda (i) (* i 1000000)))))
+                  (tensor->repr
+                   (tensor (build-list 30 (lambda (i) (* i 1000000)))))
+                  (tensor->repr (zeros 6 6 6 5))
+                  (tensor->repr (zeros 2 18))
+                  (tensor->repr (zeros 30))
+                  (tensor->repr (full 100.0 30))
+                  (tensor->repr (full +inf.0 30))
+                  (tensor->repr
+                   (tensor (build-list
+                            2000
+                            (lambda (i) (* (add1 i) 100000000)))))
+                  (tensor->repr (tensor '(1e10 2.5e10 -3e-7)))
+                  (tensor->repr (tensor '(1e8)))
+                  (tensor->repr (tensor '(+nan.0 5.0)))
+                  ;; deterministic wide-range sci (ratio > 1000): seeded
+                  ;; randn would be byte-fragile under libtorch/python
+                  ;; patch skew in the torchSource="bin" config
+                  (tensor->repr
+                   (tensor (for/list ([i (in-range 2000)])
+                             (* (exact->inexact (add1 i))
+                                12345.6789))))
+                  ;; rank 5, every dim eliding: exercises the recursive
+                  ;; slice fan-out ((2*edgeitems)^4 internal narrows)
+                  (tensor->repr (zeros 7 7 7 7 7)))])
+       (check-equal? (length rkt) (length py)
+                     "summarized-repr form count")
+       ;; the f64 marshal path against real PyTorch (repr byte-compare
+       ;; is blocked by the dtype-suffix TODO, so values compare exact)
+       (check-equal? (tensor->list (to-dtype (tensor '(16777217 1))
+                                             'float64))
+                     (hash-ref j 'f64_values))
+       (for ([r (in-list rkt)]
+             [p (in-list py)]
+             [i (in-naturals)])
+         (check-equal? r p (format "summarized repr ~a parity" i))))
      ;; int64 inference (#44): the byte-for-byte repr comparison IS the
      ;; dtype pin — a float-inferring side prints "1." forms and fails
      ;; even though values compare equal

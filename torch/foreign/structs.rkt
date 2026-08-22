@@ -20,20 +20,26 @@
 (require (only-in ffi/unsafe cpointer-has-tag? prop:cpointer set-cpointer-tag!)
          (only-in ffi/vector
                   f32vector->list
+                  f64vector->list
                   make-f32vector
+                  make-f64vector
                   make-s64vector
                   s64vector->list
                   s64vector-ref)
          (only-in racket/string string-join)
-         (only-in "error.rkt" check-ok)
-         (only-in "format.rkt" needs-sci-notation? tensor->pytorch-repr)
+         (only-in "error.rkt" check-handle check-ok)
+         (only-in "format.rkt"
+                  tensor->pytorch-repr
+                  tensor-tree->pytorch-repr)
          (only-in "raw/memory.rkt" tr-tensor-free/checked)
          (only-in "raw/syntax.rkt" Tensor?)
          (only-in "raw/tensor.rkt"
                   dtype-code->symbol
+                  tr-tensor-copy-data-f64/raw
                   tr-tensor-copy-data-i64/raw
                   tr-tensor-copy-data/raw
                   tr-tensor-dtype/raw
+                  tr-tensor-narrow/raw
                   tr-tensor-print/raw
                   tr-tensor-shape/raw))
 
@@ -75,6 +81,15 @@
   (check-ok rc 'tensor->repr)
   (f32vector->list out))
 
+;; Copy a float64 handle's values out as doubles — full precision (the
+;; float32 path truncates mantissas past 2^24).
+(define (handle->doubles h dims)
+  (define numel (apply * dims))
+  (define out (make-f64vector numel))
+  (define-values (rc _numel) (tr-tensor-copy-data-f64/raw h numel out))
+  (check-ok rc 'tensor->repr)
+  (f64vector->list out))
+
 ;; Copy an int64 handle's values out as a flat row-major list of EXACT
 ;; integers (#44) — the float path would corrupt values beyond 2^24.
 (define (handle->ints h dims)
@@ -109,11 +124,87 @@
      [else ""])
    ")"))
 
+;; --- summarization (#45): PyTorch's edgeitems/threshold elision --------
+;; A tensor with more than `threshold` elements prints only `edgeitems`
+;; leading and trailing entries per oversized dimension, with 'ellipsis
+;; markers where the middle was dropped. The edges are extracted with
+;; native narrow slices, so the marshal-out cost scales with edgeitems,
+;; never numel — a (zeros 1024 1024) repr copies 36 floats, not 2^20.
+(define summarize-threshold 1000)
+(define edgeitems 3)
+
+;; Slice `len` entries starting at `start` along dimension `d` of `h`.
+;; Slices are internal to tree building — up to (2*edgeitems)^(rank-1)
+;; of them for a high-rank fully-eliding tensor — so each is released
+;; synchronously once consumed rather than left to accumulate finalizer
+;; and ledger charges until a GC. Release mirrors `tensor-free!`
+;; exactly, including its tag-flip-even-on-raise discipline (see its
+;; comment: an ATTEMPTED free consumes the finalizer backstop, so the
+;; tag must flip regardless of success). Only when `proc` itself raises
+;; — before any free attempt — does the slice fall back to its GC
+;; finalizer.
+(define (call-with-slice h d start len proc)
+  (define s (check-handle 'tensor->repr (tr-tensor-narrow/raw h d start len)))
+  (begin0
+    (proc s)
+    (dynamic-wind
+     void
+     (lambda () (parameterize-break #f (tr-tensor-free/checked s)))
+     (lambda () (set-cpointer-tag! s 'Tensor-freed)))))
+
+;; Build the summarized tree: recurse the leading dimensions (narrowing
+;; per included index), marshal only leaf slices. `d` is the absolute
+;; dimension index into `h`, which keeps its full rank (leading
+;; length-1 dims) down the recursion; leaf copies flatten regardless.
+(define (handle->summarized-tree h dims d leaf-values)
+  (define n (car dims))
+  (define last? (null? (cdr dims)))
+  (define elide? (> n (* 2 edgeitems)))
+  (cond
+    [(and last? elide?)
+     (append (call-with-slice h d 0 edgeitems
+                              (lambda (s) (leaf-values s (list edgeitems))))
+             '(ellipsis)
+             (call-with-slice h d (- n edgeitems) edgeitems
+                              (lambda (s) (leaf-values s (list edgeitems)))))]
+    [last? (leaf-values h (list n))]
+    [else
+     (define (child i)
+       (call-with-slice h d i 1
+                        (lambda (s)
+                          (handle->summarized-tree s (cdr dims) (add1 d)
+                                                   leaf-values))))
+     (if elide?
+         (append (for/list ([i (in-range edgeitems)]) (child i))
+                 '(ellipsis)
+                 (for/list ([i (in-range (- n edgeitems) n)]) (child i)))
+         (for/list ([i (in-range n)]) (child i)))]))
+
 (define (handle->repr h dims)
   (define-values (dtype-rc code) (tr-tensor-dtype/raw h))
   (define dtype (and (zero? dtype-rc) (dtype-code->symbol code)))
+  (define numel (apply * dims))
+  ;; summarization only engages when some dimension can actually elide:
+  ;; above-threshold tensors whose dims are all <= 2*edgeitems print in
+  ;; full (PyTorch behavior), through the direct path — no per-element
+  ;; narrow slicing for a tree with nothing elided
+  (define summarize?
+    (and (> numel summarize-threshold)
+         (for/or ([n (in-list dims)]) (> n (* 2 edgeitems)))))
   (cond
-    [(zero? (apply * dims)) (empty-repr dims dtype)]
+    [(zero? numel) (empty-repr dims dtype)]
+    [summarize?
+     (define leaf-values
+       (case dtype
+         [(int64) handle->ints]
+         [(float64) handle->doubles]
+         [else handle->floats]))
+     (define tree (handle->summarized-tree h dims 0 leaf-values))
+     (define mode
+       (case dtype [(int64) 'exact-integers] [(bool) 'booleans] [else #f]))
+     ;; the formatter itself picks sci notation from the SELECTED
+     ;; values (PyTorch formats from the summarized population)
+     (tensor-tree->pytorch-repr tree dims #:mode mode)]
     [(eq? dtype 'int64)
      (tensor->pytorch-repr (handle->ints h dims) dims
                            #:mode 'exact-integers)]
@@ -122,11 +213,11 @@
      ;; renders True/False (torch.tensor([True, False]) parity)
      (tensor->pytorch-repr (handle->floats h dims) dims
                            #:mode 'booleans)]
-    [else
-     (define floats (handle->floats h dims))
-     (if (needs-sci-notation? floats)
-         (handle->string h)
-         (tensor->pytorch-repr floats dims))]))
+    [(eq? dtype 'float64)
+     ;; full-precision doubles: sci mantissas past float32's 2^24 stay
+     ;; right (the dtype suffix remains the documented TODO)
+     (tensor->pytorch-repr (handle->doubles h dims) dims)]
+    [else (tensor->pytorch-repr (handle->floats h dims) dims)]))
 
 ;; The REPL/`print`/`write` form mirrors the Python REPL: show the tensor's
 ;; contents as `tensor(...)`, not an opaque handle.  A freed handle (tag

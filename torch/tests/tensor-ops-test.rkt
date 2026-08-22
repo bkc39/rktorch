@@ -36,6 +36,13 @@
     ;; #:dtype overrides inference both ways; 'int64 truncates toward
     ;; zero (torch's cast semantics)
     (check-equal? (tensor-dtype (tensor '(1 2) #:dtype 'float32)) 'float32)
+    ;; float64 marshals at double precision: 2^24+1 survives (the f32
+    ;; path truncates it to 16777216)
+    (check-equal? (tensor->list (to-dtype (tensor '(16777217)) 'float64))
+                  '(16777217.0))
+    (check-regexp-match #rx"16777217"
+                        (tensor->repr
+                         (to-dtype (tensor '(16777217)) 'float64)))
     (check-equal? (tensor->list (tensor '(1.9 -1.9) #:dtype 'int64)) '(1 -1))
     (check-exn exn:fail? (lambda () (tensor '(1 2) #:dtype 'float64)))
     ;; nested integer data flows through shape ops as int64
@@ -83,6 +90,33 @@
     (check-equal? (tensor->list (eq (tensor (+ (expt 2 53) 1))
                                     (expt 2 53)))
                   '(0.0)))
+
+  (test-case "large tensors summarize like PyTorch (#45)"
+    ;; the headline hang: a 2^20-element repr returns instantly with the
+    ;; edgeitems form (this test formerly hung the suite)
+    (define r (tensor->repr (zeros 1024 1024)))
+    (check-regexp-match #rx"\\.\\.\\." r)
+    (check-true (< (string-length r) 400))
+    (check-equal?
+     (tensor->repr (tensor (build-list 2000 values)))
+     "tensor([   0,    1,    2,  ..., 1997, 1998, 1999])")
+    ;; strict threshold: 1000 elements print in full, 1001 summarize
+    (check-false (regexp-match? #rx"\\.\\.\\." (tensor->repr (zeros 1000))))
+    (check-regexp-match #rx"\\.\\.\\." (tensor->repr (zeros 1001)))
+    ;; wide-dynamic-range large floats summarize in sci notation
+    ;; (formerly the ATen fallback — which never summarized and would
+    ;; have resurrected the hang)
+    (manual-seed! 0)
+    (let ([r (tensor->repr (mul (randn 2000) 1e10))])
+      (check-regexp-match #rx"e[+][0-9][0-9]" r)
+      (check-true (< (string-length r) 400)))
+    ;; a dimension of exactly 2*edgeitems never elides, even inside a
+    ;; summarized tensor: (zeros 6 200) summarizes (1200 elements), the
+    ;; 200-wide rows elide inline, but all 6 rows print (no "...," row)
+    (let ([r (tensor->repr (zeros 6 200))])
+      (check-regexp-match #rx"\\.\\.\\." r)
+      (check-false (regexp-match? #rx"\n *\\.\\.\\.," r))
+      (check-equal? (length (regexp-match* #rx"\n" r)) 5)))
 
   (test-case "tensor from nested lists infers the shape"
     (define t (tensor '((1 2 3) (4 5 6))))

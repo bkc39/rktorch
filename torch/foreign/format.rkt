@@ -12,18 +12,29 @@
 ;; wide dynamic range), the caller falls back to ATen's own printer instead
 ;; (see structs.rkt) rather than emitting a subtly-wrong repr.
 ;;
-;; Not yet reproduced (v0 TODO): scientific notation, line wrapping of long
-;; rows, large-tensor "..." summarization, and dtype suffixes for non-float32.
+;; Scientific notation is now reproduced (fmt-sci, the '{:.4e}' form),
+;; so the ATen-printer fallback is gone — it never summarized, which
+;; would have resurrected the large-tensor hang for wide-range floats.
+;;
+;; Large tensors (numel > 1000) summarize exactly like PyTorch (#45):
+;; callers hand this module a TREE with 'ellipsis markers where a
+;; dimension was elided to its edge items; the last dimension renders the
+;; marker as the literal " ..." joined by ", " (PyTorch's double-space),
+;; higher dimensions as a "..." block between the standard separators.
+;;
+;; Not yet reproduced (v0 TODO): dtype suffixes for non-float32
+;; non-empty tensors.
 
 (require (only-in racket/format ~r)
-         (only-in racket/list drop take)
+         (only-in racket/list append-map drop take)
          (only-in racket/math infinite? nan?)
          (only-in racket/string string-join))
 
 (provide tensor->pytorch-repr
-         needs-sci-notation?)
+         tensor-tree->pytorch-repr)
 
 (define precision 4)
+(define linewidth 80)
 
 (define (finite-real? x)
   (and (rational? x) (not (nan? x))))
@@ -38,6 +49,19 @@
 
 (define (fmt-fixed x)
   (or (fmt-special x) (~r x #:precision (list '= precision))))
+
+;; PyTorch's scientific form: '{:.4e}' — 4-decimal mantissa, sign on the
+;; exponent, exponent zero-padded to at least two digits.
+(define (fmt-sci x)
+  (or (fmt-special x)
+      (~r x
+          #:notation 'exponential
+          #:precision (list '= precision)
+          #:format-exponent
+          (lambda (e)
+            (format "e~a~a"
+                    (if (negative? e) "-" "+")
+                    (~r (abs e) #:min-width 2 #:pad-string "0"))))))
 
 ;; ~r with '(= 0) keeps the trailing decimal point, matching PyTorch's
 ;; int-mode "2." exactly.
@@ -58,8 +82,10 @@
     [else
      (define mx (apply max mags))
      (define mn (apply min mags))
+     ;; strict bounds, exactly _Formatter's: 1e8 itself still prints
+     ;; fixed (tensor([100000000.]))
      (or (> (/ mx mn) 1000.0)
-         (>= mx 1e8)
+         (> mx 1e8)
          (< mn 1e-4))]))
 
 ;; int64 tensors print bare integers ("1", never "1.") — exactly
@@ -77,16 +103,33 @@
 ;; the whole tensor, then right-justifies every element to a common width.
 (define (make-formatter flat mode)
   (define any-finite? (for/or ([x (in-list flat)]) (finite-real? x)))
+  ;; sci wins before int-mode: torch.tensor([1e10]) is integral AND
+  ;; large, and prints 1.0000e+10
+  (define sci? (and (not mode) (needs-sci-notation? flat)))
+  (define int-mode?
+    (and (not mode) (not sci?) any-finite? (all-integral? flat)))
   (define fmt
     (cond
       [(eq? mode 'exact-integers) fmt-exact]
       [(eq? mode 'booleans) fmt-bool]
-      [(and any-finite? (all-integral? flat)) fmt-int]
+      [sci? fmt-sci]
+      [int-mode? fmt-int]
       [else fmt-fixed]))
-  (define max-width
-    (for/fold ([w 0]) ([x (in-list flat)])
-      (max w (string-length (fmt x)))))
-  (values fmt max-width))
+  ;; ONE width governs both padding and the wrap budget, exactly
+  ;; _Formatter's max_width: for FLOATING tensors (int-mode, fixed and
+  ;; sci alike) it folds over the NONZERO FINITE values only (default 1
+  ;; when empty) — so "0." and "nan" can render wider than the width
+  ;; and simply go unpadded, and all-zero/all-non-finite rows
+  ;; legitimately overflow 80 columns; integer and bool tensors fold
+  ;; over all values.
+  (define width
+    (if (memq mode '(exact-integers booleans))
+        (for/fold ([w 0]) ([x (in-list flat)])
+          (max w (string-length (fmt x))))
+        (for/fold ([w 1]) ([x (in-list flat)]
+                           #:when (and (finite-real? x) (not (zero? x))))
+          (max w (string-length (fmt x))))))
+  (values fmt width))
 
 (define (pad s width)
   (string-append (make-string (max 0 (- width (string-length s))) #\space) s))
@@ -105,8 +148,25 @@
   (cond
     [(null? dims) (pad (fmt node) max-width)]
     [(null? (cdr dims))
-     (string-join (for/list ([v (in-list node)]) (pad (fmt v) max-width))
-                  ", " #:before-first "[" #:after-last "]")]
+     ;; PyTorch wraps rows at a fixed floor((80 - indent) / (wrap-width
+     ;; + 2)) elements per line (the ellipsis occupies one slot),
+     ;; continuation lines indented one past the opening bracket;
+     ;; wrap-width carries the int-mode dot quirk (see make-formatter).
+     (define rendered
+       (for/list ([v (in-list node)])
+         (if (eq? v 'ellipsis) " ..." (pad (fmt v) max-width))))
+     (define per-line
+       (max 1 (quotient (- linewidth indent) (+ max-width 2))))
+     (define lines
+       (let loop ([xs rendered])
+         (if (<= (length xs) per-line)
+             (list (string-join xs ", "))
+             (cons (string-join (take xs per-line) ", ")
+                   (loop (drop xs per-line))))))
+     (string-join lines
+                  (string-append ",
+" (make-string (add1 indent) #\space))
+                  #:before-first "[" #:after-last "]")]
     [else
      ;; Separator between sub-blocks: a comma, (rank-1) newlines, then enough
      ;; spaces to align the next sub-block under this one.
@@ -114,7 +174,10 @@
        (string-append "," (make-string (sub1 (length dims)) #\newline)
                       (make-string (add1 indent) #\space)))
      (string-join (for/list ([sub (in-list node)])
-                    (format-nested sub (cdr dims) (add1 indent) fmt max-width))
+                    (if (eq? sub 'ellipsis)
+                        "..."
+                        (format-nested sub (cdr dims) (add1 indent) fmt
+                                       max-width)))
                   sep #:before-first "[" #:after-last "]")]))
 
 ;; "tensor(" + data + ")", with continuation lines aligned under the data by the
@@ -123,4 +186,24 @@
   (define-values (fmt max-width) (make-formatter flat mode))
   (string-append "tensor("
                  (format-nested (nest flat dims) dims 7 fmt max-width)
+                 ")"))
+
+;; The values present in a summarized tree, in order ('ellipsis markers
+;; skipped) — the population the formatter and the sci-notation heuristic
+;; run over, exactly PyTorch's behavior of formatting from the SELECTED
+;; elements.
+(define (tree-values node)
+  (cond
+    [(eq? node 'ellipsis) '()]
+    [(list? node) (append-map tree-values node)]
+    [else (list node)]))
+
+;; The summarized entry point: `tree` is nested per `dims`' structure but
+;; with elided dimensions holding only edge items around an 'ellipsis
+;; marker; `dims` supplies depth (for indent and last-dim detection), not
+;; lengths.
+(define (tensor-tree->pytorch-repr tree dims #:mode [mode #f])
+  (define-values (fmt max-width) (make-formatter (tree-values tree) mode))
+  (string-append "tensor("
+                 (format-nested tree dims 7 fmt max-width)
                  ")"))

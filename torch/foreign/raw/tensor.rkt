@@ -13,11 +13,13 @@
                   _int64
                   _ptr
                   _uint64)
-         (only-in ffi/vector _f32vector _s64vector)
+         (only-in ffi/vector _f32vector _f64vector _s64vector)
          (only-in "memory.rkt" tensor-allocator)
          (only-in "syntax.rkt" _Tensor _Tensor/null define-torch))
 
 (provide dtype-code->symbol
+         tr-tensor-copy-data-f64/raw
+         tr-tensor-narrow/raw
          tr-tensor-numel/raw
          tr-tensor-ndim/raw
          tr-tensor-shape/raw
@@ -91,6 +93,16 @@
         -> (values rc out))
   #:c-id tr_tensor_dtype)
 
+;; The float64 sibling: doubles marshal without float32 truncation.
+(define-torch tr-tensor-copy-data-f64/raw
+  (_fun (t : _Tensor)
+        (capacity : _uint64)
+        (out : (_f64vector i))
+        (out-numel : (_ptr o _uint64))
+        -> (rc : _int)
+        -> (values rc out-numel))
+  #:c-id tr_tensor_copy_data_f64)
+
 ;; tr-tensor-copy-data/raw's int64 sibling (#44): copies via a CPU/int64
 ;; conversion so integer tensors round-trip exactly.
 (define-torch tr-tensor-copy-data-i64/raw
@@ -101,6 +113,20 @@
         -> (rc : _int)
         -> (values rc out-numel))
   #:c-id tr_tensor_copy_data_i64)
+
+;; Bound against the GENERATED narrow shim (tr_gen_narrow): the repr
+;; summarizer in structs.rkt needs edge slices, and it sits below
+;; generated.rkt in the require graph (generated.rkt requires
+;; structs.rkt for wrap-tensor), so the raw layer carries its own
+;; binding to the same C symbol.
+(define-torch tr-tensor-narrow/raw
+  (_fun (t : _Tensor)
+        (dim : _int64)
+        (start : _int64)
+        (len : _int64)
+        -> _Tensor/null)
+  #:c-id tr_gen_narrow
+  #:wrap tensor-allocator)
 
 (define-torch tr-tensor-item/raw
   (_fun (t : _Tensor)
