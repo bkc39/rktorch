@@ -488,6 +488,29 @@
               touch "$deps_stamp"
               echo "Done. Lint: resyntax analyze --directory torch  |  raco review <files>"
             fi
+            # In-tree compiled/ zo caches are written by whatever raco last
+            # ran here, at whatever commit — nothing else ties bytecode to
+            # the checkout revision, and a graph compiled piecewise across
+            # commits can defeat the compilation manager (mixed-state link
+            # errors instead of recompiles). Stamp the provisioned revision;
+            # on mismatch, clear the caches. (A PLTCOMPILEDROOTS per-rev
+            # root was considered and rejected: the copied dep packages
+            # compile under the roots active at provision time, so a
+            # per-rev first root forces a full dep recompile every pull.)
+            _rev=$(git rev-parse HEAD 2>/dev/null || echo norev)
+            _rev_stamp="$PLTUSERHOME/.provisioned-rev"
+            _old_rev=$(cat "$_rev_stamp" 2>/dev/null || echo none)
+            if [ "$_old_rev" != "$_rev" ]; then
+              if [ "$_old_rev" != "none" ]; then
+                echo "bytecode cache: clearing stale compiled/ (''${_old_rev:0:12} -> ''${_rev:0:12})"
+                find torch examples scripts codegen -type d -name compiled \
+                  -exec rm -rf {} + 2>/dev/null || true
+              else
+                echo "bytecode cache: fresh for ''${_rev:0:12}"
+              fi
+              mkdir -p "$PLTUSERHOME"
+              echo "$_rev" > "$_rev_stamp"
+            fi
             export PATH="$(racket -e '(require setup/dirs)(display (path->string (find-user-console-bin-dir)))'):$PATH"
           '';
 
