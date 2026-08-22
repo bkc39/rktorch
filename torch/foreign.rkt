@@ -72,7 +72,11 @@
   [eye (->* (exact-nonnegative-integer?)
             (exact-nonnegative-integer?)
             tensor?)]
-  [tensor (->* ((or/c real? list?))
+  ;; data may nest lists/vectors arbitrarily (mixed levels fine, like
+  ;; torch.tensor); homogeneous f32vector/s64vector leaves are accepted
+  ;; too, and a matching-dtype one at top level ingests with zero
+  ;; conversion copies
+  [tensor (->* ((or/c real? list? vector? f32vector? s64vector?))
                (#:requires-grad? boolean?
                 #:device (or/c #f device/c)
                 ;; inference (#44): all-exact-integer data → int64,

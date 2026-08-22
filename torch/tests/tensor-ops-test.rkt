@@ -6,7 +6,8 @@
 ;; behavior.
 
 (module+ test
-  (require (only-in racket/list drop take)
+  (require (only-in ffi/vector f32vector s64vector)
+           (only-in racket/list drop take)
            rackunit
            "../main.rkt")
 
@@ -335,6 +336,59 @@
     ;; ...and the int64 rejection is itself parity behavior
     (check-exn exn:fail?
                (lambda () (tensor '(1 2) #:requires-grad? #t))))
+
+  (test-case "sequence ingestion: vectors, math vectors, mixed nesting (#55)"
+    ;; vectors ingest like lists, sharing the #44 dtype inference
+    (check-equal? (tensor->list (tensor (vector 1 2 3))) '(1 2 3))
+    (check-equal? (dtype (tensor (vector 1 2 3))) 'int64)
+    (check-equal? (dtype (tensor (vector 1 2.0))) 'float32)
+    (check-equal? (shape (tensor (vector (vector 1.0 2.0) (vector 3.0 4.0))))
+                  '(2 2))
+    ;; nesting levels can mix container types freely
+    (check-equal? (tensor->list (tensor (list (vector 1 2) (list 3 4))))
+                  '(1 2 3 4))
+    (check-equal? (shape (tensor (vector '((1.0) (2.0)) '((3.0) (4.0)))))
+                  '(2 2 1))
+    ;; homogeneous vectors at the leaves act as a flat run of values
+    (check-equal? (shape (tensor (list (f32vector 1.0 2.0)
+                                       (f32vector 3.0 4.0))))
+                  '(2 2))
+    (check-equal? (dtype (tensor (list (s64vector 1 2)))) 'int64)
+    ;; top-level homogeneous vectors take the zero-copy path; int64
+    ;; content past 2^53 proves there is no float transit
+    (check-equal? (tensor->list (tensor (f32vector 1.5 2.5))) '(1.5 2.5))
+    (check-equal? (dtype (tensor (f32vector 1.5))) 'float32)
+    (check-equal? (tensor->list (tensor (s64vector (add1 (expt 2 53)))))
+                  (list (add1 (expt 2 53))))
+    (check-equal? (dtype (tensor (s64vector 1))) 'int64)
+    ;; #:dtype crossing the buffer's own type falls back to conversion
+    ;; ('int64 truncates toward zero, torch's cast semantics)
+    (check-equal? (tensor->list (tensor (f32vector 1.9) #:dtype 'int64))
+                  '(1))
+    (check-equal? (tensor->list (tensor (s64vector 3) #:dtype 'float32))
+                  '(3.0))
+    ;; empties and raggedness behave exactly like the list path
+    (check-equal? (dtype (tensor (vector))) 'float32)
+    (check-equal? (tensor->repr (tensor (vector (vector) (vector))))
+                  "tensor([], size=(2, 0))")
+    (check-exn #rx"ragged"
+               (lambda () (tensor (vector (vector 1 2) (vector 3)))))
+    (check-exn #rx"ragged"
+               (lambda () (tensor (list (f32vector 1.0 2.0)
+                                        (f32vector 3.0)))))
+    ;; depth-ragged input has the right leaf COUNT (4 leaves satisfy
+    ;; 2x2) but a branch nesting deeper/shallower than the first —
+    ;; validation is per level, like torch.tensor
+    (check-exn #rx"ragged"
+               (lambda ()
+                 (tensor (vector (vector 1 2)
+                                 (vector (vector 3) (vector 4))))))
+    (check-exn #rx"ragged"
+               (lambda ()
+                 (tensor (list (list 1 2)
+                               (vector (vector 3) (vector 4))))))
+    (check-exn #rx"ragged"
+               (lambda () (tensor (list (list 1) 2)))))
 
   (test-case "wrong call shapes get contract blame at the facade"
     (check-exn exn:fail:contract? (lambda () (add 1 2)))
