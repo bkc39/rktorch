@@ -375,7 +375,20 @@
                (lambda () (tensor (vector (vector 1 2) (vector 3)))))
     (check-exn #rx"ragged"
                (lambda () (tensor (list (f32vector 1.0 2.0)
-                                        (f32vector 3.0))))))
+                                        (f32vector 3.0)))))
+    ;; depth-ragged input has the right leaf COUNT (4 leaves satisfy
+    ;; 2x2) but a branch nesting deeper/shallower than the first —
+    ;; validation is per level, like torch.tensor
+    (check-exn #rx"ragged"
+               (lambda ()
+                 (tensor (vector (vector 1 2)
+                                 (vector (vector 3) (vector 4))))))
+    (check-exn #rx"ragged"
+               (lambda ()
+                 (tensor (list (list 1 2)
+                               (vector (vector 3) (vector 4))))))
+    (check-exn #rx"ragged"
+               (lambda () (tensor (list (list 1) 2)))))
 
   (test-case "wrong call shapes get contract blame at the facade"
     (check-exn exn:fail:contract? (lambda () (add 1 2)))

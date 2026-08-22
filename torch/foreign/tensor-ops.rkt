@@ -156,7 +156,7 @@
   (wrap 'eye (tr-eye/raw n m)))
 
 ;; Shape inference walks the first element of each nesting level, exactly like
-;; torch.tensor; the numel check below (and again in C) rejects ragged input.
+;; torch.tensor; check-regular then holds every sibling to these dims.
 ;; Any level may be a list, a vector, or (as a leaf run) a homogeneous
 ;; f32vector/s64vector — mixed nesting is fine, matching torch.tensor's
 ;; acceptance of any reasonable sequence nesting.
@@ -172,14 +172,44 @@
     [(s64vector? data) (list (s64vector-length data))]
     [else '()]))
 
-(define (sequence-flatten data)
+(define (sequence-children data)
   (cond
-    [(list? data) (append-map sequence-flatten data)]
-    [(vector? data)
-     (append-map sequence-flatten (vector->list data))]
+    [(list? data) data]
+    [(vector? data) (vector->list data)]
     [(f32vector? data) (f32vector->list data)]
     [(s64vector? data) (s64vector->list data)]
-    [else (list data)]))
+    [else #f]))
+
+(define (sequence-flatten data)
+  (define kids (sequence-children data))
+  (if kids (append-map sequence-flatten kids) (list data)))
+
+;; Every sibling must match the dims inferred from the first element at
+;; each level — a leaf count times out against (apply * dims) cannot
+;; catch depth-ragged input like ((1 2) ((3) (4))), whose 4 leaves
+;; satisfy 2x2 while the second row nests one level deeper.
+;; torch.tensor validates recursively and raises here too.
+(define (check-regular data dims d)
+  (define kids (sequence-children data))
+  (cond
+    [(null? dims)
+     (when kids
+       (error 'tensor
+              "ragged nested sequence: unexpected sequence at dim ~a: ~e"
+              d data))]
+    [(not kids)
+     (error 'tensor
+            (string-append "ragged nested sequence: expected sequence of"
+                           " length ~a at dim ~a, got ~e")
+            (car dims) d data)]
+    [(not (= (length kids) (car dims)))
+     (error 'tensor
+            (string-append "ragged nested sequence: expected sequence of"
+                           " length ~a at dim ~a, got length ~a")
+            (car dims) d (length kids))]
+    [else
+     (for ([kid (in-list kids)])
+       (check-regular kid (cdr dims) (add1 d)))]))
 
 (define (exact-int64 x)
   (cond
@@ -214,11 +244,8 @@
       [(and (s64vector? data) (not (eq? dtype 'float32)))
        (values 'int64 data (s64vector-length data))]
       [else
+       (check-regular data dims 0)
        (define flat (sequence-flatten data))
-       (unless (= (length flat) (apply * dims))
-         (error 'tensor
-                "ragged nested sequence; dims ~a need ~a values, got ~a"
-                dims (apply * dims) (length flat)))
        (define inferred
          (or dtype
              (if (and (pair? flat) (andmap exact-integer? flat))
