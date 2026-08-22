@@ -111,6 +111,7 @@
                             2000
                             (lambda (i) (* (add1 i) 100000000)))))
                   (tensor->repr (tensor '(1e10 2.5e10 -3e-7)))
+                  (tensor->repr (tensor '(1e8)))
                   (begin
                     (manual-seed! 0)
                     (tensor->repr (mul (randn 2000) 1e10))))])

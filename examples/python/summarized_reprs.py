@@ -26,6 +26,7 @@ reprs = [
     repr(torch.full((30,), float("inf"))),
     repr(torch.arange(1, 2001) * 100000000),
     repr(torch.tensor([1e10, 2.5e10, -3e-7])),
+    repr(torch.tensor([1e8])),
 ]
 torch.manual_seed(0)
 reprs.append(repr(torch.randn(2000) * 1e10))

@@ -84,8 +84,10 @@
     [else
      (define mx (apply max mags))
      (define mn (apply min mags))
+     ;; strict bounds, exactly _Formatter's: 1e8 itself still prints
+     ;; fixed (tensor([100000000.]))
      (or (> (/ mx mn) 1000.0)
-         (>= mx 1e8)
+         (> mx 1e8)
          (< mn 1e-4))]))
 
 ;; int64 tensors print bare integers ("1", never "1.") — exactly
