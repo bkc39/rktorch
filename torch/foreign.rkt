@@ -58,7 +58,7 @@
   [tensor-shape (-> tensor? (listof exact-nonnegative-integer?))]
   [tensor-numel (-> tensor? exact-nonnegative-integer?)]
   ;; int64 tensors marshal out as s64vector / exact integers (#44)
-  [tensor->vector (-> tensor? (or/c f32vector? s64vector?))]
+  [tensor->vector (-> tensor? (or/c f32vector? f64vector? s64vector?))]
   [tensor->list (-> tensor? (listof real?))]
   ;; tensor->repr: the PyTorch `repr` text (what the REPL prints);
   ;; tensor->string: ATen's C++ `operator<<` text.

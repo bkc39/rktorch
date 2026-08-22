@@ -36,6 +36,13 @@
     ;; #:dtype overrides inference both ways; 'int64 truncates toward
     ;; zero (torch's cast semantics)
     (check-equal? (tensor-dtype (tensor '(1 2) #:dtype 'float32)) 'float32)
+    ;; float64 marshals at double precision: 2^24+1 survives (the f32
+    ;; path truncates it to 16777216)
+    (check-equal? (tensor->list (to-dtype (tensor '(16777217)) 'float64))
+                  '(16777217.0))
+    (check-regexp-match #rx"16777217"
+                        (tensor->repr
+                         (to-dtype (tensor '(16777217)) 'float64)))
     (check-equal? (tensor->list (tensor '(1.9 -1.9) #:dtype 'int64)) '(1 -1))
     (check-exn exn:fail? (lambda () (tensor '(1 2) #:dtype 'float64)))
     ;; nested integer data flows through shape ops as int64

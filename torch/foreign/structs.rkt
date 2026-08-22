@@ -20,7 +20,9 @@
 (require (only-in ffi/unsafe cpointer-has-tag? prop:cpointer set-cpointer-tag!)
          (only-in ffi/vector
                   f32vector->list
+                  f64vector->list
                   make-f32vector
+                  make-f64vector
                   make-s64vector
                   s64vector->list
                   s64vector-ref)
@@ -33,6 +35,7 @@
          (only-in "raw/syntax.rkt" Tensor?)
          (only-in "raw/tensor.rkt"
                   dtype-code->symbol
+                  tr-tensor-copy-data-f64/raw
                   tr-tensor-copy-data-i64/raw
                   tr-tensor-copy-data/raw
                   tr-tensor-dtype/raw
@@ -77,6 +80,15 @@
   (define-values (rc _numel) (tr-tensor-copy-data/raw h numel out))
   (check-ok rc 'tensor->repr)
   (f32vector->list out))
+
+;; Copy a float64 handle's values out as doubles — full precision (the
+;; float32 path truncates mantissas past 2^24).
+(define (handle->doubles h dims)
+  (define numel (apply * dims))
+  (define out (make-f64vector numel))
+  (define-values (rc _numel) (tr-tensor-copy-data-f64/raw h numel out))
+  (check-ok rc 'tensor->repr)
+  (f64vector->list out))
 
 ;; Copy an int64 handle's values out as a flat row-major list of EXACT
 ;; integers (#44) — the float path would corrupt values beyond 2^24.
@@ -165,7 +177,10 @@
     [(zero? numel) (empty-repr dims dtype)]
     [summarize?
      (define leaf-values
-       (if (eq? dtype 'int64) handle->ints handle->floats))
+       (case dtype
+         [(int64) handle->ints]
+         [(float64) handle->doubles]
+         [else handle->floats]))
      (define tree (handle->summarized-tree h dims 0 leaf-values))
      (define mode
        (case dtype [(int64) 'exact-integers] [(bool) 'booleans] [else #f]))
@@ -180,6 +195,10 @@
      ;; renders True/False (torch.tensor([True, False]) parity)
      (tensor->pytorch-repr (handle->floats h dims) dims
                            #:mode 'booleans)]
+    [(eq? dtype 'float64)
+     ;; full-precision doubles: sci mantissas past float32's 2^24 stay
+     ;; right (the dtype suffix remains the documented TODO)
+     (tensor->pytorch-repr (handle->doubles h dims) dims)]
     [else (tensor->pytorch-repr (handle->floats h dims) dims)]))
 
 ;; The REPL/`print`/`write` form mirrors the Python REPL: show the tensor's

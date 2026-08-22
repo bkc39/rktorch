@@ -75,6 +75,12 @@ int tr_tensor_dtype(const tr_tensor* t, tr_dtype* out);
 int tr_tensor_copy_data_i64(const tr_tensor* t, uint64_t capacity, int64_t* out,
                             uint64_t* out_numel);
 
+/* The float64 sibling: double-precision values marshal without the
+ * float32 truncation (repr mantissas and tolist exactness for
+ * to-dtype'd float64 tensors). Same size-then-fill contract. */
+int tr_tensor_copy_data_f64(const tr_tensor* t, uint64_t capacity, double* out,
+                            uint64_t* out_numel);
+
 /* Render the tensor via ATen's ostream operator into out_buffer (capacity in
  * bytes, no NUL terminator written). *out_len always receives the byte length;
  * rc=2 if buffer_capacity < len. */

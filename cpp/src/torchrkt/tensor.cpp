@@ -167,6 +167,31 @@ int tr_tensor_copy_data_i64(const tr_tensor* t, uint64_t capacity, int64_t* out,
   }
 }
 
+int tr_tensor_copy_data_f64(const tr_tensor* t, uint64_t capacity, double* out,
+                            uint64_t* out_numel) {
+  if (!t || !out_numel) {
+    torchrkt::set_error("tr_tensor_copy_data_f64: null argument");
+    return 1;
+  }
+  *out_numel = 0;
+  try {
+    const torch::Tensor c =
+        t->value.to(torch::kCPU).to(torch::kFloat64).contiguous();
+    const uint64_t numel = static_cast<uint64_t>(c.numel());
+    *out_numel = numel;
+    if (capacity < numel) {
+      return 2;
+    }
+    if (out && numel > 0) {
+      std::memcpy(out, c.data_ptr<double>(), numel * sizeof(double));
+    }
+    return 0;
+  } catch (const std::exception& e) {
+    torchrkt::record_failure("tr_tensor_copy_data_f64", e);
+    return 1;
+  }
+}
+
 int tr_tensor_copy_data(const tr_tensor* t, uint64_t capacity, float* out,
                         uint64_t* out_numel) {
   if (!t || !out_numel) {

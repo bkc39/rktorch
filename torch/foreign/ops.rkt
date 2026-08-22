@@ -7,6 +7,9 @@
                   f32vector->list
                   list->s64vector
                   make-f32vector
+                  f64vector->list
+                  f64vector?
+                  make-f64vector
                   make-s64vector
                   s64vector->list
                   s64vector-ref
@@ -32,6 +35,7 @@
          (only-in "raw/random.rkt" tr-rand/raw tr-randn/raw tr-tensor-uniform!/raw)
          (only-in "raw/tensor.rkt"
                   dtype-code->symbol
+                  tr-tensor-copy-data-f64/raw
                   tr-tensor-copy-data-i64/raw
                   tr-tensor-copy-data/raw
                   tr-tensor-dtype/raw
@@ -297,8 +301,15 @@
 ;; values beyond 2^24), everything else through float32 as before.
 (define (tensor->vector t)
   (define n (tensor-numel t))
+  (define-values (dtype-rc code) (tr-tensor-dtype/raw t))
+  (define dt (and (zero? dtype-rc) (dtype-code->symbol code)))
   (cond
-    [(int64-tensor? t)
+    [(eq? dt 'float64)
+     (define out (make-f64vector n))
+     (define-values (rc _n) (tr-tensor-copy-data-f64/raw t n out))
+     (check-ok rc 'tensor->vector)
+     out]
+    [(eq? dt 'int64)
      (define out (make-s64vector n))
      (define-values (rc _n) (tr-tensor-copy-data-i64/raw t n out))
      (check-ok rc 'tensor->vector)
@@ -313,7 +324,10 @@
 ;; .tolist()'s int/float split.
 (define (tensor->list t)
   (define v (tensor->vector t))
-  (if (s64vector? v) (s64vector->list v) (f32vector->list v)))
+  (cond
+    [(s64vector? v) (s64vector->list v)]
+    [(f64vector? v) (f64vector->list v)]
+    [else (f32vector->list v)]))
 
 ;; ATen's C++ `operator<<` text (the libtorch-native printer).
 (define (tensor->string t)

@@ -31,9 +31,7 @@
          (only-in racket/string string-join))
 
 (provide tensor->pytorch-repr
-         tensor-tree->pytorch-repr
-         tree-values
-         needs-sci-notation?)
+         tensor-tree->pytorch-repr)
 
 (define precision 4)
 (define linewidth 80)
@@ -117,27 +115,21 @@
       [sci? fmt-sci]
       [int-mode? fmt-int]
       [else fmt-fixed]))
-  (define max-width
-    (for/fold ([w 0]) ([x (in-list flat)])
-      (max w (string-length (fmt x)))))
-  ;; PyTorch's _Formatter computes width() over the NONZERO finite
-  ;; values only (each as digits+1 for the trailing dot), defaulting to
-  ;; 1 when that set is empty — so an all-zero tensor's budget
-  ;; undercounts ("0." renders 2 wide but budgets 1) and its rows
-  ;; legitimately overflow 80 columns, while ordinary int-mode rows
-  ;; budget with the dot included. Rendering always pads to the full
-  ;; rendered width; only the wrap budget follows _Formatter.
-  ;; ...and for FLOATING tensors (int-mode AND fixed alike) the budget
-  ;; population is the nonzero FINITE values, default 1 when empty — an
-  ;; all-inf row budgets 1 exactly like an all-zero one. Integer/bool
-  ;; tensors budget over all values.
-  (define wrap-width
+  ;; ONE width governs both padding and the wrap budget, exactly
+  ;; _Formatter's max_width: for FLOATING tensors (int-mode, fixed and
+  ;; sci alike) it folds over the NONZERO FINITE values only (default 1
+  ;; when empty) — so "0." and "nan" can render wider than the width
+  ;; and simply go unpadded, and all-zero/all-non-finite rows
+  ;; legitimately overflow 80 columns; integer and bool tensors fold
+  ;; over all values.
+  (define width
     (if (memq mode '(exact-integers booleans))
-        max-width
+        (for/fold ([w 0]) ([x (in-list flat)])
+          (max w (string-length (fmt x))))
         (for/fold ([w 1]) ([x (in-list flat)]
                            #:when (and (finite-real? x) (not (zero? x))))
           (max w (string-length (fmt x))))))
-  (values fmt max-width wrap-width))
+  (values fmt width))
 
 (define (pad s width)
   (string-append (make-string (max 0 (- width (string-length s))) #\space) s))
@@ -152,7 +144,7 @@
      (for/list ([i (in-range (car dims))])
        (nest (take (drop flat (* i block)) block) (cdr dims)))]))
 
-(define (format-nested node dims indent fmt max-width wrap-width)
+(define (format-nested node dims indent fmt max-width)
   (cond
     [(null? dims) (pad (fmt node) max-width)]
     [(null? (cdr dims))
@@ -164,7 +156,7 @@
        (for/list ([v (in-list node)])
          (if (eq? v 'ellipsis) " ..." (pad (fmt v) max-width))))
      (define per-line
-       (max 1 (quotient (- linewidth indent) (+ wrap-width 2))))
+       (max 1 (quotient (- linewidth indent) (+ max-width 2))))
      (define lines
        (let loop ([xs rendered])
          (if (<= (length xs) per-line)
@@ -185,16 +177,15 @@
                     (if (eq? sub 'ellipsis)
                         "..."
                         (format-nested sub (cdr dims) (add1 indent) fmt
-                                       max-width wrap-width)))
+                                       max-width)))
                   sep #:before-first "[" #:after-last "]")]))
 
 ;; "tensor(" + data + ")", with continuation lines aligned under the data by the
 ;; width of "tensor(" (7) -- exactly PyTorch's layout.
 (define (tensor->pytorch-repr flat dims #:mode [mode #f])
-  (define-values (fmt max-width wrap-width) (make-formatter flat mode))
+  (define-values (fmt max-width) (make-formatter flat mode))
   (string-append "tensor("
-                 (format-nested (nest flat dims) dims 7 fmt max-width
-                                wrap-width)
+                 (format-nested (nest flat dims) dims 7 fmt max-width)
                  ")"))
 
 ;; The values present in a summarized tree, in order ('ellipsis markers
@@ -212,8 +203,7 @@
 ;; marker; `dims` supplies depth (for indent and last-dim detection), not
 ;; lengths.
 (define (tensor-tree->pytorch-repr tree dims #:mode [mode #f])
-  (define-values (fmt max-width wrap-width)
-    (make-formatter (tree-values tree) mode))
+  (define-values (fmt max-width) (make-formatter (tree-values tree) mode))
   (string-append "tensor("
-                 (format-nested tree dims 7 fmt max-width wrap-width)
+                 (format-nested tree dims 7 fmt max-width)
                  ")"))
