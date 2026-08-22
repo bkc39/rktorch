@@ -119,7 +119,10 @@
                   (tensor->repr
                    (tensor (for/list ([i (in-range 2000)])
                              (* (exact->inexact (add1 i))
-                                12345.6789)))))])
+                                12345.6789))))
+                  ;; rank 5, every dim eliding: exercises the recursive
+                  ;; slice fan-out ((2*edgeitems)^4 internal narrows)
+                  (tensor->repr (zeros 7 7 7 7 7)))])
        (check-equal? (length rkt) (length py)
                      "summarized-repr form count")
        ;; the f64 marshal path against real PyTorch (repr byte-compare

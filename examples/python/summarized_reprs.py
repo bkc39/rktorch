@@ -29,6 +29,7 @@ reprs = [
     repr(torch.tensor([1e8])),
     repr(torch.tensor([float("nan"), 5.0])),
     repr((torch.arange(2000) + 1).to(torch.float32) * 12345.6789),
+    repr(torch.zeros(7, 7, 7, 7, 7)),
 ]
 print(json.dumps({
     "reprs": reprs,

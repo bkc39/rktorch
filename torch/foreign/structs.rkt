@@ -134,8 +134,20 @@
 (define edgeitems 3)
 
 ;; Slice `len` entries starting at `start` along dimension `d` of `h`.
-(define (slice h d start len)
-  (check-handle 'tensor->repr (tr-tensor-narrow/raw h d start len)))
+;; Slices are internal to tree building — up to (2*edgeitems)^(rank-1)
+;; of them for a high-rank fully-eliding tensor — so each is released
+;; synchronously once consumed rather than left to accumulate finalizer
+;; and ledger charges until a GC. Same break-deferral discipline as
+;; `tensor-free!`; on a raising path the finalizer backstop still holds
+;; because the tag only flips after a completed free.
+(define (call-with-slice h d start len proc)
+  (define s (check-handle 'tensor->repr (tr-tensor-narrow/raw h d start len)))
+  (begin0
+    (proc s)
+    (dynamic-wind
+     void
+     (lambda () (parameterize-break #f (tr-tensor-free/checked s)))
+     (lambda () (set-cpointer-tag! s 'Tensor-freed)))))
 
 ;; Build the summarized tree: recurse the leading dimensions (narrowing
 ;; per included index), marshal only leaf slices. `d` is the absolute
@@ -147,15 +159,18 @@
   (define elide? (> n (* 2 edgeitems)))
   (cond
     [(and last? elide?)
-     (append (leaf-values (slice h d 0 edgeitems) (list edgeitems))
+     (append (call-with-slice h d 0 edgeitems
+                              (lambda (s) (leaf-values s (list edgeitems))))
              '(ellipsis)
-             (leaf-values (slice h d (- n edgeitems) edgeitems)
-                          (list edgeitems)))]
+             (call-with-slice h d (- n edgeitems) edgeitems
+                              (lambda (s) (leaf-values s (list edgeitems)))))]
     [last? (leaf-values h (list n))]
     [else
      (define (child i)
-       (handle->summarized-tree (slice h d i 1) (cdr dims) (add1 d)
-                                leaf-values))
+       (call-with-slice h d i 1
+                        (lambda (s)
+                          (handle->summarized-tree s (cdr dims) (add1 d)
+                                                   leaf-values))))
      (if elide?
          (append (for/list ([i (in-range edgeitems)]) (child i))
                  '(ellipsis)
