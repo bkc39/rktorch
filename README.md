@@ -31,6 +31,9 @@ Built against `pkgs.libtorch-bin` by default; flip `torchSource` in `flake.nix`
 to `"python"` for bit-exact PyTorch parity. Supported systems: `aarch64-darwin`,
 `x86_64-linux`.
 
+How native memory is managed across the GC/FFI boundary:
+[docs/internals.md](docs/internals.md).
+
 ## License
 
 Apache-2.0.
