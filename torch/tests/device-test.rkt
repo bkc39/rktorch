@@ -110,7 +110,6 @@
 
   (test-case "mps queries have sane types"
     (check-true (boolean? (mps-available?)))
-    ;; no-op success when the backend is absent, real release when present
     (check-not-exn mps-empty-cache!))
 
   (test-case "new tensors and to-device land on cpu"
