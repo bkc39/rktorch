@@ -81,9 +81,6 @@
 ;; device-resident via masked_select. Deviation from numpy advanced
 ;; indexing: multiple index tensors apply per-dim sequentially, not
 ;; broadcast-combined, and index tensors are rank-1 (contract).
-(define (rank v)
-  (length (tensor-shape v)))
-
 (define (index-tensor positions v)
   (tensor positions #:dtype 'int64 #:device (tensor-device v)))
 
@@ -128,7 +125,7 @@
   (cond
     [(and (pair? specs) (null? (cdr specs))
           (bool-mask? (car specs))
-          (= (rank (car specs)) (rank t)))
+          (equal? (tensor-shape (car specs)) (tensor-shape t)))
      (g:masked-select t (car specs))]
     [else
      (define expanded

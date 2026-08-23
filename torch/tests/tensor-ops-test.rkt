@@ -373,6 +373,9 @@
                     '(1 2 7 8)))
     (check-exn #rx"too many indices" (lambda () (ref t (gt t 4) 0)))
     (check-exn #rx"mask shape" (lambda () (ref t 0 (ne (tensor '(1 0)) 0))))
+    ;; python rejects broadcastable-but-unequal full-rank masks
+    (check-exn #rx"mask shape"
+               (lambda () (ref t (ne (tensor '((1 0 1))) 0))))
     (check-exn exn:fail:contract?
                (lambda () (ref t (tensor '(0.5 1.0)))))
     (check-exn exn:fail:contract?
