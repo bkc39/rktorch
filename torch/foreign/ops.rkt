@@ -13,8 +13,8 @@
                   s64vector?)
          (only-in "device-type.rkt"
                   [device make-device]
-                  cpu-device cuda-device mps-device
-                  device-index device-type device?)
+                  cpu-device cuda-device device-index device-type device?
+                  mps-device)
          (only-in "error.rkt" check-handle check-ok)
          (only-in "raw/device.rkt"
                   tr-cuda-device-count/raw
@@ -22,6 +22,7 @@
                   tr-cuda-is-available/raw
                   tr-cuda-memory-stats/raw
                   tr-get-default-device/raw
+                  tr-mps-empty-cache/raw
                   tr-mps-is-available/raw
                   tr-set-default-device/raw
                   tr-tensor-device/raw
@@ -71,6 +72,7 @@
          cuda-if-available
          cuda-device-count
          mps-available?
+         mps-empty-cache!
          mps-if-available
          set-default-device!
          default-device
@@ -177,6 +179,10 @@
   (check-ok (tr-cuda-empty-cache/raw) 'cuda-empty-cache!)
   (void))
 
+(define (mps-empty-cache!)
+  (check-ok (tr-mps-empty-cache/raw) 'mps-empty-cache!)
+  (void))
+
 (define (reclaim-native-memory!)
   (let loop ([prev (ledger-total)] [rounds 4])
     (define drained? (collect-and-drain!))
@@ -186,7 +192,8 @@
     (when (and (> rounds 1)
                (or (< now prev) (not drained?)))
       (loop now (sub1 rounds))))
-  (cuda-empty-cache!))
+  (cuda-empty-cache!)
+  (mps-empty-cache!))
 
 (define (ledger-total)
   (for/sum ([entry (in-list (native-memory-use))])

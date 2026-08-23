@@ -144,6 +144,7 @@
         (listof (cons/c (or/c 'allocated 'reserved 'peak-allocated)
                         exact-nonnegative-integer?)))]
   [cuda-empty-cache! (-> void?)]
+  [mps-empty-cache! (-> void?)]
   [reclaim-native-memory! (-> void?)]
   [finalizer-failures (-> exact-nonnegative-integer?)]
   ;; device

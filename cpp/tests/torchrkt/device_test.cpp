@@ -162,6 +162,47 @@ TEST(TorchrktDevice, SetMpsDefaultWhenUnavailableErrors) {
   EXPECT_EQ(type, TR_DEVICE_CPU);
 }
 
+TEST(TorchrktDevice, MpsWhenUnavailableErrorsOnDirectPaths) {
+  if (tr_mps_is_available() != 0) {
+    GTEST_SKIP() << "MPS present; the success path is MpsRoundTrip";
+  }
+  // index 0 must be rejected too: set_default_device has its own guard, but
+  // the to-device/creation paths reach to_torch_device directly.
+  const std::vector<float> values = {1.0F};
+  const std::vector<int64_t> dims = {1};
+  EXPECT_EQ(tr_from_data_on_device(values.data(), values.size(), dims.data(), 1,
+                                   TR_DEVICE_MPS, 0),
+            nullptr);
+  EXPECT_STRNE(tr_last_error(), "");
+  const Handle cpu_t(
+      tr_from_data(values.data(), values.size(), dims.data(), 1));
+  EXPECT_EQ(tr_tensor_to_device(cpu_t.t, TR_DEVICE_MPS, 0), nullptr);
+  EXPECT_STRNE(tr_last_error(), "");
+}
+
+TEST(TorchrktDevice, EmptyCacheIsNoOpSuccessWithoutMps) {
+  if (tr_mps_is_available() != 0) {
+    GTEST_SKIP() << "MPS present; the success path is MpsRoundTrip";
+  }
+  EXPECT_EQ(tr_mps_empty_cache(), 0);
+}
+
+TEST(TorchrktDevice, MpsOomClassifiesAsOomKind) {
+  if (tr_mps_is_available() == 0) {
+    GTEST_SKIP() << "no MPS device visible";
+  }
+  const DefaultDeviceGuard guard;
+  ASSERT_EQ(tr_set_default_device(TR_DEVICE_MPS, 0), 0) << tr_last_error();
+  // 2^40 floats = 4 TiB: past Metal's per-buffer cap, so the MPS allocator
+  // refuses fast ("Invalid buffer size:") without committing memory. The
+  // high-water-mark shape ("MPS backend out of memory") is unreachable in a
+  // test without RAM-scale commits; classify covers both.
+  const std::vector<int64_t> dims = {int64_t{1} << 40};
+  EXPECT_EQ(tr_zeros(dims.data(), 1), nullptr);
+  EXPECT_EQ(tr_last_error_kind(), 1) << tr_last_error();
+  EXPECT_STRNE(tr_last_error(), "");
+}
+
 TEST(TorchrktDevice, MpsNonzeroIndexErrors) {
   const DefaultDeviceGuard guard;
   EXPECT_EQ(tr_set_default_device(TR_DEVICE_MPS, 1), 1);
@@ -223,6 +264,8 @@ TEST(TorchrktDevice, MpsRoundTrip) {
   EXPECT_EQ(tr_tensor_device(randn_gpu.t, &rd_type, &rd_index), 0)
       << tr_last_error();
   EXPECT_EQ(rd_type, TR_DEVICE_MPS);
+
+  EXPECT_EQ(tr_mps_empty_cache(), 0) << tr_last_error();
 }
 
 TEST(TorchrktDevice, CudaRoundTrip) {

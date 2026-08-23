@@ -1,5 +1,6 @@
 #include "torchrkt/c_api/device.h"
 
+#include <ATen/detail/MPSHooksInterface.h>
 #include <torch/torch.h>
 
 #include <atomic>
@@ -52,6 +53,13 @@ torch::Device to_torch_device(tr_device_type type, int64_t index) {
       return torch::Device(torch::kCUDA,
                            static_cast<torch::DeviceIndex>(index));
     case TR_DEVICE_MPS:
+      // Checked here, not just in set_default_device: CUDA gets this free
+      // (index >= device_count() rejects when the count is 0) but MPS has
+      // no count query, so the direct to-device/creation paths would
+      // otherwise dispatch onto an unregistered backend.
+      if (!torch::mps::is_available()) {
+        throw std::invalid_argument("MPS is not available");
+      }
       // MPS exposes a single device; there is no ordinal to pick.
       if (index != 0) {
         throw std::invalid_argument("MPS device index must be 0");
@@ -182,6 +190,16 @@ int tr_cuda_empty_cache(void) {
       c10::cuda::CUDACachingAllocator::emptyCache();
     }
 #endif
+  });
+}
+
+int tr_mps_empty_cache(void) {
+  return torchrkt::status_call("tr_mps_empty_cache", [&] {
+    // The hooks' default implementation throws when the backend is absent;
+    // mirror tr_cuda_empty_cache's no-op success instead.
+    if (torch::mps::is_available()) {
+      at::detail::getMPSHooks().emptyCache();
+    }
   });
 }
 

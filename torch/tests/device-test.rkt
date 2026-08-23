@@ -63,7 +63,8 @@
       ;; an explicitly-CPU tensor under a CUDA default lands on CPU
       (with-default-device (cuda-device)
         (check-equal? (tensor-device (tensor '(4 5) #:device (cpu-device)))
-                      (cpu-device)))
+                      (cpu-device))
+        (mps-empty-cache!))
       (check-equal? (default-device) (cpu-device))))
 
   (test-case "cuda allocator gauges (#51)"
@@ -108,7 +109,9 @@
     (check-equal? (> (cuda-device-count) 0) (cuda-available?)))
 
   (test-case "mps queries have sane types"
-    (check-true (boolean? (mps-available?))))
+    (check-true (boolean? (mps-available?)))
+    ;; no-op success when the backend is absent, real release when present
+    (check-not-exn mps-empty-cache!))
 
   (test-case "new tensors and to-device land on cpu"
     (define t (zeros 2 2))
@@ -198,7 +201,8 @@
                       '(19.0 22.0 43.0 50.0))
         ;; an explicitly-CPU tensor under an MPS default lands on CPU
         (check-equal? (tensor-device (tensor '(4 5) #:device (cpu-device)))
-                      (cpu-device)))
+                      (cpu-device))
+        (mps-empty-cache!))
       (check-equal? (default-device) (cpu-device))))
 
   (test-case "tranche-3 ops run on mps (gelu, embedding, layer-norm, mask)"

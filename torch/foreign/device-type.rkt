@@ -13,7 +13,6 @@
             (unless (exact-nonnegative-integer? index)
               (error name "index must be an exact nonnegative integer: ~e"
                      index))
-            ;; cpu and mps are single devices; only cuda has ordinals
             (when (and (memq type '(cpu mps)) (not (zero? index)))
               (error name "~a device index must be 0: ~e" type index))
             (values type index))

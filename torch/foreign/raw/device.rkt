@@ -5,12 +5,14 @@
                   _tr-device-type
                   tensor-allocator
                   tr-cuda-empty-cache/raw
+                  tr-mps-empty-cache/raw
                   tr-tensor-device/raw)
          (only-in "syntax.rkt" _Tensor _Tensor/null define-torch))
 
 (provide _tr-device-type
          tr-cuda-is-available/raw
          tr-mps-is-available/raw
+         tr-mps-empty-cache/raw
          tr-cuda-device-count/raw
          tr-cuda-empty-cache/raw
          tr-cuda-memory-stats/raw

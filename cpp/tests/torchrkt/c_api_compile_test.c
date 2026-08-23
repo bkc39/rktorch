@@ -100,6 +100,7 @@ void torchrkt_c_api_compile_check(void) {
       tr_cuda_memory_stats;
   int (*cuda_empty)(void) = tr_cuda_empty_cache;
   int (*mps_available)(void) = tr_mps_is_available;
+  int (*mps_empty)(void) = tr_mps_empty_cache;
   int (*set_default_device)(tr_device_type, int64_t) = tr_set_default_device;
   int (*get_default_device)(tr_device_type*, int64_t*) = tr_get_default_device;
   tr_tensor* (*to_device)(const tr_tensor*, tr_device_type, int64_t) =
@@ -162,6 +163,7 @@ void torchrkt_c_api_compile_check(void) {
   (void)cuda_stats;
   (void)cuda_empty;
   (void)mps_available;
+  (void)mps_empty;
   (void)set_default_device;
   (void)get_default_device;
   (void)to_device;

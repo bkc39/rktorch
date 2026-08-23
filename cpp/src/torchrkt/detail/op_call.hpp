@@ -27,6 +27,17 @@ inline error_kind classify(const std::exception& e) noexcept {
       std::string_view::npos) {
     return error_kind::oom;
   }
+  // The MPS allocator reports allocation refusals via TORCH_CHECK — a plain
+  // c10::Error, not c10::OutOfMemoryError — so only the message shape
+  // identifies them: "out of memory" past the high-water mark, "Invalid
+  // buffer size:" past Metal's per-buffer cap. Both classify as OOM so an
+  // oversized request gets the typed error on every backend, matching the
+  // DefaultCPUAllocator arm above.
+  const std::string_view what(e.what());
+  if (what.find("MPS backend out of memory") != std::string_view::npos ||
+      what.find("Invalid buffer size:") != std::string_view::npos) {
+    return error_kind::oom;
+  }
   return error_kind::generic;
 }
 
