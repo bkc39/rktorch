@@ -16,8 +16,8 @@ typedef enum tr_device_type {
   TR_DEVICE_MPS = 2
 } tr_device_type;
 
-/* Both probes return 0 when CUDA is absent AND when driver init throws
- * (failure recorded in tr_last_error) — check it to tell them apart. */
+/* Probes return 0 when the backend is absent AND when init throws; each
+ * clears tr_last_error on entry, so a non-empty message is from that call. */
 int tr_cuda_is_available(void);
 
 int tr_cuda_device_count(void);

@@ -116,6 +116,19 @@ TEST(TorchrktDevice, EmptyCacheIsNoOpSuccessWithoutCuda) {
   EXPECT_EQ(tr_cuda_empty_cache(), 0);
 }
 
+TEST(TorchrktDevice, AvailabilityProbesClearStaleErrors) {
+  EXPECT_EQ(tr_tensor_device(nullptr, nullptr, nullptr), 1);
+  EXPECT_STRNE(tr_last_error(), "");
+  tr_cuda_is_available();
+  EXPECT_STREQ(tr_last_error(), "");
+  EXPECT_EQ(tr_tensor_device(nullptr, nullptr, nullptr), 1);
+  tr_mps_is_available();
+  EXPECT_STREQ(tr_last_error(), "");
+  EXPECT_EQ(tr_tensor_device(nullptr, nullptr, nullptr), 1);
+  tr_cuda_device_count();
+  EXPECT_STREQ(tr_last_error(), "");
+}
+
 TEST(TorchrktDevice, NullArgsReportStatus) {
   EXPECT_EQ(tr_tensor_to_device(nullptr, TR_DEVICE_CPU, 0), nullptr);
   EXPECT_STRNE(tr_last_error(), "");
@@ -194,10 +207,8 @@ TEST(TorchrktDevice, MpsOomClassifiesAsOomKind) {
   }
   const DefaultDeviceGuard guard;
   ASSERT_EQ(tr_set_default_device(TR_DEVICE_MPS, 0), 0) << tr_last_error();
-  // 2^40 floats = 4 TiB: past Metal's per-buffer cap, so the MPS allocator
-  // refuses fast ("Invalid buffer size:") without committing memory. The
-  // high-water-mark shape ("MPS backend out of memory") is unreachable in a
-  // test without RAM-scale commits; classify covers both.
+  // 4 TiB trips Metal's per-buffer cap — a fast refusal, no RAM commit; the
+  // watermark shape needs RAM-scale commits, so only this shape is exercised.
   const std::vector<int64_t> dims = {int64_t{1} << 40};
   EXPECT_EQ(tr_zeros(dims.data(), 1), nullptr);
   EXPECT_EQ(tr_last_error_kind(), 1) << tr_last_error();

@@ -45,9 +45,14 @@ CPU-first; float32 + inferred int64 (#44). From `torch`:
   forms; `device` doubles as query-or-construct — the
   torch.device-vs-x.device hybrid; comparison masks are first-class
   `'bool` — the dtype queries answer it and `to-dtype` casts to it)
+- device: `device? device-type device-index cpu-device cuda-device
+  mps-device cuda-available? cuda-if-available cuda-device-count
+  mps-available? mps-if-available set-default-device! default-device
+  with-default-device to-device tensor-device` — `'mps` is accepted
+  wherever `'cuda` is (#13); CPU and MPS are single devices (index 0)
 - memory: `native-memory-use` (per-device outstanding native bytes from
-  the #37 ledger), `cuda-memory-stats` / `cuda-empty-cache!` (the CUDA
-  caching allocator's own gauges + release, #51),
+  the #37 ledger), `cuda-memory-stats` / `cuda-empty-cache!` /
+  `mps-empty-cache!` (the caching allocators' own gauges + release, #51),
   `reclaim-native-memory!` (collect -> finalizer drain -> cache release,
   the phase-boundary release-now sequence), `finalizer-failures`
   (guarded-swallow counter), `tensor-free!` (explicit synchronous
@@ -105,7 +110,7 @@ and falls back to the ATen form for scientific-notation values; see the TODO in
 `foreign/format.rkt`.
 
 Deferred (see plan): `native_functions.yaml` codegen, `nn.Module` macros, the
-broader ATen surface, CUDA, MPS, and the portable raco-catalog candidate story.
+broader ATen surface, and the portable raco-catalog candidate story.
 
 ## The libtorch source knob
 

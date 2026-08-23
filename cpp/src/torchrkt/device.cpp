@@ -57,10 +57,8 @@ torch::Device to_torch_device(tr_device_type type, int64_t index) {
       if (index != 0) {
         throw std::invalid_argument("MPS device index must be 0");
       }
-      // Checked here, not just in set_default_device: CUDA gets this free
-      // (index >= device_count() rejects when the count is 0) but MPS has
-      // no count query, so the direct to-device/creation paths would
-      // otherwise dispatch onto an unregistered backend.
+      // Unlike CUDA (rejected via device_count), MPS has no count query, so
+      // the direct to-device/creation paths need their own guard.
       if (!torch::mps::is_available()) {
         throw std::invalid_argument("MPS is not available");
       }
@@ -109,6 +107,7 @@ extern "C" {
 
 // Value-returning ABI: hand-rolled catch returns 0 but records tr_last_error.
 int tr_cuda_is_available(void) {
+  torchrkt::clear_error();
   try {
     return torch::cuda::is_available() ? 1 : 0;
   } catch (const std::exception& e) {
@@ -121,6 +120,7 @@ int tr_cuda_is_available(void) {
 }
 
 int tr_cuda_device_count(void) {
+  torchrkt::clear_error();
   try {
     return torch::cuda::is_available()
                ? static_cast<int>(torch::cuda::device_count())
@@ -135,6 +135,7 @@ int tr_cuda_device_count(void) {
 }
 
 int tr_mps_is_available(void) {
+  torchrkt::clear_error();
   try {
     return torch::mps::is_available() ? 1 : 0;
   } catch (const std::exception& e) {

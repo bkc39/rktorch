@@ -17,6 +17,10 @@ extern thread_local error_kind g_last_error_kind;
 void set_error(const std::string& message);
 void set_error(const std::string& message, error_kind kind);
 
+// For value-returning probes whose 0 is ambiguous (absent vs threw): clear
+// on entry so a non-empty tr_last_error afterwards is from that call.
+void clear_error() noexcept;
+
 // The exhaustion-safe recorder: never allocates on its own failure path, so
 // it is callable inside a noexcept boundary when the rich message build has
 // itself failed. Message is best-effort; the given (pre-classified) kind is
