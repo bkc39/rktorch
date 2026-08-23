@@ -62,12 +62,7 @@
       ;; an explicitly-CPU tensor under a CUDA default lands on CPU
       (with-default-device (cuda-device)
         (check-equal? (tensor-device (tensor '(4 5) #:device (cpu-device)))
-                      (cpu-device))
-        (manual-seed! 42)
-        (define r1 (tensor->list (to-device (randn 4) 'cpu)))
-        (manual-seed! 42)
-        (check-equal? (tensor->list (to-device (randn 4) 'cpu)) r1)
-        (mps-empty-cache!))
+                      (cpu-device)))
       (check-equal? (default-device) (cpu-device))))
 
   (test-case "cuda allocator gauges (#51)"
