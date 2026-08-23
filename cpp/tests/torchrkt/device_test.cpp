@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <cstring>
 #include <vector>
 
 #include "torchrkt/c_api.h"
@@ -204,16 +205,19 @@ TEST(TorchrktDevice, MpsOomClassifiesAsOomKind) {
 }
 
 TEST(TorchrktDevice, MpsNonzeroIndexErrors) {
+  // Message pinned, not just non-empty: the index check precedes the
+  // availability check, so this branch is proven on Metal-less hosts too.
   const DefaultDeviceGuard guard;
   EXPECT_EQ(tr_set_default_device(TR_DEVICE_MPS, 1), 1);
-  EXPECT_STRNE(tr_last_error(), "")
-      << "expected an error for a non-zero MPS index";
+  EXPECT_NE(strstr(tr_last_error(), "MPS device index must be 0"), nullptr)
+      << tr_last_error();
   const std::vector<float> values = {1.0F};
   const std::vector<int64_t> dims = {1};
   EXPECT_EQ(tr_from_data_on_device(values.data(), values.size(), dims.data(), 1,
                                    TR_DEVICE_MPS, 1),
             nullptr);
-  EXPECT_STRNE(tr_last_error(), "");
+  EXPECT_NE(strstr(tr_last_error(), "MPS device index must be 0"), nullptr)
+      << tr_last_error();
 }
 
 TEST(TorchrktDevice, MpsRoundTrip) {
@@ -246,7 +250,6 @@ TEST(TorchrktDevice, MpsRoundTrip) {
   const Handle om_back(tr_tensor_to_device(on_mps.t, TR_DEVICE_CPU, 0));
   EXPECT_EQ(cpu_data_of(om_back.t), host_vals);
 
-  // an explicitly-CPU tensor under an MPS default lands on CPU
   const Handle explicit_cpu(
       tr_from_data_on_device(host_vals.data(), host_vals.size(),
                              src_dims.data(), 1, TR_DEVICE_CPU, 0));

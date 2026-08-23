@@ -24,7 +24,6 @@ namespace {
 
 std::atomic<int64_t> g_default_device{0};
 
-// Two type bits (three device kinds), index above them.
 int64_t pack_device(tr_device_type type, int64_t index) {
   return (index << 2) | static_cast<int64_t>(type);
 }
@@ -53,16 +52,17 @@ torch::Device to_torch_device(tr_device_type type, int64_t index) {
       return torch::Device(torch::kCUDA,
                            static_cast<torch::DeviceIndex>(index));
     case TR_DEVICE_MPS:
+      // MPS exposes a single device; there is no ordinal to pick. Validated
+      // before availability so the check is provable on Metal-less hosts.
+      if (index != 0) {
+        throw std::invalid_argument("MPS device index must be 0");
+      }
       // Checked here, not just in set_default_device: CUDA gets this free
       // (index >= device_count() rejects when the count is 0) but MPS has
       // no count query, so the direct to-device/creation paths would
       // otherwise dispatch onto an unregistered backend.
       if (!torch::mps::is_available()) {
         throw std::invalid_argument("MPS is not available");
-      }
-      // MPS exposes a single device; there is no ordinal to pick.
-      if (index != 0) {
-        throw std::invalid_argument("MPS device index must be 0");
       }
       return torch::Device(torch::kMPS);
   }
@@ -87,11 +87,11 @@ void set_default_device(tr_device_type type, int64_t index) {
       throw std::invalid_argument("CUDA device index out of range");
     }
   } else if (type == TR_DEVICE_MPS) {
-    if (!torch::mps::is_available()) {
-      throw std::invalid_argument("MPS is not available");
-    }
     if (index != 0) {
       throw std::invalid_argument("MPS device index must be 0");
+    }
+    if (!torch::mps::is_available()) {
+      throw std::invalid_argument("MPS is not available");
     }
   } else if (type == TR_DEVICE_CPU) {
     if (index != 0) {

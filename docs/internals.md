@@ -18,12 +18,13 @@ collection keeps native memory honest on every device.
   at::Tensor                libtorch value: refcounted TensorImpl
       |
   Storage -> DataPtr        the buffer, owned by libtorch's (caching)
-                            allocator on CPU or CUDA
+                            allocator on CPU, CUDA, or MPS
 ```
 
 Two handles may share one storage (views). Freeing a handle drops one
 reference; the buffer is released when the last reference goes. On
-CUDA the caching allocator usually just returns the block to its pool.
+CUDA and MPS the caching allocators usually just return the block to
+their pools.
 
 ## Tensor lifetime
 
@@ -91,7 +92,13 @@ host ones — user code never calls the collector by hand.
 When an allocation fails and classifies as out-of-memory, the wrapper
 collects, drains pending finalizers (a bounded, best-effort drain),
 and retries the call exactly once; a second failure
-raises the typed `exn:fail:rktorch:oom`. Ops that draw from the global
+raises the typed `exn:fail:rktorch:oom`. Classification is by exception
+type (`c10::OutOfMemoryError`, `std::bad_alloc`) plus message shape for
+the allocators that only throw plain `c10::Error`: the CPU allocator's
+"DefaultCPUAllocator" and the MPS allocator's two refusals — "MPS
+backend out of memory" (high-water mark) and "Invalid buffer size:"
+(Metal's per-buffer cap) — so an oversized request gets the typed OOM
+on every backend. Ops that draw from the global
 RNG stream use `tensor-allocator/rng` — the same wrap minus the retry,
 because a retried draw would advance the generator stream and break
 seeded reproducibility.
@@ -103,11 +110,12 @@ seeded reproducibility.
   allocations absent).
 - `cuda-memory-stats` — the CUDA caching allocator's own
   allocated/reserved/peak numbers for this process.
-- `cuda-empty-cache!` — return reserved-but-unused blocks to the
-  driver.
+- `cuda-empty-cache!` / `mps-empty-cache!` — return
+  reserved-but-unused blocks to the driver; each is a no-op success
+  when its backend is absent.
 - `reclaim-native-memory!` — collect, drain, repeat (a bounded number
-  of rounds) until the ledger stops shrinking, then empty the CUDA
-  cache. For epoch boundaries and script exits.
+  of rounds) until the ledger stops shrinking, then empty the CUDA and
+  MPS caches. For epoch boundaries and script exits.
 - `tensor-free!` — deterministic release of one handle's reference
   (unsafe submodule); the buffer goes when the last sharing handle
   does.

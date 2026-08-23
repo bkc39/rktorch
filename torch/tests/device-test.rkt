@@ -199,7 +199,6 @@
         (define b (to-device (tensor '((5.0 6.0) (7.0 8.0))) 'mps))
         (check-equal? (tensor->list (to-device (matmul a b) 'cpu))
                       '(19.0 22.0 43.0 50.0))
-        ;; an explicitly-CPU tensor under an MPS default lands on CPU
         (check-equal? (tensor-device (tensor '(4 5) #:device (cpu-device)))
                       (cpu-device))
         (mps-empty-cache!))
