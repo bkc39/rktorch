@@ -382,6 +382,38 @@
                (lambda () (ref t (to-dtype (tensor '((0 1))) 'int64))))
     (check-exn exn:fail? (lambda () (ref (arange 6) (:: #f #f -1)))))
 
+  (test-case "ref macro sugar expands to tensor-ref value specs (#46)"
+    (define t (tensor '((1 2 3) (4 5 6))))
+    (check-equal? (tensor->list (ref t : 0))
+                  (tensor->list (tensor-ref t (::) 0)))
+    (check-equal? (tensor->list (ref t (1 : 3)))
+                  (tensor->list (tensor-ref t (:: 1 3))))
+    (check-equal? (tensor->list (ref t (: 2)))
+                  (tensor->list (tensor-ref t (:: 2))))
+    (check-equal? (tensor->list (ref t (1 :)))
+                  (tensor->list (tensor-ref t (:: 1 #f))))
+    (check-equal? (tensor->list (ref t : (: : 2)))
+                  (tensor->list (tensor-ref t (::) (:: #f #f 2))))
+    (check-equal? (tensor->list (ref t .. 0))
+                  (tensor->list (tensor-ref t '... 0)))
+    (check-equal? (shape (ref t : _)) (shape (tensor-ref t (::) #f)))
+    (check-equal? (shape (ref t _)) '(1 2 3))
+    ;; slice bounds are arbitrary expressions
+    (let ([lo 0])
+      (check-equal? (tensor->list (ref t ((add1 lo) : (+ 1 2)) 0))
+                    '(4)))
+    ;; value specs pass through the macro unchanged
+    (let ([s (:: 1 3)])
+      (check-equal? (tensor->list (ref t 0 s)) '(2 3)))
+    (check-equal? (tensor->list (ref t (gt t 4))) '(5 6))
+    ;; tensor-ref stays a first-class function
+    (check-equal? (apply tensor-ref t (list 1 2)) 6)
+    ;; `..` survives inside another macro's template (a literal `...`
+    ;; there would be the macro ellipsis and fail to expand)
+    (let-syntax ([first-of-last-dim
+                  (syntax-rules () [(_ x) (ref x .. 0)])])
+      (check-equal? (tensor->list (first-of-last-dim t)) '(1 4))))
+
   (test-case "wrong call shapes get contract blame at the facade"
     (check-exn exn:fail:contract? (lambda () (add 1 2)))
     (check-exn exn:fail:contract? (lambda () (sub 1.0 2.0)))

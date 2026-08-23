@@ -11,9 +11,12 @@
                   or/c
                   unsupplied-arg?)
          (only-in "device-type.rkt" device?)
+         (only-in "ops.rkt" tensor-dtype tensor-shape)
+         (only-in "promoted.rkt" slice?)
          (only-in "structs.rkt" tensor?))
 
 (provide dims-rest/c
+         index-spec/c
          index/c
          device/c
          tensor-or-real/c
@@ -30,6 +33,16 @@
          arange/c)
 
 (define dims-rest/c (listof exact-nonnegative-integer?))
+
+(define (index-tensor-spec? x)
+  (and (tensor? x)
+       (or (eq? (tensor-dtype x) 'bool)
+           (and (eq? (tensor-dtype x) 'int64)
+                (= 1 (length (tensor-shape x)))))))
+
+(define index-spec/c
+  (or/c exact-integer? slice? index-tensor-spec? #f '...
+        (listof exact-integer?)))
 
 ;; -1 means "infer this dimension"
 (define index/c exact-integer?)

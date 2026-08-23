@@ -14,19 +14,10 @@
          "foreign/tensor-ops.rkt"
          "foreign/operators.rkt"
          "foreign/promoted.rkt"
+         (only-in "foreign/ref-syntax.rkt" ref)
          "foreign/autograd-ops.rkt")
 
-(provide with-no-grad with-default-device)
-
-(define (index-tensor-spec? x)
-  (and (tensor? x)
-       (or (eq? (tensor-dtype x) 'bool)
-           (and (eq? (tensor-dtype x) 'int64)
-                (= 1 (length (tensor-shape x)))))))
-
-(define index-spec/c
-  (or/c exact-integer? slice? index-tensor-spec? #f '...
-        (listof exact-integer?)))
+(provide ref with-no-grad with-default-device)
 
 (provide (rename-out [t+ +] [t- -] [t* *] [t/ /])
          @)
@@ -72,8 +63,6 @@
   [flatten flatten/c]
   [narrow (-> tensor? index/c index/c exact-positive-integer? tensor?)]
   [select (-> tensor? index/c index/c tensor?)]
-  [ref (-> tensor? index-spec/c ...
-           (or/c tensor? number? boolean?))]
   [tensor-ref (-> tensor? index-spec/c ...
                   (or/c tensor? number? boolean?))]
   [:: (let ([bound/c (or/c #f exact-integer?)])

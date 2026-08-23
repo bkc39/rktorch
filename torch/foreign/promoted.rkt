@@ -33,9 +33,8 @@
          eq ne lt le gt ge
          conv2d max-pool2d avg-pool2d adaptive-avg-pool2d
          tril triu masked-fill embedding layer-norm
-         ref :: slice?
-         (rename-out [ref tensor-ref]
-                     [g:narrow narrow]
+         tensor-ref :: slice?
+         (rename-out [g:narrow narrow]
                      [g:select-int select]))
 
 (struct slice (start end step) #:transparent)
@@ -98,7 +97,7 @@
   (define n (length mdims))
   (unless (and (<= (+ d n) (length vdims))
                (equal? mdims (take (list-tail vdims d) n)))
-    (error 'ref "mask shape ~a does not match dims ~a at dim ~a"
+    (error 'tensor-ref "mask shape ~a does not match dims ~a at dim ~a"
            mdims vdims d))
   (define collapsed
     (if (= n 1)
@@ -108,7 +107,7 @@
                                  (list-tail vdims (+ d n))))))
   (g:index-select collapsed d (mask-spec->index-tensor m)))
 
-(define (ref t . specs)
+(define (tensor-ref t . specs)
   (cond
     [(and (pair? specs) (null? (cdr specs))
           (bool-mask? (car specs))
@@ -116,7 +115,7 @@
      (g:masked-select t (car specs))]
     [else
      (define expanded
-       (expand-ellipsis specs (length (tensor-shape t)) 'ref))
+       (expand-ellipsis specs (length (tensor-shape t)) 'tensor-ref))
      (define result
        (for/fold ([v t] [d 0] #:result v) ([s (in-list expanded)])
          (cond
@@ -130,7 +129,7 @@
            [(or (tensor? s) (list? s))
             (values (g:index-select v d (wrap-negative-positions s v d))
                     (add1 d))]
-           [else (error 'ref "not an index spec: ~e" s)])))
+           [else (error 'tensor-ref "not an index spec: ~e" s)])))
      (cond
        [(pair? (tensor-shape result)) result]
        [(eq? (tensor-dtype result) 'bool) (not (zero? (item result)))]
