@@ -25,6 +25,7 @@ forms = [
     form(t[t > 4]),
     form(t[torch.tensor([False, True])]),
     form(t[[-1, 0]]),
+    form(cube[torch.tensor([[True, False], [False, True]])]),
     form(t[[0, 0, 1]]),
     form(t[[1, 0], 0]),
     form(c[torch.tensor([4, 0])]),

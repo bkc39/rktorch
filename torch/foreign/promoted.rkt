@@ -51,10 +51,15 @@
 (define (bool-mask? s)
   (and (tensor? s) (eq? (tensor-dtype s) 'bool)))
 
+(define (spec-consumed-dims s)
+  (cond
+    [(or (eq? s '...) (eq? s #f)) 0]
+    [(bool-mask? s) (length (tensor-shape s))]
+    [else 1]))
+
 (define (expand-ellipsis specs rank who)
   (define consuming
-    (for/sum ([s (in-list specs)])
-      (if (or (eq? s '...) (eq? s #f)) 0 1)))
+    (for/sum ([s (in-list specs)]) (spec-consumed-dims s)))
   (unless (<= consuming rank)
     (error who "too many indices for a ~a-d tensor: ~e" rank specs))
   (define fills (- rank consuming))
@@ -69,11 +74,13 @@
 ;; The python indexing surface, spec-for-spec: integers select (rank
 ;; drops; a fully-indexed result auto-items to a scalar, booleans as
 ;; #t/#f), slices/'...' stay views, #f is None (new axis), an int list
-;; or int64 tensor is index_select along that dim (negative positions
-;; wrap, as in python), and a rank-1 bool tensor keeps python's
-;; dimension semantics (rows where true). A full-rank bool tensor alone
-;; is masked_select. Deviation from numpy advanced indexing: multiple
-;; tensor indices apply per-dim sequentially, not broadcast-combined.
+;; or rank-1 int64 tensor is index_select along that dim (negative
+;; positions wrap, as in python), and a bool tensor consumes as many
+;; dims as its rank — python's semantics: the masked dims collapse to
+;; one true-count dim. A full-rank bool tensor alone stays
+;; device-resident via masked_select. Deviation from numpy advanced
+;; indexing: multiple index tensors apply per-dim sequentially, not
+;; broadcast-combined, and index tensors are rank-1 (contract).
 (define (rank v)
   (length (tensor-shape v)))
 
@@ -101,16 +108,28 @@
     [(list? s) (index-tensor positions v)]
     [else s]))
 
+(define (apply-mask-spec v d m)
+  (define vdims (tensor-shape v))
+  (define mdims (tensor-shape m))
+  (define n (length mdims))
+  (unless (and (<= (+ d n) (length vdims))
+               (equal? mdims (take (list-tail vdims d) n)))
+    (error 'ref "mask shape ~a does not match dims ~a at dim ~a"
+           mdims vdims d))
+  (define collapsed
+    (if (= n 1)
+        v
+        (apply reshape v (append (take vdims d)
+                                 (list (apply * mdims))
+                                 (list-tail vdims (+ d n))))))
+  (g:index-select collapsed d (mask-spec->index-tensor m collapsed)))
+
 (define (ref t . specs)
   (cond
     [(and (pair? specs) (null? (cdr specs))
           (bool-mask? (car specs))
           (= (rank (car specs)) (rank t)))
      (g:masked-select t (car specs))]
-    [(ormap (lambda (s) (and (bool-mask? s) (not (= 1 (rank s))))) specs)
-     (error 'ref
-            "a bool mask must be rank 1 or a full-rank sole index: ~e"
-            specs)]
     [else
      (define expanded
        (expand-ellipsis specs (length (tensor-shape t)) 'ref))
@@ -123,9 +142,7 @@
                                     (slice-step s))
                     (add1 d))]
            [(eq? s #f) (values (unsqueeze v d) (add1 d))]
-           [(bool-mask? s)
-            (values (g:index-select v d (mask-spec->index-tensor s v))
-                    (add1 d))]
+           [(bool-mask? s) (values (apply-mask-spec v d s) (add1 d))]
            [(or (tensor? s) (list? s))
             (values (g:index-select v d (wrap-negative-positions s v d))
                     (add1 d))]

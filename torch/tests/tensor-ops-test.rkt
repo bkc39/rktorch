@@ -366,7 +366,17 @@
     (check-equal? (ref (gt t 4) 0 0) #f)
     (check-exn #rx"too many indices" (lambda () (ref t 0 0 0)))
     (check-exn #rx"at most one" (lambda () (ref t '... '...)))
-    (check-exn #rx"full-rank sole" (lambda () (ref t (gt t 4) 0)))
+    (let ([cube (tensor '(((1 2) (3 4)) ((5 6) (7 8))))])
+      ;; a rank-m mask consumes m dims: python's masked-dims collapse
+      (check-equal? (shape (ref cube (ne (tensor '((1 0) (0 1))) 0))) '(2 2))
+      (check-equal? (tensor->list (ref cube (ne (tensor '((1 0) (0 1))) 0)))
+                    '(1 2 7 8)))
+    (check-exn #rx"too many indices" (lambda () (ref t (gt t 4) 0)))
+    (check-exn #rx"mask shape" (lambda () (ref t 0 (ne (tensor '(1 0)) 0))))
+    (check-exn exn:fail:contract?
+               (lambda () (ref t (tensor '(0.5 1.0)))))
+    (check-exn exn:fail:contract?
+               (lambda () (ref t (to-dtype (tensor '((0 1))) 'int64))))
     (check-exn exn:fail? (lambda () (ref (arange 6) (:: #f #f -1)))))
 
   (test-case "wrong call shapes get contract blame at the facade"
