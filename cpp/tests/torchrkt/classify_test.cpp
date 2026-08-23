@@ -1,6 +1,5 @@
-// White-box like finalizer_death_test: exercises the shared exception
-// classifier directly, since the high-water-mark MPS refusal cannot be
-// produced by a real allocation without RAM-scale commits.
+// White-box like finalizer_death_test: the high-water-mark MPS refusal
+// cannot be produced by a real allocation without RAM-scale commits.
 #include <gtest/gtest.h>
 
 #include <new>
