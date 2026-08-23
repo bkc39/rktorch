@@ -32,6 +32,7 @@
                           (optional-int64 5) (int64 2))
           'index-select '((tensor 4 3) (int64 0) (int-tensor (0 2)))
           'masked-select '((tensor 6) (bool-tensor (0 1 0 1 1 0)))
+          'nonzero '((bool-tensor (0 1 1 0)))
           'cat '((tensors (2 3) (2 3)) (int64 0))
           'narrow '((tensor 4) (int64 0) (int64 1) (int64 2))
           'conv2d '((tensor 1 1 5 5) (tensor 2 1 3 3) (optional-tensor 2)

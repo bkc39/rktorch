@@ -53,6 +53,7 @@
          ne-scalar
          ne-tensor
          nll-loss
+         nonzero
          reshape
          select-int
          slice-tensor
@@ -170,6 +171,9 @@
 
 (define-generated-op nll-loss tr_gen_nll_loss
   ([self tensor] [target tensor] [weight optional-tensor] [reduction int64] [ignore-index int64]))
+
+(define-generated-op nonzero tr_gen_nonzero
+  ([self tensor]))
 
 (define-generated-op reshape tr_gen_reshape
   ([self tensor] [shape int-array]))

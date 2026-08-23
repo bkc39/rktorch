@@ -22,6 +22,7 @@ tr_tensor* tr_gen_index_select(const tr_tensor* self, int64_t dim,
 tr_tensor* tr_gen_masked_select(const tr_tensor* self, const tr_tensor* mask);
 tr_tensor* tr_gen_narrow(const tr_tensor* self, int64_t dim, int64_t start,
                          int64_t length);
+tr_tensor* tr_gen_nonzero(const tr_tensor* self);
 tr_tensor* tr_gen_reshape(const tr_tensor* self, const int64_t* shape,
                           int64_t shape_len);
 tr_tensor* tr_gen_select_int(const tr_tensor* self, int64_t dim, int64_t index);

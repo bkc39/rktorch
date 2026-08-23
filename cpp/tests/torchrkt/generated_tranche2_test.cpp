@@ -293,6 +293,11 @@ TEST(GeneratedTranche2, IndexSelectMaskedSelectAndGuards) {
   EXPECT_EQ(tr_gen_index_select(nullptr, 0, idx.t), nullptr);
   expect_error_from("tr_gen_index_select");
 
+  const Handle nz(tr_gen_nonzero(a.t));
+  EXPECT_EQ(shape_of(nz.t), (std::vector<int64_t>{4, 1}));
+  EXPECT_EQ(tr_gen_nonzero(nullptr), nullptr);
+  expect_error_from("tr_gen_nonzero");
+
   const Handle mask(tr_gen_gt_scalar(a.t, 2.0));
   const Handle kept(tr_gen_masked_select(a.t, mask.t));
   EXPECT_EQ(data_of(kept.t), (std::vector<float>{3.0F, 4.0F}));

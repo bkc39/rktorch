@@ -41,6 +41,7 @@
  (ne-scalar "ne.Scalar" (tensor scalar) #f)
  (ne-tensor "ne.Tensor" (tensor tensor) #f)
  (nll-loss "nll_loss" (tensor tensor optional-tensor int64 int64) #f)
+ (nonzero "nonzero" (tensor) #f)
  (reshape "reshape" (tensor int-array) #f)
  (select-int "select.int" (tensor int64 int64) #f)
  (slice-tensor "slice.Tensor" (tensor int64 optional-int64 optional-int64 int64) #f)

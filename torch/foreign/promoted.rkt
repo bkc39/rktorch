@@ -23,6 +23,7 @@
                                 max-pool2d
                                 narrow
                                 ne-scalar ne-tensor
+                                nonzero
                                 select-int
                                 slice-tensor
                                 tril
@@ -37,9 +38,6 @@
                      [g:narrow narrow]
                      [g:select-int select]))
 
-;; :: follows python slice()'s argument convention: (::) is [:],
-;; (:: n) is [:n], (:: a b) is [a:b], (:: a b s) is [a:b:s]; #f leaves
-;; a bound open.
 (struct slice (start end step) #:transparent)
 (define ::
   (case-lambda
@@ -77,12 +75,8 @@
 (define (index-tensor positions v)
   (tensor positions #:dtype 'int64 #:device (tensor-device v)))
 
-(define (mask-spec->index-tensor m v)
-  (index-tensor (for/list ([x (in-list (tensor->list m))]
-                           [i (in-naturals)]
-                           #:when (not (zero? x)))
-                  i)
-                v))
+(define (mask-spec->index-tensor m)
+  (reshape (g:nonzero (reshape m -1)) -1))
 
 (define (wrap-negative-positions s v d)
   (define n (list-ref (tensor-shape v) d))
@@ -112,7 +106,7 @@
         (apply reshape v (append (take vdims d)
                                  (list (apply * mdims))
                                  (list-tail vdims (+ d n))))))
-  (g:index-select collapsed d (mask-spec->index-tensor m collapsed)))
+  (g:index-select collapsed d (mask-spec->index-tensor m)))
 
 (define (ref t . specs)
   (cond
