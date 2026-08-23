@@ -365,8 +365,15 @@
         in
         {
           default = racket;
-          inherit cpp cpp-cuda cpp-format cpp-line-count cpp-tidy racket
+          inherit cpp cpp-format cpp-line-count cpp-tidy racket
             racket92 racket-deps codegen copy-native-libs;
+        }
+        // pkgs.lib.optionalAttrs pkgs.stdenv.isLinux {
+          # Linux-only, like the .#cuda devShell that stages it: the CUDA
+          # libtorch-bin has no darwin download, so even *evaluating* this
+          # output aborts `nix flake check` on aarch64-darwin. (MPS needs no
+          # analogous output — the stock darwin libtorch-bin ships Metal.)
+          inherit cpp-cuda;
         });
 
       apps = forAllSystems (system: {

@@ -13,7 +13,8 @@
                   s64vector?)
          (only-in "device-type.rkt"
                   [device make-device]
-                  cpu-device cuda-device device-index device-type device?)
+                  cpu-device cuda-device mps-device
+                  device-index device-type device?)
          (only-in "error.rkt" check-handle check-ok)
          (only-in "raw/device.rkt"
                   tr-cuda-device-count/raw
@@ -21,6 +22,7 @@
                   tr-cuda-is-available/raw
                   tr-cuda-memory-stats/raw
                   tr-get-default-device/raw
+                  tr-mps-is-available/raw
                   tr-set-default-device/raw
                   tr-tensor-device/raw
                   tr-tensor-to-device/raw)
@@ -68,6 +70,8 @@
          cuda-available?
          cuda-if-available
          cuda-device-count
+         mps-available?
+         mps-if-available
          set-default-device!
          default-device
          call-with-default-device
@@ -133,17 +137,27 @@
     [(device? dev) (values (device-type dev) (device-index dev))]
     [(eq? dev 'cpu) (values 'cpu 0)]
     [(eq? dev 'cuda) (values 'cuda 0)]
+    [(eq? dev 'mps) (values 'mps 0)]
     [(pair? dev) (values 'cuda (cadr dev))]
     [else (error 'device "unsupported device: ~e" dev)]))
 
 (define (type+index->device type index)
-  (if (eq? type 'cpu) (cpu-device) (cuda-device index)))
+  (case type
+    [(cpu) (cpu-device)]
+    [(mps) (mps-device)]
+    [else (cuda-device index)]))
 
 (define (cuda-available?)
   (= 1 (tr-cuda-is-available/raw)))
 
 (define (cuda-if-available)
   (if (cuda-available?) (cuda-device) (cpu-device)))
+
+(define (mps-available?)
+  (= 1 (tr-mps-is-available/raw)))
+
+(define (mps-if-available)
+  (if (mps-available?) (mps-device) (cpu-device)))
 
 (define (cuda-device-count)
   (tr-cuda-device-count/raw))

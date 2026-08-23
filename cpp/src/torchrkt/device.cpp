@@ -23,8 +23,19 @@ namespace {
 
 std::atomic<int64_t> g_default_device{0};
 
+// Two type bits (three device kinds), index above them.
 int64_t pack_device(tr_device_type type, int64_t index) {
-  return (index << 1) | (type == TR_DEVICE_CUDA ? 1 : 0);
+  return (index << 2) | static_cast<int64_t>(type);
+}
+
+tr_device_type type_of(const torch::Device& d) {
+  if (d.is_cuda()) {
+    return TR_DEVICE_CUDA;
+  }
+  if (d.is_mps()) {
+    return TR_DEVICE_MPS;
+  }
+  return TR_DEVICE_CPU;
 }
 
 }  // namespace
@@ -40,16 +51,21 @@ torch::Device to_torch_device(tr_device_type type, int64_t index) {
       }
       return torch::Device(torch::kCUDA,
                            static_cast<torch::DeviceIndex>(index));
+    case TR_DEVICE_MPS:
+      // MPS exposes a single device; there is no ordinal to pick.
+      if (index != 0) {
+        throw std::invalid_argument("MPS device index must be 0");
+      }
+      return torch::Device(torch::kMPS);
   }
   throw std::invalid_argument("unknown tr_device_type");
 }
 
 torch::Device current_default_device() {
   const int64_t packed = g_default_device.load(std::memory_order_seq_cst);
-  const tr_device_type type =
-      (packed & 1) != 0 ? TR_DEVICE_CUDA : TR_DEVICE_CPU;
+  const auto type = static_cast<tr_device_type>(packed & 3);
   const int64_t index =
-      static_cast<int64_t>(static_cast<uint64_t>(packed) >> 1U);
+      static_cast<int64_t>(static_cast<uint64_t>(packed) >> 2U);
   return to_torch_device(type, index);
 }
 
@@ -61,6 +77,13 @@ void set_default_device(tr_device_type type, int64_t index) {
     if (index < 0 ||
         index >= static_cast<int64_t>(torch::cuda::device_count())) {
       throw std::invalid_argument("CUDA device index out of range");
+    }
+  } else if (type == TR_DEVICE_MPS) {
+    if (!torch::mps::is_available()) {
+      throw std::invalid_argument("MPS is not available");
+    }
+    if (index != 0) {
+      throw std::invalid_argument("MPS device index must be 0");
     }
   } else if (type == TR_DEVICE_CPU) {
     if (index != 0) {
@@ -99,6 +122,18 @@ int tr_cuda_device_count(void) {
     return 0;
   } catch (...) {
     torchrkt::record_unknown_failure("tr_cuda_device_count");
+    return 0;
+  }
+}
+
+int tr_mps_is_available(void) {
+  try {
+    return torch::mps::is_available() ? 1 : 0;
+  } catch (const std::exception& e) {
+    torchrkt::record_failure("tr_mps_is_available", e);
+    return 0;
+  } catch (...) {
+    torchrkt::record_unknown_failure("tr_mps_is_available");
     return 0;
   }
 }
@@ -162,7 +197,7 @@ int tr_get_default_device(tr_device_type* out_type, int64_t* out_index) {
   }
   return torchrkt::status_call("tr_get_default_device", [&] {
     const torch::Device d = torchrkt::current_default_device();
-    *out_type = d.is_cuda() ? TR_DEVICE_CUDA : TR_DEVICE_CPU;
+    *out_type = torchrkt::type_of(d);
     *out_index = d.has_index() ? static_cast<int64_t>(d.index()) : 0;
   });
 }
@@ -184,10 +219,10 @@ int tr_tensor_device(const tr_tensor* t, tr_device_type* out_type,
   }
   return torchrkt::status_call("tr_tensor_device", [&] {
     const torch::Device d = t->value.device();
-    if (!d.is_cpu() && !d.is_cuda()) {
+    if (!d.is_cpu() && !d.is_cuda() && !d.is_mps()) {
       throw std::invalid_argument("tensor is on an unsupported device kind");
     }
-    *out_type = d.is_cuda() ? TR_DEVICE_CUDA : TR_DEVICE_CPU;
+    *out_type = torchrkt::type_of(d);
     *out_index = d.has_index() ? static_cast<int64_t>(d.index()) : 0;
   });
 }

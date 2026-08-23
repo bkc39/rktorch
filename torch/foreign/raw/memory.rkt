@@ -69,7 +69,7 @@
   #:c-id tr_tensor_nbytes)
 
 (define _tr-device-type
-  (_enum '(cpu = 0 cuda = 1)))
+  (_enum '(cpu = 0 cuda = 1 mps = 2)))
 
 (define-torch tr-tensor-device/raw
   (_fun _Tensor
