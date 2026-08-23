@@ -23,14 +23,11 @@ inline error_kind classify(const std::exception& e) noexcept {
   if (dynamic_cast<const std::bad_alloc*>(&e) != nullptr) {
     return error_kind::oom;
   }
-  if (std::string_view(e.what()).find("DefaultCPUAllocator") !=
-      std::string_view::npos) {
-    return error_kind::oom;
-  }
-  // MPS allocation refusals are plain c10::Errors (TORCH_CHECK), so only
-  // these two message shapes identify them as OOM.
+  // Allocator refusals thrown as plain c10::Error, matched by message shape;
+  // each phrase has one emitting site in libtorch 2.8-2.12 (re-audit on bump).
   const std::string_view what(e.what());
-  if (what.find("MPS backend out of memory") != std::string_view::npos ||
+  if (what.find("DefaultCPUAllocator") != std::string_view::npos ||
+      what.find("MPS backend out of memory") != std::string_view::npos ||
       what.find("Invalid buffer size:") != std::string_view::npos) {
     return error_kind::oom;
   }
