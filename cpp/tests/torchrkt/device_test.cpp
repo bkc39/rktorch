@@ -215,6 +215,22 @@ TEST(TorchrktDevice, MpsOomClassifiesAsOomKind) {
   EXPECT_STRNE(tr_last_error(), "");
 }
 
+TEST(TorchrktDevice, MpsSeededRandnReproduces) {
+  if (tr_mps_is_available() == 0) {
+    GTEST_SKIP() << "no MPS device visible";
+  }
+  const DefaultDeviceGuard guard;
+  ASSERT_EQ(tr_set_default_device(TR_DEVICE_MPS, 0), 0) << tr_last_error();
+  const std::vector<int64_t> dims = {8};
+  ASSERT_EQ(tr_manual_seed(42), 0) << tr_last_error();
+  const Handle a(tr_randn(dims.data(), 1));
+  ASSERT_EQ(tr_manual_seed(42), 0) << tr_last_error();
+  const Handle b(tr_randn(dims.data(), 1));
+  const Handle a_cpu(tr_tensor_to_device(a.t, TR_DEVICE_CPU, 0));
+  const Handle b_cpu(tr_tensor_to_device(b.t, TR_DEVICE_CPU, 0));
+  EXPECT_EQ(cpu_data_of(a_cpu.t), cpu_data_of(b_cpu.t));
+}
+
 TEST(TorchrktDevice, MpsNonzeroIndexErrors) {
   // Message pinned, not just non-empty: the index check precedes the
   // availability check, so this branch is proven on Metal-less hosts too.
