@@ -2,7 +2,8 @@
 
 (require (only-in racket/list append* drop [flatten list-flatten] take)
          (only-in "ops.rkt"
-                  item tensor-device tensor-dtype tensor-shape to-dtype)
+                  item tensor-device tensor-dtype tensor-shape to-device
+                  to-dtype)
          (only-in "size.rkt" ->2d)
          (only-in "structs.rkt" tensor?)
          (only-in "tensor-ops.rkt" add mul reshape sum tensor unsqueeze)
@@ -33,7 +34,7 @@
          eq ne lt le gt ge
          conv2d max-pool2d avg-pool2d adaptive-avg-pool2d
          tril triu masked-fill embedding layer-norm
-         tensor-ref :: slice?
+         tensor-ref :: slice? slice-start slice-end slice-step
          (rename-out [g:narrow narrow]
                      [g:select-int select]))
 
@@ -85,14 +86,18 @@
                      (if (< i 0) (+ i n) i))
                    v)]
     [else
-     (define neg (g:lt-scalar s 0.0))
+     ;; python indexing accepts a CPU index for a CUDA tensor;
+     ;; index_select does not, so align devices first
+     (define s* (to-device s (tensor-device v)))
+     (define neg (g:lt-scalar s* 0.0))
      (if (zero? (item (sum (to-dtype neg 'int64))))
-         s
-         (add s (mul (to-dtype neg 'int64)
-                     (tensor n #:dtype 'int64
-                             #:device (tensor-device v)))))]))
+         s*
+         (add s* (mul (to-dtype neg 'int64)
+                      (tensor n #:dtype 'int64
+                              #:device (tensor-device v)))))]))
 
-(define (apply-mask-spec v d m)
+(define (apply-mask-spec v d m0)
+  (define m (to-device m0 (tensor-device v)))
   (define vdims (tensor-shape v))
   (define mdims (tensor-shape m))
   (define n (length mdims))
@@ -113,7 +118,7 @@
     [(and (pair? specs) (null? (cdr specs))
           (bool-mask? (car specs))
           (equal? (tensor-shape (car specs)) (tensor-shape t)))
-     (g:masked-select t (car specs))]
+     (g:masked-select t (to-device (car specs) (tensor-device t)))]
     [else
      (define expanded
        (expand-ellipsis specs (length (tensor-shape t)) 'tensor-ref))

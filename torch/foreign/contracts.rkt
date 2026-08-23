@@ -12,7 +12,7 @@
                   unsupplied-arg?)
          (only-in "device-type.rkt" device?)
          (only-in "ops.rkt" tensor-dtype tensor-shape)
-         (only-in "promoted.rkt" slice?)
+         (only-in "promoted.rkt" slice-end slice-start slice-step slice?)
          (only-in "structs.rkt" tensor?))
 
 (provide dims-rest/c
@@ -34,6 +34,13 @@
 
 (define dims-rest/c (listof exact-nonnegative-integer?))
 
+(define (slice-spec? x)
+  (define (bound? b) (or (not b) (exact-integer? b)))
+  (and (slice? x)
+       (bound? (slice-start x))
+       (bound? (slice-end x))
+       (exact-integer? (slice-step x))))
+
 (define (index-tensor-spec? x)
   (and (tensor? x)
        (pair? (tensor-shape x))
@@ -42,7 +49,7 @@
                 (= 1 (length (tensor-shape x)))))))
 
 (define index-spec/c
-  (or/c exact-integer? slice? index-tensor-spec? #f '...
+  (or/c exact-integer? slice-spec? index-tensor-spec? #f '...
         (listof exact-integer?)))
 
 ;; -1 means "infer this dimension"

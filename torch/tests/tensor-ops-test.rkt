@@ -386,6 +386,10 @@
                (lambda () (tensor-ref t (tensor '(0.5 1.0)))))
     (check-exn exn:fail:contract?
                (lambda () (tensor-ref t 0 (gt (tensor 1) 0))))
+    (check-exn exn:fail:contract?
+               (lambda () (ref t ("bad" : 2))))
+    (check-exn exn:fail:contract?
+               (lambda () (ref t (0 : 2 : 1.5))))
     (check-exn exn:fail? (lambda () (ref (arange 6) (:: #f #f -1)))))
 
   (test-case "ref macro sugar expands to tensor-ref value specs (#46)"
