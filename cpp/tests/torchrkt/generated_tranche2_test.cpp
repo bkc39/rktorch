@@ -282,13 +282,8 @@ TEST(GeneratedTranche2, SliceBoundsViewsAndGuards) {
   expect_error_from("tr_gen_slice_tensor");
 }
 
-TEST(GeneratedTranche2, UnsqueezeIndexSelectMaskedSelectAndGuards) {
+TEST(GeneratedTranche2, IndexSelectMaskedSelectAndGuards) {
   const Handle a = make({1.0F, 2.0F, 3.0F, 4.0F}, {4});
-  const Handle u(tr_gen_unsqueeze(a.t, 0));
-  EXPECT_EQ(shape_of(u.t), (std::vector<int64_t>{1, 4}));
-  EXPECT_EQ(tr_gen_unsqueeze(nullptr, 0), nullptr);
-  expect_error_from("tr_gen_unsqueeze");
-
   const std::vector<int64_t> idx_vals = {3, 0};
   const std::vector<int64_t> idx_dims = {2};
   const Handle idx(

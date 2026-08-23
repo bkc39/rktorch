@@ -110,12 +110,4 @@ tr_tensor* tr_gen_triu(const tr_tensor* self, int64_t diagonal) {
       "tr_gen_triu", [&] { return at::triu(self->value, diagonal); });
 }
 
-tr_tensor* tr_gen_unsqueeze(const tr_tensor* self, int64_t dim) {
-  if (!self) {
-    return torchrkt::null_arg("tr_gen_unsqueeze");
-  }
-  return torchrkt::alloc_result(
-      "tr_gen_unsqueeze", [&] { return at::unsqueeze(self->value, dim); });
-}
-
 }  // extern "C"

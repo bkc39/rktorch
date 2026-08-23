@@ -30,7 +30,6 @@ tr_tensor* tr_gen_slice_tensor(const tr_tensor* self, int64_t dim,
                                bool end_has, int64_t step);
 tr_tensor* tr_gen_tril(const tr_tensor* self, int64_t diagonal);
 tr_tensor* tr_gen_triu(const tr_tensor* self, int64_t diagonal);
-tr_tensor* tr_gen_unsqueeze(const tr_tensor* self, int64_t dim);
 
 #ifdef __cplusplus
 }

@@ -58,8 +58,7 @@
          slice-tensor
          sum-dim-intlist
          tril
-         triu
-         unsqueeze)
+         triu)
 
 (define-generated-op adaptive-avg-pool2d tr_gen_adaptive_avg_pool2d
   ([self tensor] [output-size int-array]))
@@ -189,6 +188,3 @@
 
 (define-generated-op triu tr_gen_triu
   ([self tensor] [diagonal int64]))
-
-(define-generated-op unsqueeze tr_gen_unsqueeze
-  ([self tensor] [dim int64]))

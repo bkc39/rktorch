@@ -1,10 +1,11 @@
 #lang racket/base
 
 (require (only-in racket/list append* drop [flatten list-flatten] take)
-         (only-in "ops.rkt" item tensor-device tensor-dtype tensor-shape)
+         (only-in "ops.rkt"
+                  item tensor->list tensor-device tensor-dtype tensor-shape)
          (only-in "size.rkt" ->2d)
          (only-in "structs.rkt" tensor?)
-         (only-in "tensor-ops.rkt" reshape tensor)
+         (only-in "tensor-ops.rkt" reshape tensor unsqueeze)
          (prefix-in g: (only-in "../generated.rkt"
                                 adaptive-avg-pool2d
                                 avg-pool2d
@@ -13,20 +14,19 @@
                                 eq-scalar eq-tensor
                                 ge-scalar ge-tensor
                                 gt-scalar gt-tensor
+                                index-select
                                 layer-norm
                                 le-scalar le-tensor
                                 lt-scalar lt-tensor
                                 masked-fill-scalar
-                                max-pool2d
-                                index-select
                                 masked-select
+                                max-pool2d
                                 narrow
                                 ne-scalar ne-tensor
                                 select-int
                                 slice-tensor
                                 tril
-                                triu
-                                unsqueeze)))
+                                triu)))
 
 (provide flatten
          eq ne lt le gt ge
@@ -67,17 +67,50 @@
     [else (error who "at most one '... allowed: ~e" specs)]))
 
 ;; The python indexing surface, spec-for-spec: integers select (rank
-;; drops; a fully-indexed result auto-items to a scalar), slices/'...'
-;; stay views, #f is None (new axis), an int list or int64 tensor is
-;; index_select along that dim, and a bool tensor alone is
-;; masked_select. Deviation from numpy advanced indexing: multiple
+;; drops; a fully-indexed result auto-items to a scalar, booleans as
+;; #t/#f), slices/'...' stay views, #f is None (new axis), an int list
+;; or int64 tensor is index_select along that dim (negative positions
+;; wrap, as in python), and a rank-1 bool tensor keeps python's
+;; dimension semantics (rows where true). A full-rank bool tensor alone
+;; is masked_select. Deviation from numpy advanced indexing: multiple
 ;; tensor indices apply per-dim sequentially, not broadcast-combined.
+(define (rank v)
+  (length (tensor-shape v)))
+
+(define (index-tensor positions v)
+  (tensor positions #:dtype 'int64 #:device (tensor-device v)))
+
+(define (mask-spec->index-tensor m v)
+  (index-tensor (for/list ([x (in-list (tensor->list m))]
+                           [i (in-naturals)]
+                           #:when (not (zero? x)))
+                  i)
+                v))
+
+(define (wrap-negative-positions s v d)
+  (define n (list-ref (tensor-shape v) d))
+  (define positions
+    (if (list? s)
+        s
+        (tensor->list s)))
+  (cond
+    [(ormap negative? positions)
+     (index-tensor (for/list ([i (in-list positions)])
+                     (if (< i 0) (+ i n) i))
+                   v)]
+    [(list? s) (index-tensor positions v)]
+    [else s]))
+
 (define (ref t . specs)
   (cond
-    [(and (pair? specs) (null? (cdr specs)) (bool-mask? (car specs)))
+    [(and (pair? specs) (null? (cdr specs))
+          (bool-mask? (car specs))
+          (= (rank (car specs)) (rank t)))
      (g:masked-select t (car specs))]
-    [(ormap bool-mask? specs)
-     (error 'ref "a boolean mask must be the only index: ~e" specs)]
+    [(ormap (lambda (s) (and (bool-mask? s) (not (= 1 (rank s))))) specs)
+     (error 'ref
+            "a bool mask must be rank 1 or a full-rank sole index: ~e"
+            specs)]
     [else
      (define expanded
        (expand-ellipsis specs (length (tensor-shape t)) 'ref))
@@ -89,15 +122,18 @@
             (values (g:slice-tensor v d (slice-start s) (slice-end s)
                                     (slice-step s))
                     (add1 d))]
-           [(eq? s #f) (values (g:unsqueeze v d) (add1 d))]
-           [(tensor? s) (values (g:index-select v d s) (add1 d))]
-           [(list? s)
-            (values (g:index-select
-                     v d
-                     (tensor s #:dtype 'int64 #:device (tensor-device v)))
+           [(eq? s #f) (values (unsqueeze v d) (add1 d))]
+           [(bool-mask? s)
+            (values (g:index-select v d (mask-spec->index-tensor s v))
+                    (add1 d))]
+           [(or (tensor? s) (list? s))
+            (values (g:index-select v d (wrap-negative-positions s v d))
                     (add1 d))]
            [else (error 'ref "not an index spec: ~e" s)])))
-     (if (null? (tensor-shape result)) (item result) result)]))
+     (cond
+       [(pair? (tensor-shape result)) result]
+       [(eq? (tensor-dtype result) 'bool) (not (zero? (item result)))]
+       [else (item result)])]))
 
 (define (flatten v [start-dim 0] [end-dim -1])
   (cond

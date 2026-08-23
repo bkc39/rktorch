@@ -30,7 +30,6 @@
           'select-int '((tensor 2 3) (int64 0) (int64 1))
           'slice-tensor '((tensor 6) (int64 0) (optional-int64 1)
                           (optional-int64 5) (int64 2))
-          'unsqueeze '((tensor 2 3) (int64 1))
           'index-select '((tensor 4 3) (int64 0) (int-tensor (0 2)))
           'masked-select '((tensor 6) (bool-tensor (0 1 0 1 1 0)))
           'cat '((tensors (2 3) (2 3)) (int64 0))

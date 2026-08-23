@@ -47,5 +47,4 @@
  (sum-dim-intlist "sum.dim_IntList" (tensor optional-int-array bool optional-dtype) #f)
  (tril "tril" (tensor int64) #f)
  (triu "triu" (tensor int64) #f)
- (unsqueeze "unsqueeze" (tensor int64) #f)
 )

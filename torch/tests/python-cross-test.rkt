@@ -113,6 +113,8 @@
                        (form (ref ix (::) #f))
                        (form (ref cube 1 '... 0))
                        (form (ref ix (gt ix 4)))
+                       (form (ref ix (ne (tensor '(0 1)) 0)))
+                       (form (ref ix '(-1 0)))
                        (form (ref ix '(0 0 1)))
                        (form (ref ix '(1 0) 0))
                        (form (ref c (to-dtype (tensor '(4 0)) 'int64)))

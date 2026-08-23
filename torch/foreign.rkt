@@ -69,10 +69,10 @@
   ;; ref mirrors python's t[...]: integer/slice/'.../#f(new axis)/int
   ;; list/int64 tensor specs; a bool tensor alone is a mask; slice
   ;; results are VIEWS; fully-indexed results come back as scalars
-  [ref (->* (tensor?) #:rest (listof index-spec/c)
-            (or/c tensor? number? boolean?))]
-  [tensor-ref (->* (tensor?) #:rest (listof index-spec/c)
-                   (or/c tensor? number? boolean?))]
+  [ref (-> tensor? index-spec/c ...
+           (or/c tensor? number? boolean?))]
+  [tensor-ref (-> tensor? index-spec/c ...
+                  (or/c tensor? number? boolean?))]
   [:: (let ([bound/c (or/c #f exact-integer?)])
         (case-> (-> slice?)
                 (-> bound/c slice?)
