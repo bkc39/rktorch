@@ -1,8 +1,7 @@
 #lang racket/base
 
-;; CPU behaviors run everywhere; the CUDA/MPS cases are always registered
-;; but their bodies are `when`-guarded, so the suite verifies the GPU when
-;; run on a CUDA host (see the cuda-verify flake app) or on Apple Silicon.
+;; CPU behaviors run everywhere; the CUDA/MPS cases are `when`-guarded, so
+;; the suite verifies the GPU for real on a CUDA host or Apple Silicon.
 
 (module+ test
   (require rackunit
