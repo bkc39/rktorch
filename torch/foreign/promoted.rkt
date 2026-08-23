@@ -71,16 +71,9 @@
                         (list s))))]
     [else (error who "at most one '... allowed: ~e" specs)]))
 
-;; The python indexing surface, spec-for-spec: integers select (rank
-;; drops; a fully-indexed result auto-items to a scalar, booleans as
-;; #t/#f), slices/'...' stay views, #f is None (new axis), an int list
-;; or rank-1 int64 tensor is index_select along that dim (negative
-;; positions wrap, as in python), and a bool tensor consumes as many
-;; dims as its rank — python's semantics: the masked dims collapse to
-;; one true-count dim. A full-rank bool tensor alone stays
-;; device-resident via masked_select. Deviation from numpy advanced
-;; indexing: multiple index tensors apply per-dim sequentially, not
-;; broadcast-combined, and index tensors are rank-1 (contract).
+;; Deviation from numpy advanced indexing: multiple index tensors
+;; apply per-dim sequentially, not broadcast-combined, and index
+;; tensors are rank-1 (contract).
 (define (index-tensor positions v)
   (tensor positions #:dtype 'int64 #:device (tensor-device v)))
 

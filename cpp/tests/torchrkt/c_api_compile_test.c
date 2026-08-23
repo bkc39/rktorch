@@ -99,6 +99,8 @@ void torchrkt_c_api_compile_check(void) {
                           bool, int64_t) = tr_gen_slice_tensor;
   tr_tensor* (*gen_index_select)(const tr_tensor*, int64_t, const tr_tensor*) =
       tr_gen_index_select;
+  tr_tensor* (*gen_masked_select)(const tr_tensor*, const tr_tensor*) =
+      tr_gen_masked_select;
   tr_tensor* (*gen_dropout)(const tr_tensor*, double, bool) = tr_gen_dropout;
   int (*cuda_available)(void) = tr_cuda_is_available;
   int (*cuda_count)(void) = tr_cuda_device_count;
@@ -161,6 +163,10 @@ void torchrkt_c_api_compile_check(void) {
   (void)gen_cross_entropy_loss;
   (void)gen_max_pool2d;
   (void)gen_narrow;
+  (void)gen_select;
+  (void)gen_slice;
+  (void)gen_index_select;
+  (void)gen_masked_select;
   (void)gen_dropout;
   (void)cuda_available;
   (void)cuda_count;
