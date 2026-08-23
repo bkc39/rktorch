@@ -4,7 +4,10 @@
 ;; would collide with Typed Racket's and `_` with match's wildcard, and
 ;; a literal `...` token is impossible (it is the macro ellipsis, so any
 ;; macro whose template contained a ref form would break) — hence `..`.
-(require (for-syntax racket/base syntax/parse)
+;; whole-module for-syntax requires: macro-expansion exemption, as in
+;; define-generated.rkt (AGENTS.md import convention)
+(require (for-syntax racket/base
+                     syntax/parse/pre)
          (only-in racket/contract/base -> or/c)
          (only-in racket/contract/region define/contract)
          (only-in "contracts.rkt" index-spec/c)

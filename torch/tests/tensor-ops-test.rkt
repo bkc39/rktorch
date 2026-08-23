@@ -380,6 +380,8 @@
                (lambda () (ref t (tensor '(0.5 1.0)))))
     (check-exn exn:fail:contract?
                (lambda () (ref t (to-dtype (tensor '((0 1))) 'int64))))
+    (check-exn exn:fail:contract?
+               (lambda () (ref t 0 (gt (tensor 1) 0))))
     (check-exn exn:fail? (lambda () (ref (arange 6) (:: #f #f -1)))))
 
   (test-case "ref macro sugar expands to tensor-ref value specs (#46)"
@@ -398,15 +400,12 @@
                   (tensor->list (tensor-ref t '... 0)))
     (check-equal? (shape (ref t : _)) (shape (tensor-ref t (::) #f)))
     (check-equal? (shape (ref t _)) '(1 2 3))
-    ;; slice bounds are arbitrary expressions
     (let ([lo 0])
       (check-equal? (tensor->list (ref t ((add1 lo) : (+ 1 2)) 0))
                     '(4)))
-    ;; value specs pass through the macro unchanged
     (let ([s (:: 1 3)])
       (check-equal? (tensor->list (ref t 0 s)) '(2 3)))
     (check-equal? (tensor->list (ref t (gt t 4))) '(5 6))
-    ;; tensor-ref stays a first-class function
     (check-equal? (apply tensor-ref t (list 1 2)) 6)
     ;; `..` survives inside another macro's template (a literal `...`
     ;; there would be the macro ellipsis and fail to expand)

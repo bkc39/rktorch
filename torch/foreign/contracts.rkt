@@ -36,6 +36,7 @@
 
 (define (index-tensor-spec? x)
   (and (tensor? x)
+       (pair? (tensor-shape x))
        (or (eq? (tensor-dtype x) 'bool)
            (and (eq? (tensor-dtype x) 'int64)
                 (= 1 (length (tensor-shape x)))))))

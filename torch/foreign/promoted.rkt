@@ -2,10 +2,10 @@
 
 (require (only-in racket/list append* drop [flatten list-flatten] take)
          (only-in "ops.rkt"
-                  item tensor->list tensor-device tensor-dtype tensor-shape)
+                  item tensor-device tensor-dtype tensor-shape to-dtype)
          (only-in "size.rkt" ->2d)
          (only-in "structs.rkt" tensor?)
-         (only-in "tensor-ops.rkt" reshape tensor unsqueeze)
+         (only-in "tensor-ops.rkt" add mul reshape sum tensor unsqueeze)
          (prefix-in g: (only-in "../generated.rkt"
                                 adaptive-avg-pool2d
                                 avg-pool2d
@@ -79,17 +79,18 @@
 
 (define (wrap-negative-positions s v d)
   (define n (list-ref (tensor-shape v) d))
-  (define positions
-    (if (list? s)
-        s
-        (tensor->list s)))
   (cond
-    [(ormap negative? positions)
-     (index-tensor (for/list ([i (in-list positions)])
+    [(list? s)
+     (index-tensor (for/list ([i (in-list s)])
                      (if (< i 0) (+ i n) i))
                    v)]
-    [(list? s) (index-tensor positions v)]
-    [else s]))
+    [else
+     (define neg (g:lt-scalar s 0.0))
+     (if (zero? (item (sum (to-dtype neg 'int64))))
+         s
+         (add s (mul (to-dtype neg 'int64)
+                     (tensor n #:dtype 'int64
+                             #:device (tensor-device v)))))]))
 
 (define (apply-mask-spec v d m)
   (define vdims (tensor-shape v))
