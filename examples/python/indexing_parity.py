@@ -30,5 +30,9 @@ forms = [
     form(t[[1, 0], 0]),
     form(c[torch.tensor([4, 0])]),
     float(t[1, 2]),
+    form(torch.where(t > 4)[0]),
+    form(torch.where(t > 4)[1]),
+    form(torch.gather(t, 1, torch.tensor([[0, 2], [1, 0]]))),
+    form(torch.take(t, torch.tensor([0, 5, 3]))),
 ]
 print(json.dumps({"forms": forms}))

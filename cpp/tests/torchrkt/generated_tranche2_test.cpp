@@ -298,11 +298,46 @@ TEST(GeneratedTranche2, IndexSelectMaskedSelectAndGuards) {
   EXPECT_EQ(tr_gen_nonzero(nullptr), nullptr);
   expect_error_from("tr_gen_nonzero");
 
+  const Handle taken(tr_gen_take(a.t, idx.t));
+  EXPECT_EQ(data_of(taken.t), (std::vector<float>{4.0F, 1.0F}));
+  EXPECT_EQ(tr_gen_take(nullptr, idx.t), nullptr);
+  expect_error_from("tr_gen_take");
+
   const Handle mask(tr_gen_gt_scalar(a.t, 2.0));
   const Handle kept(tr_gen_masked_select(a.t, mask.t));
   EXPECT_EQ(data_of(kept.t), (std::vector<float>{3.0F, 4.0F}));
   EXPECT_EQ(tr_gen_masked_select(a.t, nullptr), nullptr);
   expect_error_from("tr_gen_masked_select");
+}
+
+TEST(GeneratedTranche2, GatherTakeAlongWhereAndGuards) {
+  const Handle m = make({1.0F, 2.0F, 3.0F, 4.0F}, {2, 2});
+  const std::vector<int64_t> iv = {1, 0, 0, 0};
+  const std::vector<int64_t> id2 = {2, 2};
+  const Handle idx(tr_from_data_i64(iv.data(), iv.size(), id2.data(), 2));
+  const Handle g(tr_gen_gather(m.t, 1, idx.t, false));
+  EXPECT_EQ(data_of(g.t), (std::vector<float>{2.0F, 1.0F, 3.0F, 3.0F}));
+  EXPECT_EQ(tr_gen_gather(nullptr, 1, idx.t, false), nullptr);
+  expect_error_from("tr_gen_gather");
+
+  const Handle tad(tr_gen_take_along_dim(m.t, idx.t, 1, true));
+  EXPECT_EQ(data_of(tad.t), (std::vector<float>{2.0F, 1.0F, 3.0F, 3.0F}));
+  // dim=None (has=false) operates on the flattened tensor, like python
+  const Handle tad_flat(tr_gen_take_along_dim(m.t, idx.t, 0, false));
+  EXPECT_EQ(shape_of(tad_flat.t), (std::vector<int64_t>{4}));
+  EXPECT_EQ(tr_gen_take_along_dim(nullptr, idx.t, 0, false), nullptr);
+  expect_error_from("tr_gen_take_along_dim");
+
+  const Handle cond(tr_gen_gt_scalar(m.t, 2.0));
+  const Handle other = make({-1.0F, -1.0F, -1.0F, -1.0F}, {2, 2});
+  const Handle ws(tr_gen_where_self(cond.t, m.t, other.t));
+  EXPECT_EQ(data_of(ws.t), (std::vector<float>{-1.0F, -1.0F, 3.0F, 4.0F}));
+  const Handle wso(tr_gen_where_scalarother(cond.t, m.t, 0.0));
+  EXPECT_EQ(data_of(wso.t), (std::vector<float>{0.0F, 0.0F, 3.0F, 4.0F}));
+  EXPECT_EQ(tr_gen_where_self(nullptr, m.t, other.t), nullptr);
+  expect_error_from("tr_gen_where_self");
+  EXPECT_EQ(tr_gen_where_scalarother(cond.t, nullptr, 0.0), nullptr);
+  expect_error_from("tr_gen_where_scalarother");
 }
 
 TEST(GeneratedTranche2, SumDimPresenceFlagAndGuard) {

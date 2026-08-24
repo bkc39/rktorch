@@ -2,7 +2,7 @@
 
 (module+ test
   (require (only-in ffi/vector f32vector s64vector)
-           (only-in racket/list drop take)
+           (only-in racket/list drop)
            rackunit
            "../main.rkt")
 
@@ -435,6 +435,34 @@
     (let-syntax ([first-of-last-dim
                   (syntax-rules () [(_ x) (ref x .. 0)])])
       (check-equal? (tensor->list (first-of-last-dim t)) '(1 4))))
+
+  (test-case "selection family: take/gather/take-along-dim/where (#73)"
+    (define t (reshape (arange 6) 2 3))
+    (check-equal? (tensor->list (take t '(0 5 3))) '(0.0 5.0 3.0))
+    (check-equal? (tensor->list (take t '#(5 0))) '(5.0 0.0))
+    (check-equal? (take '(1 2 3) 2) '(1 2))
+    (check-equal? (tensor->list
+                   (gather t 1 (to-dtype (tensor '((0 2) (1 0))) 'int64)))
+                  '(0.0 2.0 4.0 3.0))
+    (check-equal? (tensor->list
+                   (take-along-dim t (to-dtype (tensor '((0) (2))) 'int64) 1))
+                  '(0.0 5.0))
+    ;; dim omitted operates on the flattened tensor, like python
+    (check-equal? (tensor->list
+                   (take-along-dim t (to-dtype (tensor '(5 0)) 'int64)))
+                  '(5.0 0.0))
+    (check-equal? (map tensor->list (where (gt t 2.0)))
+                  '((1 1 1) (0 1 2)))
+    (check-equal? (tensor->list (where (gt t 2.0) t -1)) '(-1.0 -1.0 -1.0 3.0 4.0 5.0))
+    (check-equal? (tensor->list (where (gt t 2.0) t (zeros 2 3)))
+                  '(0.0 0.0 0.0 3.0 4.0 5.0))
+    (check-equal? (tensor->list
+                   (index-select t 1 (to-dtype (tensor '(2 0)) 'int64)))
+                  '(2.0 0.0 5.0 3.0))
+    (check-equal? (tensor->list (masked-select t (gt t 3.0))) '(4.0 5.0))
+    (check-equal? (shape (nonzero (gt t 0.0))) '(5 2))
+    (check-exn exn:fail:contract? (lambda () (take t 2)))
+    (check-exn exn:fail:contract? (lambda () (gather t 1 '(0 1)))))
 
   (test-case "wrong call shapes get contract blame at the facade"
     (check-exn exn:fail:contract? (lambda () (add 1 2)))

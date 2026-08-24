@@ -26,6 +26,11 @@ shape slice.Tensor
 shape index_select
 shape masked_select
 shape nonzero
+shape take
+shape gather
+shape take_along_dim
+shape where.self
+shape where.ScalarOther
 
 # --- tranche 2 (#3): the Conv-MNIST op closure ----------------------------
 

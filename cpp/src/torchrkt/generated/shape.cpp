@@ -31,6 +31,16 @@ tr_tensor* tr_gen_cat(const tr_tensor* const* tensors, int64_t tensors_len,
   });
 }
 
+tr_tensor* tr_gen_gather(const tr_tensor* self, int64_t dim,
+                         const tr_tensor* index, bool sparse_grad) {
+  if (!self || !index) {
+    return torchrkt::null_arg("tr_gen_gather");
+  }
+  return torchrkt::alloc_result("tr_gen_gather", [&] {
+    return at::gather(self->value, dim, index->value, sparse_grad);
+  });
+}
+
 tr_tensor* tr_gen_index_select(const tr_tensor* self, int64_t dim,
                                const tr_tensor* index) {
   if (!self || !index) {
@@ -102,6 +112,27 @@ tr_tensor* tr_gen_slice_tensor(const tr_tensor* self, int64_t dim,
   });
 }
 
+tr_tensor* tr_gen_take(const tr_tensor* self, const tr_tensor* index) {
+  if (!self || !index) {
+    return torchrkt::null_arg("tr_gen_take");
+  }
+  return torchrkt::alloc_result(
+      "tr_gen_take", [&] { return at::take(self->value, index->value); });
+}
+
+tr_tensor* tr_gen_take_along_dim(const tr_tensor* self,
+                                 const tr_tensor* indices, int64_t dim,
+                                 bool dim_has) {
+  if (!self || !indices) {
+    return torchrkt::null_arg("tr_gen_take_along_dim");
+  }
+  return torchrkt::alloc_result("tr_gen_take_along_dim", [&] {
+    return at::take_along_dim(
+        self->value, indices->value,
+        dim_has ? c10::optional<int64_t>(dim) : c10::optional<int64_t>());
+  });
+}
+
 tr_tensor* tr_gen_tril(const tr_tensor* self, int64_t diagonal) {
   if (!self) {
     return torchrkt::null_arg("tr_gen_tril");
@@ -116,6 +147,26 @@ tr_tensor* tr_gen_triu(const tr_tensor* self, int64_t diagonal) {
   }
   return torchrkt::alloc_result(
       "tr_gen_triu", [&] { return at::triu(self->value, diagonal); });
+}
+
+tr_tensor* tr_gen_where_scalarother(const tr_tensor* condition,
+                                    const tr_tensor* self, double other) {
+  if (!condition || !self) {
+    return torchrkt::null_arg("tr_gen_where_scalarother");
+  }
+  return torchrkt::alloc_result("tr_gen_where_scalarother", [&] {
+    return at::where(condition->value, self->value, other);
+  });
+}
+
+tr_tensor* tr_gen_where_self(const tr_tensor* condition, const tr_tensor* self,
+                             const tr_tensor* other) {
+  if (!condition || !self || !other) {
+    return torchrkt::null_arg("tr_gen_where_self");
+  }
+  return torchrkt::alloc_result("tr_gen_where_self", [&] {
+    return at::where(condition->value, self->value, other->value);
+  });
 }
 
 }  // extern "C"

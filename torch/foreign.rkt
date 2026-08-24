@@ -63,6 +63,19 @@
   [flatten flatten/c]
   [narrow (-> tensor? index/c index/c exact-positive-integer? tensor?)]
   [select (-> tensor? index/c index/c tensor?)]
+  [index-select (-> tensor? index/c tensor? tensor?)]
+  [masked-select (-> tensor? tensor? tensor?)]
+  [nonzero (-> tensor? tensor?)]
+  [take (->i ([v (or/c tensor? list?)]
+              [n (v) (if (tensor? v)
+                         (or/c tensor? (listof exact-integer?)
+                               (vectorof exact-integer?))
+                         exact-nonnegative-integer?)])
+             [result (v) (if (tensor? v) tensor? list?)])]
+  [gather (-> tensor? index/c tensor? tensor?)]
+  [take-along-dim (->* (tensor? tensor?) ((or/c #f index/c)) tensor?)]
+  [where (case-> (-> tensor? (listof tensor?))
+                 (-> tensor? tensor? (or/c tensor? real?) tensor?))]
   [tensor-ref (-> tensor? index-spec/c ...
                   (or/c tensor? number? boolean?))]
   [:: (let ([bound/c (or/c #f exact-integer?)])

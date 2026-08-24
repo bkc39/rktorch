@@ -102,6 +102,15 @@ void torchrkt_c_api_compile_check(void) {
   tr_tensor* (*gen_masked_select)(const tr_tensor*, const tr_tensor*) =
       tr_gen_masked_select;
   tr_tensor* (*gen_nonzero)(const tr_tensor*) = tr_gen_nonzero;
+  tr_tensor* (*gen_take)(const tr_tensor*, const tr_tensor*) = tr_gen_take;
+  tr_tensor* (*gen_gather)(const tr_tensor*, int64_t, const tr_tensor*, bool) =
+      tr_gen_gather;
+  tr_tensor* (*gen_take_along_dim)(const tr_tensor*, const tr_tensor*, int64_t,
+                                   bool) = tr_gen_take_along_dim;
+  tr_tensor* (*gen_where_self)(const tr_tensor*, const tr_tensor*,
+                               const tr_tensor*) = tr_gen_where_self;
+  tr_tensor* (*gen_where_scalar)(const tr_tensor*, const tr_tensor*, double) =
+      tr_gen_where_scalarother;
   tr_tensor* (*gen_dropout)(const tr_tensor*, double, bool) = tr_gen_dropout;
   int (*cuda_available)(void) = tr_cuda_is_available;
   int (*cuda_count)(void) = tr_cuda_device_count;
@@ -171,6 +180,11 @@ void torchrkt_c_api_compile_check(void) {
   (void)gen_index_select;
   (void)gen_masked_select;
   (void)gen_nonzero;
+  (void)gen_take;
+  (void)gen_gather;
+  (void)gen_take_along_dim;
+  (void)gen_where_self;
+  (void)gen_where_scalar;
   (void)gen_dropout;
   (void)cuda_available;
   (void)cuda_count;

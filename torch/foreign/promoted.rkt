@@ -1,6 +1,6 @@
 #lang racket/base
 
-(require (only-in racket/list append* drop [flatten list-flatten] take)
+(require (only-in racket/list append* drop [flatten list-flatten] [take list-take])
          (only-in "ops.rkt"
                   item tensor-device tensor-dtype tensor-shape to-device
                   to-dtype)
@@ -13,6 +13,7 @@
                                 conv2d
                                 embedding
                                 eq-scalar eq-tensor
+                                gather
                                 ge-scalar ge-tensor
                                 gt-scalar gt-tensor
                                 index-select
@@ -27,15 +28,23 @@
                                 nonzero
                                 select-int
                                 slice-tensor
+                                take
+                                take-along-dim
                                 tril
-                                triu)))
+                                triu
+                                where-scalarother
+                                where-self)))
 
 (provide flatten
          eq ne lt le gt ge
          conv2d max-pool2d avg-pool2d adaptive-avg-pool2d
          tril triu masked-fill embedding layer-norm
+         gather take take-along-dim where
          tensor-ref :: slice? slice-start slice-end slice-step
-         (rename-out [g:narrow narrow]
+         (rename-out [g:index-select index-select]
+                     [g:masked-select masked-select]
+                     [g:narrow narrow]
+                     [g:nonzero nonzero]
                      [g:select-int select]))
 
 (struct slice (start end step) #:transparent)
@@ -101,13 +110,13 @@
   (define mdims (tensor-shape m))
   (define n (length mdims))
   (unless (and (<= (+ d n) (length vdims))
-               (equal? mdims (take (list-tail vdims d) n)))
+               (equal? mdims (list-take (list-tail vdims d) n)))
     (error 'tensor-ref "mask shape ~a does not match dims ~a at dim ~a"
            mdims vdims d))
   (define collapsed
     (if (= n 1)
         v
-        (apply reshape v (append (take vdims d)
+        (apply reshape v (append (list-take vdims d)
                                  (list (apply * mdims))
                                  (list-tail vdims (+ d n))))))
   (g:index-select collapsed d (mask-spec->index-tensor m)))
@@ -140,6 +149,32 @@
        [(eq? (tensor-dtype result) 'bool) (not (zero? (item result)))]
        [else (item result)])]))
 
+;; take dispatches like the flatten shim: tensor -> torch.take (flat
+;; indexing), anything else -> racket/list's take
+(define (take v n)
+  (if (tensor? v)
+      (g:take v (if (tensor? n) n (index-tensor n v)))
+      (list-take v n)))
+
+(define (gather t dim index)
+  (g:gather t dim index #f))
+
+(define (take-along-dim t indices [dim #f])
+  (g:take-along-dim t indices dim))
+
+;; (where mask) is python's coordinate form — one 1-d index tensor per
+;; dim; (where mask a b) is elementwise selection with tensor or real b
+(define where
+  (case-lambda
+    [(mask)
+     (define coords (g:nonzero mask))
+     (for/list ([d (in-range (length (tensor-shape mask)))])
+       (g:select-int coords 1 d))]
+    [(mask a b)
+     (if (tensor? b)
+         (g:where-self mask a b)
+         (g:where-scalarother mask a (exact->inexact b)))]))
+
 (define (flatten v [start-dim 0] [end-dim -1])
   (cond
     [(tensor? v)
@@ -164,7 +199,7 @@
           (apply * (for/list ([d (in-list shp)] [i (in-naturals)]
                                                  #:when (<= s i e))
                      d)))
-        (apply reshape v (append (take shp s)
+        (apply reshape v (append (list-take shp s)
                                  (list collapsed)
                                  (drop shp (add1 e))))])]
     [else (list-flatten v)]))

@@ -119,7 +119,12 @@
                        (form (ref ix '(0 0 1)))
                        (form (ref ix '(1 0) 0))
                        (form (ref c (to-dtype (tensor '(4 0)) 'int64)))
-                       (exact->inexact (ref ix 1 2)))])
+                       (exact->inexact (ref ix 1 2))
+                       (form (car (where (gt ix 4))))
+                       (form (cadr (where (gt ix 4))))
+                       (form (gather ix 1 (to-dtype (tensor '((0 2) (1 0)))
+                                                    'int64)))
+                       (form (take ix '(0 5 3))))])
        (check-equal? (length rkt) (length py) "indexing form count")
        (for ([r (in-list rkt)]
              [p (in-list py)]
