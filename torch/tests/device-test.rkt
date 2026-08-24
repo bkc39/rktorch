@@ -63,7 +63,15 @@
       (with-default-device (cuda-device)
         (check-equal? (tensor-device (tensor '(4 5) #:device (cpu-device)))
                       (cpu-device)))
-      (check-equal? (default-device) (cpu-device))))
+      (check-equal? (default-device) (cpu-device))
+      ;; python indexing accepts CPU indices/masks for CUDA tensors
+      (let ([gm (tensor '((1 2 3) (4 5 6)) #:device (cuda-device))])
+        (check-equal? (tensor->list (ref gm (to-dtype (tensor '(-1 0))
+                                                      'int64)))
+                      '(4 5 6 1 2 3))
+        (check-equal? (tensor->list (ref gm (ne (tensor '(0 1)) 0)))
+                      '(4 5 6))
+        (check-equal? (ref gm 1 -1) 6))))
 
   (test-case "cuda allocator gauges (#51)"
     ;; the device guard rejects before any FFI call — hardware-independent

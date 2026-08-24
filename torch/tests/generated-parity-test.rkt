@@ -27,6 +27,12 @@
           'mv '((tensor 2 3) (tensor 3))
           'dot '((tensor 4) (tensor 4))
           'reshape '((tensor 2 3) (int-array (3 2)))
+          'select-int '((tensor 2 3) (int64 0) (int64 1))
+          'slice-tensor '((tensor 6) (int64 0) (optional-int64 1)
+                          (optional-int64 5) (int64 2))
+          'index-select '((tensor 4 3) (int64 0) (int-tensor (0 2)))
+          'masked-select '((tensor 6) (bool-tensor (0 1 0 1 1 0)))
+          'nonzero '((bool-tensor (0 1 1 0)))
           'cat '((tensors (2 3) (2 3)) (int64 0))
           'narrow '((tensor 4) (int64 0) (int64 1) (int64 2))
           'conv2d '((tensor 1 1 5 5) (tensor 2 1 3 3) (optional-tensor 2)
@@ -193,6 +199,11 @@
      (for-each check-generated-parity manifest)
      ;; override drives: optional-argument paths the default recipes leave
      ;; absent (or vice versa); the labels name the driven path
+     (check-generated-parity
+      (assq 'slice-tensor manifest)
+      '((tensor 6) (int64 0) (optional-int64 #f) (optional-int64 #f)
+        (int64 2))
+      "[open]")
      (check-generated-parity
       (assq 'avg-pool2d manifest)
       '((tensor 1 1 4 4) (int-array (2 2)) (int-array (2 2))

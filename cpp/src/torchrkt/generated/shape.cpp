@@ -31,6 +31,25 @@ tr_tensor* tr_gen_cat(const tr_tensor* const* tensors, int64_t tensors_len,
   });
 }
 
+tr_tensor* tr_gen_index_select(const tr_tensor* self, int64_t dim,
+                               const tr_tensor* index) {
+  if (!self || !index) {
+    return torchrkt::null_arg("tr_gen_index_select");
+  }
+  return torchrkt::alloc_result("tr_gen_index_select", [&] {
+    return at::index_select(self->value, dim, index->value);
+  });
+}
+
+tr_tensor* tr_gen_masked_select(const tr_tensor* self, const tr_tensor* mask) {
+  if (!self || !mask) {
+    return torchrkt::null_arg("tr_gen_masked_select");
+  }
+  return torchrkt::alloc_result("tr_gen_masked_select", [&] {
+    return at::masked_select(self->value, mask->value);
+  });
+}
+
 tr_tensor* tr_gen_narrow(const tr_tensor* self, int64_t dim, int64_t start,
                          int64_t length) {
   if (!self) {
@@ -41,6 +60,14 @@ tr_tensor* tr_gen_narrow(const tr_tensor* self, int64_t dim, int64_t start,
   });
 }
 
+tr_tensor* tr_gen_nonzero(const tr_tensor* self) {
+  if (!self) {
+    return torchrkt::null_arg("tr_gen_nonzero");
+  }
+  return torchrkt::alloc_result("tr_gen_nonzero",
+                                [&] { return at::nonzero(self->value); });
+}
+
 tr_tensor* tr_gen_reshape(const tr_tensor* self, const int64_t* shape,
                           int64_t shape_len) {
   if (!self || !shape || shape_len < 0) {
@@ -49,6 +76,29 @@ tr_tensor* tr_gen_reshape(const tr_tensor* self, const int64_t* shape,
   return torchrkt::alloc_result("tr_gen_reshape", [&] {
     return at::reshape(self->value,
                        at::IntArrayRef(shape, static_cast<size_t>(shape_len)));
+  });
+}
+
+tr_tensor* tr_gen_select_int(const tr_tensor* self, int64_t dim,
+                             int64_t index) {
+  if (!self) {
+    return torchrkt::null_arg("tr_gen_select_int");
+  }
+  return torchrkt::alloc_result(
+      "tr_gen_select_int", [&] { return at::select(self->value, dim, index); });
+}
+
+tr_tensor* tr_gen_slice_tensor(const tr_tensor* self, int64_t dim,
+                               int64_t start, bool start_has, int64_t end,
+                               bool end_has, int64_t step) {
+  if (!self) {
+    return torchrkt::null_arg("tr_gen_slice_tensor");
+  }
+  return torchrkt::alloc_result("tr_gen_slice_tensor", [&] {
+    return at::slice(
+        self->value, dim,
+        start_has ? c10::optional<int64_t>(start) : c10::optional<int64_t>(),
+        end_has ? c10::optional<int64_t>(end) : c10::optional<int64_t>(), step);
   });
 }
 

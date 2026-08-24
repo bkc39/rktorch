@@ -34,6 +34,7 @@
          ge-tensor
          gt-scalar
          gt-tensor
+         index-select
          layer-norm
          le-scalar
          le-tensor
@@ -41,6 +42,7 @@
          lt-scalar
          lt-tensor
          masked-fill-scalar
+         masked-select
          matmul
          max-pool2d
          mean-dim
@@ -51,7 +53,10 @@
          ne-scalar
          ne-tensor
          nll-loss
+         nonzero
          reshape
+         select-int
+         slice-tensor
          sum-dim-intlist
          tril
          triu)
@@ -110,6 +115,9 @@
 (define-generated-op gt-tensor tr_gen_gt_tensor
   ([self tensor] [other tensor]))
 
+(define-generated-op index-select tr_gen_index_select
+  ([self tensor] [dim int64] [index tensor]))
+
 (define-generated-op layer-norm tr_gen_layer_norm
   ([input tensor] [normalized-shape int-array] [weight optional-tensor] [bias optional-tensor] [eps double] [cudnn-enable bool]))
 
@@ -130,6 +138,9 @@
 
 (define-generated-op masked-fill-scalar tr_gen_masked_fill_scalar
   ([self tensor] [mask tensor] [value scalar]))
+
+(define-generated-op masked-select tr_gen_masked_select
+  ([self tensor] [mask tensor]))
 
 (define-generated-op matmul tr_gen_matmul
   ([self tensor] [other tensor]))
@@ -161,8 +172,17 @@
 (define-generated-op nll-loss tr_gen_nll_loss
   ([self tensor] [target tensor] [weight optional-tensor] [reduction int64] [ignore-index int64]))
 
+(define-generated-op nonzero tr_gen_nonzero
+  ([self tensor]))
+
 (define-generated-op reshape tr_gen_reshape
   ([self tensor] [shape int-array]))
+
+(define-generated-op select-int tr_gen_select_int
+  ([self tensor] [dim int64] [index int64]))
+
+(define-generated-op slice-tensor tr_gen_slice_tensor
+  ([self tensor] [dim int64] [start optional-int64] [end optional-int64] [step int64]))
 
 (define-generated-op sum-dim-intlist tr_gen_sum_dim_intlist
   ([self tensor] [dim optional-int-array] [keepdim bool] [dtype optional-dtype]))

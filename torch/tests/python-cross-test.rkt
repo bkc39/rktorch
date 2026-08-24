@@ -94,6 +94,37 @@
                    (lambda ()
                      (define x (tensor '((1 2) (3 4))))
                      (@ x x)))
+     ;; ref spec forms, in lockstep with the twin's `forms` list
+     (let* ([j (python-result "python/indexing_parity.py")]
+            [py (hash-ref j 'forms)]
+            [ix (tensor '((1 2 3) (4 5 6)))]
+            [c (arange 6)]
+            [cube (tensor '(((1 2) (3 4)) ((5 6) (7 8))))]
+            [form (lambda (x)
+                    (list (shape x)
+                          (for/list ([v (in-list (tensor->list x))])
+                            (exact->inexact v))))]
+            [rkt (list (form (ref ix 0))
+                       (form (ref ix (: 1 3)))
+                       (form (ref c (:: 1 5 2)))
+                       (form (ref c (: _ _ 2)))
+                       (form (ref ix : (:~ 1)))
+                       (form (ref ix .. 0))
+                       (form (ref ix : _))
+                       (form (ref cube 1 .. 0))
+                       (form (ref ix (gt ix 4)))
+                       (form (ref ix (ne (tensor '(0 1)) 0)))
+                       (form (ref ix '(-1 0)))
+                       (form (ref cube (ne (tensor '((1 0) (0 1))) 0)))
+                       (form (ref ix '(0 0 1)))
+                       (form (ref ix '(1 0) 0))
+                       (form (ref c (to-dtype (tensor '(4 0)) 'int64)))
+                       (exact->inexact (ref ix 1 2)))])
+       (check-equal? (length rkt) (length py) "indexing form count")
+       (for ([r (in-list rkt)]
+             [p (in-list py)]
+             [i (in-naturals)])
+         (check-equal? r p (format "indexing form ~a parity" i))))
      (let ()
        (define-module mlp (d-in d-hidden d-out)
          #:submodules ([fc1 (Linear d-in d-hidden)]

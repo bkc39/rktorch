@@ -1,10 +1,12 @@
 #lang racket/base
 
-(require (only-in racket/list drop [flatten list-flatten] take)
-         (only-in "ops.rkt" tensor-device tensor-dtype tensor-shape)
+(require (only-in racket/list append* drop [flatten list-flatten] take)
+         (only-in "ops.rkt"
+                  item tensor-device tensor-dtype tensor-shape to-device
+                  to-dtype)
          (only-in "size.rkt" ->2d)
          (only-in "structs.rkt" tensor?)
-         (only-in "tensor-ops.rkt" reshape tensor)
+         (only-in "tensor-ops.rkt" add mul reshape tensor unsqueeze)
          (prefix-in g: (only-in "../generated.rkt"
                                 adaptive-avg-pool2d
                                 avg-pool2d
@@ -13,13 +15,18 @@
                                 eq-scalar eq-tensor
                                 ge-scalar ge-tensor
                                 gt-scalar gt-tensor
+                                index-select
                                 layer-norm
                                 le-scalar le-tensor
                                 lt-scalar lt-tensor
                                 masked-fill-scalar
+                                masked-select
                                 max-pool2d
                                 narrow
                                 ne-scalar ne-tensor
+                                nonzero
+                                select-int
+                                slice-tensor
                                 tril
                                 triu)))
 
@@ -27,7 +34,111 @@
          eq ne lt le gt ge
          conv2d max-pool2d avg-pool2d adaptive-avg-pool2d
          tril triu masked-fill embedding layer-norm
-         (rename-out [g:narrow narrow]))
+         tensor-ref :: slice? slice-start slice-end slice-step
+         (rename-out [g:narrow narrow]
+                     [g:select-int select]))
+
+(struct slice (start end step) #:transparent)
+(define ::
+  (case-lambda
+    [() (slice #f #f 1)]
+    [(end) (slice #f end 1)]
+    [(start end) (slice start end 1)]
+    [(start end step) (slice start end step)]))
+
+(define (bool-mask? s)
+  (and (tensor? s) (eq? (tensor-dtype s) 'bool)))
+
+(define (spec-consumed-dims s)
+  (cond
+    [(or (eq? s '...) (eq? s #f)) 0]
+    [(bool-mask? s) (length (tensor-shape s))]
+    [else 1]))
+
+(define (expand-ellipsis specs rank who)
+  (define consuming
+    (for/sum ([s (in-list specs)]) (spec-consumed-dims s)))
+  (unless (<= consuming rank)
+    (error who "too many indices for a ~a-d tensor: ~e" rank specs))
+  (define fills (- rank consuming))
+  (define ellipses (for/sum ([s (in-list specs)]) (if (eq? s '...) 1 0)))
+  (case ellipses
+    [(0) specs]
+    [(1) (append* (for/list ([s (in-list specs)])
+                    (if (eq? s '...) (build-list fills (lambda (_) (::)))
+                        (list s))))]
+    [else (error who "at most one '... allowed: ~e" specs)]))
+
+;; Deviation from numpy advanced indexing: multiple index tensors
+;; apply per-dim sequentially, not broadcast-combined, and index
+;; tensors are rank-1 (contract).
+(define (index-tensor positions v)
+  (tensor positions #:dtype 'int64 #:device (tensor-device v)))
+
+(define (mask-spec->index-tensor m)
+  (reshape (g:nonzero (reshape m -1)) -1))
+
+(define (wrap-negative-positions s v d)
+  (define n (list-ref (tensor-shape v) d))
+  (cond
+    [(not (tensor? s))
+     (define positions (if (vector? s) (vector->list s) s))
+     (index-tensor (for/list ([i (in-list positions)])
+                     (if (< i 0) (+ i n) i))
+                   v)]
+    [else
+     ;; python indexing accepts a CPU index for a CUDA tensor;
+     ;; index_select does not, so align devices first. Adding n*(s<0)
+     ;; wraps negatives and is the identity elsewhere — no host sync.
+     (define s* (to-device s (tensor-device v)))
+     (add s* (mul (to-dtype (g:lt-scalar s* 0.0) 'int64)
+                  (tensor n #:dtype 'int64
+                          #:device (tensor-device v))))]))
+
+(define (apply-mask-spec v d m0)
+  (define m (to-device m0 (tensor-device v)))
+  (define vdims (tensor-shape v))
+  (define mdims (tensor-shape m))
+  (define n (length mdims))
+  (unless (and (<= (+ d n) (length vdims))
+               (equal? mdims (take (list-tail vdims d) n)))
+    (error 'tensor-ref "mask shape ~a does not match dims ~a at dim ~a"
+           mdims vdims d))
+  (define collapsed
+    (if (= n 1)
+        v
+        (apply reshape v (append (take vdims d)
+                                 (list (apply * mdims))
+                                 (list-tail vdims (+ d n))))))
+  (g:index-select collapsed d (mask-spec->index-tensor m)))
+
+(define (tensor-ref t . specs)
+  (cond
+    [(and (pair? specs) (null? (cdr specs))
+          (bool-mask? (car specs))
+          (equal? (tensor-shape (car specs)) (tensor-shape t)))
+     (g:masked-select t (to-device (car specs) (tensor-device t)))]
+    [else
+     (define expanded
+       (expand-ellipsis specs (length (tensor-shape t)) 'tensor-ref))
+     (define result
+       (for/fold ([v t] [d 0] #:result v) ([s (in-list expanded)])
+         (cond
+           [(exact-integer? s) (values (g:select-int v d s) d)]
+           [(slice? s)
+            (values (g:slice-tensor v d (slice-start s) (slice-end s)
+                                    (slice-step s))
+                    (add1 d))]
+           [(eq? s #f) (values (unsqueeze v d) (add1 d))]
+           [(bool-mask? s) (values (apply-mask-spec v d s) (add1 d))]
+           [(or (tensor? s) (list? s) (vector? s))
+            (values (g:index-select v d (wrap-negative-positions s v d))
+                    (add1 d))]
+           [else (error 'tensor-ref "not an index spec: ~e" s)])))
+     (cond
+       [(pair? (tensor-shape result)) result]
+       [(eq? (tensor-dtype result) 'bool) (not (zero? (item result)))]
+       [else (item result)])]))
 
 (define (flatten v [start-dim 0] [end-dim -1])
   (cond

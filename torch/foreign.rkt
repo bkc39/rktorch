@@ -14,9 +14,10 @@
          "foreign/tensor-ops.rkt"
          "foreign/operators.rkt"
          "foreign/promoted.rkt"
+         (only-in "foreign/ref-syntax.rkt" ref)
          "foreign/autograd-ops.rkt")
 
-(provide with-no-grad with-default-device)
+(provide ref with-no-grad with-default-device)
 
 (provide (rename-out [t+ +] [t- -] [t* *] [t/ /])
          @)
@@ -61,6 +62,15 @@
   [stack (->* ((non-empty-listof tensor?)) (index/c) tensor?)]
   [flatten flatten/c]
   [narrow (-> tensor? index/c index/c exact-positive-integer? tensor?)]
+  [select (-> tensor? index/c index/c tensor?)]
+  [tensor-ref (-> tensor? index-spec/c ...
+                  (or/c tensor? number? boolean?))]
+  [:: (let ([bound/c (or/c #f exact-integer?)])
+        (case-> (-> slice?)
+                (-> bound/c slice?)
+                (-> bound/c bound/c slice?)
+                (-> bound/c bound/c exact-integer? slice?)))]
+  [slice? (-> any/c boolean?)]
   ;; elementwise
   [add binary-arith/c]
   [sub binary-arith/c]

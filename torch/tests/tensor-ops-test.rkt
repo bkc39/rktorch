@@ -316,6 +316,126 @@
     (check-exn #rx"ragged"
                (lambda () (tensor (list (list 1) 2)))))
 
+  (test-case "select views and tensor-ref sugar (#46)"
+    (define t (tensor '((1 2 3) (4 5 6))))
+    (check-equal? (tensor->list (select t 0 1)) '(4 5 6))
+    (check-equal? (tensor->list (select t 1 -1)) '(3 6))
+    (check-equal? (shape (select t 0 0)) '(3))
+    (let ([m (tensor '((1.0 2.0) (3.0 4.0)))])
+      (sub! (select m 0 0) (select m 0 0))
+      (check-equal? (tensor->list m) '(0.0 0.0 3.0 4.0)))
+    (check-equal? (ref t 1 2) 6)
+    (check-equal? (tensor-ref t -1 -1) 6)
+    (check-equal? (ref (tensor '((1.5 2.5))) 0 1) 2.5)
+    (check-equal? (ref (tensor 7)) 7)
+    ;; 2^53+1 survives because the walk stays device-resident until item
+    (check-equal? (ref (tensor (list (add1 (expt 2 53)))) 0)
+                  (add1 (expt 2 53)))
+    (check-exn exn:fail? (lambda () (select t 0 5))))
+
+  (test-case "ref mirrors python indexing: slices, ellipsis, None, masks (#46)"
+    (define t (tensor '((1 2 3) (4 5 6))))
+    (check-equal? (tensor->list (ref t 0)) '(1 2 3))
+    (check-equal? (tensor->list (ref (arange 6) (:: 1 3))) '(1.0 2.0))
+    (check-equal? (tensor->list (ref (arange 6) (:: #f #f 2))) '(0.0 2.0 4.0))
+    (check-equal? (tensor->list (ref t (::) (:: 1 #f))) '(2 3 5 6))
+    (check-equal? (shape (ref t (:: 1) (:: 2))) '(1 2))
+    (let ([m (tensor '((1.0 2.0) (3.0 4.0)))])
+      (sub! (ref m (:: 0 1)) (ref m (:: 0 1)))
+      (check-equal? (tensor->list m) '(0.0 0.0 3.0 4.0)))
+    (check-equal? (tensor->list (ref t '... 0)) '(1 4))
+    (check-equal? (shape (ref t (::) #f)) '(2 1 3))
+    (check-equal? (shape (ref t '... #f)) '(2 3 1))
+    (check-equal? (tensor->list
+                   (ref (tensor '(((1 2) (3 4)) ((5 6) (7 8)))) 1 '... 0))
+                  '(5 7))
+    (check-equal? (tensor->list (ref t (gt t 4))) '(5 6))
+    ;; a rank-1 mask keeps python's dimension semantics: rows where true
+    (check-equal? (tensor->list (ref t (ne (tensor '(0 1)) 0)))
+                  '(4 5 6))
+    (check-equal? (shape (ref t (ne (tensor '(0 1)) 0))) '(1 3))
+    (check-equal? (tensor->list (ref t (::) (ne (tensor '(1 0 1)) 0)))
+                  '(1 3 4 6))
+    (check-equal? (shape (ref t '(0 0 1))) '(3 3))
+    (check-equal? (tensor->list (ref t '(1 0) 0)) '(4 1))
+    (check-equal? (tensor->list (ref t '(-1 0) 0)) '(4 1))
+    (check-equal? (tensor->list (ref t '#(1 0) 0)) '(4 1))
+    (check-equal? (tensor->list (ref t '#(-1 0) 0)) '(4 1))
+    (check-equal? (tensor->list
+                   (ref (arange 5) (to-dtype (tensor '(-1 0)) 'int64)))
+                  '(4.0 0.0))
+    (check-equal? (ref (gt t 4) 1 2) #t)
+    (check-equal? (ref (gt t 4) 0 0) #f)
+    (check-exn #rx"too many indices" (lambda () (ref t 0 0 0)))
+    (check-exn #rx"at most one" (lambda () (ref t '... '...)))
+    (let ([cube (tensor '(((1 2) (3 4)) ((5 6) (7 8))))])
+      ;; a rank-m mask consumes m dims: python's masked-dims collapse
+      (check-equal? (shape (ref cube (ne (tensor '((1 0) (0 1))) 0))) '(2 2))
+      (check-equal? (tensor->list (ref cube (ne (tensor '((1 0) (0 1))) 0)))
+                    '(1 2 7 8)))
+    (check-exn #rx"too many indices" (lambda () (ref t (gt t 4) 0)))
+    (check-exn #rx"mask shape" (lambda () (ref t 0 (ne (tensor '(1 0)) 0))))
+    ;; python rejects broadcastable-but-unequal full-rank masks
+    (check-exn #rx"mask shape"
+               (lambda () (ref t (ne (tensor '((1 0 1))) 0))))
+    (check-exn exn:fail:contract?
+               (lambda () (ref t (tensor '(0.5 1.0)))))
+    (check-exn exn:fail:contract? (lambda () (ref t '#(0.5))))
+    (check-exn exn:fail:contract?
+               (lambda () (ref t (to-dtype (tensor '((0 1))) 'int64))))
+    (check-exn exn:fail:contract?
+               (lambda () (ref t 0 (gt (tensor 1) 0))))
+    (check-exn exn:fail:contract?
+               (lambda () (tensor-ref t (tensor '(0.5 1.0)))))
+    (check-exn exn:fail:contract?
+               (lambda () (tensor-ref t 0 (gt (tensor 1) 0))))
+    (check-exn exn:fail:contract?
+               (lambda () (ref t (: "bad" 2))))
+    (check-exn exn:fail:contract?
+               (lambda () (ref t (: 0 2 1.5))))
+    (check-exn exn:fail? (lambda () (ref (arange 6) (:: #f #f -1)))))
+
+  (test-case "ref macro sugar expands to tensor-ref value specs (#46)"
+    (define t (tensor '((1 2 3) (4 5 6))))
+    (check-equal? (tensor->list (ref t : 0))
+                  (tensor->list (tensor-ref t (::) 0)))
+    (check-equal? (tensor->list (ref t (: 1 3)))
+                  (tensor->list (tensor-ref t (:: 1 3))))
+    (check-equal? (tensor->list (ref t (: 2)))
+                  (tensor->list (tensor-ref t (:: 2))))
+    (check-equal? (tensor->list (ref t (:~ 1)))
+                  (tensor->list (tensor-ref t (:: 1 #f))))
+    (check-equal? (tensor->list (ref t (: 1 _)))
+                  (tensor->list (tensor-ref t (:: 1 #f))))
+    (check-equal? (tensor->list (ref t : (: _ _ 2)))
+                  (tensor->list (tensor-ref t (::) (:: #f #f 2))))
+    (check-equal? (tensor->list (ref t : (:~ 0 2)))
+                  (tensor->list (tensor-ref t (::) (:: 0 #f 2))))
+    (check-equal? (tensor->list (ref t : (:~ _ 2)))
+                  (tensor->list (tensor-ref t (::) (:: #f #f 2))))
+    (check-equal? (tensor->list (ref t (:~ 1 _)))
+                  (tensor->list (tensor-ref t (:: 1 #f))))
+    (check-equal? (tensor->list (ref t : (: 0 _ 2)))
+                  (tensor->list (tensor-ref t (::) (:: 0 #f 2))))
+    (check-equal? (tensor->list (ref t (: 0 2 _)))
+                  (tensor->list (tensor-ref t (:: 0 2))))
+    (check-equal? (tensor->list (ref t .. 0))
+                  (tensor->list (tensor-ref t '... 0)))
+    (check-equal? (shape (ref t : _)) (shape (tensor-ref t (::) #f)))
+    (check-equal? (shape (ref t _)) '(1 2 3))
+    (let ([lo 0])
+      (check-equal? (tensor->list (ref t (: (add1 lo) (+ 1 2)) 0))
+                    '(4)))
+    (let ([s (:: 1 3)])
+      (check-equal? (tensor->list (ref t 0 s)) '(2 3)))
+    (check-equal? (tensor->list (ref t (gt t 4))) '(5 6))
+    (check-equal? (apply tensor-ref t (list 1 2)) 6)
+    ;; `..` survives inside another macro's template (a literal `...`
+    ;; there would be the macro ellipsis and fail to expand)
+    (let-syntax ([first-of-last-dim
+                  (syntax-rules () [(_ x) (ref x .. 0)])])
+      (check-equal? (tensor->list (first-of-last-dim t)) '(1 4))))
+
   (test-case "wrong call shapes get contract blame at the facade"
     (check-exn exn:fail:contract? (lambda () (add 1 2)))
     (check-exn exn:fail:contract? (lambda () (sub 1.0 2.0)))
