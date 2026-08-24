@@ -70,6 +70,11 @@
     (check-exn exn:fail:contract?
                (lambda () (gather (zeros 2 3) 1 (to-dtype (zeros 3 1)
                                                           'int64))))
+    (check-equal? (shape (gather (zeros 2 3) 1 (to-dtype (zeros 3 0)
+                                                         'int64)))
+                  '(3 0))
+    (check-equal? (tensor->list (index-select (arange 3) 0 (tensor 1)))
+                  '(1.0))
     (check-exn exn:fail:contract?
                (lambda ()
                  (take-along-dim t (to-dtype (tensor '(0 1)) 'int64) 1)))

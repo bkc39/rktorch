@@ -53,7 +53,7 @@
   (and/c tensor? (lambda (x) (eq? (tensor-dtype x) 'int64))))
 
 (define index-vector/c
-  (and/c int64-tensor/c (lambda (x) (= 1 (length (tensor-shape x))))))
+  (and/c int64-tensor/c (lambda (x) (< (length (tensor-shape x)) 2))))
 
 (define (index-tensor-spec? x)
   (and (tensor? x)

@@ -85,10 +85,13 @@
                                               (+ dim rank)
                                               dim))
                                 (and (= (length xd) rank)
-                                     (for/and ([xi (in-list xd)]
-                                               [ti (in-list td)]
-                                               [i (in-naturals)])
-                                       (or (= i g) (<= xi ti))))))])
+                                     ;; ATen skips extent checks for
+                                     ;; empty indices (verified)
+                                     (or (zero? (apply * xd))
+                                         (for/and ([xi (in-list xd)]
+                                                   [ti (in-list td)]
+                                                   [i (in-naturals)])
+                                           (or (= i g) (<= xi ti)))))))])
                [result tensor?])]
   [take-along-dim
    (->i ([t tensor?]
