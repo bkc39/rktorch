@@ -101,6 +101,7 @@ if(BUILD_TESTING)
 
   add_executable(torchrkt_tests
     tests/torchrkt/autograd_test.cpp
+    tests/torchrkt/classify_test.cpp
     tests/torchrkt/device_test.cpp
     tests/torchrkt/finalizer_death_test.cpp
     tests/torchrkt/generated_golden_test.cpp

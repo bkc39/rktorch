@@ -35,8 +35,13 @@ int tr_last_error_kind(void) {
 }
 
 int tr_manual_seed(uint64_t seed) {
-  return torchrkt::status_call("tr_manual_seed",
-                               [seed] { torch::manual_seed(seed); });
+  return torchrkt::status_call("tr_manual_seed", [seed] {
+    torch::manual_seed(seed);
+    // The C++ torch::manual_seed covers CPU + CUDA only (unlike Python's).
+    if (torch::mps::is_available()) {
+      torch::mps::manual_seed(seed);
+    }
+  });
 }
 
 }  // extern "C"
