@@ -47,10 +47,7 @@ Any of those makes the harness print a FAIL line and keep the transcript.
 
     # Stage a matching native lib.  The dev shell only re-stages on FIRST
     # provision (the deps_stamp guard), so do this explicitly:
-    CPP_OUT=$(nix build .#cpp --print-out-paths | tail -1) \
-      && rm -f torch/native-libs/libtorchrkt.* \
-      && cp "$CPP_OUT"/lib/libtorchrkt.* torch/native-libs/ \
-      && chmod u+w torch/native-libs/libtorchrkt.*
+    nix run .#copy-native-libs        # temp file + rename(2); safe under live processes
     find torch examples -type d -name compiled -exec rm -rf {} +
     nix develop --command raco setup --no-docs --pkgs torch
 
@@ -105,7 +102,10 @@ Any of those makes the harness print a FAIL line and keep the transcript.
   with symbols and point native-libs at it:
 
     cmake --preset dev && cmake --build --preset dev      # CMAKE_BUILD_TYPE=Debug
-    cp cpp/build/libtorchrkt.so torch/native-libs/
+    cp cpp/build/libtorchrkt.so torch/native-libs/.libtorchrkt.so.tmp \
+      && mv -f torch/native-libs/.libtorchrkt.so.tmp torch/native-libs/libtorchrkt.so
+    # temp + rename, never a bare `cp`: an in-place write corrupts any live
+    # process that has the old file mapped (#72).
 
 --------------------------------------------------------------------------------
 5.  ALWAYS-ON INSTRUMENT (works outside the harness too)

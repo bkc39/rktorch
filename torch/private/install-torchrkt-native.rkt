@@ -11,19 +11,29 @@
 
 (provide pre-installer)
 
-(require (only-in racket/file make-directory*))
+(require (only-in racket/file make-directory*)
+         (only-in "util.rkt" with-temporary-file))
 
 (define lib-pattern #rx"^libtorchrkt\\.")
 
+;; Temp file + rename(2), never a write in place: `cp`-style staging opens the
+;; destination O_TRUNC, which invalidates the pages of any process still
+;; executing the old file and faults it (#72).  rename swaps the directory
+;; entry and leaves the old inode alive, so a live REPL keeps running the old
+;; lib rather than crashing, and there is no window where the file is missing
+;; or half-written.  Same discipline as data/mnist.rkt's cache write.
 (define (copy-native-libs! dest-dir source-dir)
   (make-directory* dest-dir)
   (for ([f (in-list (directory-list source-dir))]
         #:when (regexp-match? lib-pattern (path->string f)))
     (define src (build-path source-dir f))
     (define dst (build-path dest-dir f))
-    (when (file-exists? dst)
-      (delete-file dst))
-    (copy-file src dst)))
+    (with-temporary-file (tmp #:template "libtorchrkt-~a.part"
+                              #:directory dest-dir)
+      (copy-file src tmp #t)
+      (file-or-directory-permissions
+       tmp (file-or-directory-permissions src 'bits))
+      (rename-file-or-directory tmp dst #t))))
 
 (define (has-matching-files? dir)
   (and (directory-exists? dir)
