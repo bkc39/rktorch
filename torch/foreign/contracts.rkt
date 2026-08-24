@@ -9,6 +9,7 @@
                   listof
                   none/c
                   or/c
+                  vectorof
                   unsupplied-arg?)
          (only-in "device-type.rkt" device?)
          (only-in "ops.rkt" tensor-dtype tensor-shape)
@@ -50,7 +51,7 @@
 
 (define index-spec/c
   (or/c exact-integer? slice-spec? index-tensor-spec? #f '...
-        (listof exact-integer?)))
+        (listof exact-integer?) (vectorof exact-integer?)))
 
 ;; -1 means "infer this dimension"
 (define index/c exact-integer?)

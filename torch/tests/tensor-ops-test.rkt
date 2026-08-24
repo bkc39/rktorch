@@ -359,6 +359,8 @@
     (check-equal? (shape (ref t '(0 0 1))) '(3 3))
     (check-equal? (tensor->list (ref t '(1 0) 0)) '(4 1))
     (check-equal? (tensor->list (ref t '(-1 0) 0)) '(4 1))
+    (check-equal? (tensor->list (ref t '#(1 0) 0)) '(4 1))
+    (check-equal? (tensor->list (ref t '#(-1 0) 0)) '(4 1))
     (check-equal? (tensor->list
                    (ref (arange 5) (to-dtype (tensor '(-1 0)) 'int64)))
                   '(4.0 0.0))
@@ -378,6 +380,7 @@
                (lambda () (ref t (ne (tensor '((1 0 1))) 0))))
     (check-exn exn:fail:contract?
                (lambda () (ref t (tensor '(0.5 1.0)))))
+    (check-exn exn:fail:contract? (lambda () (ref t '#(0.5))))
     (check-exn exn:fail:contract?
                (lambda () (ref t (to-dtype (tensor '((0 1))) 'int64))))
     (check-exn exn:fail:contract?
@@ -387,29 +390,37 @@
     (check-exn exn:fail:contract?
                (lambda () (tensor-ref t 0 (gt (tensor 1) 0))))
     (check-exn exn:fail:contract?
-               (lambda () (ref t ("bad" : 2))))
+               (lambda () (ref t (: "bad" 2))))
     (check-exn exn:fail:contract?
-               (lambda () (ref t (0 : 2 : 1.5))))
+               (lambda () (ref t (: 0 2 1.5))))
     (check-exn exn:fail? (lambda () (ref (arange 6) (:: #f #f -1)))))
 
   (test-case "ref macro sugar expands to tensor-ref value specs (#46)"
     (define t (tensor '((1 2 3) (4 5 6))))
     (check-equal? (tensor->list (ref t : 0))
                   (tensor->list (tensor-ref t (::) 0)))
-    (check-equal? (tensor->list (ref t (1 : 3)))
+    (check-equal? (tensor->list (ref t (: 1 3)))
                   (tensor->list (tensor-ref t (:: 1 3))))
     (check-equal? (tensor->list (ref t (: 2)))
                   (tensor->list (tensor-ref t (:: 2))))
-    (check-equal? (tensor->list (ref t (1 :)))
+    (check-equal? (tensor->list (ref t (:~ 1)))
                   (tensor->list (tensor-ref t (:: 1 #f))))
-    (check-equal? (tensor->list (ref t : (: : 2)))
+    (check-equal? (tensor->list (ref t (: 1 _)))
+                  (tensor->list (tensor-ref t (:: 1 #f))))
+    (check-equal? (tensor->list (ref t : (: _ _ 2)))
                   (tensor->list (tensor-ref t (::) (:: #f #f 2))))
+    (check-equal? (tensor->list (ref t : (:~ 0 2)))
+                  (tensor->list (tensor-ref t (::) (:: 0 #f 2))))
+    (check-equal? (tensor->list (ref t : (: 0 _ 2)))
+                  (tensor->list (tensor-ref t (::) (:: 0 #f 2))))
+    (check-equal? (tensor->list (ref t (: 0 2 _)))
+                  (tensor->list (tensor-ref t (:: 0 2))))
     (check-equal? (tensor->list (ref t .. 0))
                   (tensor->list (tensor-ref t '... 0)))
     (check-equal? (shape (ref t : _)) (shape (tensor-ref t (::) #f)))
     (check-equal? (shape (ref t _)) '(1 2 3))
     (let ([lo 0])
-      (check-equal? (tensor->list (ref t ((add1 lo) : (+ 1 2)) 0))
+      (check-equal? (tensor->list (ref t (: (add1 lo) (+ 1 2)) 0))
                     '(4)))
     (let ([s (:: 1 3)])
       (check-equal? (tensor->list (ref t 0 s)) '(2 3)))

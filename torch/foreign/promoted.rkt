@@ -81,8 +81,9 @@
 (define (wrap-negative-positions s v d)
   (define n (list-ref (tensor-shape v) d))
   (cond
-    [(list? s)
-     (index-tensor (for/list ([i (in-list s)])
+    [(not (tensor? s))
+     (define positions (if (vector? s) (vector->list s) s))
+     (index-tensor (for/list ([i (in-list positions)])
                      (if (< i 0) (+ i n) i))
                    v)]
     [else
@@ -132,7 +133,7 @@
                     (add1 d))]
            [(eq? s #f) (values (unsqueeze v d) (add1 d))]
            [(bool-mask? s) (values (apply-mask-spec v d s) (add1 d))]
-           [(or (tensor? s) (list? s))
+           [(or (tensor? s) (list? s) (vector? s))
             (values (g:index-select v d (wrap-negative-positions s v d))
                     (add1 d))]
            [else (error 'tensor-ref "not an index spec: ~e" s)])))

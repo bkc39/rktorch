@@ -105,10 +105,10 @@
                           (for/list ([v (in-list (tensor->list x))])
                             (exact->inexact v))))]
             [rkt (list (form (ref ix 0))
-                       (form (ref ix (1 : 3)))
+                       (form (ref ix (: 1 3)))
                        (form (ref c (:: 1 5 2)))
-                       (form (ref c (: : 2)))
-                       (form (ref ix : (1 :)))
+                       (form (ref c (: _ _ 2)))
+                       (form (ref ix : (:~ 1)))
                        (form (ref ix .. 0))
                        (form (ref ix : _))
                        (form (ref cube 1 .. 0))

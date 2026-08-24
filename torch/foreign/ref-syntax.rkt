@@ -4,6 +4,8 @@
 ;; would collide with Typed Racket's and `_` with match's wildcard, and
 ;; a literal `...` token is impossible (it is the macro ellipsis, so any
 ;; macro whose template contained a ref form would break) — hence `..`.
+;; `_` is python's None in both of its roles: a new axis at spec level,
+;; an omitted bound inside (: ...); `(:~ a s)` is [a::s].
 ;; whole-module for-syntax requires: macro-expansion exemption, as in
 ;; define-generated.rkt (AGENTS.md import convention)
 (require (for-syntax racket/base
@@ -24,44 +26,30 @@
   uncontracted-tensor-ref)
 
 (begin-for-syntax
-  (define (colon? stx)
-    (eq? (syntax-e stx) ':))
-
-  (define (bound-part parts who ctx)
-    (cond
-      [(null? parts) #f]
-      [(null? (cdr parts)) (car parts)]
-      [else (raise-syntax-error
-             who "expected at most one expression between colons" ctx)]))
-
-  (define (slice-stx spec who)
-    (define-values (rev-bounds current)
-      (for/fold ([bounds '()] [current '()])
-                ([part (in-list (syntax->list spec))])
-        (if (colon? part)
-            (values (cons (reverse current) bounds) '())
-            (values bounds (cons part current)))))
-    (define parts
-      (for/list ([p (in-list (reverse (cons (reverse current) rev-bounds)))])
-        (bound-part p who spec)))
-    (define (bound p) (or p #'#f))
-    (case (length parts)
-      [(2) #`(:: #,(bound (car parts)) #,(bound (cadr parts)))]
-      [(3)
-       (if (caddr parts)
-           #`(:: #,(bound (car parts)) #,(bound (cadr parts))
-                 #,(caddr parts))
-           #`(:: #,(bound (car parts)) #,(bound (cadr parts))))]
-      [else (raise-syntax-error who "too many colons in slice" spec)]))
+  (define (slice-arg stx)
+    (syntax-parse stx
+      [(~datum _) #'#f]
+      [e:expr #'e]))
 
   (define (parse-spec spec who)
     (syntax-parse spec
       [(~datum :) #'(::)]
       [(~datum ..) #'(quote (... ...))]
       [(~datum _) #'#f]
-      [(part ...)
-       #:when (ormap colon? (syntax->list spec))
-       (slice-stx spec who)]
+      [((~datum :) arg ...)
+       (define args (map slice-arg (syntax->list #'(arg ...))))
+       (syntax-parse spec
+         [(_ b) #`(:: #,(car args))]
+         [(_ a b) #`(:: #,@args)]
+         [(_ a b (~datum _)) #`(:: #,(car args) #,(cadr args))]
+         [(_ a b s) #`(:: #,@args)]
+         [_ (raise-syntax-error
+             who "expected 1 to 3 slice arguments" spec)])]
+      [((~datum :~) a) #'(:: a #f)]
+      [((~datum :~) a s) #'(:: a #f s)]
+      [((~datum :~) . _)
+       (raise-syntax-error
+        who "expected 1 or 2 arguments (start [step])" spec)]
       [e:expr #'e])))
 
 (define-syntax (ref stx)
