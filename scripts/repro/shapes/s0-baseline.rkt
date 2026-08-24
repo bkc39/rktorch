@@ -1,0 +1,2 @@
+(require torch)
+(finalizer-failures)

@@ -16,6 +16,7 @@
          collect-and-drain!
          swallow-and-count-failure
          finalizer-failures
+         finalizer-diagnostics
          tensor-allocator
          tensor-allocator/rng
          oom-retry
@@ -41,19 +42,36 @@
       (release t))))
 
 (define finalizer-failure-count (box 0))
+(define finalizer-run-count (box 0))
+;; Bounded: the messages are the evidence a bare counter throws away (#72).
+(define captured-failures (box '()))
+(define capture-limit 8)
 
 (define (finalizer-failures)
   (unbox finalizer-failure-count))
 
+(define (finalizer-diagnostics)
+  (list (cons 'runs (unbox finalizer-run-count))
+        (cons 'failures (unbox finalizer-failure-count))
+        (cons 'messages (reverse (unbox captured-failures)))
+        (cons 'ledger-entries (call-with-ledger
+                               (lambda () (hash-count allocations))))))
+
+(define (record-failure! e)
+  (call-with-ledger
+   (lambda ()
+     (set-box! finalizer-failure-count (add1 (unbox finalizer-failure-count)))
+     (define seen (unbox captured-failures))
+     (when (< (length seen) capture-limit)
+       (set-box! captured-failures
+                 (cons (if (exn? e) (exn-message e) (format "~e" e)) seen))))))
+
 ;; Total catch on purpose, not exn:fail?: any value escaping GC
 ;; finalization re-enters the error machinery and cascades (#38).
 (define ((swallow-and-count-failure release) t)
-  (with-handlers ([(lambda (_) #t)
-                   (lambda (_e)
-                     (call-with-ledger
-                      (lambda ()
-                        (set-box! finalizer-failure-count
-                                  (add1 (unbox finalizer-failure-count))))))])
+  (call-with-ledger
+   (lambda () (set-box! finalizer-run-count (add1 (unbox finalizer-run-count)))))
+  (with-handlers ([(lambda (_) #t) record-failure!])
     (release t)))
 
 (struct allocation (phantom nbytes device))
@@ -199,3 +217,14 @@
          (_fun (a : _Tensor) (b : _double) -> _Tensor/null)
          #:c-id c-id
          #:wrap tensor-allocator)]))
+
+;; Diagnostic only (#72): report what the finalizer path did, at exit.  No I/O
+;; from inside a finalizer -- that runs in atomic mode, where writing to a port
+;; can block and trip an internal error.  Accumulate, dump here.
+(define mem-trace-handle
+  (and (getenv "RKTORCH_MEM_TRACE")
+       (plumber-add-flush!
+        (current-plumber)
+        (lambda (_h)
+          (with-handlers ([(lambda (_) #t) void])
+            (eprintf "[rktorch mem] ~s\n" (finalizer-diagnostics)))))))
