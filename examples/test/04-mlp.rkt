@@ -17,9 +17,11 @@
 (module+ test
   (require rackunit)
   (define-values (losses net device) (run-example))
-  ;; accept the shorthand ('cpu / 'cuda) or the normalised (list 'cuda n) form,
-  ;; so this doesn't break if run-example ever returns the normalised device.
-  (check-not-false (or (eq? device 'cpu) (eq? device 'cuda)
+  ;; run-example echoes back the device it was given: pick-device's struct on
+  ;; the no-argument call, or an explicit shorthand passed straight through.
+  (check-not-false (or (and (device? device)
+                            (memq (device-type device) '(cpu cuda mps)))
+                       (memq device '(cpu cuda mps))
                        (and (pair? device) (eq? (car device) 'cuda)))
                    (format "unexpected device: ~a" device))
   (check-equal? (length losses) 5)
