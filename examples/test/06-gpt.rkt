@@ -56,6 +56,18 @@
   (check-true (module-training? net) "generate left the net in eval mode")
   (check-exn #rx"prompt must be non-empty"
              (lambda () (generate net vocab "")))
+  ;; Device RNG streams differ from the CPU's, so the on-device arm checks
+  ;; convergence, never equality with the CPU losses above.
+  (define accel (accelerator-if-available))
+  (unless (eq? (device-type accel) 'cpu)
+    (define-values (a-losses a-net a-vocab _a-dev) (run-example #:device accel))
+    (check-equal? (tensor-device (car (parameters a-net))) accel)
+    (check-true (andmap (lambda (l) (and (rational? l) (not (nan? l)))) a-losses)
+                (format "non-finite loss on ~a: ~a" accel a-losses))
+    (check-true (< (last a-losses) (first a-losses))
+                (format "~a losses did not decrease: ~a" accel a-losses))
+    ;; generate reads its device from the net's parameters, not the default
+    (check-equal? (string-length (generate a-net a-vocab "The " #:steps 20)) 24))
   ;; The committed Part I excerpt behind train-excerpt: data integrity only
   ;; (training it is minutes of CPU — the offline demo, not a CI job).
   (define excerpt (load-excerpt))

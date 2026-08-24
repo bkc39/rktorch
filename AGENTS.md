@@ -47,7 +47,8 @@ CPU-first; float32 + inferred int64 (#44). From `torch`:
   `'bool` — the dtype queries answer it and `to-dtype` casts to it)
 - device: `device? device-type device-index cpu-device cuda-device
   mps-device cuda-available? cuda-if-available cuda-device-count
-  mps-available? mps-if-available set-default-device! default-device
+  mps-available? mps-if-available accelerator-if-available
+  set-default-device! default-device
   with-default-device to-device tensor-device` — `'mps` is accepted
   wherever `'cuda` is (#13); CPU and MPS are single devices (index 0)
 - memory: `native-memory-use` (per-device outstanding native bytes from
@@ -132,6 +133,7 @@ nix build .#cpp        # CMake build + gtest only
 nix flake check        # everything: cpp, format, tidy, line-count, racket
 nix develop            # dev shell (includes a Python with `torch`)
 nix develop .#ci       # lean shell without Python torch (used by the lint job)
+nix develop .#cuda     # linux-only: CUDA-linked shim + host driver (#14)
 ./result/bin/torch  # runs (module+ main): prints version + a 2x2 draw
 ```
 
@@ -167,6 +169,21 @@ nix develop --command raco test torch/tests/generated-parity-test.rkt
 
 Where python3 can't `import torch` (the sandboxed `nix build`, or the lean
 `.#ci` shell), the tests self-skip, so `nix build` / `raco test` stay green.
+
+### Accelerators
+
+`accelerator-if-available` picks CUDA, then MPS, then CPU — what the examples'
+`pick-device` returns, and the analogue of PyTorch's
+`torch.accelerator.current_accelerator()`. The device suite guards its CUDA and
+MPS bodies separately; the example runners train on whichever accelerator the
+helper returns. Both verify real hardware where it exists and self-skip where it
+doesn't — never assume a case ran because it was green.
+
+**Darwin needs no special shell.** The `aarch64-darwin` `libtorch-bin` ships the
+Metal backend, so plain `nix develop` is the MPS verification environment —
+there is no `.#mps` counterpart to `.#cuda` (which exists only because CUDA
+needs a differently-linked libtorch plus the host driver). Confirm with
+`nix develop --command racket -e '(require torch)(mps-available?)'`.
 
 ## Architecture
 

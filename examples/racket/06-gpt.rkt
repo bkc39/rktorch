@@ -123,7 +123,7 @@ batches land together.
 
 @chunk[<r06-device>
 (define (pick-device)
-  (if (cuda-available?) 'cuda 'cpu))]
+  (accelerator-if-available))]
 
 @bold{The deterministic core.} @racket[run-example] is the seeded, offline
 entry the test harness and the PyTorch parity twin both drive: the committed
@@ -264,7 +264,8 @@ model, @racket[argmax] the logits at the @emph{last} position, append, repeat
 Both defaults are @emph{derived from the net itself} rather than hardcoded:
 the device from where its parameters live (@racket[with-default-device] only
 steers @emph{newly created} tensors, so the rollout context must be built
-where the weights already are --- a @racket[train-novel] net on CUDA would
+where the weights already are --- a @racket[train-novel] net on an accelerator
+would
 otherwise device-mismatch), and the context limit from the position table's
 row count, looked up as @tt{"pos-emb.weight"} in
 @racket[named-parameters] (a 64-block net would otherwise be silently

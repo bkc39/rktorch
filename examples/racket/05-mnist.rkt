@@ -46,13 +46,13 @@ PyTorch. The spatial arithmetic is the usual @tt{valid}-convolution bookkeeping:
       f2))]
 
 @bold{The device.} Pick the accelerator the way PyTorch does
-(@tt{device = "cuda" if torch.cuda.is_available() else "cpu"}); setting it as
+(@tt{torch.accelerator.current_accelerator()}); setting it as
 the process default means every tensor built afterwards --- the model's
 parameters and each batch alike --- lands there, so the whole loop follows.
 
 @chunk[<r05-device>
 (define (pick-device)
-  (if (cuda-available?) 'cuda 'cpu))]
+  (accelerator-if-available))]
 
 @bold{Accuracy.} Evaluated in @racket[eval!] mode under @racket[with-no-grad] (no
 autograd graph, no dropout), batched so the test set never has to live on the

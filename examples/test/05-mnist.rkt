@@ -42,4 +42,14 @@
   (define acc (accuracy net xs ys))
   (check-true (and (> acc 0.1) (<= acc 1.0))
               (format "accuracy out of expected range: ~a" acc))
-  (check-true (module-training? net) "accuracy left the net in eval mode"))
+  (check-true (module-training? net) "accuracy left the net in eval mode")
+  ;; Device RNG streams differ from the CPU's, so the on-device arm checks
+  ;; convergence, never equality with the CPU losses above.
+  (define accel (accelerator-if-available))
+  (unless (eq? (device-type accel) 'cpu)
+    (define-values (a-losses a-net _a-dev) (run-example #:device accel))
+    (check-equal? (tensor-device (car (parameters a-net))) accel)
+    (check-true (andmap (lambda (l) (and (rational? l) (not (nan? l)))) a-losses)
+                (format "non-finite loss on ~a: ~a" accel a-losses))
+    (check-true (< (last a-losses) (first a-losses))
+                (format "~a losses did not decrease: ~a" accel a-losses))))

@@ -166,6 +166,7 @@
   [mps-device (-> device?)]
   [mps-available? (-> boolean?)]
   [mps-if-available (-> device?)]
+  [accelerator-if-available (-> device?)]
   [set-default-device! (-> device/c void?)]
   [default-device (-> device?)]
   [call-with-default-device (-> device/c (-> any) any)]
