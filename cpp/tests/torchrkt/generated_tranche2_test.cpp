@@ -322,9 +322,9 @@ TEST(GeneratedTranche2, GatherTakeAlongWhereAndGuards) {
 
   const Handle tad(tr_gen_take_along_dim(m.t, idx.t, 1, true));
   EXPECT_EQ(data_of(tad.t), (std::vector<float>{2.0F, 1.0F, 3.0F, 3.0F}));
-  // dim=None (has=false) operates on the flattened tensor, like python
   const Handle tad_flat(tr_gen_take_along_dim(m.t, idx.t, 0, false));
   EXPECT_EQ(shape_of(tad_flat.t), (std::vector<int64_t>{4}));
+  EXPECT_EQ(data_of(tad_flat.t), (std::vector<float>{2.0F, 1.0F, 1.0F, 1.0F}));
   EXPECT_EQ(tr_gen_take_along_dim(nullptr, idx.t, 0, false), nullptr);
   expect_error_from("tr_gen_take_along_dim");
 

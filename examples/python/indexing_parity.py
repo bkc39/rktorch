@@ -34,5 +34,6 @@ forms = [
     form(torch.where(t > 4)[1]),
     form(torch.gather(t, 1, torch.tensor([[0, 2], [1, 0]]))),
     form(torch.take(t, torch.tensor([0, 5, 3]))),
+    form(torch.take_along_dim(t, torch.tensor([5, 0, 2]))),
 ]
 print(json.dumps({"forms": forms}))

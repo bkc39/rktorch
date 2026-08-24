@@ -165,19 +165,21 @@
 (define where
   (case-lambda
     [(mask)
-     (if (null? (tensor-shape mask))
-         ;; python's scalar-condition form: ([0],) when true, ([],) not
-         (list (tensor (if (zero? (car (tensor->list mask))) '() '(0))
-                       #:dtype 'int64 #:device (tensor-device mask)))
-         (let ([coords (g:nonzero mask)])
-           (for/list ([d (in-range (length (tensor-shape mask)))])
-             (g:select-int coords 1 d))))]
+     (cond
+       [(null? (tensor-shape mask))
+        ;; python's scalar-condition form: ([0],) when true, ([],) not
+        (list (tensor (if (zero? (car (tensor->list mask))) '() '(0))
+                      #:dtype 'int64 #:device (tensor-device mask)))]
+       [else
+        (define coords (g:nonzero mask))
+        (for/list ([d (in-range (length (tensor-shape mask)))])
+          (g:select-int coords 1 d))])]
     [(mask a b)
      (cond
        [(tensor? b) (g:where-self mask a b)]
-       [(and (exact-integer? b) (eq? (tensor-dtype a) 'int64))
-        ;; a double scalar would float-promote int64 results and round
-        ;; past 2^53 — same guard as the comparison combinator
+       [(and (exact-integer? b) (memq (tensor-dtype a) '(bool int64)))
+        ;; a double scalar would float-promote integral results and
+        ;; round past 2^53 — same guard as the comparison combinator
         (g:where-self mask a (tensor b #:device (tensor-device a)))]
        [else (g:where-scalarother mask a (exact->inexact b))])]))
 
