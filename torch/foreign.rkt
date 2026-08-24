@@ -68,7 +68,10 @@
   [nonzero (-> tensor? tensor?)]
   [take (->i ([v (or/c tensor? list?)]
               [n (v) (if (tensor? v)
-                         (or/c tensor? (listof exact-integer?)
+                         (or/c (and/c tensor?
+                                      (lambda (x)
+                                        (eq? (tensor-dtype x) 'int64)))
+                               (listof exact-integer?)
                                (vectorof exact-integer?))
                          exact-nonnegative-integer?)])
              [result (v) (if (tensor? v) tensor? list?)])]

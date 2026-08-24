@@ -120,10 +120,13 @@
       (let ([mt (tensor '((1 2 3) (4 5 6)) #:device (mps-device))])
         (check-equal? (tensor->list (take mt '(0 5 3))) '(1 6 4))
         (check-equal? (tensor->list (take mt '(-1 0))) '(6 1))
-        (check-equal? (shape (take mt (to-dtype (tensor '((5) (0)) 
+        (check-equal? (shape (take mt (to-dtype (tensor '((5) (0))
                                                         #:device (mps-device))
                                                 'int64)))
-                      '(2 1))))
+                      '(2 1))
+        (check-exn exn:fail?
+                   (lambda ()
+                     (take mt (to-dtype (tensor '(0 1)) 'int64))))))
     (check-not-exn mps-empty-cache!))
 
   (test-case "accelerator-if-available prefers cuda, then mps, then cpu"
