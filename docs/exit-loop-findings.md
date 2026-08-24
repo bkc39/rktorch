@@ -301,13 +301,19 @@ exactly the observed symptom.
 `ffi/unsafe/atomic.rkt:100-112` aborts out of the atomic region before handlers run — so
 the ledger is not the leak.)
 
-Two gaps in the guard, `torch/foreign/raw/memory.rkt:69-75`:
+Two gaps were found in the guard (`torch/foreign/raw/memory.rkt`). **Both are closed in
+this branch**, so they are recorded here as history, not as open work:
 
-- the run-counter `call-with-ledger` at `:72-73` runs **before and outside** the
-  `with-handlers`;
-- `record-failure!` (`:60-67`) runs *inside* the handler with no guard of its own and
-  calls `(format "~e" e)` on a non-`exn?` value — for a `tensor-impl` that re-enters
-  `prop:custom-write` → `handle->repr` → FFI → possibly another fault, inside atomic mode.
+- the run-counter `call-with-ledger` ran *before and outside* the `with-handlers`. An
+  escape from that position is a measured process death, not a raise — `exit 1`,
+  `internal-error: attempt to deschedule the current thread in atomic mode` — so the whole
+  body now sits inside the guard.
+- `record-failure!` is the direct handler of that `with-handlers`, so nothing protected it;
+  it now carries a total guard of its own. Note the re-entry originally suspected here —
+  `(format "~e" e)` reaching `prop:custom-write` → `handle->repr` → FFI — was **measured
+  and does not happen**: in atomic mode Racket does not run a custom printer, it
+  substitutes `"[?error-value->string-handler not ready?]"`. The guard is defence in
+  depth against the class, not a fix for a live path.
 
 And two candidates for the *persistent* display-path fault the cascade requires:
 `torch/foreign/error.rkt:12-15` (`last-failure` makes native calls inside `call-as-atomic`,
@@ -391,8 +397,8 @@ The staging fix removes the trigger, not the amplifier. A native fault from any 
 would still cascade, because `ffi/unsafe/alloc.rkt:29-42` runs finalizers under raw
 `unsafe-start-atomic`/`unsafe-end-atomic` with no `dynamic-wind` — anything escaping leaves
 the process atomic forever, which is why SIGTERM is ignored. Filed separately with four
-located leads: the two gaps in `swallow-and-count-failure`
-(`torch/foreign/raw/memory.rkt:69-75`), native calls inside `call-as-atomic` on the
+located leads (the two `swallow-and-count-failure` gaps are already closed here; what
+remains is) native calls inside `call-as-atomic` on the
 error-reporting path (`torch/foreign/error.rkt:12-15`), the `exn:fail?`-only printer guard
 whose fallback still writes to a possibly-dead port (`torch/foreign/structs.rkt:158-172`),
 and a poisoned-shim latch at the single `define-ffi-definer`

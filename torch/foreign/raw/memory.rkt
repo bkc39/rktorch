@@ -57,7 +57,17 @@
         (cons 'ledger-entries (call-with-ledger
                                (lambda () (hash-count allocations))))))
 
+;; Total guard because this IS the handler of the with-handlers below, so
+;; nothing else protects it, and it runs inside alloc.rkt's raw atomic region
+;; where an escape is a process death rather than a raise.  Measured: the
+;; `(format "~e" e)` below cannot re-enter a custom printer (and so cannot
+;; re-enter the FFI) -- in atomic mode Racket substitutes a placeholder instead
+;; of running prop:custom-write -- so this is defence in depth, not a live bug.
 (define (record-failure! e)
+  (with-handlers ([(lambda (_) #t) void])
+    (record-failure!/unguarded e)))
+
+(define (record-failure!/unguarded e)
   (call-with-ledger
    (lambda ()
      (set-box! finalizer-failure-count (add1 (unbox finalizer-failure-count)))

@@ -56,7 +56,9 @@ CPU-first; float32 + inferred int64 (#44). From `torch`:
   `mps-empty-cache!` (the caching allocators' own gauges + release, #51),
   `reclaim-native-memory!` (collect -> finalizer drain -> cache release,
   the phase-boundary release-now sequence), `finalizer-failures`
-  (guarded-swallow counter), `tensor-free!` (explicit synchronous
+  (guarded-swallow counter) and `finalizer-diagnostics` (that counter plus
+  runs, captured failure messages, and live ledger entries; also dumped at
+  exit under `RKTORCH_MEM_TRACE`), `tensor-free!` (explicit synchronous
   release)
 - creation: `zeros ones full arange eye tensor rand` (+ in-place `uniform!`)
 - shape: `reshape view transpose permute squeeze unsqueeze cat stack`

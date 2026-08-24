@@ -6,7 +6,9 @@
            (only-in ffi/unsafe/alloc allocator deallocator)
            (only-in "../foreign.rkt" add ones tensor-shape)
            (only-in (submod "../foreign.rkt" unsafe) tensor-free!)
-           (only-in "../foreign/raw/memory.rkt" finalizer-failures swallow-and-count-failure))
+           (only-in "../foreign/raw/memory.rkt"
+                    finalizer-diagnostics finalizer-failures
+                    swallow-and-count-failure))
 
   (define (collect-until ready? #:tries [tries 50])
     (let loop ([i 0])
@@ -28,6 +30,54 @@
     ;; successful releases don't count
     ((swallow-and-count-failure void) 'handle)
     (check-equal? (finalizer-failures) (+ before 2)))
+
+  (test-case "finalizer-diagnostics reports runs alongside failures"
+    (define (runs-of d) (cdr (assq 'runs d)))
+    (define (failures-of d) (cdr (assq 'failures d)))
+    (define before (finalizer-diagnostics))
+    ;; every guarded release counts as a run, whether or not it fails
+    ((swallow-and-count-failure void) 'handle)
+    ((swallow-and-count-failure (lambda (_t) (error 'boom "counted"))) 'handle)
+    (define after (finalizer-diagnostics))
+    (check-equal? (runs-of after) (+ (runs-of before) 2))
+    (check-equal? (failures-of after) (+ (failures-of before) 1))
+    ;; the accessor agrees with the standalone counter
+    (check-equal? (failures-of after) (finalizer-failures)))
+
+  (test-case "finalizer-diagnostics captures the exception text, not just a count"
+    (define (messages-of d) (cdr (assq 'messages d)))
+    (define before (length (messages-of (finalizer-diagnostics))))
+    ((swallow-and-count-failure
+      (lambda (_t) (error 'release "distinctive-marker-9f3a"))) 'handle)
+    (define msgs (messages-of (finalizer-diagnostics)))
+    (check-true (list? msgs))
+    (check-true (andmap string? msgs))
+    ;; bounded at 8 (capture-limit): once full, later failures add no messages
+    (cond
+      [(< before 8)
+       (check-equal? (length msgs) (add1 before))
+       (check-true (regexp-match? #rx"distinctive-marker-9f3a" (car (reverse msgs))))]
+      [else (check-equal? (length msgs) 8)]))
+
+  (test-case "finalizer-diagnostics message capture is bounded at 8"
+    ;; drive well past the limit; the list must not grow without bound
+    (for ([i (in-range 30)])
+      ((swallow-and-count-failure (lambda (_t) (error 'flood "n=~a" i))) 'handle))
+    (define msgs (cdr (assq 'messages (finalizer-diagnostics))))
+    (check-true (<= (length msgs) 8)
+                (format "capture-limit exceeded: ~a messages" (length msgs))))
+
+  (test-case "record-failure! is guarded: a value whose printing fails is still counted"
+    ;; record-failure! is the direct handler of swallow-and-count-failure's
+    ;; with-handlers, so nothing else protects it.  An escape there is a process
+    ;; death, not a raise (it runs in alloc.rkt's raw atomic region).
+    (struct unprintable ()
+      #:property prop:custom-write
+      (lambda (v port mode) (error 'custom-write "printing this raises")))
+    (define before (finalizer-failures))
+    (check-equal? ((swallow-and-count-failure (lambda (_t) (raise (unprintable)))) 'handle)
+                  (void))
+    (check-equal? (finalizer-failures) (add1 before)))
 
   (test-case "swallow-and-count-failure passes successful releases through"
     (define released '())
