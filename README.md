@@ -31,6 +31,10 @@ Built against `pkgs.libtorch-bin` by default; flip `torchSource` in `flake.nix`
 to `"python"` for bit-exact PyTorch parity. Supported systems: `aarch64-darwin`,
 `x86_64-linux`.
 
+GPU: `#:device 'cuda` on Linux and `#:device 'mps` on Apple Silicon, or
+`(accelerator-if-available)` to take whichever is present. MPS works out of the
+default `nix develop` on darwin; CUDA needs `nix develop .#cuda`.
+
 How native memory is managed across the GC/FFI boundary:
 [docs/internals.md](docs/internals.md).
 

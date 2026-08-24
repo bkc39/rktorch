@@ -56,6 +56,17 @@
   (check-true (module-training? net) "generate left the net in eval mode")
   (check-exn #rx"prompt must be non-empty"
              (lambda () (generate net vocab "")))
+  ;; The accelerator arm: same fixture, on-device. Device RNG streams differ
+  ;; from the CPU's, so this checks convergence, not CPU-equality.
+  (when (mps-available?)
+    (define-values (m-losses m-net m-vocab _m-dev) (run-example #:device 'mps))
+    (check-equal? (device-type (tensor-device (car (parameters m-net)))) 'mps)
+    (check-true (andmap (lambda (l) (and (rational? l) (not (nan? l)))) m-losses)
+                (format "non-finite loss on mps: ~a" m-losses))
+    (check-true (< (last m-losses) (first m-losses))
+                (format "mps losses did not decrease: ~a" m-losses))
+    ;; generation derives its device from the net's parameters
+    (check-equal? (string-length (generate m-net m-vocab "The " #:steps 20)) 24))
   ;; The committed Part I excerpt behind train-excerpt: data integrity only
   ;; (training it is minutes of CPU — the offline demo, not a CI job).
   (define excerpt (load-excerpt))

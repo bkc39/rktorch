@@ -110,6 +110,18 @@
     (check-true (boolean? (mps-available?)))
     (check-not-exn mps-empty-cache!))
 
+  (test-case "accelerator-if-available prefers cuda, then mps, then cpu"
+    (define picked (accelerator-if-available))
+    (check-true (device? picked))
+    (check-equal? (device-type picked)
+                  (cond
+                    [(cuda-available?) 'cuda]
+                    [(mps-available?) 'mps]
+                    [else 'cpu]))
+    (check-equal? (device-index picked) 0)
+    ;; the accelerator is usable, not merely nameable
+    (check-equal? (tensor-device (tensor '(1 2 3) #:device picked)) picked))
+
   (test-case "new tensors and to-device land on cpu"
     (define t (zeros 2 2))
     (check-equal? (tensor-device t) (cpu-device))

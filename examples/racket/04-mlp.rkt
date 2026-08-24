@@ -30,7 +30,7 @@ clause and are callable in @racket[#:forward] like Python's
   (fc2 (relu (fc1 x))))]
 
 @bold{The device.} Pick the accelerator the way PyTorch does
-(@tt{device = "cuda" if torch.cuda.is_available() else "cpu"}): set it as the
+(@tt{torch.accelerator.current_accelerator()}): set it as the
 process default and every tensor built afterwards — the module's parameters and
 the batch alike — is allocated there, so the whole loop runs on the GPU when one
 is present and on the CPU otherwise. @racket[run-example] returns the device it
@@ -38,13 +38,14 @@ chose so callers can report it.
 
 @chunk[<r04-device>
 (define (pick-device)
-  (if (cuda-available?) 'cuda 'cpu))]
+  (accelerator-if-available))]
 
 @bold{The loop.} Each step: clear gradients, forward, MSE loss, backward,
 update. On the CPU path, with the same seed this matches
 @filepath{python/04_mlp.py} draw-for-draw: the two @racket[Linear] inits consume
 the RNG exactly like @tt{nn.Linear}, then the batch is sampled identically. (The
-GPU uses its own RNG, so CUDA runs train just as well but draw different values.)
+GPU uses its own RNG, so CUDA and MPS runs train just as well but draw
+different values.)
 
 @bold{Restoring the default.} @racket[set-default-device!] is a process-wide
 side effect, so @racket[run-example] captures the prior default and wraps the

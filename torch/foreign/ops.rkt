@@ -71,6 +71,7 @@
          cuda-available?
          cuda-if-available
          cuda-device-count
+         accelerator-if-available
          mps-available?
          mps-empty-cache!
          mps-if-available
@@ -160,6 +161,14 @@
 
 (define (mps-if-available)
   (if (mps-available?) (mps-device) (cpu-device)))
+
+;; CUDA before MPS only for determinism; the two never coexist (MPS is
+;; darwin-only, and nixpkgs has no darwin CUDA libtorch).
+(define (accelerator-if-available)
+  (cond
+    [(cuda-available?) (cuda-device)]
+    [(mps-available?) (mps-device)]
+    [else (cpu-device)]))
 
 (define (cuda-device-count)
   (tr-cuda-device-count/raw))
