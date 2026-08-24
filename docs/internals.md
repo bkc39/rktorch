@@ -51,7 +51,13 @@ backstop and a live-looking tag would invite use-after-free.
 The finalizer path is wrapped in `swallow-and-count-failure`, whose
 catch is total: Racket finalizers run in **atomic mode**, where
 raising or blocking is not an option, so a failed native free becomes
-an incremented counter (`finalizer-failures`) and nothing else. One
+an incremented counter (`finalizer-failures`) plus, up to a bound of
+eight, the exception's message — read both with
+`(finalizer-diagnostics)`, which also reports total runs and live
+ledger entries, and is dumped to stderr at exit under
+`RKTORCH_MEM_TRACE=1`. The handler that records this carries a total
+guard of its own, because it is the direct body of that catch and an
+escape from there is a process death, not a raise. One
 outcome bypasses both paths: a C++ throw during storage release
 unwinds through libtorch's own noexcept frames to `std::terminate`
 before any handler can run — `finalizer_death_test.cpp` pins this.

@@ -96,16 +96,31 @@ def run(mode, idx, budget=90.0):
         raise SystemExit(3)
     imr = text.count(b"invalid memory reference")
     casc = text.count(b"error display handler") + text.count(b"error escape handler")
-    bad = hung or imr or casc
-    if bad:
+    # An abnormal exit with neither phrase present still is not a clean run:
+    # a child killed by a signal, or exiting nonzero, was scoring as a pass.
+    abnormal = exited is not None and exited != 0
+    # The signature under test is the #72 cascade: fault text, or a hang that
+    # also ignores SIGTERM.  A plain hang with no fault text and a SIGTERM that
+    # WORKS is a different thing entirely -- on a tty the line editor treats
+    # Ctrl-D on a non-empty line as delete-char, and `busy` deliberately sends
+    # it mid-computation, so the EOT is sometimes just swallowed.  Measured: the
+    # workload itself is ~7s, far inside the 90s budget, so this is not
+    # slowness.  Count it separately instead of scoring it as the cascade.
+    inconclusive = hung and not termignored and not imr and not casc
+    bad = imr or casc or abnormal or (hung and termignored)
+    if bad or inconclusive:
         p = os.path.join(os.environ.get("REPRO_LOGDIR", "/tmp"), f"rktorch-pty-{mode}-{DEV}-{idx}.log")
         open(p, "wb").write(text)
-        print(f"FAIL mode={mode} iter={idx} hung={hung} term_ignored={termignored} "
-              f"imr={imr} cascade={casc} bytes={len(text)} exit={exited} log={p}", flush=True)
-    return bool(bad)
+        print(f"{'FAIL' if bad else 'INCONCLUSIVE'} mode={mode} iter={idx} hung={hung} "
+              f"term_ignored={termignored} abnormal_exit={abnormal} imr={imr} "
+              f"cascade={casc} bytes={len(text)} exit={exited} log={p}", flush=True)
+    return bool(bad), bool(inconclusive)
 
 if __name__ == "__main__":
     mode = sys.argv[1]
     n = int(sys.argv[2]) if len(sys.argv) > 2 else 10
-    bad = sum(run(mode, i) for i in range(1, n + 1))
-    print(f"RESULT pty/{mode}-{DEV}: {bad}/{n} failed", flush=True)
+    results = [run(mode, i) for i in range(1, n + 1)]
+    bad = sum(b for b, _ in results)
+    incon = sum(i for _, i in results)
+    suffix = f" ({incon} inconclusive: Ctrl-D not delivered)" if incon else ""
+    print(f"RESULT pty/{mode}-{DEV}: {bad}/{n} failed{suffix}", flush=True)

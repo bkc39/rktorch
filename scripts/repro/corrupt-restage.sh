@@ -20,6 +20,14 @@ out="${REPRO_LOGDIR:-${TMPDIR:-/tmp}}/corrupt-$mode-$dev.log"
 backup="${TMPDIR:-/tmp}/$(basename "$lib").bak"
 mkdir -p "$(dirname "$out")"
 cp "$lib" "$backup"
+# Restore even on Ctrl-C or an early exit: leaving a zeroed shim staged
+# breaks every later run in this worktree.
+restore () { chmod u+w "$lib" 2>/dev/null || true; cp -f "$backup" "$lib" 2>/dev/null || true; chmod 0555 "$lib" 2>/dev/null || true; }
+trap restore EXIT INT TERM
+# Staging leaves the shim 0555.  Without this, `cp` fails (or `cp -f`
+# unlinks and creates a NEW inode) and the live mapping is untouched --
+# the repro would quietly test nothing.
+chmod u+w "$lib"
 
 snapshot () {  # $1 = pid
   if command -v sample >/dev/null 2>&1; then sample "$1" 3 -f "${out%.log}-sample.txt" 2>/dev/null
@@ -49,7 +57,10 @@ import sys,os
 p=sys.argv[1]; n=os.path.getsize(p)
 f=open(p,'r+b'); f.seek(4096); f.write(b'\x00'*(n-4096)); f.flush(); os.fsync(f.fileno()); f.close()
 print('  zeroed', n-4096, 'bytes')" "$lib" ;;
-  restage) cp "$backup" "$lib" && echo "  re-copied identical bytes" ;;
+  restage) before=$(stat -c%i "$lib" 2>/dev/null || stat -f%i "$lib")
+           cp "$backup" "$lib"
+           after=$(stat -c%i "$lib" 2>/dev/null || stat -f%i "$lib")
+           echo "  re-copied identical bytes (inode $before -> $after$([ "$before" = "$after" ] && echo ', in place' || echo ' -- NOT in place, repro is inert'))" ;;
 esac
 sleep 2
 

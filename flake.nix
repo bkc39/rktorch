@@ -512,8 +512,12 @@
             pkgs.stdenv.cc
           ];
 
-          provisionRacket = ''
-            export TORCHRKT_NATIVE_LIB_PATH="${cpp}"
+          # Parameterised by the shim this shell wants.  Do NOT stage a second
+          # time in a downstream hook: two stamped stages in one entry oscillate
+          # the stamp and restage on every single entry, which is the churn the
+          # stamp exists to remove (#72).
+          provisionRacketFor = shim: ''
+            export TORCHRKT_NATIVE_LIB_PATH="${shim}"
             export PLTUSERHOME="$PWD/.racket-user"
             _rkt_ver=$(racket --version 2>&1 | grep -oE 'v[0-9]+\.[0-9]+' | tr -d 'v' | tr '.' '-')
             deps_stamp="$PLTUSERHOME/.deps2-installed-torch-''${_rkt_ver}"
@@ -543,7 +547,7 @@
                 echo "WARNING: stale bytecode not fully cleared; will retry on next shell entry" >&2
               fi
             fi
-            ${stageNativeLibsStamped cpp}
+            ${stageNativeLibsStamped shim}
             if [ ! -f "$deps_stamp" ]; then
               echo "Installing Racket package (link mode, Racket ''${_rkt_ver})..."
               mkdir -p "$PLTUSERHOME"
@@ -569,13 +573,12 @@
           # only the driver libs, so nix's own libs (glibc, libstdc++) are not
           # shadowed by the system copies. Run:
           #   nix develop .#cuda --command raco test torch/tests/device-test.rkt
+          # Driver farm only.  The CUDA shim itself is staged by
+          # `provisionRacketFor cpp-cuda`, which also points
+          # TORCHRKT_NATIVE_LIB_PATH at it so the pre-installer (`raco setup
+          # --pkgs torch`) cannot stage the CPU shim back over it.
           cudaHook = ''
-            echo "Staging CUDA libtorchrkt + host NVIDIA driver..."
-            # provisionRacket points this at the CPU shim; leaving it there
-            # made any `raco setup --pkgs torch` in this shell stage the CPU
-            # shim back over the CUDA one via the pre-installer.
-            export TORCHRKT_NATIVE_LIB_PATH="${cpp-cuda}"
-            ${stageNativeLibsStamped cpp-cuda}
+            echo "Staging host NVIDIA driver farm..."
             _drv_farm="$PWD/.cuda-driver"
             rm -rf "$_drv_farm"; mkdir -p "$_drv_farm"
             for _l in libcuda.so.1 libnvidia-ml.so.1; do
@@ -612,14 +615,14 @@
           #   raco test torch/tests/python-cross-test.rkt
           default = pkgs.mkShell {
             buildInputs = baseInputs ++ [ pythonEnv ];
-            shellHook = provisionRacket;
+            shellHook = provisionRacketFor cpp;
           };
 
           # Lean shell without Python torch, used by the Resyntax CI lint job so
           # it doesn't pull torch's closure just to run the linter.
           ci = pkgs.mkShell {
             buildInputs = baseInputs;
-            shellHook = provisionRacket;
+            shellHook = provisionRacketFor cpp;
           };
         }
         # GPU verification shell: provisions Racket as usual, then stages the
@@ -632,7 +635,7 @@
         // pkgs.lib.optionalAttrs pkgs.stdenv.isLinux {
           cuda = pkgs.mkShell {
             buildInputs = baseInputs ++ [ pythonCudaEnv ];
-            shellHook = provisionRacket + cudaHook;
+            shellHook = provisionRacketFor cpp-cuda + cudaHook;
           };
         });
     };

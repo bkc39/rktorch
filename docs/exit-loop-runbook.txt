@@ -82,10 +82,16 @@ Any of those makes the harness print a FAIL line and keep the transcript.
     nix develop .#cuda --command bash -c 'REPRO_DEVICE=cuda ./scripts/repro/corrupt-restage.sh zero'
     nix develop       --command bash -c 'REPRO_DEVICE=cpu  ./scripts/repro/corrupt-restage.sh zero'
 
-  "restage" = re-copy identical bytes in place, exactly what
-  `nix run .#copy-native-libs` does.  "zero" = worst case.
-  If EITHER produces the cascade on Linux, #72's fix (atomic rename staging) is
-  confirmed as the right fix and should land.
+  "restage" = re-copy identical bytes in place.  "zero" = worst case.  Both
+  chmod the shim writable first: staging leaves it 0555, so an in-place `cp`
+  would otherwise fail (or `cp -f` would unlink and create a NEW inode) and the
+  repro would quietly test nothing.  The script prints the inode either side and
+  says so if the write was not in place.
+
+  NOTE: `nix run .#copy-native-libs` is NO LONGER this vector -- it now stages
+  via a temp file and rename(2), which leaves the old inode alive for live
+  mappings.  These modes reproduce what it USED to do.  Both produced the
+  cascade on Linux, which is what confirmed #72's fix.
 
 --------------------------------------------------------------------------------
 4.  IF IT REPRODUCES -- capture this while it is still spinning
