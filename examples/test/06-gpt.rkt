@@ -56,8 +56,8 @@
   (check-true (module-training? net) "generate left the net in eval mode")
   (check-exn #rx"prompt must be non-empty"
              (lambda () (generate net vocab "")))
-  ;; The accelerator arm: same fixture, on-device. Device RNG streams differ
-  ;; from the CPU's, so this checks convergence, not CPU-equality.
+  ;; Device RNG streams differ from the CPU's, so the on-device arm checks
+  ;; convergence, never equality with the CPU losses above.
   (when (mps-available?)
     (define-values (m-losses m-net m-vocab _m-dev) (run-example #:device 'mps))
     (check-equal? (device-type (tensor-device (car (parameters m-net)))) 'mps)

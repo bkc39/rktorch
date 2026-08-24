@@ -119,7 +119,6 @@
                     [(mps-available?) 'mps]
                     [else 'cpu]))
     (check-equal? (device-index picked) 0)
-    ;; the accelerator is usable, not merely nameable
     (check-equal? (tensor-device (tensor '(1 2 3) #:device picked)) picked))
 
   (test-case "new tensors and to-device land on cpu"

@@ -43,8 +43,8 @@
   (check-true (and (> acc 0.1) (<= acc 1.0))
               (format "accuracy out of expected range: ~a" acc))
   (check-true (module-training? net) "accuracy left the net in eval mode")
-  ;; The accelerator arm: same fixture, on-device. Device RNG streams differ
-  ;; from the CPU's, so this checks convergence, not CPU-equality.
+  ;; Device RNG streams differ from the CPU's, so the on-device arm checks
+  ;; convergence, never equality with the CPU losses above.
   (when (mps-available?)
     (define-values (m-losses m-net _m-dev) (run-example #:device 'mps))
     (check-equal? (device-type (tensor-device (car (parameters m-net)))) 'mps)
