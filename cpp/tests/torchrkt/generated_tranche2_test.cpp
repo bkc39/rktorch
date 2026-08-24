@@ -300,6 +300,11 @@ TEST(GeneratedTranche2, IndexSelectMaskedSelectAndGuards) {
 
   const Handle taken(tr_gen_take(a.t, idx.t));
   EXPECT_EQ(data_of(taken.t), (std::vector<float>{4.0F, 1.0F}));
+  const std::vector<int64_t> neg_vals = {-1, 0};
+  const Handle neg_idx(
+      tr_from_data_i64(neg_vals.data(), neg_vals.size(), idx_dims.data(), 1));
+  const Handle neg_taken(tr_gen_take(a.t, neg_idx.t));
+  EXPECT_EQ(data_of(neg_taken.t), (std::vector<float>{4.0F, 1.0F}));
   EXPECT_EQ(tr_gen_take(nullptr, idx.t), nullptr);
   expect_error_from("tr_gen_take");
 

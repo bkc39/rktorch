@@ -127,7 +127,10 @@
                        (form (take ix '(0 5 3)))
                        (form (take-along-dim
                               ix
-                              (to-dtype (tensor '(5 0 2)) 'int64))))])
+                              (to-dtype (tensor '(5 0 2)) 'int64)))
+                       (form (take ix '(-1 0 -6)))
+                       (form (car (where (gt (tensor 1) 0))))
+                       (form (car (where (gt (tensor 0) 0)))))])
        (check-equal? (length rkt) (length py) "indexing form count")
        (for ([r (in-list rkt)]
              [p (in-list py)]
