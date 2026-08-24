@@ -95,6 +95,11 @@ def run(mode, idx, budget=90.0):
         print(f"ABORT pty/{mode}: device '{DEV}' unavailable on this host", flush=True)
         raise SystemExit(3)
     imr = text.count(b"invalid memory reference")
+    # xrepl's banner for any uncaught error.  Without this a setup line that
+    # raises (a CUDA op failing, a renamed binding) leaves the REPL reading,
+    # exiting 0 on Ctrl-D, and scoring clean with its workload never run --
+    # the same way s5-heavy-train passed 20 iterations of nothing.
+    setup_error = b"[,bt for context]" in text
     casc = text.count(b"error display handler") + text.count(b"error escape handler")
     # An abnormal exit with neither phrase present still is not a clean run:
     # a child killed by a signal, or exiting nonzero, was scoring as a pass.
@@ -107,12 +112,13 @@ def run(mode, idx, budget=90.0):
     # workload itself is ~7s, far inside the 90s budget, so this is not
     # slowness.  Count it separately instead of scoring it as the cascade.
     inconclusive = hung and not termignored and not imr and not casc
-    bad = imr or casc or abnormal or (hung and termignored)
+    bad = imr or casc or abnormal or setup_error or (hung and termignored)
     if bad or inconclusive:
         p = os.path.join(os.environ.get("REPRO_LOGDIR", "/tmp"), f"rktorch-pty-{mode}-{DEV}-{idx}.log")
         open(p, "wb").write(text)
         print(f"{'FAIL' if bad else 'INCONCLUSIVE'} mode={mode} iter={idx} hung={hung} "
-              f"term_ignored={termignored} abnormal_exit={abnormal} imr={imr} "
+              f"term_ignored={termignored} abnormal_exit={abnormal} "
+              f"setup_error={setup_error} imr={imr} "
               f"cascade={casc} bytes={len(text)} exit={exited} log={p}", flush=True)
     return bool(bad), bool(inconclusive)
 

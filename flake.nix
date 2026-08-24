@@ -147,13 +147,20 @@
       # (the #72 vector, unprompted), while the default shell never restaged at
       # all — so a plain `nix develop` after a `.#cuda` visit kept running the
       # CUDA-linked shim, which needs the driver farm to even load.
-      stageNativeLibsStamped = src: ''
-        _shim_stamp="$PLTUSERHOME/.staged-shim"
-        if [ "$(cat "$_shim_stamp" 2>/dev/null || true)" != "${src}" ]; then
+      # Keyed on what is ACTUALLY staged, not on a stamp recording intent.  A
+      # stamp lies as soon as any other writer stages -- `nix run
+      # .#copy-native-libs` puts the CPU shim back without touching it, and
+      # re-entering `.#cuda` would then skip staging and run CUDA against the
+      # CPU shim.  Comparing the bytes also self-heals a deleted or truncated
+      # destination.  It is a ~220 KB compare on shell entry.
+      stageNativeLibsIfStale = src: ''
+        _stale=0
+        for _f in ${src}/lib/libtorchrkt.*; do
+          cmp -s "$_f" "$PWD/torch/native-libs/$(basename "$_f")" || _stale=1
+        done
+        if [ "$_stale" = 1 ]; then
           echo "Staging libtorchrkt (${src})..."
           ${stageNativeLibs src}
-          mkdir -p "$PLTUSERHOME"
-          printf '%s\n' "${src}" > "$_shim_stamp"
         fi
       '';
     in
@@ -547,7 +554,7 @@
                 echo "WARNING: stale bytecode not fully cleared; will retry on next shell entry" >&2
               fi
             fi
-            ${stageNativeLibsStamped shim}
+            ${stageNativeLibsIfStale shim}
             if [ ! -f "$deps_stamp" ]; then
               echo "Installing Racket package (link mode, Racket ''${_rkt_ver})..."
               mkdir -p "$PLTUSERHOME"

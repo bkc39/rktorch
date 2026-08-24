@@ -17,12 +17,13 @@ lib="$(ls "$root"/torch/native-libs/libtorchrkt.so "$root"/torch/native-libs/lib
 [ -n "$lib" ] || { echo "no staged libtorchrkt in $root/torch/native-libs"; exit 1; }
 dev="${REPRO_DEVICE:-cpu}"
 out="${REPRO_LOGDIR:-${TMPDIR:-/tmp}}/corrupt-$mode-$dev.log"
-backup="${TMPDIR:-/tmp}/$(basename "$lib").bak"
+backup=$(mktemp "${TMPDIR:-/tmp}/$(basename "$lib").XXXXXX.bak") || {
+  echo "cannot create backup"; exit 1; }
 mkdir -p "$(dirname "$out")"
-cp "$lib" "$backup"
+cp -f "$lib" "$backup" && chmod u+w "$backup" || { echo "cannot populate backup"; exit 1; }
 # Restore even on Ctrl-C or an early exit: leaving a zeroed shim staged
 # breaks every later run in this worktree.
-restore () { chmod u+w "$lib" 2>/dev/null || true; cp -f "$backup" "$lib" 2>/dev/null || true; chmod 0555 "$lib" 2>/dev/null || true; }
+restore () { chmod u+w "$lib" 2>/dev/null || true; cp -f "$backup" "$lib" 2>/dev/null || true; chmod 0555 "$lib" 2>/dev/null || true; rm -f "$backup"; }
 trap restore EXIT INT TERM
 # Staging leaves the shim 0555.  Without this, `cp` fails (or `cp -f`
 # unlinks and creates a NEW inode) and the live mapping is untouched --
