@@ -69,9 +69,13 @@
 ;; Total catch on purpose, not exn:fail?: any value escaping GC
 ;; finalization re-enters the error machinery and cascades (#38).
 (define ((swallow-and-count-failure release) t)
-  (call-with-ledger
-   (lambda () (set-box! finalizer-run-count (add1 (unbox finalizer-run-count)))))
+  ;; Everything is inside the guard, run counter included: this body runs from
+  ;; ffi/unsafe/alloc's finalizer, inside a raw start/end-atomic region with no
+  ;; dynamic-wind.  An escape from here does not raise, it kills the process
+  ;; ("attempt to deschedule the current thread in atomic mode").
   (with-handlers ([(lambda (_) #t) record-failure!])
+    (call-with-ledger
+     (lambda () (set-box! finalizer-run-count (add1 (unbox finalizer-run-count)))))
     (release t)))
 
 (struct allocation (phantom nbytes device))

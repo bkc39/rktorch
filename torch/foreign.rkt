@@ -157,6 +157,11 @@
   [mps-empty-cache! (-> void?)]
   [reclaim-native-memory! (-> void?)]
   [finalizer-failures (-> exact-nonnegative-integer?)]
+  [finalizer-diagnostics
+   (-> (list/c (cons/c 'runs exact-nonnegative-integer?)
+               (cons/c 'failures exact-nonnegative-integer?)
+               (cons/c 'messages (listof string?))
+               (cons/c 'ledger-entries exact-nonnegative-integer?)))]
   ;; device
   [device (->i ([target (or/c tensor? 'cpu 'cuda 'mps)])
                ([index (target)
