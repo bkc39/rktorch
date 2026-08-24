@@ -158,9 +158,12 @@
      (cond
        [(eq? (device-type (tensor-device v)) 'mps)
         ;; the vendored schema registers at::take for CPU/CUDA only, so
-        ;; MPS composes flat index_select + reshape to the index shape
+        ;; MPS composes flat index_select + reshape to the index shape;
+        ;; index_select rejects the negatives native take wraps
+        (define flat (reshape v -1))
         (define flat-out
-          (g:index-select (reshape v -1) 0 (reshape idx -1)))
+          (g:index-select
+           flat 0 (wrap-negative-positions (reshape idx -1) flat 0)))
         (apply reshape flat-out (tensor-shape idx))]
        [else (g:take v idx)])]))
 

@@ -15,7 +15,6 @@
     (check-equal? (tensor->list
                    (take-along-dim t (to-dtype (tensor '((0) (2))) 'int64) 1))
                   '(0.0 5.0))
-    ;; dim omitted operates on the flattened tensor, like python
     (check-equal? (tensor->list
                    (take-along-dim t (to-dtype (tensor '(5 0)) 'int64)))
                   '(5.0 0.0))

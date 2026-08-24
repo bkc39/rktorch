@@ -64,6 +64,13 @@
         (check-equal? (tensor-device (tensor '(4 5) #:device (cpu-device)))
                       (cpu-device)))
       (check-equal? (default-device) (cpu-device))
+      (when (mps-available?)
+        (let ([mt (tensor '((1 2 3) (4 5 6)) #:device (mps-device))])
+          (check-equal? (tensor->list (take mt '(0 5 3))) '(1 6 4))
+          (check-equal? (tensor->list (take mt '(-1 0))) '(6 1))
+          (check-equal? (shape (take mt (to-dtype (tensor '((5) (0)))
+                                                  'int64)))
+                        '(2 1))))
       ;; python indexing accepts CPU indices/masks for CUDA tensors
       (let ([gm (tensor '((1 2 3) (4 5 6)) #:device (cuda-device))])
         (check-equal? (tensor->list (ref gm (to-dtype (tensor '(-1 0))
