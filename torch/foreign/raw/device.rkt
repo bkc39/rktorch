@@ -5,11 +5,14 @@
                   _tr-device-type
                   tensor-allocator
                   tr-cuda-empty-cache/raw
+                  tr-mps-empty-cache/raw
                   tr-tensor-device/raw)
          (only-in "syntax.rkt" _Tensor _Tensor/null define-torch))
 
 (provide _tr-device-type
          tr-cuda-is-available/raw
+         tr-mps-is-available/raw
+         tr-mps-empty-cache/raw
          tr-cuda-device-count/raw
          tr-cuda-empty-cache/raw
          tr-cuda-memory-stats/raw
@@ -34,6 +37,10 @@
 (define-torch tr-cuda-device-count/raw
   (_fun -> _int)
   #:c-id tr_cuda_device_count)
+
+(define-torch tr-mps-is-available/raw
+  (_fun -> _int)
+  #:c-id tr_mps_is_available)
 
 (define-torch tr-set-default-device/raw
   (_fun (type : _tr-device-type) (index : _int64) -> _int)

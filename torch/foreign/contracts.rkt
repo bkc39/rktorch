@@ -37,7 +37,7 @@
 (define tensor-or-real/c (or/c tensor? real?))
 
 (define device/c
-  (or/c device? 'cpu 'cuda (list/c 'cuda exact-nonnegative-integer?)))
+  (or/c device? 'cpu 'cuda 'mps (list/c 'cuda exact-nonnegative-integer?)))
 
 (define binary-arith/c
   (->i ([a (or/c tensor? real?)]

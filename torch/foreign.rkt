@@ -144,24 +144,28 @@
         (listof (cons/c (or/c 'allocated 'reserved 'peak-allocated)
                         exact-nonnegative-integer?)))]
   [cuda-empty-cache! (-> void?)]
+  [mps-empty-cache! (-> void?)]
   [reclaim-native-memory! (-> void?)]
   [finalizer-failures (-> exact-nonnegative-integer?)]
   ;; device
-  [device (->i ([target (or/c tensor? 'cpu 'cuda)])
+  [device (->i ([target (or/c tensor? 'cpu 'cuda 'mps)])
                ([index (target)
                        (case target
                          [(cuda) exact-nonnegative-integer?]
-                         [(cpu) 0]
+                         [(cpu mps) 0]
                          [else none/c])])
                [result device?])]
   [device? (-> any/c boolean?)]
-  [device-type (-> device? (or/c 'cpu 'cuda))]
+  [device-type (-> device? (or/c 'cpu 'cuda 'mps))]
   [device-index (-> device? exact-nonnegative-integer?)]
   [cpu-device (-> device?)]
   [cuda-device (->* () (exact-nonnegative-integer?) device?)]
   [cuda-available? (-> boolean?)]
   [cuda-if-available (-> device?)]
   [cuda-device-count (-> exact-nonnegative-integer?)]
+  [mps-device (-> device?)]
+  [mps-available? (-> boolean?)]
+  [mps-if-available (-> device?)]
   [set-default-device! (-> device/c void?)]
   [default-device (-> device?)]
   [call-with-default-device (-> device/c (-> any) any)]

@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <cstring>
 #include <vector>
 
 #include "torchrkt/c_api.h"
@@ -115,6 +116,19 @@ TEST(TorchrktDevice, EmptyCacheIsNoOpSuccessWithoutCuda) {
   EXPECT_EQ(tr_cuda_empty_cache(), 0);
 }
 
+TEST(TorchrktDevice, AvailabilityProbesClearStaleErrors) {
+  EXPECT_EQ(tr_tensor_device(nullptr, nullptr, nullptr), 1);
+  EXPECT_STRNE(tr_last_error(), "");
+  tr_cuda_is_available();
+  EXPECT_STREQ(tr_last_error(), "");
+  EXPECT_EQ(tr_tensor_device(nullptr, nullptr, nullptr), 1);
+  tr_mps_is_available();
+  EXPECT_STREQ(tr_last_error(), "");
+  EXPECT_EQ(tr_tensor_device(nullptr, nullptr, nullptr), 1);
+  tr_cuda_device_count();
+  EXPECT_STREQ(tr_last_error(), "");
+}
+
 TEST(TorchrktDevice, NullArgsReportStatus) {
   EXPECT_EQ(tr_tensor_to_device(nullptr, TR_DEVICE_CPU, 0), nullptr);
   EXPECT_STRNE(tr_last_error(), "");
@@ -147,6 +161,141 @@ TEST(TorchrktDevice, SetCudaDefaultWhenUnavailableErrors) {
   int64_t index = -1;
   EXPECT_EQ(tr_get_default_device(&type, &index), 0) << tr_last_error();
   EXPECT_EQ(type, TR_DEVICE_CPU);
+}
+
+TEST(TorchrktDevice, SetMpsDefaultWhenUnavailableErrors) {
+  if (tr_mps_is_available() != 0) {
+    GTEST_SKIP() << "MPS present; the success path is MpsRoundTrip";
+  }
+  const DefaultDeviceGuard guard;
+  EXPECT_EQ(tr_set_default_device(TR_DEVICE_MPS, 0), 1);
+  EXPECT_STRNE(tr_last_error(), "") << "expected an error after a failed set";
+  tr_device_type type = TR_DEVICE_MPS;
+  int64_t index = -1;
+  EXPECT_EQ(tr_get_default_device(&type, &index), 0) << tr_last_error();
+  EXPECT_EQ(type, TR_DEVICE_CPU);
+}
+
+TEST(TorchrktDevice, MpsWhenUnavailableErrorsOnDirectPaths) {
+  if (tr_mps_is_available() != 0) {
+    GTEST_SKIP() << "MPS present; the success path is MpsRoundTrip";
+  }
+  // index 0 must be rejected too: set_default_device has its own guard, but
+  // the to-device/creation paths reach to_torch_device directly.
+  const std::vector<float> values = {1.0F};
+  const std::vector<int64_t> dims = {1};
+  EXPECT_EQ(tr_from_data_on_device(values.data(), values.size(), dims.data(), 1,
+                                   TR_DEVICE_MPS, 0),
+            nullptr);
+  EXPECT_STRNE(tr_last_error(), "");
+  const Handle cpu_t(
+      tr_from_data(values.data(), values.size(), dims.data(), 1));
+  EXPECT_EQ(tr_tensor_to_device(cpu_t.t, TR_DEVICE_MPS, 0), nullptr);
+  EXPECT_STRNE(tr_last_error(), "");
+}
+
+TEST(TorchrktDevice, EmptyCacheIsNoOpSuccessWithoutMps) {
+  if (tr_mps_is_available() != 0) {
+    GTEST_SKIP() << "MPS present; the success path is MpsRoundTrip";
+  }
+  EXPECT_EQ(tr_mps_empty_cache(), 0);
+}
+
+TEST(TorchrktDevice, MpsOomClassifiesAsOomKind) {
+  if (tr_mps_is_available() == 0) {
+    GTEST_SKIP() << "no MPS device visible";
+  }
+  const DefaultDeviceGuard guard;
+  ASSERT_EQ(tr_set_default_device(TR_DEVICE_MPS, 0), 0) << tr_last_error();
+  // 4 TiB trips Metal's per-buffer cap — a fast refusal, no RAM commit; the
+  // watermark shape needs RAM-scale commits, so only this shape is exercised.
+  const std::vector<int64_t> dims = {int64_t{1} << 40};
+  EXPECT_EQ(tr_zeros(dims.data(), 1), nullptr);
+  EXPECT_EQ(tr_last_error_kind(), 1) << tr_last_error();
+  EXPECT_STRNE(tr_last_error(), "");
+}
+
+TEST(TorchrktDevice, MpsSeededRandnReproduces) {
+  if (tr_mps_is_available() == 0) {
+    GTEST_SKIP() << "no MPS device visible";
+  }
+  const DefaultDeviceGuard guard;
+  ASSERT_EQ(tr_set_default_device(TR_DEVICE_MPS, 0), 0) << tr_last_error();
+  const std::vector<int64_t> dims = {8};
+  ASSERT_EQ(tr_manual_seed(42), 0) << tr_last_error();
+  const Handle a(tr_randn(dims.data(), 1));
+  ASSERT_EQ(tr_manual_seed(42), 0) << tr_last_error();
+  const Handle b(tr_randn(dims.data(), 1));
+  const Handle a_cpu(tr_tensor_to_device(a.t, TR_DEVICE_CPU, 0));
+  const Handle b_cpu(tr_tensor_to_device(b.t, TR_DEVICE_CPU, 0));
+  EXPECT_EQ(cpu_data_of(a_cpu.t), cpu_data_of(b_cpu.t));
+}
+
+TEST(TorchrktDevice, MpsNonzeroIndexErrors) {
+  // Message pinned, not just non-empty: the index check precedes the
+  // availability check, so this branch is proven on Metal-less hosts too.
+  const DefaultDeviceGuard guard;
+  EXPECT_EQ(tr_set_default_device(TR_DEVICE_MPS, 1), 1);
+  EXPECT_NE(strstr(tr_last_error(), "MPS device index must be 0"), nullptr)
+      << tr_last_error();
+  const std::vector<float> values = {1.0F};
+  const std::vector<int64_t> dims = {1};
+  EXPECT_EQ(tr_from_data_on_device(values.data(), values.size(), dims.data(), 1,
+                                   TR_DEVICE_MPS, 1),
+            nullptr);
+  EXPECT_NE(strstr(tr_last_error(), "MPS device index must be 0"), nullptr)
+      << tr_last_error();
+}
+
+TEST(TorchrktDevice, MpsRoundTrip) {
+  if (tr_mps_is_available() == 0) {
+    GTEST_SKIP() << "no MPS device visible";
+  }
+  const DefaultDeviceGuard guard;
+  ASSERT_EQ(tr_set_default_device(TR_DEVICE_MPS, 0), 0) << tr_last_error();
+
+  const std::vector<int64_t> dims = {2, 2};
+  const Handle on_gpu(tr_zeros(dims.data(), 2));
+  tr_device_type type = TR_DEVICE_CPU;
+  int64_t index = -1;
+  EXPECT_EQ(tr_tensor_device(on_gpu.t, &type, &index), 0) << tr_last_error();
+  EXPECT_EQ(type, TR_DEVICE_MPS);
+
+  const Handle back(tr_tensor_to_device(on_gpu.t, TR_DEVICE_CPU, 0));
+  EXPECT_EQ(cpu_data_of(back.t), (std::vector<float>{0.0F, 0.0F, 0.0F, 0.0F}));
+
+  const std::vector<float> host_vals = {1.0F, 2.0F, 3.0F};
+  const std::vector<int64_t> src_dims = {3};
+  const Handle on_mps(tr_from_data_on_device(host_vals.data(), host_vals.size(),
+                                             src_dims.data(), 1, TR_DEVICE_MPS,
+                                             0));
+  tr_device_type om_type = TR_DEVICE_CPU;
+  int64_t om_index = -1;
+  EXPECT_EQ(tr_tensor_device(on_mps.t, &om_type, &om_index), 0)
+      << tr_last_error();
+  EXPECT_EQ(om_type, TR_DEVICE_MPS);
+  const Handle om_back(tr_tensor_to_device(on_mps.t, TR_DEVICE_CPU, 0));
+  EXPECT_EQ(cpu_data_of(om_back.t), host_vals);
+
+  const Handle explicit_cpu(
+      tr_from_data_on_device(host_vals.data(), host_vals.size(),
+                             src_dims.data(), 1, TR_DEVICE_CPU, 0));
+  tr_device_type ec_type = TR_DEVICE_MPS;
+  int64_t ec_index = -1;
+  EXPECT_EQ(tr_tensor_device(explicit_cpu.t, &ec_type, &ec_index), 0)
+      << tr_last_error();
+  EXPECT_EQ(ec_type, TR_DEVICE_CPU);
+  EXPECT_EQ(cpu_data_of(explicit_cpu.t), host_vals);
+
+  const std::vector<int64_t> randn_dims = {4};
+  const Handle randn_gpu(tr_randn(randn_dims.data(), 1));
+  tr_device_type rd_type = TR_DEVICE_CPU;
+  int64_t rd_index = -1;
+  EXPECT_EQ(tr_tensor_device(randn_gpu.t, &rd_type, &rd_index), 0)
+      << tr_last_error();
+  EXPECT_EQ(rd_type, TR_DEVICE_MPS);
+
+  EXPECT_EQ(tr_mps_empty_cache(), 0) << tr_last_error();
 }
 
 TEST(TorchrktDevice, CudaRoundTrip) {

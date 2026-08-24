@@ -20,6 +20,7 @@
          tensor-allocator/rng
          oom-retry
          tr-cuda-empty-cache/raw
+         tr-mps-empty-cache/raw
          tr-last-error-kind/raw
          native-memory-use
          _tr-device-type ;; noqa
@@ -69,7 +70,7 @@
   #:c-id tr_tensor_nbytes)
 
 (define _tr-device-type
-  (_enum '(cpu = 0 cuda = 1)))
+  (_enum '(cpu = 0 cuda = 1 mps = 2)))
 
 (define-torch tr-tensor-device/raw
   (_fun _Tensor
@@ -134,12 +135,17 @@
   (_fun -> _int)
   #:c-id tr_cuda_empty_cache)
 
+(define-torch tr-mps-empty-cache/raw
+  (_fun -> _int)
+  #:c-id tr_mps_empty_cache)
+
 (define (collect-and-drain!)
   (define canary-finalized (make-semaphore 0))
   (register-finalizer (box 0) (lambda (_) (semaphore-post canary-finalized)))
   (collect-garbage)
   (define observed (sync/timeout 0.5 canary-finalized))
   (void (tr-cuda-empty-cache/raw))
+  (void (tr-mps-empty-cache/raw))
   (and observed #t))
 
 (define ((oom-retry #:oom? [oom? last-error-oom?]

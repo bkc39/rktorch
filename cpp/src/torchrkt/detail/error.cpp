@@ -16,6 +16,11 @@ void set_error(const std::string& message, error_kind kind) {
   g_last_error_kind = kind;
 }
 
+void clear_error() noexcept {
+  g_last_error.clear();
+  g_last_error_kind = error_kind::generic;
+}
+
 std::string last_error() {
   return g_last_error;
 }

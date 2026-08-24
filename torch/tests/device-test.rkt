@@ -1,8 +1,7 @@
 #lang racket/base
 
-;; CPU behaviors run everywhere; the CUDA cases are always registered but
-;; their bodies are `when`-guarded, so the suite verifies the GPU when run
-;; on a CUDA host (see the cuda-verify flake app).
+;; CPU behaviors run everywhere; the CUDA/MPS cases are `when`-guarded, so
+;; the suite verifies the GPU for real on a CUDA host or Apple Silicon.
 
 (module+ test
   (require rackunit
@@ -16,11 +15,16 @@
     (check-equal? (device-type (cuda-device)) 'cuda)
     (check-equal? (device-index (cuda-device 2)) 2)
     (check-equal? (device-index (cuda-device)) 0)
-    (check-exn exn:fail? (lambda () (device 'mps 0)))
+    (check-true (device? (mps-device)))
+    (check-equal? (device-type (mps-device)) 'mps)
+    (check-equal? (device-index (mps-device)) 0)
+    (check-exn exn:fail? (lambda () (device 'metal 0)))
+    (check-exn exn:fail? (lambda () (device 'mps 1)))
     (check-exn exn:fail? (lambda () (device 'cuda -1)))
     (check-exn exn:fail? (lambda () (device 'cpu 1)))
     (check-equal? (format "~a" (cpu-device)) "#<device cpu>")
-    (check-equal? (format "~a" (cuda-device 1)) "#<device cuda:1>"))
+    (check-equal? (format "~a" (cuda-device 1)) "#<device cuda:1>")
+    (check-equal? (format "~a" (mps-device)) "#<device mps>"))
 
   (test-case "device structs are field-wise equal? and hash keys"
     (check-equal? (cpu-device) (cpu-device))
@@ -32,7 +36,9 @@
     (hash-update! h (cuda-device 3) add1 0)
     (check-equal? (hash-ref h (cpu-device)) 2)
     (check-equal? (hash-ref h (cuda-device 3)) 1)
-    (check-equal? (hash-count h) 2))
+    (check-equal? (hash-count h) 2)
+    (check-equal? (mps-device) (device 'mps))
+    (check-false (equal? (mps-device) (cpu-device))))
 
   (test-case "tensor #:device places construction; cuda-if-available picks"
     (set-default-device! 'cpu)
@@ -45,6 +51,9 @@
     (check-equal? (device-type (cuda-if-available))
                   (if (cuda-available?) 'cuda 'cpu))
     (check-equal? (device-index (cuda-if-available)) 0)
+    (check-equal? (device-type (mps-if-available))
+                  (if (mps-available?) 'mps 'cpu))
+    (check-equal? (device-index (mps-if-available)) 0)
     (when (cuda-available?)
       (define g (tensor '(1 2 3) #:device (cuda-device)))
       (check-equal? (tensor-device g) (cuda-device 0))
@@ -97,6 +106,10 @@
     (check-pred exact-nonnegative-integer? (cuda-device-count))
     (check-equal? (> (cuda-device-count) 0) (cuda-available?)))
 
+  (test-case "mps queries have sane types"
+    (check-true (boolean? (mps-available?)))
+    (check-not-exn mps-empty-cache!))
+
   (test-case "new tensors and to-device land on cpu"
     (define t (zeros 2 2))
     (check-equal? (tensor-device t) (cpu-device))
@@ -112,6 +125,11 @@
   (test-case "requesting an unavailable cuda device errors"
     (unless (cuda-available?)
       (check-exn exn:fail? (lambda () (set-default-device! 'cuda)))
+      (check-equal? (default-device) (cpu-device))))
+
+  (test-case "requesting an unavailable mps device errors"
+    (unless (mps-available?)
+      (check-exn exn:fail? (lambda () (set-default-device! 'mps)))
       (check-equal? (default-device) (cpu-device))))
 
   (test-case "out-of-range cuda ordinal errors"
@@ -159,6 +177,51 @@
         (check-= (car (tensor->list (to-device ln 'cpu))) -1.2247 1e-4)
         (define mask (eq (tril (ones 2 2)) 0))
         (check-equal? (tensor-device mask) (cuda-device 0))
+        (check-equal? (tensor->list
+                       (to-device (masked-fill (ones 2 2) mask 0) 'cpu))
+                      '(1.0 0.0 1.0 1.0)))
+      (check-equal? (default-device) (cpu-device))))
+
+  (test-case "mps round-trip"
+    (when (mps-available?)
+      (set-default-device! 'cpu)
+      (with-default-device 'mps
+        (check-equal? (default-device) (mps-device))
+        (define g (zeros 2 2))
+        (check-equal? (tensor-device g) (mps-device))
+        (define back (to-device g 'cpu))
+        (check-equal? (tensor-device back) (cpu-device))
+        (check-equal? (tensor->list back) '(0.0 0.0 0.0 0.0))
+        (define a (to-device (tensor '((1.0 2.0) (3.0 4.0))) 'mps))
+        (define b (to-device (tensor '((5.0 6.0) (7.0 8.0))) 'mps))
+        (check-equal? (tensor->list (to-device (matmul a b) 'cpu))
+                      '(19.0 22.0 43.0 50.0))
+        (check-equal? (tensor-device (tensor '(4 5) #:device (cpu-device)))
+                      (cpu-device))
+        (manual-seed! 42)
+        (define r1 (tensor->list (to-device (randn 4) 'cpu)))
+        (manual-seed! 42)
+        (check-equal? (tensor->list (to-device (randn 4) 'cpu)) r1)
+        (mps-empty-cache!))
+      (check-equal? (default-device) (cpu-device))))
+
+  (test-case "tranche-3 ops run on mps (gelu, embedding, layer-norm, mask)"
+    (when (mps-available?)
+      (set-default-device! 'cpu)
+      (with-default-device 'mps
+        (define g
+          (to-device (gelu (to-device (tensor '(0.0 1.0 -1.0)) 'mps)) 'cpu))
+        (check-= (cadr (tensor->list g)) 0.841345 1e-5)
+        (define w (to-device (reshape (arange 1 9) 4 2) 'mps))
+        (define idx (to-device (to-dtype (tensor '(2 0 2)) 'int64) 'mps))
+        (check-equal? (tensor->list (to-device (embedding idx w) 'cpu))
+                      '(5.0 6.0 1.0 2.0 5.0 6.0))
+        (define x (to-device (tensor '((1.0 2.0 3.0) (4.0 6.0 8.0))) 'mps))
+        (define ln (layer-norm x 3 #:weight (ones 3) #:bias (zeros 3)))
+        (check-equal? (tensor-device ln) (mps-device))
+        (check-= (car (tensor->list (to-device ln 'cpu))) -1.2247 1e-4)
+        (define mask (eq (tril (ones 2 2)) 0))
+        (check-equal? (tensor-device mask) (mps-device))
         (check-equal? (tensor->list
                        (to-device (masked-fill (ones 2 2) mask 0) 'cpu))
                       '(1.0 0.0 1.0 1.0)))
