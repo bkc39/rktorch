@@ -64,6 +64,7 @@
          tril
          triu
          where-scalarother
+         where-scalarself
          where-self)
 
 (define-generated-op adaptive-avg-pool2d tr_gen_adaptive_avg_pool2d
@@ -209,6 +210,9 @@
 
 (define-generated-op where-scalarother tr_gen_where_scalarother
   ([condition tensor] [self tensor] [other scalar]))
+
+(define-generated-op where-scalarself tr_gen_where_scalarself
+  ([condition tensor] [self scalar] [other tensor]))
 
 (define-generated-op where-self tr_gen_where_self
   ([condition tensor] [self tensor] [other tensor]))

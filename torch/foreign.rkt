@@ -85,9 +85,17 @@
              [result (v) (if (tensor? v) tensor? list?)])]
   [gather (-> tensor? index/c int64-tensor/c tensor?)]
   [take-along-dim (->* (tensor? int64-tensor/c) ((or/c #f index/c)) tensor?)]
-  [where (case-> (-> bool-tensor/c (listof tensor?))
-                 (-> bool-tensor/c tensor? (or/c tensor? real?)
-                     tensor?))]
+  [where (->i ([c bool-tensor/c])
+              ([a (or/c tensor? real?)]
+               [b (a) (cond
+                        [(unsupplied-arg? a) none/c]
+                        [(tensor? a) (or/c tensor? real?)]
+                        [else tensor?])])
+              #:pre/name (a b) "a condition alone, or condition + both arms"
+              (eq? (unsupplied-arg? a) (unsupplied-arg? b))
+              [result (a) (if (unsupplied-arg? a)
+                              (listof tensor?)
+                              tensor?)])]
   [tensor-ref (-> tensor? index-spec/c ...
                   (or/c tensor? number? boolean?))]
   [:: (let ([bound/c (or/c #f exact-integer?)])

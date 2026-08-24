@@ -31,6 +31,7 @@ shape gather
 shape take_along_dim
 shape where.self
 shape where.ScalarOther
+shape where.ScalarSelf
 
 # --- tranche 2 (#3): the Conv-MNIST op closure ----------------------------
 

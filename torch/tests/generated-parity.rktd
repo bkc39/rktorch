@@ -52,5 +52,6 @@
  (tril "tril" (tensor int64) #f)
  (triu "triu" (tensor int64) #f)
  (where-scalarother "where.ScalarOther" (tensor tensor scalar) #f)
+ (where-scalarself "where.ScalarSelf" (tensor scalar tensor) #f)
  (where-self "where.self" (tensor tensor tensor) #f)
 )

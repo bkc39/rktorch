@@ -39,6 +39,8 @@ tr_tensor* tr_gen_tril(const tr_tensor* self, int64_t diagonal);
 tr_tensor* tr_gen_triu(const tr_tensor* self, int64_t diagonal);
 tr_tensor* tr_gen_where_scalarother(const tr_tensor* condition,
                                     const tr_tensor* self, double other);
+tr_tensor* tr_gen_where_scalarself(const tr_tensor* condition, double self,
+                                   const tr_tensor* other);
 tr_tensor* tr_gen_where_self(const tr_tensor* condition, const tr_tensor* self,
                              const tr_tensor* other);
 

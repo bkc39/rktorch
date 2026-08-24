@@ -34,6 +34,7 @@
                                 tril
                                 triu
                                 where-scalarother
+                                where-scalarself
                                 where-self)))
 
 (provide flatten
@@ -188,14 +189,20 @@
         (define coords (g:nonzero mask))
         (for/list ([d (in-range (length (tensor-shape mask)))])
           (g:select-int coords 1 d))])]
+    [(mask a) (error 'where "expected both value arms, got one: ~e" a)]
     [(mask a b)
      (cond
-       [(tensor? b) (g:where-self mask a b)]
-       [(and (exact-integer? b) (memq (tensor-dtype a) '(bool int64)))
-        ;; a double scalar would float-promote integral results and
-        ;; round past 2^53 — same guard as the comparison combinator
-        (g:where-self mask a (tensor b #:device (tensor-device a)))]
-       [else (g:where-scalarother mask a (exact->inexact b))])]))
+       [(and (tensor? a) (tensor? b)) (g:where-self mask a b)]
+       [(tensor? a)
+        (cond
+          [(and (exact-integer? b) (memq (tensor-dtype a) '(bool int64)))
+           ;; a double scalar would float-promote integral results and
+           ;; round past 2^53 — same guard as the comparison combinator
+           (g:where-self mask a (tensor b #:device (tensor-device a)))]
+          [else (g:where-scalarother mask a (exact->inexact b))])]
+       [(and (exact-integer? a) (memq (tensor-dtype b) '(bool int64)))
+        (g:where-self mask (tensor a #:device (tensor-device b)) b)]
+       [else (g:where-scalarself mask (exact->inexact a) b)])]))
 
 (define (flatten v [start-dim 0] [end-dim -1])
   (cond

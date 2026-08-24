@@ -159,6 +159,16 @@ tr_tensor* tr_gen_where_scalarother(const tr_tensor* condition,
   });
 }
 
+tr_tensor* tr_gen_where_scalarself(const tr_tensor* condition, double self,
+                                   const tr_tensor* other) {
+  if (!condition || !other) {
+    return torchrkt::null_arg("tr_gen_where_scalarself");
+  }
+  return torchrkt::alloc_result("tr_gen_where_scalarself", [&] {
+    return at::where(condition->value, self, other->value);
+  });
+}
+
 tr_tensor* tr_gen_where_self(const tr_tensor* condition, const tr_tensor* self,
                              const tr_tensor* other) {
   if (!condition || !self || !other) {

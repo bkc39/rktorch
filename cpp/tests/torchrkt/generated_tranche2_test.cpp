@@ -339,6 +339,10 @@ TEST(GeneratedTranche2, GatherTakeAlongWhereAndGuards) {
   EXPECT_EQ(data_of(ws.t), (std::vector<float>{-1.0F, -1.0F, 3.0F, 4.0F}));
   const Handle wso(tr_gen_where_scalarother(cond.t, m.t, 0.0));
   EXPECT_EQ(data_of(wso.t), (std::vector<float>{0.0F, 0.0F, 3.0F, 4.0F}));
+  const Handle wss(tr_gen_where_scalarself(cond.t, 9.0, m.t));
+  EXPECT_EQ(data_of(wss.t), (std::vector<float>{1.0F, 2.0F, 9.0F, 9.0F}));
+  EXPECT_EQ(tr_gen_where_scalarself(nullptr, 9.0, m.t), nullptr);
+  expect_error_from("tr_gen_where_scalarself");
   EXPECT_EQ(tr_gen_where_self(nullptr, m.t, other.t), nullptr);
   expect_error_from("tr_gen_where_self");
   EXPECT_EQ(tr_gen_where_scalarother(cond.t, nullptr, 0.0), nullptr);

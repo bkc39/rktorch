@@ -23,6 +23,13 @@
     (check-equal? (tensor->list (where (gt t 2.0) t -1)) '(-1.0 -1.0 -1.0 3.0 4.0 5.0))
     (check-equal? (tensor->list (where (gt t 2.0) t (zeros 2 3)))
                   '(0.0 0.0 0.0 3.0 4.0 5.0))
+    (check-equal? (tensor->list (where (gt t 2.0) -1 t))
+                  '(0.0 1.0 2.0 -1.0 -1.0 -1.0))
+    (let ([it (tensor '(1 2))])
+      (check-equal? (tensor->list (where (eq it 1) (add1 (expt 2 53)) it))
+                    (list (add1 (expt 2 53)) 2))
+      (check-equal? (dtype (where (eq it 1) 7 it)) 'int64))
+    (check-exn exn:fail:contract? (lambda () (where (eq t 0.0) 1 2)))
     (check-equal? (tensor->list
                    (index-select t 1 (to-dtype (tensor '(2 0)) 'int64)))
                   '(2.0 0.0 5.0 3.0))
