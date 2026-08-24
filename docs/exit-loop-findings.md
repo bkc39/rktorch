@@ -66,6 +66,16 @@ raises `invalid memory reference` exactly **once** and the REPL continues.
 | heavy MPS train (400 steps) + 3000 matmuls + 1200x1200 prints | clean, `finalizer-failures`=0 |
 | 150 forced MPS OOMs through `oom-retry` → `collect-and-drain!` → `tr_mps_empty_cache`, tensors held live | clean, `finalizer-failures`=0 |
 
+And on a **real pty with a real Ctrl-D** (0x04), 8 iterations per mode:
+
+| pty mode | what it does | result |
+|---|---|---|
+| `idle` | Ctrl-D at a quiet prompt, 400 tensors live | 0/8 |
+| `printing` | Ctrl-D while a 1200x1200 tensor is streaming | 0/8 |
+| `busy` | Ctrl-D while 4000 matmuls are still running | 0/8 |
+| `intr` | Ctrl-C then Ctrl-D mid-computation | 0/8 |
+| `spam` | ten Ctrl-Ds in a row | 0/8 |
+
 `finalizer-failures` was **0 in every single run**.
 
 ## What IS confirmed: the amplifier
