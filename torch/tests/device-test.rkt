@@ -126,7 +126,8 @@
                       '(2 1))
         (check-exn exn:fail?
                    (lambda ()
-                     (take mt (to-dtype (tensor '(0 1)) 'int64))))))
+                     (take mt (to-dtype (tensor '(0 1)) 'int64))))
+        (check-equal? (shape (take mt '())) '(0))))
     (check-not-exn mps-empty-cache!))
 
   (test-case "accelerator-if-available prefers cuda, then mps, then cpu"

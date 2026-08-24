@@ -19,6 +19,12 @@
 
 (provide ref with-no-grad with-default-device)
 
+(define bool-tensor/c
+  (and/c tensor? (lambda (x) (eq? (tensor-dtype x) 'bool))))
+
+(define int64-tensor/c
+  (and/c tensor? (lambda (x) (eq? (tensor-dtype x) 'int64))))
+
 (provide (rename-out [t+ +] [t- -] [t* *] [t/ /])
          @)
 
@@ -63,25 +69,21 @@
   [flatten flatten/c]
   [narrow (-> tensor? index/c index/c exact-positive-integer? tensor?)]
   [select (-> tensor? index/c index/c tensor?)]
-  [index-select (-> tensor? index/c tensor? tensor?)]
-  [masked-select (-> tensor? tensor? tensor?)]
+  [index-select (-> tensor? index/c int64-tensor/c tensor?)]
+  [masked-select (-> tensor? bool-tensor/c tensor?)]
   [nonzero (-> tensor? tensor?)]
   [take (->i ([v (or/c tensor? list?)]
               [n (v) (if (tensor? v)
-                         (or/c (and/c tensor?
-                                      (lambda (x)
-                                        (eq? (tensor-dtype x) 'int64)))
+                         (or/c int64-tensor/c
                                (listof exact-integer?)
                                (vectorof exact-integer?))
                          exact-nonnegative-integer?)])
              [result (v) (if (tensor? v) tensor? list?)])]
-  [gather (-> tensor? index/c tensor? tensor?)]
-  [take-along-dim (->* (tensor? tensor?) ((or/c #f index/c)) tensor?)]
-  [where (let ([bool-tensor/c
-                (and/c tensor? (lambda (x) (eq? (tensor-dtype x) 'bool)))])
-           (case-> (-> bool-tensor/c (listof tensor?))
-                   (-> bool-tensor/c tensor? (or/c tensor? real?)
-                       tensor?)))]
+  [gather (-> tensor? index/c int64-tensor/c tensor?)]
+  [take-along-dim (->* (tensor? int64-tensor/c) ((or/c #f index/c)) tensor?)]
+  [where (case-> (-> bool-tensor/c (listof tensor?))
+                 (-> bool-tensor/c tensor? (or/c tensor? real?)
+                     tensor?))]
   [tensor-ref (-> tensor? index-spec/c ...
                   (or/c tensor? number? boolean?))]
   [:: (let ([bound/c (or/c #f exact-integer?)])

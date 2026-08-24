@@ -162,10 +162,12 @@
         (unless (equal? (tensor-device idx) (tensor-device v))
           (error 'take
                  "index tensor must be on the same device as the input"))
-        (define flat (reshape v -1))
+        ;; explicit sizes: -1 is ambiguous for zero-element reshapes
+        (define flat (reshape v (apply * (tensor-shape v))))
+        (define idx-flat (reshape idx (apply * (tensor-shape idx))))
         (define flat-out
           (g:index-select
-           flat 0 (wrap-negative-positions (reshape idx -1) flat 0)))
+           flat 0 (wrap-negative-positions idx-flat flat 0)))
         (apply reshape flat-out (tensor-shape idx))]
        [else (g:take v idx)])]))
 

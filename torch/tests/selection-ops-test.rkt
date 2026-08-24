@@ -41,6 +41,14 @@
     (check-equal? (tensor->list (car (where (gt (tensor 0) 0)))) '())
     (check-exn exn:fail:contract? (lambda () (take t 2)))
     (check-exn exn:fail:contract? (lambda () (take t (gt t 2.0))))
+    (check-equal? (shape (take t '())) '(0))
+    (check-exn exn:fail:contract? (lambda () (masked-select t t)))
+    (check-exn exn:fail:contract?
+               (lambda () (gather t 1 (tensor '((0.5 1.0))))))
+    (check-exn exn:fail:contract?
+               (lambda () (index-select t 0 (tensor '(0.5)))))
+    (check-exn exn:fail:contract?
+               (lambda () (take-along-dim t (tensor '(1.0)))))
     (check-exn exn:fail:contract? (lambda () (where (tensor '(1 0)))))
     (check-exn exn:fail:contract? (lambda () (where (tensor '(1 0)) t 0)))
     (check-exn exn:fail:contract? (lambda () (gather t 1 '(0 1)))))
