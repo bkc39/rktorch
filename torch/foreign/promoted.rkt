@@ -3,7 +3,7 @@
 (require (only-in racket/list append* drop [flatten list-flatten] [take list-take])
          (only-in "device-type.rkt" device-type)
          (only-in "ops.rkt"
-                  item tensor->list tensor-device tensor-dtype tensor-shape
+                  item tensor-device tensor-dtype tensor-shape tensor->list
                   to-device to-dtype)
          (only-in "size.rkt" ->2d)
          (only-in "structs.rkt" tensor?)
@@ -159,7 +159,12 @@
        [(eq? (device-type (tensor-device v)) 'mps)
         ;; the vendored schema registers at::take for CPU/CUDA only, so
         ;; MPS composes flat index_select + reshape to the index shape;
-        ;; index_select rejects the negatives native take wraps
+        ;; index_select rejects the negatives native take wraps. The
+        ;; same-device check keeps CPU/CUDA's strictness (the wrap's
+        ;; to-device would otherwise silently migrate a mismatched idx)
+        (unless (equal? (tensor-device idx) (tensor-device v))
+          (error 'take
+                 "index tensor must be on the same device as the input"))
         (define flat (reshape v -1))
         (define flat-out
           (g:index-select
@@ -173,8 +178,6 @@
 (define (take-along-dim t indices [dim #f])
   (g:take-along-dim t indices dim))
 
-;; (where mask) is python's coordinate form — one 1-d index tensor per
-;; dim; (where mask a b) is elementwise selection with tensor or real b
 (define where
   (case-lambda
     [(mask)
