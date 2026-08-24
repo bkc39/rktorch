@@ -1,6 +1,7 @@
 #lang racket/base
 
 (require (only-in racket/list append* drop [flatten list-flatten] [take list-take])
+         (only-in "device-type.rkt" device-type)
          (only-in "ops.rkt"
                   item tensor->list tensor-device tensor-dtype tensor-shape
                   to-device to-dtype)
@@ -150,9 +151,18 @@
        [else (item result)])]))
 
 (define (take v n)
-  (if (tensor? v)
-      (g:take v (if (tensor? n) n (index-tensor n v)))
-      (list-take v n)))
+  (cond
+    [(not (tensor? v)) (list-take v n)]
+    [else
+     (define idx (if (tensor? n) n (index-tensor n v)))
+     (cond
+       [(eq? (device-type (tensor-device v)) 'mps)
+        ;; the vendored schema registers at::take for CPU/CUDA only, so
+        ;; MPS composes flat index_select + reshape to the index shape
+        (define flat-out
+          (g:index-select (reshape v -1) 0 (reshape idx -1)))
+        (apply reshape flat-out (tensor-shape idx))]
+       [else (g:take v idx)])]))
 
 (define (gather t dim index)
   (g:gather t dim index #f))
@@ -167,7 +177,6 @@
     [(mask)
      (cond
        [(null? (tensor-shape mask))
-        ;; python's scalar-condition form: ([0],) when true, ([],) not
         (list (tensor (if (zero? (car (tensor->list mask))) '() '(0))
                       #:dtype 'int64 #:device (tensor-device mask)))]
        [else
