@@ -74,8 +74,11 @@
              [result (v) (if (tensor? v) tensor? list?)])]
   [gather (-> tensor? index/c tensor? tensor?)]
   [take-along-dim (->* (tensor? tensor?) ((or/c #f index/c)) tensor?)]
-  [where (case-> (-> tensor? (listof tensor?))
-                 (-> tensor? tensor? (or/c tensor? real?) tensor?))]
+  [where (let ([bool-tensor/c
+                (and/c tensor? (lambda (x) (eq? (tensor-dtype x) 'bool)))])
+           (case-> (-> bool-tensor/c (listof tensor?))
+                   (-> bool-tensor/c tensor? (or/c tensor? real?)
+                       tensor?)))]
   [tensor-ref (-> tensor? index-spec/c ...
                   (or/c tensor? number? boolean?))]
   [:: (let ([bound/c (or/c #f exact-integer?)])

@@ -40,5 +40,7 @@
     (check-equal? (tensor->list (car (where (gt (tensor 1) 0)))) '(0))
     (check-equal? (tensor->list (car (where (gt (tensor 0) 0)))) '())
     (check-exn exn:fail:contract? (lambda () (take t 2)))
+    (check-exn exn:fail:contract? (lambda () (where (tensor '(1 0)))))
+    (check-exn exn:fail:contract? (lambda () (where (tensor '(1 0)) t 0)))
     (check-exn exn:fail:contract? (lambda () (gather t 1 '(0 1)))))
 )
