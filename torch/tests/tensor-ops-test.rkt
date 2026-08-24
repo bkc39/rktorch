@@ -461,6 +461,13 @@
                   '(2.0 0.0 5.0 3.0))
     (check-equal? (tensor->list (masked-select t (gt t 3.0))) '(4.0 5.0))
     (check-equal? (shape (nonzero (gt t 0.0))) '(5 2))
+    (let ([it (tensor '((1 2) (3 4)))])
+      (check-equal? (dtype (where (eq it 1) it (add1 (expt 2 53)))) 'int64)
+      (check-equal? (tensor->list (where (eq it 1) it (add1 (expt 2 53))))
+                    (list 1 (add1 (expt 2 53)) (add1 (expt 2 53))
+                          (add1 (expt 2 53)))))
+    (check-equal? (tensor->list (car (where (gt (tensor 1) 0)))) '(0))
+    (check-equal? (tensor->list (car (where (gt (tensor 0) 0)))) '())
     (check-exn exn:fail:contract? (lambda () (take t 2)))
     (check-exn exn:fail:contract? (lambda () (gather t 1 '(0 1)))))
 

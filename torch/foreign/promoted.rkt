@@ -2,8 +2,8 @@
 
 (require (only-in racket/list append* drop [flatten list-flatten] [take list-take])
          (only-in "ops.rkt"
-                  item tensor-device tensor-dtype tensor-shape to-device
-                  to-dtype)
+                  item tensor->list tensor-device tensor-dtype tensor-shape
+                  to-device to-dtype)
          (only-in "size.rkt" ->2d)
          (only-in "structs.rkt" tensor?)
          (only-in "tensor-ops.rkt" add mul reshape tensor unsqueeze)
@@ -149,8 +149,6 @@
        [(eq? (tensor-dtype result) 'bool) (not (zero? (item result)))]
        [else (item result)])]))
 
-;; take dispatches like the flatten shim: tensor -> torch.take (flat
-;; indexing), anything else -> racket/list's take
 (define (take v n)
   (if (tensor? v)
       (g:take v (if (tensor? n) n (index-tensor n v)))
@@ -167,13 +165,21 @@
 (define where
   (case-lambda
     [(mask)
-     (define coords (g:nonzero mask))
-     (for/list ([d (in-range (length (tensor-shape mask)))])
-       (g:select-int coords 1 d))]
+     (if (null? (tensor-shape mask))
+         ;; python's scalar-condition form: ([0],) when true, ([],) not
+         (list (tensor (if (zero? (car (tensor->list mask))) '() '(0))
+                       #:dtype 'int64 #:device (tensor-device mask)))
+         (let ([coords (g:nonzero mask)])
+           (for/list ([d (in-range (length (tensor-shape mask)))])
+             (g:select-int coords 1 d))))]
     [(mask a b)
-     (if (tensor? b)
-         (g:where-self mask a b)
-         (g:where-scalarother mask a (exact->inexact b)))]))
+     (cond
+       [(tensor? b) (g:where-self mask a b)]
+       [(and (exact-integer? b) (eq? (tensor-dtype a) 'int64))
+        ;; a double scalar would float-promote int64 results and round
+        ;; past 2^53 — same guard as the comparison combinator
+        (g:where-self mask a (tensor b #:device (tensor-device a)))]
+       [else (g:where-scalarother mask a (exact->inexact b))])]))
 
 (define (flatten v [start-dim 0] [end-dim -1])
   (cond
