@@ -73,8 +73,25 @@
                                (vectorof exact-integer?))
                          exact-nonnegative-integer?)])
              [result (v) (if (tensor? v) tensor? list?)])]
-  [gather (-> tensor? index/c int64-tensor/c tensor?)]
-  [take-along-dim (->* (tensor? int64-tensor/c) ((or/c #f index/c)) tensor?)]
+  [gather (->i ([t tensor?]
+                [dim index/c]
+                [index (t)
+                       (and/c int64-tensor/c
+                              (lambda (x)
+                                (= (length (tensor-shape x))
+                                   (length (tensor-shape t)))))])
+               [result tensor?])]
+  [take-along-dim
+   (->i ([t tensor?]
+         [indices (t dim)
+                  (and/c int64-tensor/c
+                         (lambda (x)
+                           (or (unsupplied-arg? dim)
+                               (not dim)
+                               (= (length (tensor-shape x))
+                                  (length (tensor-shape t))))))])
+        ([dim (or/c #f index/c)])
+        [result tensor?])]
   [where (->i ([c bool-tensor/c])
               ([a (or/c tensor? real?)]
                [b (a) (if (unsupplied-arg? a)
