@@ -45,10 +45,11 @@
   (check-true (module-training? net) "accuracy left the net in eval mode")
   ;; Device RNG streams differ from the CPU's, so the on-device arm checks
   ;; convergence, never equality with the CPU losses above.
-  (when (mps-available?)
-    (define-values (m-losses m-net _m-dev) (run-example #:device 'mps))
-    (check-equal? (device-type (tensor-device (car (parameters m-net)))) 'mps)
-    (check-true (andmap (lambda (l) (and (rational? l) (not (nan? l)))) m-losses)
-                (format "non-finite loss on mps: ~a" m-losses))
-    (check-true (< (last m-losses) (first m-losses))
-                (format "mps losses did not decrease: ~a" m-losses))))
+  (define accel (accelerator-if-available))
+  (unless (eq? (device-type accel) 'cpu)
+    (define-values (a-losses a-net _a-dev) (run-example #:device accel))
+    (check-equal? (tensor-device (car (parameters a-net))) accel)
+    (check-true (andmap (lambda (l) (and (rational? l) (not (nan? l)))) a-losses)
+                (format "non-finite loss on ~a: ~a" accel a-losses))
+    (check-true (< (last a-losses) (first a-losses))
+                (format "~a losses did not decrease: ~a" accel a-losses))))

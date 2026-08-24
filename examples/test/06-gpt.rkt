@@ -58,15 +58,16 @@
              (lambda () (generate net vocab "")))
   ;; Device RNG streams differ from the CPU's, so the on-device arm checks
   ;; convergence, never equality with the CPU losses above.
-  (when (mps-available?)
-    (define-values (m-losses m-net m-vocab _m-dev) (run-example #:device 'mps))
-    (check-equal? (device-type (tensor-device (car (parameters m-net)))) 'mps)
-    (check-true (andmap (lambda (l) (and (rational? l) (not (nan? l)))) m-losses)
-                (format "non-finite loss on mps: ~a" m-losses))
-    (check-true (< (last m-losses) (first m-losses))
-                (format "mps losses did not decrease: ~a" m-losses))
-    ;; generation derives its device from the net's parameters
-    (check-equal? (string-length (generate m-net m-vocab "The " #:steps 20)) 24))
+  (define accel (accelerator-if-available))
+  (unless (eq? (device-type accel) 'cpu)
+    (define-values (a-losses a-net a-vocab _a-dev) (run-example #:device accel))
+    (check-equal? (tensor-device (car (parameters a-net))) accel)
+    (check-true (andmap (lambda (l) (and (rational? l) (not (nan? l)))) a-losses)
+                (format "non-finite loss on ~a: ~a" accel a-losses))
+    (check-true (< (last a-losses) (first a-losses))
+                (format "~a losses did not decrease: ~a" accel a-losses))
+    ;; generate reads its device from the net's parameters, not the default
+    (check-equal? (string-length (generate a-net a-vocab "The " #:steps 20)) 24))
   ;; The committed Part I excerpt behind train-excerpt: data integrity only
   ;; (training it is minutes of CPU — the offline demo, not a CI job).
   (define excerpt (load-excerpt))

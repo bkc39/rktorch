@@ -17,10 +17,12 @@
 (module+ test
   (require rackunit)
   (define-values (losses net device) (run-example))
-  ;; run-example echoes back the device it ran on; the no-argument call gets
-  ;; pick-device's normalised struct, whichever accelerator this host has.
-  (check-not-false (and (device? device)
-                        (memq (device-type device) '(cpu cuda mps)))
+  ;; run-example echoes back the device it was given: pick-device's struct on
+  ;; the no-argument call, or an explicit shorthand passed straight through.
+  (check-not-false (or (and (device? device)
+                            (memq (device-type device) '(cpu cuda mps)))
+                       (memq device '(cpu cuda mps))
+                       (and (pair? device) (eq? (car device) 'cuda)))
                    (format "unexpected device: ~a" device))
   (check-equal? (length losses) 5)
   (check-true (< (last losses) (first losses))

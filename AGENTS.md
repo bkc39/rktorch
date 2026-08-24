@@ -174,9 +174,10 @@ Where python3 can't `import torch` (the sandboxed `nix build`, or the lean
 
 `accelerator-if-available` picks CUDA, then MPS, then CPU — what the examples'
 `pick-device` returns, and the analogue of PyTorch's
-`torch.accelerator.current_accelerator()`. The device suites register their
-CUDA/MPS cases unconditionally and `when`-guard the bodies, so they verify real
-hardware where it exists and self-skip where it doesn't.
+`torch.accelerator.current_accelerator()`. The device suite guards its CUDA and
+MPS bodies separately; the example runners train on whichever accelerator the
+helper returns. Both verify real hardware where it exists and self-skip where it
+doesn't — never assume a case ran because it was green.
 
 **Darwin needs no special shell.** The `aarch64-darwin` `libtorch-bin` ships the
 Metal backend, so plain `nix develop` is the MPS verification environment —
