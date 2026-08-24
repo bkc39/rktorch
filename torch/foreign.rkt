@@ -69,7 +69,11 @@
   [flatten flatten/c]
   [narrow (-> tensor? index/c index/c exact-positive-integer? tensor?)]
   [select (-> tensor? index/c index/c tensor?)]
-  [index-select (-> tensor? index/c int64-tensor/c tensor?)]
+  [index-select
+   (-> tensor? index/c
+       (and/c int64-tensor/c
+              (lambda (x) (= 1 (length (tensor-shape x)))))
+       tensor?)]
   [masked-select (-> tensor? bool-tensor/c tensor?)]
   [nonzero (-> tensor? tensor?)]
   [take (->i ([v (or/c tensor? list?)]

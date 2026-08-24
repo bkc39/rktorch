@@ -48,6 +48,9 @@
     (check-exn exn:fail:contract?
                (lambda () (index-select t 0 (tensor '(0.5)))))
     (check-exn exn:fail:contract?
+               (lambda () (index-select t 0 (to-dtype (tensor '((0 1)))
+                                                     'int64))))
+    (check-exn exn:fail:contract?
                (lambda () (take-along-dim t (tensor '(1.0)))))
     (check-exn exn:fail:contract? (lambda () (where (tensor '(1 0)))))
     (check-exn exn:fail:contract? (lambda () (where (tensor '(1 0)) t 0)))
