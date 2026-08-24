@@ -4,8 +4,6 @@
 ;; would collide with Typed Racket's and `_` with match's wildcard, and
 ;; a literal `...` token is impossible (it is the macro ellipsis, so any
 ;; macro whose template contained a ref form would break) — hence `..`.
-;; `_` is python's None in both of its roles: a new axis at spec level,
-;; an omitted bound inside (: ...); `(:~ a s)` is [a::s].
 ;; whole-module for-syntax requires: macro-expansion exemption, as in
 ;; define-generated.rkt (AGENTS.md import convention)
 (require (for-syntax racket/base

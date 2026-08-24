@@ -6,7 +6,7 @@
                   to-dtype)
          (only-in "size.rkt" ->2d)
          (only-in "structs.rkt" tensor?)
-         (only-in "tensor-ops.rkt" add mul reshape sum tensor unsqueeze)
+         (only-in "tensor-ops.rkt" add mul reshape tensor unsqueeze)
          (prefix-in g: (only-in "../generated.rkt"
                                 adaptive-avg-pool2d
                                 avg-pool2d
@@ -88,14 +88,12 @@
                    v)]
     [else
      ;; python indexing accepts a CPU index for a CUDA tensor;
-     ;; index_select does not, so align devices first
+     ;; index_select does not, so align devices first. Adding n*(s<0)
+     ;; wraps negatives and is the identity elsewhere — no host sync.
      (define s* (to-device s (tensor-device v)))
-     (define neg (g:lt-scalar s* 0.0))
-     (if (zero? (item (sum (to-dtype neg 'int64))))
-         s*
-         (add s* (mul (to-dtype neg 'int64)
-                      (tensor n #:dtype 'int64
-                              #:device (tensor-device v)))))]))
+     (add s* (mul (to-dtype (g:lt-scalar s* 0.0) 'int64)
+                  (tensor n #:dtype 'int64
+                          #:device (tensor-device v))))]))
 
 (define (apply-mask-spec v d m0)
   (define m (to-device m0 (tensor-device v)))
