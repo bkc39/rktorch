@@ -43,8 +43,9 @@
          [(_ a b s) #`(:: #,@args)]
          [_ (raise-syntax-error
              who "expected 1 to 3 slice arguments" spec)])]
-      [((~datum :~) a) #'(:: a #f)]
-      [((~datum :~) a s) #'(:: a #f s)]
+      [((~datum :~) a) #`(:: #,(slice-arg #'a) #f)]
+      [((~datum :~) a (~datum _)) #`(:: #,(slice-arg #'a) #f)]
+      [((~datum :~) a s) #`(:: #,(slice-arg #'a) #f s)]
       [((~datum :~) . _)
        (raise-syntax-error
         who "expected 1 or 2 arguments (start [step])" spec)]
