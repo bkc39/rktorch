@@ -200,6 +200,11 @@
      ;; override drives: optional-argument paths the default recipes leave
      ;; absent (or vice versa); the labels name the driven path
      (check-generated-parity
+      (assq 'slice-tensor manifest)
+      '((tensor 6) (int64 0) (optional-int64 #f) (optional-int64 #f)
+        (int64 2))
+      "[open]")
+     (check-generated-parity
       (assq 'avg-pool2d manifest)
       '((tensor 1 1 4 4) (int-array (2 2)) (int-array (2 2))
         (int-array (0 0)) (bool #f) (bool #t) (optional-int64 2))
