@@ -157,11 +157,8 @@
      (define idx (if (tensor? n) n (index-tensor n v)))
      (cond
        [(eq? (device-type (tensor-device v)) 'mps)
-        ;; the vendored schema registers at::take for CPU/CUDA only, so
-        ;; MPS composes flat index_select + reshape to the index shape;
-        ;; index_select rejects the negatives native take wraps. The
-        ;; same-device check keeps CPU/CUDA's strictness (the wrap's
-        ;; to-device would otherwise silently migrate a mismatched idx)
+        ;; the vendored schema registers at::take for CPU/CUDA only;
+        ;; the device check pre-empts the wrap's silent to-device
         (unless (equal? (tensor-device idx) (tensor-device v))
           (error 'take
                  "index tensor must be on the same device as the input"))
