@@ -9,4 +9,7 @@
   (printf "REPRO-DEVICE-UNAVAILABLE ~a\n" requested)
   (exit 3))
 (printf "REPRO device=~a\n" dev)
+(with-default-device dev
+  (for ([_ (in-range 5000)]) (void (randn 256 256))))
 (finalizer-failures)
+(native-memory-use)

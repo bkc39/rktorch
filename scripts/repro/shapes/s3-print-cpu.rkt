@@ -1,6 +1,0 @@
-(require torch)
-(randn 512 512)
-(randn 300 300)
-(arange 0 100000)
-(randn 64 64 64)
-(finalizer-failures)

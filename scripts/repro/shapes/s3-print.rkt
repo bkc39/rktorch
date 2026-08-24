@@ -9,4 +9,8 @@
   (printf "REPRO-DEVICE-UNAVAILABLE ~a\n" requested)
   (exit 3))
 (printf "REPRO device=~a\n" dev)
+(with-default-device dev (randn 512 512))
+(with-default-device dev (randn 300 300))
+(with-default-device dev (randn 64 64 64))
+(with-default-device dev (arange 0 100000))
 (finalizer-failures)

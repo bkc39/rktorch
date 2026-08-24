@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Drive `racket -i` on a REAL pty and send a REAL Ctrl-D (0x04).
 
+Honours REPRO_DEVICE (cpu|cuda|mps) and REPRO_LOGDIR.
+
 A piped stdin is not the same condition: on a tty, `racket -i` loads xrepl's
 terminal line editor, and Ctrl-D is an EOT byte the reader interprets, not an
 EOF on a closed pipe.  Usage:
@@ -15,12 +17,18 @@ modes: idle     Ctrl-D at a quiet prompt
 """
 import os, pty, select, signal, sys, time
 
+DEV = os.environ.get("REPRO_DEVICE", "cpu").lower()
+_PICK = ('(define D (case "%s" [("cuda") (cuda-device)] [("mps") (mps-device)] '
+         '[else (cpu-device)]))\n' % DEV).encode()
+_HOLD = b"(define held (with-default-device D (for/list ([_ (in-range 400)]) (randn 128 128))))\n"
+_HEAD = [b"(require torch)\n", _PICK, _HOLD]
+
 SETUP = {
-    "idle":     [b"(require torch)\n", b"(define held (for/list ([_ (in-range 400)]) (randn 128 128)))\n", b"(length held)\n"],
-    "busy":     [b"(require torch)\n", b"(define held (for/list ([_ (in-range 400)]) (randn 128 128)))\n", b"(for ([_ (in-range 4000)]) (void (matmul (randn 256 256) (randn 256 256))))\n"],
-    "printing": [b"(require torch)\n", b"(define held (for/list ([_ (in-range 400)]) (randn 128 128)))\n", b"(randn 1200 1200)\n"],
-    "intr":     [b"(require torch)\n", b"(define held (for/list ([_ (in-range 400)]) (randn 128 128)))\n", b"(for ([_ (in-range 4000)]) (void (matmul (randn 256 256) (randn 256 256))))\n"],
-    "spam":     [b"(require torch)\n", b"(define held (for/list ([_ (in-range 400)]) (randn 128 128)))\n", b"(length held)\n"],
+    "idle":     _HEAD + [b"(length held)\n"],
+    "busy":     _HEAD + [b"(with-default-device D (for ([_ (in-range 4000)]) (void (matmul (randn 256 256) (randn 256 256)))))\n"],
+    "printing": _HEAD + [b"(with-default-device D (randn 1200 1200))\n"],
+    "intr":     _HEAD + [b"(with-default-device D (for ([_ (in-range 4000)]) (void (matmul (randn 256 256) (randn 256 256)))))\n"],
+    "spam":     _HEAD + [b"(length held)\n"],
 }
 # seconds to wait after the last setup line before sending Ctrl-D
 DELAY = {"idle": 12.0, "busy": 3.0, "printing": 0.35, "intr": 3.0, "spam": 12.0}
@@ -83,11 +91,14 @@ def run(mode, idx, budget=90.0):
             pass
     os.close(fd)
     text = bytes(out)
+    if b"cuda-device: " in text or b"mps-device: " in text:
+        print(f"ABORT pty/{mode}: device '{DEV}' unavailable on this host", flush=True)
+        raise SystemExit(3)
     imr = text.count(b"invalid memory reference")
     casc = text.count(b"error display handler") + text.count(b"error escape handler")
     bad = hung or imr or casc
     if bad:
-        p = f"/tmp/rktorch-pty-{mode}-{idx}.log"
+        p = os.path.join(os.environ.get("REPRO_LOGDIR", "/tmp"), f"rktorch-pty-{mode}-{DEV}-{idx}.log")
         open(p, "wb").write(text)
         print(f"FAIL mode={mode} iter={idx} hung={hung} term_ignored={termignored} "
               f"imr={imr} cascade={casc} bytes={len(text)} exit={exited} log={p}", flush=True)
@@ -97,4 +108,4 @@ if __name__ == "__main__":
     mode = sys.argv[1]
     n = int(sys.argv[2]) if len(sys.argv) > 2 else 10
     bad = sum(run(mode, i) for i in range(1, n + 1))
-    print(f"RESULT pty/{mode}: {bad}/{n} failed", flush=True)
+    print(f"RESULT pty/{mode}-{DEV}: {bad}/{n} failed", flush=True)

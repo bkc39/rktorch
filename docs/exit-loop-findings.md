@@ -97,6 +97,18 @@ Also worth noting for triage: `racket -i` auto-loads **xrepl** (no `~/.racketrc`
 needed), so xrepl's line editor and error display are in the loop. On a tty,
 Ctrl-D on a *non-empty* line is delete-char, not EOF.
 
+## One thing that *did* reproduce "Killed" (a different bug)
+
+`(zeros 1000000000000)` on **CPU** — 4 TB, i.e. large but *within* the 64-bit
+address space — is accepted by macOS as a reservation and the process is
+**SIGKILLed (exit 137) while zero-filling it**, with no crash report. The OOM
+classifier never runs, so no `exn:fail:rktorch:oom` is ever raised. This is the
+same "Killed, no `.ips`" signature as the reported incident, but it is host OOM,
+not the error cascade. It is why the harness's OOM shape uses 2^60 floats
+(beyond address space, refused outright by every backend) — the value
+`oom-error-test.rkt` already uses. Worth its own issue if you want typed OOM to
+cover "the host said yes and then killed us".
+
 ## Remaining leads
 
 1. **The `mps-device` worktree** (`.claude/worktrees/mps-device`, HEAD `7534c2c`,

@@ -1,5 +1,0 @@
-(require torch)
-(with-default-device 'mps (randn 512 512))
-(with-default-device 'mps (randn 300 300))
-(with-default-device 'mps (randn 64 64 64))
-(finalizer-failures)
