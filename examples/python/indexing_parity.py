@@ -39,7 +39,9 @@ forms = [
     form(torch.where(torch.tensor(True))[0]),
     form(torch.where(torch.tensor(False))[0]),
     form(torch.where(t > 2, t, torch.zeros(2, 3))),
-    form(torch.where(t > 2, t, -1.0)),
-    form(torch.where(t > 2, -5.0, t)),
+    form(torch.where(t > 2, t, -1)),
+    form(torch.where(t > 2, -5, t)),
+    form(torch.where(t > 2, t, -1.5)),
+    form(torch.where(t > 2, -5.5, t)),
 ]
 print(json.dumps({"forms": forms}))
