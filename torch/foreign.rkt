@@ -75,11 +75,20 @@
              [result (v) (if (tensor? v) tensor? list?)])]
   [gather (->i ([t tensor?]
                 [dim index/c]
-                [index (t)
+                [index (t dim)
                        (and/c int64-tensor/c
                               (lambda (x)
-                                (= (length (tensor-shape x))
-                                   (length (tensor-shape t)))))])
+                                (define td (tensor-shape t))
+                                (define xd (tensor-shape x))
+                                (define rank (length td))
+                                (define g (if (negative? dim)
+                                              (+ dim rank)
+                                              dim))
+                                (and (= (length xd) rank)
+                                     (for/and ([xi (in-list xd)]
+                                               [ti (in-list td)]
+                                               [i (in-naturals)])
+                                       (or (= i g) (<= xi ti))))))])
                [result tensor?])]
   [take-along-dim
    (->i ([t tensor?]
