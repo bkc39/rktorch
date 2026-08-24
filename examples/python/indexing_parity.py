@@ -43,5 +43,7 @@ forms = [
     form(torch.where(t > 2, -5, t)),
     form(torch.where(t > 2, t, -1.5)),
     form(torch.where(t > 2, -5.5, t)),
+    form(torch.where(t > 2, 1, 0)),
+    form(torch.where(t > 2, 1.5, 0.5)),
 ]
 print(json.dumps({"forms": forms}))

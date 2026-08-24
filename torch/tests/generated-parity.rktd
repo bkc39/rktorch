@@ -51,6 +51,7 @@
  (take-along-dim "take_along_dim" (tensor tensor optional-int64) #f)
  (tril "tril" (tensor int64) #f)
  (triu "triu" (tensor int64) #f)
+ (where-scalar "where.Scalar" (tensor scalar scalar) #f)
  (where-scalarother "where.ScalarOther" (tensor tensor scalar) #f)
  (where-scalarself "where.ScalarSelf" (tensor scalar tensor) #f)
  (where-self "where.self" (tensor tensor tensor) #f)

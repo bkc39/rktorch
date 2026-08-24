@@ -33,6 +33,7 @@
                                 take-along-dim
                                 tril
                                 triu
+                                where-scalar
                                 where-scalarother
                                 where-scalarself
                                 where-self)))
@@ -200,9 +201,14 @@
            ;; round past 2^53 — same guard as the comparison combinator
            (g:where-self mask a (tensor b #:device (tensor-device a)))]
           [else (g:where-scalarother mask a (exact->inexact b))])]
-       [(and (exact-integer? a) (memq (tensor-dtype b) '(bool int64)))
+       [(and (tensor? b) (exact-integer? a)
+             (memq (tensor-dtype b) '(bool int64)))
         (g:where-self mask (tensor a #:device (tensor-device b)) b)]
-       [else (g:where-scalarself mask (exact->inexact a) b)])]))
+       [(tensor? b) (g:where-scalarself mask (exact->inexact a) b)]
+       [(and (exact-integer? a) (exact-integer? b))
+        (define dev (tensor-device mask))
+        (g:where-self mask (tensor a #:device dev) (tensor b #:device dev))]
+       [else (g:where-scalar mask (exact->inexact a) (exact->inexact b))])]))
 
 (define (flatten v [start-dim 0] [end-dim -1])
   (cond

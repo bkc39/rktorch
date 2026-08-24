@@ -3,6 +3,7 @@
 (require (only-in racket/contract/base
                   ->
                   ->i
+                  and/c
                   any/c
                   case->
                   list/c
@@ -16,9 +17,12 @@
          (only-in "promoted.rkt" slice-end slice-start slice-step slice?)
          (only-in "structs.rkt" tensor?))
 
-(provide dims-rest/c
+(provide bool-tensor/c
+         dims-rest/c
          index-spec/c
          index/c
+         index-vector/c
+         int64-tensor/c
          device/c
          tensor-or-real/c
          pool-size/c
@@ -41,6 +45,15 @@
        (bound? (slice-start x))
        (bound? (slice-end x))
        (exact-integer? (slice-step x))))
+
+(define bool-tensor/c
+  (and/c tensor? (lambda (x) (eq? (tensor-dtype x) 'bool))))
+
+(define int64-tensor/c
+  (and/c tensor? (lambda (x) (eq? (tensor-dtype x) 'int64))))
+
+(define index-vector/c
+  (and/c int64-tensor/c (lambda (x) (= 1 (length (tensor-shape x))))))
 
 (define (index-tensor-spec? x)
   (and (tensor? x)

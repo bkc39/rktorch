@@ -19,12 +19,6 @@
 
 (provide ref with-no-grad with-default-device)
 
-(define bool-tensor/c
-  (and/c tensor? (lambda (x) (eq? (tensor-dtype x) 'bool))))
-
-(define int64-tensor/c
-  (and/c tensor? (lambda (x) (eq? (tensor-dtype x) 'int64))))
-
 (provide (rename-out [t+ +] [t- -] [t* *] [t/ /])
          @)
 
@@ -69,11 +63,7 @@
   [flatten flatten/c]
   [narrow (-> tensor? index/c index/c exact-positive-integer? tensor?)]
   [select (-> tensor? index/c index/c tensor?)]
-  [index-select
-   (-> tensor? index/c
-       (and/c int64-tensor/c
-              (lambda (x) (= 1 (length (tensor-shape x)))))
-       tensor?)]
+  [index-select (-> tensor? index/c index-vector/c tensor?)]
   [masked-select (-> tensor? bool-tensor/c tensor?)]
   [nonzero (-> tensor? tensor?)]
   [take (->i ([v (or/c tensor? list?)]
@@ -87,10 +77,9 @@
   [take-along-dim (->* (tensor? int64-tensor/c) ((or/c #f index/c)) tensor?)]
   [where (->i ([c bool-tensor/c])
               ([a (or/c tensor? real?)]
-               [b (a) (cond
-                        [(unsupplied-arg? a) none/c]
-                        [(tensor? a) (or/c tensor? real?)]
-                        [else tensor?])])
+               [b (a) (if (unsupplied-arg? a)
+                          none/c
+                          (or/c tensor? real?))])
               #:pre/name (a b) "a condition alone, or condition + both arms"
               (eq? (unsupplied-arg? a) (unsupplied-arg? b))
               [result (a) (if (unsupplied-arg? a)

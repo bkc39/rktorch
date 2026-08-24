@@ -113,6 +113,8 @@ void torchrkt_c_api_compile_check(void) {
       tr_gen_where_scalarother;
   tr_tensor* (*gen_where_scalarself)(
       const tr_tensor*, double, const tr_tensor*) = tr_gen_where_scalarself;
+  tr_tensor* (*gen_where_scalar_both)(const tr_tensor*, double, double) =
+      tr_gen_where_scalar;
   tr_tensor* (*gen_dropout)(const tr_tensor*, double, bool) = tr_gen_dropout;
   int (*cuda_available)(void) = tr_cuda_is_available;
   int (*cuda_count)(void) = tr_cuda_device_count;
@@ -188,6 +190,7 @@ void torchrkt_c_api_compile_check(void) {
   (void)gen_where_self;
   (void)gen_where_scalar;
   (void)gen_where_scalarself;
+  (void)gen_where_scalar_both;
   (void)gen_dropout;
   (void)cuda_available;
   (void)cuda_count;

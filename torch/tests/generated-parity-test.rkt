@@ -42,6 +42,8 @@
                                (double -1.0))
           'where-scalarself '((bool-tensor (0 1 1 0 1 0)) (double -5.0)
                               (tensor 6))
+          'where-scalar '((bool-tensor (0 1 1 0 1 0)) (double 1.0)
+                          (double 0.0))
           'nonzero '((bool-tensor (0 1 1 0)))
           'cat '((tensors (2 3) (2 3)) (int64 0))
           'narrow '((tensor 4) (int64 0) (int64 1) (int64 2))

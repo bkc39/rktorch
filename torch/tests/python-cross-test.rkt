@@ -135,7 +135,9 @@
                        (form (where (gt ix 2) ix -1))
                        (form (where (gt ix 2) -5 ix))
                        (form (where (gt ix 2) ix -1.5))
-                       (form (where (gt ix 2) -5.5 ix)))])
+                       (form (where (gt ix 2) -5.5 ix))
+                       (form (where (gt ix 2) 1 0))
+                       (form (where (gt ix 2) 1.5 0.5)))])
        (check-equal? (length rkt) (length py) "indexing form count")
        (for ([r (in-list rkt)]
              [p (in-list py)]

@@ -63,6 +63,7 @@
          take-along-dim
          tril
          triu
+         where-scalar
          where-scalarother
          where-scalarself
          where-self)
@@ -207,6 +208,9 @@
 
 (define-generated-op triu tr_gen_triu
   ([self tensor] [diagonal int64]))
+
+(define-generated-op where-scalar tr_gen_where_scalar
+  ([condition tensor] [self scalar] [other scalar]))
 
 (define-generated-op where-scalarother tr_gen_where_scalarother
   ([condition tensor] [self tensor] [other scalar]))

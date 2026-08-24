@@ -149,6 +149,16 @@ tr_tensor* tr_gen_triu(const tr_tensor* self, int64_t diagonal) {
       "tr_gen_triu", [&] { return at::triu(self->value, diagonal); });
 }
 
+tr_tensor* tr_gen_where_scalar(const tr_tensor* condition, double self,
+                               double other) {
+  if (!condition) {
+    return torchrkt::null_arg("tr_gen_where_scalar");
+  }
+  return torchrkt::alloc_result("tr_gen_where_scalar", [&] {
+    return at::where(condition->value, self, other);
+  });
+}
+
 tr_tensor* tr_gen_where_scalarother(const tr_tensor* condition,
                                     const tr_tensor* self, double other) {
   if (!condition || !self) {
