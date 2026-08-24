@@ -132,9 +132,11 @@
         mkdir -p "$_dest"
         for _f in ${src}/lib/libtorchrkt.*; do
           _b=$(basename "$_f")
-          cp -f --no-preserve=mode "$_f" "$_dest/.$_b.tmp.$$"
+          cp -f "$_f" "$_dest/.$_b.tmp.$$"
           # read-only, as the store ships it: an in-place `cp` then fails loudly
-          # with EACCES rather than silently corrupting a live mapping.
+          # with EACCES rather than silently corrupting a live mapping.  This
+          # also makes the mode explicit, so no --no-preserve=mode is needed --
+          # and the helper stays POSIX, usable under BSD cp as well as GNU.
           chmod 0555 "$_dest/.$_b.tmp.$$"
           mv -f "$_dest/.$_b.tmp.$$" "$_dest/$_b"
         done
@@ -368,6 +370,12 @@
 
           copy-native-libs = pkgs.writeShellApplication {
             name = "copy-native-libs";
+            # Without this the app inherits the caller's PATH, which outside a
+            # nix shell on darwin is BSD coreutils -- the staging helper then
+            # failed at the first `cp`.  This is the documented restage command
+            # (AGENTS.md, .claude/skills/cpp-dev), so it must work on a bare
+            # host, not only inside `nix develop`.
+            runtimeInputs = [ pkgs.coreutils ];
             text = ''
               ${stageNativeLibs cpp}
               echo "Native library staged to $PWD/torch/native-libs"
