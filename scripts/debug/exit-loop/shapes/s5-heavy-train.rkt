@@ -1,8 +1,4 @@
-;; Body only. `dev` comes from ../shape-prelude.rkt, which exit-loop.sh
-;; prepends; running this file on its own will not define it.
 (require torch/nn)
-;; define-module, as examples/racket/04-mlp.rkt does: `relu` is a tensor
-;; function, not a module, so it cannot go inside Sequential.
 (define-module mlp ()
   #:submodules ([fc1 (Linear 256 512)]
                 [fc2 (Linear 512 512)]

@@ -1,22 +1,9 @@
 #!/usr/bin/env bash
-# Issue #72's proposed vector: overwrite the mapped libtorchrkt in place under a
-# live REPL that holds tensors, then touch native code and send EOF (Ctrl-D).
-# Restores the library on the way out.  Linux and macOS.
-#
-#   scripts/debug/exit-loop/corrupt-restage.sh [zero|restage]
-#     zero    (default) zero the whole image past the ELF/Mach header
-#     restage re-copy identical bytes in place -- what `nix run .#copy-native-libs` does
-#
-# On darwin this was measured INERT: the ~195 KB shim is fully resident after
-# load, so writes to the file never reach the mapped pages.  On Linux with
-# demand paging the outcome may differ -- that is the point of running it there.
+# corrupt-restage.sh [zero|restage]       env: REPRO_DEVICE REPRO_LOGDIR
 set -u
 mode="${1:-zero}"
 case "$mode" in zero|restage) ;; *) echo "unknown mode: $mode (want zero|restage)"; exit 2 ;; esac
-# Resolve the root with git: a fixed `..` count breaks whenever this file moves.
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && git rev-parse --show-toplevel)"
-# Pick by platform: `ls` would sort a stale .dylib ahead of the .so that
-# Racket actually maps on Linux.
 case "$(uname -s)" in
   Darwin) _ext=dylib ;;
   *)      _ext=so ;;
@@ -30,12 +17,7 @@ backup=$(mktemp "${TMPDIR:-/tmp}/$(basename "$lib").XXXXXX.bak") || {
   echo "cannot create backup"; exit 1; }
 mkdir -p "$(dirname "$out")"
 cp -f "$lib" "$backup" && chmod u+w "$backup" || { echo "cannot populate backup"; exit 1; }
-# Restore even on Ctrl-C or an early exit: leaving a zeroed shim staged
-# breaks every later run in this worktree.
 restore () {
-  # Stop the child FIRST.  Restoring while it still has the library mapped
-  # is another in-place write under a live process -- the corruption this
-  # script exists to study -- and would leave the EOF-hung child orphaned.
   exec 3>&- 2>/dev/null || true
   if [ -n "${rkt:-}" ] && kill -0 "$rkt" 2>/dev/null; then
     kill -9 "$rkt" 2>/dev/null || true
@@ -47,14 +29,8 @@ restore () {
   rm -f "$backup"
 }
 trap restore EXIT
-# INT/TERM must TERMINATE, not just restore and fall through: a signal
-# arriving before the corruption step would otherwise let execution reach
-# the destructive write with the backup already removed.
 trap 'exit 130' INT
 trap 'exit 143' TERM
-# Staging leaves the shim 0555.  Without this, `cp` fails (or `cp -f`
-# unlinks and creates a NEW inode) and the live mapping is untouched --
-# the repro would quietly test nothing.
 chmod u+w "$lib"
 
 snapshot () {  # $1 = pid
@@ -76,7 +52,6 @@ printf '(require torch)\n' >&3
 printf '(unless (case "%s" [("cuda") (cuda-available?)] [("mps") (mps-available?)] [("cpu") #t] [else #f]) (printf "REPRO-DEVICE-BAD\\n") (exit 3))\n' "$dev" >&3
 printf '(define D (case "%s" [("cuda") (cuda-device)] [("mps") (mps-device)] [else (cpu-device)]))\n' "$dev" >&3
 sleep 3
-# Refuse to corrupt the shim for a device this host cannot run.
 if grep -q REPRO-DEVICE-BAD "$out" 2>/dev/null; then
   echo "[repro] ABORT: device '$dev' unusable on this host"; exit 3
 fi

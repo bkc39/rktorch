@@ -21,10 +21,6 @@ DEV = os.environ.get("REPRO_DEVICE", "cpu").lower()
 _PICK = ('(define D (case "%s" [("cuda") (cuda-device)] [("mps") (mps-device)] '
          '[else (cpu-device)]))\n' % DEV).encode()
 _HOLD = b"(define held (with-default-device D (for/list ([_ (in-range 400)]) (randn 128 128))))\n"
-# A pty echoes our input back, so the marker must not appear literally in what
-# we send -- otherwise the transcript matches whether or not the guard fired.
-# Assemble it at runtime: the echo shows the format string, only real output
-# shows the joined marker.
 _GUARD = ('(unless (case "%s" [("cuda") (cuda-available?)] [("mps") (mps-available?)] '
           '[("cpu") #t] [else (printf "REPRO-DEVICE-~a\\n" "UNKNOWN") (exit 3)]) '
           '(printf "REPRO-DEVICE-~a\\n" "UNAVAILABLE") (exit 3))\n'
@@ -38,18 +34,16 @@ SETUP = {
     "intr":     _HEAD + [b"(with-default-device D (for ([_ (in-range 4000)]) (void (matmul (randn 256 256) (randn 256 256)))))\n"],
     "spam":     _HEAD + [b"(length held)\n"],
 }
-# seconds to wait after the last setup line before sending Ctrl-D
 DELAY = {"idle": 12.0, "busy": 3.0, "printing": 0.35, "intr": 3.0, "spam": 12.0}
 
 def run(mode, idx, budget=90.0):
     pid, fd = pty.fork()
     if pid == 0:
         try:
-            # trace on, so a swallowed native free is visible at exit
             os.execvpe("racket", ["racket", "-i"],
                        {**os.environ, "RKTORCH_MEM_TRACE": "1"})
         except OSError:
-            os._exit(127)   # else the child falls through and runs the harness
+            os._exit(127)
     out = bytearray()
     t0 = time.time()
     def pump(until):
@@ -65,17 +59,17 @@ def run(mode, idx, budget=90.0):
                 return False
             out.extend(b)
         return True
-    pump(time.time() + 6)                      # banner
+    pump(time.time() + 6)
     for line in SETUP[mode]:
         os.write(fd, line)
         pump(time.time() + 0.4)
     pump(time.time() + DELAY[mode])
     if mode == "intr":
-        os.write(fd, b"\x03")                  # Ctrl-C
+        os.write(fd, b"\x03")
         pump(time.time() + 1.5)
-    os.write(fd, b"\r")                        # ensure an empty line
+    os.write(fd, b"\r")
     pump(time.time() + 0.6)
-    os.write(fd, b"\x04")                      # Ctrl-D
+    os.write(fd, b"\x04")
     if mode == "spam":
         for _ in range(9):
             os.write(fd, b"\x04")
@@ -108,34 +102,12 @@ def run(mode, idx, budget=90.0):
         print(f"ABORT pty/{mode}: device '{DEV}' unusable on this host", flush=True)
         raise SystemExit(3)
     imr = text.count(b"invalid memory reference")
-    # xrepl's banner for any uncaught error.  Without this a setup line that
-    # raises (a CUDA op failing, a renamed binding) leaves the REPL reading,
-    # exiting 0 on Ctrl-D, and scoring clean with its workload never run --
-    # the same way s5-heavy-train passed 20 iterations of nothing.
-    # `intr` sends Ctrl-C on purpose, and a user break prints the same banner as
-    # a real error ("user break [,bt for context]").  Subtract those rather than
-    # exempting the mode, so a genuine setup error in `intr` is still caught.
-    # xrepl wraps long messages, splitting the banner across lines with a ";"
-    # continuation, so match with the line structure removed -- as exit-loop.sh
-    # does.  `intr` sends Ctrl-C on purpose and a user break prints the same
-    # banner, so subtract those rather than exempting the mode.
     flat = text.replace(b"\n", b"").replace(b"\r", b"").replace(b";", b"").replace(b" ", b"")
     setup_error = (flat.count(b"btforcontext]") - flat.count(b"userbreak")) > 0
-    # A native free that failed but was swallowed leaves exit 0 and no fault
-    # text; the exit-time diagnostic is the only place it shows.
     m = re.findall(rb"\(failures \. (\d+)\)", text)
     fin_failures = int(m[-1]) if m else 0
     casc = text.count(b"error display handler") + text.count(b"error escape handler")
-    # An abnormal exit with neither phrase present still is not a clean run:
-    # a child killed by a signal, or exiting nonzero, was scoring as a pass.
     abnormal = exited is not None and exited != 0
-    # The signature under test is the #72 cascade: fault text, or a hang that
-    # also ignores SIGTERM.  A plain hang with no fault text and a SIGTERM that
-    # WORKS is a different thing entirely -- on a tty the line editor treats
-    # Ctrl-D on a non-empty line as delete-char, and `busy` deliberately sends
-    # it mid-computation, so the EOT is sometimes just swallowed.  Measured: the
-    # workload itself is ~7s, far inside the 90s budget, so this is not
-    # slowness.  Count it separately instead of scoring it as the cascade.
     inconclusive = hung and not termignored and not imr and not casc
     bad = imr or casc or abnormal or setup_error or fin_failures or (hung and termignored)
     if bad or inconclusive:
@@ -157,8 +129,6 @@ if __name__ == "__main__":
     incon = sum(i for _, i in results)
     suffix = f" ({incon} inconclusive: Ctrl-D not delivered)" if incon else ""
     print(f"RESULT pty/{mode}-{DEV}: {bad}/{n} failed{suffix}", flush=True)
-    # Nonzero on real failures, and also when every iteration was inconclusive:
-    # a run in which Ctrl-D never landed produced no evidence either way.
     if bad:
         raise SystemExit(1)
     raise SystemExit(2 if incon == n else 0)

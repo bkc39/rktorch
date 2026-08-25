@@ -1,7 +1,4 @@
 #lang racket/base
-;; Print everything a triage report needs about THIS host before running the
-;; harness:  racket build, which libtorchrkt is actually loaded, and which
-;; devices the shim reports.  Run:  racket scripts/debug/exit-loop/preflight.rkt
 (require (only-in racket/system system)
          (only-in torch cuda-available? cuda-device-count cuda-memory-stats
                   cuda-device finalizer-failures mps-available? native-memory-use

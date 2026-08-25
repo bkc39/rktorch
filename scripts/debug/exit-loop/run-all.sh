@@ -1,14 +1,5 @@
 #!/usr/bin/env bash
-# Run the whole exit-loop sweep for one device and write a single report.
-#
-#   scripts/debug/exit-loop/run-all.sh cpu  [iterations]
-#   scripts/debug/exit-loop/run-all.sh cuda [iterations]
-#
-# Must be run from the repo root, inside the dev shell:
-#   nix develop        --command ./scripts/debug/exit-loop/run-all.sh cpu  20
-#   nix develop .#cuda --command ./scripts/debug/exit-loop/run-all.sh cuda 20
-# Stage a matching native lib first (`nix run .#copy-native-libs`); a shim
-# that does not match the bytecode is itself a fault source.
+# run-all.sh <cpu|cuda|mps> [iterations]  env: REPRO_DEVICE REPRO_TIMEOUT REPRO_LOGDIR
 set -u
 set -o pipefail   # else the `| tee` at the end masks every arm's status
 rc=0
@@ -60,10 +51,6 @@ report="$REPRO_LOGDIR/report-$dev.txt"
   rm -f "$REPRO_LOGDIR/.trace"
   echo
   echo "### done $(date)"
-  # The group runs in a subshell (left side of the pipe), so this status is the
-  # only way its result reaches the caller.  A sweep whose arms aborted --
-  # device unavailable, missing shim -- must not look green: that is how a run
-  # that tested nothing gets believed.
   exit "$rc"
 } 2>&1 | tee "$report"
 rc=$?

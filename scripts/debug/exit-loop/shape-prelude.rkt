@@ -1,6 +1,3 @@
-;; Prepended to every shape by exit-loop.sh; not a shape itself.
-;; Binds `dev` from REPRO_DEVICE and aborts if that device is unavailable,
-;; rather than silently degrading to CPU and reporting a meaningless clean run.
 (require torch)
 (define requested (string-downcase (or (getenv "REPRO_DEVICE") "cpu")))
 (define dev
