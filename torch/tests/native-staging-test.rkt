@@ -3,7 +3,7 @@
 ;; The temp-file + rename(2) staging in private/install-torchrkt-native.rkt is
 ;; what fixed #72: an in-place write corrupts every process that has the old
 ;; file mapped.  Nothing else in `raco test` covers it -- the only other
-;; verification is the hardware-dependent scripts under scripts/repro/, which
+;; verification is the hardware-dependent scripts under scripts/debug/exit-loop/, which
 ;; CI does not run.  These tests pin the property that matters: staging must
 ;; replace the directory entry and leave the OLD inode intact and readable.
 

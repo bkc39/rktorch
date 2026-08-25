@@ -3,7 +3,7 @@
 # live REPL that holds tensors, then touch native code and send EOF (Ctrl-D).
 # Restores the library on the way out.  Linux and macOS.
 #
-#   scripts/repro/corrupt-restage.sh [zero|restage]
+#   scripts/debug/exit-loop/corrupt-restage.sh [zero|restage]
 #     zero    (default) zero the whole image past the ELF/Mach header
 #     restage re-copy identical bytes in place -- what `nix run .#copy-native-libs` does
 #

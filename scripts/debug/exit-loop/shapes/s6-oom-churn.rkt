@@ -1,14 +1,5 @@
-(require torch)
-(define requested (string-downcase (or (getenv "REPRO_DEVICE") "cpu")))
-(define dev
-  (case requested
-    [("cuda") (if (cuda-available?) (cuda-device) 'unavailable)]
-    [("mps")  (if (mps-available?)  (mps-device)  'unavailable)]
-    [else (cpu-device)]))
-(when (eq? dev 'unavailable)
-  (printf "REPRO-DEVICE-UNAVAILABLE ~a\n" requested)
-  (exit 3))
-(printf "REPRO device=~a\n" dev)
+;; Body only. `dev` comes from ../shape-prelude.rkt, which exit-loop.sh
+;; prepends; running this file on its own will not define it.
 (define held
   (with-default-device dev (for/list ([_ (in-range 300)]) (randn 128 128))))
 (define ooms 0)

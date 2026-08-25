@@ -2,12 +2,14 @@
 # Feed a shape file into `racket -i` on stdin (EOF == Ctrl-D), N times, and
 # report how often the session ends badly.  Linux and macOS.
 #
-#   REPRO_DEVICE=cuda scripts/repro/exit-loop.sh scripts/repro/shapes/s1-churn.rkt 20
+#   REPRO_DEVICE=cuda scripts/debug/exit-loop/exit-loop.sh scripts/debug/exit-loop/shapes/s1-churn.rkt 20
 #
 # env: REPRO_DEVICE (cpu|cuda|mps, default cpu)   REPRO_TIMEOUT (sec, default 300)
 #      REPRO_LOGDIR (default $TMPDIR/rktorch-repro)
 set -u
 shape="${1:?usage: exit-loop.sh <shape.rkt> [iterations]}"
+prelude="$(dirname "${BASH_SOURCE[0]}")/shape-prelude.rkt"
+[ -f "$prelude" ] || { echo "missing $prelude"; exit 1; }
 n="${2:-20}"
 dev="${REPRO_DEVICE:-cpu}"
 logdir="${REPRO_LOGDIR:-${TMPDIR:-/tmp}/rktorch-repro}"
@@ -20,7 +22,9 @@ for i in $(seq 1 "$n"); do
   log="$logdir/$name-$i.log"
   # --kill-after: the failure under test is a REPL that IGNORES SIGTERM, and
   # plain `timeout` only sends TERM -- without this the sweep hangs forever.
-  timeout --kill-after=30 "$secs" racket -i < "$shape" > "$log" 2>&1
+  # prelude + shape on stdin: the device selection is shared, not copied
+  # into all seven shapes.  EOF at the end is the Ctrl-D under test.
+  cat "$prelude" "$shape" | timeout --kill-after=30 "$secs" racket -i > "$log" 2>&1
   code=$?
   if grep -q 'REPRO-DEVICE-UNAVAILABLE' "$log"; then
     echo "ABORT $name: device '$dev' is not available on this host"
