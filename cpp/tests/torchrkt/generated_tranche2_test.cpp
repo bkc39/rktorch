@@ -211,10 +211,11 @@ TEST(GeneratedTranche2, IndexedWriteFamilyGoldensTwo) {
   expect_error_from("tr_gen_index_fill__int_tensor");
 
   const Handle mask(tr_gen_gt_scalar(m.t, 8.0));
-  const Handle zero(tr_from_data(vv.data(), 1, vd.data(), 0));
+  const std::vector<float> zv = {0.0F};
+  const Handle zero(tr_from_data(zv.data(), 1, vd.data(), 0));
   EXPECT_EQ(tr_gen_masked_fill__tensor(m.t, mask.t, zero.t), 0)
       << tr_last_error();
-  EXPECT_EQ(data_of(m.t), (std::vector<float>{5.0F, 5.0F, 5.0F, 5.0F}));
+  EXPECT_EQ(data_of(m.t), (std::vector<float>{0.0F, 0.0F, 5.0F, 5.0F}));
   EXPECT_EQ(tr_gen_masked_fill__tensor(m.t, nullptr, zero.t), 1);
   expect_error_from("tr_gen_masked_fill__tensor");
 
@@ -223,12 +224,12 @@ TEST(GeneratedTranche2, IndexedWriteFamilyGoldensTwo) {
   const Handle sidx(tr_from_data_i64(sv.data(), sv.size(), sd.data(), 2));
   const Handle ssrc = make({70.0F, 80.0F}, {2, 1});
   EXPECT_EQ(tr_gen_scatter__src(m.t, 1, sidx.t, ssrc.t), 0) << tr_last_error();
-  EXPECT_EQ(data_of(m.t), (std::vector<float>{70.0F, 5.0F, 5.0F, 80.0F}));
+  EXPECT_EQ(data_of(m.t), (std::vector<float>{70.0F, 0.0F, 5.0F, 80.0F}));
   EXPECT_EQ(tr_gen_scatter__src(nullptr, 1, sidx.t, ssrc.t), 1);
   expect_error_from("tr_gen_scatter__src");
 
   EXPECT_EQ(tr_gen_scatter_add_(m.t, 1, sidx.t, ssrc.t), 0) << tr_last_error();
-  EXPECT_EQ(data_of(m.t), (std::vector<float>{140.0F, 5.0F, 5.0F, 160.0F}));
+  EXPECT_EQ(data_of(m.t), (std::vector<float>{140.0F, 0.0F, 5.0F, 160.0F}));
   EXPECT_EQ(tr_gen_scatter_add_(m.t, 1, nullptr, ssrc.t), 1);
   expect_error_from("tr_gen_scatter_add_");
 }

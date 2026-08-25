@@ -1,6 +1,8 @@
 #lang racket/base
 
-(require (only-in racket/list append* drop [flatten list-flatten] [take list-take])
+(require (only-in racket/list
+                  append* drop [flatten list-flatten] make-list
+                  [take list-take])
          (only-in "device-type.rkt" device-type)
          (only-in "ops.rkt"
                   item tensor-device tensor-dtype tensor-shape tensor->list
@@ -232,7 +234,11 @@
   (void (g:index-copy! t dim index source)))
 
 (define (index-add! t dim index source #:alpha [alpha 1])
-  (void (g:index-add! t dim index source (exact->inexact alpha))))
+  (void
+   (if (and (exact-integer? alpha) (int64-dtype? t))
+       (g:index-add! t dim index (mul source (scalar->value-tensor alpha t))
+                     1.0)
+       (g:index-add! t dim index source (exact->inexact alpha)))))
 
 (define (index-fill! t dim index v)
   (void
@@ -264,13 +270,21 @@
   (void (g:masked-scatter! t mask source)))
 
 (define (write-mask-target! t mask0 v)
-  (define mask (to-device mask0 (tensor-device t)))
-  (define mdims (tensor-shape mask))
+  (define moved (to-device mask0 (tensor-device t)))
+  (define mdims (tensor-shape moved))
   (define tdims (tensor-shape t))
   (unless (and (<= (length mdims) (length tdims))
                (equal? mdims (list-take tdims (length mdims))))
     (error 'tensor-ref! "mask shape ~a does not match leading dims of ~a"
            mdims tdims))
+  ;; ATen broadcasts masks right-aligned; a leading-dims mask needs
+  ;; trailing width-1 dims or it lands on the wrong axes
+  (define trailing (list-tail tdims (length mdims)))
+  (define mask
+    (if (null? trailing)
+        moved
+        (apply reshape moved
+               (append mdims (make-list (length trailing) 1)))))
   (cond
     [(not (tensor? v))
      (if (and (exact-integer? v) (int64-dtype? t))
@@ -282,7 +296,8 @@
     [else
      ;; python requires source numel = true count (masked_scatter_
      ;; would silently ignore surplus)
-     (define nnz (item (sum (to-dtype mask 'int64))))
+     (define nnz (* (item (sum (to-dtype mask 'int64)))
+                    (apply * trailing)))
      (unless (= (apply * (tensor-shape v)) nnz)
        (error 'tensor-ref!
               "source has ~a elements for ~a true mask positions"

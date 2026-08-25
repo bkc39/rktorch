@@ -71,7 +71,6 @@
        (for/list ([s (in-list (syntax->list #'(spec ...)))])
          (parse-spec s 'ref!)))
      (define tmps (generate-temporaries parsed))
-     ;; specs evaluate before the value, in source order
      #`(let* ([target t]
               #,@(for/list ([tmp (in-list tmps)] [e (in-list parsed)])
                    #`[#,tmp #,e])

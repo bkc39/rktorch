@@ -172,5 +172,27 @@
     (check-exn #rx"true mask positions"
                (lambda ()
                  (let ([t (fresh)])
-                   (ref! t (gt t 4.0) (tensor '(1.0 2.0 3.0)))))))
+                   (ref! t (gt t 4.0) (tensor '(1.0 2.0 3.0))))))
+    ;; leading-dims masks select rows, not right-aligned columns
+    (let ([t (fresh)])
+      (ref! t (ne (tensor '(1 0)) 0) 0)
+      (check-equal? (tensor->list t) '(0.0 0.0 0.0 4.0 5.0 6.0)))
+    (let ([sq (tensor '((1.0 2.0) (3.0 4.0)))])
+      (ref! sq (ne (tensor '(1 0)) 0) 9)
+      (check-equal? (tensor->list sq) '(9.0 9.0 3.0 4.0)))
+    (let ([t (fresh)])
+      (ref! t (ne (tensor '(0 1)) 0) (tensor '(7.0 8.0 9.0)))
+      (check-equal? (tensor->list t) '(1.0 2.0 3.0 7.0 8.0 9.0)))
+    (let ([t (fresh)])
+      (ref! t (ne (tensor '(1 0)) 0) (tensor 9.0))
+      (check-equal? (tensor->list t) '(9.0 9.0 9.0 4.0 5.0 6.0)))
+    (check-exn #rx"true mask positions"
+               (lambda ()
+                 (ref! (fresh) (ne (tensor '(1 0)) 0)
+                       (tensor '(7.0 8.0)))))
+    ;; #:alpha keeps exactness on int64 destinations
+    (let ([it (tensor '(0 0))])
+      (index-add! it 0 (to-dtype (tensor '(1)) 'int64) (tensor '(1))
+                  #:alpha (add1 (expt 2 53)))
+      (check-equal? (tensor->list it) (list 0 (add1 (expt 2 53))))))
 )
