@@ -520,9 +520,9 @@
           ];
 
           # Parameterised by the shim this shell wants.  Do NOT stage a second
-          # time in a downstream hook: two stamped stages in one entry oscillate
-          # the stamp and restage on every single entry, which is the churn the
-          # stamp exists to remove (#72).
+          # time in a downstream hook: two stages in one entry fight over which
+          # shim is staged and restage on every single entry, which is the churn
+          # this exists to avoid (#72).
           provisionRacketFor = shim: ''
             export TORCHRKT_NATIVE_LIB_PATH="${shim}"
             export PLTUSERHOME="$PWD/.racket-user"

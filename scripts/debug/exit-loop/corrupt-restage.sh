@@ -12,7 +12,9 @@
 # demand paging the outcome may differ -- that is the point of running it there.
 set -u
 mode="${1:-zero}"
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# git, not a fixed number of `..`: counting parents silently broke when this
+# script moved under scripts/debug/, and it aborted before running anything.
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && git rev-parse --show-toplevel)"
 lib="$(ls "$root"/torch/native-libs/libtorchrkt.so "$root"/torch/native-libs/libtorchrkt.dylib 2>/dev/null | head -1)"
 [ -n "$lib" ] || { echo "no staged libtorchrkt in $root/torch/native-libs"; exit 1; }
 dev="${REPRO_DEVICE:-cpu}"

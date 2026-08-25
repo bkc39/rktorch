@@ -9,8 +9,8 @@
 
 (module+ test
   (require rackunit
-           racket/file
-           racket/port
+           (only-in racket/file file->string make-directory* make-temporary-directory)
+           (only-in racket/port port->string)
            (only-in "../private/install-torchrkt-native.rkt" pre-installer))
 
   ;; Build a fake `${cpp}` output whose lib/ holds a libtorchrkt with `content`.
