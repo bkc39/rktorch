@@ -14,5 +14,5 @@ checkpoints/
 # (The reviewed v0 plan is checked in as plans/v0-scaffold.md.)
 .claude/worktrees/
 
-# exit-loop repro harness output (docs/exit-loop-runbook.txt)
+# exit-loop repro harness output, plus local investigation notes
 repro-logs/

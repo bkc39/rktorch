@@ -4,7 +4,11 @@
 #   scripts/repro/run-all.sh cpu  [iterations]
 #   scripts/repro/run-all.sh cuda [iterations]
 #
-# Must be run from the repo root, inside the dev shell (see the runbook).
+# Must be run from the repo root, inside the dev shell:
+#   nix develop        --command ./scripts/repro/run-all.sh cpu  20
+#   nix develop .#cuda --command ./scripts/repro/run-all.sh cuda 20
+# Stage a matching native lib first (`nix run .#copy-native-libs`); a shim
+# that does not match the bytecode is itself a fault source.
 set -u
 dev="${1:-cpu}"
 n="${2:-20}"
