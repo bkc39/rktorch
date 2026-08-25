@@ -11,7 +11,7 @@
 
 (provide pre-installer)
 
-(require (only-in racket/file make-directory* file->bytes)
+(require (only-in racket/file file->bytes make-directory*)
          (only-in "util.rkt" with-temporary-file))
 
 (define lib-pattern #rx"^libtorchrkt\\.")

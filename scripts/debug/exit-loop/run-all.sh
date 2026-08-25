@@ -48,7 +48,7 @@ report="$REPRO_LOGDIR/report-$dev.txt"
   cat scripts/debug/exit-loop/shape-prelude.rkt \
       scripts/debug/exit-loop/shapes/s4-mixed.rkt \
     | RKTORCH_MEM_TRACE=1 racket -i 2>&1 \
-    | grep 'rktorch mem' || echo "no trace line -- are you on debug/exit-loop?"
+    | grep 'rktorch mem' || { echo "no trace line -- diagnostics arm FAILED"; rc=1; }
   echo
   echo "### done $(date)"
   # The group runs in a subshell (left side of the pipe), so this status is the

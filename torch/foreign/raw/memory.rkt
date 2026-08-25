@@ -60,17 +60,14 @@
            (cons 'messages (reverse (unbox captured-failures)))
            (cons 'ledger-entries (hash-count allocations))))))
 
-;; Total guard because this IS the handler of the with-handlers below, so
-;; nothing else protects it, and it runs inside alloc.rkt's raw atomic region
-;; where an escape is a process death rather than a raise.  Measured: the
-;; `(format "~e" e)` below cannot re-enter a custom printer (and so cannot
-;; re-enter the FFI) -- in atomic mode Racket substitutes a placeholder instead
-;; of running prop:custom-write -- so this is defence in depth, not a live bug.
 (define (take-at-most n xs)
   (cond
     [(or (zero? n) (null? xs)) '()]
     [else (cons (car xs) (take-at-most (sub1 n) (cdr xs)))]))
 
+;; Total guard because this IS the handler of the with-handlers below, so
+;; nothing else protects it, and it runs inside alloc.rkt's raw atomic region
+;; where an escape is a process death rather than a raise.
 (define (record-failure! e)
   (with-handlers ([(lambda (_) #t) void])
     (record-failure!/unguarded e)))

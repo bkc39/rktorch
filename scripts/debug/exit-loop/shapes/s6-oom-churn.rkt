@@ -17,6 +17,10 @@
       (void (zeros 1152921504606846976)))
     (void (matmul (randn 256 256) (randn 256 256)))))
 (printf "ooms=~a other=~a\n" ooms others)
+;; Fail loudly rather than reporting a clean arm that never reached the
+;; collect/drain/retry path this shape exists to exercise.
+(unless (and (= ooms 150) (zero? others))
+  (error 's6-oom-churn "expected 150 typed OOMs and 0 generic, got ~a/~a" ooms others))
 (length held)
 (finalizer-failures)
 (native-memory-use)

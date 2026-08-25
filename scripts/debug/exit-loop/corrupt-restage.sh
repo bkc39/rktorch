@@ -12,8 +12,7 @@
 # demand paging the outcome may differ -- that is the point of running it there.
 set -u
 mode="${1:-zero}"
-# git, not a fixed number of `..`: counting parents silently broke when this
-# script moved under scripts/debug/, and it aborted before running anything.
+# Resolve the root with git: a fixed `..` count breaks whenever this file moves.
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && git rev-parse --show-toplevel)"
 lib="$(ls "$root"/torch/native-libs/libtorchrkt.so "$root"/torch/native-libs/libtorchrkt.dylib 2>/dev/null | head -1)"
 [ -n "$lib" ] || { echo "no staged libtorchrkt in $root/torch/native-libs"; exit 1; }
@@ -25,7 +24,20 @@ mkdir -p "$(dirname "$out")"
 cp -f "$lib" "$backup" && chmod u+w "$backup" || { echo "cannot populate backup"; exit 1; }
 # Restore even on Ctrl-C or an early exit: leaving a zeroed shim staged
 # breaks every later run in this worktree.
-restore () { chmod u+w "$lib" 2>/dev/null || true; cp -f "$backup" "$lib" 2>/dev/null || true; chmod 0555 "$lib" 2>/dev/null || true; rm -f "$backup"; }
+restore () {
+  # Stop the child FIRST.  Restoring while it still has the library mapped
+  # is another in-place write under a live process -- the corruption this
+  # script exists to study -- and would leave the EOF-hung child orphaned.
+  exec 3>&- 2>/dev/null || true
+  if [ -n "${rkt:-}" ] && kill -0 "$rkt" 2>/dev/null; then
+    kill -9 "$rkt" 2>/dev/null || true
+    wait "$rkt" 2>/dev/null || true
+  fi
+  chmod u+w "$lib" 2>/dev/null || true
+  cp -f "$backup" "$lib" 2>/dev/null || true
+  chmod 0555 "$lib" 2>/dev/null || true
+  rm -f "$backup"
+}
 trap restore EXIT
 # INT/TERM must TERMINATE, not just restore and fall through: a signal
 # arriving before the corruption step would otherwise let execution reach
