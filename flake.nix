@@ -132,13 +132,18 @@
         mkdir -p "$_dest"
         for _f in ${src}/lib/libtorchrkt.*; do
           _b=$(basename "$_f")
-          cp -f "$_f" "$_dest/.$_b.tmp.$$"
-          # read-only, as the store ships it: an in-place `cp` then fails loudly
-          # with EACCES rather than silently corrupting a live mapping.  This
-          # also makes the mode explicit, so no --no-preserve=mode is needed --
-          # and the helper stays POSIX, usable under BSD cp as well as GNU.
-          chmod 0555 "$_dest/.$_b.tmp.$$"
-          mv -f "$_dest/.$_b.tmp.$$" "$_dest/$_b"
+          # Chained: a shell hook has no errexit, so a partial copy must not
+          # reach the rename and replace a good shim with a truncated one.
+          # 0555 as the store ships it, which also makes an in-place `cp` fail
+          # loudly with EACCES; no --no-preserve=mode keeps this POSIX.
+          if cp -f "$_f" "$_dest/.$_b.tmp.$$" \
+             && chmod 0555 "$_dest/.$_b.tmp.$$"; then
+            mv -f "$_dest/.$_b.tmp.$$" "$_dest/$_b"
+          else
+            rm -f "$_dest/.$_b.tmp.$$"
+            echo "ERROR: staging $_b failed; leaving the existing shim in place" >&2
+            return 1 2>/dev/null || exit 1
+          fi
         done
       '';
 
@@ -147,12 +152,9 @@
       # (the #72 vector, unprompted), while the default shell never restaged at
       # all — so a plain `nix develop` after a `.#cuda` visit kept running the
       # CUDA-linked shim, which needs the driver farm to even load.
-      # Keyed on what is ACTUALLY staged, not on a stamp recording intent.  A
-      # stamp lies as soon as any other writer stages -- `nix run
-      # .#copy-native-libs` puts the CPU shim back without touching it, and
-      # re-entering `.#cuda` would then skip staging and run CUDA against the
-      # CPU shim.  Comparing the bytes also self-heals a deleted or truncated
-      # destination.  It is a ~220 KB compare on shell entry.
+      # Keyed on the bytes actually staged, so any other writer -- `nix run
+      # .#copy-native-libs`, a hand copy, a deletion -- is noticed on the next
+      # shell entry.  ~220 KB compare.
       stageNativeLibsIfStale = src: ''
         _stale=0
         for _f in ${src}/lib/libtorchrkt.*; do
@@ -522,10 +524,9 @@
             pkgs.stdenv.cc
           ];
 
-          # Parameterised by the shim this shell wants.  Do NOT stage a second
-          # time in a downstream hook: two stages in one entry fight over which
-          # shim is staged and restage on every single entry, which is the churn
-          # this exists to avoid (#72).
+          # Parameterised by the shim this shell wants.  Exactly one staging
+          # call per entry: a second one in a downstream hook would fight over
+          # which shim is staged and restage on every entry.
           provisionRacketFor = shim: ''
             export TORCHRKT_NATIVE_LIB_PATH="${shim}"
             export PLTUSERHOME="$PWD/.racket-user"

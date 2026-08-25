@@ -15,7 +15,7 @@ modes: idle     Ctrl-D at a quiet prompt
        intr     Ctrl-C then Ctrl-D
        spam     ten Ctrl-Ds in a row
 """
-import os, pty, select, signal, sys, time
+import os, pty, re, select, signal, sys, time
 
 DEV = os.environ.get("REPRO_DEVICE", "cpu").lower()
 _PICK = ('(define D (case "%s" [("cuda") (cuda-device)] [("mps") (mps-device)] '
@@ -44,7 +44,9 @@ def run(mode, idx, budget=90.0):
     pid, fd = pty.fork()
     if pid == 0:
         try:
-            os.execvp("racket", ["racket", "-i"])
+            # trace on, so a swallowed native free is visible at exit
+            os.execvpe("racket", ["racket", "-i"],
+                       {**os.environ, "RKTORCH_MEM_TRACE": "1"})
         except OSError:
             os._exit(127)   # else the child falls through and runs the harness
     out = bytearray()
@@ -113,6 +115,10 @@ def run(mode, idx, budget=90.0):
     # a real error ("user break [,bt for context]").  Subtract those rather than
     # exempting the mode, so a genuine setup error in `intr` is still caught.
     setup_error = (text.count(b"[,bt for context]") - text.count(b"user break")) > 0
+    # A native free that failed but was swallowed leaves exit 0 and no fault
+    # text; the exit-time diagnostic is the only place it shows.
+    m = re.findall(rb"\(failures \. (\d+)\)", text)
+    fin_failures = int(m[-1]) if m else 0
     casc = text.count(b"error display handler") + text.count(b"error escape handler")
     # An abnormal exit with neither phrase present still is not a clean run:
     # a child killed by a signal, or exiting nonzero, was scoring as a pass.
@@ -125,13 +131,15 @@ def run(mode, idx, budget=90.0):
     # workload itself is ~7s, far inside the 90s budget, so this is not
     # slowness.  Count it separately instead of scoring it as the cascade.
     inconclusive = hung and not termignored and not imr and not casc
-    bad = imr or casc or abnormal or setup_error or (hung and termignored)
+    bad = imr or casc or abnormal or setup_error or fin_failures or (hung and termignored)
     if bad or inconclusive:
-        p = os.path.join(os.environ.get("REPRO_LOGDIR", "/tmp"), f"rktorch-pty-{mode}-{DEV}-{idx}.log")
+        d = os.environ.get("REPRO_LOGDIR", "/tmp")
+        os.makedirs(d, exist_ok=True)
+        p = os.path.join(d, f"rktorch-pty-{mode}-{DEV}-{idx}.log")
         open(p, "wb").write(text)
         print(f"{'FAIL' if bad else 'INCONCLUSIVE'} mode={mode} iter={idx} hung={hung} "
               f"term_ignored={termignored} abnormal_exit={abnormal} "
-              f"setup_error={setup_error} imr={imr} "
+              f"setup_error={setup_error} finalizer_failures={fin_failures} imr={imr} "
               f"cascade={casc} bytes={len(text)} exit={exited} log={p}", flush=True)
     return bool(bad), bool(inconclusive)
 

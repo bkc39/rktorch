@@ -7,7 +7,9 @@
 # env: REPRO_DEVICE (cpu|cuda|mps, default cpu)   REPRO_TIMEOUT (sec, default 300)
 #      REPRO_LOGDIR (default $TMPDIR/rktorch-repro)
 set -u
+set -o pipefail   # else `cat` failing on a missing shape is masked by racket
 shape="${1:?usage: exit-loop.sh <shape.rkt> [iterations]}"
+[ -r "$shape" ] || { echo "cannot read shape: $shape"; exit 1; }
 prelude="$(dirname "${BASH_SOURCE[0]}")/shape-prelude.rkt"
 [ -f "$prelude" ] || { echo "missing $prelude"; exit 1; }
 n="${2:-20}"

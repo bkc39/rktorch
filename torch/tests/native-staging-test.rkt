@@ -1,11 +1,8 @@
 #lang racket/base
 
-;; The temp-file + rename(2) staging in private/install-torchrkt-native.rkt is
-;; what fixed #72: an in-place write corrupts every process that has the old
-;; file mapped.  Nothing else in `raco test` covers it -- the only other
-;; verification is the hardware-dependent scripts under scripts/debug/exit-loop/, which
-;; CI does not run.  These tests pin the property that matters: staging must
-;; replace the directory entry and leave the OLD inode intact and readable.
+;; Staging must replace the directory entry, never write the file in place: a
+;; process with the old library mapped keeps executing it, so the old inode
+;; has to stay intact and readable across a restage.
 
 (module+ test
   (require rackunit

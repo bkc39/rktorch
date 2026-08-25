@@ -48,7 +48,16 @@ report="$REPRO_LOGDIR/report-$dev.txt"
   cat scripts/debug/exit-loop/shape-prelude.rkt \
       scripts/debug/exit-loop/shapes/s4-mixed.rkt \
     | RKTORCH_MEM_TRACE=1 racket -i 2>&1 \
-    | grep 'rktorch mem' || { echo "no trace line -- diagnostics arm FAILED"; rc=1; }
+    | grep 'rktorch mem' > "$REPRO_LOGDIR/.trace" \
+    || { echo "no trace line -- diagnostics arm FAILED"; rc=1; }
+  if [ -s "$REPRO_LOGDIR/.trace" ]; then
+    cat "$REPRO_LOGDIR/.trace"
+    _f=$(grep -oE '\(failures \. [0-9]+\)' "$REPRO_LOGDIR/.trace" | grep -oE '[0-9]+' | tail -1)
+    if [ -n "$_f" ] && [ "$_f" -ne 0 ]; then
+      echo "diagnostics arm FAILED: finalizer-failures=$_f"; rc=1
+    fi
+  fi
+  rm -f "$REPRO_LOGDIR/.trace"
   echo
   echo "### done $(date)"
   # The group runs in a subshell (left side of the pipe), so this status is the

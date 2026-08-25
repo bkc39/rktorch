@@ -12,9 +12,17 @@
 # demand paging the outcome may differ -- that is the point of running it there.
 set -u
 mode="${1:-zero}"
+case "$mode" in zero|restage) ;; *) echo "unknown mode: $mode (want zero|restage)"; exit 2 ;; esac
 # Resolve the root with git: a fixed `..` count breaks whenever this file moves.
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && git rev-parse --show-toplevel)"
-lib="$(ls "$root"/torch/native-libs/libtorchrkt.so "$root"/torch/native-libs/libtorchrkt.dylib 2>/dev/null | head -1)"
+# Pick by platform: `ls` would sort a stale .dylib ahead of the .so that
+# Racket actually maps on Linux.
+case "$(uname -s)" in
+  Darwin) _ext=dylib ;;
+  *)      _ext=so ;;
+esac
+lib="$root/torch/native-libs/libtorchrkt.$_ext"
+[ -f "$lib" ] || lib=""
 [ -n "$lib" ] || { echo "no staged libtorchrkt in $root/torch/native-libs"; exit 1; }
 dev="${REPRO_DEVICE:-cpu}"
 out="${REPRO_LOGDIR:-${TMPDIR:-/tmp}}/corrupt-$mode-$dev.log"
