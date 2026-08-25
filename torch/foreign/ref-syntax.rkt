@@ -67,7 +67,13 @@
 (define-syntax (ref! stx)
   (syntax-parse stx
     [(_ t:expr spec ... v:expr)
-     #`(tensor-ref! t v
-                    #,@(for/list ([s (in-list
-                                      (syntax->list #'(spec ...)))])
-                         (parse-spec s 'ref!)))]))
+     (define parsed
+       (for/list ([s (in-list (syntax->list #'(spec ...)))])
+         (parse-spec s 'ref!)))
+     (define tmps (generate-temporaries parsed))
+     ;; specs evaluate before the value, in source order
+     #`(let* ([target t]
+              #,@(for/list ([tmp (in-list tmps)] [e (in-list parsed)])
+                   #`[#,tmp #,e])
+              [val v])
+         (tensor-ref! target val #,@tmps))]))

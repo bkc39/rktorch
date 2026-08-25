@@ -60,6 +60,7 @@ void torchrkt_c_api_compile_check(void) {
   int (*gen_addcmul_)(tr_tensor*, const tr_tensor*, const tr_tensor*, double) =
       tr_gen_addcmul_;
   int (*gen_copy_)(tr_tensor*, const tr_tensor*, bool) = tr_gen_copy_;
+  int (*gen_fill_)(tr_tensor*, double) = tr_gen_fill__scalar;
   int (*gen_index_copy_)(tr_tensor*, int64_t, const tr_tensor*,
                          const tr_tensor*) = tr_gen_index_copy_;
   int (*gen_index_add_)(tr_tensor*, int64_t, const tr_tensor*, const tr_tensor*,
@@ -177,6 +178,7 @@ void torchrkt_c_api_compile_check(void) {
   (void)gen_lerp_;
   (void)gen_addcmul_;
   (void)gen_copy_;
+  (void)gen_fill_;
   (void)gen_index_copy_;
   (void)gen_index_add_;
   (void)gen_scatter_value_;

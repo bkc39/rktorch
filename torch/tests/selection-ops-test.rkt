@@ -158,6 +158,17 @@
     (let ([t (fresh)])
       (ref! t (gt t 4.0) (tensor 0.0))
       (check-equal? (tensor->list t) '(1.0 2.0 3.0 4.0 0.0 0.0)))
+    (check-exn #rx"out of range"
+               (lambda () (ref! (arange 3) 3 9)))
+    (check-exn #rx"out of range"
+               (lambda () (ref! (arange 3) -4 9)))
+    (check-exn #rx"too many indices"
+               (lambda () (ref! (tensor 5.0) : 7)))
+    (let ([b (gt (arange 3) 0.5)])
+      (scatter! b 0 (to-dtype (tensor '(0)) 'int64) 1)
+      (masked-fill! b (eq (arange 3) 1.0) 0)
+      (index-fill! b 0 (to-dtype (tensor '(2)) 'int64) 1)
+      (check-equal? (tensor->list b) '(1.0 0.0 1.0)))
     (check-exn #rx"true mask positions"
                (lambda ()
                  (let ([t (fresh)])

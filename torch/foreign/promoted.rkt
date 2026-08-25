@@ -222,8 +222,8 @@
        [else (g:where-scalar mask (exact->inexact a) (exact->inexact b))])]))
 
 
-(define (integral-dtype? t)
-  (memq (tensor-dtype t) '(bool int64)))
+(define (int64-dtype? t)
+  (eq? (tensor-dtype t) 'int64))
 
 (define (scalar->value-tensor v t)
   (tensor v #:dtype 'int64 #:device (tensor-device t)))
@@ -236,7 +236,7 @@
 
 (define (index-fill! t dim index v)
   (void
-   (if (and (exact-integer? v) (integral-dtype? t))
+   (if (and (exact-integer? v) (int64-dtype? t))
        (g:index-fill-int-tensor! t dim index (scalar->value-tensor v t))
        (g:index-fill-int-scalar! t dim index (exact->inexact v)))))
 
@@ -244,7 +244,7 @@
   (void
    (cond
      [(tensor? v) (g:scatter-src! t dim index v)]
-     [(and (exact-integer? v) (integral-dtype? t))
+     [(and (exact-integer? v) (int64-dtype? t))
       ;; broadcast v to the index shape without a double transit
       (g:scatter-src! t dim index
                       (add (mul index (scalar->value-tensor 0 t))
@@ -256,16 +256,13 @@
 
 (define (masked-fill! t mask v)
   (void
-   (if (and (exact-integer? v) (integral-dtype? t))
+   (if (and (exact-integer? v) (int64-dtype? t))
        (g:masked-fill-tensor! t mask (scalar->value-tensor v t))
        (g:masked-fill-scalar! t mask (exact->inexact v)))))
 
 (define (masked-scatter! t mask source)
   (void (g:masked-scatter! t mask source)))
 
-;; the write twin of tensor-ref: basic specs address a view (writes
-;; reach the source), a sole bool mask follows python's t[mask] = v;
-;; index vectors/tensors in write position need aten::index_put_
 (define (write-mask-target! t mask0 v)
   (define mask (to-device mask0 (tensor-device t)))
   (define mdims (tensor-shape mask))
@@ -276,7 +273,7 @@
            mdims tdims))
   (cond
     [(not (tensor? v))
-     (if (and (exact-integer? v) (integral-dtype? t))
+     (if (and (exact-integer? v) (int64-dtype? t))
          (g:masked-fill-tensor! t mask (scalar->value-tensor v t))
          (g:masked-fill-scalar! t mask (exact->inexact v)))]
     [(null? (tensor-shape v))
@@ -305,29 +302,36 @@
     [else
      ;; the target view is chosen statically (no read of the current
      ;; value, which would device-sync): a fully integer-indexed
-     ;; target rebuilds ints as width-1 slices to stay a view
-     (define consumed
-       (for/sum ([s (in-list specs)]) (spec-consumed-dims s)))
+     ;; target rebuilds ints as width-1 slices to stay a view. ATen
+     ;; clamps slices where select would raise, so the rebuilt ints
+     ;; are bounds-checked first
+     (define rank (length (tensor-shape t)))
+     (define expanded (expand-ellipsis specs rank 'tensor-ref!))
      (define dropped
-       (for/sum ([s (in-list specs)])
+       (for/sum ([s (in-list expanded)])
          (if (exact-integer? s) 1 0)))
      (define added
-       (for/sum ([s (in-list specs)]) (if (eq? s #f) 1 0)))
-     (define rank (length (tensor-shape t)))
+       (for/sum ([s (in-list expanded)]) (if (eq? s #f) 1 0)))
      (define result-rank (+ (- rank dropped) added))
      (define view
        (cond
-         [(positive? result-rank) (apply tensor-ref t specs)]
+         [(positive? result-rank) (apply tensor-ref t expanded)]
          [(zero? rank) (reshape t 1)]
          [else
+          (for ([s (in-list expanded)]
+                [n (in-list (tensor-shape t))])
+            (unless (and (exact-integer? s) (< (- (add1 n)) s n))
+              (error 'tensor-ref!
+                     "index ~a out of range for dimension of size ~a"
+                     s n)))
           (apply tensor-ref t
-                 (for/list ([s (in-list specs)])
+                 (for/list ([s (in-list expanded)])
                    (if (exact-integer? s)
                        (if (= s -1) (:: s #f) (:: s (add1 s)))
                        s)))]))
      (cond
        [(tensor? v) (g:copy! view v #f)]
-       [(and (exact-integer? v) (integral-dtype? t))
+       [(and (exact-integer? v) (int64-dtype? t))
         (g:copy! view (scalar->value-tensor v t) #f)]
        ;; fill_'s C double keeps full float precision (a float32
        ;; ingestion transit would round float64 destinations)
