@@ -239,7 +239,8 @@
 
 (define (index-add! t dim index source #:alpha [alpha 1])
   (void
-   (if (and (exact-integer? alpha) (int64-dtype? t))
+   (if (and (exact-integer? alpha) (int64-dtype? t)
+            (not (double-roundtrips? alpha)))
        (g:index-add! t dim index (mul source (scalar->value-tensor alpha t))
                      1.0)
        (g:index-add! t dim index source (exact->inexact alpha)))))
@@ -330,11 +331,8 @@
             "index-vector write targets need index_put_ (issue #67): ~e"
             specs)]
     [else
-     ;; the target view is chosen statically (no read of the current
-     ;; value, which would device-sync): a fully integer-indexed
-     ;; target rebuilds ints as width-1 slices to stay a view. ATen
-     ;; clamps slices where select would raise, so the rebuilt ints
-     ;; are bounds-checked first
+     ;; ATen clamps slices where select would raise, hence the bounds
+     ;; check before the width-1 rebuild
      (define rank (length (tensor-shape t)))
      (define expanded (expand-ellipsis specs rank 'tensor-ref!))
      (define dropped

@@ -177,6 +177,12 @@ TEST(GeneratedTranche2, IndexedWriteFamilyGoldens) {
   EXPECT_EQ(tr_gen_scatter__value(m.t, 1, sidx.t, 7.0), 0) << tr_last_error();
   EXPECT_EQ(data_of(m.t),
             (std::vector<float>{7.0F, 2.0F, 7.0F, 7.0F, 7.0F, 0.0F}));
+  const Handle smask(tr_gen_gt_scalar(m.t, 6.0));
+  const Handle sfill = make({10.0F, 20.0F, 30.0F, 40.0F}, {4});
+  EXPECT_EQ(tr_gen_masked_scatter_(m.t, smask.t, sfill.t), 0)
+      << tr_last_error();
+  EXPECT_EQ(data_of(m.t),
+            (std::vector<float>{10.0F, 2.0F, 20.0F, 30.0F, 40.0F, 0.0F}));
   EXPECT_EQ(tr_gen_index_copy_(nullptr, 0, idx.t, src.t), 1);
   expect_error_from("tr_gen_index_copy_");
   EXPECT_EQ(tr_gen_masked_scatter_(m.t, nullptr, src.t), 1);
