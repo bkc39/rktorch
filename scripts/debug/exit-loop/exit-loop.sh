@@ -44,3 +44,5 @@ for i in $(seq 1 "$n"); do
   fi
 done
 echo "RESULT $name: $bad/$n failed"
+# Nonzero so run-all.sh aggregates real failures, not only ABORTs.
+[ "$bad" -eq 0 ]

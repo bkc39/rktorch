@@ -161,6 +161,9 @@
         if [ "$_stale" = 1 ]; then
           echo "Staging libtorchrkt (${src})..."
           ${stageNativeLibs src}
+        else
+          # Bytes match but an older checkout may have left 0644/0755 behind.
+          chmod 0555 "$PWD"/torch/native-libs/libtorchrkt.* 2>/dev/null || true
         fi
       '';
     in

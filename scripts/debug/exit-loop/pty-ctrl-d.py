@@ -21,7 +21,14 @@ DEV = os.environ.get("REPRO_DEVICE", "cpu").lower()
 _PICK = ('(define D (case "%s" [("cuda") (cuda-device)] [("mps") (mps-device)] '
          '[else (cpu-device)]))\n' % DEV).encode()
 _HOLD = b"(define held (with-default-device D (for/list ([_ (in-range 400)]) (randn 128 128))))\n"
-_HEAD = [b"(require torch)\n", _PICK, _HOLD]
+# A pty echoes our input back, so the marker must not appear literally in what
+# we send -- otherwise the transcript matches whether or not the guard fired.
+# Assemble it at runtime: the echo shows the format string, only real output
+# shows the joined marker.
+_GUARD = ('(unless (case "%s" [("cuda") (cuda-available?)] [("mps") (mps-available?)] '
+          '[else #t]) (printf "REPRO-DEVICE-~a\\n" "UNAVAILABLE") (exit 3))\n'
+          % DEV).encode()
+_HEAD = [b"(require torch)\n", _GUARD, _PICK, _HOLD]
 
 SETUP = {
     "idle":     _HEAD + [b"(length held)\n"],
@@ -36,7 +43,10 @@ DELAY = {"idle": 12.0, "busy": 3.0, "printing": 0.35, "intr": 3.0, "spam": 12.0}
 def run(mode, idx, budget=90.0):
     pid, fd = pty.fork()
     if pid == 0:
-        os.execvp("racket", ["racket", "-i"])
+        try:
+            os.execvp("racket", ["racket", "-i"])
+        except OSError:
+            os._exit(127)   # else the child falls through and runs the harness
     out = bytearray()
     t0 = time.time()
     def pump(until):
@@ -91,7 +101,7 @@ def run(mode, idx, budget=90.0):
             pass
     os.close(fd)
     text = bytes(out)
-    if b"cuda-device: " in text or b"mps-device: " in text:
+    if b"REPRO-DEVICE-UNAVAILABLE" in text:
         print(f"ABORT pty/{mode}: device '{DEV}' unavailable on this host", flush=True)
         raise SystemExit(3)
     imr = text.count(b"invalid memory reference")
@@ -99,7 +109,10 @@ def run(mode, idx, budget=90.0):
     # raises (a CUDA op failing, a renamed binding) leaves the REPL reading,
     # exiting 0 on Ctrl-D, and scoring clean with its workload never run --
     # the same way s5-heavy-train passed 20 iterations of nothing.
-    setup_error = b"[,bt for context]" in text
+    # `intr` sends Ctrl-C on purpose, and a user break prints the same banner as
+    # a real error ("user break [,bt for context]").  Subtract those rather than
+    # exempting the mode, so a genuine setup error in `intr` is still caught.
+    setup_error = (text.count(b"[,bt for context]") - text.count(b"user break")) > 0
     casc = text.count(b"error display handler") + text.count(b"error escape handler")
     # An abnormal exit with neither phrase present still is not a clean run:
     # a child killed by a signal, or exiting nonzero, was scoring as a pass.
@@ -130,3 +143,6 @@ if __name__ == "__main__":
     incon = sum(i for _, i in results)
     suffix = f" ({incon} inconclusive: Ctrl-D not delivered)" if incon else ""
     print(f"RESULT pty/{mode}-{DEV}: {bad}/{n} failed{suffix}", flush=True)
+    # Exit nonzero so run-all.sh's aggregate status sees real failures, not just
+    # ABORTs.
+    raise SystemExit(1 if bad else 0)

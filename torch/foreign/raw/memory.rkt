@@ -50,12 +50,15 @@
 (define (finalizer-failures)
   (unbox finalizer-failure-count))
 
+;; One atomic section for the whole snapshot: read piecemeal while finalizers
+;; are running, the counts and the messages can disagree with each other.
 (define (finalizer-diagnostics)
-  (list (cons 'runs (unbox finalizer-run-count))
-        (cons 'failures (unbox finalizer-failure-count))
-        (cons 'messages (reverse (unbox captured-failures)))
-        (cons 'ledger-entries (call-with-ledger
-                               (lambda () (hash-count allocations))))))
+  (call-with-ledger
+   (lambda ()
+     (list (cons 'runs (unbox finalizer-run-count))
+           (cons 'failures (unbox finalizer-failure-count))
+           (cons 'messages (reverse (unbox captured-failures)))
+           (cons 'ledger-entries (hash-count allocations))))))
 
 ;; Total guard because this IS the handler of the with-handlers below, so
 ;; nothing else protects it, and it runs inside alloc.rkt's raw atomic region
