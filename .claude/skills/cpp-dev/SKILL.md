@@ -118,9 +118,9 @@ Adding to the `extern "C"` surface requires updating, in the same change:
 
 ### 6. Re-stage the native lib before Racket tests
 
-Shell entry re-stages `libtorchrkt` only when the staged shim differs from the
-`.racket-user/.staged-shim` stamp, so after a C++ change Racket tests would
-otherwise run against the **stale** library — symptom: `dlsym ... symbol not
+Shell entry re-stages `libtorchrkt` only when the staged bytes differ from the
+shim that shell wants, so after a C++ change Racket tests would otherwise run
+against the **stale** library — symptom: `dlsym ... symbol not
 found`. After any C++ change that Racket code will exercise:
 
 ```bash

@@ -59,13 +59,19 @@
        (check-true (regexp-match? #rx"distinctive-marker-9f3a" (car (reverse msgs))))]
       [else (check-equal? (length msgs) 8)]))
 
-  (test-case "finalizer-diagnostics message capture is bounded at 8"
-    ;; drive well past the limit; the list must not grow without bound
+  (test-case "message capture is bounded at 8 and keeps the MOST RECENT"
+    ;; Keeping the first 8 would mean a real cascade late in a session leaves no
+    ;; evidence, because early benign failures already filled the buffer.
     (for ([i (in-range 30)])
       ((swallow-and-count-failure (lambda (_t) (error 'flood "n=~a" i))) 'handle))
+    ((swallow-and-count-failure (lambda (_t) (error 'flood "newest-marker-7c1e"))) 'handle)
     (define msgs (cdr (assq 'messages (finalizer-diagnostics))))
     (check-true (<= (length msgs) 8)
-                (format "capture-limit exceeded: ~a messages" (length msgs))))
+                (format "capture-limit exceeded: ~a messages" (length msgs)))
+    (check-true (for/or ([m (in-list msgs)]) (regexp-match? #rx"newest-marker-7c1e" m))
+                "the most recent failure was dropped once the buffer filled")
+    (check-false (for/or ([m (in-list msgs)]) (regexp-match? #rx"n=0$" m))
+                 "the oldest failure should have rotated out"))
 
   (test-case "record-failure! is guarded: a value whose printing fails is still counted"
     ;; record-failure! is the direct handler of swallow-and-count-failure's

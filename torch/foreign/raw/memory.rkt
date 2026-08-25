@@ -63,6 +63,11 @@
 ;; `(format "~e" e)` below cannot re-enter a custom printer (and so cannot
 ;; re-enter the FFI) -- in atomic mode Racket substitutes a placeholder instead
 ;; of running prop:custom-write -- so this is defence in depth, not a live bug.
+(define (take-at-most n xs)
+  (cond
+    [(or (zero? n) (null? xs)) '()]
+    [else (cons (car xs) (take-at-most (sub1 n) (cdr xs)))]))
+
 (define (record-failure! e)
   (with-handlers ([(lambda (_) #t) void])
     (record-failure!/unguarded e)))
@@ -71,10 +76,13 @@
   (call-with-ledger
    (lambda ()
      (set-box! finalizer-failure-count (add1 (unbox finalizer-failure-count)))
-     (define seen (unbox captured-failures))
-     (when (< (length seen) capture-limit)
-       (set-box! captured-failures
-                 (cons (if (exn? e) (exn-message e) (format "~e" e)) seen))))))
+     ;; Most recent, not first: eight benign failures early in a long session
+     ;; would otherwise starve the evidence for a real cascade later, which is
+     ;; the case this capture exists for.
+     (set-box! captured-failures
+               (take-at-most capture-limit
+                             (cons (if (exn? e) (exn-message e) (format "~e" e))
+                                   (unbox captured-failures)))))))
 
 ;; Total catch on purpose, not exn:fail?: any value escaping GC
 ;; finalization re-enters the error machinery and cascades (#38).

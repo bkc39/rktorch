@@ -10,6 +10,8 @@
 # Stage a matching native lib first (`nix run .#copy-native-libs`); a shim
 # that does not match the bytecode is itself a fault source.
 set -u
+set -o pipefail   # else the `| tee` at the end masks every arm's status
+rc=0
 dev="${1:-cpu}"
 n="${2:-20}"
 export REPRO_DEVICE="$dev"
@@ -26,17 +28,17 @@ report="$REPRO_LOGDIR/report-$dev.txt"
   echo "=============================================================="
   echo
   echo "### preflight"
-  racket scripts/debug/exit-loop/preflight.rkt 2>&1 || echo "PREFLIGHT FAILED"
+  racket scripts/debug/exit-loop/preflight.rkt 2>&1 || { echo "PREFLIGHT FAILED"; rc=1; }
   echo
   echo "### piped-EOF shapes (EOF == Ctrl-D)"
   for f in scripts/debug/exit-loop/shapes/*.rkt; do
-    ./scripts/debug/exit-loop/exit-loop.sh "$f" "$n"
+    ./scripts/debug/exit-loop/exit-loop.sh "$f" "$n" || rc=1
   done
   echo
   echo "### real-pty Ctrl-D"
   if python3 -c 'import pty' 2>/dev/null; then
     for m in idle printing busy intr spam; do
-      python3 scripts/debug/exit-loop/pty-ctrl-d.py "$m" $(( n < 8 ? n : 8 )) 2>&1
+      python3 scripts/debug/exit-loop/pty-ctrl-d.py "$m" $(( n < 8 ? n : 8 )) 2>&1 || rc=1
     done
   else
     echo "SKIP: python3 pty unavailable"
@@ -47,8 +49,15 @@ report="$REPRO_LOGDIR/report-$dev.txt"
     | grep 'rktorch mem' || echo "no trace line -- are you on debug/exit-loop?"
   echo
   echo "### done $(date)"
+  # The group runs in a subshell (left side of the pipe), so this status is the
+  # only way its result reaches the caller.  A sweep whose arms aborted --
+  # device unavailable, missing shim -- must not look green: that is how a run
+  # that tested nothing gets believed.
+  exit "$rc"
 } 2>&1 | tee "$report"
+rc=$?
 
 echo
 echo "Report written to: $report"
 echo "Failure transcripts (if any) in: $REPRO_LOGDIR"
+exit "$rc"

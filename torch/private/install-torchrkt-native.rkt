@@ -11,7 +11,7 @@
 
 (provide pre-installer)
 
-(require (only-in racket/file make-directory*)
+(require (only-in racket/file make-directory* file->bytes)
          (only-in "util.rkt" with-temporary-file))
 
 (define lib-pattern #rx"^libtorchrkt\\.")
@@ -28,12 +28,16 @@
         #:when (regexp-match? lib-pattern (path->string f)))
     (define src (build-path source-dir f))
     (define dst (build-path dest-dir f))
-    (with-temporary-file (tmp #:template "libtorchrkt-~a.part"
-                              #:directory dest-dir)
-      (copy-file src tmp #t)
-      (file-or-directory-permissions
-       tmp (file-or-directory-permissions src 'bits))
-      (rename-file-or-directory tmp dst #t))))
+    ;; Skip when the staged bytes already match: `raco setup` runs this on
+    ;; every shell provision, right after the shell hook has staged the same
+    ;; shim, and a redundant rename would churn the inode for nothing.
+    (unless (and (file-exists? dst) (equal? (file->bytes src) (file->bytes dst)))
+      (with-temporary-file (tmp #:template "libtorchrkt-~a.part"
+                                #:directory dest-dir)
+        (copy-file src tmp #t)
+        (file-or-directory-permissions
+         tmp (file-or-directory-permissions src 'bits))
+        (rename-file-or-directory tmp dst #t)))))
 
 (define (has-matching-files? dir)
   (and (directory-exists? dir)

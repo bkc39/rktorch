@@ -256,9 +256,10 @@ module's full export set (`racket/runtime-path`, `syntax/parse/pre`).
   rename leaves the old inode alive and anything already running keeps
   executing the old lib. **Restart the REPL to pick up a new shim — it does not
   hot-swap.** Never reintroduce an in-place `cp`; it does not merely fail to
-  swap, it corrupts the running process (#72). Which shim is staged is keyed to
-  a `.racket-user/.staged-shim` stamp, so `.#cuda` no longer restages on every
-  entry and returning to the default shell restores the CPU shim. After
+  swap, it corrupts the running process (#72). Shell entry stages only when the
+  staged bytes differ from the shim that shell wants (`cmp`), so `.#cuda` no
+  longer restages on every entry, returning to the default shell restores the
+  CPU shim, and a deleted or truncated shim is replaced rather than skipped. After
   changing C++, `nix run .#copy-native-libs` (or re-enter the shell) before
   `raco test`.
 

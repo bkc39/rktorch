@@ -24,7 +24,12 @@ cp -f "$lib" "$backup" && chmod u+w "$backup" || { echo "cannot populate backup"
 # Restore even on Ctrl-C or an early exit: leaving a zeroed shim staged
 # breaks every later run in this worktree.
 restore () { chmod u+w "$lib" 2>/dev/null || true; cp -f "$backup" "$lib" 2>/dev/null || true; chmod 0555 "$lib" 2>/dev/null || true; rm -f "$backup"; }
-trap restore EXIT INT TERM
+trap restore EXIT
+# INT/TERM must TERMINATE, not just restore and fall through: a signal
+# arriving before the corruption step would otherwise let execution reach
+# the destructive write with the backup already removed.
+trap 'exit 130' INT
+trap 'exit 143' TERM
 # Staging leaves the shim 0555.  Without this, `cp` fails (or `cp -f`
 # unlinks and creates a NEW inode) and the live mapping is untouched --
 # the repro would quietly test nothing.
