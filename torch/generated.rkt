@@ -30,6 +30,7 @@
          embedding
          eq-scalar
          eq-tensor
+         gather
          ge-scalar
          ge-tensor
          gt-scalar
@@ -58,8 +59,14 @@
          select-int
          slice-tensor
          sum-dim-intlist
+         take
+         take-along-dim
          tril
-         triu)
+         triu
+         where-scalar
+         where-scalarother
+         where-scalarself
+         where-self)
 
 (define-generated-op adaptive-avg-pool2d tr_gen_adaptive_avg_pool2d
   ([self tensor] [output-size int-array]))
@@ -102,6 +109,9 @@
 
 (define-generated-op eq-tensor tr_gen_eq_tensor
   ([self tensor] [other tensor]))
+
+(define-generated-op gather tr_gen_gather
+  ([self tensor] [dim int64] [index tensor] [sparse-grad bool]))
 
 (define-generated-op ge-scalar tr_gen_ge_scalar
   ([self tensor] [other scalar]))
@@ -187,8 +197,26 @@
 (define-generated-op sum-dim-intlist tr_gen_sum_dim_intlist
   ([self tensor] [dim optional-int-array] [keepdim bool] [dtype optional-dtype]))
 
+(define-generated-op take tr_gen_take
+  ([self tensor] [index tensor]))
+
+(define-generated-op take-along-dim tr_gen_take_along_dim
+  ([self tensor] [indices tensor] [dim optional-int64]))
+
 (define-generated-op tril tr_gen_tril
   ([self tensor] [diagonal int64]))
 
 (define-generated-op triu tr_gen_triu
   ([self tensor] [diagonal int64]))
+
+(define-generated-op where-scalar tr_gen_where_scalar
+  ([condition tensor] [self scalar] [other scalar]))
+
+(define-generated-op where-scalarother tr_gen_where_scalarother
+  ([condition tensor] [self tensor] [other scalar]))
+
+(define-generated-op where-scalarself tr_gen_where_scalarself
+  ([condition tensor] [self scalar] [other tensor]))
+
+(define-generated-op where-self tr_gen_where_self
+  ([condition tensor] [self tensor] [other tensor]))

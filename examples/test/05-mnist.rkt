@@ -2,7 +2,7 @@
 
 ;; Runner + tests for the literate ../../examples/racket/05-mnist.rkt.
 
-(require (except-in racket/list argmax flatten)
+(require (except-in racket/list argmax flatten take)
          (only-in racket/math nan?)
          torch
          torch/nn
