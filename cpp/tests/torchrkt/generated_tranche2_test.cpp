@@ -152,6 +152,37 @@ TEST(GeneratedTranche2, DropoutEvalIdentityTrainScales) {
   expect_error_from("tr_gen_dropout");
 }
 
+TEST(GeneratedTranche2, IndexedWriteFamilyGoldens) {
+  const Handle m = make({1.0F, 2.0F, 3.0F, 4.0F, 5.0F, 6.0F}, {2, 3});
+  const std::vector<int64_t> iv = {1};
+  const std::vector<int64_t> id1 = {1};
+  const Handle idx(tr_from_data_i64(iv.data(), iv.size(), id1.data(), 1));
+  const Handle src = make({9.0F, 9.0F, 9.0F}, {1, 3});
+  EXPECT_EQ(tr_gen_index_copy_(m.t, 0, idx.t, src.t), 0) << tr_last_error();
+  EXPECT_EQ(data_of(m.t),
+            (std::vector<float>{1.0F, 2.0F, 3.0F, 9.0F, 9.0F, 9.0F}));
+  EXPECT_EQ(tr_gen_index_add_(m.t, 0, idx.t, src.t, 2.0), 0) << tr_last_error();
+  EXPECT_EQ(data_of(m.t),
+            (std::vector<float>{1.0F, 2.0F, 3.0F, 27.0F, 27.0F, 27.0F}));
+  EXPECT_EQ(tr_gen_index_fill__int_scalar(m.t, 0, idx.t, 0.0), 0)
+      << tr_last_error();
+  const Handle mask(tr_gen_gt_scalar(m.t, 2.0));
+  EXPECT_EQ(tr_gen_masked_fill__scalar(m.t, mask.t, -1.0), 0)
+      << tr_last_error();
+  EXPECT_EQ(data_of(m.t),
+            (std::vector<float>{1.0F, 2.0F, -1.0F, 0.0F, 0.0F, 0.0F}));
+  const std::vector<int64_t> sv = {0, 2, 1, 0};
+  const std::vector<int64_t> sd = {2, 2};
+  const Handle sidx(tr_from_data_i64(sv.data(), sv.size(), sd.data(), 2));
+  EXPECT_EQ(tr_gen_scatter__value(m.t, 1, sidx.t, 7.0), 0) << tr_last_error();
+  EXPECT_EQ(data_of(m.t),
+            (std::vector<float>{7.0F, 2.0F, 7.0F, 7.0F, 7.0F, 0.0F}));
+  EXPECT_EQ(tr_gen_index_copy_(nullptr, 0, idx.t, src.t), 1);
+  expect_error_from("tr_gen_index_copy_");
+  EXPECT_EQ(tr_gen_masked_scatter_(m.t, nullptr, src.t), 1);
+  expect_error_from("tr_gen_masked_scatter_");
+}
+
 TEST(GeneratedTranche2, InplaceCopyOverwritesSelf) {
   const Handle a = make({1.0F, 2.0F, 3.0F}, {3});
   const Handle src = make({4.0F, 5.0F, 6.0F}, {3});

@@ -83,6 +83,16 @@ compare ge.Scalar
 nn dropout rng
 inplace copy_
 
+# --- #73 family 3: indexed writes -----------------------------------------
+inplace index_copy_
+inplace index_add_
+inplace index_fill_.int_Scalar
+inplace scatter_.src
+inplace scatter_.value
+inplace scatter_add_
+inplace masked_fill_.Scalar
+inplace masked_scatter_
+
 # --- tranche 3 (#22): the transformer op closure --------------------------
 
 # embedding exercises int64 indices (SymInt padding_idx flattens to int64);

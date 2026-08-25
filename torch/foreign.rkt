@@ -14,10 +14,10 @@
          "foreign/tensor-ops.rkt"
          "foreign/operators.rkt"
          "foreign/promoted.rkt"
-         (only-in "foreign/ref-syntax.rkt" ref)
+         (only-in "foreign/ref-syntax.rkt" ref ref!)
          "foreign/autograd-ops.rkt")
 
-(provide ref with-no-grad with-default-device)
+(provide ref ref! with-no-grad with-default-device)
 
 (provide (rename-out [t+ +] [t- -] [t* *] [t/ /])
          @)
@@ -116,6 +116,30 @@
                               tensor?)])]
   [tensor-ref (-> tensor? index-spec/c ...
                   (or/c tensor? number? boolean?))]
+  [tensor-ref! (->* (tensor? (or/c tensor? real?))
+                    #:rest (listof index-spec/c) void?)]
+  [index-copy! (-> tensor? index/c index-vector/c tensor? void?)]
+  [index-add! (->* (tensor? index/c index-vector/c tensor?)
+                   (#:alpha real?) void?)]
+  [index-fill! (-> tensor? index/c index-vector/c real? void?)]
+  [scatter! (->i ([t tensor?]
+                  [dim index/c]
+                  [index (t) (and/c int64-tensor/c
+                                    (lambda (x)
+                                      (= (length (tensor-shape x))
+                                         (length (tensor-shape t)))))]
+                  [v (or/c tensor? real?)])
+                 [result void?])]
+  [scatter-add! (->i ([t tensor?]
+                      [dim index/c]
+                      [index (t) (and/c int64-tensor/c
+                                        (lambda (x)
+                                          (= (length (tensor-shape x))
+                                             (length (tensor-shape t)))))]
+                      [src tensor?])
+                     [result void?])]
+  [masked-fill! (-> tensor? bool-tensor/c real? void?)]
+  [masked-scatter! (-> tensor? bool-tensor/c tensor? void?)]
   [:: (let ([bound/c (or/c #f exact-integer?)])
         (case-> (-> slice?)
                 (-> bound/c slice?)

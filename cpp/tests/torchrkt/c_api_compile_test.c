@@ -60,6 +60,14 @@ void torchrkt_c_api_compile_check(void) {
   int (*gen_addcmul_)(tr_tensor*, const tr_tensor*, const tr_tensor*, double) =
       tr_gen_addcmul_;
   int (*gen_copy_)(tr_tensor*, const tr_tensor*, bool) = tr_gen_copy_;
+  int (*gen_index_copy_)(tr_tensor*, int64_t, const tr_tensor*,
+                         const tr_tensor*) = tr_gen_index_copy_;
+  int (*gen_index_add_)(tr_tensor*, int64_t, const tr_tensor*, const tr_tensor*,
+                        double) = tr_gen_index_add_;
+  int (*gen_scatter_value_)(tr_tensor*, int64_t, const tr_tensor*, double) =
+      tr_gen_scatter__value;
+  int (*gen_masked_fill_)(tr_tensor*, const tr_tensor*, double) =
+      tr_gen_masked_fill__scalar;
   tr_tensor* (*gen_sum_dim)(const tr_tensor*, const int64_t*, int64_t, bool,
                             bool, int32_t) = tr_gen_sum_dim_intlist;
   tr_tensor* (*gen_conv2d)(const tr_tensor*, const tr_tensor*, const tr_tensor*,
@@ -169,6 +177,10 @@ void torchrkt_c_api_compile_check(void) {
   (void)gen_lerp_;
   (void)gen_addcmul_;
   (void)gen_copy_;
+  (void)gen_index_copy_;
+  (void)gen_index_add_;
+  (void)gen_scatter_value_;
+  (void)gen_masked_fill_;
   (void)gen_sum_dim;
   (void)gen_conv2d;
   (void)gen_avg_pool2d;

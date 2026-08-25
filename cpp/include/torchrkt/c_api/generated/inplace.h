@@ -21,9 +21,25 @@ int tr_gen_addcdiv_(tr_tensor* self, const tr_tensor* tensor1,
 int tr_gen_addcmul_(tr_tensor* self, const tr_tensor* tensor1,
                     const tr_tensor* tensor2, double value);
 int tr_gen_copy_(tr_tensor* self, const tr_tensor* src, bool non_blocking);
+int tr_gen_index_add_(tr_tensor* self, int64_t dim, const tr_tensor* index,
+                      const tr_tensor* source, double alpha);
+int tr_gen_index_copy_(tr_tensor* self, int64_t dim, const tr_tensor* index,
+                       const tr_tensor* source);
+int tr_gen_index_fill__int_scalar(tr_tensor* self, int64_t dim,
+                                  const tr_tensor* index, double value);
 int tr_gen_lerp__tensor(tr_tensor* self, const tr_tensor* end,
                         const tr_tensor* weight);
+int tr_gen_masked_fill__scalar(tr_tensor* self, const tr_tensor* mask,
+                               double value);
+int tr_gen_masked_scatter_(tr_tensor* self, const tr_tensor* mask,
+                           const tr_tensor* source);
 int tr_gen_mul__tensor(tr_tensor* self, const tr_tensor* other);
+int tr_gen_scatter__src(tr_tensor* self, int64_t dim, const tr_tensor* index,
+                        const tr_tensor* src);
+int tr_gen_scatter__value(tr_tensor* self, int64_t dim, const tr_tensor* index,
+                          double value);
+int tr_gen_scatter_add_(tr_tensor* self, int64_t dim, const tr_tensor* index,
+                        const tr_tensor* src);
 
 #ifdef __cplusplus
 }

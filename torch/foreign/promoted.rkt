@@ -17,16 +17,22 @@
                                 gather
                                 ge-scalar ge-tensor
                                 gt-scalar gt-tensor
+                                copy!
+                                index-add! index-copy!
+                                index-fill-int-scalar!
                                 index-select
                                 layer-norm
                                 le-scalar le-tensor
                                 lt-scalar lt-tensor
                                 masked-fill-scalar
+                                masked-fill-scalar!
+                                masked-scatter!
                                 masked-select
                                 max-pool2d
                                 narrow
                                 ne-scalar ne-tensor
                                 nonzero
+                                scatter-add! scatter-src! scatter-value!
                                 select-int
                                 slice-tensor
                                 take
@@ -43,7 +49,9 @@
          conv2d max-pool2d avg-pool2d adaptive-avg-pool2d
          tril triu masked-fill embedding layer-norm
          gather take take-along-dim where
-         tensor-ref :: slice? slice-start slice-end slice-step
+         index-add! index-fill! masked-fill! scatter!
+         tensor-ref tensor-ref! :: slice? slice-start slice-end slice-step
+         index-copy! masked-scatter! scatter-add!
          (rename-out [g:index-select index-select]
                      [g:masked-select masked-select]
                      [g:narrow narrow]
@@ -178,6 +186,63 @@
 
 (define (take-along-dim t indices [dim #f])
   (g:take-along-dim t indices dim))
+
+(define (index-copy! t dim index source)
+  (void (g:index-copy! t dim index source)))
+
+(define (index-add! t dim index source #:alpha [alpha 1])
+  (void (g:index-add! t dim index source (exact->inexact alpha))))
+
+(define (index-fill! t dim index v)
+  (void (g:index-fill-int-scalar! t dim index (exact->inexact v))))
+
+(define (scatter! t dim index v)
+  (void (if (tensor? v)
+            (g:scatter-src! t dim index v)
+            (g:scatter-value! t dim index (exact->inexact v)))))
+
+(define (scatter-add! t dim index src)
+  (void (g:scatter-add! t dim index src)))
+
+(define (masked-fill! t mask v)
+  (void (g:masked-fill-scalar! t mask (exact->inexact v))))
+
+(define (masked-scatter! t mask source)
+  (void (g:masked-scatter! t mask source)))
+
+;; the write twin of tensor-ref: basic specs address a view (writes
+;; reach the source), a sole bool mask routes to the masked in-place
+;; ops; index vectors/tensors in write position need aten::index_put_
+(define (tensor-ref! t v . specs)
+  (void
+   (cond
+    [(and (pair? specs) (null? (cdr specs)) (bool-mask? (car specs)))
+     (if (tensor? v)
+         (g:masked-scatter! t (car specs) v)
+         (g:masked-fill-scalar! t (car specs) (exact->inexact v)))]
+    [(for/or ([s (in-list specs)])
+       (or (tensor? s) (and (list? s) (pair? s)) (vector? s)))
+     (error 'tensor-ref!
+            "index-vector write targets need index_put_ (issue #67): ~e"
+            specs)]
+    [else
+     ;; python's basic-index write drops integer dims, so the target is
+     ;; the plain view — except a fully-indexed target, where ints
+     ;; become width-1 slices to keep a view (tensor-ref would item it)
+     (define target (apply tensor-ref t specs))
+     (define view
+       (if (tensor? target)
+           target
+           (apply tensor-ref t
+                  (for/list ([s (in-list specs)])
+                    (if (exact-integer? s)
+                        (if (= s -1) (:: s #f) (:: s (add1 s)))
+                        s)))))
+     (g:copy! view
+              (if (tensor? v)
+                  v
+                  (tensor v #:device (tensor-device t)))
+              #f)])))
 
 (define where
   (case-lambda

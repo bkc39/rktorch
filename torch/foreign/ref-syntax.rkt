@@ -11,10 +11,13 @@
          (only-in racket/contract/base -> or/c)
          (only-in racket/contract/region define/contract)
          (only-in "contracts.rkt" index-spec/c)
-         (only-in "promoted.rkt" :: [tensor-ref uncontracted-tensor-ref])
+         (only-in "promoted.rkt"
+                  ::
+                  [tensor-ref uncontracted-tensor-ref]
+                  [tensor-ref! uncontracted-tensor-ref!])
          (only-in "structs.rkt" tensor?))
 
-(provide ref)
+(provide ref ref!)
 
 ;; The macro expands here rather than to promoted.rkt's binding so the
 ;; macro path carries the same index-spec/c blame as the facade's
@@ -22,6 +25,10 @@
 (define/contract tensor-ref
   (-> tensor? index-spec/c ... (or/c tensor? number? boolean?))
   uncontracted-tensor-ref)
+
+(define/contract tensor-ref!
+  (-> tensor? (or/c tensor? real?) index-spec/c ... void?)
+  uncontracted-tensor-ref!)
 
 (begin-for-syntax
   (define (slice-arg stx)
@@ -56,3 +63,11 @@
     [(_ t:expr spec ...)
      #`(tensor-ref t #,@(for/list ([s (in-list (syntax->list #'(spec ...)))])
                           (parse-spec s 'ref)))]))
+
+(define-syntax (ref! stx)
+  (syntax-parse stx
+    [(_ t:expr spec ... v:expr)
+     #`(tensor-ref! t v
+                    #,@(for/list ([s (in-list
+                                      (syntax->list #'(spec ...)))])
+                         (parse-spec s 'ref!)))]))
