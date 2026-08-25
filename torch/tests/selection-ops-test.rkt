@@ -190,12 +190,10 @@
                (lambda ()
                  (ref! (fresh) (ne (tensor '(1 0)) 0)
                        (tensor '(7.0 8.0)))))
-    ;; #:alpha keeps exactness on int64 destinations
     (let ([it (tensor '(0 0))])
       (index-add! it 0 (to-dtype (tensor '(1)) 'int64) (tensor '(1))
                   #:alpha (add1 (expt 2 53)))
       (check-equal? (tensor->list it) (list 0 (add1 (expt 2 53)))))
-    ;; broadcastable sources expand to the true positions like python
     (let ([t (fresh)])
       (ref! t (gt t 4.0) (tensor '(9.0)))
       (check-equal? (tensor->list t) '(1.0 2.0 3.0 4.0 9.0 9.0)))

@@ -248,7 +248,8 @@
 
 (define (index-fill! t dim index v)
   (void
-   (if (and (exact-integer? v) (int64-dtype? t))
+   (if (and (exact-integer? v) (int64-dtype? t)
+            (not (double-roundtrips? v)))
        (g:index-fill-int-tensor! t dim index (scalar->value-tensor v t))
        (g:index-fill-int-scalar! t dim index (exact->inexact v)))))
 
@@ -269,7 +270,8 @@
 
 (define (masked-fill! t mask v)
   (void
-   (if (and (exact-integer? v) (int64-dtype? t))
+   (if (and (exact-integer? v) (int64-dtype? t)
+            (not (double-roundtrips? v)))
        (g:masked-fill-tensor! t mask (scalar->value-tensor v t))
        (g:masked-fill-scalar! t mask (exact->inexact v)))))
 
