@@ -5,8 +5,8 @@
                   [take list-take])
          (only-in "device-type.rkt" device-type)
          (only-in "ops.rkt"
-                  item tensor-device tensor-dtype tensor-shape tensor->list
-                  to-device to-dtype)
+                  call-with-default-device item tensor-device tensor-dtype
+                  tensor-shape tensor->list to-device to-dtype)
          (only-in "size.rkt" ->2d)
          (only-in "structs.rkt" tensor?)
          (only-in "tensor-ops.rkt" add mul reshape sum tensor unsqueeze zeros)
@@ -316,9 +316,10 @@
       t mask
       (if (= (apply * vdims) (apply * sel-shape))
           v
-          (add v (to-device (to-dtype (apply zeros sel-shape)
-                                      (tensor-dtype v))
-                            (tensor-device t)))))]))
+          (add v (to-dtype (call-with-default-device
+                            (tensor-device t)
+                            (lambda () (apply zeros sel-shape)))
+                           (tensor-dtype v)))))]))
 
 (define (tensor-ref! t v . specs)
   (void
@@ -326,7 +327,7 @@
     [(and (pair? specs) (null? (cdr specs)) (bool-mask? (car specs)))
      (write-mask-target! t (car specs) v)]
     [(for/or ([s (in-list specs)])
-       (or (tensor? s) (and (list? s) (pair? s)) (vector? s)))
+       (or (tensor? s) (list? s) (vector? s)))
      (error 'tensor-ref!
             "index-vector write targets need index_put_ (issue #67): ~e"
             specs)]

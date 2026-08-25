@@ -129,6 +129,8 @@
                (lambda () (index-fill! (fresh) 0 (tensor '(0.5)) 1)))
     (check-exn #rx"index_put_"
                (lambda () (tensor-ref! (fresh) 0 '(0 1))))
+    (check-exn #rx"index_put_"
+               (lambda () (tensor-ref! (fresh) 9 '())))
     ;; exact-int fills stay exact on integral destinations (2^53+1
     ;; dies in any double transit)
     (let ([it (tensor '((1 2) (3 4)))])
@@ -147,7 +149,6 @@
     (let ([d (to-dtype (zeros 1) 'float64)])
       (ref! d 0 1.0000000000000002)
       (check-equal? (tensor->list d) '(1.0000000000000002)))
-    ;; 0-d targets are writable
     (let ([z (tensor 5.0)])
       (ref! z .. 7)
       (check-equal? (tensor->list (reshape z 1)) '(7.0)))

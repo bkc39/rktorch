@@ -74,6 +74,8 @@ void torchrkt_c_api_compile_check(void) {
   int (*gen_index_fill_tensor_)(tr_tensor*, int64_t, const tr_tensor*,
                                 const tr_tensor*) =
       tr_gen_index_fill__int_tensor;
+  int (*gen_masked_fill_tensor_)(tr_tensor*, const tr_tensor*,
+                                 const tr_tensor*) = tr_gen_masked_fill__tensor;
   int (*gen_masked_scatter_)(tr_tensor*, const tr_tensor*, const tr_tensor*) =
       tr_gen_masked_scatter_;
   int (*gen_scatter_src_)(tr_tensor*, int64_t, const tr_tensor*,
@@ -196,6 +198,7 @@ void torchrkt_c_api_compile_check(void) {
   (void)gen_masked_fill_;
   (void)gen_index_fill_scalar_;
   (void)gen_index_fill_tensor_;
+  (void)gen_masked_fill_tensor_;
   (void)gen_masked_scatter_;
   (void)gen_scatter_src_;
   (void)gen_scatter_add_;
