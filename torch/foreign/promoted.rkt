@@ -9,7 +9,7 @@
                   to-device to-dtype)
          (only-in "size.rkt" ->2d)
          (only-in "structs.rkt" tensor?)
-         (only-in "tensor-ops.rkt" add mul reshape sum tensor unsqueeze)
+         (only-in "tensor-ops.rkt" add mul reshape sum tensor unsqueeze zeros)
          (prefix-in g: (only-in "../generated.rkt"
                                 adaptive-avg-pool2d
                                 avg-pool2d
@@ -224,6 +224,10 @@
        [else (g:where-scalar mask (exact->inexact a) (exact->inexact b))])]))
 
 
+(define (double-roundtrips? v)
+  (define d (exact->inexact v))
+  (and (rational? d) (= (inexact->exact d) v)))
+
 (define (int64-dtype? t)
   (eq? (tensor-dtype t) 'int64))
 
@@ -250,7 +254,8 @@
   (void
    (cond
      [(tensor? v) (g:scatter-src! t dim index v)]
-     [(and (exact-integer? v) (int64-dtype? t))
+     [(and (exact-integer? v) (int64-dtype? t)
+           (not (double-roundtrips? v)))
       ;; broadcast v to the index shape without a double transit
       (g:scatter-src! t dim index
                       (add (mul index (scalar->value-tensor 0 t))
@@ -294,15 +299,25 @@
      ;; python broadcasts a 0-d source; masked_scatter_ would not
      (g:masked-fill-tensor! t mask v)]
     [else
-     ;; python requires source numel = true count (masked_scatter_
-     ;; would silently ignore surplus)
-     (define nnz (* (item (sum (to-dtype mask 'int64)))
-                    (apply * trailing)))
-     (unless (= (apply * (tensor-shape v)) nnz)
+     ;; python broadcasts the source to (nnz . trailing); validation is
+     ;; required because masked_scatter_ silently ignores surplus
+     (define sel-shape
+       (cons (item (sum (to-dtype mask 'int64))) trailing))
+     (define vdims (tensor-shape v))
+     (unless (and (<= (length vdims) (length sel-shape))
+                  (for/and ([f (in-list (reverse vdims))]
+                            [s (in-list (reverse sel-shape))])
+                    (or (= f 1) (= f s))))
        (error 'tensor-ref!
-              "source has ~a elements for ~a true mask positions"
-              (apply * (tensor-shape v)) nnz))
-     (g:masked-scatter! t mask v)]))
+              "source shape ~a cannot broadcast to the true mask positions ~a"
+              vdims sel-shape))
+     (g:masked-scatter!
+      t mask
+      (if (= (apply * vdims) (apply * sel-shape))
+          v
+          (add v (to-device (to-dtype (apply zeros sel-shape)
+                                      (tensor-dtype v))
+                            (tensor-device t)))))]))
 
 (define (tensor-ref! t v . specs)
   (void
