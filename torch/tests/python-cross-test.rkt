@@ -143,6 +143,68 @@
              [p (in-list py)]
              [i (in-naturals)])
          (check-equal? r p (format "indexing form ~a parity" i))))
+     ;; ref! / write-op forms, in lockstep with the twin's `forms` list
+     (let* ([j (python-result "python/writes_parity.py")]
+            [py (hash-ref j 'forms)]
+            [fresh (lambda () (tensor '((1.0 2.0 3.0) (4.0 5.0 6.0))))]
+            [i64 (lambda (v) (to-dtype (tensor v) 'int64))]
+            [form (lambda (x)
+                    (list (shape x)
+                          (for/list ([v (in-list (tensor->list x))])
+                            (exact->inexact v))))]
+            [written (lambda (mutate!)
+                       (define t (fresh))
+                       (mutate! t)
+                       (form t))]
+            [rkt (list
+                  (written (lambda (t) (ref! t 0 9)))
+                  (written (lambda (t) (ref! t 1 2 0)))
+                  (written (lambda (t) (ref! t -1 -1 0)))
+                  (written (lambda (t) (ref! t (: 1 3) 7)))
+                  (written (lambda (t) (ref! t : (: _ _ 2) 0)))
+                  (written (lambda (t) (ref! t .. 0 5)))
+                  (written (lambda (t) (ref! t : 1 (tensor '(8.0 9.0)))))
+                  (written (lambda (t) (ref! t 0 (tensor '(7.0 8.0 9.0)))))
+                  (let ([z (tensor 5.0)])
+                    (ref! z .. 7)
+                    (form (reshape z 1)))
+                  (written (lambda (t) (ref! t (gt t 4.0) -1)))
+                  (written (lambda (t) (ref! t (gt t 4.0) (tensor 0.0))))
+                  (written (lambda (t)
+                             (ref! t (gt t 3.0) (tensor '(7.0 8.0 9.0)))))
+                  (written (lambda (t) (ref! t (ne (tensor '(1 0)) 0) 0)))
+                  (written (lambda (t)
+                             (ref! t (ne (tensor '(0 1)) 0)
+                                   (tensor '(7.0 8.0 9.0)))))
+                  (written (lambda (t)
+                             (ref! t (ne (tensor '(1 0)) 0) (tensor '(7.0)))))
+                  (written (lambda (t)
+                             (ref! t (ne (tensor '(1 1)) 0)
+                                   (tensor '((7.0) (8.0))))))
+                  (written (lambda (t) (index-fill! t 0 (i64 '(1)) 3.5)))
+                  (written (lambda (t)
+                             (index-copy! t 0 (i64 '(0))
+                                          (tensor '((9.0 9.0 9.0))))))
+                  (written (lambda (t)
+                             (index-add! t 0 (i64 '(0))
+                                         (tensor '((1.0 1.0 1.0)))
+                                         #:alpha 2)))
+                  (written (lambda (t) (scatter! t 1 (i64 '((0) (2))) 5)))
+                  (written (lambda (t)
+                             (scatter! t 1 (i64 '((0) (2)))
+                                       (tensor '((70.0) (80.0))))))
+                  (written (lambda (t)
+                             (scatter-add! t 1 (i64 '((0) (0)))
+                                           (tensor '((1.0) (1.0))))))
+                  (written (lambda (t) (masked-fill! t (gt t 5.0) 0)))
+                  (written (lambda (t)
+                             (masked-scatter! t (gt t 4.0)
+                                              (tensor '(9.0 10.0))))))])
+       (check-equal? (length rkt) (length py) "write form count")
+       (for ([r (in-list rkt)]
+             [p (in-list py)]
+             [i (in-naturals)])
+         (check-equal? r p (format "write form ~a parity" i))))
      (let ()
        (define-module mlp (d-in d-hidden d-out)
          #:submodules ([fc1 (Linear d-in d-hidden)]

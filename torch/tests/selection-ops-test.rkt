@@ -174,7 +174,6 @@
                (lambda ()
                  (let ([t (fresh)])
                    (ref! t (gt t 4.0) (tensor '(1.0 2.0 3.0))))))
-    ;; leading-dims masks select rows, not right-aligned columns
     (let ([t (fresh)])
       (ref! t (ne (tensor '(1 0)) 0) 0)
       (check-equal? (tensor->list t) '(0.0 0.0 0.0 4.0 5.0 6.0)))
