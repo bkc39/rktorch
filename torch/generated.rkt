@@ -21,6 +21,7 @@
          addcdiv!
          addcmul!
          avg-pool2d
+         broadcast-to
          cat
          conv2d
          copy!
@@ -93,6 +94,9 @@
 
 (define-generated-op avg-pool2d tr_gen_avg_pool2d
   ([self tensor] [kernel-size int-array] [stride int-array] [padding int-array] [ceil-mode bool] [count-include-pad bool] [divisor-override optional-int64]))
+
+(define-generated-op broadcast-to tr_gen_broadcast_to
+  ([self tensor] [size int-array]))
 
 (define-generated-op cat tr_gen_cat
   ([tensors tensor-list] [dim int64]))

@@ -216,5 +216,9 @@
     (let ([it (tensor '(1 2))])
       (index-add! it 0 (to-dtype (tensor '(0)) 'int64) (tensor '(3))
                   #:alpha 2)
-      (check-equal? (tensor->list it) '(7 2))))
+      (check-equal? (tensor->list it) '(7 2)))
+    ;; broadcast materialization is a view, not arithmetic — bits survive
+    (let ([t (tensor '(1.0 1.0))])
+      (ref! t (gt t 0.5) (tensor '(-0.0)))
+      (check-equal? (tensor->list t) '(-0.0 -0.0))))
 )

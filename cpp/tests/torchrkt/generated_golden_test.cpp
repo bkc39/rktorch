@@ -89,6 +89,15 @@ TEST(GeneratedGolden, ReshapeMatchesHandWritten) {
   expect_bit_identical(expected.t, actual.t);
 }
 
+TEST(GeneratedGolden, BroadcastToExpandsWidthOneDims) {
+  const Handle a = make({1.0F, 2.0F, 3.0F}, {1, 3});
+  const std::vector<int64_t> dims = {2, 3};
+  const Handle actual(tr_gen_broadcast_to(a.t, dims.data(), 2));
+  EXPECT_EQ(shape_of(actual.t), (std::vector<int64_t>{2, 3}));
+  EXPECT_EQ(data_of(actual.t),
+            (std::vector<float>{1.0F, 2.0F, 3.0F, 1.0F, 2.0F, 3.0F}));
+}
+
 // -1 in the shape array is ATen's inferred dimension, not an invalid count.
 TEST(GeneratedGolden, ReshapeInferredDimMatchesHandWritten) {
   const Handle a = make({1.0F, 2.0F, 3.0F, 4.0F, 5.0F, 6.0F}, {2, 3});
@@ -146,6 +155,9 @@ TEST(GeneratedGolden, ErrorsSurfaceAsNullNotAbort) {
   expect_error_from("tr_gen_cat");
   EXPECT_EQ(tr_gen_reshape(a.t, nullptr, -1), nullptr);
   expect_error_from("tr_gen_reshape");
+  const int64_t bdims[] = {2, 3};
+  EXPECT_EQ(tr_gen_broadcast_to(nullptr, bdims, 2), nullptr);
+  expect_error_from("tr_gen_broadcast_to");
 }
 
 }  // namespace

@@ -119,6 +119,8 @@ void torchrkt_c_api_compile_check(void) {
       tr_gen_select_int;
   tr_tensor* (*gen_slice)(const tr_tensor*, int64_t, int64_t, bool, int64_t,
                           bool, int64_t) = tr_gen_slice_tensor;
+  tr_tensor* (*gen_broadcast_to)(const tr_tensor*, const int64_t*, int64_t) =
+      tr_gen_broadcast_to;
   tr_tensor* (*gen_index_select)(const tr_tensor*, int64_t, const tr_tensor*) =
       tr_gen_index_select;
   tr_tensor* (*gen_masked_select)(const tr_tensor*, const tr_tensor*) =
@@ -214,6 +216,7 @@ void torchrkt_c_api_compile_check(void) {
   (void)gen_narrow;
   (void)gen_select;
   (void)gen_slice;
+  (void)gen_broadcast_to;
   (void)gen_index_select;
   (void)gen_masked_select;
   (void)gen_nonzero;

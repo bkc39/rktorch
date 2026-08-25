@@ -5,14 +5,15 @@
                   [take list-take])
          (only-in "device-type.rkt" device-type)
          (only-in "ops.rkt"
-                  call-with-default-device item tensor-device tensor-dtype
-                  tensor-shape tensor->list to-device to-dtype)
+                  item tensor-device tensor-dtype tensor-shape tensor->list
+                  to-device to-dtype)
          (only-in "size.rkt" ->2d)
          (only-in "structs.rkt" tensor?)
-         (only-in "tensor-ops.rkt" add mul reshape sum tensor unsqueeze zeros)
+         (only-in "tensor-ops.rkt" add mul reshape sum tensor unsqueeze)
          (prefix-in g: (only-in "../generated.rkt"
                                 adaptive-avg-pool2d
                                 avg-pool2d
+                                broadcast-to
                                 conv2d
                                 copy!
                                 embedding
@@ -316,10 +317,7 @@
       t mask
       (if (= (apply * vdims) (apply * sel-shape))
           v
-          (add v (to-dtype (call-with-default-device
-                            (tensor-device t)
-                            (lambda () (apply zeros sel-shape)))
-                           (tensor-dtype v)))))]))
+          (g:broadcast-to v sel-shape)))]))
 
 (define (tensor-ref! t v . specs)
   (void

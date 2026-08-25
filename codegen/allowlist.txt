@@ -23,6 +23,7 @@ shape narrow
 # rationale there); removing this entry breaks lib load loudly.
 shape select.int
 shape slice.Tensor
+shape broadcast_to
 shape index_select
 shape masked_select
 shape nonzero

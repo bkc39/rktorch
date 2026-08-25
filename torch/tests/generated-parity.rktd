@@ -9,6 +9,7 @@
  (addcdiv! "addcdiv_" (tensor tensor tensor scalar) #t)
  (addcmul! "addcmul_" (tensor tensor tensor scalar) #t)
  (avg-pool2d "avg_pool2d" (tensor int-array int-array int-array bool bool optional-int64) #f)
+ (broadcast-to "broadcast_to" (tensor int-array) #f)
  (cat "cat" (tensor-list int64) #f)
  (conv2d "conv2d" (tensor tensor optional-tensor int-array int-array int-array int64) #f)
  (copy! "copy_" (tensor tensor bool) #t)
