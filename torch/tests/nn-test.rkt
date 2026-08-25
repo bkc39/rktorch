@@ -1,7 +1,7 @@
 #lang racket/base
 
 (module+ test
-  (require (except-in racket/list argmax flatten)
+  (require (except-in racket/list argmax flatten take)
            (only-in racket/file make-temporary-file)
            rackunit
            "../main.rkt"

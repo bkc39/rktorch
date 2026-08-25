@@ -17,6 +17,8 @@ extern "C" {
 
 tr_tensor* tr_gen_cat(const tr_tensor* const* tensors, int64_t tensors_len,
                       int64_t dim);
+tr_tensor* tr_gen_gather(const tr_tensor* self, int64_t dim,
+                         const tr_tensor* index, bool sparse_grad);
 tr_tensor* tr_gen_index_select(const tr_tensor* self, int64_t dim,
                                const tr_tensor* index);
 tr_tensor* tr_gen_masked_select(const tr_tensor* self, const tr_tensor* mask);
@@ -29,8 +31,20 @@ tr_tensor* tr_gen_select_int(const tr_tensor* self, int64_t dim, int64_t index);
 tr_tensor* tr_gen_slice_tensor(const tr_tensor* self, int64_t dim,
                                int64_t start, bool start_has, int64_t end,
                                bool end_has, int64_t step);
+tr_tensor* tr_gen_take(const tr_tensor* self, const tr_tensor* index);
+tr_tensor* tr_gen_take_along_dim(const tr_tensor* self,
+                                 const tr_tensor* indices, int64_t dim,
+                                 bool dim_has);
 tr_tensor* tr_gen_tril(const tr_tensor* self, int64_t diagonal);
 tr_tensor* tr_gen_triu(const tr_tensor* self, int64_t diagonal);
+tr_tensor* tr_gen_where_scalar(const tr_tensor* condition, double self,
+                               double other);
+tr_tensor* tr_gen_where_scalarother(const tr_tensor* condition,
+                                    const tr_tensor* self, double other);
+tr_tensor* tr_gen_where_scalarself(const tr_tensor* condition, double self,
+                                   const tr_tensor* other);
+tr_tensor* tr_gen_where_self(const tr_tensor* condition, const tr_tensor* self,
+                             const tr_tensor* other);
 
 #ifdef __cplusplus
 }

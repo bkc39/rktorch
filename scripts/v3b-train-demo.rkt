@@ -4,7 +4,7 @@
 ;; by the literate 06-gpt example.
 ;; Run:  nix develop --command racket scripts/v3b-train-demo.rkt
 
-(require (only-in racket/list remove-duplicates take take-right)
+(require (only-in racket/list remove-duplicates take-right)
          torch
          torch/nn)
 

@@ -1,9 +1,10 @@
 #lang racket/base
 
-(require (only-in racket/list append* drop [flatten list-flatten] take)
+(require (only-in racket/list append* drop [flatten list-flatten] [take list-take])
+         (only-in "device-type.rkt" device-type)
          (only-in "ops.rkt"
-                  item tensor-device tensor-dtype tensor-shape to-device
-                  to-dtype)
+                  item tensor-device tensor-dtype tensor-shape tensor->list
+                  to-device to-dtype)
          (only-in "size.rkt" ->2d)
          (only-in "structs.rkt" tensor?)
          (only-in "tensor-ops.rkt" add mul reshape tensor unsqueeze)
@@ -13,6 +14,7 @@
                                 conv2d
                                 embedding
                                 eq-scalar eq-tensor
+                                gather
                                 ge-scalar ge-tensor
                                 gt-scalar gt-tensor
                                 index-select
@@ -27,15 +29,25 @@
                                 nonzero
                                 select-int
                                 slice-tensor
+                                take
+                                take-along-dim
                                 tril
-                                triu)))
+                                triu
+                                where-scalar
+                                where-scalarother
+                                where-scalarself
+                                where-self)))
 
 (provide flatten
          eq ne lt le gt ge
          conv2d max-pool2d avg-pool2d adaptive-avg-pool2d
          tril triu masked-fill embedding layer-norm
+         gather take take-along-dim where
          tensor-ref :: slice? slice-start slice-end slice-step
-         (rename-out [g:narrow narrow]
+         (rename-out [g:index-select index-select]
+                     [g:masked-select masked-select]
+                     [g:narrow narrow]
+                     [g:nonzero nonzero]
                      [g:select-int select]))
 
 (struct slice (start end step) #:transparent)
@@ -101,13 +113,13 @@
   (define mdims (tensor-shape m))
   (define n (length mdims))
   (unless (and (<= (+ d n) (length vdims))
-               (equal? mdims (take (list-tail vdims d) n)))
+               (equal? mdims (list-take (list-tail vdims d) n)))
     (error 'tensor-ref "mask shape ~a does not match dims ~a at dim ~a"
            mdims vdims d))
   (define collapsed
     (if (= n 1)
         v
-        (apply reshape v (append (take vdims d)
+        (apply reshape v (append (list-take vdims d)
                                  (list (apply * mdims))
                                  (list-tail vdims (+ d n))))))
   (g:index-select collapsed d (mask-spec->index-tensor m)))
@@ -140,6 +152,64 @@
        [(eq? (tensor-dtype result) 'bool) (not (zero? (item result)))]
        [else (item result)])]))
 
+(define (take v n)
+  (cond
+    [(not (tensor? v)) (list-take v n)]
+    [else
+     (define idx (if (tensor? n) n (index-tensor n v)))
+     (cond
+       [(eq? (device-type (tensor-device v)) 'mps)
+        ;; the vendored schema registers at::take for CPU/CUDA only;
+        ;; the device check pre-empts the wrap's silent to-device
+        (unless (equal? (tensor-device idx) (tensor-device v))
+          (error 'take
+                 "index tensor must be on the same device as the input"))
+        ;; explicit sizes: -1 is ambiguous for zero-element reshapes
+        (define flat (reshape v (apply * (tensor-shape v))))
+        (define idx-flat (reshape idx (apply * (tensor-shape idx))))
+        (define flat-out
+          (g:index-select
+           flat 0 (wrap-negative-positions idx-flat flat 0)))
+        (apply reshape flat-out (tensor-shape idx))]
+       [else (g:take v idx)])]))
+
+(define (gather t dim index)
+  (g:gather t dim index #f))
+
+(define (take-along-dim t indices [dim #f])
+  (g:take-along-dim t indices dim))
+
+(define where
+  (case-lambda
+    [(mask)
+     (cond
+       [(null? (tensor-shape mask))
+        (list (tensor (if (zero? (car (tensor->list mask))) '() '(0))
+                      #:dtype 'int64 #:device (tensor-device mask)))]
+       [else
+        (define coords (g:nonzero mask))
+        (for/list ([d (in-range (length (tensor-shape mask)))])
+          (g:select-int coords 1 d))])]
+    [(mask a) (error 'where "expected both value arms, got one: ~e" a)]
+    [(mask a b)
+     (cond
+       [(and (tensor? a) (tensor? b)) (g:where-self mask a b)]
+       [(tensor? a)
+        (cond
+          [(and (exact-integer? b) (memq (tensor-dtype a) '(bool int64)))
+           ;; a double scalar would float-promote integral results and
+           ;; round past 2^53 — same guard as the comparison combinator
+           (g:where-self mask a (tensor b #:device (tensor-device a)))]
+          [else (g:where-scalarother mask a (exact->inexact b))])]
+       [(and (tensor? b) (exact-integer? a)
+             (memq (tensor-dtype b) '(bool int64)))
+        (g:where-self mask (tensor a #:device (tensor-device b)) b)]
+       [(tensor? b) (g:where-scalarself mask (exact->inexact a) b)]
+       [(and (exact-integer? a) (exact-integer? b))
+        (define dev (tensor-device mask))
+        (g:where-self mask (tensor a #:device dev) (tensor b #:device dev))]
+       [else (g:where-scalar mask (exact->inexact a) (exact->inexact b))])]))
+
 (define (flatten v [start-dim 0] [end-dim -1])
   (cond
     [(tensor? v)
@@ -164,7 +234,7 @@
           (apply * (for/list ([d (in-list shp)] [i (in-naturals)]
                                                  #:when (<= s i e))
                      d)))
-        (apply reshape v (append (take shp s)
+        (apply reshape v (append (list-take shp s)
                                  (list collapsed)
                                  (drop shp (add1 e))))])]
     [else (list-flatten v)]))

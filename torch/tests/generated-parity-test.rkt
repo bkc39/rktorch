@@ -32,6 +32,18 @@
                           (optional-int64 5) (int64 2))
           'index-select '((tensor 4 3) (int64 0) (int-tensor (0 2)))
           'masked-select '((tensor 6) (bool-tensor (0 1 0 1 1 0)))
+          'take '((tensor 2 3) (int-tensor (0 5 3)))
+          'gather '((tensor 2 3) (int64 1) (int-tensor-2d ((0 2) (1 0)))
+                    (kwarg "sparse_grad" #f))
+          'take-along-dim '((tensor 2 3) (int-tensor-2d ((0) (2)))
+                            (optional-int64 1))
+          'where-self '((bool-tensor (0 1 1 0 1 0)) (tensor 6) (tensor 6))
+          'where-scalarother '((bool-tensor (0 1 1 0 1 0)) (tensor 6)
+                               (double -1.0))
+          'where-scalarself '((bool-tensor (0 1 1 0 1 0)) (double -5.0)
+                              (tensor 6))
+          'where-scalar '((bool-tensor (0 1 1 0 1 0)) (double 1.0)
+                          (double 0.0))
           'nonzero '((bool-tensor (0 1 1 0)))
           'cat '((tensors (2 3) (2 3)) (int64 0))
           'narrow '((tensor 4) (int64 0) (int64 1) (int64 2))
@@ -92,7 +104,7 @@
       [(optional-tensor)
        (if (equal? (cdr spec) '(#f)) #f (apply randn (cdr spec)))]
       [(optional-tensor-ones) (apply ones (cdr spec))]
-      [(int-tensor) (to-dtype (tensor (cadr spec)) 'int64)]
+      [(int-tensor int-tensor-2d) (to-dtype (tensor (cadr spec)) 'int64)]
       [(bool-tensor) (ne (tensor (cadr spec)) 0)]
       [(int64 double bool int-array optional-int64 optional-int-array dtype)
        (cadr spec)]
@@ -115,10 +127,19 @@
       [(optional-tensor-ones) (format "torch.ones(~a)" (csv (cdr spec)))]
       [(int-tensor)
        (format "torch.tensor([~a], dtype=torch.int64)" (csv (cadr spec)))]
+      [(int-tensor-2d)
+       (format "torch.tensor([~a], dtype=torch.int64)"
+               (string-join (for/list ([row (in-list (cadr spec))])
+                              (format "[~a]" (csv row)))
+                            ", "))]
       [(bool-tensor)
        (format "torch.tensor([~a], dtype=torch.bool)" (csv (cadr spec)))]
       [(int64 double) (number->string (cadr spec))]
-      [(kwarg) (number->string (caddr spec))]
+      [(kwarg)
+       (define v (caddr spec))
+       (cond
+         [(boolean? v) (if v "True" "False")]
+         [else (number->string v)])]
       [(bool) (if (cadr spec) "True" "False")]
       [(int-array) (format "[~a]" (csv (cadr spec)))]
       [(optional-int64) (if (cadr spec) (number->string (cadr spec)) "None")]

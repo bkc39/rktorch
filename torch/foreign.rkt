@@ -63,6 +63,57 @@
   [flatten flatten/c]
   [narrow (-> tensor? index/c index/c exact-positive-integer? tensor?)]
   [select (-> tensor? index/c index/c tensor?)]
+  [index-select (-> tensor? index/c index-vector/c tensor?)]
+  [masked-select (-> tensor? bool-tensor/c tensor?)]
+  [nonzero (-> tensor? tensor?)]
+  [take (->i ([v (or/c tensor? list?)]
+              [n (v) (if (tensor? v)
+                         (or/c int64-tensor/c
+                               (listof exact-integer?)
+                               (vectorof exact-integer?))
+                         exact-nonnegative-integer?)])
+             [result (v) (if (tensor? v) tensor? list?)])]
+  [gather (->i ([t tensor?]
+                [dim index/c]
+                [index (t dim)
+                       (and/c int64-tensor/c
+                              (lambda (x)
+                                (define td (tensor-shape t))
+                                (define xd (tensor-shape x))
+                                (define rank (length td))
+                                (define g (if (negative? dim)
+                                              (+ dim rank)
+                                              dim))
+                                (and (= (length xd) rank)
+                                     ;; ATen skips extent checks for
+                                     ;; empty indices (verified)
+                                     (or (zero? (apply * xd))
+                                         (for/and ([xi (in-list xd)]
+                                                   [ti (in-list td)]
+                                                   [i (in-naturals)])
+                                           (or (= i g) (<= xi ti)))))))])
+               [result tensor?])]
+  [take-along-dim
+   (->i ([t tensor?]
+         [indices (t dim)
+                  (and/c int64-tensor/c
+                         (lambda (x)
+                           (or (unsupplied-arg? dim)
+                               (not dim)
+                               (= (length (tensor-shape x))
+                                  (length (tensor-shape t))))))])
+        ([dim (or/c #f index/c)])
+        [result tensor?])]
+  [where (->i ([c bool-tensor/c])
+              ([a (or/c tensor? real?)]
+               [b (a) (if (unsupplied-arg? a)
+                          none/c
+                          (or/c tensor? real?))])
+              #:pre/name (a b) "a condition alone, or condition + both arms"
+              (eq? (unsupplied-arg? a) (unsupplied-arg? b))
+              [result (a) (if (unsupplied-arg? a)
+                              (listof tensor?)
+                              tensor?)])]
   [tensor-ref (-> tensor? index-spec/c ...
                   (or/c tensor? number? boolean?))]
   [:: (let ([bound/c (or/c #f exact-integer?)])

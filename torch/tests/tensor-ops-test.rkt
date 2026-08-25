@@ -2,7 +2,7 @@
 
 (module+ test
   (require (only-in ffi/vector f32vector s64vector)
-           (only-in racket/list drop take)
+           (only-in racket/list drop)
            rackunit
            "../main.rkt")
 
