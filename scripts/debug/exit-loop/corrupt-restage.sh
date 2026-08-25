@@ -73,7 +73,13 @@ exec 3> "$fifo"
 echo "[repro] pid=$rkt device=$dev lib=$lib log=$out"
 
 printf '(require torch)\n' >&3
+printf '(unless (case "%s" [("cuda") (cuda-available?)] [("mps") (mps-available?)] [("cpu") #t] [else #f]) (printf "REPRO-DEVICE-BAD\\n") (exit 3))\n' "$dev" >&3
 printf '(define D (case "%s" [("cuda") (cuda-device)] [("mps") (mps-device)] [else (cpu-device)]))\n' "$dev" >&3
+sleep 3
+# Refuse to corrupt the shim for a device this host cannot run.
+if grep -q REPRO-DEVICE-BAD "$out" 2>/dev/null; then
+  echo "[repro] ABORT: device '$dev' unusable on this host"; exit 3
+fi
 printf '(define held (with-default-device D (for/list ([_ (in-range 500)]) (randn 256 256))))\n' >&3
 printf '(length held)\n' >&3
 sleep 8

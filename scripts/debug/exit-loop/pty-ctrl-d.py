@@ -26,7 +26,8 @@ _HOLD = b"(define held (with-default-device D (for/list ([_ (in-range 400)]) (ra
 # Assemble it at runtime: the echo shows the format string, only real output
 # shows the joined marker.
 _GUARD = ('(unless (case "%s" [("cuda") (cuda-available?)] [("mps") (mps-available?)] '
-          '[else #t]) (printf "REPRO-DEVICE-~a\\n" "UNAVAILABLE") (exit 3))\n'
+          '[("cpu") #t] [else (printf "REPRO-DEVICE-~a\\n" "UNKNOWN") (exit 3)]) '
+          '(printf "REPRO-DEVICE-~a\\n" "UNAVAILABLE") (exit 3))\n'
           % DEV).encode()
 _HEAD = [b"(require torch)\n", _GUARD, _PICK, _HOLD]
 
@@ -103,8 +104,8 @@ def run(mode, idx, budget=90.0):
             pass
     os.close(fd)
     text = bytes(out)
-    if b"REPRO-DEVICE-UNAVAILABLE" in text:
-        print(f"ABORT pty/{mode}: device '{DEV}' unavailable on this host", flush=True)
+    if b"REPRO-DEVICE-UNAVAILABLE" in text or b"REPRO-DEVICE-UNKNOWN" in text:
+        print(f"ABORT pty/{mode}: device '{DEV}' unusable on this host", flush=True)
         raise SystemExit(3)
     imr = text.count(b"invalid memory reference")
     # xrepl's banner for any uncaught error.  Without this a setup line that
@@ -114,7 +115,12 @@ def run(mode, idx, budget=90.0):
     # `intr` sends Ctrl-C on purpose, and a user break prints the same banner as
     # a real error ("user break [,bt for context]").  Subtract those rather than
     # exempting the mode, so a genuine setup error in `intr` is still caught.
-    setup_error = (text.count(b"[,bt for context]") - text.count(b"user break")) > 0
+    # xrepl wraps long messages, splitting the banner across lines with a ";"
+    # continuation, so match with the line structure removed -- as exit-loop.sh
+    # does.  `intr` sends Ctrl-C on purpose and a user break prints the same
+    # banner, so subtract those rather than exempting the mode.
+    flat = text.replace(b"\n", b"").replace(b"\r", b"").replace(b";", b"").replace(b" ", b"")
+    setup_error = (flat.count(b"btforcontext]") - flat.count(b"userbreak")) > 0
     # A native free that failed but was swallowed leaves exit 0 and no fault
     # text; the exit-time diagnostic is the only place it shows.
     m = re.findall(rb"\(failures \. (\d+)\)", text)
@@ -151,6 +157,8 @@ if __name__ == "__main__":
     incon = sum(i for _, i in results)
     suffix = f" ({incon} inconclusive: Ctrl-D not delivered)" if incon else ""
     print(f"RESULT pty/{mode}-{DEV}: {bad}/{n} failed{suffix}", flush=True)
-    # Exit nonzero so run-all.sh's aggregate status sees real failures, not just
-    # ABORTs.
-    raise SystemExit(1 if bad else 0)
+    # Nonzero on real failures, and also when every iteration was inconclusive:
+    # a run in which Ctrl-D never landed produced no evidence either way.
+    if bad:
+        raise SystemExit(1)
+    raise SystemExit(2 if incon == n else 0)

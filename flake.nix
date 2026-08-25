@@ -137,8 +137,9 @@
           # 0555 as the store ships it, which also makes an in-place `cp` fail
           # loudly with EACCES; no --no-preserve=mode keeps this POSIX.
           if cp -f "$_f" "$_dest/.$_b.tmp.$$" \
-             && chmod 0555 "$_dest/.$_b.tmp.$$"; then
-            mv -f "$_dest/.$_b.tmp.$$" "$_dest/$_b"
+             && chmod 0555 "$_dest/.$_b.tmp.$$" \
+             && mv -f "$_dest/.$_b.tmp.$$" "$_dest/$_b"; then
+            :
           else
             rm -f "$_dest/.$_b.tmp.$$"
             echo "ERROR: staging $_b failed; leaving the existing shim in place" >&2

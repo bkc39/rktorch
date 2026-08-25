@@ -13,6 +13,8 @@ shape="${1:?usage: exit-loop.sh <shape.rkt> [iterations]}"
 prelude="$(dirname "${BASH_SOURCE[0]}")/shape-prelude.rkt"
 [ -f "$prelude" ] || { echo "missing $prelude"; exit 1; }
 n="${2:-20}"
+case "$n" in ("" | *[!0-9]*) echo "iterations must be a positive integer: $n"; exit 2 ;; esac
+[ "$n" -ge 1 ] || { echo "iterations must be >= 1: $n"; exit 2; }
 dev="${REPRO_DEVICE:-cpu}"
 logdir="${REPRO_LOGDIR:-${TMPDIR:-/tmp}/rktorch-repro}"
 secs="${REPRO_TIMEOUT:-300}"

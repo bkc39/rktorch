@@ -76,9 +76,8 @@
   (call-with-ledger
    (lambda ()
      (set-box! finalizer-failure-count (add1 (unbox finalizer-failure-count)))
-     ;; Most recent, not first: eight benign failures early in a long session
-     ;; would otherwise starve the evidence for a real cascade later, which is
-     ;; the case this capture exists for.
+     ;; Most recent, not first: earlier benign failures must not starve the
+     ;; buffer of evidence for a later one.
      (set-box! captured-failures
                (take-at-most capture-limit
                              (cons (if (exn? e) (exn-message e) (format "~e" e))

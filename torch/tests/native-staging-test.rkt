@@ -60,10 +60,10 @@
         f))
     (check-equal? leftovers '() "a .part/.tmp file survived staging"))
 
-  (test-case "a failed copy leaves the previous shim intact and no temp file"
+  (test-case "a failed stage leaves the previous shim intact and no temp file"
     (define collection (make-temporary-directory))
     (stage! (make-src! "GOOD-SHIM") collection)
-    ;; source whose libtorchrkt.* entry is a directory: copy-file must fail
+    ;; source whose libtorchrkt.* entry is a directory, so reading it raises
     (define bad (make-temporary-directory))
     (make-directory* (build-path bad "lib" "libtorchrkt.so"))
     (check-exn exn:fail? (lambda () (stage! bad collection)))
