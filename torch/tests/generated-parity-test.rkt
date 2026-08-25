@@ -84,8 +84,13 @@
                         (optional-int64 #f))
           'dropout '((tensor 2 3) (double 0.5) (bool #f))
           'copy! '((tensor 2 3) (tensor 2 3) (bool #f))
+          'fill-scalar! '((tensor 2 3) (double -3.0))
           'index-copy! '((tensor 3 3) (int64 0) (int-tensor (0 2))
                          (tensor 2 3))
+          'index-fill-int-tensor! '((tensor 3 3) (int64 0)
+                                    (int-tensor (0 2)) (scalar-tensor 4.5))
+          'masked-fill-tensor! '((tensor 6) (bool-tensor (0 1 0 1 0 1))
+                                 (scalar-tensor 4.5))
           'index-add! '((tensor 3 3) (int64 0) (int-tensor (0 2))
                         (tensor 2 3) (kwarg "alpha" 2.0))
           'index-fill-int-scalar! '((tensor 3 3) (int64 0)
@@ -121,6 +126,7 @@
        (if (equal? (cdr spec) '(#f)) #f (apply randn (cdr spec)))]
       [(optional-tensor-ones) (apply ones (cdr spec))]
       [(int-tensor int-tensor-2d) (to-dtype (tensor (cadr spec)) 'int64)]
+      [(scalar-tensor) (tensor (cadr spec))]
       [(bool-tensor) (ne (tensor (cadr spec)) 0)]
       [(int64 double bool int-array optional-int64 optional-int-array dtype)
        (cadr spec)]
@@ -148,6 +154,7 @@
                (string-join (for/list ([row (in-list (cadr spec))])
                               (format "[~a]" (csv row)))
                             ", "))]
+      [(scalar-tensor) (format "torch.tensor(~a)" (cadr spec))]
       [(bool-tensor)
        (format "torch.tensor([~a], dtype=torch.bool)" (csv (cadr spec)))]
       [(int64 double) (number->string (cadr spec))]

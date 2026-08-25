@@ -30,6 +30,7 @@
          embedding
          eq-scalar
          eq-tensor
+         fill-scalar!
          gather
          ge-scalar
          ge-tensor
@@ -38,6 +39,7 @@
          index-add!
          index-copy!
          index-fill-int-scalar!
+         index-fill-int-tensor!
          index-select
          layer-norm
          le-scalar
@@ -47,6 +49,7 @@
          lt-tensor
          masked-fill-scalar
          masked-fill-scalar!
+         masked-fill-tensor!
          masked-scatter!
          masked-select
          matmul
@@ -118,6 +121,9 @@
 (define-generated-op eq-tensor tr_gen_eq_tensor
   ([self tensor] [other tensor]))
 
+(define-generated-op fill-scalar! tr_gen_fill__scalar #:inplace
+  ([self tensor] [value scalar]))
+
 (define-generated-op gather tr_gen_gather
   ([self tensor] [dim int64] [index tensor] [sparse-grad bool]))
 
@@ -141,6 +147,9 @@
 
 (define-generated-op index-fill-int-scalar! tr_gen_index_fill__int_scalar #:inplace
   ([self tensor] [dim int64] [index tensor] [value scalar]))
+
+(define-generated-op index-fill-int-tensor! tr_gen_index_fill__int_tensor #:inplace
+  ([self tensor] [dim int64] [index tensor] [value tensor]))
 
 (define-generated-op index-select tr_gen_index_select
   ([self tensor] [dim int64] [index tensor]))
@@ -168,6 +177,9 @@
 
 (define-generated-op masked-fill-scalar! tr_gen_masked_fill__scalar #:inplace
   ([self tensor] [mask tensor] [value scalar]))
+
+(define-generated-op masked-fill-tensor! tr_gen_masked_fill__tensor #:inplace
+  ([self tensor] [mask tensor] [value tensor]))
 
 (define-generated-op masked-scatter! tr_gen_masked_scatter_ #:inplace
   ([self tensor] [mask tensor] [source tensor]))

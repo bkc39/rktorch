@@ -82,15 +82,16 @@ compare ge.Scalar
 # generator, so its binding must not take the OOM collect-and-retry wrap.
 nn dropout rng
 inplace copy_
-
-# --- #73 family 3: indexed writes -----------------------------------------
+inplace fill_.Scalar
 inplace index_copy_
 inplace index_add_
 inplace index_fill_.int_Scalar
+inplace index_fill_.int_Tensor
 inplace scatter_.src
 inplace scatter_.value
 inplace scatter_add_
 inplace masked_fill_.Scalar
+inplace masked_fill_.Tensor
 inplace masked_scatter_
 
 # --- tranche 3 (#22): the transformer op closure --------------------------

@@ -116,8 +116,8 @@
                               tensor?)])]
   [tensor-ref (-> tensor? index-spec/c ...
                   (or/c tensor? number? boolean?))]
-  [tensor-ref! (->* (tensor? (or/c tensor? real?))
-                    #:rest (listof index-spec/c) void?)]
+  [tensor-ref! (-> tensor? (or/c tensor? real?) index-spec/c ...
+                   void?)]
   [index-copy! (-> tensor? index/c index-vector/c tensor? void?)]
   [index-add! (->* (tensor? index/c index-vector/c tensor?)
                    (#:alpha real?) void?)]

@@ -46,6 +46,14 @@ int tr_gen_copy_(tr_tensor* self, const tr_tensor* src, bool non_blocking) {
       "tr_gen_copy_", [&] { self->value.copy_(src->value, non_blocking); });
 }
 
+int tr_gen_fill__scalar(tr_tensor* self, double value) {
+  if (!self) {
+    return torchrkt::null_arg_status("tr_gen_fill__scalar");
+  }
+  return torchrkt::status_call("tr_gen_fill__scalar",
+                               [&] { self->value.fill_(value); });
+}
+
 int tr_gen_index_add_(tr_tensor* self, int64_t dim, const tr_tensor* index,
                       const tr_tensor* source, double alpha) {
   if (!self || !index || !source) {
@@ -76,6 +84,17 @@ int tr_gen_index_fill__int_scalar(tr_tensor* self, int64_t dim,
   });
 }
 
+int tr_gen_index_fill__int_tensor(tr_tensor* self, int64_t dim,
+                                  const tr_tensor* index,
+                                  const tr_tensor* value) {
+  if (!self || !index || !value) {
+    return torchrkt::null_arg_status("tr_gen_index_fill__int_tensor");
+  }
+  return torchrkt::status_call("tr_gen_index_fill__int_tensor", [&] {
+    self->value.index_fill_(dim, index->value, value->value);
+  });
+}
+
 int tr_gen_lerp__tensor(tr_tensor* self, const tr_tensor* end,
                         const tr_tensor* weight) {
   if (!self || !end || !weight) {
@@ -93,6 +112,16 @@ int tr_gen_masked_fill__scalar(tr_tensor* self, const tr_tensor* mask,
   }
   return torchrkt::status_call("tr_gen_masked_fill__scalar", [&] {
     self->value.masked_fill_(mask->value, value);
+  });
+}
+
+int tr_gen_masked_fill__tensor(tr_tensor* self, const tr_tensor* mask,
+                               const tr_tensor* value) {
+  if (!self || !mask || !value) {
+    return torchrkt::null_arg_status("tr_gen_masked_fill__tensor");
+  }
+  return torchrkt::status_call("tr_gen_masked_fill__tensor", [&] {
+    self->value.masked_fill_(mask->value, value->value);
   });
 }
 

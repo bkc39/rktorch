@@ -128,5 +128,38 @@
     (check-exn exn:fail:contract?
                (lambda () (index-fill! (fresh) 0 (tensor '(0.5)) 1)))
     (check-exn #rx"index_put_"
-               (lambda () (tensor-ref! (fresh) 0 '(0 1)))))
+               (lambda () (tensor-ref! (fresh) 0 '(0 1))))
+    ;; exact-int fills stay exact on integral destinations (2^53+1
+    ;; dies in any double transit)
+    (let ([it (tensor '((1 2) (3 4)))])
+      (index-fill! it 0 (to-dtype (tensor '(0)) 'int64) (add1 (expt 2 53)))
+      (check-equal? (take (tensor->list it) 2)
+                    (list (add1 (expt 2 53)) (add1 (expt 2 53)))))
+    (let ([it (tensor '(1 2 3))])
+      (masked-fill! it (eq it 2) (add1 (expt 2 53)))
+      (check-equal? (tensor->list it) (list 1 (add1 (expt 2 53)) 3)))
+    (let ([it (tensor '((1 2) (3 4)))])
+      (scatter! it 1 (to-dtype (tensor '((0) (1))) 'int64)
+                (add1 (expt 2 53)))
+      (check-equal? (tensor->list it)
+                    (list (add1 (expt 2 53)) 2 3 (add1 (expt 2 53)))))
+    ;; float64 destination keeps double precision through fill_
+    (let ([d (to-dtype (zeros 1) 'float64)])
+      (ref! d 0 1.0000000000000002)
+      (check-equal? (tensor->list d) '(1.0000000000000002)))
+    ;; 0-d targets are writable
+    (let ([z (tensor 5.0)])
+      (ref! z .. 7)
+      (check-equal? (tensor->list (reshape z 1)) '(7.0)))
+    ;; python's mask-write validation: leading-dims shape, 0-d source
+    ;; broadcasts, sized source must match the true count
+    (check-exn #rx"mask shape"
+               (lambda () (ref! (fresh) (ne (tensor '(1 0 1)) 0) 0)))
+    (let ([t (fresh)])
+      (ref! t (gt t 4.0) (tensor 0.0))
+      (check-equal? (tensor->list t) '(1.0 2.0 3.0 4.0 0.0 0.0)))
+    (check-exn #rx"true mask positions"
+               (lambda ()
+                 (let ([t (fresh)])
+                   (ref! t (gt t 4.0) (tensor '(1.0 2.0 3.0)))))))
 )
