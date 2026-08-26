@@ -152,8 +152,6 @@
     (let ([z (tensor 5.0)])
       (ref! z .. 7)
       (check-equal? (tensor->list (reshape z 1)) '(7.0)))
-    ;; python's mask-write validation: leading-dims shape, 0-d source
-    ;; broadcasts, sized source must match the true count
     (check-exn #rx"mask shape"
                (lambda () (ref! (fresh) (ne (tensor '(1 0 1)) 0) 0)))
     (let ([t (fresh)])
@@ -207,6 +205,11 @@
                (lambda ()
                  (let ([t (fresh)])
                    (ref! t (gt t 4.0) (tensor '((9.0) (10.0)))))))
+    (check-exn #rx"true mask positions"
+               (lambda ()
+                 (let ([t (fresh)])
+                   (ref! t (gt t 4.0)
+                         (tensor '((7.0 8.0) (9.0 10.0)))))))
     (let ([it (tensor '((1 2) (3 4)))])
       (scatter! it 1 (to-dtype (tensor '((0) (1))) 'int64) 7)
       (check-equal? (tensor->list it) '(7 2 3 7)))

@@ -199,7 +199,11 @@
                   (written (lambda (t) (masked-fill! t (gt t 5.0) 0)))
                   (written (lambda (t)
                              (masked-scatter! t (gt t 4.0)
-                                              (tensor '(9.0 10.0))))))])
+                                              (tensor '(9.0 10.0)))))
+                  (written (lambda (t)
+                             (ref! t (gt t 4.0) (tensor '((9.0 10.0))))))
+                  (written (lambda (t)
+                             (ref! t (gt t 4.0) (tensor '(((7.0))))))))])
        (check-equal? (length rkt) (length py) "write form count")
        (for ([r (in-list rkt)]
              [p (in-list py)]

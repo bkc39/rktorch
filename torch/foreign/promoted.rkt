@@ -296,7 +296,8 @@
                (append mdims (make-list (length trailing) 1)))))
   (cond
     [(not (tensor? v))
-     (if (and (exact-integer? v) (int64-dtype? t))
+     (if (and (exact-integer? v) (int64-dtype? t)
+              (not (double-roundtrips? v)))
          (g:masked-fill-tensor! t mask (scalar->value-tensor v t))
          (g:masked-fill-scalar! t mask (exact->inexact v)))]
     [(null? (tensor-shape v))
@@ -307,19 +308,24 @@
      ;; required because masked_scatter_ silently ignores surplus
      (define sel-shape
        (cons (item (sum (to-dtype mask 'int64))) trailing))
-     (define vdims (tensor-shape v))
+     ;; python strips leading singleton source dims before broadcasting
+     (define vdims
+       (let loop ([d (tensor-shape v)])
+         (if (and (> (length d) (length sel-shape)) (= (car d) 1))
+             (loop (cdr d))
+             d)))
      (unless (and (<= (length vdims) (length sel-shape))
                   (for/and ([f (in-list (reverse vdims))]
                             [s (in-list (reverse sel-shape))])
                     (or (= f 1) (= f s))))
        (error 'tensor-ref!
               "source shape ~a cannot broadcast to the true mask positions ~a"
-              vdims sel-shape))
+              (tensor-shape v) sel-shape))
      (g:masked-scatter!
       t mask
       (if (= (apply * vdims) (apply * sel-shape))
           v
-          (g:broadcast-to v sel-shape)))]))
+          (g:broadcast-to (apply reshape v vdims) sel-shape)))]))
 
 (define (tensor-ref! t v . specs)
   (void
@@ -360,7 +366,8 @@
                        s)))]))
      (cond
        [(tensor? v) (g:copy! view v #f)]
-       [(and (exact-integer? v) (int64-dtype? t))
+       [(and (exact-integer? v) (int64-dtype? t)
+             (not (double-roundtrips? v)))
         (g:copy! view (scalar->value-tensor v t) #f)]
        ;; fill_'s C double keeps full float precision (a float32
        ;; ingestion transit would round float64 destinations)
