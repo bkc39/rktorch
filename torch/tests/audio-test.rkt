@@ -114,7 +114,18 @@
       (riff-file (riff-chunk #"fmt " (fmt-payload 1 8000)))
       (riff-chunk #"data" (integer->integer-bytes 300 2 #t #f)))
      (lambda (p)
-       (check-exn #rx"no data chunk" (lambda () (load-wav p))))))
+       (check-exn #rx"no data chunk" (lambda () (load-wav p)))))
+    (call-with-wav-bytes
+     (bytes-append #"RIFF"
+                   (integer->integer-bytes 4000000000 4 #f #f)
+                   #"WAVE")
+     (lambda (p)
+       (check-exn #rx"exceeds the file" (lambda () (load-wav p)))))
+    (call-with-wav-bytes
+     (riff-file (riff-chunk #"fmt " (make-bytes 2000 0))
+                (riff-chunk #"data" (bytes)))
+     (lambda (p)
+       (check-exn #rx"implausibly large" (lambda () (load-wav p))))))
 
   (test-case "wav rejection and cache paths (#83)"
     (check-exn #rx"not a RIFF/WAVE"
@@ -135,6 +146,8 @@
                (lambda () (write-wav "unused.wav" (tensor '(0.0)) 0)))
     (check-exn #rx"sample rate"
                (lambda () (write-wav "unused.wav" (tensor '(0.0)) 8000.0)))
+    (check-exn #rx"byte rate"
+               (lambda () (write-wav "unused.wav" (zeros 3 1) (expt 2 30))))
     (define cache (make-temporary-directory))
     (dynamic-wind
      void

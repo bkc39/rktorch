@@ -24,8 +24,6 @@
 (define (u16 bs offset) (integer-bytes->integer bs #f #f offset (+ offset 2)))
 (define (u32 bs offset) (integer-bytes->integer bs #f #f offset (+ offset 4)))
 
-;; Returns (values samples sample-rate): samples is a float32 tensor of
-;; shape (channels n) in [-1, 1), torchaudio.load's convention.
 (define (load-wav path)
   (call-with-input-file path
     (lambda (in)
@@ -34,6 +32,12 @@
                    (equal? (subbytes preamble 8 12) #"WAVE"))
         (error 'load-wav "~a is not a RIFF/WAVE file" path))
       (define riff-limit (+ 8 (u32 preamble 4)))
+      ;; declared sizes bound every later allocation — cap them by the
+      ;; physical file before believing them
+      (when (> riff-limit (file-size path))
+        (error 'load-wav
+               "~a: declared RIFF size ~a exceeds the file's ~a bytes"
+               path riff-limit (file-size path)))
       (let loop ([fmt #f])
         (when (> (+ (file-position in) 8) riff-limit)
           (error 'load-wav "~a has no data chunk" path))
@@ -48,6 +52,10 @@
                  path chunk-id))
         (cond
           [(equal? chunk-id #"fmt ")
+           (when (> chunk-size 1024)
+             (error 'load-wav
+                    "~a: fmt chunk is implausibly large (~a bytes)"
+                    path chunk-size))
            (define payload (read-exactly in chunk-size 'load-wav))
            (unless (even? chunk-size)
              (read-exactly in 1 'load-wav))
@@ -95,8 +103,7 @@
            (loop fmt)])))))
 
 (define (write-wav path samples sample-rate)
-  (unless (and (exact-positive-integer? sample-rate)
-               (< sample-rate (expt 2 30)))
+  (unless (exact-positive-integer? sample-rate)
     (error 'write-wav "sample rate must be a positive exact integer: ~e"
            sample-rate))
   (define shape (tensor-shape samples))
@@ -109,6 +116,10 @@
                    shape)]))
   (when (zero? channels)
     (error 'write-wav "zero channels: shape ~a" shape))
+  (when (>= (* sample-rate channels 2) (expt 2 32))
+    (error 'write-wav
+           "byte rate ~a does not fit the WAV header (rate ~a, ~a channels)"
+           (* sample-rate channels 2) sample-rate channels))
   (define flat (list->vector (tensor->list samples)))
   (define data (make-bytes (* 2 channels n)))
   (for* ([c (in-range channels)] [i (in-range n)])
