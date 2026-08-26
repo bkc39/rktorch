@@ -35,6 +35,8 @@ SETUP = {
     "spam":     _HEAD + [b"(length held)\n"],
 }
 DELAY = {"idle": 12.0, "busy": 3.0, "printing": 0.35, "intr": 3.0, "spam": 12.0}
+MAX_CAPTURE = 8 << 20
+READY = b'(printf "REPRO-SETUP-~a\\n" "READY")\n'
 
 def run(mode, idx, budget=90.0):
     pid, fd = pty.fork()
@@ -45,6 +47,7 @@ def run(mode, idx, budget=90.0):
         except OSError:
             os._exit(127)
     out = bytearray()
+    dropped = [0]
     t0 = time.time()
     def pump(until):
         while time.time() < until:
@@ -57,12 +60,23 @@ def run(mode, idx, budget=90.0):
                 return False
             if not b:
                 return False
-            out.extend(b)
+            # Keep draining so the child never blocks, but stop growing: a
+            # cascade emits hundreds of MB and would take the driver with it.
+            if len(out) < MAX_CAPTURE:
+                out.extend(b)
+            else:
+                dropped[0] += len(b)
         return True
     pump(time.time() + 6)
     for line in SETUP[mode]:
         os.write(fd, line)
         pump(time.time() + 0.4)
+    # Wait for setup to finish rather than trusting a fixed sleep: on a slow
+    # host `intr` would otherwise interrupt setup instead of the computation.
+    os.write(fd, READY)
+    ready_by = time.time() + 60
+    while b"REPRO-SETUP-READY" not in bytes(out) and time.time() < ready_by:
+        pump(time.time() + 0.5)
     pump(time.time() + DELAY[mode])
     if mode == "intr":
         os.write(fd, b"\x03")
@@ -104,9 +118,10 @@ def run(mode, idx, budget=90.0):
     imr = text.count(b"invalid memory reference")
     flat = text.replace(b"\n", b"").replace(b"\r", b"").replace(b";", b"").replace(b" ", b"")
     setup_error = (flat.count(b"btforcontext]") - flat.count(b"userbreak")) > 0
-    m = re.findall(rb"\(failures \. (\d+)\)", text)
-    fin_failures = int(m[-1]) if m else 0
-    no_trace = not m
+    trace = re.findall(rb"\[rktorch mem\][^\n]*", text)
+    m = re.search(rb"\(failures \. (\d+)\)", trace[-1]) if trace else None
+    fin_failures = int(m.group(1)) if m else 0
+    no_trace = m is None
     casc = text.count(b"error display handler") + text.count(b"error escape handler")
     abnormal = exited is not None and exited != 0
     inconclusive = (no_trace and not (imr or casc or abnormal or setup_error)) \
@@ -120,7 +135,7 @@ def run(mode, idx, budget=90.0):
         print(f"{'FAIL' if bad else 'INCONCLUSIVE'} mode={mode} iter={idx} hung={hung} "
               f"term_ignored={termignored} abnormal_exit={abnormal} "
               f"setup_error={setup_error} finalizer_failures={fin_failures} no_trace={no_trace} imr={imr} "
-              f"cascade={casc} bytes={len(text)} exit={exited} log={p}", flush=True)
+              f"cascade={casc} bytes={len(text)} dropped={dropped[0]} exit={exited} log={p}", flush=True)
     return bool(bad), bool(inconclusive)
 
 if __name__ == "__main__":

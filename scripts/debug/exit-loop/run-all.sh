@@ -52,7 +52,8 @@ report="$REPRO_LOGDIR/report-$dev.txt"
   rm -f "$REPRO_LOGDIR/.diag"
   if [ -s "$REPRO_LOGDIR/.trace" ]; then
     cat "$REPRO_LOGDIR/.trace"
-    _f=$(grep -oE '\(failures \. [0-9]+\)' "$REPRO_LOGDIR/.trace" | grep -oE '[0-9]+' | tail -1)
+    _f=$(tail -1 "$REPRO_LOGDIR/.trace" \
+           | grep -oE '\(failures \. [0-9]+\)' | head -1 | grep -oE '[0-9]+')
     if [ -n "$_f" ] && [ "$_f" -ne 0 ]; then
       echo "diagnostics arm FAILED: finalizer-failures=$_f"; rc=1
     fi

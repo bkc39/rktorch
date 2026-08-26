@@ -392,11 +392,8 @@
 
           copy-native-libs = pkgs.writeShellApplication {
             name = "copy-native-libs";
-            # Without this the app inherits the caller's PATH, which outside a
-            # nix shell on darwin is BSD coreutils -- the staging helper then
-            # failed at the first `cp`.  This is the documented restage command
-            # (AGENTS.md, .claude/skills/cpp-dev), so it must work on a bare
-            # host, not only inside `nix develop`.
+            # The app must run on a bare host, not only inside `nix develop`:
+            # without this it inherits the caller's PATH.
             runtimeInputs = [ pkgs.coreutils ];
             text = ''
               ${stageNativeLibs cpp}

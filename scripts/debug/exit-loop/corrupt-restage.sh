@@ -113,7 +113,8 @@ echo "[repro] cascade hits: $casc"
 echo "[repro] --- tail ---"; tail -c 600 "$out"
 banner=0
 case "$(tr -d '\n\r; ' < "$out")" in *btforcontext]*) banner=1 ;; esac
-fails=$(grep -oE '\(failures \. [0-9]+\)' "$out" | grep -oE '[0-9]+' | tail -1)
+fails=$(grep -a '\[rktorch mem\]' "$out" | tail -1 \
+          | grep -oE '\(failures \. [0-9]+\)' | head -1 | grep -oE '[0-9]+')
 echo "[repro] finalizer-failures: ${fails:-<no diagnostic>}"
 if [ "$code" -ne 0 ] || [ "$imr" -ne 0 ] || [ "$casc" -ne 0 ] || [ "$banner" = 1 ] \
    || [ -z "$fails" ] || [ "$fails" -ne 0 ]; then

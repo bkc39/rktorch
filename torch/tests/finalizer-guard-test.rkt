@@ -23,12 +23,22 @@
         (subprocess #f #f #f (find-system-path 'exec-file)
                     "-e" "(require torch) (void (ones 2 2))"))
       (close-output-port in)
-      (define text (port->string err))
-      (void (port->string out))
-      (subprocess-wait sp)
-      (begin0 text
-        (close-input-port err)
-        (close-input-port out))))
+      ;; Drain both pipes concurrently and bound the wait: reading one to EOF
+      ;; first deadlocks if the child fills the other, and an exit hang here
+      ;; would block `raco test` rather than failing it.
+      (define captured (box ""))
+      (define err-t (thread (lambda () (set-box! captured (port->string err)))))
+      (define out-t (thread (lambda () (void (port->string out)))))
+      (define exited?
+        (and (sync/timeout 60 (thread (lambda () (subprocess-wait sp)))) #t))
+      (unless exited? (subprocess-kill sp #t))
+      (sync/timeout 10 err-t)
+      (sync/timeout 10 out-t)
+      (close-input-port err)
+      (close-input-port out)
+      (unless exited?
+        (error 'trace-stderr "child did not exit within 60s"))
+      (unbox captured)))
 
   (define (collect-until ready? #:tries [tries 50])
     (let loop ([i 0])

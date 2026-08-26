@@ -25,7 +25,8 @@ for i in $(seq 1 "$n"); do
     echo "ABORT $name: device '$dev' is not available on this host"
     rm -f "$log"; exit 3
   fi
-  fails=$(grep -oE '\(failures \. [0-9]+\)' "$log" | grep -oE '[0-9]+' | tail -1)
+  fails=$(grep -a '\[rktorch mem\]' "$log" | tail -1 \
+            | grep -oE '\(failures \. [0-9]+\)' | head -1 | grep -oE '[0-9]+')
   banner=0
   case "$(tr -d '\n\r; ' < "$log")" in *btforcontext]*) banner=1 ;; esac
   if [ "$code" -ne 0 ] \
