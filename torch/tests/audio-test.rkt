@@ -2,7 +2,9 @@
 
 (module+ test
   (require rackunit
-           racket/file
+           (only-in racket/file
+                    delete-directory/files file->bytes
+                    make-temporary-directory)
            (only-in "../data/audio.rkt"
                     download-audio-cached load-audio-fixture load-wav
                     write-wav)
@@ -48,21 +50,24 @@
 
   (test-case "write-wav round-trips bit-exactly (#83)"
     (define dir (make-temporary-directory))
-    (define mono-path (build-path dir "mono.wav"))
-    (define stereo-path (build-path dir "stereo.wav"))
-    (define mono (tensor '(0.0 0.25 -0.25 0.5 -1.0 0.999969482421875)))
-    (write-wav mono-path mono 8000)
-    (define-values (mono* rate) (load-wav mono-path))
-    (check-equal? rate 8000)
-    (check-equal? (tensor-shape mono*) '(1 6))
-    (check-equal? (tensor->list mono*) (tensor->list mono))
-    (define stereo (tensor '((0.0 0.5 -0.5) (0.25 -0.25 0.75))))
-    (write-wav stereo-path stereo 22050)
-    (define-values (stereo* rate*) (load-wav stereo-path))
-    (check-equal? rate* 22050)
-    (check-equal? (tensor-shape stereo*) '(2 3))
-    (check-equal? (tensor->list stereo*) (tensor->list stereo))
-    (delete-directory/files dir))
+    (dynamic-wind
+     void
+     (lambda ()
+       (define mono-path (build-path dir "mono.wav"))
+       (define stereo-path (build-path dir "stereo.wav"))
+       (define mono (tensor '(0.0 0.25 -0.25 0.5 -1.0 0.999969482421875)))
+       (write-wav mono-path mono 8000)
+       (define-values (mono* rate) (load-wav mono-path))
+       (check-equal? rate 8000)
+       (check-equal? (tensor-shape mono*) '(1 6))
+       (check-equal? (tensor->list mono*) (tensor->list mono))
+       (define stereo (tensor '((0.0 0.5 -0.5) (0.25 -0.25 0.75))))
+       (write-wav stereo-path stereo 22050)
+       (define-values (stereo* rate*) (load-wav stereo-path))
+       (check-equal? rate* 22050)
+       (check-equal? (tensor-shape stereo*) '(2 3))
+       (check-equal? (tensor->list stereo*) (tensor->list stereo)))
+     (lambda () (delete-directory/files dir))))
 
   (test-case "chunk skipping, padding, and malformed frames (#83)"
     (call-with-wav-bytes
@@ -84,7 +89,32 @@
                 (riff-chunk #"data" (make-bytes 6 0)))
      (lambda (p)
        (check-exn #rx"not whole 2-channel frames"
-                  (lambda () (load-wav p))))))
+                  (lambda () (load-wav p)))))
+    (call-with-wav-bytes
+     (riff-file (riff-chunk #"fmt "
+                            (bytes-append (fmt-payload 1 8000) (bytes 7)))
+                (riff-chunk #"data" (integer->integer-bytes 300 2 #t #f)))
+     (lambda (p)
+       (define-values (samples rate) (load-wav p))
+       (check-equal? (tensor-shape samples) '(1 1))
+       (check-equal? (map (lambda (s) (* s 32768.0)) (tensor->list samples))
+                     '(300.0))))
+    (call-with-wav-bytes
+     (riff-file (riff-chunk #"fmt " (fmt-payload 0 8000))
+                (riff-chunk #"data" (bytes)))
+     (lambda (p)
+       (check-exn #rx"declares 0 channels" (lambda () (load-wav p)))))
+    (call-with-wav-bytes
+     (riff-file (riff-chunk #"fmt " (subbytes (fmt-payload 1 8000) 0 8))
+                (riff-chunk #"data" (bytes)))
+     (lambda (p)
+       (check-exn #rx"too short" (lambda () (load-wav p)))))
+    (call-with-wav-bytes
+     (bytes-append
+      (riff-file (riff-chunk #"fmt " (fmt-payload 1 8000)))
+      (riff-chunk #"data" (integer->integer-bytes 300 2 #t #f)))
+     (lambda (p)
+       (check-exn #rx"no data chunk" (lambda () (load-wav p))))))
 
   (test-case "wav rejection and cache paths (#83)"
     (check-exn #rx"not a RIFF/WAVE"
@@ -101,6 +131,10 @@
                (lambda () (write-wav "unused.wav" (tensor 1.0) 8000)))
     (check-exn #rx"zero channels"
                (lambda () (write-wav "unused.wav" (zeros 0 3) 8000)))
+    (check-exn #rx"sample rate"
+               (lambda () (write-wav "unused.wav" (tensor '(0.0)) 0)))
+    (check-exn #rx"sample rate"
+               (lambda () (write-wav "unused.wav" (tensor '(0.0)) 8000.0)))
     (define cache (make-temporary-directory))
     (dynamic-wind
      void
@@ -130,5 +164,13 @@
          (check-exn #rx"inside the cache directory"
                     (lambda ()
                       (download-audio-cached "../escape.wav"
-                                             (format "file://~a" src))))))
+                                             (format "file://~a" src))))
+         (define nested-src (build-path cache "nested-src.wav"))
+         (write-wav nested-src (tensor '(0.25)) 16000)
+         (check-equal? (file->bytes
+                        (download-audio-cached
+                         "datasets/clip.wav"
+                         (format "file://~a" nested-src)))
+                       (file->bytes nested-src)
+                       "nested cache names create their parent")))
      (lambda () (delete-directory/files cache)))))

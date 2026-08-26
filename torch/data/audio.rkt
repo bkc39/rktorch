@@ -33,12 +33,19 @@
       (unless (and (equal? (subbytes preamble 0 4) #"RIFF")
                    (equal? (subbytes preamble 8 12) #"WAVE"))
         (error 'load-wav "~a is not a RIFF/WAVE file" path))
+      (define riff-limit (+ 8 (u32 preamble 4)))
       (let loop ([fmt #f])
+        (when (> (+ (file-position in) 8) riff-limit)
+          (error 'load-wav "~a has no data chunk" path))
         (define header (read-bytes 8 in))
         (unless (and (bytes? header) (= (bytes-length header) 8))
           (error 'load-wav "~a has no data chunk" path))
         (define chunk-id (subbytes header 0 4))
         (define chunk-size (u32 header 4))
+        (when (> (+ (file-position in) chunk-size) riff-limit)
+          (error 'load-wav
+                 "~a: ~a chunk extends past the declared RIFF size"
+                 path chunk-id))
         (cond
           [(equal? chunk-id #"fmt ")
            (define payload (read-exactly in chunk-size 'load-wav))
@@ -48,6 +55,9 @@
           [(equal? chunk-id #"data")
            (unless fmt
              (error 'load-wav "~a has a data chunk before fmt" path))
+           (unless (>= (bytes-length fmt) 16)
+             (error 'load-wav "~a: fmt chunk is too short (~a bytes)"
+                    path (bytes-length fmt)))
            (define audio-format (u16 fmt 0))
            (unless (= audio-format 1)
              (error 'load-wav
@@ -59,6 +69,8 @@
            (unless (= bits 16)
              (error 'load-wav "~a: only 16-bit PCM is supported, got ~a-bit"
                     path bits))
+           (when (zero? channels)
+             (error 'load-wav "~a: fmt chunk declares 0 channels" path))
            (unless (zero? (remainder chunk-size (* 2 channels)))
              (error 'load-wav
                     "~a: ~a-byte data chunk is not whole ~a-channel frames"
@@ -76,11 +88,17 @@
                     32768.0))))
             sample-rate)]
           [else
-           ;; chunk payloads are padded to even length
-           (read-exactly in (+ chunk-size (modulo chunk-size 2)) 'load-wav)
+           ;; chunk payloads are padded to even length; seek, don't read —
+           ;; a forged size must not allocate its declared bytes
+           (file-position in (+ (file-position in) chunk-size
+                                (modulo chunk-size 2)))
            (loop fmt)])))))
 
 (define (write-wav path samples sample-rate)
+  (unless (and (exact-positive-integer? sample-rate)
+               (< sample-rate (expt 2 30)))
+    (error 'write-wav "sample rate must be a positive exact integer: ~e"
+           sample-rate))
   (define shape (tensor-shape samples))
   (define-values (channels n)
     (case (length shape)
@@ -128,9 +146,6 @@
       (string->path override)
       (build-path (find-system-path 'cache-dir) "rktorch" "audio")))
 
-;; Returns the cached path (audio archives are large; no in-memory read).
-;; valid? gates the cache write so a rate-limit page or truncated body
-;; cannot poison the cache.
 (define (download-audio-cached name url #:valid? [valid? (lambda (path) #t)])
   (let ([p (string->path name)])
     (unless (and (relative-path? p)
@@ -139,7 +154,8 @@
              "cache name must stay inside the cache directory: ~e" name)))
   (define dest (build-path (audio-cache-dir) name))
   (unless (file-exists? dest)
-    (make-directory* (audio-cache-dir))
+    (define-values (parent _name _dir?) (split-path dest))
+    (make-directory* parent)
     (with-temporary-file (tmp #:template "audio-~a.part"
                               #:directory (audio-cache-dir))
       (call/input-url (string->url url)
