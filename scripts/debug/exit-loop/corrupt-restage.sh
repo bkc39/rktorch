@@ -60,7 +60,7 @@ if grep -q REPRO-DEVICE-BAD "$out" 2>/dev/null; then
 fi
 printf '(define held (with-default-device D (for/list ([_ (in-range 500)]) (randn 256 256))))\n' >&3
 printf '(length held)\n' >&3
-printf '(printf "REPRO-SETUP-~a\\n" "READY")\n' >&3
+printf '(when (= (length held) 500) (printf "REPRO-SETUP-~a\\n" "READY"))\n' >&3
 for _ in $(seq 1 60); do
   grep -q REPRO-SETUP-READY "$out" 2>/dev/null && break
   sleep 1
