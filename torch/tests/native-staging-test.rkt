@@ -1,8 +1,7 @@
 #lang racket/base
 
-;; Staging must replace the directory entry, never write the file in place: a
-;; process with the old library mapped keeps executing it, so the old inode
-;; has to stay intact and readable across a restage.
+;; Staging must replace the directory entry, never write in place: the old
+;; inode has to survive for processes that already mapped it.
 
 (module+ test
   (require rackunit
@@ -42,9 +41,6 @@
     (check-equal? (file->string (staged-path collection)) "SHIM-ONE"))
 
   (test-case "re-staging replaces the inode instead of writing in place (#72)"
-    ;; The property that saves a live REPL: after a restage, a handle opened
-    ;; against the OLD file still reads the OLD bytes, because rename(2) only
-    ;; swapped the directory entry.  An in-place write would fail this.
     (define collection (temp-dir!))
     (stage! (make-src! "OLD-SHIM") collection)
     (define dst (staged-path collection))
@@ -86,8 +82,6 @@
     (check-equal? leftovers '() "a .part/.tmp file survived staging"))
 
   (test-case "a source that cannot be read leaves the shim intact and no temp file"
-    ;; The source entry is a directory, so reading it raises.  Nothing may be
-    ;; removed or replaced until a whole new file exists to rename into place.
     (define collection (temp-dir!))
     (stage! (make-src! "GOOD-SHIM") collection)
     (define before (file-or-directory-identity (staged-path collection)))

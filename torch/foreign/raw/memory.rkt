@@ -49,8 +49,6 @@
 (define (finalizer-failures)
   (unbox finalizer-failure-count))
 
-;; One atomic section for the whole snapshot: read piecemeal while finalizers
-;; are running, the counts and the messages can disagree with each other.
 (define (finalizer-diagnostics)
   (call-with-ledger
    (lambda ()
@@ -59,8 +57,7 @@
            (cons 'messages (reverse (unbox captured-failures)))
            (cons 'ledger-entries (hash-count allocations))))))
 
-;; No printer: this runs from the allocator finalizer, so a value carrying a
-;; prop:custom-write that raises or blocks must not be handed to one.
+;; No printer: a prop:custom-write that raises or blocks would be fatal here.
 (define (describe-raised e)
   (cond
     [(exn? e) (exn-message e)]
@@ -73,9 +70,7 @@
     [(or (zero? n) (null? xs)) '()]
     [else (cons (car xs) (take-at-most (sub1 n) (cdr xs)))]))
 
-;; Total guard because this IS the handler of the with-handlers below, so
-;; nothing else protects it, and it runs inside alloc.rkt's raw atomic region
-;; where an escape is a process death rather than a raise.
+;; Guarded: this is the handler below, so nothing else protects it.
 (define (record-failure! e)
   (with-handlers ([(lambda (_) #t) void])
     (record-failure!/unguarded e)))
@@ -84,8 +79,6 @@
   (call-with-ledger
    (lambda ()
      (set-box! finalizer-failure-count (add1 (unbox finalizer-failure-count)))
-     ;; Most recent, not first: earlier benign failures must not starve the
-     ;; buffer of evidence for a later one.
      (set-box! captured-failures
                (take-at-most capture-limit
                              (cons (describe-raised e)
@@ -94,10 +87,8 @@
 ;; Total catch on purpose, not exn:fail?: any value escaping GC
 ;; finalization re-enters the error machinery and cascades (#38).
 (define ((swallow-and-count-failure release) t)
-  ;; Everything is inside the guard, run counter included: this body runs from
-  ;; ffi/unsafe/alloc's finalizer, inside a raw start/end-atomic region with no
-  ;; dynamic-wind.  An escape from here does not raise, it kills the process
-  ;; ("attempt to deschedule the current thread in atomic mode").
+  ;; Nothing outside the guard: alloc.rkt's finalizer holds raw atomic mode
+  ;; with no dynamic-wind, so an escape kills the process rather than raising.
   (with-handlers ([(lambda (_) #t) record-failure!])
     (call-with-ledger
      (lambda () (set-box! finalizer-run-count (add1 (unbox finalizer-run-count)))))

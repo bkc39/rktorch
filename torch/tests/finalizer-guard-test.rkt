@@ -11,7 +11,6 @@
                     finalizer-diagnostics finalizer-failures
                     swallow-and-count-failure))
 
-  ;; The exit dump only happens at plumber flush, so it needs a child process.
   (define (trace-stderr #:trace? trace?)
     (parameterize ([current-environment-variables
                     (environment-variables-copy (current-environment-variables))])
@@ -23,9 +22,7 @@
         (subprocess #f #f #f (find-system-path 'exec-file)
                     "-e" "(require torch) (void (ones 2 2))"))
       (close-output-port in)
-      ;; Drain both pipes concurrently and bound the wait: reading one to EOF
-      ;; first deadlocks if the child fills the other, and an exit hang here
-      ;; would block `raco test` rather than failing it.
+      ;; Concurrent drain: reading one to EOF first deadlocks on the other.
       (define captured (box ""))
       (define err-t (thread (lambda () (set-box! captured (port->string err)))))
       (define out-t (thread (lambda () (void (port->string out)))))
@@ -75,13 +72,11 @@
     (define (runs-of d) (cdr (assq 'runs d)))
     (define (failures-of d) (cdr (assq 'failures d)))
     (define before (finalizer-diagnostics))
-    ;; every guarded release counts as a run, whether or not it fails
     ((swallow-and-count-failure void) 'handle)
     ((swallow-and-count-failure (lambda (_t) (error 'boom "counted"))) 'handle)
     (define after (finalizer-diagnostics))
     (check-equal? (runs-of after) (+ (runs-of before) 2))
     (check-equal? (failures-of after) (+ (failures-of before) 1))
-    ;; the accessor agrees with the standalone counter
     (check-equal? (failures-of after) (finalizer-failures)))
 
   (test-case "finalizer-diagnostics captures the exception text, not just a count"
@@ -92,7 +87,6 @@
     (define msgs (messages-of (finalizer-diagnostics)))
     (check-true (list? msgs))
     (check-true (andmap string? msgs))
-    ;; bounded at 8 (capture-limit): once full, later failures add no messages
     (cond
       [(< before 8)
        (check-equal? (length msgs) (add1 before))
@@ -100,8 +94,6 @@
       [else (check-equal? (length msgs) 8)]))
 
   (test-case "message capture is bounded at 8 and keeps the MOST RECENT"
-    ;; Keeping the first 8 would mean a real cascade late in a session leaves no
-    ;; evidence, because early benign failures already filled the buffer.
     (for ([i (in-range 30)])
       ((swallow-and-count-failure (lambda (_t) (error 'flood "n=~a" i))) 'handle))
     ((swallow-and-count-failure (lambda (_t) (error 'flood "newest-marker-7c1e"))) 'handle)
@@ -114,8 +106,6 @@
                  "the oldest failure should have rotated out"))
 
   (test-case "a non-exn value is counted and described without invoking its printer"
-    ;; describe-raised must not hand the value to a printer: this runs from the
-    ;; allocator finalizer, where a custom writer that raises or blocks is fatal.
     (define printed? (box #f))
     (struct unprintable ()
       #:property prop:custom-write

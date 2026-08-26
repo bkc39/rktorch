@@ -16,24 +16,16 @@
 
 (define lib-pattern #rx"^libtorchrkt\\.")
 
-;; Temp file + rename(2), never a write in place: `cp`-style staging opens the
-;; destination O_TRUNC, which invalidates the pages of any process still
-;; executing the old file and faults it (#72).  rename swaps the directory
-;; entry and leaves the old inode alive, so a live REPL keeps running the old
-;; lib rather than crashing, and there is no window where the file is missing
-;; or half-written.  Same discipline as data/mnist.rkt's cache write.
+;; rename(2), never a write in place: an in-place write faults every process
+;; that has the old file mapped.
 (define (copy-native-libs! dest-dir source-dir)
   (make-directory* dest-dir)
   (for ([f (in-list (directory-list source-dir))]
         #:when (regexp-match? lib-pattern (path->string f)))
     (define src (build-path source-dir f))
     (define dst (build-path dest-dir f))
-    ;; Skip when the staged bytes already match: `raco setup` runs this on
-    ;; every shell provision, right after the shell hook has staged the same
-    ;; shim, and a redundant rename would churn the inode for nothing.
     (cond
       [(and (file-exists? dst) (equal? (file->bytes src) (file->bytes dst)))
-       ;; Bytes match, but an older staging may have left a different mode.
        (file-or-directory-permissions
         dst (file-or-directory-permissions src 'bits))]
       [else
