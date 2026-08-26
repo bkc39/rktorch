@@ -7,7 +7,7 @@
          (only-in racket/port copy-port)
          (only-in net/url call/input-url get-pure-port string->url)
          (only-in "../private/util.rkt" with-temporary-file)
-         (only-in "../main.rkt" tensor tensor->list tensor-shape tensor?))
+         (only-in "../main.rkt" tensor tensor-shape tensor->list tensor?))
 
 (provide load-wav
          write-wav

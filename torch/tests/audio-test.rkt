@@ -6,7 +6,7 @@
            (only-in "../data/audio.rkt"
                     download-audio-cached load-audio-fixture load-wav
                     write-wav)
-           (only-in "../main.rkt" tensor tensor->list tensor-shape))
+           (only-in "../main.rkt" tensor tensor-shape tensor->list))
 
   (test-case "wav fixture loads with pinned samples (#83)"
     (define-values (samples rate) (load-audio-fixture))
