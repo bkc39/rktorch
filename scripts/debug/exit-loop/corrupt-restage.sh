@@ -102,7 +102,6 @@ if kill -0 "$rkt" 2>/dev/null; then
 fi
 wait "$rkt" 2>/dev/null; code=$?
 rm -f "$fifo"
-cp "$backup" "$lib"; chmod u+w "$lib" 2>/dev/null || true
 
 imr=$(grep -c 'invalid memory reference' "$out" || true)
 casc=$(grep -cE 'error display handler|error escape handler' "$out" || true)
@@ -110,7 +109,9 @@ echo "[repro] exit=$code logbytes=$(wc -c < "$out")"
 echo "[repro] invalid-memory-reference hits: $imr"
 echo "[repro] cascade hits: $casc"
 echo "[repro] --- tail ---"; tail -c 600 "$out"
-if [ "$code" -ne 0 ] || [ "$imr" -ne 0 ] || [ "$casc" -ne 0 ]; then
+banner=0
+case "$(tr -d '\n\r; ' < "$out")" in *btforcontext]*) banner=1 ;; esac
+if [ "$code" -ne 0 ] || [ "$imr" -ne 0 ] || [ "$casc" -ne 0 ] || [ "$banner" = 1 ]; then
   echo "[repro] RESULT: vector reproduced"
   exit 1
 fi

@@ -6,13 +6,21 @@
 
 (module+ test
   (require rackunit
-           (only-in racket/file file->string make-directory* make-temporary-directory)
+           (only-in racket/file delete-directory/files file->string make-directory*
+                    make-temporary-directory)
            (only-in racket/port port->string)
            (only-in "../private/install-torchrkt-native.rkt" pre-installer))
 
   ;; Build a fake `${cpp}` output whose lib/ holds a libtorchrkt with `content`.
+  (define created '())
+
+  (define (temp-dir!)
+    (define d (make-temporary-directory))
+    (set! created (cons d created))
+    d)
+
   (define (make-src! content)
-    (define root (make-temporary-directory))
+    (define root (temp-dir!))
     (define lib (build-path root "lib"))
     (make-directory lib)
     (call-with-output-file (build-path lib "libtorchrkt.so")
@@ -29,7 +37,7 @@
     (build-path collection "native-libs" "libtorchrkt.so"))
 
   (test-case "staging places the source bytes at the destination"
-    (define collection (make-temporary-directory))
+    (define collection (temp-dir!))
     (stage! (make-src! "SHIM-ONE") collection)
     (check-true (file-exists? (staged-path collection)))
     (check-equal? (file->string (staged-path collection)) "SHIM-ONE"))
@@ -38,7 +46,7 @@
     ;; The property that saves a live REPL: after a restage, a handle opened
     ;; against the OLD file still reads the OLD bytes, because rename(2) only
     ;; swapped the directory entry.  An in-place write would fail this.
-    (define collection (make-temporary-directory))
+    (define collection (temp-dir!))
     (stage! (make-src! "OLD-SHIM") collection)
     (define dst (staged-path collection))
     (define id-before (file-or-directory-identity dst))
@@ -52,7 +60,7 @@
     (close-input-port held))
 
   (test-case "staging leaves no temp file behind"
-    (define collection (make-temporary-directory))
+    (define collection (temp-dir!))
     (stage! (make-src! "SHIM") collection)
     (define leftovers
       (for/list ([f (in-list (directory-list (build-path collection "native-libs")))]
@@ -64,10 +72,10 @@
     ;; The staged shim must survive a stage that cannot complete.  Reading the
     ;; source is what fails here; the point is that nothing is removed or
     ;; replaced until a whole new file exists to rename into place.
-    (define collection (make-temporary-directory))
+    (define collection (temp-dir!))
     (stage! (make-src! "GOOD-SHIM") collection)
     (define before (file-or-directory-identity (staged-path collection)))
-    (define bad (make-temporary-directory))
+    (define bad (temp-dir!))
     (make-directory* (build-path bad "lib" "libtorchrkt.so"))
     (check-exn exn:fail? (lambda () (stage! bad collection)))
     (check-equal? (file->string (staged-path collection)) "GOOD-SHIM"
@@ -79,4 +87,7 @@
                 #:when (regexp-match? #rx"part|tmp" (path->string f)))
        f)
      '()
-     "a .part/.tmp file survived a failed stage")))
+     "a .part/.tmp file survived a failed stage"))
+
+  (for ([d (in-list created)])
+    (delete-directory/files d #:must-exist? #f)))

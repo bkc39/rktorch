@@ -38,7 +38,7 @@ report="$REPRO_LOGDIR/report-$dev.txt"
   echo "### finalizer diagnostics at exit (needs this debug branch)"
   cat scripts/debug/exit-loop/shape-prelude.rkt \
       scripts/debug/exit-loop/shapes/s4-mixed.rkt \
-    | RKTORCH_MEM_TRACE=1 racket -i 2>&1 \
+    | RKTORCH_MEM_TRACE=1 timeout --kill-after=30 "$REPRO_TIMEOUT" racket -i 2>&1 \
     | grep 'rktorch mem' > "$REPRO_LOGDIR/.trace" \
     || { echo "no trace line -- diagnostics arm FAILED"; rc=1; }
   if [ -s "$REPRO_LOGDIR/.trace" ]; then
