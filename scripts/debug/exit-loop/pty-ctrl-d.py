@@ -106,9 +106,11 @@ def run(mode, idx, budget=90.0):
     setup_error = (flat.count(b"btforcontext]") - flat.count(b"userbreak")) > 0
     m = re.findall(rb"\(failures \. (\d+)\)", text)
     fin_failures = int(m[-1]) if m else 0
+    no_trace = not m
     casc = text.count(b"error display handler") + text.count(b"error escape handler")
     abnormal = exited is not None and exited != 0
-    inconclusive = hung and not termignored and not imr and not casc
+    inconclusive = (no_trace and not (imr or casc or abnormal or setup_error)) \
+        or (hung and not termignored and not imr and not casc)
     bad = imr or casc or abnormal or setup_error or fin_failures or (hung and termignored)
     if bad or inconclusive:
         d = os.environ.get("REPRO_LOGDIR", "/tmp")
@@ -117,7 +119,7 @@ def run(mode, idx, budget=90.0):
         open(p, "wb").write(text)
         print(f"{'FAIL' if bad else 'INCONCLUSIVE'} mode={mode} iter={idx} hung={hung} "
               f"term_ignored={termignored} abnormal_exit={abnormal} "
-              f"setup_error={setup_error} finalizer_failures={fin_failures} imr={imr} "
+              f"setup_error={setup_error} finalizer_failures={fin_failures} no_trace={no_trace} imr={imr} "
               f"cascade={casc} bytes={len(text)} exit={exited} log={p}", flush=True)
     return bool(bad), bool(inconclusive)
 
@@ -132,7 +134,7 @@ if __name__ == "__main__":
     results = [run(mode, i) for i in range(1, n + 1)]
     bad = sum(b for b, _ in results)
     incon = sum(i for _, i in results)
-    suffix = f" ({incon} inconclusive: Ctrl-D not delivered)" if incon else ""
+    suffix = f" ({incon} inconclusive: no evidence)" if incon else ""
     print(f"RESULT pty/{mode}-{DEV}: {bad}/{n} failed{suffix}", flush=True)
     if bad:
         raise SystemExit(1)

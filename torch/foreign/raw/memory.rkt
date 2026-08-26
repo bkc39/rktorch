@@ -248,9 +248,8 @@
          #:c-id c-id
          #:wrap tensor-allocator)]))
 
-;; Diagnostic only (#72): report what the finalizer path did, at exit.  No I/O
-;; from inside a finalizer -- that runs in atomic mode, where writing to a port
-;; can block and trip an internal error.  Accumulate, dump here.
+;; No I/O from inside a finalizer -- that runs in atomic mode, where writing to
+;; a port can block and trip an internal error.  Accumulate, dump here.
 (define mem-trace-handle
   (and (getenv "RKTORCH_MEM_TRACE")
        (plumber-add-flush!

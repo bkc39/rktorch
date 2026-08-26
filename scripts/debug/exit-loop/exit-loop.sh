@@ -30,7 +30,8 @@ for i in $(seq 1 "$n"); do
   case "$(tr -d '\n\r; ' < "$log")" in *btforcontext]*) banner=1 ;; esac
   if [ "$code" -ne 0 ] \
      || [ "$banner" = 1 ] \
-     || { [ -n "$fails" ] && [ "$fails" -ne 0 ]; } \
+     || [ -z "$fails" ] \
+     || [ "$fails" -ne 0 ] \
      || grep -qE 'invalid memory reference|error display handler|error escape handler' "$log"; then
     bad=$((bad + 1))
     echo "FAIL iter=$i exit=$code finalizer-failures=${fails:-?} size=$(wc -c < "$log") log=$log"
