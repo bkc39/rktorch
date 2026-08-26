@@ -11,7 +11,6 @@
            (only-in racket/port port->string)
            (only-in "../private/install-torchrkt-native.rkt" pre-installer))
 
-  ;; Build a fake `${cpp}` output whose lib/ holds a libtorchrkt with `content`.
   (define created '())
 
   (define (temp-dir!)
@@ -68,10 +67,9 @@
         f))
     (check-equal? leftovers '() "a .part/.tmp file survived staging"))
 
-  (test-case "an unreadable source leaves the previous shim intact and no temp file"
-    ;; The staged shim must survive a stage that cannot complete.  Reading the
-    ;; source is what fails here; the point is that nothing is removed or
-    ;; replaced until a whole new file exists to rename into place.
+  (test-case "a source that cannot be read leaves the shim intact and no temp file"
+    ;; The source entry is a directory, so reading it raises.  Nothing may be
+    ;; removed or replaced until a whole new file exists to rename into place.
     (define collection (temp-dir!))
     (stage! (make-src! "GOOD-SHIM") collection)
     (define before (file-or-directory-identity (staged-path collection)))

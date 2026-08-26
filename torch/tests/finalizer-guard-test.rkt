@@ -3,12 +3,27 @@
 (module+ test
   (require rackunit
            (only-in ffi/unsafe malloc free)
+           (only-in racket/port port->string)
            (only-in ffi/unsafe/alloc allocator deallocator)
            (only-in "../foreign.rkt" add ones tensor-shape)
            (only-in (submod "../foreign.rkt" unsafe) tensor-free!)
            (only-in "../foreign/raw/memory.rkt"
                     finalizer-diagnostics finalizer-failures
                     swallow-and-count-failure))
+
+  ;; The exit dump only happens at plumber flush, so it needs a child process.
+  (define (trace-stderr #:trace? trace?)
+    (parameterize ([current-environment-variables
+                    (environment-variables-copy (current-environment-variables))])
+      (if trace?
+          (putenv "RKTORCH_MEM_TRACE" "1")
+          (environment-variables-set! (current-environment-variables)
+                                      #"RKTORCH_MEM_TRACE" #f))
+      (define-values (sp _o _i err)
+        (subprocess #f #f #f (find-system-path 'exec-file)
+                    "-e" "(require torch) (void (ones 2 2))"))
+      (subprocess-wait sp)
+      (begin0 (port->string err) (close-input-port err))))
 
   (define (collect-until ready? #:tries [tries 50])
     (let loop ([i 0])
@@ -30,6 +45,16 @@
     ;; successful releases don't count
     ((swallow-and-count-failure void) 'handle)
     (check-equal? (finalizer-failures) (+ before 2)))
+
+  (test-case "RKTORCH_MEM_TRACE dumps the diagnostics at exit"
+    (define out (trace-stderr #:trace? #t))
+    (check-true (regexp-match? #rx"\\[rktorch mem\\]" out)
+                (format "no trace line on stderr; got: ~s" out))
+    (check-true (regexp-match? #rx"\\(failures \\. [0-9]+\\)" out)
+                "the trace line carries no failures count"))
+
+  (test-case "the exit dump is off unless RKTORCH_MEM_TRACE is set"
+    (check-false (regexp-match? #rx"\\[rktorch mem\\]" (trace-stderr #:trace? #f))))
 
   (test-case "finalizer-diagnostics reports runs alongside failures"
     (define (runs-of d) (cdr (assq 'runs d)))

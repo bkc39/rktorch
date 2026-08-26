@@ -38,9 +38,14 @@ report="$REPRO_LOGDIR/report-$dev.txt"
   echo "### finalizer diagnostics at exit (needs this debug branch)"
   cat scripts/debug/exit-loop/shape-prelude.rkt \
       scripts/debug/exit-loop/shapes/s4-mixed.rkt \
-    | RKTORCH_MEM_TRACE=1 timeout --kill-after=30 "$REPRO_TIMEOUT" racket -i 2>&1 \
-    | grep 'rktorch mem' > "$REPRO_LOGDIR/.trace" \
+    | RKTORCH_MEM_TRACE=1 timeout --kill-after=30 "$REPRO_TIMEOUT" racket -i \
+        > "$REPRO_LOGDIR/.diag" 2>&1 || true
+  grep 'rktorch mem' "$REPRO_LOGDIR/.diag" > "$REPRO_LOGDIR/.trace" \
     || { echo "no trace line -- diagnostics arm FAILED"; rc=1; }
+  case "$(tr -d '\n\r; ' < "$REPRO_LOGDIR/.diag")" in
+    *btforcontext]*) echo "diagnostics arm FAILED: the shape raised"; rc=1 ;;
+  esac
+  rm -f "$REPRO_LOGDIR/.diag"
   if [ -s "$REPRO_LOGDIR/.trace" ]; then
     cat "$REPRO_LOGDIR/.trace"
     _f=$(grep -oE '\(failures \. [0-9]+\)' "$REPRO_LOGDIR/.trace" | grep -oE '[0-9]+' | tail -1)

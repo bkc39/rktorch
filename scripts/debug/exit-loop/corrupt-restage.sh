@@ -17,8 +17,9 @@ backup=$(mktemp "${TMPDIR:-/tmp}/$(basename "$lib").XXXXXX.bak") || {
   echo "cannot create backup"; exit 1; }
 mkdir -p "$(dirname "$out")"
 cp -f "$lib" "$backup" && chmod u+w "$backup" || { echo "cannot populate backup"; exit 1; }
+restore_failed=0
 restore () {
-  exec 3>&- 2>/dev/null || true
+  exec 3>&- || true
   if [ -n "${rkt:-}" ] && kill -0 "$rkt" 2>/dev/null; then
     kill -9 "$rkt" 2>/dev/null || true
     wait "$rkt" 2>/dev/null || true
@@ -31,6 +32,7 @@ restore () {
   else
     rm -f "$_tmp"
     echo "[repro] RESTORE FAILED -- staged shim may be corrupt; backup kept at $backup" >&2
+    restore_failed=1
   fi
 }
 trap restore EXIT
@@ -113,7 +115,16 @@ banner=0
 case "$(tr -d '\n\r; ' < "$out")" in *btforcontext]*) banner=1 ;; esac
 if [ "$code" -ne 0 ] || [ "$imr" -ne 0 ] || [ "$casc" -ne 0 ] || [ "$banner" = 1 ]; then
   echo "[repro] RESULT: vector reproduced"
+  restore
+  trap - EXIT
+  [ "$restore_failed" = 1 ] && { echo "[repro] ...and RESTORE FAILED"; exit 2; }
   exit 1
+fi
+restore
+trap - EXIT
+if [ "$restore_failed" = 1 ]; then
+  echo "[repro] RESULT: no fault observed, but RESTORE FAILED"
+  exit 2
 fi
 echo "[repro] RESULT: no fault observed"
 exit 0
