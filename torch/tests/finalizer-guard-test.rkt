@@ -22,11 +22,13 @@
       (define-values (sp out in err)
         (subprocess #f #f #f (find-system-path 'exec-file)
                     "-e" "(require torch) (void (ones 2 2))"))
+      (close-output-port in)
+      (define text (port->string err))
+      (void (port->string out))
       (subprocess-wait sp)
-      (begin0 (port->string err)
+      (begin0 text
         (close-input-port err)
-        (close-input-port out)
-        (close-output-port in))))
+        (close-input-port out))))
 
   (define (collect-until ready? #:tries [tries 50])
     (let loop ([i 0])

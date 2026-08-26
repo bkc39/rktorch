@@ -129,6 +129,7 @@
       # Same discipline as torch/data/mnist.rkt's cache write.
       stageNativeLibs = src: ''
         _dest="$PWD/torch/native-libs"
+        _stage_failed=0
         mkdir -p "$_dest"
         for _f in ${src}/lib/libtorchrkt.*; do
           _b=$(basename "$_f")
@@ -143,7 +144,7 @@
           else
             rm -f "$_dest/.$_b.tmp.$$"
             echo "ERROR: staging $_b failed; leaving the existing shim in place" >&2
-            return 1 2>/dev/null || exit 1
+            _stage_failed=1
           fi
         done
       '';
@@ -334,6 +335,7 @@
               # testing.  libtorch itself is reached via the rpath Nix baked
               # into libtorchrkt, so it is NOT copied (it is multi-GB).
               ${stageNativeLibs cpp}
+              [ "$_stage_failed" = 0 ] || exit 1
 
               raco pkg install --batch --deps fail --no-setup --copy --scope user \
                 --name torch ./torch
@@ -391,6 +393,7 @@
             runtimeInputs = [ pkgs.coreutils ];
             text = ''
               ${stageNativeLibs cpp}
+              [ "$_stage_failed" = 0 ] || exit 1
               echo "Native library staged to $PWD/torch/native-libs"
               ls -la "$PWD/torch/native-libs"
             '';
