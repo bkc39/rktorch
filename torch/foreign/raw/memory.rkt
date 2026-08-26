@@ -43,7 +43,6 @@
 
 (define finalizer-failure-count (box 0))
 (define finalizer-run-count (box 0))
-;; Bounded: the messages are the evidence a bare counter throws away (#72).
 (define captured-failures (box '()))
 (define capture-limit 8)
 

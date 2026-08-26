@@ -23,11 +23,13 @@ restore () {
     kill -9 "$rkt" 2>/dev/null || true
     wait "$rkt" 2>/dev/null || true
   fi
-  chmod u+w "$lib" 2>/dev/null || true
-  if cp -f "$backup" "$lib" 2>/dev/null; then
-    chmod 0555 "$lib" 2>/dev/null || true
+  _tmp="$(dirname "$lib")/.restore.$$"
+  if cp -f "$backup" "$_tmp" 2>/dev/null \
+     && chmod 0555 "$_tmp" 2>/dev/null \
+     && mv -f "$_tmp" "$lib" 2>/dev/null; then
     rm -f "$backup"
   else
+    rm -f "$_tmp"
     echo "[repro] RESTORE FAILED -- staged shim may be corrupt; backup kept at $backup" >&2
   fi
 }
@@ -102,7 +104,15 @@ wait "$rkt" 2>/dev/null; code=$?
 rm -f "$fifo"
 cp "$backup" "$lib"; chmod u+w "$lib" 2>/dev/null || true
 
+imr=$(grep -c 'invalid memory reference' "$out" || true)
+casc=$(grep -cE 'error display handler|error escape handler' "$out" || true)
 echo "[repro] exit=$code logbytes=$(wc -c < "$out")"
-echo "[repro] invalid-memory-reference hits: $(grep -c 'invalid memory reference' "$out" || true)"
-echo "[repro] cascade hits: $(grep -cE 'error display handler|error escape handler' "$out" || true)"
+echo "[repro] invalid-memory-reference hits: $imr"
+echo "[repro] cascade hits: $casc"
 echo "[repro] --- tail ---"; tail -c 600 "$out"
+if [ "$code" -ne 0 ] || [ "$imr" -ne 0 ] || [ "$casc" -ne 0 ]; then
+  echo "[repro] RESULT: vector reproduced"
+  exit 1
+fi
+echo "[repro] RESULT: no fault observed"
+exit 0
