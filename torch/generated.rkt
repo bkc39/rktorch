@@ -25,6 +25,7 @@
          cat
          conv2d
          copy!
+         cos
          cross-entropy-loss
          dot
          dropout
@@ -69,6 +70,7 @@
          scatter-src!
          scatter-value!
          select-int
+         sin
          slice-tensor
          sum-dim-intlist
          take
@@ -106,6 +108,9 @@
 
 (define-generated-op copy! tr_gen_copy_ #:inplace
   ([self tensor] [src tensor] [non-blocking bool]))
+
+(define-generated-op cos tr_gen_cos
+  ([self tensor]))
 
 (define-generated-op cross-entropy-loss tr_gen_cross_entropy_loss
   ([self tensor] [target tensor] [weight optional-tensor] [reduction int64] [ignore-index int64] [label-smoothing double]))
@@ -238,6 +243,9 @@
 
 (define-generated-op select-int tr_gen_select_int
   ([self tensor] [dim int64] [index int64]))
+
+(define-generated-op sin tr_gen_sin
+  ([self tensor]))
 
 (define-generated-op slice-tensor tr_gen_slice_tensor
   ([self tensor] [dim int64] [start optional-int64] [end optional-int64] [step int64]))

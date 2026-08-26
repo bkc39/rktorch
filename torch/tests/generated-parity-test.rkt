@@ -27,6 +27,8 @@
           'mv '((tensor 2 3) (tensor 3))
           'dot '((tensor 4) (tensor 4))
           'broadcast-to '((tensor 1 3) (int-array (2 3)))
+          'cos '((tensor 2 3))
+          'sin '((tensor 2 3))
           'reshape '((tensor 2 3) (int-array (3 2)))
           'select-int '((tensor 2 3) (int64 0) (int64 1))
           'slice-tensor '((tensor 6) (int64 0) (optional-int64 1)

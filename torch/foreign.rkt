@@ -152,6 +152,7 @@
   [mul binary-arith/c]
   [div binary-arith/c]
   [pow (-> tensor? tensor-or-real/c tensor?)]
+  [abs unary-numeric/c]
   [neg (-> tensor? tensor?)]
   [relu (-> tensor? tensor?)]
   [sigmoid (-> tensor? tensor?)]
@@ -160,6 +161,8 @@
   [log log/c]
   [sqrt unary-numeric/c]
   [tanh unary-numeric/c]
+  [sin unary-numeric/c]
+  [cos unary-numeric/c]
   [max reduce-or-variadic/c]
   [min reduce-or-variadic/c]
   ;; reductions

@@ -15,6 +15,7 @@
          tr-mul-scalar/raw
          tr-div-scalar/raw
          tr-pow-scalar/raw
+         tr-abs/raw
          tr-neg/raw
          tr-exp/raw
          tr-log/raw
@@ -36,6 +37,7 @@
 (define-scalar/raw tr-div-scalar/raw tr_div_scalar)
 (define-scalar/raw tr-pow-scalar/raw tr_pow_scalar)
 
+(define-unary/raw tr-abs/raw tr_abs)
 (define-unary/raw tr-neg/raw tr_neg)
 (define-unary/raw tr-exp/raw tr_exp)
 (define-unary/raw tr-log/raw tr_log)

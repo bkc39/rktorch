@@ -17,6 +17,7 @@
                                 conv2d
                                 copy!
                                 embedding
+                                cos
                                 eq-scalar eq-tensor
                                 fill-scalar!
                                 gather
@@ -40,6 +41,7 @@
                                 nonzero
                                 scatter-add! scatter-src! scatter-value!
                                 select-int
+                                sin
                                 slice-tensor
                                 take
                                 take-along-dim
@@ -62,7 +64,12 @@
                      [g:masked-select masked-select]
                      [g:narrow narrow]
                      [g:nonzero nonzero]
-                     [g:select-int select]))
+                     [g:select-int select]
+                     [tensor-cos cos]
+                     [tensor-sin sin]))
+
+(define (tensor-sin x) (if (tensor? x) (g:sin x) (sin x)))
+(define (tensor-cos x) (if (tensor? x) (g:cos x) (cos x)))
 
 (struct slice (start end step) #:transparent)
 (define ::

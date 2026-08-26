@@ -10,6 +10,7 @@
                   s64vector-length
                   s64vector?)
          (only-in racket/base
+                  [abs base:abs]
                   [exp base:exp]
                   [log base:log]
                   [max base:max]
@@ -30,6 +31,7 @@
                   tr-ones/raw
                   tr-zeros/raw)
          (only-in "raw/elementwise.rkt"
+                  tr-abs/raw
                   tr-add-scalar/raw
                   tr-add/raw
                   tr-div-scalar/raw
@@ -90,6 +92,7 @@
          mul
          div
          pow
+         abs
          neg
          exp
          log
@@ -308,6 +311,9 @@
 
 (define (neg t)
   (wrap 'neg (tr-neg/raw t)))
+
+(define (abs v)
+  (if (tensor? v) (wrap 'abs (tr-abs/raw v)) (base:abs v)))
 
 (define (exp v)
   (if (tensor? v) (wrap 'exp (tr-exp/raw v)) (base:exp v)))

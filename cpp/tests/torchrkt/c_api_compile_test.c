@@ -35,6 +35,7 @@ void torchrkt_c_api_compile_check(void) {
   tr_tensor* (*cat)(const tr_tensor* const*, int64_t, int64_t) = tr_cat;
   tr_tensor* (*add)(const tr_tensor*, const tr_tensor*) = tr_add;
   tr_tensor* (*add_scalar)(const tr_tensor*, double) = tr_add_scalar;
+  tr_tensor* (*abs_fn)(const tr_tensor*) = tr_abs;
   tr_tensor* (*gelu)(const tr_tensor*) = tr_gelu;
   tr_tensor* (*softmax)(const tr_tensor*, int64_t) = tr_softmax;
   tr_tensor* (*matmul)(const tr_tensor*, const tr_tensor*) = tr_matmul;
@@ -121,6 +122,8 @@ void torchrkt_c_api_compile_check(void) {
                           bool, int64_t) = tr_gen_slice_tensor;
   tr_tensor* (*gen_broadcast_to)(const tr_tensor*, const int64_t*, int64_t) =
       tr_gen_broadcast_to;
+  tr_tensor* (*gen_cos)(const tr_tensor*) = tr_gen_cos;
+  tr_tensor* (*gen_sin)(const tr_tensor*) = tr_gen_sin;
   tr_tensor* (*gen_index_select)(const tr_tensor*, int64_t, const tr_tensor*) =
       tr_gen_index_select;
   tr_tensor* (*gen_masked_select)(const tr_tensor*, const tr_tensor*) =
@@ -217,6 +220,8 @@ void torchrkt_c_api_compile_check(void) {
   (void)gen_select;
   (void)gen_slice;
   (void)gen_broadcast_to;
+  (void)gen_cos;
+  (void)gen_sin;
   (void)gen_index_select;
   (void)gen_masked_select;
   (void)gen_nonzero;

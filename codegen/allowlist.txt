@@ -8,6 +8,9 @@
 # tr_* ops in cpp/tests/torchrkt/generated_golden_test.cpp. The
 # hand-written family stays authoritative in v2.
 
+math cos
+math sin
+
 linalg matmul
 linalg mm
 linalg mv
