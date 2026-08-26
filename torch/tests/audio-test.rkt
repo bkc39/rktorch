@@ -6,7 +6,35 @@
            (only-in "../data/audio.rkt"
                     download-audio-cached load-audio-fixture load-wav
                     write-wav)
-           (only-in "../main.rkt" tensor tensor-shape tensor->list))
+           (only-in "../main.rkt" tensor tensor-shape tensor->list zeros))
+
+  (define (riff-chunk id payload)
+    (bytes-append id
+                  (integer->integer-bytes (bytes-length payload) 4 #f #f)
+                  payload
+                  (if (odd? (bytes-length payload)) (bytes 0) (bytes))))
+
+  (define (riff-file . chunks)
+    (define body (apply bytes-append #"WAVE" chunks))
+    (bytes-append #"RIFF"
+                  (integer->integer-bytes (bytes-length body) 4 #f #f)
+                  body))
+
+  (define (fmt-payload channels rate)
+    (bytes-append (integer->integer-bytes 1 2 #f #f)
+                  (integer->integer-bytes channels 2 #f #f)
+                  (integer->integer-bytes rate 4 #f #f)
+                  (integer->integer-bytes (* rate channels 2) 4 #f #f)
+                  (integer->integer-bytes (* channels 2) 2 #f #f)
+                  (integer->integer-bytes 16 2 #f #f)))
+
+  (define (call-with-wav-bytes bs proc)
+    (define dir (make-temporary-directory))
+    (define p (build-path dir "case.wav"))
+    (call-with-output-file p (lambda (out) (write-bytes bs out)))
+    (dynamic-wind void
+                  (lambda () (proc p))
+                  (lambda () (delete-directory/files dir))))
 
   (test-case "wav fixture loads with pinned samples (#83)"
     (define-values (samples rate) (load-audio-fixture))
@@ -36,6 +64,28 @@
     (check-equal? (tensor->list stereo*) (tensor->list stereo))
     (delete-directory/files dir))
 
+  (test-case "chunk skipping, padding, and malformed frames (#83)"
+    (call-with-wav-bytes
+     (riff-file (riff-chunk #"fmt " (fmt-payload 1 8000))
+                (riff-chunk #"LIST" (bytes 1 2 3))
+                (riff-chunk #"data"
+                            (bytes-append
+                             (integer->integer-bytes 100 2 #t #f)
+                             (integer->integer-bytes -200 2 #t #f))))
+     (lambda (p)
+       (define-values (samples rate) (load-wav p))
+       (check-equal? rate 8000)
+       (check-equal? (tensor-shape samples) '(1 2))
+       (check-equal? (map (lambda (s) (* s 32768.0))
+                          (tensor->list samples))
+                     '(100.0 -200.0))))
+    (call-with-wav-bytes
+     (riff-file (riff-chunk #"fmt " (fmt-payload 2 8000))
+                (riff-chunk #"data" (make-bytes 6 0)))
+     (lambda (p)
+       (check-exn #rx"not whole 2-channel frames"
+                  (lambda () (load-wav p))))))
+
   (test-case "wav rejection and cache paths (#83)"
     (check-exn #rx"not a RIFF/WAVE"
                (lambda ()
@@ -49,6 +99,8 @@
                   (lambda () (delete-directory/files dir)))))
     (check-exn #rx"rank 1 or"
                (lambda () (write-wav "unused.wav" (tensor 1.0) 8000)))
+    (check-exn #rx"zero channels"
+               (lambda () (write-wav "unused.wav" (zeros 0 3) 8000)))
     (define cache (make-temporary-directory))
     (dynamic-wind
      void
@@ -67,5 +119,16 @@
                       (download-audio-cached "rejected.wav"
                                              (format "file://~a" src)
                                              #:valid? (lambda (p) #f))))
-         (check-false (file-exists? (build-path cache "rejected.wav")))))
+         (check-false (file-exists? (build-path cache "rejected.wav")))
+         (define src-bytes (file->bytes src))
+         (delete-file src)
+         (check-equal? (file->bytes
+                        (download-audio-cached "cached.wav"
+                                               (format "file://~a" src)))
+                       src-bytes
+                       "second call must read the cache, not the source")
+         (check-exn #rx"inside the cache directory"
+                    (lambda ()
+                      (download-audio-cached "../escape.wav"
+                                             (format "file://~a" src))))))
      (lambda () (delete-directory/files cache)))))

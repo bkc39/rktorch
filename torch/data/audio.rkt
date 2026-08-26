@@ -7,7 +7,7 @@
          (only-in racket/port copy-port)
          (only-in net/url call/input-url get-pure-port string->url)
          (only-in "../private/util.rkt" with-temporary-file)
-         (only-in "../main.rkt" tensor tensor-shape tensor->list tensor?))
+         (only-in "../main.rkt" tensor tensor-shape tensor->list))
 
 (provide load-wav
          write-wav
@@ -59,6 +59,10 @@
            (unless (= bits 16)
              (error 'load-wav "~a: only 16-bit PCM is supported, got ~a-bit"
                     path bits))
+           (unless (zero? (remainder chunk-size (* 2 channels)))
+             (error 'load-wav
+                    "~a: ~a-byte data chunk is not whole ~a-channel frames"
+                    path chunk-size channels))
            (define data (read-exactly in chunk-size 'load-wav))
            (define n (quotient chunk-size (* 2 channels)))
            (values
@@ -85,6 +89,8 @@
       [else (error 'write-wav
                    "samples must be rank 1 or (channels n), got shape ~a"
                    shape)]))
+  (when (zero? channels)
+    (error 'write-wav "zero channels: shape ~a" shape))
   (define flat (list->vector (tensor->list samples)))
   (define data (make-bytes (* 2 channels n)))
   (for* ([c (in-range channels)] [i (in-range n)])
@@ -126,6 +132,11 @@
 ;; valid? gates the cache write so a rate-limit page or truncated body
 ;; cannot poison the cache.
 (define (download-audio-cached name url #:valid? [valid? (lambda (path) #t)])
+  (let ([p (string->path name)])
+    (unless (and (relative-path? p)
+                 (for/and ([elem (in-list (explode-path p))]) (path? elem)))
+      (error 'download-audio-cached
+             "cache name must stay inside the cache directory: ~e" name)))
   (define dest (build-path (audio-cache-dir) name))
   (unless (file-exists? dest)
     (make-directory* (audio-cache-dir))
