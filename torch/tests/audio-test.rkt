@@ -50,18 +50,22 @@
     (check-exn #rx"rank 1 or"
                (lambda () (write-wav "unused.wav" (tensor 1.0) 8000)))
     (define cache (make-temporary-directory))
-    (putenv "RKTORCH_AUDIO_DIR" (path->string cache))
-    (define src (make-temporary-file "src-~a.wav"))
-    (write-wav src (tensor '(0.0 0.5)) 16000)
-    (define cached
-      (download-audio-cached "cached.wav" (format "file://~a" src)))
-    (check-equal? (file->bytes cached) (file->bytes src))
-    (check-exn #rx"failed validation"
-               (lambda ()
-                 (download-audio-cached "rejected.wav"
-                                        (format "file://~a" src)
-                                        #:valid? (lambda (p) #f))))
-    (check-false (file-exists? (build-path cache "rejected.wav")))
-    (putenv "RKTORCH_AUDIO_DIR" "")
-    (delete-file src)
-    (delete-directory/files cache)))
+    (dynamic-wind
+     void
+     (lambda ()
+       (parameterize ([current-environment-variables
+                       (environment-variables-copy
+                        (current-environment-variables))])
+         (putenv "RKTORCH_AUDIO_DIR" (path->string cache))
+         (define src (build-path cache "src.wav"))
+         (write-wav src (tensor '(0.0 0.5)) 16000)
+         (define cached
+           (download-audio-cached "cached.wav" (format "file://~a" src)))
+         (check-equal? (file->bytes cached) (file->bytes src))
+         (check-exn #rx"failed validation"
+                    (lambda ()
+                      (download-audio-cached "rejected.wav"
+                                             (format "file://~a" src)
+                                             #:valid? (lambda (p) #f))))
+         (check-false (file-exists? (build-path cache "rejected.wav")))))
+     (lambda () (delete-directory/files cache)))))

@@ -1,5 +1,6 @@
 #lang racket/base
 
+;; whole-module on purpose: the expansion needs bindings only-in would strip
 (require racket/runtime-path
          (only-in racket/file make-directory*)
          (only-in racket/math exact-round)
@@ -40,7 +41,10 @@
         (define chunk-size (u32 header 4))
         (cond
           [(equal? chunk-id #"fmt ")
-           (loop (read-exactly in chunk-size 'load-wav))]
+           (define payload (read-exactly in chunk-size 'load-wav))
+           (unless (even? chunk-size)
+             (read-exactly in 1 'load-wav))
+           (loop payload)]
           [(equal? chunk-id #"data")
            (unless fmt
              (error 'load-wav "~a has a data chunk before fmt" path))
