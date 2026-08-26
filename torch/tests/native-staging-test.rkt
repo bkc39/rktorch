@@ -58,6 +58,22 @@
                   "a handle held across the restage must still see the old bytes")
     (close-input-port held))
 
+  (test-case "identical bytes skip the rename but still normalise the mode"
+    (define collection (temp-dir!))
+    (define src (make-src! "SAME-SHIM"))
+    (stage! src collection)
+    (define dst (staged-path collection))
+    (define id-before (file-or-directory-identity dst))
+    (file-or-directory-permissions dst #o644)
+    (stage! src collection)
+    (check-equal? (file-or-directory-identity dst) id-before
+                  "a stage of identical bytes must not churn the inode")
+    (check-equal? (file-or-directory-permissions dst 'bits)
+                  (file-or-directory-permissions
+                   (build-path src "lib" "libtorchrkt.so") 'bits)
+                  "the mode must be corrected even when the bytes match")
+    (check-equal? (file->string dst) "SAME-SHIM"))
+
   (test-case "staging leaves no temp file behind"
     (define collection (temp-dir!))
     (stage! (make-src! "SHIM") collection)
