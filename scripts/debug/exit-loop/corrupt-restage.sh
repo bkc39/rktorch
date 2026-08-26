@@ -50,7 +50,7 @@ snapshot () {  # $1 = pid
 }
 
 fifo=$(mktemp -u); mkfifo "$fifo"
-racket -i < "$fifo" > "$out" 2>&1 &
+RKTORCH_MEM_TRACE=1 racket -i < "$fifo" > "$out" 2>&1 &
 rkt=$!
 exec 3> "$fifo"
 echo "[repro] pid=$rkt device=$dev lib=$lib log=$out"
@@ -113,7 +113,10 @@ echo "[repro] cascade hits: $casc"
 echo "[repro] --- tail ---"; tail -c 600 "$out"
 banner=0
 case "$(tr -d '\n\r; ' < "$out")" in *btforcontext]*) banner=1 ;; esac
-if [ "$code" -ne 0 ] || [ "$imr" -ne 0 ] || [ "$casc" -ne 0 ] || [ "$banner" = 1 ]; then
+fails=$(grep -oE '\(failures \. [0-9]+\)' "$out" | grep -oE '[0-9]+' | tail -1)
+echo "[repro] finalizer-failures: ${fails:-<no diagnostic>}"
+if [ "$code" -ne 0 ] || [ "$imr" -ne 0 ] || [ "$casc" -ne 0 ] || [ "$banner" = 1 ] \
+   || [ -z "$fails" ] || [ "$fails" -ne 0 ]; then
   echo "[repro] RESULT: vector reproduced"
   restore
   trap - EXIT
