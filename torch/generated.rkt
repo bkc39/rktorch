@@ -21,6 +21,7 @@
          addcdiv!
          addcmul!
          avg-pool2d
+         broadcast-to
          cat
          conv2d
          copy!
@@ -30,11 +31,16 @@
          embedding
          eq-scalar
          eq-tensor
+         fill-scalar!
          gather
          ge-scalar
          ge-tensor
          gt-scalar
          gt-tensor
+         index-add!
+         index-copy!
+         index-fill-int-scalar!
+         index-fill-int-tensor!
          index-select
          layer-norm
          le-scalar
@@ -43,6 +49,9 @@
          lt-scalar
          lt-tensor
          masked-fill-scalar
+         masked-fill-scalar!
+         masked-fill-tensor!
+         masked-scatter!
          masked-select
          matmul
          max-pool2d
@@ -56,6 +65,9 @@
          nll-loss
          nonzero
          reshape
+         scatter-add!
+         scatter-src!
+         scatter-value!
          select-int
          slice-tensor
          sum-dim-intlist
@@ -82,6 +94,9 @@
 
 (define-generated-op avg-pool2d tr_gen_avg_pool2d
   ([self tensor] [kernel-size int-array] [stride int-array] [padding int-array] [ceil-mode bool] [count-include-pad bool] [divisor-override optional-int64]))
+
+(define-generated-op broadcast-to tr_gen_broadcast_to
+  ([self tensor] [size int-array]))
 
 (define-generated-op cat tr_gen_cat
   ([tensors tensor-list] [dim int64]))
@@ -110,6 +125,9 @@
 (define-generated-op eq-tensor tr_gen_eq_tensor
   ([self tensor] [other tensor]))
 
+(define-generated-op fill-scalar! tr_gen_fill__scalar #:inplace
+  ([self tensor] [value scalar]))
+
 (define-generated-op gather tr_gen_gather
   ([self tensor] [dim int64] [index tensor] [sparse-grad bool]))
 
@@ -124,6 +142,18 @@
 
 (define-generated-op gt-tensor tr_gen_gt_tensor
   ([self tensor] [other tensor]))
+
+(define-generated-op index-add! tr_gen_index_add_ #:inplace
+  ([self tensor] [dim int64] [index tensor] [source tensor] [alpha scalar]))
+
+(define-generated-op index-copy! tr_gen_index_copy_ #:inplace
+  ([self tensor] [dim int64] [index tensor] [source tensor]))
+
+(define-generated-op index-fill-int-scalar! tr_gen_index_fill__int_scalar #:inplace
+  ([self tensor] [dim int64] [index tensor] [value scalar]))
+
+(define-generated-op index-fill-int-tensor! tr_gen_index_fill__int_tensor #:inplace
+  ([self tensor] [dim int64] [index tensor] [value tensor]))
 
 (define-generated-op index-select tr_gen_index_select
   ([self tensor] [dim int64] [index tensor]))
@@ -148,6 +178,15 @@
 
 (define-generated-op masked-fill-scalar tr_gen_masked_fill_scalar
   ([self tensor] [mask tensor] [value scalar]))
+
+(define-generated-op masked-fill-scalar! tr_gen_masked_fill__scalar #:inplace
+  ([self tensor] [mask tensor] [value scalar]))
+
+(define-generated-op masked-fill-tensor! tr_gen_masked_fill__tensor #:inplace
+  ([self tensor] [mask tensor] [value tensor]))
+
+(define-generated-op masked-scatter! tr_gen_masked_scatter_ #:inplace
+  ([self tensor] [mask tensor] [source tensor]))
 
 (define-generated-op masked-select tr_gen_masked_select
   ([self tensor] [mask tensor]))
@@ -187,6 +226,15 @@
 
 (define-generated-op reshape tr_gen_reshape
   ([self tensor] [shape int-array]))
+
+(define-generated-op scatter-add! tr_gen_scatter_add_ #:inplace
+  ([self tensor] [dim int64] [index tensor] [src tensor]))
+
+(define-generated-op scatter-src! tr_gen_scatter__src #:inplace
+  ([self tensor] [dim int64] [index tensor] [src tensor]))
+
+(define-generated-op scatter-value! tr_gen_scatter__value #:inplace
+  ([self tensor] [dim int64] [index tensor] [value scalar]))
 
 (define-generated-op select-int tr_gen_select_int
   ([self tensor] [dim int64] [index int64]))

@@ -23,6 +23,7 @@ shape narrow
 # rationale there); removing this entry breaks lib load loudly.
 shape select.int
 shape slice.Tensor
+shape broadcast_to
 shape index_select
 shape masked_select
 shape nonzero
@@ -82,6 +83,17 @@ compare ge.Scalar
 # generator, so its binding must not take the OOM collect-and-retry wrap.
 nn dropout rng
 inplace copy_
+inplace fill_.Scalar
+inplace index_copy_
+inplace index_add_
+inplace index_fill_.int_Scalar
+inplace index_fill_.int_Tensor
+inplace scatter_.src
+inplace scatter_.value
+inplace scatter_add_
+inplace masked_fill_.Scalar
+inplace masked_fill_.Tensor
+inplace masked_scatter_
 
 # --- tranche 3 (#22): the transformer op closure --------------------------
 
