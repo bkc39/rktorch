@@ -8,13 +8,13 @@
 # tr_* ops in cpp/tests/torchrkt/generated_golden_test.cpp. The
 # hand-written family stays authoritative in v2.
 
-math cos
-math sin
-
 linalg matmul
 linalg mm
 linalg mv
 linalg dot
+
+math cos
+math sin
 
 # shape ops exercise the IntArrayRef and TensorList marshalling paths
 # end to end (golden-tested against the hand-written twins like linalg).

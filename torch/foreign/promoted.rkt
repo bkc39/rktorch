@@ -16,8 +16,8 @@
                                 broadcast-to
                                 conv2d
                                 copy!
-                                embedding
                                 cos
+                                embedding
                                 eq-scalar eq-tensor
                                 fill-scalar!
                                 gather

@@ -126,6 +126,10 @@
     (error 'write-wav "zero channels: shape ~a" shape))
   (when (> (* channels 2) 65535)
     (error 'write-wav "~a channels do not fit the WAV header" channels))
+  (when (> (+ 36 (* 2 channels n)) 4294967295)
+    (error 'write-wav
+           "~a frames of ~a channels overflow the RIFF size field"
+           n channels))
   (when (>= (* sample-rate channels 2) (expt 2 32))
     (error 'write-wav
            "byte rate ~a does not fit the WAV header (rate ~a, ~a channels)"
