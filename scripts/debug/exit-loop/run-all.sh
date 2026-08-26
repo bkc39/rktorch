@@ -39,7 +39,11 @@ report="$REPRO_LOGDIR/report-$dev.txt"
   cat scripts/debug/exit-loop/shape-prelude.rkt \
       scripts/debug/exit-loop/shapes/s4-mixed.rkt \
     | RKTORCH_MEM_TRACE=1 timeout --kill-after=30 "$REPRO_TIMEOUT" racket -i \
-        > "$REPRO_LOGDIR/.diag" 2>&1 || true
+        > "$REPRO_LOGDIR/.diag" 2>&1 || {
+          _dc=$?
+          echo "diagnostics arm FAILED: exit $_dc$([ "$_dc" = 124 ] && echo ' (timed out)')"
+          rc=1
+        }
   grep 'rktorch mem' "$REPRO_LOGDIR/.diag" > "$REPRO_LOGDIR/.trace" \
     || { echo "no trace line -- diagnostics arm FAILED"; rc=1; }
   case "$(tr -d '\n\r; ' < "$REPRO_LOGDIR/.diag")" in

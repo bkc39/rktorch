@@ -103,17 +103,24 @@
     (check-false (for/or ([m (in-list msgs)]) (regexp-match? #rx"n=0$" m))
                  "the oldest failure should have rotated out"))
 
-  (test-case "record-failure! is guarded: a value whose printing fails is still counted"
-    ;; record-failure! is the direct handler of swallow-and-count-failure's
-    ;; with-handlers, so nothing else protects it.  An escape there is a process
-    ;; death, not a raise (it runs in alloc.rkt's raw atomic region).
+  (test-case "a non-exn value is counted and described without invoking its printer"
+    ;; describe-raised must not hand the value to a printer: this runs from the
+    ;; allocator finalizer, where a custom writer that raises or blocks is fatal.
+    (define printed? (box #f))
     (struct unprintable ()
       #:property prop:custom-write
-      (lambda (v port mode) (error 'custom-write "printing this raises")))
+      (lambda (v port mode)
+        (set-box! printed? #t)
+        (error 'custom-write "printing this raises")))
     (define before (finalizer-failures))
     (check-equal? ((swallow-and-count-failure (lambda (_t) (raise (unprintable)))) 'handle)
                   (void))
-    (check-equal? (finalizer-failures) (add1 before)))
+    (check-equal? (finalizer-failures) (add1 before))
+    (check-false (unbox printed?)
+                 "the failure path invoked the value's custom printer")
+    (check-true (for/or ([m (in-list (cdr (assq 'messages (finalizer-diagnostics))))])
+                  (regexp-match? #rx"non-exn value" m))
+                "the fixed description was not recorded"))
 
   (test-case "swallow-and-count-failure passes successful releases through"
     (define released '())

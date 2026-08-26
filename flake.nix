@@ -165,6 +165,13 @@
         if [ "$_stale" = 1 ]; then
           echo "Staging libtorchrkt (${src})..."
           ${stageNativeLibs src}
+          if [ "$_stage_failed" != 0 ]; then
+            echo "" >&2
+            echo "  *** libtorchrkt was NOT staged.  The shim in torch/native-libs is" >&2
+            echo "  *** stale or missing; racket in this shell will load the wrong one" >&2
+            echo "  *** or fail to load at all.  Fix the error above and re-enter." >&2
+            echo "" >&2
+          fi
         else
           # Bytes match but an older checkout may have left 0644/0755 behind.
           chmod 0555 "$PWD"/torch/native-libs/libtorchrkt.* 2>/dev/null || true
@@ -529,8 +536,7 @@
           ];
 
           # Parameterised by the shim this shell wants.  Exactly one staging
-          # call per entry: a second one in a downstream hook would fight over
-          # which shim is staged and restage on every entry.
+          # call per entry.
           provisionRacketFor = shim: ''
             export TORCHRKT_NATIVE_LIB_PATH="${shim}"
             export PLTUSERHOME="$PWD/.racket-user"
@@ -588,10 +594,8 @@
           # only the driver libs, so nix's own libs (glibc, libstdc++) are not
           # shadowed by the system copies. Run:
           #   nix develop .#cuda --command raco test torch/tests/device-test.rkt
-          # Driver farm only.  The CUDA shim itself is staged by
-          # `provisionRacketFor cpp-cuda`, which also points
-          # TORCHRKT_NATIVE_LIB_PATH at it so the pre-installer (`raco setup
-          # --pkgs torch`) cannot stage the CPU shim back over it.
+          # Driver farm only; `provisionRacketFor cpp-cuda` stages the shim and
+          # points TORCHRKT_NATIVE_LIB_PATH at it.
           cudaHook = ''
             echo "Staging host NVIDIA driver farm..."
             _drv_farm="$PWD/.cuda-driver"
