@@ -125,7 +125,23 @@
      (riff-file (riff-chunk #"fmt " (make-bytes 2000 0))
                 (riff-chunk #"data" (bytes)))
      (lambda (p)
-       (check-exn #rx"implausibly large" (lambda () (load-wav p))))))
+       (check-exn #rx"implausibly large" (lambda () (load-wav p)))))
+    (call-with-wav-bytes
+     (riff-file (riff-chunk #"fmt " (fmt-payload 1 0))
+                (riff-chunk #"data" (bytes)))
+     (lambda (p)
+       (check-exn #rx"0 sample rate" (lambda () (load-wav p)))))
+    (let ([odd-fmt (bytes-append
+                    #"fmt " (integer->integer-bytes 17 4 #f #f)
+                    (fmt-payload 1 8000) (bytes 9))])
+      (call-with-wav-bytes
+       (bytes-append #"RIFF"
+                     (integer->integer-bytes (+ 4 (bytes-length odd-fmt))
+                                             4 #f #f)
+                     #"WAVE" odd-fmt
+                     (riff-chunk #"data" (bytes)))
+       (lambda (p)
+         (check-exn #rx"extends past" (lambda () (load-wav p)))))))
 
   (test-case "wav rejection and cache paths (#83)"
     (check-exn #rx"not a RIFF/WAVE"
@@ -148,6 +164,8 @@
                (lambda () (write-wav "unused.wav" (tensor '(0.0)) 8000.0)))
     (check-exn #rx"byte rate"
                (lambda () (write-wav "unused.wav" (zeros 3 1) (expt 2 30))))
+    (check-exn #rx"do not fit the WAV header"
+               (lambda () (write-wav "unused.wav" (zeros 32768 0) 1)))
     (define cache (make-temporary-directory))
     (dynamic-wind
      void

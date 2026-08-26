@@ -46,7 +46,12 @@
           (error 'load-wav "~a has no data chunk" path))
         (define chunk-id (subbytes header 0 4))
         (define chunk-size (u32 header 4))
-        (when (> (+ (file-position in) chunk-size) riff-limit)
+        ;; the pad byte counts toward the boundary for every chunk we
+        ;; consume past; a final unpadded data chunk stays tolerated
+        (define padded
+          (+ chunk-size
+             (if (equal? chunk-id #"data") 0 (modulo chunk-size 2))))
+        (when (> (+ (file-position in) padded) riff-limit)
           (error 'load-wav
                  "~a: ~a chunk extends past the declared RIFF size"
                  path chunk-id))
@@ -79,6 +84,9 @@
                     path bits))
            (when (zero? channels)
              (error 'load-wav "~a: fmt chunk declares 0 channels" path))
+           (when (zero? sample-rate)
+             (error 'load-wav "~a: fmt chunk declares a 0 sample rate"
+                    path))
            (unless (zero? (remainder chunk-size (* 2 channels)))
              (error 'load-wav
                     "~a: ~a-byte data chunk is not whole ~a-channel frames"
@@ -116,6 +124,8 @@
                    shape)]))
   (when (zero? channels)
     (error 'write-wav "zero channels: shape ~a" shape))
+  (when (> (* channels 2) 65535)
+    (error 'write-wav "~a channels do not fit the WAV header" channels))
   (when (>= (* sample-rate channels 2) (expt 2 32))
     (error 'write-wav
            "byte rate ~a does not fit the WAV header (rate ~a, ~a channels)"
