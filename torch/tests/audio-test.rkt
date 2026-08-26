@@ -5,7 +5,7 @@
            (only-in racket/file
                     delete-directory/files file->bytes
                     make-temporary-directory)
-           (only-in "../data/audio.rkt"
+           (only-in "../audio/data.rkt"
                     download-audio-cached load-audio-fixture load-wav
                     write-wav)
            (only-in "../main.rkt" tensor tensor-shape tensor->list zeros))
