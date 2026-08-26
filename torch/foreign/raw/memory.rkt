@@ -60,6 +60,15 @@
            (cons 'messages (reverse (unbox captured-failures)))
            (cons 'ledger-entries (hash-count allocations))))))
 
+;; No printer: this runs from the allocator finalizer, so a value carrying a
+;; prop:custom-write that raises or blocks must not be handed to one.
+(define (describe-raised e)
+  (cond
+    [(exn? e) (exn-message e)]
+    [(symbol? e) (symbol->string e)]
+    [(string? e) e]
+    [else "non-exn value raised from a native release"]))
+
 (define (take-at-most n xs)
   (cond
     [(or (zero? n) (null? xs)) '()]
@@ -80,7 +89,7 @@
      ;; buffer of evidence for a later one.
      (set-box! captured-failures
                (take-at-most capture-limit
-                             (cons (if (exn? e) (exn-message e) (format "~e" e))
+                             (cons (describe-raised e)
                                    (unbox captured-failures)))))))
 
 ;; Total catch on purpose, not exn:fail?: any value escaping GC

@@ -24,9 +24,12 @@ restore () {
     wait "$rkt" 2>/dev/null || true
   fi
   chmod u+w "$lib" 2>/dev/null || true
-  cp -f "$backup" "$lib" 2>/dev/null || true
-  chmod 0555 "$lib" 2>/dev/null || true
-  rm -f "$backup"
+  if cp -f "$backup" "$lib" 2>/dev/null; then
+    chmod 0555 "$lib" 2>/dev/null || true
+    rm -f "$backup"
+  else
+    echo "[repro] RESTORE FAILED -- staged shim may be corrupt; backup kept at $backup" >&2
+  fi
 }
 trap restore EXIT
 trap 'exit 130' INT
@@ -57,7 +60,13 @@ if grep -q REPRO-DEVICE-BAD "$out" 2>/dev/null; then
 fi
 printf '(define held (with-default-device D (for/list ([_ (in-range 500)]) (randn 256 256))))\n' >&3
 printf '(length held)\n' >&3
-sleep 8
+printf '(printf "REPRO-SETUP-~a\\n" "READY")\n' >&3
+for _ in $(seq 1 60); do
+  grep -q REPRO-SETUP-READY "$out" 2>/dev/null && break
+  sleep 1
+done
+grep -q REPRO-SETUP-READY "$out" 2>/dev/null || {
+  echo "[repro] ABORT: setup never completed; not corrupting"; exit 1; }
 
 echo "[repro] overwriting mapped image in place (mode=$mode)"
 case "$mode" in
@@ -65,9 +74,9 @@ case "$mode" in
 import sys,os
 p=sys.argv[1]; n=os.path.getsize(p)
 f=open(p,'r+b'); f.seek(4096); f.write(b'\x00'*(n-4096)); f.flush(); os.fsync(f.fileno()); f.close()
-print('  zeroed', n-4096, 'bytes')" "$lib" ;;
+print('  zeroed', n-4096, 'bytes')" "$lib" || { echo "[repro] ABORT: corruption failed"; exit 1; } ;;
   restage) before=$(stat -c%i "$lib" 2>/dev/null || stat -f%i "$lib")
-           cp "$backup" "$lib"
+           cp "$backup" "$lib" || { echo "[repro] ABORT: restage failed"; exit 1; }
            after=$(stat -c%i "$lib" 2>/dev/null || stat -f%i "$lib")
            echo "  re-copied identical bytes (inode $before -> $after$([ "$before" = "$after" ] && echo ', in place' || echo ' -- NOT in place, repro is inert'))" ;;
 esac

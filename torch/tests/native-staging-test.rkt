@@ -60,15 +60,20 @@
         f))
     (check-equal? leftovers '() "a .part/.tmp file survived staging"))
 
-  (test-case "a failed stage leaves the previous shim intact and no temp file"
+  (test-case "an unreadable source leaves the previous shim intact and no temp file"
+    ;; The staged shim must survive a stage that cannot complete.  Reading the
+    ;; source is what fails here; the point is that nothing is removed or
+    ;; replaced until a whole new file exists to rename into place.
     (define collection (make-temporary-directory))
     (stage! (make-src! "GOOD-SHIM") collection)
-    ;; source whose libtorchrkt.* entry is a directory, so reading it raises
+    (define before (file-or-directory-identity (staged-path collection)))
     (define bad (make-temporary-directory))
     (make-directory* (build-path bad "lib" "libtorchrkt.so"))
     (check-exn exn:fail? (lambda () (stage! bad collection)))
     (check-equal? (file->string (staged-path collection)) "GOOD-SHIM"
                   "a failed stage must not damage the installed shim")
+    (check-equal? (file-or-directory-identity (staged-path collection)) before
+                  "a failed stage must not replace the inode")
     (check-equal?
      (for/list ([f (in-list (directory-list (build-path collection "native-libs")))]
                 #:when (regexp-match? #rx"part|tmp" (path->string f)))

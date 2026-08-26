@@ -123,7 +123,12 @@ def run(mode, idx, budget=90.0):
 
 if __name__ == "__main__":
     mode = sys.argv[1]
-    n = int(sys.argv[2]) if len(sys.argv) > 2 else 10
+    try:
+        n = int(sys.argv[2]) if len(sys.argv) > 2 else 10
+    except ValueError:
+        raise SystemExit(f"iterations must be a positive integer: {sys.argv[2]}")
+    if n < 1:
+        raise SystemExit(f"iterations must be >= 1: {n}")
     results = [run(mode, i) for i in range(1, n + 1)]
     bad = sum(b for b, _ in results)
     incon = sum(i for _, i in results)
