@@ -203,7 +203,11 @@
                   (written (lambda (t)
                              (ref! t (gt t 4.0) (tensor '((9.0 10.0))))))
                   (written (lambda (t)
-                             (ref! t (gt t 4.0) (tensor '(((7.0))))))))])
+                             (ref! t (gt t 4.0) (tensor '(((7.0)))))))
+                  (written (lambda (t)
+                             (ref! t : 0 (tensor '((8.0 9.0))))))
+                  (written (lambda (t)
+                             (ref! t 0 (tensor '(((7.0 8.0 9.0))))))))])
        (check-equal? (length rkt) (length py) "write form count")
        (for ([r (in-list rkt)]
              [p (in-list py)]

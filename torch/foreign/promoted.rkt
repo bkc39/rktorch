@@ -365,7 +365,19 @@
                        (if (= s -1) (:: s #f) (:: s (add1 s)))
                        s)))]))
      (cond
-       [(tensor? v) (g:copy! view v #f)]
+       [(tensor? v)
+        ;; python strips leading singleton source dims; copy_ does not
+        (define vshape (tensor-shape view))
+        (define vdims
+          (let loop ([d (tensor-shape v)])
+            (if (and (> (length d) (length vshape)) (= (car d) 1))
+                (loop (cdr d))
+                d)))
+        (g:copy! view
+                 (if (equal? vdims (tensor-shape v))
+                     v
+                     (apply reshape v vdims))
+                 #f)]
        [(and (exact-integer? v) (int64-dtype? t)
              (not (double-roundtrips? v)))
         (g:copy! view (scalar->value-tensor v t) #f)]
