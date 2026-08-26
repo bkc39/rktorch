@@ -46,9 +46,9 @@ report="$REPRO_LOGDIR/report-$dev.txt"
         }
   grep 'rktorch mem' "$REPRO_LOGDIR/.diag" > "$REPRO_LOGDIR/.trace" \
     || { echo "no trace line -- diagnostics arm FAILED"; rc=1; }
-  case "$(tr -d '\n\r; ' < "$REPRO_LOGDIR/.diag")" in
-    *btforcontext]*) echo "diagnostics arm FAILED: the shape raised"; rc=1 ;;
-  esac
+  if tr -d '\n\r; ' < "$REPRO_LOGDIR/.diag" | grep -qF 'btforcontext]'; then
+    echo "diagnostics arm FAILED: the shape raised"; rc=1
+  fi
   rm -f "$REPRO_LOGDIR/.diag"
   if [ -s "$REPRO_LOGDIR/.trace" ]; then
     cat "$REPRO_LOGDIR/.trace"

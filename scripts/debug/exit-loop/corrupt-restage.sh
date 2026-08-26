@@ -112,7 +112,7 @@ echo "[repro] invalid-memory-reference hits: $imr"
 echo "[repro] cascade hits: $casc"
 echo "[repro] --- tail ---"; tail -c 600 "$out"
 banner=0
-case "$(tr -d '\n\r; ' < "$out")" in *btforcontext]*) banner=1 ;; esac
+tr -d '\n\r; ' < "$out" | grep -qF 'btforcontext]' && banner=1
 fails=$(grep -a '\[rktorch mem\]' "$out" | tail -1 \
           | grep -oE '\(failures \. [0-9]+\)' | head -1 | grep -oE '[0-9]+')
 echo "[repro] finalizer-failures: ${fails:-<no diagnostic>}"

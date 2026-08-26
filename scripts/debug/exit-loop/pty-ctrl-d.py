@@ -27,12 +27,12 @@ _GUARD = ('(unless (case "%s" [("cuda") (cuda-available?)] [("mps") (mps-availab
           % DEV).encode()
 _HEAD = [b"(require torch)\n", _GUARD, _PICK, _HOLD]
 
-SETUP = {
-    "idle":     _HEAD + [b"(length held)\n"],
-    "busy":     _HEAD + [b"(with-default-device D (for ([_ (in-range 4000)]) (void (matmul (randn 256 256) (randn 256 256)))))\n"],
-    "printing": _HEAD + [b"(with-default-device D (randn 1200 1200))\n"],
-    "intr":     _HEAD + [b"(with-default-device D (for ([_ (in-range 4000)]) (void (matmul (randn 256 256) (randn 256 256)))))\n"],
-    "spam":     _HEAD + [b"(length held)\n"],
+WORKLOAD = {
+    "idle":     b"(length held)\n",
+    "busy":     b"(with-default-device D (for ([_ (in-range 4000)]) (void (matmul (randn 256 256) (randn 256 256)))))\n",
+    "printing": b"(with-default-device D (randn 1200 1200))\n",
+    "intr":     b"(with-default-device D (for ([_ (in-range 4000)]) (void (matmul (randn 256 256) (randn 256 256)))))\n",
+    "spam":     b"(length held)\n",
 }
 DELAY = {"idle": 12.0, "busy": 3.0, "printing": 0.35, "intr": 3.0, "spam": 12.0}
 MAX_CAPTURE = 8 << 20
@@ -68,15 +68,20 @@ def run(mode, idx, budget=90.0):
                 dropped[0] += len(b)
         return True
     pump(time.time() + 6)
-    for line in SETUP[mode]:
+    for line in _HEAD:
         os.write(fd, line)
         pump(time.time() + 0.4)
-    # Wait for setup to finish rather than trusting a fixed sleep: on a slow
-    # host `intr` would otherwise interrupt setup instead of the computation.
+    # Readiness must be established BEFORE the workload: the REPL is sequential,
+    # so a sentinel sent after it would only arrive once the workload finished --
+    # and busy/printing/intr exist to interrupt it while it runs.
     os.write(fd, READY)
     ready_by = time.time() + 60
     while b"REPRO-SETUP-READY" not in bytes(out) and time.time() < ready_by:
         pump(time.time() + 0.5)
+    if b"REPRO-SETUP-READY" not in bytes(out):
+        print(f"ABORT pty/{mode}: setup never completed", flush=True)
+        raise SystemExit(3)
+    os.write(fd, WORKLOAD[mode])
     pump(time.time() + DELAY[mode])
     if mode == "intr":
         os.write(fd, b"\x03")
