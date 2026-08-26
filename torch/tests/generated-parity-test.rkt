@@ -26,6 +26,7 @@
           'mm '((tensor 2 2) (tensor 2 2))
           'mv '((tensor 2 3) (tensor 3))
           'dot '((tensor 4) (tensor 4))
+          'broadcast-to '((tensor 1 3) (int-array (2 3)))
           'reshape '((tensor 2 3) (int-array (3 2)))
           'select-int '((tensor 2 3) (int64 0) (int64 1))
           'slice-tensor '((tensor 6) (int64 0) (optional-int64 1)
@@ -84,6 +85,27 @@
                         (optional-int64 #f))
           'dropout '((tensor 2 3) (double 0.5) (bool #f))
           'copy! '((tensor 2 3) (tensor 2 3) (bool #f))
+          'fill-scalar! '((tensor 2 3) (double -3.0))
+          'index-copy! '((tensor 3 3) (int64 0) (int-tensor (0 2))
+                         (tensor 2 3))
+          'index-fill-int-tensor! '((tensor 3 3) (int64 0)
+                                    (int-tensor (0 2)) (scalar-tensor 4.5))
+          'masked-fill-tensor! '((tensor 6) (bool-tensor (0 1 0 1 0 1))
+                                 (scalar-tensor 4.5))
+          'index-add! '((tensor 3 3) (int64 0) (int-tensor (0 2))
+                        (tensor 2 3) (kwarg "alpha" 2.0))
+          'index-fill-int-scalar! '((tensor 3 3) (int64 0)
+                                    (int-tensor (0 2)) (double -7.0))
+          'scatter-src! '((tensor 2 3) (int64 1)
+                          (int-tensor-2d ((0 2) (1 0))) (tensor 2 2))
+          'scatter-value! '((tensor 2 3) (int64 1)
+                            (int-tensor-2d ((0 2) (1 0))) (double -9.0))
+          'scatter-add! '((tensor 2 3) (int64 1)
+                          (int-tensor-2d ((0 2) (1 0))) (tensor 2 2))
+          'masked-fill-scalar! '((tensor 6) (bool-tensor (0 1 0 1 0 1))
+                                 (double -100.0))
+          'masked-scatter! '((tensor 6) (bool-tensor (0 1 0 1 0 1))
+                             (tensor 6))
           'embedding '((tensor 5 3) (int-tensor (0 2 4 1)) (int64 -1)
                        (bool #f) (bool #f))
           'layer-norm '((tensor 2 3) (int-array (3)) (optional-tensor 3)
@@ -105,6 +127,7 @@
        (if (equal? (cdr spec) '(#f)) #f (apply randn (cdr spec)))]
       [(optional-tensor-ones) (apply ones (cdr spec))]
       [(int-tensor int-tensor-2d) (to-dtype (tensor (cadr spec)) 'int64)]
+      [(scalar-tensor) (tensor (cadr spec))]
       [(bool-tensor) (ne (tensor (cadr spec)) 0)]
       [(int64 double bool int-array optional-int64 optional-int-array dtype)
        (cadr spec)]
@@ -132,6 +155,7 @@
                (string-join (for/list ([row (in-list (cadr spec))])
                               (format "[~a]" (csv row)))
                             ", "))]
+      [(scalar-tensor) (format "torch.tensor(~a)" (cadr spec))]
       [(bool-tensor)
        (format "torch.tensor([~a], dtype=torch.bool)" (csv (cadr spec)))]
       [(int64 double) (number->string (cadr spec))]

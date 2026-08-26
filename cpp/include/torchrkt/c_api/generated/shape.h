@@ -15,6 +15,8 @@ extern "C" {
  * handle (NULL on error); an in-place op mutates its first handle
  * and returns an int status (0 ok, 1 with tr_last_error set). */
 
+tr_tensor* tr_gen_broadcast_to(const tr_tensor* self, const int64_t* size,
+                               int64_t size_len);
 tr_tensor* tr_gen_cat(const tr_tensor* const* tensors, int64_t tensors_len,
                       int64_t dim);
 tr_tensor* tr_gen_gather(const tr_tensor* self, int64_t dim,

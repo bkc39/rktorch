@@ -13,6 +13,17 @@
 
 extern "C" {
 
+tr_tensor* tr_gen_broadcast_to(const tr_tensor* self, const int64_t* size,
+                               int64_t size_len) {
+  if (!self || !size || size_len < 0) {
+    return torchrkt::null_arg("tr_gen_broadcast_to");
+  }
+  return torchrkt::alloc_result("tr_gen_broadcast_to", [&] {
+    return at::broadcast_to(
+        self->value, at::IntArrayRef(size, static_cast<size_t>(size_len)));
+  });
+}
+
 tr_tensor* tr_gen_cat(const tr_tensor* const* tensors, int64_t tensors_len,
                       int64_t dim) {
   if (!tensors || tensors_len < 0) {

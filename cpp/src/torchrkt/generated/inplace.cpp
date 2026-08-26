@@ -46,6 +46,55 @@ int tr_gen_copy_(tr_tensor* self, const tr_tensor* src, bool non_blocking) {
       "tr_gen_copy_", [&] { self->value.copy_(src->value, non_blocking); });
 }
 
+int tr_gen_fill__scalar(tr_tensor* self, double value) {
+  if (!self) {
+    return torchrkt::null_arg_status("tr_gen_fill__scalar");
+  }
+  return torchrkt::status_call("tr_gen_fill__scalar",
+                               [&] { self->value.fill_(value); });
+}
+
+int tr_gen_index_add_(tr_tensor* self, int64_t dim, const tr_tensor* index,
+                      const tr_tensor* source, double alpha) {
+  if (!self || !index || !source) {
+    return torchrkt::null_arg_status("tr_gen_index_add_");
+  }
+  return torchrkt::status_call("tr_gen_index_add_", [&] {
+    self->value.index_add_(dim, index->value, source->value, alpha);
+  });
+}
+
+int tr_gen_index_copy_(tr_tensor* self, int64_t dim, const tr_tensor* index,
+                       const tr_tensor* source) {
+  if (!self || !index || !source) {
+    return torchrkt::null_arg_status("tr_gen_index_copy_");
+  }
+  return torchrkt::status_call("tr_gen_index_copy_", [&] {
+    self->value.index_copy_(dim, index->value, source->value);
+  });
+}
+
+int tr_gen_index_fill__int_scalar(tr_tensor* self, int64_t dim,
+                                  const tr_tensor* index, double value) {
+  if (!self || !index) {
+    return torchrkt::null_arg_status("tr_gen_index_fill__int_scalar");
+  }
+  return torchrkt::status_call("tr_gen_index_fill__int_scalar", [&] {
+    self->value.index_fill_(dim, index->value, value);
+  });
+}
+
+int tr_gen_index_fill__int_tensor(tr_tensor* self, int64_t dim,
+                                  const tr_tensor* index,
+                                  const tr_tensor* value) {
+  if (!self || !index || !value) {
+    return torchrkt::null_arg_status("tr_gen_index_fill__int_tensor");
+  }
+  return torchrkt::status_call("tr_gen_index_fill__int_tensor", [&] {
+    self->value.index_fill_(dim, index->value, value->value);
+  });
+}
+
 int tr_gen_lerp__tensor(tr_tensor* self, const tr_tensor* end,
                         const tr_tensor* weight) {
   if (!self || !end || !weight) {
@@ -56,12 +105,72 @@ int tr_gen_lerp__tensor(tr_tensor* self, const tr_tensor* end,
   });
 }
 
+int tr_gen_masked_fill__scalar(tr_tensor* self, const tr_tensor* mask,
+                               double value) {
+  if (!self || !mask) {
+    return torchrkt::null_arg_status("tr_gen_masked_fill__scalar");
+  }
+  return torchrkt::status_call("tr_gen_masked_fill__scalar", [&] {
+    self->value.masked_fill_(mask->value, value);
+  });
+}
+
+int tr_gen_masked_fill__tensor(tr_tensor* self, const tr_tensor* mask,
+                               const tr_tensor* value) {
+  if (!self || !mask || !value) {
+    return torchrkt::null_arg_status("tr_gen_masked_fill__tensor");
+  }
+  return torchrkt::status_call("tr_gen_masked_fill__tensor", [&] {
+    self->value.masked_fill_(mask->value, value->value);
+  });
+}
+
+int tr_gen_masked_scatter_(tr_tensor* self, const tr_tensor* mask,
+                           const tr_tensor* source) {
+  if (!self || !mask || !source) {
+    return torchrkt::null_arg_status("tr_gen_masked_scatter_");
+  }
+  return torchrkt::status_call("tr_gen_masked_scatter_", [&] {
+    self->value.masked_scatter_(mask->value, source->value);
+  });
+}
+
 int tr_gen_mul__tensor(tr_tensor* self, const tr_tensor* other) {
   if (!self || !other) {
     return torchrkt::null_arg_status("tr_gen_mul__tensor");
   }
   return torchrkt::status_call("tr_gen_mul__tensor",
                                [&] { self->value.mul_(other->value); });
+}
+
+int tr_gen_scatter__src(tr_tensor* self, int64_t dim, const tr_tensor* index,
+                        const tr_tensor* src) {
+  if (!self || !index || !src) {
+    return torchrkt::null_arg_status("tr_gen_scatter__src");
+  }
+  return torchrkt::status_call("tr_gen_scatter__src", [&] {
+    self->value.scatter_(dim, index->value, src->value);
+  });
+}
+
+int tr_gen_scatter__value(tr_tensor* self, int64_t dim, const tr_tensor* index,
+                          double value) {
+  if (!self || !index) {
+    return torchrkt::null_arg_status("tr_gen_scatter__value");
+  }
+  return torchrkt::status_call("tr_gen_scatter__value", [&] {
+    self->value.scatter_(dim, index->value, value);
+  });
+}
+
+int tr_gen_scatter_add_(tr_tensor* self, int64_t dim, const tr_tensor* index,
+                        const tr_tensor* src) {
+  if (!self || !index || !src) {
+    return torchrkt::null_arg_status("tr_gen_scatter_add_");
+  }
+  return torchrkt::status_call("tr_gen_scatter_add_", [&] {
+    self->value.scatter_add_(dim, index->value, src->value);
+  });
 }
 
 }  // extern "C"

@@ -1,32 +1,44 @@
 #lang racket/base
 
-(require (only-in racket/list append* drop [flatten list-flatten] [take list-take])
+(require (only-in racket/list
+                  append* drop [flatten list-flatten] make-list
+                  [take list-take])
          (only-in "device-type.rkt" device-type)
          (only-in "ops.rkt"
                   item tensor-device tensor-dtype tensor-shape tensor->list
                   to-device to-dtype)
          (only-in "size.rkt" ->2d)
          (only-in "structs.rkt" tensor?)
-         (only-in "tensor-ops.rkt" add mul reshape tensor unsqueeze)
+         (only-in "tensor-ops.rkt" add mul reshape sum tensor unsqueeze)
          (prefix-in g: (only-in "../generated.rkt"
                                 adaptive-avg-pool2d
                                 avg-pool2d
+                                broadcast-to
                                 conv2d
+                                copy!
                                 embedding
                                 eq-scalar eq-tensor
+                                fill-scalar!
                                 gather
                                 ge-scalar ge-tensor
                                 gt-scalar gt-tensor
+                                index-add! index-copy!
+                                index-fill-int-scalar!
+                                index-fill-int-tensor!
                                 index-select
                                 layer-norm
                                 le-scalar le-tensor
                                 lt-scalar lt-tensor
                                 masked-fill-scalar
+                                masked-fill-scalar!
+                                masked-fill-tensor!
+                                masked-scatter!
                                 masked-select
                                 max-pool2d
                                 narrow
                                 ne-scalar ne-tensor
                                 nonzero
+                                scatter-add! scatter-src! scatter-value!
                                 select-int
                                 slice-tensor
                                 take
@@ -43,7 +55,9 @@
          conv2d max-pool2d avg-pool2d adaptive-avg-pool2d
          tril triu masked-fill embedding layer-norm
          gather take take-along-dim where
-         tensor-ref :: slice? slice-start slice-end slice-step
+         index-add! index-fill! masked-fill! scatter!
+         tensor-ref tensor-ref! :: slice? slice-start slice-end slice-step
+         index-copy! masked-scatter! scatter-add!
          (rename-out [g:index-select index-select]
                      [g:masked-select masked-select]
                      [g:narrow narrow]
@@ -209,6 +223,167 @@
         (define dev (tensor-device mask))
         (g:where-self mask (tensor a #:device dev) (tensor b #:device dev))]
        [else (g:where-scalar mask (exact->inexact a) (exact->inexact b))])]))
+
+
+(define (double-roundtrips? v)
+  (define d (exact->inexact v))
+  (and (rational? d) (= (inexact->exact d) v)))
+
+(define (int64-dtype? t)
+  (eq? (tensor-dtype t) 'int64))
+
+(define (scalar->value-tensor v t)
+  (tensor v #:dtype 'int64 #:device (tensor-device t)))
+
+(define (index-copy! t dim index source)
+  (void (g:index-copy! t dim index source)))
+
+(define (index-add! t dim index source #:alpha [alpha 1])
+  (void
+   (if (and (exact-integer? alpha) (int64-dtype? t)
+            (not (double-roundtrips? alpha)))
+       (g:index-add! t dim index (mul source (scalar->value-tensor alpha t))
+                     1.0)
+       (g:index-add! t dim index source (exact->inexact alpha)))))
+
+(define (index-fill! t dim index v)
+  (void
+   (if (and (exact-integer? v) (int64-dtype? t)
+            (not (double-roundtrips? v)))
+       (g:index-fill-int-tensor! t dim index (scalar->value-tensor v t))
+       (g:index-fill-int-scalar! t dim index (exact->inexact v)))))
+
+(define (scatter! t dim index v)
+  (void
+   (cond
+     [(tensor? v) (g:scatter-src! t dim index v)]
+     [(and (exact-integer? v) (int64-dtype? t)
+           (not (double-roundtrips? v)))
+      ;; broadcast v to the index shape without a double transit
+      (g:scatter-src! t dim index
+                      (add (mul index (scalar->value-tensor 0 t))
+                           (scalar->value-tensor v t)))]
+     [else (g:scatter-value! t dim index (exact->inexact v))])))
+
+(define (scatter-add! t dim index src)
+  (void (g:scatter-add! t dim index src)))
+
+(define (masked-fill! t mask v)
+  (void
+   (if (and (exact-integer? v) (int64-dtype? t)
+            (not (double-roundtrips? v)))
+       (g:masked-fill-tensor! t mask (scalar->value-tensor v t))
+       (g:masked-fill-scalar! t mask (exact->inexact v)))))
+
+(define (masked-scatter! t mask source)
+  (void (g:masked-scatter! t mask source)))
+
+(define (write-mask-target! t mask0 v)
+  (define moved (to-device mask0 (tensor-device t)))
+  (define mdims (tensor-shape moved))
+  (define tdims (tensor-shape t))
+  (unless (and (<= (length mdims) (length tdims))
+               (equal? mdims (list-take tdims (length mdims))))
+    (error 'tensor-ref! "mask shape ~a does not match leading dims of ~a"
+           mdims tdims))
+  ;; ATen broadcasts masks right-aligned; a leading-dims mask needs
+  ;; trailing width-1 dims or it lands on the wrong axes
+  (define trailing (list-tail tdims (length mdims)))
+  (define mask
+    (if (null? trailing)
+        moved
+        (apply reshape moved
+               (append mdims (make-list (length trailing) 1)))))
+  (cond
+    [(not (tensor? v))
+     (if (and (exact-integer? v) (int64-dtype? t)
+              (not (double-roundtrips? v)))
+         (g:masked-fill-tensor! t mask (scalar->value-tensor v t))
+         (g:masked-fill-scalar! t mask (exact->inexact v)))]
+    [(null? (tensor-shape v))
+     ;; python broadcasts a 0-d source; masked_scatter_ would not
+     (g:masked-fill-tensor! t mask v)]
+    [else
+     ;; python broadcasts the source to (nnz . trailing); validation is
+     ;; required because masked_scatter_ silently ignores surplus
+     (define sel-shape
+       (cons (item (sum (to-dtype mask 'int64))) trailing))
+     ;; python strips leading singleton source dims before broadcasting
+     (define vdims
+       (let loop ([d (tensor-shape v)])
+         (if (and (> (length d) (length sel-shape)) (= (car d) 1))
+             (loop (cdr d))
+             d)))
+     (unless (and (<= (length vdims) (length sel-shape))
+                  (for/and ([f (in-list (reverse vdims))]
+                            [s (in-list (reverse sel-shape))])
+                    (or (= f 1) (= f s))))
+       (error 'tensor-ref!
+              "source shape ~a cannot broadcast to the true mask positions ~a"
+              (tensor-shape v) sel-shape))
+     (g:masked-scatter!
+      t mask
+      (if (= (apply * vdims) (apply * sel-shape))
+          v
+          (g:broadcast-to (apply reshape v vdims) sel-shape)))]))
+
+(define (tensor-ref! t v . specs)
+  (void
+   (cond
+    [(and (pair? specs) (null? (cdr specs)) (bool-mask? (car specs)))
+     (write-mask-target! t (car specs) v)]
+    [(for/or ([s (in-list specs)])
+       (or (tensor? s) (list? s) (vector? s)))
+     (error 'tensor-ref!
+            "index-vector write targets need index_put_ (issue #67): ~e"
+            specs)]
+    [else
+     ;; ATen clamps slices where select would raise, hence the bounds
+     ;; check before the width-1 rebuild
+     (define rank (length (tensor-shape t)))
+     (define expanded (expand-ellipsis specs rank 'tensor-ref!))
+     (define dropped
+       (for/sum ([s (in-list expanded)])
+         (if (exact-integer? s) 1 0)))
+     (define added
+       (for/sum ([s (in-list expanded)]) (if (eq? s #f) 1 0)))
+     (define result-rank (+ (- rank dropped) added))
+     (define view
+       (cond
+         [(positive? result-rank) (apply tensor-ref t expanded)]
+         [(zero? rank) (reshape t 1)]
+         [else
+          (for ([s (in-list expanded)]
+                [n (in-list (tensor-shape t))])
+            (unless (and (exact-integer? s) (< (- (add1 n)) s n))
+              (error 'tensor-ref!
+                     "index ~a out of range for dimension of size ~a"
+                     s n)))
+          (apply tensor-ref t
+                 (for/list ([s (in-list expanded)])
+                   (if (exact-integer? s)
+                       (if (= s -1) (:: s #f) (:: s (add1 s)))
+                       s)))]))
+     (cond
+       [(tensor? v)
+        ;; python strips leading singleton source dims; copy_ does not
+        (define vshape (tensor-shape view))
+        (define vdims
+          (let loop ([d (tensor-shape v)])
+            (if (and (> (length d) (length vshape)) (= (car d) 1))
+                (loop (cdr d))
+                d)))
+        (g:copy! view
+                 (if (equal? vdims (tensor-shape v))
+                     v
+                     (apply reshape v vdims))
+                 #f)]
+       [(and (exact-integer? v) (int64-dtype? t)
+             (not (double-roundtrips? v)))
+        (g:copy! view (scalar->value-tensor v t) #f)]
+       ;; fill_'s C double keeps full float precision (a float32
+       ;; ingestion transit would round float64 destinations)
+       [else (g:fill-scalar! view (exact->inexact v))])])))
 
 (define (flatten v [start-dim 0] [end-dim -1])
   (cond
