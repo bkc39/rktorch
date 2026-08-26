@@ -103,7 +103,6 @@
     (let ([t (fresh)])
       (ref! t 0 .. (tensor '(9.0 9.0 9.0)))
       (check-equal? (tensor->list t) '(9.0 9.0 9.0 4.0 5.0 6.0)))
-    ;; int64 write targets keep exactness through the tensor route
     (let ([it (tensor '((1 2) (3 4)))])
       (ref! it 0 1 (add1 (expt 2 53)))
       (check-equal? (tensor->list it)
@@ -131,8 +130,6 @@
                (lambda () (tensor-ref! (fresh) 0 '(0 1))))
     (check-exn #rx"index_put_"
                (lambda () (tensor-ref! (fresh) 9 '())))
-    ;; exact-int fills stay exact on integral destinations (2^53+1
-    ;; dies in any double transit)
     (let ([it (tensor '((1 2) (3 4)))])
       (index-fill! it 0 (to-dtype (tensor '(0)) 'int64) (add1 (expt 2 53)))
       (check-equal? (take (tensor->list it) 2)
@@ -145,7 +142,6 @@
                 (add1 (expt 2 53)))
       (check-equal? (tensor->list it)
                     (list (add1 (expt 2 53)) 2 3 (add1 (expt 2 53)))))
-    ;; float64 destination keeps double precision through fill_
     (let ([d (to-dtype (zeros 1) 'float64)])
       (ref! d 0 1.0000000000000002)
       (check-equal? (tensor->list d) '(1.0000000000000002)))
@@ -217,7 +213,6 @@
       (index-add! it 0 (to-dtype (tensor '(0)) 'int64) (tensor '(3))
                   #:alpha 2)
       (check-equal? (tensor->list it) '(7 2)))
-    ;; broadcast materialization is a view, not arithmetic — bits survive
     (let ([t (tensor '(1.0 1.0))])
       (ref! t (gt t 0.5) (tensor '(-0.0)))
       (check-equal? (tensor->list t) '(-0.0 -0.0))))
