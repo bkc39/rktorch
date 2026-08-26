@@ -64,13 +64,15 @@
     (stage! src collection)
     (define dst (staged-path collection))
     (define id-before (file-or-directory-identity dst))
-    (file-or-directory-permissions dst #o644)
+    (define src-bits
+      (file-or-directory-permissions (build-path src "lib" "libtorchrkt.so") 'bits))
+    (define wrong-bits (if (= src-bits #o600) #o644 #o600))
+    (file-or-directory-permissions dst wrong-bits)
+    (check-not-equal? wrong-bits src-bits "the test must start from a differing mode")
     (stage! src collection)
     (check-equal? (file-or-directory-identity dst) id-before
                   "a stage of identical bytes must not churn the inode")
-    (check-equal? (file-or-directory-permissions dst 'bits)
-                  (file-or-directory-permissions
-                   (build-path src "lib" "libtorchrkt.so") 'bits)
+    (check-equal? (file-or-directory-permissions dst 'bits) src-bits
                   "the mode must be corrected even when the bytes match")
     (check-equal? (file->string dst) "SAME-SHIM"))
 
