@@ -176,7 +176,8 @@ def classify(f: NativeFunction, shard: str) -> Op | Skip:
         return skip(f"name collides with a shadow-dispatched binding "
                     f"({rkt_name}); promote by hand with the dispatch shim")
     if func.name.name.base in _BASE_SHADOWED:
-        rkt_name = f"{rkt_name}-tensor"
+        rkt_name = (f"{rkt_name[:-1]}-tensor!" if rkt_name.endswith("!")
+                    else f"{rkt_name}-tensor")
 
     base = func.name.name.base
     return Op(

@@ -246,5 +246,12 @@
                       (download-audio-cached
                        "direct.wav"
                        (format "file://~a" nested-src))))
+         (parameterize ([current-directory cache])
+           (putenv "RKTORCH_AUDIO_DIR" "relative-cache")
+           (check-equal? (file->bytes
+                          (download-audio-cached
+                           "clip.wav" (format "file://~a" nested-src)))
+                         (file->bytes nested-src)
+                         "relative override completes against cwd"))
          (delete-directory/files outside)))
      (lambda () (delete-directory/files cache)))))

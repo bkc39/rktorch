@@ -177,7 +177,8 @@
 (define (audio-cache-dir)
   (define override (getenv "RKTORCH_AUDIO_DIR"))
   (if (and override (not (string=? override "")))
-      (string->path override)
+      ;; complete, or the containment walk-up never reaches a root
+      (path->complete-path (string->path override))
       (build-path (find-system-path 'cache-dir) "rktorch" "audio")))
 
 (define (download-audio-cached name url #:valid? [valid? (lambda (path) #t)])
