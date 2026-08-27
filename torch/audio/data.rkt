@@ -12,8 +12,8 @@
          (only-in "../foreign/raw/audio.rkt"
                   tr-audio-info/raw tr-audio-load/raw tr-audio-save/raw)
          (only-in "../foreign/structs.rkt" wrap-tensor)
-         (only-in "../private/util.rkt" with-temporary-file)
-         (only-in "../main.rkt" tensor tensor-shape tensor->list tensor?))
+         (only-in "../main.rkt" tensor tensor-shape tensor->list tensor?)
+         (only-in "../private/util.rkt" with-temporary-file))
 
 (provide audio-info
          load-audio

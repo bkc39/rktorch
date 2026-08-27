@@ -38,8 +38,11 @@ SndPtr open_for_read(const char* path, SF_INFO* info) {
 }
 
 int format_for(const std::string& path) {
-  const auto dot = path.rfind('.');
-  std::string ext = dot == std::string::npos ? "" : path.substr(dot + 1);
+  const auto slash = path.find_last_of('/');
+  const std::string name =
+      slash == std::string::npos ? path : path.substr(slash + 1);
+  const auto dot = name.rfind('.');
+  std::string ext = dot == std::string::npos ? "" : name.substr(dot + 1);
   std::transform(ext.begin(), ext.end(), ext.begin(),
                  [](unsigned char c) { return std::tolower(c); });
   if (ext == "wav") {
@@ -148,7 +151,7 @@ int tr_audio_save(const char* path, const tr_tensor* samples, int32_t rate) {
           "combination");
     }
     const torch::Tensor interleaved =
-        s.to(torch::kCPU).to(torch::kFloat32).t().contiguous();
+        s.to(torch::kCPU, torch::kFloat32).t().contiguous();
     SndPtr f(sf_open(path, SFM_WRITE, &info));
     if (!f) {
       throw std::runtime_error(std::string("cannot open ") + path + ": " +
