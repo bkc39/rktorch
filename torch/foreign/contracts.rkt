@@ -30,6 +30,7 @@
          nonneg-size/c
          binary-arith/c
          unary-numeric/c
+         unary-real/c
          log/c
          reduce-or-variadic/c
          argmax/c
@@ -82,6 +83,10 @@
 (define unary-numeric/c
   (->i ([v (or/c tensor? number?)])
        [result (v) (if (tensor? v) tensor? number?)]))
+
+(define unary-real/c
+  (->i ([v (or/c tensor? real?)])
+       [result (v) (if (tensor? v) tensor? real?)]))
 
 (define log/c
   (->i ([v (or/c tensor? number?)])

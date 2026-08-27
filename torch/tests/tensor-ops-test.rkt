@@ -127,6 +127,7 @@
     (check-equal? (tensor->list (abs (tensor '(-1.5 2.0 -0.0))))
                   '(1.5 2.0 0.0))
     (check-equal? (abs -3) 3)
+    (check-exn exn:fail:contract? (lambda () (abs 1+2i)))
     (check-equal? (item (max (abs (sub (tensor '(1.0 -4.0))
                                        (tensor '(2.0 -1.5))))))
                   2.5)

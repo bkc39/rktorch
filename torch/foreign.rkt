@@ -153,7 +153,7 @@
   [mul binary-arith/c]
   [div binary-arith/c]
   [pow (-> tensor? tensor-or-real/c tensor?)]
-  [abs unary-numeric/c]
+  [abs unary-real/c]
   [neg (-> tensor? tensor?)]
   [relu (-> tensor? tensor?)]
   [sigmoid (-> tensor? tensor?)]
