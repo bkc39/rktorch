@@ -74,7 +74,6 @@ tr_tensor* tr_audio_load(const char* path, int64_t frame_offset,
   return torchrkt::alloc_result("tr_audio_load", [&] {
     SF_INFO info;
     const SndPtr f = open_for_read(path, &info);
-    *rate = info.samplerate;
     if (num_frames < -1) {
       throw std::invalid_argument(
           "num_frames must be -1 (to end) or "
@@ -104,6 +103,9 @@ tr_tensor* tr_audio_load(const char* path, int64_t frame_offset,
       throw std::runtime_error("short read: wanted " + std::to_string(wanted) +
                                " frames, got " + std::to_string(got));
     }
+    // out-params write only after everything that can throw (the
+    // family convention): a failed call must not leave a believable rate
+    *rate = info.samplerate;
     return interleaved.t().contiguous();
   });
 }

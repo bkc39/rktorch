@@ -8,9 +8,11 @@
                     delete-directory/files file->bytes
                     make-temporary-directory)
            (only-in racket/path path-only)
+           (only-in ffi/vector make-s32vector s32vector-ref)
            (only-in "../audio/data.rkt"
                     audio-info download-audio-cached load-audio
                     load-audio-fixture load-wav save-audio write-wav)
+           (only-in "../foreign/raw/audio.rkt" tr-audio-load/raw)
            (only-in "../main.rkt" tensor tensor-shape tensor->list zeros))
 
   (define-runtime-path flac-fixture "../audio/fixtures/sine-440-16k.flac")
@@ -219,7 +221,15 @@
        (check-exn #rx"frame offset"
                   (lambda ()
                     (load-audio (build-path dir "mono.wav")
-                                #:frame-offset 9))))
+                                #:frame-offset 9)))
+       (define written (make-s32vector 1 -7))
+       (tr-audio-load/raw (build-path dir "mono.wav") 0 -1 written)
+       (check-equal? (s32vector-ref written 0) 8000
+                     "the rate out-slot is written through")
+       (define untouched (make-s32vector 1 -7))
+       (tr-audio-load/raw (build-path dir "mono.wav") 9 -1 untouched)
+       (check-equal? (s32vector-ref untouched 0) -7
+                     "a failed load leaves the out-slot untouched"))
      (lambda () (delete-directory/files dir))))
 
   (test-case "wav rejection and cache paths (#83)"
