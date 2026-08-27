@@ -187,27 +187,28 @@
       (error 'download-audio-cached
              "cache name must stay inside the cache directory: ~e" name)))
   (define dest (build-path (audio-cache-dir) name))
-  (unless (file-exists? dest)
-    (make-directory* (audio-cache-dir))
-    (define-values (parent _name _dir?) (split-path dest))
-    ;; lexical checks miss symlinked components — the deepest EXISTING
-    ;; ancestor must resolve inside the cache root before anything is
-    ;; created (fresh directories below it cannot be symlinks)
-    (define existing-ancestor
-      (let loop ([p parent])
-        (cond
-          [(directory-exists? p) p]
-          [else
-           (define-values (up _ __) (split-path p))
-           (loop up)])))
-    (let loop ([c (explode-path (normalize-path existing-ancestor))]
-               [r (explode-path (normalize-path (audio-cache-dir)))])
+  (make-directory* (audio-cache-dir))
+  (define-values (parent _name _dir?) (split-path dest))
+  ;; lexical checks miss symlinked components — the deepest EXISTING
+  ;; ancestor must resolve inside the cache root before anything is
+  ;; created, served from, or replaced (fresh directories below a
+  ;; verified ancestor cannot be symlinks)
+  (define existing-ancestor
+    (let loop ([p parent])
       (cond
-        [(null? r) (void)]
-        [(and (pair? c) (equal? (car c) (car r))) (loop (cdr c) (cdr r))]
-        [else (error 'download-audio-cached
-                     "cache name must stay inside the cache directory: ~e"
-                     name)]))
+        [(directory-exists? p) p]
+        [else
+         (define-values (up _ __) (split-path p))
+         (loop up)])))
+  (let loop ([c (explode-path (normalize-path existing-ancestor))]
+             [r (explode-path (normalize-path (audio-cache-dir)))])
+    (cond
+      [(null? r) (void)]
+      [(and (pair? c) (equal? (car c) (car r))) (loop (cdr c) (cdr r))]
+      [else (error 'download-audio-cached
+                   "cache name must stay inside the cache directory: ~e"
+                   name)]))
+  (unless (file-exists? dest)
     (make-directory* parent)
     (with-temporary-file (tmp #:template "audio-~a.part"
                               #:directory (audio-cache-dir))

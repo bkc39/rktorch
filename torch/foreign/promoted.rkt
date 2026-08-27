@@ -11,13 +11,13 @@
          (only-in "structs.rkt" tensor?)
          (only-in "tensor-ops.rkt" add mul reshape sum tensor unsqueeze)
          (prefix-in g: (only-in "../generated.rkt"
-                                abs
+                                abs-tensor
                                 adaptive-avg-pool2d
                                 avg-pool2d
                                 broadcast-to
                                 conv2d
                                 copy!
-                                cos
+                                cos-tensor
                                 embedding
                                 eq-scalar eq-tensor
                                 fill-scalar!
@@ -42,7 +42,7 @@
                                 nonzero
                                 scatter-add! scatter-src! scatter-value!
                                 select-int
-                                sin
+                                sin-tensor
                                 slice-tensor
                                 take
                                 take-along-dim
@@ -70,9 +70,9 @@
                      [tensor-cos cos]
                      [tensor-sin sin]))
 
-(define (tensor-abs x) (if (tensor? x) (g:abs x) (abs x)))
-(define (tensor-sin x) (if (tensor? x) (g:sin x) (sin x)))
-(define (tensor-cos x) (if (tensor? x) (g:cos x) (cos x)))
+(define (tensor-abs x) (if (tensor? x) (g:abs-tensor x) (abs x)))
+(define (tensor-sin x) (if (tensor? x) (g:sin-tensor x) (sin x)))
+(define (tensor-cos x) (if (tensor? x) (g:cos-tensor x) (cos x)))
 
 (struct slice (start end step) #:transparent)
 (define ::

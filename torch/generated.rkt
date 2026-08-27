@@ -16,7 +16,7 @@
 (require (only-in "foreign/define-generated.rkt"
                   define-generated-op))
 
-(provide abs
+(provide abs-tensor
          adaptive-avg-pool2d
          add-tensor!
          addcdiv!
@@ -26,7 +26,7 @@
          cat
          conv2d
          copy!
-         cos
+         cos-tensor
          cross-entropy-loss
          dot
          dropout
@@ -71,7 +71,7 @@
          scatter-src!
          scatter-value!
          select-int
-         sin
+         sin-tensor
          slice-tensor
          sum-dim-intlist
          take
@@ -83,7 +83,7 @@
          where-scalarself
          where-self)
 
-(define-generated-op abs tr_gen_abs
+(define-generated-op abs-tensor tr_gen_abs
   ([self tensor]))
 
 (define-generated-op adaptive-avg-pool2d tr_gen_adaptive_avg_pool2d
@@ -113,7 +113,7 @@
 (define-generated-op copy! tr_gen_copy_ #:inplace
   ([self tensor] [src tensor] [non-blocking bool]))
 
-(define-generated-op cos tr_gen_cos
+(define-generated-op cos-tensor tr_gen_cos
   ([self tensor]))
 
 (define-generated-op cross-entropy-loss tr_gen_cross_entropy_loss
@@ -248,7 +248,7 @@
 (define-generated-op select-int tr_gen_select_int
   ([self tensor] [dim int64] [index int64]))
 
-(define-generated-op sin tr_gen_sin
+(define-generated-op sin-tensor tr_gen_sin
   ([self tensor]))
 
 (define-generated-op slice-tensor tr_gen_slice_tensor

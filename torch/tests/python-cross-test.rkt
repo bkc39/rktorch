@@ -7,6 +7,7 @@
   (require rackunit
            "../main.rkt"
            "../nn.rkt"
+           (only-in "../audio/data.rkt" load-audio-fixture)
            (only-in "../data/mnist.rkt" load-mnist-fixture)
            (only-in "../data/text.rkt"
                     contiguous-blocks encode load-text-fixture text->vocab)
@@ -213,6 +214,16 @@
              [p (in-list py)]
              [i (in-naturals)])
          (check-equal? r p (format "write form ~a parity" i))))
+     ;; load-wav against torchaudio.load itself, bit for bit
+     (let ([j (python-result "python/audio_parity.py")])
+       (define-values (samples rate) (load-audio-fixture))
+       (check-equal? (tensor-shape samples) (hash-ref j 'shape)
+                     "torchaudio.load shape parity")
+       (check-equal? rate (hash-ref j 'rate) "torchaudio.load rate parity")
+       (check-equal? (for/list ([v (in-list (tensor->list samples))])
+                       (exact->inexact v))
+                     (hash-ref j 'values)
+                     "torchaudio.load sample parity"))
      (let ()
        (define-module mlp (d-in d-hidden d-out)
          #:submodules ([fc1 (Linear d-in d-hidden)]
