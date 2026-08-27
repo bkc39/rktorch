@@ -411,8 +411,6 @@
 
           # Python with the PyTorch wheel/lib, for interactive parity work
           # (`nix develop --command python3`) and the python-cross-test.
-          # torchaudio/torchvision/soundfile back the audio (#83) and vision
-          # (#84) twin sides; all binary-cached on both supported systems.
           pythonEnv = pkgs.python314.withPackages
             (ps: [ ps.soundfile ps.torch ps.torchaudio ps.torchvision ]);
 

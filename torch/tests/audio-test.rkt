@@ -138,6 +138,13 @@
                   (riff-chunk #"data" (make-bytes 4 0)))
        (lambda (p)
          (check-exn #rx"block alignment" (lambda () (load-wav p))))))
+    (let ([bad-rate (bytes-copy (fmt-payload 1 8000))])
+      (integer->integer-bytes 8000 4 #f #f bad-rate 8)
+      (call-with-wav-bytes
+       (riff-file (riff-chunk #"fmt " bad-rate)
+                  (riff-chunk #"data" (make-bytes 4 0)))
+       (lambda (p)
+         (check-exn #rx"byte rate" (lambda () (load-wav p))))))
     (let ([odd-fmt (bytes-append
                     #"fmt " (integer->integer-bytes 17 4 #f #f)
                     (fmt-payload 1 8000) (bytes 9))])
@@ -210,5 +217,14 @@
                          "datasets/clip.wav"
                          (format "file://~a" nested-src)))
                        (file->bytes nested-src)
-                       "nested cache names create their parent")))
+                       "nested cache names create their parent")
+         (define outside (make-temporary-directory))
+         (make-file-or-directory-link outside (build-path cache "evil"))
+         (check-exn #rx"inside the cache directory"
+                    (lambda ()
+                      (download-audio-cached
+                       "evil/clip.wav"
+                       (format "file://~a" nested-src))))
+         (check-false (file-exists? (build-path outside "clip.wav")))
+         (delete-directory/files outside)))
      (lambda () (delete-directory/files cache)))))

@@ -4,6 +4,7 @@
 (require racket/runtime-path
          (only-in racket/file make-directory*)
          (only-in racket/math exact-round)
+         (only-in racket/path normalize-path)
          (only-in racket/port copy-port)
          (only-in net/url call/input-url get-pure-port string->url)
          (only-in "../private/util.rkt" with-temporary-file)
@@ -91,6 +92,10 @@
              (error 'load-wav
                     "~a: block alignment ~a does not match ~a-channel PCM16"
                     path (u16 fmt 12) channels))
+           (unless (= (u32 fmt 8) (* sample-rate channels 2))
+             (error 'load-wav
+                    "~a: byte rate ~a does not match rate ~a x ~a channels"
+                    path (u32 fmt 8) sample-rate channels))
            (unless (zero? (remainder chunk-size (* 2 channels)))
              (error 'load-wav
                     "~a: ~a-byte data chunk is not whole ~a-channel frames"
@@ -185,6 +190,16 @@
   (unless (file-exists? dest)
     (define-values (parent _name _dir?) (split-path dest))
     (make-directory* parent)
+    ;; lexical checks miss symlinked components — containment must hold
+    ;; on the resolved paths before the replacing rename
+    (let loop ([c (explode-path (normalize-path parent))]
+               [r (explode-path (normalize-path (audio-cache-dir)))])
+      (cond
+        [(null? r) (void)]
+        [(and (pair? c) (equal? (car c) (car r))) (loop (cdr c) (cdr r))]
+        [else (error 'download-audio-cached
+                     "cache name must stay inside the cache directory: ~e"
+                     name)]))
     (with-temporary-file (tmp #:template "audio-~a.part"
                               #:directory (audio-cache-dir))
       (call/input-url (string->url url)
