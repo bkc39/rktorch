@@ -195,9 +195,11 @@
     ;; created (fresh directories below it cannot be symlinks)
     (define existing-ancestor
       (let loop ([p parent])
-        (if (directory-exists? p)
-            p
-            (let-values ([(up _ __) (split-path p)]) (loop up)))))
+        (cond
+          [(directory-exists? p) p]
+          [else
+           (define-values (up _ __) (split-path p))
+           (loop up)])))
     (let loop ([c (explode-path (normalize-path existing-ancestor))]
                [r (explode-path (normalize-path (audio-cache-dir)))])
       (cond
