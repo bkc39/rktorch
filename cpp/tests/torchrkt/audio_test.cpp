@@ -66,7 +66,8 @@ TEST_P(AudioRoundTrip, SaveInfoLoad) {
 }
 
 INSTANTIATE_TEST_SUITE_P(WavAndFlac, AudioRoundTrip,
-                         testing::Values("rt.wav", "rt.flac"));
+                         testing::Values("rt.wav", "rt.flac", "rt.WAV",
+                                         "rt.FLAC"));
 
 TEST(Audio, WindowedLoadMatchesFullSlice) {
   const std::string path = temp_audio_path("window.wav");

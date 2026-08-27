@@ -3,6 +3,8 @@
 #include <sndfile.h>
 #include <torch/torch.h>
 
+#include <algorithm>
+#include <cctype>
 #include <cstring>
 #include <limits>
 #include <memory>
@@ -37,7 +39,9 @@ SndPtr open_for_read(const char* path, SF_INFO* info) {
 
 int format_for(const std::string& path) {
   const auto dot = path.rfind('.');
-  const std::string ext = dot == std::string::npos ? "" : path.substr(dot + 1);
+  std::string ext = dot == std::string::npos ? "" : path.substr(dot + 1);
+  std::transform(ext.begin(), ext.end(), ext.begin(),
+                 [](unsigned char c) { return std::tolower(c); });
   if (ext == "wav") {
     return SF_FORMAT_WAV | SF_FORMAT_PCM_16;
   }
