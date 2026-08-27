@@ -7,6 +7,9 @@
 void torchrkt_c_api_compile_check(void);
 
 void torchrkt_c_api_compile_check(void) {
+  int (*audio_info)(const char*, int64_t*, int32_t*, int32_t*) = tr_audio_info;
+  tr_tensor* (*audio_load)(const char*, int64_t, int64_t) = tr_audio_load;
+  int (*audio_save)(const char*, const tr_tensor*, int32_t) = tr_audio_save;
   const char* (*version)(void) = tr_version;
   const char* (*last_error)(void) = tr_last_error;
   int (*last_error_kind)(void) = tr_last_error_kind;
@@ -172,6 +175,9 @@ void torchrkt_c_api_compile_check(void) {
   (void)from_data_i64_on;
   (void)tensor_dtype;
   (void)copy_data_i64;
+  (void)audio_info;
+  (void)audio_load;
+  (void)audio_save;
   (void)copy_data_f64;
   (void)cat;
   (void)add;

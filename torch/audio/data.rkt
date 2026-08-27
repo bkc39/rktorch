@@ -7,13 +7,41 @@
          (only-in racket/path normalize-path)
          (only-in racket/port copy-port)
          (only-in net/url call/input-url get-pure-port string->url)
+         (only-in "../foreign/error.rkt" check-handle check-ok)
+         (only-in "../foreign/raw/audio.rkt"
+                  tr-audio-info/raw tr-audio-load/raw tr-audio-save/raw)
+         (only-in "../foreign/structs.rkt" wrap-tensor)
          (only-in "../private/util.rkt" with-temporary-file)
-         (only-in "../main.rkt" tensor tensor-shape tensor->list))
+         (only-in "../main.rkt" tensor tensor-shape tensor->list tensor?))
 
-(provide load-wav
+(provide audio-info
+         load-audio
+         load-wav
+         save-audio
          write-wav
          load-audio-fixture
          download-audio-cached)
+
+(define (audio-info path)
+  (define-values (rc frames rate channels) (tr-audio-info/raw path))
+  (check-ok rc 'audio-info)
+  (values frames rate channels))
+
+(define (load-audio path #:frame-offset [frame-offset 0]
+                    #:num-frames [num-frames #f])
+  (define samples
+    (wrap-tensor
+     (check-handle 'load-audio
+                   (tr-audio-load/raw path frame-offset
+                                      (or num-frames -1)))))
+  (define-values (_frames rate _channels) (audio-info path))
+  (values samples rate))
+
+(define (save-audio path samples rate)
+  (unless (tensor? samples)
+    (error 'save-audio "samples must be a tensor: ~e" samples))
+  (check-ok (tr-audio-save/raw path samples rate) 'save-audio)
+  (void))
 
 (define (read-exactly in n who)
   (define bs (read-bytes n in))
