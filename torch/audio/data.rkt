@@ -188,11 +188,17 @@
              "cache name must stay inside the cache directory: ~e" name)))
   (define dest (build-path (audio-cache-dir) name))
   (unless (file-exists? dest)
+    (make-directory* (audio-cache-dir))
     (define-values (parent _name _dir?) (split-path dest))
-    (make-directory* parent)
-    ;; lexical checks miss symlinked components — containment must hold
-    ;; on the resolved paths before the replacing rename
-    (let loop ([c (explode-path (normalize-path parent))]
+    ;; lexical checks miss symlinked components — the deepest EXISTING
+    ;; ancestor must resolve inside the cache root before anything is
+    ;; created (fresh directories below it cannot be symlinks)
+    (define existing-ancestor
+      (let loop ([p parent])
+        (if (directory-exists? p)
+            p
+            (let-values ([(up _ __) (split-path p)]) (loop up)))))
+    (let loop ([c (explode-path (normalize-path existing-ancestor))]
                [r (explode-path (normalize-path (audio-cache-dir)))])
       (cond
         [(null? r) (void)]
@@ -200,6 +206,7 @@
         [else (error 'download-audio-cached
                      "cache name must stay inside the cache directory: ~e"
                      name)]))
+    (make-directory* parent)
     (with-temporary-file (tmp #:template "audio-~a.part"
                               #:directory (audio-cache-dir))
       (call/input-url (string->url url)

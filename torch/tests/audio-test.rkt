@@ -226,5 +226,11 @@
                        "evil/clip.wav"
                        (format "file://~a" nested-src))))
          (check-false (file-exists? (build-path outside "clip.wav")))
+         (check-exn #rx"inside the cache directory"
+                    (lambda ()
+                      (download-audio-cached
+                       "evil/new/clip.wav"
+                       (format "file://~a" nested-src))))
+         (check-false (directory-exists? (build-path outside "new")))
          (delete-directory/files outside)))
      (lambda () (delete-directory/files cache)))))
