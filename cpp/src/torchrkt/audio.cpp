@@ -71,7 +71,8 @@ tr_tensor* tr_audio_load(const char* path, int64_t frame_offset,
   if (path == nullptr || rate == nullptr) {
     return torchrkt::null_arg("tr_audio_load");
   }
-  return torchrkt::alloc_result("tr_audio_load", [&] {
+  int32_t opened_rate = 0;
+  tr_tensor* handle = torchrkt::alloc_result("tr_audio_load", [&] {
     SF_INFO info;
     const SndPtr f = open_for_read(path, &info);
     if (num_frames < -1) {
@@ -103,11 +104,16 @@ tr_tensor* tr_audio_load(const char* path, int64_t frame_offset,
       throw std::runtime_error("short read: wanted " + std::to_string(wanted) +
                                " frames, got " + std::to_string(got));
     }
-    // out-params write only after everything that can throw (the
-    // family convention): a failed call must not leave a believable rate
-    *rate = info.samplerate;
+    opened_rate = info.samplerate;
     return interleaved.t().contiguous();
   });
+  // the out-param commits only once the handle exists — nothing inside
+  // alloc_result (the contiguous copy, the handle allocation) can leave
+  // a believable rate behind a failed call
+  if (handle != nullptr) {
+    *rate = opened_rate;
+  }
+  return handle;
 }
 
 int tr_audio_save(const char* path, const tr_tensor* samples, int32_t rate) {
