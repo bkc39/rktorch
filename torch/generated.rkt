@@ -16,7 +16,8 @@
 (require (only-in "foreign/define-generated.rkt"
                   define-generated-op))
 
-(provide adaptive-avg-pool2d
+(provide abs
+         adaptive-avg-pool2d
          add-tensor!
          addcdiv!
          addcmul!
@@ -81,6 +82,9 @@
          where-scalarother
          where-scalarself
          where-self)
+
+(define-generated-op abs tr_gen_abs
+  ([self tensor]))
 
 (define-generated-op adaptive-avg-pool2d tr_gen_adaptive_avg_pool2d
   ([self tensor] [output-size int-array]))

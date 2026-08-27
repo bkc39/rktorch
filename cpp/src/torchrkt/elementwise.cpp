@@ -43,7 +43,6 @@ TR_SCALAR_OP(tr_mul_scalar, a->value.mul(b))
 TR_SCALAR_OP(tr_div_scalar, a->value.div(b))
 TR_SCALAR_OP(tr_pow_scalar, a->value.pow(b))
 
-TR_UNARY_OP(tr_abs, t->value.abs())
 TR_UNARY_OP(tr_neg, t->value.neg())
 TR_UNARY_OP(tr_exp, t->value.exp())
 TR_UNARY_OP(tr_log, t->value.log())

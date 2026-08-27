@@ -78,7 +78,7 @@ class Skip:
 # dispatch shim instead. Extend as collisions surface.
 _RACKET_COLLISIONS = frozenset({
     "exp", "log", "sqrt", "tanh", "max", "min", "argmax", "flatten",
-    "abs", "round", "floor", "ceiling", "truncate",
+    "round", "floor", "ceiling", "truncate",
 })
 
 _BASE_KINDS = {

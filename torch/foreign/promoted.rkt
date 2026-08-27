@@ -11,6 +11,7 @@
          (only-in "structs.rkt" tensor?)
          (only-in "tensor-ops.rkt" add mul reshape sum tensor unsqueeze)
          (prefix-in g: (only-in "../generated.rkt"
+                                abs
                                 adaptive-avg-pool2d
                                 avg-pool2d
                                 broadcast-to
@@ -65,9 +66,11 @@
                      [g:narrow narrow]
                      [g:nonzero nonzero]
                      [g:select-int select]
+                     [tensor-abs abs]
                      [tensor-cos cos]
                      [tensor-sin sin]))
 
+(define (tensor-abs x) (if (tensor? x) (g:abs x) (abs x)))
 (define (tensor-sin x) (if (tensor? x) (g:sin x) (sin x)))
 (define (tensor-cos x) (if (tensor? x) (g:cos x) (cos x)))
 

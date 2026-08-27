@@ -13,6 +13,7 @@ extern "C" {
  * handle (NULL on error); an in-place op mutates its first handle
  * and returns an int status (0 ok, 1 with tr_last_error set). */
 
+tr_tensor* tr_gen_abs(const tr_tensor* self);
 tr_tensor* tr_gen_cos(const tr_tensor* self);
 tr_tensor* tr_gen_sin(const tr_tensor* self);
 

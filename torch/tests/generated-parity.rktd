@@ -4,6 +4,7 @@
 ;; inplace? is #t for ops checked against torch.Tensor.<attr>_ on a
 ;; cloned receiver. Consumed by torch/tests/generated-parity-test.rkt.
 (
+ (abs "abs" (tensor) #f)
  (adaptive-avg-pool2d "adaptive_avg_pool2d" (tensor int-array) #f)
  (add-tensor! "add_.Tensor" (tensor tensor scalar) #t)
  (addcdiv! "addcdiv_" (tensor tensor tensor scalar) #t)

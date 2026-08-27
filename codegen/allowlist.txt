@@ -13,6 +13,7 @@ linalg mm
 linalg mv
 linalg dot
 
+math abs
 math cos
 math sin
 

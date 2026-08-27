@@ -10,6 +10,14 @@
 
 extern "C" {
 
+tr_tensor* tr_gen_abs(const tr_tensor* self) {
+  if (!self) {
+    return torchrkt::null_arg("tr_gen_abs");
+  }
+  return torchrkt::alloc_result("tr_gen_abs",
+                                [&] { return at::abs(self->value); });
+}
+
 tr_tensor* tr_gen_cos(const tr_tensor* self) {
   if (!self) {
     return torchrkt::null_arg("tr_gen_cos");

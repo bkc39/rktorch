@@ -87,6 +87,10 @@
            (when (zero? sample-rate)
              (error 'load-wav "~a: fmt chunk declares a 0 sample rate"
                     path))
+           (unless (= (u16 fmt 12) (* 2 channels))
+             (error 'load-wav
+                    "~a: block alignment ~a does not match ~a-channel PCM16"
+                    path (u16 fmt 12) channels))
            (unless (zero? (remainder chunk-size (* 2 channels)))
              (error 'load-wav
                     "~a: ~a-byte data chunk is not whole ~a-channel frames"

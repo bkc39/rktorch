@@ -18,7 +18,6 @@ tr_tensor* tr_mul_scalar(const tr_tensor* a, double b);
 tr_tensor* tr_div_scalar(const tr_tensor* a, double b);
 tr_tensor* tr_pow_scalar(const tr_tensor* a, double b);
 
-tr_tensor* tr_abs(const tr_tensor* t);
 tr_tensor* tr_neg(const tr_tensor* t);
 tr_tensor* tr_exp(const tr_tensor* t);
 tr_tensor* tr_log(const tr_tensor* t);

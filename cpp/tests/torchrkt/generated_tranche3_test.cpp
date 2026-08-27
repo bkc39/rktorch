@@ -62,10 +62,15 @@ TEST(GeneratedTranche3, MathFamilyGoldens) {
   const Handle cx(tr_gen_cos(x.t));
   EXPECT_FLOAT_EQ(data_of(sx.t)[0], std::sin(1.0F));
   EXPECT_FLOAT_EQ(data_of(cx.t)[0], std::cos(1.0F));
+  const Handle neg = make({-1.5F, 2.0F, -0.0F}, {3});
+  const Handle av(tr_gen_abs(neg.t));
+  EXPECT_EQ(data_of(av.t), (std::vector<float>{1.5F, 2.0F, 0.0F}));
   EXPECT_EQ(tr_gen_sin(nullptr), nullptr);
   expect_error_from("tr_gen_sin");
   EXPECT_EQ(tr_gen_cos(nullptr), nullptr);
   expect_error_from("tr_gen_cos");
+  EXPECT_EQ(tr_gen_abs(nullptr), nullptr);
+  expect_error_from("tr_gen_abs");
 }
 
 TEST(GeneratedTranche3, EmbeddingGathersRows) {

@@ -131,6 +131,13 @@
                 (riff-chunk #"data" (bytes)))
      (lambda (p)
        (check-exn #rx"0 sample rate" (lambda () (load-wav p)))))
+    (let ([bad-align (bytes-copy (fmt-payload 1 8000))])
+      (integer->integer-bytes 4 2 #f #f bad-align 12)
+      (call-with-wav-bytes
+       (riff-file (riff-chunk #"fmt " bad-align)
+                  (riff-chunk #"data" (make-bytes 4 0)))
+       (lambda (p)
+         (check-exn #rx"block alignment" (lambda () (load-wav p))))))
     (let ([odd-fmt (bytes-append
                     #"fmt " (integer->integer-bytes 17 4 #f #f)
                     (fmt-payload 1 8000) (bytes 9))])

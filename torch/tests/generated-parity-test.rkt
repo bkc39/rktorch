@@ -26,6 +26,7 @@
           'mm '((tensor 2 2) (tensor 2 2))
           'mv '((tensor 2 3) (tensor 3))
           'dot '((tensor 4) (tensor 4))
+          'abs '((tensor 2 3))
           'broadcast-to '((tensor 1 3) (int-array (2 3)))
           'cos '((tensor 2 3))
           'sin '((tensor 2 3))
