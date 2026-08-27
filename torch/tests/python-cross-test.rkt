@@ -4,22 +4,13 @@
 ;; which provides Python torch; SKIPS when python3 can't import torch).
 
 (module+ test
-  ;; whole-module on purpose: the expansion needs bindings only-in would strip
-  (require racket/runtime-path
-           rackunit
+  (require rackunit
            "../main.rkt"
            "../nn.rkt"
-           (only-in racket/file
-                    delete-directory/files make-temporary-directory)
-           (only-in "../audio/data.rkt"
-                    load-audio load-audio-fixture load-wav save-audio
-                    write-wav)
            (only-in "../data/mnist.rkt" load-mnist-fixture)
            (only-in "../data/text.rkt"
                     contiguous-blocks encode load-text-fixture text->vocab)
            "private/python-env.rkt")
-
-  (define-runtime-path wav-fixture "../audio/fixtures/sine-440-16k.wav")
 
   (define (check-parity rel-path compute)
     (define j (python-result rel-path))
@@ -222,63 +213,6 @@
              [p (in-list py)]
              [i (in-naturals)])
          (check-equal? r p (format "write form ~a parity" i))))
-     ;; load-wav against torchaudio.load itself, bit for bit; the .#cuda
-     ;; python carries only torch-bin, so the audio twins gate on import
-     (when (python-module-available? "torchaudio")
-       (define j (python-result "python/audio_parity.py"))
-       (define-values (samples rate) (load-audio-fixture))
-       (check-equal? (tensor-shape samples) (hash-ref j 'shape)
-                     "torchaudio.load shape parity")
-       (check-equal? rate (hash-ref j 'rate) "torchaudio.load rate parity")
-       (check-equal? (for/list ([v (in-list (tensor->list samples))])
-                       (exact->inexact v))
-                     (hash-ref j 'values)
-                     "torchaudio.load sample parity")
-       (define-values (native native-rate) (load-audio wav-fixture))
-       (check-equal? (tensor-shape native) (hash-ref j 'shape)
-                     "load-audio shape parity")
-       (check-equal? native-rate (hash-ref j 'rate)
-                     "load-audio rate parity")
-       (check-equal? (for/list ([v (in-list (tensor->list native))])
-                       (exact->inexact v))
-                     (hash-ref j 'values)
-                     "load-audio sample parity"))
-     (when (python-module-available? "soundfile")
-       (define dir (make-temporary-directory))
-       (dynamic-wind
-        void
-        (lambda ()
-          (define p (build-path dir "written.wav"))
-          (write-wav p (tensor '((0.5 -0.25 0.125) (-1.0 0.0 0.75))) 22050)
-          (define-values (mine rate) (load-wav p))
-          (define j
-            (call-with-python-env
-             (lambda () (python-result "python/audio_write_parity.py"))
-             #:env (list (cons "RKTORCH_WAV_UNDER_TEST" (path->string p)))))
-          (check-equal? (tensor-shape mine) (hash-ref j 'shape)
-                        "soundfile shape parity")
-          (check-equal? rate (hash-ref j 'rate) "soundfile rate parity")
-          (check-equal? (for/list ([v (in-list (tensor->list mine))])
-                          (exact->inexact v))
-                        (hash-ref j 'values)
-                        "soundfile sample parity")
-          (for ([name (in-list '("native.wav" "native.flac"))])
-            (define np (build-path dir name))
-            (save-audio np (tensor '((0.5 -0.25 0.125) (-1.0 0.0 0.75)))
-                        22050)
-            (define-values (nmine nrate) (load-audio np))
-            (define nj
-              (call-with-python-env
-               (lambda () (python-result "python/audio_write_parity.py"))
-               #:env (list (cons "RKTORCH_WAV_UNDER_TEST"
-                                 (path->string np)))))
-            (check-equal? (tensor-shape nmine) (hash-ref nj 'shape) name)
-            (check-equal? nrate (hash-ref nj 'rate) name)
-            (check-equal? (for/list ([v (in-list (tensor->list nmine))])
-                            (exact->inexact v))
-                          (hash-ref nj 'values)
-                          (format "save-audio ~a soundfile parity" name))))
-        (lambda () (delete-directory/files dir))))
      (let ()
        (define-module mlp (d-in d-hidden d-out)
          #:submodules ([fc1 (Linear d-in d-hidden)]

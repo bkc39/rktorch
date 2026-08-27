@@ -4,6 +4,7 @@
 #include <torch/torch.h>
 
 #include <cstring>
+#include <limits>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -107,9 +108,6 @@ tr_tensor* tr_audio_load(const char* path, int64_t frame_offset,
     opened_rate = info.samplerate;
     return interleaved.t().contiguous();
   });
-  // the out-param commits only once the handle exists — nothing inside
-  // alloc_result (the contiguous copy, the handle allocation) can leave
-  // a believable rate behind a failed call
   if (handle != nullptr) {
     *rate = opened_rate;
   }
@@ -131,13 +129,17 @@ int tr_audio_save(const char* path, const tr_tensor* samples, int32_t rate) {
     if (rate < 1) {
       throw std::invalid_argument("sample rate must be positive");
     }
-    const torch::Tensor interleaved =
-        s.to(torch::kCPU).to(torch::kFloat32).t().contiguous();
+    if (s.size(0) > std::numeric_limits<int>::max()) {
+      throw std::invalid_argument("channel count " + std::to_string(s.size(0)) +
+                                  " does not fit libsndfile's int");
+    }
     SF_INFO info;
     std::memset(&info, 0, sizeof(info));
     info.samplerate = rate;
     info.channels = static_cast<int>(s.size(0));
     info.format = format_for(path);
+    const torch::Tensor interleaved =
+        s.to(torch::kCPU).to(torch::kFloat32).t().contiguous();
     if (sf_format_check(&info) == 0) {
       throw std::invalid_argument(
           "libsndfile rejects this format/channel "
