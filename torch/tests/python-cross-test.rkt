@@ -229,7 +229,6 @@
                        (exact->inexact v))
                      (hash-ref j 'values)
                      "torchaudio.load sample parity"))
-     ;; write-wav checked by an independent decoder
      (when (python-module-available? "soundfile")
        (define dir (make-temporary-directory))
        (dynamic-wind
