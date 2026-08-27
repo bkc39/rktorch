@@ -142,13 +142,13 @@ int tr_audio_save(const char* path, const tr_tensor* samples, int32_t rate) {
     info.samplerate = rate;
     info.channels = static_cast<int>(s.size(0));
     info.format = format_for(path);
-    const torch::Tensor interleaved =
-        s.to(torch::kCPU).to(torch::kFloat32).t().contiguous();
     if (sf_format_check(&info) == 0) {
       throw std::invalid_argument(
           "libsndfile rejects this format/channel "
           "combination");
     }
+    const torch::Tensor interleaved =
+        s.to(torch::kCPU).to(torch::kFloat32).t().contiguous();
     SndPtr f(sf_open(path, SFM_WRITE, &info));
     if (!f) {
       throw std::runtime_error(std::string("cannot open ") + path + ": " +

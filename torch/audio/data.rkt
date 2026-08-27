@@ -30,6 +30,12 @@
 
 (define (load-audio path #:frame-offset [frame-offset 0]
                     #:num-frames [num-frames #f])
+  (unless (exact-nonnegative-integer? frame-offset)
+    (error 'load-audio "frame offset must be an exact nonnegative integer: ~e"
+           frame-offset))
+  (unless (or (not num-frames) (exact-nonnegative-integer? num-frames))
+    (error 'load-audio "num-frames must be #f or an exact nonnegative ~a: ~e"
+           "integer" num-frames))
   (define rate-out (make-s32vector 1))
   (define samples
     (wrap-tensor
@@ -41,6 +47,9 @@
 (define (save-audio path samples rate)
   (unless (tensor? samples)
     (error 'save-audio "samples must be a tensor: ~e" samples))
+  (unless (and (exact-positive-integer? rate) (< rate (expt 2 31)))
+    (error 'save-audio "sample rate must be a positive exact integer: ~e"
+           rate))
   (check-ok (tr-audio-save/raw path samples rate) 'save-audio)
   (void))
 

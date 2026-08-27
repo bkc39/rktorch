@@ -208,6 +208,17 @@
                   (lambda () (save-audio (build-path dir "x.mp3") mono 8000)))
        (check-exn #rx"sample rate"
                   (lambda () (save-audio (build-path dir "x.wav") mono 0)))
+       (check-exn #rx"sample rate"
+                  (lambda ()
+                    (save-audio (build-path dir "x.wav") mono 8000.0)))
+       (check-exn #rx"frame offset"
+                  (lambda ()
+                    (load-audio (build-path dir "mono.wav")
+                                #:frame-offset -1)))
+       (check-exn #rx"num-frames"
+                  (lambda ()
+                    (load-audio (build-path dir "mono.wav")
+                                #:num-frames -2)))
        (check-exn #rx"must be a tensor"
                   (lambda () (save-audio (build-path dir "x.wav") '(1.0) 8000)))
        (check-exn #rx"rank 1 or"
