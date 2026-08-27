@@ -13,6 +13,7 @@
          "foreign/ops.rkt"
          "foreign/tensor-ops.rkt"
          "foreign/operators.rkt"
+         "foreign/nn-promoted.rkt"
          "foreign/promoted.rkt"
          (only-in "foreign/ref-syntax.rkt" ref ref!)
          "foreign/autograd-ops.rkt")
@@ -152,6 +153,7 @@
   [mul binary-arith/c]
   [div binary-arith/c]
   [pow (-> tensor? tensor-or-real/c tensor?)]
+  [abs unary-real/c]
   [neg (-> tensor? tensor?)]
   [relu (-> tensor? tensor?)]
   [sigmoid (-> tensor? tensor?)]
@@ -160,6 +162,8 @@
   [log log/c]
   [sqrt unary-numeric/c]
   [tanh unary-numeric/c]
+  [sin unary-numeric/c]
+  [cos unary-numeric/c]
   [max reduce-or-variadic/c]
   [min reduce-or-variadic/c]
   ;; reductions

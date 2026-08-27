@@ -71,15 +71,14 @@ class Skip:
     shard: str
 
 
-# Op names that collide with bindings the public facade shadow-dispatches
-# (racket/base, racket/math tanh, racket/list argmax/flatten). Emitting
-# these from generated.rkt would hand consumers a tensor-only binding
-# without the numeric fast path, so they skip — promote by hand with the
-# dispatch shim instead. Extend as collisions surface.
+# Base-colliding names: _RACKET_COLLISIONS have hand-written tr_* shims
+# (skip); _BASE_SHADOWED generate as <name>-tensor, promoted by hand.
 _RACKET_COLLISIONS = frozenset({
     "exp", "log", "sqrt", "tanh", "max", "min", "argmax", "flatten",
-    "abs", "round", "floor", "ceiling", "truncate",
+    "round", "floor", "ceiling", "truncate",
 })
+
+_BASE_SHADOWED = frozenset({"abs", "cos", "sin"})
 
 _BASE_KINDS = {
     BaseTy.Tensor: TENSOR,
@@ -176,6 +175,9 @@ def classify(f: NativeFunction, shard: str) -> Op | Skip:
     if func.name.name.base in _RACKET_COLLISIONS:
         return skip(f"name collides with a shadow-dispatched binding "
                     f"({rkt_name}); promote by hand with the dispatch shim")
+    if func.name.name.base in _BASE_SHADOWED:
+        rkt_name = (f"{rkt_name[:-1]}-tensor!" if rkt_name.endswith("!")
+                    else f"{rkt_name}-tensor")
 
     base = func.name.name.base
     return Op(

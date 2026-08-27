@@ -12,6 +12,7 @@
 (provide python
          call-with-python-env
          with-python-env
+         python-module-available?
          python-torch-available?
          python-cuda-available?
          python-result
@@ -41,6 +42,13 @@
 
 (define-syntax-rule (with-python-env body ...)
   (call-with-python-env (lambda () body ...)))
+
+(define (python-module-available? mod)
+  (and python
+       (with-python-env
+        (parameterize ([current-output-port (open-output-nowhere)]
+                       [current-error-port (open-output-nowhere)])
+          (system* python "-c" (format "import ~a" mod))))))
 
 (define (python-torch-available?)
   (and python

@@ -4,6 +4,7 @@
 ;; inplace? is #t for ops checked against torch.Tensor.<attr>_ on a
 ;; cloned receiver. Consumed by torch/tests/generated-parity-test.rkt.
 (
+ (abs-tensor "abs" (tensor) #f)
  (adaptive-avg-pool2d "adaptive_avg_pool2d" (tensor int-array) #f)
  (add-tensor! "add_.Tensor" (tensor tensor scalar) #t)
  (addcdiv! "addcdiv_" (tensor tensor tensor scalar) #t)
@@ -13,6 +14,7 @@
  (cat "cat" (tensor-list int64) #f)
  (conv2d "conv2d" (tensor tensor optional-tensor int-array int-array int-array int64) #f)
  (copy! "copy_" (tensor tensor bool) #t)
+ (cos-tensor "cos" (tensor) #f)
  (cross-entropy-loss "cross_entropy_loss" (tensor tensor optional-tensor int64 int64 double) #f)
  (dot "dot" (tensor tensor) #f)
  (dropout "dropout" (tensor double bool) #f)
@@ -57,6 +59,7 @@
  (scatter-src! "scatter_.src" (tensor int64 tensor tensor) #t)
  (scatter-value! "scatter_.value" (tensor int64 tensor scalar) #t)
  (select-int "select.int" (tensor int64 int64) #f)
+ (sin-tensor "sin" (tensor) #f)
  (slice-tensor "slice.Tensor" (tensor int64 optional-int64 optional-int64 int64) #f)
  (sum-dim-intlist "sum.dim_IntList" (tensor optional-int-array bool optional-dtype) #f)
  (take "take" (tensor tensor) #f)

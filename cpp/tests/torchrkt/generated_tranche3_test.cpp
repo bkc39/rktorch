@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <vector>
@@ -48,6 +49,28 @@ void expect_error_from(const char* who) {
   const char* message = tr_last_error();
   ASSERT_NE(message, nullptr);
   EXPECT_NE(std::strstr(message, who), nullptr) << message;
+}
+
+TEST(GeneratedTranche3, MathFamilyGoldens) {
+  const Handle z = make({0.0F, 0.0F}, {1, 2});
+  const Handle s(tr_gen_sin(z.t));
+  EXPECT_EQ(data_of(s.t), (std::vector<float>{0.0F, 0.0F}));
+  const Handle c(tr_gen_cos(z.t));
+  EXPECT_EQ(data_of(c.t), (std::vector<float>{1.0F, 1.0F}));
+  const Handle x = make({1.0F}, {1});
+  const Handle sx(tr_gen_sin(x.t));
+  const Handle cx(tr_gen_cos(x.t));
+  EXPECT_FLOAT_EQ(data_of(sx.t)[0], std::sin(1.0F));
+  EXPECT_FLOAT_EQ(data_of(cx.t)[0], std::cos(1.0F));
+  const Handle neg = make({-1.5F, 2.0F, -0.0F}, {3});
+  const Handle av(tr_gen_abs(neg.t));
+  EXPECT_EQ(data_of(av.t), (std::vector<float>{1.5F, 2.0F, 0.0F}));
+  EXPECT_EQ(tr_gen_sin(nullptr), nullptr);
+  expect_error_from("tr_gen_sin");
+  EXPECT_EQ(tr_gen_cos(nullptr), nullptr);
+  expect_error_from("tr_gen_cos");
+  EXPECT_EQ(tr_gen_abs(nullptr), nullptr);
+  expect_error_from("tr_gen_abs");
 }
 
 TEST(GeneratedTranche3, EmbeddingGathersRows) {

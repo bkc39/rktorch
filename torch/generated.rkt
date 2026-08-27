@@ -16,7 +16,8 @@
 (require (only-in "foreign/define-generated.rkt"
                   define-generated-op))
 
-(provide adaptive-avg-pool2d
+(provide abs-tensor
+         adaptive-avg-pool2d
          add-tensor!
          addcdiv!
          addcmul!
@@ -25,6 +26,7 @@
          cat
          conv2d
          copy!
+         cos-tensor
          cross-entropy-loss
          dot
          dropout
@@ -69,6 +71,7 @@
          scatter-src!
          scatter-value!
          select-int
+         sin-tensor
          slice-tensor
          sum-dim-intlist
          take
@@ -79,6 +82,9 @@
          where-scalarother
          where-scalarself
          where-self)
+
+(define-generated-op abs-tensor tr_gen_abs
+  ([self tensor]))
 
 (define-generated-op adaptive-avg-pool2d tr_gen_adaptive_avg_pool2d
   ([self tensor] [output-size int-array]))
@@ -106,6 +112,9 @@
 
 (define-generated-op copy! tr_gen_copy_ #:inplace
   ([self tensor] [src tensor] [non-blocking bool]))
+
+(define-generated-op cos-tensor tr_gen_cos
+  ([self tensor]))
 
 (define-generated-op cross-entropy-loss tr_gen_cross_entropy_loss
   ([self tensor] [target tensor] [weight optional-tensor] [reduction int64] [ignore-index int64] [label-smoothing double]))
@@ -238,6 +247,9 @@
 
 (define-generated-op select-int tr_gen_select_int
   ([self tensor] [dim int64] [index int64]))
+
+(define-generated-op sin-tensor tr_gen_sin
+  ([self tensor]))
 
 (define-generated-op slice-tensor tr_gen_slice_tensor
   ([self tensor] [dim int64] [start optional-int64] [end optional-int64] [step int64]))

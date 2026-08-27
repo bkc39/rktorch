@@ -1,6 +1,6 @@
 #lang scribble/lp2
 
-@(require (for-label (except-in racket/base exp log sqrt max min + - * /)
+@(require (for-label (except-in racket/base abs cos exp log sin sqrt max min + - * /)
                      torch))
 
 @section[#:tag "ex-arith"]{Building tensors and elementwise arithmetic}

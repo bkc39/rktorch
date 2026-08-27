@@ -470,9 +470,9 @@
           });
 
           # Python with the PyTorch wheel/lib, for interactive parity work
-          # (`nix develop --command python3`) and the python-cross-test.  Cached
-          # on both supported systems (a ~50 MiB fetch, not a source build).
-          pythonEnv = pkgs.python314.withPackages (ps: [ ps.torch ]);
+          # (`nix develop --command python3`) and the python-cross-test.
+          pythonEnv = pkgs.python314.withPackages
+            (ps: [ ps.soundfile ps.torch ps.torchaudio ps.torchvision ]);
 
           # CUDA-capable Python torch for the accelerator parity pass of the
           # cross-test (the `.#cuda` shell): the cu130 torch-bin wheel — the
