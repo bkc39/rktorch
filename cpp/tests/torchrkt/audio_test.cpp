@@ -58,7 +58,9 @@ TEST_P(AudioRoundTrip, SaveInfoLoad) {
   EXPECT_EQ(rate, 22050);
   EXPECT_EQ(channels, 2);
 
-  const Handle back(tr_audio_load(path.c_str(), 0, -1));
+  int32_t load_rate = 0;
+  const Handle back(tr_audio_load(path.c_str(), 0, -1, &load_rate));
+  EXPECT_EQ(load_rate, 22050);
   EXPECT_EQ(data_of(back.t), data_of(stereo.t));
   std::remove(path.c_str());
 }
@@ -70,9 +72,10 @@ TEST(Audio, WindowedLoadMatchesFullSlice) {
   const std::string path = temp_audio_path("window.wav");
   const Handle mono = make({0.125F, 0.25F, 0.375F, 0.5F, 0.625F}, {1, 5});
   ASSERT_EQ(tr_audio_save(path.c_str(), mono.t, 8000), 0) << tr_last_error();
-  const Handle window(tr_audio_load(path.c_str(), 1, 3));
+  int32_t wr = 0;
+  const Handle window(tr_audio_load(path.c_str(), 1, 3, &wr));
   EXPECT_EQ(data_of(window.t), (std::vector<float>{0.25F, 0.375F, 0.5F}));
-  const Handle tail(tr_audio_load(path.c_str(), 3, -1));
+  const Handle tail(tr_audio_load(path.c_str(), 3, -1, &wr));
   EXPECT_EQ(data_of(tail.t), (std::vector<float>{0.5F, 0.625F}));
   std::remove(path.c_str());
 }
@@ -84,7 +87,8 @@ TEST(Audio, RejectionsAndGuards) {
   int32_t channels = 0;
   EXPECT_EQ(tr_audio_info(missing.c_str(), &frames, &rate, &channels), 1);
   EXPECT_NE(tr_last_error(), nullptr);
-  EXPECT_EQ(tr_audio_load(missing.c_str(), 0, -1), nullptr);
+  int32_t gr = 0;
+  EXPECT_EQ(tr_audio_load(missing.c_str(), 0, -1, &gr), nullptr);
 
   const std::string bad_ext = temp_audio_path("clip.mp3");
   const Handle mono = make({0.5F}, {1, 1});
@@ -92,11 +96,13 @@ TEST(Audio, RejectionsAndGuards) {
 
   const std::string path = temp_audio_path("guards.wav");
   ASSERT_EQ(tr_audio_save(path.c_str(), mono.t, 8000), 0) << tr_last_error();
-  EXPECT_EQ(tr_audio_load(path.c_str(), 5, -1), nullptr);
+  EXPECT_EQ(tr_audio_load(path.c_str(), 5, -1, &gr), nullptr);
+  EXPECT_EQ(tr_audio_load(path.c_str(), 0, -2, &gr), nullptr);
   EXPECT_EQ(tr_audio_save(path.c_str(), mono.t, 0), 1);
 
   EXPECT_EQ(tr_audio_info(nullptr, &frames, &rate, &channels), 1);
-  EXPECT_EQ(tr_audio_load(nullptr, 0, -1), nullptr);
+  EXPECT_EQ(tr_audio_load(nullptr, 0, -1, &gr), nullptr);
+  EXPECT_EQ(tr_audio_load(path.c_str(), 0, -1, nullptr), nullptr);
   EXPECT_EQ(tr_audio_save(nullptr, mono.t, 8000), 1);
   EXPECT_EQ(tr_audio_save(path.c_str(), nullptr, 8000), 1);
   std::remove(path.c_str());

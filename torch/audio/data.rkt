@@ -7,6 +7,7 @@
          (only-in racket/path normalize-path)
          (only-in racket/port copy-port)
          (only-in net/url call/input-url get-pure-port string->url)
+         (only-in ffi/vector make-s32vector s32vector-ref)
          (only-in "../foreign/error.rkt" check-handle check-ok)
          (only-in "../foreign/raw/audio.rkt"
                   tr-audio-info/raw tr-audio-load/raw tr-audio-save/raw)
@@ -29,13 +30,13 @@
 
 (define (load-audio path #:frame-offset [frame-offset 0]
                     #:num-frames [num-frames #f])
+  (define rate-out (make-s32vector 1))
   (define samples
     (wrap-tensor
      (check-handle 'load-audio
                    (tr-audio-load/raw path frame-offset
-                                      (or num-frames -1)))))
-  (define-values (_frames rate _channels) (audio-info path))
-  (values samples rate))
+                                      (or num-frames -1) rate-out))))
+  (values samples (s32vector-ref rate-out 0)))
 
 (define (save-audio path samples rate)
   (unless (tensor? samples)

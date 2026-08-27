@@ -67,13 +67,20 @@ int tr_audio_info(const char* path, int64_t* frames, int32_t* rate,
 }
 
 tr_tensor* tr_audio_load(const char* path, int64_t frame_offset,
-                         int64_t num_frames) {
-  if (path == nullptr) {
+                         int64_t num_frames, int32_t* rate) {
+  if (path == nullptr || rate == nullptr) {
     return torchrkt::null_arg("tr_audio_load");
   }
   return torchrkt::alloc_result("tr_audio_load", [&] {
     SF_INFO info;
     const SndPtr f = open_for_read(path, &info);
+    *rate = info.samplerate;
+    if (num_frames < -1) {
+      throw std::invalid_argument(
+          "num_frames must be -1 (to end) or "
+          "nonnegative, got " +
+          std::to_string(num_frames));
+    }
     if (frame_offset < 0 || frame_offset > info.frames) {
       throw std::out_of_range("frame offset " + std::to_string(frame_offset) +
                               " outside " + std::to_string(info.frames) +
@@ -116,7 +123,8 @@ int tr_audio_save(const char* path, const tr_tensor* samples, int32_t rate) {
     if (rate < 1) {
       throw std::invalid_argument("sample rate must be positive");
     }
-    const torch::Tensor interleaved = s.to(torch::kFloat32).t().contiguous();
+    const torch::Tensor interleaved =
+        s.to(torch::kCPU).to(torch::kFloat32).t().contiguous();
     SF_INFO info;
     std::memset(&info, 0, sizeof(info));
     info.samplerate = rate;
@@ -142,6 +150,13 @@ int tr_audio_save(const char* path, const tr_tensor* samples, int32_t rate) {
     if (wrote != frames) {
       throw std::runtime_error("short write: wanted " + std::to_string(frames) +
                                " frames, wrote " + std::to_string(wrote));
+    }
+    // the header is finalized at close; a flush failure must not report
+    // success, so close explicitly and surface the result
+    SNDFILE* raw = f.release();
+    if (const int rc = sf_close(raw); rc != 0) {
+      throw std::runtime_error(std::string("close failed: ") +
+                               sf_error_number(rc));
     }
   });
 }
