@@ -118,17 +118,19 @@ Adding to the `extern "C"` surface requires updating, in the same change:
 
 ### 6. Re-stage the native lib before Racket tests
 
-The dev shell only copies `libtorchrkt` into `torch/native-libs/` on first
-provision (the `deps_stamp` guard), so Racket tests silently run against the
-**stale** library after C++ changes — symptom: `dlsym ... symbol not found`.
-After any C++ change that Racket code will exercise:
+Shell entry re-stages `libtorchrkt` only when the staged bytes differ from the
+shim that shell wants, so after a C++ change Racket tests would otherwise run
+against the **stale** library — symptom: `dlsym ... symbol not
+found`. After any C++ change that Racket code will exercise:
 
 ```bash
-CPP_OUT=$(nix build .#cpp --print-out-paths | tail -1) \
-  && rm -f torch/native-libs/libtorchrkt.* \
-  && cp "$CPP_OUT"/lib/libtorchrkt.* torch/native-libs/ \
-  && chmod u+w torch/native-libs/libtorchrkt.*
+nix run .#copy-native-libs
 ```
+
+That stages via a temp file and `rename(2)`, so it is safe to run while other
+processes have the library mapped — they keep executing the old inode (restart
+them to pick up the new one). Never stage with a bare `cp`: an in-place write
+corrupts every live process that has the old file mapped (#72).
 
 Then `nix develop --command raco test torch/`. If Racket modules fail with
 "reference to a variable that is not exported" or stale-binding errors, clear
