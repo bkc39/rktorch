@@ -30,6 +30,7 @@
          (only-in "raw/global.rkt" tr-manual-seed/raw tr-version/raw)
          (only-in "raw/memory.rkt"
                   collect-and-drain!
+                  finalizer-diagnostics
                   finalizer-failures
                   native-memory-use)
          (only-in "raw/random.rkt" tr-rand/raw tr-randn/raw tr-tensor-uniform!/raw)
@@ -59,6 +60,7 @@
          dtype
          numel
          shape
+         finalizer-diagnostics
          finalizer-failures
          native-memory-use
          manual-seed!

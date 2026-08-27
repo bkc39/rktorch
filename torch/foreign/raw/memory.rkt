@@ -16,6 +16,7 @@
          collect-and-drain!
          swallow-and-count-failure
          finalizer-failures
+         finalizer-diagnostics
          tensor-allocator
          tensor-allocator/rng
          oom-retry
@@ -41,19 +42,56 @@
       (release t))))
 
 (define finalizer-failure-count (box 0))
+(define finalizer-run-count (box 0))
+(define captured-failures (box '()))
+(define capture-limit 8)
 
 (define (finalizer-failures)
   (unbox finalizer-failure-count))
 
+(define (finalizer-diagnostics)
+  (call-with-ledger
+   (lambda ()
+     (list (cons 'runs (unbox finalizer-run-count))
+           (cons 'failures (unbox finalizer-failure-count))
+           (cons 'messages (reverse (unbox captured-failures)))
+           (cons 'ledger-entries (hash-count allocations))))))
+
+;; No printer: a prop:custom-write that raises or blocks would be fatal here.
+(define (describe-raised e)
+  (cond
+    [(exn? e) (exn-message e)]
+    [(symbol? e) (symbol->string e)]
+    [(string? e) e]
+    [else "non-exn value raised from a native release"]))
+
+(define (take-at-most n xs)
+  (cond
+    [(or (zero? n) (null? xs)) '()]
+    [else (cons (car xs) (take-at-most (sub1 n) (cdr xs)))]))
+
+;; Guarded: this is the handler below, so nothing else protects it.
+(define (record-failure! e)
+  (with-handlers ([(lambda (_) #t) void])
+    (record-failure!/unguarded e)))
+
+(define (record-failure!/unguarded e)
+  (call-with-ledger
+   (lambda ()
+     (set-box! finalizer-failure-count (add1 (unbox finalizer-failure-count)))
+     (set-box! captured-failures
+               (take-at-most capture-limit
+                             (cons (describe-raised e)
+                                   (unbox captured-failures)))))))
+
 ;; Total catch on purpose, not exn:fail?: any value escaping GC
 ;; finalization re-enters the error machinery and cascades (#38).
 (define ((swallow-and-count-failure release) t)
-  (with-handlers ([(lambda (_) #t)
-                   (lambda (_e)
-                     (call-with-ledger
-                      (lambda ()
-                        (set-box! finalizer-failure-count
-                                  (add1 (unbox finalizer-failure-count))))))])
+  ;; Nothing outside the guard: alloc.rkt's finalizer holds raw atomic mode
+  ;; with no dynamic-wind, so an escape kills the process rather than raising.
+  (with-handlers ([(lambda (_) #t) record-failure!])
+    (call-with-ledger
+     (lambda () (set-box! finalizer-run-count (add1 (unbox finalizer-run-count)))))
     (release t)))
 
 (struct allocation (phantom nbytes device))
@@ -199,3 +237,13 @@
          (_fun (a : _Tensor) (b : _double) -> _Tensor/null)
          #:c-id c-id
          #:wrap tensor-allocator)]))
+
+;; No I/O from inside a finalizer -- that runs in atomic mode, where writing to
+;; a port can block and trip an internal error.  Accumulate, dump here.
+(define mem-trace-handle
+  (and (getenv "RKTORCH_MEM_TRACE")
+       (plumber-add-flush!
+        (current-plumber)
+        (lambda (_h)
+          (with-handlers ([(lambda (_) #t) void])
+            (eprintf "[rktorch mem] ~s\n" (finalizer-diagnostics)))))))

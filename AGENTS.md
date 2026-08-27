@@ -56,7 +56,9 @@ CPU-first; float32 + inferred int64 (#44). From `torch`:
   `mps-empty-cache!` (the caching allocators' own gauges + release, #51),
   `reclaim-native-memory!` (collect -> finalizer drain -> cache release,
   the phase-boundary release-now sequence), `finalizer-failures`
-  (guarded-swallow counter), `tensor-free!` (explicit synchronous
+  (guarded-swallow counter) and `finalizer-diagnostics` (that counter plus
+  runs, captured failure messages, and live ledger entries; also dumped at
+  exit under `RKTORCH_MEM_TRACE`), `tensor-free!` (explicit synchronous
   release)
 - creation: `zeros ones full arange eye tensor rand` (+ in-place `uniform!`)
 - shape: `reshape view transpose permute squeeze unsqueeze cat stack`
@@ -249,9 +251,17 @@ module's full export set (`racket/runtime-path`, `syntax/parse/pre`).
   `loss.rkt`).
 - `private/install-torchrkt-native.rkt` — stages `libtorchrkt.*` into
   `native-libs/` from `TORCHRKT_NATIVE_LIB_PATH` (set by the Nix build/shell).
-  NOTE: the dev shell only re-stages on first provision (the `deps_stamp`
-  guard); after changing C++, re-copy from `nix build .#cpp
-  --print-out-paths` (or `nix run .#copy-native-libs`) before `raco test`.
+  Every staging path (here and the flake's three shell ones) writes a temp file
+  and `rename(2)`s it into place, so restaging under a live process is safe:
+  rename leaves the old inode alive and anything already running keeps
+  executing the old lib. **Restart the REPL to pick up a new shim — it does not
+  hot-swap.** Never reintroduce an in-place `cp`; it does not merely fail to
+  swap, it corrupts the running process (#72). Shell entry stages only when the
+  staged bytes differ from the shim that shell wants (`cmp`), so `.#cuda` no
+  longer restages on every entry, returning to the default shell restores the
+  CPU shim, and a deleted or truncated shim is replaced rather than skipped. After
+  changing C++, `nix run .#copy-native-libs` (or re-enter the shell) before
+  `raco test`.
 
 ### Codegen (`codegen/`)
 

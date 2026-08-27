@@ -3,10 +3,39 @@
 (module+ test
   (require rackunit
            (only-in ffi/unsafe malloc free)
+           (only-in racket/port port->string)
            (only-in ffi/unsafe/alloc allocator deallocator)
            (only-in "../foreign.rkt" add ones tensor-shape)
            (only-in (submod "../foreign.rkt" unsafe) tensor-free!)
-           (only-in "../foreign/raw/memory.rkt" finalizer-failures swallow-and-count-failure))
+           (only-in "../foreign/raw/memory.rkt"
+                    finalizer-diagnostics finalizer-failures
+                    swallow-and-count-failure))
+
+  (define (trace-stderr #:trace? trace?)
+    (parameterize ([current-environment-variables
+                    (environment-variables-copy (current-environment-variables))])
+      (if trace?
+          (putenv "RKTORCH_MEM_TRACE" "1")
+          (environment-variables-set! (current-environment-variables)
+                                      #"RKTORCH_MEM_TRACE" #f))
+      (define-values (sp out in err)
+        (subprocess #f #f #f (find-system-path 'exec-file)
+                    "-e" "(require torch) (void (ones 2 2))"))
+      (close-output-port in)
+      ;; Concurrent drain: reading one to EOF first deadlocks on the other.
+      (define captured (box ""))
+      (define err-t (thread (lambda () (set-box! captured (port->string err)))))
+      (define out-t (thread (lambda () (void (port->string out)))))
+      (define exited?
+        (and (sync/timeout 60 (thread (lambda () (subprocess-wait sp)))) #t))
+      (unless exited? (subprocess-kill sp #t))
+      (sync/timeout 10 err-t)
+      (sync/timeout 10 out-t)
+      (close-input-port err)
+      (close-input-port out)
+      (unless exited?
+        (error 'trace-stderr "child did not exit within 60s"))
+      (unbox captured)))
 
   (define (collect-until ready? #:tries [tries 50])
     (let loop ([i 0])
@@ -28,6 +57,70 @@
     ;; successful releases don't count
     ((swallow-and-count-failure void) 'handle)
     (check-equal? (finalizer-failures) (+ before 2)))
+
+  (test-case "RKTORCH_MEM_TRACE dumps the diagnostics at exit"
+    (define out (trace-stderr #:trace? #t))
+    (check-true (regexp-match? #rx"\\[rktorch mem\\]" out)
+                (format "no trace line on stderr; got: ~s" out))
+    (check-true (regexp-match? #rx"\\(failures \\. [0-9]+\\)" out)
+                "the trace line carries no failures count"))
+
+  (test-case "the exit dump is off unless RKTORCH_MEM_TRACE is set"
+    (check-false (regexp-match? #rx"\\[rktorch mem\\]" (trace-stderr #:trace? #f))))
+
+  (test-case "finalizer-diagnostics reports runs alongside failures"
+    (define (runs-of d) (cdr (assq 'runs d)))
+    (define (failures-of d) (cdr (assq 'failures d)))
+    (define before (finalizer-diagnostics))
+    ((swallow-and-count-failure void) 'handle)
+    ((swallow-and-count-failure (lambda (_t) (error 'boom "counted"))) 'handle)
+    (define after (finalizer-diagnostics))
+    (check-equal? (runs-of after) (+ (runs-of before) 2))
+    (check-equal? (failures-of after) (+ (failures-of before) 1))
+    (check-equal? (failures-of after) (finalizer-failures)))
+
+  (test-case "finalizer-diagnostics captures the exception text, not just a count"
+    (define (messages-of d) (cdr (assq 'messages d)))
+    (define before (length (messages-of (finalizer-diagnostics))))
+    ((swallow-and-count-failure
+      (lambda (_t) (error 'release "distinctive-marker-9f3a"))) 'handle)
+    (define msgs (messages-of (finalizer-diagnostics)))
+    (check-true (list? msgs))
+    (check-true (andmap string? msgs))
+    (cond
+      [(< before 8)
+       (check-equal? (length msgs) (add1 before))
+       (check-true (regexp-match? #rx"distinctive-marker-9f3a" (car (reverse msgs))))]
+      [else (check-equal? (length msgs) 8)]))
+
+  (test-case "message capture is bounded at 8 and keeps the MOST RECENT"
+    (for ([i (in-range 30)])
+      ((swallow-and-count-failure (lambda (_t) (error 'flood "n=~a" i))) 'handle))
+    ((swallow-and-count-failure (lambda (_t) (error 'flood "newest-marker-7c1e"))) 'handle)
+    (define msgs (cdr (assq 'messages (finalizer-diagnostics))))
+    (check-true (<= (length msgs) 8)
+                (format "capture-limit exceeded: ~a messages" (length msgs)))
+    (check-true (for/or ([m (in-list msgs)]) (regexp-match? #rx"newest-marker-7c1e" m))
+                "the most recent failure was dropped once the buffer filled")
+    (check-false (for/or ([m (in-list msgs)]) (regexp-match? #rx"n=0$" m))
+                 "the oldest failure should have rotated out"))
+
+  (test-case "a non-exn value is counted and described without invoking its printer"
+    (define printed? (box #f))
+    (struct unprintable ()
+      #:property prop:custom-write
+      (lambda (v port mode)
+        (set-box! printed? #t)
+        (error 'custom-write "printing this raises")))
+    (define before (finalizer-failures))
+    (check-equal? ((swallow-and-count-failure (lambda (_t) (raise (unprintable)))) 'handle)
+                  (void))
+    (check-equal? (finalizer-failures) (add1 before))
+    (check-false (unbox printed?)
+                 "the failure path invoked the value's custom printer")
+    (check-true (for/or ([m (in-list (cdr (assq 'messages (finalizer-diagnostics))))])
+                  (regexp-match? #rx"non-exn value" m))
+                "the fixed description was not recorded"))
 
   (test-case "swallow-and-count-failure passes successful releases through"
     (define released '())

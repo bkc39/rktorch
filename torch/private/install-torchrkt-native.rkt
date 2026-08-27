@@ -11,19 +11,30 @@
 
 (provide pre-installer)
 
-(require (only-in racket/file make-directory*))
+(require (only-in racket/file file->bytes make-directory*)
+         (only-in "util.rkt" with-temporary-file))
 
 (define lib-pattern #rx"^libtorchrkt\\.")
 
+;; rename(2), never a write in place: an in-place write faults every process
+;; that has the old file mapped.
 (define (copy-native-libs! dest-dir source-dir)
   (make-directory* dest-dir)
   (for ([f (in-list (directory-list source-dir))]
         #:when (regexp-match? lib-pattern (path->string f)))
     (define src (build-path source-dir f))
     (define dst (build-path dest-dir f))
-    (when (file-exists? dst)
-      (delete-file dst))
-    (copy-file src dst)))
+    (cond
+      [(and (file-exists? dst) (equal? (file->bytes src) (file->bytes dst)))
+       (file-or-directory-permissions
+        dst (file-or-directory-permissions src 'bits))]
+      [else
+        (with-temporary-file (tmp #:template "libtorchrkt-~a.part"
+                                 #:directory dest-dir)
+         (copy-file src tmp #t)
+         (file-or-directory-permissions
+          tmp (file-or-directory-permissions src 'bits))
+         (rename-file-or-directory tmp dst #t))])))
 
 (define (has-matching-files? dir)
   (and (directory-exists? dir)

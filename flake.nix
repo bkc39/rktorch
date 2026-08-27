@@ -119,6 +119,64 @@
             '';
           })
         else pkgs.libtorch-bin;
+
+      # Stage libtorchrkt into ./torch/native-libs by temp file + rename(2).
+      # `cp` opens the destination O_TRUNC, and that invalidates the page-cache
+      # pages of every process still executing the old file — rewriting even
+      # identical bytes faults a live REPL and wedges it, TERM-immune (#72).
+      # rename swaps the directory entry and leaves the old inode alive, so
+      # running processes keep the old code and new ones get the new lib.
+      # Same discipline as torch/data/mnist.rkt's cache write.
+      stageNativeLibs = src: ''
+        _dest="$PWD/torch/native-libs"
+        _stage_failed=0
+        mkdir -p "$_dest"
+        for _f in ${src}/lib/libtorchrkt.*; do
+          _b=$(basename "$_f")
+          # Chained: a shell hook has no errexit, so a partial copy must not
+          # reach the rename and replace a good shim with a truncated one.
+          # 0555 as the store ships it, which also makes an in-place `cp` fail
+          # loudly with EACCES; no --no-preserve=mode keeps this POSIX.
+          if cp -f "$_f" "$_dest/.$_b.tmp.$$" \
+             && chmod 0555 "$_dest/.$_b.tmp.$$" \
+             && mv -f "$_dest/.$_b.tmp.$$" "$_dest/$_b"; then
+            :
+          else
+            rm -f "$_dest/.$_b.tmp.$$"
+            echo "ERROR: staging $_b failed; leaving the existing shim in place" >&2
+            _stage_failed=1
+          fi
+        done
+      '';
+
+      # Shell-entry staging, keyed to which shim is already staged rather than
+      # to first-provision.  Without the key, `.#cuda` restaged on every entry
+      # (the #72 vector, unprompted), while the default shell never restaged at
+      # all — so a plain `nix develop` after a `.#cuda` visit kept running the
+      # CUDA-linked shim, which needs the driver farm to even load.
+      # Keyed on the bytes actually staged, so any other writer -- `nix run
+      # .#copy-native-libs`, a hand copy, a deletion -- is noticed on the next
+      # shell entry.  ~220 KB compare.
+      stageNativeLibsIfStale = src: ''
+        _stale=0
+        for _f in ${src}/lib/libtorchrkt.*; do
+          cmp -s "$_f" "$PWD/torch/native-libs/$(basename "$_f")" || _stale=1
+        done
+        if [ "$_stale" = 1 ]; then
+          echo "Staging libtorchrkt (${src})..."
+          ${stageNativeLibs src}
+          if [ "$_stage_failed" != 0 ]; then
+            echo "" >&2
+            echo "  *** libtorchrkt was NOT staged.  The shim in torch/native-libs is" >&2
+            echo "  *** stale or missing; racket in this shell will load the wrong one" >&2
+            echo "  *** or fail to load at all.  Fix the error above and re-enter." >&2
+            echo "" >&2
+          fi
+        else
+          # Bytes match but an older checkout may have left 0644/0755 behind.
+          chmod 0555 "$PWD"/torch/native-libs/libtorchrkt.* 2>/dev/null || true
+        fi
+      '';
     in
     {
       packages = forAllSystems (system:
@@ -283,8 +341,8 @@
               # Stage the native lib so define-runtime-path resolves it during
               # testing.  libtorch itself is reached via the rpath Nix baked
               # into libtorchrkt, so it is NOT copied (it is multi-GB).
-              mkdir -p ./torch/native-libs
-              cp ${cpp}/lib/libtorchrkt.* ./torch/native-libs/
+              ${stageNativeLibs cpp}
+              [ "$_stage_failed" = 0 ] || exit 1
 
               raco pkg install --batch --deps fail --no-setup --copy --scope user \
                 --name torch ./torch
@@ -334,12 +392,14 @@
 
           copy-native-libs = pkgs.writeShellApplication {
             name = "copy-native-libs";
+            # The app must run on a bare host, not only inside `nix develop`:
+            # without this it inherits the caller's PATH.
+            runtimeInputs = [ pkgs.coreutils ];
             text = ''
-              DEST="$(pwd)/torch/native-libs"
-              mkdir -p "$DEST"
-              cp -v --no-preserve=mode ${cpp}/lib/libtorchrkt.* "$DEST/"
-              echo "Native library copied to $DEST"
-              ls -la "$DEST"
+              ${stageNativeLibs cpp}
+              [ "$_stage_failed" = 0 ] || exit 1
+              echo "Native library staged to $PWD/torch/native-libs"
+              ls -la "$PWD/torch/native-libs"
             '';
           };
 
@@ -472,8 +532,10 @@
             pkgs.stdenv.cc
           ];
 
-          provisionRacket = ''
-            export TORCHRKT_NATIVE_LIB_PATH="${cpp}"
+          # Parameterised by the shim this shell wants.  Exactly one staging
+          # call per entry.
+          provisionRacketFor = shim: ''
+            export TORCHRKT_NATIVE_LIB_PATH="${shim}"
             export PLTUSERHOME="$PWD/.racket-user"
             _rkt_ver=$(racket --version 2>&1 | grep -oE 'v[0-9]+\.[0-9]+' | tr -d 'v' | tr '.' '-')
             deps_stamp="$PLTUSERHOME/.deps2-installed-torch-''${_rkt_ver}"
@@ -503,13 +565,12 @@
                 echo "WARNING: stale bytecode not fully cleared; will retry on next shell entry" >&2
               fi
             fi
+            ${stageNativeLibsIfStale shim}
             if [ ! -f "$deps_stamp" ]; then
               echo "Installing Racket package (link mode, Racket ''${_rkt_ver})..."
               mkdir -p "$PLTUSERHOME"
               raco pkg install --batch --copy --no-docs --no-setup --scope user --skip-installed \
                 ${racket-deps}/*/
-              mkdir -p ./torch/native-libs
-              cp ${cpp}/lib/libtorchrkt.* ./torch/native-libs/ 2>/dev/null || true
               raco pkg install --batch --auto --no-setup --link --scope user --skip-installed \
                 --name torch "$PWD/torch"
               raco setup --no-docs --pkgs torch
@@ -530,11 +591,10 @@
           # only the driver libs, so nix's own libs (glibc, libstdc++) are not
           # shadowed by the system copies. Run:
           #   nix develop .#cuda --command raco test torch/tests/device-test.rkt
+          # Driver farm only; `provisionRacketFor cpp-cuda` stages the shim and
+          # points TORCHRKT_NATIVE_LIB_PATH at it.
           cudaHook = ''
-            echo "Staging CUDA libtorchrkt + host NVIDIA driver..."
-            mkdir -p ./torch/native-libs
-            cp -f --no-preserve=mode ${cpp-cuda}/lib/libtorchrkt.* \
-              ./torch/native-libs/
+            echo "Staging host NVIDIA driver farm..."
             _drv_farm="$PWD/.cuda-driver"
             rm -rf "$_drv_farm"; mkdir -p "$_drv_farm"
             for _l in libcuda.so.1 libnvidia-ml.so.1; do
@@ -571,14 +631,14 @@
           #   raco test torch/tests/python-cross-test.rkt
           default = pkgs.mkShell {
             buildInputs = baseInputs ++ [ pythonEnv ];
-            shellHook = provisionRacket;
+            shellHook = provisionRacketFor cpp;
           };
 
           # Lean shell without Python torch, used by the Resyntax CI lint job so
           # it doesn't pull torch's closure just to run the linter.
           ci = pkgs.mkShell {
             buildInputs = baseInputs;
-            shellHook = provisionRacket;
+            shellHook = provisionRacketFor cpp;
           };
         }
         # GPU verification shell: provisions Racket as usual, then stages the
@@ -591,7 +651,7 @@
         // pkgs.lib.optionalAttrs pkgs.stdenv.isLinux {
           cuda = pkgs.mkShell {
             buildInputs = baseInputs ++ [ pythonCudaEnv ];
-            shellHook = provisionRacket + cudaHook;
+            shellHook = provisionRacketFor cpp-cuda + cudaHook;
           };
         });
     };
