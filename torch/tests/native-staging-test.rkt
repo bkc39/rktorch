@@ -81,23 +81,25 @@
         f))
     (check-equal? leftovers '() "a .part/.tmp file survived staging"))
 
-  (test-case "a source that cannot be read leaves the shim intact and no temp file"
+  (test-case "a stage that fails while writing leaves the shim and no temp file"
+    ;; Different bytes, so the equal-bytes branch is passed and the write path
+    ;; is actually entered before it fails.
     (define collection (temp-dir!))
     (stage! (make-src! "GOOD-SHIM") collection)
-    (define before (file-or-directory-identity (staged-path collection)))
-    (define bad (temp-dir!))
-    (make-directory* (build-path bad "lib" "libtorchrkt.so"))
-    (check-exn exn:fail? (lambda () (stage! bad collection)))
-    (check-equal? (file->string (staged-path collection)) "GOOD-SHIM"
+    (define dst (staged-path collection))
+    (define before (file-or-directory-identity dst))
+    (define dest-dir (build-path collection "native-libs"))
+    (file-or-directory-permissions dest-dir #o500)
+    (check-exn exn:fail?
+               (lambda () (stage! (make-src! "REPLACEMENT-SHIM") collection)))
+    (file-or-directory-permissions dest-dir #o700)
+    (check-equal? (file->string dst) "GOOD-SHIM"
                   "a failed stage must not damage the installed shim")
-    (check-equal? (file-or-directory-identity (staged-path collection)) before
+    (check-equal? (file-or-directory-identity dst) before
                   "a failed stage must not replace the inode")
     (check-equal?
-     (for/list ([f (in-list (directory-list (build-path collection "native-libs")))]
+     (for/list ([f (in-list (directory-list dest-dir))]
                 #:when (regexp-match? #rx"part|tmp" (path->string f)))
        f)
      '()
-     "a .part/.tmp file survived a failed stage"))
-
-  (for ([d (in-list created)])
-    (delete-directory/files d #:must-exist? #f)))
+     "a .part/.tmp file survived a failed stage")))

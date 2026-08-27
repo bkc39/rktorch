@@ -28,7 +28,7 @@ for i in $(seq 1 "$n"); do
   fails=$(grep -a '\[rktorch mem\]' "$log" | tail -1 \
             | grep -oE '\(failures \. [0-9]+\)' | head -1 | grep -oE '[0-9]+')
   banner=0
-  tr -d '\n\r; ' < "$log" | grep -qF 'btforcontext]' && banner=1
+  [ "$(tr -d '\n\r; ' < "$log" | grep -cF 'btforcontext]')" != 0 ] && banner=1
   if [ "$code" -ne 0 ] \
      || [ "$banner" = 1 ] \
      || [ -z "$fails" ] \
