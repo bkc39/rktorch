@@ -200,8 +200,8 @@
           racketPkg = racketFor pkgs pkgsRacket;
           racket-deps = racketDepsFor pkgs racketPkg;
 
-          cppCommonInputs = [ torch pkgs.gtest ];
-          cppNativeInputs = [ pkgs.cmake pkgs.clang-tools pkgs.ninja ];
+          cppCommonInputs = [ torch pkgs.gtest pkgs.libsndfile ];
+          cppNativeInputs = [ pkgs.cmake pkgs.clang-tools pkgs.ninja pkgs.pkg-config ];
           cppCmakeFlags = [
             "-DBUILD_TESTING=ON"
             "-DCMAKE_CXX_STANDARD=20"
@@ -223,9 +223,9 @@
               pname = "torchrkt-cpp";
               inherit version doCheck;
               src = ./cpp;
-              nativeBuildInputs = [ p.cmake p.clang-tools p.ninja ]
+              nativeBuildInputs = [ p.cmake p.clang-tools p.ninja p.pkg-config ]
                 ++ p.lib.optional cuda p.cudaPackages_13.cuda_nvcc;
-              buildInputs = [ (torchPackageFor p) p.gtest ]
+              buildInputs = [ (torchPackageFor p) p.gtest p.libsndfile ]
                 ++ p.lib.optional cuda cudaTk;
               cmakeFlags = cppCmakeFlags ++ p.lib.optionals cuda [
                 "-DCUDA_TOOLKIT_ROOT_DIR=${cudaTk}"
@@ -526,7 +526,9 @@
             pkgs.cmake
             pkgs.clang-tools
             pkgs.gtest
+            pkgs.libsndfile
             pkgs.ninja
+            pkgs.pkg-config
             racketPkg
             torch
             pkgs.stdenv.cc

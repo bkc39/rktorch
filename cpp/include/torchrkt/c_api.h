@@ -1,5 +1,6 @@
 #pragma once
 
+#include "torchrkt/c_api/audio.h"
 #include "torchrkt/c_api/autograd.h"
 #include "torchrkt/c_api/creation.h"
 #include "torchrkt/c_api/device.h"

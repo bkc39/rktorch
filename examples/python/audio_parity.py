@@ -1,5 +1,5 @@
 """Audio twin (#83): torchaudio.load on the committed fixture, compared
-bit-for-bit against load-wav in torch/tests/python-cross-test.rkt."""
+bit-for-bit against load-wav in torch/tests/audio-parity-test.rkt."""
 import json
 import os
 

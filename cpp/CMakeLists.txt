@@ -15,6 +15,8 @@ include(cmake/TorchrktTools.cmake)
 # Provided by libtorch-bin (or python3Packages.torch's dev output) on
 # CMAKE_PREFIX_PATH; see flake.nix's `torchSource` knob.
 find_package(Torch CONFIG REQUIRED)
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(SNDFILE REQUIRED IMPORTED_TARGET sndfile)
 
 # Torch's bundled Caffe2 config leaks MKL stub link directories
 # ("/lib;/lib/intel64;...") into the RPATH CMake expects to rewrite at
@@ -30,6 +32,7 @@ add_library(torchrkt::torchrkt ALIAS torchrkt)
 
 target_sources(torchrkt
   PRIVATE
+    src/torchrkt/audio.cpp
     src/torchrkt/autograd.cpp
     src/torchrkt/creation.cpp
     src/torchrkt/detail/error.cpp
@@ -72,7 +75,7 @@ endif()
 # Treat libtorch headers as system headers so -Wall/-Wextra/-Wpedantic report
 # only our own code, not ATen's.
 target_include_directories(torchrkt SYSTEM PRIVATE ${TORCH_INCLUDE_DIRS})
-target_link_libraries(torchrkt PRIVATE ${TORCH_LIBRARIES})
+target_link_libraries(torchrkt PRIVATE ${TORCH_LIBRARIES} PkgConfig::SNDFILE)
 
 # libtorch ships ABI flags (notably -D_GLIBCXX_USE_CXX11_ABI=...) that our TUs
 # including ATen headers must match, or std::string symbols won't link.
@@ -100,6 +103,7 @@ if(BUILD_TESTING)
   torchrkt_apply_nix_cflags(torchrkt_c_api_compile_test)
 
   add_executable(torchrkt_tests
+    tests/torchrkt/audio_test.cpp
     tests/torchrkt/autograd_test.cpp
     tests/torchrkt/classify_test.cpp
     tests/torchrkt/device_test.cpp

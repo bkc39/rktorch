@@ -7,13 +7,51 @@
          (only-in racket/path normalize-path)
          (only-in racket/port copy-port)
          (only-in net/url call/input-url get-pure-port string->url)
-         (only-in "../private/util.rkt" with-temporary-file)
-         (only-in "../main.rkt" tensor tensor-shape tensor->list))
+         (only-in ffi/vector make-s32vector s32vector-ref)
+         (only-in "../foreign/error.rkt" check-handle check-ok)
+         (only-in "../foreign/raw/audio.rkt"
+                  tr-audio-info/raw tr-audio-load/raw tr-audio-save/raw)
+         (only-in "../foreign/structs.rkt" wrap-tensor)
+         (only-in "../main.rkt" tensor tensor-shape tensor->list tensor?)
+         (only-in "../private/util.rkt" with-temporary-file))
 
-(provide load-wav
+(provide audio-info
+         load-audio
+         load-wav
+         save-audio
          write-wav
          load-audio-fixture
          download-audio-cached)
+
+(define (audio-info path)
+  (define-values (rc frames rate channels) (tr-audio-info/raw path))
+  (check-ok rc 'audio-info)
+  (values frames rate channels))
+
+(define (load-audio path #:frame-offset [frame-offset 0]
+                    #:num-frames [num-frames #f])
+  (unless (exact-nonnegative-integer? frame-offset)
+    (error 'load-audio "frame offset must be an exact nonnegative integer: ~e"
+           frame-offset))
+  (unless (or (not num-frames) (exact-nonnegative-integer? num-frames))
+    (error 'load-audio "num-frames must be #f or an exact nonnegative ~a: ~e"
+           "integer" num-frames))
+  (define rate-out (make-s32vector 1))
+  (define samples
+    (wrap-tensor
+     (check-handle 'load-audio
+                   (tr-audio-load/raw path frame-offset
+                                      (or num-frames -1) rate-out))))
+  (values samples (s32vector-ref rate-out 0)))
+
+(define (save-audio path samples rate)
+  (unless (tensor? samples)
+    (error 'save-audio "samples must be a tensor: ~e" samples))
+  (unless (and (exact-positive-integer? rate) (< rate (expt 2 31)))
+    (error 'save-audio "sample rate must be a positive exact integer: ~e"
+           rate))
+  (check-ok (tr-audio-save/raw path samples rate) 'save-audio)
+  (void))
 
 (define (read-exactly in n who)
   (define bs (read-bytes n in))

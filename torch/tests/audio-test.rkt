@@ -1,14 +1,21 @@
 #lang racket/base
 
 (module+ test
-  (require rackunit
+  ;; whole-module on purpose: the expansion needs bindings only-in would strip
+  (require racket/runtime-path
+           rackunit
            (only-in racket/file
                     delete-directory/files file->bytes
                     make-temporary-directory)
+           (only-in racket/path path-only)
+           (only-in ffi/vector make-s32vector s32vector-ref)
            (only-in "../audio/data.rkt"
-                    download-audio-cached load-audio-fixture load-wav
-                    write-wav)
+                    audio-info download-audio-cached load-audio
+                    load-audio-fixture load-wav save-audio write-wav)
+           (only-in "../foreign/raw/audio.rkt" tr-audio-load/raw)
            (only-in "../main.rkt" tensor tensor-shape tensor->list zeros))
+
+  (define-runtime-path flac-fixture "../audio/fixtures/sine-440-16k.flac")
 
   (define (riff-chunk id payload)
     (bytes-append id
@@ -156,6 +163,85 @@
                      (riff-chunk #"data" (bytes)))
        (lambda (p)
          (check-exn #rx"extends past" (lambda () (load-wav p)))))))
+
+  (test-case "libsndfile facade: load-audio, audio-info, save-audio (#83)"
+    (define-values (wav-samples wav-rate) (load-audio-fixture))
+    (define wav-path
+      (build-path (path-only flac-fixture) "sine-440-16k.wav"))
+    (define-values (native-samples native-rate) (load-audio wav-path))
+    (check-equal? native-rate wav-rate)
+    (check-equal? (tensor->list native-samples) (tensor->list wav-samples)
+                  "libsndfile and load-wav agree on the wav fixture")
+    (define-values (flac-samples flac-rate) (load-audio flac-fixture))
+    (check-equal? flac-rate 16000)
+    (check-equal? (tensor-shape flac-samples) '(1 1600))
+    (check-equal? (tensor->list flac-samples) (tensor->list wav-samples)
+                  "flac-CLI-encoded fixture decodes to the pinned samples")
+    (define-values (frames rate channels) (audio-info flac-fixture))
+    (check-equal? (list frames rate channels) '(1600 16000 1))
+    (define-values (windowed _wr)
+      (load-audio wav-path #:frame-offset 100 #:num-frames 4))
+    (check-equal? (tensor->list windowed)
+                  (for/list ([v (in-list (tensor->list wav-samples))]
+                             [i (in-naturals)]
+                             #:when (and (>= i 100) (< i 104)))
+                    v))
+    (define dir (make-temporary-directory))
+    (dynamic-wind
+     void
+     (lambda ()
+       (define stereo (tensor '((0.5 -0.25 0.125) (-1.0 0.0 0.75))))
+       (for ([name (in-list '("rt.wav" "rt.flac"))])
+         (define p (build-path dir name))
+         (save-audio p stereo 22050)
+         (define-values (f r c) (audio-info p))
+         (check-equal? (list f r c) '(3 22050 2) name)
+         (define-values (back rate*) (load-audio p))
+         (check-equal? rate* 22050)
+         (check-equal? (tensor->list back) (tensor->list stereo) name))
+       (define mono (tensor '(0.25 0.5)))
+       (save-audio (build-path dir "mono.wav") mono 8000)
+       (define-values (m _mr) (load-audio (build-path dir "mono.wav")))
+       (check-equal? (tensor-shape m) '(1 2)
+                     "rank-1 saves as a mono channel")
+       (check-exn #rx"unsupported audio extension"
+                  (lambda () (save-audio (build-path dir "x.mp3") mono 8000)))
+       (check-exn #rx"sample rate"
+                  (lambda () (save-audio (build-path dir "x.wav") mono 0)))
+       (check-exn #rx"sample rate"
+                  (lambda ()
+                    (save-audio (build-path dir "x.wav") mono 8000.0)))
+       (check-exn #rx"frame offset"
+                  (lambda ()
+                    (load-audio (build-path dir "mono.wav")
+                                #:frame-offset -1)))
+       (check-exn #rx"num-frames"
+                  (lambda ()
+                    (load-audio (build-path dir "mono.wav")
+                                #:num-frames -2)))
+       (check-exn #rx"must be a tensor"
+                  (lambda () (save-audio (build-path dir "x.wav") '(1.0) 8000)))
+       (check-exn #rx"rank 1 or"
+                  (lambda () (save-audio (build-path dir "x.wav")
+                                         (tensor 0.5) 8000)))
+       (check-exn #rx"rank 1 or"
+                  (lambda () (save-audio (build-path dir "x.wav")
+                                         (zeros 1 2 1) 8000)))
+       (check-exn #rx"cannot open"
+                  (lambda () (load-audio (build-path dir "missing.wav"))))
+       (check-exn #rx"frame offset"
+                  (lambda ()
+                    (load-audio (build-path dir "mono.wav")
+                                #:frame-offset 9)))
+       (define written (make-s32vector 1 -7))
+       (tr-audio-load/raw (build-path dir "mono.wav") 0 -1 written)
+       (check-equal? (s32vector-ref written 0) 8000
+                     "the rate out-slot is written through")
+       (define untouched (make-s32vector 1 -7))
+       (tr-audio-load/raw (build-path dir "mono.wav") 9 -1 untouched)
+       (check-equal? (s32vector-ref untouched 0) -7
+                     "a failed load leaves the out-slot untouched"))
+     (lambda () (delete-directory/files dir))))
 
   (test-case "wav rejection and cache paths (#83)"
     (check-exn #rx"not a RIFF/WAVE"

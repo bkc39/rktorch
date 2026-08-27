@@ -7,10 +7,6 @@
   (require rackunit
            "../main.rkt"
            "../nn.rkt"
-           (only-in racket/file
-                    delete-directory/files make-temporary-directory)
-           (only-in "../audio/data.rkt"
-                    load-audio-fixture load-wav write-wav)
            (only-in "../data/mnist.rkt" load-mnist-fixture)
            (only-in "../data/text.rkt"
                     contiguous-blocks encode load-text-fixture text->vocab)
@@ -217,38 +213,6 @@
              [p (in-list py)]
              [i (in-naturals)])
          (check-equal? r p (format "write form ~a parity" i))))
-     ;; load-wav against torchaudio.load itself, bit for bit; the .#cuda
-     ;; python carries only torch-bin, so the audio twins gate on import
-     (when (python-module-available? "torchaudio")
-       (define j (python-result "python/audio_parity.py"))
-       (define-values (samples rate) (load-audio-fixture))
-       (check-equal? (tensor-shape samples) (hash-ref j 'shape)
-                     "torchaudio.load shape parity")
-       (check-equal? rate (hash-ref j 'rate) "torchaudio.load rate parity")
-       (check-equal? (for/list ([v (in-list (tensor->list samples))])
-                       (exact->inexact v))
-                     (hash-ref j 'values)
-                     "torchaudio.load sample parity"))
-     (when (python-module-available? "soundfile")
-       (define dir (make-temporary-directory))
-       (dynamic-wind
-        void
-        (lambda ()
-          (define p (build-path dir "written.wav"))
-          (write-wav p (tensor '((0.5 -0.25 0.125) (-1.0 0.0 0.75))) 22050)
-          (define-values (mine rate) (load-wav p))
-          (define j
-            (call-with-python-env
-             (lambda () (python-result "python/audio_write_parity.py"))
-             #:env (list (cons "RKTORCH_WAV_UNDER_TEST" (path->string p)))))
-          (check-equal? (tensor-shape mine) (hash-ref j 'shape)
-                        "soundfile shape parity")
-          (check-equal? rate (hash-ref j 'rate) "soundfile rate parity")
-          (check-equal? (for/list ([v (in-list (tensor->list mine))])
-                          (exact->inexact v))
-                        (hash-ref j 'values)
-                        "soundfile sample parity"))
-        (lambda () (delete-directory/files dir))))
      (let ()
        (define-module mlp (d-in d-hidden d-out)
          #:submodules ([fc1 (Linear d-in d-hidden)]
