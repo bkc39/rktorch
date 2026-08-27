@@ -72,6 +72,14 @@ TEST(TorchrktOps, NbytesReportsViewExtentNotStorage) {
   EXPECT_EQ(view_bytes, 16);
 }
 
+TEST(TorchrktOps, AbsClearsSignsAndGuardsNull) {
+  const Handle t = make({-1.5F, 2.0F, -0.0F}, {3});
+  const Handle a = Handle(tr_abs(t.t));
+  EXPECT_EQ(data_of(a.t), (std::vector<float>{1.5F, 2.0F, 0.0F}));
+  EXPECT_EQ(tr_abs(nullptr), nullptr);
+  EXPECT_NE(tr_last_error(), nullptr);
+}
+
 TEST(TorchrktOps, FromDataRoundTrips) {
   const std::vector<float> values = {1.0F, 2.0F, 3.0F, 4.0F, 5.0F, 6.0F};
   const Handle t = make(values, {2, 3});
