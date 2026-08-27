@@ -208,6 +208,12 @@
                   (lambda () (save-audio (build-path dir "x.wav") mono 0)))
        (check-exn #rx"must be a tensor"
                   (lambda () (save-audio (build-path dir "x.wav") '(1.0) 8000)))
+       (check-exn #rx"rank 1 or"
+                  (lambda () (save-audio (build-path dir "x.wav")
+                                         (tensor 0.5) 8000)))
+       (check-exn #rx"rank 1 or"
+                  (lambda () (save-audio (build-path dir "x.wav")
+                                         (zeros 1 2 1) 8000)))
        (check-exn #rx"cannot open"
                   (lambda () (load-audio (build-path dir "missing.wav"))))
        (check-exn #rx"frame offset"

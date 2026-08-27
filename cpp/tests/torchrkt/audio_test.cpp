@@ -100,6 +100,10 @@ TEST(Audio, RejectionsAndGuards) {
   EXPECT_EQ(tr_audio_load(path.c_str(), 0, -2, &gr), nullptr);
   EXPECT_EQ(tr_audio_save(path.c_str(), mono.t, 0), 1);
 
+  const Handle scalar = make({0.5F}, {});
+  EXPECT_EQ(tr_audio_save(path.c_str(), scalar.t, 8000), 1);
+  const Handle cube = make({0.5F, 0.5F}, {1, 2, 1});
+  EXPECT_EQ(tr_audio_save(path.c_str(), cube.t, 8000), 1);
   EXPECT_EQ(tr_audio_info(nullptr, &frames, &rate, &channels), 1);
   EXPECT_EQ(tr_audio_load(nullptr, 0, -1, &gr), nullptr);
   EXPECT_EQ(tr_audio_load(path.c_str(), 0, -1, nullptr), nullptr);
