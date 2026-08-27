@@ -189,10 +189,8 @@
   (define dest (build-path (audio-cache-dir) name))
   (make-directory* (audio-cache-dir))
   (define-values (parent _name _dir?) (split-path dest))
-  ;; lexical checks miss symlinked components — the deepest EXISTING
-  ;; ancestor must resolve inside the cache root before anything is
-  ;; created, served from, or replaced (fresh directories below a
-  ;; verified ancestor cannot be symlinks)
+  ;; lexical checks miss symlinks: the deepest existing ancestor must
+  ;; resolve inside the cache root before anything is created or served
   (define existing-ancestor
     (let loop ([p parent])
       (cond
@@ -208,6 +206,9 @@
       [else (error 'download-audio-cached
                    "cache name must stay inside the cache directory: ~e"
                    name)]))
+  (when (link-exists? dest)
+    (error 'download-audio-cached
+           "cache name must stay inside the cache directory: ~e" name))
   (unless (file-exists? dest)
     (make-directory* parent)
     (with-temporary-file (tmp #:template "audio-~a.part"

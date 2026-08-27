@@ -13,6 +13,7 @@
          "foreign/ops.rkt"
          "foreign/tensor-ops.rkt"
          "foreign/operators.rkt"
+         "foreign/nn-promoted.rkt"
          "foreign/promoted.rkt"
          (only-in "foreign/ref-syntax.rkt" ref ref!)
          "foreign/autograd-ops.rkt")

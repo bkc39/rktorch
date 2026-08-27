@@ -239,5 +239,12 @@
                       (download-audio-cached
                        "evil/leak.wav"
                        (format "file://~a" nested-src))))
+         (make-file-or-directory-link (build-path outside "leak.wav")
+                                      (build-path cache "direct.wav"))
+         (check-exn #rx"inside the cache directory"
+                    (lambda ()
+                      (download-audio-cached
+                       "direct.wav"
+                       (format "file://~a" nested-src))))
          (delete-directory/files outside)))
      (lambda () (delete-directory/files cache)))))

@@ -7,18 +7,13 @@
          (only-in "ops.rkt"
                   item tensor-device tensor-dtype tensor-shape tensor->list
                   to-device to-dtype)
-         (only-in "size.rkt" ->2d)
          (only-in "structs.rkt" tensor?)
          (only-in "tensor-ops.rkt" add mul reshape sum tensor unsqueeze)
          (prefix-in g: (only-in "../generated.rkt"
                                 abs-tensor
-                                adaptive-avg-pool2d
-                                avg-pool2d
                                 broadcast-to
-                                conv2d
                                 copy!
                                 cos-tensor
-                                embedding
                                 eq-scalar eq-tensor
                                 fill-scalar!
                                 gather
@@ -28,15 +23,12 @@
                                 index-fill-int-scalar!
                                 index-fill-int-tensor!
                                 index-select
-                                layer-norm
                                 le-scalar le-tensor
                                 lt-scalar lt-tensor
-                                masked-fill-scalar
                                 masked-fill-scalar!
                                 masked-fill-tensor!
                                 masked-scatter!
                                 masked-select
-                                max-pool2d
                                 narrow
                                 ne-scalar ne-tensor
                                 nonzero
@@ -46,8 +38,6 @@
                                 slice-tensor
                                 take
                                 take-along-dim
-                                tril
-                                triu
                                 where-scalar
                                 where-scalarother
                                 where-scalarself
@@ -55,8 +45,6 @@
 
 (provide flatten
          eq ne lt le gt ge
-         conv2d max-pool2d avg-pool2d adaptive-avg-pool2d
-         tril triu masked-fill embedding layer-norm
          gather take take-along-dim where
          index-add! index-fill! masked-fill! scatter!
          tensor-ref tensor-ref! :: slice? slice-start slice-end slice-step
@@ -441,60 +429,3 @@
 (define le (comparison g:le-tensor g:le-scalar))
 (define gt (comparison g:gt-tensor g:gt-scalar))
 (define ge (comparison g:ge-tensor g:ge-scalar))
-
-;; --------------------------------------------------- conv + pooling wrappers
-
-(define (conv2d input weight
-                #:bias [bias #f]
-                #:stride [stride 1]
-                #:padding [padding 0]
-                #:dilation [dilation 1]
-                #:groups [groups 1])
-  (g:conv2d input weight bias
-            (->2d stride) (->2d padding) (->2d dilation) groups))
-
-(define (max-pool2d input kernel-size
-                    #:stride [stride #f]
-                    #:padding [padding 0]
-                    #:dilation [dilation 1]
-                    #:ceil-mode [ceil-mode #f])
-  (g:max-pool2d input
-                (->2d kernel-size)
-                (->2d (or stride kernel-size))
-                (->2d padding) (->2d dilation) ceil-mode))
-
-(define (avg-pool2d input kernel-size
-                    #:stride [stride #f]
-                    #:padding [padding 0]
-                    #:ceil-mode [ceil-mode #f]
-                    #:count-include-pad [count-include-pad #t]
-                    #:divisor-override [divisor-override #f])
-  (g:avg-pool2d input
-                (->2d kernel-size)
-                (->2d (or stride kernel-size))
-                (->2d padding) ceil-mode count-include-pad divisor-override))
-
-(define (adaptive-avg-pool2d input output-size)
-  (g:adaptive-avg-pool2d input (->2d output-size)))
-
-;; ------------------------------------------- transformer primitives
-
-(define (tril self [diagonal 0])
-  (g:tril self diagonal))
-
-(define (triu self [diagonal 0])
-  (g:triu self diagonal))
-
-(define (masked-fill self mask value)
-  (g:masked-fill-scalar self mask (exact->inexact value)))
-
-(define (embedding indices weight #:padding-idx [padding-idx #f])
-  (g:embedding weight indices (or padding-idx -1) #f #f))
-
-(define (layer-norm input normalized-shape
-                    #:weight [weight #f]
-                    #:bias [bias #f]
-                    #:eps [eps 1e-5])
-  (define shape
-    (if (list? normalized-shape) normalized-shape (list normalized-shape)))
-  (g:layer-norm input shape weight bias eps #t))

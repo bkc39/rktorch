@@ -71,15 +71,8 @@ class Skip:
     shard: str
 
 
-# Op names that collide with bindings the public facade shadow-dispatches
-# (racket/base, racket/math tanh, racket/list argmax/flatten). Emitting
-# these from generated.rkt under their bare names would hand consumers a
-# tensor-only binding without the numeric fast path. Two tiers:
-# - _RACKET_COLLISIONS: a hand-written tr_* implementation already
-#   exists; codegen skips the op entirely.
-# - _BASE_SHADOWED: fully generated, but the racket binding is emitted
-#   as <name>-tensor so generated.rkt stays collision-free; the public
-#   dispatch shim lives in promoted.rkt. Extend as collisions surface.
+# Base-colliding names: _RACKET_COLLISIONS have hand-written tr_* shims
+# (skip); _BASE_SHADOWED generate as <name>-tensor, promoted by hand.
 _RACKET_COLLISIONS = frozenset({
     "exp", "log", "sqrt", "tanh", "max", "min", "argmax", "flatten",
     "round", "floor", "ceiling", "truncate",
