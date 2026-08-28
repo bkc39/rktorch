@@ -11,6 +11,9 @@ void torchrkt_c_api_compile_check(void) {
   tr_tensor* (*audio_load)(const char*, int64_t, int64_t, int32_t*) =
       tr_audio_load;
   int (*audio_save)(const char*, const tr_tensor*, int32_t) = tr_audio_save;
+  tr_tensor* (*hann_window)(int64_t, bool) = tr_hann_window;
+  tr_tensor* (*stft)(const tr_tensor*, int64_t, int64_t, int64_t,
+                     const tr_tensor*, bool, bool) = tr_stft;
   const char* (*version)(void) = tr_version;
   const char* (*last_error)(void) = tr_last_error;
   int (*last_error_kind)(void) = tr_last_error_kind;
@@ -176,6 +179,8 @@ void torchrkt_c_api_compile_check(void) {
   (void)from_data_i64_on;
   (void)tensor_dtype;
   (void)copy_data_i64;
+  (void)hann_window;
+  (void)stft;
   (void)audio_info;
   (void)audio_load;
   (void)audio_save;

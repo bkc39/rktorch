@@ -43,6 +43,7 @@ target_sources(torchrkt
     src/torchrkt/random.cpp
     src/torchrkt/reduce.cpp
     src/torchrkt/shape_ops.cpp
+    src/torchrkt/spectral.cpp
     src/torchrkt/tensor.cpp
 )
 
@@ -113,6 +114,7 @@ if(BUILD_TESTING)
     tests/torchrkt/generated_tranche3_test.cpp
     tests/torchrkt/ops_test.cpp
     tests/torchrkt/random_test.cpp
+    tests/torchrkt/spectral_test.cpp
     $<TARGET_OBJECTS:torchrkt_c_api_compile_test>
   )
   target_include_directories(torchrkt_tests
