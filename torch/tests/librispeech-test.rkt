@@ -69,6 +69,20 @@
                     (lambda () (librispeech-utterances "dev-clean")))
          (check-false (directory-exists? (build-path cache-dir "dev-clean"))
                       "a corrupt archive must not publish a corpus")
+         (check-false (file-exists?
+                       (build-path cache-dir "dev-clean.tar.gz"))
+                      "a corrupt archive is evicted")
+         (define wrong (build-path scratch "wrong"))
+         (make-directory* (build-path wrong "Nothing"))
+         (parameterize ([current-directory wrong])
+           (tar-gzip (build-path cache-dir "dev-clean.tar.gz") "Nothing"))
+         (check-exn #rx"did not contain"
+                    (lambda () (librispeech-utterances "dev-clean")))
+         (check-false (file-exists?
+                       (build-path cache-dir "dev-clean.tar.gz"))
+                      "a wrong-tree archive is evicted")
+         (check-false (directory-exists?
+                       (build-path cache-dir "dev-clean")))
          (check-true
           (for/and ([p (in-list (directory-list cache-dir))])
             (not (regexp-match? #rx"librispeech-extract"

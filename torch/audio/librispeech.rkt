@@ -4,10 +4,9 @@
 (require racket/runtime-path
          (only-in file/gunzip gunzip-through-ports)
          (only-in file/untar untar)
-         (only-in racket/file
-                  delete-directory/files make-temporary-file)
          (only-in racket/list first)
          (only-in racket/string string-split string-trim)
+         (only-in "../private/util.rkt" with-temporary-directory)
          (only-in "data.rkt" download-audio-cached load-audio))
 
 (provide (struct-out utterance)
@@ -50,6 +49,11 @@
    (string-append librispeech-base-url split ".tar.gz")
    #:valid? gzip-magic?))
 
+(define (evict! archive e)
+  (with-handlers ([exn:fail? void])
+    (delete-file archive))
+  (raise e))
+
 (define (gunzip-untar! archive dest)
   (define-values (pipe-in pipe-out) (make-pipe (* 1024 1024)))
   (define outcome (box #f))
@@ -61,7 +65,7 @@
         (lambda ()
           (with-handlers ([(lambda (_) #t)
                            (lambda (e) (set-box! outcome (vector e)))])
-            (untar pipe-in #:dest dest)
+            (untar pipe-in #:dest dest #:permissive? #f)
             (set-box! outcome 'ok)))
         ;; unblocks a writer stuck on a full pipe if untar died early
         (lambda () (close-input-port pipe-in))))))
@@ -91,28 +95,18 @@
   (define-values (parent _name _dir?) (split-path archive))
   (define dest (build-path parent split))
   (unless (directory-exists? dest)
-    (define staging
-      (make-temporary-file "librispeech-extract-~a" 'directory parent))
-    (define published? (box #f))
-    (dynamic-wind
-     void
-     (lambda ()
-       (with-handlers ([(lambda (_) #t)
-                        ;; a failed extraction implicates the cached
-                        ;; archive; evict it so the next call redownloads
-                        (lambda (e)
-                          (with-handlers ([exn:fail? void])
-                            (delete-file archive))
-                          (raise e))])
-         (gunzip-untar! archive staging))
-       (with-handlers ([exn:fail:filesystem?
-                        (lambda (e)
-                          (unless (directory-exists? dest) (raise e)))])
-         (rename-file-or-directory staging dest)
-         (set-box! published? #t)))
-     (lambda ()
-       (unless (unbox published?)
-         (delete-directory/files staging #:must-exist? #f)))))
+    (with-temporary-directory (staging #:template "librispeech-extract-~a"
+                                       #:directory parent)
+      (with-handlers ([(lambda (_) #t) (lambda (e) (evict! archive e))])
+        (gunzip-untar! archive staging)
+        (unless (directory-exists?
+                 (build-path staging "LibriSpeech" split))
+          (error 'librispeech "~a did not contain LibriSpeech/~a"
+                 archive split)))
+      (with-handlers ([exn:fail:filesystem?
+                       (lambda (e)
+                         (unless (directory-exists? dest) (raise e)))])
+        (rename-file-or-directory staging dest))))
   (build-path dest "LibriSpeech" split))
 
 (define (librispeech-utterances split)
