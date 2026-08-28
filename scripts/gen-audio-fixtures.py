@@ -7,6 +7,11 @@ reference encoder, so both stay independent of the code under test:
     nix run nixpkgs#flac -- --silent --force \
         -o torch/audio/fixtures/sine-440-16k.flac \
         torch/audio/fixtures/sine-440-16k.wav
+
+librispeech-1272-128104-0000.{flac,txt} are utterance 1272-128104-0000
+of LibriSpeech dev-clean (Panayotov, Chen, Povey, Khudanpur 2015),
+CC BY 4.0, copied verbatim with its trans.txt line from
+https://www.openslr.org/resources/12/dev-clean.tar.gz
 """
 import math
 import os

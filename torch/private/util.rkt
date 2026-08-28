@@ -1,8 +1,11 @@
 #lang racket/base
 
-(require (only-in racket/file make-temporary-file))
+(require (only-in racket/file
+                  delete-directory/files make-temporary-file))
 
-(provide call-with-temporary-file
+(provide call-with-temporary-directory
+         call-with-temporary-file
+         with-temporary-directory
          with-temporary-file)
 
 ;; deletes the temp file on any escape; the file-exists? guard lets `proc`
@@ -18,3 +21,15 @@
 
 (define-syntax-rule (with-temporary-file (path-id kw-arg ...) body ...)
   (call-with-temporary-file (lambda (path-id) body ...) kw-arg ...))
+
+(define (call-with-temporary-directory proc
+                                       #:template [template "rktorch-~a.tmp"]
+                                       #:directory [directory #f])
+  (define dir (make-temporary-file template 'directory directory))
+  (dynamic-wind
+   void
+   (lambda () (proc dir))
+   (lambda () (delete-directory/files dir #:must-exist? #f))))
+
+(define-syntax-rule (with-temporary-directory (dir-id kw-arg ...) body ...)
+  (call-with-temporary-directory (lambda (dir-id) body ...) kw-arg ...))
