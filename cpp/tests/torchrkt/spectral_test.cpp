@@ -34,8 +34,7 @@ std::vector<int64_t> shape_of(const tr_tensor* t) {
   EXPECT_EQ(tr_tensor_ndim(t, &ndim), 0) << tr_last_error();
   std::vector<int64_t> dims(static_cast<size_t>(ndim));
   int64_t got = 0;
-  EXPECT_EQ(tr_tensor_shape(t, ndim, dims.data(), &got), 0)
-      << tr_last_error();
+  EXPECT_EQ(tr_tensor_shape(t, ndim, dims.data(), &got), 0) << tr_last_error();
   return dims;
 }
 
@@ -59,11 +58,10 @@ TEST(Spectral, HannWindowMatchesClosedForm) {
 }
 
 TEST(Spectral, StftConstantSignalConcentratesAtDc) {
-  const Handle ones = make({1.0F, 1.0F, 1.0F, 1.0F, 1.0F, 1.0F, 1.0F, 1.0F},
-                           {8});
-  const Handle out(
-      tr_stft(ones.t, 4, 4, -1, nullptr, /*center=*/false,
-              /*normalized=*/false));
+  const Handle ones =
+      make({1.0F, 1.0F, 1.0F, 1.0F, 1.0F, 1.0F, 1.0F, 1.0F}, {8});
+  const Handle out(tr_stft(ones.t, 4, 4, -1, nullptr, /*center=*/false,
+                           /*normalized=*/false));
   EXPECT_EQ(shape_of(out.t), (std::vector<int64_t>{3, 2, 2}));
   const std::vector<float> v = data_of(out.t);
   EXPECT_FLOAT_EQ(v[0], 4.0F);
@@ -76,8 +74,7 @@ TEST(Spectral, StftConstantSignalConcentratesAtDc) {
 TEST(Spectral, StftHonorsWindowAndGuards) {
   const Handle signal = make({1.0F, 1.0F, 1.0F, 1.0F}, {4});
   const Handle window(tr_hann_window(4, true));
-  const Handle out(
-      tr_stft(signal.t, 4, 4, 4, window.t, false, false));
+  const Handle out(tr_stft(signal.t, 4, 4, 4, window.t, false, false));
   const std::vector<float> v = data_of(out.t);
   EXPECT_FLOAT_EQ(v[0], 2.0F);
   EXPECT_EQ(tr_stft(nullptr, 4, -1, -1, nullptr, true, false), nullptr);

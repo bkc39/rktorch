@@ -31,6 +31,12 @@
               #:normalized? [normalized? #f])
   (unless (exact-positive-integer? n-fft)
     (error 'stft "n-fft must be an exact positive integer: ~e" n-fft))
+  (unless (or (not hop-length) (exact-positive-integer? hop-length))
+    (error 'stft "hop-length must be #f or an exact positive integer: ~e"
+           hop-length))
+  (unless (or (not win-length) (exact-positive-integer? win-length))
+    (error 'stft "win-length must be #f or an exact positive integer: ~e"
+           win-length))
   (unless (or (not window) (tensor? window))
     (error 'stft "window must be #f or a tensor: ~e" window))
   (wrap-tensor
@@ -74,8 +80,18 @@
                         #:sample-rate sample-rate
                         #:f-min [f-min 0.0]
                         #:f-max [f-max #f])
+  (unless (exact-positive-integer? n-freqs)
+    (error 'mel-filterbank
+           "n-freqs must be an exact positive integer: ~e" n-freqs))
+  (unless (exact-positive-integer? n-mels)
+    (error 'mel-filterbank
+           "n-mels must be an exact positive integer: ~e" n-mels))
+  (unless (exact-positive-integer? sample-rate)
+    (error 'mel-filterbank
+           "sample rate must be an exact positive integer: ~e" sample-rate))
   (define hi (or f-max (/ sample-rate 2.0)))
-  (define all-freqs (linspace 0.0 (/ sample-rate 2.0) n-freqs))
+  (define all-freqs
+    (linspace 0.0 (exact->inexact (quotient sample-rate 2)) n-freqs))
   (define m-pts (linspace (hz->mel f-min) (hz->mel hi) (+ n-mels 2)))
   (define f-pts (for/vector ([m (in-list m-pts)]) (mel->hz m)))
   (tensor

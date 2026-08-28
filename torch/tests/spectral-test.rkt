@@ -33,6 +33,10 @@
             #:window (hann-window 4) #:center? #f))
     (check-equal? (car (tensor->list windowed)) 2.0)
     (check-exn #rx"n-fft" (lambda () (stft (ones 8) #:n-fft 0)))
+    (check-exn #rx"hop-length"
+               (lambda () (stft (ones 8) #:n-fft 4 #:hop-length -1)))
+    (check-exn #rx"win-length"
+               (lambda () (stft (ones 8) #:n-fft 4 #:win-length -2)))
     (check-exn #rx"window must be"
                (lambda () (stft (ones 8) #:n-fft 4 #:window '(1 2)))))
 
@@ -52,7 +56,16 @@
     (check-equal? (tensor-shape fb) '(201 80))
     (check-true (>= (item (min fb)) 0.0))
     (check-true (<= (item (max fb)) 1.0))
-    (check-true (positive? (item (max fb)))))
+    (check-true (positive? (item (max fb))))
+    (check-exn #rx"n-mels"
+               (lambda () (mel-filterbank #:n-freqs 201 #:n-mels -1
+                                          #:sample-rate 16000)))
+    (check-exn #rx"n-freqs"
+               (lambda () (mel-filterbank #:n-freqs 0 #:n-mels 80
+                                          #:sample-rate 16000)))
+    (check-exn #rx"sample rate"
+               (lambda () (mel-filterbank #:n-freqs 201 #:n-mels 80
+                                          #:sample-rate 16000.0))))
 
   (test-case "log-mel over the speech fixture (#83)"
     (define-values (samples rate _transcript) (load-librispeech-fixture))

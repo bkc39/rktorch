@@ -6,6 +6,7 @@
 #include <stdexcept>
 #include <string>
 
+#include "torchrkt/detail/device.hpp"
 #include "torchrkt/detail/op_call.hpp"
 #include "torchrkt/detail/tensor_handle.hpp"
 
@@ -18,7 +19,9 @@ tr_tensor* tr_hann_window(int64_t window_length, bool periodic) {
                                   std::to_string(window_length));
     }
     return torch::hann_window(window_length, periodic,
-                              torch::TensorOptions().dtype(torch::kFloat32));
+                              torch::TensorOptions()
+                                  .dtype(torch::kFloat32)
+                                  .device(torchrkt::current_default_device()));
   });
 }
 
@@ -42,7 +45,7 @@ tr_tensor* tr_stft(const tr_tensor* self, int64_t n_fft, int64_t hop_length,
     const std::optional<torch::Tensor> w =
         window == nullptr ? std::optional<torch::Tensor>(torch::ones(
                                 win.value_or(n_fft),
-                                torch::TensorOptions().dtype(torch::kFloat32)))
+                                self->value.options().dtype(torch::kFloat32)))
                           : std::optional<torch::Tensor>(window->value);
     const torch::Tensor c =
         torch::stft(self->value, n_fft, hop, win, w, center, "reflect",
