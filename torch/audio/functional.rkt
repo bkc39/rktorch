@@ -5,7 +5,8 @@
                   tr-hann-window/raw tr-stft/raw)
          (only-in "../foreign/structs.rkt" wrap-tensor)
          (only-in "../main.rkt"
-                  add log matmul mul ref sqrt t tensor tensor?))
+                  add log matmul mul ref sqrt t tensor tensor-device
+                  tensor? to-device))
 
 (provide hann-window
          log-mel-spectrogram
@@ -29,6 +30,8 @@
               #:window [window #f]
               #:center? [center? #t]
               #:normalized? [normalized? #f])
+  (unless (tensor? samples)
+    (error 'stft "samples must be a tensor: ~e" samples))
   (unless (exact-positive-integer? n-fft)
     (error 'stft "n-fft must be an exact positive integer: ~e" n-fft))
   (unless (or (not hop-length) (exact-positive-integer? hop-length))
@@ -90,6 +93,8 @@
     (error 'mel-filterbank
            "sample rate must be an exact positive integer: ~e" sample-rate))
   (define hi (or f-max (/ sample-rate 2.0)))
+  (unless (< f-min hi)
+    (error 'mel-filterbank "f-min ~a must be below f-max ~a" f-min hi))
   (define all-freqs
     (linspace 0.0 (exact->inexact (quotient sample-rate 2)) n-freqs))
   (define m-pts (linspace (hz->mel f-min) (hz->mel hi) (+ n-mels 2)))
@@ -110,11 +115,14 @@
                              #:hop-length [hop-length 160]
                              #:n-mels [n-mels 80]
                              #:eps [eps 1e-6])
+  (unless (tensor? samples)
+    (error 'log-mel-spectrogram "samples must be a tensor: ~e" samples))
+  (define device (tensor-device samples))
   (define spec
     (spectrogram samples #:n-fft n-fft #:hop-length hop-length
-                 #:window (hann-window n-fft)))
+                 #:window (to-device (hann-window n-fft) device)))
   (define fb
     (mel-filterbank #:n-freqs (add1 (quotient n-fft 2))
                     #:n-mels n-mels
                     #:sample-rate sample-rate))
-  (log (add (matmul (t fb 0 1) spec) eps)))
+  (log (add (matmul (t (to-device fb device) 0 1) spec) eps)))

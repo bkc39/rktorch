@@ -38,7 +38,9 @@
     (check-exn #rx"win-length"
                (lambda () (stft (ones 8) #:n-fft 4 #:win-length -2)))
     (check-exn #rx"window must be"
-               (lambda () (stft (ones 8) #:n-fft 4 #:window '(1 2)))))
+               (lambda () (stft (ones 8) #:n-fft 4 #:window '(1 2))))
+    (check-exn #rx"samples must be"
+               (lambda () (stft '(1.0 2.0) #:n-fft 4))))
 
   (test-case "spectrogram power modes (#83)"
     (define p2 (spectrogram (ones 8) #:n-fft 4 #:hop-length 4 #:center? #f))
@@ -65,7 +67,11 @@
                                           #:sample-rate 16000)))
     (check-exn #rx"sample rate"
                (lambda () (mel-filterbank #:n-freqs 201 #:n-mels 80
-                                          #:sample-rate 16000.0))))
+                                          #:sample-rate 16000.0)))
+    (check-exn #rx"f-min"
+               (lambda () (mel-filterbank #:n-freqs 201 #:n-mels 80
+                                          #:sample-rate 16000
+                                          #:f-min 9000.0))))
 
   (test-case "log-mel over the speech fixture (#83)"
     (define-values (samples rate _transcript) (load-librispeech-fixture))
