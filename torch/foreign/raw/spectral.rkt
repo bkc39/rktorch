@@ -2,7 +2,7 @@
 
 (require (only-in ffi/unsafe _fun _int64 _stdbool)
          (only-in "memory.rkt" tensor-allocator)
-         (only-in "syntax.rkt" _Tensor/null define-torch))
+         (only-in "syntax.rkt" _Tensor _Tensor/null define-torch))
 
 (provide tr-hann-window/raw
          tr-stft/raw)
@@ -15,7 +15,7 @@
   #:wrap tensor-allocator)
 
 (define-torch tr-stft/raw
-  (_fun (self : _Tensor/null)
+  (_fun (self : _Tensor)
         (n-fft : _int64)
         (hop-length : _int64)
         (win-length : _int64)

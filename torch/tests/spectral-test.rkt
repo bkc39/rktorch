@@ -7,7 +7,8 @@
                     spectrogram stft)
            (only-in "../audio/librispeech.rkt" load-librispeech-fixture)
            (only-in "../main.rkt"
-                    item max min ones ref tensor-shape tensor->list))
+                    dtype item max min ones ref tensor-shape tensor->list
+                    to-dtype))
 
   (test-case "hann-window matches the closed form (#83)"
     (check-equal? (tensor->list (hann-window 4)) '(0.0 0.5 1.0 0.5))
@@ -79,4 +80,12 @@
     (define log-mel
       (log-mel-spectrogram (ref samples 0) #:sample-rate rate))
     (check-equal? (tensor-shape log-mel)
-                  (list 80 (add1 (quotient n 160))))))
+                  (list 80 (add1 (quotient n 160))))
+    (define f64
+      (log-mel-spectrogram (to-dtype (ref samples 0) 'float64)
+                           #:sample-rate rate))
+    (check-equal? (dtype f64) 'float64)
+    (check-exn #rx"eps"
+               (lambda ()
+                 (log-mel-spectrogram (ref samples 0) #:sample-rate rate
+                                      #:eps -1.0)))))

@@ -5,8 +5,8 @@
                   tr-hann-window/raw tr-stft/raw)
          (only-in "../foreign/structs.rkt" wrap-tensor)
          (only-in "../main.rkt"
-                  add log matmul mul ref sqrt t tensor tensor-device
-                  tensor? to-device))
+                  add dtype log matmul mul ref sqrt t tensor
+                  tensor-device tensor? to-device to-dtype))
 
 (provide hann-window
          log-mel-spectrogram
@@ -117,12 +117,18 @@
                              #:eps [eps 1e-6])
   (unless (tensor? samples)
     (error 'log-mel-spectrogram "samples must be a tensor: ~e" samples))
+  (unless (and (real? eps) (>= eps 0))
+    (error 'log-mel-spectrogram
+           "eps must be a nonnegative real: ~e" eps))
   (define device (tensor-device samples))
   (define spec
     (spectrogram samples #:n-fft n-fft #:hop-length hop-length
-                 #:window (to-device (hann-window n-fft) device)))
+                 #:window (to-dtype (to-device (hann-window n-fft) device)
+                                    (dtype samples))))
   (define fb
     (mel-filterbank #:n-freqs (add1 (quotient n-fft 2))
                     #:n-mels n-mels
                     #:sample-rate sample-rate))
-  (log (add (matmul (t (to-device fb device) 0 1) spec) eps)))
+  (define fb-matched
+    (to-dtype (to-device fb device) (dtype spec)))
+  (log (add (matmul (t fb-matched 0 1) spec) eps)))
