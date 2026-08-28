@@ -1,6 +1,7 @@
 #lang racket/base
 
-(require racket/contract
+(require (only-in racket/contract
+                  ->* ->i >=/c and/c define/contract or/c unsupplied-arg?)
          (only-in "../foreign/error.rkt" check-handle)
          (only-in "../foreign/raw/spectral.rkt"
                   tr-hann-window/raw tr-stft/raw)
