@@ -5,9 +5,8 @@
   (require racket/runtime-path
            rackunit
            (only-in file/tar tar-gzip)
-           (only-in racket/file
-                    delete-directory/files make-directory*
-                    make-temporary-directory)
+           (only-in racket/file delete-directory/files make-directory*)
+           (only-in "../private/util.rkt" with-temporary-directory)
            (only-in "../audio/librispeech.rkt"
                     librispeech-utterances load-librispeech-fixture
                     load-utterance parse-trans-line utterance-id
@@ -38,13 +37,10 @@
      "MISTER QUILTER IS THE APOSTLE OF THE MIDDLE CLASSES AND WE ARE GLAD TO WELCOME HIS GOSPEL"))
 
   (test-case "extraction publishes atomically; corrupt archives fail clean (#83)"
-    (define scratch (make-temporary-directory))
-    (dynamic-wind
-     void
-     (lambda ()
-       (parameterize ([current-environment-variables
-                       (environment-variables-copy
-                        (current-environment-variables))])
+    (with-temporary-directory (scratch)
+      (parameterize ([current-environment-variables
+                      (environment-variables-copy
+                       (current-environment-variables))])
          (putenv "RKTORCH_AUDIO_DIR" (path->string scratch))
          (define build (build-path scratch "build"))
          (define chapter (build-path build "LibriSpeech" "dev-clean" "9" "9"))
@@ -77,8 +73,7 @@
           (for/and ([p (in-list (directory-list cache-dir))])
             (not (regexp-match? #rx"librispeech-extract"
                                 (path->string p))))
-          "failed staging directories are cleaned up")))
-     (lambda () (delete-directory/files scratch))))
+          "failed staging directories are cleaned up"))))
 
   (when (getenv "RKTORCH_LIBRISPEECH_LIVE")
     (test-case "dev-clean enumerates and loads (live)"

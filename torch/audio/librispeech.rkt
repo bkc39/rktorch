@@ -56,22 +56,30 @@
   (define untarrer
     (thread
      (lambda ()
-       (with-handlers ([exn:fail? (lambda (e) (set-box! outcome e))])
-         (untar pipe-in #:dest dest)
-         (set-box! outcome 'ok))
-       ;; unblocks a writer stuck on a full pipe if untar died early
-       (close-input-port pipe-in))))
-  (define gunzip-exn
-    (with-handlers ([exn:fail? values])
-      (call-with-input-file archive
-        (lambda (in) (gunzip-through-ports in pipe-out)))
-      #f))
-  (close-output-port pipe-out)
-  (thread-wait untarrer)
+       (dynamic-wind
+        void
+        (lambda ()
+          (with-handlers ([(lambda (_) #t)
+                           (lambda (e) (set-box! outcome (vector e)))])
+            (untar pipe-in #:dest dest)
+            (set-box! outcome 'ok)))
+        ;; unblocks a writer stuck on a full pipe if untar died early
+        (lambda () (close-input-port pipe-in))))))
+  (define gunzip-outcome
+    (dynamic-wind
+     void
+     (lambda ()
+       (with-handlers ([(lambda (_) #t) vector])
+         (call-with-input-file archive
+           (lambda (in) (gunzip-through-ports in pipe-out)))
+         #f))
+     (lambda ()
+       (close-output-port pipe-out)
+       (thread-wait untarrer))))
   (define r (unbox outcome))
   (cond
-    [(exn? r) (raise r)]
-    [gunzip-exn (raise gunzip-exn)]
+    [(vector? r) (raise (vector-ref r 0))]
+    [(vector? gunzip-outcome) (raise (vector-ref gunzip-outcome 0))]
     [(eq? r 'ok) (void)]
     [else (error 'librispeech "extraction did not complete for ~a"
                  archive)]))
@@ -85,24 +93,35 @@
   (unless (directory-exists? dest)
     (define staging
       (make-temporary-file "librispeech-extract-~a" 'directory parent))
-    (with-handlers ([exn:fail?
-                     (lambda (e)
-                       (delete-directory/files staging #:must-exist? #f)
-                       (raise e))])
-      (gunzip-untar! archive staging)
-      (with-handlers ([exn:fail:filesystem?
-                       (lambda (e)
-                         (delete-directory/files staging #:must-exist? #f)
-                         (unless (directory-exists? dest) (raise e)))])
-        (rename-file-or-directory staging dest))))
+    (define published? (box #f))
+    (dynamic-wind
+     void
+     (lambda ()
+       (with-handlers ([(lambda (_) #t)
+                        ;; a failed extraction implicates the cached
+                        ;; archive; evict it so the next call redownloads
+                        (lambda (e)
+                          (with-handlers ([exn:fail? void])
+                            (delete-file archive))
+                          (raise e))])
+         (gunzip-untar! archive staging))
+       (with-handlers ([exn:fail:filesystem?
+                        (lambda (e)
+                          (unless (directory-exists? dest) (raise e)))])
+         (rename-file-or-directory staging dest)
+         (set-box! published? #t)))
+     (lambda ()
+       (unless (unbox published?)
+         (delete-directory/files staging #:must-exist? #f)))))
   (build-path dest "LibriSpeech" split))
 
 (define (librispeech-utterances split)
   (define root (extracted-root split))
   (sort
    (for*/list ([speaker (in-list (directory-list root))]
+               #:when (directory-exists? (build-path root speaker))
                [chapter (in-list (directory-list (build-path root speaker)))]
-               #:when #t
+               #:when (directory-exists? (build-path root speaker chapter))
                [chapter-dir (in-value (build-path root speaker chapter))]
                [trans (in-value
                        (build-path chapter-dir
