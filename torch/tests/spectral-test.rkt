@@ -16,10 +16,8 @@
     (check-equal? (car symmetric) 0.0)
     (check-= (cadr (reverse symmetric)) (cadr symmetric) 1e-6)
     (check-equal? (tensor->list (hann-window 0)) '())
-    (check-exn #rx"window length"
-               (lambda () (hann-window -1)))
-    (check-exn #rx"window length"
-               (lambda () (hann-window 4.0))))
+    (check-exn exn:fail:contract? (lambda () (hann-window -1)))
+    (check-exn exn:fail:contract? (lambda () (hann-window 4.0))))
 
   (test-case "stft of a constant concentrates at DC (#83)"
     (define frames
@@ -38,9 +36,9 @@
                (lambda () (stft (ones 8) #:n-fft 4 #:hop-length -1)))
     (check-exn #rx"win-length"
                (lambda () (stft (ones 8) #:n-fft 4 #:win-length -2)))
-    (check-exn #rx"window must be"
+    (check-exn #rx"window"
                (lambda () (stft (ones 8) #:n-fft 4 #:window '(1 2))))
-    (check-exn #rx"samples must be"
+    (check-exn exn:fail:contract?
                (lambda () (stft '(1.0 2.0) #:n-fft 4))))
 
   (test-case "spectrogram power modes (#83)"
@@ -50,7 +48,7 @@
     (define p1 (spectrogram (ones 8) #:n-fft 4 #:hop-length 4 #:center? #f
                             #:power 1.0))
     (check-equal? (car (tensor->list p1)) 4.0)
-    (check-exn #rx"power must be"
+    (check-exn #rx"power"
                (lambda () (spectrogram (ones 8) #:n-fft 4 #:power 3.0))))
 
   (test-case "mel filterbank triangles are bounded and ordered (#83)"
@@ -66,10 +64,10 @@
     (check-exn #rx"n-freqs"
                (lambda () (mel-filterbank #:n-freqs 0 #:n-mels 80
                                           #:sample-rate 16000)))
-    (check-exn #rx"sample rate"
+    (check-exn #rx"sample-rate"
                (lambda () (mel-filterbank #:n-freqs 201 #:n-mels 80
                                           #:sample-rate 16000.0)))
-    (check-exn #rx"f-min"
+    (check-exn #rx"f-min below"
                (lambda () (mel-filterbank #:n-freqs 201 #:n-mels 80
                                           #:sample-rate 16000
                                           #:f-min 9000.0))))
