@@ -1,0 +1,13 @@
+librispeech-1272-128104-0000.flac and librispeech-1272-128104-0000.txt
+are utterance 1272-128104-0000 of the LibriSpeech ASR corpus dev-clean
+split, copied verbatim (audio plus its trans.txt line) from
+https://www.openslr.org/resources/12/dev-clean.tar.gz
+
+LibriSpeech: Vassil Panayotov, Guoguo Chen, Daniel Povey, Sanjeev
+Khudanpur, "LibriSpeech: an ASR corpus based on public domain audio
+books", ICASSP 2015. Licensed under Creative Commons Attribution 4.0
+International (CC BY 4.0): https://creativecommons.org/licenses/by/4.0/
+
+The remaining fixtures in this directory (sine-440-16k.*) are generated
+by scripts/gen-audio-fixtures.py and carry the repository's Apache-2.0
+license.

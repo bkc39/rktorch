@@ -4,7 +4,8 @@
 (require racket/runtime-path
          (only-in file/gunzip gunzip-through-ports)
          (only-in file/untar untar)
-         (only-in racket/file make-directory*)
+         (only-in racket/file
+                  delete-directory/files make-temporary-file)
          (only-in racket/list first)
          (only-in racket/string string-split string-trim)
          (only-in "data.rkt" download-audio-cached load-audio))
@@ -49,25 +50,53 @@
    (string-append librispeech-base-url split ".tar.gz")
    #:valid? gzip-magic?))
 
+(define (gunzip-untar! archive dest)
+  (define-values (pipe-in pipe-out) (make-pipe (* 1024 1024)))
+  (define outcome (box #f))
+  (define untarrer
+    (thread
+     (lambda ()
+       (with-handlers ([exn:fail? (lambda (e) (set-box! outcome e))])
+         (untar pipe-in #:dest dest)
+         (set-box! outcome 'ok))
+       ;; unblocks a writer stuck on a full pipe if untar died early
+       (close-input-port pipe-in))))
+  (define gunzip-exn
+    (with-handlers ([exn:fail? values])
+      (call-with-input-file archive
+        (lambda (in) (gunzip-through-ports in pipe-out)))
+      #f))
+  (close-output-port pipe-out)
+  (thread-wait untarrer)
+  (define r (unbox outcome))
+  (cond
+    [(exn? r) (raise r)]
+    [gunzip-exn (raise gunzip-exn)]
+    [(eq? r 'ok) (void)]
+    [else (error 'librispeech "extraction did not complete for ~a"
+                 archive)]))
+
+;; extract into a private staging directory and publish by rename, so a
+;; failed or concurrent extraction can never surface a partial corpus
 (define (extracted-root split)
   (define archive (split-archive split))
   (define-values (parent _name _dir?) (split-path archive))
   (define dest (build-path parent split))
-  (define marker (build-path dest ".extracted"))
-  (unless (file-exists? marker)
-    (make-directory* dest)
-    (define-values (pipe-in pipe-out) (make-pipe (* 1024 1024)))
-    (define untarrer
-      (thread (lambda () (untar pipe-in #:dest dest))))
-    (call-with-input-file archive
-      (lambda (in) (gunzip-through-ports in pipe-out)))
-    (close-output-port pipe-out)
-    (thread-wait untarrer)
-    (call-with-output-file marker void))
+  (unless (directory-exists? dest)
+    (define staging
+      (make-temporary-file "librispeech-extract-~a" 'directory parent))
+    (with-handlers ([exn:fail?
+                     (lambda (e)
+                       (delete-directory/files staging #:must-exist? #f)
+                       (raise e))])
+      (gunzip-untar! archive staging)
+      (with-handlers ([exn:fail:filesystem?
+                       (lambda (e)
+                         (delete-directory/files staging #:must-exist? #f)
+                         (unless (directory-exists? dest) (raise e)))])
+        (rename-file-or-directory staging dest))))
   (build-path dest "LibriSpeech" split))
 
-;; every FLAC under speaker/chapter paired with its trans.txt line,
-;; sorted by utterance id so batch order is deterministic
 (define (librispeech-utterances split)
   (define root (extracted-root split))
   (sort

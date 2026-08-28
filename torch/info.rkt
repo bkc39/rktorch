@@ -10,7 +10,7 @@
 (define build-deps '("rackunit-lib" "racket-doc" "scribble-lib"))
 (define pkg-desc "Racket bindings for libtorch (PyTorch)")
 (define pkg-authors '("bkschemer@gmail.com"))
-(define license 'Apache-2.0)
+(define license '(Apache-2.0 AND CC-BY-4.0))
 (define pkg-tags
   '("machine-learning" "deep-learning" "tensor" "pytorch" "libtorch"))
 (define pre-install-collection "private/install-torchrkt-native.rkt")
