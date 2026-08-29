@@ -68,8 +68,7 @@
   (define magnitude-squared (add (mul re re) (mul im im)))
   (if (= power 2) magnitude-squared (sqrt magnitude-squared)))
 
-;; torchaudio.functional.edit_distance: Levenshtein distance between
-;; token sequences with unit insert/delete/substitute costs
+;; twins torchaudio.functional.edit_distance
 (define/contract (edit-distance reference hypothesis)
   (-> (listof any/c) (listof any/c) exact-nonnegative-integer?)
   (define hyp (list->vector hypothesis))

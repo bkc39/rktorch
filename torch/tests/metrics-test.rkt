@@ -33,6 +33,7 @@
     (check-equal? (cer "abc" "abc") 0)
     (check-equal? (cer "abc" "axc") 1/3)
     (check-equal? (cer "ab" "") 1)
+    (check-equal? (cer "a b" "ab") 1/3)
     (check-exn exn:fail:contract? (lambda () (cer "" "x"))))
 
   (test-case "metrics over the speech fixture transcript (#83)"

@@ -15,14 +15,12 @@
 
 (define rate/c (and/c rational? (>=/c 0)))
 
-;; Rates are exact: edit distance over the reference token count.
 (define/contract (wer reference hypothesis)
   (-> transcript/c string? rate/c)
   (define ref-words (string-split reference))
   (/ (edit-distance ref-words (string-split hypothesis))
      (length ref-words)))
 
-;; Character-level twin of wer; spaces count as characters.
 (define/contract (cer reference hypothesis)
   (-> non-empty-string? string? rate/c)
   (/ (edit-distance (string->list reference) (string->list hypothesis))
