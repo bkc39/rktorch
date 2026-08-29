@@ -2,18 +2,16 @@
 
 ;; whole-module on purpose: the expansion needs bindings only-in would strip
 (require racket/runtime-path
+         (only-in racket/contract/base -> any cons/c listof or/c)
          (only-in file/gunzip gunzip-through-ports)
          (only-in file/untar untar)
          (only-in racket/list first)
          (only-in racket/string string-split string-trim)
+         (only-in "../private/contract.rkt" define/contract-out)
          (only-in "../private/util.rkt" with-temporary-directory)
          (only-in "data.rkt" download-audio-cached load-audio))
 
-(provide (struct-out utterance)
-         librispeech-utterances
-         load-librispeech-fixture
-         load-utterance
-         parse-trans-line)
+(provide (struct-out utterance))
 
 (struct utterance (id path transcript) #:transparent)
 
@@ -21,8 +19,11 @@
 
 (define known-splits '("dev-clean" "test-clean"))
 
+(define split/c (apply or/c known-splits))
+
 ;; SPEAKER-CHAPTER-UTT TRANSCRIPT IN CAPS
-(define (parse-trans-line line)
+(define/contract-out (parse-trans-line line)
+  (-> string? (or/c #f (cons/c string? string?)))
   (define trimmed (string-trim line))
   (cond
     [(string=? trimmed "") #f]
@@ -41,9 +42,6 @@
       (and (bytes? bs) (= (bytes-length bs) 2) (equal? bs #"\037\213")))))
 
 (define (split-archive split)
-  (unless (member split known-splits)
-    (error 'librispeech "unknown split ~e (expected one of ~a)"
-           split known-splits))
   (download-audio-cached
    (format "librispeech/~a.tar.gz" split)
    (string-append librispeech-base-url split ".tar.gz")
@@ -109,7 +107,8 @@
         (rename-file-or-directory staging dest))))
   (build-path dest "LibriSpeech" split))
 
-(define (librispeech-utterances split)
+(define/contract-out (librispeech-utterances split)
+  (-> split/c (listof utterance?))
   (define root (extracted-root split))
   (sort
    (for*/list ([speaker (in-list (directory-list root))]
@@ -134,14 +133,16 @@
                 (cdr entry)))
    string<? #:key utterance-id))
 
-(define (load-utterance u)
+(define/contract-out (load-utterance u)
+  (-> utterance? any)
   (load-audio (utterance-path u)))
 
 (define-runtime-path fixture-flac "fixtures/librispeech-1272-128104-0000.flac")
 (define-runtime-path fixture-trans
   "fixtures/librispeech-1272-128104-0000.txt")
 
-(define (load-librispeech-fixture)
+(define/contract-out (load-librispeech-fixture)
+  (-> any)
   (define-values (samples rate) (load-audio fixture-flac))
   (values samples rate
           (cdr (parse-trans-line
