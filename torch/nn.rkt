@@ -5,7 +5,8 @@
 
 (require racket/contract
          "foreign.rkt"
-         (only-in "foreign/contracts.rkt" pos-size/c nonneg-size/c)
+         (only-in "foreign/contracts.rkt"
+                  nonneg-size-1d/c nonneg-size/c pos-size-1d/c pos-size/c)
          "nn/conv.rkt"
          "nn/dropout.rkt"
          "nn/embedding.rkt"
@@ -27,6 +28,8 @@
          module-training?
          in-eval-mode)
 
+(provide ctc-loss)
+
 (provide
  (contract-out
   [module? (-> any/c boolean?)]
@@ -42,6 +45,10 @@
   ;; `(require torch torch/nn)` collision-free (#11).
   [Linear (-> exact-positive-integer? exact-positive-integer? linear?)]
   [linear? (-> any/c boolean?)]
+  [Conv1d (->* (exact-positive-integer? exact-positive-integer? pos-size-1d/c)
+               (#:stride pos-size-1d/c #:padding nonneg-size-1d/c)
+               conv1d?)]
+  [conv1d? (-> any/c boolean?)]
   [Conv2d (->* (exact-positive-integer? exact-positive-integer? pos-size/c)
                (#:stride pos-size/c #:padding nonneg-size/c)
                conv2d?)]

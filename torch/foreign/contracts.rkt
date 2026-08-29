@@ -26,6 +26,8 @@
          device/c
          tensor-or-real/c
          pool-size/c
+         pos-size-1d/c
+         nonneg-size-1d/c
          pos-size/c
          nonneg-size/c
          binary-arith/c
@@ -107,6 +109,12 @@
        [result any/c]))
 
 (define pool-size/c (or/c index/c (list/c index/c index/c)))
+
+(define pos-size-1d/c
+  (or/c exact-positive-integer? (list/c exact-positive-integer?)))
+
+(define nonneg-size-1d/c
+  (or/c exact-nonnegative-integer? (list/c exact-nonnegative-integer?)))
 
 (define pos-size/c
   (or/c exact-positive-integer?

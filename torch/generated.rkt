@@ -24,10 +24,12 @@
          avg-pool2d
          broadcast-to
          cat
+         conv1d
          conv2d
          copy!
          cos-tensor
          cross-entropy-loss
+         ctc-loss-intlist
          dot
          dropout
          embedding
@@ -107,6 +109,9 @@
 (define-generated-op cat tr_gen_cat
   ([tensors tensor-list] [dim int64]))
 
+(define-generated-op conv1d tr_gen_conv1d
+  ([input tensor] [weight tensor] [bias optional-tensor] [stride int-array] [padding int-array] [dilation int-array] [groups int64]))
+
 (define-generated-op conv2d tr_gen_conv2d
   ([input tensor] [weight tensor] [bias optional-tensor] [stride int-array] [padding int-array] [dilation int-array] [groups int64]))
 
@@ -118,6 +123,9 @@
 
 (define-generated-op cross-entropy-loss tr_gen_cross_entropy_loss
   ([self tensor] [target tensor] [weight optional-tensor] [reduction int64] [ignore-index int64] [label-smoothing double]))
+
+(define-generated-op ctc-loss-intlist tr_gen_ctc_loss_intlist
+  ([log-probs tensor] [targets tensor] [input-lengths int-array] [target-lengths int-array] [blank int64] [reduction int64] [zero-infinity bool]))
 
 (define-generated-op dot tr_gen_dot
   ([self tensor] [tensor-arg tensor]))

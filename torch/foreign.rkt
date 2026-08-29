@@ -20,6 +20,8 @@
 
 (provide ref ref! with-no-grad with-default-device)
 
+(provide conv1d)
+
 (provide (rename-out [t+ +] [t- -] [t* *] [t/ /])
          @)
 

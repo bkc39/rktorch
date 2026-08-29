@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include <stdbool.h>
+
 #include "torchrkt/c_api/tensor.h"
 
 #ifdef __cplusplus
@@ -17,6 +19,13 @@ tr_tensor* tr_gen_cross_entropy_loss(
     const tr_tensor* self, const tr_tensor* target,
     const tr_tensor* weight /* nullable: NULL == no value */, int64_t reduction,
     int64_t ignore_index, double label_smoothing);
+tr_tensor* tr_gen_ctc_loss_intlist(const tr_tensor* log_probs,
+                                   const tr_tensor* targets,
+                                   const int64_t* input_lengths,
+                                   int64_t input_lengths_len,
+                                   const int64_t* target_lengths,
+                                   int64_t target_lengths_len, int64_t blank,
+                                   int64_t reduction, bool zero_infinity);
 tr_tensor* tr_gen_nll_loss(
     const tr_tensor* self, const tr_tensor* target,
     const tr_tensor* weight /* nullable: NULL == no value */, int64_t reduction,

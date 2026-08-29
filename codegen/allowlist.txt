@@ -43,6 +43,7 @@ shape where.Scalar
 
 # conv + pooling. conv2d exercises the optional-Tensor (bias) marshalling;
 # avg_pool2d the optional-int64 (divisor_override).
+conv conv1d
 conv conv2d
 conv max_pool2d
 conv avg_pool2d
@@ -52,6 +53,10 @@ conv adaptive_avg_pool2d
 # bridge); reduction is the ATen enum int (Mean=1). Full dtype work is v3.
 loss nll_loss
 loss cross_entropy_loss
+# ctc_loss: the ASR objective. IntList overload — lengths as int[] keeps
+# the surface scheme-native; blank/reduction/zero_infinity exercise
+# int64 + bool marshalling.
+loss ctc_loss.IntList
 
 # dim-wise reductions: int[1]? dim (optional-int-array) + ScalarType? dtype
 # (optional-dtype, always nullopt in float32-only v2).
