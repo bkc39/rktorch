@@ -7,6 +7,8 @@
   (require rackunit
            "../main.rkt"
            "../nn.rkt"
+           (only-in "../audio/functional.rkt" log-mel-spectrogram)
+           (only-in "../audio/librispeech.rkt" load-librispeech-fixture)
            (only-in "../data/mnist.rkt" load-mnist-fixture)
            (only-in "../data/text.rkt"
                     contiguous-blocks encode load-text-fixture text->vocab)
@@ -390,6 +392,55 @@
        (when (and (cuda-available?)
                   (python-cuda-available?))
          (check-training-twin "06_gpt" "python/06_gpt.py" train-on
+                              'cuda 5e-3)))
+     (when (python-module-available? "torchaudio")
+       (define-module asr (n-mels vocab-size #:n-hidden [n-hidden 64])
+         #:submodules ([conv1 (Conv1d n-mels n-hidden 3
+                                      #:stride 2 #:padding 1)]
+                       [conv2 (Conv1d n-hidden n-hidden 3
+                                      #:stride 2 #:padding 1)]
+                       [head (Linear n-hidden (add1 vocab-size))])
+         #:forward (x)
+         (with-default-device (tensor-device x)
+           (define frames (relu (conv2 (relu (conv1 x)))))
+           (log-softmax (head (t frames 1 2)) 2)))
+       (define-values (samples rate transcript) (load-librispeech-fixture))
+       (define vocab (text->vocab transcript))
+       (define v-size (vector-length vocab))
+       (check-equal? (map tensor-shape (parameters (asr 80 v-size)))
+                     (list '(64 80 3) '(64) '(64 64 3) '(64)
+                           (list (add1 v-size) 64) (list (add1 v-size)))
+                     "asr shape must match examples/racket/07-asr.rkt")
+       (define (train-on device)
+         (with-default-device device
+           (manual-seed! 0)
+           (define x
+             (to-device (unsqueeze (log-mel-spectrogram (ref samples 0)
+                                                        #:sample-rate rate)
+                                   0)
+                        device))
+           (define targets (unsqueeze (encode vocab transcript) 0))
+           (define net (asr 80 v-size))
+           (define opt (adam (parameters net) #:lr 0.001))
+           (define losses
+             (for/list ([_ (in-range 5)])
+               (zero-grads! opt)
+               (define out (net x))
+               (define loss
+                 (ctc-loss (t out 0 1) targets
+                           #:input-lengths (list (cadr (tensor-shape out)))
+                           #:target-lengths (list (string-length transcript))
+                           #:blank v-size))
+               (backward! loss)
+               (step! opt)
+               (item loss)))
+           (values losses
+                   (cat (for/list ([p (in-list (parameters net))])
+                          (reshape p -1))))))
+       (check-training-twin "07_asr" "python/07_asr.py" train-on 'cpu tol)
+       (when (and (cuda-available?)
+                  (python-cuda-available?))
+         (check-training-twin "07_asr" "python/07_asr.py" train-on
                               'cuda 5e-3)))
      (let ()
        (define j (python-check "conv2d_init.py"))
