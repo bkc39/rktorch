@@ -10,7 +10,8 @@
            (only-in racket/file
                     delete-directory/files make-temporary-directory)
            (only-in "../audio/functional.rkt"
-                    hann-window log-mel-spectrogram mel-filterbank stft)
+                    edit-distance hann-window log-mel-spectrogram
+                    mel-filterbank stft)
            (only-in "../audio/librispeech.rkt" load-librispeech-fixture)
            (only-in "../audio/data.rkt"
                     load-audio load-audio-fixture load-wav save-audio
@@ -68,6 +69,22 @@
             [i (in-naturals)]
             [_ (in-range 64)])
         (check-= mine theirs 1e-3 (format "log-mel element ~a" i)))))
+
+  (when (python-module-available? "torchaudio")
+    (test-case "edit-distance against torchaudio.functional.edit_distance"
+      (define j (python-result "python/edit_distance_parity.py"))
+      (define cases
+        (list (list (string->list "kitten") (string->list "sitting"))
+              (list (string->list "flaw") (string->list "lawn"))
+              (list '() '())
+              (list '() (string->list "abc"))
+              (list '("the" "cat" "sat") '("the" "bat" "sat" "on"))
+              (list '("a" "a" "b" "a") '("a" "b" "a" "a"))))
+      (for ([case (in-list cases)]
+            [theirs (in-list (hash-ref j 'distances))]
+            [i (in-naturals)])
+        (check-equal? (edit-distance (car case) (cadr case)) theirs
+                      (format "edit-distance case ~a" i)))))
 
   (when (python-module-available? "soundfile")
     (test-case "write-wav and save-audio against soundfile"

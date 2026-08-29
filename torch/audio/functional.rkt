@@ -1,8 +1,8 @@
 #lang racket/base
 
 (require (only-in racket/contract
-                  ->* ->i =/c >=/c and/c define/contract or/c
-                  unsupplied-arg?)
+                  -> ->* ->i =/c >=/c and/c any/c define/contract listof
+                  or/c unsupplied-arg?)
          (only-in "../foreign/error.rkt" check-handle)
          (only-in "../foreign/raw/spectral.rkt"
                   tr-hann-window/raw tr-stft/raw)
@@ -11,7 +11,8 @@
                   add dtype log matmul mul ref sqrt t tensor
                   tensor-device tensor? to-device to-dtype))
 
-(provide hann-window
+(provide edit-distance
+         hann-window
          log-mel-spectrogram
          mel-filterbank
          spectrogram
@@ -66,6 +67,26 @@
   (define im (ref frames .. 1))
   (define magnitude-squared (add (mul re re) (mul im im)))
   (if (= power 2) magnitude-squared (sqrt magnitude-squared)))
+
+;; torchaudio.functional.edit_distance: Levenshtein distance between
+;; token sequences with unit insert/delete/substitute costs
+(define/contract (edit-distance reference hypothesis)
+  (-> (listof any/c) (listof any/c) exact-nonnegative-integer?)
+  (define hyp (list->vector hypothesis))
+  (define n (vector-length hyp))
+  (for/fold ([prev (build-vector (add1 n) values)]
+             #:result (vector-ref prev n))
+            ([r (in-list reference)]
+             [i (in-naturals 1)])
+    (define curr (make-vector (add1 n) i))
+    (for ([h (in-vector hyp)]
+          [j (in-naturals 1)])
+      (vector-set! curr j
+                   (min (add1 (vector-ref curr (sub1 j)))
+                        (add1 (vector-ref prev j))
+                        (+ (vector-ref prev (sub1 j))
+                           (if (equal? r h) 0 1)))))
+    curr))
 
 (define (hz->mel f)
   (* 2595.0 (/ (log (+ 1.0 (/ f 700.0))) (log 10.0))))
