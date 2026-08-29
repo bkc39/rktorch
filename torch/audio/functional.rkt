@@ -1,7 +1,8 @@
 #lang racket/base
 
 (require (only-in racket/contract
-                  ->* ->i >=/c and/c define/contract or/c unsupplied-arg?)
+                  ->* ->i =/c >=/c and/c define/contract or/c
+                  unsupplied-arg?)
          (only-in "../foreign/error.rkt" check-handle)
          (only-in "../foreign/raw/spectral.rkt"
                   tr-hann-window/raw tr-stft/raw)
@@ -56,7 +57,7 @@
         #:win-length maybe-length/c
         #:window (or/c #f tensor?)
         #:center? boolean?
-        #:power (or/c 1.0 2.0))
+        #:power (or/c (=/c 1) (=/c 2)))
        tensor?)
   (define frames (stft samples #:n-fft n-fft #:hop-length hop-length
                        #:win-length win-length #:window window
@@ -64,7 +65,7 @@
   (define re (ref frames .. 0))
   (define im (ref frames .. 1))
   (define magnitude-squared (add (mul re re) (mul im im)))
-  (if (= power 2.0) magnitude-squared (sqrt magnitude-squared)))
+  (if (= power 2) magnitude-squared (sqrt magnitude-squared)))
 
 (define (hz->mel f)
   (* 2595.0 (/ (log (+ 1.0 (/ f 700.0))) (log 10.0))))

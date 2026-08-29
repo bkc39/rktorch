@@ -36,11 +36,15 @@ tr_tensor* tr_stft(const tr_tensor* self, int64_t n_fft, int64_t hop_length,
     return torchrkt::null_arg("tr_stft");
   }
   return torchrkt::alloc_result("tr_stft", [&] {
-    if (hop_length < -1) {
+    if (n_fft <= 0) {
+      throw std::invalid_argument("n_fft must be positive, got " +
+                                  std::to_string(n_fft));
+    }
+    if (hop_length < -1 || hop_length == 0) {
       throw std::invalid_argument("hop length must be positive or -1, got " +
                                   std::to_string(hop_length));
     }
-    if (win_length < -1) {
+    if (win_length < -1 || win_length == 0) {
       throw std::invalid_argument("win length must be positive or -1, got " +
                                   std::to_string(win_length));
     }

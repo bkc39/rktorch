@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <string>
 #include <vector>
 
 #include "torchrkt/c_api.h"
@@ -80,8 +81,11 @@ TEST(Spectral, StftHonorsWindowAndGuards) {
   EXPECT_EQ(tr_stft(nullptr, 4, -1, -1, nullptr, true, false), nullptr);
   EXPECT_NE(tr_last_error(), nullptr);
   EXPECT_EQ(tr_stft(signal.t, 0, -1, -1, nullptr, true, false), nullptr);
+  EXPECT_NE(std::string(tr_last_error()).find("n_fft"), std::string::npos);
   EXPECT_EQ(tr_stft(signal.t, 4, -2, -1, nullptr, false, false), nullptr);
+  EXPECT_EQ(tr_stft(signal.t, 4, 0, -1, nullptr, false, false), nullptr);
   EXPECT_EQ(tr_stft(signal.t, 4, -1, -2, nullptr, false, false), nullptr);
+  EXPECT_EQ(tr_stft(signal.t, 4, -1, 0, nullptr, false, false), nullptr);
 }
 
 TEST(Spectral, StftDefaultWindowMatchesInputDtype) {

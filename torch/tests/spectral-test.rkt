@@ -53,6 +53,9 @@
     (define p1 (spectrogram (ones 8) #:n-fft 4 #:hop-length 4 #:center? #f
                             #:power 1.0))
     (check-equal? (car (tensor->list p1)) 4.0)
+    (define p2-exact (spectrogram (ones 8) #:n-fft 4 #:hop-length 4
+                                  #:center? #f #:power 2))
+    (check-equal? (car (tensor->list p2-exact)) 16.0)
     (check-exn #rx"power"
                (lambda () (spectrogram (ones 8) #:n-fft 4 #:power 3.0))))
 
