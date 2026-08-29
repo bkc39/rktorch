@@ -9,10 +9,13 @@
            rackunit
            (only-in racket/file
                     delete-directory/files make-temporary-directory)
+           (only-in "../audio/functional.rkt"
+                    hann-window log-mel-spectrogram mel-filterbank stft)
+           (only-in "../audio/librispeech.rkt" load-librispeech-fixture)
            (only-in "../audio/data.rkt"
                     load-audio load-audio-fixture load-wav save-audio
                     write-wav)
-           (only-in "../main.rkt" tensor tensor-shape tensor->list)
+           (only-in "../main.rkt" ref tensor tensor-shape tensor->list)
            "private/python-env.rkt")
 
   (define-runtime-path wav-fixture "../audio/fixtures/sine-440-16k.wav")
@@ -38,6 +41,33 @@
                       (exact->inexact v))
                     (hash-ref j 'values)
                     "load-audio sample parity")))
+
+  (when (python-module-available? "torchaudio")
+    (test-case "spectral front-end against torch.stft and torchaudio fbanks"
+      (define j (python-result "python/spectral_parity.py"))
+      (define-values (samples rate _t) (load-librispeech-fixture))
+      (define x (ref samples 0))
+      (define frames
+        (stft x #:n-fft 400 #:hop-length 160 #:window (hann-window 400)))
+      (check-equal? (tensor-shape frames) (hash-ref j 'stft_shape))
+      (for ([mine (in-list (tensor->list frames))]
+            [theirs (in-list (hash-ref j 'stft_head))]
+            [i (in-naturals)])
+        (check-= mine theirs tol (format "stft element ~a" i)))
+      (define fb (mel-filterbank #:n-freqs 201 #:n-mels 80
+                                 #:sample-rate rate))
+      (check-equal? (tensor-shape fb) (hash-ref j 'fbank_shape))
+      (for ([mine (in-list (tensor->list fb))]
+            [theirs (in-list (hash-ref j 'fbank))]
+            [i (in-naturals)])
+        (check-= mine theirs tol (format "fbank element ~a" i)))
+      (define log-mel (log-mel-spectrogram x #:sample-rate rate))
+      (check-equal? (tensor-shape log-mel) (hash-ref j 'log_mel_shape))
+      (for ([mine (in-list (tensor->list log-mel))]
+            [theirs (in-list (hash-ref j 'log_mel_head))]
+            [i (in-naturals)]
+            [_ (in-range 64)])
+        (check-= mine theirs 1e-3 (format "log-mel element ~a" i)))))
 
   (when (python-module-available? "soundfile")
     (test-case "write-wav and save-audio against soundfile"

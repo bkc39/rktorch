@@ -11,4 +11,5 @@
 #include "torchrkt/c_api/random.h"
 #include "torchrkt/c_api/reduce.h"
 #include "torchrkt/c_api/shape_ops.h"
+#include "torchrkt/c_api/spectral.h"
 #include "torchrkt/c_api/tensor.h"
