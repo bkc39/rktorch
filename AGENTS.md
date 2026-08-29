@@ -331,6 +331,30 @@ examples (`examples/racket/*.rkt`, prose-by-design) and the python
 parity twins (`examples/python/*.py`, whose docstrings identify the
 Racket twin they mirror).
 
+## Validating arguments
+
+Exported definitions carry their contract at the definition site with
+`define/contract-out` (`torch/private/contract.rkt`), which expands to a
+`define` plus `(provide (contract-out ...))`.  One form, so the contract
+sits where a reader already is and the name is not repeated in a separate
+`provide` block.  Not `define/contract`: it blames the defining module
+rather than the caller, which is backwards for a library reporting what a
+user passed.
+
+`unless`+`error` stays for what a contract cannot see -- checks against
+parsed content (WAV chunk structure), filesystem state (symlink
+containment), or values computed mid-body.  A guard that only inspects an
+argument's shape belongs in the signature.
+
+Name non-obvious contracts with `flat-named-contract` so the violation
+message still says `sample-rate` rather than an inlined `and/c` chain.
+
+Two costs, both known: `raco review` is syntactic and cannot see the
+generated `provide`, so an exported definition used nowhere else in its
+own module draws a false "identifier is never used"; and the contract is
+evaluated in definition position, so a predicate it names must be defined
+above it.  (`resyntax`, the CI gate, is unaffected.)
+
 ## CI
 
 `.github/workflows/nix.yml`: `nix flake check` on `ubuntu-latest` +

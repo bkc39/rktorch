@@ -42,15 +42,18 @@
              (lambda () (safe-div 1 0)))
 
   ;; the caller is blamed, not the module that defines safe-div
-  (define (message-matching pattern)
-    (lambda (e)
-      (and (exn:fail? e)
-           (regexp-match? pattern
-                          (regexp-replace* #rx"[ \n]+" (exn-message e) " ")))))
-  (check-exn (message-matching #rx"blaming: [(][^)]*contract-out-test\\.rkt test[)]")
-             (lambda () (safe-div 1 0)))
-  (check-exn (message-matching #rx"contract from: [(][^)]*contract-out-test\\.rkt lib[)]")
-             (lambda () (safe-div 1 0)))
+  (define ((message-matching pattern) e)
+    (and (exn:fail? e)
+         (regexp-match? pattern
+                        (regexp-replace* #rx"[ \n]+" (exn-message e) " "))))
+  (define blames-the-caller
+    (message-matching
+     #rx"blaming: [(][^)]*contract-out-test\\.rkt test[)]"))
+  (define contract-comes-from-lib
+    (message-matching
+     #rx"contract from: [(][^)]*contract-out-test\\.rkt lib[)]"))
+  (check-exn blames-the-caller (lambda () (safe-div 1 0)))
+  (check-exn contract-comes-from-lib (lambda () (safe-div 1 0)))
 
   (check-exn #rx"#:pre condition violation"
              (lambda () (split-heads 32 5)))
