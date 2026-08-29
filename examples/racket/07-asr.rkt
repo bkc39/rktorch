@@ -265,7 +265,7 @@ rather than crash inside the loss.
 @chunk[<r07-device>
 (define (pick-device)
   (define accel (accelerator-if-available))
-  (if (eq? (device-type accel) 'mps) 'cpu accel))]
+  (if (eq? (device-type accel) 'mps) (cpu-device) accel))]
 
 @bold{Features and teacher forcing.} One utterance becomes a
 @tt{[1, 80, T]} batch. For training, the transcript becomes two shifted
@@ -452,6 +452,15 @@ dev-clean is ~5.4 hours of speech --- small for
 character-level seq2seq --- so expect recognizable words and partial
 spellings, not a production recognizer; the 100-hour train-clean-100
 split is the natural next scale.
+
+For calibration, 40 epochs at these defaults on an RTX 3090 Ti take
+about twenty minutes and drive the hybrid loss from 2.57 to 0.11. On
+held-out utterances that lands around @tt{0.6} CER --- the CTC head
+spelling phonetically (@tt{ARKTHRIS} for @emph{Arcturus},
+@tt{STEUDFAS} for @emph{steadfast}) while the attention decoder emits
+real words in roughly the right places. Word error rate stays just
+above 1.0, because the decoder over-generates and every insertion
+counts against it.
 
 @chunk[<r07-train>
 (define (train-librispeech #:epochs [epochs 20] #:limit [limit #f]

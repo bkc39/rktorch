@@ -74,6 +74,9 @@
   ;; the attention decoder is capped at one character per encoder frame
   (check-true (<= (string-length att-hyp) 500)
               (format "transcribe failed to terminate: ~v" att-hyp))
+  ;; pick-device's MPS carve-out must hand back a device?, not the bare
+  ;; symbol — every caller below feeds it to device-type/to-device
+  (check-true (device? (pick-device)))
   ;; Device RNG streams differ from the CPU's, so the on-device arm checks
   ;; convergence, never equality with the CPU losses above. pick-device
   ;; already excludes MPS (no ctc_loss kernel), so this arm is CUDA-only.
