@@ -1,15 +1,14 @@
 #lang racket/base
 
-;; Which validation strategy costs what, for #96.  Each strategy is a
-;; submodule, so a call from `main` really does cross a module boundary
-;; while the submodule's own `intra-*` loop really does not -- that
-;; difference is the whole question.
-;;
+;; What each validation strategy costs.  Every strategy is a submodule so
+;; that a call from `main` crosses a module boundary and a submodule's own
+;; `intra-*` loop does not; flattening them would measure nothing.
 ;; Run:  racket scripts/bench-contract-overhead.rkt
 
 (module bare racket/base
-  (provide scale add-wrap split-heads intra-scale intra-add intra-heads)
-  (require (only-in torch add))
+  (provide scale add-wrap split-heads shape-wrap
+           intra-scale intra-add intra-heads intra-shape)
+  (require (only-in torch add tensor-shape))
 
   (define (scale x k) (* x k))
   (define (add-wrap a b) (add a b))
@@ -20,11 +19,16 @@
   (define (intra-add reps a b)
     (for ([_ (in-range reps)]) (add-wrap a b)))
   (define (intra-heads reps n h)
-    (for/fold ([acc 0]) ([_ (in-range reps)]) (+ acc (split-heads n h)))))
+    (for/fold ([acc 0]) ([_ (in-range reps)]) (+ acc (split-heads n h))))
+
+  (define (shape-wrap t) (tensor-shape t))
+  (define (intra-shape reps t _unused)
+    (for/fold ([acc 0]) ([_ (in-range reps)]) (+ acc (length (shape-wrap t))))))
 
 (module guards racket/base
-  (provide scale add-wrap split-heads intra-scale intra-add intra-heads)
-  (require (only-in torch add tensor?))
+  (provide scale add-wrap split-heads shape-wrap
+           intra-scale intra-add intra-heads intra-shape)
+  (require (only-in torch add tensor-shape tensor?))
 
   (define (scale x k)
     (unless (real? x) (error 'scale "x must be real: ~e" x))
@@ -45,15 +49,22 @@
   (define (intra-add reps a b)
     (for ([_ (in-range reps)]) (add-wrap a b)))
   (define (intra-heads reps n h)
-    (for/fold ([acc 0]) ([_ (in-range reps)]) (+ acc (split-heads n h)))))
+    (for/fold ([acc 0]) ([_ (in-range reps)]) (+ acc (split-heads n h))))
+
+  (define (shape-wrap t)
+    (unless (tensor? t) (error 'shape-wrap "t must be a tensor: ~e" t))
+    (tensor-shape t))
+  (define (intra-shape reps t _unused)
+    (for/fold ([acc 0]) ([_ (in-range reps)]) (+ acc (length (shape-wrap t))))))
 
 (module defcontract racket/base
-  (provide scale add-wrap split-heads intra-scale intra-add intra-heads)
+  (provide scale add-wrap split-heads shape-wrap
+           intra-scale intra-add intra-heads intra-shape)
   ;; define/contract is not in racket/contract/base; raco review's
   ;; "prefer base" warning here cannot be satisfied
   (require (only-in racket/contract define/contract)
            (only-in racket/contract/base -> ->i)
-           (only-in torch add tensor?))
+           (only-in torch add tensor-shape tensor?))
 
   (define/contract (scale x k) (-> real? real? real?) (* x k))
   (define/contract (add-wrap a b) (-> tensor? tensor? tensor?) (add a b))
@@ -68,12 +79,17 @@
   (define (intra-add reps a b)
     (for ([_ (in-range reps)]) (add-wrap a b)))
   (define (intra-heads reps n h)
-    (for/fold ([acc 0]) ([_ (in-range reps)]) (+ acc (split-heads n h)))))
+    (for/fold ([acc 0]) ([_ (in-range reps)]) (+ acc (split-heads n h))))
+
+  (define/contract (shape-wrap t) (-> tensor? list?) (tensor-shape t))
+  (define (intra-shape reps t _unused)
+    (for/fold ([acc 0]) ([_ (in-range reps)]) (+ acc (length (shape-wrap t))))))
 
 (module boundary racket/base
-  (provide intra-scale intra-add intra-heads)
+  ;; define/contract-out provides the four wrappers itself
+  (provide intra-scale intra-add intra-heads intra-shape)
   (require (only-in racket/contract/base -> ->i)
-           (only-in torch add tensor?)
+           (only-in torch add tensor-shape tensor?)
            (only-in (file "../torch/private/contract.rkt") define/contract-out))
 
   (define/contract-out (scale x k) (-> real? real? real?) (* x k))
@@ -89,11 +105,15 @@
   (define (intra-add reps a b)
     (for ([_ (in-range reps)]) (add-wrap a b)))
   (define (intra-heads reps n h)
-    (for/fold ([acc 0]) ([_ (in-range reps)]) (+ acc (split-heads n h)))))
+    (for/fold ([acc 0]) ([_ (in-range reps)]) (+ acc (split-heads n h))))
+
+  (define/contract-out (shape-wrap t) (-> tensor? list?) (tensor-shape t))
+  (define (intra-shape reps t _unused)
+    (for/fold ([acc 0]) ([_ (in-range reps)]) (+ acc (length (shape-wrap t))))))
 
 (module+ main
   (require racket/format
-           (only-in torch manual-seed! randn)
+           (only-in torch manual-seed! randn reclaim-native-memory!)
            (only-in torch/audio/data load-audio-fixture)
            (only-in torch/audio/functional log-mel-spectrogram)
            (prefix-in bare: (submod ".." bare))
@@ -113,12 +133,16 @@
       (for/fold ([acc 0]) ([_ (in-range reps)]) (+ acc (f n h)))))
   (define-syntax-rule (add-loop f)
     (lambda (reps a b) (for ([_ (in-range reps)]) (f a b))))
+  (define-syntax-rule (shape-loop f)
+    (lambda (reps t _unused)
+      (for/fold ([acc 0]) ([_ (in-range reps)]) (+ acc (length (f t))))))
 
   (define (best-ms thunk #:runs [runs 7])
     (thunk)                             ; warm up before the first timed run
     (for/fold ([best +inf.0]) ([_ (in-range runs)])
-      (collect-garbage)
-      (collect-garbage)
+      ;; collect alone leaves the finalizer queue to fire after t0 and
+      ;; charge one strategy's native frees to the next one's clock
+      (reclaim-native-memory!)
       (define t0 (current-inexact-milliseconds))
       (thunk)
       (min best (- (current-inexact-milliseconds) t0))))
@@ -175,6 +199,13 @@
             (vector (add-loop bare:add-wrap) (add-loop guards:add-wrap)
                     (add-loop dc:add-wrap) (add-loop bo:add-wrap))
             (randn 8 8) (randn 8 8))
+
+  (workload "tensor? contract on a cached shape read" 1000000
+            (vector bare:intra-shape guards:intra-shape
+                    dc:intra-shape bo:intra-shape)
+            (vector (shape-loop bare:shape-wrap) (shape-loop guards:shape-wrap)
+                    (shape-loop dc:shape-wrap) (shape-loop bo:shape-wrap))
+            (randn 8 8) #f)
 
   (displayln "\nreal pipeline: log-mel-spectrogram over the speech fixture")
   (define-values (samples rate) (load-audio-fixture))

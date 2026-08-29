@@ -369,26 +369,31 @@ used.  (`resyntax`, the CI gate, is unaffected.)
 
 ### What the strategies cost
 
-`scripts/bench-contract-overhead.rkt`, lab host, ns per call, two agreeing
-runs.  Ratios are against an unvalidated call.
+`scripts/bench-contract-overhead.rkt`, lab host, ratios against an
+unvalidated call, two agreeing runs.
 
-| | flat `->` | `->i` + `#:pre` | 8x8 tensor `add` |
-|---|---|---|---|
-| `unless`+`error` | 1.1x | 2.0x | 1.0x |
-| `define/contract` intra | 9.9x | 19x | 1.07x |
-| `define/contract` cross | 10.2x | 18x | 1.07x |
-| `define/contract-out` intra | 1.0x | 1.0x | 0.9x |
-| `define/contract-out` cross | 5.2x | 18x | 1.05x |
+| | flat `->` | `->i` + `#:pre` | cached shape read | 8x8 tensor `add` |
+|---|---|---|---|---|
+| `unless`+`error` | 1.1x | 2.0x | 1.8x | 1.0x |
+| `define/contract` intra | 9.7x | 19x | 4.0x | 1.1x |
+| `define/contract` cross | 9.4x | 20x | 4.1x | 1.1x |
+| `define/contract-out` intra | 1.0x | 1.0x | 1.0x | 1.0x |
+| `define/contract-out` cross | 4.9x | 20x | 3.3x | 1.1x |
 
-Three things follow.  Anything touching a tensor is free: an FFI call is
-~15 us against ~0.2 us of contract, so the whole column is inside
-run-to-run variance -- `log-mel-spectrogram` spends ~3 ms and about 0.03%
-of it on its five boundary crossings.  `define/contract` charges the same
-inside the module as across it, because it wraps the definition rather
-than the export -- on a non-tensor hot path that is 10-20x, and it is the
-second reason to prefer `define/contract-out`, which is free internally.
-And `->i` costs ~5x a flat contract at the boundary, so reach for it when
-the dependency is real, not for tidiness.
+**"Touches a tensor" is not the dividing line -- allocation is.** An 8x8
+`add` costs ~16 us of FFI, so every strategy vanishes into run-to-run
+variance; `log-mel-spectrogram` spends ~2.7 ms and about 0.03% of it on
+its five boundary crossings.  But a cached accessor like `tensor-shape`
+allocates nothing and costs ~128 ns, so a boundary contract is a real
+3.3x there.  Contracts are free on ops that reach libtorch, not on cheap
+readers of the Racket wrapper.
+
+`define/contract` charges the same inside a module as across it, because
+it wraps the definition rather than the export.  `define/contract-out` is
+free internally (1.0x everywhere) and charges only at a real boundary --
+the second reason to prefer it, alongside blame.  `->i` is the expensive
+combinator: ~5x a flat contract, and unlike the flat case it costs the
+same whether or not the call crosses a boundary.
 
 ## CI
 
