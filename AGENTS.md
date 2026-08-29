@@ -351,10 +351,12 @@ message still says `sample-rate` rather than an inlined `and/c` chain.
 
 `raco review` lints unexpanded, so it cannot see the generated `provide`
 and reports an exported definition used nowhere else in its own module as
-"identifier is never used".  Mark those `;; noqa`, the same per-identifier
-directive the re-export shims already use; `#|review: ignore|#` suppresses
-a whole file and is too blunt here.  (`resyntax`, the CI gate, is
-unaffected.)
+"identifier is never used".  Mark the ones it flags `;; noqa`, the same
+per-identifier directive the re-export shims already use;
+`#|review: ignore|#` suppresses a whole file and is too blunt here.  It
+flags fewer than you would expect: a definition that passes its own name
+as a quoted symbol, as `(check-ok rc 'audio-info)` does, already counts as
+used.  (`resyntax`, the CI gate, is unaffected.)
 
 ## CI
 
