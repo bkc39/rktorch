@@ -24,6 +24,12 @@ tr_tensor* tr_gen_avg_pool2d(const tr_tensor* self, const int64_t* kernel_size,
                              int64_t padding_len, bool ceil_mode,
                              bool count_include_pad, int64_t divisor_override,
                              bool divisor_override_has);
+tr_tensor* tr_gen_conv1d(const tr_tensor* input, const tr_tensor* weight,
+                         const tr_tensor* bias /* nullable: NULL == no value */,
+                         const int64_t* stride, int64_t stride_len,
+                         const int64_t* padding, int64_t padding_len,
+                         const int64_t* dilation, int64_t dilation_len,
+                         int64_t groups);
 tr_tensor* tr_gen_conv2d(const tr_tensor* input, const tr_tensor* weight,
                          const tr_tensor* bias /* nullable: NULL == no value */,
                          const int64_t* stride, int64_t stride_len,

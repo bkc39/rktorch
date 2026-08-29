@@ -91,9 +91,15 @@ void torchrkt_c_api_compile_check(void) {
                           const tr_tensor*) = tr_gen_scatter_add_;
   tr_tensor* (*gen_sum_dim)(const tr_tensor*, const int64_t*, int64_t, bool,
                             bool, int32_t) = tr_gen_sum_dim_intlist;
+  tr_tensor* (*gen_conv1d)(const tr_tensor*, const tr_tensor*, const tr_tensor*,
+                           const int64_t*, int64_t, const int64_t*, int64_t,
+                           const int64_t*, int64_t, int64_t) = tr_gen_conv1d;
   tr_tensor* (*gen_conv2d)(const tr_tensor*, const tr_tensor*, const tr_tensor*,
                            const int64_t*, int64_t, const int64_t*, int64_t,
                            const int64_t*, int64_t, int64_t) = tr_gen_conv2d;
+  tr_tensor* (*gen_ctc_loss)(const tr_tensor*, const tr_tensor*, const int64_t*,
+                             int64_t, const int64_t*, int64_t, int64_t, int64_t,
+                             bool) = tr_gen_ctc_loss_intlist;
   tr_tensor* (*gen_avg_pool2d)(const tr_tensor*, const int64_t*, int64_t,
                                const int64_t*, int64_t, const int64_t*, int64_t,
                                bool, bool, int64_t, bool) = tr_gen_avg_pool2d;
@@ -220,7 +226,9 @@ void torchrkt_c_api_compile_check(void) {
   (void)gen_scatter_src_;
   (void)gen_scatter_add_;
   (void)gen_sum_dim;
+  (void)gen_conv1d;
   (void)gen_conv2d;
+  (void)gen_ctc_loss;
   (void)gen_avg_pool2d;
   (void)gen_adaptive_avg_pool2d;
   (void)gen_eq_tensor;

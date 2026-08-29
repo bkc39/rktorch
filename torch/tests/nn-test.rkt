@@ -97,6 +97,18 @@
     (check-equal? (tensor-shape (car (parameters c))) '(6 3 3 5))
     (check-equal? (tensor-shape (c (randn 2 3 10 10))) '(2 6 10 10)))
 
+  (test-case "Conv1d layer: param shapes, names, predicate, forward shape"
+    (manual-seed! 0)
+    (define c (Conv1d 2 8 3 #:stride 1 #:padding 1))
+    (check-true (conv1d? c))
+    (check-true (module? c))
+    (define ps (parameters c))
+    (check-equal? (map tensor-shape ps) '((8 2 3) (8)))
+    (check-true (andmap requires-grad? ps))
+    (check-equal? (map car (named-parameters c)) '("weight" "bias"))
+    (check-equal? (tensor-shape (c (randn 4 2 100))) '(4 8 100))
+    (check-equal? (object-name c) 'Conv1d))
+
   (test-case "MaxPool2d layer: stateless, default stride = kernel"
     (define p (MaxPool2d 2))
     (check-true (max-pool2d? p))
@@ -185,6 +197,28 @@
     (define logits (tensor '((-0.5 -1.0 -2.0) (-2.0 -0.2 -1.5))))
     (define targets (tensor '(0 1)))
     (check-= (item (cross-entropy logits targets)) 0.48362 1e-4))
+
+  (test-case "ctc-loss: closed form on uniform log-probs"
+    ;; two frames, two classes, label 1: the alignments [1 1], [0 1]
+    ;; and [1 0] carry probability 3/4, so the loss is -ln(3/4)
+    (define log-half (log 0.5))
+    (define log-probs
+      (tensor (list (list (list log-half log-half))
+                    (list (list log-half log-half)))))
+    (define targets (tensor '((1))))
+    (check-= (item (ctc-loss log-probs targets
+                             #:input-lengths '(2)
+                             #:target-lengths '(1)))
+             0.2876821 1e-6)
+    (check-exn #rx"input-lengths"
+               (lambda () (ctc-loss log-probs targets
+                                    #:input-lengths '()
+                                    #:target-lengths '(1))))
+    (check-exn #rx"blank"
+               (lambda () (ctc-loss log-probs targets
+                                    #:input-lengths '(2)
+                                    #:target-lengths '(1)
+                                    #:blank -1))))
 
   (test-case "a few Adam steps reduce the training loss"
     (manual-seed! 0)

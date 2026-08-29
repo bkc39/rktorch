@@ -45,6 +45,26 @@ tr_tensor* tr_gen_avg_pool2d(const tr_tensor* self, const int64_t* kernel_size,
   });
 }
 
+tr_tensor* tr_gen_conv1d(const tr_tensor* input, const tr_tensor* weight,
+                         const tr_tensor* bias, const int64_t* stride,
+                         int64_t stride_len, const int64_t* padding,
+                         int64_t padding_len, const int64_t* dilation,
+                         int64_t dilation_len, int64_t groups) {
+  if (!input || !weight || !stride || stride_len < 0 || !padding ||
+      padding_len < 0 || !dilation || dilation_len < 0) {
+    return torchrkt::null_arg("tr_gen_conv1d");
+  }
+  return torchrkt::alloc_result("tr_gen_conv1d", [&] {
+    return at::conv1d(
+        input->value, weight->value,
+        bias ? c10::optional<at::Tensor>(bias->value)
+             : c10::optional<at::Tensor>(),
+        at::IntArrayRef(stride, static_cast<size_t>(stride_len)),
+        at::IntArrayRef(padding, static_cast<size_t>(padding_len)),
+        at::IntArrayRef(dilation, static_cast<size_t>(dilation_len)), groups);
+  });
+}
+
 tr_tensor* tr_gen_conv2d(const tr_tensor* input, const tr_tensor* weight,
                          const tr_tensor* bias, const int64_t* stride,
                          int64_t stride_len, const int64_t* padding,
