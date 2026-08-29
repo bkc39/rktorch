@@ -58,7 +58,7 @@ class EncoderBlock(nn.Module):
         self.fc1 = nn.Linear(N_EMBD, 4 * N_EMBD)
         self.fc2 = nn.Linear(4 * N_EMBD, N_EMBD)
 
-    def forward(self, x):
+    def forward(self, x, mask=None):
         b, t, _ = x.shape
         hd = N_EMBD // N_HEAD
 
@@ -67,7 +67,10 @@ class EncoderBlock(nn.Module):
 
         xn = self.ln1(x)
         q, k, v = split(self.wq(xn)), split(self.wk(xn)), split(self.wv(xn))
-        att = torch.softmax(q @ k.transpose(2, 3) / math.sqrt(hd), dim=-1)
+        scores = q @ k.transpose(2, 3) / math.sqrt(hd)
+        if mask is not None:
+            scores = scores.masked_fill(mask, -torch.inf)
+        att = torch.softmax(scores, dim=-1)
         ctx = (att @ v).transpose(1, 2).reshape(b, t, N_EMBD)
         x1 = x + self.wo(ctx)
         return x1 + self.fc2(nn.functional.gelu(self.fc1(self.ln2(x1))))
@@ -90,7 +93,7 @@ class DecoderBlock(nn.Module):
         self.fc1 = nn.Linear(N_EMBD, 4 * N_EMBD)
         self.fc2 = nn.Linear(4 * N_EMBD, N_EMBD)
 
-    def forward(self, x, memory):
+    def forward(self, x, memory, mem_mask=None):
         b, s, _ = x.shape
         m = memory.shape[1]
         hd = N_EMBD // N_HEAD
@@ -110,7 +113,10 @@ class DecoderBlock(nn.Module):
         q2 = split(self.cq(x1n), s)
         k2 = split(self.ck(memory), m)
         v2 = split(self.cv(memory), m)
-        att2 = torch.softmax(q2 @ k2.transpose(2, 3) / math.sqrt(hd), dim=-1)
+        scores2 = q2 @ k2.transpose(2, 3) / math.sqrt(hd)
+        if mem_mask is not None:
+            scores2 = scores2.masked_fill(mem_mask, -torch.inf)
+        att2 = torch.softmax(scores2, dim=-1)
         x2 = x1 + self.co((att2 @ v2).transpose(1, 2).reshape(b, s, N_EMBD))
         return x2 + self.fc2(nn.functional.gelu(self.fc1(self.ln3(x2))))
 
@@ -123,30 +129,34 @@ class ASR(nn.Module):
         self.dil1 = nn.Conv1d(N_EMBD, N_EMBD, 3, dilation=1, padding=1)
         self.dil2 = nn.Conv1d(N_EMBD, N_EMBD, 3, dilation=2, padding=2)
         self.dil3 = nn.Conv1d(N_EMBD, N_EMBD, 3, dilation=4, padding=4)
-        self.enc1 = EncoderBlock()
-        self.enc2 = EncoderBlock()
+        self.dil4 = nn.Conv1d(N_EMBD, N_EMBD, 3, dilation=8, padding=8)
+        self.encs = nn.ModuleList([EncoderBlock() for _ in range(6)])
         self.ln_enc = nn.LayerNorm(N_EMBD)
         self.ctc_head = nn.Linear(N_EMBD, vocab_size + 1)
         self.tok_emb = nn.Embedding(vocab_size + 2, N_EMBD)
-        self.dec1 = DecoderBlock()
-        self.dec2 = DecoderBlock()
+        self.decs = nn.ModuleList([DecoderBlock() for _ in range(6)])
         self.ln_dec = nn.LayerNorm(N_EMBD)
         self.head = nn.Linear(N_EMBD, vocab_size + 1)
 
-    def forward(self, x, dec_in):
+    def forward(self, x, dec_in, enc_mask=None):
         c = torch.relu(self.conv2(torch.relu(self.conv1(x))))
         c = c + torch.relu(self.dil1(c))
         c = c + torch.relu(self.dil2(c))
         c = c + torch.relu(self.dil3(c))
+        c = c + torch.relu(self.dil4(c))
         t = c.shape[2]
         pos = sinusoidal_positions(t, N_EMBD).to(x.device)
-        memory = self.ln_enc(self.enc2(self.enc1(c.transpose(1, 2) + pos)))
+        e = c.transpose(1, 2) + pos
+        for enc in self.encs:
+            e = enc(e, enc_mask)
+        memory = self.ln_enc(e)
         ctc_log_probs = torch.log_softmax(self.ctc_head(memory), dim=2)
         s = dec_in.shape[1]
         dpos = sinusoidal_positions(s, N_EMBD).to(x.device)
-        d = self.ln_dec(self.dec2(self.dec1(self.tok_emb(dec_in) + dpos,
-                                            memory), memory))
-        return ctc_log_probs, self.head(d)
+        d = self.tok_emb(dec_in) + dpos
+        for dec in self.decs:
+            d = dec(d, memory, enc_mask)
+        return ctc_log_probs, self.head(self.ln_dec(d))
 
 
 waveform, rate = torchaudio.load(FIXTURE)
@@ -181,7 +191,7 @@ for _ in range(5):
         ctc_lp.transpose(0, 1), targets,
         input_lengths=torch.tensor([ctc_lp.shape[1]]),
         target_lengths=torch.tensor([len(transcript)]),
-        blank=vocab_size, reduction="mean", zero_infinity=False)
+        blank=vocab_size, reduction="mean", zero_infinity=True)
     loss_ce = nn.functional.cross_entropy(
         logits.reshape(-1, vocab_size + 1), dec_out.reshape(-1))
     loss = CTC_WEIGHT * loss_ctc + (1.0 - CTC_WEIGHT) * loss_ce

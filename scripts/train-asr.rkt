@@ -1,6 +1,5 @@
 #lang racket/base
 
-;; Train the 07-asr example on LibriSpeech dev-clean, checkpoint, transcribe.
 ;; Run (GPU):  nix develop .#cuda --command racket scripts/train-asr.rkt
 ;; Run (CPU):  nix develop --command racket scripts/train-asr.rkt
 
@@ -18,15 +17,22 @@
 
 (define epochs (string->number (or (getenv "EPOCHS") "20")))
 (define limit (let ([l (getenv "LIMIT")]) (and l (string->number l))))
-(define n-embd (string->number (or (getenv "EMBD") "128")))
+(define batch (string->number (or (getenv "BATCH") "16")))
+(define n-embd (string->number (or (getenv "EMBD") "256")))
 (define checkpoint (or (getenv "CHECKPOINT") "checkpoints/asr-dev-clean"))
+(define held-out 3)
 
 (define device (pick-device))
 (printf "device: ~a\n" device)
 
+;; the eval tail must stay outside the training window, so an unset LIMIT
+;; trains on everything except the held-out utterances
+(define all (librispeech-utterances "dev-clean"))
+(define train-limit
+  (min (or limit (- (length all) held-out)) (- (length all) held-out)))
 (define-values (net vocab)
-  (train-librispeech #:epochs epochs #:limit limit #:n-embd n-embd
-                     #:device device))
+  (train-librispeech #:epochs epochs #:limit train-limit #:batch batch
+                     #:n-embd n-embd #:device device))
 (reclaim-native-memory!)
 (let ([dir (path-only (string->path checkpoint))])
   (when dir (make-directory* dir)))
@@ -38,15 +44,12 @@
                  (cons 'n-embd n-embd)
                  (cons 'n-head 4)
                  (cons 'epochs epochs)
-                 (cons 'limit limit))
+                 (cons 'batch batch)
+                 (cons 'limit train-limit))
            out)))
 (printf "\ncheckpoint: ~a.safetensors (+ .rktd sidecar)\n" checkpoint)
 
-;; score a few utterances from the tail of the split — held out whenever
-;; LIMIT leaves them past the training window
-(define all (librispeech-utterances "dev-clean"))
-(define eval-start (max 0 (- (length all) 3)))
-(for ([u (in-list (list-tail all eval-start))])
+(for ([u (in-list (list-tail all (- (length all) held-out)))])
   (define-values (samples rate) (load-utterance u))
   (define reference (utterance-transcript u))
   (define features (utterance-features samples rate))

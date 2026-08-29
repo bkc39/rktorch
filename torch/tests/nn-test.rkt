@@ -109,7 +109,14 @@
     (check-equal? (tensor-shape (c (randn 4 2 100))) '(4 8 100))
     (check-equal? (object-name c) 'Conv1d)
     (define dilated (Conv1d 2 8 3 #:dilation 4 #:padding 4))
-    (check-equal? (tensor-shape (dilated (randn 4 2 100))) '(4 8 100)))
+    (check-equal? (tensor-shape (dilated (randn 4 2 100))) '(4 8 100))
+    ;; dilation semantics pinned by value: an all-ones k=2 d=2 kernel over
+    ;; 1 2 3 4 5 sums x[i] + x[i+2]
+    (check-equal? (tensor->list
+                   (conv1d (tensor '(((1.0 2.0 3.0 4.0 5.0))))
+                           (ones 1 1 2)
+                           #:dilation 2))
+                  '(4.0 6.0 8.0)))
 
   (test-case "MaxPool2d layer: stateless, default stride = kernel"
     (define p (MaxPool2d 2))
