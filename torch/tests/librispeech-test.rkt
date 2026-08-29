@@ -26,6 +26,12 @@
     (check-exn #rx"no transcript"
                (lambda () (parse-trans-line "1272-128104-0000"))))
 
+  (test-case "an unknown split is refused before any download (#96)"
+    (check-exn #rx"dev-clean"
+               (lambda () (librispeech-utterances "bogus-split")))
+    (check-exn #rx"contract violation"
+               (lambda () (librispeech-utterances "bogus-split"))))
+
   (test-case "the committed utterance fixture loads with its transcript (#83)"
     (define-values (samples rate transcript) (load-librispeech-fixture))
     (check-equal? rate 16000)
