@@ -8,7 +8,8 @@
 (module bare racket/base
   (provide scale add-wrap split-heads shape-wrap
            intra-scale intra-add intra-heads intra-shape)
-  (require (only-in torch add tensor-shape))
+  (require (only-in torch add)
+           (only-in (file "../torch/foreign/ops.rkt") tensor-shape))
 
   (define (scale x k) (* x k))
   (define (add-wrap a b) (add a b))
@@ -22,15 +23,19 @@
     (for/fold ([acc 0]) ([_ (in-range reps)]) (+ acc (split-heads n h))))
 
   (define (shape-wrap t) (tensor-shape t))
-  (define (intra-shape reps t _unused)
-    (for/fold ([acc 0]) ([_ (in-range reps)]) (+ acc (length (shape-wrap t))))))
+  (define (intra-shape reps ts _unused)
+    (for/fold ([acc 0]) ([i (in-range reps)])
+      (+ acc (length (shape-wrap (vector-ref ts (bitwise-and i 7))))))))
 
 (module guards racket/base
   (provide scale add-wrap split-heads shape-wrap
            intra-scale intra-add intra-heads intra-shape)
-  (require (only-in torch add tensor-shape)
-           ;; the public tensor? carries (-> any/c boolean?); using it would
-           ;; charge every guard and every arrow domain a second crossing
+  (require (only-in torch add)
+           ;; both public names are themselves contracted -- tensor? as
+           ;; (-> any/c boolean?), tensor-shape as its full (listof ...).
+           ;; Importing them would leave the bare row already paying a
+           ;; crossing, so the column would measure a second copy.
+           (only-in (file "../torch/foreign/ops.rkt") tensor-shape)
            (only-in (file "../torch/foreign/structs.rkt") tensor?))
 
   (define (scale x k)
@@ -57,8 +62,9 @@
   (define (shape-wrap t)
     (unless (tensor? t) (error 'shape-wrap "t must be a tensor: ~e" t))
     (tensor-shape t))
-  (define (intra-shape reps t _unused)
-    (for/fold ([acc 0]) ([_ (in-range reps)]) (+ acc (length (shape-wrap t))))))
+  (define (intra-shape reps ts _unused)
+    (for/fold ([acc 0]) ([i (in-range reps)])
+      (+ acc (length (shape-wrap (vector-ref ts (bitwise-and i 7))))))))
 
 (module defcontract racket/base
   (provide scale add-wrap split-heads shape-wrap
@@ -67,9 +73,12 @@
   ;; "prefer base" warning here cannot be satisfied
   (require (only-in racket/contract define/contract)
            (only-in racket/contract/base -> ->i listof)
-           (only-in torch add tensor-shape)
-           ;; the public tensor? carries (-> any/c boolean?); using it would
-           ;; charge every guard and every arrow domain a second crossing
+           (only-in torch add)
+           ;; both public names are themselves contracted -- tensor? as
+           ;; (-> any/c boolean?), tensor-shape as its full (listof ...).
+           ;; Importing them would leave the bare row already paying a
+           ;; crossing, so the column would measure a second copy.
+           (only-in (file "../torch/foreign/ops.rkt") tensor-shape)
            (only-in (file "../torch/foreign/structs.rkt") tensor?))
 
   (define/contract (scale x k) (-> real? real? real?) (* x k))
@@ -90,14 +99,16 @@
   (define/contract (shape-wrap t)
     (-> tensor? (listof exact-nonnegative-integer?))
     (tensor-shape t))
-  (define (intra-shape reps t _unused)
-    (for/fold ([acc 0]) ([_ (in-range reps)]) (+ acc (length (shape-wrap t))))))
+  (define (intra-shape reps ts _unused)
+    (for/fold ([acc 0]) ([i (in-range reps)])
+      (+ acc (length (shape-wrap (vector-ref ts (bitwise-and i 7))))))))
 
 (module boundary racket/base
   ;; define/contract-out provides the four wrappers itself
   (provide intra-scale intra-add intra-heads intra-shape)
   (require (only-in racket/contract/base -> ->i listof)
-           (only-in torch add tensor-shape)
+           (only-in torch add)
+           (only-in (file "../torch/foreign/ops.rkt") tensor-shape)
            (only-in (file "../torch/foreign/structs.rkt") tensor?)
            (only-in (file "../torch/private/contract.rkt") define/contract-out))
 
@@ -119,8 +130,9 @@
   (define/contract-out (shape-wrap t)
     (-> tensor? (listof exact-nonnegative-integer?))
     (tensor-shape t))
-  (define (intra-shape reps t _unused)
-    (for/fold ([acc 0]) ([_ (in-range reps)]) (+ acc (length (shape-wrap t))))))
+  (define (intra-shape reps ts _unused)
+    (for/fold ([acc 0]) ([i (in-range reps)])
+      (+ acc (length (shape-wrap (vector-ref ts (bitwise-and i 7))))))))
 
 (module+ main
   (require racket/format
@@ -144,9 +156,12 @@
       (for/fold ([acc 0]) ([_ (in-range reps)]) (+ acc (f n h)))))
   (define-syntax-rule (add-loop f)
     (lambda (reps a b) (for ([_ (in-range reps)]) (f a b))))
+  ;; a pure accessor on a loop-invariant tensor is hoisted out of the loop
+  ;; entirely -- the argument has to vary or this measures nothing
   (define-syntax-rule (shape-loop f)
-    (lambda (reps t _unused)
-      (for/fold ([acc 0]) ([_ (in-range reps)]) (+ acc (length (f t))))))
+    (lambda (reps ts _unused)
+      (for/fold ([acc 0]) ([i (in-range reps)])
+        (+ acc (length (f (vector-ref ts (bitwise-and i 7))))))))
 
   (define (best-ms thunk #:runs [runs 7])
     (thunk)                             ; warm up before the first timed run
@@ -218,7 +233,7 @@
                     dc:intra-shape bo:intra-shape)
             (vector (shape-loop bare:shape-wrap) (shape-loop guards:shape-wrap)
                     (shape-loop dc:shape-wrap) (shape-loop bo:shape-wrap))
-            (randn 8 8) #f)
+            (build-vector 8 (lambda (_) (randn 8 8))) #f)
 
   (displayln "\nreal pipeline: log-mel-spectrogram over the speech fixture")
   (define-values (samples rate) (load-audio-fixture))
