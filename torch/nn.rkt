@@ -28,7 +28,6 @@
          module-training?
          in-eval-mode)
 
-;; contracted at its definition site (#96); provided plain here
 (provide ctc-loss)
 
 (provide

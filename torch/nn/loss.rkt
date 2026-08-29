@@ -18,7 +18,9 @@
 (define (cross-entropy logits targets)
   (g:cross-entropy-loss logits (to-dtype targets 'int64) #f 1 -100 0.0))
 
-(define lengths/c (and/c (listof exact-positive-integer?) pair?))
+(define input-lengths/c (and/c (listof exact-positive-integer?) pair?))
+;; a 0 target length is a valid empty transcript
+(define target-lengths/c (and/c (listof exact-nonnegative-integer?) pair?))
 
 ;; log-probs is (T N C) log-softmaxed frames; targets is (N S) labels.
 ;; Reduction is fixed to torch's mean like cross-entropy above.
@@ -28,8 +30,8 @@
                            #:blank [blank 0]
                            #:zero-infinity? [zero-infinity? #f])
   (->* (tensor? tensor?
-        #:input-lengths lengths/c
-        #:target-lengths lengths/c)
+        #:input-lengths input-lengths/c
+        #:target-lengths target-lengths/c)
        (#:blank exact-nonnegative-integer?
         #:zero-infinity? boolean?)
        tensor?)

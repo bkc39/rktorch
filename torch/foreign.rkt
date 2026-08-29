@@ -20,7 +20,6 @@
 
 (provide ref ref! with-no-grad with-default-device)
 
-;; contracted at their definition sites (#96); provided plain here
 (provide conv1d)
 
 (provide (rename-out [t+ +] [t- -] [t* *] [t/ /])

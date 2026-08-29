@@ -214,11 +214,22 @@
                (lambda () (ctc-loss log-probs targets
                                     #:input-lengths '()
                                     #:target-lengths '(1))))
+    ;; a 0 target length is a valid empty transcript: only the all-blank
+    ;; path survives, p = 1/4, and mean reduction clamps the divisor to 1
+    (check-= (item (ctc-loss log-probs targets
+                             #:input-lengths '(2)
+                             #:target-lengths '(0)))
+             1.3862944 1e-6)
     (check-exn #rx"blank"
                (lambda () (ctc-loss log-probs targets
                                     #:input-lengths '(2)
                                     #:target-lengths '(1)
-                                    #:blank -1))))
+                                    #:blank -1)))
+    (check-exn #rx"stride"
+               (lambda () (conv1d (randn 1 2 8) (randn 3 2 3) #:stride 0)))
+    (check-exn #rx"padding"
+               (lambda () (conv1d (randn 1 2 8) (randn 3 2 3)
+                                  #:padding -1))))
 
   (test-case "a few Adam steps reduce the training loss"
     (manual-seed! 0)

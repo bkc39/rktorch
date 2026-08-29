@@ -1,7 +1,7 @@
 #lang racket/base
 
 (require (only-in racket/contract ->* define/contract or/c)
-         (only-in "contracts.rkt" size-1d/c)
+         (only-in "contracts.rkt" nonneg-size-1d/c pos-size-1d/c)
          (only-in "size.rkt" ->1d ->2d)
          (only-in "structs.rkt" tensor?)
          (prefix-in g: (only-in "../generated.rkt"
@@ -19,8 +19,6 @@
 (provide adaptive-avg-pool2d avg-pool2d conv1d conv2d embedding layer-norm
          masked-fill max-pool2d tril triu)
 
-;; contracted at the definition site per the #96 policy; foreign.rkt
-;; re-exports the name plain, unlike its contract-out neighbors
 (define/contract (conv1d input weight
                          #:bias [bias #f]
                          #:stride [stride 1]
@@ -28,8 +26,8 @@
                          #:dilation [dilation 1]
                          #:groups [groups 1])
   (->* (tensor? tensor?)
-       (#:bias (or/c tensor? #f) #:stride size-1d/c
-        #:padding size-1d/c #:dilation size-1d/c
+       (#:bias (or/c tensor? #f) #:stride pos-size-1d/c
+        #:padding nonneg-size-1d/c #:dilation pos-size-1d/c
         #:groups exact-positive-integer?)
        tensor?)
   (g:conv1d input weight bias
