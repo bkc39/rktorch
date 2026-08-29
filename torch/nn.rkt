@@ -46,7 +46,8 @@
   [Linear (-> exact-positive-integer? exact-positive-integer? linear?)]
   [linear? (-> any/c boolean?)]
   [Conv1d (->* (exact-positive-integer? exact-positive-integer? pos-size-1d/c)
-               (#:stride pos-size-1d/c #:padding nonneg-size-1d/c)
+               (#:stride pos-size-1d/c #:padding nonneg-size-1d/c
+                #:dilation pos-size-1d/c)
                conv1d?)]
   [conv1d? (-> any/c boolean?)]
   [Conv2d (->* (exact-positive-integer? exact-positive-integer? pos-size/c)

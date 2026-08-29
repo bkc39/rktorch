@@ -107,7 +107,9 @@
     (check-true (andmap requires-grad? ps))
     (check-equal? (map car (named-parameters c)) '("weight" "bias"))
     (check-equal? (tensor-shape (c (randn 4 2 100))) '(4 8 100))
-    (check-equal? (object-name c) 'Conv1d))
+    (check-equal? (object-name c) 'Conv1d)
+    (define dilated (Conv1d 2 8 3 #:dilation 4 #:padding 4))
+    (check-equal? (tensor-shape (dilated (randn 4 2 100))) '(4 8 100)))
 
   (test-case "MaxPool2d layer: stateless, default stride = kernel"
     (define p (MaxPool2d 2))
