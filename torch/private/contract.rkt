@@ -1,6 +1,7 @@
 #lang racket/base
 
 (require (for-syntax racket/base
+                     ;; whole-module require on purpose
                      syntax/parse/pre)
          (only-in racket/contract/base contract-out))
 
