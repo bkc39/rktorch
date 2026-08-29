@@ -1,32 +1,26 @@
 #lang racket/base
 
-(require (only-in racket/contract
-                  -> ->* ->i =/c >=/c and/c any/c define/contract listof
-                  or/c unsupplied-arg?)
+(require (only-in racket/contract/base
+                  -> ->* ->i =/c >=/c and/c any/c listof or/c
+                  unsupplied-arg?)
          (only-in "../foreign/error.rkt" check-handle)
          (only-in "../foreign/raw/spectral.rkt"
                   tr-hann-window/raw tr-stft/raw)
          (only-in "../foreign/structs.rkt" wrap-tensor)
          (only-in "../main.rkt"
                   add dtype log matmul mul ref sqrt t tensor
-                  tensor-device tensor? to-device to-dtype))
-
-(provide edit-distance
-         hann-window
-         log-mel-spectrogram
-         mel-filterbank
-         spectrogram
-         stft)
+                  tensor-device tensor? to-device to-dtype)
+         (only-in "../private/contract.rkt" define/contract-out))
 
 (define maybe-length/c (or/c #f exact-positive-integer?))
 
-(define/contract (hann-window window-length #:periodic? [periodic? #t])
+(define/contract-out (hann-window window-length #:periodic? [periodic? #t])
   (->* (exact-nonnegative-integer?) (#:periodic? boolean?) tensor?)
   (wrap-tensor
    (check-handle 'hann-window
                  (tr-hann-window/raw window-length periodic?))))
 
-(define/contract (stft samples
+(define/contract-out (stft samples
                        #:n-fft n-fft
                        #:hop-length [hop-length #f]
                        #:win-length [win-length #f]
@@ -46,7 +40,7 @@
                               (or hop-length -1) (or win-length -1)
                               window center? normalized?))))
 
-(define/contract (spectrogram samples
+(define/contract-out (spectrogram samples
                               #:n-fft n-fft
                               #:hop-length [hop-length #f]
                               #:win-length [win-length #f]
@@ -69,7 +63,7 @@
   (if (= power 2) magnitude-squared (sqrt magnitude-squared)))
 
 ;; twins torchaudio.functional.edit_distance
-(define/contract (edit-distance reference hypothesis)
+(define/contract-out (edit-distance reference hypothesis) ;; noqa
   (-> (listof any/c) (listof any/c) exact-nonnegative-integer?)
   (define hyp (list->vector hypothesis))
   (define n (vector-length hyp))
@@ -99,7 +93,7 @@
 
 ;; HTK-scale triangular filters, torchaudio melscale_fbanks with
 ;; mel_scale "htk" and norm #f; result shape (n-freqs n-mels)
-(define/contract (mel-filterbank #:n-freqs n-freqs
+(define/contract-out (mel-filterbank #:n-freqs n-freqs
                                  #:n-mels n-mels
                                  #:sample-rate sample-rate
                                  #:f-min [f-min 0.0]
@@ -130,7 +124,7 @@
        (define up (/ (- f-hi f) (- f-hi f-mid)))
        (max 0.0 (min down up))))))
 
-(define/contract (log-mel-spectrogram samples
+(define/contract-out (log-mel-spectrogram samples
                                       #:sample-rate sample-rate
                                       #:n-fft [n-fft 400]
                                       #:hop-length [hop-length 160]
