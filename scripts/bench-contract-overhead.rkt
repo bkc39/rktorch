@@ -28,7 +28,10 @@
 (module guards racket/base
   (provide scale add-wrap split-heads shape-wrap
            intra-scale intra-add intra-heads intra-shape)
-  (require (only-in torch add tensor-shape tensor?))
+  (require (only-in torch add tensor-shape)
+           ;; the public tensor? carries (-> any/c boolean?); using it would
+           ;; charge every guard and every arrow domain a second crossing
+           (only-in (file "../torch/foreign/structs.rkt") tensor?))
 
   (define (scale x k)
     (unless (real? x) (error 'scale "x must be real: ~e" x))
@@ -63,8 +66,11 @@
   ;; define/contract is not in racket/contract/base; raco review's
   ;; "prefer base" warning here cannot be satisfied
   (require (only-in racket/contract define/contract)
-           (only-in racket/contract/base -> ->i)
-           (only-in torch add tensor-shape tensor?))
+           (only-in racket/contract/base -> ->i listof)
+           (only-in torch add tensor-shape)
+           ;; the public tensor? carries (-> any/c boolean?); using it would
+           ;; charge every guard and every arrow domain a second crossing
+           (only-in (file "../torch/foreign/structs.rkt") tensor?))
 
   (define/contract (scale x k) (-> real? real? real?) (* x k))
   (define/contract (add-wrap a b) (-> tensor? tensor? tensor?) (add a b))
@@ -81,15 +87,18 @@
   (define (intra-heads reps n h)
     (for/fold ([acc 0]) ([_ (in-range reps)]) (+ acc (split-heads n h))))
 
-  (define/contract (shape-wrap t) (-> tensor? list?) (tensor-shape t))
+  (define/contract (shape-wrap t)
+    (-> tensor? (listof exact-nonnegative-integer?))
+    (tensor-shape t))
   (define (intra-shape reps t _unused)
     (for/fold ([acc 0]) ([_ (in-range reps)]) (+ acc (length (shape-wrap t))))))
 
 (module boundary racket/base
   ;; define/contract-out provides the four wrappers itself
   (provide intra-scale intra-add intra-heads intra-shape)
-  (require (only-in racket/contract/base -> ->i)
-           (only-in torch add tensor-shape tensor?)
+  (require (only-in racket/contract/base -> ->i listof)
+           (only-in torch add tensor-shape)
+           (only-in (file "../torch/foreign/structs.rkt") tensor?)
            (only-in (file "../torch/private/contract.rkt") define/contract-out))
 
   (define/contract-out (scale x k) (-> real? real? real?) (* x k))
@@ -107,7 +116,9 @@
   (define (intra-heads reps n h)
     (for/fold ([acc 0]) ([_ (in-range reps)]) (+ acc (split-heads n h))))
 
-  (define/contract-out (shape-wrap t) (-> tensor? list?) (tensor-shape t))
+  (define/contract-out (shape-wrap t)
+    (-> tensor? (listof exact-nonnegative-integer?))
+    (tensor-shape t))
   (define (intra-shape reps t _unused)
     (for/fold ([acc 0]) ([_ (in-range reps)]) (+ acc (length (shape-wrap t))))))
 
@@ -167,15 +178,17 @@
     ;; baseline reads slower than the guards it is supposed to beat
     (for ([v (in-list (list intra cross))] [_ (in-naturals)])
       (for ([f (in-vector v)]) (f (quotient reps 10) a b)))
-    (define base
+    (define base-intra
       (row (string-append (car strategies) " intra") reps
            (lambda () ((vector-ref intra 0) reps a b)) #f))
-    (for ([s (in-list strategies)] [i (in-naturals)])
-      (unless (zero? i)
-        (row (string-append s " intra") reps
-             (lambda () ((vector-ref intra i) reps a b)) base))
-      (row (string-append s " cross") reps
-           (lambda () ((vector-ref cross i) reps a b)) base)))
+    (define base-cross
+      (row (string-append (car strategies) " cross") reps
+           (lambda () ((vector-ref cross 0) reps a b)) #f))
+    (for ([s (in-list strategies)]
+          [i (in-naturals)]
+          #:unless (zero? i))
+      (row (string-append s " intra") reps (lambda () ((vector-ref intra i) reps a b)) base-intra)
+      (row (string-append s " cross") reps (lambda () ((vector-ref cross i) reps a b)) base-cross)))
 
   (displayln "== bench-contract-overhead (#96) ==")
   (manual-seed! 0)
