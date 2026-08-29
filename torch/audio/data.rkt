@@ -2,6 +2,8 @@
 
 ;; whole-module on purpose: the expansion needs bindings only-in would strip
 (require racket/runtime-path
+         (only-in racket/contract/base
+                  -> ->* </c and/c any any/c flat-named-contract or/c)
          (only-in racket/file make-directory*)
          (only-in racket/math exact-round)
          (only-in racket/path normalize-path)
@@ -13,29 +15,38 @@
                   tr-audio-info/raw tr-audio-load/raw tr-audio-save/raw)
          (only-in "../foreign/structs.rkt" wrap-tensor)
          (only-in "../main.rkt" tensor tensor-shape tensor->list tensor?)
+         (only-in "../private/contract.rkt" define/contract-out)
          (only-in "../private/util.rkt" with-temporary-file))
 
-(provide audio-info
-         load-audio
-         load-wav
-         save-audio
-         write-wav
-         load-audio-fixture
-         download-audio-cached)
+(define sample-rate/c
+  (flat-named-contract 'sample-rate exact-positive-integer?))
 
-(define (audio-info path)
+(define storable-sample-rate/c
+  (flat-named-contract 'sample-rate-that-fits-a-wav-header
+                       (and/c exact-positive-integer? (</c (expt 2 31)))))
+
+(define cache-name/c
+  (flat-named-contract
+   'cache-name-inside-the-cache-directory
+   (lambda (name)
+     (and (path-string? name)
+          (let ([p (if (string? name) (string->path name) name)])
+            (and (relative-path? p)
+                 (for/and ([elem (in-list (explode-path p))])
+                   (path? elem))))))))
+
+(define/contract-out (audio-info path)
+  (-> path-string? any)
   (define-values (rc frames rate channels) (tr-audio-info/raw path))
   (check-ok rc 'audio-info)
   (values frames rate channels))
 
-(define (load-audio path #:frame-offset [frame-offset 0]
-                    #:num-frames [num-frames #f])
-  (unless (exact-nonnegative-integer? frame-offset)
-    (error 'load-audio "frame offset must be an exact nonnegative integer: ~e"
-           frame-offset))
-  (unless (or (not num-frames) (exact-nonnegative-integer? num-frames))
-    (error 'load-audio "num-frames must be #f or an exact nonnegative ~a: ~e"
-           "integer" num-frames))
+(define/contract-out (load-audio path #:frame-offset [frame-offset 0]
+                                 #:num-frames [num-frames #f])
+  (->* (path-string?)
+       (#:frame-offset exact-nonnegative-integer?
+        #:num-frames (or/c #f exact-nonnegative-integer?))
+       any)
   (define rate-out (make-s32vector 1))
   (define samples
     (wrap-tensor
@@ -44,12 +55,8 @@
                                       (or num-frames -1) rate-out))))
   (values samples (s32vector-ref rate-out 0)))
 
-(define (save-audio path samples rate)
-  (unless (tensor? samples)
-    (error 'save-audio "samples must be a tensor: ~e" samples))
-  (unless (and (exact-positive-integer? rate) (< rate (expt 2 31)))
-    (error 'save-audio "sample rate must be a positive exact integer: ~e"
-           rate))
+(define/contract-out (save-audio path samples rate)
+  (-> path-string? tensor? storable-sample-rate/c void?)
   (check-ok (tr-audio-save/raw path samples rate) 'save-audio)
   (void))
 
@@ -63,7 +70,8 @@
 (define (u16 bs offset) (integer-bytes->integer bs #f #f offset (+ offset 2)))
 (define (u32 bs offset) (integer-bytes->integer bs #f #f offset (+ offset 4)))
 
-(define (load-wav path)
+(define/contract-out (load-wav path)
+  (-> path-string? any)
   (call-with-input-file path
     (lambda (in)
       (define preamble (read-exactly in 12 'load-wav))
@@ -157,10 +165,8 @@
                                 (modulo chunk-size 2)))
            (loop fmt)])))))
 
-(define (write-wav path samples sample-rate)
-  (unless (exact-positive-integer? sample-rate)
-    (error 'write-wav "sample rate must be a positive exact integer: ~e"
-           sample-rate))
+(define/contract-out (write-wav path samples sample-rate)
+  (-> path-string? tensor? sample-rate/c void?)
   (define shape (tensor-shape samples))
   (define-values (channels n)
     (case (length shape)
@@ -209,7 +215,8 @@
 
 (define-runtime-path audio-fixture "fixtures/sine-440-16k.wav")
 
-(define (load-audio-fixture)
+(define/contract-out (load-audio-fixture)
+  (-> any)
   (load-wav audio-fixture))
 
 (define (audio-cache-dir)
@@ -219,12 +226,9 @@
       (path->complete-path (string->path override))
       (build-path (find-system-path 'cache-dir) "rktorch" "audio")))
 
-(define (download-audio-cached name url #:valid? [valid? (lambda (path) #t)])
-  (let ([p (string->path name)])
-    (unless (and (relative-path? p)
-                 (for/and ([elem (in-list (explode-path p))]) (path? elem)))
-      (error 'download-audio-cached
-             "cache name must stay inside the cache directory: ~e" name)))
+(define/contract-out (download-audio-cached name url
+                                            #:valid? [valid? (lambda (_) #t)])
+  (->* (cache-name/c string?) (#:valid? (-> path? any/c)) path?)
   (define dest (build-path (audio-cache-dir) name))
   (make-directory* (audio-cache-dir))
   (define-values (parent _name _dir?) (split-path dest))
