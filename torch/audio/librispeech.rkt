@@ -107,7 +107,7 @@
         (rename-file-or-directory staging dest))))
   (build-path dest "LibriSpeech" split))
 
-(define/contract-out (librispeech-utterances split)
+(define/contract-out (librispeech-utterances split) ;; noqa
   (-> split/c (listof utterance?))
   (define root (extracted-root split))
   (sort
@@ -133,7 +133,7 @@
                 (cdr entry)))
    string<? #:key utterance-id))
 
-(define/contract-out (load-utterance u)
+(define/contract-out (load-utterance u) ;; noqa
   (-> utterance? any)
   (load-audio (utterance-path u)))
 
@@ -141,7 +141,7 @@
 (define-runtime-path fixture-trans
   "fixtures/librispeech-1272-128104-0000.txt")
 
-(define/contract-out (load-librispeech-fixture)
+(define/contract-out (load-librispeech-fixture) ;; noqa
   (-> any)
   (define-values (samples rate) (load-audio fixture-flac))
   (values samples rate

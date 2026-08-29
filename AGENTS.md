@@ -349,11 +349,12 @@ argument's shape belongs in the signature.
 Name non-obvious contracts with `flat-named-contract` so the violation
 message still says `sample-rate` rather than an inlined `and/c` chain.
 
-Two costs, both known: `raco review` is syntactic and cannot see the
-generated `provide`, so an exported definition used nowhere else in its
-own module draws a false "identifier is never used"; and the contract is
-evaluated in definition position, so a predicate it names must be defined
-above it.  (`resyntax`, the CI gate, is unaffected.)
+`raco review` lints unexpanded, so it cannot see the generated `provide`
+and reports an exported definition used nowhere else in its own module as
+"identifier is never used".  Mark those `;; noqa`, the same per-identifier
+directive the re-export shims already use; `#|review: ignore|#` suppresses
+a whole file and is too blunt here.  (`resyntax`, the CI gate, is
+unaffected.)
 
 ## CI
 

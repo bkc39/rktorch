@@ -220,7 +220,7 @@
 
 (define-runtime-path audio-fixture "fixtures/sine-440-16k.wav")
 
-(define/contract-out (load-audio-fixture)
+(define/contract-out (load-audio-fixture) ;; noqa
   (-> any)
   (load-wav audio-fixture))
 

@@ -124,7 +124,7 @@
        (define up (/ (- f-hi f) (- f-hi f-mid)))
        (max 0.0 (min down up))))))
 
-(define/contract-out (log-mel-spectrogram samples
+(define/contract-out (log-mel-spectrogram samples ;; noqa
                                       #:sample-rate sample-rate
                                       #:n-fft [n-fft 400]
                                       #:hop-length [hop-length 160]
