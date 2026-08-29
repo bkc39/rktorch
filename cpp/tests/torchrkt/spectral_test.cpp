@@ -80,6 +80,20 @@ TEST(Spectral, StftHonorsWindowAndGuards) {
   EXPECT_EQ(tr_stft(nullptr, 4, -1, -1, nullptr, true, false), nullptr);
   EXPECT_NE(tr_last_error(), nullptr);
   EXPECT_EQ(tr_stft(signal.t, 0, -1, -1, nullptr, true, false), nullptr);
+  EXPECT_EQ(tr_stft(signal.t, 4, -2, -1, nullptr, false, false), nullptr);
+  EXPECT_EQ(tr_stft(signal.t, 4, -1, -2, nullptr, false, false), nullptr);
+}
+
+TEST(Spectral, StftDefaultWindowMatchesInputDtype) {
+  const Handle ones =
+      make({1.0F, 1.0F, 1.0F, 1.0F, 1.0F, 1.0F, 1.0F, 1.0F}, {8});
+  const Handle wide(tr_tensor_to_dtype(ones.t, TR_DTYPE_FLOAT64));
+  const Handle out(tr_stft(wide.t, 4, 4, -1, nullptr, /*center=*/false,
+                           /*normalized=*/false));
+  tr_dtype dtype = TR_DTYPE_FLOAT32;
+  EXPECT_EQ(tr_tensor_dtype(out.t, &dtype), 0) << tr_last_error();
+  EXPECT_EQ(dtype, TR_DTYPE_FLOAT64);
+  EXPECT_EQ(shape_of(out.t), (std::vector<int64_t>{3, 2, 2}));
 }
 
 }  // namespace

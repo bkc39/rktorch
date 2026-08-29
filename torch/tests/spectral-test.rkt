@@ -31,6 +31,11 @@
       (stft (ones 4) #:n-fft 4 #:hop-length 4 #:win-length 4
             #:window (hann-window 4) #:center? #f))
     (check-equal? (car (tensor->list windowed)) 2.0)
+    (define wide
+      (stft (to-dtype (ones 8) 'float64) #:n-fft 4 #:hop-length 4
+            #:center? #f))
+    (check-equal? (dtype wide) 'float64)
+    (check-equal? (car (tensor->list wide)) 4.0)
     (check-exn #rx"n-fft" (lambda () (stft (ones 8) #:n-fft 0)))
     (check-exn #rx"hop-length"
                (lambda () (stft (ones 8) #:n-fft 4 #:hop-length -1)))
@@ -70,7 +75,11 @@
     (check-exn #rx"f-min below"
                (lambda () (mel-filterbank #:n-freqs 201 #:n-mels 80
                                           #:sample-rate 16000
-                                          #:f-min 9000.0))))
+                                          #:f-min 9000.0)))
+    (check-exn #rx"f-max"
+               (lambda () (mel-filterbank #:n-freqs 201 #:n-mels 80
+                                          #:sample-rate 16000
+                                          #:f-max +inf.0))))
 
   (test-case "log-mel over the speech fixture (#83)"
     (define-values (samples rate _transcript) (load-librispeech-fixture))

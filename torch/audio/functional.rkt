@@ -86,8 +86,8 @@
   (->i (#:n-freqs [n-freqs exact-positive-integer?]
         #:n-mels [n-mels exact-positive-integer?]
         #:sample-rate [sample-rate exact-positive-integer?])
-       (#:f-min [f-min (and/c real? (>=/c 0))]
-        #:f-max [f-max (or/c #f (and/c real? positive?))])
+       (#:f-min [f-min (and/c rational? (>=/c 0))]
+        #:f-max [f-max (or/c #f (and/c rational? positive?))])
        #:pre/name (f-min f-max sample-rate) "f-min below the effective f-max"
        (< (if (unsupplied-arg? f-min) 0.0 f-min)
           (if (or (unsupplied-arg? f-max) (not f-max))
@@ -119,7 +119,7 @@
        (#:n-fft exact-positive-integer?
         #:hop-length exact-positive-integer?
         #:n-mels exact-positive-integer?
-        #:eps (and/c real? (>=/c 0)))
+        #:eps (and/c rational? (>=/c 0)))
        tensor?)
   (define device (tensor-device samples))
   (define spec

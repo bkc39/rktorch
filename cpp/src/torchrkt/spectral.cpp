@@ -36,16 +36,24 @@ tr_tensor* tr_stft(const tr_tensor* self, int64_t n_fft, int64_t hop_length,
     return torchrkt::null_arg("tr_stft");
   }
   return torchrkt::alloc_result("tr_stft", [&] {
+    if (hop_length < -1) {
+      throw std::invalid_argument("hop length must be positive or -1, got " +
+                                  std::to_string(hop_length));
+    }
+    if (win_length < -1) {
+      throw std::invalid_argument("win length must be positive or -1, got " +
+                                  std::to_string(win_length));
+    }
     const std::optional<int64_t> hop =
-        hop_length < 0 ? std::nullopt : std::optional<int64_t>(hop_length);
+        hop_length == -1 ? std::nullopt : std::optional<int64_t>(hop_length);
     const std::optional<int64_t> win =
-        win_length < 0 ? std::nullopt : std::optional<int64_t>(win_length);
+        win_length == -1 ? std::nullopt : std::optional<int64_t>(win_length);
     // materializing the rectangular default silences libtorch's
-    // spectral-leakage warning without changing the result
+    // spectral-leakage warning without changing the result; it matches
+    // self's options because torch::stft requires window dtype == input
     const std::optional<torch::Tensor> w =
         window == nullptr ? std::optional<torch::Tensor>(torch::ones(
-                                win.value_or(n_fft),
-                                self->value.options().dtype(torch::kFloat32)))
+                                win.value_or(n_fft), self->value.options()))
                           : std::optional<torch::Tensor>(window->value);
     const torch::Tensor c =
         torch::stft(self->value, n_fft, hop, win, w, center, "reflect",
