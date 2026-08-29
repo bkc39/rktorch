@@ -367,6 +367,29 @@ flags fewer than you would expect: a definition that passes its own name
 as a quoted symbol, as `(check-ok rc 'audio-info)` does, already counts as
 used.  (`resyntax`, the CI gate, is unaffected.)
 
+### What the strategies cost
+
+`scripts/bench-contract-overhead.rkt`, lab host, ns per call, two agreeing
+runs.  Ratios are against an unvalidated call.
+
+| | flat `->` | `->i` + `#:pre` | 8x8 tensor `add` |
+|---|---|---|---|
+| `unless`+`error` | 1.1x | 2.0x | 1.0x |
+| `define/contract` intra | 9.9x | 19x | 1.07x |
+| `define/contract` cross | 10.2x | 18x | 1.07x |
+| `define/contract-out` intra | 1.0x | 1.0x | 0.9x |
+| `define/contract-out` cross | 5.2x | 18x | 1.05x |
+
+Three things follow.  Anything touching a tensor is free: an FFI call is
+~15 us against ~0.2 us of contract, so the whole column is inside
+run-to-run variance -- `log-mel-spectrogram` spends ~3 ms and about 0.03%
+of it on its five boundary crossings.  `define/contract` charges the same
+inside the module as across it, because it wraps the definition rather
+than the export -- on a non-tensor hot path that is 10-20x, and it is the
+second reason to prefer `define/contract-out`, which is free internally.
+And `->i` costs ~5x a flat contract at the boundary, so reach for it when
+the dependency is real, not for tidiness.
+
 ## CI
 
 `.github/workflows/nix.yml`: `nix flake check` on `ubuntu-latest` +
