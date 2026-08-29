@@ -53,9 +53,9 @@ conv adaptive_avg_pool2d
 # bridge); reduction is the ATen enum int (Mean=1). Full dtype work is v3.
 loss nll_loss
 loss cross_entropy_loss
-# ctc_loss: the ASR objective (#83 leg 2). IntList overload — lengths as
-# int[] keeps the surface scheme-native; blank/reduction/zero_infinity
-# exercise int64 + bool marshalling.
+# ctc_loss: the ASR objective. IntList overload — lengths as int[] keeps
+# the surface scheme-native; blank/reduction/zero_infinity exercise
+# int64 + bool marshalling.
 loss ctc_loss.IntList
 
 # dim-wise reductions: int[1]? dim (optional-int-array) + ScalarType? dtype
