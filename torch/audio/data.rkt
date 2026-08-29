@@ -29,11 +29,16 @@
   (flat-named-contract
    'cache-name-inside-the-cache-directory
    (lambda (name)
-     (and (path-string? name)
-          (let ([p (if (string? name) (string->path name) name)])
-            (and (relative-path? p)
-                 (for/and ([elem (in-list (explode-path p))])
-                   (path? elem))))))))
+     (cond
+       [(path-string? name)
+        (define p
+          (if (string? name)
+              (string->path name)
+              name))
+        (and (relative-path? p)
+             (for/and ([elem (in-list (explode-path p))])
+               (path? elem)))]
+       [else #f]))))
 
 (define/contract-out (audio-info path)
   (-> path-string? any)
