@@ -1,13 +1,10 @@
 #!/usr/bin/env bash
 #
-# Fast Resyntax for the edit->lint inner loop: analyze only the .rkt files this
-# branch changed against its base, not the whole tree. `resyntax analyze
-# --directory torch` takes half an hour, which is too slow to run per edit.
+# Analyze only the .rkt files this branch changed against its base.
 #
-# Not a replacement for the CI gate, which sweeps all of torch/ and so catches
-# suggestions in files this branch never touched. Note CI scopes itself to
-# torch/; this script also covers scripts/ and examples/, so it can flag files
-# CI would not.
+# Not a replacement for the CI gate: that sweeps all of torch/, so it catches
+# files this branch never touched. It is also scoped to torch/, while this
+# covers scripts/ and examples/ too -- so this can flag files CI would not.
 #
 # Usage: scripts/resyntax-changed [base-ref]      (default: origin/master)
 set -euo pipefail
@@ -20,10 +17,13 @@ if ! merge_base=$(git merge-base "$base" HEAD 2>/dev/null); then
   exit 2
 fi
 
-# Working tree vs the merge base: committed branch work plus anything still
-# uncommitted, which is what you want while iterating.
+# Committed branch work, uncommitted edits, and files not yet added -- git diff
+# reports none of the last, so a brand new .rkt would otherwise go unlinted.
 mapfile -t files < <(
-  git diff --name-only --diff-filter=ACMR "$merge_base" -- '*.rkt' | sort -u
+  {
+    git diff --name-only --diff-filter=ACMR "$merge_base" -- '*.rkt'
+    git ls-files --others --exclude-standard -- '*.rkt'
+  } | sort -u
 )
 existing=()
 for f in "${files[@]}"; do
@@ -45,9 +45,12 @@ done
 
 # Same detection as the CI gate: resyntax exits 0 even when it has suggestions,
 # so the suggestion lines themselves are the signal.
+# A here-string, not a pipe: under `set -o pipefail`, `grep -q` closes early on
+# a match, the writer takes SIGPIPE, and the pipeline yields 141 -- so a found
+# suggestion would report as none.
 out=$(resyntax analyze "${args[@]}" --analyzer-timeout 30000 2>&1)
 echo "$out"
-if echo "$out" | grep -qE "resyntax: .*\.rkt:[0-9]+:[0-9]+ \["; then
+if grep -qE "resyntax: .*\.rkt:[0-9]+:[0-9]+ \[" <<<"$out"; then
   echo "resyntax-changed: suggestions found. Fix: resyntax fix ${args[*]}" >&2
   exit 1
 fi

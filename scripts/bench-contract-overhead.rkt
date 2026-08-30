@@ -142,8 +142,7 @@
 
   ;; The cross loops must mirror the intra ones exactly: same accumulate,
   ;; same arguments-as-parameters.  Literal arguments let the compiler
-  ;; constant-fold an uncontracted callee away entirely, which made the
-  ;; baseline read 1.8 ns/call -- no call at all.
+  ;; constant-fold an uncontracted callee away entirely.
   (define-syntax-rule (scale-loop f)
     (lambda (reps x k)
       (for/fold ([acc 0.0]) ([_ (in-range reps)]) (+ acc (f x k)))))
