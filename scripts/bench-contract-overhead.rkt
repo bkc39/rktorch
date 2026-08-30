@@ -3,6 +3,9 @@
 ;; What each validation strategy costs.  Every strategy is a submodule so
 ;; that a call from `main` crosses a module boundary and a submodule's own
 ;; `intra-*` loop does not; flattening them would measure nothing.
+;; Every callee is imported from its defining module, never from the torch
+;; facade, which contracts them -- otherwise the bare row already pays a
+;; crossing and the column measures a second copy of the same contract.
 ;; Run:  racket scripts/bench-contract-overhead.rkt
 
 (module bare racket/base
@@ -30,12 +33,7 @@
 (module guards racket/base
   (provide scale add-wrap split-heads shape-wrap
            intra-scale intra-add intra-heads intra-shape)
-  (require            ;; every callee comes from its defining module, never from the
-           ;; torch facade: add carries binary-arith/c there, tensor-shape
-           ;; its (listof ...), tensor? a (-> any/c boolean?).  Importing
-           ;; any of them would leave the bare row already paying a
-           ;; crossing, so the column would measure a second copy.
-           (only-in (file "../torch/foreign/ops.rkt") tensor-shape)
+  (require           (only-in (file "../torch/foreign/ops.rkt") tensor-shape)
            (only-in (file "../torch/foreign/structs.rkt") tensor?)
            (only-in (file "../torch/foreign/tensor-ops.rkt") add))
 
@@ -74,12 +72,7 @@
   ;; "prefer base" warning here cannot be satisfied
   (require (only-in racket/contract define/contract)
            (only-in racket/contract/base -> ->i listof)
-                      ;; every callee comes from its defining module, never from the
-           ;; torch facade: add carries binary-arith/c there, tensor-shape
-           ;; its (listof ...), tensor? a (-> any/c boolean?).  Importing
-           ;; any of them would leave the bare row already paying a
-           ;; crossing, so the column would measure a second copy.
-           (only-in (file "../torch/foreign/ops.rkt") tensor-shape)
+                     (only-in (file "../torch/foreign/ops.rkt") tensor-shape)
            (only-in (file "../torch/foreign/structs.rkt") tensor?)
            (only-in (file "../torch/foreign/tensor-ops.rkt") add))
 
@@ -239,7 +232,8 @@
             (build-vector 8 (lambda (_) (randn 8 8))) #f)
 
   ;; the production surface, not a stand-in: torch's add carries
-  ;; binary-arith/c, a ->i over shapes and dtypes
+  ;; binary-arith/c, a dependent ->i whose admissible type for b turns on
+  ;; whether a is a tensor
   (displayln "\nthe shipped contract on add: facade vs raw callee")
   (let* ([u (randn 8 8)]
          [v (randn 8 8)]

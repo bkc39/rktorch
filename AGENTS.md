@@ -385,12 +385,16 @@ paying a crossing.
 
 **The combinator matters more than the callee.**  A flat `tensor?`
 contract on an allocating op is free, as the last column shows.  But the
-contract `add` actually ships -- `binary-arith/c`, a `->i` over shapes and
-dtypes -- costs **1.51x**: 14860 ns through `torch` against 9829 ns for
-the raw `tensor-ops` callee.  Five microseconds of contract on a ten
-microsecond op.  The existing carve-out that provides `+ - * / @` as
-plain renames is well founded, and the `->i` contracts on the hot tensor
-surface are the expensive part of `foreign.rkt`, not the flat ones.
+contract `add` actually ships costs **1.51x**: ~13500 ns through `torch`
+against ~8950 ns for the raw `tensor-ops` callee, or roughly five
+microseconds of contract on a ten microsecond op.  That contract,
+`binary-arith/c`, does not inspect shapes or dtypes -- it checks that the
+operands are tensors or reals, makes the admissible type of `b` depend on
+whether `a` is a tensor, and checks the result is a tensor.  The
+dependent `->i` wrapper is the cost, not the predicates.  So the existing
+carve-out providing `+ - * / @` as plain renames is well founded, and the
+`->i` contracts on the hot tensor surface are the expensive part of
+`foreign.rkt`, not the flat ones.
 
 **Cheap accessors are the other extreme.**  `tensor-shape` is a struct
 field read at ~7 ns, so a boundary contract on it is 19x and even a hand
