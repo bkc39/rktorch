@@ -158,8 +158,10 @@
       (for/fold ([acc 0]) ([i (in-range reps)])
         (+ acc (length (f (vector-ref ts (bitwise-and i 7))))))))
 
+  (define (settle-jit! thunk) (thunk))
+
   (define (best-ms thunk #:runs [runs 7])
-    (thunk)                             ; warm up before the first timed run
+    (settle-jit! thunk)
     (for/fold ([best +inf.0]) ([_ (in-range runs)])
       ;; collect alone leaves the finalizer queue to fire after t0 and
       ;; charge one strategy's native frees to the next one's clock

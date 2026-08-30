@@ -383,18 +383,22 @@ paying a crossing.
 | `define/contract-out` intra | 1.0x | 1.0x | 1.0x | 1.0x |
 | `define/contract-out` cross | 4x | 19x | 19x | 1.1x |
 
-**The combinator matters more than the callee.**  A flat `tensor?`
-contract on an allocating op is free, as the last column shows.  But the
-contract `add` actually ships costs **1.51x**: ~13500 ns through `torch`
-against ~8950 ns for the raw `tensor-ops` callee, or roughly five
-microseconds of contract on a ten microsecond op.  That contract,
-`binary-arith/c`, does not inspect shapes or dtypes -- it checks that the
+**How much the contract does matters more than what it wraps.**  A flat
+`(-> tensor? tensor? tensor?)` on an allocating op costs ~1.1x -- about a
+microsecond per call, ~10% here, small but not nothing.  The contract
+`add` actually ships costs **~1.4-1.5x** across runs: 16400 ns through
+`torch` against 11600 ns for the raw `tensor-ops` callee on one run,
+13500 against 8950 on another.  That contract,
+`binary-arith/c`, does not inspect shapes or dtypes -- it checks the
 operands are tensors or reals, makes the admissible type of `b` depend on
-whether `a` is a tensor, and checks the result is a tensor.  The
-dependent `->i` wrapper is the cost, not the predicates.  So the existing
-carve-out providing `+ - * / @` as plain renames is well founded, and the
-`->i` contracts on the hot tensor surface are the expensive part of
-`foreign.rkt`, not the flat ones.
+whether `a` is a tensor, and checks the result is a tensor.
+
+The benchmark does not separate the `->i` machinery from the extra
+predicate work it does (`or/c` dispatch, and re-testing `(tensor? a)` to
+select `b`'s contract), so that ratio is the cost of the whole
+contract, not of dependency as such.  Either way the carve-out providing
+`+ - * / @` as plain renames is well founded, and the richest contracts
+on the hot tensor surface are the expensive part of `foreign.rkt`.
 
 **Cheap accessors are the other extreme.**  `tensor-shape` is a struct
 field read at ~7 ns, so a boundary contract on it is 19x and even a hand
@@ -407,9 +411,9 @@ because it wraps the definition rather than the export.
 only at a real boundary -- the second reason to prefer it, alongside
 blame.
 
-The pipeline figure is arithmetic, not a measurement: `log-mel-spectrogram`
-runs ~3 ms over the speech fixture.  Isolating its contract share would
-need an uncontracted copy of the pipeline, which has not been built.
+`log-mel-spectrogram` runs ~3 ms over the speech fixture, measured.  What
+share of that is contract is *not* measured -- isolating it would need an
+uncontracted copy of the pipeline, which has not been built.
 
 ## CI
 
