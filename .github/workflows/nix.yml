@@ -61,19 +61,29 @@ jobs:
     name: Resyntax lint
     runs-on: ubuntu-latest
     steps:
+      # full history: --local-git-repository resolves the base ref locally,
+      # and checkout's default shallow fetch would not have it
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
       - uses: DeterminateSystems/nix-installer-action@v22
       - uses: DeterminateSystems/magic-nix-cache-action@v13
       # The default dev shell provisions Resyntax into the user scope, so the
       # linter runs on the same nix-provided Racket as the rest of the build.
       - name: Resyntax lint
+        env:
+          # on a master push the diff against master is empty, so the job
+          # reports quickly rather than being skipped — a skipped required
+          # check never reports and would stall merges
+          BASE_REF: origin/${{ github.base_ref || 'master' }}
         run: |
           nix develop .#ci --command bash -c '
             set -euo pipefail
-            out=$(resyntax analyze --directory torch --analyzer-timeout 30000 2>&1)
+            out=$(resyntax analyze --local-git-repository . "$BASE_REF" \
+                    --analyzer-timeout 30000 2>&1)
             echo "$out"
             if echo "$out" | grep -qE "resyntax: .*\.rkt:[0-9]+:[0-9]+ \["; then
-              echo "::error::Resyntax found refactoring suggestions. Run: resyntax fix --directory torch"
+              echo "::error::Resyntax found refactoring suggestions. Run: resyntax fix --local-git-repository . $BASE_REF"
               exit 1
             fi
             timeouts=$(echo "$out" | grep -c "timed out" || true)
