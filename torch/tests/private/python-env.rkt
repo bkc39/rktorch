@@ -22,9 +22,8 @@
          check-training-twin
          tol)
 
-;; dev-tol: CPU is bit-stable (the strict, CI-gating `tol`); CUDA is looser
-;; because libtorch and Python torch pick different cuDNN/cuBLAS
-;; algorithms, drifting over the Adam steps.
+;; dev-tol: CPU is bit-stable (the CI-gating `tol`); CUDA is looser because
+;; the two builds pick different cuDNN/cuBLAS algorithms
 (define (check-training-twin label rel-path train-on device dev-tol)
   (define j
     (call-with-python-env

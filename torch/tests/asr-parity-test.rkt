@@ -1,8 +1,7 @@
 #lang racket/base
 
-;; Needs the `nix develop` python. The model re-declaration MUST stay in
-;; sync with examples/racket/07-asr.rkt, per the 05/06 convention in
-;; python-cross-test.rkt.
+;; Needs the `nix develop` python; the model re-declaration MUST stay in
+;; sync with examples/racket/07-asr.rkt, as the 05/06 twins do.
 
 (module+ test
   (require rackunit

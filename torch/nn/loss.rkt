@@ -41,9 +41,8 @@
     (g:ctc-loss-intlist lp (to-dtype tg 'int64)
                         input-lengths target-lengths blank 1 zero-infinity?))
   (define device (tensor-device log-probs))
-  ;; libtorch 2.9 registers aten::_ctc_loss for CPU and CUDA only, so MPS
-  ;; frames marginalize on the CPU and the scalar returns; to-device is
-  ;; differentiable both ways, so the gradient lands back on the MPS graph.
+  ;; aten::_ctc_loss is CPU/CUDA only, so MPS detours through the CPU;
+  ;; to-device is differentiable both ways, so the gradient returns
   (if (eq? (device-type device) 'mps)
       (to-device (marginalize (to-device log-probs 'cpu)
                               (to-device targets 'cpu))

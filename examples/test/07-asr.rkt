@@ -88,10 +88,8 @@
                     "dropout stayed active in eval mode")))
   (check-exn #rx"no utterances to score"
              (lambda () (evaluate net vocab '())))
-  ;; Device RNG streams differ from the CPU's, so the on-device arm checks
-  ;; convergence, never equality with the CPU losses above. On MPS the
-  ;; hybrid loss crosses ctc-loss's CPU carve-out and must still land its
-  ;; gradient on the device's parameters.
+  ;; device RNG streams differ, so this arm checks convergence, never
+  ;; equality; on MPS it also crosses ctc-loss's CPU carve-out
   (define accel (pick-device))
   (unless (eq? (device-type accel) 'cpu)
     (define-values (a-losses a-net a-vocab _a-dev)
