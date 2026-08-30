@@ -5,11 +5,8 @@
 
 (module+ test
   (require rackunit
-           (only-in racket/list last)
            "../main.rkt"
            "../nn.rkt"
-           (only-in "../audio/functional.rkt" log-mel-spectrogram)
-           (only-in "../audio/librispeech.rkt" load-librispeech-fixture)
            (only-in "../data/mnist.rkt" load-mnist-fixture)
            (only-in "../data/text.rkt"
                     contiguous-blocks encode load-text-fixture text->vocab)

@@ -15,7 +15,10 @@
                   transcribe utterance-features))
 
 (define epochs (string->number (or (getenv "EPOCHS") "20")))
-(define limit (let ([l (getenv "LIMIT")]) (and l (string->number l))))
+(define limit
+  (let ([l (getenv "LIMIT")])
+    (and l (or (string->number l)
+               (error 'train-asr "LIMIT is not a number: ~a" l)))))
 (define batch (string->number (or (getenv "BATCH") "16")))
 (define n-embd (string->number (or (getenv "EMBD") "256")))
 (define checkpoint (or (getenv "CHECKPOINT") "checkpoints/asr-dev-clean"))
