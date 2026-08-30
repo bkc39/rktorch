@@ -19,10 +19,10 @@
   (cond [(not v) default]
         [(string->number v)
          => (lambda (n)
-              (if (exact-positive-integer? n)
-                  n
-                  (error 'train-asr "~a must be a positive integer: ~a"
-                         name v)))]
+              (unless (exact-positive-integer? n)
+                (error 'train-asr "~a must be a positive integer: ~a"
+                       name v))
+              n)]
         [else (error 'train-asr "~a is not a number: ~a" name v)]))
 
 (define epochs (env-number "EPOCHS" 20))

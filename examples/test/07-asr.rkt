@@ -68,6 +68,26 @@
                        (list transcript "MISTER QUILTER")))
   (check-true (rational? (item batch-loss)))
   (check-false (nan? (item batch-loss)))
+  ;; the masking invariant the conv-stack fix restored: a row's encoder
+  ;; output must not depend on how much padding its bucket neighbour forced
+  (let ()
+    (define short (narrow mel 1 0 200))
+    (define t-max (cadr (tensor-shape mel)))
+    (define sos-in
+      (unsqueeze (to-dtype (tensor (list (add1 (vector-length vocab))))
+                           'int64)
+                 0))
+    (define-values (alone _al) (net (unsqueeze short 0) sos-in #f))
+    (define-values (batched _bl)
+      (net (stack (list (cat (list short (zeros 80 (- t-max 200))) 1) mel) 0)
+           (cat (list sos-in sos-in) 0)
+           (list 200 t-max)))
+    (define frames (cadr (tensor-shape alone)))
+    (for ([a (in-list (tensor->list (ref alone 0)))]
+          [b (in-list (tensor->list (narrow (ref batched 0) 0 0 frames)))]
+          [i (in-naturals)])
+      (check-= a b 1e-4
+               (format "padding perturbed encoder output ~a" i))))
   (check-true (<= (string-length att-hyp) 500)
               (format "transcribe failed to terminate: ~v" att-hyp))
   (check-true (device? (pick-device)))
@@ -79,8 +99,8 @@
                            'int64)
                  0))
     (define (logits)
-      (let-values ([(_ctc l) (drop-net features sos-in #f)])
-        (tensor->list l)))
+      (define-values (_ctc l) (drop-net features sos-in #f))
+      (tensor->list l))
     (check-not-equal? (logits) (logits)
                       "dropout did not perturb a training-mode forward")
     (in-eval-mode drop-net

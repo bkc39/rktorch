@@ -1,7 +1,7 @@
 #lang racket/base
 
-(require (only-in racket/contract
-                  ->* and/c define/contract listof)
+(require (only-in racket/contract ->* and/c listof)
+         (only-in "../private/contract.rkt" define/contract-out)
          (only-in "../foreign.rkt"
                   device-type mean mul sub tensor-device tensor? to-device
                   to-dtype)
@@ -10,8 +10,7 @@
                   [ctc-loss-intlist g:ctc-loss-intlist]))
 
 (provide mse-loss
-         cross-entropy
-         ctc-loss)
+         cross-entropy)
 
 (define (mse-loss prediction target)
   (define d (sub prediction target))
@@ -26,7 +25,7 @@
 
 ;; log-probs is (T N C) log-softmaxed frames; targets is (N S) labels.
 ;; Reduction is fixed to torch's mean like cross-entropy above.
-(define/contract (ctc-loss log-probs targets
+(define/contract-out (ctc-loss log-probs targets
                            #:input-lengths input-lengths
                            #:target-lengths target-lengths
                            #:blank [blank 0]
