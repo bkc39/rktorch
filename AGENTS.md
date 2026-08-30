@@ -340,6 +340,33 @@ examples (`examples/racket/*.rkt`, prose-by-design) and the python
 parity twins (`examples/python/*.py`, whose docstrings identify the
 Racket twin they mirror).
 
+## Validating arguments
+
+Exported definitions carry their contract at the definition site with
+`define/contract-out` (`torch/private/contract.rkt`), which expands to a
+`define` plus `(provide (contract-out ...))`.  One form, so the contract
+sits where a reader already is and the name is not repeated in a separate
+`provide` block.  Not `define/contract`: it blames the defining module
+rather than the caller, which is backwards for a library reporting what a
+user passed.
+
+`unless`+`error` stays for what a contract cannot see -- checks against
+parsed content (WAV chunk structure), filesystem state (symlink
+containment), or values computed mid-body.  A guard that only inspects an
+argument's shape belongs in the signature.
+
+Name non-obvious contracts with `flat-named-contract` so the violation
+message still says `sample-rate` rather than an inlined `and/c` chain.
+
+`raco review` lints unexpanded, so it cannot see the generated `provide`
+and reports an exported definition used nowhere else in its own module as
+"identifier is never used".  Mark the ones it flags `;; noqa`, the same
+per-identifier directive the re-export shims already use;
+`#|review: ignore|#` suppresses a whole file and is too blunt here.  It
+flags fewer than you would expect: a definition that passes its own name
+as a quoted symbol, as `(check-ok rc 'audio-info)` does, already counts as
+used.  (`resyntax`, the CI gate, is unaffected.)
+
 ## CI
 
 `.github/workflows/nix.yml`: `nix flake check` on `ubuntu-latest` +

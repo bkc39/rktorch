@@ -206,12 +206,12 @@
                      "rank-1 saves as a mono channel")
        (check-exn #rx"unsupported audio extension"
                   (lambda () (save-audio (build-path dir "x.mp3") mono 8000)))
-       (check-exn #rx"sample rate"
+       (check-exn #rx"sample-rate"
                   (lambda () (save-audio (build-path dir "x.wav") mono 0)))
-       (check-exn #rx"sample rate"
+       (check-exn #rx"sample-rate"
                   (lambda ()
                     (save-audio (build-path dir "x.wav") mono 8000.0)))
-       (check-exn #rx"frame offset"
+       (check-exn #rx"frame-offset"
                   (lambda ()
                     (load-audio (build-path dir "mono.wav")
                                 #:frame-offset -1)))
@@ -219,7 +219,7 @@
                   (lambda ()
                     (load-audio (build-path dir "mono.wav")
                                 #:num-frames -2)))
-       (check-exn #rx"must be a tensor"
+       (check-exn #rx"expected: tensor"
                   (lambda () (save-audio (build-path dir "x.wav") '(1.0) 8000)))
        (check-exn #rx"rank 1 or"
                   (lambda () (save-audio (build-path dir "x.wav")
@@ -258,9 +258,9 @@
                (lambda () (write-wav "unused.wav" (tensor 1.0) 8000)))
     (check-exn #rx"zero channels"
                (lambda () (write-wav "unused.wav" (zeros 0 3) 8000)))
-    (check-exn #rx"sample rate"
+    (check-exn #rx"sample-rate"
                (lambda () (write-wav "unused.wav" (tensor '(0.0)) 0)))
-    (check-exn #rx"sample rate"
+    (check-exn #rx"sample-rate"
                (lambda () (write-wav "unused.wav" (tensor '(0.0)) 8000.0)))
     (check-exn #rx"byte rate"
                (lambda () (write-wav "unused.wav" (zeros 3 1) (expt 2 30))))
@@ -292,7 +292,7 @@
                                                (format "file://~a" src)))
                        src-bytes
                        "second call must read the cache, not the source")
-         (check-exn #rx"inside the cache directory"
+         (check-exn #rx"cache-name-inside-the-cache-directory"
                     (lambda ()
                       (download-audio-cached "../escape.wav"
                                              (format "file://~a" src))))
