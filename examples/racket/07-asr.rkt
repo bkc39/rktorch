@@ -526,6 +526,10 @@ counts against it.
                            #:log-every [log-every 1])
   (when (and limit (not (exact-positive-integer? limit)))
     (error 'train-librispeech "limit must be a positive integer: ~a" limit))
+  (unless (exact-positive-integer? epochs)
+    (error 'train-librispeech "epochs must be a positive integer: ~a" epochs))
+  (unless (exact-positive-integer? batch)
+    (error 'train-librispeech "batch must be a positive integer: ~a" batch))
   (with-default-device device
     (manual-seed! 0)
     (define all (librispeech-utterances "dev-clean"))

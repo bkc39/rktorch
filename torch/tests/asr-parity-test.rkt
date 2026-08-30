@@ -1,9 +1,8 @@
 #lang racket/base
 
-;; Run: raco test torch/tests/asr-parity-test.rkt (inside `nix develop`;
-;; SKIPS when python3 lacks torch or torchaudio). The model re-declaration
-;; MUST stay in sync with examples/racket/07-asr.rkt, per the 05/06
-;; convention in python-cross-test.rkt.
+;; Needs the `nix develop` python. The model re-declaration MUST stay in
+;; sync with examples/racket/07-asr.rkt, per the 05/06 convention in
+;; python-cross-test.rkt.
 
 (module+ test
   (require rackunit

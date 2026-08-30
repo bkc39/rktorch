@@ -10,12 +10,15 @@
          "../racket/07-asr.rkt")
 
 (module+ main
+  (define (env-number name default)
+    (define v (getenv name))
+    (cond [(not v) default]
+          [(string->number v) => values]
+          [else (error '07-asr "~a is not a number: ~a" name v)]))
   (printf "device: ~a\n" (pick-device))
-  (define limit (getenv "LIMIT"))
   (define-values (net vocab)
-    (train-librispeech
-     #:epochs (string->number (or (getenv "EPOCHS") "20"))
-     #:limit (and limit (string->number limit))))
+    (train-librispeech #:epochs (env-number "EPOCHS" 20)
+                       #:limit (env-number "LIMIT" #f)))
   (define-values (samples rate transcript) (load-librispeech-fixture))
   (define features (utterance-features samples rate))
   (define hypothesis (transcribe net vocab features))

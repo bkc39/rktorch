@@ -14,18 +14,23 @@
                   evaluate greedy-decode pick-device train-librispeech
                   transcribe utterance-features))
 
-(define epochs (string->number (or (getenv "EPOCHS") "20")))
-(define limit
-  (let ([l (getenv "LIMIT")])
-    (and l (or (string->number l)
-               (error 'train-asr "LIMIT is not a number: ~a" l)))))
-(define batch (string->number (or (getenv "BATCH") "16")))
-(define n-embd (string->number (or (getenv "EMBD") "256")))
+(define (env-number name default)
+  (define v (getenv name))
+  (cond [(not v) default]
+        [(string->number v)
+         => (lambda (n)
+              (if (exact-positive-integer? n)
+                  n
+                  (error 'train-asr "~a must be a positive integer: ~a"
+                         name v)))]
+        [else (error 'train-asr "~a is not a number: ~a" name v)]))
+
+(define epochs (env-number "EPOCHS" 20))
+(define limit (env-number "LIMIT" #f))
+(define batch (env-number "BATCH" 16))
+(define n-embd (env-number "EMBD" 256))
 (define checkpoint (or (getenv "CHECKPOINT") "checkpoints/asr-dev-clean"))
 (define held-out 3)
-
-(when (and limit (not (exact-positive-integer? limit)))
-  (error 'train-asr "LIMIT must be a positive integer: ~a" limit))
 
 (define device (pick-device))
 (printf "device: ~a\n" device)
