@@ -68,8 +68,9 @@
               (format "transcribe failed to terminate: ~v" att-hyp))
   (check-true (device? (pick-device)))
   ;; Device RNG streams differ from the CPU's, so the on-device arm checks
-  ;; convergence, never equality with the CPU losses above. pick-device
-  ;; already excludes MPS (no ctc_loss kernel), so this arm is CUDA-only.
+  ;; convergence, never equality with the CPU losses above. On MPS the
+  ;; hybrid loss crosses ctc-loss's CPU carve-out and must still land its
+  ;; gradient on the device's parameters.
   (define accel (pick-device))
   (unless (eq? (device-type accel) 'cpu)
     (define-values (a-losses a-net a-vocab _a-dev)
@@ -80,4 +81,15 @@
                 (format "non-finite loss on ~a: ~a" accel a-losses))
     (check-true (< (last a-losses) (first a-losses))
                 (format "~a losses did not decrease: ~a" accel a-losses))
-    (check-true (string? (transcribe a-net a-vocab features)))))
+    (check-true (string? (greedy-decode a-net a-vocab features)))
+    (check-true (string? (transcribe a-net a-vocab features)))
+    ;; a multi-row batch must come back on the accelerator: ctc-loss's CPU
+    ;; carve-out is only correct if it does not strand the graph there
+    (define a-mel (to-device mel accel))
+    (define a-batch-loss
+      (hybrid-batch-loss a-net a-vocab
+                         (list a-mel (narrow a-mel 1 0 200))
+                         (list transcript "MISTER QUILTER")))
+    (check-equal? (tensor-device a-batch-loss) accel)
+    (check-true (rational? (item a-batch-loss)))
+    (check-false (nan? (item a-batch-loss)))))

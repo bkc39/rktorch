@@ -306,15 +306,16 @@ something wider.
     (values ctc-log-probs
             (head (if (zero? p-drop) d (hdrop d))))))]
 
-@bold{The device.} As in the earlier capstones --- with one carve-out:
-libtorch 2.9 registers @tt{ctc_loss} for CPU and CUDA only, so on Apple
-silicon (where the accelerator is MPS) this example trains on the CPU
-rather than crash inside the loss.
+@bold{The device.} As in the earlier capstones: take the accelerator and
+let @racket[with-default-device] scope it, so parameters and batches land
+together. Both accelerators run this model natively --- libtorch 2.9
+registers no MPS @tt{ctc_loss} kernel, but @racket[ctc-loss] marginalizes
+that one op on the CPU and hands the gradient back, so Apple silicon
+trains on the GPU like CUDA does.
 
 @chunk[<r07-device>
 (define (pick-device)
-  (define accel (accelerator-if-available))
-  (if (eq? (device-type accel) 'mps) (cpu-device) accel))]
+  (accelerator-if-available))]
 
 @bold{Features and teacher forcing.} One utterance becomes a
 @tt{[1, 80, T]} batch. For training, the transcript becomes two shifted

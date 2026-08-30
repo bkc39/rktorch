@@ -2,7 +2,9 @@
 
 (require (only-in racket/contract
                   ->* and/c define/contract listof)
-         (only-in "../foreign.rkt" mean mul sub tensor? to-dtype)
+         (only-in "../foreign.rkt"
+                  device-type mean mul sub tensor-device tensor? to-device
+                  to-dtype)
          (only-in "../generated.rkt"
                   [cross-entropy-loss g:cross-entropy-loss]
                   [ctc-loss-intlist g:ctc-loss-intlist]))
@@ -35,5 +37,15 @@
        (#:blank exact-nonnegative-integer?
         #:zero-infinity? boolean?)
        tensor?)
-  (g:ctc-loss-intlist log-probs (to-dtype targets 'int64)
-                      input-lengths target-lengths blank 1 zero-infinity?))
+  (define (marginalize lp tg)
+    (g:ctc-loss-intlist lp (to-dtype tg 'int64)
+                        input-lengths target-lengths blank 1 zero-infinity?))
+  (define device (tensor-device log-probs))
+  ;; libtorch 2.9 registers aten::_ctc_loss for CPU and CUDA only, so MPS
+  ;; frames marginalize on the CPU and the scalar returns; to-device is
+  ;; differentiable both ways, so the gradient lands back on the MPS graph.
+  (if (eq? (device-type device) 'mps)
+      (to-device (marginalize (to-device log-probs 'cpu)
+                              (to-device targets 'cpu))
+                 device)
+      (marginalize log-probs targets)))

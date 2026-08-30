@@ -238,6 +238,34 @@
                (lambda () (conv1d (randn 1 2 8) (randn 3 2 3)
                                   #:padding -1))))
 
+  (test-case "ctc-loss on mps: same value, gradient back on the device"
+    ;; libtorch has no MPS ctc_loss kernel, so the loss detours through the
+    ;; CPU; the detour must be invisible in both the value and the gradient
+    (when (mps-available?)
+      (manual-seed! 0)
+      (define frames (tensor->list (randn 6 2 5)))
+      (define targets '((1 2 3) (2 3 1)))
+      (define (loss+grad dev)
+        (define w (to-device (reshape (tensor frames) 6 2 5) dev))
+        (requires-grad! w)
+        (define loss
+          (ctc-loss (log-softmax w 2)
+                    (to-device (to-dtype (tensor targets) 'int64) dev)
+                    #:input-lengths '(6 5)
+                    #:target-lengths '(3 3)
+                    #:blank 4
+                    #:zero-infinity? #t))
+        (backward! loss)
+        (values loss (grad w)))
+      (define-values (cpu-loss cpu-grad) (loss+grad 'cpu))
+      (define-values (mps-loss mps-grad) (loss+grad 'mps))
+      (check-equal? (tensor-device mps-loss) (mps-device))
+      (check-equal? (tensor-device mps-grad) (mps-device))
+      (check-= (item mps-loss) (item cpu-loss) 1e-5)
+      (for ([c (in-list (tensor->list cpu-grad))]
+            [m (in-list (tensor->list (to-device mps-grad 'cpu)))])
+        (check-= m c 1e-5))))
+
   (test-case "a few Adam steps reduce the training loss"
     (manual-seed! 0)
     (define net (mlp 4 8 2))
