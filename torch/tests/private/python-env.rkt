@@ -5,6 +5,9 @@
 ;; whole-module require: define-runtime-path needs phase-1 bindings only-in
 ;; would strip
 (require racket/runtime-path
+         ;; whole-module: the pattern's syntax classes live at phase 1 and
+         ;; only-in would strip them
+         syntax/parse/define
          (only-in json read-json)
          (only-in racket/port open-output-nowhere)
          (only-in racket/system system*)
@@ -64,7 +67,7 @@
                                 (string->bytes/utf-8 (cdr nv))))
   (parameterize ([current-environment-variables env]) (thunk)))
 
-(define-syntax-rule (with-python-env body ...)
+(define-syntax-parse-rule (with-python-env body:expr ...+)
   (call-with-python-env (lambda () body ...)))
 
 (define (python-module-available? mod)

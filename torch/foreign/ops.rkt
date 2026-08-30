@@ -1,6 +1,9 @@
 #lang racket/base
 
-(require (only-in ffi/vector
+(require ;; whole-module: the pattern's syntax classes live at phase 1 and
+         ;; only-in would strip them
+         syntax/parse/define
+         (only-in ffi/vector
                   f32vector->list
                   f64vector->list
                   f64vector?
@@ -226,7 +229,7 @@
                 thunk
                 (lambda () (set-default-device! saved))))
 
-(define-syntax-rule (with-default-device dev body ...)
+(define-syntax-parse-rule (with-default-device dev:expr body:expr ...+)
   (call-with-default-device dev (lambda () body ...)))
 
 (define (to-device t dev)
