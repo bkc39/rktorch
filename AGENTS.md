@@ -369,39 +369,43 @@ used.  (`resyntax`, the CI gate, is unaffected.)
 
 ### What the strategies cost
 
-`scripts/bench-contract-overhead.rkt`, lab host, ratios against an
-unvalidated call of the same kind, and against the *raw* callee -- the
-public `tensor?` and `tensor-shape` are themselves contracted, so
-importing them would leave the baseline already paying a crossing.
-Rounded: these workloads carry real run-to-run variance.
+`scripts/bench-contract-overhead.rkt`, lab host, rounded -- these carry
+real run-to-run variance.  Every callee is imported from its defining
+module, never from the `torch` facade, or the baseline would already be
+paying a crossing.
 
 | | flat `->` | `->i` + `#:pre` | cached shape read | 8x8 tensor `add` |
 |---|---|---|---|---|
-| bare, ns/call | 10 | 12 | 7 | 15000 |
+| bare, ns/call | 10 | 12 | 7 | 9800 |
 | `unless`+`error` | 1.2x | 2.1x | 10x | 1.0x |
 | `define/contract` intra | 9x | 19x | 25x | 1.1x |
 | `define/contract` cross | 9x | 20x | 25x | 1.1x |
 | `define/contract-out` intra | 1.0x | 1.0x | 1.0x | 1.0x |
 | `define/contract-out` cross | 4x | 19x | 19x | 1.1x |
 
-**The dividing line is allocation, not tensors.** An 8x8 `add` costs ~15
-us of FFI and every strategy disappears into it.  A cached accessor is
-the opposite extreme: `tensor-shape` is a struct field read at ~7 ns, so
-its boundary contract costs ~130 ns -- 19x -- and even a hand guard costs
-10x, because `tensor?` alone is ~60 ns.  On accessors the question is not
-which strategy but whether to validate at all.
+**The combinator matters more than the callee.**  A flat `tensor?`
+contract on an allocating op is free, as the last column shows.  But the
+contract `add` actually ships -- `binary-arith/c`, a `->i` over shapes and
+dtypes -- costs **1.51x**: 14860 ns through `torch` against 9829 ns for
+the raw `tensor-ops` callee.  Five microseconds of contract on a ten
+microsecond op.  The existing carve-out that provides `+ - * / @` as
+plain renames is well founded, and the `->i` contracts on the hot tensor
+surface are the expensive part of `foreign.rkt`, not the flat ones.
+
+**Cheap accessors are the other extreme.**  `tensor-shape` is a struct
+field read at ~7 ns, so a boundary contract on it is 19x and even a hand
+guard is 10x, because `tensor?` alone is ~60 ns.  There the question is
+whether to validate at all.
 
 **`define/contract` charges the same inside a module as across it**,
 because it wraps the definition rather than the export.
 `define/contract-out` is 1.0x internally in every workload and charges
 only at a real boundary -- the second reason to prefer it, alongside
-blame.  `->i` is the expensive combinator, ~4x a flat contract at the
-boundary.
+blame.
 
 The pipeline figure is arithmetic, not a measurement: `log-mel-spectrogram`
-runs ~3 ms over the speech fixture against roughly a microsecond of
-contract work.  Isolating it would need an uncontracted copy of the
-pipeline, which has not been built.
+runs ~3 ms over the speech fixture.  Isolating its contract share would
+need an uncontracted copy of the pipeline, which has not been built.
 
 ## CI
 

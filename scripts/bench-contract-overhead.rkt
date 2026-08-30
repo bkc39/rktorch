@@ -8,8 +8,8 @@
 (module bare racket/base
   (provide scale add-wrap split-heads shape-wrap
            intra-scale intra-add intra-heads intra-shape)
-  (require (only-in torch add)
-           (only-in (file "../torch/foreign/ops.rkt") tensor-shape))
+  (require (only-in (file "../torch/foreign/ops.rkt") tensor-shape)
+           (only-in (file "../torch/foreign/tensor-ops.rkt") add))
 
   (define (scale x k) (* x k))
   (define (add-wrap a b) (add a b))
@@ -30,13 +30,14 @@
 (module guards racket/base
   (provide scale add-wrap split-heads shape-wrap
            intra-scale intra-add intra-heads intra-shape)
-  (require (only-in torch add)
-           ;; both public names are themselves contracted -- tensor? as
-           ;; (-> any/c boolean?), tensor-shape as its full (listof ...).
-           ;; Importing them would leave the bare row already paying a
+  (require            ;; every callee comes from its defining module, never from the
+           ;; torch facade: add carries binary-arith/c there, tensor-shape
+           ;; its (listof ...), tensor? a (-> any/c boolean?).  Importing
+           ;; any of them would leave the bare row already paying a
            ;; crossing, so the column would measure a second copy.
            (only-in (file "../torch/foreign/ops.rkt") tensor-shape)
-           (only-in (file "../torch/foreign/structs.rkt") tensor?))
+           (only-in (file "../torch/foreign/structs.rkt") tensor?)
+           (only-in (file "../torch/foreign/tensor-ops.rkt") add))
 
   (define (scale x k)
     (unless (real? x) (error 'scale "x must be real: ~e" x))
@@ -73,13 +74,14 @@
   ;; "prefer base" warning here cannot be satisfied
   (require (only-in racket/contract define/contract)
            (only-in racket/contract/base -> ->i listof)
-           (only-in torch add)
-           ;; both public names are themselves contracted -- tensor? as
-           ;; (-> any/c boolean?), tensor-shape as its full (listof ...).
-           ;; Importing them would leave the bare row already paying a
+                      ;; every callee comes from its defining module, never from the
+           ;; torch facade: add carries binary-arith/c there, tensor-shape
+           ;; its (listof ...), tensor? a (-> any/c boolean?).  Importing
+           ;; any of them would leave the bare row already paying a
            ;; crossing, so the column would measure a second copy.
            (only-in (file "../torch/foreign/ops.rkt") tensor-shape)
-           (only-in (file "../torch/foreign/structs.rkt") tensor?))
+           (only-in (file "../torch/foreign/structs.rkt") tensor?)
+           (only-in (file "../torch/foreign/tensor-ops.rkt") add))
 
   (define/contract (scale x k) (-> real? real? real?) (* x k))
   (define/contract (add-wrap a b) (-> tensor? tensor? tensor?) (add a b))
@@ -104,12 +106,11 @@
       (+ acc (length (shape-wrap (vector-ref ts (bitwise-and i 7))))))))
 
 (module boundary racket/base
-  ;; define/contract-out provides the four wrappers itself
   (provide intra-scale intra-add intra-heads intra-shape)
   (require (only-in racket/contract/base -> ->i listof)
-           (only-in torch add)
            (only-in (file "../torch/foreign/ops.rkt") tensor-shape)
            (only-in (file "../torch/foreign/structs.rkt") tensor?)
+           (only-in (file "../torch/foreign/tensor-ops.rkt") add)
            (only-in (file "../torch/private/contract.rkt") define/contract-out))
 
   (define/contract-out (scale x k) (-> real? real? real?) (* x k))
@@ -136,7 +137,9 @@
 
 (module+ main
   (require racket/format
-           (only-in torch manual-seed! randn reclaim-native-memory!)
+           (only-in torch manual-seed! randn reclaim-native-memory!
+                    [add torch-add])
+           (only-in (file "../torch/foreign/tensor-ops.rkt") [add raw-add])
            (only-in torch/audio/data load-audio-fixture)
            (only-in torch/audio/functional log-mel-spectrogram)
            (prefix-in bare: (submod ".." bare))
@@ -234,6 +237,22 @@
             (vector (shape-loop bare:shape-wrap) (shape-loop guards:shape-wrap)
                     (shape-loop dc:shape-wrap) (shape-loop bo:shape-wrap))
             (build-vector 8 (lambda (_) (randn 8 8))) #f)
+
+  ;; the production surface, not a stand-in: torch's add carries
+  ;; binary-arith/c, a ->i over shapes and dtypes
+  (displayln "\nthe shipped contract on add: facade vs raw callee")
+  (let* ([u (randn 8 8)]
+         [v (randn 8 8)]
+         [n 50000]
+         [raw (/ (* (best-ms (lambda ()
+                               (for ([_ (in-range n)]) (raw-add u v)))) 1e6) n)]
+         [fac (/ (* (best-ms (lambda ()
+                               (for ([_ (in-range n)]) (torch-add u v)))) 1e6) n)])
+    (printf "  raw tensor-ops add        ~a ns/call\n"
+            (~r raw #:precision '(= 1)))
+    (printf "  torch add (binary-arith/c) ~a ns/call   ~ax\n"
+            (~r fac #:precision '(= 1))
+            (~r (/ fac raw) #:precision '(= 2))))
 
   (displayln "\nreal pipeline: log-mel-spectrogram over the speech fixture")
   (define-values (samples rate) (load-audio-fixture))
