@@ -238,10 +238,8 @@
          (values losses
                  (cat (for/list ([p (in-list (parameters net))])
                         (reshape p -1))))))
-     ;; 2e-4, not tol: the hybrid stack's backward chain (6 convs, 12
-     ;; attention blocks, 2 losses) accumulates more float32 divergence
-     ;; between libtorch-bin 2.9 and the wheel than 05/06 over the same
-     ;; 5 Adam steps
+     ;; 2e-4, not tol: this backward chain accumulates more
+     ;; libtorch-bin-vs-wheel float32 divergence than 05/06 do
      (check-training-twin "07_asr" "python/07_asr.py" train-on 'cpu 2e-4)
      (when (and (cuda-available?)
                 (python-cuda-available?))

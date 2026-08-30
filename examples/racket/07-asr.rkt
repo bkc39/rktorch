@@ -361,6 +361,9 @@ NaN the parameters mid-epoch.
 (define (hybrid-batch-loss net vocab mels transcripts)
   (when (null? mels)
     (error 'hybrid-batch-loss "no mels in the batch"))
+  (unless (= (length mels) (length transcripts))
+    (error 'hybrid-batch-loss "~a mels but ~a transcripts"
+           (length mels) (length transcripts)))
   ;; the mels carry the device: this is exported, so callers reach it
   ;; from outside whatever extent built the net
   (with-default-device (tensor-device (car mels))
