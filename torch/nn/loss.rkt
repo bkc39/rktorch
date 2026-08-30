@@ -1,15 +1,16 @@
 #lang racket/base
 
-(require (only-in racket/contract
-                  ->* and/c define/contract listof)
-         (only-in "../foreign.rkt" mean mul sub tensor? to-dtype)
+(require (only-in racket/contract ->* and/c listof)
+         (only-in "../private/contract.rkt" define/contract-out)
+         (only-in "../foreign.rkt"
+                  device-type mean mul sub tensor-device tensor? to-device
+                  to-dtype)
          (only-in "../generated.rkt"
                   [cross-entropy-loss g:cross-entropy-loss]
                   [ctc-loss-intlist g:ctc-loss-intlist]))
 
 (provide mse-loss
-         cross-entropy
-         ctc-loss)
+         cross-entropy)
 
 (define (mse-loss prediction target)
   (define d (sub prediction target))
@@ -24,7 +25,7 @@
 
 ;; log-probs is (T N C) log-softmaxed frames; targets is (N S) labels.
 ;; Reduction is fixed to torch's mean like cross-entropy above.
-(define/contract (ctc-loss log-probs targets
+(define/contract-out (ctc-loss log-probs targets
                            #:input-lengths input-lengths
                            #:target-lengths target-lengths
                            #:blank [blank 0]
@@ -35,5 +36,14 @@
        (#:blank exact-nonnegative-integer?
         #:zero-infinity? boolean?)
        tensor?)
-  (g:ctc-loss-intlist log-probs (to-dtype targets 'int64)
-                      input-lengths target-lengths blank 1 zero-infinity?))
+  (define (marginalize lp tg)
+    (g:ctc-loss-intlist lp (to-dtype tg 'int64)
+                        input-lengths target-lengths blank 1 zero-infinity?))
+  (define device (tensor-device log-probs))
+  ;; aten::_ctc_loss is CPU/CUDA only, so MPS detours through the CPU;
+  ;; to-device is differentiable both ways, so the gradient returns
+  (if (eq? (device-type device) 'mps)
+      (to-device (marginalize (to-device log-probs 'cpu)
+                              (to-device targets 'cpu))
+                 device)
+      (marginalize log-probs targets)))

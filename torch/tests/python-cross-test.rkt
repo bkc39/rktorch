@@ -245,27 +245,6 @@
              [p (in-list (hash-ref j 'values))]
              [i (in-naturals)])
          (check-= r p tol (format "04_mlp: parameter ~a parity" i))))
-     ;; dev-tol: CPU is bit-stable (the strict, CI-gating `tol`); CUDA is
-     ;; looser because libtorch 2.9 and Python torch 2.12 pick different
-     ;; cuDNN/cuBLAS algorithms, drifting ~1e-3 over 5 Adam steps.
-     (define (check-training-twin label rel-path train-on device dev-tol)
-       (define j
-         (call-with-python-env
-          #:env (list (cons "RKTORCH_PARITY_DEVICE" (symbol->string device)))
-          (lambda () (python-result rel-path))))
-       (define-values (losses flat-params) (train-on device))
-       (for ([r (in-list losses)]
-             [p (in-list (hash-ref j 'losses))]
-             [i (in-naturals)])
-         (check-= r p dev-tol (format "~a[~a]: loss at step ~a" label device i)))
-       (check-equal? (tensor-shape flat-params) (hash-ref j 'shape)
-                     (format "~a[~a]: parameter count" label device))
-       (define host-params (to-device flat-params 'cpu))
-       (for ([r (in-list (tensor->list host-params))]
-             [p (in-list (hash-ref j 'values))]
-             [i (in-naturals)])
-         (check-= r p dev-tol
-                  (format "~a[~a]: parameter ~a parity" label device i))))
      (let ()
        ;; Re-declared (torch/ can't reach examples/ once installed by copy in
        ;; the nix build): MUST stay in sync with examples/racket/05-mnist.rkt

@@ -107,7 +107,14 @@
     (check-true (andmap requires-grad? ps))
     (check-equal? (map car (named-parameters c)) '("weight" "bias"))
     (check-equal? (tensor-shape (c (randn 4 2 100))) '(4 8 100))
-    (check-equal? (object-name c) 'Conv1d))
+    (check-equal? (object-name c) 'Conv1d)
+    (define dilated (Conv1d 2 8 3 #:dilation 4 #:padding 4))
+    (check-equal? (tensor-shape (dilated (randn 4 2 100))) '(4 8 100))
+    (check-equal? (tensor->list
+                   (conv1d (tensor '(((1.0 2.0 3.0 4.0 5.0))))
+                           (ones 1 1 2)
+                           #:dilation 2))
+                  '(4.0 6.0 8.0)))
 
   (test-case "MaxPool2d layer: stateless, default stride = kernel"
     (define p (MaxPool2d 2))
@@ -230,6 +237,34 @@
     (check-exn #rx"padding"
                (lambda () (conv1d (randn 1 2 8) (randn 3 2 3)
                                   #:padding -1))))
+
+  (test-case "ctc-loss on mps: same value, gradient back on the device"
+    ;; libtorch has no MPS ctc_loss kernel, so the loss detours through the
+    ;; CPU; the detour must be invisible in both the value and the gradient
+    (when (mps-available?)
+      (manual-seed! 0)
+      (define frames (tensor->list (randn 6 2 5)))
+      (define targets '((1 2 3) (2 3 1)))
+      (define (loss+grad dev)
+        (define w (to-device (reshape (tensor frames) 6 2 5) dev))
+        (requires-grad! w)
+        (define loss
+          (ctc-loss (log-softmax w 2)
+                    (to-device (to-dtype (tensor targets) 'int64) dev)
+                    #:input-lengths '(6 5)
+                    #:target-lengths '(3 3)
+                    #:blank 4
+                    #:zero-infinity? #t))
+        (backward! loss)
+        (values loss (grad w)))
+      (define-values (cpu-loss cpu-grad) (loss+grad 'cpu))
+      (define-values (mps-loss mps-grad) (loss+grad 'mps))
+      (check-equal? (tensor-device mps-loss) (mps-device))
+      (check-equal? (tensor-device mps-grad) (mps-device))
+      (check-= (item mps-loss) (item cpu-loss) 1e-5)
+      (for ([c (in-list (tensor->list cpu-grad))]
+            [m (in-list (tensor->list (to-device mps-grad 'cpu)))])
+        (check-= m c 1e-5))))
 
   (test-case "a few Adam steps reduce the training loss"
     (manual-seed! 0)

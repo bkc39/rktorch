@@ -187,6 +187,15 @@ there is no `.#mps` counterpart to `.#cuda` (which exists only because CUDA
 needs a differently-linked libtorch plus the host driver). Confirm with
 `nix develop --command racket -e '(require torch)(mps-available?)'`.
 
+**The one MPS kernel gap.** libtorch 2.9 registers `aten::_ctc_loss` for CPU
+and CUDA only. `ctc-loss` (`torch/nn/loss.rkt`) therefore marginalizes MPS
+frames on the CPU and moves the scalar back; `to-device` is differentiable, so
+the gradient returns to the MPS graph and the rest of a model — the 07-asr
+encoder, attention decoder, and `adam` — stays on the GPU. Every other op the
+speech arc uses has an MPS kernel, so `pick-device` must keep returning
+`accelerator-if-available` unmodified: routing darwin to the CPU to dodge this
+one op is what the carve-out exists to avoid.
+
 ## Architecture
 
 ### C++ (`cpp/`)
