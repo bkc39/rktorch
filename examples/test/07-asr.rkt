@@ -71,6 +71,21 @@
   (check-true (<= (string-length att-hyp) 500)
               (format "transcribe failed to terminate: ~v" att-hyp))
   (check-true (device? (pick-device)))
+  (let ()
+    (manual-seed! 0)
+    (define drop-net (asr 80 (vector-length vocab) #:dropout 0.5))
+    (define sos-in
+      (unsqueeze (to-dtype (tensor (list (add1 (vector-length vocab))))
+                           'int64)
+                 0))
+    (define (logits)
+      (let-values ([(_ctc l) (drop-net features sos-in #f)])
+        (tensor->list l)))
+    (check-not-equal? (logits) (logits)
+                      "dropout did not perturb a training-mode forward")
+    (in-eval-mode drop-net
+      (check-equal? (logits) (logits)
+                    "dropout stayed active in eval mode")))
   (check-exn #rx"no utterances to score"
              (lambda () (evaluate net vocab '())))
   ;; Device RNG streams differ from the CPU's, so the on-device arm checks

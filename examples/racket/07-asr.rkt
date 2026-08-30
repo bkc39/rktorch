@@ -359,6 +359,8 @@ NaN the parameters mid-epoch.
   (append ids (make-list (- s-max (length ids)) fill)))
 
 (define (hybrid-batch-loss net vocab mels transcripts)
+  (when (null? mels)
+    (error 'hybrid-batch-loss "no mels in the batch"))
   ;; the mels carry the device: this is exported, so callers reach it
   ;; from outside whatever extent built the net
   (with-default-device (tensor-device (car mels))
@@ -530,6 +532,9 @@ counts against it.
     (error 'train-librispeech "epochs must be a positive integer: ~a" epochs))
   (unless (exact-positive-integer? batch)
     (error 'train-librispeech "batch must be a positive integer: ~a" batch))
+  (unless (exact-positive-integer? log-every)
+    (error 'train-librispeech "log-every must be a positive integer: ~a"
+           log-every))
   (with-default-device device
     (manual-seed! 0)
     (define all (librispeech-utterances "dev-clean"))

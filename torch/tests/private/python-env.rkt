@@ -9,7 +9,7 @@
          (only-in racket/port open-output-nowhere)
          (only-in racket/system system*)
          (only-in rackunit check-= check-equal?)
-         (only-in "../../main.rkt" tensor->list tensor-shape to-device))
+         (only-in "../../main.rkt" tensor-shape tensor->list to-device))
 
 (provide python
          call-with-python-env
