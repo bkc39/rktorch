@@ -10,10 +10,9 @@
          torch/nn
          (only-in torch/audio/librispeech
                   librispeech-utterances load-utterance utterance-transcript)
-         (only-in torch/audio/metrics cer wer)
          (only-in "../examples/racket/07-asr.rkt"
-                  greedy-decode pick-device train-librispeech transcribe
-                  utterance-features))
+                  evaluate greedy-decode pick-device train-librispeech
+                  transcribe utterance-features))
 
 (define epochs (string->number (or (getenv "EPOCHS") "20")))
 (define limit (let ([l (getenv "LIMIT")]) (and l (string->number l))))
@@ -28,8 +27,6 @@
 (define device (pick-device))
 (printf "device: ~a\n" device)
 
-;; the eval tail must stay outside the training window, so an unset LIMIT
-;; trains on everything except the held-out utterances
 (define all (librispeech-utterances "dev-clean"))
 (define train-limit
   (min (or limit (- (length all) held-out)) (- (length all) held-out)))
@@ -52,15 +49,18 @@
            out)))
 (printf "\ncheckpoint: ~a.safetensors (+ .rktd sidecar)\n" checkpoint)
 
-(for ([u (in-list (list-tail all (- (length all) held-out)))])
+(define held (list-tail all (- (length all) held-out)))
+
+(for ([u (in-list held)])
   (define-values (samples rate) (load-utterance u))
-  (define reference (utterance-transcript u))
   (define features (utterance-features samples rate))
-  (define ctc-hyp (greedy-decode net vocab features))
-  (define att-hyp (transcribe net vocab features))
-  (define w (wer reference att-hyp))
-  (define c (cer reference att-hyp))
-  (printf "\nref:     ~a\nctc:     ~a\nattend:  ~a\nwer: ~a (~a)  cer: ~a (~a)\n"
-          reference ctc-hyp att-hyp
-          w (~r (exact->inexact w) #:precision '(= 3))
-          c (~r (exact->inexact c) #:precision '(= 3))))
+  (printf "\nref:     ~a\nctc:     ~a\nattend:  ~a\n"
+          (utterance-transcript u)
+          (greedy-decode net vocab features)
+          (transcribe net vocab features)))
+
+(define-values (corpus-wer corpus-cer) (evaluate net vocab held))
+(printf "\nheld-out (~a utterances): wer ~a  cer ~a\n"
+        held-out
+        (~r (exact->inexact corpus-wer) #:precision '(= 4))
+        (~r (exact->inexact corpus-cer) #:precision '(= 4)))

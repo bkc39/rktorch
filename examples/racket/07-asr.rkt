@@ -110,11 +110,12 @@ the unbatched paths.
 
 @chunk[<r07-encoder-block>
 (define-module asr-encoder-block (n-embd n-head)
-  #:coerce ([n-head (if (zero? (remainder n-embd n-head))
+  #:coerce ([n-head (if (and (exact-positive-integer? n-head)
+                             (zero? (remainder n-embd n-head)))
                         n-head
                         (error 'asr-encoder-block
-                               "n-embd ~a not divisible by n-head ~a"
-                               n-embd n-head))])
+                               "n-head ~a must be positive and divide n-embd ~a"
+                               n-head n-embd))])
   #:submodules ([ln1 (LayerNorm n-embd)]
                 [wq (Linear n-embd n-embd)]
                 [wk (Linear n-embd n-embd)]
@@ -153,11 +154,12 @@ padded audio frames. MLP last, as always.
 
 @chunk[<r07-decoder-block>
 (define-module asr-decoder-block (n-embd n-head #:dropout [p-drop 0.0])
-  #:coerce ([n-head (if (zero? (remainder n-embd n-head))
+  #:coerce ([n-head (if (and (exact-positive-integer? n-head)
+                             (zero? (remainder n-embd n-head)))
                         n-head
                         (error 'asr-decoder-block
-                               "n-embd ~a not divisible by n-head ~a"
-                               n-embd n-head))])
+                               "n-head ~a must be positive and divide n-embd ~a"
+                               n-head n-embd))])
   #:submodules ([cdrop (Dropout #:p p-drop)]
                 [ln1 (LayerNorm n-embd)]
                 [sq (Linear n-embd n-embd)]
@@ -482,7 +484,7 @@ CTC's phonetic stutter next to attention's spelling is the payoff.
             (unsqueeze (to-dtype (tensor ids) 'int64) 0))
           (define-values (_ctc-lp logits) (net x dec-in #f))
           (inexact->exact
-           (item (argmax (narrow logits 1 (sub1 (length ids)) 1)))))
+           (item (argmax (narrow logits 1 (sub1 (length ids)) 1) 2))))
         (define ids
           (let loop ([ids (list sos)])
             (define next (next-id ids))
@@ -545,6 +547,11 @@ counts against it.
     (define vocab
       (text->vocab (apply string-append
                           (map utterance-transcript utts))))
+    ;; constructed before the featurization pass so a bad width fails
+    ;; immediately rather than after ~800MB of preprocessing
+    (define net (asr 80 (vector-length vocab) #:n-embd n-embd
+                     #:dropout p-drop))
+    (define opt (adam (parameters net) #:lr 0.0003))
     ;; decode + featurize once, cache the mels on the training device
     ;; (~800MB for all of dev-clean) so every epoch is pure model compute
     (define bucket-data
@@ -554,9 +561,7 @@ counts against it.
                 (to-device (ref (utterance-features samples rate) 0)
                            device))
               (map utterance-transcript bucket))))
-    (define net (asr 80 (vector-length vocab) #:n-embd n-embd
-                     #:dropout p-drop))
-    (define opt (adam (parameters net) #:lr 0.0003))
+
     (for ([epoch (in-range 1 (add1 epochs))])
       (define-values (total steps)
         (for/fold ([total 0.0] [steps 0])
@@ -581,6 +586,8 @@ a hyperparameter sweep should compare.
 
 @chunk[<r07-evaluate>
 (define (evaluate net vocab utterances)
+  (when (null? utterances)
+    (error 'evaluate "no utterances to score"))
   (for/fold ([w-edits 0] [w-len 0] [c-edits 0] [c-len 0]
              #:result (values (/ w-edits w-len) (/ c-edits c-len)))
             ([u (in-list utterances)])

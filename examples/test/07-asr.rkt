@@ -4,7 +4,8 @@
          (only-in racket/math nan?)
          torch
          torch/nn
-         (only-in torch/audio/librispeech load-librispeech-fixture)
+         (only-in torch/audio/librispeech
+                  librispeech-utterances load-librispeech-fixture)
          (only-in torch/audio/metrics cer wer)
          "../racket/07-asr.rkt")
 
@@ -67,6 +68,8 @@
   (check-true (<= (string-length att-hyp) 500)
               (format "transcribe failed to terminate: ~v" att-hyp))
   (check-true (device? (pick-device)))
+  (check-exn #rx"no utterances to score"
+             (lambda () (evaluate net vocab '())))
   ;; Device RNG streams differ from the CPU's, so the on-device arm checks
   ;; convergence, never equality with the CPU losses above. On MPS the
   ;; hybrid loss crosses ctc-loss's CPU carve-out and must still land its
