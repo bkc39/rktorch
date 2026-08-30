@@ -22,6 +22,9 @@
 (define checkpoint (or (getenv "CHECKPOINT") "checkpoints/asr-dev-clean"))
 (define held-out 3)
 
+(when (and limit (not (exact-positive-integer? limit)))
+  (error 'train-asr "LIMIT must be a positive integer: ~a" limit))
+
 (define device (pick-device))
 (printf "device: ~a\n" device)
 

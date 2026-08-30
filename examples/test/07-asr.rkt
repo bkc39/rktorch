@@ -31,9 +31,6 @@
               (format "non-finite loss: ~a" losses))
   (check-true (< (last losses) (first losses))
               (format "losses did not decrease: ~a" losses))
-  ;; The parameter tree: 6 convs (12) + 6 encoder blocks (16 tensors
-  ;; each) + encoder norm + ctc head + token table + 6 decoder blocks
-  ;; (26 tensors each) + decoder norm + attention head = 273.
   (define names (map car (named-parameters net)))
   (check-equal? (length names) 273)
   (check-equal? (first names) "conv1.weight")
@@ -56,14 +53,10 @@
                   (and (member c (vector->list vocab)) #t))
                 (format "decoded chars outside the vocab: ~v" hypothesis)))
   (check-true (module-training? net) "decoding left the net in eval mode")
-  ;; the metric wiring itself: a perfect hypothesis scores exactly 0 and
-  ;; a fully-deleted one exactly 1, independent of what the net produced
   (check-equal? (wer transcript transcript) 0)
   (check-equal? (cer transcript transcript) 0)
   (check-equal? (wer transcript "") 1)
   (check-equal? (cer transcript "") 1)
-  ;; the padded-batch path: two rows of different lengths force the
-  ;; padding and key-mask machinery, and must come out finite
   (define mel (ref features 0))
   (define batch-loss
     (hybrid-batch-loss net vocab
@@ -71,11 +64,8 @@
                        (list transcript "MISTER QUILTER")))
   (check-true (rational? (item batch-loss)))
   (check-false (nan? (item batch-loss)))
-  ;; the attention decoder is capped at one character per encoder frame
   (check-true (<= (string-length att-hyp) 500)
               (format "transcribe failed to terminate: ~v" att-hyp))
-  ;; pick-device's MPS carve-out must hand back a device?, not the bare
-  ;; symbol — every caller below feeds it to device-type/to-device
   (check-true (device? (pick-device)))
   ;; Device RNG streams differ from the CPU's, so the on-device arm checks
   ;; convergence, never equality with the CPU losses above. pick-device

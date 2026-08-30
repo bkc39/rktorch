@@ -27,9 +27,10 @@ CTC aligns, attention spells.
 @chunk[<r07-require>
 (require (only-in racket/list make-list)
          (only-in racket/sequence in-slice)
+         (only-in racket/string string-split)
          torch torch/nn
          (only-in torch/audio/data audio-info)
-         (only-in torch/audio/functional log-mel-spectrogram)
+         (only-in torch/audio/functional edit-distance log-mel-spectrogram)
          (only-in torch/audio/librispeech
                   librispeech-utterances load-librispeech-fixture
                   load-utterance utterance-path utterance-transcript)
@@ -39,7 +40,7 @@ CTC aligns, attention spells.
 @chunk[<r07-provide>
 (provide asr asr-encoder-block asr-decoder-block pick-device
          run-example greedy-decode transcribe utterance-features
-         hybrid-batch-loss train-librispeech)]
+         hybrid-batch-loss train-librispeech evaluate)]
 
 @bold{Positions without a table.} Attention is permutation-blind, so both
 the encoder frames and the decoder characters need a position signal. The
@@ -61,22 +62,45 @@ sides of the parity twin spell it this way.)
   (cat (list (sin angles) (cos angles)) 1))]
 
 @bold{Padding masks.} Batching utterances of different lengths means
-right-padding them to a rectangle, and attention must not treat the
-padding as audio. The mask marks padded @emph{key} columns --- built by
-comparing an @racket[arange] over frame indices against each row's true
-length, shaped @tt{[B, 1, 1, T]} so it broadcasts over every head and
-query of the @tt{[B, H, T, T]} scores. Only keys are ever masked: a
-padded @emph{query} row still attends the real keys and produces
+right-padding them to a rectangle, and neither the convolutions nor the
+attention may treat that padding as audio. Two masks do the work, both
+built by comparing an @racket[arange] over frame indices against each
+row's true length.
+
+@racket[key-padding-mask] marks padded @emph{key} columns for attention,
+shaped @tt{[B, 1, 1, T]} so it broadcasts over every head and query of
+the @tt{[B, H, T, T]} scores. Only keys are ever masked: a padded
+@emph{query} row still attends the real keys and produces
 garbage-but-finite output that the losses ignore, whereas masking whole
 rows would feed @racket[softmax] a row of @tt{-inf} and breed NaNs.
 The decoder's own stream needs no such mask: with right padding, the
 causal mask already stops every real character from seeing pad positions.
 
+@racket[frame-keep] is the convolutional counterpart, a @tt{[B, 1, T]}
+multiplier that broadcasts over channels. It exists because an attention
+mask applied at the top cannot undo mixing that happened underneath:
+every @racket[Conv1d] here carries a bias, so a padded region emerges
+from the first convolution holding @emph{bias}-valued activations rather
+than zeros, and the next layer --- reaching further with each dilation
+--- blends those into the genuine frames near the boundary. The result
+would be an utterance whose encoding depends on how long its noisiest
+neighbour in the bucket happened to be. Re-zeroing the padding after
+every convolution keeps each row's boundary frames identical to what
+they would be if the utterance were encoded alone.
+
 @chunk[<r07-mask>
+(define (row-lengths lengths)
+  (unsqueeze (tensor (map exact->inexact lengths)) 1))
+
 (define (key-padding-mask lengths t-len)
-  (reshape (ge (unsqueeze (arange t-len) 0)
-               (unsqueeze (tensor (map exact->inexact lengths)) 1))
-           (length lengths) 1 1 t-len))]
+  (reshape (ge (unsqueeze (arange t-len) 0) (row-lengths lengths))
+           (length lengths) 1 1 t-len))
+
+(define (frame-keep lengths t-len)
+  (reshape (to-dtype (lt (unsqueeze (arange t-len) 0)
+                         (row-lengths lengths))
+                     'float32)
+           (length lengths) 1 t-len))]
 
 @bold{The encoder block.} The GPT block with the causal mask deleted:
 audio is all there at once, so every frame may attend to every other,
@@ -128,13 +152,14 @@ that sound like it. The only mask there is @racket[mem-mask], hiding the
 padded audio frames. MLP last, as always.
 
 @chunk[<r07-decoder-block>
-(define-module asr-decoder-block (n-embd n-head)
+(define-module asr-decoder-block (n-embd n-head #:dropout [p-drop 0.0])
   #:coerce ([n-head (if (zero? (remainder n-embd n-head))
                         n-head
                         (error 'asr-decoder-block
                                "n-embd ~a not divisible by n-head ~a"
                                n-embd n-head))])
-  #:submodules ([ln1 (LayerNorm n-embd)]
+  #:submodules ([cdrop (Dropout #:p p-drop)]
+                [ln1 (LayerNorm n-embd)]
                 [sq (Linear n-embd n-embd)]
                 [sk (Linear n-embd n-embd)]
                 [sv (Linear n-embd n-embd)]
@@ -165,7 +190,9 @@ padded audio frames. MLP last, as always.
     (define x1
       (add x (so (reshape (transpose (matmul att v) 1 2)
                           batch seq-len n-embd))))
-    (define x1n (ln2 x1))
+    ;; skipped outright at p=0 so no RNG is drawn and the twin stays
+    ;; value-for-value
+    (define x1n (if (zero? p-drop) (ln2 x1) (cdrop (ln2 x1))))
     (define q2 (split-heads (cq x1n) seq-len))
     (define k2 (split-heads (ck memory) mem-len))
     (define v2 (split-heads (cv memory) mem-len))
@@ -191,15 +218,17 @@ decoder embeds characters from a @tt{vocab + 2} table ---
 @tt{eos} at @racket[vocab-size], @tt{sos} one past it --- and its head
 predicts @tt{vocab + 1} classes: characters or @tt{eos}, never @tt{sos}.
 The forward takes the audio batch, the teacher-forced character input,
-and the encoder padding mask (@racket[#f] when nothing is padded), and
-returns both heads' views. The keyword defaults are the fixture-scale
+and the list of true frame counts (@racket[#f] when nothing is padded),
+from which it derives the convolution multiplier at each downsampling
+stage and the attention key mask, and returns both heads' views. The keyword defaults are the fixture-scale
 configuration the parity twin trains; @racket[train-librispeech] passes
 something wider.
 
 @chunk[<r07-model>
 (define-module asr (n-mels vocab-size
                     #:n-embd [n-embd 64]
-                    #:n-head [n-head 4])
+                    #:n-head [n-head 4]
+                    #:dropout [p-drop 0.0])
   #:coerce ([n-embd (if (even? n-embd)
                         n-embd
                         (error 'asr
@@ -220,21 +249,40 @@ something wider.
                 [ln-enc (LayerNorm n-embd)]
                 [ctc-head (Linear n-embd (add1 vocab-size))]
                 [tok-emb (Embedding (+ vocab-size 2) n-embd)]
-                [dec1 (asr-decoder-block n-embd n-head)]
-                [dec2 (asr-decoder-block n-embd n-head)]
-                [dec3 (asr-decoder-block n-embd n-head)]
-                [dec4 (asr-decoder-block n-embd n-head)]
-                [dec5 (asr-decoder-block n-embd n-head)]
-                [dec6 (asr-decoder-block n-embd n-head)]
+                [dec1 (asr-decoder-block n-embd n-head
+                                          #:dropout p-drop)]
+                [dec2 (asr-decoder-block n-embd n-head
+                                          #:dropout p-drop)]
+                [dec3 (asr-decoder-block n-embd n-head
+                                          #:dropout p-drop)]
+                [dec4 (asr-decoder-block n-embd n-head
+                                          #:dropout p-drop)]
+                [dec5 (asr-decoder-block n-embd n-head
+                                          #:dropout p-drop)]
+                [dec6 (asr-decoder-block n-embd n-head
+                                          #:dropout p-drop)]
                 [ln-dec (LayerNorm n-embd)]
+                [hdrop (Dropout #:p p-drop)]
                 [head (Linear n-embd (add1 vocab-size))])
-  #:forward (x dec-in enc-mask)
+  #:forward (x dec-in lengths)
   (with-default-device (tensor-device x)
-    (define c (relu (conv2 (relu (conv1 x)))))
-    (define c1 (add c (relu (dil1 c))))
-    (define c2 (add c1 (relu (dil2 c1))))
-    (define c3 (add c2 (relu (dil3 c2))))
-    (define c4 (add c3 (relu (dil4 c3))))
+    (define (halve n) (quotient (add1 n) 2))
+    (define t0 (caddr (tensor-shape x)))
+    (define t1 (halve t0))
+    (define t2 (halve t1))
+    (define l1 (and lengths (map halve lengths)))
+    (define l2 (and l1 (map halve l1)))
+    ;; re-zero the padding after every convolution: each carries a bias,
+    ;; so pad regions come out nonzero and the next kernel would blend
+    ;; them into real boundary frames
+    (define (clip v lens t) (if lens (mul v (frame-keep lens t)) v))
+    (define c (clip (relu (conv1 x)) l1 t1))
+    (define c0 (clip (relu (conv2 c)) l2 t2))
+    (define c1 (clip (add c0 (relu (dil1 c0))) l2 t2))
+    (define c2 (clip (add c1 (relu (dil2 c1))) l2 t2))
+    (define c3 (clip (add c2 (relu (dil3 c2))) l2 t2))
+    (define c4 (clip (add c3 (relu (dil4 c3))) l2 t2))
+    (define enc-mask (and l2 (key-padding-mask l2 t2)))
     (define t-len (caddr (tensor-shape c4)))
     (define e0 (add (transpose c4 1 2) (sinusoidal-positions t-len n-embd)))
     (define memory
@@ -255,7 +303,8 @@ something wider.
                          memory enc-mask)
                    memory enc-mask)
              memory enc-mask)))
-    (values ctc-log-probs (head d))))]
+    (values ctc-log-probs
+            (head (if (zero? p-drop) d (hdrop d))))))]
 
 @bold{The device.} As in the earlier capstones --- with one carve-out:
 libtorch 2.9 registers @tt{ctc_loss} for CPU and CUDA only, so on Apple
@@ -292,7 +341,8 @@ with @tt{-100} (the @racket[cross-entropy] ignore index, so padded
 positions contribute nothing), the CTC targets with @tt{0} (only the
 first @tt{target-length} entries of each row are ever read).
 @racket[ctc-loss] then gets the @emph{true} per-row frame and character
-counts, and the encoder mask hides the padded frames from attention.
+counts, and the frame counts travel into the forward so the padding is
+hidden from the convolutions and from attention alike.
 An utterance spoken faster than the encoder's frame rate --- more
 characters than downsampled frames --- has @emph{no} valid CTC alignment
 and an infinite loss by definition; @racket[#:zero-infinity?] zeroes
@@ -306,51 +356,52 @@ NaN the parameters mid-epoch.
   (append ids (make-list (- s-max (length ids)) fill)))
 
 (define (hybrid-batch-loss net vocab mels transcripts)
-  (define v-size (vector-length vocab))
-  (define eos v-size)
-  (define sos (add1 v-size))
-  (define frame-lengths
-    (for/list ([m (in-list mels)]) (cadr (tensor-shape m))))
-  (define t-max (apply max frame-lengths))
-  (define x
-    (stack (for/list ([m (in-list mels)]
-                      [t (in-list frame-lengths)])
-             (if (= t t-max)
-                 m
-                 (cat (list m (zeros (car (tensor-shape m)) (- t-max t)))
-                      1)))
-           0))
-  (define input-lengths (map downsampled-length frame-lengths))
-  (define enc-mask
-    (and (< 1 (length mels))
-         (key-padding-mask input-lengths (downsampled-length t-max))))
-  (define ids-rows
-    (for/list ([tr (in-list transcripts)]) (transcript-ids vocab tr)))
-  (define target-lengths (map length ids-rows))
-  (define s-max (apply max target-lengths))
-  (define (rows->int64 rows)
-    (to-dtype (tensor rows) 'int64))
-  (define dec-in
-    (rows->int64 (for/list ([ids (in-list ids-rows)])
-                   (pad-row (cons sos ids) eos (add1 s-max)))))
-  (define dec-out
-    (rows->int64 (for/list ([ids (in-list ids-rows)])
-                   (pad-row (append ids (list eos)) -100 (add1 s-max)))))
-  (define ctc-targets
-    (rows->int64 (for/list ([ids (in-list ids-rows)])
-                   (pad-row ids 0 s-max))))
-  (define-values (ctc-lp logits) (net x dec-in enc-mask))
-  (define loss-ctc
-    (ctc-loss (transpose ctc-lp 0 1) ctc-targets
-              #:input-lengths input-lengths
-              #:target-lengths target-lengths
-              #:blank v-size
-              #:zero-infinity? #t))
-  (define loss-ce
-    (cross-entropy (reshape logits -1 (add1 v-size))
-                   (reshape dec-out -1)))
-  (add (mul ctc-weight loss-ctc)
-       (mul (- 1.0 ctc-weight) loss-ce)))]
+  ;; the mels carry the device: this is exported, so callers reach it
+  ;; from outside whatever extent built the net
+  (with-default-device (tensor-device (car mels))
+    (define v-size (vector-length vocab))
+    (define eos v-size)
+    (define sos (add1 v-size))
+    (define frame-lengths
+      (for/list ([m (in-list mels)]) (cadr (tensor-shape m))))
+    (define t-max (apply max frame-lengths))
+    (define x
+      (stack (for/list ([m (in-list mels)]
+                        [t (in-list frame-lengths)])
+               (if (= t t-max)
+                   m
+                   (cat (list m (zeros (car (tensor-shape m)) (- t-max t)))
+                        1)))
+             0))
+    (define batched? (< 1 (length mels)))
+    (define ids-rows
+      (for/list ([tr (in-list transcripts)]) (transcript-ids vocab tr)))
+    (define target-lengths (map length ids-rows))
+    (define s-max (apply max target-lengths))
+    (define (rows->int64 rows)
+      (to-dtype (tensor rows) 'int64))
+    (define dec-in
+      (rows->int64 (for/list ([ids (in-list ids-rows)])
+                     (pad-row (cons sos ids) eos (add1 s-max)))))
+    (define dec-out
+      (rows->int64 (for/list ([ids (in-list ids-rows)])
+                     (pad-row (append ids (list eos)) -100 (add1 s-max)))))
+    (define ctc-targets
+      (rows->int64 (for/list ([ids (in-list ids-rows)])
+                     (pad-row ids 0 s-max))))
+    (define-values (ctc-lp logits)
+      (net x dec-in (and batched? frame-lengths)))
+    (define loss-ctc
+      (ctc-loss (transpose ctc-lp 0 1) ctc-targets
+                #:input-lengths (map downsampled-length frame-lengths)
+                #:target-lengths target-lengths
+                #:blank v-size
+                #:zero-infinity? #t))
+    (define loss-ce
+      (cross-entropy (reshape logits -1 (add1 v-size))
+                     (reshape dec-out -1)))
+    (add (mul ctc-weight loss-ctc)
+         (mul (- 1.0 ctc-weight) loss-ce))))]
 
 @bold{The deterministic core.} @racket[run-example] is the seeded,
 offline entry the test harness and the PyTorch parity twin both drive:
@@ -401,6 +452,7 @@ CTC's phonetic stutter next to attention's spelling is the payoff.
         (define-values (ctc-lp _logits) (net x sos-in #f))
         (define ids
           (map inexact->exact (tensor->list (argmax ctc-lp 2))))
+
         (define kept
           (for/fold ([prev #f] [acc '()] #:result (reverse acc))
                     ([id (in-list ids)])
@@ -420,19 +472,19 @@ CTC's phonetic stutter next to attention's spelling is the payoff.
   (with-default-device dev
     (in-eval-mode net
       (with-no-grad
-        (define (step ids)
+        ;; the cap is the encoder's own frame count, arithmetic on the
+        ;; input shape — no forward pass needed to learn it
+        (define cap
+          (or max-steps (downsampled-length (caddr (tensor-shape x)))))
+        (define (next-id ids)
           (define dec-in
             (unsqueeze (to-dtype (tensor ids) 'int64) 0))
-          (define-values (ctc-lp logits) (net x dec-in #f))
-          (values (cadr (tensor-shape ctc-lp))
-                  (inexact->exact
-                   (item (argmax (narrow logits 1
-                                         (sub1 (length ids)) 1))))))
-        (define-values (frame-cap _first) (step (list sos)))
-        (define cap (or max-steps frame-cap))
+          (define-values (_ctc-lp logits) (net x dec-in #f))
+          (inexact->exact
+           (item (argmax (narrow logits 1 (sub1 (length ids)) 1)))))
         (define ids
           (let loop ([ids (list sos)])
-            (define-values (_frames next) (step ids))
+            (define next (next-id ids))
             (cond [(= next eos) (cdr ids)]
                   [(>= (length ids) (add1 cap)) (cdr ids)]
                   [else (loop (append ids (list next)))])))
@@ -466,6 +518,7 @@ counts against it.
 (define (train-librispeech #:epochs [epochs 20] #:limit [limit #f]
                            #:batch [batch 16]
                            #:n-embd [n-embd 256]
+                           #:dropout [p-drop 0.0]
                            #:device [device (pick-device)]
                            #:log-every [log-every 1])
   (when (and limit (not (exact-positive-integer? limit)))
@@ -486,6 +539,8 @@ counts against it.
             #:cache-keys? #t))
     (define buckets
       (for/list ([b (in-slice batch (in-list sorted))]) b))
+    (when (null? buckets)
+      (error 'train-librispeech "no utterances to train on"))
     (define vocab
       (text->vocab (apply string-append
                           (map utterance-transcript utts))))
@@ -498,7 +553,8 @@ counts against it.
                 (to-device (ref (utterance-features samples rate) 0)
                            device))
               (map utterance-transcript bucket))))
-    (define net (asr 80 (vector-length vocab) #:n-embd n-embd))
+    (define net (asr 80 (vector-length vocab) #:n-embd n-embd
+                     #:dropout p-drop))
     (define opt (adam (parameters net) #:lr 0.0003))
     (for ([epoch (in-range 1 (add1 epochs))])
       (define-values (total steps)
@@ -514,6 +570,29 @@ counts against it.
         (printf "epoch ~a/~a: mean loss ~a\n" epoch epochs (/ total steps))
         (flush-output)))
     (values net vocab)))]
+
+@bold{Validation.} Per-utterance rates average badly --- a three-word
+reference and a thirty-word one would count equally --- so
+@racket[evaluate] accumulates edits and reference lengths across the
+whole held-out set and divides once at the end. That is the standard
+corpus-level definition of word and character error rate, and it is what
+a hyperparameter sweep should compare.
+
+@chunk[<r07-evaluate>
+(define (evaluate net vocab utterances)
+  (for/fold ([w-edits 0] [w-len 0] [c-edits 0] [c-len 0]
+             #:result (values (/ w-edits w-len) (/ c-edits c-len)))
+            ([u (in-list utterances)])
+    (define-values (samples rate) (load-utterance u))
+    (define reference (utterance-transcript u))
+    (define hypothesis
+      (transcribe net vocab (utterance-features samples rate)))
+    (define ref-words (string-split reference))
+    (values (+ w-edits (edit-distance ref-words (string-split hypothesis)))
+            (+ w-len (length ref-words))
+            (+ c-edits (edit-distance (string->list reference)
+                                      (string->list hypothesis)))
+            (+ c-len (string-length reference)))))]
 
 @bold{Scoring.} Decode an utterance both ways and hold the attention
 hypothesis against its reference --- the rates are exact rationals, so a
@@ -544,4 +623,5 @@ reference:
 <r07-run>
 <r07-decode>
 <r07-transcribe>
-<r07-train>]
+<r07-train>
+<r07-evaluate>]

@@ -138,12 +138,37 @@ class ASR(nn.Module):
         self.ln_dec = nn.LayerNorm(N_EMBD)
         self.head = nn.Linear(N_EMBD, vocab_size + 1)
 
-    def forward(self, x, dec_in, enc_mask=None):
-        c = torch.relu(self.conv2(torch.relu(self.conv1(x))))
-        c = c + torch.relu(self.dil1(c))
-        c = c + torch.relu(self.dil2(c))
-        c = c + torch.relu(self.dil3(c))
-        c = c + torch.relu(self.dil4(c))
+    def forward(self, x, dec_in, lengths=None):
+        def halve(n):
+            return (n + 1) // 2
+
+        t0 = x.shape[2]
+        t1, t2 = halve(t0), halve(halve(t0))
+        l1 = [halve(n) for n in lengths] if lengths else None
+        l2 = [halve(n) for n in l1] if l1 else None
+
+        def clip(v, lens, t):
+            # re-zero padding after every biased convolution, else the next
+            # kernel blends pad activations into real boundary frames
+            if not lens:
+                return v
+            idx = torch.arange(t, device=v.device).unsqueeze(0)
+            keep = (idx < torch.tensor(lens, device=v.device,
+                                       dtype=torch.float32).unsqueeze(1))
+            return v * keep.to(v.dtype).unsqueeze(1)
+
+        c = clip(torch.relu(self.conv1(x)), l1, t1)
+        c = clip(torch.relu(self.conv2(c)), l2, t2)
+        c = clip(c + torch.relu(self.dil1(c)), l2, t2)
+        c = clip(c + torch.relu(self.dil2(c)), l2, t2)
+        c = clip(c + torch.relu(self.dil3(c)), l2, t2)
+        c = clip(c + torch.relu(self.dil4(c)), l2, t2)
+        enc_mask = None
+        if l2:
+            idx = torch.arange(t2, device=x.device).unsqueeze(0)
+            enc_mask = (idx >= torch.tensor(l2, device=x.device,
+                                            dtype=torch.float32).unsqueeze(1)
+                        ).reshape(len(l2), 1, 1, t2)
         t = c.shape[2]
         pos = sinusoidal_positions(t, N_EMBD).to(x.device)
         e = c.transpose(1, 2) + pos
