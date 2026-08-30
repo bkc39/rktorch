@@ -16,7 +16,7 @@
 
 (with-default-device 'cuda
   (manual-seed! 0)
-  (printf "ballooning VRAM...\n")
+  (display "ballooning VRAM...\n")
   (flush-output)
   ;; 1 GiB each; referenced at the end so GC can't release it mid-run
   (define balloon
