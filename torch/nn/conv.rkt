@@ -17,10 +17,12 @@
 
 (define-module Conv1d (in-channels out-channels kernel-size
                        #:stride [stride 1]
-                       #:padding [padding 0])
+                       #:padding [padding 0]
+                       #:dilation [dilation 1])
   #:coerce ([kernel-size (->1d kernel-size)]
             [stride (->1d stride)]
-            [padding (->1d padding)])
+            [padding (->1d padding)]
+            [dilation (->1d dilation)])
   ;; weight before bias: nn.Conv1d.reset_parameters' RNG draw order
   #:params ([weight (kaiming-uniform (list out-channels in-channels
                                            (car kernel-size)))]
@@ -29,7 +31,8 @@
                                                           (car kernel-size)))))])
                     (uniform-init (list out-channels) (- bound) bound))])
   #:forward (x)
-  (conv1d x weight #:bias bias #:stride stride #:padding padding))
+  (conv1d x weight #:bias bias #:stride stride #:padding padding
+          #:dilation dilation))
 
 (define-module Conv2d (in-channels out-channels kernel-size
                        #:stride [stride 1]
