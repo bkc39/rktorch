@@ -79,9 +79,8 @@ jobs:
         run: |
           nix develop .#ci --command bash -c '
             set -euo pipefail
-            # capture the status instead of letting set -e abort on it, so a
-            # crashing analyzer is reported as one rather than aborting
-            # before the suggestion handling below
+            # set -e would abort at the substitution, losing $out and the
+            # ::error:: below
             rc=0
             out=$(resyntax analyze --local-git-repository . "$BASE_REF" \
                     --analyzer-timeout 30000 2>&1) || rc=$?
