@@ -369,14 +369,16 @@ used.  (`resyntax`, the CI gate, is unaffected.)
 
 ### What the strategies cost
 
-`scripts/bench-contract-overhead.rkt`, lab host, rounded -- these carry
-real run-to-run variance.  Every callee is imported from its defining
+`scripts/bench-contract-overhead.rkt`, lab host, rounded.  The tensor
+columns are noisy: the 8x8 `add` baseline moves ~20% between runs, enough
+that its 1.0x-1.1x rows should be read as "lost in the noise" rather than
+as a measured overhead.  Every callee is imported from its defining
 module, never from the `torch` facade, or the baseline would already be
 paying a crossing.
 
 | | flat `->` | `->i` + `#:pre` | cached shape read | 8x8 tensor `add` |
 |---|---|---|---|---|
-| bare, ns/call | 10 | 12 | 7 | 9800 |
+| bare, ns/call | 10 | 12 | 7 | ~10000 |
 | `unless`+`error` | 1.2x | 2.1x | 10x | 1.0x |
 | `define/contract` intra | 9x | 19x | 25x | 1.1x |
 | `define/contract` cross | 9x | 20x | 25x | 1.1x |
@@ -384,11 +386,12 @@ paying a crossing.
 | `define/contract-out` cross | 4x | 19x | 19x | 1.1x |
 
 **How much the contract does matters more than what it wraps.**  A flat
-`(-> tensor? tensor? tensor?)` on an allocating op costs ~1.1x -- about a
-microsecond per call, ~10% here, small but not nothing.  The contract
-`add` actually ships costs **~1.4-1.5x** across runs: 16400 ns through
-`torch` against 11600 ns for the raw `tensor-ops` callee on one run,
-13500 against 8950 on another.  That contract,
+`(-> tensor? tensor? tensor?)` on an allocating op reads 1.0x-1.1x, which
+this benchmark cannot separate from its own noise -- so call it too small
+to resolve here, not free.  The contract `add` actually ships is
+resolvable, because it is measured as a paired facade-vs-raw comparison
+in one run: **~1.4-1.7x** across runs, 13500 ns through `torch` against
+8950 raw on one, 18500 against 11000 on another.  That contract,
 `binary-arith/c`, does not inspect shapes or dtypes -- it checks the
 operands are tensors or reals, makes the admissible type of `b` depend on
 whether `a` is a tensor, and checks the result is a tensor.

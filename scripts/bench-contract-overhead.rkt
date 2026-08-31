@@ -8,7 +8,26 @@
 ;; crossing and the column measures a second copy of the same contract.
 ;; Run:  racket scripts/bench-contract-overhead.rkt
 
+(module loops racket/base
+  (provide define-intra-loops)
+  ;; The four intra loops differ only in which wrapper they call, and each
+  ;; must stay shaped exactly like its cross counterpart in `main`.
+  (define-syntax-rule
+    (define-intra-loops [intra-scale scale] [intra-add add-wrap]
+                        [intra-heads split-heads] [intra-shape shape-wrap])
+    (begin
+      (define (intra-scale reps x k)
+        (for/fold ([acc 0.0]) ([_ (in-range reps)]) (+ acc (scale x k))))
+      (define (intra-add reps a b)
+        (for ([_ (in-range reps)]) (add-wrap a b)))
+      (define (intra-heads reps n h)
+        (for/fold ([acc 0]) ([_ (in-range reps)]) (+ acc (split-heads n h))))
+      (define (intra-shape reps ts _unused)
+        (for/fold ([acc 0]) ([i (in-range reps)])
+          (+ acc (length (shape-wrap (vector-ref ts (bitwise-and i 7))))))))))
+
 (module bare racket/base
+  (require (submod ".." loops))
   (provide scale add-wrap split-heads shape-wrap
            intra-scale intra-add intra-heads intra-shape)
   (require (only-in (file "../torch/foreign/ops.rkt") tensor-shape)
@@ -18,19 +37,13 @@
   (define (add-wrap a b) (add a b))
   (define (split-heads n h) (quotient n h))
 
-  (define (intra-scale reps x k)
-    (for/fold ([acc 0.0]) ([_ (in-range reps)]) (+ acc (scale x k))))
-  (define (intra-add reps a b)
-    (for ([_ (in-range reps)]) (add-wrap a b)))
-  (define (intra-heads reps n h)
-    (for/fold ([acc 0]) ([_ (in-range reps)]) (+ acc (split-heads n h))))
 
   (define (shape-wrap t) (tensor-shape t))
-  (define (intra-shape reps ts _unused)
-    (for/fold ([acc 0]) ([i (in-range reps)])
-      (+ acc (length (shape-wrap (vector-ref ts (bitwise-and i 7))))))))
+  (define-intra-loops [intra-scale scale] [intra-add add-wrap]
+                      [intra-heads split-heads] [intra-shape shape-wrap]))
 
 (module guards racket/base
+  (require (submod ".." loops))
   (provide scale add-wrap split-heads shape-wrap
            intra-scale intra-add intra-heads intra-shape)
   (require           (only-in (file "../torch/foreign/ops.rkt") tensor-shape)
@@ -51,21 +64,15 @@
     (unless (zero? (remainder n h)) (error 'split-heads "~a % ~a" n h))
     (quotient n h))
 
-  (define (intra-scale reps x k)
-    (for/fold ([acc 0.0]) ([_ (in-range reps)]) (+ acc (scale x k))))
-  (define (intra-add reps a b)
-    (for ([_ (in-range reps)]) (add-wrap a b)))
-  (define (intra-heads reps n h)
-    (for/fold ([acc 0]) ([_ (in-range reps)]) (+ acc (split-heads n h))))
 
   (define (shape-wrap t)
     (unless (tensor? t) (error 'shape-wrap "t must be a tensor: ~e" t))
     (tensor-shape t))
-  (define (intra-shape reps ts _unused)
-    (for/fold ([acc 0]) ([i (in-range reps)])
-      (+ acc (length (shape-wrap (vector-ref ts (bitwise-and i 7))))))))
+  (define-intra-loops [intra-scale scale] [intra-add add-wrap]
+                      [intra-heads split-heads] [intra-shape shape-wrap]))
 
 (module defcontract racket/base
+  (require (submod ".." loops))
   (provide scale add-wrap split-heads shape-wrap
            intra-scale intra-add intra-heads intra-shape)
   ;; define/contract is not in racket/contract/base; raco review's
@@ -84,21 +91,15 @@
          [result exact-positive-integer?])
     (quotient n h))
 
-  (define (intra-scale reps x k)
-    (for/fold ([acc 0.0]) ([_ (in-range reps)]) (+ acc (scale x k))))
-  (define (intra-add reps a b)
-    (for ([_ (in-range reps)]) (add-wrap a b)))
-  (define (intra-heads reps n h)
-    (for/fold ([acc 0]) ([_ (in-range reps)]) (+ acc (split-heads n h))))
 
   (define/contract (shape-wrap t)
     (-> tensor? (listof exact-nonnegative-integer?))
     (tensor-shape t))
-  (define (intra-shape reps ts _unused)
-    (for/fold ([acc 0]) ([i (in-range reps)])
-      (+ acc (length (shape-wrap (vector-ref ts (bitwise-and i 7))))))))
+  (define-intra-loops [intra-scale scale] [intra-add add-wrap]
+                      [intra-heads split-heads] [intra-shape shape-wrap]))
 
 (module boundary racket/base
+  (require (submod ".." loops))
   (provide intra-scale intra-add intra-heads intra-shape)
   (require (only-in racket/contract/base -> ->i listof)
            (only-in (file "../torch/foreign/ops.rkt") tensor-shape)
@@ -114,19 +115,12 @@
          [result exact-positive-integer?])
     (quotient n h))
 
-  (define (intra-scale reps x k)
-    (for/fold ([acc 0.0]) ([_ (in-range reps)]) (+ acc (scale x k))))
-  (define (intra-add reps a b)
-    (for ([_ (in-range reps)]) (add-wrap a b)))
-  (define (intra-heads reps n h)
-    (for/fold ([acc 0]) ([_ (in-range reps)]) (+ acc (split-heads n h))))
 
   (define/contract-out (shape-wrap t)
     (-> tensor? (listof exact-nonnegative-integer?))
     (tensor-shape t))
-  (define (intra-shape reps ts _unused)
-    (for/fold ([acc 0]) ([i (in-range reps)])
-      (+ acc (length (shape-wrap (vector-ref ts (bitwise-and i 7))))))))
+  (define-intra-loops [intra-scale scale] [intra-add add-wrap]
+                      [intra-heads split-heads] [intra-shape shape-wrap]))
 
 (module+ main
   (require racket/format
@@ -163,8 +157,8 @@
   (define (best-ms thunk #:runs [runs 7])
     (settle-jit! thunk)
     (for/fold ([best +inf.0]) ([_ (in-range runs)])
-      ;; collect alone leaves the finalizer queue to fire after t0 and
-      ;; charge one strategy's native frees to the next one's clock
+      ;; a plain collect does not wait on the finalizer queue, so native
+      ;; frees can land after t0 and be charged to the wrong strategy
       (reclaim-native-memory!)
       (define t0 (current-inexact-milliseconds))
       (thunk)
@@ -185,9 +179,8 @@
 
   (define (workload name reps intra cross a b)
     (printf "\n~a  (~a reps, warmed, best of 7)\n" name reps)
-    ;; settle every call site before the first timed row -- otherwise
-    ;; whichever strategy is measured first pays the cold-start and the
-    ;; baseline reads slower than the guards it is supposed to beat
+    ;; every call site must be settled before the first timed row: the
+    ;; one measured first would otherwise carry the cold start
     (for ([v (in-list (list intra cross))] [_ (in-naturals)])
       (for ([f (in-vector v)]) (f (quotient reps 10) a b)))
     (define base-intra
@@ -239,10 +232,11 @@
   (let* ([u (randn 8 8)]
          [v (randn 8 8)]
          [n 50000]
-         [raw (/ (* (best-ms (lambda ()
-                               (for ([_ (in-range n)]) (raw-add u v)))) 1e6) n)]
-         [fac (/ (* (best-ms (lambda ()
-                               (for ([_ (in-range n)]) (torch-add u v)))) 1e6) n)])
+         [raw-loop (lambda () (for ([_ (in-range n)]) (raw-add u v)))]
+         [fac-loop (lambda () (for ([_ (in-range n)]) (torch-add u v)))]
+         [_settled (begin (settle-jit! raw-loop) (settle-jit! fac-loop))]
+         [raw (/ (* (best-ms raw-loop) 1e6) n)]
+         [fac (/ (* (best-ms fac-loop) 1e6) n)])
     (printf "  raw tensor-ops add        ~a ns/call\n"
             (~r raw #:precision '(= 1)))
     (printf "  torch add (binary-arith/c) ~a ns/call   ~ax\n"
