@@ -5,6 +5,7 @@
                      ;; whole-module on purpose: the expansion needs bindings
                      ;; only-in would strip
                      syntax/parse/pre)
+         (only-in syntax/parse/define define-syntax-parse-rule)
          (only-in racket/generic define-generics define/generic)
          (only-in "../foreign.rkt" requires-grad!))
 
@@ -65,7 +66,7 @@
                 thunk
                 (lambda () (if was-training? (train! m) (eval! m)))))
 
-(define-syntax-rule (in-eval-mode m body ...)
+(define-syntax-parse-rule (in-eval-mode m:expr body:expr ...+)
   (call-with-eval-mode m (lambda () body ...)))
 
 (begin-for-syntax

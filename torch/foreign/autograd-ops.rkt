@@ -1,6 +1,9 @@
 #lang racket/base
 
-(require (only-in "error.rkt" check-handle check-ok)
+(require ;; whole-module: the pattern's syntax classes live at phase 1 and
+         ;; only-in would strip them
+         syntax/parse/define
+         (only-in "error.rkt" check-handle check-ok)
          (only-in "raw/autograd.rkt"
                   tr-is-grad-enabled/raw
                   tr-set-grad-enabled/raw
@@ -71,7 +74,7 @@
                 thunk
                 (lambda () (set-grad-enabled! was?))))
 
-(define-syntax-rule (with-no-grad body ...)
+(define-syntax-parse-rule (with-no-grad body:expr ...+)
   (call-with-no-grad (lambda () body ...)))
 
 (define (sub! t other [alpha 1.0])
