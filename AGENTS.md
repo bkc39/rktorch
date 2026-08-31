@@ -150,7 +150,9 @@ raco test torch/          # FFI unit tests (+ self-skipping parity test)
 raco test examples/test/     # literate-example runners
 racket -l torch           # REPL with the package
 
-resyntax analyze --directory torch   # lint gate (CI fails on any suggestion)
+resyntax analyze --local-git-repository . origin/master   # lint gate
+                                     # (CI fails on any suggestion; scans
+                                     #  changed files, torch/ included)
 resyntax fix --directory torch
 raco review torch/**/*.rkt
 ```

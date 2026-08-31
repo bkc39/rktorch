@@ -26,7 +26,7 @@
   (apply min times))
 
 (module+ main
-  (printf "== bench-oom-overhead ==\n")
+  (display "== bench-oom-overhead ==\n")
   (manual-seed! 0)
 
   ;; 8x8: wrapper overhead, not kernel time, dominates
