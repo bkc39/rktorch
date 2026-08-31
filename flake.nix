@@ -580,7 +580,8 @@
               raco pkg install --batch --auto --scope user --skip-installed \
                 resyntax review
               touch "$deps_stamp"
-              echo "Done. Lint: resyntax analyze --directory torch  |  raco review <files>"
+              echo "Done. Lint: resyntax analyze --local-git-repository . origin/master"
+              echo "      full sweep: resyntax analyze --directory torch  |  raco review <files>"
             fi
             export PATH="$(racket -e '(require setup/dirs)(display (path->string (find-user-console-bin-dir)))'):$PATH"
           '';
