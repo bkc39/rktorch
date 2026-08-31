@@ -150,7 +150,9 @@ raco test torch/          # FFI unit tests (+ self-skipping parity test)
 raco test examples/test/     # literate-example runners
 racket -l torch           # REPL with the package
 
-resyntax analyze --directory torch   # lint gate (CI fails on any suggestion)
+resyntax analyze --local-git-repository . origin/master   # lint gate
+                                     # (CI fails on any suggestion; scans
+                                     #  changed files, torch/ included)
 resyntax fix --directory torch
 raco review torch/**/*.rkt
 ```
@@ -366,6 +368,57 @@ per-identifier directive the re-export shims already use;
 flags fewer than you would expect: a definition that passes its own name
 as a quoted symbol, as `(check-ok rc 'audio-info)` does, already counts as
 used.  (`resyntax`, the CI gate, is unaffected.)
+
+### What the strategies cost
+
+`scripts/bench-contract-overhead.rkt`, lab host, rounded.  The tensor
+columns are noisy: the 8x8 `add` baseline moves ~20% between runs, enough
+that its 1.0x-1.1x rows should be read as "lost in the noise" rather than
+as a measured overhead.  Every callee is imported from its defining
+module, never from the `torch` facade, or the baseline would already be
+paying a crossing.
+
+| | flat `->` | `->i` + `#:pre` | cached shape read | 8x8 tensor `add` |
+|---|---|---|---|---|
+| bare, ns/call | 10 | 12 | 7 | ~10000 |
+| `unless`+`error` | 1.2x | 2.1x | 10x | 1.0x |
+| `define/contract` intra | 9x | 19x | 25x | 1.1x |
+| `define/contract` cross | 9x | 20x | 25x | 1.1x |
+| `define/contract-out` intra | 1.0x | 1.0x | 1.0x | 1.0x |
+| `define/contract-out` cross | 4x | 19x | 19x | 1.1x |
+
+**How much the contract does matters more than what it wraps.**  A flat
+`(-> tensor? tensor? tensor?)` on an allocating op reads 1.0x-1.1x, which
+this benchmark cannot separate from its own noise -- so call it too small
+to resolve here, not free.  The contract `add` actually ships is
+resolvable, because it is measured as a paired facade-vs-raw comparison
+in one run: **~1.4-1.7x** across runs, 13500 ns through `torch` against
+8950 raw on one, 18500 against 11000 on another.  That contract,
+`binary-arith/c`, does not inspect shapes or dtypes -- it checks the
+operands are tensors or reals, makes the admissible type of `b` depend on
+whether `a` is a tensor, and checks the result is a tensor.
+
+The benchmark does not separate the `->i` machinery from the extra
+predicate work it does (`or/c` dispatch, and re-testing `(tensor? a)` to
+select `b`'s contract), so that ratio is the cost of the whole
+contract, not of dependency as such.  Either way the carve-out providing
+`+ - * / @` as plain renames is well founded, and the richest contracts
+on the hot tensor surface are the expensive part of `foreign.rkt`.
+
+**Cheap accessors are the other extreme.**  `tensor-shape` is a struct
+field read at ~7 ns, so a boundary contract on it is 19x and even a hand
+guard is 10x, because `tensor?` alone is ~60 ns.  There the question is
+whether to validate at all.
+
+**`define/contract` charges the same inside a module as across it**,
+because it wraps the definition rather than the export.
+`define/contract-out` is 1.0x internally in every workload and charges
+only at a real boundary -- the second reason to prefer it, alongside
+blame.
+
+`log-mel-spectrogram` runs ~3 ms over the speech fixture, measured.  What
+share of that is contract is *not* measured -- isolating it would need an
+uncontracted copy of the pipeline, which has not been built.
 
 ## CI
 

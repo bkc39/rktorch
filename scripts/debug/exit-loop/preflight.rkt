@@ -15,9 +15,9 @@
 (printf "ledger        : ~a\n" (native-memory-use))
 (printf "fin-failures  : ~a\n" (finalizer-failures))
 (newline)
-(printf "staged native lib:\n")
+(display "staged native lib:\n")
 (void (system "ls -l torch/native-libs/ 2>/dev/null || true"))
-(printf "\nlinkage:\n")
+(display "\nlinkage:\n")
 (void (system (if (eq? (system-type 'os) 'macosx)
                   "otool -L torch/native-libs/libtorchrkt.dylib 2>/dev/null | head -8"
                   "ldd torch/native-libs/libtorchrkt.so 2>/dev/null | head -12")))
