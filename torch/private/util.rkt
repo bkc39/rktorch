@@ -2,7 +2,7 @@
 
 (require (only-in racket/file
                   delete-directory/files make-temporary-file)
-;; whole-module: the pattern's syntax classes live at phase 1 and
+         ;; whole-module: the pattern's syntax classes live at phase 1 and
          ;; only-in would strip them
          syntax/parse/define)
 
