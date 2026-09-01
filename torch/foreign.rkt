@@ -16,11 +16,24 @@
          "foreign/nn-promoted.rkt"
          "foreign/promoted.rkt"
          (only-in "foreign/ref-syntax.rkt" ref ref!)
-         "foreign/autograd-ops.rkt")
+         (except-in "foreign/autograd-ops.rkt" requires-grad!)
+         (submod "foreign/autograd-ops.rkt" checked))
 
 (provide ref ref! with-no-grad with-default-device)
 
 (provide conv1d)
+
+;; contracted at their definition sites; requires-grad! comes from
+;; autograd-ops' `checked` submodule so tensor-ops keeps the plain one
+(provide requires-grad!
+         requires-grad?
+         backward!
+         grad
+         has-grad?
+         maybe-grad
+         detach
+         grad-enabled?
+         call-with-no-grad)
 
 (provide (rename-out [t+ +] [t- -] [t* *] [t/ /])
          @)
@@ -268,16 +281,6 @@
   [call-with-default-device (-> device/c (-> any) any)]
   [to-device (-> tensor? device/c tensor?)]
   [tensor-device (-> tensor? device?)]
-  ;; autograd
-  [requires-grad! (->* (tensor?) (boolean?) tensor?)]
-  [requires-grad? (-> tensor? boolean?)]
-  [backward! (-> tensor? void?)]
-  [grad (-> tensor? tensor?)]
-  [has-grad? (-> tensor? boolean?)]
-  [maybe-grad (-> tensor? (or/c tensor? #f))]
-  [detach (-> tensor? tensor?)]
-  [grad-enabled? (-> boolean?)]
-  [call-with-no-grad (-> (-> any) any)]
   ;; in-place
   [sub! (->* (tensor? tensor?) (real?) void?)]
   [zero! (-> tensor? void?)]

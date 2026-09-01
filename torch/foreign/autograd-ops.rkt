@@ -1,8 +1,11 @@
 #lang racket/base
 
-(require ;; whole-module: the pattern's syntax classes live at phase 1 and
+(require (only-in racket/contract/base -> ->* any or/c)
+         ;; whole-module: the pattern's syntax classes live at phase 1 and
          ;; only-in would strip them
          syntax/parse/define
+         (only-in "../private/contract.rkt"
+                  define/checked-out define/contract-out)
          (only-in "error.rkt" check-handle check-ok)
          (only-in "raw/autograd.rkt"
                   tr-is-grad-enabled/raw
@@ -16,51 +19,45 @@
                   tr-tensor-requires-grad/raw
                   tr-tensor-sub!/raw
                   tr-tensor-zero!/raw)
-         (only-in "structs.rkt" wrap-tensor))
+         ;; the raw predicate: contracting it here would make every
+         ;; contract below cross a second boundary
+         (only-in "structs.rkt" tensor? wrap-tensor))
 
-(provide requires-grad!
-         requires-grad?
-         backward!
-         grad
-         has-grad?
-         maybe-grad
-         detach
-         grad-enabled?
-         call-with-no-grad
-         with-no-grad
+(provide with-no-grad
          sub!
          zero!
          mul!
          zero-grad!)
 
-(define (requires-grad! t [on? #t])
+(define/checked-out (requires-grad! t [on? #t])
+  (->* [tensor?] [boolean?] tensor?)
   (check-ok (tr-tensor-requires-grad!/raw t on?) 'requires-grad!)
   t)
 
-(define (requires-grad? t)
+(define/contract-out (requires-grad? t) (-> tensor? boolean?)
   (define-values (rc on?) (tr-tensor-requires-grad/raw t))
   (check-ok rc 'requires-grad?)
   on?)
 
-(define (backward! t)
+(define/contract-out (backward! t) (-> tensor? void?)
   (check-ok (tr-tensor-backward/raw t) 'backward!)
   (void))
 
-(define (grad t)
+(define/contract-out (grad t) (-> tensor? tensor?)
   (wrap-tensor (check-handle 'grad (tr-tensor-grad/raw t))))
 
-(define (has-grad? t)
+(define/contract-out (has-grad? t) (-> tensor? boolean?)
   (define-values (rc on?) (tr-tensor-has-grad/raw t))
   (check-ok rc 'has-grad?)
   on?)
 
-(define (maybe-grad t)
+(define/contract-out (maybe-grad t) (-> tensor? (or/c tensor? #f)) ;; noqa
   (and (has-grad? t) (grad t)))
 
-(define (detach t)
+(define/contract-out (detach t) (-> tensor? tensor?)
   (wrap-tensor (check-handle 'detach (tr-tensor-detach/raw t))))
 
-(define (grad-enabled?)
+(define/contract-out (grad-enabled?) (-> boolean?)
   (define-values (rc on?) (tr-is-grad-enabled/raw))
   (check-ok rc 'grad-enabled?)
   on?)
@@ -68,7 +65,7 @@
 (define (set-grad-enabled! on?)
   (check-ok (tr-set-grad-enabled/raw on?) 'set-grad-enabled!))
 
-(define (call-with-no-grad thunk)
+(define/contract-out (call-with-no-grad thunk) (-> (-> any) any)
   (define was? (grad-enabled?))
   (dynamic-wind (lambda () (set-grad-enabled! #f))
                 thunk
