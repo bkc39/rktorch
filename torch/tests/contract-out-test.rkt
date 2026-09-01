@@ -77,3 +77,35 @@
                 (let ()
                   (define/contract-out (nope x) (-> number? number?) x)
                   (nope 1))))))
+
+(module checked-lib racket/base
+  (require (only-in racket/contract/base -> not/c)
+           (only-in "../private/contract.rkt" define/checked-out))
+  (provide sibling-call)
+
+  (define/checked-out (safe-div a b)
+    (-> number? (not/c zero?) number?)
+    (/ a b))
+
+  ;; a sibling requiring this module plainly reaches the definition, not the
+  ;; contract -- the property the facade split depends on
+  (define (sibling-call) (safe-div 1 0)))
+
+(module+ test
+  (require (prefix-in plain: (submod ".." checked-lib))
+           (prefix-in checked: (submod ".." checked-lib checked)))
+
+  (check-equal? (checked:safe-div 6 3) 2)
+  (check-equal? (plain:safe-div 6 3) 2)
+
+  (check-exn #rx"safe-div: contract violation"
+             (lambda () (checked:safe-div 1 0)))
+  (check-exn (message-matching
+              #rx"blaming: [(][^)]*contract-out-test\\.rkt test[)]")
+             (lambda () (checked:safe-div 1 0)))
+
+  ;; the plain export is uncontracted: the same argument reaches the body and
+  ;; fails there instead
+  (check-exn #rx"^/: division by zero"
+             (lambda () (plain:safe-div 1 0)))
+  (check-exn #rx"^/: division by zero" plain:sibling-call))
