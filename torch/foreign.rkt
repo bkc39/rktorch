@@ -22,10 +22,18 @@
 
 (provide ref ref! with-no-grad with-default-device)
 
-(provide conv1d)
-
 (provide ::
          slice?
+         conv1d
+         conv2d
+         max-pool2d
+         avg-pool2d
+         adaptive-avg-pool2d
+         tril
+         triu
+         masked-fill
+         embedding
+         layer-norm
          requires-grad!
          requires-grad?
          backward!
@@ -188,36 +196,6 @@
   [mm (-> tensor? tensor? tensor?)]
   [mv (-> tensor? tensor? tensor?)]
   [dot (-> tensor? tensor? tensor?)]
-  ;; conv + pooling
-  [conv2d (->* (tensor? tensor?)
-               (#:bias (or/c tensor? #f) #:stride pool-size/c
-                #:padding pool-size/c #:dilation pool-size/c
-                #:groups index/c)
-               tensor?)]
-  [max-pool2d (->* (tensor? pool-size/c)
-                   (#:stride (or/c pool-size/c #f) #:padding pool-size/c
-                    #:dilation pool-size/c #:ceil-mode boolean?)
-                   tensor?)]
-  [avg-pool2d (->* (tensor? pool-size/c)
-                   (#:stride (or/c pool-size/c #f) #:padding pool-size/c
-                    #:ceil-mode boolean? #:count-include-pad boolean?
-                    #:divisor-override (or/c exact-positive-integer? #f))
-                   tensor?)]
-  [adaptive-avg-pool2d (-> tensor? pool-size/c tensor?)]
-  ;; transformer primitives
-  [tril (->* (tensor?) (exact-integer?) tensor?)]
-  [triu (->* (tensor?) (exact-integer?) tensor?)]
-  [masked-fill (-> tensor? tensor? real? tensor?)]
-  [embedding (->* (tensor? tensor?)
-                  (#:padding-idx (or/c #f exact-nonnegative-integer?))
-                  tensor?)]
-  [layer-norm (->* (tensor?
-                    (or/c exact-positive-integer?
-                          (non-empty-listof exact-positive-integer?)))
-                   (#:weight (or/c tensor? #f)
-                    #:bias (or/c tensor? #f)
-                    #:eps real?)
-                   tensor?)]
   ;; comparisons
   [eq compare/c]
   [ne compare/c]
