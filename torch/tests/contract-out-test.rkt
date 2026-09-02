@@ -87,6 +87,8 @@
     (-> number? (not/c zero?) number?)
     (/ a b))
 
+  (define/checked-out twice (-> number? number?) (lambda (x) (* 2 x)))
+
   (define (sibling-call) (safe-div 1 0)))
 
 (module+ test
@@ -104,7 +106,14 @@
 
   (check-exn #rx"^/: division by zero"
              (lambda () (plain:safe-div 1 0)))
-  (check-exn #rx"^/: division by zero" plain:sibling-call))
+  (check-exn #rx"^/: division by zero" plain:sibling-call)
+
+  (check-equal? (checked:twice 21) 42)
+  (check-equal? (plain:twice 21) 42)
+  (check-exn #rx"^twice: contract violation"
+             (lambda () (checked:twice "a")))
+  (check-exn #rx"^[*]: contract violation"
+             (lambda () (plain:twice "a"))))
 
 (module+ test
   (require (only-in racket/file file->string)
