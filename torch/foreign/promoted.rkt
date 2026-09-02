@@ -1,8 +1,16 @@
 #lang racket/base
 
-(require (only-in racket/list
+(require (only-in racket/base [abs base:abs] [cos base:cos] [sin base:sin])
+         (only-in racket/contract/base
+                  -> ->* ->i and/c listof none/c or/c unsupplied-arg? vectorof)
+         (only-in racket/list
                   append* drop [flatten list-flatten] make-list
                   [take list-take])
+         (only-in "../private/contract.rkt"
+                  define/checked-out define/contract-out)
+         (only-in "contracts.rkt"
+                  bool-tensor/c compare/c flatten/c index-spec/c index-vector/c
+                  index/c int64-tensor/c unary-numeric/c unary-real/c)
          (only-in "device-type.rkt" device-type)
          (only-in "ops.rkt"
                   item tensor-device tensor-dtype tensor-shape tensor->list
@@ -44,24 +52,24 @@
                                 where-scalarself
                                 where-self)))
 
-(provide flatten
-         eq ne lt le gt ge
-         gather take take-along-dim where
-         index-add! index-fill! masked-fill! scatter!
-         tensor-ref tensor-ref!
-         index-copy! masked-scatter! scatter-add!
-         (rename-out [g:index-select index-select]
-                     [g:masked-select masked-select]
-                     [g:narrow narrow]
-                     [g:nonzero nonzero]
-                     [g:select-int select]
-                     [tensor-abs abs]
-                     [tensor-cos cos]
-                     [tensor-sin sin]))
+(define/contract-out narrow
+  (-> tensor? index/c index/c exact-positive-integer? tensor?)
+  g:narrow)
+(define/contract-out select (-> tensor? index/c index/c tensor?) g:select-int)
+(define/contract-out index-select
+  (-> tensor? index/c index-vector/c tensor?)
+  g:index-select)
+(define/contract-out masked-select
+  (-> tensor? bool-tensor/c tensor?)
+  g:masked-select)
+(define/contract-out nonzero (-> tensor? tensor?) g:nonzero)
 
-(define (tensor-abs x) (if (tensor? x) (g:abs-tensor x) (abs x)))
-(define (tensor-sin x) (if (tensor? x) (g:sin-tensor x) (sin x)))
-(define (tensor-cos x) (if (tensor? x) (g:cos-tensor x) (cos x)))
+(define/contract-out (abs x) unary-real/c
+  (if (tensor? x) (g:abs-tensor x) (base:abs x)))
+(define/contract-out (sin x) unary-numeric/c
+  (if (tensor? x) (g:sin-tensor x) (base:sin x)))
+(define/contract-out (cos x) unary-numeric/c
+  (if (tensor? x) (g:cos-tensor x) (base:cos x)))
 
 (define (bool-mask? s)
   (and (tensor? s) (eq? (tensor-dtype s) 'bool)))
@@ -129,7 +137,8 @@
                                  (list-tail vdims (+ d n))))))
   (g:index-select collapsed d (mask-spec->index-tensor m)))
 
-(define (tensor-ref t . specs)
+(define/checked-out (tensor-ref t . specs)
+  (-> tensor? index-spec/c ... (or/c tensor? number? boolean?))
   (cond
     [(and (pair? specs) (null? (cdr specs))
           (bool-mask? (car specs))
@@ -157,7 +166,14 @@
        [(eq? (tensor-dtype result) 'bool) (not (zero? (item result)))]
        [else (item result)])]))
 
-(define (take v n)
+(define/contract-out (take v n)
+  (->i ([v (or/c tensor? list?)]
+        [n (v) (if (tensor? v)
+                   (or/c int64-tensor/c
+                         (listof exact-integer?)
+                         (vectorof exact-integer?))
+                   exact-nonnegative-integer?)])
+       [result (v) (if (tensor? v) tensor? list?)])
   (cond
     [(not (tensor? v)) (list-take v n)]
     [else
@@ -178,13 +194,47 @@
         (apply reshape flat-out (tensor-shape idx))]
        [else (g:take v idx)])]))
 
-(define (gather t dim index)
+(define/contract-out (gather t dim index)
+  (->i ([t tensor?]
+        [dim index/c]
+        [index (t dim)
+               (and/c int64-tensor/c
+                      (lambda (x)
+                        (define td (tensor-shape t))
+                        (define xd (tensor-shape x))
+                        (define rank (length td))
+                        (define g (if (negative? dim) (+ dim rank) dim))
+                        (and (= (length xd) rank)
+                             ;; ATen skips extent checks for empty
+                             ;; indices (verified)
+                             (or (zero? (apply * xd))
+                                 (for/and ([xi (in-list xd)]
+                                           [ti (in-list td)]
+                                           [i (in-naturals)])
+                                   (or (= i g) (<= xi ti)))))))])
+       [result tensor?])
   (g:gather t dim index #f))
 
-(define (take-along-dim t indices [dim #f])
+(define/contract-out (take-along-dim t indices [dim #f])
+  (->i ([t tensor?]
+        [indices (t dim)
+                 (and/c int64-tensor/c
+                        (lambda (x)
+                          (or (unsupplied-arg? dim)
+                              (not dim)
+                              (= (length (tensor-shape x))
+                                 (length (tensor-shape t))))))])
+       ([dim (or/c #f index/c)])
+       [result tensor?])
   (g:take-along-dim t indices dim))
 
-(define where
+(define/contract-out where
+  (->i ([c bool-tensor/c])
+       ([a (or/c tensor? real?)]
+        [b (a) (if (unsupplied-arg? a) none/c (or/c tensor? real?))])
+       #:pre/name (a b) "a condition alone, or condition + both arms"
+       (eq? (unsupplied-arg? a) (unsupplied-arg? b))
+       [result (a) (if (unsupplied-arg? a) (listof tensor?) tensor?)])
   (case-lambda
     [(mask)
      (cond
@@ -226,10 +276,12 @@
 (define (scalar->value-tensor v t)
   (tensor v #:dtype 'int64 #:device (tensor-device t)))
 
-(define (index-copy! t dim index source)
+(define/contract-out (index-copy! t dim index source)
+  (-> tensor? index/c index-vector/c tensor? void?)
   (void (g:index-copy! t dim index source)))
 
-(define (index-add! t dim index source #:alpha [alpha 1])
+(define/contract-out (index-add! t dim index source #:alpha [alpha 1])
+  (->* [tensor? index/c index-vector/c tensor?] [#:alpha real?] void?)
   (void
    (if (and (exact-integer? alpha) (int64-dtype? t)
             (not (double-roundtrips? alpha)))
@@ -237,14 +289,25 @@
                      1.0)
        (g:index-add! t dim index source (exact->inexact alpha)))))
 
-(define (index-fill! t dim index v)
+(define/contract-out (index-fill! t dim index v)
+  (-> tensor? index/c index-vector/c real? void?)
   (void
    (if (and (exact-integer? v) (int64-dtype? t)
             (not (double-roundtrips? v)))
        (g:index-fill-int-tensor! t dim index (scalar->value-tensor v t))
        (g:index-fill-int-scalar! t dim index (exact->inexact v)))))
 
-(define (scatter! t dim index v)
+(define (same-rank-index/c t)
+  (and/c int64-tensor/c
+         (lambda (x)
+           (= (length (tensor-shape x)) (length (tensor-shape t))))))
+
+(define/contract-out (scatter! t dim index v)
+  (->i ([t tensor?]
+        [dim index/c]
+        [index (t) (same-rank-index/c t)]
+        [v (or/c tensor? real?)])
+       [result void?])
   (void
    (cond
      [(tensor? v) (g:scatter-src! t dim index v)]
@@ -256,17 +319,24 @@
                            (scalar->value-tensor v t)))]
      [else (g:scatter-value! t dim index (exact->inexact v))])))
 
-(define (scatter-add! t dim index src)
+(define/contract-out (scatter-add! t dim index src)
+  (->i ([t tensor?]
+        [dim index/c]
+        [index (t) (same-rank-index/c t)]
+        [src tensor?])
+       [result void?])
   (void (g:scatter-add! t dim index src)))
 
-(define (masked-fill! t mask v)
+(define/contract-out (masked-fill! t mask v)
+  (-> tensor? bool-tensor/c real? void?)
   (void
    (if (and (exact-integer? v) (int64-dtype? t)
             (not (double-roundtrips? v)))
        (g:masked-fill-tensor! t mask (scalar->value-tensor v t))
        (g:masked-fill-scalar! t mask (exact->inexact v)))))
 
-(define (masked-scatter! t mask source)
+(define/contract-out (masked-scatter! t mask source)
+  (-> tensor? bool-tensor/c tensor? void?)
   (void (g:masked-scatter! t mask source)))
 
 (define (write-mask-target! t mask0 v)
@@ -318,7 +388,8 @@
           v
           (g:broadcast-to (apply reshape v vdims) sel-shape)))]))
 
-(define (tensor-ref! t v . specs)
+(define/checked-out (tensor-ref! t v . specs)
+  (-> tensor? (or/c tensor? real?) index-spec/c ... void?)
   (void
    (cond
     [(and (pair? specs) (null? (cdr specs)) (bool-mask? (car specs)))
@@ -376,7 +447,8 @@
        ;; ingestion transit would round float64 destinations)
        [else (g:fill-scalar! view (exact->inexact v))])])))
 
-(define (flatten v [start-dim 0] [end-dim -1])
+(define/contract-out (flatten v [start-dim 0] [end-dim -1])
+  flatten/c
   (cond
     [(tensor? v)
      (define shp (tensor-shape v))
@@ -416,9 +488,9 @@
      (t-op a (tensor b #:device (tensor-device a)))]
     [else (s-op a (exact->inexact b))]))
 
-(define eq (comparison g:eq-tensor g:eq-scalar))
-(define ne (comparison g:ne-tensor g:ne-scalar))
-(define lt (comparison g:lt-tensor g:lt-scalar))
-(define le (comparison g:le-tensor g:le-scalar))
-(define gt (comparison g:gt-tensor g:gt-scalar))
-(define ge (comparison g:ge-tensor g:ge-scalar))
+(define/contract-out eq compare/c (comparison g:eq-tensor g:eq-scalar))
+(define/contract-out ne compare/c (comparison g:ne-tensor g:ne-scalar))
+(define/contract-out lt compare/c (comparison g:lt-tensor g:lt-scalar))
+(define/contract-out le compare/c (comparison g:le-tensor g:le-scalar))
+(define/contract-out gt compare/c (comparison g:gt-tensor g:gt-scalar))
+(define/contract-out ge compare/c (comparison g:ge-tensor g:ge-scalar))

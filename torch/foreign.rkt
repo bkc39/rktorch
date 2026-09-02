@@ -14,7 +14,8 @@
          "foreign/tensor-ops.rkt"
          "foreign/operators.rkt"
          "foreign/nn-promoted.rkt"
-         "foreign/promoted.rkt"
+         (except-in "foreign/promoted.rkt" tensor-ref tensor-ref!)
+         (submod "foreign/promoted.rkt" checked)
          (only-in "foreign/ref-syntax.rkt" ref ref!)
          (except-in "foreign/autograd-ops.rkt" requires-grad!)
          (submod "foreign/autograd-ops.rkt" checked)
@@ -34,6 +35,34 @@
          masked-fill
          embedding
          layer-norm
+         flatten
+         narrow
+         select
+         index-select
+         masked-select
+         nonzero
+         take
+         gather
+         take-along-dim
+         where
+         tensor-ref
+         tensor-ref!
+         index-copy!
+         index-add!
+         index-fill!
+         scatter!
+         scatter-add!
+         masked-fill!
+         masked-scatter!
+         abs
+         sin
+         cos
+         eq
+         ne
+         lt
+         le
+         gt
+         ge
          requires-grad!
          requires-grad?
          backward!
@@ -85,93 +114,12 @@
   [unsqueeze (-> tensor? index/c tensor?)]
   [cat (->* ((non-empty-listof tensor?)) (index/c) tensor?)]
   [stack (->* ((non-empty-listof tensor?)) (index/c) tensor?)]
-  [flatten flatten/c]
-  [narrow (-> tensor? index/c index/c exact-positive-integer? tensor?)]
-  [select (-> tensor? index/c index/c tensor?)]
-  [index-select (-> tensor? index/c index-vector/c tensor?)]
-  [masked-select (-> tensor? bool-tensor/c tensor?)]
-  [nonzero (-> tensor? tensor?)]
-  [take (->i ([v (or/c tensor? list?)]
-              [n (v) (if (tensor? v)
-                         (or/c int64-tensor/c
-                               (listof exact-integer?)
-                               (vectorof exact-integer?))
-                         exact-nonnegative-integer?)])
-             [result (v) (if (tensor? v) tensor? list?)])]
-  [gather (->i ([t tensor?]
-                [dim index/c]
-                [index (t dim)
-                       (and/c int64-tensor/c
-                              (lambda (x)
-                                (define td (tensor-shape t))
-                                (define xd (tensor-shape x))
-                                (define rank (length td))
-                                (define g (if (negative? dim)
-                                              (+ dim rank)
-                                              dim))
-                                (and (= (length xd) rank)
-                                     ;; ATen skips extent checks for
-                                     ;; empty indices (verified)
-                                     (or (zero? (apply * xd))
-                                         (for/and ([xi (in-list xd)]
-                                                   [ti (in-list td)]
-                                                   [i (in-naturals)])
-                                           (or (= i g) (<= xi ti)))))))])
-               [result tensor?])]
-  [take-along-dim
-   (->i ([t tensor?]
-         [indices (t dim)
-                  (and/c int64-tensor/c
-                         (lambda (x)
-                           (or (unsupplied-arg? dim)
-                               (not dim)
-                               (= (length (tensor-shape x))
-                                  (length (tensor-shape t))))))])
-        ([dim (or/c #f index/c)])
-        [result tensor?])]
-  [where (->i ([c bool-tensor/c])
-              ([a (or/c tensor? real?)]
-               [b (a) (if (unsupplied-arg? a)
-                          none/c
-                          (or/c tensor? real?))])
-              #:pre/name (a b) "a condition alone, or condition + both arms"
-              (eq? (unsupplied-arg? a) (unsupplied-arg? b))
-              [result (a) (if (unsupplied-arg? a)
-                              (listof tensor?)
-                              tensor?)])]
-  [tensor-ref (-> tensor? index-spec/c ...
-                  (or/c tensor? number? boolean?))]
-  [tensor-ref! (-> tensor? (or/c tensor? real?) index-spec/c ...
-                   void?)]
-  [index-copy! (-> tensor? index/c index-vector/c tensor? void?)]
-  [index-add! (->* (tensor? index/c index-vector/c tensor?)
-                   (#:alpha real?) void?)]
-  [index-fill! (-> tensor? index/c index-vector/c real? void?)]
-  [scatter! (->i ([t tensor?]
-                  [dim index/c]
-                  [index (t) (and/c int64-tensor/c
-                                    (lambda (x)
-                                      (= (length (tensor-shape x))
-                                         (length (tensor-shape t)))))]
-                  [v (or/c tensor? real?)])
-                 [result void?])]
-  [scatter-add! (->i ([t tensor?]
-                      [dim index/c]
-                      [index (t) (and/c int64-tensor/c
-                                        (lambda (x)
-                                          (= (length (tensor-shape x))
-                                             (length (tensor-shape t)))))]
-                      [src tensor?])
-                     [result void?])]
-  [masked-fill! (-> tensor? bool-tensor/c real? void?)]
-  [masked-scatter! (-> tensor? bool-tensor/c tensor? void?)]
   ;; elementwise
   [add binary-arith/c]
   [sub binary-arith/c]
   [mul binary-arith/c]
   [div binary-arith/c]
   [pow (-> tensor? tensor-or-real/c tensor?)]
-  [abs unary-real/c]
   [neg (-> tensor? tensor?)]
   [relu (-> tensor? tensor?)]
   [sigmoid (-> tensor? tensor?)]
@@ -180,8 +128,6 @@
   [log log/c]
   [sqrt unary-numeric/c]
   [tanh unary-numeric/c]
-  [sin unary-numeric/c]
-  [cos unary-numeric/c]
   [max reduce-or-variadic/c]
   [min reduce-or-variadic/c]
   ;; reductions
@@ -196,13 +142,6 @@
   [mm (-> tensor? tensor? tensor?)]
   [mv (-> tensor? tensor? tensor?)]
   [dot (-> tensor? tensor? tensor?)]
-  ;; comparisons
-  [eq compare/c]
-  [ne compare/c]
-  [lt compare/c]
-  [le compare/c]
-  [gt compare/c]
-  [ge compare/c]
   ;; out-marshalling
   [item (-> tensor? real?)]
   [to-dtype (-> tensor? (or/c 'float32 'float64 'int64 'bool) tensor?)]
