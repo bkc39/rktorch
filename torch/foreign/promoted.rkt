@@ -6,18 +6,6 @@
          (only-in racket/list
                   append* drop [flatten list-flatten] make-list
                   [take list-take])
-         (only-in "../private/contract.rkt"
-                  define/checked-out define/contract-out)
-         (only-in "contracts.rkt"
-                  bool-tensor/c compare/c flatten/c index-spec/c index-vector/c
-                  index/c int64-tensor/c unary-numeric/c unary-real/c)
-         (only-in "device-type.rkt" device-type)
-         (only-in "ops.rkt"
-                  item tensor-device tensor-dtype tensor-shape tensor->list
-                  to-device to-dtype)
-         (only-in "slice.rkt" :: slice-end slice-start slice-step slice?)
-         (only-in "structs.rkt" tensor?)
-         (only-in "tensor-ops.rkt" add mul reshape sum tensor unsqueeze)
          (prefix-in g: (only-in "../generated.rkt"
                                 abs-tensor
                                 broadcast-to
@@ -50,25 +38,37 @@
                                 where-scalar
                                 where-scalarother
                                 where-scalarself
-                                where-self)))
+                                where-self))
+         (only-in "../private/contract.rkt"
+                  define/checked-out define/contract-out)
+         (only-in "contracts.rkt"
+                  bool-tensor/c compare/c flatten/c index-spec/c index-vector/c
+                  index/c int64-tensor/c unary-numeric/c unary-real/c)
+         (only-in "device-type.rkt" device-type)
+         (only-in "ops.rkt"
+                  item tensor-device tensor-dtype tensor-shape tensor->list
+                  to-device to-dtype)
+         (only-in "slice.rkt" :: slice-end slice-start slice-step slice?)
+         (only-in "structs.rkt" tensor?)
+         (only-in "tensor-ops.rkt" add mul reshape sum tensor unsqueeze))
 
-(define/contract-out narrow
+(define/contract-out narrow ;; noqa
   (-> tensor? index/c index/c exact-positive-integer? tensor?)
   g:narrow)
-(define/contract-out select (-> tensor? index/c index/c tensor?) g:select-int)
-(define/contract-out index-select
+(define/contract-out select (-> tensor? index/c index/c tensor?) g:select-int) ;; noqa
+(define/contract-out index-select ;; noqa
   (-> tensor? index/c index-vector/c tensor?)
   g:index-select)
-(define/contract-out masked-select
+(define/contract-out masked-select ;; noqa
   (-> tensor? bool-tensor/c tensor?)
   g:masked-select)
-(define/contract-out nonzero (-> tensor? tensor?) g:nonzero)
+(define/contract-out nonzero (-> tensor? tensor?) g:nonzero) ;; noqa
 
-(define/contract-out (abs x) unary-real/c
+(define/contract-out (abs x) unary-real/c ;; noqa
   (if (tensor? x) (g:abs-tensor x) (base:abs x)))
-(define/contract-out (sin x) unary-numeric/c
+(define/contract-out (sin x) unary-numeric/c ;; noqa
   (if (tensor? x) (g:sin-tensor x) (base:sin x)))
-(define/contract-out (cos x) unary-numeric/c
+(define/contract-out (cos x) unary-numeric/c ;; noqa
   (if (tensor? x) (g:cos-tensor x) (base:cos x)))
 
 (define (bool-mask? s)
@@ -194,7 +194,7 @@
         (apply reshape flat-out (tensor-shape idx))]
        [else (g:take v idx)])]))
 
-(define/contract-out (gather t dim index)
+(define/contract-out (gather t dim index) ;; noqa
   (->i ([t tensor?]
         [dim index/c]
         [index (t dim)
@@ -215,7 +215,7 @@
        [result tensor?])
   (g:gather t dim index #f))
 
-(define/contract-out (take-along-dim t indices [dim #f])
+(define/contract-out (take-along-dim t indices [dim #f]) ;; noqa
   (->i ([t tensor?]
         [indices (t dim)
                  (and/c int64-tensor/c
@@ -276,11 +276,11 @@
 (define (scalar->value-tensor v t)
   (tensor v #:dtype 'int64 #:device (tensor-device t)))
 
-(define/contract-out (index-copy! t dim index source)
+(define/contract-out (index-copy! t dim index source) ;; noqa
   (-> tensor? index/c index-vector/c tensor? void?)
   (void (g:index-copy! t dim index source)))
 
-(define/contract-out (index-add! t dim index source #:alpha [alpha 1])
+(define/contract-out (index-add! t dim index source #:alpha [alpha 1]) ;; noqa
   (->* [tensor? index/c index-vector/c tensor?] [#:alpha real?] void?)
   (void
    (if (and (exact-integer? alpha) (int64-dtype? t)
@@ -289,7 +289,7 @@
                      1.0)
        (g:index-add! t dim index source (exact->inexact alpha)))))
 
-(define/contract-out (index-fill! t dim index v)
+(define/contract-out (index-fill! t dim index v) ;; noqa
   (-> tensor? index/c index-vector/c real? void?)
   (void
    (if (and (exact-integer? v) (int64-dtype? t)
@@ -302,7 +302,7 @@
          (lambda (x)
            (= (length (tensor-shape x)) (length (tensor-shape t))))))
 
-(define/contract-out (scatter! t dim index v)
+(define/contract-out (scatter! t dim index v) ;; noqa
   (->i ([t tensor?]
         [dim index/c]
         [index (t) (same-rank-index/c t)]
@@ -319,7 +319,7 @@
                            (scalar->value-tensor v t)))]
      [else (g:scatter-value! t dim index (exact->inexact v))])))
 
-(define/contract-out (scatter-add! t dim index src)
+(define/contract-out (scatter-add! t dim index src) ;; noqa
   (->i ([t tensor?]
         [dim index/c]
         [index (t) (same-rank-index/c t)]
@@ -327,7 +327,7 @@
        [result void?])
   (void (g:scatter-add! t dim index src)))
 
-(define/contract-out (masked-fill! t mask v)
+(define/contract-out (masked-fill! t mask v) ;; noqa
   (-> tensor? bool-tensor/c real? void?)
   (void
    (if (and (exact-integer? v) (int64-dtype? t)
@@ -335,7 +335,7 @@
        (g:masked-fill-tensor! t mask (scalar->value-tensor v t))
        (g:masked-fill-scalar! t mask (exact->inexact v)))))
 
-(define/contract-out (masked-scatter! t mask source)
+(define/contract-out (masked-scatter! t mask source) ;; noqa
   (-> tensor? bool-tensor/c tensor? void?)
   (void (g:masked-scatter! t mask source)))
 
@@ -488,9 +488,9 @@
      (t-op a (tensor b #:device (tensor-device a)))]
     [else (s-op a (exact->inexact b))]))
 
-(define/contract-out eq compare/c (comparison g:eq-tensor g:eq-scalar))
-(define/contract-out ne compare/c (comparison g:ne-tensor g:ne-scalar))
-(define/contract-out lt compare/c (comparison g:lt-tensor g:lt-scalar))
-(define/contract-out le compare/c (comparison g:le-tensor g:le-scalar))
-(define/contract-out gt compare/c (comparison g:gt-tensor g:gt-scalar))
-(define/contract-out ge compare/c (comparison g:ge-tensor g:ge-scalar))
+(define/contract-out eq compare/c (comparison g:eq-tensor g:eq-scalar)) ;; noqa
+(define/contract-out ne compare/c (comparison g:ne-tensor g:ne-scalar)) ;; noqa
+(define/contract-out lt compare/c (comparison g:lt-tensor g:lt-scalar)) ;; noqa
+(define/contract-out le compare/c (comparison g:le-tensor g:le-scalar)) ;; noqa
+(define/contract-out gt compare/c (comparison g:gt-tensor g:gt-scalar)) ;; noqa
+(define/contract-out ge compare/c (comparison g:ge-tensor g:ge-scalar)) ;; noqa

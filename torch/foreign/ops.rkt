@@ -67,7 +67,7 @@
 
 (define dtype/c (or/c 'float32 'float64 'int64 'bool))
 
-(define/contract-out (torch-version) (-> string?)
+(define/contract-out (torch-version) (-> string?) ;; noqa
   (tr-version/raw))
 
 (define/contract-out (manual-seed! seed) (-> exact-nonnegative-integer? void?)
@@ -134,24 +134,24 @@
 (define/contract-out (cuda-available?) (-> boolean?)
   (= 1 (tr-cuda-is-available/raw)))
 
-(define/contract-out (cuda-if-available) (-> device?)
+(define/contract-out (cuda-if-available) (-> device?) ;; noqa
   (if (cuda-available?) (cuda-device) (cpu-device)))
 
 (define/contract-out (mps-available?) (-> boolean?)
   (= 1 (tr-mps-is-available/raw)))
 
-(define/contract-out (mps-if-available) (-> device?)
+(define/contract-out (mps-if-available) (-> device?) ;; noqa
   (if (mps-available?) (mps-device) (cpu-device)))
 
 ;; CUDA before MPS only for determinism; the two never coexist (MPS is
 ;; darwin-only, and nixpkgs has no darwin CUDA libtorch).
-(define/contract-out (accelerator-if-available) (-> device?)
+(define/contract-out (accelerator-if-available) (-> device?) ;; noqa
   (cond
     [(cuda-available?) (cuda-device)]
     [(mps-available?) (mps-device)]
     [else (cpu-device)]))
 
-(define/contract-out (cuda-device-count) (-> exact-nonnegative-integer?)
+(define/contract-out (cuda-device-count) (-> exact-nonnegative-integer?) ;; noqa
   (tr-cuda-device-count/raw))
 
 (define/contract-out (cuda-memory-stats [dev (cuda-device)])
@@ -182,18 +182,18 @@
   (-> (listof (cons/c device? exact-nonnegative-integer?)))
   raw:native-memory-use)
 
-(define/contract-out finalizer-failures
+(define/contract-out finalizer-failures ;; noqa
   (-> exact-nonnegative-integer?)
   raw:finalizer-failures)
 
-(define/contract-out finalizer-diagnostics
+(define/contract-out finalizer-diagnostics ;; noqa
   (-> (list/c (cons/c 'runs exact-nonnegative-integer?)
               (cons/c 'failures exact-nonnegative-integer?)
               (cons/c 'messages (listof string?))
               (cons/c 'ledger-entries exact-nonnegative-integer?)))
   raw:finalizer-diagnostics)
 
-(define/contract-out (reclaim-native-memory!) (-> void?)
+(define/contract-out (reclaim-native-memory!) (-> void?) ;; noqa
   (let loop ([prev (ledger-total)] [rounds 4])
     (define drained? (collect-and-drain!))
     (define now (ledger-total))
@@ -248,11 +248,11 @@
   (-> tensor? (listof exact-nonnegative-integer?))
   (tensor-impl-shape t))
 
-(define/contract-out shape
+(define/contract-out shape ;; noqa
   (-> tensor? (listof exact-nonnegative-integer?))
   tensor-shape)
-(define/contract-out dtype (-> tensor? dtype/c) tensor-dtype)
-(define/contract-out numel (-> tensor? exact-nonnegative-integer?) tensor-numel)
+(define/contract-out dtype (-> tensor? dtype/c) tensor-dtype) ;; noqa
+(define/contract-out numel (-> tensor? exact-nonnegative-integer?) tensor-numel) ;; noqa
 
 (define/contract-out (device x [index #f])
   (->i ([target (or/c tensor? 'cpu 'cuda 'mps)])
@@ -292,15 +292,15 @@
      (check-ok rc 'tensor->vector)
      out]))
 
-(define/checked-out (tensor->list t) (-> tensor? (listof real?))
+(define/checked-out (tensor->list t) (-> tensor? (listof real?)) ;; noqa
   (define v (tensor->vector t))
   (cond
     [(s64vector? v) (s64vector->list v)]
     [(f64vector? v) (f64vector->list v)]
     [else (f32vector->list v)]))
 
-(define/contract-out (tensor->string t) (-> tensor? string?)
+(define/contract-out (tensor->string t) (-> tensor? string?) ;; noqa
   (handle->string (tensor-handle t)))
 
-(define/contract-out (tensor->repr t) (-> tensor? string?)
+(define/contract-out (tensor->repr t) (-> tensor? string?) ;; noqa
   (handle->repr (tensor-handle t) (tensor-shape t)))

@@ -15,11 +15,12 @@
                   [max base:max]
                   [min base:min]
                   [sqrt base:sqrt])
-         (only-in racket/math [tanh base:tanh])
          (only-in racket/contract/base -> ->* non-empty-listof or/c)
          (only-in racket/list append-map [argmax base:argmax])
+         (only-in racket/math [tanh base:tanh])
          (only-in "../private/contract.rkt"
                   define/checked-out define/contract-out)
+         (only-in "autograd-ops.rkt" requires-grad!)
          (only-in "contracts.rkt"
                   arange/c argmax/c binary-arith/c index/c log/c
                   reduce-or-variadic/c tensor-or-real/c unary-numeric/c)
@@ -75,7 +76,6 @@
                   tr-transpose/raw
                   tr-unsqueeze/raw
                   tr-view/raw)
-         (only-in "autograd-ops.rkt" requires-grad!)
          (only-in "structs.rkt" tensor? wrap-tensor))
 
 (define (wrap who h)

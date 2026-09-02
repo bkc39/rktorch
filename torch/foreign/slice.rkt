@@ -12,7 +12,7 @@
 
 (define bound/c (or/c #f exact-integer?))
 
-(define/checked-out ::
+(define/checked-out :: ;; noqa
   (case-> (-> slice?)
           (-> bound/c slice?)
           (-> bound/c bound/c slice?)

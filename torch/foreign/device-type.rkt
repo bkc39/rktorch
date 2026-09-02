@@ -32,10 +32,10 @@
 (define device/c
   (or/c device? 'cpu 'cuda 'mps (list/c 'cuda exact-nonnegative-integer?)))
 
-(define/checked-out (cpu-device) (-> device?) (device 'cpu 0))
+(define/checked-out (cpu-device) (-> device?) (device 'cpu 0)) ;; noqa
 
-(define/checked-out (cuda-device [index 0])
+(define/checked-out (cuda-device [index 0]) ;; noqa
   (->* [] [exact-nonnegative-integer?] device?)
   (device 'cuda index))
 
-(define/checked-out (mps-device) (-> device?) (device 'mps 0))
+(define/checked-out (mps-device) (-> device?) (device 'mps 0)) ;; noqa

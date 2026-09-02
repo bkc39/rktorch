@@ -79,6 +79,6 @@
   (check-ok (tr-tensor-mul!/raw t (exact->inexact value)) 'mul!)
   (void))
 
-(define/contract-out (zero-grad! t) (-> tensor? void?)
+(define/contract-out (zero-grad! t) (-> tensor? void?) ;; noqa
   (when (has-grad? t)
     (zero! (grad t))))

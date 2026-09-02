@@ -172,7 +172,7 @@
                                    (shape->string (tensor-impl-shape t))))])
          (write-string (handle->repr h (tensor-impl-shape t)) port))])))
 
-(define/checked-out (tensor? v)
+(define/checked-out (tensor? v) ;; noqa
   (-> any/c boolean?)
   (and (tensor-impl? v) (Tensor? v)))
 

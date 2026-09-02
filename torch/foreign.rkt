@@ -1,7 +1,7 @@
 #lang racket/base
 
-;; raco review lints unexpanded, so the re-exports below would be reported
-;; as "provided but not defined".
+;; raco review lints unexpanded and reads a re-export facade's requires as
+;; unused
 #|review: ignore|#
 
 (require (only-in racket/contract/base -> contract-out)
