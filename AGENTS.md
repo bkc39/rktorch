@@ -325,6 +325,10 @@ explicit beats any comment) and then delete it. A correct explanation of
 what the code visibly does is still noise. Contract narration on a
 declaration whose name and signature carry the meaning is noise.
 
+Documentation of a form or function — what it does and how to use it —
+belongs in `torch/scribblings/*.scrbl`, not in a comment above the
+definition.
+
 The rare comments that stay carry something no name or structure could
 express, in one or two lines:
 
@@ -351,6 +355,20 @@ sits where a reader already is and the name is not repeated in a separate
 `provide` block.  Not `define/contract`: it blames the defining module
 rather than the caller, which is backwards for a library reporting what a
 user passed.
+
+Inside `torch/foreign/` a name the library itself calls uses
+`define/checked-out` instead.  That exports the definition plainly and puts
+the contracted name in a `checked` submodule, so a sibling requiring the
+module reaches the definition while `foreign.rkt` requires
+`(submod ... checked)` and re-exports it.  Without the split, contracting
+`add` would contract `operators.rkt`'s `t+`, and contracting `tensor?`
+would make every contract in `contracts.rkt` cross a second boundary.
+
+Which form to use is decidable, not a judgement call: **does a module under
+`torch/foreign/` import this name?**  If yes `define/checked-out`, if no
+`define/contract-out`.  A test in `torch/tests/contract-out-test.rkt`
+asserts no module under `torch/foreign/` requires a `checked` submodule, so
+the fast path cannot be recontracted by a later edit.
 
 `unless`+`error` stays for what a contract cannot see -- checks against
 parsed content (WAV chunk structure), filesystem state (symlink

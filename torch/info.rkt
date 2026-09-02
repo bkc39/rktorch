@@ -8,6 +8,7 @@
 (define version "0.1")
 (define deps '("base" "threading-lib"))
 (define build-deps '("rackunit-lib" "racket-doc" "scribble-lib"))
+(define scribblings (quote (("scribblings/torch.scrbl" ()))))
 (define pkg-desc "Racket bindings for libtorch (PyTorch)")
 (define pkg-authors '("bkschemer@gmail.com"))
 (define license '(Apache-2.0 AND CC-BY-4.0))

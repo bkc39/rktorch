@@ -77,3 +77,52 @@
                 (let ()
                   (define/contract-out (nope x) (-> number? number?) x)
                   (nope 1))))))
+
+(module checked-lib racket/base
+  (require (only-in racket/contract/base -> not/c)
+           (only-in "../private/contract.rkt" define/checked-out))
+  (provide sibling-call)
+
+  (define/checked-out (safe-div a b)
+    (-> number? (not/c zero?) number?)
+    (/ a b))
+
+  (define/checked-out twice (-> number? number?) (lambda (x) (* 2 x)))
+
+  (define (sibling-call) (safe-div 1 0)))
+
+(module+ test
+  (require (prefix-in plain: (submod ".." checked-lib))
+           (prefix-in checked: (submod ".." checked-lib checked)))
+
+  (check-equal? (checked:safe-div 6 3) 2)
+  (check-equal? (plain:safe-div 6 3) 2)
+
+  (check-exn #rx"safe-div: contract violation"
+             (lambda () (checked:safe-div 1 0)))
+  (check-exn (message-matching
+              #rx"blaming: [(][^)]*contract-out-test\\.rkt test[)]")
+             (lambda () (checked:safe-div 1 0)))
+
+  (check-exn #rx"^/: division by zero"
+             (lambda () (plain:safe-div 1 0)))
+  (check-exn #rx"^/: division by zero" plain:sibling-call)
+
+  (check-equal? (checked:twice 21) 42)
+  (check-equal? (plain:twice 21) 42)
+  (check-exn #rx"^twice: contract violation"
+             (lambda () (checked:twice "a")))
+  (check-exn #rx"^[*]: contract violation"
+             (lambda () (plain:twice "a"))))
+
+(module+ test
+  (require (only-in racket/file file->string)
+           racket/runtime-path
+           (only-in racket/sequence sequence->list))
+
+  (define-runtime-path foreign-dir "../foreign")
+
+  (for ([f (in-list (sequence->list (in-directory foreign-dir)))]
+        #:when (regexp-match? #rx"[.]rkt$" (path->string f)))
+    (check-false (regexp-match? #rx"submod[^)]*checked" (file->string f))
+                 (format "~a requires a checked submodule" f))))
