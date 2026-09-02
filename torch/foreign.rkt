@@ -11,7 +11,9 @@
          (only-in "foreign/error.rkt" exn:fail:rktorch:oom?)
          "foreign/structs.rkt"
          "foreign/ops.rkt"
-         "foreign/tensor-ops.rkt"
+         (except-in "foreign/tensor-ops.rkt"
+                    reshape unsqueeze tensor sum matmul)
+         (submod "foreign/tensor-ops.rkt" checked)
          "foreign/operators.rkt"
          "foreign/nn-promoted.rkt"
          (except-in "foreign/promoted.rkt" tensor-ref tensor-ref!)
@@ -76,6 +78,32 @@
 (provide (rename-out [t+ +] [t- -] [t* *] [t/ /])
          @)
 
+(provide zeros
+         ones
+         full
+         arange
+         eye
+         tensor
+         reshape
+         view
+         transpose
+         (rename-out [transpose t])
+         permute
+         squeeze
+         unsqueeze
+         cat
+         stack
+         sum
+         (rename-out [sum Σ])
+         mean
+         argmax
+         softmax
+         log-softmax
+         matmul
+         mm
+         mv
+         dot)
+
 (provide
  (contract-out
   [torch-version (-> string?)]
@@ -91,29 +119,6 @@
   [tensor->list (-> tensor? (listof real?))]
   [tensor->repr (-> tensor? string?)]
   [tensor->string (-> tensor? string?)]
-  ;; creation
-  [zeros (->* () #:rest dims-rest/c tensor?)]
-  [ones (->* () #:rest dims-rest/c tensor?)]
-  [full (->* (real?) #:rest dims-rest/c tensor?)]
-  [arange arange/c]
-  [eye (->* (exact-nonnegative-integer?)
-            (exact-nonnegative-integer?)
-            tensor?)]
-  [tensor (->* ((or/c real? list? vector? f32vector? s64vector?))
-               (#:requires-grad? boolean?
-                #:device (or/c #f device/c)
-                #:dtype (or/c #f 'float32 'int64))
-               tensor?)]
-  ;; shape
-  [reshape (-> tensor? index/c ... tensor?)]
-  [view (-> tensor? index/c ... tensor?)]
-  [transpose (-> tensor? index/c index/c tensor?)]
-  [rename transpose t (-> tensor? index/c index/c tensor?)]
-  [permute (-> tensor? index/c ... tensor?)]
-  [squeeze (->* (tensor?) (index/c) tensor?)]
-  [unsqueeze (-> tensor? index/c tensor?)]
-  [cat (->* ((non-empty-listof tensor?)) (index/c) tensor?)]
-  [stack (->* ((non-empty-listof tensor?)) (index/c) tensor?)]
   ;; elementwise
   [add binary-arith/c]
   [sub binary-arith/c]
@@ -130,18 +135,6 @@
   [tanh unary-numeric/c]
   [max reduce-or-variadic/c]
   [min reduce-or-variadic/c]
-  ;; reductions
-  [sum (-> tensor? tensor?)]
-  [rename sum Σ (-> tensor? tensor?)]
-  [mean (-> tensor? tensor?)]
-  [argmax argmax/c]
-  [softmax (-> tensor? index/c tensor?)]
-  [log-softmax (-> tensor? index/c tensor?)]
-  ;; linalg
-  [matmul (-> tensor? tensor? tensor?)]
-  [mm (-> tensor? tensor? tensor?)]
-  [mv (-> tensor? tensor? tensor?)]
-  [dot (-> tensor? tensor? tensor?)]
   ;; out-marshalling
   [item (-> tensor? real?)]
   [to-dtype (-> tensor? (or/c 'float32 'float64 'int64 'bool) tensor?)]

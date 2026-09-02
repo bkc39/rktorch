@@ -16,7 +16,12 @@
                   [min base:min]
                   [sqrt base:sqrt])
          (only-in racket/math [tanh base:tanh])
+         (only-in racket/contract/base -> ->* non-empty-listof or/c)
          (only-in racket/list append-map [argmax base:argmax])
+         (only-in "../private/contract.rkt"
+                  define/checked-out define/contract-out)
+         (only-in "contracts.rkt"
+                  arange/c argmax/c device/c dims-rest/c index/c)
          (only-in "error.rkt" check-handle)
          (only-in "ops.rkt" device->type+index)
          (only-in "raw/creation.rkt"
@@ -71,21 +76,7 @@
          (only-in "autograd-ops.rkt" requires-grad!)
          (only-in "structs.rkt" tensor? wrap-tensor))
 
-(provide zeros
-         ones
-         full
-         arange
-         eye
-         tensor
-         reshape
-         view
-         transpose
-         permute
-         squeeze
-         unsqueeze
-         cat
-         stack
-         add
+(provide add
          sub
          mul
          div
@@ -98,36 +89,31 @@
          sigmoid
          tanh
          gelu
-         sum
-         mean
          max
-         min
-         argmax
-         softmax
-         log-softmax
-         matmul
-         mm
-         mv
-         dot)
+         min)
 
 (define (wrap who h)
   (wrap-tensor (check-handle who h)))
 
 ;; ---------------------------------------------------------------- creation
 
-(define (zeros . dims)
+(define/contract-out (zeros . dims)
+  (->* [] #:rest dims-rest/c tensor?)
   (wrap 'zeros (tr-zeros/raw (list->s64vector dims) (length dims))))
 
-(define (ones . dims)
+(define/contract-out (ones . dims)
+  (->* [] #:rest dims-rest/c tensor?)
   (wrap 'ones (tr-ones/raw (list->s64vector dims) (length dims))))
 
-(define (full value . dims)
+(define/contract-out (full value . dims)
+  (->* [real?] #:rest dims-rest/c tensor?)
   (wrap 'full
         (tr-full/raw (list->s64vector dims)
                      (length dims)
                      (exact->inexact value))))
 
-(define arange
+(define/contract-out arange
+  arange/c
   (case-lambda
     [(end) (arange 0 end 1)]
     [(start end) (arange start end 1)]
@@ -137,7 +123,8 @@
                           (exact->inexact end)
                           (exact->inexact step)))]))
 
-(define (eye n [m n])
+(define/contract-out (eye n [m n])
+  (->* [exact-nonnegative-integer?] [exact-nonnegative-integer?] tensor?)
   (wrap 'eye (tr-eye/raw n m)))
 
 (define (nested-dims data)
@@ -199,10 +186,15 @@
     [(andmap exact-integer? flat) 'int64]
     [else 'float32]))
 
-(define (tensor data
-                #:requires-grad? [requires-grad? #f]
-                #:device [device #f]
-                #:dtype [dtype #f])
+(define/checked-out (tensor data
+                            #:requires-grad? [requires-grad? #f]
+                            #:device [device #f]
+                            #:dtype [dtype #f])
+  (->* [(or/c real? list? vector? f32vector? s64vector?)]
+       [#:requires-grad? boolean?
+        #:device (or/c #f device/c)
+        #:dtype (or/c #f 'float32 'int64)]
+       tensor?)
   (unless (memq dtype '(#f float32 int64))
     (error 'tensor "unsupported #:dtype (float32 or int64): ~e" dtype))
   (define dims (nested-dims data))
@@ -248,30 +240,38 @@
 
 ;; --------------------------------------------------------------- shape ops
 
-(define (reshape t . dims)
+(define/checked-out (reshape t . dims)
+  (-> tensor? index/c ... tensor?)
   (wrap 'reshape (tr-reshape/raw t (list->s64vector dims) (length dims))))
 
-(define (view t . dims)
+(define/contract-out (view t . dims)
+  (-> tensor? index/c ... tensor?)
   (wrap 'view (tr-view/raw t (list->s64vector dims) (length dims))))
 
-(define (transpose t dim0 dim1)
+(define/contract-out (transpose t dim0 dim1)
+  (-> tensor? index/c index/c tensor?)
   (wrap 'transpose (tr-transpose/raw t dim0 dim1)))
 
-(define (permute t . dims)
+(define/contract-out (permute t . dims)
+  (-> tensor? index/c ... tensor?)
   (wrap 'permute (tr-permute/raw t (list->s64vector dims) (length dims))))
 
-(define (squeeze t [dim #f])
+(define/contract-out (squeeze t [dim #f])
+  (->* [tensor?] [index/c] tensor?)
   (if dim
       (wrap 'squeeze (tr-squeeze-dim/raw t dim))
       (wrap 'squeeze (tr-squeeze/raw t))))
 
-(define (unsqueeze t dim)
+(define/checked-out (unsqueeze t dim)
+  (-> tensor? index/c tensor?)
   (wrap 'unsqueeze (tr-unsqueeze/raw t dim)))
 
-(define (cat ts [dim 0])
+(define/contract-out (cat ts [dim 0])
+  (->* [(non-empty-listof tensor?)] [index/c] tensor?)
   (wrap 'cat (tr-cat/raw ts (length ts) dim)))
 
-(define (stack ts [dim 0])
+(define/contract-out (stack ts [dim 0])
+  (->* [(non-empty-listof tensor?)] [index/c] tensor?)
   (wrap 'stack (tr-stack/raw ts (length ts) dim)))
 
 ;; -------------------------------------------------------------- elementwise
@@ -336,10 +336,12 @@
 
 ;; -------------------------------------------------------------- reductions
 
-(define (sum t)
+(define/checked-out (sum t)
+  (-> tensor? tensor?)
   (wrap 'sum (tr-sum/raw t)))
 
-(define (mean t)
+(define/contract-out (mean t)
+  (-> tensor? tensor?)
   (wrap 'mean (tr-mean/raw t)))
 
 (define (max v . rest)
@@ -356,7 +358,8 @@
           (error 'min "tensor min takes a single tensor"))
       (apply base:min v rest)))
 
-(define (argmax t [dim #f] #:keepdim [keepdim #f])
+(define/contract-out (argmax t [dim #f] #:keepdim [keepdim #f])
+  argmax/c
   (cond
     [(tensor? t)
      (if dim
@@ -365,22 +368,28 @@
     [(procedure? t) (base:argmax t dim)]
     [else (error 'argmax "expected a tensor or a procedure, got ~e" t)]))
 
-(define (softmax t dim)
+(define/contract-out (softmax t dim)
+  (-> tensor? index/c tensor?)
   (wrap 'softmax (tr-softmax/raw t dim)))
 
-(define (log-softmax t dim)
+(define/contract-out (log-softmax t dim)
+  (-> tensor? index/c tensor?)
   (wrap 'log-softmax (tr-log-softmax/raw t dim)))
 
 ;; ------------------------------------------------------------------ linalg
 
-(define (matmul a b)
+(define/checked-out (matmul a b)
+  (-> tensor? tensor? tensor?)
   (wrap 'matmul (tr-matmul/raw a b)))
 
-(define (mm a b)
+(define/contract-out (mm a b)
+  (-> tensor? tensor? tensor?)
   (wrap 'mm (tr-mm/raw a b)))
 
-(define (mv a b)
+(define/contract-out (mv a b)
+  (-> tensor? tensor? tensor?)
   (wrap 'mv (tr-mv/raw a b)))
 
-(define (dot a b)
+(define/contract-out (dot a b)
+  (-> tensor? tensor? tensor?)
   (wrap 'dot (tr-dot/raw a b)))
