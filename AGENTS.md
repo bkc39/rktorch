@@ -325,6 +325,10 @@ explicit beats any comment) and then delete it. A correct explanation of
 what the code visibly does is still noise. Contract narration on a
 declaration whose name and signature carry the meaning is noise.
 
+Documentation of a form or function — what it does and how to use it —
+belongs in `torch/scribblings/*.scrbl`, not in a comment above the
+definition.
+
 The rare comments that stay carry something no name or structure could
 express, in one or two lines:
 

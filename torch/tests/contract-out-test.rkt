@@ -87,8 +87,6 @@
     (-> number? (not/c zero?) number?)
     (/ a b))
 
-  ;; a sibling requiring this module plainly reaches the definition, not the
-  ;; contract -- the property the facade split depends on
   (define (sibling-call) (safe-div 1 0)))
 
 (module+ test
@@ -104,24 +102,17 @@
               #rx"blaming: [(][^)]*contract-out-test\\.rkt test[)]")
              (lambda () (checked:safe-div 1 0)))
 
-  ;; the plain export is uncontracted: the same argument reaches the body and
-  ;; fails there instead
   (check-exn #rx"^/: division by zero"
              (lambda () (plain:safe-div 1 0)))
   (check-exn #rx"^/: division by zero" plain:sibling-call))
 
 (module+ test
-  ;; whole-module require on purpose: define-runtime-path's expansion needs
-  ;; bindings only-in would strip
   (require (only-in racket/file file->string)
            racket/runtime-path
            (only-in racket/sequence sequence->list))
 
   (define-runtime-path foreign-dir "../foreign")
 
-  ;; The facade alone requires the `checked` submodules.  A sibling reaching
-  ;; for one would recontract the library's own calls -- operators.rkt's
-  ;; t+/t-/t*/t/ above all.
   (for ([f (in-list (sequence->list (in-directory foreign-dir)))]
         #:when (regexp-match? #rx"[.]rkt$" (path->string f)))
     (check-false (regexp-match? #rx"submod[^)]*checked" (file->string f))

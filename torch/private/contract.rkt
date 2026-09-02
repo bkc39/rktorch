@@ -36,10 +36,6 @@
          (define header body ...)
          (provide (contract-out [name contract])))]))
 
-;; The contracted name goes in a `checked` submodule that only the facade
-;; requires, so a sibling requiring this module plainly still calls the
-;; definition directly.  `module+` accumulates across every use in a file and
-;; sees the enclosing module's bindings, so `contract` may name imports.
 (define-syntax (define/checked-out stx)
   (module-level! stx)
   (syntax-parse stx

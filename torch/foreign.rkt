@@ -23,8 +23,6 @@
 
 (provide conv1d)
 
-;; contracted at their definition sites; requires-grad! comes from
-;; autograd-ops' `checked` submodule so tensor-ops keeps the plain one
 (provide requires-grad!
          requires-grad?
          backward!

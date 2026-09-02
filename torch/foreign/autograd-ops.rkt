@@ -1,8 +1,6 @@
 #lang racket/base
 
 (require (only-in racket/contract/base -> ->* any or/c)
-         ;; whole-module: the pattern's syntax classes live at phase 1 and
-         ;; only-in would strip them
          syntax/parse/define
          (only-in "../private/contract.rkt"
                   define/checked-out define/contract-out)
@@ -19,8 +17,6 @@
                   tr-tensor-requires-grad/raw
                   tr-tensor-sub!/raw
                   tr-tensor-zero!/raw)
-         ;; the raw predicate: contracting it here would make every
-         ;; contract below cross a second boundary
          (only-in "structs.rkt" tensor? wrap-tensor))
 
 (provide with-no-grad
