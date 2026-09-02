@@ -12,7 +12,7 @@
          "foreign/structs.rkt"
          "foreign/ops.rkt"
          (except-in "foreign/tensor-ops.rkt"
-                    reshape unsqueeze tensor sum matmul)
+                    reshape unsqueeze tensor sum matmul add sub mul div neg)
          (submod "foreign/tensor-ops.rkt" checked)
          "foreign/operators.rkt"
          "foreign/nn-promoted.rkt"
@@ -102,7 +102,22 @@
          matmul
          mm
          mv
-         dot)
+         dot
+         add
+         sub
+         mul
+         div
+         pow
+         neg
+         relu
+         sigmoid
+         gelu
+         exp
+         log
+         sqrt
+         tanh
+         max
+         min)
 
 (provide
  (contract-out
@@ -119,22 +134,6 @@
   [tensor->list (-> tensor? (listof real?))]
   [tensor->repr (-> tensor? string?)]
   [tensor->string (-> tensor? string?)]
-  ;; elementwise
-  [add binary-arith/c]
-  [sub binary-arith/c]
-  [mul binary-arith/c]
-  [div binary-arith/c]
-  [pow (-> tensor? tensor-or-real/c tensor?)]
-  [neg (-> tensor? tensor?)]
-  [relu (-> tensor? tensor?)]
-  [sigmoid (-> tensor? tensor?)]
-  [gelu (-> tensor? tensor?)]
-  [exp unary-numeric/c]
-  [log log/c]
-  [sqrt unary-numeric/c]
-  [tanh unary-numeric/c]
-  [max reduce-or-variadic/c]
-  [min reduce-or-variadic/c]
   ;; out-marshalling
   [item (-> tensor? real?)]
   [to-dtype (-> tensor? (or/c 'float32 'float64 'int64 'bool) tensor?)]
