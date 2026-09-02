@@ -12,18 +12,15 @@
                   or/c
                   unsupplied-arg?
                   vectorof)
-         (only-in "device-type.rkt" device?)
          (only-in "ops.rkt" tensor-dtype tensor-shape)
          (only-in "slice.rkt" slice-end slice-start slice-step slice?)
          (only-in "structs.rkt" tensor?))
 
 (provide bool-tensor/c
-         dims-rest/c
          index-spec/c
          index/c
          index-vector/c
          int64-tensor/c
-         device/c
          tensor-or-real/c
          pool-size/c
          pos-size-1d/c
@@ -39,8 +36,6 @@
          compare/c
          flatten/c
          arange/c)
-
-(define dims-rest/c (listof exact-nonnegative-integer?))
 
 (define (slice-spec? x)
   (define (bound? b) (or (not b) (exact-integer? b)))
@@ -73,9 +68,6 @@
 (define index/c exact-integer?)
 
 (define tensor-or-real/c (or/c tensor? real?))
-
-(define device/c
-  (or/c device? 'cpu 'cuda 'mps (list/c 'cuda exact-nonnegative-integer?)))
 
 (define binary-arith/c
   (->i ([a (or/c tensor? real?)]

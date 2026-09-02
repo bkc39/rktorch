@@ -9,7 +9,9 @@
                   make-s64vector
                   s64vector->list
                   s64vector-ref)
+         (only-in racket/contract/base -> any/c)
          (only-in racket/string string-join)
+         (only-in "../private/contract.rkt" define/checked-out)
          (only-in "error.rkt" check-handle check-ok)
          (only-in "format.rkt"
                   tensor->pytorch-repr
@@ -27,7 +29,6 @@
                   tr-tensor-shape/raw))
 
 (provide (struct-out tensor-impl)
-         tensor?
          tensor-handle
          tensor-impl-shape
          handle->string
@@ -171,7 +172,8 @@
                                    (shape->string (tensor-impl-shape t))))])
          (write-string (handle->repr h (tensor-impl-shape t)) port))])))
 
-(define (tensor? v)
+(define/checked-out (tensor? v)
+  (-> any/c boolean?)
   (and (tensor-impl? v) (Tensor? v)))
 
 (define tensor-handle tensor-impl-handle)

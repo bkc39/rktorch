@@ -21,11 +21,11 @@
          (only-in "../private/contract.rkt"
                   define/checked-out define/contract-out)
          (only-in "contracts.rkt"
-                  arange/c argmax/c binary-arith/c device/c dims-rest/c
-                  index/c log/c reduce-or-variadic/c tensor-or-real/c
-                  unary-numeric/c)
+                  arange/c argmax/c binary-arith/c index/c log/c
+                  reduce-or-variadic/c tensor-or-real/c unary-numeric/c)
+         (only-in "device-type.rkt" device/c)
          (only-in "error.rkt" check-handle)
-         (only-in "ops.rkt" device->type+index)
+         (only-in "ops.rkt" device->type+index dims-rest/c)
          (only-in "raw/creation.rkt"
                   tr-arange/raw
                   tr-eye/raw

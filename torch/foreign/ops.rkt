@@ -5,6 +5,7 @@
          syntax/parse/define
          (only-in ffi/vector
                   f32vector->list
+                  f32vector?
                   f64vector->list
                   f64vector?
                   list->s64vector
@@ -14,10 +15,14 @@
                   s64vector->list
                   s64vector-ref
                   s64vector?)
+         (only-in racket/contract/base
+                  -> ->* ->i any any/c cons/c list/c listof none/c or/c)
+         (only-in "../private/contract.rkt"
+                  define/checked-out define/contract-out)
          (only-in "device-type.rkt"
                   [device make-device]
-                  cpu-device cuda-device device-index device-type device?
-                  mps-device)
+                  cpu-device cuda-device device-index device-type device/c
+                  device? mps-device)
          (only-in "error.rkt" check-handle check-ok)
          (only-in "raw/device.rkt"
                   tr-cuda-device-count/raw
@@ -33,9 +38,9 @@
          (only-in "raw/global.rkt" tr-manual-seed/raw tr-version/raw)
          (only-in "raw/memory.rkt"
                   collect-and-drain!
-                  finalizer-diagnostics
-                  finalizer-failures
-                  native-memory-use)
+                  [finalizer-diagnostics raw:finalizer-diagnostics]
+                  [finalizer-failures raw:finalizer-failures]
+                  [native-memory-use raw:native-memory-use])
          (only-in "raw/random.rkt" tr-rand/raw tr-randn/raw tr-tensor-uniform!/raw)
          (only-in "raw/tensor.rkt"
                   dtype-code->symbol
@@ -54,68 +59,39 @@
                   tensor?
                   wrap-tensor))
 
-(provide torch-version
-         cuda-empty-cache!
-         cuda-memory-stats
-         reclaim-native-memory!
-         device
-         device->type+index
-         dtype
-         numel
-         shape
-         finalizer-diagnostics
-         finalizer-failures
-         native-memory-use
-         manual-seed!
-         randn
-         rand
-         uniform!
-         item
-         tensor-dtype
-         to-dtype
-         cuda-available?
-         cuda-if-available
-         cuda-device-count
-         accelerator-if-available
-         mps-available?
-         mps-empty-cache!
-         mps-if-available
-         set-default-device!
-         default-device
-         call-with-default-device
-         with-default-device
-         to-device
-         tensor-device
-         tensor-numel
-         tensor-shape
-         tensor->vector
-         tensor->list
-         tensor->string
-         tensor->repr)
+(provide device->type+index
+         dims-rest/c
+         with-default-device)
 
-(define (torch-version)
+(define dims-rest/c (listof exact-nonnegative-integer?))
+
+(define dtype/c (or/c 'float32 'float64 'int64 'bool))
+
+(define/contract-out (torch-version) (-> string?)
   (tr-version/raw))
 
-(define (manual-seed! seed)
+(define/contract-out (manual-seed! seed) (-> exact-nonnegative-integer? void?)
   (check-ok (tr-manual-seed/raw seed) 'manual-seed!)
   (void))
 
-(define (randn . dims)
+(define/contract-out (randn . dims)
+  (->* [] #:rest dims-rest/c tensor?)
   (wrap-tensor
    (check-handle 'randn (tr-randn/raw (list->s64vector dims) (length dims)))))
 
-(define (rand . dims)
+(define/contract-out (rand . dims)
+  (->* [] #:rest dims-rest/c tensor?)
   (wrap-tensor
    (check-handle 'rand (tr-rand/raw (list->s64vector dims) (length dims)))))
 
-(define (uniform! t low high)
+(define/contract-out (uniform! t low high) (-> tensor? real? real? void?)
   (check-ok (tr-tensor-uniform!/raw t
                                     (exact->inexact low)
                                     (exact->inexact high))
             'uniform!)
   (void))
 
-(define (item t)
+(define/checked-out (item t) (-> tensor? real?)
   (cond
     [(and (int64-tensor? t) (= 1 (tensor-numel t)))
      (define out (make-s64vector 1))
@@ -127,10 +103,10 @@
      (check-ok rc 'item)
      v]))
 
-(define (to-dtype t dtype)
+(define/checked-out (to-dtype t dtype) (-> tensor? dtype/c tensor?)
   (wrap-tensor (check-handle 'to-dtype (tr-tensor-to-dtype/raw t dtype))))
 
-(define (tensor-dtype t)
+(define/checked-out (tensor-dtype t) (-> tensor? dtype/c)
   (define-values (rc code) (tr-tensor-dtype/raw t))
   (check-ok rc 'tensor-dtype)
   (or (dtype-code->symbol code)
@@ -155,30 +131,33 @@
     [(mps) (mps-device)]
     [else (cuda-device index)]))
 
-(define (cuda-available?)
+(define/contract-out (cuda-available?) (-> boolean?)
   (= 1 (tr-cuda-is-available/raw)))
 
-(define (cuda-if-available)
+(define/contract-out (cuda-if-available) (-> device?)
   (if (cuda-available?) (cuda-device) (cpu-device)))
 
-(define (mps-available?)
+(define/contract-out (mps-available?) (-> boolean?)
   (= 1 (tr-mps-is-available/raw)))
 
-(define (mps-if-available)
+(define/contract-out (mps-if-available) (-> device?)
   (if (mps-available?) (mps-device) (cpu-device)))
 
 ;; CUDA before MPS only for determinism; the two never coexist (MPS is
 ;; darwin-only, and nixpkgs has no darwin CUDA libtorch).
-(define (accelerator-if-available)
+(define/contract-out (accelerator-if-available) (-> device?)
   (cond
     [(cuda-available?) (cuda-device)]
     [(mps-available?) (mps-device)]
     [else (cpu-device)]))
 
-(define (cuda-device-count)
+(define/contract-out (cuda-device-count) (-> exact-nonnegative-integer?)
   (tr-cuda-device-count/raw))
 
-(define (cuda-memory-stats [dev (cuda-device)])
+(define/contract-out (cuda-memory-stats [dev (cuda-device)])
+  (->* [] [device/c]
+       (listof (cons/c (or/c 'allocated 'reserved 'peak-allocated)
+                       exact-nonnegative-integer?)))
   (define-values (type index) (device->type+index dev))
   (unless (eq? type 'cuda)
     (error 'cuda-memory-stats "expected a CUDA device, given: ~e" dev))
@@ -189,15 +168,32 @@
         (cons 'reserved reserved)
         (cons 'peak-allocated peak)))
 
-(define (cuda-empty-cache!)
+(define/contract-out (cuda-empty-cache!) (-> void?)
   (check-ok (tr-cuda-empty-cache/raw) 'cuda-empty-cache!)
   (void))
 
-(define (mps-empty-cache!)
+(define/contract-out (mps-empty-cache!) (-> void?)
   (check-ok (tr-mps-empty-cache/raw) 'mps-empty-cache!)
   (void))
 
-(define (reclaim-native-memory!)
+;; a handle-attributed estimate: views charge their full extents (shared
+;; storage double-counts) and ATen-internal allocations are absent
+(define/contract-out native-memory-use
+  (-> (listof (cons/c device? exact-nonnegative-integer?)))
+  raw:native-memory-use)
+
+(define/contract-out finalizer-failures
+  (-> exact-nonnegative-integer?)
+  raw:finalizer-failures)
+
+(define/contract-out finalizer-diagnostics
+  (-> (list/c (cons/c 'runs exact-nonnegative-integer?)
+              (cons/c 'failures exact-nonnegative-integer?)
+              (cons/c 'messages (listof string?))
+              (cons/c 'ledger-entries exact-nonnegative-integer?)))
+  raw:finalizer-diagnostics)
+
+(define/contract-out (reclaim-native-memory!) (-> void?)
   (let loop ([prev (ledger-total)] [rounds 4])
     (define drained? (collect-and-drain!))
     (define now (ledger-total))
@@ -213,17 +209,18 @@
   (for/sum ([entry (in-list (native-memory-use))])
     (cdr entry)))
 
-(define (set-default-device! dev)
+(define/contract-out (set-default-device! dev) (-> device/c void?)
   (define-values (type index) (device->type+index dev))
   (check-ok (tr-set-default-device/raw type index) 'set-default-device!)
   (void))
 
-(define (default-device)
+(define/contract-out (default-device) (-> device?)
   (define-values (rc type index) (tr-get-default-device/raw))
   (check-ok rc 'default-device)
   (type+index->device type index))
 
-(define (call-with-default-device dev thunk)
+(define/contract-out (call-with-default-device dev thunk)
+  (-> device/c (-> any) any)
   (define saved (default-device))
   (dynamic-wind (lambda () (set-default-device! dev))
                 thunk
@@ -232,29 +229,39 @@
 (define-syntax-parse-rule (with-default-device dev:expr body:expr ...+)
   (call-with-default-device dev (lambda () body ...)))
 
-(define (to-device t dev)
+(define/checked-out (to-device t dev) (-> tensor? device/c tensor?)
   (define-values (type index) (device->type+index dev))
   (wrap-tensor
    (check-handle 'to-device (tr-tensor-to-device/raw t type index))))
 
-(define (tensor-device t)
+(define/checked-out (tensor-device t) (-> tensor? device?)
   (define-values (rc type index) (tr-tensor-device/raw t))
   (check-ok rc 'tensor-device)
   (type+index->device type index))
 
-(define (tensor-numel t)
+(define/contract-out (tensor-numel t) (-> tensor? exact-nonnegative-integer?)
   (define-values (rc n) (tr-tensor-numel/raw t))
   (check-ok rc 'tensor-numel)
   n)
 
-(define (tensor-shape t)
+(define/checked-out (tensor-shape t)
+  (-> tensor? (listof exact-nonnegative-integer?))
   (tensor-impl-shape t))
 
-(define shape tensor-shape)
-(define dtype tensor-dtype)
-(define numel tensor-numel)
+(define/contract-out shape
+  (-> tensor? (listof exact-nonnegative-integer?))
+  tensor-shape)
+(define/contract-out dtype (-> tensor? dtype/c) tensor-dtype)
+(define/contract-out numel (-> tensor? exact-nonnegative-integer?) tensor-numel)
 
-(define (device x [index #f])
+(define/contract-out (device x [index #f])
+  (->i ([target (or/c tensor? 'cpu 'cuda 'mps)])
+       ([index (target)
+               (case target
+                 [(cuda) exact-nonnegative-integer?]
+                 [(cpu mps) 0]
+                 [else none/c])])
+       [result device?])
   (cond
     [(tensor? x)
      (when index
@@ -263,7 +270,8 @@
      (tensor-device x)]
     [else (make-device x (or index 0))]))
 
-(define (tensor->vector t)
+(define/contract-out (tensor->vector t)
+  (-> tensor? (or/c f32vector? f64vector? s64vector?))
   (define n (tensor-numel t))
   (define-values (dtype-rc code) (tr-tensor-dtype/raw t))
   (define dt (and (zero? dtype-rc) (dtype-code->symbol code)))
@@ -284,15 +292,15 @@
      (check-ok rc 'tensor->vector)
      out]))
 
-(define (tensor->list t)
+(define/checked-out (tensor->list t) (-> tensor? (listof real?))
   (define v (tensor->vector t))
   (cond
     [(s64vector? v) (s64vector->list v)]
     [(f64vector? v) (f64vector->list v)]
     [else (f32vector->list v)]))
 
-(define (tensor->string t)
+(define/contract-out (tensor->string t) (-> tensor? string?)
   (handle->string (tensor-handle t)))
 
-(define (tensor->repr t)
+(define/contract-out (tensor->repr t) (-> tensor? string?)
   (handle->repr (tensor-handle t) (tensor-shape t)))

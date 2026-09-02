@@ -1,9 +1,10 @@
 #lang racket/base
 
+(require (only-in racket/contract/base -> ->* any/c contract-out list/c or/c)
+         (only-in "../private/contract.rkt" define/checked-out))
+
 (provide (struct-out device)
-         cpu-device
-         cuda-device
-         mps-device)
+         device/c)
 
 (struct device (type index)
   #:transparent
@@ -22,8 +23,19 @@
         (fprintf port "#<device cuda:~a>" (device-index d))
         (fprintf port "#<device ~a>" (device-type d)))))
 
-(define (cpu-device) (device 'cpu 0))
+(module+ checked
+  (provide (contract-out
+            [device? (-> any/c boolean?)]
+            [device-type (-> device? (or/c 'cpu 'cuda 'mps))]
+            [device-index (-> device? exact-nonnegative-integer?)])))
 
-(define (cuda-device [index 0]) (device 'cuda index))
+(define device/c
+  (or/c device? 'cpu 'cuda 'mps (list/c 'cuda exact-nonnegative-integer?)))
 
-(define (mps-device) (device 'mps 0))
+(define/checked-out (cpu-device) (-> device?) (device 'cpu 0))
+
+(define/checked-out (cuda-device [index 0])
+  (->* [] [exact-nonnegative-integer?] device?)
+  (device 'cuda index))
+
+(define/checked-out (mps-device) (-> device?) (device 'mps 0))
