@@ -7,6 +7,7 @@
          (only-in "ops.rkt"
                   item tensor-device tensor-dtype tensor-shape tensor->list
                   to-device to-dtype)
+         (only-in "slice.rkt" :: slice-end slice-start slice-step slice?)
          (only-in "structs.rkt" tensor?)
          (only-in "tensor-ops.rkt" add mul reshape sum tensor unsqueeze)
          (prefix-in g: (only-in "../generated.rkt"
@@ -47,7 +48,7 @@
          eq ne lt le gt ge
          gather take take-along-dim where
          index-add! index-fill! masked-fill! scatter!
-         tensor-ref tensor-ref! :: slice? slice-start slice-end slice-step
+         tensor-ref tensor-ref!
          index-copy! masked-scatter! scatter-add!
          (rename-out [g:index-select index-select]
                      [g:masked-select masked-select]
@@ -61,14 +62,6 @@
 (define (tensor-abs x) (if (tensor? x) (g:abs-tensor x) (abs x)))
 (define (tensor-sin x) (if (tensor? x) (g:sin-tensor x) (sin x)))
 (define (tensor-cos x) (if (tensor? x) (g:cos-tensor x) (cos x)))
-
-(struct slice (start end step) #:transparent)
-(define ::
-  (case-lambda
-    [() (slice #f #f 1)]
-    [(end) (slice #f end 1)]
-    [(start end) (slice start end 1)]
-    [(start end step) (slice start end step)]))
 
 (define (bool-mask? s)
   (and (tensor? s) (eq? (tensor-dtype s) 'bool)))

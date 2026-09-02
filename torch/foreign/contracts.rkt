@@ -14,7 +14,7 @@
                   vectorof)
          (only-in "device-type.rkt" device?)
          (only-in "ops.rkt" tensor-dtype tensor-shape)
-         (only-in "promoted.rkt" slice-end slice-start slice-step slice?)
+         (only-in "slice.rkt" slice-end slice-start slice-step slice?)
          (only-in "structs.rkt" tensor?))
 
 (provide bool-tensor/c

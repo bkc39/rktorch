@@ -17,13 +17,16 @@
          "foreign/promoted.rkt"
          (only-in "foreign/ref-syntax.rkt" ref ref!)
          (except-in "foreign/autograd-ops.rkt" requires-grad!)
-         (submod "foreign/autograd-ops.rkt" checked))
+         (submod "foreign/autograd-ops.rkt" checked)
+         (submod "foreign/slice.rkt" checked))
 
 (provide ref ref! with-no-grad with-default-device)
 
 (provide conv1d)
 
-(provide requires-grad!
+(provide ::
+         slice?
+         requires-grad!
          requires-grad?
          backward!
          grad
@@ -154,12 +157,6 @@
                      [result void?])]
   [masked-fill! (-> tensor? bool-tensor/c real? void?)]
   [masked-scatter! (-> tensor? bool-tensor/c tensor? void?)]
-  [:: (let ([bound/c (or/c #f exact-integer?)])
-        (case-> (-> slice?)
-                (-> bound/c slice?)
-                (-> bound/c bound/c slice?)
-                (-> bound/c bound/c exact-integer? slice?)))]
-  [slice? (-> any/c boolean?)]
   ;; elementwise
   [add binary-arith/c]
   [sub binary-arith/c]
