@@ -26,7 +26,6 @@
          module-training?
          in-eval-mode)
 
-;; every name below is contracted at its definition site
 (provide module?
          parameters
          named-parameters

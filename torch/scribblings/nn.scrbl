@@ -2,7 +2,8 @@
 
 @(require (for-label racket/base
                      racket/contract
-                     torch/nn))
+                     torch/nn
+                     torch/private/contract))
 
 @title{Layers}
 
