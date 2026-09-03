@@ -51,8 +51,22 @@
                (lambda () (Conv2d 1 8 3 #:stride 0)))
     (check-exn #rx"^LayerNorm: contract violation"
                (lambda () (LayerNorm '())))
+    (check-exn #rx"^Dropout: contract violation"
+               (lambda () (Dropout #:p 1)))
+    (check-exn #rx"^Sequential: contract violation"
+               (lambda () (Sequential (Linear 2 2) 'not-a-module)))
     (check-exn blames-this-test
-               (lambda () (LayerNorm '()))))
+               (lambda () (Sequential (Linear 2 2) 'not-a-module))))
+
+  (test-case "the module functions blame the caller too"
+    (check-exn #rx"^parameters: contract violation"
+               (lambda () (parameters 5)))
+    (check-exn blames-this-test (lambda () (parameters 5)))
+    (check-exn #rx"^named-parameters: contract violation"
+               (lambda () (named-parameters (Linear 2 2) 'prefix)))
+    (check-exn #rx"^train!: contract violation" (lambda () (train! 1)))
+    (check-exn #rx"^call-with-eval-mode: contract violation"
+               (lambda () (call-with-eval-mode (Linear 2 2) 'thunk))))
 
   (test-case "the exported predicate is the lowercase name"
     (check-true (linear? (Linear 4 3)))

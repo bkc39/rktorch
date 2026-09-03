@@ -5,10 +5,13 @@
                      ;; whole-module on purpose: the expansion needs bindings
                      ;; only-in would strip
                      syntax/parse/pre)
-         (only-in racket/contract/base -> any/c contract-out)
+         (only-in racket/contract/base
+                  -> ->* any any/c cons/c contract-out listof)
          (only-in racket/generic define-generics define/generic)
          (only-in syntax/parse/define define-syntax-parse-rule)
-         (only-in "../foreign.rkt" requires-grad!))
+         (only-in "../foreign.rkt" requires-grad! tensor?)
+         (only-in "../private/contract.rkt"
+                  define/checked-out define/contract-out))
 
 ;; the noqa'd exports are macro expansions raco review cannot see
 (provide gen:module
@@ -17,15 +20,8 @@
          module-parameters ;; noqa
          module-named-parameters ;; noqa
          module-buffers ;; noqa
-         parameters
-         named-parameters
-         buffers
-         forward
          module-set-training! ;; noqa
          module-training? ;; noqa
-         train!
-         eval!
-         call-with-eval-mode
          in-eval-mode
          define-module)
 
@@ -37,31 +33,41 @@
   (module-set-training! module training?)
   (module-training? module))
 
+(module+ checked
+  (provide (contract-out [module? (-> any/c boolean?)])))
+
 ;; Depth-first, own params before submodules', in declaration order —
 ;; PyTorch's parameters() order, which seeded-init parity relies on.
-(define (parameters m)
+(define/contract-out (parameters m) ;; noqa
+  (-> module? (listof tensor?))
   (module-parameters m))
 
-(define (named-parameters m [prefix ""])
+(define/checked-out (named-parameters m [prefix ""]) ;; noqa
+  (->* [module?] [string?] (listof (cons/c string? tensor?)))
   (module-named-parameters m prefix))
 
-(define (buffers m)
+(define/contract-out (buffers m) ;; noqa
+  (-> module? (listof tensor?))
   (module-buffers m))
 
-(define (forward m . inputs)
+(define/contract-out (forward m . inputs) ;; noqa
+  (-> module? any/c ... any)
   (apply module-forward m inputs))
 
-(define (train! m)
+(define/contract-out (train! m)
+  (-> module? module?)
   (module-set-training! m #t)
   m)
 
-(define (eval! m)
+(define/contract-out (eval! m)
+  (-> module? module?)
   (module-set-training! m #f)
   m)
 
 ;; restores the aggregate prior mode tree-wide: a hand-mixed tree collapses
 ;; to all-train or all-eval on exit
-(define (call-with-eval-mode m thunk)
+(define/contract-out (call-with-eval-mode m thunk)
+  (-> module? (-> any) any)
   (define was-training? (module-training? m))
   (dynamic-wind (lambda () (eval! m))
                 thunk

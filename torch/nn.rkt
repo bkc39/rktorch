@@ -12,7 +12,8 @@
          "nn/layer-norm.rkt"
          "nn/linear.rkt"
          "nn/loss.rkt"
-         "nn/module.rkt"
+         (except-in "nn/module.rkt" module? named-parameters)
+         (submod "nn/module.rkt" checked)
          "nn/optim.rkt"
          "nn/sequential.rkt"
          "nn/state-dict.rkt")
@@ -25,6 +26,20 @@
          module-buffers
          module-training?
          in-eval-mode)
+
+;; contracted at their definitions
+(provide module?
+         parameters
+         named-parameters
+         buffers
+         forward
+         train!
+         eval!
+         call-with-eval-mode
+         Dropout
+         dropout?
+         Sequential
+         sequential?)
 
 (provide ctc-loss)
 
@@ -48,19 +63,6 @@
 
 (provide
  (contract-out
-  [module? (-> any/c boolean?)]
-  [parameters (-> module? (listof tensor?))]
-  [named-parameters (->* (module?) (string?)
-                         (listof (cons/c string? tensor?)))]
-  [buffers (-> module? (listof tensor?))]
-  [forward (-> module? any/c ... any)]
-  [train! (-> module? module?)]
-  [eval! (-> module? module?)]
-  [call-with-eval-mode (-> module? (-> any) any)]
-  [Dropout (->* () (#:p (and/c (>=/c 0) (</c 1))) dropout?)]
-  [dropout? (-> any/c boolean?)]
-  [Sequential (-> module? ... sequential?)]
-  [sequential? (-> any/c boolean?)]
   [uniform-init (-> (listof exact-nonnegative-integer?) real? real? tensor?)]
   [normal-init (-> (listof exact-nonnegative-integer?) tensor?)]
   [kaiming-uniform (->* ((listof exact-nonnegative-integer?)) (#:a real?)
