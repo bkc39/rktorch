@@ -31,7 +31,6 @@
 (provide (rename-out [t+ +] [t- -] [t* *] [t/ /])
          @)
 
-;; every name below is contracted at its definition site
 (provide torch-version
          manual-seed!
          randn
