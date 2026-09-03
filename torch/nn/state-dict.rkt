@@ -1,21 +1,21 @@
 #lang racket/base
 
-(require (only-in racket/file file->bytes)
+(require (only-in racket/contract/base -> cons/c listof)
+         (only-in racket/file file->bytes)
          (only-in json jsexpr->string string->jsexpr)
-         (only-in "module.rkt" named-parameters)
          (only-in "../foreign.rkt"
                   reshape
                   tensor
                   tensor->list
                   tensor-shape
+                  tensor?
                   with-no-grad)
-         (only-in "../generated.rkt" copy!))
+         (only-in "../generated.rkt" copy!)
+         (only-in "../private/contract.rkt" define/contract-out)
+         (only-in "module.rkt" module? named-parameters))
 
-(provide state-dict
-         save-state!
-         load-state!)
-
-(define (state-dict model)
+(define/contract-out (state-dict model) ;; noqa
+  (-> module? (listof (cons/c string? tensor?)))
   (named-parameters model))
 
 (define (floats->bytes floats)
@@ -28,7 +28,8 @@
   (for/list ([i (in-range n)])
     (floating-point-bytes->real bs #f (* i 4) (* (+ i 1) 4))))
 
-(define (save-state! model path)
+(define/contract-out (save-state! model path) ;; noqa
+  (-> module? path-string? void?)
   (define-values (fields chunks total)
     (for/fold ([fields '()] [chunks '()] [offset 0])
               ([e (in-list (named-parameters model))])
@@ -51,7 +52,8 @@
       (write-bytes header-bytes out)
       (for ([bs (in-list (reverse chunks))]) (write-bytes bs out)))))
 
-(define (load-state! model path)
+(define/contract-out (load-state! model path) ;; noqa
+  (-> module? path-string? void?)
   (define raw (file->bytes path))
   (define header-len (integer-bytes->integer raw #f #f 0 8))
   (define data-start (+ 8 header-len))

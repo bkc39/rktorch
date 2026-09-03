@@ -257,7 +257,7 @@ module's full export set (`racket/runtime-path`, `syntax/parse/pre`).
   Explicit synchronous release goes through the raising,
   finalizer-cancelling `tr-tensor-free/checked`; OOM reaches users as
   `exn:fail:rktorch:oom` (catch by type, not message).
-- `nn.rkt` — contracted facade over `nn/` (`module.rkt` = `gen:module` +
+- `nn.rkt` — pure re-export facade over `nn/` (`module.rkt` = `gen:module` +
   the `define-module` macro; `linear.rkt`, `init.rkt`, `optim.rkt`,
   `loss.rkt`).
 - `private/install-torchrkt-native.rkt` — stages `libtorchrkt.*` into
@@ -368,7 +368,15 @@ Which form to use is decidable, not a judgement call: **does a module under
 `torch/foreign/` import this name?**  If yes `define/checked-out`, if no
 `define/contract-out`.  A test in `torch/tests/contract-out-test.rkt`
 asserts no module under `torch/foreign/` requires a `checked` submodule, so
-the fast path cannot be recontracted by a later edit.
+the fast path cannot be recontracted by a later edit.  The same rule and
+the same test cover `torch/nn/`, with `nn.rkt` as the facade.
+
+A layer built with `define-module` carries its constructor contract in a
+`#:contract` clause.  The clause is the export: it provides the constructor
+under that contract and the predicate, under its lowercase name
+(`Conv2d`/`conv2d?`, `MaxPool2d`/`max-pool2d?`; `#:predicate` overrides the
+derived name), so a layer file has no `provide` block and no `rename-out`.
+`->i` states a cross-argument invariant that used to be an `unless` guard.
 
 Two layers carry no contracts: `torch/generated.rkt` (codegen output, the
 unstable surface) and `torch/foreign/raw/` (the FFI bindings, where the

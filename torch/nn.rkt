@@ -1,20 +1,19 @@
 #lang racket/base
 
-;; raco review lints without macro expansion and cannot see the re-exports.
+;; raco review lints unexpanded and reads a re-export facade's requires as
+;; unused
 #|review: ignore|#
 
-(require racket/contract
-         "foreign.rkt"
-         "nn/conv.rkt"
+(require "nn/conv.rkt"
          "nn/dropout.rkt"
          "nn/embedding.rkt"
-         "nn/init.rkt"
+         (submod "nn/init.rkt" checked)
          "nn/layer-norm.rkt"
          "nn/linear.rkt"
          "nn/loss.rkt"
          (except-in "nn/module.rkt" module? named-parameters)
          (submod "nn/module.rkt" checked)
-         "nn/optim.rkt"
+         (only-in "nn/optim.rkt" adam adam? sgd sgd? step! zero-grads!)
          "nn/sequential.rkt"
          "nn/state-dict.rkt")
 
@@ -27,7 +26,7 @@
          module-training?
          in-eval-mode)
 
-;; contracted at their definitions
+;; every name below is contracted at its definition site
 (provide module?
          parameters
          named-parameters
@@ -35,17 +34,10 @@
          forward
          train!
          eval!
-         call-with-eval-mode
-         Dropout
-         dropout?
-         Sequential
-         sequential?)
-
-(provide ctc-loss)
+         call-with-eval-mode)
 
 ;; PascalCase constructors / lowercase predicates and functional ops keep
-;; `(require torch torch/nn)` collision-free (#11).  Each layer is
-;; contracted at its definition.
+;; `(require torch torch/nn)` collision-free (#11).
 (provide Linear
          linear?
          Conv1d
@@ -56,29 +48,31 @@
          max-pool2d?
          Flatten
          flatten?
+         Dropout
+         dropout?
          Embedding
          embedding?
          LayerNorm
-         layer-norm?)
+         layer-norm?
+         Sequential
+         sequential?)
 
-(provide
- (contract-out
-  [uniform-init (-> (listof exact-nonnegative-integer?) real? real? tensor?)]
-  [normal-init (-> (listof exact-nonnegative-integer?) tensor?)]
-  [kaiming-uniform (->* ((listof exact-nonnegative-integer?)) (#:a real?)
-                        tensor?)]
-  [fan-in (-> (listof exact-nonnegative-integer?)
-              exact-nonnegative-integer?)]
-  [sgd (-> (listof tensor?) #:lr real? sgd?)]
-  [sgd? (-> any/c boolean?)]
-  [adam (->* ((listof tensor?))
-             (#:lr real? #:beta1 real? #:beta2 real? #:eps real?)
-             adam?)]
-  [adam? (-> any/c boolean?)]
-  [step! (-> optimizer? void?)]
-  [zero-grads! (-> optimizer? void?)]
-  [mse-loss (-> tensor? tensor? tensor?)]
-  [cross-entropy (-> tensor? tensor? tensor?)]
-  [state-dict (-> module? (listof (cons/c string? tensor?)))]
-  [save-state! (-> module? path-string? void?)]
-  [load-state! (-> module? path-string? void?)]))
+(provide uniform-init
+         normal-init
+         kaiming-uniform
+         fan-in)
+
+(provide sgd
+         sgd?
+         adam
+         adam?
+         step!
+         zero-grads!)
+
+(provide mse-loss
+         cross-entropy
+         ctc-loss)
+
+(provide state-dict
+         save-state!
+         load-state!)

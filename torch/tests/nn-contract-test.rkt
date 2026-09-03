@@ -58,16 +58,6 @@
     (check-exn blames-this-test
                (lambda () (Sequential (Linear 2 2) 'not-a-module))))
 
-  (test-case "the module functions blame the caller too"
-    (check-exn #rx"^parameters: contract violation"
-               (lambda () (parameters 5)))
-    (check-exn blames-this-test (lambda () (parameters 5)))
-    (check-exn #rx"^named-parameters: contract violation"
-               (lambda () (named-parameters (Linear 2 2) 'prefix)))
-    (check-exn #rx"^train!: contract violation" (lambda () (train! 1)))
-    (check-exn #rx"^call-with-eval-mode: contract violation"
-               (lambda () (call-with-eval-mode (Linear 2 2) 'thunk))))
-
   (test-case "the exported predicate is the lowercase name"
     (check-true (linear? (Linear 4 3)))
     (check-true (max-pool2d? (MaxPool2d 2)))
@@ -95,6 +85,31 @@
   (test-case "without #:contract nothing is exported or renamed"
     (check-true (Plain? (Plain 1)))
     (check-equal? (tensor-shape ((Plain 1) (randn 2 3))) '(2 3)))
+
+  (test-case "the plain functions blame the caller too"
+    (check-exn #rx"^parameters: contract violation"
+               (lambda () (parameters 5)))
+    (check-exn blames-this-test (lambda () (parameters 5)))
+    (check-exn #rx"^named-parameters: contract violation"
+               (lambda () (named-parameters (Linear 2 2) 'prefix)))
+    (check-exn #rx"^sgd: contract violation"
+               (lambda () (sgd '() #:lr "fast")))
+    (check-exn #rx"^adam: contract violation"
+               (lambda () (adam (list 1))))
+    (check-exn #rx"^step!: contract violation" (lambda () (step! 'opt)))
+    (check-exn #rx"^mse-loss: contract violation"
+               (lambda () (mse-loss 1 2)))
+    (check-exn #rx"^uniform-init: contract violation"
+               (lambda () (uniform-init '(2) 0 "one")))
+    (check-exn #rx"^kaiming-uniform: contract violation"
+               (lambda () (kaiming-uniform '(-1))))
+    (check-exn #rx"^state-dict: contract violation"
+               (lambda () (state-dict 'model)))
+    (check-exn #rx"^save-state!: contract violation"
+               (lambda () (save-state! (Linear 2 2) 7)))
+    (check-exn #rx"^train!: contract violation" (lambda () (train! 1)))
+    (check-exn #rx"^call-with-eval-mode: contract violation"
+               (lambda () (call-with-eval-mode (Linear 2 2) 'thunk))))
 
   (test-case "#:contract outside module level is a syntax error"
     (check-exn #rx"only allowed at module level"

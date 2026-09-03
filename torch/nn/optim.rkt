@@ -1,19 +1,18 @@
 #lang racket/base
 
-(require (only-in racket/generic define-generics)
+(require (only-in racket/contract/base -> ->* any/c contract-out listof)
+         (only-in racket/generic define-generics)
          (only-in "../foreign.rkt"
                   + - * / sqrt
-                  maybe-grad sub! tensor-shape with-no-grad zero-grad! zeros))
+                  maybe-grad sub! tensor-shape tensor? with-no-grad zero-grad!
+                  zeros)
+         (only-in "../private/contract.rkt" define/contract-out))
 
 (provide gen:optimizer
          optimizer?
-         sgd
-         sgd?
          sgd-lr
-         adam
-         adam?
-         step!
-         zero-grads!)
+         (contract-out [sgd? (-> any/c boolean?)]
+                       [adam? (-> any/c boolean?)]))
 
 (define-generics optimizer
   (optimizer-step! optimizer)
@@ -31,7 +30,8 @@
          (when g
            (sub! p g (sgd-lr opt))))))])
 
-(define (sgd params #:lr lr)
+(define/contract-out (sgd params #:lr lr) ;; noqa
+  (-> (listof tensor?) #:lr real? sgd?)
   (make-sgd params lr))
 
 (struct adam (params lr beta1 beta2 eps step-box m v)
@@ -41,11 +41,14 @@
   [(define (optimizer-parameters opt) (adam-params opt))
    (define (optimizer-step! opt) (adam-do-step! opt))])
 
-(define (adam params
-              #:lr [lr 1e-3]
-              #:beta1 [beta1 0.9]
-              #:beta2 [beta2 0.999]
-              #:eps [eps 1e-8])
+(define/contract-out (adam params ;; noqa
+                           #:lr [lr 1e-3]
+                           #:beta1 [beta1 0.9]
+                           #:beta2 [beta2 0.999]
+                           #:eps [eps 1e-8])
+  (->* [(listof tensor?)]
+       [#:lr real? #:beta1 real? #:beta2 real? #:eps real?]
+       adam?)
   (make-adam params lr beta1 beta2 eps (box 0) (make-hasheq) (make-hasheq)))
 
 (define (zeros-like t)
@@ -73,8 +76,10 @@
         (define denom (+ (sqrt (/ v* bc2)) eps))
         (sub! p (/ (/ m* bc1) denom) lr)))))
 
-(define (step! opt)
+(define/contract-out (step! opt) ;; noqa
+  (-> optimizer? void?)
   (optimizer-step! opt))
 
-(define (zero-grads! opt)
+(define/contract-out (zero-grads! opt) ;; noqa
+  (-> optimizer? void?)
   (for-each zero-grad! (optimizer-parameters opt)))
