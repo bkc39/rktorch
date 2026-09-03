@@ -19,11 +19,7 @@
                   tr-tensor-zero!/raw)
          (only-in "structs.rkt" tensor? wrap-tensor))
 
-(provide with-no-grad
-         sub!
-         zero!
-         mul!
-         zero-grad!)
+(provide with-no-grad)
 
 (define/checked-out (requires-grad! t [on? #t])
   (->* [tensor?] [boolean?] tensor?)
@@ -70,18 +66,19 @@
 (define-syntax-parse-rule (with-no-grad body:expr ...+)
   (call-with-no-grad (lambda () body ...)))
 
-(define (sub! t other [alpha 1.0])
+(define/contract-out (sub! t other [alpha 1.0])
+  (->* [tensor? tensor?] [real?] void?)
   (check-ok (tr-tensor-sub!/raw t other (exact->inexact alpha)) 'sub!)
   (void))
 
-(define (zero! t)
+(define/contract-out (zero! t) (-> tensor? void?)
   (check-ok (tr-tensor-zero!/raw t) 'zero!)
   (void))
 
-(define (mul! t value)
+(define/contract-out (mul! t value) (-> tensor? real? void?)
   (check-ok (tr-tensor-mul!/raw t (exact->inexact value)) 'mul!)
   (void))
 
-(define (zero-grad! t)
+(define/contract-out (zero-grad! t) (-> tensor? void?) ;; noqa
   (when (has-grad? t)
     (zero! (grad t))))

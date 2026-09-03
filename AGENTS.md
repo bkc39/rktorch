@@ -370,6 +370,16 @@ Which form to use is decidable, not a judgement call: **does a module under
 asserts no module under `torch/foreign/` requires a `checked` submodule, so
 the fast path cannot be recontracted by a later edit.
 
+Two layers carry no contracts: `torch/generated.rkt` (codegen output, the
+unstable surface) and `torch/foreign/raw/` (the FFI bindings, where the
+contract arrow would shadow the one `_fun` matches).  A name promoted
+from either is contracted at the promotion site with the value form,
+`(define/contract-out narrow (-> ...) g:narrow)`.  A struct predicate has
+no definition to wrap; its `checked` provide is written by hand beside
+the `struct`.  `foreign.rkt` is a pure re-export module: it requires each
+module's `checked` submodule, excludes the plain names those replace, and
+provides the result.
+
 `unless`+`error` stays for what a contract cannot see -- checks against
 parsed content (WAV chunk structure), filesystem state (symlink
 containment), or values computed mid-body.  A guard that only inspects an

@@ -12,9 +12,9 @@
          (only-in racket/contract/region define/contract)
          (only-in "contracts.rkt" index-spec/c)
          (only-in "promoted.rkt"
-                  ::
                   [tensor-ref uncontracted-tensor-ref]
                   [tensor-ref! uncontracted-tensor-ref!])
+         (only-in "slice.rkt" ::)
          (only-in "structs.rkt" tensor?))
 
 (provide ref ref!)

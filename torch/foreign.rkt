@@ -1,27 +1,172 @@
 #lang racket/base
 
-;; raco review lints unexpanded, so the contract-out re-exports below would
-;; be reported as "provided but not defined".
+;; raco review lints unexpanded and reads a re-export facade's requires as
+;; unused
 #|review: ignore|#
 
-(require ffi/vector
-         racket/contract
-         "foreign/contracts.rkt"
-         (except-in "foreign/device-type.rkt" device)
-         (only-in "foreign/error.rkt" exn:fail:rktorch:oom?)
-         "foreign/structs.rkt"
-         "foreign/ops.rkt"
-         "foreign/tensor-ops.rkt"
+(require (only-in racket/contract/base -> contract-out)
+         (submod "foreign/device-type.rkt" checked)
+         (submod "foreign/error.rkt" checked)
+         (only-in "foreign/structs.rkt" tensor-free!)
+         (submod "foreign/structs.rkt" checked)
+         (except-in "foreign/ops.rkt"
+                    device->type+index dims-rest/c
+                    item to-dtype tensor-dtype to-device tensor-device
+                    tensor-shape tensor->list)
+         (submod "foreign/ops.rkt" checked)
+         (except-in "foreign/tensor-ops.rkt"
+                    reshape unsqueeze tensor sum matmul add sub mul div neg)
+         (submod "foreign/tensor-ops.rkt" checked)
          "foreign/operators.rkt"
          "foreign/nn-promoted.rkt"
-         "foreign/promoted.rkt"
+         (except-in "foreign/promoted.rkt" tensor-ref tensor-ref!)
+         (submod "foreign/promoted.rkt" checked)
          (only-in "foreign/ref-syntax.rkt" ref ref!)
          (except-in "foreign/autograd-ops.rkt" requires-grad!)
-         (submod "foreign/autograd-ops.rkt" checked))
+         (submod "foreign/autograd-ops.rkt" checked)
+         (submod "foreign/slice.rkt" checked))
 
 (provide ref ref! with-no-grad with-default-device)
 
-(provide conv1d)
+(provide (rename-out [t+ +] [t- -] [t* *] [t/ /])
+         @)
+
+;; every name below is contracted at its definition site
+(provide torch-version
+         manual-seed!
+         randn
+         rand
+         uniform!
+         tensor?
+         exn:fail:rktorch:oom?
+         tensor-shape
+         tensor-numel
+         tensor->vector
+         tensor->list
+         tensor->repr
+         tensor->string)
+
+(provide zeros
+         ones
+         full
+         arange
+         eye
+         tensor)
+
+(provide reshape
+         view
+         transpose
+         (rename-out [transpose t])
+         permute
+         squeeze
+         unsqueeze
+         cat
+         stack
+         flatten
+         narrow
+         select
+         index-select
+         masked-select
+         nonzero
+         take
+         gather
+         take-along-dim
+         where
+         tensor-ref
+         tensor-ref!
+         index-copy!
+         index-add!
+         index-fill!
+         scatter!
+         scatter-add!
+         masked-fill!
+         masked-scatter!
+         ::
+         slice?)
+
+(provide add
+         sub
+         mul
+         div
+         pow
+         abs
+         neg
+         relu
+         sigmoid
+         gelu
+         exp
+         log
+         sqrt
+         tanh
+         sin
+         cos
+         max
+         min)
+
+(provide sum
+         (rename-out [sum Σ])
+         mean
+         argmax
+         softmax
+         log-softmax)
+
+(provide matmul
+         mm
+         mv
+         dot)
+
+(provide conv1d
+         conv2d
+         max-pool2d
+         avg-pool2d
+         adaptive-avg-pool2d)
+
+(provide tril
+         triu
+         masked-fill
+         embedding
+         layer-norm)
+
+(provide eq
+         ne
+         lt
+         le
+         gt
+         ge)
+
+(provide item
+         to-dtype
+         tensor-dtype
+         shape
+         dtype
+         numel)
+
+(provide native-memory-use
+         cuda-memory-stats
+         cuda-empty-cache!
+         mps-empty-cache!
+         reclaim-native-memory!
+         finalizer-failures
+         finalizer-diagnostics)
+
+(provide device
+         device?
+         device-type
+         device-index
+         cpu-device
+         cuda-device
+         cuda-available?
+         cuda-if-available
+         cuda-device-count
+         mps-device
+         mps-available?
+         mps-if-available
+         accelerator-if-available
+         set-default-device!
+         default-device
+         call-with-default-device
+         to-device
+         tensor-device)
 
 (provide requires-grad!
          requires-grad?
@@ -31,259 +176,11 @@
          maybe-grad
          detach
          grad-enabled?
-         call-with-no-grad)
-
-(provide (rename-out [t+ +] [t- -] [t* *] [t/ /])
-         @)
-
-(provide
- (contract-out
-  [torch-version (-> string?)]
-  [manual-seed! (-> exact-nonnegative-integer? void?)]
-  [randn (->* () #:rest dims-rest/c tensor?)]
-  [rand (->* () #:rest dims-rest/c tensor?)]
-  [uniform! (-> tensor? real? real? void?)]
-  [tensor? (-> any/c boolean?)]
-  [exn:fail:rktorch:oom? (-> any/c boolean?)]
-  [tensor-shape (-> tensor? (listof exact-nonnegative-integer?))]
-  [tensor-numel (-> tensor? exact-nonnegative-integer?)]
-  [tensor->vector (-> tensor? (or/c f32vector? f64vector? s64vector?))]
-  [tensor->list (-> tensor? (listof real?))]
-  [tensor->repr (-> tensor? string?)]
-  [tensor->string (-> tensor? string?)]
-  ;; creation
-  [zeros (->* () #:rest dims-rest/c tensor?)]
-  [ones (->* () #:rest dims-rest/c tensor?)]
-  [full (->* (real?) #:rest dims-rest/c tensor?)]
-  [arange arange/c]
-  [eye (->* (exact-nonnegative-integer?)
-            (exact-nonnegative-integer?)
-            tensor?)]
-  [tensor (->* ((or/c real? list? vector? f32vector? s64vector?))
-               (#:requires-grad? boolean?
-                #:device (or/c #f device/c)
-                #:dtype (or/c #f 'float32 'int64))
-               tensor?)]
-  ;; shape
-  [reshape (-> tensor? index/c ... tensor?)]
-  [view (-> tensor? index/c ... tensor?)]
-  [transpose (-> tensor? index/c index/c tensor?)]
-  [rename transpose t (-> tensor? index/c index/c tensor?)]
-  [permute (-> tensor? index/c ... tensor?)]
-  [squeeze (->* (tensor?) (index/c) tensor?)]
-  [unsqueeze (-> tensor? index/c tensor?)]
-  [cat (->* ((non-empty-listof tensor?)) (index/c) tensor?)]
-  [stack (->* ((non-empty-listof tensor?)) (index/c) tensor?)]
-  [flatten flatten/c]
-  [narrow (-> tensor? index/c index/c exact-positive-integer? tensor?)]
-  [select (-> tensor? index/c index/c tensor?)]
-  [index-select (-> tensor? index/c index-vector/c tensor?)]
-  [masked-select (-> tensor? bool-tensor/c tensor?)]
-  [nonzero (-> tensor? tensor?)]
-  [take (->i ([v (or/c tensor? list?)]
-              [n (v) (if (tensor? v)
-                         (or/c int64-tensor/c
-                               (listof exact-integer?)
-                               (vectorof exact-integer?))
-                         exact-nonnegative-integer?)])
-             [result (v) (if (tensor? v) tensor? list?)])]
-  [gather (->i ([t tensor?]
-                [dim index/c]
-                [index (t dim)
-                       (and/c int64-tensor/c
-                              (lambda (x)
-                                (define td (tensor-shape t))
-                                (define xd (tensor-shape x))
-                                (define rank (length td))
-                                (define g (if (negative? dim)
-                                              (+ dim rank)
-                                              dim))
-                                (and (= (length xd) rank)
-                                     ;; ATen skips extent checks for
-                                     ;; empty indices (verified)
-                                     (or (zero? (apply * xd))
-                                         (for/and ([xi (in-list xd)]
-                                                   [ti (in-list td)]
-                                                   [i (in-naturals)])
-                                           (or (= i g) (<= xi ti)))))))])
-               [result tensor?])]
-  [take-along-dim
-   (->i ([t tensor?]
-         [indices (t dim)
-                  (and/c int64-tensor/c
-                         (lambda (x)
-                           (or (unsupplied-arg? dim)
-                               (not dim)
-                               (= (length (tensor-shape x))
-                                  (length (tensor-shape t))))))])
-        ([dim (or/c #f index/c)])
-        [result tensor?])]
-  [where (->i ([c bool-tensor/c])
-              ([a (or/c tensor? real?)]
-               [b (a) (if (unsupplied-arg? a)
-                          none/c
-                          (or/c tensor? real?))])
-              #:pre/name (a b) "a condition alone, or condition + both arms"
-              (eq? (unsupplied-arg? a) (unsupplied-arg? b))
-              [result (a) (if (unsupplied-arg? a)
-                              (listof tensor?)
-                              tensor?)])]
-  [tensor-ref (-> tensor? index-spec/c ...
-                  (or/c tensor? number? boolean?))]
-  [tensor-ref! (-> tensor? (or/c tensor? real?) index-spec/c ...
-                   void?)]
-  [index-copy! (-> tensor? index/c index-vector/c tensor? void?)]
-  [index-add! (->* (tensor? index/c index-vector/c tensor?)
-                   (#:alpha real?) void?)]
-  [index-fill! (-> tensor? index/c index-vector/c real? void?)]
-  [scatter! (->i ([t tensor?]
-                  [dim index/c]
-                  [index (t) (and/c int64-tensor/c
-                                    (lambda (x)
-                                      (= (length (tensor-shape x))
-                                         (length (tensor-shape t)))))]
-                  [v (or/c tensor? real?)])
-                 [result void?])]
-  [scatter-add! (->i ([t tensor?]
-                      [dim index/c]
-                      [index (t) (and/c int64-tensor/c
-                                        (lambda (x)
-                                          (= (length (tensor-shape x))
-                                             (length (tensor-shape t)))))]
-                      [src tensor?])
-                     [result void?])]
-  [masked-fill! (-> tensor? bool-tensor/c real? void?)]
-  [masked-scatter! (-> tensor? bool-tensor/c tensor? void?)]
-  [:: (let ([bound/c (or/c #f exact-integer?)])
-        (case-> (-> slice?)
-                (-> bound/c slice?)
-                (-> bound/c bound/c slice?)
-                (-> bound/c bound/c exact-integer? slice?)))]
-  [slice? (-> any/c boolean?)]
-  ;; elementwise
-  [add binary-arith/c]
-  [sub binary-arith/c]
-  [mul binary-arith/c]
-  [div binary-arith/c]
-  [pow (-> tensor? tensor-or-real/c tensor?)]
-  [abs unary-real/c]
-  [neg (-> tensor? tensor?)]
-  [relu (-> tensor? tensor?)]
-  [sigmoid (-> tensor? tensor?)]
-  [gelu (-> tensor? tensor?)]
-  [exp unary-numeric/c]
-  [log log/c]
-  [sqrt unary-numeric/c]
-  [tanh unary-numeric/c]
-  [sin unary-numeric/c]
-  [cos unary-numeric/c]
-  [max reduce-or-variadic/c]
-  [min reduce-or-variadic/c]
-  ;; reductions
-  [sum (-> tensor? tensor?)]
-  [rename sum Σ (-> tensor? tensor?)]
-  [mean (-> tensor? tensor?)]
-  [argmax argmax/c]
-  [softmax (-> tensor? index/c tensor?)]
-  [log-softmax (-> tensor? index/c tensor?)]
-  ;; linalg
-  [matmul (-> tensor? tensor? tensor?)]
-  [mm (-> tensor? tensor? tensor?)]
-  [mv (-> tensor? tensor? tensor?)]
-  [dot (-> tensor? tensor? tensor?)]
-  ;; conv + pooling
-  [conv2d (->* (tensor? tensor?)
-               (#:bias (or/c tensor? #f) #:stride pool-size/c
-                #:padding pool-size/c #:dilation pool-size/c
-                #:groups index/c)
-               tensor?)]
-  [max-pool2d (->* (tensor? pool-size/c)
-                   (#:stride (or/c pool-size/c #f) #:padding pool-size/c
-                    #:dilation pool-size/c #:ceil-mode boolean?)
-                   tensor?)]
-  [avg-pool2d (->* (tensor? pool-size/c)
-                   (#:stride (or/c pool-size/c #f) #:padding pool-size/c
-                    #:ceil-mode boolean? #:count-include-pad boolean?
-                    #:divisor-override (or/c exact-positive-integer? #f))
-                   tensor?)]
-  [adaptive-avg-pool2d (-> tensor? pool-size/c tensor?)]
-  ;; transformer primitives
-  [tril (->* (tensor?) (exact-integer?) tensor?)]
-  [triu (->* (tensor?) (exact-integer?) tensor?)]
-  [masked-fill (-> tensor? tensor? real? tensor?)]
-  [embedding (->* (tensor? tensor?)
-                  (#:padding-idx (or/c #f exact-nonnegative-integer?))
-                  tensor?)]
-  [layer-norm (->* (tensor?
-                    (or/c exact-positive-integer?
-                          (non-empty-listof exact-positive-integer?)))
-                   (#:weight (or/c tensor? #f)
-                    #:bias (or/c tensor? #f)
-                    #:eps real?)
-                   tensor?)]
-  ;; comparisons
-  [eq compare/c]
-  [ne compare/c]
-  [lt compare/c]
-  [le compare/c]
-  [gt compare/c]
-  [ge compare/c]
-  ;; out-marshalling
-  [item (-> tensor? real?)]
-  [to-dtype (-> tensor? (or/c 'float32 'float64 'int64 'bool) tensor?)]
-  [tensor-dtype (-> tensor? (or/c 'float32 'float64 'int64 'bool))]
-  [shape (-> tensor? (listof exact-nonnegative-integer?))]
-  [dtype (-> tensor? (or/c 'float32 'float64 'int64 'bool))]
-  [numel (-> tensor? exact-nonnegative-integer?)]
-  ;; memory
-  ;; native-memory-use is a handle-attributed estimate: views charge
-  ;; their full extents (shared storage double-counts) and
-  ;; ATen-internal allocations are absent
-  [native-memory-use
-   (-> (listof (cons/c device? exact-nonnegative-integer?)))]
-  [cuda-memory-stats
-   (->* () (device/c)
-        (listof (cons/c (or/c 'allocated 'reserved 'peak-allocated)
-                        exact-nonnegative-integer?)))]
-  [cuda-empty-cache! (-> void?)]
-  [mps-empty-cache! (-> void?)]
-  [reclaim-native-memory! (-> void?)]
-  [finalizer-failures (-> exact-nonnegative-integer?)]
-  [finalizer-diagnostics
-   (-> (list/c (cons/c 'runs exact-nonnegative-integer?)
-               (cons/c 'failures exact-nonnegative-integer?)
-               (cons/c 'messages (listof string?))
-               (cons/c 'ledger-entries exact-nonnegative-integer?)))]
-  ;; device
-  [device (->i ([target (or/c tensor? 'cpu 'cuda 'mps)])
-               ([index (target)
-                       (case target
-                         [(cuda) exact-nonnegative-integer?]
-                         [(cpu mps) 0]
-                         [else none/c])])
-               [result device?])]
-  [device? (-> any/c boolean?)]
-  [device-type (-> device? (or/c 'cpu 'cuda 'mps))]
-  [device-index (-> device? exact-nonnegative-integer?)]
-  [cpu-device (-> device?)]
-  [cuda-device (->* () (exact-nonnegative-integer?) device?)]
-  [cuda-available? (-> boolean?)]
-  [cuda-if-available (-> device?)]
-  [cuda-device-count (-> exact-nonnegative-integer?)]
-  [mps-device (-> device?)]
-  [mps-available? (-> boolean?)]
-  [mps-if-available (-> device?)]
-  [accelerator-if-available (-> device?)]
-  [set-default-device! (-> device/c void?)]
-  [default-device (-> device?)]
-  [call-with-default-device (-> device/c (-> any) any)]
-  [to-device (-> tensor? device/c tensor?)]
-  [tensor-device (-> tensor? device?)]
-  ;; in-place
-  [sub! (->* (tensor? tensor?) (real?) void?)]
-  [zero! (-> tensor? void?)]
-  [mul! (-> tensor? real? void?)]
-  [zero-grad! (-> tensor? void?)]))
+         call-with-no-grad
+         sub!
+         zero!
+         mul!
+         zero-grad!)
 
 (module+ unsafe
   (provide

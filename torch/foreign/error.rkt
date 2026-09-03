@@ -1,6 +1,7 @@
 #lang racket/base
 
 (require (only-in ffi/unsafe/atomic call-as-atomic)
+         (only-in racket/contract/base -> any/c contract-out)
          (only-in "raw/global.rkt" tr-last-error-kind/raw tr-last-error/raw))
 
 (provide check-ok
@@ -8,6 +9,9 @@
          (struct-out exn:fail:rktorch:oom))
 
 (struct exn:fail:rktorch:oom exn:fail ())
+
+(module+ checked
+  (provide (contract-out [exn:fail:rktorch:oom? (-> any/c boolean?)])))
 
 ;; Atomic so the (message, kind) pair comes from ONE failure, not two.
 (define (last-failure)

@@ -29,6 +29,16 @@ import it cross the contract boundary, and blame falls on them.
 (define/contract-out (safe-div a b)
   (-> number? (not/c zero?) number?)
   (/ a b))
+]
+
+The first form also promotes a binding defined elsewhere under a
+contracted name, which is how an uncontracted generated or FFI-level
+operation reaches the public surface:
+
+@racketblock[
+(define/contract-out narrow
+  (-> tensor? exact-integer? exact-integer? exact-positive-integer? tensor?)
+  g:narrow)
 ]}
 
 @defform*[[(define/checked-out id contract-expr expr)
