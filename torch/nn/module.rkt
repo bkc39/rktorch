@@ -5,8 +5,9 @@
                      ;; whole-module on purpose: the expansion needs bindings
                      ;; only-in would strip
                      syntax/parse/pre)
-         (only-in syntax/parse/define define-syntax-parse-rule)
+         (only-in racket/contract/base -> any/c contract-out)
          (only-in racket/generic define-generics define/generic)
+         (only-in syntax/parse/define define-syntax-parse-rule)
          (only-in "../foreign.rkt" requires-grad!))
 
 ;; the noqa'd exports are macro expansions raco review cannot see
@@ -70,6 +71,43 @@
   (call-with-eval-mode m (lambda () body ...)))
 
 (begin-for-syntax
+  (define (predicate-name name)
+    (define downcased
+      (for/fold ([acc '()] [prev #f] #:result (reverse acc))
+                ([c (in-string (symbol->string (syntax-e name)))])
+        (define word-break?
+          (and prev
+               (char-upper-case? c)
+               (or (char-lower-case? prev) (char-numeric? prev))))
+        (values (cons (char-downcase c) (if word-break? (cons #\- acc) acc))
+                c)))
+    (format-id name "~a?" (list->string downcased)))
+
+  (define (contract-export stx name name? contract predicate) ;; noqa
+    (cond
+      [contract
+       (unless (eq? 'module (syntax-local-context))
+         (raise-syntax-error
+          #f
+          "#:contract is only allowed at module level, since it expands to a `provide`"
+          stx))
+       (define pred-id (or predicate (predicate-name name)))
+       (define alias? (not (eq? (syntax-e pred-id) (syntax-e name?))))
+       (with-syntax ([name name] [name? name?] [name/lower pred-id]
+                     [contract contract])
+         (if alias?
+             #'(begin
+                 (define name/lower (procedure-rename name? 'name/lower)) ;; noqa
+                 (provide (contract-out [name contract]
+                                        [name/lower (-> any/c boolean?)])))
+             #'(provide (contract-out [name contract]
+                                      [name/lower (-> any/c boolean?)]))))]
+      [predicate
+       (raise-syntax-error
+        #f "#:predicate names the exported predicate and needs #:contract"
+        stx predicate)]
+      [else #'(begin)]))
+
   (define-syntax-class binding
     #:description "[id init-expr] binding"
     (pattern [id:id init:expr]))
@@ -93,18 +131,23 @@
               (~optional (~seq #:params (param:binding ...)))
               (~optional (~seq #:buffers (buffer:binding ...)))
               (~optional (~seq #:submodules (sub:binding ...)))
-              (~optional (~seq #:reflection-name reflect:expr))) ...
+              (~optional (~seq #:reflection-name reflect:expr))
+              (~optional (~seq #:contract ctc:expr))
+              (~optional (~seq #:predicate pred:id))) ...
         #:forward (input:id ...) body:expr ...+)
      (define (ids attr) (or attr '()))
      (define struct-id (generate-temporary #'name))
      (define reflect-stx (or (attribute reflect) #'(quote name)))
+     (define predicate-id (format-id #'name "~a?" #'name))
      (define (accessor field-id)
        (format-id struct-id "~a-~a" struct-id field-id))
      (define (name-string id)
        (symbol->string (syntax-e id)))
      (with-syntax ([sid struct-id]
                    [sid? (format-id struct-id "~a?" struct-id)]
-                   [name? (format-id #'name "~a?" #'name)]
+                   [name? predicate-id]
+                   [export (contract-export stx #'name predicate-id
+                                            (attribute ctc) (attribute pred))]
                    [reflect-name reflect-stx]
                    [(ctor-arg ...) #'(formal.id ...)]
                    [(c ...) (ids (attribute coerce.id))]
@@ -162,4 +205,5 @@
                       [p (requires-grad! p-init)] ...
                       [b b-init] ...
                       [sm sm-init] ...)
-                 (sid ctor-arg ... p ... b ... sm ...))))))]))
+                 (sid ctor-arg ... p ... b ... sm ...)))
+             export)))]))
