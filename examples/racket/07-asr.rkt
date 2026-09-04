@@ -447,7 +447,7 @@ CTC's phonetic stutter next to attention's spelling is the payoff.
 @chunk[<r07-decode>
 (define (greedy-decode net vocab features)
   (define v-size (vector-length vocab))
-  ;; any parameter's device works: a module's tensors are colocated
+  ;; any parameter's device works: a model's tensors are colocated
   (define dev (tensor-device (car (parameters net))))
   (define x (to-device features dev))
   (with-default-device dev

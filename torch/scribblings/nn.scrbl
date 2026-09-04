@@ -155,10 +155,11 @@ A layer whose children are @racket[layers], named by index.  Assigned to a
 field, it registers under the field name, so its parameters are
 @racket["layers.0.weight"] and so on; with @racket[prefix] it registers
 under that name instead, and @racket[""] drops the segment altogether, as
-@racket[Sequential] does.  Two children of one layer may not register
-under the same name; the constructor raises @racket[exn:fail:contract]
-when a @racket[prefix] collides with another child.  A layer list is not
-applicable; iterate it with @racket[layer-list->list].
+@racket[Sequential] does.  A @racket[prefix] is one name segment and may
+not contain a dot, as with @tt{add_module}, so it cannot alias a path
+inside another child; and two children of one layer may not register
+under the same name, which the layer's constructor raises on.  A layer
+list is not applicable; iterate it with @racket[layer-list->list].
 }
 
 @defproc[(layer-list? [v any/c]) boolean?]{

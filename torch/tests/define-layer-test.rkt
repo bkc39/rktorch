@@ -65,7 +65,9 @@
       #:forward (v) v)
     (check-exn #rx"^Clash: two children register under the same name"
                (lambda () (Clash)))
-    (check-true (layer-list? (LayerList '() #:prefix #f))))
+    (check-true (layer-list? (LayerList '() #:prefix #f)))
+    (check-exn #rx"^LayerList: contract violation"
+               (lambda () (LayerList '() #:prefix "a.b"))))
 
   (test-case "own parameters come before children's, each in declaration order"
     (define-layer Interleaved (fc1 w fc2 v)

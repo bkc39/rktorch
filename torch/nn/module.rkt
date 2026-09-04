@@ -125,8 +125,6 @@
 (define (child-training? c)
   (layer-training? (cdr c)))
 
-;; an empty name (a LayerList registered with #:prefix "") contributes no
-;; segment: its children name themselves by index alone
 (define (child-named-parameters c prefix)
   (layer-named-parameters (cdr c)
                           (if (string=? (car c) "")
@@ -141,8 +139,11 @@
                          "not applicable; iterate with layer-list->list"
                          "layer list" self))
 
+(define (name-segment? v)
+  (and (string? v) (not (regexp-match? #rx"[.]" v))))
+
 (define/checked-out (LayerList layers #:prefix [prefix #f])
-  (->* [(listof layer?)] [#:prefix (or/c #f string?)] layer-list?)
+  (->* [(listof layer?)] [#:prefix (or/c #f name-segment?)] layer-list?)
   (LayerList% layer-list-forward '() '()
               (for/list ([m (in-list layers)] [i (in-naturals)])
                 (cons (number->string i) m))

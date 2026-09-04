@@ -22,7 +22,6 @@
   (provide (contract-out [Parameter? (-> any/c boolean?)]
                          [Buffer? (-> any/c boolean?)])))
 
-;; detached first, so a parameter is a leaf whatever graph built its value
 (define/checked-out (Parameter t) ;; noqa
   (-> tensor? Parameter?)
   (requires-grad! (Parameter% (tensor-handle (detach t))

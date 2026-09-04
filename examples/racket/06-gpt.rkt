@@ -286,7 +286,7 @@ on any character outside it).
                   #:device [device #f])
   (when (zero? (string-length prompt))
     (error 'generate "prompt must be non-empty"))
-  ;; Any parameter's device works (a module's tensors are colocated); the
+  ;; Any parameter's device works (a model's tensors are colocated); the
   ;; context limit comes from pos-emb's row count by *name*, so it survives
   ;; a reordering of gpt's #:init body.
   (define dev (or device (tensor-device (car (parameters net)))))

@@ -4,8 +4,6 @@
          (only-in "module.rkt"
                   LayerList define-layer layer-list->list layer?))
 
-;; #:prefix "" registers the list under no name of its own, so the children
-;; are "0.weight", "1.bias", ... as in nn.Sequential
 (define-layer Sequential (layers) ;; noqa
   #:contract (-> layer? ... sequential?)
   #:init (#:rest ms)
