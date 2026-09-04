@@ -310,3 +310,20 @@ Implementation: `torchrkt/nn/module.rkt` (interface + macro),
 `nn/{init,linear,optim,loss}.rkt`, facade `torchrkt/nn.rkt`. Registration is
 compile-time (the macro knows the field list), so there is no runtime
 reflection at all — strictly less machinery than Python's `__setattr__` hook.
+
+**Revised (2026-09, #97): registration moved to construction time.** The
+compile-time field list left nowhere to write ordinary constructor code
+(`#:coerce` grew to fill the gap) and could not express `Sequential`'s
+indexed children or a `#f` "declared but absent" parameter. `define-layer`
+now takes an `#:init` body that assigns declared fields with `set!`, and the
+*value* a field holds when the body finishes classifies it: `Parameter?` and
+`Buffer?` are tensor subtypes (`torch/nn/parameter.rkt`), `layer?` is a
+child, `#f` is absent, anything else is a plain field. `LayerList` holds a
+variable number of children under indexed names, with `#:prefix` for a
+container that names them without its own field segment. Architecture 1's
+other commitments stand: the model is still a GC-owned struct tree, the
+`gen:layer` interface is still what hand-written layers implement, and
+parameter order (own first, then children, in declaration order) and the
+dotted names are unchanged, so checkpoints and the seeded parity tests carry
+over. The form was renamed from `define-module` at the same time, since
+`module` is a core Racket word (#97).

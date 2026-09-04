@@ -5,7 +5,7 @@
 `torch` provides Racket bindings to **libtorch** (the C++ core of PyTorch).
 **v1** is in: the v0 scaffold (pipeline + handle/finalizer/last-error
 substrate, `plans/v0-scaffold.md`) plus the curated tensor-op tranche,
-autograd, and the `define-module` nn system — all validated against PyTorch.
+autograd, and the `define-layer` nn system — all validated against PyTorch.
 Design rationale and the closed nn-architecture decision:
 `docs/design/v1-codegen-nn.md`.
 
@@ -14,7 +14,7 @@ The Racket package is the `torch` collection:
 - `(require torch)` — the high-level API. A `tensor` is a wrapper struct whose
   native handle is reclaimed by Racket's GC; user code never frees it.
 - `(require torch/nn)` — the nn layer (mirrors `import torch.nn`):
-  `define-module`, `gen:module`, `Linear`, `sgd`, `mse-loss`, initializers.
+  `define-layer`, `gen:layer`, `Parameter`, `Linear`, `sgd`, `mse-loss`, initializers.
   **Naming convention:** nn layer *constructors* are PascalCase (`Linear`,
   `Conv2d`, `MaxPool2d`, `Flatten`, `Dropout`, `Sequential`, `Embedding`,
   `LayerNorm`), mirroring the `torch.nn.*` classes; their *predicates* are
@@ -88,16 +88,18 @@ gets contract blame, not a runtime error; the `+ - * / @` operators are
 provided as plain renames (no contract overhead on the numeric fast path),
 per `foreign/operators.rkt`.
 
-From `torch/nn`: `define-module gen:module module? parameters
-named-parameters buffers forward Linear Conv2d MaxPool2d Flatten Dropout
+From `torch/nn`: `define-layer gen:layer layer? Parameter Buffer LayerList parameters
+named-parameters buffers children forward Linear Conv2d MaxPool2d Flatten Dropout
 Sequential Embedding LayerNorm sgd adam step! zero-grads! cross-entropy
 mse-loss kaiming-uniform uniform-init normal-init fan-in`. The functional
 transformer primitives (`gelu tril triu masked-fill embedding layer-norm`,
 tranche 3, #22) live on `torch` beside the other functional ops; the GPT
-causal-mask idiom is `(masked-fill scores (eq (tril (ones T T)) 0) -inf.0)`. `define-module` is the Python-style
-`nn.Module` analog: fields are registered at expansion time, models are
-plain struct trees owned by the GC (no global parameter store), and
-`prop:procedure` makes `(net x)` work like `__call__`. Layer init mirrors
+causal-mask idiom is `(masked-fill scores (eq (tril (ones T T)) 0) -inf.0)`. `define-layer` is the Python-style
+`nn.Module` analog: `#:init` is the constructor body and assigns declared
+fields with `set!`, a field's value classifies it at construction
+(`Parameter?`, `Buffer?`, `layer?`, `#f` for absent, anything else plain),
+models are plain struct trees owned by the GC (no global parameter store),
+and `prop:procedure` makes `(net x)` work like `__call__`. Layer init mirrors
 PyTorch RNG consumption (`nn.Linear.reset_parameters`), so a shared
 `manual-seed!` yields bit-comparable parameters — the MLP cross-test relies
 on this.
@@ -257,8 +259,8 @@ module's full export set (`racket/runtime-path`, `syntax/parse/pre`).
   Explicit synchronous release goes through the raising,
   finalizer-cancelling `tr-tensor-free/checked`; OOM reaches users as
   `exn:fail:rktorch:oom` (catch by type, not message).
-- `nn.rkt` — pure re-export facade over `nn/` (`module.rkt` = `gen:module` +
-  the `define-module` macro; `linear.rkt`, `init.rkt`, `optim.rkt`,
+- `nn.rkt` — pure re-export facade over `nn/` (`module.rkt` = `gen:layer`, `LayerList` +
+  the `define-layer` macro; `parameter.rkt`, `linear.rkt`, `init.rkt`, `optim.rkt`,
   `loss.rkt`).
 - `private/install-torchrkt-native.rkt` — stages `libtorchrkt.*` into
   `native-libs/` from `TORCHRKT_NATIVE_LIB_PATH` (set by the Nix build/shell).
@@ -371,7 +373,7 @@ asserts no module under `torch/foreign/` requires a `checked` submodule, so
 the fast path cannot be recontracted by a later edit.  The same rule and
 the same test cover `torch/nn/`, with `nn.rkt` as the facade.
 
-A layer built with `define-module` carries its constructor contract in a
+A layer built with `define-layer` carries its constructor contract in a
 `#:contract` clause.  The clause is the export: it provides the constructor
 under that contract and the predicate, under its lowercase name
 (`Conv2d`/`conv2d?`, `MaxPool2d`/`max-pool2d?`; `#:predicate` overrides the
