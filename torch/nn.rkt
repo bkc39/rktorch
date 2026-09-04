@@ -13,6 +13,7 @@
          "nn/loss.rkt"
          (except-in "nn/module.rkt"
                     LayerList
+                    in-layers
                     layer-list->list
                     layer?
                     named-parameters)
@@ -50,7 +51,8 @@
          Buffer?
          LayerList
          layer-list?
-         layer-list->list)
+         layer-list->list
+         in-layers)
 
 ;; PascalCase constructors / lowercase predicates and functional ops keep
 ;; `(require torch torch/nn)` collision-free (#11).

@@ -155,6 +155,12 @@
   (-> layer-list? (listof layer?))
   (map cdr (registry-children ll)))
 
+(define/checked-out (in-layers ll) ;; noqa
+  (-> layer-list? sequence?)
+  (make-do-sequence
+   (lambda ()
+     (values cdar cdr (registry-children ll) pair? #f #f))))
+
 (define (classify who names vals) ;; noqa
   (define-values (params buffers children)
     (for/fold ([params '()] [buffers '()] [children '()]

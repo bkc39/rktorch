@@ -112,7 +112,7 @@
       #:init (#:rest ms)
       (set! layers (LayerList ms))
       #:forward (x)
-      (for/fold ([acc x]) ([m (in-list (layer-list->list layers))]) (m acc)))
+      (for/fold ([acc x]) ([m (in-layers layers)]) (m acc)))
     (define-layer Stack2 (layers)
       #:init (first . rest)
       (set! layers (LayerList (cons first rest) #:prefix "s"))
@@ -135,6 +135,11 @@
     (check-equal? (map car (named-parameters s))
                   '("0.weight" "0.bias" "2.weight" "2.bias"))
     (check-equal? (length (layer-list->list (car (children s)))) 3)
+    (check-equal? (for/list ([m (in-layers (car (children s)))]) m)
+                  (layer-list->list (car (children s))))
+    (check-equal? (for/list ([m (in-layers (LayerList '()))]) m) '())
+    (check-exn #rx"^in-layers: contract violation"
+               (lambda () (in-layers (Linear 1 1))))
     (check-true (layer-list? (car (children s))))
     (check-equal? (map car (named-children (car (children s)))) '("0" "1" "2"))
     (check-exn #rx"LayerList: not applicable"

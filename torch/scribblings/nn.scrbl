@@ -105,7 +105,7 @@ A container takes its children as a rest argument and holds them in a
   #:init (#:rest ms)
   (set! layers (LayerList ms #:prefix ""))
   #:forward (x)
-  (for/fold ([acc x]) ([m (in-list (layer-list->list layers))])
+  (for/fold ([acc x]) ([m (in-layers layers)])
     (m acc)))
 ]
 
@@ -159,15 +159,20 @@ under that name instead, and @racket[""] drops the segment altogether, as
 not contain a dot, as with @tt{add_module}, so it cannot alias a path
 inside another child; and two children of one layer may not register
 under the same name, which the layer's constructor raises on.  A layer
-list is not applicable; iterate it with @racket[layer-list->list].
+list is not applicable; iterate it with @racket[in-layers].
 }
 
 @defproc[(layer-list? [v any/c]) boolean?]{
 Recognizes the result of @racket[LayerList].
 }
 
+@defproc[(in-layers [ll layer-list?]) sequence?]{
+A sequence of the children of @racket[ll], in order, for use in
+@racket[for] forms.
+}
+
 @defproc[(layer-list->list [ll layer-list?]) (listof layer?)]{
-The children of @racket[ll], in order.
+The children of @racket[ll], in order, as a list.
 }
 
 @defproc[(children [m layer?]) (listof layer?)]{
