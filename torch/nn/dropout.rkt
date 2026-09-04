@@ -5,11 +5,11 @@
          (only-in "../private/contract.rkt" define/contract-out)
          (only-in "module.rkt"
                   gen:layer
-                  layer-forward
-                  layer-parameters
-                  layer-named-parameters
                   layer-buffers
+                  layer-forward
                   layer-named-children
+                  layer-named-parameters
+                  layer-parameters
                   layer-set-training!
                   layer-training?))
 
