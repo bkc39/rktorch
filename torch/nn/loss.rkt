@@ -1,22 +1,21 @@
 #lang racket/base
 
-(require (only-in racket/contract ->* and/c listof)
-         (only-in "../private/contract.rkt" define/contract-out)
+(require (only-in racket/contract/base -> ->* and/c listof)
          (only-in "../foreign.rkt"
                   device-type mean mul sub tensor-device tensor? to-device
                   to-dtype)
          (only-in "../generated.rkt"
                   [cross-entropy-loss g:cross-entropy-loss]
-                  [ctc-loss-intlist g:ctc-loss-intlist]))
+                  [ctc-loss-intlist g:ctc-loss-intlist])
+         (only-in "../private/contract.rkt" define/contract-out))
 
-(provide mse-loss
-         cross-entropy)
-
-(define (mse-loss prediction target)
+(define/contract-out (mse-loss prediction target) ;; noqa
+  (-> tensor? tensor? tensor?)
   (define d (sub prediction target))
   (mean (mul d d)))
 
-(define (cross-entropy logits targets)
+(define/contract-out (cross-entropy logits targets) ;; noqa
+  (-> tensor? tensor? tensor?)
   (g:cross-entropy-loss logits (to-dtype targets 'int64) #f 1 -100 0.0))
 
 (define input-lengths/c (and/c (listof exact-positive-integer?) pair?))

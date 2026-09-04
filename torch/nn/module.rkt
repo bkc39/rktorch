@@ -5,9 +5,13 @@
                      ;; whole-module on purpose: the expansion needs bindings
                      ;; only-in would strip
                      syntax/parse/pre)
-         (only-in syntax/parse/define define-syntax-parse-rule)
+         (only-in racket/contract/base
+                  -> ->* any any/c cons/c contract-out listof)
          (only-in racket/generic define-generics define/generic)
-         (only-in "../foreign.rkt" requires-grad!))
+         (only-in syntax/parse/define define-syntax-parse-rule)
+         (only-in "../foreign.rkt" requires-grad! tensor?)
+         (only-in "../private/contract.rkt"
+                  define/checked-out define/contract-out))
 
 ;; the noqa'd exports are macro expansions raco review cannot see
 (provide gen:module
@@ -16,15 +20,8 @@
          module-parameters ;; noqa
          module-named-parameters ;; noqa
          module-buffers ;; noqa
-         parameters
-         named-parameters
-         buffers
-         forward
          module-set-training! ;; noqa
          module-training? ;; noqa
-         train!
-         eval!
-         call-with-eval-mode
          in-eval-mode
          define-module)
 
@@ -36,31 +33,41 @@
   (module-set-training! module training?)
   (module-training? module))
 
+(module+ checked
+  (provide (contract-out [module? (-> any/c boolean?)])))
+
 ;; Depth-first, own params before submodules', in declaration order —
 ;; PyTorch's parameters() order, which seeded-init parity relies on.
-(define (parameters m)
+(define/contract-out (parameters m) ;; noqa
+  (-> module? (listof tensor?))
   (module-parameters m))
 
-(define (named-parameters m [prefix ""])
+(define/checked-out (named-parameters m [prefix ""]) ;; noqa
+  (->* [module?] [string?] (listof (cons/c string? tensor?)))
   (module-named-parameters m prefix))
 
-(define (buffers m)
+(define/contract-out (buffers m) ;; noqa
+  (-> module? (listof tensor?))
   (module-buffers m))
 
-(define (forward m . inputs)
+(define/contract-out (forward m . inputs) ;; noqa
+  (-> module? any/c ... any)
   (apply module-forward m inputs))
 
-(define (train! m)
+(define/contract-out (train! m)
+  (-> module? module?)
   (module-set-training! m #t)
   m)
 
-(define (eval! m)
+(define/contract-out (eval! m)
+  (-> module? module?)
   (module-set-training! m #f)
   m)
 
 ;; restores the aggregate prior mode tree-wide: a hand-mixed tree collapses
 ;; to all-train or all-eval on exit
-(define (call-with-eval-mode m thunk)
+(define/contract-out (call-with-eval-mode m thunk)
+  (-> module? (-> any) any)
   (define was-training? (module-training? m))
   (dynamic-wind (lambda () (eval! m))
                 thunk
@@ -70,6 +77,43 @@
   (call-with-eval-mode m (lambda () body ...)))
 
 (begin-for-syntax
+  (define (predicate-name name)
+    (define downcased
+      (for/fold ([acc '()] [prev #f] #:result (reverse acc))
+                ([c (in-string (symbol->string (syntax-e name)))])
+        (define word-break?
+          (and prev
+               (char-upper-case? c)
+               (or (char-lower-case? prev) (char-numeric? prev))))
+        (values (cons (char-downcase c) (if word-break? (cons #\- acc) acc))
+                c)))
+    (format-id name "~a?" (list->string downcased)))
+
+  (define (contract-export stx name name? contract predicate) ;; noqa
+    (cond
+      [contract
+       (unless (eq? 'module (syntax-local-context))
+         (raise-syntax-error
+          #f
+          "#:contract is only allowed at module level, since it expands to a `provide`"
+          stx))
+       (define pred-id (or predicate (predicate-name name)))
+       (define alias? (not (eq? (syntax-e pred-id) (syntax-e name?))))
+       (with-syntax ([name name] [name? name?] [name/lower pred-id]
+                     [contract contract])
+         (if alias?
+             #'(begin
+                 (define name/lower (procedure-rename name? 'name/lower)) ;; noqa
+                 (provide (contract-out [name contract]
+                                        [name/lower (-> any/c boolean?)])))
+             #'(provide (contract-out [name contract]
+                                      [name/lower (-> any/c boolean?)]))))]
+      [predicate
+       (raise-syntax-error
+        #f "#:predicate names the exported predicate and needs #:contract"
+        stx predicate)]
+      [else #'(begin)]))
+
   (define-syntax-class binding
     #:description "[id init-expr] binding"
     (pattern [id:id init:expr]))
@@ -93,18 +137,23 @@
               (~optional (~seq #:params (param:binding ...)))
               (~optional (~seq #:buffers (buffer:binding ...)))
               (~optional (~seq #:submodules (sub:binding ...)))
-              (~optional (~seq #:reflection-name reflect:expr))) ...
+              (~optional (~seq #:reflection-name reflect:expr))
+              (~optional (~seq #:contract ctc:expr))
+              (~optional (~seq #:predicate pred:id))) ...
         #:forward (input:id ...) body:expr ...+)
      (define (ids attr) (or attr '()))
      (define struct-id (generate-temporary #'name))
      (define reflect-stx (or (attribute reflect) #'(quote name)))
+     (define predicate-id (format-id #'name "~a?" #'name))
      (define (accessor field-id)
        (format-id struct-id "~a-~a" struct-id field-id))
      (define (name-string id)
        (symbol->string (syntax-e id)))
      (with-syntax ([sid struct-id]
                    [sid? (format-id struct-id "~a?" struct-id)]
-                   [name? (format-id #'name "~a?" #'name)]
+                   [name? predicate-id]
+                   [export (contract-export stx #'name predicate-id
+                                            (attribute ctc) (attribute pred))]
                    [reflect-name reflect-stx]
                    [(ctor-arg ...) #'(formal.id ...)]
                    [(c ...) (ids (attribute coerce.id))]
@@ -162,4 +211,5 @@
                       [p (requires-grad! p-init)] ...
                       [b b-init] ...
                       [sm sm-init] ...)
-                 (sid ctor-arg ... p ... b ... sm ...))))))]))
+                 (sid ctor-arg ... p ... b ... sm ...)))
+             export)))]))

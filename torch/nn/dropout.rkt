@@ -1,6 +1,8 @@
 #lang racket/base
 
-(require (only-in "../generated.rkt" dropout)
+(require (only-in racket/contract/base -> ->* </c >=/c and/c any/c)
+         (only-in "../generated.rkt" dropout)
+         (only-in "../private/contract.rkt" define/contract-out)
          (only-in "module.rkt"
                   gen:module
                   module-forward
@@ -9,9 +11,6 @@
                   module-buffers
                   module-set-training!
                   module-training?))
-
-(provide Dropout
-         dropout?)
 
 (struct Dropout% (p [training? #:mutable])
   #:reflection-name 'Dropout
@@ -30,7 +29,8 @@
    (define (module-training? self)
      (Dropout%-training? self))])
 
-(define (Dropout #:p [p 0.5])
+(define/contract-out (Dropout #:p [p 0.5]) ;; noqa
+  (->* [] [#:p (and/c (>=/c 0) (</c 1))] dropout?)
   (Dropout% p #t))
 
-(define dropout? Dropout%?)
+(define/contract-out dropout? (-> any/c boolean?) Dropout%?)

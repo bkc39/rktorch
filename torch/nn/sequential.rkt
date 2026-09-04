@@ -1,18 +1,18 @@
 #lang racket/base
 
-(require (only-in racket/generic define/generic)
+(require (only-in racket/contract/base -> any/c)
+         (only-in racket/generic define/generic)
          (only-in racket/list append-map range)
+         (only-in "../private/contract.rkt" define/contract-out)
          (only-in "module.rkt"
                   gen:module
+                  module?
                   module-forward
                   module-parameters
                   module-named-parameters
                   module-buffers
                   module-set-training!
                   module-training?))
-
-(provide Sequential
-         sequential?)
 
 (struct Sequential% (modules)
   #:reflection-name 'Sequential
@@ -49,7 +49,8 @@
    (define (module-training? self)
      (andmap gen-training? (Sequential%-modules self)))])
 
-(define (Sequential . modules)
+(define/contract-out (Sequential . modules) ;; noqa
+  (-> module? ... sequential?)
   (Sequential% modules))
 
-(define sequential? Sequential%?)
+(define/contract-out sequential? (-> any/c boolean?) Sequential%?)

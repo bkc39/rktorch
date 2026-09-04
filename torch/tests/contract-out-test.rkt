@@ -121,8 +121,10 @@
            (only-in racket/sequence sequence->list))
 
   (define-runtime-path foreign-dir "../foreign")
+  (define-runtime-path nn-dir "../nn")
 
-  (for ([f (in-list (sequence->list (in-directory foreign-dir)))]
+  (for ([f (in-list (append (sequence->list (in-directory foreign-dir))
+                            (sequence->list (in-directory nn-dir))))]
         #:when (regexp-match? #rx"[.]rkt$" (path->string f)))
     (check-false (regexp-match? #rx"submod[^)]*checked" (file->string f))
                  (format "~a requires a checked submodule" f))))
