@@ -12,10 +12,9 @@
          "nn/linear.rkt"
          "nn/loss.rkt"
          (except-in "nn/module.rkt"
-                    LayerList
                     in-layers
-                    layer-list->list
                     layer?
+                    LayerList
                     named-parameters)
          (submod "nn/module.rkt" checked)
          (only-in "nn/optim.rkt" adam adam? sgd sgd? step! zero-grads!)

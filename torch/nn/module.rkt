@@ -151,7 +151,7 @@
 
 (define/contract-out layer-list? (-> any/c boolean?) LayerList%?)
 
-(define/checked-out (layer-list->list ll) ;; noqa
+(define/contract-out (layer-list->list ll) ;; noqa
   (-> layer-list? (listof layer?))
   (map cdr (registry-children ll)))
 
@@ -161,26 +161,27 @@
    (lambda ()
      (values cdar cdr (registry-children ll) pair? #f #f))))
 
-(define (classify who names vals) ;; noqa
-  (define-values (params buffers children)
-    (for/fold ([params '()] [buffers '()] [children '()]
-               #:result (values (reverse params)
-                                (reverse buffers)
-                                (reverse children)))
-              ([name (in-list names)] [v (in-list vals)])
-      (cond
-        [(Parameter? v) (values (cons (cons name v) params) buffers children)]
-        [(Buffer? v) (values params (cons (cons name v) buffers) children)]
-        [(layer? v)
-         (define registered-as
-           (if (LayerList%? v) (or (LayerList%-prefix v) name) name))
-         (values params buffers (cons (cons registered-as v) children))]
-        [else (values params buffers children)])))
-  (define clash (check-duplicates (map car children)))
+(define (classify names vals) ;; noqa
+  (for/fold ([params '()] [buffers '()] [children '()]
+             #:result (values (reverse params)
+                              (reverse buffers)
+                              (reverse children)))
+            ([name (in-list names)] [v (in-list vals)])
+    (cond
+      [(Parameter? v) (values (cons (cons name v) params) buffers children)]
+      [(Buffer? v) (values params (cons (cons name v) buffers) children)]
+      [(layer? v)
+       (define registered-as
+         (if (LayerList%? v) (or (LayerList%-prefix v) name) name))
+       (values params buffers (cons (cons registered-as v) children))]
+      [else (values params buffers children)])))
+
+(define (check-parameter-names who m) ;; noqa
+  (define clash (check-duplicates (map car (layer-named-parameters m ""))))
   (when clash
-    (raise-arguments-error who "two children register under the same name"
+    (raise-arguments-error who "two parameters would share a name"
                            "name" clash))
-  (values params buffers children))
+  m)
 
 (begin-for-syntax
   (define (predicate-name name)
@@ -303,8 +304,9 @@
                (let ([absent #f] ...)
                  init-body ...
                  (let-values ([(params buffers children)
-                               (classify 'name
-                                         '(field-name ...)
+                               (classify '(field-name ...)
                                          (list field.id ...))])
-                   (sid forward-proc params buffers children field.id ...))))
+                   (check-parameter-names
+                    'name
+                    (sid forward-proc params buffers children field.id ...)))))
              export)))]))

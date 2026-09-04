@@ -57,14 +57,23 @@
     (check-equal? (length (parameters m)) 8)
     (check-equal? (length (children m)) 5))
 
-  (test-case "two children registering under one name is an error"
+  (test-case "two parameters flattening to one name is an error"
     (define-layer Clash (p q)
       #:init ()
       (set! p (LayerList (list (Linear 1 1)) #:prefix "x"))
       (set! q (LayerList (list (Linear 1 1)) #:prefix "x"))
       #:forward (v) v)
-    (check-exn #rx"^Clash: two children register under the same name"
+    (check-exn #rx"^Clash: two parameters would share a name"
                (lambda () (Clash)))
+    (define-layer Nested (p q)
+      #:init ()
+      (set! p (LayerList (list (Sequential (Linear 1 1))) #:prefix ""))
+      (set! q (LayerList (list (Linear 1 1)) #:prefix "0"))
+      #:forward (v) v)
+    (check-exn #rx"^Nested: two parameters would share a name.*0[.]0[.]weight"
+               (lambda () (Nested)))
+    (check-equal? (named-children (Dropout)) '())
+    (check-equal? (children (Dropout)) '())
     (check-true (layer-list? (LayerList '() #:prefix #f)))
     (check-exn #rx"^LayerList: contract violation"
                (lambda () (LayerList '() #:prefix "a.b"))))
