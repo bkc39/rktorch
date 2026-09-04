@@ -56,7 +56,7 @@
     (check-true (for/and ([c (in-string hypothesis)])
                   (and (member c (vector->list vocab)) #t))
                 (format "decoded chars outside the vocab: ~v" hypothesis)))
-  (check-true (module-training? net) "decoding left the net in eval mode")
+  (check-true (layer-training? net) "decoding left the net in eval mode")
   (check-equal? (wer transcript transcript) 0)
   (check-equal? (cer transcript transcript) 0)
   (check-equal? (wer transcript "") 1)

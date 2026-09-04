@@ -214,9 +214,10 @@
              [i (in-naturals)])
          (check-equal? r p (format "write form ~a parity" i))))
      (let ()
-       (define-module mlp (d-in d-hidden d-out)
-         #:submodules ([fc1 (Linear d-in d-hidden)]
-                       [fc2 (Linear d-hidden d-out)])
+       (define-layer mlp (fc1 fc2)
+         #:init (d-in d-hidden d-out)
+         (set! fc1 (Linear d-in d-hidden))
+         (set! fc2 (Linear d-hidden d-out))
          #:forward (x)
          (fc2 (relu (fc1 x))))
        (define j (python-result "python/04_mlp.py"))
@@ -251,11 +252,12 @@
        ;; — model, seed, steps, lr, full-batch regime. The shape guard below
        ;; catches structural drift; a forward/recipe edit surfaces as a
        ;; loss-parity mismatch. Same contract for the 06 gpt twin below.
-       (define-module convnet ()
-         #:submodules ([c1 (Conv2d 1 16 3)]
-                       [c2 (Conv2d 16 32 3)]
-                       [f1 (Linear 800 128)]
-                       [f2 (Linear 128 10)])
+       (define-layer convnet (c1 c2 f1 f2)
+         #:init ()
+         (set! c1 (Conv2d 1 16 3))
+         (set! c2 (Conv2d 16 32 3))
+         (set! f1 (Linear 800 128))
+         (set! f2 (Linear 128 10))
          #:forward (x)
          (~> x
              c1 relu (max-pool2d 2)
@@ -288,20 +290,19 @@
          (check-training-twin "05_mnist" "python/05_mnist.py" train-on
                               'cuda 5e-3)))
      (let ()
-       (define-module gpt-block (n-embd n-head)
-         #:coerce ([n-head (if (zero? (remainder n-embd n-head))
-                               n-head
-                               (error 'gpt-block
-                                      "n-embd ~a not divisible by n-head ~a"
-                                      n-embd n-head))])
-         #:submodules ([ln1 (LayerNorm n-embd)]
-                       [wq (Linear n-embd n-embd)]
-                       [wk (Linear n-embd n-embd)]
-                       [wv (Linear n-embd n-embd)]
-                       [wo (Linear n-embd n-embd)]
-                       [ln2 (LayerNorm n-embd)]
-                       [fc1 (Linear n-embd (* 4 n-embd))]
-                       [fc2 (Linear (* 4 n-embd) n-embd)])
+       (define-layer gpt-block (n-embd n-head ln1 wq wk wv wo ln2 fc1 fc2)
+         #:init (n-embd n-head)
+         (unless (zero? (remainder n-embd n-head))
+           (error 'gpt-block "n-embd ~a not divisible by n-head ~a"
+                  n-embd n-head))
+         (set! ln1 (LayerNorm n-embd))
+         (set! wq (Linear n-embd n-embd))
+         (set! wk (Linear n-embd n-embd))
+         (set! wv (Linear n-embd n-embd))
+         (set! wo (Linear n-embd n-embd))
+         (set! ln2 (LayerNorm n-embd))
+         (set! fc1 (Linear n-embd (* 4 n-embd)))
+         (set! fc2 (Linear (* 4 n-embd) n-embd))
          #:forward (x)
          (with-default-device (tensor-device x)
            (define shape (tensor-shape x))
@@ -321,12 +322,13 @@
              (reshape (transpose (matmul att v) 1 2) batch seq-len n-embd))
            (define x1 (add x (wo ctx)))
            (add x1 (fc2 (gelu (fc1 (ln2 x1)))))))
-       (define-module gpt (vocab-size block-size)
-         #:submodules ([tok-emb (Embedding vocab-size 32)]
-                       [pos-emb (Embedding block-size 32)]
-                       [blocks (Sequential (gpt-block 32 4) (gpt-block 32 4))]
-                       [ln-f (LayerNorm 32)]
-                       [head (Linear 32 vocab-size)])
+       (define-layer gpt (tok-emb pos-emb blocks ln-f head)
+         #:init (vocab-size block-size)
+         (set! tok-emb (Embedding vocab-size 32))
+         (set! pos-emb (Embedding block-size 32))
+         (set! blocks (Sequential (gpt-block 32 4) (gpt-block 32 4)))
+         (set! ln-f (LayerNorm 32))
+         (set! head (Linear 32 vocab-size))
          #:forward (idx)
          (with-default-device (tensor-device idx)
            (define seq-len (cadr (tensor-shape idx)))

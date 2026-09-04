@@ -12,10 +12,10 @@
                   with-no-grad)
          (only-in "../generated.rkt" copy!)
          (only-in "../private/contract.rkt" define/contract-out)
-         (only-in "module.rkt" module? named-parameters))
+         (only-in "module.rkt" layer? named-parameters))
 
 (define/contract-out (state-dict model) ;; noqa
-  (-> module? (listof (cons/c string? tensor?)))
+  (-> layer? (listof (cons/c string? tensor?)))
   (named-parameters model))
 
 (define (floats->bytes floats)
@@ -29,7 +29,7 @@
     (floating-point-bytes->real bs #f (* i 4) (* (+ i 1) 4))))
 
 (define/contract-out (save-state! model path) ;; noqa
-  (-> module? path-string? void?)
+  (-> layer? path-string? void?)
   (define-values (fields chunks total)
     (for/fold ([fields '()] [chunks '()] [offset 0])
               ([e (in-list (named-parameters model))])
@@ -53,7 +53,7 @@
       (for ([bs (in-list (reverse chunks))]) (write-bytes bs out)))))
 
 (define/contract-out (load-state! model path) ;; noqa
-  (-> module? path-string? void?)
+  (-> layer? path-string? void?)
   (define raw (file->bytes path))
   (define header-len (integer-bytes->integer raw #f #f 0 8))
   (define data-start (+ 8 header-len))

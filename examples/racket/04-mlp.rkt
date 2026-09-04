@@ -5,8 +5,8 @@
 
 @section[#:tag "ex-mlp"]{Training an MLP end to end}
 
-The v1 capstone: a two-layer perceptron declared with @racket[define-module],
-trained for a few SGD steps on a fixed random batch. The module is a plain
+The v1 capstone: a two-layer perceptron declared with @racket[define-layer],
+trained for a few SGD steps on a fixed random batch. The model is a plain
 struct tree — @racket[parameters] recursively collects the four tensors the
 optimizer updates, and the whole model is reclaimed by the garbage collector
 when dropped.
@@ -17,15 +17,16 @@ when dropped.
 @chunk[<r04-provide>
 (provide run-example)]
 
-@bold{The model.} Submodules are constructed in the @racket[#:submodules]
-clause and are callable in @racket[#:forward] like Python's
-@tt{self.fc1(x)} — @racket[prop:procedure] plays the role of
-@tt{__call__}.
+@bold{The model.} The two child layers are declared as fields and assigned
+in @racket[#:init], the constructor body, like Python's @tt{__init__}; they
+are callable in @racket[#:forward] like @tt{self.fc1(x)} —
+@racket[prop:procedure] plays the role of @tt{__call__}.
 
 @chunk[<r04-model>
-(define-module mlp (d-in d-hidden d-out)
-  #:submodules ([fc1 (Linear d-in d-hidden)]
-                [fc2 (Linear d-hidden d-out)])
+(define-layer mlp (fc1 fc2)
+  #:init (d-in d-hidden d-out)
+  (set! fc1 (Linear d-in d-hidden))
+  (set! fc2 (Linear d-hidden d-out))
   #:forward (x)
   (fc2 (relu (fc1 x))))]
 

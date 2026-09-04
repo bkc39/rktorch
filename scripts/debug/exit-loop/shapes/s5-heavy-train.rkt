@@ -1,8 +1,9 @@
 (require torch/nn)
-(define-module mlp ()
-  #:submodules ([fc1 (Linear 256 512)]
-                [fc2 (Linear 512 512)]
-                [fc3 (Linear 512 10)])
+(define-layer mlp (fc1 fc2 fc3)
+  #:init ()
+  (set! fc1 (Linear 256 512))
+  (set! fc2 (Linear 512 512))
+  (set! fc3 (Linear 512 10))
   #:forward (x)
   (fc3 (relu (fc2 (relu (fc1 x))))))
 (define net (with-default-device dev (mlp)))

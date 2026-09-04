@@ -36,18 +36,19 @@
 
 (define embed-dim 32)
 
-(define-module gpt-mini (vocab-size block-size embed-dim)
-  #:submodules ([tok-emb (Embedding vocab-size embed-dim)]
-                [pos-emb (Embedding block-size embed-dim)]
-                [ln1 (LayerNorm embed-dim)]
-                [wq (Linear embed-dim embed-dim)]
-                [wk (Linear embed-dim embed-dim)]
-                [wv (Linear embed-dim embed-dim)]
-                [wo (Linear embed-dim embed-dim)]
-                [ln2 (LayerNorm embed-dim)]
-                [fc1 (Linear embed-dim (* 4 embed-dim))]
-                [fc2 (Linear (* 4 embed-dim) embed-dim)]
-                [head (Linear embed-dim vocab-size)])
+(define-layer gpt-mini (embed-dim tok-emb pos-emb ln1 wq wk wv wo ln2 fc1 fc2 head)
+  #:init (vocab-size block-size embed-dim)
+  (set! tok-emb (Embedding vocab-size embed-dim))
+  (set! pos-emb (Embedding block-size embed-dim))
+  (set! ln1 (LayerNorm embed-dim))
+  (set! wq (Linear embed-dim embed-dim))
+  (set! wk (Linear embed-dim embed-dim))
+  (set! wv (Linear embed-dim embed-dim))
+  (set! wo (Linear embed-dim embed-dim))
+  (set! ln2 (LayerNorm embed-dim))
+  (set! fc1 (Linear embed-dim (* 4 embed-dim)))
+  (set! fc2 (Linear (* 4 embed-dim) embed-dim))
+  (set! head (Linear embed-dim vocab-size))
   #:forward (idx)
   (let* ([t (cadr (tensor-shape idx))]
          [pos (to-dtype (arange t) 'int64)]

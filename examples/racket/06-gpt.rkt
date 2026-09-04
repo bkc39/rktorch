@@ -51,19 +51,18 @@ broadcasts over the batched @tt{[B, H, T, T]} scores. Then the MLP: two
 GPT-standard shape.
 
 @chunk[<r06-block>
-(define-module gpt-block (n-embd n-head)
-  #:coerce ([n-head (if (zero? (remainder n-embd n-head))
-                        n-head
-                        (error 'gpt-block "n-embd ~a not divisible by n-head ~a"
-                               n-embd n-head))])
-  #:submodules ([ln1 (LayerNorm n-embd)]
-                [wq (Linear n-embd n-embd)]
-                [wk (Linear n-embd n-embd)]
-                [wv (Linear n-embd n-embd)]
-                [wo (Linear n-embd n-embd)]
-                [ln2 (LayerNorm n-embd)]
-                [fc1 (Linear n-embd (* 4 n-embd))]
-                [fc2 (Linear (* 4 n-embd) n-embd)])
+(define-layer gpt-block (n-embd n-head ln1 wq wk wv wo ln2 fc1 fc2)
+  #:init (n-embd n-head)
+  (unless (zero? (remainder n-embd n-head))
+    (error 'gpt-block "n-embd ~a not divisible by n-head ~a" n-embd n-head))
+  (set! ln1 (LayerNorm n-embd))
+  (set! wq (Linear n-embd n-embd))
+  (set! wk (Linear n-embd n-embd))
+  (set! wv (Linear n-embd n-embd))
+  (set! wo (Linear n-embd n-embd))
+  (set! ln2 (LayerNorm n-embd))
+  (set! fc1 (Linear n-embd (* 4 n-embd)))
+  (set! fc2 (Linear (* 4 n-embd) n-embd))
   #:forward (x)
   (with-default-device (tensor-device x)
     (define shape (tensor-shape x))
@@ -99,17 +98,18 @@ defaults are the fixture-scale configuration that @racket[run-example] and the
 parity twin train; @racket[train-novel] passes something bigger.
 
 @chunk[<r06-model>
-(define-module gpt (vocab-size block-size
-                    #:n-embd [n-embd 32]
-                    #:n-head [n-head 4]
-                    #:n-layer [n-layer 2])
-  #:submodules ([tok-emb (Embedding vocab-size n-embd)]
-                [pos-emb (Embedding block-size n-embd)]
-                [blocks (apply Sequential
-                               (for/list ([_ (in-range n-layer)])
-                                 (gpt-block n-embd n-head)))]
-                [ln-f (LayerNorm n-embd)]
-                [head (Linear n-embd vocab-size)])
+(define-layer gpt (tok-emb pos-emb blocks ln-f head)
+  #:init (vocab-size block-size
+          #:n-embd [n-embd 32]
+          #:n-head [n-head 4]
+          #:n-layer [n-layer 2])
+  (set! tok-emb (Embedding vocab-size n-embd))
+  (set! pos-emb (Embedding block-size n-embd))
+  (set! blocks (apply Sequential
+                      (for/list ([_ (in-range n-layer)])
+                        (gpt-block n-embd n-head))))
+  (set! ln-f (LayerNorm n-embd))
+  (set! head (Linear n-embd vocab-size))
   #:forward (idx)
   (with-default-device (tensor-device idx)
     (define seq-len (cadr (tensor-shape idx)))
@@ -288,7 +288,7 @@ on any character outside it).
     (error 'generate "prompt must be non-empty"))
   ;; Any parameter's device works (a module's tensors are colocated); the
   ;; context limit comes from pos-emb's row count by *name*, so it survives
-  ;; a reordering of gpt's #:submodules list.
+  ;; a reordering of gpt's #:init body.
   (define dev (or device (tensor-device (car (parameters net)))))
   (define ctx-limit
     (or block-size
