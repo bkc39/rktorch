@@ -14,7 +14,6 @@
          (except-in "nn/module.rkt"
                     LayerList
                     layer-list->list
-                    layer-list?
                     layer?
                     named-parameters)
          (submod "nn/module.rkt" checked)

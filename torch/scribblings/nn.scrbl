@@ -18,6 +18,7 @@
                  (code:line keyword [id default-expr])]
           [clause (code:line #:init (formal ...) init-body ...)
                   (code:line #:init (formal ... #:rest rest-id) init-body ...)
+                  (code:line #:init (formal ... . rest-id) init-body ...)
                   (code:line #:reflection-name expr)
                   (code:line #:contract contract-expr)
                   (code:line #:predicate id)]
@@ -127,7 +128,9 @@ or a test needs no contract boundary.
 
 @defproc[(Parameter [t tensor?]) Parameter?]{
 Returns @racket[t] as a parameter: the same storage under a tensor subtype
-that @racket[define-layer] registers, with @racket[requires-grad!] set.
+that @racket[define-layer] registers, detached from any autograd graph
+that produced @racket[t] and with @racket[requires-grad!] set, so a
+parameter is always a leaf that @racket[backward!] populates.
 }
 
 @defproc[(Parameter? [v any/c]) boolean?]{
@@ -137,7 +140,8 @@ Recognizes the result of @racket[Parameter].  Every parameter is a
 
 @defproc[(Buffer [t tensor?]) Buffer?]{
 Returns @racket[t] as a buffer: the same storage under a tensor subtype
-that @racket[define-layer] registers among @racket[buffers].
+that @racket[define-layer] registers among @racket[buffers], detached
+from any autograd graph that produced @racket[t].
 }
 
 @defproc[(Buffer? [v any/c]) boolean?]{
@@ -151,8 +155,10 @@ A layer whose children are @racket[layers], named by index.  Assigned to a
 field, it registers under the field name, so its parameters are
 @racket["layers.0.weight"] and so on; with @racket[prefix] it registers
 under that name instead, and @racket[""] drops the segment altogether, as
-@racket[Sequential] does.  A layer list is not applicable; iterate it with
-@racket[layer-list->list].
+@racket[Sequential] does.  Two children of one layer may not register
+under the same name; the constructor raises @racket[exn:fail:contract]
+when a @racket[prefix] collides with another child.  A layer list is not
+applicable; iterate it with @racket[layer-list->list].
 }
 
 @defproc[(layer-list? [v any/c]) boolean?]{

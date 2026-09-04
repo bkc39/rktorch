@@ -6,9 +6,9 @@
                      ;; only-in would strip
                      syntax/parse/pre)
          (only-in racket/contract/base
-                  -> ->* any any/c cons/c contract-out listof)
+                  -> ->* any any/c cons/c contract-out listof or/c)
          (only-in racket/generic define-generics)
-         (only-in racket/list append-map)
+         (only-in racket/list append-map check-duplicates)
          (only-in syntax/parse/define define-syntax-parse-rule)
          (only-in "../foreign.rkt" tensor?)
          (only-in "../private/contract.rkt"
@@ -88,9 +88,6 @@
 (define-syntax-parse-rule (in-eval-mode m:expr body:expr ...+)
   (call-with-eval-mode m (lambda () body ...)))
 
-;; A layer is a registry: the classified fields, plus a forward procedure
-;; that receives the instance.  define-layer structs and LayerList are
-;; subtypes; a hand-written layer implements gen:layer directly instead.
 (struct registry (forward params buffers children)
   #:property prop:procedure
   (lambda (self . inputs) (apply (registry-forward self) self inputs))
@@ -145,32 +142,38 @@
                          "layer list" self))
 
 (define/checked-out (LayerList layers #:prefix [prefix #f])
-  (->* [(listof layer?)] [#:prefix string?] layer-list?)
+  (->* [(listof layer?)] [#:prefix (or/c #f string?)] layer-list?)
   (LayerList% layer-list-forward '() '()
               (for/list ([m (in-list layers)] [i (in-naturals)])
                 (cons (number->string i) m))
               prefix))
 
-(define/checked-out layer-list? (-> any/c boolean?) LayerList%?)
+(define/contract-out layer-list? (-> any/c boolean?) LayerList%?)
 
 (define/checked-out (layer-list->list ll) ;; noqa
   (-> layer-list? (listof layer?))
   (map cdr (registry-children ll)))
 
-(define (classify names vals) ;; noqa
-  (for/fold ([params '()] [buffers '()] [children '()]
-             #:result (values (reverse params)
-                              (reverse buffers)
-                              (reverse children)))
-            ([name (in-list names)] [v (in-list vals)])
-    (cond
-      [(Parameter? v) (values (cons (cons name v) params) buffers children)]
-      [(Buffer? v) (values params (cons (cons name v) buffers) children)]
-      [(layer? v)
-       (define registered-as
-         (if (LayerList%? v) (or (LayerList%-prefix v) name) name))
-       (values params buffers (cons (cons registered-as v) children))]
-      [else (values params buffers children)])))
+(define (classify who names vals) ;; noqa
+  (define-values (params buffers children)
+    (for/fold ([params '()] [buffers '()] [children '()]
+               #:result (values (reverse params)
+                                (reverse buffers)
+                                (reverse children)))
+              ([name (in-list names)] [v (in-list vals)])
+      (cond
+        [(Parameter? v) (values (cons (cons name v) params) buffers children)]
+        [(Buffer? v) (values params (cons (cons name v) buffers) children)]
+        [(layer? v)
+         (define registered-as
+           (if (LayerList%? v) (or (LayerList%-prefix v) name) name))
+         (values params buffers (cons (cons registered-as v) children))]
+        [else (values params buffers children)])))
+  (define clash (check-duplicates (map car children)))
+  (when clash
+    (raise-arguments-error who "two children register under the same name"
+                           "name" clash))
+  (values params buffers children))
 
 (begin-for-syntax
   (define (predicate-name name)
@@ -293,7 +296,8 @@
                (let ([absent #f] ...)
                  init-body ...
                  (let-values ([(params buffers children)
-                               (classify '(field-name ...)
+                               (classify 'name
+                                         '(field-name ...)
                                          (list field.id ...))])
                    (sid forward-proc params buffers children field.id ...))))
              export)))]))

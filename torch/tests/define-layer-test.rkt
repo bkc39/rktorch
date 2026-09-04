@@ -28,6 +28,45 @@
     (check-equal? (car seen) 7 "a plain field is kept, not registered")
     (check-false (list-ref seen 5) "a field never assigned is #f"))
 
+  (test-case "every child field registers, in declaration order, whatever its kind"
+    (manual-seed! 0)
+    (define-layer Inner (w)
+      #:init ()
+      (set! w (Parameter (ones 3)))
+      #:forward (x) x)
+    (define-layer Many (a b c d e)
+      #:init ()
+      (set! a (Linear 2 2))
+      (set! b (Dropout))
+      (set! c (Sequential (Linear 2 2) (LayerNorm 2)))
+      (set! d (Inner))
+      (set! e (LayerList (list (Embedding 4 2))))
+      #:forward (x) x)
+    (define m (Many))
+    (check-equal? (map car (named-children m)) '("a" "b" "c" "d" "e"))
+    (check-equal? (map car (named-parameters m))
+                  '("a.weight" "a.bias"
+                    "c.0.weight" "c.0.bias" "c.1.weight" "c.1.bias"
+                    "d.w"
+                    "e.0.weight"))
+    (check-equal? (named-parameters m)
+                  (apply append
+                         (for/list ([c (in-list (named-children m))])
+                           (named-parameters (cdr c)
+                                             (string-append (car c) ".")))))
+    (check-equal? (length (parameters m)) 8)
+    (check-equal? (length (children m)) 5))
+
+  (test-case "two children registering under one name is an error"
+    (define-layer Clash (p q)
+      #:init ()
+      (set! p (LayerList (list (Linear 1 1)) #:prefix "x"))
+      (set! q (LayerList (list (Linear 1 1)) #:prefix "x"))
+      #:forward (v) v)
+    (check-exn #rx"^Clash: two children register under the same name"
+               (lambda () (Clash)))
+    (check-true (layer-list? (LayerList '() #:prefix #f))))
+
   (test-case "own parameters come before children's, each in declaration order"
     (define-layer Interleaved (fc1 w fc2 v)
       #:init ()
@@ -123,6 +162,11 @@
     (check-false (Buffer? p))
     (check-true (requires-grad? p))
     (check-equal? (tensor->list (add p p)) '(2.0 2.0))
+    ;; built from a graph, still a leaf: backward! reaches its grad
+    (define derived (Parameter (mul (requires-grad! (ones 2)) 2)))
+    (backward! (sum (mul derived derived)))
+    (check-true (has-grad? derived))
+    (check-equal? (tensor->list (grad derived)) '(4.0 4.0))
     (define b (Buffer (zeros 2)))
     (check-true (tensor? b))
     (check-true (Buffer? b))
