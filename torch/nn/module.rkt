@@ -6,7 +6,8 @@
                      ;; only-in would strip
                      syntax/parse/pre)
          (only-in racket/contract/base
-                  -> ->* any any/c cons/c contract-out listof or/c)
+                  -> ->* and/c any any/c cons/c contract-out listof not/c
+                  or/c)
          (only-in racket/generic define-generics)
          (only-in racket/list append-map check-duplicates)
          (only-in syntax/parse/define define-syntax-parse-rule)
@@ -139,11 +140,10 @@
                          "not applicable; iterate with layer-list->list"
                          "layer list" self))
 
-(define (name-segment? v)
-  (and (string? v) (not (regexp-match? #rx"[.]" v))))
-
 (define/checked-out (LayerList layers #:prefix [prefix #f])
-  (->* [(listof layer?)] [#:prefix (or/c #f name-segment?)] layer-list?)
+  (->* [(listof layer?)]
+       [#:prefix (or/c #f (and/c string? (not/c #rx"[.]")))]
+       layer-list?)
   (LayerList% layer-list-forward '() '()
               (for/list ([m (in-list layers)] [i (in-naturals)])
                 (cons (number->string i) m))

@@ -164,7 +164,6 @@
     (check-false (Buffer? p))
     (check-true (requires-grad? p))
     (check-equal? (tensor->list (add p p)) '(2.0 2.0))
-    ;; built from a graph, still a leaf: backward! reaches its grad
     (define derived (Parameter (mul (requires-grad! (ones 2)) 2)))
     (backward! (sum (mul derived derived)))
     (check-true (has-grad? derived))

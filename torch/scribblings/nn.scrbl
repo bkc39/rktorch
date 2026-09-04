@@ -149,7 +149,7 @@ Recognizes the result of @racket[Buffer].
 }
 
 @defproc[(LayerList [layers (listof layer?)]
-                    [#:prefix prefix (or/c #f string?) #f])
+                    [#:prefix prefix (or/c #f (and/c string? (not/c #rx"[.]"))) #f])
          layer-list?]{
 A layer whose children are @racket[layers], named by index.  Assigned to a
 field, it registers under the field name, so its parameters are
