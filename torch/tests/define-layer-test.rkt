@@ -72,6 +72,18 @@
       #:forward (v) v)
     (check-exn #rx"^Nested: two parameters would share a name.*0[.]0[.]weight"
                (lambda () (Nested)))
+    (struct Twice ()
+      #:methods gen:layer
+      [(define (layer-named-parameters self prefix)
+         (list (cons (string-append prefix "w") (ones 1))
+               (cons (string-append prefix "w") (ones 1))))])
+    (check-exn #rx"^LayerList: two parameters would share a name.*0[.]w"
+               (lambda () (LayerList (list (Twice)))))
+    (check-equal? (map car (named-parameters
+                            (LayerList
+                             (list (LayerList (list (Linear 1 1)) #:prefix "x")
+                                   (LayerList (list (Linear 1 1)) #:prefix "x")))))
+                  '("0.0.weight" "0.0.bias" "1.0.weight" "1.0.bias"))
     (check-equal? (named-children (Dropout)) '())
     (check-equal? (children (Dropout)) '())
     (check-true (layer-list? (LayerList '() #:prefix #f)))

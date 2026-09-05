@@ -153,10 +153,12 @@
   (->* [(listof (or/c layer? procedure?))]
        [#:prefix (or/c #f (and/c string? (not/c #rx"[.]")))]
        layer-list?)
-  (LayerList% layer-list-forward '() '()
-              (for/list ([m (in-list layers)] [i (in-naturals)])
-                (cons (number->string i) (as-layer m)))
-              prefix))
+  (check-parameter-names
+   'LayerList
+   (LayerList% layer-list-forward '() '()
+               (for/list ([m (in-list layers)] [i (in-naturals)])
+                 (cons (number->string i) (as-layer m)))
+               prefix)))
 
 (define/contract-out layer-list? (-> any/c boolean?) LayerList%?)
 
