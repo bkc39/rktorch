@@ -1,10 +1,10 @@
 #lang racket/base
 
-(require (only-in racket/contract/base ->)
+(require (only-in racket/contract/base -> or/c)
          (only-in "module.rkt" define-layer in-layers layer? LayerList))
 
 (define-layer Sequential (layers) ;; noqa
-  #:contract (-> layer? ... sequential?)
+  #:contract (-> (or/c layer? procedure?) ... sequential?)
   #:init (#:rest ms)
   (set! layers (LayerList ms #:prefix ""))
   #:forward (x)

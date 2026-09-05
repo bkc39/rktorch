@@ -154,6 +154,30 @@
     (check-exn #rx"LayerList: not applicable"
                (lambda () ((car (children s)) (ones 1)))))
 
+  (test-case "a plain procedure is a step of Sequential and a child of a LayerList"
+    (define-layer MLP (fn)
+      #:init (d-in d-hidden d-out)
+      (set! fn (Sequential (Linear d-in d-hidden) relu
+                           (Linear d-hidden d-out) (lambda (t) (mul t 2))))
+      #:forward (x) (fn x))
+    (manual-seed! 0)
+    (define net (MLP 4 3 2))
+    (define ll (car (children (car (children net)))))
+    (check-equal? (map car (named-parameters net))
+                  '("fn.0.weight" "fn.0.bias" "fn.2.weight" "fn.2.bias"))
+    (check-equal? (map car (named-children ll)) '("0" "1" "2" "3"))
+    (check-true (andmap layer? (children ll)))
+    (check-equal? (object-name (cadr (children ll))) 'Fn)
+    (check-equal? (parameters (cadr (children ll))) '())
+    (define x (randn 5 4))
+    (define steps (layer-list->list ll))
+    (check-equal? (tensor->list (net x))
+                  (tensor->list
+                   (mul ((list-ref steps 2) (relu ((list-ref steps 0) x))) 2)))
+    (check-true (layer-training? (train! (eval! net))))
+    (check-exn #rx"^Sequential: contract violation"
+               (lambda () (Sequential (Linear 1 1) 'relu))))
+
   (test-case "LayerList nests under a field and forwards training mode"
     (define-layer Outer (blocks)
       #:init ()

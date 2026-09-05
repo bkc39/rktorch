@@ -140,13 +140,22 @@
                          "not applicable; iterate with layer-list->list"
                          "layer list" self))
 
+(struct Fn% registry (proc)
+  #:reflection-name 'Fn)
+
+(define (fn-forward self . inputs)
+  (apply (Fn%-proc self) inputs))
+
+(define (as-layer v)
+  (if (layer? v) v (Fn% fn-forward '() '() '() v)))
+
 (define/checked-out (LayerList layers #:prefix [prefix #f])
-  (->* [(listof layer?)]
+  (->* [(listof (or/c layer? procedure?))]
        [#:prefix (or/c #f (and/c string? (not/c #rx"[.]")))]
        layer-list?)
   (LayerList% layer-list-forward '() '()
               (for/list ([m (in-list layers)] [i (in-naturals)])
-                (cons (number->string i) m))
+                (cons (number->string i) (as-layer m)))
               prefix))
 
 (define/contract-out layer-list? (-> any/c boolean?) LayerList%?)

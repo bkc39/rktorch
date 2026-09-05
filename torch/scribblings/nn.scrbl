@@ -97,11 +97,12 @@ is allowed only at module level.
 ]
 
 A container takes its children as a rest argument and holds them in a
-@racket[LayerList]:
+@racket[LayerList].  A step may be a plain procedure such as
+@racket[relu], so a model can mix layers with the functional interface:
 
 @racketblock[
 (define-layer Sequential (layers)
-  #:contract (-> layer? ... sequential?)
+  #:contract (-> (or/c layer? procedure?) ... sequential?)
   #:init (#:rest ms)
   (set! layers (LayerList ms #:prefix ""))
   #:forward (x)
@@ -148,10 +149,13 @@ from any autograd graph that produced @racket[t].
 Recognizes the result of @racket[Buffer].
 }
 
-@defproc[(LayerList [layers (listof layer?)]
+@defproc[(LayerList [layers (listof (or/c layer? procedure?))]
                     [#:prefix prefix (or/c #f (and/c string? (not/c #rx"[.]"))) #f])
          layer-list?]{
-A layer whose children are @racket[layers], named by index.  Assigned to a
+A layer whose children are @racket[layers], named by index.  An element
+that is a procedure but not a @racket[layer?] becomes a child with no
+parameters that applies the procedure to its inputs, so it keeps its
+index and appears in @racket[children] like any other.  Assigned to a
 field, it registers under the field name, so its parameters are
 @racket["layers.0.weight"] and so on; with @racket[prefix] it registers
 under that name instead, and @racket[""] drops the segment altogether, as
