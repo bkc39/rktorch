@@ -9,9 +9,10 @@
            (only-in "../data/mnist.rkt" load-mnist-fixture))
 
   ;; fc in-features: 28-3+1 = 26 after conv, /2 = 13 after pool, 8*13*13 = 1352
-  (define-module convnet ()
-    #:submodules ([c1 (Conv2d 1 8 3)]
-                  [fc (Linear 1352 10)])
+  (define-layer convnet (c1 fc)
+    #:init ()
+    (set! c1 (Conv2d 1 8 3))
+    (set! fc (Linear 1352 10))
     #:forward (x)
     (fc (flatten (max-pool2d (relu (c1 x)) 2) 1)))
 

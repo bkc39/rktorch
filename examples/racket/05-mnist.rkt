@@ -26,18 +26,19 @@ lowercase on @racketmodname[torch] (@racket[max-pool2d], @racket[flatten],
 @chunk[<r05-provide>
 (provide convnet pick-device accuracy run-example train-mnist)]
 
-@bold{The model.} @racket[define-module] builds the parameter tree; the
-submodules are callable in @racket[#:forward] exactly like @tt{self.c1(x)} in
-PyTorch. The spatial arithmetic is the usual @tt{valid}-convolution bookkeeping:
+@bold{The model.} @racket[define-layer] builds the parameter tree from the
+fields assigned in @racket[#:init]; the child layers are callable in
+@racket[#:forward] exactly like @tt{self.c1(x)} in PyTorch. The spatial arithmetic is the usual @tt{valid}-convolution bookkeeping:
 @tt{28 -c3-> 26 -pool-> 13 -c3-> 11 -pool-> 5}, so the flattened feature map is
 @tt{32*5*5 = 800} wide going into the first dense layer.
 
 @chunk[<r05-model>
-(define-module convnet ()
-  #:submodules ([c1 (Conv2d 1 16 3)]
-                [c2 (Conv2d 16 32 3)]
-                [f1 (Linear 800 128)]
-                [f2 (Linear 128 10)])
+(define-layer convnet (c1 c2 f1 f2)
+  #:init ()
+  (set! c1 (Conv2d 1 16 3))
+  (set! c2 (Conv2d 16 32 3))
+  (set! f1 (Linear 800 128))
+  (set! f2 (Linear 128 10))
   #:forward (x)
   (~> x
       c1 relu (max-pool2d 2)

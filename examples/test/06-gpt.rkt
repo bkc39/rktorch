@@ -53,7 +53,7 @@
   (check-true (for/and ([c (in-string sample)])
                 (and (member c (vector->list vocab)) #t))
               (format "generated chars outside the vocab: ~v" sample))
-  (check-true (module-training? net) "generate left the net in eval mode")
+  (check-true (layer-training? net) "generate left the net in eval mode")
   (check-exn #rx"prompt must be non-empty"
              (lambda () (generate net vocab "")))
   ;; Device RNG streams differ from the CPU's, so the on-device arm checks

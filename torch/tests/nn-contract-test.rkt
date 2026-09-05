@@ -2,29 +2,29 @@
 
 (module layers racket/base
   (require (only-in racket/contract/base -> ->i any/c)
-           (only-in "../nn/module.rkt" define-module))
+           (only-in "../nn/module.rkt" define-layer))
 
-  (define-module AvgPool3d (kernel-size)
+  (define-layer AvgPool3d (kernel-size)
     #:contract (-> exact-positive-integer? avg-pool3d?)
     #:forward (x) x)
 
-  (define-module RMSNorm (n)
+  (define-layer RMSNorm (n)
     #:predicate norm?
     #:contract (-> exact-positive-integer? norm?)
     #:forward (x) x)
 
-  (define-module scale (s)
+  (define-layer scale (s)
     #:contract (-> real? scale?)
     #:forward (x) x)
 
-  (define-module GPT2Block (n-embd n-head)
+  (define-layer GPT2Block (n-embd n-head)
     #:contract (->i ([n-embd exact-positive-integer?]
                      [n-head exact-positive-integer?])
                     #:pre (n-embd n-head) (zero? (remainder n-embd n-head))
                     [_ gpt2-block?])
     #:forward (x) x)
 
-  (define-module Plain (v)
+  (define-layer Plain (v)
     #:forward (x) x)
   (provide Plain Plain?)) ;; noqa
 
@@ -116,7 +116,7 @@
                (lambda ()
                  (convert-compile-time-error
                   (let ()
-                    (define-module Local (v)
+                    (define-layer Local (v)
                       #:contract (-> any/c local?)
                       #:forward (x) x)
                     (Local 1))))))
@@ -126,7 +126,7 @@
                (lambda ()
                  (convert-compile-time-error
                   (let ()
-                    (define-module Local (v)
+                    (define-layer Local (v)
                       #:predicate local?
                       #:forward (x) x)
                     (Local 1)))))))

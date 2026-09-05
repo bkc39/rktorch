@@ -2,6 +2,7 @@
 
 @(require (for-label racket/base
                      racket/contract
+                     (only-in torch tensor?)
                      torch/nn
                      torch/private/contract))
 
@@ -9,34 +10,62 @@
 
 @defmodule[torch/nn]
 
-@defform[(define-module name (formal ...) clause ... #:forward (input ...) body ...+)
+@defform[(define-layer name (field ...) clause ... #:forward (input ...) body ...+)
          #:grammar
-         ([formal id
-                  [id default-expr]
-                  (code:line keyword id)
-                  (code:line keyword [id default-expr])]
-          [clause (code:line #:coerce ([id expr] ...))
-                  (code:line #:params ([id expr] ...))
-                  (code:line #:buffers ([id expr] ...))
-                  (code:line #:submodules ([id expr] ...))
+         ([field id
+                 [id default-expr]
+                 (code:line keyword id)
+                 (code:line keyword [id default-expr])]
+          [clause (code:line #:init (formal ...) init-body ...)
+                  (code:line #:init (formal ... #:rest rest-id) init-body ...)
+                  (code:line #:init (formal ... . rest-id) init-body ...)
                   (code:line #:reflection-name expr)
                   (code:line #:contract contract-expr)
-                  (code:line #:predicate id)])
+                  (code:line #:predicate id)]
+          [formal id
+                  [id default-expr]
+                  (code:line keyword id)
+                  (code:line keyword [id default-expr])])
          #:contracts ([contract-expr contract?])]{
 
-Defines a layer: a constructor @racket[name] whose arguments are the
-@racket[formal]s, and a predicate @racket[name?].  An instance is a
-@racket[module?] and applies as a procedure, running @racket[body] with
-every constructor argument, parameter, buffer and submodule in scope.
+Defines a layer: a constructor @racket[name], a predicate @racket[name?],
+and a struct with one slot per @racket[field].  An instance is a
+@racket[layer?] and applies as a procedure, running @racket[body] with
+every field in scope.
 
-@racket[#:coerce] rebinds a constructor argument before anything else
-runs.  @racket[#:params] tensors are marked as requiring gradients and are
-what @racket[parameters] returns, own parameters first and then each
-submodule's, in declaration order.  @racket[#:buffers] travel with the
-layer but are not trained.  @racket[#:submodules] are recursed into by
-@racket[parameters], @racket[named-parameters], @racket[buffers],
-@racket[train!] and @racket[eval!]; a submodule's parameters are named
-under its field, as in @racket["fc1.weight"].
+@racket[#:init] is the constructor body, the analogue of @tt{__init__}.
+Its @racket[formal]s are the constructor's arguments, in the grammar of
+@racket[define]; the rest argument is spelled @racket[#:rest rest-id] or
+as @racket[define]'s dotted tail.  Every field starts as @racket[#f], or as the argument of
+the same name when a formal shares it, and @racket[init-body] assigns
+fields with @racket[set!].  With @racket[#:init], a field is a bare
+identifier.  Without it, the fields are themselves the constructor
+formals, so a stateless layer needs no body.
+
+What a field holds when @racket[init-body] finishes decides what it is:
+
+@itemlist[
+ @item{a @racket[Parameter?] is a parameter: returned by
+       @racket[parameters], named by @racket[named-parameters], stepped by
+       an optimizer and written to the state dict;}
+ @item{a @racket[Buffer?] is a buffer: returned by @racket[buffers],
+       carried with the layer but not trained;}
+ @item{a @racket[layer?] is a child: @racket[parameters],
+       @racket[named-parameters], @racket[buffers], @racket[train!] and
+       @racket[eval!] recurse into it, and its parameters are named under
+       the field, as in @racket["fc1.weight"] (a @racket[LayerList] may
+       register under a @racket[#:prefix] instead);}
+ @item{@racket[#f] is a declared but absent slot, skipped by all of the
+       above, as @tt{register_parameter(name, None)} is;}
+ @item{anything else is a plain field, visible to @racket[#:forward] and
+       otherwise ignored.}]
+
+@racket[parameters] lists a layer's own parameters first and then each
+child's, each group in field declaration order.  A parameter or child
+reachable by more than one path, as when two fields hold the same layer,
+is listed once, under the first path, so an optimizer steps it once.
+@racket[init-body] runs sequentially, so the order in which parameters
+draw from the RNG is the order of the assignments.
 
 @racket[#:contract] exports the layer.  It provides @racket[name] under
 @racket[contract-expr] and the predicate under a lowercase name, both via
@@ -51,34 +80,132 @@ lowercase one as its range.  Like @racket[define/contract-out], the clause
 is allowed only at module level.
 
 @racketblock[
-(define-module Conv2d (in-channels out-channels kernel-size
-                       #:stride [stride 1]
-                       #:padding [padding 0])
+(define-layer Conv2d (kernel-size stride padding weight bias)
   #:contract (->* [exact-positive-integer? exact-positive-integer? pos-size/c]
                   [#:stride pos-size/c #:padding nonneg-size/c]
                   conv2d?)
-  #:coerce ([kernel-size (->2d kernel-size)]
-            [stride (->2d stride)]
-            [padding (->2d padding)])
-  #:params ([weight (kaiming-uniform (list out-channels in-channels
-                                            (car kernel-size) (cadr kernel-size)))]
-            [bias (uniform-init (list out-channels) -0.1 0.1)])
+  #:init (in-channels out-channels kernel-size
+          #:stride [stride 1]
+          #:padding [padding 0])
+  (set! kernel-size (->2d kernel-size))
+  (set! stride (->2d stride))
+  (set! padding (->2d padding))
+  (define shape
+    (list out-channels in-channels (car kernel-size) (cadr kernel-size)))
+  (set! weight (Parameter (kaiming-uniform shape)))
+  (set! bias (Parameter (uniform-init (list out-channels) -0.1 0.1)))
   #:forward (x)
   (conv2d x weight #:bias bias #:stride stride #:padding padding))
+]
+
+A container takes its children as a rest argument and holds them in a
+@racket[LayerList].  A step may be a plain procedure such as
+@racket[relu], so a model can mix layers with the functional interface:
+
+@racketblock[
+(define step/c (or/c layer? procedure?))
+
+(define-layer Sequential (layers)
+  #:contract (->* [] #:rest (or/c (list/c (listof step/c)) (listof step/c))
+                  sequential?)
+  #:init (#:rest steps)
+  (set! layers (LayerList (if (and (pair? steps) (list? (car steps)))
+                              (car steps)
+                              steps)
+                          #:prefix ""))
+  #:forward (x)
+  (for/fold ([acc x]) ([m (in-layers layers)])
+    (m acc)))
 ]
 
 An invariant that relates two arguments is a @racket[->i] precondition
 rather than a guard in the body:
 
 @racketblock[
-(define-module SelfAttention (n-embd n-head)
+(define-layer SelfAttention (n-embd n-head wq wk wv wo)
   #:contract (->i ([n-embd exact-positive-integer?]
                    [n-head exact-positive-integer?])
                   #:pre (n-embd n-head) (zero? (remainder n-embd n-head))
                   [_ self-attention?])
+  #:init (n-embd n-head)
   ...)
 ]
 
 Without @racket[#:contract] nothing is exported; a layer local to a model
 or a test needs no contract boundary.
+}
+
+@defproc[(Parameter [t tensor?]) Parameter?]{
+Returns @racket[t] as a parameter: the same storage under a tensor subtype
+that @racket[define-layer] registers, detached from any autograd graph
+that produced @racket[t] and with @racket[requires-grad!] set, so a
+parameter is always a leaf that @racket[backward!] populates.
+}
+
+@defproc[(Parameter? [v any/c]) boolean?]{
+Recognizes the result of @racket[Parameter].  Every parameter is a
+@racket[tensor?]; a plain tensor is not a parameter, however it was made.
+}
+
+@defproc[(Buffer [t tensor?]) Buffer?]{
+Returns @racket[t] as a buffer: the same storage under a tensor subtype
+that @racket[define-layer] registers among @racket[buffers], detached
+from any autograd graph that produced @racket[t].
+}
+
+@defproc[(Buffer? [v any/c]) boolean?]{
+Recognizes the result of @racket[Buffer].
+}
+
+@defproc[(LayerList [layers (listof (or/c layer? procedure?))]
+                    [#:prefix prefix (or/c #f (and/c string? (not/c #rx"[.]"))) #f])
+         layer-list?]{
+A layer whose children are @racket[layers], named by index.  An element
+that is a procedure but not a @racket[layer?] becomes a child with no
+parameters that applies the procedure to its inputs, so it keeps its
+index and appears in @racket[children] like any other.  Assigned to a
+field, it registers under the field name, so its parameters are
+@racket["layers.0.weight"] and so on; with @racket[prefix] it registers
+under that name instead, and @racket[""] drops the segment altogether, as
+@racket[Sequential] does.  A @racket[prefix] is one name segment and may
+not contain a dot, as with @tt{add_module}.  A layer's constructor
+raises if two of its children would register under one name, or if two
+of its parameters, however nested, would flatten to the same name.  A
+layer list is not applicable; iterate it with @racket[in-layers].
+}
+
+@defproc[(layer-list? [v any/c]) boolean?]{
+Recognizes the result of @racket[LayerList].
+}
+
+@defproc*[([(Sequential [step (or/c layer? procedure?)] ...) sequential?]
+           [(Sequential [steps (listof (or/c layer? procedure?))]) sequential?])]{
+A layer that applies each step to the previous step's result, holding
+them in a @racket[LayerList] under @racket[#:prefix ""] so their
+parameters are named by index alone, as @racket["0.weight"].  The steps
+are given either as arguments or as one list, so a model may build
+them with @racket[for/list].
+}
+
+@defproc[(sequential? [v any/c]) boolean?]{
+Recognizes the result of @racket[Sequential].
+}
+
+@defproc[(in-layers [ll layer-list?]) sequence?]{
+A sequence of the children of @racket[ll], in order, for use in
+@racket[for] forms.
+}
+
+@defproc[(layer-list->list [ll layer-list?]) (listof layer?)]{
+The children of @racket[ll], in order, as a list.
+}
+
+@defproc[(children [m layer?]) (listof layer?)]{
+The direct children of @racket[m], in registration order, each listed
+once however many fields hold it.  A @racket[LayerList] counts as one
+child; its own children are reached through it.
+}
+
+@defproc[(named-children [m layer?]) (listof (cons/c string? layer?))]{
+The direct children of @racket[m] with the names they registered under.
 }

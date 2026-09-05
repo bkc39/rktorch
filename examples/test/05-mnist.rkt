@@ -42,7 +42,7 @@
   (define acc (accuracy net xs ys))
   (check-true (and (> acc 0.1) (<= acc 1.0))
               (format "accuracy out of expected range: ~a" acc))
-  (check-true (module-training? net) "accuracy left the net in eval mode")
+  (check-true (layer-training? net) "accuracy left the net in eval mode")
   ;; Device RNG streams differ from the CPU's, so the on-device arm checks
   ;; convergence, never equality with the CPU losses above.
   (define accel (accelerator-if-available))

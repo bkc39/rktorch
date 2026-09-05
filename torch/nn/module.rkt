@@ -6,75 +6,200 @@
                      ;; only-in would strip
                      syntax/parse/pre)
          (only-in racket/contract/base
-                  -> ->* any any/c cons/c contract-out listof)
-         (only-in racket/generic define-generics define/generic)
+                  -> ->* and/c any any/c cons/c contract-out listof not/c
+                  or/c)
+         (only-in racket/generic define-generics)
+         (only-in racket/list append-map check-duplicates remove-duplicates)
          (only-in syntax/parse/define define-syntax-parse-rule)
-         (only-in "../foreign.rkt" requires-grad! tensor?)
+         (only-in "../foreign.rkt" tensor?)
          (only-in "../private/contract.rkt"
-                  define/checked-out define/contract-out))
+                  define/checked-out define/contract-out)
+         (only-in "parameter.rkt" Buffer? Parameter?))
 
 ;; the noqa'd exports are macro expansions raco review cannot see
-(provide gen:module
-         module?
-         module-forward ;; noqa
-         module-parameters ;; noqa
-         module-named-parameters ;; noqa
-         module-buffers ;; noqa
-         module-set-training! ;; noqa
-         module-training? ;; noqa
+(provide gen:layer
+         layer?
+         layer-forward ;; noqa
+         layer-parameters ;; noqa
+         layer-named-parameters ;; noqa
+         layer-buffers ;; noqa
+         layer-named-children ;; noqa
+         layer-set-training! ;; noqa
+         layer-training? ;; noqa
          in-eval-mode
-         define-module)
+         define-layer
+         step/c)
 
-(define-generics module
-  (module-forward module . inputs)
-  (module-parameters module)
-  (module-named-parameters module prefix)
-  (module-buffers module)
-  (module-set-training! module training?)
-  (module-training? module))
+(define-generics layer
+  (layer-forward layer . inputs)
+  (layer-parameters layer)
+  (layer-named-parameters layer prefix)
+  (layer-buffers layer)
+  (layer-named-children layer)
+  (layer-set-training! layer training?)
+  (layer-training? layer))
 
 (module+ checked
-  (provide (contract-out [module? (-> any/c boolean?)])))
+  (provide (contract-out [layer? (-> any/c boolean?)])))
 
-;; Depth-first, own params before submodules', in declaration order —
+;; Depth-first, own params before children's, in declaration order —
 ;; PyTorch's parameters() order, which seeded-init parity relies on.
 (define/contract-out (parameters m) ;; noqa
-  (-> module? (listof tensor?))
-  (module-parameters m))
+  (-> layer? (listof tensor?))
+  (remove-duplicates (layer-parameters m) eq?))
 
 (define/checked-out (named-parameters m [prefix ""]) ;; noqa
-  (->* [module?] [string?] (listof (cons/c string? tensor?)))
-  (module-named-parameters m prefix))
+  (->* [layer?] [string?] (listof (cons/c string? tensor?)))
+  (remove-duplicates (layer-named-parameters m prefix) eq? #:key cdr))
 
 (define/contract-out (buffers m) ;; noqa
-  (-> module? (listof tensor?))
-  (module-buffers m))
+  (-> layer? (listof tensor?))
+  (remove-duplicates (layer-buffers m) eq?))
+
+(define/contract-out (children m) ;; noqa
+  (-> layer? (listof layer?))
+  (map cdr (named-children m)))
+
+(define/contract-out (named-children m) ;; noqa
+  (-> layer? (listof (cons/c string? layer?)))
+  (remove-duplicates (layer-named-children m) eq? #:key cdr))
 
 (define/contract-out (forward m . inputs) ;; noqa
-  (-> module? any/c ... any)
-  (apply module-forward m inputs))
+  (-> layer? any/c ... any)
+  (apply layer-forward m inputs))
 
 (define/contract-out (train! m)
-  (-> module? module?)
-  (module-set-training! m #t)
+  (-> layer? layer?)
+  (layer-set-training! m #t)
   m)
 
 (define/contract-out (eval! m)
-  (-> module? module?)
-  (module-set-training! m #f)
+  (-> layer? layer?)
+  (layer-set-training! m #f)
   m)
 
 ;; restores the aggregate prior mode tree-wide: a hand-mixed tree collapses
 ;; to all-train or all-eval on exit
 (define/contract-out (call-with-eval-mode m thunk)
-  (-> module? (-> any) any)
-  (define was-training? (module-training? m))
+  (-> layer? (-> any) any)
+  (define was-training? (layer-training? m))
   (dynamic-wind (lambda () (eval! m))
                 thunk
                 (lambda () (if was-training? (train! m) (eval! m)))))
 
 (define-syntax-parse-rule (in-eval-mode m:expr body:expr ...+)
   (call-with-eval-mode m (lambda () body ...)))
+
+(struct registry (forward params buffers children)
+  #:property prop:procedure
+  (lambda (self . inputs) (apply (registry-forward self) self inputs))
+  #:methods gen:layer
+  [(define (layer-forward self . inputs)
+     (apply (registry-forward self) self inputs))
+   (define (layer-parameters self)
+     (append (map cdr (registry-params self))
+             (append-map child-parameters (registry-children self))))
+   (define (layer-named-parameters self prefix)
+     (append (for/list ([p (in-list (registry-params self))])
+               (cons (string-append prefix (car p)) (cdr p)))
+             (append-map (lambda (c) (child-named-parameters c prefix))
+                         (registry-children self))))
+   (define (layer-buffers self)
+     (append (map cdr (registry-buffers self))
+             (append-map child-buffers (registry-children self))))
+   (define (layer-named-children self)
+     (registry-children self))
+   (define (layer-set-training! self training?)
+     (for ([c (in-list (registry-children self))])
+       (child-set-training! c training?)))
+   (define (layer-training? self)
+     (andmap child-training? (registry-children self)))])
+
+(define (child-parameters c)
+  (layer-parameters (cdr c)))
+
+(define (child-buffers c)
+  (layer-buffers (cdr c)))
+
+(define (child-set-training! c training?)
+  (layer-set-training! (cdr c) training?))
+
+(define (child-training? c)
+  (layer-training? (cdr c)))
+
+(define (child-named-parameters c prefix)
+  (layer-named-parameters (cdr c)
+                          (if (string=? (car c) "")
+                              prefix
+                              (string-append prefix (car c) "."))))
+
+(struct LayerList% registry (prefix)
+  #:reflection-name 'LayerList)
+
+(define (layer-list-forward self . _inputs)
+  (raise-arguments-error 'LayerList
+                         "not applicable; iterate with layer-list->list"
+                         "layer list" self))
+
+(struct Fn% registry (proc)
+  #:reflection-name 'Fn)
+
+(define (fn-forward self . inputs)
+  (apply (Fn%-proc self) inputs))
+
+(define (as-layer v)
+  (if (layer? v) v (Fn% fn-forward '() '() '() v)))
+
+(define step/c (or/c layer? procedure?))
+
+(define/checked-out (LayerList layers #:prefix [prefix #f])
+  (->* [(listof step/c)]
+       [#:prefix (or/c #f (and/c string? (not/c #rx"[.]")))]
+       layer-list?)
+  (check-names
+   'LayerList
+   (LayerList% layer-list-forward '() '()
+               (for/list ([m (in-list layers)] [i (in-naturals)])
+                 (cons (number->string i) (as-layer m)))
+               prefix)))
+
+(define/contract-out layer-list? (-> any/c boolean?) LayerList%?)
+
+(define/contract-out (layer-list->list ll) ;; noqa
+  (-> layer-list? (listof layer?))
+  (map cdr (registry-children ll)))
+
+(define/checked-out (in-layers ll) ;; noqa
+  (-> layer-list? sequence?)
+  (make-do-sequence
+   (lambda ()
+     (values cdar cdr (registry-children ll) pair? #f #f))))
+
+(define (classify names vals) ;; noqa
+  (for/fold ([params '()] [buffers '()] [children '()]
+             #:result (values (reverse params)
+                              (reverse buffers)
+                              (reverse children)))
+            ([name (in-list names)] [v (in-list vals)])
+    (cond
+      [(Parameter? v) (values (cons (cons name v) params) buffers children)]
+      [(Buffer? v) (values params (cons (cons name v) buffers) children)]
+      [(layer? v)
+       (define registered-as
+         (if (LayerList%? v) (or (LayerList%-prefix v) name) name))
+       (values params buffers (cons (cons registered-as v) children))]
+      [else (values params buffers children)])))
+
+(define (check-names who m) ;; noqa
+  (define child-clash (check-duplicates (map car (layer-named-children m))))
+  (when child-clash
+    (raise-arguments-error who "two children would share a name"
+                           "name" child-clash))
+  (define clash (check-duplicates (map car (layer-named-parameters m ""))))
+  (when clash
+    (raise-arguments-error who "two parameters would share a name"
+                           "name" clash))
+  m)
 
 (begin-for-syntax
   (define (predicate-name name)
@@ -114,102 +239,89 @@
         stx predicate)]
       [else #'(begin)]))
 
-  (define-syntax-class binding
-    #:description "[id init-expr] binding"
-    (pattern [id:id init:expr]))
-
-  (define-splicing-syntax-class ctor-formal
+  (define-splicing-syntax-class ctor-formal ;; noqa
     #:description
     "constructor formal (id, [id default], or #:kw id / #:kw [id default])"
     (pattern id:id
+      #:attr bare? #t
       #:with (decl ...) #'(id))
     (pattern [id:id default:expr]
+      #:attr bare? #f
       #:with (decl ...) #'([id default]))
-    (pattern (~seq kw:keyword id:id)
+    (pattern (~seq (~and kw:keyword (~not #:rest)) id:id)
+      #:attr bare? #f
       #:with (decl ...) #'(kw id))
-    (pattern (~seq kw:keyword [id:id default:expr])
-      #:with (decl ...) #'(kw [id default]))))
+    (pattern (~seq (~and kw:keyword (~not #:rest)) [id:id default:expr])
+      #:attr bare? #f
+      #:with (decl ...) #'(kw [id default])))
 
-(define-syntax (define-module stx)
+  (define-syntax-class init-formals
+    #:description "#:init formals: (formal ... [#:rest id]) or (formal ... . id)"
+    (pattern (f:ctor-formal ... #:rest rest:id)
+      #:with (id ...) #'(f.id ... rest)
+      #:with formals #'((~@ f.decl ...) ... . rest))
+    (pattern (f:ctor-formal ... . rest:id)
+      #:with (id ...) #'(f.id ... rest)
+      #:with formals #'((~@ f.decl ...) ... . rest))
+    (pattern (f:ctor-formal ...)
+      #:with (id ...) #'(f.id ...)
+      #:with formals #'((~@ f.decl ...) ...))))
+
+(define-syntax (define-layer stx)
   (syntax-parse stx
-    [(_ name:id (formal:ctor-formal ...)
-        (~alt (~optional (~seq #:coerce (coerce:binding ...)))
-              (~optional (~seq #:params (param:binding ...)))
-              (~optional (~seq #:buffers (buffer:binding ...)))
-              (~optional (~seq #:submodules (sub:binding ...)))
+    [(_ name:id (field:ctor-formal ...)
+        (~alt (~optional (~seq #:init init:init-formals init-body:expr ...))
               (~optional (~seq #:reflection-name reflect:expr))
               (~optional (~seq #:contract ctc:expr))
               (~optional (~seq #:predicate pred:id))) ...
         #:forward (input:id ...) body:expr ...+)
-     (define (ids attr) (or attr '()))
+     (define field-ids (syntax->list #'(field.id ...)))
+     (define init? (attribute init))
+     (when init?
+       (for ([f (in-list field-ids)]
+             [bare? (in-list (attribute field.bare?))])
+         (unless bare?
+           (raise-syntax-error
+            #f
+            "with #:init, a field is a bare identifier; defaults and keywords belong to the #:init formals"
+            stx f))))
+     (define init-ids (if init? (syntax->list #'(init.id ...)) '()))
      (define struct-id (generate-temporary #'name))
-     (define reflect-stx (or (attribute reflect) #'(quote name)))
-     (define predicate-id (format-id #'name "~a?" #'name))
      (define (accessor field-id)
        (format-id struct-id "~a-~a" struct-id field-id))
-     (define (name-string id)
-       (symbol->string (syntax-e id)))
      (with-syntax ([sid struct-id]
                    [sid? (format-id struct-id "~a?" struct-id)]
-                   [name? predicate-id]
-                   [export (contract-export stx #'name predicate-id
-                                            (attribute ctc) (attribute pred))]
-                   [reflect-name reflect-stx]
-                   [(ctor-arg ...) #'(formal.id ...)]
-                   [(c ...) (ids (attribute coerce.id))]
-                   [(c-init ...) (ids (attribute coerce.init))]
-                   [(p ...) (ids (attribute param.id))]
-                   [(p-init ...) (ids (attribute param.init))]
-                   [(b ...) (ids (attribute buffer.id))]
-                   [(b-init ...) (ids (attribute buffer.init))]
-                   [(sm ...) (ids (attribute sub.id))]
-                   [(sm-init ...) (ids (attribute sub.init))])
-       (with-syntax ([(arg-acc ...) (map accessor (syntax->list #'(ctor-arg ...)))]
-                     [(p-acc ...) (map accessor (syntax->list #'(p ...)))]
-                     [(b-acc ...) (map accessor (syntax->list #'(b ...)))]
-                     [(sm-acc ...) (map accessor (syntax->list #'(sm ...)))]
-                     [(p-name ...) (map name-string (syntax->list #'(p ...)))]
-                     [(sm-name ...) (map name-string (syntax->list #'(sm ...)))])
+                   [name? (format-id #'name "~a?" #'name)]
+                   [reflect-name (or (attribute reflect) #'(quote name))]
+                   [formals (if init?
+                                #'init.formals
+                                #'((~@ field.decl ...) ...))]
+                   [(init-body ...) (if init? #'(init-body ...) #'())]
+                   [(absent ...)
+                    (filter (lambda (f)
+                              (not (member f init-ids bound-identifier=?)))
+                            (if init? field-ids '()))]
+                   [(field-name ...)
+                    (for/list ([f (in-list field-ids)])
+                      (symbol->string (syntax-e f)))]
+                   [(field-acc ...) (map accessor field-ids)])
+       (with-syntax ([export (contract-export stx #'name #'name?
+                                              (attribute ctc)
+                                              (attribute pred))])
          #'(begin
-             (struct sid (ctor-arg ... p ... b ... sm ...)
-               #:reflection-name reflect-name
-               #:property prop:procedure
-               (lambda (self . inputs) (apply module-forward self inputs))
-               #:methods gen:module
-               [(define/generic recur-parameters module-parameters)
-                (define/generic recur-named module-named-parameters)
-                (define/generic recur-buffers module-buffers)
-                (define/generic recur-set-training! module-set-training!)
-                (define/generic recur-training? module-training?)
-                (define (module-forward self . inputs)
-                  (let ([ctor-arg (arg-acc self)] ...
-                        [p (p-acc self)] ...
-                        [b (b-acc self)] ...
-                        [sm (sm-acc self)] ...)
-                    (apply (lambda (input ...) body ...) inputs)))
-                (define (module-parameters self)
-                  (append (list (p-acc self) ...)
-                          (recur-parameters (sm-acc self)) ...))
-                (define (module-named-parameters self prefix)
-                  (append (list (cons (string-append prefix p-name)
-                                      (p-acc self))
-                                ...)
-                          (recur-named (sm-acc self)
-                                       (string-append prefix sm-name "."))
-                          ...))
-                (define (module-buffers self)
-                  (append (list (b-acc self) ...)
-                          (recur-buffers (sm-acc self)) ...))
-                (define (module-set-training! self training?)
-                  (recur-set-training! (sm-acc self) training?) ...
-                  (void))
-                (define (module-training? self)
-                  (and (recur-training? (sm-acc self)) ... #t))])
+             (struct sid registry (field.id ...)
+               #:reflection-name reflect-name)
              (define name? sid?)
-             (define (name (~@ formal.decl ...) ...)
-               (let* ([c c-init] ...
-                      [p (requires-grad! p-init)] ...
-                      [b b-init] ...
-                      [sm sm-init] ...)
-                 (sid ctor-arg ... p ... b ... sm ...)))
+             (define (forward-proc self . inputs)
+               (let ([field.id (field-acc self)] ...)
+                 (apply (lambda (input ...) body ...) inputs)))
+             (define (name . formals)
+               (let ([absent #f] ...)
+                 init-body ...
+                 (let-values ([(params buffers children)
+                               (classify '(field-name ...)
+                                         (list field.id ...))])
+                   (check-names
+                    'name
+                    (sid forward-proc params buffers children field.id ...)))))
              export)))]))

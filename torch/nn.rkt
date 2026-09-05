@@ -11,29 +11,47 @@
          "nn/layer-norm.rkt"
          "nn/linear.rkt"
          "nn/loss.rkt"
-         (except-in "nn/module.rkt" module? named-parameters)
+         (except-in "nn/module.rkt"
+                    in-layers
+                    layer?
+                    LayerList
+                    named-parameters)
          (submod "nn/module.rkt" checked)
          (only-in "nn/optim.rkt" adam adam? sgd sgd? step! zero-grads!)
+         (except-in "nn/parameter.rkt" Buffer? Parameter Parameter?)
+         (submod "nn/parameter.rkt" checked)
          "nn/sequential.rkt"
          "nn/state-dict.rkt")
 
-(provide define-module
-         gen:module
-         module-forward
-         module-parameters
-         module-named-parameters
-         module-buffers
-         module-training?
+(provide define-layer
+         gen:layer
+         layer-forward
+         layer-parameters
+         layer-named-parameters
+         layer-buffers
+         layer-named-children
+         layer-training?
          in-eval-mode)
 
-(provide module?
+(provide layer?
          parameters
          named-parameters
          buffers
+         children
+         named-children
          forward
          train!
          eval!
          call-with-eval-mode)
+
+(provide Parameter
+         Parameter?
+         Buffer
+         Buffer?
+         LayerList
+         layer-list?
+         layer-list->list
+         in-layers)
 
 ;; PascalCase constructors / lowercase predicates and functional ops keep
 ;; `(require torch torch/nn)` collision-free (#11).
