@@ -222,6 +222,10 @@
     (check-true (tensor? b))
     (check-true (Buffer? b))
     (check-false (Parameter? b))
+    (check-false (requires-grad? b))
+    (define cut (Buffer (mul (requires-grad! (ones 2)) 2)))
+    (check-false (requires-grad? cut) "a buffer is detached from the graph")
+    (check-equal? (tensor->list cut) '(2.0 2.0))
     (check-exn #rx"^Parameter: contract violation" (lambda () (Parameter 5)))
     (check-exn #rx"^Buffer: contract violation" (lambda () (Buffer 'x)))
     (check-exn #rx"^LayerList: contract violation"
