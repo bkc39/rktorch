@@ -4,7 +4,9 @@
 ;; unused
 #|review: ignore|#
 
-(require "nn/conv.rkt"
+(require (except-in "nn/buffer.rkt" Buffer?)
+         (submod "nn/buffer.rkt" checked)
+         "nn/conv.rkt"
          "nn/dropout.rkt"
          "nn/embedding.rkt"
          (submod "nn/init.rkt" checked)
@@ -18,7 +20,7 @@
                     named-parameters)
          (submod "nn/module.rkt" checked)
          (only-in "nn/optim.rkt" adam adam? sgd sgd? step! zero-grads!)
-         (except-in "nn/parameter.rkt" Buffer? Parameter Parameter?)
+         (except-in "nn/parameter.rkt" Parameter Parameter?)
          (submod "nn/parameter.rkt" checked)
          "nn/sequential.rkt"
          "nn/state-dict.rkt")

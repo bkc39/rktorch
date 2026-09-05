@@ -14,7 +14,8 @@
          (only-in "../foreign.rkt" tensor?)
          (only-in "../private/contract.rkt"
                   define/checked-out define/contract-out)
-         (only-in "parameter.rkt" Buffer? Parameter?))
+         (only-in "buffer.rkt" Buffer?)
+         (only-in "parameter.rkt" Parameter?))
 
 ;; the noqa'd exports are macro expansions raco review cannot see
 (provide gen:layer
