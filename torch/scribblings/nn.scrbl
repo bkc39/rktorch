@@ -101,10 +101,16 @@ A container takes its children as a rest argument and holds them in a
 @racket[relu], so a model can mix layers with the functional interface:
 
 @racketblock[
+(define step/c (or/c layer? procedure?))
+
 (define-layer Sequential (layers)
-  #:contract (-> (or/c layer? procedure?) ... sequential?)
-  #:init (#:rest ms)
-  (set! layers (LayerList ms #:prefix ""))
+  #:contract (->* [] #:rest (or/c (list/c (listof step/c)) (listof step/c))
+                  sequential?)
+  #:init (#:rest steps)
+  (set! layers (LayerList (if (and (pair? steps) (list? (car steps)))
+                              (car steps)
+                              steps)
+                          #:prefix ""))
   #:forward (x)
   (for/fold ([acc x]) ([m (in-layers layers)])
     (m acc)))
@@ -168,6 +174,19 @@ same name.  A layer list is not applicable; iterate it with
 
 @defproc[(layer-list? [v any/c]) boolean?]{
 Recognizes the result of @racket[LayerList].
+}
+
+@defproc*[([(Sequential [step (or/c layer? procedure?)] ...) sequential?]
+           [(Sequential [steps (listof (or/c layer? procedure?))]) sequential?])]{
+A layer that applies each step to the previous step's result, holding
+them in a @racket[LayerList] under @racket[#:prefix ""] so their
+parameters are named by index alone, as @racket["0.weight"].  The steps
+are given either as arguments or as one list, so a model may build
+them with @racket[for/list].
+}
+
+@defproc[(sequential? [v any/c]) boolean?]{
+Recognizes the result of @racket[Sequential].
 }
 
 @defproc[(in-layers [ll layer-list?]) sequence?]{
