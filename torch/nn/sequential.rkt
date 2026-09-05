@@ -1,9 +1,7 @@
 #lang racket/base
 
 (require (only-in racket/contract/base ->* list/c listof or/c)
-         (only-in "module.rkt" define-layer in-layers layer? LayerList))
-
-(define step/c (or/c layer? procedure?))
+         (only-in "module.rkt" define-layer in-layers LayerList step/c))
 
 (define-layer Sequential (layers) ;; noqa
   #:contract (->* [] #:rest (or/c (list/c (listof step/c)) (listof step/c))

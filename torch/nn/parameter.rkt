@@ -1,13 +1,11 @@
 #lang racket/base
 
-(require (only-in racket/contract/base -> any/c contract-out)
+(require (only-in racket/contract/base -> any/c)
          (only-in "../foreign.rkt" detach requires-grad! tensor?)
          (only-in "../foreign/structs.rkt"
                   tensor-handle tensor-impl tensor-impl-shape)
          (only-in "../private/contract.rkt"
                   define/checked-out define/contract-out))
-
-(provide Parameter? Buffer?)
 
 (struct Parameter% tensor-impl ()
   #:reflection-name 'Parameter)
@@ -15,12 +13,8 @@
 (struct Buffer% tensor-impl ()
   #:reflection-name 'Buffer)
 
-(define Parameter? Parameter%?)
-(define Buffer? Buffer%?)
-
-(module+ checked
-  (provide (contract-out [Parameter? (-> any/c boolean?)]
-                         [Buffer? (-> any/c boolean?)])))
+(define/checked-out Parameter? (-> any/c boolean?) Parameter%?)
+(define/checked-out Buffer? (-> any/c boolean?) Buffer%?)
 
 (define/checked-out (Parameter t) ;; noqa
   (-> tensor? Parameter?)

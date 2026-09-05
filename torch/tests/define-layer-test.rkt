@@ -63,8 +63,15 @@
       (set! p (LayerList (list (Linear 1 1)) #:prefix "x"))
       (set! q (LayerList (list (Linear 1 1)) #:prefix "x"))
       #:forward (v) v)
-    (check-exn #rx"^Clash: two parameters would share a name"
+    (check-exn #rx"^Clash: two children would share a name"
                (lambda () (Clash)))
+    (define-layer Quiet (p q)
+      #:init ()
+      (set! p (LayerList (list (Dropout)) #:prefix "x"))
+      (set! q (LayerList (list (Dropout)) #:prefix "x"))
+      #:forward (v) v)
+    (check-exn #rx"^Quiet: two children would share a name.*\"x\""
+               (lambda () (Quiet)))
     (define-layer Nested (p q)
       #:init ()
       (set! p (LayerList (list (Sequential (Linear 1 1))) #:prefix ""))
@@ -89,6 +96,23 @@
     (check-true (layer-list? (LayerList '() #:prefix #f)))
     (check-exn #rx"^LayerList: contract violation"
                (lambda () (LayerList '() #:prefix "a.b"))))
+
+  (test-case "a layer reached by two paths contributes its parameters once"
+    (manual-seed! 0)
+    (define shared (Linear 2 2))
+    (define-layer Tied (a b both)
+      #:init ()
+      (set! a shared)
+      (set! b shared)
+      (set! both (LayerList (list shared shared)))
+      #:forward (x) (b (a x)))
+    (define t (Tied))
+    (check-equal? (map car (named-parameters t)) '("a.weight" "a.bias"))
+    (check-equal? (parameters t) (parameters shared))
+    (check-equal? (map car (named-children t)) '("a" "both"))
+    (check-equal? (map car (named-children (cadr (children t)))) '("0"))
+    (check-equal? (map car (named-parameters (cadr (children t))))
+                  '("0.weight" "0.bias")))
 
   (test-case "own parameters come before children's, each in declaration order"
     (define-layer Interleaved (fc1 w fc2 v)

@@ -61,9 +61,11 @@ What a field holds when @racket[init-body] finishes decides what it is:
        otherwise ignored.}]
 
 @racket[parameters] lists a layer's own parameters first and then each
-child's, each group in field declaration order.  @racket[init-body] runs
-sequentially, so the order in which parameters draw from the RNG is the
-order of the assignments.
+child's, each group in field declaration order.  A parameter or child
+reachable by more than one path, as when two fields hold the same layer,
+is listed once, under the first path, so an optimizer steps it once.
+@racket[init-body] runs sequentially, so the order in which parameters
+draw from the RNG is the order of the assignments.
 
 @racket[#:contract] exports the layer.  It provides @racket[name] under
 @racket[contract-expr] and the predicate under a lowercase name, both via
@@ -167,9 +169,9 @@ field, it registers under the field name, so its parameters are
 under that name instead, and @racket[""] drops the segment altogether, as
 @racket[Sequential] does.  A @racket[prefix] is one name segment and may
 not contain a dot, as with @tt{add_module}.  A layer's constructor
-raises if two of its parameters, however nested, would flatten to the
-same name.  A layer list is not applicable; iterate it with
-@racket[in-layers].
+raises if two of its children would register under one name, or if two
+of its parameters, however nested, would flatten to the same name.  A
+layer list is not applicable; iterate it with @racket[in-layers].
 }
 
 @defproc[(layer-list? [v any/c]) boolean?]{
@@ -199,9 +201,9 @@ The children of @racket[ll], in order, as a list.
 }
 
 @defproc[(children [m layer?]) (listof layer?)]{
-The direct children of @racket[m], in registration order.  A
-@racket[LayerList] counts as one child; its own children are reached
-through it.
+The direct children of @racket[m], in registration order, each listed
+once however many fields hold it.  A @racket[LayerList] counts as one
+child; its own children are reached through it.
 }
 
 @defproc[(named-children [m layer?]) (listof (cons/c string? layer?))]{
