@@ -57,6 +57,7 @@
          view
          transpose
          (rename-out [transpose t])
+         T
          permute
          squeeze
          unsqueeze

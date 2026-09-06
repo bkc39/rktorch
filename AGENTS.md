@@ -67,7 +67,9 @@ CPU-first; float32 + inferred int64 (#44). From `torch`:
 - operators: `+ - * /` shadow racket/base rkt-polars-style (numeric fast
   path to racket/base, tensor operands dispatch to add/sub/mul/div, chains
   fold left); `@` is matmul, like Python's `a @ b`; `t`/`Σ` are terse
-  aliases for transpose/sum; `~> ~>> lambda~> lambda~>>` are re-provided
+  aliases for transpose/sum; unary `T` reverses all axes like Python's `x.T`
+  (use `transpose` on the last two axes for batched attention);
+  `~> ~>> lambda~> lambda~>>` are re-provided
   from the `threading` library (dep `threading-lib`, prefetched offline by
   the `racket-deps` fixed-output derivation in flake.nix)
 - reductions: `sum mean max min argmax softmax log-softmax`
