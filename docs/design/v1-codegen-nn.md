@@ -317,7 +317,8 @@ compile-time field list left nowhere to write ordinary constructor code
 indexed children or a `#f` "declared but absent" parameter. `define-layer`
 now takes an `#:init` body that assigns declared fields with `set!`, and the
 *value* a field holds when the body finishes classifies it: `Parameter?` and
-`Buffer?` are tensor subtypes (`torch/nn/parameter.rkt`), `layer?` is a
+`Buffer?` are tensor subtypes (`torch/nn/parameter.rkt`,
+`torch/nn/buffer.rkt`), `layer?` is a
 child, `#f` is absent, anything else is a plain field. `LayerList` holds a
 variable number of children under indexed names, with `#:prefix` for a
 container that names them without its own field segment. Architecture 1's

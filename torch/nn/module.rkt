@@ -9,12 +9,13 @@
                   -> ->* and/c any any/c cons/c contract-out listof not/c
                   or/c)
          (only-in racket/generic define-generics)
-         (only-in racket/list append-map check-duplicates)
+         (only-in racket/list append-map check-duplicates remove-duplicates)
          (only-in syntax/parse/define define-syntax-parse-rule)
          (only-in "../foreign.rkt" tensor?)
          (only-in "../private/contract.rkt"
                   define/checked-out define/contract-out)
-         (only-in "parameter.rkt" Buffer? Parameter?))
+         (only-in "buffer.rkt" Buffer?)
+         (only-in "parameter.rkt" Parameter?))
 
 ;; the noqa'd exports are macro expansions raco review cannot see
 (provide gen:layer
@@ -27,7 +28,8 @@
          layer-set-training! ;; noqa
          layer-training? ;; noqa
          in-eval-mode
-         define-layer)
+         define-layer
+         step/c)
 
 (define-generics layer
   (layer-forward layer . inputs)
@@ -45,23 +47,23 @@
 ;; PyTorch's parameters() order, which seeded-init parity relies on.
 (define/contract-out (parameters m) ;; noqa
   (-> layer? (listof tensor?))
-  (layer-parameters m))
+  (remove-duplicates (layer-parameters m) eq?))
 
 (define/checked-out (named-parameters m [prefix ""]) ;; noqa
   (->* [layer?] [string?] (listof (cons/c string? tensor?)))
-  (layer-named-parameters m prefix))
+  (remove-duplicates (layer-named-parameters m prefix) eq? #:key cdr))
 
 (define/contract-out (buffers m) ;; noqa
   (-> layer? (listof tensor?))
-  (layer-buffers m))
+  (remove-duplicates (layer-buffers m) eq?))
 
 (define/contract-out (children m) ;; noqa
   (-> layer? (listof layer?))
-  (map cdr (layer-named-children m)))
+  (map cdr (named-children m)))
 
 (define/contract-out (named-children m) ;; noqa
   (-> layer? (listof (cons/c string? layer?)))
-  (layer-named-children m))
+  (remove-duplicates (layer-named-children m) eq? #:key cdr))
 
 (define/contract-out (forward m . inputs) ;; noqa
   (-> layer? any/c ... any)
@@ -149,14 +151,18 @@
 (define (as-layer v)
   (if (layer? v) v (Fn% fn-forward '() '() '() v)))
 
+(define step/c (or/c layer? procedure?))
+
 (define/checked-out (LayerList layers #:prefix [prefix #f])
-  (->* [(listof (or/c layer? procedure?))]
+  (->* [(listof step/c)]
        [#:prefix (or/c #f (and/c string? (not/c #rx"[.]")))]
        layer-list?)
-  (LayerList% layer-list-forward '() '()
-              (for/list ([m (in-list layers)] [i (in-naturals)])
-                (cons (number->string i) (as-layer m)))
-              prefix))
+  (check-names
+   'LayerList
+   (LayerList% layer-list-forward '() '()
+               (for/list ([m (in-list layers)] [i (in-naturals)])
+                 (cons (number->string i) (as-layer m)))
+               prefix)))
 
 (define/contract-out layer-list? (-> any/c boolean?) LayerList%?)
 
@@ -185,7 +191,11 @@
        (values params buffers (cons (cons registered-as v) children))]
       [else (values params buffers children)])))
 
-(define (check-parameter-names who m) ;; noqa
+(define (check-names who m) ;; noqa
+  (define child-clash (check-duplicates (map car (layer-named-children m))))
+  (when child-clash
+    (raise-arguments-error who "two children would share a name"
+                           "name" child-clash))
   (define clash (check-duplicates (map car (layer-named-parameters m ""))))
   (when clash
     (raise-arguments-error who "two parameters would share a name"
@@ -256,11 +266,7 @@
       #:with formals #'((~@ f.decl ...) ... . rest))
     (pattern (f:ctor-formal ...)
       #:with (id ...) #'(f.id ...)
-      #:with formals #'((~@ f.decl ...) ...)))
-
-  (define (bound-in? id ids) ;; noqa
-    (for/or ([other (in-list ids)])
-      (bound-identifier=? id other))))
+      #:with formals #'((~@ f.decl ...) ...))))
 
 (define-syntax (define-layer stx)
   (syntax-parse stx
@@ -293,7 +299,8 @@
                                 #'((~@ field.decl ...) ...))]
                    [(init-body ...) (if init? #'(init-body ...) #'())]
                    [(absent ...)
-                    (filter (lambda (f) (not (bound-in? f init-ids)))
+                    (filter (lambda (f)
+                              (not (member f init-ids bound-identifier=?)))
                             (if init? field-ids '()))]
                    [(field-name ...)
                     (for/list ([f (in-list field-ids)])
@@ -315,7 +322,7 @@
                  (let-values ([(params buffers children)
                                (classify '(field-name ...)
                                          (list field.id ...))])
-                   (check-parameter-names
+                   (check-names
                     'name
                     (sid forward-proc params buffers children field.id ...)))))
              export)))]))

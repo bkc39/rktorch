@@ -63,8 +63,15 @@
       (set! p (LayerList (list (Linear 1 1)) #:prefix "x"))
       (set! q (LayerList (list (Linear 1 1)) #:prefix "x"))
       #:forward (v) v)
-    (check-exn #rx"^Clash: two parameters would share a name"
+    (check-exn #rx"^Clash: two children would share a name"
                (lambda () (Clash)))
+    (define-layer Quiet (p q)
+      #:init ()
+      (set! p (LayerList (list (Dropout)) #:prefix "x"))
+      (set! q (LayerList (list (Dropout)) #:prefix "x"))
+      #:forward (v) v)
+    (check-exn #rx"^Quiet: two children would share a name.*\"x\""
+               (lambda () (Quiet)))
     (define-layer Nested (p q)
       #:init ()
       (set! p (LayerList (list (Sequential (Linear 1 1))) #:prefix ""))
@@ -72,11 +79,40 @@
       #:forward (v) v)
     (check-exn #rx"^Nested: two parameters would share a name.*0[.]0[.]weight"
                (lambda () (Nested)))
+    (struct Twice ()
+      #:methods gen:layer
+      [(define (layer-named-parameters self prefix)
+         (list (cons (string-append prefix "w") (ones 1))
+               (cons (string-append prefix "w") (ones 1))))])
+    (check-exn #rx"^LayerList: two parameters would share a name.*0[.]w"
+               (lambda () (LayerList (list (Twice)))))
+    (check-equal? (map car (named-parameters
+                            (LayerList
+                             (list (LayerList (list (Linear 1 1)) #:prefix "x")
+                                   (LayerList (list (Linear 1 1)) #:prefix "x")))))
+                  '("0.0.weight" "0.0.bias" "1.0.weight" "1.0.bias"))
     (check-equal? (named-children (Dropout)) '())
     (check-equal? (children (Dropout)) '())
     (check-true (layer-list? (LayerList '() #:prefix #f)))
     (check-exn #rx"^LayerList: contract violation"
                (lambda () (LayerList '() #:prefix "a.b"))))
+
+  (test-case "a layer reached by two paths contributes its parameters once"
+    (manual-seed! 0)
+    (define shared (Linear 2 2))
+    (define-layer Tied (a b both)
+      #:init ()
+      (set! a shared)
+      (set! b shared)
+      (set! both (LayerList (list shared shared)))
+      #:forward (x) (b (a x)))
+    (define t (Tied))
+    (check-equal? (map car (named-parameters t)) '("a.weight" "a.bias"))
+    (check-equal? (parameters t) (parameters shared))
+    (check-equal? (map car (named-children t)) '("a" "both"))
+    (check-equal? (map car (named-children (cadr (children t)))) '("0"))
+    (check-equal? (map car (named-parameters (cadr (children t))))
+                  '("0.weight" "0.bias")))
 
   (test-case "own parameters come before children's, each in declaration order"
     (define-layer Interleaved (fc1 w fc2 v)
@@ -178,6 +214,35 @@
     (check-exn #rx"^Sequential: contract violation"
                (lambda () (Sequential (Linear 1 1) 'relu))))
 
+  (test-case "Sequential forwards through layer-forward, so a step need not be applicable"
+    (struct Plus ()
+      #:methods gen:layer
+      [(define (layer-forward self . inputs) (add (car inputs) 1))
+       (define (layer-named-parameters self prefix) '())
+       (define (layer-named-children self) '())])
+    (check-false (procedure? (Plus)))
+    (define s (Sequential (Plus) relu (Plus)))
+    (check-equal? (tensor->list (s (zeros 2))) '(2.0 2.0))
+    (check-equal? (tensor->list (s (full -5.0 2))) '(1.0 1.0)))
+
+  (test-case "Sequential takes its steps as arguments or as one list"
+    (manual-seed! 0)
+    (define spread (Sequential (Linear 2 2) relu (Linear 2 4)))
+    (manual-seed! 0)
+    (define listed (Sequential (list (Linear 2 2) relu (Linear 2 4))))
+    (check-equal? (map car (named-parameters listed))
+                  '("0.weight" "0.bias" "2.weight" "2.bias"))
+    (check-equal? (map car (named-parameters spread))
+                  (map car (named-parameters listed)))
+    (define x (randn 3 2))
+    (check-equal? (tensor->list (spread x)) (tensor->list (listed x)))
+    (check-equal? (tensor->list ((Sequential) x)) (tensor->list x))
+    (check-equal? (tensor->list ((Sequential '()) x)) (tensor->list x))
+    (check-exn #rx"^Sequential: contract violation"
+               (lambda () (Sequential (list (Linear 1 1)) (Linear 1 1))))
+    (check-exn #rx"^Sequential: contract violation"
+               (lambda () (Sequential (list (Linear 1 1) 'relu)))))
+
   (test-case "LayerList nests under a field and forwards training mode"
     (define-layer Outer (blocks)
       #:init ()
@@ -210,6 +275,10 @@
     (check-true (tensor? b))
     (check-true (Buffer? b))
     (check-false (Parameter? b))
+    (check-false (requires-grad? b))
+    (define cut (Buffer (mul (requires-grad! (ones 2)) 2)))
+    (check-false (requires-grad? cut) "a buffer is detached from the graph")
+    (check-equal? (tensor->list cut) '(2.0 2.0))
     (check-exn #rx"^Parameter: contract violation" (lambda () (Parameter 5)))
     (check-exn #rx"^Buffer: contract violation" (lambda () (Buffer 'x)))
     (check-exn #rx"^LayerList: contract violation"

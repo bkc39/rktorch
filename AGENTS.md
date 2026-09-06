@@ -262,8 +262,8 @@ module's full export set (`racket/runtime-path`, `syntax/parse/pre`).
   finalizer-cancelling `tr-tensor-free/checked`; OOM reaches users as
   `exn:fail:rktorch:oom` (catch by type, not message).
 - `nn.rkt` — pure re-export facade over `nn/` (`module.rkt` = `gen:layer`, `LayerList` +
-  the `define-layer` macro; `parameter.rkt`, `linear.rkt`, `init.rkt`, `optim.rkt`,
-  `loss.rkt`).
+  the `define-layer` macro; `parameter.rkt`, `buffer.rkt`, `linear.rkt`,
+  `init.rkt`, `optim.rkt`, `loss.rkt`).
 - `private/install-torchrkt-native.rkt` — stages `libtorchrkt.*` into
   `native-libs/` from `TORCHRKT_NATIVE_LIB_PATH` (set by the Nix build/shell).
   Every staging path (here and the flake's three shell ones) writes a temp file
