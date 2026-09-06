@@ -1,7 +1,8 @@
 #lang racket/base
 
 (require (only-in racket/contract/base ->* list/c listof or/c)
-         (only-in "module.rkt" define-layer in-layers LayerList step/c))
+         (only-in "module.rkt"
+                  define-layer in-layers layer-forward LayerList step/c))
 
 (define-layer Sequential (layers) ;; noqa
   #:contract (->* [] #:rest (or/c (list/c (listof step/c)) (listof step/c))
@@ -14,4 +15,4 @@
   #:forward (x)
   (for/fold ([acc x])
             ([m (in-layers layers)])
-    (m acc)))
+    (layer-forward m acc)))

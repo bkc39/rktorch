@@ -214,6 +214,17 @@
     (check-exn #rx"^Sequential: contract violation"
                (lambda () (Sequential (Linear 1 1) 'relu))))
 
+  (test-case "Sequential forwards through layer-forward, so a step need not be applicable"
+    (struct Plus ()
+      #:methods gen:layer
+      [(define (layer-forward self . inputs) (add (car inputs) 1))
+       (define (layer-named-parameters self prefix) '())
+       (define (layer-named-children self) '())])
+    (check-false (procedure? (Plus)))
+    (define s (Sequential (Plus) relu (Plus)))
+    (check-equal? (tensor->list (s (zeros 2))) '(2.0 2.0))
+    (check-equal? (tensor->list (s (full -5.0 2))) '(1.0 1.0)))
+
   (test-case "Sequential takes its steps as arguments or as one list"
     (manual-seed! 0)
     (define spread (Sequential (Linear 2 2) relu (Linear 2 4)))
