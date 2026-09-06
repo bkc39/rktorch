@@ -522,6 +522,11 @@
               cudaPackages = pkgsCudaPy.cudaPackages_13;
             }).overridePythonAttrs (_: { dontCheckRuntimeDeps = true; })) ]);
 
+          ocamlTorch = import ./nix/ocaml-torch.nix { inherit pkgs; };
+          ocamlInputs = with pkgs.ocamlPackages; [
+            ocaml dune_3 findlib utop ocaml-lsp ocamlformat ocamlTorch
+          ];
+
           baseInputs = [
             pkgs.cmake
             pkgs.clang-tools
@@ -633,7 +638,7 @@
           # cross-test for real:
           #   raco test torch/tests/python-cross-test.rkt
           default = pkgs.mkShell {
-            buildInputs = baseInputs ++ [ pythonEnv ];
+            buildInputs = baseInputs ++ [ pythonEnv ] ++ ocamlInputs;
             shellHook = provisionRacketFor cpp;
           };
 
