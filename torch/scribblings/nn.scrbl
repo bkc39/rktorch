@@ -115,7 +115,7 @@ A container takes its children as a rest argument and holds them in a
                           #:prefix ""))
   #:forward (x)
   (for/fold ([acc x]) ([m (in-layers layers)])
-    (m acc)))
+    (layer-forward m acc)))
 ]
 
 An invariant that relates two arguments is a @racket[->i] precondition
