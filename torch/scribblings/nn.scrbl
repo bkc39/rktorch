@@ -163,7 +163,11 @@ Recognizes the result of @racket[Buffer].
 A layer whose children are @racket[layers], named by index.  An element
 that is a procedure but not a @racket[layer?] becomes a child with no
 parameters that applies the procedure to its inputs, so it keeps its
-index and appears in @racket[children] like any other.  Assigned to a
+index and appears in @racket[children] like any other.  A tensor such a
+procedure closes over is neither a parameter nor a buffer: nothing
+trains it or saves it, and it lives as long as the model does.  A value
+meant to train belongs in a @racket[Parameter] field of a
+@racket[define-layer].  Assigned to a
 field, it registers under the field name, so its parameters are
 @racket["layers.0.weight"] and so on; with @racket[prefix] it registers
 under that name instead, and @racket[""] drops the segment altogether, as
