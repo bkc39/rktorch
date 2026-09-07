@@ -1,0 +1,3 @@
+(executables
+ (names run check)
+ (libraries torch))
