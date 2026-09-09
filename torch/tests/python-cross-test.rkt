@@ -439,6 +439,20 @@
              [b (in-list (hash-ref jg 'values))]
              [i (in-naturals)])
          (check-= a b tol (format "gelu parity ~a" i))))
+     (let ()
+       (define jt (python-check "transpose_all.py"))
+       (manual-seed! 0)
+       (define x2 (randn 3 4))
+       (define x3 (randn 2 3 4))
+       (for ([r (in-list (list (T x2) (T x3)))]
+             [key (in-list '(rank2 rank3))])
+         (define j (hash-ref jt key))
+         (check-equal? (tensor-shape r) (hash-ref j 'shape)
+                       (format "T parity: ~a shape" key))
+         (for ([a (in-list (tensor->list r))]
+               [b (in-list (hash-ref j 'values))]
+               [i (in-naturals)])
+           (check-= a b tol (format "T parity ~a ~a" key i)))))
      (define jm (python-check "causal_mask.py"))
      (manual-seed! 0)
      (define scores (randn 2 4 4))
