@@ -7,8 +7,10 @@
                   reshape
                   tensor
                   tensor->list
+                  tensor-dtype
                   tensor-shape
                   tensor?
+                  to-dtype
                   with-no-grad)
          (only-in "../generated.rkt" copy!)
          (only-in "../private/contract.rkt" define/contract-out)
@@ -18,25 +20,50 @@
   (-> layer? (listof (cons/c string? tensor?)))
   (append (named-parameters model) (named-buffers model)))
 
-(define (floats->bytes floats)
-  (apply bytes-append
-         (for/list ([f (in-list floats)])
-           (real->floating-point-bytes (exact->inexact f) 4 #f))))
+(define (encode name t)
+  (define vals (tensor->list t))
+  (case (tensor-dtype t)
+    [(float32)
+     (values "F32"
+             (apply bytes-append
+                    (for/list ([f (in-list vals)])
+                      (real->floating-point-bytes (exact->inexact f) 4 #f))))]
+    [(int64)
+     (values "I64"
+             (apply bytes-append
+                    (for/list ([i (in-list vals)])
+                      (integer->integer-bytes i 8 #t #f))))]
+    [(bool)
+     (values "BOOL"
+             (apply bytes (for/list ([v (in-list vals)]) (if (zero? v) 0 1))))]
+    [else
+     (raise-arguments-error 'save-state! "unsupported dtype"
+                            "entry" name
+                            "dtype" (tensor-dtype t))]))
 
-(define (bytes->floats bs)
-  (define n (quotient (bytes-length bs) 4))
-  (for/list ([i (in-range n)])
-    (floating-point-bytes->real bs #f (* i 4) (* (+ i 1) 4))))
+(define (decode dtype bs)
+  (define n (bytes-length bs))
+  (case dtype
+    [("F32")
+     (tensor (for/list ([i (in-range 0 n 4)])
+               (floating-point-bytes->real bs #f i (+ i 4))))]
+    [("I64")
+     (tensor (for/list ([i (in-range 0 n 8)])
+               (integer-bytes->integer bs #t #f i (+ i 8))))]
+    [("BOOL")
+     (to-dtype (tensor (for/list ([b (in-bytes bs)]) b)) 'bool)]
+    [else
+     (raise-arguments-error 'load-state! "unsupported dtype" "dtype" dtype)]))
 
 (define/contract-out (save-state! model path) ;; noqa
   (-> layer? path-string? void?)
   (define-values (fields chunks total)
     (for/fold ([fields '()] [chunks '()] [offset 0])
               ([e (in-list (state-dict model))])
-      (define bs (floats->bytes (tensor->list (cdr e))))
+      (define-values (dtype bs) (encode (car e) (cdr e)))
       (define end (+ offset (bytes-length bs)))
       (values (cons (cons (string->symbol (car e))
-                          (hasheq 'dtype "F32"
+                          (hasheq 'dtype dtype
                                   'shape (tensor-shape (cdr e))
                                   'data_offsets (list offset end)))
                     fields)
@@ -68,8 +95,9 @@
                   (lambda ()
                     (error 'load-state! "no entry for ~s" name))))
       (define offsets (hash-ref meta 'data_offsets))
-      (define floats
-        (bytes->floats (subbytes raw
-                                 (+ data-start (car offsets))
-                                 (+ data-start (cadr offsets)))))
-      (copy! target (apply reshape (tensor floats) (tensor-shape target)) #f))))
+      (define loaded
+        (decode (hash-ref meta 'dtype)
+                (subbytes raw
+                          (+ data-start (car offsets))
+                          (+ data-start (cadr offsets)))))
+      (copy! target (apply reshape loaded (tensor-shape target)) #f))))

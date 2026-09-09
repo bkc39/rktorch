@@ -212,13 +212,21 @@ field of a @racket[define-layer], or in an explicit registration on
 @racket[procedure->Layer].
 }
 
-@defproc[(children-by-key [entries (listof (cons/c string? (or/c layer? procedure?)))])
+@defproc[(children-by-key [entries (listof (cons/c child-name/c step/c))])
          Children?]{
 Like @racket[children-by-index], with each child under the name paired
-with it.  A name is one segment and may not contain a dot, as with
-@tt{add_module}.  A layer's constructor raises if two of its children
-would register under one name, or if two of its parameters, however
-nested, would flatten to the same name.
+with it.  A layer's constructor raises if two of its children would
+register under one name, or if two of its parameters or buffers,
+however nested, would flatten to the same state-dict name.
+}
+
+@defthing[step/c contract?]{
+What a container accepts as a step: @racket[(or/c layer? procedure?)].
+}
+
+@defthing[child-name/c contract?]{
+A name a child registers under: one non-empty segment without a dot,
+as with @tt{add_module}.
 }
 
 @defproc[(Children? [v any/c]) boolean?]{

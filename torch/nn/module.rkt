@@ -39,7 +39,15 @@
   (layer-named-buffers layer prefix)
   (layer-named-children layer)
   (layer-set-training! layer training?)
-  (layer-training? layer))
+  (layer-training? layer)
+  #:fallbacks
+  [(define (layer-parameters self) '()) ;; noqa
+   (define (layer-named-parameters self prefix) '()) ;; noqa
+   (define (layer-buffers self) '()) ;; noqa
+   (define (layer-named-buffers self prefix) '()) ;; noqa
+   (define (layer-named-children self) '()) ;; noqa
+   (define (layer-set-training! self training?) (void)) ;; noqa
+   (define (layer-training? self) #t)]) ;; noqa
 
 (module+ checked
   (provide (contract-out [layer? (-> any/c boolean?)])))
@@ -158,7 +166,8 @@
 
 (define/checked-out step/c contract? (or/c layer? procedure?))
 
-(define/checked-out child-name/c contract? (and/c string? (not/c #rx"[.]")))
+(define/checked-out child-name/c contract?
+  (and/c string? (not/c "") (not/c #rx"[.]")))
 
 (define/contract-out (procedure->Layer proc
                                        #:parameters [params '()]
@@ -220,10 +229,16 @@
   (when child-clash
     (raise-arguments-error who "two children would share a name"
                            "name" child-clash))
-  (define clash (check-duplicates (map car (layer-named-parameters m ""))))
+  (define params (map car (layer-named-parameters m "")))
+  (define clash (check-duplicates params))
   (when clash
     (raise-arguments-error who "two parameters would share a name"
                            "name" clash))
+  (define entry-clash
+    (check-duplicates (append params (map car (layer-named-buffers m "")))))
+  (when entry-clash
+    (raise-arguments-error who "two state-dict entries would share a name"
+                           "name" entry-clash))
   m)
 
 (begin-for-syntax

@@ -67,7 +67,9 @@
          children-by-key
          Children?
          child-ref
-         in-layers)
+         child-name/c
+         in-layers
+         step/c)
 
 ;; PascalCase constructors / lowercase predicates and functional ops keep
 ;; `(require torch torch/nn)` collision-free (#11).

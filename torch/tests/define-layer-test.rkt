@@ -56,7 +56,26 @@
     (check-equal? (tensor->list (car (buffers loaded))) '(7.0 7.0))
     (check-equal? (map tensor->list (parameters loaded))
                   (map tensor->list (parameters saved)))
-    (delete-file path))
+    (delete-file path)
+    (define-layer Typed (mask count)
+      #:init (n)
+      (set! mask (Buffer (eq (tril (ones 2 2)) 0)))
+      (set! count (Buffer (tensor (list n 3))))
+      #:forward (x) x)
+    (define typed-path (make-temporary-file "rkt-typed-~a.safetensors"))
+    (save-state! (Typed 16777217) typed-path)
+    (define typed (Typed 0))
+    (load-state! typed typed-path)
+    (check-equal? (map tensor-dtype (buffers typed)) '(bool int64))
+    (check-equal? (tensor->list (car (buffers typed))) '(0.0 1.0 0.0 0.0))
+    (check-equal? (tensor->list (cadr (buffers typed))) '(16777217 3))
+    (delete-file typed-path)
+    (define-layer Wide (w)
+      #:init ()
+      (set! w (Buffer (to-dtype (ones 1) 'float64)))
+      #:forward (x) x)
+    (check-exn #rx"^save-state!: unsupported dtype"
+               (lambda () (save-state! (Wide) typed-path))))
 
   (test-case "every child field registers, in declaration order, whatever its kind"
     (manual-seed! 0)
@@ -117,6 +136,16 @@
                (cons (string-append prefix "w") (ones 1))))])
     (check-exn #rx"^LayerList: two parameters would share a name.*0[.]w"
                (lambda () (LayerList (list (Twice)))))
+    (struct Overlap ()
+      #:methods gen:layer
+      [(define (layer-named-parameters self prefix)
+         (list (cons (string-append prefix "x") (ones 1))))
+       (define (layer-named-buffers self prefix)
+         (list (cons (string-append prefix "x") (ones 1))))])
+    (check-exn #rx"^LayerList: two state-dict entries would share a name.*0[.]x"
+               (lambda () (LayerList (list (Overlap)))))
+    (check-exn #rx"^LayerHash: contract violation"
+               (lambda () (LayerHash (list (cons "" (Linear 1 1))))))
     (check-equal? (map car (named-parameters
                             (LayerList (list (LayerList (list (Linear 1 1)))
                                              (LayerList (list (Linear 1 1)))))))
@@ -288,10 +317,12 @@
   (test-case "Sequential forwards through layer-forward, so a step need not be applicable"
     (struct Plus ()
       #:methods gen:layer
-      [(define (layer-forward self . inputs) (add (car inputs) 1))
-       (define (layer-named-parameters self prefix) '())
-       (define (layer-named-children self) '())])
+      [(define (layer-forward self . inputs) (add (car inputs) 1))])
     (check-false (procedure? (Plus)))
+    (check-equal? (parameters (Plus)) '())
+    (check-equal? (state-dict (Plus)) '())
+    (check-equal? (children (Plus)) '())
+    (check-true (layer-training? (eval! (Plus))))
     (define s (Sequential (Plus) relu (Plus)))
     (check-equal? (tensor->list (s (zeros 2))) '(2.0 2.0))
     (check-equal? (tensor->list (s (full -5.0 2))) '(1.0 1.0)))
