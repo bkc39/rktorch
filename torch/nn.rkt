@@ -21,6 +21,7 @@
                     children-by-key
                     in-layers
                     layer?
+                    named-buffers
                     named-parameters
                     step/c)
          (submod "nn/module.rkt" checked)
@@ -36,6 +37,7 @@
          layer-parameters
          layer-named-parameters
          layer-buffers
+         layer-named-buffers
          layer-named-children
          layer-training?
          in-eval-mode)
@@ -45,6 +47,7 @@
          parameters
          named-parameters
          buffers
+         named-buffers
          children
          named-children
          forward

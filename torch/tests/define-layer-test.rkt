@@ -2,6 +2,7 @@
 
 (module+ test
   (require rackunit
+           (only-in racket/file make-temporary-file)
            (only-in syntax/macro-testing convert-compile-time-error)
            "../main.rkt"
            "../nn.rkt")
@@ -27,6 +28,35 @@
     (define seen (k (ones 2)))
     (check-equal? (car seen) 7 "a plain field is kept, not registered")
     (check-false (list-ref seen 5) "a field never assigned is #f"))
+
+  (test-case "buffers are named, listed after parameters, and round-trip the state dict"
+    (define k (Kinds 1))
+    (check-equal? (map car (named-buffers k)) '("shift"))
+    (check-equal? (map car (state-dict k))
+                  '("w" "b" "child.weight" "child.bias" "shift"))
+    (define-layer Outer (inner)
+      #:init ()
+      (set! inner (Kinds 1))
+      #:forward (x) x)
+    (check-equal? (map car (named-buffers (Outer))) '("inner.shift"))
+    (define-layer Stats (fc mean)
+      #:init (v)
+      (set! fc (Linear 1 1))
+      (set! mean (Buffer (full v 2)))
+      #:forward (x) x)
+    (define path (make-temporary-file "rkt-buf-~a.safetensors"))
+    (manual-seed! 1)
+    (define saved (Stats 7.0))
+    (save-state! saved path)
+    (manual-seed! 2)
+    (define loaded (Stats 1.0))
+    (check-equal? (tensor->list (car (buffers loaded))) '(1.0 1.0))
+    (load-state! loaded path)
+    (check-equal? (map car (state-dict loaded)) '("fc.weight" "fc.bias" "mean"))
+    (check-equal? (tensor->list (car (buffers loaded))) '(7.0 7.0))
+    (check-equal? (map tensor->list (parameters loaded))
+                  (map tensor->list (parameters saved)))
+    (delete-file path))
 
   (test-case "every child field registers, in declaration order, whatever its kind"
     (manual-seed! 0)

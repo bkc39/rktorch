@@ -7,6 +7,7 @@
                   gen:layer
                   layer-buffers
                   layer-forward
+                  layer-named-buffers
                   layer-named-children
                   layer-named-parameters
                   layer-parameters
@@ -25,6 +26,7 @@
    (define (layer-parameters self) '())
    (define (layer-named-parameters self prefix) '())
    (define (layer-buffers self) '())
+   (define (layer-named-buffers self prefix) '())
    (define (layer-named-children self) '())
    (define (layer-set-training! self training?)
      (set-Dropout%-training?! self training?))

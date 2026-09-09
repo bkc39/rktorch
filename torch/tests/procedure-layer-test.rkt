@@ -40,7 +40,7 @@
     (step! (sgd (parameters net) #:lr 0.5))
     (check-equal? (tensor->list weight) '(0.5 0.5))
     (check-equal? (tensor->list offset) '(1.0 1.0))
-    (check-equal? (map car (state-dict net)) '("weight")))
+    (check-equal? (map car (state-dict net)) '("weight" "offset")))
 
   (test-case "registered children participate in training and containers"
     (define projection (Linear 2 2))

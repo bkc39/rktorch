@@ -12,11 +12,11 @@
                   with-no-grad)
          (only-in "../generated.rkt" copy!)
          (only-in "../private/contract.rkt" define/contract-out)
-         (only-in "module.rkt" layer? named-parameters))
+         (only-in "module.rkt" layer? named-buffers named-parameters))
 
 (define/contract-out (state-dict model) ;; noqa
   (-> layer? (listof (cons/c string? tensor?)))
-  (named-parameters model))
+  (append (named-parameters model) (named-buffers model)))
 
 (define (floats->bytes floats)
   (apply bytes-append
@@ -32,7 +32,7 @@
   (-> layer? path-string? void?)
   (define-values (fields chunks total)
     (for/fold ([fields '()] [chunks '()] [offset 0])
-              ([e (in-list (named-parameters model))])
+              ([e (in-list (state-dict model))])
       (define bs (floats->bytes (tensor->list (cdr e))))
       (define end (+ offset (bytes-length bs)))
       (values (cons (cons (string->symbol (car e))
@@ -60,16 +60,16 @@
   (define header
     (string->jsexpr (bytes->string/utf-8 raw #f 8 data-start)))
   (with-no-grad
-    (for ([e (in-list (named-parameters model))])
+    (for ([e (in-list (state-dict model))])
       (define name (car e))
-      (define param (cdr e))
+      (define target (cdr e))
       (define meta
         (hash-ref header (string->symbol name)
                   (lambda ()
-                    (error 'load-state! "no entry for parameter ~s" name))))
+                    (error 'load-state! "no entry for ~s" name))))
       (define offsets (hash-ref meta 'data_offsets))
       (define floats
         (bytes->floats (subbytes raw
                                  (+ data-start (car offsets))
                                  (+ data-start (cadr offsets)))))
-      (copy! param (apply reshape (tensor floats) (tensor-shape param)) #f))))
+      (copy! target (apply reshape (tensor floats) (tensor-shape target)) #f))))

@@ -24,6 +24,7 @@
          layer-parameters ;; noqa
          layer-named-parameters ;; noqa
          layer-buffers ;; noqa
+         layer-named-buffers ;; noqa
          layer-named-children ;; noqa
          layer-set-training! ;; noqa
          layer-training? ;; noqa
@@ -35,6 +36,7 @@
   (layer-parameters layer)
   (layer-named-parameters layer prefix)
   (layer-buffers layer)
+  (layer-named-buffers layer prefix)
   (layer-named-children layer)
   (layer-set-training! layer training?)
   (layer-training? layer))
@@ -55,6 +57,10 @@
 (define/contract-out (buffers m) ;; noqa
   (-> layer? (listof tensor?))
   (remove-duplicates (layer-buffers m) eq?))
+
+(define/checked-out (named-buffers m [prefix ""]) ;; noqa
+  (->* [layer?] [string?] (listof (cons/c string? tensor?)))
+  (remove-duplicates (layer-named-buffers m prefix) eq? #:key cdr))
 
 (define/contract-out (children m) ;; noqa
   (-> layer? (listof layer?))
@@ -107,6 +113,11 @@
    (define (layer-buffers self)
      (append (map cdr (registry-buffers self))
              (append-map child-buffers (registry-children self))))
+   (define (layer-named-buffers self prefix)
+     (append (for/list ([b (in-list (registry-buffers self))])
+               (cons (string-append prefix (car b)) (cdr b)))
+             (append-map (lambda (c) (child-named-buffers c prefix))
+                         (registry-children self))))
    (define (layer-named-children self)
      (registry-children self))
    (define (layer-set-training! self training?)
@@ -127,11 +138,14 @@
 (define (child-training? c)
   (layer-training? (cdr c)))
 
+(define (child-prefix c prefix)
+  (if (string=? (car c) "") prefix (string-append prefix (car c) ".")))
+
 (define (child-named-parameters c prefix)
-  (layer-named-parameters (cdr c)
-                          (if (string=? (car c) "")
-                              prefix
-                              (string-append prefix (car c) "."))))
+  (layer-named-parameters (cdr c) (child-prefix c prefix)))
+
+(define (child-named-buffers c prefix)
+  (layer-named-buffers (cdr c) (child-prefix c prefix)))
 
 (struct Fn% registry (proc)
   #:reflection-name 'Fn)

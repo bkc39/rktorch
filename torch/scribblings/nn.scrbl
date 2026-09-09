@@ -49,7 +49,8 @@ What a field holds when @racket[init-body] finishes decides what it is:
        @racket[parameters], named by @racket[named-parameters], stepped by
        an optimizer and written to the state dict;}
  @item{a @racket[Buffer?] is a buffer: returned by @racket[buffers],
-       carried with the layer but not trained;}
+       named by @racket[named-buffers], written to the state dict after
+       the parameters, but not trained;}
  @item{a @racket[layer?] is a child: @racket[parameters],
        @racket[named-parameters], @racket[buffers], @racket[train!] and
        @racket[eval!] recurse into it, and its parameters are named under
