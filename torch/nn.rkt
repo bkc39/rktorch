@@ -16,6 +16,7 @@
          "nn/linear.rkt"
          "nn/loss.rkt"
          (except-in "nn/module.rkt"
+                    child-name/c
                     children-by-index
                     children-by-key
                     in-layers

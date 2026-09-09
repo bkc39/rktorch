@@ -264,7 +264,9 @@ Recognizes the result of @racket[Sequential].
 @defproc[(in-layers [v (or/c Children? layer?)]) sequence?]{
 A sequence of the children of @racket[v], in order, for use in
 @racket[for] forms: the entries of a @racket[Children?] value, or the
-@racket[children] of a layer.
+registered children of a layer.  Unlike @racket[children], a layer
+listed more than once is yielded each time, so a tied block in a
+@racket[Sequential] applies as many times as it is listed.
 }
 
 @defproc[(child-ref [m layer?] [name string?]) (or/c layer? #f)]{

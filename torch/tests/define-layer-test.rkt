@@ -193,6 +193,20 @@
     (check-exn #rx"^in-layers: contract violation" (lambda () (in-layers 5)))
     (check-exn #rx"LayerList: not applicable" (lambda () (ll (ones 1)))))
 
+  (test-case "a layer listed twice is applied twice but counted once"
+    (define twice (procedure->Layer (lambda (x) (mul x 2))))
+    (define ll (LayerList (list twice twice)))
+    (check-equal? (length (for/list ([m (in-layers ll)]) m)) 2)
+    (check-equal? (length (children ll)) 1)
+    (check-equal? (tensor->list ((Sequential (list twice twice)) (ones 1)))
+                  '(4.0))
+    (define block (Linear 1 1))
+    (define tied (Sequential block block))
+    (check-equal? (map car (named-parameters tied)) '("0.weight" "0.bias"))
+    (check-equal? (length (for/list ([m (in-layers tied)]) m)) 2)
+    (check-equal? (tensor->list (tied (ones 1)))
+                  (tensor->list (block (block (ones 1))))))
+
   (test-case "LayerHash names its children by key; child-ref looks one up"
     (manual-seed! 0)
     (define h (LayerHash (list (cons "enc" (Linear 2 3))

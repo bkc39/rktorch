@@ -28,8 +28,7 @@
          layer-set-training! ;; noqa
          layer-training? ;; noqa
          in-eval-mode
-         define-layer
-         child-name/c)
+         define-layer)
 
 (define-generics layer
   (layer-forward layer . inputs)
@@ -145,7 +144,7 @@
 
 (define/checked-out step/c contract? (or/c layer? procedure?))
 
-(define child-name/c (and/c string? (not/c #rx"[.]")))
+(define/checked-out child-name/c contract? (and/c string? (not/c #rx"[.]")))
 
 (define/contract-out (procedure->Layer proc
                                        #:parameters [params '()]
@@ -180,7 +179,7 @@
 
 (define/checked-out (in-layers v) ;; noqa
   (-> (or/c Children? layer?) sequence?)
-  (in-list (if (layer? v) (children v) (map cdr (Children%-alist v)))))
+  (in-list (map cdr (if (layer? v) (layer-named-children v) (Children%-alist v)))))
 
 (define/contract-out (child-ref m name) ;; noqa
   (-> layer? string? (or/c layer? #f))
