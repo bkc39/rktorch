@@ -34,19 +34,24 @@ def load_fixture():
     return images, labels
 
 
+class ConvBlock(nn.Module):
+    def __init__(self, in_channels, out_channels):
+        super().__init__()
+        self.conv = nn.Conv2d(in_channels, out_channels, 3)
+        self.pool = nn.MaxPool2d(2)
+
+    def forward(self, x):
+        return self.pool(torch.relu(self.conv(x)))
+
+
 class ConvNet(nn.Module):
     def __init__(self):
         super().__init__()
-        self.c1 = nn.Conv2d(1, 16, 3)
-        self.c2 = nn.Conv2d(16, 32, 3)
-        self.f1 = nn.Linear(800, 128)
-        self.f2 = nn.Linear(128, 10)
+        self.net = nn.Sequential(ConvBlock(1, 16), ConvBlock(16, 32), nn.Flatten(),
+                                 nn.Linear(800, 128), nn.ReLU(), nn.Linear(128, 10))
 
     def forward(self, x):
-        h = torch.max_pool2d(torch.relu(self.c1(x)), 2)
-        h = torch.max_pool2d(torch.relu(self.c2(h)), 2)
-        h = torch.relu(self.f1(torch.flatten(h, 1)))
-        return self.f2(h)
+        return self.net(x)
 
 
 torch.manual_seed(0)

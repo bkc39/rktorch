@@ -28,7 +28,7 @@ are callable in @racket[#:forward] like @tt{self.fc1(x)} —
   (set! fc1 (Linear d-in d-hidden))
   (set! fc2 (Linear d-hidden d-out))
   #:forward (x)
-  (fc2 (relu (fc1 x))))]
+  (~> x fc1 relu fc2))]
 
 @bold{The device.} Pick the accelerator the way PyTorch does
 (@tt{torch.accelerator.current_accelerator()}): set it as the

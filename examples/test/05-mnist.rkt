@@ -28,10 +28,12 @@
               (format "non-finite loss: ~a" losses))
   (check-true (< (last losses) (first losses))
               (format "losses did not decrease: ~a" losses))
-  ;; the convnet's parameter tree: conv/linear weights+biases in decl order.
+  ;; the convnet's parameter tree: the Sequential's steps by index, each
+  ;; conv-block's Conv2d under it, weights before biases.
   (check-equal? (map car (named-parameters net))
-                '("c1.weight" "c1.bias" "c2.weight" "c2.bias"
-                  "f1.weight" "f1.bias" "f2.weight" "f2.bias"))
+                '("net.0.conv.weight" "net.0.conv.bias"
+                  "net.1.conv.weight" "net.1.conv.bias"
+                  "net.3.weight" "net.3.bias" "net.5.weight" "net.5.bias"))
   (check-equal? (map tensor-shape (parameters net))
                 '((16 1 3 3) (16) (32 16 3 3) (32)
                   (128 800) (128) (10 128) (10)))
