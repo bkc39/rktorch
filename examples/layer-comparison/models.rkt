@@ -1,6 +1,6 @@
 #lang racket/base
 
-(require (only-in racket/contract/base -> ->* ->i </c and/c)
+(require (only-in racket/contract/base -> ->* ->i </c >=/c and/c)
          (only-in racket/match match-define)
          (only-in torch
                   + * / @ T eq gelu masked-fill narrow ones permute relu reshape
@@ -9,6 +9,8 @@
          (only-in torch/nn
                   Buffer Conv2d Dropout LayerList LayerNorm Parameter
                   define-layer in-layers kaiming-uniform uniform-init))
+
+(define dropout/c (and/c real? (>=/c 0) (</c 1)))
 
 (define-layer Projection (weight bias)
   #:contract (-> exact-positive-integer? exact-positive-integer? projection?)
@@ -73,7 +75,7 @@
         [heads (width) (and/c exact-positive-integer?
                              (lambda (h) (zero? (remainder width h))))]
         [max-t exact-positive-integer?])
-       (#:dropout [dropout (and/c real? (lambda (p) (<= 0 p)) (</c 1))])
+       (#:dropout [dropout dropout/c])
        [result causal-self-attention?])
   #:init (width heads max-t #:dropout [dropout 0.1])
   (set! head-dim (quotient width heads))
@@ -98,7 +100,7 @@
   (~> (@ weights values) (transpose 1 2) (reshape batch time width) out output-drop))
 
 (define-layer FeedForward (up down drop)
-  #:contract (->* [exact-positive-integer?] [#:dropout real?] feed-forward?)
+  #:contract (->* [exact-positive-integer?] [#:dropout dropout/c] feed-forward?)
   #:init (width #:dropout [dropout 0.1])
   (set! up (Projection width (* 4 width)))
   (set! down (Projection (* 4 width) width))
@@ -109,7 +111,7 @@
 (define-layer TransformerBlock (norm1 attention norm2 mlp)
   #:contract (->* [exact-positive-integer? exact-positive-integer?
                    exact-positive-integer?]
-                  [#:dropout real?] transformer-block?)
+                  [#:dropout dropout/c] transformer-block?)
   #:init (width heads max-t #:dropout [dropout 0.1])
   (set! norm1 (LayerNorm width))
   (set! attention (CausalSelfAttention width heads max-t #:dropout dropout))
@@ -122,7 +124,7 @@
 (define-layer TransformerStack (blocks norm)
   #:contract (->* [exact-positive-integer? exact-positive-integer?
                    exact-positive-integer? exact-positive-integer?]
-                  [#:dropout real?] transformer-stack?)
+                  [#:dropout dropout/c] transformer-stack?)
   #:init (width heads depth max-t #:dropout [dropout 0.1])
   (set! blocks
         (LayerList

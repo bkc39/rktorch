@@ -1,8 +1,5 @@
 #lang racket/base
 
-;; Runner + tests for the Racket column of ../layer-comparison/models.rkt.
-;; The Python and OCaml columns need their own toolchains; see the README.
-
 (require (only-in racket/list last)
          torch
          torch/nn
