@@ -261,7 +261,7 @@ module's full export set (`racket/runtime-path`, `syntax/parse/pre`).
   Explicit synchronous release goes through the raising,
   finalizer-cancelling `tr-tensor-free/checked`; OOM reaches users as
   `exn:fail:rktorch:oom` (catch by type, not message).
-- `nn.rkt` — pure re-export facade over `nn/` (`module.rkt` = `gen:layer`, `LayerList` +
+- `nn.rkt` — pure re-export facade over `nn/` (`layer.rkt` = `gen:layer`, `LayerList` +
   the `define-layer` macro; `parameter.rkt`, `buffer.rkt`, `linear.rkt`,
   `init.rkt`, `optim.rkt`, `loss.rkt`).
 - `private/install-torchrkt-native.rkt` — stages `libtorchrkt.*` into

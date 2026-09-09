@@ -1,7 +1,7 @@
 #lang racket/base
 
 (require (only-in racket/contract/base -> listof)
-         (only-in "module.rkt" children-by-index define-layer step/c))
+         (only-in "layer.rkt" children-by-index define-layer step/c))
 
 (define-layer LayerList (items) ;; noqa
   #:contract (-> (listof step/c) layer-list?)

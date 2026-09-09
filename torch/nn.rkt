@@ -13,9 +13,7 @@
          "nn/layer-hash.rkt"
          "nn/layer-list.rkt"
          "nn/layer-norm.rkt"
-         "nn/linear.rkt"
-         "nn/loss.rkt"
-         (except-in "nn/module.rkt"
+         (except-in "nn/layer.rkt"
                     child-name/c
                     children-by-index
                     children-by-key
@@ -24,7 +22,9 @@
                     named-buffers
                     named-parameters
                     step/c)
-         (submod "nn/module.rkt" checked)
+         (submod "nn/layer.rkt" checked)
+         "nn/linear.rkt"
+         "nn/loss.rkt"
          (only-in "nn/optim.rkt" adam adam? sgd sgd? step! zero-grads!)
          (except-in "nn/parameter.rkt" Parameter Parameter?)
          (submod "nn/parameter.rkt" checked)

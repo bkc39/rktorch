@@ -2,7 +2,7 @@
 
 (module layers racket/base
   (require (only-in racket/contract/base -> ->i any/c)
-           (only-in "../nn/module.rkt" define-layer))
+           (only-in "../nn/layer.rkt" define-layer))
 
   (define-layer AvgPool3d (kernel-size)
     #:contract (-> exact-positive-integer? avg-pool3d?)

@@ -6,7 +6,7 @@
                   nonneg-size-1d/c nonneg-size/c pos-size-1d/c pos-size/c)
          (only-in "../foreign/size.rkt" ->1d ->2d)
          (only-in "init.rkt" fan-in kaiming-uniform uniform-init)
-         (only-in "module.rkt" define-layer)
+         (only-in "layer.rkt" define-layer)
          (only-in "parameter.rkt" Parameter))
 
 (define-layer Conv1d (kernel-size stride padding dilation weight bias) ;; noqa

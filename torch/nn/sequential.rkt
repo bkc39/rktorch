@@ -1,7 +1,7 @@
 #lang racket/base
 
 (require (only-in racket/contract/base ->* list/c listof or/c)
-         (only-in "module.rkt"
+         (only-in "layer.rkt"
                   children-by-index define-layer in-layers layer-forward
                   step/c))
 

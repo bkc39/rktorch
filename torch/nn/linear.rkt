@@ -3,7 +3,7 @@
 (require (only-in racket/contract/base ->)
          (only-in "../foreign.rkt" add matmul transpose)
          (only-in "init.rkt" kaiming-uniform uniform-init)
-         (only-in "module.rkt" define-layer)
+         (only-in "layer.rkt" define-layer)
          (only-in "parameter.rkt" Parameter))
 
 (define-layer Linear (weight bias) ;; noqa

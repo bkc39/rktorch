@@ -2,7 +2,7 @@
 
 (require (only-in racket/contract/base ->* non-empty-listof or/c)
          (only-in "../foreign.rkt" layer-norm ones zeros)
-         (only-in "module.rkt" define-layer)
+         (only-in "layer.rkt" define-layer)
          (only-in "parameter.rkt" Parameter))
 
 (define-layer LayerNorm (normalized-shape eps weight bias) ;; noqa

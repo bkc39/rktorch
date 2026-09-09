@@ -3,7 +3,7 @@
 (require (only-in racket/contract/base ->)
          (only-in "../foreign.rkt" embedding)
          (only-in "init.rkt" normal-init)
-         (only-in "module.rkt" define-layer)
+         (only-in "layer.rkt" define-layer)
          (only-in "parameter.rkt" Parameter))
 
 (define-layer Embedding (weight) ;; noqa

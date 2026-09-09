@@ -3,7 +3,7 @@
 (require (only-in racket/contract/base -> ->* </c >=/c and/c any/c)
          (only-in "../generated.rkt" dropout)
          (only-in "../private/contract.rkt" define/contract-out)
-         (only-in "module.rkt"
+         (only-in "layer.rkt"
                   gen:layer
                   layer-buffers
                   layer-forward

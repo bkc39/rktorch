@@ -306,7 +306,7 @@ it roots every parameter, turning lifetime back into explicit store
 management. The module tree *is* the store; drop the model and the v0
 finalizers reclaim every native handle.
 
-Implementation: `torchrkt/nn/module.rkt` (interface + macro),
+Implementation: `torch/nn/layer.rkt` (interface + macro),
 `nn/{init,linear,optim,loss}.rkt`, facade `torchrkt/nn.rkt`. Registration is
 compile-time (the macro knows the field list), so there is no runtime
 reflection at all — strictly less machinery than Python's `__setattr__` hook.

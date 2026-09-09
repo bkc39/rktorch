@@ -14,7 +14,7 @@
                   with-no-grad)
          (only-in "../generated.rkt" copy!)
          (only-in "../private/contract.rkt" define/contract-out)
-         (only-in "module.rkt"
+         (only-in "layer.rkt"
                   layer-named-buffers layer-named-parameters layer?))
 
 (define/contract-out (state-dict model) ;; noqa

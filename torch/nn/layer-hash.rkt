@@ -1,7 +1,7 @@
 #lang racket/base
 
 (require (only-in racket/contract/base -> cons/c listof)
-         (only-in "module.rkt"
+         (only-in "layer.rkt"
                   child-name/c children-by-key define-layer step/c))
 
 (define-layer LayerHash (items) ;; noqa
