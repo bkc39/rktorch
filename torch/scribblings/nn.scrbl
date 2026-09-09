@@ -198,7 +198,7 @@ registered child layers such as @racket[Dropout].
 For a stateless operation, use @racket[(procedure->Layer relu)].
 }
 
-@defproc[(children-by-index [layers (listof (or/c layer? procedure?))])
+@defproc[(children-by-index [layers (listof step/c)])
          Children?]{
 Names @racket[layers] by position, @racket["0"], @racket["1"] and so on,
 for a field of a @racket[define-layer] to splice in as children.  An
@@ -234,7 +234,7 @@ Recognizes the result of @racket[children-by-index] and
 @racket[children-by-key].
 }
 
-@defproc[(LayerList [layers (listof (or/c layer? procedure?))]) layer-list?]{
+@defproc[(LayerList [layers (listof step/c)]) layer-list?]{
 A layer whose children are @racket[layers], named by index and nothing
 else.  Assigned to a field, it registers under the field name, so its
 parameters are @racket["layers.0.weight"] and so on.  A layer list is
@@ -245,7 +245,7 @@ not applicable; iterate it with @racket[in-layers].
 Recognizes the result of @racket[LayerList].
 }
 
-@defproc[(LayerHash [entries (listof (cons/c string? (or/c layer? procedure?)))])
+@defproc[(LayerHash [entries (listof (cons/c child-name/c step/c))])
          layer-hash?]{
 A layer whose children are @racket[entries], each under its name, in the
 order given.  Assigned to a field @racket[parts], a child @racket["enc"]
@@ -258,8 +258,8 @@ not applicable; reach a child with @racket[child-ref] or iterate with
 Recognizes the result of @racket[LayerHash].
 }
 
-@defproc*[([(Sequential [step (or/c layer? procedure?)] ...) sequential?]
-           [(Sequential [steps (listof (or/c layer? procedure?))]) sequential?])]{
+@defproc*[([(Sequential [step step/c] ...) sequential?]
+           [(Sequential [steps (listof step/c)]) sequential?])]{
 A layer that applies each step to the previous step's result.  The
 steps are its children, named by index, so its parameters are
 @racket["0.weight"] and so on.  The steps are given either as arguments

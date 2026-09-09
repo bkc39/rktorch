@@ -6,8 +6,8 @@
          (only-in "../foreign.rkt"
                   reshape
                   tensor
-                  tensor->list
                   tensor-dtype
+                  tensor->list
                   tensor-shape
                   tensor?
                   to-dtype
