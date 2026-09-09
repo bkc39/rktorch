@@ -69,8 +69,9 @@ pre{font:12px/1.55 ui-monospace,Menlo,Consolas,monospace;white-space:pre;overflo
 <p>Read each component across the columns. Racket uses threading and T for
 rank-two weights. Batched attention retains explicit axis swaps.</p>
 <p>The CNN uses channel-wise LayerNorm and biased convolutions; it is a
-ResNet-style model, not canonical ResNet-18. procedure-&gt;Layer is not yet a
-public Racket API. These examples use the supported define-layer syntax.</p>
+ResNet-style model, not canonical ResNet-18. Racket also offers procedure-&gt;Layer
+with explicit registration; see the README for a closure-based example.
+These columns compare define-layer syntax.</p>
 <p><a href="README.md">Architecture, API status, and run commands</a> ·
 Full source: <a href="models.rkt">Racket</a> /
 <a href="models.py">Python</a> / <a href="models.ml">OCaml</a></p>

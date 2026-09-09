@@ -6,8 +6,8 @@
                      ;; only-in would strip
                      syntax/parse/pre)
          (only-in racket/contract/base
-                  -> ->* and/c any any/c cons/c contract-out contract? listof
-                  not/c or/c)
+                  -> ->* ->i and/c any any/c cons/c contract-out contract? listof
+                  not/c or/c unsupplied-arg?)
          (only-in racket/generic define-generics)
          (only-in racket/list append-map check-duplicates remove-duplicates)
          (only-in syntax/parse/define define-syntax-parse-rule)
@@ -141,11 +141,27 @@
   (apply (Fn%-proc self) inputs))
 
 (define (as-layer v)
-  (if (layer? v) v (Fn% fn-forward '() '() '() v)))
+  (if (layer? v) v (procedure->Layer v)))
 
 (define/checked-out step/c contract? (or/c layer? procedure?))
 
 (define child-name/c (and/c string? (not/c #rx"[.]")))
+
+(define/contract-out (procedure->Layer proc
+                                       #:parameters [params '()]
+                                       #:buffers [bufs '()]
+                                       #:children [kids '()])
+  (->i ([proc procedure?])
+       (#:parameters [params (listof (cons/c child-name/c Parameter?))]
+        #:buffers [bufs (listof (cons/c child-name/c Buffer?))]
+        #:children [kids (listof (cons/c child-name/c layer?))])
+       #:pre (params bufs kids)
+       (not (check-duplicates
+             (map car (append (if (unsupplied-arg? params) '() params)
+                              (if (unsupplied-arg? bufs) '() bufs)
+                              (if (unsupplied-arg? kids) '() kids)))))
+       [result layer?])
+  (check-names 'procedure->Layer (Fn% fn-forward params bufs kids proc)))
 
 (struct Children% (alist)
   #:reflection-name 'Children)

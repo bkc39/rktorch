@@ -40,6 +40,7 @@
          in-eval-mode)
 
 (provide layer?
+         procedure->Layer
          parameters
          named-parameters
          buffers

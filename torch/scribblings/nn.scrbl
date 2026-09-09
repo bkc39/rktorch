@@ -2,7 +2,7 @@
 
 @(require (for-label racket/base
                      racket/contract
-                     (only-in torch tensor?)
+                     (only-in torch lambda~> relu tensor?)
                      torch/nn
                      torch/private/contract))
 
@@ -161,6 +161,42 @@ from any autograd graph that produced @racket[t].
 Recognizes the result of @racket[Buffer].
 }
 
+@defproc[(procedure->Layer [proc procedure?]
+                          [#:parameters params (listof (cons/c string? Parameter?)) '()]
+                          [#:buffers bufs (listof (cons/c string? Buffer?)) '()]
+                          [#:children kids (listof (cons/c string? layer?)) '()])
+         layer?]{
+Wraps @racket[proc] as a callable layer. Calls through the layer itself,
+@racket[forward], or @racket[layer-forward] pass positional arguments to
+@racket[proc] and preserve its return values and exceptions. Keyword
+arguments to the wrapped procedure are not supported.
+
+The optional association lists register captured parameters, buffers, and
+child layers. Names must be unique across all three lists and must not
+contain dots. Parameters precede children's parameters in traversal order;
+shared values are deduplicated by identity. Training and evaluation recurse
+through registered children, as for @racket[define-layer].
+
+Captures are not discovered automatically. In contrast to OCaml's
+@tt{Layer.of_fn}, whose parameters belong to a separate variable store,
+this wrapper owns its registered tree. Rebinding a captured variable does
+not change that registration. Mode-dependent operations should live in
+registered child layers such as @racket[Dropout].
+
+@racketblock[
+(define projection (Linear 32 32))
+(define drop (Dropout #:p 0.1))
+(define block
+  (procedure->Layer
+   (lambda~> projection relu drop)
+   #:children (list (cons "projection" projection)
+                    (cons "drop" drop))))
+(eval! block)
+]
+
+For a stateless operation, use @racket[(procedure->Layer relu)].
+}
+
 @defproc[(children-by-index [layers (listof (or/c layer? procedure?))])
          Children?]{
 Names @racket[layers] by position, @racket["0"], @racket["1"] and so on,
@@ -171,7 +207,8 @@ keeps its index and appears in @racket[children] like any other.  A
 tensor such a procedure closes over is neither a parameter nor a
 buffer: nothing trains it or saves it, and it lives as long as the
 model does.  A value meant to train belongs in a @racket[Parameter]
-field of a @racket[define-layer].
+field of a @racket[define-layer], or in an explicit registration on
+@racket[procedure->Layer].
 }
 
 @defproc[(children-by-key [entries (listof (cons/c string? (or/c layer? procedure?)))])

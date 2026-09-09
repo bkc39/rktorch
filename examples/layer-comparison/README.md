@@ -20,10 +20,24 @@ build causal self-attention, a feed-forward layer, and a transformer stack.
 | Matrix transpose | `(T weight)` | `weight.T` | `Tensor.transpose weight ~dim0:0 ~dim1:1` |
 | Evaluation | `(eval! net)` then `(net x)` | `net.eval()` then `net(x)` | `Layer.forward_ net x ~is_training:false` |
 
-Racket's `procedure->Layer`/`procedure->layer` is **not implemented**. The current
-private procedure adapter has no registered parameters, buffers, or children.
-These examples use the supported `define-layer` API. A public wrapper with
-explicit registration remains a design proposal in [#117](https://github.com/bkc39/rktorch/issues/117).
+Racket also provides `procedure->Layer`, with optional `#:parameters`,
+`#:buffers`, and `#:children` association lists for explicit registration.
+The three-column examples retain `define-layer` to compare its syntax.
+The corresponding closure-based composition is:
+
+```racket
+(define projection (Projection 32 32))
+(define drop (Dropout #:p 0.1))
+(define block
+  (procedure->Layer
+   (lambda~> projection relu drop)
+   #:children (list (cons "projection" projection)
+                    (cons "drop" drop))))
+```
+
+Use `(require torch torch/nn "models.rkt")` for this snippet.
+Registered children participate in parameter traversal and train/eval changes.
+Omitting registration creates a layer with no registered captures.
 OCaml's `Layer.of_fn` wraps a closure after its parameters have been registered
 in the supplied store; it does not discover captured parameters.
 
