@@ -10,14 +10,18 @@
          "nn/dropout.rkt"
          "nn/embedding.rkt"
          (submod "nn/init.rkt" checked)
+         "nn/layer-hash.rkt"
+         "nn/layer-list.rkt"
          "nn/layer-norm.rkt"
          "nn/linear.rkt"
          "nn/loss.rkt"
          (except-in "nn/module.rkt"
+                    children-by-index
+                    children-by-key
                     in-layers
                     layer?
-                    LayerList
-                    named-parameters)
+                    named-parameters
+                    step/c)
          (submod "nn/module.rkt" checked)
          (only-in "nn/optim.rkt" adam adam? sgd sgd? step! zero-grads!)
          (except-in "nn/parameter.rkt" Parameter Parameter?)
@@ -52,7 +56,12 @@
          Buffer?
          LayerList
          layer-list?
-         layer-list->list
+         LayerHash
+         layer-hash?
+         children-by-index
+         children-by-key
+         Children?
+         child-ref
          in-layers)
 
 ;; PascalCase constructors / lowercase predicates and functional ops keep

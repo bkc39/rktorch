@@ -53,8 +53,11 @@ What a field holds when @racket[init-body] finishes decides what it is:
  @item{a @racket[layer?] is a child: @racket[parameters],
        @racket[named-parameters], @racket[buffers], @racket[train!] and
        @racket[eval!] recurse into it, and its parameters are named under
-       the field, as in @racket["fc1.weight"] (a @racket[LayerList] may
-       register under a @racket[#:prefix] instead);}
+       the field, as in @racket["fc1.weight"];}
+ @item{a @racket[Children?] value, from @racket[children-by-index] or
+       @racket[children-by-key], splices its entries in as children under
+       their own names, and the field name is dropped, as
+       @tt{add_module} in a loop would;}
  @item{@racket[#f] is a declared but absent slot, skipped by all of the
        above, as @tt{register_parameter(name, None)} is;}
  @item{anything else is a plain field, visible to @racket[#:forward] and
@@ -98,23 +101,24 @@ is allowed only at module level.
   (conv2d x weight #:bias bias #:stride stride #:padding padding))
 ]
 
-A container takes its children as a rest argument and holds them in a
-@racket[LayerList].  A step may be a plain procedure such as
-@racket[relu], so a model can mix layers with the functional interface:
+A container is a layer whose children arrive as a named collection
+rather than one per field.  It builds them with
+@racket[children-by-index] or @racket[children-by-key] and assigns the
+result to a field; the entries register directly on the container, so
+@racket[Sequential]'s parameters are @racket["0.weight"] and so on.  A
+step may be a plain procedure such as @racket[relu], so a model can mix
+layers with the functional interface:
 
 @racketblock[
-(define step/c (or/c layer? procedure?))
-
-(define-layer Sequential (layers)
+(define-layer Sequential (steps)
   #:contract (->* [] #:rest (or/c (list/c (listof step/c)) (listof step/c))
                   sequential?)
-  #:init (#:rest steps)
-  (set! layers (LayerList (if (and (pair? steps) (list? (car steps)))
-                              (car steps)
-                              steps)
-                          #:prefix ""))
+  #:init (#:rest ms)
+  (set! steps (children-by-index (if (and (pair? ms) (list? (car ms)))
+                                     (car ms)
+                                     ms)))
   #:forward (x)
-  (for/fold ([acc x]) ([m (in-layers layers)])
+  (for/fold ([acc x]) ([m (in-layers steps)])
     (layer-forward m acc)))
 ]
 
@@ -157,51 +161,78 @@ from any autograd graph that produced @racket[t].
 Recognizes the result of @racket[Buffer].
 }
 
-@defproc[(LayerList [layers (listof (or/c layer? procedure?))]
-                    [#:prefix prefix (or/c #f (and/c string? (not/c #rx"[.]"))) #f])
-         layer-list?]{
-A layer whose children are @racket[layers], named by index.  An element
-that is a procedure but not a @racket[layer?] becomes a child with no
-parameters that applies the procedure to its inputs, so it keeps its
-index and appears in @racket[children] like any other.  A tensor such a
-procedure closes over is neither a parameter nor a buffer: nothing
-trains it or saves it, and it lives as long as the model does.  A value
-meant to train belongs in a @racket[Parameter] field of a
-@racket[define-layer].  Assigned to a
-field, it registers under the field name, so its parameters are
-@racket["layers.0.weight"] and so on; with @racket[prefix] it registers
-under that name instead, and @racket[""] drops the segment altogether, as
-@racket[Sequential] does.  A @racket[prefix] is one name segment and may
-not contain a dot, as with @tt{add_module}.  A layer's constructor
-raises if two of its children would register under one name, or if two
-of its parameters, however nested, would flatten to the same name.  A
-layer list is not applicable; iterate it with @racket[in-layers].
+@defproc[(children-by-index [layers (listof (or/c layer? procedure?))])
+         Children?]{
+Names @racket[layers] by position, @racket["0"], @racket["1"] and so on,
+for a field of a @racket[define-layer] to splice in as children.  An
+element that is a procedure but not a @racket[layer?] becomes a child
+with no parameters that applies the procedure to its inputs, so it
+keeps its index and appears in @racket[children] like any other.  A
+tensor such a procedure closes over is neither a parameter nor a
+buffer: nothing trains it or saves it, and it lives as long as the
+model does.  A value meant to train belongs in a @racket[Parameter]
+field of a @racket[define-layer].
+}
+
+@defproc[(children-by-key [entries (listof (cons/c string? (or/c layer? procedure?)))])
+         Children?]{
+Like @racket[children-by-index], with each child under the name paired
+with it.  A name is one segment and may not contain a dot, as with
+@tt{add_module}.  A layer's constructor raises if two of its children
+would register under one name, or if two of its parameters, however
+nested, would flatten to the same name.
+}
+
+@defproc[(Children? [v any/c]) boolean?]{
+Recognizes the result of @racket[children-by-index] and
+@racket[children-by-key].
+}
+
+@defproc[(LayerList [layers (listof (or/c layer? procedure?))]) layer-list?]{
+A layer whose children are @racket[layers], named by index and nothing
+else.  Assigned to a field, it registers under the field name, so its
+parameters are @racket["layers.0.weight"] and so on.  A layer list is
+not applicable; iterate it with @racket[in-layers].
 }
 
 @defproc[(layer-list? [v any/c]) boolean?]{
 Recognizes the result of @racket[LayerList].
 }
 
+@defproc[(LayerHash [entries (listof (cons/c string? (or/c layer? procedure?)))])
+         layer-hash?]{
+A layer whose children are @racket[entries], each under its name, in the
+order given.  Assigned to a field @racket[parts], a child @racket["enc"]
+has parameters @racket["parts.enc.weight"] and so on.  A layer hash is
+not applicable; reach a child with @racket[child-ref] or iterate with
+@racket[in-layers].
+}
+
+@defproc[(layer-hash? [v any/c]) boolean?]{
+Recognizes the result of @racket[LayerHash].
+}
+
 @defproc*[([(Sequential [step (or/c layer? procedure?)] ...) sequential?]
            [(Sequential [steps (listof (or/c layer? procedure?))]) sequential?])]{
-A layer that applies each step to the previous step's result, holding
-them in a @racket[LayerList] under @racket[#:prefix ""] so their
-parameters are named by index alone, as @racket["0.weight"].  The steps
-are given either as arguments or as one list, so a model may build
-them with @racket[for/list].
+A layer that applies each step to the previous step's result.  The
+steps are its children, named by index, so its parameters are
+@racket["0.weight"] and so on.  The steps are given either as arguments
+or as one list, so a model may build them with @racket[for/list].
 }
 
 @defproc[(sequential? [v any/c]) boolean?]{
 Recognizes the result of @racket[Sequential].
 }
 
-@defproc[(in-layers [ll layer-list?]) sequence?]{
-A sequence of the children of @racket[ll], in order, for use in
-@racket[for] forms.
+@defproc[(in-layers [v (or/c Children? layer?)]) sequence?]{
+A sequence of the children of @racket[v], in order, for use in
+@racket[for] forms: the entries of a @racket[Children?] value, or the
+@racket[children] of a layer.
 }
 
-@defproc[(layer-list->list [ll layer-list?]) (listof layer?)]{
-The children of @racket[ll], in order, as a list.
+@defproc[(child-ref [m layer?] [name string?]) (or/c layer? #f)]{
+The direct child of @racket[m] registered as @racket[name], or
+@racket[#f].
 }
 
 @defproc[(children [m layer?]) (listof layer?)]{

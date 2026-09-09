@@ -60,25 +60,26 @@
   (test-case "two parameters flattening to one name is an error"
     (define-layer Clash (p q)
       #:init ()
-      (set! p (LayerList (list (Linear 1 1)) #:prefix "x"))
-      (set! q (LayerList (list (Linear 1 1)) #:prefix "x"))
+      (set! p (children-by-key (list (cons "x" (Linear 1 1)))))
+      (set! q (children-by-key (list (cons "x" (Linear 1 1)))))
       #:forward (v) v)
     (check-exn #rx"^Clash: two children would share a name"
                (lambda () (Clash)))
     (define-layer Quiet (p q)
       #:init ()
-      (set! p (LayerList (list (Dropout)) #:prefix "x"))
-      (set! q (LayerList (list (Dropout)) #:prefix "x"))
+      (set! p (children-by-key (list (cons "x" (Dropout)))))
+      (set! q (children-by-key (list (cons "x" (Dropout)))))
       #:forward (v) v)
     (check-exn #rx"^Quiet: two children would share a name.*\"x\""
                (lambda () (Quiet)))
-    (define-layer Nested (p q)
+    (define-layer Spliced (head tail)
       #:init ()
-      (set! p (LayerList (list (Sequential (Linear 1 1))) #:prefix ""))
-      (set! q (LayerList (list (Linear 1 1)) #:prefix "0"))
+      (set! head (children-by-index (list (Linear 1 1) (Dropout))))
+      (set! tail (children-by-key (list (cons "out" (Linear 1 1)))))
       #:forward (v) v)
-    (check-exn #rx"^Nested: two parameters would share a name.*0[.]0[.]weight"
-               (lambda () (Nested)))
+    (check-equal? (map car (named-children (Spliced))) '("0" "1" "out"))
+    (check-equal? (map car (named-parameters (Spliced)))
+                  '("0.weight" "0.bias" "out.weight" "out.bias"))
     (struct Twice ()
       #:methods gen:layer
       [(define (layer-named-parameters self prefix)
@@ -87,15 +88,14 @@
     (check-exn #rx"^LayerList: two parameters would share a name.*0[.]w"
                (lambda () (LayerList (list (Twice)))))
     (check-equal? (map car (named-parameters
-                            (LayerList
-                             (list (LayerList (list (Linear 1 1)) #:prefix "x")
-                                   (LayerList (list (Linear 1 1)) #:prefix "x")))))
+                            (LayerList (list (LayerList (list (Linear 1 1)))
+                                             (LayerList (list (Linear 1 1)))))))
                   '("0.0.weight" "0.0.bias" "1.0.weight" "1.0.bias"))
     (check-equal? (named-children (Dropout)) '())
     (check-equal? (children (Dropout)) '())
-    (check-true (layer-list? (LayerList '() #:prefix #f)))
-    (check-exn #rx"^LayerList: contract violation"
-               (lambda () (LayerList '() #:prefix "a.b"))))
+    (check-true (layer-list? (LayerList '())))
+    (check-exn #rx"^LayerHash: contract violation"
+               (lambda () (LayerHash (list (cons "a.b" (Linear 1 1)))))))
 
   (test-case "a layer reached by two paths contributes its parameters once"
     (manual-seed! 0)
@@ -160,7 +160,7 @@
       (for/fold ([acc x]) ([m (in-layers layers)]) (m acc)))
     (define-layer Stack2 (layers)
       #:init (first . rest)
-      (set! layers (LayerList (cons first rest) #:prefix "s"))
+      (set! layers (children-by-key (list (cons "s" (LayerList (cons first rest))))))
       #:forward (x) x)
     (manual-seed! 0)
     (define st (Stack (Linear 2 3) (Linear 3 1)))
@@ -171,24 +171,51 @@
     (check-equal? (map car (named-parameters (Stack2 (Linear 1 1) (Linear 1 1))))
                   '("s.0.weight" "s.0.bias" "s.1.weight" "s.1.bias")))
 
-  (test-case "LayerList: #:prefix \"\" names children by index alone"
+  (test-case "spliced children are named by index alone, as Sequential's are"
     (define-layer Seq (layers)
       #:init (#:rest ms)
-      (set! layers (LayerList ms #:prefix ""))
+      (set! layers (children-by-index ms))
       #:forward (x) x)
     (define s (Seq (Linear 1 1) (Dropout) (Linear 1 1)))
     (check-equal? (map car (named-parameters s))
                   '("0.weight" "0.bias" "2.weight" "2.bias"))
-    (check-equal? (length (layer-list->list (car (children s)))) 3)
-    (check-equal? (for/list ([m (in-layers (car (children s)))]) m)
-                  (layer-list->list (car (children s))))
+    (check-equal? (map car (named-children s)) '("0" "1" "2"))
+    (check-equal? (map car (named-children (Sequential (Linear 1 1) (Dropout))))
+                  '("0" "1"))
+    (define ll (LayerList (list (Linear 1 1) (Dropout) (Linear 1 1))))
+    (check-true (layer-list? ll))
+    (check-equal? (map car (named-children ll)) '("0" "1" "2"))
+    (check-equal? (for/list ([m (in-layers ll)]) m) (children ll))
     (check-equal? (for/list ([m (in-layers (LayerList '()))]) m) '())
-    (check-exn #rx"^in-layers: contract violation"
-               (lambda () (in-layers (Linear 1 1))))
-    (check-true (layer-list? (car (children s))))
-    (check-equal? (map car (named-children (car (children s)))) '("0" "1" "2"))
-    (check-exn #rx"LayerList: not applicable"
-               (lambda () ((car (children s)) (ones 1)))))
+    (check-equal? (for/list ([m (in-layers (children-by-index (list relu)))])
+                    (object-name m))
+                  '(Fn))
+    (check-exn #rx"^in-layers: contract violation" (lambda () (in-layers 5)))
+    (check-exn #rx"LayerList: not applicable" (lambda () (ll (ones 1)))))
+
+  (test-case "LayerHash names its children by key; child-ref looks one up"
+    (manual-seed! 0)
+    (define h (LayerHash (list (cons "enc" (Linear 2 3))
+                               (cons "dec" (Linear 3 2))
+                               (cons "act" relu))))
+    (check-true (layer-hash? h))
+    (check-equal? (map car (named-parameters h))
+                  '("enc.weight" "enc.bias" "dec.weight" "dec.bias"))
+    (check-equal? (map car (named-children h)) '("enc" "dec" "act"))
+    (check-true (linear? (child-ref h "dec")))
+    (check-equal? (tensor-shape ((child-ref h "dec") (ones 1 3))) '(1 2))
+    (check-false (child-ref h "missing"))
+    (check-equal? (for/list ([m (in-layers h)]) m) (children h))
+    (check-exn #rx"^LayerHash: two children would share a name"
+               (lambda () (LayerHash (list (cons "a" (Linear 1 1))
+                                           (cons "a" (Linear 1 1))))))
+    (check-exn #rx"LayerHash: not applicable" (lambda () (h (ones 1))))
+    (define-layer Owner (parts)
+      #:init ()
+      (set! parts (LayerHash (list (cons "a" (Linear 1 1)))))
+      #:forward (x) ((child-ref parts "a") x))
+    (check-equal? (map car (named-parameters (Owner)))
+                  '("parts.a.weight" "parts.a.bias")))
 
   (test-case "a plain procedure is a step of Sequential and a child of a LayerList"
     (define-layer MLP (fn)
@@ -198,7 +225,7 @@
       #:forward (x) (fn x))
     (manual-seed! 0)
     (define net (MLP 4 3 2))
-    (define ll (car (children (car (children net)))))
+    (define ll (car (children net)))
     (check-equal? (map car (named-parameters net))
                   '("fn.0.weight" "fn.0.bias" "fn.2.weight" "fn.2.bias"))
     (check-equal? (map car (named-children ll)) '("0" "1" "2" "3"))
@@ -206,7 +233,7 @@
     (check-equal? (object-name (cadr (children ll))) 'Fn)
     (check-equal? (parameters (cadr (children ll))) '())
     (define x (randn 5 4))
-    (define steps (layer-list->list ll))
+    (define steps (children ll))
     (check-equal? (tensor->list (net x))
                   (tensor->list
                    (mul ((list-ref steps 2) (relu ((list-ref steps 0) x))) 2)))
@@ -253,8 +280,7 @@
     (check-true (layer-training? o))
     (eval! o)
     (check-false (layer-training? o))
-    (check-false (layer-training? (cadr (layer-list->list
-                                         (car (children (car (children o))))))))
+    (check-false (layer-training? (cadr (children (car (children o))))))
     (train! o)
     (check-true (layer-training? o)))
 

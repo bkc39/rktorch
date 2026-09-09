@@ -2,17 +2,17 @@
 
 (require (only-in racket/contract/base ->* list/c listof or/c)
          (only-in "module.rkt"
-                  define-layer in-layers layer-forward LayerList step/c))
+                  children-by-index define-layer in-layers layer-forward
+                  step/c))
 
-(define-layer Sequential (layers) ;; noqa
+(define-layer Sequential (steps) ;; noqa
   #:contract (->* [] #:rest (or/c (list/c (listof step/c)) (listof step/c))
                   sequential?)
-  #:init (#:rest steps)
-  (set! layers (LayerList (if (and (pair? steps) (list? (car steps)))
-                              (car steps)
-                              steps)
-                          #:prefix ""))
+  #:init (#:rest ms)
+  (set! steps (children-by-index (if (and (pair? ms) (list? (car ms)))
+                                     (car ms)
+                                     ms)))
   #:forward (x)
   (for/fold ([acc x])
-            ([m (in-layers layers)])
+            ([m (in-layers steps)])
     (layer-forward m acc)))

@@ -90,7 +90,7 @@ gets contract blame, not a runtime error; the `+ - * / @` operators are
 provided as plain renames (no contract overhead on the numeric fast path),
 per `foreign/operators.rkt`.
 
-From `torch/nn`: `define-layer gen:layer layer? Parameter Buffer LayerList parameters
+From `torch/nn`: `define-layer gen:layer layer? Parameter Buffer LayerList LayerHash parameters
 named-parameters buffers children forward Linear Conv2d MaxPool2d Flatten Dropout
 Sequential Embedding LayerNorm sgd adam step! zero-grads! cross-entropy
 mse-loss kaiming-uniform uniform-init normal-init fan-in`. The functional

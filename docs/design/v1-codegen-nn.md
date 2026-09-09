@@ -319,9 +319,12 @@ now takes an `#:init` body that assigns declared fields with `set!`, and the
 *value* a field holds when the body finishes classifies it: `Parameter?` and
 `Buffer?` are tensor subtypes (`torch/nn/parameter.rkt`,
 `torch/nn/buffer.rkt`), `layer?` is a
-child, `#f` is absent, anything else is a plain field. `LayerList` holds a
-variable number of children under indexed names, with `#:prefix` for a
-container that names them without its own field segment. Architecture 1's
+child, `#f` is absent, anything else is a plain field. A `Children` value
+from `children-by-index` or `children-by-key` splices its entries in as
+children under their own names, which is how `Sequential`, `LayerList` and
+`LayerHash` are ordinary `define-layer`s with no registration logic of
+their own, as PyTorch's containers are thin `Module`s over `add_module`.
+Architecture 1's
 other commitments stand: the model is still a GC-owned struct tree, the
 `gen:layer` interface is still what hand-written layers implement, and
 parameter order (own first, then children, in declaration order) and the

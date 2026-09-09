@@ -6,8 +6,8 @@
                      ;; only-in would strip
                      syntax/parse/pre)
          (only-in racket/contract/base
-                  -> ->* and/c any any/c cons/c contract-out listof not/c
-                  or/c)
+                  -> ->* and/c any any/c cons/c contract-out contract? listof
+                  not/c or/c)
          (only-in racket/generic define-generics)
          (only-in racket/list append-map check-duplicates remove-duplicates)
          (only-in syntax/parse/define define-syntax-parse-rule)
@@ -29,7 +29,7 @@
          layer-training? ;; noqa
          in-eval-mode
          define-layer
-         step/c)
+         child-name/c)
 
 (define-generics layer
   (layer-forward layer . inputs)
@@ -134,14 +134,6 @@
                               prefix
                               (string-append prefix (car c) "."))))
 
-(struct LayerList% registry (prefix)
-  #:reflection-name 'LayerList)
-
-(define (layer-list-forward self . _inputs)
-  (raise-arguments-error 'LayerList
-                         "not applicable; iterate with layer-list->list"
-                         "layer list" self))
-
 (struct Fn% registry (proc)
   #:reflection-name 'Fn)
 
@@ -151,30 +143,33 @@
 (define (as-layer v)
   (if (layer? v) v (Fn% fn-forward '() '() '() v)))
 
-(define step/c (or/c layer? procedure?))
+(define/checked-out step/c contract? (or/c layer? procedure?))
 
-(define/checked-out (LayerList layers #:prefix [prefix #f])
-  (->* [(listof step/c)]
-       [#:prefix (or/c #f (and/c string? (not/c #rx"[.]")))]
-       layer-list?)
-  (check-names
-   'LayerList
-   (LayerList% layer-list-forward '() '()
-               (for/list ([m (in-list layers)] [i (in-naturals)])
-                 (cons (number->string i) (as-layer m)))
-               prefix)))
+(define child-name/c (and/c string? (not/c #rx"[.]")))
 
-(define/contract-out layer-list? (-> any/c boolean?) LayerList%?)
+(struct Children% (alist)
+  #:reflection-name 'Children)
 
-(define/contract-out (layer-list->list ll) ;; noqa
-  (-> layer-list? (listof layer?))
-  (map cdr (registry-children ll)))
+(define/contract-out Children? (-> any/c boolean?) Children%?)
 
-(define/checked-out (in-layers ll) ;; noqa
-  (-> layer-list? sequence?)
-  (make-do-sequence
-   (lambda ()
-     (values cdar cdr (registry-children ll) pair? #f #f))))
+(define/checked-out (children-by-index layers) ;; noqa
+  (-> (listof step/c) Children?)
+  (Children% (for/list ([m (in-list layers)] [i (in-naturals)])
+               (cons (number->string i) (as-layer m)))))
+
+(define/checked-out (children-by-key entries) ;; noqa
+  (-> (listof (cons/c child-name/c step/c)) Children?)
+  (Children% (for/list ([e (in-list entries)])
+               (cons (car e) (as-layer (cdr e))))))
+
+(define/checked-out (in-layers v) ;; noqa
+  (-> (or/c Children? layer?) sequence?)
+  (in-list (if (layer? v) (children v) (map cdr (Children%-alist v)))))
+
+(define/contract-out (child-ref m name) ;; noqa
+  (-> layer? string? (or/c layer? #f))
+  (define entry (assoc name (layer-named-children m)))
+  (and entry (cdr entry)))
 
 (define (classify names vals) ;; noqa
   (for/fold ([params '()] [buffers '()] [children '()]
@@ -185,10 +180,10 @@
     (cond
       [(Parameter? v) (values (cons (cons name v) params) buffers children)]
       [(Buffer? v) (values params (cons (cons name v) buffers) children)]
-      [(layer? v)
-       (define registered-as
-         (if (LayerList%? v) (or (LayerList%-prefix v) name) name))
-       (values params buffers (cons (cons registered-as v) children))]
+      [(Children? v)
+       (values params buffers
+               (append (reverse (Children%-alist v)) children))]
+      [(layer? v) (values params buffers (cons (cons name v) children))]
       [else (values params buffers children)])))
 
 (define (check-names who m) ;; noqa
