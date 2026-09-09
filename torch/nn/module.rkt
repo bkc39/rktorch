@@ -6,8 +6,8 @@
                      ;; only-in would strip
                      syntax/parse/pre)
          (only-in racket/contract/base
-                  -> ->* ->i and/c any any/c cons/c contract-out contract? listof
-                  not/c or/c unsupplied-arg?)
+                  -> ->* ->i and/c any any/c cons/c contract-out contract?
+                  flat-named-contract listof not/c or/c unsupplied-arg?)
          (only-in racket/generic define-generics)
          (only-in racket/list append-map check-duplicates remove-duplicates)
          (only-in syntax/parse/define define-syntax-parse-rule)
@@ -164,10 +164,12 @@
 (define (as-layer v)
   (if (layer? v) v (procedure->Layer v)))
 
-(define/checked-out step/c contract? (or/c layer? procedure?))
+(define/checked-out step/c contract?
+  (flat-named-contract 'step/c (or/c layer? procedure?)))
 
 (define/checked-out child-name/c contract?
-  (and/c string? (not/c "") (not/c #rx"[.]")))
+  (flat-named-contract 'child-name/c
+                       (and/c string? (not/c "") (not/c #rx"[.]"))))
 
 (define/contract-out (procedure->Layer proc
                                        #:parameters [params '()]
@@ -316,6 +318,11 @@
               (~optional (~seq #:predicate pred:id))) ...
         #:forward (input:id ...) body:expr ...+)
      (define field-ids (syntax->list #'(field.id ...)))
+     (for ([f (in-list field-ids)])
+       (when (regexp-match? #rx"[.]" (symbol->string (syntax-e f)))
+         (raise-syntax-error
+          #f "a field name may not contain a dot; it is one state-dict segment"
+          stx f)))
      (define init? (attribute init))
      (when init?
        (for ([f (in-list field-ids)]

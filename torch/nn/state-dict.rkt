@@ -14,11 +14,12 @@
                   with-no-grad)
          (only-in "../generated.rkt" copy!)
          (only-in "../private/contract.rkt" define/contract-out)
-         (only-in "module.rkt" layer? named-buffers named-parameters))
+         (only-in "module.rkt"
+                  layer-named-buffers layer-named-parameters layer?))
 
 (define/contract-out (state-dict model) ;; noqa
   (-> layer? (listof (cons/c string? tensor?)))
-  (append (named-parameters model) (named-buffers model)))
+  (append (layer-named-parameters model "") (layer-named-buffers model "")))
 
 (define (encode name t)
   (define vals (tensor->list t))

@@ -40,7 +40,8 @@ as @racket[define]'s dotted tail.  Every field starts as @racket[#f], or as the 
 the same name when a formal shares it, and @racket[init-body] assigns
 fields with @racket[set!].  With @racket[#:init], a field is a bare
 identifier.  Without it, the fields are themselves the constructor
-formals, so a stateless layer needs no body.
+formals, so a stateless layer needs no body.  A field name is one
+state-dict segment and may not contain a dot.
 
 What a field holds when @racket[init-body] finishes decides what it is:
 
@@ -67,7 +68,9 @@ What a field holds when @racket[init-body] finishes decides what it is:
 @racket[parameters] lists a layer's own parameters first and then each
 child's, each group in field declaration order.  A parameter or child
 reachable by more than one path, as when two fields hold the same layer,
-is listed once, under the first path, so an optimizer steps it once.
+is listed once, under the first path, so an optimizer steps it once;
+the state dict keeps every path, as PyTorch's does, so a tied model
+loads into an untied one.
 @racket[init-body] runs sequentially, so the order in which parameters
 draw from the RNG is the order of the assignments.
 
@@ -163,9 +166,9 @@ Recognizes the result of @racket[Buffer].
 }
 
 @defproc[(procedure->Layer [proc procedure?]
-                          [#:parameters params (listof (cons/c string? Parameter?)) '()]
-                          [#:buffers bufs (listof (cons/c string? Buffer?)) '()]
-                          [#:children kids (listof (cons/c string? layer?)) '()])
+                          [#:parameters params (listof (cons/c child-name/c Parameter?)) '()]
+                          [#:buffers bufs (listof (cons/c child-name/c Buffer?)) '()]
+                          [#:children kids (listof (cons/c child-name/c layer?)) '()])
          layer?]{
 Wraps @racket[proc] as a callable layer. Calls through the layer itself,
 @racket[forward], or @racket[layer-forward] pass positional arguments to

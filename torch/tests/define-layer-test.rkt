@@ -169,6 +169,9 @@
     (check-equal? (map car (named-parameters t)) '("a.weight" "a.bias"))
     (check-equal? (parameters t) (parameters shared))
     (check-equal? (map car (named-children t)) '("a" "both"))
+    (check-equal? (map car (state-dict t))
+                  '("a.weight" "a.bias" "b.weight" "b.bias"
+                    "both.0.weight" "both.0.bias" "both.1.weight" "both.1.bias"))
     (check-equal? (map car (named-children (cadr (children t)))) '("0"))
     (check-equal? (map car (named-parameters (cadr (children t))))
                   '("0.weight" "0.bias")))
@@ -399,6 +402,17 @@
     (check-equal? (object-name (A)) 'Renamed)
     (check-equal? (object-name (B)) 'Renamed)
     (check-equal? (map car (named-parameters (B))) '("w")))
+
+  (test-case "a field name may not contain a dot"
+    (check-exn #rx"a field name may not contain a dot"
+               (lambda ()
+                 (convert-compile-time-error
+                  (let ()
+                    (define-layer Dotted (encoder.block)
+                      #:init ()
+                      (set! encoder.block (Linear 1 1))
+                      #:forward (x) x)
+                    (Dotted))))))
 
   (test-case "with #:init, a field with a default or keyword is a syntax error"
     (check-exn #rx"with #:init, a field is a bare identifier"
