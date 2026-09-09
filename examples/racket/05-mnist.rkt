@@ -27,12 +27,12 @@ classes; the @emph{functional} ops stay lowercase on @racketmodname[torch]
 (provide convnet pick-device accuracy run-example train-mnist)]
 
 @bold{The model.} A @racket[conv-block] bundles a convolution with the
-activation and pooling that follow it, so the network reads as a
+activation and pooling that follow it, so the network is a
 @racket[Sequential] of two blocks, a @racket[Flatten] and the classifier,
 with the plain @racket[relu] between the dense layers a step like any other.
-The blocks and dense layers are constructor locals; only the
-@racket[Sequential] is a field, so the parameters are named under it, as
-@racket["net.0.conv.weight"]. The spatial arithmetic is the usual @tt{valid}-convolution bookkeeping:
+Nothing wraps the @racket[Sequential]: its forward is the whole forward, so
+@racket[convnet] is a function that builds a fresh one, and the parameters
+are named by step, as @racket["0.conv.weight"]. The spatial arithmetic is the usual @tt{valid}-convolution bookkeeping:
 @tt{28 -c3-> 26 -pool-> 13 -c3-> 11 -pool-> 5}, so the flattened feature map is
 @tt{32*5*5 = 800} wide going into the first dense layer.
 
@@ -44,15 +44,9 @@ The blocks and dense layers are constructor locals; only the
   #:forward (x)
   (~> x conv relu pool))
 
-(define-layer convnet (net)
-  #:init ()
-  (define block0 (conv-block 1 16))
-  (define block1 (conv-block 16 32))
-  (define fc1 (Linear 800 128))
-  (define fc2 (Linear 128 10))
-  (set! net (Sequential block0 block1 (Flatten) fc1 relu fc2))
-  #:forward (x)
-  (net x))]
+(define (convnet)
+  (Sequential (conv-block 1 16) (conv-block 16 32) (Flatten)
+              (Linear 800 128) relu (Linear 128 10)))]
 
 @bold{The device.} Pick the accelerator the way PyTorch does
 (@tt{torch.accelerator.current_accelerator()}); setting it as

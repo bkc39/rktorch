@@ -80,8 +80,8 @@ GPT-standard shape.
     (define att (softmax (masked-fill scores causal -inf.0) -1))
     (define ctx
       (reshape (transpose (matmul att v) 1 2) batch seq-len n-embd))
-    (define x1 (add x (wo ctx)))
-    (add x1 (fc2 (gelu (fc1 (ln2 x1)))))))]
+    (define x1 (+ x (wo ctx)))
+    (+ x1 (fc2 (gelu (fc1 (ln2 x1)))))))]
 
 @bold{The model.} Token ids gather rows from a learned @racket[Embedding]
 table; a second table indexed by @racket[(arange seq-len)] adds a learned
@@ -114,7 +114,7 @@ parity twin train; @racket[train-novel] passes something bigger.
   (with-default-device (tensor-device idx)
     (define seq-len (cadr (tensor-shape idx)))
     (define pos (to-dtype (arange seq-len) 'int64))
-    (~> (add (tok-emb idx) (pos-emb pos))
+    (~> (+ (tok-emb idx) (pos-emb pos))
         blocks ln-f head)))]
 
 @bold{The device.} As in the MNIST capstone: pick the accelerator when one is

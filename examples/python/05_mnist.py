@@ -44,21 +44,16 @@ class ConvBlock(nn.Module):
         return self.pool(torch.relu(self.conv(x)))
 
 
-class ConvNet(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.net = nn.Sequential(ConvBlock(1, 16), ConvBlock(16, 32), nn.Flatten(),
-                                 nn.Linear(800, 128), nn.ReLU(), nn.Linear(128, 10))
-
-    def forward(self, x):
-        return self.net(x)
+def convnet():
+    return nn.Sequential(ConvBlock(1, 16), ConvBlock(16, 32), nn.Flatten(),
+                         nn.Linear(800, 128), nn.ReLU(), nn.Linear(128, 10))
 
 
 torch.manual_seed(0)
 
 # construct on DEVICE: the seeded init must draw from that device's generator
 with torch.device(DEVICE):
-    net = ConvNet()
+    net = convnet()
 xs, ys = load_fixture()
 xs, ys = xs.to(DEVICE), ys.to(DEVICE)
 opt = torch.optim.Adam(net.parameters(), lr=0.001)
