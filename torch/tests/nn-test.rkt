@@ -7,14 +7,16 @@
            "../main.rkt"
            "../nn.rkt")
 
-  (define-module mlp (in hidden out)
-    #:submodules ([fc1 (Linear in hidden)]
-                  [fc2 (Linear hidden out)])
+  (define-layer mlp (fc1 fc2)
+    #:init (in hidden out)
+    (set! fc1 (Linear in hidden))
+    (set! fc2 (Linear hidden out))
     #:forward (x)
     (fc2 (relu (fc1 x))))
 
-  (define-module scale-shift (scale)
-    #:buffers ([shift (ones 2)])
+  (define-layer scale-shift (scale shift)
+    #:init (scale)
+    (set! shift (Buffer (ones 2)))
     #:forward (x)
     (add (mul x scale) shift))
 
@@ -22,7 +24,7 @@
     (manual-seed! 0)
     (define l (Linear 4 3))
     (check-true (linear? l))
-    (check-true (module? l))
+    (check-true (layer? l))
     (check-equal? (object-name l) 'Linear)
     (define ps (parameters l))
     (check-equal? (map tensor-shape ps) '((3 4) (3)))
@@ -83,7 +85,7 @@
     (manual-seed! 0)
     (define c (Conv2d 1 8 3 #:stride 1 #:padding 1))
     (check-true (conv2d? c))
-    (check-true (module? c))
+    (check-true (layer? c))
     (define ps (parameters c))
     (check-equal? (map tensor-shape ps) '((8 1 3 3) (8)))
     (check-true (andmap requires-grad? ps))
@@ -101,7 +103,7 @@
     (manual-seed! 0)
     (define c (Conv1d 2 8 3 #:stride 1 #:padding 1))
     (check-true (conv1d? c))
-    (check-true (module? c))
+    (check-true (layer? c))
     (define ps (parameters c))
     (check-equal? (map tensor-shape ps) '((8 2 3) (8)))
     (check-true (andmap requires-grad? ps))
@@ -134,7 +136,7 @@
     (manual-seed! 0)
     (define e (Embedding 7 4))
     (check-true (embedding? e))
-    (check-true (module? e))
+    (check-true (layer? e))
     (define ps (parameters e))
     (check-equal? (map tensor-shape ps) '((7 4)))
     (check-true (andmap requires-grad? ps))
@@ -150,7 +152,7 @@
   (test-case "LayerNorm layer: ones/zeros init, normalizing forward"
     (define ln (LayerNorm 4))
     (check-true (layer-norm? ln))
-    (check-true (module? ln))
+    (check-true (layer? ln))
     (check-equal? (map car (named-parameters ln)) '("weight" "bias"))
     (check-equal? (map tensor-shape (parameters ln)) '((4) (4)))
     (check-equal? (tensor->list (car (parameters ln))) '(1.0 1.0 1.0 1.0))
@@ -164,19 +166,21 @@
     (check-equal? (object-name ln) 'LayerNorm))
 
   (test-case "#:reflection-name may precede other clauses (any-order)"
-    (define-module early-refl% ()
+    (define-layer early-refl% (w)
       #:reflection-name 'EarlyRefl
-      #:params ([w (zeros 2 2)])
+      #:init ()
+      (set! w (Parameter (zeros 2 2)))
       #:forward (x) (matmul x w))
     (check-equal? (object-name (early-refl%)) 'EarlyRefl))
 
   (test-case "conv -> pool -> flatten -> linear convnet composes"
     (manual-seed! 0)
-    (define-module convnet ()
-      #:submodules ([c1 (Conv2d 1 8 3 #:padding 1)]
-                    [pool (MaxPool2d 2)]
-                    [flat (Flatten)]
-                    [fc (Linear (* 8 14 14) 10)])
+    (define-layer convnet (c1 pool flat fc)
+      #:init ()
+      (set! c1 (Conv2d 1 8 3 #:padding 1))
+      (set! pool (MaxPool2d 2))
+      (set! flat (Flatten))
+      (set! fc (Linear (* 8 14 14) 10))
       #:forward (x)
       (fc (flat (pool (relu (c1 x))))))
     (define net (convnet))
@@ -302,24 +306,24 @@
     (define x (randn 2 4))
     (check-equal? (tensor->list (net x)) (tensor->list (net x))))
 
-  (test-case "module-training? + in-eval-mode: query and restore the prior mode"
+  (test-case "layer-training? + in-eval-mode: query and restore the prior mode"
     (define d (Dropout #:p 0.5))
-    (check-true (module-training? d) "dropout defaults to training")
-    (in-eval-mode d (check-false (module-training? d) "eval inside the body"))
-    (check-true (module-training? d) "restored to train")
+    (check-true (layer-training? d) "dropout defaults to training")
+    (in-eval-mode d (check-false (layer-training? d) "eval inside the body"))
+    (check-true (layer-training? d) "restored to train")
     ;; restores to the *prior* mode, not unconditionally train: from eval -> eval
     (eval! d)
-    (in-eval-mode d (check-false (module-training? d)))
-    (check-false (module-training? d) "restored to eval, not flipped to train")
+    (in-eval-mode d (check-false (layer-training? d)))
+    (check-false (layer-training? d) "restored to eval, not flipped to train")
     (train! d)
     (define net (Sequential (Linear 4 4) (Dropout #:p 0.5)))
-    (check-true (module-training? net))
-    (in-eval-mode net (check-false (module-training? net)))
-    (check-true (module-training? net) "model restored to train")
+    (check-true (layer-training? net))
+    (in-eval-mode net (check-false (layer-training? net)))
+    (check-true (layer-training? net) "model restored to train")
     (define lin (Linear 4 2))
-    (check-true (module-training? lin))
-    (in-eval-mode lin (check-true (module-training? lin)))
-    (check-true (module-training? lin)))
+    (check-true (layer-training? lin))
+    (in-eval-mode lin (check-true (layer-training? lin)))
+    (check-true (layer-training? lin)))
 
   (test-case "sequential: forward, indexed dotted names, param order"
     (manual-seed! 0)

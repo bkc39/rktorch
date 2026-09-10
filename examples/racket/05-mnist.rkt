@@ -12,10 +12,10 @@ same code path runs on the GPU when one is present and on the CPU otherwise; on
 an RTX 3090 Ti it reaches ~98% test accuracy in three epochs (~1.2s each), and
 ~97% in a single CPU epoch.
 
-The @emph{layer} constructors are PascalCase (@racket[Conv2d], @racket[Linear]),
-mirroring PyTorch's @tt{torch.nn.Conv2d} classes; the @emph{functional} ops stay
-lowercase on @racketmodname[torch] (@racket[max-pool2d], @racket[flatten],
-@racket[relu], like @tt{torch.max_pool2d}). Because the two casings differ,
+The @emph{layer} constructors are PascalCase (@racket[Conv2d], @racket[Linear],
+@racket[MaxPool2d], @racket[Flatten]), mirroring PyTorch's @tt{torch.nn}
+classes; the @emph{functional} ops stay lowercase on @racketmodname[torch]
+(@racket[relu], @racket[max-pool2d], like @tt{torch.relu}). Because the two casings differ,
 @racket[(require torch torch/nn)] never collides (#11) --- no prefix or
 @racket[except-in] needed.
 
@@ -26,24 +26,27 @@ lowercase on @racketmodname[torch] (@racket[max-pool2d], @racket[flatten],
 @chunk[<r05-provide>
 (provide convnet pick-device accuracy run-example train-mnist)]
 
-@bold{The model.} @racket[define-module] builds the parameter tree; the
-submodules are callable in @racket[#:forward] exactly like @tt{self.c1(x)} in
-PyTorch. The spatial arithmetic is the usual @tt{valid}-convolution bookkeeping:
+@bold{The model.} A @racket[conv-block] bundles a convolution with the
+activation and pooling that follow it, so the network is a
+@racket[Sequential] of two blocks, a @racket[Flatten] and the classifier,
+with the plain @racket[relu] between the dense layers a step like any other.
+Nothing wraps the @racket[Sequential]: its forward is the whole forward, so
+@racket[convnet] is a function that builds a fresh one, and the parameters
+are named by step, as @racket["0.conv.weight"]. The spatial arithmetic is the usual @tt{valid}-convolution bookkeeping:
 @tt{28 -c3-> 26 -pool-> 13 -c3-> 11 -pool-> 5}, so the flattened feature map is
 @tt{32*5*5 = 800} wide going into the first dense layer.
 
 @chunk[<r05-model>
-(define-module convnet ()
-  #:submodules ([c1 (Conv2d 1 16 3)]
-                [c2 (Conv2d 16 32 3)]
-                [f1 (Linear 800 128)]
-                [f2 (Linear 128 10)])
+(define-layer conv-block (conv pool)
+  #:init (in-channels out-channels)
+  (set! conv (Conv2d in-channels out-channels 3))
+  (set! pool (MaxPool2d 2))
   #:forward (x)
-  (~> x
-      c1 relu (max-pool2d 2)
-      c2 relu (max-pool2d 2)
-      (flatten 1) f1 relu
-      f2))]
+  (~> x conv relu pool))
+
+(define (convnet)
+  (Sequential (conv-block 1 16) (conv-block 16 32) (Flatten)
+              (Linear 800 128) relu (Linear 128 10)))]
 
 @bold{The device.} Pick the accelerator the way PyTorch does
 (@tt{torch.accelerator.current_accelerator()}); setting it as

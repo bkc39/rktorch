@@ -26,7 +26,7 @@
                   reduce-or-variadic/c tensor-or-real/c unary-numeric/c)
          (only-in "device-type.rkt" device/c)
          (only-in "error.rkt" check-handle)
-         (only-in "ops.rkt" device->type+index dims-rest/c)
+         (only-in "ops.rkt" device->type+index dims-rest/c tensor-shape)
          (only-in "raw/creation.rkt"
                   tr-arange/raw
                   tr-eye/raw
@@ -241,6 +241,10 @@
 (define/contract-out (permute t . dims)
   (-> tensor? index/c ... tensor?)
   (wrap 'permute (tr-permute/raw t (list->s64vector dims) (length dims))))
+
+(define/contract-out (T x) ;; noqa
+  (-> tensor? tensor?)
+  (apply permute x (reverse (build-list (length (tensor-shape x)) values))))
 
 (define/contract-out (squeeze t [dim #f])
   (->* [tensor?] [index/c] tensor?)

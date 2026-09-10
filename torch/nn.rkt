@@ -4,36 +4,72 @@
 ;; unused
 #|review: ignore|#
 
-(require "nn/conv.rkt"
+(require (except-in "nn/buffer.rkt" Buffer?)
+         (submod "nn/buffer.rkt" checked)
+         "nn/conv.rkt"
          "nn/dropout.rkt"
          "nn/embedding.rkt"
          (submod "nn/init.rkt" checked)
+         "nn/layer-hash.rkt"
+         "nn/layer-list.rkt"
          "nn/layer-norm.rkt"
+         (except-in "nn/layer.rkt"
+                    child-name/c
+                    children-by-index
+                    children-by-key
+                    in-layers
+                    layer?
+                    named-buffers
+                    named-parameters
+                    step/c)
+         (submod "nn/layer.rkt" checked)
          "nn/linear.rkt"
          "nn/loss.rkt"
-         (except-in "nn/module.rkt" module? named-parameters)
-         (submod "nn/module.rkt" checked)
          (only-in "nn/optim.rkt" adam adam? sgd sgd? step! zero-grads!)
+         (except-in "nn/parameter.rkt" Parameter Parameter?)
+         (submod "nn/parameter.rkt" checked)
          "nn/sequential.rkt"
          "nn/state-dict.rkt")
 
-(provide define-module
-         gen:module
-         module-forward
-         module-parameters
-         module-named-parameters
-         module-buffers
-         module-training?
+(provide define-layer
+         gen:layer
+         layer-forward
+         layer-parameters
+         layer-named-parameters
+         layer-buffers
+         layer-named-buffers
+         layer-named-children
+         layer-training?
          in-eval-mode)
 
-(provide module?
+(provide layer?
+         procedure->Layer
          parameters
          named-parameters
          buffers
+         named-buffers
+         children
+         named-children
          forward
          train!
          eval!
          call-with-eval-mode)
+
+(provide Parameter
+         Parameter?
+         Buffer
+         Buffer?
+         LayerList
+         layer-list?
+         LayerHash
+         layer-hash?
+         children-by-index
+         children-by-key
+         Children?
+         child-ref
+         child-name/c
+         in-layers
+         step/c)
 
 ;; PascalCase constructors / lowercase predicates and functional ops keep
 ;; `(require torch torch/nn)` collision-free (#11).

@@ -26,15 +26,16 @@
          (exp (mul (arange half) (- (/ (log 10000.0) half)))))
        (define angles (mul positions (unsqueeze freqs 0)))
        (cat (list (sin angles) (cos angles)) 1))
-     (define-module asr-encoder-block (n-embd n-head)
-       #:submodules ([ln1 (LayerNorm n-embd)]
-                     [wq (Linear n-embd n-embd)]
-                     [wk (Linear n-embd n-embd)]
-                     [wv (Linear n-embd n-embd)]
-                     [wo (Linear n-embd n-embd)]
-                     [ln2 (LayerNorm n-embd)]
-                     [fc1 (Linear n-embd (* 4 n-embd))]
-                     [fc2 (Linear (* 4 n-embd) n-embd)])
+     (define-layer asr-encoder-block (n-embd n-head ln1 wq wk wv wo ln2 fc1 fc2)
+       #:init (n-embd n-head)
+       (set! ln1 (LayerNorm n-embd))
+       (set! wq (Linear n-embd n-embd))
+       (set! wk (Linear n-embd n-embd))
+       (set! wv (Linear n-embd n-embd))
+       (set! wo (Linear n-embd n-embd))
+       (set! ln2 (LayerNorm n-embd))
+       (set! fc1 (Linear n-embd (* 4 n-embd)))
+       (set! fc2 (Linear (* 4 n-embd) n-embd))
        #:forward (x mask)
        (with-default-device (tensor-device x)
          (define batch (car (tensor-shape x)))
@@ -55,20 +56,24 @@
                     batch seq-len n-embd))
          (define x1 (add x (wo ctx)))
          (add x1 (fc2 (gelu (fc1 (ln2 x1)))))))
-     (define-module asr-decoder-block (n-embd n-head)
-       #:submodules ([ln1 (LayerNorm n-embd)]
-                     [sq (Linear n-embd n-embd)]
-                     [sk (Linear n-embd n-embd)]
-                     [sv (Linear n-embd n-embd)]
-                     [so (Linear n-embd n-embd)]
-                     [ln2 (LayerNorm n-embd)]
-                     [cq (Linear n-embd n-embd)]
-                     [ck (Linear n-embd n-embd)]
-                     [cv (Linear n-embd n-embd)]
-                     [co (Linear n-embd n-embd)]
-                     [ln3 (LayerNorm n-embd)]
-                     [fc1 (Linear n-embd (* 4 n-embd))]
-                     [fc2 (Linear (* 4 n-embd) n-embd)])
+     (define-layer asr-decoder-block (n-embd n-head
+                                      ln1 sq sk sv so
+                                      ln2 cq ck cv co
+                                      ln3 fc1 fc2)
+       #:init (n-embd n-head)
+       (set! ln1 (LayerNorm n-embd))
+       (set! sq (Linear n-embd n-embd))
+       (set! sk (Linear n-embd n-embd))
+       (set! sv (Linear n-embd n-embd))
+       (set! so (Linear n-embd n-embd))
+       (set! ln2 (LayerNorm n-embd))
+       (set! cq (Linear n-embd n-embd))
+       (set! ck (Linear n-embd n-embd))
+       (set! cv (Linear n-embd n-embd))
+       (set! co (Linear n-embd n-embd))
+       (set! ln3 (LayerNorm n-embd))
+       (set! fc1 (Linear n-embd (* 4 n-embd)))
+       (set! fc2 (Linear (* 4 n-embd) n-embd))
        #:forward (x memory mem-mask)
        (with-default-device (tensor-device x)
          (define batch (car (tensor-shape x)))
@@ -103,38 +108,36 @@
            (add x1 (co (reshape (transpose (matmul att2 v2) 1 2)
                                 batch seq-len n-embd))))
          (add x2 (fc2 (gelu (fc1 (ln3 x2)))))))
-     (define-module asr (n-mels vocab-size
-                         #:n-embd [n-embd 64]
-                         #:n-head [n-head 4])
-       #:submodules ([conv1 (Conv1d n-mels n-embd 3
-                                    #:stride 2 #:padding 1)]
-                     [conv2 (Conv1d n-embd n-embd 3
-                                    #:stride 2 #:padding 1)]
-                     [dil1 (Conv1d n-embd n-embd 3
-                                   #:dilation 1 #:padding 1)]
-                     [dil2 (Conv1d n-embd n-embd 3
-                                   #:dilation 2 #:padding 2)]
-                     [dil3 (Conv1d n-embd n-embd 3
-                                   #:dilation 4 #:padding 4)]
-                     [dil4 (Conv1d n-embd n-embd 3
-                                   #:dilation 8 #:padding 8)]
-                     [enc1 (asr-encoder-block n-embd n-head)]
-                     [enc2 (asr-encoder-block n-embd n-head)]
-                     [enc3 (asr-encoder-block n-embd n-head)]
-                     [enc4 (asr-encoder-block n-embd n-head)]
-                     [enc5 (asr-encoder-block n-embd n-head)]
-                     [enc6 (asr-encoder-block n-embd n-head)]
-                     [ln-enc (LayerNorm n-embd)]
-                     [ctc-head (Linear n-embd (add1 vocab-size))]
-                     [tok-emb (Embedding (+ vocab-size 2) n-embd)]
-                     [dec1 (asr-decoder-block n-embd n-head)]
-                     [dec2 (asr-decoder-block n-embd n-head)]
-                     [dec3 (asr-decoder-block n-embd n-head)]
-                     [dec4 (asr-decoder-block n-embd n-head)]
-                     [dec5 (asr-decoder-block n-embd n-head)]
-                     [dec6 (asr-decoder-block n-embd n-head)]
-                     [ln-dec (LayerNorm n-embd)]
-                     [head (Linear n-embd (add1 vocab-size))])
+     (define-layer asr (n-embd
+                        conv1 conv2 dil1 dil2 dil3 dil4
+                        enc1 enc2 enc3 enc4 enc5 enc6 ln-enc ctc-head
+                        tok-emb dec1 dec2 dec3 dec4 dec5 dec6 ln-dec head)
+       #:init (n-mels vocab-size
+               #:n-embd [n-embd 64]
+               #:n-head [n-head 4])
+       (set! conv1 (Conv1d n-mels n-embd 3 #:stride 2 #:padding 1))
+       (set! conv2 (Conv1d n-embd n-embd 3 #:stride 2 #:padding 1))
+       (set! dil1 (Conv1d n-embd n-embd 3 #:dilation 1 #:padding 1))
+       (set! dil2 (Conv1d n-embd n-embd 3 #:dilation 2 #:padding 2))
+       (set! dil3 (Conv1d n-embd n-embd 3 #:dilation 4 #:padding 4))
+       (set! dil4 (Conv1d n-embd n-embd 3 #:dilation 8 #:padding 8))
+       (set! enc1 (asr-encoder-block n-embd n-head))
+       (set! enc2 (asr-encoder-block n-embd n-head))
+       (set! enc3 (asr-encoder-block n-embd n-head))
+       (set! enc4 (asr-encoder-block n-embd n-head))
+       (set! enc5 (asr-encoder-block n-embd n-head))
+       (set! enc6 (asr-encoder-block n-embd n-head))
+       (set! ln-enc (LayerNorm n-embd))
+       (set! ctc-head (Linear n-embd (add1 vocab-size)))
+       (set! tok-emb (Embedding (+ vocab-size 2) n-embd))
+       (set! dec1 (asr-decoder-block n-embd n-head))
+       (set! dec2 (asr-decoder-block n-embd n-head))
+       (set! dec3 (asr-decoder-block n-embd n-head))
+       (set! dec4 (asr-decoder-block n-embd n-head))
+       (set! dec5 (asr-decoder-block n-embd n-head))
+       (set! dec6 (asr-decoder-block n-embd n-head))
+       (set! ln-dec (LayerNorm n-embd))
+       (set! head (Linear n-embd (add1 vocab-size)))
        #:forward (x dec-in lengths)
        (with-default-device (tensor-device x)
          (define (halve n) (quotient (add1 n) 2))
