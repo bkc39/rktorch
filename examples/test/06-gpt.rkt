@@ -33,15 +33,20 @@
               (format "non-finite loss: ~a" losses))
   (check-true (< (last losses) (first losses))
               (format "losses did not decrease: ~a" losses))
-  ;; The parameter tree: 2 embeddings + 2 blocks x (2 LayerNorms + 4
-  ;; attention Linears + 2 MLP Linears, each weight+bias) + final ln + head
-  ;; = 38 tensors, threaded through Sequential's indexed dotted names.
+  ;; The parameter tree: 2 embeddings + 2 blocks x (2 pre-norm residuals,
+  ;; each a LayerNorm plus its branch: 4 attention Linears or 2 MLP Linears,
+  ;; every one weight+bias) + final ln + head = 38 tensors, named through
+  ;; Sequential's index and the residual wrappers' norm/branch fields.
   (define names (map car (named-parameters net)))
   (check-equal? (length names) 38)
   (check-equal? (first names) "tok-emb.weight")
   (check-equal? (last names) "head.bias")
-  (check-not-false (member "blocks.0.ln1.weight" names))
-  (check-not-false (member "blocks.1.fc2.bias" names))
+  (check-not-false (member "blocks.0.attention.norm.weight" names))
+  (check-not-false (member "blocks.0.attention.branch.wq.weight" names))
+  (check-not-false (member "blocks.1.mlp.norm.bias" names))
+  (check-not-false (member "blocks.1.mlp.branch.fc2.bias" names))
+  ;; the flat names from before the block was factored are gone
+  (check-false (member "blocks.0.ln1.weight" names))
   ;; the embedding tables are sized by the fixture vocab and block-size 16.
   (check-equal? (tensor-shape (car (parameters net)))
                 (list (vector-length vocab) 32))

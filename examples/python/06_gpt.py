@@ -32,17 +32,13 @@ def load_fixture():
     return xs, ys, len(vocab)
 
 
-class Block(nn.Module):
+class CausalSelfAttention(nn.Module):
     def __init__(self, n_embd, n_head):
         super().__init__()
-        self.ln1 = nn.LayerNorm(n_embd)
         self.wq = nn.Linear(n_embd, n_embd)
         self.wk = nn.Linear(n_embd, n_embd)
         self.wv = nn.Linear(n_embd, n_embd)
         self.wo = nn.Linear(n_embd, n_embd)
-        self.ln2 = nn.LayerNorm(n_embd)
-        self.fc1 = nn.Linear(n_embd, 4 * n_embd)
-        self.fc2 = nn.Linear(4 * n_embd, n_embd)
         self.n_head = n_head
 
     def forward(self, x):
@@ -53,17 +49,46 @@ class Block(nn.Module):
             return m.reshape(batch, seq_len, self.n_head,
                              head_dim).transpose(1, 2)
 
-        xn = self.ln1(x)
-        q, k, v = split_heads(self.wq(xn)), split_heads(self.wk(xn)), \
-            split_heads(self.wv(xn))
+        q, k, v = split_heads(self.wq(x)), split_heads(self.wk(x)), \
+            split_heads(self.wv(x))
         scores = q @ k.transpose(2, 3) / math.sqrt(head_dim)
         # build the mask on the input's device, matching the Racket side
         causal = torch.tril(
             torch.ones(seq_len, seq_len, device=x.device)) == 0
         att = torch.softmax(scores.masked_fill(causal, float("-inf")), -1)
         ctx = (att @ v).transpose(1, 2).reshape(batch, seq_len, n_embd)
-        x = x + self.wo(ctx)
-        return x + self.fc2(nn.functional.gelu(self.fc1(self.ln2(x))))
+        return self.wo(ctx)
+
+
+class FeedForward(nn.Module):
+    def __init__(self, n_embd):
+        super().__init__()
+        self.fc1 = nn.Linear(n_embd, 4 * n_embd)
+        self.fc2 = nn.Linear(4 * n_embd, n_embd)
+
+    def forward(self, x):
+        return self.fc2(nn.functional.gelu(self.fc1(x)))
+
+
+class PreNormResidual(nn.Module):
+    def __init__(self, n_embd, branch):
+        super().__init__()
+        self.norm = nn.LayerNorm(n_embd)
+        self.branch = branch
+
+    def forward(self, x):
+        return self.branch(self.norm(x)) + x
+
+
+class Block(nn.Module):
+    def __init__(self, n_embd, n_head):
+        super().__init__()
+        self.attention = PreNormResidual(
+            n_embd, CausalSelfAttention(n_embd, n_head))
+        self.mlp = PreNormResidual(n_embd, FeedForward(n_embd))
+
+    def forward(self, x):
+        return self.mlp(self.attention(x))
 
 
 class GPT(nn.Module):
