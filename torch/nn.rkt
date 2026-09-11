@@ -21,7 +21,8 @@
                     layer?
                     named-buffers
                     named-parameters
-                    step/c)
+                    step/c
+                    training?)
          (submod "nn/layer.rkt" checked)
          "nn/linear.rkt"
          "nn/loss.rkt"
@@ -39,8 +40,10 @@
          layer-buffers
          layer-named-buffers
          layer-named-children
-         layer-set-training!
-         layer-training?
+         layer-mode
+         layer-set-mode!
+         with-mode
+         in-mode
          in-eval-mode)
 
 (provide layer?
@@ -54,7 +57,13 @@
          forward
          train!
          eval!
-         call-with-eval-mode)
+         set-mode!
+         layer-training?
+         call-with-mode
+         call-with-eval-mode
+         mode/c
+         training?
+         evaluating?)
 
 (provide Parameter
          Parameter?
