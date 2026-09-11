@@ -252,8 +252,11 @@ module's full export set (`racket/runtime-path`, `syntax/parse/pre`).
 - `info.rkt` — package metadata + native-library pre-install hook.
 - `main.rkt` — high-level facade (re-exports `foreign.rkt`).
 - `foreign.rkt` — the contracted layer + the `unsafe` submodule.
-- `foreign/ops.rkt` — version/seed/randn + marshalling (`item`, `to-dtype`,
-  `rand`, `uniform!`); `foreign/tensor-ops.rkt` — the op tranche (and the
+- `foreign/ops.rkt` — version/seed + marshalling (`item`, `to-dtype`,
+  `uniform!`, `to`); `foreign/creation-ops.rkt` — the constructors
+  (`zeros` .. `rand`, `tensor`, `arange`, `eye`, the `*-like` family, with
+  placement and `#:requires-grad?` handled once); `foreign/tensor-ops.rkt`
+  — the op tranche (and the
   shadow-dispatch convention); `foreign/autograd-ops.rkt` — autograd +
   `with-no-grad` + in-place ops; `foreign/structs.rkt` — the `tensor`
   wrapper (`prop:cpointer`, shape cached at wrap time, allocator/deallocator

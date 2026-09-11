@@ -44,13 +44,14 @@
          (only-in "contracts.rkt"
                   bool-tensor/c compare/c flatten/c index-spec/c index-vector/c
                   index/c int64-tensor/c unary-numeric/c unary-real/c)
+         (only-in "creation-ops.rkt" tensor)
          (only-in "device-type.rkt" device-type)
          (only-in "ops.rkt"
                   item tensor-device tensor-dtype tensor-shape tensor->list
                   to-device to-dtype)
          (only-in "slice.rkt" :: slice-end slice-start slice-step slice?)
          (only-in "structs.rkt" tensor?)
-         (only-in "tensor-ops.rkt" add mul reshape sum tensor unsqueeze))
+         (only-in "tensor-ops.rkt" add mul reshape sum unsqueeze))
 
 (define/contract-out narrow ;; noqa
   (-> tensor? index/c index/c exact-positive-integer? tensor?)
