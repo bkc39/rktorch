@@ -202,6 +202,15 @@ TEST(TorchrktCreationOn, PlacesAndTypesAtConstruction) {
   EXPECT_EQ(dtype_of(f.t), TR_DTYPE_FLOAT64);
   EXPECT_EQ(cpu_data_of(f.t), std::vector<float>(6, 7.0F));
   EXPECT_EQ(tr_zeros_on(nullptr, 2, TR_DEVICE_CPU, 0, TR_DTYPE_KEEP), nullptr);
+  // the documented scalar call: NULL dims with ndim 0, for both triplets
+  const Handle scalar(
+      tr_full_on(nullptr, 0, 3.0, TR_DEVICE_KEEP, 0, TR_DTYPE_INT64));
+  int64_t scalar_ndim = -1;
+  EXPECT_EQ(tr_tensor_ndim(scalar.t, &scalar_ndim), 0) << tr_last_error();
+  EXPECT_EQ(scalar_ndim, 0);
+  EXPECT_EQ(cpu_data_of(scalar.t), std::vector<float>(1, 3.0F));
+  const Handle scalar_zero(tr_zeros(nullptr, 0));
+  EXPECT_EQ(cpu_data_of(scalar_zero.t), std::vector<float>(1, 0.0F));
   EXPECT_EQ(
       tr_zeros_on(dims.data(), 2, TR_DEVICE_KEEP, 0, static_cast<tr_dtype>(9)),
       nullptr);

@@ -35,7 +35,12 @@ bool bad_dims(const int64_t* dims, int64_t ndim) {
   return ndim < 0 || (ndim > 0 && !dims);
 }
 
+// a scalar's documented call passes dims == NULL with ndim == 0; no pointer
+// arithmetic on that path
 std::vector<int64_t> to_shape(const int64_t* dims, int64_t ndim) {
+  if (ndim == 0) {
+    return {};
+  }
   return {dims, dims + ndim};
 }
 
