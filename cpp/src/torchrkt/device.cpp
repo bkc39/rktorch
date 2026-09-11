@@ -280,10 +280,11 @@ int tr_tensor_to_(tr_tensor* t, tr_device_type type, int64_t index,
     if (moved.is_same(v)) {
       return;
     }
-    // Everything that can throw — both allocating conversions and the
+    // Everything expected to throw — both allocating conversions and the
     // shallow-copy compatibility checks set_data would make — happens
-    // before either set_data, so a throw leaves t untouched: nothing is
-    // half-moved, and a retry cannot short-circuit past the grad.
+    // before either rebind; should the grad rebind still throw, the
+    // tensor rebind is rolled back. Either way t is untouched on failure:
+    // nothing is half-moved, and a retry cannot short-circuit past the grad.
     torch::Tensor moved_grad;
     if (v.grad().defined()) {
       moved_grad = torchrkt::convert(v.grad(), type, index, dtype);
@@ -294,9 +295,15 @@ int tr_tensor_to_(tr_tensor* t, tr_device_type type, int64_t index,
                 "tr_tensor_to_: incompatible tensor type for set_data");
     TORCH_CHECK(!rebind_grad || torchrkt::rebindable(v.grad(), moved_grad),
                 "tr_tensor_to_: incompatible grad type for set_data");
+    const torch::Tensor before = v.detach();
     v.set_data(moved);
     if (rebind_grad) {
-      v.mutable_grad().set_data(moved_grad);
+      try {
+        v.mutable_grad().set_data(moved_grad);
+      } catch (...) {
+        v.set_data(before);
+        throw;
+      }
     }
   });
 }

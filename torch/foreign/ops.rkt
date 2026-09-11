@@ -298,15 +298,18 @@
 
 (define tensor-to!/retrying ((oom-retry/status) tr-tensor-to!/raw))
 
-;; the status is judged first, while the native error is fresh, and the
-;; handle is re-accounted whichever way that goes: the ledger entry
-;; describes the handle as it now is
+;; a no-op when nothing would change, as `to`, so a repeated layer move
+;; touches neither the native side nor the ledger; otherwise the status is
+;; judged first, while the native error is fresh, and the handle is
+;; re-accounted whichever way that goes: the ledger entry describes the
+;; handle as it now is
 (define (to! t target [dtype #f])
   (define-values (type index dt) (parse-target 'to! target dtype))
-  (define rc (tensor-to!/retrying t type index dt))
-  (dynamic-wind void
-                (lambda () (check-ok rc 'to!))
-                (lambda () (reaccount! (tensor-handle t))))
+  (unless (already-there? t type index dt)
+    (define rc (tensor-to!/retrying t type index dt))
+    (dynamic-wind void
+                  (lambda () (check-ok rc 'to!))
+                  (lambda () (reaccount! (tensor-handle t)))))
   t)
 
 (define/checked-out (tensor-device t) (-> tensor? device?)

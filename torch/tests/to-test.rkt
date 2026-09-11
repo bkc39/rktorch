@@ -224,6 +224,14 @@
     (check-equal? (- (bytes-on (cpu-device)) base) before
                   "moving back returns the bucket to where it was")
     (check-equal? (ledger-entries) entries)
+    ;; a repeated move is a no-op: no native call, no ledger churn
+    (define runs-before (cdr (assq 'runs (finalizer-diagnostics))))
+    (check-eq? (to m 'float32) m)
+    (check-eq? (to m 'cpu 'float32) m)
+    (check-equal? (- (bytes-on (cpu-device)) base) before)
+    (check-equal? (ledger-entries) entries)
+    (check-equal? (cdr (assq 'runs (finalizer-diagnostics))) runs-before
+                  "nothing was allocated and released by a repeated move")
     ;; the layer must outlive the checks, or the GC reclaims it first
     (check-true (layer? m)))
 
