@@ -6,10 +6,12 @@
 #include <atomic>
 #include <cstdint>
 #include <exception>
+#include <optional>
 #include <stdexcept>
 #include <string>
 
 #include "torchrkt/detail/device.hpp"
+#include "torchrkt/detail/dtype.hpp"
 #include "torchrkt/detail/error.hpp"
 #include "torchrkt/detail/op_call.hpp"
 #include "torchrkt/detail/tensor_handle.hpp"
@@ -43,6 +45,9 @@ tr_device_type type_of(const torch::Device& d) {
 torch::Device to_torch_device(tr_device_type type, int64_t index) {
   switch (type) {
     case TR_DEVICE_CPU:
+      if (index != 0) {
+        throw std::invalid_argument("CPU device index must be 0");
+      }
       return torch::Device(torch::kCPU);
     case TR_DEVICE_CUDA:
       if (index < 0 ||
@@ -63,8 +68,32 @@ torch::Device to_torch_device(tr_device_type type, int64_t index) {
         throw std::invalid_argument("MPS is not available");
       }
       return torch::Device(torch::kMPS);
+    case TR_DEVICE_KEEP:
+      break;
   }
   throw std::invalid_argument("unknown tr_device_type");
+}
+
+torch::Tensor convert(const torch::Tensor& v, tr_device_type type,
+                      int64_t index, tr_dtype dtype) {
+  std::optional<torch::Device> device;
+  if (type != TR_DEVICE_KEEP) {
+    device = to_torch_device(type, index);
+  }
+  std::optional<torch::ScalarType> scalar_type;
+  if (dtype != TR_DTYPE_KEEP) {
+    scalar_type = to_scalar_type(dtype);
+  }
+  return v.to(scalar_type, /*layout=*/std::nullopt, device,
+              /*pin_memory=*/std::nullopt, /*non_blocking=*/false,
+              /*copy=*/false, /*memory_format=*/std::nullopt);
+}
+
+// set_data's own precondition (has_compatible_shallow_copy_type), checked
+// up front so the rebinding steps of tr_tensor_to_ cannot throw
+bool rebindable(const torch::Tensor& dst, const torch::Tensor& src) {
+  return dst.unsafeGetTensorImpl()->has_compatible_shallow_copy_type(
+      src.key_set());
 }
 
 torch::Device current_default_device() {
@@ -227,7 +256,58 @@ tr_tensor* tr_tensor_to_device(const tr_tensor* t, tr_device_type type,
     return torchrkt::null_arg("tr_tensor_to_device");
   }
   return torchrkt::alloc_result("tr_tensor_to_device", [&] {
-    return t->value.to(torchrkt::to_torch_device(type, index));
+    return torchrkt::convert(t->value, type, index, TR_DTYPE_KEEP);
+  });
+}
+
+tr_tensor* tr_tensor_to(const tr_tensor* t, tr_device_type type, int64_t index,
+                        tr_dtype dtype) {
+  if (!t) {
+    return torchrkt::null_arg("tr_tensor_to");
+  }
+  return torchrkt::alloc_result("tr_tensor_to", [&] {
+    return torchrkt::convert(t->value, type, index, dtype);
+  });
+}
+
+int tr_tensor_to_(tr_tensor* t, tr_device_type type, int64_t index,
+                  tr_dtype dtype) {
+  if (!t) {
+    return torchrkt::null_arg_status("tr_tensor_to_");
+  }
+  return torchrkt::status_call("tr_tensor_to_", [&] {
+    // no_grad: a grad-tracking conversion would hand set_data a non-leaf.
+    const torch::NoGradGuard no_grad;
+    torch::Tensor& v = t->value;
+    const torch::Tensor moved = torchrkt::convert(v, type, index, dtype);
+    if (moved.is_same(v)) {
+      return;
+    }
+    // Everything expected to throw — both allocating conversions and the
+    // shallow-copy compatibility checks set_data would make — happens
+    // before either rebind; should the grad rebind still throw, the
+    // tensor rebind is rolled back. Either way t is untouched on failure:
+    // nothing is half-moved, and a retry cannot short-circuit past the grad.
+    torch::Tensor moved_grad;
+    if (v.grad().defined()) {
+      moved_grad = torchrkt::convert(v.grad(), type, index, dtype);
+    }
+    const bool rebind_grad =
+        moved_grad.defined() && !moved_grad.is_same(v.grad());
+    TORCH_CHECK(torchrkt::rebindable(v, moved),
+                "tr_tensor_to_: incompatible tensor type for set_data");
+    TORCH_CHECK(!rebind_grad || torchrkt::rebindable(v.grad(), moved_grad),
+                "tr_tensor_to_: incompatible grad type for set_data");
+    const torch::Tensor before = v.detach();
+    v.set_data(moved);
+    if (rebind_grad) {
+      try {
+        v.mutable_grad().set_data(moved_grad);
+      } catch (...) {
+        v.set_data(before);
+        throw;
+      }
+    }
   });
 }
 

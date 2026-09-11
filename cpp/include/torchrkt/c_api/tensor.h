@@ -23,7 +23,12 @@ typedef enum tr_dtype {
   TR_DTYPE_FLOAT32 = 0,
   TR_DTYPE_FLOAT64 = 1,
   TR_DTYPE_INT64 = 2,
-  TR_DTYPE_BOOL = 3
+  TR_DTYPE_BOOL = 3,
+  /* "leave the dtype alone", meaning the tensor's own dtype for a conversion
+   * and float32 for a constructor. Accepted by tr_tensor_to, tr_tensor_to_,
+   * tr_tensor_to_dtype, tr_zeros_on, tr_ones_on, and tr_full_on (device.h,
+   * creation.h); every other entry point rejects it as an unknown dtype. */
+  TR_DTYPE_KEEP = -1
 } tr_dtype;
 
 /* Free a handle returned by tr_randn. Safe on NULL. If the underlying
