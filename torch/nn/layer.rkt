@@ -10,6 +10,7 @@
                   flat-named-contract listof not/c or/c unsupplied-arg?)
          (only-in racket/generic define-generics)
          (only-in racket/list append-map check-duplicates remove-duplicates)
+         (only-in racket/stxparam define-syntax-parameter syntax-parameterize)
          (only-in syntax/parse/define define-syntax-parse-rule)
          (only-in "../foreign.rkt" tensor?)
          (only-in "../private/contract.rkt"
@@ -26,9 +27,11 @@
          layer-buffers ;; noqa
          layer-named-buffers ;; noqa
          layer-named-children ;; noqa
-         layer-set-training! ;; noqa
-         layer-training? ;; noqa
+         layer-mode ;; noqa
+         layer-set-mode! ;; noqa
+         in-mode
          in-eval-mode
+         with-mode
          define-layer)
 
 (define-generics layer
@@ -38,16 +41,27 @@
   (layer-buffers layer)
   (layer-named-buffers layer prefix)
   (layer-named-children layer)
-  (layer-set-training! layer training?)
-  (layer-training? layer)
+  (layer-mode layer)
+  (layer-set-mode! layer mode)
   #:fallbacks
   [(define (layer-parameters self) '()) ;; noqa
    (define (layer-named-parameters self prefix) '()) ;; noqa
    (define (layer-buffers self) '()) ;; noqa
    (define (layer-named-buffers self prefix) '()) ;; noqa
    (define (layer-named-children self) '()) ;; noqa
-   (define (layer-set-training! self training?) (void)) ;; noqa
-   (define (layer-training? self) #t)]) ;; noqa
+   (define (layer-mode self) 'train) ;; noqa
+   (define (layer-set-mode! self mode) (void))]) ;; noqa
+
+(define/contract-out mode/c contract?
+  (flat-named-contract 'mode/c (or/c 'train 'eval)))
+
+(define/checked-out (training? mode) ;; noqa
+  (-> mode/c boolean?)
+  (eq? mode 'train))
+
+(define/contract-out (evaluating? mode) ;; noqa
+  (-> mode/c boolean?)
+  (eq? mode 'eval))
 
 (module+ checked
   (provide (contract-out [layer? (-> any/c boolean?)])))
@@ -82,29 +96,74 @@
   (-> layer? any/c ... any)
   (apply layer-forward m inputs))
 
-(define/contract-out (train! m)
+(define/contract-out (train! m) ;; noqa
   (-> layer? layer?)
-  (layer-set-training! m #t)
+  (layer-set-mode! m 'train)
   m)
 
-(define/contract-out (eval! m)
+(define/contract-out (eval! m) ;; noqa
   (-> layer? layer?)
-  (layer-set-training! m #f)
+  (layer-set-mode! m 'eval)
   m)
 
-;; restores the aggregate prior mode tree-wide: a hand-mixed tree collapses
-;; to all-train or all-eval on exit
-(define/contract-out (call-with-eval-mode m thunk)
-  (-> layer? (-> any) any)
-  (define was-training? (layer-training? m))
-  (dynamic-wind (lambda () (eval! m))
+(define/contract-out (set-mode! m mode) ;; noqa
+  (-> layer? mode/c layer?)
+  (layer-set-mode! m mode)
+  m)
+
+(define/contract-out (layer-training? m) ;; noqa
+  (-> layer? boolean?)
+  (training? (layer-mode m)))
+
+(define (mode-snapshot m)
+  (define seen (make-hasheq))
+  (let walk ([m m])
+    (cond
+      [(hash-ref seen m #f) '()]
+      [else
+       (hash-set! seen m #t)
+       (cons (cons m (layer-mode m))
+             (append-map (lambda (c) (walk (cdr c)))
+                         (layer-named-children m)))])))
+
+(define (restore-modes! before)
+  (for ([e (in-list before)] #:unless (registry? (car e)))
+    (layer-set-mode! (car e) (cdr e)))
+  (for ([e (in-list before)] #:when (registry? (car e)))
+    (set-registry-mode! (car e) (cdr e))))
+
+(define/contract-out (call-with-mode m mode thunk) ;; noqa
+  (-> layer? mode/c (-> any) any)
+  (define before (mode-snapshot m))
+  (dynamic-wind (lambda () (layer-set-mode! m mode))
                 thunk
-                (lambda () (if was-training? (train! m) (eval! m)))))
+                (lambda () (restore-modes! before))))
+
+(define/contract-out (call-with-eval-mode m thunk) ;; noqa
+  (-> layer? (-> any) any)
+  (call-with-mode m 'eval thunk))
+
+(define-syntax-parse-rule (in-mode m:expr mode:expr body:expr ...+)
+  (call-with-mode m mode (lambda () body ...)))
 
 (define-syntax-parse-rule (in-eval-mode m:expr body:expr ...+)
-  (call-with-eval-mode m (lambda () body ...)))
+  (call-with-mode m 'eval (lambda () body ...)))
 
-(struct registry (forward params buffers children)
+(define-syntax-parameter with-mode
+  (lambda (stx)
+    (raise-syntax-error
+     #f "only allowed inside a define-layer #:forward body" stx)))
+
+(begin-for-syntax
+  (define ((with-mode-transformer self-id) stx) ;; noqa
+    (syntax-parse stx
+      [(_ id:id body:expr ...+)
+       #`(let ([id (layer-mode #,self-id)]) body ...)]
+      [(_ body:expr ...+)
+       #`(let ([#,(datum->syntax stx 'mode) (layer-mode #,self-id)])
+           body ...)])))
+
+(struct registry (forward params buffers children [mode #:mutable])
   #:property prop:procedure
   (lambda (self . inputs) (apply (registry-forward self) self inputs))
   #:methods gen:layer
@@ -128,11 +187,12 @@
                          (registry-children self))))
    (define (layer-named-children self)
      (registry-children self))
-   (define (layer-set-training! self training?)
+   (define (layer-set-mode! self mode)
+     (set-registry-mode! self mode)
      (for ([c (in-list (registry-children self))])
-       (child-set-training! c training?)))
-   (define (layer-training? self)
-     (andmap child-training? (registry-children self)))])
+       (child-set-mode! c mode)))
+   (define (layer-mode self)
+     (registry-mode self))])
 
 (define (child-parameters c)
   (layer-parameters (cdr c)))
@@ -140,11 +200,8 @@
 (define (child-buffers c)
   (layer-buffers (cdr c)))
 
-(define (child-set-training! c training?)
-  (layer-set-training! (cdr c) training?))
-
-(define (child-training? c)
-  (layer-training? (cdr c)))
+(define (child-set-mode! c mode)
+  (layer-set-mode! (cdr c) mode))
 
 (define (child-prefix c prefix)
   (if (string=? (car c) "") prefix (string-append prefix (car c) ".")))
@@ -185,7 +242,8 @@
                               (if (unsupplied-arg? bufs) '() bufs)
                               (if (unsupplied-arg? kids) '() kids)))))
        [result layer?])
-  (check-names 'procedure->Layer (Fn% fn-forward params bufs kids proc)))
+  (check-names 'procedure->Layer
+               (Fn% fn-forward params bufs kids 'train proc)))
 
 (struct Children% (alist)
   #:reflection-name 'Children)
@@ -361,7 +419,9 @@
              (define name? sid?)
              (define (forward-proc self . inputs)
                (let ([field.id (field-acc self)] ...)
-                 (apply (lambda (input ...) body ...) inputs)))
+                 (syntax-parameterize
+                     ([with-mode (with-mode-transformer #'self)])
+                   (apply (lambda (input ...) body ...) inputs))))
              (define (name . formals)
                (let ([absent #f] ...)
                  init-body ...
@@ -370,5 +430,6 @@
                                          (list field.id ...))])
                    (check-names
                     'name
-                    (sid forward-proc params buffers children field.id ...)))))
+                    (sid forward-proc params buffers children 'train
+                         field.id ...)))))
              export)))]))

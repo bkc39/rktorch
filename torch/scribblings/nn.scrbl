@@ -43,6 +43,23 @@ identifier.  Without it, the fields are themselves the constructor
 formals, so a stateless layer needs no body.  A field name is one
 state-dict segment and may not contain a dot.
 
+Every layer starts in the @racket['train] mode, and @racket[train!],
+@racket[eval!] and @racket[set-mode!] set a layer's own mode and recurse
+into its children.  @racket[body] reads the instance's mode with
+@racket[with-mode].  The mode is not a field: it is neither a parameter
+nor a buffer, and it is not written to the state dict.  Other
+per-instance state that is not a tensor belongs in a plain field holding
+a @racket[box]; state that is a tensor belongs in a @racket[Buffer]
+updated in place.
+
+@racketblock[
+(define-layer Dropout (p)
+  #:contract (->* [] [#:p (and/c (>=/c 0) (</c 1))] dropout?)
+  #:init (#:p [p 0.5])
+  #:forward (x)
+  (with-mode (dropout x p (training? mode))))
+]
+
 What a field holds when @racket[init-body] finishes decides what it is:
 
 @itemlist[
@@ -143,6 +160,29 @@ Without @racket[#:contract] nothing is exported; a layer local to a model
 or a test needs no contract boundary.
 }
 
+@defform*[[(with-mode body ...+)
+           (with-mode id body ...+)]]{
+Allowed only inside a @racket[define-layer] @racket[#:forward] body.
+Binds @racket[id], or @racket[mode] when no identifier is given, to the
+instance's current mode, a @racket[mode/c] value, and evaluates
+@racket[body].  The first form is the identifier-then-body one, so
+@racket[(with-mode x)] evaluates @racket[x] with @racket[mode] bound.
+The mode is read at each call, so a layer that flips between calls sees
+the change.
+}
+
+@defthing[mode/c contract?]{
+A layer's mode: @racket['train] or @racket['eval].
+}
+
+@defproc[(training? [mode mode/c]) boolean?]{
+Whether @racket[mode] is @racket['train].
+}
+
+@defproc[(evaluating? [mode mode/c]) boolean?]{
+Whether @racket[mode] is @racket['eval].
+}
+
 @defproc[(Parameter [t tensor?]) Parameter?]{
 Returns @racket[t] as a parameter: the same storage under a tensor subtype
 that @racket[define-layer] registers, detached from any autograd graph
@@ -184,8 +224,10 @@ through registered children, as for @racket[define-layer].
 Captures are not discovered automatically. In contrast to OCaml's
 @tt{Layer.of_fn}, whose parameters belong to a separate variable store,
 this wrapper owns its registered tree. Rebinding a captured variable does
-not change that registration. Mode-dependent operations should live in
-registered child layers such as @racket[Dropout].
+not change that registration. The wrapper has a training mode of its own
+that @racket[train!] and @racket[eval!] set, but @racket[proc] cannot read
+it, so a mode-dependent step belongs in a registered child such as
+@racket[Dropout].
 
 @racketblock[
 (define projection (Linear 32 32))
@@ -294,4 +336,55 @@ child; its own children are reached through it.
 
 @defproc[(named-children [m layer?]) (listof (cons/c string? layer?))]{
 The direct children of @racket[m] with the names they registered under.
+}
+
+@defproc[(set-mode! [m layer?] [mode mode/c]) layer?]{
+Sets the mode of @racket[m] and of every layer reachable through its
+children, and returns @racket[m].
+}
+
+@defproc[(train! [m layer?]) layer?]{
+@racket[(set-mode! m 'train)].
+}
+
+@defproc[(eval! [m layer?]) layer?]{
+@racket[(set-mode! m 'eval)].
+}
+
+@defproc[(layer-mode [m layer?]) mode/c]{
+The mode of @racket[m] itself.  A layer's mode is its own:
+@racket[eval!] on a child does not change its parent's answer.  A
+hand-written @racket[gen:layer] implementation that defines no mode
+methods is stateless and reports @racket['train].
+}
+
+@defproc[(layer-training? [m layer?]) boolean?]{
+@racket[(training? (layer-mode m))].
+}
+
+@defproc[(layer-set-mode! [m layer?] [mode mode/c]) void?]{
+The @racket[gen:layer] method behind @racket[set-mode!]: sets
+@racket[m]'s own mode and recurses into its children.  A hand-written
+layer that keeps a mode of its own defines this method and
+@racket[layer-mode]; @racket[call-with-mode] restores such a layer
+through them.  A layer that defines neither is stateless.
+}
+
+@defproc[(call-with-mode [m layer?] [mode mode/c] [thunk (-> any)]) any]{
+Records the mode of every layer reachable from @racket[m], sets them all
+to @racket[mode], calls @racket[thunk], and restores each layer's own
+recorded mode, whether @racket[thunk] returns or raises.  A tree whose
+layers were in mixed modes comes back exactly as it was.
+}
+
+@defproc[(call-with-eval-mode [m layer?] [thunk (-> any)]) any]{
+@racket[(call-with-mode m 'eval thunk)].
+}
+
+@defform[(in-mode m mode body ...+)]{
+@racket[(call-with-mode m mode (lambda () body ...))].
+}
+
+@defform[(in-eval-mode m body ...+)]{
+@racket[(call-with-mode m 'eval (lambda () body ...))].
 }

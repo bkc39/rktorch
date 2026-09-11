@@ -1,8 +1,8 @@
 #lang racket/base
 
 (module+ test
-  (require rackunit
-           (only-in racket/file make-temporary-file)
+  (require (only-in racket/file make-temporary-file)
+           rackunit
            (only-in syntax/macro-testing convert-compile-time-error)
            "../main.rkt"
            "../nn.rkt")
@@ -413,6 +413,79 @@
                       (set! encoder.block (Linear 1 1))
                       #:forward (x) x)
                     (Dotted))))))
+
+  (test-case "training mode is per instance: leaves flip, parents keep their own"
+    (define lin (Linear 1 1))
+    (check-true (layer-training? lin))
+    (eval! lin)
+    (check-false (layer-training? lin))
+    (check-equal? (layer-mode lin) 'eval)
+    (train! lin)
+    (check-equal? (layer-mode lin) 'train)
+    (define-layer Gate (scale)
+      #:init ()
+      (set! scale (Parameter (full 2.0 1)))
+      #:forward (x) (with-mode (if (training? mode) (mul x scale) x)))
+    (define g (Gate))
+    (check-equal? (tensor->list (g (ones 1))) '(2.0))
+    (eval! g)
+    (check-equal? (tensor->list (g (ones 1))) '(1.0))
+    (train! g)
+    (check-equal? (tensor->list (g (ones 1))) '(2.0))
+    (define parent (Sequential lin g))
+    (eval! g)
+    (check-true (layer-training? parent) "a child's mode is not the parent's")
+    (check-false (layer-training? g))
+    (in-eval-mode parent
+      (check-false (layer-training? parent))
+      (check-false (layer-training? lin)))
+    (check-true (layer-training? parent) "restored exactly")
+    (check-true (layer-training? lin))
+    (check-false (layer-training? g) "the hand-set child came back in eval")
+    (check-exn #rx"boom" (lambda () (in-eval-mode parent (error "boom"))))
+    (check-true (layer-training? parent) "restored after an exception")
+    (check-false (layer-training? g))
+    (define wrapped (procedure->Layer values))
+    (eval! wrapped)
+    (check-false (layer-training? wrapped) "a procedure layer has its own mode")
+    (struct Toggle ([mode #:mutable])
+      #:methods gen:layer
+      [(define (layer-forward self . inputs) (car inputs))
+       (define (layer-set-mode! self mode) (set-Toggle-mode! self mode))
+       (define (layer-mode self) (Toggle-mode self))])
+    (define t1 (Toggle 'train))
+    (define t2 (Toggle 'eval))
+    (define host (Sequential t1 t2))
+    (in-eval-mode host
+      (check-false (layer-training? t1))
+      (check-false (layer-training? t2)))
+    (check-true (layer-training? t1) "a hand-written mode is restored")
+    (check-false (layer-training? t2) "a hand-written eval mode is kept")
+    (define-layer Named (scale)
+      #:init ()
+      (set! scale (Parameter (full 3.0 1)))
+      #:forward (x) (with-mode m (if (evaluating? m) x (mul x scale))))
+    (define nm (Named))
+    (check-equal? (tensor->list (nm (ones 1))) '(3.0))
+    (check-equal? (tensor->list ((eval! nm) (ones 1))) '(1.0))
+    (check-exn #rx"^set-mode!: contract violation"
+               (lambda () (set-mode! nm 'x)))
+    (eval! parent)
+    (in-mode parent 'train
+      (check-true (layer-training? g))
+      (check-equal? (layer-mode parent) 'train))
+    (check-equal? (layer-mode parent) 'eval "restored to eval exactly")
+    (check-false (layer-training? g))
+    (check-exn #rx"unbound identifier"
+               (lambda ()
+                 (convert-compile-time-error
+                  (let ()
+                    (define-layer NoMode ()
+                      #:forward (x) mode)
+                    (NoMode)))))
+    (check-exn #rx"only allowed inside a define-layer"
+               (lambda ()
+                 (convert-compile-time-error (with-mode 1)))))
 
   (test-case "with #:init, a field with a default or keyword is a syntax error"
     (check-exn #rx"with #:init, a field is a bare identifier"

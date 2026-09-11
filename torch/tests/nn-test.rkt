@@ -298,7 +298,14 @@
     (check-equal? (tensor->list (d x)) (tensor->list x))
     (train! d)
     (check-true (andmap (lambda (v) (or (= v 0.0) (= v 2.0)))
-                        (tensor->list (d x)))))
+                        (tensor->list (d x))))
+    (check-equal? (state-dict d) '() "mode is not a state-dict entry")
+    (define leaf (requires-grad! (ones 100)))
+    (backward! (sum (d leaf)))
+    (check-true (has-grad? leaf))
+    (check-true (andmap (lambda (v) (or (= v 0.0) (= v 2.0)))
+                        (tensor->list (grad leaf)))
+                "the dropout mask flows back to the input"))
 
   (test-case "dropout inside a model: eval! recurses through submodules"
     (define net (Sequential (Linear 4 4) (Dropout #:p 0.9)))
@@ -322,7 +329,7 @@
     (check-true (layer-training? net) "model restored to train")
     (define lin (Linear 4 2))
     (check-true (layer-training? lin))
-    (in-eval-mode lin (check-true (layer-training? lin)))
+    (in-eval-mode lin (check-false (layer-training? lin)))
     (check-true (layer-training? lin)))
 
   (test-case "sequential: forward, indexed dotted names, param order"
