@@ -165,7 +165,8 @@
     (check-equal? (param-values again) expected))
 
   (test-case "an in-place move re-accounts the same ledger entry"
-    (define base (begin (settle!) (bytes-on (cpu-device))))
+    (settle!)
+    (define base (bytes-on (cpu-device)))
     (define m (Linear 2048 2048)) ;; 16 MiB weight + 8 KiB bias, float32
     (settle!)
     (define entries (ledger-entries))
@@ -188,7 +189,8 @@
     (check-true (layer? m)))
 
   (test-case "tensor-free! after an in-place move unaccounts synchronously"
-    (define base (begin (settle!) (bytes-on (cpu-device))))
+    (settle!)
+    (define base (bytes-on (cpu-device)))
     (define t (zeros 1024 1024)) ;; 4 MiB
     (to! t 'float64)
     (check-equal? (tensor-dtype t) 'float64)
@@ -198,7 +200,8 @@
     (check-true (< (- (bytes-on (cpu-device)) base) (* 512 1024))))
 
   (test-case "to results are collected under pressure without manual collects"
-    (define base (begin (settle!) (bytes-on (cpu-device))))
+    (settle!)
+    (define base (bytes-on (cpu-device)))
     (define rss-before (current-rss-bytes))
     (define high-water
       (for/fold ([hw 0]) ([_ (in-range 100)])
@@ -212,7 +215,8 @@
                   "RSS grew by ~the whole churn — native buffers not freed")))
 
   (test-case "in-place flips release the old storage"
-    (define base (begin (settle!) (bytes-on (cpu-device))))
+    (settle!)
+    (define base (bytes-on (cpu-device)))
     (define m (Linear 2048 2048)) ;; 16 MiB float32
     (settle!)
     (define entries (ledger-entries))
@@ -230,7 +234,8 @@
 
   (define (check-device-moves dev dev-name)
     (set-default-device! 'cpu)
-    (define base-cpu (begin (settle!) (bytes-on (cpu-device))))
+    (settle!)
+    (define base-cpu (bytes-on (cpu-device)))
     (define base-dev (bytes-on dev))
 
     (define t (zeros 1024 1024)) ;; 4 MiB
