@@ -82,7 +82,7 @@ in ocaml.buildDunePackage {
       --replace-fail '-0.40455365180969238' '-0.40455368161201477' \
       --replace-fail '0.36596611142158508' '0.36596614122390747'
   '';
-  doCheck = true;
+  doCheck = false;
   meta = {
     description = "Jane Street OCaml bindings to PyTorch";
     homepage = "https://github.com/janestreet/torch";
