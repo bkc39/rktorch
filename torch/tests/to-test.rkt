@@ -54,8 +54,9 @@
     (define both (to t (cpu-device) 'float64))
     (check-equal? (tensor-dtype both) 'float64)
     (check-equal? (tensor-device both) (cpu-device))
-    (check-exn #rx"a dtype target takes no second argument"
-               (lambda () (to t 'float64 'float32)))
+    (check-exn exn:fail:contract? (lambda () (to t 'float64 'float32))
+               "a dtype target takes no second argument: contract blame")
+    (check-exn exn:fail:contract? (lambda () (to! t 'float64 'float32)))
     (check-exn exn:fail:contract? (lambda () (to t 'float16)))
     (check-exn exn:fail:contract? (lambda () (to 5 'cpu)))
     (check-exn exn:fail:contract? (lambda () (to t 'cpu 'cpu))))
@@ -89,6 +90,12 @@
                   "a plain tensor field is not a parameter and stays")
     (check-equal? (tensor->list (car (parameters m))) '(1.0 2.0 3.0))
     (check-eq? (~> m (to 'float32)) m "threads")
+    (check-equal? (map tensor-dtype (parameters m)) '(float32))
+    ;; nn.Module.to only accepts floating point or complex dtypes
+    (check-exn #rx"a layer only moves to a floating-point dtype"
+               (lambda () (to m 'int64)))
+    (check-exn #rx"a layer only moves to a floating-point dtype"
+               (lambda () (to m 'cpu 'bool)))
     (check-equal? (map tensor-dtype (parameters m)) '(float32)))
 
   (test-case "every layer kind answers to: containers, procedures, hand-written"

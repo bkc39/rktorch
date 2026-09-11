@@ -273,10 +273,16 @@ int tr_tensor_to_(tr_tensor* t, tr_device_type type, int64_t index,
     if (moved.is_same(v)) {
       return;
     }
-    v.set_data(moved);
+    // Both conversions (the allocating steps) happen before either
+    // set_data (shallow, non-allocating), so a throw leaves t untouched:
+    // nothing is half-moved, and a retry cannot short-circuit past the grad.
+    torch::Tensor moved_grad;
     if (v.grad().defined()) {
-      v.mutable_grad().set_data(
-          torchrkt::convert(v.grad(), type, index, dtype));
+      moved_grad = torchrkt::convert(v.grad(), type, index, dtype);
+    }
+    v.set_data(moved);
+    if (moved_grad.defined() && !moved_grad.is_same(v.grad())) {
+      v.mutable_grad().set_data(moved_grad);
     }
   });
 }

@@ -70,7 +70,11 @@
 (module+ checked
   (provide (contract-out [layer? (-> any/c boolean?)])))
 
+;; PyTorch: "nn.Module.to only accepts floating point or complex dtypes"
 (define (move-layer! m dev dtype)
+  (when (and dtype (not (memq dtype '(float32 float64))))
+    (raise-arguments-error 'to "a layer only moves to a floating-point dtype"
+                           "dtype" dtype))
   (for ([t (in-list (append (parameters m) (buffers m)))])
     (cond
       [(and dev dtype) (to! t dev dtype)]

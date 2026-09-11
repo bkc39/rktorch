@@ -70,13 +70,20 @@
 
 (module+ unsafe
   (provide (contract-out
-            [to! (->* [tensor? (or/c device/c dtype/c)] [dtype/c] tensor?)])))
+            [to! (->i ([t tensor?] [target (or/c device/c dtype/c)])
+                      ([dtype (target) (dtype-after/c target)])
+                      [result tensor?])])))
 
 (define dims-rest/c (listof exact-nonnegative-integer?))
 
 (define dtype-symbols '(float32 float64 int64 bool))
 
 (define dtype/c (apply or/c dtype-symbols))
+
+;; Python's argument order: a dtype target stands alone, a device target may
+;; carry a dtype — the shape gets contract blame, not a runtime error
+(define (dtype-after/c target)
+  (if (memq target dtype-symbols) none/c dtype/c))
 
 (define/contract-out (torch-version) (-> string?) ;; noqa
   (tr-version/raw))
@@ -243,8 +250,8 @@
 (define/checked-out (to-device t dev) (-> tensor? device/c tensor?) ;; noqa
   (to t dev))
 
-;; Python's argument order: a dtype target stands alone, a device target may
-;; carry a dtype. 'keep is the C side's "leave this axis" sentinel.
+;; 'keep is the C side's "leave this axis" sentinel; the argument-order
+;; check backs the uncontracted in-package entry
 (define (parse-target who target dtype)
   (cond
     [(memq target dtype-symbols)
@@ -270,9 +277,9 @@
      v)))
 
 (define/checked-out (to x target [dtype #f])
-  (->* [(or/c tensor? to-able?) (or/c device/c dtype/c)]
-       [dtype/c]
-       (or/c tensor? to-able?))
+  (->i ([x (or/c tensor? to-able?)] [target (or/c device/c dtype/c)])
+       ([dtype (target) (dtype-after/c target)])
+       [result (or/c tensor? to-able?)])
   (define-values (type index dt) (parse-target 'to target dtype))
   (cond
     [(tensor? x)
@@ -291,10 +298,13 @@
 
 (define tensor-to!/retrying ((oom-retry/status) tr-tensor-to!/raw))
 
+;; re-accounted before the status is judged: whatever the native side did to
+;; the storage, the ledger entry describes the handle as it now is
 (define (to! t target [dtype #f])
   (define-values (type index dt) (parse-target 'to! target dtype))
-  (check-ok (tensor-to!/retrying t type index dt) 'to!)
+  (define rc (tensor-to!/retrying t type index dt))
   (reaccount! (tensor-handle t))
+  (check-ok rc 'to!)
   t)
 
 (define/checked-out (tensor-device t) (-> tensor? device?)

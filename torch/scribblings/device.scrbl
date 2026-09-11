@@ -47,7 +47,9 @@ the caller, by optimizers, and by the layer tree all stay valid; an
 accumulated gradient moves along, and the parameter stays a
 requires-grad leaf. Plain tensor fields are not moved, just as PyTorch
 leaves plain tensor attributes where they are; register such a tensor with
-@racket[Buffer] to have it follow the layer.
+@racket[Buffer] to have it follow the layer. A layer's dtype target must be
+floating-point, @racket['float32] or @racket['float64], as
+@tt{nn.Module.to} only accepts floating-point or complex dtypes.
 
 Two rules carry over from PyTorch. Move the model before the first
 optimizer @racket[step!]: @racket[adam] creates its moments on the
