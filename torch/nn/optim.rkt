@@ -4,9 +4,7 @@
          (only-in racket/generic define-generics)
          (only-in "../foreign.rkt"
                   + - * / sqrt
-                  maybe-grad sub! tensor-device tensor-dtype tensor-shape
-                  tensor? to with-default-device with-no-grad zero-grad!
-                  zeros)
+                  maybe-grad sub! tensor? with-no-grad zero-grad! zeros-like)
          (only-in "../private/contract.rkt" define/contract-out))
 
 (provide gen:optimizer
@@ -51,12 +49,6 @@
        [#:lr real? #:beta1 real? #:beta2 real? #:eps real?]
        adam?)
   (make-adam params lr beta1 beta2 eps (box 0) (make-hasheq) (make-hasheq)))
-
-;; on the parameter's own device and dtype: a model moved with `to` before
-;; its first step gets moments that live where it does
-(define (zeros-like t)
-  (to (with-default-device (tensor-device t) (apply zeros (tensor-shape t)))
-      (tensor-dtype t)))
 
 (define (adam-do-step! opt)
   (with-no-grad

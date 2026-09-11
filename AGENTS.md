@@ -64,7 +64,11 @@ CPU-first; float32 + inferred int64 (#44). From `torch`:
   runs, captured failure messages, and live ledger entries; also dumped at
   exit under `RKTORCH_MEM_TRACE`), `tensor-free!` (explicit synchronous
   release)
-- creation: `zeros ones full arange eye tensor rand` (+ in-place `uniform!`)
+- creation: `zeros ones full arange eye tensor rand` (+ in-place `uniform!`);
+  `zeros`/`ones`/`full` take dims as rest args or one list and `#:device` /
+  `#:dtype` chosen at native construction (never construct-then-move);
+  `zeros-like` / `ones-like` inherit the reference's shape, device, dtype
+  (the first slice of #56)
 - shape: `reshape view transpose permute squeeze unsqueeze cat stack`
 - elementwise: `add sub mul div pow neg exp log sqrt relu sigmoid tanh`
   (binary ops take a real on either side)

@@ -188,4 +188,33 @@ TEST(TorchrktTo, MpsInplaceRoundTrip) {
   expect_grad(x.t, {4.0F, 8.0F, 12.0F});
 }
 
+TEST(TorchrktCreationOn, PlacesAndTypesAtConstruction) {
+  const std::vector<int64_t> dims = {2, 3};
+  const Handle z(tr_zeros_on(dims.data(), 2, TR_DEVICE_CPU, 0, TR_DTYPE_INT64));
+  EXPECT_EQ(dtype_of(z.t), TR_DTYPE_INT64);
+  EXPECT_EQ(device_type_of(z.t), TR_DEVICE_CPU);
+  EXPECT_EQ(cpu_data_of(z.t), std::vector<float>(6, 0.0F));
+  const Handle o(tr_ones_on(dims.data(), 2, TR_DEVICE_KEEP, 0, TR_DTYPE_KEEP));
+  EXPECT_EQ(dtype_of(o.t), TR_DTYPE_FLOAT32);
+  EXPECT_EQ(cpu_data_of(o.t), std::vector<float>(6, 1.0F));
+  const Handle f(
+      tr_full_on(dims.data(), 2, 7.0, TR_DEVICE_KEEP, 0, TR_DTYPE_FLOAT64));
+  EXPECT_EQ(dtype_of(f.t), TR_DTYPE_FLOAT64);
+  EXPECT_EQ(cpu_data_of(f.t), std::vector<float>(6, 7.0F));
+  EXPECT_EQ(tr_zeros_on(nullptr, 2, TR_DEVICE_CPU, 0, TR_DTYPE_KEEP), nullptr);
+  EXPECT_EQ(tr_zeros_on(dims.data(), 2, TR_DEVICE_KEEP, 0,
+                        static_cast<tr_dtype>(9)),
+            nullptr);
+}
+
+TEST(TorchrktCreationOn, CudaPlacement) {
+  if (tr_cuda_is_available() == 0) {
+    GTEST_SKIP() << "no CUDA device visible";
+  }
+  const std::vector<int64_t> dims = {4};
+  const Handle z(tr_zeros_on(dims.data(), 1, TR_DEVICE_CUDA, 0, TR_DTYPE_KEEP));
+  EXPECT_EQ(device_type_of(z.t), TR_DEVICE_CUDA);
+  EXPECT_EQ(cpu_data_of(z.t), std::vector<float>(4, 0.0F));
+}
+
 }  // namespace

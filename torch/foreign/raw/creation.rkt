@@ -3,11 +3,15 @@
 (require (only-in ffi/unsafe _double _fun _int64 _uint64)
          (only-in ffi/vector _f32vector _s64vector)
          (only-in "memory.rkt" _tr-device-type tensor-allocator)
-         (only-in "syntax.rkt" _Tensor/null define-torch))
+         (only-in "syntax.rkt" _Tensor/null define-torch)
+         (only-in "tensor.rkt" _tr-dtype))
 
 (provide tr-zeros/raw
+         tr-zeros-on/raw
          tr-ones/raw
+         tr-ones-on/raw
          tr-full/raw
+         tr-full-on/raw
          tr-arange/raw
          tr-eye/raw
          tr-from-data/raw
@@ -28,6 +32,37 @@
 (define-torch tr-full/raw
   (_fun (dims : (_s64vector i)) (ndim : _int64) (value : _double) -> _Tensor/null)
   #:c-id tr_full
+  #:wrap tensor-allocator)
+
+(define-torch tr-zeros-on/raw
+  (_fun (dims : (_s64vector i))
+        (ndim : _int64)
+        (type : _tr-device-type)
+        (index : _int64)
+        (dtype : _tr-dtype)
+        -> _Tensor/null)
+  #:c-id tr_zeros_on
+  #:wrap tensor-allocator)
+
+(define-torch tr-ones-on/raw
+  (_fun (dims : (_s64vector i))
+        (ndim : _int64)
+        (type : _tr-device-type)
+        (index : _int64)
+        (dtype : _tr-dtype)
+        -> _Tensor/null)
+  #:c-id tr_ones_on
+  #:wrap tensor-allocator)
+
+(define-torch tr-full-on/raw
+  (_fun (dims : (_s64vector i))
+        (ndim : _int64)
+        (value : _double)
+        (type : _tr-device-type)
+        (index : _int64)
+        (dtype : _tr-dtype)
+        -> _Tensor/null)
+  #:c-id tr_full_on
   #:wrap tensor-allocator)
 
 (define-torch tr-arange/raw

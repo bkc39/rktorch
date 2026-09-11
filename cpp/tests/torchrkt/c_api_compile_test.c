@@ -25,6 +25,12 @@ void torchrkt_c_api_compile_check(void) {
   int (*copy_data)(const tr_tensor*, uint64_t, float*, uint64_t*) =
       tr_tensor_copy_data;
   tr_tensor* (*zeros)(const int64_t*, int64_t) = tr_zeros;
+  tr_tensor* (*zeros_on)(const int64_t*, int64_t, tr_device_type, int64_t,
+                         tr_dtype) = tr_zeros_on;
+  tr_tensor* (*ones_on)(const int64_t*, int64_t, tr_device_type, int64_t,
+                        tr_dtype) = tr_ones_on;
+  tr_tensor* (*full_on)(const int64_t*, int64_t, double, tr_device_type,
+                        int64_t, tr_dtype) = tr_full_on;
   tr_tensor* (*from_data)(const float*, uint64_t, const int64_t*, int64_t) =
       tr_from_data;
   tr_tensor* (*from_data_on)(const float*, uint64_t, const int64_t*, int64_t,
@@ -268,6 +274,9 @@ void torchrkt_c_api_compile_check(void) {
   (void)get_default_device;
   (void)to_device;
   (void)to_fn;
+  (void)zeros_on;
+  (void)ones_on;
+  (void)full_on;
   (void)to_inplace;
   (void)tensor_device;
 }

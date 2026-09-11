@@ -49,6 +49,8 @@
 (provide zeros
          ones
          full
+         zeros-like
+         ones-like
          arange
          eye
          tensor)

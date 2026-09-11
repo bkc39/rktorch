@@ -4,9 +4,10 @@
                      racket/contract
                      (only-in torch
                               cpu-device cuda-device device device? dtype
-                              mps-device native-memory-use prop:to tensor
-                              tensor-device tensor-dtype tensor? to to-able?
-                              to-device to-dtype with-default-device ~>)
+                              full mps-device native-memory-use ones
+                              ones-like prop:to tensor tensor-device
+                              tensor-dtype tensor? to to-able? to-device
+                              to-dtype with-default-device zeros zeros-like ~>)
                      (only-in torch/nn
                               Buffer Linear Parameter adam buffers gen:layer
                               layer? load-state! parameters step!)))
@@ -86,6 +87,29 @@ Equivalent to @racket[(to t dev)].
 
 @defproc[(to-dtype [t tensor?] [dtype dtype/c]) tensor?]{
 Equivalent to @racket[(to t dtype)].
+}
+
+@section{Placement at construction}
+
+@defproc*[([(zeros [dim exact-nonnegative-integer?] ...
+                   [#:device device device/c] [#:dtype dtype dtype/c]) tensor?]
+           [(zeros [dims (listof exact-nonnegative-integer?)]
+                   [#:device device device/c] [#:dtype dtype dtype/c]) tensor?])]{
+A tensor of zeros, with the dims as rest arguments or as one list, as
+@tt{torch.zeros(2, 3)} and @tt{torch.zeros((2, 3))}. The device and dtype
+default to the process default device and @racket['float32]; when given they
+are chosen at native construction, so a tensor never takes a hop through
+another device on its way to where it will live. @racket[ones] and
+@racket[full] take the same arguments.
+}
+
+@defproc[(zeros-like [t tensor?]
+                     [#:device device device/c] [#:dtype dtype dtype/c])
+         tensor?]{
+Zeros with @racket[t]'s shape, device, and dtype unless overridden, as
+@tt{torch.zeros_like}. @racket[ones-like] is the same for ones. Optimizer
+state is the typical use: a moment created by @racket[zeros-like] lives
+where its parameter does, however the parameter got there.
 }
 
 @section{Unsafe}
