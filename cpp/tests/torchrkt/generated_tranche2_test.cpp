@@ -246,6 +246,8 @@ TEST(GeneratedTranche2, InplaceCopyOverwritesSelf) {
   EXPECT_EQ(tr_gen_copy_(a.t, src.t, /*non_blocking=*/false), 0)
       << tr_last_error();
   EXPECT_EQ(data_of(a.t), (std::vector<float>{4.0F, 5.0F, 6.0F}));
+  EXPECT_EQ(tr_gen_copy_(nullptr, src.t, false), 1);
+  expect_error_from("tr_gen_copy_");
   EXPECT_EQ(tr_gen_copy_(a.t, nullptr, false), 1);
   expect_error_from("tr_gen_copy_");
 }
