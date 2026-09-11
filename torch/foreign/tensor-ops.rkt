@@ -120,7 +120,7 @@
   (or (unsupplied-arg? dtype)
       (not (eq? dtype 'int64))
       (not (exact-integer? value))
-      (= value (inexact->exact (exact->inexact value)))
+      (= (exact->inexact value) value)
       "an int64 fill value must be exactly representable as a double"))
 
 (define/contract-out (full value #:device [device #f] #:dtype [dtype #f]
@@ -136,8 +136,6 @@
         (tr-full-on/raw (list->s64vector shape) (length shape)
                         (exact->inexact value) type index dt)))
 
-;; torch.zeros_like / ones_like: the reference's shape, device, and dtype
-;; unless overridden
 (define/contract-out (zeros-like t #:device [device #f] #:dtype [dtype #f]) ;; noqa
   (->* [tensor?] [#:device device/c #:dtype dtype/c] tensor?)
   (zeros (tensor-shape t)

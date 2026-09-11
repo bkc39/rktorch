@@ -508,7 +508,21 @@
        (for ([a (in-list (append-map tensor->list (parameters lin)))]
              [b (in-list (hash-ref j 'linear_state_values))]
              [i (in-naturals)])
-         (check-= a b tol (format "Linear.to(float64) parity ~a" i))))
+         (check-= a b tol (format "Linear.to(float64) parity ~a" i)))
+       ;; Module.to forwards the dtype only to floating-point tensors
+       (define-layer Counted (lin steps keep)
+         #:init ()
+         (set! lin (Linear 2 2))
+         (set! steps (Buffer (tensor '(0 1))))
+         (set! keep (Buffer (eq (tensor '(1 0)) 1)))
+         #:forward (x) (lin x))
+       (define counted (to (Counted) 'float64))
+       (define py-dtypes (hash-ref j 'counted_dtypes))
+       (check-equal? (length (state-dict counted)) (hash-count py-dtypes))
+       (for ([e (in-list (state-dict counted))])
+         (check-equal? (format "torch.~a" (tensor-dtype (cdr e)))
+                       (hash-ref py-dtypes (string->symbol (car e)))
+                       (format "Module.to(float64) dtype of ~a" (car e)))))
      (let ()
        ;; build on CPU, move, then train — Adam created before the move
        (define (train-on device)

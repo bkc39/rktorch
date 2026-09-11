@@ -44,8 +44,6 @@
   (layer-named-children layer)
   (layer-mode layer)
   (layer-set-mode! layer mode)
-  ;; every layer answers `to`: parameters and buffers move in place, so the
-  ;; layer, its parameter objects, and optimizer state keyed on them survive
   #:derive-property prop:to (lambda (m dev dtype) (move-layer! m dev dtype))
   #:fallbacks
   [(define (layer-parameters self) '()) ;; noqa

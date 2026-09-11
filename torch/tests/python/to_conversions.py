@@ -10,6 +10,22 @@ import torch.nn as nn
 x = torch.tensor([[1.5, -2.0], [0.0, 3.25]])
 torch.manual_seed(0)
 lin = nn.Linear(2, 2)
+
+
+class Counted(nn.Module):
+    """a submodule plus an int64 counter and a bool mask as buffers"""
+
+    def __init__(self):
+        super().__init__()
+        self.lin = nn.Linear(2, 2)
+        self.register_buffer("steps", torch.tensor([0, 1]))
+        self.register_buffer("keep", torch.tensor([True, False]))
+
+    def forward(self, x):
+        return self.lin(x)
+
+
+counted = Counted().to(torch.float64)
 print(json.dumps({
     "float64_values": x.to(torch.float64).flatten().tolist(),
     "float64_dtype": str(x.to(torch.float64).dtype),
@@ -26,6 +42,7 @@ print(json.dumps({
     "cuda_available": torch.cuda.is_available(),
     "linear_is_self": lin.to(torch.float64) is lin,
     "linear_state_dtypes": [str(v.dtype) for v in lin.state_dict().values()],
+    "counted_dtypes": {k: str(v.dtype) for k, v in counted.state_dict().items()},
     "linear_state_values": [float(v) for v in
                             torch.cat([p.detach().flatten()
                                        for p in lin.parameters()]).tolist()],
