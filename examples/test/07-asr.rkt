@@ -39,10 +39,15 @@
   (check-equal? (length names) 273)
   (check-equal? (first names) "conv1.weight")
   (check-equal? (last names) "head.bias")
-  (check-not-false (member "dil4.bias" names))
-  (check-not-false (member "enc6.wq.weight" names))
+  (check-not-false (member "dilations.3.bias" names))
+  (check-not-false (member "encoders.5.attention.wq.weight" names))
+  (check-not-false (member "encoders.0.mlp.fc1.weight" names))
   (check-not-false (member "tok-emb.weight" names))
-  (check-not-false (member "dec6.co.bias" names))
+  (check-not-false (member "decoders.5.cross.wo.bias" names))
+  (check-not-false (member "decoders.0.attention.wk.bias" names))
+  ;; the flat names from before the stacks were factored are gone
+  (check-false (member "dil4.bias" names))
+  (check-false (member "enc6.wq.weight" names))
   (check-equal? (tensor-shape (car (parameters net))) '(64 80 3))
   (check-equal? (tensor-shape
                  (cdr (assoc "tok-emb.weight" (named-parameters net))))

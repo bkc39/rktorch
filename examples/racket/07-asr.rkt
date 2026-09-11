@@ -38,7 +38,8 @@ CTC aligns, attention spells.
          (only-in torch/data/text decode encode text->vocab))]
 
 @chunk[<r07-provide>
-(provide asr asr-encoder-block asr-decoder-block pick-device
+(provide asr asr-encoder-block asr-decoder-block
+         self-attention cross-attention feed-forward pick-device
          run-example greedy-decode transcribe utterance-features
          hybrid-batch-loss train-librispeech evaluate)]
 
@@ -102,50 +103,109 @@ they would be if the utterance were encoded alone.
                      'float32)
            (length lengths) 1 t-len))]
 
-@bold{The encoder block.} The GPT block with the causal mask deleted:
-audio is all there at once, so every frame may attend to every other,
-forward and backward. Pre-norm, multi-head attention, then the 4x-widened
-@racket[gelu] MLP, residuals throughout. @racket[mask] is @racket[#f] on
-the unbatched paths.
+@bold{Attention, twice.} Both blocks below share one attention mechanic:
+project to queries, keys and values, split into @racket[n-head] heads
+(@tt{[B, T, C]} to @tt{[B, H, T, D]}), scale the scores by
+@tt{sqrt(head-dim)}, mask, @racket[softmax], join the heads and project
+out. What differs is where the keys and values come from and which mask
+applies, so there are two layers rather than one with switches.
+@racket[self-attention] reads keys and values from its own input and takes
+whatever mask the caller hands it --- @racket[#f], the encoder's
+key-padding mask, or the decoder's causal mask. @racket[cross-attention]
+reads keys and values from the encoder's @racket[memory], whose padding
+mask is the only one that applies. The @tt{[B, 1, 1, T]} and @tt{[T, T]}
+masks both broadcast over the @tt{[B, H, T, T]} scores.
 
-@chunk[<r07-encoder-block>
-(define-layer asr-encoder-block (n-embd n-head ln1 wq wk wv wo ln2 fc1 fc2)
+@chunk[<r07-attention>
+(define-layer self-attention (n-embd n-head wq wk wv wo)
   #:init (n-embd n-head)
   (unless (and (exact-positive-integer? n-head)
                (zero? (remainder n-embd n-head)))
-    (error 'asr-encoder-block
+    (error 'self-attention
            "n-head ~a must be positive and divide n-embd ~a"
            n-head n-embd))
-  (set! ln1 (LayerNorm n-embd))
   (set! wq (Linear n-embd n-embd))
   (set! wk (Linear n-embd n-embd))
   (set! wv (Linear n-embd n-embd))
   (set! wo (Linear n-embd n-embd))
-  (set! ln2 (LayerNorm n-embd))
+  #:forward (x mask)
+  (define batch (car (tensor-shape x)))
+  (define seq-len (cadr (tensor-shape x)))
+  (define head-dim (quotient n-embd n-head))
+  (define (split-heads m)
+    (transpose (reshape m batch seq-len n-head head-dim) 1 2))
+  (define q (split-heads (wq x)))
+  (define k (split-heads (wk x)))
+  (define v (split-heads (wv x)))
+  (define scores (/ (matmul q (transpose k 2 3)) (sqrt head-dim)))
+  (define att
+    (softmax (if mask (masked-fill scores mask -inf.0) scores) -1))
+  (~> (matmul att v) (transpose 1 2) (reshape batch seq-len n-embd) wo))
+
+(define-layer cross-attention (n-embd n-head wq wk wv wo)
+  #:init (n-embd n-head)
+  (unless (and (exact-positive-integer? n-head)
+               (zero? (remainder n-embd n-head)))
+    (error 'cross-attention
+           "n-head ~a must be positive and divide n-embd ~a"
+           n-head n-embd))
+  (set! wq (Linear n-embd n-embd))
+  (set! wk (Linear n-embd n-embd))
+  (set! wv (Linear n-embd n-embd))
+  (set! wo (Linear n-embd n-embd))
+  #:forward (x memory mask)
+  (define batch (car (tensor-shape x)))
+  (define seq-len (cadr (tensor-shape x)))
+  (define mem-len (cadr (tensor-shape memory)))
+  (define head-dim (quotient n-embd n-head))
+  (define (split-heads m len)
+    (transpose (reshape m batch len n-head head-dim) 1 2))
+  (define q (split-heads (wq x) seq-len))
+  (define k (split-heads (wk memory) mem-len))
+  (define v (split-heads (wv memory) mem-len))
+  (define scores (/ (matmul q (transpose k 2 3)) (sqrt head-dim)))
+  (define att
+    (softmax (if mask (masked-fill scores mask -inf.0) scores) -1))
+  (~> (matmul att v) (transpose 1 2) (reshape batch seq-len n-embd) wo))]
+
+@bold{The MLP.} The GPT block's, unchanged: two @racket[Linear] layers
+through @racket[gelu], widened 4x inside. Deliberately a local copy of the
+CharGPT example's rather than a shared library layer; a third user with the
+same shape is what would justify promoting it.
+
+@chunk[<r07-mlp>
+(define-layer feed-forward (fc1 fc2)
+  #:init (n-embd)
   (set! fc1 (Linear n-embd (* 4 n-embd)))
   (set! fc2 (Linear (* 4 n-embd) n-embd))
+  #:forward (x)
+  (~> x fc1 gelu fc2))]
+
+@bold{The encoder block.} The GPT block with the causal mask deleted:
+audio is all there at once, so every frame may attend to every other,
+forward and backward. Pre-norm, self-attention under the key-padding
+mask, then the MLP, residuals throughout. The residual pattern
+@tt{x + branch(norm(x))} stays written out here rather than wrapped as
+CharGPT's @racket[pre-norm-residual]: these branches take a mask, and in
+the decoder the memory, beside the stream, and a wrapper for that is the
+syntax question in #117. @racket[mask] is @racket[#f] on the unbatched
+paths.
+
+@chunk[<r07-encoder-block>
+(define-layer asr-encoder-block (ln1 attention ln2 mlp)
+  #:init (n-embd n-head)
+  (set! ln1 (LayerNorm n-embd))
+  (set! attention (self-attention n-embd n-head))
+  (set! ln2 (LayerNorm n-embd))
+  (set! mlp (feed-forward n-embd))
   #:forward (x mask)
-  (with-default-device (tensor-device x)
-    (define batch (car (tensor-shape x)))
-    (define seq-len (cadr (tensor-shape x)))
-    (define head-dim (quotient n-embd n-head))
-    (define (split-heads m)
-      (transpose (reshape m batch seq-len n-head head-dim) 1 2))
-    (define xn (ln1 x))
-    (define q (split-heads (wq xn)))
-    (define k (split-heads (wk xn)))
-    (define v (split-heads (wv xn)))
-    (define scores (div (matmul q (transpose k 2 3)) (sqrt head-dim)))
-    (define att
-      (softmax (if mask (masked-fill scores mask -inf.0) scores) -1))
-    (define ctx
-      (reshape (transpose (matmul att v) 1 2) batch seq-len n-embd))
-    (define x1 (add x (wo ctx)))
-    (add x1 (fc2 (gelu (fc1 (ln2 x1)))))))]
+  (define x1 (+ x (attention (ln1 x) mask)))
+  (+ x1 (mlp (ln2 x1))))]
 
 @bold{The decoder block.} Three sub-layers now. Causal self-attention
 first --- the decoder is autoregressive over characters, so the
-@racket[tril] mask from the GPT block returns. Then the new move:
+@racket[tril] mask from the GPT block returns, built on the input's device
+and handed to @racket[self-attention]. Then the new move:
 @emph{cross}-attention, where the queries come from the character stream
 but the keys and values come from the encoder's @racket[memory] --- each
 character position reaches across into the audio and pulls out the frames
@@ -153,63 +213,25 @@ that sound like it. The only mask there is @racket[mem-mask], hiding the
 padded audio frames. MLP last, as always.
 
 @chunk[<r07-decoder-block>
-(define-layer asr-decoder-block (n-embd n-head p-drop
-                                 cdrop ln1 sq sk sv so
-                                 ln2 cq ck cv co
-                                 ln3 fc1 fc2)
+(define-layer asr-decoder-block (p-drop cdrop ln1 attention ln2 cross ln3 mlp)
   #:init (n-embd n-head #:dropout [p-drop 0.0])
-  (unless (and (exact-positive-integer? n-head)
-               (zero? (remainder n-embd n-head)))
-    (error 'asr-decoder-block
-           "n-head ~a must be positive and divide n-embd ~a"
-           n-head n-embd))
   (set! cdrop (Dropout #:p p-drop))
   (set! ln1 (LayerNorm n-embd))
-  (set! sq (Linear n-embd n-embd))
-  (set! sk (Linear n-embd n-embd))
-  (set! sv (Linear n-embd n-embd))
-  (set! so (Linear n-embd n-embd))
+  (set! attention (self-attention n-embd n-head))
   (set! ln2 (LayerNorm n-embd))
-  (set! cq (Linear n-embd n-embd))
-  (set! ck (Linear n-embd n-embd))
-  (set! cv (Linear n-embd n-embd))
-  (set! co (Linear n-embd n-embd))
+  (set! cross (cross-attention n-embd n-head))
   (set! ln3 (LayerNorm n-embd))
-  (set! fc1 (Linear n-embd (* 4 n-embd)))
-  (set! fc2 (Linear (* 4 n-embd) n-embd))
+  (set! mlp (feed-forward n-embd))
   #:forward (x memory mem-mask)
   (with-default-device (tensor-device x)
-    (define batch (car (tensor-shape x)))
     (define seq-len (cadr (tensor-shape x)))
-    (define mem-len (cadr (tensor-shape memory)))
-    (define head-dim (quotient n-embd n-head))
-    (define (split-heads m len)
-      (transpose (reshape m batch len n-head head-dim) 1 2))
-    (define xn (ln1 x))
-    (define q (split-heads (sq xn) seq-len))
-    (define k (split-heads (sk xn) seq-len))
-    (define v (split-heads (sv xn) seq-len))
-    (define scores (div (matmul q (transpose k 2 3)) (sqrt head-dim)))
     (define causal (eq (tril (ones seq-len seq-len)) 0))
-    (define att (softmax (masked-fill scores causal -inf.0) -1))
-    (define x1
-      (add x (so (reshape (transpose (matmul att v) 1 2)
-                          batch seq-len n-embd))))
+    (define x1 (+ x (attention (ln1 x) causal)))
     ;; skipped outright at p=0 so no RNG is drawn and the twin stays
     ;; value-for-value
     (define x1n (if (zero? p-drop) (ln2 x1) (cdrop (ln2 x1))))
-    (define q2 (split-heads (cq x1n) seq-len))
-    (define k2 (split-heads (ck memory) mem-len))
-    (define v2 (split-heads (cv memory) mem-len))
-    (define scores2
-      (div (matmul q2 (transpose k2 2 3)) (sqrt head-dim)))
-    (define att2
-      (softmax (if mem-mask (masked-fill scores2 mem-mask -inf.0) scores2)
-               -1))
-    (define x2
-      (add x1 (co (reshape (transpose (matmul att2 v2) 1 2)
-                           batch seq-len n-embd))))
-    (add x2 (fc2 (gelu (fc1 (ln3 x2)))))))]
+    (define x2 (+ x1 (cross x1n memory mem-mask)))
+    (+ x2 (mlp (ln3 x2)))))]
 
 @bold{The model.} The spectrogram side first: two strided @racket[Conv1d]
 layers halve time twice (~40ms frames), then four @emph{dilated} residual
@@ -225,15 +247,21 @@ predicts @tt{vocab + 1} classes: characters or @tt{eos}, never @tt{sos}.
 The forward takes the audio batch, the teacher-forced character input,
 and the list of true frame counts (@racket[#f] when nothing is padded),
 from which it derives the convolution multiplier at each downsampling
-stage and the attention key mask, and returns both heads' views. The keyword defaults are the fixture-scale
+stage and the attention key mask, and returns both heads' views. The
+dilated convolutions and the two block stacks are @racket[LayerList]s
+walked with @racket[for/fold], so parameters read @tt{dilations.3.weight},
+@tt{encoders.0.attention.wq.weight} and @tt{decoders.5.cross.wo.bias};
+those replaced @tt{dil4.weight}, @tt{enc1.wq.weight} and @tt{dec6.co.bias},
+so a checkpoint from the earlier flat model does not load into this one
+(retrain with @filepath{scripts/train-asr.rkt}). The keyword defaults are the fixture-scale
 configuration the parity twin trains; @racket[train-librispeech] passes
 something wider.
 
 @chunk[<r07-model>
 (define-layer asr (n-embd p-drop
-                   conv1 conv2 dil1 dil2 dil3 dil4
-                   enc1 enc2 enc3 enc4 enc5 enc6 ln-enc ctc-head
-                   tok-emb dec1 dec2 dec3 dec4 dec5 dec6 ln-dec hdrop head)
+                   conv1 conv2 dilations
+                   encoders ln-enc ctc-head
+                   tok-emb decoders ln-dec hdrop head)
   #:init (n-mels vocab-size
           #:n-embd [n-embd 64]
           #:n-head [n-head 4]
@@ -242,25 +270,18 @@ something wider.
     (error 'asr "n-embd ~a must split into sine/cosine halves" n-embd))
   (set! conv1 (Conv1d n-mels n-embd 3 #:stride 2 #:padding 1))
   (set! conv2 (Conv1d n-embd n-embd 3 #:stride 2 #:padding 1))
-  (set! dil1 (Conv1d n-embd n-embd 3 #:dilation 1 #:padding 1))
-  (set! dil2 (Conv1d n-embd n-embd 3 #:dilation 2 #:padding 2))
-  (set! dil3 (Conv1d n-embd n-embd 3 #:dilation 4 #:padding 4))
-  (set! dil4 (Conv1d n-embd n-embd 3 #:dilation 8 #:padding 8))
-  (set! enc1 (asr-encoder-block n-embd n-head))
-  (set! enc2 (asr-encoder-block n-embd n-head))
-  (set! enc3 (asr-encoder-block n-embd n-head))
-  (set! enc4 (asr-encoder-block n-embd n-head))
-  (set! enc5 (asr-encoder-block n-embd n-head))
-  (set! enc6 (asr-encoder-block n-embd n-head))
+  (set! dilations
+        (LayerList (for/list ([d '(1 2 4 8)])
+                     (Conv1d n-embd n-embd 3 #:dilation d #:padding d))))
+  (set! encoders
+        (LayerList (for/list ([_ (in-range 6)])
+                     (asr-encoder-block n-embd n-head))))
   (set! ln-enc (LayerNorm n-embd))
   (set! ctc-head (Linear n-embd (add1 vocab-size)))
   (set! tok-emb (Embedding (+ vocab-size 2) n-embd))
-  (set! dec1 (asr-decoder-block n-embd n-head #:dropout p-drop))
-  (set! dec2 (asr-decoder-block n-embd n-head #:dropout p-drop))
-  (set! dec3 (asr-decoder-block n-embd n-head #:dropout p-drop))
-  (set! dec4 (asr-decoder-block n-embd n-head #:dropout p-drop))
-  (set! dec5 (asr-decoder-block n-embd n-head #:dropout p-drop))
-  (set! dec6 (asr-decoder-block n-embd n-head #:dropout p-drop))
+  (set! decoders
+        (LayerList (for/list ([_ (in-range 6)])
+                     (asr-decoder-block n-embd n-head #:dropout p-drop))))
   (set! ln-dec (LayerNorm n-embd))
   (set! hdrop (Dropout #:p p-drop))
   (set! head (Linear n-embd (add1 vocab-size)))
@@ -278,31 +299,21 @@ something wider.
     (define (clip v lens t) (if lens (mul v (frame-keep lens t)) v))
     (define c (clip (relu (conv1 x)) l1 t1))
     (define c0 (clip (relu (conv2 c)) l2 t2))
-    (define c1 (clip (add c0 (relu (dil1 c0))) l2 t2))
-    (define c2 (clip (add c1 (relu (dil2 c1))) l2 t2))
-    (define c3 (clip (add c2 (relu (dil3 c2))) l2 t2))
-    (define c4 (clip (add c3 (relu (dil4 c3))) l2 t2))
+    (define c4
+      (for/fold ([h c0]) ([dil (in-layers dilations)])
+        (clip (+ h (relu (dil h))) l2 t2)))
     (define enc-mask (and l2 (key-padding-mask l2 t2)))
     (define t-len (caddr (tensor-shape c4)))
-    (define e0 (add (transpose c4 1 2) (sinusoidal-positions t-len n-embd)))
+    (define e0 (+ (transpose c4 1 2) (sinusoidal-positions t-len n-embd)))
     (define memory
-      (ln-enc
-       (enc6 (enc5 (enc4 (enc3 (enc2 (enc1 e0 enc-mask) enc-mask)
-                                enc-mask)
-                          enc-mask)
-                   enc-mask)
-             enc-mask)))
+      (ln-enc (for/fold ([h e0]) ([enc (in-layers encoders)])
+                (enc h enc-mask))))
     (define ctc-log-probs (log-softmax (ctc-head memory) 2))
     (define s-len (cadr (tensor-shape dec-in)))
-    (define d0 (add (tok-emb dec-in) (sinusoidal-positions s-len n-embd)))
+    (define d0 (+ (tok-emb dec-in) (sinusoidal-positions s-len n-embd)))
     (define d
-      (ln-dec
-       (dec6 (dec5 (dec4 (dec3 (dec2 (dec1 d0 memory enc-mask)
-                                     memory enc-mask)
-                               memory enc-mask)
-                         memory enc-mask)
-                   memory enc-mask)
-             memory enc-mask)))
+      (ln-dec (for/fold ([h d0]) ([dec (in-layers decoders)])
+                (dec h memory enc-mask))))
     (values ctc-log-probs
             (head (if (zero? p-drop) d (hdrop d))))))]
 
@@ -632,6 +643,8 @@ reference:
 <r07-provide>
 <r07-positions>
 <r07-mask>
+<r07-attention>
+<r07-mlp>
 <r07-encoder-block>
 <r07-decoder-block>
 <r07-model>

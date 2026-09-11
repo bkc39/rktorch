@@ -46,17 +46,13 @@ def sinusoidal_positions(t_len, n_embd):
     return torch.cat([torch.sin(angles), torch.cos(angles)], dim=1)
 
 
-class EncoderBlock(nn.Module):
+class SelfAttention(nn.Module):
     def __init__(self):
         super().__init__()
-        self.ln1 = nn.LayerNorm(N_EMBD)
         self.wq = nn.Linear(N_EMBD, N_EMBD)
         self.wk = nn.Linear(N_EMBD, N_EMBD)
         self.wv = nn.Linear(N_EMBD, N_EMBD)
         self.wo = nn.Linear(N_EMBD, N_EMBD)
-        self.ln2 = nn.LayerNorm(N_EMBD)
-        self.fc1 = nn.Linear(N_EMBD, 4 * N_EMBD)
-        self.fc2 = nn.Linear(4 * N_EMBD, N_EMBD)
 
     def forward(self, x, mask=None):
         b, t, _ = x.shape
@@ -65,35 +61,23 @@ class EncoderBlock(nn.Module):
         def split(m):
             return m.reshape(b, t, N_HEAD, hd).transpose(1, 2)
 
-        xn = self.ln1(x)
-        q, k, v = split(self.wq(xn)), split(self.wk(xn)), split(self.wv(xn))
+        q, k, v = split(self.wq(x)), split(self.wk(x)), split(self.wv(x))
         scores = q @ k.transpose(2, 3) / math.sqrt(hd)
         if mask is not None:
             scores = scores.masked_fill(mask, -torch.inf)
         att = torch.softmax(scores, dim=-1)
-        ctx = (att @ v).transpose(1, 2).reshape(b, t, N_EMBD)
-        x1 = x + self.wo(ctx)
-        return x1 + self.fc2(nn.functional.gelu(self.fc1(self.ln2(x1))))
+        return self.wo((att @ v).transpose(1, 2).reshape(b, t, N_EMBD))
 
 
-class DecoderBlock(nn.Module):
+class CrossAttention(nn.Module):
     def __init__(self):
         super().__init__()
-        self.ln1 = nn.LayerNorm(N_EMBD)
-        self.sq = nn.Linear(N_EMBD, N_EMBD)
-        self.sk = nn.Linear(N_EMBD, N_EMBD)
-        self.sv = nn.Linear(N_EMBD, N_EMBD)
-        self.so = nn.Linear(N_EMBD, N_EMBD)
-        self.ln2 = nn.LayerNorm(N_EMBD)
-        self.cq = nn.Linear(N_EMBD, N_EMBD)
-        self.ck = nn.Linear(N_EMBD, N_EMBD)
-        self.cv = nn.Linear(N_EMBD, N_EMBD)
-        self.co = nn.Linear(N_EMBD, N_EMBD)
-        self.ln3 = nn.LayerNorm(N_EMBD)
-        self.fc1 = nn.Linear(N_EMBD, 4 * N_EMBD)
-        self.fc2 = nn.Linear(4 * N_EMBD, N_EMBD)
+        self.wq = nn.Linear(N_EMBD, N_EMBD)
+        self.wk = nn.Linear(N_EMBD, N_EMBD)
+        self.wv = nn.Linear(N_EMBD, N_EMBD)
+        self.wo = nn.Linear(N_EMBD, N_EMBD)
 
-    def forward(self, x, memory, mem_mask=None):
+    def forward(self, x, memory, mask=None):
         b, s, _ = x.shape
         m = memory.shape[1]
         hd = N_EMBD // N_HEAD
@@ -101,24 +85,55 @@ class DecoderBlock(nn.Module):
         def split(t, length):
             return t.reshape(b, length, N_HEAD, hd).transpose(1, 2)
 
-        xn = self.ln1(x)
-        q = split(self.sq(xn), s)
-        k = split(self.sk(xn), s)
-        v = split(self.sv(xn), s)
+        q = split(self.wq(x), s)
+        k = split(self.wk(memory), m)
+        v = split(self.wv(memory), m)
         scores = q @ k.transpose(2, 3) / math.sqrt(hd)
+        if mask is not None:
+            scores = scores.masked_fill(mask, -torch.inf)
+        att = torch.softmax(scores, dim=-1)
+        return self.wo((att @ v).transpose(1, 2).reshape(b, s, N_EMBD))
+
+
+class FeedForward(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.fc1 = nn.Linear(N_EMBD, 4 * N_EMBD)
+        self.fc2 = nn.Linear(4 * N_EMBD, N_EMBD)
+
+    def forward(self, x):
+        return self.fc2(nn.functional.gelu(self.fc1(x)))
+
+
+class EncoderBlock(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.ln1 = nn.LayerNorm(N_EMBD)
+        self.attention = SelfAttention()
+        self.ln2 = nn.LayerNorm(N_EMBD)
+        self.mlp = FeedForward()
+
+    def forward(self, x, mask=None):
+        x1 = x + self.attention(self.ln1(x), mask)
+        return x1 + self.mlp(self.ln2(x1))
+
+
+class DecoderBlock(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.ln1 = nn.LayerNorm(N_EMBD)
+        self.attention = SelfAttention()
+        self.ln2 = nn.LayerNorm(N_EMBD)
+        self.cross = CrossAttention()
+        self.ln3 = nn.LayerNorm(N_EMBD)
+        self.mlp = FeedForward()
+
+    def forward(self, x, memory, mem_mask=None):
+        s = x.shape[1]
         causal = torch.tril(torch.ones(s, s, device=x.device)) == 0
-        att = torch.softmax(scores.masked_fill(causal, -torch.inf), dim=-1)
-        x1 = x + self.so((att @ v).transpose(1, 2).reshape(b, s, N_EMBD))
-        x1n = self.ln2(x1)
-        q2 = split(self.cq(x1n), s)
-        k2 = split(self.ck(memory), m)
-        v2 = split(self.cv(memory), m)
-        scores2 = q2 @ k2.transpose(2, 3) / math.sqrt(hd)
-        if mem_mask is not None:
-            scores2 = scores2.masked_fill(mem_mask, -torch.inf)
-        att2 = torch.softmax(scores2, dim=-1)
-        x2 = x1 + self.co((att2 @ v2).transpose(1, 2).reshape(b, s, N_EMBD))
-        return x2 + self.fc2(nn.functional.gelu(self.fc1(self.ln3(x2))))
+        x1 = x + self.attention(self.ln1(x), causal)
+        x2 = x1 + self.cross(self.ln2(x1), memory, mem_mask)
+        return x2 + self.mlp(self.ln3(x2))
 
 
 class ASR(nn.Module):
@@ -126,10 +141,9 @@ class ASR(nn.Module):
         super().__init__()
         self.conv1 = nn.Conv1d(N_MELS, N_EMBD, 3, stride=2, padding=1)
         self.conv2 = nn.Conv1d(N_EMBD, N_EMBD, 3, stride=2, padding=1)
-        self.dil1 = nn.Conv1d(N_EMBD, N_EMBD, 3, dilation=1, padding=1)
-        self.dil2 = nn.Conv1d(N_EMBD, N_EMBD, 3, dilation=2, padding=2)
-        self.dil3 = nn.Conv1d(N_EMBD, N_EMBD, 3, dilation=4, padding=4)
-        self.dil4 = nn.Conv1d(N_EMBD, N_EMBD, 3, dilation=8, padding=8)
+        self.dils = nn.ModuleList([
+            nn.Conv1d(N_EMBD, N_EMBD, 3, dilation=d, padding=d)
+            for d in (1, 2, 4, 8)])
         self.encs = nn.ModuleList([EncoderBlock() for _ in range(6)])
         self.ln_enc = nn.LayerNorm(N_EMBD)
         self.ctc_head = nn.Linear(N_EMBD, vocab_size + 1)
@@ -159,10 +173,8 @@ class ASR(nn.Module):
 
         c = clip(torch.relu(self.conv1(x)), l1, t1)
         c = clip(torch.relu(self.conv2(c)), l2, t2)
-        c = clip(c + torch.relu(self.dil1(c)), l2, t2)
-        c = clip(c + torch.relu(self.dil2(c)), l2, t2)
-        c = clip(c + torch.relu(self.dil3(c)), l2, t2)
-        c = clip(c + torch.relu(self.dil4(c)), l2, t2)
+        for dil in self.dils:
+            c = clip(c + torch.relu(dil(c)), l2, t2)
         enc_mask = None
         if l2:
             idx = torch.arange(t2, device=x.device).unsqueeze(0)

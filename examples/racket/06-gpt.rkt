@@ -12,12 +12,14 @@ embeddings into @racket[n-layer] blocks of (layer-norm @tt{->} causal
 self-attention @tt{->} residual) and (layer-norm @tt{->} MLP @tt{->} residual),
 then a final layer-norm and a linear head back to vocabulary logits.
 
-Multi-head attention is built @emph{inline} from primitives ---
-@racket[Linear] projections, @racket[reshape]/@racket[transpose] head
-splitting, @racket[matmul] scores, the @racket[tril]-derived causal mask
-through @racket[masked-fill], and @racket[softmax] --- rather than hidden
-behind a helper, because watching the tensor shapes move is the point of the
-example. (A library-level @tt{TransformerEncoderBlock} is #32.)
+The block is written as the architecture names it: a causal self-attention
+layer, a feed-forward layer, and a pre-norm residual wrapper that puts each
+of them on the residual stream. Attention itself is still built from
+primitives --- @racket[Linear] projections, @racket[reshape]/@racket[transpose]
+head splitting, @racket[matmul] scores, the @racket[tril]-derived causal mask
+through @racket[masked-fill], and @racket[softmax] --- because watching the
+tensor shapes move is the point of the example. (A library-level
+@tt{TransformerEncoderBlock} is #32.)
 
 @chunk[<r06-require>
 (require racket/runtime-path
@@ -33,36 +35,33 @@ example. (A library-level @tt{TransformerEncoderBlock} is #32.)
                   text->vocab))]
 
 @chunk[<r06-provide>
-(provide gpt-block gpt pick-device
-         load-excerpt run-example train-excerpt train-novel generate)]
+(provide causal-self-attention feed-forward pre-norm-residual gpt-block gpt
+         pick-device load-excerpt run-example train-excerpt train-novel
+         generate)]
 
-@bold{One transformer block.} Pre-norm, as GPT-2 settled it: the residual
-stream is only ever @emph{added to}, each sub-layer reading a normalized view.
-Attention first: the normalized input is projected to queries/keys/values,
-split into @racket[n-head] heads of @tt{head-dim = n-embd / n-head} (the
-@racket[reshape] + @racket[transpose] dance takes @tt{[B, T, C]} to
-@tt{[B, H, T, D]}), and scored against itself, scaled by @tt{sqrt(head-dim)}.
+@bold{Causal self-attention.} The input is projected to queries, keys and
+values and split into @racket[n-head] heads of @tt{head-dim = n-embd / n-head}
+(the @racket[reshape] + @racket[transpose] dance takes @tt{[B, T, C]} to
+@tt{[B, H, T, D]}), then scored against itself, scaled by @tt{sqrt(head-dim)}.
 The upper triangle of the @tt{[T, T]} score matrix --- pairs where a position
 would attend to its own future --- is filled with @tt{-inf} @emph{before}
 @racket[softmax], so those weights come out exactly zero: the causal mask that
 makes this a language model rather than an oracle. The @tt{[T, T]} bool mask
-broadcasts over the batched @tt{[B, H, T, T]} scores. Then the MLP: two
-@racket[Linear] layers through @racket[gelu], widened 4x inside, the
-GPT-standard shape.
+broadcasts over the batched @tt{[B, H, T, T]} scores. The heads are joined
+back to @tt{[B, T, C]} and pass through the output projection. The mask is
+built on the input's device, so a net trained on an accelerator applies
+outside any @racket[with-default-device] extent.
 
-@chunk[<r06-block>
-(define-layer gpt-block (n-embd n-head ln1 wq wk wv wo ln2 fc1 fc2)
+@chunk[<r06-attention>
+(define-layer causal-self-attention (n-embd n-head wq wk wv wo)
   #:init (n-embd n-head)
   (unless (zero? (remainder n-embd n-head))
-    (error 'gpt-block "n-embd ~a not divisible by n-head ~a" n-embd n-head))
-  (set! ln1 (LayerNorm n-embd))
+    (error 'causal-self-attention "n-embd ~a not divisible by n-head ~a"
+           n-embd n-head))
   (set! wq (Linear n-embd n-embd))
   (set! wk (Linear n-embd n-embd))
   (set! wv (Linear n-embd n-embd))
   (set! wo (Linear n-embd n-embd))
-  (set! ln2 (LayerNorm n-embd))
-  (set! fc1 (Linear n-embd (* 4 n-embd)))
-  (set! fc2 (Linear (* 4 n-embd) n-embd))
   #:forward (x)
   (with-default-device (tensor-device x)
     (define shape (tensor-shape x))
@@ -71,26 +70,69 @@ GPT-standard shape.
     (define head-dim (quotient n-embd n-head))
     (define (split-heads m)
       (transpose (reshape m batch seq-len n-head head-dim) 1 2))
-    (define xn (ln1 x))
-    (define q (split-heads (wq xn)))
-    (define k (split-heads (wk xn)))
-    (define v (split-heads (wv xn)))
-    (define scores (div (matmul q (transpose k 2 3)) (sqrt head-dim)))
+    (define q (split-heads (wq x)))
+    (define k (split-heads (wk x)))
+    (define v (split-heads (wv x)))
+    (define scores (/ (matmul q (transpose k 2 3)) (sqrt head-dim)))
     (define causal (eq (tril (ones seq-len seq-len)) 0))
     (define att (softmax (masked-fill scores causal -inf.0) -1))
-    (define ctx
-      (reshape (transpose (matmul att v) 1 2) batch seq-len n-embd))
-    (define x1 (+ x (wo ctx)))
-    (+ x1 (fc2 (gelu (fc1 (ln2 x1)))))))]
+    (~> (matmul att v) (transpose 1 2) (reshape batch seq-len n-embd) wo)))]
+
+@bold{The MLP.} Two @racket[Linear] layers through @racket[gelu], widened 4x
+inside, the GPT-standard shape.
+
+@chunk[<r06-mlp>
+(define-layer feed-forward (fc1 fc2)
+  #:init (n-embd)
+  (set! fc1 (Linear n-embd (* 4 n-embd)))
+  (set! fc2 (Linear (* 4 n-embd) n-embd))
+  #:forward (x)
+  (~> x fc1 gelu fc2))]
+
+@bold{The pre-norm residual.} Pre-norm, as GPT-2 settled it: the residual
+stream is only ever @emph{added to}, each sub-layer reading a normalized view.
+The wrapper owns the @racket[LayerNorm] and takes the sub-layer it guards as
+a constructor argument, so the same three lines serve attention and the MLP.
+Its two children register as @tt{norm} and @tt{branch}, which is where the
+dotted parameter paths below come from.
+
+@chunk[<r06-residual>
+(define-layer pre-norm-residual (norm branch)
+  #:init (n-embd branch)
+  (set! norm (LayerNorm n-embd))
+  #:forward (x)
+  (~> x norm branch (+ x)))]
+
+@bold{One transformer block.} Attention on the residual stream, then the
+MLP on the residual stream; the block's forward is the diagram. The
+sub-layers are constructed inside the wrappers' argument positions, so the
+@racket[Linear] initializers still draw from the RNG in the order
+@tt{wq, wk, wv, wo, fc1, fc2}, which is what keeps the seeded parity with the
+Python twin.
+
+@chunk[<r06-block>
+(define-layer gpt-block (attention mlp)
+  #:init (n-embd n-head)
+  (set! attention
+        (pre-norm-residual n-embd (causal-self-attention n-embd n-head)))
+  (set! mlp (pre-norm-residual n-embd (feed-forward n-embd)))
+  #:forward (x)
+  (~> x attention mlp))]
 
 @bold{The model.} Token ids gather rows from a learned @racket[Embedding]
 table; a second table indexed by @racket[(arange seq-len)] adds a learned
 position signal (its @tt{[T, C]} rows broadcast over the batch). The blocks
 stack in a @racket[Sequential], whose indexed naming gives PyTorch-style
-dotted paths (@tt{blocks.0.ln1.weight}). @racket[block-size] only sizes the
+dotted paths: @tt{blocks.0.attention.norm.weight} is the first block's
+attention layer-norm, @tt{blocks.0.attention.branch.wq.weight} its query
+projection, @tt{blocks.0.mlp.branch.fc1.weight} its MLP's first layer. Those
+paths changed when the block was factored (they were
+@tt{blocks.0.ln1.weight}, @tt{blocks.0.wq.weight}, @tt{blocks.0.fc1.weight}),
+so a checkpoint saved by the earlier flat block does not load into this one;
+retrain with @filepath{scripts/train-gpt.rkt}. @racket[block-size] only sizes the
 position table --- cropping inputs to fit is the caller's job. Both forwards
 scope their temporaries --- the position @racket[arange] here, the
-causal-mask @racket[ones] in the block --- to the @emph{input's} device, so
+causal-mask @racket[ones] in the attention layer --- to the @emph{input's} device, so
 a CUDA-trained net can be applied directly, outside any
 @racket[with-default-device] extent, exactly like the Python twin's
 @tt{device=idx.device}. The keyword
@@ -105,9 +147,8 @@ parity twin train; @racket[train-novel] passes something bigger.
           #:n-layer [n-layer 2])
   (set! tok-emb (Embedding vocab-size n-embd))
   (set! pos-emb (Embedding block-size n-embd))
-  (set! blocks (apply Sequential
-                      (for/list ([_ (in-range n-layer)])
-                        (gpt-block n-embd n-head))))
+  (set! blocks (Sequential (for/list ([_ (in-range n-layer)])
+                             (gpt-block n-embd n-head))))
   (set! ln-f (LayerNorm n-embd))
   (set! head (Linear n-embd vocab-size))
   #:forward (idx)
@@ -313,6 +354,9 @@ on any character outside it).
 @chunk[<*>
   <r06-require>
   <r06-provide>
+  <r06-attention>
+  <r06-mlp>
+  <r06-residual>
   <r06-block>
   <r06-model>
   <r06-device>
