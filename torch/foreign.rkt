@@ -10,9 +10,9 @@
          (only-in "foreign/structs.rkt" tensor-free!)
          (submod "foreign/structs.rkt" checked)
          (except-in "foreign/ops.rkt"
-                    device->type+index dims-rest/c
-                    item to-dtype tensor-dtype to-device tensor-device
-                    tensor-shape tensor->list)
+                    device->type+index dims-rest/c dtype/c
+                    item to to-able? to-dtype tensor-dtype to-device
+                    tensor-device tensor-shape tensor->list)
          (submod "foreign/ops.rkt" checked)
          (except-in "foreign/tensor-ops.rkt"
                     reshape unsqueeze tensor sum matmul add sub mul div neg)
@@ -167,7 +167,10 @@
          default-device
          call-with-default-device
          to-device
-         tensor-device)
+         tensor-device
+         to
+         to-able?
+         prop:to)
 
 (provide requires-grad!
          requires-grad?
@@ -184,6 +187,8 @@
          zero-grad!)
 
 (module+ unsafe
+  (require (submod "foreign/ops.rkt" unsafe))
   (provide
+   to!
    (contract-out
     [tensor-free! (-> tensor? void?)])))

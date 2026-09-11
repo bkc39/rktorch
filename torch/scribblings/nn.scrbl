@@ -2,7 +2,7 @@
 
 @(require (for-label racket/base
                      racket/contract
-                     (only-in torch lambda~> relu tensor?)
+                     (only-in torch lambda~> prop:to relu tensor? to to-able?)
                      torch/nn
                      torch/private/contract))
 
@@ -202,7 +202,8 @@ from any autograd graph that produced @racket[t].
 }
 
 @defproc[(Buffer? [v any/c]) boolean?]{
-Recognizes the result of @racket[Buffer].
+Recognizes the result of @racket[Buffer].  A buffer follows its layer
+through @racket[to]; a plain tensor field does not.
 }
 
 @defproc[(procedure->Layer [proc procedure?]
@@ -342,6 +343,14 @@ The direct children of @racket[m] with the names they registered under.
 Sets the mode of @racket[m] and of every layer reachable through its
 children, and returns @racket[m].
 }
+
+Every layer satisfies @racket[to-able?]: @racket[gen:layer] derives
+@racket[prop:to], so @racket[(to m 'cuda)] moves each of
+@racket[(parameters m)] and @racket[(buffers m)] in place, keeps every
+parameter object and its gradient, and returns @racket[m].  A hand-written
+@racket[gen:layer] implementation gets this for whatever its
+@racket[layer-parameters] and @racket[layer-buffers] report.  See
+@racket[to] for the rules on optimizer state and plain fields.
 
 @defproc[(train! [m layer?]) layer?]{
 @racket[(set-mode! m 'train)].

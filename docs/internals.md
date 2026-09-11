@@ -81,6 +81,22 @@ the point of the design: pressure scales with total native footprint,
 so the ordinary GC cycle collects dead CUDA tensors as gracefully as
 host ones — user code never calls the collector by hand.
 
+### In-place moves
+
+`to` on a layer moves each parameter and buffer through
+`tr_tensor_to_`, which rebinds the storage under the existing handle
+(`Tensor::set_data`, the mechanism behind `torch.nn.Module.to`). The
+handle's ledger entry recorded the old device and byte count, so the
+Racket side re-accounts it (`reaccount!`: unaccount, then account) as
+the same weak key — one entry per handle before and after, now in the
+destination's bucket. libtorch releases the old storage at `set_data`
+time when nothing else references it. A wrapper that aliased the
+tensor before the move keeps its stale charge until it dies, the
+documented over-count. The functional `to` needs no special
+treatment: its result is a fresh allocation charged like any other,
+and when nothing would change it returns the source object rather
+than a second wrapper over the same storage.
+
 ## Thread safety
 
 - The native side is safe by construction: `at::Tensor` refcounts are

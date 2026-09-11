@@ -6,10 +6,12 @@
 #include <atomic>
 #include <cstdint>
 #include <exception>
+#include <optional>
 #include <stdexcept>
 #include <string>
 
 #include "torchrkt/detail/device.hpp"
+#include "torchrkt/detail/dtype.hpp"
 #include "torchrkt/detail/error.hpp"
 #include "torchrkt/detail/op_call.hpp"
 #include "torchrkt/detail/tensor_handle.hpp"
@@ -63,8 +65,25 @@ torch::Device to_torch_device(tr_device_type type, int64_t index) {
         throw std::invalid_argument("MPS is not available");
       }
       return torch::Device(torch::kMPS);
+    case TR_DEVICE_KEEP:
+      break;
   }
   throw std::invalid_argument("unknown tr_device_type");
+}
+
+torch::Tensor convert(const torch::Tensor& v, tr_device_type type,
+                      int64_t index, tr_dtype dtype) {
+  std::optional<torch::Device> device;
+  if (type != TR_DEVICE_KEEP) {
+    device = to_torch_device(type, index);
+  }
+  std::optional<torch::ScalarType> scalar_type;
+  if (dtype != TR_DTYPE_KEEP) {
+    scalar_type = to_scalar_type(dtype);
+  }
+  return v.to(scalar_type, /*layout=*/std::nullopt, device,
+              /*pin_memory=*/std::nullopt, /*non_blocking=*/false,
+              /*copy=*/false, /*memory_format=*/std::nullopt);
 }
 
 torch::Device current_default_device() {
@@ -228,6 +247,37 @@ tr_tensor* tr_tensor_to_device(const tr_tensor* t, tr_device_type type,
   }
   return torchrkt::alloc_result("tr_tensor_to_device", [&] {
     return t->value.to(torchrkt::to_torch_device(type, index));
+  });
+}
+
+tr_tensor* tr_tensor_to(const tr_tensor* t, tr_device_type type, int64_t index,
+                        tr_dtype dtype) {
+  if (!t) {
+    return torchrkt::null_arg("tr_tensor_to");
+  }
+  return torchrkt::alloc_result("tr_tensor_to", [&] {
+    return torchrkt::convert(t->value, type, index, dtype);
+  });
+}
+
+int tr_tensor_to_(tr_tensor* t, tr_device_type type, int64_t index,
+                  tr_dtype dtype) {
+  if (!t) {
+    return torchrkt::null_arg_status("tr_tensor_to_");
+  }
+  return torchrkt::status_call("tr_tensor_to_", [&] {
+    // no_grad: a grad-tracking conversion would hand set_data a non-leaf.
+    const torch::NoGradGuard no_grad;
+    torch::Tensor& v = t->value;
+    const torch::Tensor moved = torchrkt::convert(v, type, index, dtype);
+    if (moved.is_same(v)) {
+      return;
+    }
+    v.set_data(moved);
+    if (v.grad().defined()) {
+      v.mutable_grad().set_data(
+          torchrkt::convert(v.grad(), type, index, dtype));
+    }
   });
 }
 

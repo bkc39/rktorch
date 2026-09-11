@@ -16,7 +16,8 @@
                   s64vector-ref
                   s64vector?)
          (only-in racket/contract/base
-                  -> ->* ->i any any/c cons/c list/c listof none/c or/c)
+                  -> ->* ->i any any/c cons/c contract-out list/c listof none/c
+                  or/c)
          (only-in "../private/contract.rkt"
                   define/checked-out define/contract-out)
          (only-in "device-type.rkt"
@@ -34,13 +35,16 @@
                   tr-mps-is-available/raw
                   tr-set-default-device/raw
                   tr-tensor-device/raw
-                  tr-tensor-to-device/raw)
+                  tr-tensor-to!/raw
+                  tr-tensor-to/raw)
          (only-in "raw/global.rkt" tr-manual-seed/raw tr-version/raw)
          (only-in "raw/memory.rkt"
                   collect-and-drain!
                   [finalizer-diagnostics raw:finalizer-diagnostics]
                   [finalizer-failures raw:finalizer-failures]
-                  [native-memory-use raw:native-memory-use])
+                  [native-memory-use raw:native-memory-use]
+                  oom-retry/status
+                  reaccount!)
          (only-in "raw/random.rkt" tr-rand/raw tr-randn/raw tr-tensor-uniform!/raw)
          (only-in "raw/tensor.rkt"
                   dtype-code->symbol
@@ -49,8 +53,7 @@
                   tr-tensor-copy-data/raw
                   tr-tensor-dtype/raw
                   tr-tensor-item/raw
-                  tr-tensor-numel/raw
-                  tr-tensor-to-dtype/raw)
+                  tr-tensor-numel/raw)
          (only-in "structs.rkt"
                   handle->repr
                   handle->string
@@ -61,11 +64,19 @@
 
 (provide device->type+index
          dims-rest/c
+         dtype/c
+         prop:to
          with-default-device)
+
+(module+ unsafe
+  (provide (contract-out
+            [to! (->* [tensor? (or/c device/c dtype/c)] [dtype/c] tensor?)])))
 
 (define dims-rest/c (listof exact-nonnegative-integer?))
 
-(define dtype/c (or/c 'float32 'float64 'int64 'bool))
+(define dtype-symbols '(float32 float64 int64 bool))
+
+(define dtype/c (apply or/c dtype-symbols))
 
 (define/contract-out (torch-version) (-> string?) ;; noqa
   (tr-version/raw))
@@ -103,8 +114,8 @@
      (check-ok rc 'item)
      v]))
 
-(define/checked-out (to-dtype t dtype) (-> tensor? dtype/c tensor?)
-  (wrap-tensor (check-handle 'to-dtype (tr-tensor-to-dtype/raw t dtype))))
+(define/checked-out (to-dtype t dtype) (-> tensor? dtype/c tensor?) ;; noqa
+  (to t dtype))
 
 (define/checked-out (tensor-dtype t) (-> tensor? dtype/c)
   (define-values (rc code) (tr-tensor-dtype/raw t))
@@ -229,10 +240,62 @@
 (define-syntax-parse-rule (with-default-device dev:expr body:expr ...+)
   (call-with-default-device dev (lambda () body ...)))
 
-(define/checked-out (to-device t dev) (-> tensor? device/c tensor?)
-  (define-values (type index) (device->type+index dev))
-  (wrap-tensor
-   (check-handle 'to-device (tr-tensor-to-device/raw t type index))))
+(define/checked-out (to-device t dev) (-> tensor? device/c tensor?) ;; noqa
+  (to t dev))
+
+;; Python's argument order: a dtype target stands alone, a device target may
+;; carry a dtype. 'keep is the C side's "leave this axis" sentinel.
+(define (parse-target who target dtype)
+  (cond
+    [(memq target dtype-symbols)
+     (when dtype
+       (raise-arguments-error who "a dtype target takes no second argument"
+                              "target" target "dtype" dtype))
+     (values 'keep 0 target)]
+    [else
+     (define-values (type index) (device->type+index target))
+     (values type index (or dtype 'keep))]))
+
+(define (already-there? t type index dtype)
+  (and (or (eq? type 'keep)
+           (equal? (type+index->device type index) (tensor-device t)))
+       (or (eq? dtype 'keep) (eq? dtype (tensor-dtype t)))))
+
+(define-values (prop:to to-able?* to-ref)
+  (make-struct-type-property
+   'to
+   (lambda (v _info)
+     (unless (and (procedure? v) (procedure-arity-includes? v 3))
+       (raise-argument-error 'prop:to "(procedure-arity-includes/c 3)" v))
+     v)))
+
+(define/checked-out (to x target [dtype #f])
+  (->* [(or/c tensor? to-able?) (or/c device/c dtype/c)]
+       [dtype/c]
+       (or/c tensor? to-able?))
+  (define-values (type index dt) (parse-target 'to target dtype))
+  (cond
+    [(tensor? x)
+     ;; x.to(...) is x when nothing changes; a fresh wrapper over the aliased
+     ;; storage would charge the ledger twice
+     (if (already-there? x type index dt)
+         x
+         (wrap-tensor (check-handle 'to (tr-tensor-to/raw x type index dt))))]
+    [else
+     ((to-ref x) x
+                 (and (not (eq? type 'keep)) (type+index->device type index))
+                 (and (not (eq? dt 'keep)) dt))]))
+
+(define/checked-out (to-able? v) (-> any/c boolean?) ;; noqa
+  (to-able?* v))
+
+(define tensor-to!/retrying ((oom-retry/status) tr-tensor-to!/raw))
+
+(define (to! t target [dtype #f])
+  (define-values (type index dt) (parse-target 'to! target dtype))
+  (check-ok (tensor-to!/retrying t type index dt) 'to!)
+  (reaccount! (tensor-handle t))
+  t)
 
 (define/checked-out (tensor-device t) (-> tensor? device?)
   (define-values (rc type index) (tr-tensor-device/raw t))

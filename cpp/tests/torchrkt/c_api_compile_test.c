@@ -167,6 +167,10 @@ void torchrkt_c_api_compile_check(void) {
   int (*get_default_device)(tr_device_type*, int64_t*) = tr_get_default_device;
   tr_tensor* (*to_device)(const tr_tensor*, tr_device_type, int64_t) =
       tr_tensor_to_device;
+  tr_tensor* (*to_fn)(const tr_tensor*, tr_device_type, int64_t, tr_dtype) =
+      tr_tensor_to;
+  int (*to_inplace)(tr_tensor*, tr_device_type, int64_t, tr_dtype) =
+      tr_tensor_to_;
   int (*tensor_device)(const tr_tensor*, tr_device_type*, int64_t*) =
       tr_tensor_device;
 
@@ -263,5 +267,7 @@ void torchrkt_c_api_compile_check(void) {
   (void)set_default_device;
   (void)get_default_device;
   (void)to_device;
+  (void)to_fn;
+  (void)to_inplace;
   (void)tensor_device;
 }

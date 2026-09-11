@@ -49,8 +49,12 @@ CPU-first; float32 + inferred int64 (#44). From `torch`:
   mps-device cuda-available? cuda-if-available cuda-device-count
   mps-available? mps-if-available accelerator-if-available
   set-default-device! default-device
-  with-default-device to-device tensor-device` — `'mps` is accepted
-  wherever `'cuda` is (#13); CPU and MPS are single devices (index 0)
+  with-default-device to to-device to-dtype tensor-device` — `'mps` is
+  accepted wherever `'cuda` is (#13); CPU and MPS are single devices
+  (index 0); `to` is PyTorch's `.to` (device, dtype, or both; identity
+  when nothing changes; layers move in place through `prop:to`, which
+  `gen:layer` derives, #54), and `to!` in the `unsafe` submodule is the
+  in-place tensor primitive behind it
 - memory: `native-memory-use` (per-device outstanding native bytes from
   the #37 ledger), `cuda-memory-stats` / `cuda-empty-cache!` /
   `mps-empty-cache!` (the caching allocators' own gauges + release, #51),

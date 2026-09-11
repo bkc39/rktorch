@@ -20,6 +20,8 @@
          tensor-allocator
          tensor-allocator/rng
          oom-retry
+         oom-retry/status
+         reaccount!
          tr-cuda-empty-cache/raw
          tr-mps-empty-cache/raw
          tr-last-error-kind/raw
@@ -108,7 +110,7 @@
   #:c-id tr_tensor_nbytes)
 
 (define _tr-device-type
-  (_enum '(cpu = 0 cuda = 1 mps = 2)))
+  (_enum '(cpu = 0 cuda = 1 mps = 2 keep = -1) _int))
 
 (define-torch tr-tensor-device/raw
   (_fun _Tensor
@@ -137,6 +139,12 @@
        (when a
          (set-phantom-bytes! (allocation-phantom a) 0)
          (hash-remove! allocations t))))))
+
+;; An in-place move (tr_tensor_to_) changes the device and byte count under
+;; the same handle, so its ledger entry is replaced rather than added to.
+(define (reaccount! t)
+  (unaccount! t)
+  (account! t))
 
 (define (native-memory-use)
   (define entries (call-with-ledger (lambda () (hash-values allocations))))
@@ -197,6 +205,17 @@
        (collect!)
        (apply raw-fn args)]
       [else #f])))
+
+(define ((oom-retry/status #:oom? [oom? last-error-oom?]
+                           #:collect! [collect! collect-and-drain!])
+         raw-fn)
+  (lambda args
+    (define rc (apply raw-fn args))
+    (cond
+      [(and (= rc 1) (oom?))
+       (collect!)
+       (apply raw-fn args)]
+      [else rc])))
 
 (define ((accounted wrapped) . args)
   (define t (apply wrapped args))

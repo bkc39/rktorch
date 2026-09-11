@@ -13,7 +13,10 @@ extern "C" {
 typedef enum tr_device_type {
   TR_DEVICE_CPU = 0,
   TR_DEVICE_CUDA = 1,
-  TR_DEVICE_MPS = 2
+  TR_DEVICE_MPS = 2,
+  /* "leave the device alone" — accepted only by tr_tensor_to / tr_tensor_to_;
+   * every other entry point rejects it as an unknown device type. */
+  TR_DEVICE_KEEP = -1
 } tr_device_type;
 
 /* Probes return 0 when the backend is absent AND when init throws; each
@@ -35,6 +38,22 @@ int tr_get_default_device(tr_device_type* out_type, int64_t* out_index);
 
 tr_tensor* tr_tensor_to_device(const tr_tensor* t, tr_device_type type,
                                int64_t index);
+
+/* torch.Tensor.to(device=, dtype=): one native hop for either or both axes.
+ * TR_DEVICE_KEEP / TR_DTYPE_KEEP leave that axis unchanged. When nothing
+ * changes the result aliases t's storage (copy=false), like PyTorch. NULL on
+ * error. */
+tr_tensor* tr_tensor_to(const tr_tensor* t, tr_device_type type, int64_t index,
+                        tr_dtype dtype);
+
+/* In-place counterpart, the mechanism behind torch.nn.Module.to: rebinds t's
+ * storage through Tensor::set_data under no_grad, so the handle, its
+ * requires_grad flag, its leaf-ness and its version counter survive, and an
+ * accumulated .grad is rebound the same way. A no-op when nothing changes.
+ * The caller's byte accounting for t is stale afterwards (device and nbytes
+ * may both differ). 0 success, 1 error. */
+int tr_tensor_to_(tr_tensor* t, tr_device_type type, int64_t index,
+                  tr_dtype dtype);
 
 int tr_cuda_memory_stats(int64_t device_index, int64_t* out_allocated,
                          int64_t* out_reserved, int64_t* out_peak_allocated);

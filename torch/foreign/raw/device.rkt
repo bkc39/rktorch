@@ -7,7 +7,8 @@
                   tr-cuda-empty-cache/raw
                   tr-mps-empty-cache/raw
                   tr-tensor-device/raw)
-         (only-in "syntax.rkt" _Tensor _Tensor/null define-torch))
+         (only-in "syntax.rkt" _Tensor _Tensor/null define-torch)
+         (only-in "tensor.rkt" _tr-dtype))
 
 (provide _tr-device-type
          tr-cuda-is-available/raw
@@ -18,7 +19,8 @@
          tr-cuda-memory-stats/raw
          tr-set-default-device/raw
          tr-get-default-device/raw
-         tr-tensor-to-device/raw
+         tr-tensor-to/raw
+         tr-tensor-to!/raw
          tr-tensor-device/raw)
 
 (define-torch tr-cuda-memory-stats/raw
@@ -53,8 +55,20 @@
         -> (values rc type index))
   #:c-id tr_get_default_device)
 
-(define-torch tr-tensor-to-device/raw
-  (_fun (t : _Tensor) (type : _tr-device-type) (index : _int64) -> _Tensor/null)
-  #:c-id tr_tensor_to_device
+(define-torch tr-tensor-to/raw
+  (_fun (t : _Tensor)
+        (type : _tr-device-type)
+        (index : _int64)
+        (dtype : _tr-dtype)
+        -> _Tensor/null)
+  #:c-id tr_tensor_to
   #:wrap tensor-allocator)
+
+(define-torch tr-tensor-to!/raw
+  (_fun (t : _Tensor)
+        (type : _tr-device-type)
+        (index : _int64)
+        (dtype : _tr-dtype)
+        -> _int)
+  #:c-id tr_tensor_to_)
 

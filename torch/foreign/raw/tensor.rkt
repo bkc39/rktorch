@@ -24,7 +24,6 @@
          tr-tensor-dtype/raw
          tr-tensor-print/raw
          tr-tensor-item/raw
-         tr-tensor-to-dtype/raw
          _tr-dtype)
 
 (define-torch tr-tensor-numel/raw
@@ -60,7 +59,7 @@
   #:c-id tr_tensor_copy_data)
 
 (define _tr-dtype
-  (_enum '(float32 = 0 float64 = 1 int64 = 2 bool = 3)))
+  (_enum '(float32 = 0 float64 = 1 int64 = 2 bool = 3 keep = -1) _int))
 
 (define (dtype-code->symbol n)
   (case n
@@ -111,11 +110,6 @@
         -> (rc : _int)
         -> (values rc out))
   #:c-id tr_tensor_item)
-
-(define-torch tr-tensor-to-dtype/raw
-  (_fun (t : _Tensor) (dtype : _tr-dtype) -> _Tensor/null)
-  #:c-id tr_tensor_to_dtype
-  #:wrap tensor-allocator)
 
 (define-torch tr-tensor-print/raw
   (_fun (t : _Tensor)

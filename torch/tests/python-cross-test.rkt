@@ -4,7 +4,8 @@
 ;; which provides Python torch; SKIPS when python3 can't import torch).
 
 (module+ test
-  (require rackunit
+  (require (only-in racket/list append-map)
+           rackunit
            "../main.rkt"
            "../nn.rkt"
            (only-in "../data/mnist.rkt" load-mnist-fixture)
@@ -473,4 +474,66 @@
      (for ([a (in-list (tensor->list r))]
            [b (in-list (hash-ref jm 'values))]
            [i (in-naturals)])
-       (check-= a b tol (format "causal mask parity ~a" i)))]))
+       (check-= a b tol (format "causal mask parity ~a" i)))
+     (let ()
+       (define j (python-check "to_conversions.py"))
+       (define x (tensor '((1.5 -2.0) (0.0 3.25))))
+       ;; values, not repr: the float64 dtype suffix is format.rkt's open TODO
+       (check-equal? (tensor->list (to x 'float64)) (hash-ref j 'float64_values))
+       (check-equal? (format "torch.~a" (tensor-dtype (to x 'float64)))
+                     (hash-ref j 'float64_dtype))
+       (check-equal? (tensor->repr (to x 'int64)) (hash-ref j 'int64_repr))
+       (check-equal? (tensor->repr (to x 'bool)) (hash-ref j 'bool_repr))
+       (check-equal? (format "torch.~a" (tensor-dtype (to x 'cpu 'float64)))
+                     (hash-ref j 'both_dtype))
+       (check-equal? (eq? (to x 'cpu) x) (hash-ref j 'cpu_is_self))
+       (check-equal? (eq? (to x 'float32) x) (hash-ref j 'dtype_is_self))
+       (check-equal? (symbol->string (device-type (tensor-device x)))
+                     (hash-ref j 'device_type))
+       (check-equal? (cuda-available?) (hash-ref j 'cuda_available))
+       (manual-seed! 0)
+       (define lin (Linear 2 2))
+       (check-equal? (eq? (to lin 'float64) lin) (hash-ref j 'linear_is_self))
+       (check-equal? (for/list ([e (in-list (state-dict lin))])
+                       (format "torch.~a" (tensor-dtype (cdr e))))
+                     (hash-ref j 'linear_state_dtypes))
+       (for ([a (in-list (append-map tensor->list (parameters lin)))]
+             [b (in-list (hash-ref j 'linear_state_values))]
+             [i (in-naturals)])
+         (check-= a b tol (format "Linear.to(float64) parity ~a" i))))
+     (let ()
+       ;; build on CPU, move, then train — Adam created before the move
+       (define (train-on device)
+         (manual-seed! 0)
+         (define model (Sequential (Linear 4 8) relu (Linear 8 1)))
+         (define xs0 (randn 16 4))
+         (define ys0 (matmul xs0 (ones 4 1)))
+         (define opt (adam (parameters model) #:lr 0.1))
+         (to model device)
+         (define xs (to xs0 device))
+         (define ys (to ys0 device))
+         (define losses
+           (for/list ([_ (in-range 3)])
+             (zero-grads! opt)
+             (define loss (mse-loss (model xs) ys))
+             (backward! loss)
+             (step! opt)
+             (item loss)))
+         (to model 'cpu)
+         (values losses (append-map tensor->list (parameters model))))
+       (define (check-move-twin device dev-tol)
+         (define j
+           (call-with-python-env
+            #:env (list (cons "RKTORCH_PARITY_DEVICE" (symbol->string device)))
+            (lambda () (python-check "to_move_train.py"))))
+         (define-values (losses params) (train-on device))
+         (for ([r (in-list losses)] [p (in-list (hash-ref j 'losses))]
+               [i (in-naturals)])
+           (check-= r p dev-tol (format "to_move_train[~a]: loss ~a" device i)))
+         (for ([r (in-list params)] [p (in-list (hash-ref j 'params))]
+               [i (in-naturals)])
+           (check-= r p dev-tol
+                    (format "to_move_train[~a]: parameter ~a" device i))))
+       (check-move-twin 'cpu tol)
+       (when (and (cuda-available?) (python-cuda-available?))
+         (check-move-twin 'cuda 1e-3)))]))
