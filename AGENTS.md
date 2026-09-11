@@ -100,6 +100,7 @@ causal-mask idiom is `(masked-fill scores (eq (tril (ones T T)) 0) -inf.0)`. `de
 `nn.Module` analog: `#:init` is the constructor body and assigns declared
 fields with `set!`, a field's value classifies it at construction
 (`Parameter?`, `Buffer?`, `layer?`, `#f` for absent, anything else plain),
+`#:training id` exposes the instance's own mode to `#:forward` (`train!`/`eval!` set it and recurse; every layer starts in training mode),
 models are plain struct trees owned by the GC (no global parameter store),
 and `prop:procedure` makes `(net x)` work like `__call__`. Layer init mirrors
 PyTorch RNG consumption (`nn.Linear.reset_parameters`), so a shared

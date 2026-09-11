@@ -82,7 +82,7 @@
   (-> layer? any/c ... any)
   (apply layer-forward m inputs))
 
-(define/contract-out (train! m)
+(define/contract-out (train! m) ;; noqa
   (-> layer? layer?)
   (layer-set-training! m #t)
   m)
@@ -92,19 +92,34 @@
   (layer-set-training! m #f)
   m)
 
-;; restores the aggregate prior mode tree-wide: a hand-mixed tree collapses
-;; to all-train or all-eval on exit
+(define (mode-snapshot m)
+  (define seen (make-hasheq))
+  (let walk ([m m])
+    (cond
+      [(hash-ref seen m #f) '()]
+      [else
+       (hash-set! seen m #t)
+       (cons (cons m (layer-training? m))
+             (append-map (lambda (c) (walk (cdr c)))
+                         (layer-named-children m)))])))
+
+(define (restore-modes! before)
+  (for ([e (in-list before)] #:unless (registry? (car e)))
+    (layer-set-training! (car e) (cdr e)))
+  (for ([e (in-list before)] #:when (registry? (car e)))
+    (set-registry-training?! (car e) (cdr e))))
+
 (define/contract-out (call-with-eval-mode m thunk)
   (-> layer? (-> any) any)
-  (define was-training? (layer-training? m))
+  (define before (mode-snapshot m))
   (dynamic-wind (lambda () (eval! m))
                 thunk
-                (lambda () (if was-training? (train! m) (eval! m)))))
+                (lambda () (restore-modes! before))))
 
 (define-syntax-parse-rule (in-eval-mode m:expr body:expr ...+)
   (call-with-eval-mode m (lambda () body ...)))
 
-(struct registry (forward params buffers children)
+(struct registry (forward params buffers children [training? #:mutable])
   #:property prop:procedure
   (lambda (self . inputs) (apply (registry-forward self) self inputs))
   #:methods gen:layer
@@ -129,10 +144,11 @@
    (define (layer-named-children self)
      (registry-children self))
    (define (layer-set-training! self training?)
+     (set-registry-training?! self training?)
      (for ([c (in-list (registry-children self))])
        (child-set-training! c training?)))
    (define (layer-training? self)
-     (andmap child-training? (registry-children self)))])
+     (registry-training? self))])
 
 (define (child-parameters c)
   (layer-parameters (cdr c)))
@@ -142,9 +158,6 @@
 
 (define (child-set-training! c training?)
   (layer-set-training! (cdr c) training?))
-
-(define (child-training? c)
-  (layer-training? (cdr c)))
 
 (define (child-prefix c prefix)
   (if (string=? (car c) "") prefix (string-append prefix (car c) ".")))
@@ -185,7 +198,7 @@
                               (if (unsupplied-arg? bufs) '() bufs)
                               (if (unsupplied-arg? kids) '() kids)))))
        [result layer?])
-  (check-names 'procedure->Layer (Fn% fn-forward params bufs kids proc)))
+  (check-names 'procedure->Layer (Fn% fn-forward params bufs kids #t proc)))
 
 (struct Children% (alist)
   #:reflection-name 'Children)
@@ -315,7 +328,8 @@
         (~alt (~optional (~seq #:init init:init-formals init-body:expr ...))
               (~optional (~seq #:reflection-name reflect:expr))
               (~optional (~seq #:contract ctc:expr))
-              (~optional (~seq #:predicate pred:id))) ...
+              (~optional (~seq #:predicate pred:id))
+              (~optional (~seq #:training mode:id))) ...
         #:forward (input:id ...) body:expr ...+)
      (define field-ids (syntax->list #'(field.id ...)))
      (for ([f (in-list field-ids)])
@@ -351,7 +365,11 @@
                    [(field-name ...)
                     (for/list ([f (in-list field-ids)])
                       (symbol->string (syntax-e f)))]
-                   [(field-acc ...) (map accessor field-ids)])
+                   [(field-acc ...) (map accessor field-ids)]
+                   [(mode-binding ...)
+                    (if (attribute mode)
+                        (list #'[mode (registry-training? self)])
+                        '())])
        (with-syntax ([export (contract-export stx #'name #'name?
                                               (attribute ctc)
                                               (attribute pred))])
@@ -360,7 +378,7 @@
                #:reflection-name reflect-name)
              (define name? sid?)
              (define (forward-proc self . inputs)
-               (let ([field.id (field-acc self)] ...)
+               (let (mode-binding ... [field.id (field-acc self)] ...)
                  (apply (lambda (input ...) body ...) inputs)))
              (define (name . formals)
                (let ([absent #f] ...)
@@ -370,5 +388,6 @@
                                          (list field.id ...))])
                    (check-names
                     'name
-                    (sid forward-proc params buffers children field.id ...)))))
+                    (sid forward-proc params buffers children #t
+                         field.id ...)))))
              export)))]))

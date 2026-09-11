@@ -1,8 +1,8 @@
 #lang racket/base
 
 (module+ test
-  (require rackunit
-           (only-in racket/file make-temporary-file)
+  (require (only-in racket/file make-temporary-file)
+           rackunit
            (only-in syntax/macro-testing convert-compile-time-error)
            "../main.rkt"
            "../nn.rkt")
@@ -413,6 +413,55 @@
                       (set! encoder.block (Linear 1 1))
                       #:forward (x) x)
                     (Dotted))))))
+
+  (test-case "training mode is per instance: leaves flip, parents keep their own"
+    (define lin (Linear 1 1))
+    (check-true (layer-training? lin))
+    (eval! lin)
+    (check-false (layer-training? lin))
+    (train! lin)
+    (define-layer Gate (scale)
+      #:init ()
+      (set! scale (Parameter (full 2.0 1)))
+      #:training training?
+      #:forward (x) (if training? (mul x scale) x))
+    (define g (Gate))
+    (check-equal? (tensor->list (g (ones 1))) '(2.0))
+    (eval! g)
+    (check-equal? (tensor->list (g (ones 1))) '(1.0))
+    (train! g)
+    (check-equal? (tensor->list (g (ones 1))) '(2.0))
+    (define parent (Sequential lin g))
+    (eval! g)
+    (check-true (layer-training? parent) "a child's mode is not the parent's")
+    (check-false (layer-training? g))
+    (in-eval-mode parent
+      (check-false (layer-training? parent))
+      (check-false (layer-training? lin)))
+    (check-true (layer-training? parent) "restored exactly")
+    (check-true (layer-training? lin))
+    (check-false (layer-training? g) "the hand-set child came back in eval")
+    (check-exn #rx"boom" (lambda () (in-eval-mode parent (error "boom"))))
+    (check-true (layer-training? parent) "restored after an exception")
+    (check-false (layer-training? g))
+    (define wrapped (procedure->Layer values))
+    (eval! wrapped)
+    (check-false (layer-training? wrapped) "a procedure layer has its own mode")
+    (check-exn #rx"unbound identifier"
+               (lambda ()
+                 (convert-compile-time-error
+                  (let ()
+                    (define-layer NoMode ()
+                      #:forward (x) training?)
+                    (NoMode)))))
+    (check-exn #rx"define-layer"
+               (lambda ()
+                 (convert-compile-time-error
+                  (let ()
+                    (define-layer BadMode ()
+                      #:training 5
+                      #:forward (x) x)
+                    (BadMode))))))
 
   (test-case "with #:init, a field with a default or keyword is a syntax error"
     (check-exn #rx"with #:init, a field is a bare identifier"

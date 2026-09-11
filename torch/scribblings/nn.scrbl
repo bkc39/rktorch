@@ -21,7 +21,8 @@
                   (code:line #:init (formal ... . rest-id) init-body ...)
                   (code:line #:reflection-name expr)
                   (code:line #:contract contract-expr)
-                  (code:line #:predicate id)]
+                  (code:line #:predicate id)
+                  (code:line #:training id)]
           [formal id
                   [id default-expr]
                   (code:line keyword id)
@@ -42,6 +43,25 @@ fields with @racket[set!].  With @racket[#:init], a field is a bare
 identifier.  Without it, the fields are themselves the constructor
 formals, so a stateless layer needs no body.  A field name is one
 state-dict segment and may not contain a dot.
+
+Every layer starts in training mode, and @racket[train!] and
+@racket[eval!] set a layer's own mode and recurse into its children.
+@racket[#:training id] binds @racket[id] in @racket[body] to the
+instance's mode at each call, @racket[#t] or @racket[#f]; without the
+clause nothing is bound.  The mode is not a field: it is neither a
+parameter nor a buffer, and it is not written to the state dict.  Other
+per-instance state that is not a tensor belongs in a plain field holding
+a @racket[box]; state that is a tensor belongs in a @racket[Buffer]
+updated in place.
+
+@racketblock[
+(define-layer Dropout (p)
+  #:contract (->* [] [#:p (and/c (>=/c 0) (</c 1))] dropout?)
+  #:init (#:p [p 0.5])
+  #:training training?
+  #:forward (x)
+  (dropout x p training?))
+]
 
 What a field holds when @racket[init-body] finishes decides what it is:
 
@@ -184,8 +204,10 @@ through registered children, as for @racket[define-layer].
 Captures are not discovered automatically. In contrast to OCaml's
 @tt{Layer.of_fn}, whose parameters belong to a separate variable store,
 this wrapper owns its registered tree. Rebinding a captured variable does
-not change that registration. Mode-dependent operations should live in
-registered child layers such as @racket[Dropout].
+not change that registration. The wrapper has a training mode of its own
+that @racket[train!] and @racket[eval!] set, but @racket[proc] cannot read
+it, so a mode-dependent step belongs in a registered child such as
+@racket[Dropout].
 
 @racketblock[
 (define projection (Linear 32 32))
@@ -294,4 +316,32 @@ child; its own children are reached through it.
 
 @defproc[(named-children [m layer?]) (listof (cons/c string? layer?))]{
 The direct children of @racket[m] with the names they registered under.
+}
+
+@defproc[(train! [m layer?]) layer?]{
+Puts @racket[m] and every layer reachable through its children in
+training mode, and returns @racket[m].
+}
+
+@defproc[(eval! [m layer?]) layer?]{
+Puts @racket[m] and every layer reachable through its children in
+evaluation mode, and returns @racket[m].
+}
+
+@defproc[(layer-training? [m layer?]) boolean?]{
+Whether @racket[m] itself is in training mode.  A layer's mode is its
+own: @racket[eval!] on a child does not change its parent's answer.  A
+hand-written @racket[gen:layer] implementation that defines no mode
+methods is stateless and reports @racket[#t].
+}
+
+@defproc[(call-with-eval-mode [m layer?] [thunk (-> any)]) any]{
+Records the mode of every layer reachable from @racket[m], puts them all
+in evaluation mode, calls @racket[thunk], and restores each layer's own
+recorded mode, whether @racket[thunk] returns or raises.  A tree whose
+layers were in mixed modes comes back exactly as it was.
+}
+
+@defform[(in-eval-mode m body ...+)]{
+@racket[(call-with-eval-mode m (lambda () body ...))].
 }

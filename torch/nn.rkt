@@ -39,6 +39,7 @@
          layer-buffers
          layer-named-buffers
          layer-named-children
+         layer-set-training!
          layer-training?
          in-eval-mode)
 
