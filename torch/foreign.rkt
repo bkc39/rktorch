@@ -5,12 +5,13 @@
 #|review: ignore|#
 
 (require (only-in racket/contract/base -> contract-out)
+         (only-in "foreign/device-type.rkt" device/c)
          (submod "foreign/device-type.rkt" checked)
          (submod "foreign/error.rkt" checked)
          (only-in "foreign/structs.rkt" tensor-free!)
          (submod "foreign/structs.rkt" checked)
          (except-in "foreign/ops.rkt"
-                    device->type+index dims-rest/c dtype/c
+                    device->type+index dims-rest/c
                     item to to-able? to-dtype tensor-dtype to-device
                     tensor-device tensor-shape tensor->list)
          (submod "foreign/ops.rkt" checked)
@@ -172,7 +173,9 @@
          tensor-device
          to
          to-able?
-         prop:to)
+         prop:to
+         device/c
+         dtype/c)
 
 (provide requires-grad!
          requires-grad?

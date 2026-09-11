@@ -54,7 +54,8 @@ CPU-first; float32 + inferred int64 (#44). From `torch`:
   (index 0); `to` is PyTorch's `.to` (device, dtype, or both; identity
   when nothing changes; layers move in place through `prop:to`, which
   `gen:layer` derives, #54), and `to!` in the `unsafe` submodule is the
-  in-place tensor primitive behind it
+  in-place tensor primitive behind it; `device/c` and `dtype/c` are
+  exported for user contracts
 - memory: `native-memory-use` (per-device outstanding native bytes from
   the #37 ledger), `cuda-memory-stats` / `cuda-empty-cache!` /
   `mps-empty-cache!` (the caching allocators' own gauges + release, #51),

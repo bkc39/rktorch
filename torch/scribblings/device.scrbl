@@ -3,8 +3,9 @@
 @(require (for-label racket/base
                      racket/contract
                      (only-in torch
-                              cpu-device cuda-device device device? dtype
-                              full mps-device native-memory-use ones
+                              cpu-device cuda-device device device/c device?
+                              dtype dtype/c full mps-device
+                              native-memory-use ones
                               ones-like prop:to tensor tensor-device
                               tensor-dtype tensor? to to-able? to-device
                               to-dtype with-default-device zeros zeros-like ~>)
@@ -50,7 +51,10 @@ requires-grad leaf. Plain tensor fields are not moved, just as PyTorch
 leaves plain tensor attributes where they are; register such a tensor with
 @racket[Buffer] to have it follow the layer. A layer's dtype target must be
 floating-point, @racket['float32] or @racket['float64], as
-@tt{nn.Module.to} only accepts floating-point or complex dtypes.
+@tt{nn.Module.to} only accepts floating-point or complex dtypes, and as
+there it reaches only the floating-point parameters and buffers: an
+@racket['int64] counter or a @racket['bool] mask registered with
+@racket[Buffer] keeps its dtype and changes device alone.
 
 Two rules carry over from PyTorch. Move the model before the first
 optimizer @racket[step!]: @racket[adam] creates its moments on the
@@ -66,6 +70,16 @@ leaves the layer with some parameters moved and some not.
 
 @racket[to-device] and @racket[to-dtype] are the single-axis primitives
 underneath @racket[to]; both share its identity behaviour.
+}
+
+@defthing[device/c contract?]{
+A device designator: a @racket[device?] value, one of @racket['cpu],
+@racket['cuda], @racket['mps], or @racket[(list 'cuda index)].
+}
+
+@defthing[dtype/c contract?]{
+One of @racket['float32], @racket['float64], @racket['int64],
+@racket['bool].
 }
 
 @defthing[prop:to struct-type-property?]{

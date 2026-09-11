@@ -203,7 +203,8 @@ from any autograd graph that produced @racket[t].
 
 @defproc[(Buffer? [v any/c]) boolean?]{
 Recognizes the result of @racket[Buffer].  A buffer follows its layer
-through @racket[to]; a plain tensor field does not.
+through @racket[to]: it always changes device, and a floating-point buffer
+also takes a dtype target; a plain tensor field does neither.
 }
 
 @defproc[(procedure->Layer [proc procedure?]
