@@ -276,7 +276,7 @@
        (raise-argument-error 'prop:to "(procedure-arity-includes/c 3)" v))
      v)))
 
-(define/checked-out (to x target [dtype #f])
+(define/contract-out (to x target [dtype #f]) ;; noqa
   (->i ([x (or/c tensor? to-able?)] [target (or/c device/c dtype/c)])
        ([dtype (target) (dtype-after/c target)])
        [result (or/c tensor? to-able?)])
@@ -293,7 +293,7 @@
                  (and (not (eq? type 'keep)) (type+index->device type index))
                  (and (not (eq? dt 'keep)) dt))]))
 
-(define/checked-out (to-able? v) (-> any/c boolean?) ;; noqa
+(define/contract-out (to-able? v) (-> any/c boolean?) ;; noqa
   (to-able?* v))
 
 (define tensor-to!/retrying ((oom-retry/status) tr-tensor-to!/raw))

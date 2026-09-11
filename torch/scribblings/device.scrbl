@@ -56,11 +56,13 @@ there it reaches only the floating-point parameters and buffers: an
 @racket['int64] counter or a @racket['bool] mask registered with
 @racket[Buffer] keeps its dtype and changes device alone.
 
-Two rules carry over from PyTorch. Move the model before the first
-optimizer @racket[step!]: @racket[adam] creates its moments on the
-parameter's device at that step, and moments created earlier stay behind.
-And a move that fails part-way, for example on a CUDA out-of-memory error,
-leaves the layer with some parameters moved and some not.
+Optimizer state follows: @racket[adam] creates its moments on the
+parameter's device and dtype at the first @racket[step!], and a moment
+created before a later move is brought to the parameter at the next step,
+so a model may be moved at any point of training. One rule carries over
+from PyTorch: a move that fails part-way, for example on a CUDA
+out-of-memory error, leaves the layer with some parameters moved and some
+not.
 
 @racketblock[
 (define model (Linear 784 10))

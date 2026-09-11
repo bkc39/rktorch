@@ -4,7 +4,8 @@
          (only-in racket/generic define-generics)
          (only-in "../foreign.rkt"
                   + - * / sqrt
-                  maybe-grad sub! tensor? with-no-grad zero-grad! zeros-like)
+                  maybe-grad sub! tensor-device tensor-dtype tensor? to
+                  with-no-grad zero-grad! zeros-like)
          (only-in "../private/contract.rkt" define/contract-out))
 
 (provide gen:optimizer
@@ -50,6 +51,16 @@
        adam?)
   (make-adam params lr beta1 beta2 eps (box 0) (make-hasheq) (make-hasheq)))
 
+;; a moment created before its parameter was moved with `to` follows it at
+;; the next step, so a move mid-training does not strand optimizer state
+(define (moment-on table p)
+  (define m (hash-ref! table p (lambda () (zeros-like p))))
+  (define dev (tensor-device p))
+  (define dt (tensor-dtype p))
+  (if (and (equal? (tensor-device m) dev) (eq? (tensor-dtype m) dt))
+      m
+      (to m dev dt)))
+
 (define (adam-do-step! opt)
   (with-no-grad
     (set-box! (adam-step-box opt) (add1 (unbox (adam-step-box opt))))
@@ -63,8 +74,8 @@
     (for ([p (in-list (adam-params opt))])
       (define g (maybe-grad p))
       (when g
-        (define m (hash-ref! (adam-m opt) p (lambda () (zeros-like p))))
-        (define v (hash-ref! (adam-v opt) p (lambda () (zeros-like p))))
+        (define m (moment-on (adam-m opt) p))
+        (define v (moment-on (adam-v opt) p))
         (define m* (+ (* b1 m) (* (- 1.0 b1) g)))
         (define v* (+ (* b2 v) (* (- 1.0 b2) (* g g))))
         (hash-set! (adam-m opt) p m*)

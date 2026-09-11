@@ -12,8 +12,8 @@
          (submod "foreign/structs.rkt" checked)
          (except-in "foreign/ops.rkt"
                     device->type+index dims-rest/c
-                    item to to-able? to-dtype tensor-dtype to-device
-                    tensor-device tensor-shape tensor->list)
+                    item to-dtype tensor-dtype to-device tensor-device
+                    tensor-shape tensor->list)
          (submod "foreign/ops.rkt" checked)
          (except-in "foreign/tensor-ops.rkt"
                     reshape unsqueeze tensor sum matmul add sub mul div neg)

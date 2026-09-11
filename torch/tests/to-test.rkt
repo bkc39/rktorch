@@ -166,7 +166,21 @@
     (define w2 (car (parameters m2)))
     (check-equal? (tensor-dtype w2) 'float64)
     (check-true (< (car (tensor->list w2)) 1.0) "the moved parameter stepped")
-    (check-true (= (cadr (tensor->list w2)) 2.0) "a zero-grad entry is held"))
+    (check-true (= (cadr (tensor->list w2)) 2.0) "a zero-grad entry is held")
+    ;; a move after steps have populated the moments: they follow the
+    ;; parameter at the next step instead of stranding on the old dtype
+    (define m3 (Mixed))
+    (define opt3 (adam (parameters m3) #:lr 0.1))
+    (backward! (m3 (ones 3)))
+    (step! opt3)
+    (define after-one (tensor->list (car (parameters m3))))
+    (to m3 'float64)
+    (backward! (m3 (to (ones 3) 'float64)))
+    (step! opt3)
+    (define w3 (car (parameters m3)))
+    (check-equal? (tensor-dtype w3) 'float64)
+    (check-true (< (car (tensor->list w3)) (car after-one))
+                "the second step, after the move, applied the moments"))
 
   (test-case "checkpoints compose with moves in either order"
     (manual-seed! 0)
@@ -311,6 +325,10 @@
     (backward! (sum y))
     (check-equal? (tensor-device (grad (car (parameters m)))) dev)
     (step! opt)
+    (check-eq? (to m 'cpu) m)
+    (backward! (sum (m (ones 1 1024))))
+    (step! opt) ;; moments populated on the device follow the parameter back
+    (check-eq? (to m dev) m)
     (check-eq? (to m 'cpu) m)
     (check-equal? (map tensor-device (parameters m))
                   (list (cpu-device) (cpu-device)))

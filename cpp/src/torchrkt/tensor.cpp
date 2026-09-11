@@ -8,6 +8,7 @@
 #include <sstream>
 #include <string>
 
+#include "torchrkt/detail/device.hpp"
 #include "torchrkt/detail/dtype.hpp"
 #include "torchrkt/detail/error.hpp"
 #include "torchrkt/detail/op_call.hpp"
@@ -143,7 +144,7 @@ tr_tensor* tr_tensor_to_dtype(const tr_tensor* t, tr_dtype dtype) {
     return torchrkt::null_arg("tr_tensor_to_dtype");
   }
   return torchrkt::alloc_result("tr_tensor_to_dtype", [&] {
-    return t->value.to(torchrkt::to_scalar_type(dtype));
+    return torchrkt::convert(t->value, TR_DEVICE_KEEP, 0, dtype);
   });
 }
 

@@ -194,28 +194,25 @@
   (void (tr-mps-empty-cache/raw))
   (and observed #t))
 
-(define ((oom-retry #:oom? [oom? last-error-oom?]
-                    #:collect! [collect! collect-and-drain!])
-         raw-fn)
-  (lambda args
-    (define t (apply raw-fn args))
-    (cond
-      [t t]
-      [(oom?)
-       (collect!)
-       (apply raw-fn args)]
-      [else #f])))
+;; one retry after a collect when a failed call was an OOM; the two
+;; wrappers below differ only in how a raw result reports failure
+(define (((retry-on-oom failed? oom? collect!) raw-fn) . args)
+  (define result (apply raw-fn args))
+  (cond
+    [(and (failed? result) (oom?))
+     (collect!)
+     (apply raw-fn args)]
+    [else result]))
 
-(define ((oom-retry/status #:oom? [oom? last-error-oom?]
-                           #:collect! [collect! collect-and-drain!])
-         raw-fn)
-  (lambda args
-    (define rc (apply raw-fn args))
-    (cond
-      [(and (= rc 1) (oom?))
-       (collect!)
-       (apply raw-fn args)]
-      [else rc])))
+;; handle-returning raw calls: #f is the failure
+(define (oom-retry #:oom? [oom? last-error-oom?]
+                   #:collect! [collect! collect-and-drain!])
+  (retry-on-oom not oom? collect!))
+
+;; status-returning raw calls: 1 is the failure
+(define (oom-retry/status #:oom? [oom? last-error-oom?]
+                          #:collect! [collect! collect-and-drain!])
+  (retry-on-oom (lambda (rc) (= rc 1)) oom? collect!))
 
 (define ((accounted wrapped) . args)
   (define t (apply wrapped args))

@@ -20,4 +20,6 @@ void set_default_device(tr_device_type type, int64_t index);
 torch::Tensor convert(const torch::Tensor& v, tr_device_type type,
                       int64_t index, tr_dtype dtype);
 
+bool rebindable(const torch::Tensor& dst, const torch::Tensor& src);
+
 }  // namespace torchrkt

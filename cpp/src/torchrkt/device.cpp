@@ -86,6 +86,13 @@ torch::Tensor convert(const torch::Tensor& v, tr_device_type type,
               /*copy=*/false, /*memory_format=*/std::nullopt);
 }
 
+// set_data's own precondition (has_compatible_shallow_copy_type), checked
+// up front so the rebinding steps of tr_tensor_to_ cannot throw
+bool rebindable(const torch::Tensor& dst, const torch::Tensor& src) {
+  return dst.unsafeGetTensorImpl()->has_compatible_shallow_copy_type(
+      src.key_set());
+}
+
 torch::Device current_default_device() {
   const int64_t packed = g_default_device.load(std::memory_order_seq_cst);
   const auto type = static_cast<tr_device_type>(packed & 3);
@@ -246,7 +253,7 @@ tr_tensor* tr_tensor_to_device(const tr_tensor* t, tr_device_type type,
     return torchrkt::null_arg("tr_tensor_to_device");
   }
   return torchrkt::alloc_result("tr_tensor_to_device", [&] {
-    return t->value.to(torchrkt::to_torch_device(type, index));
+    return torchrkt::convert(t->value, type, index, TR_DTYPE_KEEP);
   });
 }
 
@@ -273,15 +280,22 @@ int tr_tensor_to_(tr_tensor* t, tr_device_type type, int64_t index,
     if (moved.is_same(v)) {
       return;
     }
-    // Both conversions (the allocating steps) happen before either
-    // set_data (shallow, non-allocating), so a throw leaves t untouched:
-    // nothing is half-moved, and a retry cannot short-circuit past the grad.
+    // Everything that can throw — both allocating conversions and the
+    // shallow-copy compatibility checks set_data would make — happens
+    // before either set_data, so a throw leaves t untouched: nothing is
+    // half-moved, and a retry cannot short-circuit past the grad.
     torch::Tensor moved_grad;
     if (v.grad().defined()) {
       moved_grad = torchrkt::convert(v.grad(), type, index, dtype);
     }
+    const bool rebind_grad =
+        moved_grad.defined() && !moved_grad.is_same(v.grad());
+    TORCH_CHECK(torchrkt::rebindable(v, moved),
+                "tr_tensor_to_: incompatible tensor type for set_data");
+    TORCH_CHECK(!rebind_grad || torchrkt::rebindable(v.grad(), moved_grad),
+                "tr_tensor_to_: incompatible grad type for set_data");
     v.set_data(moved);
-    if (moved_grad.defined() && !moved_grad.is_same(v.grad())) {
+    if (rebind_grad) {
       v.mutable_grad().set_data(moved_grad);
     }
   });
