@@ -112,7 +112,6 @@
         -> (values rc out))
   #:c-id tr_tensor_item)
 
-;; single-axis compatibility binding, as tr-tensor-to-device/raw in device.rkt
 (define-torch tr-tensor-to-dtype/raw
   (_fun (t : _Tensor) (dtype : _tr-dtype) -> _Tensor/null)
   #:c-id tr_tensor_to_dtype

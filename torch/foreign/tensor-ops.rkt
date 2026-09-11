@@ -92,7 +92,7 @@
   (if (and (pair? dims) (list? (car dims))) (car dims) dims))
 
 ;; the device and dtype go into native construction — never a default-device
-;; scope or a construct-then-move hop through another device (#56)
+;; scope or a construct-then-move hop through another device
 (define (placement device dtype)
   (define-values (type index)
     (if device (device->type+index device) (values 'keep 0)))
