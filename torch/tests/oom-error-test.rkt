@@ -4,7 +4,7 @@
   (require rackunit
            (only-in "../generated.rkt" dropout)
            "../main.rkt"
-           (only-in "../foreign/raw/memory.rkt" oom-retry))
+           (only-in "../foreign/raw/memory.rkt" oom-retry oom-retry/status))
 
   ;; 2^60 floats = 4 EiB: beyond any 64-bit user address space (so the
   ;; failure is deterministic — no overcommit/OOM-killer hazard) yet below
@@ -65,6 +65,48 @@
        (lambda _args #f)))
     (check-false (wrapped 'arg))
     (check-equal? collects 1))
+
+  (test-case "oom-retry/status: rc 1 + oom kind collects and retries once"
+    (define calls 0)
+    (define collects 0)
+    (define (fails-once . _args)
+      (set! calls (add1 calls))
+      (if (= calls 1) 1 0))
+    (define wrapped
+      ((oom-retry/status #:oom? (lambda () #t)
+                         #:collect! (lambda () (set! collects (add1 collects))))
+       fails-once))
+    (check-equal? (wrapped 'arg) 0)
+    (check-equal? calls 2)
+    (check-equal? collects 1))
+
+  (test-case "oom-retry/status: a second failure surfaces as rc 1"
+    (define collects 0)
+    (define wrapped
+      ((oom-retry/status #:oom? (lambda () #t)
+                         #:collect! (lambda () (set! collects (add1 collects))))
+       (lambda _args 1)))
+    (check-equal? (wrapped 'arg) 1)
+    (check-equal? collects 1))
+
+  (test-case "oom-retry/status: non-OOM failures and successes never retry"
+    (define calls 0)
+    (define collects 0)
+    (define wrapped
+      ((oom-retry/status #:oom? (lambda () #f)
+                         #:collect! (lambda () (set! collects (add1 collects))))
+       (lambda _args (set! calls (add1 calls)) 1)))
+    (check-equal? (wrapped 'arg) 1)
+    (check-equal? calls 1)
+    (check-equal? collects 0)
+    (define probes 0)
+    (define ok
+      ((oom-retry/status #:oom? (lambda () (set! probes (add1 probes)) #t)
+                         #:collect! (lambda () (set! collects (add1 collects))))
+       (lambda _args 0)))
+    (check-equal? (ok 'arg) 0)
+    (check-equal? probes 0 "a success touches no probe")
+    (check-equal? collects 0))
 
   (test-case "oom-retry: non-OOM failures never collect or retry"
     (define calls 0)

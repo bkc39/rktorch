@@ -22,9 +22,9 @@
          tr-tensor-copy-data-i64/raw
          tr-tensor-copy-data/raw
          tr-tensor-dtype/raw
+         tr-tensor-to-dtype/raw
          tr-tensor-print/raw
          tr-tensor-item/raw
-         tr-tensor-to-dtype/raw
          _tr-dtype)
 
 (define-torch tr-tensor-numel/raw
@@ -60,7 +60,7 @@
   #:c-id tr_tensor_copy_data)
 
 (define _tr-dtype
-  (_enum '(float32 = 0 float64 = 1 int64 = 2 bool = 3)))
+  (_enum '(float32 = 0 float64 = 1 int64 = 2 bool = 3 keep = -1) _int))
 
 (define (dtype-code->symbol n)
   (case n

@@ -20,6 +20,8 @@
          tensor-allocator
          tensor-allocator/rng
          oom-retry
+         oom-retry/status
+         reaccount!
          tr-cuda-empty-cache/raw
          tr-mps-empty-cache/raw
          tr-last-error-kind/raw
@@ -108,7 +110,7 @@
   #:c-id tr_tensor_nbytes)
 
 (define _tr-device-type
-  (_enum '(cpu = 0 cuda = 1 mps = 2)))
+  (_enum '(cpu = 0 cuda = 1 mps = 2 keep = -1) _int))
 
 (define-torch tr-tensor-device/raw
   (_fun _Tensor
@@ -137,6 +139,12 @@
        (when a
          (set-phantom-bytes! (allocation-phantom a) 0)
          (hash-remove! allocations t))))))
+
+;; An in-place move (tr_tensor_to_) changes the device and byte count under
+;; the same handle, so its ledger entry is replaced rather than added to.
+(define (reaccount! t)
+  (unaccount! t)
+  (account! t))
 
 (define (native-memory-use)
   (define entries (call-with-ledger (lambda () (hash-values allocations))))
@@ -186,17 +194,25 @@
   (void (tr-mps-empty-cache/raw))
   (and observed #t))
 
-(define ((oom-retry #:oom? [oom? last-error-oom?]
-                    #:collect! [collect! collect-and-drain!])
-         raw-fn)
-  (lambda args
-    (define t (apply raw-fn args))
-    (cond
-      [t t]
-      [(oom?)
-       (collect!)
-       (apply raw-fn args)]
-      [else #f])))
+;; one retry after a collect when a failed call was an OOM; the two
+;; wrappers below differ only in how a raw result reports failure
+(define (((retry-on-oom failed? oom? collect!) raw-fn) . args)
+  (define result (apply raw-fn args))
+  (cond
+    [(and (failed? result) (oom?))
+     (collect!)
+     (apply raw-fn args)]
+    [else result]))
+
+;; handle-returning raw calls: #f is the failure
+(define (oom-retry #:oom? [oom? last-error-oom?]
+                   #:collect! [collect! collect-and-drain!])
+  (retry-on-oom not oom? collect!))
+
+;; status-returning raw calls: 1 is the failure
+(define (oom-retry/status #:oom? [oom? last-error-oom?]
+                          #:collect! [collect! collect-and-drain!])
+  (retry-on-oom (lambda (rc) (= rc 1)) oom? collect!))
 
 (define ((accounted wrapped) . args)
   (define t (apply wrapped args))
