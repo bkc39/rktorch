@@ -51,8 +51,6 @@
        adam?)
   (make-adam params lr beta1 beta2 eps (box 0) (make-hasheq) (make-hasheq)))
 
-;; a moment created before its parameter was moved with `to` follows it at
-;; the next step, so a move mid-training does not strand optimizer state
 (define (moment-on table p)
   (define m (hash-ref! table p (lambda () (zeros-like p))))
   (define dev (tensor-device p))

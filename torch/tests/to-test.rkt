@@ -197,6 +197,10 @@
     (load-state! loaded-first path)
     (to loaded-first 'float64)
     (check-equal? (param-values loaded-first) expected)
+    ;; the checkpoint writer takes float32/int64/bool only: a float64 model
+    ;; is moved back before saving, and saving it as is is refused
+    (check-exn #rx"unsupported dtype"
+               (lambda () (save-state! loaded-first path)))
     (to loaded-first 'float32)
     (save-state! loaded-first path)
     (define again (Linear 3 2))

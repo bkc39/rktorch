@@ -202,6 +202,12 @@ TEST(TorchrktCreationOn, PlacesAndTypesAtConstruction) {
   EXPECT_EQ(dtype_of(f.t), TR_DTYPE_FLOAT64);
   EXPECT_EQ(cpu_data_of(f.t), std::vector<float>(6, 7.0F));
   EXPECT_EQ(tr_zeros_on(nullptr, 2, TR_DEVICE_CPU, 0, TR_DTYPE_KEEP), nullptr);
+  // CPU is a single device: an ordinal other than 0 is rejected here as it
+  // is by tr_set_default_device
+  EXPECT_EQ(tr_zeros_on(dims.data(), 2, TR_DEVICE_CPU, 1, TR_DTYPE_KEEP),
+            nullptr);
+  EXPECT_NE(strstr(tr_last_error(), "CPU device index must be 0"), nullptr)
+      << tr_last_error();
   // the documented scalar call: NULL dims with ndim 0, for both triplets
   const Handle scalar(
       tr_full_on(nullptr, 0, 3.0, TR_DEVICE_KEEP, 0, TR_DTYPE_INT64));

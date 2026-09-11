@@ -9,10 +9,11 @@
 extern "C" {
 #endif
 
-/* Tensor constructors. All allocate CPU float32 tensors and follow tr_randn's
- * contract: return a new tr_tensor the caller releases with tr_tensor_free,
- * or NULL on error (see tr_last_error). `dims` points at `ndim` sizes;
- * ndim==0 yields a scalar. */
+/* Tensor constructors. All follow tr_randn's contract: return a new
+ * tr_tensor the caller releases with tr_tensor_free, or NULL on error (see
+ * tr_last_error). `dims` points at `ndim` sizes; ndim==0 yields a scalar.
+ * The plain constructors allocate float32 on the process default device;
+ * the _on variants below choose device and dtype. */
 
 tr_tensor* tr_zeros(const int64_t* dims, int64_t ndim);
 

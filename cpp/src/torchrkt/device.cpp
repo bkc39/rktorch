@@ -45,6 +45,9 @@ tr_device_type type_of(const torch::Device& d) {
 torch::Device to_torch_device(tr_device_type type, int64_t index) {
   switch (type) {
     case TR_DEVICE_CPU:
+      if (index != 0) {
+        throw std::invalid_argument("CPU device index must be 0");
+      }
       return torch::Device(torch::kCPU);
     case TR_DEVICE_CUDA:
       if (index < 0 ||
