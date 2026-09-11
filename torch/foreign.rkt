@@ -51,6 +51,9 @@
          full
          zeros-like
          ones-like
+         full-like
+         randn-like
+         rand-like
          arange
          eye
          tensor)

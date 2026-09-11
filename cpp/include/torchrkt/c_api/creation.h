@@ -42,6 +42,12 @@ tr_tensor* tr_arange(double start, double end, double step);
 /* n x m identity (ones on the main diagonal). */
 tr_tensor* tr_eye(int64_t n, int64_t m);
 
+tr_tensor* tr_arange_on(double start, double end, double step,
+                        tr_device_type type, int64_t index, tr_dtype dtype);
+
+tr_tensor* tr_eye_on(int64_t n, int64_t m, tr_device_type type, int64_t index,
+                     tr_dtype dtype);
+
 /* Build a tensor from `numel` row-major float32 values reshaped to `dims`.
  * numel must equal the product of dims; the data is copied. */
 tr_tensor* tr_from_data(const float* data, uint64_t numel, const int64_t* dims,

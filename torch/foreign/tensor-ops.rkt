@@ -23,7 +23,7 @@
                   define/checked-out define/contract-out)
          (only-in "autograd-ops.rkt" requires-grad!)
          (only-in "contracts.rkt"
-                  arange/c argmax/c binary-arith/c index/c log/c
+                  argmax/c binary-arith/c index/c log/c
                   reduce-or-variadic/c tensor-or-real/c unary-numeric/c)
          (only-in "device-type.rkt" device/c)
          (only-in "error.rkt" check-handle)
@@ -31,8 +31,8 @@
                   device->type+index dims-rest/c dtype/c tensor-device
                   tensor-dtype tensor-shape)
          (only-in "raw/creation.rkt"
-                  tr-arange/raw
-                  tr-eye/raw
+                  tr-arange-on/raw
+                  tr-eye-on/raw
                   tr-from-data-i64-on-device/raw
                   tr-from-data-i64/raw
                   tr-from-data-on-device/raw
@@ -40,6 +40,7 @@
                   tr-full-on/raw
                   tr-ones-on/raw
                   tr-zeros-on/raw)
+         (only-in "raw/random.rkt" tr-rand-on/raw tr-randn-on/raw)
          (only-in "raw/elementwise.rkt"
                   tr-add-scalar/raw
                   tr-add/raw
@@ -98,21 +99,32 @@
     (if device (device->type+index device) (values 'keep 0)))
   (values type index (or dtype 'keep)))
 
-(define/contract-out (zeros #:device [device #f] #:dtype [dtype #f] . dims)
-  (->* [] [#:device device/c #:dtype dtype/c] #:rest shape-rest/c tensor?)
-  (define shape (shape-of dims))
-  (define-values (type index dt) (placement device dtype))
-  (wrap 'zeros
-        (tr-zeros-on/raw (list->s64vector shape) (length shape)
-                         type index dt)))
+(define (finish out requires-grad?)
+  (if requires-grad? (requires-grad! out) out))
 
-(define/contract-out (ones #:device [device #f] #:dtype [dtype #f] . dims)
-  (->* [] [#:device device/c #:dtype dtype/c] #:rest shape-rest/c tensor?)
+(define float-dtype/c (or/c 'float32 'float64))
+
+(define (shaped who raw dims device dtype requires-grad? . extra)
   (define shape (shape-of dims))
   (define-values (type index dt) (placement device dtype))
-  (wrap 'ones
-        (tr-ones-on/raw (list->s64vector shape) (length shape)
-                        type index dt)))
+  (finish (wrap who
+                (apply raw (list->s64vector shape) (length shape)
+                       (append extra (list type index dt))))
+          requires-grad?))
+
+(define/contract-out (zeros #:device [device #f] #:dtype [dtype #f]
+                            #:requires-grad? [requires-grad? #f]
+                            . dims)
+  (->* [] [#:device device/c #:dtype dtype/c #:requires-grad? boolean?]
+       #:rest shape-rest/c tensor?)
+  (shaped 'zeros tr-zeros-on/raw dims device dtype requires-grad?))
+
+(define/contract-out (ones #:device [device #f] #:dtype [dtype #f]
+                           #:requires-grad? [requires-grad? #f]
+                           . dims)
+  (->* [] [#:device device/c #:dtype dtype/c #:requires-grad? boolean?]
+       #:rest shape-rest/c tensor?)
+  (shaped 'ones tr-ones-on/raw dims device dtype requires-grad?))
 
 ;; the fill crosses the FFI as a double: an int64 fill outside the exact
 ;; range of a double would round silently, so the contract refuses it
@@ -124,44 +136,107 @@
       "an int64 fill value must be exactly representable as a double"))
 
 (define/contract-out (full value #:device [device #f] #:dtype [dtype #f]
+                           #:requires-grad? [requires-grad? #f]
                            . dims)
   (->i ([value real?])
-       (#:device [device device/c] #:dtype [dtype dtype/c])
+       (#:device [device device/c]
+        #:dtype [dtype dtype/c]
+        #:requires-grad? [requires-grad? boolean?])
        #:rest [dims shape-rest/c]
        #:pre/desc (value dtype) (fill-crosses-exactly? value dtype)
        [result tensor?])
-  (define shape (shape-of dims))
+  (shaped 'full tr-full-on/raw dims device dtype requires-grad?
+          (exact->inexact value)))
+
+(define/contract-out (randn #:device [device #f] #:dtype [dtype #f]
+                            #:requires-grad? [requires-grad? #f]
+                            . dims)
+  (->* [] [#:device device/c #:dtype float-dtype/c #:requires-grad? boolean?]
+       #:rest shape-rest/c tensor?)
+  (shaped 'randn tr-randn-on/raw dims device dtype requires-grad?))
+
+(define/contract-out (rand #:device [device #f] #:dtype [dtype #f]
+                           #:requires-grad? [requires-grad? #f]
+                           . dims)
+  (->* [] [#:device device/c #:dtype float-dtype/c #:requires-grad? boolean?]
+       #:rest shape-rest/c tensor?)
+  (shaped 'rand tr-rand-on/raw dims device dtype requires-grad?))
+
+(define (like t device dtype)
+  (values (or device (tensor-device t)) (or dtype (tensor-dtype t))))
+
+(define/contract-out (zeros-like t #:device [device #f] #:dtype [dtype #f] ;; noqa
+                                 #:requires-grad? [requires-grad? #f])
+  (->* [tensor?] [#:device device/c #:dtype dtype/c #:requires-grad? boolean?]
+       tensor?)
+  (define-values (dev dt) (like t device dtype))
+  (zeros (tensor-shape t) #:device dev #:dtype dt
+         #:requires-grad? requires-grad?))
+
+(define/contract-out (ones-like t #:device [device #f] #:dtype [dtype #f] ;; noqa
+                                #:requires-grad? [requires-grad? #f])
+  (->* [tensor?] [#:device device/c #:dtype dtype/c #:requires-grad? boolean?]
+       tensor?)
+  (define-values (dev dt) (like t device dtype))
+  (ones (tensor-shape t) #:device dev #:dtype dt
+        #:requires-grad? requires-grad?))
+
+(define/contract-out (full-like t value #:device [device #f] #:dtype [dtype #f] ;; noqa
+                                #:requires-grad? [requires-grad? #f])
+  (->* [tensor? real?]
+       [#:device device/c #:dtype dtype/c #:requires-grad? boolean?]
+       tensor?)
+  (define-values (dev dt) (like t device dtype))
+  (full value (tensor-shape t) #:device dev #:dtype dt
+        #:requires-grad? requires-grad?))
+
+(define/contract-out (randn-like t #:device [device #f] #:dtype [dtype #f] ;; noqa
+                                 #:requires-grad? [requires-grad? #f])
+  (->* [tensor?]
+       [#:device device/c #:dtype float-dtype/c #:requires-grad? boolean?]
+       tensor?)
+  (define-values (dev dt) (like t device dtype))
+  (randn (tensor-shape t) #:device dev #:dtype dt
+         #:requires-grad? requires-grad?))
+
+(define/contract-out (rand-like t #:device [device #f] #:dtype [dtype #f] ;; noqa
+                                #:requires-grad? [requires-grad? #f])
+  (->* [tensor?]
+       [#:device device/c #:dtype float-dtype/c #:requires-grad? boolean?]
+       tensor?)
+  (define-values (dev dt) (like t device dtype))
+  (rand (tensor-shape t) #:device dev #:dtype dt
+        #:requires-grad? requires-grad?))
+
+(define/contract-out (arange a [b #f] [c #f]
+                             #:device [device #f] #:dtype [dtype #f]
+                             #:requires-grad? [requires-grad? #f])
+  (->* [real?]
+       [real? real?
+        #:device device/c #:dtype dtype/c #:requires-grad? boolean?]
+       tensor?)
+  (define-values (start end step)
+    (cond
+      [(not b) (values 0 a 1)]
+      [(not c) (values a b 1)]
+      [else (values a b c)]))
   (define-values (type index dt) (placement device dtype))
-  (wrap 'full
-        (tr-full-on/raw (list->s64vector shape) (length shape)
-                        (exact->inexact value) type index dt)))
+  (finish (wrap 'arange
+                (tr-arange-on/raw (exact->inexact start)
+                                  (exact->inexact end)
+                                  (exact->inexact step)
+                                  type index dt))
+          requires-grad?))
 
-(define/contract-out (zeros-like t #:device [device #f] #:dtype [dtype #f]) ;; noqa
-  (->* [tensor?] [#:device device/c #:dtype dtype/c] tensor?)
-  (zeros (tensor-shape t)
-         #:device (or device (tensor-device t))
-         #:dtype (or dtype (tensor-dtype t))))
-
-(define/contract-out (ones-like t #:device [device #f] #:dtype [dtype #f]) ;; noqa
-  (->* [tensor?] [#:device device/c #:dtype dtype/c] tensor?)
-  (ones (tensor-shape t)
-        #:device (or device (tensor-device t))
-        #:dtype (or dtype (tensor-dtype t))))
-
-(define/contract-out arange
-  arange/c
-  (case-lambda
-    [(end) (arange 0 end 1)]
-    [(start end) (arange start end 1)]
-    [(start end step)
-     (wrap 'arange
-           (tr-arange/raw (exact->inexact start)
-                          (exact->inexact end)
-                          (exact->inexact step)))]))
-
-(define/contract-out (eye n [m n])
-  (->* [exact-nonnegative-integer?] [exact-nonnegative-integer?] tensor?)
-  (wrap 'eye (tr-eye/raw n m)))
+(define/contract-out (eye n [m n]
+                          #:device [device #f] #:dtype [dtype #f]
+                          #:requires-grad? [requires-grad? #f])
+  (->* [exact-nonnegative-integer?]
+       [exact-nonnegative-integer?
+        #:device device/c #:dtype dtype/c #:requires-grad? boolean?]
+       tensor?)
+  (define-values (type index dt) (placement device dtype))
+  (finish (wrap 'eye (tr-eye-on/raw n m type index dt)) requires-grad?))
 
 (define (nested-dims data)
   (cond
