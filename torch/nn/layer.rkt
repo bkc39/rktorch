@@ -12,7 +12,8 @@
          (only-in racket/list append-map check-duplicates remove-duplicates)
          (only-in racket/stxparam define-syntax-parameter syntax-parameterize)
          (only-in syntax/parse/define define-syntax-parse-rule)
-         (only-in "../foreign.rkt" tensor?)
+         (only-in "../foreign.rkt" prop:to tensor-dtype tensor?)
+         (only-in (submod "../foreign.rkt" unsafe) to!)
          (only-in "../private/contract.rkt"
                   define/checked-out define/contract-out)
          (only-in "buffer.rkt" Buffer?)
@@ -43,6 +44,7 @@
   (layer-named-children layer)
   (layer-mode layer)
   (layer-set-mode! layer mode)
+  #:derive-property prop:to (lambda (m dev dtype) (move-layer! m dev dtype))
   #:fallbacks
   [(define (layer-parameters self) '()) ;; noqa
    (define (layer-named-parameters self prefix) '()) ;; noqa
@@ -65,6 +67,25 @@
 
 (module+ checked
   (provide (contract-out [layer? (-> any/c boolean?)])))
+
+;; PyTorch: "nn.Module.to only accepts floating point or complex dtypes",
+;; and its convert forwards the dtype only to floating-point tensors — an
+;; int64 or bool buffer keeps its dtype and changes device alone
+(define (floating? t)
+  (and (memq (tensor-dtype t) '(float32 float64)) #t))
+
+(define (move-layer! m dev dtype)
+  (when (and dtype (not (memq dtype '(float32 float64))))
+    (raise-arguments-error 'to "a layer only moves to a floating-point dtype"
+                           "dtype" dtype))
+  (for ([t (in-list (append (parameters m) (buffers m)))])
+    (define dt (and dtype (floating? t) dtype))
+    (cond
+      [(and dev dt) (to! t dev dt)]
+      [dev (to! t dev)]
+      [dt (to! t dt)]
+      [else (void)]))
+  m)
 
 ;; Depth-first, own params before children's, in declaration order —
 ;; PyTorch's parameters() order, which seeded-init parity relies on.

@@ -1,10 +1,10 @@
 #lang racket/base
 
-(require (only-in racket/contract/base -> ->* any/c contract-out list/c or/c)
+(require (only-in racket/contract/base
+                  -> ->* any/c contract-out contract? list/c or/c)
          (only-in "../private/contract.rkt" define/checked-out))
 
-(provide (struct-out device)
-         device/c)
+(provide (struct-out device))
 
 (struct device (type index)
   #:transparent
@@ -29,7 +29,7 @@
             [device-type (-> device? (or/c 'cpu 'cuda 'mps))]
             [device-index (-> device? exact-nonnegative-integer?)])))
 
-(define device/c
+(define/checked-out device/c contract? ;; noqa
   (or/c device? 'cpu 'cuda 'mps (list/c 'cuda exact-nonnegative-integer?)))
 
 (define/checked-out (cpu-device) (-> device?) (device 'cpu 0)) ;; noqa

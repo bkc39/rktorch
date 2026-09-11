@@ -15,7 +15,8 @@
                   [max base:max]
                   [min base:min]
                   [sqrt base:sqrt])
-         (only-in racket/contract/base -> ->* non-empty-listof or/c)
+         (only-in racket/contract/base
+                  -> ->* ->i list/c non-empty-listof or/c unsupplied-arg?)
          (only-in racket/list append-map [argmax base:argmax])
          (only-in racket/math [tanh base:tanh])
          (only-in "../private/contract.rkt"
@@ -26,7 +27,9 @@
                   reduce-or-variadic/c tensor-or-real/c unary-numeric/c)
          (only-in "device-type.rkt" device/c)
          (only-in "error.rkt" check-handle)
-         (only-in "ops.rkt" device->type+index dims-rest/c tensor-shape)
+         (only-in "ops.rkt"
+                  device->type+index dims-rest/c dtype/c tensor-device
+                  tensor-dtype tensor-shape)
          (only-in "raw/creation.rkt"
                   tr-arange/raw
                   tr-eye/raw
@@ -34,9 +37,9 @@
                   tr-from-data-i64/raw
                   tr-from-data-on-device/raw
                   tr-from-data/raw
-                  tr-full/raw
-                  tr-ones/raw
-                  tr-zeros/raw)
+                  tr-full-on/raw
+                  tr-ones-on/raw
+                  tr-zeros-on/raw)
          (only-in "raw/elementwise.rkt"
                   tr-add-scalar/raw
                   tr-add/raw
@@ -83,20 +86,67 @@
 
 ;; ---------------------------------------------------------------- creation
 
-(define/contract-out (zeros . dims)
-  (->* [] #:rest dims-rest/c tensor?)
-  (wrap 'zeros (tr-zeros/raw (list->s64vector dims) (length dims))))
+(define shape-rest/c (or/c (list/c dims-rest/c) dims-rest/c))
 
-(define/contract-out (ones . dims)
-  (->* [] #:rest dims-rest/c tensor?)
-  (wrap 'ones (tr-ones/raw (list->s64vector dims) (length dims))))
+(define (shape-of dims)
+  (if (and (pair? dims) (list? (car dims))) (car dims) dims))
 
-(define/contract-out (full value . dims)
-  (->* [real?] #:rest dims-rest/c tensor?)
+;; the device and dtype go into native construction — never a default-device
+;; scope or a construct-then-move hop through another device
+(define (placement device dtype)
+  (define-values (type index)
+    (if device (device->type+index device) (values 'keep 0)))
+  (values type index (or dtype 'keep)))
+
+(define/contract-out (zeros #:device [device #f] #:dtype [dtype #f] . dims)
+  (->* [] [#:device device/c #:dtype dtype/c] #:rest shape-rest/c tensor?)
+  (define shape (shape-of dims))
+  (define-values (type index dt) (placement device dtype))
+  (wrap 'zeros
+        (tr-zeros-on/raw (list->s64vector shape) (length shape)
+                         type index dt)))
+
+(define/contract-out (ones #:device [device #f] #:dtype [dtype #f] . dims)
+  (->* [] [#:device device/c #:dtype dtype/c] #:rest shape-rest/c tensor?)
+  (define shape (shape-of dims))
+  (define-values (type index dt) (placement device dtype))
+  (wrap 'ones
+        (tr-ones-on/raw (list->s64vector shape) (length shape)
+                        type index dt)))
+
+;; the fill crosses the FFI as a double: an int64 fill outside the exact
+;; range of a double would round silently, so the contract refuses it
+(define (fill-crosses-exactly? value dtype)
+  (or (unsupplied-arg? dtype)
+      (not (eq? dtype 'int64))
+      (not (exact-integer? value))
+      (= (exact->inexact value) value)
+      "an int64 fill value must be exactly representable as a double"))
+
+(define/contract-out (full value #:device [device #f] #:dtype [dtype #f]
+                           . dims)
+  (->i ([value real?])
+       (#:device [device device/c] #:dtype [dtype dtype/c])
+       #:rest [dims shape-rest/c]
+       #:pre/desc (value dtype) (fill-crosses-exactly? value dtype)
+       [result tensor?])
+  (define shape (shape-of dims))
+  (define-values (type index dt) (placement device dtype))
   (wrap 'full
-        (tr-full/raw (list->s64vector dims)
-                     (length dims)
-                     (exact->inexact value))))
+        (tr-full-on/raw (list->s64vector shape) (length shape)
+                        (exact->inexact value) type index dt)))
+
+(define/contract-out (zeros-like t #:device [device #f] #:dtype [dtype #f]) ;; noqa
+  (->* [tensor?] [#:device device/c #:dtype dtype/c] tensor?)
+  (zeros (tensor-shape t)
+         #:device (or device (tensor-device t))
+         #:dtype (or dtype (tensor-dtype t))))
+
+(define/contract-out (ones-like t #:device [device #f] #:dtype [dtype #f]) ;; noqa
+  (->* [tensor?] [#:device device/c #:dtype dtype/c] tensor?)
+  (ones (tensor-shape t)
+        #:device (or device (tensor-device t))
+        #:dtype (or dtype (tensor-dtype t))))
 
 (define/contract-out arange
   arange/c

@@ -10,7 +10,7 @@
          (only-in "foreign/structs.rkt" tensor-free!)
          (submod "foreign/structs.rkt" checked)
          (except-in "foreign/ops.rkt"
-                    device->type+index dims-rest/c
+                    device->type+index dims-rest/c dtype/c
                     item to-dtype tensor-dtype to-device tensor-device
                     tensor-shape tensor->list)
          (submod "foreign/ops.rkt" checked)
@@ -49,6 +49,8 @@
 (provide zeros
          ones
          full
+         zeros-like
+         ones-like
          arange
          eye
          tensor)
@@ -167,7 +169,12 @@
          default-device
          call-with-default-device
          to-device
-         tensor-device)
+         tensor-device
+         to
+         to-able?
+         prop:to
+         device/c
+         dtype/c)
 
 (provide requires-grad!
          requires-grad?
@@ -184,6 +191,8 @@
          zero-grad!)
 
 (module+ unsafe
+  (require (submod "foreign/ops.rkt" unsafe))
   (provide
+   to!
    (contract-out
     [tensor-free! (-> tensor? void?)])))
