@@ -8,27 +8,11 @@
 #include <sstream>
 #include <string>
 
+#include "torchrkt/detail/device.hpp"
+#include "torchrkt/detail/dtype.hpp"
 #include "torchrkt/detail/error.hpp"
 #include "torchrkt/detail/op_call.hpp"
 #include "torchrkt/detail/tensor_handle.hpp"
-
-namespace {
-
-torch::ScalarType to_scalar_type(tr_dtype dtype) {
-  switch (dtype) {
-    case TR_DTYPE_FLOAT32:
-      return torch::kFloat32;
-    case TR_DTYPE_FLOAT64:
-      return torch::kFloat64;
-    case TR_DTYPE_INT64:
-      return torch::kInt64;
-    case TR_DTYPE_BOOL:
-      return torch::kBool;
-  }
-  throw std::invalid_argument("unknown tr_dtype");
-}
-
-}  // namespace
 
 extern "C" {
 
@@ -159,8 +143,9 @@ tr_tensor* tr_tensor_to_dtype(const tr_tensor* t, tr_dtype dtype) {
   if (!t) {
     return torchrkt::null_arg("tr_tensor_to_dtype");
   }
-  return torchrkt::alloc_result(
-      "tr_tensor_to_dtype", [&] { return t->value.to(to_scalar_type(dtype)); });
+  return torchrkt::alloc_result("tr_tensor_to_dtype", [&] {
+    return torchrkt::convert(t->value, TR_DEVICE_KEEP, 0, dtype);
+  });
 }
 
 int tr_tensor_print(const tr_tensor* t, uint64_t buffer_capacity,

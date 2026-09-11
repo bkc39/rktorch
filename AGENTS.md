@@ -49,8 +49,13 @@ CPU-first; float32 + inferred int64 (#44). From `torch`:
   mps-device cuda-available? cuda-if-available cuda-device-count
   mps-available? mps-if-available accelerator-if-available
   set-default-device! default-device
-  with-default-device to-device tensor-device` — `'mps` is accepted
-  wherever `'cuda` is (#13); CPU and MPS are single devices (index 0)
+  with-default-device to to-device to-dtype tensor-device` — `'mps` is
+  accepted wherever `'cuda` is (#13); CPU and MPS are single devices
+  (index 0); `to` is PyTorch's `.to` (device, dtype, or both; identity
+  when nothing changes; layers move in place through `prop:to`, which
+  `gen:layer` derives, #54), and `to!` in the `unsafe` submodule is the
+  in-place tensor primitive behind it; `device/c` and `dtype/c` are
+  exported for user contracts
 - memory: `native-memory-use` (per-device outstanding native bytes from
   the #37 ledger), `cuda-memory-stats` / `cuda-empty-cache!` /
   `mps-empty-cache!` (the caching allocators' own gauges + release, #51),
@@ -60,7 +65,11 @@ CPU-first; float32 + inferred int64 (#44). From `torch`:
   runs, captured failure messages, and live ledger entries; also dumped at
   exit under `RKTORCH_MEM_TRACE`), `tensor-free!` (explicit synchronous
   release)
-- creation: `zeros ones full arange eye tensor rand` (+ in-place `uniform!`)
+- creation: `zeros ones full arange eye tensor rand` (+ in-place `uniform!`);
+  `zeros`/`ones`/`full` take dims as rest args or one list and `#:device` /
+  `#:dtype` chosen at native construction (never construct-then-move);
+  `zeros-like` / `ones-like` inherit the reference's shape, device, dtype
+  (the first slice of #56)
 - shape: `reshape view transpose permute squeeze unsqueeze cat stack`
 - elementwise: `add sub mul div pow neg exp log sqrt relu sigmoid tanh`
   (binary ops take a real on either side)
