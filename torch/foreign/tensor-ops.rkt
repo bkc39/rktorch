@@ -85,7 +85,6 @@
 
 ;; ---------------------------------------------------------------- creation
 
-;; torch.zeros(2, 3) and torch.zeros((2, 3)): dims as rest args or one list
 (define shape-rest/c (or/c (list/c dims-rest/c) dims-rest/c))
 
 (define (shape-of dims)

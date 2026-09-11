@@ -135,8 +135,10 @@ where its parameter does, however the parameter got there.
 @defproc*[([(to! [t tensor?] [target (or/c device/c dtype/c)]) tensor?]
            [(to! [t tensor?] [target device/c] [dtype dtype/c]) tensor?])]{
 The in-place primitive behind a layer move: rebinds @racket[t]'s storage to
-the moved copy and returns @racket[t]. Every alias of @racket[t] observes the
-change, which is why it lives in the unsafe submodule. The tensor's ledger
+the moved copy and returns @racket[t]. Every reference to @racket[t]
+observes the change, which is why it lives in the unsafe submodule; a view
+or detached copy made earlier is a separate tensor and keeps the old
+storage, device, and dtype. The tensor's ledger
 entry is re-accounted under the same handle, so @racket[native-memory-use]
 reports the new device and byte count; the old storage is released by
 libtorch at once when nothing else references it.
