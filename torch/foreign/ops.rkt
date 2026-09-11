@@ -16,8 +16,8 @@
                   s64vector-ref
                   s64vector?)
          (only-in racket/contract/base
-                  -> ->* ->i any any/c cons/c contract-out list/c listof none/c
-                  or/c)
+                  -> ->* ->i any any/c cons/c contract-out contract? list/c
+                  listof none/c or/c)
          (only-in "../private/contract.rkt"
                   define/checked-out define/contract-out)
          (only-in "device-type.rkt"
@@ -64,8 +64,6 @@
 
 (provide device->type+index
          dims-rest/c
-         dtype/c
-         prop:to
          with-default-device)
 
 (module+ unsafe
@@ -78,7 +76,7 @@
 
 (define dtype-symbols '(float32 float64 int64 bool))
 
-(define dtype/c (apply or/c dtype-symbols))
+(define/checked-out dtype/c contract? (apply or/c dtype-symbols))
 
 ;; Python's argument order: a dtype target stands alone, a device target may
 ;; carry a dtype — the shape gets contract blame, not a runtime error
@@ -268,13 +266,15 @@
            (equal? (type+index->device type index) (tensor-device t)))
        (or (eq? dtype 'keep) (eq? dtype (tensor-dtype t)))))
 
-(define-values (prop:to to-able?* to-ref)
+(define-values (prop:to* to-able?* to-ref)
   (make-struct-type-property
    'to
    (lambda (v _info)
      (unless (and (procedure? v) (procedure-arity-includes? v 3))
        (raise-argument-error 'prop:to "(procedure-arity-includes/c 3)" v))
      v)))
+
+(define/contract-out prop:to struct-type-property? prop:to*) ;; noqa
 
 (define/contract-out (to x target [dtype #f]) ;; noqa
   (->i ([x (or/c tensor? to-able?)] [target (or/c device/c dtype/c)])
