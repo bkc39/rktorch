@@ -335,6 +335,14 @@ hand-written @racket[gen:layer] implementation that defines no mode
 methods is stateless and reports @racket[#t].
 }
 
+@defproc[(layer-set-training! [m layer?] [training? boolean?]) void?]{
+The @racket[gen:layer] method behind @racket[train!] and @racket[eval!]:
+sets @racket[m]'s own mode and recurses into its children.  A
+hand-written layer that keeps a mode of its own defines this method and
+@racket[layer-training?]; @racket[call-with-eval-mode] restores such a
+layer through them.  A layer that defines neither is stateless.
+}
+
 @defproc[(call-with-eval-mode [m layer?] [thunk (-> any)]) any]{
 Records the mode of every layer reachable from @racket[m], puts them all
 in evaluation mode, calls @racket[thunk], and restores each layer's own

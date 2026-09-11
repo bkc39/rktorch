@@ -447,6 +447,20 @@
     (define wrapped (procedure->Layer values))
     (eval! wrapped)
     (check-false (layer-training? wrapped) "a procedure layer has its own mode")
+    (struct Toggle ([on? #:mutable])
+      #:methods gen:layer
+      [(define (layer-forward self . inputs) (car inputs))
+       (define (layer-set-training! self training?)
+         (set-Toggle-on?! self training?))
+       (define (layer-training? self) (Toggle-on? self))])
+    (define t1 (Toggle #t))
+    (define t2 (Toggle #f))
+    (define host (Sequential t1 t2))
+    (in-eval-mode host
+      (check-false (layer-training? t1))
+      (check-false (layer-training? t2)))
+    (check-true (layer-training? t1) "a hand-written mode is restored")
+    (check-false (layer-training? t2) "a hand-written eval mode is kept")
     (check-exn #rx"unbound identifier"
                (lambda ()
                  (convert-compile-time-error
