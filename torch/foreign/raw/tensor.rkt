@@ -22,6 +22,7 @@
          tr-tensor-copy-data-i64/raw
          tr-tensor-copy-data/raw
          tr-tensor-dtype/raw
+         tr-tensor-to-dtype/raw
          tr-tensor-print/raw
          tr-tensor-item/raw
          _tr-dtype)
@@ -110,6 +111,12 @@
         -> (rc : _int)
         -> (values rc out))
   #:c-id tr_tensor_item)
+
+;; single-axis compatibility binding, as tr-tensor-to-device/raw in device.rkt
+(define-torch tr-tensor-to-dtype/raw
+  (_fun (t : _Tensor) (dtype : _tr-dtype) -> _Tensor/null)
+  #:c-id tr_tensor_to_dtype
+  #:wrap tensor-allocator)
 
 (define-torch tr-tensor-print/raw
   (_fun (t : _Tensor)

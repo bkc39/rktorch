@@ -19,6 +19,7 @@
          tr-cuda-memory-stats/raw
          tr-set-default-device/raw
          tr-get-default-device/raw
+         tr-tensor-to-device/raw
          tr-tensor-to/raw
          tr-tensor-to!/raw
          tr-tensor-device/raw)
@@ -54,6 +55,13 @@
         -> (rc : _int)
         -> (values rc type index))
   #:c-id tr_get_default_device)
+
+;; single-axis compatibility binding: the direct-FFI layer is a documented
+;; access level (AGENTS.md), so the pre-#54 name stays
+(define-torch tr-tensor-to-device/raw
+  (_fun (t : _Tensor) (type : _tr-device-type) (index : _int64) -> _Tensor/null)
+  #:c-id tr_tensor_to_device
+  #:wrap tensor-allocator)
 
 (define-torch tr-tensor-to/raw
   (_fun (t : _Tensor)

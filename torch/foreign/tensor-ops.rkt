@@ -118,6 +118,14 @@
                            . dims)
   (->* [real?] [#:device device/c #:dtype dtype/c] #:rest shape-rest/c
        tensor?)
+  ;; the fill crosses the FFI as a double: an int64 fill outside the exact
+  ;; range of a double would round silently, so it is refused instead
+  (when (and (eq? dtype 'int64)
+             (exact-integer? value)
+             (not (= value (inexact->exact (exact->inexact value)))))
+    (raise-arguments-error 'full
+                           "an int64 fill value must be exactly representable as a double"
+                           "value" value))
   (define shape (shape-of dims))
   (define-values (type index dt) (placement device dtype))
   (wrap 'full

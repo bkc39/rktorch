@@ -25,6 +25,10 @@
     (check-equal? (tensor-device (zeros-like ref)) (cpu-device))
     (check-equal? (tensor-dtype (zeros-like ref #:dtype 'int64)) 'int64)
     (check-equal? (tensor->list (ones-like (zeros 3))) '(1.0 1.0 1.0))
+    (check-equal? (tensor->list (full 9007199254740992 1 #:dtype 'int64))
+                  '(9007199254740992) "2^53 survives the double crossing")
+    (check-exn #rx"exactly representable as a double"
+               (lambda () (full 9007199254740993 1 #:dtype 'int64)))
     (check-exn exn:fail:contract? (lambda () (zeros 2 #:dtype 'float16)))
     (check-exn exn:fail:contract? (lambda () (zeros '(2) 3)))
     (check-equal? (tensor->list (arange 3)) '(0.0 1.0 2.0))
