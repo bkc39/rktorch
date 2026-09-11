@@ -72,6 +72,8 @@ jobs:
       # linter runs on the same nix-provided Racket as the rest of the build.
       - name: Resyntax lint
         env:
+          # on a master push the empty diff against origin/master reports
+          # quickly; a skipped required check never reports and stalls merges
           BASE_REF: ${{ github.event.pull_request.base.sha || 'origin/master' }}
         run: |
           nix develop .#ci --command bash -c '
