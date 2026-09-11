@@ -202,9 +202,9 @@ TEST(TorchrktCreationOn, PlacesAndTypesAtConstruction) {
   EXPECT_EQ(dtype_of(f.t), TR_DTYPE_FLOAT64);
   EXPECT_EQ(cpu_data_of(f.t), std::vector<float>(6, 7.0F));
   EXPECT_EQ(tr_zeros_on(nullptr, 2, TR_DEVICE_CPU, 0, TR_DTYPE_KEEP), nullptr);
-  EXPECT_EQ(tr_zeros_on(dims.data(), 2, TR_DEVICE_KEEP, 0,
-                        static_cast<tr_dtype>(9)),
-            nullptr);
+  EXPECT_EQ(
+      tr_zeros_on(dims.data(), 2, TR_DEVICE_KEEP, 0, static_cast<tr_dtype>(9)),
+      nullptr);
 }
 
 TEST(TorchrktCreationOn, CudaPlacement) {
