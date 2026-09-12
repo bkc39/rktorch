@@ -45,7 +45,7 @@
                   [native-memory-use raw:native-memory-use]
                   oom-retry/status
                   reaccount!)
-         (only-in "raw/random.rkt" tr-rand/raw tr-randn/raw tr-tensor-uniform!/raw)
+         (only-in "raw/random.rkt" tr-tensor-uniform!/raw)
          (only-in "raw/tensor.rkt"
                   dtype-code->symbol
                   tr-tensor-copy-data-f64/raw
@@ -89,16 +89,6 @@
 (define/contract-out (manual-seed! seed) (-> exact-nonnegative-integer? void?)
   (check-ok (tr-manual-seed/raw seed) 'manual-seed!)
   (void))
-
-(define/contract-out (randn . dims)
-  (->* [] #:rest dims-rest/c tensor?)
-  (wrap-tensor
-   (check-handle 'randn (tr-randn/raw (list->s64vector dims) (length dims)))))
-
-(define/contract-out (rand . dims)
-  (->* [] #:rest dims-rest/c tensor?)
-  (wrap-tensor
-   (check-handle 'rand (tr-rand/raw (list->s64vector dims) (length dims)))))
 
 (define/contract-out (uniform! t low high) (-> tensor? real? real? void?)
   (check-ok (tr-tensor-uniform!/raw t

@@ -34,8 +34,7 @@
          reduce-or-variadic/c
          argmax/c
          compare/c
-         flatten/c
-         arange/c)
+         flatten/c)
 
 (define (slice-spec? x)
   (define (bound? b) (or (not b) (exact-integer? b)))
@@ -122,8 +121,3 @@
        ([start (v) (if (tensor? v) index/c none/c)]
         [end (v) (if (tensor? v) index/c none/c)])
        [result any/c]))
-
-(define arange/c
-  (case-> (-> real? tensor?)
-          (-> real? real? tensor?)
-          (-> real? real? real? tensor?)))

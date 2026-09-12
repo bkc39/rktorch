@@ -6,7 +6,9 @@
          (only-in "syntax.rkt" _Tensor/null define-torch)
          (only-in "tensor.rkt" _tr-dtype))
 
-(provide tr-zeros/raw
+(provide tr-arange-on/raw
+         tr-eye-on/raw
+         tr-zeros/raw
          tr-zeros-on/raw
          tr-ones/raw
          tr-ones-on/raw
@@ -63,6 +65,27 @@
         (dtype : _tr-dtype)
         -> _Tensor/null)
   #:c-id tr_full_on
+  #:wrap tensor-allocator)
+
+(define-torch tr-arange-on/raw
+  (_fun (start : _double)
+        (end : _double)
+        (step : _double)
+        (type : _tr-device-type)
+        (index : _int64)
+        (dtype : _tr-dtype)
+        -> _Tensor/null)
+  #:c-id tr_arange_on
+  #:wrap tensor-allocator)
+
+(define-torch tr-eye-on/raw
+  (_fun (n : _int64)
+        (m : _int64)
+        (type : _tr-device-type)
+        (index : _int64)
+        (dtype : _tr-dtype)
+        -> _Tensor/null)
+  #:c-id tr_eye_on
   #:wrap tensor-allocator)
 
 (define-torch tr-arange/raw

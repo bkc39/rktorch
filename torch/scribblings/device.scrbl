@@ -3,12 +3,13 @@
 @(require (for-label racket/base
                      racket/contract
                      (only-in torch
-                              cpu-device cuda-device device device/c device?
-                              dtype dtype/c full mps-device
-                              native-memory-use ones
-                              ones-like prop:to tensor tensor-device
-                              tensor-dtype tensor? to to-able? to-device
-                              to-dtype with-default-device zeros zeros-like ~>)
+                              arange cpu-device cuda-device device device/c
+                              device? dtype dtype/c eye full full-like
+                              mps-device native-memory-use ones ones-like
+                              prop:to rand rand-like randn randn-like tensor
+                              tensor-device tensor-dtype tensor? to to-able?
+                              to-device to-dtype with-default-device zeros
+                              zeros-like ~>)
                      (only-in torch/nn
                               Buffer Linear Parameter adam buffers gen:layer
                               layer? load-state! parameters step!)))
@@ -108,24 +109,38 @@ Equivalent to @racket[(to t dtype)].
 @section{Placement at construction}
 
 @defproc*[([(zeros [dim exact-nonnegative-integer?] ...
-                   [#:device device device/c] [#:dtype dtype dtype/c]) tensor?]
+                   [#:device device device/c] [#:dtype dtype dtype/c]
+                   [#:requires-grad? requires-grad? boolean? #f]) tensor?]
            [(zeros [dims (listof exact-nonnegative-integer?)]
-                   [#:device device device/c] [#:dtype dtype dtype/c]) tensor?])]{
+                   [#:device device device/c] [#:dtype dtype dtype/c]
+                   [#:requires-grad? requires-grad? boolean? #f]) tensor?])]{
 A tensor of zeros, with the dims as rest arguments or as one list, as
 @tt{torch.zeros(2, 3)} and @tt{torch.zeros((2, 3))}. The device and dtype
 default to the process default device and @racket['float32]; when given they
 are chosen at native construction, so a tensor never takes a hop through
-another device on its way to where it will live. @racket[ones] and
-@racket[full] take the same arguments.
+another device on its way to where it will live. With
+@racket[#:requires-grad?] the result is marked as a leaf after construction,
+which an integer dtype refuses as PyTorch does. @racket[ones], @racket[full],
+@racket[randn], and @racket[rand] take the same arguments; the two random
+constructors accept only @racket['float32] or @racket['float64] and draw
+from the chosen device's generator.
+
+@racket[arange] and @racket[eye] take the same three keywords after their
+positional arguments. @racket[arange] stays @racket['float32] by default, as
+before; @racket[(arange n #:dtype 'int64)] is the index vector
+@tt{torch.arange(n)} produces.
 }
 
 @defproc[(zeros-like [t tensor?]
-                     [#:device device device/c] [#:dtype dtype dtype/c])
+                     [#:device device device/c] [#:dtype dtype dtype/c]
+                     [#:requires-grad? requires-grad? boolean? #f])
          tensor?]{
 Zeros with @racket[t]'s shape, device, and dtype unless overridden, as
-@tt{torch.zeros_like}. @racket[ones-like] is the same for ones. Optimizer
-state is the typical use: a moment created by @racket[zeros-like] lives
-where its parameter does, however the parameter got there.
+@tt{torch.zeros_like}. @racket[ones-like], @racket[full-like] (which takes
+the fill value after @racket[t]), @racket[randn-like], and @racket[rand-like]
+are the same for their constructors. Optimizer state is the typical use: a
+moment created by @racket[zeros-like] lives where its parameter does,
+however the parameter got there.
 }
 
 @section{Unsafe}

@@ -14,8 +14,10 @@
                     item to-dtype tensor-dtype to-device tensor-device
                     tensor-shape tensor->list)
          (submod "foreign/ops.rkt" checked)
+         (except-in "foreign/creation-ops.rkt" tensor)
+         (submod "foreign/creation-ops.rkt" checked)
          (except-in "foreign/tensor-ops.rkt"
-                    reshape unsqueeze tensor sum matmul add sub mul div neg)
+                    reshape unsqueeze sum matmul add sub mul div neg)
          (submod "foreign/tensor-ops.rkt" checked)
          "foreign/operators.rkt"
          "foreign/nn-promoted.rkt"
@@ -51,6 +53,9 @@
          full
          zeros-like
          ones-like
+         full-like
+         randn-like
+         rand-like
          arange
          eye
          tensor)

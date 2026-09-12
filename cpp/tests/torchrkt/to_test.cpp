@@ -222,6 +222,31 @@ TEST(TorchrktCreationOn, PlacesAndTypesAtConstruction) {
       nullptr);
 }
 
+TEST(TorchrktCreationOn, ArangeEyeAndRandomTakeOptions) {
+  const Handle ar(
+      tr_arange_on(0.0, 3.0, 1.0, TR_DEVICE_KEEP, 0, TR_DTYPE_INT64));
+  EXPECT_EQ(dtype_of(ar.t), TR_DTYPE_INT64);
+  EXPECT_EQ(cpu_data_of(ar.t), (std::vector<float>{0.0F, 1.0F, 2.0F}));
+  const Handle ey(tr_eye_on(2, 2, TR_DEVICE_CPU, 0, TR_DTYPE_FLOAT64));
+  EXPECT_EQ(dtype_of(ey.t), TR_DTYPE_FLOAT64);
+  EXPECT_EQ(cpu_data_of(ey.t), (std::vector<float>{1.0F, 0.0F, 0.0F, 1.0F}));
+  const std::vector<int64_t> dims = {2, 3};
+  const Handle n(
+      tr_randn_on(dims.data(), 2, TR_DEVICE_KEEP, 0, TR_DTYPE_FLOAT64));
+  EXPECT_EQ(dtype_of(n.t), TR_DTYPE_FLOAT64);
+  EXPECT_EQ(cpu_data_of(n.t).size(), 6U);
+  const Handle r(tr_rand_on(dims.data(), 2, TR_DEVICE_CPU, 0, TR_DTYPE_KEEP));
+  EXPECT_EQ(dtype_of(r.t), TR_DTYPE_FLOAT32);
+  for (const float v : cpu_data_of(r.t)) {
+    EXPECT_GE(v, 0.0F);
+    EXPECT_LT(v, 1.0F);
+  }
+  // normals have no integer kernel: the request fails cleanly
+  EXPECT_EQ(tr_randn_on(dims.data(), 2, TR_DEVICE_KEEP, 0, TR_DTYPE_INT64),
+            nullptr);
+  EXPECT_EQ(tr_rand_on(nullptr, 2, TR_DEVICE_KEEP, 0, TR_DTYPE_KEEP), nullptr);
+}
+
 TEST(TorchrktCreationOn, CudaPlacement) {
   if (tr_cuda_is_available() == 0) {
     GTEST_SKIP() << "no CUDA device visible";
@@ -230,6 +255,25 @@ TEST(TorchrktCreationOn, CudaPlacement) {
   const Handle z(tr_zeros_on(dims.data(), 1, TR_DEVICE_CUDA, 0, TR_DTYPE_KEEP));
   EXPECT_EQ(device_type_of(z.t), TR_DEVICE_CUDA);
   EXPECT_EQ(cpu_data_of(z.t), std::vector<float>(4, 0.0F));
+  // every constructor honours the device at construction
+  const Handle ar(
+      tr_arange_on(0.0, 4.0, 1.0, TR_DEVICE_CUDA, 0, TR_DTYPE_INT64));
+  EXPECT_EQ(device_type_of(ar.t), TR_DEVICE_CUDA);
+  EXPECT_EQ(dtype_of(ar.t), TR_DTYPE_INT64);
+  EXPECT_EQ(cpu_data_of(ar.t), (std::vector<float>{0.0F, 1.0F, 2.0F, 3.0F}));
+  const Handle ey(tr_eye_on(2, 2, TR_DEVICE_CUDA, 0, TR_DTYPE_KEEP));
+  EXPECT_EQ(device_type_of(ey.t), TR_DEVICE_CUDA);
+  EXPECT_EQ(cpu_data_of(ey.t), (std::vector<float>{1.0F, 0.0F, 0.0F, 1.0F}));
+  const Handle n(
+      tr_randn_on(dims.data(), 1, TR_DEVICE_CUDA, 0, TR_DTYPE_FLOAT64));
+  EXPECT_EQ(device_type_of(n.t), TR_DEVICE_CUDA);
+  EXPECT_EQ(dtype_of(n.t), TR_DTYPE_FLOAT64);
+  const Handle r(tr_rand_on(dims.data(), 1, TR_DEVICE_CUDA, 0, TR_DTYPE_KEEP));
+  EXPECT_EQ(device_type_of(r.t), TR_DEVICE_CUDA);
+  for (const float v : cpu_data_of(r.t)) {
+    EXPECT_GE(v, 0.0F);
+    EXPECT_LT(v, 1.0F);
+  }
 }
 
 }  // namespace

@@ -65,11 +65,14 @@ CPU-first; float32 + inferred int64 (#44). From `torch`:
   runs, captured failure messages, and live ledger entries; also dumped at
   exit under `RKTORCH_MEM_TRACE`), `tensor-free!` (explicit synchronous
   release)
-- creation: `zeros ones full arange eye tensor rand` (+ in-place `uniform!`);
-  `zeros`/`ones`/`full` take dims as rest args or one list and `#:device` /
-  `#:dtype` chosen at native construction (never construct-then-move);
-  `zeros-like` / `ones-like` inherit the reference's shape, device, dtype
-  (the first slice of #56)
+- creation: `zeros ones full arange eye tensor rand randn` (+ in-place
+  `uniform!`); every constructor takes `#:device` / `#:dtype` chosen at
+  native construction (never construct-then-move) and `#:requires-grad?`
+  applied after it (integer dtypes refuse it as torch does); the shape
+  constructors take dims as rest args or one list; `zeros-like` /
+  `ones-like` / `full-like` / `randn-like` / `rand-like` inherit the
+  reference's shape, device, dtype unless overridden (#56); `arange` stays
+  float32 by default (its int64 inference is the open remainder of #56)
 - shape: `reshape view transpose permute squeeze unsqueeze cat stack`
 - elementwise: `add sub mul div pow neg exp log sqrt relu sigmoid tanh`
   (binary ops take a real on either side)
@@ -249,8 +252,11 @@ module's full export set (`racket/runtime-path`, `syntax/parse/pre`).
 - `info.rkt` — package metadata + native-library pre-install hook.
 - `main.rkt` — high-level facade (re-exports `foreign.rkt`).
 - `foreign.rkt` — the contracted layer + the `unsafe` submodule.
-- `foreign/ops.rkt` — version/seed/randn + marshalling (`item`, `to-dtype`,
-  `rand`, `uniform!`); `foreign/tensor-ops.rkt` — the op tranche (and the
+- `foreign/ops.rkt` — version/seed + marshalling (`item`, `to-dtype`,
+  `uniform!`, `to`); `foreign/creation-ops.rkt` — the constructors
+  (`zeros` .. `rand`, `tensor`, `arange`, `eye`, the `*-like` family, with
+  placement and `#:requires-grad?` handled once); `foreign/tensor-ops.rkt`
+  — the op tranche (and the
   shadow-dispatch convention); `foreign/autograd-ops.rkt` — autograd +
   `with-no-grad` + in-place ops; `foreign/structs.rkt` — the `tensor`
   wrapper (`prop:cpointer`, shape cached at wrap time, allocator/deallocator
