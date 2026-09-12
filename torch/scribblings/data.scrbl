@@ -4,9 +4,9 @@
                      racket/contract
                      racket/sequence
                      (only-in torch
-                              draw-seed generator? index-select make-generator
-                              narrow randn randperm select stack tensor
-                              tensor?)
+                              device? draw-seed generator? index-select
+                              make-generator narrow randn randperm select
+                              stack tensor tensor?)
                      torch/data/loader))
 
 @title{Datasets and loaders}
@@ -33,11 +33,18 @@ takes. One traversal of a loader is one epoch.
 
 @defthing[gen:dataset any/c]{
 The generic interface of a map-style dataset, with methods
-@racket[dataset-length], @racket[dataset-ref], and @racket[dataset-batch].
-A structure implementing the first two gets @racket[dataset-batch] by
-default: the items at the indices, each as a list of its fields, handed to
-the collate. A dataset over tensors overrides it with one native op per
-batch.
+@racket[dataset-length], @racket[dataset-ref], @racket[dataset-batch], and
+@racket[dataset-device]. A structure implementing the first two gets
+@racket[dataset-batch] by default: the items at the indices, each as a
+list of its fields, handed to the collate. A dataset over tensors overrides
+it with one native op per batch.
+}
+
+@defproc[(dataset-device [ds dataset?]) (or/c device? #f)]{
+Where the dataset's batches live, or @racket[#f] when it has no single
+device. A loader moves each epoch's permutation there once, so no batch
+waits on a host-to-device copy. The default is @racket[#f]; a
+@racket[tensor-dataset] answers its first tensor's device.
 }
 
 @defproc[(dataset? [v any/c]) boolean?]{
@@ -65,10 +72,11 @@ an int64 tensor when a loader cuts it from a permutation.
 @defproc[(tensor-dataset [t tensor?] [more tensor?] ...) dataset?]{
 A dataset over one or more tensors sharing their first dimension, as
 @tt{TensorDataset}: item @racket[i] is @racket[(select t 0 i)] per tensor.
-Its batches never go through items: a contiguous ascending run of indices
-is a @racket[narrow] of each tensor, and any other run is one
-@racket[index-select] with the indices moved to the tensor's device. Keep
-the tensors on the training device and a batch costs no host copy.
+With @racket[default-collate], its batches never go through items: a
+contiguous ascending run of indices is a @racket[narrow] of each tensor,
+and any other run is one @racket[index-select] with the indices on the
+tensor's device. Keep the tensors on the training device and a batch costs
+no host copy. A custom collate sees the items, as @tt{collate_fn} does.
 }
 
 @defproc[(tensor-dataset? [v any/c]) boolean?]{

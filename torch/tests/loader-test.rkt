@@ -2,8 +2,8 @@
 
 (module+ test
   (require rackunit
-           "../main.rkt"
-           "../data/loader.rkt")
+           "../data/loader.rkt"
+           "../main.rkt")
 
   (define xs (reshape (arange 12) 6 2))
   (define ys (arange 6 #:dtype 'int64))
@@ -49,7 +49,16 @@
     (check-equal? (tensor->list yt) '(4 1) "an index tensor gathers too")
     (check-exn exn:fail:contract? (lambda () (tensor-dataset xs (ones 5))))
     (check-exn #rx"share the first dimension"
-               (lambda () (tensor-dataset xs (ones 5 2)))))
+               (lambda () (tensor-dataset xs (ones 5 2))))
+    (check-equal? (format "~a" ds) "#<tensor-dataset>")
+    ;; a custom collate sees the items, as DataLoader's collate_fn does
+    (define counted
+      (dataloader ds #:batch-size 4
+                  #:collate (lambda (items)
+                              (values (length items)
+                                      (map (lambda (it) (item (cadr it))) items)))))
+    (check-equal? (for/list ([(n ids) (in-dataloader counted)]) (cons n ids))
+                  '((4 0 1 2 3) (2 4 5))))
 
   (test-case "a hand-written dataset goes through dataset-ref and collate"
     (struct Squares (n)
@@ -121,6 +130,27 @@
     (check-equal? (tensor->list (car batch))
                   (apply append (for/list ([i (in-list expected)])
                                   (tensor->list (select xs 0 i))))))
+
+  (test-case "a device-resident dataset batches on its device"
+    (for ([dev (in-list (list (and (cuda-available?) (cuda-device))
+                              (and (mps-available?) (mps-device))))]
+          #:when dev)
+      (define ds (tensor-dataset (to xs dev) (to ys dev)))
+      (define loader
+        (dataloader ds #:batch-size 4 #:shuffle? #t #:generator (make-generator 3)))
+      (define seen
+        (for/list ([(xb yb) (in-dataloader loader)])
+          (check-equal? (tensor-device xb) dev)
+          (check-equal? (tensor-device yb) dev)
+          (tensor->list yb)))
+      (check-equal? (sort (apply append seen) <) '(0 1 2 3 4 5))
+      (check-equal? seen
+                    (for/list ([(_xb yb) (in-dataloader
+                                          (dataloader (tensor-dataset xs ys)
+                                                      #:batch-size 4 #:shuffle? #t
+                                                      #:generator (make-generator 3)))])
+                      (tensor->list yb))
+                    "the permutation is drawn on the CPU whatever the device")))
 
   (test-case "in-epochs numbers epochs and continues the stream"
     (define ds (tensor-dataset xs ys))
