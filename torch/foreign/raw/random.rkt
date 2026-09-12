@@ -1,6 +1,7 @@
 #lang racket/base
 
-;; Everything here draws the global RNG stream: no-retry wrap only.
+;; Tensor draws take the global stream unless handed a generator: no-retry
+;; wrap only, since a retried draw would advance the stream.
 
 (require (only-in ffi/unsafe
                   _double _fun _int _int64 _ptr _uint64 _void
