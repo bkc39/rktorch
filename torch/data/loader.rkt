@@ -1,25 +1,26 @@
 #lang racket/base
 
 (require (only-in racket/contract/base
-                  -> ->* any any/c contract-out non-empty-listof)
+                  -> ->* any any/c contract-out listof non-empty-listof or/c)
          (only-in racket/generic define-generics)
          (only-in racket/list first)
          (only-in "../foreign.rkt"
-                  draw-seed generator? index-select make-generator narrow
-                  randperm select stack tensor tensor-device tensor-shape
-                  tensor->list tensor? to)
+                  device? draw-seed generator? index-select make-generator
+                  narrow randperm select stack tensor tensor-device
+                  tensor-shape tensor->list tensor? to)
          (only-in "../private/contract.rkt" define/contract-out))
 
 (provide gen:dataset
-         dataset-length
-         dataset-ref
-         dataset-batch
-         dataset-device
-         (contract-out [dataset? (-> any/c boolean?)]))
+         (contract-out
+          [dataset? (-> any/c boolean?)]
+          [dataset-length (-> dataset? exact-nonnegative-integer?)]
+          [dataset-ref (-> dataset? exact-nonnegative-integer? any)]
+          [dataset-batch (-> dataset? indices/c collate/c any)]
+          [dataset-device (-> dataset? (or/c device? #f))]))
 
-;; A map-style dataset: an item per index, and a batch for a run of indices.
-;; The batch method is what a loader calls; the fallback collates the items
-;; one by one, and tensor-backed datasets override it with one native op.
+(define indices/c (or/c (listof exact-nonnegative-integer?) tensor?))
+(define collate/c (-> (non-empty-listof list?) any))
+
 (define-generics dataset
   (dataset-length dataset)
   (dataset-ref dataset i)
@@ -99,7 +100,6 @@
 
 (provide (contract-out [tensor-dataset? (-> any/c boolean?)]))
 
-;; torch's default_collate for tensor fields: one stack per field
 (define/contract-out (default-collate items) ;; noqa
   (-> (non-empty-listof (non-empty-listof tensor?)) any)
   (apply values
@@ -120,7 +120,7 @@
        [#:batch-size exact-positive-integer?
         #:shuffle? boolean?
         #:drop-last? boolean?
-        #:collate (-> (non-empty-listof list?) any)
+        #:collate collate/c
         #:generator generator?]
        dataloader?)
   (make-dataloader ds batch-size shuffle? drop-last? collate generator))
@@ -138,11 +138,7 @@
       (quotient n b)
       (quotient (+ n b -1) b)))
 
-;; What one DataLoader epoch draws, so a seeded loader replays its batch
-;; order: with a generator, an int64 (the iterator's base seed), the
-;; permutation, and the trailing permutation RandomSampler draws for its
-;; remainder and discards; without one, two int64s from the global stream,
-;; the second seeding a fresh generator that draws the two permutations.
+;; the second permutation is the remainder draw RandomSampler discards
 (define (epoch-permutation loader n)
   (define g (dataloader-generator loader))
   (define gen
@@ -152,14 +148,10 @@
   (begin0 (randperm n #:generator gen)
     (randperm n #:generator gen)))
 
-;; One traversal is one epoch: a permutation is drawn when the traversal
-;; starts and each position yields the batch's fields as values.
 (define (epoch-batches loader)
   (define ds (dataloader-dataset loader))
   (define n (dataset-length ds))
   (define b (dataloader-batch-size loader))
-  ;; the permutation moves to the dataset's device once: a per-batch index
-  ;; copy would make the host wait for the stream on every step
   (define perm
     (cond
       [(dataloader-shuffle? loader)
@@ -185,31 +177,30 @@
      (define-values (count batch) (epoch-batches loader))
      (values batch add1 0 (lambda (k) (< k count)) #f #f))))
 
-;; (for ([(epoch xb yb) (in-epochs loader n)]) ...): epochs by number, each
-;; a fresh traversal, so the generator's stream continues across them
 (define/contract-out (in-epochs loader n-epochs) ;; noqa
   (-> dataloader? exact-nonnegative-integer? sequence?)
   (make-do-sequence
    (lambda ()
      (define batch #f)
      (define count 0)
-     (define (start-epoch!)
-       (define-values (c b) (epoch-batches loader))
-       (set! count c)
-       (set! batch b))
-     (when (> n-epochs 0) (start-epoch!))
+     ;; every epoch starts, and so draws, even one with no batches
+     (define (start-from e)
+       (cond
+         [(>= e n-epochs) e]
+         [else
+          (define-values (c b) (epoch-batches loader))
+          (set! count c)
+          (set! batch b)
+          (if (zero? c) (start-from (add1 e)) e)]))
      (values (lambda (pos)
                (call-with-values (lambda () (batch (cdr pos)))
                                  (lambda vals (apply values (car pos) vals))))
              (lambda (pos)
                (define k (add1 (cdr pos)))
-               (cond
-                 [(< k count) (cons (car pos) k)]
-                 [else
-                  (define e (add1 (car pos)))
-                  (when (< e n-epochs) (start-epoch!))
-                  (cons e 0)]))
-             (cons 0 0)
-             (lambda (pos) (and (< (car pos) n-epochs) (< (cdr pos) count)))
+               (if (< k count)
+                   (cons (car pos) k)
+                   (cons (start-from (add1 (car pos))) 0)))
+             (cons (start-from 0) 0)
+             (lambda (pos) (< (car pos) n-epochs))
              #f
              #f))))

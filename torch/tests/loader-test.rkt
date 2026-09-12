@@ -59,6 +59,10 @@
       (dataset-batch ds (tensor '(4 1) #:dtype 'int64) default-collate))
     (check-equal? (tensor->list yt) '(4 1) "an index tensor gathers too")
     (check-exn exn:fail:contract? (lambda () (tensor-dataset xs (ones 5))))
+    (check-exn exn:fail:contract?
+               (lambda () (dataset-batch ds '(-6 -5 -4) default-collate))
+               "indices are natural numbers, not end-relative")
+    (check-exn exn:fail:contract? (lambda () (dataset-ref ds -1)))
     (check-exn #rx"share the first dimension"
                (lambda () (tensor-dataset xs (ones 5 2))))
     (check-equal? (format "~a" ds) "#<tensor-dataset>")
@@ -190,4 +194,18 @@
                              (tensor->list yb))))
                   "in-epochs and repeated in-dataloader traversals agree")
     (check-equal? (for/list ([(epoch _xb _yb) (in-epochs loader 0)]) epoch)
-                  '())))
+                  '())
+    ;; an epoch with no batches still draws, as a drained DataLoader does
+    (define g (make-generator 4))
+    (define empty (dataloader ds #:batch-size 8 #:shuffle? #t #:drop-last? #t
+                              #:generator g))
+    (check-equal? (dataloader-length empty) 0)
+    (check-equal? (for/list ([(epoch _xb _yb) (in-epochs empty 3)]) epoch) '())
+    (define g2 (make-generator 4))
+    (for* ([_e (in-range 3)]
+           [(_xb _yb) (in-dataloader (dataloader ds #:batch-size 8 #:shuffle? #t
+                                                 #:drop-last? #t #:generator g2))])
+      (void))
+    (check-equal? (tensor->list (randperm 6 #:generator g))
+                  (tensor->list (randperm 6 #:generator g2))
+                  "three empty epochs consumed three epochs of the stream")))
