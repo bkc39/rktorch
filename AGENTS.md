@@ -483,3 +483,22 @@ uncontracted copy of the pipeline, which has not been built.
 (regenerate + fail on porcelain). (A `raco-catalog` workflow is deferred
 until the portable native-candidate story exists — libtorch is too large to
 bundle the xgboost way.)
+
+### Binary cache (#79)
+
+The lab host serves its `/nix/store` as a signed binary cache (Harmonia
+behind `tailscale serve`, tailnet-only) at
+`https://lab.tailb6061b.ts.net`, key
+`lab.tailb6061b.ts.net-1:/dlX81jfwuolbO7oiV11HoXe1ib6gMik1XPG2x8u3xc=`.
+Every Linux CI job joins the tailnet with an ephemeral `tag:ci` node
+(`tailscale/github-action`, OAuth client in the `TS_OAUTH_CLIENT_ID` /
+`TS_OAUTH_SECRET` secrets) and lists the host as an extra substituter
+ahead of `cache.nixos.org`; `fallback = true` and a 5 s connect timeout
+mean a missing secret (fork PRs), a down host, or the macOS runner (no
+tailnet) degrade to a normal uncached build, never a failure. The host
+keeps master's closures warm nightly (`nix-cache-warm.timer`, GC-rooted
+under `/nix/var/nix/gcroots/cache-warm`), and anything else built on the
+host — the CUDA shim, the tidy toolchain — is served too. To use it from
+another tailnet machine, add the same two lines to `~/.config/nix/nix.conf`
+as `extra-substituters` / `extra-trusted-public-keys`. CI does not push:
+a PR's own outputs are cached only once master is built on the host.
