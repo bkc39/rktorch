@@ -498,3 +498,27 @@ uncontracted copy of the pipeline, which has not been built.
 (regenerate + fail on porcelain). (A `raco-catalog` workflow is deferred
 until the portable native-candidate story exists — libtorch is too large to
 bundle the xgboost way.)
+
+### Binary cache (#79)
+
+The lab host serves its `/nix/store` as a signed binary cache (Harmonia
+behind `tailscale serve`, tailnet-only) at
+`https://lab.tailb6061b.ts.net`, key
+`lab.tailb6061b.ts.net-1:/dlX81jfwuolbO7oiV11HoXe1ib6gMik1XPG2x8u3xc=`.
+Every job installs Nix through `.github/actions/nix-cache`, which on
+Linux first joins the tailnet as an ephemeral `tag:ci` node
+(`tailscale/github-action`, OAuth client in the `TS_OAUTH_CLIENT_ID` /
+`TS_OAUTH_SECRET` secrets) and lists the host as an extra substituter
+beside `cache.nixos.org`; `fallback = true` and a 5 s connect timeout
+mean a missing secret (fork PRs), a down host, or the macOS runner (no
+tailnet) degrade to a normal uncached build, never a failure. The cache
+serves whatever the host has built: master's C++ shim and the tidy and
+format checks after a local `nix build`, the CUDA shim, the codegen
+Python. A nightly `nix-cache-warm.timer` is meant to pin master's
+closures under `/nix/var/nix/gcroots/cache-warm` but currently builds
+nothing (#131), so a miss after a master merge means nobody has built
+that commit on the host yet. CI does not push. To use the cache from
+another tailnet machine, add the same two lines as `extra-substituters`
+/ `extra-trusted-public-keys` to the daemon's `/etc/nix/nix.conf` (a
+multi-user Nix ignores them in `~/.config/nix/nix.conf` unless the
+caller is in `trusted-users`).
