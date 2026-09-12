@@ -6,9 +6,9 @@
 (module+ test
   (require (only-in racket/list append-map)
            rackunit
+           "../data/loader.rkt"
            "../main.rkt"
            "../nn.rkt"
-           "../data/loader.rkt"
            (only-in "../data/mnist.rkt" load-mnist-fixture)
            (only-in "../data/text.rkt"
                     contiguous-blocks encode load-text-fixture text->vocab)
@@ -294,29 +294,29 @@
        ;; the same convnet on shuffled minibatches: the loader replays
        ;; DataLoader(generator=g)'s batch order, so the losses match
        (define js (python-check "mnist_shuffle.py"))
-       (set-default-device! 'cpu)
-       (manual-seed! 0)
-       (define-values (sxs sys) (load-mnist-fixture))
-       (define snet (convnet))
-       (define sopt (adam (parameters snet) #:lr 0.001))
-       (define sloader
-         (dataloader (tensor-dataset sxs sys) #:batch-size 64 #:shuffle? #t
-                     #:generator (make-generator 0)))
-       (define slosses
-         (for/list ([(_epoch xb yb) (in-epochs sloader 2)])
-           (zero-grads! sopt)
-           (define loss (cross-entropy (snet xb) yb))
-           (backward! loss)
-           (step! sopt)
-           (item loss)))
-       (check-equal? (length slosses) (length (hash-ref js 'losses)))
-       (for ([r (in-list slosses)] [p (in-list (hash-ref js 'losses))]
-             [i (in-naturals)])
-         (check-= r p tol (format "mnist shuffle twin: loss ~a" i)))
-       (for ([r (in-list (append-map tensor->list (parameters snet)))]
-             [p (in-list (hash-ref js 'params))]
-             [i (in-naturals)])
-         (check-= r p tol (format "mnist shuffle twin: parameter ~a" i))))
+       (with-default-device 'cpu
+         (manual-seed! 0)
+         (define-values (sxs sys) (load-mnist-fixture))
+         (define snet (convnet))
+         (define sopt (adam (parameters snet) #:lr 0.001))
+         (define sloader
+           (dataloader (tensor-dataset sxs sys) #:batch-size 64 #:shuffle? #t
+                       #:generator (make-generator 0)))
+         (define slosses
+           (for/list ([(_epoch xb yb) (in-epochs sloader 2)])
+             (zero-grads! sopt)
+             (define loss (cross-entropy (snet xb) yb))
+             (backward! loss)
+             (step! sopt)
+             (item loss)))
+         (check-equal? (length slosses) (length (hash-ref js 'losses)))
+         (for ([r (in-list slosses)] [p (in-list (hash-ref js 'losses))]
+               [i (in-naturals)])
+           (check-= r p tol (format "mnist shuffle twin: loss ~a" i)))
+         (for ([r (in-list (append-map tensor->list (parameters snet)))]
+               [p (in-list (hash-ref js 'params))]
+               [i (in-naturals)])
+           (check-= r p tol (format "mnist shuffle twin: parameter ~a" i)))))
      (let ()
        (define-layer causal-self-attention (n-embd n-head wq wk wv wo)
          #:init (n-embd n-head)
@@ -565,6 +565,15 @@
            (for/list ([ib (in-dataloader loader)]) (tensor->list ib))))
        (check-equal? (orders (make-generator 7) 2) (hash-ref j 'loader_order)
                      "one generator across two DataLoader epochs")
+       ;; without a generator the draws come from the global stream, and
+       ;; leave it where DataLoader(shuffle=True) leaves it
+       (manual-seed! 3)
+       (check-equal? (orders #f 2) (hash-ref j 'global_order)
+                     "two DataLoader epochs on the global stream")
+       (for ([r (in-list (tensor->list (randn 3)))]
+             [p (in-list (hash-ref j 'after_global))]
+             [i (in-naturals)])
+         (check-= r p tol (format "global stream after shuffling: ~a" i)))
        (manual-seed! 0)
        (define model (Linear 3 1))
        (define opt (sgd (parameters model) #:lr 0.1))

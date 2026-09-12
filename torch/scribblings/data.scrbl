@@ -97,7 +97,7 @@ values.
                      [#:drop-last? drop-last? boolean? #f]
                      [#:collate collate (-> (non-empty-listof list?) any)
                       default-collate]
-                     [#:generator generator generator? #f])
+                     [#:generator generator (or/c generator? #f) #f])
          dataloader?]{
 A loader over @racket[ds], as @tt{DataLoader(ds, batch_size, shuffle,
 drop_last, collate_fn, generator)} with @tt{num_workers=0}: batches are

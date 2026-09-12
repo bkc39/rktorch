@@ -121,7 +121,7 @@
         #:shuffle? boolean?
         #:drop-last? boolean?
         #:collate collate/c
-        #:generator generator?]
+        #:generator (or/c generator? #f)]
        dataloader?)
   (make-dataloader ds batch-size shuffle? drop-last? collate generator))
 

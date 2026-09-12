@@ -152,6 +152,25 @@
                   (apply append (for/list ([i (in-list expected)])
                                   (tensor->list (select xs 0 i))))))
 
+  (test-case "shuffle without a generator takes two words of the global stream"
+    (define ds (tensor-dataset xs ys))
+    (define (epoch-order)
+      (for/list ([(_xb yb) (in-dataloader
+                            (dataloader ds #:batch-size 6 #:shuffle? #t))])
+        (tensor->list yb)))
+    (manual-seed! 11)
+    (define seen (epoch-order))
+    (define after (tensor->list (randn 4)))
+    ;; the replay: a base seed, then a seed for a fresh generator
+    (manual-seed! 11)
+    (void (draw-seed))
+    (define g (make-generator (draw-seed)))
+    (check-equal? seen (list (tensor->list (randperm 6 #:generator g))))
+    (check-equal? (tensor->list (randn 4)) after
+                  "exactly two words leave the global stream per epoch")
+    (manual-seed! 11)
+    (check-equal? (epoch-order) seen "the global stream replays under a seed"))
+
   (test-case "a device-resident dataset batches on its device"
     (for ([dev (in-list (list (and (cuda-available?) (cuda-device))
                               (and (mps-available?) (mps-device))))]

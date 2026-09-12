@@ -19,6 +19,14 @@ index_loader = DataLoader(TensorDataset(torch.arange(N)), batch_size=BATCH,
 loader_order = [[[int(v) for v in b[0]] for b in index_loader]
                 for _ in range(EPOCHS)]
 
+# no generator: the draws come from the global stream and advance it
+torch.manual_seed(3)
+global_loader = DataLoader(TensorDataset(torch.arange(N)), batch_size=BATCH,
+                           shuffle=True)
+global_order = [[[int(v) for v in b[0]] for b in global_loader]
+                for _ in range(EPOCHS)]
+after_global = torch.randn(3).tolist()
+
 torch.manual_seed(0)
 model = torch.nn.Linear(3, 1)
 opt = torch.optim.SGD(model.parameters(), lr=0.1)
@@ -35,6 +43,8 @@ for _ in range(EPOCHS):
 
 print(json.dumps({
     "loader_order": loader_order,
+    "global_order": global_order,
+    "after_global": after_global,
     "losses": losses,
     "params": [float(v) for v in torch.cat([p.detach().flatten()
                                            for p in model.parameters()]).tolist()],
