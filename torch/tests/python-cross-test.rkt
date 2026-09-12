@@ -12,6 +12,7 @@
            (only-in "../data/mnist.rkt" load-mnist-fixture)
            (only-in "../data/text.rkt"
                     contiguous-blocks encode load-text-fixture text->vocab)
+           (only-in "../vision/cifar10.rkt" load-cifar10-fixture)
            "private/python-env.rkt")
 
   (define (check-parity rel-path compute)
@@ -628,6 +629,25 @@
              [p (in-list (hash-ref j 'params))]
              [i (in-naturals)])
          (check-= r p tol (format "dataloader twin: parameter ~a" i))))
+     (let ()
+       ;; the CIFAR-10 fixture parsed by both sides: labels, pixels, means
+       (define j (python-check "cifar10_fixture.py"))
+       (define-values (imgs lbls) (load-cifar10-fixture))
+       (check-equal? (length lbls) (hash-ref j 'n))
+       (check-equal? (tensor->list lbls) (hash-ref j 'labels))
+       (define flat (tensor->list (reshape imgs 256 -1)))
+       (define first-pixels
+         (append (for/list ([i (in-range 8)]) (list-ref flat i))
+                 (for/list ([i (in-range 1024 1028)]) (list-ref flat i))
+                 (for/list ([i (in-range 2048 2052)]) (list-ref flat i))))
+       (for ([r (in-list first-pixels)] [p (in-list (hash-ref j 'first_pixels))]
+             [i (in-naturals)])
+         (check-= r p tol (format "cifar10 fixture pixel ~a" i)))
+       (for ([r (in-list (for/list ([i (in-range 256)])
+                           (item (mean (select imgs 0 i)))))]
+             [p (in-list (hash-ref j 'means))]
+             [i (in-naturals)])
+         (check-= r p tol (format "cifar10 fixture mean ~a" i))))
      (let ()
        (define j (python-check "creation_kwargs.py"))
        (manual-seed! 0)
