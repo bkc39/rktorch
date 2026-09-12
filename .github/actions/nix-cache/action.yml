@@ -1,0 +1,41 @@
+name: Nix with the lab binary cache
+description: >-
+  Install Nix with the lab host's tailnet-only binary cache as an extra
+  substituter, joining the tailnet first when an OAuth client is available.
+
+inputs:
+  ts-oauth-client-id:
+    description: Tailscale OAuth client id able to mint tag:ci auth keys
+    required: false
+    default: ""
+  ts-oauth-secret:
+    description: Secret for ts-oauth-client-id
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    # Fork PRs carry no secrets and the macOS runner has no tailnet; either
+    # way the cache is unreachable and nix falls through to cache.nixos.org
+    # after connect-timeout, so a failed join must not fail the job.
+    - name: Connect to tailnet (Nix binary cache)
+      if: runner.os == 'Linux'
+      uses: tailscale/github-action@v4
+      with:
+        oauth-client-id: ${{ inputs.ts-oauth-client-id }}
+        oauth-secret: ${{ inputs.ts-oauth-secret }}
+        tags: tag:ci
+        timeout: 60s
+      continue-on-error: true
+
+    - uses: DeterminateSystems/nix-installer-action@v22
+      with:
+        extra-conf: |
+          extra-substituters = https://lab.tailb6061b.ts.net
+          extra-trusted-public-keys = lab.tailb6061b.ts.net-1:/dlX81jfwuolbO7oiV11HoXe1ib6gMik1XPG2x8u3xc=
+          connect-timeout = 5
+          stalled-download-timeout = 20
+          fallback = true
+
+    - uses: DeterminateSystems/magic-nix-cache-action@v13

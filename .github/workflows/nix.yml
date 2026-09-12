@@ -14,29 +14,10 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
-      - name: Connect to tailnet (Nix binary cache)
-        if: runner.os == 'Linux'
-        uses: tailscale/github-action@v4
+      - uses: ./.github/actions/nix-cache
         with:
-          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
-          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
-          tags: tag:ci
-          # Fail fast on fork PRs where the OAuth secret is absent (v4 default: 2m).
-          timeout: 60s
-        # Fork PRs receive no secrets, so this step no-ops there and the
-        # cache is simply unreachable -- connect-timeout below makes nix
-        # fall through to cache.nixos.org instead of hanging.
-        continue-on-error: true
-
-      - uses: DeterminateSystems/nix-installer-action@v22
-        with:
-          extra-conf: |
-            extra-substituters = https://lab.tailb6061b.ts.net
-            extra-trusted-public-keys = lab.tailb6061b.ts.net-1:/dlX81jfwuolbO7oiV11HoXe1ib6gMik1XPG2x8u3xc=
-            connect-timeout = 5
-            stalled-download-timeout = 20
-            fallback = true
-      - uses: DeterminateSystems/magic-nix-cache-action@v13
+          ts-oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          ts-oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
       - name: Build, test, and lint
         run: nix flake check --print-build-logs
 
@@ -49,29 +30,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - name: Connect to tailnet (Nix binary cache)
-        if: runner.os == 'Linux'
-        uses: tailscale/github-action@v4
+      - uses: ./.github/actions/nix-cache
         with:
-          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
-          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
-          tags: tag:ci
-          # Fail fast on fork PRs where the OAuth secret is absent (v4 default: 2m).
-          timeout: 60s
-        # Fork PRs receive no secrets, so this step no-ops there and the
-        # cache is simply unreachable -- connect-timeout below makes nix
-        # fall through to cache.nixos.org instead of hanging.
-        continue-on-error: true
-
-      - uses: DeterminateSystems/nix-installer-action@v22
-        with:
-          extra-conf: |
-            extra-substituters = https://lab.tailb6061b.ts.net
-            extra-trusted-public-keys = lab.tailb6061b.ts.net-1:/dlX81jfwuolbO7oiV11HoXe1ib6gMik1XPG2x8u3xc=
-            connect-timeout = 5
-            stalled-download-timeout = 20
-            fallback = true
-      - uses: DeterminateSystems/magic-nix-cache-action@v13
+          ts-oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          ts-oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
       - name: clang-format
         run: nix build .#cpp-format --print-build-logs
       - name: line-count gate (500 lines/file)
@@ -84,29 +46,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - name: Connect to tailnet (Nix binary cache)
-        if: runner.os == 'Linux'
-        uses: tailscale/github-action@v4
+      - uses: ./.github/actions/nix-cache
         with:
-          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
-          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
-          tags: tag:ci
-          # Fail fast on fork PRs where the OAuth secret is absent (v4 default: 2m).
-          timeout: 60s
-        # Fork PRs receive no secrets, so this step no-ops there and the
-        # cache is simply unreachable -- connect-timeout below makes nix
-        # fall through to cache.nixos.org instead of hanging.
-        continue-on-error: true
-
-      - uses: DeterminateSystems/nix-installer-action@v22
-        with:
-          extra-conf: |
-            extra-substituters = https://lab.tailb6061b.ts.net
-            extra-trusted-public-keys = lab.tailb6061b.ts.net-1:/dlX81jfwuolbO7oiV11HoXe1ib6gMik1XPG2x8u3xc=
-            connect-timeout = 5
-            stalled-download-timeout = 20
-            fallback = true
-      - uses: DeterminateSystems/magic-nix-cache-action@v13
+          ts-oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          ts-oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
       # Committed generated output must match what the generator emits from
       # the vendored schema + allowlist. Porcelain (not just diff) so newly
       # emitted-but-uncommitted files also fail.
@@ -129,29 +72,10 @@ jobs:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
-      - name: Connect to tailnet (Nix binary cache)
-        if: runner.os == 'Linux'
-        uses: tailscale/github-action@v4
+      - uses: ./.github/actions/nix-cache
         with:
-          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
-          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
-          tags: tag:ci
-          # Fail fast on fork PRs where the OAuth secret is absent (v4 default: 2m).
-          timeout: 60s
-        # Fork PRs receive no secrets, so this step no-ops there and the
-        # cache is simply unreachable -- connect-timeout below makes nix
-        # fall through to cache.nixos.org instead of hanging.
-        continue-on-error: true
-
-      - uses: DeterminateSystems/nix-installer-action@v22
-        with:
-          extra-conf: |
-            extra-substituters = https://lab.tailb6061b.ts.net
-            extra-trusted-public-keys = lab.tailb6061b.ts.net-1:/dlX81jfwuolbO7oiV11HoXe1ib6gMik1XPG2x8u3xc=
-            connect-timeout = 5
-            stalled-download-timeout = 20
-            fallback = true
-      - uses: DeterminateSystems/magic-nix-cache-action@v13
+          ts-oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          ts-oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
       # The default dev shell provisions Resyntax into the user scope, so the
       # linter runs on the same nix-provided Racket as the rest of the build.
       - name: Resyntax lint
