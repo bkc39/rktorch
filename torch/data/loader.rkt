@@ -6,8 +6,7 @@
          (only-in racket/list first)
          (only-in "../foreign.rkt"
                   draw-seed generator? index-select make-generator narrow
-                  randperm select tensor tensor-device tensor-shape tensor?
-                  to)
+                  randperm select shape tensor tensor-device tensor? to)
          (only-in "../private/contract.rkt" define/contract-out)
          (only-in "dataset.rkt"
                   collate/c dataset-batch dataset-device dataset-length
@@ -27,12 +26,12 @@
 
 (define batched/c
   (flat-named-contract 'batched-tensor
-                       (lambda (v) (and (tensor? v) (pair? (tensor-shape v))))))
+                       (lambda (v) (and (tensor? v) (pair? (shape v))))))
 
 (define (same-leading-dimension/c t)
   (flat-named-contract
    'same-leading-dimension
-   (lambda (u) (and (batched/c u) (= (car (tensor-shape u)) (car (tensor-shape t)))))))
+   (lambda (u) (and (batched/c u) (= (car (shape u)) (car (shape t)))))))
 
 (define (same-device/c t)
   (flat-named-contract
@@ -46,7 +45,7 @@
                   [result tensor-dataset?])
   #:init (t . more)
   (set! tensors (cons t more))
-  #:length (car (tensor-shape (first tensors)))
+  #:length (car (shape (first tensors)))
   #:ref (i)
   (apply values (for/list ([t (in-list tensors)]) (select t 0 i)))
   #:device (tensor-device (first tensors))
@@ -56,7 +55,7 @@
      (collate (for/list ([i (in-list (indices->list indices))])
                 (for/list ([t (in-list tensors)]) (select t 0 i))))]
     [else
-     (define n (car (tensor-shape (first tensors))))
+     (define n (car (shape (first tensors))))
      (define start (run-start indices n))
      (apply values
             (cond

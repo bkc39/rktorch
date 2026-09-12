@@ -13,8 +13,7 @@
          (only-in racket/generic define-generics)
          (only-in racket/list first)
          (only-in "../foreign.rkt"
-                  device? stack tensor-device tensor-dtype tensor-shape
-                  tensor->list tensor?)
+                  device? dtype shape stack tensor-device tensor->list tensor?)
          (only-in "../private/contract.rkt" define/contract-out))
 
 ;; the noqa'd exports are macro expansions raco review cannot see
@@ -35,9 +34,9 @@
    'non-empty-int64-vector
    (lambda (v)
      (and (tensor? v)
-          (eq? (tensor-dtype v) 'int64)
-          (= 1 (length (tensor-shape v)))
-          (positive? (car (tensor-shape v)))))))
+          (eq? (dtype v) 'int64)
+          (= 1 (length (shape v)))
+          (positive? (car (shape v)))))))
 (define/contract-out indices/c contract? ;; noqa
   (or/c (non-empty-listof exact-nonnegative-integer?) index-tensor/c))
 (define/contract-out collate/c contract? ;; noqa
@@ -86,7 +85,7 @@
             (for/and ([item (in-list v)])
               (and (= (length item) (length lead))
                    (andmap (lambda (t u)
-                             (and (equal? (tensor-shape t) (tensor-shape u))
+                             (and (equal? (shape t) (shape u))
                                   (equal? (tensor-device t) (tensor-device u))))
                            item
                            lead))))))))
