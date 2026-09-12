@@ -11,4 +11,5 @@ Racket bindings for libtorch.
 @include-section["length.scrbl"]
 @include-section["device.scrbl"]
 @include-section["data.scrbl"]
+@include-section["vision.scrbl"]
 @include-section["nn.scrbl"]
