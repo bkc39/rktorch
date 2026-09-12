@@ -67,15 +67,8 @@ int tr_tensor_uniform_(tr_tensor* t, double low, double high) {
 }
 
 tr_generator* tr_generator_new(uint64_t seed) {
-  try {
-    return new tr_generator{at::detail::createCPUGenerator(seed)};
-  } catch (const std::exception& e) {
-    torchrkt::record_failure("tr_generator_new", e);
-    return nullptr;
-  } catch (...) {
-    torchrkt::record_unknown_failure("tr_generator_new");
-    return nullptr;
-  }
+  return torchrkt::alloc_handle<tr_generator>(
+      "tr_generator_new", [&] { return at::detail::createCPUGenerator(seed); });
 }
 
 void tr_generator_free(tr_generator* g) {

@@ -239,9 +239,10 @@ one op is what the carve-out exists to avoid.
   status codes / NULL. `detail/tensor_handle.hpp` (in `src/`, private)
   completes the opaque struct over a `torch::Tensor`;
   `detail/op_call.hpp` holds the boundary helpers (`alloc_result` and
-  `null_arg` for tensor-returning ops; `status_call` and `null_arg_status`
-  for the int-status in-place shape) every op body reduces to — new ops
-  must use them rather than hand-rolling try/catch.
+  `null_arg` for tensor-returning ops, `alloc_handle<H>` for any other
+  opaque handle; `status_call` and `null_arg_status` for the int-status
+  in-place shape) every op body reduces to — new ops must use them rather
+  than hand-rolling try/catch.
 - `tests/torchrkt/{random,ops,autograd,generated_golden,generated_tranche2}_test.cpp`
   — GoogleTest goldens per family (generated families get a C-boundary
   golden: a correctness case + a null/length-guard case).

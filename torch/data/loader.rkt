@@ -63,10 +63,12 @@
    (define (dataset-device self)
      (tensor-device (first (tensor-dataset-tensors self))))
    ;; the whole-batch path is default-collate's result computed natively;
-   ;; a custom collate must see the items, as DataLoader's collate_fn does
+   ;; a custom collate must see the items, as DataLoader's collate_fn does.
+   ;; chaperone-of?, not eq?: the exported default-collate is the contract's
+   ;; chaperone of the one bound here
    (define (dataset-batch self indices collate)
      (cond
-       [(not (eq? collate default-collate))
+       [(not (chaperone-of? collate default-collate))
         (batch-by-ref self indices collate)]
        [else
         (define ts (tensor-dataset-tensors self))

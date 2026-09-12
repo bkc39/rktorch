@@ -51,10 +51,11 @@ inline void record_unknown_failure(const char* who) noexcept {
   }
 }
 
-template <typename Fn>
-tr_tensor* alloc_result(const char* who, Fn&& fn) noexcept {
+// an opaque handle over whatever fn yields, or NULL with the error recorded
+template <typename Handle, typename Fn>
+Handle* alloc_handle(const char* who, Fn&& fn) noexcept {
   try {
-    return new tr_tensor{std::forward<Fn>(fn)()};
+    return new Handle{std::forward<Fn>(fn)()};
   } catch (const std::exception& e) {
     record_failure(who, e);
     return nullptr;
@@ -62,6 +63,11 @@ tr_tensor* alloc_result(const char* who, Fn&& fn) noexcept {
     record_unknown_failure(who);
     return nullptr;
   }
+}
+
+template <typename Fn>
+tr_tensor* alloc_result(const char* who, Fn&& fn) noexcept {
+  return alloc_handle<tr_tensor>(who, std::forward<Fn>(fn));
 }
 
 template <typename Fn>

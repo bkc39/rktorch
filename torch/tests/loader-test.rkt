@@ -23,6 +23,17 @@
     (check-equal? (tensor-shape (randperm 0)) '(0))
     (check-exn exn:fail:contract? (lambda () (randperm -1))))
 
+  (test-case "generators are released by the guarded finalizer"
+    (define (runs) (cdr (assq 'runs (finalizer-diagnostics))))
+    (define before (runs))
+    (for ([_i (in-range 32)]) (void (make-generator 1)))
+    (let loop ([i 0])
+      (collect-garbage)
+      (unless (or (> (runs) before) (>= i 50))
+        (sleep 0.01)
+        (loop (add1 i))))
+    (check-true (> (runs) before) "a collected generator ran the finalizer"))
+
   (test-case "generator draws leave the global stream alone"
     (manual-seed! 5)
     (define expected (tensor->list (randn 4)))
@@ -51,6 +62,12 @@
     (check-exn #rx"share the first dimension"
                (lambda () (tensor-dataset xs (ones 5 2))))
     (check-equal? (format "~a" ds) "#<tensor-dataset>")
+    ;; the native path hands out views: a run's batch follows the source
+    (define src (ones 6 2))
+    (define-values (view) (dataset-batch (tensor-dataset src) '(1 2 3) default-collate))
+    (mul! src 3.0)
+    (check-equal? (tensor->list view) '(3.0 3.0 3.0 3.0 3.0 3.0)
+                  "default-collate from outside the module takes the native path")
     ;; a custom collate sees the items, as DataLoader's collate_fn does
     (define counted
       (dataloader ds #:batch-size 4
