@@ -24,6 +24,7 @@
          (except-in "foreign/promoted.rkt" tensor-ref tensor-ref!)
          (submod "foreign/promoted.rkt" checked)
          (only-in "foreign/ref-syntax.rkt" ref ref!)
+         (only-in "foreign/sized.rkt" gen:sized length sized?)
          (except-in "foreign/autograd-ops.rkt" requires-grad!)
          (submod "foreign/autograd-ops.rkt" checked)
          (submod "foreign/slice.rkt" checked))
@@ -56,6 +57,12 @@
          full-like
          randn-like
          rand-like
+         make-generator
+         generator?
+         randperm
+         draw-seed
+         seed/c
+         size/c
          arange
          eye
          tensor)
@@ -147,7 +154,10 @@
          tensor-dtype
          shape
          dtype
-         numel)
+         numel
+         length
+         gen:sized
+         sized?)
 
 (provide native-memory-use
          cuda-memory-stats

@@ -6,6 +6,7 @@
 (module+ test
   (require (only-in racket/list append-map)
            rackunit
+           "../data/loader.rkt"
            "../main.rkt"
            "../nn.rkt"
            (only-in "../data/mnist.rkt" load-mnist-fixture)
@@ -289,7 +290,33 @@
        (when (and (cuda-available?)
                   (python-cuda-available?))
          (check-training-twin "05_mnist" "python/05_mnist.py" train-on
-                              'cuda 5e-3)))
+                              'cuda 5e-3))
+       ;; the same convnet on shuffled minibatches: the loader replays
+       ;; DataLoader(generator=g)'s batch order, so the losses match
+       (define js (python-check "mnist_shuffle.py"))
+       (with-default-device 'cpu
+         (manual-seed! 0)
+         (define-values (sxs sys) (load-mnist-fixture))
+         (define snet (convnet))
+         (define sopt (adam (parameters snet) #:lr 0.001))
+         (define sloader
+           (dataloader (tensor-dataset sxs sys) #:batch-size 64 #:shuffle? #t
+                       #:generator (make-generator 0)))
+         (define slosses
+           (for/list ([(_epoch xb yb) (in-epochs sloader 2)])
+             (zero-grads! sopt)
+             (define loss (cross-entropy (snet xb) yb))
+             (backward! loss)
+             (step! sopt)
+             (item loss)))
+         (check-equal? (length slosses) (length (hash-ref js 'losses)))
+         (for ([r (in-list slosses)] [p (in-list (hash-ref js 'losses))]
+               [i (in-naturals)])
+           (check-= r p tol (format "mnist shuffle twin: loss ~a" i)))
+         (for ([r (in-list (append-map tensor->list (parameters snet)))]
+               [p (in-list (hash-ref js 'params))]
+               [i (in-naturals)])
+           (check-= r p tol (format "mnist shuffle twin: parameter ~a" i)))))
      (let ()
        (define-layer causal-self-attention (n-embd n-head wq wk wv wo)
          #:init (n-embd n-head)
@@ -523,6 +550,84 @@
          (check-equal? (format "torch.~a" (tensor-dtype (cdr e)))
                        (hash-ref py-dtypes (string->symbol (car e)))
                        (format "Module.to(float64) dtype of ~a" (car e)))))
+     (let ()
+       ;; a shuffling loader replays DataLoader(generator=g)'s batch order
+       (define j (python-check "dataloader_twin.py"))
+       (define n 10)
+       (define xs (/ (reshape (arange (* n 3)) n 3) n))
+       (define ys (matmul xs (ones 3 1)))
+       (define ds (tensor-dataset xs ys))
+       (define (orders g epochs)
+         (define loader
+           (dataloader (tensor-dataset (arange n #:dtype 'int64))
+                       #:batch-size 4 #:shuffle? #t #:generator g))
+         (for/list ([_ (in-range epochs)])
+           (for/list ([ib (in-dataloader loader)]) (tensor->list ib))))
+       (check-equal? (orders (make-generator 7) 2) (hash-ref j 'loader_order)
+                     "one generator across two DataLoader epochs")
+       ;; without a generator the draws come from the global stream, and
+       ;; leave it where DataLoader(shuffle=True) leaves it
+       (manual-seed! 3)
+       (check-equal? (orders #f 2) (hash-ref j 'global_order)
+                     "two DataLoader epochs on the global stream")
+       (for ([r (in-list (tensor->list (randn 3)))]
+             [p (in-list (hash-ref j 'after_global))]
+             [i (in-naturals)])
+         (check-= r p tol (format "global stream after shuffling: ~a" i)))
+       ;; every traversal draws the iterator's base seed, shuffled or not
+       (define ids (tensor-dataset (arange n #:dtype 'int64)))
+       (define g5 (make-generator 5))
+       (for* ([_e (in-range 2)]
+              [ib (in-dataloader (dataloader ids #:batch-size 4 #:generator g5))])
+         (void ib))
+       (check-equal? (tensor->list (randperm n #:generator g5))
+                     (hash-ref j 'unshuffled_then)
+                     "an unshuffled epoch draws its base seed")
+       (manual-seed! 3)
+       (for ([ib (in-dataloader (dataloader ids #:batch-size 4))])
+         (void ib))
+       (for ([r (in-list (tensor->list (randn 3)))]
+             [p (in-list (hash-ref j 'after_global_plain))]
+             [i (in-naturals)])
+         (check-= r p tol (format "global stream after a plain epoch: ~a" i)))
+       ;; the remainder draw waits until the first permutation is used up;
+       ;; in-range first, so the loader's exhaustion check never runs
+       (define (partial batch-size take)
+         (define g (make-generator 11))
+         (define loader
+           (dataloader ids #:batch-size batch-size #:shuffle? #t #:generator g))
+         (define n-first (if (eq? take 'all) (dataloader-length loader) 1))
+         (hasheq 'first
+                 (for/list ([_i (in-range n-first)] [ib (in-dataloader loader)])
+                   (tensor->list ib))
+                 'second
+                 (for/list ([ib (in-dataloader loader)]) (tensor->list ib))
+                 'then
+                 (tensor->list (randperm n #:generator g))))
+       (for ([case (in-list '((one_of_4 4 one) (all_of_4 4 all) (all_of_5 5 all)))])
+         (check-equal? (partial (cadr case) (caddr case))
+                       (hash-ref (hash-ref j 'partial_orders) (car case))
+                       (format "partial traversal ~a" (car case))))
+       (manual-seed! 0)
+       (define model (Linear 3 1))
+       (define opt (sgd (parameters model) #:lr 0.1))
+       (define loader
+         (dataloader ds #:batch-size 4 #:shuffle? #t
+                     #:generator (make-generator 7)))
+       (define losses
+         (for*/list ([_ (in-range 2)] [(xb yb) (in-dataloader loader)])
+           (zero-grads! opt)
+           (define loss (mse-loss (model xb) yb))
+           (backward! loss)
+           (step! opt)
+           (item loss)))
+       (for ([r (in-list losses)] [p (in-list (hash-ref j 'losses))]
+             [i (in-naturals)])
+         (check-= r p tol (format "dataloader twin: loss ~a" i)))
+       (for ([r (in-list (append-map tensor->list (parameters model)))]
+             [p (in-list (hash-ref j 'params))]
+             [i (in-naturals)])
+         (check-= r p tol (format "dataloader twin: parameter ~a" i))))
      (let ()
        (define j (python-check "creation_kwargs.py"))
        (manual-seed! 0)

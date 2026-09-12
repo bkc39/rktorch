@@ -72,7 +72,24 @@ CPU-first; float32 + inferred int64 (#44). From `torch`:
   constructors take dims as rest args or one list; `zeros-like` /
   `ones-like` / `full-like` / `randn-like` / `rand-like` inherit the
   reference's shape, device, dtype unless overridden (#56); `arange` stays
-  float32 by default (its int64 inference is the open remainder of #56)
+  float32 by default (its int64 inference is the open remainder of #56);
+  `make-generator` / `generator?` / `randperm` / `draw-seed` — a CPU
+  `torch.Generator` with its own stream, the permutation and the int64
+  seed word drawn from it (or the global stream), for loaders (#87)
+- `length` (`torch/foreign/sized.rkt`): Python's `len` as `gen:sized`,
+  shadowing racket/base's like `+`; fast defaults for lists, vectors,
+  strings, hashes; a tensor's first dimension; datasets and loaders
+- data (`torch/data/loader.rkt`, #87): `define-dataset` (fields, `#:init`,
+  `#:length`, `#:ref`, optional `#:batch`/`#:device`, `#:contract` export,
+  the `Dataset` subclass shape) over `gen:dataset` (`dataset-length`
+  `dataset-ref` `dataset-batch` `dataset-device`), `tensor-dataset`
+  (batches are `narrow` views or one `index-select`, device resident),
+  `default-collate`,
+  `dataloader #:batch-size #:shuffle? #:drop-last? #:collate #:generator`,
+  `in-dataloader` (one traversal = one epoch, the generator's stream
+  continuing), `in-epochs`; synchronous, single-threaded like
+  `num_workers=0`; a seeded loader replays `DataLoader(generator=g)`'s
+  batch order
 - shape: `reshape view transpose permute squeeze unsqueeze cat stack`
 - elementwise: `add sub mul div pow neg exp log sqrt relu sigmoid tanh`
   (binary ops take a real on either side)
@@ -228,9 +245,10 @@ one op is what the carve-out exists to avoid.
   status codes / NULL. `detail/tensor_handle.hpp` (in `src/`, private)
   completes the opaque struct over a `torch::Tensor`;
   `detail/op_call.hpp` holds the boundary helpers (`alloc_result` and
-  `null_arg` for tensor-returning ops; `status_call` and `null_arg_status`
-  for the int-status in-place shape) every op body reduces to — new ops
-  must use them rather than hand-rolling try/catch.
+  `null_arg` for tensor-returning ops, `alloc_handle<H>` for any other
+  opaque handle; `status_call` and `null_arg_status` for the int-status
+  in-place shape) every op body reduces to — new ops must use them rather
+  than hand-rolling try/catch.
 - `tests/torchrkt/{random,ops,autograd,generated_golden,generated_tranche2}_test.cpp`
   — GoogleTest goldens per family (generated families get a C-boundary
   golden: a correctness case + a null/length-guard case).
@@ -252,6 +270,11 @@ module's full export set (`racket/runtime-path`, `syntax/parse/pre`).
 - `info.rkt` — package metadata + native-library pre-install hook.
 - `main.rkt` — high-level facade (re-exports `foreign.rkt`).
 - `foreign.rkt` — the contracted layer + the `unsafe` submodule.
+- `data/dataset.rkt` — `define-dataset` and `gen:dataset`;
+  `private/definer.rkt` — the clause grammar it shares with `define-layer`.
+- `data/loader.rkt` — `tensor-dataset`, `dataloader`, `in-dataloader`,
+  `in-epochs`, re-exporting `data/dataset.rkt`; `data/mnist.rkt`,
+  `data/text.rkt` — the modality loaders (moving under #88).
 - `foreign/ops.rkt` — version/seed + marshalling (`item`, `to-dtype`,
   `uniform!`, `to`); `foreign/creation-ops.rkt` — the constructors
   (`zeros` .. `rand`, `tensor`, `arange`, `eye`, the `*-like` family, with

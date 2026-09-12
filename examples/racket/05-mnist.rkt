@@ -1,6 +1,6 @@
 #lang scribble/lp2
 
-@(require (for-label (except-in racket/base abs cos exp log sin sqrt max min + - * /)
+@(require (for-label (except-in racket/base abs cos exp log sin sqrt max min length + - * /)
                      torch torch/nn))
 
 @section[#:tag "ex-mnist"]{Training a convnet on MNIST}
@@ -20,7 +20,7 @@ classes; the @emph{functional} ops stay lowercase on @racketmodname[torch]
 @racket[except-in] needed.
 
 @chunk[<r05-require>
-(require torch torch/nn
+(require torch torch/nn torch/data/loader
          (only-in torch/data/mnist load-mnist load-mnist-fixture))]
 
 @chunk[<r05-provide>
@@ -107,8 +107,10 @@ choice — the prior default is restored even if a step raises.
 
 @bold{The real thing.} @racket[train-mnist] is the headline run: it downloads the
 full dataset (cached under @envvar{RKTORCH_MNIST_DIR} or the system cache dir),
-trains for @racket[epochs] minibatched epochs, and reports held-out test accuracy
-after each. This is what reaches ~98%; @racket[run-example] above is its offline,
+trains for @racket[epochs] epochs of shuffled minibatches drawn by a
+@racket[dataloader] over the device-resident training set (a seeded
+@racket[make-generator], so the batch order replays), and reports held-out
+test accuracy after each. This is what reaches ~98%; @racket[run-example] above is its offline,
 fixture-sized shadow for testing.
 
 @chunk[<r05-train-mnist>
@@ -118,15 +120,16 @@ fixture-sized shadow for testing.
     (manual-seed! 0)
     (define-values (train-x train-y) (load-mnist 'train))
     (define-values (test-x test-y) (load-mnist 'test))
-    (define n-train (car (tensor-shape train-x)))
     (define net (convnet))
     (define opt (adam (parameters net) #:lr 0.001))
+    (define loader
+      (dataloader (tensor-dataset train-x train-y)
+                  #:batch-size batch #:shuffle? #t
+                  #:generator (make-generator 0)))
     (for/list ([epoch (in-range epochs)])
-      (for ([start (in-range 0 n-train batch)])
-        (define len (min batch (- n-train start)))
+      (for ([(xb yb) (in-dataloader loader)])
         (zero-grads! opt)
-        (define loss (cross-entropy (net (narrow train-x 0 start len))
-                                    (narrow train-y 0 start len)))
+        (define loss (cross-entropy (net xb) yb))
         (backward! loss)
         (step! opt))
       (accuracy net test-x test-y))))]
