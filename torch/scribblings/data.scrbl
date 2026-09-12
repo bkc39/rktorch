@@ -65,16 +65,16 @@ The item at @racket[i], as one value per field, as
                                        tensor?)]
                         [collate (-> (non-empty-listof list?) any)])
          any]{
-The batch at @racket[indices], as values. @racket[indices] is a list of
-natural numbers, or a rank-one int64 tensor when a loader cuts it from a
-permutation.
+The batch at @racket[indices], as values. @racket[indices] is a non-empty
+list of natural numbers, or a non-empty rank-one int64 tensor when a
+loader cuts it from a permutation.
 }
 
 @defproc[(tensor-dataset [t tensor?] [more tensor?] ...) dataset?]{
 A dataset over one or more tensors of rank at least one sharing their
-first dimension, as @tt{TensorDataset}: item @racket[i] is
-@racket[(select t 0 i)] per tensor. Anything else is a contract violation
-blamed on the caller.
+first dimension and their device, as @tt{TensorDataset}: item @racket[i]
+is @racket[(select t 0 i)] per tensor. Anything else is a contract
+violation blamed on the caller.
 With @racket[default-collate], its batches never go through items: a
 contiguous ascending run of indices is a @racket[narrow] of each tensor,
 and any other run is one @racket[index-select] with the indices on the
@@ -89,7 +89,7 @@ Recognises the result of @racket[tensor-dataset].
 @defproc[(default-collate [items (non-empty-listof (non-empty-listof tensor?))])
          any]{
 @tt{default_collate} for tensor fields: one @racket[stack] per field, as
-values.
+values. Every item must carry the same number of fields.
 }
 
 @section{Loaders}
@@ -108,7 +108,7 @@ built on the calling thread when they are asked for. Every traversal
 draws what one @tt{DataLoader} iterator draws, in its order, from
 @racket[generator] or else the global stream: one @racket[draw-seed] when
 the traversal starts, shuffled or not; with @racket[#:shuffle?] the
-permutation, and once it is used up the trailing permutation its sampler
+permutation when the first batch is asked for, and once it is used up the trailing permutation its sampler
 discards, before a final partial batch or else when the traversal is
 exhausted. A traversal abandoned early leaves the stream where PyTorch's
 would. The stream continues across traversals, so

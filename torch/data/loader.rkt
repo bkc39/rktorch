@@ -1,8 +1,8 @@
 #lang racket/base
 
 (require (only-in racket/contract/base
-                  -> ->* ->i any any/c contract-out flat-named-contract listof
-                  non-empty-listof or/c)
+                  -> ->* ->i and/c any any/c contract-out flat-named-contract
+                  listof non-empty-listof or/c)
          (only-in racket/generic define-generics)
          (only-in racket/list first)
          (only-in "../foreign.rkt"
@@ -21,10 +21,14 @@
 
 (define index-tensor/c
   (flat-named-contract
-   'int64-vector
+   'non-empty-int64-vector
    (lambda (v)
-     (and (tensor? v) (eq? (tensor-dtype v) 'int64) (= 1 (length (tensor-shape v)))))))
-(define indices/c (or/c (listof exact-nonnegative-integer?) index-tensor/c))
+     (and (tensor? v)
+          (eq? (tensor-dtype v) 'int64)
+          (= 1 (length (tensor-shape v)))
+          (positive? (car (tensor-shape v)))))))
+(define indices/c
+  (or/c (non-empty-listof exact-nonnegative-integer?) index-tensor/c))
 (define collate/c (-> (non-empty-listof list?) any))
 
 (define-generics dataset
@@ -102,16 +106,32 @@
    'same-leading-dimension
    (lambda (u) (and (batched/c u) (= (car (tensor-shape u)) (car (tensor-shape t)))))))
 
+(define (same-device/c t)
+  (flat-named-contract
+   'same-device
+   (lambda (u) (and (tensor? u) (equal? (tensor-device u) (tensor-device t))))))
+
 (define/contract-out (tensor-dataset t . more) ;; noqa
   (->i ([t batched/c])
-       #:rest [more (t) (listof (same-leading-dimension/c t))]
+       #:rest [more (t) (listof (and/c (same-leading-dimension/c t) (same-device/c t)))]
        [result dataset?])
   (make-tensor-dataset (cons t more)))
 
 (provide (contract-out [tensor-dataset? (-> any/c boolean?)]))
 
+(define items/c
+  (flat-named-contract
+   'rectangular-tensor-items
+   (lambda (v)
+     (and (list? v)
+          (pair? v)
+          (for/and ([item (in-list v)])
+            (and (list? item) (pair? item) (andmap tensor? item)))
+          (let ([n (length (first v))])
+            (for/and ([item (in-list v)]) (= (length item) n)))))))
+
 (define/contract-out (default-collate items) ;; noqa
-  (-> (non-empty-listof (non-empty-listof tensor?)) any)
+  (-> items/c any)
   (apply values
          (for/list ([field (in-range (length (first items)))])
            (stack (for/list ([item (in-list items)]) (list-ref item field))))))
@@ -160,28 +180,31 @@
   (if g (draw-seed #:generator g) (draw-seed))
   (define sampler
     (and (dataloader-shuffle? loader) (or g (make-generator (draw-seed)))))
-  (define perm
-    (and sampler
-         (let ([drawn (randperm n #:generator sampler)]
-               [dev (dataset-device ds)])
-           (if dev (to drawn dev) drawn))))
+  (define perm #f)
+  (define (permutation!)
+    (unless perm
+      (define drawn (randperm n #:generator sampler))
+      (define dev (dataset-device ds))
+      (set! perm (if dev (to drawn dev) drawn)))
+    perm)
   (define count (batch-count loader))
   (define remainder-drawn? #f)
   (define (finish!)
     (when (and sampler (not remainder-drawn?))
+      (permutation!)
       (set! remainder-drawn? #t)
       (void (randperm n #:generator sampler))))
   (define partial-last?
     (and (not (dataloader-drop-last? loader)) (positive? (remainder n b))))
   (define (batch k)
-    (when (and partial-last? (= k (sub1 count)))
-      (finish!))
     (define start (* k b))
     (define len (min b (- n start)))
     (define indices
-      (if perm
-          (narrow perm 0 start len)
+      (if sampler
+          (narrow (permutation!) 0 start len)
           (for/list ([i (in-range start (+ start len))]) i)))
+    (when (and partial-last? (= k (sub1 count)))
+      (finish!))
     (dataset-batch ds indices (dataloader-collate loader)))
   (values count batch finish!))
 

@@ -68,6 +68,12 @@
     (check-exn #rx"int64-vector"
                (lambda () (dataset-batch ds (reshape (arange 4 #:dtype 'int64) 2 2)
                                          default-collate)))
+    (check-exn #rx"int64-vector"
+               (lambda () (dataset-batch ds (arange 0 #:dtype 'int64) default-collate)))
+    (check-exn exn:fail:contract? (lambda () (dataset-batch ds '() default-collate)))
+    (check-exn #rx"rectangular-tensor-items"
+               (lambda () (default-collate (list (list (ones 2) (ones 2)) (list (ones 2))))))
+    (check-exn #rx"rectangular-tensor-items" (lambda () (default-collate '(()))))
     (check-exn exn:fail:contract?
                (lambda () (dataset-batch ds '(-6 -5 -4) default-collate))
                "indices are natural numbers, not end-relative")
@@ -195,7 +201,17 @@
     (check-equal? (length exhausted) 2)
     (check-equal? (tensor->list (randperm 6 #:generator g))
                   (tensor->list (randperm 6 #:generator twin))
-                  "exhaustion draws the remainder"))
+                  "exhaustion draws the remainder")
+    ;; a traversal started but never asked for a batch drew only its base seed
+    (define g-idle (make-generator 11))
+    (define-values (_next _more?)
+      (sequence-generate
+       (in-dataloader (dataloader ds #:batch-size 3 #:shuffle? #t #:generator g-idle))))
+    (define twin-idle (make-generator 11))
+    (void (draw-seed #:generator twin-idle))
+    (check-equal? (tensor->list (randperm 6 #:generator g-idle))
+                  (tensor->list (randperm 6 #:generator twin-idle))
+                  "the permutation waits for the first batch"))
 
   (test-case "dataloader: shuffle draws a permutation per traversal"
     (define ds (tensor-dataset xs ys))
@@ -248,6 +264,7 @@
     (for ([dev (in-list (list (and (cuda-available?) (cuda-device))
                               (and (mps-available?) (mps-device))))]
           #:when dev)
+      (check-exn #rx"same-device" (lambda () (tensor-dataset (to xs dev) ys)))
       (define ds (tensor-dataset (to xs dev) (to ys dev)))
       (define loader
         (dataloader ds #:batch-size 4 #:shuffle? #t #:generator (make-generator 3)))
