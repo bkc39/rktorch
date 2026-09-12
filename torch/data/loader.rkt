@@ -50,8 +50,6 @@
   #:ref (i)
   (apply values (for/list ([t (in-list tensors)]) (select t 0 i)))
   #:device (tensor-device (first tensors))
-  ;; the whole-batch path is default-collate's result computed natively;
-  ;; a custom collate must see the items, as DataLoader's collate_fn does
   #:batch (indices collate)
   (cond
     [(not (default-collate? collate))

@@ -8,7 +8,7 @@
                      (only-in "../private/definer.rkt"
                               contract-export ctor-formal init-formals))
          (only-in racket/contract/base
-                  -> any any/c contract-out flat-named-contract
+                  -> ->i any any/c contract-out flat-named-contract
                   non-empty-listof or/c)
          (only-in racket/generic define-generics)
          (only-in racket/list first)
@@ -26,7 +26,10 @@
           [dataset? (-> any/c boolean?)]
           [dataset-length (-> dataset? exact-nonnegative-integer?)]
           [dataset-ref (-> dataset? exact-nonnegative-integer? any)]
-          [dataset-batch (-> dataset? indices/c collate/c any)]
+          [dataset-batch (->i ([ds dataset?]
+                               [indices (ds) (indices-of/c ds)]
+                               [collate collate/c])
+                              any)]
           [dataset-device (-> dataset? (or/c device? #f))]))
 
 (define index-tensor/c
@@ -40,6 +43,17 @@
 (define indices/c
   (or/c (non-empty-listof exact-nonnegative-integer?) index-tensor/c))
 (define collate/c (-> (non-empty-listof list?) any))
+
+;; a list is checked against the length; a tensor's elements are not read
+(define (indices-of/c ds)
+  (define n (dataset-length ds))
+  (or/c (flat-named-contract
+         'indices-below-length
+         (lambda (v)
+           (and (list? v) (pair? v)
+                (andmap (lambda (i) (and (exact-nonnegative-integer? i) (< i n)))
+                        v))))
+        index-tensor/c))
 
 (define-generics dataset
   (dataset-length dataset)

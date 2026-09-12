@@ -137,8 +137,8 @@ The item at @racket[i], as one value per field, as
                         [collate collate/c])
          any]{
 The batch at @racket[indices], as values. @racket[indices] is a non-empty
-list of natural numbers, or a non-empty rank-one int64 tensor when a
-loader cuts it from a permutation.
+list of natural numbers below the length, or a non-empty rank-one int64
+tensor when a loader cuts it from a permutation.
 }
 
 @defproc[(tensor-dataset [t tensor?] [more tensor?] ...) tensor-dataset?]{

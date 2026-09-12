@@ -75,6 +75,8 @@
     (check-exn #rx"int64-vector"
                (lambda () (dataset-batch ds (arange 0 #:dtype 'int64) default-collate)))
     (check-exn exn:fail:contract? (lambda () (dataset-batch ds '() default-collate)))
+    (check-exn #rx"indices-below-length"
+               (lambda () (dataset-batch ds '(0 6) default-collate)))
     (check-exn #rx"stackable-tensor-items"
                (lambda () (default-collate (list (list (ones 2) (ones 2)) (list (ones 2))))))
     (check-exn #rx"stackable-tensor-items" (lambda () (default-collate '(()))))
