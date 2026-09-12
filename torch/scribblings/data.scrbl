@@ -31,13 +31,80 @@ takes. One traversal of a loader is one epoch.
 
 @section{Datasets}
 
+@defform[(define-dataset name (field ...) clause ...)
+         #:grammar
+         ([field id
+                 [id default-expr]
+                 (code:line keyword id)
+                 (code:line keyword [id default-expr])]
+          [clause (code:line #:init (formal ...) init-body ...)
+                  (code:line #:init (formal ... #:rest rest-id) init-body ...)
+                  (code:line #:init (formal ... . rest-id) init-body ...)
+                  (code:line #:length length-expr)
+                  (code:line #:ref (index-id) body ...+)
+                  (code:line #:batch (indices-id collate-id) body ...+)
+                  (code:line #:device device-expr)
+                  (code:line #:contract contract-expr)
+                  (code:line #:predicate id)]
+          [formal id
+                  [id default-expr]
+                  (code:line keyword id)
+                  (code:line keyword [id default-expr])])
+         #:contracts ([contract-expr contract?])]{
+
+Defines a map-style dataset: a constructor @racket[name], a predicate
+@racket[name?], and a structure with one slot per @racket[field] that
+implements @racket[gen:dataset]. The clauses are the methods of a
+@tt{Dataset} subclass, with every field in scope: @racket[#:init] is
+@tt{__init__}, @racket[#:length] is @tt{__len__}, and @racket[#:ref] is
+@tt{__getitem__}, returning the item at @racket[index-id] as one value per
+field. Both are required.
+
+@racketblock[
+(define-dataset squares (n)
+  #:init (n)
+  #:length n
+  #:ref (i) (values (full (* i i) 2) (tensor i)))
+]
+
+@racket[#:init]'s @racket[formal]s are the constructor's arguments, in the
+grammar of @racket[define]. Every field starts as @racket[#f], or as the
+argument of the same name when a formal shares it, and @racket[init-body]
+assigns fields with @racket[set!]. Without @racket[#:init], the fields are
+themselves the constructor formals.
+
+@racket[#:batch] replaces the default batch, which fetches each item with
+@racket[#:ref] and hands the list of items to @racket[collate-id]; use it
+when a whole batch is one native op, as @racket[tensor-dataset] does.
+@racket[indices-id] is an @racket[indices/c], a list or an int64 tensor;
+@racket[indices->list] reads either. @racket[#:device] answers
+@racket[dataset-device], @racket[#f] by default.
+
+@racket[#:contract] provides the constructor under @racket[contract-expr]
+and the predicate under its lowercase name, or the @racket[#:predicate]
+one, as @racket[define-layer] does; without it nothing is exported.
+}
+
 @defthing[gen:dataset any/c]{
-The generic interface of a map-style dataset, with methods
-@racket[dataset-length], @racket[dataset-ref], @racket[dataset-batch], and
-@racket[dataset-device]. A structure implementing the first two gets
-@racket[dataset-batch] by default: the items at the indices, each as a
-list of its fields, handed to the collate. A dataset over tensors overrides
-it with one native op per batch.
+The generic interface a @racket[define-dataset] structure implements, with
+methods @racket[dataset-length], @racket[dataset-ref],
+@racket[dataset-batch], and @racket[dataset-device]. A structure written
+by hand implementing the first two gets the other two by default.
+}
+
+@defproc[(indices->list [indices indices/c])
+         (non-empty-listof exact-nonnegative-integer?)]{
+The indices of a batch as a list, whether a loader handed them over as a
+list or as an int64 tensor.
+}
+
+@defthing[indices/c contract?]{
+A non-empty list of natural numbers, or a non-empty rank-one int64 tensor.
+}
+
+@defthing[collate/c contract?]{
+A procedure from a non-empty list of items, each a list of fields, to the
+batch's values.
 }
 
 @defproc[(dataset-device [ds dataset?]) (or/c device? #f)]{
@@ -70,11 +137,11 @@ list of natural numbers, or a non-empty rank-one int64 tensor when a
 loader cuts it from a permutation.
 }
 
-@defproc[(tensor-dataset [t tensor?] [more tensor?] ...) dataset?]{
+@defproc[(tensor-dataset [t tensor?] [more tensor?] ...) tensor-dataset?]{
 A dataset over one or more tensors of rank at least one sharing their
-first dimension and their device, as @tt{TensorDataset}: item @racket[i]
-is @racket[(select t 0 i)] per tensor. Anything else is a contract
-violation blamed on the caller.
+first dimension and their device, as @tt{TensorDataset}, written with
+@racket[define-dataset]: item @racket[i] is @racket[(select t 0 i)] per
+tensor. Anything else is a contract violation blamed on the caller.
 With @racket[default-collate], its batches never go through items: a
 contiguous ascending run of indices is a @racket[narrow] of each tensor,
 and any other run is one @racket[index-select] with the indices on the
@@ -90,6 +157,13 @@ Recognises the result of @racket[tensor-dataset].
          any]{
 @tt{default_collate} for tensor fields: one @racket[stack] per field, as
 values. Every item must carry the same number of fields.
+}
+
+@defproc[(default-collate? [v any/c]) boolean?]{
+Recognises @racket[default-collate] however it arrived, through any number
+of contract boundaries. A @racket[#:batch] body that computes the default
+batch natively asks this before taking its fast path, and hands the items
+to any other collate.
 }
 
 @section{Loaders}

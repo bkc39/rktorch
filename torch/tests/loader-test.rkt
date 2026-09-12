@@ -97,12 +97,12 @@
     (check-equal? (for/list ([(n ids) (in-dataloader counted)]) (cons n ids))
                   '((4 0 1 2 3) (2 4 5))))
 
-  (test-case "a hand-written dataset goes through dataset-ref and collate"
-    (struct Squares (n)
-      #:methods gen:dataset
-      [(define (dataset-length self) (Squares-n self))
-       (define (dataset-ref _self i) (values (full (* i i) 2) (tensor i)))])
-    (define ds (Squares 5))
+  (test-case "a dataset without #:batch goes through dataset-ref and collate"
+    (define-dataset squares (n)
+      #:init (n)
+      #:length n
+      #:ref (i) (values (full (* i i) 2) (tensor i)))
+    (define ds (squares 5))
     (define-values (xb yb) (dataset-batch ds '(1 3) default-collate))
     (check-equal? (tensor-shape xb) '(2 2))
     (check-equal? (tensor->list xb) '(1.0 1.0 9.0 9.0))

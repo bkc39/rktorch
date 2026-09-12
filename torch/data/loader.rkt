@@ -1,101 +1,27 @@
 #lang racket/base
 
 (require (only-in racket/contract/base
-                  -> ->* ->i and/c any any/c contract-out flat-named-contract
-                  listof non-empty-listof or/c unsupplied-arg?)
-         (only-in racket/generic define-generics)
+                  -> ->i and/c any/c contract-out flat-named-contract listof
+                  or/c unsupplied-arg?)
          (only-in racket/list first)
          (only-in "../foreign.rkt"
-                  device? draw-seed generator? index-select make-generator
-                  narrow randperm select stack tensor tensor-device
-                  tensor-dtype tensor-shape tensor->list tensor? to)
-         (only-in "../private/contract.rkt" define/contract-out))
+                  draw-seed generator? index-select make-generator narrow
+                  randperm select tensor tensor-device tensor-shape tensor?
+                  to)
+         (only-in "../private/contract.rkt" define/contract-out)
+         "dataset.rkt")
 
-(provide gen:dataset
-         (contract-out
-          [dataset? (-> any/c boolean?)]
-          [dataset-length (-> dataset? exact-nonnegative-integer?)]
-          [dataset-ref (-> dataset? exact-nonnegative-integer? any)]
-          [dataset-batch (-> dataset? indices/c collate/c any)]
-          [dataset-device (-> dataset? (or/c device? #f))]))
-
-(define index-tensor/c
-  (flat-named-contract
-   'non-empty-int64-vector
-   (lambda (v)
-     (and (tensor? v)
-          (eq? (tensor-dtype v) 'int64)
-          (= 1 (length (tensor-shape v)))
-          (positive? (car (tensor-shape v)))))))
-(define indices/c
-  (or/c (non-empty-listof exact-nonnegative-integer?) index-tensor/c))
-(define collate/c (-> (non-empty-listof list?) any))
-
-(define-generics dataset
-  (dataset-length dataset)
-  (dataset-ref dataset i)
-  (dataset-batch dataset indices collate)
-  (dataset-device dataset)
-  #:fallbacks
-  [(define (dataset-batch self indices collate) ;; noqa
-     (batch-by-ref self indices collate))
-   (define (dataset-device self) #f)]) ;; noqa
-
-(define (batch-by-ref ds indices collate) ;; noqa
-  (collate (for/list ([i (in-list (index-list indices))])
-             (call-with-values (lambda () (dataset-ref ds i)) list))))
-
-(define (index-list indices)
-  (if (tensor? indices) (tensor->list indices) indices))
+(provide (all-from-out "dataset.rkt"))
 
 ;; a contiguous ascending run of indices is a narrow, not a gather
 (define (run-start indices n)
   (cond
     [(tensor? indices) #f]
-    [(null? indices) #f]
     [else
      (define start (first indices))
      (and (for/and ([i (in-list indices)] [k (in-naturals start)]) (= i k))
           (<= (+ start (length indices)) n)
           start)]))
-
-;; the struct's name goes to the variadic constructor below; the plain
-;; constructor stays internal
-(struct tensor-dataset (tensors) ;; noqa
-  #:constructor-name make-tensor-dataset
-  #:omit-define-syntaxes
-  #:methods gen:dataset
-  [(define (dataset-length self)
-     (car (tensor-shape (first (tensor-dataset-tensors self)))))
-   (define (dataset-ref self i)
-     (apply values
-            (for/list ([t (in-list (tensor-dataset-tensors self))])
-              (select t 0 i))))
-   (define (dataset-device self)
-     (tensor-device (first (tensor-dataset-tensors self))))
-   ;; the whole-batch path is default-collate's result computed natively;
-   ;; a custom collate must see the items, as DataLoader's collate_fn does.
-   ;; chaperone-of?, not eq?: the exported default-collate is the contract's
-   ;; chaperone of the one bound here
-   (define (dataset-batch self indices collate)
-     (cond
-       [(not (chaperone-of? collate default-collate))
-        (batch-by-ref self indices collate)]
-       [else
-        (define ts (tensor-dataset-tensors self))
-        (define start (run-start indices (dataset-length self)))
-        (apply values
-               (cond
-                 [start
-                  (for/list ([t (in-list ts)])
-                    (narrow t 0 start (length indices)))]
-                 [else
-                  (define index
-                    (if (tensor? indices)
-                        indices
-                        (tensor indices #:dtype 'int64)))
-                  (for/list ([t (in-list ts)])
-                    (index-select t 0 (to index (tensor-device t))))]))]))])
 
 (define batched/c
   (flat-named-contract 'batched-tensor
@@ -111,30 +37,37 @@
    'same-device
    (lambda (u) (and (tensor? u) (equal? (tensor-device u) (tensor-device t))))))
 
-(define/contract-out (tensor-dataset t . more) ;; noqa
-  (->i ([t batched/c])
-       #:rest [more (t) (listof (and/c (same-leading-dimension/c t) (same-device/c t)))]
-       [result dataset?])
-  (make-tensor-dataset (cons t more)))
-
-(provide (contract-out [tensor-dataset? (-> any/c boolean?)]))
-
-(define items/c
-  (flat-named-contract
-   'rectangular-tensor-items
-   (lambda (v)
-     (and (list? v)
-          (pair? v)
-          (for/and ([item (in-list v)])
-            (and (list? item) (pair? item) (andmap tensor? item)))
-          (let ([n (length (first v))])
-            (for/and ([item (in-list v)]) (= (length item) n)))))))
-
-(define/contract-out (default-collate items) ;; noqa
-  (-> items/c any)
-  (apply values
-         (for/list ([field (in-range (length (first items)))])
-           (stack (for/list ([item (in-list items)]) (list-ref item field))))))
+(define-dataset tensor-dataset (tensors) ;; noqa
+  #:contract (->i ([t batched/c])
+                  #:rest [more (t) (listof (and/c (same-leading-dimension/c t)
+                                                  (same-device/c t)))]
+                  [result tensor-dataset?])
+  #:init (t . more)
+  (set! tensors (cons t more))
+  #:length (car (tensor-shape (first tensors)))
+  #:ref (i)
+  (apply values (for/list ([t (in-list tensors)]) (select t 0 i)))
+  #:device (tensor-device (first tensors))
+  ;; the whole-batch path is default-collate's result computed natively;
+  ;; a custom collate must see the items, as DataLoader's collate_fn does
+  #:batch (indices collate)
+  (cond
+    [(not (default-collate? collate))
+     (collate (for/list ([i (in-list (indices->list indices))])
+                (for/list ([t (in-list tensors)]) (select t 0 i))))]
+    [else
+     (define n (car (tensor-shape (first tensors))))
+     (define start (run-start indices n))
+     (apply values
+            (cond
+              [start
+               (for/list ([t (in-list tensors)])
+                 (narrow t 0 start (length indices)))]
+              [else
+               (define index
+                 (if (tensor? indices) indices (tensor indices #:dtype 'int64)))
+               (for/list ([t (in-list tensors)])
+                 (index-select t 0 (to index (tensor-device t))))]))]))
 
 (struct dataloader (dataset batch-size shuffle? drop-last? collate generator) ;; noqa
   #:constructor-name make-dataloader
