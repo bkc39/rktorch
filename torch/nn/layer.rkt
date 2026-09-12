@@ -430,7 +430,8 @@
                    [(field-name ...)
                     (for/list ([f (in-list field-ids)])
                       (symbol->string (syntax-e f)))]
-                   [(field-acc ...) (map accessor field-ids)])
+                   [(field-acc ...) (map accessor field-ids)]
+                   [n-inputs (length (syntax->list #'(input ...)))])
        (with-syntax ([export (contract-export stx #'name #'name?
                                               (attribute ctc)
                                               (attribute pred))])
@@ -439,6 +440,8 @@
                #:reflection-name reflect-name)
              (define name? sid?)
              (define (forward-proc self . inputs)
+               (unless (= (length inputs) n-inputs)
+                 (apply raise-arity-error 'name n-inputs inputs))
                (let ([field.id (field-acc self)] ...)
                  (syntax-parameterize
                      ([with-mode (with-mode-transformer #'self)])

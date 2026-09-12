@@ -31,7 +31,10 @@
 Defines a layer: a constructor @racket[name], a predicate @racket[name?],
 and a struct with one slot per @racket[field].  An instance is a
 @racket[layer?] and applies as a procedure, running @racket[body] with
-every field in scope.
+every field in scope.  A call with other than one argument per
+@racket[input] raises @racket[exn:fail:contract:arity] under
+@racket[name], whether made directly, through @racket[forward], or
+through @racket[layer-forward].
 
 @racket[#:init] is the constructor body, the analogue of @tt{__init__}.
 Its @racket[formal]s are the constructor's arguments, in the grammar of
