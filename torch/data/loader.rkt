@@ -2,7 +2,7 @@
 
 (require (only-in racket/contract/base
                   -> ->* ->i and/c any any/c contract-out flat-named-contract
-                  listof non-empty-listof or/c)
+                  listof non-empty-listof or/c unsupplied-arg?)
          (only-in racket/generic define-generics)
          (only-in racket/list first)
          (only-in "../foreign.rkt"
@@ -146,13 +146,18 @@
                                  #:drop-last? [drop-last? #f]
                                  #:collate [collate default-collate]
                                  #:generator [generator #f])
-  (->* [dataset?]
-       [#:batch-size exact-positive-integer?
-        #:shuffle? boolean?
-        #:drop-last? boolean?
-        #:collate collate/c
-        #:generator (or/c generator? #f)]
-       dataloader?)
+  (->i ([ds dataset?])
+       (#:batch-size [batch-size exact-positive-integer?]
+        #:shuffle? [shuffle? boolean?]
+        #:drop-last? [drop-last? boolean?]
+        #:collate [collate collate/c]
+        #:generator [generator (or/c generator? #f)])
+       #:pre/name (ds shuffle?)
+       "a shuffled loader needs a non-empty dataset, as RandomSampler does"
+       (or (unsupplied-arg? shuffle?)
+           (not shuffle?)
+           (positive? (dataset-length ds)))
+       [result dataloader?])
   (make-dataloader ds batch-size shuffle? drop-last? collate generator))
 
 (provide (contract-out [dataloader? (-> any/c boolean?)]))

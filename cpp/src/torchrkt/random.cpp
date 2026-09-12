@@ -72,6 +72,8 @@ tr_generator* tr_generator_new(uint64_t seed) {
 }
 
 void tr_generator_free(tr_generator* g) {
+  // GC finalizer, as tr_tensor_free: deliberately NO try/catch, a throw
+  // terminates inside libtorch's noexcept release first.
   delete g;
 }
 

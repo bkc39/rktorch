@@ -137,10 +137,13 @@
   #:property prop:custom-write
   (lambda (_g port _mode) (write-string "#<generator>" port)))
 
-(provide seed/c)
+(provide seed/c size/c)
 
 (define seed/c
   (flat-named-contract 'seed (integer-in 0 (sub1 (expt 2 64)))))
+
+(define size/c
+  (flat-named-contract 'size (integer-in 0 (sub1 (expt 2 63)))))
 
 (define/contract-out (make-generator seed) ;; noqa
   (-> seed/c generator?)
@@ -150,7 +153,7 @@
   (and (generator-impl? v) (Generator? (generator-impl-handle v))))
 
 (define/contract-out (randperm n #:generator [generator #f]) ;; noqa
-  (->* [exact-nonnegative-integer?] [#:generator generator?] tensor?)
+  (->* [size/c] [#:generator generator?] tensor?)
   (wrap 'randperm (tr-randperm/raw n generator)))
 
 (define/contract-out (draw-seed #:generator [generator #f]) ;; noqa

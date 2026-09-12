@@ -23,7 +23,8 @@
     (check-equal? (tensor-shape (randperm 0)) '(0))
     (check-exn exn:fail:contract? (lambda () (randperm -1)))
     (check-true (generator? (make-generator (sub1 (expt 2 64)))))
-    (check-exn #rx"seed" (lambda () (make-generator (expt 2 64)))))
+    (check-exn #rx"seed" (lambda () (make-generator (expt 2 64))))
+    (check-exn #rx"size" (lambda () (randperm (expt 2 63)))))
 
   (test-case "generators are released by the guarded finalizer"
     (define (runs) (cdr (assq 'runs (finalizer-diagnostics))))
@@ -202,6 +203,13 @@
     (check-equal? (tensor->list (randperm 6 #:generator g))
                   (tensor->list (randperm 6 #:generator twin))
                   "exhaustion draws the remainder")
+    ;; RandomSampler refuses an empty dataset; an unshuffled loader may be empty
+    (define none (tensor-dataset (ones 0 2)))
+    (check-exn #rx"non-empty dataset"
+               (lambda () (dataloader none #:batch-size 1 #:shuffle? #t)))
+    (check-equal? (for/list ([xb (in-dataloader (dataloader none #:batch-size 1))]) xb)
+                  '())
+    (check-equal? (dataloader-length (dataloader none #:batch-size 1 #:shuffle? #f)) 0)
     ;; a traversal started but never asked for a batch drew only its base seed
     (define g-idle (make-generator 11))
     (define-values (_next _more?)

@@ -51,7 +51,6 @@ inline void record_unknown_failure(const char* who) noexcept {
   }
 }
 
-// an opaque handle over whatever fn yields, or NULL with the error recorded
 template <typename Handle, typename Fn>
 Handle* alloc_handle(const char* who, Fn&& fn) noexcept {
   try {

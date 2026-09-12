@@ -61,6 +61,7 @@
          randperm
          draw-seed
          seed/c
+         size/c
          arange
          eye
          tensor)

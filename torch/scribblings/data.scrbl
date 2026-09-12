@@ -4,7 +4,7 @@
                      racket/contract
                      racket/sequence
                      (only-in torch
-                              device? draw-seed generator? index-select seed/c
+                              device? draw-seed generator? index-select seed/c size/c
                               make-generator narrow randn randperm select
                               stack tensor tensor?)
                      torch/data/loader))
@@ -104,7 +104,9 @@ values. Every item must carry the same number of fields.
          dataloader?]{
 A loader over @racket[ds], as @tt{DataLoader(ds, batch_size, shuffle,
 drop_last, collate_fn, generator)} with @tt{num_workers=0}: batches are
-built on the calling thread when they are asked for. Every traversal
+built on the calling thread when they are asked for. A shuffled loader
+needs a non-empty dataset, as @tt{RandomSampler} does; an empty one may
+still be traversed in order. Every traversal
 draws what one @tt{DataLoader} iterator draws, in its order, from
 @racket[generator] or else the global stream: one @racket[draw-seed] when
 the traversal starts, shuffled or not; with @racket[#:shuffle?] the
@@ -162,7 +164,11 @@ Recognises the result of @racket[make-generator].
 A natural number below @racket[(expt 2 64)].
 }
 
-@defproc[(randperm [n exact-nonnegative-integer?]
+@defthing[size/c flat-contract?]{
+A natural number below @racket[(expt 2 63)], the native size range.
+}
+
+@defproc[(randperm [n size/c]
                    [#:generator generator generator? #f])
          tensor?]{
 An int64 permutation of @racket[0] to @racket[n-1] on the CPU, drawn from
