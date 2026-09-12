@@ -574,6 +574,40 @@
              [p (in-list (hash-ref j 'after_global))]
              [i (in-naturals)])
          (check-= r p tol (format "global stream after shuffling: ~a" i)))
+       ;; every traversal draws the iterator's base seed, shuffled or not
+       (define ids (tensor-dataset (arange n #:dtype 'int64)))
+       (define g5 (make-generator 5))
+       (for* ([_e (in-range 2)]
+              [ib (in-dataloader (dataloader ids #:batch-size 4 #:generator g5))])
+         (void ib))
+       (check-equal? (tensor->list (randperm n #:generator g5))
+                     (hash-ref j 'unshuffled_then)
+                     "an unshuffled epoch draws its base seed")
+       (manual-seed! 3)
+       (for ([ib (in-dataloader (dataloader ids #:batch-size 4))])
+         (void ib))
+       (for ([r (in-list (tensor->list (randn 3)))]
+             [p (in-list (hash-ref j 'after_global_plain))]
+             [i (in-naturals)])
+         (check-= r p tol (format "global stream after a plain epoch: ~a" i)))
+       ;; the remainder draw waits until the first permutation is used up;
+       ;; in-range first, so the loader's exhaustion check never runs
+       (define (partial batch-size take)
+         (define g (make-generator 11))
+         (define loader
+           (dataloader ids #:batch-size batch-size #:shuffle? #t #:generator g))
+         (define n-first (if (eq? take 'all) (dataloader-length loader) 1))
+         (hasheq 'first
+                 (for/list ([_i (in-range n-first)] [ib (in-dataloader loader)])
+                   (tensor->list ib))
+                 'second
+                 (for/list ([ib (in-dataloader loader)]) (tensor->list ib))
+                 'then
+                 (tensor->list (randperm n #:generator g))))
+       (for ([case (in-list '((one_of_4 4 one) (all_of_4 4 all) (all_of_5 5 all)))])
+         (check-equal? (partial (cadr case) (caddr case))
+                       (hash-ref (hash-ref j 'partial_orders) (car case))
+                       (format "partial traversal ~a" (car case))))
        (manual-seed! 0)
        (define model (Linear 3 1))
        (define opt (sgd (parameters model) #:lr 0.1))

@@ -15,6 +15,8 @@
                   ->*
                   ->i
                   any/c
+                  flat-named-contract
+                  integer-in
                   list/c
                   or/c
                   unsupplied-arg?)
@@ -135,8 +137,13 @@
   #:property prop:custom-write
   (lambda (_g port _mode) (write-string "#<generator>" port)))
 
+(provide seed/c)
+
+(define seed/c
+  (flat-named-contract 'seed (integer-in 0 (sub1 (expt 2 64)))))
+
 (define/contract-out (make-generator seed) ;; noqa
-  (-> exact-nonnegative-integer? generator?)
+  (-> seed/c generator?)
   (generator-impl (check-handle 'make-generator (tr-generator-new/raw seed))))
 
 (define/contract-out (generator? v) (-> any/c boolean?) ;; noqa

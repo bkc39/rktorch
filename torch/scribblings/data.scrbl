@@ -4,7 +4,7 @@
                      racket/contract
                      racket/sequence
                      (only-in torch
-                              device? draw-seed generator? index-select
+                              device? draw-seed generator? index-select seed/c
                               make-generator narrow randn randperm select
                               stack tensor tensor?)
                      torch/data/loader))
@@ -65,13 +65,16 @@ The item at @racket[i], as one value per field, as
                                        tensor?)]
                         [collate (-> (non-empty-listof list?) any)])
          any]{
-The batch at @racket[indices], as values. @racket[indices] is a list, or
-an int64 tensor when a loader cuts it from a permutation.
+The batch at @racket[indices], as values. @racket[indices] is a list of
+natural numbers, or a rank-one int64 tensor when a loader cuts it from a
+permutation.
 }
 
 @defproc[(tensor-dataset [t tensor?] [more tensor?] ...) dataset?]{
-A dataset over one or more tensors sharing their first dimension, as
-@tt{TensorDataset}: item @racket[i] is @racket[(select t 0 i)] per tensor.
+A dataset over one or more tensors of rank at least one sharing their
+first dimension, as @tt{TensorDataset}: item @racket[i] is
+@racket[(select t 0 i)] per tensor. Anything else is a contract violation
+blamed on the caller.
 With @racket[default-collate], its batches never go through items: a
 contiguous ascending run of indices is a @racket[narrow] of each tensor,
 and any other run is one @racket[index-select] with the indices on the
@@ -101,11 +104,15 @@ values.
          dataloader?]{
 A loader over @racket[ds], as @tt{DataLoader(ds, batch_size, shuffle,
 drop_last, collate_fn, generator)} with @tt{num_workers=0}: batches are
-built on the calling thread when they are asked for. With
-@racket[#:shuffle?] every traversal draws exactly what a @tt{DataLoader}
-epoch draws from @racket[generator]: one @racket[draw-seed], the
-permutation, and the trailing permutation its sampler discards; the stream
-continues across traversals, so @racket[(make-generator s)] here and
+built on the calling thread when they are asked for. Every traversal
+draws what one @tt{DataLoader} iterator draws, in its order, from
+@racket[generator] or else the global stream: one @racket[draw-seed] when
+the traversal starts, shuffled or not; with @racket[#:shuffle?] the
+permutation, and once it is used up the trailing permutation its sampler
+discards, before a final partial batch or else when the traversal is
+exhausted. A traversal abandoned early leaves the stream where PyTorch's
+would. The stream continues across traversals, so
+@racket[(make-generator s)] here and
 @tt{torch.Generator().manual_seed(s)} there yield the same batch order
 epoch after epoch. Without a generator the draws come from the global
 stream the way @tt{RandomSampler} makes them, seeding a fresh generator
@@ -138,8 +145,10 @@ loader n)]) ...)] is the nested @racket[for*] over @racket[in-range] and
 
 @defmodule[torch #:link-target? #f]
 
-@defproc[(make-generator [seed exact-nonnegative-integer?]) generator?]{
+@defproc[(make-generator [seed seed/c]) generator?]{
 A CPU random generator with its own stream, @tt{torch.Generator().manual_seed(seed)}.
+The seed is a natural number below @racket[(expt 2 64)], the range the
+native generator takes.
 Draws from it leave the global stream that @racket[randn] and model
 initialisation use untouched, so a seeded shuffle does not perturb seeded
 parity elsewhere.
@@ -147,6 +156,10 @@ parity elsewhere.
 
 @defproc[(generator? [v any/c]) boolean?]{
 Recognises the result of @racket[make-generator].
+}
+
+@defthing[seed/c flat-contract?]{
+A natural number below @racket[(expt 2 64)].
 }
 
 @defproc[(randperm [n exact-nonnegative-integer?]

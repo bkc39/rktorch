@@ -1,13 +1,14 @@
 #lang racket/base
 
 (require (only-in racket/contract/base
-                  -> ->* any any/c contract-out listof non-empty-listof or/c)
+                  -> ->* ->i any any/c contract-out flat-named-contract listof
+                  non-empty-listof or/c)
          (only-in racket/generic define-generics)
          (only-in racket/list first)
          (only-in "../foreign.rkt"
                   device? draw-seed generator? index-select make-generator
                   narrow randperm select stack tensor tensor-device
-                  tensor-shape tensor->list tensor? to)
+                  tensor-dtype tensor-shape tensor->list tensor? to)
          (only-in "../private/contract.rkt" define/contract-out))
 
 (provide gen:dataset
@@ -18,7 +19,12 @@
           [dataset-batch (-> dataset? indices/c collate/c any)]
           [dataset-device (-> dataset? (or/c device? #f))]))
 
-(define indices/c (or/c (listof exact-nonnegative-integer?) tensor?))
+(define index-tensor/c
+  (flat-named-contract
+   'int64-vector
+   (lambda (v)
+     (and (tensor? v) (eq? (tensor-dtype v) 'int64) (= 1 (length (tensor-shape v)))))))
+(define indices/c (or/c (listof exact-nonnegative-integer?) index-tensor/c))
 (define collate/c (-> (non-empty-listof list?) any))
 
 (define-generics dataset
@@ -51,7 +57,7 @@
 
 ;; the struct's name goes to the variadic constructor below; the plain
 ;; constructor stays internal
-(struct tensor-dataset (tensors)
+(struct tensor-dataset (tensors) ;; noqa
   #:constructor-name make-tensor-dataset
   #:omit-define-syntaxes
   #:methods gen:dataset
@@ -87,15 +93,19 @@
                   (for/list ([t (in-list ts)])
                     (index-select t 0 (to index (tensor-device t))))]))]))])
 
+(define batched/c
+  (flat-named-contract 'batched-tensor
+                       (lambda (v) (and (tensor? v) (pair? (tensor-shape v))))))
+
+(define (same-leading-dimension/c t)
+  (flat-named-contract
+   'same-leading-dimension
+   (lambda (u) (and (batched/c u) (= (car (tensor-shape u)) (car (tensor-shape t)))))))
+
 (define/contract-out (tensor-dataset t . more) ;; noqa
-  (-> tensor? tensor? ... dataset?)
-  (define n (car (tensor-shape t)))
-  (for ([u (in-list more)])
-    (unless (= (car (tensor-shape u)) n)
-      (raise-arguments-error 'tensor-dataset
-                             "every tensor must share the first dimension"
-                             "expected" n
-                             "given" (car (tensor-shape u)))))
+  (->i ([t batched/c])
+       #:rest [more (t) (listof (same-leading-dimension/c t))]
+       [result dataset?])
   (make-tensor-dataset (cons t more)))
 
 (provide (contract-out [tensor-dataset? (-> any/c boolean?)]))
@@ -138,29 +148,34 @@
       (quotient n b)
       (quotient (+ n b -1) b)))
 
-;; the second permutation is the remainder draw RandomSampler discards
-(define (epoch-permutation loader n)
-  (define g (dataloader-generator loader))
-  (define gen
-    (cond
-      [g (draw-seed #:generator g) g]
-      [else (draw-seed) (make-generator (draw-seed))]))
-  (begin0 (randperm n #:generator gen)
-    (randperm n #:generator gen)))
-
+;; One traversal draws what one DataLoader iterator draws, in its order:
+;; the base seed on creation, the permutation when the first batch is
+;; asked for, and the remainder permutation RandomSampler discards once
+;; the first is used up: before a final partial batch, else on exhaustion.
 (define (epoch-batches loader)
   (define ds (dataloader-dataset loader))
   (define n (dataset-length ds))
   (define b (dataloader-batch-size loader))
+  (define g (dataloader-generator loader))
+  (if g (draw-seed #:generator g) (draw-seed))
+  (define sampler
+    (and (dataloader-shuffle? loader) (or g (make-generator (draw-seed)))))
   (define perm
-    (cond
-      [(dataloader-shuffle? loader)
-       (define drawn (epoch-permutation loader n))
-       (define dev (dataset-device ds))
-       (if dev (to drawn dev) drawn)]
-      [else #f]))
+    (and sampler
+         (let ([drawn (randperm n #:generator sampler)]
+               [dev (dataset-device ds)])
+           (if dev (to drawn dev) drawn))))
   (define count (batch-count loader))
+  (define remainder-drawn? #f)
+  (define (finish!)
+    (when (and sampler (not remainder-drawn?))
+      (set! remainder-drawn? #t)
+      (void (randperm n #:generator sampler))))
+  (define partial-last?
+    (and (not (dataloader-drop-last? loader)) (positive? (remainder n b))))
   (define (batch k)
+    (when (and partial-last? (= k (sub1 count)))
+      (finish!))
     (define start (* k b))
     (define len (min b (- n start)))
     (define indices
@@ -168,14 +183,23 @@
           (narrow perm 0 start len)
           (for/list ([i (in-range start (+ start len))]) i)))
     (dataset-batch ds indices (dataloader-collate loader)))
-  (values count batch))
+  (values count batch finish!))
 
 (define/contract-out (in-dataloader loader) ;; noqa
   (-> dataloader? sequence?)
   (make-do-sequence
    (lambda ()
-     (define-values (count batch) (epoch-batches loader))
-     (values batch add1 0 (lambda (k) (< k count)) #f #f))))
+     (define-values (count batch finish!) (epoch-batches loader))
+     (values batch
+             add1
+             0
+             (lambda (k)
+               (or (< k count)
+                   (begin
+                     (finish!)
+                     #f)))
+             #f
+             #f))))
 
 (define/contract-out (in-epochs loader n-epochs) ;; noqa
   (-> dataloader? exact-nonnegative-integer? sequence?)
@@ -183,23 +207,31 @@
    (lambda ()
      (define batch #f)
      (define count 0)
+     (define finish! void)
      ;; every epoch starts, and so draws, even one with no batches
      (define (start-from e)
        (cond
          [(>= e n-epochs) e]
          [else
-          (define-values (c b) (epoch-batches loader))
+          (define-values (c b f) (epoch-batches loader))
           (set! count c)
           (set! batch b)
-          (if (zero? c) (start-from (add1 e)) e)]))
+          (set! finish! f)
+          (cond
+            [(zero? c)
+             (finish!)
+             (start-from (add1 e))]
+            [else e])]))
      (values (lambda (pos)
                (call-with-values (lambda () (batch (cdr pos)))
                                  (lambda vals (apply values (car pos) vals))))
              (lambda (pos)
                (define k (add1 (cdr pos)))
-               (if (< k count)
-                   (cons (car pos) k)
-                   (cons (start-from (add1 (car pos))) 0)))
+               (cond
+                 [(< k count) (cons (car pos) k)]
+                 [else
+                  (finish!)
+                  (cons (start-from (add1 (car pos))) 0)]))
              (cons (start-from 0) 0)
              (lambda (pos) (< (car pos) n-epochs))
              #f

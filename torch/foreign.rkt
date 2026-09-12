@@ -60,6 +60,7 @@
          generator?
          randperm
          draw-seed
+         seed/c
          arange
          eye
          tensor)

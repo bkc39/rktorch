@@ -21,7 +21,9 @@
     (check-equal? (tensor->list (randperm 16 #:generator b)) a2)
     (check-equal? (tensor-dtype (randperm 4)) 'int64)
     (check-equal? (tensor-shape (randperm 0)) '(0))
-    (check-exn exn:fail:contract? (lambda () (randperm -1))))
+    (check-exn exn:fail:contract? (lambda () (randperm -1)))
+    (check-true (generator? (make-generator (sub1 (expt 2 64)))))
+    (check-exn #rx"seed" (lambda () (make-generator (expt 2 64)))))
 
   (test-case "generators are released by the guarded finalizer"
     (define (runs) (cdr (assq 'runs (finalizer-diagnostics))))
@@ -59,11 +61,18 @@
       (dataset-batch ds (tensor '(4 1) #:dtype 'int64) default-collate))
     (check-equal? (tensor->list yt) '(4 1) "an index tensor gathers too")
     (check-exn exn:fail:contract? (lambda () (tensor-dataset xs (ones 5))))
+    (check-exn #rx"same-leading-dimension" (lambda () (tensor-dataset xs (ones 5))))
+    (check-exn #rx"batched-tensor" (lambda () (tensor-dataset (tensor 1.0))))
+    (check-exn #rx"int64-vector"
+               (lambda () (dataset-batch ds (tensor '(1.0 2.0)) default-collate)))
+    (check-exn #rx"int64-vector"
+               (lambda () (dataset-batch ds (reshape (arange 4 #:dtype 'int64) 2 2)
+                                         default-collate)))
     (check-exn exn:fail:contract?
                (lambda () (dataset-batch ds '(-6 -5 -4) default-collate))
                "indices are natural numbers, not end-relative")
     (check-exn exn:fail:contract? (lambda () (dataset-ref ds -1)))
-    (check-exn #rx"share the first dimension"
+    (check-exn #rx"same-leading-dimension"
                (lambda () (tensor-dataset xs (ones 5 2))))
     (check-equal? (format "~a" ds) "#<tensor-dataset>")
     ;; the native path hands out views: a run's batch follows the source
@@ -122,7 +131,71 @@
       (for/first ([(xb yb) (in-dataloader (dataloader ds #:batch-size 6))])
         (list xb yb)))
     (check-equal? (tensor->list (car full)) (tensor->list xs))
-    (check-equal? (tensor->list (cadr full)) (tensor->list ys)))
+    (check-equal? (tensor->list (cadr full)) (tensor->list ys))
+    ;; an unshuffled traversal still draws the iterator's base seed
+    (define g (make-generator 5))
+    (for* ([_e (in-range 2)]
+           [(_xb _yb) (in-dataloader (dataloader ds #:batch-size 4 #:generator g))])
+      (void))
+    (define twin (make-generator 5))
+    (void (draw-seed #:generator twin))
+    (void (draw-seed #:generator twin))
+    (check-equal? (tensor->list (randperm 6 #:generator g))
+                  (tensor->list (randperm 6 #:generator twin))
+                  "one word per unshuffled epoch"))
+
+  (test-case "the remainder permutation waits until the first is used up"
+    (define ds (tensor-dataset xs ys))
+    (define (run batch-size take)
+      (define g (make-generator 11))
+      (define loader
+        (dataloader ds #:batch-size batch-size #:shuffle? #t #:generator g))
+      (define n-first (if (eq? take 'all) (dataloader-length loader) 1))
+      ;; in-range first: the loader's exhaustion check never runs
+      (define first-orders
+        (for/list ([_i (in-range n-first)] [(_xb yb) (in-dataloader loader)])
+          (tensor->list yb)))
+      (define second-orders
+        (for/list ([(_xb yb) (in-dataloader loader)]) (tensor->list yb)))
+      (list first-orders second-orders (tensor->list (randperm 6 #:generator g))))
+    (define (replay batch-size take)
+      (define g (make-generator 11))
+      (define (perm) (tensor->list (randperm 6 #:generator g)))
+      (define (batches p)
+        (for/list ([k (in-range (quotient (+ 5 batch-size) batch-size))])
+          (for/list ([i (in-list p)] [j (in-naturals)]
+                     #:when (and (>= j (* k batch-size))
+                                 (< j (* (add1 k) batch-size))))
+            i)))
+      (void (draw-seed #:generator g))
+      (define first-perm (batches (perm)))
+      ;; batch 4 leaves a partial last batch, so a full first epoch drew the
+      ;; remainder before yielding it; batch 3 divides 6 and drew nothing
+      (when (and (eq? take 'all) (positive? (remainder 6 batch-size)))
+        (void (perm)))
+      (void (draw-seed #:generator g))
+      (define second-perm (batches (perm)))
+      (void (perm))
+      (list (if (eq? take 'all) first-perm (list (car first-perm)))
+            second-perm
+            (perm)))
+    (check-equal? (run 4 'one) (replay 4 'one) "one batch of four, abandoned")
+    (check-equal? (run 4 'all) (replay 4 'all) "all batches of four, not exhausted")
+    (check-equal? (run 3 'all) (replay 3 'all) "all batches of three, not exhausted")
+    (define g (make-generator 11))
+    (define exhausted
+      (for/list ([(_xb yb) (in-dataloader
+                            (dataloader ds #:batch-size 3 #:shuffle? #t
+                                        #:generator g))])
+        (tensor->list yb)))
+    (define twin (make-generator 11))
+    (void (draw-seed #:generator twin))
+    (void (randperm 6 #:generator twin))
+    (void (randperm 6 #:generator twin))
+    (check-equal? (length exhausted) 2)
+    (check-equal? (tensor->list (randperm 6 #:generator g))
+                  (tensor->list (randperm 6 #:generator twin))
+                  "exhaustion draws the remainder"))
 
   (test-case "dataloader: shuffle draws a permutation per traversal"
     (define ds (tensor-dataset xs ys))
