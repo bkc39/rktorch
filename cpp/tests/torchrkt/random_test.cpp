@@ -173,6 +173,26 @@ TEST(TorchrktRandom, DrawSeedReplaysAndAdvancesTheStream) {
   (void)pa;
 }
 
+// a bound-less random_ on int64 samples [0, 2^63): the seed word a
+// DataLoader draws is never negative, so the Racket side may take it as a
+// natural number
+TEST(TorchrktRandom, DrawSeedIsNeverNegative) {
+  tr_generator* g = tr_generator_new(0);
+  ASSERT_NE(g, nullptr) << tr_last_error();
+  for (int i = 0; i < 4096; ++i) {
+    int64_t seed = -1;
+    ASSERT_EQ(tr_generator_draw_seed(g, &seed), 0) << tr_last_error();
+    ASSERT_GE(seed, 0) << "draw " << i;
+  }
+  tr_generator_free(g);
+  ASSERT_EQ(tr_manual_seed(0), 0) << tr_last_error();
+  for (int i = 0; i < 4096; ++i) {
+    int64_t seed = -1;
+    ASSERT_EQ(tr_generator_draw_seed(nullptr, &seed), 0) << tr_last_error();
+    ASSERT_GE(seed, 0) << "global draw " << i;
+  }
+}
+
 TEST(TorchrktRandom, RandpermWithoutGeneratorAndErrors) {
   ASSERT_EQ(tr_manual_seed(5), 0) << tr_last_error();
   const std::vector<float> p1 = randperm_of(10, nullptr);

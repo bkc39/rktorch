@@ -11,11 +11,11 @@
          (only-in "../private/contract.rkt" define/contract-out))
 
 (provide gen:dataset
-         dataset?
          dataset-length
          dataset-ref
          dataset-batch
-         dataset-device)
+         dataset-device
+         (contract-out [dataset? (-> any/c boolean?)]))
 
 ;; A map-style dataset: an item per index, and a batch for a run of indices.
 ;; The batch method is what a loader calls; the fallback collates the items
