@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -89,6 +90,103 @@ TEST(TorchrktRandom, DifferentSeedsDiffer) {
 
   tr_tensor_free(a);
   tr_tensor_free(b);
+}
+
+std::vector<float> randperm_of(int64_t n, tr_generator* g) {
+  tr_tensor* p = tr_randperm(n, g);
+  EXPECT_NE(p, nullptr) << tr_last_error();
+  std::vector<float> out = data_of(p);
+  tr_tensor_free(p);
+  return out;
+}
+
+bool is_permutation(const std::vector<float>& xs) {
+  std::vector<float> sorted = xs;
+  std::sort(sorted.begin(), sorted.end());
+  for (size_t i = 0; i < sorted.size(); ++i) {
+    if (sorted[i] != static_cast<float>(i)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+TEST(TorchrktRandom, GeneratorSeedReplaysPermutations) {
+  tr_generator* a = tr_generator_new(7);
+  tr_generator* b = tr_generator_new(7);
+  ASSERT_NE(a, nullptr) << tr_last_error();
+  ASSERT_NE(b, nullptr) << tr_last_error();
+  const std::vector<float> a1 = randperm_of(16, a);
+  const std::vector<float> a2 = randperm_of(16, a);
+  EXPECT_TRUE(is_permutation(a1));
+  EXPECT_TRUE(is_permutation(a2));
+  EXPECT_NE(a1, a2) << "the stream continues across draws";
+  EXPECT_EQ(randperm_of(16, b), a1) << "same seed, same first draw";
+  EXPECT_EQ(randperm_of(16, b), a2) << "same seed, same second draw";
+  tr_generator_free(a);
+  tr_generator_free(b);
+  tr_generator_free(nullptr);
+}
+
+TEST(TorchrktRandom, GeneratorDrawsLeaveTheGlobalStreamAlone) {
+  ASSERT_EQ(tr_manual_seed(3), 0) << tr_last_error();
+  tr_tensor* before = make_randn({4});
+  const std::vector<float> expected = data_of(before);
+  tr_tensor_free(before);
+  ASSERT_EQ(tr_manual_seed(3), 0) << tr_last_error();
+  tr_generator* g = tr_generator_new(11);
+  ASSERT_NE(g, nullptr) << tr_last_error();
+  randperm_of(64, g);
+  tr_generator_free(g);
+  tr_tensor* after = make_randn({4});
+  EXPECT_EQ(data_of(after), expected);
+  tr_tensor_free(after);
+}
+
+TEST(TorchrktRandom, DrawSeedReplaysAndAdvancesTheStream) {
+  tr_generator* a = tr_generator_new(21);
+  tr_generator* b = tr_generator_new(21);
+  ASSERT_NE(a, nullptr) << tr_last_error();
+  ASSERT_NE(b, nullptr) << tr_last_error();
+  int64_t sa = -1;
+  int64_t sb = -1;
+  ASSERT_EQ(tr_generator_draw_seed(a, &sa), 0) << tr_last_error();
+  ASSERT_EQ(tr_generator_draw_seed(b, &sb), 0) << tr_last_error();
+  EXPECT_EQ(sa, sb) << "same seed, same draw";
+  EXPECT_GE(sa, 0);
+  // the draw advanced a: its permutation is b's second, not b's first
+  const std::vector<float> pa = randperm_of(8, a);
+  int64_t again = -1;
+  ASSERT_EQ(tr_generator_draw_seed(b, &again), 0) << tr_last_error();
+  EXPECT_NE(again, sb) << "the stream continues";
+  tr_generator_free(a);
+  tr_generator_free(b);
+  int64_t global = -1;
+  ASSERT_EQ(tr_manual_seed(2), 0) << tr_last_error();
+  ASSERT_EQ(tr_generator_draw_seed(nullptr, &global), 0) << tr_last_error();
+  int64_t global_again = -1;
+  ASSERT_EQ(tr_manual_seed(2), 0) << tr_last_error();
+  ASSERT_EQ(tr_generator_draw_seed(nullptr, &global_again), 0)
+      << tr_last_error();
+  EXPECT_EQ(global, global_again) << "NULL draws from the global stream";
+  EXPECT_EQ(tr_generator_draw_seed(nullptr, nullptr), 1);
+  (void)pa;
+}
+
+TEST(TorchrktRandom, RandpermWithoutGeneratorAndErrors) {
+  ASSERT_EQ(tr_manual_seed(5), 0) << tr_last_error();
+  const std::vector<float> p1 = randperm_of(10, nullptr);
+  ASSERT_EQ(tr_manual_seed(5), 0) << tr_last_error();
+  EXPECT_EQ(randperm_of(10, nullptr), p1)
+      << "NULL draws from the global stream";
+  EXPECT_TRUE(is_permutation(p1));
+  tr_tensor* empty = tr_randperm(0, nullptr);
+  ASSERT_NE(empty, nullptr) << tr_last_error();
+  int64_t numel = -1;
+  EXPECT_EQ(tr_tensor_numel(empty, &numel), 0) << tr_last_error();
+  EXPECT_EQ(numel, 0);
+  tr_tensor_free(empty);
+  EXPECT_EQ(tr_randperm(-1, nullptr), nullptr);
 }
 
 }  // namespace

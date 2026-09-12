@@ -8,6 +8,7 @@
            rackunit
            "../main.rkt"
            "../nn.rkt"
+           "../data/loader.rkt"
            (only-in "../data/mnist.rkt" load-mnist-fixture)
            (only-in "../data/text.rkt"
                     contiguous-blocks encode load-text-fixture text->vocab)
@@ -289,7 +290,33 @@
        (when (and (cuda-available?)
                   (python-cuda-available?))
          (check-training-twin "05_mnist" "python/05_mnist.py" train-on
-                              'cuda 5e-3)))
+                              'cuda 5e-3))
+       ;; the same convnet on shuffled minibatches: the loader replays
+       ;; DataLoader(generator=g)'s batch order, so the losses match
+       (define js (python-check "mnist_shuffle.py"))
+       (set-default-device! 'cpu)
+       (manual-seed! 0)
+       (define-values (sxs sys) (load-mnist-fixture))
+       (define snet (convnet))
+       (define sopt (adam (parameters snet) #:lr 0.001))
+       (define sloader
+         (dataloader (tensor-dataset sxs sys) #:batch-size 64 #:shuffle? #t
+                     #:generator (make-generator 0)))
+       (define slosses
+         (for/list ([(_epoch xb yb) (in-epochs sloader 2)])
+           (zero-grads! sopt)
+           (define loss (cross-entropy (snet xb) yb))
+           (backward! loss)
+           (step! sopt)
+           (item loss)))
+       (check-equal? (length slosses) (length (hash-ref js 'losses)))
+       (for ([r (in-list slosses)] [p (in-list (hash-ref js 'losses))]
+             [i (in-naturals)])
+         (check-= r p tol (format "mnist shuffle twin: loss ~a" i)))
+       (for ([r (in-list (append-map tensor->list (parameters snet)))]
+             [p (in-list (hash-ref js 'params))]
+             [i (in-naturals)])
+         (check-= r p tol (format "mnist shuffle twin: parameter ~a" i))))
      (let ()
        (define-layer causal-self-attention (n-embd n-head wq wk wv wo)
          #:init (n-embd n-head)
@@ -523,6 +550,41 @@
          (check-equal? (format "torch.~a" (tensor-dtype (cdr e)))
                        (hash-ref py-dtypes (string->symbol (car e)))
                        (format "Module.to(float64) dtype of ~a" (car e)))))
+     (let ()
+       ;; a shuffling loader replays DataLoader(generator=g)'"'"'s batch order
+       (define j (python-check "dataloader_twin.py"))
+       (define n 10)
+       (define xs (/ (reshape (arange (* n 3)) n 3) n))
+       (define ys (matmul xs (ones 3 1)))
+       (define ds (tensor-dataset xs ys))
+       (define (orders g epochs)
+         (define loader
+           (dataloader (tensor-dataset (arange n #:dtype 'int64))
+                       #:batch-size 4 #:shuffle? #t #:generator g))
+         (for/list ([_ (in-range epochs)])
+           (for/list ([ib (in-dataloader loader)]) (tensor->list ib))))
+       (check-equal? (orders (make-generator 7) 2) (hash-ref j 'loader_order)
+                     "one generator across two DataLoader epochs")
+       (manual-seed! 0)
+       (define model (Linear 3 1))
+       (define opt (sgd (parameters model) #:lr 0.1))
+       (define loader
+         (dataloader ds #:batch-size 4 #:shuffle? #t
+                     #:generator (make-generator 7)))
+       (define losses
+         (for*/list ([_ (in-range 2)] [(xb yb) (in-dataloader loader)])
+           (zero-grads! opt)
+           (define loss (mse-loss (model xb) yb))
+           (backward! loss)
+           (step! opt)
+           (item loss)))
+       (for ([r (in-list losses)] [p (in-list (hash-ref j 'losses))]
+             [i (in-naturals)])
+         (check-= r p tol (format "dataloader twin: loss ~a" i)))
+       (for ([r (in-list (append-map tensor->list (parameters model)))]
+             [p (in-list (hash-ref j 'params))]
+             [i (in-naturals)])
+         (check-= r p tol (format "dataloader twin: parameter ~a" i))))
      (let ()
        (define j (python-check "creation_kwargs.py"))
        (manual-seed! 0)

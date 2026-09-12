@@ -56,6 +56,10 @@
          full-like
          randn-like
          rand-like
+         make-generator
+         generator?
+         randperm
+         draw-seed
          arange
          eye
          tensor)

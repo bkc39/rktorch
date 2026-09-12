@@ -1,6 +1,7 @@
 #lang racket/base
 
-(require (only-in ffi/vector
+(require (only-in ffi/unsafe prop:cpointer)
+         (only-in ffi/vector
                   f32vector->list
                   f32vector-length
                   f32vector?
@@ -10,8 +11,10 @@
                   s64vector-length
                   s64vector?)
          (only-in racket/contract/base
+                  ->
                   ->*
                   ->i
+                  any/c
                   list/c
                   or/c
                   unsupplied-arg?)
@@ -21,7 +24,7 @@
                   define/contract-out)
          (only-in "autograd-ops.rkt" requires-grad!)
          (only-in "device-type.rkt" device/c)
-         (only-in "error.rkt" check-handle)
+         (only-in "error.rkt" check-handle check-ok)
          (only-in "ops.rkt"
                   device->type+index
                   dims-rest/c
@@ -39,7 +42,13 @@
                   tr-full-on/raw
                   tr-ones-on/raw
                   tr-zeros-on/raw)
-         (only-in "raw/random.rkt" tr-rand-on/raw tr-randn-on/raw)
+         (only-in "raw/random.rkt"
+                  Generator?
+                  tr-generator-draw-seed/raw
+                  tr-generator-new/raw
+                  tr-rand-on/raw
+                  tr-randn-on/raw
+                  tr-randperm/raw)
          (only-in "structs.rkt" tensor? wrap-tensor))
 
 (define (wrap who h)
@@ -119,6 +128,29 @@
   (->* [] [#:device device/c #:dtype float-dtype/c #:requires-grad? boolean?]
        #:rest shape-rest/c tensor?)
   (shaped 'rand tr-rand-on/raw dims device dtype requires-grad?))
+
+(struct generator-impl (handle)
+  #:reflection-name 'generator
+  #:property prop:cpointer 0
+  #:property prop:custom-write
+  (lambda (_g port _mode) (write-string "#<generator>" port)))
+
+(define/contract-out (make-generator seed) ;; noqa
+  (-> exact-nonnegative-integer? generator?)
+  (generator-impl (check-handle 'make-generator (tr-generator-new/raw seed))))
+
+(define/contract-out (generator? v) (-> any/c boolean?) ;; noqa
+  (and (generator-impl? v) (Generator? (generator-impl-handle v))))
+
+(define/contract-out (randperm n #:generator [generator #f]) ;; noqa
+  (->* [exact-nonnegative-integer?] [#:generator generator?] tensor?)
+  (wrap 'randperm (tr-randperm/raw n generator)))
+
+(define/contract-out (draw-seed #:generator [generator #f]) ;; noqa
+  (->* [] [#:generator generator?] exact-nonnegative-integer?)
+  (define-values (rc seed) (tr-generator-draw-seed/raw generator))
+  (check-ok rc 'draw-seed)
+  seed)
 
 (define (like t device dtype)
   (values (or device (tensor-device t)) (or dtype (tensor-dtype t))))

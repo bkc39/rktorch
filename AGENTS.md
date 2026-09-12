@@ -72,7 +72,18 @@ CPU-first; float32 + inferred int64 (#44). From `torch`:
   constructors take dims as rest args or one list; `zeros-like` /
   `ones-like` / `full-like` / `randn-like` / `rand-like` inherit the
   reference's shape, device, dtype unless overridden (#56); `arange` stays
-  float32 by default (its int64 inference is the open remainder of #56)
+  float32 by default (its int64 inference is the open remainder of #56);
+  `make-generator` / `generator?` / `randperm` / `draw-seed` — a CPU
+  `torch.Generator` with its own stream, the permutation and the int64
+  seed word drawn from it (or the global stream), for loaders (#87)
+- data (`torch/data/loader.rkt`, #87): `gen:dataset` (`dataset-length`
+  `dataset-ref` `dataset-batch`), `tensor-dataset` (batches are `narrow`
+  views or one `index-select`, device resident), `default-collate`,
+  `dataloader #:batch-size #:shuffle? #:drop-last? #:collate #:generator`,
+  `in-dataloader` (one traversal = one epoch, the generator's stream
+  continuing), `in-epochs`; synchronous, single-threaded like
+  `num_workers=0`; a seeded loader replays `DataLoader(generator=g)`'s
+  batch order
 - shape: `reshape view transpose permute squeeze unsqueeze cat stack`
 - elementwise: `add sub mul div pow neg exp log sqrt relu sigmoid tanh`
   (binary ops take a real on either side)
@@ -252,6 +263,9 @@ module's full export set (`racket/runtime-path`, `syntax/parse/pre`).
 - `info.rkt` — package metadata + native-library pre-install hook.
 - `main.rkt` — high-level facade (re-exports `foreign.rkt`).
 - `foreign.rkt` — the contracted layer + the `unsafe` submodule.
+- `data/loader.rkt` — datasets and loaders (`gen:dataset`, `tensor-dataset`,
+  `dataloader`, `in-dataloader`, `in-epochs`); `data/mnist.rkt`,
+  `data/text.rkt` — the modality loaders (moving under #88).
 - `foreign/ops.rkt` — version/seed + marshalling (`item`, `to-dtype`,
   `uniform!`, `to`); `foreign/creation-ops.rkt` — the constructors
   (`zeros` .. `rand`, `tensor`, `arange`, `eye`, the `*-like` family, with
