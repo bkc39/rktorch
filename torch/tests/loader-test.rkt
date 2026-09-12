@@ -24,7 +24,10 @@
     (check-exn exn:fail:contract? (lambda () (randperm -1)))
     (check-true (generator? (make-generator (sub1 (expt 2 64)))))
     (check-exn #rx"seed" (lambda () (make-generator (expt 2 64))))
-    (check-exn #rx"size" (lambda () (randperm (expt 2 63)))))
+    (check-exn #rx"size" (lambda () (randperm (expt 2 63))))
+    (check-equal? (tensor-shape (randperm 3 #:generator #f)) '(3)
+                  "#f is the global stream, as it is for a loader")
+    (check-true (exact-nonnegative-integer? (draw-seed #:generator #f))))
 
   (test-case "generators are released by the guarded finalizer"
     (define (runs) (cdr (assq 'runs (finalizer-diagnostics))))
@@ -207,6 +210,12 @@
     (define none (tensor-dataset (ones 0 2)))
     (check-exn #rx"non-empty dataset"
                (lambda () (dataloader none #:batch-size 1 #:shuffle? #t)))
+    (define-dataset vast ()
+      #:length (expt 2 63)
+      #:ref (i) (tensor i))
+    (check-exn #rx"size range"
+               (lambda () (dataloader (vast) #:batch-size 1 #:shuffle? #t)))
+    (check-true (dataloader? (dataloader (vast) #:batch-size 1)))
     (check-equal? (for/list ([xb (in-dataloader (dataloader none #:batch-size 1))]) xb)
                   '())
     (check-equal? (dataloader-length (dataloader none #:batch-size 1 #:shuffle? #f)) 0)
@@ -266,7 +275,17 @@
     (check-equal? (tensor->list (randn 4)) after
                   "exactly two words leave the global stream per epoch")
     (manual-seed! 11)
-    (check-equal? (epoch-order) seen "the global stream replays under a seed"))
+    (check-equal? (epoch-order) seen "the global stream replays under a seed")
+    ;; started but never asked for a batch: the base seed only, as iter(loader)
+    (manual-seed! 11)
+    (define-values (_next _more?)
+      (sequence-generate
+       (in-dataloader (dataloader ds #:batch-size 6 #:shuffle? #t))))
+    (define idle (tensor->list (randn 4)))
+    (manual-seed! 11)
+    (void (draw-seed))
+    (check-equal? (tensor->list (randn 4)) idle
+                  "the sampler's seed waits for the first batch"))
 
   (test-case "a device-resident dataset batches on its device"
     (for ([dev (in-list (list (and (cuda-available?) (cuda-device))

@@ -100,6 +100,8 @@ list or as an int64 tensor.
 
 @defthing[indices/c contract?]{
 A non-empty list of natural numbers, or a non-empty rank-one int64 tensor.
+The tensor's elements are not read: a loader cuts them from a permutation,
+possibly on a device, and reading them back would wait on it every batch.
 }
 
 @defthing[collate/c contract?]{
@@ -179,8 +181,8 @@ to any other collate.
 A loader over @racket[ds], as @tt{DataLoader(ds, batch_size, shuffle,
 drop_last, collate_fn, generator)} with @tt{num_workers=0}: batches are
 built on the calling thread when they are asked for. A shuffled loader
-needs a non-empty dataset, as @tt{RandomSampler} does; an empty one may
-still be traversed in order. Every traversal
+needs a non-empty dataset within @racket[size/c], as @tt{RandomSampler}
+and @racket[randperm] do; an empty one may still be traversed in order. Every traversal
 draws what one @tt{DataLoader} iterator draws, in its order, from
 @racket[generator] or else the global stream: one @racket[draw-seed] when
 the traversal starts, shuffled or not; with @racket[#:shuffle?] the
@@ -243,7 +245,7 @@ A natural number below @racket[(expt 2 63)], the native size range.
 }
 
 @defproc[(randperm [n size/c]
-                   [#:generator generator generator? #f])
+                   [#:generator generator (or/c generator? #f) #f])
          tensor?]{
 An int64 permutation of @racket[0] to @racket[n-1] on the CPU, drawn from
 @racket[generator] or from the global stream, as @tt{torch.randperm}. Drawn
@@ -251,7 +253,7 @@ on the CPU whatever the default device, as PyTorch's sampler does, so a
 permutation replays across devices.
 }
 
-@defproc[(draw-seed [#:generator generator generator? #f])
+@defproc[(draw-seed [#:generator generator (or/c generator? #f) #f])
          exact-nonnegative-integer?]{
 One int64 drawn from @racket[generator] or the global stream, as
 @tt{torch.empty((), dtype=torch.int64).random_(generator=g).item()}. A

@@ -153,11 +153,11 @@
   (and (generator-impl? v) (Generator? (generator-impl-handle v))))
 
 (define/contract-out (randperm n #:generator [generator #f]) ;; noqa
-  (->* [size/c] [#:generator generator?] tensor?)
+  (->* [size/c] [#:generator (or/c generator? #f)] tensor?)
   (wrap 'randperm (tr-randperm/raw n generator)))
 
 (define/contract-out (draw-seed #:generator [generator #f]) ;; noqa
-  (->* [] [#:generator generator?] exact-nonnegative-integer?)
+  (->* [] [#:generator (or/c generator? #f)] exact-nonnegative-integer?)
   (define-values (rc seed) (tr-generator-draw-seed/raw generator))
   (check-ok rc 'draw-seed)
   seed)

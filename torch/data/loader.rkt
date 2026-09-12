@@ -86,10 +86,10 @@
         #:collate [collate collate/c]
         #:generator [generator (or/c generator? #f)])
        #:pre/name (ds shuffle?)
-       "a shuffled loader needs a non-empty dataset, as RandomSampler does"
+       "a shuffled loader needs a non-empty dataset within randperm's size range"
        (or (unsupplied-arg? shuffle?)
            (not shuffle?)
-           (positive? (dataset-length ds)))
+           (< 0 (dataset-length ds) (expt 2 63)))
        [result dataloader?])
   (make-dataloader ds batch-size shuffle? drop-last? collate generator))
 
@@ -115,30 +115,35 @@
   (define n (dataset-length ds))
   (define b (dataloader-batch-size loader))
   (define g (dataloader-generator loader))
-  (if g (draw-seed #:generator g) (draw-seed))
-  (define sampler
-    (and (dataloader-shuffle? loader) (or g (make-generator (draw-seed)))))
+  (draw-seed #:generator g)
+  (define shuffle? (dataloader-shuffle? loader))
+  ;; RandomSampler seeds its own generator on the first next, not on iter
+  (define sampler #f)
+  (define (sampler!)
+    (unless sampler
+      (set! sampler (or g (make-generator (draw-seed)))))
+    sampler)
   (define perm #f)
   (define (permutation!)
     (unless perm
-      (define drawn (randperm n #:generator sampler))
+      (define drawn (randperm n #:generator (sampler!)))
       (define dev (dataset-device ds))
       (set! perm (if dev (to drawn dev) drawn)))
     perm)
   (define count (batch-count loader))
   (define remainder-drawn? #f)
   (define (finish!)
-    (when (and sampler (not remainder-drawn?))
+    (when (and shuffle? (not remainder-drawn?))
       (permutation!)
       (set! remainder-drawn? #t)
-      (void (randperm n #:generator sampler))))
+      (void (randperm n #:generator (sampler!)))))
   (define partial-last?
     (and (not (dataloader-drop-last? loader)) (positive? (remainder n b))))
   (define (batch k)
     (define start (* k b))
     (define len (min b (- n start)))
     (define indices
-      (if sampler
+      (if shuffle?
           (narrow (permutation!) 0 start len)
           (for/list ([i (in-range start (+ start len))]) i)))
     (when (and partial-last? (= k (sub1 count)))

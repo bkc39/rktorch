@@ -1,8 +1,5 @@
 #lang racket/base
 
-;; The clause grammar define-layer and define-dataset share: constructor
-;; formals, #:init formals, and the #:contract / #:predicate export.
-
 (require (for-template racket/base
                        (only-in racket/contract/base -> any/c contract-out))
          (only-in racket/syntax format-id)

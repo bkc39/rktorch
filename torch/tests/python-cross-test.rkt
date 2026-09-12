@@ -551,7 +551,7 @@
                        (hash-ref py-dtypes (string->symbol (car e)))
                        (format "Module.to(float64) dtype of ~a" (car e)))))
      (let ()
-       ;; a shuffling loader replays DataLoader(generator=g)'"'"'s batch order
+       ;; a shuffling loader replays DataLoader(generator=g)'s batch order
        (define j (python-check "dataloader_twin.py"))
        (define n 10)
        (define xs (/ (reshape (arange (* n 3)) n 3) n))
