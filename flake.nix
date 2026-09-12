@@ -638,6 +638,11 @@
           # cross-test for real:
           #   raco test torch/tests/python-cross-test.rkt
           default = pkgs.mkShell {
+            buildInputs = baseInputs ++ [ pythonEnv ];
+            shellHook = provisionRacketFor cpp;
+          };
+
+          ocaml = pkgs.mkShell {
             buildInputs = baseInputs ++ [ pythonEnv ] ++ ocamlInputs;
             shellHook = provisionRacketFor cpp;
           };

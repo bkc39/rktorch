@@ -27,22 +27,24 @@ nix build              # build native lib, install pkg, run tests
 nix develop            # dev shell (raco test, cmake, resyntax, ...)
 ```
 
-The default shell also includes OCaml, Dune, Findlib, utop, ocamllsp,
-ocamlformat, and Jane Street's Torch bindings:
+The optional `ocaml` shell adds OCaml, Dune, Findlib, utop, ocamllsp,
+ocamlformat, and Jane Street's Torch bindings for reference experiments:
 
 ```bash
-nix develop --command ocamlc -version
-nix develop --command ocamlfind query torch
-nix develop --command dune exec --root /path/to/ocaml-project ./main.exe
-nix develop --command utop
+nix develop .#ocaml --command ocamlc -version
+nix develop .#ocaml --command ocamlfind query torch
+nix develop .#ocaml --command dune exec --root /path/to/ocaml-project ./main.exe
+nix develop .#ocaml --command utop
 ```
 
 Dune projects can use `(libraries torch)` without an opam switch. The bindings
 are pinned in [`nix/ocaml-torch.nix`](nix/ocaml-torch.nix) to Jane Street v0.17.0
 and its compatible libtorch 2.1.2; on Apple Silicon the native library comes
 from the PyTorch wheel. That runtime is linked separately into OCaml programs.
-The first shell entry builds the OCaml bindings and runs their inline tests.
-The `ci` and `cuda` shells retain their existing toolchains.
+The first `ocaml` shell entry builds the bindings without running their upstream
+inline test suite: some of its SVD expectations are host-dependent up to sign,
+and the suite is pinned upstream code, not a regression surface for this repo.
+The default, `ci`, and `cuda` shells do not include the OCaml toolchain.
 
 Built against `pkgs.libtorch-bin` by default; flip `torchSource` in `flake.nix`
 to `"python"` for bit-exact PyTorch parity. Supported systems: `aarch64-darwin`,
