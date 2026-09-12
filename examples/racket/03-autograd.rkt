@@ -1,6 +1,6 @@
 #lang scribble/lp2
 
-@(require (for-label (except-in racket/base abs cos exp log sin sqrt max min + - * /)
+@(require (for-label (except-in racket/base abs cos exp log sin sqrt max min length + - * /)
                      torch))
 
 @section[#:tag "ex-autograd"]{Autograd: gradients by backpropagation}

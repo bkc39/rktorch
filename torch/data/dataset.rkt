@@ -13,7 +13,8 @@
          (only-in racket/generic define-generics)
          (only-in racket/list first)
          (only-in "../foreign.rkt"
-                  device? dtype shape stack tensor-device tensor->list tensor?)
+                  device? dtype gen:sized length shape stack tensor-device
+                  tensor->list tensor?)
          (only-in "../private/contract.rkt" define/contract-out))
 
 ;; the noqa'd exports are macro expansions raco review cannot see
@@ -184,7 +185,9 @@
               (let ([field.id (field-acc self)] ...)
                 ((lambda (ref.index) ref.body ...) ref.index)))
             batch-method ...
-            device-method ...])
+            device-method ...]
+           #:methods gen:sized
+           [(define (length self) (dataset-length self))])
          (define name? sid?)
          (define (name . formals)
            (let ([absent #f] ...)

@@ -76,6 +76,9 @@ CPU-first; float32 + inferred int64 (#44). From `torch`:
   `make-generator` / `generator?` / `randperm` / `draw-seed` — a CPU
   `torch.Generator` with its own stream, the permutation and the int64
   seed word drawn from it (or the global stream), for loaders (#87)
+- `length` (`torch/foreign/sized.rkt`): Python's `len` as `gen:sized`,
+  shadowing racket/base's like `+`; fast defaults for lists, vectors,
+  strings, hashes; a tensor's first dimension; datasets and loaders
 - data (`torch/data/loader.rkt`, #87): `define-dataset` (fields, `#:init`,
   `#:length`, `#:ref`, optional `#:batch`/`#:device`, `#:contract` export,
   the `Dataset` subclass shape) over `gen:dataset` (`dataset-length`

@@ -1,12 +1,12 @@
 #lang scribble/manual
 
-@(require (for-label racket/base
+@(require (for-label (except-in racket/base length)
                      racket/contract
                      racket/sequence
                      (only-in torch
-                              device? draw-seed generator? index-select seed/c size/c
-                              make-generator narrow randn randperm select
-                              stack tensor tensor?)
+                              device? draw-seed generator? index-select length
+                              make-generator narrow randn randperm seed/c select
+                              size/c stack tensor tensor?)
                      torch/data/loader))
 
 @title{Datasets and loaders}
@@ -124,7 +124,8 @@ Recognises values implementing @racket[gen:dataset].
 }
 
 @defproc[(dataset-length [ds dataset?]) exact-nonnegative-integer?]{
-The number of items.
+The number of items; @racket[length] answers the same for a dataset
+written with @racket[define-dataset].
 }
 
 @defproc[(dataset-ref [ds dataset?] [i exact-nonnegative-integer?]) any]{
@@ -206,12 +207,15 @@ Recognises the result of @racket[dataloader].
 }
 
 @defproc[(dataloader-length [loader dataloader?]) exact-nonnegative-integer?]{
-The number of batches in a traversal, @tt{len(loader)}.
+The number of batches in a traversal, @tt{len(loader)}; @racket[length]
+answers the same.
 }
 
 @defproc[(in-dataloader [loader dataloader?]) sequence?]{
 One epoch: a sequence of the batches, each as the values its collate
 returns, for the @racket[for] forms. A second traversal is a second epoch.
+A loader is itself a sequence, so @racket[(for ([(xb yb) loader]) ...)]
+is the same epoch, as @tt{for xb, yb in loader} is.
 }
 
 @defproc[(in-epochs [loader dataloader?] [n exact-nonnegative-integer?])

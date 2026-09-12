@@ -6,7 +6,8 @@
          (only-in racket/list first)
          (only-in "../foreign.rkt"
                   draw-seed generator? index-select make-generator narrow
-                  randperm select shape tensor tensor-device tensor? to)
+                  gen:sized length randperm select shape tensor tensor-device
+                  tensor? to)
          (only-in "../private/contract.rkt" define/contract-out)
          (only-in "dataset.rkt"
                   collate/c dataset-batch dataset-device dataset-length
@@ -73,7 +74,10 @@
 
 (struct dataloader (dataset batch-size shuffle? drop-last? collate generator) ;; noqa
   #:constructor-name make-dataloader
-  #:omit-define-syntaxes)
+  #:omit-define-syntaxes
+  #:methods gen:sized
+  [(define (length loader) (batch-count loader))]
+  #:property prop:sequence (lambda (loader) (in-dataloader loader)))
 
 (define/contract-out (dataloader ds ;; noqa
                                  #:batch-size [batch-size 1]
