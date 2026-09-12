@@ -3,10 +3,11 @@
 (require (for-template racket/base
                        (only-in racket/contract/base -> any/c contract-out))
          (only-in racket/syntax format-id)
+         ;; whole-module on purpose: the syntax classes need bindings only-in
+         ;; would strip
          syntax/parse/pre)
 
-(provide predicate-name
-         contract-export
+(provide contract-export
          ctor-formal
          init-formals)
 

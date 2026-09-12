@@ -160,7 +160,8 @@ Recognises the result of @racket[tensor-dataset].
 @defproc[(default-collate [items (non-empty-listof (non-empty-listof tensor?))])
          any]{
 @tt{default_collate} for tensor fields: one @racket[stack] per field, as
-values. Every item must carry the same fields, each of one shape.
+values. Every item must carry the same fields, each of one shape on one
+device.
 }
 
 @defproc[(default-collate? [v any/c]) boolean?]{

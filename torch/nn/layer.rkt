@@ -5,7 +5,8 @@
                      ;; whole-module on purpose: the expansion needs bindings
                      ;; only-in would strip
                      syntax/parse/pre
-                     "../private/definer.rkt")
+                     (only-in "../private/definer.rkt"
+                              contract-export ctor-formal init-formals))
          (only-in racket/contract/base
                   -> ->* ->i and/c any any/c cons/c contract-out contract?
                   flat-named-contract listof not/c or/c unsupplied-arg?)

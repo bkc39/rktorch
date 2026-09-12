@@ -5,14 +5,16 @@
                      ;; whole-module on purpose: the expansion needs bindings
                      ;; only-in would strip
                      syntax/parse/pre
-                     "../private/definer.rkt")
+                     (only-in "../private/definer.rkt"
+                              contract-export ctor-formal init-formals))
          (only-in racket/contract/base
                   -> any any/c contract-out flat-named-contract
                   non-empty-listof or/c)
          (only-in racket/generic define-generics)
          (only-in racket/list first)
          (only-in "../foreign.rkt"
-                  device? stack tensor-dtype tensor-shape tensor->list tensor?)
+                  device? stack tensor-device tensor-dtype tensor-shape
+                  tensor->list tensor?)
          (only-in "../private/contract.rkt" define/contract-out))
 
 ;; the noqa'd exports are macro expansions raco review cannot see
@@ -65,12 +67,14 @@
           (pair? v)
           (for/and ([item (in-list v)])
             (and (list? item) (pair? item) (andmap tensor? item)))
-          (let ([shapes (map tensor-shape (first v))])
+          (let ([lead (first v)])
             (for/and ([item (in-list v)])
-              (and (= (length item) (length shapes))
-                   (andmap (lambda (t shape) (equal? (tensor-shape t) shape))
+              (and (= (length item) (length lead))
+                   (andmap (lambda (t u)
+                             (and (equal? (tensor-shape t) (tensor-shape u))
+                                  (equal? (tensor-device t) (tensor-device u))))
                            item
-                           shapes))))))))
+                           lead))))))))
 
 (define/contract-out (default-collate items) ;; noqa
   (-> items/c any)

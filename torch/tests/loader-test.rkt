@@ -294,6 +294,8 @@
                               (and (mps-available?) (mps-device))))]
           #:when dev)
       (check-exn #rx"same-device" (lambda () (tensor-dataset (to xs dev) ys)))
+      (check-exn #rx"stackable-tensor-items"
+                 (lambda () (default-collate (list (list (ones 2)) (list (to (ones 2) dev))))))
       (define ds (tensor-dataset (to xs dev) (to ys dev)))
       (define loader
         (dataloader ds #:batch-size 4 #:shuffle? #t #:generator (make-generator 3)))

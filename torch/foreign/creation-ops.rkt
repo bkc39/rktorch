@@ -15,6 +15,7 @@
                   ->*
                   ->i
                   any/c
+                  flat-contract?
                   flat-named-contract
                   integer-in
                   list/c
@@ -137,12 +138,10 @@
   #:property prop:custom-write
   (lambda (_g port _mode) (write-string "#<generator>" port)))
 
-(provide seed/c size/c)
-
-(define seed/c
+(define/contract-out seed/c flat-contract? ;; noqa
   (flat-named-contract 'seed (integer-in 0 (sub1 (expt 2 64)))))
 
-(define size/c
+(define/contract-out size/c flat-contract? ;; noqa
   (flat-named-contract 'size (integer-in 0 (sub1 (expt 2 63)))))
 
 (define/contract-out (make-generator seed) ;; noqa
