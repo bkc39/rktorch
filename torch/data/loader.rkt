@@ -9,11 +9,13 @@
                   randperm select tensor tensor-device tensor-shape tensor?
                   to)
          (only-in "../private/contract.rkt" define/contract-out)
-         "dataset.rkt")
+         (only-in "dataset.rkt"
+                  collate/c dataset-batch dataset-device dataset-length
+                  dataset-ref dataset? default-collate default-collate?
+                  define-dataset gen:dataset indices->list indices/c))
 
 (provide (all-from-out "dataset.rkt"))
 
-;; a contiguous ascending run of indices is a narrow, not a gather
 (define (run-start indices n)
   (cond
     [(tensor? indices) #f]

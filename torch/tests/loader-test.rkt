@@ -75,9 +75,11 @@
     (check-exn #rx"int64-vector"
                (lambda () (dataset-batch ds (arange 0 #:dtype 'int64) default-collate)))
     (check-exn exn:fail:contract? (lambda () (dataset-batch ds '() default-collate)))
-    (check-exn #rx"rectangular-tensor-items"
+    (check-exn #rx"stackable-tensor-items"
                (lambda () (default-collate (list (list (ones 2) (ones 2)) (list (ones 2))))))
-    (check-exn #rx"rectangular-tensor-items" (lambda () (default-collate '(()))))
+    (check-exn #rx"stackable-tensor-items" (lambda () (default-collate '(()))))
+    (check-exn #rx"stackable-tensor-items"
+               (lambda () (default-collate (list (list (ones 2)) (list (ones 3))))))
     (check-exn exn:fail:contract?
                (lambda () (dataset-batch ds '(-6 -5 -4) default-collate))
                "indices are natural numbers, not end-relative")

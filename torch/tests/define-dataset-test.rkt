@@ -102,6 +102,11 @@
                  (convert-compile-time-error
                   (define-dataset no-ctc (n) #:predicate p? #:init (n) ;; noqa
                     #:length n #:ref (i) i))))
+    (check-exn #rx"#:device needs #:batch"
+               (lambda ()
+                 (convert-compile-time-error
+                  (define-dataset no-batch (n) #:init (n) #:device (cpu-device) ;; noqa
+                    #:length n #:ref (i) i))))
     (check-exn #rx"bare identifier"
                (lambda ()
                  (convert-compile-time-error

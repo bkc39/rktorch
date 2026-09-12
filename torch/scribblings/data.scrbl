@@ -78,7 +78,10 @@ themselves the constructor formals.
 when a whole batch is one native op, as @racket[tensor-dataset] does.
 @racket[indices-id] is an @racket[indices/c], a list or an int64 tensor;
 @racket[indices->list] reads either. @racket[#:device] answers
-@racket[dataset-device], @racket[#f] by default.
+@racket[dataset-device], @racket[#f] by default; it needs @racket[#:batch],
+because a loader then hands @racket[#:batch] an index tensor resident on
+that device, which the default batch could only read back with a copy
+per batch.
 
 @racket[#:contract] provides the constructor under @racket[contract-expr]
 and the predicate under its lowercase name, or the @racket[#:predicate]
@@ -130,9 +133,8 @@ The item at @racket[i], as one value per field, as
 }
 
 @defproc[(dataset-batch [ds dataset?]
-                        [indices (or/c (listof exact-nonnegative-integer?)
-                                       tensor?)]
-                        [collate (-> (non-empty-listof list?) any)])
+                        [indices indices/c]
+                        [collate collate/c])
          any]{
 The batch at @racket[indices], as values. @racket[indices] is a non-empty
 list of natural numbers, or a non-empty rank-one int64 tensor when a
@@ -158,7 +160,7 @@ Recognises the result of @racket[tensor-dataset].
 @defproc[(default-collate [items (non-empty-listof (non-empty-listof tensor?))])
          any]{
 @tt{default_collate} for tensor fields: one @racket[stack] per field, as
-values. Every item must carry the same number of fields.
+values. Every item must carry the same fields, each of one shape.
 }
 
 @defproc[(default-collate? [v any/c]) boolean?]{

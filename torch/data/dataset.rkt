@@ -59,14 +59,18 @@
 
 (define items/c
   (flat-named-contract
-   'rectangular-tensor-items
+   'stackable-tensor-items
    (lambda (v)
      (and (list? v)
           (pair? v)
           (for/and ([item (in-list v)])
             (and (list? item) (pair? item) (andmap tensor? item)))
-          (let ([n (length (first v))])
-            (for/and ([item (in-list v)]) (= (length item) n)))))))
+          (let ([shapes (map tensor-shape (first v))])
+            (for/and ([item (in-list v)])
+              (and (= (length item) (length shapes))
+                   (andmap (lambda (t shape) (equal? (tensor-shape t) shape))
+                           item
+                           shapes))))))))
 
 (define/contract-out (default-collate items) ;; noqa
   (-> items/c any)
@@ -80,77 +84,92 @@
   (-> any/c boolean?)
   (chaperone-of? v default-collate))
 
+(begin-for-syntax
+  (define-splicing-syntax-class init-clause ;; noqa
+    #:description "#:init clause"
+    (pattern (~seq #:init f:init-formals body:expr ...)
+      #:with formals #'f.formals
+      #:with (id ...) #'(f.id ...)))
+
+  (define-splicing-syntax-class length-clause ;; noqa
+    #:description "#:length clause"
+    (pattern (~seq #:length body:expr)))
+
+  (define-splicing-syntax-class ref-clause ;; noqa
+    #:description "#:ref clause"
+    (pattern (~seq #:ref (index:id) body:expr ...+)))
+
+  (define-splicing-syntax-class batch-clause ;; noqa
+    #:description "#:batch clause"
+    (pattern (~seq #:batch (indices:id collate:id) body:expr ...+)))
+
+  (define-splicing-syntax-class device-clause ;; noqa
+    #:description "#:device clause"
+    (pattern (~seq #:device body:expr)))
+
+  (define (non-bare-field fields bare?s) ;; noqa
+    (for/first ([f (in-list fields)] [bare? (in-list bare?s)] #:unless bare?)
+      f)))
+
 (define-syntax (define-dataset stx)
   (syntax-parse stx
     [(_ name:id (field:ctor-formal ...)
-        (~alt (~optional (~seq #:init init:init-formals init-body:expr ...))
+        (~alt (~optional init:init-clause)
               (~optional (~seq #:contract ctc:expr))
               (~optional (~seq #:predicate pred:id))
-              (~once (~seq #:length length-body:expr)
-                     #:name "#:length clause")
-              (~once (~seq #:ref (index:id) ref-body:expr ...+)
-                     #:name "#:ref clause")
-              (~optional (~seq #:batch (indices:id collate:id)
-                               batch-body:expr ...+))
-              (~optional (~seq #:device device-body:expr)))
+              (~once len:length-clause #:name "#:length clause")
+              (~once ref:ref-clause #:name "#:ref clause")
+              (~optional batch:batch-clause)
+              (~optional device:device-clause))
         ...)
-     (define field-ids (syntax->list #'(field.id ...)))
-     (define init? (attribute init))
-     (when init?
-       (for ([f (in-list field-ids)]
-             [bare? (in-list (attribute field.bare?))])
-         (unless bare?
-           (raise-syntax-error
-            #f
-            "with #:init, a field is a bare identifier; defaults and keywords belong to the #:init formals"
-            stx f))))
-     (define init-ids (if init? (syntax->list #'(init.id ...)) '()))
-     (define struct-id (generate-temporary #'name))
-     (with-syntax ([sid struct-id]
-                   [sid? (format-id struct-id "~a?" struct-id)]
-                   [name? (format-id #'name "~a?" #'name)]
-                   [formals (if init?
-                                #'init.formals
-                                #'((~@ field.decl ...) ...))]
-                   [(init-body ...) (if init? #'(init-body ...) #'())]
-                   [(absent ...)
-                    (filter (lambda (f)
-                              (not (member f init-ids bound-identifier=?)))
-                            (if init? field-ids '()))]
-                   [(field-acc ...)
-                    (for/list ([f (in-list field-ids)])
-                      (format-id struct-id "~a-~a" struct-id f))])
-       (with-syntax ([(batch-method ...)
-                      (if (attribute batch-body)
-                          #'((define (dataset-batch self indices collate)
-                               (let ([field.id (field-acc self)] ...)
-                                 ((lambda (indices collate) batch-body ...)
-                                  indices collate))))
-                          #'())]
-                     [(device-method ...)
-                      (if (attribute device-body)
-                          #'((define (dataset-device self)
-                               (let ([field.id (field-acc self)] ...)
-                                 device-body)))
-                          #'())]
-                     [export (contract-export stx #'name #'name?
-                                              (attribute ctc)
-                                              (attribute pred))])
-         #'(begin
-             (struct sid (field.id ...)
-               #:reflection-name 'name
-               #:methods gen:dataset
-               [(define (dataset-length self)
-                  (let ([field.id (field-acc self)] ...)
-                    length-body))
-                (define (dataset-ref self index)
-                  (let ([field.id (field-acc self)] ...)
-                    ((lambda (index) ref-body ...) index)))
-                batch-method ...
-                device-method ...])
-             (define name? sid?)
-             (define (name . formals)
-               (let ([absent #f] ...)
-                 init-body ...
-                 (sid field.id ...)))
-             export)))]))
+     #:do [(define fields (syntax->list #'(field.id ...)))
+           (define init? (attribute init))]
+     #:fail-when (and init? (non-bare-field fields (attribute field.bare?)))
+     "with #:init, a field is a bare identifier; defaults and keywords belong to the #:init formals"
+     #:fail-when (and (attribute device) (not (attribute batch)) #'device.body)
+     "#:device needs #:batch: a loader hands a device-resident index tensor to #:batch, and the default batch reads indices on the host"
+     #:with sid (generate-temporary #'name)
+     #:with sid? (format-id #'sid "~a?" #'sid)
+     #:with name? (format-id #'name "~a?" #'name)
+     #:with (field-acc ...) (for/list ([f (in-list fields)])
+                              (format-id #'sid "~a-~a" #'sid f))
+     #:with formals (if init? #'init.formals #'((~@ field.decl ...) ...))
+     #:with (init-body ...) (if init? #'(init.body ...) #'())
+     #:with (absent ...) (if init?
+                             (filter (lambda (f)
+                                       (not (member f (syntax->list #'(init.id ...))
+                                                    bound-identifier=?)))
+                                     fields)
+                             '())
+     #:with (batch-method ...)
+     (if (attribute batch)
+         #'((define (dataset-batch self batch.indices batch.collate)
+              (let ([field.id (field-acc self)] ...)
+                ((lambda (batch.indices batch.collate) batch.body ...)
+                 batch.indices batch.collate))))
+         #'())
+     #:with (device-method ...)
+     (if (attribute device)
+         #'((define (dataset-device self)
+              (let ([field.id (field-acc self)] ...)
+                device.body)))
+         #'())
+     #:with export (contract-export stx #'name #'name? (attribute ctc) (attribute pred))
+     #'(begin
+         (struct sid (field.id ...)
+           #:reflection-name 'name
+           #:methods gen:dataset
+           [(define (dataset-length self)
+              (let ([field.id (field-acc self)] ...)
+                len.body))
+            (define (dataset-ref self ref.index)
+              (let ([field.id (field-acc self)] ...)
+                ((lambda (ref.index) ref.body ...) ref.index)))
+            batch-method ...
+            device-method ...])
+         (define name? sid?)
+         (define (name . formals)
+           (let ([absent #f] ...)
+             init-body ...
+             (sid field.id ...)))
+         export)]))
