@@ -64,10 +64,13 @@
                (for/list ([t (in-list tensors)])
                  (narrow t 0 start (length indices)))]
               [else
+               (define dev (tensor-device (first tensors)))
                (define index
-                 (if (tensor? indices) indices (tensor indices #:dtype 'int64)))
+                 (if (tensor? indices)
+                     (to indices dev)
+                     (tensor indices #:dtype 'int64 #:device dev)))
                (for/list ([t (in-list tensors)])
-                 (index-select t 0 (to index (tensor-device t))))]))]))
+                 (index-select t 0 index))]))]))
 
 (struct dataloader (dataset batch-size shuffle? drop-last? collate generator) ;; noqa
   #:constructor-name make-dataloader
@@ -171,34 +174,39 @@
   (-> dataloader? exact-nonnegative-integer? sequence?)
   (make-do-sequence
    (lambda ()
-     (define batch #f)
+     (define e 0)
+     (define k 0)
      (define count 0)
+     (define batch #f)
      (define finish! void)
-     ;; every epoch starts, and so draws, even one with no batches
-     (define (start-from e)
+     (define started? #f)
+     ;; an epoch starts when its first batch is asked for, and the one
+     ;; before it is finished then, so a loop that stops on another sequence
+     ;; leaves the stream where its last batch left it
+     (define (more?)
        (cond
-         [(>= e n-epochs) e]
-         [else
+         [(>= e n-epochs) #f]
+         [(not started?)
           (define-values (c b f) (epoch-batches loader))
           (set! count c)
           (set! batch b)
           (set! finish! f)
-          (cond
-            [(zero? c)
-             (finish!)
-             (start-from (add1 e))]
-            [else e])]))
-     (values (lambda (pos)
-               (call-with-values (lambda () (batch (cdr pos)))
-                                 (lambda vals (apply values (car pos) vals))))
-             (lambda (pos)
-               (define k (add1 (cdr pos)))
-               (cond
-                 [(< k count) (cons (car pos) k)]
-                 [else
-                  (finish!)
-                  (cons (start-from (add1 (car pos))) 0)]))
-             (cons (start-from 0) 0)
-             (lambda (pos) (< (car pos) n-epochs))
+          (set! k 0)
+          (set! started? #t)
+          (more?)]
+         [(< k count) #t]
+         [else
+          (finish!)
+          (set! e (add1 e))
+          (set! started? #f)
+          (more?)]))
+     (values (lambda (_i)
+               (call-with-values (lambda () (batch k))
+                                 (lambda vals (apply values e vals))))
+             (lambda (i)
+               (set! k (add1 k))
+               (add1 i))
+             0
+             (lambda (_i) (more?))
              #f
              #f))))

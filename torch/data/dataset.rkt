@@ -8,7 +8,7 @@
                      (only-in "../private/definer.rkt"
                               contract-export ctor-formal init-formals))
          (only-in racket/contract/base
-                  -> ->i any any/c contract-out flat-named-contract
+                  -> ->i any any/c contract-out contract? flat-named-contract
                   non-empty-listof or/c)
          (only-in racket/generic define-generics)
          (only-in racket/list first)
@@ -20,12 +20,10 @@
 ;; the noqa'd exports are macro expansions raco review cannot see
 (provide gen:dataset
          define-dataset
-         indices/c
-         collate/c
          (contract-out
           [dataset? (-> any/c boolean?)]
           [dataset-length (-> dataset? exact-nonnegative-integer?)]
-          [dataset-ref (-> dataset? exact-nonnegative-integer? any)]
+          [dataset-ref (->i ([ds dataset?] [i (ds) (index-of/c ds)]) any)]
           [dataset-batch (->i ([ds dataset?]
                                [indices (ds) (indices-of/c ds)]
                                [collate collate/c])
@@ -40,19 +38,22 @@
           (eq? (tensor-dtype v) 'int64)
           (= 1 (length (tensor-shape v)))
           (positive? (car (tensor-shape v)))))))
-(define indices/c
+(define/contract-out indices/c contract? ;; noqa
   (or/c (non-empty-listof exact-nonnegative-integer?) index-tensor/c))
-(define collate/c (-> (non-empty-listof list?) any))
+(define/contract-out collate/c contract? ;; noqa
+  (-> (non-empty-listof list?) any))
+
+(define (index-of/c ds)
+  (define n (dataset-length ds))
+  (flat-named-contract 'index-below-length
+                       (lambda (i) (and (exact-nonnegative-integer? i) (< i n)))))
 
 ;; a list is checked against the length; a tensor's elements are not read
 (define (indices-of/c ds)
-  (define n (dataset-length ds))
+  (define below? (index-of/c ds))
   (or/c (flat-named-contract
          'indices-below-length
-         (lambda (v)
-           (and (list? v) (pair? v)
-                (andmap (lambda (i) (and (exact-nonnegative-integer? i) (< i n)))
-                        v))))
+         (lambda (v) (and (list? v) (pair? v) (andmap below? v))))
         index-tensor/c))
 
 (define-generics dataset

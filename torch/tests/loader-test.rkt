@@ -77,6 +77,7 @@
     (check-exn exn:fail:contract? (lambda () (dataset-batch ds '() default-collate)))
     (check-exn #rx"indices-below-length"
                (lambda () (dataset-batch ds '(0 6) default-collate)))
+    (check-exn #rx"index-below-length" (lambda () (dataset-ref ds 6)))
     (check-exn #rx"stackable-tensor-items"
                (lambda () (default-collate (list (list (ones 2) (ones 2)) (list (ones 2))))))
     (check-exn #rx"stackable-tensor-items" (lambda () (default-collate '(()))))
@@ -337,6 +338,20 @@
                   "in-epochs and repeated in-dataloader traversals agree")
     (check-equal? (for/list ([(epoch _xb _yb) (in-epochs loader 0)]) epoch)
                   '())
+    ;; stopped by another sequence right after an epoch's last batch: the
+    ;; next epoch has not started and the remainder has not been drawn
+    (define g-stop (make-generator 8))
+    (for ([_i (in-range 2)]
+          [(_e _xb _yb) (in-epochs (dataloader ds #:batch-size 3 #:shuffle? #t
+                                               #:generator g-stop)
+                                   3)])
+      (void))
+    (define twin-stop (make-generator 8))
+    (void (draw-seed #:generator twin-stop))
+    (void (randperm 6 #:generator twin-stop))
+    (check-equal? (tensor->list (randperm 6 #:generator g-stop))
+                  (tensor->list (randperm 6 #:generator twin-stop))
+                  "in-epochs advances only when the next element is asked for")
     ;; an epoch with no batches still draws, as a drained DataLoader does
     (define g (make-generator 4))
     (define empty (dataloader ds #:batch-size 8 #:shuffle? #t #:drop-last? #t

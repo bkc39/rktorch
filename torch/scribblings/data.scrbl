@@ -128,7 +128,7 @@ The number of items.
 }
 
 @defproc[(dataset-ref [ds dataset?] [i exact-nonnegative-integer?]) any]{
-The item at @racket[i], as one value per field, as
+The item at @racket[i], below the length, as one value per field, as
 @tt{dataset[i]} in PyTorch returns a tuple.
 }
 
