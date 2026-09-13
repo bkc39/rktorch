@@ -28,11 +28,15 @@ the noise, form @tt{x_t} with @racket[q-sample], and regress the network's
 output on that noise with a mean squared error. Both draws are made on the
 CPU whatever device the model trains on, so a seeded run replays the same
 timesteps and noise on the GPU as on the CPU, the way the PyTorch twin of
-this example draws them.
+this example draws them. The device is the accelerator when there is one,
+except that on Apple silicon the run stays on the CPU: libtorch 2.9 has no
+MPS kernel for the backward of @racket[group-norm], and the UNet is built
+on it.
 
 @chunk[<r08-step>
 (define (pick-device)
-  (accelerator-if-available))
+  (define accel (accelerator-if-available))
+  (if (memq (device-type accel) '(cpu mps)) 'cpu accel))
 
 (define (train-step net sched opt xs device)
   (define n (length xs))

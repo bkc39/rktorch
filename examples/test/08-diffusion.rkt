@@ -39,8 +39,8 @@
                 '(2 3 32 32))
   ;; Device RNG streams differ from the CPU's for the init, so the on-device
   ;; arm checks convergence, never equality with the CPU losses above.
-  (define accel (accelerator-if-available))
-  (unless (eq? (device-type accel) 'cpu)
+  (define accel (pick-device))
+  (unless (eq? accel 'cpu)
     (define-values (a-losses a-net _a-dev) (run-example #:device accel))
     (check-equal? (tensor-device (car (parameters a-net))) accel)
     (check-true (andmap (lambda (l) (and (rational? l) (not (nan? l)))) a-losses)
