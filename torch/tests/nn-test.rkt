@@ -149,6 +149,39 @@
                   (take (drop w-rows 12) 4))
     (check-equal? (object-name e) 'Embedding))
 
+  (test-case "ConvTranspose2d layer: transposed weight layout, forward shape"
+    (manual-seed! 0)
+    (define c (ConvTranspose2d 3 6 4 #:stride 2 #:padding 1))
+    (check-true (conv-transpose2d? c))
+    (check-true (layer? c))
+    (define ps (parameters c))
+    (check-equal? (map tensor-shape ps) '((3 6 4 4) (6)))
+    (check-true (andmap requires-grad? ps))
+    (check-equal? (map car (named-parameters c)) '("weight" "bias"))
+    (check-equal? (tensor-shape (c (randn 2 3 8 8))) '(2 6 16 16))
+    (check-equal? (object-name c) 'ConvTranspose2d)
+    (check-equal? (map tensor-shape (parameters (ConvTranspose2d 4 4 3 #:groups 2)))
+                  '((4 2 3 3) (4)))
+    (check-equal? (tensor-shape ((ConvTranspose2d 1 1 2 #:stride 2 #:output-padding 1)
+                                 (ones 1 1 2 2)))
+                  '(1 1 5 5)))
+
+  (test-case "GroupNorm layer: ones/zeros init, per-group normalizing forward"
+    (define gn (GroupNorm 2 4))
+    (check-true (group-norm? gn))
+    (check-equal? (map tensor-shape (parameters gn)) '((4) (4)))
+    (check-equal? (map car (named-parameters gn)) '("weight" "bias"))
+    (check-equal? (tensor->list (car (parameters gn))) '(1.0 1.0 1.0 1.0))
+    (check-equal? (tensor->list (cadr (parameters gn))) '(0.0 0.0 0.0 0.0))
+    (manual-seed! 0)
+    (define y (gn (randn 2 4 3 3)))
+    (check-equal? (tensor-shape y) '(2 4 3 3))
+    ;; each group of two channels normalises to mean 0 over its 18 values
+    (define grouped (reshape y 2 2 18))
+    (for* ([b (in-range 2)] [g (in-range 2)])
+      (check-= (item (mean (select (select grouped 0 b) 0 g))) 0.0 1e-5))
+    (check-equal? (object-name gn) 'GroupNorm))
+
   (test-case "LayerNorm layer: ones/zeros init, normalizing forward"
     (define ln (LayerNorm 4))
     (check-true (layer-norm? ln))
