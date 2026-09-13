@@ -243,7 +243,10 @@ the gradient returns to the MPS graph and the rest of a model — the 07-asr
 encoder, attention decoder, and `adam` — stays on the GPU. Every other op the
 speech arc uses has an MPS kernel, so `pick-device` must keep returning
 `accelerator-if-available` unmodified: routing darwin to the CPU to dodge this
-one op is what the carve-out exists to avoid.
+one op is what the carve-out exists to avoid. The second gap is
+`aten::native_group_norm_backward`: the `GroupNorm` layer
+(`torch/nn/group-norm.rkt`) normalises on the CPU under MPS the same way, so
+the diffusion UNet trains on the GPU there with its norms round-tripped.
 
 ## Architecture
 
