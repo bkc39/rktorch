@@ -2,7 +2,7 @@
 
 @(require (for-label racket/base
                      racket/contract
-                     (only-in torch device? randn-like tensor?)
+                     (only-in torch cuda-if-available device? randn-like tensor?)
                      torch/data/loader
                      (only-in torch/nn Conv2d ConvTranspose2d GroupNorm Linear
                               define-layer)
