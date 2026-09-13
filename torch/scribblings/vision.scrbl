@@ -2,7 +2,7 @@
 
 @(require (for-label racket/base
                      racket/contract
-                     (only-in torch device? tensor?)
+                     (only-in torch cuda-if-available device? tensor?)
                      torch/data/loader
                      torch/vision/cifar10))
 

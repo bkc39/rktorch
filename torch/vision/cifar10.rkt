@@ -4,7 +4,7 @@
                   f32vector-set! make-f32vector make-s64vector s64vector-set!)
          (only-in file/gunzip gunzip-through-ports)
          (only-in net/url call/input-url get-pure-port string->url)
-         (only-in racket/contract/base -> ->* any/c cons/c listof or/c)
+         (only-in racket/contract/base -> ->* cons/c listof or/c)
          (only-in racket/file file->bytes make-directory*)
          (only-in racket/list take)
          (only-in racket/port copy-port)
@@ -91,22 +91,20 @@
   (-> boolean?)
   (file-exists? (archive-path)))
 
-(define (download-cached)
-  (define dest (archive-path))
-  (unless (file-exists? dest)
-    (make-directory* (cifar10-cache-dir))
-    ;; temp file, decoded in full, then an atomic rename: a redirect page or
-    ;; a transfer cut short must not reach the cache
-    (with-temporary-file (tmp #:template "cifar10-~a.part"
-                              #:directory (cifar10-cache-dir))
-      (call/input-url (string->url cifar10-mirror)
-                      (lambda (url) (get-pure-port url #:redirections 5))
-                      (lambda (in)
-                        (call-with-output-file tmp #:exists 'truncate
-                          (lambda (out) (copy-port in out)))
-                        (unpack-archive tmp 'load-cifar10 cifar10-mirror)
-                        (rename-file-or-directory tmp dest #t)))))
-  dest)
+(define (fetch-archive dest)
+  (make-directory* (cifar10-cache-dir))
+  ;; temp file, decoded in full, then an atomic rename: a redirect page or
+  ;; a transfer cut short must not reach the cache
+  (with-temporary-file (tmp #:template "cifar10-~a.part"
+                            #:directory (cifar10-cache-dir))
+    (call/input-url (string->url cifar10-mirror)
+                    (lambda (url) (get-pure-port url #:redirections 5))
+                    (lambda (in)
+                      (call-with-output-file tmp #:exists 'truncate
+                        (lambda (out) (copy-port in out)))
+                      (define files (unpack-archive tmp 'load-cifar10 cifar10-mirror))
+                      (rename-file-or-directory tmp dest #t)
+                      files))))
 
 (define batch-names
   (append (for/list ([i (in-range 1 6)]) (format "data_batch_~a.bin" i))
@@ -135,8 +133,10 @@
 
 (define/contract-out (cifar10-archive-files) ;; noqa
   (-> (listof (cons/c string? bytes?)))
-  (define path (download-cached))
-  (unpack-archive path 'cifar10-archive-files path))
+  (define path (archive-path))
+  (if (file-exists? path)
+      (unpack-archive path 'cifar10-archive-files path)
+      (fetch-archive path)))
 
 (define (archive-file files name)
   (define entry (assoc name files))
