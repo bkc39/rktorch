@@ -91,6 +91,11 @@ CPU-first; float32 + inferred int64 (#44). From `torch`:
   continuing), `in-epochs`; synchronous, single-threaded like
   `num_workers=0`; a seeded loader replays `DataLoader(generator=g)`'s
   batch order
+- diffusion (`torch/vision/diffusion.rkt`, #84): `linear-schedule`
+  `cosine-schedule` (betas, alphas, alpha-bars as device tensors), `q-sample`
+  (closed-form `q(x_t | x_0)`), `sinusoidal-embedding`, and the layers
+  `TimeEmbedding` `ResBlock` `UNet` (two levels, `#:base` channels); the
+  training loop is `examples/racket/08-diffusion.rkt`
 - vision (`torch/vision/cifar10.rkt`, #84): `load-cifar10` (binary archive
   cached and unpacked in memory, float32 `[N 3 32 32]` in `[-1, 1]` plus
   int64 labels), `cifar10-dataset #:device`, `cifar10-label-names`,
@@ -281,7 +286,8 @@ module's full export set (`racket/runtime-path`, `syntax/parse/pre`).
 - `data/dataset.rkt` — `define-dataset` and `gen:dataset`;
   `private/definer.rkt` — the clause grammar it shares with `define-layer`.
 - `vision/cifar10.rkt` — CIFAR-10 loader and dataset, `vision/fixtures/`
-  its 256-record fixture.
+  its 256-record fixture; `vision/diffusion.rkt` — DDPM schedules, `q-sample`
+  and the UNet layers.
 - `data/loader.rkt` — `tensor-dataset`, `dataloader`, `in-dataloader`,
   `in-epochs`, re-exporting `data/dataset.rkt`; `data/mnist.rkt`,
   `data/text.rkt` — the modality loaders (moving under #88).

@@ -13,6 +13,8 @@
            (only-in "../data/text.rkt"
                     contiguous-blocks encode load-text-fixture text->vocab)
            (only-in "../vision/cifar10.rkt" load-cifar10-fixture)
+           (only-in "../vision/diffusion.rkt"
+                    UNet linear-schedule q-sample schedule-steps)
            "private/python-env.rkt")
 
   (define (check-parity rel-path compute)
@@ -410,6 +412,37 @@
        (when (and (cuda-available?)
                   (python-cuda-available?))
          (check-training-twin "06_gpt" "python/06_gpt.py" train-on
+                              'cuda 5e-3)))
+     (let ()
+       ;; the DDPM twin: UNet, linear schedule, timesteps and noise drawn on
+       ;; the CPU whatever the device, 5 full-batch steps on the fixture
+       (define (train-on device)
+         (with-default-device device
+           (manual-seed! 0)
+           (define-values (xs _ys) (load-cifar10-fixture))
+           (define net (UNet))
+           (define sched (linear-schedule))
+           (define opt (adam (parameters net) #:lr 0.001))
+           (define n (length xs))
+           (define steps (schedule-steps sched))
+           (define losses
+             (for/list ([_ (in-range 5)])
+               (define t (to (to-dtype (mul (rand n #:device 'cpu) steps) 'int64)
+                             device))
+               (define noise (to (randn-like xs #:device 'cpu) device))
+               (zero-grads! opt)
+               (define loss (mse-loss (net (q-sample sched xs t noise) t) noise))
+               (backward! loss)
+               (step! opt)
+               (item loss)))
+           (values losses
+                   (cat (for/list ([p (in-list (parameters net))])
+                          (reshape p -1))))))
+       (check-training-twin "08_diffusion" "python/08_diffusion.py" train-on
+                            'cpu tol)
+       (when (and (cuda-available?)
+                  (python-cuda-available?))
+         (check-training-twin "08_diffusion" "python/08_diffusion.py" train-on
                               'cuda 5e-3)))
      (let ()
        (define j (python-check "conv2d_init.py"))
