@@ -16,10 +16,11 @@ The Racket package is the `torch` collection:
 - `(require torch/nn)` — the nn layer (mirrors `import torch.nn`):
   `define-layer`, `gen:layer`, `Parameter`, `Linear`, `sgd`, `mse-loss`, initializers.
   **Naming convention:** nn layer *constructors* are PascalCase (`Linear`,
-  `Conv2d`, `MaxPool2d`, `Flatten`, `Dropout`, `Sequential`, `Embedding`,
-  `LayerNorm`), mirroring the `torch.nn.*` classes; their *predicates* are
-  lowercase (`linear?`, `conv2d?`, `max-pool2d?`, `flatten?`, `dropout?`,
-  `sequential?`, `embedding?`, `layer-norm?`), per Racket idiom
+  `Conv2d`, `ConvTranspose2d`, `MaxPool2d`, `Flatten`, `Dropout`,
+  `Sequential`, `Embedding`, `LayerNorm`, `GroupNorm`), mirroring the
+  `torch.nn.*` classes; their *predicates* are lowercase (`linear?`,
+  `conv2d?`, `conv-transpose2d?`, `max-pool2d?`, `flatten?`, `dropout?`,
+  `sequential?`, `embedding?`, `layer-norm?`, `group-norm?`), per Racket idiom
   (`list?`, `hash?`). The functional ops keep lowercase names on `torch`
   (`conv2d`, `max-pool2d`, `flatten`, like `torch.conv2d`). The PascalCase
   constructors vs lowercase functional ops are what let `(require torch
@@ -91,7 +92,8 @@ CPU-first; float32 + inferred int64 (#44). From `torch`:
   `num_workers=0`; a seeded loader replays `DataLoader(generator=g)`'s
   batch order
 - shape: `reshape view transpose permute squeeze unsqueeze cat stack`
-- elementwise: `add sub mul div pow neg exp log sqrt relu sigmoid tanh`
+- elementwise: `add sub mul div pow neg exp log sqrt relu sigmoid tanh silu
+  clamp`
   (binary ops take a real on either side)
 - operators: `+ - * /` shadow racket/base rkt-polars-style (numeric fast
   path to racket/base, tensor operands dispatch to add/sub/mul/div, chains
@@ -121,10 +123,11 @@ per `foreign/operators.rkt`.
 
 From `torch/nn`: `define-layer procedure->Layer gen:layer layer? Parameter Buffer LayerList LayerHash parameters
 named-parameters buffers children forward Linear Conv2d MaxPool2d Flatten Dropout
-Sequential Embedding LayerNorm sgd adam step! zero-grads! cross-entropy
+Sequential Embedding LayerNorm ConvTranspose2d GroupNorm sgd adam step! zero-grads! cross-entropy
 mse-loss kaiming-uniform uniform-init normal-init fan-in`. The functional
 transformer primitives (`gelu tril triu masked-fill embedding layer-norm`,
-tranche 3, #22) live on `torch` beside the other functional ops; the GPT
+tranche 3, #22) and the UNet ones (`conv-transpose2d group-norm silu
+clamp`, tranche 4, #84) live on `torch` beside the other functional ops; the GPT
 causal-mask idiom is `(masked-fill scores (eq (tril (ones T T)) 0) -inf.0)`. `define-layer` is the Python-style
 `nn.Module` analog: `#:init` is the constructor body and assigns declared
 fields with `set!`, a field's value classifies it at construction

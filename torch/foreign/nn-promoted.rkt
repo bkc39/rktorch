@@ -4,17 +4,22 @@
          (prefix-in g: (only-in "../generated.rkt"
                                 adaptive-avg-pool2d
                                 avg-pool2d
+                                clamp
+                                conv-transpose2d-input
                                 conv1d
                                 conv2d
                                 embedding
+                                group-norm
                                 layer-norm
                                 masked-fill-scalar
                                 max-pool2d
+                                silu
                                 tril
                                 triu))
          (only-in "../private/contract.rkt" define/contract-out)
          (only-in "contracts.rkt"
-                  index/c nonneg-size-1d/c pool-size/c pos-size-1d/c)
+                  index/c nonneg-size-1d/c nonneg-size/c pool-size/c
+                  pos-size-1d/c pos-size/c)
          (only-in "size.rkt" ->1d ->2d)
          (only-in "structs.rkt" tensor?))
 
@@ -112,3 +117,34 @@
   (define shape
     (if (list? normalized-shape) normalized-shape (list normalized-shape)))
   (g:layer-norm input shape weight bias eps #t))
+
+(define/contract-out (conv-transpose2d input weight ;; noqa
+                                       #:bias [bias #f]
+                                       #:stride [stride 1]
+                                       #:padding [padding 0]
+                                       #:output-padding [output-padding 0]
+                                       #:dilation [dilation 1]
+                                       #:groups [groups 1])
+  (->* [tensor? tensor?]
+       [#:bias (or/c tensor? #f) #:stride pos-size/c
+        #:padding nonneg-size/c #:output-padding nonneg-size/c
+        #:dilation pos-size/c #:groups exact-positive-integer?]
+       tensor?)
+  (g:conv-transpose2d-input input weight bias
+                            (->2d stride) (->2d padding) (->2d output-padding)
+                            groups (->2d dilation)))
+
+(define/contract-out (group-norm input num-groups ;; noqa
+                                 #:weight [weight #f]
+                                 #:bias [bias #f]
+                                 #:eps [eps 1e-5])
+  (->* [tensor? exact-positive-integer?]
+       [#:weight (or/c tensor? #f) #:bias (or/c tensor? #f) #:eps real?]
+       tensor?)
+  (g:group-norm input num-groups weight bias (exact->inexact eps) #t))
+
+(define/contract-out silu (-> tensor? tensor?) g:silu) ;; noqa
+
+(define/contract-out (clamp self #:min [min #f] #:max [max #f]) ;; noqa
+  (->* [tensor?] [#:min (or/c real? #f) #:max (or/c real? #f)] tensor?)
+  (g:clamp self (and min (exact->inexact min)) (and max (exact->inexact max))))

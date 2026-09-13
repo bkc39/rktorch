@@ -208,6 +208,43 @@
     (check-= (cadr (tensor->list g)) 0.841345 1e-5)
     (check-= (caddr (tensor->list g)) -0.158655 1e-5))
 
+  (test-case "silu: x * sigmoid(x)"
+    (define y (tensor->list (silu (tensor '(0.0 1.0 -1.0)))))
+    (check-= (car y) 0.0 1e-6)
+    (check-= (cadr y) 0.7310586 1e-5)
+    (check-= (caddr y) -0.2689414 1e-5))
+
+  (test-case "clamp: either bound, both, and ATen's refusal of neither"
+    (define x (tensor '(-2.0 -0.5 0.0 0.5 2.0)))
+    (check-equal? (tensor->list (clamp x #:min -1)) '(-1.0 -0.5 0.0 0.5 2.0))
+    (check-equal? (tensor->list (clamp x #:max 1)) '(-2.0 -0.5 0.0 0.5 1.0))
+    (check-equal? (tensor->list (clamp x #:min -1 #:max 1)) '(-1.0 -0.5 0.0 0.5 1.0))
+    (check-exn exn:fail? (lambda () (clamp x))))
+
+  (test-case "conv-transpose2d scatters each pixel over the kernel"
+    (define x (reshape (tensor '(1.0 2.0 3.0 4.0)) 1 1 2 2))
+    (define w (ones 1 1 2 2))
+    (check-equal? (tensor->list (conv-transpose2d x w))
+                  '(1.0 3.0 2.0 4.0 10.0 6.0 3.0 7.0 4.0))
+    (check-equal? (shape (conv-transpose2d x w #:stride 2 #:output-padding 1))
+                  '(1 1 5 5))
+    (check-equal? (shape (conv-transpose2d (ones 1 2 2 2) (ones 2 3 2 2)))
+                  '(1 3 3 3)
+                  "the weight is laid out (in, out, kH, kW)")
+    (check-exn #rx"^conv-transpose2d: contract violation"
+               (lambda () (conv-transpose2d x w #:stride 0))))
+
+  (test-case "group-norm normalises per group, then affines"
+    (define x (reshape (tensor '(1.0 3.0 5.0 7.0)) 1 2 1 2))
+    (for ([got (in-list (tensor->list (group-norm x 2)))]
+          [want (in-list '(-1.0 1.0 -1.0 1.0))])
+      (check-= got want 1e-4))
+    (for ([got (in-list (tensor->list (group-norm x 2 #:weight (full 2.0 2)
+                                                  #:bias (ones 2))))]
+          [want (in-list '(-1.0 3.0 -1.0 3.0))])
+      (check-= got want 1e-4))
+    (check-exn #rx"^group-norm: contract violation" (lambda () (group-norm x 0))))
+
   (test-case "tril/triu default diagonal + offsets"
     (define m (reshape (arange 1 10) 3 3))
     (check-equal? (tensor->list (tril m))
