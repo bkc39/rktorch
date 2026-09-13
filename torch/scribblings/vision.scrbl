@@ -2,7 +2,7 @@
 
 @(require (for-label racket/base
                      racket/contract
-                     (only-in torch cuda-if-available device? randn-like tensor?)
+                     (only-in torch cuda-if-available device/c randn-like tensor?)
                      torch/data/loader
                      (only-in torch/nn Conv2d ConvTranspose2d GroupNorm Linear
                               define-layer)
@@ -27,7 +27,7 @@ in memory; nothing else is written.
 ]
 
 @defproc[(load-cifar10 [split (or/c 'train 'test) 'train]
-                       [#:device device (or/c #f device?) #f])
+                       [#:device device (or/c #f device/c) #f])
          (values tensor? tensor?)]{
 The split's images as a float32 tensor of shape @tt{[N 3 32 32]} with
 pixels in @tt{[-1, 1]}, and its labels as an int64 tensor of shape
@@ -37,7 +37,7 @@ come back as one tensor.
 }
 
 @defproc[(cifar10-dataset [split (or/c 'train 'test) 'train]
-                          [#:device device (or/c #f device?) #f])
+                          [#:device device (or/c #f device/c) #f])
          dataset?]{
 @racket[load-cifar10] as a @racket[tensor-dataset], so a loader over it
 batches where the tensors live.
@@ -55,7 +55,7 @@ examples.
 }
 
 @defproc[(cifar10-records->tensors [bs bytes?]
-                                   [#:device device (or/c #f device?) #f])
+                                   [#:device device (or/c #f device/c) #f])
          (values tensor? tensor?)]{
 Parses a buffer of 3073-byte records, one label byte followed by the
 red, green and blue planes of an image, into the tensors above, on
