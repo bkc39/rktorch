@@ -13,8 +13,9 @@
 CIFAR-10 from its binary distribution: 60000 colour images of 32 by 32
 pixels in ten classes, 50000 for training and 10000 for testing. The
 archive is fetched once into the cache directory (or
-@envvar{RKTORCH_CIFAR10_DIR}) and unpacked in memory; nothing else is
-written.
+@envvar{RKTORCH_CIFAR10_DIR}), decoded in full before it is kept so a
+redirect page or a transfer cut short never reaches the cache, and unpacked
+in memory; nothing else is written.
 
 @racketblock[
 (define loader

@@ -1,7 +1,8 @@
 #lang racket/base
 
 (module+ test
-  (require (only-in racket/list take)
+  (require (only-in racket/file delete-directory/files make-temporary-file)
+           (only-in racket/list take)
            rackunit
            (only-in "../data/loader.rkt" dataset-ref)
            (only-in "../main.rkt" dtype length ref shape tensor->list)
@@ -68,6 +69,19 @@
 
   (define (string-trim-newlines s)
     (regexp-replace #rx"\n+$" s ""))
+
+  (test-case "a cache holding anything but the whole archive is refused"
+    (define dir (make-temporary-file "cifar10-cache-~a" 'directory))
+    (define fake (build-path dir "cifar-10-binary.tar.gz"))
+    (call-with-output-file fake
+      (lambda (out) (write-bytes #"<!DOCTYPE HTML>" out)))
+    (parameterize ([current-environment-variables
+                    (environment-variables-copy (current-environment-variables))])
+      (putenv "RKTORCH_CIFAR10_DIR" (path->string dir))
+      (check-true (cifar10-cached?))
+      (check-exn #rx"not the CIFAR-10 binary archive, or cut short"
+                 (lambda () (cifar10-archive-files))))
+    (delete-directory/files dir))
 
   ;; the archive itself, only when the cache already has it: never a fetch
   (define files (and (cifar10-cached?) (cifar10-archive-files)))

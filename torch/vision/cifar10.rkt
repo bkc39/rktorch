@@ -6,6 +6,7 @@
          (only-in net/url call/input-url get-pure-port string->url)
          (only-in racket/contract/base -> ->* any/c cons/c listof or/c)
          (only-in racket/file file->bytes make-directory*)
+         (only-in racket/list take)
          (only-in racket/port copy-port)
          ;; whole-module on purpose: the expansion needs bindings only-in
          ;; would strip
@@ -96,7 +97,8 @@
   (define dest (archive-path))
   (unless (file-exists? dest)
     (make-directory* (cifar10-cache-dir))
-    ;; temp file + atomic rename: an interrupted fetch must not poison the cache
+    ;; temp file, decoded in full, then an atomic rename: a redirect page or
+    ;; a transfer cut short must not reach the cache
     (with-temporary-file (tmp #:template "cifar10-~a.part"
                               #:directory (cifar10-cache-dir))
       (call/input-url (string->url cifar10-mirror)
@@ -104,28 +106,41 @@
                       (lambda (in)
                         (call-with-output-file tmp #:exists 'truncate
                           (lambda (out) (copy-port in out)))
-                        (unless (gzip-file? tmp)
-                          (raise-arguments-error 'load-cifar10
-                                                 "the mirror did not answer with the archive"
-                                                 "url" cifar10-mirror))
+                        (unpack-archive tmp 'load-cifar10 cifar10-mirror)
                         (rename-file-or-directory tmp dest #t)))))
   dest)
 
-(define (gzip-file? path)
-  (define head (call-with-input-file path (lambda (in) (read-bytes 2 in))))
-  (equal? head #"\37\213"))
+(define batch-names
+  (append (for/list ([i (in-range 1 6)]) (format "data_batch_~a.bin" i))
+          '("test_batch.bin")))
 
 (define (basename name)
   (define parts (regexp-split #rx"/" name))
   (car (reverse parts)))
 
-;; every file of the archive by its base name, unpacked in memory
+;; the archive's files by base name, or an error naming the source when
+;; the bytes are not the archive or stop short of it
+(define (unpack-archive path who source)
+  (define files
+    (with-handlers ([exn:fail? (lambda (_) #f)])
+      (define out (open-output-bytes))
+      (gunzip-through-ports (open-input-bytes (file->bytes path)) out)
+      (for/list ([entry (in-list (tar-entries (get-output-bytes out)))])
+        (cons (basename (car entry)) (cdr entry)))))
+  (define complete?
+    (and files
+         (for/and ([name (in-list batch-names)])
+           (define entry (assoc name files))
+           (and entry (= (bytes-length (cdr entry)) (* 10000 record-size))))))
+  (unless complete?
+    (raise-arguments-error who "not the CIFAR-10 binary archive, or cut short"
+                           "source" source))
+  files)
+
 (define/contract-out (cifar10-archive-files) ;; noqa
   (-> (listof (cons/c string? bytes?)))
-  (define out (open-output-bytes))
-  (gunzip-through-ports (open-input-bytes (file->bytes (download-cached))) out)
-  (for/list ([entry (in-list (tar-entries (get-output-bytes out)))])
-    (cons (basename (car entry)) (cdr entry))))
+  (define path (download-cached))
+  (unpack-archive path 'cifar10-archive-files path))
 
 (define (archive-file files name)
   (define entry (assoc name files))
@@ -138,9 +153,7 @@
   (->* [] [(or/c 'train 'test)] (values tensor? tensor?))
   (define files (cifar10-archive-files))
   (define names
-    (if (eq? split 'test)
-        '("test_batch.bin")
-        (for/list ([i (in-range 1 6)]) (format "data_batch_~a.bin" i))))
+    (if (eq? split 'test) '("test_batch.bin") (take batch-names 5)))
   (cifar10-records->tensors
    (apply bytes-append (for/list ([name (in-list names)])
                          (archive-file files name)))))
