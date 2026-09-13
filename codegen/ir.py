@@ -5,7 +5,8 @@ marshals: Tensor, Scalar -> double, float -> double, int64_t (incl.
 SymInt), bool, IntArrayRef -> (s64*, len), TensorList -> (ptr*, len),
 and a single Tensor return. The tranche-2 (#3) additions widen this to
 optional Tensor/int/IntArrayRef/ScalarType (marshalled as a NULL pointer
-or a sentinel) and in-place ops (a mutable receiver + integer status,
+or a sentinel), tranche 4 (#84) to optional Scalar (a double plus a
+presence flag), and in-place ops (a mutable receiver + integer status,
 the tr_tensor_sub_ shape). Everything else is skipped with a reason --
 the generator reports skips instead of guessing.
 """
@@ -37,6 +38,7 @@ OPTIONAL_TENSOR = "optional-tensor"
 OPTIONAL_INT64 = "optional-int64"
 OPTIONAL_INT_ARRAY = "optional-int-array"
 OPTIONAL_DTYPE = "optional-dtype"
+OPTIONAL_SCALAR = "optional-scalar"
 
 
 @dataclass(frozen=True)
@@ -115,6 +117,8 @@ def _param_kind(ty) -> str | None:
                 return OPTIONAL_INT64
             if elem.name is BaseTy.ScalarType:
                 return OPTIONAL_DTYPE
+            if elem.name is BaseTy.Scalar:
+                return OPTIONAL_SCALAR
         if _int_list(elem):
             return OPTIONAL_INT_ARRAY
     return None

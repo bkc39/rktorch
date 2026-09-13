@@ -20,7 +20,8 @@
   ;; one fails loudly). Spec -> input: (tensor dim ...) = seeded randn,
   ;; (tensors ...) a list of them, (bool-tensor ...) a genuine bool handle
   ;; via `ne 0`, (kwarg "name" v) a scalar passed as name=v to a kwarg-only
-  ;; aten arg, other heads are literals with #f = None.
+  ;; aten arg, (optional-scalar v) a Scalar? bound, other heads are
+  ;; literals with #f = None.
   (define generated-recipes
     (hash 'matmul '((tensor 2 3) (tensor 3 2))
           'mm '((tensor 2 2) (tensor 2 2))
@@ -122,7 +123,15 @@
           'masked-fill-scalar '((tensor 6) (bool-tensor (0 1 0 1 0 1))
                                 (double -100.0))
           'tril '((tensor 4 4) (int64 0))
-          'triu '((tensor 4 4) (int64 0))))
+          'triu '((tensor 4 4) (int64 0))
+          'conv-transpose2d-input '((tensor 1 2 4 4) (tensor 2 3 3 3)
+                                    (optional-tensor 3) (int-array (1 1))
+                                    (int-array (0 0)) (int-array (0 0))
+                                    (int64 1) (int-array (1 1)))
+          'group-norm '((tensor 2 4 3 3) (int64 2) (optional-tensor 4)
+                        (optional-tensor 4) (double 1e-5) (bool #t))
+          'silu '((tensor 2 3))
+          'clamp '((tensor 2 3) (optional-scalar -0.5) (optional-scalar 0.5))))
 
   ;; Tensor specs draw seeded randns left to right — both sides consume the
   ;; same RNG stream, so spec order and draw counts must match exactly.
@@ -138,7 +147,8 @@
       [(int-tensor int-tensor-2d) (to-dtype (tensor (cadr spec)) 'int64)]
       [(scalar-tensor) (tensor (cadr spec))]
       [(bool-tensor) (ne (tensor (cadr spec)) 0)]
-      [(int64 double bool int-array optional-int64 optional-int-array dtype)
+      [(int64 double bool int-array optional-int64 optional-int-array
+        optional-scalar dtype)
        (cadr spec)]
       [(kwarg) (caddr spec)]
       [else (error 'generated-parity "unknown recipe spec: ~a" spec)]))
@@ -175,7 +185,8 @@
          [else (number->string v)])]
       [(bool) (if (cadr spec) "True" "False")]
       [(int-array) (format "[~a]" (csv (cadr spec)))]
-      [(optional-int64) (if (cadr spec) (number->string (cadr spec)) "None")]
+      [(optional-int64 optional-scalar)
+       (if (cadr spec) (number->string (cadr spec)) "None")]
       [(optional-int-array)
        (if (cadr spec) (format "[~a]" (csv (cadr spec))) "None")]
       [(dtype) (if (cadr spec) (format "torch.~a" (cadr spec)) "None")]
@@ -325,4 +336,34 @@
      (check-generated-parity
       (assq 'triu manifest)
       '((tensor 4 4) (int64 1))
-      "[diag=1]")]))
+      "[diag=1]")
+     (check-generated-parity
+      (assq 'conv-transpose2d-input manifest)
+      '((tensor 1 2 4 4) (tensor 2 3 3 3) (optional-tensor #f)
+        (int-array (1 1)) (int-array (0 0)) (int-array (0 0)) (int64 1)
+        (int-array (1 1)))
+      "[no-bias]")
+     (check-generated-parity
+      (assq 'conv-transpose2d-input manifest)
+      '((tensor 1 2 4 4) (tensor 2 3 3 3) (optional-tensor 3)
+        (int-array (2 2)) (int-array (0 0)) (int-array (1 1)) (int64 1)
+        (int-array (1 1)))
+      "[stride-2+output-padding]")
+     (check-generated-parity
+      (assq 'group-norm manifest)
+      '((tensor 2 4 3 3) (int64 2) (optional-tensor #f) (optional-tensor #f)
+        (double 1e-5) (bool #t))
+      "[no-affine]")
+     (check-generated-parity
+      (assq 'group-norm manifest)
+      '((tensor 2 4 3 3) (int64 1) (optional-tensor 4) (optional-tensor 4)
+        (double 1e-5) (bool #t))
+      "[one-group]")
+     (check-generated-parity
+      (assq 'clamp manifest)
+      '((tensor 2 3) (optional-scalar -0.5) (optional-scalar #f))
+      "[min-only]")
+     (check-generated-parity
+      (assq 'clamp manifest)
+      '((tensor 2 3) (optional-scalar #f) (optional-scalar 0.5))
+      "[max-only]")]))
