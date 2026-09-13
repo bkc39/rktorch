@@ -27,7 +27,6 @@
               (format "non-finite loss: ~a" losses))
   (check-true (< (last losses) (first losses))
               (format "losses did not decrease: ~a" losses))
-  ;; the parameter tree walks the UNet's fields in declaration order
   (define names (map car (named-parameters net)))
   (check-equal? (take names 4)
                 '("time.fc1.weight" "time.fc1.bias" "time.fc2.weight" "time.fc2.bias"))

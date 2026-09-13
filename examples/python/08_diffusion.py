@@ -116,6 +116,10 @@ with torch.device(DEVICE):
 opt = torch.optim.Adam(net.parameters(), lr=0.001)
 steps = alpha_bars.shape[0]
 
+# building the net consumed the CPU stream only on a CPU run; reseed so
+# the timestep and noise draws below replay on every device
+torch.manual_seed(0)
+
 losses = []
 for _ in range(5):
     n = xs.shape[0]

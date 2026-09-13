@@ -1,14 +1,16 @@
 #lang racket/base
 
 (require (only-in racket/contract/base
-                  -> ->* >=/c and/c any/c between/c contract-out
+                  -> ->* and/c any/c between/c contract-out
                   flat-named-contract listof)
-         (only-in racket/math pi)
+         (only-in racket/math infinite? nan? pi)
          (only-in "../foreign.rkt"
-                  add arange cat cos exp index-select length log mul reshape
-                  silu sin sqrt sub tensor tensor-device tensor? to-dtype
-                  unsqueeze)
-         (only-in "../nn.rkt" Conv2d ConvTranspose2d GroupNorm Linear define-layer)
+                  add arange cat cos dtype exp index-select length log mul
+                  reshape shape silu sin sqrt sub tensor tensor-device tensor?
+                  to-dtype unsqueeze)
+         (only-in "../nn.rkt"
+                  Conv2d ConvTranspose2d GroupNorm Linear define-layer
+                  parameters)
          (only-in "../private/contract.rkt" define/contract-out))
 
 (struct schedule (steps betas alphas alpha-bars) ;; noqa
@@ -38,6 +40,17 @@
 (define variance/c
   (flat-named-contract 'variance (and/c real? (between/c 0.0 1.0))))
 
+(define offset/c
+  (flat-named-contract
+   'finite-nonnegative-real
+   (lambda (v) (and (real? v) (not (nan? v)) (not (infinite? v)) (>= v 0)))))
+
+(define timesteps/c
+  (flat-named-contract
+   'int64-vector
+   (lambda (v)
+     (and (tensor? v) (eq? (dtype v) 'int64) (= 1 (length (shape v)))))))
+
 (define/contract-out (linear-schedule [steps 1000] ;; noqa
                                       #:beta-start [beta-start 1e-4]
                                       #:beta-end [beta-end 0.02])
@@ -50,7 +63,7 @@
      (exact->inexact (+ beta-start (* (- beta-end beta-start) (/ i span)))))))
 
 (define/contract-out (cosine-schedule [steps 1000] #:offset [offset 0.008]) ;; noqa
-  (->* [] [exact-positive-integer? #:offset (and/c real? (>=/c 0))] schedule?)
+  (->* [] [exact-positive-integer? #:offset offset/c] schedule?)
   (define (f t)
     (define x (* (/ (+ (/ t steps) offset) (+ 1.0 offset)) (/ pi 2.0)))
     (* (cos x) (cos x)))
@@ -59,7 +72,7 @@
      (min 0.999 (- 1.0 (/ (f (add1 t)) (f t)))))))
 
 (define/contract-out (q-sample sched x0 t noise) ;; noqa
-  (-> schedule? tensor? tensor? tensor? tensor?)
+  (-> schedule? tensor? timesteps/c tensor? tensor?)
   (define a (reshape (index-select (schedule-alpha-bars sched) 0 t) -1 1 1 1))
   (add (mul (sqrt a) x0) (mul (sqrt (sub 1.0 a)) noise)))
 
@@ -68,7 +81,7 @@
                        (lambda (n) (and (exact-positive-integer? n) (even? n)))))
 
 (define/contract-out (sinusoidal-embedding t dim) ;; noqa
-  (-> tensor? even-dim/c tensor?)
+  (-> timesteps/c even-dim/c tensor?)
   (define half (quotient dim 2))
   (define freqs
     (exp (mul (arange half #:device (tensor-device t))
@@ -82,7 +95,9 @@
   (set! fc1 (Linear dim (* 4 dim)))
   (set! fc2 (Linear (* 4 dim) (* 4 dim)))
   #:forward (t)
-  (fc2 (silu (fc1 (sinusoidal-embedding t dim)))))
+  (define features
+    (to-dtype (sinusoidal-embedding t dim) (dtype (car (parameters fc1)))))
+  (fc2 (silu (fc1 features))))
 
 (define channels/c
   (flat-named-contract 'multiple-of-eight

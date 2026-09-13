@@ -26,9 +26,11 @@ this program is the loop around them.
 @bold{One step.} Draw a timestep per image uniformly from @tt{[0, T)}, draw
 the noise, form @tt{x_t} with @racket[q-sample], and regress the network's
 output on that noise with a mean squared error. Both draws are made on the
-CPU whatever device the model trains on, so a seeded run replays the same
-timesteps and noise on the GPU as on the CPU, the way the PyTorch twin of
-this example draws them. The device is the accelerator when there is one,
+CPU whatever device the model trains on, and the seed is set again once the
+model is built, since building it consumes the CPU stream only on a CPU
+run; a seeded run therefore replays the same timesteps and noise on the GPU
+as on the CPU, the way the PyTorch twin of this example draws them. The
+device is the accelerator when there is one,
 except that on Apple silicon the run stays on the CPU: libtorch 2.9 has no
 MPS kernel for the backward of @racket[group-norm], and the UNet is built
 on it.
@@ -65,6 +67,7 @@ together.
     (define net (UNet))
     (define sched (linear-schedule))
     (define opt (adam (parameters net) #:lr 0.001))
+    (manual-seed! 0)
     (define losses
       (for/list ([_ (in-range steps)])
         (train-step net sched opt xs device)))
@@ -90,6 +93,7 @@ regime the sampler in the next example works in.
     (define net (UNet #:base base))
     (define sched (linear-schedule))
     (define opt (adam (parameters net) #:lr lr))
+    (manual-seed! 0)
     (for/list ([epoch (in-range epochs)])
       (define total
         (for/sum ([(xb _yb) loader])

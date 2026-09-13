@@ -423,6 +423,7 @@
            (define net (UNet))
            (define sched (linear-schedule))
            (define opt (adam (parameters net) #:lr 0.001))
+           (manual-seed! 0)
            (define n (length xs))
            (define steps (schedule-steps sched))
            (define losses

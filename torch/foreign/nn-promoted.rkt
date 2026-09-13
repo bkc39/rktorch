@@ -1,6 +1,7 @@
 #lang racket/base
 
-(require (only-in racket/contract/base -> ->* non-empty-listof or/c)
+(require (only-in racket/contract/base
+                  -> ->* ->i non-empty-listof or/c unsupplied-arg?)
          (prefix-in g: (only-in "../generated.rkt"
                                 adaptive-avg-pool2d
                                 avg-pool2d
@@ -146,5 +147,11 @@
 (define/contract-out silu (-> tensor? tensor?) g:silu) ;; noqa
 
 (define/contract-out (clamp self #:min [min #f] #:max [max #f]) ;; noqa
-  (->* [tensor?] [#:min (or/c real? #f) #:max (or/c real? #f)] tensor?)
+  (->i ([self tensor?])
+       (#:min [min (or/c real? #f)] #:max [max (or/c real? #f)])
+       #:pre/name (min max)
+       "at least one bound"
+       (or (and (not (unsupplied-arg? min)) min)
+           (and (not (unsupplied-arg? max)) max))
+       [result tensor?])
   (g:clamp self (and min (exact->inexact min)) (and max (exact->inexact max))))

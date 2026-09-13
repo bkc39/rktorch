@@ -34,7 +34,9 @@
     (check-true (< (last abars) 0.01))
     (check-exn #rx"variance" (lambda () (linear-schedule 10 #:beta-end 1.5)))
     (check-exn #rx"^cosine-schedule: contract violation"
-               (lambda () (cosine-schedule 10 #:offset -1))))
+               (lambda () (cosine-schedule 10 #:offset -1)))
+    (check-exn #rx"finite-nonnegative-real"
+               (lambda () (cosine-schedule 10 #:offset +inf.0))))
 
   (test-case "q-sample mixes signal and noise by the schedule at each timestep"
     (define s (linear-schedule 10))
@@ -45,7 +47,8 @@
     (define got (tensor->list (q-sample s x0 t noise)))
     (define (expected a) (+ (sqrt a) (* 3.0 (sqrt (- 1.0 a)))))
     (check-= (car got) (expected (car abars)) 1e-6)
-    (check-= (cadr got) (expected (last abars)) 1e-6))
+    (check-= (cadr got) (expected (last abars)) 1e-6)
+    (check-exn #rx"int64-vector" (lambda () (q-sample s x0 (arange 2) noise))))
 
   (test-case "sinusoidal embedding: sines then cosines, t = 0 gives zeros then ones"
     (define e (sinusoidal-embedding (tensor '(0 1) #:dtype 'int64) 8))
@@ -58,13 +61,20 @@
                     "the frequency table follows the timesteps, not the default device"))
     (check-equal? (list-take (tensor->list e) 8) '(0.0 0.0 0.0 0.0 1.0 1.0 1.0 1.0))
     (check-= (list-ref (tensor->list e) 8) (sin 1.0) 1e-6)
-    (check-exn #rx"even-positive-integer" (lambda () (sinusoidal-embedding (tensor '(0)) 7))))
+    (check-exn #rx"even-positive-integer"
+               (lambda () (sinusoidal-embedding (tensor '(0) #:dtype 'int64) 7)))
+    (check-exn #rx"int64-vector" (lambda () (sinusoidal-embedding (arange 2) 8)))
+    (check-exn #rx"int64-vector"
+               (lambda () (sinusoidal-embedding (tensor '((0) (1))) 8))))
 
   (test-case "layers: shapes, predicates, contracts"
     (manual-seed! 0)
     (define te (TimeEmbedding 8))
     (check-true (time-embedding? te))
     (check-equal? (tensor-shape (te (tensor '(0 5) #:dtype 'int64))) '(2 32))
+    (check-equal? (tensor-dtype ((to (TimeEmbedding 8) 'float64) (tensor '(0 5) #:dtype 'int64)))
+                  'float64
+                  "the features follow the layer's dtype")
     (define rb (ResBlock 8 16 32))
     (check-true (res-block? rb))
     (check-equal? (map car (named-parameters rb))

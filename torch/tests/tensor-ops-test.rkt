@@ -219,7 +219,7 @@
     (check-equal? (tensor->list (clamp x #:min -1)) '(-1.0 -0.5 0.0 0.5 2.0))
     (check-equal? (tensor->list (clamp x #:max 1)) '(-2.0 -0.5 0.0 0.5 1.0))
     (check-equal? (tensor->list (clamp x #:min -1 #:max 1)) '(-1.0 -0.5 0.0 0.5 1.0))
-    (check-exn exn:fail? (lambda () (clamp x))))
+    (check-exn #rx"at least one bound" (lambda () (clamp x))))
 
   (test-case "conv-transpose2d scatters each pixel over the kernel"
     (define x (reshape (tensor '(1.0 2.0 3.0 4.0)) 1 1 2 2))

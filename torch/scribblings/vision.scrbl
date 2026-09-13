@@ -97,7 +97,7 @@ model lives.
 }
 
 @defproc[(cosine-schedule [steps exact-positive-integer? 1000]
-                          [#:offset offset (>=/c 0) 0.008])
+                          [#:offset offset finite-nonnegative-real? 0.008])
          schedule?]{
 The improved-DDPM schedule: cumulative products following a squared cosine
 of the timestep, each variance capped at @racket[0.999].
@@ -111,7 +111,7 @@ of the timestep, each variance capped at @racket[0.999].
 A schedule and its tables, each of shape @tt{[steps]}.
 }
 
-@defproc[(q-sample [s schedule?] [x0 tensor?] [t tensor?] [noise tensor?])
+@defproc[(q-sample [s schedule?] [x0 tensor?] [t int64-vector?] [noise tensor?])
          tensor?]{
 @tt{q(x_t | x_0)} in closed form: with @tt{a} the cumulative product at each
 image's timestep @racket[t], an int64 tensor of shape @tt{[N]},
@@ -119,7 +119,7 @@ image's timestep @racket[t], an int64 tensor of shape @tt{[N]},
 typically @racket[randn-like], so a seeded run replays.
 }
 
-@defproc[(sinusoidal-embedding [t tensor?] [dim even-positive-integer?])
+@defproc[(sinusoidal-embedding [t int64-vector?] [dim even-positive-integer?])
          tensor?]{
 Timesteps @racket[t], shape @tt{[N]}, as @tt{[N dim]} sinusoidal features:
 the sine half then the cosine half over frequencies falling geometrically
