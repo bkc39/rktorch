@@ -5,7 +5,9 @@
            (only-in racket/list take)
            rackunit
            (only-in "../data/loader.rkt" dataset-ref)
-           (only-in "../main.rkt" dtype length ref shape tensor->list)
+           (only-in "../main.rkt"
+                    cuda-available? cuda-device dtype length mps-available?
+                    mps-device ref shape tensor->list tensor-device)
            (only-in "../vision/cifar10.rkt"
                     cifar10-archive-files
                     cifar10-cached?
@@ -36,6 +38,16 @@
     (check-true (>= (apply min all) -1.0) "pixel below -1")
     (check-true (<= (apply max all) 1.0) "pixel above 1")
     (check-true (< (apply min all) 0.0) "no dark pixel"))
+
+  (test-case "records land on the requested device"
+    (for ([dev (in-list (list (and (cuda-available?) (cuda-device))
+                              (and (mps-available?) (mps-device))))]
+          #:when dev)
+      (define-values (imgs lbls)
+        (cifar10-records->tensors (make-bytes (* 2 3073) 9) #:device dev))
+      (check-equal? (tensor-device imgs) dev)
+      (check-equal? (tensor-device lbls) dev)
+      (check-equal? (shape imgs) '(2 3 32 32))))
 
   (test-case "records must come whole"
     (check-exn #rx"whole number of 3073-byte records"

@@ -12,7 +12,7 @@
          ;; would strip
          racket/runtime-path
          (only-in "../data/loader.rkt" dataset? tensor-dataset)
-         (only-in "../main.rkt" device/c reshape tensor tensor? to)
+         (only-in "../main.rkt" device/c reshape tensor tensor?)
          (only-in "../private/contract.rkt" define/contract-out)
          (only-in "../private/util.rkt" with-temporary-file))
 
@@ -23,10 +23,8 @@
   '("airplane" "automobile" "bird" "cat" "deer"
     "dog" "frog" "horse" "ship" "truck"))
 
-;; a record is one label byte, then the red, green and blue planes of a
-;; 32x32 image: channel-major already, so the buffer reshapes to NCHW
-(define/contract-out (cifar10-records->tensors bs) ;; noqa
-  (-> bytes? (values tensor? tensor?))
+(define/contract-out (cifar10-records->tensors bs #:device [device #f]) ;; noqa
+  (->* [bytes?] [#:device (or/c #f device/c)] (values tensor? tensor?))
   (define n (quotient (bytes-length bs) record-size))
   (unless (= (bytes-length bs) (* n record-size))
     (raise-arguments-error 'cifar10-records->tensors
@@ -41,7 +39,8 @@
     (for ([k (in-range image-size)])
       (f32vector-set! images (+ base k)
                       (- (/ (bytes-ref bs (+ at 1 k)) 127.5) 1.0))))
-  (values (reshape (tensor images) n 3 32 32) (tensor labels)))
+  (values (reshape (tensor images #:device device) n 3 32 32)
+          (tensor labels #:device device)))
 
 (define (octal-field bs start len)
   (define s (bytes->string/latin-1 (subbytes bs start (+ start len))))
@@ -55,7 +54,6 @@
                   len))
   (bytes->string/utf-8 (subbytes raw 0 end)))
 
-;; the entries of an uncompressed tar: name and contents per regular file
 (define/contract-out (tar-entries bs) ;; noqa
   (-> bytes? (listof (cons/c string? bytes?)))
   (let loop ([at 0] [acc '()])
@@ -118,8 +116,6 @@
   (define parts (regexp-split #rx"/" name))
   (car (reverse parts)))
 
-;; the archive's files by base name, or an error naming the source when
-;; the bytes are not the archive or stop short of it
 (define (unpack-archive path who source)
   (define files
     (with-handlers ([exn:fail? (lambda (_) #f)])
@@ -149,21 +145,21 @@
                            "name" name))
   (cdr entry))
 
-(define/contract-out (load-cifar10 [split 'train]) ;; noqa
-  (->* [] [(or/c 'train 'test)] (values tensor? tensor?))
+(define/contract-out (load-cifar10 [split 'train] #:device [device #f]) ;; noqa
+  (->* [] [(or/c 'train 'test) #:device (or/c #f device/c)]
+       (values tensor? tensor?))
   (define files (cifar10-archive-files))
   (define names
     (if (eq? split 'test) '("test_batch.bin") (take batch-names 5)))
   (cifar10-records->tensors
    (apply bytes-append (for/list ([name (in-list names)])
-                         (archive-file files name)))))
+                         (archive-file files name)))
+   #:device device))
 
 (define/contract-out (cifar10-dataset [split 'train] #:device [device #f]) ;; noqa
   (->* [] [(or/c 'train 'test) #:device (or/c #f device/c)] dataset?)
-  (define-values (images labels) (load-cifar10 split))
-  (if device
-      (tensor-dataset (to images device) (to labels device))
-      (tensor-dataset images labels)))
+  (define-values (images labels) (load-cifar10 split #:device device))
+  (tensor-dataset images labels))
 
 (define-runtime-path fixture "fixtures/cifar10-256.bin")
 

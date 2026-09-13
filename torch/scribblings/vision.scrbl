@@ -26,20 +26,21 @@ in memory; nothing else is written.
               #:batch-size 128 #:shuffle? #t))
 ]
 
-@defproc[(load-cifar10 [split (or/c 'train 'test) 'train])
+@defproc[(load-cifar10 [split (or/c 'train 'test) 'train]
+                       [#:device device (or/c #f device?) #f])
          (values tensor? tensor?)]{
 The split's images as a float32 tensor of shape @tt{[N 3 32 32]} with
 pixels in @tt{[-1, 1]}, and its labels as an int64 tensor of shape
-@tt{[N]}, the layout a diffusion model trains on. The five training
-batches come back as one tensor.
+@tt{[N]}, the layout a diffusion model trains on, built on
+@racket[device] or else the default device. The five training batches
+come back as one tensor.
 }
 
 @defproc[(cifar10-dataset [split (or/c 'train 'test) 'train]
                           [#:device device (or/c #f device?) #f])
          dataset?]{
-@racket[load-cifar10] as a @racket[tensor-dataset], moved to
-@racket[device] when one is given, so a loader over it batches on the
-device.
+@racket[load-cifar10] as a @racket[tensor-dataset], so a loader over it
+batches where the tensors live.
 }
 
 @defthing[cifar10-label-names (listof string?)]{
@@ -53,10 +54,13 @@ package, in the same form as @racket[load-cifar10]; for tests and offline
 examples.
 }
 
-@defproc[(cifar10-records->tensors [bs bytes?]) (values tensor? tensor?)]{
+@defproc[(cifar10-records->tensors [bs bytes?]
+                                   [#:device device (or/c #f device?) #f])
+         (values tensor? tensor?)]{
 Parses a buffer of 3073-byte records, one label byte followed by the
-red, green and blue planes of an image, into the tensors above. A buffer
-that is not a whole number of records is an error.
+red, green and blue planes of an image, into the tensors above, on
+@racket[device] or else the default device. A buffer that is not a whole
+number of records is an error.
 }
 
 @defproc[(cifar10-archive-files) (listof (cons/c string? bytes?))]{
