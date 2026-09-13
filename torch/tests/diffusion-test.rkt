@@ -31,7 +31,10 @@
     (check-true (> (car abars) 0.99))
     (for ([a (in-list abars)] [b (in-list (cdr abars))])
       (check-true (< b a) "alpha-bar must fall"))
-    (check-true (< (last abars) 0.01)))
+    (check-true (< (last abars) 0.01))
+    (check-exn #rx"variance" (lambda () (linear-schedule 10 #:beta-end 1.5)))
+    (check-exn #rx"^cosine-schedule: contract violation"
+               (lambda () (cosine-schedule 10 #:offset -1))))
 
   (test-case "q-sample mixes signal and noise by the schedule at each timestep"
     (define s (linear-schedule 10))
@@ -47,6 +50,12 @@
   (test-case "sinusoidal embedding: sines then cosines, t = 0 gives zeros then ones"
     (define e (sinusoidal-embedding (tensor '(0 1) #:dtype 'int64) 8))
     (check-equal? (tensor-shape e) '(2 8))
+    (for ([dev (in-list (list (and (cuda-available?) (cuda-device))
+                              (and (mps-available?) (mps-device))))]
+          #:when dev)
+      (check-equal? (tensor-device (sinusoidal-embedding (to (tensor '(3) #:dtype 'int64) dev) 8))
+                    dev
+                    "the frequency table follows the timesteps, not the default device"))
     (check-equal? (list-take (tensor->list e) 8) '(0.0 0.0 0.0 0.0 1.0 1.0 1.0 1.0))
     (check-= (list-ref (tensor->list e) 8) (sin 1.0) 1e-6)
     (check-exn #rx"even-positive-integer" (lambda () (sinusoidal-embedding (tensor '(0)) 7))))

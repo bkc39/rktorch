@@ -87,8 +87,8 @@ a schedule of noise levels, the closed-form jump to any timestep, and a
 small UNet. The training loop and the sampler are the examples' business.
 
 @defproc[(linear-schedule [steps exact-positive-integer? 1000]
-                          [#:beta-start beta-start real? 1e-4]
-                          [#:beta-end beta-end real? 0.02])
+                          [#:beta-start beta-start (real-in 0 1) 1e-4]
+                          [#:beta-end beta-end (real-in 0 1) 0.02])
          schedule?]{
 The DDPM schedule: @racket[steps] variances evenly spaced from
 @racket[beta-start] to @racket[beta-end], with their alphas and cumulative
@@ -97,7 +97,7 @@ model lives.
 }
 
 @defproc[(cosine-schedule [steps exact-positive-integer? 1000]
-                          [#:offset offset real? 0.008])
+                          [#:offset offset (>=/c 0) 0.008])
          schedule?]{
 The improved-DDPM schedule: cumulative products following a squared cosine
 of the timestep, each variance capped at @racket[0.999].

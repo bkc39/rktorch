@@ -1,11 +1,13 @@
 #lang racket/base
 
 (require (only-in racket/contract/base
-                  -> ->* and/c any/c contract-out flat-named-contract listof)
+                  -> ->* >=/c and/c any/c between/c contract-out
+                  flat-named-contract listof)
          (only-in racket/math pi)
          (only-in "../foreign.rkt"
                   add arange cat cos exp index-select length log mul reshape
-                  silu sin sqrt sub tensor tensor? to-dtype unsqueeze)
+                  silu sin sqrt sub tensor tensor-device tensor? to-dtype
+                  unsqueeze)
          (only-in "../nn.rkt" Conv2d ConvTranspose2d GroupNorm Linear define-layer)
          (only-in "../private/contract.rkt" define/contract-out))
 
@@ -33,17 +35,22 @@
          (loop (cdr as) next (cons next out))])))
   (make-schedule (length betas) (tensor betas) (tensor alphas) (tensor alpha-bars)))
 
+(define variance/c
+  (flat-named-contract 'variance (and/c real? (between/c 0.0 1.0))))
+
 (define/contract-out (linear-schedule [steps 1000] ;; noqa
                                       #:beta-start [beta-start 1e-4]
                                       #:beta-end [beta-end 0.02])
-  (->* [] [exact-positive-integer? #:beta-start real? #:beta-end real?] schedule?)
+  (->* []
+       [exact-positive-integer? #:beta-start variance/c #:beta-end variance/c]
+       schedule?)
   (define span (max 1 (sub1 steps)))
   (betas->schedule
    (for/list ([i (in-range steps)])
      (exact->inexact (+ beta-start (* (- beta-end beta-start) (/ i span)))))))
 
 (define/contract-out (cosine-schedule [steps 1000] #:offset [offset 0.008]) ;; noqa
-  (->* [] [exact-positive-integer? #:offset real?] schedule?)
+  (->* [] [exact-positive-integer? #:offset (and/c real? (>=/c 0))] schedule?)
   (define (f t)
     (define x (* (/ (+ (/ t steps) offset) (+ 1.0 offset)) (/ pi 2.0)))
     (* (cos x) (cos x)))
@@ -63,7 +70,9 @@
 (define/contract-out (sinusoidal-embedding t dim) ;; noqa
   (-> tensor? even-dim/c tensor?)
   (define half (quotient dim 2))
-  (define freqs (exp (mul (arange half) (- (/ (log 10000.0) half)))))
+  (define freqs
+    (exp (mul (arange half #:device (tensor-device t))
+              (- (/ (log 10000.0) half)))))
   (define angles (mul (unsqueeze (to-dtype t 'float32) 1) (unsqueeze freqs 0)))
   (cat (list (sin angles) (cos angles)) 1))
 

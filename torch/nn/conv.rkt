@@ -1,6 +1,6 @@
 #lang racket/base
 
-(require (only-in racket/contract/base ->* or/c)
+(require (only-in racket/contract/base ->* ->i or/c unsupplied-arg?)
          (only-in "../foreign.rkt"
                   conv-transpose2d conv1d conv2d flatten max-pool2d)
          (only-in "../foreign/contracts.rkt"
@@ -56,13 +56,20 @@
 
 (define-layer ConvTranspose2d ;; noqa
   (kernel-size stride padding output-padding dilation groups weight bias)
-  #:contract (->* [exact-positive-integer? exact-positive-integer? pos-size/c]
-                  [#:stride pos-size/c
-                   #:padding nonneg-size/c
-                   #:output-padding nonneg-size/c
-                   #:dilation pos-size/c
-                   #:groups exact-positive-integer?]
-                  conv-transpose2d?)
+  #:contract (->i ([in-channels exact-positive-integer?]
+                   [out-channels exact-positive-integer?]
+                   [kernel-size pos-size/c])
+                  (#:stride [stride pos-size/c]
+                   #:padding [padding nonneg-size/c]
+                   #:output-padding [output-padding nonneg-size/c]
+                   #:dilation [dilation pos-size/c]
+                   #:groups [groups exact-positive-integer?])
+                  #:pre/name (in-channels out-channels groups)
+                  "groups must divide both channel counts"
+                  (or (unsupplied-arg? groups)
+                      (and (zero? (remainder in-channels groups))
+                           (zero? (remainder out-channels groups))))
+                  [result conv-transpose2d?])
   #:init (in-channels out-channels kernel-size
           #:stride [stride 1]
           #:padding [padding 0]
