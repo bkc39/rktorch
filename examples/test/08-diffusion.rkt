@@ -33,7 +33,6 @@
   (check-equal? (last names) "out-conv.bias")
   (check-equal? (length names) 74)
   (check-equal? (tensor-shape (car (parameters net))) '(128 32))
-  ;; the net maps a batch to a noise estimate of the same shape
   (check-equal? (tensor-shape (net (zeros 2 3 32 32) (tensor '(0 999) #:dtype 'int64)))
                 '(2 3 32 32))
   ;; Device RNG streams differ from the CPU's for the init, so the on-device
