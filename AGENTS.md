@@ -90,6 +90,11 @@ CPU-first; float32 + inferred int64 (#44). From `torch`:
   continuing), `in-epochs`; synchronous, single-threaded like
   `num_workers=0`; a seeded loader replays `DataLoader(generator=g)`'s
   batch order
+- vision (`torch/vision/cifar10.rkt`, #84): `load-cifar10` (binary archive
+  cached and unpacked in memory, float32 `[N 3 32 32]` in `[-1, 1]` plus
+  int64 labels), `cifar10-dataset #:device`, `cifar10-label-names`,
+  `load-cifar10-fixture` (256 committed records), `cifar10-records->tensors`,
+  `tar-entries`
 - shape: `reshape view transpose permute squeeze unsqueeze cat stack`
 - elementwise: `add sub mul div pow neg exp log sqrt relu sigmoid tanh`
   (binary ops take a real on either side)
@@ -272,6 +277,8 @@ module's full export set (`racket/runtime-path`, `syntax/parse/pre`).
 - `foreign.rkt` — the contracted layer + the `unsafe` submodule.
 - `data/dataset.rkt` — `define-dataset` and `gen:dataset`;
   `private/definer.rkt` — the clause grammar it shares with `define-layer`.
+- `vision/cifar10.rkt` — CIFAR-10 loader and dataset, `vision/fixtures/`
+  its 256-record fixture.
 - `data/loader.rkt` — `tensor-dataset`, `dataloader`, `in-dataloader`,
   `in-epochs`, re-exporting `data/dataset.rkt`; `data/mnist.rkt`,
   `data/text.rkt` — the modality loaders (moving under #88).
