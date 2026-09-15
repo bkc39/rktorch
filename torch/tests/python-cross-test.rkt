@@ -4,7 +4,7 @@
 ;; which provides Python torch; SKIPS when python3 can't import torch).
 
 (module+ test
-  (require (only-in racket/list append-map)
+  (require (only-in racket/list append* append-map)
            rackunit
            "../data/loader.rkt"
            "../main.rkt"
@@ -502,6 +502,28 @@
              [b (in-list (hash-ref j 'values))]
              [i (in-naturals)])
          (check-= a b tol (format "group-norm forward: value ~a parity" i))))
+     (let ()
+       (define j (python-check "ema_update.py"))
+       (manual-seed! 0)
+       (define m (Linear 4 3))
+       (define x (randn 8 4))
+       (define avg (ema m (Linear 4 3) #:decay 0.9))
+       (define opt (sgd (parameters m) #:lr 0.1))
+       (for ([_ (in-range 3)])
+         (zero-grads! opt)
+         (define y (m x))
+         (backward! (mean (* y y)))
+         (step! opt)
+         (ema-update! avg))
+       (define (flat layer) (append* (map tensor->list (parameters layer))))
+       (for ([a (in-list (flat m))]
+             [b (in-list (hash-ref j 'model))]
+             [i (in-naturals)])
+         (check-= a b tol (format "ema: model parameter ~a parity" i)))
+       (for ([a (in-list (flat (ema-average avg)))]
+             [b (in-list (hash-ref j 'average))]
+             [i (in-naturals)])
+         (check-= a b tol (format "ema: averaged parameter ~a parity" i))))
      (let ()
        (define j (python-check "pool_default_stride.py"))
        (manual-seed! 0)

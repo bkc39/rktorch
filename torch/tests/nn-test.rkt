@@ -318,6 +318,30 @@
     (check-true (< (last losses) (first losses))
                 (format "Adam losses did not decrease: ~a" losses)))
 
+  (test-case "ema: construction and the first update copy, later updates decay"
+    (manual-seed! 0)
+    (define net (Linear 2 2))
+    (define avg (ema net (Linear 2 2) #:decay 0.5))
+    (check-true (ema? avg))
+    (check-equal? (ema-decay avg) 0.5)
+    (define (weights layer) (tensor->list (car (parameters layer))))
+    (check-equal? (weights (ema-average avg)) (weights net))
+    (with-no-grad
+      (for ([p (in-list (parameters net))])
+        (mul! p 3.0)))
+    (ema-update! avg)
+    (check-equal? (weights (ema-average avg)) (weights net))
+    (with-no-grad
+      (for ([p (in-list (parameters net))])
+        (mul! p 3.0)))
+    (ema-update! avg)
+    (for ([q (in-list (weights (ema-average avg)))]
+          [p (in-list (weights net))])
+      (check-= q (* p 2/3) 1e-6))
+    (check-exn #rx"shape for shape" (lambda () (ema net (Linear 3 3))))
+    (check-exn #rx"^ema: contract violation"
+               (lambda () (ema net (Linear 2 2) #:decay 2))))
+
   (test-case "dropout: train drops/scales, eval is identity, mode recurses"
     (manual-seed! 0)
     (define d (Dropout #:p 0.5))

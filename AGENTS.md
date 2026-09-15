@@ -133,7 +133,8 @@ per `foreign/operators.rkt`.
 
 From `torch/nn`: `define-layer procedure->Layer gen:layer layer? Parameter Buffer LayerList LayerHash parameters
 named-parameters buffers children forward Linear Conv2d MaxPool2d Flatten Dropout
-Sequential Embedding LayerNorm ConvTranspose2d GroupNorm sgd adam step! zero-grads! cross-entropy
+Sequential Embedding LayerNorm ConvTranspose2d GroupNorm sgd adam step! zero-grads! ema
+ema-update! ema-average cross-entropy
 mse-loss kaiming-uniform uniform-init normal-init fan-in`. The functional
 transformer primitives (`gelu tril triu masked-fill embedding layer-norm`,
 tranche 3, #22) and the UNet ones (`conv-transpose2d group-norm silu
@@ -321,7 +322,7 @@ module's full export set (`racket/runtime-path`, `syntax/parse/pre`).
   `exn:fail:rktorch:oom` (catch by type, not message).
 - `nn.rkt` — pure re-export facade over `nn/` (`layer.rkt` = `gen:layer`, `LayerList` +
   the `define-layer` macro; `parameter.rkt`, `buffer.rkt`, `linear.rkt`,
-  `init.rkt`, `optim.rkt`, `loss.rkt`).
+  `init.rkt`, `optim.rkt`, `ema.rkt`, `loss.rkt`).
 - `private/install-torchrkt-native.rkt` — stages `libtorchrkt.*` into
   `native-libs/` from `TORCHRKT_NATIVE_LIB_PATH` (set by the Nix build/shell).
   Every staging path (here and the flake's three shell ones) writes a temp file

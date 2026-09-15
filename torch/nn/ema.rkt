@@ -1,0 +1,55 @@
+#lang racket/base
+
+(require (only-in racket/contract/base -> ->i any/c contract-out real-in)
+         (only-in "../foreign.rkt" mul! shape sub! with-no-grad)
+         (only-in "../private/contract.rkt" define/contract-out)
+         (only-in "layer.rkt" layer? parameters))
+
+(struct ema (model average decay count) ;; noqa
+  #:constructor-name make-ema
+  #:omit-define-syntaxes)
+
+(provide (contract-out
+          [ema? (-> any/c boolean?)]
+          [ema-average (-> ema? layer?)]
+          [ema-decay (-> ema? (real-in 0 1))]))
+
+(define (same-shapes? model average)
+  (define ps (parameters model))
+  (define qs (parameters average))
+  (and (= (length ps) (length qs))
+       (for/and ([p (in-list ps)] [q (in-list qs)])
+         (equal? (shape p) (shape q)))))
+
+(define (copy-parameters! e)
+  (with-no-grad
+    (for ([p (in-list (parameters (ema-model e)))]
+          [q (in-list (parameters (ema-average e)))])
+      (mul! q 0.0)
+      (sub! q p -1.0))))
+
+(define/contract-out (ema model average #:decay [decay 0.9999]) ;; noqa
+  (->i ([model layer?] [average layer?])
+       (#:decay [decay (real-in 0 1)])
+       #:pre/name (model average)
+       "the average must have the model's parameters, shape for shape"
+       (same-shapes? model average)
+       [result ema?])
+  (define e (make-ema model average decay (box 0)))
+  (copy-parameters! e)
+  e)
+
+;; the first update copies, not averages: AveragedModel's n_averaged == 0 rule
+(define/contract-out (ema-update! e) ;; noqa
+  (-> ema? void?)
+  (define n (unbox (ema-count e)))
+  (set-box! (ema-count e) (add1 n))
+  (cond
+    [(zero? n) (copy-parameters! e)]
+    [else
+     (with-no-grad
+       (define d (ema-decay e))
+       (for ([p (in-list (parameters (ema-model e)))]
+             [q (in-list (parameters (ema-average e)))])
+         (mul! q d)
+         (sub! q p (- d 1.0))))]))

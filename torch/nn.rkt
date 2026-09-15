@@ -8,6 +8,7 @@
          (submod "nn/buffer.rkt" checked)
          "nn/conv.rkt"
          "nn/dropout.rkt"
+         "nn/ema.rkt"
          "nn/embedding.rkt"
          "nn/group-norm.rkt"
          (submod "nn/init.rkt" checked)
@@ -118,6 +119,12 @@
          adam?
          step!
          zero-grads!)
+
+(provide ema
+         ema?
+         ema-average
+         ema-decay
+         ema-update!)
 
 (provide mse-loss
          cross-entropy
