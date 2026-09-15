@@ -176,7 +176,6 @@
     (manual-seed! 0)
     (define y (gn (randn 2 4 3 3)))
     (check-equal? (tensor-shape y) '(2 4 3 3))
-    ;; each group of two channels normalises to mean 0 over its 18 values
     (define grouped (reshape y 2 2 18))
     (for* ([b (in-range 2)] [g (in-range 2)])
       (check-= (item (mean (select (select grouped 0 b) 0 g))) 0.0 1e-5))
