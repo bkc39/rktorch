@@ -4,6 +4,7 @@
                   -> ->* and/c any/c between/c contract-out
                   flat-named-contract listof)
          (only-in racket/math infinite? nan? pi)
+         (only-in threading ~>)
          (only-in "../foreign.rkt"
                   add arange cat cos dtype exp index-select length log mul
                   reshape shape silu sin sqrt sub tensor tensor-device tensor?
@@ -95,9 +96,12 @@
   (set! fc1 (Linear dim (* 4 dim)))
   (set! fc2 (Linear (* 4 dim) (* 4 dim)))
   #:forward (t)
-  (define features
-    (to-dtype (sinusoidal-embedding t dim) (dtype (car (parameters fc1)))))
-  (fc2 (silu (fc1 features))))
+  (~> t
+      (sinusoidal-embedding dim)
+      (to-dtype (dtype (car (parameters fc1))))
+      fc1
+      silu
+      fc2))
 
 (define channels/c
   (flat-named-contract 'multiple-of-eight
@@ -114,9 +118,9 @@
   (set! conv2 (Conv2d out out 3 #:padding 1))
   (set! skip (and (not (= in out)) (Conv2d in out 1)))
   #:forward (x temb)
-  (define h (conv1 (silu (norm1 x))))
-  (define shifted (add h (reshape (emb (silu temb)) (length temb) -1 1 1)))
-  (add (conv2 (silu (norm2 shifted))) (if skip (skip x) x)))
+  (define h (~> x norm1 silu conv1))
+  (define shift (~> temb silu emb (reshape (length temb) -1 1 1)))
+  (add (~> (add h shift) norm2 silu conv2) (if skip (skip x) x)))
 
 (define-layer UNet (time in-conv down1 pool1 down2 pool2 mid ;; noqa
                     up2-conv up2 up1-conv up1 out-norm out-conv)
@@ -143,4 +147,4 @@
   (define h3 (mid (pool2 h2) temb))
   (define u2 (up2 (cat (list (up2-conv h3) h2) 1) temb))
   (define u1 (up1 (cat (list (up1-conv u2) h1) 1) temb))
-  (out-conv (silu (out-norm u1))))
+  (~> u1 out-norm silu out-conv))
