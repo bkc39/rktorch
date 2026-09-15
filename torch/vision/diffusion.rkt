@@ -42,7 +42,9 @@
 (define offset/c
   (flat-named-contract
    'finite-nonnegative-real
-   (lambda (v) (and (real? v) (not (nan? v)) (not (infinite? v)) (>= v 0)))))
+   (lambda (v)
+     (and (real? v) (>= v 0)
+          (let ([f (exact->inexact v)]) (not (or (nan? f) (infinite? f))))))))
 
 (define timesteps/c
   (flat-named-contract

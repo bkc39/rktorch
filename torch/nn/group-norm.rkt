@@ -18,9 +18,8 @@
   (set! weight (Parameter (ones num-channels)))
   (set! bias (Parameter (zeros num-channels)))
   #:forward (x)
-  ;; libtorch 2.9 has no MPS kernel for the backward; to-device is
-  ;; differentiable both ways, so the normalisation runs on the CPU and the
-  ;; gradient returns to the MPS graph, the ctc-loss carve-out
+  ;; libtorch 2.9 has no MPS kernel for the backward, so MPS detours through
+  ;; the CPU; to-device is differentiable both ways, so the gradient returns
   (define device (tensor-device x))
   (if (eq? (device-type device) 'mps)
       (to-device (group-norm (to-device x 'cpu) num-groups

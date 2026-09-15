@@ -36,7 +36,9 @@
     (check-exn #rx"^cosine-schedule: contract violation"
                (lambda () (cosine-schedule 10 #:offset -1)))
     (check-exn #rx"finite-nonnegative-real"
-               (lambda () (cosine-schedule 10 #:offset +inf.0))))
+               (lambda () (cosine-schedule 10 #:offset +inf.0)))
+    (check-exn #rx"finite-nonnegative-real"
+               (lambda () (cosine-schedule 10 #:offset (expt 10 400)))))
 
   (test-case "q-sample mixes signal and noise by the schedule at each timestep"
     (define s (linear-schedule 10))
