@@ -414,8 +414,6 @@
          (check-training-twin "06_gpt" "python/06_gpt.py" train-on
                               'cuda 5e-3)))
      (let ()
-       ;; the DDPM twin: UNet, linear schedule, timesteps and noise drawn on
-       ;; the CPU whatever the device, 5 full-batch steps on the fixture
        (define (train-on device)
          (with-default-device device
            (manual-seed! 0)

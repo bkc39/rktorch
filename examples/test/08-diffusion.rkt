@@ -19,7 +19,6 @@
 
 (module+ test
   (require rackunit)
-  ;; Deterministic, offline: 5 full-batch steps on the committed fixture.
   (define-values (losses net device) (run-example #:device 'cpu))
   (check-equal? device 'cpu)
   (check-equal? (length losses) 5)

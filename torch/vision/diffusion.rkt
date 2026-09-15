@@ -25,8 +25,6 @@
           [schedule-alphas (-> schedule? tensor?)]
           [schedule-alpha-bars (-> schedule? tensor?)]))
 
-;; the closed form q(x_t | x_0) needs the cumulative products as tensors on
-;; the default device, so a schedule is built where its model lives
 (define (betas->schedule betas)
   (define alphas (for/list ([b (in-list betas)]) (- 1.0 b)))
   (define alpha-bars
