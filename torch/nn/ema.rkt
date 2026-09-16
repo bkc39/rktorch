@@ -43,7 +43,6 @@
   (copy-parameters! e)
   e)
 
-;; the first update copies, not averages: AveragedModel's n_averaged == 0 rule
 (define/contract-out (ema-update! e) ;; noqa
   (-> ema? void?)
   (define n (unbox (ema-count e)))

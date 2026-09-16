@@ -104,7 +104,13 @@
                                           (tensor '(3 10) #:dtype 'int64)))
                   '(2 3 32 32))
     (check-exn #rx"multiple-of-32" (lambda () (UNet #:base 12)))
-    (check-exn #rx"at-most-six-levels" (lambda () (UNet #:base 32 #:mults '(1 1 1 1 1 1 1))))
+    (check-exn #rx"at-most-five-levels" (lambda () (UNet #:base 32 #:mults '(1 1 1 1 1 1))))
+    (check-exn #rx"one of the levels' resolutions"
+               (lambda () (UNet #:base 32 #:mults '(1 2) #:attention '(8))))
+    (check-equal? (tensor-shape ((UNet #:base 32 #:mults '(2 2) #:blocks 1 #:attention '())
+                                 (randn 1 3 32 32) (tensor '(5) #:dtype 'int64) #f))
+                  '(1 3 32 32)
+                  "a first multiplier above one widens the output layers too")
     (check-exn #rx"^ResBlock: contract violation" (lambda () (ResBlock 32 40 128)))
     (check-exn #rx"^TimeEmbedding: contract violation" (lambda () (TimeEmbedding 7))))
 

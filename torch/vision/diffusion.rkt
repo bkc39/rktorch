@@ -1,8 +1,8 @@
 #lang racket/base
 
 (require (only-in racket/contract/base
-                  -> ->* </c >=/c and/c any/c between/c contract-out
-                  flat-named-contract listof or/c)
+                  -> ->* ->i </c >=/c and/c any/c between/c contract-out
+                  flat-named-contract listof or/c unsupplied-arg?)
          (only-in racket/math infinite? nan? pi)
          (only-in threading ~>)
          (only-in "../foreign.rkt"
@@ -114,9 +114,16 @@
 (define dropout/c (and/c real? (>=/c 0) (</c 1)))
 
 (define levels/c
-  (flat-named-contract 'at-most-six-levels-of-32x32
-                       (lambda (l) (and (list? l) (<= 1 (length l) 6)
+  (flat-named-contract 'at-most-five-levels-of-32x32
+                       (lambda (l) (and (list? l) (<= 1 (length l) 5)
                                         (andmap exact-positive-integer? l)))))
+
+(define (resolution i) (quotient 32 (expt 2 i)))
+
+(define (reachable? attention mults)
+  (for/and ([r (in-list attention)])
+    (for/or ([i (in-range (length mults))])
+      (= r (resolution i)))))
 
 (define-layer ResBlock (norm1 conv1 emb norm2 drop conv2 skip) ;; noqa
   #:contract (->* [channels/c channels/c exact-positive-integer?]
@@ -178,21 +185,24 @@
 
 (define-layer UNet (time classes in-conv downs mid1 mid-attn mid2 ups ;; noqa
                     out-norm out-conv)
-  #:contract (->* []
-                  [#:base channels/c
-                   #:mults levels/c
-                   #:blocks exact-positive-integer?
-                   #:attention (listof exact-positive-integer?)
-                   #:dropout dropout/c
-                   #:classes (or/c #f exact-positive-integer?)]
-                  unet?)
+  #:contract (->i ()
+                  (#:base [base channels/c]
+                   #:mults [mults levels/c]
+                   #:blocks [blocks exact-positive-integer?]
+                   #:attention [attention (listof exact-positive-integer?)]
+                   #:dropout [dropout dropout/c]
+                   #:classes [classes (or/c #f exact-positive-integer?)])
+                  #:pre/name (mults attention)
+                  "every attention resolution must be one of the levels' resolutions"
+                  (reachable? (if (unsupplied-arg? attention) '(16) attention)
+                              (if (unsupplied-arg? mults) '(1 2 2 2) mults))
+                  [result unet?])
   #:init (#:base [base 128] #:mults [mults '(1 2 2 2)] #:blocks [blocks 2]
           #:attention [attention '(16)] #:dropout [dropout 0.1]
           #:classes [n-classes #f])
   (define t-dim (* 4 base))
   (define levels (length mults))
   (define (width i) (* base (list-ref mults i)))
-  (define (resolution i) (quotient 32 (expt 2 i)))
   (define (stage narrow wide res)
     (Stage (ResBlock narrow wide t-dim #:dropout dropout)
            (and (memv res attention) (AttentionBlock wide))))
@@ -225,8 +235,8 @@
     (unless (zero? i)
       (set! stages (cons (Upsample wide) stages))))
   (set! ups (LayerList (reverse stages)))
-  (set! out-norm (GroupNorm norm-groups base))
-  (set! out-conv (Conv2d base 3 3 #:padding 1))
+  (set! out-norm (GroupNorm norm-groups (width 0)))
+  (set! out-conv (Conv2d (width 0) 3 3 #:padding 1))
   #:forward (x t y)
   (define temb
     (let ([te (time t)])

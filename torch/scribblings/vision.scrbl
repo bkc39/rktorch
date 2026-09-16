@@ -170,11 +170,12 @@ a transposed convolution.
          unet?]{
 The DDPM UNet for 32x32 RGB images, the paper's CIFAR-10 configuration
 by default: one resolution level per entry of @racket[mults], at most
-six of them from 32x32 down to 1x1, each @racket[base] times that entry
+five of them from 32x32 down to 2x2, each @racket[base] times that entry
 wide and half the resolution of the last,
 @racket[blocks] @racket[ResBlock]s per level on the way down and one more
 per level on the way up, each followed by an @racket[AttentionBlock] at
-the resolutions listed in @racket[attention], a @racket[Downsample]
+the resolutions listed in @racket[attention], each of which must be one
+of the levels' resolutions, a @racket[Downsample]
 between levels going down and an @racket[Upsample] coming up, a middle
 of block, attention, block, and a @racket[TimeEmbedding] of @racket[base]
 features. Every block's output on the way down is concatenated back in on
