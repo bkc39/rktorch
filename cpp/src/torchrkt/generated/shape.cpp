@@ -89,6 +89,22 @@ tr_tensor* tr_gen_nonzero(const tr_tensor* self) {
                                 [&] { return at::nonzero(self->value); });
 }
 
+tr_tensor* tr_gen_repeat_interleave_self_int(const tr_tensor* self,
+                                             int64_t repeats, int64_t dim,
+                                             bool dim_has, int64_t output_size,
+                                             bool output_size_has) {
+  if (!self) {
+    return torchrkt::null_arg("tr_gen_repeat_interleave_self_int");
+  }
+  return torchrkt::alloc_result("tr_gen_repeat_interleave_self_int", [&] {
+    return at::repeat_interleave(
+        self->value, repeats,
+        dim_has ? c10::optional<int64_t>(dim) : c10::optional<int64_t>(),
+        output_size_has ? c10::optional<int64_t>(output_size)
+                        : c10::optional<int64_t>());
+  });
+}
+
 tr_tensor* tr_gen_reshape(const tr_tensor* self, const int64_t* shape,
                           int64_t shape_len) {
   if (!self || !shape || shape_len < 0) {

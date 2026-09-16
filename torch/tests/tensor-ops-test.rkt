@@ -214,6 +214,14 @@
     (check-= (cadr y) 0.7310586 1e-5)
     (check-= (caddr y) -0.2689414 1e-5))
 
+  (test-case "upsample-nearest2d: every pixel becomes a scale by scale block"
+    (define x (reshape (arange 4) 1 1 2 2))
+    (define y (upsample-nearest2d x))
+    (check-equal? (tensor-shape y) '(1 1 4 4))
+    (check-equal? (tensor->list y)
+                  '(0.0 0.0 1.0 1.0 0.0 0.0 1.0 1.0 2.0 2.0 3.0 3.0 2.0 2.0 3.0 3.0))
+    (check-equal? (tensor-shape (upsample-nearest2d (randn 2 3 5 7) #:scale 3)) '(2 3 15 21)))
+
   (test-case "clamp: either bound, both, and ATen's refusal of neither"
     (define x (tensor '(-2.0 -0.5 0.0 0.5 2.0)))
     (check-equal? (tensor->list (clamp x #:min -1)) '(-1.0 -0.5 0.0 0.5 2.0))

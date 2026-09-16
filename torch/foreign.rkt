@@ -144,7 +144,8 @@
          masked-fill
          embedding
          layer-norm
-         group-norm)
+         group-norm
+         upsample-nearest2d)
 
 (provide eq
          ne

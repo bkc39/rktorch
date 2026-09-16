@@ -132,3 +132,8 @@ nn silu
 # clamp introduces the optional-scalar kind (Scalar? -> double + presence
 # flag). ATen requires at least one bound.
 math clamp
+
+# --- tranche 5 (#84): the full-size DDPM UNet ------------------------------
+# repeat_interleave along the two spatial dims is nearest-neighbour
+# upsampling, F.interpolate(mode="nearest"), without an optional-float kind.
+shape repeat_interleave.self_int

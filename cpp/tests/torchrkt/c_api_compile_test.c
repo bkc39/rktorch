@@ -149,6 +149,9 @@ void torchrkt_c_api_compile_check(void) {
   tr_tensor* (*gen_silu)(const tr_tensor*) = tr_gen_silu;
   tr_tensor* (*gen_clamp)(const tr_tensor*, double, bool, double, bool) =
       tr_gen_clamp;
+  tr_tensor* (*gen_repeat_interleave)(const tr_tensor*, int64_t, int64_t, bool,
+                                      int64_t, bool) =
+      tr_gen_repeat_interleave_self_int;
   tr_tensor* (*gen_masked_fill)(const tr_tensor*, const tr_tensor*, double) =
       tr_gen_masked_fill_scalar;
   tr_tensor* (*gen_tril)(const tr_tensor*, int64_t) = tr_gen_tril;

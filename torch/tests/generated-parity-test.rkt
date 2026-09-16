@@ -131,7 +131,9 @@
           'group-norm '((tensor 2 4 3 3) (int64 2) (optional-tensor 4)
                         (optional-tensor 4) (double 1e-5) (bool #t))
           'silu '((tensor 2 3))
-          'clamp '((tensor 2 3) (optional-scalar -0.5) (optional-scalar 0.5))))
+          'clamp '((tensor 2 3) (optional-scalar -0.5) (optional-scalar 0.5))
+          'repeat-interleave-self-int '((tensor 2 3) (int64 2) (optional-int64 1)
+                                        (optional-int64 #f))))
 
   ;; Tensor specs draw seeded randns left to right — both sides consume the
   ;; same RNG stream, so spec order and draw counts must match exactly.
@@ -372,4 +374,8 @@
      (check-generated-parity
       (assq 'clamp manifest)
       '((tensor 2 3) (optional-scalar #f) (optional-scalar 0.5))
-      "[max-only]")]))
+      "[max-only]")
+     (check-generated-parity
+      (assq 'repeat-interleave-self-int manifest)
+      '((tensor 2 3) (int64 3) (optional-int64 #f) (optional-int64 #f))
+      "[flattened]")]))

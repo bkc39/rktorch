@@ -71,6 +71,7 @@
          ne-tensor
          nll-loss
          nonzero
+         repeat-interleave-self-int
          reshape
          scatter-add!
          scatter-src!
@@ -253,6 +254,9 @@
 
 (define-generated-op nonzero tr_gen_nonzero
   ([self tensor]))
+
+(define-generated-op repeat-interleave-self-int tr_gen_repeat_interleave_self_int
+  ([self tensor] [repeats int64] [dim optional-int64] [output-size optional-int64]))
 
 (define-generated-op reshape tr_gen_reshape
   ([self tensor] [shape int-array]))

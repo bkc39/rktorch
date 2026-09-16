@@ -59,6 +59,7 @@
  (ne-tensor "ne.Tensor" (tensor tensor) #f)
  (nll-loss "nll_loss" (tensor tensor optional-tensor int64 int64) #f)
  (nonzero "nonzero" (tensor) #f)
+ (repeat-interleave-self-int "repeat_interleave.self_int" (tensor int64 optional-int64 optional-int64) #f)
  (reshape "reshape" (tensor int-array) #f)
  (scatter-add! "scatter_add_" (tensor int64 tensor tensor) #t)
  (scatter-src! "scatter_.src" (tensor int64 tensor tensor) #t)

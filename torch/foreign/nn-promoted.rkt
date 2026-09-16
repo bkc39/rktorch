@@ -14,6 +14,7 @@
                                 layer-norm
                                 masked-fill-scalar
                                 max-pool2d
+                                repeat-interleave-self-int
                                 silu
                                 tril
                                 triu))
@@ -155,3 +156,8 @@
            (and (not (unsupplied-arg? max)) max))
        [result tensor?])
   (g:clamp self (and min (exact->inexact min)) (and max (exact->inexact max))))
+
+(define/contract-out (upsample-nearest2d input #:scale [scale 2]) ;; noqa
+  (->* [tensor?] [#:scale exact-positive-integer?] tensor?)
+  (g:repeat-interleave-self-int
+   (g:repeat-interleave-self-int input scale 2 #f) scale 3 #f))
