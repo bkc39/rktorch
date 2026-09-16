@@ -51,8 +51,10 @@
     (check-= (car got) (expected (car abars)) 1e-6)
     (check-= (cadr got) (expected (last abars)) 1e-6)
     (check-exn #rx"int64-vector" (lambda () (q-sample s x0 (arange 2) noise)))
-    (check-exn #rx"one timestep per image"
-               (lambda () (q-sample s x0 (tensor '(3) #:dtype 'int64) noise))))
+    (check-exn #rx"one timestep per"
+               (lambda () (q-sample s x0 (tensor '(3) #:dtype 'int64) noise)))
+    (check-exn #rx"noise of the images' shape"
+               (lambda () (q-sample s x0 t (full 3.0 1 1 1 1)))))
 
   (test-case "sinusoidal embedding: sines then cosines, t = 0 gives zeros then ones"
     (define e (sinusoidal-embedding (tensor '(0 1) #:dtype 'int64) 8))
