@@ -39,7 +39,7 @@
        "the average must be a separate layer with the model's parameters, shape for shape, on its device and dtype"
        (separate-copy? model average)
        [result ema?])
-  (define e (make-ema model average decay (box 0) (make-hash)))
+  (define e (make-ema model average decay (box 0) (make-hasheq)))
   (copy-parameters! e)
   e)
 
@@ -56,7 +56,6 @@
          (lerp! q p (weight-on e q))))]))
 
 (define (weight-on e q)
-  (define dev (tensor-device q))
-  (define dt (dtype q))
-  (hash-ref! (ema-weights e) (cons dev dt)
-             (lambda () (full (- 1.0 (ema-decay e)) #:device dev #:dtype dt))))
+  (hash-ref! (ema-weights e) q
+             (lambda ()
+               (full (- 1.0 (ema-decay e)) #:device (tensor-device q) #:dtype (dtype q)))))

@@ -50,7 +50,7 @@
        [#:lr real? #:beta1 real? #:beta2 real? #:eps real?]
        adam?)
   (make-adam params lr beta1 beta2 eps (box 0) (make-hasheq) (make-hasheq)
-             (make-hash)))
+             (make-hasheq)))
 
 (define (moment-on table p)
   (define m (hash-ref! table p (lambda () (zeros-like p))))
@@ -64,10 +64,9 @@
      moved]))
 
 (define (scalar-on table value p)
-  (define dev (tensor-device p))
-  (define dt (tensor-dtype p))
-  (hash-ref! table (list value dev dt)
-             (lambda () (full value #:device dev #:dtype dt))))
+  (hash-ref! table p
+             (lambda ()
+               (full value #:device (tensor-device p) #:dtype (tensor-dtype p)))))
 
 (define (adam-do-step! opt)
   (with-no-grad

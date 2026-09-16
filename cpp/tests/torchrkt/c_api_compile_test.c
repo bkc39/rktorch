@@ -275,6 +275,7 @@ void torchrkt_c_api_compile_check(void) {
   (void)gen_group_norm;
   (void)gen_silu;
   (void)gen_clamp;
+  (void)gen_repeat_interleave;
   (void)gen_ctc_loss;
   (void)gen_avg_pool2d;
   (void)gen_adaptive_avg_pool2d;
