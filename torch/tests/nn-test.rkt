@@ -358,6 +358,8 @@
     (manual-seed! 0)
     (define d (Dropout #:p 0.5))
     (check-equal? (object-name d) 'Dropout)
+    (check-equal? (tensor->list ((Dropout #:p 0) (ones 3))) '(1.0 1.0 1.0)
+                  "an exact probability reaches the op as a flonum")
     (define x (ones 100))
     (define tr (tensor->list (d x)))
     (check-true (andmap (lambda (v) (or (= v 0.0) (= v 2.0))) tr))
