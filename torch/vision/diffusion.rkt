@@ -1,17 +1,18 @@
 #lang racket/base
 
 (require (only-in racket/contract/base
-                  -> ->* and/c any/c between/c contract-out
-                  flat-named-contract listof)
+                  -> ->* </c >=/c and/c any/c between/c contract-out
+                  flat-named-contract listof non-empty-listof or/c)
          (only-in racket/math infinite? nan? pi)
          (only-in threading ~>)
          (only-in "../foreign.rkt"
-                  add arange cat cos dtype exp index-select length log mul
-                  reshape shape silu sin sqrt sub tensor tensor-device tensor?
-                  to-dtype unsqueeze)
+                  add arange cat cos dtype exp index-select length log matmul
+                  mul reshape shape silu sin softmax sqrt sub tensor
+                  tensor-device tensor? to-dtype transpose unsqueeze
+                  upsample-nearest2d)
          (only-in "../nn.rkt"
-                  Conv2d ConvTranspose2d GroupNorm Linear define-layer
-                  parameters)
+                  Conv2d Dropout Embedding GroupNorm LayerList Linear
+                  define-layer in-layers parameters)
          (only-in "../private/contract.rkt" define/contract-out))
 
 (struct schedule (steps betas alphas alpha-bars) ;; noqa
@@ -103,48 +104,137 @@
       silu
       fc2))
 
-(define channels/c
-  (flat-named-contract 'multiple-of-eight
-                       (lambda (n) (and (exact-positive-integer? n)
-                                        (zero? (remainder n 8))))))
+(define norm-groups 32)
 
-(define-layer ResBlock (norm1 conv1 emb norm2 conv2 skip) ;; noqa
-  #:contract (-> channels/c channels/c exact-positive-integer? res-block?)
-  #:init (in out t-dim)
-  (set! norm1 (GroupNorm 8 in))
+(define channels/c
+  (flat-named-contract 'multiple-of-32
+                       (lambda (n) (and (exact-positive-integer? n)
+                                        (zero? (remainder n norm-groups))))))
+
+(define dropout/c (and/c real? (>=/c 0) (</c 1)))
+
+(define-layer ResBlock (norm1 conv1 emb norm2 drop conv2 skip) ;; noqa
+  #:contract (->* [channels/c channels/c exact-positive-integer?]
+                  [#:dropout dropout/c]
+                  res-block?)
+  #:init (in out t-dim #:dropout [dropout 0.0])
+  (set! norm1 (GroupNorm norm-groups in))
   (set! conv1 (Conv2d in out 3 #:padding 1))
   (set! emb (Linear t-dim out))
-  (set! norm2 (GroupNorm 8 out))
+  (set! norm2 (GroupNorm norm-groups out))
+  (set! drop (Dropout #:p dropout))
   (set! conv2 (Conv2d out out 3 #:padding 1))
   (set! skip (and (not (= in out)) (Conv2d in out 1)))
   #:forward (x temb)
   (define h (~> x norm1 silu conv1))
   (define shift (~> temb silu emb (reshape (length temb) -1 1 1)))
-  (add (~> (add h shift) norm2 silu conv2) (if skip (skip x) x)))
+  (add (~> (add h shift) norm2 silu drop conv2) (if skip (skip x) x)))
 
-(define-layer UNet (time in-conv down1 pool1 down2 pool2 mid ;; noqa
-                    up2-conv up2 up1-conv up1 out-norm out-conv)
-  #:contract (->* [] [#:base channels/c] unet?)
-  #:init (#:base [base 32])
+(define-layer AttentionBlock (norm q k v proj) ;; noqa
+  #:contract (-> channels/c attention-block?)
+  #:init (channels)
+  (set! norm (GroupNorm norm-groups channels))
+  (set! q (Conv2d channels channels 1))
+  (set! k (Conv2d channels channels 1))
+  (set! v (Conv2d channels channels 1))
+  (set! proj (Conv2d channels channels 1))
+  #:forward (x)
+  (define dims (shape x))
+  (define n (car dims))
+  (define c (cadr dims))
+  (define pixels (* (caddr dims) (cadddr dims)))
+  (define normed (norm x))
+  (define (tokens layer) (reshape (layer normed) n c pixels))
+  (define scores (mul (matmul (transpose (tokens q) 1 2) (tokens k))
+                      (/ 1.0 (sqrt c))))
+  (define weights (transpose (softmax scores -1) 1 2))
+  (define out (reshape (matmul (tokens v) weights) n c (caddr dims) (cadddr dims)))
+  (add x (proj out)))
+
+(define-layer Downsample (conv) ;; noqa
+  #:contract (-> channels/c downsample?)
+  #:init (channels)
+  (set! conv (Conv2d channels channels 3 #:stride 2 #:padding 1))
+  #:forward (x _temb)
+  (conv x))
+
+(define-layer Upsample (conv) ;; noqa
+  #:contract (-> channels/c upsample?)
+  #:init (channels)
+  (set! conv (Conv2d channels channels 3 #:padding 1))
+  #:forward (x)
+  (conv (upsample-nearest2d x)))
+
+(define-layer Stage (res attn)
+  #:init (res attn)
+  #:forward (x temb)
+  (define res-out (res x temb))
+  (if attn (attn res-out) res-out))
+
+(define-layer UNet (time classes in-conv downs mid1 mid-attn mid2 ups ;; noqa
+                    out-norm out-conv)
+  #:contract (->* []
+                  [#:base channels/c
+                   #:mults (non-empty-listof exact-positive-integer?)
+                   #:blocks exact-positive-integer?
+                   #:attention (listof exact-positive-integer?)
+                   #:dropout dropout/c
+                   #:classes (or/c #f exact-positive-integer?)]
+                  unet?)
+  #:init (#:base [base 128] #:mults [mults '(1 2 2 2)] #:blocks [blocks 2]
+          #:attention [attention '(16)] #:dropout [dropout 0.1]
+          #:classes [n-classes #f])
   (define t-dim (* 4 base))
+  (define levels (length mults))
+  (define (width i) (* base (list-ref mults i)))
+  (define (resolution i) (quotient 32 (expt 2 i)))
+  (define (stage narrow wide res)
+    (Stage (ResBlock narrow wide t-dim #:dropout dropout)
+           (and (memv res attention) (AttentionBlock wide))))
   (set! time (TimeEmbedding base))
+  (set! classes (and n-classes (Embedding (add1 n-classes) t-dim)))
   (set! in-conv (Conv2d 3 base 3 #:padding 1))
-  (set! down1 (ResBlock base base t-dim))
-  (set! pool1 (Conv2d base base 3 #:stride 2 #:padding 1))
-  (set! down2 (ResBlock base (* 2 base) t-dim))
-  (set! pool2 (Conv2d (* 2 base) (* 2 base) 3 #:stride 2 #:padding 1))
-  (set! mid (ResBlock (* 2 base) (* 2 base) t-dim))
-  (set! up2-conv (ConvTranspose2d (* 2 base) (* 2 base) 4 #:stride 2 #:padding 1))
-  (set! up2 (ResBlock (* 4 base) (* 2 base) t-dim))
-  (set! up1-conv (ConvTranspose2d (* 2 base) base 4 #:stride 2 #:padding 1))
-  (set! up1 (ResBlock (* 2 base) base t-dim))
-  (set! out-norm (GroupNorm 8 base))
+  (define stages '())
+  (define skips (list base))
+  (define channels base)
+  (for ([i (in-range levels)])
+    (define wide (width i))
+    (for ([_ (in-range blocks)])
+      (set! stages (cons (stage channels wide (resolution i)) stages))
+      (set! skips (cons wide skips))
+      (set! channels wide))
+    (unless (= i (sub1 levels))
+      (set! stages (cons (Downsample wide) stages))
+      (set! skips (cons wide skips))))
+  (set! downs (LayerList (reverse stages)))
+  (set! mid1 (ResBlock channels channels t-dim #:dropout dropout))
+  (set! mid-attn (AttentionBlock channels))
+  (set! mid2 (ResBlock channels channels t-dim #:dropout dropout))
+  (set! stages '())
+  (for ([i (in-range (sub1 levels) -1 -1)])
+    (define wide (width i))
+    (for ([_ (in-range (add1 blocks))])
+      (set! stages (cons (stage (+ channels (car skips)) wide (resolution i)) stages))
+      (set! skips (cdr skips))
+      (set! channels wide))
+    (unless (zero? i)
+      (set! stages (cons (Upsample wide) stages))))
+  (set! ups (LayerList (reverse stages)))
+  (set! out-norm (GroupNorm norm-groups base))
   (set! out-conv (Conv2d base 3 3 #:padding 1))
-  #:forward (x t)
-  (define temb (time t))
-  (define h1 (down1 (in-conv x) temb))
-  (define h2 (down2 (pool1 h1) temb))
-  (define h3 (mid (pool2 h2) temb))
-  (define u2 (up2 (cat (list (up2-conv h3) h2) 1) temb))
-  (define u1 (up1 (cat (list (up1-conv u2) h1) 1) temb))
-  (~> u1 out-norm silu out-conv))
+  #:forward (x t y)
+  (define temb
+    (let ([te (time t)])
+      (if classes (add te (classes y)) te)))
+  (define x0 (in-conv x))
+  (define-values (bottom stack)
+    (for/fold ([down x0] [stack (list x0)]) ([layer (in-layers downs)])
+      (define next (layer down temb))
+      (values next (cons next stack))))
+  (define middle (mid2 (mid-attn (mid1 bottom temb)) temb))
+  (define-values (top _rest)
+    (for/fold ([up middle] [rest stack]) ([layer (in-layers ups)])
+      (if (upsample? layer)
+          (values (layer up) rest)
+          (values (layer (cat (list up (car rest)) 1) temb) (cdr rest)))))
+  (~> top out-norm silu out-conv))

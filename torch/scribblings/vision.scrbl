@@ -2,9 +2,10 @@
 
 @(require (for-label racket/base
                      racket/contract
-                     (only-in torch cuda-if-available device/c randn-like tensor?)
+                     (only-in torch cuda-if-available device/c randn-like tensor?
+                              upsample-nearest2d)
                      torch/data/loader
-                     (only-in torch/nn Conv2d ConvTranspose2d GroupNorm Linear
+                     (only-in torch/nn Conv2d Dropout Embedding GroupNorm Linear
                               define-layer)
                      torch/vision/cifar10
                      torch/vision/diffusion))
@@ -132,20 +133,55 @@ features through two @racket[Linear] layers with a silu between.
 }
 
 @defproc[(ResBlock [in channels/c] [out channels/c]
-                   [t-dim exact-positive-integer?])
+                   [t-dim exact-positive-integer?]
+                   [#:dropout dropout (real-in 0 1) 0])
          res-block?]{
-The UNet's block: @racket[GroupNorm] of eight groups, silu, a 3x3
+The UNet's block: @racket[GroupNorm] of 32 groups, silu, a 3x3
 @racket[Conv2d], the time embedding projected and added per channel, a
-second norm, silu and convolution, plus the residual through a 1x1
-convolution when the widths differ. Widths are multiples of eight.
+second norm, silu, @racket[Dropout] and convolution, plus the residual
+through a 1x1 convolution when the widths differ. Widths are multiples of
+32, the group count.
 }
 
-@defproc[(UNet [#:base base channels/c 32]) unet?]{
-A two-level UNet for 32x32 RGB images: a @racket[TimeEmbedding] of
-@racket[base] features, an input convolution to @racket[base] channels, a
-@racket[ResBlock] and a stride-2 convolution per level down to
-@tt{2base} channels at 8x8, a middle block, then a @racket[ConvTranspose2d]
-per level back up with the matching skip concatenated, and an output
-convolution to three channels. Called as @racket[(net x t)] it returns the
-noise estimate for @racket[x] at timesteps @racket[t].
+@defproc[(AttentionBlock [channels channels/c]) attention-block?]{
+Single-head self-attention over every pixel of a feature map, the DDPM
+form: a norm, 1x1 convolutions for the queries, keys and values,
+softmax over the scaled dot products, a 1x1 output projection, and the
+input added back.
+}
+
+@defproc[(Downsample [channels channels/c]) downsample?]{
+A stride-2 3x3 convolution; called as @racket[(down x temb)] so it slots
+into the down path beside the blocks, the embedding ignored.
+}
+
+@defproc[(Upsample [channels channels/c]) upsample?]{
+Nearest-neighbour doubling through @racket[upsample-nearest2d] followed
+by a 3x3 convolution, the DDPM upsampling that avoids the checkerboard of
+a transposed convolution.
+}
+
+@defproc[(UNet [#:base base channels/c 128]
+               [#:mults mults (non-empty-listof exact-positive-integer?) '(1 2 2 2)]
+               [#:blocks blocks exact-positive-integer? 2]
+               [#:attention attention (listof exact-positive-integer?) '(16)]
+               [#:dropout dropout (real-in 0 1) 0.1]
+               [#:classes classes (or/c #f exact-positive-integer?) #f])
+         unet?]{
+The DDPM UNet for 32x32 RGB images, the paper's CIFAR-10 configuration
+by default: one resolution level per entry of @racket[mults], each
+@racket[base] times that entry wide and half the resolution of the last,
+@racket[blocks] @racket[ResBlock]s per level on the way down and one more
+per level on the way up, each followed by an @racket[AttentionBlock] at
+the resolutions listed in @racket[attention], a @racket[Downsample]
+between levels going down and an @racket[Upsample] coming up, a middle
+of block, attention, block, and a @racket[TimeEmbedding] of @racket[base]
+features. Every block's output on the way down is concatenated back in on
+the way up. With @racket[classes] the network is class-conditional: an
+@racket[Embedding] of that many labels plus one null label, added to the
+time embedding, so a label of @racket[classes] means "no label" for
+classifier-free guidance. Called as @racket[(net x t y)] it returns the
+noise estimate for @racket[x] at timesteps @racket[t] and int64 labels
+@racket[y], which is @racket[#f] for an unconditional network. The
+default network has 35.7 million parameters.
 }

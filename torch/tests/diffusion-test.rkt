@@ -77,19 +77,36 @@
     (check-equal? (tensor-dtype ((to (TimeEmbedding 8) 'float64) (tensor '(0 5) #:dtype 'int64)))
                   'float64
                   "the features follow the layer's dtype")
-    (define rb (ResBlock 8 16 32))
+    (define rb (ResBlock 32 64 128))
     (check-true (res-block? rb))
     (check-equal? (map car (named-parameters rb))
                   '("norm1.weight" "norm1.bias" "conv1.weight" "conv1.bias"
                     "emb.weight" "emb.bias" "norm2.weight" "norm2.bias"
                     "conv2.weight" "conv2.bias" "skip.weight" "skip.bias"))
-    (check-equal? (tensor-shape (rb (randn 2 8 4 4) (randn 2 32))) '(2 16 4 4))
-    (check-equal? (length (parameters (ResBlock 8 8 32))) 10
+    (check-equal? (tensor-shape (rb (randn 2 32 4 4) (randn 2 128))) '(2 64 4 4))
+    (check-equal? (length (parameters (ResBlock 32 32 128))) 10
                   "no skip conv when the widths agree")
-    (define net (UNet #:base 8))
+    (define ab (AttentionBlock 32))
+    (check-true (attention-block? ab))
+    (check-equal? (map car (named-parameters ab))
+                  '("norm.weight" "norm.bias" "q.weight" "q.bias" "k.weight" "k.bias"
+                    "v.weight" "v.bias" "proj.weight" "proj.bias"))
+    (check-equal? (tensor-shape (ab (randn 2 32 4 4))) '(2 32 4 4))
+    (check-equal? (tensor-shape ((Downsample 32) (randn 2 32 8 8) #f)) '(2 32 4 4))
+    (check-equal? (tensor-shape ((Upsample 32) (randn 2 32 4 4))) '(2 32 8 8))
+    (define net (UNet #:base 32 #:mults '(1 2) #:blocks 1 #:attention '(16) #:dropout 0))
     (check-true (unet? net))
-    (check-equal? (tensor-shape (net (randn 2 3 32 32) (tensor '(0 999) #:dtype 'int64)))
+    (check-equal? (tensor-shape (net (randn 2 3 32 32) (tensor '(0 999) #:dtype 'int64) #f))
                   '(2 3 32 32))
-    (check-exn #rx"multiple-of-eight" (lambda () (UNet #:base 12)))
-    (check-exn #rx"^ResBlock: contract violation" (lambda () (ResBlock 8 12 32)))
-    (check-exn #rx"^TimeEmbedding: contract violation" (lambda () (TimeEmbedding 7)))))
+    (define labelled (UNet #:base 32 #:mults '(1 2) #:blocks 1 #:attention '() #:classes 10))
+    (check-equal? (tensor-shape (labelled (randn 2 3 32 32)
+                                          (tensor '(0 999) #:dtype 'int64)
+                                          (tensor '(3 10) #:dtype 'int64)))
+                  '(2 3 32 32))
+    (check-exn #rx"multiple-of-32" (lambda () (UNet #:base 12)))
+    (check-exn #rx"^ResBlock: contract violation" (lambda () (ResBlock 32 40 128)))
+    (check-exn #rx"^TimeEmbedding: contract violation" (lambda () (TimeEmbedding 7))))
+
+  (test-case "the default UNet is the DDPM paper's CIFAR-10 model"
+    (define net (UNet))
+    (check-equal? (for/sum ([p (in-list (parameters net))]) (numel p)) 35746307)))

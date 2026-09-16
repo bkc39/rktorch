@@ -418,7 +418,8 @@
          (with-default-device device
            (manual-seed! 0)
            (define-values (xs _ys) (load-cifar10-fixture))
-           (define net (UNet))
+           (define net (UNet #:base 64 #:mults '(1 2) #:blocks 1 #:attention '(16)
+                             #:dropout 0))
            (define sched (linear-schedule))
            (define opt (adam (parameters net) #:lr 0.001))
            (manual-seed! 0)
@@ -430,7 +431,7 @@
                              device))
                (define noise (to (randn-like xs #:device 'cpu) device))
                (zero-grads! opt)
-               (define loss (mse-loss (net (q-sample sched xs t noise) t) noise))
+               (define loss (mse-loss (net (q-sample sched xs t noise) t #f) noise))
                (backward! loss)
                (step! opt)
                (item loss)))

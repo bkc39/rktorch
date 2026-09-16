@@ -30,9 +30,9 @@
   (check-equal? (take names 4)
                 '("time.fc1.weight" "time.fc1.bias" "time.fc2.weight" "time.fc2.bias"))
   (check-equal? (last names) "out-conv.bias")
-  (check-equal? (length names) 74)
-  (check-equal? (tensor-shape (car (parameters net))) '(128 32))
-  (check-equal? (tensor-shape (net (zeros 2 3 32 32) (tensor '(0 999) #:dtype 'int64)))
+  (check-equal? (length names) 144)
+  (check-equal? (tensor-shape (car (parameters net))) '(256 64))
+  (check-equal? (tensor-shape (net (zeros 2 3 32 32) (tensor '(0 999) #:dtype 'int64) #f))
                 '(2 3 32 32))
   ;; Device RNG streams differ from the CPU's for the init, so the on-device
   ;; arm checks convergence, never equality with the CPU losses above.

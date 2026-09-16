@@ -94,8 +94,11 @@ CPU-first; float32 + inferred int64 (#44). From `torch`:
 - diffusion (`torch/vision/diffusion.rkt`, #84): `linear-schedule`
   `cosine-schedule` (betas, alphas, alpha-bars as device tensors), `q-sample`
   (closed-form `q(x_t | x_0)`), `sinusoidal-embedding`, and the layers
-  `TimeEmbedding` `ResBlock` `UNet` (two levels, `#:base` channels); the
-  training loop is `examples/racket/08-diffusion.rkt`
+  `TimeEmbedding` `ResBlock` (with `#:dropout`) `AttentionBlock`
+  `Downsample` `Upsample` `UNet` (the DDPM CIFAR-10 network by default:
+  `#:base #:mults #:blocks #:attention #:dropout`, `#:classes` for a
+  class-conditional net with a null label); the training loop is
+  `examples/racket/08-diffusion.rkt`
 - vision (`torch/vision/cifar10.rkt`, #84): `load-cifar10` (binary archive
   cached and unpacked in memory, float32 `[N 3 32 32]` in `[-1, 1]` plus
   int64 labels), `cifar10-dataset #:device`, `cifar10-label-names`,
@@ -138,7 +141,8 @@ ema-update! ema-average cross-entropy
 mse-loss kaiming-uniform uniform-init normal-init fan-in`. The functional
 transformer primitives (`gelu tril triu masked-fill embedding layer-norm`,
 tranche 3, #22) and the UNet ones (`conv-transpose2d group-norm silu
-clamp`, tranche 4, #84) live on `torch` beside the other functional ops; the GPT
+clamp`, tranche 4, #84; `upsample-nearest2d` over `repeat_interleave`, tranche
+5) live on `torch` beside the other functional ops; the GPT
 causal-mask idiom is `(masked-fill scores (eq (tril (ones T T)) 0) -inf.0)`. `define-layer` is the Python-style
 `nn.Module` analog: `#:init` is the constructor body and assigns declared
 fields with `set!`, a field's value classifies it at construction
