@@ -350,6 +350,12 @@
         (int-array (1 1)))
       "[stride-2+output-padding]")
      (check-generated-parity
+      (assq 'conv-transpose2d-input manifest)
+      '((tensor 1 4 4 4) (tensor 4 3 3 3) (optional-tensor 6)
+        (int-array (1 1)) (int-array (0 0)) (int-array (0 0)) (int64 2)
+        (int-array (2 2)))
+      "[groups-2+dilation-2]")
+     (check-generated-parity
       (assq 'group-norm manifest)
       '((tensor 2 4 3 3) (int64 2) (optional-tensor #f) (optional-tensor #f)
         (double 1e-5) (bool #t))

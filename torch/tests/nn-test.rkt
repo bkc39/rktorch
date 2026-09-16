@@ -162,6 +162,9 @@
     (check-equal? (object-name c) 'ConvTranspose2d)
     (check-equal? (map tensor-shape (parameters (ConvTranspose2d 4 4 3 #:groups 2)))
                   '((4 2 3 3) (4)))
+    (check-equal? (tensor-shape ((ConvTranspose2d 4 6 3 #:groups 2 #:dilation 2)
+                                 (randn 1 4 4 4)))
+                  '(1 6 8 8))
     (check-equal? (tensor-shape ((ConvTranspose2d 1 1 2 #:stride 2 #:output-padding 1)
                                  (ones 1 1 2 2)))
                   '(1 1 5 5)))
@@ -339,6 +342,7 @@
           [p (in-list (weights net))])
       (check-= q (* p 2/3) 1e-6))
     (check-exn #rx"shape for shape" (lambda () (ema net (Linear 3 3))))
+    (check-exn #rx"separate layer" (lambda () (ema net net)))
     (check-exn #rx"^ema: contract violation"
                (lambda () (ema net (Linear 2 2) #:decay 2))))
 

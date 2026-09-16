@@ -14,12 +14,13 @@
           [ema-average (-> ema? layer?)]
           [ema-decay (-> ema? (real-in 0 1))]))
 
-(define (same-shapes? model average)
+(define (separate-copy? model average)
   (define ps (parameters model))
   (define qs (parameters average))
-  (and (= (length ps) (length qs))
+  (and (not (eq? model average))
+       (= (length ps) (length qs))
        (for/and ([p (in-list ps)] [q (in-list qs)])
-         (equal? (shape p) (shape q)))))
+         (and (not (memq q ps)) (equal? (shape p) (shape q))))))
 
 (define (copy-parameters! e)
   (with-no-grad
@@ -32,8 +33,8 @@
   (->i ([model layer?] [average layer?])
        (#:decay [decay (real-in 0 1)])
        #:pre/name (model average)
-       "the average must have the model's parameters, shape for shape"
-       (same-shapes? model average)
+       "the average must be a separate layer with the model's parameters, shape for shape"
+       (separate-copy? model average)
        [result ema?])
   (define e (make-ema model average decay (box 0)))
   (copy-parameters! e)

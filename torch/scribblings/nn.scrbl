@@ -408,7 +408,10 @@ layers were in mixed modes comes back exactly as it was.
 An exponential moving average of @racket[model]'s parameters, kept in
 @racket[average]: a second layer of the same architecture, built fresh by
 the caller, whose parameters are overwritten with the model's on
-construction. A diffusion model sampled from its averaged weights rather
+construction. Passing the model itself, or a layer sharing any parameter
+with it, is a contract violation. Buffers are neither copied nor
+averaged, as PyTorch's @tt{AveragedModel} leaves them by default; the
+average keeps the buffers it was built with. A diffusion model sampled from its averaged weights rather
 than its latest ones gives markedly cleaner images, the reason DDPM
 training keeps one; the default decay is that paper's.
 }

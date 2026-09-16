@@ -4,7 +4,7 @@
 ;; which provides Python torch; SKIPS when python3 can't import torch).
 
 (module+ test
-  (require (only-in racket/list append* append-map)
+  (require (only-in racket/list append-map)
            rackunit
            "../data/loader.rkt"
            "../main.rkt"
@@ -515,7 +515,7 @@
          (backward! (mean (* y y)))
          (step! opt)
          (ema-update! avg))
-       (define (flat layer) (append* (map tensor->list (parameters layer))))
+       (define (flat layer) (append-map tensor->list (parameters layer)))
        (for ([a (in-list (flat m))]
              [b (in-list (hash-ref j 'model))]
              [i (in-naturals)])
