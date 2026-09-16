@@ -8,7 +8,7 @@
 ;; and a thin uncontracted wrapper. Promotion into the contracted
 ;; public facade (torch/foreign.rkt) is hand-curated.
 ;;
-;; Conventions: an optional tensor/int/int-array argument takes #f
+;; Conventions: an optional tensor/int/int-array/scalar argument takes #f
 ;; for "absent" (an empty list '() is also absent for int-arrays);
 ;; loss ops follow ATen (nll_loss wants log-probabilities,
 ;; cross_entropy_loss wants raw logits).
@@ -24,6 +24,8 @@
          avg-pool2d
          broadcast-to
          cat
+         clamp
+         conv-transpose2d-input
          conv1d
          conv2d
          copy!
@@ -39,6 +41,7 @@
          gather
          ge-scalar
          ge-tensor
+         group-norm
          gt-scalar
          gt-tensor
          index-add!
@@ -73,6 +76,7 @@
          scatter-src!
          scatter-value!
          select-int
+         silu
          sin-tensor
          slice-tensor
          sum-dim-intlist
@@ -108,6 +112,12 @@
 
 (define-generated-op cat tr_gen_cat
   ([tensors tensor-list] [dim int64]))
+
+(define-generated-op clamp tr_gen_clamp
+  ([self tensor] [min optional-scalar] [max optional-scalar]))
+
+(define-generated-op conv-transpose2d-input tr_gen_conv_transpose2d_input
+  ([input tensor] [weight tensor] [bias optional-tensor] [stride int-array] [padding int-array] [output-padding int-array] [groups int64] [dilation int-array]))
 
 (define-generated-op conv1d tr_gen_conv1d
   ([input tensor] [weight tensor] [bias optional-tensor] [stride int-array] [padding int-array] [dilation int-array] [groups int64]))
@@ -153,6 +163,9 @@
 
 (define-generated-op ge-tensor tr_gen_ge_tensor
   ([self tensor] [other tensor]))
+
+(define-generated-op group-norm tr_gen_group_norm
+  ([input tensor] [num-groups int64] [weight optional-tensor] [bias optional-tensor] [eps double] [cudnn-enabled bool]))
 
 (define-generated-op gt-scalar tr_gen_gt_scalar
   ([self tensor] [other scalar]))
@@ -255,6 +268,9 @@
 
 (define-generated-op select-int tr_gen_select_int
   ([self tensor] [dim int64] [index int64]))
+
+(define-generated-op silu tr_gen_silu
+  ([self tensor]))
 
 (define-generated-op sin-tensor tr_gen_sin
   ([self tensor]))

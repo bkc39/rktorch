@@ -51,6 +51,14 @@
                (lambda () (Conv2d 1 8 3 #:stride 0)))
     (check-exn #rx"^LayerNorm: contract violation"
                (lambda () (LayerNorm '())))
+    (check-exn #rx"^ConvTranspose2d: contract violation"
+               (lambda () (ConvTranspose2d 1 8 3 #:stride 0)))
+    (check-exn #rx"^GroupNorm: contract violation"
+               (lambda () (GroupNorm 0 4)))
+    (check-exn #rx"groups must divide the channels"
+               (lambda () (GroupNorm 3 4)))
+    (check-exn #rx"groups must divide both channel counts"
+               (lambda () (ConvTranspose2d 2 5 3 #:groups 2)))
     (check-exn #rx"^Dropout: contract violation"
                (lambda () (Dropout #:p 1)))
     (check-exn #rx"^Sequential: contract violation"

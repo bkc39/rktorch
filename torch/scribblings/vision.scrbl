@@ -2,9 +2,12 @@
 
 @(require (for-label racket/base
                      racket/contract
-                     (only-in torch cuda-if-available device/c tensor?)
+                     (only-in torch cuda-if-available device/c randn-like tensor?)
                      torch/data/loader
-                     torch/vision/cifar10))
+                     (only-in torch/nn Conv2d ConvTranspose2d GroupNorm Linear
+                              define-layer)
+                     torch/vision/cifar10
+                     torch/vision/diffusion))
 
 @title{Vision datasets}
 
@@ -73,4 +76,76 @@ whether to trigger the fetch; the tests only touch a cached archive.
 @defproc[(tar-entries [bs bytes?]) (listof (cons/c string? bytes?))]{
 The regular files of an uncompressed tar buffer, name and contents,
 enough for the archives the datasets ship in.
+}
+
+@section{Diffusion}
+
+@defmodule[torch/vision/diffusion]
+
+The pieces of a denoising diffusion model in the epsilon-prediction form:
+a schedule of noise levels, the closed-form jump to any timestep, and a
+small UNet. The training loop and the sampler are the examples' business.
+
+@defproc[(linear-schedule [steps exact-positive-integer? 1000]
+                          [#:beta-start beta-start (real-in 0 1) 1e-4]
+                          [#:beta-end beta-end (real-in 0 1) 0.02])
+         schedule?]{
+The DDPM schedule: @racket[steps] variances evenly spaced from
+@racket[beta-start] to @racket[beta-end], with their alphas and cumulative
+products as float32 tensors on the default device, so build it where the
+model lives.
+}
+
+@defproc[(cosine-schedule [steps exact-positive-integer? 1000]
+                          [#:offset offset finite-nonnegative-real? 0.008])
+         schedule?]{
+The improved-DDPM schedule: cumulative products following a squared cosine
+of the timestep, each variance capped at @racket[0.999].
+}
+
+@deftogether[(@defproc[(schedule? [v any/c]) boolean?]
+              @defproc[(schedule-steps [s schedule?]) exact-positive-integer?]
+              @defproc[(schedule-betas [s schedule?]) tensor?]
+              @defproc[(schedule-alphas [s schedule?]) tensor?]
+              @defproc[(schedule-alpha-bars [s schedule?]) tensor?])]{
+A schedule and its tables, each of shape @tt{[steps]}.
+}
+
+@defproc[(q-sample [s schedule?] [x0 tensor?] [t int64-vector?] [noise tensor?])
+         tensor?]{
+@tt{q(x_t | x_0)} in closed form: with @tt{a} the cumulative product at each
+image's timestep @racket[t], an int64 tensor of shape @tt{[N]},
+@tt{sqrt(a) x0 + sqrt(1 - a) noise}. @racket[noise] is drawn by the caller,
+typically @racket[randn-like], so a seeded run replays.
+}
+
+@defproc[(sinusoidal-embedding [t int64-vector?] [dim even-positive-integer?])
+         tensor?]{
+Timesteps @racket[t], shape @tt{[N]}, as @tt{[N dim]} sinusoidal features:
+the sine half then the cosine half over frequencies falling geometrically
+from @tt{1} to @tt{1/10000}.
+}
+
+@defproc[(TimeEmbedding [dim even-positive-integer?]) time-embedding?]{
+A layer mapping timesteps to a @tt{[N 4dim]} embedding: the sinusoidal
+features through two @racket[Linear] layers with a silu between.
+}
+
+@defproc[(ResBlock [in channels/c] [out channels/c]
+                   [t-dim exact-positive-integer?])
+         res-block?]{
+The UNet's block: @racket[GroupNorm] of eight groups, silu, a 3x3
+@racket[Conv2d], the time embedding projected and added per channel, a
+second norm, silu and convolution, plus the residual through a 1x1
+convolution when the widths differ. Widths are multiples of eight.
+}
+
+@defproc[(UNet [#:base base channels/c 32]) unet?]{
+A two-level UNet for 32x32 RGB images: a @racket[TimeEmbedding] of
+@racket[base] features, an input convolution to @racket[base] channels, a
+@racket[ResBlock] and a stride-2 convolution per level down to
+@tt{2base} channels at 8x8, a middle block, then a @racket[ConvTranspose2d]
+per level back up with the matching skip concatenated, and an output
+convolution to three channels. Called as @racket[(net x t)] it returns the
+noise estimate for @racket[x] at timesteps @racket[t].
 }

@@ -109,6 +109,8 @@
          relu
          sigmoid
          gelu
+         silu
+         clamp
          exp
          log
          sqrt
@@ -132,6 +134,7 @@
 
 (provide conv1d
          conv2d
+         conv-transpose2d
          max-pool2d
          avg-pool2d
          adaptive-avg-pool2d)
@@ -140,7 +143,8 @@
          triu
          masked-fill
          embedding
-         layer-norm)
+         layer-norm
+         group-norm)
 
 (provide eq
          ne
@@ -203,6 +207,7 @@
          sub!
          zero!
          mul!
+         copy!
          zero-grad!)
 
 (module+ unsafe

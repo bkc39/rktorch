@@ -16,10 +16,11 @@ The Racket package is the `torch` collection:
 - `(require torch/nn)` — the nn layer (mirrors `import torch.nn`):
   `define-layer`, `gen:layer`, `Parameter`, `Linear`, `sgd`, `mse-loss`, initializers.
   **Naming convention:** nn layer *constructors* are PascalCase (`Linear`,
-  `Conv2d`, `MaxPool2d`, `Flatten`, `Dropout`, `Sequential`, `Embedding`,
-  `LayerNorm`), mirroring the `torch.nn.*` classes; their *predicates* are
-  lowercase (`linear?`, `conv2d?`, `max-pool2d?`, `flatten?`, `dropout?`,
-  `sequential?`, `embedding?`, `layer-norm?`), per Racket idiom
+  `Conv2d`, `ConvTranspose2d`, `MaxPool2d`, `Flatten`, `Dropout`,
+  `Sequential`, `Embedding`, `LayerNorm`, `GroupNorm`), mirroring the
+  `torch.nn.*` classes; their *predicates* are lowercase (`linear?`,
+  `conv2d?`, `conv-transpose2d?`, `max-pool2d?`, `flatten?`, `dropout?`,
+  `sequential?`, `embedding?`, `layer-norm?`, `group-norm?`), per Racket idiom
   (`list?`, `hash?`). The functional ops keep lowercase names on `torch`
   (`conv2d`, `max-pool2d`, `flatten`, like `torch.conv2d`). The PascalCase
   constructors vs lowercase functional ops are what let `(require torch
@@ -90,13 +91,19 @@ CPU-first; float32 + inferred int64 (#44). From `torch`:
   continuing), `in-epochs`; synchronous, single-threaded like
   `num_workers=0`; a seeded loader replays `DataLoader(generator=g)`'s
   batch order
+- diffusion (`torch/vision/diffusion.rkt`, #84): `linear-schedule`
+  `cosine-schedule` (betas, alphas, alpha-bars as device tensors), `q-sample`
+  (closed-form `q(x_t | x_0)`), `sinusoidal-embedding`, and the layers
+  `TimeEmbedding` `ResBlock` `UNet` (two levels, `#:base` channels); the
+  training loop is `examples/racket/08-diffusion.rkt`
 - vision (`torch/vision/cifar10.rkt`, #84): `load-cifar10` (binary archive
   cached and unpacked in memory, float32 `[N 3 32 32]` in `[-1, 1]` plus
   int64 labels), `cifar10-dataset #:device`, `cifar10-label-names`,
   `load-cifar10-fixture` (256 committed records), `cifar10-records->tensors`,
   `tar-entries`
 - shape: `reshape view transpose permute squeeze unsqueeze cat stack`
-- elementwise: `add sub mul div pow neg exp log sqrt relu sigmoid tanh`
+- elementwise: `add sub mul div pow neg exp log sqrt relu sigmoid tanh silu
+  clamp`
   (binary ops take a real on either side)
 - operators: `+ - * /` shadow racket/base rkt-polars-style (numeric fast
   path to racket/base, tensor operands dispatch to add/sub/mul/div, chains
@@ -110,7 +117,7 @@ CPU-first; float32 + inferred int64 (#44). From `torch`:
 - linalg: `matmul mm mv dot`; out: `item to-dtype`
 - autograd: `requires-grad! requires-grad? backward! grad has-grad?
   maybe-grad detach with-no-grad grad-enabled?`; in-place
-  `sub! zero! mul! zero-grad!`
+  `sub! zero! mul! copy! zero-grad!`
 
 **Name shadowing convention:** ops colliding with racket/base or racket/list
 (`exp log sqrt tanh max min argmax`) are generic — tensors hit libtorch,
@@ -126,10 +133,12 @@ per `foreign/operators.rkt`.
 
 From `torch/nn`: `define-layer procedure->Layer gen:layer layer? Parameter Buffer LayerList LayerHash parameters
 named-parameters buffers children forward Linear Conv2d MaxPool2d Flatten Dropout
-Sequential Embedding LayerNorm sgd adam step! zero-grads! cross-entropy
+Sequential Embedding LayerNorm ConvTranspose2d GroupNorm sgd adam step! zero-grads! ema
+ema-update! ema-average cross-entropy
 mse-loss kaiming-uniform uniform-init normal-init fan-in`. The functional
 transformer primitives (`gelu tril triu masked-fill embedding layer-norm`,
-tranche 3, #22) live on `torch` beside the other functional ops; the GPT
+tranche 3, #22) and the UNet ones (`conv-transpose2d group-norm silu
+clamp`, tranche 4, #84) live on `torch` beside the other functional ops; the GPT
 causal-mask idiom is `(masked-fill scores (eq (tril (ones T T)) 0) -inf.0)`. `define-layer` is the Python-style
 `nn.Module` analog: `#:init` is the constructor body and assigns declared
 fields with `set!`, a field's value classifies it at construction
@@ -235,7 +244,10 @@ the gradient returns to the MPS graph and the rest of a model — the 07-asr
 encoder, attention decoder, and `adam` — stays on the GPU. Every other op the
 speech arc uses has an MPS kernel, so `pick-device` must keep returning
 `accelerator-if-available` unmodified: routing darwin to the CPU to dodge this
-one op is what the carve-out exists to avoid.
+one op is what the carve-out exists to avoid. The second gap is
+`aten::native_group_norm_backward`: the `GroupNorm` layer
+(`torch/nn/group-norm.rkt`) normalises on the CPU under MPS the same way, so
+the diffusion UNet trains on the GPU there with its norms round-tripped.
 
 ## Architecture
 
@@ -278,7 +290,8 @@ module's full export set (`racket/runtime-path`, `syntax/parse/pre`).
 - `data/dataset.rkt` — `define-dataset` and `gen:dataset`;
   `private/definer.rkt` — the clause grammar it shares with `define-layer`.
 - `vision/cifar10.rkt` — CIFAR-10 loader and dataset, `vision/fixtures/`
-  its 256-record fixture.
+  its 256-record fixture; `vision/diffusion.rkt` — DDPM schedules, `q-sample`
+  and the UNet layers.
 - `data/loader.rkt` — `tensor-dataset`, `dataloader`, `in-dataloader`,
   `in-epochs`, re-exporting `data/dataset.rkt`; `data/mnist.rkt`,
   `data/text.rkt` — the modality loaders (moving under #88).
@@ -309,7 +322,7 @@ module's full export set (`racket/runtime-path`, `syntax/parse/pre`).
   `exn:fail:rktorch:oom` (catch by type, not message).
 - `nn.rkt` — pure re-export facade over `nn/` (`layer.rkt` = `gen:layer`, `LayerList` +
   the `define-layer` macro; `parameter.rkt`, `buffer.rkt`, `linear.rkt`,
-  `init.rkt`, `optim.rkt`, `loss.rkt`).
+  `init.rkt`, `optim.rkt`, `ema.rkt`, `loss.rkt`).
 - `private/install-torchrkt-native.rkt` — stages `libtorchrkt.*` into
   `native-libs/` from `TORCHRKT_NATIVE_LIB_PATH` (set by the Nix build/shell).
   Every staging path (here and the flake's three shell ones) writes a temp file
@@ -352,10 +365,12 @@ Conventions:
   (Tensor / Scalar→double / int64 / bool / IntArrayRef / TensorList args,
   single Tensor return). Unsupported signatures are skipped with a report —
   widening the IR is a generator change, not a hand-written shim.
-- Optional *types* (`Tensor?`, `int?`) are outside the IR and skip; schema
-  *defaults* (`int dim=0`) are flattened to required arguments on the
-  unstable surface — defaults are a curated-facade concern. In-place ops
-  (`add_`) skip too: their C-side mutation convention is a #3 decision.
+- Optional *types* are in the IR: `Tensor?` is a NULL pointer, `int?` and
+  `Scalar?` carry a presence flag, `int[]?` a length plus flag, and
+  `ScalarType?` a -1 sentinel. In-place ops (`add_`) emit a mutable receiver
+  plus an integer status. Schema *defaults* (`int dim=0`) are still
+  flattened to required arguments on the unstable surface — defaults are a
+  curated-facade concern.
 - Generated output is committed (AOT); CI's `codegen-drift` job regenerates
   and fails on any diff, so never edit generated files by hand.
 - `generated/` is exempt from the C++ 500-line gate (shard size is the
