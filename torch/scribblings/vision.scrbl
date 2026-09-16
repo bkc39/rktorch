@@ -162,15 +162,16 @@ a transposed convolution.
 }
 
 @defproc[(UNet [#:base base channels/c 128]
-               [#:mults mults (non-empty-listof exact-positive-integer?) '(1 2 2 2)]
+               [#:mults mults (listof exact-positive-integer?) '(1 2 2 2)]
                [#:blocks blocks exact-positive-integer? 2]
                [#:attention attention (listof exact-positive-integer?) '(16)]
                [#:dropout dropout (real-in 0 1) 0.1]
                [#:classes classes (or/c #f exact-positive-integer?) #f])
          unet?]{
 The DDPM UNet for 32x32 RGB images, the paper's CIFAR-10 configuration
-by default: one resolution level per entry of @racket[mults], each
-@racket[base] times that entry wide and half the resolution of the last,
+by default: one resolution level per entry of @racket[mults], at most
+six of them from 32x32 down to 1x1, each @racket[base] times that entry
+wide and half the resolution of the last,
 @racket[blocks] @racket[ResBlock]s per level on the way down and one more
 per level on the way up, each followed by an @racket[AttentionBlock] at
 the resolutions listed in @racket[attention], a @racket[Downsample]

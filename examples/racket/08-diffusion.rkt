@@ -86,7 +86,8 @@ together.
 @bold{The headline run.} The full training set through the shuffled loader,
 device resident so a batch is one gather on the GPU, the class-conditional
 DDPM network at the paper's CIFAR-10 size, with the mean training loss per
-epoch reported. An epoch of 391 batches takes minutes on an RTX 3090 Ti;
+epoch reported, each batch weighted by its size so the last, shorter batch
+counts for what it is. An epoch of 391 batches takes minutes on an RTX 3090 Ti;
 the mean loss is near @tt{0.06} after the first epoch and settles around
 @tt{0.03} over tens of epochs, which is the regime the sampler in the next
 example works in.
@@ -106,10 +107,11 @@ example works in.
     (define opt (adam (parameters net) #:lr lr))
     (manual-seed! 0)
     (for/list ([epoch (in-range epochs)])
-      (define total
-        (for/sum ([(xb yb) loader])
-          (train-step net sched opt xb yb device)))
-      (/ total (length loader)))))]
+      (define-values (total count)
+        (for/fold ([total 0.0] [count 0]) ([(xb yb) loader])
+          (values (+ total (* (length xb) (train-step net sched opt xb yb device)))
+                  (+ count (length xb)))))
+      (/ total count))))]
 
 @chunk[<*>
   <r08-require>

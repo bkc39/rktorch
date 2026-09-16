@@ -104,6 +104,7 @@
                                           (tensor '(3 10) #:dtype 'int64)))
                   '(2 3 32 32))
     (check-exn #rx"multiple-of-32" (lambda () (UNet #:base 12)))
+    (check-exn #rx"at-most-six-levels" (lambda () (UNet #:base 32 #:mults '(1 1 1 1 1 1 1))))
     (check-exn #rx"^ResBlock: contract violation" (lambda () (ResBlock 32 40 128)))
     (check-exn #rx"^TimeEmbedding: contract violation" (lambda () (TimeEmbedding 7))))
 

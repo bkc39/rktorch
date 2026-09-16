@@ -2,7 +2,7 @@
 
 (require (only-in racket/contract/base
                   -> ->* </c >=/c and/c any/c between/c contract-out
-                  flat-named-contract listof non-empty-listof or/c)
+                  flat-named-contract listof or/c)
          (only-in racket/math infinite? nan? pi)
          (only-in threading ~>)
          (only-in "../foreign.rkt"
@@ -113,6 +113,11 @@
 
 (define dropout/c (and/c real? (>=/c 0) (</c 1)))
 
+(define levels/c
+  (flat-named-contract 'at-most-six-levels-of-32x32
+                       (lambda (l) (and (list? l) (<= 1 (length l) 6)
+                                        (andmap exact-positive-integer? l)))))
+
 (define-layer ResBlock (norm1 conv1 emb norm2 drop conv2 skip) ;; noqa
   #:contract (->* [channels/c channels/c exact-positive-integer?]
                   [#:dropout dropout/c]
@@ -175,7 +180,7 @@
                     out-norm out-conv)
   #:contract (->* []
                   [#:base channels/c
-                   #:mults (non-empty-listof exact-positive-integer?)
+                   #:mults levels/c
                    #:blocks exact-positive-integer?
                    #:attention (listof exact-positive-integer?)
                    #:dropout dropout/c
