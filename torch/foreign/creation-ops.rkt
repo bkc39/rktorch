@@ -100,13 +100,19 @@
   (shaped 'ones tr-ones-on/raw dims device dtype requires-grad?))
 
 ;; the fill crosses the FFI as a double: an int64 fill outside the exact
-;; range of a double would round silently, so the contract refuses it
+;; range of a double would round silently and a uint8 fill outside 0..255
+;; would wrap, so the contract refuses both
 (define (fill-crosses-exactly? value dtype)
-  (or (unsupplied-arg? dtype)
-      (not (eq? dtype 'int64))
-      (not (exact-integer? value))
-      (= (exact->inexact value) value)
-      "an int64 fill value must be exactly representable as a double"))
+  (cond
+    [(unsupplied-arg? dtype) #t]
+    [(eq? dtype 'int64)
+     (or (not (exact-integer? value))
+         (= (exact->inexact value) value)
+         "an int64 fill value must be exactly representable as a double")]
+    [(eq? dtype 'uint8)
+     (or (and (integer? value) (<= 0 value 255))
+         "a uint8 fill value must be an integer from 0 to 255")]
+    [else #t]))
 
 (define/contract-out (full value #:device [device #f] #:dtype [dtype #f]
                            #:requires-grad? [requires-grad? #f]
@@ -189,6 +195,9 @@
        [#:device device/c #:dtype dtype/c #:requires-grad? boolean?]
        tensor?)
   (define-values (dev dt) (like t device dtype))
+  (define verdict (fill-crosses-exactly? value dt))
+  (unless (eq? verdict #t)
+    (raise-argument-error 'full-like verdict value))
   (full value (tensor-shape t) #:device dev #:dtype dt
         #:requires-grad? requires-grad?))
 

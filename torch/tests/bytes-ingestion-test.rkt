@@ -3,9 +3,9 @@
 (module+ test
   (require (only-in racket/list range)
            (only-in rackunit check-equal? check-exn test-case)
-           (only-in "../main.rkt" div item reshape tensor tensor->list
-                    tensor->repr tensor->vector tensor-dtype tensor-shape to
-                    to-dtype zeros))
+           (only-in "../main.rkt" div full full-like item reshape tensor
+                    tensor->list tensor->repr tensor->vector tensor-dtype
+                    tensor-shape to to-dtype zeros))
 
   (test-case "a byte string builds a uint8 tensor and comes back as one"
     (define t (tensor #"\0\1\2\377"))
@@ -41,6 +41,15 @@
     (check-equal? (tensor-dtype (zeros 2 #:dtype 'uint8)) 'uint8)
     (check-equal? (tensor->repr (zeros 2 #:dtype 'uint8))
                   "tensor([0, 0], dtype=torch.uint8)")
+    (check-equal? (tensor->list (full 7 2 #:dtype 'uint8)) '(7 7))
+    (check-equal? (tensor->list (full-like (zeros 2) 255.0 #:dtype 'uint8))
+                  '(255 255))
+    (check-exn #rx"uint8 fill value must be an integer from 0 to 255"
+               (lambda () (full 300 2 #:dtype 'uint8)))
+    (check-exn #rx"uint8 fill value must be an integer from 0 to 255"
+               (lambda () (full 1.5 2 #:dtype 'uint8)))
+    (check-exn #rx"uint8 fill value must be an integer from 0 to 255"
+               (lambda () (full-like (zeros 2) -1 #:dtype 'uint8)))
     (check-equal? (tensor->repr (to (tensor '(1.5 -2.0)) 'float64))
                   "tensor([ 1.5000, -2.0000], dtype=torch.float64)"))
 

@@ -79,15 +79,14 @@
        (format ", size=(~a)"
                (string-join (map number->string dims) ", ")))
    (case dtype
-     [(float64) ", dtype=torch.float64"]
      [(int64) ", dtype=torch.int64"]
      [(bool) ", dtype=torch.bool"]
-     [(uint8) ", dtype=torch.uint8"]
-     [else ""])
+     [else (dtype-suffix dtype)])
    ")"))
 
 ;; PyTorch names every dtype but its defaults (float32, int64, bool) after
-;; a non-empty tensor's values.
+;; a non-empty tensor's values; an empty tensor also names int64 and bool,
+;; since no value shows them.
 (define (dtype-suffix dtype)
   (case dtype
     [(float64) ", dtype=torch.float64"]
