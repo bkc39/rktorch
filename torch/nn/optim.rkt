@@ -64,9 +64,16 @@
      moved]))
 
 (define (scalar-on table value p)
-  (hash-ref! table p
-             (lambda ()
-               (full value #:device (tensor-device p) #:dtype (tensor-dtype p)))))
+  (define dev (tensor-device p))
+  (define dt (tensor-dtype p))
+  (define (fresh) (full value #:device dev #:dtype dt))
+  (define s (hash-ref! table p fresh))
+  (cond
+    [(and (equal? (tensor-device s) dev) (eq? (tensor-dtype s) dt)) s]
+    [else
+     (define moved (fresh))
+     (hash-set! table p moved)
+     moved]))
 
 (define (adam-do-step! opt)
   (with-no-grad

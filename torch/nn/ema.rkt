@@ -56,6 +56,13 @@
          (lerp! q p (weight-on e q))))]))
 
 (define (weight-on e q)
-  (hash-ref! (ema-weights e) q
-             (lambda ()
-               (full (- 1.0 (ema-decay e)) #:device (tensor-device q) #:dtype (dtype q)))))
+  (define dev (tensor-device q))
+  (define dt (dtype q))
+  (define (fresh) (full (- 1.0 (ema-decay e)) #:device dev #:dtype dt))
+  (define w (hash-ref! (ema-weights e) q fresh))
+  (cond
+    [(and (equal? (tensor-device w) dev) (eq? (dtype w) dt)) w]
+    [else
+     (define moved (fresh))
+     (hash-set! (ema-weights e) q moved)
+     moved]))

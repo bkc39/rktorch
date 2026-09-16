@@ -277,6 +277,27 @@
                (lambda () (conv1d (randn 1 2 8) (randn 3 2 3)
                                   #:padding -1))))
 
+  (test-case "GroupNorm on mps: same values, gradient back on the device"
+    (when (mps-available?)
+      (manual-seed! 0)
+      (define xs (tensor->list (randn 2 4 3 3)))
+      (define (out+grad dev)
+        (define x (to-device (reshape (tensor xs) 2 4 3 3) dev))
+        (requires-grad! x)
+        (define y ((to (GroupNorm 2 4) dev) x))
+        (backward! (mean (mul y y)))
+        (values y (grad x)))
+      (define-values (cpu-y cpu-g) (out+grad 'cpu))
+      (define-values (mps-y mps-g) (out+grad 'mps))
+      (check-equal? (tensor-device mps-y) (mps-device))
+      (check-equal? (tensor-device mps-g) (mps-device))
+      (for ([a (in-list (tensor->list cpu-y))]
+            [b (in-list (tensor->list (to-device mps-y 'cpu)))])
+        (check-= a b 1e-5))
+      (for ([a (in-list (tensor->list cpu-g))]
+            [b (in-list (tensor->list (to-device mps-g 'cpu)))])
+        (check-= a b 1e-5))))
+
   (test-case "ctc-loss on mps: same value, gradient back on the device"
     ;; libtorch has no MPS ctc_loss kernel, so the loss detours through the
     ;; CPU; the detour must be invisible in both the value and the gradient
@@ -351,6 +372,11 @@
     (ema-update! aliased)
     (check-equal? (tensor->list shared) '(1.0 1.0 1.0)
                   "copying and averaging through shared storage leave the values intact")
+    (to net 'float64)
+    (to (ema-average avg) 'float64)
+    (ema-update! avg)
+    (check-equal? (tensor-dtype (car (parameters (ema-average avg)))) 'float64
+                  "the cached weight follows the average across a move")
     (check-exn #rx"^ema: contract violation"
                (lambda () (ema net (Linear 2 2) #:decay 2))))
 
