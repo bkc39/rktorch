@@ -20,6 +20,7 @@
          tr-tensor-ndim/raw
          tr-tensor-shape/raw
          tr-tensor-copy-data-i64/raw
+         tr-tensor-copy-data-u8/raw
          tr-tensor-copy-data/raw
          tr-tensor-dtype/raw
          tr-tensor-to-dtype/raw
@@ -60,7 +61,8 @@
   #:c-id tr_tensor_copy_data)
 
 (define _tr-dtype
-  (_enum '(float32 = 0 float64 = 1 int64 = 2 bool = 3 keep = -1) _int))
+  (_enum '(float32 = 0 float64 = 1 int64 = 2 bool = 3 uint8 = 4 keep = -1)
+         _int))
 
 (define (dtype-code->symbol n)
   (case n
@@ -68,6 +70,7 @@
     [(1) 'float64]
     [(2) 'int64]
     [(3) 'bool]
+    [(4) 'uint8]
     [else #f]))
 
 ;; out is a plain _int, not _tr-dtype: on the error path the C side never
@@ -95,6 +98,15 @@
         -> (rc : _int)
         -> (values rc out-numel))
   #:c-id tr_tensor_copy_data_i64)
+
+(define-torch tr-tensor-copy-data-u8/raw
+  (_fun (t : _Tensor)
+        (capacity : _uint64)
+        (out : _bytes)
+        (out-numel : (_ptr o _uint64))
+        -> (rc : _int)
+        -> (values rc out-numel))
+  #:c-id tr_tensor_copy_data_u8)
 
 (define-torch tr-tensor-narrow/raw
   (_fun (t : _Tensor)

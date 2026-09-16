@@ -113,6 +113,46 @@ TEST(TorchrktOps, FromDataI64RejectsBadShapes) {
   EXPECT_EQ(tr_from_data_i64(nullptr, 3, dims.data(), 2), nullptr);
 }
 
+TEST(TorchrktOps, FromDataU8RoundTripsBytes) {
+  const std::vector<uint8_t> bytes = {0, 1, 2, 255};
+  const std::vector<int64_t> dims = {2, 2};
+  const Handle t(tr_from_data_u8(bytes.data(), bytes.size(), dims.data(), 2));
+  ASSERT_NE(t.t, nullptr) << tr_last_error();
+  tr_dtype dt = TR_DTYPE_FLOAT32;
+  EXPECT_EQ(tr_tensor_dtype(t.t, &dt), 0) << tr_last_error();
+  EXPECT_EQ(dt, TR_DTYPE_UINT8);
+  EXPECT_EQ(shape_of(t.t), dims);
+  std::uint64_t numel = 0;
+  EXPECT_EQ(tr_tensor_copy_data_u8(t.t, 0, nullptr, &numel), 2);
+  std::vector<uint8_t> out(numel);
+  EXPECT_EQ(tr_tensor_copy_data_u8(t.t, numel, out.data(), &numel), 0)
+      << tr_last_error();
+  EXPECT_EQ(out, bytes);
+  EXPECT_EQ(data_of(t.t), (std::vector<float>{0.0F, 1.0F, 2.0F, 255.0F}));
+  const Handle wide(tr_tensor_to_dtype(t.t, TR_DTYPE_INT64));
+  EXPECT_EQ(tr_tensor_dtype(wide.t, &dt), 0) << tr_last_error();
+  EXPECT_EQ(dt, TR_DTYPE_INT64);
+  const Handle back(tr_tensor_to_dtype(wide.t, TR_DTYPE_UINT8));
+  EXPECT_EQ(tr_tensor_copy_data_u8(back.t, numel, out.data(), &numel), 0)
+      << tr_last_error();
+  EXPECT_EQ(out, bytes);
+}
+
+TEST(TorchrktOps, FromDataU8RejectsBadShapesAndNull) {
+  const std::vector<uint8_t> bytes = {1, 2, 3};
+  const std::vector<int64_t> dims = {2, 2};
+  EXPECT_EQ(tr_from_data_u8(bytes.data(), bytes.size(), dims.data(), 2),
+            nullptr);
+  EXPECT_STRNE(tr_last_error(), "");
+  EXPECT_EQ(tr_from_data_u8(nullptr, 3, dims.data(), 2), nullptr);
+  const std::vector<int64_t> empty = {0};
+  const Handle none(tr_from_data_u8(nullptr, 0, empty.data(), 1));
+  ASSERT_NE(none.t, nullptr) << tr_last_error();
+  std::uint64_t numel = 7;
+  EXPECT_EQ(tr_tensor_copy_data_u8(none.t, 0, nullptr, &numel), 0);
+  EXPECT_EQ(numel, 0U);
+}
+
 TEST(TorchrktOps, DtypeGetterCoversTheEnum) {
   const std::vector<float> values = {1.0F};
   const std::vector<int64_t> dims = {1};
@@ -123,6 +163,9 @@ TEST(TorchrktOps, DtypeGetterCoversTheEnum) {
   const Handle f64(tr_tensor_to_dtype(f32.t, TR_DTYPE_FLOAT64));
   EXPECT_EQ(tr_tensor_dtype(f64.t, &dt), 0) << tr_last_error();
   EXPECT_EQ(dt, TR_DTYPE_FLOAT64);
+  const Handle u8(tr_tensor_to_dtype(f32.t, TR_DTYPE_UINT8));
+  EXPECT_EQ(tr_tensor_dtype(u8.t, &dt), 0) << tr_last_error();
+  EXPECT_EQ(dt, TR_DTYPE_UINT8);
   EXPECT_EQ(tr_tensor_dtype(nullptr, &dt), 1);
   EXPECT_STRNE(tr_last_error(), "");
 }
