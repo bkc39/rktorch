@@ -2,7 +2,7 @@
 
 (require (only-in racket/contract/base -> ->i any/c contract-out real-in)
          (only-in "../foreign.rkt"
-                  copy! dtype mul! shape sub! tensor-device with-no-grad)
+                  copy! dtype shape sub sub! tensor-device with-no-grad)
          (only-in "../private/contract.rkt" define/contract-out)
          (only-in "layer.rkt" layer? parameters))
 
@@ -52,8 +52,7 @@
     [(zero? n) (copy-parameters! e)]
     [else
      (with-no-grad
-       (define d (ema-decay e))
+       (define weight (- 1.0 (ema-decay e)))
        (for ([p (in-list (parameters (ema-model e)))]
              [q (in-list (parameters (ema-average e)))])
-         (mul! q d)
-         (sub! q p (- d 1.0))))]))
+         (sub! q (sub q p) weight)))]))
