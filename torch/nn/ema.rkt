@@ -1,7 +1,8 @@
 #lang racket/base
 
 (require (only-in racket/contract/base -> ->i any/c contract-out real-in)
-         (only-in "../foreign.rkt" mul! shape sub! with-no-grad)
+         (only-in "../foreign.rkt"
+                  copy! dtype mul! shape sub! tensor-device with-no-grad)
          (only-in "../private/contract.rkt" define/contract-out)
          (only-in "layer.rkt" layer? parameters))
 
@@ -20,20 +21,22 @@
   (and (not (eq? model average))
        (= (length ps) (length qs))
        (for/and ([p (in-list ps)] [q (in-list qs)])
-         (and (not (memq q ps)) (equal? (shape p) (shape q))))))
+         (and (not (memq q ps))
+              (equal? (shape p) (shape q))
+              (equal? (tensor-device p) (tensor-device q))
+              (eq? (dtype p) (dtype q))))))
 
 (define (copy-parameters! e)
   (with-no-grad
     (for ([p (in-list (parameters (ema-model e)))]
           [q (in-list (parameters (ema-average e)))])
-      (mul! q 0.0)
-      (sub! q p -1.0))))
+      (copy! q p))))
 
 (define/contract-out (ema model average #:decay [decay 0.9999]) ;; noqa
   (->i ([model layer?] [average layer?])
        (#:decay [decay (real-in 0 1)])
        #:pre/name (model average)
-       "the average must be a separate layer with the model's parameters, shape for shape"
+       "the average must be a separate layer with the model's parameters, shape for shape, on its device and dtype"
        (separate-copy? model average)
        [result ema?])
   (define e (make-ema model average decay (box 0)))

@@ -60,9 +60,14 @@
     (check-equal? (tensor->list p) '(0.5 1.0))
     (check-true (requires-grad? p)))
 
-  (test-case "in-place zero! and mul!"
+  (test-case "in-place zero!, mul! and copy!"
     (define t (tensor '(1.0 2.0)))
     (mul! t 3)
     (check-equal? (tensor->list t) '(3.0 6.0))
     (zero! t)
-    (check-equal? (tensor->list t) '(0.0 0.0))))
+    (check-equal? (tensor->list t) '(0.0 0.0))
+    (copy! t (tensor '(5.0 7.0)))
+    (check-equal? (tensor->list t) '(5.0 7.0))
+    (copy! t t)
+    (check-equal? (tensor->list t) '(5.0 7.0) "copying a tensor onto itself is the identity")
+    (check-exn exn:fail? (lambda () (copy! t (tensor '(1.0 2.0 3.0)))))))

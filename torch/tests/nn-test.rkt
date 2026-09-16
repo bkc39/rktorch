@@ -343,6 +343,12 @@
       (check-= q (* p 2/3) 1e-6))
     (check-exn #rx"shape for shape" (lambda () (ema net (Linear 3 3))))
     (check-exn #rx"separate layer" (lambda () (ema net net)))
+    (check-exn #rx"device and dtype" (lambda () (ema net (to (Linear 2 2) 'float64))))
+    (define shared (Parameter (ones 3)))
+    (define-layer holder (w) #:init (w0) (set! w w0) #:forward (x) x)
+    (define aliased (ema (holder shared) (holder (Parameter shared))))
+    (check-equal? (tensor->list (car (parameters (ema-average aliased)))) '(1.0 1.0 1.0)
+                  "copying through shared storage leaves the values intact")
     (check-exn #rx"^ema: contract violation"
                (lambda () (ema net (Linear 2 2) #:decay 2))))
 

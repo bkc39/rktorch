@@ -207,6 +207,7 @@
          sub!
          zero!
          mul!
+         copy!
          zero-grad!)
 
 (module+ unsafe

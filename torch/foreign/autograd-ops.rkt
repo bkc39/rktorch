@@ -2,6 +2,7 @@
 
 (require (only-in racket/contract/base -> ->* any or/c)
          syntax/parse/define
+         (prefix-in g: (only-in "../generated.rkt" copy!))
          (only-in "../private/contract.rkt"
                   define/checked-out define/contract-out)
          (only-in "error.rkt" check-handle check-ok)
@@ -78,6 +79,9 @@
 (define/contract-out (mul! t value) (-> tensor? real? void?)
   (check-ok (tr-tensor-mul!/raw t (exact->inexact value)) 'mul!)
   (void))
+
+(define/contract-out (copy! t source) (-> tensor? tensor? void?) ;; noqa
+  (void (g:copy! t source #f)))
 
 (define/contract-out (zero-grad! t) (-> tensor? void?) ;; noqa
   (when (has-grad? t)
