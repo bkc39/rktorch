@@ -305,9 +305,14 @@
      (error 'tensor "cannot convert non-finite value to int64: ~e" x)]))
 
 (define (exact-byte x)
-  (unless (byte? x)
+  (define v
+    (cond
+      [(exact-integer? x) x]
+      [(rational? x) (inexact->exact (truncate x))]
+      [else (error 'tensor "cannot convert non-finite value to uint8: ~e" x)]))
+  (unless (byte? v)
     (error 'tensor "cannot convert value to uint8 (0 to 255): ~e" x))
-  x)
+  v)
 
 (define (infer-dtype flat)
   (cond

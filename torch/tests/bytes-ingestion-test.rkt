@@ -1,7 +1,8 @@
 #lang racket/base
 
 (module+ test
-  (require (only-in racket/list range)
+  (require (only-in ffi/vector f32vector)
+           (only-in racket/list range)
            (only-in rackunit check-equal? check-exn test-case)
            (only-in "../main.rkt" div full full-like item reshape tensor
                     tensor->list tensor->repr tensor->vector tensor-dtype
@@ -30,10 +31,16 @@
     (check-equal? (tensor-dtype u) 'uint8)
     (check-equal? (tensor-shape u) '(2 2))
     (check-equal? (tensor->vector u) #"\1\2\3\377")
+    (check-equal? (tensor->list (tensor '(1.0 2.5 255.0) #:dtype 'uint8))
+                  '(1 2 255) "inexact values truncate, as for int64")
+    (check-equal? (tensor->list (tensor (f32vector 3.0 4.0) #:dtype 'uint8))
+                  '(3 4))
     (check-exn #rx"^tensor: cannot convert value to uint8"
                (lambda () (tensor '(256) #:dtype 'uint8)))
     (check-exn #rx"^tensor: cannot convert value to uint8"
-               (lambda () (tensor '(1.5) #:dtype 'uint8)))
+               (lambda () (tensor '(-1.0) #:dtype 'uint8)))
+    (check-exn #rx"^tensor: cannot convert non-finite value to uint8"
+               (lambda () (tensor (list +inf.0) #:dtype 'uint8)))
     (check-exn exn:fail? (lambda () (tensor #"\1" #:requires-grad? #t))))
 
   (test-case "uint8 is a dtype everywhere a dtype goes"
