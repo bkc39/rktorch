@@ -18,6 +18,8 @@ inline torch::ScalarType to_scalar_type(tr_dtype dtype) {
       return torch::kInt64;
     case TR_DTYPE_BOOL:
       return torch::kBool;
+    case TR_DTYPE_UINT8:
+      return torch::kUInt8;
     case TR_DTYPE_KEEP:
       break;
   }

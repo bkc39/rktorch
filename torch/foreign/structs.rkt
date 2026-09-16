@@ -82,8 +82,17 @@
      [(float64) ", dtype=torch.float64"]
      [(int64) ", dtype=torch.int64"]
      [(bool) ", dtype=torch.bool"]
+     [(uint8) ", dtype=torch.uint8"]
      [else ""])
    ")"))
+
+;; PyTorch names every dtype but its defaults (float32, int64, bool) after
+;; a non-empty tensor's values.
+(define (dtype-suffix dtype)
+  (case dtype
+    [(float64) ", dtype=torch.float64"]
+    [(uint8) ", dtype=torch.uint8"]
+    [else ""]))
 
 (define summarize-threshold 1000)
 (define edgeitems 3)
@@ -139,21 +148,27 @@
     [summarize?
      (define leaf-values
        (case dtype
-         [(int64) handle->ints]
+         [(int64 uint8) handle->ints]
          [(float64) handle->doubles]
          [else handle->floats]))
      (define tree (handle->summarized-tree h dims 0 leaf-values))
      (define mode
-       (case dtype [(int64) 'exact-integers] [(bool) 'booleans] [else #f]))
-     (tensor-tree->pytorch-repr tree dims #:mode mode)]
-    [(eq? dtype 'int64)
+       (case dtype
+         [(int64 uint8) 'exact-integers]
+         [(bool) 'booleans]
+         [else #f]))
+     (tensor-tree->pytorch-repr tree dims #:mode mode
+                                #:suffix (dtype-suffix dtype))]
+    [(memq dtype '(int64 uint8))
      (tensor->pytorch-repr (handle->ints h dims) dims
-                           #:mode 'exact-integers)]
+                           #:mode 'exact-integers
+                           #:suffix (dtype-suffix dtype))]
     [(eq? dtype 'bool)
      (tensor->pytorch-repr (handle->floats h dims) dims
                            #:mode 'booleans)]
     [(eq? dtype 'float64)
-     (tensor->pytorch-repr (handle->doubles h dims) dims)]
+     (tensor->pytorch-repr (handle->doubles h dims) dims
+                           #:suffix (dtype-suffix dtype))]
     [else (tensor->pytorch-repr (handle->floats h dims) dims)]))
 
 (struct tensor-impl (handle shape)

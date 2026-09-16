@@ -34,13 +34,16 @@
                   dtype/c
                   tensor-device
                   tensor-dtype
-                  tensor-shape)
+                  tensor-shape
+                  to-dtype)
          (only-in "raw/creation.rkt"
                   tr-arange-on/raw
                   tr-eye-on/raw
                   tr-from-data-i64-on-device/raw
                   tr-from-data-i64/raw
                   tr-from-data-on-device/raw
+                  tr-from-data-u8-on-device/raw
+                  tr-from-data-u8/raw
                   tr-from-data/raw
                   tr-full-on/raw
                   tr-ones-on/raw
@@ -247,6 +250,7 @@
          (cons (vector-length data) (nested-dims (vector-ref data 0))))]
     [(f32vector? data) (list (f32vector-length data))]
     [(s64vector? data) (list (s64vector-length data))]
+    [(bytes? data) (list (bytes-length data))]
     [else '()]))
 
 (define (sequence-children data)
@@ -255,6 +259,7 @@
     [(vector? data) (vector->list data)]
     [(f32vector? data) (f32vector->list data)]
     [(s64vector? data) (s64vector->list data)]
+    [(bytes? data) (bytes->list data)]
     [else #f]))
 
 (define (sequence-flatten data)
@@ -290,6 +295,11 @@
     [else
      (error 'tensor "cannot convert non-finite value to int64: ~e" x)]))
 
+(define (exact-byte x)
+  (unless (byte? x)
+    (error 'tensor "cannot convert value to uint8 (0 to 255): ~e" x))
+  x)
+
 (define (infer-dtype flat)
   (cond
     [(null? flat) 'float32]
@@ -300,19 +310,20 @@
                             #:requires-grad? [requires-grad? #f]
                             #:device [device #f]
                             #:dtype [dtype #f])
-  (->* [(or/c real? list? vector? f32vector? s64vector?)]
+  (->* [(or/c real? list? vector? f32vector? s64vector? bytes?)]
        [#:requires-grad? boolean?
         #:device (or/c #f device/c)
-        #:dtype (or/c #f 'float32 'int64)]
+        #:dtype (or/c #f 'float32 'int64 'uint8)]
        tensor?)
-  (unless (memq dtype '(#f float32 int64))
-    (error 'tensor "unsupported #:dtype (float32 or int64): ~e" dtype))
+  (unless (memq dtype '(#f float32 int64 uint8))
+    (error 'tensor "unsupported #:dtype (float32, int64 or uint8): ~e" dtype))
   (define dims (nested-dims data))
   (define-values (chosen payload numel)
     (cond
-      [(and (f32vector? data) (not (eq? dtype 'int64)))
+      [(bytes? data) (values 'uint8 data (bytes-length data))]
+      [(and (f32vector? data) (not (memq dtype '(int64 uint8))))
        (values 'float32 data (f32vector-length data))]
-      [(and (s64vector? data) (not (eq? dtype 'float32)))
+      [(and (s64vector? data) (not (memq dtype '(float32 uint8))))
        (values 'int64 data (s64vector-length data))]
       [else
        (check-regular data dims 0)
@@ -322,11 +333,14 @@
           (values 'int64
                   (list->s64vector (map exact-int64 flat))
                   (length flat))]
+         [(uint8)
+          (values 'uint8 (list->bytes (map exact-byte flat)) (length flat))]
          [else
           (values 'float32
                   (list->f32vector (map exact->inexact flat))
                   (length flat))])]))
   (define dim-vec (list->s64vector dims))
+  (define ndim (length dims))
   (define-values (type index)
     (if device (device->type+index device) (values #f #f)))
   (define out
@@ -334,16 +348,21 @@
           (case chosen
             [(int64)
              (if device
-                 (tr-from-data-i64-on-device/raw payload numel
-                                          dim-vec (length dims)
-                                          type index)
-                 (tr-from-data-i64/raw payload numel
-                                       dim-vec (length dims)))]
+                 (tr-from-data-i64-on-device/raw payload numel dim-vec ndim
+                                                 type index)
+                 (tr-from-data-i64/raw payload numel dim-vec ndim))]
+            [(uint8)
+             (if device
+                 (tr-from-data-u8-on-device/raw payload numel dim-vec ndim
+                                                type index)
+                 (tr-from-data-u8/raw payload numel dim-vec ndim))]
             [else
              (if device
-                 (tr-from-data-on-device/raw payload numel
-                                      dim-vec (length dims)
-                                      type index)
-                 (tr-from-data/raw payload numel
-                                   dim-vec (length dims)))])))
-  (if requires-grad? (requires-grad! out) out))
+                 (tr-from-data-on-device/raw payload numel dim-vec ndim
+                                             type index)
+                 (tr-from-data/raw payload numel dim-vec ndim))])))
+  (define typed
+    (if (and (bytes? data) dtype (not (eq? dtype 'uint8)))
+        (to-dtype out dtype)
+        out))
+  (if requires-grad? (requires-grad! typed) typed))
