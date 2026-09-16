@@ -2,11 +2,11 @@
 
 (require (only-in racket/contract/base -> ->i any/c contract-out real-in)
          (only-in "../foreign.rkt"
-                  copy! dtype shape sub sub! tensor-device with-no-grad)
+                  copy! dtype full lerp! shape tensor-device with-no-grad)
          (only-in "../private/contract.rkt" define/contract-out)
          (only-in "layer.rkt" layer? parameters))
 
-(struct ema (model average decay count) ;; noqa
+(struct ema (model average decay count weights) ;; noqa
   #:constructor-name make-ema
   #:omit-define-syntaxes)
 
@@ -39,7 +39,7 @@
        "the average must be a separate layer with the model's parameters, shape for shape, on its device and dtype"
        (separate-copy? model average)
        [result ema?])
-  (define e (make-ema model average decay (box 0)))
+  (define e (make-ema model average decay (box 0) (make-hash)))
   (copy-parameters! e)
   e)
 
@@ -52,7 +52,12 @@
     [(zero? n) (copy-parameters! e)]
     [else
      (with-no-grad
-       (define weight (- 1.0 (ema-decay e)))
        (for ([p (in-list (parameters (ema-model e)))]
              [q (in-list (parameters (ema-average e)))])
-         (sub! q (sub q p) weight)))]))
+         (lerp! q p (weight-on e q))))]))
+
+(define (weight-on e q)
+  (define dev (tensor-device q))
+  (define dt (dtype q))
+  (hash-ref! (ema-weights e) (cons dev dt)
+             (lambda () (full (- 1.0 (ema-decay e)) #:device dev #:dtype dt))))

@@ -120,7 +120,7 @@ CPU-first; float32 + inferred int64 (#44). From `torch`:
 - linalg: `matmul mm mv dot`; out: `item to-dtype`
 - autograd: `requires-grad! requires-grad? backward! grad has-grad?
   maybe-grad detach with-no-grad grad-enabled?`; in-place
-  `sub! zero! mul! copy! zero-grad!`
+  `sub! zero! mul! copy! addcmul! addcdiv! lerp! zero-grad!`
 
 **Name shadowing convention:** ops colliding with racket/base or racket/list
 (`exp log sqrt tanh max min argmax`) are generic — tensors hit libtorch,

@@ -209,6 +209,9 @@
          zero!
          mul!
          copy!
+         addcmul!
+         addcdiv!
+         lerp!
          zero-grad!)
 
 (module+ unsafe

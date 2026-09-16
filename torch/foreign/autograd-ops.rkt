@@ -2,7 +2,8 @@
 
 (require (only-in racket/contract/base -> ->* any or/c)
          syntax/parse/define
-         (prefix-in g: (only-in "../generated.rkt" copy!))
+         (prefix-in g: (only-in "../generated.rkt"
+                                addcdiv! addcmul! copy! lerp-tensor!))
          (only-in "../private/contract.rkt"
                   define/checked-out define/contract-out)
          (only-in "error.rkt" check-handle check-ok)
@@ -82,6 +83,17 @@
 
 (define/contract-out (copy! t source) (-> tensor? tensor? void?) ;; noqa
   (void (g:copy! t source #f)))
+
+(define/contract-out (addcmul! t a b [value 1.0]) ;; noqa
+  (->* [tensor? tensor? tensor?] [real?] void?)
+  (void (g:addcmul! t a b (exact->inexact value))))
+
+(define/contract-out (addcdiv! t a b [value 1.0]) ;; noqa
+  (->* [tensor? tensor? tensor?] [real?] void?)
+  (void (g:addcdiv! t a b (exact->inexact value))))
+
+(define/contract-out (lerp! t end weight) (-> tensor? tensor? tensor? void?) ;; noqa
+  (void (g:lerp-tensor! t end weight)))
 
 (define/contract-out (zero-grad! t) (-> tensor? void?) ;; noqa
   (when (has-grad? t)

@@ -3,9 +3,9 @@
 (require (only-in racket/contract/base -> ->* any/c contract-out listof)
          (only-in racket/generic define-generics)
          (only-in "../foreign.rkt"
-                  + - * / sqrt
-                  maybe-grad sub! tensor-device tensor-dtype tensor? to
-                  with-no-grad zero-grad! zeros-like)
+                  addcdiv! addcmul! full maybe-grad mul! sqrt sub!
+                  tensor-device tensor-dtype tensor? to with-no-grad
+                  zero-grad! zeros-like)
          (only-in "../private/contract.rkt" define/contract-out))
 
 (provide gen:optimizer
@@ -34,7 +34,7 @@
   (-> (listof tensor?) #:lr real? sgd?)
   (make-sgd params lr))
 
-(struct adam (params lr beta1 beta2 eps step-box m v)
+(struct adam (params lr beta1 beta2 eps step-box m v scalars)
   #:constructor-name make-adam
   #:name adam-optimizer ;; noqa
   #:methods gen:optimizer
@@ -49,15 +49,25 @@
   (->* [(listof tensor?)]
        [#:lr real? #:beta1 real? #:beta2 real? #:eps real?]
        adam?)
-  (make-adam params lr beta1 beta2 eps (box 0) (make-hasheq) (make-hasheq)))
+  (make-adam params lr beta1 beta2 eps (box 0) (make-hasheq) (make-hasheq)
+             (make-hash)))
 
 (define (moment-on table p)
   (define m (hash-ref! table p (lambda () (zeros-like p))))
   (define dev (tensor-device p))
   (define dt (tensor-dtype p))
-  (if (and (equal? (tensor-device m) dev) (eq? (tensor-dtype m) dt))
-      m
-      (to m dev dt)))
+  (cond
+    [(and (equal? (tensor-device m) dev) (eq? (tensor-dtype m) dt)) m]
+    [else
+     (define moved (to m dev dt))
+     (hash-set! table p moved)
+     moved]))
+
+(define (scalar-on table value p)
+  (define dev (tensor-device p))
+  (define dt (tensor-dtype p))
+  (hash-ref! table (list value dev dt)
+             (lambda () (full value #:device dev #:dtype dt))))
 
 (define (adam-do-step! opt)
   (with-no-grad
@@ -74,12 +84,14 @@
       (when g
         (define m (moment-on (adam-m opt) p))
         (define v (moment-on (adam-v opt) p))
-        (define m* (+ (* b1 m) (* (- 1.0 b1) g)))
-        (define v* (+ (* b2 v) (* (- 1.0 b2) (* g g))))
-        (hash-set! (adam-m opt) p m*)
-        (hash-set! (adam-v opt) p v*)
-        (define denom (+ (sqrt (/ v* bc2)) eps))
-        (sub! p (/ (/ m* bc1) denom) lr)))))
+        (mul! m b1)
+        (sub! m g (- b1 1.0))
+        (mul! v b2)
+        (addcmul! v g g (- 1.0 b2))
+        (define denom (sqrt v))
+        (mul! denom (/ 1.0 (expt bc2 0.5)))
+        (sub! denom (scalar-on (adam-scalars opt) eps p) -1.0)
+        (addcdiv! p m denom (- (/ lr bc1)))))))
 
 (define/contract-out (step! opt) ;; noqa
   (-> optimizer? void?)
