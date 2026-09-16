@@ -109,6 +109,17 @@ TEST(TorchrktDevice, CudaMemoryStatsFailsCleanlyWithoutCuda) {
   EXPECT_EQ(tr_cuda_memory_stats(0, nullptr, nullptr, nullptr), 1);
 }
 
+TEST(TorchrktDevice, CudaMemGetInfoFailsCleanlyWithoutCuda) {
+  if (tr_cuda_is_available() != 0) {
+    GTEST_SKIP() << "CUDA present; the success path is CudaRoundTrip";
+  }
+  int64_t free_bytes = -1;
+  int64_t total_bytes = -1;
+  EXPECT_EQ(tr_cuda_mem_get_info(0, &free_bytes, &total_bytes), 1);
+  EXPECT_STRNE(tr_last_error(), "");
+  EXPECT_EQ(tr_cuda_mem_get_info(0, nullptr, nullptr), 1);
+}
+
 TEST(TorchrktDevice, EmptyCacheIsNoOpSuccessWithoutCuda) {
   if (tr_cuda_is_available() != 0) {
     GTEST_SKIP() << "CUDA present; the success path is CudaRoundTrip";
@@ -363,6 +374,16 @@ TEST(TorchrktDevice, CudaRoundTrip) {
       << tr_last_error();
   EXPECT_LE(reserved_after, reserved);
   EXPECT_EQ(tr_cuda_memory_stats(256, &alloc, &reserved, &peak), 1);
+  EXPECT_STRNE(tr_last_error(), "");
+  int64_t free_bytes = -1;
+  int64_t total_bytes = -1;
+  ASSERT_EQ(tr_cuda_mem_get_info(0, &free_bytes, &total_bytes), 0)
+      << tr_last_error();
+  EXPECT_GT(total_bytes, 0);
+  EXPECT_GE(free_bytes, 0);
+  EXPECT_LE(free_bytes, total_bytes);
+  EXPECT_GE(total_bytes, reserved_after);
+  EXPECT_EQ(tr_cuda_mem_get_info(256, &free_bytes, &total_bytes), 1);
   EXPECT_STRNE(tr_last_error(), "");
 
   const std::vector<int64_t> randn_dims = {4};

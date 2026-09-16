@@ -7,7 +7,7 @@
                   _double _enum _fun _int _int64 _ptr _void
                   register-finalizer)
          (only-in ffi/unsafe/alloc allocator deallocator)
-         (only-in ffi/unsafe/atomic call-as-atomic)
+         (only-in ffi/unsafe/atomic call-as-atomic in-atomic-mode?)
          (only-in "../device-type.rkt" device device-index device-type)
          (only-in "syntax.rkt" _Tensor _Tensor/null define-torch))
 
@@ -23,9 +23,12 @@
          oom-retry/status
          reaccount!
          tr-cuda-empty-cache/raw
+         tr-cuda-mem-get-info/raw
          tr-mps-empty-cache/raw
          tr-last-error-kind/raw
+         native-memory-limit
          native-memory-use
+         native-memory-use/fold
          _tr-device-type ;; noqa
          tr-tensor-device/raw
          define-unary/raw
@@ -47,6 +50,8 @@
 (define finalizer-run-count (box 0))
 (define captured-failures (box '()))
 (define capture-limit 8)
+(define pressure-collection-count (box 0))
+(define pressure-reclaimed-bytes (box 0))
 
 (define (finalizer-failures)
   (unbox finalizer-failure-count))
@@ -57,7 +62,9 @@
      (list (cons 'runs (unbox finalizer-run-count))
            (cons 'failures (unbox finalizer-failure-count))
            (cons 'messages (reverse (unbox captured-failures)))
-           (cons 'ledger-entries (hash-count allocations))))))
+           (cons 'ledger-entries (hash-count allocations))
+           (cons 'pressure-collections (unbox pressure-collection-count))
+           (cons 'pressure-reclaimed (unbox pressure-reclaimed-bytes))))))
 
 ;; No printer: a prop:custom-write that raises or blocks would be fatal here.
 (define (describe-raised e)
@@ -99,6 +106,15 @@
 (struct allocation (phantom nbytes device))
 
 (define allocations (make-weak-hasheq))
+(define live-bytes (make-hash))
+(define accounted-since (make-hash))
+(define collect-interval (make-hash))
+(define high-water (make-hash))
+
+(define native-memory-limit (make-parameter #f))
+(define high-water-fraction 4/5)
+(define interval-divisor 8)
+(define reclaim-fraction 1/20)
 
 ;; Atomic mode, not a semaphore: finalizers run in atomic mode, where
 ;; blocking is an internal error.
@@ -120,16 +136,28 @@
         -> (values rc type index))
   #:c-id tr_tensor_device)
 
+(define-torch tr-cuda-mem-get-info/raw
+  (_fun (index : _int64)
+        (free : (_ptr o _int64))
+        (total : (_ptr o _int64))
+        -> (rc : _int)
+        -> (values rc free total))
+  #:c-id tr_cuda_mem_get_info)
+
 (define (account! t)
-  (with-handlers ([exn:fail? void])
+  (with-handlers ([exn:fail? (lambda (_) #f)])
     (define-values (nb-rc nbytes) (tr-tensor-nbytes/raw t))
     (define-values (dev-rc type index) (tr-tensor-device/raw t))
-    (when (and (zero? nb-rc) (zero? dev-rc))
-      (define entry
-        (allocation (make-phantom-bytes nbytes)
-                    nbytes
-                    (device type (if (eq? type 'cpu) 0 index))))
-      (call-with-ledger (lambda () (hash-set! allocations t entry))))))
+    (and (zero? nb-rc)
+         (zero? dev-rc)
+         (let* ([dev (device type (if (eq? type 'cpu) 0 index))]
+                [entry (allocation (make-phantom-bytes nbytes) nbytes dev)])
+           (call-with-ledger
+            (lambda ()
+              (hash-set! allocations t entry)
+              (hash-update! live-bytes dev (lambda (n) (+ n nbytes)) 0)
+              (hash-update! accounted-since dev (lambda (n) (+ n nbytes)) 0)))
+           dev))))
 
 (define (unaccount! t)
   (with-handlers ([exn:fail? void])
@@ -138,22 +166,22 @@
        (define a (hash-ref allocations t #f))
        (when a
          (set-phantom-bytes! (allocation-phantom a) 0)
-         (hash-remove! allocations t))))))
+         (hash-remove! allocations t)
+         (hash-update! live-bytes
+                       (allocation-device a)
+                       (lambda (n) (max 0 (- n (allocation-nbytes a))))
+                       0))))))
 
 ;; An in-place move (tr_tensor_to_) changes the device and byte count under
 ;; the same handle, so its ledger entry is replaced rather than added to.
 (define (reaccount! t)
   (unaccount! t)
-  (account! t))
+  (define dev (account! t))
+  (when dev
+    (collect-under-pressure! dev)))
 
-(define (native-memory-use)
-  (define entries (call-with-ledger (lambda () (hash-values allocations))))
-  (define totals (make-hash))
-  (for ([a (in-list entries)])
-    (hash-update! totals (allocation-device a)
-                  (lambda (n) (+ n (allocation-nbytes a)))
-                  0))
-  (sort (hash->list totals)
+(define (sort-by-device totals)
+  (sort totals
         (lambda (x y)
           (define dx (car x))
           (define dy (car y))
@@ -161,6 +189,73 @@
             [(eq? (device-type dx) (device-type dy))
              (< (device-index dx) (device-index dy))]
             [else (eq? (device-type dx) 'cpu)]))))
+
+(define (native-memory-use)
+  (define totals (call-with-ledger (lambda () (hash->list live-bytes))))
+  (sort-by-device (filter (lambda (entry) (positive? (cdr entry))) totals)))
+
+;; The entry-by-entry fold; the counters above must agree with it.
+(define (native-memory-use/fold)
+  (define entries (call-with-ledger (lambda () (hash-values allocations))))
+  (define totals (make-hash))
+  (for ([a (in-list entries)])
+    (hash-update! totals (allocation-device a)
+                  (lambda (n) (+ n (allocation-nbytes a)))
+                  0))
+  (sort-by-device (hash->list totals)))
+
+(define (capacity-mark dev)
+  (cond
+    [(eq? (device-type dev) 'cuda)
+     (define-values (rc _free total)
+       (tr-cuda-mem-get-info/raw (device-index dev)))
+     (and (zero? rc) (positive? total) (floor (* high-water-fraction total)))]
+    [else #f]))
+
+;; Queried once per device, outside atomic mode; #f when unknown.
+(define (device-high-water dev)
+  (or (native-memory-limit)
+      (let ([cached (call-with-ledger
+                     (lambda () (hash-ref high-water dev 'unknown)))])
+        (cond
+          [(eq? cached 'unknown)
+           (define mark (capacity-mark dev))
+           (call-with-ledger (lambda () (hash-set! high-water dev mark)))
+           mark]
+          [else cached]))))
+
+(define (collect-under-pressure! dev)
+  (unless (in-atomic-mode?)
+    (define mark (device-high-water dev))
+    (when mark
+      (define base (quotient mark interval-divisor))
+      (define due?
+        (call-with-ledger
+         (lambda ()
+           (and (> (hash-ref live-bytes dev 0) mark)
+                (>= (hash-ref accounted-since dev 0)
+                    (hash-ref collect-interval dev base))))))
+      (when due?
+        (pressure-collect! dev mark base)))))
+
+;; Reclaiming little means the working set itself sits above the mark, so
+;; the interval to the next collection doubles instead of thrashing.
+(define (pressure-collect! dev mark base)
+  (define before (call-with-ledger (lambda () (hash-ref live-bytes dev 0))))
+  (collect-and-wait!)
+  (call-with-ledger
+   (lambda ()
+     (define reclaimed (max 0 (- before (hash-ref live-bytes dev 0))))
+     (define interval (hash-ref collect-interval dev base))
+     (hash-set! collect-interval dev
+                (if (< reclaimed (* reclaim-fraction mark))
+                    (min (* 2 interval) (* 2 mark))
+                    base))
+     (hash-set! accounted-since dev 0)
+     (set-box! pressure-collection-count
+               (add1 (unbox pressure-collection-count)))
+     (set-box! pressure-reclaimed-bytes
+               (+ reclaimed (unbox pressure-reclaimed-bytes))))))
 
 ;; Unwrapped release on purpose: the (deallocator) wrap would cancel the
 ;; very registration this finalizer runs from.
@@ -185,14 +280,17 @@
   (_fun -> _int)
   #:c-id tr_mps_empty_cache)
 
-(define (collect-and-drain!)
+(define (collect-and-wait!)
   (define canary-finalized (make-semaphore 0))
   (register-finalizer (box 0) (lambda (_) (semaphore-post canary-finalized)))
   (collect-garbage)
-  (define observed (sync/timeout 0.5 canary-finalized))
+  (and (sync/timeout 0.5 canary-finalized) #t))
+
+(define (collect-and-drain!)
+  (define observed (collect-and-wait!))
   (void (tr-cuda-empty-cache/raw))
   (void (tr-mps-empty-cache/raw))
-  (and observed #t))
+  observed)
 
 ;; one retry after a collect when a failed call was an OOM; the two
 ;; wrappers below differ only in how a raw result reports failure
@@ -216,7 +314,10 @@
 
 (define ((accounted wrapped) . args)
   (define t (apply wrapped args))
-  (when t (account! t))
+  (when t
+    (define dev (account! t))
+    (when dev
+      (collect-under-pressure! dev)))
   t)
 
 ;; The retry composes OUTSIDE the allocator wrap: ffi/unsafe/alloc runs

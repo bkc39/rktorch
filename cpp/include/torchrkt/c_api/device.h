@@ -61,6 +61,13 @@ int tr_tensor_to_(tr_tensor* t, tr_device_type type, int64_t index,
 int tr_cuda_memory_stats(int64_t device_index, int64_t* out_allocated,
                          int64_t* out_reserved, int64_t* out_peak_allocated);
 
+/* cudaMemGetInfo for one device: the driver's free and total bytes. Free is
+ * the driver's view, so it counts other processes and this process's
+ * reserved-but-unallocated cache; total is the device's capacity. Same
+ * guard, range check and status shape as tr_cuda_memory_stats. */
+int tr_cuda_mem_get_info(int64_t device_index, int64_t* out_free,
+                         int64_t* out_total);
+
 int tr_cuda_empty_cache(void);
 
 int tr_tensor_device(const tr_tensor* t, tr_device_type* out_type,

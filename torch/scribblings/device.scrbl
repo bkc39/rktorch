@@ -3,13 +3,16 @@
 @(require (for-label racket/base
                      racket/contract
                      (only-in torch
-                              arange cpu-device cuda-device device device/c
-                              device? dtype dtype/c eye full full-like
-                              mps-device native-memory-use ones ones-like
-                              prop:to rand rand-like randn randn-like tensor
-                              tensor-device tensor-dtype tensor? to to-able?
-                              to-device to-dtype with-default-device zeros
-                              zeros-like ~>)
+                              arange cpu-device cuda-device cuda-memory-info
+                              cuda-memory-stats device device/c device?
+                              dtype dtype/c eye finalizer-diagnostics full
+                              full-like mps-device native-memory-limit
+                              native-memory-use ones ones-like prop:to rand
+                              rand-like randn randn-like
+                              reclaim-native-memory! tensor tensor-device
+                              tensor-dtype tensor? to to-able? to-device
+                              to-dtype with-default-device zeros zeros-like
+                              ~>)
                      (only-in torch/nn
                               Buffer Linear Parameter adam buffers gen:layer
                               layer? load-state! parameters step!)))
@@ -141,6 +144,66 @@ the fill value after @racket[t]), @racket[randn-like], and @racket[rand-like]
 are the same for their constructors. Optimizer state is the typical use: a
 moment created by @racket[zeros-like] lives where its parameter does,
 however the parameter got there.
+}
+
+@section{Native memory}
+
+Every tensor's native storage is released by a finalizer when Racket's
+collector finds its handle unreachable. The ledger charges each allocation
+to the collector as phantom bytes, so ordinary programs never call the
+collector by hand. A training loop is the exception: its intermediates
+survive the minor collections that run during a step and are released only
+by a full one, so the residue grows until a device runs out. The ledger
+therefore also collects on pressure: when a device's live bytes pass its
+high-water mark, the next allocation runs a full collection and waits for
+the finalizers to drain. The mark is 80% of the device's capacity, from
+@racket[cuda-memory-info], or @racket[native-memory-limit] when set. A
+collection is never run within an eighth of the mark of the previous one,
+measured in bytes allocated, and when a collection reclaims under 5% of the
+mark that spacing doubles, so a working set that legitimately sits above
+the mark is not collected on every step.
+
+@defproc[(native-memory-use) (listof (cons/c device? exact-nonnegative-integer?))]{
+Live native bytes per device as the ledger sees them: every handle not yet
+released, at the byte count of its own extent. Views charge their full
+extent, so shared storage is counted once per handle, and libtorch's own
+internal allocations are absent.
+}
+
+@defparam[native-memory-limit limit (or/c #f exact-positive-integer?)]{
+The high-water mark in bytes for every device, overriding the capacity-
+derived mark. @racket[#f], the default, defers to the device's capacity;
+on a device whose capacity is unknown, such as the CPU, the default leaves
+pressure collection off.
+}
+
+@defproc[(cuda-memory-info [dev device/c (cuda-device)])
+         (listof (cons/c (or/c 'free 'total) exact-nonnegative-integer?))]{
+The driver's free and total bytes for a CUDA device, as
+@tt{torch.cuda.mem_get_info}. Free counts other processes and this
+process's reserved-but-unallocated cache; total is the capacity the
+high-water mark is taken from. Raises when CUDA is absent.
+}
+
+@defproc[(cuda-memory-stats [dev device/c (cuda-device)])
+         (listof (cons/c (or/c 'allocated 'reserved 'peak-allocated)
+                         exact-nonnegative-integer?))]{
+The CUDA caching allocator's own numbers for this process: bytes allocated
+now, bytes reserved from the driver, and the peak allocated.
+}
+
+@defproc[(reclaim-native-memory!) void?]{
+Collects and drains repeatedly, up to four rounds, while the ledger keeps
+shrinking, then returns the CUDA and MPS caches to their drivers. For epoch
+boundaries and script exits; a training loop no longer needs it.
+}
+
+@defproc[(finalizer-diagnostics)
+         (listof (cons/c symbol? any/c))]{
+An association list with the finalizer run and failure counts, the captured
+failure messages, the number of ledger entries, and under
+@racket['pressure-collections] and @racket['pressure-reclaimed] the number
+of pressure collections so far and the bytes they released.
 }
 
 @section{Unsafe}

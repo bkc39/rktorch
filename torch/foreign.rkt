@@ -160,7 +160,9 @@
          sized?)
 
 (provide native-memory-use
+         native-memory-limit
          cuda-memory-stats
+         cuda-memory-info
          cuda-empty-cache!
          mps-empty-cache!
          reclaim-native-memory!

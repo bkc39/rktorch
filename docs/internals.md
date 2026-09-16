@@ -81,6 +81,38 @@ the point of the design: pressure scales with total native footprint,
 so the ordinary GC cycle collects dead CUDA tensors as gracefully as
 host ones — user code never calls the collector by hand.
 
+### Pressure-driven collection
+
+Phantom pressure drives *minor* collections, and a minor collection
+frees only the handles allocated since the previous one. A handle that
+is live across a minor collection is promoted, and once dead it waits
+for a full collection; a training step's intermediates are exactly
+that, so their residue grows between incidental majors until the
+device is exhausted (#145). The ledger closes the gap itself:
+
+- `account!` keeps a live-bytes counter and a bytes-accounted-since-
+  last-collection counter per device.
+- `accounted`, which runs outside the allocator's atomic wrap, checks
+  after each accounting: live bytes above the device's high-water mark
+  and accounted-since past the current interval means a full
+  `collect-garbage` plus the canary wait (`collect-and-wait!`, the
+  drain half of `collect-and-drain!` without the cache emptying, which
+  is the OOM retry's business).
+- The mark is 80% of `tr_cuda_mem_get_info`'s total for a CUDA device,
+  queried once and cached; `native-memory-limit` overrides it for every
+  device and is how the CPU tests exercise the path. No capacity and no
+  limit means the check is off.
+- Hysteresis: the interval starts at an eighth of the mark; a
+  collection that reclaims under 5% of the mark doubles it (capped at
+  twice the mark), one that reclaims more resets it. A working set that
+  sits above the mark is therefore collected at a decaying rate instead
+  of on every allocation.
+- Never from atomic mode (`in-atomic-mode?` guards it), and the RNG
+  wrap gets the check too: it runs after the draw, so it cannot
+  double-draw.
+- `finalizer-diagnostics` reports `pressure-collections` and
+  `pressure-reclaimed`.
+
 ### In-place moves
 
 `to` on a layer moves each parameter and buffer through
@@ -104,8 +136,10 @@ than a second wrapper over the same storage.
   sharing storage may be freed in either order from any thread.
 - The ledger is serialized with `call-as-atomic`, not a lock: the
   finalizer side already runs in atomic mode, where taking a semaphore
-  would deadlock. Per-device totals are folded on query
-  (`native-memory-use`), not maintained as mutable counters.
+  would deadlock. Per-device live totals are counters updated in the
+  same atomic section as the entry, so the pressure check costs one
+  hash lookup per allocation; the entry-by-entry fold survives as
+  `native-memory-use/fold`, the cross-check the tests run.
 - The finalizer failure count is likewise incremented atomically in
   the guarded finalizer context.
 

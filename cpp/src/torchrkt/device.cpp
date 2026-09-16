@@ -18,6 +18,9 @@
 
 #ifdef TORCHRKT_WITH_CUDA_ALLOCATOR
 #include <c10/cuda/CUDACachingAllocator.h>
+#include <c10/cuda/CUDAException.h>
+#include <c10/cuda/CUDAGuard.h>
+#include <cuda_runtime_api.h>
 #endif
 
 namespace torchrkt {
@@ -209,6 +212,36 @@ int tr_cuda_memory_stats(int64_t device_index, int64_t* out_allocated,
     *out_allocated = stats.allocated_bytes[agg].current;
     *out_reserved = stats.reserved_bytes[agg].current;
     *out_peak_allocated = stats.allocated_bytes[agg].peak;
+  });
+#endif
+}
+
+int tr_cuda_mem_get_info(int64_t device_index, int64_t* out_free,
+                         int64_t* out_total) {
+  if (!out_free || !out_total) {
+    return torchrkt::null_arg_status("tr_cuda_mem_get_info");
+  }
+#ifndef TORCHRKT_WITH_CUDA_ALLOCATOR
+  (void)device_index;
+  return torchrkt::status_call("tr_cuda_mem_get_info", [] {
+    throw std::runtime_error("CUDA support is not compiled into this build");
+  });
+#else
+  return torchrkt::status_call("tr_cuda_mem_get_info", [&] {
+    if (!torch::cuda::is_available()) {
+      throw std::runtime_error("CUDA is not available");
+    }
+    if (device_index < 0 ||
+        device_index >= static_cast<int64_t>(torch::cuda::device_count())) {
+      throw std::invalid_argument("CUDA device index out of range");
+    }
+    const c10::cuda::CUDAGuard guard(
+        static_cast<c10::DeviceIndex>(device_index));
+    size_t free_bytes = 0;
+    size_t total_bytes = 0;
+    C10_CUDA_CHECK(cudaMemGetInfo(&free_bytes, &total_bytes));
+    *out_free = static_cast<int64_t>(free_bytes);
+    *out_total = static_cast<int64_t>(total_bytes);
   });
 #endif
 }

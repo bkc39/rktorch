@@ -178,6 +178,7 @@ void torchrkt_c_api_compile_check(void) {
   int (*cuda_count)(void) = tr_cuda_device_count;
   int (*cuda_stats)(int64_t, int64_t*, int64_t*, int64_t*) =
       tr_cuda_memory_stats;
+  int (*cuda_mem_info)(int64_t, int64_t*, int64_t*) = tr_cuda_mem_get_info;
   int (*cuda_empty)(void) = tr_cuda_empty_cache;
   int (*mps_available)(void) = tr_mps_is_available;
   int (*mps_empty)(void) = tr_mps_empty_cache;
@@ -287,6 +288,7 @@ void torchrkt_c_api_compile_check(void) {
   (void)cuda_available;
   (void)cuda_count;
   (void)cuda_stats;
+  (void)cuda_mem_info;
   (void)cuda_empty;
   (void)mps_available;
   (void)mps_empty;

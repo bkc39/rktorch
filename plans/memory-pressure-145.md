@@ -118,3 +118,20 @@ low limit.
 2. Measure the collection cost on the GPU probe; PR B for batched frees
    only if the drain is the cost.
 3. #142 and #144 stay their own issues.
+
+## Status (2026-09-16)
+
+PR A is built on this branch. The same probe with `POLICY=pressure
+LIMIT=256` (the ledger's own trigger, nothing by hand):
+
+| between steps | ledger peak (MiB) | collections in 16 steps | ms/step |
+|---|---|---|---|
+| nothing | 448 | 0 by hand, 3 incidental majors | 12 |
+| `(collect-garbage)` + yield | 0 | 16 | 55 |
+| the trigger, 256 MiB limit | 248 | 5 | 35 |
+
+`native-pressure-test.rkt` pins: counters agree with the fold; no limit and
+no capacity never fires; a 64 MiB limit bounds a 32 MiB/step churn under
+128 MiB; a working set above the mark backs off (at most 5 collections for
+120 MiB of live growth). The GPU rows, the 0.3 s collection breakdown and
+step 2 wait for the 3090 Ti.
