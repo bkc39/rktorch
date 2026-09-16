@@ -74,7 +74,11 @@
      (min 0.999 (- 1.0 (/ (f (add1 t)) (f t)))))))
 
 (define/contract-out (q-sample sched x0 t noise) ;; noqa
-  (-> schedule? tensor? timesteps/c tensor? tensor?)
+  (->i ([sched schedule?] [x0 tensor?] [t timesteps/c] [noise tensor?])
+       #:pre/name (x0 t)
+       "one timestep per image"
+       (and (pair? (shape x0)) (= (car (shape x0)) (car (shape t))))
+       [result tensor?])
   (define a (reshape (index-select (schedule-alpha-bars sched) 0 t) -1 1 1 1))
   (add (mul (sqrt a) x0) (mul (sqrt (sub 1.0 a)) noise)))
 
