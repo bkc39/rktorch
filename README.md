@@ -1,6 +1,6 @@
 <div align="center">
 
-# <img src="docs/images/rktorch-logo.png" alt="" height="82" hspace="8" align="center"> rktorch
+# <img src="docs/images/rktorch-logo.png" alt="" height="106" hspace="8" align="absmiddle"> rktorch
 
 **Tensors, autograd, and neural networks for Racket — [PyTorch](https://pytorch.org/)**
 
