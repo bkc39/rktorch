@@ -137,3 +137,9 @@ math clamp
 # repeat_interleave along the two spatial dims is nearest-neighbour
 # upsampling, F.interpolate(mode="nearest"), without an optional-float kind.
 shape repeat_interleave.self_int
+
+# --- tranche 7 (#153): the sequence op closure ------------------------------
+# topk and sort are the first ops with several Tensor returns (#154): an
+# integer status plus one out pointer per return, (values, indices) here.
+sort topk
+sort sort

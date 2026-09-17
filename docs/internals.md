@@ -123,7 +123,14 @@ backend out of memory" (high-water mark) and "Invalid buffer size:"
 on every backend. Ops that draw from the global
 RNG stream use `tensor-allocator/rng` — the same wrap minus the retry,
 because a retried draw would advance the generator stream and break
-seeded reproducibility.
+seeded reproducibility. An op with several tensor outputs (`topk`,
+`sort`) reports an integer status and writes its handles through out
+pointers; `tensor-allocator/outputs` runs the call and registers every
+handle's finalizer inside one atomic section, accounts each in the
+ledger, and retries the whole call on OOM exactly as the single-output
+wrap does (`tensor-allocator/outputs/rng` omits the retry). The shim
+writes no out pointer until every handle exists, so a failed call leaves
+nothing to free.
 
 ## Observability and control
 

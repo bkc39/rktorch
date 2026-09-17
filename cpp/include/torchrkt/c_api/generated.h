@@ -12,3 +12,4 @@
 #include "torchrkt/c_api/generated/nn.h"
 #include "torchrkt/c_api/generated/reduce.h"
 #include "torchrkt/c_api/generated/shape.h"
+#include "torchrkt/c_api/generated/sort.h"

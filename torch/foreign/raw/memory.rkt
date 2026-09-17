@@ -19,6 +19,8 @@
          finalizer-diagnostics
          tensor-allocator
          tensor-allocator/rng
+         tensor-allocator/outputs
+         tensor-allocator/outputs/rng
          oom-retry
          oom-retry/status
          reaccount!
@@ -229,6 +231,29 @@
 ;; retry would draw twice and break seeded parity.
 (define (tensor-allocator/rng raw-fn)
   (accounted ((allocator tr-tensor-free/finalizer) raw-fn)))
+
+(define adopt-handle ((allocator tr-tensor-free/finalizer) values))
+
+;; One atomic section spans the call and every registration, as (allocator)
+;; does for a single result, so no break lands between a handle and its
+;; finalizer.
+(define ((adopting-outputs raw-fn) . args)
+  (call-as-atomic
+   (lambda ()
+     (define handles (apply raw-fn args))
+     (and handles (map adopt-handle handles)))))
+
+(define ((accounted-outputs wrapped) . args)
+  (define handles (apply wrapped args))
+  (when handles (for-each account! handles))
+  handles)
+
+;; For raw calls answering a list of handles, or #f on failure.
+(define (tensor-allocator/outputs raw-fn)
+  (accounted-outputs ((oom-retry) (adopting-outputs raw-fn))))
+
+(define (tensor-allocator/outputs/rng raw-fn)
+  (accounted-outputs (adopting-outputs raw-fn)))
 
 (define-syntax (define-unary/raw stx)
   (syntax-parse stx

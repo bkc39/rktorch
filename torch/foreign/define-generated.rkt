@@ -3,10 +3,15 @@
 (require (for-syntax racket/base
                      racket/syntax
                      syntax/parse/pre)
-         (only-in ffi/unsafe _fun _int _int32 _int64 _double _list _stdbool)
+         (only-in ffi/unsafe
+                  _double _fun _int _int32 _int64 _list _ptr _stdbool)
          (only-in ffi/vector _s64vector list->s64vector)
-         (only-in "error.rkt" check-handle check-ok)
-         (only-in "raw/memory.rkt" tensor-allocator tensor-allocator/rng)
+         (only-in "error.rkt" check-handle check-ok check-outputs)
+         (only-in "raw/memory.rkt"
+                  tensor-allocator
+                  tensor-allocator/outputs
+                  tensor-allocator/outputs/rng
+                  tensor-allocator/rng)
          (only-in "raw/syntax.rkt" _Tensor _Tensor/null define-torch)
          (only-in "structs.rkt" wrap-tensor))
 
@@ -84,6 +89,33 @@
            (define (name arg ...)
              (check-ok (raw-name call-arg ...) 'name)
              recv)))]
+    [(_ name:id c-id:id (~optional (~and #:rng rng?)) #:returns n:nat
+        ([arg:id kind:id] ...))
+     #:fail-when (and (< (syntax-e #'n) 2) #'n)
+     "a single return takes no #:returns clause"
+     (define-values (specs call-args)
+       (build-pieces stx
+                     (syntax->list #'(arg ...))
+                     (syntax->datum #'(kind ...))))
+     (with-syntax ([raw-name (format-id #'name "~a/raw" #'name)]
+                   [(spec ...) specs]
+                   [(call-arg ...) call-args]
+                   [(out ...) (generate-temporaries
+                               (build-list (syntax-e #'n) values))]
+                   [wrap (if (attribute rng?)
+                             #'tensor-allocator/outputs/rng
+                             #'tensor-allocator/outputs)])
+       #'(begin
+           (define-torch raw-name
+             (_fun spec ... (out : (_ptr o _Tensor/null)) ...
+                   -> (rc : _int)
+                   -> (and (zero? rc) (list out ...)))
+             #:c-id c-id
+             #:wrap wrap)
+           (define (name arg ...)
+             (apply values
+                    (map wrap-tensor
+                         (check-outputs 'name (raw-name call-arg ...)))))))]
     [(_ name:id c-id:id #:rng ([arg:id kind:id] ...))
      (define-values (specs call-args)
        (build-pieces stx

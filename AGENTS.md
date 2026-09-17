@@ -277,7 +277,9 @@ the diffusion UNet trains on the GPU there with its norms round-tripped.
   `detail/op_call.hpp` holds the boundary helpers (`alloc_result` and
   `null_arg` for tensor-returning ops, `alloc_handle<H>` for any other
   opaque handle; `status_call` and `null_arg_status` for the int-status
-  in-place shape) every op body reduces to — new ops must use them rather
+  in-place shape; `alloc_results` for an op with several Tensor returns,
+  an int status plus one `tr_tensor**` out pointer per return, every one
+  NULL unless the whole call succeeded) every op body reduces to — new ops must use them rather
   than hand-rolling try/catch.
 - `tests/torchrkt/{random,ops,autograd,generated_golden,generated_tranche2}_test.cpp`
   — GoogleTest goldens per family (generated families get a C-boundary
@@ -329,7 +331,10 @@ module's full export set (`racket/runtime-path`, `syntax/parse/pre`).
   `tensor-allocator` — or `tensor-allocator/rng` for bindings that draw
   from the global RNG stream (randn/rand; ops flagged `rng` in the
   codegen allowlist) so a retry can never double-draw and break seeded
-  parity; never a bare `(allocator ...)` wrap (skips the ledger).
+  parity; a binding with several tensor outputs carries
+  `tensor-allocator/outputs` (or `/outputs/rng`), which registers and
+  accounts every handle inside one atomic section; never a bare
+  `(allocator ...)` wrap (skips the ledger).
   Explicit synchronous release goes through the raising,
   finalizer-cancelling `tr-tensor-free/checked`; OOM reaches users as
   `exn:fail:rktorch:oom` (catch by type, not message).
@@ -376,12 +381,15 @@ Conventions:
 
 - **Extend the allowlist instead of hand-writing** when an op fits the IR
   (Tensor / Scalar→double / int64 / bool / IntArrayRef / TensorList args,
-  single Tensor return). Unsupported signatures are skipped with a report —
+  one or more Tensor returns). Unsupported signatures are skipped with a report —
   widening the IR is a generator change, not a hand-written shim.
 - Optional *types* are in the IR: `Tensor?` is a NULL pointer, `int?` and
   `Scalar?` carry a presence flag, `int[]?` a length plus flag, and
   `ScalarType?` a -1 sentinel. In-place ops (`add_`) emit a mutable receiver
-  plus an integer status. Schema *defaults* (`int dim=0`) are still
+  plus an integer status. An op with several Tensor returns (`topk`,
+  `sort`, #154) emits an integer status plus trailing out pointers in C
+  and a `#:returns N` clause in Racket, where it answers multiple values
+  in schema order; any non-Tensor return still skips. Schema *defaults* (`int dim=0`) are still
   flattened to required arguments on the unstable surface — defaults are a
   curated-facade concern.
 - Generated output is committed (AOT); CI's `codegen-drift` job regenerates
