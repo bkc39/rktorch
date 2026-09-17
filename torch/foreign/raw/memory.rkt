@@ -147,12 +147,26 @@
          (note-unaccounted! (allocation-device a) (allocation-nbytes a)))))))
 
 ;; An in-place move (tr_tensor_to_) changes the device and byte count under
-;; the same handle, so its ledger entry is replaced rather than added to.
+;; the same handle, so its ledger entry is replaced rather than added to. When
+;; the new size cannot be read the old charge goes back: a stale entry still
+;; presses on the collector, a missing one would not.
 (define (reaccount! t)
+  (define old (call-with-ledger (lambda () (hash-ref allocations t #f))))
   (unaccount! t)
   (define dev (account! t))
-  (when dev
-    (collect-under-pressure! dev)))
+  (cond
+    [dev (collect-under-pressure! dev)]
+    [old (restore-entry! t old)]
+    [else (void)]))
+
+(define (restore-entry! t old)
+  (define nbytes (allocation-nbytes old))
+  (define dev (allocation-device old))
+  (define entry (allocation (make-phantom-bytes nbytes) nbytes dev))
+  (call-with-ledger
+   (lambda ()
+     (hash-set! allocations t entry)
+     (note-accounted! dev nbytes))))
 
 (define (sort-by-device totals)
   (sort totals
