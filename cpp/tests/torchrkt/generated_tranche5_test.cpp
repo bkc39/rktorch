@@ -58,19 +58,6 @@ void expect_near(const std::vector<float>& got, const std::vector<float>& want,
   }
 }
 
-const std::vector<int64_t> kOne{1, 1};
-const std::vector<int64_t> kZero{0, 0};
-const std::vector<int64_t> kTwo{2, 2};
-
-tr_tensor* transpose2d(const tr_tensor* input, const tr_tensor* weight,
-                       const tr_tensor* bias,
-                       const std::vector<int64_t>& stride,
-                       const std::vector<int64_t>& output_padding) {
-  return tr_gen_conv_transpose2d_input(input, weight, bias, stride.data(), 2,
-                                       kZero.data(), 2, output_padding.data(),
-                                       2, 1, kOne.data(), 2);
-}
-
 TEST(GeneratedTranche5,
      RepeatInterleaveAlongBothSpatialDimsIsNearestUpsampling) {
   const Handle input = make({1.0F, 2.0F, 3.0F, 4.0F}, {1, 1, 2, 2});
