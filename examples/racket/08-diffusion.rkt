@@ -26,9 +26,10 @@ this program is the loop around them.
 @bold{One step.} Draw a timestep per image uniformly from @tt{[0, T)}, draw
 the noise, form @tt{x_t} with @racket[q-sample], and regress the network's
 output on that noise with a mean squared error. A class-conditional network
-also sees the labels, with a tenth of them replaced by the null label so
-the same network learns the unconditional estimate too, which is what
-classifier-free guidance needs at sampling time. Every draw is made on the
+also sees the labels, with a tenth of them replaced by the null label,
+the network's class count from @racket[unet-classes], so the same network
+learns the unconditional estimate too, which is what classifier-free
+guidance needs at sampling time. Every draw is made on the
 CPU whatever device the model trains on, and the seed is set again once the
 model is built, since building it consumes the CPU stream only on a CPU
 run; a seeded run therefore replays the same timesteps, noise and dropped
@@ -42,7 +43,8 @@ stays on the GPU.
 (define (pick-device)
   (accelerator-if-available))
 
-(define (train-step net sched opt xs ys device #:null-label [null-label 10]
+(define (train-step net sched opt xs ys device
+                    #:null-label [null-label (unet-classes net)]
                     #:label-dropout [label-dropout 0.1])
   (define n (length xs))
   (define steps (schedule-steps sched))

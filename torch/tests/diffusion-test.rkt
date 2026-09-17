@@ -110,11 +110,20 @@
                                           (tensor '(0 999) #:dtype 'int64)
                                           (tensor '(3 10) #:dtype 'int64)))
                   '(2 3 32 32))
-    (check-exn #rx"one timestep and"
+    (check-exn #rx"one int64 timestep and"
                (lambda () (net (randn 2 3 32 32) (tensor '(5) #:dtype 'int64) #f)))
-    (check-exn #rx"one label per image"
+    (check-exn #rx"one int64 label per image"
                (lambda () (labelled (randn 2 3 32 32) (tensor '(0 999) #:dtype 'int64)
                                     (tensor '(3) #:dtype 'int64))))
+    (check-exn #rx"no labels otherwise"
+               (lambda () (net (randn 2 3 32 32) (tensor '(0 999) #:dtype 'int64)
+                               (tensor '(3 4) #:dtype 'int64))))
+    (check-exn #rx"int64 timestep"
+               (lambda () (net (randn 2 3 32 32) (tensor '(0.0 999.0)) #f)))
+    (check-exn #rx"\\[N 3 32 32\\]"
+               (lambda () (net (randn 2 3 64 64) (tensor '(0 999) #:dtype 'int64) #f)))
+    (check-equal? (unet-classes labelled) 10)
+    (check-false (unet-classes net))
     (check-exn #rx"multiple-of-32" (lambda () (UNet #:base 12)))
     (check-exn #rx"at-most-five-levels" (lambda () (UNet #:base 32 #:mults '(1 1 1 1 1 1))))
     (check-exn #rx"one of the levels' resolutions"

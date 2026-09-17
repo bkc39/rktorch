@@ -6,6 +6,7 @@
                   and/c
                   any/c
                   case->
+                  flat-named-contract
                   list/c
                   listof
                   none/c
@@ -51,7 +52,8 @@
   (and/c tensor? (lambda (x) (eq? (tensor-dtype x) 'int64))))
 
 (define image-batch/c
-  (and/c tensor? (lambda (x) (= 4 (length (tensor-shape x))))))
+  (flat-named-contract 'image-batch
+                       (lambda (x) (and (tensor? x) (= 4 (length (tensor-shape x)))))))
 
 (define index-vector/c
   (and/c int64-tensor/c (lambda (x) (< (length (tensor-shape x)) 2))))

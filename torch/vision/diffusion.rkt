@@ -12,7 +12,7 @@
                   upsample-nearest2d)
          (only-in "../nn.rkt"
                   Conv2d Dropout Embedding GroupNorm LayerList Linear
-                  define-layer in-layers parameters)
+                  define-layer in-layers named-children parameters)
          (only-in "../private/contract.rkt" define/contract-out))
 
 (struct schedule (steps betas alphas alpha-bars) ;; noqa
@@ -242,10 +242,14 @@
   (set! out-conv (Conv2d (width 0) 3 3 #:padding 1))
   #:forward (x t y)
   (define images (car (shape x)))
-  (define (per-image? v) (and (tensor? v) (equal? (shape v) (list images))))
-  (unless (and (per-image? t) (or (not classes) (per-image? y)))
-    (raise-arguments-error 'UNet "one timestep and, when conditional, one label per image"
-                           "images" images "timesteps" t "labels" y))
+  (define (per-image? v)
+    (and (tensor? v) (eq? (dtype v) 'int64) (equal? (shape v) (list images))))
+  (unless (and (equal? (cdr (shape x)) '(3 32 32))
+               (per-image? t)
+               (if classes (per-image? y) (not y)))
+    (raise-arguments-error 'UNet
+                           "an [N 3 32 32] batch with one int64 timestep and, when conditional, one int64 label per image; no labels otherwise"
+                           "images" x "timesteps" t "labels" y))
   (define temb
     (let ([te (time t)])
       (if classes (add te (classes y)) te)))
@@ -261,3 +265,8 @@
           (values (layer up) rest)
           (values (layer (cat (list up (car rest)) 1) temb) (cdr rest)))))
   (~> top out-norm silu out-conv))
+
+(define/contract-out (unet-classes net) ;; noqa
+  (-> unet? (or/c #f exact-positive-integer?))
+  (define embedding (assoc "classes" (named-children net)))
+  (and embedding (sub1 (car (shape (car (parameters (cdr embedding))))))))

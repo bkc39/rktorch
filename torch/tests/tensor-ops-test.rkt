@@ -221,7 +221,7 @@
     (check-equal? (tensor->list y)
                   '(0.0 0.0 1.0 1.0 0.0 0.0 1.0 1.0 2.0 2.0 3.0 3.0 2.0 2.0 3.0 3.0))
     (check-equal? (tensor-shape (upsample-nearest2d (randn 2 3 5 7) #:scale 3)) '(2 3 15 21))
-    (check-exn #rx"^upsample-nearest2d: contract violation"
+    (check-exn #rx"image-batch"
                (lambda () (upsample-nearest2d (randn 2 3 4 4 4)))))
 
   (test-case "clamp: either bound, both, and ATen's refusal of neither"

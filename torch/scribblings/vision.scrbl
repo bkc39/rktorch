@@ -189,3 +189,8 @@ noise estimate for @racket[x] at timesteps @racket[t] and int64 labels
 @racket[y], which is @racket[#f] for an unconditional network. The
 default network has 35.7 million parameters.
 }
+
+@defproc[(unet-classes [net unet?]) (or/c #f exact-positive-integer?)]{
+The class count @racket[net] was built with, also its null label, or
+@racket[#f] for an unconditional network.
+}
