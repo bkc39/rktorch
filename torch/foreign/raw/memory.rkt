@@ -332,7 +332,9 @@
 ;; forward's intermediates are dead, and little is live, so a collection
 ;; here reclaims the most, promotes the least, and leaves Racket's own
 ;; schedule a low baseline. The floor is the ledger's size after the last
-;; collection at a trough, and residue past the margin above it is due one.
+;; collection at a trough, zero before the first so that the first step's
+;; garbage is not mistaken for it, and residue past the margin above it is
+;; due one.
 ;; A step's dead intermediates have aged past the nursery by then, so only
 ;; a full collection reaches them, and the budget spaces those out: after
 ;; one that took t, the next waits t over the budget.
@@ -344,8 +346,8 @@
   (call-with-ledger
    (lambda ()
      (for/list ([(dev live) (in-hash live-bytes)]
-                #:when (let ([floor (hash-ref trough-floor dev #f)])
-                         (and floor (> (- live floor) (margin-over floor)))))
+                #:when (let ([floor (hash-ref trough-floor dev 0)])
+                         (> (- live floor) (margin-over floor))))
        dev))))
 
 (define (set-trough-floors!)
@@ -357,8 +359,9 @@
 (define (lower-trough-floors!)
   (call-with-ledger
    (lambda ()
-     (for ([(dev live) (in-hash live-bytes)])
-       (hash-update! trough-floor dev (lambda (floor) (min floor live)) live)))))
+     (for ([(dev live) (in-hash live-bytes)]
+           #:when (hash-has-key? trough-floor dev))
+       (hash-update! trough-floor dev (lambda (floor) (min floor live)))))))
 
 (define (ledger-total)
   (call-with-ledger
