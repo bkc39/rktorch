@@ -62,11 +62,11 @@
                                   input-size
                                   (* hidden-size (if bidirectional? 2 1)))])
                   (append
-                   (list (cons "weight_ih" (list rows fan-in))
-                         (cons "weight_hh" (list rows hidden-size)))
+                   (list (list "weight_ih" rows fan-in)
+                         (list "weight_hh" rows hidden-size))
                    (if bias?
-                       (list (cons "bias_ih" (list rows))
-                             (cons "bias_hh" (list rows)))
+                       (list (list "bias_ih" rows)
+                             (list "bias_hh" rows))
                        '()))))])
     (cons (format "~a_l~a~a" (car entry) layer suffix)
           (apply draw (cdr entry)))))
