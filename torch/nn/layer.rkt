@@ -32,6 +32,7 @@
          layer-named-children ;; noqa
          layer-mode ;; noqa
          layer-set-mode! ;; noqa
+         move-layer!
          in-mode
          in-eval-mode
          with-mode
