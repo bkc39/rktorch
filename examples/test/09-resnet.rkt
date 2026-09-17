@@ -43,7 +43,7 @@
   (check-true (layer-training? net))
   (define-values (xs ys) (load-cifar10-fixture))
   (define acc (accuracy net xs ys))
-  (check-true (and (>= acc 0.0) (<= acc 1.0)))
+  (check-true (<= 0.0 acc 1.0))
   (check-true (layer-training? net) "accuracy left the net in eval mode")
   ;; Device RNG streams differ from the CPU's for the init, so the on-device
   ;; arm checks convergence, never equality with the CPU losses above.
