@@ -38,6 +38,9 @@ tr_tensor* tr_gen_layer_norm(
     const tr_tensor* bias /* nullable: NULL == no value */, double eps,
     bool cudnn_enable);
 tr_tensor* tr_gen_leaky_relu(const tr_tensor* self, double negative_slope);
+tr_tensor* tr_gen_linear(
+    const tr_tensor* input, const tr_tensor* weight,
+    const tr_tensor* bias /* nullable: NULL == no value */);
 tr_tensor* tr_gen_silu(const tr_tensor* self);
 
 #ifdef __cplusplus

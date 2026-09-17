@@ -144,7 +144,8 @@
                                               (optional-tensor #f) (int64 1))
           'huber-loss '((tensor 2 3) (tensor 2 3) (int64 1) (double 1.0))
           'l1-loss '((tensor 2 3) (tensor 2 3) (int64 1))
-          'flip '((tensor 2 3) (int-array (1)))))
+          'flip '((tensor 2 3) (int-array (1)))
+          'linear '((tensor 4 3) (tensor 2 3) (optional-tensor 2))))
 
   ;; Tensor specs draw seeded randns left to right — both sides consume the
   ;; same RNG stream, so spec order and draw counts must match exactly.
@@ -427,4 +428,8 @@
      (check-generated-parity
       (assq 'flip manifest)
       '((tensor 2 3) (int-array (0 1)))
-      "[both-dims]")]))
+      "[both-dims]")
+     (check-generated-parity
+      (assq 'linear manifest)
+      '((tensor 4 3) (tensor 2 3) (optional-tensor #f))
+      "[no-bias]")]))

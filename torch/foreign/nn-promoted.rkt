@@ -15,6 +15,7 @@
                                 group-norm
                                 layer-norm
                                 leaky-relu
+                                linear
                                 masked-fill-scalar
                                 max-pool2d
                                 repeat-interleave-self-int
@@ -193,6 +194,10 @@
        [result tensor?])
   (g:batch-norm input weight bias running-mean running-var training?
                 (exact->inexact momentum) (exact->inexact eps) #t))
+
+(define/contract-out (linear input weight #:bias [bias #f]) ;; noqa
+  (->* [tensor? tensor?] [#:bias (or/c tensor? #f)] tensor?)
+  (g:linear input weight bias))
 
 (define/contract-out (leaky-relu self #:negative-slope [negative-slope 0.01]) ;; noqa
   (->* [tensor?] [#:negative-slope real?] tensor?)
