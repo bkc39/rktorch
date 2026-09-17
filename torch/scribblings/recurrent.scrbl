@@ -17,7 +17,7 @@
                              [#:num-layers num-layers exact-positive-integer? 1]
                              [#:bias? bias? boolean? #t]
                              [#:batch-first? batch-first? boolean? #f]
-                             [#:dropout dropout (and/c real? (>=/c 0) (</c 1)) 0.0]
+                             [#:dropout dropout (and/c real? (>=/c 0) (<=/c 1)) 0.0]
                              [#:bidirectional? bidirectional? boolean? #f])
                        lstm?]
               @defproc[(GRU [input-size exact-positive-integer?]
@@ -25,7 +25,7 @@
                             [#:num-layers num-layers exact-positive-integer? 1]
                             [#:bias? bias? boolean? #t]
                             [#:batch-first? batch-first? boolean? #f]
-                            [#:dropout dropout (and/c real? (>=/c 0) (</c 1)) 0.0]
+                            [#:dropout dropout (and/c real? (>=/c 0) (<=/c 1)) 0.0]
                             [#:bidirectional? bidirectional? boolean? #f])
                        gru?])]{
 Multi-layer recurrences over a whole sequence in one call, PyTorch's
@@ -72,13 +72,14 @@ Whether @racket[v] was built by @racket[LSTM] or by @racket[GRU].
 }
 
 @defproc[(clip-grad-norm! [params (listof tensor?)]
-                          [max-norm (and/c real? (>/c 0))])
+                          [max-norm (and/c real? (>=/c 0))])
          tensor?]{
 Scales the gradients of @racket[params] in place so that their joint L2
 norm, taken over all of them as one vector, is at most
 @racket[max-norm], and answers the norm they had before, as PyTorch's
 @tt{clip_grad_norm_}. Gradients already within the bound are left as they
-are, and parameters without a gradient are skipped. It belongs between
+are, and parameters without a gradient are skipped; a bound of zero zeroes
+every gradient. It belongs between
 the backward pass and the optimizer step:
 
 @racketblock[

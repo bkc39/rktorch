@@ -1,6 +1,6 @@
 #lang racket/base
 
-(require (only-in racket/contract/base -> and/c listof >/c)
+(require (only-in racket/contract/base -> and/c listof >=/c)
          (only-in racket/list filter-map)
          (only-in "../foreign.rkt"
                   add clamp div maybe-grad mul sqrt sum tensor-device tensor?
@@ -11,7 +11,7 @@
 ;; The scale stays a tensor from the norm to the multiply, as in
 ;; torch.nn.utils.clip_grad_norm_, so clipping never waits on the device.
 (define/contract-out (clip-grad-norm! params max-norm) ;; noqa
-  (-> (listof tensor?) (and/c real? (>/c 0)) tensor?)
+  (-> (listof tensor?) (and/c real? (>=/c 0)) tensor?)
   (with-no-grad
     (define grads (filter-map maybe-grad params))
     (cond
