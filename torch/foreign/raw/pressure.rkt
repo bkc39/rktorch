@@ -15,6 +15,7 @@
          collect-under-pressure!
          collect-at-trough!
          collect-and-wait!
+         margin-over
          pressure-diagnostics
          reset-pressure-state!
          allocator-reading

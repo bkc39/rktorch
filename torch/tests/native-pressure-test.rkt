@@ -9,7 +9,8 @@
            (only-in "../foreign/raw/memory.rkt" native-memory-use/fold)
            (only-in "../foreign/raw/pressure.rkt"
                     allocator-reading call-as-the-collector collect-at-trough!
-                    reset-pressure-state! trough-budget trough-margin)
+                    margin-over reset-pressure-state! trough-budget
+                    trough-margin)
            (only-in "../nn.rkt" Linear Sequential))
 
   (define mib (* 1024 1024))
@@ -157,6 +158,37 @@
       (define y (net x))
       (check-equal? (trough-minors) before)
       (check-true (and y #t))))
+
+  (test-case "the default margin is the floor, kept between 256 MiB and 1 GiB"
+    (check-equal? (margin-over 0) (* 256 mib))
+    (check-equal? (margin-over (* 100 mib)) (* 256 mib))
+    (check-equal? (margin-over (* 512 mib)) (* 512 mib))
+    (check-equal? (margin-over (* 4096 mib)) (* 1024 mib))
+    (parameterize ([trough-margin (* 16 mib)])
+      (check-equal? (margin-over (* 512 mib)) (* 16 mib))))
+
+  ;; the tensors stay held, so each step tests the decision alone: whether a
+  ;; collection reclaims anything is the other tests' business
+  (test-case "with the default margin, troughs follow the floor"
+    (settle!)
+    (define (hold k) (for/list ([_ (in-range k)]) (zeros 1024 1024)))
+    (define (collects? thunk)
+      (define before (trough-collections))
+      (thunk)
+      (collect-at-trough!)
+      (positive? (- (trough-collections) before)))
+    (parameterize ([trough-budget 1000])
+      (define held '())
+      (define (grow! k) (set! held (cons (hold k) held)))
+      (check-false (collects? (lambda () (grow! 32)))
+                   "128 MiB is under the 256 MiB minimum")
+      (check-true (collects? (lambda () (grow! 48)))
+                  "320 MiB over an empty floor is past it")
+      (check-false (collects? (lambda () (grow! 70)))
+                   "280 MiB over a 320 MiB floor is under a margin that follows it")
+      (check-true (collects? (lambda () (grow! 20)))
+                  "360 MiB over a 320 MiB floor is past it")
+      (check-equal? (length held) 4)))
 
   (test-case "a collector killed mid-collection does not hold the claim"
     (settle!)
