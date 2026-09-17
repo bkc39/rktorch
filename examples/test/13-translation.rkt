@@ -1,7 +1,5 @@
 #lang racket/base
 
-;; Runner + tests for the literate ../../examples/racket/13-translation.rkt.
-
 (require (only-in racket/list first last [take list-take])
          (only-in racket/math nan?)
          torch
@@ -10,9 +8,6 @@
          "../racket/13-translation.rkt")
 
 (module+ main
-  ;; The headline run: the tutorial's 11445 pairs (downloads + caches 3 MB), a
-  ;; tenth held out, then the held-out token error rate and ten translations.
-  ;; EPOCHS overrides the epoch count.
   (printf "device: ~a\n" (pick-device))
   (define-values (net source-vocab target-vocab held-out)
     (train-translator
@@ -42,15 +37,12 @@
   (check-not-false (member "dec.attend.va.bias" names))
   (check-not-false (member "dec.gru.bias_hh_l0" names))
   (check-equal? (last names) "dec.head.bias")
-  ;; teacher-forced and free-running forwards agree in shape, [B, L, V]
   (define-values (sources targets)
     (pairs->tensors (list-take (load-translation-fixture) 4)
                     source-vocab target-vocab #:width 10))
   (define v (vocab-size target-vocab))
   (check-equal? (tensor-shape (net sources targets 10 #t)) (list 4 10 v))
   (check-equal? (tensor-shape (net sources #f 10 #f)) (list 4 10 v))
-  ;; an untrained-but-wired model still answers one in-vocabulary string per
-  ;; sentence, from raw (unnormalized) input, and leaves the net in train mode
   (define translations
     (translate net source-vocab target-vocab '("Je vais bien." "Il est là !")))
   (check-equal? (length translations) 2)
@@ -60,15 +52,12 @@
     (token-error-rate net source-vocab target-vocab
                       (list-take (load-translation-fixture) 8)))
   (check-true (and (rational? rate) (>= rate 0.0)))
-  ;; the split is a seeded partition
   (define pairs (load-translation-fixture))
   (define-values (training held-out) (split-pairs pairs))
   (check-equal? (length held-out) 28)
   (check-equal? (+ (length training) (length held-out)) (length pairs))
   (define-values (_training-again held-out-again) (split-pairs pairs))
   (check-equal? held-out-again held-out)
-  ;; a short real training run learns the fixture: the error rate on the
-  ;; pairs it trained on falls well below an untrained model's
   (define trained
     (train-pairs pairs source-vocab target-vocab
                  #:epochs 40 #:batch 32 #:hidden 64 #:lr 0.005

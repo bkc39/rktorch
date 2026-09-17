@@ -190,6 +190,10 @@ trains on the rest and answers the held-out pairs along with the model, so the
 caller can measure on sentences the model never saw. The vocabularies come
 from all the pairs, held-out ones included, as in the tutorial: a held-out
 sentence may combine words in a new way but never contains an unknown word.
+The runner, @filepath{examples/test/13-translation.rkt}, does exactly this
+(the first run downloads and caches the 3 MB archive), then prints the held-out
+token error rate and ten held-out translations; @envvar{EPOCHS} overrides the
+epoch count.
 
 @chunk[<r13-train>
 (define (split-pairs pairs #:held-out [fraction 0.1] #:seed [seed 0])
