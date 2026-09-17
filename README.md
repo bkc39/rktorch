@@ -11,6 +11,10 @@
 
 </div>
 
+> [!WARNING]
+> **This library is a work in progress.** The API is still changing and the
+> package is not yet on the Racket catalog. Expect breaking changes.
+
 `rktorch` provides Racket bindings for the [PyTorch](https://pytorch.org/)
 tensor library. This brings to Racket NumPy-like tensor computations with GPU
 acceleration and tape-based automatic differentiation, a `define-layer` form
@@ -19,7 +23,7 @@ for neural networks, and PyTorch-style datasets and loaders.
 The bindings are checked against PyTorch itself: seeded draws, initializers,
 optimizers, and whole training runs are compared with Python twins, so a model
 ported from PyTorch trains the same way here. CPU is supported everywhere, CUDA
-on Linux, and MPS on Apple Silicon. The API is young and still moving.
+on Linux, and MPS on Apple Silicon.
 
 ## Install
 
