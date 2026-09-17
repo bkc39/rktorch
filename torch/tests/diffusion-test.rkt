@@ -96,6 +96,9 @@
                   '("norm.weight" "norm.bias" "q.weight" "q.bias" "k.weight" "k.bias"
                     "v.weight" "v.bias" "proj.weight" "proj.bias"))
     (check-equal? (tensor-shape (ab (randn 2 32 4 4))) '(2 32 4 4))
+    (check-equal? (map tensor-shape (parameters ab))
+                  '((32) (32) (32 32) (32) (32 32) (32) (32 32) (32) (32 32) (32))
+                  "queries, keys, values and the projection are linear maps of a token")
     (check-equal? (tensor-shape ((Downsample 32) (randn 2 32 8 8) #f)) '(2 32 4 4))
     (check-equal? (tensor-shape ((Upsample 32) (randn 2 32 4 4))) '(2 32 8 8))
     (define net (UNet #:base 32 #:mults '(1 2) #:blocks 1 #:attention '(16) #:dropout 0))

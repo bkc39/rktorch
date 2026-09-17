@@ -86,20 +86,17 @@ class AttentionBlock(nn.Module):
     def __init__(self, channels):
         super().__init__()
         self.norm = nn.GroupNorm(GROUPS, channels)
-        self.q = nn.Conv2d(channels, channels, 1)
-        self.k = nn.Conv2d(channels, channels, 1)
-        self.v = nn.Conv2d(channels, channels, 1)
-        self.proj = nn.Conv2d(channels, channels, 1)
+        self.q = nn.Linear(channels, channels)
+        self.k = nn.Linear(channels, channels)
+        self.v = nn.Linear(channels, channels)
+        self.proj = nn.Linear(channels, channels)
 
     def forward(self, x):
         n, c, h, w = x.shape
-        normed = self.norm(x)
-        q = self.q(normed).reshape(n, c, h * w).transpose(1, 2)
-        k = self.k(normed).reshape(n, c, h * w)
-        v = self.v(normed).reshape(n, c, h * w)
-        weights = torch.softmax(torch.bmm(q, k) * (c ** -0.5), dim=-1)
-        out = torch.bmm(v, weights.transpose(1, 2)).reshape(n, c, h, w)
-        return x + self.proj(out)
+        tokens = self.norm(x).reshape(n, c, h * w).transpose(1, 2)
+        scores = torch.bmm(self.q(tokens), self.k(tokens).transpose(1, 2)) * (c ** -0.5)
+        mixed = self.proj(torch.bmm(torch.softmax(scores, dim=-1), self.v(tokens)))
+        return x + mixed.transpose(1, 2).reshape(n, c, h, w)
 
 
 class Downsample(nn.Module):

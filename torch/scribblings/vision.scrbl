@@ -144,10 +144,12 @@ through a 1x1 convolution when the widths differ. Widths are multiples of
 }
 
 @defproc[(AttentionBlock [channels channels/c]) attention-block?]{
-Single-head self-attention over every pixel of a feature map, the DDPM
-form: a norm, 1x1 convolutions for the queries, keys and values,
-softmax over the scaled dot products, a 1x1 output projection, and the
-input added back.
+Single-head self-attention over a feature map, the DDPM form: after a
+norm each pixel's channels are one token, @racket[Linear] maps give the
+queries, keys and values, softmax over the scaled dot products mixes the
+tokens, a @racket[Linear] projection follows, and the result is added to
+the input. The convolutional path before the block is the encoder that
+turns pixels into these tokens.
 }
 
 @defproc[(Downsample [channels channels/c]) downsample?]{
