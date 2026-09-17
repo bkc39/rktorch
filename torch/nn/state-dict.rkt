@@ -4,13 +4,11 @@
          (only-in racket/file file->bytes)
          (only-in json jsexpr->string string->jsexpr)
          (only-in "../foreign.rkt"
-                  reshape
-                  tensor
+                  bytes->tensor
                   tensor-dtype
-                  tensor->list
+                  tensor->bytes
                   tensor-shape
                   tensor?
-                  to-dtype
                   with-no-grad)
          (only-in "../generated.rkt" copy!)
          (only-in "../private/contract.rkt" define/contract-out)
@@ -21,40 +19,29 @@
   (-> layer? (listof (cons/c string? tensor?)))
   (append (layer-named-parameters model "") (layer-named-buffers model "")))
 
-(define (encode name t)
-  (define vals (tensor->list t))
-  (case (tensor-dtype t)
-    [(float32)
-     (values "F32"
-             (apply bytes-append
-                    (for/list ([f (in-list vals)])
-                      (real->floating-point-bytes (exact->inexact f) 4 #f))))]
-    [(int64)
-     (values "I64"
-             (apply bytes-append
-                    (for/list ([i (in-list vals)])
-                      (integer->integer-bytes i 8 #t #f))))]
-    [(bool)
-     (values "BOOL"
-             (apply bytes (for/list ([v (in-list vals)]) (if (zero? v) 0 1))))]
-    [else
-     (raise-arguments-error 'save-state! "unsupported dtype"
-                            "entry" name
-                            "dtype" (tensor-dtype t))]))
+;; safetensors' dtype tags; the payload is the element bytes little-endian,
+;; which is the host's order on every platform the shim builds for
+(define tags
+  '((float32 . "F32") (float64 . "F64") (float16 . "F16") (bfloat16 . "BF16")
+    (int64 . "I64") (bool . "BOOL") (uint8 . "U8")))
 
-(define (decode dtype bs)
-  (define n (bytes-length bs))
-  (case dtype
-    [("F32")
-     (tensor (for/list ([i (in-range 0 n 4)])
-               (floating-point-bytes->real bs #f i (+ i 4))))]
-    [("I64")
-     (tensor (for/list ([i (in-range 0 n 8)])
-               (integer-bytes->integer bs #t #f i (+ i 8))))]
-    [("BOOL")
-     (to-dtype (tensor (for/list ([b (in-bytes bs)]) b)) 'bool)]
-    [else
-     (raise-arguments-error 'load-state! "unsupported dtype" "dtype" dtype)]))
+(define (encode name t)
+  (define tag (assq (tensor-dtype t) tags))
+  (unless tag
+    (raise-arguments-error 'save-state! "unsupported dtype"
+                           "entry" name
+                           "dtype" (tensor-dtype t)))
+  (values (cdr tag) (tensor->bytes t)))
+
+(define (decode name dtype shape bs)
+  (define entry
+    (for/first ([e (in-list tags)] #:when (string=? (cdr e) dtype))
+      (car e)))
+  (unless entry
+    (raise-arguments-error 'load-state! "unsupported dtype"
+                           "entry" name
+                           "dtype" dtype))
+  (bytes->tensor bs entry shape))
 
 (define/contract-out (save-state! model path) ;; noqa
   (-> layer? path-string? void?)
@@ -96,9 +83,16 @@
                   (lambda ()
                     (error 'load-state! "no entry for ~s" name))))
       (define offsets (hash-ref meta 'data_offsets))
+      (define shape (hash-ref meta 'shape))
+      (unless (equal? shape (tensor-shape target))
+        (raise-arguments-error 'load-state! "shape mismatch"
+                               "entry" name
+                               "file" shape
+                               "model" (tensor-shape target)))
       (define loaded
-        (decode (hash-ref meta 'dtype)
+        (decode name (hash-ref meta 'dtype) shape
                 (subbytes raw
                           (+ data-start (car offsets))
                           (+ data-start (cadr offsets)))))
-      (copy! target (apply reshape loaded (tensor-shape target)) #f))))
+      ;; copy_ converts, so a file in one dtype loads into a model in another
+      (copy! target loaded #f))))

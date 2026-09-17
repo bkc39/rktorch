@@ -73,11 +73,13 @@
 ;; PyTorch: "nn.Module.to only accepts floating point or complex dtypes",
 ;; and its convert forwards the dtype only to floating-point tensors — an
 ;; int64 or bool buffer keeps its dtype and changes device alone
+(define floating-dtypes '(float32 float64 float16 bfloat16))
+
 (define (floating? t)
-  (and (memq (tensor-dtype t) '(float32 float64)) #t))
+  (and (memq (tensor-dtype t) floating-dtypes) #t))
 
 (define (move-layer! m dev dtype)
-  (when (and dtype (not (memq dtype '(float32 float64))))
+  (when (and dtype (not (memq dtype floating-dtypes)))
     (raise-arguments-error 'to "a layer only moves to a floating-point dtype"
                            "dtype" dtype))
   (for ([t (in-list (append (parameters m) (buffers m)))])

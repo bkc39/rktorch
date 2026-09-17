@@ -39,7 +39,12 @@ linked against libtorch via `find_package(Torch)`.
 
 ### v1 surface
 
-CPU-first; float32 + inferred int64 (#44) + uint8 from bytes (#58). From
+CPU-first; float32 + inferred int64 (#44) + uint8 from bytes (#58) +
+float64 + the half pair float16/bfloat16 (#152: every constructor and `to`
+take them, values read back through float32, `tensor->bytes` /
+`bytes->tensor` carry the element bytes as they are, and `with-autocast`
+runs a forward under `at::autocast` per device type, bfloat16 by default,
+with `backward!` outside the form as PyTorch recommends). From
 `torch`:
 
 - v0 core: `torch-version manual-seed! randn tensor-shape tensor-numel
@@ -131,6 +136,10 @@ CPU-first; float32 + inferred int64 (#44) + uint8 from bytes (#58). From
 - autograd: `requires-grad! requires-grad? backward! grad has-grad?
   maybe-grad detach with-no-grad grad-enabled?`; in-place
   `sub! zero! mul! copy! addcmul! addcdiv! lerp! zero-grad!`
+- autocast: `with-autocast call-with-autocast autocast-enabled?
+  autocast-dtype` (`torch/foreign/autocast.rkt` over
+  `cpp/src/torchrkt/autocast.cpp`; per thread and per device type like
+  grad mode, restored by `dynamic-wind`, the cast cache dropped on exit)
 
 **Name shadowing convention:** ops colliding with racket/base or racket/list
 (`exp log sqrt tanh max min argmax`) are generic — tensors hit libtorch,
@@ -153,8 +162,9 @@ uniform-init normal-init fan-in`. The functional
 transformer primitives (`gelu tril triu masked-fill embedding layer-norm`,
 tranche 3, #22), the UNet ones (`conv-transpose2d group-norm silu
 clamp`, tranche 4, #84; `upsample-nearest2d` over `repeat_interleave`, tranche
-5) and the classic vision ones (`batch-norm leaky-relu flip`, tranche 6,
-#152; `BatchNorm2d`/`BatchNorm1d` keep `running-mean`, `running-var` and
+5) and the classic vision ones (`batch-norm leaky-relu flip linear`, tranche 6,
+#152; `Linear` runs on the fused `linear`, so autocast casts the whole affine
+map; `BatchNorm2d`/`BatchNorm1d` keep `running-mean`, `running-var` and
 `num-batches-tracked` as `Buffer`s that ATen updates in place in `'train`
 mode) live on `torch` beside the other functional ops; the GPT
 causal-mask idiom is `(masked-fill scores (eq (tril (ones T T)) 0) -inf.0)`. `define-layer` is the Python-style

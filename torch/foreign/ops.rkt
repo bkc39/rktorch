@@ -48,6 +48,7 @@
          (only-in "raw/random.rkt" tr-tensor-uniform!/raw)
          (only-in "raw/tensor.rkt"
                   dtype-code->symbol
+                  tr-tensor-copy-bytes/raw
                   tr-tensor-copy-data-f64/raw
                   tr-tensor-copy-data-i64/raw
                   tr-tensor-copy-data-u8/raw
@@ -75,7 +76,7 @@
 
 (define dims-rest/c (listof exact-nonnegative-integer?))
 
-(define dtype-symbols '(float32 float64 int64 bool uint8))
+(define dtype-symbols '(float32 float64 int64 bool uint8 float16 bfloat16))
 
 (define/checked-out dtype/c contract? (apply or/c dtype-symbols))
 
@@ -365,6 +366,17 @@
      (define-values (rc _n) (tr-tensor-copy-data/raw t n out))
      (check-ok rc 'tensor->vector)
      out]))
+
+;; the element bytes as they are, in the tensor's own dtype: the safetensors
+;; payload, and how a 16-bit float leaves the process without widening
+(define/contract-out (tensor->bytes t) (-> tensor? bytes?) ;; noqa
+  (define-values (probe nbytes) (tr-tensor-copy-bytes/raw t 0 #f))
+  (unless (= probe 2)
+    (check-ok probe 'tensor->bytes))
+  (define out (make-bytes nbytes))
+  (define-values (rc _n) (tr-tensor-copy-bytes/raw t nbytes out))
+  (check-ok rc 'tensor->bytes)
+  out)
 
 (define/checked-out (tensor->list t) (-> tensor? (listof real?)) ;; noqa
   (define v (tensor->vector t))

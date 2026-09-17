@@ -72,10 +72,17 @@
     (delete-file typed-path)
     (define-layer Wide (w)
       #:init ()
-      (set! w (Buffer (to-dtype (ones 1) 'float64)))
+      (set! w (Buffer (to-dtype (tensor '(0.1)) 'float64)))
       #:forward (x) x)
-    (check-exn #rx"^save-state!: unsupported dtype"
-               (lambda () (save-state! (Wide) typed-path))))
+    (define written (Wide))
+    (save-state! written typed-path)
+    (define wide (Wide))
+    (load-state! wide typed-path)
+    (check-equal? (map tensor-dtype (buffers wide)) '(float64))
+    (check-equal? (tensor->list (car (buffers wide)))
+                  (tensor->list (car (buffers written)))
+                  "float64 keeps every bit through the file")
+    (delete-file typed-path))
 
   (test-case "every child field registers, in declaration order, whatever its kind"
     (manual-seed! 0)
