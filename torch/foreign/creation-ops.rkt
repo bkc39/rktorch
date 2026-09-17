@@ -5,7 +5,11 @@
                   f32vector->list
                   f32vector-length
                   f32vector?
+                  f64vector->list
+                  f64vector-length
+                  f64vector?
                   list->f32vector
+                  list->f64vector
                   list->s64vector
                   s64vector->list
                   s64vector-length
@@ -39,6 +43,8 @@
          (only-in "raw/creation.rkt"
                   tr-arange-on/raw
                   tr-eye-on/raw
+                  tr-from-data-f64-on-device/raw
+                  tr-from-data-f64/raw
                   tr-from-data-i64-on-device/raw
                   tr-from-data-i64/raw
                   tr-from-data-on-device/raw
@@ -258,6 +264,7 @@
          '(0)
          (cons (vector-length data) (nested-dims (vector-ref data 0))))]
     [(f32vector? data) (list (f32vector-length data))]
+    [(f64vector? data) (list (f64vector-length data))]
     [(s64vector? data) (list (s64vector-length data))]
     [(bytes? data) (list (bytes-length data))]
     [else '()]))
@@ -267,6 +274,7 @@
     [(list? data) data]
     [(vector? data) (vector->list data)]
     [(f32vector? data) (f32vector->list data)]
+    [(f64vector? data) (f64vector->list data)]
     [(s64vector? data) (s64vector->list data)]
     [(bytes? data) (bytes->list data)]
     [else #f]))
@@ -324,20 +332,24 @@
                             #:requires-grad? [requires-grad? #f]
                             #:device [device #f]
                             #:dtype [dtype #f])
-  (->* [(or/c real? list? vector? f32vector? s64vector? bytes?)]
+  (->* [(or/c real? list? vector? f32vector? f64vector? s64vector? bytes?)]
        [#:requires-grad? boolean?
         #:device (or/c #f device/c)
-        #:dtype (or/c #f 'float32 'int64 'uint8)]
+        #:dtype (or/c #f 'float32 'float64 'int64 'uint8)]
        tensor?)
-  (unless (memq dtype '(#f float32 int64 uint8))
-    (error 'tensor "unsupported #:dtype (float32, int64 or uint8): ~e" dtype))
+  (unless (memq dtype '(#f float32 float64 int64 uint8))
+    (error 'tensor
+           "unsupported #:dtype (float32, float64, int64 or uint8): ~e"
+           dtype))
   (define dims (nested-dims data))
   (define-values (chosen payload numel)
     (cond
       [(bytes? data) (values 'uint8 data (bytes-length data))]
-      [(and (f32vector? data) (not (memq dtype '(int64 uint8))))
+      [(and (f32vector? data) (memq dtype '(#f float32)))
        (values 'float32 data (f32vector-length data))]
-      [(and (s64vector? data) (not (memq dtype '(float32 uint8))))
+      [(and (f64vector? data) (memq dtype '(#f float64)))
+       (values 'float64 data (f64vector-length data))]
+      [(and (s64vector? data) (memq dtype '(#f int64)))
        (values 'int64 data (s64vector-length data))]
       [else
        (check-regular data dims 0)
@@ -349,6 +361,10 @@
                   (length flat))]
          [(uint8)
           (values 'uint8 (list->bytes (map exact-byte flat)) (length flat))]
+         [(float64)
+          (values 'float64
+                  (list->f64vector (map exact->inexact flat))
+                  (length flat))]
          [else
           (values 'float32
                   (list->f32vector (map exact->inexact flat))
@@ -365,6 +381,11 @@
                  (tr-from-data-i64-on-device/raw payload numel dim-vec ndim
                                                  type index)
                  (tr-from-data-i64/raw payload numel dim-vec ndim))]
+            [(float64)
+             (if device
+                 (tr-from-data-f64-on-device/raw payload numel dim-vec ndim
+                                                 type index)
+                 (tr-from-data-f64/raw payload numel dim-vec ndim))]
             [(uint8)
              (if device
                  (tr-from-data-u8-on-device/raw payload numel dim-vec ndim

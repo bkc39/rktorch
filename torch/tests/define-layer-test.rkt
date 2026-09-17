@@ -71,11 +71,16 @@
     (check-equal? (tensor->list (cadr (buffers typed))) '(16777217 3))
     (delete-file typed-path)
     (define-layer Wide (w)
-      #:init ()
-      (set! w (Buffer (to-dtype (ones 1) 'float64)))
+      #:init (v)
+      (set! w (Buffer (tensor (list v) #:dtype 'float64)))
       #:forward (x) x)
-    (check-exn #rx"^save-state!: unsupported dtype"
-               (lambda () (save-state! (Wide) typed-path))))
+    (save-state! (Wide 0.1) typed-path)
+    (define wide (Wide 0.0))
+    (load-state! wide typed-path)
+    (check-equal? (map tensor-dtype (buffers wide)) '(float64))
+    (check-equal? (tensor->list (car (buffers wide))) '(0.1)
+                  "0.1 is not a float32: every bit of a float64 survives")
+    (delete-file typed-path))
 
   (test-case "every child field registers, in declaration order, whatever its kind"
     (manual-seed! 0)
