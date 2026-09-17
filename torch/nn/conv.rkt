@@ -52,9 +52,11 @@
   ;; bias=False the bias is never drawn, as there
   (set! weight (Parameter (kaiming-uniform shape)))
   (set! bias
-        (and bias?
-             (let ([bound (/ 1.0 (sqrt (fan-in shape)))])
-               (Parameter (uniform-init (list out-channels) (- bound) bound)))))
+        (cond
+          [bias?
+           (define bound (/ 1.0 (sqrt (fan-in shape))))
+           (Parameter (uniform-init (list out-channels) (- bound) bound))]
+          [else #f]))
   #:forward (x)
   (conv2d x weight #:bias bias #:stride stride #:padding padding))
 
