@@ -40,6 +40,9 @@
     [(optional-int64)
      (values (list #`(#,arg : _int64) #`(#,has-arg : _stdbool))
              (list #`(or #,arg 0) #`(and #,arg #t)))]
+    [(optional-scalar)
+     (values (list #`(#,arg : _double) #`(#,has-arg : _stdbool))
+             (list #`(or #,arg 0.0) #`(and #,arg #t)))]
     [(optional-int-array)
      (values (list #`(#,arg : (_s64vector i)) #`(#,len-arg : _int64)
                    #`(#,has-arg : _stdbool))

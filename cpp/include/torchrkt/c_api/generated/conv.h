@@ -36,6 +36,13 @@ tr_tensor* tr_gen_conv2d(const tr_tensor* input, const tr_tensor* weight,
                          const int64_t* padding, int64_t padding_len,
                          const int64_t* dilation, int64_t dilation_len,
                          int64_t groups);
+tr_tensor* tr_gen_conv_transpose2d_input(
+    const tr_tensor* input, const tr_tensor* weight,
+    const tr_tensor* bias /* nullable: NULL == no value */,
+    const int64_t* stride, int64_t stride_len, const int64_t* padding,
+    int64_t padding_len, const int64_t* output_padding,
+    int64_t output_padding_len, int64_t groups, const int64_t* dilation,
+    int64_t dilation_len);
 tr_tensor* tr_gen_max_pool2d(const tr_tensor* self, const int64_t* kernel_size,
                              int64_t kernel_size_len, const int64_t* stride,
                              int64_t stride_len, const int64_t* padding,

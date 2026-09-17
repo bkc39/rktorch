@@ -146,6 +146,19 @@ void torchrkt_c_api_compile_check(void) {
   tr_tensor* (*gen_layer_norm)(const tr_tensor*, const int64_t*, int64_t,
                                const tr_tensor*, const tr_tensor*, double,
                                bool) = tr_gen_layer_norm;
+  tr_tensor* (*gen_conv_transpose2d)(
+      const tr_tensor*, const tr_tensor*, const tr_tensor*, const int64_t*,
+      int64_t, const int64_t*, int64_t, const int64_t*, int64_t, int64_t,
+      const int64_t*, int64_t) = tr_gen_conv_transpose2d_input;
+  tr_tensor* (*gen_group_norm)(const tr_tensor*, int64_t, const tr_tensor*,
+                               const tr_tensor*, double, bool) =
+      tr_gen_group_norm;
+  tr_tensor* (*gen_silu)(const tr_tensor*) = tr_gen_silu;
+  tr_tensor* (*gen_clamp)(const tr_tensor*, double, bool, double, bool) =
+      tr_gen_clamp;
+  tr_tensor* (*gen_repeat_interleave)(const tr_tensor*, int64_t, int64_t, bool,
+                                      int64_t, bool) =
+      tr_gen_repeat_interleave_self_int;
   tr_tensor* (*gen_masked_fill)(const tr_tensor*, const tr_tensor*, double) =
       tr_gen_masked_fill_scalar;
   tr_tensor* (*gen_tril)(const tr_tensor*, int64_t) = tr_gen_tril;
@@ -268,6 +281,11 @@ void torchrkt_c_api_compile_check(void) {
   (void)gen_sum_dim;
   (void)gen_conv1d;
   (void)gen_conv2d;
+  (void)gen_conv_transpose2d;
+  (void)gen_group_norm;
+  (void)gen_silu;
+  (void)gen_clamp;
+  (void)gen_repeat_interleave;
   (void)gen_ctc_loss;
   (void)gen_avg_pool2d;
   (void)gen_adaptive_avg_pool2d;

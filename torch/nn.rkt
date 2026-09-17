@@ -8,7 +8,9 @@
          (submod "nn/buffer.rkt" checked)
          "nn/conv.rkt"
          "nn/dropout.rkt"
+         "nn/ema.rkt"
          "nn/embedding.rkt"
+         "nn/group-norm.rkt"
          (submod "nn/init.rkt" checked)
          "nn/layer-hash.rkt"
          "nn/layer-list.rkt"
@@ -89,6 +91,8 @@
          conv1d?
          Conv2d
          conv2d?
+         ConvTranspose2d
+         conv-transpose2d?
          MaxPool2d
          max-pool2d?
          Flatten
@@ -99,6 +103,8 @@
          embedding?
          LayerNorm
          layer-norm?
+         GroupNorm
+         group-norm?
          Sequential
          sequential?)
 
@@ -113,6 +119,12 @@
          adam?
          step!
          zero-grads!)
+
+(provide ema
+         ema?
+         ema-average
+         ema-decay
+         ema-update!)
 
 (provide mse-loss
          cross-entropy
