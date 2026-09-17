@@ -13,7 +13,7 @@
            (only-in "../data/text.rkt"
                     contiguous-blocks encode load-text-fixture text->vocab)
            (only-in "../data/translation.rkt"
-                    load-translation-fixture pad-id pairs->tensors
+                    eos-id load-translation-fixture pad-id pairs->tensors
                     pairs->vocabs sos-id vocab-size)
            (only-in "../vision/cifar10.rkt" load-cifar10-fixture)
            (only-in "../vision/diffusion.rkt"
@@ -468,7 +468,10 @@
          (set! embed (Embedding vocab-size hidden))
          (set! gru (GRU hidden hidden #:batch-first? #t))
          #:forward (tokens)
-         (gru (embed tokens)))
+         (define-values (outputs _final) (gru (embed tokens)))
+         (define at-eos
+           (unsqueeze (to-dtype (eq tokens eos-id) (tensor-dtype outputs)) 1))
+         (values outputs (transpose (matmul at-eos outputs) 0 1)))
        (define-layer attention (wa ua va)
          #:init ()
          (set! wa (Linear hidden hidden))

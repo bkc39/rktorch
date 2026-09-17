@@ -63,7 +63,9 @@ class Encoder(nn.Module):
         self.gru = nn.GRU(HIDDEN, HIDDEN, batch_first=True)
 
     def forward(self, tokens):
-        return self.gru(self.embed(tokens))
+        outputs, _ = self.gru(self.embed(tokens))
+        at_eos = (tokens == EOS).unsqueeze(1).to(outputs.dtype)
+        return outputs, torch.matmul(at_eos, outputs).transpose(0, 1)
 
 
 class Attention(nn.Module):

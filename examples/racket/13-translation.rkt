@@ -32,9 +32,14 @@ batch.
          translate token-error-rate split-pairs)]
 
 @bold{The encoder.} An @racket[Embedding] and a batch-first @racket[GRU]. It
-answers two things: every step's output, @tt{[B, L, H]}, which the decoder
-will attend over, and the final state, @tt{[1, B, H]}, which starts the
-decoder.
+answers every step's output, @tt{[B, L, H]}, which the decoder will attend
+over, and the state that starts the decoder, @tt{[1, B, H]}. That state is not
+the @racket[GRU]'s final one: a batch is padded to a common width, so for a
+short sentence the final state has also read the padding after it. The state
+wanted is the one at the sentence's @tt{<eos>}, and for a one-layer GRU that is
+simply the output at that position. A one-hot mask of the @tt{<eos>} positions,
+@tt{[B, 1, L]}, picks that row out of the @tt{[B, L, H]} outputs with one
+batched @racket[matmul].
 
 @chunk[<r13-encoder>
 (define-layer encoder (embed drop gru)
@@ -43,7 +48,10 @@ decoder.
   (set! drop (Dropout #:p dropout))
   (set! gru (GRU hidden hidden #:batch-first? #t))
   #:forward (tokens)
-  (gru (drop (embed tokens))))]
+  (define-values (outputs _final) (gru (drop (embed tokens))))
+  (define at-eos
+    (unsqueeze (to-dtype (eq tokens eos-id) (tensor-dtype outputs)) 1))
+  (values outputs (transpose (matmul at-eos outputs) 0 1)))]
 
 @bold{Attention.} Bahdanau's additive score: project the decoder's state (the
 query) and the encoder's outputs (the keys) into a common space, add them,

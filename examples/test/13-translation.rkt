@@ -43,6 +43,16 @@
   (define v (vocab-size target-vocab))
   (check-equal? (tensor-shape (net sources targets 10 #t)) (list 4 10 v))
   (check-equal? (tensor-shape (net sources #f 10 #f)) (list 4 10 v))
+  (define (first-step-logits width)
+    (define-values (wide _targets)
+      (pairs->tensors (list-take (load-translation-fixture) 4)
+                      source-vocab target-vocab #:width width))
+    (in-eval-mode net
+      (with-no-grad (tensor->list (narrow (net wide #f 1 #f) 1 0 1)))))
+  (for ([narrow-logit (in-list (first-step-logits 10))]
+        [wide-logit (in-list (first-step-logits 16))])
+    (check-= narrow-logit wide-logit 1e-5
+             "the padding after a source sentence changes nothing"))
   (define translations
     (translate net source-vocab target-vocab '("Je vais bien." "Il est là !")))
   (check-equal? (length translations) 2)
