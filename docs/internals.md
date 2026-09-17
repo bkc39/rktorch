@@ -83,6 +83,18 @@ host ones — user code never calls the collector by hand.
 
 ### Pressure-driven collection
 
+The policy lives in `torch/foreign/raw/pressure.rkt`, under the ledger:
+`raw/memory.rkt` tells it of every accounting and release
+(`note-accounted!`, `note-unaccounted!`, inside the ledger's atomic
+section) and asks it to act. It binds no C itself. Its two CUDA readings,
+capacity and the allocator's allocated bytes, are bound in
+`raw/device.rkt` with the rest of `device.cpp` and handed down by
+`install-cuda-queries!` when that module is instantiated, because
+`raw/device.rkt` sits above the ledger and requiring it from below would
+be a cycle. One collection runs at a time (`call-as-the-collector`): a
+second thread that finds a trigger due while the first is collecting
+skips.
+
 Phantom pressure keeps Racket's generational collections running, and
 on a GPU training loop they free most of a step's intermediates within
 the step. Two things escape them (#145, measured with
@@ -157,12 +169,14 @@ the last defence when a trough collection is not yet due:
   two seconds. Without this a collection found 13 GB of garbage and
   the next `backward!` still failed, the frees not yet made.
 - The mark is 80% of `tr_cuda_mem_get_info`'s total for a CUDA device,
-  queried once and cached; `native-memory-limit` overrides it for every
+  cached once known (a failed query is retried after a second, so one
+  early failure cannot switch the backstop off); `native-memory-limit` overrides it for every
   device and is how the CPU tests exercise the path. No capacity and no
   limit means the check is off.
 - Hysteresis: the interval starts at an eighth of the mark; a
   collection that reclaims under 5% of the mark doubles it (capped at
-  twice the mark), one that reclaims more resets it. A working set that
+  twice the mark), one that reclaims more resets it, and one whose
+  drain ran out of time leaves it alone. A working set that
   sits above the mark is therefore collected at a decaying rate instead
   of on every allocation.
 - Never from atomic mode (`in-atomic-mode?` guards it), and the RNG

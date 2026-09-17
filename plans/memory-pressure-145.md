@@ -265,3 +265,24 @@ it as `train.rkt.with-gc-every.bak`). Batch 224, the 35.7M-parameter UNet:
 `reclaim-native-memory!` once after training, to hand cached VRAM back before
 generation. That is the function's documented use, not a leak workaround, and
 is left alone.
+
+## Review fixes (2026-09-17)
+
+From the automated review of #147: the pressure engine moved to
+`raw/pressure.rkt` (`raw/memory.rkt` back to 279 lines, the two CUDA queries
+back in `raw/device.rkt` and handed down by `install-cuda-queries!`); a failed
+capacity query is retried; one collection at a time; counters updated inside
+the atomic section; a timed-out drain no longer doubles the backstop
+interval; both triggers reset every device's accounted-since; one shared CUDA
+precondition in `device.cpp`; Racket tests for the three promoted CUDA
+functions and a gtest for the settings no-op. Not taken: the weak-entry
+ordering worry (2.7M finalizer runs return the ledger to exactly zero) and
+the failed re-accounting after an in-place move, which predates this work.
+
+Checks: 3,827,384 tests, `.#cpp`, `.#cpp-cuda`, `.#cpp-format`, `.#cpp-tidy`,
+`raco review`, Resyntax. On the GPU after the split the backstop fires
+through the handed-down allocator reading and the UNet probe is flat with no
+backstop firings. Its step time could not be compared fairly: the host was
+at a load average of 10 to 24 from other jobs, which stretches each
+collection and so spaces them out (0.44 s before the split, 0.47 and 0.49 s
+after, under that load). To redo on a quiet machine.
