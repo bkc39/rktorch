@@ -31,7 +31,16 @@
     (check-equal? (tensor-shape (image-grid (randn 10 3 4 4))) '(3 14 50)
                   "ten images in eight columns: two rows")
     (check-equal? (tensor-shape (image-grid (randn 2 3 4 4) #:padding 0))
-                  '(3 4 8)))
+                  '(3 4 8))
+    ;; a uint8 batch keeps its dtype, and full refuses a pad value outside
+    ;; its range as contract blame rather than wrapping it
+    (define bytes-batch (to-dtype (full 9.0 2 3 2 2) 'uint8))
+    (define byte-grid (image-grid bytes-batch #:padding 1 #:pad-value 7))
+    (check-equal? (tensor-dtype byte-grid) 'uint8)
+    (check-equal? (tensor->list (select (select byte-grid 0 0) 0 0))
+                  '(7 7 7 7 7 7 7))
+    (check-exn exn:fail:contract?
+               (lambda () (image-grid bytes-batch #:pad-value -1))))
 
   (test-case "write-ppm: a P6 header and one byte per channel, row-major"
     ;; red, green / blue, white

@@ -3,7 +3,7 @@
 (require (only-in racket/contract/base
                   ->* and/c flat-named-contract list/c)
          (only-in "../foreign.rkt"
-                  add cat clamp copy! full mul narrow permute select sub
+                  add clamp copy! full mul narrow permute select sub
                   tensor-device tensor-dtype tensor-shape tensor->vector
                   tensor? to-dtype)
          (only-in "../foreign/contracts.rkt" image-batch/c)
@@ -27,8 +27,6 @@
    'non-empty-image-batch
    (and/c image-batch/c (lambda (x) (positive? (car (tensor-shape x)))))))
 
-;; torchvision.utils.make_grid's layout, so a twin can pin it: columns
-;; across, padding around every image, one channel tripled to three
 (define/contract-out (image-grid images ;; noqa
                                  #:columns [columns 8]
                                  #:padding [padding 2]
@@ -43,7 +41,6 @@
   (define c (cadr dims))
   (define h (caddr dims))
   (define w (cadddr dims))
-  (define rgb (if (= c 1) (cat (list images images images) 1) images))
   (define cols (min columns n))
   (define rows (quotient (+ n cols -1) cols))
   (define grid
@@ -55,11 +52,10 @@
   (for ([i (in-range n)])
     (define top (+ padding (* (quotient i cols) (+ h padding))))
     (define left (+ padding (* (remainder i cols) (+ w padding))))
-    (copy! (narrow (narrow grid 1 top h) 2 left w) (select rgb 0 i)))
+    ;; copy! broadcasts, so a one-channel tile fills all three channels
+    (copy! (narrow (narrow grid 1 top h) 2 left w) (select images 0 i)))
   grid)
 
-;; save_image's quantization: scale to [0, 255], add a half, clamp,
-;; truncate; a uint8 image is written as it is
 (define/contract-out (write-ppm path image #:range [value-range '(0 1)]) ;; noqa
   (->* [path-string? image/c] [#:range value-range/c] void?)
   (define dims (tensor-shape image))
