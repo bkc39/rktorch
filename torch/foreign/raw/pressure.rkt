@@ -5,6 +5,7 @@
          (only-in "../device-type.rkt" device-index device-type))
 
 (provide call-with-ledger
+         call-as-the-collector
          note-accounted!
          note-unaccounted!
          note-finalizer-run!
@@ -41,7 +42,7 @@
 (define trough-minor-count (box 0))
 (define next-trough-ms (box 0.0))
 (define next-minor-ms (box 0.0))
-(define collecting? (box #f))
+(define collector (box #f))
 
 (define native-memory-limit (make-parameter #f))
 (define high-water-fraction 4/5)
@@ -142,18 +143,21 @@
           (hash-ref allocator-sample dev 0)))))
 
 ;; One collection at a time: a second thread that finds the gate open while
-;; the first is inside its collection skips instead of collecting again.
+;; the first is inside its collection skips instead of collecting again. The
+;; claim names its thread, because kill-thread runs no dynamic-wind exit: a
+;; claimant that has died holds nothing.
 (define (call-as-the-collector thunk)
   (define claimed?
     (call-with-ledger
      (lambda ()
-       (and (not (unbox collecting?))
-            (set-box! collecting? #t)
+       (define holder (unbox collector))
+       (and (or (not holder) (thread-dead? holder))
+            (set-box! collector (current-thread))
             #t))))
   (when claimed?
     (dynamic-wind void
                   thunk
-                  (lambda () (set-box! collecting? #f)))))
+                  (lambda () (set-box! collector #f)))))
 
 (define (reset-accounted-since!)
   (for ([dev (in-list (hash-keys accounted-since))])

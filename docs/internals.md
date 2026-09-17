@@ -93,7 +93,8 @@ capacity and the allocator's allocated bytes, are bound in
 `raw/device.rkt` sits above the ledger and requiring it from below would
 be a cycle. One collection runs at a time (`call-as-the-collector`): a
 second thread that finds a trigger due while the first is collecting
-skips.
+skips. The claim names its thread, so one killed mid-collection, whose
+`dynamic-wind` exit never runs, stops holding it.
 
 Phantom pressure keeps Racket's generational collections running, and
 on a GPU training loop they free most of a step's intermediates within
@@ -123,7 +124,10 @@ ledger exceeds its *floor*, its size after the previous trough
 collection and zero before the first, by a margin: the floor itself,
 kept between 256 MiB and 1 GiB (`trough-margin` overrides it for
 tests). A time budget spaces them: after a collection that took t, the
-next waits t / `trough-budget`, 1/20 by default. On the 35.7M-parameter
+next waits t / `trough-budget`, 1/20 by default. Neither is a user
+setting: the margin is a test override and the budget a measured
+default, both internal to `raw/pressure.rkt`; `native-memory-limit` is
+the knob a program turns. On the 35.7M-parameter
 DDPM UNet at batch 224 that is a collection every three or four steps,
 a peak flat at 15.0 GB against 13.9 GB for a hand collection on every
 step, and 0.45 s per step against 0.42 s. Collecting at every trough

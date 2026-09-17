@@ -8,7 +8,7 @@
                     zeros)
            (only-in "../foreign/raw/memory.rkt" native-memory-use/fold)
            (only-in "../foreign/raw/pressure.rkt"
-                    allocator-reading collect-at-trough!
+                    allocator-reading call-as-the-collector collect-at-trough!
                     reset-pressure-state! trough-budget trough-margin)
            (only-in "../nn.rkt" Linear Sequential))
 
@@ -157,6 +157,26 @@
       (define y (net x))
       (check-equal? (trough-minors) before)
       (check-true (and y #t))))
+
+  (test-case "a collector killed mid-collection does not hold the claim"
+    (settle!)
+    (define inside (make-semaphore 0))
+    (define doomed
+      (thread (lambda ()
+                (call-as-the-collector
+                 (lambda ()
+                   (semaphore-post inside)
+                   (sync never-evt))))))
+    (semaphore-wait inside)
+    (define skipped? #t)
+    (call-as-the-collector (lambda () (set! skipped? #f)))
+    (check-true skipped? "a live claimant must make a second collector skip")
+    (kill-thread doomed)
+    (define before (trough-collections))
+    (parameterize ([trough-margin (* 16 mib)])
+      (step! 8)
+      (collect-at-trough!)
+      (check-equal? (- (trough-collections) before) 1)))
 
   (test-case "the diagnostics carry every collection counter"
     (define keys (map car (finalizer-diagnostics)))
