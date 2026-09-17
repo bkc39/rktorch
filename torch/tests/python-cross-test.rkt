@@ -4,7 +4,7 @@
 ;; which provides Python torch; SKIPS when python3 can't import torch).
 
 (module+ test
-  (require (only-in racket/list append-map)
+  (require (only-in racket/list append-map make-list range)
            rackunit
            "../data/loader.rkt"
            "../main.rkt"
@@ -585,7 +585,6 @@
      (let ()
        (define j (python-check "to_conversions.py"))
        (define x (tensor '((1.5 -2.0) (0.0 3.25))))
-       ;; values, not repr: the float64 dtype suffix is format.rkt's open TODO
        (check-equal? (tensor->list (to x 'float64)) (hash-ref j 'float64_values))
        (check-equal? (format "torch.~a" (tensor-dtype (to x 'float64)))
                      (hash-ref j 'float64_dtype))
@@ -759,6 +758,28 @@
                      (hash-ref j 'randn_like_dtype))
        (check-equal? (tensor-shape (randn-like n64))
                      (hash-ref j 'randn_like_shape)))
+     (let ()
+       (define j (python-check "bytes_ingestion.py"))
+       (define t (tensor #"\0\1\2\377"))
+       (check-equal? (tensor->list t) (hash-ref j 'values))
+       (check-equal? (format "torch.~a" (tensor-dtype t)) (hash-ref j 'dtype))
+       (check-equal? (tensor->repr t) (hash-ref j 'repr))
+       (check-equal? (tensor->repr (reshape t 2 2)) (hash-ref j 'repr_2x2))
+       (check-equal? (tensor->repr (tensor #"")) (hash-ref j 'empty_repr))
+       (check-equal? (tensor->repr
+                      (tensor (apply bytes-append
+                                     (make-list 5 (list->bytes (range 256))))))
+                     (hash-ref j 'summarized_repr))
+       (check-equal? (tensor->list
+                      (div (to (tensor (list->bytes (range 256))) 'float32)
+                           255.0))
+                     (hash-ref j 'scaled))
+       (check-equal? (format "torch.~a" (tensor-dtype (to t 'int64)))
+                     (hash-ref j 'as_int64_dtype))
+       (check-equal? (tensor->repr (to (tensor '((1.5 -2.0) (0.0 3.25)))
+                                       'float64))
+                     (hash-ref j 'float64_repr))
+       (check-equal? (item (tensor #"\7")) (hash-ref j 'item)))
      (let ()
        ;; build on CPU, move, then train — Adam created before the move
        (define (train-on device)

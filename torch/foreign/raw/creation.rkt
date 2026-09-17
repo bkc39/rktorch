@@ -1,6 +1,6 @@
 #lang racket/base
 
-(require (only-in ffi/unsafe _double _fun _int64 _uint64)
+(require (only-in ffi/unsafe _bytes _double _fun _int64 _uint64)
          (only-in ffi/vector _f32vector _s64vector)
          (only-in "memory.rkt" _tr-device-type tensor-allocator)
          (only-in "syntax.rkt" _Tensor/null define-torch)
@@ -19,7 +19,9 @@
          tr-from-data/raw
          tr-from-data-i64-on-device/raw
          tr-from-data-i64/raw
-         tr-from-data-on-device/raw)
+         tr-from-data-on-device/raw
+         tr-from-data-u8-on-device/raw
+         tr-from-data-u8/raw)
 
 (define-torch tr-zeros/raw
   (_fun (dims : (_s64vector i)) (ndim : _int64) -> _Tensor/null)
@@ -136,4 +138,24 @@
         (device-index : _int64)
         -> _Tensor/null)
   #:c-id tr_from_data_i64_on_device
+  #:wrap tensor-allocator)
+
+(define-torch tr-from-data-u8/raw
+  (_fun (data : _bytes)
+        (numel : _uint64)
+        (dims : (_s64vector i))
+        (ndim : _int64)
+        -> _Tensor/null)
+  #:c-id tr_from_data_u8
+  #:wrap tensor-allocator)
+
+(define-torch tr-from-data-u8-on-device/raw
+  (_fun (data : _bytes)
+        (numel : _uint64)
+        (dims : (_s64vector i))
+        (ndim : _int64)
+        (device-type : _tr-device-type)
+        (device-index : _int64)
+        -> _Tensor/null)
+  #:c-id tr_from_data_u8_on_device
   #:wrap tensor-allocator)

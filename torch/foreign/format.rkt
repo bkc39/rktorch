@@ -1,7 +1,5 @@
 #lang racket/base
 
-;; TODO: dtype suffixes for non-float32 non-empty tensors.
-
 (require (only-in racket/format ~r)
          (only-in racket/list append-map drop take)
          (only-in racket/math infinite? nan?)
@@ -137,11 +135,12 @@
                                        max-width)))
                   sep #:before-first "[" #:after-last "]")]))
 
-(define (tensor->pytorch-repr flat dims #:mode [mode #f])
+(define (tensor->pytorch-repr flat dims #:mode [mode #f] #:suffix [suffix ""])
   (define-values (fmt max-width) (make-formatter flat mode))
   (string-append repr-opener
                  (format-nested (nest flat dims) dims
                                 (string-length repr-opener) fmt max-width)
+                 suffix
                  ")"))
 
 (define (tree-values node)
@@ -150,9 +149,11 @@
     [(list? node) (append-map tree-values node)]
     [else (list node)]))
 
-(define (tensor-tree->pytorch-repr tree dims #:mode [mode #f])
+(define (tensor-tree->pytorch-repr tree dims
+                                   #:mode [mode #f] #:suffix [suffix ""])
   (define-values (fmt max-width) (make-formatter (tree-values tree) mode))
   (string-append repr-opener
                  (format-nested tree dims
                                 (string-length repr-opener) fmt max-width)
+                 suffix
                  ")"))

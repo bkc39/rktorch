@@ -7,7 +7,7 @@
          (only-in net/url string->url get-pure-port call/input-url)
          (only-in file/gunzip gunzip-through-ports)
          (only-in "../private/util.rkt" with-temporary-file)
-         (only-in "../main.rkt" tensor reshape to-dtype))
+         (only-in "../main.rkt" div reshape tensor to-dtype))
 
 (provide read-idx
          idx->images
@@ -30,14 +30,12 @@
 
 (define (idx->images bs)
   (define-values (dims data) (read-idx bs))
-  (define floats
-    (for/list ([b (in-bytes data)]) (/ (exact->inexact b) 255.0)))
-  (apply reshape (tensor floats)
+  (apply reshape (div (to-dtype (tensor data) 'float32) 255.0)
          (list (car dims) 1 (cadr dims) (caddr dims))))
 
 (define (idx->labels bs)
   (define-values (_dims data) (read-idx bs))
-  (to-dtype (tensor (for/list ([b (in-bytes data)]) b)) 'int64))
+  (to-dtype (tensor data) 'int64))
 
 (define-runtime-path images-fixture "fixtures/mnist-256-images-idx3-ubyte")
 (define-runtime-path labels-fixture "fixtures/mnist-256-labels-idx1-ubyte")

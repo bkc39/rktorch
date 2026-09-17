@@ -37,11 +37,14 @@ linked against libtorch via `find_package(Torch)`.
 
 ### v1 surface
 
-CPU-first; float32 + inferred int64 (#44). From `torch`:
+CPU-first; float32 + inferred int64 (#44) + uint8 from bytes (#58). From
+`torch`:
 
 - v0 core: `torch-version manual-seed! randn tensor-shape tensor-numel
   tensor->list tensor->vector tensor->repr tensor->string` (+
-  `tensor-dtype`; `tensor` infers int64 for all-integer data, #44; the
+  `tensor-dtype`; `tensor` infers int64 for all-integer data, #44, and
+  builds a uint8 tensor from a byte string with no boxed conversion, #58,
+  the ingestion path for image payloads and raw file buffers; the
   unprefixed property names `shape`/`dtype`/`numel` alias the tensor-
   forms; `device` doubles as query-or-construct — the
   torch.device-vs-x.device hybrid; comparison masks are first-class
