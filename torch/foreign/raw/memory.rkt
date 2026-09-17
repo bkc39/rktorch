@@ -343,8 +343,8 @@
 ;; a full collection reaches them, and the budget spaces those out: after
 ;; one that took t, the next waits t over the budget. A forward pass with
 ;; gradients off is the other case: its garbage is as young as garbage gets,
-;; so that trough asks for a minor collection first, on a budget of its own,
-;; and pays for a full one only with what survives.
+;; so that trough asks for a minor collection first and pays for a full one
+;; only with what survives, the two stages splitting the budget.
 (define (margin-over floor)
   (or (trough-margin)
       (max trough-margin-min (min floor trough-margin-max))))
@@ -375,7 +375,7 @@
    (lambda ()
      (for/sum ([live (in-hash-values live-bytes)]) live))))
 
-(define (collect-young-at-trough!)
+(define (collect-young-at-trough! budget)
   (define started (current-inexact-milliseconds))
   (when (and (>= started (unbox next-minor-ms))
              (pair? (devices-over-floor)))
@@ -384,7 +384,7 @@
     (drain-finalizers!)
     (define finished (current-inexact-milliseconds))
     (set-box! next-minor-ms
-              (+ finished (/ (- finished started) (trough-budget))))
+              (+ finished (/ (- finished started) budget)))
     (set-box! trough-minor-count (add1 (unbox trough-minor-count)))
     (set-box! pressure-reclaimed-bytes
               (+ (max 0 (- before (ledger-total)))
@@ -393,8 +393,9 @@
 (define (collect-at-trough! #:young? [young? #f])
   (unless (in-atomic-mode?)
     (lower-trough-floors!)
+    (define budget (if young? (/ (trough-budget) 2) (trough-budget)))
     (when young?
-      (collect-young-at-trough!))
+      (collect-young-at-trough! budget))
     (define started (current-inexact-milliseconds))
     (when (and (>= started (unbox next-trough-ms))
                (pair? (devices-over-floor)))
@@ -407,7 +408,7 @@
            (hash-set! accounted-since dev 0))))
       (define finished (current-inexact-milliseconds))
       (set-box! next-trough-ms
-                (+ finished (/ (- finished started) (trough-budget))))
+                (+ finished (/ (- finished started) budget)))
       (set-box! trough-collection-count
                 (add1 (unbox trough-collection-count)))
       (set-box! pressure-reclaimed-bytes
