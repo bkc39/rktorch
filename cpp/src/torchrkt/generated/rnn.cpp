@@ -42,7 +42,7 @@ int tr_gen_gru_input(const tr_tensor* input, const tr_tensor* hx,
                      bool train, bool bidirectional, bool batch_first,
                      tr_tensor** out0, tr_tensor** out1) {
   if (!input || !hx || !params || params_len < 0 || !out0 || !out1) {
-    return torchrkt::null_arg_status("tr_gen_gru_input");
+    return torchrkt::null_arg_outputs("tr_gen_gru_input", {out0, out1});
   }
   return torchrkt::alloc_results("tr_gen_gru_input", {out0, out1}, [&] {
     std::vector<at::Tensor> params_vec;
@@ -66,7 +66,7 @@ int tr_gen_lstm_input(const tr_tensor* input, const tr_tensor* const* hx,
                       tr_tensor** out2) {
   if (!input || !hx || hx_len < 0 || !params || params_len < 0 || !out0 ||
       !out1 || !out2) {
-    return torchrkt::null_arg_status("tr_gen_lstm_input");
+    return torchrkt::null_arg_outputs("tr_gen_lstm_input", {out0, out1, out2});
   }
   return torchrkt::alloc_results("tr_gen_lstm_input", {out0, out1, out2}, [&] {
     std::vector<at::Tensor> hx_vec;
