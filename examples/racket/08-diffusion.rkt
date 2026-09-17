@@ -63,16 +63,20 @@ stays on the GPU.
 entry the test harness and the parity twin drive: a small unconditional
 @racket[UNet], base 64, two levels with attention at 16x16 and no dropout, a
 @racket[linear-schedule], five full-batch @racket[adam] steps on the committed
-256-image fixture, and the per-step losses back. As in the earlier examples
-the process default device is set for the dynamic extent of the run with
-@racket[with-default-device], so the schedule's tables and the model land
-together.
+256-image fixture, and the per-step losses back. @racket[#:batch] trains on a
+prefix of the fixture instead: the tests take four images for two steps, which
+drives every kernel forward and backward without the gigabytes of activations
+a full-batch step holds. As in the earlier examples the process default device
+is set for the dynamic extent of the run with @racket[with-default-device], so
+the schedule's tables and the model land together.
 
 @chunk[<r08-run>
-(define (run-example #:steps [steps 5] #:device [device (pick-device)])
+(define (run-example #:steps [steps 5] #:batch [batch #f]
+                     #:device [device (pick-device)])
   (with-default-device device
     (manual-seed! 0)
-    (define-values (xs _ys) (load-cifar10-fixture))
+    (define-values (all-xs _ys) (load-cifar10-fixture))
+    (define xs (if batch (narrow all-xs 0 0 batch) all-xs))
     (define net (UNet #:base 64 #:mults '(1 2) #:blocks 1 #:attention '(16)
                       #:dropout 0))
     (define sched (linear-schedule))

@@ -19,9 +19,10 @@
 
 (module+ test
   (require rackunit)
-  (define-values (losses net device) (run-example #:device 'cpu))
+  (define-values (losses net device)
+    (run-example #:device 'cpu #:batch 4 #:steps 2))
   (check-equal? device 'cpu)
-  (check-equal? (length losses) 5)
+  (check-equal? (length losses) 2)
   (check-true (andmap (lambda (l) (and (rational? l) (not (nan? l)))) losses)
               (format "non-finite loss: ~a" losses))
   (check-true (< (last losses) (first losses))
@@ -38,7 +39,8 @@
   ;; arm checks convergence, never equality with the CPU losses above.
   (define accel (accelerator-if-available))
   (unless (eq? (device-type accel) 'cpu)
-    (define-values (a-losses a-net _a-dev) (run-example #:device accel))
+    (define-values (a-losses a-net _a-dev)
+      (run-example #:device accel #:batch 4 #:steps 2))
     (check-equal? (tensor-device (car (parameters a-net))) accel)
     (check-true (andmap (lambda (l) (and (rational? l) (not (nan? l)))) a-losses)
                 (format "non-finite loss on ~a: ~a" accel a-losses))
