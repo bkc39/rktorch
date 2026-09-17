@@ -3,8 +3,8 @@
 (require (only-in racket/contract/base -> and/c listof >/c)
          (only-in racket/list filter-map)
          (only-in "../foreign.rkt"
-                  add clamp div maybe-grad mul sqrt sum tensor? with-no-grad
-                  zeros)
+                  add clamp div maybe-grad mul sqrt sum tensor-device tensor?
+                  to-device with-no-grad zeros)
          (only-in "../generated.rkt" [mul-tensor! g:mul-tensor!])
          (only-in "../private/contract.rkt" define/contract-out))
 
@@ -17,11 +17,12 @@
     (cond
       [(null? grads) (zeros)]
       [else
+       (define home (tensor-device (car grads)))
        (define total
          (sqrt (for/fold ([acc (sum (mul (car grads) (car grads)))])
                          ([g (in-list (cdr grads))])
-                 (add acc (sum (mul g g))))))
+                 (add acc (to-device (sum (mul g g)) home)))))
        (define scale (clamp (div max-norm (add total 1e-6)) #:max 1.0))
        (for ([g (in-list grads)])
-         (g:mul-tensor! g scale))
+         (g:mul-tensor! g (to-device scale (tensor-device g))))
        total])))
