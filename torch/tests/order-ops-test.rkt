@@ -35,7 +35,8 @@
     (check-equal? (sort '("bb" "a" "ccc") > #:key string-length)
                   '("ccc" "bb" "a"))
     (check-equal? (sort '((2 . a) (1 . b)) < #:key car #:cache-keys? #t)
-                  '((1 . b) (2 . a))))
+                  '((1 . b) (2 . a)))
+    (check-equal? (sort '(3 1 2) < #:key #f) '(1 2 3)))
 
   (test-case "each form of sort refuses the other's arguments"
     (check-exn exn:fail:contract? (lambda () (sort (tensor '(1.0 2.0)) <)))
@@ -79,7 +80,7 @@
     (check-equal? (tensor->list (randn 4)) expected))
 
   (test-case "multinomial refuses a rank-3 tensor and a zero sample count"
-    (check-exn exn:fail:contract? (lambda () (multinomial (ones 2 2 2) 1)))
+    (check-exn #rx"probabilities" (lambda () (multinomial (ones 2 2 2) 1)))
     (check-exn exn:fail:contract? (lambda () (multinomial (ones 3) 0))))
 
   (test-case "nll-loss over log-softmax is cross-entropy"
