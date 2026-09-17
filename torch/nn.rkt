@@ -4,7 +4,8 @@
 ;; unused
 #|review: ignore|#
 
-(require (except-in "nn/buffer.rkt" Buffer?)
+(require "nn/batch-norm.rkt"
+         (except-in "nn/buffer.rkt" Buffer?)
          (submod "nn/buffer.rkt" checked)
          "nn/conv.rkt"
          "nn/dropout.rkt"
@@ -105,6 +106,10 @@
          layer-norm?
          GroupNorm
          group-norm?
+         BatchNorm2d
+         batch-norm2d?
+         BatchNorm1d
+         batch-norm1d?
          Sequential
          sequential?)
 
@@ -128,7 +133,10 @@
 
 (provide mse-loss
          cross-entropy
-         ctc-loss)
+         ctc-loss
+         binary-cross-entropy-with-logits
+         huber-loss
+         l1-loss)
 
 (provide state-dict
          save-state!
