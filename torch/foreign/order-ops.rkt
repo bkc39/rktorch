@@ -2,7 +2,8 @@
 
 (require (only-in racket/base [sort base:sort])
          (only-in racket/contract/base
-                  -> ->* ->i and/c any any/c none/c or/c unsupplied-arg?)
+                  -> ->* ->i and/c any any/c flat-named-contract none/c or/c
+                  unsupplied-arg?)
          (prefix-in g: (only-in "../generated.rkt"
                                 argsort multinomial sort-tensor topk))
          (only-in "../private/contract.rkt" define/contract-out)
@@ -17,7 +18,7 @@
 (define sort/c
   (->i ([v (or/c tensor? list?)])
        ([less-than? (v) (if (tensor? v) none/c (any/c any/c . -> . any/c))]
-        #:key [key (v) (if (tensor? v) none/c (any/c . -> . any/c))]
+        #:key [key (v) (if (tensor? v) none/c (or/c #f (any/c . -> . any/c)))]
         #:cache-keys? [cache-keys? (v) (if (tensor? v) none/c boolean?)]
         #:dim [dim (v) (if (tensor? v) index/c none/c)]
         #:descending? [descending? (v) (if (tensor? v) boolean? none/c)])
@@ -68,7 +69,9 @@
   (g:topk t k dim largest? sorted?))
 
 (define probabilities/c
-  (and/c tensor? (lambda (t) (<= 1 (length (tensor-shape t)) 2))))
+  (flat-named-contract
+   'probabilities
+   (and/c tensor? (lambda (t) (<= 1 (length (tensor-shape t)) 2)))))
 
 (define/contract-out (multinomial probabilities num-samples ;; noqa
                                   #:replacement? [replacement? #f]
