@@ -184,13 +184,18 @@ broader ATen surface, and the portable raco-catalog candidate story.
 
 ## Build Commands
 
+[`docs/building.md`](docs/building.md) is the same guide written for people;
+a change to a build target or a shell belongs in both.
+
 ```bash
 nix build              # builds cpp, installs the pkg, runs raco test + examples
 nix build .#cpp        # CMake build + gtest only
-nix flake check        # everything: cpp, format, tidy, line-count, racket
+nix flake check        # the Nix checks: cpp, format, tidy, line-count, racket
+                       # (CI also runs the Resyntax gate and codegen-drift)
 nix develop            # dev shell (includes a Python with `torch`)
 nix develop .#ci       # lean shell without Python torch (used by the lint job)
 nix develop .#cuda     # linux-only: CUDA-linked shim + host driver (#14)
+nix develop .#ocaml    # adds OCaml + Jane Street's Torch bindings (reference)
 ./result/bin/torch  # runs (module+ main): prints version + a 2x2 draw
 ```
 
@@ -203,7 +208,8 @@ ctest --test-dir cpp/build --output-on-failure
 
 raco test torch/          # FFI unit tests (+ self-skipping parity test)
 raco test examples/test/     # literate-example runners
-racket -l torch           # REPL with the package
+racket -ie "(require torch)"   # REPL with the package loaded
+                               # (`racket -l torch` runs module+ main instead)
 
 resyntax analyze --local-git-repository . origin/master   # lint gate
                                      # (CI fails on any suggestion; scans
