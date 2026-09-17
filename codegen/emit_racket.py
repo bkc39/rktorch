@@ -32,7 +32,7 @@ def emit_wrappers(shards: dict[str, list[Op]]) -> str:
         ";; and a thin uncontracted wrapper. Promotion into the contracted",
         ";; public facade (torch/foreign.rkt) is hand-curated.",
         ";;",
-        ";; Conventions: an optional tensor/int/int-array argument takes #f",
+        ";; Conventions: an optional tensor/int/int-array/scalar argument takes #f",
         ";; for \"absent\" (an empty list '() is also absent for int-arrays);",
         ";; loss ops follow ATen (nll_loss wants log-probabilities,",
         ";; cross_entropy_loss wants raw logits).",

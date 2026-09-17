@@ -10,6 +10,7 @@ from .ir import (
     OPTIONAL_DTYPE,
     OPTIONAL_INT64,
     OPTIONAL_INT_ARRAY,
+    OPTIONAL_SCALAR,
     OPTIONAL_TENSOR,
     SCALAR,
     TENSOR,
@@ -37,10 +38,12 @@ _C_DECLS = {
     OPTIONAL_INT64: "int64_t {n}, bool {n}_has",
     OPTIONAL_INT_ARRAY: "const int64_t* {n}, int64_t {n}_len, bool {n}_has",
     OPTIONAL_DTYPE: "int32_t {n}",  # -1 == c10::nullopt
+    OPTIONAL_SCALAR: "double {n}, bool {n}_has",
 }
 
 # Kinds whose C decl mentions `bool`, so the header needs <stdbool.h>.
-_BOOL_DECL_KINDS = frozenset({BOOL, OPTIONAL_INT64, OPTIONAL_INT_ARRAY})
+_BOOL_DECL_KINDS = frozenset(
+    {BOOL, OPTIONAL_INT64, OPTIONAL_INT_ARRAY, OPTIONAL_SCALAR})
 
 
 def _c_decl(p: Param, *, receiver: bool, header: bool = False) -> str:
@@ -82,6 +85,9 @@ def _arg_expr(p: Param) -> str:
                 f"at::IntArrayRef({p.name}, "
                 f"static_cast<size_t>({p.name}_len))) "
                 f": c10::optional<at::IntArrayRef>()")
+    if p.kind == OPTIONAL_SCALAR:
+        return (f"{p.name}_has ? c10::optional<at::Scalar>({p.name}) "
+                f": c10::optional<at::Scalar>()")
     if p.kind == OPTIONAL_DTYPE:
         return (f"{p.name} < 0 ? c10::optional<at::ScalarType>() "
                 f": c10::optional<at::ScalarType>("
