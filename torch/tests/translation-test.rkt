@@ -2,6 +2,10 @@
 
 (module+ test
   (require rackunit
+           (only-in file/zip zip)
+           (only-in racket/file
+                    display-to-file file->bytes make-directory*
+                    make-temporary-directory delete-directory/files)
            (only-in racket/list first last)
            "../data/translation.rkt"
            "../main.rkt")
@@ -53,6 +57,32 @@
     (check-equal? (encode-sentence v "je suis bien") '(3 6 5 2))
     (check-exn #rx"word not in the vocabulary"
                (lambda () (encode-sentence v "je suis perdu"))))
+
+  (test-case "a vocabulary's words cannot be edited under its id map"
+    (define v (words->vocab '("je vais bien")))
+    (check-pred immutable? (word-vocab-words v))
+    (check-exn exn:fail:contract?
+               (lambda () (vector-set! (word-vocab-words v) 3 "tu"))))
+
+  (test-case "only a complete archive holding the pairs is accepted"
+    (define dir (make-temporary-directory))
+    (define whole (build-path dir "whole.zip"))
+    (define cut (build-path dir "cut.zip"))
+    (parameterize ([current-directory dir])
+      (make-directory* "data")
+      (display-to-file "I am cold.\tJ'ai froid.\n" "data/eng-fra.txt")
+      (display-to-file "other" "data/other.txt")
+      (zip whole "data/eng-fra.txt")
+      (zip (build-path dir "other.zip") "data/other.txt"))
+    (define bytes (file->bytes whole))
+    (call-with-output-file cut
+      (lambda (out)
+        (write-bytes bytes out 0 (quotient (bytes-length bytes) 2))))
+    (check-true (translation-archive? whole))
+    (check-false (translation-archive? cut))
+    (check-false (translation-archive? (build-path dir "other.zip")))
+    (check-false (translation-archive? (build-path dir "missing.zip")))
+    (delete-directory/files dir))
 
   (test-case "decode-tokens stops at <eos> and skips the other specials"
     (define v (words->vocab '("je vais bien")))

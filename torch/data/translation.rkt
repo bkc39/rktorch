@@ -1,6 +1,8 @@
 #lang racket/base
 
-(require (only-in file/unzip call-with-unzip-entry)
+(require (only-in file/unzip
+                  call-with-unzip-entry read-zip-directory
+                  zip-directory-contains?)
          (only-in net/url call/input-url get-pure-port string->url)
          (only-in racket/contract/base
                   -> ->* and/c any/c cons/c contract-out listof or/c vectorof)
@@ -78,9 +80,11 @@
 (define/contract-out (words->vocab sentences) ;; noqa
   (-> (listof string?) word-vocab?)
   (define words
-    (list->vector
-     (append special-words
-             (remove-duplicates (apply append (map sentence-words sentences))))))
+    (vector->immutable-vector
+     (list->vector
+      (append special-words
+              (remove-duplicates
+               (apply append (map sentence-words sentences)))))))
   (word-vocab words
               (for/hash ([w (in-vector words)] [i (in-naturals)])
                 (values w i))))
@@ -163,9 +167,11 @@
       (string->path override)
       (build-path (find-system-path 'cache-dir) "rktorch" "translation")))
 
-(define (zip-archive? path)
-  (call-with-input-file path
-    (lambda (in) (equal? (read-bytes 4 in) #"PK\3\4"))))
+;; A zip's directory sits at its end, so a truncated download fails here.
+(define/contract-out (translation-archive? path) ;; noqa
+  (-> path-string? boolean?)
+  (with-handlers ([exn:fail? (lambda (_e) #f)])
+    (zip-directory-contains? (read-zip-directory path) archive-entry)))
 
 (define (fetch-archive!)
   (define dest (build-path (translation-cache-dir) archive-name))
@@ -178,10 +184,10 @@
                       (lambda (in)
                         (call-with-output-file tmp #:exists 'truncate
                           (lambda (out) (copy-port in out)))))
-      (unless (zip-archive? tmp)
+      (unless (translation-archive? tmp)
         (raise (exn:fail:network
-                (format "load-translation-pairs: ~a is not a zip archive; not caching"
-                        archive-url)
+                (format "load-translation-pairs: ~a did not answer a complete archive holding ~a; not caching"
+                        archive-url archive-entry)
                 (current-continuation-marks))))
       (rename-file-or-directory tmp dest #t)))
   dest)

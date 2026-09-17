@@ -100,7 +100,7 @@ norm is at most @racket[max-norm], leaving their direction alone.
 @bold{The deterministic core.} @racket[run-example] is what the test harness
 and the PyTorch twin both drive: the committed 841-character fixture in
 16-character blocks, full batch, five clipped @racket[adam] steps from seed 0.
-Under that seed the embedding, the LSTM's eight-tensor flat weight list and the
+Under that seed the embedding, the LSTM's four weight tensors and the
 head start from PyTorch's values, and the losses and final parameters track
 @tt{torch.optim.Adam} with @tt{clip_grad_norm_} within float tolerance.
 
@@ -128,8 +128,11 @@ from a zero state, so the model learns to find its footing within one block;
 a block of 64 characters is a sentence or two of Conrad, which is enough.
 @racket[train-excerpt] runs it offline on the committed opening of Part I;
 @racket[train-novel] downloads the whole novella (cached) and trains a
-two-layer, 256-wide model with dropout between the layers, a few minutes on a
-GPU.
+two-layer, 256-wide model with dropout between the layers, about a minute on
+a GPU. The runner, @filepath{examples/test/12-char-rnn.rkt}, trains the novella
+model and prints a sample; @envvar{EXCERPT} switches it to the offline
+excerpt, and @envvar{EPOCHS}, @envvar{TEMPERATURE} and @envvar{SEED} override
+the defaults.
 
 @chunk[<r12-train>
 (define-runtime-path excerpt-path "../data/heart-of-darkness-part-i.txt")

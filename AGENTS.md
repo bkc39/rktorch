@@ -98,7 +98,8 @@ CPU-first; float32 + inferred int64 (#44) + uint8 from bytes (#58). From
 - translation (`torch/data/translation.rkt`, #153): the PyTorch seq2seq
   tutorial's eng-fra pairs, `load-translation-pairs` (zip cached, 11445
   pairs after the tutorial's normalisation and filter) and
-  `load-translation-fixture` (287 committed pairs), `parse-pairs`
+  `load-translation-fixture` (287 committed pairs),
+  `translation-archive?`, `parse-pairs`
   `normalize-sentence`, word vocabularies with `<pad>` 0 / `<sos>` 1 /
   `<eos>` 2 (`pairs->vocabs` `encode-sentence` `decode-tokens`), and
   `pairs->tensors` padding to a width

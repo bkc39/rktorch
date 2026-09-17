@@ -30,7 +30,13 @@ task is translating into English, as in the tutorial.
 Downloads the tutorial's archive (3 MB) on first use, caches it under
 @envvar{RKTORCH_TRANSLATION_DIR} or the system cache directory, and parses
 @filepath{data/eng-fra.txt} out of it with @racket[parse-pairs]. A response
-that is not a zip archive is not cached.
+that fails @racket[translation-archive?], an error page or a download cut
+short, is not cached.
+}
+
+@defproc[(translation-archive? [path path-string?]) boolean?]{
+Whether the file at @racket[path] is a complete zip archive holding
+@filepath{data/eng-fra.txt}.
 }
 
 @defproc[(load-translation-fixture [#:source source (or/c 'eng 'fra) 'fra])

@@ -1,7 +1,5 @@
 #lang racket/base
 
-;; Runner + tests for the literate ../../examples/racket/12-char-rnn.rkt.
-
 (require (only-in racket/list first last)
          (only-in racket/math nan?)
          torch
@@ -9,8 +7,6 @@
          "../racket/12-char-rnn.rkt")
 
 (module+ main
-  ;; EXCERPT=1 trains offline on the committed Part I excerpt; otherwise the
-  ;; full novella (downloads + caches). EPOCHS, TEMPERATURE and SEED override.
   (printf "device: ~a\n" (pick-device))
   (define epochs (string->number (or (getenv "EPOCHS") "0")))
   (define-values (net vocab)
@@ -58,7 +54,6 @@
   (check-exn #rx"prompt must be non-empty" (lambda () (sample net vocab "")))
   (check-exn #rx"temperature must be positive"
              (lambda () (sample net vocab "The " #:temperature 0)))
-  ;; A two-layer net with dropout carries a [2, 1, H] state through sampling.
   (define deep (char-rnn (vector-length vocab) #:num-layers 2 #:dropout 0.2))
   (check-equal? (string-length (sample deep vocab "It " #:steps 5)) 8)
   ;; Device RNG streams differ from the CPU's, so the on-device arm checks
