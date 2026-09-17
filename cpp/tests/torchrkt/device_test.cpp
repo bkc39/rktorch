@@ -133,6 +133,14 @@ TEST(TorchrktDevice, AllocatorSettingsRejectsNull) {
   EXPECT_STRNE(tr_last_error(), "");
 }
 
+TEST(TorchrktDevice, AllocatorSettingsIsNoOpSuccessWithoutCuda) {
+  if (tr_cuda_is_available() != 0) {
+    GTEST_SKIP() << "CUDA present; the success path is CudaRoundTrip";
+  }
+  EXPECT_EQ(tr_cuda_set_allocator_settings("expandable_segments:True"), 0)
+      << tr_last_error();
+}
+
 TEST(TorchrktDevice, EmptyCacheIsNoOpSuccessWithoutCuda) {
   if (tr_cuda_is_available() != 0) {
     GTEST_SKIP() << "CUDA present; the success path is CudaRoundTrip";

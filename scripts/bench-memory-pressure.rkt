@@ -18,7 +18,7 @@
 (require racket/format
          (only-in racket/string string-split)
          torch
-         (only-in torch/foreign/raw/memory trough-budget trough-margin)
+         (only-in torch/foreign/raw/pressure trough-budget trough-margin)
          torch/nn)
 
 (define (env name default)

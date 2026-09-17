@@ -5,10 +5,9 @@
                   _tr-device-type
                   tensor-allocator
                   tr-cuda-empty-cache/raw
-                  tr-cuda-mem-get-info/raw
-                  tr-cuda-memory-stats/raw
                   tr-mps-empty-cache/raw
                   tr-tensor-device/raw)
+         (only-in "pressure.rkt" install-cuda-queries!)
          (only-in "syntax.rkt" _Tensor _Tensor/null define-torch)
          (only-in "tensor.rkt" _tr-dtype))
 
@@ -28,6 +27,34 @@
          tr-tensor-to/raw
          tr-tensor-to!/raw
          tr-tensor-device/raw)
+
+(define-torch tr-cuda-mem-get-info/raw
+  (_fun (index : _int64)
+        (free : (_ptr o _int64))
+        (total : (_ptr o _int64))
+        -> (rc : _int)
+        -> (values rc free total))
+  #:c-id tr_cuda_mem_get_info)
+
+(define-torch tr-cuda-memory-stats/raw
+  (_fun (index : _int64)
+        (allocated : (_ptr o _int64))
+        (reserved : (_ptr o _int64))
+        (peak : (_ptr o _int64))
+        -> (rc : _int)
+        -> (values rc allocated reserved peak))
+  #:c-id tr_cuda_memory_stats)
+
+;; the pressure engine sits below this module, so its two CUDA readings are
+;; handed down; #f is "unknown"
+(install-cuda-queries!
+ #:capacity (lambda (index)
+              (define-values (rc _free total) (tr-cuda-mem-get-info/raw index))
+              (and (zero? rc) total))
+ #:allocated (lambda (index)
+               (define-values (rc allocated _reserved _peak)
+                 (tr-cuda-memory-stats/raw index))
+               (and (zero? rc) allocated)))
 
 (define-torch tr-cuda-reset-peak-stats/raw
   (_fun (index : _int64) -> _int)

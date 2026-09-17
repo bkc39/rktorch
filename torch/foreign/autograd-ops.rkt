@@ -19,7 +19,7 @@
                   tr-tensor-requires-grad/raw
                   tr-tensor-sub!/raw
                   tr-tensor-zero!/raw)
-         (only-in "raw/memory.rkt" collect-at-trough!)
+         (only-in "raw/pressure.rkt" collect-at-trough!)
          (only-in "structs.rkt" tensor? wrap-tensor))
 
 (provide collect-at-forward-trough!

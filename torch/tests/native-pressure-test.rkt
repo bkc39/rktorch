@@ -6,10 +6,10 @@
                     cpu-device finalizer-diagnostics native-memory-limit
                     native-memory-use reclaim-native-memory! with-no-grad
                     zeros)
-           (only-in "../foreign/raw/memory.rkt"
+           (only-in "../foreign/raw/memory.rkt" native-memory-use/fold)
+           (only-in "../foreign/raw/pressure.rkt"
                     allocator-reading collect-at-trough!
-                    native-memory-use/fold reset-pressure-state!
-                    trough-budget trough-margin)
+                    reset-pressure-state! trough-budget trough-margin)
            (only-in "../nn.rkt" Linear Sequential))
 
   (define mib (* 1024 1024))
@@ -156,4 +156,11 @@
       (define before (trough-minors))
       (define y (net x))
       (check-equal? (trough-minors) before)
-      (check-true (and y #t)))))
+      (check-true (and y #t))))
+
+  (test-case "the diagnostics carry every collection counter"
+    (define keys (map car (finalizer-diagnostics)))
+    (for ([k (in-list '(runs failures messages ledger-entries
+                        pressure-collections pressure-reclaimed
+                        trough-collections trough-minors))])
+      (check-not-false (memq k keys) (format "missing ~a" k)))))

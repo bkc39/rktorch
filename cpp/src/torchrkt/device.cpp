@@ -134,6 +134,24 @@ void set_default_device(tr_device_type type, int64_t index) {
   g_default_device.store(pack_device(type, index), std::memory_order_seq_cst);
 }
 
+#ifdef TORCHRKT_WITH_CUDA_ALLOCATOR
+namespace {
+
+// the precondition every per-device CUDA query shares
+c10::DeviceIndex checked_cuda_index(int64_t device_index) {
+  if (!torch::cuda::is_available()) {
+    throw std::runtime_error("CUDA is not available");
+  }
+  if (device_index < 0 ||
+      device_index >= static_cast<int64_t>(torch::cuda::device_count())) {
+    throw std::invalid_argument("CUDA device index out of range");
+  }
+  return static_cast<c10::DeviceIndex>(device_index);
+}
+
+}  // namespace
+#endif
+
 }  // namespace torchrkt
 
 extern "C" {
@@ -192,13 +210,7 @@ int tr_cuda_memory_stats(int64_t device_index, int64_t* out_allocated,
   });
 #else
   return torchrkt::status_call("tr_cuda_memory_stats", [&] {
-    if (!torch::cuda::is_available()) {
-      throw std::runtime_error("CUDA is not available");
-    }
-    if (device_index < 0 ||
-        device_index >= static_cast<int64_t>(torch::cuda::device_count())) {
-      throw std::invalid_argument("CUDA device index out of range");
-    }
+    const c10::DeviceIndex device = torchrkt::checked_cuda_index(device_index);
     // getDeviceStats throws on a never-initialized allocator; report zeros.
     if (!c10::cuda::CUDACachingAllocator::get()->initialized()) {
       *out_allocated = 0;
@@ -206,8 +218,7 @@ int tr_cuda_memory_stats(int64_t device_index, int64_t* out_allocated,
       *out_peak_allocated = 0;
       return;
     }
-    const auto stats = c10::cuda::CUDACachingAllocator::getDeviceStats(
-        static_cast<c10::DeviceIndex>(device_index));
+    const auto stats = c10::cuda::CUDACachingAllocator::getDeviceStats(device);
     const auto agg =
         static_cast<size_t>(c10::CachingDeviceAllocator::StatType::AGGREGATE);
     *out_allocated = stats.allocated_bytes[agg].current;
@@ -229,15 +240,8 @@ int tr_cuda_mem_get_info(int64_t device_index, int64_t* out_free,
   });
 #else
   return torchrkt::status_call("tr_cuda_mem_get_info", [&] {
-    if (!torch::cuda::is_available()) {
-      throw std::runtime_error("CUDA is not available");
-    }
-    if (device_index < 0 ||
-        device_index >= static_cast<int64_t>(torch::cuda::device_count())) {
-      throw std::invalid_argument("CUDA device index out of range");
-    }
-    const c10::cuda::CUDAGuard guard(
-        static_cast<c10::DeviceIndex>(device_index));
+    const c10::DeviceIndex device = torchrkt::checked_cuda_index(device_index);
+    const c10::cuda::CUDAGuard guard(device);
     size_t free_bytes = 0;
     size_t total_bytes = 0;
     C10_CUDA_CHECK(cudaMemGetInfo(&free_bytes, &total_bytes));
@@ -255,18 +259,11 @@ int tr_cuda_reset_peak_stats(int64_t device_index) {
   });
 #else
   return torchrkt::status_call("tr_cuda_reset_peak_stats", [&] {
-    if (!torch::cuda::is_available()) {
-      throw std::runtime_error("CUDA is not available");
-    }
-    if (device_index < 0 ||
-        device_index >= static_cast<int64_t>(torch::cuda::device_count())) {
-      throw std::invalid_argument("CUDA device index out of range");
-    }
+    const c10::DeviceIndex device = torchrkt::checked_cuda_index(device_index);
     if (!c10::cuda::CUDACachingAllocator::get()->initialized()) {
       return;
     }
-    c10::cuda::CUDACachingAllocator::resetPeakStats(
-        static_cast<c10::DeviceIndex>(device_index));
+    c10::cuda::CUDACachingAllocator::resetPeakStats(device);
   });
 #endif
 }

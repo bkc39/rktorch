@@ -45,10 +45,11 @@
                   collect-and-drain!
                   [finalizer-diagnostics raw:finalizer-diagnostics]
                   [finalizer-failures raw:finalizer-failures]
-                  [native-memory-limit raw:native-memory-limit]
                   [native-memory-use raw:native-memory-use]
                   oom-retry/status
                   reaccount!)
+         (only-in "raw/pressure.rkt"
+                  [native-memory-limit raw:native-memory-limit])
          (only-in "raw/random.rkt" tr-tensor-uniform!/raw)
          (only-in "raw/tensor.rkt"
                   dtype-code->symbol
