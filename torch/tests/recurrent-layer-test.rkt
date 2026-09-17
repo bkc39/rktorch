@@ -71,7 +71,9 @@
     (manual-seed! 0)
     (define gru (GRU 3 4 #:num-layers 2 #:dropout 0.5))
     (define x (randn 5 2 3))
-    (define (run) (let-values ([(out _h) (gru x)]) (tensor->list out)))
+    (define (run)
+      (define-values (out _h) (gru x))
+      (tensor->list out))
     (check-not-equal? (run) (run))
     (eval! gru)
     (check-equal? (run) (run)))
@@ -143,7 +145,7 @@
 
   (cond
     [(not (python-torch-available?))
-     (printf "[recurrent-layer-test] parity skipped: python3 `torch` not available\n")]
+     (displayln "[recurrent-layer-test] parity skipped: python3 `torch` not available")]
     [else
      (define j (python-check "recurrent_layers.py"))
      (check-layer-parity (hash-ref j 'lstm)
