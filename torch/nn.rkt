@@ -17,6 +17,7 @@
          "nn/layer-list.rkt"
          "nn/layer-norm.rkt"
          (except-in "nn/layer.rkt"
+                    move-layer!
                     child-name/c
                     children-by-index
                     children-by-key
