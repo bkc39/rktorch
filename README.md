@@ -29,21 +29,26 @@ on Linux, and MPS on Apple Silicon.
 
 ## Install
 
+> [!NOTE]
+> `raco pkg install torch` is forthcoming. The package goes on the Racket
+> catalog once the library is ready for a release; that work is tracked in
+> [#149](https://github.com/bkc39/rktorch/issues/149).
+
+Until then, build from a checkout with [Nix](https://nixos.org/). The first
+`nix develop` builds `libtorchrkt`, the small C++ shim linked against libtorch,
+and installs the Racket package and its dependencies into the checkout:
+
 ```sh
-raco pkg install torch
+git clone https://github.com/bkc39/rktorch.git
+cd rktorch
+nix develop
+racket -ie "(require torch)"
 ```
 
-then
-
-```racket
-(require torch)
-```
-
-The package needs the native library `libtorchrkt`, a small C++ shim linked
-against libtorch. The catalog entry and its native-library story are being set
-up ([#149](https://github.com/bkc39/rktorch/issues/149)); until then the Nix
-flake builds everything, native library included. See
-[Building from source](docs/building.md).
+[Building from source](docs/building.md) covers the
+[Nix build](docs/building.md#build-and-test) and the
+[development loop](docs/building.md#development-shells): the CUDA and OCaml
+shells, running the tests, and re-staging the native library after a C++ change.
 
 ## Usage
 
