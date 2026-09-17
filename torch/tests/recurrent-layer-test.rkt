@@ -9,6 +9,7 @@
            rackunit
            "../main.rkt"
            "../nn.rkt"
+           (only-in "../generated.rkt" cudnn-rnn-flatten-weight)
            "private/python-env.rkt")
 
   (define (flat ts)
@@ -93,7 +94,8 @@
 
   (test-case "constructor contracts"
     (check-exn exn:fail:contract? (lambda () (LSTM 0 4)))
-    (check-exn exn:fail:contract? (lambda () (GRU 3 4 #:dropout 1.0)))
+    (check-pred gru? (GRU 3 4 #:num-layers 2 #:dropout 1.0))
+    (check-exn exn:fail:contract? (lambda () (GRU 3 4 #:dropout 1.5)))
     (check-exn exn:fail:contract? (lambda () (GRU 3 4 #:num-layers 0))))
 
   (test-case "a checkpoint round-trips through the PyTorch names"
@@ -126,7 +128,13 @@
 
   (test-case "clip-grad-norm! with nothing to clip answers zero"
     (check-= (item (clip-grad-norm! '() 1.0)) 0.0 0.0)
-    (check-exn exn:fail:contract? (lambda () (clip-grad-norm! '() 0))))
+    (check-exn exn:fail:contract? (lambda () (clip-grad-norm! '() -1))))
+
+  (test-case "a bound of zero zeroes the gradients and still answers the norm"
+    (define a (tensor '(3.0 4.0) #:requires-grad? #t))
+    (backward! (sum (* a a 0.5)))
+    (check-= (item (clip-grad-norm! (list a) 0)) 5.0 1e-6)
+    (check-equal? (tensor->list (grad a)) '(0.0 0.0)))
 
   (define (check-layer-parity expected make label)
     (manual-seed! 0)
@@ -174,6 +182,24 @@
                          "GRU without bias")])
 
   (when (cuda-available?)
+    (test-case "cudnn-rnn-flatten-weight packs the weights into one buffer"
+      (manual-seed! 0)
+      (define gru (to (GRU 3 4 #:num-layers 2 #:bidirectional? #t) 'cuda))
+      (define weights (parameters gru))
+      (define before (flat (map (lambda (w) (to-device w 'cpu)) weights)))
+      (define buffer
+        (with-no-grad
+          (cudnn-rnn-flatten-weight weights 4 3 3 4 0 2 #f #t)))
+      (check-equal? (device-type (tensor-device buffer)) 'cuda)
+      (check-true (>= (tensor-numel buffer)
+                      (for/sum ([w (in-list weights)]) (tensor-numel w))))
+      (check-equal? (flat (map (lambda (w) (to-device w 'cpu)) weights)) before)
+      (check-exn #rx"cudnn-rnn-flatten-weight"
+                 (lambda ()
+                   (with-no-grad
+                     (cudnn-rnn-flatten-weight (list (car weights))
+                                               4 3 3 4 0 2 #f #t)))))
+
     (test-case "a layer moved to CUDA flattens its weights and still agrees"
       (manual-seed! 0)
       (define lstm (LSTM 3 4 #:num-layers 2))

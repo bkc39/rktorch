@@ -1,7 +1,7 @@
 #lang racket/base
 
 (require (only-in racket/contract/base
-                  -> ->* </c >=/c and/c any/c contract-out)
+                  -> ->* <=/c >=/c and/c any/c contract-out)
          (only-in "../foreign.rkt"
                   device-type prop:to tensor-device tensor-dtype tensor-shape
                   tensor? with-no-grad zeros)
@@ -79,7 +79,7 @@
     (cons (format "~a_l~a~a" (car entry) layer suffix)
           (apply draw (cdr entry)))))
 
-(define dropout/c (and/c real? (>=/c 0) (</c 1)))
+(define dropout/c (and/c real? (>=/c 0) (<=/c 1)))
 
 (define-syntax-rule (define-recurrent-layer Name make made? gates)
   (define/contract-out (Name input-size hidden-size ;; noqa
