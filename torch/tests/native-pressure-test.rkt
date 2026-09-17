@@ -5,7 +5,9 @@
            (only-in "../foreign.rkt"
                     cpu-device finalizer-diagnostics native-memory-limit
                     native-memory-use reclaim-native-memory! zeros)
-           (only-in "../foreign/raw/memory.rkt" native-memory-use/fold))
+           (only-in "../foreign/raw/memory.rkt"
+                    allocator-reading native-memory-use/fold
+                    reset-pressure-state!))
 
   (define mib (* 1024 1024))
 
@@ -18,7 +20,8 @@
 
   (define (settle!)
     (for ([_ (in-range 3)])
-      (reclaim-native-memory!)))
+      (reclaim-native-memory!))
+    (reset-pressure-state!))
 
   ;; a step: k temporaries of 4 MiB live together, then drop as a batch
   (define (step! k)
@@ -65,4 +68,27 @@
       (define fired (- (collections) before))
       (check-true (> fired 0) "the trigger never fired")
       (check-true (<= fired 5)
-                  (format "~a collections for 120 MiB of live growth" fired)))))
+                  (format "~a collections for 120 MiB of live growth" fired))))
+
+  (test-case "an allocator reading above the mark fires with a small ledger"
+    (settle!)
+    (define before (collections))
+    (parameterize ([native-memory-limit (* 64 mib)]
+                   [allocator-reading (lambda (_dev) (* 200 mib))])
+      (define kept (for/list ([_ (in-range 48)]) (zeros 512 512)))
+      (check-equal? (length kept) 48)
+      (check-true (< (cpu-bytes) (* 64 mib)) "the ledger alone is under the mark")
+      (define fired (- (collections) before))
+      (check-true (> fired 0) "the allocator reading never fired the trigger")
+      (check-true (<= fired 4)
+                  (format "~a collections against a reading that cannot fall"
+                          fired))))
+
+  (test-case "an unknown allocator reading leaves the ledger in charge"
+    (settle!)
+    (define before (collections))
+    (parameterize ([native-memory-limit (* 64 mib)]
+                   [allocator-reading (lambda (_dev) #f)])
+      (define kept (for/list ([_ (in-range 48)]) (zeros 512 512)))
+      (check-equal? (length kept) 48)
+      (check-equal? (collections) before))))

@@ -24,11 +24,14 @@
          reaccount!
          tr-cuda-empty-cache/raw
          tr-cuda-mem-get-info/raw
+         tr-cuda-memory-stats/raw
          tr-mps-empty-cache/raw
          tr-last-error-kind/raw
+         allocator-reading
          native-memory-limit
          native-memory-use
          native-memory-use/fold
+         reset-pressure-state!
          _tr-device-type ;; noqa
          tr-tensor-device/raw
          define-unary/raw
@@ -108,12 +111,15 @@
 (define allocations (make-weak-hasheq))
 (define live-bytes (make-hash))
 (define accounted-since (make-hash))
+(define sampled-since (make-hash))
+(define allocator-sample (make-hash))
 (define collect-interval (make-hash))
 (define high-water (make-hash))
 
 (define native-memory-limit (make-parameter #f))
 (define high-water-fraction 4/5)
 (define interval-divisor 8)
+(define sample-divisor 32)
 (define reclaim-fraction 1/20)
 
 ;; Atomic mode, not a semaphore: finalizers run in atomic mode, where
@@ -144,6 +150,15 @@
         -> (values rc free total))
   #:c-id tr_cuda_mem_get_info)
 
+(define-torch tr-cuda-memory-stats/raw
+  (_fun (index : _int64)
+        (allocated : (_ptr o _int64))
+        (reserved : (_ptr o _int64))
+        (peak : (_ptr o _int64))
+        -> (rc : _int)
+        -> (values rc allocated reserved peak))
+  #:c-id tr_cuda_memory_stats)
+
 (define (account! t)
   (with-handlers ([exn:fail? (lambda (_) #f)])
     (define-values (nb-rc nbytes) (tr-tensor-nbytes/raw t))
@@ -156,7 +171,8 @@
             (lambda ()
               (hash-set! allocations t entry)
               (hash-update! live-bytes dev (lambda (n) (+ n nbytes)) 0)
-              (hash-update! accounted-since dev (lambda (n) (+ n nbytes)) 0)))
+              (hash-update! accounted-since dev (lambda (n) (+ n nbytes)) 0)
+              (hash-update! sampled-since dev (lambda (n) (+ n nbytes)) 0)))
            dev))))
 
 (define (unaccount! t)
@@ -224,28 +240,67 @@
            mark]
           [else cached]))))
 
+;; The allocator's own allocated bytes: the ledger double-counts views and
+;; cannot see storage only the autograd graph holds. #f when unknown.
+(define (cuda-allocated dev)
+  (cond
+    [(eq? (device-type dev) 'cuda)
+     (define-values (rc allocated _reserved _peak)
+       (tr-cuda-memory-stats/raw (device-index dev)))
+     (and (zero? rc) allocated)]
+    [else #f]))
+
+(define allocator-reading (make-parameter cuda-allocated))
+
+(define (sample-allocator! dev)
+  (define reading (or ((allocator-reading) dev) 0))
+  (call-with-ledger
+   (lambda ()
+     (hash-set! allocator-sample dev reading)
+     (hash-set! sampled-since dev 0)))
+  reading)
+
 (define (collect-under-pressure! dev)
   (unless (in-atomic-mode?)
     (define mark (device-high-water dev))
     (when mark
       (define base (quotient mark interval-divisor))
-      (define due?
+      (define-values (gate-open? sample-due?)
         (call-with-ledger
          (lambda ()
-           (and (> (hash-ref live-bytes dev 0) mark)
-                (>= (hash-ref accounted-since dev 0)
-                    (hash-ref collect-interval dev base))))))
-      (when due?
-        (pressure-collect! dev mark base)))))
+           (values (>= (hash-ref accounted-since dev 0)
+                       (hash-ref collect-interval dev base))
+                   (>= (hash-ref sampled-since dev 0)
+                       (quotient mark sample-divisor))))))
+      (when gate-open?
+        (when sample-due?
+          (sample-allocator! dev))
+        (when (> (pressure-reading dev) mark)
+          (pressure-collect! dev mark base))))))
+
+(define (pressure-reading dev)
+  (call-with-ledger
+   (lambda ()
+     (max (hash-ref live-bytes dev 0)
+          (hash-ref allocator-sample dev 0)))))
+
+(define (reset-pressure-state!)
+  (call-with-ledger
+   (lambda ()
+     (for ([table (in-list (list accounted-since sampled-since allocator-sample
+                                 collect-interval high-water))])
+       (hash-clear! table)))))
 
 ;; Reclaiming little means the working set itself sits above the mark, so
 ;; the interval to the next collection doubles instead of thrashing.
 (define (pressure-collect! dev mark base)
-  (define before (call-with-ledger (lambda () (hash-ref live-bytes dev 0))))
+  (define before (pressure-reading dev))
   (collect-and-wait!)
+  (sample-allocator! dev)
+  (define after (pressure-reading dev))
   (call-with-ledger
    (lambda ()
-     (define reclaimed (max 0 (- before (hash-ref live-bytes dev 0))))
+     (define reclaimed (max 0 (- before after)))
      (define interval (hash-ref collect-interval dev base))
      (hash-set! collect-interval dev
                 (if (< reclaimed (* reclaim-fraction mark))
@@ -280,11 +335,28 @@
   (_fun -> _int)
   #:c-id tr_mps_empty_cache)
 
+;; The canary shows the finalizer thread has started on this collection's
+;; batch, not that it has finished: finalization order is unspecified and
+;; the thread runs only while this one yields. So yield until the run count
+;; has stood still for a few turns, within a deadline.
+(define drain-deadline-ms 2000)
+(define quiet-turns 3)
+
 (define (collect-and-wait!)
   (define canary-finalized (make-semaphore 0))
   (register-finalizer (box 0) (lambda (_) (semaphore-post canary-finalized)))
   (collect-garbage)
-  (and (sync/timeout 0.5 canary-finalized) #t))
+  (define observed (sync/timeout 0.5 canary-finalized))
+  (define deadline (+ (current-inexact-milliseconds) drain-deadline-ms))
+  (let loop ([runs (unbox finalizer-run-count)] [quiet 0])
+    (sleep 0)
+    (define now (unbox finalizer-run-count))
+    (cond
+      [(> (current-inexact-milliseconds) deadline) (void)]
+      [(not (= now runs)) (loop now 0)]
+      [(< (add1 quiet) quiet-turns) (loop now (add1 quiet))]
+      [else (void)]))
+  (and observed #t))
 
 (define (collect-and-drain!)
   (define observed (collect-and-wait!))

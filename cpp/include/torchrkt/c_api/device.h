@@ -68,6 +68,19 @@ int tr_cuda_memory_stats(int64_t device_index, int64_t* out_allocated,
 int tr_cuda_mem_get_info(int64_t device_index, int64_t* out_free,
                          int64_t* out_total);
 
+/* Resets the caching allocator's peak counters for one device, so
+ * tr_cuda_memory_stats' peak covers only what follows. A no-op on a
+ * never-initialized allocator. Same guard and range check as
+ * tr_cuda_memory_stats. */
+int tr_cuda_reset_peak_stats(int64_t device_index);
+
+/* torch.cuda.memory._set_allocator_settings: a PYTORCH_CUDA_ALLOC_CONF
+ * string such as "expandable_segments:True". Options that shape segments
+ * only affect segments created afterwards, so call it before the first CUDA
+ * allocation. No-op success when CUDA is not compiled in, like
+ * tr_cuda_empty_cache; 1 on NULL or a string the parser rejects. */
+int tr_cuda_set_allocator_settings(const char* settings);
+
 int tr_cuda_empty_cache(void);
 
 int tr_tensor_device(const tr_tensor* t, tr_device_type* out_type,

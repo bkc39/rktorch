@@ -133,5 +133,31 @@ LIMIT=256` (the ledger's own trigger, nothing by hand):
 `native-pressure-test.rkt` pins: counters agree with the fold; no limit and
 no capacity never fires; a 64 MiB limit bounds a 32 MiB/step churn under
 128 MiB; a working set above the mark backs off (at most 5 collections for
-120 MiB of live growth). The GPU rows, the 0.3 s collection breakdown and
-step 2 wait for the 3090 Ti.
+120 MiB of live growth).
+
+## GPU results (2026-09-17, 3090 Ti, libtorch 2.9)
+
+`scripts/bench-memory-pressure.rkt`, batch 1024, width 128, depth 8: a
+15 GB working set on master's functional adam.
+
+| mode | steps | peak per window (GB) | held after a step (GB) | collections | s/step | gc total |
+|---|---|---|---|---|---|---|
+| trigger off | 200 | 15.1 rising to 17.2 | 0.15 rising to 2.3 | none | 0.366 | 1.6 s |
+| by hand every 10 steps | 200 | 15.0 flat | 0.05 | 20 | 0.386 | 12.8 s |
+| trigger, default 80% mark | 700 | 15.1 to 17.2 sawtooth, 19.7 once | 0.2 to 2.3 | 3, reclaiming 37.8 GB | 0.367 | 3.0 s |
+| trigger, 15.5 GB mark, before the drain fix | died at 131 | 22 at the failure | 13.3 | 2, reclaiming 0.7 GB | 0.37 | |
+| trigger, 15.5 GB mark, with the drain fix | 200 | 16.3 | 0.1 to 1.4 | 1, reclaiming 13.1 GB | 0.372 | 1.4 s |
+
+What the traced failure showed: no major collection for 130 steps, the
+young generations keeping up; a major mid-forward in step 131 promoted
+13 GB of live intermediates, after which nothing collected them; the
+trigger fired in step 132 but measured and resumed before the finalizers
+had run. Hence the drain in `collect-and-wait!`, and the allocator reading
+in the pressure signal (at the failure the ledger saw 12.6 GB, the
+allocator 21.4 GB).
+
+Also added: `cuda-reset-peak-stats!` (the windows above) and
+`cuda-allocator-settings!`. Open: whether the library turns on
+`expandable_segments` by default; the real diffusion probe on #138's UNet;
+the collection-cost split (a drained collection costs about 0.5 s here,
+three times in 700 steps, so batched frees have no case yet).

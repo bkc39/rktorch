@@ -1,11 +1,12 @@
 #lang racket/base
 
-(require (only-in ffi/unsafe _fun _int _int64 _ptr)
+(require (only-in ffi/unsafe _fun _int _int64 _ptr _string/utf-8)
          (only-in "memory.rkt"
                   _tr-device-type
                   tensor-allocator
                   tr-cuda-empty-cache/raw
                   tr-cuda-mem-get-info/raw
+                  tr-cuda-memory-stats/raw
                   tr-mps-empty-cache/raw
                   tr-tensor-device/raw)
          (only-in "syntax.rkt" _Tensor _Tensor/null define-torch)
@@ -19,6 +20,8 @@
          tr-cuda-empty-cache/raw
          tr-cuda-mem-get-info/raw
          tr-cuda-memory-stats/raw
+         tr-cuda-reset-peak-stats/raw
+         tr-cuda-set-allocator-settings/raw
          tr-set-default-device/raw
          tr-get-default-device/raw
          tr-tensor-to-device/raw
@@ -26,14 +29,13 @@
          tr-tensor-to!/raw
          tr-tensor-device/raw)
 
-(define-torch tr-cuda-memory-stats/raw
-  (_fun (index : _int64)
-        (allocated : (_ptr o _int64))
-        (reserved : (_ptr o _int64))
-        (peak : (_ptr o _int64))
-        -> (rc : _int)
-        -> (values rc allocated reserved peak))
-  #:c-id tr_cuda_memory_stats)
+(define-torch tr-cuda-reset-peak-stats/raw
+  (_fun (index : _int64) -> _int)
+  #:c-id tr_cuda_reset_peak_stats)
+
+(define-torch tr-cuda-set-allocator-settings/raw
+  (_fun (settings : _string/utf-8) -> _int)
+  #:c-id tr_cuda_set_allocator_settings)
 
 (define-torch tr-cuda-is-available/raw
   (_fun -> _int)

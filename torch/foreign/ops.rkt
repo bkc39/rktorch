@@ -31,6 +31,8 @@
                   tr-cuda-is-available/raw
                   tr-cuda-mem-get-info/raw
                   tr-cuda-memory-stats/raw
+                  tr-cuda-reset-peak-stats/raw
+                  tr-cuda-set-allocator-settings/raw
                   tr-get-default-device/raw
                   tr-mps-empty-cache/raw
                   tr-mps-is-available/raw
@@ -186,6 +188,19 @@
   (check-ok rc 'cuda-memory-info)
   (list (cons 'free free)
         (cons 'total total)))
+
+(define/contract-out (cuda-reset-peak-stats! [dev (cuda-device)])
+  (->* [] [device/c] void?)
+  (define-values (type index) (device->type+index dev))
+  (unless (eq? type 'cuda)
+    (error 'cuda-reset-peak-stats! "expected a CUDA device, given: ~e" dev))
+  (check-ok (tr-cuda-reset-peak-stats/raw index) 'cuda-reset-peak-stats!)
+  (void))
+
+(define/contract-out (cuda-allocator-settings! settings) (-> string? void?)
+  (check-ok (tr-cuda-set-allocator-settings/raw settings)
+            'cuda-allocator-settings!)
+  (void))
 
 (define/contract-out (cuda-empty-cache!) (-> void?)
   (check-ok (tr-cuda-empty-cache/raw) 'cuda-empty-cache!)

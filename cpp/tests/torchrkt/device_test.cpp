@@ -120,6 +120,19 @@ TEST(TorchrktDevice, CudaMemGetInfoFailsCleanlyWithoutCuda) {
   EXPECT_EQ(tr_cuda_mem_get_info(0, nullptr, nullptr), 1);
 }
 
+TEST(TorchrktDevice, ResetPeakStatsFailsCleanlyWithoutCuda) {
+  if (tr_cuda_is_available() != 0) {
+    GTEST_SKIP() << "CUDA present; the success path is CudaRoundTrip";
+  }
+  EXPECT_EQ(tr_cuda_reset_peak_stats(0), 1);
+  EXPECT_STRNE(tr_last_error(), "");
+}
+
+TEST(TorchrktDevice, AllocatorSettingsRejectsNull) {
+  EXPECT_EQ(tr_cuda_set_allocator_settings(nullptr), 1);
+  EXPECT_STRNE(tr_last_error(), "");
+}
+
 TEST(TorchrktDevice, EmptyCacheIsNoOpSuccessWithoutCuda) {
   if (tr_cuda_is_available() != 0) {
     GTEST_SKIP() << "CUDA present; the success path is CudaRoundTrip";
@@ -384,6 +397,17 @@ TEST(TorchrktDevice, CudaRoundTrip) {
   EXPECT_LE(free_bytes, total_bytes);
   EXPECT_GE(total_bytes, reserved_after);
   EXPECT_EQ(tr_cuda_mem_get_info(256, &free_bytes, &total_bytes), 1);
+  EXPECT_STRNE(tr_last_error(), "");
+  ASSERT_EQ(tr_cuda_reset_peak_stats(0), 0) << tr_last_error();
+  int64_t peak_after = -1;
+  ASSERT_EQ(tr_cuda_memory_stats(0, &alloc, &reserved, &peak_after), 0)
+      << tr_last_error();
+  EXPECT_EQ(peak_after, alloc);
+  EXPECT_EQ(tr_cuda_reset_peak_stats(256), 1);
+  EXPECT_EQ(tr_cuda_set_allocator_settings("garbage_collection_threshold:0.9"),
+            0)
+      << tr_last_error();
+  EXPECT_EQ(tr_cuda_set_allocator_settings("no_such_option:1"), 1);
   EXPECT_STRNE(tr_last_error(), "");
 
   const std::vector<int64_t> randn_dims = {4};

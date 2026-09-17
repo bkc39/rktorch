@@ -83,21 +83,41 @@ host ones — user code never calls the collector by hand.
 
 ### Pressure-driven collection
 
-Phantom pressure drives *minor* collections, and a minor collection
-frees only the handles allocated since the previous one. A handle that
-is live across a minor collection is promoted, and once dead it waits
-for a full collection; a training step's intermediates are exactly
-that, so their residue grows between incidental majors until the
-device is exhausted (#145). The ledger closes the gap itself:
+Phantom pressure keeps Racket's generational collections running, and
+on a GPU training loop they free most of a step's intermediates within
+the step. Two things escape them (#145, measured with
+`scripts/bench-memory-pressure.rkt`):
+
+- a slow residue of handles promoted past the young generations, about
+  12 MiB per step on a 15 GB working set;
+- the fatal one: when Racket runs a *major* collection in the middle of
+  a forward pass, every intermediate alive at that moment is promoted
+  to the oldest generation, and Racket schedules its next major for
+  when memory use has doubled from there, which on a card that is more
+  than half full is never. That step's storage, a whole working set of
+  it, stays behind and the next step's `backward!` fails.
+
+The ledger closes the gap itself:
 
 - `account!` keeps a live-bytes counter and a bytes-accounted-since-
   last-collection counter per device.
 - `accounted`, which runs outside the allocator's atomic wrap, checks
-  after each accounting: live bytes above the device's high-water mark
-  and accounted-since past the current interval means a full
-  `collect-garbage` plus the canary wait (`collect-and-wait!`, the
-  drain half of `collect-and-drain!` without the cache emptying, which
-  is the OOM retry's business).
+  after each accounting: accounted-since past the current interval and
+  live bytes above the device's high-water mark means
+  `collect-and-wait!`, the drain half of `collect-and-drain!` without
+  the cache emptying, which is the OOM retry's business.
+- Live bytes are the larger of the ledger's counter and the caching
+  allocator's `allocated`, sampled once per 1/32 of the mark in
+  accounted bytes (`allocator-reading`, a parameter so tests can fake
+  it). Handles the young collections free mid-step leave their storage
+  with the autograd graph, where only the allocator can see it.
+- `collect-and-wait!` must really drain. The canary shows the finalizer
+  thread has started on the batch, not finished it: finalization order
+  is unspecified, and that thread runs only while the main one yields,
+  which a loop of FFI calls does not do. So after the canary it yields
+  until `finalizer-run-count` has stood still for three turns, within
+  two seconds. Without this a collection found 13 GB of garbage and
+  the next `backward!` still failed, the frees not yet made.
 - The mark is 80% of `tr_cuda_mem_get_info`'s total for a CUDA device,
   queried once and cached; `native-memory-limit` overrides it for every
   device and is how the CPU tests exercise the path. No capacity and no

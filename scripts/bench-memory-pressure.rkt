@@ -1,0 +1,146 @@
+#lang racket/base
+
+;; Native memory over a training loop (#145): a stack of Conv2d + LayerNorm
+;; + relu blocks on random [BATCH 3 32 32] batches with adam, reporting the
+;; caching allocator's peak per ten-step window, reserved bytes, seconds per
+;; step and the ledger's pressure collections.
+;; Run:  MODE=off|manual|pressure BATCH=256 WIDTH=128 DEPTH=8 STEPS=60 \
+;;       GC_EVERY=10 LIMIT=<MiB> racket scripts/bench-memory-pressure.rkt
+;; off disables the trigger, manual collects by hand every GC_EVERY steps with
+;; the trigger off, pressure leaves it to the ledger (LIMIT overrides the
+;; capacity-derived mark).
+
+(require racket/format
+         torch
+         torch/nn)
+
+(define (env name default)
+  (or (getenv name) default))
+
+(define MODE (string->symbol (env "MODE" "pressure")))
+(define BATCH (string->number (env "BATCH" "256")))
+(define WIDTH (string->number (env "WIDTH" "128")))
+(define DEPTH (string->number (env "DEPTH" "8")))
+(define STEPS (string->number (env "STEPS" "60")))
+(define GC-EVERY (string->number (env "GC_EVERY" "10")))
+(define LIMIT
+  (let ([mib (getenv "LIMIT")])
+    (and mib (* 1024 1024 (string->number mib)))))
+
+(define TRACE
+  (let ([from (getenv "TRACE")])
+    (and from (string->number from))))
+
+(define major-collections (box 0))
+(define gc-receiver (make-log-receiver (current-logger) 'debug 'GC))
+(void
+ (thread
+  (lambda ()
+    (let loop ()
+      (when (regexp-match? #rx"MAJ" (vector-ref (sync gc-receiver) 1))
+        (set-box! major-collections (add1 (unbox major-collections))))
+      (loop)))))
+
+(define never (expt 2 60))
+(define mib (* 1024 1024))
+
+(define (stat key)
+  (quotient (cdr (assq key (cuda-memory-stats))) mib))
+
+(define (diagnostic key)
+  (cdr (assq key (finalizer-diagnostics))))
+
+(define (report-state label)
+  (printf "~a: ledger ~a MiB, allocated ~a MiB, reserved ~a MiB, ~s\n"
+          label
+          (for/sum ([entry (in-list (native-memory-use))])
+            (quotient (cdr entry) mib))
+          (stat 'allocated)
+          (stat 'reserved)
+          (finalizer-diagnostics)))
+
+(define (make-blocks)
+  (for/list ([_ (in-range DEPTH)])
+    (cons (Conv2d WIDTH WIDTH 3 #:padding 1)
+          (LayerNorm (list WIDTH 32 32)))))
+
+(define (run)
+  (define in-conv (Conv2d 3 WIDTH 3 #:padding 1))
+  (define blocks (make-blocks))
+  (define out-conv (Conv2d WIDTH 3 3 #:padding 1))
+  (define params
+    (append (parameters in-conv)
+            (for*/list ([b (in-list blocks)]
+                        [p (in-list (append (parameters (car b))
+                                            (parameters (cdr b))))])
+              p)
+            (parameters out-conv)))
+  (define opt (adam params #:lr 0.0001))
+  (define (forward x)
+    (out-conv
+     (for/fold ([h (in-conv x)]) ([b (in-list blocks)])
+       (relu ((cdr b) ((car b) h))))))
+  (define (train-step!)
+    (define x (randn BATCH 3 32 32))
+    (define target (randn BATCH 3 32 32))
+    (zero-grads! opt)
+    (define loss (mse-loss (forward x) target))
+    (backward! loss)
+    (step! opt)
+    (item loss))
+  (printf "mode=~a batch=~a width=~a depth=~a limit=~a total=~a MiB\n"
+          MODE BATCH WIDTH DEPTH (getenv "LIMIT")
+          (quotient (cdr (assq 'total (cuda-memory-info))) mib))
+  (displayln "step window-peak-MiB allocated-MiB reserved-MiB collections s/step")
+  (cuda-reset-peak-stats!)
+  (define gc0 (current-gc-milliseconds))
+  (define t0 (current-inexact-milliseconds))
+  (for/fold ([window-start t0]) ([i (in-range 1 (add1 STEPS))])
+    (train-step!)
+    (when (and TRACE (>= i TRACE))
+      (printf "  ~a: ledger ~a allocated ~a peak ~a pressure ~a majors ~a racket ~a MiB\n"
+              i
+              (for/sum ([entry (in-list (native-memory-use))])
+                (quotient (cdr entry) mib))
+              (stat 'allocated)
+              (stat 'peak-allocated)
+              (diagnostic 'pressure-collections)
+              (unbox major-collections)
+              (quotient (current-memory-use) mib)))
+    (when (and (eq? MODE 'manual) (zero? (remainder i GC-EVERY)))
+      (collect-garbage)
+      (sleep 0))
+    (cond
+      [(zero? (remainder i 10))
+       (define now (current-inexact-milliseconds))
+       (printf "~a ~a ~a ~a ~a ~a\n"
+               i
+               (stat 'peak-allocated)
+               (stat 'allocated)
+               (stat 'reserved)
+               (diagnostic 'pressure-collections)
+               (~r (/ (- now window-start) 10000.0) #:precision '(= 3)))
+       (flush-output)
+       (cuda-reset-peak-stats!)
+       now]
+      [else window-start]))
+  (printf "total ~a s, gc ~a ms, reclaimed ~a MiB by ~a pressure collections\n"
+          (~r (/ (- (current-inexact-milliseconds) t0) 1000.0) #:precision '(= 1))
+          (- (current-gc-milliseconds) gc0)
+          (quotient (diagnostic 'pressure-reclaimed) mib)
+          (diagnostic 'pressure-collections)))
+
+(module+ main
+  (unless (cuda-available?)
+    (error 'bench-memory-pressure "needs a CUDA device"))
+  (manual-seed! 0)
+  (parameterize ([native-memory-limit (if (eq? MODE 'pressure) LIMIT never)])
+    (with-default-device (cuda-device)
+      (with-handlers ([exn:fail:rktorch:oom?
+                       (lambda (e)
+                         (printf "OOM: ~a\n" (car (regexp-split #rx"\n" (exn-message e))))
+                         (report-state "at the failure")
+                         (reclaim-native-memory!)
+                         (report-state "after reclaim")
+                         (exit 1))])
+        (run)))))

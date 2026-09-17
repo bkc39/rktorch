@@ -3,8 +3,9 @@
 @(require (for-label racket/base
                      racket/contract
                      (only-in torch
-                              arange cpu-device cuda-device cuda-memory-info
-                              cuda-memory-stats device device/c device?
+                              arange cpu-device cuda-allocator-settings!
+                              cuda-device cuda-memory-info cuda-memory-stats
+                              cuda-reset-peak-stats! device device/c device?
                               dtype dtype/c eye finalizer-diagnostics full
                               full-like mps-device native-memory-limit
                               native-memory-use ones ones-like prop:to rand
@@ -151,12 +152,18 @@ however the parameter got there.
 Every tensor's native storage is released by a finalizer when Racket's
 collector finds its handle unreachable. The ledger charges each allocation
 to the collector as phantom bytes, so ordinary programs never call the
-collector by hand. A training loop is the exception: its intermediates
-survive the minor collections that run during a step and are released only
-by a full one, so the residue grows until a device runs out. The ledger
-therefore also collects on pressure: when a device's live bytes pass its
-high-water mark, the next allocation runs a full collection and waits for
-the finalizers to drain. The mark is 80% of the device's capacity, from
+collector by hand. A training loop is the exception. Handles that survive
+the collections of a step wait for a full one, and when Racket happens to
+run a full collection in the middle of a forward pass, that pass's
+intermediates are promoted to the oldest generation, where Racket will not
+look again until its memory use has doubled: a whole step's storage stays
+behind and the next step runs out. The ledger therefore also collects on
+pressure: when a device's live bytes pass its high-water mark, the next
+allocation runs a full collection and yields until the finalizers have
+drained. Live bytes are the larger of the ledger's total and the CUDA
+caching allocator's own allocated figure, sampled as allocation proceeds,
+because storage that only the autograd graph still holds is invisible to the
+ledger. The mark is 80% of the device's capacity, from
 @racket[cuda-memory-info], or @racket[native-memory-limit] when set. A
 collection is never run within an eighth of the mark of the previous one,
 measured in bytes allocated, and when a collection reclaims under 5% of the
@@ -190,6 +197,23 @@ high-water mark is taken from. Raises when CUDA is absent.
                          exact-nonnegative-integer?))]{
 The CUDA caching allocator's own numbers for this process: bytes allocated
 now, bytes reserved from the driver, and the peak allocated.
+}
+
+@defproc[(cuda-reset-peak-stats! [dev device/c (cuda-device)]) void?]{
+Resets the allocator's peak counters, as
+@tt{torch.cuda.reset_peak_memory_stats}, so the next
+@racket['peak-allocated] covers only what follows.
+}
+
+@defproc[(cuda-allocator-settings! [settings string?]) void?]{
+Applies a @tt{PYTORCH_CUDA_ALLOC_CONF} string to the caching allocator, as
+@tt{torch.cuda.memory._set_allocator_settings}:
+@racket["expandable_segments:True"] lets segments grow in place instead of
+fragmenting, @racket["garbage_collection_threshold:0.8"] has the allocator
+return cached blocks once reserved memory passes that fraction of capacity.
+Options that shape segments affect only segments created afterwards, so
+call it before the first CUDA allocation. Does nothing in a build without
+CUDA; raises on a string the allocator's parser rejects.
 }
 
 @defproc[(reclaim-native-memory!) void?]{

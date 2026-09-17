@@ -163,6 +163,8 @@
          native-memory-limit
          cuda-memory-stats
          cuda-memory-info
+         cuda-reset-peak-stats!
+         cuda-allocator-settings!
          cuda-empty-cache!
          mps-empty-cache!
          reclaim-native-memory!
