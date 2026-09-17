@@ -6,7 +6,7 @@
 (module+ test
   (require (only-in json string->jsexpr)
            (only-in racket/file file->bytes make-temporary-file)
-           (only-in racket/list append-map make-list range)
+           (only-in racket/list append* append-map make-list range)
            rackunit
            "../data/loader.rkt"
            "../main.rkt"
@@ -18,6 +18,7 @@
            (only-in "../vision/diffusion.rkt"
                     UNet linear-schedule q-sample schedule-steps)
            (only-in "../vision/resnet.rkt" ResNet)
+           (only-in "../vision/ppm.rkt" image-grid write-ppm)
            "private/python-env.rkt")
 
   ;; nn.Linear plus an int64 counter, the half_dtypes.py twin's Counted
@@ -500,6 +501,118 @@
          (check-training-twin "09_resnet" "python/09_resnet.py" train-on
                               'cuda 5e-3)))
      (let ()
+       ;; MUST stay in sync with examples/racket/10-dcgan.rkt: the losses
+       ;; are the discriminator's and the generator's per step, interleaved,
+       ;; and the parameters are the generator's then the discriminator's
+       (define-layer gen-twin (fc bn0 up1 bn1 up2)
+         #:init ()
+         (set! fc (Linear 100 (* 128 7 7)))
+         (set! bn0 (BatchNorm1d (* 128 7 7)))
+         (set! up1 (ConvTranspose2d 128 64 4 #:stride 2 #:padding 1))
+         (set! bn1 (BatchNorm2d 64))
+         (set! up2 (ConvTranspose2d 64 1 4 #:stride 2 #:padding 1))
+         #:forward (z)
+         (~> z fc bn0 relu (reshape (length z) 128 7 7) up1 bn1 relu up2 tanh))
+       (define-layer disc-twin (conv1 conv2 bn fc)
+         #:init ()
+         (set! conv1 (Conv2d 1 64 4 #:stride 2 #:padding 1))
+         (set! conv2 (Conv2d 64 128 4 #:stride 2 #:padding 1))
+         (set! bn (BatchNorm2d 128))
+         (set! fc (Linear (* 128 7 7) 1))
+         #:forward (x)
+         (~> x conv1 (leaky-relu #:negative-slope 0.2)
+             conv2 bn (leaky-relu #:negative-slope 0.2)
+             (flatten 1) fc))
+       (define (train-on device)
+         (with-default-device device
+           (manual-seed! 0)
+           (define-values (xs _ys) (load-mnist-fixture))
+           (define gen (gen-twin))
+           (define disc (disc-twin))
+           (define opt-g (adam (parameters gen) #:lr 2e-4 #:beta1 0.5))
+           (define opt-d (adam (parameters disc) #:lr 2e-4 #:beta1 0.5))
+           (manual-seed! 0)
+           (define n (length xs))
+           (define real (sub (mul xs 2.0) 1.0))
+           (define ones-target (ones n 1))
+           (define zeros-target (zeros n 1))
+           (define losses
+             (append*
+              (for/list ([_ (in-range 3)])
+                (define z (to (randn n 100 #:device 'cpu) device))
+                (define fake (gen z))
+                (zero-grads! opt-d)
+                (define d-loss
+                  (add (binary-cross-entropy-with-logits (disc real) ones-target)
+                       (binary-cross-entropy-with-logits (disc (detach fake))
+                                                         zeros-target)))
+                (backward! d-loss)
+                (step! opt-d)
+                (zero-grads! opt-g)
+                (define g-loss
+                  (binary-cross-entropy-with-logits (disc fake) ones-target))
+                (backward! g-loss)
+                (step! opt-g)
+                (list (item d-loss) (item g-loss)))))
+           (values losses
+                   (cat (for/list ([p (in-list (append (parameters gen)
+                                                       (parameters disc)))])
+                          (reshape p -1))))))
+       ;; batch norm in both networks: a few dozen of the 1.3M parameters
+       ;; land just past tol after three alternating steps, as for 09_resnet
+       (check-training-twin "10_dcgan" "python/10_dcgan.py" train-on 'cpu 5e-4)
+       (when (and (cuda-available?)
+                  (python-cuda-available?))
+         (check-training-twin "10_dcgan" "python/10_dcgan.py" train-on
+                              'cuda 5e-3)))
+     (let ()
+       ;; MUST stay in sync with examples/racket/11-vae.rkt
+       (define-layer vae-twin (enc mu-head logvar-head dec1 dec2)
+         #:init ()
+         (set! enc (Linear 784 400))
+         (set! mu-head (Linear 400 20))
+         (set! logvar-head (Linear 400 20))
+         (set! dec1 (Linear 20 400))
+         (set! dec2 (Linear 400 784))
+         #:forward (x eps)
+         (define h (relu (enc (flatten x 1))))
+         (define mu (mu-head h))
+         (define logvar (logvar-head h))
+         (define z (add mu (mul eps (exp (mul logvar 0.5)))))
+         (values (dec2 (relu (dec1 z))) mu logvar))
+       (define (train-on device)
+         (with-default-device device
+           (manual-seed! 0)
+           (define-values (xs _ys) (load-mnist-fixture))
+           (define net (vae-twin))
+           (define opt (adam (parameters net) #:lr 1e-3))
+           (manual-seed! 0)
+           (define n (length xs))
+           (define losses
+             (for/list ([_ (in-range 5)])
+               (define eps (to (randn n 20 #:device 'cpu) device))
+               (zero-grads! opt)
+               (define-values (logits means logvars) (net xs eps))
+               (define recon
+                 (mul (binary-cross-entropy-with-logits logits (flatten xs 1))
+                      784.0))
+               (define kl
+                 (mul (sum (sub (sub (add 1.0 logvars) (mul means means))
+                                (exp logvars)))
+                      (/ -0.5 n)))
+               (define loss (add recon kl))
+               (backward! loss)
+               (step! opt)
+               (item loss)))
+           (values losses
+                   (cat (for/list ([p (in-list (parameters net))])
+                          (reshape p -1))))))
+       (check-training-twin "11_vae" "python/11_vae.py" train-on 'cpu tol)
+       (when (and (cuda-available?)
+                  (python-cuda-available?))
+         (check-training-twin "11_vae" "python/11_vae.py" train-on
+                              'cuda 5e-3)))
+     (let ()
        (define j (python-check "conv2d_init.py"))
        (manual-seed! 0)
        (define net (Conv2d 1 8 3))
@@ -663,6 +776,28 @@
                     (lambda (o) (one-cycle-lr o #:max-lr 1.0 #:total-steps 12)))
        (check-shape "lambda"
                     (lambda (o) (lambda-lr o (lambda (t) (/ 1.0 (add1 t)))))))
+     (let ()
+       (define j (python-check "make_grid_parity.py"))
+       (manual-seed! 0)
+       (define grid (image-grid (rand 5 3 4 4) #:columns 2 #:padding 1
+                                #:pad-value 0.5))
+       (check-equal? (tensor-shape grid) (hash-ref j 'shape)
+                     "image-grid: shape parity with make_grid")
+       (for ([a (in-list (tensor->list grid))]
+             [b (in-list (hash-ref j 'values))]
+             [i (in-naturals)])
+         (check-= a b tol (format "image-grid: value ~a parity" i)))
+       (define path (make-temporary-file "rkt-grid-~a.ppm"))
+       (write-ppm path grid)
+       (define bs (file->bytes path))
+       (delete-file path)
+       ;; five images in two columns: three rows of 4 + 1, so 16 by 11
+       (define header #"P6\n11 16\n255\n")
+       (check-equal? (subbytes bs 0 (bytes-length header)) header
+                     "write-ppm: header for make_grid's 16 by 11")
+       (check-equal? (bytes->list (subbytes bs (bytes-length header)))
+                     (hash-ref j 'pixels)
+                     "write-ppm: save_image's quantization"))
      (let ()
        (define j (python-check "ema_update.py"))
        (manual-seed! 0)

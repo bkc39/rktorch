@@ -19,4 +19,6 @@
     ("06-gpt.rkt" 300)
     ("07-asr.rkt" 300)
     ("08-diffusion.rkt" 600)
-    ("09-resnet.rkt" 600)))
+    ("09-resnet.rkt" 600)
+    ("10-dcgan.rkt" 600)
+    ("11-vae.rkt" 600)))
