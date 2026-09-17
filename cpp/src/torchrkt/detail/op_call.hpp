@@ -152,4 +152,15 @@ inline int null_arg_status(const char* who) {
   return 1;
 }
 
+// A refused call still owes the caller NULL in every out slot it can reach.
+template <std::size_t N>
+int null_arg_outputs(const char* who, tr_tensor** const (&outs)[N]) {
+  for (tr_tensor** out : outs) {
+    if (out) {
+      *out = nullptr;
+    }
+  }
+  return null_arg_status(who);
+}
+
 }  // namespace torchrkt
