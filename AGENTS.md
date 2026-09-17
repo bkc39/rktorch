@@ -114,6 +114,11 @@ with `backward!` outside the form as PyTorch recommends). From
   int64 labels), `cifar10-dataset #:device`, `cifar10-label-names`,
   `load-cifar10-fixture` (256 committed records), `cifar10-records->tensors`,
   `tar-entries`
+- resnet (`torch/vision/resnet.rkt`, #152): `BasicBlock` and `ResNet`
+  (`#:classes #:base #:blocks`, ResNet-18 for 32x32 images by default,
+  bias-free convolutions under `BatchNorm2d`); the training loop with
+  device-side augmentation, SGD under `one-cycle-lr` and `with-autocast` is
+  `examples/racket/09-resnet.rkt`
 - transforms (`torch/vision/transforms.rkt`, #152): `random-horizontal-flip
   #:p` and `random-crop #:padding` on an image batch where it lives; each
   takes `#:generator` and draws one seed per batch from it, so a seeded

@@ -17,6 +17,7 @@
            (only-in "../vision/cifar10.rkt" load-cifar10-fixture)
            (only-in "../vision/diffusion.rkt"
                     UNet linear-schedule q-sample schedule-steps)
+           (only-in "../vision/resnet.rkt" ResNet)
            "private/python-env.rkt")
 
   ;; nn.Linear plus an int64 counter, the half_dtypes.py twin's Counted
@@ -469,6 +470,34 @@
        (when (and (cuda-available?)
                   (python-cuda-available?))
          (check-training-twin "08_diffusion" "python/08_diffusion.py" train-on
+                              'cuda 5e-3)))
+     (let ()
+       ;; MUST stay in sync with examples/racket/09-resnet.rkt's run-example
+       (define (train-on device)
+         (with-default-device device
+           (manual-seed! 0)
+           (define-values (xs ys) (load-cifar10-fixture))
+           (define net (ResNet #:base 16))
+           (define opt (sgd (parameters net) #:lr 0.005 #:momentum 0.9
+                            #:weight-decay 5e-4))
+           (define losses
+             (for/list ([_ (in-range 3)])
+               (zero-grads! opt)
+               (define loss (cross-entropy (net xs) ys))
+               (backward! loss)
+               (step! opt)
+               (item loss)))
+           (values losses
+                   (cat (for/list ([p (in-list (parameters net))])
+                          (reshape p -1))))))
+       ;; batch norm divides by the batch's own statistics, which amplifies
+       ;; the last-bit kernel differences between the two torch builds; a
+       ;; few of the 700k parameters land just past tol after three steps
+       (check-training-twin "09_resnet" "python/09_resnet.py" train-on
+                            'cpu 5e-4)
+       (when (and (cuda-available?)
+                  (python-cuda-available?))
+         (check-training-twin "09_resnet" "python/09_resnet.py" train-on
                               'cuda 5e-3)))
      (let ()
        (define j (python-check "conv2d_init.py"))
