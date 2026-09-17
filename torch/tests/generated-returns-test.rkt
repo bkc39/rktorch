@@ -3,7 +3,7 @@
 (module+ test
   (require rackunit
            (only-in syntax/macro-testing convert-syntax-error)
-           (only-in "../generated.rkt" sort-tensor topk)
+           (prefix-in g: (only-in "../generated.rkt" sort-tensor topk))
            "../main.rkt"
            (only-in "../foreign/define-generated.rkt" define-generated-op)
            (submod "../foreign.rkt" unsafe))
@@ -15,7 +15,7 @@
 
   (test-case "topk answers values and indices as two values"
     (define-values (values-t indices-t)
-      (topk (tensor '((1.0 5.0 3.0) (4.0 2.0 6.0))) 2 -1 #t #t))
+      (g:topk (tensor '((1.0 5.0 3.0) (4.0 2.0 6.0))) 2 -1 #t #t))
     (check-equal? (tensor-shape values-t) '(2 2))
     (check-equal? (tensor->list values-t) '(5.0 3.0 6.0 4.0))
     (check-equal? (tensor-dtype indices-t) 'int64)
@@ -23,20 +23,20 @@
 
   (test-case "sort-tensor answers the sorted values and their source indices"
     (define-values (values-t indices-t)
-      (sort-tensor (tensor '(3.0 1.0 2.0)) 0 #t))
+      (g:sort-tensor (tensor '(3.0 1.0 2.0)) 0 #t))
     (check-equal? (tensor->list values-t) '(3.0 2.0 1.0))
     (check-equal? (tensor->list indices-t) '(0 2 1)))
 
   (test-case "gradients flow through the values output"
     (define x (requires-grad! (tensor '(1.0 5.0 3.0))))
-    (define-values (top _indices) (topk x 2 0 #t #t))
+    (define-values (top _indices) (g:topk x 2 0 #t #t))
     (backward! (sum top))
     (check-equal? (tensor->list (grad x)) '(0.0 1.0 1.0)))
 
   (test-case "the ledger accounts every output and releases each on free"
     (define input (randn 64))
     (define before (cpu-bytes))
-    (define-values (values-t indices-t) (topk input 16 0 #t #t))
+    (define-values (values-t indices-t) (g:topk input 16 0 #t #t))
     (check-equal? (- (cpu-bytes) before) (+ (* 16 4) (* 16 8)))
     (tensor-free! values-t)
     (check-equal? (- (cpu-bytes) before) (* 16 8))
@@ -45,7 +45,7 @@
 
   (test-case "a failing call raises with the op and the ATen message"
     (check-exn #rx"topk.*tr_gen_topk"
-               (lambda () (topk (tensor '(1.0 2.0 3.0)) 4 0 #t #t))))
+               (lambda () (g:topk (tensor '(1.0 2.0 3.0)) 4 0 #t #t))))
 
   (test-case "#:returns below 2 is a syntax error"
     (check-exn

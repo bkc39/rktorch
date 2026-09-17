@@ -12,6 +12,7 @@
                   tensor-allocator/outputs
                   tensor-allocator/outputs/rng
                   tensor-allocator/rng)
+         (only-in "raw/random.rkt" _Generator/null)
          (only-in "raw/syntax.rkt" _Tensor _Tensor/null define-torch)
          (only-in "structs.rkt" wrap-tensor))
 
@@ -54,6 +55,8 @@
              (list #`(list->s64vector (or #,arg '()))
                    #`(if (pair? #,arg) (length #,arg) 0)
                    #`(and (pair? #,arg) #t)))]
+    [(optional-generator)
+     (values (list #`(#,arg : _Generator/null)) (list arg))]
     [(optional-dtype)
      (values (list #`(#,arg : _int32)) (list #`(opt-dtype->code #,arg)))]
     [else

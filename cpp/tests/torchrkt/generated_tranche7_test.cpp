@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <vector>
@@ -52,6 +53,14 @@ Handle make(const std::vector<float>& values,
             const std::vector<int64_t>& dims) {
   return Handle(tr_from_data(values.data(), values.size(), dims.data(),
                              static_cast<int64_t>(dims.size())));
+}
+
+void expect_near(const std::vector<float>& got, const std::vector<float>& want,
+                 float tol) {
+  ASSERT_EQ(got.size(), want.size());
+  for (size_t i = 0; i < got.size(); ++i) {
+    EXPECT_NEAR(got[i], want[i], tol) << "index " << i;
+  }
 }
 
 void expect_error_from(const char* who) {
@@ -107,6 +116,125 @@ TEST(GeneratedTranche7, NullHandlesAndNullOutPointersAreRefused) {
   EXPECT_EQ(tr_gen_sort(input.t, 0, false, &values, nullptr), 1);
   expect_error_from("tr_gen_sort");
   EXPECT_EQ(values, nullptr);
+}
+
+Handle full(const std::vector<int64_t>& dims, double value) {
+  return Handle(tr_full(dims.data(), static_cast<int64_t>(dims.size()), value));
+}
+
+// Zero weights leave every gate at sigmoid(0) = 0.5 and the candidate at
+// tanh(0) = 0, so the recurrences reduce to closed forms of the state.
+struct ZeroWeights {
+  Handle w_ih, w_hh, b_ih, b_hh;
+  ZeroWeights(int64_t gates, int64_t input, int64_t hidden)
+      : w_ih(full({gates * hidden, input}, 0.0)),
+        w_hh(full({gates * hidden, hidden}, 0.0)),
+        b_ih(full({gates * hidden}, 0.0)),
+        b_hh(full({gates * hidden}, 0.0)) {}
+  std::vector<const tr_tensor*> list() const {
+    return {w_ih.t, w_hh.t, b_ih.t, b_hh.t};
+  }
+};
+
+TEST(GeneratedTranche7, ArgsortIsTheIndicesHalfOfSort) {
+  const Handle input = make({3.0F, 1.0F, 2.0F}, {3});
+  const Handle indices(tr_gen_argsort(input.t, 0, true));
+  EXPECT_EQ(indices_of(indices.t), (std::vector<int64_t>{0, 2, 1}));
+  EXPECT_EQ(tr_gen_argsort(nullptr, 0, true), nullptr);
+  expect_error_from("tr_gen_argsort");
+}
+
+TEST(GeneratedTranche7, MultinomialDrawsFromTheGeneratorItIsHanded) {
+  const Handle weights = make({0.0F, 1.0F, 0.0F, 0.5F, 0.0F, 0.5F}, {2, 3});
+  tr_generator* first = tr_generator_new(7);
+  tr_generator* second = tr_generator_new(7);
+  ASSERT_NE(first, nullptr);
+  ASSERT_NE(second, nullptr);
+  const Handle a(tr_gen_multinomial(weights.t, 8, true, first));
+  const Handle b(tr_gen_multinomial(weights.t, 8, true, second));
+  tr_generator_free(first);
+  tr_generator_free(second);
+  EXPECT_EQ(shape_of(a.t), (std::vector<int64_t>{2, 8}));
+  const std::vector<int64_t> draws = indices_of(a.t);
+  EXPECT_EQ(draws, indices_of(b.t));
+  for (size_t i = 0; i < 8; ++i) {
+    EXPECT_EQ(draws[i], 1) << "row 0, draw " << i;
+    EXPECT_NE(draws[8 + i], 1) << "row 1, draw " << i;
+  }
+  const Handle global(tr_gen_multinomial(weights.t, 1, false, nullptr));
+  EXPECT_EQ(shape_of(global.t), (std::vector<int64_t>{2, 1}));
+  EXPECT_EQ(tr_gen_multinomial(nullptr, 1, false, nullptr), nullptr);
+  expect_error_from("tr_gen_multinomial");
+}
+
+TEST(GeneratedTranche7, LstmWithZeroWeightsHalvesTheCellEachStep) {
+  const Handle input = full({2, 1, 3}, 1.0);
+  const Handle h0 = full({1, 1, 4}, 0.0);
+  const Handle c0 = full({1, 1, 4}, 1.0);
+  const ZeroWeights weights(4, 3, 4);
+  const std::vector<const tr_tensor*> state = {h0.t, c0.t};
+  const std::vector<const tr_tensor*> params = weights.list();
+  tr_tensor* output = nullptr;
+  tr_tensor* h_n = nullptr;
+  tr_tensor* c_n = nullptr;
+  ASSERT_EQ(tr_gen_lstm_input(input.t, state.data(), 2, params.data(), 4, true,
+                              1, 0.0, false, false, false, &output, &h_n, &c_n),
+            0)
+      << tr_last_error();
+  const Handle owned_output(output);
+  const Handle owned_h(h_n);
+  const Handle owned_c(c_n);
+  EXPECT_EQ(shape_of(output), (std::vector<int64_t>{2, 1, 4}));
+  EXPECT_EQ(shape_of(h_n), (std::vector<int64_t>{1, 1, 4}));
+  expect_near(data_of(c_n), std::vector<float>(4, 0.25F), 1e-6F);
+  expect_near(data_of(h_n), std::vector<float>(4, 0.5F * std::tanh(0.25F)),
+              1e-6F);
+  const std::vector<float> steps = data_of(output);
+  EXPECT_NEAR(steps[0], 0.5F * std::tanh(0.5F), 1e-6F);
+  EXPECT_NEAR(steps[4], 0.5F * std::tanh(0.25F), 1e-6F);
+}
+
+TEST(GeneratedTranche7, GruWithZeroWeightsHalvesTheStateEachStep) {
+  const Handle input = full({3, 1, 2}, 1.0);
+  const Handle h0 = full({1, 1, 2}, 1.0);
+  const ZeroWeights weights(3, 2, 2);
+  const std::vector<const tr_tensor*> params = weights.list();
+  tr_tensor* output = nullptr;
+  tr_tensor* h_n = nullptr;
+  ASSERT_EQ(tr_gen_gru_input(input.t, h0.t, params.data(), 4, true, 1, 0.0,
+                             false, false, false, &output, &h_n),
+            0)
+      << tr_last_error();
+  const Handle owned_output(output);
+  const Handle owned_h(h_n);
+  expect_near(data_of(output), {0.5F, 0.5F, 0.25F, 0.25F, 0.125F, 0.125F},
+              1e-6F);
+  expect_near(data_of(h_n), {0.125F, 0.125F}, 1e-6F);
+}
+
+TEST(GeneratedTranche7, RecurrencesRefuseNullListsAndNullListElements) {
+  const Handle input = full({1, 1, 2}, 1.0);
+  const Handle h0 = full({1, 1, 2}, 0.0);
+  const ZeroWeights weights(3, 2, 2);
+  std::vector<const tr_tensor*> params = weights.list();
+  tr_tensor* output = nullptr;
+  tr_tensor* h_n = nullptr;
+  EXPECT_EQ(tr_gen_gru_input(input.t, h0.t, nullptr, 4, true, 1, 0.0, false,
+                             false, false, &output, &h_n),
+            1);
+  expect_error_from("tr_gen_gru_input");
+  params[2] = nullptr;
+  EXPECT_EQ(tr_gen_gru_input(input.t, h0.t, params.data(), 4, true, 1, 0.0,
+                             false, false, false, &output, &h_n),
+            1);
+  expect_error_from("tr_gen_gru_input");
+  EXPECT_EQ(output, nullptr);
+  EXPECT_EQ(h_n, nullptr);
+  tr_tensor* c_n = nullptr;
+  EXPECT_EQ(tr_gen_lstm_input(input.t, nullptr, 2, params.data(), 4, true, 1,
+                              0.0, false, false, false, &output, &h_n, &c_n),
+            1);
+  expect_error_from("tr_gen_lstm_input");
 }
 
 }  // namespace

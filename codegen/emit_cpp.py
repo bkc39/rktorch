@@ -8,6 +8,7 @@ from .ir import (
     INT64,
     INT_ARRAY,
     OPTIONAL_DTYPE,
+    OPTIONAL_GENERATOR,
     OPTIONAL_INT64,
     OPTIONAL_INT_ARRAY,
     OPTIONAL_SCALAR,
@@ -39,6 +40,7 @@ _C_DECLS = {
     OPTIONAL_INT_ARRAY: "const int64_t* {n}, int64_t {n}_len, bool {n}_has",
     OPTIONAL_DTYPE: "int32_t {n}",  # -1 == c10::nullopt
     OPTIONAL_SCALAR: "double {n}, bool {n}_has",
+    OPTIONAL_GENERATOR: "const tr_generator* {n}",  # NULL == global stream
 }
 
 # Kinds whose C decl mentions `bool`, so the header needs <stdbool.h>.
@@ -56,6 +58,8 @@ def _c_decl(p: Param, *, receiver: bool, header: bool = False) -> str:
     # required handle (the body keeps the bare decl for clang-format).
     if header and p.kind == OPTIONAL_TENSOR:
         decl += " /* nullable: NULL == no value */"
+    if header and p.kind == OPTIONAL_GENERATOR:
+        decl += " /* nullable: NULL == the global stream */"
     return decl
 
 
@@ -98,6 +102,9 @@ def _arg_expr(p: Param) -> str:
     if p.kind == OPTIONAL_SCALAR:
         return (f"{p.name}_has ? c10::optional<at::Scalar>({p.name}) "
                 f": c10::optional<at::Scalar>()")
+    if p.kind == OPTIONAL_GENERATOR:
+        return (f"{p.name} ? c10::optional<at::Generator>({p.name}->value) "
+                f": c10::optional<at::Generator>()")
     if p.kind == OPTIONAL_DTYPE:
         return (f"{p.name} < 0 ? c10::optional<at::ScalarType>() "
                 f": c10::optional<at::ScalarType>("
@@ -105,11 +112,17 @@ def _arg_expr(p: Param) -> str:
     return p.name
 
 
+def _takes_generator(ops: list[Op]) -> bool:
+    return any(p.kind == OPTIONAL_GENERATOR for op in ops for p in op.params)
+
+
 def emit_header(shard: str, ops: list[Op]) -> str:
     needs_bool = any(p.kind in _BOOL_DECL_KINDS for op in ops for p in op.params)
     lines = [BANNER, "#pragma once", ""]
     if needs_bool:
         lines += ["#include <stdbool.h>", ""]
+    if _takes_generator(ops):
+        lines += ['#include "torchrkt/c_api/random.h"']
     lines += ['#include "torchrkt/c_api/tensor.h"', ""]
     lines += ["#ifdef __cplusplus", 'extern "C" {', "#endif", ""]
     lines += [
@@ -207,6 +220,8 @@ def emit_source(shard: str, ops: list[Op]) -> str:
     lines += ["#include <torch/torch.h>", ""]
     if needs_vector:
         lines += ["#include <stdexcept>", "#include <vector>", ""]
+    if _takes_generator(ops):
+        lines += ['#include "torchrkt/detail/generator_handle.hpp"']
     lines += [
         '#include "torchrkt/detail/op_call.hpp"',
         '#include "torchrkt/detail/tensor_handle.hpp"',

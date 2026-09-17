@@ -10,6 +10,15 @@
 
 extern "C" {
 
+tr_tensor* tr_gen_argsort(const tr_tensor* self, int64_t dim, bool descending) {
+  if (!self) {
+    return torchrkt::null_arg("tr_gen_argsort");
+  }
+  return torchrkt::alloc_result("tr_gen_argsort", [&] {
+    return at::argsort(self->value, dim, descending);
+  });
+}
+
 int tr_gen_sort(const tr_tensor* self, int64_t dim, bool descending,
                 tr_tensor** out0, tr_tensor** out1) {
   if (!self || !out0 || !out1) {

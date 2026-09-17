@@ -21,6 +21,7 @@
          (submod "foreign/tensor-ops.rkt" checked)
          "foreign/operators.rkt"
          "foreign/nn-promoted.rkt"
+         "foreign/order-ops.rkt"
          (except-in "foreign/promoted.rkt" tensor-ref tensor-ref!)
          (submod "foreign/promoted.rkt" checked)
          (only-in "foreign/ref-syntax.rkt" ref ref!)
@@ -126,6 +127,11 @@
          argmax
          softmax
          log-softmax)
+
+(provide sort
+         argsort
+         topk
+         multinomial)
 
 (provide matmul
          mm
