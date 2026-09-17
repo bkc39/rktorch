@@ -184,6 +184,9 @@ broader ATen surface, and the portable raco-catalog candidate story.
 
 ## Build Commands
 
+[`docs/building.md`](docs/building.md) is the same guide written for people;
+a change to a build target or a shell belongs in both.
+
 ```bash
 nix build              # builds cpp, installs the pkg, runs raco test + examples
 nix build .#cpp        # CMake build + gtest only

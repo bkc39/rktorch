@@ -5,6 +5,10 @@ shim (`libtorchrkt`, a C++ library linked against libtorch), installs the Racket
 package, and runs every test and example. Supported systems: `x86_64-linux` and
 `aarch64-darwin`.
 
+This page is the guide for people. [`AGENTS.md`](../AGENTS.md) carries the same
+commands for coding agents, beside the repository's layout and conventions; a
+change to a build target or a shell belongs in both.
+
 ## Build and test
 
 ```bash
@@ -63,7 +67,9 @@ and Jane Street's [Torch bindings](https://github.com/janestreet/torch), which
 rktorch uses as a reference design:
 
 ```bash
+nix develop .#ocaml --command ocamlc -version
 nix develop .#ocaml --command ocamlfind query torch
+nix develop .#ocaml --command dune exec --root /path/to/ocaml-project ./main.exe
 nix develop .#ocaml --command utop
 ```
 

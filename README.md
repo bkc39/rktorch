@@ -137,7 +137,8 @@ instance applies as a procedure.
               #:generator (make-generator 0)))
 
 (define (accuracy)
-  (item (mean (to-dtype (eq (argmax (net xs) 1) ys) 'float32))))
+  (with-no-grad
+    (item (mean (to-dtype (eq (argmax (net xs) 1) ys) 'float32)))))
 
 (for ([epoch (in-range 5)])
   (for ([(xb yb) (in-dataloader loader)])
@@ -188,6 +189,8 @@ against:
 - [Speech recognition on LibriSpeech](examples/racket/07-asr.rkt): a spectral
   front end, a transformer encoder-decoder, and CTC, with a
   [training script](scripts/train-asr.rkt)
+- [Image generation on CIFAR-10](examples/racket/08-diffusion.rkt): a
+  class-conditional DDPM with a UNet, trained with an EMA of the weights
 
 ## Documentation
 
@@ -198,6 +201,9 @@ against:
 - [Building from source](docs/building.md): the Nix flake, development shells,
   accelerators, and the libtorch source knob.
 - [`AGENTS.md`](AGENTS.md): the layout of the repository and its conventions.
+- Roadmap: the [open epics](https://github.com/bkc39/rktorch/issues?q=is%3Aissue+is%3Aopen+epic+in%3Atitle)
+  on the issue tracker; [`plans/v0-scaffold.md`](plans/v0-scaffold.md) records
+  the original scope.
 
 ## Internals
 
@@ -218,5 +224,4 @@ follows and which it keeps as a reference implementation.
 
 ## License
 
-Apache-2.0 for the code and CC-BY-4.0 for the documentation, as declared in
-[`torch/info.rkt`](torch/info.rkt).
+`Apache-2.0 AND CC-BY-4.0`, as declared in [`torch/info.rkt`](torch/info.rkt).
