@@ -401,3 +401,41 @@ layers were in mixed modes comes back exactly as it was.
 @defform[(in-eval-mode m body ...+)]{
 @racket[(call-with-mode m 'eval (lambda () body ...))].
 }
+
+@defproc[(ema [model layer?] [average layer?]
+              [#:decay decay (real-in 0 1) 0.9999])
+         ema?]{
+An exponential moving average of @racket[model]'s parameters, kept in
+@racket[average]: a second layer of the same architecture, built fresh by
+the caller, whose parameters are overwritten with the model's on
+construction. Passing the model itself, a layer sharing a parameter
+object with it, or one on another device or dtype is a contract
+violation; a model moved with @racket[to] needs its average moved the
+same way. Two parameters over one storage, which the contract cannot
+see, average to themselves: the copy and the update read both tensors
+before writing either. Buffers are neither copied nor
+averaged, as PyTorch's @tt{AveragedModel} leaves them by default; the
+average keeps the buffers it was built with. A diffusion model sampled from its averaged weights rather
+than its latest ones gives markedly cleaner images, the reason DDPM
+training keeps one; the default decay is that paper's.
+}
+
+@defproc[(ema-update! [e ema?]) void?]{
+Moves every averaged parameter to @racket[decay] times itself plus
+@racket[(- 1 decay)] times the model's, under @racket[with-no-grad]. The
+first update copies instead of averaging, as PyTorch's
+@tt{AveragedModel} does, so an average built before training tracks the
+trained weights rather than the initial draw.
+}
+
+@defproc[(ema-average [e ema?]) layer?]{
+The averaged layer, the one to evaluate with.
+}
+
+@defproc[(ema-decay [e ema?]) (real-in 0 1)]{
+The decay @racket[e] was built with.
+}
+
+@defproc[(ema? [v any/c]) boolean?]{
+Whether @racket[v] is an average built by @racket[ema].
+}

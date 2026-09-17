@@ -117,3 +117,23 @@ nn layer_norm
 shape tril
 shape triu
 compare masked_fill.Scalar
+
+# --- tranche 4 (#84): the DDPM UNet op closure ----------------------------
+
+# conv_transpose2d.input is conv2d's marshalling plus output_padding: the
+# decoder's upsampling conv.
+conv conv_transpose2d.input
+
+# group_norm reuses layer_norm's optional affine pair; silu is the first
+# generated activation (relu/gelu stay hand-written).
+nn group_norm
+nn silu
+
+# clamp introduces the optional-scalar kind (Scalar? -> double + presence
+# flag). ATen requires at least one bound.
+math clamp
+
+# --- tranche 5 (#84): the full-size DDPM UNet ------------------------------
+# repeat_interleave along the two spatial dims is nearest-neighbour
+# upsampling, F.interpolate(mode="nearest"), without an optional-float kind.
+shape repeat_interleave.self_int

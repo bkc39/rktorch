@@ -4,7 +4,7 @@
 ;; which provides Python torch; SKIPS when python3 can't import torch).
 
 (module+ test
-  (require (only-in racket/list append-map)
+  (require (only-in racket/list append-map make-list range)
            rackunit
            "../data/loader.rkt"
            "../main.rkt"
@@ -13,6 +13,8 @@
            (only-in "../data/text.rkt"
                     contiguous-blocks encode load-text-fixture text->vocab)
            (only-in "../vision/cifar10.rkt" load-cifar10-fixture)
+           (only-in "../vision/diffusion.rkt"
+                    UNet linear-schedule q-sample schedule-steps)
            "private/python-env.rkt")
 
   (define (check-parity rel-path compute)
@@ -412,6 +414,37 @@
          (check-training-twin "06_gpt" "python/06_gpt.py" train-on
                               'cuda 5e-3)))
      (let ()
+       (define (train-on device)
+         (with-default-device device
+           (manual-seed! 0)
+           (define-values (xs _ys) (load-cifar10-fixture))
+           (define net (UNet #:base 64 #:mults '(1 2) #:blocks 1 #:attention '(16)
+                             #:dropout 0))
+           (define sched (linear-schedule))
+           (define opt (adam (parameters net) #:lr 0.001))
+           (manual-seed! 0)
+           (define n (length xs))
+           (define steps (schedule-steps sched))
+           (define losses
+             (for/list ([_ (in-range 5)])
+               (define t (to (to-dtype (mul (rand n #:device 'cpu) steps) 'int64)
+                             device))
+               (define noise (to (randn-like xs #:device 'cpu) device))
+               (zero-grads! opt)
+               (define loss (mse-loss (net (q-sample sched xs t noise) t #f) noise))
+               (backward! loss)
+               (step! opt)
+               (item loss)))
+           (values losses
+                   (cat (for/list ([p (in-list (parameters net))])
+                          (reshape p -1))))))
+       (check-training-twin "08_diffusion" "python/08_diffusion.py" train-on
+                            'cpu tol)
+       (when (and (cuda-available?)
+                  (python-cuda-available?))
+         (check-training-twin "08_diffusion" "python/08_diffusion.py" train-on
+                              'cuda 5e-3)))
+     (let ()
        (define j (python-check "conv2d_init.py"))
        (manual-seed! 0)
        (define net (Conv2d 1 8 3))
@@ -446,6 +479,52 @@
              [b (in-list (hash-ref j 'values))]
              [i (in-naturals)])
          (check-= a b tol (format "layer-norm forward: value ~a parity" i))))
+     (let ()
+       (define j (python-check "conv_transpose2d_init.py"))
+       (manual-seed! 0)
+       (define net (ConvTranspose2d 2 4 3))
+       (define ps (parameters net))
+       (check-equal? (map tensor-shape ps) (hash-ref j 'shapes)
+                     "conv-transpose2d init: parameter shapes match nn.ConvTranspose2d")
+       (define rkt-vals (apply append (map tensor->list ps)))
+       (define py-vals (hash-ref j 'values))
+       (check-equal? (length rkt-vals) (length py-vals)
+                     "conv-transpose2d init: value count")
+       (for ([r (in-list rkt-vals)] [p (in-list py-vals)] [i (in-naturals)])
+         (check-= r p tol (format "conv-transpose2d init: value ~a parity" i))))
+     (let ()
+       (define j (python-check "group_norm_forward.py"))
+       (manual-seed! 0)
+       (define gn (GroupNorm 2 4))
+       (define r (gn (randn 2 4 3 3)))
+       (check-equal? (tensor-shape r) (hash-ref j 'shape)
+                     "group-norm forward: shape parity")
+       (for ([a (in-list (tensor->list r))]
+             [b (in-list (hash-ref j 'values))]
+             [i (in-naturals)])
+         (check-= a b tol (format "group-norm forward: value ~a parity" i))))
+     (let ()
+       (define j (python-check "ema_update.py"))
+       (manual-seed! 0)
+       (define m (Linear 4 3))
+       (define x (randn 8 4))
+       (define avg (ema m (Linear 4 3) #:decay 0.9))
+       (define opt (sgd (parameters m) #:lr 0.1))
+       (for ([_ (in-range 3)])
+         (zero-grads! opt)
+         (define y (m x))
+         (backward! (mean (* y y)))
+         (step! opt)
+         (ema-update! avg))
+       (define (flat layer) (append-map tensor->list (parameters layer)))
+       (for ([a (in-list (flat m))]
+             [b (in-list (hash-ref j 'model))]
+             [i (in-naturals)])
+         (check-= a b tol (format "ema: model parameter ~a parity" i)))
+       (for ([a (in-list (flat (ema-average avg)))]
+             [b (in-list (hash-ref j 'average))]
+             [i (in-naturals)])
+         (check-= a b tol (format "ema: averaged parameter ~a parity" i))))
      (let ()
        (define j (python-check "pool_default_stride.py"))
        (manual-seed! 0)
@@ -506,7 +585,6 @@
      (let ()
        (define j (python-check "to_conversions.py"))
        (define x (tensor '((1.5 -2.0) (0.0 3.25))))
-       ;; values, not repr: the float64 dtype suffix is format.rkt's open TODO
        (check-equal? (tensor->list (to x 'float64)) (hash-ref j 'float64_values))
        (check-equal? (format "torch.~a" (tensor-dtype (to x 'float64)))
                      (hash-ref j 'float64_dtype))
@@ -680,6 +758,28 @@
                      (hash-ref j 'randn_like_dtype))
        (check-equal? (tensor-shape (randn-like n64))
                      (hash-ref j 'randn_like_shape)))
+     (let ()
+       (define j (python-check "bytes_ingestion.py"))
+       (define t (tensor #"\0\1\2\377"))
+       (check-equal? (tensor->list t) (hash-ref j 'values))
+       (check-equal? (format "torch.~a" (tensor-dtype t)) (hash-ref j 'dtype))
+       (check-equal? (tensor->repr t) (hash-ref j 'repr))
+       (check-equal? (tensor->repr (reshape t 2 2)) (hash-ref j 'repr_2x2))
+       (check-equal? (tensor->repr (tensor #"")) (hash-ref j 'empty_repr))
+       (check-equal? (tensor->repr
+                      (tensor (apply bytes-append
+                                     (make-list 5 (list->bytes (range 256))))))
+                     (hash-ref j 'summarized_repr))
+       (check-equal? (tensor->list
+                      (div (to (tensor (list->bytes (range 256))) 'float32)
+                           255.0))
+                     (hash-ref j 'scaled))
+       (check-equal? (format "torch.~a" (tensor-dtype (to t 'int64)))
+                     (hash-ref j 'as_int64_dtype))
+       (check-equal? (tensor->repr (to (tensor '((1.5 -2.0) (0.0 3.25)))
+                                       'float64))
+                     (hash-ref j 'float64_repr))
+       (check-equal? (item (tensor #"\7")) (hash-ref j 'item)))
      (let ()
        ;; build on CPU, move, then train — Adam created before the move
        (define (train-on device)

@@ -30,6 +30,22 @@ tr_tensor* tr_gen_embedding(const tr_tensor* weight, const tr_tensor* indices,
   });
 }
 
+tr_tensor* tr_gen_group_norm(const tr_tensor* input, int64_t num_groups,
+                             const tr_tensor* weight, const tr_tensor* bias,
+                             double eps, bool cudnn_enabled) {
+  if (!input) {
+    return torchrkt::null_arg("tr_gen_group_norm");
+  }
+  return torchrkt::alloc_result("tr_gen_group_norm", [&] {
+    return at::group_norm(input->value, num_groups,
+                          weight ? c10::optional<at::Tensor>(weight->value)
+                                 : c10::optional<at::Tensor>(),
+                          bias ? c10::optional<at::Tensor>(bias->value)
+                               : c10::optional<at::Tensor>(),
+                          eps, cudnn_enabled);
+  });
+}
+
 tr_tensor* tr_gen_layer_norm(const tr_tensor* input,
                              const int64_t* normalized_shape,
                              int64_t normalized_shape_len,
@@ -49,6 +65,14 @@ tr_tensor* tr_gen_layer_norm(const tr_tensor* input,
              : c10::optional<at::Tensor>(),
         eps, cudnn_enable);
   });
+}
+
+tr_tensor* tr_gen_silu(const tr_tensor* self) {
+  if (!self) {
+    return torchrkt::null_arg("tr_gen_silu");
+  }
+  return torchrkt::alloc_result("tr_gen_silu",
+                                [&] { return at::silu(self->value); });
 }
 
 }  // extern "C"

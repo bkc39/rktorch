@@ -1,7 +1,8 @@
 #lang racket/base
 
-(require (only-in racket/contract/base ->* or/c)
-         (only-in "../foreign.rkt" conv1d conv2d flatten max-pool2d)
+(require (only-in racket/contract/base ->* ->i or/c unsupplied-arg?)
+         (only-in "../foreign.rkt"
+                  conv-transpose2d conv1d conv2d flatten max-pool2d)
          (only-in "../foreign/contracts.rkt"
                   nonneg-size-1d/c nonneg-size/c pos-size-1d/c pos-size/c)
          (only-in "../foreign/size.rkt" ->1d ->2d)
@@ -52,6 +53,47 @@
           (Parameter (uniform-init (list out-channels) (- bound) bound))))
   #:forward (x)
   (conv2d x weight #:bias bias #:stride stride #:padding padding))
+
+(define-layer ConvTranspose2d ;; noqa
+  (kernel-size stride padding output-padding dilation groups weight bias)
+  #:contract (->i ([in-channels exact-positive-integer?]
+                   [out-channels exact-positive-integer?]
+                   [kernel-size pos-size/c])
+                  (#:stride [stride pos-size/c]
+                   #:padding [padding nonneg-size/c]
+                   #:output-padding [output-padding nonneg-size/c]
+                   #:dilation [dilation pos-size/c]
+                   #:groups [groups exact-positive-integer?])
+                  #:pre/name (in-channels out-channels groups)
+                  "groups must divide both channel counts"
+                  (or (unsupplied-arg? groups)
+                      (and (zero? (remainder in-channels groups))
+                           (zero? (remainder out-channels groups))))
+                  [result conv-transpose2d?])
+  #:init (in-channels out-channels kernel-size
+          #:stride [stride 1]
+          #:padding [padding 0]
+          #:output-padding [output-padding 0]
+          #:dilation [dilation 1]
+          #:groups [groups 1])
+  (set! kernel-size (->2d kernel-size))
+  (set! stride (->2d stride))
+  (set! padding (->2d padding))
+  (set! output-padding (->2d output-padding))
+  (set! dilation (->2d dilation))
+  ;; the transposed layout (in, out/groups, kH, kW): fan-in reads out/groups
+  (define shape ;; noqa
+    (list in-channels (quotient out-channels groups)
+          (car kernel-size) (cadr kernel-size)))
+  ;; weight before bias: _ConvNd.reset_parameters' RNG draw order
+  (set! weight (Parameter (kaiming-uniform shape)))
+  (set! bias
+        (let ([bound (/ 1.0 (sqrt (fan-in shape)))])
+          (Parameter (uniform-init (list out-channels) (- bound) bound))))
+  #:forward (x)
+  (conv-transpose2d x weight #:bias bias #:stride stride #:padding padding
+                    #:output-padding output-padding #:dilation dilation
+                    #:groups groups))
 
 (define-layer MaxPool2d (kernel-size ;; noqa
                          #:stride [stride #f]

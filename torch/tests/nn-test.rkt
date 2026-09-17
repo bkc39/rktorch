@@ -149,6 +149,41 @@
                   (take (drop w-rows 12) 4))
     (check-equal? (object-name e) 'Embedding))
 
+  (test-case "ConvTranspose2d layer: transposed weight layout, forward shape"
+    (manual-seed! 0)
+    (define c (ConvTranspose2d 3 6 4 #:stride 2 #:padding 1))
+    (check-true (conv-transpose2d? c))
+    (check-true (layer? c))
+    (define ps (parameters c))
+    (check-equal? (map tensor-shape ps) '((3 6 4 4) (6)))
+    (check-true (andmap requires-grad? ps))
+    (check-equal? (map car (named-parameters c)) '("weight" "bias"))
+    (check-equal? (tensor-shape (c (randn 2 3 8 8))) '(2 6 16 16))
+    (check-equal? (object-name c) 'ConvTranspose2d)
+    (check-equal? (map tensor-shape (parameters (ConvTranspose2d 4 4 3 #:groups 2)))
+                  '((4 2 3 3) (4)))
+    (check-equal? (tensor-shape ((ConvTranspose2d 4 6 3 #:groups 2 #:dilation 2)
+                                 (randn 1 4 4 4)))
+                  '(1 6 8 8))
+    (check-equal? (tensor-shape ((ConvTranspose2d 1 1 2 #:stride 2 #:output-padding 1)
+                                 (ones 1 1 2 2)))
+                  '(1 1 5 5)))
+
+  (test-case "GroupNorm layer: ones/zeros init, per-group normalizing forward"
+    (define gn (GroupNorm 2 4))
+    (check-true (group-norm? gn))
+    (check-equal? (map tensor-shape (parameters gn)) '((4) (4)))
+    (check-equal? (map car (named-parameters gn)) '("weight" "bias"))
+    (check-equal? (tensor->list (car (parameters gn))) '(1.0 1.0 1.0 1.0))
+    (check-equal? (tensor->list (cadr (parameters gn))) '(0.0 0.0 0.0 0.0))
+    (manual-seed! 0)
+    (define y (gn (randn 2 4 3 3)))
+    (check-equal? (tensor-shape y) '(2 4 3 3))
+    (define grouped (reshape y 2 2 18))
+    (for* ([b (in-range 2)] [g (in-range 2)])
+      (check-= (item (mean (select (select grouped 0 b) 0 g))) 0.0 1e-5))
+    (check-equal? (object-name gn) 'GroupNorm))
+
   (test-case "LayerNorm layer: ones/zeros init, normalizing forward"
     (define ln (LayerNorm 4))
     (check-true (layer-norm? ln))
@@ -242,6 +277,27 @@
                (lambda () (conv1d (randn 1 2 8) (randn 3 2 3)
                                   #:padding -1))))
 
+  (test-case "GroupNorm on mps: same values, gradient back on the device"
+    (when (mps-available?)
+      (manual-seed! 0)
+      (define xs (tensor->list (randn 2 4 3 3)))
+      (define (out+grad dev)
+        (define x (to-device (reshape (tensor xs) 2 4 3 3) dev))
+        (requires-grad! x)
+        (define y ((to (GroupNorm 2 4) dev) x))
+        (backward! (mean (mul y y)))
+        (values y (grad x)))
+      (define-values (cpu-y cpu-g) (out+grad 'cpu))
+      (define-values (mps-y mps-g) (out+grad 'mps))
+      (check-equal? (tensor-device mps-y) (mps-device))
+      (check-equal? (tensor-device mps-g) (mps-device))
+      (for ([a (in-list (tensor->list cpu-y))]
+            [b (in-list (tensor->list (to-device mps-y 'cpu)))])
+        (check-= a b 1e-5))
+      (for ([a (in-list (tensor->list cpu-g))]
+            [b (in-list (tensor->list (to-device mps-g 'cpu)))])
+        (check-= a b 1e-5))))
+
   (test-case "ctc-loss on mps: same value, gradient back on the device"
     ;; libtorch has no MPS ctc_loss kernel, so the loss detours through the
     ;; CPU; the detour must be invisible in both the value and the gradient
@@ -286,10 +342,50 @@
     (check-true (< (last losses) (first losses))
                 (format "Adam losses did not decrease: ~a" losses)))
 
+  (test-case "ema: construction and the first update copy, later updates decay"
+    (manual-seed! 0)
+    (define net (Linear 2 2))
+    (define avg (ema net (Linear 2 2) #:decay 0.5))
+    (check-true (ema? avg))
+    (check-equal? (ema-decay avg) 0.5)
+    (define (weights layer) (tensor->list (car (parameters layer))))
+    (check-equal? (weights (ema-average avg)) (weights net))
+    (with-no-grad
+      (for ([p (in-list (parameters net))])
+        (mul! p 3.0)))
+    (ema-update! avg)
+    (check-equal? (weights (ema-average avg)) (weights net))
+    (with-no-grad
+      (for ([p (in-list (parameters net))])
+        (mul! p 3.0)))
+    (ema-update! avg)
+    (for ([q (in-list (weights (ema-average avg)))]
+          [p (in-list (weights net))])
+      (check-= q (* p 2/3) 1e-6))
+    (check-exn #rx"shape for shape" (lambda () (ema net (Linear 3 3))))
+    (check-exn #rx"separate layer" (lambda () (ema net net)))
+    (check-exn #rx"device and dtype" (lambda () (ema net (to (Linear 2 2) 'float64))))
+    (define shared (Parameter (ones 3)))
+    (define-layer holder (w) #:init (w0) (set! w w0) #:forward (x) x)
+    (define aliased (ema (holder shared) (holder (Parameter shared))))
+    (ema-update! aliased)
+    (ema-update! aliased)
+    (check-equal? (tensor->list shared) '(1.0 1.0 1.0)
+                  "copying and averaging through shared storage leave the values intact")
+    (to net 'float64)
+    (to (ema-average avg) 'float64)
+    (ema-update! avg)
+    (check-equal? (tensor-dtype (car (parameters (ema-average avg)))) 'float64
+                  "the cached weight follows the average across a move")
+    (check-exn #rx"^ema: contract violation"
+               (lambda () (ema net (Linear 2 2) #:decay 2))))
+
   (test-case "dropout: train drops/scales, eval is identity, mode recurses"
     (manual-seed! 0)
     (define d (Dropout #:p 0.5))
     (check-equal? (object-name d) 'Dropout)
+    (check-equal? (tensor->list ((Dropout #:p 0) (ones 3))) '(1.0 1.0 1.0)
+                  "an exact probability reaches the op as a flonum")
     (define x (ones 100))
     (define tr (tensor->list (d x)))
     (check-true (andmap (lambda (v) (or (= v 0.0) (= v 2.0))) tr))

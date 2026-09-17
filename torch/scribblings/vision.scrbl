@@ -2,9 +2,13 @@
 
 @(require (for-label racket/base
                      racket/contract
-                     (only-in torch cuda-if-available device/c tensor?)
+                     (only-in torch cuda-if-available device/c randn-like tensor?
+                              upsample-nearest2d)
                      torch/data/loader
-                     torch/vision/cifar10))
+                     (only-in torch/nn Conv2d Dropout Embedding GroupNorm Linear
+                              define-layer)
+                     torch/vision/cifar10
+                     torch/vision/diffusion))
 
 @title{Vision datasets}
 
@@ -73,4 +77,120 @@ whether to trigger the fetch; the tests only touch a cached archive.
 @defproc[(tar-entries [bs bytes?]) (listof (cons/c string? bytes?))]{
 The regular files of an uncompressed tar buffer, name and contents,
 enough for the archives the datasets ship in.
+}
+
+@section{Diffusion}
+
+@defmodule[torch/vision/diffusion]
+
+The pieces of a denoising diffusion model in the epsilon-prediction form:
+a schedule of noise levels, the closed-form jump to any timestep, and a
+small UNet. The training loop and the sampler are the examples' business.
+
+@defproc[(linear-schedule [steps exact-positive-integer? 1000]
+                          [#:beta-start beta-start (real-in 0 1) 1e-4]
+                          [#:beta-end beta-end (real-in 0 1) 0.02])
+         schedule?]{
+The DDPM schedule: @racket[steps] variances evenly spaced from
+@racket[beta-start] to @racket[beta-end], with their alphas and cumulative
+products as float32 tensors on the default device, so build it where the
+model lives.
+}
+
+@defproc[(cosine-schedule [steps exact-positive-integer? 1000]
+                          [#:offset offset finite-nonnegative-real? 0.008])
+         schedule?]{
+The improved-DDPM schedule: cumulative products following a squared cosine
+of the timestep, each variance capped at @racket[0.999].
+}
+
+@deftogether[(@defproc[(schedule? [v any/c]) boolean?]
+              @defproc[(schedule-steps [s schedule?]) exact-positive-integer?]
+              @defproc[(schedule-betas [s schedule?]) tensor?]
+              @defproc[(schedule-alphas [s schedule?]) tensor?]
+              @defproc[(schedule-alpha-bars [s schedule?]) tensor?])]{
+A schedule and its tables, each of shape @tt{[steps]}.
+}
+
+@defproc[(q-sample [s schedule?] [x0 tensor?] [t int64-vector?] [noise tensor?])
+         tensor?]{
+@tt{q(x_t | x_0)} in closed form: with @tt{a} the cumulative product at each
+image's timestep @racket[t], an int64 tensor of shape @tt{[N]},
+@tt{sqrt(a) x0 + sqrt(1 - a) noise}. @racket[noise] is drawn by the caller,
+typically @racket[randn-like], so a seeded run replays.
+}
+
+@defproc[(sinusoidal-embedding [t int64-vector?] [dim even-positive-integer?])
+         tensor?]{
+Timesteps @racket[t], shape @tt{[N]}, as @tt{[N dim]} sinusoidal features:
+the sine half then the cosine half over frequencies falling geometrically
+from @tt{1} to @tt{1/10000}.
+}
+
+@defproc[(TimeEmbedding [dim even-positive-integer?]) time-embedding?]{
+A layer mapping timesteps to a @tt{[N 4dim]} embedding: the sinusoidal
+features through two @racket[Linear] layers with a silu between.
+}
+
+@defproc[(ResBlock [in channels/c] [out channels/c]
+                   [t-dim exact-positive-integer?]
+                   [#:dropout dropout (real-in 0 1) 0])
+         res-block?]{
+The UNet's block: @racket[GroupNorm] of 32 groups, silu, a 3x3
+@racket[Conv2d], the time embedding projected and added per channel, a
+second norm, silu, @racket[Dropout] and convolution, plus the residual
+through a 1x1 convolution when the widths differ. Widths are multiples of
+32, the group count.
+}
+
+@defproc[(AttentionBlock [channels channels/c]) attention-block?]{
+Single-head self-attention over a feature map, the DDPM form: after a
+norm each pixel's channels are one token, @racket[Linear] maps give the
+queries, keys and values, softmax over the scaled dot products mixes the
+tokens, a @racket[Linear] projection follows, and the result is added to
+the input. The convolutional path before the block is the encoder that
+turns pixels into these tokens.
+}
+
+@defproc[(Downsample [channels channels/c]) downsample?]{
+A stride-2 3x3 convolution; called as @racket[(down x temb)] so it slots
+into the down path beside the blocks, the embedding ignored.
+}
+
+@defproc[(Upsample [channels channels/c]) upsample?]{
+Nearest-neighbour doubling through @racket[upsample-nearest2d] followed
+by a 3x3 convolution, the DDPM upsampling that avoids the checkerboard of
+a transposed convolution.
+}
+
+@defproc[(UNet [#:base base channels/c 128]
+               [#:mults mults (listof exact-positive-integer?) '(1 2 2 2)]
+               [#:blocks blocks exact-positive-integer? 2]
+               [#:attention attention (listof exact-positive-integer?) '(16)]
+               [#:dropout dropout (real-in 0 1) 0.1]
+               [#:classes classes (or/c #f exact-positive-integer?) #f])
+         unet?]{
+The DDPM UNet for 32x32 RGB images, the paper's CIFAR-10 configuration
+by default: one resolution level per entry of @racket[mults], at most
+five of them from 32x32 down to 2x2, each @racket[base] times that entry
+wide and half the resolution of the last,
+@racket[blocks] @racket[ResBlock]s per level on the way down and one more
+per level on the way up, each followed by an @racket[AttentionBlock] at
+the resolutions listed in @racket[attention], each of which must be one
+of the levels' resolutions, a @racket[Downsample]
+between levels going down and an @racket[Upsample] coming up, a middle
+of block, attention, block, and a @racket[TimeEmbedding] of @racket[base]
+features. Every block's output on the way down is concatenated back in on
+the way up. With @racket[classes] the network is class-conditional: an
+@racket[Embedding] of that many labels plus one null label, added to the
+time embedding, so a label of @racket[classes] means "no label" for
+classifier-free guidance. Called as @racket[(net x t y)] it returns the
+noise estimate for @racket[x] at timesteps @racket[t] and int64 labels
+@racket[y], which is @racket[#f] for an unconditional network. The
+default network has 35.7 million parameters.
+}
+
+@defproc[(unet-classes [net unet?]) (or/c #f exact-positive-integer?)]{
+The class count @racket[net] was built with, also its null label, or
+@racket[#f] for an unconditional network.
 }

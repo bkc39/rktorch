@@ -8,4 +8,4 @@
   #:contract (->* [] [#:p (and/c (>=/c 0) (</c 1))] dropout?)
   #:init (#:p [p 0.5])
   #:forward (x)
-  (with-mode (dropout x p (training? mode))))
+  (with-mode (dropout x (exact->inexact p) (training? mode))))

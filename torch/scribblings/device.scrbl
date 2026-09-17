@@ -31,7 +31,8 @@ PyTorch's @tt{.to}: moves @racket[x] to a device, casts it to a dtype, or
 both in one native hop. A device target is any @racket[device/c] form,
 @racket['cuda], @racket[(device 'cuda 1)], or a @racket[device?] value; a
 dtype target is one of @racket['float32], @racket['float64],
-@racket['int64], @racket['bool]. As in Python, the dtype may follow a device
+@racket['int64], @racket['bool], @racket['uint8]. As in Python, the dtype
+may follow a device
 target but a dtype target stands alone.
 
 @racketblock[

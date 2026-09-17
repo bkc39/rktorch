@@ -54,6 +54,7 @@
                   dtype-code->symbol
                   tr-tensor-copy-data-f64/raw
                   tr-tensor-copy-data-i64/raw
+                  tr-tensor-copy-data-u8/raw
                   tr-tensor-copy-data/raw
                   tr-tensor-dtype/raw
                   tr-tensor-item/raw
@@ -78,7 +79,7 @@
 
 (define dims-rest/c (listof exact-nonnegative-integer?))
 
-(define dtype-symbols '(float32 float64 int64 bool))
+(define dtype-symbols '(float32 float64 int64 bool uint8))
 
 (define/checked-out dtype/c contract? (apply or/c dtype-symbols))
 
@@ -103,7 +104,7 @@
 
 (define/checked-out (item t) (-> tensor? real?)
   (cond
-    [(and (int64-tensor? t) (= 1 (tensor-numel t)))
+    [(and (integer-tensor? t) (= 1 (tensor-numel t)))
      (define out (make-s64vector 1))
      (define-values (rc _n) (tr-tensor-copy-data-i64/raw t 1 out))
      (check-ok rc 'item)
@@ -122,9 +123,9 @@
   (or (dtype-code->symbol code)
       (error 'tensor-dtype "unsupported dtype code: ~a" code)))
 
-(define (int64-tensor? t)
+(define (integer-tensor? t)
   (define-values (rc code) (tr-tensor-dtype/raw t))
-  (and (zero? rc) (eq? (dtype-code->symbol code) 'int64)))
+  (and (zero? rc) (memq (dtype-code->symbol code) '(int64 uint8)) #t))
 
 (define (device->type+index dev)
   (cond
@@ -376,11 +377,16 @@
     [else (make-device x (or index 0))]))
 
 (define/contract-out (tensor->vector t)
-  (-> tensor? (or/c f32vector? f64vector? s64vector?))
+  (-> tensor? (or/c f32vector? f64vector? s64vector? bytes?))
   (define n (tensor-numel t))
   (define-values (dtype-rc code) (tr-tensor-dtype/raw t))
   (define dt (and (zero? dtype-rc) (dtype-code->symbol code)))
   (cond
+    [(eq? dt 'uint8)
+     (define out (make-bytes n))
+     (define-values (rc _n) (tr-tensor-copy-data-u8/raw t n out))
+     (check-ok rc 'tensor->vector)
+     out]
     [(eq? dt 'float64)
      (define out (make-f64vector n))
      (define-values (rc _n) (tr-tensor-copy-data-f64/raw t n out))
@@ -400,6 +406,7 @@
 (define/checked-out (tensor->list t) (-> tensor? (listof real?)) ;; noqa
   (define v (tensor->vector t))
   (cond
+    [(bytes? v) (bytes->list v)]
     [(s64vector? v) (s64vector->list v)]
     [(f64vector? v) (f64vector->list v)]
     [else (f32vector->list v)]))
