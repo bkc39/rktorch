@@ -14,7 +14,7 @@
                     item to-dtype tensor-dtype to-device tensor-device
                     tensor-shape tensor->list)
          (submod "foreign/ops.rkt" checked)
-         (except-in "foreign/creation-ops.rkt" tensor)
+         (except-in "foreign/creation-ops.rkt" generator? tensor)
          (submod "foreign/creation-ops.rkt" checked)
          (except-in "foreign/tensor-ops.rkt"
                     reshape unsqueeze sum matmul add sub mul div neg)
