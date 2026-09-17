@@ -174,9 +174,46 @@ near step 35.
 | default, 80% of capacity (19.3 GB) | 21.2 GB | 22.4 GB | not recorded | 0.42 |
 | `native-memory-limit` 15 GB | 16.8 GB | 18.2 GB | 26, reclaiming 114 GB | 0.42 |
 
-Both complete with no per-step cost against the plain loop's 0.42 s. The
+Both complete with no per-step cost against the plain loop's 0.42 s (these
+two rows predate the trough collection below). The
 default mark does not meet the issue's "within 10% of the 14 GB working
 set": the trigger only acts at accounting points, so the peak is the mark
 plus what `backward!` adds on top, 2.9 GB short of the card here. A tighter
 mark costs nothing measurable at this size, which argues for a lower
 default or a mark relative to the observed working set.
+
+## Collecting at the trough (2026-09-17)
+
+The mid-forward trigger fires at the peak, where a full collection promotes
+the step's live intermediates; the 15 GB-mark run above made 26 collections
+in 150 steps, each setting up the next. `backward!` now ends with
+`collect-at-trough!`; the capacity mark remains as the backstop.
+
+Synthetic bench, batch 1024 (everything off: 0.366 s/step, peak 15.1 GB
+and rising):
+
+| trough policy | peak | reserved | trough collections | s/step |
+|---|---|---|---|---|
+| every trough, minor first then major | 11.4 GB | 15.5 GB | 239 majors in 300 steps | 0.49 |
+| 5% time budget, major only | 12.9 GB flat | 14.7 GB | 167 in 400 steps | 0.375 |
+
+The minor stage reclaimed almost nothing (the dead intermediates have aged
+out of the nursery by the end of `backward!`), so it was dropped.
+
+The diffusion UNet on the local merge with #138, hand collection disabled:
+
+| run | peak | reserved | trough / backstop | s/step |
+|---|---|---|---|---|
+| batch 224, 150 steps | 15.0 GB flat from step 10 | 17.1 GB | 46 / 0 | 0.45 (plain 0.42) |
+| batch 256, 196 steps (one epoch) | 16.9 GB flat | 19.2 GB | 64 / 0 | 0.49 |
+| sampler, 1000 no-grad steps, 60 samples | 14 GB per window | 14.6 GB | 0 / 0 | 67 s total |
+
+Against the issue's acceptance: batch 224 is within 8% of the 13.9 GB that
+a hand collection on every step reaches, at 7% overhead; batch 256, which
+died in epoch 1 with a 21.1 GB probe peak, runs an epoch flat.
+
+Open: the sampler has no trough, so its dead tensors pile up to 14 GB
+(a forward there needs under 2 GB) until Racket's own collections catch
+them; it stays under the backstop and completes, but a no-grad loop wants a
+trough signal of its own, perhaps the return of a top-level layer call.
+The initial floor and the 5% budget are defaults to review.

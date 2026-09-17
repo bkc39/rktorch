@@ -3,7 +3,8 @@
 @(require (for-label racket/base
                      racket/contract
                      (only-in torch
-                              arange cpu-device cuda-allocator-settings!
+                              arange backward! cpu-device
+                              cuda-allocator-settings!
                               cuda-device cuda-memory-info cuda-memory-stats
                               cuda-reset-peak-stats! device device/c device?
                               dtype dtype/c eye finalizer-diagnostics full
@@ -157,10 +158,19 @@ the collections of a step wait for a full one, and when Racket happens to
 run a full collection in the middle of a forward pass, that pass's
 intermediates are promoted to the oldest generation, where Racket will not
 look again until its memory use has doubled: a whole step's storage stays
-behind and the next step runs out. The ledger therefore also collects on
-pressure: when a device's live bytes pass its high-water mark, the next
-allocation runs a full collection and yields until the finalizers have
-drained. Live bytes are the larger of the ledger's total and the CUDA
+behind and the next step runs out. The ledger therefore collects by itself,
+in two places. The first is the trough of a training step:
+@racket[backward!] has just released the graph, the forward pass's
+intermediates are dead and little is live, so a full collection there
+reclaims the most and promotes the least. When the ledger has grown by more
+than a margin (between 256 MiB and 1 GiB) over its size after the previous
+such collection, @racket[backward!] runs one before it returns and yields
+until the finalizers have drained; the collections are spaced so that they
+take about 5% of wall-clock time. A program whose residue never reaches the
+margin never sees one. The second is a backstop for everything else, such
+as a sampling loop that never calls @racket[backward!]: when a device's
+live bytes pass its high-water mark, the next allocation runs the same
+drained collection. Live bytes are the larger of the ledger's total and the CUDA
 caching allocator's own allocated figure, sampled as allocation proceeds,
 because storage that only the autograd graph still holds is invisible to the
 ledger. The mark is 80% of the device's capacity, from
@@ -225,9 +235,10 @@ boundaries and script exits; a training loop no longer needs it.
 @defproc[(finalizer-diagnostics)
          (listof (cons/c symbol? any/c))]{
 An association list with the finalizer run and failure counts, the captured
-failure messages, the number of ledger entries, and under
-@racket['pressure-collections] and @racket['pressure-reclaimed] the number
-of pressure collections so far and the bytes they released.
+failure messages, the number of ledger entries, and the collections the
+ledger has made: @racket['trough-collections] at the end of
+@racket[backward!], @racket['pressure-collections] from the high-water
+backstop, and under @racket['pressure-reclaimed] the bytes both released.
 }
 
 @section{Unsafe}

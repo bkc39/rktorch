@@ -97,7 +97,30 @@ the step. Two things escape them (#145, measured with
   than half full is never. That step's storage, a whole working set of
   it, stays behind and the next step's `backward!` fails.
 
-The ledger closes the gap itself:
+The ledger closes the gap itself, first at the trough and then with a
+backstop at the peak.
+
+**The trough.** `backward!` ends by calling `collect-at-trough!`. At that
+moment the graph has been released, the forward's intermediates are dead
+and almost nothing is live, so a full collection reclaims the most,
+promotes the least, and leaves Racket's doubling rule a small baseline
+to double from. The dead intermediates have aged past the nursery by
+then (a minor collection there was tried and reclaimed next to nothing),
+so the collection is a full one, drained as below. It runs when the
+ledger exceeds its *floor*, its size after the previous trough
+collection and zero before the first, by a margin: the floor itself,
+kept between 256 MiB and 1 GiB (`trough-margin` overrides it for
+tests). A time budget spaces them: after a collection that took t, the
+next waits t / `trough-budget`, 1/20 by default. On the 35.7M-parameter
+DDPM UNet at batch 224 that is a collection every three or four steps,
+a peak flat at 15.0 GB against 13.9 GB for a hand collection on every
+step, and 0.45 s per step against 0.42 s. Collecting at every trough
+instead costs 30%.
+
+**The backstop.** A collection at the peak is the wrong moment, since it
+promotes that step's live intermediates and so sets up the next one,
+but it is the only moment available to a loop with no `backward!`, and
+the last defence when a trough collection is not yet due:
 
 - `account!` keeps a live-bytes counter and a bytes-accounted-since-
   last-collection counter per device.
@@ -130,8 +153,9 @@ The ledger closes the gap itself:
 - Never from atomic mode (`in-atomic-mode?` guards it), and the RNG
   wrap gets the check too: it runs after the draw, so it cannot
   double-draw.
-- `finalizer-diagnostics` reports `pressure-collections` and
-  `pressure-reclaimed`.
+- `finalizer-diagnostics` reports `trough-collections`,
+  `pressure-collections` (the backstop) and `pressure-reclaimed` (bytes,
+  both kinds).
 
 ### In-place moves
 
