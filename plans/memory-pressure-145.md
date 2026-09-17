@@ -161,3 +161,22 @@ Also added: `cuda-reset-peak-stats!` (the windows above) and
 `expandable_segments` by default; the real diffusion probe on #138's UNet;
 the collection-cost split (a drained collection costs about 0.5 s here,
 three times in 700 steps, so batched frees have no case yet).
+
+## The diffusion probe (2026-09-17)
+
+`~/cifar10-diffusion/train.rkt` on a local merge of this branch with #138
+(clean merge, not pushed): the 35.7M-parameter UNet at batch 224, 150 steps,
+hand collection disabled (`GC_EVERY=1000000`). The issue's plain loop died
+near step 35.
+
+| mark | peak allocated | reserved at end | pressure collections | s/step |
+|---|---|---|---|---|
+| default, 80% of capacity (19.3 GB) | 21.2 GB | 22.4 GB | not recorded | 0.42 |
+| `native-memory-limit` 15 GB | 16.8 GB | 18.2 GB | 26, reclaiming 114 GB | 0.42 |
+
+Both complete with no per-step cost against the plain loop's 0.42 s. The
+default mark does not meet the issue's "within 10% of the 14 GB working
+set": the trigger only acts at accounting points, so the peak is the mark
+plus what `backward!` adds on top, 2.9 GB short of the card here. A tighter
+mark costs nothing measurable at this size, which argues for a lower
+default or a mark relative to the observed working set.
