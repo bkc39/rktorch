@@ -47,6 +47,10 @@ flake builds everything, native library included. See
 
 ## Usage
 
+![A Racket REPL session: a seeded random tensor, a matrix product, a byte
+string as a uint8 tensor, a gradient from backward!, and a Linear layer applied
+to a tensor](docs/images/repl.gif)
+
 A tensor prints in the Racket REPL exactly as it does in Python:
 
 ```racket
