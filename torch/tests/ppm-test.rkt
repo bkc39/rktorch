@@ -54,7 +54,11 @@
                   (bytes 9 9 9 9 9 9)
                   "uint8 passes through"))
 
-  (test-case "write-ppm: contracts on the image and the range"
+  (test-case "image-grid and write-ppm: contracts on the batch, the image and the range"
+    (check-exn #rx"non-empty-image-batch"
+               (lambda () (image-grid (zeros 0 3 4 4))))
+    (check-exn #rx"non-empty-image-batch"
+               (lambda () (image-grid (zeros 3 4 4))))
     (check-exn exn:fail:contract? (lambda () (written (zeros 2 2))))
     (check-exn exn:fail:contract? (lambda () (written (zeros 1 2 2))))
     (check-exn exn:fail:contract?

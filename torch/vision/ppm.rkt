@@ -18,7 +18,14 @@
             (and (= 3 (length dims)) (= 3 (car dims))))))))
 
 (define value-range/c
-  (and/c (list/c real? real?) (lambda (r) (< (car r) (cadr r)))))
+  (flat-named-contract
+   'value-range
+   (and/c (list/c real? real?) (lambda (r) (< (car r) (cadr r))))))
+
+(define non-empty-image-batch/c
+  (flat-named-contract
+   'non-empty-image-batch
+   (and/c image-batch/c (lambda (x) (positive? (car (tensor-shape x)))))))
 
 ;; torchvision.utils.make_grid's layout, so a twin can pin it: columns
 ;; across, padding around every image, one channel tripled to three
@@ -26,7 +33,7 @@
                                  #:columns [columns 8]
                                  #:padding [padding 2]
                                  #:pad-value [pad-value 0])
-  (->* [image-batch/c]
+  (->* [non-empty-image-batch/c]
        [#:columns exact-positive-integer?
         #:padding exact-nonnegative-integer?
         #:pad-value real?]
