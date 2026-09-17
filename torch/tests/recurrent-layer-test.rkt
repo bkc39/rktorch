@@ -65,7 +65,12 @@
                (lambda () (lstm (randn 5 2 3) (zeros 1 2 4))))
     (check-exn exn:fail:contract:arity?
                (lambda () ((GRU 3 4) (randn 5 2 3) (zeros 1 2 4) (zeros 1 2 4))))
-    (check-exn #rx"rank-3" (lambda () (lstm (randn 5 3)))))
+    (check-exn #rx"LSTM: contract violation.*rank-3 tensor"
+               (lambda () (lstm (randn 5 3))))
+    (check-exn #rx"LSTM: contract violation.*rank-3 tensor"
+               (lambda () (lstm '(1 2 3))))
+    (check-exn #rx"GRU: contract violation.*rank-3 tensor"
+               (lambda () ((GRU 3 4) (randn 5 2 3) (zeros 2 4)))))
 
   (test-case "inter-layer dropout is a training-mode behaviour"
     (manual-seed! 0)
@@ -77,6 +82,14 @@
     (check-not-equal? (run) (run))
     (eval! gru)
     (check-equal? (run) (run)))
+
+  (test-case "to moves a recurrent layer through its own move path"
+    (define gru (GRU 3 4))
+    (check-eq? (to gru 'float64) gru)
+    (check-equal? (map tensor-dtype (parameters gru))
+                  '(float64 float64 float64 float64))
+    (define-values (out _h) (gru (randn 5 2 3 #:dtype 'float64)))
+    (check-equal? (tensor-dtype out) 'float64))
 
   (test-case "constructor contracts"
     (check-exn exn:fail:contract? (lambda () (LSTM 0 4)))
@@ -177,6 +190,11 @@
       (backward! (sum gpu-out))
       (for ([p (in-list (parameters lstm))])
         (check-equal? (tensor-shape (grad p)) (tensor-shape p)))
+      (to lstm 'cpu)
+      (to lstm 'cuda)
+      (define-values (round-trip _rh _rc) (lstm (to-device x 'cuda)))
+      (check-close (tensor->list (to-device round-trip 'cpu))
+                   (tensor->list cpu-out) "after a CPU round trip" 1e-4)
       (define opt (adam (parameters lstm)))
       (step! opt)
       (define-values (after-step _ah _ac) (lstm (to-device x 'cuda)))

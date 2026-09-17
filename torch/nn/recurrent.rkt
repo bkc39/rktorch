@@ -3,13 +3,13 @@
 (require (only-in racket/contract/base
                   -> ->* </c >=/c and/c any/c contract-out)
          (only-in "../foreign.rkt"
-                  device-type tensor-device tensor-dtype tensor-shape
-                  with-no-grad zeros)
+                  device-type prop:to tensor-device tensor-dtype tensor-shape
+                  tensor? with-no-grad zeros)
          (only-in "../generated.rkt"
                   cudnn-rnn-flatten-weight gru-input lstm-input)
          (only-in "../private/contract.rkt" define/contract-out)
          (only-in "init.rkt" uniform-init)
-         (only-in "layer.rkt" gen:layer training?)
+         (only-in "layer.rkt" gen:layer move-layer! training?)
          (only-in "parameter.rkt" Parameter))
 
 (provide (contract-out [lstm? (-> any/c boolean?)]
@@ -33,11 +33,19 @@
    (define (layer-set-mode! self mode)
      (set-recurrent-mode! self mode))])
 
+;; A move rebinds every parameter to scattered storage, on any device and
+;; for a dtype change alike, so it is the move that forgets the flattening.
+(define (move-and-scatter! self device dtype)
+  (set-recurrent-flattened-on! self #f)
+  (move-layer! self device dtype))
+
 (struct lstm recurrent ()
-  #:reflection-name 'LSTM)
+  #:reflection-name 'LSTM
+  #:property prop:to move-and-scatter!)
 
 (struct gru recurrent ()
-  #:reflection-name 'GRU)
+  #:reflection-name 'GRU
+  #:property prop:to move-and-scatter!)
 
 ;; cudnnRNNMode_t
 (define (cudnn-mode self)
@@ -115,8 +123,6 @@
                                  (recurrent-batch-first? self)
                                  (recurrent-bidirectional? self))))))
 
-;; `to` rebinds every parameter to fresh storage, so a move is what makes
-;; the weights scatter again.
 (define (ensure-flat! self)
   (define device (tensor-device (car (weights self))))
   (unless (equal? device (recurrent-flattened-on self))
@@ -136,11 +142,13 @@
 (define (run self x state)
   (define who (if (lstm? self) 'LSTM 'GRU))
   (define state-count (if (lstm? self) 2 1))
-  (unless (= 3 (length (tensor-shape x)))
-    (raise-arguments-error who "expected a rank-3 input"
-                           "shape" (tensor-shape x)))
+  (unless (and (tensor? x) (= 3 (length (tensor-shape x))))
+    (raise-argument-error who "a rank-3 tensor?" x))
   (unless (memv (length state) (list 0 state-count))
     (apply raise-arity-error who (list 1 (add1 state-count)) x state))
+  (for ([s (in-list state)] [i (in-naturals 1)])
+    (unless (and (tensor? s) (= 3 (length (tensor-shape s))))
+      (apply raise-argument-error who "a rank-3 tensor?" i x state)))
   (ensure-flat! self)
   (define initial
     (if (null? state)
