@@ -117,6 +117,21 @@ a peak flat at 15.0 GB against 13.9 GB for a hand collection on every
 step, and 0.45 s per step against 0.42 s. Collecting at every trough
 instead costs 30%.
 
+**The no-grad trough.** A sampling or evaluation loop never reaches
+`backward!`. Its trough is the return of an *outermost* layer call with
+gradients off: `call-forward` in `torch/nn/layer.rkt` marks the
+continuation for the extent of a call, so a nested call sees the mark
+and only the outermost return reaches `collect-at-forward-trough!`,
+which checks the grad mode and calls `collect-at-trough! #:young? #t`.
+The mark unwinds with the continuation, so an exception leaves no state
+behind. This garbage is young, so a minor collection goes first and a
+full one takes what survives (handles that lived through a minor
+collection during a long forward); the two stages split the budget.
+With gradients on, the return of a forward is the peak, the graph
+holding every intermediate, and nothing is done. On the #138 sampler
+(1000 steps, a doubled batch of 60): window peak 14 GB down to 5.6 GB,
+reserved 14.6 GB down to 6.0 GB, 70.7 s against 67.4 s.
+
 **The backstop.** A collection at the peak is the wrong moment, since it
 promotes that step's live intermediates and so sets up the next one,
 but it is the only moment available to a loop with no `backward!`, and
@@ -153,9 +168,9 @@ the last defence when a trough collection is not yet due:
 - Never from atomic mode (`in-atomic-mode?` guards it), and the RNG
   wrap gets the check too: it runs after the draw, so it cannot
   double-draw.
-- `finalizer-diagnostics` reports `trough-collections`,
+- `finalizer-diagnostics` reports `trough-collections`, `trough-minors`,
   `pressure-collections` (the backstop) and `pressure-reclaimed` (bytes,
-  both kinds).
+  all kinds).
 
 ### In-place moves
 

@@ -13,8 +13,8 @@
                               rand-like randn randn-like
                               reclaim-native-memory! tensor tensor-device
                               tensor-dtype tensor? to to-able? to-device
-                              to-dtype with-default-device zeros zeros-like
-                              ~>)
+                              to-dtype with-default-device with-no-grad
+                              zeros zeros-like ~>)
                      (only-in torch/nn
                               Buffer Linear Parameter adam buffers gen:layer
                               layer? load-state! parameters step!)))
@@ -167,10 +167,15 @@ than a margin (between 256 MiB and 1 GiB) over its size after the previous
 such collection, @racket[backward!] runs one before it returns and yields
 until the finalizers have drained; the collections are spaced so that they
 take about 5% of wall-clock time. A program whose residue never reaches the
-margin never sees one. The second is a backstop for everything else, such
-as a sampling loop that never calls @racket[backward!]: when a device's
-live bytes pass its high-water mark, the next allocation runs the same
-drained collection. Live bytes are the larger of the ledger's total and the CUDA
+margin never sees one. A sampling or evaluation loop never calls
+@racket[backward!]; its trough is the return of an outermost layer call
+while gradients are off (see @racket[with-no-grad]), where nothing of the
+forward pass outlives its result. That garbage is young, so a minor
+collection is tried first and a full one takes only what survives, the two
+sharing the same 5%. With gradients on the same moment is the peak of a
+step, and nothing is done there. The second place is a backstop for code
+with neither trough: when a device's live bytes pass its high-water mark,
+the next allocation runs the same drained collection. Live bytes are the larger of the ledger's total and the CUDA
 caching allocator's own allocated figure, sampled as allocation proceeds,
 because storage that only the autograd graph still holds is invisible to the
 ledger. The mark is 80% of the device's capacity, from
@@ -236,9 +241,10 @@ boundaries and script exits; a training loop no longer needs it.
          (listof (cons/c symbol? any/c))]{
 An association list with the finalizer run and failure counts, the captured
 failure messages, the number of ledger entries, and the collections the
-ledger has made: @racket['trough-collections] at the end of
-@racket[backward!], @racket['pressure-collections] from the high-water
-backstop, and under @racket['pressure-reclaimed] the bytes both released.
+ledger has made: @racket['trough-collections] and @racket['trough-minors],
+the full and minor collections at a trough, @racket['pressure-collections]
+from the high-water backstop, and under @racket['pressure-reclaimed] the
+bytes all of them released.
 }
 
 @section{Unsafe}

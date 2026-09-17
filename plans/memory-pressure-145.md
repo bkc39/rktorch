@@ -212,8 +212,35 @@ Against the issue's acceptance: batch 224 is within 8% of the 13.9 GB that
 a hand collection on every step reaches, at 7% overhead; batch 256, which
 died in epoch 1 with a 21.1 GB probe peak, runs an epoch flat.
 
-Open: the sampler has no trough, so its dead tensors pile up to 14 GB
-(a forward there needs under 2 GB) until Racket's own collections catch
-them; it stays under the backstop and completes, but a no-grad loop wants a
-trough signal of its own, perhaps the return of a top-level layer call.
 The initial floor and the 5% budget are defaults to review.
+
+## The no-grad trough, and the leak check (2026-09-17)
+
+The return of an outermost layer call with gradients off is now a trough:
+minor collection first, a full one for what survives, one shared budget.
+
+| no-grad run | window peak | reserved | backstop / full / minor | time |
+|---|---|---|---|---|
+| synthetic forward, batch 1024, 300 steps, backstop only | 20.0 GB | 20.5 GB | 193 / 0 / 0 | 0.116 s/step |
+| same, full collections only at the trough | 12 to 18 GB | 18.5 GB | 0 / 47 / 0 | 0.120 s/step |
+| same, minor first | 12.8 GB (one forward's worth) | 13.4 GB | 0 / 1 / 300 | 0.111 s/step |
+| #138 sampler, 1000 steps, before | 14 GB | 14.6 GB | 0 / 0 / 0 | 67.4 s |
+| #138 sampler, a budget per stage | 4.7 GB | 5.4 GB | 0 / 96 / 1000 | 76.4 s |
+| #138 sampler, one shared budget | 5.6 GB | 6.0 GB | 0 / 47 / 1000 | 70.7 s |
+
+UNet training at batch 224 is unchanged by the layer-call wrapper: 14,988
+MiB flat, 0.43 s/step.
+
+Leak check, `scripts/bench-memory-pressure.rkt` sampled along long runs.
+Every column a leak would move is flat or oscillating, and dropping the
+model returns the ledger, the allocator's allocated and reserved bytes and
+the ledger's entry count to zero:
+
+| run | allocated after a step | ledger entries | Racket heap | RSS | after the drop |
+|---|---|---|---|---|---|
+| no-grad, 3000 steps | 24 MiB, constant | 38, constant | 121 to 130 MiB, oscillating | 798 MiB, constant | 0 / 0 / 0 |
+| training, batch 512, 1500 steps | 88 to 129 MiB, no trend | 243 to 336, no trend | 174 to 215 MiB, oscillating | 970 to 971 MiB | 0 / 0 / 0 |
+
+Left open: within one no-grad forward nothing is collected, so the window
+peak is one forward's worth of intermediates (a nested trough would tighten
+it); `expandable_segments` stays opt-in.

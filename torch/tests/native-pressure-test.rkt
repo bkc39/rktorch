@@ -4,13 +4,13 @@
   (require rackunit
            (only-in "../foreign.rkt"
                     cpu-device finalizer-diagnostics native-memory-limit
-                    native-memory-use reclaim-native-memory! zeros)
-           (only-in "../foreign.rkt" with-no-grad)
-           (only-in "../nn.rkt" Linear Sequential)
+                    native-memory-use reclaim-native-memory! with-no-grad
+                    zeros)
            (only-in "../foreign/raw/memory.rkt"
                     allocator-reading collect-at-trough!
                     native-memory-use/fold reset-pressure-state!
-                    trough-budget trough-margin))
+                    trough-budget trough-margin)
+           (only-in "../nn.rkt" Linear Sequential))
 
   (define mib (* 1024 1024))
 
