@@ -19,7 +19,7 @@
   ;; Every op in the codegen manifest needs an input recipe here (a missing
   ;; one fails loudly). Spec -> input: (tensor dim ...) = seeded randn,
   ;; (tensors ...) a list of them, (bool-tensor ...) a genuine bool handle
-  ;; via `ne 0`, (kwarg "name" v) a scalar passed as name=v to a kwarg-only
+  ;; via `ne 0`, (kwarg "name" v) a scalar (or none) passed as name=v to a kwarg-only
   ;; aten arg, (optional-scalar v) a Scalar? bound, other heads are
   ;; literals with #f = None.
   (define generated-recipes
@@ -133,7 +133,7 @@
           'silu '((tensor 2 3))
           'clamp '((tensor 2 3) (optional-scalar -0.5) (optional-scalar 0.5))
           'repeat-interleave-self-int '((tensor 2 3) (int64 2) (optional-int64 1)
-                                        (optional-int64 #f))))
+                                        (kwarg "output_size" none))))
 
   ;; Tensor specs draw seeded randns left to right — both sides consume the
   ;; same RNG stream, so spec order and draw counts must match exactly.
@@ -152,7 +152,7 @@
       [(int64 double bool int-array optional-int64 optional-int-array
         optional-scalar dtype)
        (cadr spec)]
-      [(kwarg) (caddr spec)]
+      [(kwarg) (let ([v (caddr spec)]) (if (eq? v 'none) #f v))]
       [else (error 'generated-parity "unknown recipe spec: ~a" spec)]))
 
   (define (spec->python-expr spec)
@@ -183,6 +183,7 @@
       [(kwarg)
        (define v (caddr spec))
        (cond
+         [(eq? v 'none) "None"]
          [(boolean? v) (if v "True" "False")]
          [else (number->string v)])]
       [(bool) (if (cadr spec) "True" "False")]
@@ -377,5 +378,9 @@
       "[max-only]")
      (check-generated-parity
       (assq 'repeat-interleave-self-int manifest)
-      '((tensor 2 3) (int64 3) (optional-int64 #f) (optional-int64 #f))
-      "[flattened]")]))
+      '((tensor 2 3) (int64 3) (optional-int64 #f) (kwarg "output_size" none))
+      "[flattened]")
+     (check-generated-parity
+      (assq 'repeat-interleave-self-int manifest)
+      '((tensor 2 3) (int64 3) (optional-int64 #f) (kwarg "output_size" 18))
+      "[flattened+output-size]")]))
