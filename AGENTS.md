@@ -124,6 +124,12 @@ with `backward!` outside the form as PyTorch recommends). From
   takes `#:generator` and draws one seed per batch from it, so a seeded
   loader replays its augmentation (the draws are the transform's own, not
   torchvision's)
+- generative examples on MNIST (#152): `examples/racket/10-dcgan.rkt` (a
+  DCGAN shrunk to 28x28, `ConvTranspose2d` and `BatchNorm2d` in the
+  generator, `leaky-relu` in the discriminator, two `adam`s at 2e-4 with
+  `#:beta1 0.5`) and `11-vae.rkt` (the linear VAE, the reparameterization
+  with the caller's noise, the reference loss over the batch); both write a
+  10x10 sample grid per epoch through `image-grid` and `write-ppm`
 - images (`torch/vision/ppm.rkt`, #155): `image-grid #:columns #:padding
   #:pad-value` (torchvision's `make_grid` layout, on the device) and
   `write-ppm #:range` (binary P6, `save_image`'s quantization; a uint8 image
