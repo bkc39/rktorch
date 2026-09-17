@@ -21,6 +21,7 @@
          tr-tensor-shape/raw
          tr-tensor-copy-data-i64/raw
          tr-tensor-copy-data-u8/raw
+         tr-tensor-copy-bytes/raw
          tr-tensor-copy-data/raw
          tr-tensor-dtype/raw
          tr-tensor-to-dtype/raw
@@ -61,7 +62,8 @@
   #:c-id tr_tensor_copy_data)
 
 (define _tr-dtype
-  (_enum '(float32 = 0 float64 = 1 int64 = 2 bool = 3 uint8 = 4 keep = -1)
+  (_enum '(float32 = 0 float64 = 1 int64 = 2 bool = 3 uint8 = 4
+           float16 = 5 bfloat16 = 6 keep = -1)
          _int))
 
 (define (dtype-code->symbol n)
@@ -71,7 +73,19 @@
     [(2) 'int64]
     [(3) 'bool]
     [(4) 'uint8]
+    [(5) 'float16]
+    [(6) 'bfloat16]
     [else #f]))
+
+;; the element bytes in the tensor's own dtype; capacity 0 asks for the size
+(define-torch tr-tensor-copy-bytes/raw
+  (_fun (t : _Tensor)
+        (capacity : _uint64)
+        (out : _bytes)
+        (out-nbytes : (_ptr o _uint64))
+        -> (rc : _int)
+        -> (values rc out-nbytes))
+  #:c-id tr_tensor_copy_bytes)
 
 ;; out is a plain _int, not _tr-dtype: on the error path the C side never
 ;; writes it, and an enum unmarshal of that garbage raises BEFORE the

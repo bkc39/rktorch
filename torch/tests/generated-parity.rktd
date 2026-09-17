@@ -47,6 +47,7 @@
  (le-tensor "le.Tensor" (tensor tensor) #f)
  (leaky-relu "leaky_relu" (tensor scalar) #f)
  (lerp-tensor! "lerp_.Tensor" (tensor tensor tensor) #t)
+ (linear "linear" (tensor tensor optional-tensor) #f)
  (lt-scalar "lt.Scalar" (tensor scalar) #f)
  (lt-tensor "lt.Tensor" (tensor tensor) #f)
  (masked-fill-scalar "masked_fill.Scalar" (tensor tensor scalar) #f)

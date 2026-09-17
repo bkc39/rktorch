@@ -59,6 +59,7 @@
          le-tensor
          leaky-relu
          lerp-tensor!
+         linear
          lt-scalar
          lt-tensor
          masked-fill-scalar
@@ -224,6 +225,9 @@
 
 (define-generated-op lerp-tensor! tr_gen_lerp__tensor #:inplace
   ([self tensor] [end tensor] [weight tensor]))
+
+(define-generated-op linear tr_gen_linear
+  ([input tensor] [weight tensor] [bias optional-tensor]))
 
 (define-generated-op lt-scalar tr_gen_lt_scalar
   ([self tensor] [other scalar]))

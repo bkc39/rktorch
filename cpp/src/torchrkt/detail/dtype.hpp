@@ -20,6 +20,10 @@ inline torch::ScalarType to_scalar_type(tr_dtype dtype) {
       return torch::kBool;
     case TR_DTYPE_UINT8:
       return torch::kUInt8;
+    case TR_DTYPE_FLOAT16:
+      return torch::kFloat16;
+    case TR_DTYPE_BFLOAT16:
+      return torch::kBFloat16;
     case TR_DTYPE_KEEP:
       break;
   }

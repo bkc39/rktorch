@@ -44,6 +44,7 @@
                   tr-from-data-on-device/raw
                   tr-from-data-u8-on-device/raw
                   tr-from-data-u8/raw
+                  tr-from-bytes/raw
                   tr-from-data/raw
                   tr-full-on/raw
                   tr-ones-on/raw
@@ -75,7 +76,7 @@
 (define (finish out requires-grad?)
   (if requires-grad? (requires-grad! out) out))
 
-(define float-dtype/c (or/c 'float32 'float64))
+(define float-dtype/c (or/c 'float32 'float64 'float16 'bfloat16))
 
 (define (shaped who raw dims device dtype requires-grad? . extra)
   (define shape (shape-of dims))
@@ -327,10 +328,12 @@
   (->* [(or/c real? list? vector? f32vector? s64vector? bytes?)]
        [#:requires-grad? boolean?
         #:device (or/c #f device/c)
-        #:dtype (or/c #f 'float32 'int64 'uint8)]
+        #:dtype (or/c #f 'float32 'int64 'uint8 'float16 'bfloat16)]
        tensor?)
-  (unless (memq dtype '(#f float32 int64 uint8))
-    (error 'tensor "unsupported #:dtype (float32, int64 or uint8): ~e" dtype))
+  (unless (memq dtype '(#f float32 int64 uint8 float16 bfloat16))
+    (error 'tensor
+           "unsupported #:dtype (float32, int64, uint8, float16 or bfloat16): ~e"
+           dtype))
   (define dims (nested-dims data))
   (define-values (chosen payload numel)
     (cond
@@ -375,8 +378,18 @@
                  (tr-from-data-on-device/raw payload numel dim-vec ndim
                                              type index)
                  (tr-from-data/raw payload numel dim-vec ndim))])))
+  ;; the half pair has no host vector type, so it is built as float32 and
+  ;; narrowed natively, like a byte string asked for another dtype
   (define typed
-    (if (and (bytes? data) dtype (not (eq? dtype 'uint8)))
-        (to-dtype out dtype)
-        out))
+    (cond
+      [(and (bytes? data) dtype (not (eq? dtype 'uint8))) (to-dtype out dtype)]
+      [(memq dtype '(float16 bfloat16)) (to-dtype out dtype)]
+      [else out]))
   (if requires-grad? (requires-grad! typed) typed))
+
+;; the inverse of tensor->bytes: element bytes in the given dtype, shaped
+(define/contract-out (bytes->tensor bs dtype shape) ;; noqa
+  (-> bytes? dtype/c dims-rest/c tensor?)
+  (wrap 'bytes->tensor
+        (tr-from-bytes/raw bs (bytes-length bs)
+                           (list->s64vector shape) (length shape) dtype)))

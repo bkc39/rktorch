@@ -4,7 +4,9 @@
 ;; which provides Python torch; SKIPS when python3 can't import torch).
 
 (module+ test
-  (require (only-in racket/list append-map make-list range)
+  (require (only-in json string->jsexpr)
+           (only-in racket/file file->bytes make-temporary-file)
+           (only-in racket/list append-map make-list range)
            rackunit
            "../data/loader.rkt"
            "../main.rkt"
@@ -16,6 +18,30 @@
            (only-in "../vision/diffusion.rkt"
                     UNet linear-schedule q-sample schedule-steps)
            "private/python-env.rkt")
+
+  ;; nn.Linear plus an int64 counter, the half_dtypes.py twin's Counted
+  (define-layer BrainCounted (lin steps)
+    #:init ()
+    (set! lin (Linear 3 2))
+    (set! steps (Buffer (tensor '(0 1))))
+    #:forward (x) (lin x))
+
+  ;; one buffer per safetensors dtype tag, the safetensors_dtypes.py twin
+  (define-layer Tagged (f32 f64 f16 bf16 i64 bool u8)
+    #:init ()
+    (set! f32 (Buffer (zeros 2 3)))
+    (set! f64 (Buffer (zeros 3 #:dtype 'float64)))
+    (set! f16 (Buffer (zeros 2 2 #:dtype 'float16)))
+    (set! bf16 (Buffer (zeros 4 #:dtype 'bfloat16)))
+    (set! i64 (Buffer (zeros 2 2 #:dtype 'int64)))
+    (set! bool (Buffer (zeros 3 #:dtype 'bool)))
+    (set! u8 (Buffer (zeros 3 #:dtype 'uint8)))
+    #:forward (x) x)
+
+  (define (hex->bytes s)
+    (apply bytes
+           (for/list ([i (in-range 0 (string-length s) 2)])
+             (string->number (substring s i (+ i 2)) 16))))
 
   (define (check-parity rel-path compute)
     (define j (python-result rel-path))
@@ -626,6 +652,104 @@
                      (hash-ref j 'full_int64_repr))
        (check-equal? (tensor->repr (ones 3 #:dtype 'bool))
                      (hash-ref j 'ones_bool_repr))
+       (let ()
+         (define h (python-check "half_dtypes.py"))
+         (manual-seed! 0)
+         (define xh (randn 2 3))
+         (check-equal? (tensor->list (to xh 'float16)) (hash-ref h 'half_values)
+                       "float16 cast: values through float32")
+         (check-equal? (tensor->list (to xh 'bfloat16))
+                       (hash-ref h 'brain_values)
+                       "bfloat16 cast: values through float32")
+         (check-equal? (tensor->repr (to xh 'float16)) (hash-ref h 'half_repr))
+         (check-equal? (tensor->repr (to xh 'bfloat16)) (hash-ref h 'brain_repr))
+         (check-equal? (tensor->repr (zeros 0 #:dtype 'float16))
+                       (hash-ref h 'empty_half_repr))
+         (check-equal? (tensor->repr (zeros 2 2 #:dtype 'bfloat16))
+                       (hash-ref h 'zeros_brain_repr))
+         (check-equal? (tensor->list (full 0.1 3 #:dtype 'float16))
+                       (hash-ref h 'full_half_values))
+         (check-equal? (tensor->list (arange 0 5 #:dtype 'bfloat16))
+                       (hash-ref h 'arange_brain_values))
+         (check-equal? (tensor->list (tensor '(1.0 0.1 65504.0)
+                                             #:dtype 'float16))
+                       (hash-ref h 'tensor_half_values))
+         (manual-seed! 1)
+         (define counted (to (BrainCounted) 'bfloat16))
+         (check-equal? (for/hasheq ([e (in-list (state-dict counted))])
+                         (values (string->symbol (car e))
+                                 (format "torch.~a" (tensor-dtype (cdr e)))))
+                       (hash-ref h 'counted_dtypes)
+                       "a layer moved to bfloat16 keeps its int64 buffer")
+         (check-equal? (tensor->list (car (parameters counted)))
+                       (hash-ref h 'counted_weight)))
+       (let ()
+         (define h (python-check "autocast_cpu.py"))
+         (define half-tol 2e-2)
+         (manual-seed! 0)
+         (define a (randn 3 4))
+         (define b (randn 4 2))
+         (check-equal? (autocast-enabled? 'cpu) (hash-ref h 'before))
+         (define prod
+           (with-autocast #:device 'cpu
+             (check-equal? (autocast-enabled? 'cpu) (hash-ref h 'inside))
+             (matmul a b)))
+         (check-equal? (autocast-enabled? 'cpu) (hash-ref h 'after))
+         (check-equal? (format "torch.~a" (tensor-dtype prod))
+                       (hash-ref h 'prod_dtype))
+         (for ([r (in-list (tensor->list prod))]
+               [p (in-list (hash-ref h 'prod_values))]
+               [i (in-naturals)])
+           (check-= r p half-tol (format "autocast matmul: value ~a" i)))
+         (manual-seed! 1)
+         (define lin (Linear 4 2))
+         (define xa (randn 8 4))
+         (define loss
+           (with-autocast #:device 'cpu
+             (define y (lin xa))
+             (check-equal? (format "torch.~a" (tensor-dtype y))
+                           (hash-ref h 'y_dtype))
+             (mean (mul y y))))
+         (check-= (item loss) (hash-ref h 'loss) half-tol "autocast loss")
+         (backward! loss)
+         (define g (grad (car (parameters lin))))
+         (check-equal? (format "torch.~a" (tensor-dtype g))
+                       (hash-ref h 'grad_dtype))
+         (for ([r (in-list (tensor->list g))]
+               [p (in-list (hash-ref h 'grad_values))]
+               [i (in-naturals)])
+           (check-= r p half-tol (format "autocast grad: value ~a" i))))
+       (let ()
+         (define h (python-check "safetensors_dtypes.py"))
+         (define path (make-temporary-file "rkt-tagged-~a.safetensors"))
+         (call-with-output-file path #:exists 'truncate
+           (lambda (out) (write-bytes (hex->bytes (hash-ref h 'hex)) out)))
+         (define m (Tagged))
+         (load-state! m path)
+         (for ([e (in-list (state-dict m))])
+           (check-equal? (map exact->inexact (tensor->list (cdr e)))
+                         (hash-ref (hash-ref h 'values)
+                                   (string->symbol (car e)))
+                         (format "safetensors ~a: values from Python's file"
+                                 (car e))))
+         (define ours (make-temporary-file "rkt-tagged-out-~a.safetensors"))
+         (save-state! m ours)
+         (define raw (file->bytes ours))
+         (define header-len (integer-bytes->integer raw #f #f 0 8))
+         (define header
+           (string->jsexpr (bytes->string/utf-8 raw #f 8 (+ 8 header-len))))
+         (for ([e (in-list (state-dict m))])
+           (define meta (hash-ref header (string->symbol (car e))))
+           (define offsets (hash-ref meta 'data_offsets))
+           (check-equal? (subbytes raw
+                                   (+ 8 header-len (car offsets))
+                                   (+ 8 header-len (cadr offsets)))
+                         (hex->bytes (hash-ref (hash-ref h 'payload_hex)
+                                               (string->symbol (car e))))
+                         (format "safetensors ~a: our payload is Python's"
+                                 (car e))))
+         (delete-file path)
+         (delete-file ours))
        (check-equal? (format "torch.~a" (tensor-dtype (zeros-like (to x 'float64))))
                      (hash-ref j 'zeros_like_dtype))
        (check-equal? (eq? (to x 'cpu) x) (hash-ref j 'cpu_is_self))

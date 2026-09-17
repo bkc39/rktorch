@@ -154,3 +154,7 @@ loss l1_loss
 
 # flip along the width axis is the horizontal-flip augmentation.
 shape flip
+
+# linear is nn.Linear's fused affine map: under autocast the whole op is
+# cast, where matmul then add would promote the bias back to float32.
+nn linear

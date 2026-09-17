@@ -21,7 +21,19 @@
          tr-from-data-i64/raw
          tr-from-data-on-device/raw
          tr-from-data-u8-on-device/raw
-         tr-from-data-u8/raw)
+         tr-from-data-u8/raw
+         tr-from-bytes/raw)
+
+;; element bytes in the given dtype, the inverse of tr-tensor-copy-bytes/raw
+(define-torch tr-from-bytes/raw
+  (_fun (data : _bytes)
+        (nbytes : _uint64)
+        (dims : (_s64vector i))
+        (ndim : _int64)
+        (dtype : _tr-dtype)
+        -> _Tensor/null)
+  #:c-id tr_from_bytes
+  #:wrap tensor-allocator)
 
 (define-torch tr-zeros/raw
   (_fun (dims : (_s64vector i)) (ndim : _int64) -> _Tensor/null)

@@ -27,9 +27,10 @@
          (only-in "foreign/sized.rkt" gen:sized length sized?)
          (except-in "foreign/autograd-ops.rkt" requires-grad!)
          (submod "foreign/autograd-ops.rkt" checked)
+         "foreign/autocast.rkt"
          (submod "foreign/slice.rkt" checked))
 
-(provide ref ref! with-no-grad with-default-device)
+(provide ref ref! with-no-grad with-autocast with-default-device)
 
 (provide (rename-out [t+ +] [t- -] [t* *] [t/ /])
          @)
@@ -46,6 +47,7 @@
          tensor-numel
          tensor->vector
          tensor->list
+         tensor->bytes
          tensor->repr
          tensor->string)
 
@@ -65,7 +67,8 @@
          size/c
          arange
          eye
-         tensor)
+         tensor
+         bytes->tensor)
 
 (provide reshape
          view
@@ -148,6 +151,7 @@
          layer-norm
          group-norm
          batch-norm
+         linear
          upsample-nearest2d)
 
 (provide eq
@@ -208,6 +212,9 @@
          detach
          grad-enabled?
          call-with-no-grad
+         autocast-enabled?
+         autocast-dtype
+         call-with-autocast
          sub!
          zero!
          mul!
