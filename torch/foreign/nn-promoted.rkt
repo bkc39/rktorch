@@ -20,8 +20,8 @@
                                 triu))
          (only-in "../private/contract.rkt" define/contract-out)
          (only-in "contracts.rkt"
-                  index/c nonneg-size-1d/c nonneg-size/c pool-size/c
-                  pos-size-1d/c pos-size/c)
+                  image-batch/c index/c nonneg-size-1d/c nonneg-size/c
+                  pool-size/c pos-size-1d/c pos-size/c)
          (only-in "size.rkt" ->1d ->2d)
          (only-in "structs.rkt" tensor?))
 
@@ -158,6 +158,6 @@
   (g:clamp self (and min (exact->inexact min)) (and max (exact->inexact max))))
 
 (define/contract-out (upsample-nearest2d input #:scale [scale 2]) ;; noqa
-  (->* [tensor?] [#:scale exact-positive-integer?] tensor?)
+  (->* [image-batch/c] [#:scale exact-positive-integer?] tensor?)
   (g:repeat-interleave-self-int
    (g:repeat-interleave-self-int input scale 2 #f) scale 3 #f))

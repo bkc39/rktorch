@@ -220,7 +220,9 @@
     (check-equal? (tensor-shape y) '(1 1 4 4))
     (check-equal? (tensor->list y)
                   '(0.0 0.0 1.0 1.0 0.0 0.0 1.0 1.0 2.0 2.0 3.0 3.0 2.0 2.0 3.0 3.0))
-    (check-equal? (tensor-shape (upsample-nearest2d (randn 2 3 5 7) #:scale 3)) '(2 3 15 21)))
+    (check-equal? (tensor-shape (upsample-nearest2d (randn 2 3 5 7) #:scale 3)) '(2 3 15 21))
+    (check-exn #rx"^upsample-nearest2d: contract violation"
+               (lambda () (upsample-nearest2d (randn 2 3 4 4 4)))))
 
   (test-case "clamp: either bound, both, and ATen's refusal of neither"
     (define x (tensor '(-2.0 -0.5 0.0 0.5 2.0)))

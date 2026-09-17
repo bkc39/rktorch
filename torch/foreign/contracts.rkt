@@ -17,6 +17,7 @@
          (only-in "structs.rkt" tensor?))
 
 (provide bool-tensor/c
+         image-batch/c
          index-spec/c
          index/c
          index-vector/c
@@ -48,6 +49,9 @@
 
 (define int64-tensor/c
   (and/c tensor? (lambda (x) (eq? (tensor-dtype x) 'int64))))
+
+(define image-batch/c
+  (and/c tensor? (lambda (x) (= 4 (length (tensor-shape x))))))
 
 (define index-vector/c
   (and/c int64-tensor/c (lambda (x) (< (length (tensor-shape x)) 2))))

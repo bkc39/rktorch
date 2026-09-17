@@ -110,6 +110,11 @@
                                           (tensor '(0 999) #:dtype 'int64)
                                           (tensor '(3 10) #:dtype 'int64)))
                   '(2 3 32 32))
+    (check-exn #rx"one timestep and"
+               (lambda () (net (randn 2 3 32 32) (tensor '(5) #:dtype 'int64) #f)))
+    (check-exn #rx"one label per image"
+               (lambda () (labelled (randn 2 3 32 32) (tensor '(0 999) #:dtype 'int64)
+                                    (tensor '(3) #:dtype 'int64))))
     (check-exn #rx"multiple-of-32" (lambda () (UNet #:base 12)))
     (check-exn #rx"at-most-five-levels" (lambda () (UNet #:base 32 #:mults '(1 1 1 1 1 1))))
     (check-exn #rx"one of the levels' resolutions"

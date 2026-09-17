@@ -241,6 +241,11 @@
   (set! out-norm (GroupNorm norm-groups (width 0)))
   (set! out-conv (Conv2d (width 0) 3 3 #:padding 1))
   #:forward (x t y)
+  (define images (car (shape x)))
+  (define (per-image? v) (and (tensor? v) (equal? (shape v) (list images))))
+  (unless (and (per-image? t) (or (not classes) (per-image? y)))
+    (raise-arguments-error 'UNet "one timestep and, when conditional, one label per image"
+                           "images" images "timesteps" t "labels" y))
   (define temb
     (let ([te (time t)])
       (if classes (add te (classes y)) te)))
