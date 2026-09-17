@@ -5,13 +5,16 @@
          (prefix-in g: (only-in "../generated.rkt"
                                 adaptive-avg-pool2d
                                 avg-pool2d
+                                batch-norm
                                 clamp
                                 conv-transpose2d-input
                                 conv1d
                                 conv2d
                                 embedding
+                                flip
                                 group-norm
                                 layer-norm
+                                leaky-relu
                                 masked-fill-scalar
                                 max-pool2d
                                 repeat-interleave-self-int
@@ -161,3 +164,40 @@
   (->* [image-batch/c] [#:scale exact-positive-integer?] tensor?)
   (g:repeat-interleave-self-int
    (g:repeat-interleave-self-int input scale 2 #f) scale 3 #f))
+
+(define (supplied v)
+  (and (not (unsupplied-arg? v)) v))
+
+(define/contract-out (batch-norm input ;; noqa
+                                 #:running-mean [running-mean #f]
+                                 #:running-var [running-var #f]
+                                 #:weight [weight #f]
+                                 #:bias [bias #f]
+                                 #:training? [training? #f]
+                                 #:momentum [momentum 0.1]
+                                 #:eps [eps 1e-5])
+  (->i ([input tensor?])
+       (#:running-mean [running-mean (or/c tensor? #f)]
+        #:running-var [running-var (or/c tensor? #f)]
+        #:weight [weight (or/c tensor? #f)]
+        #:bias [bias (or/c tensor? #f)]
+        #:training? [training? boolean?]
+        #:momentum [momentum real?]
+        #:eps [eps real?])
+       #:pre/name (running-mean running-var training?)
+       "running statistics as a pair, required unless training"
+       (let ([mean (supplied running-mean)] [var (supplied running-var)])
+         (if (supplied training?)
+             (eq? (and mean #t) (and var #t))
+             (and mean var #t)))
+       [result tensor?])
+  (g:batch-norm input weight bias running-mean running-var training?
+                (exact->inexact momentum) (exact->inexact eps) #t))
+
+(define/contract-out (leaky-relu self #:negative-slope [negative-slope 0.01]) ;; noqa
+  (->* [tensor?] [#:negative-slope real?] tensor?)
+  (g:leaky-relu self (exact->inexact negative-slope)))
+
+(define/contract-out (flip self dims) ;; noqa
+  (-> tensor? (or/c index/c (non-empty-listof index/c)) tensor?)
+  (g:flip self (if (list? dims) dims (list dims))))
