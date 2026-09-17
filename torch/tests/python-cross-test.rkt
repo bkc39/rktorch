@@ -18,6 +18,7 @@
            (only-in "../vision/diffusion.rkt"
                     UNet linear-schedule q-sample schedule-steps)
            (only-in "../vision/resnet.rkt" ResNet)
+           (only-in "../vision/ppm.rkt" image-grid write-ppm)
            "private/python-env.rkt")
 
   ;; nn.Linear plus an int64 counter, the half_dtypes.py twin's Counted
@@ -663,6 +664,28 @@
                     (lambda (o) (one-cycle-lr o #:max-lr 1.0 #:total-steps 12)))
        (check-shape "lambda"
                     (lambda (o) (lambda-lr o (lambda (t) (/ 1.0 (add1 t)))))))
+     (let ()
+       (define j (python-check "make_grid_parity.py"))
+       (manual-seed! 0)
+       (define grid (image-grid (rand 5 3 4 4) #:columns 2 #:padding 1
+                                #:pad-value 0.5))
+       (check-equal? (tensor-shape grid) (hash-ref j 'shape)
+                     "image-grid: shape parity with make_grid")
+       (for ([a (in-list (tensor->list grid))]
+             [b (in-list (hash-ref j 'values))]
+             [i (in-naturals)])
+         (check-= a b tol (format "image-grid: value ~a parity" i)))
+       (define path (make-temporary-file "rkt-grid-~a.ppm"))
+       (write-ppm path grid)
+       (define bs (file->bytes path))
+       (delete-file path)
+       ;; five images in two columns: three rows of 4 + 1, so 16 by 11
+       (define header #"P6\n11 16\n255\n")
+       (check-equal? (subbytes bs 0 (bytes-length header)) header
+                     "write-ppm: header for make_grid's 16 by 11")
+       (check-equal? (bytes->list (subbytes bs (bytes-length header)))
+                     (hash-ref j 'pixels)
+                     "write-ppm: save_image's quantization"))
      (let ()
        (define j (python-check "ema_update.py"))
        (manual-seed! 0)

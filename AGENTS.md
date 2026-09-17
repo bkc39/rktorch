@@ -124,6 +124,10 @@ with `backward!` outside the form as PyTorch recommends). From
   takes `#:generator` and draws one seed per batch from it, so a seeded
   loader replays its augmentation (the draws are the transform's own, not
   torchvision's)
+- images (`torch/vision/ppm.rkt`, #155): `image-grid #:columns #:padding
+  #:pad-value` (torchvision's `make_grid` layout, on the device) and
+  `write-ppm #:range` (binary P6, `save_image`'s quantization; a uint8 image
+  as it is)
 - shape: `reshape view transpose permute squeeze unsqueeze cat stack flip`
 - elementwise: `add sub mul div pow neg exp log sqrt relu sigmoid tanh silu
   leaky-relu clamp`

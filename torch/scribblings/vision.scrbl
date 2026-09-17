@@ -11,6 +11,7 @@
                      torch/vision/cifar10
                      torch/vision/resnet
                      torch/vision/transforms
+                     torch/vision/ppm
                      torch/vision/diffusion))
 
 @title{Vision datasets}
@@ -272,4 +273,39 @@ is the narrow one the tests and the parity twin train. Called on an
 @deftogether[(@defproc[(basic-block? [v any/c]) boolean?]
               @defproc[(resnet? [v any/c]) boolean?])]{
 The predicates.
+}
+
+@section{Images}
+
+@defmodule[torch/vision/ppm]
+
+Sample grids as image files without a dependency: the binary PPM format
+(@tt{P6}) is a one-line header followed by one byte per channel, which every
+image viewer and converter reads.
+
+@racketblock[
+(write-ppm "samples.ppm" (image-grid samples #:columns 10) #:range '(-1 1))
+]
+
+@defproc[(image-grid [images tensor?]
+                     [#:columns columns exact-positive-integer? 8]
+                     [#:padding padding exact-nonnegative-integer? 2]
+                     [#:pad-value pad-value real? 0])
+         tensor?]{
+Lays the @tt{[N C H W]} batch @racket[images], a rank-4 tensor with at
+least one image, out as one @tt{[C H' W']} image, @racket[columns] across
+and @racket[padding] pixels of @racket[pad-value] around every image, on
+the device the batch lives on. One channel becomes three. The layout is
+torchvision's @tt{make_grid}.
+}
+
+@defproc[(write-ppm [path path-string?]
+                    [image tensor?]
+                    [#:range range (list/c real? real?) '(0 1)])
+         void?]{
+Writes the @tt{[3 H W]} tensor @racket[image] to @racket[path]. A float
+image is quantized the way torchvision's @tt{save_image} does, with
+@racket[range] naming the values that map to 0 and 255, its first below
+its second, so a dataset in @tt{[-1, 1]} passes @racket['(-1 1)]; a uint8
+image is written as it is.
 }
