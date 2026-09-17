@@ -59,7 +59,9 @@
 (define pressure-collection-count (box 0))
 (define pressure-reclaimed-bytes (box 0))
 (define trough-collection-count (box 0))
+(define trough-minor-count (box 0))
 (define next-trough-ms (box 0.0))
+(define next-minor-ms (box 0.0))
 
 (define (finalizer-failures)
   (unbox finalizer-failure-count))
@@ -73,7 +75,8 @@
            (cons 'ledger-entries (hash-count allocations))
            (cons 'pressure-collections (unbox pressure-collection-count))
            (cons 'pressure-reclaimed (unbox pressure-reclaimed-bytes))
-           (cons 'trough-collections (unbox trough-collection-count))))))
+           (cons 'trough-collections (unbox trough-collection-count))
+           (cons 'trough-minors (unbox trough-minor-count))))))
 
 ;; No printer: a prop:custom-write that raises or blocks would be fatal here.
 (define (describe-raised e)
@@ -305,7 +308,8 @@
      (for ([table (in-list (list accounted-since sampled-since allocator-sample
                                  collect-interval high-water trough-floor))])
        (hash-clear! table))
-     (set-box! next-trough-ms 0.0))))
+     (set-box! next-trough-ms 0.0)
+     (set-box! next-minor-ms 0.0))))
 
 ;; Reclaiming little means the working set itself sits above the mark, so
 ;; the interval to the next collection doubles instead of thrashing.
@@ -337,7 +341,10 @@
 ;; due one.
 ;; A step's dead intermediates have aged past the nursery by then, so only
 ;; a full collection reaches them, and the budget spaces those out: after
-;; one that took t, the next waits t over the budget.
+;; one that took t, the next waits t over the budget. A forward pass with
+;; gradients off is the other case: its garbage is as young as garbage gets,
+;; so that trough asks for a minor collection first, on a budget of its own,
+;; and pays for a full one only with what survives.
 (define (margin-over floor)
   (or (trough-margin)
       (max trough-margin-min (min floor trough-margin-max))))
@@ -368,9 +375,26 @@
    (lambda ()
      (for/sum ([live (in-hash-values live-bytes)]) live))))
 
-(define (collect-at-trough!)
+(define (collect-young-at-trough!)
+  (define started (current-inexact-milliseconds))
+  (when (and (>= started (unbox next-minor-ms))
+             (pair? (devices-over-floor)))
+    (define before (ledger-total))
+    (collect-garbage 'minor)
+    (drain-finalizers!)
+    (define finished (current-inexact-milliseconds))
+    (set-box! next-minor-ms
+              (+ finished (/ (- finished started) (trough-budget))))
+    (set-box! trough-minor-count (add1 (unbox trough-minor-count)))
+    (set-box! pressure-reclaimed-bytes
+              (+ (max 0 (- before (ledger-total)))
+                 (unbox pressure-reclaimed-bytes)))))
+
+(define (collect-at-trough! #:young? [young? #f])
   (unless (in-atomic-mode?)
     (lower-trough-floors!)
+    (when young?
+      (collect-young-at-trough!))
     (define started (current-inexact-milliseconds))
     (when (and (>= started (unbox next-trough-ms))
                (pair? (devices-over-floor)))

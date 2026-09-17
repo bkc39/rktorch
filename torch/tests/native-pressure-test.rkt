@@ -5,6 +5,8 @@
            (only-in "../foreign.rkt"
                     cpu-device finalizer-diagnostics native-memory-limit
                     native-memory-use reclaim-native-memory! zeros)
+           (only-in "../foreign.rkt" with-no-grad)
+           (only-in "../nn.rkt" Linear Sequential)
            (only-in "../foreign/raw/memory.rkt"
                     allocator-reading collect-at-trough!
                     native-memory-use/fold reset-pressure-state!
@@ -18,6 +20,9 @@
 
   (define (collections)
     (cdr (assq 'pressure-collections (finalizer-diagnostics))))
+
+  (define (trough-minors)
+    (cdr (assq 'trough-minors (finalizer-diagnostics))))
 
   (define (trough-collections)
     (cdr (assq 'trough-collections (finalizer-diagnostics))))
@@ -128,4 +133,27 @@
       (for ([_ (in-range 5)])
         (step! 8)
         (collect-at-trough!))
-      (check-equal? (- (trough-collections) before) 1))))
+      (check-equal? (- (trough-collections) before) 1)))
+
+  (test-case "an outermost layer call with gradients off is a trough, once"
+    (settle!)
+    (define net (Sequential (Linear 1024 1024) (Linear 1024 1024)))
+    (define x (zeros 1024 1024))
+    (parameterize ([trough-margin (* 1 mib)]
+                   [trough-budget 1000])
+      (define before (trough-minors))
+      (define y (with-no-grad (net x)))
+      (check-equal? (- (trough-minors) before) 1
+                    "the nested Linear calls must not count")
+      (check-true (and y #t))))
+
+  (test-case "with gradients on a layer call is the peak, not a trough"
+    (settle!)
+    (define net (Linear 1024 1024))
+    (define x (zeros 1024 1024))
+    (parameterize ([trough-margin (* 1 mib)]
+                   [trough-budget 1000])
+      (define before (trough-minors))
+      (define y (net x))
+      (check-equal? (trough-minors) before)
+      (check-true (and y #t)))))
