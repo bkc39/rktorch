@@ -29,7 +29,10 @@
          (submod "nn/layer.rkt" checked)
          "nn/linear.rkt"
          "nn/loss.rkt"
-         (only-in "nn/optim.rkt" adam adam? sgd sgd? step! zero-grads!)
+         (only-in "nn/optim.rkt"
+                  adam adam? learning-rate optimizer? rmsprop rmsprop?
+                  set-learning-rate! sgd sgd? step! zero-grads!)
+         "nn/scheduler.rkt"
          (except-in "nn/parameter.rkt" Parameter Parameter?)
          (submod "nn/parameter.rkt" checked)
          "nn/sequential.rkt"
@@ -122,8 +125,25 @@
          sgd?
          adam
          adam?
+         rmsprop
+         rmsprop?
+         optimizer?
          step!
-         zero-grads!)
+         zero-grads!
+         learning-rate
+         set-learning-rate!)
+
+(provide scheduler?
+         scheduler-step-count
+         scheduler-rate
+         scheduler-optimizer-of
+         step-lr
+         multi-step-lr
+         exponential-lr
+         cosine-annealing-lr
+         linear-lr
+         one-cycle-lr
+         lambda-lr)
 
 (provide ema
          ema?

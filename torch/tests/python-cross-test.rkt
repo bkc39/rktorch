@@ -558,6 +558,83 @@
              [i (in-naturals)])
          (check-= a b tol (format "batch-norm eval: value ~a parity" i))))
      (let ()
+       (define j (python-check "sgd_variants.py"))
+       (define-layer mlp-twin (fc1 fc2)
+         #:init ()
+         (set! fc1 (Linear 4 8))
+         (set! fc2 (Linear 8 2))
+         #:forward (x)
+         (fc2 (relu (fc1 x))))
+       (define (run make-opt)
+         (manual-seed! 0)
+         (define net (mlp-twin))
+         (define xs (randn 16 4))
+         (define ys (randn 16 2))
+         (define opt (make-opt (parameters net)))
+         (define losses
+           (for/list ([_ (in-range 5)])
+             (zero-grads! opt)
+             (define loss (mse-loss (net xs) ys))
+             (backward! loss)
+             (step! opt)
+             (item loss)))
+         (values losses
+                 (tensor->list (cat (for/list ([p (in-list (parameters net))])
+                                      (reshape p -1))))))
+       (define (check-config name make-opt)
+         (define expected (hash-ref j (string->symbol name)))
+         (define-values (losses params) (run make-opt))
+         (for ([r (in-list losses)] [p (in-list (hash-ref expected 'losses))]
+               [i (in-naturals)])
+           (check-= r p tol (format "~a: loss ~a" name i)))
+         (for ([r (in-list params)] [p (in-list (hash-ref expected 'params))]
+               [i (in-naturals)])
+           (check-= r p tol (format "~a: parameter ~a" name i))))
+       (check-config "momentum"
+                     (lambda (ps) (sgd ps #:lr 0.1 #:momentum 0.9)))
+       (check-config "nesterov"
+                     (lambda (ps) (sgd ps #:lr 0.1 #:momentum 0.9
+                                       #:nesterov? #t)))
+       (check-config "weight_decay"
+                     (lambda (ps) (sgd ps #:lr 0.1 #:momentum 0.9
+                                       #:weight-decay 5e-4)))
+       (check-config "adam_weight_decay"
+                     (lambda (ps) (adam ps #:lr 0.05 #:weight-decay 1e-2)))
+       (check-config "rmsprop" (lambda (ps) (rmsprop ps #:lr 0.01)))
+       (check-config "rmsprop_momentum"
+                     (lambda (ps) (rmsprop ps #:lr 0.01 #:momentum 0.9
+                                           #:weight-decay 1e-3))))
+     (let ()
+       (define j (python-check "schedulers.py"))
+       (define (rates make)
+         (define opt (sgd (list (Parameter (zeros 1))) #:lr 0.1))
+         (define s (make opt))
+         (cons (learning-rate s)
+               (for/list ([_ (in-range 11)])
+                 (step! opt)
+                 (step! s)
+                 (learning-rate s))))
+       (define (check-shape name make)
+         (for ([r (in-list (rates make))]
+               [p (in-list (hash-ref j (string->symbol name)))]
+               [i (in-naturals)])
+           (check-= r p 1e-9 (format "~a scheduler: rate at step ~a" name i))))
+       (check-shape "step" (lambda (o) (step-lr o #:step-size 3 #:gamma 0.5)))
+       (check-shape "multi_step"
+                    (lambda (o) (multi-step-lr o #:milestones '(2 5 9)
+                                               #:gamma 0.1)))
+       (check-shape "exponential" (lambda (o) (exponential-lr o #:gamma 0.9)))
+       (check-shape "cosine"
+                    (lambda (o) (cosine-annealing-lr o #:t-max 10
+                                                     #:eta-min 0.01)))
+       (check-shape "linear"
+                    (lambda (o) (linear-lr o #:start-factor 0.25
+                                           #:end-factor 1.0 #:total-iters 4)))
+       (check-shape "one_cycle"
+                    (lambda (o) (one-cycle-lr o #:max-lr 1.0 #:total-steps 12)))
+       (check-shape "lambda"
+                    (lambda (o) (lambda-lr o (lambda (t) (/ 1.0 (add1 t)))))))
+     (let ()
        (define j (python-check "ema_update.py"))
        (manual-seed! 0)
        (define m (Linear 4 3))

@@ -2,7 +2,8 @@
 
 @(require (for-label racket/base
                      racket/contract
-                     (only-in torch lambda~> prop:to relu tensor? to to-able?)
+                     (only-in torch backward! lambda~> prop:to relu tensor? to to-able?)
+                     (only-in torch/data/loader in-dataloader)
                      torch/nn
                      torch/private/contract))
 
@@ -438,4 +439,155 @@ The decay @racket[e] was built with.
 
 @defproc[(ema? [v any/c]) boolean?]{
 Whether @racket[v] is an average built by @racket[ema].
+}
+
+@section{Optimizers and schedules}
+
+An optimizer holds a list of parameters and answers to @racket[step!] and
+@racket[zero-grads!]; every one keeps its state in place on the parameter's
+device and dtype, as the #138 Adam does, and follows a parameter moved with
+@racket[to]. The learning rate is the one setting that varies during
+training, so every optimizer exposes it through @racket[learning-rate] and
+@racket[set-learning-rate!], which is what a schedule writes.
+
+@defproc[(sgd [params (listof tensor?)]
+              [#:lr lr real?]
+              [#:momentum momentum (real-in 0 1) 0]
+              [#:nesterov? nesterov? boolean? #f]
+              [#:weight-decay weight-decay real? 0])
+         sgd?]{
+@tt{torch.optim.SGD}: with @racket[momentum] the update blends into a
+buffer, copied from the first gradient and thereafter @racket[momentum]
+times itself plus the gradient; with @racket[nesterov?] the update looks
+one blend ahead, which requires a momentum; @racket[weight-decay] adds that
+multiple of the parameter to the gradient before either, torch's L2 form.
+}
+
+@defproc[(adam [params (listof tensor?)]
+               [#:lr lr real? 1e-3]
+               [#:beta1 beta1 real? 0.9]
+               [#:beta2 beta2 real? 0.999]
+               [#:eps eps real? 1e-8]
+               [#:weight-decay weight-decay real? 0])
+         adam?]{
+@tt{torch.optim.Adam} with bias correction; @racket[weight-decay] is the
+L2 form applied to the gradient, as there, not AdamW's decoupled one.
+}
+
+@defproc[(rmsprop [params (listof tensor?)]
+                  [#:lr lr real? 1e-2]
+                  [#:alpha alpha (real-in 0 1) 0.99]
+                  [#:eps eps (>/c 0) 1e-8]
+                  [#:weight-decay weight-decay real? 0]
+                  [#:momentum momentum (real-in 0 1) 0])
+         rmsprop?]{
+@tt{torch.optim.RMSprop}, uncentered: a running average of the squared
+gradient decayed by @racket[alpha], the parameter moved by the gradient over
+that average's root plus @racket[eps]; with @racket[momentum] the move
+accumulates into a buffer that starts at zero.
+}
+
+@deftogether[(@defproc[(sgd? [v any/c]) boolean?]
+              @defproc[(adam? [v any/c]) boolean?]
+              @defproc[(rmsprop? [v any/c]) boolean?]
+              @defproc[(optimizer? [v any/c]) boolean?])]{
+The optimizer predicates; @racket[optimizer?] holds of every optimizer and
+of every schedule.
+}
+
+@defproc[(step! [opt optimizer?]) void?]{
+Applies one update to every parameter that has a gradient, under
+@racket[with-no-grad]; on a schedule, advances it and writes its rate.
+}
+
+@defproc[(zero-grads! [opt optimizer?]) void?]{
+Zeroes the gradient of every parameter, @tt{optimizer.zero_grad()}.
+}
+
+@deftogether[(@defproc[(learning-rate [opt optimizer?]) real?]
+              @defproc[(set-learning-rate! [opt optimizer?] [lr real?]) void?])]{
+The learning rate the next @racket[step!] will use; on a schedule, its
+optimizer's.
+}
+
+A schedule wraps an optimizer and answers to @racket[step!] like one: the
+rate for step 0 is written at construction, and each @racket[step!] on the
+schedule advances its count and writes the rate for it, so a training loop
+steps the optimizer and then the schedule as in PyTorch. The rates are the
+closed forms of @tt{torch.optim.lr_scheduler}'s constructors of the same
+names, pinned against them step for step.
+
+@racketblock[
+(define opt (sgd (parameters net) #:lr 0.1 #:momentum 0.9 #:weight-decay 5e-4))
+(define schedule (one-cycle-lr opt #:max-lr 0.1 #:total-steps (* epochs batches)))
+(for* ([epoch (in-range epochs)] [(xb yb) (in-dataloader loader)])
+  (zero-grads! opt)
+  (backward! (cross-entropy (net xb) yb))
+  (step! opt)
+  (step! schedule))
+]
+
+@defproc[(step-lr [opt optimizer?]
+                  [#:step-size step-size exact-positive-integer?]
+                  [#:gamma gamma real? 0.1])
+         scheduler?]{
+The base rate times @racket[gamma] to the power of the number of whole
+@racket[step-size] periods elapsed.
+}
+
+@defproc[(multi-step-lr [opt optimizer?]
+                        [#:milestones milestones (listof exact-positive-integer?)]
+                        [#:gamma gamma real? 0.1])
+         scheduler?]{
+The base rate times @racket[gamma] once per milestone reached.
+}
+
+@defproc[(exponential-lr [opt optimizer?] [#:gamma gamma real?]) scheduler?]{
+The base rate times @racket[gamma] to the power of the step.
+}
+
+@defproc[(cosine-annealing-lr [opt optimizer?]
+                              [#:t-max t-max exact-positive-integer?]
+                              [#:eta-min eta-min real? 0])
+         scheduler?]{
+Half a cosine from the base rate at step 0 to @racket[eta-min] at
+@racket[t-max], and back up beyond it.
+}
+
+@defproc[(linear-lr [opt optimizer?]
+                    [#:start-factor start-factor (real-in 0 1) 1/3]
+                    [#:end-factor end-factor (real-in 0 1) 1]
+                    [#:total-iters total-iters exact-positive-integer? 5])
+         scheduler?]{
+The base rate scaled from @racket[start-factor] to @racket[end-factor]
+linearly over @racket[total-iters] steps, and held there: the warmup.
+}
+
+@defproc[(one-cycle-lr [opt optimizer?]
+                       [#:max-lr max-lr (>/c 0)]
+                       [#:total-steps total-steps exact-positive-integer?]
+                       [#:pct-start pct-start (real-in 0 1) 0.3]
+                       [#:div-factor div-factor (>/c 0) 25]
+                       [#:final-div-factor final-div-factor (>/c 0) 1e4])
+         scheduler?]{
+@tt{OneCycleLR} with cosine annealing: from @racket[max-lr] over
+@racket[div-factor] up to @racket[max-lr] over the first @racket[pct-start]
+of @racket[total-steps], then down to the initial rate over
+@racket[final-div-factor]. Stepping past @racket[total-steps] is an error,
+as there. The base rate of @racket[opt] is not used. Momentum is left
+alone, where PyTorch's default cycles it; pass @tt{cycle_momentum=False}
+to reproduce this schedule there.
+}
+
+@defproc[(lambda-lr [opt optimizer?] [factor (-> exact-nonnegative-integer? real?)])
+         scheduler?]{
+The base rate times @racket[(factor step)].
+}
+
+@deftogether[(@defproc[(scheduler? [v any/c]) boolean?]
+              @defproc[(scheduler-step-count [s scheduler?]) exact-nonnegative-integer?]
+              @defproc[(scheduler-rate [s scheduler?]) real?]
+              @defproc[(scheduler-optimizer-of [s scheduler?]) optimizer?])]{
+A schedule, the number of times it has been stepped, the rate for that
+count, and the optimizer it writes to.
 }
