@@ -244,3 +244,24 @@ the ledger's entry count to zero:
 Left open: within one no-grad forward nothing is collected, so the window
 peak is one forward's worth of intermediates (a nested trough would tighten
 it); `expandable_segments` stays opt-in.
+
+## Epochs without hand collection (2026-09-17, after #138 merged)
+
+Master merged into this branch (clean). The merged arc carries no manual
+collection in the repo; the only one was `GC_EVERY` in the out-of-repo
+`~/cifar10-diffusion/train.rkt`, now removed there (the original kept beside
+it as `train.rkt.with-gc-every.bak`). Batch 224, the 35.7M-parameter UNet:
+
+- 3 epochs plus both sampling passes (60 samples each): complete; epoch
+  peaks 16.1 / 17.1 / 16.1 GB; about 98 s per epoch; backstop 0, trough
+  collections 288, minors 1706, finalizer failures 0.
+- 5 epochs with `reclaim-native-memory!` before measuring at each epoch end
+  (a temporary copy of the script; the script itself stays free of it): the
+  settled state is identical after every epoch, 1131 MiB in the ledger across
+  1980 entries, 1304 MiB allocated, 1239 MiB of Racket heap, epoch peak
+  16.3 GB. Nothing accumulates from epoch to epoch.
+
+`scripts/train-asr.rkt` and `scripts/train-gpt.rkt` each call
+`reclaim-native-memory!` once after training, to hand cached VRAM back before
+generation. That is the function's documented use, not a leak workaround, and
+is left alone.
