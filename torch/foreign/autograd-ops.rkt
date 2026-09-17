@@ -17,6 +17,7 @@
                   tr-tensor-requires-grad/raw
                   tr-tensor-sub!/raw
                   tr-tensor-zero!/raw)
+         (only-in "raw/memory.rkt" collect-at-trough!)
          (only-in "structs.rkt" tensor? wrap-tensor))
 
 (provide with-no-grad)
@@ -33,7 +34,7 @@
 
 (define/contract-out (backward! t) (-> tensor? void?)
   (check-ok (tr-tensor-backward/raw t) 'backward!)
-  (void))
+  (collect-at-trough!))
 
 (define/contract-out (grad t) (-> tensor? tensor?)
   (wrap-tensor (check-handle 'grad (tr-tensor-grad/raw t))))

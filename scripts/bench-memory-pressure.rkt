@@ -5,13 +5,15 @@
 ;; caching allocator's peak per ten-step window, reserved bytes, seconds per
 ;; step and the ledger's pressure collections.
 ;; Run:  MODE=off|manual|pressure BATCH=256 WIDTH=128 DEPTH=8 STEPS=60 \
-;;       GC_EVERY=10 LIMIT=<MiB> racket scripts/bench-memory-pressure.rkt
-;; off disables the trigger, manual collects by hand every GC_EVERY steps with
-;; the trigger off, pressure leaves it to the ledger (LIMIT overrides the
+;;       GC_EVERY=10 LIMIT=<MiB> BUDGET=0.05 racket scripts/bench-memory-pressure.rkt
+;; off disables every collection the ledger makes, manual collects by hand
+;; every GC_EVERY steps on top of that, backstop keeps only the mid-forward
+;; trigger, pressure is the library as shipped (LIMIT overrides the
 ;; capacity-derived mark).
 
 (require racket/format
          torch
+         (only-in torch/foreign/raw/memory trough-budget trough-margin)
          torch/nn)
 
 (define (env name default)
@@ -91,7 +93,7 @@
   (printf "mode=~a batch=~a width=~a depth=~a limit=~a total=~a MiB\n"
           MODE BATCH WIDTH DEPTH (getenv "LIMIT")
           (quotient (cdr (assq 'total (cuda-memory-info))) mib))
-  (displayln "step window-peak-MiB allocated-MiB reserved-MiB collections s/step")
+  (displayln "step window-peak-MiB allocated-MiB reserved-MiB backstop trough s/step")
   (cuda-reset-peak-stats!)
   (define gc0 (current-gc-milliseconds))
   (define t0 (current-inexact-milliseconds))
@@ -113,28 +115,34 @@
     (cond
       [(zero? (remainder i 10))
        (define now (current-inexact-milliseconds))
-       (printf "~a ~a ~a ~a ~a ~a\n"
+       (printf "~a ~a ~a ~a ~a ~a ~a\n"
                i
                (stat 'peak-allocated)
                (stat 'allocated)
                (stat 'reserved)
                (diagnostic 'pressure-collections)
+               (diagnostic 'trough-collections)
                (~r (/ (- now window-start) 10000.0) #:precision '(= 3)))
        (flush-output)
        (cuda-reset-peak-stats!)
        now]
       [else window-start]))
-  (printf "total ~a s, gc ~a ms, reclaimed ~a MiB by ~a pressure collections\n"
+  (printf "total ~a s, gc ~a ms, reclaimed ~a MiB: ~a backstop, ~a trough\n"
           (~r (/ (- (current-inexact-milliseconds) t0) 1000.0) #:precision '(= 1))
           (- (current-gc-milliseconds) gc0)
           (quotient (diagnostic 'pressure-reclaimed) mib)
-          (diagnostic 'pressure-collections)))
+          (diagnostic 'pressure-collections)
+          (diagnostic 'trough-collections)))
 
 (module+ main
   (unless (cuda-available?)
     (error 'bench-memory-pressure "needs a CUDA device"))
   (manual-seed! 0)
-  (parameterize ([native-memory-limit (if (eq? MODE 'pressure) LIMIT never)])
+  (parameterize ([native-memory-limit (if (memq MODE '(pressure backstop))
+                                          LIMIT
+                                          never)]
+                 [trough-margin (if (eq? MODE 'pressure) #f never)]
+                 [trough-budget (string->number (env "BUDGET" "1/20"))])
     (with-default-device (cuda-device)
       (with-handlers ([exn:fail:rktorch:oom?
                        (lambda (e)

@@ -6,8 +6,9 @@
                     cpu-device finalizer-diagnostics native-memory-limit
                     native-memory-use reclaim-native-memory! zeros)
            (only-in "../foreign/raw/memory.rkt"
-                    allocator-reading native-memory-use/fold
-                    reset-pressure-state!))
+                    allocator-reading collect-at-trough!
+                    native-memory-use/fold reset-pressure-state!
+                    trough-budget trough-margin))
 
   (define mib (* 1024 1024))
 
@@ -17,6 +18,9 @@
 
   (define (collections)
     (cdr (assq 'pressure-collections (finalizer-diagnostics))))
+
+  (define (trough-collections)
+    (cdr (assq 'trough-collections (finalizer-diagnostics))))
 
   (define (settle!)
     (for ([_ (in-range 3)])
@@ -91,4 +95,37 @@
                    [allocator-reading (lambda (_dev) #f)])
       (define kept (for/list ([_ (in-range 48)]) (zeros 512 512)))
       (check-equal? (length kept) 48)
-      (check-equal? (collections) before))))
+      (check-equal? (collections) before)))
+
+  (test-case "residue past the margin at a trough is collected"
+    (settle!)
+    (collect-at-trough!)
+    (define base (cpu-bytes))
+    (define before (trough-collections))
+    (parameterize ([trough-margin (* 16 mib)])
+      (step! 8)
+      (collect-at-trough!)
+      (check-equal? (- (trough-collections) before) 1)
+      (check-true (< (- (cpu-bytes) base) (* 16 mib))
+                  "the trough collection left the step's residue behind")))
+
+  (test-case "residue under the margin is left alone"
+    (settle!)
+    (collect-at-trough!)
+    (define before (trough-collections))
+    (parameterize ([trough-margin (* 64 mib)])
+      (define kept (step! 4))
+      (collect-at-trough!)
+      (check-equal? kept 4)
+      (check-equal? (trough-collections) before)))
+
+  (test-case "the budget spaces trough collections out"
+    (settle!)
+    (collect-at-trough!)
+    (define before (trough-collections))
+    (parameterize ([trough-margin (* 16 mib)]
+                   [trough-budget 1/1000])
+      (for ([_ (in-range 5)])
+        (step! 8)
+        (collect-at-trough!))
+      (check-equal? (- (trough-collections) before) 1))))

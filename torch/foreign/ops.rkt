@@ -231,7 +231,8 @@
               (cons/c 'messages (listof string?))
               (cons/c 'ledger-entries exact-nonnegative-integer?)
               (cons/c 'pressure-collections exact-nonnegative-integer?)
-              (cons/c 'pressure-reclaimed exact-nonnegative-integer?)))
+              (cons/c 'pressure-reclaimed exact-nonnegative-integer?)
+              (cons/c 'trough-collections exact-nonnegative-integer?)))
   raw:finalizer-diagnostics)
 
 (define/contract-out (reclaim-native-memory!) (-> void?) ;; noqa

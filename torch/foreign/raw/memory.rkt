@@ -14,6 +14,7 @@
 (provide tr-tensor-free/finalizer
          tr-tensor-free/checked
          collect-and-drain!
+         collect-at-trough!
          swallow-and-count-failure
          finalizer-failures
          finalizer-diagnostics
@@ -32,6 +33,8 @@
          native-memory-use
          native-memory-use/fold
          reset-pressure-state!
+         trough-budget
+         trough-margin
          _tr-device-type ;; noqa
          tr-tensor-device/raw
          define-unary/raw
@@ -55,6 +58,8 @@
 (define capture-limit 8)
 (define pressure-collection-count (box 0))
 (define pressure-reclaimed-bytes (box 0))
+(define trough-collection-count (box 0))
+(define next-trough-ms (box 0.0))
 
 (define (finalizer-failures)
   (unbox finalizer-failure-count))
@@ -67,7 +72,8 @@
            (cons 'messages (reverse (unbox captured-failures)))
            (cons 'ledger-entries (hash-count allocations))
            (cons 'pressure-collections (unbox pressure-collection-count))
-           (cons 'pressure-reclaimed (unbox pressure-reclaimed-bytes))))))
+           (cons 'pressure-reclaimed (unbox pressure-reclaimed-bytes))
+           (cons 'trough-collections (unbox trough-collection-count))))))
 
 ;; No printer: a prop:custom-write that raises or blocks would be fatal here.
 (define (describe-raised e)
@@ -115,12 +121,21 @@
 (define allocator-sample (make-hash))
 (define collect-interval (make-hash))
 (define high-water (make-hash))
+(define trough-floor (make-hash))
 
 (define native-memory-limit (make-parameter #f))
 (define high-water-fraction 4/5)
 (define interval-divisor 8)
 (define sample-divisor 32)
 (define reclaim-fraction 1/20)
+
+;; #f: the floor itself, kept between the two bounds below
+(define trough-margin (make-parameter #f))
+(define trough-margin-min (* 256 1024 1024))
+(define trough-margin-max (* 1024 1024 1024))
+
+;; the share of wall-clock time trough collections may take
+(define trough-budget (make-parameter 1/20))
 
 ;; Atomic mode, not a semaphore: finalizers run in atomic mode, where
 ;; blocking is an internal error.
@@ -288,8 +303,9 @@
   (call-with-ledger
    (lambda ()
      (for ([table (in-list (list accounted-since sampled-since allocator-sample
-                                 collect-interval high-water))])
-       (hash-clear! table)))))
+                                 collect-interval high-water trough-floor))])
+       (hash-clear! table))
+     (set-box! next-trough-ms 0.0))))
 
 ;; Reclaiming little means the working set itself sits above the mark, so
 ;; the interval to the next collection doubles instead of thrashing.
@@ -311,6 +327,65 @@
                (add1 (unbox pressure-collection-count)))
      (set-box! pressure-reclaimed-bytes
                (+ reclaimed (unbox pressure-reclaimed-bytes))))))
+
+;; The end of backward! is a step's trough: the graph is released, the
+;; forward's intermediates are dead, and little is live, so a collection
+;; here reclaims the most, promotes the least, and leaves Racket's own
+;; schedule a low baseline. The floor is the ledger's size after the last
+;; collection at a trough, and residue past the margin above it is due one.
+;; A step's dead intermediates have aged past the nursery by then, so only
+;; a full collection reaches them, and the budget spaces those out: after
+;; one that took t, the next waits t over the budget.
+(define (margin-over floor)
+  (or (trough-margin)
+      (max trough-margin-min (min floor trough-margin-max))))
+
+(define (devices-over-floor)
+  (call-with-ledger
+   (lambda ()
+     (for/list ([(dev live) (in-hash live-bytes)]
+                #:when (let ([floor (hash-ref trough-floor dev #f)])
+                         (and floor (> (- live floor) (margin-over floor)))))
+       dev))))
+
+(define (set-trough-floors!)
+  (call-with-ledger
+   (lambda ()
+     (for ([(dev live) (in-hash live-bytes)])
+       (hash-set! trough-floor dev live)))))
+
+(define (lower-trough-floors!)
+  (call-with-ledger
+   (lambda ()
+     (for ([(dev live) (in-hash live-bytes)])
+       (hash-update! trough-floor dev (lambda (floor) (min floor live)) live)))))
+
+(define (ledger-total)
+  (call-with-ledger
+   (lambda ()
+     (for/sum ([live (in-hash-values live-bytes)]) live))))
+
+(define (collect-at-trough!)
+  (unless (in-atomic-mode?)
+    (lower-trough-floors!)
+    (define started (current-inexact-milliseconds))
+    (when (and (>= started (unbox next-trough-ms))
+               (pair? (devices-over-floor)))
+      (define before (ledger-total))
+      (collect-and-wait!)
+      (set-trough-floors!)
+      (call-with-ledger
+       (lambda ()
+         (for ([dev (in-list (hash-keys accounted-since))])
+           (hash-set! accounted-since dev 0))))
+      (define finished (current-inexact-milliseconds))
+      (set-box! next-trough-ms
+                (+ finished (/ (- finished started) (trough-budget))))
+      (set-box! trough-collection-count
+                (add1 (unbox trough-collection-count)))
+      (set-box! pressure-reclaimed-bytes
+                (+ (max 0 (- before (ledger-total)))
+                   (unbox pressure-reclaimed-bytes))))))
 
 ;; Unwrapped release on purpose: the (deallocator) wrap would cancel the
 ;; very registration this finalizer runs from.
@@ -347,6 +422,10 @@
   (register-finalizer (box 0) (lambda (_) (semaphore-post canary-finalized)))
   (collect-garbage)
   (define observed (sync/timeout 0.5 canary-finalized))
+  (drain-finalizers!)
+  (and observed #t))
+
+(define (drain-finalizers!)
   (define deadline (+ (current-inexact-milliseconds) drain-deadline-ms))
   (let loop ([runs (unbox finalizer-run-count)] [quiet 0])
     (sleep 0)
@@ -355,8 +434,7 @@
       [(> (current-inexact-milliseconds) deadline) (void)]
       [(not (= now runs)) (loop now 0)]
       [(< (add1 quiet) quiet-turns) (loop now (add1 quiet))]
-      [else (void)]))
-  (and observed #t))
+      [else (void)])))
 
 (define (collect-and-drain!)
   (define observed (collect-and-wait!))
