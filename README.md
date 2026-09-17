@@ -2,7 +2,7 @@
 
 # <img src="docs/images/rktorch-logo.png" alt="" height="106" hspace="8" align="absmiddle"> rktorch
 
-**Tensors, autograd, and neural networks for Racket — [PyTorch](https://pytorch.org/)**
+**Tensors, autograd, and neural networks for Racket — à la [PyTorch](https://pytorch.org/)**
 
 [![Build](https://img.shields.io/github/actions/workflow/status/bkc39/rktorch/nix.yml?label=build)](https://github.com/bkc39/rktorch/actions/workflows/nix.yml)
 [![Docs](https://img.shields.io/badge/docs-racket--lang.org-blue.svg)](https://docs.racket-lang.org/torch)
