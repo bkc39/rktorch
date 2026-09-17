@@ -157,10 +157,16 @@ def _emit_body(op: Op) -> list[str]:
     lines = [f"{ret_type} {op.c_name}({_c_params(op)}) {{"]
     if guards:
         cond = " || ".join(guards)
-        fail = "null_arg_status" if _returns_status(op) else "null_arg"
+        if outs:
+            refuse = (f'torchrkt::null_arg_outputs("{op.c_name}", '
+                      f'{{{", ".join(outs)}}})')
+        elif op.inplace:
+            refuse = f'torchrkt::null_arg_status("{op.c_name}")'
+        else:
+            refuse = f'torchrkt::null_arg("{op.c_name}")'
         lines += [
             f"  if ({cond}) {{",
-            f'    return torchrkt::{fail}("{op.c_name}");',
+            f"    return {refuse};",
             "  }",
         ]
     preamble = []

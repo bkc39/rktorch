@@ -95,15 +95,19 @@ TEST(GeneratedTranche7, AFailedCallLeavesEveryOutPointerNull) {
   EXPECT_EQ(indices, nullptr);
 }
 
-TEST(GeneratedTranche7, NullHandlesAndNullOutPointersAreRefused) {
+TEST(GeneratedTranche7, ARefusedCallNullsEveryOutSlotItCanReach) {
   const Handle input = make({1.0F, 2.0F, 3.0F}, {3});
-  tr_tensor* values = nullptr;
-  tr_tensor* indices = nullptr;
+  tr_tensor* values = input.t;
+  tr_tensor* indices = input.t;
   EXPECT_EQ(tr_gen_topk(nullptr, 1, 0, true, true, &values, &indices), 1);
   expect_error_from("tr_gen_topk");
+  EXPECT_EQ(values, nullptr);
+  EXPECT_EQ(indices, nullptr);
+  indices = input.t;
   EXPECT_EQ(tr_gen_topk(input.t, 1, 0, true, true, nullptr, &indices), 1);
   expect_error_from("tr_gen_topk");
   EXPECT_EQ(indices, nullptr);
+  values = input.t;
   EXPECT_EQ(tr_gen_sort(input.t, 0, false, &values, nullptr), 1);
   expect_error_from("tr_gen_sort");
   EXPECT_EQ(values, nullptr);

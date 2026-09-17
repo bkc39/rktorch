@@ -13,7 +13,7 @@ extern "C" {
 int tr_gen_sort(const tr_tensor* self, int64_t dim, bool descending,
                 tr_tensor** out0, tr_tensor** out1) {
   if (!self || !out0 || !out1) {
-    return torchrkt::null_arg_status("tr_gen_sort");
+    return torchrkt::null_arg_outputs("tr_gen_sort", {out0, out1});
   }
   return torchrkt::alloc_results("tr_gen_sort", {out0, out1}, [&] {
     return at::sort(self->value, dim, descending);
@@ -23,7 +23,7 @@ int tr_gen_sort(const tr_tensor* self, int64_t dim, bool descending,
 int tr_gen_topk(const tr_tensor* self, int64_t k, int64_t dim, bool largest,
                 bool sorted, tr_tensor** out0, tr_tensor** out1) {
   if (!self || !out0 || !out1) {
-    return torchrkt::null_arg_status("tr_gen_topk");
+    return torchrkt::null_arg_outputs("tr_gen_topk", {out0, out1});
   }
   return torchrkt::alloc_results("tr_gen_topk", {out0, out1}, [&] {
     return at::topk(self->value, k, dim, largest, sorted);
