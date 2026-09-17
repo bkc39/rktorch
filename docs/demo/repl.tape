@@ -1,7 +1,8 @@
 # The REPL recording at the top of the README's Usage section. Regenerate from
-# the repository root, inside `nix develop`, with VHS 0.11 (0.12.0 exits without
+# the repository root, inside `nix develop`. No dev shell ships VHS; the flake's
+# pinned nixpkgs has 0.11.0, the version this needs (0.12.0 exits without
 # writing the GIF: charmbracelet/vhs#787):
-#   vhs docs/demo/repl.tape
+#   nix shell --inputs-from . nixpkgs#vhs --command vhs docs/demo/repl.tape
 
 Output docs/images/repl.gif
 

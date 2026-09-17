@@ -15,7 +15,16 @@ change to a build target or a shell belongs in both.
 nix build                 # native lib + Racket package + tests + examples
 ./result/bin/torch        # prints the libtorch version and a 2x2 draw
 nix build .#cpp           # CMake build and the GoogleTest suite only
-nix flake check           # everything CI runs: cpp, format, tidy, line gate, racket
+nix flake check           # the Nix checks: cpp, format, tidy, line gate, racket
+```
+
+CI runs two more jobs that `nix flake check` does not cover. The Resyntax gate
+is the `resyntax analyze` command below, and it fails on any suggestion. The
+code-generation drift check regenerates the ATen bindings and fails if the
+committed output differs:
+
+```bash
+nix run .#codegen && git status --porcelain   # must print nothing
 ```
 
 ## Development shells
