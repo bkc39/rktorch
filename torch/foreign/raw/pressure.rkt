@@ -24,26 +24,31 @@
          trough-margin)
 
 ;; Atomic mode, not a semaphore: finalizers run in atomic mode, where
-;; blocking is an internal error.
+;; blocking is an internal error. Every field below is written inside it.
 (define (call-with-ledger thunk)
   (call-as-atomic thunk))
 
-(define live-bytes (make-hash))
-(define accounted-since (make-hash))
-(define sampled-since (make-hash))
-(define allocator-sample (make-hash))
-(define collect-interval (make-hash))
-(define high-water (make-hash))
-(define trough-floor (make-hash))
+;; One per device: what the ledger holds there and what the two triggers
+;; remember about it. `mark` is 'unknown until queried, then bytes, #f for a
+;; device with no capacity, or (retry-at . ms) after a failed query.
+(struct account
+  (live since-check since-sample sample interval mark floor)
+  #:mutable)
 
-(define finalizer-run-count (box 0))
-(define pressure-collection-count (box 0))
-(define pressure-reclaimed-bytes (box 0))
-(define trough-collection-count (box 0))
-(define trough-minor-count (box 0))
-(define next-trough-ms (box 0.0))
-(define next-minor-ms (box 0.0))
-(define collector (box #f))
+(struct stats
+  (finalizer-runs backstop-collections reclaimed trough-collections
+   trough-minors)
+  #:mutable)
+
+;; when each trough stage may next run, and the thread inside a collection
+(struct schedule (next-full-ms next-minor-ms holder) #:mutable)
+
+(struct queries (capacity allocated) #:mutable)
+
+(define accounts (make-hash))
+(define the-stats (stats 0 0 0 0 0))
+(define the-schedule (schedule 0.0 0.0 #f))
+(define the-queries (queries #f #f))
 
 (define native-memory-limit (make-parameter #f))
 (define high-water-fraction 4/5)
@@ -60,46 +65,99 @@
 ;; the share of wall-clock time trough collections may take
 (define trough-budget (make-parameter 1/20))
 
-;; The three below run inside the caller's call-with-ledger section.
+;; --- the accounts, all inside the atomic section ---
+
+(define (account-of dev)
+  (hash-ref! accounts dev (lambda () (account 0 0 0 0 #f 'unknown 0))))
+
 (define (note-accounted! dev nbytes)
-  (hash-update! live-bytes dev (lambda (n) (+ n nbytes)) 0)
-  (hash-update! accounted-since dev (lambda (n) (+ n nbytes)) 0)
-  (hash-update! sampled-since dev (lambda (n) (+ n nbytes)) 0))
+  (define a (account-of dev))
+  (set-account-live! a (+ (account-live a) nbytes))
+  (set-account-since-check! a (+ (account-since-check a) nbytes))
+  (set-account-since-sample! a (+ (account-since-sample a) nbytes)))
 
 (define (note-unaccounted! dev nbytes)
-  (hash-update! live-bytes dev (lambda (n) (max 0 (- n nbytes))) 0))
+  (define a (account-of dev))
+  (set-account-live! a (max 0 (- (account-live a) nbytes))))
 
-(define (note-finalizer-run!)
-  (set-box! finalizer-run-count (add1 (unbox finalizer-run-count))))
+(define (reset-checks!)
+  (for ([a (in-hash-values accounts)])
+    (set-account-since-check! a 0)))
 
-(define (finalizer-runs)
-  (unbox finalizer-run-count))
+(define (account-reading a)
+  (max (account-live a) (account-sample a)))
+
+(define (account-over-floor? a)
+  (define floor (account-floor a))
+  (> (- (account-live a) floor) (margin-over floor)))
+
+;; --- readings taken outside it ---
 
 (define (live-bytes-by-device)
-  (call-with-ledger (lambda () (hash->list live-bytes))))
+  (call-with-ledger
+   (lambda ()
+     (for/list ([(dev a) (in-hash accounts)])
+       (cons dev (account-live a))))))
+
+(define (ledger-total)
+  (call-with-ledger
+   (lambda ()
+     (for/sum ([a (in-hash-values accounts)]) (account-live a)))))
+
+(define (devices-over-floor)
+  (call-with-ledger
+   (lambda ()
+     (for/list ([(dev a) (in-hash accounts)] #:when (account-over-floor? a))
+       dev))))
+
+(define (pressure-reading dev)
+  (call-with-ledger (lambda () (account-reading (account-of dev)))))
+
+;; --- statistics ---
+
+(define (note-finalizer-run!)
+  (set-stats-finalizer-runs! the-stats (add1 (stats-finalizer-runs the-stats))))
+
+(define (finalizer-runs)
+  (stats-finalizer-runs the-stats))
+
+(define (note-reclaimed! bytes)
+  (set-stats-reclaimed! the-stats (+ (stats-reclaimed the-stats) (max 0 bytes))))
 
 (define (pressure-diagnostics)
-  (list (cons 'pressure-collections (unbox pressure-collection-count))
-        (cons 'pressure-reclaimed (unbox pressure-reclaimed-bytes))
-        (cons 'trough-collections (unbox trough-collection-count))
-        (cons 'trough-minors (unbox trough-minor-count))))
+  (list (cons 'pressure-collections (stats-backstop-collections the-stats))
+        (cons 'pressure-reclaimed (stats-reclaimed the-stats))
+        (cons 'trough-collections (stats-trough-collections the-stats))
+        (cons 'trough-minors (stats-trough-minors the-stats))))
+
+(define (reset-pressure-state!)
+  (call-with-ledger
+   (lambda ()
+     (for ([a (in-hash-values accounts)])
+       (set-account-since-check! a 0)
+       (set-account-since-sample! a 0)
+       (set-account-sample! a 0)
+       (set-account-interval! a #f)
+       (set-account-mark! a 'unknown)
+       (set-account-floor! a 0))
+     (set-schedule-next-full-ms! the-schedule 0.0)
+     (set-schedule-next-minor-ms! the-schedule 0.0))))
+
+;; --- the device's capacity and allocator, from raw/device.rkt ---
 
 ;; raw/device.rkt owns the two CUDA bindings and requires the ledger, so it
 ;; hands them over at instantiation instead of being required from here.
-(define cuda-capacity-query (box #f))
-(define cuda-allocated-query (box #f))
-
 (define (install-cuda-queries! #:capacity capacity #:allocated allocated)
-  (set-box! cuda-capacity-query capacity)
-  (set-box! cuda-allocated-query allocated))
+  (set-queries-capacity! the-queries capacity)
+  (set-queries-allocated! the-queries allocated))
 
 (define (cuda-query query dev)
   (and (eq? (device-type dev) 'cuda)
-       (unbox query)
-       ((unbox query) (device-index dev))))
+       query
+       (query (device-index dev))))
 
 (define (capacity-mark dev)
-  (define total (cuda-query cuda-capacity-query dev))
+  (define total (cuda-query (queries-capacity the-queries) dev))
   (and total (positive? total) (floor (* high-water-fraction total))))
 
 ;; A mark is cached for good; a failed query on a CUDA device only until the
@@ -107,19 +165,19 @@
 (define (device-high-water dev)
   (or (native-memory-limit)
       (let ([cached (call-with-ledger
-                     (lambda () (hash-ref high-water dev 'unknown)))]
+                     (lambda () (account-mark (account-of dev))))]
             [now (current-inexact-milliseconds)])
         (cond
           [(or (eq? cached 'unknown) (and (pair? cached) (>= now (cdr cached))))
            (define mark (capacity-mark dev))
            (call-with-ledger
             (lambda ()
-              (hash-set! high-water dev
-                         (cond
-                           [mark mark]
-                           [(eq? (device-type dev) 'cuda)
-                            (cons 'retry-at (+ now capacity-retry-ms))]
-                           [else #f]))))
+              (set-account-mark! (account-of dev)
+                                 (cond
+                                   [mark mark]
+                                   [(eq? (device-type dev) 'cuda)
+                                    (cons 'retry-at (+ now capacity-retry-ms))]
+                                   [else #f]))))
            mark]
           [(pair? cached) #f]
           [else cached]))))
@@ -127,42 +185,37 @@
 ;; The allocator's own allocated bytes: the ledger double-counts views and
 ;; cannot see storage only the autograd graph holds. #f when unknown.
 (define allocator-reading
-  (make-parameter (lambda (dev) (cuda-query cuda-allocated-query dev))))
+  (make-parameter
+   (lambda (dev) (cuda-query (queries-allocated the-queries) dev))))
 
 (define (sample-allocator! dev)
   (define reading (or ((allocator-reading) dev) 0))
   (call-with-ledger
    (lambda ()
-     (hash-set! allocator-sample dev reading)
-     (hash-set! sampled-since dev 0)))
-  reading)
+     (define a (account-of dev))
+     (set-account-sample! a reading)
+     (set-account-since-sample! a 0))))
 
-(define (pressure-reading dev)
-  (call-with-ledger
-   (lambda ()
-     (max (hash-ref live-bytes dev 0)
-          (hash-ref allocator-sample dev 0)))))
+;; --- one collection at a time ---
 
-;; One collection at a time: a second thread that finds the gate open while
-;; the first is inside its collection skips instead of collecting again. The
-;; claim names its thread, because kill-thread runs no dynamic-wind exit: a
-;; claimant that has died holds nothing.
+;; A second thread that finds a trigger due while the first is inside its
+;; collection skips instead of collecting again. The claim names its thread,
+;; because kill-thread runs no dynamic-wind exit: a claimant that has died
+;; holds nothing.
 (define (call-as-the-collector thunk)
   (define claimed?
     (call-with-ledger
      (lambda ()
-       (define holder (unbox collector))
+       (define holder (schedule-holder the-schedule))
        (and (or (not holder) (thread-dead? holder))
-            (set-box! collector (current-thread))
+            (set-schedule-holder! the-schedule (current-thread))
             #t))))
   (when claimed?
     (dynamic-wind void
                   thunk
-                  (lambda () (set-box! collector #f)))))
+                  (lambda () (set-schedule-holder! the-schedule #f)))))
 
-(define (reset-accounted-since!)
-  (for ([dev (in-list (hash-keys accounted-since))])
-    (hash-set! accounted-since dev 0)))
+;; --- the backstop, from every accounting ---
 
 (define (collect-under-pressure! dev)
   (unless (in-atomic-mode?)
@@ -172,10 +225,9 @@
       (define-values (gate-open? sample-due?)
         (call-with-ledger
          (lambda ()
-           (values (>= (hash-ref accounted-since dev 0)
-                       (hash-ref collect-interval dev base))
-                   (>= (hash-ref sampled-since dev 0)
-                       (quotient mark sample-divisor))))))
+           (define a (account-of dev))
+           (values (>= (account-since-check a) (or (account-interval a) base))
+                   (>= (account-since-sample a) (quotient mark sample-divisor))))))
       (when gate-open?
         (when sample-due?
           (sample-allocator! dev))
@@ -193,28 +245,21 @@
   (define after (pressure-reading dev))
   (call-with-ledger
    (lambda ()
+     (define a (account-of dev))
      (define reclaimed (max 0 (- before after)))
-     (define interval (hash-ref collect-interval dev base))
-     (hash-set! collect-interval dev
-                (cond
-                  [(not drained?) interval]
-                  [(< reclaimed (* reclaim-fraction mark))
-                   (min (* 2 interval) (* 2 mark))]
-                  [else base]))
-     (reset-accounted-since!)
-     (set-box! pressure-collection-count
-               (add1 (unbox pressure-collection-count)))
-     (set-box! pressure-reclaimed-bytes
-               (+ reclaimed (unbox pressure-reclaimed-bytes))))))
+     (define interval (or (account-interval a) base))
+     (set-account-interval! a
+                            (cond
+                              [(not drained?) interval]
+                              [(< reclaimed (* reclaim-fraction mark))
+                               (min (* 2 interval) (* 2 mark))]
+                              [else base]))
+     (reset-checks!)
+     (set-stats-backstop-collections!
+      the-stats (add1 (stats-backstop-collections the-stats)))
+     (note-reclaimed! reclaimed))))
 
-(define (reset-pressure-state!)
-  (call-with-ledger
-   (lambda ()
-     (for ([table (in-list (list accounted-since sampled-since allocator-sample
-                                 collect-interval high-water trough-floor))])
-       (hash-clear! table))
-     (set-box! next-trough-ms 0.0)
-     (set-box! next-minor-ms 0.0))))
+;; --- the troughs ---
 
 ;; The end of backward! is a step's trough: the graph is released, the
 ;; forward's intermediates are dead, and little is live, so a collection
@@ -233,70 +278,67 @@
   (or (trough-margin)
       (max trough-margin-min (min floor trough-margin-max))))
 
-(define (devices-over-floor)
+(define (lower-floors!)
   (call-with-ledger
    (lambda ()
-     (for/list ([(dev live) (in-hash live-bytes)]
-                #:when (let ([floor (hash-ref trough-floor dev 0)])
-                         (> (- live floor) (margin-over floor))))
-       dev))))
+     (for ([a (in-hash-values accounts)])
+       (set-account-floor! a (min (account-floor a) (account-live a)))))))
 
-(define (lower-trough-floors!)
-  (call-with-ledger
-   (lambda ()
-     (for ([(dev live) (in-hash live-bytes)]
-           #:when (hash-has-key? trough-floor dev))
-       (hash-update! trough-floor dev (lambda (floor) (min floor live)))))))
-
-(define (ledger-total)
-  (call-with-ledger
-   (lambda ()
-     (for/sum ([live (in-hash-values live-bytes)]) live))))
+(define (settle-floors!)
+  (for ([a (in-hash-values accounts)])
+    (set-account-floor! a (account-live a))))
 
 (define (due? next-ms)
-  (and (>= (current-inexact-milliseconds) (unbox next-ms))
+  (and (>= (current-inexact-milliseconds) next-ms)
        (pair? (devices-over-floor))))
 
-(define (record-trough! next-ms count started before budget)
-  (define finished (current-inexact-milliseconds))
-  (define after (ledger-total))
-  (call-with-ledger
-   (lambda ()
-     (set-box! next-ms (+ finished (/ (- finished started) budget)))
-     (set-box! count (add1 (unbox count)))
-     (set-box! pressure-reclaimed-bytes
-               (+ (max 0 (- before after)) (unbox pressure-reclaimed-bytes))))))
-
-(define (collect-young-at-trough! budget)
-  (when (due? next-minor-ms)
+;; runs one stage: collect, then record its cost, its yield and its next time
+(define (trough-stage! next-ms set-next! bump! collect! budget)
+  (when (due? (next-ms the-schedule))
     (define started (current-inexact-milliseconds))
     (define before (ledger-total))
-    (collect-garbage 'minor)
-    (drain-finalizers!)
-    (record-trough! next-minor-ms trough-minor-count started before budget)))
-
-(define (collect-old-at-trough! budget)
-  (when (due? next-trough-ms)
-    (define started (current-inexact-milliseconds))
-    (define before (ledger-total))
-    (collect-and-wait!)
+    (collect!)
+    (define finished (current-inexact-milliseconds))
+    (define after (ledger-total))
     (call-with-ledger
      (lambda ()
-       (for ([(dev live) (in-hash live-bytes)])
-         (hash-set! trough-floor dev live))
-       (reset-accounted-since!)))
-    (record-trough! next-trough-ms trough-collection-count
-                    started before budget)))
+       (set-next! the-schedule (+ finished (/ (- finished started) budget)))
+       (bump! the-stats)
+       (note-reclaimed! (- before after))))))
+
+(define (collect-young-at-trough! budget)
+  (trough-stage! schedule-next-minor-ms
+                 set-schedule-next-minor-ms!
+                 (lambda (s) (set-stats-trough-minors! s (add1 (stats-trough-minors s))))
+                 (lambda ()
+                   (collect-garbage 'minor)
+                   (drain-finalizers!))
+                 budget))
+
+(define (collect-old-at-trough! budget)
+  (trough-stage! schedule-next-full-ms
+                 set-schedule-next-full-ms!
+                 (lambda (s)
+                   (set-stats-trough-collections! s (add1 (stats-trough-collections s))))
+                 (lambda ()
+                   (collect-and-wait!)
+                   (call-with-ledger
+                    (lambda ()
+                      (settle-floors!)
+                      (reset-checks!))))
+                 budget))
 
 (define (collect-at-trough! #:young? [young? #f])
   (unless (in-atomic-mode?)
-    (lower-trough-floors!)
+    (lower-floors!)
     (define budget (if young? (/ (trough-budget) 2) (trough-budget)))
     (call-as-the-collector
      (lambda ()
        (when young?
          (collect-young-at-trough! budget))
        (collect-old-at-trough! budget)))))
+
+;; --- a collection that has really finished ---
 
 ;; The canary shows the finalizer thread has started on this collection's
 ;; batch, not that it has finished: finalization order is unspecified and
