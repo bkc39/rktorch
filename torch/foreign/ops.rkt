@@ -16,8 +16,8 @@
                   s64vector-ref
                   s64vector?)
          (only-in racket/contract/base
-                  -> ->* ->i any any/c cons/c contract-out contract? list/c
-                  listof none/c or/c)
+                  -> ->* ->i and/c any any/c cons/c contract-out contract?
+                  list/c listof none/c or/c parameter/c)
          (only-in "../private/contract.rkt"
                   define/checked-out define/contract-out)
          (only-in "device-type.rkt"
@@ -29,10 +29,14 @@
                   tr-cuda-device-count/raw
                   tr-cuda-empty-cache/raw
                   tr-cuda-is-available/raw
+                  tr-cuda-mem-get-info/raw
                   tr-cuda-memory-stats/raw
+                  tr-cuda-reset-peak-stats/raw
+                  tr-cuda-set-allocator-settings/raw
                   tr-get-default-device/raw
                   tr-mps-empty-cache/raw
                   tr-mps-is-available/raw
+                  tr-mps-memory-info/raw
                   tr-set-default-device/raw
                   tr-tensor-device/raw
                   tr-tensor-to!/raw
@@ -45,6 +49,11 @@
                   [native-memory-use raw:native-memory-use]
                   oom-retry/status
                   reaccount!)
+         (only-in "raw/pressure.rkt"
+                  [native-collect-budget raw:native-collect-budget]
+                  [native-collect-margin raw:native-collect-margin]
+                  [native-memory-fraction raw:native-memory-fraction]
+                  [native-memory-limit raw:native-memory-limit])
          (only-in "raw/random.rkt" tr-tensor-uniform!/raw)
          (only-in "raw/tensor.rkt"
                   dtype-code->symbol
@@ -175,9 +184,42 @@
         (cons 'reserved reserved)
         (cons 'peak-allocated peak)))
 
+(define/contract-out (cuda-memory-info [dev (cuda-device)])
+  (->* [] [device/c]
+       (listof (cons/c (or/c 'free 'total) exact-nonnegative-integer?)))
+  (define-values (type index) (device->type+index dev))
+  (unless (eq? type 'cuda)
+    (error 'cuda-memory-info "expected a CUDA device, given: ~e" dev))
+  (define-values (rc free total) (tr-cuda-mem-get-info/raw index))
+  (check-ok rc 'cuda-memory-info)
+  (list (cons 'free free)
+        (cons 'total total)))
+
+(define/contract-out (cuda-reset-peak-stats! [dev (cuda-device)])
+  (->* [] [device/c] void?)
+  (define-values (type index) (device->type+index dev))
+  (unless (eq? type 'cuda)
+    (error 'cuda-reset-peak-stats! "expected a CUDA device, given: ~e" dev))
+  (check-ok (tr-cuda-reset-peak-stats/raw index) 'cuda-reset-peak-stats!)
+  (void))
+
+(define/contract-out (cuda-allocator-settings! settings) (-> string? void?)
+  (check-ok (tr-cuda-set-allocator-settings/raw settings)
+            'cuda-allocator-settings!)
+  (void))
+
 (define/contract-out (cuda-empty-cache!) (-> void?)
   (check-ok (tr-cuda-empty-cache/raw) 'cuda-empty-cache!)
   (void))
+
+(define/contract-out (mps-memory-info)
+  (-> (listof (cons/c (or/c 'allocated 'driver-allocated 'recommended-max)
+                      exact-nonnegative-integer?)))
+  (define-values (rc allocated driver recommended) (tr-mps-memory-info/raw))
+  (check-ok rc 'mps-memory-info)
+  (list (cons 'allocated allocated)
+        (cons 'driver-allocated driver)
+        (cons 'recommended-max recommended)))
 
 (define/contract-out (mps-empty-cache!) (-> void?)
   (check-ok (tr-mps-empty-cache/raw) 'mps-empty-cache!)
@@ -189,6 +231,23 @@
   (-> (listof (cons/c device? exact-nonnegative-integer?)))
   raw:native-memory-use)
 
+;; the high-water mark for every device; #f defers to the device's capacity
+(define/contract-out native-memory-limit ;; noqa
+  (parameter/c (or/c #f exact-positive-integer?))
+  raw:native-memory-limit)
+
+(define/contract-out native-memory-fraction ;; noqa
+  (parameter/c (and/c real? positive? (lambda (x) (<= x 1))))
+  raw:native-memory-fraction)
+
+(define/contract-out native-collect-margin ;; noqa
+  (parameter/c (or/c #f exact-positive-integer?))
+  raw:native-collect-margin)
+
+(define/contract-out native-collect-budget ;; noqa
+  (parameter/c (and/c real? positive?))
+  raw:native-collect-budget)
+
 (define/contract-out finalizer-failures ;; noqa
   (-> exact-nonnegative-integer?)
   raw:finalizer-failures)
@@ -197,7 +256,11 @@
   (-> (list/c (cons/c 'runs exact-nonnegative-integer?)
               (cons/c 'failures exact-nonnegative-integer?)
               (cons/c 'messages (listof string?))
-              (cons/c 'ledger-entries exact-nonnegative-integer?)))
+              (cons/c 'ledger-entries exact-nonnegative-integer?)
+              (cons/c 'pressure-collections exact-nonnegative-integer?)
+              (cons/c 'pressure-reclaimed exact-nonnegative-integer?)
+              (cons/c 'trough-collections exact-nonnegative-integer?)
+              (cons/c 'trough-minors exact-nonnegative-integer?)))
   raw:finalizer-diagnostics)
 
 (define/contract-out (reclaim-native-memory!) (-> void?) ;; noqa
