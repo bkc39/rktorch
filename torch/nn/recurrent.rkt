@@ -9,7 +9,8 @@
                   cudnn-rnn-flatten-weight gru-input lstm-input)
          (only-in "../private/contract.rkt" define/contract-out)
          (only-in "init.rkt" uniform-init)
-         (only-in "layer.rkt" gen:layer move-layer! training?)
+         (only-in "layer.rkt"
+                  call-at-forward-trough gen:layer move-layer! training?)
          (only-in "parameter.rkt" Parameter))
 
 (provide (contract-out [lstm? (-> any/c boolean?)]
@@ -19,10 +20,10 @@
                    dropout bidirectional? params
                    [mode #:mutable] [flattened-on #:mutable])
   #:property prop:procedure
-  (lambda (self x . state) (run self x state))
+  (lambda (self x . state) (forward self x state))
   #:methods gen:layer
   [(define (layer-forward self . inputs)
-     (run self (car inputs) (cdr inputs)))
+     (forward self (car inputs) (cdr inputs)))
    (define (layer-parameters self)
      (map cdr (recurrent-params self)))
    (define (layer-named-parameters self prefix)
@@ -138,6 +139,9 @@
          (recurrent-hidden-size self)
          #:device (tensor-device x)
          #:dtype (tensor-dtype x)))
+
+(define (forward self x state)
+  (call-at-forward-trough (lambda () (run self x state))))
 
 (define (run self x state)
   (define who (if (lstm? self) 'LSTM 'GRU))

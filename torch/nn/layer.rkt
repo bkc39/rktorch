@@ -16,6 +16,7 @@
          (only-in syntax/parse/define define-syntax-parse-rule)
          (only-in "../foreign.rkt" prop:to tensor-dtype tensor?)
          (only-in (submod "../foreign.rkt" unsafe) to!)
+         (only-in "../foreign/autograd-ops.rkt" collect-at-forward-trough!)
          (only-in "../private/contract.rkt"
                   define/checked-out define/contract-out)
          (only-in "buffer.rkt" Buffer?)
@@ -33,6 +34,7 @@
          layer-mode ;; noqa
          layer-set-mode! ;; noqa
          move-layer!
+         call-at-forward-trough
          in-mode
          in-eval-mode
          with-mode
@@ -187,12 +189,27 @@
        #`(let ([#,(datum->syntax stx 'mode) (layer-mode #,self-id)])
            body ...)])))
 
+(define layer-call-key (make-continuation-mark-key 'layer-call))
+
+;; the mark tells a nested call from the outermost one, whose return is
+;; where a no-grad loop's memory is at its lowest
+(define (call-at-forward-trough forward)
+  (cond
+    [(continuation-mark-set-first #f layer-call-key) (forward)]
+    [else
+     (begin0 (with-continuation-mark layer-call-key #t (forward))
+             (collect-at-forward-trough!))]))
+
+(define (call-forward self inputs)
+  (call-at-forward-trough
+   (lambda () (apply (registry-forward self) self inputs))))
+
 (struct registry (forward params buffers children [mode #:mutable])
   #:property prop:procedure
-  (lambda (self . inputs) (apply (registry-forward self) self inputs))
+  (lambda (self . inputs) (call-forward self inputs))
   #:methods gen:layer
   [(define (layer-forward self . inputs)
-     (apply (registry-forward self) self inputs))
+     (call-forward self inputs))
    (define (layer-parameters self)
      (append (map cdr (registry-params self))
              (append-map child-parameters (registry-children self))))
