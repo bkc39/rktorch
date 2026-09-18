@@ -9,8 +9,8 @@
            (only-in "../foreign/raw/memory.rkt" native-memory-use/fold)
            (only-in "../foreign/raw/pressure.rkt"
                     allocator-reading call-as-the-collector collect-at-trough!
-                    margin-over reset-pressure-state! trough-budget
-                    trough-margin)
+                    drain-deadline margin-over reset-pressure-state!
+                    trough-budget trough-margin)
            (only-in "../nn.rkt" Linear Sequential))
 
   (define mib (* 1024 1024))
@@ -189,6 +189,42 @@
       (check-true (collects? (lambda () (grow! 20)))
                   "360 MiB over a 320 MiB floor is past it")
       (check-equal? (length held) 4)))
+
+  ;; a zero deadline makes every drain report that it ran out of time
+  (test-case "a stalled drain does not credit the backstop's byte gate"
+    (settle!)
+    (parameterize ([native-memory-limit (* 64 mib)]
+                   [drain-deadline 0])
+      ;; a working set over the mark, so every check that looks does collect
+      (define held (for/list ([_ (in-range 20)]) (zeros 1024 1024)))
+      (define before (collections))
+      (define more (for/list ([_ (in-range 3)]) (zeros 1024 1024)))
+      (check-equal? (+ (length held) (length more)) 23)
+      (check-true (>= (- (collections) before) 3)
+                  (format "~a collections over 3 allocations past the mark"
+                          (- (collections) before)))))
+
+  (test-case "a stalled drain at a trough leaves the floor where it was"
+    (settle!)
+    (collect-at-trough!)
+    (define held
+      (parameterize ([trough-margin (* 16 mib)]
+                     [trough-budget 1000]
+                     [drain-deadline 0])
+        (define before-stall (trough-collections))
+        (define kept (for/list ([_ (in-range 8)]) (zeros 1024 1024)))
+        (collect-at-trough!)
+        (check-equal? (- (trough-collections) before-stall) 1)
+        kept))
+    ;; the floor never took the stalled collection's snapshot, so the same
+    ;; residue is still over it at the next trough
+    (parameterize ([trough-margin (* 16 mib)]
+                   [trough-budget 1000])
+      (define before-retry (trough-collections))
+      (collect-at-trough!)
+      (check-equal? (length held) 8)
+      (check-equal? (- (trough-collections) before-retry) 1
+                    "the stalled trough must not have settled the floor")))
 
   (test-case "a collector killed mid-collection does not hold the claim"
     (settle!)

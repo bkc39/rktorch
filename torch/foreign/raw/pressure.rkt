@@ -19,6 +19,7 @@
          pressure-diagnostics
          reset-pressure-state!
          allocator-reading
+         drain-deadline
          native-memory-limit
          trough-budget
          trough-margin)
@@ -248,13 +249,16 @@
      (define a (account-of dev))
      (define reclaimed (max 0 (- before after)))
      (define interval (or (account-interval a) base))
-     (set-account-interval! a
-                            (cond
-                              [(not drained?) interval]
-                              [(< reclaimed (* reclaim-fraction mark))
-                               (min (* 2 interval) (* 2 mark))]
-                              [else base]))
-     (reset-checks!)
+     ;; A drain that ran out of time measured nothing, so it neither backs
+     ;; the interval off nor counts as this device's check: the next
+     ;; allocation looks again. Looking is cheap, and the mark still guards
+     ;; the collection itself.
+     (when drained?
+       (set-account-interval! a
+                              (if (< reclaimed (* reclaim-fraction mark))
+                                  (min (* 2 interval) (* 2 mark))
+                                  base))
+       (reset-checks!))
      (set-stats-backstop-collections!
       the-stats (add1 (stats-backstop-collections the-stats)))
      (note-reclaimed! reclaimed))))
@@ -292,16 +296,22 @@
   (and (>= (current-inexact-milliseconds) next-ms)
        (pair? (devices-over-floor))))
 
-;; runs one stage: collect, then record its cost, its yield and its next time
-(define (trough-stage! next-ms set-next! bump! collect! budget)
+;; runs one stage: collect, then record its cost, its yield and its next
+;; time. `collect!` reports whether its drain finished, and `on-drained!` is
+;; what only a finished one earns: a floor pinned to bytes still waiting to
+;; be freed would hide that residue from the next trough. The next time is
+;; set either way, so a stalled stage cannot spin.
+(define (trough-stage! next-ms set-next! bump! collect! on-drained! budget)
   (when (due? (next-ms the-schedule))
     (define started (current-inexact-milliseconds))
     (define before (ledger-total))
-    (collect!)
+    (define drained? (collect!))
     (define finished (current-inexact-milliseconds))
     (define after (ledger-total))
     (call-with-ledger
      (lambda ()
+       (when drained?
+         (on-drained!))
        (set-next! the-schedule (+ finished (/ (- finished started) budget)))
        (bump! the-stats)
        (note-reclaimed! (- before after))))))
@@ -313,6 +323,7 @@
                  (lambda ()
                    (collect-garbage 'minor)
                    (drain-finalizers!))
+                 void
                  budget))
 
 (define (collect-old-at-trough! budget)
@@ -321,11 +332,11 @@
                  (lambda (s)
                    (set-stats-trough-collections! s (add1 (stats-trough-collections s))))
                  (lambda ()
-                   (collect-and-wait!)
-                   (call-with-ledger
-                    (lambda ()
-                      (settle-floors!)
-                      (reset-checks!))))
+                   (define-values (_observed drained?) (collect-and-wait!))
+                   drained?)
+                 (lambda ()
+                   (settle-floors!)
+                   (reset-checks!))
                  budget))
 
 (define (collect-at-trough! #:young? [young? #f])
@@ -345,7 +356,7 @@
 ;; the thread runs only while this one yields. So yield until the run count
 ;; has stood still for a few turns, within a deadline. Two results: whether
 ;; the canary was seen, and whether the drain finished inside the deadline.
-(define drain-deadline-ms 2000)
+(define drain-deadline (make-parameter 2000))
 (define quiet-turns 3)
 
 (define (collect-and-wait!)
@@ -356,12 +367,12 @@
   (values (and observed #t) (drain-finalizers!)))
 
 (define (drain-finalizers!)
-  (define deadline (+ (current-inexact-milliseconds) drain-deadline-ms))
+  (define deadline (+ (current-inexact-milliseconds) (drain-deadline)))
   (let loop ([runs (finalizer-runs)] [quiet 0])
     (sleep 0)
     (define now (finalizer-runs))
     (cond
-      [(> (current-inexact-milliseconds) deadline) #f]
+      [(>= (current-inexact-milliseconds) deadline) #f]
       [(not (= now runs)) (loop now 0)]
       [(< (add1 quiet) quiet-turns) (loop now (add1 quiet))]
       [else #t])))

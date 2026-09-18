@@ -187,7 +187,11 @@ the last defence when a trough collection is not yet due:
 - Hysteresis: the interval starts at an eighth of the mark; a
   collection that reclaims under 5% of the mark doubles it (capped at
   twice the mark), one that reclaims more resets it, and one whose
-  drain ran out of time leaves it alone. A working set that
+  drain ran out of time leaves it alone. A stalled drain also leaves the
+  bytes-since-check counters and the trough floors where they were: it
+  measured nothing, so it earns no credit, and the next allocation looks
+  again. Looking is cheap; the mark and the trough margin still guard the
+  collection itself. A working set that
   sits above the mark is therefore collected at a decaying rate instead
   of on every allocation.
 - Never from atomic mode (`in-atomic-mode?` guards it), and the RNG
