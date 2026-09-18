@@ -5,6 +5,8 @@
                      syntax/parse/pre)
          (only-in ffi/unsafe _double _enum _fun _int _int64 _ptr _void)
          (only-in ffi/unsafe/alloc allocator deallocator)
+         (only-in ffi/unsafe/atomic call-as-atomic)
+         (only-in racket/list remove-duplicates)
          (only-in "../device-type.rkt" device device-index device-type)
          (only-in "pressure.rkt"
                   call-with-ledger
@@ -275,7 +277,11 @@
 
 (define ((accounted-outputs wrapped) . args)
   (define handles (apply wrapped args))
-  (when handles (for-each account! handles))
+  (when handles
+    ;; every output is on the ledger before any collection measures it
+    (for ([dev (in-list (remove-duplicates (filter values
+                                                   (map account! handles))))])
+      (collect-under-pressure! dev)))
   handles)
 
 ;; For raw calls answering a list of handles, or #f on failure.

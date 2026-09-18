@@ -74,77 +74,77 @@
 (define-syntax (define-generated-op stx)
   (syntax-parse stx
     [(_ name:id c-id:id #:inplace ([arg:id kind:id] ...+))
-     (define-values (specs call-args)
-       (build-pieces stx
-                     (syntax->list #'(arg ...))
-                     (syntax->datum #'(kind ...))))
-     (with-syntax ([raw-name (format-id #'name "~a/raw" #'name)]
-                   [(spec ...) specs]
-                   [(call-arg ...) call-args]
-                   [recv (car (syntax->list #'(arg ...)))])
-       #'(begin
-           (define-torch raw-name
-             (_fun spec ... -> _int)
-             #:c-id c-id)
-           (define (name arg ...)
-             (check-ok (raw-name call-arg ...) 'name)
-             recv)))]
+     #:do [(define-values (specs call-args)
+             (build-pieces stx
+                           (syntax->list #'(arg ...))
+                           (syntax->datum #'(kind ...))))]
+     #:with raw-name (format-id #'name "~a/raw" #'name)
+     #:with (spec ...) specs
+     #:with (call-arg ...) call-args
+     #:with recv (car (syntax->list #'(arg ...)))
+     #'(begin
+         (define-torch raw-name
+           (_fun spec ... -> _int)
+           #:c-id c-id)
+         (define (name arg ...)
+           (check-ok (raw-name call-arg ...) 'name)
+           recv))]
     [(_ name:id c-id:id (~optional (~and #:rng rng?)) #:returns n:nat
         ([arg:id kind:id] ...))
      #:fail-when (and (< (syntax-e #'n) 2) #'n)
      "a single return takes no #:returns clause"
-     (define-values (specs call-args)
-       (build-pieces stx
-                     (syntax->list #'(arg ...))
-                     (syntax->datum #'(kind ...))))
-     (with-syntax ([raw-name (format-id #'name "~a/raw" #'name)]
-                   [(spec ...) specs]
-                   [(call-arg ...) call-args]
-                   [(out ...) (generate-temporaries
-                               (build-list (syntax-e #'n) values))]
-                   [wrap (if (attribute rng?)
-                             #'tensor-allocator/outputs/rng
-                             #'tensor-allocator/outputs)])
-       #'(begin
-           (define-torch raw-name
-             (_fun spec ... (out : (_ptr o _Tensor/null)) ...
-                   -> (rc : _int)
-                   -> (and (zero? rc) (list out ...)))
-             #:c-id c-id
-             #:wrap wrap)
-           (define (name arg ...)
-             (apply values
-                    (map wrap-tensor
-                         (check-outputs 'name (raw-name call-arg ...)))))))]
+     #:do [(define-values (specs call-args)
+             (build-pieces stx
+                           (syntax->list #'(arg ...))
+                           (syntax->datum #'(kind ...))))]
+     #:with raw-name (format-id #'name "~a/raw" #'name)
+     #:with (spec ...) specs
+     #:with (call-arg ...) call-args
+     #:with (out ...) (generate-temporaries
+                       (build-list (syntax-e #'n) values))
+     #:with wrap (if (attribute rng?)
+                     #'tensor-allocator/outputs/rng
+                     #'tensor-allocator/outputs)
+     #'(begin
+         (define-torch raw-name
+           (_fun spec ... (out : (_ptr o _Tensor/null)) ...
+                 -> (rc : _int)
+                 -> (and (zero? rc) (list out ...)))
+           #:c-id c-id
+           #:wrap wrap)
+         (define (name arg ...)
+           (apply values
+                  (map wrap-tensor
+                       (check-outputs 'name (raw-name call-arg ...))))))]
     [(_ name:id c-id:id #:rng ([arg:id kind:id] ...))
-     (define-values (specs call-args)
-       (build-pieces stx
-                     (syntax->list #'(arg ...))
-                     (syntax->datum #'(kind ...))))
-     (with-syntax ([raw-name (format-id #'name "~a/raw" #'name)]
-                   [(spec ...) specs]
-                   [(call-arg ...) call-args])
-       #'(begin
-           (define-torch raw-name
-             (_fun spec ... -> _Tensor/null)
-             #:c-id c-id
-             #:wrap tensor-allocator/rng)
-           (define (name arg ...)
-             (wrap-tensor
-              (check-handle 'name (raw-name call-arg ...))))))]
+     #:do [(define-values (specs call-args)
+             (build-pieces stx
+                           (syntax->list #'(arg ...))
+                           (syntax->datum #'(kind ...))))]
+     #:with raw-name (format-id #'name "~a/raw" #'name)
+     #:with (spec ...) specs
+     #:with (call-arg ...) call-args
+     #'(begin
+         (define-torch raw-name
+           (_fun spec ... -> _Tensor/null)
+           #:c-id c-id
+           #:wrap tensor-allocator/rng)
+         (define (name arg ...)
+           (wrap-tensor
+            (check-handle 'name (raw-name call-arg ...)))))]
     [(_ name:id c-id:id ([arg:id kind:id] ...))
-     (define-values (specs call-args)
-       (build-pieces stx
-                     (syntax->list #'(arg ...))
-                     (syntax->datum #'(kind ...))))
-     (with-syntax ([raw-name (format-id #'name "~a/raw" #'name)]
-                   [(spec ...) specs]
-                   [(call-arg ...) call-args])
-       #'(begin
-           (define-torch raw-name
-             (_fun spec ... -> _Tensor/null)
-             #:c-id c-id
-             #:wrap tensor-allocator)
-           (define (name arg ...)
-             (wrap-tensor
-              (check-handle 'name (raw-name call-arg ...))))))]))
+     #:do [(define-values (specs call-args)
+             (build-pieces stx
+                           (syntax->list #'(arg ...))
+                           (syntax->datum #'(kind ...))))]
+     #:with raw-name (format-id #'name "~a/raw" #'name)
+     #:with (spec ...) specs
+     #:with (call-arg ...) call-args
+     #'(begin
+         (define-torch raw-name
+           (_fun spec ... -> _Tensor/null)
+           #:c-id c-id
+           #:wrap tensor-allocator)
+         (define (name arg ...)
+           (wrap-tensor
+            (check-handle 'name (raw-name call-arg ...)))))]))
