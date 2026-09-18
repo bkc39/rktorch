@@ -120,6 +120,18 @@
        (check-not-exn
         (lambda () (cuda-allocator-settings! "expandable_segments:True")))]))
 
+  (test-case "mps memory gauges (#145)"
+    (define info (mps-memory-info))
+    (define (gauge k) (cdr (assq k info)))
+    (check-equal? (map car info) '(allocated driver-allocated recommended-max))
+    (cond
+      [(mps-available?)
+       (check-true (> (gauge 'recommended-max) 0))
+       (check-true (>= (gauge 'driver-allocated) (gauge 'allocated)))]
+      [else
+       ;; absent backend: a no-op success reporting zeros, like the cache drop
+       (check-equal? (map cdr info) '(0 0 0))]))
+
   (test-case "device arguments accept structs and legacy forms alike"
     (set-default-device! (cpu-device))
     (check-equal? (default-device) (cpu-device))

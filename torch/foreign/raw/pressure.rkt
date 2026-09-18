@@ -2,7 +2,7 @@
 
 (require (only-in ffi/unsafe register-finalizer)
          (only-in ffi/unsafe/atomic call-as-atomic in-atomic-mode?)
-         (only-in "../device-type.rkt" device-index device-type))
+         (only-in "../device-type.rkt" device-type))
 
 (provide call-with-ledger
          call-as-the-collector
@@ -11,7 +11,7 @@
          note-finalizer-run!
          finalizer-runs
          live-bytes-by-device
-         install-cuda-queries!
+         install-device-queries!
          collect-under-pressure!
          collect-at-trough!
          collect-and-wait!
@@ -20,9 +20,10 @@
          reset-pressure-state!
          allocator-reading
          drain-deadline
-         native-memory-limit
-         trough-budget
-         trough-margin)
+         native-collect-budget
+         native-collect-margin
+         native-memory-fraction
+         native-memory-limit)
 
 ;; Atomic mode, not a semaphore: finalizers run in atomic mode, where
 ;; blocking is an internal error. Every field below is written inside it.
@@ -30,10 +31,10 @@
   (call-as-atomic thunk))
 
 ;; One per device: what the ledger holds there and what the two triggers
-;; remember about it. `mark` is 'unknown until queried, then bytes, #f for a
-;; device with no capacity, or (retry-at . ms) after a failed query.
+;; remember about it. `capacity` is 'unknown until queried, then bytes, #f for
+;; a device that has none, or (retry-at . ms) after a failed query.
 (struct account
-  (live since-check since-sample sample interval mark floor)
+  (live since-check since-sample sample interval capacity floor)
   #:mutable)
 
 (struct stats
@@ -52,19 +53,19 @@
 (define the-queries (queries #f #f))
 
 (define native-memory-limit (make-parameter #f))
-(define high-water-fraction 4/5)
+(define native-memory-fraction (make-parameter 4/5))
 (define interval-divisor 8)
 (define sample-divisor 32)
 (define reclaim-fraction 1/20)
 (define capacity-retry-ms 1000.0)
 
 ;; #f: the floor itself, kept between the two bounds below
-(define trough-margin (make-parameter #f))
-(define trough-margin-min (* 256 1024 1024))
-(define trough-margin-max (* 1024 1024 1024))
+(define native-collect-margin (make-parameter #f))
+(define margin-min (* 256 1024 1024))
+(define margin-max (* 1024 1024 1024))
 
 ;; the share of wall-clock time trough collections may take
-(define trough-budget (make-parameter 1/20))
+(define native-collect-budget (make-parameter 1/20))
 
 ;; --- the accounts, all inside the atomic section ---
 
@@ -139,55 +140,61 @@
        (set-account-since-sample! a 0)
        (set-account-sample! a 0)
        (set-account-interval! a #f)
-       (set-account-mark! a 'unknown)
+       (set-account-capacity! a 'unknown)
        (set-account-floor! a 0))
      (set-schedule-next-full-ms! the-schedule 0.0)
      (set-schedule-next-minor-ms! the-schedule 0.0))))
 
 ;; --- the device's capacity and allocator, from raw/device.rkt ---
 
-;; raw/device.rkt owns the two CUDA bindings and requires the ledger, so it
-;; hands them over at instantiation instead of being required from here.
-(define (install-cuda-queries! #:capacity capacity #:allocated allocated)
+;; raw/device.rkt owns the device bindings and requires the ledger, so it
+;; hands these over at instantiation instead of being required from here.
+;; Each takes a device and answers in bytes, or #f where it cannot say.
+(define (install-device-queries! #:capacity capacity #:allocated allocated)
   (set-queries-capacity! the-queries capacity)
   (set-queries-allocated! the-queries allocated))
 
-(define (cuda-query query dev)
-  (and (eq? (device-type dev) 'cuda)
-       query
-       (query (device-index dev))))
+(define (queried-capacity dev)
+  (define query (queries-capacity the-queries))
+  (define total (and query (query dev)))
+  (and total (positive? total) total))
 
-(define (capacity-mark dev)
-  (define total (cuda-query (queries-capacity the-queries) dev))
-  (and total (positive? total) (floor (* high-water-fraction total))))
+;; The capacity is cached once known, and a failed query on a device that
+;; should have one is retried after a moment, so one early failure cannot
+;; switch the backstop off for the rest of the process.
+(define (device-capacity dev)
+  (define cached
+    (call-with-ledger (lambda () (account-capacity (account-of dev)))))
+  (define now (current-inexact-milliseconds))
+  (cond
+    [(or (eq? cached 'unknown) (and (pair? cached) (>= now (cdr cached))))
+     (define total (queried-capacity dev))
+     (call-with-ledger
+      (lambda ()
+        (set-account-capacity! (account-of dev)
+                               (cond
+                                 [total total]
+                                 [(memq (device-type dev) '(cuda mps))
+                                  (cons 'retry-at (+ now capacity-retry-ms))]
+                                 [else #f]))))
+     total]
+    [(pair? cached) #f]
+    [else cached]))
 
-;; A mark is cached for good; a failed query on a CUDA device only until the
-;; retry time, so one early failure cannot switch the backstop off.
+;; The fraction is applied at every check rather than folded into the cache,
+;; so a program may parameterize it at any point in its run.
 (define (device-high-water dev)
   (or (native-memory-limit)
-      (let ([cached (call-with-ledger
-                     (lambda () (account-mark (account-of dev))))]
-            [now (current-inexact-milliseconds)])
-        (cond
-          [(or (eq? cached 'unknown) (and (pair? cached) (>= now (cdr cached))))
-           (define mark (capacity-mark dev))
-           (call-with-ledger
-            (lambda ()
-              (set-account-mark! (account-of dev)
-                                 (cond
-                                   [mark mark]
-                                   [(eq? (device-type dev) 'cuda)
-                                    (cons 'retry-at (+ now capacity-retry-ms))]
-                                   [else #f]))))
-           mark]
-          [(pair? cached) #f]
-          [else cached]))))
+      (let ([capacity (device-capacity dev)])
+        (and capacity (floor (* (native-memory-fraction) capacity))))))
 
 ;; The allocator's own allocated bytes: the ledger double-counts views and
 ;; cannot see storage only the autograd graph holds. #f when unknown.
 (define allocator-reading
   (make-parameter
-   (lambda (dev) (cuda-query (queries-allocated the-queries) dev))))
+   (lambda (dev)
+     (define query (queries-allocated the-queries))
+     (and query (query dev)))))
 
 (define (sample-allocator! dev)
   (define reading (or ((allocator-reading) dev) 0))
@@ -279,8 +286,8 @@
 ;; so that trough asks for a minor collection first and pays for a full one
 ;; only with what survives, the two stages splitting the budget.
 (define (margin-over floor)
-  (or (trough-margin)
-      (max trough-margin-min (min floor trough-margin-max))))
+  (or (native-collect-margin)
+      (max margin-min (min floor margin-max))))
 
 (define (lower-floors!)
   (call-with-ledger
@@ -342,7 +349,8 @@
 (define (collect-at-trough! #:young? [young? #f])
   (unless (in-atomic-mode?)
     (lower-floors!)
-    (define budget (if young? (/ (trough-budget) 2) (trough-budget)))
+    (define budget
+      (if young? (/ (native-collect-budget) 2) (native-collect-budget)))
     (call-as-the-collector
      (lambda ()
        (when young?

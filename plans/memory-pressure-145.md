@@ -290,3 +290,28 @@ the same probe, batch 224, 150 steps: ec6b025 (before the split) 0.44 s per
 step, 99 s per epoch, 49 trough collections; fc02adf (after, with every
 review fix) 0.45 s per step, 101 s per epoch, 53 trough collections, both
 flat at 16.2 to 16.4 GB with no backstop firings. Within run-to-run noise.
+
+## Tuning, and MPS (2026-09-18)
+
+The policy's constants are parameters on the facade, so a script tunes the
+whole thing for its own machine by wrapping its loop once:
+`native-memory-limit` and `native-memory-fraction` set the backstop's mark,
+`native-collect-margin` how far the ledger may grow between collections at a
+trough, and `native-collect-budget` the share of wall-clock time those may
+take. The fraction is read at every check rather than folded into the cached
+capacity, so it may change mid-run.
+
+The UNet at batch 224, 150 steps, showing the trade the knobs buy:
+
+| setting | peak | trough collections | s/step |
+|---|---|---|---|
+| defaults | 15.6 GB | 50 | 0.43 |
+| margin 4 GiB, budget 1/200 | 20.1 GB | 6 | 0.42 |
+
+MPS now has a capacity too. `tr_mps_memory_info` reports the allocator's
+allocated and driver bytes and Metal's recommended working-set maximum,
+promoted as `mps-memory-info`; `raw/device.rkt` installs one pair of readings
+that dispatches on device type, so the backstop works on MPS exactly as on
+CUDA instead of needing `native-memory-limit` by hand. Only the compile and
+absent-backend paths are exercised here, on Linux; the macOS CI job builds it
+and the first real exercise is a run on Apple hardware.

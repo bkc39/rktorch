@@ -8,7 +8,9 @@
                               cuda-device cuda-memory-info cuda-memory-stats
                               cuda-reset-peak-stats! device device/c device?
                               dtype dtype/c eye finalizer-diagnostics full
-                              full-like mps-device native-memory-limit
+                              full-like mps-device mps-memory-info
+                              native-collect-budget native-collect-margin
+                              native-memory-fraction native-memory-limit
                               native-memory-use ones ones-like prop:to rand
                               rand-like randn randn-like
                               reclaim-native-memory! tensor tensor-device
@@ -179,12 +181,28 @@ with neither trough: when a device's live bytes pass its high-water mark,
 the next allocation runs the same drained collection. Live bytes are the larger of the ledger's total and the CUDA
 caching allocator's own allocated figure, sampled as allocation proceeds,
 because storage that only the autograd graph still holds is invisible to the
-ledger. The mark is 80% of the device's capacity, from
-@racket[cuda-memory-info], or @racket[native-memory-limit] when set. A
-collection is never run within an eighth of the mark of the previous one,
+ledger. The mark is @racket[native-memory-fraction] of the device's
+capacity, from @racket[cuda-memory-info] on CUDA and
+@racket[mps-memory-info] on MPS, or @racket[native-memory-limit] when set.
+A collection is never run within an eighth of the mark of the previous one,
 measured in bytes allocated, and when a collection reclaims under 5% of the
 mark that spacing doubles, so a working set that legitimately sits above
 the mark is not collected on every step.
+
+Every knob above is a parameter, so a training script can tune the whole
+policy for its own machine by wrapping its loop once:
+
+@racketblock[
+(parameterize ([native-memory-fraction 9/10]
+               [native-collect-budget 1/50]
+               [native-collect-margin (* 2 1024 1024 1024)])
+  (train!))
+]
+
+Raising the fraction and the margin and lowering the budget all trade peak
+memory for throughput. The defaults are deliberately cautious, and were
+measured on one model on one card, so a machine with more memory than
+compute has room to relax them.
 
 @defproc[(native-memory-use) (listof (cons/c device? exact-nonnegative-integer?))]{
 Live native bytes per device as the ledger sees them: every handle not yet
@@ -198,6 +216,36 @@ The high-water mark in bytes for every device, overriding the capacity-
 derived mark. @racket[#f], the default, defers to the device's capacity;
 on a device whose capacity is unknown, such as the CPU, the default leaves
 pressure collection off.
+}
+
+@defparam[native-memory-fraction fraction (and/c real? positive? (<=/c 1))]{
+The share of a device's capacity the backstop treats as its high-water
+mark, @racket[4/5] by default. Read at every check, so it may be
+parameterized at any point in a run. Ignored where
+@racket[native-memory-limit] is set or the capacity is unknown.
+}
+
+@defparam[native-collect-margin margin (or/c #f exact-positive-integer?)]{
+How far in bytes the ledger may grow past its size after the previous
+collection at a trough before another is due. @racket[#f], the default,
+tracks that size itself, kept between 256 MiB and 1 GiB. A larger margin
+collects less often and holds more.
+}
+
+@defparam[native-collect-budget budget (and/c real? positive?)]{
+The share of wall-clock time collections at a trough may take, @racket[1/20]
+by default. After one costing @racket[t] the next waits @racket[t] divided
+by the budget, so a smaller budget spaces them further apart and a larger
+one collects more eagerly.
+}
+
+@defproc[(mps-memory-info)
+         (listof (cons/c (or/c 'allocated 'driver-allocated 'recommended-max)
+                         exact-nonnegative-integer?))]{
+The MPS allocator's own gauges: bytes handed out, bytes taken from the
+driver, and the working-set maximum Metal recommends staying under, which
+is what the backstop's mark is taken from on that device. All three are
+zero when the backend is absent, rather than raising.
 }
 
 @defproc[(cuda-memory-info [dev device/c (cuda-device)])

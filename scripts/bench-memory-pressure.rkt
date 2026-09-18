@@ -18,7 +18,6 @@
 (require racket/format
          (only-in racket/string string-split)
          torch
-         (only-in torch/foreign/raw/pressure trough-budget trough-margin)
          torch/nn)
 
 (define (env name default)
@@ -165,8 +164,8 @@
   (parameterize ([native-memory-limit (if (memq MODE '(pressure backstop))
                                           LIMIT
                                           never)]
-                 [trough-margin (if (eq? MODE 'pressure) #f never)]
-                 [trough-budget (string->number (env "BUDGET" "1/20"))])
+                 [native-collect-margin (if (eq? MODE 'pressure) #f never)]
+                 [native-collect-budget (string->number (env "BUDGET" "1/20"))])
     (with-default-device (cuda-device)
       (with-handlers ([exn:fail:rktorch:oom?
                        (lambda (e)

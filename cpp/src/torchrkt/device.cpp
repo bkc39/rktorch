@@ -300,6 +300,28 @@ int tr_mps_empty_cache(void) {
   });
 }
 
+int tr_mps_memory_info(int64_t* out_allocated, int64_t* out_driver,
+                       int64_t* out_recommended_max) {
+  if (!out_allocated || !out_driver || !out_recommended_max) {
+    return torchrkt::null_arg_status("tr_mps_memory_info");
+  }
+  return torchrkt::status_call("tr_mps_memory_info", [&] {
+    *out_allocated = 0;
+    *out_driver = 0;
+    *out_recommended_max = 0;
+    // The hooks' defaults throw when the backend is absent; report zeros
+    // instead, as tr_mps_empty_cache reports a no-op success.
+    if (!torch::mps::is_available()) {
+      return;
+    }
+    const at::MPSHooksInterface& hooks = at::detail::getMPSHooks();
+    *out_allocated = static_cast<int64_t>(hooks.getCurrentAllocatedMemory());
+    *out_driver = static_cast<int64_t>(hooks.getDriverAllocatedMemory());
+    *out_recommended_max =
+        static_cast<int64_t>(hooks.getRecommendedMaxMemory());
+  });
+}
+
 int tr_set_default_device(tr_device_type type, int64_t index) {
   return torchrkt::status_call("tr_set_default_device", [&] {
     torchrkt::set_default_device(type, index);

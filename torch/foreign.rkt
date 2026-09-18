@@ -166,6 +166,10 @@
 
 (provide native-memory-use
          native-memory-limit
+         native-memory-fraction
+         native-collect-margin
+         native-collect-budget
+         mps-memory-info
          cuda-memory-stats
          cuda-memory-info
          cuda-reset-peak-stats!

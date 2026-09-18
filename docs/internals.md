@@ -122,12 +122,11 @@ then (a minor collection there was tried and reclaimed next to nothing),
 so the collection is a full one, drained as below. It runs when the
 ledger exceeds its *floor*, its size after the previous trough
 collection and zero before the first, by a margin: the floor itself,
-kept between 256 MiB and 1 GiB (`trough-margin` overrides it for
-tests). A time budget spaces them: after a collection that took t, the
-next waits t / `trough-budget`, 1/20 by default. Neither is a user
-setting: the margin is a test override and the budget a measured
-default, both internal to `raw/pressure.rkt`; `native-memory-limit` is
-the knob a program turns. On the 35.7M-parameter
+kept between 256 MiB and 1 GiB (`native-collect-margin` overrides it). A time budget spaces them: after a collection that took t, the
+next waits t / `native-collect-budget`, 1/20 by default. Both are
+parameters on the facade, with `native-memory-limit` and
+`native-memory-fraction`, so a script can tune the policy for its own
+machine by wrapping its loop in one `parameterize`. On the 35.7M-parameter
 DDPM UNet at batch 224 that is a collection every three or four steps,
 a peak flat at 15.0 GB against 13.9 GB for a hand collection on every
 step, and 0.45 s per step against 0.42 s. Collecting at every trough
@@ -170,7 +169,9 @@ the last defence when a trough collection is not yet due:
 - Live bytes are the larger of the ledger's counter and the caching
   allocator's `allocated`, sampled once per 1/32 of the mark in
   accounted bytes (`allocator-reading`, a parameter so tests can fake
-  it). Handles the young collections free mid-step leave their storage
+  it). `raw/device.rkt` installs both readings with
+  `install-device-queries!`; each takes a device and dispatches on its
+  type, so CUDA and MPS share one path and the CPU answers `#f`. Handles the young collections free mid-step leave their storage
   with the autograd graph, where only the allocator can see it.
 - `collect-and-wait!` must really drain. The canary shows the finalizer
   thread has started on the batch, not finished it: finalization order
@@ -179,9 +180,13 @@ the last defence when a trough collection is not yet due:
   until `finalizer-run-count` has stood still for three turns, within
   two seconds. Without this a collection found 13 GB of garbage and
   the next `backward!` still failed, the frees not yet made.
-- The mark is 80% of `tr_cuda_mem_get_info`'s total for a CUDA device,
-  cached once known (a failed query is retried after a second, so one
-  early failure cannot switch the backstop off); `native-memory-limit` overrides it for every
+- The mark is `native-memory-fraction` of the device's capacity, 80% by
+  default: `tr_cuda_mem_get_info`'s total on CUDA and
+  `tr_mps_memory_info`'s recommended maximum on MPS. The capacity is
+  cached once known, and a failed query on a device that should have one
+  is retried after a second, so one early failure cannot switch the
+  backstop off. The fraction is applied at each check, not folded into
+  the cache, so a program may change it mid-run; `native-memory-limit` overrides it for every
   device and is how the CPU tests exercise the path. No capacity and no
   limit means the check is off.
 - Hysteresis: the interval starts at an eighth of the mark; a

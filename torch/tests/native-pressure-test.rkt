@@ -9,8 +9,9 @@
            (only-in "../foreign/raw/memory.rkt" native-memory-use/fold)
            (only-in "../foreign/raw/pressure.rkt"
                     allocator-reading call-as-the-collector collect-at-trough!
-                    drain-deadline margin-over reset-pressure-state!
-                    trough-budget trough-margin)
+                    drain-deadline install-device-queries! margin-over
+                    native-collect-budget native-collect-margin
+                    native-memory-fraction reset-pressure-state!)
            (only-in "../nn.rkt" Linear Sequential))
 
   (define mib (* 1024 1024))
@@ -108,7 +109,7 @@
     (collect-at-trough!)
     (define base (cpu-bytes))
     (define before (trough-collections))
-    (parameterize ([trough-margin (* 16 mib)])
+    (parameterize ([native-collect-margin (* 16 mib)])
       (step! 8)
       (collect-at-trough!)
       (check-equal? (- (trough-collections) before) 1)
@@ -119,7 +120,7 @@
     (settle!)
     (collect-at-trough!)
     (define before (trough-collections))
-    (parameterize ([trough-margin (* 64 mib)])
+    (parameterize ([native-collect-margin (* 64 mib)])
       (define kept (step! 4))
       (collect-at-trough!)
       (check-equal? kept 4)
@@ -129,8 +130,8 @@
     (settle!)
     (collect-at-trough!)
     (define before (trough-collections))
-    (parameterize ([trough-margin (* 16 mib)]
-                   [trough-budget 1/1000])
+    (parameterize ([native-collect-margin (* 16 mib)]
+                   [native-collect-budget 1/1000])
       (for ([_ (in-range 5)])
         (step! 8)
         (collect-at-trough!))
@@ -140,8 +141,8 @@
     (settle!)
     (define net (Sequential (Linear 1024 1024) (Linear 1024 1024)))
     (define x (zeros 1024 1024))
-    (parameterize ([trough-margin (* 1 mib)]
-                   [trough-budget 1000])
+    (parameterize ([native-collect-margin (* 1 mib)]
+                   [native-collect-budget 1000])
       (define before (trough-minors))
       (define y (with-no-grad (net x)))
       (check-equal? (- (trough-minors) before) 1
@@ -152,8 +153,8 @@
     (settle!)
     (define net (Linear 1024 1024))
     (define x (zeros 1024 1024))
-    (parameterize ([trough-margin (* 1 mib)]
-                   [trough-budget 1000])
+    (parameterize ([native-collect-margin (* 1 mib)]
+                   [native-collect-budget 1000])
       (define before (trough-minors))
       (define y (net x))
       (check-equal? (trough-minors) before)
@@ -164,7 +165,7 @@
     (check-equal? (margin-over (* 100 mib)) (* 256 mib))
     (check-equal? (margin-over (* 512 mib)) (* 512 mib))
     (check-equal? (margin-over (* 4096 mib)) (* 1024 mib))
-    (parameterize ([trough-margin (* 16 mib)])
+    (parameterize ([native-collect-margin (* 16 mib)])
       (check-equal? (margin-over (* 512 mib)) (* 16 mib))))
 
   ;; the tensors stay held, so each step tests the decision alone: whether a
@@ -177,7 +178,7 @@
       (thunk)
       (collect-at-trough!)
       (positive? (- (trough-collections) before)))
-    (parameterize ([trough-budget 1000])
+    (parameterize ([native-collect-budget 1000])
       (define held '())
       (define (grow! k) (set! held (cons (hold k) held)))
       (check-false (collects? (lambda () (grow! 32)))
@@ -208,8 +209,8 @@
     (settle!)
     (collect-at-trough!)
     (define held
-      (parameterize ([trough-margin (* 16 mib)]
-                     [trough-budget 1000]
+      (parameterize ([native-collect-margin (* 16 mib)]
+                     [native-collect-budget 1000]
                      [drain-deadline 0])
         (define before-stall (trough-collections))
         (define kept (for/list ([_ (in-range 8)]) (zeros 1024 1024)))
@@ -218,8 +219,8 @@
         kept))
     ;; the floor never took the stalled collection's snapshot, so the same
     ;; residue is still over it at the next trough
-    (parameterize ([trough-margin (* 16 mib)]
-                   [trough-budget 1000])
+    (parameterize ([native-collect-margin (* 16 mib)]
+                   [native-collect-budget 1000])
       (define before-retry (trough-collections))
       (collect-at-trough!)
       (check-equal? (length held) 8)
@@ -241,7 +242,7 @@
     (check-true skipped? "a live claimant must make a second collector skip")
     (kill-thread doomed)
     (define before (trough-collections))
-    (parameterize ([trough-margin (* 16 mib)])
+    (parameterize ([native-collect-margin (* 16 mib)])
       (step! 8)
       (collect-at-trough!)
       (check-equal? (- (trough-collections) before) 1)))
@@ -251,4 +252,24 @@
     (for ([k (in-list '(runs failures messages ledger-entries
                         pressure-collections pressure-reclaimed
                         trough-collections trough-minors))])
-      (check-not-false (memq k keys) (format "missing ~a" k)))))
+      (check-not-false (memq k keys) (format "missing ~a" k))))
+
+  ;; the CPU has no capacity of its own, so the fraction is exercised against
+  ;; a stand-in; the real queries are restored at the end
+  (test-case "the memory fraction scales the capacity-derived mark"
+    (define (collections-over fraction blocks)
+      (settle!)
+      (define before (collections))
+      (parameterize ([native-memory-fraction fraction])
+        (define held (for/list ([_ (in-range blocks)]) (zeros 1024 1024)))
+        (begin0 (- (collections) before)
+                (check-equal? (length held) blocks))))
+    (install-device-queries! #:capacity (lambda (_dev) (* 128 mib))
+                             #:allocated (lambda (_dev) #f))
+    ;; half of 128 MiB is a 64 MiB mark, and 20 blocks of 4 MiB pass it
+    (check-true (positive? (collections-over 1/2 20)))
+    ;; all of it is a 128 MiB mark, which the same 80 MiB stays under
+    (check-equal? (collections-over 1 20) 0)
+    (install-device-queries! #:capacity (lambda (_dev) #f)
+                             #:allocated (lambda (_dev) #f))
+    (settle!)))

@@ -16,8 +16,8 @@
                   s64vector-ref
                   s64vector?)
          (only-in racket/contract/base
-                  -> ->* ->i any any/c cons/c contract-out contract? list/c
-                  listof none/c or/c parameter/c)
+                  -> ->* ->i and/c any any/c cons/c contract-out contract?
+                  list/c listof none/c or/c parameter/c)
          (only-in "../private/contract.rkt"
                   define/checked-out define/contract-out)
          (only-in "device-type.rkt"
@@ -36,6 +36,7 @@
                   tr-get-default-device/raw
                   tr-mps-empty-cache/raw
                   tr-mps-is-available/raw
+                  tr-mps-memory-info/raw
                   tr-set-default-device/raw
                   tr-tensor-device/raw
                   tr-tensor-to!/raw
@@ -49,6 +50,9 @@
                   oom-retry/status
                   reaccount!)
          (only-in "raw/pressure.rkt"
+                  [native-collect-budget raw:native-collect-budget]
+                  [native-collect-margin raw:native-collect-margin]
+                  [native-memory-fraction raw:native-memory-fraction]
                   [native-memory-limit raw:native-memory-limit])
          (only-in "raw/random.rkt" tr-tensor-uniform!/raw)
          (only-in "raw/tensor.rkt"
@@ -208,6 +212,15 @@
   (check-ok (tr-cuda-empty-cache/raw) 'cuda-empty-cache!)
   (void))
 
+(define/contract-out (mps-memory-info)
+  (-> (listof (cons/c (or/c 'allocated 'driver-allocated 'recommended-max)
+                      exact-nonnegative-integer?)))
+  (define-values (rc allocated driver recommended) (tr-mps-memory-info/raw))
+  (check-ok rc 'mps-memory-info)
+  (list (cons 'allocated allocated)
+        (cons 'driver-allocated driver)
+        (cons 'recommended-max recommended)))
+
 (define/contract-out (mps-empty-cache!) (-> void?)
   (check-ok (tr-mps-empty-cache/raw) 'mps-empty-cache!)
   (void))
@@ -222,6 +235,18 @@
 (define/contract-out native-memory-limit ;; noqa
   (parameter/c (or/c #f exact-positive-integer?))
   raw:native-memory-limit)
+
+(define/contract-out native-memory-fraction ;; noqa
+  (parameter/c (and/c real? positive? (lambda (x) (<= x 1))))
+  raw:native-memory-fraction)
+
+(define/contract-out native-collect-margin ;; noqa
+  (parameter/c (or/c #f exact-positive-integer?))
+  raw:native-collect-margin)
+
+(define/contract-out native-collect-budget ;; noqa
+  (parameter/c (and/c real? positive?))
+  raw:native-collect-budget)
 
 (define/contract-out finalizer-failures ;; noqa
   (-> exact-nonnegative-integer?)

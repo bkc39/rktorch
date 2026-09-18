@@ -141,6 +141,23 @@ TEST(TorchrktDevice, AllocatorSettingsIsNoOpSuccessWithoutCuda) {
       << tr_last_error();
 }
 
+TEST(TorchrktDevice, MpsMemoryInfoReportsZerosWithoutMps) {
+  int64_t allocated = -1;
+  int64_t driver = -1;
+  int64_t recommended = -1;
+  ASSERT_EQ(tr_mps_memory_info(&allocated, &driver, &recommended), 0)
+      << tr_last_error();
+  if (tr_mps_is_available() == 0) {
+    EXPECT_EQ(allocated, 0);
+    EXPECT_EQ(driver, 0);
+    EXPECT_EQ(recommended, 0);
+  } else {
+    EXPECT_GT(recommended, 0);
+    EXPECT_GE(driver, allocated);
+  }
+  EXPECT_EQ(tr_mps_memory_info(nullptr, nullptr, nullptr), 1);
+}
+
 TEST(TorchrktDevice, EmptyCacheIsNoOpSuccessWithoutCuda) {
   if (tr_cuda_is_available() != 0) {
     GTEST_SKIP() << "CUDA present; the success path is CudaRoundTrip";

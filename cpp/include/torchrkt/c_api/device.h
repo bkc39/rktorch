@@ -35,6 +35,13 @@ int tr_mps_is_available(void);
 /* No-op success when the MPS backend is absent, like tr_cuda_empty_cache. */
 int tr_mps_empty_cache(void);
 
+/* The MPS allocator's own gauges: bytes handed out, bytes taken from the
+ * driver, and the recommended working-set maximum, which is the nearest
+ * thing MPS has to a capacity. All three are 0 when the backend is absent,
+ * with the no-op success of tr_mps_empty_cache. */
+int tr_mps_memory_info(int64_t* out_allocated, int64_t* out_driver,
+                       int64_t* out_recommended_max);
+
 int tr_set_default_device(tr_device_type type, int64_t index);
 
 int tr_get_default_device(tr_device_type* out_type, int64_t* out_index);
