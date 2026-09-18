@@ -92,6 +92,24 @@
     (define-values (out _h) (gru (randn 5 2 3 #:dtype 'float64)))
     (check-equal? (tensor-dtype out) 'float64))
 
+  (test-case "a bare recurrent layer is a forward trough, once"
+    (define (trough-minors)
+      (cdr (assq 'trough-minors (finalizer-diagnostics))))
+    (define gru (GRU 512 512 #:batch-first? #t))
+    (define x (zeros 1 8 512))
+    (parameterize ([native-collect-margin (* 1 1024 1024)]
+                   [native-collect-budget 1000])
+      (define before (trough-minors))
+      (define-values (out _h) (with-no-grad (gru x)))
+      (check-equal? (- (trough-minors) before) 1
+                    "a hand-written gen:layer must reach the forward trough")
+      (check-true (and out #t))
+      (define with-grad (trough-minors))
+      (define-values (train-out _th) (gru x))
+      (check-equal? (trough-minors) with-grad
+                    "with gradients on a layer call is the peak, not a trough")
+      (check-true (and train-out #t))))
+
   (test-case "constructor contracts"
     (check-exn exn:fail:contract? (lambda () (LSTM 0 4)))
     (check-pred gru? (GRU 3 4 #:num-layers 2 #:dropout 1.0))
