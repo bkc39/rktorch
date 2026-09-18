@@ -43,6 +43,16 @@
     (tensor-free! indices-t)
     (check-equal? (cpu-bytes) before))
 
+  (test-case "a multi-output call presses on the collector like any other"
+    (define before (cdr (assq 'pressure-collections (finalizer-diagnostics))))
+    (parameterize ([native-memory-limit (* 8 1024 1024)])
+      (for ([_ (in-range 40)])
+        (define-values (top _indices) (g:topk (randn 65536) 4096 0 #t #t))
+        (void top)))
+    (check-true (> (cdr (assq 'pressure-collections (finalizer-diagnostics)))
+                   before)
+                "accounting several outputs never reached the trigger"))
+
   (test-case "a failing call raises with the op and the ATen message"
     (check-exn #rx"topk.*tr_gen_topk"
                (lambda () (g:topk (tensor '(1.0 2.0 3.0)) 4 0 #t #t))))
