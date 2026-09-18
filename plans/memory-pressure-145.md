@@ -285,4 +285,8 @@ through the handed-down allocator reading and the UNet probe is flat with no
 backstop firings. Its step time could not be compared fairly: the host was
 at a load average of 10 to 24 from other jobs, which stretches each
 collection and so spaces them out (0.44 s before the split, 0.47 and 0.49 s
-after, under that load). To redo on a quiet machine.
+after, under that load). Redone on a quiet host (load under 2, GPU idle),
+the same probe, batch 224, 150 steps: ec6b025 (before the split) 0.44 s per
+step, 99 s per epoch, 49 trough collections; fc02adf (after, with every
+review fix) 0.45 s per step, 101 s per epoch, 53 trough collections, both
+flat at 16.2 to 16.4 GB with no backstop firings. Within run-to-run noise.
