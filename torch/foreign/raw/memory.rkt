@@ -3,12 +3,19 @@
 (require (for-syntax racket/base
                      ;; whole-module require on purpose
                      syntax/parse/pre)
-         (only-in ffi/unsafe
-                  _double _enum _fun _int _int64 _ptr _void
-                  register-finalizer)
+         (only-in ffi/unsafe _double _enum _fun _int _int64 _ptr _void)
          (only-in ffi/unsafe/alloc allocator deallocator)
-         (only-in ffi/unsafe/atomic call-as-atomic)
          (only-in "../device-type.rkt" device device-index device-type)
+         (only-in "pressure.rkt"
+                  call-with-ledger
+                  collect-and-wait!
+                  collect-under-pressure!
+                  finalizer-runs
+                  live-bytes-by-device
+                  note-accounted!
+                  note-finalizer-run!
+                  note-unaccounted!
+                  pressure-diagnostics)
          (only-in "syntax.rkt" _Tensor _Tensor/null define-torch))
 
 (provide tr-tensor-free/finalizer
@@ -28,6 +35,7 @@
          tr-mps-empty-cache/raw
          tr-last-error-kind/raw
          native-memory-use
+         native-memory-use/fold
          _tr-device-type ;; noqa
          tr-tensor-device/raw
          define-unary/raw
@@ -46,7 +54,6 @@
       (release t))))
 
 (define finalizer-failure-count (box 0))
-(define finalizer-run-count (box 0))
 (define captured-failures (box '()))
 (define capture-limit 8)
 
@@ -56,10 +63,11 @@
 (define (finalizer-diagnostics)
   (call-with-ledger
    (lambda ()
-     (list (cons 'runs (unbox finalizer-run-count))
-           (cons 'failures (unbox finalizer-failure-count))
-           (cons 'messages (reverse (unbox captured-failures)))
-           (cons 'ledger-entries (hash-count allocations))))))
+     (append (list (cons 'runs (finalizer-runs))
+                   (cons 'failures (unbox finalizer-failure-count))
+                   (cons 'messages (reverse (unbox captured-failures)))
+                   (cons 'ledger-entries (hash-count allocations)))
+             (pressure-diagnostics)))))
 
 ;; No printer: a prop:custom-write that raises or blocks would be fatal here.
 (define (describe-raised e)
@@ -94,18 +102,12 @@
   ;; Nothing outside the guard: alloc.rkt's finalizer holds raw atomic mode
   ;; with no dynamic-wind, so an escape kills the process rather than raising.
   (with-handlers ([(lambda (_) #t) record-failure!])
-    (call-with-ledger
-     (lambda () (set-box! finalizer-run-count (add1 (unbox finalizer-run-count)))))
+    (call-with-ledger note-finalizer-run!)
     (release t)))
 
 (struct allocation (phantom nbytes device))
 
 (define allocations (make-weak-hasheq))
-
-;; Atomic mode, not a semaphore: finalizers run in atomic mode, where
-;; blocking is an internal error.
-(define (call-with-ledger thunk)
-  (call-as-atomic thunk))
 
 (define-torch tr-tensor-nbytes/raw
   (_fun _Tensor (out : (_ptr o _int64)) -> (rc : _int) -> (values rc out))
@@ -123,15 +125,18 @@
   #:c-id tr_tensor_device)
 
 (define (account! t)
-  (with-handlers ([exn:fail? void])
+  (with-handlers ([exn:fail? (lambda (_) #f)])
     (define-values (nb-rc nbytes) (tr-tensor-nbytes/raw t))
     (define-values (dev-rc type index) (tr-tensor-device/raw t))
-    (when (and (zero? nb-rc) (zero? dev-rc))
-      (define entry
-        (allocation (make-phantom-bytes nbytes)
-                    nbytes
-                    (device type (if (eq? type 'cpu) 0 index))))
-      (call-with-ledger (lambda () (hash-set! allocations t entry))))))
+    (and (zero? nb-rc)
+         (zero? dev-rc)
+         (let* ([dev (device type (if (eq? type 'cpu) 0 index))]
+                [entry (allocation (make-phantom-bytes nbytes) nbytes dev)])
+           (call-with-ledger
+            (lambda ()
+              (hash-set! allocations t entry)
+              (note-accounted! dev nbytes)))
+           dev))))
 
 (define (unaccount! t)
   (with-handlers ([exn:fail? void])
@@ -140,22 +145,33 @@
        (define a (hash-ref allocations t #f))
        (when a
          (set-phantom-bytes! (allocation-phantom a) 0)
-         (hash-remove! allocations t))))))
+         (hash-remove! allocations t)
+         (note-unaccounted! (allocation-device a) (allocation-nbytes a)))))))
 
 ;; An in-place move (tr_tensor_to_) changes the device and byte count under
-;; the same handle, so its ledger entry is replaced rather than added to.
+;; the same handle, so its ledger entry is replaced rather than added to. When
+;; the new size cannot be read the old charge goes back: a stale entry still
+;; presses on the collector, a missing one would not.
 (define (reaccount! t)
+  (define old (call-with-ledger (lambda () (hash-ref allocations t #f))))
   (unaccount! t)
-  (account! t))
+  (define dev (account! t))
+  (cond
+    [dev (collect-under-pressure! dev)]
+    [old (restore-entry! t old)]
+    [else (void)]))
 
-(define (native-memory-use)
-  (define entries (call-with-ledger (lambda () (hash-values allocations))))
-  (define totals (make-hash))
-  (for ([a (in-list entries)])
-    (hash-update! totals (allocation-device a)
-                  (lambda (n) (+ n (allocation-nbytes a)))
-                  0))
-  (sort (hash->list totals)
+(define (restore-entry! t old)
+  (define nbytes (allocation-nbytes old))
+  (define dev (allocation-device old))
+  (define entry (allocation (make-phantom-bytes nbytes) nbytes dev))
+  (call-with-ledger
+   (lambda ()
+     (hash-set! allocations t entry)
+     (note-accounted! dev nbytes))))
+
+(define (sort-by-device totals)
+  (sort totals
         (lambda (x y)
           (define dx (car x))
           (define dy (car y))
@@ -163,6 +179,20 @@
             [(eq? (device-type dx) (device-type dy))
              (< (device-index dx) (device-index dy))]
             [else (eq? (device-type dx) 'cpu)]))))
+
+(define (native-memory-use)
+  (sort-by-device (filter (lambda (entry) (positive? (cdr entry)))
+                          (live-bytes-by-device))))
+
+;; The entry-by-entry fold; the counters above must agree with it.
+(define (native-memory-use/fold)
+  (define entries (call-with-ledger (lambda () (hash-values allocations))))
+  (define totals (make-hash))
+  (for ([a (in-list entries)])
+    (hash-update! totals (allocation-device a)
+                  (lambda (n) (+ n (allocation-nbytes a)))
+                  0))
+  (sort-by-device (hash->list totals)))
 
 ;; Unwrapped release on purpose: the (deallocator) wrap would cancel the
 ;; very registration this finalizer runs from.
@@ -188,13 +218,10 @@
   #:c-id tr_mps_empty_cache)
 
 (define (collect-and-drain!)
-  (define canary-finalized (make-semaphore 0))
-  (register-finalizer (box 0) (lambda (_) (semaphore-post canary-finalized)))
-  (collect-garbage)
-  (define observed (sync/timeout 0.5 canary-finalized))
+  (define-values (observed _drained?) (collect-and-wait!))
   (void (tr-cuda-empty-cache/raw))
   (void (tr-mps-empty-cache/raw))
-  (and observed #t))
+  observed)
 
 ;; one retry after a collect when a failed call was an OOM; the two
 ;; wrappers below differ only in how a raw result reports failure
@@ -218,7 +245,10 @@
 
 (define ((accounted wrapped) . args)
   (define t (apply wrapped args))
-  (when t (account! t))
+  (when t
+    (define dev (account! t))
+    (when dev
+      (collect-under-pressure! dev)))
   t)
 
 ;; The retry composes OUTSIDE the allocator wrap: ffi/unsafe/alloc runs

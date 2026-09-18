@@ -321,9 +321,11 @@ module's full export set (`racket/runtime-path`, `syntax/parse/pre`).
   finalizer); `foreign/error.rkt` — `check-ok` / `check-handle`;
   `foreign/format.rkt` — the PyTorch-repr reproducer.
 - `foreign/raw/*.rkt` — direct FFI, one module per C translation unit:
-  `syntax` (the pure FFI definer + `_Tensor` cpointer), `memory` (the
-  lifetime substrate: frees, pressure ledger, `tensor-allocator`,
-  op-definer macros), `global`, `tensor`, `random`, `creation`,
+  `syntax` (the pure FFI definer + `_Tensor` cpointer), `pressure` (no
+  FFI of its own: the collection policy under the ledger, the two troughs
+  and the capacity backstop, #145), `memory` (the lifetime substrate:
+  frees, pressure ledger, `tensor-allocator`, op-definer macros),
+  `global`, `tensor`, `random`, `creation`,
   `shape-ops`, `elementwise`, `reduce`, `linalg`, `autograd`.
   **`docs/internals.md` is the canonical memory-management narrative**
   (lifetime chain, phantom-bytes pressure, typed OOM + retry). The
