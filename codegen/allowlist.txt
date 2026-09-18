@@ -137,3 +137,20 @@ math clamp
 # repeat_interleave along the two spatial dims is nearest-neighbour
 # upsampling, F.interpolate(mode="nearest"), without an optional-float kind.
 shape repeat_interleave.self_int
+
+# --- tranche 6 (#152): the classic vision op closure ------------------------
+
+# batch_norm takes the running statistics as optional tensors and updates
+# them in place when training, so a Buffer field gets nn.BatchNorm2d's
+# semantics without a Racket-side write.
+nn batch_norm
+nn leaky_relu
+
+# The GAN, VAE and regression objectives; reduction is the Racket wrapper's
+# business (mean, like cross_entropy_loss).
+loss binary_cross_entropy_with_logits
+loss huber_loss
+loss l1_loss
+
+# flip along the width axis is the horizontal-flip augmentation.
+shape flip

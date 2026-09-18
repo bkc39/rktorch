@@ -159,6 +159,19 @@ void torchrkt_c_api_compile_check(void) {
   tr_tensor* (*gen_repeat_interleave)(const tr_tensor*, int64_t, int64_t, bool,
                                       int64_t, bool) =
       tr_gen_repeat_interleave_self_int;
+  tr_tensor* (*gen_batch_norm)(
+      const tr_tensor*, const tr_tensor*, const tr_tensor*, const tr_tensor*,
+      const tr_tensor*, bool, double, double, bool) = tr_gen_batch_norm;
+  tr_tensor* (*gen_leaky_relu)(const tr_tensor*, double) = tr_gen_leaky_relu;
+  tr_tensor* (*gen_bce_with_logits)(
+      const tr_tensor*, const tr_tensor*, const tr_tensor*, const tr_tensor*,
+      int64_t) = tr_gen_binary_cross_entropy_with_logits;
+  tr_tensor* (*gen_huber_loss)(const tr_tensor*, const tr_tensor*, int64_t,
+                               double) = tr_gen_huber_loss;
+  tr_tensor* (*gen_l1_loss)(const tr_tensor*, const tr_tensor*, int64_t) =
+      tr_gen_l1_loss;
+  tr_tensor* (*gen_flip)(const tr_tensor*, const int64_t*, int64_t) =
+      tr_gen_flip;
   tr_tensor* (*gen_masked_fill)(const tr_tensor*, const tr_tensor*, double) =
       tr_gen_masked_fill_scalar;
   tr_tensor* (*gen_tril)(const tr_tensor*, int64_t) = tr_gen_tril;
@@ -289,6 +302,12 @@ void torchrkt_c_api_compile_check(void) {
   (void)gen_group_norm;
   (void)gen_silu;
   (void)gen_clamp;
+  (void)gen_batch_norm;
+  (void)gen_leaky_relu;
+  (void)gen_bce_with_logits;
+  (void)gen_huber_loss;
+  (void)gen_l1_loss;
+  (void)gen_flip;
   (void)gen_repeat_interleave;
   (void)gen_ctc_loss;
   (void)gen_avg_pool2d;

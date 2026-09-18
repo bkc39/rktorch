@@ -59,6 +59,10 @@
                (lambda () (GroupNorm 3 4)))
     (check-exn #rx"groups must divide both channel counts"
                (lambda () (ConvTranspose2d 2 5 3 #:groups 2)))
+    (check-exn #rx"^BatchNorm2d: contract violation"
+               (lambda () (BatchNorm2d 0)))
+    (check-exn #rx"^BatchNorm1d: contract violation"
+               (lambda () (BatchNorm1d 3 #:eps 'tiny)))
     (check-exn #rx"^Dropout: contract violation"
                (lambda () (Dropout #:p 1)))
     (check-exn #rx"^Sequential: contract violation"

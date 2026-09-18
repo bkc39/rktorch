@@ -10,6 +10,29 @@
 
 extern "C" {
 
+tr_tensor* tr_gen_batch_norm(const tr_tensor* input, const tr_tensor* weight,
+                             const tr_tensor* bias,
+                             const tr_tensor* running_mean,
+                             const tr_tensor* running_var, bool training,
+                             double momentum, double eps, bool cudnn_enabled) {
+  if (!input) {
+    return torchrkt::null_arg("tr_gen_batch_norm");
+  }
+  return torchrkt::alloc_result("tr_gen_batch_norm", [&] {
+    return at::batch_norm(
+        input->value,
+        weight ? c10::optional<at::Tensor>(weight->value)
+               : c10::optional<at::Tensor>(),
+        bias ? c10::optional<at::Tensor>(bias->value)
+             : c10::optional<at::Tensor>(),
+        running_mean ? c10::optional<at::Tensor>(running_mean->value)
+                     : c10::optional<at::Tensor>(),
+        running_var ? c10::optional<at::Tensor>(running_var->value)
+                    : c10::optional<at::Tensor>(),
+        training, momentum, eps, cudnn_enabled);
+  });
+}
+
 tr_tensor* tr_gen_dropout(const tr_tensor* input, double p, bool train) {
   if (!input) {
     return torchrkt::null_arg("tr_gen_dropout");
@@ -64,6 +87,15 @@ tr_tensor* tr_gen_layer_norm(const tr_tensor* input,
         bias ? c10::optional<at::Tensor>(bias->value)
              : c10::optional<at::Tensor>(),
         eps, cudnn_enable);
+  });
+}
+
+tr_tensor* tr_gen_leaky_relu(const tr_tensor* self, double negative_slope) {
+  if (!self) {
+    return torchrkt::null_arg("tr_gen_leaky_relu");
+  }
+  return torchrkt::alloc_result("tr_gen_leaky_relu", [&] {
+    return at::leaky_relu(self->value, negative_slope);
   });
 }
 

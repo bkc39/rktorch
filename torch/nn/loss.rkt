@@ -1,12 +1,16 @@
 #lang racket/base
 
-(require (only-in racket/contract/base -> ->* and/c listof)
+(require (only-in racket/contract/base -> ->* >/c and/c listof or/c)
          (only-in "../foreign.rkt"
                   device-type mean mul sub tensor-device tensor? to-device
                   to-dtype)
          (only-in "../generated.rkt"
+                  [binary-cross-entropy-with-logits
+                   g:binary-cross-entropy-with-logits]
                   [cross-entropy-loss g:cross-entropy-loss]
-                  [ctc-loss-intlist g:ctc-loss-intlist])
+                  [ctc-loss-intlist g:ctc-loss-intlist]
+                  [huber-loss g:huber-loss]
+                  [l1-loss g:l1-loss])
          (only-in "../private/contract.rkt" define/contract-out))
 
 (define/contract-out (mse-loss prediction target) ;; noqa
@@ -17,6 +21,22 @@
 (define/contract-out (cross-entropy logits targets) ;; noqa
   (-> tensor? tensor? tensor?)
   (g:cross-entropy-loss logits (to-dtype targets 'int64) #f 1 -100 0.0))
+
+(define/contract-out (binary-cross-entropy-with-logits logits targets ;; noqa
+                                                        #:weight [weight #f]
+                                                        #:pos-weight [pos-weight #f])
+  (->* [tensor? tensor?]
+       [#:weight (or/c tensor? #f) #:pos-weight (or/c tensor? #f)]
+       tensor?)
+  (g:binary-cross-entropy-with-logits logits targets weight pos-weight 1))
+
+(define/contract-out (huber-loss prediction target #:delta [delta 1.0]) ;; noqa
+  (->* [tensor? tensor?] [#:delta (>/c 0)] tensor?)
+  (g:huber-loss prediction target 1 (exact->inexact delta)))
+
+(define/contract-out (l1-loss prediction target) ;; noqa
+  (-> tensor? tensor? tensor?)
+  (g:l1-loss prediction target 1))
 
 (define input-lengths/c (and/c (listof exact-positive-integer?) pair?))
 ;; a 0 target length is a valid empty transcript

@@ -184,6 +184,52 @@
       (check-= (item (mean (select (select grouped 0 b) 0 g))) 0.0 1e-5))
     (check-equal? (object-name gn) 'GroupNorm))
 
+  (test-case "BatchNorm2d layer: init, batch statistics, running statistics, eval"
+    (define bn (BatchNorm2d 3))
+    (check-true (batch-norm2d? bn))
+    (check-equal? (map car (named-parameters bn)) '("weight" "bias"))
+    (check-equal? (map car (named-buffers bn))
+                  '("running-mean" "running-var" "num-batches-tracked"))
+    (check-equal? (map tensor-shape (buffers bn)) '((3) (3) ()))
+    (check-equal? (tensor-dtype (caddr (buffers bn))) 'int64)
+    (check-equal? (tensor->list (car (buffers bn))) '(0.0 0.0 0.0))
+    (check-equal? (tensor->list (cadr (buffers bn))) '(1.0 1.0 1.0))
+    (manual-seed! 0)
+    (define x (add (mul (randn 4 3 5 5) 3.0) 2.0))
+    (define y (bn x))
+    (check-equal? (tensor-shape y) '(4 3 5 5))
+    (define per-channel (reshape (transpose y 0 1) 3 100))
+    (for ([c (in-range 3)])
+      (check-= (item (mean (select per-channel 0 c))) 0.0 1e-5))
+    (check-= (item (caddr (buffers bn))) 1 0)
+    ;; momentum 0.1 of a batch mean near 2 and a batch variance near 9
+    (for ([m (in-list (tensor->list (car (buffers bn))))])
+      (check-true (< 0.1 m 0.3)))
+    (for ([v (in-list (tensor->list (cadr (buffers bn))))])
+      (check-true (< 1.5 v 2.1)))
+    (define z (in-eval-mode bn (bn x)))
+    (check-false (equal? (tensor->list z) (tensor->list y))
+                 "eval normalizes with the running statistics")
+    (check-= (item (caddr (buffers bn))) 1 0)
+    (check-exn #rx"rank" (lambda () (bn (randn 4 3))))
+    (check-equal? (object-name bn) 'BatchNorm2d))
+
+  (test-case "BatchNorm1d layer: [N C] and [N C L] inputs"
+    (define bn (BatchNorm1d 4 #:momentum 0.5 #:eps 1e-3))
+    (check-true (batch-norm1d? bn))
+    (check-equal? (tensor-shape (bn (randn 8 4))) '(8 4))
+    (check-equal? (tensor-shape (bn (randn 8 4 6))) '(8 4 6))
+    (check-= (item (caddr (buffers bn))) 2 0)
+    (check-exn #rx"rank" (lambda () (bn (randn 2 4 3 3))))
+    (check-equal? (object-name bn) 'BatchNorm1d))
+
+  (test-case "BatchNorm2d: gradients reach the affine parameters"
+    (define bn (BatchNorm2d 2))
+    (define x (randn 3 2 4 4))
+    (backward! (mean (mul (bn x) (bn x))))
+    (for ([p (in-list (parameters bn))])
+      (check-true (has-grad? p))))
+
   (test-case "LayerNorm layer: ones/zeros init, normalizing forward"
     (define ln (LayerNorm 4))
     (check-true (layer-norm? ln))
@@ -243,6 +289,24 @@
     (define logits (tensor '((-0.5 -1.0 -2.0) (-2.0 -0.2 -1.5))))
     (define targets (tensor '(0 1)))
     (check-= (item (cross-entropy logits targets)) 0.48362 1e-4))
+
+  (test-case "binary-cross-entropy-with-logits, huber-loss, l1-loss: known values"
+    (define zero (tensor '(0.0 0.0)))
+    (define labels (tensor '(1.0 0.0)))
+    (define log2 0.6931472)
+    (check-= (item (binary-cross-entropy-with-logits zero labels)) log2 1e-6)
+    (check-= (item (binary-cross-entropy-with-logits
+                    zero labels #:weight (tensor '(1.0 3.0))))
+             (* 2 log2) 1e-6)
+    (check-= (item (binary-cross-entropy-with-logits
+                    zero labels #:pos-weight (tensor '(3.0 3.0))))
+             (* 2 log2) 1e-6)
+    (define x (tensor '(0.0 0.0 0.0)))
+    (define target (tensor '(0.5 2.0 -3.0)))
+    (check-= (item (huber-loss x target)) 1.375 1e-6)
+    (check-= (item (huber-loss x target #:delta 2)) 2.0416667 1e-6)
+    (check-= (item (l1-loss x target)) 1.8333333 1e-6)
+    (check-exn exn:fail:contract? (lambda () (huber-loss x target #:delta 0))))
 
   (test-case "ctc-loss: closed form on uniform log-probs"
     ;; two frames, two classes, label 1: the alignments [1 1], [0 1]
@@ -450,4 +514,20 @@
     (for ([a (in-list (state-dict net))] [b (in-list (state-dict net2))])
       (check-equal? (car a) (car b))
       (check-equal? (tensor->list (cdr a)) (tensor->list (cdr b))))
+    (delete-file path))
+
+  (test-case "BatchNorm2d: the running statistics and the counter round-trip"
+    (define bn (BatchNorm2d 2))
+    (bn (add (randn 3 2 4 4) 5.0))
+    (define path (make-temporary-file "rkt-bn-~a.safetensors"))
+    (save-state! bn path)
+    (define bn2 (BatchNorm2d 2))
+    (load-state! bn2 path)
+    (check-equal? (map car (state-dict bn2))
+                  '("weight" "bias" "running-mean" "running-var"
+                    "num-batches-tracked"))
+    (for ([a (in-list (state-dict bn))] [b (in-list (state-dict bn2))])
+      (check-equal? (tensor->list (cdr a)) (tensor->list (cdr b))))
+    (check-equal? (tensor-dtype (caddr (buffers bn2))) 'int64)
+    (check-= (item (caddr (buffers bn2))) 1 0)
     (delete-file path)))
