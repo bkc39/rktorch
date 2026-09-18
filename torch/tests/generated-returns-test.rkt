@@ -47,7 +47,7 @@
     (define before (cdr (assq 'pressure-collections (finalizer-diagnostics))))
     (parameterize ([native-memory-limit (* 8 1024 1024)])
       (for ([_ (in-range 40)])
-        (define-values (top _indices) (topk (randn 65536) 4096 0 #t #t))
+        (define-values (top _indices) (g:topk (randn 65536) 4096 0 #t #t))
         (void top)))
     (check-true (> (cdr (assq 'pressure-collections (finalizer-diagnostics)))
                    before)
