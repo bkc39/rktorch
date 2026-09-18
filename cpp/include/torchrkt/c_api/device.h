@@ -35,6 +35,13 @@ int tr_mps_is_available(void);
 /* No-op success when the MPS backend is absent, like tr_cuda_empty_cache. */
 int tr_mps_empty_cache(void);
 
+/* The MPS allocator's own gauges: bytes handed out, bytes taken from the
+ * driver, and the recommended working-set maximum, which is the nearest
+ * thing MPS has to a capacity. All three are 0 when the backend is absent,
+ * with the no-op success of tr_mps_empty_cache. */
+int tr_mps_memory_info(int64_t* out_allocated, int64_t* out_driver,
+                       int64_t* out_recommended_max);
+
 int tr_set_default_device(tr_device_type type, int64_t index);
 
 int tr_get_default_device(tr_device_type* out_type, int64_t* out_index);
@@ -60,6 +67,26 @@ int tr_tensor_to_(tr_tensor* t, tr_device_type type, int64_t index,
 
 int tr_cuda_memory_stats(int64_t device_index, int64_t* out_allocated,
                          int64_t* out_reserved, int64_t* out_peak_allocated);
+
+/* cudaMemGetInfo for one device: the driver's free and total bytes. Free is
+ * the driver's view, so it counts other processes and this process's
+ * reserved-but-unallocated cache; total is the device's capacity. Same
+ * guard, range check and status shape as tr_cuda_memory_stats. */
+int tr_cuda_mem_get_info(int64_t device_index, int64_t* out_free,
+                         int64_t* out_total);
+
+/* Resets the caching allocator's peak counters for one device, so
+ * tr_cuda_memory_stats' peak covers only what follows. A no-op on a
+ * never-initialized allocator. Same guard and range check as
+ * tr_cuda_memory_stats. */
+int tr_cuda_reset_peak_stats(int64_t device_index);
+
+/* torch.cuda.memory._set_allocator_settings: a PYTORCH_CUDA_ALLOC_CONF
+ * string such as "expandable_segments:True". Options that shape segments
+ * only affect segments created afterwards, so call it before the first CUDA
+ * allocation. No-op success when CUDA is not compiled in, like
+ * tr_cuda_empty_cache; 1 on NULL or a string the parser rejects. */
+int tr_cuda_set_allocator_settings(const char* settings);
 
 int tr_cuda_empty_cache(void);
 
