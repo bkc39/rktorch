@@ -86,10 +86,10 @@ host ones — user code never calls the collector by hand.
 The policy lives in `torch/foreign/raw/pressure.rkt`, under the ledger:
 `raw/memory.rkt` tells it of every accounting and release
 (`note-accounted!`, `note-unaccounted!`, inside the ledger's atomic
-section) and asks it to act. It binds no C itself. Its two CUDA readings,
-capacity and the allocator's allocated bytes, are bound in
+section) and asks it to act. It binds no C itself. Its two readings, a
+device's capacity and its allocator's allocated bytes, are bound in
 `raw/device.rkt` with the rest of `device.cpp` and handed down by
-`install-cuda-queries!` when that module is instantiated, because
+`install-device-queries!` when that module is instantiated, because
 `raw/device.rkt` sits above the ledger and requiring it from below would
 be a cycle. One collection runs at a time (`call-as-the-collector`): a
 second thread that finds a trigger due while the first is collecting

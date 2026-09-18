@@ -2,8 +2,9 @@
 
 ;; Native memory over a training loop (#145): a stack of Conv2d + LayerNorm
 ;; + relu blocks on random [BATCH 3 32 32] batches with adam, reporting the
-;; caching allocator's peak per ten-step window, reserved bytes, seconds per
-;; step and the ledger's pressure collections.
+;; allocator's peak per ten-step window, reserved bytes, seconds per step and
+;; the ledger's pressure collections. Runs on whichever accelerator is here,
+;; CUDA or MPS.
 ;; Run:  MODE=off|manual|backstop|pressure NOGRAD=1 BATCH=256 WIDTH=128 \
 ;;       DEPTH=8 STEPS=60 \
 ;;       GC_EVERY=10 LIMIT=<MiB> BUDGET=0.05 racket scripts/bench-memory-pressure.rkt
@@ -51,8 +52,51 @@
 (define never (expt 2 60))
 (define mib (* 1024 1024))
 
+(define accelerator
+  (cond
+    [(cuda-available?) 'cuda]
+    [(mps-available?) 'mps]
+    [else (error 'bench-memory-pressure "needs a CUDA or MPS device")]))
+
+;; MPS keeps no peak counter of its own, so on that device the peak is the
+;; largest reading seen at a step boundary: it cannot catch a peak inside a
+;; step the way the CUDA allocator's own high-water mark does.
+(define sampled-peak (box 0))
+
+(define (allocated-bytes)
+  (case accelerator
+    [(cuda) (cdr (assq 'allocated (cuda-memory-stats)))]
+    [else (cdr (assq 'allocated (mps-memory-info)))]))
+
+(define (reserved-bytes)
+  (case accelerator
+    [(cuda) (cdr (assq 'reserved (cuda-memory-stats)))]
+    [else (cdr (assq 'driver-allocated (mps-memory-info)))]))
+
+(define (capacity-bytes)
+  (case accelerator
+    [(cuda) (cdr (assq 'total (cuda-memory-info)))]
+    [else (cdr (assq 'recommended-max (mps-memory-info)))]))
+
+(define (peak-bytes)
+  (case accelerator
+    [(cuda) (cdr (assq 'peak-allocated (cuda-memory-stats)))]
+    [else (unbox sampled-peak)]))
+
+(define (note-peak!)
+  (set-box! sampled-peak (max (unbox sampled-peak) (allocated-bytes))))
+
+(define (reset-peak!)
+  (case accelerator
+    [(cuda) (cuda-reset-peak-stats!)]
+    [else (set-box! sampled-peak 0)]))
+
 (define (stat key)
-  (quotient (cdr (assq key (cuda-memory-stats))) mib))
+  (quotient (case key
+              [(allocated) (allocated-bytes)]
+              [(reserved) (reserved-bytes)]
+              [else (peak-bytes)])
+            mib))
 
 (define (diagnostic key)
   (cdr (assq key (finalizer-diagnostics))))
@@ -108,15 +152,16 @@
        (backward! loss)
        (step! opt)
        (item loss)]))
-  (printf "mode=~a batch=~a width=~a depth=~a limit=~a total=~a MiB\n"
-          MODE BATCH WIDTH DEPTH (getenv "LIMIT")
-          (quotient (cdr (assq 'total (cuda-memory-info))) mib))
+  (printf "device=~a mode=~a batch=~a width=~a depth=~a limit=~a total=~a MiB\n"
+          accelerator MODE BATCH WIDTH DEPTH (getenv "LIMIT")
+          (quotient (capacity-bytes) mib))
   (displayln "step window-peak-MiB allocated-MiB reserved-MiB backstop trough minors entries racket-MiB rss-MiB s/step")
-  (cuda-reset-peak-stats!)
+  (reset-peak!)
   (define gc0 (current-gc-milliseconds))
   (define t0 (current-inexact-milliseconds))
   (for/fold ([window-start t0]) ([i (in-range 1 (add1 STEPS))])
     (train-step!)
+    (note-peak!)
     (when (and TRACE (>= i TRACE))
       (printf "  ~a: ledger ~a allocated ~a peak ~a pressure ~a majors ~a racket ~a MiB\n"
               i
@@ -146,7 +191,7 @@
                (rss-mib)
                (~r (/ (- now window-start) 10000.0) #:precision '(= 3)))
        (flush-output)
-       (cuda-reset-peak-stats!)
+       (reset-peak!)
        now]
       [else window-start]))
   (printf "total ~a s, gc ~a ms, reclaimed ~a MiB: ~a backstop, ~a trough, ~a minors\n"
@@ -158,15 +203,13 @@
           (diagnostic 'trough-minors)))
 
 (module+ main
-  (unless (cuda-available?)
-    (error 'bench-memory-pressure "needs a CUDA device"))
   (manual-seed! 0)
   (parameterize ([native-memory-limit (if (memq MODE '(pressure backstop))
                                           LIMIT
                                           never)]
                  [native-collect-margin (if (eq? MODE 'pressure) #f never)]
                  [native-collect-budget (string->number (env "BUDGET" "1/20"))])
-    (with-default-device (cuda-device)
+    (with-default-device (if (eq? accelerator 'cuda) (cuda-device) (mps-device))
       (with-handlers ([exn:fail:rktorch:oom?
                        (lambda (e)
                          (printf "OOM: ~a\n" (car (regexp-split #rx"\n" (exn-message e))))
