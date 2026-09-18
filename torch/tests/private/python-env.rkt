@@ -59,6 +59,11 @@
 ;; Adjusts a *copy* of the environment, never the process-wide one.
 (define (call-with-python-env thunk #:env [extra '()])
   (define env (environment-variables-copy (current-environment-variables)))
+  ;; `import torch` from the repository root would otherwise find the Racket
+  ;; collection directory as an implicit namespace package, so the availability
+  ;; probe answers yes with no wheel installed. raco test hides it by chdir'ing
+  ;; into each test's directory; raco cover and a bare racket do not.
+  (environment-variables-set! env #"PYTHONSAFEPATH" #"1")
   (when cuda-driver-path
     (environment-variables-set! env #"LD_LIBRARY_PATH"
                                 (string->bytes/utf-8 cuda-driver-path)))

@@ -581,12 +581,18 @@
               raco pkg install --batch --auto --no-setup --link --scope user --skip-installed \
                 --name torch "$PWD/torch"
               raco setup --no-docs --pkgs torch
-              echo "Installing Racket linters (Resyntax + racket-review)..."
+              echo "Installing Racket dev tools (Resyntax + racket-review + cover)..."
+              # Unpinned, from the live catalog, like the linters beside it;
+              # cover-lib rides along when #63 pins them. It cannot join the
+              # racket-deps FOD as things stand: a fixed-output derivation may
+              # not reference store paths, and the doc packages in that closure
+              # embed them in their rendered HTML.
               raco pkg install --batch --auto --scope user --skip-installed \
-                resyntax review
+                resyntax review cover-lib
               touch "$deps_stamp"
               echo "Done. Lint: resyntax analyze --local-git-repository . origin/master"
               echo "      full sweep: resyntax analyze --directory torch  |  raco review <files>"
+              echo "      coverage:   racket scripts/coverage.rkt"
             fi
             export PATH="$(racket -e '(require setup/dirs)(display (path->string (find-user-console-bin-dir)))'):$PATH"
           '';
