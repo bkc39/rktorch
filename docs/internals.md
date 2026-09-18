@@ -153,8 +153,15 @@ promotes that step's live intermediates and so sets up the next one,
 but it is the only moment available to a loop with no `backward!`, and
 the last defence when a trough collection is not yet due:
 
-- `account!` keeps a live-bytes counter and a bytes-accounted-since-
-  last-collection counter per device.
+- Each device has one `account` record: live bytes, bytes accounted
+  since the last check and since the last allocator sample, that sample,
+  the backstop's current interval, the cached capacity mark and the
+  trough floor. `account!` updates it through `note-accounted!`, so a
+  check is one table lookup and field reads. The counters are a `stats`
+  record, the two next-collection times and the thread inside a
+  collection a `schedule` record, and the two CUDA queries handed down
+  from `raw/device.rkt` a `queries` record. Every field is written
+  inside `call-with-ledger`.
 - `accounted`, which runs outside the allocator's atomic wrap, checks
   after each accounting: accounted-since past the current interval and
   live bytes above the device's high-water mark means
