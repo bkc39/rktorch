@@ -2,6 +2,7 @@
 
 (require (for-syntax racket/base
                      (only-in racket/syntax format-id generate-temporary)
+                     (only-in racket/syntax with-syntax*)
                      ;; whole-module on purpose: the expansion needs bindings
                      ;; only-in would strip
                      syntax/parse/pre
@@ -14,7 +15,7 @@
          (only-in racket/list append-map check-duplicates remove-duplicates)
          (only-in racket/stxparam define-syntax-parameter syntax-parameterize)
          (only-in syntax/parse/define define-syntax-parse-rule)
-         (only-in "../foreign.rkt" prop:to tensor-dtype tensor?)
+         (only-in "../foreign.rkt" prop:to tensor-device tensor-dtype tensor?)
          (only-in (submod "../foreign.rkt" unsafe) to!)
          (only-in "../foreign/autograd-ops.rkt" collect-at-forward-trough!)
          (only-in "../private/contract.rkt"
@@ -78,6 +79,13 @@
 ;; int64 or bool buffer keeps its dtype and changes device alone
 (define (floating? t)
   (and (memq (tensor-dtype t) '(float32 float64)) #t))
+
+;; What `#:on-move` reacts to: `to` is the identity when nothing changes, and
+;; a device round trip returns to the placement it started from, so the pair
+;; is read either side of one move rather than compared across several.
+(define (placement-of m)
+  (for/list ([t (in-list (append (parameters m) (buffers m)))])
+    (cons (tensor-device t) (tensor-dtype t))))
 
 (define (move-layer! m dev dtype)
   (when (and dtype (not (memq dtype '(float32 float64))))
@@ -286,6 +294,15 @@
   (check-names 'procedure->Layer
                (Fn% fn-forward params bufs kids 'train proc)))
 
+(struct Parameters% (alist)
+  #:reflection-name 'Parameters)
+
+(define/contract-out Parameters? (-> any/c boolean?) Parameters%?)
+
+(define/checked-out (parameters-by-key entries) ;; noqa
+  (-> (listof (cons/c child-name/c Parameter?)) Parameters?)
+  (Parameters% entries))
+
 (struct Children% (alist)
   #:reflection-name 'Children)
 
@@ -318,6 +335,9 @@
             ([name (in-list names)] [v (in-list vals)])
     (cond
       [(Parameter? v) (values (cons (cons name v) params) buffers children)]
+      [(Parameters? v)
+       (values (append (reverse (Parameters%-alist v)) params)
+               buffers children)]
       [(Buffer? v) (values params (cons (cons name v) buffers) children)]
       [(Children? v)
        (values params buffers
@@ -348,8 +368,10 @@
         (~alt (~optional (~seq #:init init:init-formals init-body:expr ...))
               (~optional (~seq #:reflection-name reflect:expr))
               (~optional (~seq #:contract ctc:expr))
-              (~optional (~seq #:predicate pred:id))) ...
-        #:forward (input:id ...) body:expr ...+)
+              (~optional (~seq #:predicate pred:id))
+              (~optional (~seq #:on-move moved-body:expr ...+))) ...
+        #:forward (~or* (input:id ...) (input:id ... . restarg:id))
+        body:expr ...+)
      (define field-ids (syntax->list #'(field.id ...)))
      (for ([f (in-list field-ids)])
        (when (regexp-match? #rx"[.]" (symbol->string (syntax-e f)))
@@ -385,21 +407,47 @@
                     (for/list ([f (in-list field-ids)])
                       (symbol->string (syntax-e f)))]
                    [(field-acc ...) (map accessor field-ids)]
-                   [n-inputs (length (syntax->list #'(input ...)))])
-       (with-syntax ([export (contract-export stx #'name #'name?
-                                              (attribute ctc)
-                                              (attribute pred))])
+                   [n-inputs (length (syntax->list #'(input ...)))]
+                   [forward-lambda
+                    (if (attribute restarg)
+                        #'(lambda (input ... . restarg) body ...)
+                        #'(lambda (input ...) body ...))]
+                   [enough? (if (attribute restarg) #'>= #'=)]
+                   [expected
+                    (if (attribute restarg)
+                        #`(arity-at-least
+                           #,(length (syntax->list #'(input ...))))
+                        #`#,(length (syntax->list #'(input ...))))])
+       (with-syntax* ([export (contract-export stx #'name #'name?
+                                               (attribute ctc)
+                                               (attribute pred))]
+                      [(moved-defn ...)
+                       (if (attribute moved-body)
+                           #'((define (moved-proc self dev dtype)
+                                (define before (placement-of self))
+                                (begin0 (move-layer! self dev dtype)
+                                        (unless (equal? before
+                                                        (placement-of self))
+                                          (let ([field.id (field-acc self)] ...)
+                                            moved-body ...)))))
+                           #'())]
+                      [(moved-clause ...)
+                       (if (attribute moved-body)
+                           #'(#:property prop:to moved-proc)
+                           #'())])
          #'(begin
+             moved-defn ...
              (struct sid registry (field.id ...)
-               #:reflection-name reflect-name)
+               #:reflection-name reflect-name
+               moved-clause ...)
              (define name? sid?)
              (define (forward-proc self . inputs)
-               (unless (= (length inputs) n-inputs)
-                 (apply raise-arity-error 'name n-inputs inputs))
+               (unless (enough? (length inputs) n-inputs)
+                 (apply raise-arity-error 'name expected inputs))
                (let ([field.id (field-acc self)] ...)
                  (syntax-parameterize
                      ([with-mode (with-mode-transformer #'self)])
-                   (apply (lambda (input ...) body ...) inputs))))
+                   (apply forward-lambda inputs))))
              (define (name . formals)
                (let ([absent #f] ...)
                  init-body ...

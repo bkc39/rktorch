@@ -11,7 +11,7 @@
            "../nn.rkt"
            (only-in "../generated.rkt" cudnn-rnn-flatten-weight)
            (only-in (submod "../nn/recurrent.rkt" private)
-                    recurrent-flattened-on)
+                    flattened-placement)
            "private/python-env.rkt")
 
   (define (flat ts)
@@ -118,15 +118,18 @@
 
   (test-case "only a move that rebinds the weights forgets the flattening"
     (define gru (GRU 3 4))
+    (define w (cdr (assoc "weight_ih_l0" (named-parameters gru))))
+    (define (recorded) (flattened-placement w))
+    (define (now) (cons (tensor-device w) (tensor-dtype w)))
     (define-values (out _h) (gru (randn 5 2 3)))
     (check-true (and out #t))
-    (check-not-false (recurrent-flattened-on gru))
+    (check-equal? (recorded) (now) "the first forward recorded nothing")
     (to gru 'cpu)
-    (check-not-false (recurrent-flattened-on gru)
-                     "a move that changed nothing scattered the weights")
+    (check-equal? (recorded) (now)
+                  "a move that changed nothing would re-flatten")
     (to gru 'float64)
-    (check-false (recurrent-flattened-on gru)
-                 "a dtype move kept a flattening of the old storage"))
+    (check-false (recorded)
+                 "a move that rebound the storage left its flattening behind"))
 
   (test-case "constructor contracts"
     (check-exn exn:fail:contract? (lambda () (LSTM 0 4)))

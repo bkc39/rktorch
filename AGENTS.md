@@ -158,14 +158,16 @@ fields with `set!`, a field's value classifies it at construction
 (`Parameter?`, `Buffer?`, `layer?`, `#f` for absent, anything else plain),
 `(with-mode body)` binds `mode` (`'train` or `'eval`, predicates `training?`/`evaluating?`) in `#:forward` to the instance's own mode (`train!`/`eval!` set it and recurse; every layer starts in `'train`),
 models are plain struct trees owned by the GC (no global parameter store),
-and `prop:procedure` makes `(net x)` work like `__call__`. `LSTM` and `GRU` (`nn/recurrent.rkt`, #153) are hand-written
-`gen:layer` structs rather than `define-layer` forms, because their
-parameter set depends on `#:num-layers` and `#:bidirectional?` and carries
-PyTorch's names (`weight_ih_l0` .. `bias_hh_l1_reverse`); applying one
-answers `(values output h-n [c-n])`, an initial state follows the input,
-and on CUDA the first call after a move flattens the weights for cudnn
-(`cudnn-rnn-flatten-weight`, in place, the parameters keep their
-identity). `clip-grad-norm!` (`nn/clip.rkt`) keeps its scale on the
+and `prop:procedure` makes `(net x)` work like `__call__`. `LSTM` and `GRU` (`nn/recurrent.rkt`, #153) are
+`define-layer` forms whose parameter set depends on `#:num-layers` and
+`#:bidirectional?`: `parameters-by-key` registers them under PyTorch's own
+names (`weight_ih_l0` .. `bias_hh_l1_reverse`) the way `children-by-key`
+registers children, and a rest-argument `#:forward` lets an initial state
+follow the input. Applying one answers `(values output h-n [c-n])`. On CUDA
+the weights are flattened for cudnn (`cudnn-rnn-flatten-weight`, in place,
+the parameters keep their identity) whenever their device or dtype differs
+from the placement the last flattening was built for, so `to`'s identity
+case costs nothing and a transient OOM is retried rather than latched. `clip-grad-norm!` (`nn/clip.rkt`) keeps its scale on the
 device. Layer init mirrors
 PyTorch RNG consumption (`nn.Linear.reset_parameters`), so a shared
 `manual-seed!` yields bit-comparable parameters — the MLP cross-test relies
@@ -357,7 +359,9 @@ module's full export set (`racket/runtime-path`, `syntax/parse/pre`).
   finalizer-cancelling `tr-tensor-free/checked`; OOM reaches users as
   `exn:fail:rktorch:oom` (catch by type, not message).
 - `nn.rkt` — pure re-export facade over `nn/` (`layer.rkt` = `gen:layer`, `LayerList` +
-  the `define-layer` macro; `parameter.rkt`, `buffer.rkt`, `linear.rkt`,
+  the `define-layer` macro, whose `#:forward` takes a rest argument, whose
+  fields admit `parameters-by-key` beside `children-by-key`, and whose
+  `#:on-move` body runs after a `to` that rebound anything; `parameter.rkt`, `buffer.rkt`, `linear.rkt`,
   `init.rkt`, `optim.rkt`, `ema.rkt`, `loss.rkt`, `recurrent.rkt`,
   `clip.rkt`).
 - `private/install-torchrkt-native.rkt` — stages `libtorchrkt.*` into

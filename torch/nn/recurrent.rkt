@@ -1,197 +1,172 @@
 #lang racket/base
 
 (require (only-in racket/contract/base
-                  -> ->* <=/c >=/c and/c any/c contract-out)
+                  -> ->* <=/c >=/c and/c contract-out)
          (only-in "../foreign.rkt"
-                  device-type exn:fail:rktorch:oom? prop:to tensor-device
-                  tensor-dtype tensor-shape tensor? with-no-grad zeros)
+                  device-type exn:fail:rktorch:oom? tensor-device tensor-dtype
+                  tensor-shape tensor? with-no-grad zeros)
          (only-in "../generated.rkt"
                   cudnn-rnn-flatten-weight gru-input lstm-input)
-         (only-in "../private/contract.rkt" define/contract-out)
          (only-in "init.rkt" uniform-init)
          (only-in "layer.rkt"
-                  call-at-forward-trough gen:layer move-layer! training?)
+                  define-layer parameters-by-key training? with-mode)
          (only-in "parameter.rkt" Parameter))
 
-(provide (contract-out [lstm? (-> any/c boolean?)]
-                       [gru? (-> any/c boolean?)]))
-
-(struct recurrent (input-size hidden-size num-layers bias? batch-first?
-                   dropout bidirectional? params
-                   [mode #:mutable] [flattened-on #:mutable])
-  #:property prop:procedure
-  (lambda (self x . state) (forward self x state))
-  #:methods gen:layer
-  [(define (layer-forward self . inputs)
-     (cond
-       [(null? inputs) (raise-forward-arity self inputs)]
-       [else (forward self (car inputs) (cdr inputs))]))
-   (define (layer-parameters self)
-     (map cdr (recurrent-params self)))
-   (define (layer-named-parameters self prefix)
-     (for/list ([p (in-list (recurrent-params self))])
-       (cons (string-append prefix (car p)) (cdr p))))
-   (define (layer-mode self)
-     (recurrent-mode self))
-   (define (layer-set-mode! self mode)
-     (set-recurrent-mode! self mode))])
-
-;; `to` is the identity when nothing changes, leaving the flat buffer intact,
-;; so only a move that really rebound the storage forgets the flattening.
-(define (placement self)
-  (define w (car (weights self)))
-  (cons (tensor-device w) (tensor-dtype w)))
-
-(define (move-and-scatter! self device dtype)
-  (define before (placement self))
-  (begin0 (move-layer! self device dtype)
-          (unless (equal? before (placement self))
-            (set-recurrent-flattened-on! self #f))))
-
-(struct lstm recurrent ()
-  #:reflection-name 'LSTM
-  #:property prop:to move-and-scatter!)
-
-(struct gru recurrent ()
-  #:reflection-name 'GRU
-  #:property prop:to move-and-scatter!)
-
-(define (layer-who self)
-  (if (lstm? self) 'LSTM 'GRU))
-
-(define (state-count self)
-  (if (lstm? self) 2 1))
-
-(define (raise-forward-arity self inputs)
-  (apply raise-arity-error
-         (layer-who self)
-         (list 1 (add1 (state-count self)))
-         inputs))
-
-;; cudnnRNNMode_t
-(define (cudnn-mode self)
-  (if (lstm? self) 2 3))
-
-(define (direction-count self)
-  (if (recurrent-bidirectional? self) 2 1))
+(struct rnn (who gates state-count cudnn-mode input-size hidden-size
+             num-layers bias? batch-first? dropout bidirectional?))
 
 ;; nn.RNNBase's order, which is both the flat-weight order ATen expects and
 ;; reset_parameters' draw order: per layer, per direction, w_ih w_hh b_ih b_hh
-(define (draw-parameters gates input-size hidden-size num-layers bias?
-                         bidirectional?)
-  (define rows (* gates hidden-size))
-  (define bound (/ 1.0 (sqrt hidden-size)))
+(define (draw-parameters spec)
+  (define rows (* (rnn-gates spec) (rnn-hidden-size spec)))
+  (define hidden (rnn-hidden-size spec))
+  (define bound (/ 1.0 (sqrt hidden)))
   (define (draw . dims)
     (Parameter (uniform-init dims (- bound) bound)))
-  (for*/list ([layer (in-range num-layers)]
-              [suffix (in-list (if bidirectional? '("" "_reverse") '("")))]
+  (for*/list ([layer (in-range (rnn-num-layers spec))]
+              [suffix (in-list (if (rnn-bidirectional? spec)
+                                   '("" "_reverse")
+                                   '("")))]
               [entry
                (in-list
                 (let ([fan-in (if (zero? layer)
-                                  input-size
-                                  (* hidden-size (if bidirectional? 2 1)))])
+                                  (rnn-input-size spec)
+                                  (* hidden (if (rnn-bidirectional? spec) 2 1)))])
                   (append
                    (list (list "weight_ih" rows fan-in)
-                         (list "weight_hh" rows hidden-size))
-                   (if bias?
+                         (list "weight_hh" rows hidden))
+                   (if (rnn-bias? spec)
                        (list (list "bias_ih" rows)
                              (list "bias_hh" rows))
                        '()))))])
     (cons (format "~a_l~a~a" (car entry) layer suffix)
           (apply draw (cdr entry)))))
 
-(define dropout/c (and/c real? (>=/c 0) (<=/c 1)))
+;; Keyed on the first weight, which `to!` mutates in place and so survives a
+;; move. A move that rebinds the storage drops the entry through `#:on-move`,
+;; which a placement read at forward time could not do: a device round trip
+;; ends where it started.
+(define flattened (make-weak-hasheq))
 
-(define-syntax-rule (define-recurrent-layer Name make made? gates)
-  (define/contract-out (Name input-size hidden-size ;; noqa
-                             #:num-layers [num-layers 1]
-                             #:bias? [bias? #t]
-                             #:batch-first? [batch-first? #f]
-                             #:dropout [dropout 0.0]
-                             #:bidirectional? [bidirectional? #f])
-    (->* [exact-positive-integer? exact-positive-integer?]
-         [#:num-layers exact-positive-integer?
-          #:bias? boolean?
-          #:batch-first? boolean?
-          #:dropout dropout/c
-          #:bidirectional? boolean?]
-         made?)
-    (make input-size hidden-size num-layers bias? batch-first?
-          (exact->inexact dropout) bidirectional?
-          (draw-parameters gates input-size hidden-size num-layers bias?
-                           bidirectional?)
-          'train #f)))
-
-(define-recurrent-layer LSTM lstm lstm? 4)
-(define-recurrent-layer GRU gru gru? 3)
-
-(define (weights self)
-  (map cdr (recurrent-params self)))
+(define (placement weights)
+  (define w (car weights))
+  (cons (tensor-device w) (tensor-dtype w)))
 
 ;; Flattening is an optimisation cudnn asks for, never a requirement: a build
 ;; or a dtype it refuses still runs, on compacted copies, and refusing again
 ;; on the next call would cost an FFI round trip for the same answer. An OOM
 ;; is not that: it is transient and belongs to the caller, so it propagates
 ;; and leaves the layer unflattened, to be retried once the pressure clears.
-(define (flatten-weights! self)
+(define (flatten-weights! spec weights)
   (with-handlers ([exn:fail:rktorch:oom? raise]
                   [exn:fail? void])
     (with-no-grad
       (void
-       (cudnn-rnn-flatten-weight (weights self)
-                                 (if (recurrent-bias? self) 4 2)
-                                 (recurrent-input-size self)
-                                 (cudnn-mode self)
-                                 (recurrent-hidden-size self)
+       (cudnn-rnn-flatten-weight weights
+                                 (if (rnn-bias? spec) 4 2)
+                                 (rnn-input-size spec)
+                                 (rnn-cudnn-mode spec)
+                                 (rnn-hidden-size spec)
                                  0
-                                 (recurrent-num-layers self)
-                                 (recurrent-batch-first? self)
-                                 (recurrent-bidirectional? self))))))
+                                 (rnn-num-layers spec)
+                                 (rnn-batch-first? spec)
+                                 (rnn-bidirectional? spec))))))
 
-(define (ensure-flat! self)
-  (define device (tensor-device (car (weights self))))
-  (unless (equal? device (recurrent-flattened-on self))
-    (when (eq? (device-type device) 'cuda)
-      (flatten-weights! self))
-    (set-recurrent-flattened-on! self device)))
+(define (ensure-flat! spec weights)
+  (define now (placement weights))
+  (unless (equal? now (hash-ref flattened (car weights) #f))
+    (when (eq? (device-type (car now)) 'cuda)
+      (flatten-weights! spec weights))
+    (hash-set! flattened (car weights) now)))
 
-(define (zero-state self x)
+(define (forget-flattening! entries)
+  (hash-remove! flattened (cdr (car entries))))
+
+(define (zero-state spec x)
   (define batch
-    (list-ref (tensor-shape x) (if (recurrent-batch-first? self) 0 1)))
-  (zeros (* (recurrent-num-layers self) (direction-count self))
+    (list-ref (tensor-shape x) (if (rnn-batch-first? spec) 0 1)))
+  (zeros (* (rnn-num-layers spec) (if (rnn-bidirectional? spec) 2 1))
          batch
-         (recurrent-hidden-size self)
+         (rnn-hidden-size spec)
          #:device (tensor-device x)
          #:dtype (tensor-dtype x)))
 
-(define (forward self x state)
-  (call-at-forward-trough (lambda () (run self x state))))
-
-(define (run self x state)
-  (define who (layer-who self))
+(define (check-inputs spec x state)
+  (define who (rnn-who spec))
   (unless (and (tensor? x) (= 3 (length (tensor-shape x))))
     (raise-argument-error who "a rank-3 tensor?" x))
-  (unless (memv (length state) (list 0 (state-count self)))
-    (raise-forward-arity self (cons x state)))
+  (unless (memv (length state) (list 0 (rnn-state-count spec)))
+    (apply raise-arity-error who
+           (list 1 (add1 (rnn-state-count spec)))
+           x state))
   (for ([s (in-list state)] [i (in-naturals 1)])
     (unless (and (tensor? s) (= 3 (length (tensor-shape s))))
-      (apply raise-argument-error who "a rank-3 tensor?" i x state)))
-  (ensure-flat! self)
+      (apply raise-argument-error who "a rank-3 tensor?" i x state))))
+
+(define (run spec entries op x state mode)
+  (check-inputs spec x state)
+  (define weights (map cdr entries))
+  (ensure-flat! spec weights)
   (define initial
     (if (null? state)
-        (for/list ([_ (in-range (state-count self))]) (zero-state self x))
+        (for/list ([_ (in-range (rnn-state-count spec))]) (zero-state spec x))
         state))
-  (define (recur op hx)
-    (op x hx (weights self)
-        (recurrent-bias? self)
-        (recurrent-num-layers self)
-        (recurrent-dropout self)
-        (training? (recurrent-mode self))
-        (recurrent-bidirectional? self)
-        (recurrent-batch-first? self)))
-  (if (lstm? self)
-      (recur lstm-input initial)
-      (recur gru-input (car initial))))
+  (op x
+      (if (= 1 (rnn-state-count spec)) (car initial) initial)
+      weights
+      (rnn-bias? spec)
+      (rnn-num-layers spec)
+      (rnn-dropout spec)
+      (training? mode)
+      (rnn-bidirectional? spec)
+      (rnn-batch-first? spec)))
+
+(define dropout/c (and/c real? (>=/c 0) (<=/c 1)))
+
+(define-layer LSTM (spec entries params) ;; noqa
+  #:contract (->* [exact-positive-integer? exact-positive-integer?]
+                  [#:num-layers exact-positive-integer?
+                   #:bias? boolean?
+                   #:batch-first? boolean?
+                   #:dropout dropout/c
+                   #:bidirectional? boolean?]
+                  lstm?)
+  #:init (input-size hidden-size
+          #:num-layers [num-layers 1]
+          #:bias? [bias? #t]
+          #:batch-first? [batch-first? #f]
+          #:dropout [dropout 0.0]
+          #:bidirectional? [bidirectional? #f])
+  (set! spec (rnn 'LSTM 4 2 2 input-size hidden-size num-layers bias?
+                  batch-first? (exact->inexact dropout) bidirectional?))
+  (set! entries (draw-parameters spec))
+  (set! params (parameters-by-key entries))
+  #:on-move (forget-flattening! entries)
+  #:forward (x . state)
+  (with-mode (run spec entries lstm-input x state mode)))
+
+(define-layer GRU (spec entries params) ;; noqa
+  #:contract (->* [exact-positive-integer? exact-positive-integer?]
+                  [#:num-layers exact-positive-integer?
+                   #:bias? boolean?
+                   #:batch-first? boolean?
+                   #:dropout dropout/c
+                   #:bidirectional? boolean?]
+                  gru?)
+  #:init (input-size hidden-size
+          #:num-layers [num-layers 1]
+          #:bias? [bias? #t]
+          #:batch-first? [batch-first? #f]
+          #:dropout [dropout 0.0]
+          #:bidirectional? [bidirectional? #f])
+  (set! spec (rnn 'GRU 3 1 3 input-size hidden-size num-layers bias?
+                  batch-first? (exact->inexact dropout) bidirectional?))
+  (set! entries (draw-parameters spec))
+  (set! params (parameters-by-key entries))
+  #:on-move (forget-flattening! entries)
+  #:forward (x . state)
+  (with-mode (run spec entries gru-input x state mode)))
 
 (module+ private
-  (provide recurrent-flattened-on))
+  (provide flattened-placement)
+  (define (flattened-placement weight) (hash-ref flattened weight #f)))
