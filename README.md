@@ -228,4 +228,8 @@ follows and which it keeps as a reference implementation.
 
 ## License
 
-`Apache-2.0 AND CC-BY-4.0`, as declared in [`torch/info.rkt`](torch/info.rkt).
+`Apache-2.0 AND CC-BY-4.0 AND CC-BY-2.0-FR`, as declared in
+[`torch/info.rkt`](torch/info.rkt). The code is Apache-2.0; the committed
+data fixtures carry the licenses of their sources, recorded in the `NOTICE`
+beside each one ([`torch/audio/fixtures`](torch/audio/fixtures/NOTICE),
+[`torch/data/fixtures`](torch/data/fixtures/NOTICE)).
