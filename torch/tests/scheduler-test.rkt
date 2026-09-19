@@ -1,7 +1,8 @@
 #lang racket/base
 
 (module+ test
-  (require rackunit
+  (require (only-in racket/math nan?)
+           rackunit
            "../main.rkt"
            "../nn.rkt")
 
@@ -78,6 +79,51 @@
     (check-rates (rates (lambda-lr (fresh-opt) (lambda (t) (/ 1.0 (add1 t))))
                         3)
                  '(0.1 0.05 0.03333333333333333 0.025)))
+
+  (test-case "scheduler-rate reports the rate written, not a fresh call"
+    (define calls (box 0))
+    (define s (lambda-lr (fresh-opt)
+                         (lambda (t)
+                           (set-box! calls (add1 (unbox calls)))
+                           (/ 1.0 (add1 t)))))
+    (check-equal? (unbox calls) 1 "construction writes step 0's rate")
+    (check-= (scheduler-rate s) 0.1 0.0)
+    (check-= (scheduler-rate s) 0.1 0.0)
+    (check-equal? (unbox calls) 1 "reading the rate does not step the callback")
+    (step! s)
+    (check-= (scheduler-rate s) 0.05 1e-12)
+    (check-equal? (unbox calls) 2))
+
+  (test-case "lambda-lr takes the factor the manual documents"
+    (check-exn #rx"^lambda-lr: contract violation"
+               (lambda () (lambda-lr (fresh-opt) (lambda (_a _b) 1.0))))
+    (check-exn #rx"expected: real[?]"
+               (lambda () (lambda-lr (fresh-opt) (lambda (_t) 0+1i))))
+    (check-exn #rx"in: the range of"
+               (lambda () (lambda-lr (fresh-opt) (lambda (_t) 0+1i))))
+    (check-exn #rx"blaming: [(][^)]*scheduler-test\\.rkt test[)]"
+               (lambda () (lambda-lr (fresh-opt) (lambda (_t) 0+1i)))))
+
+  (test-case "one-cycle-lr refuses a cycle that is all warmup"
+    ;; pct-start 1 puts the peak at the last step, so the descent has no
+    ;; steps to divide by and the rate comes out NaN
+    (check-exn #rx"^one-cycle-lr: contract violation"
+               (lambda () (one-cycle-lr (fresh-opt) #:max-lr 1.0
+                                        #:total-steps 10 #:pct-start 1)))
+    (define s (one-cycle-lr (fresh-opt) #:max-lr 1.0 #:total-steps 10
+                            #:pct-start 0.1))
+    (for ([_ (in-range 10)])
+      (step! s)
+      (check-false (nan? (learning-rate s)))))
+
+  (test-case "weight decay is never negative, as in torch.optim"
+    (define ps (list (Parameter (zeros 2))))
+    (check-exn #rx"^sgd: contract violation"
+               (lambda () (sgd ps #:lr 0.1 #:weight-decay -0.1)))
+    (check-exn #rx"^adam: contract violation"
+               (lambda () (adam ps #:weight-decay -1e-4)))
+    (check-exn #rx"^rmsprop: contract violation"
+               (lambda () (rmsprop ps #:weight-decay -1))))
 
   (test-case "set-learning-rate! and a scheduler on adam and rmsprop"
     (define a (adam (list (Parameter (zeros 2))) #:lr 0.01))
