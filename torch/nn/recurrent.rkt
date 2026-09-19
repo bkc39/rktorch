@@ -8,6 +8,7 @@
          (only-in "../generated.rkt"
                   cudnn-rnn-flatten-weight gru-input lstm-input)
          (only-in "init.rkt" uniform-init)
+         (only-in racket/match match)
          (only-in "layer.rkt"
                   define-layer parameters-by-key training? with-mode)
          (only-in "parameter.rkt" Parameter))
@@ -84,7 +85,9 @@
 
 (define (zero-state spec x)
   (define batch
-    (list-ref (tensor-shape x) (if (rnn-batch-first? spec) 0 1)))
+    (match (tensor-shape x)
+      [(list batch-first-dim time-first-dim _)
+       (if (rnn-batch-first? spec) batch-first-dim time-first-dim)]))
   (zeros (* (rnn-num-layers spec) (if (rnn-bidirectional? spec) 2 1))
          batch
          (rnn-hidden-size spec)

@@ -131,6 +131,21 @@
     (check-false (recorded)
                  "a move that rebound the storage left its flattening behind"))
 
+  (test-case "a nested recurrent layer hears the move too"
+    (define-layer Wrap (inner) ;; noqa
+      #:init ()
+      (set! inner (GRU 3 4))
+      #:forward (x)
+      (let-values ([(out _h) (inner x)]) out))
+    (define net (Wrap))
+    (define w (cdr (assoc "inner.weight_ih_l0" (named-parameters net))))
+    (void (net (randn 5 2 3)))
+    (check-equal? (flattened-placement w)
+                  (cons (tensor-device w) (tensor-dtype w)))
+    (to net 'float64)
+    (check-false (flattened-placement w)
+                 "moving the parent left the child's flattening behind"))
+
   (test-case "constructor contracts"
     (check-exn exn:fail:contract? (lambda () (LSTM 0 4)))
     (check-pred gru? (GRU 3 4 #:num-layers 2 #:dropout 1.0))

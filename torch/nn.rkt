@@ -83,6 +83,8 @@
          children-by-index
          children-by-key
          Children?
+         parameters-by-key
+         Parameters?
          child-ref
          child-name/c
          in-layers
