@@ -56,8 +56,6 @@
 ;;; Running
 
 (define (run-cover!)
-  (unless (getenv "PLTCOLLECTS")
-    (putenv "PLTCOLLECTS" (string-append (path->string (current-directory)) ":")))
   (displayln "running raco cover over torch/ (instrumented; runs the suite)")
   (zero? (system*/exit-code (raco) "cover" "-b" "-d" (report-dir) "torch/")))
 

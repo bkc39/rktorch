@@ -41,8 +41,7 @@ module that others require, stale bytecode surfaces as
 exported` — which looks like a code error and is not:
 
 ```bash
-nix develop .#ci --command bash -c \
-  'export PLTCOLLECTS="$PWD:"; raco make torch/tests/*.rkt'
+nix develop .#ci --command raco make torch/tests/*.rkt
 ```
 
 If it persists, clear the caches and redo:
@@ -51,13 +50,12 @@ If it persists, clear the caches and redo:
 ### 3. Test
 
 ```bash
-nix develop .#ci --command bash -c \
-  'export PLTCOLLECTS="$PWD:"; raco test torch/'
+nix develop .#ci --command raco test torch/
 ```
 
-`PLTCOLLECTS` is required for anything that requires the `torch` collection:
-the scribblings and examples do, so without it the run aborts before
-`torch/tests/`. The PyTorch parity tests self-skip in `.#ci` (no wheel) and
+Shell entry installs the package in link mode, so the `torch` collection
+resolves from anywhere in the checkout without setting `PLTCOLLECTS`.
+The PyTorch parity tests self-skip in `.#ci` (no wheel) and
 run for real in the default `nix develop`; run them there before pushing
 anything that touches an op, an initializer or an optimizer.
 
@@ -133,8 +131,8 @@ documentation lives in `torch/scribblings/*.scrbl`, never in a comment above
 the definition:
 
 ```bash
-nix develop .#ci --command bash -c \
-  'export PLTCOLLECTS="$PWD:"; raco scribble --dest /tmp/doc torch/scribblings/torch.scrbl'
+nix develop .#ci --command \
+  raco scribble --dest /tmp/doc torch/scribblings/torch.scrbl
 ```
 
 ### 8. Final gate

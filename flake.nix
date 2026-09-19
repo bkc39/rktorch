@@ -580,26 +580,26 @@
             if [ ! -f "$deps_stamp" ]; then
               echo "Installing Racket package (link mode, Racket ''${_rkt_ver})..."
               mkdir -p "$PLTUSERHOME"
-              raco pkg install --batch --copy --no-docs --no-setup --scope user --skip-installed \
-                ${racket-deps}/*/
-              raco pkg install --batch --auto --no-setup --link --scope user --skip-installed \
-                --name torch "$PWD/torch"
-              raco setup --no-docs --pkgs torch
-              echo "Installing Racket dev tools (Resyntax + racket-review + cover)..."
-              # Unpinned, from the live catalog, like the linters beside it;
-              # cover-lib rides along when #63 pins them. It cannot join the
-              # racket-deps FOD as things stand: a fixed-output derivation may
-              # not reference store paths, and the doc packages in that closure
-              # embed them in their rendered HTML.
-              # A shell hook has no errexit, so an unchecked failure here would
-              # still stamp the checkout as provisioned and never try again,
-              # leaving a tool missing until someone deletes the stamp by hand.
-              if raco pkg install --batch --auto --scope user --skip-installed \
-                   resyntax review cover-lib; then
+              # A shell hook has no errexit, so every step is chained: the
+              # stamp is what makes provisioning a one-time cost, and stamping
+              # a half-provisioned checkout leaves it broken until someone
+              # deletes the stamp by hand. The dev tools come unpinned from the
+              # live catalog, cover-lib beside the linters; it rides along when
+              # #63 pins them, and it cannot join the racket-deps FOD as things
+              # stand, since a fixed-output derivation may not reference store
+              # paths and the doc packages in that closure embed them.
+              if raco pkg install --batch --copy --no-docs --no-setup \
+                     --scope user --skip-installed ${racket-deps}/*/ \
+                 && raco pkg install --batch --auto --no-setup --link \
+                      --scope user --skip-installed --name torch "$PWD/torch" \
+                 && raco setup --no-docs --pkgs torch \
+                 && { echo "Installing Racket dev tools (Resyntax + racket-review + cover)..."
+                      raco pkg install --batch --auto --scope user \
+                        --skip-installed resyntax review cover-lib; }; then
                 touch "$deps_stamp"
               else
-                echo "WARNING: installing the dev tools failed; not stamping," >&2
-                echo "         so the next shell entry retries." >&2
+                echo "WARNING: provisioning failed; not stamping, so the next" >&2
+                echo "         shell entry retries it." >&2
               fi
               echo "Done. Lint: resyntax analyze --local-git-repository . origin/master"
               echo "      full sweep: resyntax analyze --directory torch  |  raco review <files>"
