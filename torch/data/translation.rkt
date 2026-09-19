@@ -38,8 +38,6 @@
               #:unless (eq? (char-general-category c) 'mn))
      c)))
 
-;; The PyTorch tutorial's normalizeString: lower-case ASCII letters, with
-;; `!` and `?` split off as words and every other run collapsed to a space.
 (define/contract-out (normalize-sentence s) ;; noqa
   (-> string? string?)
   (define ascii (strip-accents (string-downcase (string-trim s))))
@@ -79,11 +77,12 @@
 
 (define/contract-out (words->vocab sentences) ;; noqa
   (-> (listof string?) word-vocab?)
+  ;; the specials lead, so a corpus that spells one keeps the reserved id
   (define words
     (vector->immutable-vector
      (list->vector
-      (append special-words
-              (remove-duplicates
+      (remove-duplicates
+       (append special-words
                (apply append (map sentence-words sentences)))))))
   (word-vocab words
               (for/hash ([w (in-vector words)] [i (in-naturals)])

@@ -84,6 +84,13 @@
     (check-false (translation-archive? (build-path dir "missing.zip")))
     (delete-directory/files dir))
 
+  (test-case "a corpus that spells a special keeps the reserved id"
+    (define v (words->vocab '("<pad> je <eos> vais")))
+    (check-equal? (vector->list (word-vocab-words v))
+                  '("<pad>" "<sos>" "<eos>" "je" "vais"))
+    (check-equal? (encode-sentence v "<pad> je") (list pad-id 3 eos-id))
+    (check-equal? (vocab-size v) 5))
+
   (test-case "decode-tokens stops at <eos> and skips the other specials"
     (define v (words->vocab '("je vais bien")))
     (check-equal? (decode-tokens v '(1 3 4 5 2 0 0)) "je vais bien")
