@@ -6,16 +6,19 @@
                      ;; only-in would strip
                      syntax/parse/pre
                      (only-in "../private/definer.rkt"
-                              contract-export ctor-formal init-formals))
+                              contract-export ctor-formal forward-formal
+                              init-formals))
          (only-in racket/contract/base
-                  -> ->* ->i and/c any any/c cons/c contract-out contract?
-                  flat-named-contract listof not/c or/c unsupplied-arg?)
+                  -> ->* ->i and/c any any/c cons/c contract contract-out
+                  contract? flat-named-contract listof not/c or/c
+                  unsupplied-arg?)
          (only-in racket/generic define-generics)
          (only-in racket/list append-map check-duplicates remove-duplicates)
          (only-in racket/stxparam define-syntax-parameter syntax-parameterize)
          (only-in syntax/parse/define define-syntax-parse-rule)
          (only-in "../foreign.rkt" prop:to tensor-dtype tensor?)
          (only-in (submod "../foreign.rkt" unsafe) to!)
+         (only-in "../foreign/autograd-ops.rkt" collect-at-forward-trough!)
          (only-in "../private/contract.rkt"
                   define/checked-out define/contract-out)
          (only-in "buffer.rkt" Buffer?)
@@ -188,12 +191,25 @@
        #`(let ([#,(datum->syntax stx 'mode) (layer-mode #,self-id)])
            body ...)])))
 
+(define layer-call-key (make-continuation-mark-key 'layer-call))
+
+;; the mark tells a nested call from the outermost one, whose return is
+;; where a no-grad loop's memory is at its lowest
+(define (call-forward self inputs)
+  (cond
+    [(continuation-mark-set-first #f layer-call-key)
+     (apply (registry-forward self) self inputs)]
+    [else
+     (begin0 (with-continuation-mark layer-call-key #t
+               (apply (registry-forward self) self inputs))
+             (collect-at-forward-trough!))]))
+
 (struct registry (forward params buffers children [mode #:mutable])
   #:property prop:procedure
-  (lambda (self . inputs) (apply (registry-forward self) self inputs))
+  (lambda (self . inputs) (call-forward self inputs))
   #:methods gen:layer
   [(define (layer-forward self . inputs)
-     (apply (registry-forward self) self inputs))
+     (call-forward self inputs))
    (define (layer-parameters self)
      (append (map cdr (registry-params self))
              (append-map child-parameters (registry-children self))))
@@ -333,7 +349,7 @@
               (~optional (~seq #:reflection-name reflect:expr))
               (~optional (~seq #:contract ctc:expr))
               (~optional (~seq #:predicate pred:id))) ...
-        #:forward (input:id ...) body:expr ...+)
+        #:forward (input:forward-formal ...) body:expr ...+)
      (define field-ids (syntax->list #'(field.id ...)))
      (for ([f (in-list field-ids)])
        (when (regexp-match? #rx"[.]" (symbol->string (syntax-e f)))
@@ -350,6 +366,27 @@
             "with #:init, a field is a bare identifier; defaults and keywords belong to the #:init formals"
             stx f))))
      (define init-ids (if init? (syntax->list #'(init.id ...)) '()))
+     ;; a contracted forward formal becomes one checker built here, at the
+     ;; definition, not one per call; the layer promises it and whoever
+     ;; applies the layer answers for the argument
+     (define input-ids (syntax->list #'(input.id ...)))
+     (define input-ctcs (attribute input.ctc))
+     (define checker-ids
+       (for/list ([c (in-list input-ctcs)])
+         (and c (generate-temporary #'check))))
+     (define checker-defs
+       (for/list ([c (in-list input-ctcs)]
+                  [cid (in-list checker-ids)]
+                  #:when c)
+         #`(define #,cid
+             (contract (-> #,c any) values 'name 'caller 'name
+                       (quote-syntax name)))))
+     (define checked-bindings
+       (for/list ([c (in-list input-ctcs)]
+                  [cid (in-list checker-ids)]
+                  [i (in-list input-ids)]
+                  #:when c)
+         #`[#,i (#,cid #,i)]))
      (define struct-id (generate-temporary #'name))
      (define (accessor field-id)
        (format-id struct-id "~a-~a" struct-id field-id))
@@ -369,7 +406,9 @@
                     (for/list ([f (in-list field-ids)])
                       (symbol->string (syntax-e f)))]
                    [(field-acc ...) (map accessor field-ids)]
-                   [n-inputs (length (syntax->list #'(input ...)))])
+                   [(checker-def ...) checker-defs]
+                   [(checked-binding ...) checked-bindings]
+                   [n-inputs (length input-ids)])
        (with-syntax ([export (contract-export stx #'name #'name?
                                               (attribute ctc)
                                               (attribute pred))])
@@ -377,13 +416,16 @@
              (struct sid registry (field.id ...)
                #:reflection-name reflect-name)
              (define name? sid?)
+             checker-def ...
              (define (forward-proc self . inputs)
                (unless (= (length inputs) n-inputs)
                  (apply raise-arity-error 'name n-inputs inputs))
                (let ([field.id (field-acc self)] ...)
                  (syntax-parameterize
                      ([with-mode (with-mode-transformer #'self)])
-                   (apply (lambda (input ...) body ...) inputs))))
+                   (apply (lambda (input.id ...)
+                            (let (checked-binding ...) body ...))
+                          inputs))))
              (define (name . formals)
                (let ([absent #f] ...)
                  init-body ...

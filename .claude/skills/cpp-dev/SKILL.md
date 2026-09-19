@@ -19,10 +19,10 @@ The codegen generator (`nix run .#codegen`, see
 `codegen/` and the AGENTS.md codegen section) emits the whole three-layer
 stack — `extern "C"` shim, raw Racket binding, uncontracted wrapper — for
 any ATen op whose signature fits the IR (Tensor / Scalar→double / int64 /
-bool / IntArrayRef / TensorList args, single Tensor return). **If the op is
+bool / IntArrayRef / TensorList args, one or more Tensor returns). **If the op is
 IR-eligible, add a line to `codegen/allowlist.txt` + an input recipe in
 `torch/tests/generated-parity-test.rkt`, regenerate, and skip hand-writing
-entirely.** Hand-write only ops outside the IR (multi-return, out-params,
+entirely.** Hand-write only ops outside the IR (non-Tensor returns, out-params,
 optional argument *types* like `Tensor?`, in-place ops, dtype/device
 knobs — note schema *defaults* are fine: they become required args on the
 unstable surface). Never edit files under a `generated/`

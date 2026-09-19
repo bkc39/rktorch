@@ -63,6 +63,21 @@
                (lambda () (BatchNorm2d 0)))
     (check-exn #rx"^BatchNorm1d: contract violation"
                (lambda () (BatchNorm1d 3 #:eps 'tiny)))
+    ;; the rank a layer accepts is stated in its #:forward formals, so a
+    ;; wrong one is contract blame naming the layer and the contract, not an
+    ;; error raised from inside torch/nn; the party is the label `caller`,
+    ;; since the wrapper is built where the layer is defined
+    (check-exn #rx"^BatchNorm2d: contract violation"
+               (lambda () ((BatchNorm2d 3) (randn 4 3))))
+    (check-exn #rx"expected: image-batch"
+               (lambda () ((BatchNorm2d 3) (randn 4 3))))
+    (check-exn (message-matching #rx"blaming: caller")
+               (lambda () ((BatchNorm2d 3) (randn 4 3))))
+    (check-exn #rx"expected: feature-batch"
+               (lambda () ((BatchNorm1d 4) (randn 2 4 3 3))))
+    (check-equal? (tensor-shape ((BatchNorm1d 4) (randn 8 4 6))) '(8 4 6))
+    (check-exn #rx"^BatchNorm2d: arity mismatch"
+               (lambda () ((BatchNorm2d 3) (randn 1 3 2 2) 'extra)))
     (check-exn #rx"^Dropout: contract violation"
                (lambda () (Dropout #:p 1)))
     (check-exn #rx"^Sequential: contract violation"

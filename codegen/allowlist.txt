@@ -158,3 +158,8 @@ shape flip
 # linear is nn.Linear's fused affine map: under autocast the whole op is
 # cast, where matmul then add would promote the bias back to float32.
 nn linear
+# --- tranche 7 (#153): the sequence op closure ------------------------------
+# topk and sort are the first ops with several Tensor returns (#154): an
+# integer status plus one out pointer per return, (values, indices) here.
+sort topk
+sort sort

@@ -13,7 +13,9 @@ extern "C" {
 
 /* Generated ops (inplace). A functional op returns a new tr_tensor
  * handle (NULL on error); an in-place op mutates its first handle
- * and returns an int status (0 ok, 1 with tr_last_error set). */
+ * and returns an int status (0 ok, 1 with tr_last_error set). An op
+ * with several Tensor returns also reports a status and writes one
+ * new handle per trailing out pointer, every one NULL on error. */
 
 int tr_gen_add__tensor(tr_tensor* self, const tr_tensor* other, double alpha);
 int tr_gen_addcdiv_(tr_tensor* self, const tr_tensor* tensor1,
