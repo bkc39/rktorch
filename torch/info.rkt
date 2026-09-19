@@ -10,8 +10,6 @@
 (define build-deps '("rackunit-lib" "racket-doc" "scribble-lib"))
 (define scribblings (quote (("scribblings/torch.scrbl" ()))))
 (define pkg-desc "Racket bindings for libtorch (PyTorch)")
-;; split so the source carries nothing an address scraper's regex matches;
-;; the catalog still sees the whole address
 (define pkg-authors (list (string-append "bkschemer" "@" "gmail" "." "com")))
 (define license '(Apache-2.0 AND CC-BY-4.0))
 (define pkg-tags
