@@ -19,9 +19,11 @@
                   tr-tensor-requires-grad/raw
                   tr-tensor-sub!/raw
                   tr-tensor-zero!/raw)
+         (only-in "raw/pressure.rkt" collect-at-trough!)
          (only-in "structs.rkt" tensor? wrap-tensor))
 
-(provide with-no-grad)
+(provide collect-at-forward-trough!
+         with-no-grad)
 
 (define/checked-out (requires-grad! t [on? #t])
   (->* [tensor?] [boolean?] tensor?)
@@ -35,7 +37,15 @@
 
 (define/contract-out (backward! t) (-> tensor? void?)
   (check-ok (tr-tensor-backward/raw t) 'backward!)
-  (void))
+  (collect-at-trough!))
+
+;; With gradients off nothing outlives a forward pass but its result, so the
+;; return of an outermost layer call is a trough like the end of backward!.
+;; With them on it is the peak: the graph holds every intermediate.
+(define (collect-at-forward-trough!)
+  (define-values (rc on?) (tr-is-grad-enabled/raw))
+  (when (and (zero? rc) (not on?))
+    (collect-at-trough! #:young? #t)))
 
 (define/contract-out (grad t) (-> tensor? tensor?)
   (wrap-tensor (check-handle 'grad (tr-tensor-grad/raw t))))

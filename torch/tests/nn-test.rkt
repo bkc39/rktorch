@@ -254,7 +254,7 @@
     (check-false (equal? (tensor->list z) (tensor->list y))
                  "eval normalizes with the running statistics")
     (check-= (item (caddr (buffers bn))) 1 0)
-    (check-exn #rx"rank" (lambda () (bn (randn 4 3))))
+    (check-exn #rx"image-batch" (lambda () (bn (randn 4 3))))
     (check-equal? (object-name bn) 'BatchNorm2d))
 
   (test-case "BatchNorm1d layer: [N C] and [N C L] inputs"
@@ -263,7 +263,7 @@
     (check-equal? (tensor-shape (bn (randn 8 4))) '(8 4))
     (check-equal? (tensor-shape (bn (randn 8 4 6))) '(8 4 6))
     (check-= (item (caddr (buffers bn))) 2 0)
-    (check-exn #rx"rank" (lambda () (bn (randn 2 4 3 3))))
+    (check-exn #rx"feature-batch" (lambda () (bn (randn 2 4 3 3))))
     (check-equal? (object-name bn) 'BatchNorm1d))
 
   (test-case "BatchNorm2d: gradients reach the affine parameters"

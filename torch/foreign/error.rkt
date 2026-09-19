@@ -6,6 +6,7 @@
 
 (provide check-ok
          check-handle
+         check-outputs
          (struct-out exn:fail:rktorch:oom))
 
 (struct exn:fail:rktorch:oom exn:fail ())
@@ -37,3 +38,10 @@
      who
      (lambda (m) (format "torchrkt returned NULL handle: ~a" m))))
   h)
+
+(define (check-outputs who handles)
+  (unless handles
+    (raise-torch-failure
+     who
+     (lambda (m) (format "torchrkt returned no outputs: ~a" m))))
+  handles)

@@ -2,15 +2,14 @@
 
 (require (only-in racket/contract/base ->*)
          (only-in "../foreign.rkt"
-                  add batch-norm copy! ones tensor tensor-shape to-dtype zeros)
+                  add batch-norm copy! ones tensor to-dtype zeros)
+         (only-in "../foreign/contracts.rkt" feature-batch/c image-batch/c)
          (only-in "buffer.rkt" Buffer)
          (only-in "layer.rkt" define-layer training? with-mode)
          (only-in "parameter.rkt" Parameter))
 
-(define (normalize who ranks x mode momentum eps weight bias
+(define (normalize x mode momentum eps weight bias
                    running-mean running-var num-batches-tracked)
-  (unless (memv (length (tensor-shape x)) ranks)
-    (raise-argument-error who (format "a tensor of rank ~a" ranks) x))
   (define training (training? mode))
   (when training
     ;; nn.BatchNorm2d counts the batches it has normalised; add promotes the
@@ -37,9 +36,9 @@
   (set! running-mean (Buffer (zeros num-features)))
   (set! running-var (Buffer (ones num-features)))
   (set! num-batches-tracked (Buffer (tensor 0)))
-  #:forward (x)
+  #:forward ([x : image-batch/c])
   (with-mode
-    (normalize 'BatchNorm2d '(4) x mode momentum eps weight bias
+    (normalize x mode momentum eps weight bias
                running-mean running-var num-batches-tracked)))
 
 (define-layer BatchNorm1d (eps momentum weight bias ;; noqa
@@ -53,7 +52,7 @@
   (set! running-mean (Buffer (zeros num-features)))
   (set! running-var (Buffer (ones num-features)))
   (set! num-batches-tracked (Buffer (tensor 0)))
-  #:forward (x)
+  #:forward ([x : feature-batch/c])
   (with-mode
-    (normalize 'BatchNorm1d '(2 3) x mode momentum eps weight bias
+    (normalize x mode momentum eps weight bias
                running-mean running-var num-batches-tracked)))
