@@ -35,11 +35,18 @@
   (or (find-executable-path "raco") (die "coverage: no raco on PATH\n")))
 
 (define (git . args)
+  (define ok? #f)
   (define out
     (with-output-to-string
       (lambda ()
-        (apply system* (or (find-executable-path "git") (die "no git\n"))
-               args))))
+        (set! ok? (apply system*
+                         (or (find-executable-path "git") (die "no git\n"))
+                         args)))))
+  ;; Silence here would understate what --changed reports: an unresolvable
+  ;; origin/master (no remote, a shallow clone, a fork off another branch)
+  ;; would just contribute no files.
+  (unless ok?
+    (die "coverage: git ~a failed\n" (string-join args " ")))
   (string-split out "\n"))
 
 ;;; Running
@@ -54,30 +61,38 @@
 
 (struct entry (path pct covered missed total) #:transparent)
 
+;; `\\s*` at every tag boundary and an optional `%`: cover emits this table
+;; compactly today, and the gate should survive it pretty-printing tomorrow.
+;; In a pregexp `\\s` spans newlines, so no (?s:) is needed here.
+(define (cell name pattern)
+  (string-append "\\s*<td class=\"" name "\">\\s*" pattern "\\s*</td>"))
+
 (define row-px
   (pregexp
    (string-append
-    "<tr class=\"file-info\"><td class=\"file-name\">"
-    "<a href=\"[^\"]*\">([^<]+)</a></td>"
-    "<td class=\"coverage-percentage\">([0-9.]+)</td>"
-    "<td class=\"covered-expressions\">([0-9]+)</td>"
-    "<td class=\"uncovered-expressions\">([0-9]+)</td>"
-    "<td class=\"total-expressions\">([0-9]+)</td>")))
+    "<tr class=\"file-info\">\\s*<td class=\"file-name\">\\s*"
+    "<a href=\"[^\"]*\">([^<]+)</a>\\s*</td>"
+    (cell "coverage-percentage" "([0-9.]+)%?")
+    (cell "covered-expressions" "([0-9]+)")
+    (cell "uncovered-expressions" "([0-9]+)")
+    (cell "total-expressions" "([0-9]+)"))))
 
-(define (read-entries)
-  (define index (build-path (report-dir) "index.html"))
-  (unless (file-exists? index)
-    (die "coverage: no report at ~a\n" index))
-  (define rows
-    (regexp-match* row-px (file->string index) #:match-select values))
-  (when (null? rows)
-    (die "coverage: could not parse ~a (did cover's html change?)\n" index))
-  (for/list ([r (in-list rows)])
+(define (parse-entries html)
+  (for/list ([r (in-list (regexp-match* row-px html #:match-select values))])
     (entry (second r)
            (string->number (list-ref r 2))
            (string->number (list-ref r 3))
            (string->number (list-ref r 4))
            (string->number (list-ref r 5)))))
+
+(define (read-entries)
+  (define index (build-path (report-dir) "index.html"))
+  (unless (file-exists? index)
+    (die "coverage: no report at ~a\n" index))
+  (define entries (parse-entries (file->string index)))
+  (when (null? entries)
+    (die "coverage: could not parse ~a (did cover's html change?)\n" index))
+  entries)
 
 (define (area path)
   (define parts (string-split path "/"))
@@ -88,7 +103,14 @@
 
 ;; The lines of a file that hold at least one uncovered expression.
 ;; (?s:) so a line's spans may straddle newlines.
-(define line-px (pregexp "(?s:<div class=\"line\" id=\"([0-9]+)\">(.*?)</div>)"))
+(define line-px
+  (pregexp "(?s:<div\\s+class=\"line\"\\s+id=\"([0-9]+)\"\\s*>(.*?)</div>)"))
+
+(define (parse-uncovered-lines html)
+  (for/list ([m (in-list (regexp-match* line-px html #:match-select values))]
+             ;; m is (whole-match line-number line-content)
+             #:when (regexp-match? #rx"class=\"uncovered\"" (list-ref m 2)))
+    (string->number (second m))))
 
 (define (uncovered-lines path)
   (define html
@@ -96,13 +118,12 @@
                 (string-append (substring path 0 (- (string-length path) 4))
                                ".html")))
   (cond
-    [(not (file-exists? html)) '()]
-    [else
-     (for/list ([m (in-list (regexp-match* line-px (file->string html)
-                                           #:match-select values))]
-                ;; m is (whole-match line-number line-content)
-                #:when (regexp-match? #rx"class=\"uncovered\"" (list-ref m 2)))
-       (string->number (second m)))]))
+    ;; Saying nothing would read as "fully covered" for a file with plenty
+    ;; uncovered, so a missing per-file report is reported, not swallowed.
+    [(not (file-exists? html))
+     (eprintf "coverage: no per-file report at ~a\n" html)
+     '()]
+    [else (parse-uncovered-lines (file->string html))]))
 
 ;;; Reporting
 
@@ -204,3 +225,65 @@
       (exit 1)]
      [else
       (printf "floor ~a%: met\n" (floor%))])))
+
+;;; Tests
+;;
+;; The report is scraped, so the shapes it is scraped from are pinned here:
+;; run with `raco test scripts/coverage.rkt`.
+
+(module+ test
+  (require (only-in rackunit check-equal? test-case))
+
+  (define (row name pct cov unc total)
+    (string-append
+     "<tr class=\"file-info\"><td class=\"file-name\">"
+     "<a href=\"" name ".html\">" name ".rkt</a></td>"
+     "<td class=\"coverage-percentage\">" pct "</td>"
+     "<td class=\"covered-expressions\">" cov "</td>"
+     "<td class=\"uncovered-expressions\">" unc "</td>"
+     "<td class=\"total-expressions\">" total "</td></tr>"))
+
+  (test-case "the index table parses as cover emits it today"
+    (define es
+      (parse-entries
+       (string-append "<tbody>" (row "torch/nn/linear" "100" "185" "0" "185")
+                      (row "torch/foreign/ops" "94.8" "1830" "100" "1930")
+                      "</tbody>")))
+    (check-equal? (map entry-path es)
+                  '("torch/nn/linear.rkt" "torch/foreign/ops.rkt"))
+    (check-equal? (map entry-covered es) '(185 1830))
+    (check-equal? (map entry-missed es) '(0 100))
+    (check-equal? (map entry-total es) '(185 1930))
+    (check-equal? (map entry-pct es) '(100 94.8)))
+
+  (test-case "and survives a pretty-printed table with percent signs"
+    (define es
+      (parse-entries
+       (string-append
+        "<tr class=\"file-info\">\n  <td class=\"file-name\">\n"
+        "    <a href=\"x.html\">torch/nn/x.rkt</a>\n  </td>\n"
+        "  <td class=\"coverage-percentage\"> 81.5% </td>\n"
+        "  <td class=\"covered-expressions\"> 110 </td>\n"
+        "  <td class=\"uncovered-expressions\"> 25 </td>\n"
+        "  <td class=\"total-expressions\"> 135 </td>\n</tr>")))
+    (check-equal? (map entry-path es) '("torch/nn/x.rkt"))
+    (check-equal? (map entry-missed es) '(25))
+    (check-equal? (map entry-pct es) '(81.5)))
+
+  (test-case "only the lines carrying an uncovered span are reported"
+    (check-equal?
+     (parse-uncovered-lines
+      (string-append
+       "<div class=\"line\" id=\"24\"><span class=\"covered\">(if</span></div>"
+       "<div class=\"line\" id=\"25\"><span class=\"uncovered\">(to-device</span>"
+       "<span class=\"uncovered\">x)</span></div>"
+       "<div class=\"line\" id=\"26\"><span class=\"irrelevant\"> </span></div>"))
+     '(25)))
+
+  (test-case "a file's area is its directory, with raw/ kept apart"
+    (check-equal? (map area '("torch/main.rkt"
+                              "torch/nn/linear.rkt"
+                              "torch/foreign/ops.rkt"
+                              "torch/foreign/raw/memory.rkt"))
+                  '("torch (facades)" "torch/nn" "torch/foreign"
+                    "torch/foreign/raw"))))
