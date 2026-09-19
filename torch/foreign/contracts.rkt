@@ -18,6 +18,7 @@
          (only-in "structs.rkt" tensor?))
 
 (provide bool-tensor/c
+         feature-batch/c
          image-batch/c
          index-spec/c
          index/c
@@ -54,6 +55,14 @@
 (define image-batch/c
   (flat-named-contract 'image-batch
                        (lambda (x) (and (tensor? x) (= 4 (length (tensor-shape x)))))))
+
+;; nn.BatchNorm1d's input: features over a batch, with or without a length
+(define feature-batch/c
+  (flat-named-contract 'feature-batch
+                       (lambda (x)
+                         (and (tensor? x)
+                              (memv (length (tensor-shape x)) '(2 3))
+                              #t))))
 
 (define index-vector/c
   (and/c int64-tensor/c (lambda (x) (< (length (tensor-shape x)) 2))))

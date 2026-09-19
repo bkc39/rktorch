@@ -476,6 +476,9 @@ under that contract and the predicate, under its lowercase name
 (`Conv2d`/`conv2d?`, `MaxPool2d`/`max-pool2d?`; `#:predicate` overrides the
 derived name), so a layer file has no `provide` block and no `rename-out`.
 `->i` states a cross-argument invariant that used to be an `unless` guard.
+A forward formal written `[x : image-batch/c]` states what the layer accepts
+there, which is where a rank or shape check belongs; the violation names the
+layer and the contract, and the check is built once at the definition.
 
 Two layers carry no contracts: `torch/generated.rkt` (codegen output, the
 unstable surface) and `torch/foreign/raw/` (the FFI bindings, where the
