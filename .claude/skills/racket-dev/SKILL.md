@@ -85,6 +85,12 @@ before pushing rather than after a bot asks. Coverage says a line ran, not
 that anything checked it, so write the test for the behaviour and let the
 number follow.
 
+`cover` runs every file in **one process**, where `raco test` forks per file,
+so a test that asserts on accumulated ledger or GC state can fail under
+coverage and pass under `raco test` — the pressure tests do. Step 3 is the
+authority on whether the suite passes; the script says so and treats its own
+numbers as a floor when that happens.
+
 Legitimately unreachable here: accelerator-only branches on the wrong host
 (MPS cannot be covered on Linux at all) and network download paths. Anything
 else uncovered is either a missing test or, when a contract already rejects

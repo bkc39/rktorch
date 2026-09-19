@@ -45,18 +45,10 @@
 ;;; Running
 
 (define (run-cover!)
-  ;; Without this, `python3 -c "import torch"` in the parity harness imports
-  ;; the repo's own torch/ DIRECTORY as a namespace package (raco test hides
-  ;; it by chdir'ing into each test's directory; cover runs from the root).
-  (putenv "PYTHONSAFEPATH" "1")
   (unless (getenv "PLTCOLLECTS")
     (putenv "PLTCOLLECTS" (string-append (path->string (current-directory)) ":")))
   (displayln "running raco cover over torch/ (instrumented; runs the suite)")
-  (define rc
-    (system*/exit-code (raco) "cover" "-b" "-d" (report-dir) "torch/"))
-  (unless (zero? rc)
-    (eprintf "coverage: raco cover exited ~a; the report below may be partial\n"
-             rc)))
+  (zero? (system*/exit-code (raco) "cover" "-b" "-d" (report-dir) "torch/")))
 
 ;;; Reading the report
 
@@ -178,13 +170,16 @@
    #:once-each
    [("-d" "--directory") dir "report directory (default: coverage)"
                              (report-dir dir)]
-   [("--floor") f "fail below this percentage" (floor% (string->number f))]
+   [("--floor") f "fail below this percentage"
+                  (define n (string->number f))
+                  (unless (real? n) (die "coverage: --floor needs a number, got ~a\n" f))
+                  (floor% n)]
    [("--changed") "also list uncovered lines in files this branch touches"
                   (changed-only? #t)]
    [("--no-run") "read an existing report instead of running the suite"
                  (run? #f)]
    #:args ()
-   (when (run?) (run-cover!))
+   (define suite-ok? (or (not (run?)) (run-cover!)))
    (define entries (read-entries))
    (define covered (for/sum ([e (in-list entries)]) (entry-covered e)))
    (define total (for/sum ([e (in-list entries)]) (entry-total e)))
@@ -195,6 +190,13 @@
    (print-worst entries 12)
    (when (changed-only?) (print-changed entries))
    (printf "\nreport: ~a/index.html\n" (report-dir))
+   ;; cover runs every file in ONE process; raco test forks per file. A test
+   ;; that asserts on accumulated ledger or GC state can fail here and pass
+   ;; there, so `raco test` stays the authority on correctness and this only
+   ;; says the numbers may be short.
+   (unless suite-ok?
+     (display "note: the suite reported failures under cover; run raco test\n")
+     (display "      to judge them, and treat the numbers above as a floor\n"))
    (cond
      [(< overall (floor%))
       (eprintf "\ncoverage ~a% is below the ~a% floor\n"

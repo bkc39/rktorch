@@ -545,7 +545,11 @@
             export TORCHRKT_NATIVE_LIB_PATH="${shim}"
             export PLTUSERHOME="$PWD/.racket-user"
             _rkt_ver=$(racket --version 2>&1 | grep -oE 'v[0-9]+\.[0-9]+' | tr -d 'v' | tr '.' '-')
-            deps_stamp="$PLTUSERHOME/.deps2-installed-torch-''${_rkt_ver}"
+            # Bump the ordinal whenever the installed package list below
+            # changes: the stamp is what makes provisioning a one-time cost,
+            # so an already-provisioned checkout would otherwise skip the new
+            # package and only fail later, where it is used. (deps3: cover-lib)
+            deps_stamp="$PLTUSERHOME/.deps3-installed-torch-''${_rkt_ver}"
             # In-tree zo caches compiled piecewise across commits can defeat
             # the compilation manager, so bytecode is keyed to HEAD by a
             # stamp-and-clear (a per-rev PLTCOMPILEDROOTS would recompile
