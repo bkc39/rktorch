@@ -85,6 +85,10 @@ before pushing rather than after a bot asks. Coverage says a line ran, not
 that anything checked it, so write the test for the behaviour and let the
 number follow.
 
+`--changed` compares against `origin/master`. In a shallow checkout there is
+no merge base to compare with, so it says so and falls back to the working
+tree and the index rather than failing the run.
+
 `cover` runs every file in **one process**, where `raco test` forks per file,
 so a test that asserts on accumulated ledger or GC state can fail under
 coverage and pass under `raco test` — the pressure tests do. Step 3 is the

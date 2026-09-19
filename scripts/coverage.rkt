@@ -34,6 +34,10 @@
 (define (raco)
   (or (find-executable-path "raco") (die "coverage: no raco on PATH\n")))
 
+;; A failed git call warns and contributes nothing: loud, because a quietly
+;; shorter list understates what --changed covers, but not fatal, because the
+;; merge-base comparison has nothing to compare against in a shallow clone
+;; (CI checks out at fetch-depth 1) and --changed is a report either way.
 (define (git . args)
   (define ok? #f)
   (define out
@@ -42,12 +46,12 @@
         (set! ok? (apply system*
                          (or (find-executable-path "git") (die "no git\n"))
                          args)))))
-  ;; Silence here would understate what --changed reports: an unresolvable
-  ;; origin/master (no remote, a shallow clone, a fork off another branch)
-  ;; would just contribute no files.
-  (unless ok?
-    (die "coverage: git ~a failed\n" (string-join args " ")))
-  (string-split out "\n"))
+  (cond
+    [ok? (string-split out "\n")]
+    [else
+     (eprintf "coverage: git ~a failed; --changed lists only what it could see\n"
+              (string-join args " "))
+     '()]))
 
 ;;; Running
 
