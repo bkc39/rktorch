@@ -223,6 +223,14 @@
     (check-exn #rx"feature-batch" (lambda () (bn (randn 2 4 3 3))))
     (check-equal? (object-name bn) 'BatchNorm1d))
 
+  (test-case "BatchNorm2d: the counter counts past float32's last integer"
+    (define bn (BatchNorm2d 2))
+    (define counter (caddr (buffers bn)))
+    (copy! counter (tensor (expt 2 24)))
+    (bn (randn 3 2 4 4))
+    (check-equal? (tensor-dtype counter) 'int64)
+    (check-= (item counter) (add1 (expt 2 24)) 0))
+
   (test-case "BatchNorm2d: gradients reach the affine parameters"
     (define bn (BatchNorm2d 2))
     (define x (randn 3 2 4 4))

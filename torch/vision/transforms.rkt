@@ -23,12 +23,15 @@
   (->* [image-batch/c] [#:p (real-in 0 1) #:generator (or/c generator? #f)]
        tensor?)
   (define n (car (tensor-shape x)))
-  (define rng (batch-rng generator))
-  (define flipped
-    (for/list ([_ (in-range n)]) (if (< (random rng) p) 1 0)))
-  (define mask (reshape (ne (tensor flipped #:device (tensor-device x)) 0)
-                        n 1 1 1))
-  (where mask (flip x 3) x))
+  (cond
+    [(zero? n) x]
+    [else
+     (define rng (batch-rng generator))
+     (define flipped
+       (for/list ([_ (in-range n)]) (if (< (random rng) p) 1 0)))
+     (define mask (reshape (ne (tensor flipped #:device (tensor-device x)) 0)
+                           n 1 1 1))
+     (where mask (flip x 3) x)]))
 
 (define/contract-out (random-crop x ;; noqa
                                   #:padding [padding 4]
@@ -38,6 +41,11 @@
        tensor?)
   (define dims (tensor-shape x))
   (define n (car dims))
+  (cond
+    [(zero? n) x]
+    [else (cropped x dims n padding generator)]))
+
+(define (cropped x dims n padding generator)
   (define h (caddr dims))
   (define w (cadddr dims))
   (define padded (zeros n (cadr dims) (+ h (* 2 padding)) (+ w (* 2 padding))
