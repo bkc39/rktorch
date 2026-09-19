@@ -107,11 +107,16 @@
   (cond
     [(unsupplied-arg? dtype) #t]
     [(eq? dtype 'int64)
-     (or (and (integer? value) (= (exact->inexact value) value))
+     (or (and (integer? value)
+              (<= (- (expt 2 63)) value (sub1 (expt 2 63)))
+              (= (exact->inexact value) value))
          "an int64 fill value must be an integer exactly representable as a double")]
     [(eq? dtype 'uint8)
      (or (and (integer? value) (<= 0 value 255))
          "a uint8 fill value must be an integer from 0 to 255")]
+    [(eq? dtype 'bool)
+     (or (and (integer? value) (<= 0 value 1))
+         "a bool fill value must be 0 or 1")]
     [else #t]))
 
 (define/contract-out (fill-value/c dtype) ;; noqa

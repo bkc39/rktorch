@@ -9,9 +9,6 @@
          (only-in "../foreign/contracts.rkt" image-batch/c)
          (only-in "../private/contract.rkt" define/contract-out))
 
-(define (pixels? dims)
-  (andmap positive? (list-tail dims (- (length dims) 2))))
-
 (define image/c
   (flat-named-contract
    'image
@@ -19,20 +16,19 @@
      (and (tensor? x)
           (not (eq? (tensor-dtype x) 'bool))
           (let ([dims (tensor-shape x)])
-            (and (= 3 (length dims)) (= 3 (car dims)) (pixels? dims)))))))
+            (and (= 3 (length dims))
+                 (= 3 (car dims))
+                 (andmap positive? dims)))))))
 
 (define value-range/c
   (flat-named-contract
    'value-range
-   (and/c (list/c real? real?) (lambda (r) (< (car r) (cadr r))))))
+   (and/c (list/c rational? rational?) (lambda (r) (< (car r) (cadr r))))))
 
 (define non-empty-image-batch/c
   (flat-named-contract
    'non-empty-image-batch
-   (and/c image-batch/c
-          (lambda (x)
-            (let ([dims (tensor-shape x)])
-              (and (positive? (car dims)) (pixels? dims)))))))
+   (and/c image-batch/c (lambda (x) (andmap positive? (tensor-shape x))))))
 
 (define/contract-out (image-grid images ;; noqa
                                  #:columns [columns 8]

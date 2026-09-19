@@ -235,7 +235,8 @@ Writes the @tt{[3 H W]} tensor @racket[image], whose @tt{H} and @tt{W}
 are the positive dimensions its header states, to @racket[path]. A float
 image is quantized the way torchvision's @tt{save_image} does, with
 @racket[range] naming the values that map to 0 and 255, its first below
-its second, so a dataset in @tt{[-1, 1]} passes @racket['(-1 1)]; a uint8
+its second and both finite, so a dataset in @tt{[-1, 1]} passes
+@racket['(-1 1)]; a uint8
 image is written as it is. A boolean image is not one ATen can subtract
 a range from, so the contract refuses it.
 }

@@ -101,10 +101,17 @@
                (lambda () (image-grid (zeros 2 3 0 5))))
     (check-exn #rx"non-empty-image-batch"
                (lambda () (image-grid (zeros 2 3 5 0))))
+    (check-exn #rx"non-empty-image-batch"
+               (lambda () (image-grid (zeros 2 0 4 4))))
     (check-exn exn:fail:contract? (lambda () (written (zeros 2 2))))
     (check-exn exn:fail:contract? (lambda () (written (zeros 1 2 2))))
     (check-exn exn:fail:contract?
                (lambda () (written (zeros 3 2 2) #:range '(1 0))))
+    ;; an infinite span makes the scale zero and writes every pixel black
+    (check-exn #rx"value-range"
+               (lambda () (written (zeros 3 2 2) #:range '(0 +inf.0))))
+    (check-exn #rx"value-range"
+               (lambda () (written (zeros 3 2 2) #:range '(-inf.0 1))))
     (check-exn #rx"expected: image"
                (lambda () (written (to-dtype (zeros 3 2 2) 'bool))))
     ;; a PPM header states a width and a height, and neither may be zero
