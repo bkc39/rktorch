@@ -16,8 +16,25 @@
 
 (define-runtime-path native-libs-dir "../../native-libs")
 
+;; Without #:fail this reports the platform loader's own miss, naming a path
+;; nobody chose and no way forward. The package installs and its docs render
+;; without the library (the catalog's build server has none), so this is where
+;; a user without one finds out.
+(define (no-native-library)
+  (error 'torch
+         (string-append
+          "the native library libtorchrkt is not staged.\n"
+          "  looked in: ~a\n"
+          "  Build it with Nix -- `nix build`, or `nix develop`, which stages"
+          " it for you --\n"
+          "  or set TORCHRKT_NATIVE_LIB_PATH to a directory whose lib/ holds"
+          " it and reinstall.\n"
+          "  See docs/building.md.")
+         (simplify-path native-libs-dir)))
+
 (define-ffi-definer define-torch
-  (ffi-lib (build-path native-libs-dir "libtorchrkt")))
+  (ffi-lib (build-path native-libs-dir "libtorchrkt")
+           #:fail no-native-library))
 
 (define-cpointer-type _Tensor)
 

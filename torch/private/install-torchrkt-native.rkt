@@ -49,12 +49,16 @@
      (copy-native-libs! native-libs-dir (build-path cpp-lib-path "lib"))]
     [(has-matching-files? native-libs-dir)
      (void)]
+    ;; Not an error: the package has to install and its manual has to render
+    ;; on a machine with no native library at all, which is what the catalog's
+    ;; build server is. Requiring the bindings without one fails with the
+    ;; instructions below, at the point where the library is actually needed.
     [else
-     (error
-      'pre-installer
+     (eprintf
       (string-append
-       "libtorchrkt not found. Either:\n"
+       "torch: libtorchrkt was not staged, so the bindings will not load"
+       " until it is. Either:\n"
        "  1. Build with Nix: `nix build` (or `nix develop`), which sets\n"
        "     TORCHRKT_NATIVE_LIB_PATH and stages the library, or\n"
-       "  2. Copy libtorchrkt.* manually into ~a")
+       "  2. Copy libtorchrkt.* manually into ~a\n")
       (path->string native-libs-dir))]))
