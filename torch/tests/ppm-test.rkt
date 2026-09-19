@@ -117,6 +117,9 @@
                (lambda () (written (zeros 3 2 2) #:range '(-1e308 1e308))))
     (check-exn #rx"expected: image"
                (lambda () (written (to-dtype (zeros 3 2 2) 'bool))))
+    ;; an int64 image under the default range would quantize to white
+    (check-exn #rx"expected: image"
+               (lambda () (written (to-dtype (zeros 3 2 2) 'int64))))
     ;; a PPM header states a width and a height, and neither may be zero
     (check-exn #rx"expected: image" (lambda () (written (zeros 3 0 2))))
     (check-exn #rx"expected: image" (lambda () (written (zeros 3 2 0)))))

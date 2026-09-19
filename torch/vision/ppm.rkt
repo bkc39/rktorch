@@ -9,12 +9,14 @@
          (only-in "../foreign/contracts.rkt" image-batch/c)
          (only-in "../private/contract.rkt" define/contract-out))
 
+(define ppm-dtypes '(float32 float64 float16 bfloat16 uint8))
+
 (define image/c
   (flat-named-contract
    'image
    (lambda (x)
      (and (tensor? x)
-          (not (eq? (tensor-dtype x) 'bool))
+          (and (memq (tensor-dtype x) ppm-dtypes) #t)
           (let ([dims (tensor-shape x)])
             (and (= 3 (length dims))
                  (= 3 (car dims))
