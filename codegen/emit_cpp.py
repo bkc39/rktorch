@@ -59,11 +59,21 @@ def _c_decl(p: Param, *, receiver: bool, header: bool = False) -> str:
     return decl
 
 
+def _out_names(op: Op) -> list[str]:
+    return [f"out{i}" for i in range(op.returns)] if op.returns > 1 else []
+
+
+def _returns_status(op: Op) -> bool:
+    return op.inplace or op.returns > 1
+
+
 def _c_params(op: Op, *, header: bool = False) -> str:
-    return ", ".join(
+    decls = [
         _c_decl(p, receiver=(op.inplace and i == 0), header=header)
         for i, p in enumerate(op.params)
-    )
+    ]
+    decls += [f"tr_tensor** {out}" for out in _out_names(op)]
+    return ", ".join(decls)
 
 
 def _arg_expr(p: Param) -> str:
@@ -107,11 +117,13 @@ def emit_header(shard: str, ops: list[Op]) -> str:
             shard
         ),
         " * handle (NULL on error); an in-place op mutates its first handle",
-        " * and returns an int status (0 ok, 1 with tr_last_error set). */",
+        " * and returns an int status (0 ok, 1 with tr_last_error set). An op",
+        " * with several Tensor returns also reports a status and writes one",
+        " * new handle per trailing out pointer, every one NULL on error. */",
         "",
     ]
     for op in ops:
-        ret = "int" if op.inplace else "tr_tensor*"
+        ret = "int" if _returns_status(op) else "tr_tensor*"
         lines.append(f"{ret} {op.c_name}({_c_params(op, header=True)});")
     lines += ["", "#ifdef __cplusplus", "}", "#endif"]
     return "\n".join(lines) + "\n"
@@ -139,14 +151,22 @@ def _emit_body(op: Op) -> list[str]:
         # optional dim must name >=1 axis (absent is the nullopt encoding).
         if p.kind == OPTIONAL_INT_ARRAY:
             guards.append(f"({p.name}_has && (!{p.name} || {p.name}_len <= 0))")
-    ret_type = "int" if op.inplace else "tr_tensor*"
+    outs = _out_names(op)
+    guards += [f"!{out}" for out in outs]
+    ret_type = "int" if _returns_status(op) else "tr_tensor*"
     lines = [f"{ret_type} {op.c_name}({_c_params(op)}) {{"]
     if guards:
         cond = " || ".join(guards)
-        fail = "null_arg_status" if op.inplace else "null_arg"
+        if outs:
+            refuse = (f'torchrkt::null_arg_outputs("{op.c_name}", '
+                      f'{{{", ".join(outs)}}})')
+        elif op.inplace:
+            refuse = f'torchrkt::null_arg_status("{op.c_name}")'
+        else:
+            refuse = f'torchrkt::null_arg("{op.c_name}")'
         lines += [
             f"  if ({cond}) {{",
-            f'    return torchrkt::{fail}("{op.c_name}");',
+            f"    return {refuse};",
             "  }",
         ]
     preamble = []
@@ -174,7 +194,12 @@ def _emit_body(op: Op) -> list[str]:
                   "  });", "}"]
     else:
         call = f"at::{op.base}({', '.join(_arg_expr(p) for p in op.params)})"
-        lines += [f'  return torchrkt::alloc_result("{op.c_name}", [&] {{']
+        if outs:
+            lines += [f'  return torchrkt::alloc_results("{op.c_name}", '
+                      f'{{{", ".join(outs)}}}, [&] {{']
+        else:
+            lines += [f'  return torchrkt::alloc_result("{op.c_name}", '
+                      "[&] {"]
         lines += preamble
         lines += [f"    return {call};", "  });", "}"]
     return lines

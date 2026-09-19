@@ -5,6 +5,8 @@
                      syntax/parse/pre)
          (only-in ffi/unsafe _double _enum _fun _int _int64 _ptr _void)
          (only-in ffi/unsafe/alloc allocator deallocator)
+         (only-in ffi/unsafe/atomic call-as-atomic)
+         (only-in racket/list remove-duplicates)
          (only-in "../device-type.rkt" device device-index device-type)
          (only-in "pressure.rkt"
                   call-with-ledger
@@ -26,6 +28,8 @@
          finalizer-diagnostics
          tensor-allocator
          tensor-allocator/rng
+         tensor-allocator/outputs
+         tensor-allocator/outputs/rng
          oom-retry
          oom-retry/status
          reaccount!
@@ -259,6 +263,33 @@
 ;; retry would draw twice and break seeded parity.
 (define (tensor-allocator/rng raw-fn)
   (accounted ((allocator tr-tensor-free/finalizer) raw-fn)))
+
+(define adopt-handle ((allocator tr-tensor-free/finalizer) values))
+
+;; One atomic section spans the call and every registration, as (allocator)
+;; does for a single result, so no break lands between a handle and its
+;; finalizer.
+(define ((adopting-outputs raw-fn) . args)
+  (call-as-atomic
+   (lambda ()
+     (define handles (apply raw-fn args))
+     (and handles (map adopt-handle handles)))))
+
+(define ((accounted-outputs wrapped) . args)
+  (define handles (apply wrapped args))
+  (when handles
+    ;; every output is on the ledger before any collection measures it
+    (for ([dev (in-list (remove-duplicates (filter values
+                                                   (map account! handles))))])
+      (collect-under-pressure! dev)))
+  handles)
+
+;; For raw calls answering a list of handles, or #f on failure.
+(define (tensor-allocator/outputs raw-fn)
+  (accounted-outputs ((oom-retry) (adopting-outputs raw-fn))))
+
+(define (tensor-allocator/outputs/rng raw-fn)
+  (accounted-outputs (adopting-outputs raw-fn)))
 
 (define-syntax (define-unary/raw stx)
   (syntax-parse stx

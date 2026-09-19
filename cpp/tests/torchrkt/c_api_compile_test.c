@@ -194,6 +194,10 @@ void torchrkt_c_api_compile_check(void) {
   tr_tensor* (*gen_where_scalar)(const tr_tensor*, double, double) =
       tr_gen_where_scalar;
   tr_tensor* (*gen_dropout)(const tr_tensor*, double, bool) = tr_gen_dropout;
+  int (*gen_topk)(const tr_tensor*, int64_t, int64_t, bool, bool, tr_tensor**,
+                  tr_tensor**) = tr_gen_topk;
+  int (*gen_sort)(const tr_tensor*, int64_t, bool, tr_tensor**, tr_tensor**) =
+      tr_gen_sort;
   int (*cuda_available)(void) = tr_cuda_is_available;
   int (*cuda_count)(void) = tr_cuda_device_count;
   int (*cuda_stats)(int64_t, int64_t*, int64_t*, int64_t*) =
@@ -316,6 +320,8 @@ void torchrkt_c_api_compile_check(void) {
   (void)gen_where_scalarself;
   (void)gen_where_scalar;
   (void)gen_dropout;
+  (void)gen_topk;
+  (void)gen_sort;
   (void)cuda_available;
   (void)cuda_count;
   (void)cuda_stats;
