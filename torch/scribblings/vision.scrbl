@@ -216,8 +216,10 @@ image viewer and converter reads.
 Lays the @tt{[N C H W]} batch @racket[images], a rank-4 tensor with at
 least one image, out as one @tt{[C H' W']} image, @racket[columns] across
 and @racket[padding] pixels of @racket[pad-value] around every image, on
-the device the batch lives on. One channel becomes three. The layout is
-torchvision's @tt{make_grid}.
+the device the batch lives on. One channel becomes three. A batch of one
+image comes back as that image, with no border, which is what
+@tt{make_grid} returns there. The layout is torchvision's
+@tt{make_grid}.
 }
 
 @defproc[(write-ppm [path path-string?]
@@ -228,5 +230,6 @@ Writes the @tt{[3 H W]} tensor @racket[image] to @racket[path]. A float
 image is quantized the way torchvision's @tt{save_image} does, with
 @racket[range] naming the values that map to 0 and 255, its first below
 its second, so a dataset in @tt{[-1, 1]} passes @racket['(-1 1)]; a uint8
-image is written as it is.
+image is written as it is. A boolean image is not one ATen can subtract
+a range from, so the contract refuses it.
 }
