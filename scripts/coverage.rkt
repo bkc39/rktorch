@@ -89,13 +89,24 @@
            (string->number (list-ref r 4))
            (string->number (list-ref r 5)))))
 
+;; How many rows the report claims, independent of whether each one parsed.
+;; A markup change that breaks only some rows would otherwise drop those
+;; files from the totals with nothing to show for it.
+(define (count-rows html)
+  (length (regexp-match* #px"<tr\\s+class=\"file-info\"" html)))
+
 (define (read-entries)
   (define index (build-path (report-dir) "index.html"))
   (unless (file-exists? index)
     (die "coverage: no report at ~a\n" index))
-  (define entries (parse-entries (file->string index)))
+  (define html (file->string index))
+  (define entries (parse-entries html))
+  (define declared (count-rows html))
   (when (null? entries)
     (die "coverage: could not parse ~a (did cover's html change?)\n" index))
+  (unless (= declared (length entries))
+    (die "coverage: parsed ~a of the ~a rows in ~a; cover's html changed\n"
+         (length entries) declared index))
   entries)
 
 (define (area path)
@@ -165,11 +176,13 @@
     (print-entry-row e)))
 
 (define (print-changed entries)
-  ;; Two queries, not three: `diff HEAD` already covers the index as well as
-  ;; the working tree.
+  ;; `diff HEAD` covers the index as well as the working tree, but git diff
+  ;; only knows about tracked content: a new file nobody has added yet is
+  ;; precisely the uncovered code this flag exists to find.
   (define touched
     (for/list ([f (in-list (append (git "diff" "--name-only" "origin/master...HEAD")
-                                   (git "diff" "--name-only" "HEAD")))]
+                                   (git "diff" "--name-only" "HEAD")
+                                   (git "ls-files" "--others" "--exclude-standard")))]
                #:when (regexp-match? #rx"^torch/.*[.]rkt$" (string-trim f)))
       (string-trim f)))
   (define mine
@@ -285,6 +298,17 @@
        "<span class=\"uncovered\">x)</span></div>"
        "<div class=\"line\" id=\"26\"><span class=\"irrelevant\"> </span></div>"))
      '(25)))
+
+  (test-case "a row that stops matching is visible against the declared count"
+    (define good (row "torch/nn/a" "100" "5" "0" "5"))
+    ;; as if a later cover renamed one cell's class
+    (define drifted
+      (regexp-replace "covered-expressions" (row "torch/nn/b" "50" "1" "1" "2")
+                      "covered-exprs"))
+    (define html (string-append good drifted))
+    (check-equal? (length (parse-entries html)) 1)
+    (check-equal? (count-rows html) 2
+                  "the discrepancy is what read-entries refuses to average over"))
 
   (test-case "a file's area is its directory, with raw/ kept apart"
     (check-equal? (map area '("torch/main.rkt"
