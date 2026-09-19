@@ -99,16 +99,16 @@
        #:rest shape-rest/c tensor?)
   (shaped 'ones tr-ones-on/raw dims device dtype requires-grad?))
 
-;; the fill crosses the FFI as a double: an int64 fill outside the exact
-;; range of a double would round silently and a uint8 fill outside 0..255
-;; would wrap, so the contract refuses both
+;; the fill crosses the FFI as a double: a fractional value would truncate,
+;; an int64 fill outside the exact range of a double would round and a
+;; uint8 fill outside 0..255 would wrap, so the contract refuses all three
+;; where torch takes them silently
 (define (fill-crosses-exactly? value dtype)
   (cond
     [(unsupplied-arg? dtype) #t]
     [(eq? dtype 'int64)
-     (or (not (exact-integer? value))
-         (= (exact->inexact value) value)
-         "an int64 fill value must be exactly representable as a double")]
+     (or (and (integer? value) (= (exact->inexact value) value))
+         "an int64 fill value must be an integer exactly representable as a double")]
     [(eq? dtype 'uint8)
      (or (and (integer? value) (<= 0 value 255))
          "a uint8 fill value must be an integer from 0 to 255")]

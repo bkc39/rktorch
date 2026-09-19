@@ -57,6 +57,15 @@
                (lambda () (full 1.5 2 #:dtype 'uint8)))
     (check-exn #rx"uint8 fill value must be an integer from 0 to 255"
                (lambda () (full-like (zeros 2) -1 #:dtype 'uint8)))
+    ;; torch truncates a fractional fill for both dtypes; int64 refuses it
+    ;; here for the reason uint8 does
+    (check-equal? (tensor->list (full 2.0 2 #:dtype 'int64)) '(2 2))
+    (check-exn #rx"int64 fill value must be an integer"
+               (lambda () (full 0.5 2 #:dtype 'int64)))
+    (check-exn #rx"int64 fill value must be an integer"
+               (lambda () (full 1/2 2 #:dtype 'int64)))
+    (check-exn #rx"int64 fill value must be an integer"
+               (lambda () (full (add1 (expt 2 60)) 2 #:dtype 'int64)))
     (check-equal? (tensor->repr (to (tensor '(1.5 -2.0)) 'float64))
                   "tensor([ 1.5000, -2.0000], dtype=torch.float64)"))
 

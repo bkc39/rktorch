@@ -9,9 +9,9 @@
          (only-in "../foreign/contracts.rkt" image-batch/c)
          (only-in "../private/contract.rkt" define/contract-out))
 
-;; ATen has no subtraction on a boolean tensor, so the range transform
-;; has nothing to apply there; a PPM states its width and height, and
-;; neither may be zero
+(define (pixels? dims)
+  (andmap positive? (list-tail dims (- (length dims) 2))))
+
 (define image/c
   (flat-named-contract
    'image
@@ -19,10 +19,7 @@
      (and (tensor? x)
           (not (eq? (tensor-dtype x) 'bool))
           (let ([dims (tensor-shape x)])
-            (and (= 3 (length dims))
-                 (= 3 (car dims))
-                 (positive? (cadr dims))
-                 (positive? (caddr dims))))))))
+            (and (= 3 (length dims)) (= 3 (car dims)) (pixels? dims)))))))
 
 (define value-range/c
   (flat-named-contract
@@ -32,7 +29,10 @@
 (define non-empty-image-batch/c
   (flat-named-contract
    'non-empty-image-batch
-   (and/c image-batch/c (lambda (x) (positive? (car (tensor-shape x)))))))
+   (and/c image-batch/c
+          (lambda (x)
+            (let ([dims (tensor-shape x)])
+              (and (positive? (car dims)) (pixels? dims)))))))
 
 (define/contract-out (image-grid images ;; noqa
                                  #:columns [columns 8]

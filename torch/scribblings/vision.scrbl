@@ -214,7 +214,8 @@ image viewer and converter reads.
                      [#:pad-value pad-value (fill-value/c (tensor-dtype images)) 0])
          tensor?]{
 Lays the @tt{[N C H W]} batch @racket[images], a rank-4 tensor with at
-least one image, out as one @tt{[C H' W']} image, @racket[columns] across
+least one image and no zero dimension, out as one @tt{[C H' W']} image,
+@racket[columns] across
 and @racket[padding] pixels of @racket[pad-value] around every image, on
 the device the batch lives on. One channel becomes three. A batch of one
 image comes back as that image, with no border, which is what
