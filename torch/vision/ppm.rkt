@@ -23,7 +23,10 @@
 (define value-range/c
   (flat-named-contract
    'value-range
-   (and/c (list/c rational? rational?) (lambda (r) (< (car r) (cadr r))))))
+   (and/c (list/c rational? rational?)
+          (lambda (r)
+            (define span (exact->inexact (- (cadr r) (car r))))
+            (and (< (car r) (cadr r)) (rational? span) (positive? span))))))
 
 (define non-empty-image-batch/c
   (flat-named-contract
@@ -51,7 +54,6 @@
       [(= n 1) (one-image (select images 0 0) c h w)]
       [else (grid-of images n c h w columns padding pad-value)])))
 
-;; make_grid returns a single image as it is, with no border
 (define (one-image image c h w)
   (cond
     [(= c 1)
@@ -84,14 +86,16 @@
   (define lo (car value-range))
   (define hi (cadr value-range))
   (define pixels
-    (tensor->vector
-     (permute (if (eq? (tensor-dtype image) 'uint8)
-                  image
-                  (to-dtype (clamp (add (mul (sub image lo) (/ 255.0 (- hi lo)))
-                                        0.5)
-                                   #:min 0 #:max 255)
-                            'uint8))
-              1 2 0)))
+    (with-no-grad
+      (tensor->vector
+       (permute (if (eq? (tensor-dtype image) 'uint8)
+                    image
+                    (to-dtype (clamp (add (mul (sub image lo)
+                                               (/ 255.0 (- hi lo)))
+                                          0.5)
+                                     #:min 0 #:max 255)
+                              'uint8))
+                1 2 0))))
   (call-with-output-file path
     #:exists 'truncate
     (lambda (out)

@@ -112,11 +112,22 @@
                (lambda () (written (zeros 3 2 2) #:range '(0 +inf.0))))
     (check-exn #rx"value-range"
                (lambda () (written (zeros 3 2 2) #:range '(-inf.0 1))))
+    ;; finite endpoints whose span is not: the scale would come out zero
+    (check-exn #rx"value-range"
+               (lambda () (written (zeros 3 2 2) #:range '(-1e308 1e308))))
     (check-exn #rx"expected: image"
                (lambda () (written (to-dtype (zeros 3 2 2) 'bool))))
     ;; a PPM header states a width and a height, and neither may be zero
     (check-exn #rx"expected: image" (lambda () (written (zeros 3 0 2))))
     (check-exn #rx"expected: image" (lambda () (written (zeros 3 2 0)))))
+
+  (test-case "write-ppm quantizes off the graph, as save_image does"
+    (define x (mul (rand 3 2 2 #:requires-grad? #t) 1.0))
+    (check-true (requires-grad? x))
+    (define path (make-temporary-file "rkt-grad-~a.ppm"))
+    (write-ppm path x)
+    (check-equal? (bytes-length (file->bytes path)) (+ 11 (* 3 2 2)))
+    (delete-file path))
 
   (test-case "image-grid and write-ppm accept device tensors"
     (when (cuda-available?)
