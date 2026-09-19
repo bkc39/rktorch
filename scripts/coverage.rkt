@@ -238,11 +238,11 @@
 (module+ test
   (require (only-in rackunit check-equal? test-case))
 
-  (define (row name pct cov unc total)
+  (define (row name percent cov unc total)
     (string-append
      "<tr class=\"file-info\"><td class=\"file-name\">"
      "<a href=\"" name ".html\">" name ".rkt</a></td>"
-     "<td class=\"coverage-percentage\">" pct "</td>"
+     "<td class=\"coverage-percentage\">" percent "</td>"
      "<td class=\"covered-expressions\">" cov "</td>"
      "<td class=\"uncovered-expressions\">" unc "</td>"
      "<td class=\"total-expressions\">" total "</td></tr>"))
