@@ -154,3 +154,8 @@ loss l1_loss
 
 # flip along the width axis is the horizontal-flip augmentation.
 shape flip
+# --- tranche 7 (#153): the sequence op closure ------------------------------
+# topk and sort are the first ops with several Tensor returns (#154): an
+# integer status plus one out pointer per return, (values, indices) here.
+sort topk
+sort sort
