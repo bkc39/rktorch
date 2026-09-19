@@ -1,6 +1,6 @@
 #lang racket/base
 
-(require (only-in racket/contract/base ->* listof)
+(require (only-in racket/contract/base ->* list/c)
          (only-in threading ~>)
          (only-in "../foreign.rkt" adaptive-avg-pool2d add flatten relu)
          (only-in "../nn/batch-norm.rkt" BatchNorm2d)
@@ -28,6 +28,10 @@
   (relu (add (bn2 (conv2 (relu (bn1 (conv1 x)))))
              (if shortcut (shortcut x) x))))
 
+(define four-stage-depths/c
+  (list/c exact-positive-integer? exact-positive-integer?
+          exact-positive-integer? exact-positive-integer?))
+
 (define (stage in out blocks stride)
   (apply Sequential
          (BasicBlock in out #:stride stride)
@@ -39,7 +43,7 @@
   #:contract (->* []
                   [#:classes exact-positive-integer?
                    #:base exact-positive-integer?
-                   #:blocks (listof exact-positive-integer?)]
+                   #:blocks four-stage-depths/c]
                   resnet?)
   #:init (#:classes [classes 10] #:base [base 64] #:blocks [blocks '(2 2 2 2)])
   (set! stem (Conv2d 3 base 3 #:padding 1 #:bias? #f))

@@ -260,7 +260,11 @@ shortcut is the identity with no parameters of its own, as torchvision.
 
 @defproc[(ResNet [#:classes classes exact-positive-integer? 10]
                  [#:base base exact-positive-integer? 64]
-                 [#:blocks blocks (listof exact-positive-integer?) '(2 2 2 2)])
+                 [#:blocks blocks (list/c exact-positive-integer?
+                                          exact-positive-integer?
+                                          exact-positive-integer?
+                                          exact-positive-integer?)
+                                   '(2 2 2 2)])
          resnet?]{
 The stem at @racket[base] channels, then four stages of @racket[blocks]
 basic blocks at @racket[base], twice, four and eight times that, the last
