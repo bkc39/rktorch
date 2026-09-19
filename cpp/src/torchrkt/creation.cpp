@@ -127,6 +127,30 @@ tr_tensor* tr_from_data_i64_on_device(const int64_t* data, uint64_t numel,
   });
 }
 
+tr_tensor* tr_from_data_f64(const double* data, uint64_t numel,
+                            const int64_t* dims, int64_t ndim) {
+  if ((!data && numel > 0) || torchrkt::bad_dims(dims, ndim)) {
+    return torchrkt::null_arg("tr_from_data_f64");
+  }
+  return torchrkt::alloc_result("tr_from_data_f64", [&] {
+    return host_from_data(data, numel, dims, ndim, torch::kFloat64)
+        .to(torchrkt::current_default_device());
+  });
+}
+
+tr_tensor* tr_from_data_f64_on_device(const double* data, uint64_t numel,
+                                      const int64_t* dims, int64_t ndim,
+                                      tr_device_type device_type,
+                                      int64_t device_index) {
+  if ((!data && numel > 0) || torchrkt::bad_dims(dims, ndim)) {
+    return torchrkt::null_arg("tr_from_data_f64_on_device");
+  }
+  return torchrkt::alloc_result("tr_from_data_f64_on_device", [&] {
+    return host_from_data(data, numel, dims, ndim, torch::kFloat64)
+        .to(torchrkt::to_torch_device(device_type, device_index));
+  });
+}
+
 tr_tensor* tr_from_data_u8(const uint8_t* data, uint64_t numel,
                            const int64_t* dims, int64_t ndim) {
   if ((!data && numel > 0) || torchrkt::bad_dims(dims, ndim)) {

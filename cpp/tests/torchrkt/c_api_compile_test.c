@@ -40,6 +40,11 @@ void torchrkt_c_api_compile_check(void) {
   tr_tensor* (*from_data_i64_on)(const int64_t*, uint64_t, const int64_t*,
                                  int64_t, tr_device_type, int64_t) =
       tr_from_data_i64_on_device;
+  tr_tensor* (*from_data_f64)(const double*, uint64_t, const int64_t*,
+                              int64_t) = tr_from_data_f64;
+  tr_tensor* (*from_data_f64_on)(const double*, uint64_t, const int64_t*,
+                                 int64_t, tr_device_type, int64_t) =
+      tr_from_data_f64_on_device;
   tr_tensor* (*from_data_u8)(const uint8_t*, uint64_t, const int64_t*,
                              int64_t) = tr_from_data_u8;
   tr_tensor* (*from_data_u8_on)(const uint8_t*, uint64_t, const int64_t*,
@@ -235,6 +240,8 @@ void torchrkt_c_api_compile_check(void) {
   (void)from_data_i64_on;
   (void)tensor_dtype;
   (void)copy_data_i64;
+  (void)from_data_f64;
+  (void)from_data_f64_on;
   (void)from_data_u8;
   (void)from_data_u8_on;
   (void)copy_data_u8;
