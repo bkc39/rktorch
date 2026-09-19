@@ -40,6 +40,8 @@ OPTIONAL_INT64 = "optional-int64"
 OPTIONAL_INT_ARRAY = "optional-int-array"
 OPTIONAL_DTYPE = "optional-dtype"
 OPTIONAL_SCALAR = "optional-scalar"
+# Tranche 7 (#153): a tr_generator handle, NULL for the global stream.
+OPTIONAL_GENERATOR = "optional-generator"
 
 
 @dataclass(frozen=True)
@@ -123,6 +125,8 @@ def _param_kind(ty) -> str | None:
                 return OPTIONAL_DTYPE
             if elem.name is BaseTy.Scalar:
                 return OPTIONAL_SCALAR
+            if elem.name is BaseTy.Generator:
+                return OPTIONAL_GENERATOR
         if _int_list(elem):
             return OPTIONAL_INT_ARRAY
     return None

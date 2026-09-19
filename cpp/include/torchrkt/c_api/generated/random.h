@@ -5,23 +5,22 @@
 
 #include <stdbool.h>
 
+#include "torchrkt/c_api/random.h"
 #include "torchrkt/c_api/tensor.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-/* Generated ops (sort). A functional op returns a new tr_tensor
+/* Generated ops (random). A functional op returns a new tr_tensor
  * handle (NULL on error); an in-place op mutates its first handle
  * and returns an int status (0 ok, 1 with tr_last_error set). An op
  * with several Tensor returns also reports a status and writes one
  * new handle per trailing out pointer, every one NULL on error. */
 
-tr_tensor* tr_gen_argsort(const tr_tensor* self, int64_t dim, bool descending);
-int tr_gen_sort(const tr_tensor* self, int64_t dim, bool descending,
-                tr_tensor** out0, tr_tensor** out1);
-int tr_gen_topk(const tr_tensor* self, int64_t k, int64_t dim, bool largest,
-                bool sorted, tr_tensor** out0, tr_tensor** out1);
+tr_tensor* tr_gen_multinomial(
+    const tr_tensor* self, int64_t num_samples, bool replacement,
+    const tr_generator* generator /* nullable: NULL == the global stream */);
 
 #ifdef __cplusplus
 }

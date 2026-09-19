@@ -20,7 +20,8 @@
   ;; one fails loudly). Spec -> input: (tensor dim ...) = seeded randn,
   ;; (tensors ...) a list of them, (bool-tensor ...) a genuine bool handle
   ;; via `ne 0`, (kwarg "name" v) a scalar (or none) passed as name=v to a kwarg-only
-  ;; aten arg, (optional-scalar v) a Scalar? bound, other heads are
+  ;; aten arg, (optional-scalar v) a Scalar? bound, (uniform-tensor dim ...)
+  ;; a seeded rand (non-negative, for probabilities), other heads are
   ;; literals with #f = None.
   (define generated-recipes
     (hash 'matmul '((tensor 2 3) (tensor 3 2))
@@ -135,13 +136,25 @@
           'repeat-interleave-self-int '((tensor 2 3) (int64 2) (optional-int64 1)
                                         (kwarg "output_size" none))
           'topk '((tensor 3 5) (int64 2) (int64 -1) (bool #t) (bool #t))
-          'sort-tensor '((tensor 3 5) (int64 -1) (bool #f))))
+          'sort-tensor '((tensor 3 5) (int64 -1) (bool #f))
+          'argsort '((tensor 3 5) (int64 -1) (bool #f))
+          'multinomial '((uniform-tensor 3 6) (int64 4) (bool #f)
+                         (kwarg "generator" none))
+          'lstm-input '((tensor 5 2 3) (tensors (1 2 4) (1 2 4))
+                        (tensors (16 3) (16 4) (16) (16))
+                        (bool #t) (int64 1) (double 0.0) (bool #f) (bool #f)
+                        (bool #f))
+          'gru-input '((tensor 5 2 3) (tensor 1 2 4)
+                       (tensors (12 3) (12 4) (12) (12))
+                       (bool #t) (int64 1) (double 0.0) (bool #f) (bool #f)
+                       (bool #f))))
 
   ;; Tensor specs draw seeded randns left to right — both sides consume the
   ;; same RNG stream, so spec order and draw counts must match exactly.
   (define (spec->racket-arg spec)
     (case (car spec)
       [(tensor) (apply randn (cdr spec))]
+      [(uniform-tensor) (apply rand (cdr spec))]
       [(tensors)
        (for/list ([dims (in-list (cdr spec))])
          (apply randn dims))]
@@ -162,6 +175,7 @@
       (string-join (map number->string vs) ", "))
     (case (car spec)
       [(tensor) (format "torch.randn(~a)" (csv (cdr spec)))]
+      [(uniform-tensor) (format "torch.rand(~a)" (csv (cdr spec)))]
       [(tensors)
        (format "[~a]"
                (string-join (for/list ([dims (in-list (cdr spec))])
@@ -405,4 +419,26 @@
      (check-generated-parity
       (assq 'sort-tensor manifest)
       '((tensor 3 5) (int64 0) (bool #t))
-      "[descending-dim-0]")]))
+      "[descending-dim-0]")
+     (check-generated-parity
+      (assq 'argsort manifest)
+      '((tensor 3 5) (int64 0) (bool #t))
+      "[descending-dim-0]")
+     (check-generated-parity
+      (assq 'multinomial manifest)
+      '((uniform-tensor 3 6) (int64 8) (bool #t) (kwarg "generator" none))
+      "[replacement]")
+     (check-generated-parity
+      (assq 'lstm-input manifest)
+      '((tensor 2 5 3) (tensors (4 2 4) (4 2 4))
+        (tensors (16 3) (16 4) (16 3) (16 4)
+                 (16 8) (16 4) (16 8) (16 4))
+        (bool #f) (int64 2) (double 0.0) (bool #f) (bool #t) (bool #t))
+      "[2-layer-bidirectional-batch-first-no-bias]")
+     (check-generated-parity
+      (assq 'gru-input manifest)
+      '((tensor 2 5 3) (tensor 4 2 4)
+        (tensors (12 3) (12 4) (12 3) (12 4)
+                 (12 8) (12 4) (12 8) (12 4))
+        (bool #f) (int64 2) (double 0.0) (bool #f) (bool #t) (bool #t))
+      "[2-layer-bidirectional-batch-first-no-bias]")]))

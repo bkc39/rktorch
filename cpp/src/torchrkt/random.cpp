@@ -10,13 +10,10 @@
 #include <vector>
 
 #include "torchrkt/detail/error.hpp"
+#include "torchrkt/detail/generator_handle.hpp"
 #include "torchrkt/detail/op_call.hpp"
 #include "torchrkt/detail/options.hpp"
 #include "torchrkt/detail/tensor_handle.hpp"
-
-struct tr_generator {
-  at::Generator value;
-};
 
 extern "C" {
 
