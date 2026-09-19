@@ -10,6 +10,8 @@
            "../main.rkt"
            "../nn.rkt"
            (only-in "../generated.rkt" cudnn-rnn-flatten-weight)
+           (only-in (submod "../nn/recurrent.rkt" private)
+                    recurrent-flattened-on)
            "private/python-env.rkt")
 
   (define (flat ts)
@@ -113,6 +115,18 @@
       (check-equal? (trough-minors) with-grad
                     "with gradients on a layer call is the peak, not a trough")
       (check-true (and train-out #t))))
+
+  (test-case "only a move that rebinds the weights forgets the flattening"
+    (define gru (GRU 3 4))
+    (define-values (out _h) (gru (randn 5 2 3)))
+    (check-true (and out #t))
+    (check-not-false (recurrent-flattened-on gru))
+    (to gru 'cpu)
+    (check-not-false (recurrent-flattened-on gru)
+                     "a move that changed nothing scattered the weights")
+    (to gru 'float64)
+    (check-false (recurrent-flattened-on gru)
+                 "a dtype move kept a flattening of the old storage"))
 
   (test-case "constructor contracts"
     (check-exn exn:fail:contract? (lambda () (LSTM 0 4)))
