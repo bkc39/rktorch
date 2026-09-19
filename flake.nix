@@ -545,7 +545,11 @@
             export TORCHRKT_NATIVE_LIB_PATH="${shim}"
             export PLTUSERHOME="$PWD/.racket-user"
             _rkt_ver=$(racket --version 2>&1 | grep -oE 'v[0-9]+\.[0-9]+' | tr -d 'v' | tr '.' '-')
-            deps_stamp="$PLTUSERHOME/.deps2-installed-torch-''${_rkt_ver}"
+            # Bump the ordinal whenever the installed package list below
+            # changes: the stamp is what makes provisioning a one-time cost,
+            # so an already-provisioned checkout would otherwise skip the new
+            # package and only fail later, where it is used. (deps3: cover-lib)
+            deps_stamp="$PLTUSERHOME/.deps3-installed-torch-''${_rkt_ver}"
             # In-tree zo caches compiled piecewise across commits can defeat
             # the compilation manager, so bytecode is keyed to HEAD by a
             # stamp-and-clear (a per-rev PLTCOMPILEDROOTS would recompile
@@ -581,12 +585,18 @@
               raco pkg install --batch --auto --no-setup --link --scope user --skip-installed \
                 --name torch "$PWD/torch"
               raco setup --no-docs --pkgs torch
-              echo "Installing Racket linters (Resyntax + racket-review)..."
+              echo "Installing Racket dev tools (Resyntax + racket-review + cover)..."
+              # Unpinned, from the live catalog, like the linters beside it;
+              # cover-lib rides along when #63 pins them. It cannot join the
+              # racket-deps FOD as things stand: a fixed-output derivation may
+              # not reference store paths, and the doc packages in that closure
+              # embed them in their rendered HTML.
               raco pkg install --batch --auto --scope user --skip-installed \
-                resyntax review
+                resyntax review cover-lib
               touch "$deps_stamp"
               echo "Done. Lint: resyntax analyze --local-git-repository . origin/master"
               echo "      full sweep: resyntax analyze --directory torch  |  raco review <files>"
+              echo "      coverage:   racket scripts/coverage.rkt"
             fi
             export PATH="$(racket -e '(require setup/dirs)(display (path->string (find-user-console-bin-dir)))'):$PATH"
           '';

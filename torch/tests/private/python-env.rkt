@@ -70,27 +70,30 @@
 (define-syntax-parse-rule (with-python-env body:expr ...+)
   (call-with-python-env (lambda () body ...)))
 
+;; `python3 -c` prepends the working directory to sys.path, so from the
+;; repository root `import torch` finds the Racket collection DIRECTORY as an
+;; implicit namespace package and a probe answers yes with no wheel installed.
+;; raco test hides it by chdir'ing into each test's directory; raco cover and a
+;; bare racket do not. Scoped to the `-c` probes: the same variable would also
+;; stop a reference script importing a sibling helper out of its own directory.
+(define (probe . args)
+  (call-with-python-env
+   #:env '(("PYTHONSAFEPATH" . "1"))
+   (lambda ()
+     (parameterize ([current-output-port (open-output-nowhere)]
+                    [current-error-port (open-output-nowhere)])
+       (apply system* python args)))))
+
 (define (python-module-available? mod)
-  (and python
-       (with-python-env
-        (parameterize ([current-output-port (open-output-nowhere)]
-                       [current-error-port (open-output-nowhere)])
-          (system* python "-c" (format "import ~a" mod))))))
+  (and python (probe "-c" (format "import ~a" mod))))
 
 (define (python-torch-available?)
-  (and python
-       (with-python-env
-        (parameterize ([current-output-port (open-output-nowhere)]
-                       [current-error-port (open-output-nowhere)])
-          (system* python "-c" "import torch")))))
+  (and python (probe "-c" "import torch")))
 
 (define (python-cuda-available?)
   (and python
-       (with-python-env
-        (parameterize ([current-output-port (open-output-nowhere)]
-                       [current-error-port (open-output-nowhere)])
-          (system* python "-c"
-                   "import torch,sys; sys.exit(0 if torch.cuda.is_available() else 1)")))))
+       (probe "-c"
+              "import torch,sys; sys.exit(0 if torch.cuda.is_available() else 1)")))
 
 ;; Runs a Python reference file relative to examples/.
 (define (python-result rel-path)
