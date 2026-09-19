@@ -77,7 +77,6 @@
 
 (define/contract-out (words->vocab sentences) ;; noqa
   (-> (listof string?) word-vocab?)
-  ;; the specials lead, so a corpus that spells one keeps the reserved id
   (define words
     (vector->immutable-vector
      (list->vector
