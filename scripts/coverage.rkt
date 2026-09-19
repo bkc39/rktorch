@@ -184,7 +184,7 @@
        (define ls (uncovered-lines (entry-path e)))
        (cond
          [(eq? ls 'missing)
-          (printf "      uncovered lines: unknown, cover wrote no report\n")]
+          (displayln "      uncovered lines: unknown, cover wrote no report")]
          [(null? ls) (void)]
          [else (printf "      uncovered lines: ~a\n"
                        (string-join (map number->string ls) " "))]))]))
