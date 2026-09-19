@@ -107,6 +107,10 @@ CPU-first; float32 + inferred int64 (#44) + uint8 from bytes (#58). From
   int64 labels), `cifar10-dataset #:device`, `cifar10-label-names`,
   `load-cifar10-fixture` (256 committed records), `cifar10-records->tensors`,
   `tar-entries`
+- images (`torch/vision/ppm.rkt`, #155): `image-grid #:columns #:padding
+  #:pad-value` (torchvision's `make_grid` layout, on the device) and
+  `write-ppm #:range` (binary P6, `save_image`'s quantization; a uint8 image
+  as it is)
 - shape: `reshape view transpose permute squeeze unsqueeze cat stack`
 - elementwise: `add sub mul div pow neg exp log sqrt relu sigmoid tanh silu
   clamp`
