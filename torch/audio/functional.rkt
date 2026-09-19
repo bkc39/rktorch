@@ -4,21 +4,16 @@
                   -> ->* ->i =/c >=/c and/c any/c listof or/c
                   unsupplied-arg?)
          (only-in "../foreign/error.rkt" check-handle)
-         (only-in "../foreign/ops.rkt" device->type+index)
+         (only-in "../foreign/ops.rkt" float-dtype/c placement)
          (only-in "../foreign/raw/spectral.rkt"
                   tr-hann-window/raw tr-stft/raw)
          (only-in "../foreign/structs.rkt" wrap-tensor)
          (only-in "../main.rkt"
-                  add device/c dtype dtype/c log matmul mul ref sqrt t tensor
+                  add device/c dtype log matmul mul ref sqrt t tensor
                   tensor-device tensor? to-dtype)
          (only-in "../private/contract.rkt" define/contract-out))
 
 (define maybe-length/c (or/c #f exact-positive-integer?))
-
-(define (placement device dtype)
-  (define-values (type index)
-    (if device (device->type+index device) (values 'keep 0)))
-  (values type index (or dtype 'keep)))
 
 (define/contract-out (hann-window window-length
                                   #:periodic? [periodic? #t]
@@ -27,7 +22,7 @@
   (->* (exact-nonnegative-integer?)
        (#:periodic? boolean?
         #:device (or/c #f device/c)
-        #:dtype (or/c #f dtype/c))
+        #:dtype (or/c #f float-dtype/c))
        tensor?)
   (define-values (type index dt) (placement device dtype))
   (wrap-tensor
@@ -120,7 +115,7 @@
        (#:f-min [f-min (and/c rational? (>=/c 0))]
         #:f-max [f-max (or/c #f (and/c rational? positive?))]
         #:device [device (or/c #f device/c)]
-        #:dtype [dtype (or/c #f dtype/c)])
+        #:dtype [dtype (or/c #f float-dtype/c)])
        #:pre/name (f-min f-max sample-rate) "f-min below the effective f-max"
        (< (if (unsupplied-arg? f-min) 0.0 f-min)
           (if (or (unsupplied-arg? f-max) (not f-max))
@@ -141,9 +136,9 @@
         (define down (/ (- f f-lo) (- f-mid f-lo)))
         (define up (/ (- f-hi f) (- f-hi f-mid)))
         (max 0.0 (min down up)))))
-  ;; tensor builds float32, int64 and uint8 only, so any other dtype is a
-  ;; cast on the destination rather than a second trip across the boundary
-  (define buildable? (and (memq dtype '(#f float32 int64 uint8)) #t))
+  ;; tensor builds no float64, so that one is a cast on the destination
+  ;; rather than a second trip across the boundary
+  (define buildable? (and (memq dtype '(#f float32)) #t))
   (define built (tensor rows #:device device #:dtype (and buildable? dtype)))
   (if buildable? built (to-dtype built dtype)))
 

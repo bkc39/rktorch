@@ -30,6 +30,8 @@
          (only-in "error.rkt" check-handle check-ok)
          (only-in "ops.rkt"
                   device->type+index
+                  float-dtype/c
+                  placement
                   dims-rest/c
                   dtype/c
                   tensor-device
@@ -65,17 +67,8 @@
 (define (shape-of dims)
   (if (and (pair? dims) (list? (car dims))) (car dims) dims))
 
-;; the device and dtype go into native construction — never a default-device
-;; scope or a construct-then-move hop through another device
-(define (placement device dtype)
-  (define-values (type index)
-    (if device (device->type+index device) (values 'keep 0)))
-  (values type index (or dtype 'keep)))
-
 (define (finish out requires-grad?)
   (if requires-grad? (requires-grad! out) out))
-
-(define float-dtype/c (or/c 'float32 'float64))
 
 (define (shaped who raw dims device dtype requires-grad? . extra)
   (define shape (shape-of dims))
