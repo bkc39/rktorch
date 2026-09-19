@@ -243,6 +243,8 @@
     (check-= (car (tensor->list var)) 1.1 1e-5 "unbiased batch variance")
     (check-exn #rx"running statistics" (lambda () (batch-norm x)))
     (check-exn #rx"running statistics"
+               (lambda () (batch-norm x #:training? #f)))
+    (check-exn #rx"running statistics"
                (lambda () (batch-norm x #:running-mean mean #:training? #t))))
 
   (test-case "upsample-nearest2d: every pixel becomes a scale by scale block"

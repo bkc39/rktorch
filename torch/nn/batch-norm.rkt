@@ -2,7 +2,7 @@
 
 (require (only-in racket/contract/base ->*)
          (only-in "../foreign.rkt"
-                  add batch-norm copy! ones tensor to-dtype zeros)
+                  add batch-norm copy! ones ones-like tensor zeros)
          (only-in "../foreign/contracts.rkt" feature-batch/c image-batch/c)
          (only-in "buffer.rkt" Buffer)
          (only-in "layer.rkt" define-layer training? with-mode)
@@ -12,10 +12,10 @@
                    running-mean running-var num-batches-tracked)
   (define training (training? mode))
   (when training
-    ;; nn.BatchNorm2d counts the batches it has normalised; add promotes the
-    ;; int64 counter, so the sum is cast back before it lands in the buffer
+    ;; the one is a tensor, not the scalar 1: a scalar promotes the counter to
+    ;; float32, which stops advancing it once it reaches 2^24
     (copy! num-batches-tracked
-           (to-dtype (add num-batches-tracked 1) 'int64)))
+           (add num-batches-tracked (ones-like num-batches-tracked))))
   (batch-norm x
               #:running-mean running-mean
               #:running-var running-var

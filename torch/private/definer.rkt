@@ -65,8 +65,6 @@
     #:attr bare? #f
     #:with (decl ...) #'(kw [id default])))
 
-;; a forward formal is a bare id, or [id : contract] to state what the
-;; layer accepts there — the notation #99 proposes for #:init
 (define-syntax-class forward-formal ;; noqa
   #:description "forward formal (id or [id : contract])"
   (pattern id:id

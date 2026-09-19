@@ -50,9 +50,10 @@ module boundary of its own to name the caller by. A bare @racket[id]
 accepts anything, as before.
 
 @racketblock[
-(define-layer BatchNorm2d (weight bias)
+(define-layer BatchNorm2d (weight bias running-mean running-var)
   #:forward ([x : image-batch/c])
-  (batch-norm x #:weight weight #:bias bias))
+  (batch-norm x #:weight weight #:bias bias
+              #:running-mean running-mean #:running-var running-var))
 ]
 
 @racket[#:init] is the constructor body, the analogue of @tt{__init__}.
