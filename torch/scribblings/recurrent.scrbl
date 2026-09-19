@@ -62,6 +62,10 @@ After a move with @racket[to], the first call on a CUDA device packs the
 weights into the single buffer cudnn wants; the parameters stay the same
 tensors, so an optimizer built before or after sees them alike.
 
+On the CPU these run through oneDNN, which carries only @racket['float32]
+for a recurrence, so a layer moved to @racket['float64] raises from ATen on
+its next call; CUDA takes both.
+
 Unbatched rank-two inputs, projections (@tt{proj_size}) and packed
 sequences are not supported.
 }

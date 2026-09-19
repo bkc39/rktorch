@@ -134,16 +134,23 @@
   (test-case "a nested recurrent layer hears the move too"
     (define-layer Wrap (inner) ;; noqa
       #:init ()
-      (set! inner (GRU 3 4))
+      (set! inner (LSTM 3 4))
       #:forward (x)
-      (let-values ([(out _h) (inner x)]) out))
+      (let-values ([(out _h _c) (inner x)]) out))
     (define net (Wrap))
     (define w (cdr (assoc "inner.weight_ih_l0" (named-parameters net))))
+    (define (recorded) (flattened-placement w))
+    (define (now) (cons (tensor-device w) (tensor-dtype w)))
     (void (net (randn 5 2 3)))
-    (check-equal? (flattened-placement w)
-                  (cons (tensor-device w) (tensor-dtype w)))
+    (check-equal? (recorded) (now))
+    (to net (cpu-device))
+    (check-equal? (recorded) (now)
+                  "a device move that changed nothing forgot the flattening")
+    (to net (cpu-device) 'float32)
+    (check-equal? (recorded) (now)
+                  "a device and dtype move that changed nothing forgot it")
     (to net 'float64)
-    (check-false (flattened-placement w)
+    (check-false (recorded)
                  "moving the parent left the child's flattening behind"))
 
   (test-case "constructor contracts"

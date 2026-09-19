@@ -116,8 +116,7 @@
     (cond
       [(and dev dtype) (to (cdr c) dev dtype)]
       [dev (to (cdr c) dev)]
-      [dtype (to (cdr c) dtype)]
-      [else (void)]))
+      [else (to (cdr c) dtype)]))
   (for ([t (in-list (own-tensors m))])
     (move-tensor! t dev dtype))
   m)
