@@ -128,7 +128,8 @@
 
 (provide mse-loss
          cross-entropy
-         ctc-loss)
+         ctc-loss
+         nll-loss)
 
 (provide state-dict
          save-state!
