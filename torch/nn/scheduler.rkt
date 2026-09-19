@@ -1,8 +1,8 @@
 #lang racket/base
 
 (require (only-in racket/contract/base
-                  -> ->* >/c any/c contract-out listof
-                  procedure-arity-includes/c real-in)
+                  -> ->* </c >=/c >/c and/c any/c contract-out listof
+                  real-in)
          (only-in racket/generic define/generic)
          (only-in racket/math pi)
          (only-in "../private/contract.rkt" define/contract-out)
@@ -12,10 +12,8 @@
 
 (provide (contract-out [scheduler? (-> any/c boolean?)]))
 
-;; a learning-rate schedule wraps an optimizer and answers to step! like
-;; one: each step advances the count and writes the closed-form rate for it
-;; into the optimizer, as torch.optim.lr_scheduler does after optimizer.step()
-(struct scheduler (optimizer base-lr lr-at [last #:mutable])
+(struct scheduler (optimizer base-lr lr-at [last #:mutable]
+                             [last-rate #:mutable])
   #:constructor-name make-scheduler
   #:name scheduler-value ;; noqa
   #:methods gen:optimizer
@@ -30,14 +28,12 @@
      (apply-rate! s))])
 
 (define (apply-rate! s)
-  (optimizer-set-lr! (scheduler-optimizer s)
-                     ((scheduler-lr-at s) (scheduler-base-lr s)
-                                          (scheduler-last s))))
+  (define lr ((scheduler-lr-at s) (scheduler-base-lr s) (scheduler-last s)))
+  (set-scheduler-last-rate! s lr)
+  (optimizer-set-lr! (scheduler-optimizer s) lr))
 
-;; the rate for step 0 is written at construction, as PyTorch's schedulers
-;; do in their constructor
 (define (build opt lr-at)
-  (define s (make-scheduler opt (optimizer-lr opt) lr-at 0))
+  (define s (make-scheduler opt (optimizer-lr opt) lr-at 0 #f))
   (apply-rate! s)
   s)
 
@@ -47,7 +43,7 @@
 
 (define/contract-out (scheduler-rate s) ;; noqa
   (-> scheduler? real?)
-  ((scheduler-lr-at s) (scheduler-base-lr s) (scheduler-last s)))
+  (scheduler-last-rate s))
 
 (define/contract-out (step-lr opt #:step-size step-size #:gamma [gamma 0.1]) ;; noqa
   (->* [optimizer? #:step-size exact-positive-integer?] [#:gamma real?]
@@ -104,7 +100,7 @@
                                    #:div-factor [div-factor 25.0]
                                    #:final-div-factor [final-div-factor 1e4])
   (->* [optimizer? #:max-lr (>/c 0) #:total-steps exact-positive-integer?]
-       [#:pct-start (real-in 0 1) #:div-factor (>/c 0)
+       [#:pct-start (and/c (>=/c 0) (</c 1)) #:div-factor (>/c 0)
         #:final-div-factor (>/c 0)]
        scheduler?)
   (define initial (/ max-lr div-factor))
@@ -125,7 +121,7 @@
                (anneal max-lr final (/ (- t up-end) (- down-end up-end)))))))
 
 (define/contract-out (lambda-lr opt factor) ;; noqa
-  (-> optimizer? (procedure-arity-includes/c 1) scheduler?)
+  (-> optimizer? (-> exact-nonnegative-integer? real?) scheduler?)
   (build opt (lambda (base t) (* base (factor t)))))
 
 (define/contract-out (scheduler-optimizer-of s) ;; noqa

@@ -30,8 +30,9 @@
          "nn/linear.rkt"
          "nn/loss.rkt"
          (only-in "nn/optim.rkt"
-                  adam adam? learning-rate optimizer? rmsprop rmsprop?
+                  adam adam? learning-rate rmsprop rmsprop?
                   set-learning-rate! sgd sgd? step! zero-grads!)
+         (submod "nn/optim.rkt" checked)
          "nn/scheduler.rkt"
          (except-in "nn/parameter.rkt" Parameter Parameter?)
          (submod "nn/parameter.rkt" checked)

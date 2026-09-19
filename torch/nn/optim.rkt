@@ -1,7 +1,7 @@
 #lang racket/base
 
 (require (only-in racket/contract/base
-                  -> ->* ->i >/c any/c contract-out listof real-in
+                  -> ->* ->i >=/c >/c any/c contract-out listof real-in
                   unsupplied-arg?)
          (only-in racket/generic define-generics)
          (only-in "../foreign.rkt"
@@ -20,6 +20,9 @@
          (contract-out [sgd? (-> any/c boolean?)]
                        [adam? (-> any/c boolean?)]
                        [rmsprop? (-> any/c boolean?)]))
+
+(module+ checked
+  (provide (contract-out [optimizer? (-> any/c boolean?)])))
 
 (define-generics optimizer
   (optimizer-step! optimizer)
@@ -73,7 +76,7 @@
   (->i ([params (listof tensor?)] #:lr [lr real?])
        (#:momentum [momentum (real-in 0 1)]
         #:nesterov? [nesterov? boolean?]
-        #:weight-decay [weight-decay real?])
+        #:weight-decay [weight-decay (>=/c 0)])
        #:pre/name (momentum nesterov?)
        "Nesterov momentum requires a momentum"
        (or (unsupplied-arg? nesterov?)
@@ -131,7 +134,7 @@
                            #:weight-decay [weight-decay 0.0])
   (->* [(listof tensor?)]
        [#:lr real? #:beta1 real? #:beta2 real? #:eps real?
-        #:weight-decay real?]
+        #:weight-decay (>=/c 0)]
        adam?)
   (make-adam params lr beta1 beta2 eps weight-decay (box 0)
              (make-hasheq) (make-hasheq) (make-hasheq)))
@@ -178,7 +181,7 @@
                               #:weight-decay [weight-decay 0.0]
                               #:momentum [momentum 0.0])
   (->* [(listof tensor?)]
-       [#:lr real? #:alpha (real-in 0 1) #:eps (>/c 0) #:weight-decay real?
+       [#:lr real? #:alpha (real-in 0 1) #:eps (>/c 0) #:weight-decay (>=/c 0)
         #:momentum (real-in 0 1)]
        rmsprop?)
   (make-rmsprop params lr alpha eps weight-decay momentum
