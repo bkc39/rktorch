@@ -116,18 +116,16 @@
              #:when (regexp-match? #rx"class=\"uncovered\"" (list-ref m 2)))
     (string->number (second m))))
 
+;; A list of line numbers, or 'missing when cover wrote no report for the
+;; file: an empty list there would read as "nothing left to test".
 (define (uncovered-lines path)
   (define html
     (build-path (report-dir)
                 (string-append (substring path 0 (- (string-length path) 4))
                                ".html")))
-  (cond
-    ;; Saying nothing would read as "fully covered" for a file with plenty
-    ;; uncovered, so a missing per-file report is reported, not swallowed.
-    [(not (file-exists? html))
-     (eprintf "coverage: no per-file report at ~a\n" html)
-     '()]
-    [else (parse-uncovered-lines (file->string html))]))
+  (if (file-exists? html)
+      (parse-uncovered-lines (file->string html))
+      'missing))
 
 ;;; Reporting
 
@@ -152,22 +150,26 @@
             (~a (~r (pct (first v) (second v)) #:precision '(= 1)) #:width 8)
             (~a (- (second v) (first v)) #:width 7))))
 
+(define (print-entry-row e)
+  (printf "  ~a ~a  ~a missed of ~a\n"
+          (~a (entry-path e) #:min-width 42)
+          (~a (~r (entry-pct e) #:precision '(= 1)) #:width 6)
+          (entry-missed e) (entry-total e)))
+
 (define (print-worst entries n)
   (define worst
     (take (sort entries > #:key entry-missed)
           (min n (length entries))))
   (display "\nfiles with the most uncovered expressions\n")
   (for ([e (in-list worst)] #:unless (zero? (entry-missed e)))
-    (printf "  ~a ~a  ~a missed of ~a\n"
-            (~a (entry-path e) #:min-width 42)
-            (~a (~r (entry-pct e) #:precision '(= 1)) #:width 6)
-            (entry-missed e) (entry-total e))))
+    (print-entry-row e)))
 
 (define (print-changed entries)
+  ;; Two queries, not three: `diff HEAD` already covers the index as well as
+  ;; the working tree.
   (define touched
     (for/list ([f (in-list (append (git "diff" "--name-only" "origin/master...HEAD")
-                                   (git "diff" "--name-only")
-                                   (git "diff" "--name-only" "--cached")))]
+                                   (git "diff" "--name-only" "HEAD")))]
                #:when (regexp-match? #rx"^torch/.*[.]rkt$" (string-trim f)))
       (string-trim f)))
   (define mine
@@ -178,14 +180,14 @@
     [else
      (display "\nchanged files\n")
      (for ([e (in-list (sort mine > #:key entry-missed))])
-       (printf "  ~a ~a  ~a missed of ~a\n"
-               (~a (entry-path e) #:min-width 42)
-               (~a (~r (entry-pct e) #:precision '(= 1)) #:width 6)
-               (entry-missed e) (entry-total e))
+       (print-entry-row e)
        (define ls (uncovered-lines (entry-path e)))
-       (unless (null? ls)
-         (printf "      uncovered lines: ~a\n"
-                 (string-join (map number->string ls) " "))))]))
+       (cond
+         [(eq? ls 'missing)
+          (printf "      uncovered lines: unknown, cover wrote no report\n")]
+         [(null? ls) (void)]
+         [else (printf "      uncovered lines: ~a\n"
+                       (string-join (map number->string ls) " "))]))]))
 
 ;;; Main
 
