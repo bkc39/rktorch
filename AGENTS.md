@@ -189,7 +189,9 @@ broader ATen surface, and the portable raco-catalog candidate story.
 ## Build Commands
 
 [`docs/building.md`](docs/building.md) is the same guide written for people;
-a change to a build target or a shell belongs in both.
+a change to a build target or a shell belongs in both. The ordered local loop
+for a change, and the gates it has to pass before it is done, are the
+`cpp-dev` and `racket-dev` skills under `.claude/skills/`.
 
 ```bash
 nix build              # builds cpp, installs the pkg, runs raco test + examples
@@ -214,6 +216,10 @@ raco test torch/          # FFI unit tests (+ self-skipping parity test)
 raco test examples/test/     # literate-example runners
 racket -ie "(require torch)"   # REPL with the package loaded
                                # (`racket -l torch` runs module+ main instead)
+
+racket scripts/coverage.rkt --changed   # expression coverage (#173); exits
+                               # non-zero below the floor and lists the lines
+                               # of the files you touched that no test reaches
 
 resyntax analyze --local-git-repository . origin/master   # lint gate
                                      # (CI fails on any suggestion; scans

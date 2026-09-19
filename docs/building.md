@@ -44,12 +44,34 @@ raco test torch/                  # unit tests; the PyTorch parity tests self-sk
 raco test examples/test/          # the literate examples
 racket -ie "(require torch)"      # a REPL with the package loaded
 resyntax analyze --local-git-repository . origin/master   # the lint gate
+racket scripts/coverage.rkt       # expression coverage, with a floor
 ```
 
 The first entry into a shell installs the Racket dependencies into a
 per-checkout `.racket-user` directory and stages `libtorchrkt` under
 `torch/native-libs/`. After changing C++, re-stage the library with
 `nix run .#copy-native-libs` before running `raco test`.
+
+## Coverage
+
+`scripts/coverage.rkt` instruments the library with
+[`cover`](https://pkgs.racket-lang.org/package/cover), drives it with the test
+suite, and prints expression coverage per area:
+
+```bash
+nix develop .#ci --command racket scripts/coverage.rkt
+nix develop .#ci --command racket scripts/coverage.rkt --changed
+```
+
+It exits non-zero below the floor set in the script, so it works as a gate as
+well as a report. `--changed` adds the files the branch touches and, for each,
+the line numbers no test reaches. The HTML report lands in `coverage/`.
+
+Cold it takes about a minute, less than a cold `raco test torch/`, because
+`cover` compiles instrumented code in memory and never writes bytecode.
+Accelerator-only branches cannot be covered on the wrong host: MPS code is
+unreachable on Linux, and the CUDA arms need `nix develop .#cuda` on a machine
+with a GPU.
 
 ## The libtorch source
 
