@@ -115,6 +115,15 @@
          "a uint8 fill value must be an integer from 0 to 255")]
     [else #t]))
 
+(define/contract-out (fill-value/c dtype) ;; noqa
+  (-> dtype/c flat-contract?)
+  (flat-named-contract
+   (case dtype
+     [(int64) 'int64-fill-value]
+     [(uint8) 'uint8-fill-value]
+     [else 'fill-value])
+   (lambda (v) (and (real? v) (eq? #t (fill-crosses-exactly? v dtype))))))
+
 (define/contract-out (full value #:device [device #f] #:dtype [dtype #f]
                            #:requires-grad? [requires-grad? #f]
                            . dims)

@@ -294,7 +294,7 @@ image viewer and converter reads.
 @defproc[(image-grid [images tensor?]
                      [#:columns columns exact-positive-integer? 8]
                      [#:padding padding exact-nonnegative-integer? 2]
-                     [#:pad-value pad-value real? 0])
+                     [#:pad-value pad-value (fill-value/c (tensor-dtype images)) 0])
          tensor?]{
 Lays the @tt{[N C H W]} batch @racket[images], a rank-4 tensor with at
 least one image, out as one @tt{[C H' W']} image, @racket[columns] across
@@ -302,14 +302,19 @@ and @racket[padding] pixels of @racket[pad-value] around every image, on
 the device the batch lives on. One channel becomes three. A batch of one
 image comes back as that image, with no border, which is what
 @tt{make_grid} returns there. The layout is torchvision's
-@tt{make_grid}.
+@tt{make_grid}. @racket[pad-value] must be a value the batch's dtype
+holds exactly, so a uint8 batch takes 0 through 255. The grid is built
+under @racket[with-no-grad], as @tt{make_grid} is decorated with
+@tt{no_grad}: it is a picture of the batch, not a step in its graph. The one-image case returns the batch's own image, so there it
+carries whatever the batch carried, again as @tt{make_grid} does.
 }
 
 @defproc[(write-ppm [path path-string?]
                     [image tensor?]
                     [#:range range (list/c real? real?) '(0 1)])
          void?]{
-Writes the @tt{[3 H W]} tensor @racket[image] to @racket[path]. A float
+Writes the @tt{[3 H W]} tensor @racket[image], whose @tt{H} and @tt{W}
+are the positive dimensions its header states, to @racket[path]. A float
 image is quantized the way torchvision's @tt{save_image} does, with
 @racket[range] naming the values that map to 0 and 255, its first below
 its second, so a dataset in @tt{[-1, 1]} passes @racket['(-1 1)]; a uint8

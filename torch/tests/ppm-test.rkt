@@ -39,8 +39,21 @@
     (check-equal? (tensor-dtype byte-grid) 'uint8)
     (check-equal? (tensor->list (select (select byte-grid 0 0) 0 0))
                   '(7 7 7 7 7 7 7))
-    (check-exn exn:fail:contract?
-               (lambda () (image-grid bytes-batch #:pad-value -1))))
+    (check-exn #rx"^image-grid: contract violation"
+               (lambda () (image-grid bytes-batch #:pad-value -1)))
+    (check-exn #rx"uint8-fill-value"
+               (lambda () (image-grid bytes-batch #:pad-value 256))))
+
+  (test-case "image-grid does not extend the caller's graph, as make_grid"
+    (define x (mul (rand 3 3 2 2 #:requires-grad? #t) 1.0))
+    (check-true (requires-grad? x))
+    (check-false (requires-grad? (image-grid x)))
+    ;; make_grid returns a three-channel singleton as a view, which torch
+    ;; leaves requiring grad even under no_grad; a one-channel one is
+    ;; built, so it does not
+    (check-true (requires-grad? (image-grid (narrow x 0 0 1))))
+    (check-false
+     (requires-grad? (image-grid (narrow (narrow x 0 0 1) 1 0 1)))))
 
   (test-case "image-grid: one image comes back the way make_grid returns it"
     (define one (reshape (add (arange 12) 1.0) 1 3 2 2))
@@ -83,7 +96,10 @@
     (check-exn exn:fail:contract?
                (lambda () (written (zeros 3 2 2) #:range '(1 0))))
     (check-exn #rx"expected: image"
-               (lambda () (written (to-dtype (zeros 3 2 2) 'bool)))))
+               (lambda () (written (to-dtype (zeros 3 2 2) 'bool))))
+    ;; a PPM header states a width and a height, and neither may be zero
+    (check-exn #rx"expected: image" (lambda () (written (zeros 3 0 2))))
+    (check-exn #rx"expected: image" (lambda () (written (zeros 3 2 0)))))
 
   (test-case "image-grid and write-ppm accept device tensors"
     (when (cuda-available?)

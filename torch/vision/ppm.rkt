@@ -1,16 +1,17 @@
 #lang racket/base
 
 (require (only-in racket/contract/base
-                  ->* and/c flat-named-contract list/c)
+                  ->* ->i and/c flat-named-contract list/c)
          (only-in "../foreign.rkt"
-                  add clamp copy! full mul narrow permute select sub
-                  tensor-device tensor-dtype tensor-shape tensor->vector
-                  tensor? to-dtype)
+                  add clamp copy! fill-value/c full mul narrow permute select
+                  sub tensor-device tensor-dtype tensor-shape tensor->vector
+                  tensor? to-dtype with-no-grad)
          (only-in "../foreign/contracts.rkt" image-batch/c)
          (only-in "../private/contract.rkt" define/contract-out))
 
 ;; ATen has no subtraction on a boolean tensor, so the range transform
-;; has nothing to apply there
+;; has nothing to apply there; a PPM states its width and height, and
+;; neither may be zero
 (define image/c
   (flat-named-contract
    'image
@@ -18,7 +19,10 @@
      (and (tensor? x)
           (not (eq? (tensor-dtype x) 'bool))
           (let ([dims (tensor-shape x)])
-            (and (= 3 (length dims)) (= 3 (car dims))))))))
+            (and (= 3 (length dims))
+                 (= 3 (car dims))
+                 (positive? (cadr dims))
+                 (positive? (caddr dims))))))))
 
 (define value-range/c
   (flat-named-contract
@@ -34,19 +38,22 @@
                                  #:columns [columns 8]
                                  #:padding [padding 2]
                                  #:pad-value [pad-value 0])
-  (->* [non-empty-image-batch/c]
-       [#:columns exact-positive-integer?
-        #:padding exact-nonnegative-integer?
-        #:pad-value real?]
-       tensor?)
+  (->i ([images non-empty-image-batch/c])
+       (#:columns [columns exact-positive-integer?]
+        #:padding [padding exact-nonnegative-integer?]
+        #:pad-value [pad-value (images) (fill-value/c (tensor-dtype images))])
+       [result tensor?])
   (define dims (tensor-shape images))
   (define n (car dims))
   (define c (cadr dims))
   (define h (caddr dims))
   (define w (cadddr dims))
-  (cond
-    [(= n 1) (one-image (select images 0 0) c h w)]
-    [else (grid-of images n c h w columns padding pad-value)]))
+  ;; make_grid is a display helper and carries @torch.no_grad(); without
+  ;; it every copy! would extend the caller's graph into the grid
+  (with-no-grad
+    (cond
+      [(= n 1) (one-image (select images 0 0) c h w)]
+      [else (grid-of images n c h w columns padding pad-value)])))
 
 ;; make_grid returns a single image as it is, with no border
 (define (one-image image c h w)
