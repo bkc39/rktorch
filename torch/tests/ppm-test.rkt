@@ -42,6 +42,16 @@
     (check-exn exn:fail:contract?
                (lambda () (image-grid bytes-batch #:pad-value -1))))
 
+  (test-case "image-grid: one image comes back the way make_grid returns it"
+    (define one (reshape (add (arange 12) 1.0) 1 3 2 2))
+    (define g (image-grid one #:padding 2 #:pad-value -1))
+    (check-equal? (tensor-shape g) '(3 2 2) "no border around a single image")
+    (check-equal? (tensor->list g) (tensor->list (select one 0 0)))
+    (define grey (reshape (add (arange 4) 1.0) 1 1 2 2))
+    (define g1 (image-grid grey #:padding 2))
+    (check-equal? (tensor-shape g1) '(3 2 2) "one channel still becomes three")
+    (check-equal? (tensor->list (select g1 0 2)) '(1.0 2.0 3.0 4.0)))
+
   (test-case "write-ppm: a P6 header and one byte per channel, row-major"
     ;; red, green / blue, white
     (define image
@@ -71,7 +81,9 @@
     (check-exn exn:fail:contract? (lambda () (written (zeros 2 2))))
     (check-exn exn:fail:contract? (lambda () (written (zeros 1 2 2))))
     (check-exn exn:fail:contract?
-               (lambda () (written (zeros 3 2 2) #:range '(1 0)))))
+               (lambda () (written (zeros 3 2 2) #:range '(1 0))))
+    (check-exn #rx"expected: image"
+               (lambda () (written (to-dtype (zeros 3 2 2) 'bool)))))
 
   (test-case "image-grid and write-ppm accept device tensors"
     (when (cuda-available?)

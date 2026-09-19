@@ -9,11 +9,14 @@
          (only-in "../foreign/contracts.rkt" image-batch/c)
          (only-in "../private/contract.rkt" define/contract-out))
 
+;; ATen has no subtraction on a boolean tensor, so the range transform
+;; has nothing to apply there
 (define image/c
   (flat-named-contract
    'image
    (lambda (x)
      (and (tensor? x)
+          (not (eq? (tensor-dtype x) 'bool))
           (let ([dims (tensor-shape x)])
             (and (= 3 (length dims)) (= 3 (car dims))))))))
 
@@ -41,6 +44,22 @@
   (define c (cadr dims))
   (define h (caddr dims))
   (define w (cadddr dims))
+  (cond
+    [(= n 1) (one-image (select images 0 0) c h w)]
+    [else (grid-of images n c h w columns padding pad-value)]))
+
+;; make_grid returns a single image as it is, with no border
+(define (one-image image c h w)
+  (cond
+    [(= c 1)
+     (define out (full 0.0 3 h w
+                       #:device (tensor-device image)
+                       #:dtype (tensor-dtype image)))
+     (copy! out image)
+     out]
+    [else image]))
+
+(define (grid-of images n c h w columns padding pad-value)
   (define cols (min columns n))
   (define rows (quotient (+ n cols -1) cols))
   (define grid

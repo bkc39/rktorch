@@ -59,8 +59,10 @@ the generator does not learn from this half, against zeros. Then the
 generator: the same discriminator scores the fresh batch again, this time
 with the graph intact, against ones. The latent draw is made on the CPU
 whatever device the networks train on, so a seeded run replays it on the
-GPU as the twin draws it. Images arrive from the loader in @tt{[0, 1]}
-and are rescaled to the generator's range.
+GPU as the twin draws it. The two loss targets are built on
+@racket[device] like the latent, so a caller may step a model that is not
+on the default device. Images arrive from the loader in @tt{[0, 1]} and
+are rescaled to the generator's range.
 
 @chunk[<r10-step>
 (define (pick-device)
@@ -70,8 +72,8 @@ and are rescaled to the generator's range.
   (define n (length xs))
   (define real (sub (mul xs 2.0) 1.0))
   (define z (to (randn n latent #:device 'cpu) device))
-  (define ones-target (ones n 1))
-  (define zeros-target (zeros n 1))
+  (define ones-target (ones n 1 #:device device))
+  (define zeros-target (zeros n 1 #:device device))
   (define fake (gen z))
   (zero-grads! opt-d)
   (define d-loss
