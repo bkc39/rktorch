@@ -8,6 +8,7 @@ from .ir import (
     INT64,
     INT_ARRAY,
     OPTIONAL_DTYPE,
+    OPTIONAL_GENERATOR,
     OPTIONAL_INT64,
     OPTIONAL_INT_ARRAY,
     OPTIONAL_SCALAR,
@@ -39,6 +40,7 @@ _C_DECLS = {
     OPTIONAL_INT_ARRAY: "const int64_t* {n}, int64_t {n}_len, bool {n}_has",
     OPTIONAL_DTYPE: "int32_t {n}",  # -1 == c10::nullopt
     OPTIONAL_SCALAR: "double {n}, bool {n}_has",
+    OPTIONAL_GENERATOR: "const tr_generator* {n}",  # NULL == global stream
 }
 
 # Kinds whose C decl mentions `bool`, so the header needs <stdbool.h>.
@@ -56,14 +58,26 @@ def _c_decl(p: Param, *, receiver: bool, header: bool = False) -> str:
     # required handle (the body keeps the bare decl for clang-format).
     if header and p.kind == OPTIONAL_TENSOR:
         decl += " /* nullable: NULL == no value */"
+    if header and p.kind == OPTIONAL_GENERATOR:
+        decl += " /* nullable: NULL == the global stream */"
     return decl
 
 
+def _out_names(op: Op) -> list[str]:
+    return [f"out{i}" for i in range(op.returns)] if op.returns > 1 else []
+
+
+def _returns_status(op: Op) -> bool:
+    return op.inplace or op.returns > 1
+
+
 def _c_params(op: Op, *, header: bool = False) -> str:
-    return ", ".join(
+    decls = [
         _c_decl(p, receiver=(op.inplace and i == 0), header=header)
         for i, p in enumerate(op.params)
-    )
+    ]
+    decls += [f"tr_tensor** {out}" for out in _out_names(op)]
+    return ", ".join(decls)
 
 
 def _arg_expr(p: Param) -> str:
@@ -88,6 +102,9 @@ def _arg_expr(p: Param) -> str:
     if p.kind == OPTIONAL_SCALAR:
         return (f"{p.name}_has ? c10::optional<at::Scalar>({p.name}) "
                 f": c10::optional<at::Scalar>()")
+    if p.kind == OPTIONAL_GENERATOR:
+        return (f"{p.name} ? c10::optional<at::Generator>({p.name}->value) "
+                f": c10::optional<at::Generator>()")
     if p.kind == OPTIONAL_DTYPE:
         return (f"{p.name} < 0 ? c10::optional<at::ScalarType>() "
                 f": c10::optional<at::ScalarType>("
@@ -95,11 +112,17 @@ def _arg_expr(p: Param) -> str:
     return p.name
 
 
+def _takes_generator(ops: list[Op]) -> bool:
+    return any(p.kind == OPTIONAL_GENERATOR for op in ops for p in op.params)
+
+
 def emit_header(shard: str, ops: list[Op]) -> str:
     needs_bool = any(p.kind in _BOOL_DECL_KINDS for op in ops for p in op.params)
     lines = [BANNER, "#pragma once", ""]
     if needs_bool:
         lines += ["#include <stdbool.h>", ""]
+    if _takes_generator(ops):
+        lines += ['#include "torchrkt/c_api/random.h"']
     lines += ['#include "torchrkt/c_api/tensor.h"', ""]
     lines += ["#ifdef __cplusplus", 'extern "C" {', "#endif", ""]
     lines += [
@@ -107,11 +130,13 @@ def emit_header(shard: str, ops: list[Op]) -> str:
             shard
         ),
         " * handle (NULL on error); an in-place op mutates its first handle",
-        " * and returns an int status (0 ok, 1 with tr_last_error set). */",
+        " * and returns an int status (0 ok, 1 with tr_last_error set). An op",
+        " * with several Tensor returns also reports a status and writes one",
+        " * new handle per trailing out pointer, every one NULL on error. */",
         "",
     ]
     for op in ops:
-        ret = "int" if op.inplace else "tr_tensor*"
+        ret = "int" if _returns_status(op) else "tr_tensor*"
         lines.append(f"{ret} {op.c_name}({_c_params(op, header=True)});")
     lines += ["", "#ifdef __cplusplus", "}", "#endif"]
     return "\n".join(lines) + "\n"
@@ -139,14 +164,22 @@ def _emit_body(op: Op) -> list[str]:
         # optional dim must name >=1 axis (absent is the nullopt encoding).
         if p.kind == OPTIONAL_INT_ARRAY:
             guards.append(f"({p.name}_has && (!{p.name} || {p.name}_len <= 0))")
-    ret_type = "int" if op.inplace else "tr_tensor*"
+    outs = _out_names(op)
+    guards += [f"!{out}" for out in outs]
+    ret_type = "int" if _returns_status(op) else "tr_tensor*"
     lines = [f"{ret_type} {op.c_name}({_c_params(op)}) {{"]
     if guards:
         cond = " || ".join(guards)
-        fail = "null_arg_status" if op.inplace else "null_arg"
+        if outs:
+            refuse = (f'torchrkt::null_arg_outputs("{op.c_name}", '
+                      f'{{{", ".join(outs)}}})')
+        elif op.inplace:
+            refuse = f'torchrkt::null_arg_status("{op.c_name}")'
+        else:
+            refuse = f'torchrkt::null_arg("{op.c_name}")'
         lines += [
             f"  if ({cond}) {{",
-            f'    return torchrkt::{fail}("{op.c_name}");',
+            f"    return {refuse};",
             "  }",
         ]
     preamble = []
@@ -174,7 +207,12 @@ def _emit_body(op: Op) -> list[str]:
                   "  });", "}"]
     else:
         call = f"at::{op.base}({', '.join(_arg_expr(p) for p in op.params)})"
-        lines += [f'  return torchrkt::alloc_result("{op.c_name}", [&] {{']
+        if outs:
+            lines += [f'  return torchrkt::alloc_results("{op.c_name}", '
+                      f'{{{", ".join(outs)}}}, [&] {{']
+        else:
+            lines += [f'  return torchrkt::alloc_result("{op.c_name}", '
+                      "[&] {"]
         lines += preamble
         lines += [f"    return {call};", "  });", "}"]
     return lines
@@ -188,6 +226,8 @@ def emit_source(shard: str, ops: list[Op]) -> str:
     lines += ["#include <torch/torch.h>", ""]
     if needs_vector:
         lines += ["#include <stdexcept>", "#include <vector>", ""]
+    if _takes_generator(ops):
+        lines += ['#include "torchrkt/detail/generator_handle.hpp"']
     lines += [
         '#include "torchrkt/detail/op_call.hpp"',
         '#include "torchrkt/detail/tensor_handle.hpp"',

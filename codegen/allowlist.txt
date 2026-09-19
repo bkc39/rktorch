@@ -137,3 +137,22 @@ math clamp
 # repeat_interleave along the two spatial dims is nearest-neighbour
 # upsampling, F.interpolate(mode="nearest"), without an optional-float kind.
 shape repeat_interleave.self_int
+
+# --- tranche 7 (#153): the sequence op closure ------------------------------
+# topk and sort are the first ops with several Tensor returns (#154): an
+# integer status plus one out pointer per return, (values, indices) here.
+sort topk
+sort sort
+# argsort is sort's indices alone, a single return.
+sort argsort
+
+# The cudnn-backed multi-layer recurrences: the flat weights and the LSTM's
+# (h, c) state marshal through the tensor-list kind, and they return
+# (output, h_n, c_n) and (output, h_n). Dropout between layers draws from
+# the global stream when train is set, hence the rng flag.
+rnn lstm.input rng
+rnn gru.input rng
+
+# multinomial introduces the optional-generator kind (a tr_generator
+# handle, NULL for the global stream).
+random multinomial rng

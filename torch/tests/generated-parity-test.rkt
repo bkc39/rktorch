@@ -20,7 +20,8 @@
   ;; one fails loudly). Spec -> input: (tensor dim ...) = seeded randn,
   ;; (tensors ...) a list of them, (bool-tensor ...) a genuine bool handle
   ;; via `ne 0`, (kwarg "name" v) a scalar (or none) passed as name=v to a kwarg-only
-  ;; aten arg, (optional-scalar v) a Scalar? bound, other heads are
+  ;; aten arg, (optional-scalar v) a Scalar? bound, (uniform-tensor dim ...)
+  ;; a seeded rand (non-negative, for probabilities), other heads are
   ;; literals with #f = None.
   (define generated-recipes
     (hash 'matmul '((tensor 2 3) (tensor 3 2))
@@ -133,13 +134,27 @@
           'silu '((tensor 2 3))
           'clamp '((tensor 2 3) (optional-scalar -0.5) (optional-scalar 0.5))
           'repeat-interleave-self-int '((tensor 2 3) (int64 2) (optional-int64 1)
-                                        (kwarg "output_size" none))))
+                                        (kwarg "output_size" none))
+          'topk '((tensor 3 5) (int64 2) (int64 -1) (bool #t) (bool #t))
+          'sort-tensor '((tensor 3 5) (int64 -1) (bool #f))
+          'argsort '((tensor 3 5) (int64 -1) (bool #f))
+          'multinomial '((uniform-tensor 3 6) (int64 4) (bool #f)
+                         (kwarg "generator" none))
+          'lstm-input '((tensor 5 2 3) (tensors (1 2 4) (1 2 4))
+                        (tensors (16 3) (16 4) (16) (16))
+                        (bool #t) (int64 1) (double 0.0) (bool #f) (bool #f)
+                        (bool #f))
+          'gru-input '((tensor 5 2 3) (tensor 1 2 4)
+                       (tensors (12 3) (12 4) (12) (12))
+                       (bool #t) (int64 1) (double 0.0) (bool #f) (bool #f)
+                       (bool #f))))
 
   ;; Tensor specs draw seeded randns left to right — both sides consume the
   ;; same RNG stream, so spec order and draw counts must match exactly.
   (define (spec->racket-arg spec)
     (case (car spec)
       [(tensor) (apply randn (cdr spec))]
+      [(uniform-tensor) (apply rand (cdr spec))]
       [(tensors)
        (for/list ([dims (in-list (cdr spec))])
          (apply randn dims))]
@@ -160,6 +175,7 @@
       (string-join (map number->string vs) ", "))
     (case (car spec)
       [(tensor) (format "torch.randn(~a)" (csv (cdr spec)))]
+      [(uniform-tensor) (format "torch.rand(~a)" (csv (cdr spec)))]
       [(tensors)
        (format "[~a]"
                (string-join (for/list ([dims (in-list (cdr spec))])
@@ -219,8 +235,10 @@
        (if inplace?
            (format "~a\nr = a0\n" invoke)
            (format "r = ~a\n" invoke))
-       "print(json.dumps({\"shape\": list(r.shape),"
-       " \"values\": [float(v) for v in r.flatten().tolist()]}))"))
+       "rs = r if isinstance(r, tuple) else (r,)\n"
+       "print(json.dumps([{\"shape\": list(t.shape),"
+       " \"values\": [float(v) for v in t.flatten().tolist()]}"
+       " for t in rs]))"))
     (define out (open-output-string))
     (define ok?
       (with-python-env
@@ -235,7 +253,8 @@
     (define name (car entry))
     (define py-name (cadr entry))
     (define kinds (caddr entry))
-    (define inplace? (and (>= (length entry) 4) (list-ref entry 3)))
+    (define inplace? (list-ref entry 3))
+    (define returns (list-ref entry 4))
     (define specs
       (or specs-override
           (hash-ref generated-recipes name
@@ -245,18 +264,27 @@
                              name "generated-parity-test.rkt")))))
     (check-equal? (length specs) (length kinds)
                   (format "~a~a: recipe arity matches manifest" name label))
-    (define j (generated-python-result py-name specs inplace?))
+    (define expected (generated-python-result py-name specs inplace?))
     (manual-seed! 0)
     (define args (map spec->racket-arg specs))
     (define op (dynamic-require generated-rkt name))
-    (define result (apply op args))
-    (check-equal? (tensor-shape result) (hash-ref j 'shape)
-                  (format "~a~a: generated shape parity" name label))
-    (for ([r (in-list (tensor->list result))]
-          [p (in-list (hash-ref j 'values))]
-          [i (in-naturals)])
-      (check-= r p tol
-               (format "~a~a: generated value ~a parity" name label i))))
+    (define results (call-with-values (lambda () (apply op args)) list))
+    (check-equal? (length results) returns
+                  (format "~a~a: return count matches manifest" name label))
+    (check-equal? (length results) (length expected)
+                  (format "~a~a: return count parity" name label))
+    (for ([result (in-list results)]
+          [j (in-list expected)]
+          [k (in-naturals)])
+      (check-equal? (tensor-shape result) (hash-ref j 'shape)
+                    (format "~a~a: generated shape parity, return ~a"
+                            name label k))
+      (for ([r (in-list (tensor->list result))]
+            [p (in-list (hash-ref j 'values))]
+            [i (in-naturals)])
+        (check-= r p tol
+                 (format "~a~a: generated value ~a parity, return ~a"
+                         name label i k)))))
 
   (cond
     [(not (python-torch-available?))
@@ -383,4 +411,34 @@
      (check-generated-parity
       (assq 'repeat-interleave-self-int manifest)
       '((tensor 2 3) (int64 3) (optional-int64 #f) (kwarg "output_size" 18))
-      "[flattened+output-size]")]))
+      "[flattened+output-size]")
+     (check-generated-parity
+      (assq 'topk manifest)
+      '((tensor 3 5) (int64 3) (int64 0) (bool #f) (bool #t))
+      "[smallest-along-dim-0]")
+     (check-generated-parity
+      (assq 'sort-tensor manifest)
+      '((tensor 3 5) (int64 0) (bool #t))
+      "[descending-dim-0]")
+     (check-generated-parity
+      (assq 'argsort manifest)
+      '((tensor 3 5) (int64 0) (bool #t))
+      "[descending-dim-0]")
+     (check-generated-parity
+      (assq 'multinomial manifest)
+      '((uniform-tensor 3 6) (int64 8) (bool #t) (kwarg "generator" none))
+      "[replacement]")
+     (check-generated-parity
+      (assq 'lstm-input manifest)
+      '((tensor 2 5 3) (tensors (4 2 4) (4 2 4))
+        (tensors (16 3) (16 4) (16 3) (16 4)
+                 (16 8) (16 4) (16 8) (16 4))
+        (bool #f) (int64 2) (double 0.0) (bool #f) (bool #t) (bool #t))
+      "[2-layer-bidirectional-batch-first-no-bias]")
+     (check-generated-parity
+      (assq 'gru-input manifest)
+      '((tensor 2 5 3) (tensor 4 2 4)
+        (tensors (12 3) (12 4) (12 3) (12 4)
+                 (12 8) (12 4) (12 8) (12 4))
+        (bool #f) (int64 2) (double 0.0) (bool #f) (bool #t) (bool #t))
+      "[2-layer-bidirectional-batch-first-no-bias]")]))

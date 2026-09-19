@@ -3,7 +3,8 @@
 The IR admits exactly the signature shapes the hand-written v1 shim
 marshals: Tensor, Scalar -> double, float -> double, int64_t (incl.
 SymInt), bool, IntArrayRef -> (s64*, len), TensorList -> (ptr*, len),
-and a single Tensor return. The tranche-2 (#3) additions widen this to
+and a return of one or more Tensors (several come back through out
+pointers beside an integer status). The tranche-2 (#3) additions widen this to
 optional Tensor/int/IntArrayRef/ScalarType (marshalled as a NULL pointer
 or a sentinel), tranche 4 (#84) to optional Scalar (a double plus a
 presence flag), and in-place ops (a mutable receiver + integer status,
@@ -39,6 +40,8 @@ OPTIONAL_INT64 = "optional-int64"
 OPTIONAL_INT_ARRAY = "optional-int-array"
 OPTIONAL_DTYPE = "optional-dtype"
 OPTIONAL_SCALAR = "optional-scalar"
+# Tranche 7 (#153): a tr_generator handle, NULL for the global stream.
+OPTIONAL_GENERATOR = "optional-generator"
 
 
 @dataclass(frozen=True)
@@ -64,6 +67,9 @@ class Op:
     # gives them the no-retry allocator wrap so an OOM collect-and-retry
     # can never double-draw and break seeded parity (allowlist `rng` flag).
     rng: bool = False
+    # Tensor return count. More than one switches the C ABI to an integer
+    # status plus one `tr_tensor**` out pointer per return.
+    returns: int = 1
 
 
 @dataclass(frozen=True)
@@ -80,7 +86,7 @@ _RACKET_COLLISIONS = frozenset({
     "round", "floor", "ceiling", "truncate",
 })
 
-_BASE_SHADOWED = frozenset({"abs", "cos", "sin"})
+_BASE_SHADOWED = frozenset({"abs", "cos", "sin", "sort"})
 
 _BASE_KINDS = {
     BaseTy.Tensor: TENSOR,
@@ -119,6 +125,8 @@ def _param_kind(ty) -> str | None:
                 return OPTIONAL_DTYPE
             if elem.name is BaseTy.Scalar:
                 return OPTIONAL_SCALAR
+            if elem.name is BaseTy.Generator:
+                return OPTIONAL_GENERATOR
         if _int_list(elem):
             return OPTIONAL_INT_ARRAY
     return None
@@ -150,11 +158,13 @@ def classify(f: NativeFunction, shard: str) -> Op | Skip:
         return skip("out variant")
     inplace = func.name.name.inplace
     rets = func.returns
-    if len(rets) != 1 or not (
-        isinstance(rets[0].type, BaseType)
-        and rets[0].type.name is BaseTy.Tensor
+    if not rets or not all(
+        isinstance(r.type, BaseType) and r.type.name is BaseTy.Tensor
+        for r in rets
     ):
-        return skip("return is not a single Tensor")
+        return skip("return is not one or more Tensors")
+    if inplace and len(rets) != 1:
+        return skip("in-place op with several returns")
 
     # Functional ops are emitted as at::<base> free-function calls, so they
     # must expose the function variant. In-place ops are emitted as a method
@@ -197,4 +207,5 @@ def classify(f: NativeFunction, shard: str) -> Op | Skip:
         params=tuple(params),
         shard=shard,
         inplace=inplace,
+        returns=len(rets),
     )

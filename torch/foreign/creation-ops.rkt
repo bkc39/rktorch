@@ -166,7 +166,7 @@
   (-> seed/c generator?)
   (generator-impl (check-handle 'make-generator (tr-generator-new/raw seed))))
 
-(define/contract-out (generator? v) (-> any/c boolean?) ;; noqa
+(define/checked-out (generator? v) (-> any/c boolean?) ;; noqa
   (and (generator-impl? v) (Generator? (generator-impl-handle v))))
 
 (define/contract-out (randperm n #:generator [generator #f]) ;; noqa

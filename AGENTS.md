@@ -124,18 +124,22 @@ CPU-first; float32 + inferred int64 (#44) + uint8 from bytes (#58). From
   from the `threading` library (dep `threading-lib`, prefetched offline by
   the `racket-deps` fixed-output derivation in flake.nix)
 - reductions: `sum mean max min argmax softmax log-softmax`
+- ordering and sampling (`torch/foreign/order-ops.rkt`, tranche 7, #153):
+  `topk` and `sort` answer `(values entries indices)`; `argsort`;
+  `multinomial #:replacement? #:generator` (no-retry RNG wrap; seeded CPU
+  draws match PyTorch's); `sort` on a non-tensor is racket/base's
 - linalg: `matmul mm mv dot`; out: `item to-dtype`
 - autograd: `requires-grad! requires-grad? backward! grad has-grad?
   maybe-grad detach with-no-grad grad-enabled?`; in-place
   `sub! zero! mul! copy! addcmul! addcdiv! lerp! zero-grad!`
 
 **Name shadowing convention:** ops colliding with racket/base or racket/list
-(`exp log sqrt tanh max min argmax`) are generic — tensors hit libtorch,
+(`exp log sqrt tanh max min argmax sort`) are generic — tensors hit libtorch,
 anything else defers to the original — so `(require torch)` never breaks
 numeric code. New ops that collide must follow the same dispatch pattern
 (check racket/base first — `tanh` was missed initially and broke numeric
 callers), and scribble examples need
-`(for-label (except-in racket/base exp log sqrt max min + - * /))`.
+`(for-label (except-in racket/base exp log sort sqrt max min + - * /))`.
 Dispatching named ops carry dependent (`->i`) contracts so the wrong shape
 gets contract blame, not a runtime error; the `+ - * / @` operators are
 provided as plain renames (no contract overhead on the numeric fast path),
@@ -144,7 +148,7 @@ per `foreign/operators.rkt`.
 From `torch/nn`: `define-layer procedure->Layer gen:layer layer? Parameter Buffer LayerList LayerHash parameters
 named-parameters buffers children forward Linear Conv2d MaxPool2d Flatten Dropout
 Sequential Embedding LayerNorm ConvTranspose2d GroupNorm sgd adam step! zero-grads! ema
-ema-update! ema-average cross-entropy
+ema-update! ema-average cross-entropy nll-loss
 mse-loss kaiming-uniform uniform-init normal-init fan-in`. The functional
 transformer primitives (`gelu tril triu masked-fill embedding layer-norm`,
 tranche 3, #22) and the UNet ones (`conv-transpose2d group-norm silu
@@ -277,13 +281,16 @@ the diffusion UNet trains on the GPU there with its norms round-tripped.
   `tr_tensor_free`.
 - `src/torchrkt/*.cpp` — translation layer; catches C++ exceptions, returns
   status codes / NULL. `detail/tensor_handle.hpp` (in `src/`, private)
-  completes the opaque struct over a `torch::Tensor`;
+  completes the opaque struct over a `torch::Tensor`
+  (`generator_handle.hpp` does the same for `tr_generator`);
   `detail/op_call.hpp` holds the boundary helpers (`alloc_result` and
   `null_arg` for tensor-returning ops, `alloc_handle<H>` for any other
   opaque handle; `status_call` and `null_arg_status` for the int-status
-  in-place shape) every op body reduces to — new ops must use them rather
+  in-place shape; `alloc_results` for an op with several Tensor returns,
+  an int status plus one `tr_tensor**` out pointer per return, every one
+  NULL unless the whole call succeeded) every op body reduces to — new ops must use them rather
   than hand-rolling try/catch.
-- `tests/torchrkt/{random,ops,autograd,generated_golden,generated_tranche2}_test.cpp`
+- `tests/torchrkt/{random,ops,autograd,generated_golden,generated_tranche2..7}_test.cpp`
   — GoogleTest goldens per family (generated families get a C-boundary
   golden: a correctness case + a null/length-guard case).
   `c_api_compile_test.c` proves the headers are valid C (add a
@@ -317,15 +324,18 @@ module's full export set (`racket/runtime-path`, `syntax/parse/pre`).
   (`zeros` .. `rand`, `tensor`, `arange`, `eye`, the `*-like` family, with
   placement and `#:requires-grad?` handled once); `foreign/tensor-ops.rkt`
   — the op tranche (and the
-  shadow-dispatch convention); `foreign/autograd-ops.rkt` — autograd +
+  shadow-dispatch convention); `foreign/order-ops.rkt` — `topk` `sort`
+  `argsort` `multinomial`; `foreign/autograd-ops.rkt` — autograd +
   `with-no-grad` + in-place ops; `foreign/structs.rkt` — the `tensor`
   wrapper (`prop:cpointer`, shape cached at wrap time, allocator/deallocator
   finalizer); `foreign/error.rkt` — `check-ok` / `check-handle`;
   `foreign/format.rkt` — the PyTorch-repr reproducer.
 - `foreign/raw/*.rkt` — direct FFI, one module per C translation unit:
-  `syntax` (the pure FFI definer + `_Tensor` cpointer), `memory` (the
-  lifetime substrate: frees, pressure ledger, `tensor-allocator`,
-  op-definer macros), `global`, `tensor`, `random`, `creation`,
+  `syntax` (the pure FFI definer + `_Tensor` cpointer), `pressure` (no
+  FFI of its own: the collection policy under the ledger, the two troughs
+  and the capacity backstop, #145), `memory` (the lifetime substrate:
+  frees, pressure ledger, `tensor-allocator`, op-definer macros),
+  `global`, `tensor`, `random`, `creation`,
   `shape-ops`, `elementwise`, `reduce`, `linalg`, `autograd`.
   **`docs/internals.md` is the canonical memory-management narrative**
   (lifetime chain, phantom-bytes pressure, typed OOM + retry). The
@@ -333,7 +343,10 @@ module's full export set (`racket/runtime-path`, `syntax/parse/pre`).
   `tensor-allocator` — or `tensor-allocator/rng` for bindings that draw
   from the global RNG stream (randn/rand; ops flagged `rng` in the
   codegen allowlist) so a retry can never double-draw and break seeded
-  parity; never a bare `(allocator ...)` wrap (skips the ledger).
+  parity; a binding with several tensor outputs carries
+  `tensor-allocator/outputs` (or `/outputs/rng`), which registers and
+  accounts every handle inside one atomic section; never a bare
+  `(allocator ...)` wrap (skips the ledger).
   Explicit synchronous release goes through the raising,
   finalizer-cancelling `tr-tensor-free/checked`; OOM reaches users as
   `exn:fail:rktorch:oom` (catch by type, not message).
@@ -380,12 +393,17 @@ Conventions:
 
 - **Extend the allowlist instead of hand-writing** when an op fits the IR
   (Tensor / Scalar→double / int64 / bool / IntArrayRef / TensorList args,
-  single Tensor return). Unsupported signatures are skipped with a report —
+  one or more Tensor returns). Unsupported signatures are skipped with a report —
   widening the IR is a generator change, not a hand-written shim.
 - Optional *types* are in the IR: `Tensor?` is a NULL pointer, `int?` and
   `Scalar?` carry a presence flag, `int[]?` a length plus flag, and
-  `ScalarType?` a -1 sentinel. In-place ops (`add_`) emit a mutable receiver
-  plus an integer status. Schema *defaults* (`int dim=0`) are still
+  `ScalarType?` a -1 sentinel, and `Generator?` a `tr_generator` handle
+  (NULL for the global stream; an op that draws still needs the allowlist
+  `rng` flag). In-place ops (`add_`) emit a mutable receiver
+  plus an integer status. An op with several Tensor returns (`topk`,
+  `sort`, #154) emits an integer status plus trailing out pointers in C
+  and a `#:returns N` clause in Racket, where it answers multiple values
+  in schema order; any non-Tensor return still skips. Schema *defaults* (`int dim=0`) are still
   flattened to required arguments on the unstable surface — defaults are a
   curated-facade concern.
 - Generated output is committed (AOT); CI's `codegen-drift` job regenerates

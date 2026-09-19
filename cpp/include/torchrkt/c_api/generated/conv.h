@@ -13,7 +13,9 @@ extern "C" {
 
 /* Generated ops (conv). A functional op returns a new tr_tensor
  * handle (NULL on error); an in-place op mutates its first handle
- * and returns an int status (0 ok, 1 with tr_last_error set). */
+ * and returns an int status (0 ok, 1 with tr_last_error set). An op
+ * with several Tensor returns also reports a status and writes one
+ * new handle per trailing out pointer, every one NULL on error. */
 
 tr_tensor* tr_gen_adaptive_avg_pool2d(const tr_tensor* self,
                                       const int64_t* output_size,

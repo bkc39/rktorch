@@ -115,6 +115,7 @@ if(BUILD_TESTING)
     tests/torchrkt/generated_tranche3_test.cpp
     tests/torchrkt/generated_tranche4_test.cpp
     tests/torchrkt/generated_tranche5_test.cpp
+    tests/torchrkt/generated_tranche7_test.cpp
     tests/torchrkt/ops_test.cpp
     tests/torchrkt/random_test.cpp
     tests/torchrkt/spectral_test.cpp
