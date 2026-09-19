@@ -23,7 +23,9 @@
   (lambda (self x . state) (forward self x state))
   #:methods gen:layer
   [(define (layer-forward self . inputs)
-     (forward self (car inputs) (cdr inputs)))
+     (cond
+       [(null? inputs) (raise-forward-arity self inputs)]
+       [else (forward self (car inputs) (cdr inputs))]))
    (define (layer-parameters self)
      (map cdr (recurrent-params self)))
    (define (layer-named-parameters self prefix)
@@ -47,6 +49,18 @@
 (struct gru recurrent ()
   #:reflection-name 'GRU
   #:property prop:to move-and-scatter!)
+
+(define (layer-who self)
+  (if (lstm? self) 'LSTM 'GRU))
+
+(define (state-count self)
+  (if (lstm? self) 2 1))
+
+(define (raise-forward-arity self inputs)
+  (apply raise-arity-error
+         (layer-who self)
+         (list 1 (add1 (state-count self)))
+         inputs))
 
 ;; cudnnRNNMode_t
 (define (cudnn-mode self)
@@ -144,19 +158,18 @@
   (call-at-forward-trough (lambda () (run self x state))))
 
 (define (run self x state)
-  (define who (if (lstm? self) 'LSTM 'GRU))
-  (define state-count (if (lstm? self) 2 1))
+  (define who (layer-who self))
   (unless (and (tensor? x) (= 3 (length (tensor-shape x))))
     (raise-argument-error who "a rank-3 tensor?" x))
-  (unless (memv (length state) (list 0 state-count))
-    (apply raise-arity-error who (list 1 (add1 state-count)) x state))
+  (unless (memv (length state) (list 0 (state-count self)))
+    (raise-forward-arity self (cons x state)))
   (for ([s (in-list state)] [i (in-naturals 1)])
     (unless (and (tensor? s) (= 3 (length (tensor-shape s))))
       (apply raise-argument-error who "a rank-3 tensor?" i x state)))
   (ensure-flat! self)
   (define initial
     (if (null? state)
-        (for/list ([_ (in-range state-count)]) (zero-state self x))
+        (for/list ([_ (in-range (state-count self))]) (zero-state self x))
         state))
   (define (recur op hx)
     (op x hx (weights self)
