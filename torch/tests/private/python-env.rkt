@@ -74,13 +74,16 @@
 ;; repository root `import torch` finds the Racket collection DIRECTORY as an
 ;; implicit namespace package and a probe answers yes with no wheel installed.
 ;; raco test hides it by chdir'ing into each test's directory; raco cover and a
-;; bare racket do not. Scoped to the `-c` probes: the same variable would also
-;; stop a reference script importing a sibling helper out of its own directory.
+;; bare racket do not. Running the probe from elsewhere is what actually fixes
+;; it, on every Python: PYTHONSAFEPATH is 3.11 and later, and an older one
+;; ignores it silently. Both are scoped to the `-c` probes, since the same
+;; variable would stop a reference script importing a sibling helper.
 (define (probe . args)
   (call-with-python-env
    #:env '(("PYTHONSAFEPATH" . "1"))
    (lambda ()
-     (parameterize ([current-output-port (open-output-nowhere)]
+     (parameterize ([current-directory (find-system-path 'temp-dir)]
+                    [current-output-port (open-output-nowhere)]
                     [current-error-port (open-output-nowhere)])
        (apply system* python args)))))
 

@@ -591,9 +591,16 @@
               # racket-deps FOD as things stand: a fixed-output derivation may
               # not reference store paths, and the doc packages in that closure
               # embed them in their rendered HTML.
-              raco pkg install --batch --auto --scope user --skip-installed \
-                resyntax review cover-lib
-              touch "$deps_stamp"
+              # A shell hook has no errexit, so an unchecked failure here would
+              # still stamp the checkout as provisioned and never try again,
+              # leaving a tool missing until someone deletes the stamp by hand.
+              if raco pkg install --batch --auto --scope user --skip-installed \
+                   resyntax review cover-lib; then
+                touch "$deps_stamp"
+              else
+                echo "WARNING: installing the dev tools failed; not stamping," >&2
+                echo "         so the next shell entry retries." >&2
+              fi
               echo "Done. Lint: resyntax analyze --local-git-repository . origin/master"
               echo "      full sweep: resyntax analyze --directory torch  |  raco review <files>"
               echo "      coverage:   racket scripts/coverage.rkt"
