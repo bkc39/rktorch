@@ -10,4 +10,5 @@ target_sources(torchrkt
     ${CMAKE_CURRENT_SOURCE_DIR}/src/torchrkt/generated/nn.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/torchrkt/generated/reduce.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/torchrkt/generated/shape.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/torchrkt/generated/sort.cpp
 )

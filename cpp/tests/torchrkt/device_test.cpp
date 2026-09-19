@@ -109,6 +109,55 @@ TEST(TorchrktDevice, CudaMemoryStatsFailsCleanlyWithoutCuda) {
   EXPECT_EQ(tr_cuda_memory_stats(0, nullptr, nullptr, nullptr), 1);
 }
 
+TEST(TorchrktDevice, CudaMemGetInfoFailsCleanlyWithoutCuda) {
+  if (tr_cuda_is_available() != 0) {
+    GTEST_SKIP() << "CUDA present; the success path is CudaRoundTrip";
+  }
+  int64_t free_bytes = -1;
+  int64_t total_bytes = -1;
+  EXPECT_EQ(tr_cuda_mem_get_info(0, &free_bytes, &total_bytes), 1);
+  EXPECT_STRNE(tr_last_error(), "");
+  EXPECT_EQ(tr_cuda_mem_get_info(0, nullptr, nullptr), 1);
+}
+
+TEST(TorchrktDevice, ResetPeakStatsFailsCleanlyWithoutCuda) {
+  if (tr_cuda_is_available() != 0) {
+    GTEST_SKIP() << "CUDA present; the success path is CudaRoundTrip";
+  }
+  EXPECT_EQ(tr_cuda_reset_peak_stats(0), 1);
+  EXPECT_STRNE(tr_last_error(), "");
+}
+
+TEST(TorchrktDevice, AllocatorSettingsRejectsNull) {
+  EXPECT_EQ(tr_cuda_set_allocator_settings(nullptr), 1);
+  EXPECT_STRNE(tr_last_error(), "");
+}
+
+TEST(TorchrktDevice, AllocatorSettingsIsNoOpSuccessWithoutCuda) {
+  if (tr_cuda_is_available() != 0) {
+    GTEST_SKIP() << "CUDA present; the success path is CudaRoundTrip";
+  }
+  EXPECT_EQ(tr_cuda_set_allocator_settings("expandable_segments:True"), 0)
+      << tr_last_error();
+}
+
+TEST(TorchrktDevice, MpsMemoryInfoReportsZerosWithoutMps) {
+  int64_t allocated = -1;
+  int64_t driver = -1;
+  int64_t recommended = -1;
+  ASSERT_EQ(tr_mps_memory_info(&allocated, &driver, &recommended), 0)
+      << tr_last_error();
+  if (tr_mps_is_available() == 0) {
+    EXPECT_EQ(allocated, 0);
+    EXPECT_EQ(driver, 0);
+    EXPECT_EQ(recommended, 0);
+  } else {
+    EXPECT_GT(recommended, 0);
+    EXPECT_GE(driver, allocated);
+  }
+  EXPECT_EQ(tr_mps_memory_info(nullptr, nullptr, nullptr), 1);
+}
+
 TEST(TorchrktDevice, EmptyCacheIsNoOpSuccessWithoutCuda) {
   if (tr_cuda_is_available() != 0) {
     GTEST_SKIP() << "CUDA present; the success path is CudaRoundTrip";
@@ -363,6 +412,27 @@ TEST(TorchrktDevice, CudaRoundTrip) {
       << tr_last_error();
   EXPECT_LE(reserved_after, reserved);
   EXPECT_EQ(tr_cuda_memory_stats(256, &alloc, &reserved, &peak), 1);
+  EXPECT_STRNE(tr_last_error(), "");
+  int64_t free_bytes = -1;
+  int64_t total_bytes = -1;
+  ASSERT_EQ(tr_cuda_mem_get_info(0, &free_bytes, &total_bytes), 0)
+      << tr_last_error();
+  EXPECT_GT(total_bytes, 0);
+  EXPECT_GE(free_bytes, 0);
+  EXPECT_LE(free_bytes, total_bytes);
+  EXPECT_GE(total_bytes, reserved_after);
+  EXPECT_EQ(tr_cuda_mem_get_info(256, &free_bytes, &total_bytes), 1);
+  EXPECT_STRNE(tr_last_error(), "");
+  ASSERT_EQ(tr_cuda_reset_peak_stats(0), 0) << tr_last_error();
+  int64_t peak_after = -1;
+  ASSERT_EQ(tr_cuda_memory_stats(0, &alloc, &reserved, &peak_after), 0)
+      << tr_last_error();
+  EXPECT_EQ(peak_after, alloc);
+  EXPECT_EQ(tr_cuda_reset_peak_stats(256), 1);
+  EXPECT_EQ(tr_cuda_set_allocator_settings("garbage_collection_threshold:0.9"),
+            0)
+      << tr_last_error();
+  EXPECT_EQ(tr_cuda_set_allocator_settings("no_such_option:1"), 1);
   EXPECT_STRNE(tr_last_error(), "");
 
   const std::vector<int64_t> randn_dims = {4};

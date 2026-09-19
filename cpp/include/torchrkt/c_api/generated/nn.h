@@ -13,7 +13,9 @@ extern "C" {
 
 /* Generated ops (nn). A functional op returns a new tr_tensor
  * handle (NULL on error); an in-place op mutates its first handle
- * and returns an int status (0 ok, 1 with tr_last_error set). */
+ * and returns an int status (0 ok, 1 with tr_last_error set). An op
+ * with several Tensor returns also reports a status and writes one
+ * new handle per trailing out pointer, every one NULL on error. */
 
 tr_tensor* tr_gen_dropout(const tr_tensor* input, double p, bool train);
 tr_tensor* tr_gen_embedding(const tr_tensor* weight, const tr_tensor* indices,
