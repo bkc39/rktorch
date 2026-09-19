@@ -586,7 +586,7 @@ linearly over @racket[total-iters] steps, and held there: the warmup.
 @defproc[(one-cycle-lr [opt optimizer?]
                        [#:max-lr max-lr (>/c 0)]
                        [#:total-steps total-steps exact-positive-integer?]
-                       [#:pct-start pct-start (real-in 0 1) 0.3]
+                       [#:pct-start pct-start (and/c (>=/c 0) (</c 1)) 0.3]
                        [#:div-factor div-factor (>/c 0) 25]
                        [#:final-div-factor final-div-factor (>/c 0) 1e4])
          scheduler?]{
@@ -596,7 +596,9 @@ of @racket[total-steps], then down to the initial rate over
 @racket[final-div-factor]. Stepping past @racket[total-steps] is an error,
 as there. The base rate of @racket[opt] is not used. Momentum is left
 alone, where PyTorch's default cycles it; pass @tt{cycle_momentum=False}
-to reproduce this schedule there.
+to reproduce this schedule there. A @racket[pct-start] of 1 would put the
+peak at the last step and leave the descent no steps to spread over, so
+the contract excludes it.
 }
 
 @defproc[(lambda-lr [opt optimizer?] [factor (-> exact-nonnegative-integer? real?)])
@@ -608,6 +610,8 @@ The base rate times @racket[(factor step)].
               @defproc[(scheduler-step-count [s scheduler?]) exact-nonnegative-integer?]
               @defproc[(scheduler-rate [s scheduler?]) real?]
               @defproc[(scheduler-optimizer-of [s scheduler?]) optimizer?])]{
-A schedule, the number of times it has been stepped, the rate for that
-count, and the optimizer it writes to.
+A schedule, the number of times it has been stepped, the rate it last
+wrote to its optimizer, and that optimizer. @racket[scheduler-rate] is
+@tt{get_last_lr()}: it reports the rate written at construction or by the
+last @racket[step!], and does not call a @racket[lambda-lr] factor again.
 }
