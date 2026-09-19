@@ -4,21 +4,35 @@
                   -> ->* ->i =/c >=/c and/c any/c listof or/c
                   unsupplied-arg?)
          (only-in "../foreign/error.rkt" check-handle)
+         (only-in "../foreign/ops.rkt" device->type+index)
          (only-in "../foreign/raw/spectral.rkt"
                   tr-hann-window/raw tr-stft/raw)
          (only-in "../foreign/structs.rkt" wrap-tensor)
          (only-in "../main.rkt"
-                  add dtype log matmul mul ref sqrt t tensor
-                  tensor-device tensor? to-device to-dtype)
+                  add device/c dtype dtype/c log matmul mul ref sqrt t tensor
+                  tensor-device tensor? to-dtype)
          (only-in "../private/contract.rkt" define/contract-out))
 
 (define maybe-length/c (or/c #f exact-positive-integer?))
 
-(define/contract-out (hann-window window-length #:periodic? [periodic? #t])
-  (->* (exact-nonnegative-integer?) (#:periodic? boolean?) tensor?)
+(define (placement device dtype)
+  (define-values (type index)
+    (if device (device->type+index device) (values 'keep 0)))
+  (values type index (or dtype 'keep)))
+
+(define/contract-out (hann-window window-length
+                                  #:periodic? [periodic? #t]
+                                  #:device [device #f]
+                                  #:dtype [dtype #f])
+  (->* (exact-nonnegative-integer?)
+       (#:periodic? boolean?
+        #:device (or/c #f device/c)
+        #:dtype (or/c #f dtype/c))
+       tensor?)
+  (define-values (type index dt) (placement device dtype))
   (wrap-tensor
    (check-handle 'hann-window
-                 (tr-hann-window/raw window-length periodic?))))
+                 (tr-hann-window/raw window-length periodic? type index dt))))
 
 (define/contract-out (stft samples
                        #:n-fft n-fft
@@ -97,12 +111,16 @@
                                  #:n-mels n-mels
                                  #:sample-rate sample-rate
                                  #:f-min [f-min 0.0]
-                                 #:f-max [f-max #f])
+                                 #:f-max [f-max #f]
+                                 #:device [device #f]
+                                 #:dtype [dtype #f])
   (->i (#:n-freqs [n-freqs exact-positive-integer?]
         #:n-mels [n-mels exact-positive-integer?]
         #:sample-rate [sample-rate exact-positive-integer?])
        (#:f-min [f-min (and/c rational? (>=/c 0))]
-        #:f-max [f-max (or/c #f (and/c rational? positive?))])
+        #:f-max [f-max (or/c #f (and/c rational? positive?))]
+        #:device [device (or/c #f device/c)]
+        #:dtype [dtype (or/c #f dtype/c)])
        #:pre/name (f-min f-max sample-rate) "f-min below the effective f-max"
        (< (if (unsupplied-arg? f-min) 0.0 f-min)
           (if (or (unsupplied-arg? f-max) (not f-max))
@@ -114,15 +132,20 @@
     (linspace 0.0 (exact->inexact (quotient sample-rate 2)) n-freqs))
   (define m-pts (linspace (hz->mel f-min) (hz->mel hi) (+ n-mels 2)))
   (define f-pts (for/vector ([m (in-list m-pts)]) (mel->hz m)))
-  (tensor
-   (for/list ([f (in-list all-freqs)])
-     (for/list ([m (in-range n-mels)])
-       (define f-lo (vector-ref f-pts m))
-       (define f-mid (vector-ref f-pts (add1 m)))
-       (define f-hi (vector-ref f-pts (+ m 2)))
-       (define down (/ (- f f-lo) (- f-mid f-lo)))
-       (define up (/ (- f-hi f) (- f-hi f-mid)))
-       (max 0.0 (min down up))))))
+  (define rows
+    (for/list ([f (in-list all-freqs)])
+      (for/list ([m (in-range n-mels)])
+        (define f-lo (vector-ref f-pts m))
+        (define f-mid (vector-ref f-pts (add1 m)))
+        (define f-hi (vector-ref f-pts (+ m 2)))
+        (define down (/ (- f f-lo) (- f-mid f-lo)))
+        (define up (/ (- f-hi f) (- f-hi f-mid)))
+        (max 0.0 (min down up)))))
+  ;; tensor builds float32, int64 and uint8 only, so any other dtype is a
+  ;; cast on the destination rather than a second trip across the boundary
+  (define buildable? (and (memq dtype '(#f float32 int64 uint8)) #t))
+  (define built (tensor rows #:device device #:dtype (and buildable? dtype)))
+  (if buildable? built (to-dtype built dtype)))
 
 (define/contract-out (log-mel-spectrogram samples ;; noqa
                                       #:sample-rate sample-rate
@@ -139,12 +162,13 @@
   (define device (tensor-device samples))
   (define spec
     (spectrogram samples #:n-fft n-fft #:hop-length hop-length
-                 #:window (to-dtype (to-device (hann-window n-fft) device)
-                                    (dtype samples))))
+                 #:window (hann-window n-fft
+                                       #:device device
+                                       #:dtype (dtype samples))))
   (define fb
     (mel-filterbank #:n-freqs (add1 (quotient n-fft 2))
                     #:n-mels n-mels
-                    #:sample-rate sample-rate))
-  (define fb-matched
-    (to-dtype (to-device fb device) (dtype spec)))
-  (log (add (matmul (t fb-matched 0 1) spec) eps)))
+                    #:sample-rate sample-rate
+                    #:device device
+                    #:dtype (dtype spec)))
+  (log (add (matmul (t fb 0 1) spec) eps)))
