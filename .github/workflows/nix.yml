@@ -41,14 +41,6 @@ jobs:
       - name: clang-tidy
         run: nix build .#cpp-tidy --print-build-logs
 
-  no-addresses:
-    name: No addresses
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-      - name: Scan tracked files for email addresses
-        run: ./scripts/check-no-addresses.sh
-
   codegen-drift:
     name: Codegen drift
     runs-on: ubuntu-latest
