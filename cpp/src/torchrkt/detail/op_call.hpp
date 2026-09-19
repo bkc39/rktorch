@@ -2,12 +2,16 @@
 
 #include <c10/util/Exception.h>
 
+#include <array>
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <exception>
+#include <memory>
 #include <new>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <utility>
 
 #include "torchrkt/c_api/tensor.h"
@@ -69,6 +73,37 @@ tr_tensor* alloc_result(const char* who, Fn&& fn) noexcept {
   return alloc_handle<tr_tensor>(who, std::forward<Fn>(fn));
 }
 
+// Every handle is built before any out pointer is written, so a throw midway
+// frees the ones already made and the caller sees only NULLs.
+template <std::size_t N, typename Fn>
+int alloc_results(const char* who, tr_tensor** const (&outs)[N],
+                  Fn&& fn) noexcept {
+  for (tr_tensor** out : outs) {
+    *out = nullptr;
+  }
+  try {
+    auto results = std::forward<Fn>(fn)();
+    static_assert(std::tuple_size_v<decltype(results)> == N,
+                  "one out pointer per Tensor return");
+    auto handles = std::apply(
+        [](auto&... value) {
+          return std::array<std::unique_ptr<tr_tensor>, N>{
+              std::unique_ptr<tr_tensor>(new tr_tensor{std::move(value)})...};
+        },
+        results);
+    for (std::size_t i = 0; i < N; ++i) {
+      *outs[i] = handles[i].release();
+    }
+    return 0;
+  } catch (const std::exception& e) {
+    record_failure(who, e);
+    return 1;
+  } catch (...) {
+    record_unknown_failure(who);
+    return 1;
+  }
+}
+
 template <typename Fn>
 int status_call(const char* who, Fn&& fn) noexcept {
   try {
@@ -115,6 +150,17 @@ inline tr_tensor* null_arg(const char* who) {
 inline int null_arg_status(const char* who) {
   set_error(std::string(who) + ": null argument");
   return 1;
+}
+
+// A refused call still owes the caller NULL in every out slot it can reach.
+template <std::size_t N>
+int null_arg_outputs(const char* who, tr_tensor** const (&outs)[N]) {
+  for (tr_tensor** out : outs) {
+    if (out) {
+      *out = nullptr;
+    }
+  }
+  return null_arg_status(who);
 }
 
 }  // namespace torchrkt
