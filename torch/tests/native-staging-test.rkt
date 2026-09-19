@@ -4,10 +4,10 @@
 ;; inode has to survive for processes that already mapped it.
 
 (module+ test
-  (require rackunit
-           (only-in racket/file delete-directory/files file->string make-directory*
+  (require (only-in racket/file delete-directory/files file->string make-directory*
                     make-temporary-directory)
            (only-in racket/port port->string)
+           rackunit
            (only-in "../private/install-torchrkt-native.rkt" pre-installer))
 
   (define created '())
@@ -33,6 +33,26 @@
 
   (define (staged-path collection)
     (build-path collection "native-libs" "libtorchrkt.so"))
+
+  ;; The catalog's build server has neither, and a package that refuses to
+  ;; install there cannot be listed.
+  (test-case "with no source and nothing staged, the hook reports and returns"
+    (define collection (temp-dir!))
+    (define said
+      (parameterize ([current-environment-variables
+                      (environment-variables-copy
+                       (current-environment-variables))]
+                     [current-error-port (open-output-string)])
+        (putenv "TORCHRKT_NATIVE_LIB_PATH" "")
+        (environment-variables-set!
+         (current-environment-variables) #"TORCHRKT_NATIVE_LIB_PATH" #f)
+        (check-not-exn (lambda () (pre-installer #f collection #f)))
+        (get-output-string (current-error-port))))
+    (check-true (regexp-match? #rx"libtorchrkt" said)
+                "it names what is missing")
+    (check-true (regexp-match? #rx"TORCHRKT_NATIVE_LIB_PATH" said)
+                "and one of the two ways to supply it")
+    (check-false (file-exists? (staged-path collection))))
 
   (test-case "staging places the source bytes at the destination"
     (define collection (temp-dir!))

@@ -49,10 +49,6 @@
      (copy-native-libs! native-libs-dir (build-path cpp-lib-path "lib"))]
     [(has-matching-files? native-libs-dir)
      (void)]
-    ;; Not an error: the package has to install and its manual has to render
-    ;; on a machine with no native library at all, which is what the catalog's
-    ;; build server is. Requiring the bindings without one fails with the
-    ;; instructions below, at the point where the library is actually needed.
     [else
      (eprintf
       (string-append
