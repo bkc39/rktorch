@@ -3,8 +3,8 @@
 (require (only-in racket/contract/base
                   -> ->* <=/c >=/c and/c any/c contract-out)
          (only-in "../foreign.rkt"
-                  device-type prop:to tensor-device tensor-dtype tensor-shape
-                  tensor? with-no-grad zeros)
+                  device-type exn:fail:rktorch:oom? prop:to tensor-device
+                  tensor-dtype tensor-shape tensor? with-no-grad zeros)
          (only-in "../generated.rkt"
                   cudnn-rnn-flatten-weight gru-input lstm-input)
          (only-in "../private/contract.rkt" define/contract-out)
@@ -36,11 +36,17 @@
    (define (layer-set-mode! self mode)
      (set-recurrent-mode! self mode))])
 
-;; A move rebinds every parameter to scattered storage, on any device and
-;; for a dtype change alike, so it is the move that forgets the flattening.
+;; `to` is the identity when nothing changes, leaving the flat buffer intact,
+;; so only a move that really rebound the storage forgets the flattening.
+(define (placement self)
+  (define w (car (weights self)))
+  (cons (tensor-device w) (tensor-dtype w)))
+
 (define (move-and-scatter! self device dtype)
-  (set-recurrent-flattened-on! self #f)
-  (move-layer! self device dtype))
+  (define before (placement self))
+  (begin0 (move-layer! self device dtype)
+          (unless (equal? before (placement self))
+            (set-recurrent-flattened-on! self #f))))
 
 (struct lstm recurrent ()
   #:reflection-name 'LSTM
@@ -122,10 +128,14 @@
 (define (weights self)
   (map cdr (recurrent-params self)))
 
-;; Flattening is an optimisation cudnn asks for, never a requirement: a
-;; build or a dtype it refuses still runs, on compacted copies.
+;; Flattening is an optimisation cudnn asks for, never a requirement: a build
+;; or a dtype it refuses still runs, on compacted copies, and refusing again
+;; on the next call would cost an FFI round trip for the same answer. An OOM
+;; is not that: it is transient and belongs to the caller, so it propagates
+;; and leaves the layer unflattened, to be retried once the pressure clears.
 (define (flatten-weights! self)
-  (with-handlers ([exn:fail? void])
+  (with-handlers ([exn:fail:rktorch:oom? raise]
+                  [exn:fail? void])
     (with-no-grad
       (void
        (cudnn-rnn-flatten-weight (weights self)
@@ -182,3 +192,6 @@
   (if (lstm? self)
       (recur lstm-input initial)
       (recur gru-input (car initial))))
+
+(module+ private
+  (provide recurrent-flattened-on))
