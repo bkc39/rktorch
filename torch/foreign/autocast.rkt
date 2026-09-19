@@ -36,9 +36,6 @@
   (check-ok (tr-set-autocast-enabled/raw type (or dtype 'keep) on?)
             'set-autocast!))
 
-;; torch.autocast(device_type, dtype): the ops the thread dispatches run in
-;; the half dtype where PyTorch's cast lists say so, float32 elsewhere, and
-;; leaving the extent puts back whatever autocast state was there before
 (define/contract-out (call-with-autocast thunk ;; noqa
                                          #:device [device (default-device)]
                                          #:dtype [dtype 'bfloat16])
