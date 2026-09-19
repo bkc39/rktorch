@@ -50,6 +50,11 @@
     (check-exn exn:fail:contract?
                (lambda () (random-crop (randn 3 4 4) #:padding 1))))
 
+  (test-case "an empty batch passes through both transforms"
+    (define x (zeros 0 3 4 4))
+    (check-equal? (tensor-shape (random-horizontal-flip x)) '(0 3 4 4))
+    (check-equal? (tensor-shape (random-crop x #:padding 2)) '(0 3 4 4)))
+
   (test-case "transforms keep the device of their input"
     (when (cuda-available?)
       (define x (to (randn 8 3 32 32) (cuda-device)))
