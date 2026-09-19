@@ -55,11 +55,14 @@
 
 ;; Flattening is an optimisation cudnn asks for, never a requirement: a build
 ;; or a dtype it refuses still runs, on compacted copies, and refusing again
-;; on the next call would cost an FFI round trip for the same answer. An OOM
-;; is not that: it is transient and belongs to the caller, so it propagates
-;; and leaves the layer unflattened, to be retried once the pressure clears.
+;; on the next call would cost an FFI round trip for the same answer. Two
+;; failures are not that and reach the caller: an OOM, which is transient, so
+;; the layer stays unflattened and retries once the pressure clears; and a
+;; contract violation, which is a defect here rather than an answer from
+;; cudnn, and would otherwise read as the fallback path.
 (define (flatten-weights! spec weights)
   (with-handlers ([exn:fail:rktorch:oom? raise]
+                  [exn:fail:contract? raise]
                   [exn:fail? void])
     (with-no-grad
       (void
