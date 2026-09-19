@@ -385,22 +385,17 @@
   m)
 
 (begin-for-syntax
-  (define (check-field-names! stx fields)
-    (for ([f (in-list fields)])
-      (when (regexp-match? #rx"[.]" (symbol->string (syntax-e f)))
-        (raise-syntax-error
-         #f "a field name may not contain a dot; it is one state-dict segment"
-         stx f))))
+  (define-splicing-syntax-class layer-field
+    #:description "a layer field"
+    #:attributes (id bare? (decl 1))
+    (pattern f:ctor-formal
+      #:fail-when
+      (and (regexp-match? #rx"[.]" (symbol->string (syntax-e #'f.id))) #'f.id)
+      "a field name may not contain a dot; it is one state-dict segment"
+      #:with id #'f.id
+      #:attr bare? (attribute f.bare?)
+      #:with (decl ...) #'(f.decl ...)))
 
-  (define (check-bare-fields! stx fields bare?s)
-    (for ([f (in-list fields)] [bare? (in-list bare?s)])
-      (unless bare?
-        (raise-syntax-error
-         #f
-         "with #:init, a field is a bare identifier; defaults and keywords belong to the #:init formals"
-         stx f))))
-
-  ;; the fields an #:init leaves for its body to assign
   (define (unassigned-fields fields init-ids)
     (filter (lambda (f) (not (member f init-ids bound-identifier=?))) fields))
 
@@ -412,7 +407,7 @@
 
 (define-syntax (define-layer stx)
   (syntax-parse stx
-    [(_ name:id (field:ctor-formal ...)
+    [(_ name:id (field:layer-field ...)
         (~alt (~optional (~seq #:init init:init-formals init-body:expr ...))
               (~optional (~seq #:reflection-name reflect:expr))
               (~optional (~seq #:contract ctc:expr))
@@ -420,11 +415,14 @@
               (~optional (~seq #:on-move moved-body:expr ...+))) ...
         #:forward (~or* (input:id ...) (input:id ... . restarg:id))
         body:expr ...+)
+     #:fail-when
+     (and (attribute init)
+          (for/or ([f (in-list (syntax->list #'(field.id ...)))]
+                   [bare? (in-list (attribute field.bare?))])
+            (and (not bare?) f)))
+     "with #:init, a field is a bare identifier; defaults and keywords belong to the #:init formals"
      #:do [(define fields (syntax->list #'(field.id ...)))
-           (check-field-names! stx fields)
            (define init? (and (attribute init) #t))
-           (when init?
-             (check-bare-fields! stx fields (attribute field.bare?)))
            (define init-ids (if init? (syntax->list #'(init.id ...)) '()))
            (define struct-id (generate-temporary #'name))
            (define arity (length (syntax->list #'(input ...))))]
@@ -445,8 +443,6 @@
      #:with forward-lambda (if (attribute restarg)
                                #'(lambda (input ... . restarg) body ...)
                                #'(lambda (input ...) body ...))
-     ;; a move hook overrides the property gen:layer derives, so it is
-     ;; attached only when #:on-move asked for it
      #:with (moved-defn ...)
      (if (attribute moved-body)
          #'((define (moved-proc self dev dtype)
