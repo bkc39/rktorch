@@ -241,4 +241,20 @@ TEST(GeneratedTranche7, RecurrencesRefuseNullListsAndNullListElements) {
   expect_error_from("tr_gen_lstm_input");
 }
 
+TEST(GeneratedTranche7, FlattenWeightGuardsItsListAndHasNoCpuKernel) {
+  EXPECT_EQ(tr_gen__cudnn_rnn_flatten_weight(nullptr, 4, 4, 2, 3, 2, 0, 1,
+                                             false, false),
+            nullptr);
+  expect_error_from("tr_gen__cudnn_rnn_flatten_weight");
+  if (tr_cuda_is_available()) {
+    GTEST_SKIP() << "the CUDA path is driven from the Racket layer tests";
+  }
+  const ZeroWeights weights(3, 2, 2);
+  const std::vector<const tr_tensor*> params = weights.list();
+  EXPECT_EQ(tr_gen__cudnn_rnn_flatten_weight(params.data(), 4, 4, 2, 3, 2, 0, 1,
+                                             false, false),
+            nullptr);
+  expect_error_from("tr_gen__cudnn_rnn_flatten_weight");
+}
+
 }  // namespace

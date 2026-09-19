@@ -205,6 +205,9 @@ void torchrkt_c_api_compile_check(void) {
                   const tr_tensor* const*, int64_t, bool, int64_t, double, bool,
                   bool, bool, tr_tensor**, tr_tensor**, tr_tensor**) =
       tr_gen_lstm_input;
+  tr_tensor* (*gen_flatten_weight)(
+      const tr_tensor* const*, int64_t, int64_t, int64_t, int64_t, int64_t,
+      int64_t, int64_t, bool, bool) = tr_gen__cudnn_rnn_flatten_weight;
   int (*gen_gru)(const tr_tensor*, const tr_tensor*, const tr_tensor* const*,
                  int64_t, bool, int64_t, double, bool, bool, bool, tr_tensor**,
                  tr_tensor**) = tr_gen_gru_input;
@@ -336,6 +339,7 @@ void torchrkt_c_api_compile_check(void) {
   (void)gen_multinomial;
   (void)gen_lstm;
   (void)gen_gru;
+  (void)gen_flatten_weight;
   (void)cuda_available;
   (void)cuda_count;
   (void)cuda_stats;

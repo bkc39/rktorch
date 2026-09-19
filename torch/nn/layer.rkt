@@ -33,6 +33,8 @@
          layer-named-children ;; noqa
          layer-mode ;; noqa
          layer-set-mode! ;; noqa
+         move-layer!
+         call-at-forward-trough
          in-mode
          in-eval-mode
          with-mode
@@ -191,14 +193,16 @@
 
 ;; the mark tells a nested call from the outermost one, whose return is
 ;; where a no-grad loop's memory is at its lowest
-(define (call-forward self inputs)
+(define (call-at-forward-trough forward)
   (cond
-    [(continuation-mark-set-first #f layer-call-key)
-     (apply (registry-forward self) self inputs)]
+    [(continuation-mark-set-first #f layer-call-key) (forward)]
     [else
-     (begin0 (with-continuation-mark layer-call-key #t
-               (apply (registry-forward self) self inputs))
+     (begin0 (with-continuation-mark layer-call-key #t (forward))
              (collect-at-forward-trough!))]))
+
+(define (call-forward self inputs)
+  (call-at-forward-trough
+   (lambda () (apply (registry-forward self) self inputs))))
 
 (struct registry (forward params buffers children [mode #:mutable])
   #:property prop:procedure

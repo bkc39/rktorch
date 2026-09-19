@@ -137,7 +137,7 @@ def _c_name(aten_name: str) -> str:
 
 
 def _racket_name(func_name) -> str:
-    base = func_name.name.base.replace("_", "-")
+    base = func_name.name.base.lstrip("_").replace("_", "-")
     overload = func_name.overload_name
     name = base
     if overload:

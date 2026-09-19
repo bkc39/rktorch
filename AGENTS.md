@@ -17,7 +17,8 @@ The Racket package is the `torch` collection:
   `define-layer`, `gen:layer`, `Parameter`, `Linear`, `sgd`, `mse-loss`, initializers.
   **Naming convention:** nn layer *constructors* are PascalCase (`Linear`,
   `Conv2d`, `ConvTranspose2d`, `MaxPool2d`, `Flatten`, `Dropout`,
-  `Sequential`, `Embedding`, `LayerNorm`, `GroupNorm`), mirroring the
+  `Sequential`, `Embedding`, `LayerNorm`, `GroupNorm`, `LSTM`, `GRU`),
+  mirroring the
   `torch.nn.*` classes; their *predicates* are lowercase (`linear?`,
   `conv2d?`, `conv-transpose2d?`, `max-pool2d?`, `flatten?`, `dropout?`,
   `sequential?`, `embedding?`, `layer-norm?`, `group-norm?`), per Racket idiom
@@ -143,7 +144,8 @@ per `foreign/operators.rkt`.
 
 From `torch/nn`: `define-layer procedure->Layer gen:layer layer? Parameter Buffer LayerList LayerHash parameters
 named-parameters buffers children forward Linear Conv2d MaxPool2d Flatten Dropout
-Sequential Embedding LayerNorm ConvTranspose2d GroupNorm sgd adam step! zero-grads! ema
+Sequential Embedding LayerNorm ConvTranspose2d GroupNorm LSTM GRU sgd adam step!
+zero-grads! clip-grad-norm! ema
 ema-update! ema-average cross-entropy nll-loss
 mse-loss kaiming-uniform uniform-init normal-init fan-in`. The functional
 transformer primitives (`gelu tril triu masked-fill embedding layer-norm`,
@@ -156,7 +158,15 @@ fields with `set!`, a field's value classifies it at construction
 (`Parameter?`, `Buffer?`, `layer?`, `#f` for absent, anything else plain),
 `(with-mode body)` binds `mode` (`'train` or `'eval`, predicates `training?`/`evaluating?`) in `#:forward` to the instance's own mode (`train!`/`eval!` set it and recurse; every layer starts in `'train`),
 models are plain struct trees owned by the GC (no global parameter store),
-and `prop:procedure` makes `(net x)` work like `__call__`. Layer init mirrors
+and `prop:procedure` makes `(net x)` work like `__call__`. `LSTM` and `GRU` (`nn/recurrent.rkt`, #153) are hand-written
+`gen:layer` structs rather than `define-layer` forms, because their
+parameter set depends on `#:num-layers` and `#:bidirectional?` and carries
+PyTorch's names (`weight_ih_l0` .. `bias_hh_l1_reverse`); applying one
+answers `(values output h-n [c-n])`, an initial state follows the input,
+and on CUDA the first call after a move flattens the weights for cudnn
+(`cudnn-rnn-flatten-weight`, in place, the parameters keep their
+identity). `clip-grad-norm!` (`nn/clip.rkt`) keeps its scale on the
+device. Layer init mirrors
 PyTorch RNG consumption (`nn.Linear.reset_parameters`), so a shared
 `manual-seed!` yields bit-comparable parameters — the MLP cross-test relies
 on this.
@@ -348,7 +358,8 @@ module's full export set (`racket/runtime-path`, `syntax/parse/pre`).
   `exn:fail:rktorch:oom` (catch by type, not message).
 - `nn.rkt` — pure re-export facade over `nn/` (`layer.rkt` = `gen:layer`, `LayerList` +
   the `define-layer` macro; `parameter.rkt`, `buffer.rkt`, `linear.rkt`,
-  `init.rkt`, `optim.rkt`, `ema.rkt`, `loss.rkt`).
+  `init.rkt`, `optim.rkt`, `ema.rkt`, `loss.rkt`, `recurrent.rkt`,
+  `clip.rkt`).
 - `private/install-torchrkt-native.rkt` — stages `libtorchrkt.*` into
   `native-libs/` from `TORCHRKT_NATIVE_LIB_PATH` (set by the Nix build/shell).
   Every staging path (here and the flake's three shell ones) writes a temp file
@@ -383,7 +394,8 @@ headers:
   hand-curated.
 - `torch/tests/generated-parity.rktd` — manifest driving the generated-op
   battery in `generated-parity-test.rkt`; every new allowlist line needs an
-  input recipe in that test
+  input recipe in that test (`'device-only` for an op with no CPU kernel,
+  which then needs a device-guarded test of its own)
 
 Conventions:
 
@@ -399,7 +411,9 @@ Conventions:
   plus an integer status. An op with several Tensor returns (`topk`,
   `sort`, #154) emits an integer status plus trailing out pointers in C
   and a `#:returns N` clause in Racket, where it answers multiple values
-  in schema order; any non-Tensor return still skips. Schema *defaults* (`int dim=0`) are still
+  in schema order; any non-Tensor return still skips. A private ATen name
+  loses its leading underscore on the Racket side
+  (`_cudnn_rnn_flatten_weight` is `cudnn-rnn-flatten-weight`). Schema *defaults* (`int dim=0`) are still
   flattened to required arguments on the unstable surface — defaults are a
   curated-facade concern.
 - Generated output is committed (AOT); CI's `codegen-drift` job regenerates
