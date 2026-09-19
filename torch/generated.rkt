@@ -12,6 +12,8 @@
 ;; for "absent" (an empty list '() is also absent for int-arrays);
 ;; loss ops follow ATen (nll_loss wants log-probabilities,
 ;; cross_entropy_loss wants raw logits).
+;; An op with several Tensor returns carries #:returns N and answers
+;; them as multiple values, in schema order.
 
 (require (only-in "foreign/define-generated.rkt"
                   define-generated-op))
@@ -87,9 +89,11 @@
          silu
          sin-tensor
          slice-tensor
+         sort-tensor
          sum-dim-intlist
          take
          take-along-dim
+         topk
          tril
          triu
          where-scalar
@@ -310,6 +314,9 @@
 (define-generated-op slice-tensor tr_gen_slice_tensor
   ([self tensor] [dim int64] [start optional-int64] [end optional-int64] [step int64]))
 
+(define-generated-op sort-tensor tr_gen_sort #:returns 2
+  ([self tensor] [dim int64] [descending bool]))
+
 (define-generated-op sum-dim-intlist tr_gen_sum_dim_intlist
   ([self tensor] [dim optional-int-array] [keepdim bool] [dtype optional-dtype]))
 
@@ -318,6 +325,9 @@
 
 (define-generated-op take-along-dim tr_gen_take_along_dim
   ([self tensor] [indices tensor] [dim optional-int64]))
+
+(define-generated-op topk tr_gen_topk #:returns 2
+  ([self tensor] [k int64] [dim int64] [largest bool] [sorted bool]))
 
 (define-generated-op tril tr_gen_tril
   ([self tensor] [diagonal int64]))

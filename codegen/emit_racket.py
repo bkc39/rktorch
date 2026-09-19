@@ -36,6 +36,8 @@ def emit_wrappers(shards: dict[str, list[Op]]) -> str:
         ";; for \"absent\" (an empty list '() is also absent for int-arrays);",
         ";; loss ops follow ATen (nll_loss wants log-probabilities,",
         ";; cross_entropy_loss wants raw logits).",
+        ";; An op with several Tensor returns carries #:returns N and answers",
+        ";; them as multiple values, in schema order.",
         "",
         '(require (only-in "foreign/define-generated.rkt"',
         "                  define-generated-op))",
@@ -48,6 +50,8 @@ def emit_wrappers(shards: dict[str, list[Op]]) -> str:
             f"[{_rkt_arg(p.name, p.kind)} {p.kind}]" for p in op.params
         )
         flag = " #:inplace" if op.inplace else (" #:rng" if op.rng else "")
+        if op.returns > 1:
+            flag += f" #:returns {op.returns}"
         lines += [
             "",
             f"(define-generated-op {op.racket_name} {op.c_name}{flag}",
@@ -63,16 +67,20 @@ def emit_manifest(shards: dict[str, list[Op]]) -> str:
     )
     lines = [BANNER.rstrip()]
     lines += [
-        ";; Parity manifest: (racket-name python-attr (arg kinds ...) inplace?).",
+        ";; Parity manifest:",
+        ";; (racket-name python-attr (arg kinds ...) inplace? returns).",
         ";; inplace? is #t for ops checked against torch.Tensor.<attr>_ on a",
-        ";; cloned receiver. Consumed by torch/tests/generated-parity-test.rkt.",
+        ";; cloned receiver; returns counts the Tensor returns, compared",
+        ";; elementwise against the Python tuple when above 1. Consumed by",
+        ";; torch/tests/generated-parity-test.rkt.",
         "(",
     ]
     for op in all_ops:
         kinds = " ".join(p.kind for p in op.params)
         flag = "#t" if op.inplace else "#f"
         lines.append(
-            f' ({op.racket_name} "{op.python_name}" ({kinds}) {flag})'
+            f' ({op.racket_name} "{op.python_name}" ({kinds}) {flag}'
+            f" {op.returns})"
         )
     lines.append(")")
     return "\n".join(lines) + "\n"
