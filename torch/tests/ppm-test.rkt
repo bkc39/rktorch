@@ -115,6 +115,9 @@
     ;; finite endpoints whose span is not: the scale would come out zero
     (check-exn #rx"value-range"
                (lambda () (written (zeros 3 2 2) #:range '(-1e308 1e308))))
+    ;; a span small enough that 255 over it is not a number either
+    (check-exn #rx"value-range"
+               (lambda () (written (zeros 3 2 2) #:range '(0 1e-307))))
     (check-exn #rx"expected: image"
                (lambda () (written (to-dtype (zeros 3 2 2) 'bool))))
     ;; an int64 image under the default range would quantize to white

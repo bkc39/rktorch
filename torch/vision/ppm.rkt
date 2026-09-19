@@ -22,13 +22,18 @@
                  (= 3 (car dims))
                  (andmap positive? dims)))))))
 
+(define (quantizes? r)
+  (define span (exact->inexact (- (cadr r) (car r))))
+  (and (< (car r) (cadr r))
+       (rational? span)
+       (positive? span)
+       (let ([scale (/ 255.0 span)])
+         (and (rational? scale) (positive? scale)))))
+
 (define value-range/c
   (flat-named-contract
    'value-range
-   (and/c (list/c rational? rational?)
-          (lambda (r)
-            (define span (exact->inexact (- (cadr r) (car r))))
-            (and (< (car r) (cadr r)) (rational? span) (positive? span))))))
+   (and/c (list/c rational? rational?) quantizes?)))
 
 (define non-empty-image-batch/c
   (flat-named-contract
