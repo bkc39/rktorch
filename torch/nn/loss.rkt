@@ -10,7 +10,8 @@
                   [cross-entropy-loss g:cross-entropy-loss]
                   [ctc-loss-intlist g:ctc-loss-intlist]
                   [huber-loss g:huber-loss]
-                  [l1-loss g:l1-loss])
+                  [l1-loss g:l1-loss]
+                  [nll-loss g:nll-loss])
          (only-in "../private/contract.rkt" define/contract-out))
 
 (define/contract-out (mse-loss prediction target) ;; noqa
@@ -66,3 +67,17 @@
                               (to-device targets 'cpu))
                  device)
       (marginalize log-probs targets)))
+
+(define reductions '#hasheq((none . 0) (mean . 1) (sum . 2)))
+
+(define/contract-out (nll-loss log-probs targets ;; noqa
+                               #:weight [weight #f]
+                               #:reduction [reduction 'mean]
+                               #:ignore-index [ignore-index -100])
+  (->* (tensor? tensor?)
+       (#:weight (or/c tensor? #f)
+        #:reduction (or/c 'none 'mean 'sum)
+        #:ignore-index exact-integer?)
+       tensor?)
+  (g:nll-loss log-probs (to-dtype targets 'int64) weight
+              (hash-ref reductions reduction) ignore-index))

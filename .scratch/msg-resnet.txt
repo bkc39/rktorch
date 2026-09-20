@@ -1,0 +1,22 @@
+vision: ResNet on CIFAR-10, the classic supervised recipe (#152 leg 3)
+
+torch/vision/resnet.rkt: BasicBlock (two 3x3 convolutions under batch
+norm, a projection shortcut only where the shape changes and no field to
+name otherwise, as torchvision) and ResNet (a 3x3 stem for 32x32 images,
+four stages of blocks doubling the width, global average pooling and a
+linear head; ResNet-18 at base 64 by default, 11.2M parameters). Conv2d
+takes #:bias? so the convolutions under batch norm draw no bias, as
+PyTorch's bias=False.
+
+examples/racket/09-resnet.rkt: the loop with the three new ingredients,
+random-crop and random-horizontal-flip on the device from the loader's
+generator, SGD with Nesterov momentum and weight decay under one-cycle-lr
+stepped per batch, and the forward under with-autocast on CUDA with the
+backward outside; run-example is the seeded float32 core on the fixture
+(the narrow base-16 net, five full-batch steps) that the harness and the
+twin drive; train-cifar10 is the headline run with the test accuracy after
+every epoch. Twin 09_resnet.py; harness with the parameter tree pinned;
+manual section; AGENTS rosters.
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01VDEpCNkMi2rmxjgRnCHhkp

@@ -1,0 +1,4 @@
+warning: Git tree '/home/bkc/dev/rkt/rktorch/.claude/worktrees/vision-152' is dirty
+this derivation will be built:
+  /nix/store/hcbqpkjnh9s33w2kmvzvva47a62hjncl-torchrkt-cpp-0.1.0.drv
+building '/nix/store/hcbqpkjnh9s33w2kmvzvva47a62hjncl-torchrkt-cpp-0.1.0.drv'...

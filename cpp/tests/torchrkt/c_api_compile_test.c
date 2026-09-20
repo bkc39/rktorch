@@ -221,6 +221,19 @@ void torchrkt_c_api_compile_check(void) {
                   tr_tensor**) = tr_gen_topk;
   int (*gen_sort)(const tr_tensor*, int64_t, bool, tr_tensor**, tr_tensor**) =
       tr_gen_sort;
+  tr_tensor* (*gen_argsort)(const tr_tensor*, int64_t, bool) = tr_gen_argsort;
+  tr_tensor* (*gen_multinomial)(const tr_tensor*, int64_t, bool,
+                                const tr_generator*) = tr_gen_multinomial;
+  int (*gen_lstm)(const tr_tensor*, const tr_tensor* const*, int64_t,
+                  const tr_tensor* const*, int64_t, bool, int64_t, double, bool,
+                  bool, bool, tr_tensor**, tr_tensor**, tr_tensor**) =
+      tr_gen_lstm_input;
+  tr_tensor* (*gen_flatten_weight)(
+      const tr_tensor* const*, int64_t, int64_t, int64_t, int64_t, int64_t,
+      int64_t, int64_t, bool, bool) = tr_gen__cudnn_rnn_flatten_weight;
+  int (*gen_gru)(const tr_tensor*, const tr_tensor*, const tr_tensor* const*,
+                 int64_t, bool, int64_t, double, bool, bool, bool, tr_tensor**,
+                 tr_tensor**) = tr_gen_gru_input;
   int (*cuda_available)(void) = tr_cuda_is_available;
   int (*cuda_count)(void) = tr_cuda_device_count;
   int (*cuda_stats)(int64_t, int64_t*, int64_t*, int64_t*) =
@@ -357,6 +370,11 @@ void torchrkt_c_api_compile_check(void) {
   (void)gen_dropout;
   (void)gen_topk;
   (void)gen_sort;
+  (void)gen_argsort;
+  (void)gen_multinomial;
+  (void)gen_lstm;
+  (void)gen_gru;
+  (void)gen_flatten_weight;
   (void)cuda_available;
   (void)cuda_count;
   (void)cuda_stats;

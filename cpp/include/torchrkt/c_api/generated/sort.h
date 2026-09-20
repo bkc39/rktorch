@@ -17,6 +17,7 @@ extern "C" {
  * with several Tensor returns also reports a status and writes one
  * new handle per trailing out pointer, every one NULL on error. */
 
+tr_tensor* tr_gen_argsort(const tr_tensor* self, int64_t dim, bool descending);
 int tr_gen_sort(const tr_tensor* self, int64_t dim, bool descending,
                 tr_tensor** out0, tr_tensor** out1);
 int tr_gen_topk(const tr_tensor* self, int64_t k, int64_t dim, bool largest,

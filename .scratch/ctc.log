@@ -1,0 +1,6 @@
+warning: Git tree '/home/bkc/dev/rkt/rktorch/.claude/worktrees/vision-152' is dirty
+raco test: (submod (file "torch/tests/nn-contract-test.rkt") test)
+raco test: (submod (file "torch/tests/nn-test.rkt") test)
+raco test: (submod (file "torch/tests/define-layer-test.rkt") test)
+raco test: (submod (file "torch/tests/forward-arity-test.rkt") test)
+64 tests passed

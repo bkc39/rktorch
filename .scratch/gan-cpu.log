@@ -1,0 +1,10 @@
+warning: Git tree '/home/bkc/dev/rkt/rktorch/.claude/worktrees/vision-152' is dirty
+bytecode cache: clearing compiled/ (93460b8551ee -> b0189770a7a8)
+Staging libtorchrkt (/nix/store/bbd4y4k5n2chrzbjapr2qjcsvsi2q2lq-torchrkt-cpp-0.1.0)...
+raco test: (submod (file "examples/test/10-dcgan.rkt") test)
+raco test: (submod (file "examples/test/11-vae.rkt") test)
+raco test: (submod (file "examples/test/09-resnet.rkt") test)
+raco test: (submod (file "torch/tests/ppm-test.rkt") test)
+raco test: (submod (file "torch/tests/transforms-test.rkt") test)
+raco test: (submod (file "torch/tests/nn-test.rkt") test)
+81 tests passed
