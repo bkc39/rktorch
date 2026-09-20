@@ -27,6 +27,16 @@
     (check-equal? (tensor-dtype (matmul a b)) 'float32)
     (check-equal? (tensor-dtype a) 'float32 "the inputs are never touched"))
 
+  (test-case "leaving restores the dtype even where autocast was off"
+    (check-false (autocast-enabled? 'cpu))
+    (define before (autocast-dtype 'cpu))
+    (define other (if (eq? before 'float16) 'bfloat16 'float16))
+    (with-autocast #:device 'cpu #:dtype other
+      (check-equal? (autocast-dtype 'cpu) other))
+    (check-false (autocast-enabled? 'cpu))
+    (check-equal? (autocast-dtype 'cpu) before
+                  "the body's dtype does not outlive the extent"))
+
   (test-case "with-autocast nests and restores the outer state, even on escape"
     (with-autocast #:device 'cpu #:dtype 'bfloat16
       (with-autocast #:device 'cpu #:dtype 'bfloat16

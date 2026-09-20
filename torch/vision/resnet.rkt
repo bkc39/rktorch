@@ -3,6 +3,7 @@
 (require (only-in racket/contract/base ->* list/c)
          (only-in threading ~>)
          (only-in "../foreign.rkt" adaptive-avg-pool2d add flatten relu)
+         (only-in "../foreign/contracts.rkt" image-batch/c)
          (only-in "../nn/batch-norm.rkt" BatchNorm2d)
          (only-in "../nn/conv.rkt" Conv2d)
          (only-in "../nn/layer.rkt" define-layer)
@@ -18,13 +19,11 @@
   (set! bn1 (BatchNorm2d out))
   (set! conv2 (Conv2d out out 3 #:padding 1 #:bias? #f))
   (set! bn2 (BatchNorm2d out))
-  ;; the projection shortcut only where the shape changes; elsewhere the
-  ;; identity, and no field to name in the state dict, as torchvision
   (set! shortcut
         (and (or (not (= stride 1)) (not (= in out)))
              (Sequential (Conv2d in out 1 #:stride stride #:bias? #f)
                          (BatchNorm2d out))))
-  #:forward (x)
+  #:forward ([x : image-batch/c])
   (relu (add (bn2 (conv2 (relu (bn1 (conv1 x)))))
              (if shortcut (shortcut x) x))))
 
@@ -53,6 +52,6 @@
   (set! layer3 (stage (* 2 base) (* 4 base) (list-ref blocks 2) 2))
   (set! layer4 (stage (* 4 base) (* 8 base) (list-ref blocks 3) 2))
   (set! fc (Linear (* 8 base) classes))
-  #:forward (x)
+  #:forward ([x : image-batch/c])
   (~> x stem bn relu layer1 layer2 layer3 layer4
       (adaptive-avg-pool2d 1) (flatten 1) fc))

@@ -64,10 +64,6 @@
                (lambda () (BatchNorm2d 0)))
     (check-exn #rx"^BatchNorm1d: contract violation"
                (lambda () (BatchNorm1d 3 #:eps 'tiny)))
-    ;; the rank a layer accepts is stated in its #:forward formals, so a
-    ;; wrong one is contract blame naming the layer and the contract, not an
-    ;; error raised from inside torch/nn; the party is the label `caller`,
-    ;; since the wrapper is built where the layer is defined
     (check-exn #rx"^BatchNorm2d: contract violation"
                (lambda () ((BatchNorm2d 3) (randn 4 3))))
     (check-exn #rx"expected: image-batch"
@@ -85,6 +81,14 @@
                (lambda () (Sequential (Linear 2 2) 'not-a-module)))
     (check-exn blames-this-test
                (lambda () (Sequential (Linear 2 2) 'not-a-module))))
+
+  (test-case "an unbatched image blames ResNet, not a layer inside it"
+    (define net (ResNet #:base 4))
+    (check-exn #rx"^ResNet: contract violation"
+               (lambda () (net (randn 3 32 32))))
+    (check-exn #rx"expected: image-batch"
+               (lambda () (net (randn 3 32 32))))
+    (check-equal? (tensor-shape (net (randn 2 3 32 32))) '(2 10)))
 
   (test-case "ResNet's #:blocks is one depth per stage, so exactly four"
     (check-exn #rx"^ResNet: contract violation"

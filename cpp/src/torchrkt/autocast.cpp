@@ -42,15 +42,22 @@ extern "C" {
 int tr_set_autocast_enabled(tr_device_type type, tr_dtype dtype, int enabled) {
   return torchrkt::status_call("tr_set_autocast_enabled", [&] {
     const torch::DeviceType device = device_type_of(type);
+    // the dtype is restored on the way out whether or not autocast was on
+    // there, so a body that changed it does not outlive its extent
+    if (dtype != TR_DTYPE_KEEP) {
+      if (dtype != TR_DTYPE_FLOAT16 && dtype != TR_DTYPE_BFLOAT16) {
+        throw std::invalid_argument(
+            "autocast dtype must be float16 or bfloat16");
+      }
+      at::autocast::set_autocast_dtype(device, torchrkt::to_scalar_type(dtype));
+    } else if (enabled != 0) {
+      throw std::invalid_argument("autocast dtype must be float16 or bfloat16");
+    }
     if (enabled == 0) {
       at::autocast::set_autocast_enabled(device, false);
       at::autocast::clear_cache();
       return;
     }
-    if (dtype != TR_DTYPE_FLOAT16 && dtype != TR_DTYPE_BFLOAT16) {
-      throw std::invalid_argument("autocast dtype must be float16 or bfloat16");
-    }
-    at::autocast::set_autocast_dtype(device, torchrkt::to_scalar_type(dtype));
     at::autocast::set_autocast_enabled(device, true);
   });
 }

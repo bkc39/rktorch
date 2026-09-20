@@ -137,21 +137,28 @@ is allowed only at module level.
 @racketblock[
 (define-layer Conv2d (kernel-size stride padding weight bias)
   #:contract (->* [exact-positive-integer? exact-positive-integer? pos-size/c]
-                  [#:stride pos-size/c #:padding nonneg-size/c]
+                  [#:stride pos-size/c #:padding nonneg-size/c
+                   #:bias? boolean?]
                   conv2d?)
   #:init (in-channels out-channels kernel-size
           #:stride [stride 1]
-          #:padding [padding 0])
+          #:padding [padding 0]
+          #:bias? [bias? #t])
   (set! kernel-size (->2d kernel-size))
   (set! stride (->2d stride))
   (set! padding (->2d padding))
   (define shape
     (list out-channels in-channels (car kernel-size) (cadr kernel-size)))
   (set! weight (Parameter (kaiming-uniform shape)))
-  (set! bias (Parameter (uniform-init (list out-channels) -0.1 0.1)))
-  #:forward (x)
+  (set! bias
+        (and bias? (Parameter (uniform-init (list out-channels) -0.1 0.1))))
+  #:forward ([x : image-batch/c])
   (conv2d x weight #:bias bias #:stride stride #:padding padding))
 ]
+
+@racket[#:bias?] is @racket[#f] where a batch norm follows, as in
+@racket[ResNet]: the normalization's shift subsumes the bias, so the
+field holds @racket[#f] and no @tt{bias} entry reaches the state dict.
 
 A container is a layer whose children arrive as a named collection
 rather than one per field.  It builds them with
@@ -231,6 +238,26 @@ Whether @racket[mode] is @racket['train].
 
 @defproc[(evaluating? [mode mode/c]) boolean?]{
 Whether @racket[mode] is @racket['eval].
+}
+
+@deftogether[(@defproc[(BatchNorm2d [num-features exact-positive-integer?]
+                                    [#:eps eps real? 1e-5]
+                                    [#:momentum momentum real? 0.1])
+                       batch-norm2d?]
+              @defproc[(BatchNorm1d [num-features exact-positive-integer?]
+                                    [#:eps eps real? 1e-5]
+                                    [#:momentum momentum real? 0.1])
+                       batch-norm1d?])]{
+@tt{nn.BatchNorm2d} and @tt{nn.BatchNorm1d}: normalize each of
+@racket[num-features] channels over the batch, scale and shift by a
+learned @tt{weight} and @tt{bias}, and keep a @racket[Buffer] running
+mean and variance that @racket[step!] does not touch --- the forward
+updates them, in @racket['train] mode only, and @racket[eval!] switches
+the normalization onto them.  @racket[BatchNorm2d] takes an
+@tt{[N C H W]} batch and @racket[BatchNorm1d] takes @tt{[N C]} or
+@tt{[N C L]}; another rank is a contract violation naming the layer.
+The @tt{num-batches-tracked} buffer counts the batches normalized, in
+int64 as torch does.
 }
 
 @defproc[(Parameter [t tensor?]) Parameter?]{

@@ -155,26 +155,8 @@ int tr_tensor_copy_bytes(const tr_tensor* t, uint64_t capacity, uint8_t* out,
   if (!t || !out_nbytes) {
     return torchrkt::null_arg_status("tr_tensor_copy_bytes");
   }
-  *out_nbytes = 0;
-  try {
-    const torch::Tensor c = t->value.to(torch::kCPU).contiguous();
-    const auto nbytes = static_cast<uint64_t>(c.numel()) *
-                        static_cast<uint64_t>(c.element_size());
-    *out_nbytes = nbytes;
-    if (capacity < nbytes) {
-      return 2;
-    }
-    if (out && nbytes > 0) {
-      std::memcpy(out, c.const_data_ptr(), nbytes);
-    }
-    return 0;
-  } catch (const std::exception& e) {
-    torchrkt::record_failure("tr_tensor_copy_bytes", e);
-    return 1;
-  } catch (...) {
-    torchrkt::record_unknown_failure("tr_tensor_copy_bytes");
-    return 1;
-  }
+  return torchrkt::copy_tensor_bytes("tr_tensor_copy_bytes", t->value, capacity,
+                                     out, out_nbytes);
 }
 
 int tr_tensor_item(const tr_tensor* t, double* out) {
