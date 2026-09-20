@@ -49,7 +49,8 @@ def emit_wrappers(shards: dict[str, list[Op]]) -> str:
         args = " ".join(
             f"[{_rkt_arg(p.name, p.kind)} {p.kind}]" for p in op.params
         )
-        flag = " #:inplace" if op.inplace else (" #:rng" if op.rng else "")
+        flag = " #:inplace" if op.inplace else (" #:no-retry" if op.no_retry
+                                        else "")
         if op.returns > 1:
             flag += f" #:returns {op.returns}"
         lines += [
