@@ -29,6 +29,16 @@
   (define (trough-collections)
     (cdr (assq 'trough-collections (finalizer-diagnostics))))
 
+  (define (trough-floor)
+    (cdr (assq 'trough-floor (finalizer-diagnostics))))
+
+  ;; A trough is due on two gates: the bytes over the floor, and the time
+  ;; the budget spaces collections out by. "the budget spaces trough
+  ;; collections out" is the case for the second one; every case about the
+  ;; first opens it, or a slow collection's backoff decides the result
+  ;; instead of the bytes the case is about (#183).
+  (define no-backoff +inf.0)
+
   (define (settle!)
     (for ([_ (in-range 3)])
       (reclaim-native-memory!))
@@ -178,7 +188,7 @@
       (thunk)
       (collect-at-trough!)
       (positive? (- (trough-collections) before)))
-    (parameterize ([native-collect-budget 1000])
+    (parameterize ([native-collect-budget no-backoff])
       (define held '())
       (define (grow! k) (set! held (cons (hold k) held)))
       (check-false (collects? (lambda () (grow! 32)))
@@ -208,19 +218,22 @@
   (test-case "a stalled drain at a trough leaves the floor where it was"
     (settle!)
     (collect-at-trough!)
+    (define settled (trough-floor))
     (define held
       (parameterize ([native-collect-margin (* 16 mib)]
-                     [native-collect-budget 1000]
+                     [native-collect-budget no-backoff]
                      [drain-deadline 0])
         (define before-stall (trough-collections))
         (define kept (for/list ([_ (in-range 8)]) (zeros 1024 1024)))
         (collect-at-trough!)
         (check-equal? (- (trough-collections) before-stall) 1)
+        (check-equal? (trough-floor) settled
+                      "a drain that ran out of time must not settle the floor")
         kept))
     ;; the floor never took the stalled collection's snapshot, so the same
     ;; residue is still over it at the next trough
     (parameterize ([native-collect-margin (* 16 mib)]
-                   [native-collect-budget 1000])
+                   [native-collect-budget no-backoff])
       (define before-retry (trough-collections))
       (collect-at-trough!)
       (check-equal? (length held) 8)
@@ -251,7 +264,7 @@
     (define keys (map car (finalizer-diagnostics)))
     (for ([k (in-list '(runs failures messages ledger-entries
                         pressure-collections pressure-reclaimed
-                        trough-collections trough-minors))])
+                        trough-collections trough-minors trough-floor))])
       (check-not-false (memq k keys) (format "missing ~a" k))))
 
   ;; the CPU has no capacity of its own, so the fraction is exercised against

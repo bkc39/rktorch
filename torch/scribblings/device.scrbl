@@ -294,6 +294,13 @@ ledger has made: @racket['trough-collections] and @racket['trough-minors],
 the full and minor collections at a trough, @racket['pressure-collections]
 from the high-water backstop, and under @racket['pressure-reclaimed] the
 bytes all of them released.
+
+@racket['trough-floor] is the ledger size the last trough whose drain
+finished settled on, summed over the devices. It is the baseline
+@racket[native-collect-margin] is measured above, so residue within the
+margin of it is left alone. A collection whose finalizers do not finish
+draining in time leaves it where it was, so the bytes still waiting to be
+freed stay visible to the next trough.
 }
 
 @section{Unsafe}
