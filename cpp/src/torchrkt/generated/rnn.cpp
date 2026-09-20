@@ -13,6 +13,29 @@
 
 extern "C" {
 
+tr_tensor* tr_gen__cudnn_rnn_flatten_weight(
+    const tr_tensor* const* weight_arr, int64_t weight_arr_len,
+    int64_t weight_stride0, int64_t input_size, int64_t mode,
+    int64_t hidden_size, int64_t proj_size, int64_t num_layers,
+    bool batch_first, bool bidirectional) {
+  if (!weight_arr || weight_arr_len < 0) {
+    return torchrkt::null_arg("tr_gen__cudnn_rnn_flatten_weight");
+  }
+  return torchrkt::alloc_result("tr_gen__cudnn_rnn_flatten_weight", [&] {
+    std::vector<at::Tensor> weight_arr_vec;
+    weight_arr_vec.reserve(static_cast<size_t>(weight_arr_len));
+    for (int64_t i = 0; i < weight_arr_len; ++i) {
+      if (!weight_arr[i]) {
+        throw std::invalid_argument("null tensor in weight_arr");
+      }
+      weight_arr_vec.push_back(weight_arr[i]->value);
+    }
+    return at::_cudnn_rnn_flatten_weight(
+        weight_arr_vec, weight_stride0, input_size, mode, hidden_size,
+        proj_size, num_layers, batch_first, bidirectional);
+  });
+}
+
 int tr_gen_gru_input(const tr_tensor* input, const tr_tensor* hx,
                      const tr_tensor* const* params, int64_t params_len,
                      bool has_biases, int64_t num_layers, double dropout,

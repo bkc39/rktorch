@@ -35,6 +35,7 @@
          cos-tensor
          cross-entropy-loss
          ctc-loss-intlist
+         cudnn-rnn-flatten-weight
          dot
          dropout
          embedding
@@ -148,6 +149,9 @@
 
 (define-generated-op ctc-loss-intlist tr_gen_ctc_loss_intlist
   ([log-probs tensor] [targets tensor] [input-lengths int-array] [target-lengths int-array] [blank int64] [reduction int64] [zero-infinity bool]))
+
+(define-generated-op cudnn-rnn-flatten-weight tr_gen__cudnn_rnn_flatten_weight
+  ([weight-arr tensor-list] [weight-stride0 int64] [input-size int64] [mode int64] [hidden-size int64] [proj-size int64] [num-layers int64] [batch-first bool] [bidirectional bool]))
 
 (define-generated-op dot tr_gen_dot
   ([self tensor] [tensor-arg tensor]))
