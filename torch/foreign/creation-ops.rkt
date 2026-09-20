@@ -30,10 +30,10 @@
          (only-in "error.rkt" check-handle check-ok)
          (only-in "ops.rkt"
                   device->type+index
-                  float-dtype/c
-                  placement
                   dims-rest/c
                   dtype/c
+                  float-dtype/c
+                  placement
                   tensor-device
                   tensor-dtype
                   tensor-shape
