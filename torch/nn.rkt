@@ -17,8 +17,6 @@
          "nn/layer-list.rkt"
          "nn/layer-norm.rkt"
          (except-in "nn/layer.rkt"
-                    call-at-forward-trough
-                    move-layer!
                     child-name/c
                     children-by-index
                     children-by-key
