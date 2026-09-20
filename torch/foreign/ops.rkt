@@ -74,6 +74,8 @@
 
 (provide device->type+index
          dims-rest/c
+         float-dtype/c
+         placement
          with-default-device)
 
 (module+ unsafe
@@ -87,6 +89,15 @@
 (define dtype-symbols '(float32 float64 int64 bool uint8))
 
 (define/checked-out dtype/c contract? (apply or/c dtype-symbols))
+
+(define float-dtype/c (or/c 'float32 'float64))
+
+;; the device and dtype go into native construction — never a default-device
+;; scope or a construct-then-move hop through another device
+(define (placement device dtype)
+  (define-values (type index)
+    (if device (device->type+index device) (values 'keep 0)))
+  (values type index (or dtype 'keep)))
 
 ;; Python's argument order: a dtype target stands alone, a device target may
 ;; carry a dtype — the shape gets contract blame, not a runtime error
