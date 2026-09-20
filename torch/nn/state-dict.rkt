@@ -9,6 +9,7 @@
                   tensor->bytes
                   tensor-shape
                   tensor?
+                  with-default-device
                   with-no-grad)
          (only-in "../generated.rkt" copy!)
          (only-in "../private/contract.rkt" define/contract-out)
@@ -41,7 +42,9 @@
     (raise-arguments-error 'load-state! "unsupported dtype"
                            "entry" name
                            "dtype" dtype))
-  (bytes->tensor bs entry shape))
+  ;; the payload decodes on the host and `copy!` moves it: an F64 entry
+  ;; loading into a float32 model could not land on an MPS default device
+  (with-default-device 'cpu (bytes->tensor bs entry shape)))
 
 (define/contract-out (save-state! model path) ;; noqa
   (-> layer? path-string? void?)

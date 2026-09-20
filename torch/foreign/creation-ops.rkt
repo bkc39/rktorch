@@ -380,7 +380,6 @@
       [else out]))
   (if requires-grad? (requires-grad! typed) typed))
 
-;; the inverse of tensor->bytes: element bytes in the given dtype, shaped
 (define/contract-out (bytes->tensor bs dtype shape) ;; noqa
   (-> bytes? dtype/c dims-rest/c tensor?)
   (wrap 'bytes->tensor
