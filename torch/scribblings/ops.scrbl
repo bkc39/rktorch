@@ -2,12 +2,10 @@
 
 @(require "common.rkt"
           (for-label (except-in racket/base
-                                exp log max min sort sqrt + - * /)
+                                abs cos exp log sin sort sqrt max min length
+                                + - * /)
                      racket/contract
-                     (only-in torch
-                              T |@| arange item lambda~> lambda~>> matmul
-                              mean mul relu reshape shape sum t tensor
-                              tensor->list tensor? transpose zeros ~> ~>>)))
+                     torch))
 
 @title{Operations on tensors}
 
@@ -36,9 +34,15 @@ also @racket[T], which reverses every axis.}
 
 @section{Arithmetic}
 
-@defproc[(mul [a (or/c tensor? real?)] [b (or/c tensor? real?)]) tensor?]{
-Elementwise product. A real operand broadcasts across the tensor, promoting
-to a float result.
+@defproc[(mul [a (or/c tensor? real?)]
+              [b (if (tensor? a) (or/c tensor? real?) tensor?)])
+         tensor?]{
+Elementwise product. A real operand broadcasts across the tensor; at least
+one of the two must be a tensor.
+
+A scalar crosses the FFI boundary as a C double, so an integer tensor
+combined with an integer scalar comes back @racket['float32] where PyTorch
+would keep the integer dtype.
 
 @torch-examples[(tensor->list (mul (tensor '(1.0 2.0)) 3.0))]}
 
@@ -95,8 +99,10 @@ to the binding @racketmodname[racket/base] provides, so requiring
 @racketmodname[torch] never breaks numeric code that was already in the
 module.
 
-@deftogether[(@defidform[exp] @defidform[log] @defidform[sqrt]
-              @defidform[max] @defidform[min] @defidform[sort])]{
+@deftogether[(@defidform[abs] @defidform[cos] @defidform[exp]
+              @defidform[log] @defidform[sin] @defidform[sqrt]
+              @defidform[max] @defidform[min] @defidform[sort]
+              @defidform[length])]{
 Generic over tensors and the values @racketmodname[racket/base] accepts.}
 
 @deftogether[(@defidform[+] @defidform[-] @defidform[*] @defidform[/])]{

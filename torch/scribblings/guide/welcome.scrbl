@@ -54,11 +54,11 @@ collides: no prefix and no @racket[except-in] are needed.
 @section[#:tag "welcome-shadowing"]{Shadowed names stay safe}
 
 A handful of tensor operations share names with @racketmodname[racket/base]
---- @racket[exp], @racket[log], @racket[sqrt], @racket[max], @racket[min],
-@racket[sort], and the arithmetic operators. rktorch provides these as
-@emph{generic} operations: a tensor argument goes to libtorch, and anything
-else falls through to the binding @racketmodname[racket/base] would have
-given you.
+--- @racket[abs], @racket[cos], @racket[exp], @racket[log], @racket[sin],
+@racket[sqrt], @racket[max], @racket[min], @racket[sort], @racket[length],
+and the arithmetic operators. rktorch provides these as @emph{generic}
+operations: a tensor argument goes to libtorch, and anything else falls
+through to the binding @racketmodname[racket/base] would have given you.
 
 So requiring the library never breaks the numeric code already in your
 module:
@@ -70,14 +70,23 @@ module:
 ]
 
 The first is @racketmodname[racket/base]'s @racket[+] on two numbers. The
-second dispatches to tensor addition. The third broadcasts the scalar, and
-promotes to a float tensor on the way, exactly as PyTorch does.
+second dispatches to tensor addition. The third broadcasts the scalar
+across the tensor.
+
+@margin-note{Note the dtype in that third result. A scalar crosses the FFI
+boundary as a C double, so an integer tensor combined with an integer
+scalar comes back @racket['float32]. This is a known deviation: PyTorch
+keeps @tt{torch.tensor([1,2,3]) + 10} at @tt{int64}. Cast with
+@racket[to-dtype] where the dtype matters.}
 
 @margin-note{When you write Scribble documentation that mentions these
 names, the @racket[for-label] import needs
-@racket[(except-in racket/base exp log sort sqrt max min + - * /)] so the
-links resolve to the tensor operations. The manual's own
-@tt{scribblings/common.rkt} does this once for every chapter.}
+@racket[(except-in racket/base abs cos exp log sin sort sqrt max min length + - * /)],
+so the links resolve to the tensor operations, followed by
+@racketmodname[torch] itself. Each chapter of this manual carries that line
+--- re-exporting it from a shared module tags every link to that module
+instead of to @racketmodname[torch], which is why
+@tt{scribblings/common.rkt} deliberately does not.}
 
 @section[#:tag "welcome-next"]{Where to go next}
 

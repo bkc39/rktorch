@@ -5,9 +5,9 @@
                      racket/contract
                      (only-in torch relu shape tensor? zeros)
                      (only-in torch/nn
-                              Conv2d Dropout Linear Sequential adam
+                              Conv2d Dropout Linear Sequential adam adam?
                               define-layer layer? mse-loss named-parameters
-                              parameters sgd step! zero-grads!)))
+                              parameters sgd sgd? step! zero-grads!)))
 
 @title{Built-in layers, optimizers and losses}
 
@@ -37,18 +37,30 @@ PyTorch's @tt{nn.Linear} initializes them.
 
 @defproc[(Conv2d [in exact-positive-integer?]
                  [out exact-positive-integer?]
-                 [kernel exact-positive-integer?]
-                 [#:stride stride exact-positive-integer? 1]
-                 [#:padding padding exact-nonnegative-integer? 0])
+                 [kernel (or/c exact-positive-integer?
+                               (list/c exact-positive-integer?
+                                       exact-positive-integer?))]
+                 [#:stride stride (or/c exact-positive-integer?
+                                        (list/c exact-positive-integer?
+                                                exact-positive-integer?))
+                           1]
+                 [#:padding padding (or/c exact-nonnegative-integer?
+                                          (list/c exact-nonnegative-integer?
+                                                  exact-nonnegative-integer?))
+                            0])
          layer?]{
 Two-dimensional convolution over a batch shaped @tt{[N, in, H, W]},
 answering @tt{[N, out, H', W']} with the usual convolution arithmetic.
+
+Each size is an integer for a square one, or a two-element list
+@racket[(list height width)] for an asymmetric one, mirroring PyTorch's
+@tt{nn.Conv2d(kernel_size=(3, 5))}.
 
 @torch-examples[
 (shape ((Conv2d 1 4 3) (zeros 1 1 8 8)))
 ]}
 
-@defproc[(Dropout [#:p p (and/c real? (between/c 0 1)) 0.5]) layer?]{
+@defproc[(Dropout [#:p p (and/c real? (>=/c 0) (</c 1)) 0.5]) layer?]{
 Zeroes each element independently with probability @racket[p] while the
 layer is in training mode, and is the identity while it is evaluating. See
 @secref["Layers"] for the mode flag.}
@@ -79,23 +91,27 @@ Whether @racket[v] implements the layer interface.}
 An optimizer holds the parameters it is responsible for and the rule for
 updating them.
 
-@margin-note{The contract on these is @tt{optimizer?}, a predicate defined
-in @tt{torch/nn/optim} and not re-exported from @racketmodname[torch/nn];
-it is written @racket[any/c] here because the name cannot be reached
-through the usual import.}
-
-@defproc[(sgd [params (listof tensor?)] [#:lr lr real?]) any/c]{
+@defproc[(sgd [params (listof tensor?)] [#:lr lr real?]) sgd?]{
 Stochastic gradient descent: each parameter moves against its gradient by
-@racket[lr]. Answers the optimizer that @racket[step!] and
-@racket[zero-grads!] take.}
+@racket[lr].}
 
 @defproc[(adam [params (listof tensor?)]
                [#:lr lr real? 0.001]
                [#:beta1 beta1 real? 0.9]
                [#:beta2 beta2 real? 0.999]
                [#:eps eps real? 1e-8])
-         any/c]{
+         adam?]{
 Adam, with PyTorch's defaults.}
+
+@deftogether[(@defproc[(sgd? [v any/c]) boolean?]
+              @defproc[(adam? [v any/c]) boolean?])]{
+Predicates for the two optimizers.}
+
+@margin-note{@racket[step!] and @racket[zero-grads!] accept any optimizer.
+Their contract names @tt{optimizer?}, a predicate defined in
+@tt{torch/nn/optim} and not re-exported from @racketmodname[torch/nn], so
+it is written @racket[any/c] here; each of @racket[sgd?] and
+@racket[adam?] implies it.}
 
 @defproc[(step! [opt any/c]) void?]{
 Applies one update to every parameter the optimizer holds, from the

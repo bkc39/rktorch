@@ -70,7 +70,7 @@ sum of every gradient computed so far. Note that it takes the
 Run the step until the loss stops falling:
 
 @torch-examples[
-(for ([i (in-range 200)]) (train-step!))
+(for ([i (in-range 30)]) (train-step!))
 (train-step!)
 ]
 
