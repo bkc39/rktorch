@@ -56,7 +56,6 @@
   (flat-named-contract 'image-batch
                        (lambda (x) (and (tensor? x) (= 4 (length (tensor-shape x)))))))
 
-;; nn.BatchNorm1d's input: features over a batch, with or without a length
 (define feature-batch/c
   (flat-named-contract 'feature-batch
                        (lambda (x)
