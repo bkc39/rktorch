@@ -116,6 +116,16 @@
       (step! s)
       (check-false (nan? (learning-rate s)))))
 
+  (test-case "a learning rate is never negative, as in torch.optim"
+    (define ps (list (Parameter (zeros 2))))
+    (check-exn #rx"^sgd: contract violation"
+               (lambda () (sgd ps #:lr -0.1)))
+    (check-exn #rx"^adam: contract violation"
+               (lambda () (adam ps #:lr -1e-3)))
+    (check-exn #rx"^rmsprop: contract violation"
+               (lambda () (rmsprop ps #:lr -1e-2)))
+    (check-= (learning-rate (sgd ps #:lr 0)) 0 0.0 "zero is a held rate"))
+
   (test-case "weight decay is never negative, as in torch.optim"
     (define ps (list (Parameter (zeros 2))))
     (check-exn #rx"^sgd: contract violation"

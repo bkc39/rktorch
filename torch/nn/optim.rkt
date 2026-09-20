@@ -73,7 +73,7 @@
                           #:momentum [momentum 0.0]
                           #:nesterov? [nesterov? #f]
                           #:weight-decay [weight-decay 0.0])
-  (->i ([params (listof tensor?)] #:lr [lr real?])
+  (->i ([params (listof tensor?)] #:lr [lr (>=/c 0)])
        (#:momentum [momentum (real-in 0 1)]
         #:nesterov? [nesterov? boolean?]
         #:weight-decay [weight-decay (>=/c 0)])
@@ -133,7 +133,7 @@
                            #:eps [eps 1e-8]
                            #:weight-decay [weight-decay 0.0])
   (->* [(listof tensor?)]
-       [#:lr real? #:beta1 real? #:beta2 real? #:eps real?
+       [#:lr (>=/c 0) #:beta1 real? #:beta2 real? #:eps real?
         #:weight-decay (>=/c 0)]
        adam?)
   (make-adam params lr beta1 beta2 eps weight-decay (box 0)
@@ -181,7 +181,8 @@
                               #:weight-decay [weight-decay 0.0]
                               #:momentum [momentum 0.0])
   (->* [(listof tensor?)]
-       [#:lr real? #:alpha (real-in 0 1) #:eps (>/c 0) #:weight-decay (>=/c 0)
+       [#:lr (>=/c 0) #:alpha (real-in 0 1) #:eps (>/c 0)
+        #:weight-decay (>=/c 0)
         #:momentum (real-in 0 1)]
        rmsprop?)
   (make-rmsprop params lr alpha eps weight-decay momentum
