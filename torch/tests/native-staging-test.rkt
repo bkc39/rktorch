@@ -43,7 +43,6 @@
                       (environment-variables-copy
                        (current-environment-variables))]
                      [current-error-port (open-output-string)])
-        (putenv "TORCHRKT_NATIVE_LIB_PATH" "")
         (environment-variables-set!
          (current-environment-variables) #"TORCHRKT_NATIVE_LIB_PATH" #f)
         (check-not-exn (lambda () (pre-installer #f collection #f)))
