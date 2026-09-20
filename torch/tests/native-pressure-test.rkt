@@ -196,6 +196,26 @@
                   "360 MiB over a 320 MiB floor is past it")
       (check-equal? (length held) 4)))
 
+  (test-case "a trough that does not collect still lowers the floor"
+    (settle!)
+    (define settled
+      (parameterize ([native-collect-margin (* 16 mib)]
+                     [native-collect-budget no-backoff])
+        (define kept (for/list ([_ (in-range 40)]) (zeros 1024 1024)))
+        (collect-at-trough!)
+        (begin0 (trough-floor) (check-equal? (length kept) 40))))
+    (check-true (>= settled (* 128 mib))
+                (format "the floor settled at ~a MiB" (quotient settled mib)))
+    (for ([_ (in-range 3)]) (reclaim-native-memory!))
+    (define before (trough-collections))
+    (parameterize ([native-collect-margin (* 1024 1024 mib)]
+                   [native-collect-budget no-backoff])
+      (collect-at-trough!))
+    (check-equal? (- (trough-collections) before) 0
+                  "a margin nothing can exceed must leave the trough idle")
+    (check-true (< (trough-floor) settled)
+                "the floor follows the ledger down with no collection at all"))
+
   ;; a zero deadline makes every drain report that it ran out of time
   (test-case "a stalled drain does not credit the backstop's byte gate"
     (settle!)
