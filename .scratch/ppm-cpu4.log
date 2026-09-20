@@ -1,4 +1,0 @@
-warning: Git tree '/home/bkc/dev/rkt/rktorch/.claude/worktrees/vision-152' is dirty
-bytecode cache: clearing compiled/ (890866cf4cbd -> ca68f4b3eef3)
-raco test: (submod (file "torch/tests/ppm-test.rkt") test)
-4 tests passed
