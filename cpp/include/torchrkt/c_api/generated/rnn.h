@@ -17,6 +17,11 @@ extern "C" {
  * with several Tensor returns also reports a status and writes one
  * new handle per trailing out pointer, every one NULL on error. */
 
+tr_tensor* tr_gen__cudnn_rnn_flatten_weight(
+    const tr_tensor* const* weight_arr, int64_t weight_arr_len,
+    int64_t weight_stride0, int64_t input_size, int64_t mode,
+    int64_t hidden_size, int64_t proj_size, int64_t num_layers,
+    bool batch_first, bool bidirectional);
 int tr_gen_gru_input(const tr_tensor* input, const tr_tensor* hx,
                      const tr_tensor* const* params, int64_t params_len,
                      bool has_biases, int64_t num_layers, double dropout,

@@ -24,6 +24,7 @@
  (cos-tensor "cos" (tensor) #f 1)
  (cross-entropy-loss "cross_entropy_loss" (tensor tensor optional-tensor int64 int64 double) #f 1)
  (ctc-loss-intlist "ctc_loss.IntList" (tensor tensor int-array int-array int64 int64 bool) #f 1)
+ (cudnn-rnn-flatten-weight "_cudnn_rnn_flatten_weight" (tensor-list int64 int64 int64 int64 int64 int64 bool bool) #f 1)
  (dot "dot" (tensor tensor) #f 1)
  (dropout "dropout" (tensor double bool) #f 1)
  (embedding "embedding" (tensor tensor int64 bool bool) #f 1)
