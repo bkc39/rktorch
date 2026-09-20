@@ -1,0 +1,2 @@
+warning: Git tree '/home/bkc/dev/rkt/rktorch/.claude/worktrees/vision-152' is dirty
+codegen: generated 87 op(s) across 12 shard(s): compare, conv, inplace, linalg, loss, math, nn, random, reduce, rnn, shape, sort
