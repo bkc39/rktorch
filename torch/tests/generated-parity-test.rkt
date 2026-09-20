@@ -22,7 +22,8 @@
   ;; via `ne 0`, (kwarg "name" v) a scalar (or none) passed as name=v to a kwarg-only
   ;; aten arg, (optional-scalar v) a Scalar? bound, (uniform-tensor dim ...)
   ;; a seeded rand (non-negative, for probabilities), other heads are
-  ;; literals with #f = None.
+  ;; literals with #f = None. A recipe of 'device-only marks an op with no CPU
+  ;; kernel, which a device-guarded test drives instead.
   (define generated-recipes
     (hash 'matmul '((tensor 2 3) (tensor 3 2))
           'mm '((tensor 2 2) (tensor 2 2))
@@ -137,6 +138,7 @@
                                         (kwarg "output_size" none))
           'topk '((tensor 3 5) (int64 2) (int64 -1) (bool #t) (bool #t))
           'sort-tensor '((tensor 3 5) (int64 -1) (bool #f))
+          'cudnn-rnn-flatten-weight 'device-only
           'argsort '((tensor 3 5) (int64 -1) (bool #f))
           'multinomial '((uniform-tensor 3 6) (int64 4) (bool #f)
                          (kwarg "generator" none))
@@ -292,7 +294,10 @@
              "(run inside `nix develop`)")]
     [else
      (define manifest (with-input-from-file generated-manifest read))
-     (for-each check-generated-parity manifest)
+     (for ([entry (in-list manifest)]
+           #:unless (eq? 'device-only
+                         (hash-ref generated-recipes (car entry) #f)))
+       (check-generated-parity entry))
      ;; override drives: optional-argument paths the default recipes leave
      ;; absent (or vice versa); the labels name the driven path
      (check-generated-parity
