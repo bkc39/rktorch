@@ -1,0 +1,8 @@
+review: ResNet's #:blocks is exactly four depths
+
+#:init reads indices 0 through 3, so a shorter list raised list-ref
+from inside the constructor instead of blaming the caller. The
+contract now states the four stages.
+
+Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01VDEpCNkMi2rmxjgRnCHhkp

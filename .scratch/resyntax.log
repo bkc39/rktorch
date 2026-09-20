@@ -1,0 +1,43 @@
+warning: Git tree '/home/bkc/dev/rkt/rktorch/.claude/worktrees/vision-152' is dirty
+resyntax: --- analyzing code ---
+resyntax: analyzing /home/bkc/dev/rkt/rktorch/.claude/worktrees/vision-152/torch/tests/generated-parity-test.rkt
+resyntax: analyzer identifier-usage-analyzer timed out after 10000 ms while analyzing /home/bkc/dev/rkt/rktorch/.claude/worktrees/vision-152/torch/tests/generated-parity-test.rkt
+resyntax: analyzing /home/bkc/dev/rkt/rktorch/.claude/worktrees/vision-152/torch/tests/nn-contract-test.rkt
+resyntax: analyzer identifier-usage-analyzer timed out after 10000 ms while analyzing /home/bkc/dev/rkt/rktorch/.claude/worktrees/vision-152/torch/tests/nn-contract-test.rkt
+resyntax: analyzing /home/bkc/dev/rkt/rktorch/.claude/worktrees/vision-152/torch/tests/transforms-test.rkt
+resyntax: analyzer identifier-usage-analyzer timed out after 10000 ms while analyzing /home/bkc/dev/rkt/rktorch/.claude/worktrees/vision-152/torch/tests/transforms-test.rkt
+resyntax: analyzing /home/bkc/dev/rkt/rktorch/.claude/worktrees/vision-152/torch/tests/nn-test.rkt
+resyntax: analyzer ignored-result-values-analyzer timed out after 10000 ms while analyzing /home/bkc/dev/rkt/rktorch/.claude/worktrees/vision-152/torch/tests/nn-test.rkt
+resyntax: analyzer identifier-usage-analyzer timed out after 10000 ms while analyzing /home/bkc/dev/rkt/rktorch/.claude/worktrees/vision-152/torch/tests/nn-test.rkt
+resyntax: analyzing /home/bkc/dev/rkt/rktorch/.claude/worktrees/vision-152/torch/tests/tensor-ops-test.rkt
+resyntax: analyzer ignored-result-values-analyzer timed out after 10000 ms while analyzing /home/bkc/dev/rkt/rktorch/.claude/worktrees/vision-152/torch/tests/tensor-ops-test.rkt
+resyntax: analyzer identifier-usage-analyzer timed out after 10000 ms while analyzing /home/bkc/dev/rkt/rktorch/.claude/worktrees/vision-152/torch/tests/tensor-ops-test.rkt
+resyntax: analyzing /home/bkc/dev/rkt/rktorch/.claude/worktrees/vision-152/torch/tests/python-cross-test.rkt
+resyntax: analyzer ignored-result-values-analyzer timed out after 10000 ms while analyzing /home/bkc/dev/rkt/rktorch/.claude/worktrees/vision-152/torch/tests/python-cross-test.rkt
+resyntax: analyzer identifier-usage-analyzer timed out after 10000 ms while analyzing /home/bkc/dev/rkt/rktorch/.claude/worktrees/vision-152/torch/tests/python-cross-test.rkt
+resyntax: cond-let-to-cond-define: suggestion discarded because it does not preserve all comments
+  dropped comment locations: (immutable-range-set #<range:natural<=> [39213, 39277)>)
+  original syntax:
+   #<syntax:torch/tests/python-cross-test.rkt:36:2 (cond ((not (python-torch-available?)) (printf "[python-cross-test] skipped: python3 `torch` not available ~a\n" "(run inside `nix develop`)")) (else (check-parity "python/00_randn.py" (lambda () (manual-seed! 0) (randn 2 2))) (check-parity "python/01_a...>
+  replacement syntax:
+   #<syntax:.racket-user/.local/share/racket/9.3/pkgs/resyntax/default-recommendations/let-replacement/cond-let-replacement.rkt:36:2 (cond ((not (python-torch-available?)) (printf "[python-cross-test] skipped: python3 `torch` not available ~a\n" "(run inside `nix develop`)")) (else (check-parity "python/00_randn.py" (lambda () (manual-seed! 0) (randn 2 2))) (check-parity "python/01_a...>
+resyntax: let-to-define: suggestion discarded because it does not preserve all comments
+  dropped comment locations: (immutable-range-set #<range:natural<=> [39213, 39277)>)
+  original syntax:
+   #<syntax:torch/tests/python-cross-test.rkt:36:2 (cond ((not (python-torch-available?)) (printf "[python-cross-test] skipped: python3 `torch` not available ~a\n" "(run inside `nix develop`)")) (else (check-parity "python/00_randn.py" (lambda () (manual-seed! 0) (randn 2 2))) (check-parity "python/01_a...>
+  replacement syntax:
+   #<syntax:.../resyntax/base.rkt:223:10 (cond ((not (python-torch-available?)) (printf "[python-cross-test] skipped: python3 `torch` not available ~a\n" "(run inside `nix develop`)")) (else (check-parity "python/00_randn.py" (lambda () (manual-seed! 0) (randn 2 2))) (check-parity "python/01_a...>
+resyntax: analyzing /home/bkc/dev/rkt/rktorch/.claude/worktrees/vision-152/torch/generated.rkt
+resyntax: analyzer identifier-usage-analyzer timed out after 10000 ms while analyzing /home/bkc/dev/rkt/rktorch/.claude/worktrees/vision-152/torch/generated.rkt
+resyntax: analyzing /home/bkc/dev/rkt/rktorch/.claude/worktrees/vision-152/torch/foreign.rkt
+resyntax: analyzing /home/bkc/dev/rkt/rktorch/.claude/worktrees/vision-152/torch/nn.rkt
+resyntax: analyzing /home/bkc/dev/rkt/rktorch/.claude/worktrees/vision-152/torch/foreign/nn-promoted.rkt
+resyntax: analyzer ignored-result-values-analyzer timed out after 10000 ms while analyzing /home/bkc/dev/rkt/rktorch/.claude/worktrees/vision-152/torch/foreign/nn-promoted.rkt
+resyntax: analyzer identifier-usage-analyzer timed out after 10000 ms while analyzing /home/bkc/dev/rkt/rktorch/.claude/worktrees/vision-152/torch/foreign/nn-promoted.rkt
+resyntax: analyzing /home/bkc/dev/rkt/rktorch/.claude/worktrees/vision-152/torch/vision/transforms.rkt
+resyntax: analyzer identifier-usage-analyzer timed out after 10000 ms while analyzing /home/bkc/dev/rkt/rktorch/.claude/worktrees/vision-152/torch/vision/transforms.rkt
+resyntax: analyzing /home/bkc/dev/rkt/rktorch/.claude/worktrees/vision-152/torch/nn/batch-norm.rkt
+resyntax: analyzer identifier-usage-analyzer timed out after 10000 ms while analyzing /home/bkc/dev/rkt/rktorch/.claude/worktrees/vision-152/torch/nn/batch-norm.rkt
+resyntax: analyzing /home/bkc/dev/rkt/rktorch/.claude/worktrees/vision-152/torch/nn/loss.rkt
+resyntax: analyzer identifier-usage-analyzer timed out after 10000 ms while analyzing /home/bkc/dev/rkt/rktorch/.claude/worktrees/vision-152/torch/nn/loss.rkt
+resyntax: --- displaying results ---

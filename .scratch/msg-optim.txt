@@ -1,0 +1,27 @@
+nn: the SGD family, RMSprop, and learning-rate schedules (#152, toward #144)
+
+sgd takes #:momentum, #:nesterov? and #:weight-decay with torch.optim.SGD's
+arithmetic: the buffer copies the first gradient and blends the later ones,
+Nesterov looks one blend ahead and needs a momentum (a ->i precondition),
+decay adds its multiple of the parameter to the gradient. adam takes the
+same L2 #:weight-decay. rmsprop is torch.optim.RMSprop uncentered, with its
+momentum buffer starting at zero. Every optimizer's learning rate is a
+mutable field behind optimizer-lr / optimizer-set-lr! on gen:optimizer, and
+learning-rate / set-learning-rate! at the surface.
+
+torch/nn/scheduler.rkt: a schedule wraps an optimizer, implements
+gen:optimizer so step! and zero-grads! reach it, writes the closed-form
+rate for step 0 at construction and for each step! after, as
+torch.optim.lr_scheduler does. step-lr, multi-step-lr, exponential-lr,
+cosine-annealing-lr, linear-lr (the warmup), one-cycle-lr (cosine phases,
+momentum left alone, an error past the cycle) and lambda-lr. Chaining,
+sequencing and parameter groups stay open on #144.
+
+Tests: the buffer arithmetic on a unit gradient, RMSprop's first step, the
+closed forms step for step, the protocol; twins sgd_variants.py (six
+optimizer configurations trained five steps on the MLP, losses and
+parameters) and schedulers.py (every shape's rates over twelve steps from
+get_last_lr). Manual section "Optimizers and schedules"; AGENTS roster.
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01VDEpCNkMi2rmxjgRnCHhkp

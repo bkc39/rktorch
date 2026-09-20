@@ -8,8 +8,10 @@ Racket bindings for libtorch.
 
 @include-section["contract.scrbl"]
 @include-section["shape.scrbl"]
+@include-section["order.scrbl"]
 @include-section["length.scrbl"]
 @include-section["device.scrbl"]
 @include-section["data.scrbl"]
 @include-section["vision.scrbl"]
 @include-section["nn.scrbl"]
+@include-section["recurrent.scrbl"]

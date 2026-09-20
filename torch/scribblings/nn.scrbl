@@ -11,7 +11,7 @@
 
 @defmodule[torch/nn]
 
-@defform[(define-layer name (field ...) clause ... #:forward (input ...) body ...+)
+@defform[(define-layer name (field ...) clause ... #:forward forward-formals body ...+)
          #:grammar
          ([field id
                  [id default-expr]
@@ -22,7 +22,10 @@
                   (code:line #:init (formal ... . rest-id) init-body ...)
                   (code:line #:reflection-name expr)
                   (code:line #:contract contract-expr)
-                  (code:line #:predicate id)]
+                  (code:line #:predicate id)
+                  (code:line #:on-move moved-body ...+)]
+          [forward-formals (input ...)
+                           (input ... . rest-id)]
           [formal id
                   [id default-expr]
                   (code:line keyword id)
@@ -101,6 +104,10 @@ What a field holds when @racket[init-body] finishes decides what it is:
        @racket[children-by-key], splices its entries in as children under
        their own names, and the field name is dropped, as
        @tt{add_module} in a loop would;}
+ @item{a @racket[Parameters?] value, from @racket[parameters-by-key],
+       splices its entries in as parameters under their own names, for a
+       set whose size or naming is decided at construction, as
+       @tt{register_parameter} in a loop would;}
  @item{@racket[#f] is a declared but absent slot, skipped by all of the
        above, as @tt{register_parameter(name, None)} is;}
  @item{anything else is a plain field, visible to @racket[#:forward] and
@@ -178,6 +185,25 @@ rather than a guard in the body:
                   [_ self-attention?])
   #:init (n-embd n-head)
   ...)
+]
+
+@racket[#:on-move] runs after @racket[to] has moved the layer, with every
+field in scope, and only when the move actually rebound something: the
+device and dtype of every parameter and buffer are read either side of it
+and compared.  @racket[to] is the identity when nothing changes, so a loop
+that defensively moves a model to the device it is already on runs the body
+not at all; a device round trip runs it twice, once per move, which reading
+the placement after the fact could not detect.  It is for state derived
+from where the tensors live --- a cached layout, a handle onto their
+storage --- which a move invalidates:
+
+@racketblock[
+(define-layer LSTM (spec entries params)
+  #:init (input-size hidden-size)
+  (code:comment "...")
+  #:on-move (forget-flattening! entries)
+  #:forward (x . state)
+  (with-mode (run spec entries lstm-input x state mode)))
 ]
 
 Without @racket[#:contract] nothing is exported; a layer local to a model
@@ -281,6 +307,20 @@ buffer: nothing trains it or saves it, and it lives as long as the
 model does.  A value meant to train belongs in a @racket[Parameter]
 field of a @racket[define-layer], or in an explicit registration on
 @racket[procedure->Layer].
+}
+
+@deftogether[(@defproc[(parameters-by-key
+                        [entries (listof (cons/c child-name/c Parameter?))])
+                       Parameters?]
+              @defproc[(Parameters? [v any/c]) boolean?])]{
+The parameter counterpart of @racket[children-by-key]: a field holding
+one registers every entry as a parameter under the name paired with it,
+and the field's own name is dropped.  For a layer whose parameters are
+decided at construction rather than declared one per field --- a
+recurrent stack naming its weights @tt{weight_ih_l0} through
+@tt{bias_hh_l1_reverse} by its depth and direction --- this is what
+@tt{register_parameter} in a loop does.  The same duplicate-name check
+applies as to children.
 }
 
 @defproc[(children-by-key [entries (listof (cons/c child-name/c step/c))])

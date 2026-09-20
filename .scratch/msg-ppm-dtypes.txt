@@ -1,0 +1,13 @@
+vision: write-ppm takes a floating-point or uint8 image
+
+An int64 image holding 0 to 255 went through the range transform under
+the default `'(0 1)` and quantized to white, silently. The range keyword
+is the control for that, but the owner's call is to state the dtypes
+instead, so `image/c` names them.
+
+The list carries float16 and bfloat16, which this branch has no way to
+make: #165 adds them in the same arc, and a sample tensor out of an
+autocast forward would otherwise stop writing the moment that lands.
+
+Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01VDEpCNkMi2rmxjgRnCHhkp

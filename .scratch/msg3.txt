@@ -1,0 +1,17 @@
+nn: BatchNorm2d, BatchNorm1d and the vision losses (#152)
+
+The first Buffer customers: running-mean, running-var and an int64
+num-batches-tracked, with PyTorch's init (ones, zeros, zeros, ones, 0),
+updated by ATen in 'train mode and read in 'eval; the counter is bumped
+through an int64 cast because add promotes it. Both layers share one
+normalising helper and differ in the rank they accept. The state dict
+carries the buffers, so a trained BatchNorm round-trips through
+safetensors, counter included.
+
+binary-cross-entropy-with-logits (#:weight, #:pos-weight), huber-loss
+(#:delta) and l1-loss join loss.rkt with the mean reduction of their
+siblings. Python twin batch_norm_forward.py pins the training forward, the
+statistics it leaves behind, the counter and the eval forward.
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01VDEpCNkMi2rmxjgRnCHhkp

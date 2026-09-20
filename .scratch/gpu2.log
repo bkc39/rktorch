@@ -1,0 +1,8 @@
+warning: Git tree '/home/bkc/dev/rkt/rktorch/.claude/worktrees/vision-152' is dirty
+Staging libtorchrkt (/nix/store/8202kw84fggywslgzmz2gc4qzwp2rx3s-torchrkt-cpp-0.1.0)...
+Staging host NVIDIA driver farm...
+CUDA shell ready. Verify:
+  raco test torch/tests/device-test.rkt
+raco test: (submod (file "torch/tests/generated-parity-test.rkt") test)
+raco test: (submod (file "torch/tests/python-cross-test.rkt") test)
+5977256 tests passed

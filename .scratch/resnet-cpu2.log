@@ -1,0 +1,3 @@
+warning: Git tree '/home/bkc/dev/rkt/rktorch/.claude/worktrees/vision-152' is dirty
+raco test: (submod (file "examples/test/09-resnet.rkt") test)
+15 tests passed

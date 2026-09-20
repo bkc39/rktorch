@@ -1,0 +1,29 @@
+warning: Git tree '/home/bkc/dev/rkt/rktorch/.claude/worktrees/vision-152' is dirty
+raco test: (submod (file "torch/tests/scheduler-test.rkt") test)
+--------------------
+a scheduler answers to the optimizer protocol
+ERROR
+name:       check-eq?
+location:   torch/tests/scheduler-test.rkt:35:4
+
+parameters: contract violation
+  expected: layer?
+  given: #<sgd>
+  in: the 1st argument of
+      (-> layer? (listof tensor?))
+  contract from: 
+      /home/bkc/dev/rkt/rktorch/.claude/worktrees/vision-152/torch/nn/layer.rkt
+  blaming: (/home/bkc/dev/rkt/rktorch/.claude/worktrees/vision-152/torch/tests/scheduler-test.rkt test)
+   (assuming the contract is correct)
+  at: /home/bkc/dev/rkt/rktorch/.claude/worktrees/vision-152/torch/nn/layer.rkt:96:22
+--------------------
+--------------------
+one-cycle-lr rises to max-lr, falls to the final rate, then refuses
+FAILURE
+name:       check-exn
+location:   torch/tests/scheduler-test.rkt:73:4
+params:
+  '(#rx"stepped past the cycle" #<procedure:.../scheduler-test.rkt:73:43>)
+message:    "No exception raised"
+--------------------
+2/9 test failures

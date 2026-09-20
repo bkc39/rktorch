@@ -1,0 +1,18 @@
+nn: a forward formal states the shape it takes, as a contract (#152)
+
+BatchNorm checked its input's rank with an unless guard inside the
+forward. AGENTS.md puts that check in the signature, but define-layer had
+nowhere to put it: #:contract reaches the constructor alone, and a private
+helper cannot carry one. So a forward formal may now be written
+[x : image-batch/c], the notation #99 proposes for #:init, and the rank
+BatchNorm2d and BatchNorm1d accept is part of their signature.
+
+The checker is built once where the layer is defined, not per call, so a
+forward pays one flat check. The violation names the layer and the
+contract, as a constructor's does, and the arity error of #18 is
+untouched. A bare formal accepts anything, so every other layer is
+unchanged. feature-batch/c ([N C] or [N C L]) joins image-batch/c in
+foreign/contracts.rkt.
+
+Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01VDEpCNkMi2rmxjgRnCHhkp
