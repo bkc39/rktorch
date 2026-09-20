@@ -11,7 +11,7 @@
            "../nn.rkt"
            (only-in "../generated.rkt" cudnn-rnn-flatten-weight)
            (only-in (submod "../nn/recurrent.rkt" private)
-                    flattened-placement)
+                    flatten-refused? flattened-placement)
            "private/python-env.rkt")
 
   (define (flat ts)
@@ -278,6 +278,10 @@
       (define before (flat (parameters lstm)))
       (to lstm 'cuda)
       (define-values (gpu-out _gh _gc) (lstm (to-device x 'cuda)))
+      ;; the outputs agree whether or not cudnn took the flat weights, so
+      ;; without this a swallowed refusal would leave every check below green
+      (check-false (flatten-refused? (car (parameters lstm)))
+                   "cudnn refused to flatten and the refusal was swallowed")
       (check-close (tensor->list (to-device gpu-out 'cpu)) (tensor->list cpu-out)
                    "cudnn output" 1e-4)
       (check-close (flat (for/list ([p (in-list (parameters lstm))])

@@ -46,6 +46,7 @@
   (layer-buffers layer)
   (layer-named-buffers layer prefix)
   (layer-named-children layer)
+  (layer-own-tensors layer)
   (layer-mode layer)
   (layer-set-mode! layer mode)
   #:derive-property prop:to (lambda (m dev dtype) (move-layer! m dev dtype))
@@ -55,6 +56,7 @@
    (define (layer-buffers self) '()) ;; noqa
    (define (layer-named-buffers self prefix) '()) ;; noqa
    (define (layer-named-children self) '()) ;; noqa
+   (define (layer-own-tensors self) (own-tensors self)) ;; noqa
    (define (layer-mode self) 'train) ;; noqa
    (define (layer-set-mode! self mode) (void))]) ;; noqa
 
@@ -93,6 +95,9 @@
     [dt (to! t dt)]
     [else (void)]))
 
+;; The fallback for a layer that does not declare its own tensors apart from
+;; its children's: both lists here are recursive, so this is the expensive
+;; way round and `registry` overrides it.
 (define (own-tensors m)
   (define theirs (make-hasheq))
   (for* ([c (in-list (layer-named-children m))]
@@ -112,7 +117,7 @@
       [(and dev dtype) (to (cdr c) dev dtype)]
       [dev (to (cdr c) dev)]
       [else (to (cdr c) dtype)]))
-  (for ([t (in-list (own-tensors m))])
+  (for ([t (in-list (layer-own-tensors m))])
     (move-tensor! t dev dtype))
   m)
 
@@ -252,6 +257,9 @@
                          (registry-children self))))
    (define (layer-named-children self)
      (registry-children self))
+   (define (layer-own-tensors self)
+     (append (map cdr (registry-params self))
+             (map cdr (registry-buffers self))))
    (define (layer-set-mode! self mode)
      (set-registry-mode! self mode)
      (for ([c (in-list (registry-children self))])

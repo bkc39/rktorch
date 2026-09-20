@@ -49,6 +49,13 @@
 ;; ends where it started.
 (define flattened (make-weak-hasheq))
 
+;; Which weights cudnn refused to flatten. The refusal is swallowed so the
+;; layer still runs, and the placement is cached either way so it is not asked
+;; twice, which together would hide a defect in the arguments we pass as a
+;; silent fall back to compacted copies; recording it lets a test say the
+;; flattening happened rather than only that the outputs agree.
+(define refused (make-weak-hasheq))
+
 (define (placement weights)
   (define w (car weights))
   (cons (tensor-device w) (tensor-dtype w)))
@@ -63,7 +70,7 @@
 (define (flatten-weights! spec weights)
   (with-handlers ([exn:fail:rktorch:oom? raise]
                   [exn:fail:contract? raise]
-                  [exn:fail? void])
+                  [exn:fail? (lambda (_e) (hash-set! refused (car weights) #t))])
     (with-no-grad
       (void
        (cudnn-rnn-flatten-weight weights
@@ -80,6 +87,7 @@
   (define now (placement weights))
   (unless (equal? now (hash-ref flattened (car weights) #f))
     (when (eq? (device-type (car now)) 'cuda)
+      (hash-remove! refused (car weights))
       (flatten-weights! spec weights))
     (hash-set! flattened (car weights) now)))
 
@@ -185,5 +193,6 @@
   (with-mode (run spec entries gru-input x state mode)))
 
 (module+ private
-  (provide flattened-placement)
-  (define (flattened-placement weight) (hash-ref flattened weight #f)))
+  (provide flattened-placement flatten-refused?)
+  (define (flattened-placement weight) (hash-ref flattened weight #f))
+  (define (flatten-refused? weight) (hash-ref refused weight #f)))
