@@ -1,3 +1,0 @@
-warning: Git tree '/home/bkc/dev/rkt/rktorch/.claude/worktrees/vision-152' is dirty
-raco test: (submod (file "torch/tests/scheduler-test.rkt") test)
-9 tests passed
