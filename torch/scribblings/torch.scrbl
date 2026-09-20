@@ -1,8 +1,11 @@
 #lang scribble/manual
 
-@title{rktorch}
+@title{The rktorch Reference}
 
-Racket bindings for libtorch.
+Racket bindings for libtorch. This manual is the reference: it states what
+each binding accepts and answers. For a narrative introduction --- a first
+tensor through to a training loop --- start with
+@other-doc['(lib "torch/scribblings/guide/guide.scrbl")].
 
 @table-of-contents[]
 
