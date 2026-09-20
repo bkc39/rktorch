@@ -2,13 +2,13 @@
 
 (require (only-in racket/contract/base
                   -> ->* <=/c >=/c and/c contract-out)
+         (only-in racket/match match)
          (only-in "../foreign.rkt"
                   device-type exn:fail:rktorch:oom? tensor-device tensor-dtype
                   tensor-shape tensor? with-no-grad zeros)
          (only-in "../generated.rkt"
                   cudnn-rnn-flatten-weight gru-input lstm-input)
          (only-in "init.rkt" uniform-init)
-         (only-in racket/match match)
          (only-in "layer.rkt"
                   define-layer parameters-by-key training? with-mode)
          (only-in "parameter.rkt" Parameter))
@@ -97,14 +97,25 @@
          #:device (tensor-device x)
          #:dtype (tensor-dtype x)))
 
+;; raise-arity-error prints no expected line for an arity that is neither one
+;; number nor a lower bound, and these accept the input alone or the input and
+;; a full state, so the message is built here.
+(define (raise-state-arity who count state)
+  (raise (exn:fail:contract:arity
+          (format (string-append "~a: arity mismatch;\n"
+                                 " the expected number of arguments does not"
+                                 " match the given number\n"
+                                 "  expected: 1 or ~a\n"
+                                 "  given: ~a")
+                  who (add1 count) (add1 (length state)))
+          (current-continuation-marks))))
+
 (define (check-inputs spec x state)
   (define who (rnn-who spec))
   (unless (and (tensor? x) (= 3 (length (tensor-shape x))))
     (raise-argument-error who "a rank-3 tensor?" x))
   (unless (memv (length state) (list 0 (rnn-state-count spec)))
-    (apply raise-arity-error who
-           (list 1 (add1 (rnn-state-count spec)))
-           x state))
+    (raise-state-arity who (rnn-state-count spec) state))
   (for ([s (in-list state)] [i (in-naturals 1)])
     (unless (and (tensor? s) (= 3 (length (tensor-shape s))))
       (apply raise-argument-error who "a rank-3 tensor?" i x state))))

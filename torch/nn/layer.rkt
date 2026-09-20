@@ -34,8 +34,6 @@
          layer-named-children ;; noqa
          layer-mode ;; noqa
          layer-set-mode! ;; noqa
-         move-layer!
-         call-at-forward-trough
          in-mode
          in-eval-mode
          with-mode
@@ -95,9 +93,6 @@
     [dt (to! t dt)]
     [else (void)]))
 
-;; A child moves through its own `to`, as nn.Module._apply recurses through
-;; its children's, so a nested layer's #:on-move runs; what is left here is
-;; whatever the children do not already own.
 (define (own-tensors m)
   (define theirs (make-hasheq))
   (for* ([c (in-list (layer-named-children m))]

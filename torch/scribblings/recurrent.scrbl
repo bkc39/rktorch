@@ -43,9 +43,11 @@ state as values:
 @tt{hidden-size} wide, or twice that when @racket[bidirectional?]. Each
 state has shape @tt{[num-layers × directions, N, hidden-size]} whatever
 @racket[batch-first?] says. The initial state is zero unless it follows
-the input, @racket[(lstm x h-0 c-0)] or @racket[(gru x h-0)]; feeding one
-call's final state to the next continues the sequence, which is how a
-decoder steps one token at a time.
+the input, @racket[(lstm x h-0 c-0)] or @racket[(gru x h-0)]. On a
+unidirectional layer, feeding one call's final state to the next continues
+the sequence, which is how a decoder steps one token at a time; a
+@racket[bidirectional?] layer has no such continuation, since its backward
+direction reads each call's input from the end.
 
 @racket[dropout] applies between layers, never after the last, and only in
 training mode; @racket[eval!] turns it off.
@@ -62,9 +64,10 @@ After a move with @racket[to], the first call on a CUDA device packs the
 weights into the single buffer cudnn wants; the parameters stay the same
 tensors, so an optimizer built before or after sees them alike.
 
-On the CPU these run through oneDNN, which carries only @racket['float32]
-for a recurrence, so a layer moved to @racket['float64] raises from ATen on
-its next call; CUDA takes both.
+The input's dtype has to be the layer's. On the CPU a mismatch reaches
+oneDNN, which is chosen on the input's dtype and then reads the weights,
+and raises @tt{get_mkldnn_dtype: unsupported data type} rather than the
+usual mismatch message; move the input with @racket[to] as well.
 
 Unbatched rank-two inputs, projections (@tt{proj_size}) and packed
 sequences are not supported.

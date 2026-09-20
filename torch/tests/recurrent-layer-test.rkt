@@ -64,9 +64,11 @@
 
   (test-case "the state arguments come all together or not at all"
     (define lstm (LSTM 3 4))
-    (check-exn exn:fail:contract:arity?
+    (check-exn #rx"LSTM: arity mismatch.*expected: 1 or 3\n  given: 2"
                (lambda () (lstm (randn 5 2 3) (zeros 1 2 4))))
     (check-exn exn:fail:contract:arity?
+               (lambda () (lstm (randn 5 2 3) (zeros 1 2 4))))
+    (check-exn #rx"GRU: arity mismatch.*expected: 1 or 2\n  given: 3"
                (lambda () ((GRU 3 4) (randn 5 2 3) (zeros 1 2 4) (zeros 1 2 4))))
     (check-exn #rx"LSTM: contract violation.*rank-3 tensor"
                (lambda () (lstm (randn 5 3))))
@@ -97,6 +99,13 @@
                   '(float64 float64 float64 float64))
     (define-values (out _h) (gru (randn 5 2 3 #:dtype 'float64)))
     (check-equal? (tensor-dtype out) 'float64))
+
+  (test-case "the input dtype has to be the layer's"
+    (define lstm (LSTM 3 4))
+    (to lstm 'float64)
+    ;; ATen picks oneDNN on the input's dtype and then reads the weights, so
+    ;; this is the documented mkldnn message rather than a mismatch report
+    (check-exn exn:fail? (lambda () (lstm (randn 5 2 3)))))
 
   (test-case "a bare recurrent layer is a forward trough, once"
     (define (trough-minors)
