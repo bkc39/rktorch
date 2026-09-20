@@ -3,7 +3,7 @@
 
 @title{The rktorch Guide}
 
-@author["Ben Carriel"]
+@author["bkc"]
 
 This guide introduces @racketmodname[torch], Racket bindings for libtorch,
 the library PyTorch is built on. It assumes you can read Racket and that

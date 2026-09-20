@@ -9,6 +9,9 @@ tensor through to a training loop --- start with
 
 @table-of-contents[]
 
+@include-section["tensor.scrbl"]
+@include-section["ops.scrbl"]
+@include-section["autograd.scrbl"]
 @include-section["contract.scrbl"]
 @include-section["shape.scrbl"]
 @include-section["order.scrbl"]
@@ -17,4 +20,5 @@ tensor through to a training loop --- start with
 @include-section["data.scrbl"]
 @include-section["vision.scrbl"]
 @include-section["nn.scrbl"]
+@include-section["layers-builtin.scrbl"]
 @include-section["recurrent.scrbl"]

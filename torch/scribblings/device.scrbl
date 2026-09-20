@@ -3,6 +3,7 @@
 @(require (for-label racket/base
                      racket/contract
                      (only-in torch
+                              accelerator-if-available
                               arange backward! cpu-device
                               cuda-allocator-settings!
                               cuda-device cuda-memory-info cuda-memory-stats
@@ -113,6 +114,28 @@ Equivalent to @racket[(to t dev)].
 @defproc[(to-dtype [t tensor?] [dtype dtype/c]) tensor?]{
 Equivalent to @racket[(to t dtype)].
 }
+
+@section{Choosing a device}
+
+@defproc[(accelerator-if-available) device?]{
+The accelerator this process can use --- CUDA on a Linux machine with an
+NVIDIA GPU, Metal on Apple Silicon --- or the CPU device when there is
+none, mirroring @tt{torch.accelerator.current_accelerator()}.}
+
+@defform[(with-default-device dev body ...+)]{
+Evaluates @racket[body] with @racket[dev] as the process default device, so
+every tensor constructed inside, a model's parameters and a batch alike, is
+allocated there. Answers the last result.
+
+Paired with @racket[accelerator-if-available] this is what lets one
+training loop run on a GPU where there is one and the CPU otherwise,
+without being rewritten:
+
+@racketblock[
+(with-default-device (accelerator-if-available)
+  (code:comment "everything built here lives on the chosen device")
+  (void))
+]}
 
 @section{Placement at construction}
 
