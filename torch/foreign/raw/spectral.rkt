@@ -1,8 +1,9 @@
 #lang racket/base
 
 (require (only-in ffi/unsafe _fun _int64 _stdbool)
-         (only-in "memory.rkt" tensor-allocator)
-         (only-in "syntax.rkt" _Tensor _Tensor/null define-torch))
+         (only-in "memory.rkt" _tr-device-type tensor-allocator)
+         (only-in "syntax.rkt" _Tensor _Tensor/null define-torch)
+         (only-in "tensor.rkt" _tr-dtype))
 
 (provide tr-hann-window/raw
          tr-stft/raw)
@@ -10,6 +11,9 @@
 (define-torch tr-hann-window/raw
   (_fun (window-length : _int64)
         (periodic : _stdbool)
+        (type : _tr-device-type)
+        (index : _int64)
+        (dtype : _tr-dtype)
         -> _Tensor/null)
   #:c-id tr_hann_window
   #:wrap tensor-allocator)
