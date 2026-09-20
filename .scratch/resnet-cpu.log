@@ -1,9 +1,0 @@
-warning: Git tree '/home/bkc/dev/rkt/rktorch/.claude/worktrees/vision-152' is dirty
-Staging libtorchrkt (/nix/store/bbd4y4k5n2chrzbjapr2qjcsvsi2q2lq-torchrkt-cpp-0.1.0)...
-raco test: (submod (file "examples/test/09-resnet.rkt") test)
-raco test: (submod (file "torch/tests/nn-test.rkt") test)
-raco test: (submod (file "torch/tests/nn-contract-test.rkt") test)
-raco test: (submod (file "torch/tests/transforms-test.rkt") test)
-raco test: (submod (file "examples/test/05-mnist.rkt") test)
-raco test: (submod (file "torch/tests/convnet-smoke-test.rkt") test)
-75 tests passed

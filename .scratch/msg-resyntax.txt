@@ -1,9 +1,0 @@
-nn: Resyntax's two shapes on the ResNet leg (#152 leg 3)
-
-The bias-free Conv2d init as a cond with a define rather than an and over
-a let, and the harness's accuracy range as one chained comparison; the CI
-lane's analyzers run three times longer than the local ones and reached
-both.
-
-Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
-Claude-Session: https://claude.ai/code/session_01VDEpCNkMi2rmxjgRnCHhkp
