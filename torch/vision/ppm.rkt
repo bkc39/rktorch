@@ -9,7 +9,7 @@
          (only-in "../foreign/contracts.rkt" image-batch/c)
          (only-in "../private/contract.rkt" define/contract-out))
 
-(define ppm-dtypes '(float32 float64 float16 bfloat16 uint8))
+(define ppm-dtypes '(float32 float64 uint8))
 
 (define image/c
   (flat-named-contract

@@ -125,6 +125,7 @@
    (case dtype
      [(int64) 'int64-fill-value]
      [(uint8) 'uint8-fill-value]
+     [(bool) 'bool-fill-value]
      [else 'fill-value])
    (lambda (v) (and (real? v) (eq? #t (fill-crosses-exactly? v dtype))))))
 

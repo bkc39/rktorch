@@ -47,7 +47,10 @@
     (check-exn #rx"^image-grid: contract violation"
                (lambda () (image-grid int-batch #:pad-value 0.5)))
     (check-exn #rx"int64-fill-value"
-               (lambda () (image-grid int-batch #:pad-value 0.5))))
+               (lambda () (image-grid int-batch #:pad-value 0.5)))
+    (define bool-batch (to-dtype (zeros 2 3 2 2) 'bool))
+    (check-exn #rx"bool-fill-value"
+               (lambda () (image-grid bool-batch #:pad-value 2))))
 
   (test-case "image-grid does not extend the caller's graph, as make_grid"
     (define x (mul (rand 3 3 2 2 #:requires-grad? #t) 1.0))
