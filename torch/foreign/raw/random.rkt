@@ -9,7 +9,7 @@
          (only-in ffi/unsafe/alloc allocator)
          (only-in ffi/vector _s64vector)
          (only-in "memory.rkt"
-                  _tr-device-type swallow-and-count-failure tensor-allocator/rng)
+                  _tr-device-type swallow-and-count-failure tensor-allocator/no-retry)
          (only-in "syntax.rkt" _Tensor _Tensor/null define-torch)
          (only-in "tensor.rkt" _tr-dtype))
 
@@ -47,7 +47,7 @@
 (define-torch tr-randperm/raw
   (_fun (n : _int64) (generator : _Generator/null) -> _Tensor/null)
   #:c-id tr_randperm
-  #:wrap tensor-allocator/rng)
+  #:wrap tensor-allocator/no-retry)
 
 (define-torch tr-randn-on/raw
   (_fun (dims : (_s64vector i))
@@ -57,7 +57,7 @@
         (dtype : _tr-dtype)
         -> _Tensor/null)
   #:c-id tr_randn_on
-  #:wrap tensor-allocator/rng)
+  #:wrap tensor-allocator/no-retry)
 
 (define-torch tr-rand-on/raw
   (_fun (dims : (_s64vector i))
@@ -67,21 +67,21 @@
         (dtype : _tr-dtype)
         -> _Tensor/null)
   #:c-id tr_rand_on
-  #:wrap tensor-allocator/rng)
+  #:wrap tensor-allocator/no-retry)
 
 (define-torch tr-randn/raw
   (_fun (dims : (_s64vector i))
         (ndim : _int64)
         -> _Tensor/null)
   #:c-id tr_randn
-  #:wrap tensor-allocator/rng)
+  #:wrap tensor-allocator/no-retry)
 
 (define-torch tr-rand/raw
   (_fun (dims : (_s64vector i))
         (ndim : _int64)
         -> _Tensor/null)
   #:c-id tr_rand
-  #:wrap tensor-allocator/rng)
+  #:wrap tensor-allocator/no-retry)
 
 (define-torch tr-tensor-uniform!/raw
   (_fun (t : _Tensor) (low : _double) (high : _double) -> _int)
