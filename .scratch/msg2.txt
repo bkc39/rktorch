@@ -1,0 +1,10 @@
+foreign: promote batch-norm, leaky-relu and flip (#152)
+
+batch-norm takes the statistics, the affine pair, #:training?, #:momentum
+and #:eps as keywords; a ->i precondition insists the statistics come as a
+pair and are present unless training, which is ATen's own rule surfaced as
+contract blame. leaky-relu takes #:negative-slope; flip takes one dim or a
+list of them, like layer-norm's normalized shape.
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01VDEpCNkMi2rmxjgRnCHhkp

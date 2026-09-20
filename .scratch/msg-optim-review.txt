@@ -1,0 +1,22 @@
+review: cache the scheduler's rate, and five smaller fixes
+
+`scheduler-rate` recomputed the rate on every call, so reading it
+advanced a stateful `lambda-lr` callback and could report a value the
+optimizer never saw; it now returns what `apply-rate!` last wrote, as
+`get_last_lr()` does. The rest come from the same review:
+
+- `one-cycle-lr` with `#:pct-start 1` put the peak at the last step and
+  divided the descent by zero, installing a NaN rate; the contract
+  excludes 1.
+- `lambda-lr` took any arity-1 procedure while the manual promised
+  `(-> exact-nonnegative-integer? real?)`; it takes that now, so a
+  callback returning a non-real is caller blame, not a tensor error.
+- `#:weight-decay` accepted negatives on all three optimizers, quietly
+  turning regularization around. `torch.optim` rejects them, and so do
+  these.
+- `optimizer?` reaches the facade through a `checked` submodule, the
+  plain/checked split every other shared name in torch/nn uses.
+- Two comments in scheduler.rkt repeated nn.scrbl's prose.
+
+Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01VDEpCNkMi2rmxjgRnCHhkp

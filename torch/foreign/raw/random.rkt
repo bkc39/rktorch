@@ -14,6 +14,7 @@
          (only-in "tensor.rkt" _tr-dtype))
 
 (provide Generator? ;; noqa
+         _Generator/null
          tr-generator-draw-seed/raw
          tr-generator-new/raw
          tr-randn/raw

@@ -1,0 +1,3 @@
+warning: Git tree '/home/bkc/dev/rkt/rktorch/.claude/worktrees/vision-152' is dirty
+raco test: (submod (file "torch/tests/transforms-test.rkt") test)
+5 tests passed

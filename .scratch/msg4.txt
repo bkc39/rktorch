@@ -1,0 +1,12 @@
+vision: random-crop and random-horizontal-flip on the device (#152)
+
+The CIFAR-10 augmentation pair over the ops the library already has: the
+crop pads with zeros through narrow and copy! and cuts per-image windows,
+the flip mirrors the width and selects per image with where. One draw-seed
+from the torch generator seeds a Racket generator per batch, so a seeded
+loader replays its augmentation while the images never leave the device;
+the draws are the transforms' own, not torchvision's. Manual section and
+AGENTS rosters for tranche 6.
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01VDEpCNkMi2rmxjgRnCHhkp

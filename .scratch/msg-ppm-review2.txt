@@ -1,0 +1,20 @@
+review: build the grid under no-grad, and name the pad value's contract
+
+`make_grid` is decorated with `no_grad`; without it every `copy!` here
+extended the caller's graph into what is only a picture of the batch.
+The body runs under `with-no-grad` now. The one-image path still hands
+back the batch's own image, which torch leaves requiring grad even under
+`no_grad`, as it does there.
+
+`#:pad-value` took any real and let the nested `full` refuse it, so a
+uint8 batch with -1 was `full: contract violation` blaming
+torch/vision/ppm.rkt for what the caller passed. `creation-ops.rkt` now
+exports `(fill-value/c dtype)`, built from the table `full`'s own
+`#:pre/desc` uses, and `image-grid` states it with `->i`, so the
+violation names `image-grid` and `uint8-fill-value`.
+
+`image/c` requires a positive height and width: a PPM header states
+both, and a zero in either wrote a file no reader accepts.
+
+Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01VDEpCNkMi2rmxjgRnCHhkp

@@ -8,7 +8,9 @@ target_sources(torchrkt
     ${CMAKE_CURRENT_SOURCE_DIR}/src/torchrkt/generated/loss.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/torchrkt/generated/math.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/torchrkt/generated/nn.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/torchrkt/generated/random.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/torchrkt/generated/reduce.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/torchrkt/generated/rnn.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/torchrkt/generated/shape.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/torchrkt/generated/sort.cpp
 )

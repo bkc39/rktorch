@@ -1,0 +1,414 @@
+warning: Git tree '/home/bkc/dev/rkt/rktorch/.claude/worktrees/vision-152' is dirty
+Staging libtorchrkt (/nix/store/944hhmmz0a6if8caz5z7yx8mpprjc15x-torchrkt-cpp-0.1.0)...
+Staging host NVIDIA driver farm...
+CUDA shell ready. Verify:
+  raco test torch/tests/device-test.rkt
+raco test: (submod (file "torch/tests/python-cross-test.rkt") test)
+--------------------
+FAILURE
+name:       check-=
+location:   torch/tests/private/python-env.rkt:46:4
+message:    "10_dcgan[cpu]: parameter 777089 parity"
+actual:     4.437991447048262e-5
+expected:   0.00014947235467843711
+tolerance:  0.0001
+--------------------
+--------------------
+FAILURE
+name:       check-=
+location:   torch/tests/private/python-env.rkt:46:4
+message:    "10_dcgan[cpu]: parameter 777096 parity"
+actual:     0.016109440475702286
+expected:   0.01592548005282879
+tolerance:  0.0001
+--------------------
+--------------------
+FAILURE
+name:       check-=
+location:   torch/tests/private/python-env.rkt:46:4
+message:    "10_dcgan[cpu]: parameter 777105 parity"
+actual:     0.004860235378146172
+expected:   0.004975906107574701
+tolerance:  0.0001
+--------------------
+--------------------
+FAILURE
+name:       check-=
+location:   torch/tests/private/python-env.rkt:46:4
+message:    "10_dcgan[cpu]: parameter 777109 parity"
+actual:     0.007774720434099436
+expected:   0.007913297973573208
+tolerance:  0.0001
+--------------------
+--------------------
+FAILURE
+name:       check-=
+location:   torch/tests/private/python-env.rkt:46:4
+message:    "10_dcgan[cpu]: parameter 777110 parity"
+actual:     0.03013726696372032
+expected:   0.03001856431365013
+tolerance:  0.0001
+--------------------
+--------------------
+FAILURE
+name:       check-=
+location:   torch/tests/private/python-env.rkt:46:4
+message:    "10_dcgan[cpu]: parameter 777114 parity"
+actual:     -0.023650607094168663
+expected:   -0.023541944101452827
+tolerance:  0.0001
+--------------------
+--------------------
+FAILURE
+name:       check-=
+location:   torch/tests/private/python-env.rkt:46:4
+message:    "10_dcgan[cpu]: parameter 777117 parity"
+actual:     0.026597177609801292
+expected:   0.0264828409999609
+tolerance:  0.0001
+--------------------
+--------------------
+FAILURE
+name:       check-=
+location:   torch/tests/private/python-env.rkt:46:4
+message:    "10_dcgan[cpu]: parameter 777121 parity"
+actual:     -0.005980814341455698
+expected:   -0.00575164332985878
+tolerance:  0.0001
+--------------------
+--------------------
+FAILURE
+name:       check-=
+location:   torch/tests/private/python-env.rkt:46:4
+message:    "10_dcgan[cpu]: parameter 777124 parity"
+actual:     0.028181560337543488
+expected:   0.0279861930757761
+tolerance:  0.0001
+--------------------
+--------------------
+FAILURE
+name:       check-=
+location:   torch/tests/private/python-env.rkt:46:4
+message:    "10_dcgan[cpu]: parameter 777128 parity"
+actual:     0.010075180791318417
+expected:   0.009930144995450974
+tolerance:  0.0001
+--------------------
+--------------------
+FAILURE
+name:       check-=
+location:   torch/tests/private/python-env.rkt:46:4
+message:    "10_dcgan[cpu]: parameter 777134 parity"
+actual:     -0.009024649858474731
+expected:   -0.009245199151337147
+tolerance:  0.0001
+--------------------
+--------------------
+FAILURE
+name:       check-=
+location:   torch/tests/private/python-env.rkt:46:4
+message:    "10_dcgan[cpu]: parameter 777135 parity"
+actual:     -0.023940065875649452
+expected:   -0.023773696273565292
+tolerance:  0.0001
+--------------------
+--------------------
+FAILURE
+name:       check-=
+location:   torch/tests/private/python-env.rkt:46:4
+message:    "10_dcgan[cpu]: parameter 777140 parity"
+actual:     -0.02949240244925022
+expected:   -0.02967817895114422
+tolerance:  0.0001
+--------------------
+--------------------
+FAILURE
+name:       check-=
+location:   torch/tests/private/python-env.rkt:46:4
+message:    "10_dcgan[cpu]: parameter 777146 parity"
+actual:     0.005384391639381647
+expected:   0.005507708992809057
+tolerance:  0.0001
+--------------------
+--------------------
+FAILURE
+name:       check-=
+location:   torch/tests/private/python-env.rkt:46:4
+message:    "10_dcgan[cpu]: parameter 777149 parity"
+actual:     -0.010379827581346035
+expected:   -0.010481365956366062
+tolerance:  0.0001
+--------------------
+--------------------
+FAILURE
+name:       check-=
+location:   torch/tests/private/python-env.rkt:46:4
+message:    "10_dcgan[cpu]: parameter 777151 parity"
+actual:     0.024241892620921135
+expected:   0.02434321865439415
+tolerance:  0.0001
+--------------------
+--------------------
+FAILURE
+name:       check-=
+location:   torch/tests/private/python-env.rkt:46:4
+message:    "10_dcgan[cpu]: parameter 910466 parity"
+actual:     0.02308599464595318
+expected:   0.02330218069255352
+tolerance:  0.0001
+--------------------
+--------------------
+FAILURE
+name:       check-=
+location:   torch/tests/private/python-env.rkt:46:4
+message:    "10_dcgan[cpu]: parameter 910469 parity"
+actual:     0.019678978249430656
+expected:   0.019787412136793137
+tolerance:  0.0001
+--------------------
+--------------------
+FAILURE
+name:       check-=
+location:   torch/tests/private/python-env.rkt:46:4
+message:    "10_dcgan[cpu]: parameter 910472 parity"
+actual:     0.006036187522113323
+expected:   0.006177211180329323
+tolerance:  0.0001
+--------------------
+--------------------
+FAILURE
+name:       check-=
+location:   torch/tests/private/python-env.rkt:46:4
+message:    "10_dcgan[cpu]: parameter 910473 parity"
+actual:     0.029621558263897896
+expected:   0.02972908690571785
+tolerance:  0.0001
+--------------------
+--------------------
+FAILURE
+name:       check-=
+location:   torch/tests/private/python-env.rkt:46:4
+message:    "10_dcgan[cpu]: parameter 910475 parity"
+actual:     -0.01842450723052025
+expected:   -0.01856783963739872
+tolerance:  0.0001
+--------------------
+--------------------
+FAILURE
+name:       check-=
+location:   torch/tests/private/python-env.rkt:46:4
+message:    "10_dcgan[cpu]: parameter 910485 parity"
+actual:     0.020469198003411293
+expected:   0.02032453753054142
+tolerance:  0.0001
+--------------------
+--------------------
+FAILURE
+name:       check-=
+location:   torch/tests/private/python-env.rkt:46:4
+message:    "10_dcgan[cpu]: parameter 910486 parity"
+actual:     0.017505595460534096
+expected:   0.017402760684490204
+tolerance:  0.0001
+--------------------
+--------------------
+FAILURE
+name:       check-=
+location:   torch/tests/private/python-env.rkt:46:4
+message:    "10_dcgan[cpu]: parameter 910487 parity"
+actual:     0.0043141660280525684
+expected:   0.0045104920864105225
+tolerance:  0.0001
+--------------------
+--------------------
+FAILURE
+name:       check-=
+location:   torch/tests/private/python-env.rkt:46:4
+message:    "10_dcgan[cpu]: parameter 910493 parity"
+actual:     -0.016514495015144348
+expected:   -0.016398239880800247
+tolerance:  0.0001
+--------------------
+--------------------
+FAILURE
+name:       check-=
+location:   torch/tests/private/python-env.rkt:46:4
+message:    "10_dcgan[cpu]: parameter 910501 parity"
+actual:     0.004072524607181549
+expected:   0.003911829553544521
+tolerance:  0.0001
+--------------------
+--------------------
+FAILURE
+name:       check-=
+location:   torch/tests/private/python-env.rkt:46:4
+message:    "10_dcgan[cpu]: parameter 910510 parity"
+actual:     -0.015582227148115635
+expected:   -0.015476364642381668
+tolerance:  0.0001
+--------------------
+--------------------
+FAILURE
+name:       check-=
+location:   torch/tests/private/python-env.rkt:46:4
+message:    "10_dcgan[cpu]: parameter 910517 parity"
+actual:     0.01968727633357048
+expected:   0.01954088918864727
+tolerance:  0.0001
+--------------------
+--------------------
+FAILURE
+name:       check-=
+location:   torch/tests/private/python-env.rkt:46:4
+message:    "10_dcgan[cpu]: parameter 910518 parity"
+actual:     0.012486816383898258
+expected:   0.012588665820658207
+tolerance:  0.0001
+--------------------
+--------------------
+FAILURE
+name:       check-=
+location:   torch/tests/private/python-env.rkt:46:4
+message:    "10_dcgan[cpu]: parameter 910520 parity"
+actual:     -0.012563393451273441
+expected:   -0.012749417684972286
+tolerance:  0.0001
+--------------------
+--------------------
+FAILURE
+name:       check-=
+location:   torch/tests/private/python-env.rkt:46:4
+message:    "10_dcgan[cpu]: parameter 910521 parity"
+actual:     0.005277452524751425
+expected:   0.005165798123925924
+tolerance:  0.0001
+--------------------
+--------------------
+FAILURE
+name:       check-=
+location:   torch/tests/private/python-env.rkt:46:4
+message:    "10_dcgan[cpu]: parameter 910524 parity"
+actual:     0.014934971928596497
+expected:   0.01477485615760088
+tolerance:  0.0001
+--------------------
+--------------------
+FAILURE
+name:       check-=
+location:   torch/tests/private/python-env.rkt:46:4
+message:    "10_dcgan[cpu]: parameter 910528 parity"
+actual:     0.0075511084869503975
+expected:   0.007670565042644739
+tolerance:  0.0001
+--------------------
+--------------------
+FAILURE
+name:       check-=
+location:   torch/tests/private/python-env.rkt:46:4
+message:    "10_dcgan[cpu]: parameter 910541 parity"
+actual:     0.0250674057751894
+expected:   0.025273054838180542
+tolerance:  0.0001
+--------------------
+--------------------
+FAILURE
+name:       check-=
+location:   torch/tests/private/python-env.rkt:46:4
+message:    "10_dcgan[cpu]: parameter 910544 parity"
+actual:     -0.0232313871383667
+expected:   -0.02310592494904995
+tolerance:  0.0001
+--------------------
+--------------------
+FAILURE
+name:       check-=
+location:   torch/tests/private/python-env.rkt:46:4
+message:    "10_dcgan[cpu]: parameter 910549 parity"
+actual:     -0.011926902458071709
+expected:   -0.012038173153996468
+tolerance:  0.0001
+--------------------
+--------------------
+FAILURE
+name:       check-=
+location:   torch/tests/private/python-env.rkt:46:4
+message:    "10_dcgan[cpu]: parameter 910555 parity"
+actual:     0.01996983028948307
+expected:   0.019817043095827103
+tolerance:  0.0001
+--------------------
+--------------------
+FAILURE
+name:       check-=
+location:   torch/tests/private/python-env.rkt:46:4
+message:    "10_dcgan[cpu]: parameter 910561 parity"
+actual:     0.0036682607606053352
+expected:   0.0037819354329258204
+tolerance:  0.0001
+--------------------
+--------------------
+FAILURE
+name:       check-=
+location:   torch/tests/private/python-env.rkt:46:4
+message:    "10_dcgan[cpu]: parameter 910565 parity"
+actual:     -0.03038295917212963
+expected:   -0.0302593857049942
+tolerance:  0.0001
+--------------------
+--------------------
+FAILURE
+name:       check-=
+location:   torch/tests/private/python-env.rkt:46:4
+message:    "10_dcgan[cpu]: parameter 910575 parity"
+actual:     -0.012887489050626755
+expected:   -0.01276549231261015
+tolerance:  0.0001
+--------------------
+--------------------
+FAILURE
+name:       check-=
+location:   torch/tests/private/python-env.rkt:46:4
+message:    "10_dcgan[cpu]: parameter 910577 parity"
+actual:     0.025599416345357895
+expected:   0.025474995374679565
+tolerance:  0.0001
+--------------------
+--------------------
+FAILURE
+name:       check-=
+location:   torch/tests/private/python-env.rkt:46:4
+message:    "10_dcgan[cpu]: parameter 910582 parity"
+actual:     -0.022285226732492447
+expected:   -0.022144557908177376
+tolerance:  0.0001
+--------------------
+--------------------
+FAILURE
+name:       check-=
+location:   torch/tests/private/python-env.rkt:46:4
+message:    "10_dcgan[cpu]: parameter 910583 parity"
+actual:     0.01927114836871624
+expected:   0.01910790428519249
+tolerance:  0.0001
+--------------------
+--------------------
+FAILURE
+name:       check-=
+location:   torch/tests/private/python-env.rkt:46:4
+message:    "10_dcgan[cpu]: parameter 910588 parity"
+actual:     0.018291449174284935
+expected:   0.018483832478523254
+tolerance:  0.0001
+--------------------
+--------------------
+FAILURE
+name:       check-=
+location:   torch/tests/private/python-env.rkt:46:4
+message:    "10_dcgan[cpu]: parameter 910590 parity"
+actual:     -0.0053051793947815895
+expected:   -0.005190354306250811
+tolerance:  0.0001
+--------------------
+raco test: (submod (file "examples/test/10-dcgan.rkt") test)
+raco test: (submod (file "examples/test/11-vae.rkt") test)
+45/10518642 test failures

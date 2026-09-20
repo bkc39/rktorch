@@ -7,6 +7,7 @@
 (require "nn/batch-norm.rkt"
          (except-in "nn/buffer.rkt" Buffer?)
          (submod "nn/buffer.rkt" checked)
+         "nn/clip.rkt"
          "nn/conv.rkt"
          "nn/dropout.rkt"
          "nn/ema.rkt"
@@ -20,6 +21,7 @@
                     child-name/c
                     children-by-index
                     children-by-key
+                    parameters-by-key
                     in-layers
                     layer?
                     named-buffers
@@ -32,6 +34,7 @@
          (only-in "nn/optim.rkt" adam adam? sgd sgd? step! zero-grads!)
          (except-in "nn/parameter.rkt" Parameter Parameter?)
          (submod "nn/parameter.rkt" checked)
+         "nn/recurrent.rkt"
          "nn/sequential.rkt"
          "nn/state-dict.rkt")
 
@@ -79,6 +82,8 @@
          children-by-index
          children-by-key
          Children?
+         parameters-by-key
+         Parameters?
          child-ref
          child-name/c
          in-layers
@@ -111,7 +116,11 @@
          BatchNorm1d
          batch-norm1d?
          Sequential
-         sequential?)
+         sequential?
+         LSTM
+         lstm?
+         GRU
+         gru?)
 
 (provide uniform-init
          normal-init
@@ -125,6 +134,8 @@
          step!
          zero-grads!)
 
+(provide clip-grad-norm!)
+
 (provide ema
          ema?
          ema-average
@@ -136,7 +147,8 @@
          ctc-loss
          binary-cross-entropy-with-logits
          huber-loss
-         l1-loss)
+         l1-loss
+         nll-loss)
 
 (provide state-dict
          save-state!

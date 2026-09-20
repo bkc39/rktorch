@@ -23,6 +23,7 @@
          add-tensor!
          addcdiv!
          addcmul!
+         argsort
          avg-pool2d
          batch-norm
          binary-cross-entropy-with-logits
@@ -36,6 +37,7 @@
          cos-tensor
          cross-entropy-loss
          ctc-loss-intlist
+         cudnn-rnn-flatten-weight
          dot
          dropout
          embedding
@@ -47,6 +49,7 @@
          ge-scalar
          ge-tensor
          group-norm
+         gru-input
          gt-scalar
          gt-tensor
          huber-loss
@@ -62,6 +65,7 @@
          leaky-relu
          lerp-tensor!
          linear
+         lstm-input
          lt-scalar
          lt-tensor
          masked-fill-scalar
@@ -74,6 +78,7 @@
          mean-dim
          mm
          mul-tensor!
+         multinomial
          mv
          narrow
          ne-scalar
@@ -116,6 +121,9 @@
 (define-generated-op addcmul! tr_gen_addcmul_ #:inplace
   ([self tensor] [tensor1 tensor] [tensor2 tensor] [value scalar]))
 
+(define-generated-op argsort tr_gen_argsort
+  ([self tensor] [dim int64] [descending bool]))
+
 (define-generated-op avg-pool2d tr_gen_avg_pool2d
   ([self tensor] [kernel-size int-array] [stride int-array] [padding int-array] [ceil-mode bool] [count-include-pad bool] [divisor-override optional-int64]))
 
@@ -155,6 +163,9 @@
 (define-generated-op ctc-loss-intlist tr_gen_ctc_loss_intlist
   ([log-probs tensor] [targets tensor] [input-lengths int-array] [target-lengths int-array] [blank int64] [reduction int64] [zero-infinity bool]))
 
+(define-generated-op cudnn-rnn-flatten-weight tr_gen__cudnn_rnn_flatten_weight
+  ([weight-arr tensor-list] [weight-stride0 int64] [input-size int64] [mode int64] [hidden-size int64] [proj-size int64] [num-layers int64] [batch-first bool] [bidirectional bool]))
+
 (define-generated-op dot tr_gen_dot
   ([self tensor] [tensor-arg tensor]))
 
@@ -187,6 +198,9 @@
 
 (define-generated-op group-norm tr_gen_group_norm
   ([input tensor] [num-groups int64] [weight optional-tensor] [bias optional-tensor] [eps double] [cudnn-enabled bool]))
+
+(define-generated-op gru-input tr_gen_gru_input #:rng #:returns 2
+  ([input tensor] [hx tensor] [params tensor-list] [has-biases bool] [num-layers int64] [dropout double] [train bool] [bidirectional bool] [batch-first bool]))
 
 (define-generated-op gt-scalar tr_gen_gt_scalar
   ([self tensor] [other scalar]))
@@ -233,6 +247,9 @@
 (define-generated-op linear tr_gen_linear
   ([input tensor] [weight tensor] [bias optional-tensor]))
 
+(define-generated-op lstm-input tr_gen_lstm_input #:rng #:returns 3
+  ([input tensor] [hx tensor-list] [params tensor-list] [has-biases bool] [num-layers int64] [dropout double] [train bool] [bidirectional bool] [batch-first bool]))
+
 (define-generated-op lt-scalar tr_gen_lt_scalar
   ([self tensor] [other scalar]))
 
@@ -268,6 +285,9 @@
 
 (define-generated-op mul-tensor! tr_gen_mul__tensor #:inplace
   ([self tensor] [other tensor]))
+
+(define-generated-op multinomial tr_gen_multinomial #:rng
+  ([self tensor] [num-samples int64] [replacement bool] [generator optional-generator]))
 
 (define-generated-op mv tr_gen_mv
   ([self tensor] [vec tensor]))

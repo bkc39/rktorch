@@ -18,11 +18,11 @@ The Racket package is the `torch` collection:
   **Naming convention:** nn layer *constructors* are PascalCase (`Linear`,
   `Conv2d`, `ConvTranspose2d`, `MaxPool2d`, `Flatten`, `Dropout`,
   `Sequential`, `Embedding`, `LayerNorm`, `GroupNorm`, `BatchNorm2d`,
-  `BatchNorm1d`), mirroring the
+  `BatchNorm1d`, `LSTM`, `GRU`), mirroring the
   `torch.nn.*` classes; their *predicates* are lowercase (`linear?`,
   `conv2d?`, `conv-transpose2d?`, `max-pool2d?`, `flatten?`, `dropout?`,
   `sequential?`, `embedding?`, `layer-norm?`, `group-norm?`,
-  `batch-norm2d?`, `batch-norm1d?`), per Racket idiom
+  `batch-norm2d?`, `batch-norm1d?`, `lstm?`, `gru?`), per Racket idiom
   (`list?`, `hash?`). The functional ops keep lowercase names on `torch`
   (`conv2d`, `max-pool2d`, `flatten`, like `torch.conv2d`). The PascalCase
   constructors vs lowercase functional ops are what let `(require torch
@@ -132,6 +132,10 @@ with `backward!` outside the form as PyTorch recommends). From
   from the `threading` library (dep `threading-lib`, prefetched offline by
   the `racket-deps` fixed-output derivation in flake.nix)
 - reductions: `sum mean max min argmax softmax log-softmax`
+- ordering and sampling (`torch/foreign/order-ops.rkt`, tranche 7, #153):
+  `topk` and `sort` answer `(values entries indices)`; `argsort`;
+  `multinomial #:replacement? #:generator` (no-retry RNG wrap; seeded CPU
+  draws match PyTorch's); `sort` on a non-tensor is racket/base's
 - linalg: `matmul mm mv dot`; out: `item to-dtype`
 - autograd: `requires-grad! requires-grad? backward! grad has-grad?
   maybe-grad detach with-no-grad grad-enabled?`; in-place
@@ -142,12 +146,12 @@ with `backward!` outside the form as PyTorch recommends). From
   grad mode, restored by `dynamic-wind`, the cast cache dropped on exit)
 
 **Name shadowing convention:** ops colliding with racket/base or racket/list
-(`exp log sqrt tanh max min argmax`) are generic — tensors hit libtorch,
+(`exp log sqrt tanh max min argmax sort`) are generic — tensors hit libtorch,
 anything else defers to the original — so `(require torch)` never breaks
 numeric code. New ops that collide must follow the same dispatch pattern
 (check racket/base first — `tanh` was missed initially and broke numeric
 callers), and scribble examples need
-`(for-label (except-in racket/base exp log sqrt max min + - * /))`.
+`(for-label (except-in racket/base exp log sort sqrt max min + - * /))`.
 Dispatching named ops carry dependent (`->i`) contracts so the wrong shape
 gets contract blame, not a runtime error; the `+ - * / @` operators are
 provided as plain renames (no contract overhead on the numeric fast path),
@@ -156,9 +160,9 @@ per `foreign/operators.rkt`.
 From `torch/nn`: `define-layer procedure->Layer gen:layer layer? Parameter Buffer LayerList LayerHash parameters
 named-parameters buffers children forward Linear Conv2d MaxPool2d Flatten Dropout
 Sequential Embedding LayerNorm ConvTranspose2d GroupNorm BatchNorm2d BatchNorm1d
-sgd adam step! zero-grads! ema ema-update! ema-average cross-entropy
-mse-loss binary-cross-entropy-with-logits huber-loss l1-loss kaiming-uniform
-uniform-init normal-init fan-in`. The functional
+LSTM GRU sgd adam step! zero-grads! clip-grad-norm! ema ema-update! ema-average
+cross-entropy nll-loss mse-loss binary-cross-entropy-with-logits huber-loss
+l1-loss kaiming-uniform uniform-init normal-init fan-in`. The functional
 transformer primitives (`gelu tril triu masked-fill embedding layer-norm`,
 tranche 3, #22), the UNet ones (`conv-transpose2d group-norm silu
 clamp`, tranche 4, #84; `upsample-nearest2d` over `repeat_interleave`, tranche
@@ -173,7 +177,17 @@ fields with `set!`, a field's value classifies it at construction
 (`Parameter?`, `Buffer?`, `layer?`, `#f` for absent, anything else plain),
 `(with-mode body)` binds `mode` (`'train` or `'eval`, predicates `training?`/`evaluating?`) in `#:forward` to the instance's own mode (`train!`/`eval!` set it and recurse; every layer starts in `'train`),
 models are plain struct trees owned by the GC (no global parameter store),
-and `prop:procedure` makes `(net x)` work like `__call__`. Layer init mirrors
+and `prop:procedure` makes `(net x)` work like `__call__`. `LSTM` and `GRU` (`nn/recurrent.rkt`, #153) are
+`define-layer` forms whose parameter set depends on `#:num-layers` and
+`#:bidirectional?`: `parameters-by-key` registers them under PyTorch's own
+names (`weight_ih_l0` .. `bias_hh_l1_reverse`) the way `children-by-key`
+registers children, and a rest-argument `#:forward` lets an initial state
+follow the input. Applying one answers `(values output h-n [c-n])`. On CUDA
+the weights are flattened for cudnn (`cudnn-rnn-flatten-weight`, in place,
+the parameters keep their identity) whenever their device or dtype differs
+from the placement the last flattening was built for, so `to`'s identity
+case costs nothing and a transient OOM is retried rather than latched. `clip-grad-norm!` (`nn/clip.rkt`) keeps its scale on the
+device. Layer init mirrors
 PyTorch RNG consumption (`nn.Linear.reset_parameters`), so a shared
 `manual-seed!` yields bit-comparable parameters — the MLP cross-test relies
 on this.
@@ -206,7 +220,9 @@ broader ATen surface, and the portable raco-catalog candidate story.
 ## Build Commands
 
 [`docs/building.md`](docs/building.md) is the same guide written for people;
-a change to a build target or a shell belongs in both.
+a change to a build target or a shell belongs in both. The ordered local loop
+for a change, and the gates it has to pass before it is done, are the
+`cpp-dev` and `racket-dev` skills under `.claude/skills/`.
 
 ```bash
 nix build              # builds cpp, installs the pkg, runs raco test + examples
@@ -231,6 +247,10 @@ raco test torch/          # FFI unit tests (+ self-skipping parity test)
 raco test examples/test/     # literate-example runners
 racket -ie "(require torch)"   # REPL with the package loaded
                                # (`racket -l torch` runs module+ main instead)
+
+racket scripts/coverage.rkt --changed   # expression coverage (#173); exits
+                               # non-zero below the floor and lists the lines
+                               # of the files you touched that no test reaches
 
 resyntax analyze --local-git-repository . origin/master   # lint gate
                                      # (CI fails on any suggestion; scans
@@ -294,7 +314,8 @@ the diffusion UNet trains on the GPU there with its norms round-tripped.
   `tr_tensor_free`.
 - `src/torchrkt/*.cpp` — translation layer; catches C++ exceptions, returns
   status codes / NULL. `detail/tensor_handle.hpp` (in `src/`, private)
-  completes the opaque struct over a `torch::Tensor`;
+  completes the opaque struct over a `torch::Tensor`
+  (`generator_handle.hpp` does the same for `tr_generator`);
   `detail/op_call.hpp` holds the boundary helpers (`alloc_result` and
   `null_arg` for tensor-returning ops, `alloc_handle<H>` for any other
   opaque handle; `status_call` and `null_arg_status` for the int-status
@@ -302,7 +323,7 @@ the diffusion UNet trains on the GPU there with its norms round-tripped.
   an int status plus one `tr_tensor**` out pointer per return, every one
   NULL unless the whole call succeeded) every op body reduces to — new ops must use them rather
   than hand-rolling try/catch.
-- `tests/torchrkt/{random,ops,autograd,generated_golden,generated_tranche2}_test.cpp`
+- `tests/torchrkt/{random,ops,autograd,generated_golden,generated_tranche2..7}_test.cpp`
   — GoogleTest goldens per family (generated families get a C-boundary
   golden: a correctness case + a null/length-guard case).
   `c_api_compile_test.c` proves the headers are valid C (add a
@@ -336,7 +357,8 @@ module's full export set (`racket/runtime-path`, `syntax/parse/pre`).
   (`zeros` .. `rand`, `tensor`, `arange`, `eye`, the `*-like` family, with
   placement and `#:requires-grad?` handled once); `foreign/tensor-ops.rkt`
   — the op tranche (and the
-  shadow-dispatch convention); `foreign/autograd-ops.rkt` — autograd +
+  shadow-dispatch convention); `foreign/order-ops.rkt` — `topk` `sort`
+  `argsort` `multinomial`; `foreign/autograd-ops.rkt` — autograd +
   `with-no-grad` + in-place ops; `foreign/structs.rkt` — the `tensor`
   wrapper (`prop:cpointer`, shape cached at wrap time, allocator/deallocator
   finalizer); `foreign/error.rkt` — `check-ok` / `check-handle`;
@@ -362,8 +384,11 @@ module's full export set (`racket/runtime-path`, `syntax/parse/pre`).
   finalizer-cancelling `tr-tensor-free/checked`; OOM reaches users as
   `exn:fail:rktorch:oom` (catch by type, not message).
 - `nn.rkt` — pure re-export facade over `nn/` (`layer.rkt` = `gen:layer`, `LayerList` +
-  the `define-layer` macro; `parameter.rkt`, `buffer.rkt`, `linear.rkt`,
-  `init.rkt`, `optim.rkt`, `ema.rkt`, `loss.rkt`).
+  the `define-layer` macro, whose `#:forward` takes a rest argument, whose
+  fields admit `parameters-by-key` beside `children-by-key`, and whose
+  `#:on-move` body runs after a `to` that rebound anything; `parameter.rkt`, `buffer.rkt`, `linear.rkt`,
+  `init.rkt`, `optim.rkt`, `ema.rkt`, `loss.rkt`, `recurrent.rkt`,
+  `clip.rkt`).
 - `private/install-torchrkt-native.rkt` — stages `libtorchrkt.*` into
   `native-libs/` from `TORCHRKT_NATIVE_LIB_PATH` (set by the Nix build/shell).
   Every staging path (here and the flake's three shell ones) writes a temp file
@@ -398,7 +423,8 @@ headers:
   hand-curated.
 - `torch/tests/generated-parity.rktd` — manifest driving the generated-op
   battery in `generated-parity-test.rkt`; every new allowlist line needs an
-  input recipe in that test
+  input recipe in that test (`'device-only` for an op with no CPU kernel,
+  which then needs a device-guarded test of its own)
 
 Conventions:
 
@@ -408,11 +434,15 @@ Conventions:
   widening the IR is a generator change, not a hand-written shim.
 - Optional *types* are in the IR: `Tensor?` is a NULL pointer, `int?` and
   `Scalar?` carry a presence flag, `int[]?` a length plus flag, and
-  `ScalarType?` a -1 sentinel. In-place ops (`add_`) emit a mutable receiver
+  `ScalarType?` a -1 sentinel, and `Generator?` a `tr_generator` handle
+  (NULL for the global stream; an op that draws still needs the allowlist
+  `rng` flag). In-place ops (`add_`) emit a mutable receiver
   plus an integer status. An op with several Tensor returns (`topk`,
   `sort`, #154) emits an integer status plus trailing out pointers in C
   and a `#:returns N` clause in Racket, where it answers multiple values
-  in schema order; any non-Tensor return still skips. Schema *defaults* (`int dim=0`) are still
+  in schema order; any non-Tensor return still skips. A private ATen name
+  loses its leading underscore on the Racket side
+  (`_cudnn_rnn_flatten_weight` is `cudnn-rnn-flatten-weight`). Schema *defaults* (`int dim=0`) are still
   flattened to required arguments on the unstable surface — defaults are a
   curated-facade concern.
 - Generated output is committed (AOT); CI's `codegen-drift` job regenerates
