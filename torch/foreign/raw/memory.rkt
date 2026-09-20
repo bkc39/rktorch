@@ -27,9 +27,9 @@
          finalizer-failures
          finalizer-diagnostics
          tensor-allocator
-         tensor-allocator/rng
+         tensor-allocator/no-retry
          tensor-allocator/outputs
-         tensor-allocator/outputs/rng
+         tensor-allocator/outputs/no-retry
          oom-retry
          oom-retry/status
          reaccount!
@@ -259,9 +259,10 @@
 (define (tensor-allocator raw-fn)
   (accounted ((oom-retry) ((allocator tr-tensor-free/finalizer) raw-fn))))
 
-;; No retry: these bindings consume the global RNG stream, and a blind
-;; retry would draw twice and break seeded parity.
-(define (tensor-allocator/rng raw-fn)
+;; No retry: re-running these after an OOM would repeat something the
+;; first call already did — a draw from the global RNG stream, or an
+;; in-place update of a tensor the caller handed in.
+(define (tensor-allocator/no-retry raw-fn)
   (accounted ((allocator tr-tensor-free/finalizer) raw-fn)))
 
 (define adopt-handle ((allocator tr-tensor-free/finalizer) values))
@@ -288,7 +289,7 @@
 (define (tensor-allocator/outputs raw-fn)
   (accounted-outputs ((oom-retry) (adopting-outputs raw-fn))))
 
-(define (tensor-allocator/outputs/rng raw-fn)
+(define (tensor-allocator/outputs/no-retry raw-fn)
   (accounted-outputs (adopting-outputs raw-fn)))
 
 (define-syntax (define-unary/raw stx)
