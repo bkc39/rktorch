@@ -17,6 +17,13 @@ extern "C" {
  * with several Tensor returns also reports a status and writes one
  * new handle per trailing out pointer, every one NULL on error. */
 
+tr_tensor* tr_gen_batch_norm(
+    const tr_tensor* input,
+    const tr_tensor* weight /* nullable: NULL == no value */,
+    const tr_tensor* bias /* nullable: NULL == no value */,
+    const tr_tensor* running_mean /* nullable: NULL == no value */,
+    const tr_tensor* running_var /* nullable: NULL == no value */,
+    bool training, double momentum, double eps, bool cudnn_enabled);
 tr_tensor* tr_gen_dropout(const tr_tensor* input, double p, bool train);
 tr_tensor* tr_gen_embedding(const tr_tensor* weight, const tr_tensor* indices,
                             int64_t padding_idx, bool scale_grad_by_freq,
@@ -32,6 +39,7 @@ tr_tensor* tr_gen_layer_norm(
     const tr_tensor* weight /* nullable: NULL == no value */,
     const tr_tensor* bias /* nullable: NULL == no value */, double eps,
     bool cudnn_enable);
+tr_tensor* tr_gen_leaky_relu(const tr_tensor* self, double negative_slope);
 tr_tensor* tr_gen_silu(const tr_tensor* self);
 
 #ifdef __cplusplus

@@ -2,12 +2,14 @@
 
 @(require (for-label racket/base
                      racket/contract
-                     (only-in torch cuda-if-available device/c randn-like tensor?
+                     (only-in torch cuda-if-available device/c draw-seed generator?
+                              make-generator randn-like tensor?
                               upsample-nearest2d)
                      torch/data/loader
                      (only-in torch/nn Conv2d Dropout Embedding GroupNorm Linear
                               define-layer)
                      torch/vision/cifar10
+                     torch/vision/transforms
                      torch/vision/diffusion))
 
 @title{Vision datasets}
@@ -193,4 +195,46 @@ default network has 35.7 million parameters.
 @defproc[(unet-classes [net unet?]) (or/c #f exact-positive-integer?)]{
 The class count @racket[net] was built with, also its null label, or
 @racket[#f] for an unconditional network.
+}
+
+@section{Transforms}
+
+@defmodule[torch/vision/transforms]
+
+Augmentation on an image batch where it lives: each transform takes an
+@tt{[N C H W]} tensor and returns one of the same shape on the same
+device. The random choices are per image, drawn on the host from a Racket
+generator that one @racket[draw-seed] from the torch generator seeds per
+batch, so a loader built on @racket[(make-generator 0)] replays its
+augmentation as well as its batch order. They are the transform's own
+draws: a torchvision pipeline on the same seed picks different crops.
+
+@racketblock[
+(define g (make-generator 0))
+(define loader
+  (dataloader (cifar10-dataset 'train #:device (cuda-if-available))
+              #:batch-size 128 #:shuffle? #t #:generator g))
+(for ([(xb yb) (in-dataloader loader)])
+  (define augmented
+    (random-horizontal-flip (random-crop xb #:padding 4 #:generator g)
+                            #:generator g))
+  ...)
+]
+
+@defproc[(random-horizontal-flip [x tensor?]
+                                 [#:p p (real-in 0 1) 0.5]
+                                 [#:generator generator (or/c generator? #f) #f])
+         tensor?]{
+Mirrors each image of the rank-4 batch @racket[x] along its width with
+probability @racket[p]; the rest pass through unchanged.
+}
+
+@defproc[(random-crop [x tensor?]
+                      [#:padding padding exact-nonnegative-integer? 4]
+                      [#:generator generator (or/c generator? #f) #f])
+         tensor?]{
+Pads every image of the rank-4 batch @racket[x] with @racket[padding] zero
+pixels on each side and cuts a window of the original size at a per-image
+offset, torchvision's @tt{RandomCrop(32, padding=4)} for CIFAR-10. With
+@racket[padding] 0 it is the identity.
 }

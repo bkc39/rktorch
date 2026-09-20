@@ -136,7 +136,7 @@
     (define b (tensor->list (randn 4)))
     (check-equal? b a))
 
-  (test-case "dropout (generated #:rng arm) draws identically across an OOM"
+  (test-case "dropout (generated #:no-retry arm) draws identically across an OOM"
     (define x (ones 64))
     (manual-seed! 7)
     (define a (tensor->list (dropout x 0.5 #t)))

@@ -19,3 +19,6 @@ coverage/
 
 # exit-loop repro harness output, plus local investigation notes
 repro-logs/
+
+# agent scratch: logs, probes and one-off scripts, never part of a change
+.scratch/
