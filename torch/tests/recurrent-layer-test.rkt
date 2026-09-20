@@ -11,7 +11,7 @@
            "../nn.rkt"
            (only-in "../generated.rkt" cudnn-rnn-flatten-weight)
            (only-in (submod "../nn/recurrent.rkt" private)
-                    recurrent-flattened-on)
+                    flatten-refused? flattened-placement)
            "private/python-env.rkt")
 
   (define (flat ts)
@@ -64,9 +64,11 @@
 
   (test-case "the state arguments come all together or not at all"
     (define lstm (LSTM 3 4))
-    (check-exn exn:fail:contract:arity?
+    (check-exn #rx"LSTM: arity mismatch.*expected: 1 or 3\n  given: 2"
                (lambda () (lstm (randn 5 2 3) (zeros 1 2 4))))
     (check-exn exn:fail:contract:arity?
+               (lambda () (lstm (randn 5 2 3) (zeros 1 2 4))))
+    (check-exn #rx"GRU: arity mismatch.*expected: 1 or 2\n  given: 3"
                (lambda () ((GRU 3 4) (randn 5 2 3) (zeros 1 2 4) (zeros 1 2 4))))
     (check-exn #rx"LSTM: contract violation.*rank-3 tensor"
                (lambda () (lstm (randn 5 3))))
@@ -98,6 +100,13 @@
     (define-values (out _h) (gru (randn 5 2 3 #:dtype 'float64)))
     (check-equal? (tensor-dtype out) 'float64))
 
+  (test-case "the input dtype has to be the layer's"
+    (define lstm (LSTM 3 4))
+    (to lstm 'float64)
+    ;; ATen picks oneDNN on the input's dtype and then reads the weights, so
+    ;; this is the documented mkldnn message rather than a mismatch report
+    (check-exn exn:fail? (lambda () (lstm (randn 5 2 3)))))
+
   (test-case "a bare recurrent layer is a forward trough, once"
     (define (trough-minors)
       (cdr (assq 'trough-minors (finalizer-diagnostics))))
@@ -118,15 +127,40 @@
 
   (test-case "only a move that rebinds the weights forgets the flattening"
     (define gru (GRU 3 4))
+    (define w (cdr (assoc "weight_ih_l0" (named-parameters gru))))
+    (define (recorded) (flattened-placement w))
+    (define (now) (cons (tensor-device w) (tensor-dtype w)))
     (define-values (out _h) (gru (randn 5 2 3)))
     (check-true (and out #t))
-    (check-not-false (recurrent-flattened-on gru))
+    (check-equal? (recorded) (now) "the first forward recorded nothing")
     (to gru 'cpu)
-    (check-not-false (recurrent-flattened-on gru)
-                     "a move that changed nothing scattered the weights")
+    (check-equal? (recorded) (now)
+                  "a move that changed nothing would re-flatten")
     (to gru 'float64)
-    (check-false (recurrent-flattened-on gru)
-                 "a dtype move kept a flattening of the old storage"))
+    (check-false (recorded)
+                 "a move that rebound the storage left its flattening behind"))
+
+  (test-case "a nested recurrent layer hears the move too"
+    (define-layer Wrap (inner) ;; noqa
+      #:init ()
+      (set! inner (LSTM 3 4))
+      #:forward (x)
+      (let-values ([(out _h _c) (inner x)]) out))
+    (define net (Wrap))
+    (define w (cdr (assoc "inner.weight_ih_l0" (named-parameters net))))
+    (define (recorded) (flattened-placement w))
+    (define (now) (cons (tensor-device w) (tensor-dtype w)))
+    (void (net (randn 5 2 3)))
+    (check-equal? (recorded) (now))
+    (to net (cpu-device))
+    (check-equal? (recorded) (now)
+                  "a device move that changed nothing forgot the flattening")
+    (to net (cpu-device) 'float32)
+    (check-equal? (recorded) (now)
+                  "a device and dtype move that changed nothing forgot it")
+    (to net 'float64)
+    (check-false (recorded)
+                 "moving the parent left the child's flattening behind"))
 
   (test-case "constructor contracts"
     (check-exn exn:fail:contract? (lambda () (LSTM 0 4)))
@@ -244,6 +278,10 @@
       (define before (flat (parameters lstm)))
       (to lstm 'cuda)
       (define-values (gpu-out _gh _gc) (lstm (to-device x 'cuda)))
+      ;; the outputs agree whether or not cudnn took the flat weights, so
+      ;; without this a swallowed refusal would leave every check below green
+      (check-false (flatten-refused? (car (parameters lstm)))
+                   "cudnn refused to flatten and the refusal was swallowed")
       (check-close (tensor->list (to-device gpu-out 'cpu)) (tensor->list cpu-out)
                    "cudnn output" 1e-4)
       (check-close (flat (for/list ([p (in-list (parameters lstm))])

@@ -14,7 +14,8 @@
          (only-in racket/list append-map check-duplicates remove-duplicates)
          (only-in racket/stxparam define-syntax-parameter syntax-parameterize)
          (only-in syntax/parse/define define-syntax-parse-rule)
-         (only-in "../foreign.rkt" prop:to tensor-dtype tensor?)
+         (only-in "../foreign.rkt"
+                  prop:to tensor-device tensor-dtype tensor? to)
          (only-in (submod "../foreign.rkt" unsafe) to!)
          (only-in "../foreign/autograd-ops.rkt" collect-at-forward-trough!)
          (only-in "../private/contract.rkt"
@@ -47,6 +48,7 @@
   (layer-buffers layer)
   (layer-named-buffers layer prefix)
   (layer-named-children layer)
+  (layer-own-tensors layer)
   (layer-mode layer)
   (layer-set-mode! layer mode)
   #:derive-property prop:to (lambda (m dev dtype) (move-layer! m dev dtype))
@@ -56,6 +58,7 @@
    (define (layer-buffers self) '()) ;; noqa
    (define (layer-named-buffers self prefix) '()) ;; noqa
    (define (layer-named-children self) '()) ;; noqa
+   (define (layer-own-tensors self) (own-tensors self)) ;; noqa
    (define (layer-mode self) 'train) ;; noqa
    (define (layer-set-mode! self mode) (void))]) ;; noqa
 
@@ -79,17 +82,45 @@
 (define (floating? t)
   (and (memq (tensor-dtype t) '(float32 float64)) #t))
 
+;; What `#:on-move` reacts to: `to` is the identity when nothing changes, and
+;; a device round trip returns to the placement it started from, so the pair
+;; is read either side of one move rather than compared across several.
+(define (placement-of m)
+  (for/list ([t (in-list (append (parameters m) (buffers m)))])
+    (cons (tensor-device t) (tensor-dtype t))))
+
+(define (move-tensor! t dev dtype)
+  (define dt (and dtype (floating? t) dtype))
+  (cond
+    [(and dev dt) (to! t dev dt)]
+    [dev (to! t dev)]
+    [dt (to! t dt)]
+    [else (void)]))
+
+;; The fallback for a layer that does not declare its own tensors apart from
+;; its children's: both lists here are recursive, so this is the expensive
+;; way round and `registry` overrides it.
+(define (own-tensors m)
+  (define theirs (make-hasheq))
+  (for* ([c (in-list (layer-named-children m))]
+         [t (in-list (append (layer-parameters (cdr c))
+                             (layer-buffers (cdr c))))])
+    (hash-set! theirs t #t))
+  (for/list ([t (in-list (append (parameters m) (buffers m)))]
+             #:unless (hash-ref theirs t #f))
+    t))
+
 (define (move-layer! m dev dtype)
   (when (and dtype (not (memq dtype '(float32 float64))))
     (raise-arguments-error 'to "a layer only moves to a floating-point dtype"
                            "dtype" dtype))
-  (for ([t (in-list (append (parameters m) (buffers m)))])
-    (define dt (and dtype (floating? t) dtype))
+  (for ([c (in-list (layer-named-children m))])
     (cond
-      [(and dev dt) (to! t dev dt)]
-      [dev (to! t dev)]
-      [dt (to! t dt)]
-      [else (void)]))
+      [(and dev dtype) (to (cdr c) dev dtype)]
+      [dev (to (cdr c) dev)]
+      [else (to (cdr c) dtype)]))
+  (for ([t (in-list (layer-own-tensors m))])
+    (move-tensor! t dev dtype))
   m)
 
 ;; Depth-first, own params before children's, in declaration order —
@@ -228,6 +259,9 @@
                          (registry-children self))))
    (define (layer-named-children self)
      (registry-children self))
+   (define (layer-own-tensors self)
+     (append (map cdr (registry-params self))
+             (map cdr (registry-buffers self))))
    (define (layer-set-mode! self mode)
      (set-registry-mode! self mode)
      (for ([c (in-list (registry-children self))])
@@ -286,6 +320,15 @@
   (check-names 'procedure->Layer
                (Fn% fn-forward params bufs kids 'train proc)))
 
+(struct Parameters% (alist)
+  #:reflection-name 'Parameters)
+
+(define/contract-out Parameters? (-> any/c boolean?) Parameters%?)
+
+(define/checked-out (parameters-by-key entries) ;; noqa
+  (-> (listof (cons/c child-name/c Parameter?)) Parameters?)
+  (Parameters% entries))
+
 (struct Children% (alist)
   #:reflection-name 'Children)
 
@@ -318,6 +361,9 @@
             ([name (in-list names)] [v (in-list vals)])
     (cond
       [(Parameter? v) (values (cons (cons name v) params) buffers children)]
+      [(Parameters? v)
+       (values (append (reverse (Parameters%-alist v)) params)
+               buffers children)]
       [(Buffer? v) (values params (cons (cons name v) buffers) children)]
       [(Children? v)
        (values params buffers
@@ -342,72 +388,97 @@
                            "name" entry-clash))
   m)
 
+(begin-for-syntax
+  (define-splicing-syntax-class layer-field
+    #:description "a layer field"
+    #:attributes (id bare? (decl 1))
+    (pattern f:ctor-formal
+      #:fail-when
+      (and (regexp-match? #rx"[.]" (symbol->string (syntax-e #'f.id))) #'f.id)
+      "a field name may not contain a dot; it is one state-dict segment"
+      #:with id #'f.id
+      #:attr bare? (attribute f.bare?)
+      #:with (decl ...) #'(f.decl ...)))
+
+  (define (unassigned-fields fields init-ids)
+    (filter (lambda (f) (not (member f init-ids bound-identifier=?))) fields))
+
+  (define (field-strings fields)
+    (for/list ([f (in-list fields)]) (symbol->string (syntax-e f))))
+
+  (define (accessor-ids struct-id fields)
+    (for/list ([f (in-list fields)]) (format-id struct-id "~a-~a" struct-id f))))
+
 (define-syntax (define-layer stx)
   (syntax-parse stx
-    [(_ name:id (field:ctor-formal ...)
+    [(_ name:id (field:layer-field ...)
         (~alt (~optional (~seq #:init init:init-formals init-body:expr ...))
               (~optional (~seq #:reflection-name reflect:expr))
               (~optional (~seq #:contract ctc:expr))
-              (~optional (~seq #:predicate pred:id))) ...
-        #:forward (input:id ...) body:expr ...+)
-     (define field-ids (syntax->list #'(field.id ...)))
-     (for ([f (in-list field-ids)])
-       (when (regexp-match? #rx"[.]" (symbol->string (syntax-e f)))
-         (raise-syntax-error
-          #f "a field name may not contain a dot; it is one state-dict segment"
-          stx f)))
-     (define init? (attribute init))
-     (when init?
-       (for ([f (in-list field-ids)]
-             [bare? (in-list (attribute field.bare?))])
-         (unless bare?
-           (raise-syntax-error
-            #f
-            "with #:init, a field is a bare identifier; defaults and keywords belong to the #:init formals"
-            stx f))))
-     (define init-ids (if init? (syntax->list #'(init.id ...)) '()))
-     (define struct-id (generate-temporary #'name))
-     (define (accessor field-id)
-       (format-id struct-id "~a-~a" struct-id field-id))
-     (with-syntax ([sid struct-id]
-                   [sid? (format-id struct-id "~a?" struct-id)]
-                   [name? (format-id #'name "~a?" #'name)]
-                   [reflect-name (or (attribute reflect) #'(quote name))]
-                   [formals (if init?
-                                #'init.formals
-                                #'((~@ field.decl ...) ...))]
-                   [(init-body ...) (if init? #'(init-body ...) #'())]
-                   [(absent ...)
-                    (filter (lambda (f)
-                              (not (member f init-ids bound-identifier=?)))
-                            (if init? field-ids '()))]
-                   [(field-name ...)
-                    (for/list ([f (in-list field-ids)])
-                      (symbol->string (syntax-e f)))]
-                   [(field-acc ...) (map accessor field-ids)]
-                   [n-inputs (length (syntax->list #'(input ...)))])
-       (with-syntax ([export (contract-export stx #'name #'name?
-                                              (attribute ctc)
-                                              (attribute pred))])
-         #'(begin
-             (struct sid registry (field.id ...)
-               #:reflection-name reflect-name)
-             (define name? sid?)
-             (define (forward-proc self . inputs)
-               (unless (= (length inputs) n-inputs)
-                 (apply raise-arity-error 'name n-inputs inputs))
-               (let ([field.id (field-acc self)] ...)
-                 (syntax-parameterize
-                     ([with-mode (with-mode-transformer #'self)])
-                   (apply (lambda (input ...) body ...) inputs))))
-             (define (name . formals)
-               (let ([absent #f] ...)
-                 init-body ...
-                 (let-values ([(params buffers children)
-                               (classify '(field-name ...)
-                                         (list field.id ...))])
-                   (check-names
-                    'name
-                    (sid forward-proc params buffers children 'train
-                         field.id ...)))))
-             export)))]))
+              (~optional (~seq #:predicate pred:id))
+              (~optional (~seq #:on-move moved-body:expr ...+))) ...
+        #:forward (~or* (input:id ...) (input:id ... . restarg:id))
+        body:expr ...+)
+     #:fail-when
+     (and (attribute init)
+          (for/or ([f (in-list (syntax->list #'(field.id ...)))]
+                   [bare? (in-list (attribute field.bare?))])
+            (and (not bare?) f)))
+     "with #:init, a field is a bare identifier; defaults and keywords belong to the #:init formals"
+     #:do [(define fields (syntax->list #'(field.id ...)))
+           (define init? (and (attribute init) #t))
+           (define init-ids (if init? (syntax->list #'(init.id ...)) '()))
+           (define struct-id (generate-temporary #'name))
+           (define arity (length (syntax->list #'(input ...))))]
+     #:with sid struct-id
+     #:with sid? (format-id struct-id "~a?" struct-id)
+     #:with name? (format-id #'name "~a?" #'name)
+     #:with reflect-name (or (attribute reflect) #'(quote name))
+     #:with formals (if init? #'init.formals #'((~@ field.decl ...) ...))
+     #:with (assign ...) (if init? #'(init-body ...) #'())
+     #:with (absent ...) (unassigned-fields (if init? fields '()) init-ids)
+     #:with (field-name ...) (field-strings fields)
+     #:with (field-acc ...) (accessor-ids struct-id fields)
+     #:with n-inputs #`#,arity
+     #:with enough? (if (attribute restarg) #'>= #'=)
+     #:with expected (if (attribute restarg)
+                         #`(arity-at-least #,arity)
+                         #`#,arity)
+     #:with forward-lambda (if (attribute restarg)
+                               #'(lambda (input ... . restarg) body ...)
+                               #'(lambda (input ...) body ...))
+     #:with (moved-defn ...)
+     (if (attribute moved-body)
+         #'((define (moved-proc self dev dtype)
+              (define before (placement-of self))
+              (begin0 (move-layer! self dev dtype)
+                      (unless (equal? before (placement-of self))
+                        (let ([field.id (field-acc self)] ...)
+                          moved-body ...)))))
+         #'())
+     #:with (moved-clause ...)
+     (if (attribute moved-body) #'(#:property prop:to moved-proc) #'())
+     #:with export (contract-export stx #'name #'name?
+                                    (attribute ctc) (attribute pred))
+     #'(begin
+         moved-defn ...
+         (struct sid registry (field.id ...)
+           #:reflection-name reflect-name
+           moved-clause ...)
+         (define name? sid?)
+         (define (forward-proc self . inputs)
+           (unless (enough? (length inputs) n-inputs)
+             (apply raise-arity-error 'name expected inputs))
+           (let ([field.id (field-acc self)] ...)
+             (syntax-parameterize ([with-mode (with-mode-transformer #'self)])
+               (apply forward-lambda inputs))))
+         (define (name . formals)
+           (let ([absent #f] ...)
+             assign ...
+             (let-values ([(params buffers children)
+                           (classify '(field-name ...) (list field.id ...))])
+               (check-names
+                'name
+                (sid forward-proc params buffers children 'train
+                     field.id ...)))))
+         export)]))
