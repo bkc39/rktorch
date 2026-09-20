@@ -10,6 +10,9 @@ __pycache__/
 # train-gpt checkpoint dumps (weights + sidecar)
 checkpoints/
 
+# scripts/coverage.rkt's HTML report
+coverage/
+
 # Local-only planning notes; agents may drop plan files here without committing.
 # (The reviewed v0 plan is checked in as plans/v0-scaffold.md.)
 .claude/worktrees/
