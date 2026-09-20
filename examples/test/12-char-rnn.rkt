@@ -8,25 +8,27 @@
 
 (module+ main
   (printf "device: ~a\n" (pick-device))
-  ;; an unset EPOCHS takes the default; a supplied one is authoritative, zero
-  ;; included, so EPOCHS=0 samples an untrained net rather than silently
+  ;; an unset variable takes the default; a supplied one is authoritative,
+  ;; zero included, so EPOCHS=0 samples an untrained net rather than silently
   ;; starting the full run and downloading the novella for it
-  (define epochs
-    (let ([supplied (getenv "EPOCHS")])
-      (and supplied
-           (or (string->number supplied)
-               (error '12-char-rnn "EPOCHS is not a number: ~a" supplied)))))
+  (define (numeric-env name [default #f])
+    (define supplied (getenv name))
+    (cond
+      [(not supplied) default]
+      [(string->number supplied)]
+      [else (error '12-char-rnn "~a is not a number: ~a" name supplied)]))
+  (define epochs (numeric-env "EPOCHS"))
   (define-values (net vocab)
     (cond
       [(and (getenv "EXCERPT") epochs) (train-excerpt #:epochs epochs)]
       [(getenv "EXCERPT") (train-excerpt)]
       [epochs (train-novel #:epochs epochs)]
       [else (train-novel)]))
-  (manual-seed! (string->number (or (getenv "SEED") "0")))
+  (manual-seed! (numeric-env "SEED" 0))
   (displayln
    (sample net vocab "The "
            #:steps 600
-           #:temperature (string->number (or (getenv "TEMPERATURE") "0.8")))))
+           #:temperature (numeric-env "TEMPERATURE" 0.8))))
 
 (module+ test
   (require rackunit)
