@@ -32,11 +32,6 @@
   (define (trough-floor)
     (cdr (assq 'trough-floor (finalizer-diagnostics))))
 
-  ;; A trough is due on two gates: the bytes over the floor, and the time
-  ;; the budget spaces collections out by. "the budget spaces trough
-  ;; collections out" is the case for the second one; every case about the
-  ;; first opens it, or a slow collection's backoff decides the result
-  ;; instead of the bytes the case is about (#183).
   (define no-backoff +inf.0)
 
   (define (settle!)
