@@ -1,0 +1,21 @@
+warning: Git tree '/home/bkc/dev/rkt/rktorch/.claude/worktrees/vision-152' is dirty
+raco test: (submod (file "torch/tests/nn-test.rkt") test)
+raco test: (submod (file "torch/tests/scheduler-test.rkt") test)
+scheduler-test.rkt:26:17: optimizer?: unbound identifier
+  in: optimizer?
+  location...:
+   scheduler-test.rkt:26:17
+  context...:
+   /nix/store/r499x5jim532jcw2zlhmpcc0wzk6s4zi-racket-9.3/share/racket/pkgs/compiler-lib/compiler/commands/test.rkt:98:2
+   body of (submod "/nix/store/r499x5jim532jcw2zlhmpcc0wzk6s4zi-racket-9.3/share/racket/pkgs/compiler-lib/compiler/commands/test.rkt" process)
+   body of top-level
+scheduler-test.rkt: raco test: non-zero exit: 1
+raco test: (submod (file "torch/tests/to-test.rkt") test)
+raco test: (submod (file "torch/tests/define-layer-test.rkt") test)
+raco test: (submod (file "torch/tests/nn-contract-test.rkt") test)
+raco test: (submod (file "torch/tests/diffusion-test.rkt") test)
+raco test: (submod (file "torch/tests/convnet-smoke-test.rkt") test)
+raco test: (submod (file "examples/test/04-mlp.rkt") test)
+raco test: (submod (file "examples/test/05-mnist.rkt") test)
+raco test: (submod (file "examples/test/06-gpt.rkt") test)
+1/124 test failures

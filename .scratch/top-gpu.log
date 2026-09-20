@@ -1,0 +1,9 @@
+Staging libtorchrkt (/nix/store/gcv9nb37hybbdhm7xmsqc06dx9cv34v6-torchrkt-cpp-0.1.0)...
+Staging host NVIDIA driver farm...
+CUDA shell ready. Verify:
+  raco test torch/tests/device-test.rkt
+raco test: (submod (file "torch/tests/python-cross-test.rkt") test)
+raco test: (submod (file "torch/tests/generated-parity-test.rkt") test)
+raco test: (submod (file "torch/tests/autocast-test.rkt") test)
+raco test: (submod (file "examples/test/09-resnet.rkt") test)
+10521779 tests passed

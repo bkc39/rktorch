@@ -1,0 +1,949 @@
+﻿2026-09-17T22:11:35.3371480Z Current runner version: '2.337.0'
+2026-09-17T22:11:35.3405524Z ##[group]Runner Image Provisioner
+2026-09-17T22:11:35.3407013Z Hosted Compute Agent
+2026-09-17T22:11:35.3408042Z Version: 20260828.587
+2026-09-17T22:11:35.3409057Z Commit: abac92662cab4cc7352de4f9f9d2e2419aad9c29
+2026-09-17T22:11:35.3410498Z Build Date: 2026-08-28T16:44:25Z
+2026-09-17T22:11:35.3411623Z Worker ID: {4730bbe0-5084-42da-b655-ec6ee49d8e78}
+2026-09-17T22:11:35.3412934Z Azure Region: eastus
+2026-09-17T22:11:35.3413917Z ##[endgroup]
+2026-09-17T22:11:35.3416574Z ##[group]Operating System
+2026-09-17T22:11:35.3417674Z Ubuntu
+2026-09-17T22:11:35.3418551Z 24.04.5
+2026-09-17T22:11:35.3419527Z LTS
+2026-09-17T22:11:35.3420401Z ##[endgroup]
+2026-09-17T22:11:35.3421401Z ##[group]Runner Image
+2026-09-17T22:11:35.3422459Z Image: ubuntu-24.04
+2026-09-17T22:11:35.3423528Z Version: 20260907.300.1
+2026-09-17T22:11:35.3425983Z Included Software: https://github.com/actions/runner-images/blob/ubuntu24/20260907.300/images/ubuntu/Ubuntu2404-Readme.md
+2026-09-17T22:11:35.3428788Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu24%2F20260907.300
+2026-09-17T22:11:35.3430485Z ##[endgroup]
+2026-09-17T22:11:35.3432603Z ##[group]GITHUB_TOKEN Permissions
+2026-09-17T22:11:35.3435733Z Contents: read
+2026-09-17T22:11:35.3436852Z Metadata: read
+2026-09-17T22:11:35.3437919Z Packages: read
+2026-09-17T22:11:35.3438983Z ##[endgroup]
+2026-09-17T22:11:35.3442290Z Secret source: Actions
+2026-09-17T22:11:35.3444873Z Cache mode: write
+2026-09-17T22:11:35.3446141Z Prepare workflow directory
+2026-09-17T22:11:35.3915539Z Prepare all required actions
+2026-09-17T22:11:35.3987292Z Getting action download info
+2026-09-17T22:11:35.5868962Z Download action repository 'actions/checkout@v5' (SHA:fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09)
+2026-09-17T22:11:35.7956898Z Complete job name: Resyntax lint
+2026-09-17T22:11:35.8765197Z ##[group]Run actions/checkout@v5
+2026-09-17T22:11:35.8766150Z with:
+2026-09-17T22:11:35.8766610Z   fetch-depth: 0
+2026-09-17T22:11:35.8767102Z   repository: bkc39/rktorch
+2026-09-17T22:11:35.8771139Z   token: ***
+2026-09-17T22:11:35.8771594Z   ssh-strict: true
+2026-09-17T22:11:35.8772053Z   ssh-user: git
+2026-09-17T22:11:35.8772514Z   persist-credentials: true
+2026-09-17T22:11:35.8773025Z   clean: true
+2026-09-17T22:11:35.8773489Z   sparse-checkout-cone-mode: true
+2026-09-17T22:11:35.8774090Z   fetch-tags: false
+2026-09-17T22:11:35.8774746Z   show-progress: true
+2026-09-17T22:11:35.8775218Z   lfs: false
+2026-09-17T22:11:35.8775661Z   submodules: false
+2026-09-17T22:11:35.8776133Z   set-safe-directory: true
+2026-09-17T22:11:35.8776663Z   allow-unsafe-pr-checkout: false
+2026-09-17T22:11:35.8777468Z ##[endgroup]
+2026-09-17T22:11:35.9825449Z Syncing repository: bkc39/rktorch
+2026-09-17T22:11:35.9828152Z ##[group]Getting Git version info
+2026-09-17T22:11:35.9829416Z Working directory is '/home/runner/work/rktorch/rktorch'
+2026-09-17T22:11:35.9831072Z [command]/usr/bin/git version
+2026-09-17T22:11:35.9898275Z git version 2.55.0
+2026-09-17T22:11:35.9921983Z ##[endgroup]
+2026-09-17T22:11:35.9941104Z Temporarily overriding HOME='/home/runner/work/_temp/c1e3bc64-cf10-4d41-bb08-c99c1bf95c67' before making global git config changes
+2026-09-17T22:11:35.9943728Z Adding repository directory to the temporary git global config as a safe directory
+2026-09-17T22:11:35.9947550Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/rktorch/rktorch
+2026-09-17T22:11:36.0003395Z Deleting the contents of '/home/runner/work/rktorch/rktorch'
+2026-09-17T22:11:36.0009692Z ##[group]Initializing the repository
+2026-09-17T22:11:36.0014200Z [command]/usr/bin/git init /home/runner/work/rktorch/rktorch
+2026-09-17T22:11:36.0129428Z hint: Using 'master' as the name for the initial branch. This default branch name
+2026-09-17T22:11:36.0131194Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+2026-09-17T22:11:36.0132843Z hint: to use in all of your new repositories, which will suppress this warning,
+2026-09-17T22:11:36.0134700Z hint: call:
+2026-09-17T22:11:36.0135704Z hint:
+2026-09-17T22:11:36.0136545Z hint: 	git config --global init.defaultBranch <name>
+2026-09-17T22:11:36.0137634Z hint:
+2026-09-17T22:11:36.0138646Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+2026-09-17T22:11:36.0140216Z hint: 'development'. The just-created branch can be renamed via this command:
+2026-09-17T22:11:36.0141472Z hint:
+2026-09-17T22:11:36.0142188Z hint: 	git branch -m <name>
+2026-09-17T22:11:36.0143020Z hint:
+2026-09-17T22:11:36.0144050Z hint: Disable this message with "git config set advice.defaultBranchName false"
+2026-09-17T22:11:36.0151097Z Initialized empty Git repository in /home/runner/work/rktorch/rktorch/.git/
+2026-09-17T22:11:36.0161741Z [command]/usr/bin/git remote add origin https://github.com/bkc39/rktorch
+2026-09-17T22:11:36.0212433Z ##[endgroup]
+2026-09-17T22:11:36.0213802Z ##[group]Disabling automatic garbage collection
+2026-09-17T22:11:36.0216203Z [command]/usr/bin/git config --local gc.auto 0
+2026-09-17T22:11:36.0251216Z ##[endgroup]
+2026-09-17T22:11:36.0252516Z ##[group]Setting up auth
+2026-09-17T22:11:36.0259119Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-09-17T22:11:36.0295984Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-09-17T22:11:36.0708477Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-09-17T22:11:36.0748436Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-09-17T22:11:36.0977565Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-09-17T22:11:36.1014135Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-09-17T22:11:36.1242731Z [command]/usr/bin/git config --local http.https://github.com/.extraheader AUTHORIZATION: basic ***
+2026-09-17T22:11:36.1282751Z ##[endgroup]
+2026-09-17T22:11:36.1292581Z ##[group]Fetching the repository
+2026-09-17T22:11:36.1294814Z [command]/usr/bin/git -c protocol.version=2 fetch --prune --no-recurse-submodules origin +refs/heads/*:refs/remotes/origin/* +refs/tags/*:refs/tags/* +3925a884c76ee3202d27332f86c80e3301a81891:refs/remotes/pull/170/merge
+2026-09-17T22:11:36.7185504Z From https://github.com/bkc39/rktorch
+2026-09-17T22:11:36.7188017Z  * [new branch]      api/bytes-ingestion-58                   -> origin/api/bytes-ingestion-58
+2026-09-17T22:11:36.7190930Z  * [new branch]      api/creation-kwargs-56                   -> origin/api/creation-kwargs-56
+2026-09-17T22:11:36.7192985Z  * [new branch]      api/dtype-inference                      -> origin/api/dtype-inference
+2026-09-17T22:11:36.7194830Z  * [new branch]      api/indexed-writes                       -> origin/api/indexed-writes
+2026-09-17T22:11:36.7196673Z  * [new branch]      api/selection-family                     -> origin/api/selection-family
+2026-09-17T22:11:36.7198515Z  * [new branch]      api/tensor-indexing                      -> origin/api/tensor-indexing
+2026-09-17T22:11:36.7200431Z  * [new branch]      api/tensor-printing                      -> origin/api/tensor-printing
+2026-09-17T22:11:36.7202271Z  * [new branch]      api/unified-to-54                        -> origin/api/unified-to-54
+2026-09-17T22:11:36.7204113Z  * [new branch]      api/vector-ingestion                     -> origin/api/vector-ingestion
+2026-09-17T22:11:36.7206629Z  * [new branch]      audio/asr-capstone                       -> origin/audio/asr-capstone
+2026-09-17T22:11:36.7208727Z  * [new branch]      audio/librispeech-data                   -> origin/audio/librispeech-data
+2026-09-17T22:11:36.7211087Z  * [new branch]      audio/librispeech-dataset                -> origin/audio/librispeech-dataset
+2026-09-17T22:11:36.7213841Z  * [new branch]      audio/sndfile-io                         -> origin/audio/sndfile-io
+2026-09-17T22:11:36.7216350Z  * [new branch]      chore/comment-hygiene                    -> origin/chore/comment-hygiene
+2026-09-17T22:11:36.7219034Z  * [new branch]      chore/foreign-drop-narration             -> origin/chore/foreign-drop-narration
+2026-09-17T22:11:36.7221621Z  * [new branch]      ci/nix-cache-79                          -> origin/ci/nix-cache-79
+2026-09-17T22:11:36.7224094Z  * [new branch]      ci/resyntax-changed-files                -> origin/ci/resyntax-changed-files
+2026-09-17T22:11:36.7227021Z  * [new branch]      ci/resyntax-event-sha-110                -> origin/ci/resyntax-event-sha-110
+2026-09-17T22:11:36.7229507Z  * [new branch]      data/loader-87                           -> origin/data/loader-87
+2026-09-17T22:11:36.7231714Z  * [new branch]      debug/exit-loop                          -> origin/debug/exit-loop
+2026-09-17T22:11:36.7234163Z  * [new branch]      devx/bytecode-rev                        -> origin/devx/bytecode-rev
+2026-09-17T22:11:36.7236996Z  * [new branch]      docs/memory-internals                    -> origin/docs/memory-internals
+2026-09-17T22:11:36.7239669Z  * [new branch]      docs/readme-landing-148                  -> origin/docs/readme-landing-148
+2026-09-17T22:11:36.7242491Z  * [new branch]      examples/blocks-119                      -> origin/examples/blocks-119
+2026-09-17T22:11:36.7245428Z  * [new branch]      fix/issue-18-followups                   -> origin/fix/issue-18-followups
+2026-09-17T22:11:36.7248494Z  * [new branch]      flake/silence-cuda-bindings-warning      -> origin/flake/silence-cuda-bindings-warning
+2026-09-17T22:11:36.7251697Z  * [new branch]      foreign/memory-pressure-145              -> origin/foreign/memory-pressure-145
+2026-09-17T22:11:36.7254710Z  * [new branch]      master                                   -> origin/master
+2026-09-17T22:11:36.7257206Z  * [new branch]      mem/37-phantom-bytes                     -> origin/mem/37-phantom-bytes
+2026-09-17T22:11:36.7259924Z  * [new branch]      mem/38-noexcept-finalizer                -> origin/mem/38-noexcept-finalizer
+2026-09-17T22:11:36.7262719Z  * [new branch]      mem/cuda-observability                   -> origin/mem/cuda-observability
+2026-09-17T22:11:36.7266893Z  * [new branch]      mem/device-type                          -> origin/mem/device-type
+2026-09-17T22:11:36.7270232Z  * [new branch]      mem/oom-typed-retry                      -> origin/mem/oom-typed-retry
+2026-09-17T22:11:36.7274160Z  * [new branch]      mem/tensor-device-kw                     -> origin/mem/tensor-device-kw
+2026-09-17T22:11:36.7278469Z  * [new branch]      nix/ocaml-shell-120                      -> origin/nix/ocaml-shell-120
+2026-09-17T22:11:36.7281281Z  * [new branch]      nn/define-layer                          -> origin/nn/define-layer
+2026-09-17T22:11:36.7283706Z  * [new branch]      nn/forward-arity-18                      -> origin/nn/forward-arity-18
+2026-09-17T22:11:36.7286785Z  * [new branch]      nn/load-state-strict-122                 -> origin/nn/load-state-strict-122
+2026-09-17T22:11:36.7289380Z  * [new branch]      nn/training-mode-27                      -> origin/nn/training-mode-27
+2026-09-17T22:11:36.7291693Z  * [new branch]      nn/unet-ops-84                           -> origin/nn/unet-ops-84
+2026-09-17T22:11:36.7294107Z  * [new branch]      perf/contract-benchmark                  -> origin/perf/contract-benchmark
+2026-09-17T22:11:36.7297763Z  * [new branch]      refactor/checked-submodule               -> origin/refactor/checked-submodule
+2026-09-17T22:11:36.7300487Z  * [new branch]      refactor/contracts-96                    -> origin/refactor/contracts-96
+2026-09-17T22:11:36.7303044Z  * [new branch]      refactor/syntax-parse-20                 -> origin/refactor/syntax-parse-20
+2026-09-17T22:11:36.7305822Z  * [new branch]      rkt/93-bump                              -> origin/rkt/93-bump
+2026-09-17T22:11:36.7308001Z  * [new branch]      seq/char-rnn-153                         -> origin/seq/char-rnn-153
+2026-09-17T22:11:36.7310984Z  * [new branch]      seq/layers-153                           -> origin/seq/layers-153
+2026-09-17T22:11:36.7313106Z  * [new branch]      seq/rnn-153                              -> origin/seq/rnn-153
+2026-09-17T22:11:36.7316140Z  * [new branch]      seq/tranche7-153                         -> origin/seq/tranche7-153
+2026-09-17T22:11:36.7318543Z  * [new branch]      seq/translation-153                      -> origin/seq/translation-153
+2026-09-17T22:11:36.7321191Z  * [new branch]      seq/translation-data-153                 -> origin/seq/translation-data-153
+2026-09-17T22:11:36.7324158Z  * [new branch]      tests/29-split-python-cross-test         -> origin/tests/29-split-python-cross-test
+2026-09-17T22:11:36.7326894Z  * [new branch]      v1                                       -> origin/v1
+2026-09-17T22:11:36.7328740Z  * [new branch]      v2/C                                     -> origin/v2/C
+2026-09-17T22:11:36.7330697Z  * [new branch]      v2/nix-py314                             -> origin/v2/nix-py314
+2026-09-17T22:11:36.7332688Z  * [new branch]      v3/B                                     -> origin/v3/B
+2026-09-17T22:11:36.7334836Z  * [new branch]      v3/C                                     -> origin/v3/C
+2026-09-17T22:11:36.7336739Z  * [new branch]      v3/C-2                                   -> origin/v3/C-2
+2026-09-17T22:11:36.7338833Z  * [new branch]      vision/cifar10-84                        -> origin/vision/cifar10-84
+2026-09-17T22:11:36.7341156Z  * [new branch]      vision/classic-152                       -> origin/vision/classic-152
+2026-09-17T22:11:36.7343412Z  * [new branch]      vision/half-152                          -> origin/vision/half-152
+2026-09-17T22:11:36.7346397Z  * [new branch]      vision/optim-152                         -> origin/vision/optim-152
+2026-09-17T22:11:36.7348833Z  * [new branch]      vision/ppm-155                           -> origin/vision/ppm-155
+2026-09-17T22:11:36.7351031Z  * [new branch]      vision/resnet-152                        -> origin/vision/resnet-152
+2026-09-17T22:11:36.7353323Z  * [new ref]         3925a884c76ee3202d27332f86c80e3301a81891 -> pull/170/merge
+2026-09-17T22:11:36.7357175Z ##[endgroup]
+2026-09-17T22:11:36.7358714Z ##[group]Determining the checkout info
+2026-09-17T22:11:36.7360478Z ##[endgroup]
+2026-09-17T22:11:36.7361484Z [command]/usr/bin/git sparse-checkout disable
+2026-09-17T22:11:36.7364828Z [command]/usr/bin/git config --local --unset-all extensions.worktreeConfig
+2026-09-17T22:11:36.7368366Z ##[group]Checking out the ref
+2026-09-17T22:11:36.7369983Z [command]/usr/bin/git checkout --progress --force refs/remotes/pull/170/merge
+2026-09-17T22:11:36.7648090Z Note: switching to 'refs/remotes/pull/170/merge'.
+2026-09-17T22:11:36.7649729Z 
+2026-09-17T22:11:36.7651086Z You are in 'detached HEAD' state. You can look around, make experimental
+2026-09-17T22:11:36.7653487Z changes and commit them, and you can discard any commits you make in this
+2026-09-17T22:11:36.7656102Z state without impacting any branches by switching back to a branch.
+2026-09-17T22:11:36.7657544Z 
+2026-09-17T22:11:36.7658858Z If you want to create a new branch to retain commits you create, you may
+2026-09-17T22:11:36.7661905Z do so (now or later) by using -c with the switch command. Example:
+2026-09-17T22:11:36.7663151Z 
+2026-09-17T22:11:36.7663587Z   git switch -c <new-branch-name>
+2026-09-17T22:11:36.7664317Z 
+2026-09-17T22:11:36.7664881Z Or undo this operation with:
+2026-09-17T22:11:36.7665555Z 
+2026-09-17T22:11:36.7665928Z   git switch -
+2026-09-17T22:11:36.7666425Z 
+2026-09-17T22:11:36.7667290Z Turn off this advice by setting config variable advice.detachedHead to false
+2026-09-17T22:11:36.7668596Z 
+2026-09-17T22:11:36.7670251Z HEAD is now at 3925a88 Merge 93460b8551ee65809a452d9ea5e67b57a72f9b00 into e0648ff98fd02ab382af9705fddb3835b1fbb101
+2026-09-17T22:11:36.7674358Z ##[endgroup]
+2026-09-17T22:11:36.7704178Z [command]/usr/bin/git log -1 --format=%H
+2026-09-17T22:11:36.7732336Z 3925a884c76ee3202d27332f86c80e3301a81891
+2026-09-17T22:11:36.8118951Z Prepare all required actions
+2026-09-17T22:11:36.8120673Z Getting action download info
+2026-09-17T22:11:36.9081017Z Download action repository 'tailscale/github-action@v4' (SHA:306e68a486fd2350f2bfc3b19fcd143891a4a2d8)
+2026-09-17T22:11:37.0582805Z Download action repository 'DeterminateSystems/nix-installer-action@v22' (SHA:ef8a148080ab6020fd15196c2084a2eea5ff2d25)
+2026-09-17T22:11:37.1753965Z Download action repository 'DeterminateSystems/magic-nix-cache-action@v13' (SHA:565684385bcd71bad329742eefe8d12f2e765b39)
+2026-09-17T22:11:37.3581526Z ##[group]Run ./.github/actions/nix-cache
+2026-09-17T22:11:37.3582555Z with:
+2026-09-17T22:11:37.3583506Z   ts-oauth-client-id: ***
+2026-09-17T22:11:37.3585212Z   ts-oauth-secret: ***
+2026-09-17T22:11:37.3586041Z ##[endgroup]
+2026-09-17T22:11:37.3649448Z ##[start-action display=Connect to tailnet (Nix binary cache);id=__self.__tailscale_github-action]
+2026-09-17T22:11:37.3798285Z ##[group]Run tailscale/github-action@v4
+2026-09-17T22:11:37.3799320Z with:
+2026-09-17T22:11:37.3800132Z   oauth-client-id: ***
+2026-09-17T22:11:37.3801517Z   oauth-secret: ***
+2026-09-17T22:11:37.3802294Z   tags: tag:ci
+2026-09-17T22:11:37.3803019Z   timeout: 60s
+2026-09-17T22:11:37.3803739Z   version: 1.94.2
+2026-09-17T22:11:37.3804645Z   retry: 5
+2026-09-17T22:11:37.3805351Z   use-cache: true
+2026-09-17T22:11:37.3806102Z ##[endgroup]
+2026-09-17T22:11:37.5079865Z Resolved Tailscale version: 1.94.2
+2026-09-17T22:11:37.5818070Z Cache hit for: action-setup-tailscale/1.94.2/Linux-amd64
+2026-09-17T22:11:37.9593063Z Received 34760015 of 34760015 (100.0%), 106.9 MBs/sec
+2026-09-17T22:11:37.9595613Z Cache Size: ~33 MB (34760015 B)
+2026-09-17T22:11:37.9630981Z [command]/usr/bin/tar -xf /home/runner/work/_temp/4a057b19-d242-4358-a3df-d7a709473c4d/cache.tzst -P -C /home/runner/work/rktorch/rktorch --use-compress-program unzstd
+2026-09-17T22:11:38.0730027Z Cache restored successfully
+2026-09-17T22:11:38.0748685Z Found Tailscale 1.94.2 in cache: /opt/hostedtoolcache/tailscale/1.94.2/Linux-amd64
+2026-09-17T22:11:38.0751386Z ▶️ copy tailscale from cache
+2026-09-17T22:11:38.0973611Z ▶️ copy tailscaled from cache
+2026-09-17T22:11:38.1234039Z ▶️ chmod tailscale
+2026-09-17T22:11:38.1350518Z ▶️ chmod tailscaled
+2026-09-17T22:11:38.1460548Z Starting tailscaled daemon...
+2026-09-17T22:11:38.1499252Z Waiting for tailscaled daemon to become ready...
+2026-09-17T22:11:38.1502143Z ▶️ get tailscale status
+2026-09-17T22:11:38.4173880Z Daemon ready! Initial state: NeedsLogin
+2026-09-17T22:11:38.4175433Z ✅ tailscaled daemon is up and running!
+2026-09-17T22:11:38.4176509Z ▶️ hostname
+2026-09-17T22:11:38.4224378Z Attempt 1 to bring up Tailscale...
+2026-09-17T22:11:38.4225883Z ▶️ tailscale up
+2026-09-17T22:11:39.7590527Z ✅ Tailscale up command completed successfully on attempt 1
+2026-09-17T22:11:39.7592187Z ▶️ get tailscale status
+2026-09-17T22:11:39.7711346Z ✅ Tailscale is running and connected!
+2026-09-17T22:11:39.7820277Z ##[end-action id=__self.__tailscale_github-action;outcome=success;conclusion=success;duration_ms=2416]
+2026-09-17T22:11:39.7825844Z ##[start-action display=Run DeterminateSystems/nix-installer-action@v22;id=__self.__DeterminateSystems_nix-installer-action]
+2026-09-17T22:11:39.8007316Z ##[group]Run DeterminateSystems/nix-installer-action@v22
+2026-09-17T22:11:39.8007721Z with:
+2026-09-17T22:11:39.8008737Z   extra-conf: extra-substituters = https://lab.tailb6061b.ts.net
+extra-trusted-public-keys = lab.tailb6061b.ts.net-1:/dlX81jfwuolbO7oiV11HoXe1ib6gMik1XPG2x8u3xc=
+connect-timeout = 5
+stalled-download-timeout = 20
+fallback = true
+
+2026-09-17T22:11:39.8009807Z   determinate: true
+2026-09-17T22:11:39.8010092Z   flakehub: false
+2026-09-17T22:11:39.8010394Z   force-no-systemd: false
+2026-09-17T22:11:39.8013250Z   github-token: ***
+2026-09-17T22:11:39.8013572Z   github-server-url: https://github.com
+2026-09-17T22:11:39.8013923Z   job-status: success
+2026-09-17T22:11:39.8014201Z   kvm: true
+2026-09-17T22:11:39.8014602Z   modify-profile: true
+2026-09-17T22:11:39.8014896Z   reinstall: false
+2026-09-17T22:11:39.8015573Z   start-daemon: true
+2026-09-17T22:11:39.8015887Z   diagnostic-endpoint: -
+2026-09-17T22:11:39.8016200Z   trust-runner-user: true
+2026-09-17T22:11:39.8016499Z   summarize: true
+2026-09-17T22:11:39.8016787Z   _internal-strict-mode: false
+2026-09-17T22:11:39.8017180Z ##[endgroup]
+2026-09-17T22:11:40.7460674Z [command]/usr/bin/sudo mkdir -p /var/lib/determinate
+2026-09-17T22:11:40.7772450Z ##[group]Detecting systemd...
+2026-09-17T22:11:40.7773656Z ##[endgroup]
+2026-09-17T22:11:40.7787959Z ##[group]Configuring KVM
+2026-09-17T22:11:40.8315644Z ##[endgroup]
+2026-09-17T22:11:40.8325984Z [32m Accelerated KVM is enabled [33m⚡️
+2026-09-17T22:11:40.8326970Z ##[group]Installing Nix
+2026-09-17T22:11:40.8327771Z ##[group]Downloading nix-installer for x86_64-linux
+2026-09-17T22:11:40.8328711Z Fetching from https://cf.install.determinate.systems/nix-installer/stable/x86_64-linux
+2026-09-17T22:11:40.9058752Z Cache hit for: determinatesystem-nix-installer-x86_64-linux-6b488cc44386254f4bd5baaf3b844747
+2026-09-17T22:11:41.2761207Z Received 47907515 of 47907515 (100.0%), 146.4 MBs/sec
+2026-09-17T22:11:41.2762093Z Cache Size: ~46 MB (47907515 B)
+2026-09-17T22:11:41.2790230Z [command]/usr/bin/tar -xf /home/runner/work/_temp/472e39c3-31c2-4de8-b499-5c1194620c39/cache.tzst -P -C /home/runner/work/_temp/nix-installer-dd2273b5-8860-4786-92c7-0efb1a713047 --use-compress-program unzstd
+2026-09-17T22:11:41.3994823Z Cache restored successfully
+2026-09-17T22:11:41.4019798Z ##[endgroup]
+2026-09-17T22:11:41.4029814Z Installing Determinate Nix using the --determinate flag
+2026-09-17T22:11:41.4037450Z [command]/home/runner/work/_temp/nix-installer-dd2273b5-8860-4786-92c7-0efb1a713047/nix-installer install linux --determinate
+2026-09-17T22:11:41.4089094Z  INFO nix-installer v3.22.4
+2026-09-17T22:11:41.5088126Z [2m[33m`nix-installer` needs to run as `root`, attempting to escalate now via `sudo`...[39m[0m
+2026-09-17T22:11:41.5191324Z  INFO nix-installer v3.22.4
+2026-09-17T22:11:41.6595731Z  INFO Step: Create directory `/nix`
+2026-09-17T22:11:41.6597618Z  INFO Step: Install Determinate Nixd
+2026-09-17T22:11:41.6736311Z  INFO Step: Provision Nix
+2026-09-17T22:11:44.3861504Z  INFO Step: Create build users (UID 30001-30032) and group (GID 30000)
+2026-09-17T22:11:45.0546872Z  INFO Step: Configure Nix
+2026-09-17T22:11:46.0063633Z  INFO Step: Create directory `/etc/tmpfiles.d`
+2026-09-17T22:11:46.0064226Z  INFO Step: Configure the Determinate Nix daemon
+2026-09-17T22:11:47.1285591Z  INFO Step: Cleanup
+2026-09-17T22:11:47.1303551Z  INFO Running self test for shell sh
+2026-09-17T22:11:47.3253382Z  INFO Running self test for shell bash
+2026-09-17T22:11:47.5234770Z [1m[32mNix was installed successfully![39m[0m
+2026-09-17T22:11:47.5236142Z To get started using Nix, open a new shell or run `[1m. /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh[0m`
+2026-09-17T22:11:47.5236967Z 
+2026-09-17T22:11:47.5587921Z ##[endgroup]
+2026-09-17T22:11:47.5596914Z FlakeHub is disabled because the workflow is misconfigured. Please make sure that `id-token: write` and `contents: read` are set for this step's (or job's) permissions so that GitHub Actions provides OIDC token endpoints.
+2026-09-17T22:11:47.5599051Z For more information, see https://docs.determinate.systems/guides/github-actions/#nix-installer-action
+2026-09-17T22:11:47.6431794Z ##[end-action id=__self.__DeterminateSystems_nix-installer-action;outcome=success;conclusion=success;duration_ms=7860]
+2026-09-17T22:11:47.6435903Z ##[start-action display=Run DeterminateSystems/magic-nix-cache-action@v13;id=__self.__DeterminateSystems_magic-nix-cache-action]
+2026-09-17T22:11:47.6494167Z Node 20 is being deprecated. This workflow is running with Node 24 by default. If you need to temporarily use Node 20, you can set the ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION=true environment variable. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
+2026-09-17T22:11:47.6495902Z ##[group]Run DeterminateSystems/magic-nix-cache-action@v13
+2026-09-17T22:11:47.6496626Z with:
+2026-09-17T22:11:47.6496854Z   listen: 127.0.0.1:37515
+2026-09-17T22:11:47.6497138Z   upstream-cache: https://cache.nixos.org
+2026-09-17T22:11:47.6497455Z   diagnostic-endpoint: -
+2026-09-17T22:11:47.6497767Z   flakehub-cache-server: https://cache.flakehub.com
+2026-09-17T22:11:47.6498153Z   flakehub-api-server: https://api.flakehub.com
+2026-09-17T22:11:47.6498494Z   startup-notification-port: 41239
+2026-09-17T22:11:47.6498775Z   diff-store: false
+2026-09-17T22:11:47.6499005Z   _internal-strict-mode: false
+2026-09-17T22:11:47.6499298Z env:
+2026-09-17T22:11:47.6499581Z   DETSYS_BACKTRACE_COLLECTOR: 046e6224-af9f-45ea-a894-ddc95282bae6
+2026-09-17T22:11:47.6499954Z   DETERMINATE_NIX_KVM: 1
+2026-09-17T22:11:47.6500184Z ##[endgroup]
+2026-09-17T22:11:47.8701570Z [command]/usr/bin/sudo mkdir -p /var/lib/determinate
+2026-09-17T22:11:48.0039697Z The Nix daemon may not consider the user running this workflow to be trusted. Magic Nix Cache may not start correctly.
+2026-09-17T22:11:48.0046352Z ##[group]Downloading magic-nix-cache for X64-Linux
+2026-09-17T22:11:48.0047675Z Fetching from https://cf.install.determinate.systems/magic-nix-cache-closure/stable/X64-Linux
+2026-09-17T22:11:48.2568546Z Cache hit for: determinatesystem-magic-nix-cache-X64-Linux-ca076abff5f72da321929fb051ea5c88
+2026-09-17T22:11:48.8119947Z Received 83927298 of 83927298 (100.0%), 161.7 MBs/sec
+2026-09-17T22:11:48.8120855Z Cache Size: ~80 MB (83927298 B)
+2026-09-17T22:11:48.8233499Z [command]/usr/bin/tar -xf /home/runner/work/_temp/638a72f1-16cf-44bf-8570-0a7742c0f05f/cache.tzst -P -C /home/runner/work/_temp/magic-nix-cache-2ea963f5-d02c-4dff-8689-adf1b79ec4d0 --use-compress-program unzstd
+2026-09-17T22:11:48.9259111Z Cache restored successfully
+2026-09-17T22:11:48.9301026Z ##[endgroup]
+2026-09-17T22:11:57.6483911Z FlakeHub Cache is disabled due to missing or invalid token
+2026-09-17T22:11:57.6485420Z If you're signed up for FlakeHub Cache, make sure that your Actions config has a `permissions` block with `id-token` set to "write" and `contents` set to "read"
+2026-09-17T22:11:57.6530162Z Waiting for magic-nix-cache to start...
+2026-09-17T22:11:57.6663235Z   [2m2026-09-17T22:11:57.664557Z[0m [32m INFO[0m [1;32mmagic_nix_cache[0m[32m: [32mEnabling FlakeHub cache because determinate-nixd is available.[0m
+2026-09-17T22:11:57.6665450Z     [2;3mat[0m magic-nix-cache/src/main.rs:325
+2026-09-17T22:11:57.6666272Z 
+2026-09-17T22:11:57.6667346Z   [2m2026-09-17T22:11:57.664592Z[0m [32m INFO[0m [1;32mmagic_nix_cache[0m[32m: [32mIgnoring the user-specified --flakehub-api-server-netrc, in favor of the determinate-nixd netrc[0m
+2026-09-17T22:11:57.6668622Z     [2;3mat[0m magic-nix-cache/src/main.rs:330
+2026-09-17T22:11:57.6669043Z 
+2026-09-17T22:11:57.6670036Z   [2m2026-09-17T22:11:57.664778Z[0m [31mERROR[0m [1;31mmagic_nix_cache[0m[31m: [31mFlakeHub: cache initialized failed: Unauthenticated: Cannot find netrc credentials for https://api.flakehub.com/[0m
+2026-09-17T22:11:57.6671119Z     [2;3mat[0m magic-nix-cache/src/main.rs:399
+2026-09-17T22:11:57.6671537Z 
+2026-09-17T22:11:57.6693051Z ##[error]Unable to authenticate to FlakeHub. Individuals must register at FlakeHub.com; Organizations must create an organization at FlakeHub.com.
+2026-09-17T22:11:57.6695169Z   [2m2026-09-17T22:11:57.664879Z[0m [32m INFO[0m [1;32mmagic_nix_cache[0m[32m: [32mLoading credentials from environment[0m
+2026-09-17T22:11:57.6696444Z     [2;3mat[0m magic-nix-cache/src/main.rs:423
+2026-09-17T22:11:57.6696995Z 
+2026-09-17T22:11:57.6809977Z   [2m2026-09-17T22:11:57.680531Z[0m [32m INFO[0m [1;32mmagic_nix_cache[0m[32m: [32mNative GitHub Action cache is enabled.[0m
+2026-09-17T22:11:57.6812144Z     [2;3mat[0m magic-nix-cache/src/main.rs:441
+2026-09-17T22:11:57.6813201Z 
+2026-09-17T22:11:57.6814750Z   [2m2026-09-17T22:11:57.680546Z[0m [32m INFO[0m [1;32mmagic_nix_cache[0m[32m: [32mSubscribing to Determinate Nixd build events.[0m
+2026-09-17T22:11:57.6815881Z     [2;3mat[0m magic-nix-cache/src/main.rs:467
+2026-09-17T22:11:57.6816732Z 
+2026-09-17T22:11:57.6971038Z Launched Magic Nix Cache
+2026-09-17T22:11:57.7400971Z ##[end-action id=__self.__DeterminateSystems_magic-nix-cache-action;outcome=success;conclusion=success;duration_ms=10096]
+2026-09-17T22:11:57.7482234Z ##[group]Run nix develop .#ci --command bash -c '
+2026-09-17T22:11:57.7482703Z [36;1mnix develop .#ci --command bash -c '[0m
+2026-09-17T22:11:57.7483048Z [36;1m  set -euo pipefail[0m
+2026-09-17T22:11:57.7483420Z [36;1m  # set -e would abort at the substitution, losing $out and the[0m
+2026-09-17T22:11:57.7483812Z [36;1m  # ::error:: below[0m
+2026-09-17T22:11:57.7484067Z [36;1m  rc=0[0m
+2026-09-17T22:11:57.7484730Z [36;1m  out=$(resyntax analyze --local-git-repository . "$BASE_REF" \[0m
+2026-09-17T22:11:57.7485214Z [36;1m          --analyzer-timeout 30000 2>&1) || rc=$?[0m
+2026-09-17T22:11:57.7485557Z [36;1m  echo "$out"[0m
+2026-09-17T22:11:57.7485809Z [36;1m  if [ "$rc" -ne 0 ]; then[0m
+2026-09-17T22:11:57.7486234Z [36;1m    echo "::error::Resyntax exited $rc without completing the analysis."[0m
+2026-09-17T22:11:57.7486666Z [36;1m    exit 1[0m
+2026-09-17T22:11:57.7486888Z [36;1m  fi[0m
+2026-09-17T22:11:57.7487242Z [36;1m  if echo "$out" | grep -qE "resyntax: .*\.rkt:[0-9]+:[0-9]+ \["; then[0m
+2026-09-17T22:11:57.7487920Z [36;1m    echo "::error::Resyntax found refactoring suggestions. Run: resyntax fix --local-git-repository . $BASE_REF"[0m
+2026-09-17T22:11:57.7488479Z [36;1m    exit 1[0m
+2026-09-17T22:11:57.7488708Z [36;1m  fi[0m
+2026-09-17T22:11:57.7489003Z [36;1m  timeouts=$(echo "$out" | grep -c "timed out" || true)[0m
+2026-09-17T22:11:57.7489382Z [36;1m  if [ "$timeouts" -gt 0 ]; then[0m
+2026-09-17T22:11:57.7489923Z [36;1m    echo "::warning::Resyntax analyzer timed out on $timeouts file(s); that part of the analysis was partial."[0m
+2026-09-17T22:11:57.7490452Z [36;1m  fi[0m
+2026-09-17T22:11:57.7490700Z [36;1m  echo "Resyntax: no suggestions."[0m
+2026-09-17T22:11:57.7491000Z [36;1m'[0m
+2026-09-17T22:11:57.7535701Z shell: /usr/bin/bash -e {0}
+2026-09-17T22:11:57.7535986Z env:
+2026-09-17T22:11:57.7536305Z   DETSYS_BACKTRACE_COLLECTOR: 046e6224-af9f-45ea-a894-ddc95282bae6
+2026-09-17T22:11:57.7536713Z   DETERMINATE_NIX_KVM: 1
+2026-09-17T22:11:57.7537221Z   MAGIC_NIX_CACHE_DAEMONDIR: /home/runner/work/_temp/magic-nix-cache-5082b340-9d58-4b13-9d6a-0c1df3bfadce
+2026-09-17T22:11:57.7537789Z   BASE_REF: e0648ff98fd02ab382af9705fddb3835b1fbb101
+2026-09-17T22:11:57.7538121Z ##[endgroup]
+2026-09-17T22:11:58.2910325Z copying path '/nix/store/7iayzmpci4nxnl1826gk2s4xd1f9x15z-source' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:07.1627154Z copying path '/nix/store/ykxf7hipn2l20snl20g9fzqnw28ba7ah-source' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:18.1416850Z copying path '/nix/store/w8bgsxay0hvq7786kch1fpz5faij7cnx-fribidi-1.0.16' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:18.1583914Z copying path '/nix/store/qllq42j7nhmfdqi8k4dkfjk9fqwnhswg-torch-rkt-racket-deps' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:18.1605164Z copying path '/nix/store/0hckf4kx70qifvrsbh64hc2s5xfyrf97-bzip2-1.0.8' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:18.1705275Z copying path '/nix/store/x7hyp2ndwysydy2q1djdvjzlqzvqhg8x-expat-2.8.2' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:18.1750764Z copying path '/nix/store/c6dz02sxdl4ac09kc0lgcarsi5wbjymf-libjpeg-turbo-3.1.4.1' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:18.1765535Z copying path '/nix/store/9braj8dkwiky7d222l29y3p7164vc58h-libdeflate-1.25' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:18.1767439Z copying path '/nix/store/wflv43s0i42ysmjvw1hiw4vdiidfzwnn-libffi-3.7.1' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:18.1768577Z copying path '/nix/store/waa2ybxmmaaxq0ssaf5ksrn241v77d2n-libice-1.1.2' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:18.1822763Z copying path '/nix/store/gycvlzgb3zyak6cjc77v14kj2cldvl8b-brotli-1.2.0-lib' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:18.1918182Z copying path '/nix/store/78vgjwcfyp66rqdc9xsmfh75js2fjd39-gsettings-desktop-schemas-50.1' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:18.2021530Z copying path '/nix/store/2hsx0n216xaiycqlfbymmqpnin69ml2d-glibc-locales-2.42-67' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:18.2039921Z copying path '/nix/store/skiv9g443q6b5zanvnih7xsgnhwlc0v2-libxau-1.0.12' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:18.2041086Z copying path '/nix/store/sk50vh3qlrz5b4rw886bs7yb6x32pbpx-lz4-1.10.0-lib' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:18.2077068Z copying path '/nix/store/96hgnqnikm0k4pag8x35hb6s46nag1l3-xz-5.8.3' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:18.2245014Z copying path '/nix/store/g83pifx7v1m4zjvy6rfg3y2krd2cs649-libiconv-1.19' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:18.2253576Z copying path '/nix/store/7lwzk9b6030k49f0pfgwk8qapd7nmkjh-pixman-0.46.4' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:18.2557798Z copying path '/nix/store/0ncs5mdii6hlrxx09g648h1d61dqf0ds-libz-1.2.8.2025.03.07' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:18.2678437Z copying path '/nix/store/1mf3lj0mldr8732yvzjc12fig2407b3d-openssl-3.6.3' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:18.2865948Z copying path '/nix/store/zks9mfsn4rqr6z9g6pcj2xqzcsplj0nb-zlib-1.3.2' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:18.2937086Z copying path '/nix/store/zlvs6miv8wfki399pmxri7x0sjd3429c-ncurses-6.6' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:18.3044300Z copying path '/nix/store/xyikkpwkyxx6syba3kfrr0h67ig5hwmn-gcc-15.2.0-libgcc' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:18.3282384Z copying path '/nix/store/4yrcph5895vdnc8crdzxh9vm51p3wgj3-wayland-1.26.0' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:18.3500017Z copying path '/nix/store/0c5qg74fw50vz6scy5dn2zm6h2bvsscn-zlib-1.3.2-static' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:18.3715690Z copying path '/nix/store/g54b6ghpnn98hfdz4yqw87w10c3hx8bv-xgcc-15.2.0-libgcc' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:18.3811300Z copying path '/nix/store/b24vp6qm9qggn13gbvmmnlgxbgicd1sc-lzo-2.10' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:18.4069053Z copying path '/nix/store/klwz4lnn6zvz88nas35gyqyh2iv5xh80-dejavu-fonts-minimal-2.37' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:18.4094365Z copying path '/nix/store/s52vdyj97g3adv6qb431v8m2kccs0bzz-linux-headers-6.18.7' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:18.4151193Z copying path '/nix/store/72qimgkjqnrjvvmmv0z69j6mqy3ahm2f-giflib-6.1.3' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:18.4244330Z copying path '/nix/store/18ba4mqxs7r9lcbyc3hq69yx6lb6jghv-iso-codes-4.20.1' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:18.4248064Z copying path '/nix/store/fvzrihfjwmh1610sv7mz5vg2dnqc9fin-libxml2-2.15.3' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:18.4355102Z copying path '/nix/store/kpjkxs3hlgl7yxqp8cg7fkvs42zi4vfh-util-linux-minimal-2.42.2-lib' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:18.4357871Z copying path '/nix/store/fqkp26idpnpqk5l2cjfb51jdn6nj5bam-sqlite-3.53.3' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:18.4578674Z copying path '/nix/store/r5v7743c48hj7n38m8yxyq36a754x4vl-libpng-apng-1.6.58' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:18.4711583Z copying path '/nix/store/133x6d2rys6yasnygq1hid7fs49rgr7d-dav1d-1.5.3' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:18.4831666Z copying path '/nix/store/dsn500c5j62qz9f49mi3nhx74jbkf6xq-pcre2-10.47' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:18.4833275Z copying path '/nix/store/w2dvvgma5r0iyhh53iq0yxxxgjikwdhb-libxdmcp-1.1.5' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:18.4836519Z copying path '/nix/store/0i89jbfivjx3iwmp06fq6466h446vfwv-libdaemon-0.14' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:18.4840930Z copying path '/nix/store/zs5j10161w3h46a85ixrwmm5x7gccym1-libtool-2.6.2-lib' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:18.5042699Z copying path '/nix/store/43grvfid3lryjg7hhz3g17lmwdpvr77f-libtasn1-4.21.0' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:18.5451892Z copying path '/nix/store/idpiqyd6dsg04vxsmwj5lsq0qzgs6il0-libevent-2.1.13' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:18.5454232Z copying path '/nix/store/9ndc176kmp1fz9ja64zxwq5r2r3g6695-xkeyboard-config-2.48' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:18.5484386Z copying path '/nix/store/5gazxn5x85bkqjxcnwzkzn0yps81fqal-freetype-2.14.3' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:18.5507448Z copying path '/nix/store/nayywgvfsgzi1pma0a7c64pqz3zrz7vb-libxcb-1.17.0' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:18.5536590Z copying path '/nix/store/x28jw1f17gbg292468c1pr3bdnmb3449-libwebp-1.6.0' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:18.5846439Z copying path '/nix/store/3h6hx53x5rz70vh4mwlx763vdww466zv-unixodbc-2.3.14' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:18.6060994Z copying path '/nix/store/jnrk28d552wrc6cw8ck3q6x8zgvbb0zq-publicsuffix-list-0-unstable-2026-07-25' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:18.6177964Z copying path '/nix/store/09p3ih1qxxyj91zmm3h735q0yyyrgx8b-fontconfig-2.18.2' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:18.6522374Z copying path '/nix/store/p8lws4skm5pnwszxrqrjqc5i51fjr020-libsm-1.2.6' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:18.6620807Z copying path '/nix/store/vphj765l5kv36rv8qq6fnm8rk77g0fwx-p11-kit-0.26.2' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:18.6902483Z copying path '/nix/store/ws8fpx9ksf4xqn22jnz7mj3ibwccca3a-dns-root-data-2025-04-14' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:18.6920514Z copying path '/nix/store/z493j9b2d1v9fcnabanv10fx7kd8jlzj-libselinux-3.10' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:18.6958953Z copying path '/nix/store/62qx8cgv8h24cq4vgh5ipyflwg1naykl-libx11-1.8.13' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:18.7130584Z copying path '/nix/store/cjgm8gv32xdrjgzbgc0zk2fypiys9ylf-gcc-15.3.0-libgcc' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:18.7204135Z copying path '/nix/store/1s1ckrf352fzmjlivak9whawsg0mkxh7-util-linux-minimal-2.42.2-swap' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:18.7393910Z copying path '/nix/store/22lwxpkn07y6ymf3vr42dqc15dmw8ibp-util-linux-minimal-2.42.2-mount' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:18.7443112Z copying path '/nix/store/7fmcw8kn7pjj491062b4k43yfrmd95h5-libxcrypt-4.5.2' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:18.7461304Z copying path '/nix/store/zmvllxxx62iys7vpyg020rni3v29bcxi-gnu-config-2024-01-01' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:18.7579909Z copying path '/nix/store/bf6wgamqnl3c91iamlb1branrfcwwy7x-libunistring-1.4.2' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:18.7791736Z copying path '/nix/store/8wrmi2fp3wvn2w6ikdfgzspyr8nwn934-mailcap-2.1.54' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:18.7799996Z copying path '/nix/store/r48746qznwqxxl9qzd8f08ny8mg1dg2y-gcc-15.3.0-lib' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:18.7826844Z copying path '/nix/store/msrf7lbwkxmzw9igyxjbhz9qc8097yvc-glib-2.88.3' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:18.7882490Z copying path '/nix/store/v2hsfkf03b3l79rhcxw4nq7w79kr3qkw-tzdata-2026b' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:18.7910208Z copying path '/nix/store/akwszv4qid3cg2xqsiy6m7qdndvh552i-fontconfig-2.18.2-lib' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:18.7999330Z copying path '/nix/store/m3rljmxkdbvg8sm43mnchsnk1j7l57yw-alsa-topology-conf-1.2.5.1' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:18.8076477Z copying path '/nix/store/xknj6c33cc197s60ry0i69vdkmaizrs1-update-autotools-gnu-config-scripts-hook' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:18.8217787Z copying path '/nix/store/1yhry7y89sm34rv8sjb5yycrnavnas3w-util-linux-minimal-2.42.2-login' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:18.8323678Z copying path '/nix/store/vzkvfpdxfn2wwn11m3vf4g30jvmlmih5-libdatrie-2019-12-20-lib' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:18.8495755Z copying path '/nix/store/njhz1f5xr4hgniy9bbb9g5k2llgsmycv-acl-2.4.0' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:18.8677691Z copying path '/nix/store/1ww50zcsv4wbp5yz3ixcix4kjaicig6c-libpsl-0.21.5' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:18.8691888Z copying path '/nix/store/l0c9s0y8mspasl4dg91d9kqhsigqnl75-attr-2.6.0' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:18.8740016Z copying path '/nix/store/pxf2z5y0qy63qlq39xwjv8i60lpcd0zy-nghttp2-1.69.0-lib' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:18.9120730Z copying path '/nix/store/6qa00czc79b3nb6ld0mdyacfp2p1k3jx-libidn2-2.3.8' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:18.9143689Z copying path '/nix/store/m5wp1l4kqbacif4wcmif00c6kqzpqij5-systemd-minimal-libs-261.1' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:18.9149223Z copying path '/nix/store/acrnf5y878q0s118klx9a47di53nrngd-libxfixes-6.0.2' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:18.9150773Z copying path '/nix/store/whs9idvicsc1zi5553xsb06795nzgi4g-libxext-1.3.7' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:18.9152343Z copying path '/nix/store/crlxplavrrasrjgcmf1wlaw2z8d41a77-libxcomposite-0.4.7' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:18.9161959Z copying path '/nix/store/7sqaqky2c5sj5bx8sgr6igc4px24ilb6-libxkbcommon-1.13.2' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:18.9173965Z copying path '/nix/store/13kjy1d82s872mswb87y7bfzsmsmy971-libxrender-0.9.12' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:18.9388766Z copying path '/nix/store/95lrl8y3r4all5sv7x39y8ndi6blwy47-libthai-0.1.30' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:18.9790559Z copying path '/nix/store/y1c9y15m30pp827zkmlaimd310yvx0m6-libxdamage-1.1.7' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:18.9843345Z copying path '/nix/store/57iz36553175g3178pvxjij8z5rcsd4n-glibc-2.42-61' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:18.9848222Z copying path '/nix/store/5h2bqww71qn8qi9nhhlzb9qsmb0m07fq-libxcursor-1.2.3' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:18.9864929Z copying path '/nix/store/537pqc39r3zlcwkncgz2cqyqzcvwwrcp-libxft-2.3.9' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:18.9899669Z copying path '/nix/store/dwc1r464zf5379jr69vv9gl84h28bzc0-libglvnd-1.7.0' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:18.9902170Z copying path '/nix/store/b3c89bqlzv6y67lgm00s1238g1zjpq1x-libxi-1.8.3' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:18.9905496Z copying path '/nix/store/ahaa4jwd3bkyz6xcqkpyww548wj5x9c6-libxrandr-1.5.5' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:18.9907235Z copying path '/nix/store/rczsgxbhyn18zn1672qdiv0yf2gsym79-libxinerama-1.1.6' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:19.0456065Z copying path '/nix/store/c2wd07p71cfyx1wkxsqv32b1z0f2hknl-libxtst-1.2.5' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:19.0846697Z copying path '/nix/store/ma26hzsai3yn4p16lg9ij1q593djhh92-libepoxy-1.5.10' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:19.1107720Z copying path '/nix/store/45v0zhdyy25r487v7fra7sdlrh5f17js-gettext-1.0' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:19.1116220Z copying path '/nix/store/4ivj7cm6rr1pj1zhr30bcl1jn6815pr1-gmp-with-cxx-6.3.0' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:19.1123141Z copying path '/nix/store/hdafzn814kg90afqsm7dq130y0aq3iaz-gmp-with-cxx-6.3.0' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:19.1125071Z copying path '/nix/store/8yc5xvphm2rbgh5d2h5hds5fvznll4ji-graphite2-1.3.15' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:19.1135082Z copying path '/nix/store/nv8jd3fvfv8p1d6dxflk1snfxzwabbm7-icu4c-78.3' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:19.1143227Z copying path '/nix/store/42bfwwy0jhnn313xw2zqi44nifh5sa25-lerc-4.2.0' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:19.1144936Z copying path '/nix/store/pxahscw9vl9vac1nbjpy6bhz3vbk3cpl-zstd-1.5.7' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:19.2177157Z copying path '/nix/store/97d5ygrvqj55f4nx1x34wfdcc7qn11c0-coreutils-9.11' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:19.2183875Z copying path '/nix/store/846r2knifw60684yjrmlri56vsl4cnq7-cairo-1.18.4' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:19.2189438Z copying path '/nix/store/xicqawdz30f0carilpjz5y80j5g9xr0y-dconf-0.49.0-lib' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:19.2196513Z copying path '/nix/store/2gc9jsd4g7g48ppp6iizd3jy4p64wg9c-harfbuzz-13.2.1' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:19.2198430Z copying path '/nix/store/nh2b6z00j50wswd7js4zhgmw91wh03j6-json-glib-1.10.8' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:19.2199982Z copying path '/nix/store/6mhmzv9pwn7ndngblp7k8kf4hhhqvicj-libsoup-3.6.6' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:19.2340979Z copying path '/nix/store/xxx9p6yah6yv90053vhqcnn4k86674ji-kmod-31' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:19.2342479Z copying path '/nix/store/9i9w80lnbc49c3r429k3gwd7fp5k9rx1-kmod-31-lib' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:19.2346423Z copying path '/nix/store/dwxig4i40abpi96g84mj435xvziwa3q2-libtiff-4.7.2' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:19.2404021Z copying path '/nix/store/kpl6xdfb9i1ama4m151v4r904mc0s1mj-nettle-3.10.2' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:19.3349415Z copying path '/nix/store/vh6q3h8h88wpfm17pdl88caq9anrplan-gdk-pixbuf-2.44.7' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:19.3565218Z copying path '/nix/store/gnnp2bs29cddbmglijhnaq3pk8hlfb7s-unbound-1.25.2-lib' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:19.3873023Z copying path '/nix/store/xbbq3x3fzhxzyb7ac569mlp4vv0z733j-systemd-minimal-261.1' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:19.3875498Z copying path '/nix/store/xc5gc7rbkxnh7z9z70s3ynl8mmpzs23m-gobject-introspection-1.86.0' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:19.4433377Z copying path '/nix/store/bylld9izhrwbhpgq145vfr49cl7v0b37-pango-1.57.1' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:19.4593198Z copying path '/nix/store/vby7f6w0189hcvcribawy73fq55h18z7-gnutls-3.8.13' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:19.5205965Z copying path '/nix/store/4a5gbd2plkgaracgpq2rph426ljb24ps-librsvg-2.62.3' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:19.6566366Z copying path '/nix/store/v2dzxxlyf0z8njnr3nar1wmdiw6hssb6-attr-2.5.2' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:19.6568288Z copying path '/nix/store/gik3rh1vz2jlgnifb9dh6vc6sxwwz9jj-bash-5.3p9' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:19.6573404Z copying path '/nix/store/3lnvi6r17y9kki4r9klzvavranaz3131-bzip2-1.0.8' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:19.6575467Z copying path '/nix/store/3zsxawygch41cizjvhpacmgaq7y3vhjg-ed-1.22.5' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:19.6578354Z copying path '/nix/store/hi0fdcqdkmzwxhzlx7y6z2yf6d5lw8ix-expand-response-params' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:19.6579647Z copying path '/nix/store/d6j5cifzkwjlimawmjhywqx9l6bk43q6-expand-response-params' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:19.6586469Z copying path '/nix/store/d8927sznk6qnqln6hl9p4d42h8pq49vg-expat-2.8.0' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:19.6593446Z copying path '/nix/store/wp1cshqv98i8abs8rcx91s54igqgll0f-gawk-5.4.0' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:19.6600309Z copying path '/nix/store/chqq8mpmpyfi9kgsngya71akv5xicn03-gcc-15.2.0-lib' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:19.6608823Z copying path '/nix/store/bsh7n2nx8ndmm1mmww6v2h4851nalj13-glibc-2.42-61-bin' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:19.6612429Z copying path '/nix/store/zswf4c2na0d8ykb59rrp14748jb0w2wc-gdbm-1.26-lib' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:19.6620304Z copying path '/nix/store/r50gpjb5pcl01c7nvhrn31rnwsnhzplg-gmp-6.3.0' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:19.7054233Z copying path '/nix/store/8i2h8b6nykwi6rj3ya5x4sysljg8zmg4-pkg-config-0.29.2' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:19.7074358Z copying path '/nix/store/wn2byajlpr3w4pii81n6r0bjfrp5ca31-keyutils-1.6.3-lib' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:19.7117799Z copying path '/nix/store/9qf6m6csaabfx2adfdk5771w8fjsqccs-pcre2-10.46' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:19.7136014Z copying path '/nix/store/61a1nwx3w6rqyaisj5rn1sal1981apm7-zlib-1.3.2' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:19.7240830Z copying path '/nix/store/yxla342pd0453pz2k0yybnyy1hig8dv4-acl-2.3.2' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:19.7464958Z copying path '/nix/store/pwvgxbwfn8ps2y4fcq6scgj3pfxjxznb-libuv-1.52.1' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:19.7471297Z copying path '/nix/store/qmc2phn2pbimq55hmj0v8r02f6ld90fb-rhash-1.4.6' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:19.7540680Z copying path '/nix/store/17rqw7p3j0vvvwja05l6bq2im8qpxcl7-isl-0.20' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:19.7730666Z copying path '/nix/store/drmzcl1j9wwwgz4q87dvz2p2zfwnp4w3-mpfr-4.2.2' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:19.7877062Z copying path '/nix/store/3y3kzc5njlj7nwj1s78am0yzjnpicv9x-bzip2-1.0.8-bin' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:19.7954216Z copying path '/nix/store/2zs4bbi72plfm8j6zxf1js4f3yc4yzwy-libffi-3.5.2' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:19.8075440Z copying path '/nix/store/k5akwnrn9x2afaj2va7g4a2zpdim8l43-gnutar-1.35' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:19.8186228Z copying path '/nix/store/1m05k7xgfnw6jc21xxk5681ni3ar97wf-pkg-config-wrapper-0.29.2' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:19.8281105Z copying path '/nix/store/kgxafhycw2kybbqih759ykc2043qyi5j-gnused-4.9' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:19.8284908Z copying path '/nix/store/kyz3mm5snbb8998kbkm28jps1phk9509-file-5.47' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:19.8418498Z copying path '/nix/store/ndpbjk6jhw0da5h272dqqnyxa35a9gmx-gzip-1.14' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:19.8547543Z copying path '/nix/store/bck1xkk9m0f60352gnjb512ix0n4x9qm-libxml2-2.15.2' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:19.8679826Z copying path '/nix/store/vlq7nnw39j7rwk0pp68w1fcwzpxahm9h-gnumake-4.4.1' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:19.8772247Z copying path '/nix/store/wgvplwp0faqhqr92w0ma8bxaxk202ama-patch-2.8' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:19.8991052Z copying path '/nix/store/15h9askp4k1lx44d9871wid23j2a8ijp-glibc-2.42-61-dev' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:19.9037535Z copying path '/nix/store/0j6jil4xc4ndp0kcqzjwbfywxvifl160-libmpc-1.4.0' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:19.9058265Z copying path '/nix/store/gn94gpcp5q08x4v6g8mvw8v4r65rcjzk-gnugrep-3.12' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:19.9199386Z copying path '/nix/store/7dr4qx9ws30cdh9if3x79pbby3nxakrf-libmpg123-1.33.4' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:19.9238212Z copying path '/nix/store/ksami5im2kz3przdlh55349gsrkl0mfj-lame-3.100-lib' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:19.9432958Z copying path '/nix/store/kz9nf4vb7pg38411r2aaa634k1p4klvc-libogg-1.3.6' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:19.9515326Z copying path '/nix/store/s1hjbyg12jj4q3m5drn4i6prgwhr437w-libopus-1.6.1' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:19.9761337Z copying path '/nix/store/6h5x436gsbc92ahp2bmxfl8h7h318p17-binutils-2.46-lib' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:20.0168866Z copying path '/nix/store/y18pnbvfarnilsmgayswvi1khaw9wbsc-openssl-3.6.2' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:20.0173044Z copying path '/nix/store/zshxcsjv43migvylmfn1dh4wsl5wi09v-nghttp2-1.69.0-lib' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:20.0192046Z copying path '/nix/store/waz72vmxc8zk90qqvgg9ikhzdk1kzjy4-xz-5.8.3' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:20.0305896Z copying path '/nix/store/1scb6xccxlqy8rj9hfgf7ppqv99pfwq9-util-linux-minimal-2.42-lib' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:20.0417917Z copying path '/nix/store/q7xxk3bzyhp4b4f3685z0mp8grg3r5l8-libvorbis-1.3.7' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:20.0578495Z copying path '/nix/store/v9sym7lkcp6nj2llsqhajvp2zmimv5v1-mpdecimal-4.0.1' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:20.0711519Z copying path '/nix/store/wl2nw5l4x4dg6kclbgpq7v9212i1s6cy-ncurses-6.6' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:20.0864131Z copying path '/nix/store/yg1gv8db04ldrnmdhykq8zjqqg6pg5kd-sqlite-3.51.2' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:20.1530578Z copying path '/nix/store/csra6zhdjw7rjzv98fycz7qjalyv55k2-xz-5.8.3-bin' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:20.1576319Z copying path '/nix/store/pdr1dyni8b3y5cakzmjkrwyn8ygizj0z-dbus-1.16.2-lib' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:20.1948443Z copying path '/nix/store/jg984hgvy0m3h9xycqlddhllyxlwfm8y-compiler-rt-libc-21.1.8' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:20.1952275Z copying path '/nix/store/qxaq7jz61a6zkr2mq49i0zvqip2m2jj8-gcc-15.2.0' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:20.1954025Z copying path '/nix/store/q467fsvyhfjbv2vym2yziarzvrh45k7k-flac-1.5.0' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:20.1962944Z copying path '/nix/store/cspsij182bd9hsx64mz1p7p143inkrjn-gmp-with-cxx-6.3.0' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:20.1977098Z copying path '/nix/store/rsmk7psm9kph06fdjay1g97syi8g6g7c-gtest-1.17.0' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:20.1992509Z copying path '/nix/store/ivsbzvzs5i528inggkjv07v4w5dbsx64-libtorch-2.9.0' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:20.1995630Z copying path '/nix/store/ldcshpa3cspn8jfr4k1m05j4d4vz36wb-llvm-21.1.8-lib' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:20.2030396Z copying path '/nix/store/7a235m7crqbb4h49sak20fqxpw3n7hr0-ninja-1.13.2' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:20.2133054Z copying path '/nix/store/s2946bl9ciwzhafd66jhansrmxq9xhqm-binutils-2.46' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:20.2169015Z copying path '/nix/store/ilblcn1dkvzghcr2yk3av6jxn5rk1iqw-patchelf-0.15.2' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:20.2706583Z copying path '/nix/store/gd74vdpqzq0qmmikvmrf3r3kghhhnf50-zstd-1.5.7' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:20.2826224Z copying path '/nix/store/cjraidmmw39g7xsxsj51sszbx8wplig5-at-spi2-core-2.60.6' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:20.3242035Z copying path '/nix/store/wz4xwadg5vjnl88yban6whz8hczq3mxv-avahi-0.8' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:20.3253262Z copying path '/nix/store/siq0k6mgd80a6djw2h4fazy32al0vn5n-gtest-1.17.0-dev' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:20.3366482Z copying path '/nix/store/483wixjigga3ikcn57169zpwr30l6qvf-libsndfile-1.2.2' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:20.3552531Z copying path '/nix/store/9ypz3flqsrl5xl495mm8h645gadjsxi1-coreutils-9.11' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:20.4274388Z copying path '/nix/store/ylf24iiwy5xphy8wfz6jgahncsfgsy2r-readline-8.3p3' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:20.4411061Z copying path '/nix/store/zzrv2kz5gv9mch8kwqcbifsz5lmv5rnv-kmod-31' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:20.4890186Z copying path '/nix/store/gqsj8r6v4jq58mjw5gwz7nj1mw7iyim0-cups-2.4.19-lib' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:20.6874890Z copying path '/nix/store/41b8kcrrjd20gbs1v7bar29arr9wn151-alsa-ucm-conf-1.2.15.3' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:20.6876558Z copying path '/nix/store/ww555mznia5v7sz2w85lblg4amvhkhv1-diffutils-3.12' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:20.7041694Z copying path '/nix/store/c1cjgg6p8m8fssivzrc2p13mwwml3p3v-findutils-4.10.0' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:20.7256454Z copying path '/nix/store/5cbjxz04crbjnawysjx5q717gvbsx7k8-krb5-1.22.1-lib' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:20.7271857Z copying path '/nix/store/f1584f659vjzigscdcm59c4sl7j2d094-libarchive-3.8.7-lib' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:20.7275056Z copying path '/nix/store/w3br983xcky4vdsz4df4splnbqhvnwp6-libssh2-1.11.1' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:20.7289711Z copying path '/nix/store/60m4rxhg2fldqaak400c0lry96ijrzqn-python3-3.13.13' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:20.8978438Z copying path '/nix/store/z27nyp7sk8zhfxp6anmnc2im1v09i6a1-curl-8.20.0' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:20.9123112Z copying path '/nix/store/w0p3046zxcqlybnhpz71xzivnxp30wy0-tinysparql-3.11.1' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:20.9953153Z copying path '/nix/store/3zqm4hxrxarx85cxd03gj5yvxkzialqj-alsa-lib-1.2.15.3' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:21.0562392Z copying path '/nix/store/r9941n32g4wyvggz2703dlplbdq8a6rd-cmake-4.1.2' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:21.2065248Z copying path '/nix/store/k3ccipb70j6dxdbx2xn9f5nshkkmb7fb-libsndfile-1.2.2-bin' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:21.2885464Z copying path '/nix/store/yahg6m73g13b0r0hz32k0p9f58kxxjhs-libsndfile-1.2.2-dev' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:21.3183460Z disabling binary cache 'http://127.0.0.1:37515' for 60 seconds
+2026-09-17T22:12:21.3192136Z error: unable to download 'http://127.0.0.1:37515/nar/0lp9wywwfaffahbmwl2id3zl3gwardzf4bm1jzalh1975dj58kxh.nar.zstd': HTTP error 418
+2026-09-17T22:12:21.3193367Z 
+2026-09-17T22:12:21.3193809Z        response body:
+2026-09-17T22:12:21.3194284Z 
+2026-09-17T22:12:21.3195422Z        GitHub API error: Twirp error: twirp error: TwirpErrorResponse { code: ResourceExhausted, msg: "rate limit exceeded", meta: {} }
+2026-09-17T22:12:21.3243392Z copying path '/nix/store/mijaaxa13nv1h754xdic87f31z3mnbc6-gtk+3-3.24.52' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:21.3245061Z error: substituter 'http://127.0.0.1:37515' is disabled
+2026-09-17T22:12:21.3966444Z copying path '/nix/store/mijaaxa13nv1h754xdic87f31z3mnbc6-gtk+3-3.24.52' from 'https://cache.nixos.org'...
+2026-09-17T22:12:21.3981046Z copying path '/nix/store/yahg6m73g13b0r0hz32k0p9f58kxxjhs-libsndfile-1.2.2-dev' from 'https://cache.nixos.org'...
+2026-09-17T22:12:21.4233303Z copying path '/nix/store/0balwgpf53vhjycd97mq1bkmz45nc1ks-compiler-rt-libc-21.1.8-dev' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:21.4240151Z error: substituter 'http://127.0.0.1:37515' is disabled
+2026-09-17T22:12:21.4976781Z copying path '/nix/store/0balwgpf53vhjycd97mq1bkmz45nc1ks-compiler-rt-libc-21.1.8-dev' from 'https://cache.nixos.org'...
+2026-09-17T22:12:21.7961170Z copying path '/nix/store/drxcv33qq9ava7gdpik5xs9q2wfnhdb0-binutils-wrapper-2.46' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:21.7962876Z copying path '/nix/store/mbyy19mdwnfvfwmdi0gqgggx0njvpl1w-binutils-wrapper-2.46' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:21.7964045Z error: substituter 'http://127.0.0.1:37515' is disabled
+2026-09-17T22:12:21.7965135Z error: substituter 'http://127.0.0.1:37515' is disabled
+2026-09-17T22:12:21.8413480Z copying path '/nix/store/mbyy19mdwnfvfwmdi0gqgggx0njvpl1w-binutils-wrapper-2.46' from 'https://cache.nixos.org'...
+2026-09-17T22:12:21.8721722Z copying path '/nix/store/drxcv33qq9ava7gdpik5xs9q2wfnhdb0-binutils-wrapper-2.46' from 'https://cache.nixos.org'...
+2026-09-17T22:12:23.8032036Z copying path '/nix/store/r499x5jim532jcw2zlhmpcc0wzk6s4zi-racket-9.3' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:23.8036695Z error: substituter 'http://127.0.0.1:37515' is disabled
+2026-09-17T22:12:23.8634644Z copying path '/nix/store/r499x5jim532jcw2zlhmpcc0wzk6s4zi-racket-9.3' from 'https://cache.nixos.org'...
+2026-09-17T22:12:25.1033842Z copying path '/nix/store/c72lk5p6hfy5b3skbb1dzflhnkb8vlz0-clang-21.1.8-python' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:25.1041815Z error: substituter 'http://127.0.0.1:37515' is disabled
+2026-09-17T22:12:25.1647294Z copying path '/nix/store/c72lk5p6hfy5b3skbb1dzflhnkb8vlz0-clang-21.1.8-python' from 'https://cache.nixos.org'...
+2026-09-17T22:12:26.2201735Z copying path '/nix/store/788mx070y81zjlg5ipcl0cra3afviw9k-gcc-wrapper-15.2.0' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:26.2209743Z error: substituter 'http://127.0.0.1:37515' is disabled
+2026-09-17T22:12:26.2816474Z copying path '/nix/store/788mx070y81zjlg5ipcl0cra3afviw9k-gcc-wrapper-15.2.0' from 'https://cache.nixos.org'...
+2026-09-17T22:12:26.3297283Z copying path '/nix/store/jci7gw90lh2vdjaxkb6pzf9xp4v08wzs-stdenv-linux' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:26.3302152Z error: substituter 'http://127.0.0.1:37515' is disabled
+2026-09-17T22:12:26.3809705Z copying path '/nix/store/jci7gw90lh2vdjaxkb6pzf9xp4v08wzs-stdenv-linux' from 'https://cache.nixos.org'...
+2026-09-17T22:12:28.4366287Z copying path '/nix/store/jdgw7h0g0l8clmcasaspxnx6v62jz1il-clang-21.1.8-lib' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:28.4368839Z error: substituter 'http://127.0.0.1:37515' is disabled
+2026-09-17T22:12:28.4806357Z copying path '/nix/store/jdgw7h0g0l8clmcasaspxnx6v62jz1il-clang-21.1.8-lib' from 'https://cache.nixos.org'...
+2026-09-17T22:12:29.9849479Z copying path '/nix/store/gvz22i88167pqs9n5qklbxdwgfxbxkcr-libtorch-2.9.0-dev' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:29.9851121Z copying path '/nix/store/bbd4y4k5n2chrzbjapr2qjcsvsi2q2lq-torchrkt-cpp-0.1.0' from 'https://lab.tailb6061b.ts.net'...
+2026-09-17T22:12:29.9858863Z error: substituter 'http://127.0.0.1:37515' is disabled
+2026-09-17T22:12:30.0320877Z copying path '/nix/store/gvz22i88167pqs9n5qklbxdwgfxbxkcr-libtorch-2.9.0-dev' from 'https://cache.nixos.org'...
+2026-09-17T22:12:33.5168810Z copying path '/nix/store/wcwr4iq7c8f4ygn8bd1q0k3i51lmhz35-clang-21.1.8' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:33.5170881Z error: substituter 'http://127.0.0.1:37515' is disabled
+2026-09-17T22:12:33.5468466Z copying path '/nix/store/wcwr4iq7c8f4ygn8bd1q0k3i51lmhz35-clang-21.1.8' from 'https://cache.nixos.org'...
+2026-09-17T22:12:33.9019158Z copying path '/nix/store/874j5xydsj6nr6i1zdrjvhln5gmxvvrr-clang-wrapper-21.1.8' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:33.9021093Z error: substituter 'http://127.0.0.1:37515' is disabled
+2026-09-17T22:12:33.9311711Z copying path '/nix/store/874j5xydsj6nr6i1zdrjvhln5gmxvvrr-clang-wrapper-21.1.8' from 'https://cache.nixos.org'...
+2026-09-17T22:12:33.9419477Z copying path '/nix/store/kvpilgp8anmfppznpvczb34y3wfdbhaj-clang-tools-21.1.8' from 'http://127.0.0.1:37515'...
+2026-09-17T22:12:33.9421947Z error: substituter 'http://127.0.0.1:37515' is disabled
+2026-09-17T22:12:33.9693395Z copying path '/nix/store/kvpilgp8anmfppznpvczb34y3wfdbhaj-clang-tools-21.1.8' from 'https://cache.nixos.org'...
+2026-09-17T22:12:34.2087174Z building '/nix/store/0lswfzjrmd6wqrbv4zca7zk9jk0hdw4i-nix-shell-env.drv'...
+2026-09-17T22:12:34.9125617Z disabling binary cache 'http://127.0.0.1:37515' for 60 seconds
+2026-09-17T22:12:34.9127789Z error: unable to download 'http://127.0.0.1:37515/73fr7zjwc2s46y7vrq8563237l0ivqcb.narinfo': HTTP error 418
+2026-09-17T22:12:34.9128283Z 
+2026-09-17T22:12:34.9128390Z        response body:
+2026-09-17T22:12:34.9128606Z 
+2026-09-17T22:12:34.9128967Z        GitHub API error: GitHub Actions Cache throttled Magic Nix Cache. Not trying to use it again on this run.
+2026-09-17T22:12:34.9129792Z error: unable to download 'http://127.0.0.1:37515/cgjr3kj3hs7ngznyws5qfg16c8scpys0.narinfo': HTTP error 418
+2026-09-17T22:12:34.9130289Z 
+2026-09-17T22:12:34.9130388Z        response body:
+2026-09-17T22:12:34.9130541Z 
+2026-09-17T22:12:34.9130890Z        GitHub API error: GitHub Actions Cache throttled Magic Nix Cache. Not trying to use it again on this run.
+2026-09-17T22:12:35.1110752Z these 2 paths will be fetched (1.7 MiB download, 7.2 MiB unpacked):
+2026-09-17T22:12:35.1111823Z   /nix/store/cgjr3kj3hs7ngznyws5qfg16c8scpys0-bash-interactive-5.3p9
+2026-09-17T22:12:35.1112807Z   /nix/store/73fr7zjwc2s46y7vrq8563237l0ivqcb-bash-interactive-5.3p9-man
+2026-09-17T22:12:35.1125516Z copying path '/nix/store/73fr7zjwc2s46y7vrq8563237l0ivqcb-bash-interactive-5.3p9-man' from 'https://cache.nixos.org'...
+2026-09-17T22:12:35.1130351Z copying path '/nix/store/cgjr3kj3hs7ngznyws5qfg16c8scpys0-bash-interactive-5.3p9' from 'https://cache.nixos.org'...
+2026-09-17T22:12:35.2477745Z bytecode cache: fresh for 3925a884c76e
+2026-09-17T22:12:35.2553532Z Staging libtorchrkt (/nix/store/bbd4y4k5n2chrzbjapr2qjcsvsi2q2lq-torchrkt-cpp-0.1.0)...
+2026-09-17T22:12:35.2678423Z Installing Racket package (link mode, Racket 9-3)...
+2026-09-17T22:12:37.6351280Z raco setup: version: 9.3
+2026-09-17T22:12:37.6353202Z raco setup: platform: x86_64-linux [cs]
+2026-09-17T22:12:37.6354778Z raco setup: target machine: ta6le
+2026-09-17T22:12:37.6355669Z raco setup: installation name: 9.3
+2026-09-17T22:12:37.6356807Z raco setup: variants: cs
+2026-09-17T22:12:37.6358079Z raco setup: main collects: /nix/store/r499x5jim532jcw2zlhmpcc0wzk6s4zi-racket-9.3/share/racket/collects/
+2026-09-17T22:12:37.6359651Z raco setup: collects paths: 
+2026-09-17T22:12:37.6361075Z raco setup:   /home/runner/work/rktorch/rktorch/.racket-user/.local/share/racket/9.3/collects
+2026-09-17T22:12:37.6363201Z raco setup:   /nix/store/r499x5jim532jcw2zlhmpcc0wzk6s4zi-racket-9.3/share/racket/collects/
+2026-09-17T22:12:37.6365598Z raco setup: main pkgs: /nix/store/r499x5jim532jcw2zlhmpcc0wzk6s4zi-racket-9.3/share/racket/pkgs
+2026-09-17T22:12:37.6366716Z raco setup: pkgs paths: 
+2026-09-17T22:12:37.6367659Z raco setup:   /nix/store/r499x5jim532jcw2zlhmpcc0wzk6s4zi-racket-9.3/share/racket/pkgs
+2026-09-17T22:12:37.6369026Z raco setup:   /home/runner/work/rktorch/rktorch/.racket-user/.local/share/racket/9.3/pkgs
+2026-09-17T22:12:37.6370081Z raco setup: links files: 
+2026-09-17T22:12:37.6371113Z raco setup:   /nix/store/r499x5jim532jcw2zlhmpcc0wzk6s4zi-racket-9.3/share/racket/links.rktd
+2026-09-17T22:12:37.6372537Z raco setup:   /home/runner/work/rktorch/rktorch/.racket-user/.local/share/racket/9.3/links.rktd
+2026-09-17T22:12:37.6373672Z raco setup: compiled-file roots: 
+2026-09-17T22:12:37.6374352Z raco setup:   same
+2026-09-17T22:12:37.6375568Z raco setup:   /nix/store/r499x5jim532jcw2zlhmpcc0wzk6s4zi-racket-9.3/lib/racket/compiled
+2026-09-17T22:12:37.6376862Z raco setup: --- updating info-domain tables ---                    [22:12:37]
+2026-09-17T22:12:37.6417586Z raco setup: updating: /home/runner/work/rktorch/rktorch/.racket-user/.local/share/racket/9.3/share/info-cache.rktd
+2026-09-17T22:12:37.6418810Z raco setup: --- pre-installing collections ---                     [22:12:37]
+2026-09-17T22:12:37.8823344Z raco setup: pre-installing: <pkgs>/torch
+2026-09-17T22:12:37.8828859Z raco setup: --- installing foreign libraries ---                   [22:12:37]
+2026-09-17T22:12:37.8830377Z raco setup: --- installing shared files ---                        [22:12:37]
+2026-09-17T22:12:37.8893991Z raco setup: --- compiling collections ---                          [22:12:37]
+2026-09-17T22:12:37.8916408Z raco setup: --- parallel build using 4 jobs ---                    [22:12:37]
+2026-09-17T22:12:37.9058010Z raco setup: 3 making: <pkgs>/torch
+2026-09-17T22:12:45.8000536Z raco setup: 3 making: <pkgs>/torch/private
+2026-09-17T22:12:45.9935669Z raco setup: 3 making: <pkgs>/torch/tests
+2026-09-17T22:12:52.5677904Z raco setup: --- creating launchers ---                             [22:12:52]
+2026-09-17T22:12:52.5751369Z raco setup: --- installing man pages ---                           [22:12:52]
+2026-09-17T22:12:52.5752433Z raco setup: --- installing collections ---                         [22:12:52]
+2026-09-17T22:12:52.5753345Z raco setup: --- post-installing collections ---                    [22:12:52]
+2026-09-17T22:12:52.6180967Z Installing Racket linters (Resyntax + racket-review)...
+2026-09-17T22:12:53.1125763Z 00: Resolving "resyntax" via https://download.racket-lang.org/releases/9.3/catalog/
+2026-09-17T22:12:53.2056832Z 00: Resolving "resyntax" via https://download.rhombus-lang.org/releases/current/catalog/
+2026-09-17T22:12:53.4819307Z 00: Resolving "resyntax" via https://pkgs.racket-lang.org
+2026-09-17T22:12:53.7910687Z Resolving "review" via https://download.racket-lang.org/releases/9.3/catalog/
+2026-09-17T22:12:53.8722682Z Resolving "review" via https://download.rhombus-lang.org/releases/current/catalog/
+2026-09-17T22:12:53.9962826Z Resolving "review" via https://pkgs.racket-lang.org
+2026-09-17T22:12:54.2468237Z Downloading repository https://github.com/jackfirth/resyntax.git commit 40f3497321f8590eb6a0b7c7984a9116323b7ebf
+2026-09-17T22:12:54.6827290Z Downloading repository https://github.com/Bogdanp/racket-review.git commit ecb1968f12b485b5387f66bbd9220f191d136d84
+2026-09-17T22:12:55.2484953Z 00: Resolving "br-parser-tools-lib" via https://download.racket-lang.org/releases/9.3/catalog/
+2026-09-17T22:12:55.2505774Z 01: Resolving "brag-lib" via https://download.racket-lang.org/releases/9.3/catalog/
+2026-09-17T22:12:55.2519031Z 02: Resolving "fancy-app" via https://download.racket-lang.org/releases/9.3/catalog/
+2026-09-17T22:12:55.2537914Z 03: Resolving "fmt" via https://download.racket-lang.org/releases/9.3/catalog/
+2026-09-17T22:12:55.2559602Z 04: Resolving "guard" via https://download.racket-lang.org/releases/9.3/catalog/
+2026-09-17T22:12:55.3033969Z 03: Resolving "fmt" via https://download.rhombus-lang.org/releases/current/catalog/
+2026-09-17T22:12:55.3263312Z 00: Resolving "br-parser-tools-lib" via https://download.rhombus-lang.org/releases/current/catalog/
+2026-09-17T22:12:55.3491776Z 04: Resolving "guard" via https://download.rhombus-lang.org/releases/current/catalog/
+2026-09-17T22:12:55.4027194Z 02: Resolving "fancy-app" via https://download.rhombus-lang.org/releases/current/catalog/
+2026-09-17T22:12:55.4048526Z 01: Resolving "brag-lib" via https://download.rhombus-lang.org/releases/current/catalog/
+2026-09-17T22:12:55.4790781Z 03: Resolving "fmt" via https://pkgs.racket-lang.org
+2026-09-17T22:12:55.4887168Z 00: Resolving "br-parser-tools-lib" via https://pkgs.racket-lang.org
+2026-09-17T22:12:55.4947357Z 04: Resolving "guard" via https://pkgs.racket-lang.org
+2026-09-17T22:12:55.5196195Z 01: Resolving "brag-lib" via https://pkgs.racket-lang.org
+2026-09-17T22:12:55.5274413Z 02: Resolving "fancy-app" via https://pkgs.racket-lang.org
+2026-09-17T22:12:55.7667227Z Resolving "rebellion" via https://download.racket-lang.org/releases/9.3/catalog/
+2026-09-17T22:12:55.8544594Z Resolving "rebellion" via https://download.rhombus-lang.org/releases/current/catalog/
+2026-09-17T22:12:55.9838281Z Resolving "rebellion" via https://pkgs.racket-lang.org
+2026-09-17T22:12:56.1439404Z Downloading repository https://gitlab.com/mbutterick/br-parser-tools.git?path=br-parser-tools-lib commit 95b7c69cf9d660a51abf4742378b9adb7100d25a
+2026-09-17T22:12:56.6868253Z Downloading repository https://gitlab.com/mbutterick/brag.git?path=brag-lib commit 30cbf95e6a717e71fb8bda6b15a7253aed36115a
+2026-09-17T22:12:57.1188630Z Downloading repository github://github.com/samth/fancy-app/master commit f451852164ee67e3e122f25b4bce45001a557045
+2026-09-17T22:12:57.3101108Z Downloading repository https://github.com/sorawee/fmt.git commit 4e1ed68e596e656960b44a8244bb33eb4e65ec64
+2026-09-17T22:12:57.8456883Z Downloading repository https://github.com/jackfirth/guard.git commit c86ee57d3fc13eed689102b733702ed1162da681
+2026-09-17T22:12:58.0114705Z Downloading repository https://github.com/jackfirth/rebellion.git commit 8f3fc46740918205c0a293ad58dd9a8094ef3f51
+2026-09-17T22:12:58.6763125Z Resolving "pretty-expressive" via https://download.racket-lang.org/releases/9.3/catalog/
+2026-09-17T22:12:58.7865996Z Resolving "pretty-expressive" via https://download.rhombus-lang.org/releases/current/catalog/
+2026-09-17T22:12:58.8885909Z Downloading https://download.rhombus-lang.org/releases/current/pkgs/pretty-expressive.zip
+2026-09-17T22:12:59.0144253Z Resolving "pretty-expressive-lib" via https://download.racket-lang.org/releases/9.3/catalog/
+2026-09-17T22:12:59.0834062Z Resolving "pretty-expressive-lib" via https://download.rhombus-lang.org/releases/current/catalog/
+2026-09-17T22:12:59.1792744Z Downloading https://download.rhombus-lang.org/releases/current/pkgs/pretty-expressive-lib.zip
+2026-09-17T22:12:59.9855310Z The following uninstalled packages were listed as dependencies
+2026-09-17T22:12:59.9856097Z and they were automatically installed:
+2026-09-17T22:12:59.9856648Z  dependencies of resyntax:
+2026-09-17T22:12:59.9857106Z    br-parser-tools-lib
+2026-09-17T22:12:59.9857494Z    brag-lib
+2026-09-17T22:12:59.9857838Z    fancy-app
+2026-09-17T22:12:59.9858165Z    fmt
+2026-09-17T22:12:59.9858467Z    guard
+2026-09-17T22:12:59.9858778Z    rebellion
+2026-09-17T22:12:59.9859120Z  dependencies of fmt:
+2026-09-17T22:12:59.9859520Z    pretty-expressive
+2026-09-17T22:12:59.9860280Z  dependencies of pretty-expressive:
+2026-09-17T22:12:59.9860774Z    pretty-expressive-lib
+2026-09-17T22:13:00.5298966Z raco setup: version: 9.3
+2026-09-17T22:13:00.5300367Z raco setup: platform: x86_64-linux [cs]
+2026-09-17T22:13:00.5301381Z raco setup: target machine: ta6le
+2026-09-17T22:13:00.5302125Z raco setup: installation name: 9.3
+2026-09-17T22:13:00.5302648Z raco setup: variants: cs
+2026-09-17T22:13:00.5303839Z raco setup: main collects: /nix/store/r499x5jim532jcw2zlhmpcc0wzk6s4zi-racket-9.3/share/racket/collects/
+2026-09-17T22:13:00.5305329Z raco setup: collects paths: 
+2026-09-17T22:13:00.5306372Z raco setup:   /home/runner/work/rktorch/rktorch/.racket-user/.local/share/racket/9.3/collects
+2026-09-17T22:13:00.5307352Z raco setup:   /nix/store/r499x5jim532jcw2zlhmpcc0wzk6s4zi-racket-9.3/share/racket/collects/
+2026-09-17T22:13:00.5308342Z raco setup: main pkgs: /nix/store/r499x5jim532jcw2zlhmpcc0wzk6s4zi-racket-9.3/share/racket/pkgs
+2026-09-17T22:13:00.5309060Z raco setup: pkgs paths: 
+2026-09-17T22:13:00.5309666Z raco setup:   /nix/store/r499x5jim532jcw2zlhmpcc0wzk6s4zi-racket-9.3/share/racket/pkgs
+2026-09-17T22:13:00.5310575Z raco setup:   /home/runner/work/rktorch/rktorch/.racket-user/.local/share/racket/9.3/pkgs
+2026-09-17T22:13:00.5311241Z raco setup: links files: 
+2026-09-17T22:13:00.5311862Z raco setup:   /nix/store/r499x5jim532jcw2zlhmpcc0wzk6s4zi-racket-9.3/share/racket/links.rktd
+2026-09-17T22:13:00.5312820Z raco setup:   /home/runner/work/rktorch/rktorch/.racket-user/.local/share/racket/9.3/links.rktd
+2026-09-17T22:13:00.5313530Z raco setup: compiled-file roots: 
+2026-09-17T22:13:00.5313917Z raco setup:   same
+2026-09-17T22:13:00.5314632Z raco setup:   /nix/store/r499x5jim532jcw2zlhmpcc0wzk6s4zi-racket-9.3/lib/racket/compiled
+2026-09-17T22:13:00.5315463Z raco setup: --- updating info-domain tables ---                    [22:13:00]
+2026-09-17T22:13:00.5370296Z raco setup: updating: /home/runner/work/rktorch/rktorch/.racket-user/.local/share/racket/9.3/share/info-cache.rktd
+2026-09-17T22:13:00.5374478Z raco setup: --- pre-installing collections ---                     [22:13:00]
+2026-09-17T22:13:00.5375864Z raco setup: --- installing foreign libraries ---                   [22:13:00]
+2026-09-17T22:13:00.5377365Z raco setup: --- installing shared files ---                        [22:13:00]
+2026-09-17T22:13:00.5454448Z raco setup: --- compiling collections ---                          [22:13:00]
+2026-09-17T22:13:00.5522590Z raco setup: --- parallel build using 4 jobs ---                    [22:13:00]
+2026-09-17T22:13:00.5655741Z raco setup: 3 making: <pkgs>/br-parser-tools-lib/br-parser-tools
+2026-09-17T22:13:00.5679488Z raco setup: 2 making: <pkgs>/brag-lib/brag
+2026-09-17T22:13:00.5687801Z raco setup: 1 making: <pkgs>/fancy-app
+2026-09-17T22:13:00.5698099Z raco setup: 0 making: <pkgs>/fmt
+2026-09-17T22:13:02.3831717Z raco setup: 1 making: <pkgs>/guard
+2026-09-17T22:13:03.8566933Z raco setup: 1 making: <pkgs>/guard/private
+2026-09-17T22:13:03.8576389Z raco setup: 1 making: <pkgs>/pretty-expressive (pretty-expressive)
+2026-09-17T22:13:05.5323807Z raco setup: 1 making: <pkgs>/pretty-expressive/tests
+2026-09-17T22:13:06.7854268Z raco setup: 1 making: <pkgs>/pretty-expressive-lib (pretty-expressive)
+2026-09-17T22:13:06.8009560Z raco setup: 1 making: <pkgs>/rebellion
+2026-09-17T22:13:06.9236019Z raco setup: 3 making: <pkgs>/br-parser-tools-lib/br-parser-tools/examples
+2026-09-17T22:13:07.7575446Z raco setup: 2 making: <pkgs>/brag-lib/brag/codegen
+2026-09-17T22:13:07.9126078Z raco setup: 3 making: <pkgs>/br-parser-tools-lib/br-parser-tools/private-lex
+2026-09-17T22:13:07.9211945Z raco setup: 3 making: <pkgs>/br-parser-tools-lib/br-parser-tools/private-yacc
+2026-09-17T22:13:07.9279621Z raco setup: 3 making: <pkgs>/resyntax
+2026-09-17T22:13:08.1525915Z raco setup: 0 making: <pkgs>/fmt/private
+2026-09-17T22:13:08.1557618Z raco setup: 0 making: <pkgs>/fmt/scribblings
+2026-09-17T22:13:08.1573960Z raco setup: 0 making: <pkgs>/fmt/tests
+2026-09-17T22:13:08.4380022Z raco setup: 0 making: <pkgs>/fmt/tests/config-tests
+2026-09-17T22:13:08.6049374Z raco setup: 0 making: <pkgs>/review
+2026-09-17T22:13:09.2115731Z raco setup: 2 making: <pkgs>/brag-lib/brag/private
+2026-09-17T22:13:09.7895129Z raco setup: 2 making: <pkgs>/brag-lib/brag/rules
+2026-09-17T22:13:21.0940626Z raco setup: 1 making: <pkgs>/rebellion/base
+2026-09-17T22:13:26.6526858Z raco setup: 1 making: <pkgs>/rebellion/collection
+2026-09-17T22:13:43.1377238Z raco setup: 1 making: <pkgs>/rebellion/media/text
+2026-09-17T22:13:43.8228118Z raco setup: 1 making: <pkgs>/rebellion/private
+2026-09-17T22:13:43.8424219Z raco setup: 1 making: <pkgs>/rebellion/streaming
+2026-09-17T22:13:43.8450059Z raco setup: 1 making: <pkgs>/rebellion/streaming/reducer/private
+2026-09-17T22:13:47.1773503Z raco setup: 1 making: <pkgs>/rebellion/type
+2026-09-17T22:13:47.8812935Z raco setup: 1 making: <pkgs>/rebellion/type/object/private
+2026-09-17T22:13:47.8821347Z raco setup: 1 making: <pkgs>/rebellion/type/private
+2026-09-17T22:13:47.8828925Z raco setup: 1 making: <pkgs>/rebellion/type/record
+2026-09-17T22:13:48.3581481Z raco setup: 1 making: <pkgs>/rebellion/type/record/private
+2026-09-17T22:13:48.3606360Z raco setup: 1 making: <pkgs>/rebellion/type/singleton
+2026-09-17T22:13:48.6866049Z raco setup: 1 making: <pkgs>/rebellion/type/tuple/private
+2026-09-17T22:13:48.6879129Z raco setup: 1 making: <pkgs>/rebellion/type/wrapper
+2026-09-17T22:14:21.8286862Z raco setup: 3 making: <pkgs>/resyntax/default-recommendations/let-replacement
+2026-09-17T22:14:26.4927789Z raco setup: --- creating launchers ---                             [22:14:26]
+2026-09-17T22:14:26.5205696Z raco setup: launcher: /home/runner/work/rktorch/rktorch/.racket-user/.local/share/racket/9.3/bin/resyntax
+2026-09-17T22:14:26.5292209Z raco setup: --- installing man pages ---                           [22:14:26]
+2026-09-17T22:14:26.5294059Z raco setup: --- building documentation ---                         [22:14:26]
+2026-09-17T22:14:27.5960996Z raco setup: syncing: <pkgs>/pretty-expressive/doc/pretty-expressive
+2026-09-17T22:14:29.5085767Z raco setup: 0 running: <pkgs>/fancy-app/main.scrbl
+2026-09-17T22:14:29.5302925Z raco setup: 1 running: <pkgs>/racket-index/scribblings/main/user/family.scrbl
+2026-09-17T22:14:29.5696739Z raco setup: 3 running: <pkgs>/fmt/scribblings/fmt.scrbl
+2026-09-17T22:14:29.8815808Z raco setup: 2 running: <pkgs>/guard/scribblings/guard.scrbl
+2026-09-17T22:14:30.4297311Z raco setup: 1 running: <pkgs>/racket-index/scribblings/main/user/local-redirect.scrbl
+2026-09-17T22:14:30.7879676Z raco setup: 0 running: <pkgs>/pretty-expressive/scribblings/pretty-expressive.scrbl
+2026-09-17T22:14:30.9448183Z raco setup: 3 running: <pkgs>/rebellion/main.scrbl
+2026-09-17T22:14:31.2052891Z raco setup: 1 running: <pkgs>/racket-index/scribblings/main/user/release.scrbl
+2026-09-17T22:14:31.3635768Z raco setup: 1 running: <pkgs>/resyntax/main.scrbl
+2026-09-17T22:14:31.8160938Z raco setup: 2 running: <pkgs>/racket-index/scribblings/main/user/search.scrbl
+2026-09-17T22:14:32.0296455Z raco setup: 2 running: <pkgs>/racket-index/scribblings/main/user/start.scrbl
+2026-09-17T22:14:32.7199116Z raco setup: 2 skipping: <pkgs>/torch/scribblings/torch.scrbl
+2026-09-17T22:16:19.4352985Z raco setup: 3 rendering: <pkgs>/racket-index/scribblings/main/user/family.scrbl
+2026-09-17T22:16:20.1495842Z raco setup: 2 rendering: <pkgs>/fancy-app/main.scrbl
+2026-09-17T22:16:20.1556154Z raco setup: 1 rendering: <pkgs>/fmt/scribblings/fmt.scrbl
+2026-09-17T22:16:20.1629403Z raco setup: 0 rendering: <pkgs>/guard/scribblings/guard.scrbl
+2026-09-17T22:16:21.2485860Z raco setup: 3 rendering: <pkgs>/racket-index/scribblings/main/user/local-redirect.scrbl
+2026-09-17T22:16:21.5884412Z raco setup: 2 rendering: <pkgs>/pretty-expressive/scribblings/pretty-expressive.scrbl
+2026-09-17T22:16:21.6265946Z raco setup: 3 rendering: <pkgs>/rebellion/main.scrbl
+2026-09-17T22:16:21.7237724Z raco setup: 1 rendering: <pkgs>/racket-index/scribblings/main/user/release.scrbl
+2026-09-17T22:16:22.5209103Z raco setup: 1 rendering: <pkgs>/resyntax/main.scrbl
+2026-09-17T22:16:22.7886954Z raco setup: 0 rendering: <pkgs>/racket-index/scribblings/main/user/search.scrbl
+2026-09-17T22:16:23.0329745Z raco setup: 2 rendering: <pkgs>/racket-index/scribblings/main/user/start.scrbl
+2026-09-17T22:18:10.8958404Z raco setup: --- installing collections ---                         [22:18:10]
+2026-09-17T22:18:10.8959468Z raco setup: --- post-installing collections ---                    [22:18:10]
+2026-09-17T22:18:10.9626366Z Done. Lint: resyntax analyze --local-git-repository . origin/master
+2026-09-17T22:18:10.9627159Z       full sweep: resyntax analyze --directory torch  |  raco review <files>
+2026-09-17T22:24:36.8132697Z resyntax: --- analyzing code ---
+2026-09-17T22:24:36.8133403Z resyntax: could not load language refactoring suite due to error
+2026-09-17T22:24:36.8134061Z   language: info
+2026-09-17T22:24:36.8134980Z   error:
+2026-09-17T22:24:36.8136185Z    dynamic-require: unknown module
+2026-09-17T22:24:36.8137304Z      module name: (submod "/nix/store/r499x5jim532jcw2zlhmpcc0wzk6s4zi-racket-9.3/share/racket/collects/info/main.rkt" resyntax)
+2026-09-17T22:24:36.8138610Z resyntax: could not load language refactoring suite due to error
+2026-09-17T22:24:36.8139265Z   language: info
+2026-09-17T22:24:36.8139640Z   error:
+2026-09-17T22:24:36.8140009Z    dynamic-require: unknown module
+2026-09-17T22:24:36.8141059Z      module name: (submod "/nix/store/r499x5jim532jcw2zlhmpcc0wzk6s4zi-racket-9.3/share/racket/collects/info/main.rkt" resyntax)
+2026-09-17T22:24:36.8142576Z resyntax: skipping /home/runner/work/rktorch/rktorch/examples/test/info.rkt because it's written in #lang info, which is unsupported and has no resyntax submodule
+2026-09-17T22:24:36.8143457Z resyntax: analyzing /home/runner/work/rktorch/rktorch/examples/test/09-resnet.rkt
+2026-09-17T22:24:36.8144072Z resyntax: analyzing /home/runner/work/rktorch/rktorch/torch/tests/python-cross-test.rkt
+2026-09-17T22:24:36.8145564Z resyntax: analyzer ignored-result-values-analyzer timed out after 30000 ms while analyzing /home/runner/work/rktorch/rktorch/torch/tests/python-cross-test.rkt
+2026-09-17T22:24:36.8146709Z resyntax: analyzer identifier-usage-analyzer timed out after 30000 ms while analyzing /home/runner/work/rktorch/rktorch/torch/tests/python-cross-test.rkt
+2026-09-17T22:24:36.8147612Z resyntax: cond-let-to-cond-define: suggestion discarded because it does not preserve all comments
+2026-09-17T22:24:36.8148313Z   dropped comment locations: (immutable-range-set #<range:natural<=> [50334, 50398)>)
+2026-09-17T22:24:36.8148771Z   original syntax:
+2026-09-17T22:24:36.8149909Z    #<syntax:torch/tests/python-cross-test.rkt:63:2 (cond ((not (python-torch-available?)) (printf "[python-cross-test] skipped: python3 `torch` not available ~a\n" "(run inside `nix develop`)")) (else (check-parity "python/00_randn.py" (lambda () (manual-seed! 0) (randn 2 2))) (check-parity "python/01_a...>
+2026-09-17T22:24:36.8151131Z   replacement syntax:
+2026-09-17T22:24:36.8152562Z    #<syntax:.racket-user/.local/share/racket/9.3/pkgs/resyntax/default-recommendations/let-replacement/cond-let-replacement.rkt:36:2 (cond ((not (python-torch-available?)) (printf "[python-cross-test] skipped: python3 `torch` not available ~a\n" "(run inside `nix develop`)")) (else (check-parity "python/00_randn.py" (lambda () (manual-seed! 0) (randn 2 2))) (check-parity "python/01_a...>
+2026-09-17T22:24:36.8154194Z resyntax: let-to-define: suggestion discarded because it does not preserve all comments
+2026-09-17T22:24:36.8155148Z   dropped comment locations: (immutable-range-set #<range:natural<=> [50334, 50398)>)
+2026-09-17T22:24:36.8155594Z   original syntax:
+2026-09-17T22:24:36.8156742Z    #<syntax:torch/tests/python-cross-test.rkt:63:2 (cond ((not (python-torch-available?)) (printf "[python-cross-test] skipped: python3 `torch` not available ~a\n" "(run inside `nix develop`)")) (else (check-parity "python/00_randn.py" (lambda () (manual-seed! 0) (randn 2 2))) (check-parity "python/01_a...>
+2026-09-17T22:24:36.8160370Z   replacement syntax:
+2026-09-17T22:24:36.8162662Z    #<syntax:.../resyntax/base.rkt:223:10 (cond ((not (python-torch-available?)) (printf "[python-cross-test] skipped: python3 `torch` not available ~a\n" "(run inside `nix develop`)")) (else (check-parity "python/00_randn.py" (lambda () (manual-seed! 0) (randn 2 2))) (check-parity "python/01_a...>
+2026-09-17T22:24:36.8166129Z resyntax: analyzing /home/runner/work/rktorch/rktorch/torch/tests/nn-test.rkt
+2026-09-17T22:24:36.8167525Z resyntax: analyzer identifier-usage-analyzer timed out after 30000 ms while analyzing /home/runner/work/rktorch/rktorch/torch/tests/nn-test.rkt
+2026-09-17T22:24:36.8168818Z resyntax: could not load language refactoring suite due to error
+2026-09-17T22:24:36.8169489Z   language: scribble/lp2
+2026-09-17T22:24:36.8169876Z   error:
+2026-09-17T22:24:36.8170237Z    dynamic-require: unknown module
+2026-09-17T22:24:36.8171177Z      module name: (submod "/nix/store/r499x5jim532jcw2zlhmpcc0wzk6s4zi-racket-9.3/share/racket/pkgs/scribble-lib/scribble/lp2.rkt" resyntax)
+2026-09-17T22:24:36.8171949Z resyntax: could not load language refactoring suite due to error
+2026-09-17T22:24:36.8172340Z   language: scribble/lp2
+2026-09-17T22:24:36.8172664Z   error:
+2026-09-17T22:24:36.8173027Z    dynamic-require: unknown module
+2026-09-17T22:24:36.8174130Z      module name: (submod "/nix/store/r499x5jim532jcw2zlhmpcc0wzk6s4zi-racket-9.3/share/racket/pkgs/scribble-lib/scribble/lp2.rkt" resyntax)
+2026-09-17T22:24:36.8176294Z resyntax: skipping /home/runner/work/rktorch/rktorch/examples/racket/09-resnet.rkt because it's written in #lang scribble/lp2, which is unsupported and has no resyntax submodule
+2026-09-17T22:24:36.8177845Z resyntax: analyzing /home/runner/work/rktorch/rktorch/torch/nn/conv.rkt
+2026-09-17T22:24:36.8179130Z resyntax: analyzer identifier-usage-analyzer timed out after 30000 ms while analyzing /home/runner/work/rktorch/rktorch/torch/nn/conv.rkt
+2026-09-17T22:24:36.8180460Z resyntax: analyzing /home/runner/work/rktorch/rktorch/torch/vision/resnet.rkt
+2026-09-17T22:24:36.8181864Z resyntax: analyzer identifier-usage-analyzer timed out after 30000 ms while analyzing /home/runner/work/rktorch/rktorch/torch/vision/resnet.rkt
+2026-09-17T22:24:36.8182734Z resyntax: --- displaying results ---
+2026-09-17T22:24:36.8183193Z resyntax: /home/runner/work/rktorch/rktorch/torch/nn/conv.rkt:55:8 [and-let-to-cond]
+2026-09-17T22:24:36.8183554Z 
+2026-09-17T22:24:36.8183558Z 
+2026-09-17T22:24:36.8183791Z   Using `cond` allows converting `let` to internal definitions, reducing nesting
+2026-09-17T22:24:36.8184165Z 
+2026-09-17T22:24:36.8184169Z 
+2026-09-17T22:24:36.8184261Z   55 (and bias?
+2026-09-17T22:24:36.8184800Z   56      (let ([bound (/ 1.0 (sqrt (fan-in shape)))])
+2026-09-17T22:24:36.8185251Z   57        (Parameter (uniform-init (list out-channels) (- bound) bound))))
+2026-09-17T22:24:36.8185553Z 
+2026-09-17T22:24:36.8185556Z 
+2026-09-17T22:24:36.8185643Z   55 (cond
+2026-09-17T22:24:36.8185837Z   56   [bias?
+2026-09-17T22:24:36.8186096Z   57    (define bound (/ 1.0 (sqrt (fan-in shape))))
+2026-09-17T22:24:36.8186551Z   58    (Parameter (uniform-init (list out-channels) (- bound) bound))]
+2026-09-17T22:24:36.8187134Z   59   [else #f])
+2026-09-17T22:24:36.8187360Z 
+2026-09-17T22:24:36.8187364Z 
+2026-09-17T22:24:36.8188162Z resyntax: /home/runner/work/rktorch/rktorch/examples/test/09-resnet.rkt:46:14 [two-inclusive-comparisons-to-triple-comparison]
+2026-09-17T22:24:36.8189086Z 
+2026-09-17T22:24:36.8189091Z 
+2026-09-17T22:24:36.8189656Z   Comparison functions like `<=` accept multiple arguments, so this condition can be simplified.
+2026-09-17T22:24:36.8190048Z 
+2026-09-17T22:24:36.8190052Z 
+2026-09-17T22:24:36.8190158Z   46 (and (>= acc 0.0) (<= acc 1.0))
+2026-09-17T22:24:36.8190345Z 
+2026-09-17T22:24:36.8190349Z 
+2026-09-17T22:24:36.8190441Z   46 (<= 0.0 acc 1.0)
+2026-09-17T22:24:36.8192532Z ##[error]Resyntax found refactoring suggestions. Run: resyntax fix --local-git-repository . e0648ff98fd02ab382af9705fddb3835b1fbb101
+2026-09-17T22:24:36.8199007Z ##[error]Process completed with exit code 1.
+2026-09-17T22:24:36.8284394Z Post job cleanup.
+2026-09-17T22:24:36.8289943Z ##[start-action display=Run DeterminateSystems/magic-nix-cache-action@v13;id=__f51c7a6f-fb43-427c-b541-79716aa1a2f0.__DeterminateSystems_magic-nix-cache-action]
+2026-09-17T22:24:36.8338515Z Node 20 is being deprecated. This workflow is running with Node 24 by default. If you need to temporarily use Node 20, you can set the ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION=true environment variable. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
+2026-09-17T22:24:36.8339771Z Post job cleanup.
+2026-09-17T22:24:37.2562211Z [command]/usr/bin/sudo mkdir -p /var/lib/determinate
+2026-09-17T22:24:37.3321750Z   [2m2026-09-17T22:24:37.328464Z[0m [32m INFO[0m [1;32mmagic_nix_cache::api[0m[32m: [32mWorkflow finished[0m
+2026-09-17T22:24:37.3322727Z     [2;3mat[0m magic-nix-cache/src/api.rs:58
+2026-09-17T22:24:37.3323127Z 
+2026-09-17T22:24:37.3324106Z   [2m2026-09-17T22:24:37.328497Z[0m [32m INFO[0m [1;32mmagic_nix_cache::api[0m[32m: [32mWaiting for GitHub action cache uploads to finish[0m
+2026-09-17T22:24:37.3325435Z     [2;3mat[0m magic-nix-cache/src/api.rs:98
+2026-09-17T22:24:37.3325873Z 
+2026-09-17T22:24:37.3326823Z   [2m2026-09-17T22:24:37.328538Z[0m [32m INFO[0m [1;32mmagic_nix_cache::api[0m[32m: [32mFlakeHub cache is not enabled, not uploading anything to it[0m
+2026-09-17T22:24:37.3327586Z     [2;3mat[0m magic-nix-cache/src/api.rs:110
+2026-09-17T22:24:37.3327844Z 
+2026-09-17T22:24:37.3328259Z   [2m2026-09-17T22:24:37.328606Z[0m [32m INFO[0m [1;32mmagic_nix_cache[0m[32m: [32mShutting down[0m
+2026-09-17T22:24:37.3329151Z     [2;3mat[0m magic-nix-cache/src/main.rs:559
+2026-09-17T22:24:37.3329584Z 
+2026-09-17T22:24:37.9915949Z ##[end-action id=__f51c7a6f-fb43-427c-b541-79716aa1a2f0.__DeterminateSystems_magic-nix-cache-action;outcome=success;conclusion=success;duration_ms=1162]
+2026-09-17T22:24:37.9921497Z ##[start-action display=Run DeterminateSystems/nix-installer-action@v22;id=__f51c7a6f-fb43-427c-b541-79716aa1a2f0.__DeterminateSystems_nix-installer-action]
+2026-09-17T22:24:38.0009646Z Post job cleanup.
+2026-09-17T22:24:38.2296163Z [command]/usr/bin/sudo mkdir -p /var/lib/determinate
+2026-09-17T22:24:39.1636308Z ##[end-action id=__f51c7a6f-fb43-427c-b541-79716aa1a2f0.__DeterminateSystems_nix-installer-action;outcome=success;conclusion=success;duration_ms=1171]
+2026-09-17T22:24:39.1639059Z ##[start-action display=Connect to tailnet (Nix binary cache);id=__f51c7a6f-fb43-427c-b541-79716aa1a2f0.__tailscale_github-action]
+2026-09-17T22:24:39.1681170Z Post job cleanup.
+2026-09-17T22:24:39.2296679Z 🔄 Logging out of Tailscale...
+2026-09-17T22:24:39.2438248Z Running: sudo -E tailscale logout
+2026-09-17T22:24:39.2456757Z [command]/usr/bin/sudo -E tailscale logout
+2026-09-17T22:24:39.5041037Z ✅ Successfully logged out of Tailscale
+2026-09-17T22:24:39.5041621Z Stopping tailscale
+2026-09-17T22:24:39.5062441Z [command]/usr/bin/sudo pkill -P 2278
+2026-09-17T22:24:39.5288194Z [command]/usr/bin/sudo tailscaled --cleanup
+2026-09-17T22:24:39.5427236Z TPM: error opening: stat /dev/tpmrm0: no such file or directory
+2026-09-17T22:24:39.5471451Z 2026/09/17 22:24:39 logtail started
+2026-09-17T22:24:39.5473013Z 2026/09/17 22:24:39 Program starting: v1.94.2-t0a29cf18b-g3f044c9f6, Go 1.25.5: []string{"tailscaled", "--cleanup"}
+2026-09-17T22:24:39.5478734Z 2026/09/17 22:24:39 LogID: 798562e42aab1ed370bc302ae3b9e5c157e27c2c4cc2e8971e7f7d6ac16c9f17
+2026-09-17T22:24:39.5480149Z 2026/09/17 22:24:39 logpolicy: using system state directory "/var/lib/tailscale"
+2026-09-17T22:24:39.5496727Z 2026/09/17 22:24:39 dns: [resolved-ping=yes rc=resolved resolved=file nm=no resolv-conf-mode=stub ret=systemd-resolved]
+2026-09-17T22:24:39.5500593Z 2026/09/17 22:24:39 dns: using "systemd-resolved" mode
+2026-09-17T22:24:39.5502306Z 2026/09/17 22:24:39 creating dns cleanup: route ip+net: no such network interface
+2026-09-17T22:24:39.5980360Z 2026/09/17 22:24:39 flushing log.
+2026-09-17T22:24:39.5981439Z 2026/09/17 22:24:39 logger closing down
+2026-09-17T22:24:39.6452189Z ✅ Stopped tailscale
+2026-09-17T22:24:39.6549379Z ##[end-action id=__f51c7a6f-fb43-427c-b541-79716aa1a2f0.__tailscale_github-action;outcome=success;conclusion=success;duration_ms=490]
+2026-09-17T22:24:39.6618984Z Post job cleanup.
+2026-09-17T22:24:39.7490144Z [command]/usr/bin/git version
+2026-09-17T22:24:39.7533071Z git version 2.55.0
+2026-09-17T22:24:39.7582201Z Temporarily overriding HOME='/home/runner/work/_temp/e76ecee1-5340-4a0d-b26d-2ab16dc89de6' before making global git config changes
+2026-09-17T22:24:39.7583803Z Adding repository directory to the temporary git global config as a safe directory
+2026-09-17T22:24:39.7589982Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/rktorch/rktorch
+2026-09-17T22:24:39.7642152Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-09-17T22:24:39.7684189Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-09-17T22:24:39.8026231Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-09-17T22:24:39.8066047Z http.https://github.com/.extraheader
+2026-09-17T22:24:39.8082233Z [command]/usr/bin/git config --local --unset-all http.https://github.com/.extraheader
+2026-09-17T22:24:39.8129012Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-09-17T22:24:39.8482867Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-09-17T22:24:39.8540141Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-09-17T22:24:39.8993016Z Cleaning up orphan processes
+2026-09-17T22:24:39.9328967Z ##[warning]Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: DeterminateSystems/magic-nix-cache-action@v13. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
