@@ -22,6 +22,7 @@
                     child-name/c
                     children-by-index
                     children-by-key
+                    parameters-by-key
                     in-layers
                     layer?
                     named-buffers
@@ -82,6 +83,8 @@
          children-by-index
          children-by-key
          Children?
+         parameters-by-key
+         Parameters?
          child-ref
          child-name/c
          in-layers

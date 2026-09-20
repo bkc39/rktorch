@@ -50,11 +50,11 @@
     [(has-matching-files? native-libs-dir)
      (void)]
     [else
-     (error
-      'pre-installer
+     (eprintf
       (string-append
-       "libtorchrkt not found. Either:\n"
+       "torch: libtorchrkt was not staged, so the bindings will not load"
+       " until it is. Either:\n"
        "  1. Build with Nix: `nix build` (or `nix develop`), which sets\n"
        "     TORCHRKT_NATIVE_LIB_PATH and stages the library, or\n"
-       "  2. Copy libtorchrkt.* manually into ~a")
+       "  2. Copy libtorchrkt.* manually into ~a\n")
       (path->string native-libs-dir))]))
