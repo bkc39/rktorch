@@ -29,9 +29,11 @@
          (only-in "device-type.rkt" device/c)
          (only-in "error.rkt" check-handle check-ok)
          (only-in "ops.rkt"
+                  any-float-dtype/c
                   device->type+index
                   dims-rest/c
                   dtype/c
+                  placement
                   tensor-device
                   tensor-dtype
                   tensor-shape
@@ -66,17 +68,8 @@
 (define (shape-of dims)
   (if (and (pair? dims) (list? (car dims))) (car dims) dims))
 
-;; the device and dtype go into native construction — never a default-device
-;; scope or a construct-then-move hop through another device
-(define (placement device dtype)
-  (define-values (type index)
-    (if device (device->type+index device) (values 'keep 0)))
-  (values type index (or dtype 'keep)))
-
 (define (finish out requires-grad?)
   (if requires-grad? (requires-grad! out) out))
-
-(define float-dtype/c (or/c 'float32 'float64 'float16 'bfloat16))
 
 (define (shaped who raw dims device dtype requires-grad? . extra)
   (define shape (shape-of dims))
@@ -140,14 +133,14 @@
 (define/contract-out (randn #:device [device #f] #:dtype [dtype #f]
                             #:requires-grad? [requires-grad? #f]
                             . dims)
-  (->* [] [#:device device/c #:dtype float-dtype/c #:requires-grad? boolean?]
+  (->* [] [#:device device/c #:dtype any-float-dtype/c #:requires-grad? boolean?]
        #:rest shape-rest/c tensor?)
   (shaped 'randn tr-randn-on/raw dims device dtype requires-grad?))
 
 (define/contract-out (rand #:device [device #f] #:dtype [dtype #f]
                            #:requires-grad? [requires-grad? #f]
                            . dims)
-  (->* [] [#:device device/c #:dtype float-dtype/c #:requires-grad? boolean?]
+  (->* [] [#:device device/c #:dtype any-float-dtype/c #:requires-grad? boolean?]
        #:rest shape-rest/c tensor?)
   (shaped 'rand tr-rand-on/raw dims device dtype requires-grad?))
 
@@ -214,7 +207,7 @@
 (define/contract-out (randn-like t #:device [device #f] #:dtype [dtype #f] ;; noqa
                                  #:requires-grad? [requires-grad? #f])
   (->* [tensor?]
-       [#:device device/c #:dtype float-dtype/c #:requires-grad? boolean?]
+       [#:device device/c #:dtype any-float-dtype/c #:requires-grad? boolean?]
        tensor?)
   (define-values (dev dt) (like t device dtype))
   (randn (tensor-shape t) #:device dev #:dtype dt
@@ -223,7 +216,7 @@
 (define/contract-out (rand-like t #:device [device #f] #:dtype [dtype #f] ;; noqa
                                 #:requires-grad? [requires-grad? #f])
   (->* [tensor?]
-       [#:device device/c #:dtype float-dtype/c #:requires-grad? boolean?]
+       [#:device device/c #:dtype any-float-dtype/c #:requires-grad? boolean?]
        tensor?)
   (define-values (dev dt) (like t device dtype))
   (rand (tensor-shape t) #:device dev #:dtype dt

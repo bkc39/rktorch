@@ -107,6 +107,14 @@
     (set! steps (Buffer (tensor '(0 1))))
     #:forward (x) (mul w x))
 
+  (test-case "randn and rand construct at a half dtype, as ones and zeros do"
+    (for ([dt (in-list '(float16 bfloat16 float32 float64))])
+      (check-equal? (tensor-dtype (randn 2 2 #:dtype dt)) dt)
+      (check-equal? (tensor-dtype (rand 2 #:dtype dt)) dt)
+      (check-equal? (tensor-dtype (randn-like (zeros 2 #:dtype dt))) dt))
+    (check-exn exn:fail:contract?
+               (lambda () (randn 2 #:dtype 'int64))))
+
   (test-case "a layer moves to the half pair, integer buffers staying put"
     (define m (HalfCounted))
     (check-eq? (to m 'bfloat16) m)
