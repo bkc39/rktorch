@@ -1,6 +1,6 @@
 #lang scribble/manual
 
-@title[#:tag "reference"]{Reference}
+@title[#:tag "reference" #:style 'toc]{Reference}
 
 What each binding accepts and answers. The @secref["guide"] introduces the
 same material in the order you meet it.

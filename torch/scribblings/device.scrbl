@@ -117,6 +117,11 @@ Equivalent to @racket[(to t dtype)].
 
 @section{Choosing a device}
 
+@defproc[(device? [v any/c]) boolean?]{
+Whether @racket[v] is a device value, as answered by @racket[device],
+@racket[cpu-device], @racket[cuda-device], @racket[mps-device] and
+@racket[accelerator-if-available].}
+
 @defproc[(accelerator-if-available) device?]{
 The accelerator this process can use --- CUDA on a Linux machine with an
 NVIDIA GPU, Metal on Apple Silicon --- or the CPU device when there is
