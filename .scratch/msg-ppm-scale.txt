@@ -1,0 +1,9 @@
+vision: the range contract checks the scale write-ppm divides by
+
+Checking the endpoints, then the span, still left the reciprocal: a span
+of 1e-307 is finite and positive, and 255 over it is not. `quantizes?`
+asks about every value the quantization actually forms, which is the
+whole class rather than the three cases found one at a time.
+
+Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01VDEpCNkMi2rmxjgRnCHhkp

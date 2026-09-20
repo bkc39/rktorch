@@ -1,0 +1,289 @@
+diff --git a/AGENTS.md b/AGENTS.md
+index 0e480fc..d075762 100644
+--- a/AGENTS.md
++++ b/AGENTS.md
+@@ -466,6 +466,9 @@ under that contract and the predicate, under its lowercase name
+ (`Conv2d`/`conv2d?`, `MaxPool2d`/`max-pool2d?`; `#:predicate` overrides the
+ derived name), so a layer file has no `provide` block and no `rename-out`.
+ `->i` states a cross-argument invariant that used to be an `unless` guard.
++A forward formal written `[x : image-batch/c]` states what the layer accepts
++there, which is where a rank or shape check belongs; the violation names the
++layer and the contract, and the check is built once at the definition.
+ 
+ Two layers carry no contracts: `torch/generated.rkt` (codegen output, the
+ unstable surface) and `torch/foreign/raw/` (the FFI bindings, where the
+diff --git a/torch/foreign/contracts.rkt b/torch/foreign/contracts.rkt
+index b0289ad..7b6a48b 100644
+--- a/torch/foreign/contracts.rkt
++++ b/torch/foreign/contracts.rkt
+@@ -18,6 +18,7 @@
+          (only-in "structs.rkt" tensor?))
+ 
+ (provide bool-tensor/c
++         feature-batch/c
+          image-batch/c
+          index-spec/c
+          index/c
+@@ -55,6 +56,14 @@
+   (flat-named-contract 'image-batch
+                        (lambda (x) (and (tensor? x) (= 4 (length (tensor-shape x)))))))
+ 
++;; nn.BatchNorm1d's input: features over a batch, with or without a length
++(define feature-batch/c
++  (flat-named-contract 'feature-batch
++                       (lambda (x)
++                         (and (tensor? x)
++                              (memv (length (tensor-shape x)) '(2 3))
++                              #t))))
++
+ (define index-vector/c
+   (and/c int64-tensor/c (lambda (x) (< (length (tensor-shape x)) 2))))
+ 
+diff --git a/torch/nn/batch-norm.rkt b/torch/nn/batch-norm.rkt
+index 1c0f8c0..615329b 100644
+--- a/torch/nn/batch-norm.rkt
++++ b/torch/nn/batch-norm.rkt
+@@ -2,15 +2,14 @@
+ 
+ (require (only-in racket/contract/base ->*)
+          (only-in "../foreign.rkt"
+-                  add batch-norm copy! ones tensor tensor-shape to-dtype zeros)
++                  add batch-norm copy! ones tensor to-dtype zeros)
++         (only-in "../foreign/contracts.rkt" feature-batch/c image-batch/c)
+          (only-in "buffer.rkt" Buffer)
+          (only-in "layer.rkt" define-layer training? with-mode)
+          (only-in "parameter.rkt" Parameter))
+ 
+-(define (normalize who ranks x mode momentum eps weight bias
++(define (normalize x mode momentum eps weight bias
+                    running-mean running-var num-batches-tracked)
+-  (unless (memv (length (tensor-shape x)) ranks)
+-    (raise-argument-error who (format "a tensor of rank ~a" ranks) x))
+   (define training (training? mode))
+   (when training
+     ;; nn.BatchNorm2d counts the batches it has normalised; add promotes the
+@@ -37,9 +36,9 @@
+   (set! running-mean (Buffer (zeros num-features)))
+   (set! running-var (Buffer (ones num-features)))
+   (set! num-batches-tracked (Buffer (tensor 0)))
+-  #:forward (x)
++  #:forward ([x : image-batch/c])
+   (with-mode
+-    (normalize 'BatchNorm2d '(4) x mode momentum eps weight bias
++    (normalize x mode momentum eps weight bias
+                running-mean running-var num-batches-tracked)))
+ 
+ (define-layer BatchNorm1d (eps momentum weight bias ;; noqa
+@@ -53,7 +52,7 @@
+   (set! running-mean (Buffer (zeros num-features)))
+   (set! running-var (Buffer (ones num-features)))
+   (set! num-batches-tracked (Buffer (tensor 0)))
+-  #:forward (x)
++  #:forward ([x : feature-batch/c])
+   (with-mode
+-    (normalize 'BatchNorm1d '(2 3) x mode momentum eps weight bias
++    (normalize x mode momentum eps weight bias
+                running-mean running-var num-batches-tracked)))
+diff --git a/torch/nn/layer.rkt b/torch/nn/layer.rkt
+index e14ed7a..3f06f87 100644
+--- a/torch/nn/layer.rkt
++++ b/torch/nn/layer.rkt
+@@ -6,10 +6,12 @@
+                      ;; only-in would strip
+                      syntax/parse/pre
+                      (only-in "../private/definer.rkt"
+-                              contract-export ctor-formal init-formals))
++                              contract-export ctor-formal forward-formal
++                              init-formals))
+          (only-in racket/contract/base
+-                  -> ->* ->i and/c any any/c cons/c contract-out contract?
+-                  flat-named-contract listof not/c or/c unsupplied-arg?)
++                  -> ->* ->i and/c any any/c cons/c contract contract-out
++                  contract? flat-named-contract listof not/c or/c
++                  unsupplied-arg?)
+          (only-in racket/generic define-generics)
+          (only-in racket/list append-map check-duplicates remove-duplicates)
+          (only-in racket/stxparam define-syntax-parameter syntax-parameterize)
+@@ -331,7 +333,7 @@
+               (~optional (~seq #:reflection-name reflect:expr))
+               (~optional (~seq #:contract ctc:expr))
+               (~optional (~seq #:predicate pred:id))) ...
+-        #:forward (input:id ...) body:expr ...+)
++        #:forward (input:forward-formal ...) body:expr ...+)
+      (define field-ids (syntax->list #'(field.id ...)))
+      (for ([f (in-list field-ids)])
+        (when (regexp-match? #rx"[.]" (symbol->string (syntax-e f)))
+@@ -348,6 +350,27 @@
+             "with #:init, a field is a bare identifier; defaults and keywords belong to the #:init formals"
+             stx f))))
+      (define init-ids (if init? (syntax->list #'(init.id ...)) '()))
++     ;; a contracted forward formal becomes one checker built here, at the
++     ;; definition, not one per call; the layer promises it and whoever
++     ;; applies the layer answers for the argument
++     (define input-ids (syntax->list #'(input.id ...)))
++     (define input-ctcs (attribute input.ctc))
++     (define checker-ids
++       (for/list ([c (in-list input-ctcs)])
++         (and c (generate-temporary #'check))))
++     (define checker-defs
++       (for/list ([c (in-list input-ctcs)]
++                  [cid (in-list checker-ids)]
++                  #:when c)
++         #`(define #,cid
++             (contract (-> #,c any) values 'name 'caller 'name
++                       (quote-syntax name)))))
++     (define checked-bindings
++       (for/list ([c (in-list input-ctcs)]
++                  [cid (in-list checker-ids)]
++                  [i (in-list input-ids)]
++                  #:when c)
++         #`[#,i (#,cid #,i)]))
+      (define struct-id (generate-temporary #'name))
+      (define (accessor field-id)
+        (format-id struct-id "~a-~a" struct-id field-id))
+@@ -367,7 +390,9 @@
+                     (for/list ([f (in-list field-ids)])
+                       (symbol->string (syntax-e f)))]
+                    [(field-acc ...) (map accessor field-ids)]
+-                   [n-inputs (length (syntax->list #'(input ...)))])
++                   [(checker-def ...) checker-defs]
++                   [(checked-binding ...) checked-bindings]
++                   [n-inputs (length input-ids)])
+        (with-syntax ([export (contract-export stx #'name #'name?
+                                               (attribute ctc)
+                                               (attribute pred))])
+@@ -375,13 +400,16 @@
+              (struct sid registry (field.id ...)
+                #:reflection-name reflect-name)
+              (define name? sid?)
++             checker-def ...
+              (define (forward-proc self . inputs)
+                (unless (= (length inputs) n-inputs)
+                  (apply raise-arity-error 'name n-inputs inputs))
+                (let ([field.id (field-acc self)] ...)
+                  (syntax-parameterize
+                      ([with-mode (with-mode-transformer #'self)])
+-                   (apply (lambda (input ...) body ...) inputs))))
++                   (apply (lambda (input.id ...)
++                            (let (checked-binding ...) body ...))
++                          inputs))))
+              (define (name . formals)
+                (let ([absent #f] ...)
+                  init-body ...
+diff --git a/torch/private/definer.rkt b/torch/private/definer.rkt
+index 5bb3d06..03dc87e 100644
+--- a/torch/private/definer.rkt
++++ b/torch/private/definer.rkt
+@@ -9,6 +9,7 @@
+ 
+ (provide contract-export
+          ctor-formal
++         forward-formal
+          init-formals)
+ 
+ (define (predicate-name name)
+@@ -64,6 +65,15 @@
+     #:attr bare? #f
+     #:with (decl ...) #'(kw [id default])))
+ 
++;; a forward formal is a bare id, or [id : contract] to state what the
++;; layer accepts there — the notation #99 proposes for #:init
++(define-syntax-class forward-formal ;; noqa
++  #:description "forward formal (id or [id : contract])"
++  (pattern id:id
++    #:attr ctc #f)
++  (pattern [id:id (~datum :) c:expr]
++    #:attr ctc #'c))
++
+ (define-syntax-class init-formals
+   #:description "#:init formals: (formal ... [#:rest id]) or (formal ... . id)"
+   (pattern (f:ctor-formal ... #:rest rest:id)
+diff --git a/torch/scribblings/nn.scrbl b/torch/scribblings/nn.scrbl
+index c2d1623..ed98cd6 100644
+--- a/torch/scribblings/nn.scrbl
++++ b/torch/scribblings/nn.scrbl
+@@ -25,8 +25,11 @@
+           [formal id
+                   [id default-expr]
+                   (code:line keyword id)
+-                  (code:line keyword [id default-expr])])
+-         #:contracts ([contract-expr contract?])]{
++                  (code:line keyword [id default-expr])]
++          [input id
++                 [id : input-contract-expr]])
++         #:contracts ([contract-expr contract?]
++                      [input-contract-expr contract?])]{
+ 
+ Defines a layer: a constructor @racket[name], a predicate @racket[name?],
+ and a struct with one slot per @racket[field].  An instance is a
+@@ -36,6 +39,22 @@ every field in scope.  A call with other than one argument per
+ @racket[name], whether made directly, through @racket[forward], or
+ through @racket[layer-forward].
+ 
++An @racket[input] written @racket[[id : contract-expr]] states what the
++layer accepts there, and a call that does not satisfy it is a contract
++violation naming the layer and the contract rather than an error raised
++from inside the body: a shape the layer cannot take belongs in the
++signature, not in an @racket[unless] guard. The check is built once,
++where the layer is defined, so it costs one flat check per call; the
++party blamed is the label @tt{caller}, since a layer's forward has no
++module boundary of its own to name the caller by. A bare @racket[id]
++accepts anything, as before.
++
++@racketblock[
++(define-layer BatchNorm2d (weight bias)
++  #:forward ([x : image-batch/c])
++  (batch-norm x #:weight weight #:bias bias))
++]
++
+ @racket[#:init] is the constructor body, the analogue of @tt{__init__}.
+ Its @racket[formal]s are the constructor's arguments, in the grammar of
+ @racket[define]; the rest argument is spelled @racket[#:rest rest-id] or
+diff --git a/torch/tests/nn-contract-test.rkt b/torch/tests/nn-contract-test.rkt
+index c28b528..90e87e9 100644
+--- a/torch/tests/nn-contract-test.rkt
++++ b/torch/tests/nn-contract-test.rkt
+@@ -63,6 +63,21 @@
+                (lambda () (BatchNorm2d 0)))
+     (check-exn #rx"^BatchNorm1d: contract violation"
+                (lambda () (BatchNorm1d 3 #:eps 'tiny)))
++    ;; the rank a layer accepts is stated in its #:forward formals, so a
++    ;; wrong one is contract blame naming the layer and the contract, not an
++    ;; error raised from inside torch/nn; the party is the label `caller`,
++    ;; since the wrapper is built where the layer is defined
++    (check-exn #rx"^BatchNorm2d: contract violation"
++               (lambda () ((BatchNorm2d 3) (randn 4 3))))
++    (check-exn #rx"expected: image-batch"
++               (lambda () ((BatchNorm2d 3) (randn 4 3))))
++    (check-exn (message-matching #rx"blaming: caller")
++               (lambda () ((BatchNorm2d 3) (randn 4 3))))
++    (check-exn #rx"expected: feature-batch"
++               (lambda () ((BatchNorm1d 4) (randn 2 4 3 3))))
++    (check-equal? (tensor-shape ((BatchNorm1d 4) (randn 8 4 6))) '(8 4 6))
++    (check-exn #rx"^BatchNorm2d: arity mismatch"
++               (lambda () ((BatchNorm2d 3) (randn 1 3 2 2) 'extra)))
+     (check-exn #rx"^Dropout: contract violation"
+                (lambda () (Dropout #:p 1)))
+     (check-exn #rx"^Sequential: contract violation"
+diff --git a/torch/tests/nn-test.rkt b/torch/tests/nn-test.rkt
+index 4c59f99..8d11e43 100644
+--- a/torch/tests/nn-test.rkt
++++ b/torch/tests/nn-test.rkt
+@@ -211,7 +211,7 @@
+     (check-false (equal? (tensor->list z) (tensor->list y))
+                  "eval normalizes with the running statistics")
+     (check-= (item (caddr (buffers bn))) 1 0)
+-    (check-exn #rx"rank" (lambda () (bn (randn 4 3))))
++    (check-exn #rx"image-batch" (lambda () (bn (randn 4 3))))
+     (check-equal? (object-name bn) 'BatchNorm2d))
+ 
+   (test-case "BatchNorm1d layer: [N C] and [N C L] inputs"
+@@ -220,7 +220,7 @@
+     (check-equal? (tensor-shape (bn (randn 8 4))) '(8 4))
+     (check-equal? (tensor-shape (bn (randn 8 4 6))) '(8 4 6))
+     (check-= (item (caddr (buffers bn))) 2 0)
+-    (check-exn #rx"rank" (lambda () (bn (randn 2 4 3 3))))
++    (check-exn #rx"feature-batch" (lambda () (bn (randn 2 4 3 3))))
+     (check-equal? (object-name bn) 'BatchNorm1d))
+ 
+   (test-case "BatchNorm2d: gradients reach the affine parameters"

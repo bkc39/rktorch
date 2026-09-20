@@ -159,3 +159,22 @@ shape flip
 # integer status plus one out pointer per return, (values, indices) here.
 sort topk
 sort sort
+# argsort is sort's indices alone, a single return.
+sort argsort
+
+# The cudnn-backed multi-layer recurrences: the flat weights and the LSTM's
+# (h, c) state marshal through the tensor-list kind, and they return
+# (output, h_n, c_n) and (output, h_n). Dropout between layers draws from
+# the global stream when train is set, hence the rng flag.
+rnn lstm.input rng
+rnn gru.input rng
+
+# multinomial introduces the optional-generator kind (a tr_generator
+# handle, NULL for the global stream).
+random multinomial rng
+
+# cudnn wants an RNN's weights in one buffer and otherwise compacts them,
+# with a warning, on every call. This re-points each weight at its slice of
+# a fresh flat buffer, in place; it has a CUDA kernel only, so its parity
+# recipe is `device-only` and a CUDA-guarded test drives it.
+rnn _cudnn_rnn_flatten_weight

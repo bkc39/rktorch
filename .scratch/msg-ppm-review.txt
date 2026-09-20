@@ -1,0 +1,28 @@
+review: make_grid returns one image unpadded, and two smaller fixes
+
+`image-grid` padded a batch of one, where `make_grid` returns that image
+as it is:
+
+```python
+if tensor.size(0) == 1:
+    return tensor.squeeze(0)
+```
+
+which sits after its one-to-three channel expansion, so a one-channel
+singleton still comes back with three channels. The twin's fallback
+gained the same early return and the cross-test compares a seeded
+singleton against it.
+
+`write-ppm` accepted a boolean image and then failed inside ATen, which
+has no subtraction for that dtype, so `image/c` refuses it.
+
+The write-ppm cross-check compared quantized bytes exactly while the
+values beside it are compared with `tol`, so a difference between two
+torch builds near a rounding boundary would fail it by one byte. It
+allows the one byte now, and checks the length separately.
+
+Reported on #171, where this branch is merged; fixed here, where the
+code is.
+
+Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01VDEpCNkMi2rmxjgRnCHhkp

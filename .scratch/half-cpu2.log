@@ -1,0 +1,48 @@
+warning: Git tree '/home/bkc/dev/rkt/rktorch/.claude/worktrees/vision-152' is dirty
+raco test: (submod (file "torch/tests/autocast-test.rkt") test)
+/home/bkc/dev/rkt/rktorch/.claude/worktrees/vision-152/torch/foreign/autocast.rkt:54:65: syntax: unbound identifier;
+ also, no #%app syntax transformer is bound in the transformer phase
+  at: syntax
+  in: (syntax (default-device))
+  location...:
+   /home/bkc/dev/rkt/rktorch/.claude/worktrees/vision-152/torch/foreign/autocast.rkt:54:65
+  context...:
+   /nix/store/r499x5jim532jcw2zlhmpcc0wzk6s4zi-racket-9.3/share/racket/collects/racket/private/stxparam.rkt:57:2
+   /nix/store/r499x5jim532jcw2zlhmpcc0wzk6s4zi-racket-9.3/share/racket/pkgs/compiler-lib/compiler/commands/test.rkt:98:2
+   body of (submod "/nix/store/r499x5jim532jcw2zlhmpcc0wzk6s4zi-racket-9.3/share/racket/pkgs/compiler-lib/compiler/commands/test.rkt" process)
+   body of top-level
+autocast-test.rkt: raco test: non-zero exit: 1
+raco test: (submod (file "torch/tests/to-test.rkt") test)
+/home/bkc/dev/rkt/rktorch/.claude/worktrees/vision-152/torch/foreign/autocast.rkt:54:65: syntax: unbound identifier;
+ also, no #%app syntax transformer is bound in the transformer phase
+  at: syntax
+  in: (syntax (default-device))
+  location...:
+   /home/bkc/dev/rkt/rktorch/.claude/worktrees/vision-152/torch/foreign/autocast.rkt:54:65
+  context...:
+   /nix/store/r499x5jim532jcw2zlhmpcc0wzk6s4zi-racket-9.3/share/racket/collects/racket/private/stxparam.rkt:57:2
+   /nix/store/r499x5jim532jcw2zlhmpcc0wzk6s4zi-racket-9.3/share/racket/collects/racket/private/reqprov.rkt:81:13: t
+   /nix/store/r499x5jim532jcw2zlhmpcc0wzk6s4zi-racket-9.3/share/racket/collects/racket/require-transform.rkt:265:2: expand-import
+   /nix/store/r499x5jim532jcw2zlhmpcc0wzk6s4zi-racket-9.3/share/racket/collects/racket/private/reqprov.rkt:505:5
+   /nix/store/r499x5jim532jcw2zlhmpcc0wzk6s4zi-racket-9.3/share/racket/collects/racket/require-transform.rkt:265:2: expand-import
+   /nix/store/r499x5jim532jcw2zlhmpcc0wzk6s4zi-racket-9.3/share/racket/collects/racket/private/reqprov.rkt:286:21: try-next
+   /nix/store/r499x5jim532jcw2zlhmpcc0wzk6s4zi-racket-9.3/share/racket/collects/racket/private/reqprov.rkt:257:2
+   /nix/store/r499x5jim532jcw2zlhmpcc0wzk6s4zi-racket-9.3/share/racket/collects/syntax/wrap-modbeg.rkt:46:4
+   /nix/store/r499x5jim532jcw2zlhmpcc0wzk6s4zi-racket-9.3/share/racket/pkgs/compiler-lib/compiler/commands/test.rkt:98:2
+   body of (submod "/nix/store/r499x5jim532jcw2zlhmpcc0wzk6s4zi-racket-9.3/share/racket/pkgs/compiler-lib/compiler/commands/test.rkt" process)
+   body of top-level
+to-test.rkt: raco test: non-zero exit: 1
+raco test: (submod (file "torch/tests/define-layer-test.rkt") test)
+/home/bkc/dev/rkt/rktorch/.claude/worktrees/vision-152/torch/foreign/autocast.rkt:54:65: syntax: unbound identifier;
+ also, no #%app syntax transformer is bound in the transformer phase
+  at: syntax
+  in: (syntax (default-device))
+  location...:
+   /home/bkc/dev/rkt/rktorch/.claude/worktrees/vision-152/torch/foreign/autocast.rkt:54:65
+  context...:
+   /nix/store/r499x5jim532jcw2zlhmpcc0wzk6s4zi-racket-9.3/share/racket/collects/racket/private/stxparam.rkt:57:2
+   /nix/store/r499x5jim532jcw2zlhmpcc0wzk6s4zi-racket-9.3/share/racket/pkgs/compiler-lib/compiler/commands/test.rkt:98:2
+   body of (submod "/nix/store/r499x5jim532jcw2zlhmpcc0wzk6s4zi-racket-9.3/share/racket/pkgs/compiler-lib/compiler/commands/test.rkt" process)
+   body of top-level
+define-layer-test.rkt: raco test: non-zero exit: 1
+3/3 test failures

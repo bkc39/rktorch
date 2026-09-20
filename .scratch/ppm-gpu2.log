@@ -1,0 +1,8 @@
+bytecode cache: clearing compiled/ (a67336b4604d -> 890866cf4cbd)
+Staging libtorchrkt (/nix/store/cip31284001i3vq747yzx1yn5hnhd05m-torchrkt-cpp-0.1.0)...
+Staging host NVIDIA driver farm...
+CUDA shell ready. Verify:
+  raco test torch/tests/device-test.rkt
+raco test: (submod (file "torch/tests/python-cross-test.rkt") test)
+raco test: (submod (file "torch/tests/ppm-test.rkt") test)
+5975055 tests passed

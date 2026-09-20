@@ -1,0 +1,29 @@
+8836b327b33805540817c77fe9635d2fc8a4d54d
+100644 c71cf6bdd9a65af9d1dcc2272de18f9ef1478a34 1	AGENTS.md
+100644 058ea94f7b0738c573e9b1b1914f74382c9c93b8 2	AGENTS.md
+100644 2781b069acea35c298baa1aa2b55192370a28501 3	AGENTS.md
+100644 b7a8ccf7b19a116d95ce37a0e196346b51570529 1	torch/nn.rkt
+100644 efd983024c08e91c92b4f8f65a59a036bf0bc5b8 2	torch/nn.rkt
+100644 8578ae0fb1b680cab1dc64985f14bd1b89662944 3	torch/nn.rkt
+100644 6c5cb249651c62182a50a4358910000f4bb56d42 1	torch/nn/layer.rkt
+100644 23a3b4187da4758a07adbfda5a4b91eb00847b8c 2	torch/nn/layer.rkt
+100644 35493dac629da2bdff0f2ddb9b15457c44e217c2 3	torch/nn/layer.rkt
+100644 7a443986002d3ffd6f84be29258d5a8971d4c25c 1	torch/nn/loss.rkt
+100644 95f3924df72c2e19b25fdf48ff3e8af5eed4257c 2	torch/nn/loss.rkt
+100644 13015e50f9aa2346496cd12ffebf0e9cd045ae6c 3	torch/nn/loss.rkt
+
+Auto-merging AGENTS.md
+CONFLICT (content): Merge conflict in AGENTS.md
+Auto-merging codegen/allowlist.txt
+Auto-merging cpp/tests/torchrkt/c_api_compile_test.c
+Auto-merging torch/foreign.rkt
+Auto-merging torch/generated.rkt
+Auto-merging torch/nn.rkt
+CONFLICT (content): Merge conflict in torch/nn.rkt
+Auto-merging torch/nn/layer.rkt
+CONFLICT (content): Merge conflict in torch/nn/layer.rkt
+Auto-merging torch/nn/loss.rkt
+CONFLICT (content): Merge conflict in torch/nn/loss.rkt
+Auto-merging torch/scribblings/nn.scrbl
+Auto-merging torch/tests/generated-parity-test.rkt
+Auto-merging torch/tests/generated-parity.rktd

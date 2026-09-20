@@ -1,0 +1,16 @@
+codegen: tranche 6, the classic vision op closure (#152)
+
+batch_norm, leaky_relu, binary_cross_entropy_with_logits, huber_loss,
+l1_loss and flip join the allowlist; every one fits the existing kinds, so
+the generator is untouched. batch_norm's running statistics are optional
+tensors that ATen updates in place when training, which is what lets a
+Buffer field carry nn.BatchNorm2d's semantics without a Racket-side write.
+
+Goldens in generated_tranche6_test.cpp pin the per-channel normalisation,
+the momentum update of the running statistics (unbiased batch variance),
+the eval-mode refusal without statistics, log 2 for BCE at zero logits,
+the Huber knee, and both flip forms; C pins for the six signatures; parity
+recipes with training, weighted, sum, none and multi-dim drives.
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01VDEpCNkMi2rmxjgRnCHhkp
