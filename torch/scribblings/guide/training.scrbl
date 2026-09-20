@@ -10,8 +10,7 @@
 
 Everything so far assembles into one small loop. This chapter fits a model
 to data end to end, with no dataset machinery in the way --- see
-@other-doc['(lib "torch/scribblings/torch.scrbl")] for datasets and
-batching.
+@secref["Datasets_and_loaders"] for those.
 
 @section[#:tag "training-problem"]{Something to learn}
 

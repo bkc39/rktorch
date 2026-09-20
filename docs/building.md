@@ -82,13 +82,16 @@ the loader's own message.
 
 ## The manual
 
-The package ships two Scribble documents: the guide
-(`torch/scribblings/guide/`), a narrative introduction, and the reference
-(`torch/scribblings/torch.scrbl`). Chapters share
-`torch/scribblings/common.rkt`, whose `torch-examples` form binds every
-example to one evaluator, so the results in the manual are produced by the
-library at build time. An example that would need a GPU or a download must
-not be written as a live one.
+The manual is one Scribble document, `torch/scribblings/torch.scrbl`, with
+two parts beneath it: `guide.scrbl`, a narrative introduction whose
+chapters live in `guide/`, and `reference.scrbl`, which includes the
+per-area chapters. Keeping both halves in a single document is what makes
+the links between them ordinary relative links.
+
+Chapters share `torch/scribblings/common.rkt`, whose `torch-examples` form
+binds every example to one evaluator, so the results in the manual are
+produced by the library at build time. An example that would need a GPU or
+a download must not be written as a live one.
 
 `raco setup` renders both into `torch/doc/` (gitignored), and `raco docs`
 opens them:
@@ -98,19 +101,18 @@ nix develop .#ci --command raco setup --pkgs torch
 nix develop .#ci --command raco docs
 ```
 
-Those pages reach the other manuals through Racket's `local-redirect`
+Links into Racket's own manuals still go through its `local-redirect`
 mechanism, whose rewriting script is loaded over `file://`. That is right
-for reading them locally and broken for serving them over HTTP, where the
-script never runs and every cross-manual link lands on a "Redirections"
-placeholder. To render a copy that can be served, build both documents in
-one pass so the links between them are relative, and send the ones into
-Racket's own manuals to the web:
+for reading the docs locally and broken for serving them over HTTP, where
+the script never runs and such a link lands on a "Redirections"
+placeholder. To render a copy that can be served, send those links to the
+web instead:
 
 ```bash
 nix develop .#ci --command raco scribble --htmls --dest /tmp/rktorch-docs \
   ++main-xref-in --redirect-main https://docs.racket-lang.org/ \
-  torch/scribblings/guide/guide.scrbl torch/scribblings/torch.scrbl
-python3 -m http.server -d /tmp/rktorch-docs 8000   # then open /guide/
+  torch/scribblings/torch.scrbl
+python3 -m http.server -d /tmp/rktorch-docs 8000   # then open /torch/
 ```
 
 ## Coverage

@@ -8,10 +8,10 @@
 
 @title[#:tag "welcome"]{Welcome to rktorch}
 
-@racketmodname[torch] binds libtorch, the C++ library underneath PyTorch.
-The tensors are the same tensors: the same dtypes, the same broadcasting,
-the same autograd engine, the same kernels on the same GPU. What changes is
-the language around them.
+If you know PyTorch, most of what you know transfers: the dtypes, the
+broadcasting rules, the autograd engine and the kernels are the same ones.
+This chapter covers what is different --- how the library is spelled in
+Racket --- before the rest of the guide gets to work.
 
 @section[#:tag "welcome-first"]{A first tensor}
 
