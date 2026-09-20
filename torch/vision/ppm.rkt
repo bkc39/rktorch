@@ -1,7 +1,7 @@
 #lang racket/base
 
 (require (only-in racket/contract/base
-                  ->* ->i and/c flat-named-contract list/c)
+                  ->* ->i and/c flat-named-contract list/c unsupplied-arg?)
          (only-in "../foreign.rkt"
                   add clamp copy! fill-value/c full mul narrow permute select
                   sub tensor-device tensor-dtype tensor-shape tensor->vector
@@ -22,13 +22,27 @@
                  (= 3 (car dims))
                  (andmap positive? dims)))))))
 
+;; the endpoints cross to ATen as doubles, so the span and scale checked
+;; here are the ones the arithmetic will use, not the exact originals
 (define (quantizes? r)
-  (define span (exact->inexact (- (cadr r) (car r))))
-  (and (< (car r) (cadr r))
+  (define lo (exact->inexact (car r)))
+  (define hi (exact->inexact (cadr r)))
+  (define span (- hi lo))
+  (and (= lo (car r))
+       (= hi (cadr r))
+       (< lo hi)
        (rational? span)
        (positive? span)
        (let ([scale (/ 255.0 span)])
          (and (rational? scale) (positive? scale)))))
+
+;; float32 carries the scale for a float32 image: a span small enough to
+;; make it overflow there writes every pixel white
+(define (scale-fits? value-range dtype)
+  (define span (- (exact->inexact (cadr value-range))
+                  (exact->inexact (car value-range))))
+  (or (not (eq? dtype 'float32))
+      (<= (/ 255.0 span) 3.4028234663852886e38)))
 
 (define value-range/c
   (flat-named-contract
@@ -88,7 +102,13 @@
   grid)
 
 (define/contract-out (write-ppm path image #:range [value-range '(0 1)]) ;; noqa
-  (->* [path-string? image/c] [#:range value-range/c] void?)
+  (->i ([path path-string?] [image image/c])
+       (#:range [value-range value-range/c])
+       #:pre/name (image value-range)
+       "the range's scale must be a number in the image's dtype"
+       (or (unsupplied-arg? value-range)
+           (scale-fits? value-range (tensor-dtype image)))
+       [_ void?])
   (define dims (tensor-shape image))
   (define lo (car value-range))
   (define hi (cadr value-range))

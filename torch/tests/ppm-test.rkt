@@ -14,7 +14,6 @@
     bs)
 
   (test-case "image-grid: make_grid's layout, padding around every image"
-    ;; three 1x2 images of one channel each, two columns, padding 1
     (define images (reshape (add (arange 6) 1.0) 3 1 1 2))
     (define grid (image-grid images #:columns 2 #:padding 1 #:pad-value -1))
     (check-equal? (tensor-shape grid) '(3 5 7) "one channel becomes three")
@@ -32,8 +31,6 @@
                   "ten images in eight columns: two rows")
     (check-equal? (tensor-shape (image-grid (randn 2 3 4 4) #:padding 0))
                   '(3 4 8))
-    ;; a uint8 batch keeps its dtype, and full refuses a pad value outside
-    ;; its range as contract blame rather than wrapping it
     (define bytes-batch (to-dtype (full 9.0 2 3 2 2) 'uint8))
     (define byte-grid (image-grid bytes-batch #:padding 1 #:pad-value 7))
     (check-equal? (tensor-dtype byte-grid) 'uint8)
@@ -121,6 +118,16 @@
     ;; a span small enough that 255 over it is not a number either
     (check-exn #rx"value-range"
                (lambda () (written (zeros 3 2 2) #:range '(0 1e-307))))
+    (check-exn #rx"value-range"
+               (lambda () (written (zeros 3 2 2)
+                                   #:range (list (add1 (expt 2 53))
+                                                 (+ 3 (expt 2 53))))))
+    (check-exn #rx"scale must be a number in the image's dtype"
+               (lambda () (written (zeros 3 2 2) #:range '(0 1e-38))))
+    (check-equal? (bytes-length (written (to-dtype (zeros 3 2 2) 'float64)
+                                         #:range '(0 1e-38)))
+                  (+ 11 12)
+                  "float64 carries that scale")
     (check-exn #rx"expected: image"
                (lambda () (written (to-dtype (zeros 3 2 2) 'bool))))
     ;; an int64 image under the default range would quantize to white

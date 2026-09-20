@@ -70,7 +70,7 @@ CPU-first; float32 + inferred int64 (#44) + uint8 from bytes (#58). From
   runs, captured failure messages, and live ledger entries; also dumped at
   exit under `RKTORCH_MEM_TRACE`), `tensor-free!` (explicit synchronous
   release)
-- creation: `zeros ones full arange eye tensor rand randn` (+ in-place
+- creation: `zeros ones full fill-value/c arange eye tensor rand randn` (+ in-place
   `uniform!`); every constructor takes `#:device` / `#:dtype` chosen at
   native construction (never construct-then-move) and `#:requires-grad?`
   applied after it (integer dtypes refuse it as torch does); the shape
