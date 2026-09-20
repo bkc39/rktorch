@@ -34,8 +34,6 @@
          layer-named-children ;; noqa
          layer-mode ;; noqa
          layer-set-mode! ;; noqa
-         move-layer!
-         call-at-forward-trough
          in-mode
          in-eval-mode
          with-mode

@@ -21,6 +21,7 @@ the whole context.
 @chunk[<r12-require>
 (require racket/runtime-path
          (only-in racket/file file->string)
+         (only-in racket/match match)
          torch torch/nn
          (only-in torch/data/text
                   contiguous-blocks
@@ -59,9 +60,9 @@ weights are drawn in.
   (set! head (Linear hidden vocab-size))
   #:forward (idx state)
   (define-values (out h c)
-    (if state
-        (lstm (embed idx) (car state) (cadr state))
-        (lstm (embed idx))))
+    (match state
+      [(list h₀ c₀) (lstm (embed idx) h₀ c₀)]
+      [#f (lstm (embed idx))]))
   (values (head out) (list h c)))]
 
 @bold{The loss.} Every position predicts its successor, so the @tt{[B, T, V]}
@@ -211,13 +212,13 @@ and only the chosen index crosses to the host each step.
   (define device (tensor-device (car (parameters net))))
   (define (last-step-logits logits)
     (define seq-len (cadr (tensor-shape logits)))
-    (reshape (narrow logits 1 (- seq-len 1) 1) 1 -1))
+    (~> logits (narrow 1 (sub1 seq-len) 1) (reshape 1 -1)))
   (define (draw logits)
     (multinomial (softmax (/ logits temperature) -1) 1))
   (in-eval-mode net
     (with-no-grad
       (define prompt-ids
-        (to-device (reshape (encode vocab prompt) 1 -1) device))
+        (~> (encode vocab prompt) (reshape 1 -1) (to device)))
       (define-values (prompt-logits primed) (net prompt-ids #f))
       (define-values (drawn _logits _state)
         (for/fold ([drawn '()]

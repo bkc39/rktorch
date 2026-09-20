@@ -290,8 +290,8 @@
                (step! opt)
                (item loss)))
            (values losses
-                   (cat (for/list ([p (in-list (parameters net))])
-                          (reshape p -1))))))
+                   (cat (map (lambda (p) (reshape p -1))
+                             (parameters net))))))
        (check-training-twin "05_mnist" "python/05_mnist.py" train-on 'cpu tol)
        (when (and (cuda-available?)
                   (python-cuda-available?))
