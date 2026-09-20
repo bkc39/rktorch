@@ -290,8 +290,8 @@
                (step! opt)
                (item loss)))
            (values losses
-                   (cat (map (lambda (p) (reshape p -1))
-                             (parameters net))))))
+                   (cat (for/list ([p (in-list (parameters net))])
+                          (reshape p -1))))))
        (check-training-twin "05_mnist" "python/05_mnist.py" train-on 'cpu tol)
        (when (and (cuda-available?)
                   (python-cuda-available?))
@@ -452,8 +452,8 @@
                (step! opt)
                (item loss)))
            (values losses
-                   (cat (for/list ([p (in-list (parameters net))])
-                          (reshape p -1))))))
+                   (cat (map (lambda (p) (reshape p -1))
+                             (parameters net))))))
        (check-training-twin "12_char_rnn" "python/12_char_rnn.py" train-on
                             'cpu tol)
        (when (and (cuda-available?)
@@ -638,6 +638,34 @@
              [b (in-list (hash-ref j 'values))]
              [i (in-naturals)])
          (check-= a b tol (format "group-norm forward: value ~a parity" i))))
+     (let ()
+       (define j (python-check "batch_norm_forward.py"))
+       (manual-seed! 0)
+       (define bn (BatchNorm2d 3))
+       (define x (randn 2 3 4 4))
+       (define r (bn x))
+       (check-equal? (tensor-shape r) (hash-ref j 'shape)
+                     "batch-norm forward: shape parity")
+       (for ([a (in-list (tensor->list r))]
+             [b (in-list (hash-ref j 'values))]
+             [i (in-naturals)])
+         (check-= a b tol (format "batch-norm forward: value ~a parity" i)))
+       (define stats (buffers bn))
+       (for ([a (in-list (tensor->list (car stats)))]
+             [b (in-list (hash-ref j 'running_mean))]
+             [i (in-naturals)])
+         (check-= a b tol (format "batch-norm running mean ~a parity" i)))
+       (for ([a (in-list (tensor->list (cadr stats)))]
+             [b (in-list (hash-ref j 'running_var))]
+             [i (in-naturals)])
+         (check-= a b tol (format "batch-norm running var ~a parity" i)))
+       (check-= (item (caddr stats)) (hash-ref j 'num_batches_tracked) 0
+                "batch-norm batches tracked parity")
+       (define e (in-eval-mode bn (bn x)))
+       (for ([a (in-list (tensor->list e))]
+             [b (in-list (hash-ref j 'eval_values))]
+             [i (in-naturals)])
+         (check-= a b tol (format "batch-norm eval: value ~a parity" i))))
      (let ()
        (define j (python-check "ema_update.py"))
        (manual-seed! 0)

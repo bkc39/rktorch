@@ -136,6 +136,17 @@
           'clamp '((tensor 2 3) (optional-scalar -0.5) (optional-scalar 0.5))
           'repeat-interleave-self-int '((tensor 2 3) (int64 2) (optional-int64 1)
                                         (kwarg "output_size" none))
+          ;; running_var must stay positive, so it is drawn as ones
+          'batch-norm '((tensor 2 3 4 4) (optional-tensor 3) (optional-tensor 3)
+                        (optional-tensor 3) (optional-tensor-ones 3) (bool #f)
+                        (double 0.1) (double 1e-5) (bool #t))
+          'leaky-relu '((tensor 2 3) (double 0.01))
+          'binary-cross-entropy-with-logits '((tensor 2 3) (tensor 2 3)
+                                              (optional-tensor #f)
+                                              (optional-tensor #f) (int64 1))
+          'huber-loss '((tensor 2 3) (tensor 2 3) (int64 1) (double 1.0))
+          'l1-loss '((tensor 2 3) (tensor 2 3) (int64 1))
+          'flip '((tensor 2 3) (int-array (1)))
           'topk '((tensor 3 5) (int64 2) (int64 -1) (bool #t) (bool #t))
           'sort-tensor '((tensor 3 5) (int64 -1) (bool #f))
           'cudnn-rnn-flatten-weight 'device-only
@@ -417,6 +428,39 @@
       (assq 'repeat-interleave-self-int manifest)
       '((tensor 2 3) (int64 3) (optional-int64 #f) (kwarg "output_size" 18))
       "[flattened+output-size]")
+     (check-generated-parity
+      (assq 'batch-norm manifest)
+      '((tensor 2 3 4 4) (optional-tensor 3) (optional-tensor 3)
+        (optional-tensor 3) (optional-tensor-ones 3) (bool #t) (double 0.1)
+        (double 1e-5) (bool #t))
+      "[training]")
+     (check-generated-parity
+      (assq 'batch-norm manifest)
+      '((tensor 2 3 4 4) (optional-tensor #f) (optional-tensor #f)
+        (optional-tensor #f) (optional-tensor #f) (bool #t) (double 0.1)
+        (double 1e-5) (bool #t))
+      "[training+no-stats+no-affine]")
+     (check-generated-parity
+      (assq 'leaky-relu manifest)
+      '((tensor 2 3) (double 0.2))
+      "[slope-0.2]")
+     (check-generated-parity
+      (assq 'binary-cross-entropy-with-logits manifest)
+      '((tensor 2 3) (tensor 2 3) (optional-tensor 3) (optional-tensor-ones 3)
+        (int64 2))
+      "[weighted+sum]")
+     (check-generated-parity
+      (assq 'huber-loss manifest)
+      '((tensor 2 3) (tensor 2 3) (int64 0) (double 0.5))
+      "[none+delta-0.5]")
+     (check-generated-parity
+      (assq 'l1-loss manifest)
+      '((tensor 2 3) (tensor 2 3) (int64 2))
+      "[sum]")
+     (check-generated-parity
+      (assq 'flip manifest)
+      '((tensor 2 3) (int-array (0 1)))
+      "[both-dims]")
      (check-generated-parity
       (assq 'topk manifest)
       '((tensor 3 5) (int64 3) (int64 0) (bool #f) (bool #t))
