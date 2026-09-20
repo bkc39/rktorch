@@ -52,6 +52,34 @@ per-checkout `.racket-user` directory and stages `libtorchrkt` under
 `torch/native-libs/`. After changing C++, re-stage the library with
 `nix run .#copy-native-libs` before running `raco test`.
 
+## The native library
+
+`torch` loads `libtorchrkt` from `torch/native-libs/`, and reports which of the
+two failures it hit: nothing staged there, or something staged that the
+platform loader would not open. Nix stages it for you -- `nix build`, or the
+first entry into `nix develop` -- and `nix run .#copy-native-libs` re-stages it
+after a C++ change. Without Nix there are two ways to supply it.
+
+Set `TORCHRKT_NATIVE_LIB_PATH` to a directory whose `lib/` subdirectory holds
+the library, and the package's pre-install hook copies it into place:
+
+```bash
+TORCHRKT_NATIVE_LIB_PATH=/path/to/prefix raco pkg install --name torch ./torch
+# /path/to/prefix/lib/libtorchrkt.so   (libtorchrkt.dylib on darwin)
+```
+
+Or copy it in by hand, which the hook leaves alone:
+
+```bash
+cp libtorchrkt.so torch/native-libs/
+```
+
+A hand-built library has to find libtorch at load time as well; the one Nix
+builds carries an rpath to it, so a copy from elsewhere may need
+`LD_LIBRARY_PATH` (`DYLD_LIBRARY_PATH` on darwin) to point at libtorch's `lib/`.
+A library that is staged but cannot resolve libtorch reports as staged, with
+the loader's own message.
+
 ## Coverage
 
 `scripts/coverage.rkt` instruments the library with
