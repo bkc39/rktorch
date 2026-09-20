@@ -46,15 +46,33 @@ Handle make(const std::vector<float>& values,
 }
 
 TEST(Spectral, HannWindowMatchesClosedForm) {
-  const Handle w(tr_hann_window(4, true));
+  const Handle w(tr_hann_window(4, true, TR_DEVICE_KEEP, 0, TR_DTYPE_KEEP));
   EXPECT_EQ(data_of(w.t), (std::vector<float>{0.0F, 0.5F, 1.0F, 0.5F}));
-  const Handle symmetric(tr_hann_window(4, false));
+  const Handle symmetric(
+      tr_hann_window(4, false, TR_DEVICE_KEEP, 0, TR_DTYPE_KEEP));
   const std::vector<float> s = data_of(symmetric.t);
   EXPECT_FLOAT_EQ(s[0], 0.0F);
   EXPECT_FLOAT_EQ(s[3], 0.0F);
-  const Handle empty(tr_hann_window(0, true));
+  const Handle empty(tr_hann_window(0, true, TR_DEVICE_KEEP, 0, TR_DTYPE_KEEP));
   EXPECT_EQ(data_of(empty.t), std::vector<float>{});
-  EXPECT_EQ(tr_hann_window(-1, true), nullptr);
+  EXPECT_EQ(tr_hann_window(-1, true, TR_DEVICE_KEEP, 0, TR_DTYPE_KEEP),
+            nullptr);
+  EXPECT_NE(tr_last_error(), nullptr);
+}
+
+TEST(Spectral, HannWindowHonoursDeviceAndDtype) {
+  const Handle f64(tr_hann_window(4, true, TR_DEVICE_CPU, 0, TR_DTYPE_FLOAT64));
+  tr_dtype dtype = TR_DTYPE_FLOAT32;
+  ASSERT_EQ(tr_tensor_dtype(f64.t, &dtype), 0) << tr_last_error();
+  EXPECT_EQ(dtype, TR_DTYPE_FLOAT64);
+  tr_device_type type = TR_DEVICE_CUDA;
+  int64_t index = -1;
+  ASSERT_EQ(tr_tensor_device(f64.t, &type, &index), 0) << tr_last_error();
+  EXPECT_EQ(type, TR_DEVICE_CPU);
+  EXPECT_EQ(shape_of(f64.t), (std::vector<int64_t>{4}));
+  EXPECT_EQ(tr_hann_window(4, true, static_cast<tr_device_type>(99), 0,
+                           TR_DTYPE_KEEP),
+            nullptr);
   EXPECT_NE(tr_last_error(), nullptr);
 }
 
@@ -74,7 +92,8 @@ TEST(Spectral, StftConstantSignalConcentratesAtDc) {
 
 TEST(Spectral, StftHonorsWindowAndGuards) {
   const Handle signal = make({1.0F, 1.0F, 1.0F, 1.0F}, {4});
-  const Handle window(tr_hann_window(4, true));
+  const Handle window(
+      tr_hann_window(4, true, TR_DEVICE_KEEP, 0, TR_DTYPE_KEEP));
   const Handle out(tr_stft(signal.t, 4, 4, 4, window.t, false, false));
   const std::vector<float> v = data_of(out.t);
   EXPECT_FLOAT_EQ(v[0], 2.0F);
