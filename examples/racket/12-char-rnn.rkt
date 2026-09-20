@@ -21,6 +21,7 @@ the whole context.
 @chunk[<r12-require>
 (require racket/runtime-path
          (only-in racket/file file->string)
+         (only-in racket/list last)
          (only-in racket/match match)
          torch torch/nn
          (only-in torch/data/text
@@ -79,7 +80,7 @@ halves apart.
             (reshape ys -1)))
 
 (define (last-dim t)
-  (car (reverse (tensor-shape t))))]
+  (last (tensor-shape t)))]
 
 @bold{One step.} Backward, clip, update. The clip sits between the backward
 pass and the optimizer: it rescales all gradients by one factor so their joint
@@ -150,8 +151,13 @@ the defaults.
     (define-values (xs ys)
       (contiguous-blocks (encode vocab text) block-size))
     (define n (car (tensor-shape xs)))
-    (unless (<= batch n)
-      (error 'train-on-text "batch ~a exceeds the text's ~a blocks" batch n))
+    (unless (and (exact-positive-integer? batch) (<= batch n))
+      (error 'train-on-text
+             "batch must be a positive integer at most the text's ~a blocks, got ~a"
+             n batch))
+    (unless (exact-positive-integer? log-every)
+      (error 'train-on-text "log-every must be a positive integer, got ~a"
+             log-every))
     (define net (net-for (vector-length vocab)))
     (define opt (adam (parameters net) #:lr lr))
     (for ([epoch (in-range 1 (add1 epochs))])
