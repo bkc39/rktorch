@@ -8,12 +8,19 @@
 
 (module+ main
   (printf "device: ~a\n" (pick-device))
-  (define epochs (string->number (or (getenv "EPOCHS") "0")))
+  ;; an unset EPOCHS takes the default; a supplied one is authoritative, zero
+  ;; included, so EPOCHS=0 samples an untrained net rather than silently
+  ;; starting the full run and downloading the novella for it
+  (define epochs
+    (let ([supplied (getenv "EPOCHS")])
+      (and supplied
+           (or (string->number supplied)
+               (error '12-char-rnn "EPOCHS is not a number: ~a" supplied)))))
   (define-values (net vocab)
     (cond
-      [(and (getenv "EXCERPT") (positive? epochs)) (train-excerpt #:epochs epochs)]
+      [(and (getenv "EXCERPT") epochs) (train-excerpt #:epochs epochs)]
       [(getenv "EXCERPT") (train-excerpt)]
-      [(positive? epochs) (train-novel #:epochs epochs)]
+      [epochs (train-novel #:epochs epochs)]
       [else (train-novel)]))
   (manual-seed! (string->number (or (getenv "SEED") "0")))
   (displayln
