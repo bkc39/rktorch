@@ -240,6 +240,26 @@ Whether @racket[mode] is @racket['train].
 Whether @racket[mode] is @racket['eval].
 }
 
+@deftogether[(@defproc[(BatchNorm2d [num-features exact-positive-integer?]
+                                    [#:eps eps real? 1e-5]
+                                    [#:momentum momentum real? 0.1])
+                       batch-norm2d?]
+              @defproc[(BatchNorm1d [num-features exact-positive-integer?]
+                                    [#:eps eps real? 1e-5]
+                                    [#:momentum momentum real? 0.1])
+                       batch-norm1d?])]{
+@tt{nn.BatchNorm2d} and @tt{nn.BatchNorm1d}: normalize each of
+@racket[num-features] channels over the batch, scale and shift by a
+learned @tt{weight} and @tt{bias}, and keep a @racket[Buffer] running
+mean and variance that @racket[step!] does not touch --- the forward
+updates them, in @racket['train] mode only, and @racket[eval!] switches
+the normalization onto them.  @racket[BatchNorm2d] takes an
+@tt{[N C H W]} batch and @racket[BatchNorm1d] takes @tt{[N C]} or
+@tt{[N C L]}; another rank is a contract violation naming the layer.
+The @tt{num-batches-tracked} buffer counts the batches normalized, in
+int64 as torch does.
+}
+
 @defproc[(Parameter [t tensor?]) Parameter?]{
 Returns @racket[t] as a parameter: the same storage under a tensor subtype
 that @racket[define-layer] registers, detached from any autograd graph

@@ -212,6 +212,9 @@ draws: a torchvision pipeline on the same seed picks different crops.
 
 @racketblock[
 (define g (make-generator 0))
+(define loader
+  (dataloader (cifar10-dataset 'train #:device (cuda-if-available))
+              #:batch-size 128 #:shuffle? #t #:generator g))
 (for ([(xb yb) (in-dataloader loader)])
   (define augmented
     (random-horizontal-flip (random-crop xb #:padding 4 #:generator g)

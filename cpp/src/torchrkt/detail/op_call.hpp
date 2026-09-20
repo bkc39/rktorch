@@ -142,6 +142,34 @@ int copy_data_call(const char* who, uint64_t capacity, Scalar* out,
   }
 }
 
+// Size-then-fill in bytes. The size is metadata, so a probe with no
+// capacity answers without moving the tensor to the host; only a call
+// with room materializes it.
+inline int copy_tensor_bytes(const char* who, const torch::Tensor& t,
+                             uint64_t capacity, uint8_t* out,
+                             uint64_t* out_nbytes) noexcept {
+  *out_nbytes = 0;
+  try {
+    const auto nbytes = static_cast<uint64_t>(t.numel()) *
+                        static_cast<uint64_t>(t.element_size());
+    *out_nbytes = nbytes;
+    if (capacity < nbytes) {
+      return 2;
+    }
+    if (out && nbytes > 0) {
+      const torch::Tensor c = t.to(torch::kCPU).contiguous();
+      std::memcpy(out, c.const_data_ptr(), nbytes);
+    }
+    return 0;
+  } catch (const std::exception& e) {
+    record_failure(who, e);
+    return 1;
+  } catch (...) {
+    record_unknown_failure(who);
+    return 1;
+  }
+}
+
 inline tr_tensor* null_arg(const char* who) {
   set_error(std::string(who) + ": null argument");
   return nullptr;
