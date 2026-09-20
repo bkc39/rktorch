@@ -34,18 +34,19 @@ def read_allowlist() -> list[tuple[str, str, bool]]:
         if not line:
             continue
         fields = line.split()
-        # `<shard> <op>` with an optional trailing `rng` flag marking ops
-        # that draw from the global generator stream: the Racket emitter
-        # gives those the no-retry allocator wrap (seeded-parity safety;
-        # see torch/foreign/raw/memory.rkt).
-        rng = False
-        if len(fields) == 3 and fields[2] == "rng":
-            rng = True
+        # `<shard> <op>` with an optional trailing `no-retry` flag for ops
+        # a second call would not repeat harmlessly — a draw from the
+        # global generator stream, or an in-place update of an argument.
+        # The Racket emitter gives those the no-retry allocator wrap (see
+        # torch/foreign/raw/memory.rkt).
+        no_retry = False
+        if len(fields) == 3 and fields[2] == "no-retry":
+            no_retry = True
             fields = fields[:2]
         if len(fields) != 2:
-            sys.exit(f"allowlist: malformed line (want '<shard> <op> [rng]'): "
-                     f"{raw_line!r}")
-        entry = (fields[0], fields[1], rng)
+            sys.exit("allowlist: malformed line "
+                     f"(want '<shard> <op> [no-retry]'): {raw_line!r}")
+        entry = (fields[0], fields[1], no_retry)
         if entry[:2] in [e[:2] for e in entries]:
             sys.exit(f"allowlist: duplicate entry: {entry[0]} {entry[1]}")
         entries.append(entry)
@@ -82,7 +83,7 @@ def main() -> None:
 
     shards: dict[str, list[Op]] = {}
     skips: list[Skip] = []
-    for shard, name, rng in read_allowlist():
+    for shard, name, no_retry in read_allowlist():
         f = by_name.get(name)
         if f is None:
             sys.exit(f"allowlist: {name!r} not found in native_functions.yaml")
@@ -90,14 +91,15 @@ def main() -> None:
         if isinstance(result, Skip):
             skips.append(result)
         else:
-            if rng:
-                # rng marks tensor-returning ops for the no-retry wrap;
-                # in-place ops never take an allocator wrap at all, so
-                # the combination is a spec error, not a no-op.
+            if no_retry:
+                # the flag marks tensor-returning ops for the no-retry
+                # wrap; in-place ops never take an allocator wrap at all,
+                # so the combination is a spec error, not a no-op.
                 if result.inplace:
-                    sys.exit(f"allowlist: {name!r}: `rng` is meaningless "
-                             "on an inplace op (no allocator wrap)")
-                result = dataclasses.replace(result, rng=True)
+                    sys.exit(f"allowlist: {name!r}: `no-retry` is "
+                             "meaningless on an inplace op (no allocator "
+                             "wrap)")
+                result = dataclasses.replace(result, no_retry=True)
             shards.setdefault(shard, []).append(result)
     for ops in shards.values():
         ops.sort(key=lambda o: o.c_name)

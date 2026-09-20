@@ -63,10 +63,11 @@ class Op:
     # integer status instead of a fresh handle; the C++ body calls the
     # `<base>_` method on the receiver rather than the at::* free function.
     inplace: bool = False
-    # RNG ops draw from the global generator stream; the Racket emitter
-    # gives them the no-retry allocator wrap so an OOM collect-and-retry
-    # can never double-draw and break seeded parity (allowlist `rng` flag).
-    rng: bool = False
+    # The op does something a second call would repeat: draw from the
+    # global generator stream, or update a tensor in place. The Racket
+    # emitter gives it the no-retry allocator wrap so an OOM
+    # collect-and-retry cannot run it twice (allowlist `no-retry` flag).
+    no_retry: bool = False
     # Tensor return count. More than one switches the C ABI to an integer
     # status plus one `tr_tensor**` out pointer per return.
     returns: int = 1

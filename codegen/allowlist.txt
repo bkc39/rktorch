@@ -88,9 +88,9 @@ compare ge.Tensor
 compare ge.Scalar
 
 # Regularization (dropout's train/eval mode flows from the layer). The
-# rng flag: dropout's training path draws bernoulli masks from the global
+# no-retry flag: dropout's training path draws bernoulli masks from the global
 # generator, so its binding must not take the OOM collect-and-retry wrap.
-nn dropout rng
+nn dropout no-retry
 inplace copy_
 inplace fill_.Scalar
 inplace index_copy_
@@ -142,8 +142,9 @@ shape repeat_interleave.self_int
 
 # batch_norm takes the running statistics as optional tensors and updates
 # them in place when training, so a Buffer field gets nn.BatchNorm2d's
-# semantics without a Racket-side write.
-nn batch_norm
+# semantics without a Racket-side write. That update is why it does not
+# retry: an OOM after it would apply the same batch twice.
+nn batch_norm no-retry
 nn leaky_relu
 
 # The GAN, VAE and regression objectives; reduction is the Racket wrapper's
@@ -165,13 +166,13 @@ sort argsort
 # The cudnn-backed multi-layer recurrences: the flat weights and the LSTM's
 # (h, c) state marshal through the tensor-list kind, and they return
 # (output, h_n, c_n) and (output, h_n). Dropout between layers draws from
-# the global stream when train is set, hence the rng flag.
-rnn lstm.input rng
-rnn gru.input rng
+# the global stream when train is set, hence the no-retry flag.
+rnn lstm.input no-retry
+rnn gru.input no-retry
 
 # multinomial introduces the optional-generator kind (a tr_generator
 # handle, NULL for the global stream).
-random multinomial rng
+random multinomial no-retry
 
 # cudnn wants an RNN's weights in one buffer and otherwise compacts them,
 # with a warning, on every call. This re-points each weight at its slice of
