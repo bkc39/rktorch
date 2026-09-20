@@ -73,8 +73,11 @@
                   tensor?
                   wrap-tensor))
 
-(provide device->type+index
+(provide any-float-dtype/c
+         device->type+index
          dims-rest/c
+         float-dtype/c
+         placement
          with-default-device)
 
 (module+ unsafe
@@ -88,6 +91,19 @@
 (define dtype-symbols '(float32 float64 int64 bool uint8 float16 bfloat16))
 
 (define/checked-out dtype/c contract? (apply or/c dtype-symbols))
+
+(define float-dtype/c (or/c 'float32 'float64))
+
+;; randn and rand construct at the dtype they are given, half included;
+;; the spectral helpers in torch/audio take float-dtype/c and do not
+(define any-float-dtype/c (or/c 'float32 'float64 'float16 'bfloat16))
+
+;; the device and dtype go into native construction — never a default-device
+;; scope or a construct-then-move hop through another device
+(define (placement device dtype)
+  (define-values (type index)
+    (if device (device->type+index device) (values 'keep 0)))
+  (values type index (or dtype 'keep)))
 
 ;; Python's argument order: a dtype target stands alone, a device target may
 ;; carry a dtype — the shape gets contract blame, not a runtime error
