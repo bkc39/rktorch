@@ -86,6 +86,14 @@
     (check-exn blames-this-test
                (lambda () (Sequential (Linear 2 2) 'not-a-module))))
 
+  (test-case "an unbatched image blames ResNet, not a layer inside it"
+    (define net (ResNet #:base 4))
+    (check-exn #rx"^ResNet: contract violation"
+               (lambda () (net (randn 3 32 32))))
+    (check-exn #rx"expected: image-batch"
+               (lambda () (net (randn 3 32 32))))
+    (check-equal? (tensor-shape (net (randn 2 3 32 32))) '(2 10)))
+
   (test-case "ResNet's #:blocks is one depth per stage, so exactly four"
     (check-exn #rx"^ResNet: contract violation"
                (lambda () (ResNet #:blocks '(2 2 2))))
