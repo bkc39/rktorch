@@ -94,6 +94,44 @@
        (check-exn exn:fail? (lambda () (cuda-memory-stats)))
        (check-not-exn cuda-empty-cache!)]))
 
+  (test-case "cuda capacity, peak reset and allocator settings (#145)"
+    (check-exn #rx"expected a CUDA device"
+               (lambda () (cuda-memory-info (cpu-device))))
+    (check-exn #rx"expected a CUDA device"
+               (lambda () (cuda-reset-peak-stats! (cpu-device))))
+    (cond
+      [(cuda-available?)
+       (define g (tensor '(1 2 3 4) #:device (cuda-device)))
+       (define info (cuda-memory-info))
+       (check-true (> (cdr (assq 'total info)) 0))
+       (check-true (<= (cdr (assq 'free info)) (cdr (assq 'total info))))
+       (cuda-reset-peak-stats!)
+       (define stats (cuda-memory-stats))
+       (check-equal? (cdr (assq 'peak-allocated stats))
+                     (cdr (assq 'allocated stats)))
+       (check-not-exn
+        (lambda () (cuda-allocator-settings! "garbage_collection_threshold:0.9")))
+       (check-exn exn:fail?
+                  (lambda () (cuda-allocator-settings! "no_such_option:1")))
+       (check-equal? (tensor-device g) (cuda-device 0))]
+      [else
+       (check-exn exn:fail? (lambda () (cuda-memory-info)))
+       (check-exn exn:fail? (lambda () (cuda-reset-peak-stats!)))
+       (check-not-exn
+        (lambda () (cuda-allocator-settings! "expandable_segments:True")))]))
+
+  (test-case "mps memory gauges (#145)"
+    (define info (mps-memory-info))
+    (define (gauge k) (cdr (assq k info)))
+    (check-equal? (map car info) '(allocated driver-allocated recommended-max))
+    (cond
+      [(mps-available?)
+       (check-true (> (gauge 'recommended-max) 0))
+       (check-true (>= (gauge 'driver-allocated) (gauge 'allocated)))]
+      [else
+       ;; absent backend: a no-op success reporting zeros, like the cache drop
+       (check-equal? (map cdr info) '(0 0 0))]))
+
   (test-case "device arguments accept structs and legacy forms alike"
     (set-default-device! (cpu-device))
     (check-equal? (default-device) (cpu-device))

@@ -12,6 +12,8 @@
 ;; for "absent" (an empty list '() is also absent for int-arrays);
 ;; loss ops follow ATen (nll_loss wants log-probabilities,
 ;; cross_entropy_loss wants raw logits).
+;; An op with several Tensor returns carries #:returns N and answers
+;; them as multiple values, in schema order.
 
 (require (only-in "foreign/define-generated.rkt"
                   define-generated-op))
@@ -21,6 +23,7 @@
          add-tensor!
          addcdiv!
          addcmul!
+         argsort
          avg-pool2d
          broadcast-to
          cat
@@ -32,6 +35,7 @@
          cos-tensor
          cross-entropy-loss
          ctc-loss-intlist
+         cudnn-rnn-flatten-weight
          dot
          dropout
          embedding
@@ -42,6 +46,7 @@
          ge-scalar
          ge-tensor
          group-norm
+         gru-input
          gt-scalar
          gt-tensor
          index-add!
@@ -53,6 +58,7 @@
          le-scalar
          le-tensor
          lerp-tensor!
+         lstm-input
          lt-scalar
          lt-tensor
          masked-fill-scalar
@@ -65,6 +71,7 @@
          mean-dim
          mm
          mul-tensor!
+         multinomial
          mv
          narrow
          ne-scalar
@@ -80,9 +87,11 @@
          silu
          sin-tensor
          slice-tensor
+         sort-tensor
          sum-dim-intlist
          take
          take-along-dim
+         topk
          tril
          triu
          where-scalar
@@ -104,6 +113,9 @@
 
 (define-generated-op addcmul! tr_gen_addcmul_ #:inplace
   ([self tensor] [tensor1 tensor] [tensor2 tensor] [value scalar]))
+
+(define-generated-op argsort tr_gen_argsort
+  ([self tensor] [dim int64] [descending bool]))
 
 (define-generated-op avg-pool2d tr_gen_avg_pool2d
   ([self tensor] [kernel-size int-array] [stride int-array] [padding int-array] [ceil-mode bool] [count-include-pad bool] [divisor-override optional-int64]))
@@ -138,6 +150,9 @@
 (define-generated-op ctc-loss-intlist tr_gen_ctc_loss_intlist
   ([log-probs tensor] [targets tensor] [input-lengths int-array] [target-lengths int-array] [blank int64] [reduction int64] [zero-infinity bool]))
 
+(define-generated-op cudnn-rnn-flatten-weight tr_gen__cudnn_rnn_flatten_weight
+  ([weight-arr tensor-list] [weight-stride0 int64] [input-size int64] [mode int64] [hidden-size int64] [proj-size int64] [num-layers int64] [batch-first bool] [bidirectional bool]))
+
 (define-generated-op dot tr_gen_dot
   ([self tensor] [tensor-arg tensor]))
 
@@ -167,6 +182,9 @@
 
 (define-generated-op group-norm tr_gen_group_norm
   ([input tensor] [num-groups int64] [weight optional-tensor] [bias optional-tensor] [eps double] [cudnn-enabled bool]))
+
+(define-generated-op gru-input tr_gen_gru_input #:rng #:returns 2
+  ([input tensor] [hx tensor] [params tensor-list] [has-biases bool] [num-layers int64] [dropout double] [train bool] [bidirectional bool] [batch-first bool]))
 
 (define-generated-op gt-scalar tr_gen_gt_scalar
   ([self tensor] [other scalar]))
@@ -200,6 +218,9 @@
 
 (define-generated-op lerp-tensor! tr_gen_lerp__tensor #:inplace
   ([self tensor] [end tensor] [weight tensor]))
+
+(define-generated-op lstm-input tr_gen_lstm_input #:rng #:returns 3
+  ([input tensor] [hx tensor-list] [params tensor-list] [has-biases bool] [num-layers int64] [dropout double] [train bool] [bidirectional bool] [batch-first bool]))
 
 (define-generated-op lt-scalar tr_gen_lt_scalar
   ([self tensor] [other scalar]))
@@ -236,6 +257,9 @@
 
 (define-generated-op mul-tensor! tr_gen_mul__tensor #:inplace
   ([self tensor] [other tensor]))
+
+(define-generated-op multinomial tr_gen_multinomial #:rng
+  ([self tensor] [num-samples int64] [replacement bool] [generator optional-generator]))
 
 (define-generated-op mv tr_gen_mv
   ([self tensor] [vec tensor]))
@@ -282,6 +306,9 @@
 (define-generated-op slice-tensor tr_gen_slice_tensor
   ([self tensor] [dim int64] [start optional-int64] [end optional-int64] [step int64]))
 
+(define-generated-op sort-tensor tr_gen_sort #:returns 2
+  ([self tensor] [dim int64] [descending bool]))
+
 (define-generated-op sum-dim-intlist tr_gen_sum_dim_intlist
   ([self tensor] [dim optional-int-array] [keepdim bool] [dtype optional-dtype]))
 
@@ -290,6 +317,9 @@
 
 (define-generated-op take-along-dim tr_gen_take_along_dim
   ([self tensor] [indices tensor] [dim optional-int64]))
+
+(define-generated-op topk tr_gen_topk #:returns 2
+  ([self tensor] [k int64] [dim int64] [largest bool] [sorted bool]))
 
 (define-generated-op tril tr_gen_tril
   ([self tensor] [diagonal int64]))

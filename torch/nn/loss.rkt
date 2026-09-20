@@ -1,12 +1,13 @@
 #lang racket/base
 
-(require (only-in racket/contract/base -> ->* and/c listof)
+(require (only-in racket/contract/base -> ->* and/c listof or/c)
          (only-in "../foreign.rkt"
                   device-type mean mul sub tensor-device tensor? to-device
                   to-dtype)
          (only-in "../generated.rkt"
                   [cross-entropy-loss g:cross-entropy-loss]
-                  [ctc-loss-intlist g:ctc-loss-intlist])
+                  [ctc-loss-intlist g:ctc-loss-intlist]
+                  [nll-loss g:nll-loss])
          (only-in "../private/contract.rkt" define/contract-out))
 
 (define/contract-out (mse-loss prediction target) ;; noqa
@@ -46,3 +47,17 @@
                               (to-device targets 'cpu))
                  device)
       (marginalize log-probs targets)))
+
+(define reductions '#hasheq((none . 0) (mean . 1) (sum . 2)))
+
+(define/contract-out (nll-loss log-probs targets ;; noqa
+                               #:weight [weight #f]
+                               #:reduction [reduction 'mean]
+                               #:ignore-index [ignore-index -100])
+  (->* (tensor? tensor?)
+       (#:weight (or/c tensor? #f)
+        #:reduction (or/c 'none 'mean 'sum)
+        #:ignore-index exact-integer?)
+       tensor?)
+  (g:nll-loss log-probs (to-dtype targets 'int64) weight
+              (hash-ref reductions reduction) ignore-index))

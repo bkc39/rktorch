@@ -140,6 +140,27 @@
     (check-equal? (tensor->list (seq (ones 1 2)))
                   (tensor->list (seq (ones 1 2))) "still callable"))
 
+  ;; A hand-written layer does not separate its own tensors from its
+  ;; children's, so the move subtracts to find them; `define-layer` declares
+  ;; them and takes the cheap path instead. Both have to move every tensor
+  ;; exactly once. See #176.
+  (test-case "a move reaches a hand-written layer's child and its own weight"
+    (struct Nest (own child)
+      #:methods gen:layer
+      [(define (layer-forward self . inputs)
+         (mul (car inputs) (Nest-own self)))
+       (define (layer-parameters self)
+         (cons (Nest-own self) (parameters (Nest-child self))))
+       (define (layer-named-children self)
+         (list (cons "child" (Nest-child self))))])
+    (define inner (Linear 2 2))
+    (define nest (Nest (Parameter (ones 2)) inner))
+    (check-eq? (to nest 'float64) nest)
+    (check-equal? (map tensor-dtype (parameters nest))
+                  '(float64 float64 float64)
+                  "the layer's own weight and its child's both moved")
+    (check-equal? (map tensor-dtype (parameters inner)) '(float64 float64)))
+
   (test-case "autograd survives an in-place move: leaf, grad, optimizers"
     (define m (Mixed))
     (define w (car (parameters m)))
