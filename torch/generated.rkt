@@ -127,7 +127,7 @@
 (define-generated-op avg-pool2d tr_gen_avg_pool2d
   ([self tensor] [kernel-size int-array] [stride int-array] [padding int-array] [ceil-mode bool] [count-include-pad bool] [divisor-override optional-int64]))
 
-(define-generated-op batch-norm tr_gen_batch_norm
+(define-generated-op batch-norm tr_gen_batch_norm #:no-retry
   ([input tensor] [weight optional-tensor] [bias optional-tensor] [running-mean optional-tensor] [running-var optional-tensor] [training bool] [momentum double] [eps double] [cudnn-enabled bool]))
 
 (define-generated-op binary-cross-entropy-with-logits tr_gen_binary_cross_entropy_with_logits
@@ -169,7 +169,7 @@
 (define-generated-op dot tr_gen_dot
   ([self tensor] [tensor-arg tensor]))
 
-(define-generated-op dropout tr_gen_dropout #:rng
+(define-generated-op dropout tr_gen_dropout #:no-retry
   ([input tensor] [p double] [train bool]))
 
 (define-generated-op embedding tr_gen_embedding
@@ -199,7 +199,7 @@
 (define-generated-op group-norm tr_gen_group_norm
   ([input tensor] [num-groups int64] [weight optional-tensor] [bias optional-tensor] [eps double] [cudnn-enabled bool]))
 
-(define-generated-op gru-input tr_gen_gru_input #:rng #:returns 2
+(define-generated-op gru-input tr_gen_gru_input #:no-retry #:returns 2
   ([input tensor] [hx tensor] [params tensor-list] [has-biases bool] [num-layers int64] [dropout double] [train bool] [bidirectional bool] [batch-first bool]))
 
 (define-generated-op gt-scalar tr_gen_gt_scalar
@@ -247,7 +247,7 @@
 (define-generated-op linear tr_gen_linear
   ([input tensor] [weight tensor] [bias optional-tensor]))
 
-(define-generated-op lstm-input tr_gen_lstm_input #:rng #:returns 3
+(define-generated-op lstm-input tr_gen_lstm_input #:no-retry #:returns 3
   ([input tensor] [hx tensor-list] [params tensor-list] [has-biases bool] [num-layers int64] [dropout double] [train bool] [bidirectional bool] [batch-first bool]))
 
 (define-generated-op lt-scalar tr_gen_lt_scalar
@@ -286,7 +286,7 @@
 (define-generated-op mul-tensor! tr_gen_mul__tensor #:inplace
   ([self tensor] [other tensor]))
 
-(define-generated-op multinomial tr_gen_multinomial #:rng
+(define-generated-op multinomial tr_gen_multinomial #:no-retry
   ([self tensor] [num-samples int64] [replacement bool] [generator optional-generator]))
 
 (define-generated-op mv tr_gen_mv
