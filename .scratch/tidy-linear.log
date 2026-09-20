@@ -1,6 +1,0 @@
-warning: Git tree '/home/bkc/dev/rkt/rktorch/.claude/worktrees/vision-152' is dirty
-these 2 derivations will be built:
-  /nix/store/2mrqgwbn7ksyn9xclay21b6m6hlbi34c-torchrkt-cpp-format-0.1.0.drv
-  /nix/store/p9qqipgbz79ql03b1k3zdpgzmdfxjd6b-torchrkt-cpp-tidy-0.1.0.drv
-building '/nix/store/2mrqgwbn7ksyn9xclay21b6m6hlbi34c-torchrkt-cpp-format-0.1.0.drv'...
-building '/nix/store/p9qqipgbz79ql03b1k3zdpgzmdfxjd6b-torchrkt-cpp-tidy-0.1.0.drv'...

@@ -1,6 +1,0 @@
-warning: Git tree '/home/bkc/dev/rkt/rktorch/.claude/worktrees/vision-152' is dirty
-Staging host NVIDIA driver farm...
-CUDA shell ready. Verify:
-  raco test torch/tests/device-test.rkt
-raco test: (submod (file "torch/tests/python-cross-test.rkt") test)
-5974766 tests passed
