@@ -28,8 +28,11 @@
           [formal id
                   [id default-expr]
                   (code:line keyword id)
-                  (code:line keyword [id default-expr])])
-         #:contracts ([contract-expr contract?])]{
+                  (code:line keyword [id default-expr])]
+          [input id
+                 [id : input-contract-expr]])
+         #:contracts ([contract-expr contract?]
+                      [input-contract-expr contract?])]{
 
 Defines a layer: a constructor @racket[name], a predicate @racket[name?],
 and a struct with one slot per @racket[field].  An instance is a
@@ -38,6 +41,23 @@ every field in scope.  A call with other than one argument per
 @racket[input] raises @racket[exn:fail:contract:arity] under
 @racket[name], whether made directly, through @racket[forward], or
 through @racket[layer-forward].
+
+An @racket[input] written @racket[[id : contract-expr]] states what the
+layer accepts there, and a call that does not satisfy it is a contract
+violation naming the layer and the contract rather than an error raised
+from inside the body: a shape the layer cannot take belongs in the
+signature, not in an @racket[unless] guard. The check is built once,
+where the layer is defined, so it costs one flat check per call; the
+party blamed is the label @tt{caller}, since a layer's forward has no
+module boundary of its own to name the caller by. A bare @racket[id]
+accepts anything, as before.
+
+@racketblock[
+(define-layer BatchNorm2d (weight bias running-mean running-var)
+  #:forward ([x : image-batch/c])
+  (batch-norm x #:weight weight #:bias bias
+              #:running-mean running-mean #:running-var running-var))
+]
 
 @racket[#:init] is the constructor body, the analogue of @tt{__init__}.
 Its @racket[formal]s are the constructor's arguments, in the grammar of
@@ -210,6 +230,26 @@ Whether @racket[mode] is @racket['train].
 
 @defproc[(evaluating? [mode mode/c]) boolean?]{
 Whether @racket[mode] is @racket['eval].
+}
+
+@deftogether[(@defproc[(BatchNorm2d [num-features exact-positive-integer?]
+                                    [#:eps eps real? 1e-5]
+                                    [#:momentum momentum real? 0.1])
+                       batch-norm2d?]
+              @defproc[(BatchNorm1d [num-features exact-positive-integer?]
+                                    [#:eps eps real? 1e-5]
+                                    [#:momentum momentum real? 0.1])
+                       batch-norm1d?])]{
+@tt{nn.BatchNorm2d} and @tt{nn.BatchNorm1d}: normalize each of
+@racket[num-features] channels over the batch, scale and shift by a
+learned @tt{weight} and @tt{bias}, and keep a @racket[Buffer] running
+mean and variance that @racket[step!] does not touch --- the forward
+updates them, in @racket['train] mode only, and @racket[eval!] switches
+the normalization onto them.  @racket[BatchNorm2d] takes an
+@tt{[N C H W]} batch and @racket[BatchNorm1d] takes @tt{[N C]} or
+@tt{[N C L]}; another rank is a contract violation naming the layer.
+The @tt{num-batches-tracked} buffer counts the batches normalized, in
+int64 as torch does.
 }
 
 @defproc[(Parameter [t tensor?]) Parameter?]{

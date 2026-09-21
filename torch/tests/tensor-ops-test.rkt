@@ -214,6 +214,39 @@
     (check-= (cadr y) 0.7310586 1e-5)
     (check-= (caddr y) -0.2689414 1e-5))
 
+  (test-case "leaky-relu: the negative side is scaled"
+    (define y (tensor->list (leaky-relu (tensor '(-2.0 0.0 3.0))
+                                        #:negative-slope 0.1)))
+    (check-= (car y) -0.2 1e-6)
+    (check-= (cadr y) 0.0 1e-6)
+    (check-= (caddr y) 3.0 1e-6)
+    (check-= (car (tensor->list (leaky-relu (tensor '(-1.0))))) -0.01 1e-7))
+
+  (test-case "flip: one dim or several"
+    (define x (reshape (arange 4) 2 2))
+    (check-equal? (tensor->list (flip x 1)) '(1.0 0.0 3.0 2.0))
+    (check-equal? (tensor->list (flip x '(0 1))) '(3.0 2.0 1.0 0.0)))
+
+  (test-case "batch-norm: statistics are a pair, required unless training"
+    (define x (reshape (tensor '(1.0 3.0 5.0 7.0)) 1 2 1 2))
+    (for ([v (in-list (tensor->list (batch-norm x #:training? #t)))]
+          [w (in-list '(-1.0 1.0 -1.0 1.0))])
+      (check-= v w 1e-4))
+    (define mean (zeros 2))
+    (define var (ones 2))
+    (for ([v (in-list (tensor->list (batch-norm x #:running-mean mean
+                                                #:running-var var)))]
+          [w (in-list '(1.0 3.0 5.0 7.0))])
+      (check-= v w 1e-4))
+    (batch-norm x #:running-mean mean #:running-var var #:training? #t)
+    (check-= (car (tensor->list mean)) 0.2 1e-5 "updated in place")
+    (check-= (car (tensor->list var)) 1.1 1e-5 "unbiased batch variance")
+    (check-exn #rx"running statistics" (lambda () (batch-norm x)))
+    (check-exn #rx"running statistics"
+               (lambda () (batch-norm x #:training? #f)))
+    (check-exn #rx"running statistics"
+               (lambda () (batch-norm x #:running-mean mean #:training? #t))))
+
   (test-case "upsample-nearest2d: every pixel becomes a scale by scale block"
     (define x (reshape (arange 4) 1 1 2 2))
     (define y (upsample-nearest2d x))

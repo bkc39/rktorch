@@ -17,6 +17,11 @@ extern "C" {
  * with several Tensor returns also reports a status and writes one
  * new handle per trailing out pointer, every one NULL on error. */
 
+tr_tensor* tr_gen_binary_cross_entropy_with_logits(
+    const tr_tensor* self, const tr_tensor* target,
+    const tr_tensor* weight /* nullable: NULL == no value */,
+    const tr_tensor* pos_weight /* nullable: NULL == no value */,
+    int64_t reduction);
 tr_tensor* tr_gen_cross_entropy_loss(
     const tr_tensor* self, const tr_tensor* target,
     const tr_tensor* weight /* nullable: NULL == no value */, int64_t reduction,
@@ -28,6 +33,10 @@ tr_tensor* tr_gen_ctc_loss_intlist(const tr_tensor* log_probs,
                                    const int64_t* target_lengths,
                                    int64_t target_lengths_len, int64_t blank,
                                    int64_t reduction, bool zero_infinity);
+tr_tensor* tr_gen_huber_loss(const tr_tensor* self, const tr_tensor* target,
+                             int64_t reduction, double delta);
+tr_tensor* tr_gen_l1_loss(const tr_tensor* self, const tr_tensor* target,
+                          int64_t reduction);
 tr_tensor* tr_gen_nll_loss(
     const tr_tensor* self, const tr_tensor* target,
     const tr_tensor* weight /* nullable: NULL == no value */, int64_t reduction,
