@@ -271,7 +271,8 @@
               (cons/c 'pressure-collections exact-nonnegative-integer?)
               (cons/c 'pressure-reclaimed exact-nonnegative-integer?)
               (cons/c 'trough-collections exact-nonnegative-integer?)
-              (cons/c 'trough-minors exact-nonnegative-integer?)))
+              (cons/c 'trough-minors exact-nonnegative-integer?)
+              (cons/c 'trough-floor exact-nonnegative-integer?)))
   raw:finalizer-diagnostics)
 
 (define/contract-out (reclaim-native-memory!) (-> void?) ;; noqa

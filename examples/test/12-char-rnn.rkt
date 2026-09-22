@@ -8,9 +8,6 @@
 
 (module+ main
   (printf "device: ~a\n" (pick-device))
-  ;; an unset variable takes the default; a supplied one is authoritative,
-  ;; zero included, so EPOCHS=0 samples an untrained net rather than silently
-  ;; starting the full run and downloading the novella for it
   (define (numeric-env name [default #f])
     (define supplied (getenv name))
     (cond
@@ -18,12 +15,9 @@
       [(string->number supplied)]
       [else (error '12-char-rnn "~a is not a number: ~a" name supplied)]))
   (define epochs (numeric-env "EPOCHS"))
+  (define train (if (getenv "EXCERPT") train-excerpt train-novel))
   (define-values (net vocab)
-    (cond
-      [(and (getenv "EXCERPT") epochs) (train-excerpt #:epochs epochs)]
-      [(getenv "EXCERPT") (train-excerpt)]
-      [epochs (train-novel #:epochs epochs)]
-      [else (train-novel)]))
+    (if epochs (train #:epochs epochs) (train)))
   (manual-seed! (numeric-env "SEED" 0))
   (displayln
    (sample net vocab "The "

@@ -110,10 +110,11 @@
   (test-case "a bare recurrent layer is a forward trough, once"
     (define (trough-minors)
       (cdr (assq 'trough-minors (finalizer-diagnostics))))
+    (define no-backoff +inf.0)
     (define gru (GRU 512 512 #:batch-first? #t))
     (define x (zeros 1 8 512))
     (parameterize ([native-collect-margin (* 1 1024 1024)]
-                   [native-collect-budget 1000])
+                   [native-collect-budget no-backoff])
       (define before (trough-minors))
       (define-values (out _h) (with-no-grad (gru x)))
       (check-equal? (- (trough-minors) before) 1
