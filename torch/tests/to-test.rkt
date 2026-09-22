@@ -124,7 +124,12 @@
         (define g (tensor '(1.0 2.0 3.0) #:device 'cuda #:dtype dt))
         (check-equal? (tensor-device g) (cuda-device))
         (check-equal? (tensor-dtype g) dt)
-        (check-equal? (tensor->list g) '(1.0 2.0 3.0)))))
+        (check-equal? (tensor->list g) '(1.0 2.0 3.0))
+        (with-default-device 'cuda
+          (define d (tensor '(1.0 2.0 3.0) #:dtype dt))
+          (check-equal? (tensor-device d) (cuda-device)
+                        "built on the CPU by name, it still lands on the default")
+          (check-equal? (tensor->list d) '(1.0 2.0 3.0))))))
 
   (test-case "a layer moves to the half pair, integer buffers staying put"
     (define m (HalfCounted))

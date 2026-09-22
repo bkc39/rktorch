@@ -25,7 +25,6 @@
          tr-from-bytes/raw
          tr-from-bytes-on-device/raw)
 
-;; element bytes in the given dtype, the inverse of tr-tensor-copy-bytes/raw
 (define-torch tr-from-bytes/raw
   (_fun (data : _bytes)
         (nbytes : _uint64)
