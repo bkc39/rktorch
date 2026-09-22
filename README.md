@@ -191,6 +191,8 @@ against:
   [training script](scripts/train-asr.rkt)
 - [Image generation on CIFAR-10](examples/racket/08-diffusion.rkt): a
   class-conditional DDPM with a UNet, trained with an EMA of the weights
+- [A character-level LSTM](examples/racket/12-char-rnn.rkt): gradient
+  clipping, and sampling at a temperature from a carried state
 
 ## Documentation
 
