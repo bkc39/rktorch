@@ -77,7 +77,6 @@
     [(6) 'bfloat16]
     [else #f]))
 
-;; the element bytes in the tensor's own dtype; capacity 0 asks for the size
 (define-torch tr-tensor-copy-bytes/raw
   (_fun (t : _Tensor)
         (capacity : _uint64)
