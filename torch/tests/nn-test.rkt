@@ -524,6 +524,21 @@
       (check-equal? (tensor->list (cdr a)) (tensor->list (cdr b))))
     (delete-file path))
 
+  (test-case "load-state!: an entry missing a field says which"
+    (define net (Linear 2 2))
+    (define header
+      (string->bytes/utf-8
+       "{\"weight\":{\"dtype\":\"F32\",\"data_offsets\":[0,16]},\"bias\":{\"dtype\":\"F32\",\"shape\":[2],\"data_offsets\":[16,24]}}"))
+    (define path (make-temporary-file "rkt-bad-~a.safetensors"))
+    (call-with-output-file path #:exists 'truncate
+      (lambda (out)
+        (write-bytes (integer->integer-bytes (bytes-length header) 8 #f #f) out)
+        (write-bytes header out)
+        (write-bytes (make-bytes 24 0) out)))
+    (check-exn #rx"entry has no field" (lambda () (load-state! net path)))
+    (check-exn #rx"shape" (lambda () (load-state! net path)))
+    (delete-file path))
+
   (test-case "BatchNorm2d: the running statistics and the counter round-trip"
     (define bn (BatchNorm2d 2))
     (bn (add (randn 3 2 4 4) 5.0))

@@ -41,12 +41,12 @@
          (only-in "raw/creation.rkt"
                   tr-arange-on/raw
                   tr-eye-on/raw
+                  tr-from-bytes/raw
                   tr-from-data-i64-on-device/raw
                   tr-from-data-i64/raw
                   tr-from-data-on-device/raw
                   tr-from-data-u8-on-device/raw
                   tr-from-data-u8/raw
-                  tr-from-bytes/raw
                   tr-from-data/raw
                   tr-full-on/raw
                   tr-ones-on/raw
