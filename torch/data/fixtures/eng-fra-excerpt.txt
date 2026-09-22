@@ -1,0 +1,318 @@
+I'm OK.	Je vais bien.
+I'm sick.	Je suis malade.
+I'm awake.	Je suis réveillé.
+I'm timid.	Je suis timide.
+I'm a liar.	Je suis un menteur.
+I'm shaken.	Je suis remué.
+You're big.	Tu es grand.
+He's not in.	Il n'est pas à l'intérieur.
+I'm engaged.	Je suis fiancé.
+I'm reading.	Je lis.
+I'm worried.	Je me fais du souci.
+We're tired.	Nous sommes fatiguées.
+You're nice.	Vous êtes sympas.
+He is eating.	Il est en train de manger.
+I'm all ears.	Je suis tout ouïe.
+I'm not deaf.	Je ne suis pas sourde.
+I'm restless.	Je ne tiens pas en place.
+I'm very shy.	Je suis très timide.
+We are Arabs.	Nous sommes arabes.
+You are late.	Vous êtes en retard.
+You're naive.	Vous êtes naïve.
+He is no fool.	Il n'est pas idiot.
+He's studying.	Il est en train d'étudier.
+I'm ambitious.	Je suis ambitieuse.
+I'm impatient.	Je suis impatient.
+I'm not obese.	Je ne suis pas obèse.
+I'm your boss.	Je suis ton chef.
+They're early.	Elles sont en avance.
+We're married.	Nous sommes mariés.
+We're unlucky.	Nous sommes malchanceux.
+You're bright.	Vous êtes brillant.
+You're joking!	Vous plaisantez !
+He is my uncle.	C'est mon oncle.
+I am an artist.	Je suis un artiste.
+I'm contagious.	Je suis contagieuse.
+I'm making tea.	Je prépare le thé.
+I'm one of you.	Je suis l'un d'entre vous.
+I'm wide awake.	Je suis tout à fait éveillée.
+We are all set.	Nous sommes toutes prêtes.
+We're not open.	Nous ne sommes pas ouverts.
+You are morons.	Vous êtes des crétins.
+You're foolish.	Vous êtes imprudentes.
+You're selfish.	Vous êtes égoïste.
+He is well paid.	Il est bien payé.
+I am very sorry.	Je suis vraiment désolé.
+I'm from Brazil.	Je viens du Brésil.
+I'm not certain.	Je n'en suis pas certain.
+I'm replaceable.	Je suis remplaçable.
+I'm your sister.	Je suis votre sœur.
+They're jittery.	Ils sont nerveux.
+We're all angry.	Nous sommes tous en colère.
+We're in charge.	C'est nous qui dirigeons.
+We're separated.	Nous sommes séparés.
+You're an idiot.	Tu es un idiot.
+You're faithful.	Vous êtes fidèle.
+You're powerful.	Vous êtes puissant.
+You're talented.	Vous êtes talentueuses.
+He is very brave.	Il est très courageux.
+He's not my type.	Il n'est pas mon genre.
+I am out of work.	Je suis sans travail.
+I'm confused now.	Je suis paumé maintenant.
+I'm no different.	Je ne suis pas différente.
+I'm real careful.	Je suis vraiment prudente.
+She is on a diet.	Elle est au régime.
+They're not dead.	Elles ne sont pas mortes.
+We're getting it.	Nous pigeons.
+We're surrounded.	Nous sommes cernés.
+You're all alone.	Vous êtes toutes seules.
+You're exhausted.	Vous êtes épuisées.
+You're obnoxious.	Vous êtes odieuse.
+You're very busy.	Vous êtes fort occupée.
+You're very rude.	Vous êtes fort grossier.
+He is a gentleman.	C'est un monsieur.
+He's an undergrad.	C'est un étudiant de premier cycle.
+I am in your debt.	Je suis votre débiteur.
+I'm aware of that.	J'en suis conscient.
+I'm kind of happy.	Je suis pour ainsi dire heureux.
+I'm not satisfied.	Je ne suis pas satisfaite.
+I'm totally drunk.	Je suis complètement saoul.
+They are very big.	Elles sont très grandes.
+We're a good team.	Nous sommes une bonne équipe.
+We're not dressed.	Nous ne sommes pas habillées.
+We're ready to go.	Nous sommes prêtes à partir.
+You are so stupid.	Tu es tellement idiote !
+You're here early.	Tu viens tôt.
+You're the leader.	Tu es la chef.
+You're too polite.	Tu es trop poli.
+You're very funny.	Vous êtes fort drôles.
+You're very upset.	Tu es très contrariée.
+He is sure to come.	Il est certain de venir.
+He's old and crazy.	Il est vieux et fou.
+I'm about to leave.	Je suis sur le point de partir.
+I'm going to fight.	Je vais me battre.
+I'm not invincible.	Je ne suis pas invincible.
+I'm very impressed.	Je suis très impressionnée.
+They're all guilty.	Elles sont toutes coupables.
+We're all infected.	Nous sommes tous infectés.
+We're not partners.	Nous ne sommes pas partenaires.
+You are overworked.	Tu es surmené.
+You're avoiding me.	Tu m'évites.
+You're not dressed.	Vous n'êtes pas habillée.
+You're still alive.	Tu es toujours vivante.
+You're the teacher.	C'est toi la professeur.
+You're very clever.	Vous êtes très ingénieuse.
+He is good at rugby.	Il est fort au rugby.
+He's in big trouble.	Il a de gros problèmes.
+I am older than him.	Je suis plus vieux que lui.
+I'm broke and tired.	Je suis sur la paille et fatigué.
+I'm more than happy.	Je suis plus qu'heureux.
+I'm not really busy.	Je ne suis pas vraiment occupé.
+I'm sorry. I forgot.	Je suis désolée. J'ai oublié.
+She is good-natured.	Elle a une bonne nature.
+They're all waiting.	Elles attendent toutes.
+We're both teachers.	Nous sommes toutes deux enseignantes.
+We're really scared.	Nous avons vraiment peur.
+You're kind of cute.	Vous êtes mignons, dans votre genre.
+You're out of order.	Tu es hors-service.
+You're very curious.	Tu es fort curieux.
+You're with friends.	Vous êtes avec des amis.
+He is in the kitchen.	Il est dans la cuisine.
+He's eight years old.	Il a huit ans.
+I am glad to see her.	Je suis contente de la voir.
+I'm dying to see you.	Je désespère de te voir !
+I'm here to help you.	Je suis ici pour vous aider.
+I'm not good at this.	Je ne suis pas bon à ça.
+I'm not your servant.	Je ne suis pas ta servante.
+I'm smarter than you.	Je suis plus dégourdie que vous.
+I'm unnecessary here.	Je ne suis pas utile ici.
+She's gone on a trip.	Elle est partie en voyage.
+They're not all busy.	Ils ne sont pas tous occupés.
+We're going to fight.	Nous combattrons.
+We're too vulnerable.	Nous sommes trop vulnérables.
+You're conscientious.	Tu es consciencieuse.
+You're not very good.	Vous n'êtes pas très bonnes.
+You're very flexible.	Vous êtes très flexible.
+He is a tennis player.	C'est un joueur de tennis.
+He is the tallest boy.	C'est le garçon le plus grand.
+He's stronger than me.	Il est plus fort que moi.
+I'm a little confused.	Je suis un peu désorienté.
+I'm glad you're early.	Je suis contente que vous soyez en avance.
+I'm not an only child.	Je ne suis pas un enfant unique.
+I'm not too convinced.	Je n'en suis pas trop convaincu.
+I'm terrible at chess.	Je suis mauvais aux échecs.
+She's still under age.	Elle est encore mineure.
+They're up to no good.	Ils ne mijotent rien de bon.
+You are not a student.	Tu n'es pas un étudiant.
+You're not safe there.	Vous n'y êtes pas en sécurité.
+You're so predictable.	Vous êtes tellement prévisible !
+You're very observant.	Vous êtes très observateur.
+He is riding a bicycle.	Il fait du vélo.
+He's still sick in bed.	Il est toujours cloué au lit.
+I'm afraid of the dark.	J'ai peur de l'obscurité.
+I'm glad I left Boston.	Je suis content d'être parti de Boston.
+I'm no friend of yours.	Je ne suis pas votre amie.
+I'm on a paid vacation.	Je suis en congés payés.
+I'm walking beside her.	Je marche à son côté.
+She's lost her car key.	Elle a perdu la clé de sa voiture.
+We're a married couple.	Nous sommes mariés.
+You are hearing things.	Vous entendez des choses.
+You're in grave danger.	Tu es en grand danger.
+You're very attractive.	Vous êtes fort attirante.
+He is looking for a job.	Il est à la recherche d'un emploi.
+He's addicted to heroin.	Il est héroïno-dépendant.
+I am the fastest runner.	Je suis le coureur le plus rapide.
+I'm going to start over.	Je vais recommencer.
+I'm not happy with this.	J'en suis mécontent.
+I'm really proud of you.	Je suis réellement fier de toi.
+She is as young as I am.	Elle est aussi jeune que moi.
+They're all on vacation.	Ils sont tous en vacances.
+We are studying Spanish.	Nous étudions l'espagnol.
+You're all hypocritical.	Vous êtes tous hypocrites.
+You're not welcome here.	Vous n'êtes pas les bienvenus ici.
+You're very resourceful.	Vous êtes pleine de ressources.
+He's always dissatisfied.	Il est constamment insatisfait.
+I am only warming up now.	Pour l'instant je m'entraîne seulement.
+I'm feeding the goldfish.	Je nourris le poisson rouge.
+I'm looking for a wallet.	Je cherche un portefeuille.
+I'm not going to sell it.	Je ne le vendrai pas.
+I'm sort of an introvert.	Je suis en quelque sorte introverti.
+She is at work right now.	Elle est au travail, actuellement.
+They are very big apples.	Ce sont de très grosses pommes.
+We're deluding ourselves.	Nous nous berçons d'illusions.
+You're a terrible person.	Tu es une personne exécrable.
+You're not alone anymore.	Vous n'êtes plus seuls.
+He is inclined to be lazy.	Il tend à être paresseux.
+He's not stronger than me.	Il n'est pas plus fort que moi.
+I am used to living alone.	Je suis habituée à vivre seule.
+I'm being paid to do this.	Je suis payé pour faire ça.
+I'm glad that you're here.	Je me réjouis que vous soyez ici.
+I'm in charge of shopping.	Je suis responsable des courses.
+I'm not pressed for money.	Je ne suis pas en mal d'argent.
+I'm sorry I yelled at you.	Je suis désolé de t'avoir crié après.
+She is a very nice person.	C'est une personne très sympa.
+They're young and healthy.	Elles sont jeunes et en bonne santé.
+You're a wonderful friend.	Tu es un merveilleux ami.
+You're not tired, are you?	Vous n'êtes pas fatigués, si ?
+You're very sophisticated.	Tu es fort raffiné.
+He is going to the concert.	Il va au concert.
+He's eager to speak to you.	Il a hâte de vous parler.
+I'm asking you as a friend.	Je vous le demande en tant qu'amie.
+I'm no longer angry at you.	Je ne suis plus en colère après toi.
+I'm sorry about last night.	Je suis désolée au sujet de la nuit dernière.
+She is just going shopping.	Elle va juste faire des courses.
+We're all in this together.	Nous sommes tous sur le même bateau.
+You are taller than she is.	Tu es plus grand qu'elle.
+You're not sleeping enough.	Vous ne dormez pas suffisamment.
+He is digging his own grave.	Il creuse sa propre tombe.
+He's checking his cellphone.	Il vérifie son téléphone portable.
+I am yours and you are mine.	Je suis tienne et tu es mien.
+I'm going to tell everybody.	Je vais le dire à tout le monde.
+I'm older than your brother.	Je suis plus vieux que ton frère.
+I'm wondering if I love him.	Je me demande si je l'aime.
+They are reading their book.	Ils lisent leur livre.
+You are as white as a sheet.	Tu es blanc comme un cachet d'aspirine.
+You're not that interesting.	Vous n'êtes pas si intéressants.
+He is constantly complaining.	Il est toujours en train de se plaindre.
+He is trusted by his parents.	Ses parents lui font confiance.
+I am going to write a letter.	Je vais écrire une lettre.
+I'm afraid we have no choice.	Je crains que nous n'ayons pas le choix.
+I'm glad to finally meet you.	Je me réjouis de vous avoir finalement rencontré.
+I'm going to figure this out.	Je vais déchiffrer ça.
+I'm saving this seat for Tom.	Je garde ce siège pour Tom.
+I'm tired of waiting in line.	Je suis fatigué de faire la queue.
+She is trying to lose weight.	Elle essaie de perdre du poids.
+We're the best at what we do.	Nous sommes les meilleurs dans ce que nous faisons.
+You're just being diplomatic.	Tu veux juste paraître diplomate.
+He is earning twice my salary.	Il gagne deux fois mon salaire.
+He's rich, but he's not happy.	Il est riche mais il n'est pas heureux.
+I'm aware of that possibility.	Je suis conscient de cette possibilité.
+I'm going to protect you, Tom.	Je vais vous protéger, Tom.
+I'm sorry I misunderstood you.	Je suis désolée de vous avoir mal compris.
+I'm tired of all your fussing.	J'en ai marre de tous tes chichis.
+She's neither rich nor famous.	Elle n'est ni riche, ni connue.
+We're sorry we can't help you.	Nous regrettons de ne pas pouvoir vous aider.
+You're preaching to the choir.	Tu prêches un convaincu.
+He is above doing such a thing.	Il est au-dessus d'un tel acte.
+He's always at home on Sundays.	Il est toujours chez lui le dimanche.
+I'm beginning to see a pattern.	Je commence à distinguer un schéma.
+I'm never angry without reason.	Je ne suis jamais en colère sans raison.
+I'm sorry to have bothered you.	Je suis désolé de t'avoir dérangée !
+I'm the youngest in the family.	Je suis le plus jeune enfant.
+She's used to getting up early.	Elle est habituée à se lever tôt.
+We're waiting for you to leave.	Nous attendons que tu sois parti.
+You're the only one for me now.	Tu es la seule pour moi désormais.
+He's been teaching for 20 years.	Cela fait vingt ans qu'il enseigne.
+I am very sensitive to the cold.	Je suis très sensible au froid.
+I'm leaving town for a few days.	Je quitte la ville pour quelques jours.
+I'm reading an interesting book.	Je suis en train de lire un livre intéressant.
+I'm very pleased with your work.	Je suis ravi de votre travail.
+They are jealous of our success.	Elles jalousent notre succès.
+You're disappointed, aren't you?	Vous êtes déçues, n'est-ce pas ?
+He is a potential world champion.	C'est un champion du monde en puissance.
+He's three years older than I am.	Il a trois ans de plus que moi.
+I'm glad to hear of your success.	Je suis heureux d'entendre parler de votre succès.
+I'm sorry to bother you so often.	Je suis désolé de te déranger si souvent.
+I'm tired of watching television.	Je suis fatigué de regarder la télévision.
+They're barely paid minimum wage.	Ils sont à peine payés le SMIC.
+You're not staying here, are you?	Tu ne restes pas ici, si ?
+He's bound to notice your mistake.	Il est forcé de remarquer votre erreur.
+I'm impressed you've done so well.	Je suis impressionné que tu aies si bien réussi.
+I'm so embarrassed, I want to die.	Je suis tellement gênée que je veux mourir.
+I'm very much aware of the danger.	Je suis très conscient du danger.
+We're working on a limited budget.	Nous travaillons dans un budget limité.
+He is always looking to the future.	Il regarde toujours vers l'avenir.
+I am convinced that he is innocent.	Je suis convaincu qu'il est innocent.
+I'm not gonna do anything about it.	Je ne vais rien y faire.
+She is afraid of falling ill again.	Elle a peur de retomber malade.
+We're going to give it another try.	On va essayer encore une fois.
+He is suffering from loss of memory.	Il souffre d'amnésie.
+I'm calling to report a lost wallet.	J'appelle pour signaler un portefeuille perdu.
+You are doing very well. Keep it up.	Tu te débrouilles très bien. Continue.
+I am familiar with this part of town.	Je suis familier de cette partie de la ville.
+I'm sorry, I dialed the wrong number.	Je suis confus, j'ai composé un mauvais numéro.
+You are really very productive today.	Vous êtes vraiment très productive aujourd'hui.
+I am of the opinion that she is right.	Selon moi, elle a raison.
+I'm very interested in social studies.	Les études sociales m'intéressent beaucoup.
+I am certain that he will quit his job.	Je suis sûr qu'il va démissionner.
+I'm very interested in learning French.	Je suis fort intéressé par l'apprentissage du français.
+I am ashamed of having been rude to her.	J'ai honte d'avoir été grossier envers elle.
+They're both in love with the same girl.	Ils sont tous deux amoureux de la même fille.
+I am looking forward to seeing you again.	Je suis impatiente de vous revoir.
+You're always disagreeing with your boss.	Vous êtes toujours en désaccord avec votre patron.
+You're not the only one with this problem.	Vous n'êtes pas la seule avec ce problème.
+They are willing to talk about the problem.	Elles sont disposées à discuter du problème.
+I am looking for a book about medieval Spain.	Je cherche un livre traitant de l'Espagne médiévale.
+She is always finding fault with other people.	Elle trouve toujours à redire aux autres.
+I'm getting pretty bored with driving every morning.	J'en ai plutôt marre de conduire chaque matin.
+Go.	Va !
+I feel lonely.	Je me sens seul.
+I can't feel it.	Je ne le perçois pas.
+That's a promise.	Il s'agit d'une promesse.
+Where's the money?	Où est l'argent ?
+A whale is a mammal.	La baleine est un mammifère.
+Clothes make the man.	L'habit fait l'homme.
+You'll have to drive.	Vous devrez conduire.
+What is the cat up to?	Qu'est-ce que le chat a en tête ?
+This window won't open.	Cette fenêtre refuse de s'ouvrir.
+That could be difficult.	Cela pourrait être difficile.
+Is it your fault or ours?	Est-ce de votre faute ou de la nôtre ?
+I may give it another try.	Il se peut que j'en fasse à nouveau la tentative.
+He carved me a wooden doll.	Il m'a sculpté une poupée de bois.
+Am I interrupting something?	Est-ce que j'interromps quelque chose ?
+Where are your credit cards?	Où sont tes cartes de crédit ?
+Tom asked me if I had a plan.	Tom m'a demandé si j'avais un plan.
+That's exactly what he wanted.	C'est exactement ce qu'il voulait.
+She would not follow my advice.	Elle a refusé de suivre mon conseil.
+She was washing the dishes then.	Pendant ce temps, elle lavait la vaisselle.
+These trees were planted by them.	Ce sont eux qui ont planté ces arbres.
+Why couldn't you sleep last night?	Pourquoi n'es-tu pas arrivé à dormir la nuit dernière ?
+He went so far as to call me a liar.	Il alla jusqu'à me traiter de menteur.
+There was no response to my question.	Il n'y eut pas de réponse à ma question.
+I suggest that you not wait any longer.	Je suggère que vous n'attendiez pas davantage.
+I don't remember asking for your opinion.	Je ne me rappelle pas avoir requis votre opinion.
+The small boy slowly made some new friends.	Le petit garçon se fit lentement de nouveaux amis.
+There was a sign saying, "Keep off the grass."	Il y avait un panneau disant "Pelouse interdite".
+What are some foods you usually eat with red wine?	Quels sont les aliments que vous mangez habituellement avec du vin rouge ?
+I'd like to be left alone for a while, if you don't mind.	J'aimerais que l'on me laisse seul un moment, si vous n'y voyez pas d'inconvénient.
+What happened to that friend of yours that you introduced me to last weekend?	Qu'est-il advenu de cet ami à vous auquel vous m'avez présentée le week-end dernier ?
