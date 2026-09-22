@@ -7,7 +7,7 @@
          (only-in racket/contract/base
                   -> ->* and/c any/c cons/c contract-out listof or/c vectorof)
          (only-in racket/file file->string make-directory*)
-         (only-in racket/list index-of remove-duplicates)
+         (only-in racket/list append-map index-of remove-duplicates)
          (only-in racket/port copy-port)
          ;; whole-module on purpose: the expansion needs bindings only-in
          ;; would strip
@@ -85,8 +85,7 @@
     (vector->immutable-vector
      (list->vector
       (remove-duplicates
-       (append special-words
-               (apply append (map sentence-words sentences)))))))
+       (append special-words (append-map sentence-words sentences))))))
   (word-vocab words
               (for/hash ([w (in-vector words)] [i (in-naturals)])
                 (values w i))))
