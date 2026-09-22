@@ -440,6 +440,50 @@
          (check-training-twin "06_gpt" "python/06_gpt.py" train-on
                               'cuda 5e-3)))
      (let ()
+       ;; Re-declared like the gpt above: MUST stay in sync with
+       ;; examples/racket/12-char-rnn.rkt
+       (define-layer char-rnn (embed lstm head)
+         #:init (vocab-size)
+         (set! embed (Embedding vocab-size 32))
+         (set! lstm (LSTM 32 64 #:batch-first? #t))
+         (set! head (Linear 64 vocab-size))
+         #:forward (idx)
+         (define-values (out _h _c) (lstm (embed idx)))
+         (head out))
+       (define text (load-text-fixture))
+       (define vocab (text->vocab text))
+       (define v-size (vector-length vocab))
+       (check-equal? (map tensor-shape (parameters (char-rnn v-size)))
+                     (list (list v-size 32)
+                           '(256 32) '(256 64) '(256) '(256)
+                           (list v-size 64) (list v-size))
+                     "char-rnn shape must match examples/racket/12-char-rnn.rkt")
+       (define (train-on device)
+         (with-default-device device
+           (manual-seed! 0)
+           (define-values (xs ys) (contiguous-blocks (encode vocab text) 16))
+           (define net (char-rnn v-size))
+           (define opt (adam (parameters net) #:lr 0.001))
+           (define losses
+             (for/list ([_ (in-range 5)])
+               (zero-grads! opt)
+               (define loss
+                 (nll-loss (log-softmax (reshape (net xs) -1 v-size) 1)
+                           (reshape ys -1)))
+               (backward! loss)
+               (clip-grad-norm! (parameters net) 1.0)
+               (step! opt)
+               (item loss)))
+           (values losses
+                   (cat (map (lambda (p) (reshape p -1))
+                             (parameters net))))))
+       (check-training-twin "12_char_rnn" "python/12_char_rnn.py" train-on
+                            'cpu tol)
+       (when (and (cuda-available?)
+                  (python-cuda-available?))
+         (check-training-twin "12_char_rnn" "python/12_char_rnn.py" train-on
+                              'cuda 5e-3)))
+     (let ()
        (define (train-on device)
          (with-default-device device
            (manual-seed! 0)
