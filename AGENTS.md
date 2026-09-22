@@ -96,6 +96,14 @@ CPU-first; float32 + inferred int64 (#44) + uint8 from bytes (#58). From
   continuing), `in-epochs`; synchronous, single-threaded like
   `num_workers=0`; a seeded loader replays `DataLoader(generator=g)`'s
   batch order
+- translation (`torch/data/translation.rkt`, #153): the PyTorch seq2seq
+  tutorial's eng-fra pairs, `load-translation-pairs` (zip cached, 11445
+  pairs after the tutorial's normalisation and filter) and
+  `load-translation-fixture` (287 committed pairs),
+  `translation-archive?`, `parse-pairs`
+  `normalize-sentence`, word vocabularies with `<pad>` 0 / `<sos>` 1 /
+  `<eos>` 2 (`pairs->vocabs` `encode-sentence` `decode-tokens`), and
+  `pairs->tensors` padding to a width
 - diffusion (`torch/vision/diffusion.rkt`, #84): `linear-schedule`
   `cosine-schedule` (betas, alphas, alpha-bars as device tensors), `q-sample`
   (closed-form `q(x_t | x_0)`), `sinusoidal-embedding`, and the layers
@@ -341,7 +349,8 @@ module's full export set (`racket/runtime-path`, `syntax/parse/pre`).
   and the UNet layers.
 - `data/loader.rkt` — `tensor-dataset`, `dataloader`, `in-dataloader`,
   `in-epochs`, re-exporting `data/dataset.rkt`; `data/mnist.rkt`,
-  `data/text.rkt` — the modality loaders (moving under #88).
+  `data/text.rkt`, `data/translation.rkt` — the modality loaders (moving
+  under #88).
 - `foreign/ops.rkt` — version/seed + marshalling (`item`, `to-dtype`,
   `uniform!`, `to`); `foreign/creation-ops.rkt` — the constructors
   (`zeros` .. `rand`, `tensor`, `arange`, `eye`, the `*-like` family, with
