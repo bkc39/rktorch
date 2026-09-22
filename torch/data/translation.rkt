@@ -7,7 +7,7 @@
          (only-in racket/contract/base
                   -> ->* and/c any/c cons/c contract-out listof or/c vectorof)
          (only-in racket/file file->string make-directory*)
-         (only-in racket/list remove-duplicates)
+         (only-in racket/list index-of remove-duplicates)
          (only-in racket/port copy-port)
          ;; whole-module on purpose: the expansion needs bindings only-in
          ;; would strip
@@ -23,11 +23,15 @@
 (define pair/c (cons/c string? string?))
 (define language/c (or/c 'eng 'fra))
 
-(define/contract-out pad-id exact-nonnegative-integer? 0) ;; noqa
-(define/contract-out sos-id exact-nonnegative-integer? 1) ;; noqa
-(define/contract-out eos-id exact-nonnegative-integer? 2) ;; noqa
-
 (define special-words '("<pad>" "<sos>" "<eos>"))
+
+;; the specials head every vocabulary in this order, so an id is a position
+(define/contract-out pad-id exact-nonnegative-integer? ;; noqa
+  (index-of special-words "<pad>"))
+(define/contract-out sos-id exact-nonnegative-integer? ;; noqa
+  (index-of special-words "<sos>"))
+(define/contract-out eos-id exact-nonnegative-integer? ;; noqa
+  (index-of special-words "<eos>"))
 
 (struct word-vocab (words ids))
 
@@ -165,11 +169,18 @@
       (string->path override)
       (build-path (find-system-path 'cache-dir) "rktorch" "translation")))
 
-;; A zip's directory sits at its end, so a truncated download fails here.
+;; A zip's directory sits at its end, so a truncated download fails to list
+;; the entry; inflating it and reading the first pair catches a body that
+;; was damaged in the middle with the directory intact.
 (define/contract-out (translation-archive? path) ;; noqa
   (-> path-string? boolean?)
   (with-handlers ([exn:fail? (lambda (_e) #f)])
-    (zip-directory-contains? (read-zip-directory path) archive-entry)))
+    (and (zip-directory-contains? (read-zip-directory path) archive-entry)
+         (call-with-unzip-entry
+          path archive-entry
+          (lambda (entry)
+            (define first-line (call-with-input-file entry read-line))
+            (and (string? first-line) (regexp-match? #rx"\t" first-line)))))))
 
 (define (fetch-archive!)
   (define dest (build-path (translation-cache-dir) archive-name))
