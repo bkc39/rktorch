@@ -4,7 +4,7 @@
   (require (only-in ffi/vector f32vector)
            (only-in racket/list range)
            (only-in rackunit check-equal? check-exn test-case)
-           (only-in "../main.rkt" div full full-like item reshape tensor
+           (only-in "../main.rkt" bytes->tensor div full full-like item reshape tensor
                     tensor->list tensor->repr tensor->vector tensor-dtype
                     tensor-shape to to-dtype zeros))
 
@@ -59,6 +59,11 @@
                (lambda () (full-like (zeros 2) -1 #:dtype 'uint8)))
     (check-equal? (tensor->repr (to (tensor '(1.5 -2.0)) 'float64))
                   "tensor([ 1.5000, -2.0000], dtype=torch.float64)"))
+
+  (test-case "bool bytes are read as nonzero, whatever the byte"
+    (define b (bytes->tensor (bytes 0 1 2 255) 'bool '(4)))
+    (check-equal? (tensor-dtype b) 'bool)
+    (check-equal? (tensor->list b) '(0.0 1.0 1.0 1.0)))
 
   (test-case "uint8 -> float32 -> / 255 equals the boxed double path bit for bit"
     (define bs (list->bytes (range 256)))

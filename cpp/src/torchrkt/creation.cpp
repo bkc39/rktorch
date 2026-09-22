@@ -202,6 +202,13 @@ tr_tensor* tr_from_bytes(const uint8_t* data, uint64_t nbytes,
       throw std::invalid_argument(
           "byte count is not a multiple of the element size");
     }
+    // a byte other than 0 or 1 is not a bool ATen can hold, so the payload
+    // is read as uint8 and compared, as numpy's astype(bool) does
+    if (scalar == torch::kBool) {
+      return host_from_data(data, nbytes, dims, ndim, torch::kUInt8)
+          .ne(0)
+          .to(torchrkt::current_default_device());
+    }
     return host_from_data(data, nbytes / size, dims, ndim, scalar)
         .to(torchrkt::current_default_device());
   });

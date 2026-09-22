@@ -88,4 +88,15 @@
       (define z (with-autocast #:device 'cuda #:dtype 'float16 (conv x)))
       (check-equal? (tensor-dtype z) 'float16)
       (check-false (autocast-enabled? 'cuda))
-      (check-equal? (tensor-dtype (conv x)) 'float32))))
+      (check-equal? (tensor-dtype (conv x)) 'float32)))
+
+  (test-case "a nested extent in the other half dtype does not reuse casts"
+    (when (cuda-available?)
+      (define lin (to (Linear 8 4) (cuda-device)))
+      (define x (to (randn 2 8) (cuda-device)))
+      (with-autocast #:device 'cuda #:dtype 'bfloat16
+        (check-equal? (tensor-dtype (lin x)) 'bfloat16)
+        (with-autocast #:device 'cuda #:dtype 'float16
+          (check-equal? (tensor-dtype (lin x)) 'float16
+                        "the outer extent's bfloat16 weight cast is not reused"))
+        (check-equal? (tensor-dtype (lin x)) 'bfloat16)))))
