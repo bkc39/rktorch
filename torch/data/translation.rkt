@@ -73,7 +73,7 @@
     (if (eq? source 'fra) (cons fra eng) (cons eng fra))))
 
 (define (sentence-words s)
-  (string-split s " "))
+  (map string->immutable-string (string-split s " ")))
 
 (define/contract-out (words->vocab sentences) ;; noqa
   (-> (listof string?) word-vocab?)

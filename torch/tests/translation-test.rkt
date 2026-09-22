@@ -119,8 +119,6 @@
     (check-equal? (decode-tokens fra (narrow xs 0 0 1)) "je vais bien")
     (check-equal? (decode-tokens eng (narrow ys 0 0 1)) "i m ok"))
 
-  ;; The whole corpus, when RKTORCH_TRANSLATION_FULL is set (it downloads 3 MB
-  ;; once): the counts are the PyTorch tutorial's, minus its two specials.
   (when (getenv "RKTORCH_TRANSLATION_FULL")
     (test-case "the full corpus filters to the tutorial's 11445 pairs"
       (define pairs (load-translation-pairs))
