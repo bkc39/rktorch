@@ -85,15 +85,21 @@
         (hash-ref header (string->symbol name)
                   (lambda ()
                     (error 'load-state! "no entry for ~s" name))))
-      (define offsets (hash-ref meta 'data_offsets))
-      (define shape (hash-ref meta 'shape))
+      (define (field key)
+        (hash-ref meta key
+                  (lambda ()
+                    (raise-arguments-error 'load-state! "entry has no field"
+                                           "entry" name
+                                           "field" key))))
+      (define offsets (field 'data_offsets))
+      (define shape (field 'shape))
       (unless (equal? shape (tensor-shape target))
         (raise-arguments-error 'load-state! "shape mismatch"
                                "entry" name
                                "file" shape
                                "model" (tensor-shape target)))
       (define loaded
-        (decode name (hash-ref meta 'dtype) shape
+        (decode name (field 'dtype) shape
                 (subbytes raw
                           (+ data-start (car offsets))
                           (+ data-start (cadr offsets)))))

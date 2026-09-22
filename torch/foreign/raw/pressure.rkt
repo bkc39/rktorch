@@ -130,7 +130,9 @@
   (list (cons 'pressure-collections (stats-backstop-collections the-stats))
         (cons 'pressure-reclaimed (stats-reclaimed the-stats))
         (cons 'trough-collections (stats-trough-collections the-stats))
-        (cons 'trough-minors (stats-trough-minors the-stats))))
+        (cons 'trough-minors (stats-trough-minors the-stats))
+        (cons 'trough-floor (for/sum ([a (in-hash-values accounts)])
+                              (account-floor a)))))
 
 (define (reset-pressure-state!)
   (call-with-ledger
