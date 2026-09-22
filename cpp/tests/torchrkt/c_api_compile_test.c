@@ -52,6 +52,9 @@ void torchrkt_c_api_compile_check(void) {
       tr_tensor_copy_bytes;
   tr_tensor* (*from_bytes)(const uint8_t*, uint64_t, const int64_t*, int64_t,
                            tr_dtype) = tr_from_bytes;
+  tr_tensor* (*from_bytes_on)(const uint8_t*, uint64_t, const int64_t*, int64_t,
+                              tr_dtype, tr_device_type, int64_t) =
+      tr_from_bytes_on_device;
   int (*set_autocast_enabled)(tr_device_type, tr_dtype, int) =
       tr_set_autocast_enabled;
   int (*is_autocast_enabled)(tr_device_type, int*) = tr_is_autocast_enabled;
@@ -277,6 +280,7 @@ void torchrkt_c_api_compile_check(void) {
   (void)copy_data_u8;
   (void)copy_bytes;
   (void)from_bytes;
+  (void)from_bytes_on;
   (void)set_autocast_enabled;
   (void)is_autocast_enabled;
   (void)autocast_dtype;
