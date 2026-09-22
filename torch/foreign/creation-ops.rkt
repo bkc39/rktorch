@@ -37,10 +37,12 @@
                   tensor-device
                   tensor-dtype
                   tensor-shape
+                  to-device
                   to-dtype)
          (only-in "raw/creation.rkt"
                   tr-arange-on/raw
                   tr-eye-on/raw
+                  tr-from-bytes-on-device/raw
                   tr-from-bytes/raw
                   tr-from-data-i64-on-device/raw
                   tr-from-data-i64/raw
@@ -351,23 +353,29 @@
                   (length flat))])]))
   (define dim-vec (list->s64vector dims))
   (define ndim (length dims))
+  (define narrow?
+    (or (and (bytes? data) dtype (not (eq? dtype 'uint8)) #t)
+        (and (memq dtype '(float16 bfloat16)) #t)))
+  ;; a tensor that is narrowed after construction is built on the host, so
+  ;; the device never holds the wide copy and the narrow one at once
+  (define build-on (and (not narrow?) device))
   (define-values (type index)
-    (if device (device->type+index device) (values #f #f)))
+    (if build-on (device->type+index build-on) (values #f #f)))
   (define out
     (wrap 'tensor
           (case chosen
             [(int64)
-             (if device
+             (if build-on
                  (tr-from-data-i64-on-device/raw payload numel dim-vec ndim
                                                  type index)
                  (tr-from-data-i64/raw payload numel dim-vec ndim))]
             [(uint8)
-             (if device
+             (if build-on
                  (tr-from-data-u8-on-device/raw payload numel dim-vec ndim
                                                 type index)
                  (tr-from-data-u8/raw payload numel dim-vec ndim))]
             [else
-             (if device
+             (if build-on
                  (tr-from-data-on-device/raw payload numel dim-vec ndim
                                              type index)
                  (tr-from-data/raw payload numel dim-vec ndim))])))
@@ -375,13 +383,21 @@
   ;; narrowed natively, like a byte string asked for another dtype
   (define typed
     (cond
-      [(and (bytes? data) dtype (not (eq? dtype 'uint8))) (to-dtype out dtype)]
-      [(memq dtype '(float16 bfloat16)) (to-dtype out dtype)]
+      [narrow?
+       (define narrowed (to-dtype out dtype))
+       (if device (to-device narrowed device) narrowed)]
       [else out]))
   (if requires-grad? (requires-grad! typed) typed))
 
-(define/contract-out (bytes->tensor bs dtype shape) ;; noqa
-  (-> bytes? dtype/c dims-rest/c tensor?)
+(define/contract-out (bytes->tensor bs dtype shape #:device [device #f]) ;; noqa
+  (->* [bytes? dtype/c dims-rest/c] [#:device (or/c #f device/c)] tensor?)
+  (define dims (list->s64vector shape))
   (wrap 'bytes->tensor
-        (tr-from-bytes/raw bs (bytes-length bs)
-                           (list->s64vector shape) (length shape) dtype)))
+        (cond
+          [device
+           (define-values (type index) (device->type+index device))
+           (tr-from-bytes-on-device/raw bs (bytes-length bs) dims (length shape)
+                                        dtype type index)]
+          [else
+           (tr-from-bytes/raw bs (bytes-length bs) dims (length shape)
+                              dtype)])))

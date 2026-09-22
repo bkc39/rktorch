@@ -83,6 +83,13 @@ tr_tensor* tr_from_data_u8_on_device(const uint8_t* data, uint64_t numel,
 tr_tensor* tr_from_bytes(const uint8_t* data, uint64_t nbytes,
                          const int64_t* dims, int64_t ndim, tr_dtype dtype);
 
+/* tr_from_bytes onto the given device, as tr_from_data_on_device is to
+ * tr_from_data: the process default device is neither read nor changed. */
+tr_tensor* tr_from_bytes_on_device(const uint8_t* data, uint64_t nbytes,
+                                   const int64_t* dims, int64_t ndim,
+                                   tr_dtype dtype, tr_device_type device_type,
+                                   int64_t device_index);
+
 #ifdef __cplusplus
 }
 #endif

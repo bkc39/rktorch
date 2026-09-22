@@ -2,6 +2,8 @@
 
 (require (for-syntax racket/base)
          (only-in racket/contract/base -> ->* any or/c)
+         ;; whole-module: the pattern's syntax classes live at phase 1 and
+         ;; only-in would strip them
          syntax/parse/define
          (only-in "../private/contract.rkt" define/contract-out)
          (only-in "device-type.rkt" device-type device?)
@@ -33,7 +35,7 @@
   dtype)
 
 (define (set-autocast! type dtype on?)
-  (check-ok (tr-set-autocast-enabled/raw type (or dtype 'keep) on?)
+  (check-ok (tr-set-autocast-enabled/raw type dtype on?)
             'set-autocast!))
 
 (define/contract-out (call-with-autocast thunk ;; noqa

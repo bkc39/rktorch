@@ -115,6 +115,17 @@
     (check-exn exn:fail:contract?
                (lambda () (randn 2 #:dtype 'int64))))
 
+  (test-case "tensor narrows to a half dtype before it reaches the device"
+    (for ([dt (in-list '(float16 bfloat16))])
+      (define t (tensor '(1.0 2.0 3.0) #:dtype dt))
+      (check-equal? (tensor-dtype t) dt)
+      (check-equal? (tensor->list t) '(1.0 2.0 3.0))
+      (when (cuda-available?)
+        (define g (tensor '(1.0 2.0 3.0) #:device 'cuda #:dtype dt))
+        (check-equal? (tensor-device g) (cuda-device))
+        (check-equal? (tensor-dtype g) dt)
+        (check-equal? (tensor->list g) '(1.0 2.0 3.0)))))
+
   (test-case "a layer moves to the half pair, integer buffers staying put"
     (define m (HalfCounted))
     (check-eq? (to m 'bfloat16) m)
