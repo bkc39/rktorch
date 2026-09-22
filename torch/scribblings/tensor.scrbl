@@ -4,8 +4,8 @@
           (for-label racket/base
                      racket/contract
                      (only-in torch
-                              arange device? device/c dtype/c item
-                              manual-seed! ones randn shape sum tensor
+                              arange device device? device/c dtype dtype/c
+                              item manual-seed! ones randn shape sum tensor
                               tensor->list tensor-device tensor-dtype tensor?
                               to-dtype zeros)))
 
@@ -114,12 +114,24 @@ The dimensions, outermost first.
 
 @torch-examples[(shape (tensor '((1 2 3) (4 5 6))))]}
 
-@defproc[(tensor-dtype [t tensor?]) dtype/c]{
+@defproc[(dtype [t tensor?]) dtype/c]{
 The element type: one of @racket['float32], @racket['float64],
-@racket['int64], @racket['bool], @racket['uint8].}
+@racket['int64], @racket['bool], @racket['uint8]. The short name, and the
+one to prefer; it is Python's @tt{t.dtype}.
+
+@torch-examples[
+(dtype (tensor '(1 2)))
+(dtype (tensor '(1.0 2.0)))
+]}
+
+@defproc[(tensor-dtype [t tensor?]) dtype/c]{
+The same answer as @racket[dtype], under the name that says which kind of
+value it reads.}
 
 @defproc[(tensor-device [t tensor?]) device?]{
-Where the storage lives. See @secref["Devices_and_dtypes"].}
+Where the storage lives: the same answer as @racket[device] given a tensor,
+under the name that says which kind of value it reads. See
+@secref["Devices_and_dtypes"].}
 
 @section{Conversion out}
 

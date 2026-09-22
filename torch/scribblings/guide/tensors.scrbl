@@ -44,15 +44,19 @@ The creation family builds tensors from a shape instead of from data.
 
 @section[#:tag "tensors-queries"]{Asking about them}
 
-@racket[shape] answers a list of dimensions, @racket[tensor-dtype] the
-element type, and @racket[tensor-device] where the storage lives:
+@racket[shape] answers a list of dimensions, @racket[dtype] the element
+type, and @racket[device] where the storage lives --- Python's
+@tt{t.shape}, @tt{t.dtype} and @tt{t.device}:
 
 @torch-examples[
 (define m (tensor '((1 2 3) (4 5 6))))
 (shape m)
-(tensor-dtype m)
-(tensor-device m)
+(dtype m)
+(device m)
 ]
+
+@racket[device] does double duty: given a tensor it reads the tensor's
+device, and given a device name it builds one, as @racket[(device 'cuda 1)].
 
 @section[#:tag "tensors-out"]{Getting data back out}
 
@@ -78,7 +82,7 @@ across the whole tensor:
 
 @torch-examples[
 (relu (tensor '(-1.0 0.0 2.0)))
-(mul (tensor '(1.0 2.0 3.0)) 2.0)
+(* (tensor '(1.0 2.0 3.0)) 2.0)
 ]
 
 Reductions collapse a tensor to one value. @racket[sum] and @racket[mean]

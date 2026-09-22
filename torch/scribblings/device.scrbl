@@ -1,6 +1,7 @@
 #lang scribble/manual
 
-@(require (for-label racket/base
+@(require "common.rkt"
+          (for-label racket/base
                      racket/contract
                      (only-in torch
                               accelerator-if-available
@@ -116,6 +117,22 @@ Equivalent to @racket[(to t dtype)].
 }
 
 @section{Choosing a device}
+
+@defproc*[([(device [t tensor?]) device?]
+           [(device [kind (or/c 'cpu 'cuda 'mps)]
+                    [index exact-nonnegative-integer? 0])
+            device?])]{
+Given a tensor, answers where its storage lives, as Python's
+@tt{t.device}; @racket[tensor-device] is the same query under the longer
+name. Given a device kind, builds a device value, as
+@tt{torch.device("cuda", 1)}: @racket[index] selects among CUDA devices and
+must be @racket[0] for @racket['cpu] and @racket['mps]. Supplying an index
+when querying a tensor is a contract error.
+
+@torch-examples[
+(device (tensor '(1.0 2.0)))
+(device 'cpu)
+]}
 
 @defproc[(device? [v any/c]) boolean?]{
 Whether @racket[v] is a device value, as answered by @racket[device],

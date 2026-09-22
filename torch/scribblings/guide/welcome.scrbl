@@ -27,8 +27,8 @@ The library infers the element type from the data, the way PyTorch does ---
 integers give an integer tensor, decimals give a single-precision float one:
 
 @torch-examples[
-(tensor-dtype (tensor '((1 2) (3 4))))
-(tensor-dtype (tensor '(1.0 2.0)))
+(dtype (tensor '((1 2) (3 4))))
+(dtype (tensor '(1.0 2.0)))
 ]
 
 @section[#:tag "welcome-two-surfaces"]{Two surfaces, two casings}
