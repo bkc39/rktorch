@@ -447,8 +447,6 @@
      (check-ok rc 'tensor->vector)
      out]))
 
-;; the element bytes as they are, in the tensor's own dtype: the safetensors
-;; payload, and how a 16-bit float leaves the process without widening
 (define/contract-out (tensor->bytes t) (-> tensor? bytes?) ;; noqa
   (define-values (probe nbytes) (tr-tensor-copy-bytes/raw t 0 #f))
   (unless (= probe 2)
