@@ -362,6 +362,9 @@
   ;; once; bytes are built at their own size and only widen, so they are
   ;; built where they are wanted and widened there
   (define stage? (and narrow? (not (bytes? data))))
+  ;; the destination is fixed before the build, as every other constructor
+  ;; fixes it, so a default that changes meanwhile does not move the result
+  (define lands-on (and stage? (or device (default-device))))
   (define build-on (if stage? 'cpu device))
   (define-values (type index)
     (if build-on (device->type+index build-on) (values #f #f)))
@@ -387,7 +390,7 @@
   ;; narrowed natively, like a byte string asked for another dtype
   (define typed
     (cond
-      [stage? (to-device (to-dtype out dtype) (or device (default-device)))]
+      [stage? (to-device (to-dtype out dtype) lands-on)]
       [narrow? (to-dtype out dtype)]
       [else out]))
   (if requires-grad? (requires-grad! typed) typed))
