@@ -107,8 +107,11 @@ container writes them as @tt{F16} and @tt{BF16}.
 
 Training in half precision is done the way PyTorch does it: the parameters
 stay @racket['float32] and the forward runs under autocast, which casts the
-matrix multiplications and convolutions to the half dtype and keeps the
-reductions, losses and normalisations in float32, per PyTorch's cast lists.
+matrix multiplications and convolutions to the half dtype and runs the ops
+on PyTorch's float32 list in float32: softmax, the losses, the norms,
+@tt{sum} and a few other reductions. An op on neither list keeps its
+input's dtype, so the @tt{mean} of a half tensor is half; reduce with a
+listed op, or cast first, where the precision matters.
 The 3090 Ti and its generation run @racket['bfloat16] on tensor cores with
 float32's range, so no loss scaling is needed; @racket['float16] is the
 choice for inference and storage.
@@ -129,8 +132,12 @@ choice for inference and storage.
 Runs the body with autocast on for @racket[device], which is a device type
 or a @racket[device?] value and defaults to the default device, in
 @racket[dtype], @racket['bfloat16] unless given @racket['float16]. The state
-is per thread and per device type, as in @tt{torch.autocast}, and leaving
-the body puts back whatever was there before, so the form nests. Run
+belongs to the operating-system thread and the device type, as in
+@tt{torch.autocast}, and leaving the body puts back whatever was there
+before, so the form nests. Racket threads in one place share an
+operating-system thread, so while one of them is inside the form, tensor
+operations that another one runs are autocast too: keep other threads that
+compute out of the extent, or give that work a place of its own. Run
 @racket[backward!] outside the form, as PyTorch recommends: the gradients
 arrive in the parameters' own dtype either way.
 }
@@ -145,7 +152,8 @@ The procedure form of @racket[with-autocast].
 
 @defproc[(autocast-enabled? [device (or/c 'cpu 'cuda 'mps device?) (default-device)])
          boolean?]{
-Whether autocast is on for @racket[device] on the calling thread.
+Whether autocast is on for @racket[device] on the calling operating-system
+thread, which every Racket thread in the place shares.
 }
 
 @defproc[(autocast-dtype [device (or/c 'cpu 'cuda 'mps device?) (default-device)])
