@@ -10,6 +10,7 @@
          (only-in "foreign/structs.rkt" tensor-free!)
          (submod "foreign/structs.rkt" checked)
          (except-in "foreign/ops.rkt"
+                    any-float-dtype/c default-device
                     device->type+index dims-rest/c dtype/c
                     item to-dtype tensor-dtype to-device tensor-device
                     tensor-shape tensor->list)
