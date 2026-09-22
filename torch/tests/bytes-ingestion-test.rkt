@@ -77,6 +77,19 @@
         (check-equal? (default-device) (cuda-device)
                       "and the default is not borrowed to get there"))))
 
+  (test-case "bytes widen where they are wanted, half stages on the host"
+    (define bs (bytes 1 2 3 4))
+    (for ([dt (in-list '(float32 int64))]
+          [want (in-list '((1.0 2.0 3.0 4.0) (1 2 3 4)))])
+      (define t (tensor bs #:dtype dt))
+      (check-equal? (tensor-dtype t) dt)
+      (check-equal? (tensor->list t) want))
+    (when (cuda-available?)
+      (for ([dt (in-list '(float32 float16))])
+        (define g (tensor bs #:dtype dt #:device 'cuda))
+        (check-equal? (tensor-device g) (cuda-device))
+        (check-equal? (tensor-dtype g) dt))))
+
   (test-case "bool bytes are read as nonzero, whatever the byte"
     (define b (bytes->tensor (bytes 0 1 2 255) 'bool '(4)))
     (check-equal? (tensor-dtype b) 'bool)
