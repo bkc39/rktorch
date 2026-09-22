@@ -73,8 +73,7 @@
                   tensor?
                   wrap-tensor))
 
-(provide any-float-dtype/c
-         device->type+index
+(provide device->type+index
          dims-rest/c
          float-dtype/c
          placement
@@ -96,7 +95,8 @@
 
 ;; randn and rand construct at the dtype they are given, half included;
 ;; the spectral helpers in torch/audio take float-dtype/c and do not
-(define any-float-dtype/c (or/c 'float32 'float64 'float16 'bfloat16))
+(define/checked-out any-float-dtype/c contract? ;; noqa
+  (or/c 'float32 'float64 'float16 'bfloat16))
 
 ;; the device and dtype go into native construction — never a default-device
 ;; scope or a construct-then-move hop through another device
@@ -302,7 +302,7 @@
   (check-ok (tr-set-default-device/raw type index) 'set-default-device!)
   (void))
 
-(define/contract-out (default-device) (-> device?)
+(define/checked-out (default-device) (-> device?)
   (define-values (rc type index) (tr-get-default-device/raw))
   (check-ok rc 'default-device)
   (type+index->device type index))
