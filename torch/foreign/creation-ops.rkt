@@ -366,10 +366,12 @@
   (define narrow?
     (or (and (bytes? data) dtype (not (eq? dtype 'uint8)) #t)
         (and (memq dtype '(float16 bfloat16)) #t)))
-  ;; a tensor narrowed after construction is built on the CPU by name, not
-  ;; on the default device, so no accelerator holds the wide copy and the
-  ;; narrow one at once
-  (define build-on (if narrow? 'cpu device))
+  ;; only the half pair is built wide and cast down, so only it is staged on
+  ;; the CPU, where no accelerator holds the wide copy and the narrow one at
+  ;; once; bytes are built at their own size and only widen, so they are
+  ;; built where they are wanted and widened there
+  (define stage? (and narrow? (not (bytes? data))))
+  (define build-on (if stage? 'cpu device))
   (define-values (type index)
     (if build-on (device->type+index build-on) (values #f #f)))
   (define out
@@ -394,8 +396,8 @@
   ;; narrowed natively, like a byte string asked for another dtype
   (define typed
     (cond
-      [narrow?
-       (to-device (to-dtype out dtype) (or device (default-device)))]
+      [stage? (to-device (to-dtype out dtype) (or device (default-device)))]
+      [narrow? (to-dtype out dtype)]
       [else out]))
   (if requires-grad? (requires-grad! typed) typed))
 
