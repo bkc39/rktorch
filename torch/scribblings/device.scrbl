@@ -135,13 +135,12 @@ choice for inference and storage.
                     (maybe-dtype (code:line) (code:line #:dtype dtype))]]{
 Runs the body with autocast on for @racket[device], which is a device type
 or a @racket[device?] value and defaults to the default device, in
-@racket[dtype], @racket['bfloat16] unless given @racket['float16]. The state
-belongs to the operating-system thread and the device type, as in
-@tt{torch.autocast}, and leaving the body puts back whatever was there
-before, so the form nests. Racket threads in one place share an
-operating-system thread, so while one of them is inside the form, tensor
-operations that another one runs are autocast too: keep other threads that
-compute out of the extent, or give that work a place of its own. Run
+@racket[dtype], @racket['bfloat16] unless given @racket['float16]. Leaving
+the body puts back whatever was there before, so the form nests. The state
+is kept per device type but not per Racket thread: every thread in the
+place sees it, a parallel thread included, so while one of them is inside
+the form, tensor operations that another one runs are autocast too. Keep
+other threads that compute out of the extent. Run
 @racket[backward!] outside the form, as PyTorch recommends: the gradients
 arrive in the parameters' own dtype either way.
 }
@@ -156,8 +155,8 @@ The procedure form of @racket[with-autocast].
 
 @defproc[(autocast-enabled? [device (or/c 'cpu 'cuda 'mps device?) (default-device)])
          boolean?]{
-Whether autocast is on for @racket[device] on the calling operating-system
-thread, which every Racket thread in the place shares.
+Whether autocast is on for @racket[device], which every Racket thread in
+the place sees alike.
 }
 
 @defproc[(autocast-dtype [device (or/c 'cpu 'cuda 'mps device?) (default-device)])
