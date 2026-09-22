@@ -14,13 +14,14 @@
                     item to-dtype tensor-dtype to-device tensor-device
                     tensor-shape tensor->list)
          (submod "foreign/ops.rkt" checked)
-         (except-in "foreign/creation-ops.rkt" tensor)
+         (except-in "foreign/creation-ops.rkt" generator? tensor)
          (submod "foreign/creation-ops.rkt" checked)
          (except-in "foreign/tensor-ops.rkt"
                     reshape unsqueeze sum matmul add sub mul div neg)
          (submod "foreign/tensor-ops.rkt" checked)
          "foreign/operators.rkt"
          "foreign/nn-promoted.rkt"
+         "foreign/order-ops.rkt"
          (except-in "foreign/promoted.rkt" tensor-ref tensor-ref!)
          (submod "foreign/promoted.rkt" checked)
          (only-in "foreign/ref-syntax.rkt" ref ref!)
@@ -77,6 +78,7 @@
          unsqueeze
          cat
          stack
+         flip
          flatten
          narrow
          select
@@ -110,6 +112,7 @@
          sigmoid
          gelu
          silu
+         leaky-relu
          clamp
          exp
          log
@@ -126,6 +129,11 @@
          argmax
          softmax
          log-softmax)
+
+(provide sort
+         argsort
+         topk
+         multinomial)
 
 (provide matmul
          mm
@@ -145,6 +153,7 @@
          embedding
          layer-norm
          group-norm
+         batch-norm
          upsample-nearest2d)
 
 (provide eq

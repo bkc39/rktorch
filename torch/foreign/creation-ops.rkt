@@ -32,6 +32,8 @@
                   device->type+index
                   dims-rest/c
                   dtype/c
+                  float-dtype/c
+                  placement
                   tensor-device
                   tensor-dtype
                   tensor-shape
@@ -65,17 +67,8 @@
 (define (shape-of dims)
   (if (and (pair? dims) (list? (car dims))) (car dims) dims))
 
-;; the device and dtype go into native construction — never a default-device
-;; scope or a construct-then-move hop through another device
-(define (placement device dtype)
-  (define-values (type index)
-    (if device (device->type+index device) (values 'keep 0)))
-  (values type index (or dtype 'keep)))
-
 (define (finish out requires-grad?)
   (if requires-grad? (requires-grad! out) out))
-
-(define float-dtype/c (or/c 'float32 'float64))
 
 (define (shaped who raw dims device dtype requires-grad? . extra)
   (define shape (shape-of dims))
@@ -157,7 +150,7 @@
   (-> seed/c generator?)
   (generator-impl (check-handle 'make-generator (tr-generator-new/raw seed))))
 
-(define/contract-out (generator? v) (-> any/c boolean?) ;; noqa
+(define/checked-out (generator? v) (-> any/c boolean?) ;; noqa
   (and (generator-impl? v) (Generator? (generator-impl-handle v))))
 
 (define/contract-out (randperm n #:generator [generator #f]) ;; noqa

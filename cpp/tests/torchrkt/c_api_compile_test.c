@@ -11,7 +11,8 @@ void torchrkt_c_api_compile_check(void) {
   tr_tensor* (*audio_load)(const char*, int64_t, int64_t, int32_t*) =
       tr_audio_load;
   int (*audio_save)(const char*, const tr_tensor*, int32_t) = tr_audio_save;
-  tr_tensor* (*hann_window)(int64_t, bool) = tr_hann_window;
+  tr_tensor* (*hann_window)(int64_t, bool, tr_device_type, int64_t, tr_dtype) =
+      tr_hann_window;
   tr_tensor* (*stft)(const tr_tensor*, int64_t, int64_t, int64_t,
                      const tr_tensor*, bool, bool) = tr_stft;
   const char* (*version)(void) = tr_version;
@@ -159,6 +160,19 @@ void torchrkt_c_api_compile_check(void) {
   tr_tensor* (*gen_repeat_interleave)(const tr_tensor*, int64_t, int64_t, bool,
                                       int64_t, bool) =
       tr_gen_repeat_interleave_self_int;
+  tr_tensor* (*gen_batch_norm)(
+      const tr_tensor*, const tr_tensor*, const tr_tensor*, const tr_tensor*,
+      const tr_tensor*, bool, double, double, bool) = tr_gen_batch_norm;
+  tr_tensor* (*gen_leaky_relu)(const tr_tensor*, double) = tr_gen_leaky_relu;
+  tr_tensor* (*gen_bce_with_logits)(
+      const tr_tensor*, const tr_tensor*, const tr_tensor*, const tr_tensor*,
+      int64_t) = tr_gen_binary_cross_entropy_with_logits;
+  tr_tensor* (*gen_huber_loss)(const tr_tensor*, const tr_tensor*, int64_t,
+                               double) = tr_gen_huber_loss;
+  tr_tensor* (*gen_l1_loss)(const tr_tensor*, const tr_tensor*, int64_t) =
+      tr_gen_l1_loss;
+  tr_tensor* (*gen_flip)(const tr_tensor*, const int64_t*, int64_t) =
+      tr_gen_flip;
   tr_tensor* (*gen_masked_fill)(const tr_tensor*, const tr_tensor*, double) =
       tr_gen_masked_fill_scalar;
   tr_tensor* (*gen_tril)(const tr_tensor*, int64_t) = tr_gen_tril;
@@ -198,6 +212,19 @@ void torchrkt_c_api_compile_check(void) {
                   tr_tensor**) = tr_gen_topk;
   int (*gen_sort)(const tr_tensor*, int64_t, bool, tr_tensor**, tr_tensor**) =
       tr_gen_sort;
+  tr_tensor* (*gen_argsort)(const tr_tensor*, int64_t, bool) = tr_gen_argsort;
+  tr_tensor* (*gen_multinomial)(const tr_tensor*, int64_t, bool,
+                                const tr_generator*) = tr_gen_multinomial;
+  int (*gen_lstm)(const tr_tensor*, const tr_tensor* const*, int64_t,
+                  const tr_tensor* const*, int64_t, bool, int64_t, double, bool,
+                  bool, bool, tr_tensor**, tr_tensor**, tr_tensor**) =
+      tr_gen_lstm_input;
+  tr_tensor* (*gen_flatten_weight)(
+      const tr_tensor* const*, int64_t, int64_t, int64_t, int64_t, int64_t,
+      int64_t, int64_t, bool, bool) = tr_gen__cudnn_rnn_flatten_weight;
+  int (*gen_gru)(const tr_tensor*, const tr_tensor*, const tr_tensor* const*,
+                 int64_t, bool, int64_t, double, bool, bool, bool, tr_tensor**,
+                 tr_tensor**) = tr_gen_gru_input;
   int (*cuda_available)(void) = tr_cuda_is_available;
   int (*cuda_count)(void) = tr_cuda_device_count;
   int (*cuda_stats)(int64_t, int64_t*, int64_t*, int64_t*) =
@@ -293,6 +320,12 @@ void torchrkt_c_api_compile_check(void) {
   (void)gen_group_norm;
   (void)gen_silu;
   (void)gen_clamp;
+  (void)gen_batch_norm;
+  (void)gen_leaky_relu;
+  (void)gen_bce_with_logits;
+  (void)gen_huber_loss;
+  (void)gen_l1_loss;
+  (void)gen_flip;
   (void)gen_repeat_interleave;
   (void)gen_ctc_loss;
   (void)gen_avg_pool2d;
@@ -322,6 +355,11 @@ void torchrkt_c_api_compile_check(void) {
   (void)gen_dropout;
   (void)gen_topk;
   (void)gen_sort;
+  (void)gen_argsort;
+  (void)gen_multinomial;
+  (void)gen_lstm;
+  (void)gen_gru;
+  (void)gen_flatten_weight;
   (void)cuda_available;
   (void)cuda_count;
   (void)cuda_stats;

@@ -10,8 +10,9 @@
          (only-in "raw/memory.rkt"
                   tensor-allocator
                   tensor-allocator/outputs
-                  tensor-allocator/outputs/rng
-                  tensor-allocator/rng)
+                  tensor-allocator/outputs/no-retry
+                  tensor-allocator/no-retry)
+         (only-in "raw/random.rkt" _Generator/null)
          (only-in "raw/syntax.rkt" _Tensor _Tensor/null define-torch)
          (only-in "structs.rkt" wrap-tensor))
 
@@ -54,6 +55,8 @@
              (list #`(list->s64vector (or #,arg '()))
                    #`(if (pair? #,arg) (length #,arg) 0)
                    #`(and (pair? #,arg) #t)))]
+    [(optional-generator)
+     (values (list #`(#,arg : _Generator/null)) (list arg))]
     [(optional-dtype)
      (values (list #`(#,arg : _int32)) (list #`(opt-dtype->code #,arg)))]
     [else
@@ -89,7 +92,7 @@
          (define (name arg ...)
            (check-ok (raw-name call-arg ...) 'name)
            recv))]
-    [(_ name:id c-id:id (~optional (~and #:rng rng?)) #:returns n:nat
+    [(_ name:id c-id:id (~optional (~and #:no-retry no-retry?)) #:returns n:nat
         ([arg:id kind:id] ...))
      #:fail-when (and (< (syntax-e #'n) 2) #'n)
      "a single return takes no #:returns clause"
@@ -102,8 +105,8 @@
      #:with (call-arg ...) call-args
      #:with (out ...) (generate-temporaries
                        (build-list (syntax-e #'n) values))
-     #:with wrap (if (attribute rng?)
-                     #'tensor-allocator/outputs/rng
+     #:with wrap (if (attribute no-retry?)
+                     #'tensor-allocator/outputs/no-retry
                      #'tensor-allocator/outputs)
      #'(begin
          (define-torch raw-name
@@ -116,7 +119,7 @@
            (apply values
                   (map wrap-tensor
                        (check-outputs 'name (raw-name call-arg ...))))))]
-    [(_ name:id c-id:id #:rng ([arg:id kind:id] ...))
+    [(_ name:id c-id:id #:no-retry ([arg:id kind:id] ...))
      #:do [(define-values (specs call-args)
              (build-pieces stx
                            (syntax->list #'(arg ...))
@@ -128,7 +131,7 @@
          (define-torch raw-name
            (_fun spec ... -> _Tensor/null)
            #:c-id c-id
-           #:wrap tensor-allocator/rng)
+           #:wrap tensor-allocator/no-retry)
          (define (name arg ...)
            (wrap-tensor
             (check-handle 'name (raw-name call-arg ...)))))]

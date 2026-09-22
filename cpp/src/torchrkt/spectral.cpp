@@ -8,20 +8,20 @@
 
 #include "torchrkt/detail/device.hpp"
 #include "torchrkt/detail/op_call.hpp"
+#include "torchrkt/detail/options.hpp"
 #include "torchrkt/detail/tensor_handle.hpp"
 
 extern "C" {
 
-tr_tensor* tr_hann_window(int64_t window_length, bool periodic) {
+tr_tensor* tr_hann_window(int64_t window_length, bool periodic,
+                          tr_device_type type, int64_t index, tr_dtype dtype) {
   return torchrkt::alloc_result("tr_hann_window", [&] {
     if (window_length < 0) {
       throw std::invalid_argument("window length must be nonnegative, got " +
                                   std::to_string(window_length));
     }
     return torch::hann_window(window_length, periodic,
-                              torch::TensorOptions()
-                                  .dtype(torch::kFloat32)
-                                  .device(torchrkt::current_default_device()));
+                              torchrkt::options_on(type, index, dtype));
   });
 }
 

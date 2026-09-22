@@ -40,6 +40,8 @@ OPTIONAL_INT64 = "optional-int64"
 OPTIONAL_INT_ARRAY = "optional-int-array"
 OPTIONAL_DTYPE = "optional-dtype"
 OPTIONAL_SCALAR = "optional-scalar"
+# Tranche 7 (#153): a tr_generator handle, NULL for the global stream.
+OPTIONAL_GENERATOR = "optional-generator"
 
 
 @dataclass(frozen=True)
@@ -61,10 +63,11 @@ class Op:
     # integer status instead of a fresh handle; the C++ body calls the
     # `<base>_` method on the receiver rather than the at::* free function.
     inplace: bool = False
-    # RNG ops draw from the global generator stream; the Racket emitter
-    # gives them the no-retry allocator wrap so an OOM collect-and-retry
-    # can never double-draw and break seeded parity (allowlist `rng` flag).
-    rng: bool = False
+    # The op does something a second call would repeat: draw from the
+    # global generator stream, or update a tensor in place. The Racket
+    # emitter gives it the no-retry allocator wrap so an OOM
+    # collect-and-retry cannot run it twice (allowlist `no-retry` flag).
+    no_retry: bool = False
     # Tensor return count. More than one switches the C ABI to an integer
     # status plus one `tr_tensor**` out pointer per return.
     returns: int = 1
@@ -123,6 +126,8 @@ def _param_kind(ty) -> str | None:
                 return OPTIONAL_DTYPE
             if elem.name is BaseTy.Scalar:
                 return OPTIONAL_SCALAR
+            if elem.name is BaseTy.Generator:
+                return OPTIONAL_GENERATOR
         if _int_list(elem):
             return OPTIONAL_INT_ARRAY
     return None
@@ -133,7 +138,7 @@ def _c_name(aten_name: str) -> str:
 
 
 def _racket_name(func_name) -> str:
-    base = func_name.name.base.replace("_", "-")
+    base = func_name.name.base.lstrip("_").replace("_", "-")
     overload = func_name.overload_name
     name = base
     if overload:

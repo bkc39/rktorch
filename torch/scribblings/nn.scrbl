@@ -10,7 +10,7 @@
 
 @defmodule[torch/nn]
 
-@defform[(define-layer name (field ...) clause ... #:forward (input ...) body ...+)
+@defform[(define-layer name (field ...) clause ... #:forward forward-formals body ...+)
          #:grammar
          ([field id
                  [id default-expr]
@@ -21,12 +21,18 @@
                   (code:line #:init (formal ... . rest-id) init-body ...)
                   (code:line #:reflection-name expr)
                   (code:line #:contract contract-expr)
-                  (code:line #:predicate id)]
+                  (code:line #:predicate id)
+                  (code:line #:on-move moved-body ...+)]
+          [forward-formals (input ...)
+                           (input ... . rest-id)]
           [formal id
                   [id default-expr]
                   (code:line keyword id)
-                  (code:line keyword [id default-expr])])
-         #:contracts ([contract-expr contract?])]{
+                  (code:line keyword [id default-expr])]
+          [input id
+                 [id : input-contract-expr]])
+         #:contracts ([contract-expr contract?]
+                      [input-contract-expr contract?])]{
 
 Defines a layer: a constructor @racket[name], a predicate @racket[name?],
 and a struct with one slot per @racket[field].  An instance is a
@@ -35,6 +41,23 @@ every field in scope.  A call with other than one argument per
 @racket[input] raises @racket[exn:fail:contract:arity] under
 @racket[name], whether made directly, through @racket[forward], or
 through @racket[layer-forward].
+
+An @racket[input] written @racket[[id : contract-expr]] states what the
+layer accepts there, and a call that does not satisfy it is a contract
+violation naming the layer and the contract rather than an error raised
+from inside the body: a shape the layer cannot take belongs in the
+signature, not in an @racket[unless] guard. The check is built once,
+where the layer is defined, so it costs one flat check per call; the
+party blamed is the label @tt{caller}, since a layer's forward has no
+module boundary of its own to name the caller by. A bare @racket[id]
+accepts anything, as before.
+
+@racketblock[
+(define-layer BatchNorm2d (weight bias running-mean running-var)
+  #:forward ([x : image-batch/c])
+  (batch-norm x #:weight weight #:bias bias
+              #:running-mean running-mean #:running-var running-var))
+]
 
 @racket[#:init] is the constructor body, the analogue of @tt{__init__}.
 Its @racket[formal]s are the constructor's arguments, in the grammar of
@@ -80,6 +103,10 @@ What a field holds when @racket[init-body] finishes decides what it is:
        @racket[children-by-key], splices its entries in as children under
        their own names, and the field name is dropped, as
        @tt{add_module} in a loop would;}
+ @item{a @racket[Parameters?] value, from @racket[parameters-by-key],
+       splices its entries in as parameters under their own names, for a
+       set whose size or naming is decided at construction, as
+       @tt{register_parameter} in a loop would;}
  @item{@racket[#f] is a declared but absent slot, skipped by all of the
        above, as @tt{register_parameter(name, None)} is;}
  @item{anything else is a plain field, visible to @racket[#:forward] and
@@ -159,6 +186,25 @@ rather than a guard in the body:
   ...)
 ]
 
+@racket[#:on-move] runs after @racket[to] has moved the layer, with every
+field in scope, and only when the move actually rebound something: the
+device and dtype of every parameter and buffer are read either side of it
+and compared.  @racket[to] is the identity when nothing changes, so a loop
+that defensively moves a model to the device it is already on runs the body
+not at all; a device round trip runs it twice, once per move, which reading
+the placement after the fact could not detect.  It is for state derived
+from where the tensors live --- a cached layout, a handle onto their
+storage --- which a move invalidates:
+
+@racketblock[
+(define-layer LSTM (spec entries params)
+  #:init (input-size hidden-size)
+  (code:comment "...")
+  #:on-move (forget-flattening! entries)
+  #:forward (x . state)
+  (with-mode (run spec entries lstm-input x state mode)))
+]
+
 Without @racket[#:contract] nothing is exported; a layer local to a model
 or a test needs no contract boundary.
 }
@@ -184,6 +230,26 @@ Whether @racket[mode] is @racket['train].
 
 @defproc[(evaluating? [mode mode/c]) boolean?]{
 Whether @racket[mode] is @racket['eval].
+}
+
+@deftogether[(@defproc[(BatchNorm2d [num-features exact-positive-integer?]
+                                    [#:eps eps real? 1e-5]
+                                    [#:momentum momentum real? 0.1])
+                       batch-norm2d?]
+              @defproc[(BatchNorm1d [num-features exact-positive-integer?]
+                                    [#:eps eps real? 1e-5]
+                                    [#:momentum momentum real? 0.1])
+                       batch-norm1d?])]{
+@tt{nn.BatchNorm2d} and @tt{nn.BatchNorm1d}: normalize each of
+@racket[num-features] channels over the batch, scale and shift by a
+learned @tt{weight} and @tt{bias}, and keep a @racket[Buffer] running
+mean and variance that @racket[step!] does not touch --- the forward
+updates them, in @racket['train] mode only, and @racket[eval!] switches
+the normalization onto them.  @racket[BatchNorm2d] takes an
+@tt{[N C H W]} batch and @racket[BatchNorm1d] takes @tt{[N C]} or
+@tt{[N C L]}; another rank is a contract violation naming the layer.
+The @tt{num-batches-tracked} buffer counts the batches normalized, in
+int64 as torch does.
 }
 
 @defproc[(Parameter [t tensor?]) Parameter?]{
@@ -260,6 +326,20 @@ buffer: nothing trains it or saves it, and it lives as long as the
 model does.  A value meant to train belongs in a @racket[Parameter]
 field of a @racket[define-layer], or in an explicit registration on
 @racket[procedure->Layer].
+}
+
+@deftogether[(@defproc[(parameters-by-key
+                        [entries (listof (cons/c child-name/c Parameter?))])
+                       Parameters?]
+              @defproc[(Parameters? [v any/c]) boolean?])]{
+The parameter counterpart of @racket[children-by-key]: a field holding
+one registers every entry as a parameter under the name paired with it,
+and the field's own name is dropped.  For a layer whose parameters are
+decided at construction rather than declared one per field --- a
+recurrent stack naming its weights @tt{weight_ih_l0} through
+@tt{bias_hh_l1_reverse} by its depth and direction --- this is what
+@tt{register_parameter} in a loop does.  The same duplicate-name check
+applies as to children.
 }
 
 @defproc[(children-by-key [entries (listof (cons/c child-name/c step/c))])

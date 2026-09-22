@@ -10,6 +10,25 @@
 
 extern "C" {
 
+tr_tensor* tr_gen_binary_cross_entropy_with_logits(const tr_tensor* self,
+                                                   const tr_tensor* target,
+                                                   const tr_tensor* weight,
+                                                   const tr_tensor* pos_weight,
+                                                   int64_t reduction) {
+  if (!self || !target) {
+    return torchrkt::null_arg("tr_gen_binary_cross_entropy_with_logits");
+  }
+  return torchrkt::alloc_result("tr_gen_binary_cross_entropy_with_logits", [&] {
+    return at::binary_cross_entropy_with_logits(
+        self->value, target->value,
+        weight ? c10::optional<at::Tensor>(weight->value)
+               : c10::optional<at::Tensor>(),
+        pos_weight ? c10::optional<at::Tensor>(pos_weight->value)
+                   : c10::optional<at::Tensor>(),
+        reduction);
+  });
+}
+
 tr_tensor* tr_gen_cross_entropy_loss(const tr_tensor* self,
                                      const tr_tensor* target,
                                      const tr_tensor* weight, int64_t reduction,
@@ -45,6 +64,26 @@ tr_tensor* tr_gen_ctc_loss_intlist(const tr_tensor* log_probs,
         at::IntArrayRef(target_lengths,
                         static_cast<size_t>(target_lengths_len)),
         blank, reduction, zero_infinity);
+  });
+}
+
+tr_tensor* tr_gen_huber_loss(const tr_tensor* self, const tr_tensor* target,
+                             int64_t reduction, double delta) {
+  if (!self || !target) {
+    return torchrkt::null_arg("tr_gen_huber_loss");
+  }
+  return torchrkt::alloc_result("tr_gen_huber_loss", [&] {
+    return at::huber_loss(self->value, target->value, reduction, delta);
+  });
+}
+
+tr_tensor* tr_gen_l1_loss(const tr_tensor* self, const tr_tensor* target,
+                          int64_t reduction) {
+  if (!self || !target) {
+    return torchrkt::null_arg("tr_gen_l1_loss");
+  }
+  return torchrkt::alloc_result("tr_gen_l1_loss", [&] {
+    return at::l1_loss(self->value, target->value, reduction);
   });
 }
 

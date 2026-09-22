@@ -20,8 +20,10 @@
   ;; one fails loudly). Spec -> input: (tensor dim ...) = seeded randn,
   ;; (tensors ...) a list of them, (bool-tensor ...) a genuine bool handle
   ;; via `ne 0`, (kwarg "name" v) a scalar (or none) passed as name=v to a kwarg-only
-  ;; aten arg, (optional-scalar v) a Scalar? bound, other heads are
-  ;; literals with #f = None.
+  ;; aten arg, (optional-scalar v) a Scalar? bound, (uniform-tensor dim ...)
+  ;; a seeded rand (non-negative, for probabilities), other heads are
+  ;; literals with #f = None. A recipe of 'device-only marks an op with no CPU
+  ;; kernel, which a device-guarded test drives instead.
   (define generated-recipes
     (hash 'matmul '((tensor 2 3) (tensor 3 2))
           'mm '((tensor 2 2) (tensor 2 2))
@@ -134,14 +136,38 @@
           'clamp '((tensor 2 3) (optional-scalar -0.5) (optional-scalar 0.5))
           'repeat-interleave-self-int '((tensor 2 3) (int64 2) (optional-int64 1)
                                         (kwarg "output_size" none))
+          ;; running_var must stay positive, so it is drawn as ones
+          'batch-norm '((tensor 2 3 4 4) (optional-tensor 3) (optional-tensor 3)
+                        (optional-tensor 3) (optional-tensor-ones 3) (bool #f)
+                        (double 0.1) (double 1e-5) (bool #t))
+          'leaky-relu '((tensor 2 3) (double 0.01))
+          'binary-cross-entropy-with-logits '((tensor 2 3) (tensor 2 3)
+                                              (optional-tensor #f)
+                                              (optional-tensor #f) (int64 1))
+          'huber-loss '((tensor 2 3) (tensor 2 3) (int64 1) (double 1.0))
+          'l1-loss '((tensor 2 3) (tensor 2 3) (int64 1))
+          'flip '((tensor 2 3) (int-array (1)))
           'topk '((tensor 3 5) (int64 2) (int64 -1) (bool #t) (bool #t))
-          'sort-tensor '((tensor 3 5) (int64 -1) (bool #f))))
+          'sort-tensor '((tensor 3 5) (int64 -1) (bool #f))
+          'cudnn-rnn-flatten-weight 'device-only
+          'argsort '((tensor 3 5) (int64 -1) (bool #f))
+          'multinomial '((uniform-tensor 3 6) (int64 4) (bool #f)
+                         (kwarg "generator" none))
+          'lstm-input '((tensor 5 2 3) (tensors (1 2 4) (1 2 4))
+                        (tensors (16 3) (16 4) (16) (16))
+                        (bool #t) (int64 1) (double 0.0) (bool #f) (bool #f)
+                        (bool #f))
+          'gru-input '((tensor 5 2 3) (tensor 1 2 4)
+                       (tensors (12 3) (12 4) (12) (12))
+                       (bool #t) (int64 1) (double 0.0) (bool #f) (bool #f)
+                       (bool #f))))
 
   ;; Tensor specs draw seeded randns left to right — both sides consume the
   ;; same RNG stream, so spec order and draw counts must match exactly.
   (define (spec->racket-arg spec)
     (case (car spec)
       [(tensor) (apply randn (cdr spec))]
+      [(uniform-tensor) (apply rand (cdr spec))]
       [(tensors)
        (for/list ([dims (in-list (cdr spec))])
          (apply randn dims))]
@@ -162,6 +188,7 @@
       (string-join (map number->string vs) ", "))
     (case (car spec)
       [(tensor) (format "torch.randn(~a)" (csv (cdr spec)))]
+      [(uniform-tensor) (format "torch.rand(~a)" (csv (cdr spec)))]
       [(tensors)
        (format "[~a]"
                (string-join (for/list ([dims (in-list (cdr spec))])
@@ -278,7 +305,10 @@
              "(run inside `nix develop`)")]
     [else
      (define manifest (with-input-from-file generated-manifest read))
-     (for-each check-generated-parity manifest)
+     (for ([entry (in-list manifest)]
+           #:unless (eq? 'device-only
+                         (hash-ref generated-recipes (car entry) #f)))
+       (check-generated-parity entry))
      ;; override drives: optional-argument paths the default recipes leave
      ;; absent (or vice versa); the labels name the driven path
      (check-generated-parity
@@ -399,10 +429,65 @@
       '((tensor 2 3) (int64 3) (optional-int64 #f) (kwarg "output_size" 18))
       "[flattened+output-size]")
      (check-generated-parity
+      (assq 'batch-norm manifest)
+      '((tensor 2 3 4 4) (optional-tensor 3) (optional-tensor 3)
+        (optional-tensor 3) (optional-tensor-ones 3) (bool #t) (double 0.1)
+        (double 1e-5) (bool #t))
+      "[training]")
+     (check-generated-parity
+      (assq 'batch-norm manifest)
+      '((tensor 2 3 4 4) (optional-tensor #f) (optional-tensor #f)
+        (optional-tensor #f) (optional-tensor #f) (bool #t) (double 0.1)
+        (double 1e-5) (bool #t))
+      "[training+no-stats+no-affine]")
+     (check-generated-parity
+      (assq 'leaky-relu manifest)
+      '((tensor 2 3) (double 0.2))
+      "[slope-0.2]")
+     (check-generated-parity
+      (assq 'binary-cross-entropy-with-logits manifest)
+      '((tensor 2 3) (tensor 2 3) (optional-tensor 3) (optional-tensor-ones 3)
+        (int64 2))
+      "[weighted+sum]")
+     (check-generated-parity
+      (assq 'huber-loss manifest)
+      '((tensor 2 3) (tensor 2 3) (int64 0) (double 0.5))
+      "[none+delta-0.5]")
+     (check-generated-parity
+      (assq 'l1-loss manifest)
+      '((tensor 2 3) (tensor 2 3) (int64 2))
+      "[sum]")
+     (check-generated-parity
+      (assq 'flip manifest)
+      '((tensor 2 3) (int-array (0 1)))
+      "[both-dims]")
+     (check-generated-parity
       (assq 'topk manifest)
       '((tensor 3 5) (int64 3) (int64 0) (bool #f) (bool #t))
       "[smallest-along-dim-0]")
      (check-generated-parity
       (assq 'sort-tensor manifest)
       '((tensor 3 5) (int64 0) (bool #t))
-      "[descending-dim-0]")]))
+      "[descending-dim-0]")
+     (check-generated-parity
+      (assq 'argsort manifest)
+      '((tensor 3 5) (int64 0) (bool #t))
+      "[descending-dim-0]")
+     (check-generated-parity
+      (assq 'multinomial manifest)
+      '((uniform-tensor 3 6) (int64 8) (bool #t) (kwarg "generator" none))
+      "[replacement]")
+     (check-generated-parity
+      (assq 'lstm-input manifest)
+      '((tensor 2 5 3) (tensors (4 2 4) (4 2 4))
+        (tensors (16 3) (16 4) (16 3) (16 4)
+                 (16 8) (16 4) (16 8) (16 4))
+        (bool #f) (int64 2) (double 0.0) (bool #f) (bool #t) (bool #t))
+      "[2-layer-bidirectional-batch-first-no-bias]")
+     (check-generated-parity
+      (assq 'gru-input manifest)
+      '((tensor 2 5 3) (tensor 4 2 4)
+        (tensors (12 3) (12 4) (12 3) (12 4)
+                 (12 8) (12 4) (12 8) (12 4))
+        (bool #f) (int64 2) (double 0.0) (bool #f) (bool #t) (bool #t))
+      "[2-layer-bidirectional-batch-first-no-bias]")]))
