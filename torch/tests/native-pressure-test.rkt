@@ -29,6 +29,11 @@
   (define (trough-collections)
     (cdr (assq 'trough-collections (finalizer-diagnostics))))
 
+  (define (trough-floor)
+    (cdr (assq 'trough-floor (finalizer-diagnostics))))
+
+  (define no-backoff +inf.0)
+
   (define (settle!)
     (for ([_ (in-range 3)])
       (reclaim-native-memory!))
@@ -178,7 +183,7 @@
       (thunk)
       (collect-at-trough!)
       (positive? (- (trough-collections) before)))
-    (parameterize ([native-collect-budget 1000])
+    (parameterize ([native-collect-budget no-backoff])
       (define held '())
       (define (grow! k) (set! held (cons (hold k) held)))
       (check-false (collects? (lambda () (grow! 32)))
@@ -190,6 +195,26 @@
       (check-true (collects? (lambda () (grow! 20)))
                   "360 MiB over a 320 MiB floor is past it")
       (check-equal? (length held) 4)))
+
+  (test-case "a trough that does not collect still lowers the floor"
+    (settle!)
+    (define settled
+      (parameterize ([native-collect-margin (* 16 mib)]
+                     [native-collect-budget no-backoff])
+        (define kept (for/list ([_ (in-range 40)]) (zeros 1024 1024)))
+        (collect-at-trough!)
+        (begin0 (trough-floor) (check-equal? (length kept) 40))))
+    (check-true (>= settled (* 128 mib))
+                (format "the floor settled at ~a MiB" (quotient settled mib)))
+    (for ([_ (in-range 3)]) (reclaim-native-memory!))
+    (define before (trough-collections))
+    (parameterize ([native-collect-margin (* 1024 1024 mib)]
+                   [native-collect-budget no-backoff])
+      (collect-at-trough!))
+    (check-equal? (- (trough-collections) before) 0
+                  "a margin nothing can exceed must leave the trough idle")
+    (check-true (< (trough-floor) settled)
+                "the floor follows the ledger down with no collection at all"))
 
   ;; a zero deadline makes every drain report that it ran out of time
   (test-case "a stalled drain does not credit the backstop's byte gate"
@@ -208,19 +233,22 @@
   (test-case "a stalled drain at a trough leaves the floor where it was"
     (settle!)
     (collect-at-trough!)
+    (define settled (trough-floor))
     (define held
       (parameterize ([native-collect-margin (* 16 mib)]
-                     [native-collect-budget 1000]
+                     [native-collect-budget no-backoff]
                      [drain-deadline 0])
         (define before-stall (trough-collections))
         (define kept (for/list ([_ (in-range 8)]) (zeros 1024 1024)))
         (collect-at-trough!)
         (check-equal? (- (trough-collections) before-stall) 1)
+        (check-equal? (trough-floor) settled
+                      "a drain that ran out of time must not settle the floor")
         kept))
     ;; the floor never took the stalled collection's snapshot, so the same
     ;; residue is still over it at the next trough
     (parameterize ([native-collect-margin (* 16 mib)]
-                   [native-collect-budget 1000])
+                   [native-collect-budget no-backoff])
       (define before-retry (trough-collections))
       (collect-at-trough!)
       (check-equal? (length held) 8)
@@ -251,7 +279,7 @@
     (define keys (map car (finalizer-diagnostics)))
     (for ([k (in-list '(runs failures messages ledger-entries
                         pressure-collections pressure-reclaimed
-                        trough-collections trough-minors))])
+                        trough-collections trough-minors trough-floor))])
       (check-not-false (memq k keys) (format "missing ~a" k))))
 
   ;; the CPU has no capacity of its own, so the fraction is exercised against

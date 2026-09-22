@@ -6,10 +6,12 @@
                      ;; only-in would strip
                      syntax/parse/pre
                      (only-in "../private/definer.rkt"
-                              contract-export ctor-formal init-formals))
+                              contract-export ctor-formal forward-formal
+                              init-formals))
          (only-in racket/contract/base
-                  -> ->* ->i and/c any any/c cons/c contract-out contract?
-                  flat-named-contract listof not/c or/c unsupplied-arg?)
+                  -> ->* ->i and/c any any/c cons/c contract contract-out
+                  contract? flat-named-contract listof not/c or/c
+                  unsupplied-arg?)
          (only-in racket/generic define-generics)
          (only-in racket/list append-map check-duplicates remove-duplicates)
          (only-in racket/stxparam define-syntax-parameter syntax-parameterize)
@@ -415,7 +417,8 @@
               (~optional (~seq #:contract ctc:expr))
               (~optional (~seq #:predicate pred:id))
               (~optional (~seq #:on-move moved-body:expr ...+))) ...
-        #:forward (~or* (input:id ...) (input:id ... . restarg:id))
+        #:forward (~or* (input:forward-formal ...)
+                        (input:forward-formal ... . restarg:id))
         body:expr ...+)
      #:fail-when
      (and (attribute init)
@@ -427,7 +430,25 @@
            (define init? (and (attribute init) #t))
            (define init-ids (if init? (syntax->list #'(init.id ...)) '()))
            (define struct-id (generate-temporary #'name))
-           (define arity (length (syntax->list #'(input ...))))]
+           (define input-ids (syntax->list #'(input.id ...)))
+           (define arity (length input-ids))
+           (define input-ctcs (attribute input.ctc))
+           (define checker-ids
+             (for/list ([c (in-list input-ctcs)])
+               (and c (generate-temporary #'check))))]
+     #:with (checker-def ...)
+     (for/list ([c (in-list input-ctcs)]
+                [cid (in-list checker-ids)]
+                #:when c)
+       #`(define #,cid
+           (contract (-> #,c any) values 'name 'caller 'name
+                     (quote-syntax name))))
+     #:with (checked-binding ...)
+     (for/list ([c (in-list input-ctcs)]
+                [cid (in-list checker-ids)]
+                [i (in-list input-ids)]
+                #:when c)
+       #`[#,i (#,cid #,i)])
      #:with sid struct-id
      #:with sid? (format-id struct-id "~a?" struct-id)
      #:with name? (format-id #'name "~a?" #'name)
@@ -442,9 +463,12 @@
      #:with expected (if (attribute restarg)
                          #`(arity-at-least #,arity)
                          #`#,arity)
-     #:with forward-lambda (if (attribute restarg)
-                               #'(lambda (input ... . restarg) body ...)
-                               #'(lambda (input ...) body ...))
+     #:with forward-lambda
+     (if (attribute restarg)
+         #'(lambda (input.id ... . restarg)
+             (let (checked-binding ...) body ...))
+         #'(lambda (input.id ...)
+             (let (checked-binding ...) body ...)))
      #:with (moved-defn ...)
      (if (attribute moved-body)
          #'((define (moved-proc self dev dtype)
@@ -464,6 +488,7 @@
            #:reflection-name reflect-name
            moved-clause ...)
          (define name? sid?)
+         checker-def ...
          (define (forward-proc self . inputs)
            (unless (enough? (length inputs) n-inputs)
              (apply raise-arity-error 'name expected inputs))

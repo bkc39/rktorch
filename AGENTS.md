@@ -17,11 +17,12 @@ The Racket package is the `torch` collection:
   `define-layer`, `gen:layer`, `Parameter`, `Linear`, `sgd`, `mse-loss`, initializers.
   **Naming convention:** nn layer *constructors* are PascalCase (`Linear`,
   `Conv2d`, `ConvTranspose2d`, `MaxPool2d`, `Flatten`, `Dropout`,
-  `Sequential`, `Embedding`, `LayerNorm`, `GroupNorm`, `LSTM`, `GRU`),
-  mirroring the
+  `Sequential`, `Embedding`, `LayerNorm`, `GroupNorm`, `BatchNorm2d`,
+  `BatchNorm1d`, `LSTM`, `GRU`), mirroring the
   `torch.nn.*` classes; their *predicates* are lowercase (`linear?`,
   `conv2d?`, `conv-transpose2d?`, `max-pool2d?`, `flatten?`, `dropout?`,
-  `sequential?`, `embedding?`, `layer-norm?`, `group-norm?`), per Racket idiom
+  `sequential?`, `embedding?`, `layer-norm?`, `group-norm?`,
+  `batch-norm2d?`, `batch-norm1d?`, `lstm?`, `gru?`), per Racket idiom
   (`list?`, `hash?`). The functional ops keep lowercase names on `torch`
   (`conv2d`, `max-pool2d`, `flatten`, like `torch.conv2d`). The PascalCase
   constructors vs lowercase functional ops are what let `(require torch
@@ -95,6 +96,14 @@ CPU-first; float32 + inferred int64 (#44) + uint8 from bytes (#58). From
   continuing), `in-epochs`; synchronous, single-threaded like
   `num_workers=0`; a seeded loader replays `DataLoader(generator=g)`'s
   batch order
+- translation (`torch/data/translation.rkt`, #153): the PyTorch seq2seq
+  tutorial's eng-fra pairs, `load-translation-pairs` (zip cached, 11445
+  pairs after the tutorial's normalisation and filter) and
+  `load-translation-fixture` (287 committed pairs),
+  `translation-archive?`, `parse-pairs`
+  `normalize-sentence`, word vocabularies with `<pad>` 0 / `<sos>` 1 /
+  `<eos>` 2 (`pairs->vocabs` `encode-sentence` `decode-tokens`), and
+  `pairs->tensors` padding to a width
 - diffusion (`torch/vision/diffusion.rkt`, #84): `linear-schedule`
   `cosine-schedule` (betas, alphas, alpha-bars as device tensors), `q-sample`
   (closed-form `q(x_t | x_0)`), `sinusoidal-embedding`, and the layers
@@ -108,9 +117,14 @@ CPU-first; float32 + inferred int64 (#44) + uint8 from bytes (#58). From
   int64 labels), `cifar10-dataset #:device`, `cifar10-label-names`,
   `load-cifar10-fixture` (256 committed records), `cifar10-records->tensors`,
   `tar-entries`
-- shape: `reshape view transpose permute squeeze unsqueeze cat stack`
+- transforms (`torch/vision/transforms.rkt`, #152): `random-horizontal-flip
+  #:p` and `random-crop #:padding` on an image batch where it lives; each
+  takes `#:generator` and draws one seed per batch from it, so a seeded
+  loader replays its augmentation (the draws are the transform's own, not
+  torchvision's)
+- shape: `reshape view transpose permute squeeze unsqueeze cat stack flip`
 - elementwise: `add sub mul div pow neg exp log sqrt relu sigmoid tanh silu
-  clamp`
+  leaky-relu clamp`
   (binary ops take a real on either side)
 - operators: `+ - * /` shadow racket/base rkt-polars-style (numeric fast
   path to racket/base, tensor operands dispatch to add/sub/mul/div, chains
@@ -148,14 +162,17 @@ per `foreign/operators.rkt`.
 
 From `torch/nn`: `define-layer procedure->Layer gen:layer layer? Parameter Buffer LayerList LayerHash parameters
 named-parameters buffers children forward Linear Conv2d MaxPool2d Flatten Dropout
-Sequential Embedding LayerNorm ConvTranspose2d GroupNorm LSTM GRU sgd adam step!
-zero-grads! clip-grad-norm! ema
-ema-update! ema-average cross-entropy nll-loss
-mse-loss kaiming-uniform uniform-init normal-init fan-in`. The functional
+Sequential Embedding LayerNorm ConvTranspose2d GroupNorm BatchNorm2d BatchNorm1d
+LSTM GRU sgd adam step! zero-grads! clip-grad-norm! ema ema-update! ema-average
+cross-entropy nll-loss mse-loss binary-cross-entropy-with-logits huber-loss
+l1-loss kaiming-uniform uniform-init normal-init fan-in`. The functional
 transformer primitives (`gelu tril triu masked-fill embedding layer-norm`,
-tranche 3, #22) and the UNet ones (`conv-transpose2d group-norm silu
+tranche 3, #22), the UNet ones (`conv-transpose2d group-norm silu
 clamp`, tranche 4, #84; `upsample-nearest2d` over `repeat_interleave`, tranche
-5) live on `torch` beside the other functional ops; the GPT
+5) and the classic vision ones (`batch-norm leaky-relu flip`, tranche 6,
+#152; `BatchNorm2d`/`BatchNorm1d` keep `running-mean`, `running-var` and
+`num-batches-tracked` as `Buffer`s that ATen updates in place in `'train`
+mode) live on `torch` beside the other functional ops; the GPT
 causal-mask idiom is `(masked-fill scores (eq (tril (ones T T)) 0) -inf.0)`. `define-layer` is the Python-style
 `nn.Module` analog: `#:init` is the constructor body and assigns declared
 fields with `set!`, a field's value classifies it at construction
@@ -336,7 +353,8 @@ module's full export set (`racket/runtime-path`, `syntax/parse/pre`).
   and the UNet layers.
 - `data/loader.rkt` — `tensor-dataset`, `dataloader`, `in-dataloader`,
   `in-epochs`, re-exporting `data/dataset.rkt`; `data/mnist.rkt`,
-  `data/text.rkt` — the modality loaders (moving under #88).
+  `data/text.rkt`, `data/translation.rkt` — the modality loaders (moving
+  under #88).
 - `foreign/ops.rkt` — version/seed + marshalling (`item`, `to-dtype`,
   `uniform!`, `to`); `foreign/creation-ops.rkt` — the constructors
   (`zeros` .. `rand`, `tensor`, `arange`, `eye`, the `*-like` family, with
@@ -501,6 +519,9 @@ under that contract and the predicate, under its lowercase name
 (`Conv2d`/`conv2d?`, `MaxPool2d`/`max-pool2d?`; `#:predicate` overrides the
 derived name), so a layer file has no `provide` block and no `rename-out`.
 `->i` states a cross-argument invariant that used to be an `unless` guard.
+A forward formal written `[x : image-batch/c]` states what the layer accepts
+there, which is where a rank or shape check belongs; the violation names the
+layer and the contract, and the check is built once at the definition.
 
 Two layers carry no contracts: `torch/generated.rkt` (codegen output, the
 unstable surface) and `torch/foreign/raw/` (the FFI bindings, where the

@@ -14,6 +14,7 @@ same material in the order you meet it.
 @include-section["length.scrbl"]
 @include-section["device.scrbl"]
 @include-section["data.scrbl"]
+@include-section["translation.scrbl"]
 @include-section["vision.scrbl"]
 @include-section["nn.scrbl"]
 @include-section["layers-builtin.scrbl"]

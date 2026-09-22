@@ -78,6 +78,7 @@
          unsqueeze
          cat
          stack
+         flip
          flatten
          narrow
          select
@@ -111,6 +112,7 @@
          sigmoid
          gelu
          silu
+         leaky-relu
          clamp
          exp
          log
@@ -151,6 +153,7 @@
          embedding
          layer-norm
          group-norm
+         batch-norm
          upsample-nearest2d)
 
 (provide eq
