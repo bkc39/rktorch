@@ -3,7 +3,9 @@
 @(require (for-label racket/base
                      racket/contract
                      (only-in torch
-                              arange backward! cpu-device
+                              arange autocast-dtype autocast-enabled?
+                              backward! bytes->tensor call-with-autocast
+                              cpu-device default-device
                               cuda-allocator-settings!
                               cuda-device cuda-memory-info cuda-memory-stats
                               cuda-reset-peak-stats! device device/c device?
@@ -14,8 +16,10 @@
                               native-memory-use ones ones-like prop:to rand
                               rand-like randn randn-like
                               reclaim-native-memory! tensor tensor-device
-                              tensor-dtype tensor? to to-able? to-device
-                              to-dtype with-default-device with-no-grad
+                              tensor->bytes tensor-dtype tensor? to to-able?
+                              to-device
+                              to-dtype with-autocast with-default-device
+                              with-no-grad
                               zeros zeros-like ~>)
                      (only-in torch/nn
                               Buffer Linear Parameter adam buffers gen:layer
@@ -169,11 +173,16 @@ float leaves the process without widening.
 }
 
 @defproc[(bytes->tensor [bs bytes?] [dtype dtype/c]
-                        [shape (listof exact-nonnegative-integer?)])
+                        [shape (listof exact-nonnegative-integer?)]
+                        [#:device device (or/c #f device/c) #f])
          tensor?]{
 The inverse of @racket[tensor->bytes]: a tensor of @racket[dtype] and
 @racket[shape] over a copy of @racket[bs], whose length must be the
-element count times the element size. It lands on the default device.
+element count times the element size. It lands on @racket[device], or on
+the default device when that is @racket[#f]. Naming the device decodes
+somewhere the default cannot hold the dtype --- an @tt{F64} payload while
+the default is MPS --- without changing the default, which every thread in
+the process shares.
 }
 
 @defthing[prop:to struct-type-property?]{

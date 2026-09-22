@@ -30,6 +30,7 @@
          (only-in "error.rkt" check-handle check-ok)
          (only-in "ops.rkt"
                   any-float-dtype/c
+                  default-device
                   device->type+index
                   dims-rest/c
                   dtype/c
@@ -365,9 +366,10 @@
   (define narrow?
     (or (and (bytes? data) dtype (not (eq? dtype 'uint8)) #t)
         (and (memq dtype '(float16 bfloat16)) #t)))
-  ;; a tensor that is narrowed after construction is built on the host, so
-  ;; the device never holds the wide copy and the narrow one at once
-  (define build-on (and (not narrow?) device))
+  ;; a tensor narrowed after construction is built on the CPU by name, not
+  ;; on the default device, so no accelerator holds the wide copy and the
+  ;; narrow one at once
+  (define build-on (if narrow? 'cpu device))
   (define-values (type index)
     (if build-on (device->type+index build-on) (values #f #f)))
   (define out
@@ -393,8 +395,7 @@
   (define typed
     (cond
       [narrow?
-       (define narrowed (to-dtype out dtype))
-       (if device (to-device narrowed device) narrowed)]
+       (to-device (to-dtype out dtype) (or device (default-device)))]
       [else out]))
   (if requires-grad? (requires-grad! typed) typed))
 
