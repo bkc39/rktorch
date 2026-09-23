@@ -78,7 +78,10 @@ with `backward!` outside the form as PyTorch recommends). From
   release)
 - creation: `zeros ones full arange eye tensor rand randn` (+ in-place
   `uniform!`); every constructor takes `#:device` / `#:dtype` chosen at
-  native construction (never construct-then-move) and `#:requires-grad?`
+  native construction (never construct-then-move), with one exception:
+  `tensor` asked for `'float16` / `'bfloat16` from a list or vector, which
+  no host vector type carries, is built and narrowed on the CPU and moved
+  once, so an accelerator never holds the wide copy; `#:requires-grad?`
   applied after it (integer dtypes refuse it as torch does); the shape
   constructors take dims as rest args or one list; `zeros-like` /
   `ones-like` / `full-like` / `randn-like` / `rand-like` inherit the
