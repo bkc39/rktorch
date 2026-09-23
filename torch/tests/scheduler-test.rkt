@@ -112,9 +112,28 @@
                                         #:total-steps 10 #:pct-start 1)))
     (define s (one-cycle-lr (fresh-opt) #:max-lr 1.0 #:total-steps 10
                             #:pct-start 0.1))
+    ;; pct-start times total-steps is exactly 1 here, so the warmup ends at
+    ;; step 0; the exact step over the zero-length phase is 0, not NaN
+    (check-= (learning-rate s) 0.04 1e-12 "step 0 holds max-lr / div-factor")
     (for ([_ (in-range 10)])
       (step! s)
       (check-false (nan? (learning-rate s)))))
+
+  (test-case "a step that raises leaves the count and the rate where they were"
+    (define s (one-cycle-lr (fresh-opt) #:max-lr 1.0 #:total-steps 3))
+    (for ([_ (in-range 3)])
+      (step! s))
+    (define rate (learning-rate s))
+    (check-exn #rx"stepped past the cycle" (lambda () (step! s)))
+    (check-equal? (scheduler-step-count s) 3)
+    (check-= (scheduler-rate s) rate 0.0)
+    (check-= (learning-rate s) rate 0.0)
+    (define l (lambda-lr (fresh-opt)
+                         (lambda (t) (if (= t 2) (error 'factor "no step 2") 1.0))))
+    (step! l)
+    (check-exn #rx"no step 2" (lambda () (step! l)))
+    (check-equal? (scheduler-step-count l) 1)
+    (check-= (learning-rate l) 0.1 0.0))
 
   (test-case "a learning rate is never negative, as in torch.optim"
     (define ps (list (Parameter (zeros 2))))
