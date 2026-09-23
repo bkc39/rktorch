@@ -1,7 +1,7 @@
 #lang racket/base
 
 (require (only-in racket/contract/base
-                  -> ->* </c <=/c >=/c >/c and/c any/c contract-out listof
+                  -> ->* </c <=/c >/c >=/c and/c any/c contract-out listof
                   real-in)
          (only-in racket/generic define/generic)
          (only-in racket/math pi)
