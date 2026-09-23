@@ -99,7 +99,9 @@
   (or/c 'float32 'float64 'float16 'bfloat16))
 
 ;; the device and dtype go into native construction — never a default-device
-;; scope or a construct-then-move hop through another device
+;; scope or a construct-then-move hop through another device; the one
+;; exception is `tensor`'s half path in creation-ops.rkt, which stages on
+;; the CPU because no host vector type carries a half
 (define (placement device dtype)
   (define-values (type index)
     (if device (device->type+index device) (values 'keep 0)))
