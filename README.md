@@ -193,6 +193,8 @@ against:
   class-conditional DDPM with a UNet, trained with an EMA of the weights
 - [A character-level LSTM](examples/racket/12-char-rnn.rkt): gradient
   clipping, and sampling at a temperature from a carried state
+- [French to English translation](examples/racket/13-translation.rkt): a GRU
+  encoder-decoder with Bahdanau attention, teacher forcing, and greedy decoding
 
 ## Documentation
 
