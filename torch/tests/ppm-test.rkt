@@ -14,7 +14,6 @@
     bs)
 
   (test-case "image-grid: make_grid's layout, padding around every image"
-    ;; three 1x2 images of one channel each, two columns, padding 1
     (define images (reshape (add (arange 6) 1.0) 3 1 1 2))
     (define grid (image-grid images #:columns 2 #:padding 1 #:pad-value -1))
     (check-equal? (tensor-shape grid) '(3 5 7) "one channel becomes three")
@@ -32,8 +31,6 @@
                   "ten images in eight columns: two rows")
     (check-equal? (tensor-shape (image-grid (randn 2 3 4 4) #:padding 0))
                   '(3 4 8))
-    ;; a uint8 batch keeps its dtype, and full refuses a pad value outside
-    ;; its range as contract blame rather than wrapping it
     (define bytes-batch (to-dtype (full 9.0 2 3 2 2) 'uint8))
     (define byte-grid (image-grid bytes-batch #:padding 1 #:pad-value 7))
     (check-equal? (tensor-dtype byte-grid) 'uint8)
@@ -42,7 +39,15 @@
     (check-exn #rx"^image-grid: contract violation"
                (lambda () (image-grid bytes-batch #:pad-value -1)))
     (check-exn #rx"uint8-fill-value"
-               (lambda () (image-grid bytes-batch #:pad-value 256))))
+               (lambda () (image-grid bytes-batch #:pad-value 256)))
+    (define int-batch (to-dtype (full 9.0 2 3 2 2) 'int64))
+    (check-exn #rx"^image-grid: contract violation"
+               (lambda () (image-grid int-batch #:pad-value 0.5)))
+    (check-exn #rx"int64-fill-value"
+               (lambda () (image-grid int-batch #:pad-value 0.5)))
+    (define bool-batch (to-dtype (zeros 2 3 2 2) 'bool))
+    (check-exn #rx"bool-fill-value"
+               (lambda () (image-grid bool-batch #:pad-value 2))))
 
   (test-case "image-grid does not extend the caller's graph, as make_grid"
     (define x (mul (rand 3 3 2 2 #:requires-grad? #t) 1.0))
@@ -91,15 +96,54 @@
                (lambda () (image-grid (zeros 0 3 4 4))))
     (check-exn #rx"non-empty-image-batch"
                (lambda () (image-grid (zeros 3 4 4))))
+    ;; a zero height or width makes a grid that is nothing but padding
+    (check-exn #rx"non-empty-image-batch"
+               (lambda () (image-grid (zeros 2 3 0 5))))
+    (check-exn #rx"non-empty-image-batch"
+               (lambda () (image-grid (zeros 2 3 5 0))))
+    (check-exn #rx"non-empty-image-batch"
+               (lambda () (image-grid (zeros 2 0 4 4))))
     (check-exn exn:fail:contract? (lambda () (written (zeros 2 2))))
     (check-exn exn:fail:contract? (lambda () (written (zeros 1 2 2))))
     (check-exn exn:fail:contract?
                (lambda () (written (zeros 3 2 2) #:range '(1 0))))
+    ;; an infinite span makes the scale zero and writes every pixel black
+    (check-exn #rx"value-range"
+               (lambda () (written (zeros 3 2 2) #:range '(0 +inf.0))))
+    (check-exn #rx"value-range"
+               (lambda () (written (zeros 3 2 2) #:range '(-inf.0 1))))
+    ;; finite endpoints whose span is not: the scale would come out zero
+    (check-exn #rx"value-range"
+               (lambda () (written (zeros 3 2 2) #:range '(-1e308 1e308))))
+    ;; a span small enough that 255 over it is not a number either
+    (check-exn #rx"value-range"
+               (lambda () (written (zeros 3 2 2) #:range '(0 1e-307))))
+    (check-exn #rx"value-range"
+               (lambda () (written (zeros 3 2 2)
+                                   #:range (list (add1 (expt 2 53))
+                                                 (+ 3 (expt 2 53))))))
+    (check-exn #rx"scale must be a number in the image's dtype"
+               (lambda () (written (zeros 3 2 2) #:range '(0 1e-38))))
+    (check-equal? (bytes-length (written (to-dtype (zeros 3 2 2) 'float64)
+                                         #:range '(0 1e-38)))
+                  (+ 11 12)
+                  "float64 carries that scale")
     (check-exn #rx"expected: image"
                (lambda () (written (to-dtype (zeros 3 2 2) 'bool))))
+    ;; an int64 image under the default range would quantize to white
+    (check-exn #rx"expected: image"
+               (lambda () (written (to-dtype (zeros 3 2 2) 'int64))))
     ;; a PPM header states a width and a height, and neither may be zero
     (check-exn #rx"expected: image" (lambda () (written (zeros 3 0 2))))
     (check-exn #rx"expected: image" (lambda () (written (zeros 3 2 0)))))
+
+  (test-case "write-ppm quantizes off the graph, as save_image does"
+    (define x (mul (rand 3 2 2 #:requires-grad? #t) 1.0))
+    (check-true (requires-grad? x))
+    (define path (make-temporary-file "rkt-grad-~a.ppm"))
+    (write-ppm path x)
+    (check-equal? (bytes-length (file->bytes path)) (+ 11 (* 3 2 2)))
+    (delete-file path))
 
   (test-case "image-grid and write-ppm accept device tensors"
     (when (cuda-available?)

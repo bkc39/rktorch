@@ -9,9 +9,9 @@
                      (only-in torch/nn Conv2d Dropout Embedding GroupNorm Linear
                               define-layer)
                      torch/vision/cifar10
+                     torch/vision/ppm
                      torch/vision/resnet
                      torch/vision/transforms
-                     torch/vision/ppm
                      torch/vision/diffusion))
 
 @title{Vision datasets}
@@ -300,7 +300,8 @@ image viewer and converter reads.
                      [#:pad-value pad-value (fill-value/c (tensor-dtype images)) 0])
          tensor?]{
 Lays the @tt{[N C H W]} batch @racket[images], a rank-4 tensor with at
-least one image, out as one @tt{[C H' W']} image, @racket[columns] across
+least one image and no zero dimension, out as one @tt{[C H' W']} image,
+@racket[columns] across
 and @racket[padding] pixels of @racket[pad-value] around every image, on
 the device the batch lives on. One channel becomes three. A batch of one
 image comes back as that image, with no border, which is what
@@ -320,7 +321,11 @@ Writes the @tt{[3 H W]} tensor @racket[image], whose @tt{H} and @tt{W}
 are the positive dimensions its header states, to @racket[path]. A float
 image is quantized the way torchvision's @tt{save_image} does, with
 @racket[range] naming the values that map to 0 and 255, its first below
-its second, so a dataset in @tt{[-1, 1]} passes @racket['(-1 1)]; a uint8
-image is written as it is. A boolean image is not one ATen can subtract
-a range from, so the contract refuses it.
+its second and both finite, so a dataset in @tt{[-1, 1]} passes
+@racket['(-1 1)]; a uint8
+image is written as it is. @racket[image] is a @racket['float32],
+@racket['float64] or @racket['uint8] tensor: an integer or boolean one
+has no range the transform can read, and under the default
+@racket[range] a 0-to-255 integer image would quantize to white rather
+than to itself.
 }

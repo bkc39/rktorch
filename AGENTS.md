@@ -76,7 +76,7 @@ with `backward!` outside the form as PyTorch recommends). From
   runs, captured failure messages, and live ledger entries; also dumped at
   exit under `RKTORCH_MEM_TRACE`), `tensor-free!` (explicit synchronous
   release)
-- creation: `zeros ones full arange eye tensor rand randn` (+ in-place
+- creation: `zeros ones full fill-value/c arange eye tensor rand randn` (+ in-place
   `uniform!`); every constructor takes `#:device` / `#:dtype` chosen at
   native construction (never construct-then-move), with one exception:
   `tensor` asked for `'float16` / `'bfloat16` from a list or vector, which

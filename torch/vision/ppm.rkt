@@ -1,7 +1,7 @@
 #lang racket/base
 
 (require (only-in racket/contract/base
-                  ->* ->i and/c flat-named-contract list/c)
+                  ->* ->i and/c flat-named-contract list/c unsupplied-arg?)
          (only-in "../foreign.rkt"
                   add clamp copy! fill-value/c full mul narrow permute select
                   sub tensor-device tensor-dtype tensor-shape tensor->vector
@@ -9,30 +9,50 @@
          (only-in "../foreign/contracts.rkt" image-batch/c)
          (only-in "../private/contract.rkt" define/contract-out))
 
-;; ATen has no subtraction on a boolean tensor, so the range transform
-;; has nothing to apply there; a PPM states its width and height, and
-;; neither may be zero
+(define ppm-dtypes '(float32 float64 uint8))
+
 (define image/c
   (flat-named-contract
    'image
    (lambda (x)
      (and (tensor? x)
-          (not (eq? (tensor-dtype x) 'bool))
+          (and (memq (tensor-dtype x) ppm-dtypes) #t)
           (let ([dims (tensor-shape x)])
             (and (= 3 (length dims))
                  (= 3 (car dims))
-                 (positive? (cadr dims))
-                 (positive? (caddr dims))))))))
+                 (andmap positive? dims)))))))
+
+;; the endpoints cross to ATen as doubles, so the span and scale checked
+;; here are the ones the arithmetic will use, not the exact originals
+(define (quantizes? r)
+  (define lo (exact->inexact (car r)))
+  (define hi (exact->inexact (cadr r)))
+  (define span (- hi lo))
+  (and (= lo (car r))
+       (= hi (cadr r))
+       (< lo hi)
+       (rational? span)
+       (positive? span)
+       (let ([scale (/ 255.0 span)])
+         (and (rational? scale) (positive? scale)))))
+
+;; float32 carries the scale for a float32 image: a span small enough to
+;; make it overflow there writes every pixel white
+(define (scale-fits? value-range dtype)
+  (define span (- (exact->inexact (cadr value-range))
+                  (exact->inexact (car value-range))))
+  (or (not (eq? dtype 'float32))
+      (<= (/ 255.0 span) 3.4028234663852886e38)))
 
 (define value-range/c
   (flat-named-contract
    'value-range
-   (and/c (list/c real? real?) (lambda (r) (< (car r) (cadr r))))))
+   (and/c (list/c rational? rational?) quantizes?)))
 
 (define non-empty-image-batch/c
   (flat-named-contract
    'non-empty-image-batch
-   (and/c image-batch/c (lambda (x) (positive? (car (tensor-shape x)))))))
+   (and/c image-batch/c (lambda (x) (andmap positive? (tensor-shape x))))))
 
 (define/contract-out (image-grid images ;; noqa
                                  #:columns [columns 8]
@@ -55,7 +75,6 @@
       [(= n 1) (one-image (select images 0 0) c h w)]
       [else (grid-of images n c h w columns padding pad-value)])))
 
-;; make_grid returns a single image as it is, with no border
 (define (one-image image c h w)
   (cond
     [(= c 1)
@@ -83,19 +102,27 @@
   grid)
 
 (define/contract-out (write-ppm path image #:range [value-range '(0 1)]) ;; noqa
-  (->* [path-string? image/c] [#:range value-range/c] void?)
+  (->i ([path path-string?] [image image/c])
+       (#:range [value-range value-range/c])
+       #:pre/name (image value-range)
+       "the range's scale must be a number in the image's dtype"
+       (or (unsupplied-arg? value-range)
+           (scale-fits? value-range (tensor-dtype image)))
+       [_ void?])
   (define dims (tensor-shape image))
   (define lo (car value-range))
   (define hi (cadr value-range))
   (define pixels
-    (tensor->vector
-     (permute (if (eq? (tensor-dtype image) 'uint8)
-                  image
-                  (to-dtype (clamp (add (mul (sub image lo) (/ 255.0 (- hi lo)))
-                                        0.5)
-                                   #:min 0 #:max 255)
-                            'uint8))
-              1 2 0)))
+    (with-no-grad
+      (tensor->vector
+       (permute (if (eq? (tensor-dtype image) 'uint8)
+                    image
+                    (to-dtype (clamp (add (mul (sub image lo)
+                                               (/ 255.0 (- hi lo)))
+                                          0.5)
+                                     #:min 0 #:max 255)
+                              'uint8))
+                1 2 0))))
   (call-with-output-file path
     #:exists 'truncate
     (lambda (out)
