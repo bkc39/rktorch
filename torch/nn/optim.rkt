@@ -1,7 +1,7 @@
 #lang racket/base
 
 (require (only-in racket/contract/base
-                  -> ->* ->i >=/c >/c any/c contract-out listof real-in
+                  -> ->* ->i >=/c any/c contract-out listof
                   unsupplied-arg?)
          (only-in racket/generic define-generics)
          (only-in "../foreign.rkt"
@@ -55,7 +55,6 @@
      (hash-set! table p moved)
      moved]))
 
-;; torch's L2 weight decay: the gradient the update sees is g + wd * p
 (define (decayed g p weight-decay)
   (if (zero? weight-decay) g (add g (mul p weight-decay))))
 
@@ -74,7 +73,7 @@
                           #:nesterov? [nesterov? #f]
                           #:weight-decay [weight-decay 0.0])
   (->i ([params (listof tensor?)] #:lr [lr (>=/c 0)])
-       (#:momentum [momentum (real-in 0 1)]
+       (#:momentum [momentum (>=/c 0)]
         #:nesterov? [nesterov? boolean?]
         #:weight-decay [weight-decay (>=/c 0)])
        #:pre/name (momentum nesterov?)
@@ -85,8 +84,6 @@
        [result sgd?])
   (make-sgd params lr momentum nesterov? weight-decay (make-hasheq)))
 
-;; torch.optim.SGD: the first step copies the gradient into the buffer, the
-;; later ones blend it in; Nesterov looks one blend ahead
 (define (momentum-buffer! opt p d)
   (define table (sgd-bufs opt))
   (cond
@@ -181,15 +178,13 @@
                               #:weight-decay [weight-decay 0.0]
                               #:momentum [momentum 0.0])
   (->* [(listof tensor?)]
-       [#:lr (>=/c 0) #:alpha (real-in 0 1) #:eps (>/c 0)
+       [#:lr (>=/c 0) #:alpha (>=/c 0) #:eps (>=/c 0)
         #:weight-decay (>=/c 0)
-        #:momentum (real-in 0 1)]
+        #:momentum (>=/c 0)]
        rmsprop?)
   (make-rmsprop params lr alpha eps weight-decay momentum
                 (make-hasheq) (make-hasheq) (make-hasheq)))
 
-;; torch.optim.RMSprop, uncentered: the running square average, its root
-;; plus eps as the divisor, and a zero-initialised momentum buffer when asked
 (define (rmsprop-do-step! opt)
   (with-no-grad
     (define alpha (rmsprop-alpha opt))
@@ -225,5 +220,5 @@
   (optimizer-lr opt))
 
 (define/contract-out (set-learning-rate! opt lr) ;; noqa
-  (-> optimizer? real? void?)
+  (-> optimizer? (>=/c 0) void?)
   (optimizer-set-lr! opt lr))
