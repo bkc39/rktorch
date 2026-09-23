@@ -1,7 +1,7 @@
 #lang racket/base
 
 (require (only-in racket/contract/base
-                  -> ->* </c >=/c >/c and/c any/c contract-out listof
+                  -> ->* </c <=/c >=/c >/c and/c any/c contract-out listof
                   real-in)
          (only-in racket/generic define/generic)
          (only-in racket/math pi)
@@ -53,7 +53,7 @@
 (define/contract-out (multi-step-lr opt ;; noqa
                                     #:milestones milestones
                                     #:gamma [gamma 0.1])
-  (->* [optimizer? #:milestones (listof exact-positive-integer?)]
+  (->* [optimizer? #:milestones (listof exact-nonnegative-integer?)]
        [#:gamma real?]
        scheduler?)
   (build opt
@@ -81,7 +81,7 @@
                                 #:end-factor [end-factor 1.0]
                                 #:total-iters [total-iters 5])
   (->* [optimizer?]
-       [#:start-factor (real-in 0 1) #:end-factor (real-in 0 1)
+       [#:start-factor (and/c (>/c 0) (<=/c 1)) #:end-factor (real-in 0 1)
         #:total-iters exact-positive-integer?]
        scheduler?)
   (build opt

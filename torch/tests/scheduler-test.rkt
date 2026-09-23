@@ -126,6 +126,28 @@
                (lambda () (rmsprop ps #:lr -1e-2)))
     (check-= (learning-rate (sgd ps #:lr 0)) 0 0.0 "zero is a held rate"))
 
+  (test-case "the bounds are torch.optim's: nonnegative, not unit-capped"
+    (define ps (list (Parameter (zeros 2))))
+    (check-true (sgd? (sgd ps #:lr 0.1 #:momentum 1.1)))
+    (check-true (rmsprop? (rmsprop ps #:alpha 1.1 #:eps 0 #:momentum 1.5)))
+    (check-exn #rx"^sgd: contract violation"
+               (lambda () (sgd ps #:lr 0.1 #:momentum -0.1)))
+    (check-exn #rx"^rmsprop: contract violation"
+               (lambda () (rmsprop ps #:eps -1e-8)))
+    (define o (sgd ps #:lr 0.1))
+    (set-learning-rate! o 0)
+    (check-= (learning-rate o) 0 0.0)
+    (check-exn #rx"^set-learning-rate!: contract violation"
+               (lambda () (set-learning-rate! o -0.1)))
+    ;; a milestone at zero decays at construction, as MultiStepLR does
+    (check-rates (rates (multi-step-lr (fresh-opt) #:milestones '(0 2)
+                                       #:gamma 0.5) 3)
+                 '(0.05 0.05 0.025 0.025))
+    ;; a zero start factor would freeze the first update; torch refuses it
+    (check-exn #rx"^linear-lr: contract violation"
+               (lambda () (linear-lr (fresh-opt) #:start-factor 0)))
+    (check-true (scheduler? (linear-lr (fresh-opt) #:end-factor 0))))
+
   (test-case "weight decay is never negative, as in torch.optim"
     (define ps (list (Parameter (zeros 2))))
     (check-exn #rx"^sgd: contract violation"
