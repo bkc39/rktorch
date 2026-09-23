@@ -24,17 +24,17 @@
    (define (optimizer-lr s) (inner-lr (scheduler-optimizer s)))
    (define (optimizer-set-lr! s lr) (inner-set-lr! (scheduler-optimizer s) lr))
    (define (optimizer-step! s)
-     (set-scheduler-last! s (add1 (scheduler-last s)))
-     (apply-rate! s))])
+     (apply-rate! s (add1 (scheduler-last s))))])
 
-(define (apply-rate! s)
-  (define lr ((scheduler-lr-at s) (scheduler-base-lr s) (scheduler-last s)))
+(define (apply-rate! s t)
+  (define lr ((scheduler-lr-at s) (scheduler-base-lr s) t))
+  (set-scheduler-last! s t)
   (set-scheduler-last-rate! s lr)
   (optimizer-set-lr! (scheduler-optimizer s) lr))
 
 (define (build opt lr-at)
   (define s (make-scheduler opt (optimizer-lr opt) lr-at 0 #f))
-  (apply-rate! s)
+  (apply-rate! s 0)
   s)
 
 (define/contract-out (scheduler-step-count s) ;; noqa
