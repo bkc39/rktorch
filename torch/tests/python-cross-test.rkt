@@ -20,6 +20,7 @@
            (only-in "../vision/cifar10.rkt" load-cifar10-fixture)
            (only-in "../vision/diffusion.rkt"
                     UNet linear-schedule q-sample schedule-steps)
+           (only-in "../vision/ppm.rkt" image-grid write-ppm)
            (only-in "../vision/resnet.rkt" ResNet)
            "private/python-env.rkt")
 
@@ -702,6 +703,43 @@
              [b (in-list (hash-ref j 'values))]
              [i (in-naturals)])
          (check-= a b tol (format "group-norm forward: value ~a parity" i))))
+     (let ()
+       (define j (python-check "make_grid_parity.py"))
+       (manual-seed! 0)
+       (define grid (image-grid (rand 5 3 4 4) #:columns 2 #:padding 1
+                                #:pad-value 0.5))
+       (check-equal? (tensor-shape grid) (hash-ref j 'shape)
+                     "image-grid: shape parity with make_grid")
+       (for ([a (in-list (tensor->list grid))]
+             [b (in-list (hash-ref j 'values))]
+             [i (in-naturals)])
+         (check-= a b tol (format "image-grid: value ~a parity" i)))
+       (define path (make-temporary-file "rkt-grid-~a.ppm"))
+       (write-ppm path grid)
+       (define bs (file->bytes path))
+       (delete-file path)
+       ;; five images in two columns: three rows of 4 + 1, so 16 by 11
+       (define header #"P6\n11 16\n255\n")
+       (check-equal? (subbytes bs 0 (bytes-length header)) header
+                     "write-ppm: header for make_grid's 16 by 11")
+       (define pixels (bytes->list (subbytes bs (bytes-length header))))
+       (check-equal? (length pixels) (length (hash-ref j 'pixels))
+                     "write-ppm: one byte per channel")
+       ;; the quantization rounds at a half, where a difference the value
+       ;; check above tolerates moves a byte by one
+       (for ([a (in-list pixels)]
+             [b (in-list (hash-ref j 'pixels))]
+             [i (in-naturals)])
+         (check-= a b 1 (format "write-ppm: save_image's quantization ~a" i)))
+       (manual-seed! 1)
+       (define one (image-grid (rand 1 3 4 4) #:columns 2 #:padding 1
+                               #:pad-value 0.5))
+       (check-equal? (tensor-shape one) (hash-ref j 'one_shape)
+                     "image-grid: make_grid returns one image unpadded")
+       (for ([a (in-list (tensor->list one))]
+             [b (in-list (hash-ref j 'one_values))]
+             [i (in-naturals)])
+         (check-= a b tol (format "image-grid: one image value ~a parity" i))))
      (let ()
        (define j (python-check "batch_norm_forward.py"))
        (manual-seed! 0)
