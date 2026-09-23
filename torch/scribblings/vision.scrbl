@@ -9,6 +9,7 @@
                      (only-in torch/nn Conv2d Dropout Embedding GroupNorm Linear
                               define-layer)
                      torch/vision/cifar10
+                     torch/vision/ppm
                      torch/vision/transforms
                      torch/vision/diffusion))
 
@@ -237,4 +238,52 @@ Pads every image of the rank-4 batch @racket[x] with @racket[padding] zero
 pixels on each side and cuts a window of the original size at a per-image
 offset, torchvision's @tt{RandomCrop(32, padding=4)} for CIFAR-10. With
 @racket[padding] 0 it is the identity.
+}
+
+@section{Images}
+
+@defmodule[torch/vision/ppm]
+
+Sample grids as image files without a dependency: the binary PPM format
+(@tt{P6}) is a one-line header followed by one byte per channel, which every
+image viewer and converter reads.
+
+@racketblock[
+(write-ppm "samples.ppm" (image-grid samples #:columns 10) #:range '(-1 1))
+]
+
+@defproc[(image-grid [images tensor?]
+                     [#:columns columns exact-positive-integer? 8]
+                     [#:padding padding exact-nonnegative-integer? 2]
+                     [#:pad-value pad-value (fill-value/c (tensor-dtype images)) 0])
+         tensor?]{
+Lays the @tt{[N C H W]} batch @racket[images], a rank-4 tensor with at
+least one image and no zero dimension, out as one @tt{[C H' W']} image,
+@racket[columns] across
+and @racket[padding] pixels of @racket[pad-value] around every image, on
+the device the batch lives on. One channel becomes three. A batch of one
+image comes back as that image, with no border, which is what
+@tt{make_grid} returns there. The layout is torchvision's
+@tt{make_grid}. @racket[pad-value] must be a value the batch's dtype
+holds exactly, so a uint8 batch takes 0 through 255. The grid is built
+under @racket[with-no-grad], as @tt{make_grid} is decorated with
+@tt{no_grad}: it is a picture of the batch, not a step in its graph. The one-image case returns the batch's own image, so there it
+carries whatever the batch carried, again as @tt{make_grid} does.
+}
+
+@defproc[(write-ppm [path path-string?]
+                    [image tensor?]
+                    [#:range range (list/c real? real?) '(0 1)])
+         void?]{
+Writes the @tt{[3 H W]} tensor @racket[image], whose @tt{H} and @tt{W}
+are the positive dimensions its header states, to @racket[path]. A float
+image is quantized the way torchvision's @tt{save_image} does, with
+@racket[range] naming the values that map to 0 and 255, its first below
+its second and both finite, so a dataset in @tt{[-1, 1]} passes
+@racket['(-1 1)]; a uint8
+image is written as it is. @racket[image] is a @racket['float32],
+@racket['float64] or @racket['uint8] tensor: an integer or boolean one
+has no range the transform can read, and under the default
+@racket[range] a 0-to-255 integer image would quantize to white rather
+than to itself.
 }
