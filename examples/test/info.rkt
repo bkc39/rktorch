@@ -22,4 +22,5 @@
     ("09-resnet.rkt" 600)
     ("10-dcgan.rkt" 600)
     ("11-vae.rkt" 600)
-    ("12-char-rnn.rkt" 300)))
+    ("12-char-rnn.rkt" 300)
+    ("13-translation.rkt" 600)))

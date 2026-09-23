@@ -14,6 +14,9 @@
            (only-in "../data/mnist.rkt" load-mnist-fixture)
            (only-in "../data/text.rkt"
                     contiguous-blocks encode load-text-fixture text->vocab)
+           (only-in "../data/translation.rkt"
+                    eos-id load-translation-fixture pad-id pairs->tensors
+                    pairs->vocabs sos-id vocab-size)
            (only-in "../vision/cifar10.rkt" load-cifar10-fixture)
            (only-in "../vision/diffusion.rkt"
                     UNet linear-schedule q-sample schedule-steps)
@@ -485,6 +488,103 @@
                   (python-cuda-available?))
          (check-training-twin "12_char_rnn" "python/12_char_rnn.py" train-on
                               'cuda 5e-3)))
+     (let ()
+       ;; Re-declared: MUST stay in sync with examples/racket/13-translation.rkt
+       (define hidden 32)
+       (define-layer encoder (embed gru)
+         #:init (vocab-size)
+         (set! embed (Embedding vocab-size hidden))
+         (set! gru (GRU hidden hidden #:batch-first? #t))
+         #:forward (tokens)
+         (define-values (outputs _final) (gru (embed tokens)))
+         (define at-eos
+           (unsqueeze (to-dtype (eq tokens eos-id) (tensor-dtype outputs)) 1))
+         (values outputs (transpose (matmul at-eos outputs) 0 1)))
+       (define-layer attention (wa ua va)
+         #:init ()
+         (set! wa (Linear hidden hidden))
+         (set! ua (Linear hidden hidden))
+         (set! va (Linear hidden 1))
+         #:forward (query keys padding)
+         (define scores (transpose (va (tanh (+ (wa query) (ua keys)))) 1 2))
+         (matmul (softmax (masked-fill scores padding -inf.0) -1) keys))
+       (define-layer decoder (embed attend gru head)
+         #:init (vocab-size)
+         (set! embed (Embedding vocab-size hidden))
+         (set! attend (attention))
+         (set! gru (GRU (* 2 hidden) hidden #:batch-first? #t))
+         (set! head (Linear hidden vocab-size))
+         #:forward (previous state keys padding)
+         (define context (attend (transpose state 0 1) keys padding))
+         (define-values (output next-state)
+           (gru (cat (list (embed previous) context) 2) state))
+         (values (head output) next-state))
+       (define-layer seq2seq (enc dec)
+         #:init (source-size target-size)
+         (set! enc (encoder source-size))
+         (set! dec (decoder target-size))
+         #:forward (sources targets teacher-forcing?)
+         (define-values (keys encoded) (enc sources))
+         (define padding (unsqueeze (eq sources pad-id) 1))
+         (define batch (car (tensor-shape sources)))
+         (define-values (logits _previous _state)
+           (for/fold ([logits '()]
+                      [previous (full-like (narrow sources 1 0 1) sos-id)]
+                      [state encoded])
+                     ([step (in-range 10)])
+             (define-values (step-logits next-state)
+               (dec previous state keys padding))
+             (define next
+               (if teacher-forcing?
+                   (narrow targets 1 step 1)
+                   (let-values ([(_top best) (topk step-logits 1)])
+                     (detach (reshape best batch 1)))))
+             (values (cons step-logits logits) next next-state)))
+         (cat (reverse logits) 1))
+       (define pairs (load-translation-fixture))
+       (define-values (source-vocab target-vocab) (pairs->vocabs pairs))
+       (define s-size (vocab-size source-vocab))
+       (define v-size (vocab-size target-vocab))
+       (check-equal? (map tensor-shape (parameters (seq2seq s-size v-size)))
+                     (list (list s-size hidden)
+                           '(96 32) '(96 32) '(96) '(96)
+                           (list v-size hidden)
+                           '(32 32) '(32) '(32 32) '(32) '(1 32) '(1)
+                           '(96 64) '(96 32) '(96) '(96)
+                           (list v-size hidden) (list v-size))
+                     "seq2seq shape must match examples/racket/13-translation.rkt at #:hidden 32")
+       (define (train-on device)
+         (with-default-device device
+           (manual-seed! 0)
+           (define-values (sources targets)
+             (pairs->tensors pairs source-vocab target-vocab #:width 10))
+           (define net (seq2seq s-size v-size))
+           (define opt (adam (parameters net) #:lr 0.001))
+           (define losses
+             (for/list ([_ (in-range 5)])
+               (define teacher-forcing?
+                 (< (item (rand 1 #:device 'cpu)) 0.5))
+               (zero-grads! opt)
+               (define loss
+                 (nll-loss (log-softmax
+                            (reshape (net sources targets teacher-forcing?)
+                                     -1 v-size)
+                            1)
+                           (reshape targets -1)
+                           #:ignore-index pad-id))
+               (backward! loss)
+               (clip-grad-norm! (parameters net) 1.0)
+               (step! opt)
+               (item loss)))
+           (values losses
+                   (cat (for/list ([p (in-list (parameters net))])
+                          (reshape p -1))))))
+       (check-training-twin "13_translation" "python/13_translation.py"
+                            train-on 'cpu tol)
+       (when (and (cuda-available?)
+                  (python-cuda-available?))
+         (check-training-twin "13_translation" "python/13_translation.py"
+                              train-on 'cuda 5e-3)))
      (let ()
        (define (train-on device)
          (with-default-device device
