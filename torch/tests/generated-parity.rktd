@@ -53,6 +53,7 @@
  (le-tensor "le.Tensor" (tensor tensor) #f 1)
  (leaky-relu "leaky_relu" (tensor scalar) #f 1)
  (lerp-tensor! "lerp_.Tensor" (tensor tensor tensor) #t 1)
+ (linear "linear" (tensor tensor optional-tensor) #f 1)
  (lstm-input "lstm.input" (tensor tensor-list tensor-list bool int64 double bool bool bool) #f 3)
  (lt-scalar "lt.Scalar" (tensor scalar) #f 1)
  (lt-tensor "lt.Tensor" (tensor tensor) #f 1)

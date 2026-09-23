@@ -165,4 +165,18 @@ TEST(GeneratedTranche6, FlipReversesTheNamedDims) {
   expect_error_from("tr_gen_flip");
 }
 
+TEST(GeneratedTranche6, LinearIsTheAffineMapWithTheWeightTransposed) {
+  const Handle x = make({1.0F, 2.0F}, {1, 2});
+  // three outputs from two inputs: x0, x1, x0 + x1
+  const Handle w = make({1.0F, 0.0F, 0.0F, 1.0F, 1.0F, 1.0F}, {3, 2});
+  const Handle plain(tr_gen_linear(x.t, w.t, nullptr));
+  EXPECT_EQ(shape_of(plain.t), (std::vector<int64_t>{1, 3}));
+  expect_near(data_of(plain.t), {1.0F, 2.0F, 3.0F}, 0.0F);
+  const Handle b = make({0.5F, 0.5F, 0.5F}, {3});
+  const Handle shifted(tr_gen_linear(x.t, w.t, b.t));
+  expect_near(data_of(shifted.t), {1.5F, 2.5F, 3.5F}, 0.0F);
+  EXPECT_EQ(tr_gen_linear(nullptr, w.t, nullptr), nullptr);
+  expect_error_from("tr_gen_linear");
+}
+
 }  // namespace

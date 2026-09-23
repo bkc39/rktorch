@@ -4,7 +4,9 @@
   (require (only-in ffi/vector f32vector)
            (only-in racket/list range)
            (only-in rackunit check-equal? check-exn test-case)
-           (only-in "../main.rkt" div full full-like item reshape tensor
+           (only-in "../main.rkt" bytes->tensor cpu-device cuda-available?
+                    cuda-device default-device div full full-like item reshape
+                    tensor tensor-device with-default-device
                     tensor->list tensor->repr tensor->vector tensor-dtype
                     tensor-shape to to-dtype zeros))
 
@@ -73,6 +75,39 @@
                (lambda () (full 0.5 2 #:dtype 'bool)))
     (check-equal? (tensor->repr (to (tensor '(1.5 -2.0)) 'float64))
                   "tensor([ 1.5000, -2.0000], dtype=torch.float64)"))
+
+  (test-case "bytes->tensor takes a device and leaves the default alone"
+    (define bs (bytes 0 0 128 63 0 0 0 64))
+    (define here (bytes->tensor bs 'float32 '(2) #:device 'cpu))
+    (check-equal? (tensor-device here) (cpu-device))
+    (check-equal? (tensor->list here) '(1.0 2.0))
+    (check-equal? (tensor-device (bytes->tensor bs 'float32 '(2)))
+                  (default-device) "without #:device it is the default's")
+    (when (cuda-available?)
+      (with-default-device 'cuda
+        (check-equal? (tensor-device (bytes->tensor bs 'float32 '(2)
+                                                    #:device 'cpu))
+                      (cpu-device) "#:device wins over the default")
+        (check-equal? (default-device) (cuda-device)
+                      "and the default is not borrowed to get there"))))
+
+  (test-case "bytes widen where they are wanted, half stages on the host"
+    (define bs (bytes 1 2 3 4))
+    (for ([dt (in-list '(float32 int64))]
+          [want (in-list '((1.0 2.0 3.0 4.0) (1 2 3 4)))])
+      (define t (tensor bs #:dtype dt))
+      (check-equal? (tensor-dtype t) dt)
+      (check-equal? (tensor->list t) want))
+    (when (cuda-available?)
+      (for ([dt (in-list '(float32 float16))])
+        (define g (tensor bs #:dtype dt #:device 'cuda))
+        (check-equal? (tensor-device g) (cuda-device))
+        (check-equal? (tensor-dtype g) dt))))
+
+  (test-case "bool bytes are read as nonzero, whatever the byte"
+    (define b (bytes->tensor (bytes 0 1 2 255) 'bool '(4)))
+    (check-equal? (tensor-dtype b) 'bool)
+    (check-equal? (tensor->list b) '(0.0 1.0 1.0 1.0)))
 
   (test-case "uint8 -> float32 -> / 255 equals the boxed double path bit for bit"
     (define bs (list->bytes (range 256)))

@@ -64,6 +64,7 @@
          le-tensor
          leaky-relu
          lerp-tensor!
+         linear
          lstm-input
          lt-scalar
          lt-tensor
@@ -242,6 +243,9 @@
 
 (define-generated-op lerp-tensor! tr_gen_lerp__tensor #:inplace
   ([self tensor] [end tensor] [weight tensor]))
+
+(define-generated-op linear tr_gen_linear
+  ([input tensor] [weight tensor] [bias optional-tensor]))
 
 (define-generated-op lstm-input tr_gen_lstm_input #:no-retry #:returns 3
   ([input tensor] [hx tensor-list] [params tensor-list] [has-biases bool] [num-layers int64] [dropout double] [train bool] [bidirectional bool] [batch-first bool]))

@@ -2,7 +2,7 @@
 
 (module+ test
   (require (except-in racket/list argmax flatten take)
-           (only-in racket/file make-temporary-file)
+           (only-in racket/file file->bytes make-temporary-file)
            rackunit
            "../main.rkt"
            "../nn.rkt")
@@ -524,6 +524,21 @@
       (check-equal? (tensor->list (cdr a)) (tensor->list (cdr b))))
     (delete-file path))
 
+  (test-case "load-state!: an entry missing a field says which"
+    (define net (Linear 2 2))
+    (define header
+      (string->bytes/utf-8
+       "{\"weight\":{\"dtype\":\"F32\",\"data_offsets\":[0,16]},\"bias\":{\"dtype\":\"F32\",\"shape\":[2],\"data_offsets\":[16,24]}}"))
+    (define path (make-temporary-file "rkt-bad-~a.safetensors"))
+    (call-with-output-file path #:exists 'truncate
+      (lambda (out)
+        (write-bytes (integer->integer-bytes (bytes-length header) 8 #f #f) out)
+        (write-bytes header out)
+        (write-bytes (make-bytes 24 0) out)))
+    (check-exn #rx"entry has no field" (lambda () (load-state! net path)))
+    (check-exn #rx"shape" (lambda () (load-state! net path)))
+    (delete-file path))
+
   (test-case "BatchNorm2d: the running statistics and the counter round-trip"
     (define bn (BatchNorm2d 2))
     (bn (add (randn 3 2 4 4) 5.0))
@@ -538,4 +553,50 @@
       (check-equal? (tensor->list (cdr a)) (tensor->list (cdr b))))
     (check-equal? (tensor-dtype (caddr (buffers bn2))) 'int64)
     (check-= (item (caddr (buffers bn2))) 1 0)
+    (delete-file path))
+
+  (define-layer Typed (w f16 bf16 u8 f64 mask)
+    #:init ()
+    (set! w (Parameter (tensor '(0.5 -1.5))))
+    (set! f16 (Buffer (tensor '(1.0 0.1 -2.0) #:dtype 'float16)))
+    (set! bf16 (Buffer (to-dtype (tensor '((1.0 0.1) (3.0 4.0))) 'bfloat16)))
+    (set! u8 (Buffer (tensor (bytes 0 9 255))))
+    (set! f64 (Buffer (to (tensor '(1.0 2.0)) 'float64)))
+    (set! mask (Buffer (gt (tensor '(1.0 -1.0 1.0)) 0)))
+    #:forward (x) x)
+
+  (define-layer Wide (w f16 bf16 u8 f64 mask)
+    #:init ()
+    (set! w (Parameter (zeros 2)))
+    (set! f16 (Buffer (zeros 3)))
+    (set! bf16 (Buffer (zeros 2 2)))
+    (set! u8 (Buffer (zeros 3)))
+    (set! f64 (Buffer (zeros 2)))
+    (set! mask (Buffer (zeros 3)))
+    #:forward (x) x)
+
+  (test-case "safetensors carries every dtype: the half pair, uint8, float64"
+    (define a (Typed))
+    (define path (make-temporary-file "rkt-typed-~a.safetensors"))
+    (save-state! a path)
+    (define header-len (integer-bytes->integer (file->bytes path) #f #f 0 8))
+    (define header
+      (bytes->string/utf-8 (subbytes (file->bytes path) 8 (+ 8 header-len))))
+    (for ([tag (in-list '("F32" "F16" "BF16" "U8" "F64" "BOOL"))])
+      (check-true (regexp-match? (regexp-quote tag) header) tag))
+    (define b (Typed))
+    (with-no-grad
+      (for ([t (in-list (append (parameters b) (buffers b)))])
+        (copy! t (zeros-like t))))
+    (load-state! b path)
+    (for ([x (in-list (state-dict a))] [y (in-list (state-dict b))])
+      (check-equal? (tensor-dtype (cdr x)) (tensor-dtype (cdr y)) (car x))
+      (check-equal? (tensor->list (cdr x)) (tensor->list (cdr y)) (car x)))
+    ;; a file in one dtype loads into a model in another: copy! converts
+    (define c (Wide))
+    (load-state! c path)
+    (check-equal? (map (lambda (e) (tensor-dtype (cdr e))) (state-dict c))
+                  '(float32 float32 float32 float32 float32 float32))
+    (check-equal? (tensor->list (cdr (assoc "u8" (state-dict c))))
+                  '(0.0 9.0 255.0))
     (delete-file path)))
