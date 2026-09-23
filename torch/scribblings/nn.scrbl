@@ -538,10 +538,10 @@ training, so every optimizer exposes it through @racket[learning-rate] and
 @racket[set-learning-rate!], which is what a schedule writes.
 
 @defproc[(sgd [params (listof tensor?)]
-              [#:lr lr real?]
-              [#:momentum momentum (real-in 0 1) 0]
+              [#:lr lr (>=/c 0)]
+              [#:momentum momentum (>=/c 0) 0]
               [#:nesterov? nesterov? boolean? #f]
-              [#:weight-decay weight-decay real? 0])
+              [#:weight-decay weight-decay (>=/c 0) 0])
          sgd?]{
 @tt{torch.optim.SGD}: with @racket[momentum] the update blends into a
 buffer, copied from the first gradient and thereafter @racket[momentum]
@@ -551,22 +551,22 @@ multiple of the parameter to the gradient before either, torch's L2 form.
 }
 
 @defproc[(adam [params (listof tensor?)]
-               [#:lr lr real? 1e-3]
+               [#:lr lr (>=/c 0) 1e-3]
                [#:beta1 beta1 real? 0.9]
                [#:beta2 beta2 real? 0.999]
                [#:eps eps real? 1e-8]
-               [#:weight-decay weight-decay real? 0])
+               [#:weight-decay weight-decay (>=/c 0) 0])
          adam?]{
 @tt{torch.optim.Adam} with bias correction; @racket[weight-decay] is the
 L2 form applied to the gradient, as there, not AdamW's decoupled one.
 }
 
 @defproc[(rmsprop [params (listof tensor?)]
-                  [#:lr lr real? 1e-2]
-                  [#:alpha alpha (real-in 0 1) 0.99]
-                  [#:eps eps (>/c 0) 1e-8]
-                  [#:weight-decay weight-decay real? 0]
-                  [#:momentum momentum (real-in 0 1) 0])
+                  [#:lr lr (>=/c 0) 1e-2]
+                  [#:alpha alpha (>=/c 0) 0.99]
+                  [#:eps eps (>=/c 0) 1e-8]
+                  [#:weight-decay weight-decay (>=/c 0) 0]
+                  [#:momentum momentum (>=/c 0) 0])
          rmsprop?]{
 @tt{torch.optim.RMSprop}, uncentered: a running average of the squared
 gradient decayed by @racket[alpha], the parameter moved by the gradient over
@@ -592,7 +592,7 @@ Zeroes the gradient of every parameter, @tt{optimizer.zero_grad()}.
 }
 
 @deftogether[(@defproc[(learning-rate [opt optimizer?]) real?]
-              @defproc[(set-learning-rate! [opt optimizer?] [lr real?]) void?])]{
+              @defproc[(set-learning-rate! [opt optimizer?] [lr (>=/c 0)]) void?])]{
 The learning rate the next @racket[step!] will use; on a schedule, its
 optimizer's.
 }
@@ -623,7 +623,7 @@ The base rate times @racket[gamma] to the power of the number of whole
 }
 
 @defproc[(multi-step-lr [opt optimizer?]
-                        [#:milestones milestones (listof exact-positive-integer?)]
+                        [#:milestones milestones (listof exact-nonnegative-integer?)]
                         [#:gamma gamma real? 0.1])
          scheduler?]{
 The base rate times @racket[gamma] once per milestone reached.
@@ -642,7 +642,7 @@ Half a cosine from the base rate at step 0 to @racket[eta-min] at
 }
 
 @defproc[(linear-lr [opt optimizer?]
-                    [#:start-factor start-factor (real-in 0 1) 1/3]
+                    [#:start-factor start-factor (and/c (>/c 0) (<=/c 1)) 1/3]
                     [#:end-factor end-factor (real-in 0 1) 1]
                     [#:total-iters total-iters exact-positive-integer? 5])
          scheduler?]{
