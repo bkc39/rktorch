@@ -71,7 +71,7 @@ CPU-first; float32 + inferred int64 (#44) + uint8 from bytes (#58). From
   runs, captured failure messages, and live ledger entries; also dumped at
   exit under `RKTORCH_MEM_TRACE`), `tensor-free!` (explicit synchronous
   release)
-- creation: `zeros ones full arange eye tensor rand randn` (+ in-place
+- creation: `zeros ones full fill-value/c arange eye tensor rand randn` (+ in-place
   `uniform!`); every constructor takes `#:device` / `#:dtype` chosen at
   native construction (never construct-then-move) and `#:requires-grad?`
   applied after it (integer dtypes refuse it as torch does); the shape
@@ -122,6 +122,10 @@ CPU-first; float32 + inferred int64 (#44) + uint8 from bytes (#58). From
   takes `#:generator` and draws one seed per batch from it, so a seeded
   loader replays its augmentation (the draws are the transform's own, not
   torchvision's)
+- images (`torch/vision/ppm.rkt`, #155): `image-grid #:columns #:padding
+  #:pad-value` (torchvision's `make_grid` layout, on the device) and
+  `write-ppm #:range` (binary P6, `save_image`'s quantization; a uint8 image
+  as it is)
 - shape: `reshape view transpose permute squeeze unsqueeze cat stack flip`
 - elementwise: `add sub mul div pow neg exp log sqrt relu sigmoid tanh silu
   leaky-relu clamp`

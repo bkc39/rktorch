@@ -53,6 +53,7 @@
 (provide zeros
          ones
          full
+         fill-value/c
          zeros-like
          ones-like
          full-like
