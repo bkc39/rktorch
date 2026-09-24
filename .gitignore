@@ -20,5 +20,8 @@ coverage/
 # exit-loop repro harness output, plus local investigation notes
 repro-logs/
 
+# rendered manual; `raco setup` writes it beside the collection
+torch/doc/
+
 # agent scratch: logs, probes and one-off scripts, never part of a change
 .scratch/
