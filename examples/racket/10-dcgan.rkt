@@ -114,7 +114,9 @@ both networks and the device.
     (values d-losses g-losses gen disc device)))]
 
 @bold{The headline run.} Shuffled minibatches of the full training set for
-a few epochs, the mean losses per epoch reported, and after each epoch a
+a few epochs, the last partial batch dropped because the generator's batch
+norm needs more than one image, the mean losses per epoch reported, and
+after each epoch a
 10x10 grid of images from one fixed latent draw written as a PPM into
 @racket[out], so the same hundred latents can be watched sharpening from
 epoch to epoch. On an RTX 3090 Ti an epoch takes seconds; five epochs
@@ -128,7 +130,7 @@ give recognisable digits.
     (define-values (train-x _train-y) (load-mnist 'train))
     (define loader
       (dataloader (tensor-dataset train-x)
-                  #:batch-size batch #:shuffle? #t
+                  #:batch-size batch #:shuffle? #t #:drop-last? #t
                   #:generator (make-generator 0)))
     (define gen (generator))
     (define disc (discriminator))
