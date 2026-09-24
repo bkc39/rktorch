@@ -65,9 +65,11 @@ TEST_P(AudioRoundTrip, SaveInfoLoad) {
   std::remove(path.c_str());
 }
 
+// one stem per case: on a case-insensitive filesystem rt.flac and rt.FLAC
+// are one file, and ctest runs the two at the same time
 INSTANTIATE_TEST_SUITE_P(WavAndFlac, AudioRoundTrip,
-                         testing::Values("rt.wav", "rt.flac", "rt.WAV",
-                                         "rt.FLAC"));
+                         testing::Values("rt1.wav", "rt2.flac", "rt3.WAV",
+                                         "rt4.FLAC"));
 
 TEST(Audio, WindowedLoadMatchesFullSlice) {
   const std::string path = temp_audio_path("window.wav");
