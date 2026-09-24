@@ -8,12 +8,13 @@
                               to-dtype upsample-nearest2d)
                      torch/data/loader
                      (only-in torch/nn Conv2d Dropout Embedding GroupNorm Linear
-                              define-layer)
+                              define-layer load-state!)
                      torch/vision/cifar10
                      torch/vision/image
                      torch/vision/ppm
                      torch/vision/resnet
                      torch/vision/transforms
+                     torch/vision/weights
                      torch/vision/diffusion))
 
 @title{Vision datasets}
@@ -415,6 +416,39 @@ truncated, is an error naming the reason.
                      [#:device device (or/c #f device/c) #f])
          tensor?]{
 @racket[decode-image] on the contents of the file at @racket[path].
+}
+
+@section{Pretrained weights}
+
+@defmodule[torch/vision/weights]
+
+torchvision's ImageNet weights, each exported once to a safetensors file
+by @filepath{scripts/export-weights.py} and published as an asset of this
+repository's @tt{weights-v1} release. A checkpoint is fetched the first
+time it is asked for, checked against the size and SHA-256 recorded in
+the module before it reaches the cache, and read from the cache after
+that. A @filepath{.txt} file beside it records where the weights came
+from and their licence, torchvision's BSD-3-Clause.
+@envvar{RKTORCH_WEIGHTS_DIR} moves the cache and
+@envvar{RKTORCH_WEIGHTS_URL} the release, for a mirror. The files keep
+torchvision's key names, and a model loads one with
+@racket[load-state!]'s @racket[#:rename].
+
+@defthing[pretrained-weights-names (listof symbol?)]{
+The published checkpoints, torchvision's @tt{IMAGENET1K_V1} weights for
+three networks: @racket['resnet18-imagenet1k-v1],
+@racket['resnet34-imagenet1k-v1] and @racket['resnet50-imagenet1k-v1].
+}
+
+@defproc[(pretrained-weights [name symbol?]) path?]{
+The path of the cached checkpoint @racket[name], fetching it first when
+the cache lacks it. A download whose size or checksum differs from the
+published file is an error, and nothing is kept.
+}
+
+@defproc[(pretrained-weights-cached? [name symbol?]) boolean?]{
+Whether @racket[name] is already in the cache, so a caller can decide
+whether to trigger the fetch; the tests only touch cached weights.
 }
 
 @section{Images}

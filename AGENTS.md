@@ -141,6 +141,13 @@ with `backward!` outside the form as PyTorch recommends). From
   weights, since `upsample_bilinear2d` needs the unmarshalled `float?`),
   `center-crop` (offsets round half to even), `normalize`,
   `imagenet-normalize`, `imagenet-mean`, `imagenet-std`
+- pretrained weights (`torch/vision/weights.rkt`, #199):
+  `pretrained-weights` fetches a torchvision ImageNet checkpoint, exported
+  by `scripts/export-weights.py`, from the `weights-v1` release into the
+  cache (`RKTORCH_WEIGHTS_DIR`, `RKTORCH_WEIGHTS_URL`), checking the size
+  and SHA-256 recorded in the module before the rename into place;
+  `pretrained-weights-cached?`, `pretrained-weights-names`. The files keep
+  torchvision's key names; `load-state! #:rename` maps them
 - image reading (`torch/vision/image.rkt`, #199): `decode-image` (bytes)
   and `read-image` (a path) to a uint8 `[C H W]` tensor, `#:mode
   'unchanged 'gray 'gray-alpha 'rgb 'rgba`, `#:device`; JPEG and PNG

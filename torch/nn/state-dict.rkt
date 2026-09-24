@@ -1,7 +1,7 @@
 #lang racket/base
 
 (require (only-in json jsexpr->string string->jsexpr)
-         (only-in racket/contract/base -> ->* any cons/c listof)
+         (only-in racket/contract/base -> ->* any cons/c listof or/c)
          (only-in racket/file file->bytes)
          (only-in racket/match match match-define)
          (only-in "../foreign.rkt"
@@ -110,25 +110,51 @@
              misplaced)
        '())))
 
-(define/contract-out (load-state! model path #:strict? [strict? #t]) ;; noqa
-  (->* [layer? path-string?] [#:strict? boolean?] any)
+;; model key -> (file key . header entry); a key renamed to #f is dropped
+(define (entries-by-model-key header rename)
+  (for/fold ([by-key (hash)])
+            ([file-key (in-list (sort (map symbol->string (hash-keys header))
+                                      string<?))]
+             #:unless (string=? file-key "__metadata__"))
+    (define model-key (rename file-key))
+    (cond
+      [(not model-key) by-key]
+      [(hash-ref by-key model-key #f)
+       => (lambda (prior)
+            (raise-arguments-error 'load-state!
+                                   "#:rename maps two file keys to one model key"
+                                   "model key" model-key
+                                   "file keys" (list (car prior) file-key)))]
+      [else
+       (hash-set by-key model-key
+                 (cons file-key
+                       (hash-ref header (string->symbol file-key))))])))
+
+(define/contract-out (load-state! model path ;; noqa
+                                  #:strict? [strict? #t]
+                                  #:rename [rename values])
+  (->* [layer? path-string?]
+       [#:strict? boolean? #:rename (-> string? (or/c string? #f))]
+       any)
   (define raw (file->bytes path))
   (define header-len (integer-bytes->integer raw #f #f 0 8))
   (define data-start (+ 8 header-len))
   (define payload-size (- (bytes-length raw) data-start))
   (define header
     (string->jsexpr (bytes->string/utf-8 raw #f 8 data-start)))
+  (define by-key (entries-by-model-key header rename))
   (define entries (state-dict model))
   (define in-model
     (for/hash ([e (in-list entries)]) (values (car e) #t)))
-  (define (meta-of name) (hash-ref header (string->symbol name) #f))
+  (define (meta-of name)
+    (define entry (hash-ref by-key name #f))
+    (and entry (cdr entry)))
   (define missing
     (for/list ([e (in-list entries)] #:unless (meta-of (car e))) (car e)))
   (define unexpected
-    (sort (for/list ([k (in-hash-keys header)]
-                     #:unless (eq? k '__metadata__)
-                     #:unless (hash-ref in-model (symbol->string k) #f))
-            (symbol->string k))
+    (sort (for/list ([(model-key entry) (in-hash by-key)]
+                     #:unless (hash-ref in-model model-key #f))
+            (car entry))
           string<?))
   (define pendings
     (for*/list ([e (in-list entries)]
