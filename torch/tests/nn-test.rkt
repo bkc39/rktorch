@@ -2,7 +2,7 @@
 
 (module+ test
   (require (except-in racket/list argmax flatten take)
-           (only-in racket/file make-temporary-file)
+           (only-in racket/file file->bytes make-temporary-file)
            rackunit
            "../main.rkt"
            "../nn.rkt")
@@ -81,6 +81,49 @@
       (check-equal? (tensor->list (grad p))
                     (map (lambda (_) 0.0) (tensor->list p)))))
 
+  (test-case "sgd momentum, Nesterov and weight decay follow torch.optim.SGD"
+    ;; loss = sum(w): the gradient is 1 everywhere, so the update is the
+    ;; buffer arithmetic alone
+    (define (trained #:momentum [mu 0.0] #:nesterov? [nesterov? #f]
+                     #:weight-decay [wd 0.0] #:steps [steps 2])
+      (define w (Parameter (ones 2)))
+      (define opt (sgd (list w) #:lr 0.1 #:momentum mu #:nesterov? nesterov?
+                       #:weight-decay wd))
+      (for ([_ (in-range steps)])
+        (zero-grads! opt)
+        (backward! (sum w))
+        (step! opt))
+      (car (tensor->list w)))
+    (check-= (trained) 0.8 1e-6 "plain: two steps of lr")
+    ;; buffers 1 then 1.9: 1 - 0.1 - 0.19
+    (check-= (trained #:momentum 0.9) 0.71 1e-6)
+    ;; Nesterov looks ahead: 1 + 0.9 * 1 = 1.9 on the first step already
+    (check-= (trained #:momentum 0.9 #:nesterov? #t #:steps 1) 0.81 1e-6)
+    ;; decay adds wd * w to the gradient: 1 + 0.5 * 1 = 1.5 on the first step
+    (check-= (trained #:weight-decay 0.5 #:steps 1) 0.85 1e-6)
+    (check-exn #rx"Nesterov momentum requires a momentum"
+               (lambda () (sgd (list (Parameter (ones 1))) #:lr 0.1
+                               #:nesterov? #t))))
+
+  (test-case "rmsprop divides by the root of the running square average"
+    (define w (Parameter (ones 2)))
+    (define opt (rmsprop (list w) #:lr 0.01))
+    (check-true (rmsprop? opt))
+    (zero-grads! opt)
+    (backward! (sum w))
+    (step! opt)
+    ;; v = 0.01, sqrt v = 0.1: the first step moves by lr * 1 / 0.1
+    (check-= (car (tensor->list w)) 0.9 1e-5)
+    (define m (Parameter (ones 2)))
+    (define with-momentum (rmsprop (list m) #:lr 0.01 #:momentum 0.5))
+    (zero-grads! with-momentum)
+    (backward! (sum m))
+    (step! with-momentum)
+    (check-= (car (tensor->list m)) 0.9 1e-5 "the buffer starts at zero")
+    (check-= (learning-rate opt) 0.01 0.0)
+    (set-learning-rate! opt 0.02)
+    (check-= (learning-rate opt) 0.02 0.0))
+
   (test-case "Conv2d layer: param shapes, names, predicate, forward shape"
     (manual-seed! 0)
     (define c (Conv2d 1 8 3 #:stride 1 #:padding 1))
@@ -92,6 +135,18 @@
     (check-equal? (map car (named-parameters c)) '("weight" "bias"))
     (check-equal? (tensor-shape (c (randn 4 1 28 28))) '(4 8 28 28))
     (check-equal? (object-name c) 'Conv2d))
+
+  (test-case "Conv2d without a bias draws the weight alone"
+    (manual-seed! 0)
+    (define with-bias (Conv2d 1 8 3))
+    (manual-seed! 0)
+    (define bare (Conv2d 1 8 3 #:bias? #f))
+    (check-equal? (map tensor-shape (parameters bare)) '((8 1 3 3)))
+    (check-equal? (map car (named-parameters bare)) '("weight"))
+    (check-equal? (tensor->list (car (parameters bare)))
+                  (tensor->list (car (parameters with-bias)))
+                  "the same weight draw")
+    (check-equal? (tensor-shape (bare (randn 2 1 8 8))) '(2 8 6 6)))
 
   (test-case "Conv2d non-square kernel + per-axis padding"
     (manual-seed! 0)
@@ -184,6 +239,60 @@
       (check-= (item (mean (select (select grouped 0 b) 0 g))) 0.0 1e-5))
     (check-equal? (object-name gn) 'GroupNorm))
 
+  (test-case "BatchNorm2d layer: init, batch statistics, running statistics, eval"
+    (define bn (BatchNorm2d 3))
+    (check-true (batch-norm2d? bn))
+    (check-equal? (map car (named-parameters bn)) '("weight" "bias"))
+    (check-equal? (map car (named-buffers bn))
+                  '("running-mean" "running-var" "num-batches-tracked"))
+    (check-equal? (map tensor-shape (buffers bn)) '((3) (3) ()))
+    (check-equal? (tensor-dtype (caddr (buffers bn))) 'int64)
+    (check-equal? (tensor->list (car (buffers bn))) '(0.0 0.0 0.0))
+    (check-equal? (tensor->list (cadr (buffers bn))) '(1.0 1.0 1.0))
+    (manual-seed! 0)
+    (define x (add (mul (randn 4 3 5 5) 3.0) 2.0))
+    (define y (bn x))
+    (check-equal? (tensor-shape y) '(4 3 5 5))
+    (define per-channel (reshape (transpose y 0 1) 3 100))
+    (for ([c (in-range 3)])
+      (check-= (item (mean (select per-channel 0 c))) 0.0 1e-5))
+    (check-= (item (caddr (buffers bn))) 1 0)
+    ;; momentum 0.1 of a batch mean near 2 and a batch variance near 9
+    (for ([m (in-list (tensor->list (car (buffers bn))))])
+      (check-true (< 0.1 m 0.3)))
+    (for ([v (in-list (tensor->list (cadr (buffers bn))))])
+      (check-true (< 1.5 v 2.1)))
+    (define z (in-eval-mode bn (bn x)))
+    (check-false (equal? (tensor->list z) (tensor->list y))
+                 "eval normalizes with the running statistics")
+    (check-= (item (caddr (buffers bn))) 1 0)
+    (check-exn #rx"image-batch" (lambda () (bn (randn 4 3))))
+    (check-equal? (object-name bn) 'BatchNorm2d))
+
+  (test-case "BatchNorm1d layer: [N C] and [N C L] inputs"
+    (define bn (BatchNorm1d 4 #:momentum 0.5 #:eps 1e-3))
+    (check-true (batch-norm1d? bn))
+    (check-equal? (tensor-shape (bn (randn 8 4))) '(8 4))
+    (check-equal? (tensor-shape (bn (randn 8 4 6))) '(8 4 6))
+    (check-= (item (caddr (buffers bn))) 2 0)
+    (check-exn #rx"feature-batch" (lambda () (bn (randn 2 4 3 3))))
+    (check-equal? (object-name bn) 'BatchNorm1d))
+
+  (test-case "BatchNorm2d: the counter counts past float32's last integer"
+    (define bn (BatchNorm2d 2))
+    (define counter (caddr (buffers bn)))
+    (copy! counter (tensor (expt 2 24)))
+    (bn (randn 3 2 4 4))
+    (check-equal? (tensor-dtype counter) 'int64)
+    (check-= (item counter) (add1 (expt 2 24)) 0))
+
+  (test-case "BatchNorm2d: gradients reach the affine parameters"
+    (define bn (BatchNorm2d 2))
+    (define x (randn 3 2 4 4))
+    (backward! (mean (mul (bn x) (bn x))))
+    (for ([p (in-list (parameters bn))])
+      (check-true (has-grad? p))))
+
   (test-case "LayerNorm layer: ones/zeros init, normalizing forward"
     (define ln (LayerNorm 4))
     (check-true (layer-norm? ln))
@@ -243,6 +352,24 @@
     (define logits (tensor '((-0.5 -1.0 -2.0) (-2.0 -0.2 -1.5))))
     (define targets (tensor '(0 1)))
     (check-= (item (cross-entropy logits targets)) 0.48362 1e-4))
+
+  (test-case "binary-cross-entropy-with-logits, huber-loss, l1-loss: known values"
+    (define zero (tensor '(0.0 0.0)))
+    (define labels (tensor '(1.0 0.0)))
+    (define log2 0.6931472)
+    (check-= (item (binary-cross-entropy-with-logits zero labels)) log2 1e-6)
+    (check-= (item (binary-cross-entropy-with-logits
+                    zero labels #:weight (tensor '(1.0 3.0))))
+             (* 2 log2) 1e-6)
+    (check-= (item (binary-cross-entropy-with-logits
+                    zero labels #:pos-weight (tensor '(3.0 3.0))))
+             (* 2 log2) 1e-6)
+    (define x (tensor '(0.0 0.0 0.0)))
+    (define target (tensor '(0.5 2.0 -3.0)))
+    (check-= (item (huber-loss x target)) 1.375 1e-6)
+    (check-= (item (huber-loss x target #:delta 2)) 2.0416667 1e-6)
+    (check-= (item (l1-loss x target)) 1.8333333 1e-6)
+    (check-exn exn:fail:contract? (lambda () (huber-loss x target #:delta 0))))
 
   (test-case "ctc-loss: closed form on uniform log-probs"
     ;; two frames, two classes, label 1: the alignments [1 1], [0 1]
@@ -450,4 +577,81 @@
     (for ([a (in-list (state-dict net))] [b (in-list (state-dict net2))])
       (check-equal? (car a) (car b))
       (check-equal? (tensor->list (cdr a)) (tensor->list (cdr b))))
+    (delete-file path))
+
+  (test-case "load-state!: an entry missing a field says which"
+    (define net (Linear 2 2))
+    (define header
+      (string->bytes/utf-8
+       "{\"weight\":{\"dtype\":\"F32\",\"data_offsets\":[0,16]},\"bias\":{\"dtype\":\"F32\",\"shape\":[2],\"data_offsets\":[16,24]}}"))
+    (define path (make-temporary-file "rkt-bad-~a.safetensors"))
+    (call-with-output-file path #:exists 'truncate
+      (lambda (out)
+        (write-bytes (integer->integer-bytes (bytes-length header) 8 #f #f) out)
+        (write-bytes header out)
+        (write-bytes (make-bytes 24 0) out)))
+    (check-exn #rx"entry has no field" (lambda () (load-state! net path)))
+    (check-exn #rx"shape" (lambda () (load-state! net path)))
+    (delete-file path))
+
+  (test-case "BatchNorm2d: the running statistics and the counter round-trip"
+    (define bn (BatchNorm2d 2))
+    (bn (add (randn 3 2 4 4) 5.0))
+    (define path (make-temporary-file "rkt-bn-~a.safetensors"))
+    (save-state! bn path)
+    (define bn2 (BatchNorm2d 2))
+    (load-state! bn2 path)
+    (check-equal? (map car (state-dict bn2))
+                  '("weight" "bias" "running-mean" "running-var"
+                    "num-batches-tracked"))
+    (for ([a (in-list (state-dict bn))] [b (in-list (state-dict bn2))])
+      (check-equal? (tensor->list (cdr a)) (tensor->list (cdr b))))
+    (check-equal? (tensor-dtype (caddr (buffers bn2))) 'int64)
+    (check-= (item (caddr (buffers bn2))) 1 0)
+    (delete-file path))
+
+  (define-layer Typed (w f16 bf16 u8 f64 mask)
+    #:init ()
+    (set! w (Parameter (tensor '(0.5 -1.5))))
+    (set! f16 (Buffer (tensor '(1.0 0.1 -2.0) #:dtype 'float16)))
+    (set! bf16 (Buffer (to-dtype (tensor '((1.0 0.1) (3.0 4.0))) 'bfloat16)))
+    (set! u8 (Buffer (tensor (bytes 0 9 255))))
+    (set! f64 (Buffer (to (tensor '(1.0 2.0)) 'float64)))
+    (set! mask (Buffer (gt (tensor '(1.0 -1.0 1.0)) 0)))
+    #:forward (x) x)
+
+  (define-layer Wide (w f16 bf16 u8 f64 mask)
+    #:init ()
+    (set! w (Parameter (zeros 2)))
+    (set! f16 (Buffer (zeros 3)))
+    (set! bf16 (Buffer (zeros 2 2)))
+    (set! u8 (Buffer (zeros 3)))
+    (set! f64 (Buffer (zeros 2)))
+    (set! mask (Buffer (zeros 3)))
+    #:forward (x) x)
+
+  (test-case "safetensors carries every dtype: the half pair, uint8, float64"
+    (define a (Typed))
+    (define path (make-temporary-file "rkt-typed-~a.safetensors"))
+    (save-state! a path)
+    (define header-len (integer-bytes->integer (file->bytes path) #f #f 0 8))
+    (define header
+      (bytes->string/utf-8 (subbytes (file->bytes path) 8 (+ 8 header-len))))
+    (for ([tag (in-list '("F32" "F16" "BF16" "U8" "F64" "BOOL"))])
+      (check-true (regexp-match? (regexp-quote tag) header) tag))
+    (define b (Typed))
+    (with-no-grad
+      (for ([t (in-list (append (parameters b) (buffers b)))])
+        (copy! t (zeros-like t))))
+    (load-state! b path)
+    (for ([x (in-list (state-dict a))] [y (in-list (state-dict b))])
+      (check-equal? (tensor-dtype (cdr x)) (tensor-dtype (cdr y)) (car x))
+      (check-equal? (tensor->list (cdr x)) (tensor->list (cdr y)) (car x)))
+    ;; a file in one dtype loads into a model in another: copy! converts
+    (define c (Wide))
+    (load-state! c path)
+    (check-equal? (map (lambda (e) (tensor-dtype (cdr e))) (state-dict c))
+                  '(float32 float32 float32 float32 float32 float32))
+    (check-equal? (tensor->list (cdr (assoc "u8" (state-dict c))))
+                  '(0.0 9.0 255.0))
     (delete-file path)))

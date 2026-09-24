@@ -34,7 +34,8 @@
            (only-in syntax/macro-testing convert-compile-time-error)
            (submod ".." layers)
            (only-in "../main.rkt" randn tensor-shape)
-           "../nn.rkt")
+           "../nn.rkt"
+           (only-in "../vision/resnet.rkt" ResNet))
 
   (define ((message-matching pattern) e)
     (and (exn:fail:contract? e)
@@ -59,12 +60,43 @@
                (lambda () (GroupNorm 3 4)))
     (check-exn #rx"groups must divide both channel counts"
                (lambda () (ConvTranspose2d 2 5 3 #:groups 2)))
+    (check-exn #rx"^BatchNorm2d: contract violation"
+               (lambda () (BatchNorm2d 0)))
+    (check-exn #rx"^BatchNorm1d: contract violation"
+               (lambda () (BatchNorm1d 3 #:eps 'tiny)))
+    (check-exn #rx"^BatchNorm2d: contract violation"
+               (lambda () ((BatchNorm2d 3) (randn 4 3))))
+    (check-exn #rx"expected: image-batch"
+               (lambda () ((BatchNorm2d 3) (randn 4 3))))
+    (check-exn (message-matching #rx"blaming: caller")
+               (lambda () ((BatchNorm2d 3) (randn 4 3))))
+    (check-exn #rx"expected: feature-batch"
+               (lambda () ((BatchNorm1d 4) (randn 2 4 3 3))))
+    (check-equal? (tensor-shape ((BatchNorm1d 4) (randn 8 4 6))) '(8 4 6))
+    (check-exn #rx"^BatchNorm2d: arity mismatch"
+               (lambda () ((BatchNorm2d 3) (randn 1 3 2 2) 'extra)))
     (check-exn #rx"^Dropout: contract violation"
                (lambda () (Dropout #:p 1)))
     (check-exn #rx"^Sequential: contract violation"
                (lambda () (Sequential (Linear 2 2) 'not-a-module)))
     (check-exn blames-this-test
                (lambda () (Sequential (Linear 2 2) 'not-a-module))))
+
+  (test-case "an unbatched or grey image blames ResNet, not a layer inside it"
+    (define net (ResNet #:base 4))
+    (check-exn #rx"^ResNet: contract violation"
+               (lambda () (net (randn 3 32 32))))
+    (check-exn #rx"expected: rgb-image-batch"
+               (lambda () (net (randn 3 32 32))))
+    (check-exn #rx"^ResNet: contract violation"
+               (lambda () (net (randn 2 1 32 32))))
+    (check-equal? (tensor-shape (net (randn 2 3 32 32))) '(2 10)))
+
+  (test-case "ResNet's #:blocks is one depth per stage, so exactly four"
+    (check-exn #rx"^ResNet: contract violation"
+               (lambda () (ResNet #:blocks '(2 2 2))))
+    (check-exn #rx"^ResNet: contract violation"
+               (lambda () (ResNet #:blocks '(2 2 2 2 2)))))
 
   (test-case "the exported predicate is the lowercase name"
     (check-true (linear? (Linear 4 3)))

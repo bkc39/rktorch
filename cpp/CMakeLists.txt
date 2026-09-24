@@ -33,6 +33,7 @@ add_library(torchrkt::torchrkt ALIAS torchrkt)
 target_sources(torchrkt
   PRIVATE
     src/torchrkt/audio.cpp
+    src/torchrkt/autocast.cpp
     src/torchrkt/autograd.cpp
     src/torchrkt/creation.cpp
     src/torchrkt/detail/error.cpp
@@ -105,9 +106,11 @@ if(BUILD_TESTING)
 
   add_executable(torchrkt_tests
     tests/torchrkt/audio_test.cpp
+    tests/torchrkt/autocast_test.cpp
     tests/torchrkt/autograd_test.cpp
     tests/torchrkt/classify_test.cpp
     tests/torchrkt/device_test.cpp
+    tests/torchrkt/dtype_test.cpp
     tests/torchrkt/finalizer_death_test.cpp
     tests/torchrkt/generated_asr_test.cpp
     tests/torchrkt/generated_golden_test.cpp
@@ -115,6 +118,7 @@ if(BUILD_TESTING)
     tests/torchrkt/generated_tranche3_test.cpp
     tests/torchrkt/generated_tranche4_test.cpp
     tests/torchrkt/generated_tranche5_test.cpp
+    tests/torchrkt/generated_tranche6_test.cpp
     tests/torchrkt/generated_tranche7_test.cpp
     tests/torchrkt/ops_test.cpp
     tests/torchrkt/random_test.cpp

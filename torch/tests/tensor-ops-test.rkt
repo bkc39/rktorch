@@ -31,7 +31,9 @@
                (lambda () (full 9007199254740993 1 #:dtype 'int64)))
     (check-exn #rx"exactly representable as a double"
                (lambda () (full (expt 10 400) 1 #:dtype 'int64)))
-    (check-exn exn:fail:contract? (lambda () (zeros 2 #:dtype 'float16)))
+    (check-equal? (tensor-dtype (zeros 2 #:dtype 'float16)) 'float16)
+    (check-equal? (tensor-dtype (ones 2 #:dtype 'bfloat16)) 'bfloat16)
+    (check-exn exn:fail:contract? (lambda () (zeros 2 #:dtype 'float8)))
     (check-exn exn:fail:contract? (lambda () (zeros '(2) 3)))
     (check-equal? (tensor->list (arange 3)) '(0.0 1.0 2.0))
     (check-equal? (tensor->list (arange 1 2.5 0.5)) '(1.0 1.5 2.0))
@@ -79,6 +81,46 @@
     (check-equal? (tensor-shape (randn-like (zeros 4))) '(4))
     (check-equal? (tensor-dtype (randn-like (zeros 4) #:dtype 'float64))
                   'float64))
+
+  (test-case "the half pair: construction, readback, repr, and raw bytes"
+    (define half (tensor '(1.0 0.1 65504.0) #:dtype 'float16))
+    (check-equal? (tensor-dtype half) 'float16)
+    (define hs (tensor->list half))
+    (check-= (car hs) 1.0 0.0)
+    (check-= (cadr hs) 0.1 1e-4)
+    (check-false (= (cadr hs) 0.1) "ten mantissa bits")
+    (check-= (caddr hs) 65504.0 0.0 "float16's largest finite value")
+    (define brain (to-dtype (tensor '(1.0 0.1 100000.0)) 'bfloat16))
+    (check-equal? (tensor-dtype brain) 'bfloat16)
+    (check-= (caddr (tensor->list brain)) 100000.0 512.0 "float32's range")
+    (check-equal? (tensor->repr (tensor '(1.0 2.0) #:dtype 'float16))
+                  "tensor([1., 2.], dtype=torch.float16)")
+    (check-equal? (tensor->repr (zeros 0 #:dtype 'bfloat16))
+                  "tensor([], dtype=torch.bfloat16)")
+    (check-equal? (tensor-dtype (randn 2 #:dtype 'bfloat16)) 'bfloat16)
+    (check-equal? (tensor-dtype (full 0.5 2 #:dtype 'float16)) 'float16)
+    (check-equal? (tensor-dtype (arange 3 #:dtype 'bfloat16)) 'bfloat16)
+    (check-equal? (item (to-dtype (tensor 3.0) 'bfloat16)) 3.0)
+    ;; IEEE half: 1.0 is 0x3C00, -2.0 is 0xC000; bfloat16 1.0 is 0x3F80
+    (check-equal? (tensor->bytes (tensor '(1.0 -2.0) #:dtype 'float16))
+                  (bytes #x00 #x3C #x00 #xC0))
+    (check-equal? (tensor->bytes (tensor '(1.0 -2.0) #:dtype 'bfloat16))
+                  (bytes #x80 #x3F #x00 #xC0))
+    (check-equal? (tensor->bytes (tensor '(1 0 1) #:dtype 'uint8))
+                  (bytes 1 0 1))
+    (check-equal? (bytes-length (tensor->bytes (ones 2 3))) 24)
+    (check-equal? (tensor->bytes (zeros 0)) #"")
+    (define back (bytes->tensor (bytes #x00 #x3C #x00 #xC0) 'float16 '(2 1)))
+    (check-equal? (tensor-dtype back) 'float16)
+    (check-equal? (tensor-shape back) '(2 1))
+    (check-equal? (tensor->list back) '(1.0 -2.0))
+    (check-equal? (tensor->list (bytes->tensor (bytes 1 0 1) 'bool '(3)))
+                  '(1.0 0.0 1.0))
+    (check-equal? (tensor-dtype (bytes->tensor #"" 'int64 '(0))) 'int64)
+    (check-exn #rx"element size"
+               (lambda () (bytes->tensor (bytes 1 2 3) 'float16 '(1))))
+    (check-exn exn:fail?
+               (lambda () (bytes->tensor (bytes 1 2 3 4) 'float16 '(3)))))
 
   (test-case "dtype inference mirrors torch.tensor (#44)"
     (check-equal? (tensor-dtype (tensor '(1 2 3))) 'int64)
@@ -214,6 +256,47 @@
     (check-= (car y) 0.0 1e-6)
     (check-= (cadr y) 0.7310586 1e-5)
     (check-= (caddr y) -0.2689414 1e-5))
+
+  (test-case "leaky-relu: the negative side is scaled"
+    (define y (tensor->list (leaky-relu (tensor '(-2.0 0.0 3.0))
+                                        #:negative-slope 0.1)))
+    (check-= (car y) -0.2 1e-6)
+    (check-= (cadr y) 0.0 1e-6)
+    (check-= (caddr y) 3.0 1e-6)
+    (check-= (car (tensor->list (leaky-relu (tensor '(-1.0))))) -0.01 1e-7))
+
+  (test-case "linear: x times the transposed weight, plus the bias"
+    (define x (tensor '((1.0 2.0))))
+    (define w (tensor '((1.0 0.0) (0.0 1.0) (1.0 1.0))))
+    (check-equal? (tensor->list (linear x w)) '(1.0 2.0 3.0))
+    (check-equal? (tensor->list (linear x w #:bias (tensor '(0.5 0.5 0.5))))
+                  '(1.5 2.5 3.5))
+    (check-equal? (tensor-shape (linear (randn 5 4 3) (randn 2 3))) '(5 4 2)))
+
+  (test-case "flip: one dim or several"
+    (define x (reshape (arange 4) 2 2))
+    (check-equal? (tensor->list (flip x 1)) '(1.0 0.0 3.0 2.0))
+    (check-equal? (tensor->list (flip x '(0 1))) '(3.0 2.0 1.0 0.0)))
+
+  (test-case "batch-norm: statistics are a pair, required unless training"
+    (define x (reshape (tensor '(1.0 3.0 5.0 7.0)) 1 2 1 2))
+    (for ([v (in-list (tensor->list (batch-norm x #:training? #t)))]
+          [w (in-list '(-1.0 1.0 -1.0 1.0))])
+      (check-= v w 1e-4))
+    (define mean (zeros 2))
+    (define var (ones 2))
+    (for ([v (in-list (tensor->list (batch-norm x #:running-mean mean
+                                                #:running-var var)))]
+          [w (in-list '(1.0 3.0 5.0 7.0))])
+      (check-= v w 1e-4))
+    (batch-norm x #:running-mean mean #:running-var var #:training? #t)
+    (check-= (car (tensor->list mean)) 0.2 1e-5 "updated in place")
+    (check-= (car (tensor->list var)) 1.1 1e-5 "unbiased batch variance")
+    (check-exn #rx"running statistics" (lambda () (batch-norm x)))
+    (check-exn #rx"running statistics"
+               (lambda () (batch-norm x #:training? #f)))
+    (check-exn #rx"running statistics"
+               (lambda () (batch-norm x #:running-mean mean #:training? #t))))
 
   (test-case "upsample-nearest2d: every pixel becomes a scale by scale block"
     (define x (reshape (arange 4) 1 1 2 2))

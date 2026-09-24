@@ -10,6 +10,7 @@
          (only-in "foreign/structs.rkt" tensor-free!)
          (submod "foreign/structs.rkt" checked)
          (except-in "foreign/ops.rkt"
+                    any-float-dtype/c default-device
                     device->type+index dims-rest/c dtype/c
                     item to-dtype tensor-dtype to-device tensor-device
                     tensor-shape tensor->list)
@@ -28,9 +29,10 @@
          (only-in "foreign/sized.rkt" gen:sized length sized?)
          (except-in "foreign/autograd-ops.rkt" requires-grad!)
          (submod "foreign/autograd-ops.rkt" checked)
+         "foreign/autocast.rkt"
          (submod "foreign/slice.rkt" checked))
 
-(provide ref ref! with-no-grad with-default-device)
+(provide ref ref! with-no-grad with-autocast with-default-device)
 
 (provide (rename-out [t+ +] [t- -] [t* *] [t/ /])
          @)
@@ -47,12 +49,14 @@
          tensor-numel
          tensor->vector
          tensor->list
+         tensor->bytes
          tensor->repr
          tensor->string)
 
 (provide zeros
          ones
          full
+         fill-value/c
          zeros-like
          ones-like
          full-like
@@ -66,7 +70,8 @@
          size/c
          arange
          eye
-         tensor)
+         tensor
+         bytes->tensor)
 
 (provide reshape
          view
@@ -78,6 +83,7 @@
          unsqueeze
          cat
          stack
+         flip
          flatten
          narrow
          select
@@ -111,6 +117,7 @@
          sigmoid
          gelu
          silu
+         leaky-relu
          clamp
          exp
          log
@@ -151,6 +158,8 @@
          embedding
          layer-norm
          group-norm
+         batch-norm
+         linear
          upsample-nearest2d)
 
 (provide eq
@@ -219,6 +228,9 @@
          detach
          grad-enabled?
          call-with-no-grad
+         autocast-enabled?
+         autocast-dtype
+         call-with-autocast
          sub!
          zero!
          mul!

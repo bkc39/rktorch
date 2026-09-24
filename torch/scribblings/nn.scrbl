@@ -2,7 +2,8 @@
 
 @(require (for-label racket/base
                      racket/contract
-                     (only-in torch lambda~> prop:to relu tensor? to to-able?)
+                     (only-in torch backward! lambda~> prop:to relu tensor? to to-able?)
+                     (only-in torch/data/loader in-dataloader)
                      torch/nn
                      torch/private/contract))
 
@@ -28,8 +29,11 @@
           [formal id
                   [id default-expr]
                   (code:line keyword id)
-                  (code:line keyword [id default-expr])])
-         #:contracts ([contract-expr contract?])]{
+                  (code:line keyword [id default-expr])]
+          [input id
+                 [id : input-contract-expr]])
+         #:contracts ([contract-expr contract?]
+                      [input-contract-expr contract?])]{
 
 Defines a layer: a constructor @racket[name], a predicate @racket[name?],
 and a struct with one slot per @racket[field].  An instance is a
@@ -38,6 +42,23 @@ every field in scope.  A call with other than one argument per
 @racket[input] raises @racket[exn:fail:contract:arity] under
 @racket[name], whether made directly, through @racket[forward], or
 through @racket[layer-forward].
+
+An @racket[input] written @racket[[id : contract-expr]] states what the
+layer accepts there, and a call that does not satisfy it is a contract
+violation naming the layer and the contract rather than an error raised
+from inside the body: a shape the layer cannot take belongs in the
+signature, not in an @racket[unless] guard. The check is built once,
+where the layer is defined, so it costs one flat check per call; the
+party blamed is the label @tt{caller}, since a layer's forward has no
+module boundary of its own to name the caller by. A bare @racket[id]
+accepts anything, as before.
+
+@racketblock[
+(define-layer BatchNorm2d (weight bias running-mean running-var)
+  #:forward ([x : image-batch/c])
+  (batch-norm x #:weight weight #:bias bias
+              #:running-mean running-mean #:running-var running-var))
+]
 
 @racket[#:init] is the constructor body, the analogue of @tt{__init__}.
 Its @racket[formal]s are the constructor's arguments, in the grammar of
@@ -116,21 +137,28 @@ is allowed only at module level.
 @racketblock[
 (define-layer Conv2d (kernel-size stride padding weight bias)
   #:contract (->* [exact-positive-integer? exact-positive-integer? pos-size/c]
-                  [#:stride pos-size/c #:padding nonneg-size/c]
+                  [#:stride pos-size/c #:padding nonneg-size/c
+                   #:bias? boolean?]
                   conv2d?)
   #:init (in-channels out-channels kernel-size
           #:stride [stride 1]
-          #:padding [padding 0])
+          #:padding [padding 0]
+          #:bias? [bias? #t])
   (set! kernel-size (->2d kernel-size))
   (set! stride (->2d stride))
   (set! padding (->2d padding))
   (define shape
     (list out-channels in-channels (car kernel-size) (cadr kernel-size)))
   (set! weight (Parameter (kaiming-uniform shape)))
-  (set! bias (Parameter (uniform-init (list out-channels) -0.1 0.1)))
+  (set! bias
+        (and bias? (Parameter (uniform-init (list out-channels) -0.1 0.1))))
   #:forward (x)
   (conv2d x weight #:bias bias #:stride stride #:padding padding))
 ]
+
+@racket[#:bias?] is @racket[#f] where a batch norm follows, as in
+@racket[ResNet]: the normalization's shift subsumes the bias, so the
+field holds @racket[#f] and no @tt{bias} entry reaches the state dict.
 
 A container is a layer whose children arrive as a named collection
 rather than one per field.  It builds them with
@@ -210,6 +238,26 @@ Whether @racket[mode] is @racket['train].
 
 @defproc[(evaluating? [mode mode/c]) boolean?]{
 Whether @racket[mode] is @racket['eval].
+}
+
+@deftogether[(@defproc[(BatchNorm2d [num-features exact-positive-integer?]
+                                    [#:eps eps real? 1e-5]
+                                    [#:momentum momentum real? 0.1])
+                       batch-norm2d?]
+              @defproc[(BatchNorm1d [num-features exact-positive-integer?]
+                                    [#:eps eps real? 1e-5]
+                                    [#:momentum momentum real? 0.1])
+                       batch-norm1d?])]{
+@tt{nn.BatchNorm2d} and @tt{nn.BatchNorm1d}: normalize each of
+@racket[num-features] channels over the batch, scale and shift by a
+learned @tt{weight} and @tt{bias}, and keep a @racket[Buffer] running
+mean and variance that @racket[step!] does not touch --- the forward
+updates them, in @racket['train] mode only, and @racket[eval!] switches
+the normalization onto them.  @racket[BatchNorm2d] takes an
+@tt{[N C H W]} batch and @racket[BatchNorm1d] takes @tt{[N C]} or
+@tt{[N C L]}; another rank is a contract violation naming the layer.
+The @tt{num-batches-tracked} buffer counts the batches normalized, in
+int64 as torch does.
 }
 
 @defproc[(Parameter [t tensor?]) Parameter?]{
@@ -480,6 +528,161 @@ The decay @racket[e] was built with.
 Whether @racket[v] is an average built by @racket[ema].
 }
 
+@section{Optimizers and schedules}
+
+An optimizer holds a list of parameters and answers to @racket[step!] and
+@racket[zero-grads!]; every one keeps its state in place on the parameter's
+device and dtype, as the #138 Adam does, and follows a parameter moved with
+@racket[to]. The learning rate is the one setting that varies during
+training, so every optimizer exposes it through @racket[learning-rate] and
+@racket[set-learning-rate!], which is what a schedule writes.
+
+@defproc[(sgd [params (listof tensor?)]
+              [#:lr lr (>=/c 0)]
+              [#:momentum momentum (>=/c 0) 0]
+              [#:nesterov? nesterov? boolean? #f]
+              [#:weight-decay weight-decay (>=/c 0) 0])
+         sgd?]{
+@tt{torch.optim.SGD}: with @racket[momentum] the update blends into a
+buffer, copied from the first gradient and thereafter @racket[momentum]
+times itself plus the gradient; with @racket[nesterov?] the update looks
+one blend ahead, which requires a momentum; @racket[weight-decay] adds that
+multiple of the parameter to the gradient before either, torch's L2 form.
+}
+
+@defproc[(adam [params (listof tensor?)]
+               [#:lr lr (>=/c 0) 1e-3]
+               [#:beta1 beta1 real? 0.9]
+               [#:beta2 beta2 real? 0.999]
+               [#:eps eps real? 1e-8]
+               [#:weight-decay weight-decay (>=/c 0) 0])
+         adam?]{
+@tt{torch.optim.Adam} with bias correction; @racket[weight-decay] is the
+L2 form applied to the gradient, as there, not AdamW's decoupled one.
+}
+
+@defproc[(rmsprop [params (listof tensor?)]
+                  [#:lr lr (>=/c 0) 1e-2]
+                  [#:alpha alpha (>=/c 0) 0.99]
+                  [#:eps eps (>=/c 0) 1e-8]
+                  [#:weight-decay weight-decay (>=/c 0) 0]
+                  [#:momentum momentum (>=/c 0) 0])
+         rmsprop?]{
+@tt{torch.optim.RMSprop}, uncentered: a running average of the squared
+gradient decayed by @racket[alpha], the parameter moved by the gradient over
+that average's root plus @racket[eps]; with @racket[momentum] the move
+accumulates into a buffer that starts at zero.
+}
+
+@deftogether[(@defproc[(sgd? [v any/c]) boolean?]
+              @defproc[(adam? [v any/c]) boolean?]
+              @defproc[(rmsprop? [v any/c]) boolean?]
+              @defproc[(optimizer? [v any/c]) boolean?])]{
+The optimizer predicates; @racket[optimizer?] holds of every optimizer and
+of every schedule.
+}
+
+@defproc[(step! [opt optimizer?]) void?]{
+Applies one update to every parameter that has a gradient, under
+@racket[with-no-grad]; on a schedule, advances it and writes its rate.
+}
+
+@defproc[(zero-grads! [opt optimizer?]) void?]{
+Zeroes the gradient of every parameter, @tt{optimizer.zero_grad()}.
+}
+
+@deftogether[(@defproc[(learning-rate [opt optimizer?]) real?]
+              @defproc[(set-learning-rate! [opt optimizer?] [lr (>=/c 0)]) void?])]{
+The learning rate the next @racket[step!] will use; on a schedule, its
+optimizer's.
+}
+
+A schedule wraps an optimizer and answers to @racket[step!] like one: the
+rate for step 0 is written at construction, and each @racket[step!] on the
+schedule advances its count and writes the rate for it, so a training loop
+steps the optimizer and then the schedule as in PyTorch. The rates are the
+closed forms of @tt{torch.optim.lr_scheduler}'s constructors of the same
+names, pinned against them step for step.
+
+@racketblock[
+(define opt (sgd (parameters net) #:lr 0.1 #:momentum 0.9 #:weight-decay 5e-4))
+(define schedule (one-cycle-lr opt #:max-lr 0.1 #:total-steps (* epochs batches)))
+(for* ([epoch (in-range epochs)] [(xb yb) (in-dataloader loader)])
+  (zero-grads! opt)
+  (backward! (cross-entropy (net xb) yb))
+  (step! opt)
+  (step! schedule))
+]
+
+@defproc[(step-lr [opt optimizer?]
+                  [#:step-size step-size exact-positive-integer?]
+                  [#:gamma gamma real? 0.1])
+         scheduler?]{
+The base rate times @racket[gamma] to the power of the number of whole
+@racket[step-size] periods elapsed.
+}
+
+@defproc[(multi-step-lr [opt optimizer?]
+                        [#:milestones milestones (listof exact-nonnegative-integer?)]
+                        [#:gamma gamma real? 0.1])
+         scheduler?]{
+The base rate times @racket[gamma] once per milestone reached.
+}
+
+@defproc[(exponential-lr [opt optimizer?] [#:gamma gamma real?]) scheduler?]{
+The base rate times @racket[gamma] to the power of the step.
+}
+
+@defproc[(cosine-annealing-lr [opt optimizer?]
+                              [#:t-max t-max exact-positive-integer?]
+                              [#:eta-min eta-min real? 0])
+         scheduler?]{
+Half a cosine from the base rate at step 0 to @racket[eta-min] at
+@racket[t-max], and back up beyond it.
+}
+
+@defproc[(linear-lr [opt optimizer?]
+                    [#:start-factor start-factor (and/c (>/c 0) (<=/c 1)) 1/3]
+                    [#:end-factor end-factor (real-in 0 1) 1]
+                    [#:total-iters total-iters exact-positive-integer? 5])
+         scheduler?]{
+The base rate scaled from @racket[start-factor] to @racket[end-factor]
+linearly over @racket[total-iters] steps, and held there: the warmup.
+}
+
+@defproc[(one-cycle-lr [opt optimizer?]
+                       [#:max-lr max-lr (>/c 0)]
+                       [#:total-steps total-steps exact-positive-integer?]
+                       [#:pct-start pct-start (and/c (>=/c 0) (</c 1)) 0.3]
+                       [#:div-factor div-factor (>/c 0) 25]
+                       [#:final-div-factor final-div-factor (>/c 0) 1e4])
+         scheduler?]{
+@tt{OneCycleLR} with cosine annealing: from @racket[max-lr] over
+@racket[div-factor] up to @racket[max-lr] over the first @racket[pct-start]
+of @racket[total-steps], then down to the initial rate over
+@racket[final-div-factor]. Stepping past @racket[total-steps] is an error,
+as there. The base rate of @racket[opt] is not used. Momentum is left
+alone, where PyTorch's default cycles it; pass @tt{cycle_momentum=False}
+to reproduce this schedule there. A @racket[pct-start] of 1 would put the
+peak at the last step and leave the descent no steps to spread over, so
+the contract excludes it.
+}
+
+@defproc[(lambda-lr [opt optimizer?] [factor (-> exact-nonnegative-integer? real?)])
+         scheduler?]{
+The base rate times @racket[(factor step)].
+}
+
+@deftogether[(@defproc[(scheduler? [v any/c]) boolean?]
+              @defproc[(scheduler-step-count [s scheduler?]) exact-nonnegative-integer?]
+              @defproc[(scheduler-rate [s scheduler?]) real?]
+              @defproc[(scheduler-optimizer-of [s scheduler?]) optimizer?])]{
+A schedule, the number of times it has been stepped, the rate it last
+wrote to its optimizer, and that optimizer. @racket[scheduler-rate] is
+@tt{get_last_lr()}: it reports the rate written at construction or by the
+last @racket[step!], and does not call a @racket[lambda-lr] factor again.
+}
+
 @section{Checkpoints}
 
 @defproc[(state-dict [model layer?]) (listof (cons/c string? tensor?))]{
@@ -492,9 +695,9 @@ tensor shared by two fields appears under both names.
 Writes @racket[(state-dict model)] to @racket[path] in the safetensors
 layout: an 8-byte little-endian header length, a JSON header giving each
 entry's @tt{dtype}, @tt{shape} and @tt{data_offsets}, then the tensors'
-bytes, little-endian.  Entries are typed @tt{F32}, @tt{F64}, @tt{I64},
-@tt{U8} or @tt{BOOL}, and every value is written exactly, a
-@racket['float64] tensor included.  A tensor of any other dtype is refused
+bytes, little-endian.  Entries are typed @tt{F32}, @tt{F64}, @tt{F16},
+@tt{BF16}, @tt{I64}, @tt{U8} or @tt{BOOL}, and every value is written
+exactly, a @racket['float64] tensor included.  A tensor of any other dtype is refused
 with the name of its entry.
 }
 

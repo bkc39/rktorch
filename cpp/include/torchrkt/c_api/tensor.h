@@ -25,6 +25,9 @@ typedef enum tr_dtype {
   TR_DTYPE_INT64 = 2,
   TR_DTYPE_BOOL = 3,
   TR_DTYPE_UINT8 = 4,
+  /* The half-precision pair, appended so the earlier values stay ABI. */
+  TR_DTYPE_FLOAT16 = 5,
+  TR_DTYPE_BFLOAT16 = 6,
   /* "leave the dtype alone", meaning the tensor's own dtype for a conversion
    * and float32 for a constructor. Accepted by tr_tensor_to, tr_tensor_to_,
    * tr_tensor_to_dtype, tr_zeros_on, tr_ones_on, and tr_full_on (device.h,
@@ -82,6 +85,14 @@ int tr_tensor_copy_data_f64(const tr_tensor* t, uint64_t capacity, double* out,
 
 int tr_tensor_copy_data_u8(const tr_tensor* t, uint64_t capacity, uint8_t* out,
                            uint64_t* out_numel);
+
+/* Copy the tensor's element bytes as they are, row-major in its own dtype
+ * and the host's byte order (capacity in bytes): the safetensors payload,
+ * and the only way a 16-bit float leaves the process without widening.
+ * *out_nbytes always receives the true byte count; rc=2 if capacity <
+ * nbytes. */
+int tr_tensor_copy_bytes(const tr_tensor* t, uint64_t capacity, uint8_t* out,
+                         uint64_t* out_nbytes);
 
 /* Render the tensor via ATen's ostream operator into out_buffer (capacity in
  * bytes, no NUL terminator written). *out_len always receives the byte length;

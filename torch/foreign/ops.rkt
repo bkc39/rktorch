@@ -57,6 +57,7 @@
          (only-in "raw/random.rkt" tr-tensor-uniform!/raw)
          (only-in "raw/tensor.rkt"
                   dtype-code->symbol
+                  tr-tensor-copy-bytes/raw
                   tr-tensor-copy-data-f64/raw
                   tr-tensor-copy-data-i64/raw
                   tr-tensor-copy-data-u8/raw
@@ -74,6 +75,8 @@
 
 (provide device->type+index
          dims-rest/c
+         float-dtype/c
+         placement
          with-default-device)
 
 (module+ unsafe
@@ -84,9 +87,25 @@
 
 (define dims-rest/c (listof exact-nonnegative-integer?))
 
-(define dtype-symbols '(float32 float64 int64 bool uint8))
+(define dtype-symbols '(float32 float64 int64 bool uint8 float16 bfloat16))
 
 (define/checked-out dtype/c contract? (apply or/c dtype-symbols))
+
+(define float-dtype/c (or/c 'float32 'float64))
+
+;; randn and rand construct at the dtype they are given, half included;
+;; the spectral helpers in torch/audio take float-dtype/c and do not
+(define/checked-out any-float-dtype/c contract? ;; noqa
+  (or/c 'float32 'float64 'float16 'bfloat16))
+
+;; the device and dtype go into native construction — never a default-device
+;; scope or a construct-then-move hop through another device; the one
+;; exception is `tensor`'s half path in creation-ops.rkt, which stages on
+;; the CPU because no host vector type carries a half
+(define (placement device dtype)
+  (define-values (type index)
+    (if device (device->type+index device) (values 'keep 0)))
+  (values type index (or dtype 'keep)))
 
 ;; Python's argument order: a dtype target stands alone, a device target may
 ;; carry a dtype — the shape gets contract blame, not a runtime error
@@ -260,7 +279,8 @@
               (cons/c 'pressure-collections exact-nonnegative-integer?)
               (cons/c 'pressure-reclaimed exact-nonnegative-integer?)
               (cons/c 'trough-collections exact-nonnegative-integer?)
-              (cons/c 'trough-minors exact-nonnegative-integer?)))
+              (cons/c 'trough-minors exact-nonnegative-integer?)
+              (cons/c 'trough-floor exact-nonnegative-integer?)))
   raw:finalizer-diagnostics)
 
 (define/contract-out (reclaim-native-memory!) (-> void?) ;; noqa
@@ -284,7 +304,7 @@
   (check-ok (tr-set-default-device/raw type index) 'set-default-device!)
   (void))
 
-(define/contract-out (default-device) (-> device?)
+(define/checked-out (default-device) (-> device?)
   (define-values (rc type index) (tr-get-default-device/raw))
   (check-ok rc 'default-device)
   (type+index->device type index))
@@ -428,6 +448,15 @@
      (define-values (rc _n) (tr-tensor-copy-data/raw t n out))
      (check-ok rc 'tensor->vector)
      out]))
+
+(define/contract-out (tensor->bytes t) (-> tensor? bytes?) ;; noqa
+  (define-values (probe nbytes) (tr-tensor-copy-bytes/raw t 0 #f))
+  (unless (= probe 2)
+    (check-ok probe 'tensor->bytes))
+  (define out (make-bytes nbytes))
+  (define-values (rc _n) (tr-tensor-copy-bytes/raw t nbytes out))
+  (check-ok rc 'tensor->bytes)
+  out)
 
 (define/checked-out (tensor->list t) (-> tensor? (listof real?)) ;; noqa
   (define v (tensor->vector t))

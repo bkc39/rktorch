@@ -1,29 +1,14 @@
 #lang racket/base
 
-(require (only-in ffi/vector
-                  f32vector-length
-                  f32vector-ref
-                  f32vector-set!
-                  f64vector-length
-                  f64vector-ref
-                  f64vector-set!
-                  make-f32vector
-                  make-f64vector
-                  make-s64vector
-                  s64vector-length
-                  s64vector-ref
-                  s64vector-set!)
-         (only-in racket/contract/base -> ->* any cons/c listof)
+(require (only-in racket/contract/base -> ->* any cons/c listof)
          (only-in racket/file file->bytes)
          (only-in json jsexpr->string string->jsexpr)
          (only-in "../foreign.rkt"
-                  reshape
-                  tensor
+                  bytes->tensor
                   tensor-dtype
-                  tensor->vector
+                  tensor->bytes
                   tensor-shape
                   tensor?
-                  to-dtype
                   with-no-grad)
          (only-in "../generated.rkt" copy!)
          (only-in "../private/contract.rkt" define/contract-out)
@@ -34,79 +19,31 @@
   (-> layer? (listof (cons/c string? tensor?)))
   (append (layer-named-parameters model "") (layer-named-buffers model "")))
 
-;; Little-endian, as safetensors stores every dtype.
-(define (pack n width write-at!)
-  (define bs (make-bytes (* n width)))
-  (for ([i (in-range n)])
-    (write-at! bs i (* i width)))
-  bs)
+;; safetensors' dtype tags; the payload is the element bytes little-endian,
+;; which is the host's order on every platform the shim builds for
+(define tags
+  '((float32 . "F32") (float64 . "F64") (float16 . "F16") (bfloat16 . "BF16")
+    (int64 . "I64") (bool . "BOOL") (uint8 . "U8")))
 
 (define (encode name t)
-  (case (tensor-dtype t)
-    [(float32)
-     (define v (tensor->vector t))
-     (values "F32"
-             (pack (f32vector-length v) 4
-                   (lambda (bs i at)
-                     (real->floating-point-bytes (f32vector-ref v i) 4 #f
-                                                 bs at))))]
-    [(float64)
-     (define v (tensor->vector t))
-     (values "F64"
-             (pack (f64vector-length v) 8
-                   (lambda (bs i at)
-                     (real->floating-point-bytes (f64vector-ref v i) 8 #f
-                                                 bs at))))]
-    [(int64)
-     (define v (tensor->vector t))
-     (values "I64"
-             (pack (s64vector-length v) 8
-                   (lambda (bs i at)
-                     (integer->integer-bytes (s64vector-ref v i) 8 #t #f
-                                             bs at))))]
-    [(uint8) (values "U8" (tensor->vector t))]
-    [(bool) (values "BOOL" (tensor->vector (to-dtype t 'uint8)))]
-    [else
-     (raise-arguments-error 'save-state! "unsupported dtype"
-                            "entry" name
-                            "dtype" (tensor-dtype t))]))
+  (define tag (assq (tensor-dtype t) tags))
+  (unless tag
+    (raise-arguments-error 'save-state! "unsupported dtype"
+                           "entry" name
+                           "dtype" (tensor-dtype t)))
+  (values (cdr tag) (tensor->bytes t)))
 
-(define (unpack bs width make set-at!)
-  (define n (quotient (bytes-length bs) width))
-  (define v (make n))
-  (for ([i (in-range n)])
-    (set-at! v i (* i width)))
-  v)
-
-(define (decode name dtype bs)
-  (case dtype
-    [("F32")
-     (tensor
-      (unpack bs 4 make-f32vector
-              (lambda (v i at)
-                (f32vector-set! v i
-                                (floating-point-bytes->real bs #f
-                                                            at (+ at 4))))))]
-    [("F64")
-     (tensor
-      (unpack bs 8 make-f64vector
-              (lambda (v i at)
-                (f64vector-set! v i
-                                (floating-point-bytes->real bs #f
-                                                            at (+ at 8))))))]
-    [("I64")
-     (tensor
-      (unpack bs 8 make-s64vector
-              (lambda (v i at)
-                (s64vector-set! v i
-                                (integer-bytes->integer bs #t #f
-                                                        at (+ at 8))))))]
-    [("U8") (tensor bs)]
-    [("BOOL") (to-dtype (tensor bs) 'bool)]
-    [else
-     (raise-arguments-error 'load-state! "unsupported dtype"
-                            "entry" name
-                            "dtype" dtype)]))
+(define (decode name dtype shape bs)
+  (define entry
+    (for/first ([e (in-list tags)] #:when (string=? (cdr e) dtype))
+      (car e)))
+  (unless entry
+    (raise-arguments-error 'load-state! "unsupported dtype"
+                           "entry" name
+                           "dtype" dtype))
+  ;; the payload decodes on the host and `copy!` moves it: an F64 entry
+  ;; loading into a float32 model could not land on an MPS default device
+  (bytes->tensor bs entry shape #:device 'cpu))
 
 (define/contract-out (save-state! model path) ;; noqa
   (-> layer? path-string? void?)
@@ -131,6 +68,13 @@
                    out)
       (write-bytes header-bytes out)
       (for ([bs (in-list (reverse chunks))]) (write-bytes bs out)))))
+
+(define (field meta name key)
+  (hash-ref meta key
+            (lambda ()
+              (raise-arguments-error 'load-state! "entry has no field"
+                                     "entry" name
+                                     "field" key))))
 
 (define (mismatch-report strict? missing unexpected mismatched)
   (append
@@ -165,9 +109,9 @@
     (for*/list ([e (in-list entries)]
                 [meta (in-value (meta-of (car e)))]
                 #:when meta
-                #:unless (equal? (hash-ref meta 'shape)
-                                 (tensor-shape (cdr e))))
-      (list (car e) (hash-ref meta 'shape) (tensor-shape (cdr e)))))
+                [shape (in-value (field meta (car e) 'shape))]
+                #:unless (equal? shape (tensor-shape (cdr e))))
+      (list (car e) shape (tensor-shape (cdr e)))))
   (define report (mismatch-report strict? missing unexpected mismatched))
   (unless (null? report)
     (apply raise-arguments-error 'load-state!
@@ -176,13 +120,15 @@
     (for ([e (in-list entries)])
       (define meta (meta-of (car e)))
       (when meta
-        (define offsets (hash-ref meta 'data_offsets))
+        (define offsets (field meta (car e) 'data_offsets))
         (define loaded
           (decode (car e)
-                  (hash-ref meta 'dtype)
+                  (field meta (car e) 'dtype)
+                  (field meta (car e) 'shape)
                   (subbytes raw
                             (+ data-start (car offsets))
                             (+ data-start (cadr offsets)))))
-        (copy! (cdr e) (apply reshape loaded (tensor-shape (cdr e))) #f))))
+        ;; copy_ converts, so a file in one dtype loads into a model in another
+        (copy! (cdr e) loaded #f))))
   (unless strict?
     (values missing unexpected)))

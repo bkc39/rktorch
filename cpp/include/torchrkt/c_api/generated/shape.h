@@ -21,6 +21,8 @@ tr_tensor* tr_gen_broadcast_to(const tr_tensor* self, const int64_t* size,
                                int64_t size_len);
 tr_tensor* tr_gen_cat(const tr_tensor* const* tensors, int64_t tensors_len,
                       int64_t dim);
+tr_tensor* tr_gen_flip(const tr_tensor* self, const int64_t* dims,
+                       int64_t dims_len);
 tr_tensor* tr_gen_gather(const tr_tensor* self, int64_t dim,
                          const tr_tensor* index, bool sparse_grad);
 tr_tensor* tr_gen_index_select(const tr_tensor* self, int64_t dim,

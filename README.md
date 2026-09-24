@@ -7,7 +7,7 @@
 [![Build](https://img.shields.io/github/actions/workflow/status/bkc39/rktorch/nix.yml?label=build)](https://github.com/bkc39/rktorch/actions/workflows/nix.yml)
 [![Docs](https://img.shields.io/badge/docs-racket--lang.org-blue.svg)](https://docs.racket-lang.org/torch)
 [![Package](https://img.shields.io/badge/raco%20pkg-torch-purple.svg)](https://pkgs.racket-lang.org/package/torch)
-[![License](https://img.shields.io/badge/license-Apache--2.0%20AND%20CC--BY--4.0-blue.svg)](#license)
+[![License](https://img.shields.io/badge/license-Apache--2.0%20AND%20CC--BY--4.0%20AND%20CC--BY--2.0--FR-blue.svg)](#license)
 
 </div>
 
@@ -191,6 +191,10 @@ against:
   [training script](scripts/train-asr.rkt)
 - [Image generation on CIFAR-10](examples/racket/08-diffusion.rkt): a
   class-conditional DDPM with a UNet, trained with an EMA of the weights
+- [A character-level LSTM](examples/racket/12-char-rnn.rkt): gradient
+  clipping, and sampling at a temperature from a carried state
+- [French to English translation](examples/racket/13-translation.rkt): a GRU
+  encoder-decoder with Bahdanau attention, teacher forcing, and greedy decoding
 
 ## Documentation
 
@@ -224,4 +228,8 @@ follows and which it keeps as a reference implementation.
 
 ## License
 
-`Apache-2.0 AND CC-BY-4.0`, as declared in [`torch/info.rkt`](torch/info.rkt).
+`Apache-2.0 AND CC-BY-4.0 AND CC-BY-2.0-FR`, as declared in
+[`torch/info.rkt`](torch/info.rkt). The code is Apache-2.0; the committed
+data fixtures carry the licenses of their sources, recorded in the `NOTICE`
+beside each one ([`torch/audio/fixtures`](torch/audio/fixtures/NOTICE),
+[`torch/data/fixtures`](torch/data/fixtures/NOTICE)).

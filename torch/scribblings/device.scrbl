@@ -3,7 +3,9 @@
 @(require (for-label racket/base
                      racket/contract
                      (only-in torch
-                              arange backward! cpu-device
+                              arange autocast-dtype autocast-enabled?
+                              backward! bytes->tensor call-with-autocast
+                              cpu-device default-device
                               cuda-allocator-settings!
                               cuda-device cuda-memory-info cuda-memory-stats
                               cuda-reset-peak-stats! device device/c device?
@@ -14,8 +16,10 @@
                               native-memory-use ones ones-like prop:to rand
                               rand-like randn randn-like
                               reclaim-native-memory! tensor tensor-device
-                              tensor-dtype tensor? to to-able? to-device
-                              to-dtype with-default-device with-no-grad
+                              tensor->bytes tensor-dtype tensor? to to-able?
+                              to-device
+                              to-dtype with-autocast with-default-device
+                              with-no-grad
                               zeros zeros-like ~>)
                      (only-in torch/nn
                               Buffer Linear Parameter adam buffers gen:layer
@@ -33,9 +37,9 @@ PyTorch's @tt{.to}: moves @racket[x] to a device, casts it to a dtype, or
 both in one native hop. A device target is any @racket[device/c] form,
 @racket['cuda], @racket[(device 'cuda 1)], or a @racket[device?] value; a
 dtype target is one of @racket['float32], @racket['float64],
-@racket['int64], @racket['bool], @racket['uint8]. As in Python, the dtype
-may follow a device
-target but a dtype target stands alone.
+@racket['float16], @racket['bfloat16], @racket['int64], @racket['bool],
+@racket['uint8]. As in Python, the dtype may follow a device target but a
+dtype target stands alone.
 
 @racketblock[
 (to x (device 'cuda))
@@ -59,7 +63,8 @@ accumulated gradient moves along, and the parameter stays a
 requires-grad leaf. Plain tensor fields are not moved, just as PyTorch
 leaves plain tensor attributes where they are; register such a tensor with
 @racket[Buffer] to have it follow the layer. A layer's dtype target must be
-floating-point, @racket['float32] or @racket['float64], as
+floating-point, one of @racket['float32], @racket['float64],
+@racket['float16], @racket['bfloat16], as
 @tt{nn.Module.to} only accepts floating-point or complex dtypes, and as
 there it reaches only the floating-point parameters and buffers: an
 @racket['int64] counter or a @racket['bool] mask registered with
@@ -89,8 +94,94 @@ A device designator: a @racket[device?] value, one of @racket['cpu],
 }
 
 @defthing[dtype/c contract?]{
-One of @racket['float32], @racket['float64], @racket['int64],
-@racket['bool].
+One of @racket['float32], @racket['float64], @racket['float16],
+@racket['bfloat16], @racket['int64], @racket['bool], @racket['uint8].
+}
+
+@section{Half precision}
+
+The 16-bit floats are dtypes like any other: @racket['float16] is IEEE
+half, with ten mantissa bits and a largest value of 65504, and
+@racket['bfloat16] keeps float32's exponent with seven mantissa bits, so it
+holds float32's range at a quarter of the precision. Every constructor
+takes them, @racket[to] casts to and from them, a layer moves to them, and
+values read back through float32, so @racket[tensor->list] and
+@racket[item] are exact for what the tensor holds. The safetensors
+container writes them as @tt{F16} and @tt{BF16}.
+
+Training in half precision is done the way PyTorch does it: the parameters
+stay @racket['float32] and the forward runs under autocast, which casts the
+matrix multiplications and convolutions to the half dtype and runs the ops
+on PyTorch's float32 list in float32: softmax, the losses, the norms,
+@tt{sum} and a few other reductions. An op on neither list keeps its
+input's dtype, so the @tt{mean} of a half tensor is half; reduce with a
+listed op, or cast first, where the precision matters.
+The 3090 Ti and its generation run @racket['bfloat16] on tensor cores with
+float32's range, so no loss scaling is needed; @racket['float16] is the
+choice for inference and storage.
+
+@racketblock[
+(for ([(xb yb) (in-dataloader loader)])
+  (zero-grads! opt)
+  (define loss
+    (with-autocast #:device 'cuda
+      (cross-entropy (net xb) yb)))
+  (backward! loss)
+  (step! opt))
+]
+
+@defform[(with-autocast maybe-device maybe-dtype body ...+)
+         #:grammar [(maybe-device (code:line) (code:line #:device device))
+                    (maybe-dtype (code:line) (code:line #:dtype dtype))]]{
+Runs the body with autocast on for @racket[device], which is a device type
+or a @racket[device?] value and defaults to the default device, in
+@racket[dtype], @racket['bfloat16] unless given @racket['float16]. Leaving
+the body puts back whatever was there before, so the form nests. The state
+is kept per device type but not per Racket thread: every thread in the
+place sees it, a parallel thread included, so while one of them is inside
+the form, tensor operations that another one runs are autocast too. Keep
+other threads that compute out of the extent. Run
+@racket[backward!] outside the form, as PyTorch recommends: the gradients
+arrive in the parameters' own dtype either way.
+}
+
+@defproc[(call-with-autocast [thunk (-> any)]
+                             [#:device device (or/c 'cpu 'cuda 'mps device?)
+                              (default-device)]
+                             [#:dtype dtype (or/c 'float16 'bfloat16) 'bfloat16])
+         any]{
+The procedure form of @racket[with-autocast].
+}
+
+@defproc[(autocast-enabled? [device (or/c 'cpu 'cuda 'mps device?) (default-device)])
+         boolean?]{
+Whether autocast is on for @racket[device], which every Racket thread in
+the place sees alike.
+}
+
+@defproc[(autocast-dtype [device (or/c 'cpu 'cuda 'mps device?) (default-device)])
+         (or/c 'float16 'bfloat16)]{
+The dtype autocast casts to on @racket[device], set or not; the process
+default is @racket['float16] for CUDA and @racket['bfloat16] for the CPU.
+}
+
+@defproc[(tensor->bytes [t tensor?]) bytes?]{
+The element bytes of @racket[t] as they are, row-major in its own dtype and
+the host's byte order: the safetensors payload, and the only way a 16-bit
+float leaves the process without widening.
+}
+
+@defproc[(bytes->tensor [bs bytes?] [dtype dtype/c]
+                        [shape (listof exact-nonnegative-integer?)]
+                        [#:device device (or/c #f device/c) #f])
+         tensor?]{
+The inverse of @racket[tensor->bytes]: a tensor of @racket[dtype] and
+@racket[shape] over a copy of @racket[bs], whose length must be the
+element count times the element size. It lands on @racket[device], or on
+the default device when that is @racket[#f]. Naming the device decodes
+somewhere the default cannot hold the dtype --- an @tt{F64} payload while
+the default is MPS --- without changing the default, which every thread in
+the process shares.
 }
 
 @defthing[prop:to struct-type-property?]{
@@ -130,8 +221,8 @@ another device on its way to where it will live. With
 @racket[#:requires-grad?] the result is marked as a leaf after construction,
 which an integer dtype refuses as PyTorch does. @racket[ones], @racket[full],
 @racket[randn], and @racket[rand] take the same arguments; the two random
-constructors accept only @racket['float32] or @racket['float64] and draw
-from the chosen device's generator.
+constructors accept only a floating-point dtype and draw from the chosen
+device's generator.
 
 @racket[arange] and @racket[eye] take the same three keywords after their
 positional arguments. @racket[arange] stays @racket['float32] by default, as
@@ -294,6 +385,16 @@ ledger has made: @racket['trough-collections] and @racket['trough-minors],
 the full and minor collections at a trough, @racket['pressure-collections]
 from the high-water backstop, and under @racket['pressure-reclaimed] the
 bytes all of them released.
+
+@racket['trough-floor] is the baseline residue at a trough is measured
+against, summed over the devices; @racket[native-collect-margin] is the
+room allowed above it, so residue within the margin is left alone. It moves
+two ways. A trough whose drain finished settles it on what the ledger still
+holds, while one whose finalizers do not finish draining in time leaves it
+where it was, so the bytes still waiting to be freed stay visible to the
+next trough. Every trough also lowers it to the live size first if that is
+smaller, whether or not it goes on to collect, so a floor left high by an
+earlier peak cannot hide later growth.
 }
 
 @section{Unsafe}

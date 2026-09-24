@@ -33,16 +33,22 @@
          (only-in "device-type.rkt" device/c)
          (only-in "error.rkt" check-handle check-ok)
          (only-in "ops.rkt"
+                  any-float-dtype/c
+                  default-device
                   device->type+index
                   dims-rest/c
                   dtype/c
+                  placement
                   tensor-device
                   tensor-dtype
                   tensor-shape
+                  to-device
                   to-dtype)
          (only-in "raw/creation.rkt"
                   tr-arange-on/raw
                   tr-eye-on/raw
+                  tr-from-bytes-on-device/raw
+                  tr-from-bytes/raw
                   tr-from-data-f64-on-device/raw
                   tr-from-data-f64/raw
                   tr-from-data-i64-on-device/raw
@@ -71,17 +77,8 @@
 (define (shape-of dims)
   (if (and (pair? dims) (list? (car dims))) (car dims) dims))
 
-;; the device and dtype go into native construction — never a default-device
-;; scope or a construct-then-move hop through another device
-(define (placement device dtype)
-  (define-values (type index)
-    (if device (device->type+index device) (values 'keep 0)))
-  (values type index (or dtype 'keep)))
-
 (define (finish out requires-grad?)
   (if requires-grad? (requires-grad! out) out))
-
-(define float-dtype/c (or/c 'float32 'float64))
 
 (define (shaped who raw dims device dtype requires-grad? . extra)
   (define shape (shape-of dims))
@@ -105,20 +102,35 @@
        #:rest shape-rest/c tensor?)
   (shaped 'ones tr-ones-on/raw dims device dtype requires-grad?))
 
-;; the fill crosses the FFI as a double: an int64 fill outside the exact
-;; range of a double would round silently and a uint8 fill outside 0..255
-;; would wrap, so the contract refuses both
+;; the fill crosses the FFI as a double: a fractional value would truncate,
+;; an int64 fill outside the exact range of a double would round and a
+;; uint8 fill outside 0..255 would wrap, so the contract refuses all three
+;; where torch takes them silently
 (define (fill-crosses-exactly? value dtype)
   (cond
     [(unsupplied-arg? dtype) #t]
     [(eq? dtype 'int64)
-     (or (not (exact-integer? value))
-         (= (exact->inexact value) value)
-         "an int64 fill value must be exactly representable as a double")]
+     (or (and (integer? value)
+              (<= (- (expt 2 63)) value (sub1 (expt 2 63)))
+              (= (exact->inexact value) value))
+         "an int64 fill value must be an integer exactly representable as a double")]
     [(eq? dtype 'uint8)
      (or (and (integer? value) (<= 0 value 255))
          "a uint8 fill value must be an integer from 0 to 255")]
+    [(eq? dtype 'bool)
+     (or (and (integer? value) (<= 0 value 1))
+         "a bool fill value must be 0 or 1")]
     [else #t]))
+
+(define/contract-out (fill-value/c dtype) ;; noqa
+  (-> dtype/c flat-contract?)
+  (flat-named-contract
+   (case dtype
+     [(int64) 'int64-fill-value]
+     [(uint8) 'uint8-fill-value]
+     [(bool) 'bool-fill-value]
+     [else 'fill-value])
+   (lambda (v) (and (real? v) (eq? #t (fill-crosses-exactly? v dtype))))))
 
 (define/contract-out (full value #:device [device #f] #:dtype [dtype #f]
                            #:requires-grad? [requires-grad? #f]
@@ -136,14 +148,14 @@
 (define/contract-out (randn #:device [device #f] #:dtype [dtype #f]
                             #:requires-grad? [requires-grad? #f]
                             . dims)
-  (->* [] [#:device device/c #:dtype float-dtype/c #:requires-grad? boolean?]
+  (->* [] [#:device device/c #:dtype any-float-dtype/c #:requires-grad? boolean?]
        #:rest shape-rest/c tensor?)
   (shaped 'randn tr-randn-on/raw dims device dtype requires-grad?))
 
 (define/contract-out (rand #:device [device #f] #:dtype [dtype #f]
                            #:requires-grad? [requires-grad? #f]
                            . dims)
-  (->* [] [#:device device/c #:dtype float-dtype/c #:requires-grad? boolean?]
+  (->* [] [#:device device/c #:dtype any-float-dtype/c #:requires-grad? boolean?]
        #:rest shape-rest/c tensor?)
   (shaped 'rand tr-rand-on/raw dims device dtype requires-grad?))
 
@@ -210,7 +222,7 @@
 (define/contract-out (randn-like t #:device [device #f] #:dtype [dtype #f] ;; noqa
                                  #:requires-grad? [requires-grad? #f])
   (->* [tensor?]
-       [#:device device/c #:dtype float-dtype/c #:requires-grad? boolean?]
+       [#:device device/c #:dtype any-float-dtype/c #:requires-grad? boolean?]
        tensor?)
   (define-values (dev dt) (like t device dtype))
   (randn (tensor-shape t) #:device dev #:dtype dt
@@ -219,7 +231,7 @@
 (define/contract-out (rand-like t #:device [device #f] #:dtype [dtype #f] ;; noqa
                                 #:requires-grad? [requires-grad? #f])
   (->* [tensor?]
-       [#:device device/c #:dtype float-dtype/c #:requires-grad? boolean?]
+       [#:device device/c #:dtype any-float-dtype/c #:requires-grad? boolean?]
        tensor?)
   (define-values (dev dt) (like t device dtype))
   (rand (tensor-shape t) #:device dev #:dtype dt
@@ -335,11 +347,11 @@
   (->* [(or/c real? list? vector? f32vector? f64vector? s64vector? bytes?)]
        [#:requires-grad? boolean?
         #:device (or/c #f device/c)
-        #:dtype (or/c #f 'float32 'float64 'int64 'uint8)]
+        #:dtype (or/c #f 'float32 'float64 'int64 'uint8 'float16 'bfloat16)]
        tensor?)
-  (unless (memq dtype '(#f float32 float64 int64 uint8))
+  (unless (memq dtype '(#f float32 float64 int64 uint8 float16 bfloat16))
     (error 'tensor
-           "unsupported #:dtype (float32, float64, int64 or uint8): ~e"
+           "unsupported #:dtype (float32, float64, int64, uint8, float16 or bfloat16): ~e"
            dtype))
   (define dims (nested-dims data))
   (define-values (chosen payload numel)
@@ -371,33 +383,61 @@
                   (length flat))])]))
   (define dim-vec (list->s64vector dims))
   (define ndim (length dims))
+  (define narrow?
+    (or (and (bytes? data) dtype (not (eq? dtype 'uint8)) #t)
+        (and (memq dtype '(float16 bfloat16)) #t)))
+  ;; only the half pair is built wide and cast down, so only it is staged on
+  ;; the CPU, where no accelerator holds the wide copy and the narrow one at
+  ;; once; bytes are built at their own size and only widen, so they are
+  ;; built where they are wanted and widened there
+  (define stage? (and narrow? (not (bytes? data))))
+  ;; the destination is fixed before the build, as every other constructor
+  ;; fixes it, so a default that changes meanwhile does not move the result
+  (define lands-on (and stage? (or device (default-device))))
+  (define build-on (if stage? 'cpu device))
   (define-values (type index)
-    (if device (device->type+index device) (values #f #f)))
+    (if build-on (device->type+index build-on) (values #f #f)))
   (define out
     (wrap 'tensor
           (case chosen
             [(int64)
-             (if device
+             (if build-on
                  (tr-from-data-i64-on-device/raw payload numel dim-vec ndim
                                                  type index)
                  (tr-from-data-i64/raw payload numel dim-vec ndim))]
             [(float64)
-             (if device
+             (if build-on
                  (tr-from-data-f64-on-device/raw payload numel dim-vec ndim
                                                  type index)
                  (tr-from-data-f64/raw payload numel dim-vec ndim))]
             [(uint8)
-             (if device
+             (if build-on
                  (tr-from-data-u8-on-device/raw payload numel dim-vec ndim
                                                 type index)
                  (tr-from-data-u8/raw payload numel dim-vec ndim))]
             [else
-             (if device
+             (if build-on
                  (tr-from-data-on-device/raw payload numel dim-vec ndim
                                              type index)
                  (tr-from-data/raw payload numel dim-vec ndim))])))
+  ;; the half pair has no host vector type, so it is built as float32 and
+  ;; narrowed natively, like a byte string asked for another dtype
   (define typed
-    (if (and (bytes? data) dtype (not (eq? dtype 'uint8)))
-        (to-dtype out dtype)
-        out))
+    (cond
+      [stage? (to-device (to-dtype out dtype) lands-on)]
+      [narrow? (to-dtype out dtype)]
+      [else out]))
   (if requires-grad? (requires-grad! typed) typed))
+
+(define/contract-out (bytes->tensor bs dtype shape #:device [device #f]) ;; noqa
+  (->* [bytes? dtype/c dims-rest/c] [#:device (or/c #f device/c)] tensor?)
+  (define dims (list->s64vector shape))
+  (wrap 'bytes->tensor
+        (cond
+          [device
+           (define-values (type index) (device->type+index device))
+           (tr-from-bytes-on-device/raw bs (bytes-length bs) dims (length shape)
+                                        dtype type index)]
+          [else
+           (tr-from-bytes/raw bs (bytes-length bs) dims (length shape)
+                              dtype)])))

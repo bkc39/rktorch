@@ -4,7 +4,8 @@
 ;; unused
 #|review: ignore|#
 
-(require (except-in "nn/buffer.rkt" Buffer?)
+(require "nn/batch-norm.rkt"
+         (except-in "nn/buffer.rkt" Buffer?)
          (submod "nn/buffer.rkt" checked)
          "nn/clip.rkt"
          "nn/conv.rkt"
@@ -30,7 +31,11 @@
          (submod "nn/layer.rkt" checked)
          "nn/linear.rkt"
          "nn/loss.rkt"
-         (only-in "nn/optim.rkt" adam adam? sgd sgd? step! zero-grads!)
+         (only-in "nn/optim.rkt"
+                  adam adam? learning-rate rmsprop rmsprop?
+                  set-learning-rate! sgd sgd? step! zero-grads!)
+         (submod "nn/optim.rkt" checked)
+         "nn/scheduler.rkt"
          (except-in "nn/parameter.rkt" Parameter Parameter?)
          (submod "nn/parameter.rkt" checked)
          "nn/recurrent.rkt"
@@ -110,6 +115,10 @@
          layer-norm?
          GroupNorm
          group-norm?
+         BatchNorm2d
+         batch-norm2d?
+         BatchNorm1d
+         batch-norm1d?
          Sequential
          sequential?
          LSTM
@@ -126,8 +135,25 @@
          sgd?
          adam
          adam?
+         rmsprop
+         rmsprop?
+         optimizer?
          step!
-         zero-grads!)
+         zero-grads!
+         learning-rate
+         set-learning-rate!)
+
+(provide scheduler?
+         scheduler-step-count
+         scheduler-rate
+         scheduler-optimizer-of
+         step-lr
+         multi-step-lr
+         exponential-lr
+         cosine-annealing-lr
+         linear-lr
+         one-cycle-lr
+         lambda-lr)
 
 (provide clip-grad-norm!)
 
@@ -140,6 +166,9 @@
 (provide mse-loss
          cross-entropy
          ctc-loss
+         binary-cross-entropy-with-logits
+         huber-loss
+         l1-loss
          nll-loss)
 
 (provide state-dict
