@@ -274,7 +274,8 @@ basic blocks at @racket[base], twice, four and eight times that, the last
 three at stride 2, and the head. The default is ResNet-18 as the CIFAR-10
 literature shapes it, 11.2 million parameters; @racket[(ResNet #:base 16)]
 is the narrow one the tests and the parity twin train. Called on an
-@tt{[N 3 32 32]} batch it returns @tt{[N classes]} logits.
+@tt{[N 3 32 32]} batch it returns @tt{[N classes]} logits; any other rank
+or channel count is a contract violation, blamed on the caller.
 }
 
 @deftogether[(@defproc[(basic-block? [v any/c]) boolean?]

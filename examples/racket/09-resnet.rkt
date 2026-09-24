@@ -45,12 +45,14 @@ so the batch-norm layers normalise with their running statistics, and
 
 @bold{One step.} Cross-entropy on the logits, the backward pass outside the
 autocast extent as PyTorch recommends, then the optimizer and, when there
-is one, the schedule. Autocast is asked for only on CUDA: the CPU arm of
-the tests and the parity twin train in float32.
+is one, the schedule. Autocast is asked for only on CUDA, judged from the
+batch's own device: the CPU arm of the tests and the parity twin train in
+float32.
 
 @chunk[<r09-step>
-(define (train-step net opt xs ys device #:schedule [schedule #f])
+(define (train-step net opt xs ys #:schedule [schedule #f])
   (zero-grads! opt)
+  (define device (tensor-device xs))
   (define loss
     (if (eq? (device-type device) 'cuda)
         (with-autocast #:device device (cross-entropy (net xs) ys))
@@ -122,7 +124,7 @@ epochs reach 93 to 94 percent.
         (define augmented
           (random-horizontal-flip (random-crop xb #:padding 4 #:generator g)
                                   #:generator g))
-        (train-step net opt augmented yb device #:schedule schedule))
+        (train-step net opt augmented yb #:schedule schedule))
       (accuracy net test-x test-y))))]
 
 @chunk[<*>
