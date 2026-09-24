@@ -2,7 +2,8 @@
 
 (module+ test
   (require (only-in ffi/vector f64vector)
-           (only-in racket/file make-temporary-file)
+           (only-in json jsexpr->string string->jsexpr)
+           (only-in racket/file file->bytes make-temporary-file)
            (only-in rackunit check-equal? check-exn check-not-exn test-case)
            (only-in "../main.rkt" manual-seed! tensor tensor->list tensor-dtype
                     tensor-shape zeros)
@@ -43,6 +44,40 @@
                   'float32)
     (check-equal? (tensor-shape (tensor '((1 2) (3 4)) #:dtype 'float64))
                   '(2 2)))
+
+  (define (rewrite-header! path update)
+    (define raw (file->bytes path))
+    (define len (integer-bytes->integer raw #f #f 0 8))
+    (define header
+      (string->jsexpr (bytes->string/utf-8 raw #f 8 (+ 8 len))))
+    (define rewritten (string->bytes/utf-8 (jsexpr->string (update header))))
+    (call-with-output-file path #:exists 'truncate
+      (lambda (out)
+        (write-bytes (integer->integer-bytes (bytes-length rewritten) 8 #f #f)
+                     out)
+        (write-bytes rewritten out)
+        (write-bytes raw out (+ 8 len)))))
+
+  (test-case "a tag or payload the file cannot back fails before any copy"
+    (for ([damage (in-list (list (lambda (m) (hash-set m 'dtype "I32"))
+                                 (lambda (m) (hash-set m 'data_offsets '(0 4)))
+                                 (lambda (m)
+                                   (hash-set m 'data_offsets '(0 1000)))
+                                 (lambda (m) (hash-set m 'data_offsets '(0)))))]
+          [expected
+           (in-list
+            (list #rx"unsupported dtypes \\(key, dtype\\): '\\(\\(\"b.weight\" \"I32\"\\)\\)"
+                  #rx"payloads out of place.*\"b.weight\" \\(0 4\\) 16"
+                  #rx"payloads out of place.*\"b.weight\" \\(0 1000\\) 16"
+                  #rx"payloads out of place.*\"b.weight\" \\(0\\) 16"))])
+      (define-values (_model path) (saved-pair 2))
+      (rewrite-header! path (lambda (h) (hash-update h 'b.weight damage)))
+      (define target (Pair 2))
+      (define before (values-of target))
+      (check-exn expected (lambda () (load-state! target path)))
+      (check-equal? (values-of target) before
+                    "a.weight and a.bias precede the damage and stay put")
+      (delete-file path)))
 
   (test-case "strict loading names every missing and unexpected key at once"
     (define-values (_model path) (saved-pair 2))

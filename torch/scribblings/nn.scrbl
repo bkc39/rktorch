@@ -718,5 +718,7 @@ share are loaded and the result is two values: the missing keys in the
 model's order and the unexpected keys in alphabetical order.  An entry
 whose shape differs from the model's is an error in either mode, reported
 per key with both shapes, because equal element counts do not make shapes
-equal.
+equal.  So is an entry with a dtype tag outside the list above, or whose
+@tt{data_offsets} do not span exactly the bytes its dtype and shape need
+inside the file, so a damaged checkpoint leaves the model as it was.
 }
