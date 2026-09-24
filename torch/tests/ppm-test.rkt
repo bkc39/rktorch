@@ -89,7 +89,19 @@
                   "values past the range clamp")
     (check-equal? (subbytes (written (to-dtype (full 9.0 3 1 2) 'uint8)) 11)
                   (bytes 9 9 9 9 9 9)
-                  "uint8 passes through"))
+                  "uint8 passes through")
+    (for ([half (in-list '(float16 bfloat16))])
+      (check-equal? (subbytes (written (to-dtype image half)) 11)
+                    (bytes 255 0 0 0 255 0 0 0 255 255 255 255)
+                    (format "a ~a image quantizes like float32" half))
+      (check-equal? (subbytes (written (to-dtype (full 0.0005 3 1 1) half)
+                                       #:range '(0 1e-3))
+                              11)
+                    (bytes 128 128 128)
+                    (format "~a takes a scale past its own range" half))
+      (check-equal? (tensor-dtype (image-grid (to-dtype (full 9.0 2 3 2 2) half)))
+                    half
+                    (format "a ~a batch grids in its dtype" half))))
 
   (test-case "image-grid and write-ppm: contracts on the batch, the image and the range"
     (check-exn #rx"non-empty-image-batch"
@@ -124,6 +136,9 @@
                                                  (+ 3 (expt 2 53))))))
     (check-exn #rx"scale must be a number in the image's dtype"
                (lambda () (written (zeros 3 2 2) #:range '(0 1e-38))))
+    (check-exn #rx"scale must be a number in the image's dtype"
+               (lambda () (written (to-dtype (zeros 3 2 2) 'bfloat16)
+                                   #:range '(0 1e-38))))
     (check-equal? (bytes-length (written (to-dtype (zeros 3 2 2) 'float64)
                                          #:range '(0 1e-38)))
                   (+ 11 12)
