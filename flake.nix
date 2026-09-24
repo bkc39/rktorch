@@ -303,8 +303,9 @@
                   failed=1
                 fi
               # generated/ shards are exempt: their size is the generator's
-              # concern, not a hand-maintainability gate.
-              done < <(find . -type f \( -name '*.c' -o -name '*.h' -o -name '*.hpp' -o -name '*.cpp' \) -not -path '*/generated/*')
+              # concern, not a hand-maintainability gate; so is vendored
+              # third_party/ code, whose size is upstream's.
+              done < <(find . -type f \( -name '*.c' -o -name '*.h' -o -name '*.hpp' -o -name '*.cpp' \) -not -path '*/generated/*' -not -path '*/third_party/*')
               if [ "$failed" -ne 0 ]; then
                 exit 1
               fi

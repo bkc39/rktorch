@@ -37,9 +37,11 @@ target_sources(torchrkt
     src/torchrkt/autograd.cpp
     src/torchrkt/creation.cpp
     src/torchrkt/detail/error.cpp
+    src/torchrkt/detail/stb_image.c
     src/torchrkt/device.cpp
     src/torchrkt/elementwise.cpp
     src/torchrkt/global.cpp
+    src/torchrkt/image.cpp
     src/torchrkt/linalg.cpp
     src/torchrkt/random.cpp
     src/torchrkt/reduce.cpp
@@ -75,8 +77,11 @@ if(EXISTS "${TORCHRKT_TORCH_LIBDIR}/libtorch_cuda.so")
 endif()
 
 # Treat libtorch headers as system headers so -Wall/-Wextra/-Wpedantic report
-# only our own code, not ATen's.
-target_include_directories(torchrkt SYSTEM PRIVATE ${TORCH_INCLUDE_DIRS})
+# only our own code, not ATen's; the same for the vendored stb_image.
+target_include_directories(torchrkt SYSTEM PRIVATE
+  ${TORCH_INCLUDE_DIRS}
+  ${CMAKE_CURRENT_SOURCE_DIR}/third_party/stb
+)
 target_link_libraries(torchrkt PRIVATE ${TORCH_LIBRARIES} PkgConfig::SNDFILE)
 
 # libtorch ships ABI flags (notably -D_GLIBCXX_USE_CXX11_ABI=...) that our TUs
@@ -120,6 +125,7 @@ if(BUILD_TESTING)
     tests/torchrkt/generated_tranche5_test.cpp
     tests/torchrkt/generated_tranche6_test.cpp
     tests/torchrkt/generated_tranche7_test.cpp
+    tests/torchrkt/image_test.cpp
     tests/torchrkt/ops_test.cpp
     tests/torchrkt/random_test.cpp
     tests/torchrkt/spectral_test.cpp

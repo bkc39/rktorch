@@ -1,14 +1,16 @@
 #lang scribble/manual
 
-@(require (for-label racket/base
+@(require "common.rkt"
+          (for-label racket/base
                      racket/contract
                      (only-in torch cuda-if-available device/c draw-seed generator?
-                              make-generator randn-like tensor?
-                              upsample-nearest2d)
+                              make-generator matmul randn-like tensor?
+                              to-dtype upsample-nearest2d)
                      torch/data/loader
                      (only-in torch/nn Conv2d Dropout Embedding GroupNorm Linear
                               define-layer)
                      torch/vision/cifar10
+                     torch/vision/image
                      torch/vision/ppm
                      torch/vision/resnet
                      torch/vision/transforms
@@ -203,9 +205,100 @@ The class count @racket[net] was built with, also its null label, or
 
 @defmodule[torch/vision/transforms]
 
-Augmentation on an image batch where it lives: each transform takes an
-@tt{[N C H W]} tensor and returns one of the same shape on the same
-device. The random choices are per image, drawn on the host from a Racket
+The preprocessing a pretrained network expects, and augmentation on an
+image batch where it lives. Every transform returns a tensor on its
+input's device.
+
+@torch-examples[
+(require torch/vision/image torch/vision/transforms)
+(define photo
+  (read-image (collection-file-path "smooth-401x299.jpg"
+                                    "torch" "vision" "fixtures" "images")))
+(tensor-shape photo)
+(define x
+  (imagenet-normalize
+   (center-crop (resize (convert-image-dtype photo) 256) 224)))
+(tensor-shape x)
+]
+
+The first four are torchvision's @tt{transforms.functional} of the same
+names and take an image, @tt{[C H W]}, or a batch, @tt{[N C H W]}.
+
+@defproc[(convert-image-dtype [x tensor?]
+                              [dtype (or/c 'uint8 'float16 'bfloat16
+                                           'float32 'float64)
+                                     'float32])
+         tensor?]{
+@racket[x] as @racket[dtype], rescaled between the two conventions for
+pixels: a @racket['uint8] image holds 0 to 255, a float one 0 to 1. So a
+decoded image divides by 255 on the way to a float dtype, and a float
+image multiplies by @racket[255.999] and truncates on the way back, which
+lands 1.0 on 255 and nothing past it. Between two float dtypes it is
+@racket[to-dtype]; to its own dtype it is @racket[x] itself.
+}
+
+@defproc[(resize [x tensor?]
+                 [size (or/c exact-positive-integer?
+                             (list/c exact-positive-integer?
+                                     exact-positive-integer?))]
+                 [#:antialias? antialias? boolean? #t])
+         tensor?]{
+Resamples the float image or batch @racket[x] to @racket[size]
+bilinearly. A pair is the new height and width; a single number is the
+new length of the shorter side, the longer one scaled to keep the aspect
+ratio and truncated, so @tt{[3 299 401]} resized to 256 is
+@tt{[3 256 343]}. With @racket[antialias?], the default as in
+torchvision, a downscale widens the triangle filter to the scale factor
+the way Pillow does, so every input pixel contributes; without it each
+output pixel interpolates the two inputs nearest its centre, which aliases
+when shrinking by more than two. Either way the result is
+@tt{F.interpolate(mode="bilinear", align_corners=False)} to within float
+rounding.
+
+The resampling is two matrix products, one per axis, with weights
+computed on the host, rather than ATen's upsampling kernel: it is
+differentiable, it runs on any device @racket[matmul] does, and it needs
+no optional-float argument, which the generated surface does not yet
+marshal. The half dtypes are resampled in float32 and narrowed back. A
+@racket['uint8] image is a contract violation: convert it first, as
+above.
+}
+
+@defproc[(center-crop [x tensor?]
+                      [size (or/c exact-positive-integer?
+                                  (list/c exact-positive-integer?
+                                          exact-positive-integer?))])
+         tensor?]{
+The central @racket[size] window of @racket[x], of any dtype, a view on
+its storage. A pair is the height and width, a single number a square.
+The window's offset is half the difference rounded to even, as Python's
+@tt{round} does in torchvision. A window larger than the image is a
+contract violation, where torchvision would pad.
+}
+
+@defproc[(normalize [x tensor?]
+                    [mean (listof real?)]
+                    [std (listof (and/c real? positive?))])
+         tensor?]{
+Subtracts @racket[mean] and divides by @racket[std], one value per
+channel of the float image or batch @racket[x].
+}
+
+@deftogether[(@defthing[imagenet-mean (listof real?)]
+              @defthing[imagenet-std (listof real?)])]{
+The per-channel statistics the torchvision ImageNet weights were trained
+with, @racket['(0.485 0.456 0.406)] and @racket['(0.229 0.224 0.225)].
+}
+
+@defproc[(imagenet-normalize [x tensor?]) tensor?]{
+@racket[(normalize x imagenet-mean imagenet-std)] for a three-channel
+float image or batch in @tt{[0, 1]}, the input every pretrained
+torchvision classifier expects after @racket[resize] to 256 and
+@racket[center-crop] to 224.
+}
+
+The two random transforms take an @tt{[N C H W]} batch and return one of
+the same shape. The random choices are per image, drawn on the host from a Racket
 generator that one @racket[draw-seed] from the torch generator seeds per
 batch, so a loader built on @racket[(make-generator 0)] replays its
 augmentation as well as its batch order. They are the transform's own
@@ -281,6 +374,47 @@ or channel count is a contract violation, blamed on the caller.
 @deftogether[(@defproc[(basic-block? [v any/c]) boolean?]
               @defproc[(resnet? [v any/c]) boolean?])]{
 The predicates.
+}
+
+@section{Reading images}
+
+@defmodule[torch/vision/image]
+
+JPEG and PNG decoding into a @racket['uint8] tensor of shape
+@tt{[C H W]}, torchvision's @tt{decode_image} layout. The decoder is
+@hyperlink["https://github.com/nothings/stb"]{stb_image}, compiled into
+the native library with only those two formats, so reading an image adds
+no system dependency.
+
+A PNG decodes to exactly the pixels torchvision's decoder returns. A
+JPEG differs from libjpeg-turbo's decoding by a count or two in places,
+because the two decoders use different inverse transforms and chroma
+upsampling. Baseline and progressive JPEGs decode; arithmetic-coded and
+12-bit ones do not. A 16-bit PNG is reduced to 8 bits. EXIF orientation
+is ignored, as it is by @tt{decode_image} by default.
+
+@defproc[(decode-image [bs bytes?]
+                       [#:mode mode (or/c 'unchanged 'gray 'gray-alpha
+                                          'rgb 'rgba)
+                               'unchanged]
+                       [#:device device (or/c #f device/c) #f])
+         tensor?]{
+Decodes the encoded image @racket[bs], which must not be empty, on the
+CPU and moves it to @racket[device], or else to the default device.
+@racket['unchanged] keeps the channels the file stores, except that a
+palette PNG comes back as RGB, or RGBA with a transparency chunk; the
+other modes convert to one, two, three or four channels, the way
+torchvision's @tt{ImageReadMode} does. What is not a JPEG or a PNG, or is
+truncated, is an error naming the reason.
+}
+
+@defproc[(read-image [path path-string?]
+                     [#:mode mode (or/c 'unchanged 'gray 'gray-alpha
+                                        'rgb 'rgba)
+                             'unchanged]
+                     [#:device device (or/c #f device/c) #f])
+         tensor?]{
+@racket[decode-image] on the contents of the file at @racket[path].
 }
 
 @section{Images}
