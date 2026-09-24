@@ -81,6 +81,49 @@
       (check-equal? (tensor->list (grad p))
                     (map (lambda (_) 0.0) (tensor->list p)))))
 
+  (test-case "sgd momentum, Nesterov and weight decay follow torch.optim.SGD"
+    ;; loss = sum(w): the gradient is 1 everywhere, so the update is the
+    ;; buffer arithmetic alone
+    (define (trained #:momentum [mu 0.0] #:nesterov? [nesterov? #f]
+                     #:weight-decay [wd 0.0] #:steps [steps 2])
+      (define w (Parameter (ones 2)))
+      (define opt (sgd (list w) #:lr 0.1 #:momentum mu #:nesterov? nesterov?
+                       #:weight-decay wd))
+      (for ([_ (in-range steps)])
+        (zero-grads! opt)
+        (backward! (sum w))
+        (step! opt))
+      (car (tensor->list w)))
+    (check-= (trained) 0.8 1e-6 "plain: two steps of lr")
+    ;; buffers 1 then 1.9: 1 - 0.1 - 0.19
+    (check-= (trained #:momentum 0.9) 0.71 1e-6)
+    ;; Nesterov looks ahead: 1 + 0.9 * 1 = 1.9 on the first step already
+    (check-= (trained #:momentum 0.9 #:nesterov? #t #:steps 1) 0.81 1e-6)
+    ;; decay adds wd * w to the gradient: 1 + 0.5 * 1 = 1.5 on the first step
+    (check-= (trained #:weight-decay 0.5 #:steps 1) 0.85 1e-6)
+    (check-exn #rx"Nesterov momentum requires a momentum"
+               (lambda () (sgd (list (Parameter (ones 1))) #:lr 0.1
+                               #:nesterov? #t))))
+
+  (test-case "rmsprop divides by the root of the running square average"
+    (define w (Parameter (ones 2)))
+    (define opt (rmsprop (list w) #:lr 0.01))
+    (check-true (rmsprop? opt))
+    (zero-grads! opt)
+    (backward! (sum w))
+    (step! opt)
+    ;; v = 0.01, sqrt v = 0.1: the first step moves by lr * 1 / 0.1
+    (check-= (car (tensor->list w)) 0.9 1e-5)
+    (define m (Parameter (ones 2)))
+    (define with-momentum (rmsprop (list m) #:lr 0.01 #:momentum 0.5))
+    (zero-grads! with-momentum)
+    (backward! (sum m))
+    (step! with-momentum)
+    (check-= (car (tensor->list m)) 0.9 1e-5 "the buffer starts at zero")
+    (check-= (learning-rate opt) 0.01 0.0)
+    (set-learning-rate! opt 0.02)
+    (check-= (learning-rate opt) 0.02 0.0))
+
   (test-case "Conv2d layer: param shapes, names, predicate, forward shape"
     (manual-seed! 0)
     (define c (Conv2d 1 8 3 #:stride 1 #:padding 1))

@@ -175,9 +175,11 @@ per `foreign/operators.rkt`.
 From `torch/nn`: `define-layer procedure->Layer gen:layer layer? Parameter Buffer LayerList LayerHash parameters
 named-parameters buffers children forward Linear Conv2d MaxPool2d Flatten Dropout
 Sequential Embedding LayerNorm ConvTranspose2d GroupNorm BatchNorm2d BatchNorm1d
-LSTM GRU sgd adam step! zero-grads! clip-grad-norm! ema ema-update! ema-average
-cross-entropy nll-loss mse-loss binary-cross-entropy-with-logits huber-loss
-l1-loss kaiming-uniform uniform-init normal-init fan-in`. The functional
+LSTM GRU sgd adam rmsprop step! zero-grads! clip-grad-norm! learning-rate
+set-learning-rate! step-lr multi-step-lr exponential-lr cosine-annealing-lr
+linear-lr one-cycle-lr lambda-lr ema ema-update! ema-average cross-entropy
+nll-loss mse-loss binary-cross-entropy-with-logits huber-loss l1-loss
+kaiming-uniform uniform-init normal-init fan-in`. The functional
 transformer primitives (`gelu tril triu masked-fill embedding layer-norm`,
 tranche 3, #22), the UNet ones (`conv-transpose2d group-norm silu
 clamp`, tranche 4, #84; `upsample-nearest2d` over `repeat_interleave`, tranche
