@@ -34,7 +34,8 @@
            (only-in syntax/macro-testing convert-compile-time-error)
            (submod ".." layers)
            (only-in "../main.rkt" randn tensor-shape)
-           "../nn.rkt")
+           "../nn.rkt"
+           (only-in "../vision/resnet.rkt" ResNet))
 
   (define ((message-matching pattern) e)
     (and (exn:fail:contract? e)
@@ -80,6 +81,22 @@
                (lambda () (Sequential (Linear 2 2) 'not-a-module)))
     (check-exn blames-this-test
                (lambda () (Sequential (Linear 2 2) 'not-a-module))))
+
+  (test-case "an unbatched or grey image blames ResNet, not a layer inside it"
+    (define net (ResNet #:base 4))
+    (check-exn #rx"^ResNet: contract violation"
+               (lambda () (net (randn 3 32 32))))
+    (check-exn #rx"expected: rgb-image-batch"
+               (lambda () (net (randn 3 32 32))))
+    (check-exn #rx"^ResNet: contract violation"
+               (lambda () (net (randn 2 1 32 32))))
+    (check-equal? (tensor-shape (net (randn 2 3 32 32))) '(2 10)))
+
+  (test-case "ResNet's #:blocks is one depth per stage, so exactly four"
+    (check-exn #rx"^ResNet: contract violation"
+               (lambda () (ResNet #:blocks '(2 2 2))))
+    (check-exn #rx"^ResNet: contract violation"
+               (lambda () (ResNet #:blocks '(2 2 2 2 2)))))
 
   (test-case "the exported predicate is the lowercase name"
     (check-true (linear? (Linear 4 3)))

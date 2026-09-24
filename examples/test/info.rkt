@@ -19,5 +19,6 @@
     ("06-gpt.rkt" 300)
     ("07-asr.rkt" 300)
     ("08-diffusion.rkt" 600)
+    ("09-resnet.rkt" 600)
     ("12-char-rnn.rkt" 300)
     ("13-translation.rkt" 600)))

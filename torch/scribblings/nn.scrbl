@@ -137,21 +137,28 @@ is allowed only at module level.
 @racketblock[
 (define-layer Conv2d (kernel-size stride padding weight bias)
   #:contract (->* [exact-positive-integer? exact-positive-integer? pos-size/c]
-                  [#:stride pos-size/c #:padding nonneg-size/c]
+                  [#:stride pos-size/c #:padding nonneg-size/c
+                   #:bias? boolean?]
                   conv2d?)
   #:init (in-channels out-channels kernel-size
           #:stride [stride 1]
-          #:padding [padding 0])
+          #:padding [padding 0]
+          #:bias? [bias? #t])
   (set! kernel-size (->2d kernel-size))
   (set! stride (->2d stride))
   (set! padding (->2d padding))
   (define shape
     (list out-channels in-channels (car kernel-size) (cadr kernel-size)))
   (set! weight (Parameter (kaiming-uniform shape)))
-  (set! bias (Parameter (uniform-init (list out-channels) -0.1 0.1)))
+  (set! bias
+        (and bias? (Parameter (uniform-init (list out-channels) -0.1 0.1))))
   #:forward (x)
   (conv2d x weight #:bias bias #:stride stride #:padding padding))
 ]
+
+@racket[#:bias?] is @racket[#f] where a batch norm follows, as in
+@racket[ResNet]: the normalization's shift subsumes the bias, so the
+field holds @racket[#f] and no @tt{bias} entry reaches the state dict.
 
 A container is a layer whose children arrive as a named collection
 rather than one per field.  It builds them with

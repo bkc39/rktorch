@@ -36,11 +36,13 @@
 
 (define-layer Conv2d (kernel-size stride padding weight bias) ;; noqa
   #:contract (->* [exact-positive-integer? exact-positive-integer? pos-size/c]
-                  [#:stride pos-size/c #:padding nonneg-size/c]
+                  [#:stride pos-size/c #:padding nonneg-size/c
+                   #:bias? boolean?]
                   conv2d?)
   #:init (in-channels out-channels kernel-size
           #:stride [stride 1]
-          #:padding [padding 0])
+          #:padding [padding 0]
+          #:bias? [bias? #t])
   (set! kernel-size (->2d kernel-size))
   (set! stride (->2d stride))
   (set! padding (->2d padding))
@@ -49,8 +51,11 @@
   ;; weight before bias: nn.Conv2d.reset_parameters' RNG draw order
   (set! weight (Parameter (kaiming-uniform shape)))
   (set! bias
-        (let ([bound (/ 1.0 (sqrt (fan-in shape)))])
-          (Parameter (uniform-init (list out-channels) (- bound) bound))))
+        (cond
+          [bias?
+           (define bound (/ 1.0 (sqrt (fan-in shape))))
+           (Parameter (uniform-init (list out-channels) (- bound) bound))]
+          [else #f]))
   #:forward (x)
   (conv2d x weight #:bias bias #:stride stride #:padding padding))
 

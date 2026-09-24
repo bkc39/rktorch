@@ -10,6 +10,7 @@
                               define-layer)
                      torch/vision/cifar10
                      torch/vision/ppm
+                     torch/vision/resnet
                      torch/vision/transforms
                      torch/vision/diffusion))
 
@@ -238,6 +239,48 @@ Pads every image of the rank-4 batch @racket[x] with @racket[padding] zero
 pixels on each side and cuts a window of the original size at a per-image
 offset, torchvision's @tt{RandomCrop(32, padding=4)} for CIFAR-10. With
 @racket[padding] 0 it is the identity.
+}
+
+@section{ResNet}
+
+@defmodule[torch/vision/resnet]
+
+The residual network for 32x32 images: a 3x3 stem in place of ImageNet's
+7x7 stem and max-pool, four stages of basic blocks doubling the width and
+halving the resolution, global average pooling and a linear head. Every
+convolution is bias-free, as its batch norm absorbs the bias. The training
+loop is @filepath{examples/racket/09-resnet.rkt}.
+
+@defproc[(BasicBlock [in exact-positive-integer?]
+                     [out exact-positive-integer?]
+                     [#:stride stride exact-positive-integer? 1])
+         basic-block?]{
+Two 3x3 convolutions with batch norm and a ReLU between, added to the
+input and passed through a ReLU; when the stride or the width changes, a
+1x1 convolution with batch norm projects the input first, and otherwise the
+shortcut is the identity with no parameters of its own, as torchvision.
+}
+
+@defproc[(ResNet [#:classes classes exact-positive-integer? 10]
+                 [#:base base exact-positive-integer? 64]
+                 [#:blocks blocks (list/c exact-positive-integer?
+                                          exact-positive-integer?
+                                          exact-positive-integer?
+                                          exact-positive-integer?)
+                                   '(2 2 2 2)])
+         resnet?]{
+The stem at @racket[base] channels, then four stages of @racket[blocks]
+basic blocks at @racket[base], twice, four and eight times that, the last
+three at stride 2, and the head. The default is ResNet-18 as the CIFAR-10
+literature shapes it, 11.2 million parameters; @racket[(ResNet #:base 16)]
+is the narrow one the tests and the parity twin train. Called on an
+@tt{[N 3 32 32]} batch it returns @tt{[N classes]} logits; any other rank
+or channel count is a contract violation, blamed on the caller.
+}
+
+@deftogether[(@defproc[(basic-block? [v any/c]) boolean?]
+              @defproc[(resnet? [v any/c]) boolean?])]{
+The predicates.
 }
 
 @section{Images}

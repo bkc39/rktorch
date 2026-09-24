@@ -136,6 +136,18 @@
     (check-equal? (tensor-shape (c (randn 4 1 28 28))) '(4 8 28 28))
     (check-equal? (object-name c) 'Conv2d))
 
+  (test-case "Conv2d without a bias draws the weight alone"
+    (manual-seed! 0)
+    (define with-bias (Conv2d 1 8 3))
+    (manual-seed! 0)
+    (define bare (Conv2d 1 8 3 #:bias? #f))
+    (check-equal? (map tensor-shape (parameters bare)) '((8 1 3 3)))
+    (check-equal? (map car (named-parameters bare)) '("weight"))
+    (check-equal? (tensor->list (car (parameters bare)))
+                  (tensor->list (car (parameters with-bias)))
+                  "the same weight draw")
+    (check-equal? (tensor-shape (bare (randn 2 1 8 8))) '(2 8 6 6)))
+
   (test-case "Conv2d non-square kernel + per-axis padding"
     (manual-seed! 0)
     (define c (Conv2d 3 6 '(3 5) #:padding '(1 2)))
