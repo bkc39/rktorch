@@ -5,17 +5,18 @@
                      racket/contract
                      (only-in torch relu shape tensor? zeros)
                      (only-in torch/nn
-                              Conv2d Dropout Linear Sequential adam adam?
+                              Conv2d Dropout Linear Sequential
                               define-layer layer? mse-loss named-parameters
-                              parameters sgd sgd? step! zero-grads!)))
+                              parameters)))
 
-@title{Built-in layers, optimizers and losses}
+@title{Built-in layers and losses}
 
 @defmodule[torch/nn #:link-target? #f]
 
-The concrete layers the library ships, and the machinery that trains them.
-@racket[define-layer], the interface they implement, and the container
-forms are described in @secref["Layers"].
+The concrete layers and losses the library ships. @racket[define-layer],
+the interface the layers implement, and the container forms are described
+in @secref["Layers"]; the optimizers and learning-rate schedules that
+train them are in @secref["Optimizers and schedules"].
 
 @section{Layer constructors}
 
@@ -85,43 +86,6 @@ its own separator: @racket["enc."] gives @racket["enc.fc1.weight"].
 
 @defproc[(layer? [v any/c]) boolean?]{
 Whether @racket[v] implements the layer interface.}
-
-@section{Optimizers}
-
-An optimizer holds the parameters it is responsible for and the rule for
-updating them.
-
-@defproc[(sgd [params (listof tensor?)] [#:lr lr real?]) sgd?]{
-Stochastic gradient descent: each parameter moves against its gradient by
-@racket[lr].}
-
-@defproc[(adam [params (listof tensor?)]
-               [#:lr lr real? 0.001]
-               [#:beta1 beta1 real? 0.9]
-               [#:beta2 beta2 real? 0.999]
-               [#:eps eps real? 1e-8])
-         adam?]{
-Adam, with PyTorch's defaults.}
-
-@deftogether[(@defproc[(sgd? [v any/c]) boolean?]
-              @defproc[(adam? [v any/c]) boolean?])]{
-Predicates for the two optimizers.}
-
-@margin-note{@racket[step!] and @racket[zero-grads!] accept any optimizer.
-Their contract names @tt{optimizer?}, a predicate defined in
-@tt{torch/nn/optim} and not re-exported from @racketmodname[torch/nn], so
-it is written @racket[any/c] here; each of @racket[sgd?] and
-@racket[adam?] implies it.}
-
-@defproc[(step! [opt any/c]) void?]{
-Applies one update to every parameter the optimizer holds, from the
-gradients currently accumulated.}
-
-@defproc[(zero-grads! [opt any/c]) void?]{
-Clears the gradient of every parameter the optimizer holds. Note that it
-takes the @emph{optimizer}, not the parameter list. Because gradients
-accumulate, a training loop that omits this descends using the sum of every
-gradient computed so far.}
 
 @section{Losses}
 
