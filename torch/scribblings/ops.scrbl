@@ -5,7 +5,8 @@
                                 abs cos exp log sin sort sqrt max min length
                                 + - * /)
                      racket/contract
-                     torch))
+                     torch
+                     (only-in torch/data/loader dataloader define-dataset)))
 
 @title{Operations on tensors}
 
@@ -31,6 +32,22 @@ A view with the two named axes exchanged.
 @defidform[t]{
 A terse alias for @racket[transpose], taking the same three arguments. See
 also @racket[T], which reverses every axis.}
+
+@defproc[(T [x tensor?]) tensor?]{
+A view with every dimension in reverse order, matching Python's @tt{x.T}. A
+matrix of shape @tt{[M, N]} becomes @tt{[N, M]}; a tensor of shape
+@tt{[B, H, S, D]} becomes @tt{[D, S, H, B]}. Scalars and vectors keep their
+shapes. Storage is shared with @racket[x], and gradients propagate through
+the view.
+
+@torch-examples[
+(T (tensor '((1 2 3) (4 5 6))))
+]
+
+For batched attention keys, @racket[(transpose keys -2 -1)] swaps only the
+last two dimensions, as Python's @tt{keys.mT} does, where @racket[T]
+reverses every axis. PyTorch deprecates @tt{.T} for tensors whose rank is
+not two; @racket[T] supports every rank without a warning.}
 
 @section{Arithmetic}
 
@@ -91,18 +108,41 @@ The arithmetic mean of every element, as a one-element tensor.
 @margin-note{Neither takes an axis argument yet: both are whole-tensor
 reductions, where PyTorch's @tt{sum} and @tt{mean} accept a @tt{dim}.}
 
+@section{Length}
+
+@defproc[(length [v sized?]) exact-nonnegative-integer?]{
+Python's @tt{len}, shadowing @racketmodname[racket/base]'s @racket[length]
+the way @racket[+] is shadowed: a list, vector, string or hash answers what
+it always did, a tensor answers its first dimension, and a dataset or
+loader answers its number of items or batches.
+
+@torch-examples[
+(length '(1 2 3))
+(length (zeros 4 2))
+]
+
+A rank-zero tensor has no length, as @tt{len} of a 0-d tensor raises.}
+
+@defproc[(sized? [v any/c]) boolean?]{
+Recognises anything @racket[length] accepts.}
+
+@defthing[gen:sized any/c]{
+The generic behind @racket[length], with that one method. A structure
+implements it with @racket[#:methods]; @racket[define-dataset] does so for
+every dataset, which is what lets @racket[length] answer a
+@racket[dataloader].}
+
 @section{Shadowed names}
 
 A few operations share a name with @racketmodname[racket/base]. Each is
 generic: a tensor argument dispatches to libtorch, and anything else defers
 to the binding @racketmodname[racket/base] provides, so requiring
 @racketmodname[torch] never breaks numeric code that was already in the
-module.
+module. @racket[length], above, is the same kind of generic.
 
 @deftogether[(@defidform[abs] @defidform[cos] @defidform[exp]
               @defidform[log] @defidform[sin] @defidform[sqrt]
-              @defidform[max] @defidform[min] @defidform[sort]
-              @defidform[length])]{
+              @defidform[max] @defidform[min] @defidform[sort])]{
 Generic over tensors and the values @racketmodname[racket/base] accepts.}
 
 @deftogether[(@defidform[+] @defidform[-] @defidform[*] @defidform[/])]{

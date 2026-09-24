@@ -1,6 +1,6 @@
 #lang scribble/manual
 
-@title[#:tag "guide"]{Guide}
+@title[#:tag "guide" #:style 'toc]{Guide}
 
 A narrative tour of the library, in the order you meet it: a tensor, the
 gradients it tracks, a layer, and the loop that puts the three together.
@@ -16,3 +16,4 @@ know PyTorch's API.
 @include-section["guide/autograd.scrbl"]
 @include-section["guide/layers.scrbl"]
 @include-section["guide/training.scrbl"]
+@include-section["guide/examples.scrbl"]

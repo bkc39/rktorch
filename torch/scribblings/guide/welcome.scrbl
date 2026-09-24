@@ -6,7 +6,7 @@
                      torch
                      torch/nn))
 
-@title[#:tag "welcome"]{Welcome to rktorch}
+@title[#:tag "guide-welcome"]{Welcome to rktorch}
 
 If you know PyTorch, most of what you know transfers: the dtypes, the
 broadcasting rules, the autograd engine and the kernels are the same ones.
@@ -90,7 +90,7 @@ instead of to @racketmodname[torch], which is why
 
 @section[#:tag "welcome-next"]{Where to go next}
 
-@secref["tensors"] covers building tensors and operating on them.
-@secref["autograd"] introduces the gradients that make training possible,
-@secref["layers"] the models that hold parameters, and
-@secref["training"] the loop that fits one to data.
+@secref["guide-tensors"] covers building tensors and operating on them.
+@secref["guide-autograd"] introduces the gradients that make training possible,
+@secref["guide-layers"] the models that hold parameters, and
+@secref["guide-training"] the loop that fits one to data.

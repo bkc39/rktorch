@@ -3,7 +3,7 @@
 @(require (for-label (except-in racket/base abs cos exp log sin sort sqrt max min length + - * /)
                      torch torch/nn))
 
-@section[#:tag "ex-gpt"]{Training a char-GPT on Heart of Darkness}
+@title[#:tag "ex-gpt"]{Training a char-GPT on Heart of Darkness}
 
 The v3 capstone: a decoder-only transformer language model over characters,
 trained on Joseph Conrad's @emph{Heart of Darkness} (Project Gutenberg #219).

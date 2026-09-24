@@ -3,7 +3,7 @@
 @(require (for-label (except-in racket/base abs cos exp log sin sort sqrt max min length + - * /)
                      torch torch/nn torch/data/loader torch/data/translation))
 
-@section[#:tag "ex-translation"]{Translating French with a GRU and attention}
+@title[#:tag "ex-translation"]{Translating French with a GRU and attention}
 
 The sequence-to-sequence model of the PyTorch tutorial, which is also
 ocaml-torch's @tt{translation} example: a @racket[GRU] encoder reads a French

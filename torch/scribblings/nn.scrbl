@@ -528,7 +528,7 @@ The decay @racket[e] was built with.
 Whether @racket[v] is an average built by @racket[ema].
 }
 
-@section{Optimizers and schedules}
+@section[#:tag "optimizers"]{Optimizers and schedules}
 
 An optimizer holds a list of parameters and answers to @racket[step!] and
 @racket[zero-grads!]; every one keeps its state in place on the parameter's

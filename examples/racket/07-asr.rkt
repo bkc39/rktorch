@@ -3,7 +3,7 @@
 @(require (for-label (except-in racket/base abs cos exp log sin sort sqrt max min length + - * /)
                      torch torch/nn))
 
-@section[#:tag "ex-asr"]{Speech to text on LibriSpeech with CTC and attention}
+@title[#:tag "ex-asr"]{Speech to text on LibriSpeech with CTC and attention}
 
 The speech capstone: a hybrid CTC/attention recognizer over LibriSpeech
 utterances, the whole arc composed --- FLAC decode

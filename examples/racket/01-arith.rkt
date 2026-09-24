@@ -3,7 +3,7 @@
 @(require (for-label (except-in racket/base abs cos exp log sin sort sqrt max min length + - * /)
                      torch))
 
-@section[#:tag "ex-arith"]{Building tensors and elementwise arithmetic}
+@title[#:tag "ex-arith"]{Building tensors and elementwise arithmetic}
 
 Tensors are usually built from data, not sampled: @racket[tensor] takes a
 nested list, infers the shape from the nesting (here 2x2), and copies the

@@ -6,7 +6,7 @@
                      torch
                      torch/nn))
 
-@title[#:tag "tensors"]{Tensors}
+@title[#:tag "guide-tensors"]{Tensors}
 
 A @deftech{tensor} is a rectangular array of numbers with a single element
 type, living on a single device. Everything else in the library is built on

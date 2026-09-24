@@ -16,7 +16,7 @@
 The concrete layers and losses the library ships. @racket[define-layer],
 the interface the layers implement, and the container forms are described
 in @secref["Layers"]; the optimizers and learning-rate schedules that
-train them are in @secref["Optimizers and schedules"].
+train them are in @secref["optimizers"].
 
 @section{Layer constructors}
 

@@ -6,7 +6,7 @@
                      torch
                      torch/nn))
 
-@title[#:tag "autograd"]{Automatic differentiation}
+@title[#:tag "guide-autograd"]{Automatic differentiation}
 
 Training a model means nudging its numbers in the direction that reduces a
 loss. Finding that direction by hand is the part nobody wants to do, so the
@@ -41,7 +41,7 @@ The function here is @tt{y = x₁² + x₂²}, whose derivative is @tt{2x}. At
 
 @margin-note{Gradients @emph{accumulate}: calling @racket[backward!] again
 adds to what @racket[grad] already holds rather than replacing it. This is
-why a training loop clears them every step --- see @secref["training"].}
+why a training loop clears them every step --- see @secref["guide-training"].}
 
 @section[#:tag "autograd-no-grad"]{Turning it off}
 

@@ -3,7 +3,7 @@
 @(require (for-label (except-in racket/base abs cos exp log sin sort sqrt max min length + - * /)
                      torch torch/nn))
 
-@section[#:tag "ex-mnist"]{Training a convnet on MNIST}
+@title[#:tag "ex-mnist"]{Training a convnet on MNIST}
 
 The v2 capstone: a LeNet-ish convolutional network --- two
 @racket[Conv2d]/@racket[max-pool2d] stages into two @racket[Linear] layers ---
