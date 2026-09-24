@@ -9,7 +9,7 @@
          (only-in "../foreign/contracts.rkt" image-batch/c)
          (only-in "../private/contract.rkt" define/contract-out))
 
-(define ppm-dtypes '(float32 float64 uint8))
+(define ppm-dtypes '(float16 bfloat16 float32 float64 uint8))
 
 (define image/c
   (flat-named-contract
@@ -36,12 +36,13 @@
        (let ([scale (/ 255.0 span)])
          (and (rational? scale) (positive? scale)))))
 
-;; float32 carries the scale for a float32 image: a span small enough to
-;; make it overflow there writes every pixel white
+;; ATen applies the scale in float32 arithmetic for a float32 image and
+;; for the half dtypes, whose kernels compute in float32: a span small
+;; enough to make it overflow there writes every pixel white
 (define (scale-fits? value-range dtype)
   (define span (- (exact->inexact (cadr value-range))
                   (exact->inexact (car value-range))))
-  (or (not (eq? dtype 'float32))
+  (or (memq dtype '(float64 uint8))
       (<= (/ 255.0 span) 3.4028234663852886e38)))
 
 (define value-range/c

@@ -324,8 +324,9 @@ image is quantized the way torchvision's @tt{save_image} does, with
 @racket[range] naming the values that map to 0 and 255, its first below
 its second and both finite, so a dataset in @tt{[-1, 1]} passes
 @racket['(-1 1)]; a uint8
-image is written as it is. @racket[image] is a @racket['float32],
-@racket['float64] or @racket['uint8] tensor: an integer or boolean one
+image is written as it is. @racket[image] is a float tensor, one of
+@racket['float16], @racket['bfloat16], @racket['float32] and
+@racket['float64], or a @racket['uint8] one: an integer or boolean image
 has no range the transform can read, and under the default
 @racket[range] a 0-to-255 integer image would quantize to white rather
 than to itself.
