@@ -57,7 +57,10 @@
     (check-exn exn:fail:contract? (lambda () (to t 'float64 'float32))
                "a dtype target takes no second argument: contract blame")
     (check-exn exn:fail:contract? (lambda () (to! t 'float64 'float32)))
-    (check-exn exn:fail:contract? (lambda () (to t 'float16)))
+    (check-equal? (tensor-dtype (to t 'float16)) 'float16)
+    (check-equal? (tensor-dtype (to t 'bfloat16)) 'bfloat16)
+    (check-equal? (tensor->list (to t 'bfloat16)) '(1.0 2.0 3.0))
+    (check-exn exn:fail:contract? (lambda () (to t 'float8)))
     (check-exn exn:fail:contract? (lambda () (to 5 'cpu)))
     (check-exn exn:fail:contract? (lambda () (to t 'cpu 'cpu))))
 
@@ -96,6 +99,48 @@
                (lambda () (to m 'int64)))
     (check-exn #rx"a layer only moves to a floating-point dtype"
                (lambda () (to m 'cpu 'bool)))
+    (check-equal? (map tensor-dtype (parameters m)) '(float32)))
+
+  (define-layer HalfCounted (w steps)
+    #:init ()
+    (set! w (Parameter (tensor '(1.0 0.1))))
+    (set! steps (Buffer (tensor '(0 1))))
+    #:forward (x) (mul w x))
+
+  (test-case "randn and rand construct at a half dtype, as ones and zeros do"
+    (for ([dt (in-list '(float16 bfloat16 float32 float64))])
+      (check-equal? (tensor-dtype (randn 2 2 #:dtype dt)) dt)
+      (check-equal? (tensor-dtype (rand 2 #:dtype dt)) dt)
+      (check-equal? (tensor-dtype (randn-like (zeros 2 #:dtype dt))) dt))
+    (check-exn exn:fail:contract?
+               (lambda () (randn 2 #:dtype 'int64))))
+
+  (test-case "tensor narrows to a half dtype before it reaches the device"
+    (for ([dt (in-list '(float16 bfloat16))])
+      (define t (tensor '(1.0 2.0 3.0) #:dtype dt))
+      (check-equal? (tensor-dtype t) dt)
+      (check-equal? (tensor->list t) '(1.0 2.0 3.0))
+      (when (cuda-available?)
+        (define g (tensor '(1.0 2.0 3.0) #:device 'cuda #:dtype dt))
+        (check-equal? (tensor-device g) (cuda-device))
+        (check-equal? (tensor-dtype g) dt)
+        (check-equal? (tensor->list g) '(1.0 2.0 3.0))
+        (with-default-device 'cuda
+          (define d (tensor '(1.0 2.0 3.0) #:dtype dt))
+          (check-equal? (tensor-device d) (cuda-device)
+                        "built on the CPU by name, it still lands on the default")
+          (check-equal? (tensor->list d) '(1.0 2.0 3.0))))))
+
+  (test-case "a layer moves to the half pair, integer buffers staying put"
+    (define m (HalfCounted))
+    (check-eq? (to m 'bfloat16) m)
+    (check-equal? (map tensor-dtype (parameters m)) '(bfloat16))
+    (check-equal? (map tensor-dtype (buffers m)) '(int64))
+    (check-equal? (tensor-dtype (m (ones 2 #:dtype 'bfloat16))) 'bfloat16)
+    (to m 'float16)
+    (check-equal? (map tensor-dtype (parameters m)) '(float16))
+    (check-= (cadr (tensor->list (car (parameters m)))) 0.1 1e-3)
+    (to m 'float32)
     (check-equal? (map tensor-dtype (parameters m)) '(float32)))
 
   (test-case "a non-floating buffer keeps its dtype under a layer dtype move"
@@ -218,14 +263,11 @@
     (load-state! loaded-first path)
     (to loaded-first 'float64)
     (check-equal? (param-values loaded-first) expected)
-    ;; the checkpoint writer takes float32/int64/bool only: a float64 model
-    ;; is moved back before saving, and saving it as is is refused
-    (check-exn #rx"unsupported dtype"
-               (lambda () (save-state! loaded-first path)))
-    (to loaded-first 'float32)
+    ;; a float64 model saves as F64, and a float32 model loads it converted
     (save-state! loaded-first path)
     (define again (Linear 3 2))
     (load-state! again path)
+    (check-equal? (map tensor-dtype (parameters again)) '(float32 float32))
     (check-equal? (param-values again) expected))
 
   (test-case "an in-place move re-accounts the same ledger entry"

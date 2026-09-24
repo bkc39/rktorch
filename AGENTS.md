@@ -39,7 +39,12 @@ linked against libtorch via `find_package(Torch)`.
 
 ### v1 surface
 
-CPU-first; float32 + inferred int64 (#44) + uint8 from bytes (#58). From
+CPU-first; float32 + inferred int64 (#44) + uint8 from bytes (#58) +
+float64 + the half pair float16/bfloat16 (#152: every constructor and `to`
+take them, values read back through float32, `tensor->bytes` /
+`bytes->tensor` carry the element bytes as they are, and `with-autocast`
+runs a forward under `at::autocast` per device type, bfloat16 by default,
+with `backward!` outside the form as PyTorch recommends). From
 `torch`:
 
 - v0 core: `torch-version manual-seed! randn tensor-shape tensor-numel
@@ -71,9 +76,12 @@ CPU-first; float32 + inferred int64 (#44) + uint8 from bytes (#58). From
   runs, captured failure messages, and live ledger entries; also dumped at
   exit under `RKTORCH_MEM_TRACE`), `tensor-free!` (explicit synchronous
   release)
-- creation: `zeros ones full arange eye tensor rand randn` (+ in-place
+- creation: `zeros ones full fill-value/c arange eye tensor rand randn` (+ in-place
   `uniform!`); every constructor takes `#:device` / `#:dtype` chosen at
-  native construction (never construct-then-move) and `#:requires-grad?`
+  native construction (never construct-then-move), with one exception:
+  `tensor` asked for `'float16` / `'bfloat16` from a list or vector, which
+  no host vector type carries, is built and narrowed on the CPU and moved
+  once, so an accelerator never holds the wide copy; `#:requires-grad?`
   applied after it (integer dtypes refuse it as torch does); the shape
   constructors take dims as rest args or one list; `zeros-like` /
   `ones-like` / `full-like` / `randn-like` / `rand-like` inherit the
@@ -96,6 +104,14 @@ CPU-first; float32 + inferred int64 (#44) + uint8 from bytes (#58). From
   continuing), `in-epochs`; synchronous, single-threaded like
   `num_workers=0`; a seeded loader replays `DataLoader(generator=g)`'s
   batch order
+- translation (`torch/data/translation.rkt`, #153): the PyTorch seq2seq
+  tutorial's eng-fra pairs, `load-translation-pairs` (zip cached, 11445
+  pairs after the tutorial's normalisation and filter) and
+  `load-translation-fixture` (287 committed pairs),
+  `translation-archive?`, `parse-pairs`
+  `normalize-sentence`, word vocabularies with `<pad>` 0 / `<sos>` 1 /
+  `<eos>` 2 (`pairs->vocabs` `encode-sentence` `decode-tokens`), and
+  `pairs->tensors` padding to a width
 - diffusion (`torch/vision/diffusion.rkt`, #84): `linear-schedule`
   `cosine-schedule` (betas, alphas, alpha-bars as device tensors), `q-sample`
   (closed-form `q(x_t | x_0)`), `sinusoidal-embedding`, and the layers
@@ -109,11 +125,26 @@ CPU-first; float32 + inferred int64 (#44) + uint8 from bytes (#58). From
   int64 labels), `cifar10-dataset #:device`, `cifar10-label-names`,
   `load-cifar10-fixture` (256 committed records), `cifar10-records->tensors`,
   `tar-entries`
+- resnet (`torch/vision/resnet.rkt`, #152): `BasicBlock` and `ResNet`
+  (`#:classes #:base #:blocks`, ResNet-18 for 32x32 images by default,
+  bias-free convolutions under `BatchNorm2d`); the training loop with
+  device-side augmentation, SGD under `one-cycle-lr` and `with-autocast` is
+  `examples/racket/09-resnet.rkt`
 - transforms (`torch/vision/transforms.rkt`, #152): `random-horizontal-flip
   #:p` and `random-crop #:padding` on an image batch where it lives; each
   takes `#:generator` and draws one seed per batch from it, so a seeded
   loader replays its augmentation (the draws are the transform's own, not
   torchvision's)
+- generative examples on MNIST (#152): `examples/racket/10-dcgan.rkt` (a
+  DCGAN shrunk to 28x28, `ConvTranspose2d` and `BatchNorm2d` in the
+  generator, `leaky-relu` in the discriminator, two `adam`s at 2e-4 with
+  `#:beta1 0.5`) and `11-vae.rkt` (the linear VAE, the reparameterization
+  with the caller's noise, the reference loss over the batch); both write a
+  10x10 sample grid per epoch through `image-grid` and `write-ppm`
+- images (`torch/vision/ppm.rkt`, #155): `image-grid #:columns #:padding
+  #:pad-value` (torchvision's `make_grid` layout, on the device) and
+  `write-ppm #:range` (binary P6, `save_image`'s quantization; a uint8 image
+  as it is)
 - shape: `reshape view transpose permute squeeze unsqueeze cat stack flip`
 - elementwise: `add sub mul div pow neg exp log sqrt relu sigmoid tanh silu
   leaky-relu clamp`
@@ -135,6 +166,10 @@ CPU-first; float32 + inferred int64 (#44) + uint8 from bytes (#58). From
 - autograd: `requires-grad! requires-grad? backward! grad has-grad?
   maybe-grad detach with-no-grad grad-enabled?`; in-place
   `sub! zero! mul! copy! addcmul! addcdiv! lerp! zero-grad!`
+- autocast: `with-autocast call-with-autocast autocast-enabled?
+  autocast-dtype` (`torch/foreign/autocast.rkt` over
+  `cpp/src/torchrkt/autocast.cpp`; per thread and per device type like
+  grad mode, restored by `dynamic-wind`, the cast cache dropped on exit)
 
 **Name shadowing convention:** ops colliding with racket/base or racket/list
 (`exp log sqrt tanh max min argmax sort`) are generic — tensors hit libtorch,
@@ -151,14 +186,17 @@ per `foreign/operators.rkt`.
 From `torch/nn`: `define-layer procedure->Layer gen:layer layer? Parameter Buffer LayerList LayerHash parameters
 named-parameters buffers children forward Linear Conv2d MaxPool2d Flatten Dropout
 Sequential Embedding LayerNorm ConvTranspose2d GroupNorm BatchNorm2d BatchNorm1d
-LSTM GRU sgd adam step! zero-grads! clip-grad-norm! ema ema-update! ema-average
-cross-entropy nll-loss mse-loss binary-cross-entropy-with-logits huber-loss
-l1-loss kaiming-uniform uniform-init normal-init fan-in`. The functional
+LSTM GRU sgd adam rmsprop step! zero-grads! clip-grad-norm! learning-rate
+set-learning-rate! step-lr multi-step-lr exponential-lr cosine-annealing-lr
+linear-lr one-cycle-lr lambda-lr ema ema-update! ema-average cross-entropy
+nll-loss mse-loss binary-cross-entropy-with-logits huber-loss l1-loss
+kaiming-uniform uniform-init normal-init fan-in`. The functional
 transformer primitives (`gelu tril triu masked-fill embedding layer-norm`,
 tranche 3, #22), the UNet ones (`conv-transpose2d group-norm silu
 clamp`, tranche 4, #84; `upsample-nearest2d` over `repeat_interleave`, tranche
-5) and the classic vision ones (`batch-norm leaky-relu flip`, tranche 6,
-#152; `BatchNorm2d`/`BatchNorm1d` keep `running-mean`, `running-var` and
+5) and the classic vision ones (`batch-norm leaky-relu flip linear`, tranche 6,
+#152; `Linear` runs on the fused `linear`, so autocast casts the whole affine
+map; `BatchNorm2d`/`BatchNorm1d` keep `running-mean`, `running-var` and
 `num-batches-tracked` as `Buffer`s that ATen updates in place in `'train`
 mode) live on `torch` beside the other functional ops; the GPT
 causal-mask idiom is `(masked-fill scores (eq (tril (ones T T)) 0) -inf.0)`. `define-layer` is the Python-style
@@ -341,7 +379,8 @@ module's full export set (`racket/runtime-path`, `syntax/parse/pre`).
   and the UNet layers.
 - `data/loader.rkt` — `tensor-dataset`, `dataloader`, `in-dataloader`,
   `in-epochs`, re-exporting `data/dataset.rkt`; `data/mnist.rkt`,
-  `data/text.rkt` — the modality loaders (moving under #88).
+  `data/text.rkt`, `data/translation.rkt` — the modality loaders (moving
+  under #88).
 - `foreign/ops.rkt` — version/seed + marshalling (`item`, `to-dtype`,
   `uniform!`, `to`); `foreign/creation-ops.rkt` — the constructors
   (`zeros` .. `rand`, `tensor`, `arange`, `eye`, the `*-like` family, with

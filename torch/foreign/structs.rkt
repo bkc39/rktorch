@@ -91,6 +91,8 @@
   (case dtype
     [(float64) ", dtype=torch.float64"]
     [(uint8) ", dtype=torch.uint8"]
+    [(float16) ", dtype=torch.float16"]
+    [(bfloat16) ", dtype=torch.bfloat16"]
     [else ""]))
 
 (define summarize-threshold 1000)
@@ -168,7 +170,9 @@
     [(eq? dtype 'float64)
      (tensor->pytorch-repr (handle->doubles h dims) dims
                            #:suffix (dtype-suffix dtype))]
-    [else (tensor->pytorch-repr (handle->floats h dims) dims)]))
+    [else
+     (tensor->pytorch-repr (handle->floats h dims) dims
+                           #:suffix (dtype-suffix dtype))]))
 
 (struct tensor-impl (handle shape)
   #:reflection-name 'tensor

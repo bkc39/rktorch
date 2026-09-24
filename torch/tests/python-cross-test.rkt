@@ -4,7 +4,9 @@
 ;; which provides Python torch; SKIPS when python3 can't import torch).
 
 (module+ test
-  (require (only-in racket/list append-map make-list range)
+  (require (only-in json string->jsexpr)
+           (only-in racket/file file->bytes make-temporary-file)
+           (only-in racket/list append* append-map make-list range)
            rackunit
            "../data/loader.rkt"
            "../main.rkt"
@@ -12,10 +14,39 @@
            (only-in "../data/mnist.rkt" load-mnist-fixture)
            (only-in "../data/text.rkt"
                     contiguous-blocks encode load-text-fixture text->vocab)
+           (only-in "../data/translation.rkt"
+                    eos-id load-translation-fixture pad-id pairs->tensors
+                    pairs->vocabs sos-id vocab-size)
            (only-in "../vision/cifar10.rkt" load-cifar10-fixture)
            (only-in "../vision/diffusion.rkt"
                     UNet linear-schedule q-sample schedule-steps)
+           (only-in "../vision/ppm.rkt" image-grid write-ppm)
+           (only-in "../vision/resnet.rkt" ResNet)
            "private/python-env.rkt")
+
+  ;; nn.Linear plus an int64 counter, the half_dtypes.py twin's Counted
+  (define-layer BrainCounted (lin steps)
+    #:init ()
+    (set! lin (Linear 3 2))
+    (set! steps (Buffer (tensor '(0 1))))
+    #:forward (x) (lin x))
+
+  ;; one buffer per safetensors dtype tag, the safetensors_dtypes.py twin
+  (define-layer Tagged (f32 f64 f16 bf16 i64 bool u8)
+    #:init ()
+    (set! f32 (Buffer (zeros 2 3)))
+    (set! f64 (Buffer (zeros 3 #:dtype 'float64)))
+    (set! f16 (Buffer (zeros 2 2 #:dtype 'float16)))
+    (set! bf16 (Buffer (zeros 4 #:dtype 'bfloat16)))
+    (set! i64 (Buffer (zeros 2 2 #:dtype 'int64)))
+    (set! bool (Buffer (zeros 3 #:dtype 'bool)))
+    (set! u8 (Buffer (zeros 3 #:dtype 'uint8)))
+    #:forward (x) x)
+
+  (define (hex->bytes s)
+    (apply bytes
+           (for/list ([i (in-range 0 (string-length s) 2)])
+             (string->number (substring s i (+ i 2)) 16))))
 
   (define (check-parity rel-path compute)
     (define j (python-result rel-path))
@@ -458,6 +489,103 @@
          (check-training-twin "12_char_rnn" "python/12_char_rnn.py" train-on
                               'cuda 5e-3)))
      (let ()
+       ;; Re-declared: MUST stay in sync with examples/racket/13-translation.rkt
+       (define hidden 32)
+       (define-layer encoder (embed gru)
+         #:init (vocab-size)
+         (set! embed (Embedding vocab-size hidden))
+         (set! gru (GRU hidden hidden #:batch-first? #t))
+         #:forward (tokens)
+         (define-values (outputs _final) (gru (embed tokens)))
+         (define at-eos
+           (unsqueeze (to-dtype (eq tokens eos-id) (tensor-dtype outputs)) 1))
+         (values outputs (transpose (matmul at-eos outputs) 0 1)))
+       (define-layer attention (wa ua va)
+         #:init ()
+         (set! wa (Linear hidden hidden))
+         (set! ua (Linear hidden hidden))
+         (set! va (Linear hidden 1))
+         #:forward (query keys padding)
+         (define scores (transpose (va (tanh (+ (wa query) (ua keys)))) 1 2))
+         (matmul (softmax (masked-fill scores padding -inf.0) -1) keys))
+       (define-layer decoder (embed attend gru head)
+         #:init (vocab-size)
+         (set! embed (Embedding vocab-size hidden))
+         (set! attend (attention))
+         (set! gru (GRU (* 2 hidden) hidden #:batch-first? #t))
+         (set! head (Linear hidden vocab-size))
+         #:forward (previous state keys padding)
+         (define context (attend (transpose state 0 1) keys padding))
+         (define-values (output next-state)
+           (gru (cat (list (embed previous) context) 2) state))
+         (values (head output) next-state))
+       (define-layer seq2seq (enc dec)
+         #:init (source-size target-size)
+         (set! enc (encoder source-size))
+         (set! dec (decoder target-size))
+         #:forward (sources targets teacher-forcing?)
+         (define-values (keys encoded) (enc sources))
+         (define padding (unsqueeze (eq sources pad-id) 1))
+         (define batch (car (tensor-shape sources)))
+         (define-values (logits _previous _state)
+           (for/fold ([logits '()]
+                      [previous (full-like (narrow sources 1 0 1) sos-id)]
+                      [state encoded])
+                     ([step (in-range 10)])
+             (define-values (step-logits next-state)
+               (dec previous state keys padding))
+             (define next
+               (if teacher-forcing?
+                   (narrow targets 1 step 1)
+                   (let-values ([(_top best) (topk step-logits 1)])
+                     (detach (reshape best batch 1)))))
+             (values (cons step-logits logits) next next-state)))
+         (cat (reverse logits) 1))
+       (define pairs (load-translation-fixture))
+       (define-values (source-vocab target-vocab) (pairs->vocabs pairs))
+       (define s-size (vocab-size source-vocab))
+       (define v-size (vocab-size target-vocab))
+       (check-equal? (map tensor-shape (parameters (seq2seq s-size v-size)))
+                     (list (list s-size hidden)
+                           '(96 32) '(96 32) '(96) '(96)
+                           (list v-size hidden)
+                           '(32 32) '(32) '(32 32) '(32) '(1 32) '(1)
+                           '(96 64) '(96 32) '(96) '(96)
+                           (list v-size hidden) (list v-size))
+                     "seq2seq shape must match examples/racket/13-translation.rkt at #:hidden 32")
+       (define (train-on device)
+         (with-default-device device
+           (manual-seed! 0)
+           (define-values (sources targets)
+             (pairs->tensors pairs source-vocab target-vocab #:width 10))
+           (define net (seq2seq s-size v-size))
+           (define opt (adam (parameters net) #:lr 0.001))
+           (define losses
+             (for/list ([_ (in-range 5)])
+               (define teacher-forcing?
+                 (< (item (rand 1 #:device 'cpu)) 0.5))
+               (zero-grads! opt)
+               (define loss
+                 (nll-loss (log-softmax
+                            (reshape (net sources targets teacher-forcing?)
+                                     -1 v-size)
+                            1)
+                           (reshape targets -1)
+                           #:ignore-index pad-id))
+               (backward! loss)
+               (clip-grad-norm! (parameters net) 1.0)
+               (step! opt)
+               (item loss)))
+           (values losses
+                   (cat (for/list ([p (in-list (parameters net))])
+                          (reshape p -1))))))
+       (check-training-twin "13_translation" "python/13_translation.py"
+                            train-on 'cpu tol)
+       (when (and (cuda-available?)
+                  (python-cuda-available?))
+         (check-training-twin "13_translation" "python/13_translation.py"
+                              train-on 'cuda 5e-3)))
+     (let ()
        (define (train-on device)
          (with-default-device device
            (manual-seed! 0)
@@ -487,6 +615,146 @@
        (when (and (cuda-available?)
                   (python-cuda-available?))
          (check-training-twin "08_diffusion" "python/08_diffusion.py" train-on
+                              'cuda 5e-3)))
+     (let ()
+       ;; MUST stay in sync with examples/racket/09-resnet.rkt's run-example
+       (define (train-on device)
+         (with-default-device device
+           (manual-seed! 0)
+           (define-values (xs ys) (load-cifar10-fixture))
+           (define net (ResNet #:base 16))
+           (define opt (sgd (parameters net) #:lr 0.005 #:momentum 0.9
+                            #:weight-decay 5e-4))
+           (define losses
+             (for/list ([_ (in-range 3)])
+               (zero-grads! opt)
+               (define loss (cross-entropy (net xs) ys))
+               (backward! loss)
+               (step! opt)
+               (item loss)))
+           (values losses
+                   (cat (for/list ([p (in-list (parameters net))])
+                          (reshape p -1))))))
+       ;; batch norm divides by the batch's own statistics, which amplifies
+       ;; the last-bit kernel differences between the two torch builds; a
+       ;; few of the 700k parameters land just past tol after three steps
+       (check-training-twin "09_resnet" "python/09_resnet.py" train-on
+                            'cpu 5e-4)
+       (when (and (cuda-available?)
+                  (python-cuda-available?))
+         (check-training-twin "09_resnet" "python/09_resnet.py" train-on
+                              'cuda 5e-3)))
+     (let ()
+       ;; MUST stay in sync with examples/racket/10-dcgan.rkt: the losses
+       ;; are the discriminator's and the generator's per step, interleaved,
+       ;; and the parameters are the generator's then the discriminator's
+       (define-layer gen-twin (fc bn0 up1 bn1 up2)
+         #:init ()
+         (set! fc (Linear 100 (* 128 7 7)))
+         (set! bn0 (BatchNorm1d (* 128 7 7)))
+         (set! up1 (ConvTranspose2d 128 64 4 #:stride 2 #:padding 1))
+         (set! bn1 (BatchNorm2d 64))
+         (set! up2 (ConvTranspose2d 64 1 4 #:stride 2 #:padding 1))
+         #:forward (z)
+         (~> z fc bn0 relu (reshape (length z) 128 7 7) up1 bn1 relu up2 tanh))
+       (define-layer disc-twin (conv1 conv2 bn fc)
+         #:init ()
+         (set! conv1 (Conv2d 1 64 4 #:stride 2 #:padding 1))
+         (set! conv2 (Conv2d 64 128 4 #:stride 2 #:padding 1))
+         (set! bn (BatchNorm2d 128))
+         (set! fc (Linear (* 128 7 7) 1))
+         #:forward (x)
+         (~> x conv1 (leaky-relu #:negative-slope 0.2)
+             conv2 bn (leaky-relu #:negative-slope 0.2)
+             (flatten 1) fc))
+       (define (train-on device)
+         (with-default-device device
+           (manual-seed! 0)
+           (define-values (xs _ys) (load-mnist-fixture))
+           (define gen (gen-twin))
+           (define disc (disc-twin))
+           (define opt-g (adam (parameters gen) #:lr 2e-4 #:beta1 0.5))
+           (define opt-d (adam (parameters disc) #:lr 2e-4 #:beta1 0.5))
+           (manual-seed! 0)
+           (define n (length xs))
+           (define real (sub (mul xs 2.0) 1.0))
+           (define ones-target (ones n 1))
+           (define zeros-target (zeros n 1))
+           (define losses
+             (append*
+              (for/list ([_ (in-range 3)])
+                (define z (to (randn n 100 #:device 'cpu) device))
+                (define fake (gen z))
+                (zero-grads! opt-d)
+                (define d-loss
+                  (add (binary-cross-entropy-with-logits (disc real) ones-target)
+                       (binary-cross-entropy-with-logits (disc (detach fake))
+                                                         zeros-target)))
+                (backward! d-loss)
+                (step! opt-d)
+                (zero-grads! opt-g)
+                (define g-loss
+                  (binary-cross-entropy-with-logits (disc fake) ones-target))
+                (backward! g-loss)
+                (step! opt-g)
+                (list (item d-loss) (item g-loss)))))
+           (values losses
+                   (cat (for/list ([p (in-list (append (parameters gen)
+                                                       (parameters disc)))])
+                          (reshape p -1))))))
+       ;; batch norm in both networks: a few dozen of the 1.3M parameters
+       ;; land just past tol after three alternating steps, as for 09_resnet
+       (check-training-twin "10_dcgan" "python/10_dcgan.py" train-on 'cpu 5e-4)
+       (when (and (cuda-available?)
+                  (python-cuda-available?))
+         (check-training-twin "10_dcgan" "python/10_dcgan.py" train-on
+                              'cuda 5e-3)))
+     (let ()
+       ;; MUST stay in sync with examples/racket/11-vae.rkt
+       (define-layer vae-twin (enc mu-head logvar-head dec1 dec2)
+         #:init ()
+         (set! enc (Linear 784 400))
+         (set! mu-head (Linear 400 20))
+         (set! logvar-head (Linear 400 20))
+         (set! dec1 (Linear 20 400))
+         (set! dec2 (Linear 400 784))
+         #:forward (x eps)
+         (define h (relu (enc (flatten x 1))))
+         (define mu (mu-head h))
+         (define logvar (logvar-head h))
+         (define z (add mu (mul eps (exp (mul logvar 0.5)))))
+         (values (dec2 (relu (dec1 z))) mu logvar))
+       (define (train-on device)
+         (with-default-device device
+           (manual-seed! 0)
+           (define-values (xs _ys) (load-mnist-fixture))
+           (define net (vae-twin))
+           (define opt (adam (parameters net) #:lr 1e-3))
+           (manual-seed! 0)
+           (define n (length xs))
+           (define losses
+             (for/list ([_ (in-range 5)])
+               (define eps (to (randn n 20 #:device 'cpu) device))
+               (zero-grads! opt)
+               (define-values (logits means logvars) (net xs eps))
+               (define recon
+                 (mul (binary-cross-entropy-with-logits logits (flatten xs 1))
+                      784.0))
+               (define kl
+                 (mul (sum (sub (sub (add 1.0 logvars) (mul means means))
+                                (exp logvars)))
+                      (/ -0.5 n)))
+               (define loss (add recon kl))
+               (backward! loss)
+               (step! opt)
+               (item loss)))
+           (values losses
+                   (cat (for/list ([p (in-list (parameters net))])
+                          (reshape p -1))))))
+       (check-training-twin "11_vae" "python/11_vae.py" train-on 'cpu tol)
+       (when (and (cuda-available?)
+                  (python-cuda-available?))
+         (check-training-twin "11_vae" "python/11_vae.py" train-on
                               'cuda 5e-3)))
      (let ()
        (define j (python-check "conv2d_init.py"))
@@ -548,6 +816,43 @@
              [i (in-naturals)])
          (check-= a b tol (format "group-norm forward: value ~a parity" i))))
      (let ()
+       (define j (python-check "make_grid_parity.py"))
+       (manual-seed! 0)
+       (define grid (image-grid (rand 5 3 4 4) #:columns 2 #:padding 1
+                                #:pad-value 0.5))
+       (check-equal? (tensor-shape grid) (hash-ref j 'shape)
+                     "image-grid: shape parity with make_grid")
+       (for ([a (in-list (tensor->list grid))]
+             [b (in-list (hash-ref j 'values))]
+             [i (in-naturals)])
+         (check-= a b tol (format "image-grid: value ~a parity" i)))
+       (define path (make-temporary-file "rkt-grid-~a.ppm"))
+       (write-ppm path grid)
+       (define bs (file->bytes path))
+       (delete-file path)
+       ;; five images in two columns: three rows of 4 + 1, so 16 by 11
+       (define header #"P6\n11 16\n255\n")
+       (check-equal? (subbytes bs 0 (bytes-length header)) header
+                     "write-ppm: header for make_grid's 16 by 11")
+       (define pixels (bytes->list (subbytes bs (bytes-length header))))
+       (check-equal? (length pixels) (length (hash-ref j 'pixels))
+                     "write-ppm: one byte per channel")
+       ;; the quantization rounds at a half, where a difference the value
+       ;; check above tolerates moves a byte by one
+       (for ([a (in-list pixels)]
+             [b (in-list (hash-ref j 'pixels))]
+             [i (in-naturals)])
+         (check-= a b 1 (format "write-ppm: save_image's quantization ~a" i)))
+       (manual-seed! 1)
+       (define one (image-grid (rand 1 3 4 4) #:columns 2 #:padding 1
+                               #:pad-value 0.5))
+       (check-equal? (tensor-shape one) (hash-ref j 'one_shape)
+                     "image-grid: make_grid returns one image unpadded")
+       (for ([a (in-list (tensor->list one))]
+             [b (in-list (hash-ref j 'one_values))]
+             [i (in-naturals)])
+         (check-= a b tol (format "image-grid: one image value ~a parity" i))))
+     (let ()
        (define j (python-check "batch_norm_forward.py"))
        (manual-seed! 0)
        (define bn (BatchNorm2d 3))
@@ -575,6 +880,83 @@
              [b (in-list (hash-ref j 'eval_values))]
              [i (in-naturals)])
          (check-= a b tol (format "batch-norm eval: value ~a parity" i))))
+     (let ()
+       (define j (python-check "sgd_variants.py"))
+       (define-layer mlp-twin (fc1 fc2)
+         #:init ()
+         (set! fc1 (Linear 4 8))
+         (set! fc2 (Linear 8 2))
+         #:forward (x)
+         (fc2 (relu (fc1 x))))
+       (define (run make-opt)
+         (manual-seed! 0)
+         (define net (mlp-twin))
+         (define xs (randn 16 4))
+         (define ys (randn 16 2))
+         (define opt (make-opt (parameters net)))
+         (define losses
+           (for/list ([_ (in-range 5)])
+             (zero-grads! opt)
+             (define loss (mse-loss (net xs) ys))
+             (backward! loss)
+             (step! opt)
+             (item loss)))
+         (values losses
+                 (tensor->list (cat (for/list ([p (in-list (parameters net))])
+                                      (reshape p -1))))))
+       (define (check-config name make-opt)
+         (define expected (hash-ref j (string->symbol name)))
+         (define-values (losses params) (run make-opt))
+         (for ([r (in-list losses)] [p (in-list (hash-ref expected 'losses))]
+               [i (in-naturals)])
+           (check-= r p tol (format "~a: loss ~a" name i)))
+         (for ([r (in-list params)] [p (in-list (hash-ref expected 'params))]
+               [i (in-naturals)])
+           (check-= r p tol (format "~a: parameter ~a" name i))))
+       (check-config "momentum"
+                     (lambda (ps) (sgd ps #:lr 0.1 #:momentum 0.9)))
+       (check-config "nesterov"
+                     (lambda (ps) (sgd ps #:lr 0.1 #:momentum 0.9
+                                       #:nesterov? #t)))
+       (check-config "weight_decay"
+                     (lambda (ps) (sgd ps #:lr 0.1 #:momentum 0.9
+                                       #:weight-decay 5e-4)))
+       (check-config "adam_weight_decay"
+                     (lambda (ps) (adam ps #:lr 0.05 #:weight-decay 1e-2)))
+       (check-config "rmsprop" (lambda (ps) (rmsprop ps #:lr 0.01)))
+       (check-config "rmsprop_momentum"
+                     (lambda (ps) (rmsprop ps #:lr 0.01 #:momentum 0.9
+                                           #:weight-decay 1e-3))))
+     (let ()
+       (define j (python-check "schedulers.py"))
+       (define (rates make)
+         (define opt (sgd (list (Parameter (zeros 1))) #:lr 0.1))
+         (define s (make opt))
+         (cons (learning-rate s)
+               (for/list ([_ (in-range 11)])
+                 (step! opt)
+                 (step! s)
+                 (learning-rate s))))
+       (define (check-shape name make)
+         (for ([r (in-list (rates make))]
+               [p (in-list (hash-ref j (string->symbol name)))]
+               [i (in-naturals)])
+           (check-= r p 1e-9 (format "~a scheduler: rate at step ~a" name i))))
+       (check-shape "step" (lambda (o) (step-lr o #:step-size 3 #:gamma 0.5)))
+       (check-shape "multi_step"
+                    (lambda (o) (multi-step-lr o #:milestones '(2 5 9)
+                                               #:gamma 0.1)))
+       (check-shape "exponential" (lambda (o) (exponential-lr o #:gamma 0.9)))
+       (check-shape "cosine"
+                    (lambda (o) (cosine-annealing-lr o #:t-max 10
+                                                     #:eta-min 0.01)))
+       (check-shape "linear"
+                    (lambda (o) (linear-lr o #:start-factor 0.25
+                                           #:end-factor 1.0 #:total-iters 4)))
+       (check-shape "one_cycle"
+                    (lambda (o) (one-cycle-lr o #:max-lr 1.0 #:total-steps 12)))
+       (check-shape "lambda"
+                    (lambda (o) (lambda-lr o (lambda (t) (/ 1.0 (add1 t)))))))
      (let ()
        (define j (python-check "ema_update.py"))
        (manual-seed! 0)
@@ -670,6 +1052,104 @@
                      (hash-ref j 'full_int64_repr))
        (check-equal? (tensor->repr (ones 3 #:dtype 'bool))
                      (hash-ref j 'ones_bool_repr))
+       (let ()
+         (define h (python-check "half_dtypes.py"))
+         (manual-seed! 0)
+         (define xh (randn 2 3))
+         (check-equal? (tensor->list (to xh 'float16)) (hash-ref h 'half_values)
+                       "float16 cast: values through float32")
+         (check-equal? (tensor->list (to xh 'bfloat16))
+                       (hash-ref h 'brain_values)
+                       "bfloat16 cast: values through float32")
+         (check-equal? (tensor->repr (to xh 'float16)) (hash-ref h 'half_repr))
+         (check-equal? (tensor->repr (to xh 'bfloat16)) (hash-ref h 'brain_repr))
+         (check-equal? (tensor->repr (zeros 0 #:dtype 'float16))
+                       (hash-ref h 'empty_half_repr))
+         (check-equal? (tensor->repr (zeros 2 2 #:dtype 'bfloat16))
+                       (hash-ref h 'zeros_brain_repr))
+         (check-equal? (tensor->list (full 0.1 3 #:dtype 'float16))
+                       (hash-ref h 'full_half_values))
+         (check-equal? (tensor->list (arange 0 5 #:dtype 'bfloat16))
+                       (hash-ref h 'arange_brain_values))
+         (check-equal? (tensor->list (tensor '(1.0 0.1 65504.0)
+                                             #:dtype 'float16))
+                       (hash-ref h 'tensor_half_values))
+         (manual-seed! 1)
+         (define counted (to (BrainCounted) 'bfloat16))
+         (check-equal? (for/hasheq ([e (in-list (state-dict counted))])
+                         (values (string->symbol (car e))
+                                 (format "torch.~a" (tensor-dtype (cdr e)))))
+                       (hash-ref h 'counted_dtypes)
+                       "a layer moved to bfloat16 keeps its int64 buffer")
+         (check-equal? (tensor->list (car (parameters counted)))
+                       (hash-ref h 'counted_weight)))
+       (let ()
+         (define h (python-check "autocast_cpu.py"))
+         (define half-tol 2e-2)
+         (manual-seed! 0)
+         (define a (randn 3 4))
+         (define b (randn 4 2))
+         (check-equal? (autocast-enabled? 'cpu) (hash-ref h 'before))
+         (define prod
+           (with-autocast #:device 'cpu
+             (check-equal? (autocast-enabled? 'cpu) (hash-ref h 'inside))
+             (matmul a b)))
+         (check-equal? (autocast-enabled? 'cpu) (hash-ref h 'after))
+         (check-equal? (format "torch.~a" (tensor-dtype prod))
+                       (hash-ref h 'prod_dtype))
+         (for ([r (in-list (tensor->list prod))]
+               [p (in-list (hash-ref h 'prod_values))]
+               [i (in-naturals)])
+           (check-= r p half-tol (format "autocast matmul: value ~a" i)))
+         (manual-seed! 1)
+         (define lin (Linear 4 2))
+         (define xa (randn 8 4))
+         (define loss
+           (with-autocast #:device 'cpu
+             (define y (lin xa))
+             (check-equal? (format "torch.~a" (tensor-dtype y))
+                           (hash-ref h 'y_dtype))
+             (mean (mul y y))))
+         (check-= (item loss) (hash-ref h 'loss) half-tol "autocast loss")
+         (backward! loss)
+         (define g (grad (car (parameters lin))))
+         (check-equal? (format "torch.~a" (tensor-dtype g))
+                       (hash-ref h 'grad_dtype))
+         (for ([r (in-list (tensor->list g))]
+               [p (in-list (hash-ref h 'grad_values))]
+               [i (in-naturals)])
+           (check-= r p half-tol (format "autocast grad: value ~a" i))))
+       (let ()
+         (define h (python-check "safetensors_dtypes.py"))
+         (define path (make-temporary-file "rkt-tagged-~a.safetensors"))
+         (call-with-output-file path #:exists 'truncate
+           (lambda (out) (write-bytes (hex->bytes (hash-ref h 'hex)) out)))
+         (define m (Tagged))
+         (load-state! m path)
+         (for ([e (in-list (state-dict m))])
+           (check-equal? (map exact->inexact (tensor->list (cdr e)))
+                         (hash-ref (hash-ref h 'values)
+                                   (string->symbol (car e)))
+                         (format "safetensors ~a: values from Python's file"
+                                 (car e))))
+         (define ours (make-temporary-file "rkt-tagged-out-~a.safetensors"))
+         (save-state! m ours)
+         (define raw (file->bytes ours))
+         (define header-len (integer-bytes->integer raw #f #f 0 8))
+         (define header
+           (string->jsexpr (bytes->string/utf-8 raw #f 8 (+ 8 header-len))))
+         (for ([e (in-list (state-dict m))])
+           (define meta (hash-ref header (string->symbol (car e))))
+           (define offsets (hash-ref meta 'data_offsets))
+           (check-equal? (subbytes raw
+                                   (+ 8 header-len (car offsets))
+                                   (+ 8 header-len (cadr offsets)))
+                         (hex->bytes (hash-ref (hash-ref h 'payload_hex)
+                                               (string->symbol (car e))))
+                         (format "safetensors ~a: our payload is Python's"
+                                 (car e))))
+         (delete-file path)
+         (delete-file ours))
        (check-equal? (format "torch.~a" (tensor-dtype (zeros-like (to x 'float64))))
                      (hash-ref j 'zeros_like_dtype))
        (check-equal? (eq? (to x 'cpu) x) (hash-ref j 'cpu_is_self))

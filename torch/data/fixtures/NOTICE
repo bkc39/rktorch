@@ -1,0 +1,12 @@
+eng-fra-excerpt.txt is 318 lines of eng-fra.txt from the PyTorch seq2seq
+tutorial's data archive, https://download.pytorch.org/tutorial/data.zip,
+copied verbatim: every 40th sentence pair that survives the tutorial's
+filter, followed by 31 pairs it rejects. That file is the English-French
+tab-delimited export of the Tatoeba Project, https://tatoeba.org, as
+distributed by https://www.manythings.org/anki/, and is licensed under
+Creative Commons Attribution 2.0 France (CC BY 2.0 FR):
+https://creativecommons.org/licenses/by/2.0/fr/
+
+heart-of-darkness-excerpt.txt is from Joseph Conrad's Heart of Darkness
+(Project Gutenberg #219), in the public domain. The mnist-256-* files are
+the first 256 records of the MNIST training set.
