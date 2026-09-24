@@ -66,6 +66,15 @@ tr_tensor* tr_from_data_i64_on_device(const int64_t* data, uint64_t numel,
                                       tr_device_type device_type,
                                       int64_t device_index);
 
+/* float64 values kept exact: no float32 transit. */
+tr_tensor* tr_from_data_f64(const double* data, uint64_t numel,
+                            const int64_t* dims, int64_t ndim);
+
+tr_tensor* tr_from_data_f64_on_device(const double* data, uint64_t numel,
+                                      const int64_t* dims, int64_t ndim,
+                                      tr_device_type device_type,
+                                      int64_t device_index);
+
 /* uint8 from a byte buffer (torch.frombuffer(..., dtype=torch.uint8)); the
  * bytes are copied, so the caller's buffer may move or die afterwards. */
 tr_tensor* tr_from_data_u8(const uint8_t* data, uint64_t numel,

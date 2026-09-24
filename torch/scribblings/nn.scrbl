@@ -682,3 +682,43 @@ wrote to its optimizer, and that optimizer. @racket[scheduler-rate] is
 @tt{get_last_lr()}: it reports the rate written at construction or by the
 last @racket[step!], and does not call a @racket[lambda-lr] factor again.
 }
+
+@section{Checkpoints}
+
+@defproc[(state-dict [model layer?]) (listof (cons/c string? tensor?))]{
+The model's parameters and then its buffers, each under its dotted path, in
+the order of @tt{nn.Module.state_dict}.  Every registered path is kept, so a
+tensor shared by two fields appears under both names.
+}
+
+@defproc[(save-state! [model layer?] [path path-string?]) void?]{
+Writes @racket[(state-dict model)] to @racket[path] in the safetensors
+layout: an 8-byte little-endian header length, a JSON header giving each
+entry's @tt{dtype}, @tt{shape} and @tt{data_offsets}, then the tensors'
+bytes, little-endian.  Entries are typed @tt{F32}, @tt{F64}, @tt{F16},
+@tt{BF16}, @tt{I64}, @tt{U8} or @tt{BOOL}, and every value is written
+exactly, a @racket['float64] tensor included.  A tensor of any other dtype is refused
+with the name of its entry.
+}
+
+@defproc[(load-state! [model layer?]
+                      [path path-string?]
+                      [#:strict? strict? boolean? #t])
+         any]{
+Copies the entries of the checkpoint at @racket[path] into
+@racket[model]'s parameters and buffers, in place and outside the autograd
+tape, as @tt{load_state_dict} does.  A loaded value takes the dtype and
+device of the tensor it lands in.
+
+The file is checked against the model before anything is copied.  With
+@racket[strict?], a key the model has and the file lacks, or the file has
+and the model lacks, is an error, and the one error names every such key;
+a strict load returns @|void-const|.  Without it, the entries the two
+share are loaded and the result is two values: the missing keys in the
+model's order and the unexpected keys in alphabetical order.  An entry
+whose shape differs from the model's is an error in either mode, reported
+per key with both shapes, because equal element counts do not make shapes
+equal.  So is an entry with a dtype tag outside the list above, or whose
+@tt{data_offsets} do not span exactly the bytes its dtype and shape need
+inside the file, so a damaged checkpoint leaves the model as it was.
+}
