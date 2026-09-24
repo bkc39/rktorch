@@ -34,8 +34,9 @@
   (check-equal? (take names 3) '("stem.weight" "bn.weight" "bn.bias"))
   (check-equal? (list-ref names 3) "layer1.0.conv1.weight")
   (check-equal? (last names) "fc.bias")
-  ;; 2 + 4 stages of 2 blocks (6 tensors each, 8 with a projection) + fc
-  (check-equal? (length names) 62)
+  ;; the stem and its norm, four stages of two blocks with six tensors
+  ;; each and nine where the first block projects, then the head
+  (check-equal? (length names) (+ 3 (* 2 6) (* 3 (+ 9 6)) 2))
   (check-equal? (tensor-shape (car (parameters net))) '(16 3 3 3))
   (check-not-false (member "layer2.0.shortcut.0.weight" names) "the projection")
   (check-false (member "layer1.0.shortcut.0.weight" names) "identity elsewhere")
