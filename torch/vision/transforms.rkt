@@ -240,3 +240,14 @@
     ;; convert_image_dtype's scale: 1.0 lands on 255 and nothing past it
     [(eq? dtype 'uint8) (to-dtype (mul x (- 256.0 1e-3)) 'uint8)]
     [else (to-dtype x dtype)]))
+
+(define rgb-image/c
+  (flat-named-contract
+   'three-channel-image-or-batch
+   (and/c image-or-batch/c image-tensor/c
+          (lambda (img) (= 3 (channels img))))))
+
+(define/contract-out (imagenet-preprocess x) ;; noqa
+  (-> rgb-image/c tensor?)
+  (imagenet-normalize
+   (center-crop (resize (convert-image-dtype x 'float32) 256) 224)))

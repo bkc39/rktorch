@@ -1,0 +1,16 @@
+The four photographs here are copied verbatim from the validation split
+of the "hymenoptera" dataset that PyTorch's transfer-learning tutorial
+(Sasank Chilamkurthy, "Transfer Learning for Computer Vision Tutorial")
+distributes at https://download.pytorch.org/tutorial/hymenoptera_data.zip:
+
+  ants/8398478_50ef10c47a.jpg   val/ants/8398478_50ef10c47a.jpg
+  ants/11381045_b352a47d8c.jpg  val/ants/11381045_b352a47d8c.jpg
+  bees/10870992_eebeeb3a12.jpg  val/bees/10870992_eebeeb3a12.jpg
+  bees/26589803_5ba7000313.jpg  val/bees/26589803_5ba7000313.jpg
+
+That dataset is a subset of ImageNet, whose images were gathered from the
+web and remain the property of their photographers; the archive states no
+licence of its own. They are kept here, as the tutorial's archive keeps
+them, as a small test fixture for non-commercial research and teaching
+use, the terms under which ImageNet distributes its images. The directory
+is laid out as an image folder, one subdirectory per class.

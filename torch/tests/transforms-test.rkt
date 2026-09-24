@@ -131,4 +131,20 @@
                   '(0 127 255))
     (check-eq? (convert-image-dtype floats 'float32) floats)
     (check-equal? (tensor-dtype (convert-image-dtype floats 'float64))
-                  'float64)))
+                  'float64))
+
+  (test-case "imagenet-preprocess: the four steps in order, from bytes or floats"
+    (define image (to-dtype (reshape (arange (* 3 300 400)) 3 300 400) 'uint8))
+    (define by-hand
+      (imagenet-normalize
+       (center-crop (resize (convert-image-dtype image) 256) 224)))
+    (check-true (same? (imagenet-preprocess image) by-hand))
+    (check-true (same? (imagenet-preprocess (convert-image-dtype image))
+                       by-hand))
+    (check-equal? (tensor-shape (imagenet-preprocess
+                                 (stack (list image image) 0)))
+                  '(2 3 224 224))
+    (check-exn exn:fail:contract?
+               (lambda () (imagenet-preprocess (select image 0 0))))
+    (check-exn exn:fail:contract?
+               (lambda () (imagenet-preprocess (narrow image 0 0 1))))))

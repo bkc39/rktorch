@@ -11,6 +11,7 @@
                               define-layer load-state!)
                      torch/vision/cifar10
                      torch/vision/image
+                     torch/vision/imagenet
                      torch/vision/ppm
                      torch/vision/resnet
                      torch/vision/transforms
@@ -220,10 +221,12 @@ input's device.
   (imagenet-normalize
    (center-crop (resize (convert-image-dtype photo) 256) 224)))
 (tensor-shape x)
+(item (max (abs (- x (imagenet-preprocess photo)))))
 ]
 
 The first four are torchvision's @tt{transforms.functional} of the same
-names and take an image, @tt{[C H W]}, or a batch, @tt{[N C H W]}.
+names and take an image, @tt{[C H W]}, or a batch, @tt{[N C H W]}, as does
+@racket[imagenet-preprocess].
 
 @defproc[(convert-image-dtype [x tensor?]
                               [dtype (or/c 'uint8 'float16 'bfloat16
@@ -289,6 +292,16 @@ channel of the float image or batch @racket[x].
               @defthing[imagenet-std (listof real?)])]{
 The per-channel statistics the torchvision ImageNet weights were trained
 with, @racket['(0.485 0.456 0.406)] and @racket['(0.229 0.224 0.225)].
+}
+
+@defproc[(imagenet-preprocess [x tensor?]) tensor?]{
+The whole input pipeline of torchvision's ImageNet classifiers for the
+three-channel image or batch @racket[x], @racket['uint8] or float:
+@racket[convert-image-dtype] to @racket['float32], @racket[resize] with
+the shorter side to 256, @racket[center-crop] to 224 and
+@racket[imagenet-normalize]. It resizes the float image, where
+torchvision's @tt{ImageClassification} resizes a @racket['uint8] tensor
+and rounds it back to bytes first, so the two differ by that rounding.
 }
 
 @defproc[(imagenet-normalize [x tensor?]) tensor?]{
@@ -375,6 +388,96 @@ or channel count is a contract violation, blamed on the caller.
 @deftogether[(@defproc[(basic-block? [v any/c]) boolean?]
               @defproc[(resnet? [v any/c]) boolean?])]{
 The predicates.
+}
+
+@subsection{The ImageNet networks}
+
+The residual networks of He, Zhang, Ren and Sun at ImageNet's scale, in
+torchvision's layout and under its field names, so its pretrained weights
+load into them: a 7x7 stride-2 stem, batch norm and a 3x3 stride-2
+max-pool, four stages at 64, 128, 256 and 512 channels, the last three
+starting at stride 2, global average pooling and a linear head. Called
+on an @tt{[N 3 H W]} batch, typically 224 by 224 after
+@racket[imagenet-preprocess], they return @tt{[N classes]} logits; put
+them in @racket['eval] mode first when classifying, so their batch norms
+use the saved running statistics.
+
+@racketblock[
+(define net (resnet18 #:pretrained? #t))
+(in-eval-mode net
+  (with-no-grad (net (unsqueeze (imagenet-preprocess image) 0))))
+]
+
+@deftogether[(@defproc[(resnet18 [#:pretrained? pretrained? boolean? #f]
+                                 [#:classes classes exact-positive-integer? 1000])
+                       imagenet-resnet?]
+              @defproc[(resnet34 [#:pretrained? pretrained? boolean? #f]
+                                 [#:classes classes exact-positive-integer? 1000])
+                       imagenet-resnet?]
+              @defproc[(resnet50 [#:pretrained? pretrained? boolean? #f]
+                                 [#:classes classes exact-positive-integer? 1000])
+                       imagenet-resnet?])]{
+ResNet-18 and ResNet-34, with two and three to six @racket[BasicBlock]s
+per stage, and ResNet-50, with @racket[Bottleneck]s: 11.7, 21.8 and 25.6
+million parameters. With @racket[pretrained?], torchvision's
+@tt{IMAGENET1K_V1} weights are fetched through
+@racket[pretrained-weights] and loaded with @racket[torchvision-key] as
+the rename; their top-1 accuracies on ImageNet's validation set are
+69.8, 73.3 and 76.1 percent. With a @racket[classes] other than 1000 the
+backbone is still loaded but the head is a fresh @racket[Linear] of that
+width, what assigning a new @tt{model.fc} does in PyTorch: the start of
+fine-tuning on a new task.
+}
+
+@defproc[(ImageNetResNet [blocks (list/c exact-positive-integer?
+                                         exact-positive-integer?
+                                         exact-positive-integer?
+                                         exact-positive-integer?)]
+                         [#:block block (or/c 'basic 'bottleneck) 'basic]
+                         [#:classes classes exact-positive-integer? 1000])
+         imagenet-resnet?]{
+The network the three builders make, with @racket[blocks] blocks of the
+given kind per stage, for the other depths: @racket['(3 4 23 3)] with
+bottlenecks is ResNet-101. Its fields are @racket[conv1], @racket[bn1],
+@racket[maxpool], @racket[layer1] through @racket[layer4] and
+@racket[fc].
+}
+
+@defproc[(Bottleneck [in exact-positive-integer?]
+                     [width exact-positive-integer?]
+                     [#:stride stride exact-positive-integer? 1])
+         bottleneck?]{
+A 1x1 convolution down to @racket[width] channels, a 3x3 at
+@racket[stride], and a 1x1 out to four times @racket[width], each with
+batch norm and all but the last followed by a ReLU, added to the input
+and passed through a ReLU. Where the stride or the width changes, the
+shortcut projects the input as @racket[BasicBlock]'s does. The stride
+sits on the 3x3 convolution, torchvision's version 1.5 of the block.
+}
+
+@deftogether[(@defproc[(imagenet-resnet? [v any/c]) boolean?]
+              @defproc[(bottleneck? [v any/c]) boolean?])]{
+The predicates.
+}
+
+@defproc[(torchvision-key [key string?]) string?]{
+A torchvision checkpoint key as the network in this module names it: its
+@tt{downsample} is @racket[shortcut] here, and every underscore becomes a
+hyphen, so @tt{layer2.0.downsample.1.running_mean} is
+@tt{layer2.0.shortcut.1.running-mean}. The @racket[#:rename] the
+builders pass to @racket[load-state!].
+}
+
+@subsection{ImageNet classes}
+
+@defmodule[torch/vision/imagenet]
+
+@defthing[imagenet-classes (listof string?)]{
+The thousand ImageNet class names in label order, as torchvision's
+weights list them, so the index of a logit names its class:
+@racket[(list-ref imagenet-classes 309)] is @racket["bee"] and 310
+@racket["ant"]. The names are unique; where ImageNet has two classes
+called @tt{crane}, torchvision names the bird @tt{crane bird}.
 }
 
 @section{Reading images}
