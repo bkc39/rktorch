@@ -1,0 +1,15 @@
+((shell "nix develop .#ci --command")
+ (base-ref "origin/master")
+ (gates
+  (native   "nix run .#copy-native-libs")
+  (compile  "raco make torch/tests/*.rkt")
+  (test     "raco test torch/")
+  (examples "raco test examples/test/")
+  (parity   ("raco test torch/tests/python-cross-test.rkt torch/tests/generated-parity-test.rkt"
+             #:shell "nix develop .#cuda --command"))
+  (coverage "racket scripts/coverage.rkt --changed")
+  (resyntax "resyntax analyze --local-git-repository . origin/master --analyzer-timeout 30000 --refactoring-suite rktorch-lint/style project-style")
+  (candidates "resyntax analyze --local-git-repository . origin/master --analyzer-timeout 30000 --refactoring-suite rktorch-lint/candidates candidates")
+  (docs     "raco scribble --dest /tmp/doc torch/scribblings/torch.scrbl")
+  (check    "nix flake check"))
+ (push-gates (compile resyntax test)))
