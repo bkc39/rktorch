@@ -199,6 +199,15 @@ The class count @racket[net] was built with, also its null label, or
 @racket[#f] for an unconditional network.
 }
 
+@deftogether[(@defproc[(time-embedding? [v any/c]) boolean?]
+              @defproc[(res-block? [v any/c]) boolean?]
+              @defproc[(attention-block? [v any/c]) boolean?]
+              @defproc[(downsample? [v any/c]) boolean?]
+              @defproc[(upsample? [v any/c]) boolean?]
+              @defproc[(unet? [v any/c]) boolean?])]{
+The predicates of the layers above.
+}
+
 @section{Transforms}
 
 @defmodule[torch/vision/transforms]

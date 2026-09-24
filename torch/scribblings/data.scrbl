@@ -1,13 +1,17 @@
 #lang scribble/manual
 
-@(require (for-label (except-in racket/base length)
+@(require "common.rkt"
+          (for-label (except-in racket/base length)
                      racket/contract
                      racket/sequence
                      (only-in torch
+                              arange
                               device? draw-seed generator? index-select length
                               make-generator narrow randn randperm seed/c select
-                              size/c stack tensor tensor?)
-                     torch/data/loader))
+                              size/c stack tensor tensor? tensor->list)
+                     torch/data/loader
+                     torch/data/mnist
+                     torch/data/text))
 
 @title{Datasets and loaders}
 
@@ -267,3 +271,70 @@ One int64 drawn from @racket[generator] or the global stream, as
 @tt{DataLoader} makes this draw once per epoch before its permutation;
 @racket[dataloader] makes it too, so the streams stay in step.
 }
+
+@section{MNIST}
+
+@defmodule[torch/data/mnist]
+
+The handwritten digits, fetched once from the mirror torchvision uses into
+the cache directory and decoded from the IDX files.
+
+@defproc[(load-mnist [split (or/c 'train 'test) 'train]) (values tensor? tensor?)]{
+The split's images as a float32 tensor of shape @tt{[N 1 28 28]} with
+pixels in @tt{[0, 1]}, and its labels as an int64 tensor of shape
+@tt{[N]}: 60000 training digits or 10000 test ones.}
+
+@defproc[(load-mnist-fixture) (values tensor? tensor?)]{
+The first 256 training digits, committed with the package, in the same
+form as @racket[load-mnist]; what the tests and the offline examples
+train on.}
+
+@section{Text}
+
+@defmodule[torch/data/text]
+
+Character-level text: a corpus as one string, a vocabulary of its
+characters, and the int64 token tensors a language model consumes.
+
+@defproc[(load-heart-of-darkness) string?]{
+Conrad's novella from Project Gutenberg, fetched once into the cache
+directory with the licence boilerplate stripped; the corpus of the
+character GPT and the character LSTM.}
+
+@defproc[(load-text-fixture) string?]{
+A committed excerpt of the same text, for the tests and the offline
+examples.}
+
+@defproc[(text->vocab [text string?]) (vectorof char?)]{
+The distinct characters of @racket[text], sorted, so that a character's
+index in the vector is its token.}
+
+@defproc[(encode [vocab (vectorof char?)] [text string?]) tensor?]{
+@racket[text] as an int64 tensor of tokens under @racket[vocab]. A
+character outside the vocabulary is an error.
+
+@torch-examples[
+(require torch/data/text)
+(define vocab (text->vocab "hello"))
+vocab
+(encode vocab "ole")
+]}
+
+@defproc[(decode [vocab (vectorof char?)]
+                 [tokens (or/c tensor? (listof exact-nonnegative-integer?))])
+         string?]{
+The inverse: tokens, as a tensor or a list, back to a string.
+
+@torch-examples[(decode (text->vocab "hello") '(1 0 2 2 3))]}
+
+@defproc[(contiguous-blocks [tokens tensor?] [block-size exact-positive-integer?])
+         (values tensor? tensor?)]{
+The token vector cut into as many whole blocks of @racket[block-size] as
+fit, as two @tt{[B block-size]} tensors: the inputs, and the same tokens
+shifted one place on, which are the targets a next-token model predicts.
+Both are views over @racket[tokens]. Deterministic, so a parity twin sees
+the same batches.
+
+@torch-examples[
+(contiguous-blocks (arange 7 #:dtype 'int64) 3)
+]}
