@@ -147,6 +147,7 @@
           'huber-loss '((tensor 2 3) (tensor 2 3) (int64 1) (double 1.0))
           'l1-loss '((tensor 2 3) (tensor 2 3) (int64 1))
           'flip '((tensor 2 3) (int-array (1)))
+          'linear '((tensor 4 3) (tensor 2 3) (optional-tensor 2))
           'topk '((tensor 3 5) (int64 2) (int64 -1) (bool #t) (bool #t))
           'sort-tensor '((tensor 3 5) (int64 -1) (bool #f))
           'cudnn-rnn-flatten-weight 'device-only
@@ -461,6 +462,10 @@
       (assq 'flip manifest)
       '((tensor 2 3) (int-array (0 1)))
       "[both-dims]")
+     (check-generated-parity
+      (assq 'linear manifest)
+      '((tensor 4 3) (tensor 2 3) (optional-tensor #f))
+      "[no-bias]")
      (check-generated-parity
       (assq 'topk manifest)
       '((tensor 3 5) (int64 3) (int64 0) (bool #f) (bool #t))

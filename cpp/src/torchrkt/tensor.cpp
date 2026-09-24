@@ -96,6 +96,12 @@ int tr_tensor_dtype(const tr_tensor* t, tr_dtype* out) {
       case torch::kUInt8:
         *out = TR_DTYPE_UINT8;
         return;
+      case torch::kFloat16:
+        *out = TR_DTYPE_FLOAT16;
+        return;
+      case torch::kBFloat16:
+        *out = TR_DTYPE_BFLOAT16;
+        return;
       default:
         throw std::invalid_argument("tensor has an unsupported dtype");
     }
@@ -142,6 +148,15 @@ int tr_tensor_copy_data(const tr_tensor* t, uint64_t capacity, float* out,
       "tr_tensor_copy_data", capacity, out, out_numel, [&] {
         return t->value.to(torch::kCPU).to(torch::kFloat32).contiguous();
       });
+}
+
+int tr_tensor_copy_bytes(const tr_tensor* t, uint64_t capacity, uint8_t* out,
+                         uint64_t* out_nbytes) {
+  if (!t || !out_nbytes) {
+    return torchrkt::null_arg_status("tr_tensor_copy_bytes");
+  }
+  return torchrkt::copy_tensor_bytes("tr_tensor_copy_bytes", t->value, capacity,
+                                     out, out_nbytes);
 }
 
 int tr_tensor_item(const tr_tensor* t, double* out) {

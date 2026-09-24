@@ -1,7 +1,7 @@
 #lang racket/base
 
 (require (only-in racket/contract/base ->)
-         (only-in "../foreign.rkt" add matmul transpose)
+         (only-in "../foreign.rkt" linear)
          (only-in "init.rkt" kaiming-uniform uniform-init)
          (only-in "layer.rkt" define-layer)
          (only-in "parameter.rkt" Parameter))
@@ -15,4 +15,4 @@
         (let ([bound (/ 1.0 (sqrt in-features))])
           (Parameter (uniform-init (list out-features) (- bound) bound))))
   #:forward (x)
-  (add (matmul x (transpose weight 0 1)) bias))
+  (linear x weight #:bias bias))

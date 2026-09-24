@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "torchrkt/detail/device.hpp"
+#include "torchrkt/detail/dtype.hpp"
 #include "torchrkt/detail/op_call.hpp"
 #include "torchrkt/detail/options.hpp"
 #include "torchrkt/detail/tensor_handle.hpp"
@@ -185,6 +186,51 @@ tr_tensor* tr_from_data_on_device(const float* data, uint64_t numel,
   }
   return torchrkt::alloc_result("tr_from_data_on_device", [&] {
     return host_from_data(data, numel, dims, ndim, torch::kFloat32)
+        .to(torchrkt::to_torch_device(device_type, device_index));
+  });
+}
+
+namespace {
+
+torch::Tensor host_from_bytes(const uint8_t* data, uint64_t nbytes,
+                              const int64_t* dims, int64_t ndim,
+                              tr_dtype dtype) {
+  const torch::ScalarType scalar = torchrkt::to_scalar_type(dtype);
+  const auto size = static_cast<uint64_t>(torch::elementSize(scalar));
+  if (nbytes % size != 0) {
+    throw std::invalid_argument(
+        "byte count is not a multiple of the element size");
+  }
+  // a byte other than 0 or 1 is not a bool ATen can hold, so the payload
+  // is read as uint8 and compared, as numpy's astype(bool) does
+  if (scalar == torch::kBool) {
+    return host_from_data(data, nbytes, dims, ndim, torch::kUInt8).ne(0);
+  }
+  return host_from_data(data, nbytes / size, dims, ndim, scalar);
+}
+
+}  // namespace
+
+tr_tensor* tr_from_bytes(const uint8_t* data, uint64_t nbytes,
+                         const int64_t* dims, int64_t ndim, tr_dtype dtype) {
+  if ((!data && nbytes > 0) || torchrkt::bad_dims(dims, ndim)) {
+    return torchrkt::null_arg("tr_from_bytes");
+  }
+  return torchrkt::alloc_result("tr_from_bytes", [&] {
+    return host_from_bytes(data, nbytes, dims, ndim, dtype)
+        .to(torchrkt::current_default_device());
+  });
+}
+
+tr_tensor* tr_from_bytes_on_device(const uint8_t* data, uint64_t nbytes,
+                                   const int64_t* dims, int64_t ndim,
+                                   tr_dtype dtype, tr_device_type device_type,
+                                   int64_t device_index) {
+  if ((!data && nbytes > 0) || torchrkt::bad_dims(dims, ndim)) {
+    return torchrkt::null_arg("tr_from_bytes_on_device");
+  }
+  return torchrkt::alloc_result("tr_from_bytes_on_device", [&] {
+    return host_from_bytes(data, nbytes, dims, ndim, dtype)
         .to(torchrkt::to_torch_device(device_type, device_index));
   });
 }

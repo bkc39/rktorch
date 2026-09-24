@@ -99,6 +99,18 @@ tr_tensor* tr_gen_leaky_relu(const tr_tensor* self, double negative_slope) {
   });
 }
 
+tr_tensor* tr_gen_linear(const tr_tensor* input, const tr_tensor* weight,
+                         const tr_tensor* bias) {
+  if (!input || !weight) {
+    return torchrkt::null_arg("tr_gen_linear");
+  }
+  return torchrkt::alloc_result("tr_gen_linear", [&] {
+    return at::linear(input->value, weight->value,
+                      bias ? c10::optional<at::Tensor>(bias->value)
+                           : c10::optional<at::Tensor>());
+  });
+}
+
 tr_tensor* tr_gen_silu(const tr_tensor* self) {
   if (!self) {
     return torchrkt::null_arg("tr_gen_silu");
