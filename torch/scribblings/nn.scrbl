@@ -152,7 +152,7 @@ is allowed only at module level.
   (set! weight (Parameter (kaiming-uniform shape)))
   (set! bias
         (and bias? (Parameter (uniform-init (list out-channels) -0.1 0.1))))
-  #:forward ([x : image-batch/c])
+  #:forward (x)
   (conv2d x weight #:bias bias #:stride stride #:padding padding))
 ]
 

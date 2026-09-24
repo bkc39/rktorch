@@ -48,8 +48,7 @@
   (set! padding (->2d padding))
   (define shape ;; noqa
     (list out-channels in-channels (car kernel-size) (cadr kernel-size)))
-  ;; weight before bias: nn.Conv2d.reset_parameters' RNG draw order; with
-  ;; bias=False the bias is never drawn, as there
+  ;; weight before bias: nn.Conv2d.reset_parameters' RNG draw order
   (set! weight (Parameter (kaiming-uniform shape)))
   (set! bias
         (cond

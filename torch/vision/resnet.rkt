@@ -1,8 +1,9 @@
 #lang racket/base
 
-(require (only-in racket/contract/base ->* list/c)
+(require (only-in racket/contract/base ->* flat-named-contract list/c)
          (only-in threading ~>)
-         (only-in "../foreign.rkt" adaptive-avg-pool2d add flatten relu)
+         (only-in "../foreign.rkt"
+                  adaptive-avg-pool2d add flatten relu tensor-shape tensor?)
          (only-in "../foreign/contracts.rkt" image-batch/c)
          (only-in "../nn/batch-norm.rkt" BatchNorm2d)
          (only-in "../nn/conv.rkt" Conv2d)
@@ -26,6 +27,14 @@
   #:forward ([x : image-batch/c])
   (relu (add (bn2 (conv2 (relu (bn1 (conv1 x)))))
              (if shortcut (shortcut x) x))))
+
+(define rgb-image-batch/c
+  (flat-named-contract 'rgb-image-batch
+                       (lambda (x)
+                         (and (tensor? x)
+                              (let ([shape (tensor-shape x)])
+                                (and (= 4 (length shape))
+                                     (= 3 (cadr shape))))))))
 
 (define four-stage-depths/c
   (list/c exact-positive-integer? exact-positive-integer?
@@ -52,6 +61,6 @@
   (set! layer3 (stage (* 2 base) (* 4 base) (list-ref blocks 2) 2))
   (set! layer4 (stage (* 4 base) (* 8 base) (list-ref blocks 3) 2))
   (set! fc (Linear (* 8 base) classes))
-  #:forward ([x : image-batch/c])
+  #:forward ([x : rgb-image-batch/c])
   (~> x stem bn relu layer1 layer2 layer3 layer4
       (adaptive-avg-pool2d 1) (flatten 1) fc))
