@@ -528,7 +528,57 @@ The decay @racket[e] was built with.
 Whether @racket[v] is an average built by @racket[ema].
 }
 
-@section{Optimizers and schedules}
+@section[#:tag "layer-interface"]{The layer interface}
+
+Every layer, whether from @racket[define-layer] or written by hand,
+implements @racket[gen:layer]. A hand-written layer needs only
+@racket[layer-forward]; the collection methods have empty fallbacks, and
+the containers reach every tensor by walking @racket[layer-named-children].
+
+@defthing[gen:layer any/c]{
+The generic interface, with methods @racket[layer-forward],
+@racket[layer-parameters], @racket[layer-named-parameters],
+@racket[layer-buffers], @racket[layer-named-buffers],
+@racket[layer-named-children], @racket[layer-own-tensors],
+@racket[layer-mode] and @racket[layer-set-mode!]. A structure implements
+it with @racket[#:methods]; it derives @racket[prop:to], so every layer is
+@racket[to-able?].}
+
+@defproc[(layer-forward [m layer?] [input any/c] ...) any]{
+The layer's computation on its inputs. @racket[define-layer]'s
+@racket[#:forward] clause supplies it, and applying a layer as a
+procedure calls it.}
+
+@defproc[(forward [m layer?] [input any/c] ...) any]{
+Calls @racket[layer-forward]; the explicit spelling of @racket[(m input)].}
+
+@deftogether[(@defproc[(layer-parameters [m layer?]) (listof tensor?)]
+              @defproc[(layer-buffers [m layer?]) (listof tensor?)])]{
+The tensors the layer itself owns, without walking its children;
+@racket[parameters] and @racket[buffers] are the recursive collectors.
+Both default to the empty list.}
+
+@deftogether[(@defproc[(layer-named-parameters [m layer?] [prefix string?])
+                       (listof (cons/c string? tensor?))]
+              @defproc[(layer-named-buffers [m layer?] [prefix string?])
+                       (listof (cons/c string? tensor?))]
+              @defproc[(layer-named-children [m layer?])
+                       (listof (cons/c string? layer?))])]{
+The named forms: the layer's own parameters and buffers under
+@racket[prefix], and its child layers by field name, which is how
+@racket[named-parameters] builds the dotted paths. Each defaults to the
+empty list, so a hand-written layer that names nothing still walks.}
+
+@deftogether[(@defproc[(buffers [m layer?]) (listof tensor?)]
+              @defproc[(named-buffers [m layer?] [prefix string? ""])
+                       (listof (cons/c string? tensor?))])]{
+Every @racket[Buffer] in the layer tree, and the same paired with dotted
+paths, as @racket[parameters] and @racket[named-parameters] do for
+parameters. Buffers move with the layer under @racket[to] and are saved
+by @racket[save-state!], but no optimizer updates them: running
+statistics, masks, position tables.}
+
+@section[#:tag "optimizers"]{Optimizers and schedules}
 
 An optimizer holds a list of parameters and answers to @racket[step!] and
 @racket[zero-grads!]; every one keeps its state in place on the parameter's

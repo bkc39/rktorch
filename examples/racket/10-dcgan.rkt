@@ -4,7 +4,7 @@
                      torch torch/nn torch/data/loader torch/data/mnist
                      torch/vision/ppm))
 
-@section[#:tag "ex-dcgan"]{Training a DCGAN on MNIST}
+@title[#:tag "ex-dcgan"]{Training a DCGAN on MNIST}
 
 The first generative example that is not a diffusion model: two networks
 in a contest. A generator maps a latent draw to an image through

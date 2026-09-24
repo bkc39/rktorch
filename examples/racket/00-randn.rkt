@@ -3,7 +3,7 @@
 @(require (for-label (except-in racket/base abs cos exp log sin sort sqrt max min length + - * /)
                      torch))
 
-@section[#:tag "ex-randn"]{Seeding the RNG and sampling a tensor}
+@title[#:tag "ex-randn"]{Seeding the RNG and sampling a tensor}
 
 The smallest end-to-end thing you can do with the bindings is seed the global
 random number generator and draw a tensor of standard-normal samples. This is

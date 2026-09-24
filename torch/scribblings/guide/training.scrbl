@@ -6,7 +6,7 @@
                      torch
                      torch/nn))
 
-@title[#:tag "training"]{A training loop}
+@title[#:tag "guide-training"]{A training loop}
 
 Everything so far assembles into one small loop. This chapter fits a model
 to data end to end, with no dataset machinery in the way --- see

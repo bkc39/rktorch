@@ -5,9 +5,11 @@
                      racket/contract
                      (only-in torch
                               arange device device? device/c dtype dtype/c
-                              item manual-seed! ones randn shape sum tensor
-                              tensor->list tensor-device tensor-dtype tensor?
-                              to-dtype zeros)))
+                              eye full full-like item manual-seed! ones
+                              ones-like rand rand-like randn randn-like shape
+                              sum tensor tensor->list tensor->string
+                              tensor-device tensor-dtype tensor-shape tensor?
+                              to-dtype zeros zeros-like)))
 
 @title{Tensors}
 
@@ -103,6 +105,60 @@ It stays @racket['float32] by default, so
 (tensor-dtype (arange 6 #:dtype 'int64))
 ]}
 
+@defproc[(rand [dim exact-nonnegative-integer?] ...
+               [#:device device device/c #f]
+               [#:dtype dtype (or/c 'float32 'float64) #f]
+               [#:requires-grad? requires-grad? boolean? #f])
+         tensor?]{
+As @racket[randn], drawing uniformly from @tt{[0, 1)}.}
+
+@defproc[(full [value real?] [dim exact-nonnegative-integer?] ...
+               [#:device device device/c #f]
+               [#:dtype dtype dtype/c #f]
+               [#:requires-grad? requires-grad? boolean? #f])
+         tensor?]{
+A tensor of the given shape filled with @racket[value], as
+@tt{torch.full}. The value must be one the dtype holds exactly: an
+integer dtype refuses @racket[0.5].
+
+@torch-examples[(full 7 2 2)]}
+
+@defproc[(eye [n exact-nonnegative-integer?] [m exact-nonnegative-integer? n]
+              [#:device device device/c #f]
+              [#:dtype dtype dtype/c #f]
+              [#:requires-grad? requires-grad? boolean? #f])
+         tensor?]{
+The @racket[n] by @racket[m] identity, ones on the diagonal.
+
+@torch-examples[(eye 2)]}
+
+@deftogether[(@defproc[(ones-like [t tensor?]
+                                  [#:device device device/c #f]
+                                  [#:dtype dtype dtype/c #f]
+                                  [#:requires-grad? requires-grad? boolean? #f])
+                       tensor?]
+              @defproc[(full-like [t tensor?] [value real?]
+                                  [#:device device device/c #f]
+                                  [#:dtype dtype dtype/c #f]
+                                  [#:requires-grad? requires-grad? boolean? #f])
+                       tensor?]
+              @defproc[(randn-like [t tensor?]
+                                   [#:device device device/c #f]
+                                   [#:dtype dtype (or/c 'float32 'float64) #f]
+                                   [#:requires-grad? requires-grad? boolean? #f])
+                       tensor?]
+              @defproc[(rand-like [t tensor?]
+                                  [#:device device device/c #f]
+                                  [#:dtype dtype (or/c 'float32 'float64) #f]
+                                  [#:requires-grad? requires-grad? boolean? #f])
+                       tensor?])]{
+Each constructor with @racket[t]'s shape, device and dtype unless
+overridden, as @tt{torch.ones_like} and friends; @racket[zeros-like] is
+described with @racket[zeros]. The noise a diffusion step adds is
+@racket[(randn-like x0)], so it lands where the images live.
+
+@torch-examples[(ones-like (zeros 2 3))]}
+
 @defproc[(manual-seed! [seed exact-integer?]) void?]{
 Seeds the global generator, so the draws that follow repeat. Seeded CPU
 draws match PyTorch's for the same seed.}
@@ -113,6 +169,10 @@ draws match PyTorch's for the same seed.}
 The dimensions, outermost first.
 
 @torch-examples[(shape (tensor '((1 2 3) (4 5 6))))]}
+
+@defproc[(tensor-shape [t tensor?]) (listof exact-nonnegative-integer?)]{
+The same answer as @racket[shape], under the name that says which kind of
+value it reads.}
 
 @defproc[(dtype [t tensor?]) dtype/c]{
 The element type: one of @racket['float32], @racket['float64],
@@ -146,3 +206,9 @@ The single element of a one-element tensor, as a Racket number. Raises if
 the tensor holds anything other than exactly one element.
 
 @torch-examples[(item (sum (tensor '((1 2) (3 4)))))]}
+
+@defproc[(tensor->string [t tensor?]) string?]{
+The tensor as PyTorch prints it, which is also how a tensor displays at
+the REPL.
+
+@torch-examples[(display (tensor->string (tensor '((1 2) (3 4)))))]}

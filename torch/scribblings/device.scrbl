@@ -6,7 +6,8 @@
                      (only-in torch
                               accelerator-if-available arange autocast-dtype
                               autocast-enabled? backward! bytes->tensor
-                              call-with-autocast cpu-device default-device
+                              call-with-autocast cpu-device cuda-if-available
+                              default-device device-type set-default-device!
                               cuda-allocator-settings!
                               cuda-device cuda-memory-info cuda-memory-stats
                               cuda-reset-peak-stats! device device/c device?
@@ -228,6 +229,33 @@ when querying a tensor is a contract error.
 Whether @racket[v] is a device value, as answered by @racket[device],
 @racket[cpu-device], @racket[cuda-device], @racket[mps-device] and
 @racket[accelerator-if-available].}
+
+@deftogether[(@defproc[(cpu-device) device?]
+              @defproc[(cuda-device [index exact-nonnegative-integer? 0]) device?]
+              @defproc[(mps-device) device?])]{
+The CPU, the CUDA device at @racket[index], and Apple's Metal device, as
+values; @racket[(device 'cuda 1)] is the same as @racket[(cuda-device 1)].
+
+@torch-examples[(cpu-device)]}
+
+@defproc[(device-type [dev device?]) (or/c 'cpu 'cuda 'mps)]{
+Which kind of device @racket[dev] is. A training step that wants autocast
+only on CUDA asks this of the batch's device.
+
+@torch-examples[(device-type (device (zeros 1)))]}
+
+@defproc[(cuda-if-available) device?]{
+The first CUDA device when one is present, else the CPU;
+@racket[accelerator-if-available] also considers Metal.}
+
+@deftogether[(@defproc[(default-device) device?]
+              @defproc[(set-default-device! [dev device/c]) void?])]{
+The process default device --- where a constructor allocates when given
+no @racket[#:device] --- and its setter. @racket[with-default-device]
+scopes the same setting to a body, which is usually what a program wants;
+the setter is for a script that picks a device once at the top.
+
+@torch-examples[(default-device)]}
 
 @defproc[(accelerator-if-available) device?]{
 The accelerator this process can use --- CUDA on a Linux machine with an

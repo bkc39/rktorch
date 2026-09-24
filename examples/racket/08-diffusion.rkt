@@ -4,7 +4,7 @@
                      torch torch/nn torch/data/loader torch/vision/cifar10
                      torch/vision/diffusion))
 
-@section[#:tag "ex-diffusion"]{Training a denoising diffusion model on CIFAR-10}
+@title[#:tag "ex-diffusion"]{Training a denoising diffusion model on CIFAR-10}
 
 The generative-vision capstone: a DDPM in the epsilon-prediction form. A
 noising process adds Gaussian noise to a training image over @tt{T} steps;

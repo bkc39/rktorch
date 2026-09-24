@@ -4,7 +4,7 @@
                      torch torch/nn torch/data/loader torch/vision/cifar10
                      torch/vision/resnet torch/vision/transforms))
 
-@section[#:tag "ex-resnet"]{Training a ResNet classifier on CIFAR-10}
+@title[#:tag "ex-resnet"]{Training a ResNet classifier on CIFAR-10}
 
 The classic supervised-vision recipe: a ResNet-18 shaped for 32x32 images,
 random crops and flips on the device, SGD with momentum and weight decay
