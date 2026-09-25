@@ -118,6 +118,33 @@ TEST(ImageDecode, SolidJpegDecodesToItsValue) {
   EXPECT_EQ(bytes_of(rgb.t), std::vector<uint8_t>(192, 100));
 }
 
+std::vector<uint8_t> png_header(uint32_t width, uint32_t height) {
+  std::vector<uint8_t> bytes = {0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n',
+                                0,    0,   0,   13,  'I',  'H',  'D',  'R'};
+  for (const uint32_t v : {width, height}) {
+    for (int shift = 24; shift >= 0; shift -= 8) {
+      bytes.push_back(static_cast<uint8_t>(v >> shift));
+    }
+  }
+  // 8-bit gray, an unchecked CRC, then the empty IDAT a header scan stops at
+  const std::vector<uint8_t> rest = {8, 0, 0, 0, 0,   0,   0,   0,  0,
+                                     0, 0, 0, 0, 'I', 'D', 'A', 'T'};
+  bytes.insert(bytes.end(), rest.begin(), rest.end());
+  return bytes;
+}
+
+TEST(ImageDecode, OversizedImagesAreRefusedFromTheHeader) {
+  EXPECT_EQ(decode(png_header(16000, 16000), 0), nullptr);
+  EXPECT_NE(std::string(tr_last_error())
+                .find("16000 x 16000 pixels is over the 178956970-pixel limit"),
+            std::string::npos)
+      << tr_last_error();
+  EXPECT_EQ(decode(png_header(16000, 11000), 0), nullptr);
+  EXPECT_NE(std::string(tr_last_error()).find("cannot decode image"),
+            std::string::npos)
+      << "under the limit, the missing pixel data is the failure";
+}
+
 TEST(ImageDecode, FailuresAreStatusNotAborts) {
   const std::vector<uint8_t> junk = {'n', 'o', 't', ' ', 'a', 'n', ' ', 'i'};
   EXPECT_EQ(decode(junk, 0), nullptr);
