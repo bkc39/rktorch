@@ -5,9 +5,10 @@
                      racket/contract
                      (only-in torch
                               arange device device? device/c dtype dtype/c
-                              item manual-seed! ones randn shape sum tensor
-                              tensor->list tensor-device tensor-dtype tensor?
-                              to-dtype zeros)))
+                              item manual-seed! numel ones randn shape sum
+                              tensor tensor->list tensor-device tensor-dtype
+                              tensor-numel tensor-shape tensor? to-dtype
+                              zeros)))
 
 @title{Tensors}
 
@@ -110,9 +111,14 @@ draws match PyTorch's for the same seed.}
 @section{Queries}
 
 @defproc[(shape [t tensor?]) (listof exact-nonnegative-integer?)]{
-The dimensions, outermost first.
+The dimensions, outermost first. The short name, and the one to prefer;
+it is Python's @tt{t.shape}.
 
 @torch-examples[(shape (tensor '((1 2 3) (4 5 6))))]}
+
+@defproc[(tensor-shape [t tensor?]) (listof exact-nonnegative-integer?)]{
+The same answer as @racket[shape], under the name that says which kind of
+value it reads.}
 
 @defproc[(dtype [t tensor?]) dtype/c]{
 The element type: one of @racket['float32], @racket['float64],
@@ -126,6 +132,16 @@ one to prefer; it is Python's @tt{t.dtype}.
 
 @defproc[(tensor-dtype [t tensor?]) dtype/c]{
 The same answer as @racket[dtype], under the name that says which kind of
+value it reads.}
+
+@defproc[(numel [t tensor?]) exact-nonnegative-integer?]{
+The number of elements, the product of the dimensions. The short name, and
+the one to prefer; it is Python's @tt{t.numel()}.
+
+@torch-examples[(numel (tensor '((1 2 3) (4 5 6))))]}
+
+@defproc[(tensor-numel [t tensor?]) exact-nonnegative-integer?]{
+The same answer as @racket[numel], under the name that says which kind of
 value it reads.}
 
 @defproc[(tensor-device [t tensor?]) device?]{

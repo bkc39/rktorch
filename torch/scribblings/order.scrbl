@@ -77,6 +77,8 @@ An out-of-memory failure here is not retried, since a second attempt
 would advance the stream.
 }
 
+@section{Negative log likelihood}
+
 @defmodule[torch/nn #:link-target? #f]
 
 @defproc[(nll-loss [log-probs tensor?]

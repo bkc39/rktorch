@@ -59,4 +59,76 @@
     (when (cuda-available?)
       (define x (to (randn 8 3 32 32) (cuda-device)))
       (check-equal? (tensor-device (random-horizontal-flip x)) (cuda-device))
-      (check-equal? (tensor-device (random-crop x)) (cuda-device)))))
+      (check-equal? (tensor-device (random-crop x)) (cuda-device))))
+
+  (define (close? a expected [eps 1e-6])
+    (define values (tensor->list a))
+    (and (= (length values) (length expected))
+         (for/and ([v (in-list values)] [e (in-list expected)])
+           (< (abs (- v e)) eps))))
+
+  (test-case "resize: an int is the short side and the long keeps the aspect"
+    (check-equal? (tensor-shape (resize (randn 3 4 6) 2)) '(3 2 3))
+    (check-equal? (tensor-shape (resize (randn 3 4 6) '(5 7))) '(3 5 7))
+    (check-equal? (tensor-shape (resize (randn 2 3 6 4) 3)) '(2 3 4 3)
+                  "4.5 rows truncate to 4"))
+
+  (test-case "resize: the same size answers the image"
+    (define x (randn 3 4 6))
+    (check-true (same? (resize x '(4 6)) x))
+    (check-true (same? (resize x 4 #:antialias? #f) x)))
+
+  (test-case "resize: the two filters by hand"
+    (define row (reshape (arange 4.0) 1 1 4))
+    (check-true (close? (resize row '(1 2) #:antialias? #f) '(0.5 2.5))
+                "plain bilinear averages the two inputs around each centre")
+    (check-true (close? (resize row '(1 2)) '(5/7 16/7))
+                "the antialiased triangle spans two inputs a side")
+    (check-true (close? (resize (reshape (arange 9.0) 1 1 9) '(1 3))
+                        '(1.25 4.0 6.75))
+                "a whole-number factor puts the triangle's edge on a pixel")
+    (define pair (reshape (arange 2.0) 1 1 2))
+    (for ([antialias? (in-list '(#t #f))])
+      (check-true (close? (resize pair '(1 4) #:antialias? antialias?)
+                          '(0.0 0.25 0.75 1.0))
+                  "upsampling clamps at the edges")))
+
+  (test-case "resize: float64 and the half dtypes keep their dtype"
+    (for ([dtype (in-list '(float64 float16 bfloat16))])
+      (define out (resize (to-dtype (rand 3 8 8) dtype) 4))
+      (check-equal? (tensor-dtype out) dtype)
+      (check-equal? (tensor-shape out) '(3 4 4)))
+    (check-exn exn:fail:contract?
+               (lambda () (resize (to-dtype (rand 3 8 8) 'uint8) 4)))
+    (check-exn exn:fail:contract? (lambda () (resize (rand 8 8) 4))))
+
+  (test-case "center-crop: the offset rounds half to even, as Python's round"
+    (define x (reshape (arange 25) 1 5 5))
+    (check-equal? (tensor-shape (center-crop x 2)) '(1 2 2))
+    (check-equal? (tensor->list (center-crop x 2)) '(12.0 13.0 17.0 18.0))
+    (check-equal? (tensor->list (center-crop x '(4 1))) '(2.0 7.0 12.0 17.0))
+    (check-equal? (tensor-shape (center-crop (rand 2 3 9 7) '(5 7)))
+                  '(2 3 5 7))
+    (check-exn exn:fail:contract? (lambda () (center-crop x 6)))
+    (check-exn exn:fail:contract? (lambda () (center-crop x '(2 6)))))
+
+  (test-case "normalize: per channel, one mean and one positive std each"
+    (define x (reshape (tensor '(1.0 2.0 3.0 4.0)) 2 1 2))
+    (check-true (close? (normalize x '(1 2) '(2 4)) '(0.0 0.5 0.25 0.5)))
+    (check-exn exn:fail:contract? (lambda () (normalize x '(1) '(2))))
+    (check-exn exn:fail:contract? (lambda () (normalize x '(1 2) '(2 0))))
+    (define centred
+      (imagenet-normalize (reshape (tensor imagenet-mean) 3 1 1)))
+    (check-true (close? centred '(0.0 0.0 0.0)))
+    (check-exn exn:fail:contract?
+               (lambda () (imagenet-normalize (rand 1 4 4)))))
+
+  (test-case "convert-image-dtype: torchvision's scaling each way"
+    (define bytes-image (reshape (tensor #"\0\200\377") 1 1 3))
+    (check-true (close? (convert-image-dtype bytes-image) '(0.0 128/255 1.0)))
+    (define floats (reshape (tensor '(0.0 0.5 1.0)) 1 1 3))
+    (check-equal? (tensor->list (convert-image-dtype floats 'uint8))
+                  '(0 127 255))
+    (check-eq? (convert-image-dtype floats 'float32) floats)
+    (check-equal? (tensor-dtype (convert-image-dtype floats 'float64))
+                  'float64)))
