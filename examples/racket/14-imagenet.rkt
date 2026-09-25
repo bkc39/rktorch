@@ -60,10 +60,10 @@ differentiate. A softmax turns the logits into probabilities, and
       (softmax (net batch) 1))))
 
 (define (top-k probs [k 5])
-  (for/list ([i (in-range (car (tensor-shape probs)))])
-    (define-values (ps indices) (topk (select probs 0 i) k))
-    (for/list ([p (in-list (tensor->list ps))]
-               [index (in-list (tensor->list indices))])
+  (for/list ([row (in-tensor probs)])
+    (define-values (ps indices) (topk row k))
+    (for/list ([p (in-flattened-tensor ps)]
+               [index (in-flattened-tensor indices)])
       (cons (list-ref imagenet-classes index) p))))]
 
 @bold{Putting it together.} The runner passes the committed ant and bee

@@ -90,6 +90,10 @@ with `backward!` outside the form as PyTorch recommends). From
   `make-generator` / `generator?` / `randperm` / `draw-seed` — a CPU
   `torch.Generator` with its own stream, the permutation and the int64
   seed word drawn from it (or the global stream), for loaders (#87)
+- iteration (`torch/foreign/sequences.rkt`, #199): `in-tensor` (the
+  slices along the first dimension as views, Python's `for row in t`) and
+  `in-flattened-tensor` (the elements as Racket numbers, row-major, copied
+  to the host once; Python's `for x in t.flatten()` yields 0-d tensors)
 - `length` (`torch/foreign/sized.rkt`): Python's `len` as `gen:sized`,
   shadowing racket/base's like `+`; fast defaults for lists, vectors,
   strings, hashes; a tensor's first dimension; datasets and loaders

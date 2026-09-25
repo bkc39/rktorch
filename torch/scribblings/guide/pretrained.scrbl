@@ -78,11 +78,17 @@ into the cache the first time, checks it, and loads it:
 (define probs
   (in-eval-mode net
     (with-no-grad (softmax (net (unsqueeze x 0)) 1))))
-(define-values (ps indices) (topk (select probs 0 0) 5))
-(for/list ([p (in-list (tensor->list ps))]
-           [i (in-list (tensor->list indices))])
-  (cons (list-ref imagenet-classes i) p))
+(for/list ([row (in-tensor probs)])
+  (define-values (ps indices) (topk row 5))
+  (for/list ([p (in-flattened-tensor ps)]
+             [i (in-flattened-tensor indices)])
+    (cons (list-ref imagenet-classes i) p)))
 ]
+
+@racket[in-tensor] walks the batch one image's probabilities at a time,
+Python's @tt{for row in probs}, and @racket[in-flattened-tensor] walks the
+five values and indices @racket[topk] picked as Racket numbers, so an
+index goes straight to @racket[list-ref].
 
 Two details matter. @racket[in-eval-mode] makes the batch norms use the
 running statistics saved with the weights, so a batch of one image is
