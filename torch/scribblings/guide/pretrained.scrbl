@@ -78,17 +78,20 @@ into the cache the first time, checks it, and loads it:
 (define probs
   (in-eval-mode net
     (with-no-grad (softmax (net (unsqueeze x 0)) 1))))
-(for/list ([row (in-tensor probs)])
-  (define-values (ps indices) (topk row 5))
-  (for/list ([p (in-flattened-tensor ps)]
-             [i (in-flattened-tensor indices)])
-    (cons (list-ref imagenet-classes i) p)))
+(for*/list ([row (in-tensor probs)]
+            #:do [(define-values (ps indices) (topk row 5))]
+            [(p i) (in-parallel (in-flattened-tensor ps)
+                                (in-flattened-tensor indices))])
+  (cons (list-ref imagenet-classes i) p))
 ]
 
 @racket[in-tensor] walks the batch one image's probabilities at a time,
-Python's @tt{for row in probs}, and @racket[in-flattened-tensor] walks the
-five values and indices @racket[topk] picked as Racket numbers, so an
-index goes straight to @racket[list-ref].
+Python's @tt{for row in probs}. @racket[#:do] binds the two tensors
+@racket[topk] returns for that row, and @racket[in-parallel] walks the
+five values and their indices together, each through
+@racket[in-flattened-tensor] as Racket numbers, so an index goes straight
+to @racket[list-ref]. The result is one list of guesses for the whole
+batch, here the five for the one photograph.
 
 Two details matter. @racket[in-eval-mode] makes the batch norms use the
 running statistics saved with the weights, so a batch of one image is
