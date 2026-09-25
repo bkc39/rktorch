@@ -71,6 +71,9 @@
                     '(("a.jpeg" 0) ("b.PNG" 0) ("c.jpg" 0) ("d.png" 1)))
       (check-equal? (names (image-folder-samples root #:extensions '(".png")))
                     '(("b.PNG" 0) ("d.png" 1)))
+      (check-equal? (names (image-folder-samples root #:extensions '(".PNG")))
+                    '(("b.PNG" 0) ("d.png" 1))
+                    "case is ignored on both sides")
       (define-values (gray _) (dataset-ref (image-folder root) 3))
       (check-equal? (car (tensor-shape gray)) 3 "decoded as RGB")))
 

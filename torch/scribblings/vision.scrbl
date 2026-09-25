@@ -587,9 +587,9 @@ labelled @racket[i] is the @racket[i]th.
                                [#:extensions extensions (listof string?)
                                              '(".jpg" ".jpeg" ".png")])
          (listof (cons/c path? exact-nonnegative-integer?))]{
-Every image file and its label, class by class; within a class, a
-directory's files in name order come before its subdirectories', which
-follow in turn.
+Every image file and its label, class by class, each class's files in
+the order of their paths. Symbolic links to directories are not
+followed, so a link back up the tree cannot loop.
 }
 
 @section{Ants and bees}

@@ -29,7 +29,7 @@ with momentum under a step schedule.
                   random-horizontal-flip random-resized-crop))]
 
 @chunk[<r15-provide>
-(provide pick-device load-train load-val train-batch head? set-frozen!
+(provide pick-device load-train load-val train-batch head-parameters set-frozen!
          accuracy train-phase finetune)]
 
 @bold{The data.} An image folder reads one class per directory, labels in
@@ -77,15 +77,18 @@ so a run replays.
 
 @bold{Freezing.} A frozen weight does not require a gradient: the
 backward pass stops short of it and an optimizer never moves it. The head
-is the network's @racket[fc] field, so its parameters are the ones named
-under it.
+is the network's @racket[fc] child, so its parameters are that child's,
+PyTorch's @tt{model.fc.parameters()}; every other parameter is the
+backbone.
 
 @chunk[<r15-freeze>
-(define (head? name) (regexp-match? #rx"^fc[.]" name))
+(define (head-parameters net)
+  (parameters (child-ref net "fc")))
 
 (define (set-frozen! net frozen?)
-  (for ([(name p) (in-named-parameters net)]
-        #:unless (head? name))
+  (define head (head-parameters net))
+  (for ([p (in-list (parameters net))]
+        #:unless (memq p head))
     (requires-grad! p (not frozen?))))]
 
 @bold{Accuracy.} The validation batch under @racket[in-eval-mode], so
@@ -118,14 +121,14 @@ validation accuracy after it, and its wall-clock seconds.
   (define n (vector-length images))
   (for/list ([epoch (in-range 1 (add1 epochs))])
     (define start (current-inexact-milliseconds))
-    (define order (tensor->list (randperm n #:generator generator)))
+    (define order
+      (for/vector #:length n
+                  ([i (in-flattened-tensor (randperm n #:generator generator))])
+        i))
     (define losses
       (for/list ([from (in-range 0 n batch)])
         (define indices
-          (for/list ([i (in-list order)]
-                     [k (in-naturals)]
-                     #:when (<= from k (sub1 (+ from batch))))
-            i))
+          (for/list ([i (in-vector order from (min n (+ from batch)))]) i))
         (define-values (xs ys) (train-batch images labels indices generator))
         (zero-grads! opt)
         (define loss (cross-entropy (net xs) ys))
@@ -164,9 +167,7 @@ two-way head, where torchvision would assign a new @tt{model.fc}.
                  #:epochs epochs #:batch batch #:generator generator
                  #:phase name))
   (set-frozen! net #t)
-  (define head (for/list ([(name p) (in-named-parameters net)]
-                          #:when (head? name))
-                 p))
+  (define head (head-parameters net))
   (define features (phase 'feature-extract head 0.001 feature-epochs))
   (set-frozen! net #f)
   (define tuned (phase 'fine-tune (parameters net) 0.0001 finetune-epochs))

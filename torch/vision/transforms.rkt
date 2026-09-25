@@ -277,8 +277,10 @@
 (define (central-window h w ratio)
   (define-values (ch cw)
     (cond
-      [(< (/ w h) (car ratio)) (values (exact-round (/ w (car ratio))) w)]
-      [(> (/ w h) (cadr ratio)) (values h (exact-round (* h (cadr ratio))))]
+      [(< (/ w h) (car ratio))
+       (values (max 1 (exact-round (/ w (car ratio)))) w)]
+      [(> (/ w h) (cadr ratio))
+       (values h (max 1 (exact-round (* h (cadr ratio)))))]
       [else (values h w)]))
   (list (quotient (- h ch) 2) (quotient (- w cw) 2) ch cw))
 

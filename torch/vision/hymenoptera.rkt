@@ -5,7 +5,8 @@
          (only-in "../foreign.rkt" device/c tensor?)
          (only-in "../private/contract.rkt" define/contract-out)
          (only-in "../private/download.rkt" call-with-verified-download)
-         (only-in "../private/util.rkt" with-temporary-directory)
+         (only-in "../private/util.rkt"
+                  cache-dir env-setting with-temporary-directory)
          (only-in "image-folder.rkt" image-folder image-folder?))
 
 (define archive-url
@@ -14,17 +15,10 @@
 (define archive-sha256
   "fbc41b31d544714d18dd1230b1e2b455e1557766e13e67f9f5a7a23af7c02209")
 
-(define (setting name default)
-  (define v (getenv name))
-  (if (and v (not (string=? v ""))) v default))
+(define (hymenoptera-dir)
+  (cache-dir "RKTORCH_HYMENOPTERA_DIR" "hymenoptera"))
 
-(define (cache-dir)
-  (define override (setting "RKTORCH_HYMENOPTERA_DIR" #f))
-  (if override
-      (string->path override)
-      (build-path (find-system-path 'cache-dir) "rktorch" "hymenoptera")))
-
-(define (data-root) (build-path (cache-dir) "hymenoptera_data"))
+(define (data-root) (build-path (hymenoptera-dir) "hymenoptera_data"))
 
 (define/contract-out (hymenoptera-cached?) ;; noqa
   (-> boolean?)
@@ -34,7 +28,7 @@
 ;; leaves no tree
 (define (install! zip)
   (with-temporary-directory (unpacked #:template "hymenoptera-~a"
-                                      #:directory (cache-dir))
+                                      #:directory (hymenoptera-dir))
     (call-with-input-file zip
       (lambda (in) (unzip in (make-filesystem-entry-reader #:dest unpacked))))
     (rename-file-or-directory (build-path unpacked "hymenoptera_data")
@@ -44,9 +38,9 @@
   (-> path?)
   (unless (hymenoptera-cached?)
     (call-with-verified-download 'hymenoptera-root
-                                 (setting "RKTORCH_HYMENOPTERA_URL"
-                                          archive-url)
-                                 (cache-dir) archive-bytes archive-sha256
+                                 (or (env-setting "RKTORCH_HYMENOPTERA_URL")
+                                     archive-url)
+                                 (hymenoptera-dir) archive-bytes archive-sha256
                                  install!))
   (data-root))
 

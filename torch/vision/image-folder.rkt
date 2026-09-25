@@ -1,6 +1,7 @@
 #lang racket/base
 
 (require (only-in racket/contract/base -> ->* cons/c listof or/c)
+         (only-in racket/file find-files)
          (only-in racket/string string-suffix?)
          (only-in "../data/dataset.rkt" define-dataset)
          (only-in "../foreign.rkt" device/c tensor tensor?)
@@ -12,18 +13,14 @@
 (define (image-file? path extensions)
   (define-values (_dir name _must-be-dir?) (split-path path))
   (define lowered (string-downcase (path->string name)))
-  (for/or ([ext (in-list extensions)]) (string-suffix? lowered ext)))
+  (for/or ([ext (in-list extensions)])
+    (string-suffix? lowered (string-downcase ext))))
 
 (define/contract-out (image-folder-classes root) ;; noqa
   (-> path-string? (listof string?))
   (for/list ([entry (in-list (directory-list root))]
              #:when (directory-exists? (build-path root entry)))
     (path->string entry)))
-
-(define (files-under dir)
-  (define entries (directory-list dir #:build? #t))
-  (append (filter file-exists? entries)
-          (apply append (map files-under (filter directory-exists? entries)))))
 
 (define/contract-out (image-folder-samples root ;; noqa
                                            #:extensions
@@ -34,8 +31,10 @@
                                                        root)]
                                                [label (in-naturals)])
                                       (cons class label)))]
-              [file (in-list (files-under (build-path root
-                                                      (car class+label))))]
+              [file (in-list (sort (find-files file-exists?
+                                               (build-path root
+                                                           (car class+label)))
+                                   path<?))]
               #:when (image-file? file extensions))
     (cons file (cdr class+label))))
 

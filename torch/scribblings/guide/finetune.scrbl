@@ -45,7 +45,7 @@ committed with the library are laid out the same way:
 @torch-examples[
 (require torch/data/loader torch/vision/image-folder)
 (define folder
-  (collection-file-path "hymenoptera" "torch" "vision" "fixtures"))
+  (collection-path "torch" "vision" "fixtures" "hymenoptera"))
 (image-folder-classes folder)
 (define photos (image-folder folder))
 (length photos)

@@ -176,7 +176,15 @@
                                             #:ratio '(1/2 2)
                                             #:generator (make-generator 0))
                        (resize big '(3 3)))
-                "the image's own ratio admissible: the whole image"))
+                "the image's own ratio admissible: the whole image")
+    (check-true (same? (random-resized-crop x 3 #:scale '(1 1)
+                                            #:ratio '(1/1000 1/1000))
+                       (resize (narrow x 2 4 1) '(3 3)))
+                "a ratio too thin for a pixel still keeps one column")
+    (check-true (same? (random-resized-crop x 3 #:scale '(1 1)
+                                            #:ratio '(1000 1000))
+                       (resize (narrow x 1 4 1) '(3 3)))
+                "and one row"))
 
   (test-case "random-resized-crop: what it refuses"
     (define x (rand 3 10 10))
