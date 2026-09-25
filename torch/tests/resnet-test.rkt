@@ -84,10 +84,21 @@
       (environment-variables-set! env #"RKTORCH_WEIGHTS_DIR"
                                   (string->bytes/utf-8 (path->string cache)))
       (parameterize ([current-environment-variables env])
-        (check-exn #rx"the checkpoint lacks weights.*conv1.weight"
+        (check-exn #rx"does not fit the backbone.*missing: .*conv1.weight"
                    (lambda () (resnet18 #:pretrained? #t #:classes 2)))
         (check-exn #rx"checkpoint does not match the model"
                    (lambda () (resnet18 #:pretrained? #t))))))
+
+  (test-case "a checkpoint with keys the backbone lacks is refused too"
+    (with-temporary-directory (cache)
+      (save-state! (ImageNetResNet '(2 2 2 3))
+                   (build-path cache "resnet18-imagenet1k-v1.safetensors"))
+      (define env (environment-variables-copy (current-environment-variables)))
+      (environment-variables-set! env #"RKTORCH_WEIGHTS_DIR"
+                                  (string->bytes/utf-8 (path->string cache)))
+      (parameterize ([current-environment-variables env])
+        (check-exn #rx"does not fit the backbone.*unexpected: .*layer4[.]2[.]"
+                   (lambda () (resnet18 #:pretrained? #t #:classes 2))))))
 
   (when (pretrained-weights-cached? 'resnet18-imagenet1k-v1)
     (test-case "another head keeps the pretrained backbone and starts fresh"

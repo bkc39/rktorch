@@ -59,6 +59,24 @@
            (check-false (pretrained-weights-cached? name))
            (check-equal? (directory-list cache) '()))))))
 
+  (test-case "a mirror's URL may leave off its trailing slash"
+    (with-temporary-directory (release)
+      (with-temporary-directory (cache)
+        (call-with-output-file (build-path release file)
+          (lambda (out) (write-bytes #"not the checkpoint" out)))
+        (define bare
+          (regexp-replace #rx"/$" (directory-url release) ""))
+        (with-weights-env
+         (list (cons "RKTORCH_WEIGHTS_DIR" (path->string cache))
+               (cons "RKTORCH_WEIGHTS_URL" bare))
+         (lambda ()
+           (check-exn (regexp (string-append
+                               "url: \""
+                               (regexp-quote bare)
+                               "/resnet18-imagenet1k-v1.safetensors\""))
+                      (lambda () (pretrained-weights name))
+                      "the file was found and read, so the slash was added"))))))
+
   (test-case "the right size is not enough: the checksum decides"
     (with-temporary-directory (release)
       (with-temporary-directory (cache)

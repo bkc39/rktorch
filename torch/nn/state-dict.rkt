@@ -110,7 +110,6 @@
              misplaced)
        '())))
 
-;; model key -> (file key . header entry); a key renamed to #f is dropped
 (define (entries-by-model-key header rename)
   (for/fold ([by-key (hash)])
             ([file-key (in-list (sort (map symbol->string (hash-keys header))

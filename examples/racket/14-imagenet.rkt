@@ -22,7 +22,7 @@ names. It is ocaml-torch's @tt{pretrained} predict example.
 (require torch torch/nn
          (only-in torch/vision/image read-image)
          (only-in torch/vision/imagenet imagenet-classes)
-         (only-in torch/vision/resnet resnet18 resnet34 resnet50)
+         (only-in torch/vision/resnet resnet18)
          (only-in torch/vision/transforms imagenet-preprocess))]
 
 @chunk[<r14-provide>
