@@ -23,6 +23,7 @@
          "foreign/operators.rkt"
          "foreign/nn-promoted.rkt"
          "foreign/order-ops.rkt"
+         "foreign/sequences.rkt"
          (except-in "foreign/promoted.rkt" tensor-ref tensor-ref!)
          (submod "foreign/promoted.rkt" checked)
          (only-in "foreign/ref-syntax.rkt" ref ref!)
@@ -49,6 +50,8 @@
          tensor-numel
          tensor->vector
          tensor->list
+         in-tensor
+         in-flattened-tensor
          tensor->bytes
          tensor->repr
          tensor->string)
