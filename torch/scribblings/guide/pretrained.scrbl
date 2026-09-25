@@ -46,8 +46,8 @@ photograph still has three channels:
   (read-image (collection-file-path "10870992_eebeeb3a12.jpg" "torch"
                                     "vision" "fixtures" "hymenoptera" "bees")
               #:mode 'rgb))
-(tensor-shape bee)
-(tensor-dtype bee)
+(shape bee)
+(dtype bee)
 ]
 
 @section[#:tag "pretrained-input"]{The input the network expects}
@@ -60,7 +60,7 @@ cut the central 224 by 224 window, and normalise.
 
 @torch-examples[
 (define x (imagenet-preprocess bee))
-(tensor-shape x)
+(shape x)
 ]
 
 Feeding a network anything else, a different size or unnormalised
