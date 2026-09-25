@@ -218,11 +218,11 @@ input's device.
 (define photo
   (read-image (collection-file-path "smooth-401x299.jpg"
                                     "torch" "vision" "fixtures" "images")))
-(tensor-shape photo)
+(shape photo)
 (define x
   (imagenet-normalize
    (center-crop (resize (convert-image-dtype photo) 256) 224)))
-(tensor-shape x)
+(shape x)
 (item (max (abs (- x (imagenet-preprocess photo)))))
 ]
 
