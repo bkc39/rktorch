@@ -50,7 +50,7 @@ committed with the library are laid out the same way:
 (define photos (image-folder folder))
 (length photos)
 (define-values (image label) (dataset-ref photos 3))
-(list (tensor-shape image) (item label))
+(list (shape image) (item label))
 ]
 
 @racket[hymenoptera-dataset] is the full set, fetched and cached the
@@ -66,7 +66,7 @@ pretrained weights and the head starts from a fresh initialisation.
 @torch-examples[
 (require torch/vision/resnet)
 (define net (resnet18 #:classes 2))
-(tensor-shape (cdr (assoc "fc.weight" (named-parameters net))))
+(shape (cdr (assoc "fc.weight" (named-parameters net))))
 ]
 
 Here @racket[#:pretrained?] is left out, so the example builds without
@@ -80,11 +80,11 @@ moves it. Freezing everything but the head turns the network into a
 fixed feature extractor with a small classifier on top:
 
 @torch-examples[
-(for ([np (in-list (named-parameters net))])
-  (requires-grad! (cdr np) (regexp-match? #rx"^fc[.]" (car np))))
-(for/list ([np (in-list (named-parameters net))]
-           #:when (requires-grad? (cdr np)))
-  (car np))
+(for ([(name p) (in-named-parameters net)])
+  (requires-grad! p (regexp-match? #rx"^fc[.]" name)))
+(for/list ([(name p) (in-named-parameters net)]
+           #:when (requires-grad? p))
+  name)
 ]
 
 @section[#:tag "finetune-run"]{Two phases}

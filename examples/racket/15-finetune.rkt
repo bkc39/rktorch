@@ -84,9 +84,9 @@ under it.
 (define (head? name) (regexp-match? #rx"^fc[.]" name))
 
 (define (set-frozen! net frozen?)
-  (for ([np (in-list (named-parameters net))]
-        #:unless (head? (car np)))
-    (requires-grad! (cdr np) (not frozen?))))]
+  (for ([(name p) (in-named-parameters net)]
+        #:unless (head? name))
+    (requires-grad! p (not frozen?))))]
 
 @bold{Accuracy.} The validation batch under @racket[in-eval-mode], so
 the batch norms normalise with their running statistics, in slices of 64.
@@ -164,9 +164,9 @@ two-way head, where torchvision would assign a new @tt{model.fc}.
                  #:epochs epochs #:batch batch #:generator generator
                  #:phase name))
   (set-frozen! net #t)
-  (define head (for/list ([np (in-list (named-parameters net))]
-                          #:when (head? (car np)))
-                 (cdr np)))
+  (define head (for/list ([(name p) (in-named-parameters net)]
+                          #:when (head? name))
+                 p))
   (define features (phase 'feature-extract head 0.001 feature-epochs))
   (set-frozen! net #f)
   (define tuned (phase 'fine-tune (parameters net) 0.0001 finetune-epochs))

@@ -44,13 +44,13 @@
     (check-true (and (rational? (list-ref r 2)) (not (nan? (list-ref r 2))))
                 (format "non-finite loss: ~a" r))
     (check-true (<= 0.0 (list-ref r 3) 1.0)))
-  (check-equal? (tensor-shape (cdr (assoc "fc.weight" (named-parameters net))))
+  (check-equal? (shape (cdr (assoc "fc.weight" (named-parameters net))))
                 '(2 512))
   (check-true (layer-training? net) "accuracy left the net in eval mode")
   (set-frozen! net #t)
-  (check-equal? (for/list ([np (in-list (named-parameters net))]
-                           #:when (requires-grad? (cdr np)))
-                  (car np))
+  (check-equal? (for/list ([(name p) (in-named-parameters net)]
+                           #:when (requires-grad? p))
+                  name)
                 '("fc.weight" "fc.bias"))
   (set-frozen! net #f)
   (check-true (andmap requires-grad? (parameters net)))

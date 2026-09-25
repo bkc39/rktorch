@@ -29,6 +29,18 @@
     (check-equal? (car seen) 7 "a plain field is kept, not registered")
     (check-false (list-ref seen 5) "a field never assigned is #f"))
 
+  (test-case "in-named-parameters yields each name and its tensor"
+    (define k (Kinds 7))
+    (check-equal? (for/list ([(name _) (in-named-parameters k)]) name)
+                  (map car (named-parameters k)))
+    (check-true (andmap eq?
+                        (for/list ([(_ p) (in-named-parameters k)]) p)
+                        (map cdr (named-parameters k))))
+    (check-equal? (for/list ([(name _) (in-named-parameters (Dropout))]) name)
+                  '())
+    (check-exn #rx"^in-named-parameters: contract violation"
+               (lambda () (in-named-parameters 5))))
+
   (test-case "buffers are named, listed after parameters, and round-trip the state dict"
     (define k (Kinds 1))
     (check-equal? (map car (named-buffers k)) '("shift"))
