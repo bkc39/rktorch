@@ -200,7 +200,7 @@
           racketPkg = racketFor pkgs pkgsRacket;
           racket-deps = racketDepsFor pkgs racketPkg;
 
-          cppCommonInputs = [ torch pkgs.gtest pkgs.libsndfile ];
+          cppCommonInputs = [ torch pkgs.gtest pkgs.libsndfile pkgs.stb ];
           cppNativeInputs = [ pkgs.cmake pkgs.clang-tools pkgs.ninja pkgs.pkg-config ];
           cppCmakeFlags = [
             "-DBUILD_TESTING=ON"
@@ -225,7 +225,7 @@
               src = ./cpp;
               nativeBuildInputs = [ p.cmake p.clang-tools p.ninja p.pkg-config ]
                 ++ p.lib.optional cuda p.cudaPackages_13.cuda_nvcc;
-              buildInputs = [ (torchPackageFor p) p.gtest p.libsndfile ]
+              buildInputs = [ (torchPackageFor p) p.gtest p.libsndfile p.stb ]
                 ++ p.lib.optional cuda cudaTk;
               cmakeFlags = cppCmakeFlags ++ p.lib.optionals cuda [
                 "-DCUDA_TOOLKIT_ROOT_DIR=${cudaTk}"
@@ -303,9 +303,8 @@
                   failed=1
                 fi
               # generated/ shards are exempt: their size is the generator's
-              # concern, not a hand-maintainability gate; so is vendored
-              # third_party/ code, whose size is upstream's.
-              done < <(find . -type f \( -name '*.c' -o -name '*.h' -o -name '*.hpp' -o -name '*.cpp' \) -not -path '*/generated/*' -not -path '*/third_party/*')
+              # concern, not a hand-maintainability gate.
+              done < <(find . -type f \( -name '*.c' -o -name '*.h' -o -name '*.hpp' -o -name '*.cpp' \) -not -path '*/generated/*')
               if [ "$failed" -ne 0 ]; then
                 exit 1
               fi
@@ -534,6 +533,7 @@
             pkgs.gtest
             pkgs.libsndfile
             pkgs.ninja
+            pkgs.stb
             pkgs.pkg-config
             racketPkg
             torch
