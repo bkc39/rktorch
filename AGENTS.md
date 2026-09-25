@@ -144,7 +144,9 @@ with `backward!` outside the form as PyTorch recommends). From
 - image reading (`torch/vision/image.rkt`, #199): `decode-image` (bytes)
   and `read-image` (a path) to a uint8 `[C H W]` tensor, `#:mode
   'unchanged 'gray 'gray-alpha 'rgb 'rgba`, `#:device`; JPEG and PNG
-  through the vendored `stb_image` behind `tr_image_decode`; PNGs match
+  through `stb_image` behind `tr_image_decode`, the header from nixpkgs'
+  `stb` found by pkg-config like libsndfile and compiled once in
+  `src/torchrkt/detail/stb_image.c`; PNGs match
   torchvision.io exactly, JPEGs within a count or two
   (`image-parity-test.rkt`, torchvision only in the default shell)
 - generative examples on MNIST (#152): `examples/racket/10-dcgan.rkt` (a
@@ -494,10 +496,6 @@ Conventions:
   curated-facade concern.
 - Generated output is committed (AOT); CI's `codegen-drift` job regenerates
   and fails on any diff, so never edit generated files by hand.
-- `third_party/` (vendored upstream code, today `stb/stb_image.h`, see its
-  README for the pinned commit) is exempt from the line gate too, and sits
-  outside the format and tidy globs; the shim includes it as a SYSTEM
-  header so its warnings stay out of the build.
 - `generated/` is exempt from the C++ 500-line gate (shard size is the
   generator's concern).
 - The golden-equivalence proof lives in
