@@ -508,8 +508,12 @@ CPU and moves it to @racket[device], or else to the default device.
 @racket['unchanged] keeps the channels the file stores, except that a
 palette PNG comes back as RGB, or RGBA with a transparency chunk; the
 other modes convert to one, two, three or four channels, the way
-torchvision's @tt{ImageReadMode} does. What is not a JPEG or a PNG, or is
-truncated, is an error naming the reason.
+torchvision's @tt{ImageReadMode} does, gray as stb's integer luma
+@tt{(77r + 150g + 29b) >> 8}. What is not a JPEG or a PNG, or is
+truncated, is an error naming the reason. So is an image of more than
+178,956,970 pixels, Pillow's decompression-bomb limit, which is refused
+from its header before any pixel is decoded, so a small file cannot
+claim gigabytes of memory.
 }
 
 @defproc[(read-image [path path-string?]

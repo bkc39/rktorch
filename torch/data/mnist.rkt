@@ -6,7 +6,7 @@
          (only-in racket/port copy-port)
          (only-in net/url string->url get-pure-port call/input-url)
          (only-in file/gunzip gunzip-through-ports)
-         (only-in "../private/util.rkt" with-temporary-file)
+         (only-in "../private/util.rkt" cache-dir with-temporary-file)
          (only-in "../main.rkt" div reshape tensor to-dtype))
 
 (provide read-idx
@@ -48,10 +48,7 @@
 (define mnist-mirror "https://ossci-datasets.s3.amazonaws.com/mnist/")
 
 (define (mnist-cache-dir)
-  (define override (getenv "RKTORCH_MNIST_DIR"))
-  (if (and override (not (string=? override "")))
-      (string->path override)
-      (build-path (find-system-path 'cache-dir) "rktorch" "mnist")))
+  (cache-dir "RKTORCH_MNIST_DIR" "mnist"))
 
 (define (download-cached name)
   (define dest (build-path (mnist-cache-dir) name))

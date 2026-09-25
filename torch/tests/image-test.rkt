@@ -41,12 +41,19 @@
     (check-equal? (plane widened 2) (plane gray 0))
     (define opaque (read-image (fixture "gradient.png") #:mode 'rgba))
     (check-equal? (plane opaque 3) (drawn (lambda (_x _y) 255)))
-    (check-equal? (tensor-shape (read-image (fixture "gradient.png")
-                                            #:mode 'gray-alpha))
-                  '(2 23 37))
-    (check-equal? (tensor-shape (read-image (fixture "gradient.png")
-                                            #:mode 'gray))
-                  '(1 23 37))
+    (define (luma x y)
+      (quotient (+ (* 77 (modulo (* 7 x) 256))
+                   (* 150 (modulo (* 11 y) 256))
+                   (* 29 (modulo (+ (* 3 x) (* 5 y)) 256)))
+                256))
+    (define gray-alpha (read-image (fixture "gradient.png") #:mode 'gray-alpha))
+    (check-equal? (tensor-shape gray-alpha) '(2 23 37))
+    (check-equal? (plane gray-alpha 0) (drawn luma)
+                  "stb's luma, (77r + 150g + 29b) >> 8")
+    (check-equal? (plane gray-alpha 1) (drawn (lambda (_x _y) 255)))
+    (define reduced (read-image (fixture "gradient.png") #:mode 'gray))
+    (check-equal? (tensor-shape reduced) '(1 23 37))
+    (check-equal? (plane reduced 0) (drawn luma))
     (check-equal? (tensor-shape (read-image (fixture "palette.png")))
                   '(3 23 37)))
 
@@ -66,6 +73,15 @@
     (define from-bytes (decode-image (file->bytes path) #:device 'cpu))
     (check-equal? (tensor->bytes from-bytes) (tensor->bytes (read-image path)))
     (check-equal? (tensor-device from-bytes) (cpu-device)))
+
+  (test-case "an image over the pixel limit is refused from its header"
+    (define (be32 n) (integer->integer-bytes n 4 #f #t))
+    (define header
+      (bytes-append #"\211PNG\r\n\32\n" (be32 13) #"IHDR" (be32 16000)
+                    (be32 16000) (bytes 8 0 0 0 0) (be32 0) (be32 0) #"IDAT"))
+    (check-exn
+     #rx"decode-image: .*16000 x 16000 pixels is over the 178956970-pixel limit"
+     (lambda () (decode-image header))))
 
   (test-case "what is not an image is an error, what is not bytes a contract"
     (check-exn #rx"decode-image: .*cannot decode image: unknown image type"
