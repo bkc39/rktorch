@@ -17,6 +17,7 @@ include(cmake/TorchrktTools.cmake)
 find_package(Torch CONFIG REQUIRED)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(SNDFILE REQUIRED IMPORTED_TARGET sndfile)
+pkg_check_modules(STB REQUIRED IMPORTED_TARGET stb)
 
 # Torch's bundled Caffe2 config leaks MKL stub link directories
 # ("/lib;/lib/intel64;...") into the RPATH CMake expects to rewrite at
@@ -77,12 +78,10 @@ if(EXISTS "${TORCHRKT_TORCH_LIBDIR}/libtorch_cuda.so")
 endif()
 
 # Treat libtorch headers as system headers so -Wall/-Wextra/-Wpedantic report
-# only our own code, not ATen's; the same for the vendored stb_image.
-target_include_directories(torchrkt SYSTEM PRIVATE
-  ${TORCH_INCLUDE_DIRS}
-  ${CMAKE_CURRENT_SOURCE_DIR}/third_party/stb
-)
-target_link_libraries(torchrkt PRIVATE ${TORCH_LIBRARIES} PkgConfig::SNDFILE)
+# only our own code, not ATen's.
+target_include_directories(torchrkt SYSTEM PRIVATE ${TORCH_INCLUDE_DIRS})
+target_link_libraries(torchrkt PRIVATE ${TORCH_LIBRARIES} PkgConfig::SNDFILE
+  PkgConfig::STB)
 
 # libtorch ships ABI flags (notably -D_GLIBCXX_USE_CXX11_ABI=...) that our TUs
 # including ATen headers must match, or std::string symbols won't link.

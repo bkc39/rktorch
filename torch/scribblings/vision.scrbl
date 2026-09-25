@@ -510,9 +510,9 @@ called @tt{crane}, torchvision names the bird @tt{crane bird}.
 
 JPEG and PNG decoding into a @racket['uint8] tensor of shape
 @tt{[C H W]}, torchvision's @tt{decode_image} layout. The decoder is
-@hyperlink["https://github.com/nothings/stb"]{stb_image}, compiled into
-the native library with only those two formats, so reading an image adds
-no system dependency.
+@hyperlink["https://github.com/nothings/stb"]{stb_image}, a header-only
+library compiled into the native library with only those two formats, so
+reading an image needs no library at run time.
 
 A PNG decodes to exactly the pixels torchvision's decoder returns. A
 JPEG differs from libjpeg-turbo's decoding by a count or two in places,
