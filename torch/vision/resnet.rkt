@@ -15,8 +15,6 @@
          (only-in "../private/contract.rkt" define/contract-out)
          (only-in "weights.rkt" pretrained-weights))
 
-;; torchvision's downsample: a strided 1x1 projection where the shape
-;; changes, and no parameters at all where it does not
 (define (projection in out stride)
   (and (or (not (= stride 1)) (not (= in out)))
        (Sequential (Conv2d in out 1 #:stride stride #:bias? #f)
@@ -64,11 +62,15 @@
   (list/c exact-positive-integer? exact-positive-integer?
           exact-positive-integer? exact-positive-integer?))
 
-(define (stage in out blocks stride)
+(define (expansion block) (if (eq? block 'basic) 1 4))
+
+(define (stage block in width blocks stride)
+  (define make (if (eq? block 'basic) BasicBlock Bottleneck))
+  (define out (* (expansion block) width))
   (apply Sequential
-         (BasicBlock in out #:stride stride)
+         (make in width #:stride stride)
          (for/list ([_ (in-range (sub1 blocks))])
-           (BasicBlock out out))))
+           (make out width))))
 
 (define-layer ResNet (stem bn layer1 layer2 layer3 layer4 fc) ;; noqa
   #:predicate resnet?
@@ -80,26 +82,16 @@
   #:init (#:classes [classes 10] #:base [base 64] #:blocks [blocks '(2 2 2 2)])
   (set! stem (Conv2d 3 base 3 #:padding 1 #:bias? #f))
   (set! bn (BatchNorm2d base))
-  (set! layer1 (stage base base (list-ref blocks 0) 1))
-  (set! layer2 (stage base (* 2 base) (list-ref blocks 1) 2))
-  (set! layer3 (stage (* 2 base) (* 4 base) (list-ref blocks 2) 2))
-  (set! layer4 (stage (* 4 base) (* 8 base) (list-ref blocks 3) 2))
+  (set! layer1 (stage 'basic base base (list-ref blocks 0) 1))
+  (set! layer2 (stage 'basic base (* 2 base) (list-ref blocks 1) 2))
+  (set! layer3 (stage 'basic (* 2 base) (* 4 base) (list-ref blocks 2) 2))
+  (set! layer4 (stage 'basic (* 4 base) (* 8 base) (list-ref blocks 3) 2))
   (set! fc (Linear (* 8 base) classes))
   #:forward ([x : rgb-image-batch/c])
   (~> x stem bn relu layer1 layer2 layer3 layer4
       (adaptive-avg-pool2d 1) (flatten 1) fc))
 
 (define block/c (or/c 'basic 'bottleneck))
-
-(define (expansion block) (if (eq? block 'basic) 1 4))
-
-(define (imagenet-stage block in width blocks stride)
-  (define make (if (eq? block 'basic) BasicBlock Bottleneck))
-  (define out (* (expansion block) width))
-  (apply Sequential
-         (make in width #:stride stride)
-         (for/list ([_ (in-range (sub1 blocks))])
-           (make out width))))
 
 (define-layer ImageNetResNet ;; noqa
   (conv1 bn1 maxpool layer1 layer2 layer3 layer4 fc)
@@ -112,10 +104,10 @@
   (set! conv1 (Conv2d 3 64 7 #:stride 2 #:padding 3 #:bias? #f))
   (set! bn1 (BatchNorm2d 64))
   (set! maxpool (MaxPool2d 3 #:stride 2 #:padding 1))
-  (set! layer1 (imagenet-stage block 64 64 (list-ref blocks 0) 1))
-  (set! layer2 (imagenet-stage block (* 64 e) 128 (list-ref blocks 1) 2))
-  (set! layer3 (imagenet-stage block (* 128 e) 256 (list-ref blocks 2) 2))
-  (set! layer4 (imagenet-stage block (* 256 e) 512 (list-ref blocks 3) 2))
+  (set! layer1 (stage block 64 64 (list-ref blocks 0) 1))
+  (set! layer2 (stage block (* 64 e) 128 (list-ref blocks 1) 2))
+  (set! layer3 (stage block (* 128 e) 256 (list-ref blocks 2) 2))
+  (set! layer4 (stage block (* 256 e) 512 (list-ref blocks 3) 2))
   (set! fc (Linear (* 512 e) classes))
   #:forward ([x : rgb-image-batch/c])
   (~> x conv1 bn1 relu maxpool layer1 layer2 layer3 layer4
@@ -127,8 +119,6 @@
 
 (define (head-key? key) (regexp-match? #rx"^fc[.]" key))
 
-;; another head size keeps the pretrained backbone and a fresh head, what
-;; replacing torchvision's model.fc does
 (define (pretrained blocks block checkpoint pretrained? classes)
   (define net (ImageNetResNet blocks #:block block #:classes classes))
   (when pretrained?
@@ -136,15 +126,19 @@
     (cond
       [(= classes 1000) (load-state! net path #:rename torchvision-key)]
       [else
-       (define-values (missing _unexpected)
+       (define-values (missing unexpected)
          (load-state! net path
                       #:strict? #f
                       #:rename (lambda (key)
                                  (and (not (head-key? key))
                                       (torchvision-key key)))))
-       (unless (andmap head-key? missing)
-         (raise-arguments-error 'pretrained "the checkpoint lacks weights"
-                                "missing" missing))]))
+       (define backbone-missing
+         (filter (lambda (key) (not (head-key? key))) missing))
+       (unless (and (null? backbone-missing) (null? unexpected))
+         (raise-arguments-error 'pretrained
+                                "the checkpoint does not fit the backbone"
+                                "missing" backbone-missing
+                                "unexpected" unexpected))]))
   net)
 
 (define builder/c

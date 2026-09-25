@@ -45,8 +45,7 @@
     (check-equal? (length guesses) 5)
     (check-true (andmap string? (map car guesses)))
     (define ps (map cdr guesses))
-    (check-true (andmap <= (cdr ps) (reverse (cdr (reverse ps))))
-                "the five come most likely first")
+    (check-true (apply >= ps) "the five come most likely first")
     (check-true (<= 0 (apply + ps) 1.000001)))
   ;; With the weights cached, the network sees the insects: each photo's
   ;; class is among its five guesses, and first for all but the close-up.
