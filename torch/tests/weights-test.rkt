@@ -54,7 +54,7 @@
          (list (cons "RKTORCH_WEIGHTS_DIR" (path->string cache))
                (cons "RKTORCH_WEIGHTS_URL" (directory-url release)))
          (lambda ()
-           (check-exn #rx"does not match the published checkpoint.*bytes: 20"
+           (check-exn #rx"does not match the published file.*bytes: 20"
                       (lambda () (pretrained-weights name)))
            (check-false (pretrained-weights-cached? name))
            (check-equal? (directory-list cache) '()))))))
@@ -68,6 +68,6 @@
          (list (cons "RKTORCH_WEIGHTS_DIR" (path->string cache))
                (cons "RKTORCH_WEIGHTS_URL" (directory-url release)))
          (lambda ()
-           (check-exn #rx"does not match the published checkpoint.*sha256: \"[0-9a-f]+\""
+           (check-exn #rx"does not match the published file.*sha256: \"[0-9a-f]+\""
                       (lambda () (pretrained-weights name)))
            (check-equal? (directory-list cache) '())))))))

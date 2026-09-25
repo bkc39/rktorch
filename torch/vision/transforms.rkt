@@ -5,7 +5,7 @@
          (only-in racket/contract/base
                   -> ->* ->i and/c flat-named-contract list/c listof or/c
                   real-in)
-         (only-in racket/math exact-floor exact-truncate)
+         (only-in racket/math exact-floor exact-round exact-truncate)
          (only-in "../foreign.rkt"
                   copy! div draw-seed flip generator? matmul mul narrow ne
                   reshape select stack sub tensor tensor-device tensor-dtype
@@ -251,3 +251,57 @@
   (-> rgb-image/c tensor?)
   (imagenet-normalize
    (center-crop (resize (convert-image-dtype x 'float32) 256) 224)))
+
+(define (ordered-pair/c element/c)
+  (flat-named-contract
+   'ascending-pair
+   (and/c (list/c element/c element/c)
+          (lambda (pair) (<= (car pair) (cadr pair))))))
+
+(define (crop-window rng h w scale ratio)
+  (define (uniform lo hi) (+ lo (* (- hi lo) (random rng))))
+  (define log-lo (log (exact->inexact (car ratio))))
+  (define log-hi (log (exact->inexact (cadr ratio))))
+  (or (for/or ([_ (in-range 10)])
+        (define area (* h w (uniform (car scale) (cadr scale))))
+        (define aspect (exp (uniform log-lo log-hi)))
+        (define cw (exact-round (sqrt (* area aspect))))
+        (define ch (exact-round (sqrt (/ area aspect))))
+        (and (< 0 cw) (<= cw w) (< 0 ch) (<= ch h)
+             (list (random (add1 (- h ch)) rng)
+                   (random (add1 (- w cw)) rng)
+                   ch cw)))
+      (central-window h w ratio)))
+
+(define (central-window h w ratio)
+  (define-values (ch cw)
+    (cond
+      [(< (/ w h) (car ratio)) (values (exact-round (/ w (car ratio))) w)]
+      [(> (/ w h) (cadr ratio)) (values h (exact-round (* h (cadr ratio))))]
+      [else (values h w)]))
+  (list (quotient (- h ch) 2) (quotient (- w cw) 2) ch cw))
+
+(define (resized-crop image window size)
+  (define rank (length (tensor-shape image)))
+  (resize (narrow (narrow image (- rank 2) (car window) (caddr window))
+                  (- rank 1) (cadr window) (cadddr window))
+          (list size size)))
+
+(define/contract-out (random-resized-crop x size ;; noqa
+                                          #:scale [scale '(0.08 1.0)]
+                                          #:ratio [ratio '(3/4 4/3)]
+                                          #:generator [generator #f])
+  (->* [float-image/c exact-positive-integer?]
+       [#:scale (ordered-pair/c (and/c (real-in 0 1) positive?))
+        #:ratio (ordered-pair/c (and/c real? positive?))
+        #:generator (or/c generator? #f)]
+       tensor?)
+  (define rng (batch-rng generator))
+  (define-values (h w) (spatial-size x))
+  (define (one image)
+    (resized-crop image (crop-window rng h w scale ratio) size))
+  (if (= 3 (length (tensor-shape x)))
+      (one x)
+      (stack (for/list ([i (in-range (car (tensor-shape x)))])
+               (one (select x 0 i)))
+             0)))

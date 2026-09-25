@@ -1,12 +1,8 @@
 #lang racket/base
 
-(require (only-in file/sha1 bytes->hex-string)
-         (only-in net/url call/input-url get-pure-port string->url)
-         (only-in racket/contract/base -> listof)
-         (only-in racket/file make-directory*)
-         (only-in racket/port copy-port)
+(require (only-in racket/contract/base -> listof)
          (only-in "../private/contract.rkt" define/contract-out)
-         (only-in "../private/util.rkt" with-temporary-file))
+         (only-in "../private/download.rkt" call-with-verified-download))
 
 (struct checkpoint (file size sha256 source weights))
 
@@ -64,9 +60,6 @@
                             (checkpoint-file (entry-of 'pretrained-weights-cached?
                                                        name)))))
 
-(define (sha256-hex path)
-  (call-with-input-file path (lambda (in) (bytes->hex-string (sha256-bytes in)))))
-
 (define (notice c)
   (string-append (checkpoint-weights c) "\n"
                  "exported from " (checkpoint-source c) "\n"
@@ -74,32 +67,14 @@
                  licence))
 
 (define (fetch! c dest)
-  (define url (string-append (setting "RKTORCH_WEIGHTS_URL" release)
-                             (checkpoint-file c)))
-  (make-directory* (weights-dir))
-  ;; temp file, checked in full, then an atomic rename: a redirect page or
-  ;; a transfer cut short must not reach the cache
-  (with-temporary-file (tmp #:template "weights-~a.part"
-                            #:directory (weights-dir))
-    (call/input-url (string->url url)
-                    (lambda (u) (get-pure-port u #:redirections 5))
-                    (lambda (in)
-                      (call-with-output-file tmp #:exists 'truncate
-                        (lambda (out) (copy-port in out)))))
-    (define size (file-size tmp))
-    (define digest (sha256-hex tmp))
-    (unless (and (= size (checkpoint-size c))
-                 (string=? digest (checkpoint-sha256 c)))
-      (raise-arguments-error 'pretrained-weights
-                             "download does not match the published checkpoint"
-                             "url" url
-                             "bytes" size
-                             "expected bytes" (checkpoint-size c)
-                             "sha256" digest
-                             "expected sha256" (checkpoint-sha256 c)))
-    (call-with-output-file (path-add-extension dest #".txt") #:exists 'truncate
-      (lambda (out) (write-string (notice c) out)))
-    (rename-file-or-directory tmp dest #t)))
+  (call-with-verified-download
+   'pretrained-weights
+   (string-append (setting "RKTORCH_WEIGHTS_URL" release) (checkpoint-file c))
+   (weights-dir) (checkpoint-size c) (checkpoint-sha256 c)
+   (lambda (tmp)
+     (call-with-output-file (path-add-extension dest #".txt") #:exists 'truncate
+       (lambda (out) (write-string (notice c) out)))
+     (rename-file-or-directory tmp dest #t))))
 
 (define/contract-out (pretrained-weights name) ;; noqa
   (-> symbol? path?)

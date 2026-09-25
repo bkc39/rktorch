@@ -147,4 +147,44 @@
     (check-exn exn:fail:contract?
                (lambda () (imagenet-preprocess (select image 0 0))))
     (check-exn exn:fail:contract?
-               (lambda () (imagenet-preprocess (narrow image 0 0 1))))))
+               (lambda () (imagenet-preprocess (narrow image 0 0 1)))))
+
+  (test-case "random-resized-crop: a square of the size, replayed by the seed"
+    (define x (rand 3 30 40))
+    (check-equal? (tensor-shape (random-resized-crop x 16)) '(3 16 16))
+    (check-equal? (tensor-shape (random-resized-crop (rand 5 3 30 40) 8))
+                  '(5 3 8 8))
+    (check-true (same? (random-resized-crop x 16 #:generator (make-generator 3))
+                       (random-resized-crop x 16 #:generator (make-generator 3)))))
+
+  (test-case "random-resized-crop: the whole image when scale and ratio say so"
+    (define x (rand 3 10 20))
+    (check-true (same? (random-resized-crop x 8 #:scale '(1 1) #:ratio '(2 2))
+                       (resize x '(8 8)))))
+
+  (test-case "random-resized-crop: ten misses fall back to the central window"
+    (define x (reshape (arange 81.0) 1 9 9))
+    (check-true (same? (random-resized-crop x 3 #:scale '(1 1) #:ratio '(3 3))
+                       (resize (narrow x 1 3 3) '(3 3)))
+                "too wide for the image: its full width, a third as tall")
+    (check-true (same? (random-resized-crop x 3 #:scale '(1 1)
+                                            #:ratio '(1/3 1/3))
+                       (resize (narrow x 2 3 3) '(3 3)))
+                "too tall: its full height, a third as wide")
+    (define big (rand 1 1000 1000))
+    (check-true (same? (random-resized-crop big 3 #:scale '(1 1)
+                                            #:ratio '(1/2 2)
+                                            #:generator (make-generator 0))
+                       (resize big '(3 3)))
+                "the image's own ratio admissible: the whole image"))
+
+  (test-case "random-resized-crop: what it refuses"
+    (define x (rand 3 10 10))
+    (check-exn exn:fail:contract?
+               (lambda () (random-resized-crop x 4 #:scale '(0.5 0.1))))
+    (check-exn exn:fail:contract?
+               (lambda () (random-resized-crop x 4 #:scale '(0 1))))
+    (check-exn exn:fail:contract?
+               (lambda () (random-resized-crop x 4 #:ratio '(2 1))))
+    (check-exn exn:fail:contract?
+               (lambda () (random-resized-crop (to-dtype x 'uint8) 4)))))
