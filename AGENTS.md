@@ -142,10 +142,11 @@ with `backward!` outside the form as PyTorch recommends). From
   `center-crop` (offsets round half to even), `normalize`,
   `imagenet-normalize`, `imagenet-mean`, `imagenet-std`
 - pretrained weights (`torch/vision/weights.rkt`, #199):
-  `pretrained-weights` fetches a torchvision ImageNet checkpoint, exported
-  by `scripts/export-weights.py`, from the `weights-v1` release into the
-  cache (`RKTORCH_WEIGHTS_DIR`, `RKTORCH_WEIGHTS_URL`), checking the size
-  and SHA-256 recorded in the module before the rename into place;
+  `pretrained-weights` fetches a torchvision ImageNet checkpoint, timm's
+  `tv_in1k` safetensors on Hugging Face pinned to a commit, into the cache
+  (`RKTORCH_WEIGHTS_DIR`; `RKTORCH_WEIGHTS_URL` is a hub mirror), checking
+  the size and SHA-256 recorded in the module before the rename into place
+  (`scripts/check-weights.py` confirms the tensors are torchvision's);
   `pretrained-weights-cached?`, `pretrained-weights-names`. The files keep
   torchvision's key names; `load-state! #:rename` maps them
 - image reading (`torch/vision/image.rkt`, #199): `decode-image` (bytes)

@@ -10,27 +10,34 @@
          (only-in "../private/util.rkt"
                   cache-dir env-setting with-temporary-file))
 
-(struct checkpoint (file size sha256 source weights))
+(struct checkpoint (file repo revision size sha256 weights))
 
+;; timm's copies of torchvision's IMAGENET1K_V1 weights, pinned to a commit
 (define checkpoints
   (list
    (cons 'resnet18-imagenet1k-v1
-         (checkpoint "resnet18-imagenet1k-v1.safetensors" 46807920
-                     "db77c3aa4b2b89016936bb46f01dc292eedd0d14fb30e1833919693d656f5162"
-                     "https://download.pytorch.org/models/resnet18-f37072fd.pth"
+         (checkpoint "resnet18-imagenet1k-v1.safetensors"
+                     "timm/resnet18.tv_in1k"
+                     "bbd144b3e5565108aad885f145491d11bc6ce807"
+                     46807446
+                     "694f673df6520a3158624e8a89af086f59923ee4cd7436fe5bc3bc71d295ad81"
                      "torchvision.models.ResNet18_Weights.IMAGENET1K_V1"))
    (cons 'resnet34-imagenet1k-v1
-         (checkpoint "resnet34-imagenet1k-v1.safetensors" 87279112
-                     "4db058525703b0bdcdfb19c5b4d5e498cc8f46f05117af21d9e7aa81d415b6a8"
-                     "https://download.pytorch.org/models/resnet34-b627a593.pth"
+         (checkpoint "resnet34-imagenet1k-v1.safetensors"
+                     "timm/resnet34.tv_in1k"
+                     "1b7b21cca82ff974d341713f777bf740c2db38c4"
+                     87278522
+                     "0bb82595a564991a9d424708b33f5d843f5aaed7f6c0886ff10849ff97022235"
                      "torchvision.models.ResNet34_Weights.IMAGENET1K_V1"))
    (cons 'resnet50-imagenet1k-v1
-         (checkpoint "resnet50-imagenet1k-v1.safetensors" 102470400
-                     "86904c337f79cbc83fe044bea66de10137568ac616fe5203e3b8f10b2872aa97"
-                     "https://download.pytorch.org/models/resnet50-0676ba61.pth"
+         (checkpoint "resnet50-imagenet1k-v1.safetensors"
+                     "timm/resnet50.tv_in1k"
+                     "78f3ecfdb38e06d9b8397f662e7ab8fee96026fa"
+                     102469840
+                     "5d061a3c593d795bfe682d9b152bafbcf550579873492def3515b46db1189888"
                      "torchvision.models.ResNet50_Weights.IMAGENET1K_V1"))))
 
-(define release "https://github.com/bkc39/rktorch/releases/download/weights-v1/")
+(define hugging-face "https://huggingface.co/")
 
 (define licence
   (string-append
@@ -42,9 +49,11 @@
 (define (weights-dir)
   (cache-dir "RKTORCH_WEIGHTS_DIR" "weights"))
 
-(define (release-url)
-  (define base (or (env-setting "RKTORCH_WEIGHTS_URL") release))
-  (if (string-suffix? base "/") base (string-append base "/")))
+(define (checkpoint-url c)
+  (define base (or (env-setting "RKTORCH_WEIGHTS_URL") hugging-face))
+  (string-append (if (string-suffix? base "/") base (string-append base "/"))
+                 (checkpoint-repo c) "/resolve/" (checkpoint-revision c)
+                 "/model.safetensors"))
 
 (define (entry-of who name)
   (define e (assq name checkpoints))
@@ -66,14 +75,14 @@
 (define (sha256-hex path)
   (call-with-input-file path (lambda (in) (bytes->hex-string (sha256-bytes in)))))
 
-(define (notice c)
+(define (notice c url)
   (string-append (checkpoint-weights c) "\n"
-                 "exported from " (checkpoint-source c) "\n"
+                 "fetched from " url "\n"
                  "sha256 " (checkpoint-sha256 c) "\n"
                  licence))
 
 (define (fetch! c dest)
-  (define url (string-append (release-url) (checkpoint-file c)))
+  (define url (checkpoint-url c))
   (make-directory* (weights-dir))
   ;; temp file, checked in full, then an atomic rename: a redirect page or
   ;; a transfer cut short must not reach the cache
@@ -96,7 +105,7 @@
                              "sha256" digest
                              "expected sha256" (checkpoint-sha256 c)))
     (call-with-output-file (path-replace-extension dest #".txt") #:exists 'truncate
-      (lambda (out) (write-string (notice c) out)))
+      (lambda (out) (write-string (notice c url) out)))
     (rename-file-or-directory tmp dest #t)))
 
 (define/contract-out (pretrained-weights name) ;; noqa
