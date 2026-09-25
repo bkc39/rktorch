@@ -61,11 +61,13 @@ def file_name(name, weights):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("out_dir")
-    parser.add_argument("names", nargs="*", default=sorted(CHECKPOINTS))
+    parser.add_argument("names", nargs="*", choices=sorted(CHECKPOINTS),
+                        help="checkpoints to export, all of them by default")
     parser.add_argument("--categories")
     args = parser.parse_args()
     os.makedirs(args.out_dir, exist_ok=True)
-    for name in args.names:
+    names = args.names or sorted(CHECKPOINTS)
+    for name in names:
         build, weights = CHECKPOINTS[name]
         model = build(weights=weights).eval()
         metadata = {
@@ -82,7 +84,7 @@ def main():
         digest = hashlib.sha256(data).hexdigest()
         print(f"{name} {os.path.basename(path)} {len(data)} {digest}")
     if args.categories:
-        _, weights = CHECKPOINTS[args.names[0]]
+        _, weights = CHECKPOINTS[names[0]]
         with open(args.categories, "w") as out:
             out.write("\n".join(weights.meta["categories"]) + "\n")
         print(f"wrote {args.categories}")

@@ -14,7 +14,7 @@
          (only-in "../data/loader.rkt" dataset? tensor-dataset)
          (only-in "../main.rkt" device/c reshape tensor tensor?)
          (only-in "../private/contract.rkt" define/contract-out)
-         (only-in "../private/util.rkt" with-temporary-file))
+         (only-in "../private/util.rkt" cache-dir with-temporary-file))
 
 (define record-size 3073)
 (define image-size 3072)
@@ -79,10 +79,7 @@
 (define archive-name "cifar-10-binary.tar.gz")
 
 (define (cifar10-cache-dir)
-  (define override (getenv "RKTORCH_CIFAR10_DIR"))
-  (if (and override (not (string=? override "")))
-      (string->path override)
-      (build-path (find-system-path 'cache-dir) "rktorch" "cifar10")))
+  (cache-dir "RKTORCH_CIFAR10_DIR" "cifar10"))
 
 (define (archive-path)
   (build-path (cifar10-cache-dir) archive-name))

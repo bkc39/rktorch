@@ -5,8 +5,10 @@
          (only-in racket/contract/base -> listof)
          (only-in racket/file make-directory*)
          (only-in racket/port copy-port)
+         (only-in racket/string string-suffix?)
          (only-in "../private/contract.rkt" define/contract-out)
-         (only-in "../private/util.rkt" with-temporary-file))
+         (only-in "../private/util.rkt"
+                  cache-dir env-setting with-temporary-file))
 
 (struct checkpoint (file size sha256 source weights))
 
@@ -37,15 +39,12 @@
    "The weights were trained on ImageNet-1K; its terms of access bind"
    " whoever uses them.\n"))
 
-(define (setting name default)
-  (define v (getenv name))
-  (if (and v (not (string=? v ""))) v default))
-
 (define (weights-dir)
-  (define override (setting "RKTORCH_WEIGHTS_DIR" #f))
-  (if override
-      (string->path override)
-      (build-path (find-system-path 'cache-dir) "rktorch" "weights")))
+  (cache-dir "RKTORCH_WEIGHTS_DIR" "weights"))
+
+(define (release-url)
+  (define base (or (env-setting "RKTORCH_WEIGHTS_URL") release))
+  (if (string-suffix? base "/") base (string-append base "/")))
 
 (define (entry-of who name)
   (define e (assq name checkpoints))
@@ -74,8 +73,7 @@
                  licence))
 
 (define (fetch! c dest)
-  (define url (string-append (setting "RKTORCH_WEIGHTS_URL" release)
-                             (checkpoint-file c)))
+  (define url (string-append (release-url) (checkpoint-file c)))
   (make-directory* (weights-dir))
   ;; temp file, checked in full, then an atomic rename: a redirect page or
   ;; a transfer cut short must not reach the cache
@@ -97,7 +95,7 @@
                              "expected bytes" (checkpoint-size c)
                              "sha256" digest
                              "expected sha256" (checkpoint-sha256 c)))
-    (call-with-output-file (path-add-extension dest #".txt") #:exists 'truncate
+    (call-with-output-file (path-replace-extension dest #".txt") #:exists 'truncate
       (lambda (out) (write-string (notice c) out)))
     (rename-file-or-directory tmp dest #t)))
 
