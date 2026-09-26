@@ -43,7 +43,7 @@ photograph still has three channels:
 @torch-examples[
 (require torch/vision/image torch/vision/transforms)
 (define bee
-  (read-image (collection-file-path "10870992_eebeeb3a12.jpg" "torch"
+  (read-image (collection-file-path "honey-bee.jpg" "torch"
                                     "vision" "fixtures" "hymenoptera" "bees")
               #:mode 'rgb))
 (shape bee)
@@ -106,11 +106,12 @@ network's logits agree with torchvision's to within @tt{6e-5}.
 @section[#:tag "pretrained-results"]{What it sees}
 
 The four photographs committed with the library, two ants and two bees
-from the ants-and-bees dataset, and ResNet-18's five most likely classes
-for each, as @filepath{examples/racket/14-imagenet.rkt} reported them on
-@(hash-ref results 'device) on @(hash-ref results 'date). The close-up of
-an ant's underside, seen from an angle ImageNet rarely shows, is the one
-the network gets wrong; "ant" is only its fourth guess.
+in the public domain, and ResNet-18's five most likely classes for each,
+as @filepath{examples/racket/14-imagenet.rkt} reported them on
+@(hash-ref results 'device) on @(hash-ref results 'date). The ant on a
+stalk of hedge mustard is the one the network gets wrong: the yellow
+flowers fill most of the frame, so "rapeseed" comes first and "ant"
+second.
 
 @(apply
   itemlist
