@@ -113,6 +113,48 @@
                   '("a.weight" "a.bias" "c.weight" "c.bias"))
     (delete-file path))
 
+  (define (b->c key) (regexp-replace #rx"^b[.]" key "c."))
+
+  (test-case "#:rename maps each file key to the model key it loads into"
+    (define-values (model path) (saved-pair 2))
+    (define target (Other 2))
+    (check-exn #rx"missing keys" (lambda () (load-state! target path)))
+    (load-state! target path #:rename b->c)
+    (check-equal? (values-of target) (values-of model))
+    (delete-file path))
+
+  (test-case "#:rename to #f leaves a key out; the rest report in their own names"
+    (define-values (_model path) (saved-pair 2))
+    (define-values (missing unexpected)
+      (load-state! (Other 2) path #:strict? #f
+                   #:rename (lambda (k) (and (regexp-match? #rx"^a[.]" k) k))))
+    (check-equal? missing '("c.weight" "c.bias"))
+    (check-equal? unexpected '() "a dropped key is not unexpected")
+    (define-values (missing* unexpected*)
+      (load-state! (Other 2) path #:strict? #f
+                   #:rename (lambda (k) (regexp-replace #rx"^b[.]" k "z."))))
+    (check-equal? missing* '("c.weight" "c.bias") "missing: the model's names")
+    (check-equal? unexpected* '("b.bias" "b.weight")
+                  "unexpected: the file's names")
+    (define narrow (Other 3))
+    (check-exn #rx"shape mismatches.*\"a.weight\" \\(2 2\\) \\(3 2\\)"
+               (lambda () (load-state! narrow path #:rename b->c))
+               "a mismatch names the model's key")
+    (delete-file path))
+
+  (test-case "two file keys renamed to one model key fail before any copy"
+    (define-values (_model path) (saved-pair 2))
+    (define target (Pair 2))
+    (define before (values-of target))
+    (check-exn
+     #rx"#:rename maps two file keys to one model key.*a.weight.*a.bias"
+     (lambda ()
+       (load-state! target path
+                    #:rename (lambda (k) (regexp-replace #rx"bias$" k
+                                                         "weight")))))
+    (check-equal? (values-of target) before)
+    (delete-file path))
+
   (test-case "a shape mismatch is an error in either mode, per key"
     (define-values (_model path) (saved-pair 3))
     (define narrow (Pair 2))
