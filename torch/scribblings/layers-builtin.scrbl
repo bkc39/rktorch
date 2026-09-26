@@ -6,8 +6,8 @@
                      (only-in torch relu shape tensor? zeros)
                      (only-in torch/nn
                               Conv2d Dropout Linear Sequential
-                              define-layer layer? mse-loss named-parameters
-                              parameters)))
+                              define-layer in-named-parameters layer? mse-loss
+                              named-parameters parameters)))
 
 @title{Built-in layers and losses}
 
@@ -82,6 +82,17 @@ its own separator: @racket["enc."] gives @racket["enc.fc1.weight"].
 
 @torch-examples[
 (map car (named-parameters (Sequential (Linear 2 2))))
+]}
+
+@defproc[(in-named-parameters [m layer?]) sequence?]{
+@racket[named-parameters] as a sequence of two values per parameter, its
+dotted path and its tensor, so a @racket[for] clause can bind both
+without taking a pair apart; @tt{named_parameters()} in a Python
+@tt{for} loop.
+
+@torch-examples[
+(for/list ([(name p) (in-named-parameters (Sequential (Linear 2 3)))])
+  (list name (shape p)))
 ]}
 
 @defproc[(layer? [v any/c]) boolean?]{

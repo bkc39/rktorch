@@ -129,6 +129,15 @@ with `backward!` outside the form as PyTorch recommends). From
   int64 labels), `cifar10-dataset #:device`, `cifar10-label-names`,
   `load-cifar10-fixture` (256 committed records), `cifar10-records->tensors`,
   `tar-entries`
+- image folders (`torch/vision/image-folder.rkt`, #199): `image-folder
+  #:transform #:extensions #:device` (torchvision's `ImageFolder`, items
+  decoded as RGB on demand), `image-folder-classes`,
+  `image-folder-samples`; `torch/vision/hymenoptera.rkt` the tutorial's
+  ants and bees (`hymenoptera-dataset` `hymenoptera-root`
+  `hymenoptera-cached?`, zip checked by size and SHA-256 through
+  `torch/private/download.rkt`, shared with the weights); the fine-tune
+  example is `examples/racket/15-finetune.rkt`, with a `random-resized-crop`
+  in the transforms
 - ImageNet networks (`torch/vision/resnet.rkt`, #199): `resnet18`
   `resnet34` `resnet50` (`#:pretrained?`, `#:classes`; another head size
   keeps the loaded backbone and starts a fresh `fc`), `ImageNetResNet
@@ -222,7 +231,7 @@ provided as plain renames (no contract overhead on the numeric fast path),
 per `foreign/operators.rkt`.
 
 From `torch/nn`: `define-layer procedure->Layer gen:layer layer? Parameter Buffer LayerList LayerHash parameters
-named-parameters buffers children forward Linear Conv2d MaxPool2d Flatten Dropout
+named-parameters in-named-parameters buffers children forward Linear Conv2d MaxPool2d Flatten Dropout
 Sequential Embedding LayerNorm ConvTranspose2d GroupNorm BatchNorm2d BatchNorm1d
 LSTM GRU sgd adam rmsprop step! zero-grads! clip-grad-norm! learning-rate
 set-learning-rate! step-lr multi-step-lr exponential-lr cosine-annealing-lr
