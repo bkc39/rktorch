@@ -35,14 +35,14 @@
   (test-case "one class per directory, labelled in name order"
     (check-equal? (image-folder-classes fixture) '("ants" "bees"))
     (check-equal? (names (image-folder-samples fixture))
-                  '(("11381045_b352a47d8c.jpg" 0) ("8398478_50ef10c47a.jpg" 0)
-                    ("10870992_eebeeb3a12.jpg" 1) ("26589803_5ba7000313.jpg" 1))))
+                  '(("formica-rufa.jpg" 0) ("hedge-mustard.jpg" 0)
+                    ("coneflower.jpg" 1) ("honey-bee.jpg" 1))))
 
   (test-case "an item is the RGB image and its label, transformed on request"
     (define folder (image-folder fixture))
     (check-equal? (length folder) 4)
     (define-values (image label) (dataset-ref folder 2))
-    (check-equal? (tensor-shape image) '(3 464 500))
+    (check-equal? (tensor-shape image) '(3 353 500))
     (check-equal? (tensor-dtype image) 'uint8)
     (check-equal? (item label) 1)
     (check-equal? (tensor-dtype label) 'int64)
