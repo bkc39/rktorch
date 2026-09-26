@@ -108,7 +108,7 @@
            (with-no-grad (values (net their-batch) (net our-batch)))))
        (check-equal? (tensor-shape ours) (tensor-shape theirs))
        (define worst (item (max (abs (sub ours theirs)))))
-       (check-true (<= worst 1e-3)
+       (check-true (<= worst 1e-4)
                    (format "~a: logits on torchvision's pixels, max |difference| ~a"
                            name worst))
        (check-equal? (top5 on-our-decode) (hash-ref (hash-ref j 'top5) name)
