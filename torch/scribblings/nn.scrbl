@@ -2,6 +2,7 @@
 
 @(require (for-label racket/base
                      racket/contract
+                     (only-in racket/string string-replace)
                      (only-in torch backward! lambda~> prop:to relu tensor? to to-able?)
                      (only-in torch/data/loader in-dataloader)
                      torch/nn
@@ -703,7 +704,8 @@ with the name of its entry.
 
 @defproc[(load-state! [model layer?]
                       [path path-string?]
-                      [#:strict? strict? boolean? #t])
+                      [#:strict? strict? boolean? #t]
+                      [#:rename rename (-> string? (or/c string? #f)) values])
          any]{
 Copies the entries of the checkpoint at @racket[path] into
 @racket[model]'s parameters and buffers, in place and outside the autograd
@@ -721,4 +723,18 @@ per key with both shapes, because equal element counts do not make shapes
 equal.  So is an entry with a dtype tag outside the list above, or whose
 @tt{data_offsets} do not span exactly the bytes its dtype and shape need
 inside the file, so a damaged checkpoint leaves the model as it was.
+
+@racket[rename] maps each key in the file to the key it loads into, which
+is how a checkpoint written by other code reaches a model whose fields
+are named in the Racket style: torchvision's @tt{bn1.running_mean} can
+land in a @racket[BatchNorm2d]'s @tt{bn1.running-mean}. A key renamed to
+@racket[#f] is left out, neither loaded nor unexpected. Unexpected keys
+are reported as the file names them; missing keys and mismatches as the
+model does. Two file keys renamed to one model key are an error before
+anything is copied.
+
+@racketblock[
+(load-state! net path
+             #:rename (lambda (key) (string-replace key "_" "-")))
+]
 }

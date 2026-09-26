@@ -6,10 +6,22 @@
          ;; only-in would strip them
          syntax/parse/define)
 
-(provide call-with-temporary-directory
+(provide cache-dir
+         call-with-temporary-directory
          call-with-temporary-file
+         env-setting
          with-temporary-directory
          with-temporary-file)
+
+(define (env-setting name)
+  (define v (getenv name))
+  (and v (not (string=? v "")) v))
+
+(define (cache-dir override-var name)
+  (define override (env-setting override-var))
+  (if override
+      (string->path override)
+      (build-path (find-system-path 'cache-dir) "rktorch" name)))
 
 ;; deletes the temp file on any escape; the file-exists? guard lets `proc`
 ;; rename it away

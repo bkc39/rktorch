@@ -7,7 +7,7 @@
          (only-in racket/set for/set set->list)
          (only-in racket/string string-replace string-trim)
          (only-in net/url call/input-url get-pure-port string->url)
-         (only-in "../private/util.rkt" with-temporary-file)
+         (only-in "../private/util.rkt" cache-dir with-temporary-file)
          (only-in "../main.rkt" narrow reshape tensor tensor->list
                   tensor-shape tensor? to-dtype))
 
@@ -78,10 +78,7 @@
   (list "User-Agent: rktorch/0.1 (+https://github.com/bkc39/rktorch)"))
 
 (define (text-cache-dir)
-  (define override (getenv "RKTORCH_TEXT_DIR"))
-  (if (and override (not (string=? override "")))
-      (string->path override)
-      (build-path (find-system-path 'cache-dir) "rktorch" "text")))
+  (cache-dir "RKTORCH_TEXT_DIR" "text"))
 
 ;; valid? gates the cache write: a rate-limit page or truncated body must
 ;; not poison the cache
