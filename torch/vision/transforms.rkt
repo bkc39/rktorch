@@ -213,10 +213,13 @@
 (define/contract-out imagenet-mean (listof real?) '(0.485 0.456 0.406)) ;; noqa
 (define/contract-out imagenet-std (listof real?) '(0.229 0.224 0.225)) ;; noqa
 
-(define rgb-float-image/c
+(define (three-channels/c name base/c)
   (flat-named-contract
-   'three-channel-float-image-or-batch
-   (and/c float-image/c (lambda (img) (= 3 (channels img))))))
+   name
+   (and/c base/c (lambda (img) (= 3 (channels img))))))
+
+(define rgb-float-image/c
+  (three-channels/c 'three-channel-float-image-or-batch float-image/c))
 
 (define/contract-out (imagenet-normalize x) ;; noqa
   (-> rgb-float-image/c tensor?)
@@ -240,3 +243,12 @@
     ;; convert_image_dtype's scale: 1.0 lands on 255 and nothing past it
     [(eq? dtype 'uint8) (to-dtype (mul x (- 256.0 1e-3)) 'uint8)]
     [else (to-dtype x dtype)]))
+
+(define rgb-image/c
+  (three-channels/c 'three-channel-image-or-batch
+                    (and/c image-or-batch/c image-tensor/c)))
+
+(define/contract-out (imagenet-preprocess x) ;; noqa
+  (-> rgb-image/c tensor?)
+  (imagenet-normalize
+   (center-crop (resize (convert-image-dtype x 'float32) 256) 224)))
