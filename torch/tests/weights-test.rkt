@@ -2,6 +2,7 @@
 
 (module+ test
   (require (only-in net/url path->url url->string)
+           (only-in racket/file make-directory*)
            (only-in rackunit check-equal? check-exn check-false check-not-false
                     check-true test-case)
            (only-in "../private/util.rkt" with-temporary-directory)
@@ -21,6 +22,16 @@
 
   (define name 'resnet18-imagenet1k-v1)
   (define file "resnet18-imagenet1k-v1.safetensors")
+  (define hub-path
+    (string-append "timm/resnet18.tv_in1k/resolve/"
+                   "bbd144b3e5565108aad885f145491d11bc6ce807/model.safetensors"))
+
+  ;; a mirror has Hugging Face's layout, as HF_ENDPOINT mirrors do
+  (define (mirror-file mirror)
+    (define path (build-path mirror hub-path))
+    (define-values (dir _name _dir?) (split-path path))
+    (make-directory* dir)
+    path)
 
   (test-case "the published checkpoints"
     (check-equal? pretrained-weights-names
@@ -46,13 +57,13 @@
          (check-equal? (pretrained-weights name) (build-path cache file))))))
 
   (test-case "a download that is not the checkpoint never reaches the cache"
-    (with-temporary-directory (release)
+    (with-temporary-directory (mirror)
       (with-temporary-directory (cache)
-        (call-with-output-file (build-path release file)
+        (call-with-output-file (mirror-file mirror)
           (lambda (out) (write-bytes #"a redirect page, say" out)))
         (with-weights-env
          (list (cons "RKTORCH_WEIGHTS_DIR" (path->string cache))
-               (cons "RKTORCH_WEIGHTS_URL" (directory-url release)))
+               (cons "RKTORCH_WEIGHTS_URL" (directory-url mirror)))
          (lambda ()
            (check-exn #rx"does not match the published checkpoint.*bytes: 20"
                       (lambda () (pretrained-weights name)))
@@ -60,12 +71,12 @@
            (check-equal? (directory-list cache) '()))))))
 
   (test-case "a mirror's URL may leave off its trailing slash"
-    (with-temporary-directory (release)
+    (with-temporary-directory (mirror)
       (with-temporary-directory (cache)
-        (call-with-output-file (build-path release file)
+        (call-with-output-file (mirror-file mirror)
           (lambda (out) (write-bytes #"not the checkpoint" out)))
         (define bare
-          (regexp-replace #rx"/$" (directory-url release) ""))
+          (regexp-replace #rx"/$" (directory-url mirror) ""))
         (with-weights-env
          (list (cons "RKTORCH_WEIGHTS_DIR" (path->string cache))
                (cons "RKTORCH_WEIGHTS_URL" bare))
@@ -73,18 +84,18 @@
            (check-exn (regexp (string-append
                                "url: \""
                                (regexp-quote bare)
-                               "/resnet18-imagenet1k-v1.safetensors\""))
+                               "/" (regexp-quote hub-path) "\""))
                       (lambda () (pretrained-weights name))
                       "the file was found and read, so the slash was added"))))))
 
   (test-case "the right size is not enough: the checksum decides"
-    (with-temporary-directory (release)
+    (with-temporary-directory (mirror)
       (with-temporary-directory (cache)
-        (call-with-output-file (build-path release file)
-          (lambda (out) (file-truncate out 46807920)))
+        (call-with-output-file (mirror-file mirror)
+          (lambda (out) (file-truncate out 46807446)))
         (with-weights-env
          (list (cons "RKTORCH_WEIGHTS_DIR" (path->string cache))
-               (cons "RKTORCH_WEIGHTS_URL" (directory-url release)))
+               (cons "RKTORCH_WEIGHTS_URL" (directory-url mirror)))
          (lambda ()
            (check-exn #rx"does not match the published checkpoint.*sha256: \"[0-9a-f]+\""
                       (lambda () (pretrained-weights name)))
