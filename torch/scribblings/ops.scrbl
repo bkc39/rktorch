@@ -5,7 +5,8 @@
                                 abs cos exp log sin sort sqrt max min length
                                 + - * /)
                      racket/contract
-                     torch))
+                     torch
+                     (only-in torch/nn nll-loss)))
 
 @title{Operations on tensors}
 
@@ -31,6 +32,21 @@ A view with the two named axes exchanged.
 @defidform[t]{
 A terse alias for @racket[transpose], taking the same three arguments. See
 also @racket[T], which reverses every axis.}
+
+@defproc[(unsqueeze [t tensor?] [dim exact-integer?]) tensor?]{
+A view of @racket[t] with a new dimension of size one inserted at
+@racket[dim], which counts from the end when negative; @tt{torch.unsqueeze}.
+It is how one image becomes a batch of one.
+
+@torch-examples[(shape (unsqueeze (zeros 3 4) 0))]}
+
+@defproc[(select [t tensor?] [dim exact-integer?] [index exact-integer?])
+         tensor?]{
+The slice of @racket[t] at @racket[index] along @racket[dim], a view with
+that dimension removed; @tt{torch.select}, and @tt{t[i]} along the first
+dimension. A negative @racket[index] counts from the end.
+
+@torch-examples[(tensor->list (select (tensor '((1 2 3) (4 5 6))) 0 1))]}
 
 @section{Arithmetic}
 
@@ -90,6 +106,21 @@ The arithmetic mean of every element, as a one-element tensor.
 
 @margin-note{Neither takes an axis argument yet: both are whole-tensor
 reductions, where PyTorch's @tt{sum} and @tt{mean} accept a @tt{dim}.}
+
+@section{Softmax}
+
+@defproc[(softmax [t tensor?] [dim exact-integer?]) tensor?]{
+Exponentiates the entries of @racket[t] along @racket[dim] and divides
+each by their sum, so every slice along @racket[dim] is a probability
+distribution; @tt{torch.softmax}.
+
+@torch-examples[(tensor->list (softmax (tensor '(1.0 2.0 3.0)) 0))]}
+
+@defproc[(log-softmax [t tensor?] [dim exact-integer?]) tensor?]{
+The logarithm of @racket[softmax], computed as each entry minus the
+log-sum-exp along @racket[dim], so it stays finite where
+@racket[softmax]'s entries underflow to zero; @tt{torch.log_softmax}. It
+is what @racket[nll-loss] takes.}
 
 @section{Shadowed names}
 

@@ -3,6 +3,7 @@ function(torchrkt_add_format_target target)
   file(GLOB_RECURSE TORCHRKT_FORMAT_SOURCES CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/include/*.h"
     "${CMAKE_CURRENT_SOURCE_DIR}/include/*.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/*.c"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/*.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/tests/*.c"
@@ -29,6 +30,8 @@ endfunction()
 
 function(torchrkt_add_tidy_target target build_target)
   find_program(CLANG_TIDY_EXECUTABLE NAMES clang-tidy)
+  # src/*.c is left out: its one file compiles stb_image, whose SSE2 path
+  # includes GCC's intrinsic headers, which clang-tidy's parser rejects
   file(GLOB_RECURSE TORCHRKT_TIDY_SOURCES CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp"
   )

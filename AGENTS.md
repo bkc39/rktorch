@@ -134,7 +134,21 @@ with `backward!` outside the form as PyTorch recommends). From
   #:p` and `random-crop #:padding` on an image batch where it lives; each
   takes `#:generator` and draws one seed per batch from it, so a seeded
   loader replays its augmentation (the draws are the transform's own, not
-  torchvision's)
+  torchvision's). The pretrained preprocessing (#199) on an image or a
+  batch: `convert-image-dtype` (uint8 0-255 to float 0-1 and back, the
+  torchvision scaling), `resize #:antialias?` (short side or `(h w)`,
+  float only; two matmuls with host-computed bilinear or Pillow-filter
+  weights, since `upsample_bilinear2d` needs the unmarshalled `float?`),
+  `center-crop` (offsets round half to even), `normalize`,
+  `imagenet-normalize`, `imagenet-mean`, `imagenet-std`
+- image reading (`torch/vision/image.rkt`, #199): `decode-image` (bytes)
+  and `read-image` (a path) to a uint8 `[C H W]` tensor, `#:mode
+  'unchanged 'gray 'gray-alpha 'rgb 'rgba`, `#:device`; JPEG and PNG
+  through `stb_image` behind `tr_image_decode`, the header from nixpkgs'
+  `stb` found by pkg-config like libsndfile and compiled once in
+  `src/torchrkt/detail/stb_image.c`; PNGs match
+  torchvision.io exactly, JPEGs within a count or two
+  (`image-parity-test.rkt`, torchvision only in the default shell)
 - generative examples on MNIST (#152): `examples/racket/10-dcgan.rkt` (a
   DCGAN shrunk to 28x28, `ConvTranspose2d` and `BatchNorm2d` in the
   generator, `leaky-relu` in the discriminator, two `adam`s at 2e-4 with
@@ -379,7 +393,9 @@ module's full export set (`racket/runtime-path`, `syntax/parse/pre`).
 - `data/dataset.rkt` — `define-dataset` and `gen:dataset`;
   `private/definer.rkt` — the clause grammar it shares with `define-layer`.
 - `vision/cifar10.rkt` — CIFAR-10 loader and dataset, `vision/fixtures/`
-  its 256-record fixture; `vision/diffusion.rkt` — DDPM schedules, `q-sample`
+  its 256-record fixture and `vision/fixtures/images/` the reader's
+  synthetic JPEGs and PNGs (`scripts/gen-image-fixtures.py`);
+  `vision/image.rkt` — the image reader; `vision/diffusion.rkt` — DDPM schedules, `q-sample`
   and the UNet layers.
 - `data/loader.rkt` — `tensor-dataset`, `dataloader`, `in-dataloader`,
   `in-epochs`, re-exporting `data/dataset.rkt`; `data/mnist.rkt`,
