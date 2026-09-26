@@ -119,7 +119,7 @@
 
 (define (head-key? key) (regexp-match? #rx"^fc[.]" key))
 
-(define (pretrained blocks block checkpoint pretrained? classes)
+(define (pretrained who blocks block checkpoint pretrained? classes)
   (define net (ImageNetResNet blocks #:block block #:classes classes))
   (when pretrained?
     (define path (pretrained-weights checkpoint))
@@ -135,7 +135,7 @@
        (define backbone-missing
          (filter (lambda (key) (not (head-key? key))) missing))
        (unless (and (null? backbone-missing) (null? unexpected))
-         (raise-arguments-error 'pretrained
+         (raise-arguments-error who
                                 "the checkpoint does not fit the backbone"
                                 "missing" backbone-missing
                                 "unexpected" unexpected))]))
@@ -148,15 +148,17 @@
 (define/contract-out (resnet18 #:pretrained? [pretrained? #f] ;; noqa
                                #:classes [classes 1000])
   builder/c
-  (pretrained '(2 2 2 2) 'basic 'resnet18-imagenet1k-v1 pretrained? classes))
+  (pretrained 'resnet18 '(2 2 2 2) 'basic 'resnet18-imagenet1k-v1 pretrained?
+              classes))
 
 (define/contract-out (resnet34 #:pretrained? [pretrained? #f] ;; noqa
                                #:classes [classes 1000])
   builder/c
-  (pretrained '(3 4 6 3) 'basic 'resnet34-imagenet1k-v1 pretrained? classes))
+  (pretrained 'resnet34 '(3 4 6 3) 'basic 'resnet34-imagenet1k-v1 pretrained?
+              classes))
 
 (define/contract-out (resnet50 #:pretrained? [pretrained? #f] ;; noqa
                                #:classes [classes 1000])
   builder/c
-  (pretrained '(3 4 6 3) 'bottleneck 'resnet50-imagenet1k-v1 pretrained?
-              classes))
+  (pretrained 'resnet50 '(3 4 6 3) 'bottleneck 'resnet50-imagenet1k-v1
+              pretrained? classes))
