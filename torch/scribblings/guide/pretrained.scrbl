@@ -101,7 +101,8 @@ by the batch itself. And the checkpoint's keys are torchvision's, such as
 @tt{layer1.0.bn1.running-mean}: the builder loads with
 @racket[load-state!]'s @racket[#:rename] and @racket[torchvision-key],
 which rewrites one into the other. On the same pixels, the Racket
-network's logits agree with torchvision's to within @tt{6e-5}.
+network's logits agree with torchvision's to within @tt{1e-4}, the bound
+the parity test holds all three networks to.
 
 @section[#:tag "pretrained-results"]{What it sees}
 
