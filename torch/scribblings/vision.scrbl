@@ -4,13 +4,15 @@
           (for-label racket/base
                      racket/contract
                      (only-in torch cuda-if-available device/c draw-seed generator?
-                              make-generator matmul randn-like tensor?
+                              make-generator matmul narrow randn-like tensor?
                               to-dtype upsample-nearest2d)
                      torch/data/loader
                      (only-in torch/nn Conv2d Dropout Embedding GroupNorm Linear
                               define-layer load-state!)
                      torch/vision/cifar10
+                     torch/vision/hymenoptera
                      torch/vision/image
+                     torch/vision/image-folder
                      torch/vision/imagenet
                      torch/vision/ppm
                      torch/vision/resnet
@@ -338,6 +340,28 @@ Mirrors each image of the rank-4 batch @racket[x] along its width with
 probability @racket[p]; the rest pass through unchanged.
 }
 
+@defproc[(random-resized-crop [x tensor?]
+                              [size exact-positive-integer?]
+                              [#:scale scale (list/c (real-in 0 1) (real-in 0 1))
+                                       '(0.08 1.0)]
+                              [#:ratio ratio (list/c (and/c real? positive?)
+                                                     (and/c real? positive?))
+                                       '(3/4 4/3)]
+                              [#:generator generator (or/c generator? #f) #f])
+         tensor?]{
+torchvision's @tt{RandomResizedCrop}, the ImageNet training augmentation:
+a window covering a random share of the image's area, drawn from
+@racket[scale], at an aspect ratio drawn log-uniformly from
+@racket[ratio], cut at a random position and resized to
+@racket[size] by @racket[size]. Ten draws that do not fit fall back to
+the central window at the nearest admissible ratio, as torchvision does.
+@racket[x] is a float image, or a batch whose images each get their own
+window. Both pairs are ascending, and the scale's lower end is above zero.
+Unlike the two transforms below, it accepts a single image, because
+photographs of different sizes cannot share a batch until it has been
+applied.
+}
+
 @defproc[(random-crop [x tensor?]
                       [#:padding padding exact-nonnegative-integer? 4]
                       [#:generator generator (or/c generator? #f) #f])
@@ -523,6 +547,76 @@ claim gigabytes of memory.
                      [#:device device (or/c #f device/c) #f])
          tensor?]{
 @racket[decode-image] on the contents of the file at @racket[path].
+}
+
+@section{Image folders}
+
+@defmodule[torch/vision/image-folder]
+
+torchvision's @tt{ImageFolder}: a dataset over a directory with one
+subdirectory per class, the classes labelled in the order of their names.
+
+@racketblock[
+(define train (image-folder "hymenoptera_data/train"))
+(image-folder-classes "hymenoptera_data/train")
+]
+
+@defproc[(image-folder [root path-string?]
+                       [#:transform transform (-> tensor? tensor?) values]
+                       [#:extensions extensions (listof string?)
+                                     '(".jpg" ".jpeg" ".png")]
+                       [#:device device (or/c #f device/c) #f])
+         image-folder?]{
+A dataset of every file under @racket[root]'s class directories whose
+name ends in one of @racket[extensions], ignoring case. An item is the
+image decoded as RGB by @racket[read-image] on @racket[device] and passed
+through @racket[transform], and its label as an int64 scalar. The files
+are listed once, at construction; each is decoded when it is asked for.
+}
+
+@defproc[(image-folder? [v any/c]) boolean?]{
+The predicate.
+}
+
+@defproc[(image-folder-classes [root path-string?]) (listof string?)]{
+The names of @racket[root]'s subdirectories in sorted order, so the class
+labelled @racket[i] is the @racket[i]th.
+}
+
+@defproc[(image-folder-samples [root path-string?]
+                               [#:extensions extensions (listof string?)
+                                             '(".jpg" ".jpeg" ".png")])
+         (listof (cons/c path? exact-nonnegative-integer?))]{
+Every image file and its label, class by class, each class's files in
+the order of their paths. Symbolic links to directories are not
+followed, so a link back up the tree cannot loop.
+}
+
+@section{Ants and bees}
+
+@defmodule[torch/vision/hymenoptera]
+
+The dataset of PyTorch's transfer-learning tutorial: photographs of ants
+and bees from ImageNet, 244 for training and 153 for validation. The
+archive is fetched once from @tt{download.pytorch.org}, checked against
+its size and SHA-256, and unpacked into the cache directory (or
+@envvar{RKTORCH_HYMENOPTERA_DIR}); @envvar{RKTORCH_HYMENOPTERA_URL} points
+at a mirror.
+
+@defproc[(hymenoptera-dataset [split (or/c 'train 'val)]
+                              [#:transform transform (-> tensor? tensor?) values]
+                              [#:device device (or/c #f device/c) #f])
+         image-folder?]{
+The split as an @racket[image-folder]: ants are label 0 and bees label 1.
+}
+
+@defproc[(hymenoptera-root) path?]{
+The unpacked @filepath{hymenoptera_data} directory, fetching it first
+when the cache lacks it.
+}
+
+@defproc[(hymenoptera-cached?) boolean?]{
+Whether the unpacked tree is already in the cache.
 }
 
 @section{Pretrained weights}
