@@ -1,16 +1,28 @@
-The four photographs here are copied verbatim from the validation split
-of the "hymenoptera" dataset that PyTorch's transfer-learning tutorial
-(Sasank Chilamkurthy, "Transfer Learning for Computer Vision Tutorial")
-distributes at https://download.pytorch.org/tutorial/hymenoptera_data.zip:
+The four photographs here are in the public domain. Each is the
+500-pixel-wide rendition Wikimedia Commons serves of the original below,
+with its metadata stripped (jpegtran -copy none; the pixels are
+unchanged).
 
-  ants/8398478_50ef10c47a.jpg   val/ants/8398478_50ef10c47a.jpg
-  ants/11381045_b352a47d8c.jpg  val/ants/11381045_b352a47d8c.jpg
-  bees/10870992_eebeeb3a12.jpg  val/bees/10870992_eebeeb3a12.jpg
-  bees/26589803_5ba7000313.jpg  val/bees/26589803_5ba7000313.jpg
+  ants/formica-rufa.jpg
+    "Formica rufa 3.JPG" by Fredrik Lähnn, released into the public domain
+    by its author, who asks to be credited.
+    https://commons.wikimedia.org/wiki/File:Formica_rufa_3.JPG
 
-That dataset is a subset of ImageNet, whose images were gathered from the
-web and remain the property of their photographers; the archive states no
-licence of its own. They are kept here, as the tutorial's archive keeps
-them, as a small test fixture for non-commercial research and teaching
-use, the terms under which ImageNet distributes its images. The directory
-is laid out as an image folder, one subdirectory per class.
+  ants/hedge-mustard.jpg
+    "Ant on Tall Hedge Mustard" by the U.S. Fish and Wildlife Service,
+    Mountain-Prairie Region: a work of the U.S. federal government.
+    https://commons.wikimedia.org/wiki/File:Ant_on_Tall_Hedge_Mustard_(27178598058).jpg
+
+  bees/coneflower.jpg
+    "Bumblebee on Purple Coneflower" by the U.S. Fish and Wildlife Service,
+    Midwest Region: a work of the U.S. federal government.
+    https://commons.wikimedia.org/wiki/File:Bumblebee_on_Purple_Coneflower_(25297224820).jpg
+
+  bees/honey-bee.jpg
+    "European honey bee extracts nectar" by John Severns, released into the
+    public domain by its author.
+    https://commons.wikimedia.org/wiki/File:European_honey_bee_extracts_nectar.jpg
+
+The directory is laid out as an image folder, one subdirectory per class,
+like the ants-and-bees dataset of PyTorch's transfer-learning tutorial.
+That dataset's ImageNet photographs are not redistributed here.

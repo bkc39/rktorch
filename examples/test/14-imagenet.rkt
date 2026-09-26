@@ -48,11 +48,12 @@
     (check-true (apply >= ps) "the five come most likely first")
     (check-true (<= 0 (apply + ps) 1.000001)))
   ;; With the weights cached, the network sees the insects: each photo's
-  ;; class is among its five guesses, and first for all but the close-up.
+  ;; class is among its five guesses, and first for all but the ant among
+  ;; hedge mustard flowers, which it takes for rapeseed.
   (when (pretrained-weights-cached? 'resnet18-imagenet1k-v1)
     (define pretrained (run-example photos #:device 'cpu))
     (for ([guesses (in-list pretrained)]
           [insect (in-list '("ant" "ant" "bee" "bee"))])
       (check-not-false (assoc insect guesses) insect))
     (check-equal? (map (lambda (guesses) (car (first guesses))) pretrained)
-                  '("ant" "centipede" "bee" "bee"))))
+                  '("ant" "rapeseed" "bee" "bee"))))
