@@ -342,7 +342,8 @@ probability @racket[p]; the rest pass through unchanged.
 
 @defproc[(random-resized-crop [x tensor?]
                               [size exact-positive-integer?]
-                              [#:scale scale (list/c (real-in 0 1) (real-in 0 1))
+                              [#:scale scale (list/c (and/c (real-in 0 1) positive?)
+                                                     (and/c (real-in 0 1) positive?))
                                        '(0.08 1.0)]
                               [#:ratio ratio (list/c (and/c real? positive?)
                                                      (and/c real? positive?))
@@ -356,7 +357,7 @@ a window covering a random share of the image's area, drawn from
 @racket[size] by @racket[size]. Ten draws that do not fit fall back to
 the central window at the nearest admissible ratio, as torchvision does.
 @racket[x] is a float image, or a batch whose images each get their own
-window. Both pairs are ascending, and the scale's lower end is above zero.
+window. Both pairs are ascending.
 Unlike the two transforms below, it accepts a single image, because
 photographs of different sizes cannot share a batch until it has been
 applied.

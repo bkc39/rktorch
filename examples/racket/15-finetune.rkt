@@ -110,8 +110,10 @@ the batch norms normalise with their running statistics, in slices of 64.
 @racket['train] mode throughout, so its batch norms normalise by the batch
 and keep updating their running statistics even while their weights are
 frozen, as the tutorial's do. The optimizer steps every batch and the
-schedule once an epoch. Each epoch reports its mean training loss, the
-validation accuracy after it, and its wall-clock seconds.
+schedule once an epoch. Each epoch reports its training loss averaged
+over the images, as the tutorial's running loss is, so a short last batch
+counts by its size; then the validation accuracy after it, and its
+wall-clock seconds.
 
 @chunk[<r15-phase>
 (define (train-phase net opt schedule train val
@@ -125,8 +127,8 @@ validation accuracy after it, and its wall-clock seconds.
       (for/vector #:length n
                   ([i (in-flattened-tensor (randperm n #:generator generator))])
         i))
-    (define losses
-      (for/list ([from (in-range 0 n batch)])
+    (define total
+      (for/sum ([from (in-range 0 n batch)])
         (define indices
           (for/list ([i (in-vector order from (min n (+ from batch)))]) i))
         (define-values (xs ys) (train-batch images labels indices generator))
@@ -134,10 +136,10 @@ validation accuracy after it, and its wall-clock seconds.
         (define loss (cross-entropy (net xs) ys))
         (backward! loss)
         (step! opt)
-        (item loss)))
+        (* (item loss) (length indices))))
     (step! schedule)
     (list phase epoch
-          (/ (apply + losses) (length losses))
+          (/ total n)
           (accuracy net (car val) (cdr val))
           (/ (- (current-inexact-milliseconds) start) 1000.0))))]
 

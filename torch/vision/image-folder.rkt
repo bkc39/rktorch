@@ -14,7 +14,7 @@
   (define-values (_dir name _must-be-dir?) (split-path path))
   (define lowered (string-downcase (path->string name)))
   (for/or ([ext (in-list extensions)])
-    (string-suffix? lowered (string-downcase ext))))
+    (string-suffix? lowered ext)))
 
 (define/contract-out (image-folder-classes root) ;; noqa
   (-> path-string? (listof string?))
@@ -27,15 +27,17 @@
                                            [extensions image-extensions])
   (->* [path-string?] [#:extensions (listof string?)]
        (listof (cons/c path? exact-nonnegative-integer?)))
+  (define lowered (map string-downcase extensions))
   (for*/list ([class+label (in-list (for/list ([class (image-folder-classes
                                                        root)]
                                                [label (in-naturals)])
                                       (cons class label)))]
               [file (in-list (sort (find-files file-exists?
                                                (build-path root
-                                                           (car class+label)))
+                                                           (car class+label))
+                                               #:follow-links? #f)
                                    path<?))]
-              #:when (image-file? file extensions))
+              #:when (image-file? file lowered))
     (cons file (cdr class+label))))
 
 (define-dataset image-folder (samples transform device) ;; noqa

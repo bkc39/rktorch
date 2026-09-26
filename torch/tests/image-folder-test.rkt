@@ -77,6 +77,17 @@
       (define-values (gray _) (dataset-ref (image-folder root) 3))
       (check-equal? (car (tensor-shape gray)) 3 "decoded as RGB")))
 
+  (test-case "a link to a file counts; a link to a directory is not followed"
+    (with-temporary-directory (root)
+      (make-directory* (build-path root "cats"))
+      (copy-file (build-path images "smooth.jpg") (build-path root "cats" "a.jpg"))
+      (make-file-or-directory-link (build-path root "cats" "a.jpg")
+                                   (build-path root "cats" "b.jpg"))
+      (make-file-or-directory-link ".." (build-path root "cats" "up"))
+      (check-equal? (names (image-folder-samples root))
+                    '(("a.jpg" 0) ("b.jpg" 0))
+                    "the link back up the tree is not a loop")))
+
   (test-case "the ants-and-bees tree is read from the cache as it lies"
     (with-temporary-directory (cache)
       (for ([split (in-list '("train" "val"))])
