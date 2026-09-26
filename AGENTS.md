@@ -90,6 +90,10 @@ with `backward!` outside the form as PyTorch recommends). From
   `make-generator` / `generator?` / `randperm` / `draw-seed` — a CPU
   `torch.Generator` with its own stream, the permutation and the int64
   seed word drawn from it (or the global stream), for loaders (#87)
+- iteration (`torch/foreign/sequences.rkt`, #199): `in-tensor` (the
+  slices along the first dimension as views, Python's `for row in t`) and
+  `in-flattened-tensor` (the elements as Racket numbers, row-major, copied
+  to the host once; Python's `for x in t.flatten()` yields 0-d tensors)
 - `length` (`torch/foreign/sized.rkt`): Python's `len` as `gen:sized`,
   shadowing racket/base's like `+`; fast defaults for lists, vectors,
   strings, hashes; a tensor's first dimension; datasets and loaders
@@ -125,6 +129,14 @@ with `backward!` outside the form as PyTorch recommends). From
   int64 labels), `cifar10-dataset #:device`, `cifar10-label-names`,
   `load-cifar10-fixture` (256 committed records), `cifar10-records->tensors`,
   `tar-entries`
+- ImageNet networks (`torch/vision/resnet.rkt`, #199): `resnet18`
+  `resnet34` `resnet50` (`#:pretrained?`, `#:classes`; another head size
+  keeps the loaded backbone and starts a fresh `fc`), `ImageNetResNet
+  blocks #:block #:classes`, `Bottleneck`, `torchvision-key` (the load
+  rename: `downsample` is `shortcut`, `_` is `-`); `imagenet-classes`
+  (`torch/vision/imagenet.rkt`, label order) and `imagenet-preprocess`;
+  the predict example is `examples/racket/14-imagenet.rkt`, parity against
+  torchvision in `imagenet-parity-test.rkt` (default shell, cached weights)
 - resnet (`torch/vision/resnet.rkt`, #152): `BasicBlock` and `ResNet`
   (`#:classes #:base #:blocks`, ResNet-18 for 32x32 images by default,
   bias-free convolutions under `BatchNorm2d`); the training loop with
