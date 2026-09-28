@@ -1,22 +1,7 @@
-"""Writes what the review bot reads before it reviews a push.
-
-A pull request is reviewed in full until a run of this workflow has
-succeeded on it. After that, a push is reviewed incrementally from the head
-that run reviewed: only the commits since then that are not on the base
-branch, plus the conflict resolutions in their merge commits, in order.
-Merging a lower PR of a stack up into this one therefore does not re-review
-that PR's changes here, and a push that only merges the base has nothing to
-review at all. A failed or cancelled run does not count, so its changes are
-reviewed by the next one. Every earlier review thread goes into the context
-with its replies, so a point already settled is not raised again.
+"""The review bot's context: full, incremental or none, the patch since the
+last successful review, and the earlier threads; see claude-code-review.yml.
 
     python3 .github/scripts/review_context.py OUT_DIR
-
-Reads PR, AFTER, BASE_REF, HEAD_REF, REPO and GitHub's GITHUB_WORKFLOW_REF
-and GITHUB_RUN_ID from the environment, and writes OUT_DIR/context.md,
-OUT_DIR/threads.md and, for an incremental review, OUT_DIR/changes.patch.
-Sets the step output `mode`: full, incremental, or none when the commits
-since the last review add nothing of this PR's own.
 """
 import json
 import os

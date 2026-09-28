@@ -14,6 +14,7 @@ dest=${1:-manual}
 log=$(mktemp)
 trap 'rm -f "$log"' EXIT
 
+rm -rf "${dest:?}/torch"
 if ! raco scribble --htmls ++xref-in setup/xref load-collections-xref \
        --redirect-main https://docs.racket-lang.org/ \
        --dest "$dest" torch/scribblings/torch.scrbl >"$log" 2>&1; then
