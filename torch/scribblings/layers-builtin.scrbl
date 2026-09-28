@@ -11,10 +11,10 @@
                               Parameter Sequential batch-norm1d? batch-norm2d?
                               binary-cross-entropy-with-logits conv2d?
                               cross-entropy ctc-loss define-layer dropout?
-                              kaiming-uniform layer? linear? load-state!
-                              max-pool2d? mse-loss named-buffers
-                              named-parameters parameters save-state!
-                              uniform-init)))
+                              in-named-parameters kaiming-uniform layer?
+                              linear? load-state! max-pool2d? mse-loss
+                              named-buffers named-parameters parameters
+                              save-state! uniform-init)))
 
 @title{Built-in layers and losses}
 
@@ -89,6 +89,17 @@ its own separator: @racket["enc."] gives @racket["enc.fc1.weight"].
 
 @torch-examples[
 (map car (named-parameters (Sequential (Linear 2 2))))
+]}
+
+@defproc[(in-named-parameters [m layer?]) sequence?]{
+@racket[named-parameters] as a sequence of two values per parameter, its
+dotted path and its tensor, so a @racket[for] clause can bind both
+without taking a pair apart; @tt{named_parameters()} in a Python
+@tt{for} loop.
+
+@torch-examples[
+(for/list ([(name p) (in-named-parameters (Sequential (Linear 2 3)))])
+  (list name (shape p)))
 ]}
 
 @defproc[(layer? [v any/c]) boolean?]{
@@ -249,15 +260,3 @@ Uniform on @tt{[low, high)}.}
 Kaiming's uniform initialization with the bound PyTorch's
 @tt{nn.Linear} and @tt{nn.Conv2d} use by default, the fan-in read from
 @racket[dims].}
-
-@section{Checkpoints}
-
-@defproc[(save-state! [model layer?] [path path-string?]) void?]{
-Writes @racket[model]'s parameters and buffers to @racket[path] as a
-safetensors file, each under its dotted name from
-@racket[named-parameters] and @racket[named-buffers].}
-
-@defproc[(load-state! [model layer?] [path path-string?]) void?]{
-Loads the safetensors file at @racket[path] into @racket[model]'s
-parameters and buffers, matched by their dotted names, in place. The
-file must name every tensor the model has and no others.}

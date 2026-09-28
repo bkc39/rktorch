@@ -7,7 +7,7 @@
                      racket/contract
                      torch
                      (only-in torch/data/loader dataloader define-dataset)
-                     (only-in torch/nn MaxPool2d cross-entropy)))
+                     (only-in torch/nn MaxPool2d cross-entropy nll-loss)))
 
 @title{Operations on tensors}
 
@@ -174,8 +174,9 @@ storage.
 
 @defproc[(select [t tensor?] [dim exact-integer?] [index exact-integer?])
          tensor?]{
-The slice at @racket[index] along @racket[dim], with that axis removed,
-as @tt{t.select(dim, index)}; a view.
+The slice of @racket[t] at @racket[index] along @racket[dim], a view with
+that dimension removed; @tt{torch.select}, and @tt{t[i]} along the first
+dimension. A negative @racket[index] counts from the end.
 
 @torch-examples[(select (tensor '((1 2) (3 4))) 0 1)]}
 
@@ -258,7 +259,9 @@ them along a new one, so every input must have the same shape.
 ]}
 
 @defproc[(unsqueeze [t tensor?] [dim exact-integer?]) tensor?]{
-A view with a length-one axis inserted at @racket[dim].
+A view of @racket[t] with a new dimension of size one inserted at
+@racket[dim], which counts from the end when negative; @tt{torch.unsqueeze}.
+It is how one image becomes a batch of one.
 
 @torch-examples[(shape (unsqueeze (arange 3) 0))]}
 
@@ -286,39 +289,19 @@ tensors and reals, like @racket[exp].
 
 @torch-examples[(sigmoid (tensor '(0.0)))]}
 
-@section{Softmax, ordering and sampling}
+@section{Softmax}
 
 @deftogether[(@defproc[(softmax [t tensor?] [dim exact-integer?]) tensor?]
               @defproc[(log-softmax [t tensor?] [dim exact-integer?]) tensor?])]{
 The softmax along @racket[dim], and its logarithm computed stably.
-@racket[cross-entropy] takes raw logits and applies the latter itself.
+@racket[cross-entropy] takes raw logits and applies the latter itself;
+@racket[nll-loss] takes the latter's output.
 
 @torch-examples[(softmax (tensor '(1.0 2.0 3.0)) 0)]}
 
-@defproc[(topk [t tensor?] [k exact-positive-integer?]
-               [#:dim dim exact-integer? -1]
-               [#:largest? largest? boolean? #t]
-               [#:sorted? sorted? boolean? #t])
-         (values tensor? tensor?)]{
-The @racket[k] largest (or smallest) entries along @racket[dim] and their
-indices, as two values.
-
-@torch-examples[(topk (tensor '(3.0 1.0 2.0)) 2)]}
-
-@defproc[(argsort [t tensor?]
-                  [#:dim dim exact-integer? -1]
-                  [#:descending? descending? boolean? #f])
-         tensor?]{
-The indices that would sort @racket[t] along @racket[dim].}
-
-@defproc[(multinomial [probabilities tensor?] [n exact-positive-integer?]
-                      [#:replacement? replacement? boolean? #f]
-                      [#:generator generator (or/c generator? #f) #f])
-         tensor?]{
-@racket[n] indices drawn from each row of @racket[probabilities], which
-need not sum to one, from @racket[generator] or the global stream;
-seeded CPU draws match PyTorch's. Sampling the next character of a
-language model is @racket[(multinomial (softmax logits -1) 1)].}
+The largest entries, sorting and sampling from a distribution,
+@racket[topk], @racket[argsort] and @racket[multinomial], have a chapter of
+their own, @emph{Ordering and sampling}.
 
 @section{Spatial}
 

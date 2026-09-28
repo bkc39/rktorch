@@ -263,6 +263,12 @@
     (load-state! loaded-first path)
     (to loaded-first 'float64)
     (check-equal? (param-values loaded-first) expected)
+    (save-state! loaded-first path)
+    (define wide (to (Linear 3 2) 'float64))
+    (load-state! wide path)
+    (check-equal? (map tensor-dtype (parameters wide)) '(float64 float64))
+    (check-equal? (param-values wide) expected
+                  "a float64 model saves as it is and comes back float64")
     ;; a float64 model saves as F64, and a float32 model loads it converted
     (save-state! loaded-first path)
     (define again (Linear 3 2))

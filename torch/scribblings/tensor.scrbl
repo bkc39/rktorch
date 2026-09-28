@@ -5,10 +5,11 @@
                      racket/contract
                      (only-in torch
                               arange device device? device/c dtype dtype/c
-                              eye full full-like item manual-seed! ones
-                              ones-like rand rand-like randn randn-like shape
-                              sum tensor tensor->list tensor->string
-                              tensor-device tensor-dtype tensor-shape tensor?
+                              eye full full-like in-flattened-tensor in-tensor
+                              item manual-seed! numel ones ones-like rand
+                              rand-like randn randn-like shape sum tensor
+                              tensor->list tensor->string tensor-device
+                              tensor-dtype tensor-numel tensor-shape tensor?
                               to-dtype zeros zeros-like)))
 
 @title{Tensors}
@@ -166,7 +167,8 @@ draws match PyTorch's for the same seed.}
 @section{Queries}
 
 @defproc[(shape [t tensor?]) (listof exact-nonnegative-integer?)]{
-The dimensions, outermost first.
+The dimensions, outermost first. The short name, and the one to prefer;
+it is Python's @tt{t.shape}.
 
 @torch-examples[(shape (tensor '((1 2 3) (4 5 6))))]}
 
@@ -188,6 +190,16 @@ one to prefer; it is Python's @tt{t.dtype}.
 The same answer as @racket[dtype], under the name that says which kind of
 value it reads.}
 
+@defproc[(numel [t tensor?]) exact-nonnegative-integer?]{
+The number of elements, the product of the dimensions. The short name, and
+the one to prefer; it is Python's @tt{t.numel()}.
+
+@torch-examples[(numel (tensor '((1 2 3) (4 5 6))))]}
+
+@defproc[(tensor-numel [t tensor?]) exact-nonnegative-integer?]{
+The same answer as @racket[numel], under the name that says which kind of
+value it reads.}
+
 @defproc[(tensor-device [t tensor?]) device?]{
 Where the storage lives: the same answer as @racket[device] given a tensor,
 under the name that says which kind of value it reads. See
@@ -200,6 +212,28 @@ The elements as a flat Racket list, in row-major order, whatever the
 tensor's shape.
 
 @torch-examples[(tensor->list (tensor '((1 2) (3 4))))]}
+
+@defproc[(in-tensor [t tensor?]) sequence?]{
+The slices of @racket[t] along its first dimension, for a @racket[for]
+clause: Python's @tt{for row in t}. Each slice is a view one dimension
+smaller on @racket[t]'s device, so a vector yields zero-dimensional
+tensors and writing into a slice writes into @racket[t]. @racket[t] needs
+at least one dimension, as Python's loop does.
+
+@torch-examples[
+(for/list ([row (in-tensor (tensor '((1 2) (3 4))))])
+  (tensor->list row))
+]}
+
+@defproc[(in-flattened-tensor [t tensor?]) sequence?]{
+The elements of @racket[t] in row-major order, as Racket numbers: Python's
+@tt{for x in t.flatten()}, except that Python yields zero-dimensional
+tensors. The elements are copied to the host once, when the iteration
+starts, as @racket[tensor->list] copies them.
+
+@torch-examples[
+(for/sum ([x (in-flattened-tensor (tensor '((1 2) (3 4))))]) x)
+]}
 
 @defproc[(item [t tensor?]) number?]{
 The single element of a one-element tensor, as a Racket number. Raises if

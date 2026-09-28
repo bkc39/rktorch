@@ -15,7 +15,7 @@
          (only-in racket/string string-prefix? string-split string-trim)
          (only-in "../main.rkt" tensor tensor? tensor->list to-dtype)
          (only-in "../private/contract.rkt" define/contract-out)
-         (only-in "../private/util.rkt" with-temporary-file))
+         (only-in "../private/util.rkt" cache-dir with-temporary-file))
 
 (provide (contract-out [word-vocab? (-> any/c boolean?)]
                        [word-vocab-words (-> word-vocab? (vectorof string?))]))
@@ -163,10 +163,7 @@
 (define archive-entry "data/eng-fra.txt")
 
 (define (translation-cache-dir)
-  (define override (getenv "RKTORCH_TRANSLATION_DIR"))
-  (if (and override (not (string=? override "")))
-      (string->path override)
-      (build-path (find-system-path 'cache-dir) "rktorch" "translation")))
+  (cache-dir "RKTORCH_TRANSLATION_DIR" "translation"))
 
 ;; A zip's directory sits at its end, so a truncated download fails to list
 ;; the entry; inflating it and reading the first pair catches a body that

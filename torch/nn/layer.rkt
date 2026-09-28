@@ -135,6 +135,17 @@
   (->* [layer?] [string?] (listof (cons/c string? tensor?)))
   (remove-duplicates (layer-named-parameters m prefix) eq? #:key cdr))
 
+(define/contract-out (in-named-parameters m) ;; noqa
+  (-> layer? sequence?)
+  (make-do-sequence
+   (lambda ()
+     (values (lambda (entries) (values (caar entries) (cdar entries)))
+             cdr
+             (named-parameters m)
+             pair?
+             #f
+             #f))))
+
 (define/contract-out (buffers m) ;; noqa
   (-> layer? (listof tensor?))
   (remove-duplicates (layer-buffers m) eq?))

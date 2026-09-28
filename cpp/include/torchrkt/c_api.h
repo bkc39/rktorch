@@ -8,6 +8,7 @@
 #include "torchrkt/c_api/elementwise.h"
 #include "torchrkt/c_api/generated.h"
 #include "torchrkt/c_api/global.h"
+#include "torchrkt/c_api/image.h"
 #include "torchrkt/c_api/linalg.h"
 #include "torchrkt/c_api/random.h"
 #include "torchrkt/c_api/reduce.h"

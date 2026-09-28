@@ -2,6 +2,7 @@
 
 @(require (for-label racket/base
                      racket/contract
+                     (only-in racket/string string-replace)
                      (only-in torch backward! lambda~> prop:to relu tensor? to to-able?)
                      (only-in torch/data/loader in-dataloader)
                      torch/nn
@@ -731,4 +732,59 @@ A schedule, the number of times it has been stepped, the rate it last
 wrote to its optimizer, and that optimizer. @racket[scheduler-rate] is
 @tt{get_last_lr()}: it reports the rate written at construction or by the
 last @racket[step!], and does not call a @racket[lambda-lr] factor again.
+}
+
+@section{Checkpoints}
+
+@defproc[(state-dict [model layer?]) (listof (cons/c string? tensor?))]{
+The model's parameters and then its buffers, each under its dotted path, in
+the order of @tt{nn.Module.state_dict}.  Every registered path is kept, so a
+tensor shared by two fields appears under both names.
+}
+
+@defproc[(save-state! [model layer?] [path path-string?]) void?]{
+Writes @racket[(state-dict model)] to @racket[path] in the safetensors
+layout: an 8-byte little-endian header length, a JSON header giving each
+entry's @tt{dtype}, @tt{shape} and @tt{data_offsets}, then the tensors'
+bytes, little-endian.  Entries are typed @tt{F32}, @tt{F64}, @tt{F16},
+@tt{BF16}, @tt{I64}, @tt{U8} or @tt{BOOL}, and every value is written
+exactly, a @racket['float64] tensor included.  A tensor of any other dtype is refused
+with the name of its entry.
+}
+
+@defproc[(load-state! [model layer?]
+                      [path path-string?]
+                      [#:strict? strict? boolean? #t]
+                      [#:rename rename (-> string? (or/c string? #f)) values])
+         any]{
+Copies the entries of the checkpoint at @racket[path] into
+@racket[model]'s parameters and buffers, in place and outside the autograd
+tape, as @tt{load_state_dict} does.  A loaded value takes the dtype and
+device of the tensor it lands in.
+
+The file is checked against the model before anything is copied.  With
+@racket[strict?], a key the model has and the file lacks, or the file has
+and the model lacks, is an error, and the one error names every such key;
+a strict load returns @|void-const|.  Without it, the entries the two
+share are loaded and the result is two values: the missing keys in the
+model's order and the unexpected keys in alphabetical order.  An entry
+whose shape differs from the model's is an error in either mode, reported
+per key with both shapes, because equal element counts do not make shapes
+equal.  So is an entry with a dtype tag outside the list above, or whose
+@tt{data_offsets} do not span exactly the bytes its dtype and shape need
+inside the file, so a damaged checkpoint leaves the model as it was.
+
+@racket[rename] maps each key in the file to the key it loads into, which
+is how a checkpoint written by other code reaches a model whose fields
+are named in the Racket style: torchvision's @tt{bn1.running_mean} can
+land in a @racket[BatchNorm2d]'s @tt{bn1.running-mean}. A key renamed to
+@racket[#f] is left out, neither loaded nor unexpected. Unexpected keys
+are reported as the file names them; missing keys and mismatches as the
+model does. Two file keys renamed to one model key are an error before
+anything is copied.
+
+@racketblock[
+(load-state! net path
+             #:rename (lambda (key) (string-replace key "_" "-")))
+]
 }

@@ -140,7 +140,8 @@
                         (tensor->repr
                          (to-dtype (tensor '(16777217)) 'float64)))
     (check-equal? (tensor->list (tensor '(1.9 -1.9) #:dtype 'int64)) '(1 -1))
-    (check-exn exn:fail? (lambda () (tensor '(1 2) #:dtype 'float64)))
+    (check-equal? (tensor-dtype (tensor '(1 2) #:dtype 'float64)) 'float64)
+    (check-exn exn:fail? (lambda () (tensor '(1 2) #:dtype 'bool)))
     (check-equal? (tensor->list (transpose (tensor '((1 2) (3 4))) 0 1))
                   '(1 3 2 4))
     (check-equal? (tensor-dtype (tensor '())) 'float32)

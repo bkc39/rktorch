@@ -113,6 +113,30 @@ TEST(TorchrktOps, FromDataI64RejectsBadShapes) {
   EXPECT_EQ(tr_from_data_i64(nullptr, 3, dims.data(), 2), nullptr);
 }
 
+TEST(TorchrktOps, FromDataF64KeepsEveryBit) {
+  // 0.1 and 1 + 2^-52 are not float32-representable: an exact round trip
+  // rules out a float32 transit.
+  const std::vector<double> values = {0.1, 1.0 + 0x1.0p-52, -2.5e300};
+  const std::vector<int64_t> dims = {3};
+  const Handle t(
+      tr_from_data_f64(values.data(), values.size(), dims.data(), 1));
+  ASSERT_NE(t.t, nullptr) << tr_last_error();
+  tr_dtype dt = TR_DTYPE_FLOAT32;
+  EXPECT_EQ(tr_tensor_dtype(t.t, &dt), 0) << tr_last_error();
+  EXPECT_EQ(dt, TR_DTYPE_FLOAT64);
+  std::uint64_t numel = 0;
+  EXPECT_EQ(tr_tensor_copy_data_f64(t.t, 0, nullptr, &numel), 2);
+  std::vector<double> out(numel);
+  EXPECT_EQ(tr_tensor_copy_data_f64(t.t, numel, out.data(), &numel), 0)
+      << tr_last_error();
+  EXPECT_EQ(out, values);
+  const std::vector<int64_t> bad = {2, 2};
+  EXPECT_EQ(tr_from_data_f64(values.data(), values.size(), bad.data(), 2),
+            nullptr);
+  EXPECT_STRNE(tr_last_error(), "");
+  EXPECT_EQ(tr_from_data_f64(nullptr, 3, dims.data(), 1), nullptr);
+}
+
 TEST(TorchrktOps, FromDataU8RoundTripsBytes) {
   const std::vector<uint8_t> bytes = {0, 1, 2, 255};
   const std::vector<int64_t> dims = {2, 2};

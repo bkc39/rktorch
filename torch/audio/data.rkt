@@ -16,7 +16,7 @@
          (only-in "../foreign/structs.rkt" wrap-tensor)
          (only-in "../main.rkt" tensor tensor-shape tensor->list tensor?)
          (only-in "../private/contract.rkt" define/contract-out)
-         (only-in "../private/util.rkt" with-temporary-file))
+         (only-in "../private/util.rkt" cache-dir with-temporary-file))
 
 (define sample-rate/c
   (flat-named-contract 'sample-rate exact-positive-integer?))
@@ -225,11 +225,8 @@
   (load-wav audio-fixture))
 
 (define (audio-cache-dir)
-  (define override (getenv "RKTORCH_AUDIO_DIR"))
-  (if (and override (not (string=? override "")))
-      ;; complete, or the containment walk-up never reaches a root
-      (path->complete-path (string->path override))
-      (build-path (find-system-path 'cache-dir) "rktorch" "audio")))
+  ;; complete, or the containment walk-up never reaches a root
+  (path->complete-path (cache-dir "RKTORCH_AUDIO_DIR" "audio")))
 
 (define/contract-out (download-audio-cached name url
                                             #:valid? [valid? (lambda (_) #t)])

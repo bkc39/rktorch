@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+#
+# Renders the manual into manual/ and fails on a binding documented twice or
+# on a broken-link count other than `known`; see docs/building.md.
+#
+#   nix develop .#ci --command scripts/build-docs
+set -euo pipefail
+
+cd "$(git rev-parse --show-toplevel)"
+
+known=0
+dest=manual
+log=$(mktemp)
+trap 'rm -f "$log"' EXIT
+
+rm -rf "$dest/torch"
+if ! raco scribble --htmls ++xref-in setup/xref load-collections-xref \
+       --redirect-main https://docs.racket-lang.org/ \
+       --dest "$dest" torch/scribblings/torch.scrbl >"$log" 2>&1; then
+  cat "$log"
+  exit 1
+fi
+
+status=0
+if grep "multiple times" "$log" |
+     grep -v -e "key multiple times: '(dep " \
+             -e "key multiple times: '(elem (chunk \"<\*>:"; then
+  echo "build-docs: the keys above are documented more than once"
+  status=1
+fi
+
+mapfile -t broken < <(
+  grep -o -E 'class="badlink">(<span class="[A-Za-z]+">)?[^<]*' \
+       "$dest"/torch/*.html |
+    sed -E 's|^.*/([^/:]+):class="badlink">(<span class="[A-Za-z]+">)?|\1 -> |' |
+    sort
+)
+printf '%s\n' "${broken[@]}" | uniq -c
+echo "build-docs: ${#broken[@]} broken links (known: $known)"
+if [ "${#broken[@]}" -gt "$known" ]; then
+  echo "build-docs: more broken links than before; document or fix the new ones"
+  status=1
+elif [ "${#broken[@]}" -lt "$known" ]; then
+  echo "build-docs: fewer broken links than before; set known=${#broken[@]}"
+  status=1
+fi
+echo "build-docs: $dest/torch/index.html"
+exit "$status"

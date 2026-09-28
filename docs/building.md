@@ -114,14 +114,17 @@ Links into Racket's own manuals still go through its `local-redirect`
 mechanism, whose rewriting script is loaded over `file://`. That is right
 for reading the docs locally and broken for serving them over HTTP, where
 the script never runs and such a link lands on a "Redirections"
-placeholder. To render a copy that can be served, send those links to the
-web instead:
+placeholder. `scripts/build-docs` renders a copy that can be served, with
+those links sent to the web, and checks it for what `raco scribble` lets
+pass: a binding documented twice, which it only warns about, and broken
+links, the names a page renders in red. It lists each broken link as
+`page -> name` and fails when their count differs from the one it records:
+more means a change added one, fewer means the record should come down to
+match, so fixed links cannot be spent on new ones:
 
 ```bash
-nix develop .#ci --command raco scribble --htmls --dest /tmp/rktorch-docs \
-  ++main-xref-in --redirect-main https://docs.racket-lang.org/ \
-  torch/scribblings/torch.scrbl
-python3 -m http.server -d /tmp/rktorch-docs 8000   # then open /torch/
+nix develop .#ci --command scripts/build-docs     # renders into manual/
+python3 -m http.server -d manual 8000             # then open /torch/
 ```
 
 ## Coverage

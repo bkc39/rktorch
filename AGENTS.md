@@ -90,6 +90,10 @@ with `backward!` outside the form as PyTorch recommends). From
   `make-generator` / `generator?` / `randperm` / `draw-seed` — a CPU
   `torch.Generator` with its own stream, the permutation and the int64
   seed word drawn from it (or the global stream), for loaders (#87)
+- iteration (`torch/foreign/sequences.rkt`, #199): `in-tensor` (the
+  slices along the first dimension as views, Python's `for row in t`) and
+  `in-flattened-tensor` (the elements as Racket numbers, row-major, copied
+  to the host once; Python's `for x in t.flatten()` yields 0-d tensors)
 - `length` (`torch/foreign/sized.rkt`): Python's `len` as `gen:sized`,
   shadowing racket/base's like `+`; fast defaults for lists, vectors,
   strings, hashes; a tensor's first dimension; datasets and loaders
@@ -125,6 +129,23 @@ with `backward!` outside the form as PyTorch recommends). From
   int64 labels), `cifar10-dataset #:device`, `cifar10-label-names`,
   `load-cifar10-fixture` (256 committed records), `cifar10-records->tensors`,
   `tar-entries`
+- image folders (`torch/vision/image-folder.rkt`, #199): `image-folder
+  #:transform #:extensions #:device` (torchvision's `ImageFolder`, items
+  decoded as RGB on demand), `image-folder-classes`,
+  `image-folder-samples`; `torch/vision/hymenoptera.rkt` the tutorial's
+  ants and bees (`hymenoptera-dataset` `hymenoptera-root`
+  `hymenoptera-cached?`, zip checked by size and SHA-256 through
+  `torch/private/download.rkt`, shared with the weights); the fine-tune
+  example is `examples/racket/15-finetune.rkt`, with a `random-resized-crop`
+  in the transforms
+- ImageNet networks (`torch/vision/resnet.rkt`, #199): `resnet18`
+  `resnet34` `resnet50` (`#:pretrained?`, `#:classes`; another head size
+  keeps the loaded backbone and starts a fresh `fc`), `ImageNetResNet
+  blocks #:block #:classes`, `Bottleneck`, `torchvision-key` (the load
+  rename: `downsample` is `shortcut`, `_` is `-`); `imagenet-classes`
+  (`torch/vision/imagenet.rkt`, label order) and `imagenet-preprocess`;
+  the predict example is `examples/racket/14-imagenet.rkt`, parity against
+  torchvision in `imagenet-parity-test.rkt` (default shell, cached weights)
 - resnet (`torch/vision/resnet.rkt`, #152): `BasicBlock` and `ResNet`
   (`#:classes #:base #:blocks`, ResNet-18 for 32x32 images by default,
   bias-free convolutions under `BatchNorm2d`); the training loop with
@@ -134,7 +155,29 @@ with `backward!` outside the form as PyTorch recommends). From
   #:p` and `random-crop #:padding` on an image batch where it lives; each
   takes `#:generator` and draws one seed per batch from it, so a seeded
   loader replays its augmentation (the draws are the transform's own, not
-  torchvision's)
+  torchvision's). The pretrained preprocessing (#199) on an image or a
+  batch: `convert-image-dtype` (uint8 0-255 to float 0-1 and back, the
+  torchvision scaling), `resize #:antialias?` (short side or `(h w)`,
+  float only; two matmuls with host-computed bilinear or Pillow-filter
+  weights, since `upsample_bilinear2d` needs the unmarshalled `float?`),
+  `center-crop` (offsets round half to even), `normalize`,
+  `imagenet-normalize`, `imagenet-mean`, `imagenet-std`
+- pretrained weights (`torch/vision/weights.rkt`, #199):
+  `pretrained-weights` fetches a torchvision ImageNet checkpoint, timm's
+  `tv_in1k` safetensors on Hugging Face pinned to a commit, into the cache
+  (`RKTORCH_WEIGHTS_DIR`; `RKTORCH_WEIGHTS_URL` is a hub mirror), checking
+  the size and SHA-256 recorded in the module before the rename into place
+  (`scripts/check-weights.py` confirms the tensors are torchvision's);
+  `pretrained-weights-cached?`, `pretrained-weights-names`. The files keep
+  torchvision's key names; `load-state! #:rename` maps them
+- image reading (`torch/vision/image.rkt`, #199): `decode-image` (bytes)
+  and `read-image` (a path) to a uint8 `[C H W]` tensor, `#:mode
+  'unchanged 'gray 'gray-alpha 'rgb 'rgba`, `#:device`; JPEG and PNG
+  through `stb_image` behind `tr_image_decode`, the header from nixpkgs'
+  `stb` found by pkg-config like libsndfile and compiled once in
+  `src/torchrkt/detail/stb_image.c`; PNGs match
+  torchvision.io exactly, JPEGs within a count or two
+  (`image-parity-test.rkt`, torchvision only in the default shell)
 - generative examples on MNIST (#152): `examples/racket/10-dcgan.rkt` (a
   DCGAN shrunk to 28x28, `ConvTranspose2d` and `BatchNorm2d` in the
   generator, `leaky-relu` in the discriminator, two `adam`s at 2e-4 with
@@ -188,7 +231,7 @@ provided as plain renames (no contract overhead on the numeric fast path),
 per `foreign/operators.rkt`.
 
 From `torch/nn`: `define-layer procedure->Layer gen:layer layer? Parameter Buffer LayerList LayerHash parameters
-named-parameters buffers children forward Linear Conv2d MaxPool2d Flatten Dropout
+named-parameters in-named-parameters buffers children forward Linear Conv2d MaxPool2d Flatten Dropout
 Sequential Embedding LayerNorm ConvTranspose2d GroupNorm BatchNorm2d BatchNorm1d
 LSTM GRU sgd adam rmsprop step! zero-grads! clip-grad-norm! learning-rate
 set-learning-rate! step-lr multi-step-lr exponential-lr cosine-annealing-lr
@@ -379,7 +422,9 @@ module's full export set (`racket/runtime-path`, `syntax/parse/pre`).
 - `data/dataset.rkt` — `define-dataset` and `gen:dataset`;
   `private/definer.rkt` — the clause grammar it shares with `define-layer`.
 - `vision/cifar10.rkt` — CIFAR-10 loader and dataset, `vision/fixtures/`
-  its 256-record fixture; `vision/diffusion.rkt` — DDPM schedules, `q-sample`
+  its 256-record fixture and `vision/fixtures/images/` the reader's
+  synthetic JPEGs and PNGs (`scripts/gen-image-fixtures.py`);
+  `vision/image.rkt` — the image reader; `vision/diffusion.rkt` — DDPM schedules, `q-sample`
   and the UNet layers.
 - `data/loader.rkt` — `tensor-dataset`, `dataloader`, `in-dataloader`,
   `in-epochs`, re-exporting `data/dataset.rkt`; `data/mnist.rkt`,

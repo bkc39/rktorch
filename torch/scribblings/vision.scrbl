@@ -1,17 +1,23 @@
 #lang scribble/manual
 
-@(require (for-label racket/base
+@(require "common.rkt"
+          (for-label racket/base
                      racket/contract
                      (only-in torch cuda-if-available device/c draw-seed generator?
-                              make-generator randn-like tensor?
-                              upsample-nearest2d)
+                              make-generator matmul narrow randn-like tensor?
+                              to-dtype upsample-nearest2d)
                      torch/data/loader
                      (only-in torch/nn Conv2d Dropout Embedding GroupNorm Linear
-                              define-layer)
+                              define-layer load-state!)
                      torch/vision/cifar10
+                     torch/vision/hymenoptera
+                     torch/vision/image
+                     torch/vision/image-folder
+                     torch/vision/imagenet
                      torch/vision/ppm
                      torch/vision/resnet
                      torch/vision/transforms
+                     torch/vision/weights
                      torch/vision/diffusion))
 
 @title{Vision datasets}
@@ -212,9 +218,112 @@ The predicates of the layers above.
 
 @defmodule[torch/vision/transforms]
 
-Augmentation on an image batch where it lives: each transform takes an
-@tt{[N C H W]} tensor and returns one of the same shape on the same
-device. The random choices are per image, drawn on the host from a Racket
+The preprocessing a pretrained network expects, and augmentation on an
+image batch where it lives. Every transform returns a tensor on its
+input's device.
+
+@torch-examples[
+(require torch/vision/image torch/vision/transforms)
+(define photo
+  (read-image (collection-file-path "smooth-401x299.jpg"
+                                    "torch" "vision" "fixtures" "images")))
+(shape photo)
+(define x
+  (imagenet-normalize
+   (center-crop (resize (convert-image-dtype photo) 256) 224)))
+(shape x)
+(item (max (abs (- x (imagenet-preprocess photo)))))
+]
+
+The first four are torchvision's @tt{transforms.functional} of the same
+names and take an image, @tt{[C H W]}, or a batch, @tt{[N C H W]}, as does
+@racket[imagenet-preprocess].
+
+@defproc[(convert-image-dtype [x tensor?]
+                              [dtype (or/c 'uint8 'float16 'bfloat16
+                                           'float32 'float64)
+                                     'float32])
+         tensor?]{
+@racket[x] as @racket[dtype], rescaled between the two conventions for
+pixels: a @racket['uint8] image holds 0 to 255, a float one 0 to 1. So a
+decoded image divides by 255 on the way to a float dtype, and a float
+image multiplies by @racket[255.999] and truncates on the way back, which
+lands 1.0 on 255 and nothing past it. Between two float dtypes it is
+@racket[to-dtype]; to its own dtype it is @racket[x] itself.
+}
+
+@defproc[(resize [x tensor?]
+                 [size (or/c exact-positive-integer?
+                             (list/c exact-positive-integer?
+                                     exact-positive-integer?))]
+                 [#:antialias? antialias? boolean? #t])
+         tensor?]{
+Resamples the float image or batch @racket[x] to @racket[size]
+bilinearly. A pair is the new height and width; a single number is the
+new length of the shorter side, the longer one scaled to keep the aspect
+ratio and truncated, so @tt{[3 299 401]} resized to 256 is
+@tt{[3 256 343]}. With @racket[antialias?], the default as in
+torchvision, a downscale widens the triangle filter to the scale factor
+the way Pillow does, so every input pixel contributes; without it each
+output pixel interpolates the two inputs nearest its centre, which aliases
+when shrinking by more than two. Either way the result is
+@tt{F.interpolate(mode="bilinear", align_corners=False)} to within float
+rounding.
+
+The resampling is two matrix products, one per axis, with weights
+computed on the host, rather than ATen's upsampling kernel: it is
+differentiable, it runs on any device @racket[matmul] does, and it needs
+no optional-float argument, which the generated surface does not yet
+marshal. The half dtypes are resampled in float32 and narrowed back. A
+@racket['uint8] image is a contract violation: convert it first, as
+above.
+}
+
+@defproc[(center-crop [x tensor?]
+                      [size (or/c exact-positive-integer?
+                                  (list/c exact-positive-integer?
+                                          exact-positive-integer?))])
+         tensor?]{
+The central @racket[size] window of @racket[x], of any dtype, a view on
+its storage. A pair is the height and width, a single number a square.
+The window's offset is half the difference rounded to even, as Python's
+@tt{round} does in torchvision. A window larger than the image is a
+contract violation, where torchvision would pad.
+}
+
+@defproc[(normalize [x tensor?]
+                    [mean (listof real?)]
+                    [std (listof (and/c real? positive?))])
+         tensor?]{
+Subtracts @racket[mean] and divides by @racket[std], one value per
+channel of the float image or batch @racket[x].
+}
+
+@deftogether[(@defthing[imagenet-mean (listof real?)]
+              @defthing[imagenet-std (listof real?)])]{
+The per-channel statistics the torchvision ImageNet weights were trained
+with, @racket['(0.485 0.456 0.406)] and @racket['(0.229 0.224 0.225)].
+}
+
+@defproc[(imagenet-preprocess [x tensor?]) tensor?]{
+The whole input pipeline of torchvision's ImageNet classifiers for the
+three-channel image or batch @racket[x], @racket['uint8] or float:
+@racket[convert-image-dtype] to @racket['float32], @racket[resize] with
+the shorter side to 256, @racket[center-crop] to 224 and
+@racket[imagenet-normalize]. It resizes the float image, where
+torchvision's @tt{ImageClassification} resizes a @racket['uint8] tensor
+and rounds it back to bytes first, so the two differ by that rounding.
+}
+
+@defproc[(imagenet-normalize [x tensor?]) tensor?]{
+@racket[(normalize x imagenet-mean imagenet-std)] for a three-channel
+float image or batch in @tt{[0, 1]}, the input every pretrained
+torchvision classifier expects after @racket[resize] to 256 and
+@racket[center-crop] to 224.
+}
+
+The two random transforms take an @tt{[N C H W]} batch and return one of
+the same shape. The random choices are per image, drawn on the host from a Racket
 generator that one @racket[draw-seed] from the torch generator seeds per
 batch, so a loader built on @racket[(make-generator 0)] replays its
 augmentation as well as its batch order. They are the transform's own
@@ -238,6 +347,29 @@ draws: a torchvision pipeline on the same seed picks different crops.
          tensor?]{
 Mirrors each image of the rank-4 batch @racket[x] along its width with
 probability @racket[p]; the rest pass through unchanged.
+}
+
+@defproc[(random-resized-crop [x tensor?]
+                              [size exact-positive-integer?]
+                              [#:scale scale (list/c (and/c (real-in 0 1) positive?)
+                                                     (and/c (real-in 0 1) positive?))
+                                       '(0.08 1.0)]
+                              [#:ratio ratio (list/c (and/c real? positive?)
+                                                     (and/c real? positive?))
+                                       '(3/4 4/3)]
+                              [#:generator generator (or/c generator? #f) #f])
+         tensor?]{
+torchvision's @tt{RandomResizedCrop}, the ImageNet training augmentation:
+a window covering a random share of the image's area, drawn from
+@racket[scale], at an aspect ratio drawn log-uniformly from
+@racket[ratio], cut at a random position and resized to
+@racket[size] by @racket[size]. Ten draws that do not fit fall back to
+the central window at the nearest admissible ratio, as torchvision does.
+@racket[x] is a float image, or a batch whose images each get their own
+window. Both pairs are ascending.
+Unlike the two transforms below, it accepts a single image, because
+photographs of different sizes cannot share a batch until it has been
+applied.
 }
 
 @defproc[(random-crop [x tensor?]
@@ -290,6 +422,246 @@ or channel count is a contract violation, blamed on the caller.
 @deftogether[(@defproc[(basic-block? [v any/c]) boolean?]
               @defproc[(resnet? [v any/c]) boolean?])]{
 The predicates.
+}
+
+@subsection{The ImageNet networks}
+
+The residual networks of He, Zhang, Ren and Sun at ImageNet's scale, in
+torchvision's layout and under its field names, so its pretrained weights
+load into them: a 7x7 stride-2 stem, batch norm and a 3x3 stride-2
+max-pool, four stages at 64, 128, 256 and 512 channels, the last three
+starting at stride 2, global average pooling and a linear head. Called
+on an @tt{[N 3 H W]} batch, typically 224 by 224 after
+@racket[imagenet-preprocess], they return @tt{[N classes]} logits; put
+them in @racket['eval] mode first when classifying, so their batch norms
+use the saved running statistics.
+
+@racketblock[
+(define net (resnet18 #:pretrained? #t))
+(in-eval-mode net
+  (with-no-grad (net (unsqueeze (imagenet-preprocess image) 0))))
+]
+
+@deftogether[(@defproc[(resnet18 [#:pretrained? pretrained? boolean? #f]
+                                 [#:classes classes exact-positive-integer? 1000])
+                       imagenet-resnet?]
+              @defproc[(resnet34 [#:pretrained? pretrained? boolean? #f]
+                                 [#:classes classes exact-positive-integer? 1000])
+                       imagenet-resnet?]
+              @defproc[(resnet50 [#:pretrained? pretrained? boolean? #f]
+                                 [#:classes classes exact-positive-integer? 1000])
+                       imagenet-resnet?])]{
+ResNet-18 and ResNet-34, with two and three to six @racket[BasicBlock]s
+per stage, and ResNet-50, with @racket[Bottleneck]s: 11.7, 21.8 and 25.6
+million parameters. With @racket[pretrained?], torchvision's
+@tt{IMAGENET1K_V1} weights are fetched through
+@racket[pretrained-weights] and loaded with @racket[torchvision-key] as
+the rename; their top-1 accuracies on ImageNet's validation set are
+69.8, 73.3 and 76.1 percent. With a @racket[classes] other than 1000 the
+backbone is still loaded but the head is a fresh @racket[Linear] of that
+width, what assigning a new @tt{model.fc} does in PyTorch: the start of
+fine-tuning on a new task.
+}
+
+@defproc[(ImageNetResNet [blocks (list/c exact-positive-integer?
+                                         exact-positive-integer?
+                                         exact-positive-integer?
+                                         exact-positive-integer?)]
+                         [#:block block (or/c 'basic 'bottleneck) 'basic]
+                         [#:classes classes exact-positive-integer? 1000])
+         imagenet-resnet?]{
+The network the three builders make, with @racket[blocks] blocks of the
+given kind per stage, for the other depths: @racket['(3 4 23 3)] with
+bottlenecks is ResNet-101. Its fields are @racket[conv1], @racket[bn1],
+@racket[maxpool], @racket[layer1] through @racket[layer4] and
+@racket[fc].
+}
+
+@defproc[(Bottleneck [in exact-positive-integer?]
+                     [width exact-positive-integer?]
+                     [#:stride stride exact-positive-integer? 1])
+         bottleneck?]{
+A 1x1 convolution down to @racket[width] channels, a 3x3 at
+@racket[stride], and a 1x1 out to four times @racket[width], each with
+batch norm and all but the last followed by a ReLU, added to the input
+and passed through a ReLU. Where the stride or the width changes, the
+shortcut projects the input as @racket[BasicBlock]'s does. The stride
+sits on the 3x3 convolution, torchvision's version 1.5 of the block.
+}
+
+@deftogether[(@defproc[(imagenet-resnet? [v any/c]) boolean?]
+              @defproc[(bottleneck? [v any/c]) boolean?])]{
+The predicates.
+}
+
+@defproc[(torchvision-key [key string?]) string?]{
+A torchvision checkpoint key as the network in this module names it: its
+@tt{downsample} is @racket[shortcut] here, and every underscore becomes a
+hyphen, so @tt{layer2.0.downsample.1.running_mean} is
+@tt{layer2.0.shortcut.1.running-mean}. The @racket[#:rename] the
+builders pass to @racket[load-state!].
+}
+
+@subsection{ImageNet classes}
+
+@defmodule[torch/vision/imagenet]
+
+@defthing[imagenet-classes (listof string?)]{
+The thousand ImageNet class names in label order, as torchvision's
+weights list them, so the index of a logit names its class:
+@racket[(list-ref imagenet-classes 309)] is @racket["bee"] and 310
+@racket["ant"]. The names are unique; where ImageNet has two classes
+called @tt{crane}, torchvision names the bird @tt{crane bird}.
+}
+
+@section{Reading images}
+
+@defmodule[torch/vision/image]
+
+JPEG and PNG decoding into a @racket['uint8] tensor of shape
+@tt{[C H W]}, torchvision's @tt{decode_image} layout. The decoder is
+@hyperlink["https://github.com/nothings/stb"]{stb_image}, a header-only
+library compiled into the native library with only those two formats, so
+reading an image needs no library at run time.
+
+A PNG decodes to exactly the pixels torchvision's decoder returns. A
+JPEG differs from libjpeg-turbo's decoding by a count or two in places,
+because the two decoders use different inverse transforms and chroma
+upsampling. Baseline and progressive JPEGs decode; arithmetic-coded and
+12-bit ones do not. A 16-bit PNG is reduced to 8 bits. EXIF orientation
+is ignored, as it is by @tt{decode_image} by default.
+
+@defproc[(decode-image [bs bytes?]
+                       [#:mode mode (or/c 'unchanged 'gray 'gray-alpha
+                                          'rgb 'rgba)
+                               'unchanged]
+                       [#:device device (or/c #f device/c) #f])
+         tensor?]{
+Decodes the encoded image @racket[bs], which must not be empty, on the
+CPU and moves it to @racket[device], or else to the default device.
+@racket['unchanged] keeps the channels the file stores, except that a
+palette PNG comes back as RGB, or RGBA with a transparency chunk; the
+other modes convert to one, two, three or four channels, the way
+torchvision's @tt{ImageReadMode} does, gray as stb's integer luma
+@tt{(77r + 150g + 29b) >> 8}. What is not a JPEG or a PNG, or is
+truncated, is an error naming the reason. So is an image of more than
+178,956,970 pixels, Pillow's decompression-bomb limit, which is refused
+from its header before any pixel is decoded, so a small file cannot
+claim gigabytes of memory.
+}
+
+@defproc[(read-image [path path-string?]
+                     [#:mode mode (or/c 'unchanged 'gray 'gray-alpha
+                                        'rgb 'rgba)
+                             'unchanged]
+                     [#:device device (or/c #f device/c) #f])
+         tensor?]{
+@racket[decode-image] on the contents of the file at @racket[path].
+}
+
+@section{Image folders}
+
+@defmodule[torch/vision/image-folder]
+
+torchvision's @tt{ImageFolder}: a dataset over a directory with one
+subdirectory per class, the classes labelled in the order of their names.
+
+@racketblock[
+(define train (image-folder "hymenoptera_data/train"))
+(image-folder-classes "hymenoptera_data/train")
+]
+
+@defproc[(image-folder [root path-string?]
+                       [#:transform transform (-> tensor? tensor?) values]
+                       [#:extensions extensions (listof string?)
+                                     '(".jpg" ".jpeg" ".png")]
+                       [#:device device (or/c #f device/c) #f])
+         image-folder?]{
+A dataset of every file under @racket[root]'s class directories whose
+name ends in one of @racket[extensions], ignoring case. An item is the
+image decoded as RGB by @racket[read-image] on @racket[device] and passed
+through @racket[transform], and its label as an int64 scalar. The files
+are listed once, at construction; each is decoded when it is asked for.
+}
+
+@defproc[(image-folder? [v any/c]) boolean?]{
+The predicate.
+}
+
+@defproc[(image-folder-classes [root path-string?]) (listof string?)]{
+The names of @racket[root]'s subdirectories in sorted order, so the class
+labelled @racket[i] is the @racket[i]th.
+}
+
+@defproc[(image-folder-samples [root path-string?]
+                               [#:extensions extensions (listof string?)
+                                             '(".jpg" ".jpeg" ".png")])
+         (listof (cons/c path? exact-nonnegative-integer?))]{
+Every image file and its label, class by class, each class's files in
+the order of their paths. Symbolic links to directories are not
+followed, so a link back up the tree cannot loop.
+}
+
+@section{Ants and bees}
+
+@defmodule[torch/vision/hymenoptera]
+
+The dataset of PyTorch's transfer-learning tutorial: photographs of ants
+and bees from ImageNet, 244 for training and 153 for validation. The
+archive is fetched once from @tt{download.pytorch.org}, checked against
+its size and SHA-256, and unpacked into the cache directory (or
+@envvar{RKTORCH_HYMENOPTERA_DIR}); @envvar{RKTORCH_HYMENOPTERA_URL} points
+at a mirror.
+
+@defproc[(hymenoptera-dataset [split (or/c 'train 'val)]
+                              [#:transform transform (-> tensor? tensor?) values]
+                              [#:device device (or/c #f device/c) #f])
+         image-folder?]{
+The split as an @racket[image-folder]: ants are label 0 and bees label 1.
+}
+
+@defproc[(hymenoptera-root) path?]{
+The unpacked @filepath{hymenoptera_data} directory, fetching it first
+when the cache lacks it.
+}
+
+@defproc[(hymenoptera-cached?) boolean?]{
+Whether the unpacked tree is already in the cache.
+}
+
+@section{Pretrained weights}
+
+@defmodule[torch/vision/weights]
+
+torchvision's ImageNet weights, as the safetensors files timm publishes
+on Hugging Face (@tt{timm/resnet18.tv_in1k} and its two siblings), each
+pinned to one commit; @filepath{scripts/check-weights.py} confirms they
+hold torchvision's tensors, bit for bit. A checkpoint is fetched the first
+time it is asked for, checked against the size and SHA-256 recorded in
+the module before it reaches the cache, and read from the cache after
+that. A @filepath{.txt} file beside it records where the weights came
+from and their licence, torchvision's BSD-3-Clause.
+@envvar{RKTORCH_WEIGHTS_DIR} moves the cache and
+@envvar{RKTORCH_WEIGHTS_URL} points at a Hugging Face mirror, which keeps
+the hub's layout, @tt{REPO/resolve/REVISION/model.safetensors}. The files
+keep torchvision's key names, and a model loads one with
+@racket[load-state!]'s @racket[#:rename].
+
+@defthing[pretrained-weights-names (listof symbol?)]{
+The published checkpoints, torchvision's @tt{IMAGENET1K_V1} weights for
+three networks: @racket['resnet18-imagenet1k-v1],
+@racket['resnet34-imagenet1k-v1] and @racket['resnet50-imagenet1k-v1].
+}
+
+@defproc[(pretrained-weights [name symbol?]) path?]{
+The path of the cached checkpoint @racket[name], fetching it first when
+the cache lacks it. A download whose size or checksum differs from the
+published file is an error, and nothing is kept.
+}
+
+@defproc[(pretrained-weights-cached? [name symbol?]) boolean?]{
+Whether @racket[name] is already in the cache, so a caller can decide
+whether to trigger the fetch; the tests only touch cached weights.
 }
 
 @section{Images}
