@@ -3,7 +3,7 @@
 @(require (for-label (except-in racket/base abs cos exp log sin sort sqrt max min length + - * /)
                      torch))
 
-@section[#:tag "ex-autograd"]{Autograd: gradients by backpropagation}
+@title[#:tag "ex-autograd"]{Autograd: gradients by backpropagation}
 
 The calculus hello-world: for @tt{y = sum(x*x)} the gradient is @tt{2x}.
 @racket[tensor]'s @racket[#:requires-grad?] marks @tt{x} as a leaf to

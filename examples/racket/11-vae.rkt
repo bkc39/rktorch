@@ -4,7 +4,7 @@
                      torch torch/nn torch/data/loader torch/data/mnist
                      torch/vision/ppm))
 
-@section[#:tag "ex-vae"]{Training a variational autoencoder on MNIST}
+@title[#:tag "ex-vae"]{Training a variational autoencoder on MNIST}
 
 The smallest end-to-end reparameterization: an encoder maps an image to
 the mean and log-variance of a Gaussian over a 20-dimensional latent, a

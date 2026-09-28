@@ -93,6 +93,15 @@ binds every example to one evaluator, so the results in the manual are
 produced by the library at build time. An example that would need a GPU or
 a download must not be written as a live one.
 
+The guide's "Worked examples" part weaves the literate programs under
+`examples/racket/` into the manual by relative path
+(`guide/examples.scrbl` includes `(submod "../../../examples/racket/NN.rkt"
+doc)`). That is the one place the manual reaches outside the `torch/`
+package: it renders from a checkout or a link-mode install, and it does
+not from a `raco pkg install --copy` of `torch/`, which is how the flake and
+a catalog install the package. The examples' eventual move inside the
+package is tracked on #88.
+
 `raco setup` renders both into `torch/doc/` (gitignored), and `raco docs`
 opens them:
 

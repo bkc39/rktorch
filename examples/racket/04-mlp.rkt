@@ -3,7 +3,7 @@
 @(require (for-label (except-in racket/base abs cos exp log sin sort sqrt max min length + - * /)
                      torch torch/nn))
 
-@section[#:tag "ex-mlp"]{Training an MLP end to end}
+@title[#:tag "ex-mlp"]{Training an MLP end to end}
 
 The v1 capstone: a two-layer perceptron declared with @racket[define-layer],
 trained for a few SGD steps on a fixed random batch. The model is a plain

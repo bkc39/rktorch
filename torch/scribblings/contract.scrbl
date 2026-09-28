@@ -8,6 +8,8 @@
 
 @defmodule[torch/private/contract]
 
+This chapter is for contributors to the library rather than users of it.
+
 Two forms that attach a contract to a definition at its definition site,
 so the contract sits next to the code it describes rather than in a
 @racket[contract-out] block at the exporting facade.  Both are allowed only

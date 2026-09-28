@@ -25,7 +25,7 @@
                          #:when (eq? (car row) phase))
      (max best (list-ref row 3))))
 
-@title[#:tag "finetune"]{Fine-tuning}
+@title[#:tag "guide-finetune"]{Fine-tuning}
 
 A pretrained network knows ImageNet's thousand classes. Most problems
 have other classes and far fewer examples, and the usual answer is to

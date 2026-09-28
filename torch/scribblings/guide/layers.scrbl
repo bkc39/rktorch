@@ -6,7 +6,7 @@
                      torch
                      torch/nn))
 
-@title[#:tag "layers"]{Layers}
+@title[#:tag "guide-layers"]{Layers}
 
 A @deftech{layer} is a callable that owns tensors. The tensors it owns are
 its @deftech{parameters}: the numbers training adjusts.

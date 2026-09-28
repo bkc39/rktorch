@@ -3,7 +3,7 @@
 @(require (for-label (except-in racket/base abs cos exp log sin sort sqrt max min length + - * /)
                      torch))
 
-@section[#:tag "ex-matmul"]{Shape manipulation and matrix multiplication}
+@title[#:tag "ex-matmul"]{Shape manipulation and matrix multiplication}
 
 @racket[arange] enumerates values like @tt{torch.arange} (float32 here), and
 @racket[reshape] takes the target shape as ordinary arguments. Together they

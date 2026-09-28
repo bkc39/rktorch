@@ -24,7 +24,7 @@
           (append (list (last rel)) (list "torch" "vision" "fixtures" "hymenoptera")
                   (drop-right rel 1))))
 
-@title[#:tag "pretrained"]{A pretrained network}
+@title[#:tag "guide-pretrained"]{A pretrained network}
 
 Every network so far started from random weights. Most real vision work
 starts instead from a network someone has already trained on a large

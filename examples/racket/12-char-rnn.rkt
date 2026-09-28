@@ -3,7 +3,7 @@
 @(require (for-label (except-in racket/base abs cos exp log sin sort sqrt max min length + - * /)
                      torch torch/nn))
 
-@section[#:tag "ex-char-rnn"]{A character-level LSTM on Heart of Darkness}
+@title[#:tag "ex-char-rnn"]{A character-level LSTM on Heart of Darkness}
 
 The recurrent counterpart of the char-GPT: the same novella, the same
 next-character objective, but the context lives in an @racket[LSTM]'s state
