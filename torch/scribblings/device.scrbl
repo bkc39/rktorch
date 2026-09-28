@@ -1,11 +1,12 @@
 #lang scribble/manual
 
-@(require (for-label racket/base
+@(require "common.rkt"
+          (for-label racket/base
                      racket/contract
                      (only-in torch
-                              arange autocast-dtype autocast-enabled?
-                              backward! bytes->tensor call-with-autocast
-                              cpu-device default-device
+                              accelerator-if-available arange autocast-dtype
+                              autocast-enabled? backward! bytes->tensor
+                              call-with-autocast cpu-device default-device
                               cuda-allocator-settings!
                               cuda-device cuda-memory-info cuda-memory-stats
                               cuda-reset-peak-stats! device device/c device?
@@ -204,6 +205,49 @@ Equivalent to @racket[(to t dev)].
 @defproc[(to-dtype [t tensor?] [dtype dtype/c]) tensor?]{
 Equivalent to @racket[(to t dtype)].
 }
+
+@section{Choosing a device}
+
+@defproc*[([(device [t tensor?]) device?]
+           [(device [kind (or/c 'cpu 'cuda 'mps)]
+                    [index exact-nonnegative-integer? 0])
+            device?])]{
+Given a tensor, answers where its storage lives, as Python's
+@tt{t.device}; @racket[tensor-device] is the same query under the longer
+name. Given a device kind, builds a device value, as
+@tt{torch.device("cuda", 1)}: @racket[index] selects among CUDA devices and
+must be @racket[0] for @racket['cpu] and @racket['mps]. Supplying an index
+when querying a tensor is a contract error.
+
+@torch-examples[
+(device (tensor '(1.0 2.0)))
+(device 'cpu)
+]}
+
+@defproc[(device? [v any/c]) boolean?]{
+Whether @racket[v] is a device value, as answered by @racket[device],
+@racket[cpu-device], @racket[cuda-device], @racket[mps-device] and
+@racket[accelerator-if-available].}
+
+@defproc[(accelerator-if-available) device?]{
+The accelerator this process can use --- CUDA on a Linux machine with an
+NVIDIA GPU, Metal on Apple Silicon --- or the CPU device when there is
+none, mirroring @tt{torch.accelerator.current_accelerator()}.}
+
+@defform[(with-default-device dev body ...+)]{
+Evaluates @racket[body] with @racket[dev] as the process default device, so
+every tensor constructed inside, a model's parameters and a batch alike, is
+allocated there. Answers the last result.
+
+Paired with @racket[accelerator-if-available] this is what lets one
+training loop run on a GPU where there is one and the CPU otherwise,
+without being rewritten:
+
+@racketblock[
+(with-default-device (accelerator-if-available)
+  (code:comment "everything built here lives on the chosen device")
+  (void))
+]}
 
 @section{Placement at construction}
 

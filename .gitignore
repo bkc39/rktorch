@@ -13,12 +13,18 @@ checkpoints/
 # scripts/coverage.rkt's HTML report
 coverage/
 
+# scripts/build-docs's rendered manual
+manual/
+
 # Local-only planning notes; agents may drop plan files here without committing.
 # (The reviewed v0 plan is checked in as plans/v0-scaffold.md.)
 .claude/worktrees/
 
 # exit-loop repro harness output, plus local investigation notes
 repro-logs/
+
+# rendered manual; `raco setup` writes it beside the collection
+torch/doc/
 
 # agent scratch: logs, probes and one-off scripts, never part of a change
 .scratch/

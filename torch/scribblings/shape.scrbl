@@ -5,7 +5,7 @@
 
 @title{Transpose shorthand}
 
-@defmodule[torch]
+@defmodule[torch #:link-target? #f]
 
 @defproc[(T [x tensor?]) tensor?]{
 Returns a view with all dimensions in reverse order, matching Python's

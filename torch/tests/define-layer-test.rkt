@@ -29,6 +29,18 @@
     (check-equal? (car seen) 7 "a plain field is kept, not registered")
     (check-false (list-ref seen 5) "a field never assigned is #f"))
 
+  (test-case "in-named-parameters yields each name and its tensor"
+    (define k (Kinds 7))
+    (check-equal? (for/list ([(name _) (in-named-parameters k)]) name)
+                  (map car (named-parameters k)))
+    (check-true (andmap eq?
+                        (for/list ([(_ p) (in-named-parameters k)]) p)
+                        (map cdr (named-parameters k))))
+    (check-equal? (for/list ([(name _) (in-named-parameters (Dropout))]) name)
+                  '())
+    (check-exn #rx"^in-named-parameters: contract violation"
+               (lambda () (in-named-parameters 5))))
+
   (test-case "buffers are named, listed after parameters, and round-trip the state dict"
     (define k (Kinds 1))
     (check-equal? (map car (named-buffers k)) '("shift"))
@@ -71,17 +83,15 @@
     (check-equal? (tensor->list (cadr (buffers typed))) '(16777217 3))
     (delete-file typed-path)
     (define-layer Wide (w)
-      #:init ()
-      (set! w (Buffer (to-dtype (tensor '(0.1)) 'float64)))
+      #:init (v)
+      (set! w (Buffer (tensor (list v) #:dtype 'float64)))
       #:forward (x) x)
-    (define written (Wide))
-    (save-state! written typed-path)
-    (define wide (Wide))
+    (save-state! (Wide 0.1) typed-path)
+    (define wide (Wide 0.0))
     (load-state! wide typed-path)
     (check-equal? (map tensor-dtype (buffers wide)) '(float64))
-    (check-equal? (tensor->list (car (buffers wide)))
-                  (tensor->list (car (buffers written)))
-                  "float64 keeps every bit through the file")
+    (check-equal? (tensor->list (car (buffers wide))) '(0.1)
+                  "0.1 is not a float32: every bit of a float64 survives")
     (delete-file typed-path))
 
   (test-case "every child field registers, in declaration order, whatever its kind"
