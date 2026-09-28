@@ -13,6 +13,9 @@ checkpoints/
 # scripts/coverage.rkt's HTML report
 coverage/
 
+# scripts/build-docs's rendered manual
+manual/
+
 # Local-only planning notes; agents may drop plan files here without committing.
 # (The reviewed v0 plan is checked in as plans/v0-scaffold.md.)
 .claude/worktrees/

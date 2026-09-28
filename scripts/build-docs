@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+#
+# Builds the manual the way it is read, one page per section with links into
+# Racket's own documentation resolved (without ++xref-in, every racket/base
+# name renders as a broken link), and checks what raco scribble lets pass:
+#
+# - broken links, the red names in a rendered page, listed as
+#   `page -> name`. The build fails when there are more than `known` below,
+#   so a change adds none; lower `known` when you fix some.
+# - a binding documented twice, which raco scribble only warns about
+#   ("collected information for key multiple times" on anything but a
+#   `dep` key).
+#
+#   nix develop .#ci --command scripts/build-docs [DEST]    (default: manual)
+set -euo pipefail
+
+cd "$(git rev-parse --show-toplevel)"
+
+known=62
+dest=${1:-manual}
+log=$(mktemp)
+trap 'rm -f "$log"' EXIT
+
+if ! raco scribble --htmls ++xref-in setup/xref load-collections-xref \
+       --redirect-main https://docs.racket-lang.org/ \
+       --dest "$dest" torch/scribblings/torch.scrbl >"$log" 2>&1; then
+  cat "$log"
+  exit 1
+fi
+
+status=0
+if grep "multiple times" "$log" | grep -v "key multiple times: '(dep "; then
+  echo "build-docs: the keys above are documented more than once"
+  status=1
+fi
+
+mapfile -t broken < <(
+  grep -o -E 'class="badlink">(<span class="[A-Za-z]+">)?[^<]*' \
+       "$dest"/torch/*.html |
+    sed -E 's|^.*/([^/:]+):class="badlink">(<span class="[A-Za-z]+">)?|\1 -> |' |
+    sort
+)
+printf '%s\n' "${broken[@]}" | uniq -c
+echo "build-docs: ${#broken[@]} broken links (known: $known)"
+if [ "${#broken[@]}" -gt "$known" ]; then
+  echo "build-docs: more broken links than before; document or fix the new ones"
+  status=1
+fi
+echo "build-docs: $dest/torch/index.html"
+exit "$status"
