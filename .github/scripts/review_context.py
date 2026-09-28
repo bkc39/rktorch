@@ -134,10 +134,7 @@ def threads_markdown(nodes):
         out.append(f"## {t['path']}:{line} ({state})\n")
         for c in t["comments"]:
             who = (c["author"] or {}).get("login", "ghost")
-            body = c["body"].strip()
-            if len(body) > 2000:
-                body = body[:2000] + " [...]"
-            out.append(f"**{who}:**\n\n{body}\n")
+            out.append(f"**{who}:**\n\n{c['body'].strip()}\n")
     return "\n".join(out)
 
 
