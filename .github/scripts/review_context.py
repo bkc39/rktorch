@@ -16,9 +16,25 @@ query($owner: String!, $name: String!, $pr: Int!, $after: String) {
       reviewThreads(first: 50, after: $after) {
         pageInfo { hasNextPage endCursor }
         nodes {
-          isResolved isOutdated path line originalLine
-          comments(first: 30) { nodes { author { login } body } }
+          id isResolved isOutdated path line originalLine
+          comments(first: 100) {
+            pageInfo { hasNextPage endCursor }
+            nodes { author { login } body }
+          }
         }
+      }
+    }
+  }
+}
+"""
+
+MORE_COMMENTS = """
+query($id: ID!, $after: String) {
+  node(id: $id) {
+    ... on PullRequestReviewThread {
+      comments(first: 100, after: $after) {
+        pageInfo { hasNextPage endCursor }
+        nodes { author { login } body }
       }
     }
   }
@@ -75,6 +91,19 @@ def changes(before, after, base):
     return "\n".join(parts)
 
 
+def all_comments(thread):
+    comments = thread["comments"]
+    nodes = list(comments["nodes"])
+    while comments["pageInfo"]["hasNextPage"]:
+        comments = json.loads(run(
+            "gh", "api", "graphql", "-f", f"query={MORE_COMMENTS}",
+            "-f", f"id={thread['id']}",
+            "-f", f"after={comments['pageInfo']['endCursor']}"))["data"][
+                "node"]["comments"]
+        nodes += comments["nodes"]
+    return nodes
+
+
 def threads(repo, pr):
     owner, name = repo.split("/")
     nodes, cursor = [], None
@@ -85,6 +114,8 @@ def threads(repo, pr):
             args += ["-f", f"after={cursor}"]
         page = json.loads(run(*args))["data"]["repository"]["pullRequest"][
             "reviewThreads"]
+        for thread in page["nodes"]:
+            thread["comments"] = all_comments(thread)
         nodes += page["nodes"]
         if not page["pageInfo"]["hasNextPage"]:
             return nodes
@@ -101,7 +132,7 @@ def threads_markdown(nodes):
             state += ", outdated"
         line = t["line"] or t["originalLine"]
         out.append(f"## {t['path']}:{line} ({state})\n")
-        for c in t["comments"]["nodes"]:
+        for c in t["comments"]:
             who = (c["author"] or {}).get("login", "ghost")
             body = c["body"].strip()
             if len(body) > 2000:

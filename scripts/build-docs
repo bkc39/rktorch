@@ -1,20 +1,19 @@
 #!/usr/bin/env bash
 #
-# Renders the manual into DEST (default manual/) and fails on a binding
-# documented twice or on a broken-link count other than `known`; see
-# docs/building.md.
+# Renders the manual into manual/ and fails on a binding documented twice or
+# on a broken-link count other than `known`; see docs/building.md.
 #
-#   nix develop .#ci --command scripts/build-docs [DEST]
+#   nix develop .#ci --command scripts/build-docs
 set -euo pipefail
 
 cd "$(git rev-parse --show-toplevel)"
 
 known=62
-dest=${1:-manual}
+dest=manual
 log=$(mktemp)
 trap 'rm -f "$log"' EXIT
 
-rm -rf "${dest:?}/torch"
+rm -rf "$dest/torch"
 if ! raco scribble --htmls ++xref-in setup/xref load-collections-xref \
        --redirect-main https://docs.racket-lang.org/ \
        --dest "$dest" torch/scribblings/torch.scrbl >"$log" 2>&1; then
