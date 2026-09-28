@@ -5,7 +5,7 @@
                      torch/vision/resnet torch/vision/transforms
                      torch/vision/weights))
 
-@section[#:tag "ex-imagenet"]{Classifying photographs with a pretrained ResNet}
+@title[#:tag "ex-imagenet"]{Classifying photographs with a pretrained ResNet}
 
 Every network in the examples so far starts from random weights. This one
 starts from torchvision's: the ResNet of He, Zhang, Ren and Sun

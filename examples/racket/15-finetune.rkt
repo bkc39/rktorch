@@ -5,7 +5,7 @@
                      torch/vision/image-folder torch/vision/resnet
                      torch/vision/transforms))
 
-@section[#:tag "ex-finetune"]{Fine-tuning a pretrained ResNet on ants and bees}
+@title[#:tag "ex-finetune"]{Fine-tuning a pretrained ResNet on ants and bees}
 
 Transfer learning, after PyTorch's tutorial (Sasank Chilamkurthy,
 @italic{Transfer Learning for Computer Vision}) and ocaml-torch's
