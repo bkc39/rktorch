@@ -136,8 +136,9 @@ nix develop .#ci --command scripts/build-docs
 
 It renders the manual into `manual/` with links into Racket's own docs
 resolved (a bare `raco scribble` leaves every `racket/base` name as a broken
-link) and fails on a binding documented twice or on more broken links than
-the known count it records. Lower that count when a change fixes some.
+link) and fails on a binding documented twice or when the broken-link
+count differs from the one it records. Lower the record when a change fixes
+some.
 
 ### 8. Final gate
 

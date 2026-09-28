@@ -109,8 +109,9 @@ placeholder. `scripts/build-docs` renders a copy that can be served, with
 those links sent to the web, and checks it for what `raco scribble` lets
 pass: a binding documented twice, which it only warns about, and broken
 links, the names a page renders in red. It lists each broken link as
-`page -> name` and fails when there are more than the known count it
-records, so a change adds none:
+`page -> name` and fails when their count differs from the one it records:
+more means a change added one, fewer means the record should come down to
+match, so fixed links cannot be spent on new ones:
 
 ```bash
 nix develop .#ci --command scripts/build-docs     # renders into manual/

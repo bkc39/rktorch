@@ -1,17 +1,10 @@
 #!/usr/bin/env bash
 #
-# Builds the manual the way it is read, one page per section with links into
-# Racket's own documentation resolved (without ++xref-in, every racket/base
-# name renders as a broken link), and checks what raco scribble lets pass:
+# Renders the manual into DEST (default manual/) and fails on a binding
+# documented twice or on a broken-link count other than `known`; see
+# docs/building.md.
 #
-# - broken links, the red names in a rendered page, listed as
-#   `page -> name`. The build fails when there are more than `known` below,
-#   so a change adds none; lower `known` when you fix some.
-# - a binding documented twice, which raco scribble only warns about
-#   ("collected information for key multiple times" on anything but a
-#   `dep` key).
-#
-#   nix develop .#ci --command scripts/build-docs [DEST]    (default: manual)
+#   nix develop .#ci --command scripts/build-docs [DEST]
 set -euo pipefail
 
 cd "$(git rev-parse --show-toplevel)"
@@ -44,6 +37,9 @@ printf '%s\n' "${broken[@]}" | uniq -c
 echo "build-docs: ${#broken[@]} broken links (known: $known)"
 if [ "${#broken[@]}" -gt "$known" ]; then
   echo "build-docs: more broken links than before; document or fix the new ones"
+  status=1
+elif [ "${#broken[@]}" -lt "$known" ]; then
+  echo "build-docs: fewer broken links than before; set known=${#broken[@]}"
   status=1
 fi
 echo "build-docs: $dest/torch/index.html"

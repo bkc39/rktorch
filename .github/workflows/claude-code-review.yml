@@ -5,8 +5,9 @@
 # CLAUDE_CODE_OAUTH_TOKEN repository secret (Settings > Secrets and
 # variables > Actions). Posts findings as PR comments / inline annotations.
 #
-# A pull request's first review covers its whole diff; every later push is
-# reviewed incrementally, against the earlier threads and their replies (see
+# A pull request is reviewed in full until a review run succeeds on it;
+# after that each push is reviewed incrementally from the head that run
+# covered, against the earlier threads and their replies (see
 # .github/scripts/review_context.py). A push that only merges the base
 # branch is not reviewed.
 
@@ -18,6 +19,7 @@ on:
     types: [opened, synchronize]
 
 permissions:
+  actions: read
   contents: read
   pull-requests: write
   id-token: write
@@ -36,10 +38,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ github.event.pull_request.number }}
-          ACTION: ${{ github.event.action }}
-          BEFORE: ${{ github.event.before }}
           AFTER: ${{ github.event.pull_request.head.sha }}
           BASE_REF: ${{ github.event.pull_request.base.ref }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
           REPO: ${{ github.repository }}
         run: python3 .github/scripts/review_context.py .review-context
 
