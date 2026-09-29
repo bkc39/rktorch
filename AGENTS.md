@@ -146,6 +146,13 @@ with `backward!` outside the form as PyTorch recommends). From
   (`torch/vision/imagenet.rkt`, label order) and `imagenet-preprocess`;
   the predict example is `examples/racket/14-imagenet.rkt`, parity against
   torchvision in `imagenet-parity-test.rkt` (default shell, cached weights)
+- VGG (`torch/vision/vgg.rkt`, #202): `vgg16-features #:pretrained?`, the
+  convolutional half of VGG-16 as one `features` child, a `Sequential` of
+  31 steps in torchvision's slots (so `features.N.weight` loads without a
+  rename; walk it with `in-layers` for activations); `vgg16-features?`.
+  The style-transfer example is `examples/racket/16-style-transfer.rkt`,
+  parity against torchvision in `style-transfer-parity-test.rkt` (default
+  shell, cached weights)
 - resnet (`torch/vision/resnet.rkt`, #152): `BasicBlock` and `ResNet`
   (`#:classes #:base #:blocks`, ResNet-18 for 32x32 images by default,
   bias-free convolutions under `BatchNorm2d`); the training loop with
@@ -169,7 +176,10 @@ with `backward!` outside the form as PyTorch recommends). From
   the size and SHA-256 recorded in the module before the rename into place
   (`scripts/check-weights.py` confirms the tensors are torchvision's);
   `pretrained-weights-cached?`, `pretrained-weights-names`. The files keep
-  torchvision's key names; `load-state! #:rename` maps them
+  torchvision's key names; `load-state! #:rename` maps them. A checkpoint
+  with `keys` (VGG-16's `features.`) is fetched as a byte range, its header
+  and those entries, checked by that prefix's size and SHA-256, and cut to
+  a safetensors file of those entries (`torch/private/safetensors.rkt`)
 - image reading (`torch/vision/image.rkt`, #199): `decode-image` (bytes)
   and `read-image` (a path) to a uint8 `[C H W]` tensor, `#:mode
   'unchanged 'gray 'gray-alpha 'rgb 'rgba`, `#:device`; JPEG and PNG

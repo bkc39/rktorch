@@ -17,6 +17,7 @@
                      torch/vision/ppm
                      torch/vision/resnet
                      torch/vision/transforms
+                     torch/vision/vgg
                      torch/vision/weights
                      torch/vision/diffusion))
 
@@ -514,6 +515,43 @@ weights list them, so the index of a logit names its class:
 called @tt{crane}, torchvision names the bird @tt{crane bird}.
 }
 
+@section{VGG}
+
+@defmodule[torch/vision/vgg]
+
+The convolutional half of VGG-16 (Simonyan and Zisserman, @italic{Very
+Deep Convolutional Networks for Large-Scale Image Recognition}, ICLR 2015),
+torchvision's @tt{vgg16().features}: thirteen 3-by-3 convolutions, each
+followed by a ReLU, in five stages that each end in a 2-by-2 max-pool. It
+is what style transfer and perceptual losses read activations from; the
+classifier that follows it in the full network is left out.
+
+@defproc[(vgg16-features [#:pretrained? pretrained? boolean? #f])
+         vgg16-features?]{
+The features as a layer with one child, @racket[features], a
+@racket[Sequential] of 31 steps in torchvision's slots, so its parameters
+are named @tt{features.0.weight}, @tt{features.2.weight} and on up to
+@tt{features.28.bias}, as torchvision names them, and a step's index is
+torchvision's. Walking @racket[(child-ref net "features")] with
+@racket[in-layers] gives each step's output in turn. It takes an RGB batch
+and returns 512 channels at a thirty-second of the input's height and
+width.
+
+With @racket[#:pretrained? #t] it loads torchvision's @tt{IMAGENET1K_V1}
+weights, the @racket['vgg16-features-imagenet1k-v1] checkpoint of
+@racket[pretrained-weights], which has exactly these names. The network
+was trained on images normalised by @racket[imagenet-normalize].
+
+@torch-examples[
+(require torch/vision/vgg)
+(define net (vgg16-features))
+(shape (net (zeros 1 3 64 64)))
+]}
+
+@defproc[(vgg16-features? [v any/c]) boolean?]{
+Whether @racket[v] is a layer @racket[vgg16-features] built.
+}
+
 @section{Reading images}
 
 @defmodule[torch/vision/image]
@@ -634,7 +672,7 @@ Whether the unpacked tree is already in the cache.
 @defmodule[torch/vision/weights]
 
 torchvision's ImageNet weights, as the safetensors files timm publishes
-on Hugging Face (@tt{timm/resnet18.tv_in1k} and its two siblings), each
+on Hugging Face (@tt{timm/resnet18.tv_in1k} and its siblings), each
 pinned to one commit; @filepath{scripts/check-weights.py} confirms they
 hold torchvision's tensors, bit for bit. A checkpoint is fetched the first
 time it is asked for, checked against the size and SHA-256 recorded in
@@ -647,10 +685,17 @@ the hub's layout, @tt{REPO/resolve/REVISION/model.safetensors}. The files
 keep torchvision's key names, and a model loads one with
 @racket[load-state!]'s @racket[#:rename].
 
+VGG-16's convolutional features, all that style transfer uses, are the
+first 56 MiB of a 528 MiB file whose rest is the classifier. Only those
+bytes are fetched, with an HTTP range request, and checked against their
+own recorded size and SHA-256; the cached file is a safetensors file of the
+@tt{features.*} entries alone.
+
 @defthing[pretrained-weights-names (listof symbol?)]{
-The published checkpoints, torchvision's @tt{IMAGENET1K_V1} weights for
-three networks: @racket['resnet18-imagenet1k-v1],
-@racket['resnet34-imagenet1k-v1] and @racket['resnet50-imagenet1k-v1].
+The published checkpoints, torchvision's @tt{IMAGENET1K_V1} weights:
+@racket['resnet18-imagenet1k-v1], @racket['resnet34-imagenet1k-v1] and
+@racket['resnet50-imagenet1k-v1] for the ResNets, and
+@racket['vgg16-features-imagenet1k-v1] for VGG-16's features.
 }
 
 @defproc[(pretrained-weights [name symbol?]) path?]{
