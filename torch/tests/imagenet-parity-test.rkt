@@ -7,7 +7,7 @@
            racket/runtime-path
            (only-in rackunit check-= check-equal? check-true)
            (only-in "../main.rkt"
-                    abs backward! bytes->tensor copy! item max requires-grad!
+                    abs backward! copy! item max requires-grad!
                     select stack sub tensor tensor-shape tensor->list topk
                     with-no-grad)
            (only-in "../nn.rkt"
@@ -22,14 +22,6 @@
            "private/python-env.rkt")
 
   (define-runtime-path photos-dir "../vision/fixtures/hymenoptera")
-
-  (define (hex->bytes s)
-    (apply bytes
-           (for/list ([i (in-range 0 (string-length s) 2)])
-             (string->number (substring s i (+ i 2)) 16))))
-
-  (define (unpack j dtype)
-    (bytes->tensor (hex->bytes (hash-ref j 'hex)) dtype (hash-ref j 'shape)))
 
   (define models
     (list (list 'resnet18 resnet18 'resnet18-imagenet1k-v1)

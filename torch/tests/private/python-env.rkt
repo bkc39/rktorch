@@ -12,7 +12,7 @@
          (only-in racket/port open-output-nowhere)
          (only-in racket/system system*)
          (only-in rackunit check-= check-equal?)
-         (only-in "../../main.rkt" tensor-shape tensor->list to-device))
+         (only-in "../../main.rkt" bytes->tensor tensor-shape tensor->list to-device))
 
 (provide python
          call-with-python-env
@@ -23,7 +23,18 @@
          python-result
          python-check
          check-training-twin
-         tol)
+         tol
+         unpack)
+
+(define (hex->bytes s)
+  (define out (make-bytes (quotient (string-length s) 2)))
+  (for ([i (in-range (bytes-length out))])
+    (bytes-set! out i (string->number (substring s (* 2 i) (+ 2 (* 2 i))) 16)))
+  out)
+
+;; a tensor a twin printed with pretrained_common.packed
+(define (unpack j dtype)
+  (bytes->tensor (hex->bytes (hash-ref j 'hex)) dtype (hash-ref j 'shape)))
 
 ;; dev-tol: CPU is bit-stable (the CI-gating `tol`); CUDA is looser because
 ;; the two builds pick different cuDNN/cuBLAS algorithms
