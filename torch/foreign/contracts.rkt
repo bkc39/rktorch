@@ -60,10 +60,11 @@
 (define rgb-image-batch/c
   (flat-named-contract 'rgb-image-batch
                        (lambda (x)
-                         (and (tensor? x)
-                              (let ([shape (tensor-shape x)])
-                                (and (= 4 (length shape))
-                                     (= 3 (cadr shape))))))))
+                         (cond
+                           [(tensor? x)
+                            (define shape (tensor-shape x))
+                            (and (= 4 (length shape)) (= 3 (cadr shape)))]
+                           [else #f]))))
 
 (define feature-batch/c
   (flat-named-contract 'feature-batch

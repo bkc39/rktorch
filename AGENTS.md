@@ -150,9 +150,10 @@ with `backward!` outside the form as PyTorch recommends). From
   convolutional half of VGG-16 as one `features` child, a `Sequential` of
   31 steps in torchvision's slots (so `features.N.weight` loads without a
   rename; walk it with `in-layers` for activations); `vgg16-features?`.
-  The style-transfer example is `examples/racket/16-style-transfer.rkt`,
-  parity against torchvision in `style-transfer-parity-test.rkt` (default
-  shell, cached weights)
+  The style-transfer example is `examples/racket/16-style-transfer.rkt`;
+  its runner's test holds it to `torch/tests/python/style_transfer.py`
+  (default shell, cached weights). A test under `torch/tests/` cannot
+  require an example: the flake installs `torch/` as a copied package
 - resnet (`torch/vision/resnet.rkt`, #152): `BasicBlock` and `ResNet`
   (`#:classes #:base #:blocks`, ResNet-18 for 32x32 images by default,
   bias-free convolutions under `BatchNorm2d`); the training loop with

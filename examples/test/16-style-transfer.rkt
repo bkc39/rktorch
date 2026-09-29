@@ -31,7 +31,7 @@
             (~r (caddr record) #:precision 2))
     (flush-output))
   (write-ppm "style-transfer.ppm" (select image 0 0))
-  (printf "wrote style-transfer.ppm\n"))
+  (displayln "wrote style-transfer.ppm"))
 
 (module+ test
   (require (only-in racket/list last)
@@ -65,3 +65,57 @@
               "the style loss falls")
   (check-equal? (caddr (car losses)) 0.0
                 "the image starts as the photograph"))
+
+(module+ test
+  ;; Parity against torch/tests/python/style_transfer.py, in the default
+  ;; shell with the weights cached: the twin's pixels, VGG's activations at
+  ;; the style layers, then five steps of the transfer.
+  (require (only-in racket/path path-only)
+           (only-in torch/tests/private/python-env
+                    call-with-python-env python-check python-module-available?
+                    unpack)
+           (only-in torch/vision/weights
+                    pretrained-weights pretrained-weights-cached?))
+
+  (define (worst a b) (item (max (abs (sub a b)))))
+
+  (define (check-parity)
+    (define weights-dir
+      (path-only (pretrained-weights 'vgg16-features-imagenet1k-v1)))
+    (define j
+      (call-with-python-env
+       #:env (list (cons "RKTORCH_PARITY_WEIGHTS" (path->string weights-dir)))
+       (lambda () (python-check "style_transfer.py"))))
+    (define their-content (unpack (hash-ref j 'content) 'float32))
+    (define their-style (unpack (hash-ref j 'style) 'float32))
+    (define pretrained (frozen-vgg 'cpu))
+    (define found (activations pretrained their-content style-layers))
+    (for ([i (in-list style-layers)])
+      (define theirs
+        (unpack (hash-ref (hash-ref j 'activations)
+                          (string->symbol (number->string i)))
+                'float32))
+      (check-equal? (shape (hash-ref found i)) (shape theirs))
+      (check-true (<= (worst (hash-ref found i) theirs) 1e-4)
+                  (format "activations at ~a, max |difference| ~a"
+                          i (worst (hash-ref found i) theirs))))
+    (define-values (our-image our-losses)
+      (style-transfer pretrained their-content their-style #:steps 5 #:lr 0.02))
+    (define their-losses (hash-ref j 'losses))
+    (check-equal? (map car our-losses) (map car their-losses))
+    (for* ([(mine theirs) (in-parallel (in-list our-losses)
+                                       (in-list their-losses))]
+           [(a b) (in-parallel (in-list (cdr mine)) (in-list (cdr theirs)))])
+      (check-true (<= (abs (- a b)) (* 1e-5 (max 1.0 (abs b))))
+                  (format "step ~a: ~a against torch's ~a" (car mine) a b)))
+    (define their-image (unpack (hash-ref j 'image) 'float32))
+    (check-true (<= (worst our-image their-image) 1e-5)
+                (format "the image after five steps, max |difference| ~a"
+                        (worst our-image their-image))))
+
+  (cond
+    [(not (python-module-available? "torchvision"))
+     (displayln "[16-style-transfer] parity skipped: python3 `torchvision` not available")]
+    [(not (pretrained-weights-cached? 'vgg16-features-imagenet1k-v1))
+     (displayln "[16-style-transfer] parity skipped: VGG-16 weights not cached")]
+    [else (check-parity)]))
