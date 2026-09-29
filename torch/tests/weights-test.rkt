@@ -36,7 +36,8 @@
   (test-case "the published checkpoints"
     (check-equal? pretrained-weights-names
                   '(resnet18-imagenet1k-v1 resnet34-imagenet1k-v1
-                                           resnet50-imagenet1k-v1)))
+                                           resnet50-imagenet1k-v1
+                                           vgg16-features-imagenet1k-v1)))
 
   (test-case "an unknown name is an error that lists the known ones"
     (check-exn #rx"no such checkpoint.*resnet18-imagenet1k-v1"
@@ -87,6 +88,27 @@
                                "/" (regexp-quote hub-path) "\""))
                       (lambda () (pretrained-weights name))
                       "the file was found and read, so the slash was added"))))))
+
+  (test-case "a partial checkpoint is checked by its prefix before it is cut"
+    (with-temporary-directory (mirror)
+      (with-temporary-directory (cache)
+        (define path
+          (build-path mirror
+                      (string-append
+                       "timm/vgg16.tv_in1k/resolve/"
+                       "b8d8aa2dd860af9233c8c67385a8097fd6c35d3f/"
+                       "model.safetensors")))
+        (define-values (dir _name _dir?) (split-path path))
+        (make-directory* dir)
+        (call-with-output-file path
+          (lambda (out) (write-bytes #"not the features" out)))
+        (with-weights-env
+         (list (cons "RKTORCH_WEIGHTS_DIR" (path->string cache))
+               (cons "RKTORCH_WEIGHTS_URL" (directory-url mirror)))
+         (lambda ()
+           (check-exn #rx"does not match the published file.*expected bytes: 58861562"
+                      (lambda () (pretrained-weights 'vgg16-features-imagenet1k-v1)))
+           (check-equal? (directory-list cache) '()))))))
 
   (test-case "the right size is not enough: the checksum decides"
     (with-temporary-directory (mirror)

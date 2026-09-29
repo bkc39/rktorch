@@ -11,11 +11,12 @@
 ;; the download lands in a temporary file beside the cache and reaches
 ;; `install` only when its size and SHA-256 match, so a redirect page or a
 ;; transfer cut short never does
-(define (call-with-verified-download who url dir size sha256 install)
+(define (call-with-verified-download who url dir size sha256 install
+                                     #:headers [headers '()])
   (make-directory* dir)
   (with-temporary-file (tmp #:template "download-~a.part" #:directory dir)
     (call/input-url (string->url url)
-                    (lambda (u) (get-pure-port u #:redirections 5))
+                    (lambda (u) (get-pure-port u headers #:redirections 5))
                     (lambda (in)
                       (call-with-output-file tmp #:exists 'truncate
                         (lambda (out) (copy-port in out)))))
