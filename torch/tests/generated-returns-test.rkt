@@ -36,13 +36,16 @@
 
   (test-case "the ledger accounts every output and releases each on free"
     (define input (randn 64))
+    (reclaim-native-memory!)
     (define before (cpu-bytes))
     (define-values (values-t indices-t) (g:topk input 16 0 #t #t))
     (check-equal? (- (cpu-bytes) before) (+ (* 16 4) (* 16 8)))
     (tensor-free! values-t)
     (check-equal? (- (cpu-bytes) before) (* 16 8))
     (tensor-free! indices-t)
-    (check-equal? (cpu-bytes) before))
+    (check-equal? (cpu-bytes) before)
+    ;; input outlives the readings, or its finalizer can land between them
+    (check-equal? (tensor-shape input) '(64)))
 
   ;; Only the two outputs are allocated inside the loop, so the trigger can
   ;; only come from the multi-output wrap.
