@@ -118,7 +118,7 @@ second.
   itemlist
   (for/list ([entry (in-list (hash-ref results 'photos))])
     (item
-     (image (photo-path (hash-ref entry 'path)) #:scale 0.25)
+     (photo (photo-path (hash-ref entry 'path)) #:scale 0.25)
      (linebreak)
      (tt (string-join (hash-ref entry 'path) "/"))
      (tabular

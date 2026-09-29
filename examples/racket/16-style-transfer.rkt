@@ -1,6 +1,7 @@
 #lang scribble/lp2
 
 @(require (only-in racket/format ~r)
+          (only-in torch/scribblings/common photo)
           (for-label (except-in racket/base abs cos exp log sin sort sqrt max min length + - * /)
                      torch torch/nn torch/vision/image torch/vision/transforms
                      torch/vision/vgg))
@@ -155,12 +156,12 @@ what @(number->string (hash-ref results 'steps)) steps make of them at
 seconds on @(hash-ref results 'date):
 
 @tabular[#:sep @hspace[1]
-         (list (list (image (fixture "hymenoptera" "bees" "honey-bee.jpg")
-                            #:scale 0.5)
-                     (image (fixture "style" "starry-night.jpg") #:scale 0.5)
-                     (image (collection-file-path "style-transfer.png" "torch"
+         (list (list (photo (fixture "hymenoptera" "bees" "honey-bee.jpg")
+                            #:scale 0.45)
+                     (photo (fixture "style" "starry-night.jpg") #:scale 0.45)
+                     (photo (collection-file-path "style-transfer.png" "torch"
                                                   "scribblings" "results")
-                            #:scale 0.5)))]
+                            #:scale 0.45)))]
 
 The style loss falls by more than three orders of magnitude while the
 content loss, zero while the image is still the photograph, climbs and
