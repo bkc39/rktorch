@@ -688,7 +688,8 @@ keep torchvision's key names, and a model loads one with
 VGG-16's convolutional features, all that style transfer uses, are the
 first 56 MiB of a 528 MiB file whose rest is the classifier. Only those
 bytes are fetched, with an HTTP range request, and checked against their
-own recorded size and SHA-256; the cached file is a safetensors file of the
+own recorded size and SHA-256; a mirror that ignores the range, such as a
+@tt{file:} one, is read no further than them; the cached file is a safetensors file of the
 @tt{features.*} entries alone.
 
 @defthing[pretrained-weights-names (listof symbol?)]{

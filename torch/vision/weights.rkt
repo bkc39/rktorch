@@ -103,6 +103,7 @@
    #:headers (if keys
                  (list (format "Range: bytes=0-~a" (sub1 (checkpoint-size c))))
                  '())
+   #:limit (and keys (checkpoint-size c))
    (lambda (tmp)
      (when keys
        (define subset

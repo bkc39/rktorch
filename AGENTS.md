@@ -179,8 +179,9 @@ with `backward!` outside the form as PyTorch recommends). From
   `pretrained-weights-cached?`, `pretrained-weights-names`. The files keep
   torchvision's key names; `load-state! #:rename` maps them. A checkpoint
   with `keys` (VGG-16's `features.`) is fetched as a byte range, its header
-  and those entries, checked by that prefix's size and SHA-256, and cut to
-  a safetensors file of those entries (`torch/private/safetensors.rkt`)
+  and those entries (read no further, so a mirror that ignores `Range`
+  still works), checked by that prefix's size and SHA-256, and cut to a
+  safetensors file of those entries (`torch/private/safetensors.rkt`)
 - image reading (`torch/vision/image.rkt`, #199): `decode-image` (bytes)
   and `read-image` (a path) to a uint8 `[C H W]` tensor, `#:mode
   'unchanged 'gray 'gray-alpha 'rgb 'rgba`, `#:device`; JPEG and PNG
