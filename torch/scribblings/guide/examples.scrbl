@@ -27,9 +27,10 @@ MNIST convnet are the first models and the first training loops. The
 character GPT, the LSTM and the translator are the sequence models; the
 speech recogniser is the audio one; the diffusion model, the DCGAN and the
 variational autoencoder are the generative ones; the ResNet is the
-classic supervised-vision recipe; and the last two start from pretrained
-weights, classifying photographs with ImageNet's ResNet-18 and fine-tuning
-it on ants and bees.
+classic supervised-vision recipe; and the last three start from
+pretrained weights: classifying photographs with ImageNet's ResNet-18,
+fine-tuning it on ants and bees, and painting a photograph in the style of
+another with VGG-16's features.
 
 @margin-note{These chapters are woven from files outside the
 @racketmodname[torch] package, so they render from a checkout or a
@@ -51,3 +52,4 @@ link-mode install; see @filepath{docs/building.md}.}
 @include-section[(submod "../../../examples/racket/13-translation.rkt" doc)]
 @include-section[(submod "../../../examples/racket/14-imagenet.rkt" doc)]
 @include-section[(submod "../../../examples/racket/15-finetune.rkt" doc)]
+@include-section[(submod "../../../examples/racket/16-style-transfer.rkt" doc)]

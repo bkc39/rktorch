@@ -79,6 +79,30 @@ the operator spellings.
 (sub 10 (tensor '(1.0 2.0)))
 ]}
 
+@defproc[(div [a (or/c tensor? real?)]
+              [b (if (tensor? a) (or/c tensor? real?) tensor?)])
+         tensor?]{
+Elementwise quotient, with the same broadcasting, dtype and
+at-least-one-tensor rules as @racket[mul]; a real over a tensor divides it
+by each entry. @racket[/] is the operator spelling.
+
+@torch-examples[
+(tensor->list (div (tensor '(2.0 4.0)) 2))
+(tensor->list (div 1 (tensor '(2.0 4.0))))
+]}
+
+@defproc[(clamp [t tensor?]
+                [#:min min (or/c real? #f) #f]
+                [#:max max (or/c real? #f) #f])
+         tensor?]{
+@racket[t] with every entry below @racket[min] raised to it and every entry
+above @racket[max] lowered to it; @tt{torch.clamp}. At least one bound must
+be given.
+
+@torch-examples[
+(tensor->list (clamp (tensor '(-1.0 0.5 2.0)) #:min 0.0 #:max 1.0))
+]}
+
 @defproc[(matmul [a tensor?] [b tensor?]) tensor?]{
 Matrix product, following PyTorch's @tt{torch.matmul} broadcasting rules.
 

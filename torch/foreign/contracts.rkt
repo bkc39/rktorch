@@ -20,6 +20,7 @@
 (provide bool-tensor/c
          feature-batch/c
          image-batch/c
+         rgb-image-batch/c
          index-spec/c
          index/c
          index-vector/c
@@ -55,6 +56,15 @@
 (define image-batch/c
   (flat-named-contract 'image-batch
                        (lambda (x) (and (tensor? x) (= 4 (length (tensor-shape x)))))))
+
+(define rgb-image-batch/c
+  (flat-named-contract 'rgb-image-batch
+                       (lambda (x)
+                         (cond
+                           [(tensor? x)
+                            (define shape (tensor-shape x))
+                            (and (= 4 (length shape)) (= 3 (cadr shape)))]
+                           [else #f]))))
 
 (define feature-batch/c
   (flat-named-contract 'feature-batch

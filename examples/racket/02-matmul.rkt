@@ -18,9 +18,9 @@ build a small matrix with known contents.
 @bold{The Gram matrix of a 2x3.} @racket[t] (alias of @racket[transpose])
 swaps two dimensions and @racket[|@|] is matmul, exactly Python's
 @tt{a @"@" a.T} — again deterministic, for an exact parity check. (The
-literate reader reserves bare @litchar["@"], so the operator appears as
-@racket[|@|] in this rendered chunk; in ordinary code it is just
-@litchar["@"].)
+literate reader reserves a bare @litchar["@"], so this file's source
+spells the operator @tt["|@|"]; it renders, and is written in ordinary
+code, as @racket[|@|].)
 
 @chunk[<r02-run>
 (define (run-example)

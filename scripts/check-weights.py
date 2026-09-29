@@ -8,7 +8,8 @@ WEIGHTS_DIR is the cache `pretrained-weights` fills. Each file is timm's
 key names (`bn1.running_mean`, `layer1.0.downsample.0.weight`), which
 weights.rkt renames on load. The script compares every tensor with
 torchvision's own state_dict, dtype and bits, and prints each file's size
-and SHA-256, the values weights.rkt records.
+and SHA-256, the values weights.rkt records. For a features-only file
+weights.rkt records those of the fetched prefix it was cut from instead.
 
 `--categories PATH` also writes the ImageNet class names, one per line,
 in label order, from the same weights' metadata.
@@ -27,7 +28,12 @@ CHECKPOINTS = {
     "resnet18": (models.resnet18, models.ResNet18_Weights.IMAGENET1K_V1),
     "resnet34": (models.resnet34, models.ResNet34_Weights.IMAGENET1K_V1),
     "resnet50": (models.resnet50, models.ResNet50_Weights.IMAGENET1K_V1),
+    "vgg16-features": (lambda weights: models.vgg16(weights=weights).features,
+                       models.VGG16_Weights.IMAGENET1K_V1),
 }
+
+# a features-only file names its entries as the whole network does
+PREFIX = {"vgg16-features": "features."}
 
 DTYPES = {"F32": torch.float32, "I64": torch.int64}
 
@@ -70,7 +76,8 @@ def main():
         with open(os.path.join(args.weights_dir, file), "rb") as f:
             raw = f.read()
         found = list(differences(load_safetensors(raw),
-                                 build(weights=weights).state_dict()))
+                                 {PREFIX.get(name, "") + k: v for k, v in
+                                  build(weights=weights).state_dict().items()}))
         verdict = "identical" if not found else f"{len(found)} differ"
         print(f"{name} {file} {len(raw)} {hashlib.sha256(raw).hexdigest()} "
               f"{verdict}")

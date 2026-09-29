@@ -78,3 +78,16 @@ Whether operations are currently being recorded.}
 @defproc[(detach [t tensor?]) tensor?]{
 A tensor sharing @racket[t]'s storage but carrying no history, so it is a
 leaf of any later backward pass.}
+
+@defproc[(copy! [t tensor?] [source tensor?]) void?]{
+Writes @racket[source]'s values into @racket[t] in place, broadcasting
+@racket[source] to @racket[t]'s shape and converting it to @racket[t]'s
+dtype and device; @tt{t.copy_(source)}. Inside @racket[with-no-grad] it
+updates a leaf that requires a gradient, such as the image a style
+transfer optimises, without recording the write.
+
+@torch-examples[
+(define t (zeros 3))
+(copy! t (tensor '(1.0 2.0 3.0)))
+(tensor->list t)
+]}

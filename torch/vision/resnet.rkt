@@ -1,11 +1,11 @@
 #lang racket/base
 
-(require (only-in racket/contract/base -> ->* flat-named-contract list/c or/c)
+(require (only-in racket/contract/base -> ->* list/c or/c)
          (only-in racket/string string-replace)
          (only-in threading ~>)
          (only-in "../foreign.rkt"
-                  adaptive-avg-pool2d add flatten relu tensor-shape tensor?)
-         (only-in "../foreign/contracts.rkt" image-batch/c)
+                  adaptive-avg-pool2d add flatten relu)
+         (only-in "../foreign/contracts.rkt" image-batch/c rgb-image-batch/c)
          (only-in "../nn/batch-norm.rkt" BatchNorm2d)
          (only-in "../nn/conv.rkt" Conv2d MaxPool2d)
          (only-in "../nn/layer.rkt" define-layer)
@@ -49,14 +49,6 @@
   #:forward ([x : image-batch/c])
   (relu (add (~> x conv1 bn1 relu conv2 bn2 relu conv3 bn3)
              (if shortcut (shortcut x) x))))
-
-(define rgb-image-batch/c
-  (flat-named-contract 'rgb-image-batch
-                       (lambda (x)
-                         (and (tensor? x)
-                              (let ([shape (tensor-shape x)])
-                                (and (= 4 (length shape))
-                                     (= 3 (cadr shape))))))))
 
 (define four-stage-depths/c
   (list/c exact-positive-integer? exact-positive-integer?
