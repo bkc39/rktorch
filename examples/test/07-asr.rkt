@@ -10,11 +10,7 @@
          "../racket/07-asr.rkt")
 
 (module+ main
-  (define (env-number name default)
-    (define v (getenv name))
-    (cond [(not v) default]
-          [(string->number v) => values]
-          [else (error '07-asr "~a is not a number: ~a" name v)]))
+  (require (only-in "private/env.rkt" env-number))
   (printf "device: ~a\n" (pick-device))
   (define-values (net vocab)
     (train-librispeech #:epochs (env-number "EPOCHS" 20)

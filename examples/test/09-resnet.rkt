@@ -10,9 +10,10 @@
          "../racket/09-resnet.rkt")
 
 (module+ main
+  (require (only-in "private/env.rkt" env-number))
   ;; The headline run: full CIFAR-10 (downloads + caches the 163 MB archive
   ;; once), test accuracy after every epoch. Pass EPOCHS to override.
-  (define epochs (string->number (or (getenv "EPOCHS") "30")))
+  (define epochs (env-number "EPOCHS" 30))
   (printf "device: ~a\n" (pick-device))
   (for ([acc (in-list (train-cifar10 #:epochs epochs))]
         [epoch (in-naturals 1)])

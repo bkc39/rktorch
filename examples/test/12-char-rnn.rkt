@@ -7,22 +7,17 @@
          "../racket/12-char-rnn.rkt")
 
 (module+ main
+  (require (only-in "private/env.rkt" env-number))
   (printf "device: ~a\n" (pick-device))
-  (define (numeric-env name [default #f])
-    (define supplied (getenv name))
-    (cond
-      [(not supplied) default]
-      [(string->number supplied)]
-      [else (error '12-char-rnn "~a is not a number: ~a" name supplied)]))
-  (define epochs (numeric-env "EPOCHS"))
+  (define epochs (env-number "EPOCHS" #f))
   (define train (if (getenv "EXCERPT") train-excerpt train-novel))
   (define-values (net vocab)
     (if epochs (train #:epochs epochs) (train)))
-  (manual-seed! (numeric-env "SEED" 0))
+  (manual-seed! (env-number "SEED" 0))
   (displayln
    (sample net vocab "The "
            #:steps 600
-           #:temperature (numeric-env "TEMPERATURE" 0.8))))
+           #:temperature (env-number "TEMPERATURE" 0.8))))
 
 (module+ test
   (require rackunit)

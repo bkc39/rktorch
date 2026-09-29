@@ -9,10 +9,11 @@
          "../racket/10-dcgan.rkt")
 
 (module+ main
+  (require (only-in "private/env.rkt" env-number))
   ;; The headline run: full MNIST, mean discriminator and generator losses
   ;; per epoch, a 10x10 sample grid per epoch under OUT. Pass EPOCHS to
   ;; override.
-  (define epochs (string->number (or (getenv "EPOCHS") "5")))
+  (define epochs (env-number "EPOCHS" 5))
   (define out (getenv "OUT"))
   (printf "device: ~a\n" (pick-device))
   (for ([losses (in-list (train-dcgan #:epochs epochs #:out out))]
