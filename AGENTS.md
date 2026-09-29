@@ -296,13 +296,17 @@ broader ATen surface, and the portable raco-catalog candidate story.
 
 `flake.nix` has `torchSource = "bin" | "python"`:
 
-- **`bin`** (default) — `pkgs.libtorch-bin`. Small prebuilt download, fast cached
-  CI on `aarch64-darwin` + `x86_64-linux`. Parity with Python torch is *tolerant*
-  (the cross-test uses a float tolerance), because the C++ side may be a
-  different patch version than the Python torch.
-- **`python`** — `pkgs.python3Packages.torch`. Builds against the *same* libtorch
-  the parity script imports, so seeded `randn` is **bit-exact** — at the cost of
-  a heavy (often uncached on darwin) from-source build.
+- **`bin`** (default) — `pkgs.libtorch-bin`, pointed at PyTorch's libtorch
+  2.14.0 downloads (nixpkgs still ships 2.9.0); the CUDA build adds cuDNN 9.24,
+  which the cu130 download no longer bundles. Small prebuilt download, fast
+  cached CI on `aarch64-darwin` + `x86_64-linux`. Parity with Python torch is
+  *tolerant* (the cross-test uses a float tolerance), because the C++ side may
+  be a different version than the Python torch.
+- **`python`** — `pkgs.python314Packages.torch`. Builds against the *same*
+  libtorch the parity script imports, so seeded `randn` is **bit-exact** — at
+  the cost of a heavy (often uncached on darwin) from-source build. It fails at
+  evaluation while that torch is older than 2.14.0, the version the vendored
+  schema and the MPS kernels assume.
 
 ## Build Commands
 

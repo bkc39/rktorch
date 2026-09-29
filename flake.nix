@@ -140,8 +140,22 @@
           };
         });
 
+      # The vendored ATen schema and the MPS kernels ctc-loss and GroupNorm
+      # call directly both need libtorch >= libtorchVersion, so the python
+      # route fails at evaluation, not on the first MPS call, while nixpkgs'
+      # Python torch is older.
       torchPackageFor = pkgs:
-        if torchSource == "python" then pkgs.python314Packages.torch
+        if torchSource == "python" then
+          let torch = pkgs.python314Packages.torch;
+          in
+          assert pkgs.lib.assertMsg
+            (pkgs.lib.versionAtLeast torch.version libtorchVersion)
+            ("torchSource = \"python\" links torch " + torch.version
+             + ", older than the libtorch " + libtorchVersion
+             + " the vendored schema and the MPS kernels assume;"
+             + " use torchSource = \"bin\" until nixpkgs' Python torch"
+             + " reaches it");
+          torch
         else
           let
             cuda = pkgs.config.cudaSupport;

@@ -159,7 +159,8 @@ with a GPU.
   a float tolerance, because the C++ and Python builds may differ in version.
 - `"python"` builds against the same libtorch the Python `torch` package ships,
   so seeded draws are bit-exact against PyTorch, at the cost of a much heavier
-  build.
+  build. It fails at evaluation while that torch is older than 2.14.0, the
+  version the vendored schema and the MPS kernels assume.
 
 ## Accelerators
 
