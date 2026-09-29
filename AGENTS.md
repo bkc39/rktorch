@@ -479,6 +479,12 @@ module's full export set (`racket/runtime-path`, `syntax/parse/pre`).
   `#:on-move` body runs after a `to` that rebound anything; `parameter.rkt`, `buffer.rkt`, `linear.rkt`,
   `init.rkt`, `optim.rkt`, `ema.rkt`, `loss.rkt`, `recurrent.rkt`,
   `clip.rkt`).
+- `private/download.rkt` — the one download path (#195): a temp file in the
+  cache's directory, checked, then installed. `call-with-verified-download`
+  checks an exact size and SHA-256 (pretrained weights, hymenoptera);
+  `download-cached` hands the downloaded path to a `#:valid?` predicate and
+  renames it into place (MNIST, text, translation, CIFAR-10, audio). Each
+  loader keeps its own cache-directory function and override variable.
 - `private/install-torchrkt-native.rkt` — stages `libtorchrkt.*` into
   `native-libs/` from `TORCHRKT_NATIVE_LIB_PATH` (set by the Nix build/shell).
   Every staging path (here and the flake's three shell ones) writes a temp file

@@ -2,12 +2,11 @@
 
 ;; whole-module on purpose: the expansion needs bindings only-in would strip
 (require racket/runtime-path
-         (only-in racket/file file->string make-directory*)
-         (only-in racket/port copy-port)
+         (only-in racket/file file->string)
          (only-in racket/set for/set set->list)
          (only-in racket/string string-replace string-trim)
-         (only-in net/url call/input-url get-pure-port string->url)
-         (only-in "../private/util.rkt" cache-dir with-temporary-file)
+         (only-in "../private/download.rkt" download-cached)
+         (only-in "../private/util.rkt" cache-dir)
          (only-in "../main.rkt" narrow reshape tensor tensor->list
                   tensor-shape tensor? to-dtype))
 
@@ -80,29 +79,11 @@
 (define (text-cache-dir)
   (cache-dir "RKTORCH_TEXT_DIR" "text"))
 
-;; valid? gates the cache write: a rate-limit page or truncated body must
-;; not poison the cache
 (define (download-text-cached name url #:valid? [valid? (lambda (text) #t)])
-  (define dest (build-path (text-cache-dir) name))
-  (unless (file-exists? dest)
-    (make-directory* (text-cache-dir))
-    ;; temp file + atomic rename: an interrupted fetch must not poison the cache
-    (with-temporary-file (tmp #:template "text-~a.part"
-                              #:directory (text-cache-dir))
-      (call/input-url (string->url url)
-                      (lambda (u)
-                        (get-pure-port u gutenberg-headers #:redirections 3))
-                      (lambda (in)
-                        (call-with-output-file tmp #:exists 'truncate
-                          (lambda (out) (copy-port in out)))
-                        (unless (valid? (file->string tmp))
-                          (raise (exn:fail:network
-                                  (format
-                                   "download-text-cached: fetched ~a failed validation; not caching (bad response from ~a?)"
-                                   name url)
-                                  (current-continuation-marks))))
-                        (rename-file-or-directory tmp dest #t)))))
-  (file->string dest))
+  (file->string
+   (download-cached 'download-text-cached (text-cache-dir) name url
+                    #:headers gutenberg-headers
+                    #:valid? (lambda (path) (valid? (file->string path))))))
 
 (define (gutenberg-text? text)
   (and (regexp-match? start-marker text)

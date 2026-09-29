@@ -3,18 +3,17 @@
 (require (only-in ffi/vector
                   f32vector-set! make-f32vector make-s64vector s64vector-set!)
          (only-in file/gunzip gunzip-through-ports)
-         (only-in net/url call/input-url get-pure-port string->url)
          (only-in racket/contract/base -> ->* cons/c listof or/c)
-         (only-in racket/file file->bytes make-directory*)
+         (only-in racket/file file->bytes)
          (only-in racket/list take)
-         (only-in racket/port copy-port)
          ;; whole-module on purpose: the expansion needs bindings only-in
          ;; would strip
          racket/runtime-path
          (only-in "../data/loader.rkt" dataset? tensor-dataset)
          (only-in "../main.rkt" device/c reshape tensor tensor?)
          (only-in "../private/contract.rkt" define/contract-out)
-         (only-in "../private/util.rkt" cache-dir with-temporary-file))
+         (only-in "../private/download.rkt" download-cached)
+         (only-in "../private/util.rkt" cache-dir))
 
 (define record-size 3073)
 (define image-size 3072)
@@ -88,21 +87,6 @@
   (-> boolean?)
   (file-exists? (archive-path)))
 
-(define (fetch-archive dest)
-  (make-directory* (cifar10-cache-dir))
-  ;; temp file, decoded in full, then an atomic rename: a redirect page or
-  ;; a transfer cut short must not reach the cache
-  (with-temporary-file (tmp #:template "cifar10-~a.part"
-                            #:directory (cifar10-cache-dir))
-    (call/input-url (string->url cifar10-mirror)
-                    (lambda (url) (get-pure-port url #:redirections 5))
-                    (lambda (in)
-                      (call-with-output-file tmp #:exists 'truncate
-                        (lambda (out) (copy-port in out)))
-                      (define files (unpack-archive tmp 'load-cifar10 cifar10-mirror))
-                      (rename-file-or-directory tmp dest #t)
-                      files))))
-
 (define batch-names
   (append (for/list ([i (in-range 1 6)]) (format "data_batch_~a.bin" i))
           '("test_batch.bin")))
@@ -130,10 +114,15 @@
 
 (define/contract-out (cifar10-archive-files) ;; noqa
   (-> (listof (cons/c string? bytes?)))
-  (define path (archive-path))
-  (if (file-exists? path)
-      (unpack-archive path 'cifar10-archive-files path)
-      (fetch-archive path)))
+  ;; a fresh download is unpacked once, by the check that admits it
+  (define fetched #f)
+  (define (unpacks? tmp)
+    (set! fetched (unpack-archive tmp 'load-cifar10 cifar10-mirror))
+    #t)
+  (define path
+    (download-cached 'load-cifar10 (cifar10-cache-dir) archive-name
+                     cifar10-mirror #:valid? unpacks?))
+  (or fetched (unpack-archive path 'cifar10-archive-files path)))
 
 (define (archive-file files name)
   (define entry (assoc name files))
