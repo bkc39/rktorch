@@ -30,6 +30,7 @@
 
   (define mib (* 1024 1024))
   (define never (expt 2 60))
+  (define no-backoff +inf.0)
 
   (define (diagnostic key) (cdr (assq key (finalizer-diagnostics))))
   (define (minors) (diagnostic 'trough-minors))
@@ -131,10 +132,12 @@
        (define before (minors))
        (void
         (parameterize ([native-collect-margin (* 16 mib)]
-                       [native-collect-budget 1])
+                       [native-collect-budget no-backoff])
           (run-sampler net sched steps device)))
        ;; The UNet calls dozens of sub-layers per forward. Counting those would
        ;; put the tally far above the step count; the mark must hold it to one.
+       ;; With the time budget off, a step quicker than the last collection
+       ;; cannot defer its trough, so only the mark decides the count.
        (check-equal? (- (minors) before) steps
                      "a nested layer call was counted as its own trough")
        (settle!))
