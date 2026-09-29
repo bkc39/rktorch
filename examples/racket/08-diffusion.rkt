@@ -34,10 +34,7 @@ CPU whatever device the model trains on, and the seed is set again once the
 model is built, since building it consumes the CPU stream only on a CPU
 run; a seeded run therefore replays the same timesteps, noise and dropped
 labels on the GPU as on the CPU, the way the PyTorch twin of this example
-draws them. The device is the accelerator when there is one. On Apple
-silicon the @racket[GroupNorm] layers normalise on the CPU, since libtorch
-2.9 has no MPS kernel for that backward, and everything else in the UNet
-stays on the GPU.
+draws them. The device is the accelerator when there is one.
 
 @chunk[<r08-step>
 (define (pick-device)

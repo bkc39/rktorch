@@ -152,9 +152,11 @@ with a GPU.
 
 `flake.nix` has a `torchSource` knob:
 
-- `"bin"` (the default) uses the prebuilt `pkgs.libtorch-bin`: a small download
-  and fast, cached CI. Parity with Python torch is checked to a float tolerance,
-  because the C++ and Python builds may differ in patch version.
+- `"bin"` (the default) uses the prebuilt `pkgs.libtorch-bin` derivation,
+  pointed at PyTorch's libtorch 2.14.0 downloads (nixpkgs still ships 2.9.0):
+  a small download and fast, cached CI. The CUDA build adds cuDNN 9.24, which
+  the cu130 download no longer bundles. Parity with Python torch is checked to
+  a float tolerance, because the C++ and Python builds may differ in version.
 - `"python"` builds against the same libtorch the Python `torch` package ships,
   so seeded draws are bit-exact against PyTorch, at the cost of a much heavier
   build.

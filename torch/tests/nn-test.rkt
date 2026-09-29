@@ -426,8 +426,6 @@
         (check-= a b 1e-5))))
 
   (test-case "ctc-loss on mps: same value, gradient back on the device"
-    ;; libtorch has no MPS ctc_loss kernel, so the loss detours through the
-    ;; CPU; the detour must be invisible in both the value and the gradient
     (when (mps-available?)
       (manual-seed! 0)
       (define frames (tensor->list (randn 6 2 5)))

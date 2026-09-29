@@ -95,30 +95,77 @@
           outputHash = "sha256-7149ciHUXyTKKg+3KGRPKU9aTHrAA5gw5XWibaf1avw=";
         };
 
+      # nixpkgs' libtorch-bin is still 2.9.0 (#140), so torchPackageFor points
+      # its derivation at PyTorch's own 2.14.0 downloads. The darwin zip
+      # bundles libomp.dylib behind @loader_path, so no Homebrew install name
+      # needs rewriting any more.
+      libtorchVersion = "2.14.0";
+      libtorchZips = {
+        aarch64-darwin-cpu = {
+          name = "libtorch-macos-arm64-2.14.0.zip";
+          url = "https://download.pytorch.org/libtorch/cpu/libtorch-macos-arm64-2.14.0.zip";
+          hash = "sha256-cAQuRtcPkfApOlYri/pJ3oYvzKlpAt+QTbe/91J1BNk=";
+        };
+        x86_64-linux-cpu = {
+          name = "libtorch-shared-with-deps-2.14.0-cpu.zip";
+          url = "https://download.pytorch.org/libtorch/cpu/libtorch-shared-with-deps-2.14.0%2Bcpu.zip";
+          hash = "sha256-9trtRE/syydXBBkWdgYqZIkJZwzQmwr0AhE/NhBcHdw=";
+        };
+        x86_64-linux-cuda = {
+          name = "libtorch-shared-with-deps-2.14.0-cu130.zip";
+          url = "https://download.pytorch.org/libtorch/cu130/libtorch-shared-with-deps-2.14.0%2Bcu130.zip";
+          hash = "sha256-bFpQwpkKmPxORgCWP7rv1iTBq6p+dOys5B7ecHbLhnI=";
+        };
+      };
+
+      # The 2.14 cu130 zip bundles only the libcudnn.so.9 dispatcher, none of
+      # the libcudnn_* libraries it dlopens. This is the cuDNN PyTorch 2.14's
+      # cu130 build expects, as one entry of NVIDIA's redistrib_9.24.0.json
+      # (path and sha256 copied from it) fed to nixpkgs' own cuDNN derivation.
+      cudnnFor = pkgs:
+        pkgs.cudaPackages_13.cudnn.overrideAttrs (old: rec {
+          passthru = old.passthru // {
+            release = {
+              version = "9.24.0.43";
+              cuda_variant = [ "13" ];
+              linux-x86_64.cuda13 = {
+                relative_path =
+                  "cudnn/linux-x86_64/cudnn-linux-x86_64-9.24.0.43_cuda13-archive.tar.xz";
+                sha256 =
+                  "63f1900222c69ee7e94583408181ccdb988dc2833531ce6bde0df43bbdd04a6d";
+              };
+            };
+            supportedReleases.linux-x86_64 =
+              passthru.release.linux-x86_64.cuda13;
+          };
+        });
+
       torchPackageFor = pkgs:
         if torchSource == "python" then pkgs.python314Packages.torch
-        # nixpkgs' libtorch-bin on darwin leaves a Homebrew install name for
-        # OpenMP inside libtorch_cpu.dylib, so anything linking it aborts at
-        # dyld load on machines without Homebrew's libomp (e.g. GitHub's macOS
-        # runners) and silently depends on Homebrew everywhere else. Rewrite
-        # the reference to the nix-provided libomp and ad-hoc re-sign (the
-        # edit invalidates the auto-signature applied earlier in fixup).
-        else if pkgs.stdenv.isDarwin then
+        else
+          let
+            cuda = pkgs.config.cudaSupport;
+            device = if cuda then "cuda" else "cpu";
+          in
           pkgs.libtorch-bin.overrideAttrs (old: {
-            nativeBuildInputs = (old.nativeBuildInputs or [ ])
-              ++ [ pkgs.darwin.cctools pkgs.darwin.sigtool ];
-            postFixup = (old.postFixup or "") + ''
-              for lib in $out/lib/*.dylib; do
-                if otool -L "$lib" | grep -q '/opt/homebrew/opt/libomp/lib/libomp.dylib'; then
-                  install_name_tool -change \
-                    /opt/homebrew/opt/libomp/lib/libomp.dylib \
-                    ${pkgs.llvmPackages.openmp}/lib/libomp.dylib "$lib"
-                  codesign -f -s - "$lib"
-                fi
-              done
+            version = libtorchVersion;
+            src = pkgs.fetchzip
+              libtorchZips."${pkgs.stdenv.hostPlatform.system}-${device}";
+          } // pkgs.lib.optionalAttrs cuda {
+            # Drop the bundled dispatcher so autoPatchelf resolves
+            # libcudnn.so.9 to cuDNN 9.24, whose own RUNPATH ($ORIGIN) finds
+            # the libcudnn_* libraries it dlopens.
+            buildInputs = (old.buildInputs or [ ]) ++ [ (cudnnFor pkgs) ];
+            installPhase = old.installPhase + ''
+              rm $out/lib/libcudnn.so.9
             '';
-          })
-        else pkgs.libtorch-bin;
+            # The bundled libnvrtc.so.13 is CUDA 13.0.88 and dlopens
+            # libnvrtc-builtins.so.13.0, which the zip leaves out; this is the
+            # matching nvrtc, appended to every library's RUNPATH.
+            appendRunpaths = [
+              "${pkgs.lib.getLib pkgs.cudaPackages_13_0.cuda_nvrtc}/lib"
+            ];
+          });
 
       # Stage libtorchrkt into ./torch/native-libs by temp file + rename(2).
       # `cp` opens the destination O_TRUNC, and that invalidates the page-cache
@@ -459,9 +506,9 @@
           racket-deps = racketDepsFor pkgs racketPkg;
           cpp = self.packages.${system}.cpp;
           cpp-cuda = self.packages.${system}.cpp-cuda;
-          # The CUDA libtorch the shim links; its lib/ holds the bundled cuDNN
-          # (libcudnn_*.so.9) that conv/pool ops dlopen by soname at runtime.
-          cudaTorch = torchPackageFor (import nixpkgs {
+          # The cuDNN the CUDA libtorch links (see cudnnFor); conv/pool ops
+          # dlopen its libcudnn_*.so.9 libraries by soname at runtime.
+          cudaCudnn = cudnnFor (import nixpkgs {
             inherit system;
             config = {
               allowUnfree = true;
@@ -634,16 +681,16 @@
                 echo "WARNING: $_l not found via ldconfig; CUDA calls may fail" >&2
               fi
             done
-            # Driver farm first (host libcuda), then the libtorch lib dir so its
-            # bundled cuDNN resolves — conv/pool dlopen libcudnn_*.so.9 by
-            # soname, and the autoAddDriverRunpath doesn't cover that. (matmul
-            # and friends worked without it; only the cuDNN-backed ops need it.)
-            export LD_LIBRARY_PATH="$_drv_farm:${cudaTorch}/lib''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+            # Driver farm first (host libcuda), then the cuDNN lib dir — conv/pool
+            # dlopen libcudnn_*.so.9 by soname, and the autoAddDriverRunpath
+            # doesn't cover that. (matmul and friends work without it; only the
+            # cuDNN-backed ops need it.)
+            export LD_LIBRARY_PATH="$_drv_farm:${pkgs.lib.getLib cudaCudnn}/lib''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
             # The Python torch-bin (cu130 wheel, pythonCudaEnv) finds its own
             # bundled libtorch/cuDNN via RUNPATH and needs ONLY the host driver —
-            # NOT cudaTorch/lib, whose libtorch 2.9 libs would shadow the wheel's
-            # 2.12 ones (libtorch_python.so ABI clash). The cross-test pins the
-            # python child's LD_LIBRARY_PATH to just this farm when it's set.
+            # NOT the cuDNN 9.24 above, which would shadow the wheel's own cuDNN.
+            # The cross-test pins the python child's LD_LIBRARY_PATH to just this
+            # farm when it's set.
             export RKTORCH_CUDA_DRIVER_PATH="$_drv_farm"
             echo "CUDA shell ready. Verify:"
             echo "  raco test torch/tests/device-test.rkt"

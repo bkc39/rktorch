@@ -378,17 +378,11 @@ there is no `.#mps` counterpart to `.#cuda` (which exists only because CUDA
 needs a differently-linked libtorch plus the host driver). Confirm with
 `nix develop --command racket -e '(require torch)(mps-available?)'`.
 
-**The one MPS kernel gap.** libtorch 2.9 registers `aten::_ctc_loss` for CPU
-and CUDA only. `ctc-loss` (`torch/nn/loss.rkt`) therefore marginalizes MPS
-frames on the CPU and moves the scalar back; `to-device` is differentiable, so
-the gradient returns to the MPS graph and the rest of a model — the 07-asr
-encoder, attention decoder, and `adam` — stays on the GPU. Every other op the
-speech arc uses has an MPS kernel, so `pick-device` must keep returning
-`accelerator-if-available` unmodified: routing darwin to the CPU to dodge this
-one op is what the carve-out exists to avoid. The second gap is
-`aten::native_group_norm_backward`: the `GroupNorm` layer
-(`torch/nn/group-norm.rkt`) normalises on the CPU under MPS the same way, so
-the diffusion UNet trains on the GPU there with its norms round-tripped.
+**No MPS kernel gaps.** Since libtorch 2.14 every op the examples use has an
+MPS kernel, `aten::_ctc_loss` and `aten::native_group_norm_backward` included
+(#139), so `pick-device` returns `accelerator-if-available` unmodified. When a
+new op lacks one, route that op alone through the CPU with `to-device`, which
+is differentiable both ways, rather than routing darwin to the CPU.
 
 ## Architecture
 
@@ -498,7 +492,7 @@ module's full export set (`racket/runtime-path`, `syntax/parse/pre`).
 The ATen generator (v2/A, #2): `nix run .#codegen` (equivalently
 `nix develop --command python3 -m codegen`, but with a much smaller
 closure) reads `codegen/allowlist.txt` against the **vendored** schema in
-`codegen/aten/` (pinned to the C++ libtorch 2.9.0 — see the README there;
+`codegen/aten/` (pinned to the C++ libtorch 2.14.0 — see the README there;
 never the dev-shell python torch's copy) and emits, with DO-NOT-EDIT
 headers:
 
