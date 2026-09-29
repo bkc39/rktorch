@@ -6,9 +6,10 @@
 ;;
 ;;   nix develop .#cuda --command racket scripts/style-transfer-results.rkt
 
-(require (only-in racket/date current-date date->string date-display-format)
+(require (only-in racket/class send)
+         (only-in racket/date current-date date->string date-display-format)
          (only-in racket/draw make-bitmap)
-         (only-in racket/class send)
+         (only-in racket/match match-define)
          (only-in racket/pretty pretty-write)
          racket/runtime-path
          torch
@@ -27,12 +28,12 @@
 (define every 50)
 
 (define (write-png path image)
-  (define-values (c h w) (apply values (shape image)))
+  (match-define (list _ h w) (shape image))
   (define plane (* h w))
   (define argb (make-bytes (* 4 plane) 255))
-  (for ([v (in-flattened-tensor
-            (convert-image-dtype (to image (cpu-device)) 'uint8))]
-        [k (in-naturals)])
+  (for ([(v k) (in-indexed
+                (in-flattened-tensor
+                 (convert-image-dtype (to image (cpu-device)) 'uint8)))])
     (define-values (channel i) (quotient/remainder k plane))
     (bytes-set! argb (+ (* 4 i) 1 channel) v))
   (define bitmap (make-bitmap w h #f))

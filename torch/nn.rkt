@@ -60,6 +60,7 @@
          procedure->Layer
          parameters
          named-parameters
+         in-parameters
          in-named-parameters
          buffers
          named-buffers

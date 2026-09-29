@@ -11,7 +11,8 @@
                               Parameter Sequential batch-norm1d? batch-norm2d?
                               binary-cross-entropy-with-logits conv2d?
                               cross-entropy ctc-loss define-layer dropout?
-                              in-named-parameters kaiming-uniform layer?
+                              in-named-parameters in-parameters
+                              kaiming-uniform layer?
                               linear? load-state! max-pool2d? mse-loss
                               named-buffers named-parameters parameters
                               save-state! uniform-init)))
@@ -89,6 +90,15 @@ its own separator: @racket["enc."] gives @racket["enc.fc1.weight"].
 
 @torch-examples[
 (map car (named-parameters (Sequential (Linear 2 2))))
+]}
+
+@defproc[(in-parameters [m layer?]) sequence?]{
+@racket[parameters] as a sequence, one tensor at a time;
+@tt{parameters()} in a Python @tt{for} loop.
+
+@torch-examples[
+(for/list ([p (in-parameters (Sequential (Linear 2 3)))])
+  (shape p))
 ]}
 
 @defproc[(in-named-parameters [m layer?]) sequence?]{

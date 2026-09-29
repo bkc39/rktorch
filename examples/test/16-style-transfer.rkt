@@ -37,14 +37,14 @@
   (require (only-in racket/list last)
            rackunit
            torch
-           (only-in torch/nn parameters)
+           (only-in torch/nn in-parameters)
            "../racket/16-style-transfer.rkt")
   ;; Offline and deterministic: random weights, both images at 32 pixels,
   ;; five steps on the CPU.
   (manual-seed! 0)
   (define device (cpu-device))
   (define net (frozen-vgg device #:pretrained? #f))
-  (check-true (for/and ([p (in-list (parameters net))])
+  (check-true (for/and ([p (in-parameters net)])
                 (not (requires-grad? p)))
               "the network is frozen")
   (define content (load-image content-path 32 device))

@@ -29,6 +29,15 @@
     (check-equal? (car seen) 7 "a plain field is kept, not registered")
     (check-false (list-ref seen 5) "a field never assigned is #f"))
 
+  (test-case "in-parameters yields each parameter tensor"
+    (define k (Kinds 7))
+    (check-true (andmap eq?
+                        (for/list ([p (in-parameters k)]) p)
+                        (parameters k)))
+    (check-equal? (for/list ([p (in-parameters (Dropout))]) p) '())
+    (check-exn #rx"^in-parameters: contract violation"
+               (lambda () (in-parameters 5))))
+
   (test-case "in-named-parameters yields each name and its tensor"
     (define k (Kinds 7))
     (check-equal? (for/list ([(name _) (in-named-parameters k)]) name)

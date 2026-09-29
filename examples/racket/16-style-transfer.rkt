@@ -3,6 +3,7 @@
 @(require (only-in racket/format ~r)
           (only-in torch/scribblings/common photo)
           (for-label (except-in racket/base abs cos exp log sin sort sqrt max min length + - * /)
+                     racket/match
                      torch torch/nn torch/vision/image torch/vision/transforms
                      torch/vision/vgg))
 
@@ -20,7 +21,8 @@ matrices, should match the painting's at five depths, which carries over
 brush strokes, colour and texture while ignoring where things are.
 
 @chunk[<r16-require>
-(require torch torch/nn
+(require (only-in racket/match match-define)
+         torch torch/nn
          (only-in torch/vision/image read-image)
          (only-in torch/vision/transforms
                   convert-image-dtype imagenet-normalize resize)
@@ -39,10 +41,10 @@ batch dimension of one.
   (accelerator-if-available))
 
 (define (load-image path size device)
-  (unsqueeze (resize (convert-image-dtype
-                      (read-image path #:mode 'rgb #:device device))
-                     size)
-             0))]
+  (~> (read-image path #:mode 'rgb #:device device)
+      convert-image-dtype
+      (resize size)
+      (unsqueeze 0)))]
 
 @bold{The network.} VGG-16's features are thirteen 3-by-3 convolutions
 with a ReLU after each and a 2-by-2 max-pool after every stage. Its weights
@@ -52,7 +54,7 @@ flows through them to the image.
 @chunk[<r16-network>
 (define (frozen-vgg device #:pretrained? [pretrained? #t])
   (define net (to (vgg16-features #:pretrained? pretrained?) device))
-  (for ([p (in-list (parameters net))])
+  (for ([p (in-parameters net)])
     (requires-grad! p #f))
   net)]
 
@@ -75,8 +77,7 @@ keeping the outputs at the wanted indices and stopping after the last.
   (for/fold ([x (imagenet-normalize image)]
              [found (hash)]
              #:result found)
-            ([step (in-layers (child-ref net "features"))]
-             [i (in-naturals)]
+            ([(step i) (in-indexed (in-layers (child-ref net "features")))]
              #:break (> i last-layer))
     (define y (forward step x))
     (values y (if (memv i layers) (hash-set found i y) found))))]
@@ -85,13 +86,16 @@ keeping the outputs at the wanted indices and stopping after the last.
 @tt{C}-by-@tt{C} matrix of how strongly each pair of channels fires
 together, summed over every position, so where a texture appears no
 longer matters. Dividing by the number of entries keeps the five layers
-on comparable scales.
+on comparable scales. (The literate reader reserves a bare
+@litchar["@"], so this file's source spells the matrix product
+@tt["|@|"]; it renders, and is written in ordinary code, as
+@racket[|@|].)
 
 @chunk[<r16-gram>
 (define (gram-matrix features)
-  (define-values (n c h w) (apply values (shape features)))
+  (match-define (list n c h w) (shape features))
   (define m (reshape features (* n c) (* h w)))
-  (div (matmul m (transpose m 0 1)) (* n c h w)))]
+  (/ (|@| m (T m)) (* n c h w)))]
 
 @bold{The optimisation.} The targets are computed once, without a
 gradient. The image starts as a copy of the photograph, and every step
@@ -125,12 +129,12 @@ an Adam step on the pixels, which are then clamped back into
       (define style-loss
         (for/fold ([total 0.0])
                   ([i (in-list style-layers)])
-          (add total (mse-loss (gram-matrix (hash-ref found i))
-                               (hash-ref style-grams i)))))
+          (+ total (mse-loss (gram-matrix (hash-ref found i))
+                             (hash-ref style-grams i)))))
       (define content-loss
         (mse-loss (hash-ref found content-layer) content-target))
-      (backward! (add (mul style-loss style-weight)
-                      (mul content-loss content-weight)))
+      (backward! (+ (* style-loss style-weight)
+                    (* content-loss content-weight)))
       (step! opt)
       (with-no-grad
         (copy! image (clamp image #:min 0.0 #:max 1.0)))
