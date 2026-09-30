@@ -2,11 +2,10 @@
 
 ;; whole-module on purpose: the expansion needs bindings only-in would strip
 (require racket/runtime-path
-         (only-in racket/file file->bytes make-directory*)
-         (only-in racket/port copy-port)
-         (only-in net/url string->url get-pure-port call/input-url)
+         (only-in racket/file file->bytes)
          (only-in file/gunzip gunzip-through-ports)
-         (only-in "../private/util.rkt" cache-dir with-temporary-file)
+         (only-in "../private/download.rkt" [download-cached fetch-cached])
+         (only-in "../private/util.rkt" cache-dir)
          (only-in "../main.rkt" div reshape tensor to-dtype))
 
 (provide read-idx
@@ -51,20 +50,11 @@
   (cache-dir "RKTORCH_MNIST_DIR" "mnist"))
 
 (define (download-cached name)
-  (define dest (build-path (mnist-cache-dir) name))
-  (unless (file-exists? dest)
-    (make-directory* (mnist-cache-dir))
-    ;; temp file + atomic rename: an interrupted fetch must not poison the cache
-    (with-temporary-file (tmp #:template "mnist-~a.part"
-                              #:directory (mnist-cache-dir))
-      (call/input-url (string->url (string-append mnist-mirror name))
-                      get-pure-port
-                      (lambda (in)
-                        (call-with-output-file tmp #:exists 'truncate
-                          (lambda (out) (copy-port in out)))
-                        (rename-file-or-directory tmp dest #t)))))
+  (define archive
+    (fetch-cached 'download-cached (mnist-cache-dir) name
+                  (string-append mnist-mirror name)))
   (define out (open-output-bytes))
-  (gunzip-through-ports (open-input-bytes (file->bytes dest)) out)
+  (gunzip-through-ports (open-input-bytes (file->bytes archive)) out)
   (get-output-bytes out))
 
 (define (load-mnist [split 'train])

@@ -1,21 +1,21 @@
 #lang racket/base
 
 (require (only-in file/unzip
-                  call-with-unzip-entry read-zip-directory
+                  call-with-unzip-entry read-zip-directory unzip-entry
                   zip-directory-contains?)
-         (only-in net/url call/input-url get-pure-port string->url)
          (only-in racket/contract/base
                   -> ->* and/c any/c cons/c contract-out listof or/c vectorof)
-         (only-in racket/file file->string make-directory*)
+         (only-in racket/file file->string)
          (only-in racket/list append-map index-of remove-duplicates)
-         (only-in racket/port copy-port)
+         (only-in racket/port copy-port open-output-nowhere)
          ;; whole-module on purpose: the expansion needs bindings only-in
          ;; would strip
          racket/runtime-path
          (only-in racket/string string-prefix? string-split string-trim)
          (only-in "../main.rkt" tensor tensor? tensor->list to-dtype)
          (only-in "../private/contract.rkt" define/contract-out)
-         (only-in "../private/util.rkt" cache-dir with-temporary-file))
+         (only-in "../private/download.rkt" download-cached)
+         (only-in "../private/util.rkt" cache-dir))
 
 (provide (contract-out [word-vocab? (-> any/c boolean?)]
                        [word-vocab-words (-> word-vocab? (vectorof string?))]))
@@ -165,37 +165,31 @@
 (define (translation-cache-dir)
   (cache-dir "RKTORCH_TRANSLATION_DIR" "translation"))
 
+(define (inflated-first-line path directory)
+  (define first-line eof)
+  (unzip-entry path directory archive-entry
+               (lambda (_name _dir? in)
+                 (set! first-line (read-line in 'any))
+                 (copy-port in (open-output-nowhere))))
+  first-line)
+
+(define (tab-separated? line)
+  (and (string? line) (regexp-match? #rx"\t" line)))
+
 ;; A zip's directory sits at its end, so a truncated download fails to list
-;; the entry; inflating it and reading the first pair catches a body that
-;; was damaged in the middle with the directory intact.
+;; the entry. Inflating all of it catches damage that breaks the deflate
+;; stream; file/unzip checks no CRC, so damage that still inflates passes.
 (define/contract-out (translation-archive? path) ;; noqa
   (-> path-string? boolean?)
   (with-handlers ([exn:fail? (lambda (_e) #f)])
-    (and (zip-directory-contains? (read-zip-directory path) archive-entry)
-         (call-with-unzip-entry
-          path archive-entry
-          (lambda (entry)
-            (define first-line (call-with-input-file entry read-line))
-            (and (string? first-line) (regexp-match? #rx"\t" first-line)))))))
+    (define directory (read-zip-directory path))
+    (and (zip-directory-contains? directory archive-entry)
+         (tab-separated? (inflated-first-line path directory)))))
 
 (define (fetch-archive!)
-  (define dest (build-path (translation-cache-dir) archive-name))
-  (unless (file-exists? dest)
-    (make-directory* (translation-cache-dir))
-    (with-temporary-file (tmp #:template "pairs-~a.part"
-                              #:directory (translation-cache-dir))
-      (call/input-url (string->url archive-url)
-                      (lambda (u) (get-pure-port u #:redirections 3))
-                      (lambda (in)
-                        (call-with-output-file tmp #:exists 'truncate
-                          (lambda (out) (copy-port in out)))))
-      (unless (translation-archive? tmp)
-        (raise (exn:fail:network
-                (format "load-translation-pairs: ~a did not answer a complete archive holding ~a; not caching"
-                        archive-url archive-entry)
-                (current-continuation-marks))))
-      (rename-file-or-directory tmp dest #t)))
-  dest)
+  (download-cached 'load-translation-pairs (translation-cache-dir)
+                   archive-name archive-url
+                   #:valid? translation-archive?))
 
 (define/contract-out (load-translation-pairs ;; noqa
                       #:source [source 'fra]
