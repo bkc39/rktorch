@@ -183,6 +183,7 @@
          sized?)
 
 (provide native-memory-use
+         native-memory-unaccounted
          native-memory-limit
          native-memory-fraction
          native-collect-margin

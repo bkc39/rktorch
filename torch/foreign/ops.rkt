@@ -46,6 +46,7 @@
                   collect-and-drain!
                   [finalizer-diagnostics raw:finalizer-diagnostics]
                   [finalizer-failures raw:finalizer-failures]
+                  [native-memory-unaccounted raw:native-memory-unaccounted]
                   [native-memory-use raw:native-memory-use]
                   oom-retry/status
                   reaccount!)
@@ -249,6 +250,11 @@
 (define/contract-out native-memory-use
   (-> (listof (cons/c device? exact-nonnegative-integer?)))
   raw:native-memory-use)
+
+;; the allocator's bytes past the ledger's, as of the last trough
+(define/contract-out native-memory-unaccounted ;; noqa
+  (-> (listof (cons/c device? exact-nonnegative-integer?)))
+  raw:native-memory-unaccounted)
 
 ;; the high-water mark for every device; #f defers to the device's capacity
 (define/contract-out native-memory-limit ;; noqa

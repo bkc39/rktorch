@@ -11,6 +11,8 @@
          note-finalizer-run!
          finalizer-runs
          live-bytes-by-device
+         unaccounted-bytes-by-device
+         shadow-refresh
          install-device-queries!
          collect-under-pressure!
          collect-at-trough!
@@ -32,10 +34,13 @@
 
 ;; One per device: what the ledger holds there and what the two triggers
 ;; remember about it. `capacity` is 'unknown until queried, then bytes, #f for
-;; a device that has none, or (retry-at . ms) after a failed query.
+;; a device that has none, or (retry-at . ms) after a failed query. `shadow`
+;; charges the collector, as phantom bytes, for the `unaccounted` bytes the
+;; allocator holds beyond the ledger, and is adjusted, never replaced.
 (struct account
-  (live since-check since-sample sample interval capacity floor)
-  #:mutable)
+  ([live #:mutable] [since-check #:mutable] [since-sample #:mutable]
+   [sample #:mutable] [interval #:mutable] [capacity #:mutable]
+   [floor #:mutable] shadow [unaccounted #:mutable]))
 
 (struct stats
   (finalizer-runs backstop-collections reclaimed trough-collections
@@ -70,7 +75,8 @@
 ;; --- the accounts, all inside the atomic section ---
 
 (define (account-of dev)
-  (hash-ref! accounts dev (lambda () (account 0 0 0 0 #f 'unknown 0))))
+  (hash-ref! accounts dev
+             (lambda () (account 0 0 0 0 #f 'unknown 0 (make-phantom-bytes 0) 0))))
 
 (define (note-accounted! dev nbytes)
   (define a (account-of dev))
@@ -100,6 +106,12 @@
    (lambda ()
      (for/list ([(dev a) (in-hash accounts)])
        (cons dev (account-live a))))))
+
+(define (unaccounted-bytes-by-device)
+  (call-with-ledger
+   (lambda ()
+     (for/list ([(dev a) (in-hash accounts)])
+       (cons dev (account-unaccounted a))))))
 
 (define (ledger-total)
   (call-with-ledger
@@ -143,7 +155,8 @@
        (set-account-sample! a 0)
        (set-account-interval! a #f)
        (set-account-capacity! a 'unknown)
-       (set-account-floor! a 0))
+       (set-account-floor! a 0)
+       (set-shadow! a 0))
      (set-schedule-next-full-ms! the-schedule 0.0)
      (set-schedule-next-minor-ms! the-schedule 0.0))))
 
@@ -204,7 +217,31 @@
    (lambda ()
      (define a (account-of dev))
      (set-account-sample! a reading)
-     (set-account-since-sample! a 0))))
+     (set-account-since-sample! a 0)
+     (when (eq? (shadow-refresh) 'samples)
+       (set-shadow! a reading)))))
+
+;; --- the shadow: what the allocator holds that the ledger cannot see ---
+
+;; Storage only the autograd graph or libtorch itself holds reaches no
+;; wrapper, so the ledger never charges it; the allocator's figure less the
+;; ledger's is that remainder, and never counts a ledger byte twice. 'troughs
+;; refreshes it only at a trough, before its collection, so the collection
+;; that follows sets Racket's next major trigger with the shadow already in
+;; it. 'samples also refreshes it at the backstop's samples, which in a large
+;; forward means tracking the graph as it grows; #f charges nothing.
+(define shadow-refresh (make-parameter 'troughs))
+
+(define (set-shadow! a reading)
+  (define unaccounted (max 0 (- reading (account-live a))))
+  (set-account-unaccounted! a unaccounted)
+  (set-phantom-bytes! (account-shadow a) unaccounted))
+
+(define (refresh-shadows!)
+  (define charging? (shadow-refresh))
+  (for ([dev (in-list (call-with-ledger (lambda () (hash-keys accounts))))])
+    (define reading (if charging? (or ((allocator-reading) dev) 0) 0))
+    (call-with-ledger (lambda () (set-shadow! (account-of dev) reading)))))
 
 ;; --- one collection at a time ---
 
@@ -351,6 +388,7 @@
 (define (collect-at-trough! #:young? [young? #f])
   (unless (in-atomic-mode?)
     (lower-floors!)
+    (refresh-shadows!)
     (define budget
       (if young? (/ (native-collect-budget) 2) (native-collect-budget)))
     (call-as-the-collector

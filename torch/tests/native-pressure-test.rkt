@@ -4,14 +4,15 @@
   (require rackunit
            (only-in "../foreign.rkt"
                     cpu-device finalizer-diagnostics native-memory-limit
-                    native-memory-use reclaim-native-memory! with-no-grad
-                    zeros)
+                    native-memory-unaccounted native-memory-use
+                    reclaim-native-memory! with-no-grad zeros)
            (only-in "../foreign/raw/memory.rkt" native-memory-use/fold)
            (only-in "../foreign/raw/pressure.rkt"
                     allocator-reading call-as-the-collector collect-at-trough!
                     drain-deadline install-device-queries! margin-over
                     native-collect-budget native-collect-margin
-                    native-memory-fraction reset-pressure-state!)
+                    native-memory-fraction reset-pressure-state!
+                    shadow-refresh)
            (only-in "../nn.rkt" Linear Sequential))
 
   (define mib (* 1024 1024))
@@ -108,6 +109,58 @@
       (define kept (for/list ([_ (in-range 48)]) (zeros 512 512)))
       (check-equal? (length kept) 48)
       (check-equal? (collections) before)))
+
+  (define (cpu-unaccounted)
+    (cond [(assoc (cpu-device) (native-memory-unaccounted)) => cdr]
+          [else 0]))
+
+  (define idle-margin (* 1024 1024 mib))
+
+  (test-case "a trough charges what only the allocator holds, as phantom bytes"
+    (settle!)
+    (define held (for/list ([_ (in-range 4)]) (zeros 1024 1024)))
+    (define before (current-memory-use))
+    (parameterize ([allocator-reading (lambda (_dev) (+ (cpu-bytes) (* 256 mib)))]
+                   [native-collect-margin idle-margin])
+      (collect-at-trough!))
+    (check-true (<= (* 255 mib) (cpu-unaccounted) (* 256 mib))
+                (format "~a MiB unaccounted" (quotient (cpu-unaccounted) mib)))
+    (check-true (>= (- (current-memory-use) before) (* 200 mib))
+                "the collector was not charged for the allocator's excess")
+    (parameterize ([native-collect-margin idle-margin])
+      (collect-at-trough!))
+    (check-equal? (cpu-unaccounted) 0
+                  "a trough where the allocator says nothing must clear the charge")
+    (check-equal? (length held) 4))
+
+  (test-case "the charge never counts a ledger byte twice"
+    (settle!)
+    (define held (for/list ([_ (in-range 4)]) (zeros 1024 1024)))
+    (parameterize ([allocator-reading (lambda (_dev) (quotient (cpu-bytes) 2))]
+                   [native-collect-margin idle-margin])
+      (collect-at-trough!))
+    (check-equal? (cpu-unaccounted) 0)
+    (check-equal? (length held) 4))
+
+  (test-case "with the shadow off a trough charges nothing"
+    (settle!)
+    (parameterize ([shadow-refresh #f]
+                   [allocator-reading (lambda (_dev) (* 256 mib))]
+                   [native-collect-margin idle-margin])
+      (collect-at-trough!))
+    (check-equal? (cpu-unaccounted) 0))
+
+  (test-case "'samples also refreshes the charge at the backstop's samples"
+    (settle!)
+    (parameterize ([shadow-refresh 'samples]
+                   [native-memory-limit (* 64 mib)]
+                   [allocator-reading (lambda (_dev) (* 200 mib))])
+      (define kept (for/list ([_ (in-range 48)]) (zeros 512 512)))
+      (check-equal? (length kept) 48)
+      (check-true (positive? (cpu-unaccounted))
+                  "no trough ran, so only a sample could have set it"))
+    (settle!)
+    (check-equal? (cpu-unaccounted) 0 "a reset must clear the charge"))
 
   (test-case "residue past the margin at a trough is collected"
     (settle!)

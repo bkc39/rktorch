@@ -6,8 +6,15 @@
 ;; the ledger's pressure collections. Runs on whichever accelerator is here,
 ;; CUDA or MPS.
 ;; Run:  MODE=off|manual|backstop|pressure NOGRAD=1 BATCH=256 WIDTH=128 \
-;;       DEPTH=8 STEPS=60 \
+;;       DEPTH=8 STEPS=60 SHADOW=troughs|samples|off \
 ;;       GC_EVERY=10 LIMIT=<MiB> BUDGET=0.05 racket scripts/bench-memory-pressure.rkt
+;; SHADOW says when the allocator's bytes beyond the ledger are charged to
+;; Racket's collector (#213): at troughs, as shipped, also at the backstop's
+;; samples, or never. Each window counts Racket's major collections, and the
+;; summary splits them into the ledger's own and the ones Racket forced.
+;; LEAK=1 also keeps a second loss each step, computed with gradients on and
+;; never differentiated, so its graph holds that forward's activations after
+;; their tensors are gone: the leak the unaccounted column is there to show.
 ;; off disables every collection the ledger makes, manual collects by hand
 ;; every GC_EVERY steps on top of that, backstop keeps only the mid-forward
 ;; trigger, pressure is the library as shipped (LIMIT overrides the
@@ -30,6 +37,12 @@
 (define DEPTH (string->number (env "DEPTH" "8")))
 (define STEPS (string->number (env "STEPS" "60")))
 (define NOGRAD? (and (getenv "NOGRAD") #t))
+(define LEAK? (and (getenv "LEAK") #t))
+(define SHADOW
+  (case (env "SHADOW" "troughs")
+    [("troughs") 'troughs]
+    [("samples") 'samples]
+    [else #f]))
 (define GC-EVERY (string->number (env "GC_EVERY" "10")))
 (define LIMIT
   (let ([mib (getenv "LIMIT")])
@@ -141,6 +154,7 @@
      (for/fold ([h (in-conv x)]) ([b (in-list blocks)])
        (relu ((cdr b) ((car b) h))))))
   (define model (procedure->Layer forward))
+  (define kept-losses '())
   (define (train-step!)
     (define x (randn BATCH 3 32 32))
     (cond
@@ -151,13 +165,17 @@
        (define loss (mse-loss (forward x) target))
        (backward! loss)
        (step! opt)
+       (when LEAK?
+         (set! kept-losses (cons (mse-loss (forward x) target) kept-losses)))
        (item loss)]))
-  (printf "device=~a mode=~a batch=~a width=~a depth=~a limit=~a total=~a MiB\n"
-          accelerator MODE BATCH WIDTH DEPTH (getenv "LIMIT")
+  (printf "device=~a mode=~a shadow=~a batch=~a width=~a depth=~a limit=~a total=~a MiB\n"
+          accelerator MODE SHADOW BATCH WIDTH DEPTH (getenv "LIMIT")
           (quotient (capacity-bytes) mib))
-  (displayln "step window-peak-MiB allocated-MiB reserved-MiB backstop trough minors entries racket-MiB rss-MiB s/step")
+  (displayln "step window-peak-MiB allocated-MiB reserved-MiB backstop trough minors entries racket-MiB rss-MiB s/step majors unaccounted-MiB")
   (reset-peak!)
   (define gc0 (current-gc-milliseconds))
+  (define majors0 (unbox major-collections))
+  (define window-majors (box majors0))
   (define t0 (current-inexact-milliseconds))
   (for/fold ([window-start t0]) ([i (in-range 1 (add1 STEPS))])
     (train-step!)
@@ -178,7 +196,8 @@
     (cond
       [(zero? (remainder i 10))
        (define now (current-inexact-milliseconds))
-       (printf "~a ~a ~a ~a ~a ~a ~a ~a ~a ~a ~a\n"
+       (define majors (unbox major-collections))
+       (printf "~a ~a ~a ~a ~a ~a ~a ~a ~a ~a ~a ~a ~a\n"
                i
                (stat 'peak-allocated)
                (stat 'allocated)
@@ -189,26 +208,37 @@
                (diagnostic 'ledger-entries)
                (quotient (current-memory-use) mib)
                (rss-mib)
-               (~r (/ (- now window-start) 10000.0) #:precision '(= 3)))
+               (~r (/ (- now window-start) 10000.0) #:precision '(= 3))
+               (- majors (unbox window-majors))
+               (for/sum ([entry (in-list (native-memory-unaccounted))])
+                 (quotient (cdr entry) mib)))
+       (set-box! window-majors majors)
        (flush-output)
        (reset-peak!)
        now]
       [else window-start]))
+  (define majors (- (unbox major-collections) majors0))
+  (define ledger-majors
+    (+ (diagnostic 'pressure-collections) (diagnostic 'trough-collections)))
   (printf "total ~a s, gc ~a ms, reclaimed ~a MiB: ~a backstop, ~a trough, ~a minors\n"
           (~r (/ (- (current-inexact-milliseconds) t0) 1000.0) #:precision '(= 1))
           (- (current-gc-milliseconds) gc0)
           (quotient (diagnostic 'pressure-reclaimed) mib)
           (diagnostic 'pressure-collections)
           (diagnostic 'trough-collections)
-          (diagnostic 'trough-minors)))
+          (diagnostic 'trough-minors))
+  (printf "majors ~a: ~a the ledger's, ~a forced by Racket\n"
+          majors ledger-majors (max 0 (- majors ledger-majors))))
 
 (module+ main
+  (require (only-in torch/foreign/raw/pressure shadow-refresh))
   (manual-seed! 0)
   (parameterize ([native-memory-limit (if (memq MODE '(pressure backstop))
                                           LIMIT
                                           never)]
                  [native-collect-margin (if (eq? MODE 'pressure) #f never)]
-                 [native-collect-budget (string->number (env "BUDGET" "1/20"))])
+                 [native-collect-budget (string->number (env "BUDGET" "1/20"))]
+                 [shadow-refresh SHADOW])
     (with-default-device (if (eq? accelerator 'cuda) (cuda-device) (mps-device))
       (with-handlers ([exn:fail:rktorch:oom?
                        (lambda (e)

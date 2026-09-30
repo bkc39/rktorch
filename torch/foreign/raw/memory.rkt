@@ -17,7 +17,8 @@
                   note-accounted!
                   note-finalizer-run!
                   note-unaccounted!
-                  pressure-diagnostics)
+                  pressure-diagnostics
+                  unaccounted-bytes-by-device)
          (only-in "syntax.rkt" _Tensor _Tensor/null define-torch))
 
 (provide tr-tensor-free/finalizer
@@ -38,6 +39,7 @@
          tr-last-error-kind/raw
          native-memory-use
          native-memory-use/fold
+         native-memory-unaccounted
          _tr-device-type ;; noqa
          tr-tensor-device/raw
          define-unary/raw
@@ -182,9 +184,14 @@
              (< (device-index dx) (device-index dy))]
             [else (eq? (device-type dx) 'cpu)]))))
 
+(define (positive-by-device totals)
+  (sort-by-device (filter (lambda (entry) (positive? (cdr entry))) totals)))
+
 (define (native-memory-use)
-  (sort-by-device (filter (lambda (entry) (positive? (cdr entry)))
-                          (live-bytes-by-device))))
+  (positive-by-device (live-bytes-by-device)))
+
+(define (native-memory-unaccounted)
+  (positive-by-device (unaccounted-bytes-by-device)))
 
 ;; The entry-by-entry fold; the counters above must agree with it.
 (define (native-memory-use/fold)
