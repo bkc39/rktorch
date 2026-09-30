@@ -9,9 +9,10 @@
          "../racket/08-diffusion.rkt")
 
 (module+ main
+  (require (only-in "private/env.rkt" env-number))
   ;; The headline run: full CIFAR-10 (downloads + caches the 163 MB archive
   ;; once), mean epsilon-MSE per epoch. Pass EPOCHS to override.
-  (define epochs (string->number (or (getenv "EPOCHS") "10")))
+  (define epochs (env-number "EPOCHS" 10))
   (printf "device: ~a\n" (pick-device))
   (for ([loss (in-list (train-cifar10 #:epochs epochs))]
         [epoch (in-naturals 1)])

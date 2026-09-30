@@ -9,9 +9,10 @@
          "../racket/11-vae.rkt")
 
 (module+ main
+  (require (only-in "private/env.rkt" env-number))
   ;; The headline run: full MNIST, mean loss per epoch, a 10x10 grid of
   ;; decoded latents per epoch under OUT. Pass EPOCHS to override.
-  (define epochs (string->number (or (getenv "EPOCHS") "10")))
+  (define epochs (env-number "EPOCHS" 10))
   (define out (getenv "OUT"))
   (printf "device: ~a\n" (pick-device))
   (for ([loss (in-list (train-vae #:epochs epochs #:out out))]

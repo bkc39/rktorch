@@ -10,6 +10,7 @@
          "../racket/06-gpt.rkt")
 
 (module+ main
+  (require (only-in "private/env.rkt" env-number))
   ;; EXCERPT=1: the offline middle path — train on the committed Part I
   ;; excerpt (no network), then sample. Otherwise the headline run: full
   ;; Heart of Darkness (downloads + caches), 2000 minibatch steps, then a
@@ -19,7 +20,7 @@
   (define-values (net vocab)
     (if (getenv "EXCERPT")
         (train-excerpt)
-        (train-novel #:steps (string->number (or (getenv "STEPS") "2000")))))
+        (train-novel #:steps (env-number "STEPS" 2000))))
   ;; generate derives the device and context limit from the net.
   (displayln (generate net vocab "The " #:steps 400)))
 
