@@ -50,6 +50,7 @@
                   oom-retry/status
                   reaccount!)
          (only-in "raw/pressure.rkt"
+                  [native-collect-at-troughs raw:native-collect-at-troughs]
                   [native-collect-budget raw:native-collect-budget]
                   [native-collect-margin raw:native-collect-margin]
                   [native-memory-fraction raw:native-memory-fraction]
@@ -266,6 +267,10 @@
 (define/contract-out native-collect-budget ;; noqa
   (parameter/c (and/c real? positive?))
   raw:native-collect-budget)
+
+(define/contract-out native-collect-at-troughs ;; noqa
+  (parameter/c boolean?)
+  raw:native-collect-at-troughs)
 
 (define/contract-out finalizer-failures ;; noqa
   (-> exact-nonnegative-integer?)

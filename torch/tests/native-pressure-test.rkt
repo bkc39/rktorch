@@ -3,8 +3,9 @@
 (module+ test
   (require rackunit
            (only-in "../foreign.rkt"
-                    cpu-device finalizer-diagnostics native-memory-limit
-                    native-memory-use reclaim-native-memory! with-no-grad
+                    add backward! cpu-device finalizer-diagnostics matmul
+                    native-collect-at-troughs native-memory-limit
+                    native-memory-use reclaim-native-memory! sum with-no-grad
                     zeros)
            (only-in "../foreign/raw/memory.rkt" native-memory-use/fold)
            (only-in "../foreign/raw/pressure.rkt"
@@ -12,7 +13,8 @@
                     drain-deadline install-device-queries! margin-over
                     native-collect-budget native-collect-margin
                     native-memory-fraction reset-pressure-state!)
-           (only-in "../nn.rkt" Linear Sequential))
+           (only-in "../nn.rkt"
+                    Linear Sequential forward gen:layer layer-forward))
 
   (define mib (* 1024 1024))
 
@@ -164,6 +166,44 @@
       (define y (net x))
       (check-equal? (trough-minors) before)
       (check-true (and y #t))))
+
+  (test-case "a hand-written layer is a trough, however it is called"
+    (struct Hand (w)
+      #:property prop:procedure layer-forward
+      #:methods gen:layer
+      [(define (layer-forward self . inputs)
+         (add (matmul (car inputs) (Hand-w self)) 1))])
+    (define hand (Hand (zeros 1024 1024)))
+    (define x (zeros 1024 1024))
+    (parameterize ([native-collect-margin (* 1 mib)]
+                   [native-collect-budget 1000])
+      (for ([call (in-list (list (lambda () (hand x))
+                                 (lambda () (forward hand x))
+                                 (lambda () (layer-forward hand x))))])
+        (settle!)
+        (define before (trough-minors))
+        (check-true (and (with-no-grad (call)) #t))
+        (check-equal? (- (trough-minors) before) 1
+                      "the call's return collects once"))))
+
+  (test-case "native-collect-at-troughs #f turns off both implicit collections"
+    (define net (Linear 1024 1024))
+    (define x (zeros 1024 1024))
+    (define (train-step!) (backward! (sum (net x))))
+    (parameterize ([native-collect-margin (* 1 mib)]
+                   [native-collect-budget 1000])
+      (settle!)
+      (define on (trough-collections))
+      (train-step!)
+      (check-equal? (- (trough-collections) on) 1 "on by default")
+      (parameterize ([native-collect-at-troughs #f])
+        (settle!)
+        (define full (trough-collections))
+        (define minors (trough-minors))
+        (train-step!)
+        (check-true (and (with-no-grad (net x)) #t))
+        (check-equal? (trough-collections) full "backward! did not collect")
+        (check-equal? (trough-minors) minors "the layer call did not collect"))))
 
   (test-case "the default margin is the floor, kept between 256 MiB and 1 GiB"
     (check-equal? (margin-over 0) (* 256 mib))
