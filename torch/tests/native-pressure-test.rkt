@@ -11,8 +11,8 @@
                     allocator-reading call-as-the-collector collect-at-trough!
                     drain-deadline install-device-queries! margin-over
                     native-collect-budget native-collect-margin
-                    native-memory-fraction reset-pressure-state!
-                    shadow-refresh)
+                    native-memory-fraction release-spacing
+                    reset-pressure-state! shadow-refresh)
            (only-in "../nn.rkt" Linear Sequential))
 
   (define mib (* 1024 1024))
@@ -351,6 +351,33 @@
     (check-true (positive? (collections-over 1/2 20)))
     ;; all of it is a 128 MiB mark, which the same 80 MiB stays under
     (check-equal? (collections-over 1 20) 0)
+    (install-device-queries! #:capacity (lambda (_dev) #f)
+                             #:allocated (lambda (_dev) #f))
+    (settle!))
+
+  ;; a stand-in for a device whose cache the backstop can empty, as on MPS
+  (test-case "a backstop empties a releasable cache, no more often than the spacing"
+    (define releases 0)
+    (define (fired-and-released spacing)
+      (settle!)
+      (set! releases 0)
+      (define before (collections))
+      (parameterize ([native-memory-fraction 1/2]
+                     [release-spacing spacing])
+        (define held (for/list ([_ (in-range 40)]) (zeros 1024 1024)))
+        (check-equal? (length held) 40))
+      (values (- (collections) before) releases))
+    (install-device-queries! #:capacity (lambda (_dev) (* 128 mib))
+                             #:allocated (lambda (_dev) #f)
+                             #:release (lambda (_dev)
+                                         (set! releases (add1 releases))
+                                         #t))
+    (define-values (fired spaced) (fired-and-released +inf.0))
+    (check-true (>= fired 2) (format "~a backstop collections" fired))
+    (check-equal? spaced 1 "the spacing must hold every later firing back")
+    (define-values (fired-unspaced unspaced) (fired-and-released 0))
+    (check-equal? unspaced fired-unspaced
+                  "with no spacing every firing must release")
     (install-device-queries! #:capacity (lambda (_dev) #f)
                              #:allocated (lambda (_dev) #f))
     (settle!)))

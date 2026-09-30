@@ -77,13 +77,20 @@
        (tr-cuda-memory-stats/raw (device-index dev)))
      (and (zero? rc) allocated)]
     [(mps)
-     (define-values (rc allocated _driver _recommended)
+     ;; on unified memory the allocator's cache is host memory, so what it
+     ;; has taken from the driver is what costs the machine (#175)
+     (define-values (rc _allocated driver _recommended)
        (tr-mps-memory-info/raw))
-     (and (zero? rc) allocated)]
+     (and (zero? rc) driver)]
     [else #f]))
 
+(define (device-release dev)
+  (and (eq? (device-type dev) 'mps)
+       (zero? (tr-mps-empty-cache/raw))))
+
 (install-device-queries! #:capacity device-capacity
-                         #:allocated device-allocated)
+                         #:allocated device-allocated
+                         #:release device-release)
 
 (define-torch tr-cuda-reset-peak-stats/raw
   (_fun (index : _int64) -> _int)

@@ -21,8 +21,9 @@
            (only-in (submod "../foreign.rkt" unsafe) to!)
            (only-in "../foreign/raw/memory.rkt" native-memory-use/fold)
            (only-in "../foreign/raw/pressure.rkt"
-                    native-collect-budget native-collect-margin
-                    native-memory-fraction reset-pressure-state!)
+                    allocator-reading collect-and-wait! native-collect-budget
+                    native-collect-margin native-memory-fraction
+                    release-spacing reset-pressure-state!)
            (only-in "../nn.rkt" Linear Sequential parameters)
            (only-in "../vision/diffusion.rkt"
                     UNet linear-schedule schedule-alpha-bars schedule-alphas
@@ -107,6 +108,32 @@
        (check-equal? (length held) 24)
        (check-true (> (backstops) before)
                    "the backstop never fired off the queried MPS capacity")
+       (settle!))
+
+     (test-case "the backstop reads MPS's driver figure and empties its cache"
+       (settle!)
+       (define (gauge key) (cdr (assq key (mps-memory-info))))
+       (define (cached) (- (gauge 'driver-allocated) (gauge 'allocated)))
+       (check-equal? ((allocator-reading) device) (gauge 'driver-allocated)
+                     "on unified memory the reading is what the driver gave")
+       ;; tensors freed by a collection go back to the cache, not the driver
+       (with-default-device device
+         (for ([_ (in-range 24)]) (randn 1024 1024)))
+       (collect-and-wait!)
+       (define cached-before (cached))
+       (define before (backstops))
+       (define held
+         (parameterize ([native-memory-limit #f]
+                        [native-memory-fraction 1/200]
+                        [native-collect-margin never]
+                        [release-spacing 0])
+           (with-default-device device
+             (for/list ([_ (in-range 24)]) (randn 1024 1024)))))
+       (check-equal? (length held) 24)
+       (check-true (> (backstops) before) "the backstop never fired")
+       (check-true (< (cached) cached-before)
+                   (format "the cache stayed at ~a MiB after the backstop"
+                           (quotient (cached) mib)))
        (settle!))
 
      (test-case "a no-grad sampler loop troughs, with a minor before the full"

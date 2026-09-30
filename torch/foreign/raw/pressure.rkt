@@ -13,6 +13,7 @@
          live-bytes-by-device
          unaccounted-bytes-by-device
          shadow-refresh
+         release-spacing
          install-device-queries!
          collect-under-pressure!
          collect-at-trough!
@@ -37,10 +38,11 @@
 ;; a device that has none, or (retry-at . ms) after a failed query. `shadow`
 ;; charges the collector, as phantom bytes, for the `unaccounted` bytes the
 ;; allocator holds beyond the ledger, and is adjusted, never replaced.
+;; `release-after` is when the backstop may next empty the device's cache.
 (struct account
   ([live #:mutable] [since-check #:mutable] [since-sample #:mutable]
    [sample #:mutable] [interval #:mutable] [capacity #:mutable]
-   [floor #:mutable] shadow [unaccounted #:mutable]))
+   [floor #:mutable] shadow [unaccounted #:mutable] [release-after #:mutable]))
 
 (struct stats
   (finalizer-runs backstop-collections reclaimed trough-collections
@@ -50,12 +52,12 @@
 ;; when each trough stage may next run, and the thread inside a collection
 (struct schedule (next-full-ms next-minor-ms holder) #:mutable)
 
-(struct queries (capacity allocated) #:mutable)
+(struct queries (capacity allocated release) #:mutable)
 
 (define accounts (make-hash))
 (define the-stats (stats 0 0 0 0 0))
 (define the-schedule (schedule 0.0 0.0 #f))
-(define the-queries (queries #f #f))
+(define the-queries (queries #f #f #f))
 
 (define native-memory-limit (make-parameter #f))
 (define native-memory-fraction (make-parameter 4/5))
@@ -63,6 +65,9 @@
 (define sample-divisor 32)
 (define reclaim-fraction 1/20)
 (define capacity-retry-ms 1000.0)
+
+;; the least time in ms between two cache releases by the backstop on a device
+(define release-spacing (make-parameter 5000.0))
 
 ;; #f: the floor itself, kept between the two bounds below
 (define native-collect-margin (make-parameter #f))
@@ -76,7 +81,8 @@
 
 (define (account-of dev)
   (hash-ref! accounts dev
-             (lambda () (account 0 0 0 0 #f 'unknown 0 (make-phantom-bytes 0) 0))))
+             (lambda ()
+               (account 0 0 0 0 #f 'unknown 0 (make-phantom-bytes 0) 0 0.0))))
 
 (define (note-accounted! dev nbytes)
   (define a (account-of dev))
@@ -156,7 +162,8 @@
        (set-account-interval! a #f)
        (set-account-capacity! a 'unknown)
        (set-account-floor! a 0)
-       (set-shadow! a 0))
+       (set-shadow! a 0)
+       (set-account-release-after! a 0.0))
      (set-schedule-next-full-ms! the-schedule 0.0)
      (set-schedule-next-minor-ms! the-schedule 0.0))))
 
@@ -164,10 +171,15 @@
 
 ;; raw/device.rkt owns the device bindings and requires the ledger, so it
 ;; hands these over at instantiation instead of being required from here.
-;; Each takes a device and answers in bytes, or #f where it cannot say.
-(define (install-device-queries! #:capacity capacity #:allocated allocated)
+;; Each takes a device and answers in bytes, or #f where it cannot say;
+;; `release` empties the device's allocator cache and answers whether it had
+;; one to empty.
+(define (install-device-queries! #:capacity capacity
+                                 #:allocated allocated
+                                 #:release [release #f])
   (set-queries-capacity! the-queries capacity)
-  (set-queries-allocated! the-queries allocated))
+  (set-queries-allocated! the-queries allocated)
+  (set-queries-release! the-queries release))
 
 (define (queried-capacity dev)
   (define query (queries-capacity the-queries))
@@ -288,6 +300,7 @@
 (define (pressure-collect! dev mark base)
   (define before (pressure-reading dev))
   (define-values (_observed drained?) (collect-and-wait!))
+  (release-cache! dev)
   (sample-allocator! dev)
   (define after (pressure-reading dev))
   (call-with-ledger
@@ -308,6 +321,21 @@
      (set-stats-backstop-collections!
       the-stats (add1 (stats-backstop-collections the-stats)))
      (note-reclaimed! reclaimed))))
+
+;; Where the allocator's reading counts its cache, as on unified memory, a
+;; collection frees tensors into that cache and the reading does not move,
+;; so the backstop also empties it. Spaced in time, not bytes: emptying is
+;; quick, but the blocks the next steps need then come from the driver again.
+(define (release-cache! dev)
+  (define release (queries-release the-queries))
+  (when (and release
+             (>= (current-inexact-milliseconds)
+                 (call-with-ledger
+                  (lambda () (account-release-after (account-of dev)))))
+             (release dev))
+    (define next (+ (current-inexact-milliseconds) (release-spacing)))
+    (call-with-ledger
+     (lambda () (set-account-release-after! (account-of dev) next)))))
 
 ;; --- the troughs ---
 

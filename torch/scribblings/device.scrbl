@@ -346,10 +346,16 @@ collection is tried first and a full one takes only what survives, the two
 sharing the same 5%. With gradients on the same moment is the peak of a
 step, and nothing is done there. The second place is a backstop for code
 with neither trough: when a device's live bytes pass its high-water mark,
-the next allocation runs the same drained collection. Live bytes are the larger of the ledger's total and the CUDA
-caching allocator's own allocated figure, sampled as allocation proceeds,
-because storage that only the autograd graph still holds is invisible to the
-ledger. The mark is @racket[native-memory-fraction] of the device's
+the next allocation runs the same drained collection. Live bytes are the
+larger of the ledger's total and the allocator's own figure, sampled as
+allocation proceeds. On CUDA that figure is the bytes the caching allocator
+has allocated, because storage that only the autograd graph still holds is
+invisible to the ledger. On MPS it is the bytes the allocator has taken
+from the driver, its cache included, because on unified memory that cache
+is the machine's own memory. A collection frees tensors into the cache
+without moving that figure, so on MPS a backstop collection also empties
+the cache, at most once every five seconds, since the next steps then take
+their memory from the driver again. The mark is @racket[native-memory-fraction] of the device's
 capacity, from @racket[cuda-memory-info] on CUDA and
 @racket[mps-memory-info] on MPS, or @racket[native-memory-limit] when set.
 A collection is never run within an eighth of the mark of the previous one,
@@ -364,9 +370,10 @@ charge for that device. Storage that only the autograd graph or libtorch
 itself holds reaches no tensor, so this is the only way the collector's own
 schedule learns of it. It is read only at a trough, because a charge that
 followed the graph through a forward pass would push Racket past its
-trigger at the peak, the moment a full collection does the most harm. The
-charge is zero on the CPU, whose allocator keeps no count, and
-@racket[native-memory-unaccounted] reports it.
+trigger at the peak, the moment a full collection does the most harm. It is
+read from the same figure as the backstop's, so on MPS the allocator's
+cache is charged too. The charge is zero on the CPU, whose allocator keeps
+no count, and @racket[native-memory-unaccounted] reports it.
 
 Every knob above is a parameter, so a training script can tune the whole
 policy for its own machine by wrapping its loop once:
@@ -397,8 +404,9 @@ total at the last trough: what the autograd graph, a retained graph, or
 libtorch itself was holding that no tensor accounts for. Between training
 steps it should stay near zero, so a figure that climbs from one step to
 the next is a graph that is not being released, such as a missing
-@racket[detach]. Devices with nothing unaccounted are left out, and the
-CPU never appears.
+@racket[detach]. On MPS it includes the allocator's cache, which is host
+memory there. Devices with nothing unaccounted are left out, and the CPU
+never appears.
 }
 
 @defparam[native-memory-limit limit (or/c #f exact-positive-integer?)]{
@@ -433,9 +441,9 @@ one collects more eagerly.
          (listof (cons/c (or/c 'allocated 'driver-allocated 'recommended-max)
                          exact-nonnegative-integer?))]{
 The MPS allocator's own gauges: bytes handed out, bytes taken from the
-driver, and the working-set maximum Metal recommends staying under, which
-is what the backstop's mark is taken from on that device. All three are
-zero when the backend is absent, rather than raising.
+driver, and the working-set maximum Metal recommends staying under. The
+backstop reads the second against a mark taken from the third. All three
+are zero when the backend is absent, rather than raising.
 }
 
 @defproc[(cuda-memory-info [dev device/c (cuda-device)])
