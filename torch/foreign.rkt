@@ -188,6 +188,7 @@
          native-memory-fraction
          native-collect-margin
          native-collect-budget
+         native-collect-at-troughs
          mps-memory-info
          cuda-memory-stats
          cuda-memory-info

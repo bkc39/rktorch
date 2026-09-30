@@ -3,7 +3,8 @@
 @(require (for-label racket/base
                      racket/contract
                      (only-in racket/string string-replace)
-                     (only-in torch backward! lambda~> prop:to relu tensor? to to-able?)
+                     (only-in torch backward! lambda~> native-collect-at-troughs
+                              prop:to relu tensor? to to-able? with-no-grad)
                      (only-in torch/data/loader in-dataloader)
                      torch/nn
                      torch/private/contract))
@@ -536,6 +537,25 @@ implements @racket[gen:layer]. A hand-written layer needs only
 @racket[layer-forward]; the collection methods have empty fallbacks, and
 the containers reach every tensor by walking @racket[layer-named-children].
 
+Every call reaches a layer's @racket[layer-forward] method through the
+function of the same name, which is what @racket[forward] and applying a
+layer call too. That is where the return of an outermost layer call under
+@racket[with-no-grad] collects (see @racket[native-collect-at-troughs]),
+so a hand-written layer gets it the same way a @racket[define-layer] one
+does. Such a layer is not applicable unless its structure asks for it,
+with @racket[#:property prop:procedure layer-forward].
+
+@racketblock[
+(struct Twice (inner)
+  #:property prop:procedure layer-forward
+  #:methods gen:layer
+  [(define (layer-forward self . inputs)
+     (define inner (Twice-inner self))
+     (inner (apply inner inputs)))
+   (define (layer-named-children self)
+     (list (cons "inner" (Twice-inner self))))])
+]
+
 @defthing[gen:layer any/c]{
 The generic interface, with methods @racket[layer-forward],
 @racket[layer-parameters], @racket[layer-named-parameters],
@@ -546,9 +566,11 @@ it with @racket[#:methods]; it derives @racket[prop:to], so every layer is
 @racket[to-able?].}
 
 @defproc[(layer-forward [m layer?] [input any/c] ...) any]{
-The layer's computation on its inputs. @racket[define-layer]'s
-@racket[#:forward] clause supplies it, and applying a layer as a
-procedure calls it.}
+Runs the layer's computation on its inputs: the @racket[layer-forward]
+method, which @racket[define-layer]'s @racket[#:forward] clause supplies.
+Inside a @racket[#:methods gen:layer] block the name is the method being
+defined; everywhere else it is this function, so a call cannot skip the
+collection at an outermost call's return.}
 
 @defproc[(forward [m layer?] [input any/c] ...) any]{
 Calls @racket[layer-forward]; the explicit spelling of @racket[(m input)].}

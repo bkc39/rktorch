@@ -23,6 +23,7 @@
          reset-pressure-state!
          allocator-reading
          drain-deadline
+         native-collect-at-troughs
          native-collect-budget
          native-collect-margin
          native-memory-fraction
@@ -72,6 +73,9 @@
 
 ;; the share of wall-clock time trough collections may take
 (define native-collect-budget (make-parameter 1/20))
+
+;; whether backward! and an outermost no-grad layer call collect at all
+(define native-collect-at-troughs (make-parameter #t))
 
 ;; --- the accounts, all inside the atomic section ---
 
