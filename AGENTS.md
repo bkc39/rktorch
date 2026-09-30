@@ -299,9 +299,12 @@ broader ATen surface, and the portable raco-catalog candidate story.
 - **`bin`** (default) — `pkgs.libtorch-bin`, pointed at PyTorch's libtorch
   2.14.0 downloads (nixpkgs still ships 2.9.0); the CUDA build adds cuDNN 9.24,
   which the cu130 download no longer bundles. Small prebuilt download, fast
-  cached CI on `aarch64-darwin` + `x86_64-linux`. Parity with Python torch is
-  *tolerant* (the cross-test uses a float tolerance), because the C++ side may
-  be a different version than the Python torch.
+  cached CI on `aarch64-darwin` + `x86_64-linux`. On `x86_64-linux` the shells'
+  Python torch is PyTorch's own wheel of the same release
+  (`nix/torch-wheels.nix`): the CPU wheel in `nix develop`, and in `.#cuda` the
+  cu130 wheel linked against the CUDA libraries and cuDNN the shim loads. Darwin
+  still gets nixpkgs' torch. The cross-test compares to a float tolerance either
+  way.
 - **`python`** — `pkgs.python314Packages.torch`. Builds against the *same*
   libtorch the parity script imports, so seeded `randn` is **bit-exact** — at
   the cost of a heavy (often uncached on darwin) from-source build. It fails at
