@@ -268,6 +268,22 @@
         (check-equal? (trough-collections) full "backward! did not collect")
         (check-equal? (trough-minors) minors "the layer call did not collect"))))
 
+  (test-case "with the collections off, both troughs still refresh the charge"
+    (define net (Linear 1024 1024))
+    (define x (zeros 1024 1024))
+    (define (charged-by thunk)
+      (settle!)
+      (parameterize ([native-collect-at-troughs #f]
+                     [allocator-reading
+                      (lambda (_dev) (+ (cpu-bytes) (* 256 mib)))])
+        (thunk))
+      (cpu-unaccounted))
+    (check-true (positive? (charged-by (lambda () (backward! (sum (net x))))))
+                "backward! left the charge where it was")
+    (check-true (positive? (charged-by (lambda () (with-no-grad (net x)))))
+                "the no-grad layer call left the charge where it was")
+    (settle!))
+
   (test-case "the default margin is the floor, kept between 256 MiB and 1 GiB"
     (check-equal? (margin-over 0) (* 256 mib))
     (check-equal? (margin-over (* 100 mib)) (* 256 mib))

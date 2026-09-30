@@ -226,7 +226,10 @@ uses: the difference, so no ledger byte is charged twice, and zero on
 the CPU, whose allocator keeps no count.
 
 - It is refreshed by `refresh-shadows!` at every trough, *before* the
-  trough collects, so the full collection that follows sets Racket's
+  trough collects, and at a trough whose collection
+  `native-collect-at-troughs` has switched off, since the refresh is
+  accounting and costs no pause. Refreshed before the collection, the
+  full collection that follows sets Racket's
   next trigger with the shadow already inside it. Raised after that
   collection instead, it would sit above a trigger computed without it,
   and Racket would force a major early in the next forward.

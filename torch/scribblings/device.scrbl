@@ -439,7 +439,9 @@ one collects more eagerly.
 Whether @racket[backward!] and the outermost layer call under
 @racket[with-no-grad] collect at their return, @racket[#t] by default.
 With it off neither does, and a loop that relied on them grows until the
-backstop's mark catches it.
+backstop's mark catches it. Either way both still read the allocator for
+the charge @racket[native-memory-unaccounted] reports, which costs no
+pause.
 }
 
 @defproc[(mps-memory-info)
