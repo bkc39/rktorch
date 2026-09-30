@@ -30,6 +30,9 @@
 
   (define mib (* 1024 1024))
   (define never (expt 2 60))
+  (define no-backoff +inf.0)
+  ;; no device's live bytes sit 2^60 below its floor, so every trough is due
+  (define always-due (- never))
 
   (define (diagnostic key) (cdr (assq key (finalizer-diagnostics))))
   (define (minors) (diagnostic 'trough-minors))
@@ -130,11 +133,13 @@
        (define steps 4)
        (define before (minors))
        (void
-        (parameterize ([native-collect-margin (* 16 mib)]
-                       [native-collect-budget 1])
+        (parameterize ([native-collect-margin always-due]
+                       [native-collect-budget no-backoff])
           (run-sampler net sched steps device)))
        ;; The UNet calls dozens of sub-layers per forward. Counting those would
        ;; put the tally far above the step count; the mark must hold it to one.
+       ;; Both gates are off, so neither a quick step nor garbage the collector
+       ;; already reclaimed mid-forward can skip a trough: only the mark counts.
        (check-equal? (- (minors) before) steps
                      "a nested layer call was counted as its own trough")
        (settle!))

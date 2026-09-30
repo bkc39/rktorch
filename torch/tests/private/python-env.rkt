@@ -62,8 +62,8 @@
 
 (define python (find-executable-path "python3"))
 
-;; Under the .#cuda shell the process LD_LIBRARY_PATH (Racket's libtorch 2.9)
-;; would shadow the Python wheel's own libtorch and break `import torch`;
+;; Under the .#cuda shell the process LD_LIBRARY_PATH (Racket's cuDNN 9.24)
+;; would shadow the Python wheel's own cuDNN and break `import torch`;
 ;; pin each python child to the host-driver farm the cudaHook exports.
 (define cuda-driver-path (getenv "RKTORCH_CUDA_DRIVER_PATH"))
 
