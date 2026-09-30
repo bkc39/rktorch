@@ -472,8 +472,11 @@ CUDA; raises on a string the allocator's parser rejects.
 
 @defproc[(reclaim-native-memory!) void?]{
 Collects and drains repeatedly, up to four rounds, while the ledger keeps
-shrinking, then returns the CUDA and MPS caches to their drivers. For epoch
-boundaries and script exits; a training loop no longer needs it.
+shrinking, then returns the CUDA and MPS caches to their drivers and reads
+each allocator again for the charge @racket[native-memory-unaccounted]
+reports, so memory a dropped graph held stops being charged at once rather
+than at the next trough. For epoch boundaries and script exits; a training
+loop no longer needs it.
 }
 
 @defproc[(finalizer-diagnostics)

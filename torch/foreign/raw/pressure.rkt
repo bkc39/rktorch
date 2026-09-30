@@ -13,6 +13,7 @@
          live-bytes-by-device
          unaccounted-bytes-by-device
          shadow-refresh
+         refresh-shadows!
          install-device-queries!
          collect-under-pressure!
          collect-at-trough!

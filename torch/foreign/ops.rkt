@@ -54,7 +54,8 @@
                   [native-collect-budget raw:native-collect-budget]
                   [native-collect-margin raw:native-collect-margin]
                   [native-memory-fraction raw:native-memory-fraction]
-                  [native-memory-limit raw:native-memory-limit])
+                  [native-memory-limit raw:native-memory-limit]
+                  refresh-shadows!)
          (only-in "raw/random.rkt" tr-tensor-uniform!/raw)
          (only-in "raw/tensor.rkt"
                   dtype-code->symbol
@@ -299,7 +300,9 @@
                (or (< now prev) (not drained?)))
       (loop now (sub1 rounds))))
   (cuda-empty-cache!)
-  (mps-empty-cache!))
+  (mps-empty-cache!)
+  ;; what was graph-held is gone now, so its charge must not wait for a trough
+  (refresh-shadows!))
 
 (define (ledger-total)
   (for/sum ([entry (in-list (native-memory-use))])
