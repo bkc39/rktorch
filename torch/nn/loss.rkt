@@ -1,9 +1,7 @@
 #lang racket/base
 
 (require (only-in racket/contract/base -> ->* >/c and/c listof or/c)
-         (only-in "../foreign.rkt"
-                  device-type mean mul sub tensor-device tensor? to-device
-                  to-dtype)
+         (only-in "../foreign.rkt" mean mul sub tensor? to-dtype)
          (only-in "../generated.rkt"
                   [binary-cross-entropy-with-logits
                    g:binary-cross-entropy-with-logits]
@@ -56,17 +54,8 @@
        (#:blank exact-nonnegative-integer?
         #:zero-infinity? boolean?)
        tensor?)
-  (define (marginalize lp tg)
-    (g:ctc-loss-intlist lp (to-dtype tg 'int64)
-                        input-lengths target-lengths blank 1 zero-infinity?))
-  (define device (tensor-device log-probs))
-  ;; aten::_ctc_loss is CPU/CUDA only, so MPS detours through the CPU;
-  ;; to-device is differentiable both ways, so the gradient returns
-  (if (eq? (device-type device) 'mps)
-      (to-device (marginalize (to-device log-probs 'cpu)
-                              (to-device targets 'cpu))
-                 device)
-      (marginalize log-probs targets)))
+  (g:ctc-loss-intlist log-probs (to-dtype targets 'int64)
+                      input-lengths target-lengths blank 1 zero-infinity?))
 
 (define reductions '#hasheq((none . 0) (mean . 1) (sum . 2)))
 

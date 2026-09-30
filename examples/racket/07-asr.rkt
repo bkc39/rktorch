@@ -319,10 +319,8 @@ something wider.
 
 @bold{The device.} As in the earlier capstones: take the accelerator and
 let @racket[with-default-device] scope it, so parameters and batches land
-together. Both accelerators run this model natively --- libtorch 2.9
-registers no MPS @tt{ctc_loss} kernel, but @racket[ctc-loss] marginalizes
-that one op on the CPU and hands the gradient back, so Apple silicon
-trains on the GPU like CUDA does.
+together. Both accelerators run this model natively, @racket[ctc-loss]
+included, so Apple silicon trains on the GPU like CUDA does.
 
 @chunk[<r07-device>
 (define (pick-device)
@@ -513,7 +511,7 @@ system cache dir) and by default trains on @emph{all} of it. Utterances
 sort by their frame counts --- read from FLAC headers via
 @racket[audio-info], no decode --- so each @racket[batch]-sized bucket
 pads its members to nearly-equal lengths and the rectangle wastes little.
-The spectral front end stays on the CPU --- libtorch-bin 2.9's cuFFT
+The spectral front end stays on the CPU --- the cu130 builds' cuFFT
 raises @tt{CUFFT_INTERNAL_ERROR} on this driver stack, and an
 @tt{[80, T]} feature transfer per utterance is noise next to the model
 compute anyway --- and the mels move to the training device.
