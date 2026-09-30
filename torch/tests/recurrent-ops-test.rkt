@@ -85,11 +85,14 @@
                   #:when (eq? (device-type (car entry)) 'cuda))
           (cdr entry)))
       (define scores (to-device (randn 64) 'cuda))
+      (reclaim-native-memory!)
       (define before (cuda-bytes))
       (define-values (top indices) (topk scores 16))
       (check-equal? (- (cuda-bytes) before) (+ (* 16 4) (* 16 8)))
       (check-equal? (device-type (tensor-device indices)) 'cuda)
-      (check-equal? (tensor-shape top) '(16)))
+      (check-equal? (tensor-shape top) '(16))
+      ;; scores outlives the reading, or its finalizer can land before it
+      (check-equal? (tensor-shape scores) '(64)))
 
     (test-case "multinomial samples on the device"
       (define draws
