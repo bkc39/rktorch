@@ -539,7 +539,9 @@
           # (`nix develop --command python3`) and the python-cross-test. On
           # x86_64-linux it is PyTorch's own wheels at libtorchVersion, the same
           # build the shim links (nix/torch-wheels.nix, #197). Darwin keeps
-          # nixpkgs' torch until the macOS wheels have been tried on a Mac.
+          # nixpkgs' torch until the macOS wheels have been tried on a Mac, and
+          # torchSource = "python" keeps it everywhere: the shim then links
+          # nixpkgs' torch, so the twins must run that same build.
           pythonWheels = cudaLibs:
             let
               python = pkgs.python314.override {
@@ -558,14 +560,17 @@
                + "; move the wheels with it");
             python.withPackages
               (ps: [ ps.soundfile ps.torch ps.torchaudio ps.torchvision ]);
+          pythonFromNixpkgs = p: p.python314.withPackages
+            (ps: [ ps.soundfile ps.torch ps.torchaudio ps.torchvision ]);
           pythonEnv =
-            if system == "x86_64-linux" then pythonWheels null
-            else pkgs.python314.withPackages
-              (ps: [ ps.soundfile ps.torch ps.torchaudio ps.torchvision ]);
+            if system == "x86_64-linux" && torchSource == "bin"
+            then pythonWheels null
+            else pythonFromNixpkgs pkgs;
 
-          # The `.#cuda` shell's Python: the cu130 wheels, linked against the
-          # CUDA libraries the CUDA libtorch bundles and its cuDNN 9.24, so both
-          # sides of a CUDA parity test load the same ones.
+          # The `.#cuda` shell's Python: with torchSource = "bin", the cu130
+          # wheels, linked against the CUDA libraries the CUDA libtorch bundles
+          # and its cuDNN 9.24, so both sides of a CUDA parity test load the
+          # same ones.
           cudaRuntime = pkgs.runCommand "libtorch-cuda-runtime" { } ''
             mkdir -p $out/lib
             for f in ${torchPackageFor pkgsCuda}/lib/*.so*; do
@@ -576,7 +581,9 @@
             done
           '';
           pythonCudaEnv =
-            pythonWheels [ cudaRuntime (pkgs.lib.getLib cudaCudnn) ];
+            if torchSource == "bin"
+            then pythonWheels [ cudaRuntime (pkgs.lib.getLib cudaCudnn) ]
+            else pythonFromNixpkgs pkgsCuda;
 
           ocamlTorch = import ./nix/ocaml-torch.nix { inherit pkgs; };
           ocamlInputs = with pkgs.ocamlPackages; [
