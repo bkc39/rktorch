@@ -32,11 +32,14 @@ Every layer is applied like a procedure, and is @racket[layer?].
 @racket[Sequential], which composes them, is described with the other
 container forms in @secref["Layers"].
 
-@defproc[(Linear [in exact-positive-integer?] [out exact-positive-integer?])
+@defproc[(Linear [in exact-positive-integer?] [out exact-positive-integer?]
+                 [#:bias? bias? boolean? #t])
          layer?]{
 The affine map @tt{xW@superscript{T} + b}, from @racket[in] features to
 @racket[out]. Owns @racket["weight"] and @racket["bias"], initialized as
-PyTorch's @tt{nn.Linear} initializes them.
+PyTorch's @tt{nn.Linear} initializes them. With @racket[#:bias?]
+@racket[#f] it owns only @racket["weight"], as @tt{bias=False} does, and
+draws the same weight.
 
 @torch-examples[
 (define fc (Linear 3 2))
@@ -56,10 +59,13 @@ PyTorch's @tt{nn.Linear} initializes them.
                  [#:padding padding (or/c exact-nonnegative-integer?
                                           (list/c exact-nonnegative-integer?
                                                   exact-nonnegative-integer?))
-                            0])
+                            0]
+                 [#:bias? bias? boolean? #t])
          layer?]{
 Two-dimensional convolution over a batch shaped @tt{[N, in, H, W]},
 answering @tt{[N, out, H', W']} with the usual convolution arithmetic.
+@racket[#:bias?] @racket[#f] leaves out the bias, for a convolution a batch
+norm follows.
 
 Each size is an integer for a square one, or a two-element list
 @racket[(list height width)] for an asymmetric one, mirroring PyTorch's
@@ -186,12 +192,14 @@ spectrogram frames.}
                                                      (list/c exact-positive-integer?
                                                              exact-positive-integer?))
                                       1]
-                          [#:groups groups exact-positive-integer? 1])
+                          [#:groups groups exact-positive-integer? 1]
+                          [#:bias? bias? boolean? #t])
          layer?]{
 The transposed convolution that upsamples, @tt{nn.ConvTranspose2d}: a
 DCGAN generator is a stack of these from a latent vector up to an image.
 @racket[output-padding] resolves the ambiguity in the output size that a
-stride above one leaves.}
+stride above one leaves. @racket[#:bias?] @racket[#f] leaves out the bias,
+as for a convolution a batch norm follows.}
 
 @defproc[(MaxPool2d [kernel (or/c exact-positive-integer?
                                   (list/c exact-positive-integer?
