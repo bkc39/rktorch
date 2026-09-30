@@ -5,8 +5,9 @@
                      racket/contract
                      (only-in torch
                               backward! detach grad grad-enabled? has-grad?
-                              maybe-grad mul requires-grad! requires-grad?
-                              sum tensor tensor? with-no-grad)
+                              maybe-grad mul native-collect-at-troughs
+                              requires-grad! requires-grad? sum tensor tensor?
+                              with-no-grad)
                      (only-in torch/nn zero-grads!)))
 
 @title{Automatic differentiation}
@@ -58,7 +59,12 @@ that tensor's gradient.
 Gradients @emph{accumulate} rather than replace, which is what makes
 gradient accumulation across several batches possible --- and is why a
 training loop clears them every step, with
-@racket[zero-grads!].}
+@racket[zero-grads!].
+
+The end of @racket[backward!] is the trough of a training step, so when
+enough native memory has built up since the last one it runs a full
+collection before returning, which can take a few hundred milliseconds.
+@racket[native-collect-at-troughs] turns that off.}
 
 @section{Turning tracking off}
 
