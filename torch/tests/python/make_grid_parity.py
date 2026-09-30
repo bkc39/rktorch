@@ -1,8 +1,8 @@
 """torchvision.utils.make_grid on a seeded batch, and save_image's
 quantization of it, for the Racket image-grid and write-ppm pair.
 
-The CUDA parity shell carries torch-bin without torchvision, so the grid
-falls back to make_grid's own algorithm (torchvision/utils.py) there.
+Where torchvision is missing, the grid falls back to make_grid's own
+algorithm (torchvision/utils.py).
 """
 import json
 import math

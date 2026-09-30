@@ -469,7 +469,7 @@
           };
 
           # The ATen generator (`nix run .#codegen`): python3 with torchgen
-          # (from the python torch wheel) + the pinned clang-format the
+          # (from nixpkgs' python torch) + the pinned clang-format the
           # generator formats its C++ output with. Writes into the working
           # tree, so it must run from the repo root — much lighter than the
           # full dev shell when all you need is regeneration.

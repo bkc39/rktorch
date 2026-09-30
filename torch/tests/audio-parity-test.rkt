@@ -21,8 +21,7 @@
 
   (define-runtime-path wav-fixture "../audio/fixtures/sine-440-16k.wav")
 
-  ;; the .#cuda python carries only torch-bin, so both batteries gate on
-  ;; import
+  ;; both batteries gate on import, for a shell whose python lacks torchaudio
   (when (python-module-available? "torchaudio")
     (test-case "load-wav and load-audio against torchaudio.load"
       (define j (python-result "python/audio_parity.py"))

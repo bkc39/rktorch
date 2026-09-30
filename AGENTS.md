@@ -189,7 +189,7 @@ with `backward!` outside the form as PyTorch recommends). From
   `stb` found by pkg-config like libsndfile and compiled once in
   `src/torchrkt/detail/stb_image.c`; PNGs match
   torchvision.io exactly, JPEGs within a count or two
-  (`image-parity-test.rkt`, torchvision only in the default shell)
+  (`image-parity-test.rkt`, against torchvision in both shells)
 - generative examples on MNIST (#152): `examples/racket/10-dcgan.rkt` (a
   DCGAN shrunk to 28x28, `ConvTranspose2d` and `BatchNorm2d` in the
   generator, `leaky-relu` in the discriminator, two `adam`s at 2e-4 with

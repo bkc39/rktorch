@@ -30,9 +30,10 @@ twice with transposed convolutions of kernel 4, stride 2 and padding 1;
 the discriminator halves it twice with the same kernel shape and reads a
 logit off the 128x7x7 map. The generator's first batch norm is one
 dimensional, over the flat features, as in the reference code. The three
-layers a batch norm follows carry no bias: the normalization subtracts each
-channel's mean, which cancels any constant offset, so a bias there would
-have a gradient of exactly zero and train only on rounding noise.
+layers a batch norm follows carry no bias: the normalization subtracts the
+mean of each feature or channel, which cancels any constant offset, so a
+bias there would have a gradient of exactly zero and train only on
+rounding noise.
 
 @chunk[<r10-model>
 (define-layer generator (fc bn0 up1 bn1 up2)

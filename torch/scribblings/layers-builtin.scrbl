@@ -64,8 +64,9 @@ draws the same weight.
          layer?]{
 Two-dimensional convolution over a batch shaped @tt{[N, in, H, W]},
 answering @tt{[N, out, H', W']} with the usual convolution arithmetic.
-@racket[#:bias?] @racket[#f] leaves out the bias, for a convolution a batch
-norm follows.
+With @racket[#:bias?] @racket[#f] it owns only @racket["weight"], as
+@tt{bias=False} does, and draws the same weight; a convolution a batch norm
+follows needs no bias.
 
 Each size is an integer for a square one, or a two-element list
 @racket[(list height width)] for an asymmetric one, mirroring PyTorch's
@@ -198,8 +199,9 @@ spectrogram frames.}
 The transposed convolution that upsamples, @tt{nn.ConvTranspose2d}: a
 DCGAN generator is a stack of these from a latent vector up to an image.
 @racket[output-padding] resolves the ambiguity in the output size that a
-stride above one leaves. @racket[#:bias?] @racket[#f] leaves out the bias,
-as for a convolution a batch norm follows.}
+stride above one leaves. With @racket[#:bias?] @racket[#f] it owns only
+@racket["weight"], as @tt{bias=False} does, and draws the same weight, as
+for a @racket[Conv2d] a batch norm follows.}
 
 @defproc[(MaxPool2d [kernel (or/c exact-positive-integer?
                                   (list/c exact-positive-integer?
