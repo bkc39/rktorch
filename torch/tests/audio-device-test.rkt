@@ -2,10 +2,11 @@
 
 (module+ test
   (require rackunit
-           (only-in "../audio/functional.rkt" hann-window mel-filterbank)
+           (only-in "../audio/functional.rkt"
+                    hann-window log-mel-spectrogram mel-filterbank stft)
            (only-in "../main.rkt"
-                    accelerator-if-available cpu-device dtype tensor-device
-                    tensor-shape))
+                    accelerator-if-available cpu-device dtype manual-seed! randn
+                    tensor->list tensor-device tensor-shape to-device))
 
   (define rate 16000)
 
@@ -28,9 +29,12 @@
 
   (define accelerator (accelerator-if-available))
 
-  ;; The auxiliaries are what #102 moves, so they are what this checks. The
-  ;; whole pipeline cannot run here: stft on CUDA fails in cuFFT (#180), and
-  ;; it fails the same way whether the window is moved or built in place.
+  (define (agrees-with-cpu on-device on-cpu tol)
+    (check-equal? (tensor-shape on-device) (tensor-shape on-cpu))
+    (for ([a (in-list (tensor->list (to-device on-device (cpu-device))))]
+          [c (in-list (tensor->list on-cpu))])
+      (check-= a c tol)))
+
   (unless (equal? accelerator (cpu-device))
     (test-case "the auxiliaries are built on the accelerator"
       (check-equal? (tensor-device
@@ -39,4 +43,19 @@
       (check-equal? (tensor-device
                      (mel-filterbank #:n-freqs 201 #:n-mels 80
                                      #:sample-rate rate #:device accelerator))
-                    accelerator))))
+                    accelerator))
+
+    (test-case "stft and the log-mel front end run on the accelerator (#180)"
+      (manual-seed! 0)
+      (define samples (randn rate))
+      (define (frames dev)
+        (stft (to-device samples dev) #:n-fft 400 #:hop-length 160
+              #:window (hann-window 400 #:device dev)))
+      (define on-accelerator (frames accelerator))
+      (check-equal? (tensor-device on-accelerator) accelerator)
+      (agrees-with-cpu on-accelerator (frames (cpu-device)) 1e-3)
+      (define (mels dev)
+        (log-mel-spectrogram (to-device samples dev) #:sample-rate rate))
+      (define mels-on-accelerator (mels accelerator))
+      (check-equal? (tensor-device mels-on-accelerator) accelerator)
+      (agrees-with-cpu mels-on-accelerator (mels (cpu-device)) 1e-3))))
