@@ -68,7 +68,8 @@
                    #:padding [padding nonneg-size/c]
                    #:output-padding [output-padding nonneg-size/c]
                    #:dilation [dilation pos-size/c]
-                   #:groups [groups exact-positive-integer?])
+                   #:groups [groups exact-positive-integer?]
+                   #:bias? [bias? boolean?])
                   #:pre/name (in-channels out-channels groups)
                   "groups must divide both channel counts"
                   (or (unsupplied-arg? groups)
@@ -80,7 +81,8 @@
           #:padding [padding 0]
           #:output-padding [output-padding 0]
           #:dilation [dilation 1]
-          #:groups [groups 1])
+          #:groups [groups 1]
+          #:bias? [bias? #t])
   (set! kernel-size (->2d kernel-size))
   (set! stride (->2d stride))
   (set! padding (->2d padding))
@@ -93,8 +95,11 @@
   ;; weight before bias: _ConvNd.reset_parameters' RNG draw order
   (set! weight (Parameter (kaiming-uniform shape)))
   (set! bias
-        (let ([bound (/ 1.0 (sqrt (fan-in shape)))])
-          (Parameter (uniform-init (list out-channels) (- bound) bound))))
+        (cond
+          [bias?
+           (define bound (/ 1.0 (sqrt (fan-in shape))))
+           (Parameter (uniform-init (list out-channels) (- bound) bound))]
+          [else #f]))
   #:forward (x)
   (conv-transpose2d x weight #:bias bias #:stride stride #:padding padding
                     #:output-padding output-padding #:dilation dilation
