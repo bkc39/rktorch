@@ -33,11 +33,11 @@
   (check-true (andmap finite? (append d-losses g-losses))
               (format "non-finite loss: ~a ~a" d-losses g-losses))
   (check-equal? (map car (named-parameters gen))
-                '("fc.weight" "fc.bias" "bn0.weight" "bn0.bias"
-                  "up1.weight" "up1.bias" "bn1.weight" "bn1.bias"
+                '("fc.weight" "bn0.weight" "bn0.bias"
+                  "up1.weight" "bn1.weight" "bn1.bias"
                   "up2.weight" "up2.bias"))
   (check-equal? (map tensor-shape (parameters disc))
-                '((64 1 4 4) (64) (128 64 4 4) (128) (128) (128) (1 6272) (1)))
+                '((64 1 4 4) (64) (128 64 4 4) (128) (128) (1 6272) (1)))
   (check-equal? (tensor-shape (gen (randn 4 100))) '(4 1 28 28))
   (check-equal? (tensor-shape (disc (randn 4 1 28 28))) '(4 1))
   (define samples (in-eval-mode gen (with-no-grad (gen (randn 2 100)))))
