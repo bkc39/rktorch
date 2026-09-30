@@ -301,7 +301,10 @@
 (define (pressure-collect! dev mark base)
   (define before (pressure-reading dev))
   (define-values (_observed drained?) (collect-and-wait!))
-  (release-cache! dev)
+  ;; after a drain that ran out of time, finalizers still to run would
+  ;; refill the cache behind the release and spend its spacing for nothing
+  (when drained?
+    (release-cache! dev))
   (sample-allocator! dev)
   (define after (pressure-reading dev))
   (call-with-ledger

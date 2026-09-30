@@ -368,12 +368,13 @@
   ;; a stand-in for a device whose cache the backstop can empty, as on MPS
   (test-case "a backstop empties a releasable cache, no more often than the spacing"
     (define releases 0)
-    (define (fired-and-released spacing)
+    (define (fired-and-released spacing [deadline (drain-deadline)])
       (settle!)
       (set! releases 0)
       (define before (collections))
       (parameterize ([native-memory-fraction 1/2]
-                     [release-spacing spacing])
+                     [release-spacing spacing]
+                     [drain-deadline deadline])
         (define held (for/list ([_ (in-range 40)]) (zeros 1024 1024)))
         (check-equal? (length held) 40))
       (values (- (collections) before) releases))
@@ -388,6 +389,11 @@
     (define-values (fired-unspaced unspaced) (fired-and-released 0))
     (check-equal? unspaced fired-unspaced
                   "with no spacing every firing must release")
+    ;; a zero deadline makes every drain report that it ran out of time
+    (define-values (fired-stalled stalled) (fired-and-released 0 0))
+    (check-true (positive? fired-stalled))
+    (check-equal? stalled 0
+                  "a drain that ran out of time must not release the cache")
     (install-device-queries! #:capacity (lambda (_dev) #f)
                              #:allocated (lambda (_dev) #f))
     (settle!)))

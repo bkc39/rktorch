@@ -353,9 +353,9 @@ has allocated, because storage that only the autograd graph still holds is
 invisible to the ledger. On MPS it is the bytes the allocator has taken
 from the driver, its cache included, because on unified memory that cache
 is the machine's own memory. A collection frees tensors into the cache
-without moving that figure, so on MPS a backstop collection also empties
-the cache, at most once every five seconds, since the next steps then take
-their memory from the driver again. The mark is @racket[native-memory-fraction] of the device's
+without moving that figure, so on MPS a backstop collection whose drain
+finished also empties the cache, at most once every five seconds, since
+the next steps then take their memory from the driver again. The mark is @racket[native-memory-fraction] of the device's
 capacity, from @racket[cuda-memory-info] on CUDA and
 @racket[mps-memory-info] on MPS, or @racket[native-memory-limit] when set.
 A collection is never run within an eighth of the mark of the previous one,
