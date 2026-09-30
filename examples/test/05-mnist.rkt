@@ -10,9 +10,10 @@
          "../racket/05-mnist.rkt")
 
 (module+ main
+  (require (only-in "private/env.rkt" env-number))
   ;; The headline run: full MNIST (downloads + caches), ~98% on a GPU. Pass
   ;; EPOCHS to override. Use run-example for the quick offline smoke instead.
-  (define epochs (string->number (or (getenv "EPOCHS") "3")))
+  (define epochs (env-number "EPOCHS" 3))
   (printf "device: ~a\n" (pick-device))
   (for ([acc (in-list (train-mnist #:epochs epochs))]
         [epoch (in-naturals 1)])

@@ -7,8 +7,6 @@
          (only-in racket/file make-directory*)
          (only-in racket/math exact-round)
          (only-in racket/path normalize-path)
-         (only-in racket/port copy-port)
-         (only-in net/url call/input-url get-pure-port string->url)
          (only-in ffi/vector make-s32vector s32vector-ref)
          (only-in "../foreign/error.rkt" check-handle check-ok)
          (only-in "../foreign/raw/audio.rkt"
@@ -16,7 +14,8 @@
          (only-in "../foreign/structs.rkt" wrap-tensor)
          (only-in "../main.rkt" tensor tensor-shape tensor->list tensor?)
          (only-in "../private/contract.rkt" define/contract-out)
-         (only-in "../private/util.rkt" cache-dir with-temporary-file))
+         (only-in "../private/download.rkt" download-cached)
+         (only-in "../private/util.rkt" cache-dir))
 
 (define sample-rate/c
   (flat-named-contract 'sample-rate exact-positive-integer?))
@@ -254,20 +253,5 @@
   (when (link-exists? dest)
     (error 'download-audio-cached
            "cache name must stay inside the cache directory: ~e" name))
-  (unless (file-exists? dest)
-    (make-directory* parent)
-    (with-temporary-file (tmp #:template "audio-~a.part"
-                              #:directory (audio-cache-dir))
-      (call/input-url (string->url url)
-                      (lambda (u) (get-pure-port u '() #:redirections 3))
-                      (lambda (in)
-                        (call-with-output-file tmp #:exists 'truncate
-                          (lambda (out) (copy-port in out)))
-                        (unless (valid? tmp)
-                          (raise (exn:fail:network
-                                  (format
-                                   "download-audio-cached: fetched ~a failed validation; not caching (bad response from ~a?)"
-                                   name url)
-                                  (current-continuation-marks))))
-                        (rename-file-or-directory tmp dest #t)))))
-  dest)
+  (download-cached 'download-audio-cached (audio-cache-dir) name url
+                   #:valid? valid?))

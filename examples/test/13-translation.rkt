@@ -8,10 +8,10 @@
          "../racket/13-translation.rkt")
 
 (module+ main
+  (require (only-in "private/env.rkt" env-number))
   (printf "device: ~a\n" (pick-device))
   (define-values (net source-vocab target-vocab held-out)
-    (train-translator
-     #:epochs (string->number (or (getenv "EPOCHS") "30"))))
+    (train-translator #:epochs (env-number "EPOCHS" 30)))
   (printf "held-out token error rate over ~a pairs: ~a\n"
           (length held-out)
           (token-error-rate net source-vocab target-vocab held-out))

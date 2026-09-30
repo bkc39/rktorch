@@ -10,11 +10,7 @@
          "../racket/07-asr.rkt")
 
 (module+ main
-  (define (env-number name default)
-    (define v (getenv name))
-    (cond [(not v) default]
-          [(string->number v) => values]
-          [else (error '07-asr "~a is not a number: ~a" name v)]))
+  (require (only-in "private/env.rkt" env-number))
   (printf "device: ~a\n" (pick-device))
   (define-values (net vocab)
     (train-librispeech #:epochs (env-number "EPOCHS" 20)
@@ -114,7 +110,7 @@
   (check-exn #rx"no utterances to score"
              (lambda () (evaluate net vocab '())))
   ;; device RNG streams differ, so this arm checks convergence, never
-  ;; equality; on MPS it also crosses ctc-loss's CPU carve-out
+  ;; equality
   (define accel (pick-device))
   (unless (eq? (device-type accel) 'cpu)
     (define-values (a-losses a-net a-vocab _a-dev)
@@ -127,8 +123,7 @@
                 (format "~a losses did not decrease: ~a" accel a-losses))
     (check-true (string? (greedy-decode a-net a-vocab features)))
     (check-true (string? (transcribe a-net a-vocab features)))
-    ;; a multi-row batch must come back on the accelerator: ctc-loss's CPU
-    ;; carve-out is only correct if it does not strand the graph there
+    ;; a multi-row batch must come back on the accelerator
     (define a-mel (to-device mel accel))
     (define a-batch-loss
       (hybrid-batch-loss a-net a-vocab
