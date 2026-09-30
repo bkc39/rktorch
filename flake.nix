@@ -689,7 +689,11 @@
           # /run/opengl-driver/lib (a NixOS path absent on this Ubuntu host), so
           # we put just libcuda.so.1 / libnvidia-ml.so.1 on LD_LIBRARY_PATH —
           # only the driver libs, so nix's own libs (glibc, libstdc++) are not
-          # shadowed by the system copies. Run:
+          # shadowed by the system copies. libcuda dlopens its PTX JIT,
+          # libnvidia-ptxjitcompiler.so.1, whenever a kernel ships as PTX (some
+          # of cuFFT's do on sm_86), and nix's glibc never reads the host's
+          # ld.so.cache, so the JIT goes in the farm too; without it stft on
+          # CUDA fails with CUFFT_INTERNAL_ERROR (#180). Run:
           #   nix develop .#cuda --command raco test torch/tests/device-test.rkt
           # Driver farm only; `provisionRacketFor cpp-cuda` stages the shim and
           # points TORCHRKT_NATIVE_LIB_PATH at it.
@@ -697,7 +701,7 @@
             echo "Staging host NVIDIA driver farm..."
             _drv_farm="$PWD/.cuda-driver"
             rm -rf "$_drv_farm"; mkdir -p "$_drv_farm"
-            for _l in libcuda.so.1 libnvidia-ml.so.1; do
+            for _l in libcuda.so.1 libnvidia-ml.so.1 libnvidia-ptxjitcompiler.so.1; do
               # Match the lib name as a fixed string (its dots are ERE
               # metacharacters), then take the path field of that ldconfig line.
               _p=$(/sbin/ldconfig -p 2>/dev/null \
