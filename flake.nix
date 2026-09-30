@@ -165,6 +165,19 @@
             version = libtorchVersion;
             src = pkgs.fetchzip
               libtorchZips."${pkgs.stdenv.hostPlatform.system}-${device}";
+          } // pkgs.lib.optionalAttrs pkgs.stdenv.isDarwin {
+            # The darwin zip's libomp, libshm, libtorch and libtorch_cpu carry
+            # plain ad-hoc signatures (not linker-signed), which the
+            # derivation's own `install_name_tool -id` postFixup invalidates
+            # rather than re-signs. macOS 27 then SIGKILLs anything that loads
+            # them (26 tolerated it), so re-sign every dylib after that edit.
+            nativeBuildInputs = (old.nativeBuildInputs or [ ])
+              ++ [ pkgs.darwin.sigtool ];
+            postFixup = (old.postFixup or "") + ''
+              for lib in $out/lib/*.dylib; do
+                codesign -f -s - "$lib"
+              done
+            '';
           } // pkgs.lib.optionalAttrs cuda {
             # Drop the bundled dispatcher so autoPatchelf resolves
             # libcudnn.so.9 to cuDNN 9.24, whose own RUNPATH ($ORIGIN) finds
