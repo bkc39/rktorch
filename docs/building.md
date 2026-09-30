@@ -155,8 +155,10 @@ with a GPU.
 - `"bin"` (the default) uses the prebuilt `pkgs.libtorch-bin` derivation,
   pointed at PyTorch's libtorch 2.14.0 downloads (nixpkgs still ships 2.9.0):
   a small download and fast, cached CI. The CUDA build adds cuDNN 9.24, which
-  the cu130 download no longer bundles. Parity with Python torch is checked to
-  a float tolerance, because the C++ and Python builds may differ in version.
+  the cu130 download no longer bundles. On Linux the shells' Python torch is
+  PyTorch's own wheel of the same release, CPU or cu130, and the cu130 one
+  loads the same CUDA libraries and cuDNN as the Racket side. On macOS it is
+  still nixpkgs' torch. Parity is checked to a float tolerance either way.
 - `"python"` builds against the same libtorch the Python `torch` package ships,
   so seeded draws are bit-exact against PyTorch, at the cost of a much heavier
   build. It fails at evaluation while that torch is older than 2.14.0, the
