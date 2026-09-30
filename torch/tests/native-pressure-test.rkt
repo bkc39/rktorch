@@ -133,6 +133,16 @@
                   "a trough where the allocator says nothing must clear the charge")
     (check-equal? (length held) 4))
 
+  (test-case "reclaiming clears a charge the allocator no longer backs"
+    (settle!)
+    (parameterize ([allocator-reading (lambda (_dev) (+ (cpu-bytes) (* 256 mib)))]
+                   [native-collect-margin idle-margin])
+      (collect-at-trough!))
+    (check-true (positive? (cpu-unaccounted)))
+    (reclaim-native-memory!)
+    (check-equal? (cpu-unaccounted) 0
+                  "the charge outlived the reclamation that ended it"))
+
   (test-case "the charge never counts a ledger byte twice"
     (settle!)
     (define held (for/list ([_ (in-range 4)]) (zeros 1024 1024)))
