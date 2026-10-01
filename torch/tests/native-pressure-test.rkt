@@ -488,4 +488,25 @@
     (check-equal? (cpu-unaccounted) 0 "a release charged growth it observed")
     (install-device-queries! #:capacity (lambda (_dev) #f)
                              #:allocated (lambda (_dev) #f))
+    (settle!))
+
+  ;; the trough charged a cache that the next forward's tensors then reuse:
+  ;; the allocator's reading stays put while the ledger grows
+  (test-case "a sample lowers the shadow as tensors reuse the cache it charged"
+    (define reading 0)
+    (install-device-queries! #:capacity (lambda (_dev) #f)
+                             #:allocated (lambda (_dev) reading))
+    (settle!)
+    (set! reading (+ (cpu-bytes) (* 256 mib)))
+    (parameterize ([native-collect-margin idle-margin])
+      (collect-at-trough!))
+    (check-true (>= (cpu-unaccounted) (* 255 mib)) "the trough charged the cache")
+    (parameterize ([native-memory-limit (* 1024 mib)])
+      (define held (for/list ([_ (in-range 40)]) (zeros 1024 1024)))
+      (check-equal? (length held) 40)
+      (check-true (<= (cpu-unaccounted) (* 128 mib))
+                  (format "~a MiB is charged both as tensors and as cache"
+                          (quotient (cpu-unaccounted) mib))))
+    (install-device-queries! #:capacity (lambda (_dev) #f)
+                             #:allocated (lambda (_dev) #f))
     (settle!)))

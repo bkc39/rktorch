@@ -198,10 +198,13 @@ the last defence when a trough collection is not yet due:
   byte hysteresis: emptying is quick, but the blocks the next steps need
   then come from the driver again. A drain that ran out of time does
   not release, since finalizers still to run would refill the cache
-  behind the release and spend its spacing. A release also lowers the
-  shadow to the allocator's reading after it, since on MPS the shadow
-  counted that cache, but never raises it: mid-forward the reading
-  includes what the graph holds, which the shadow does not charge.
+  behind the release and spend its spacing.
+- Every allocator sample may lower the shadow, never raise it. On MPS
+  the trough charged the cache, and new tensors that reuse those blocks,
+  or a release that empties them, bring `driver-allocated` down relative
+  to the ledger; without the lowering those bytes would be charged twice
+  until the next trough. What the graph holds mid-forward raises the
+  reading, and is not charged.
 - `collect-and-wait!` must really drain. The canary shows the finalizer
   thread has started on the batch, not finished it: finalization order
   is unspecified, and that thread runs only while the main one yields,
@@ -255,7 +258,8 @@ the CPU, whose allocator keeps no count.
   and Racket would force a major early in the next forward.
   `reclaim-native-memory!` refreshes it too, once the caches are
   emptied, so memory a dropped graph held stops being charged at once.
-- It is not refreshed during a forward. At the backstop's samples, one
+- It is not raised during a forward; the backstop's samples may only
+  lower it (see the backstop above). Raised at those samples, one
   every 1/32 of the mark once its gate opens, it would track the graph as
   it grows and push Racket past its trigger at the peak. Measured on the
   #145 conv stack at batch 1024: 127 majors forced by Racket against 88
