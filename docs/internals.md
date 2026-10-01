@@ -165,8 +165,9 @@ the last defence when a trough collection is not yet due:
 - Each device has one `account` record: live bytes, bytes accounted
   since the last check and since the last allocator sample, that sample,
   the backstop's current interval, the cached capacity mark, the
-  trough floor, the shadow below with its byte count, and when the
-  backstop may next empty the device's cache. `account!` updates it
+  trough floor, the shadow below with its byte count, when the
+  backstop may next empty the device's cache, and the trial the last
+  release is on (below). `account!` updates it
   through `note-accounted!`, so a
   check is one table lookup and field reads. The counters are a `stats`
   record, the two next-collection times and the thread inside a
@@ -201,6 +202,21 @@ the last defence when a trough collection is not yet due:
   then come from the driver again. A drain that ran out of time does
   not release, since finalizers still to run would refill the cache
   behind the release and spend its spacing.
+- A release that brings the reading down is put on trial rather than
+  credited. Emptying the cache lowers `driver-allocated` however little
+  the collection freed, and when the mark sits below what a step needs at
+  once the next step takes those bytes straight back: 08-diffusion at
+  `native-memory-fraction` 1/2 on a 16 GB M2 Pro (#236) fired 188 times in
+  782 steps for no gain in time or swap, because each release reset the
+  interval. The trial ends at the first sample that finds the reading
+  under the mark after a further mark's worth of allocation, counted from
+  the bytes accounted between samples; that sample credits the release and
+  returns the interval to an eighth of the mark, which until then stays
+  where it was. A backstop collection before the credit means the
+  release's bytes came back, and the interval doubles as it would for a
+  collection that reclaimed little, whatever this one reclaimed and
+  whether or not the spacing held its own release back. A collection that
+  reclaims without a release, as on CUDA, is credited at once as before.
 - Every allocator sample may lower the shadow, never raise it. On MPS
   the trough charged the cache, and new tensors that reuse those blocks,
   or a release that empties them, bring `driver-allocated` down relative
@@ -231,11 +247,15 @@ the last defence when a trough collection is not yet due:
   backstop off. The fraction is applied at each check, not folded into
   the cache, so a program may change it mid-run; `native-memory-limit` overrides it for every
   device and is how the CPU tests exercise the path. No capacity and no
-  limit means the check is off.
+  limit means the check is off. Both parameters, with the trough's margin
+  and budget, live in `raw/pressure-settings.rkt`, which reads
+  `RKTORCH_MEMORY_FRACTION` and `RKTORCH_MEMORY_LIMIT` (MiB) once, at
+  instantiation, as their initial values, and raises a user error naming
+  the variable for a value that does not parse or is out of range.
 - Hysteresis: the interval starts at an eighth of the mark; a
   collection that reclaims under 5% of the mark doubles it (capped at
-  twice the mark), one that reclaims more resets it, and one whose
-  drain ran out of time leaves it alone. A stalled drain also leaves the
+  twice the mark), one that reclaims more resets it (a release only
+  after its trial), and one whose drain ran out of time leaves it alone. A stalled drain also leaves the
   bytes-since-check counters and the trough floors where they were: it
   measured nothing, so it earns no credit, and the next allocation looks
   again. Looking is cheap; the mark and the trough margin still guard the
