@@ -236,7 +236,8 @@
      (set-account-sample! a reading)
      (set-account-since-sample! a 0)
      (when (eq? (shadow-refresh) 'samples)
-       (set-shadow! a reading)))))
+       (set-shadow! a reading))))
+  reading)
 
 ;; --- the shadow: what the allocator holds that the ledger cannot see ---
 
@@ -253,6 +254,13 @@
   (define unaccounted (max 0 (- reading (account-live a))))
   (set-account-unaccounted! a unaccounted)
   (set-phantom-bytes! (account-shadow a) unaccounted))
+
+;; After a cache release the shadow may only come down: the released cache
+;; stops being charged, but what the graph holds mid-forward is not charged
+;; there either.
+(define (lower-shadow! a reading)
+  (when (< (max 0 (- reading (account-live a))) (account-unaccounted a))
+    (set-shadow! a reading)))
 
 (define (refresh-shadows!)
   (define charging? (shadow-refresh))
@@ -307,9 +315,10 @@
   (define-values (_observed drained?) (collect-and-wait!))
   ;; after a drain that ran out of time, finalizers still to run would
   ;; refill the cache behind the release and spend its spacing for nothing
-  (when drained?
-    (release-cache! dev))
-  (sample-allocator! dev)
+  (define released? (and drained? (release-cache! dev)))
+  (define reading (sample-allocator! dev))
+  (when released?
+    (call-with-ledger (lambda () (lower-shadow! (account-of dev) reading))))
   (define after (pressure-reading dev))
   (call-with-ledger
    (lambda ()
@@ -336,14 +345,15 @@
 ;; quick, but the blocks the next steps need then come from the driver again.
 (define (release-cache! dev)
   (define release (queries-release the-queries))
-  (when (and release
-             (>= (current-inexact-milliseconds)
-                 (call-with-ledger
-                  (lambda () (account-release-after (account-of dev)))))
-             (release dev))
-    (define next (+ (current-inexact-milliseconds) (release-spacing)))
-    (call-with-ledger
-     (lambda () (set-account-release-after! (account-of dev) next)))))
+  (and release
+       (>= (current-inexact-milliseconds)
+           (call-with-ledger
+            (lambda () (account-release-after (account-of dev)))))
+       (release dev)
+       (let ([next (+ (current-inexact-milliseconds) (release-spacing))])
+         (call-with-ledger
+          (lambda () (set-account-release-after! (account-of dev) next)))
+         #t)))
 
 ;; --- the troughs ---
 

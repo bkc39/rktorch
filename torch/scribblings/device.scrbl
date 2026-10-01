@@ -373,7 +373,7 @@ schedule learns of it. It is read only at a trough, because a charge that
 followed the graph through a forward pass would push Racket past its
 trigger at the peak, the moment a full collection does the most harm. It is
 read from the same figure as the backstop's, so on MPS the allocator's
-cache is charged too. The charge is zero on the CPU, whose allocator keeps
+cache is charged too, and a backstop release lowers the charge at once. The charge is zero on the CPU, whose allocator keeps
 no count, and @racket[native-memory-unaccounted] reports it.
 
 Every knob above is a parameter, so a training script can tune the whole

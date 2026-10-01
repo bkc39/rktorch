@@ -198,7 +198,10 @@ the last defence when a trough collection is not yet due:
   byte hysteresis: emptying is quick, but the blocks the next steps need
   then come from the driver again. A drain that ran out of time does
   not release, since finalizers still to run would refill the cache
-  behind the release and spend its spacing.
+  behind the release and spend its spacing. A release also lowers the
+  shadow to the allocator's reading after it, since on MPS the shadow
+  counted that cache, but never raises it: mid-forward the reading
+  includes what the graph holds, which the shadow does not charge.
 - `collect-and-wait!` must really drain. The canary shows the finalizer
   thread has started on the batch, not finished it: finalization order
   is unspecified, and that thread runs only while the main one yields,
