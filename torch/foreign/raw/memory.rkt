@@ -14,6 +14,7 @@
                   collect-under-pressure!
                   finalizer-runs
                   live-bytes-by-device
+                  lower-shadows!
                   note-accounted!
                   note-finalizer-run!
                   note-unaccounted!
@@ -230,6 +231,7 @@
   (define-values (observed _drained?) (collect-and-wait!))
   (void (tr-cuda-empty-cache/raw))
   (void (tr-mps-empty-cache/raw))
+  (lower-shadows!)
   observed)
 
 ;; one retry after a collect when a failed call was an OOM; the two

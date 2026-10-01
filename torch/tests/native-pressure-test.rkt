@@ -6,8 +6,10 @@
                     add backward! cpu-device finalizer-diagnostics matmul
                     native-collect-at-troughs native-memory-limit
                     native-memory-unaccounted native-memory-use
-                    reclaim-native-memory! sum with-no-grad zeros)
-           (only-in "../foreign/raw/memory.rkt" native-memory-use/fold)
+                    mps-empty-cache! reclaim-native-memory! sum with-no-grad
+                    zeros)
+           (only-in "../foreign/raw/memory.rkt"
+                    collect-and-drain! native-memory-use/fold)
            (only-in "../foreign/raw/pressure.rkt"
                     allocator-reading call-as-the-collector collect-at-trough!
                     drain-deadline install-device-queries! margin-over
@@ -530,4 +532,37 @@
                           (quotient (cpu-unaccounted) mib))))
     (install-device-queries! #:capacity (lambda (_dev) #f)
                              #:allocated (lambda (_dev) #f))
+    (settle!))
+
+  (test-case "a sample that cannot read the allocator leaves the charge"
+    (settle!)
+    (parameterize ([allocator-reading (lambda (_dev) (+ (cpu-bytes) (* 256 mib)))]
+                   [native-collect-margin idle-margin])
+      (collect-at-trough!))
+    (parameterize ([allocator-reading (lambda (_dev) #f)]
+                   [native-memory-limit (* 1024 mib)])
+      (define held (for/list ([_ (in-range 40)]) (zeros 1024 1024)))
+      (check-equal? (length held) 40))
+    (check-true (>= (cpu-unaccounted) (* 255 mib))
+                "a failed reading lowered the charge as if it were zero")
+    (settle!))
+
+  ;; on this host emptying is a no-op, so the stand-in's cache is zeroed by
+  ;; hand just before, as a real release would
+  (test-case "emptying the cache by hand or for an OOM retry lowers the charge"
+    (define cache 0)
+    (define (charge-cache!)
+      (settle!)
+      (set! cache (* 256 mib))
+      (parameterize ([native-collect-margin idle-margin])
+        (collect-at-trough!))
+      (check-true (>= (cpu-unaccounted) (* 255 mib)) "the trough charged the cache")
+      (set! cache 0))
+    (parameterize ([allocator-reading (lambda (_dev) (+ (cpu-bytes) cache))])
+      (charge-cache!)
+      (mps-empty-cache!)
+      (check-equal? (cpu-unaccounted) 0 "mps-empty-cache! left the cache charged")
+      (charge-cache!)
+      (collect-and-drain!)
+      (check-equal? (cpu-unaccounted) 0 "the OOM retry's drain left the cache charged"))
     (settle!)))

@@ -14,6 +14,7 @@
          unaccounted-bytes-by-device
          shadow-refresh
          refresh-shadows!
+         lower-shadows!
          release-spacing
          install-device-queries!
          collect-under-pressure!
@@ -229,15 +230,17 @@
      (and query (query dev)))))
 
 (define (sample-allocator! dev)
-  (define reading (or ((allocator-reading) dev) 0))
+  (define known ((allocator-reading) dev))
+  (define reading (or known 0))
   (call-with-ledger
    (lambda ()
      (define a (account-of dev))
      (set-account-sample! a reading)
      (set-account-since-sample! a 0)
-     (if (eq? (shadow-refresh) 'samples)
-         (set-shadow! a reading)
-         (lower-shadow! a reading)))))
+     (when known
+       (if (eq? (shadow-refresh) 'samples)
+           (set-shadow! a reading)
+           (lower-shadow! a reading))))))
 
 ;; --- the shadow: what the allocator holds that the ledger cannot see ---
 
@@ -263,6 +266,13 @@
 (define (lower-shadow! a reading)
   (when (< (max 0 (- reading (account-live a))) (account-unaccounted a))
     (set-shadow! a reading)))
+
+;; for a cache emptied outside the backstop: the OOM retry, or by hand
+(define (lower-shadows!)
+  (for ([dev (in-list (call-with-ledger (lambda () (hash-keys accounts))))])
+    (define reading ((allocator-reading) dev))
+    (when reading
+      (call-with-ledger (lambda () (lower-shadow! (account-of dev) reading))))))
 
 ;; An allocator that cannot answer right now leaves its device's charge as
 ;; it was; with charging off every charge goes to zero.
@@ -449,7 +459,8 @@
        (define young-drained? (and young? (collect-young-at-trough! budget)))
        (define old-drained? (collect-old-at-trough! budget))
        ;; what that collection freed may include storage only a dropped
-       ;; graph held; the charge moves with it rather than adding to it
+       ;; graph held, and on MPS it moves finalized tensors into the cache;
+       ;; either way the charge moves with it rather than adding to it
        (when (or young-drained? old-drained?)
          (refresh-shadows!))))))
 

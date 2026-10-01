@@ -204,7 +204,13 @@ the last defence when a trough collection is not yet due:
   or a release that empties them, bring `driver-allocated` down relative
   to the ledger; without the lowering those bytes would be charged twice
   until the next trough. What the graph holds mid-forward raises the
-  reading, and is not charged.
+  reading, and is not charged. A cache emptied outside the backstop, by
+  `mps-empty-cache!` or the OOM retry's `collect-and-drain!`, is followed
+  by the same lowering, and a sample whose allocator cannot answer leaves
+  the shadow alone. Tensors that a finished collection moves into the
+  cache are charged again by the trough's refresh after its collection;
+  a backstop collection, mid-forward, does not raise the charge for them,
+  and the backstop itself still reads `driver-allocated` in full.
 - `collect-and-wait!` must really drain. The canary shows the finalizer
   thread has started on the batch, not finished it: finalization order
   is unspecified, and that thread runs only while the main one yields,
