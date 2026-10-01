@@ -198,14 +198,21 @@ def branch_chain(pr, owner, default, find):
 
 
 def stack_layers(repo, pr, default):
-    try:
-        return (native_stack(repo, pr["number"])
-                or branch_chain(pr, repo.split("/")[0], default,
-                                lambda **query: pulls(repo, **query)))
-    except (subprocess.CalledProcessError, KeyError, TypeError,
-            ValueError) as e:
-        print(f"::warning::no stack in the review context: {e}")
-        return []
+    lookups = [
+        ("native stack", lambda: native_stack(repo, pr["number"])),
+        ("branch chain", lambda: branch_chain(
+            pr, repo.split("/")[0], default,
+            lambda **query: pulls(repo, **query)))]
+    for source, lookup in lookups:
+        try:
+            layers = lookup()
+        except (subprocess.CalledProcessError, KeyError, TypeError,
+                ValueError) as e:
+            print(f"::warning::{source} lookup failed: {e}")
+            continue
+        if layers:
+            return source, layers
+    return "no stack", []
 
 
 def stack_markdown(layers, number, base):
@@ -301,7 +308,7 @@ def main():
                 f.write(patch)
         else:
             mode = "none"
-    layers = stack_layers(repo, pr, default)
+    source, layers = stack_layers(repo, pr, default)
     with open(os.path.join(out_dir, "threads.md"), "w") as f:
         f.write(threads_markdown(threads(repo, number)))
     full = (f"Full review: since the last review this pull request moved off "
@@ -327,15 +334,16 @@ def main():
                 + stack_markdown(layers, number, base)
                 + "`threads.md` lists every earlier review thread on this "
                 "pull request with its replies.\n")
-    with open(PROMPT) as f:
-        prompt = f"Review pull request #{number} in {repo}.\n\n{f.read()}"
+    prompt = (f"Review pull request #{number} in {repo}.\n\n"
+              + run("git", "show", f"origin/{default}:{PROMPT}"))
     delimiter = f"PROMPT_{secrets.token_hex(16)}"
     with open(env["GITHUB_OUTPUT"], "a") as f:
         f.write(f"mode={mode}\nrecord={RECORD.format(pr=number)}\n"
                 f"prompt<<{delimiter}\n{prompt}\n{delimiter}\n")
     stack = " ".join(f"#{entry['number']}" for entry in layers)
     print(f"review mode: {mode} (last reviewed head: {before[:7] or 'none'}; "
-          f"base: {base}, event base: {env['BASE_REF']}; stack: {stack})")
+          f"head: {env['HEAD_REF']}, base: {base}, event base: "
+          f"{env['BASE_REF']}; {source}: {stack})")
 
 
 if __name__ == "__main__":

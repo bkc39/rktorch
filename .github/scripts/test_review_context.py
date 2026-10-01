@@ -176,8 +176,20 @@ class Stack(unittest.TestCase):
         out = io.StringIO()
         with mock.patch.object(rc, "run", side_effect=failure), \
                 contextlib.redirect_stdout(out):
-            self.assertEqual(rc.stack_layers("o/r", self.prs[1], "master"), [])
-        self.assertIn("no stack in the review context", out.getvalue())
+            self.assertEqual(rc.stack_layers("o/r", self.prs[1], "master"),
+                             ("no stack", []))
+        self.assertIn("native stack lookup failed", out.getvalue())
+        self.assertIn("branch chain lookup failed", out.getvalue())
+
+    def test_a_failed_native_lookup_falls_back_to_the_branch_chain(self):
+        failure = subprocess.CalledProcessError(1, "gh")
+        with mock.patch.object(rc, "native_stack", side_effect=failure), \
+                mock.patch.object(rc, "pulls",
+                                  lambda repo, **query: self.find(**query)), \
+                contextlib.redirect_stdout(io.StringIO()):
+            source, layers = rc.stack_layers("o/r", self.prs[1], "master")
+        self.assertEqual(source, "branch chain")
+        self.assertEqual([e["number"] for e in layers], [1, 2, 3])
 
 
 def fake_gh(artifacts=(), retargets=(), merged=()):
