@@ -261,10 +261,18 @@ the CPU, whose allocator keeps no count.
   full collection that follows sets Racket's
   next trigger with the shadow already inside it. Raised after that
   collection instead, it would sit above a trigger computed without it,
-  and Racket would force a major early in the next forward. A collection
-  that drained is followed by a second refresh: it may have freed storage
-  only a dropped graph held, and what that refresh changes is a charge the
-  collection's own trigger already counted, moved rather than added.
+  and Racket would force a major early in the next forward. When the last
+  stage the trough ran drained, a second refresh follows: that collection
+  may have freed storage only a dropped graph held, and what the refresh
+  changes is a charge the collection's own trigger already counted, moved
+  rather than added. A stage whose drain ran out of time gets no second
+  refresh, since finalizers still to run would be read as held storage;
+  what the refresh frees counts toward `pressure-reclaimed`.
+- A gradient is storage the backward pass wrote before any handle pointed
+  at it, so the trough's refresh can already charge it. `grad` wraps it
+  through `tensor-allocator/adopted`, which takes the bytes it puts on
+  the ledger off the shadow, so wrapping it moves the charge instead of
+  doubling it.
   `reclaim-native-memory!` refreshes it too, once the caches are
   emptied, so memory a dropped graph held stops being charged at once.
   An allocator that cannot answer at a refresh leaves its device's charge

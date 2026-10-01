@@ -7,6 +7,7 @@
 (provide call-with-ledger
          call-as-the-collector
          note-accounted!
+         note-adopted!
          note-unaccounted!
          note-finalizer-run!
          finalizer-runs
@@ -253,10 +254,18 @@
 ;; forward means tracking the graph as it grows; #f charges nothing.
 (define shadow-refresh (make-parameter 'troughs))
 
+(define (charge-shadow! a bytes)
+  (set-account-unaccounted! a bytes)
+  (set-phantom-bytes! (account-shadow a) bytes))
+
 (define (set-shadow! a reading)
-  (define unaccounted (max 0 (- reading (account-live a))))
-  (set-account-unaccounted! a unaccounted)
-  (set-phantom-bytes! (account-shadow a) unaccounted))
+  (charge-shadow! a (max 0 (- reading (account-live a)))))
+
+;; A handle onto storage that existed before it, a gradient the backward
+;; pass wrote, joins the ledger with bytes the shadow may already charge.
+(define (note-adopted! dev nbytes)
+  (define a (account-of dev))
+  (charge-shadow! a (max 0 (- (account-unaccounted a) nbytes))))
 
 ;; Between troughs a sample may only lower the shadow. On MPS the trough
 ;; charged the allocator's cache, and new tensors that reuse it, or a release
@@ -423,7 +432,7 @@
         (bump! the-stats)
         (note-reclaimed! (- before after))))
      drained?]
-    [else #f]))
+    [else 'skipped]))
 
 (define (collect-young-at-trough! budget)
   (trough-stage! schedule-next-minor-ms
@@ -456,13 +465,22 @@
       (if young? (/ (native-collect-budget) 2) (native-collect-budget)))
     (call-as-the-collector
      (lambda ()
-       (define young-drained? (and young? (collect-young-at-trough! budget)))
-       (define old-drained? (collect-old-at-trough! budget))
-       ;; what that collection freed may include storage only a dropped
-       ;; graph held, and on MPS it moves finalized tensors into the cache;
-       ;; either way the charge moves with it rather than adding to it
-       (when (or young-drained? old-drained?)
-         (refresh-shadows!))))))
+       (define young (if young? (collect-young-at-trough! budget) 'skipped))
+       (define old (collect-old-at-trough! budget))
+       ;; what the last stage that ran freed may include storage only a
+       ;; dropped graph held, and on MPS it moves finalized tensors into the
+       ;; cache; the charge moves with it rather than adding to it, and only
+       ;; a finished drain shows what was freed
+       (when (eq? #t (if (eq? old 'skipped) young old))
+         (define before (unaccounted-total))
+         (refresh-shadows!)
+         (call-with-ledger
+          (lambda () (note-reclaimed! (- before (unaccounted-total))))))))))
+
+(define (unaccounted-total)
+  (call-with-ledger
+   (lambda ()
+     (for/sum ([a (in-hash-values accounts)]) (account-unaccounted a)))))
 
 ;; --- a collection that has really finished ---
 

@@ -16,6 +16,7 @@
                   live-bytes-by-device
                   lower-shadows!
                   note-accounted!
+                  note-adopted!
                   note-finalizer-run!
                   note-unaccounted!
                   pressure-diagnostics
@@ -29,6 +30,7 @@
          finalizer-failures
          finalizer-diagnostics
          tensor-allocator
+         tensor-allocator/adopted
          tensor-allocator/no-retry
          tensor-allocator/outputs
          tensor-allocator/outputs/no-retry
@@ -254,11 +256,17 @@
                           #:collect! [collect! collect-and-drain!])
   (retry-on-oom (lambda (rc) (= rc 1)) oom? collect!))
 
-(define ((accounted wrapped) . args)
+(define (((accounted adopted?) wrapped) . args)
   (define t (apply wrapped args))
   (when t
     (define dev (account! t))
     (when dev
+      (when adopted?
+        (call-with-ledger
+         (lambda ()
+           (define entry (hash-ref allocations t #f))
+           (when entry
+             (note-adopted! dev (allocation-nbytes entry))))))
       (collect-under-pressure! dev)))
   t)
 
@@ -266,13 +274,18 @@
 ;; the wrapped call in atomic mode, where the drain's blocking wait is an
 ;; internal error.
 (define (tensor-allocator raw-fn)
-  (accounted ((oom-retry) ((allocator tr-tensor-free/finalizer) raw-fn))))
+  ((accounted #f) ((oom-retry) ((allocator tr-tensor-free/finalizer) raw-fn))))
+
+;; For a handle onto storage that already existed natively, such as a
+;; gradient: the shadow may already charge its bytes.
+(define (tensor-allocator/adopted raw-fn)
+  ((accounted #t) ((oom-retry) ((allocator tr-tensor-free/finalizer) raw-fn))))
 
 ;; No retry: re-running these after an OOM would repeat something the
 ;; first call already did — a draw from the global RNG stream, or an
 ;; in-place update of a tensor the caller handed in.
 (define (tensor-allocator/no-retry raw-fn)
-  (accounted ((allocator tr-tensor-free/finalizer) raw-fn)))
+  ((accounted #f) ((allocator tr-tensor-free/finalizer) raw-fn)))
 
 (define adopt-handle ((allocator tr-tensor-free/finalizer) values))
 

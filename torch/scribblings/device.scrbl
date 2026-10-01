@@ -7,7 +7,7 @@
                               accelerator-if-available arange autocast-dtype
                               autocast-enabled? backward! bytes->tensor
                               call-with-autocast cpu-device cuda-if-available
-                              default-device detach device-type
+                              default-device detach device-type grad
                               set-default-device!
                               cuda-allocator-settings!
                               cuda-device cuda-memory-info cuda-memory-stats
@@ -369,7 +369,10 @@ trough, before collecting, it reads each device's allocator and charges the
 bytes allocated there beyond the ledger's own total as one more phantom
 charge for that device, and reads again after a collection that finished,
 which may have freed storage only a dropped graph held. A device whose
-allocator cannot answer at that moment keeps its previous charge. Storage that only the autograd graph or libtorch
+allocator cannot answer at that moment keeps its previous charge. A
+gradient is storage the backward pass wrote before any tensor pointed at
+it, so taking it with @racket[grad] moves its bytes from this charge to the
+ledger rather than charging them twice. Storage that only the autograd graph or libtorch
 itself holds reaches no tensor, so this is the only way the collector's own
 schedule learns of it. It is read only at a trough, because a charge that
 followed the graph through a forward pass would push Racket past its
@@ -513,7 +516,9 @@ failure messages, the number of ledger entries, and the collections the
 ledger has made: @racket['trough-collections] and @racket['trough-minors],
 the full and minor collections at a trough, @racket['pressure-collections]
 from the high-water backstop, and under @racket['pressure-reclaimed] the
-bytes all of them released.
+bytes all of them released, including allocator bytes a trough's collection
+freed that only the charge @racket[native-memory-unaccounted] reports had
+covered.
 
 @racket['trough-floor] is the baseline residue at a trough is measured
 against, summed over the devices; @racket[native-collect-margin] is the
