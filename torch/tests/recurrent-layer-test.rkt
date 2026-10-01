@@ -75,9 +75,9 @@
     (check-exn #rx"LSTM: contract violation.*rank-3 tensor"
                (lambda () (lstm '(1 2 3))))
     (check-exn exn:fail:contract:arity?
-               (lambda () (forward (GRU 3 4))))
+               (lambda () ((GRU 3 4))))
     (check-exn #rx"LSTM"
-               (lambda () (forward (LSTM 3 4))))
+               (lambda () ((LSTM 3 4))))
     (check-exn #rx"GRU: contract violation.*rank-3 tensor"
                (lambda () ((GRU 3 4) (randn 5 2 3) (zeros 2 4)))))
 

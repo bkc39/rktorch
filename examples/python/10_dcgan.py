@@ -30,9 +30,10 @@ def load_fixture():
 class Generator(nn.Module):
     def __init__(self, latent=100):
         super().__init__()
-        self.fc = nn.Linear(latent, 128 * 7 * 7)
+        self.fc = nn.Linear(latent, 128 * 7 * 7, bias=False)
         self.bn0 = nn.BatchNorm1d(128 * 7 * 7)
-        self.up1 = nn.ConvTranspose2d(128, 64, 4, stride=2, padding=1)
+        self.up1 = nn.ConvTranspose2d(128, 64, 4, stride=2, padding=1,
+                                      bias=False)
         self.bn1 = nn.BatchNorm2d(64)
         self.up2 = nn.ConvTranspose2d(64, 1, 4, stride=2, padding=1)
 
@@ -46,7 +47,7 @@ class Discriminator(nn.Module):
     def __init__(self):
         super().__init__()
         self.conv1 = nn.Conv2d(1, 64, 4, stride=2, padding=1)
-        self.conv2 = nn.Conv2d(64, 128, 4, stride=2, padding=1)
+        self.conv2 = nn.Conv2d(64, 128, 4, stride=2, padding=1, bias=False)
         self.bn = nn.BatchNorm2d(128)
         self.fc = nn.Linear(128 * 7 * 7, 1)
 

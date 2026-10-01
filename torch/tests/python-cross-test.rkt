@@ -650,9 +650,9 @@
        ;; and the parameters are the generator's then the discriminator's
        (define-layer gen-twin (fc bn0 up1 bn1 up2)
          #:init ()
-         (set! fc (Linear 100 (* 128 7 7)))
+         (set! fc (Linear 100 (* 128 7 7) #:bias? #f))
          (set! bn0 (BatchNorm1d (* 128 7 7)))
-         (set! up1 (ConvTranspose2d 128 64 4 #:stride 2 #:padding 1))
+         (set! up1 (ConvTranspose2d 128 64 4 #:stride 2 #:padding 1 #:bias? #f))
          (set! bn1 (BatchNorm2d 64))
          (set! up2 (ConvTranspose2d 64 1 4 #:stride 2 #:padding 1))
          #:forward (z)
@@ -660,7 +660,7 @@
        (define-layer disc-twin (conv1 conv2 bn fc)
          #:init ()
          (set! conv1 (Conv2d 1 64 4 #:stride 2 #:padding 1))
-         (set! conv2 (Conv2d 64 128 4 #:stride 2 #:padding 1))
+         (set! conv2 (Conv2d 64 128 4 #:stride 2 #:padding 1 #:bias? #f))
          (set! bn (BatchNorm2d 128))
          (set! fc (Linear (* 128 7 7) 1))
          #:forward (x)
@@ -702,8 +702,7 @@
                    (cat (for/list ([p (in-list (append (parameters gen)
                                                        (parameters disc)))])
                           (reshape p -1))))))
-       ;; batch norm in both networks: a few dozen of the 1.3M parameters
-       ;; land just past tol after three alternating steps, as for 09_resnet
+       ;; batch norm in both networks, so the 5e-4 tol of 09_resnet
        (check-training-twin "10_dcgan" "python/10_dcgan.py" train-on 'cpu 5e-4)
        (when (and (cuda-available?)
                   (python-cuda-available?))

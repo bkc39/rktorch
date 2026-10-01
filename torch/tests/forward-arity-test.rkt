@@ -4,8 +4,7 @@
   (require (only-in racket/contract/base flat-named-contract)
            (only-in rackunit check-equal? check-exn test-case)
            (only-in "../main.rkt" ones tensor-shape)
-           (only-in "../nn.rkt" Linear Sequential define-layer forward
-                    layer-forward))
+           (only-in "../nn.rkt" Linear Sequential define-layer))
 
   (define-layer Pair ()
     #:forward (x y)
@@ -25,9 +24,7 @@
                (lambda () (seq x x)))
     (check-exn exn:fail:contract:arity? (lambda () (seq x x)))
     (check-exn #rx"^Sequential: arity mismatch.*expected: 1.*given: 0"
-               (lambda () (forward seq)))
-    (check-exn #rx"^Sequential: arity mismatch.*given: 2"
-               (lambda () (layer-forward seq x x)))
+               (lambda () (seq)))
     (define p (Pair))
     (check-exn #rx"^Pair: arity mismatch.*expected: 2.*given: 1"
                (lambda () (p x)))

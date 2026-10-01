@@ -68,7 +68,9 @@ with `backward!` outside the form as PyTorch recommends). From
   in-place tensor primitive behind it; `device/c` and `dtype/c` are
   exported for user contracts
 - memory: `native-memory-use` (per-device outstanding native bytes from
-  the #37 ledger), `cuda-memory-stats` / `cuda-empty-cache!` /
+  the #37 ledger), `native-memory-unaccounted` (per device, the
+  allocator's bytes past the ledger's as of the last trough, charged to
+  the collector as the shadow, #213), `cuda-memory-stats` / `cuda-empty-cache!` /
   `mps-empty-cache!` (the caching allocators' own gauges + release, #51),
   `reclaim-native-memory!` (collect -> finalizer drain -> cache release,
   the phase-boundary release-now sequence), `finalizer-failures`
@@ -189,7 +191,7 @@ with `backward!` outside the form as PyTorch recommends). From
   `stb` found by pkg-config like libsndfile and compiled once in
   `src/torchrkt/detail/stb_image.c`; PNGs match
   torchvision.io exactly, JPEGs within a count or two
-  (`image-parity-test.rkt`, torchvision only in the default shell)
+  (`image-parity-test.rkt`, against torchvision in both shells)
 - generative examples on MNIST (#152): `examples/racket/10-dcgan.rkt` (a
   DCGAN shrunk to 28x28, `ConvTranspose2d` and `BatchNorm2d` in the
   generator, `leaky-relu` in the discriminator, two `adam`s at 2e-4 with
@@ -243,7 +245,7 @@ provided as plain renames (no contract overhead on the numeric fast path),
 per `foreign/operators.rkt`.
 
 From `torch/nn`: `define-layer procedure->Layer gen:layer layer? Parameter Buffer LayerList LayerHash parameters
-named-parameters in-named-parameters buffers children forward Linear Conv2d MaxPool2d Flatten Dropout
+named-parameters in-named-parameters buffers children Linear Conv2d MaxPool2d Flatten Dropout
 Sequential Embedding LayerNorm ConvTranspose2d GroupNorm BatchNorm2d BatchNorm1d
 LSTM GRU sgd adam rmsprop step! zero-grads! clip-grad-norm! learning-rate
 set-learning-rate! step-lr multi-step-lr exponential-lr cosine-annealing-lr
@@ -264,7 +266,10 @@ fields with `set!`, a field's value classifies it at construction
 (`Parameter?`, `Buffer?`, `layer?`, `#f` for absent, anything else plain),
 `(with-mode body)` binds `mode` (`'train` or `'eval`, predicates `training?`/`evaluating?`) in `#:forward` to the instance's own mode (`train!`/`eval!` set it and recurse; every layer starts in `'train`),
 models are plain struct trees owned by the GC (no global parameter store),
-and `prop:procedure` makes `(net x)` work like `__call__`. `LSTM` and `GRU` (`nn/recurrent.rkt`, #153) are
+and a layer is called by applying it, `(net x)`, the analog of `__call__`:
+`gen:layer` derives `prop:procedure`, so every layer, hand-written ones
+included, is applicable, and there is no separate `forward` or callable
+`layer-forward` (#235). `LSTM` and `GRU` (`nn/recurrent.rkt`, #153) are
 `define-layer` forms whose parameter set depends on `#:num-layers` and
 `#:bidirectional?`: `parameters-by-key` registers them under PyTorch's own
 names (`weight_ih_l0` .. `bias_hh_l1_reverse`) the way `children-by-key`
@@ -299,9 +304,12 @@ broader ATen surface, and the portable raco-catalog candidate story.
 - **`bin`** (default) — `pkgs.libtorch-bin`, pointed at PyTorch's libtorch
   2.14.0 downloads (nixpkgs still ships 2.9.0); the CUDA build adds cuDNN 9.24,
   which the cu130 download no longer bundles. Small prebuilt download, fast
-  cached CI on `aarch64-darwin` + `x86_64-linux`. Parity with Python torch is
-  *tolerant* (the cross-test uses a float tolerance), because the C++ side may
-  be a different version than the Python torch.
+  cached CI on `aarch64-darwin` + `x86_64-linux`. On `x86_64-linux` the shells'
+  Python torch is PyTorch's own wheel of the same release
+  (`nix/torch-wheels.nix`): the CPU wheel in `nix develop`, and in `.#cuda` the
+  cu130 wheel linked against the CUDA libraries and cuDNN the shim loads. Darwin
+  still gets nixpkgs' torch. The cross-test compares to a float tolerance either
+  way.
 - **`python`** — `pkgs.python314Packages.torch`. Builds against the *same*
   libtorch the parity script imports, so seeded `randn` is **bit-exact** — at
   the cost of a heavy (often uncached on darwin) from-source build. It fails at

@@ -1,25 +1,30 @@
 #lang racket/base
 
-(require (only-in ffi/unsafe register-finalizer)
-         (only-in ffi/unsafe/atomic call-as-atomic in-atomic-mode?)
-         (only-in "../device-type.rkt" device-type))
+(require (only-in ffi/unsafe/atomic call-as-atomic in-atomic-mode?)
+         (only-in "../device-type.rkt" device-type)
+         (only-in "collector.rkt"
+                  call-as-the-collector collect-and-wait! drain-finalizers!))
 
 (provide call-with-ledger
-         call-as-the-collector
          note-accounted!
+         note-adopted!
+         note-unadopted!
+         shadow-generation
          note-unaccounted!
-         note-finalizer-run!
-         finalizer-runs
          live-bytes-by-device
+         unaccounted-bytes-by-device
+         shadow-refresh
+         refresh-shadows!
+         lower-shadows!
+         release-spacing
          install-device-queries!
          collect-under-pressure!
          collect-at-trough!
-         collect-and-wait!
          margin-over
          pressure-diagnostics
          reset-pressure-state!
          allocator-reading
-         drain-deadline
+         native-collect-at-troughs
          native-collect-budget
          native-collect-margin
          native-memory-fraction
@@ -32,25 +37,27 @@
 
 ;; One per device: what the ledger holds there and what the two triggers
 ;; remember about it. `capacity` is 'unknown until queried, then bytes, #f for
-;; a device that has none, or (retry-at . ms) after a failed query.
+;; a device that has none, or (retry-at . ms) after a failed query. `shadow`
+;; charges the collector, as phantom bytes, for the `unaccounted` bytes the
+;; allocator holds beyond the ledger, and is adjusted, never replaced.
+;; `release-after` is when the backstop may next empty the device's cache.
 (struct account
-  (live since-check since-sample sample interval capacity floor)
+  ([live #:mutable] [since-check #:mutable] [since-sample #:mutable]
+   [sample #:mutable] [interval #:mutable] [capacity #:mutable]
+   [floor #:mutable] shadow [unaccounted #:mutable] [release-after #:mutable]))
+
+(struct stats (backstop-collections reclaimed trough-collections trough-minors)
   #:mutable)
 
-(struct stats
-  (finalizer-runs backstop-collections reclaimed trough-collections
-   trough-minors)
-  #:mutable)
+;; when each trough stage may next run
+(struct schedule (next-full-ms next-minor-ms) #:mutable)
 
-;; when each trough stage may next run, and the thread inside a collection
-(struct schedule (next-full-ms next-minor-ms holder) #:mutable)
-
-(struct queries (capacity allocated) #:mutable)
+(struct queries (capacity allocated release) #:mutable)
 
 (define accounts (make-hash))
-(define the-stats (stats 0 0 0 0 0))
-(define the-schedule (schedule 0.0 0.0 #f))
-(define the-queries (queries #f #f))
+(define the-stats (stats 0 0 0 0))
+(define the-schedule (schedule 0.0 0.0))
+(define the-queries (queries #f #f #f))
 
 (define native-memory-limit (make-parameter #f))
 (define native-memory-fraction (make-parameter 4/5))
@@ -58,6 +65,8 @@
 (define sample-divisor 32)
 (define reclaim-fraction 1/20)
 (define capacity-retry-ms 1000.0)
+
+(define release-spacing (make-parameter 5000.0))
 
 ;; #f: the floor itself, kept between the two bounds below
 (define native-collect-margin (make-parameter #f))
@@ -67,10 +76,15 @@
 ;; the share of wall-clock time trough collections may take
 (define native-collect-budget (make-parameter 1/20))
 
+;; whether backward! and an outermost no-grad layer call collect at all
+(define native-collect-at-troughs (make-parameter #t))
+
 ;; --- the accounts, all inside the atomic section ---
 
 (define (account-of dev)
-  (hash-ref! accounts dev (lambda () (account 0 0 0 0 #f 'unknown 0))))
+  (hash-ref! accounts dev
+             (lambda ()
+               (account 0 0 0 0 #f 'unknown 0 (make-phantom-bytes 0) 0 0.0))))
 
 (define (note-accounted! dev nbytes)
   (define a (account-of dev))
@@ -101,6 +115,12 @@
      (for/list ([(dev a) (in-hash accounts)])
        (cons dev (account-live a))))))
 
+(define (unaccounted-bytes-by-device)
+  (call-with-ledger
+   (lambda ()
+     (for/list ([(dev a) (in-hash accounts)])
+       (cons dev (account-unaccounted a))))))
+
 (define (ledger-total)
   (call-with-ledger
    (lambda ()
@@ -116,12 +136,6 @@
   (call-with-ledger (lambda () (account-reading (account-of dev)))))
 
 ;; --- statistics ---
-
-(define (note-finalizer-run!)
-  (set-stats-finalizer-runs! the-stats (add1 (stats-finalizer-runs the-stats))))
-
-(define (finalizer-runs)
-  (stats-finalizer-runs the-stats))
 
 (define (note-reclaimed! bytes)
   (set-stats-reclaimed! the-stats (+ (stats-reclaimed the-stats) (max 0 bytes))))
@@ -143,7 +157,10 @@
        (set-account-sample! a 0)
        (set-account-interval! a #f)
        (set-account-capacity! a 'unknown)
-       (set-account-floor! a 0))
+       (set-account-floor! a 0)
+       (set-shadow! a 0)
+       (set-account-release-after! a 0.0))
+     (next-shadow-generation!)
      (set-schedule-next-full-ms! the-schedule 0.0)
      (set-schedule-next-minor-ms! the-schedule 0.0))))
 
@@ -151,10 +168,15 @@
 
 ;; raw/device.rkt owns the device bindings and requires the ledger, so it
 ;; hands these over at instantiation instead of being required from here.
-;; Each takes a device and answers in bytes, or #f where it cannot say.
-(define (install-device-queries! #:capacity capacity #:allocated allocated)
+;; Each takes a device and answers in bytes, or #f where it cannot say;
+;; `release` empties the device's allocator cache and answers whether it had
+;; one to empty.
+(define (install-device-queries! #:capacity capacity
+                                 #:allocated allocated
+                                 #:release [release #f])
   (set-queries-capacity! the-queries capacity)
-  (set-queries-allocated! the-queries allocated))
+  (set-queries-allocated! the-queries allocated)
+  (set-queries-release! the-queries release))
 
 (define (queried-capacity dev)
   (define query (queries-capacity the-queries))
@@ -198,32 +220,91 @@
      (define query (queries-allocated the-queries))
      (and query (query dev)))))
 
+(define (live-of dev)
+  (call-with-ledger (lambda () (account-live (account-of dev)))))
+
 (define (sample-allocator! dev)
-  (define reading (or ((allocator-reading) dev) 0))
+  (define live (live-of dev))
+  (define known ((allocator-reading) dev))
+  (define reading (or known 0))
   (call-with-ledger
    (lambda ()
      (define a (account-of dev))
      (set-account-sample! a reading)
-     (set-account-since-sample! a 0))))
+     (set-account-since-sample! a 0)
+     (when known
+       (if (eq? (shadow-refresh) 'samples)
+           (set-shadow! a reading)
+           (lower-shadow! a reading live))))))
 
-;; --- one collection at a time ---
+;; --- the shadow: what the allocator holds that the ledger cannot see ---
 
-;; A second thread that finds a trigger due while the first is inside its
-;; collection skips instead of collecting again. The claim names its thread,
-;; because kill-thread runs no dynamic-wind exit: a claimant that has died
-;; holds nothing.
-(define (call-as-the-collector thunk)
-  (define claimed?
-    (call-with-ledger
-     (lambda ()
-       (define holder (schedule-holder the-schedule))
-       (and (or (not holder) (thread-dead? holder))
-            (set-schedule-holder! the-schedule (current-thread))
-            #t))))
-  (when claimed?
-    (dynamic-wind void
-                  thunk
-                  (lambda () (set-schedule-holder! the-schedule #f)))))
+;; Storage only the autograd graph or libtorch itself holds reaches no
+;; wrapper, so the ledger never charges it; the allocator's figure less the
+;; ledger's is that remainder, and never counts a ledger byte twice. 'troughs
+;; refreshes it only at a trough, before its collection, so the collection
+;; that follows sets Racket's next major trigger with the shadow already in
+;; it. 'samples also refreshes it at the backstop's samples, which in a large
+;; forward means tracking the graph as it grows; #f charges nothing.
+(define shadow-refresh (make-parameter 'troughs))
+
+(define (charge-shadow! a bytes)
+  (set-account-unaccounted! a bytes)
+  (set-phantom-bytes! (account-shadow a) bytes))
+
+(define (set-shadow! a reading)
+  (charge-shadow! a (max 0 (- reading (account-live a)))))
+
+;; A handle onto storage that existed before it, a gradient the backward
+;; pass wrote, joins the ledger with bytes the shadow may already charge.
+(define (note-adopted! dev nbytes)
+  (define a (account-of dev))
+  (define taken (min nbytes (account-unaccounted a)))
+  (charge-shadow! a (- (account-unaccounted a) taken))
+  taken)
+
+;; and leaves it when that handle is released, the storage still held
+(define (note-unadopted! dev nbytes)
+  (define a (account-of dev))
+  (charge-shadow! a (+ (account-unaccounted a) nbytes)))
+
+;; Between troughs a sample may only lower the shadow. On MPS the trough
+;; charged the allocator's cache, and new tensors that reuse it, or a release
+;; that empties it, bring the reading down, so those bytes stop being charged
+;; twice; what the graph holds mid-forward raises the reading and is not
+;; charged. `live` is the ledger as it stood when the allocator was read; if
+;; another thread has accounted or released a tensor since, the two no
+;; longer describe the same moment and nothing is lowered.
+(define (lower-shadow! a reading live)
+  (define excess (max 0 (- reading live)))
+  (when (and (= live (account-live a))
+             (< excess (account-unaccounted a)))
+    (charge-shadow! a excess)))
+
+;; for a cache emptied outside the backstop: the OOM retry, or by hand
+(define (lower-shadows!)
+  (for ([dev (in-list (call-with-ledger (lambda () (hash-keys accounts))))])
+    (define live (live-of dev))
+    (define reading ((allocator-reading) dev))
+    (when reading
+      (call-with-ledger
+       (lambda () (lower-shadow! (account-of dev) reading live))))))
+
+;; An allocator that cannot answer right now leaves its device's charge as
+;; it was; with charging off every charge goes to zero.
+(define (refresh-shadows!)
+  (define charging? (shadow-refresh))
+  (for ([dev (in-list (call-with-ledger (lambda () (hash-keys accounts))))])
+    (define reading (and charging? ((allocator-reading) dev)))
+    (when (or reading (not charging?))
+      (call-with-ledger
+       (lambda () (set-shadow! (account-of dev) (or reading 0))))))
+  (call-with-ledger next-shadow-generation!))
+
+;; counts refreshes, so a gradient adopted since the last one is known
+(define generation 0)
+(define (shadow-generation) generation)
+(define (next-shadow-generation!) (set! generation (add1 generation)))
 
 ;; --- the backstop, from every accounting ---
 
@@ -251,6 +332,9 @@
 (define (pressure-collect! dev mark base)
   (define before (pressure-reading dev))
   (define-values (_observed drained?) (collect-and-wait!))
+  ;; after a drain that ran out of time, finalizers still to run would
+  ;; refill the cache behind the release and spend its spacing for nothing
+  (define released (and drained? (release-cache! dev)))
   (sample-allocator! dev)
   (define after (pressure-reading dev))
   (call-with-ledger
@@ -261,16 +345,39 @@
      ;; A drain that ran out of time measured nothing, so it neither backs
      ;; the interval off nor counts as this device's check: the next
      ;; allocation looks again. Looking is cheap, and the mark still guards
-     ;; the collection itself.
+     ;; the collection itself. A release the spacing held back left the
+     ;; cache in the reading, which says nothing of the working set, so the
+     ;; interval stays where it was.
      (when drained?
        (set-account-interval! a
-                              (if (< reclaimed (* reclaim-fraction mark))
-                                  (min (* 2 interval) (* 2 mark))
-                                  base))
+                              (cond
+                                [(eq? released 'spaced) interval]
+                                [(< reclaimed (* reclaim-fraction mark))
+                                 (min (* 2 interval) (* 2 mark))]
+                                [else base]))
        (reset-checks!))
      (set-stats-backstop-collections!
       the-stats (add1 (stats-backstop-collections the-stats)))
      (note-reclaimed! reclaimed))))
+
+;; Where the allocator's reading counts its cache, as on unified memory, a
+;; collection frees tensors into that cache and the reading does not move,
+;; so the backstop also empties it. Spaced in time, not bytes: emptying is
+;; quick, but the blocks the next steps need then come from the driver again.
+;; Answers 'released, 'spaced when the spacing held it back, or #f.
+(define (release-cache! dev)
+  (define release (queries-release the-queries))
+  (cond
+    [(not release) #f]
+    [(< (current-inexact-milliseconds)
+        (call-with-ledger (lambda () (account-release-after (account-of dev)))))
+     'spaced]
+    [(release dev)
+     (define next (+ (current-inexact-milliseconds) (release-spacing)))
+     (call-with-ledger
+      (lambda () (set-account-release-after! (account-of dev) next)))
+     'released]
+    [else #f]))
 
 ;; --- the troughs ---
 
@@ -311,19 +418,22 @@
 ;; be freed would hide that residue from the next trough. The next time is
 ;; set either way, so a stalled stage cannot spin.
 (define (trough-stage! next-ms set-next! bump! collect! on-drained! budget)
-  (when (due? (next-ms the-schedule))
-    (define started (current-inexact-milliseconds))
-    (define before (ledger-total))
-    (define drained? (collect!))
-    (define finished (current-inexact-milliseconds))
-    (define after (ledger-total))
-    (call-with-ledger
-     (lambda ()
-       (when drained?
-         (on-drained!))
-       (set-next! the-schedule (+ finished (/ (- finished started) budget)))
-       (bump! the-stats)
-       (note-reclaimed! (- before after))))))
+  (cond
+    [(due? (next-ms the-schedule))
+     (define started (current-inexact-milliseconds))
+     (define before (ledger-total))
+     (define drained? (collect!))
+     (define finished (current-inexact-milliseconds))
+     (define after (ledger-total))
+     (call-with-ledger
+      (lambda ()
+        (when drained?
+          (on-drained!))
+        (set-next! the-schedule (+ finished (/ (- finished started) budget)))
+        (bump! the-stats)
+        (note-reclaimed! (- before after))))
+     drained?]
+    [else 'skipped]))
 
 (define (collect-young-at-trough! budget)
   (trough-stage! schedule-next-minor-ms
@@ -351,38 +461,24 @@
 (define (collect-at-trough! #:young? [young? #f])
   (unless (in-atomic-mode?)
     (lower-floors!)
+    (refresh-shadows!)
     (define budget
       (if young? (/ (native-collect-budget) 2) (native-collect-budget)))
     (call-as-the-collector
      (lambda ()
-       (when young?
-         (collect-young-at-trough! budget))
-       (collect-old-at-trough! budget)))))
+       (define young (if young? (collect-young-at-trough! budget) 'skipped))
+       (define old (collect-old-at-trough! budget))
+       ;; what the last stage that ran freed may include storage only a
+       ;; dropped graph held, and on MPS it moves finalized tensors into the
+       ;; cache; the charge moves with it rather than adding to it, and only
+       ;; a finished drain shows what was freed
+       (when (eq? #t (if (eq? old 'skipped) young old))
+         (define before (unaccounted-total))
+         (refresh-shadows!)
+         (call-with-ledger
+          (lambda () (note-reclaimed! (- before (unaccounted-total))))))))))
 
-;; --- a collection that has really finished ---
-
-;; The canary shows the finalizer thread has started on this collection's
-;; batch, not that it has finished: finalization order is unspecified and
-;; the thread runs only while this one yields. So yield until the run count
-;; has stood still for a few turns, within a deadline. Two results: whether
-;; the canary was seen, and whether the drain finished inside the deadline.
-(define drain-deadline (make-parameter 2000))
-(define quiet-turns 3)
-
-(define (collect-and-wait!)
-  (define canary-finalized (make-semaphore 0))
-  (register-finalizer (box 0) (lambda (_) (semaphore-post canary-finalized)))
-  (collect-garbage)
-  (define observed (sync/timeout 0.5 canary-finalized))
-  (values (and observed #t) (drain-finalizers!)))
-
-(define (drain-finalizers!)
-  (define deadline (+ (current-inexact-milliseconds) (drain-deadline)))
-  (let loop ([runs (finalizer-runs)] [quiet 0])
-    (sleep 0)
-    (define now (finalizer-runs))
-    (cond
-      [(>= (current-inexact-milliseconds) deadline) #f]
-      [(not (= now runs)) (loop now 0)]
-      [(< (add1 quiet) quiet-turns) (loop now (add1 quiet))]
-      [else #t])))
+(define (unaccounted-total)
+  (call-with-ledger
+   (lambda ()
+     (for/sum ([a (in-hash-values accounts)]) (account-unaccounted a)))))

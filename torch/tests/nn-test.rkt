@@ -30,10 +30,7 @@
     (check-equal? (map tensor-shape ps) '((3 4) (3)))
     (check-true (andmap requires-grad? ps))
     (define y (l (randn 5 4)))
-    (check-equal? (tensor-shape y) '(5 3))
-    (manual-seed! 1)
-    (define x (randn 2 4))
-    (check-equal? (tensor->list (forward l x)) (tensor->list (l x))))
+    (check-equal? (tensor-shape y) '(5 3)))
 
   (test-case "kaiming-uniform stays within the PyTorch bound"
     (manual-seed! 0)
@@ -136,7 +133,15 @@
     (check-equal? (tensor-shape (c (randn 4 1 28 28))) '(4 8 28 28))
     (check-equal? (object-name c) 'Conv2d))
 
+  (define (draw-after build)
+    (manual-seed! 0)
+    (build)
+    (tensor->list (randn 4)))
+
   (test-case "Conv2d without a bias draws the weight alone"
+    (check-equal? (draw-after (lambda () (Conv2d 1 8 3 #:bias? #f)))
+                  (draw-after (lambda () (kaiming-uniform '(8 1 3 3))))
+                  "the weight is the only draw")
     (manual-seed! 0)
     (define with-bias (Conv2d 1 8 3))
     (manual-seed! 0)
@@ -147,6 +152,36 @@
                   (tensor->list (car (parameters with-bias)))
                   "the same weight draw")
     (check-equal? (tensor-shape (bare (randn 2 1 8 8))) '(2 8 6 6)))
+
+  (test-case "ConvTranspose2d without a bias draws the weight alone"
+    (check-equal? (draw-after (lambda () (ConvTranspose2d 4 2 3 #:bias? #f)))
+                  (draw-after (lambda () (kaiming-uniform '(4 2 3 3))))
+                  "the weight is the only draw")
+    (manual-seed! 0)
+    (define with-bias (ConvTranspose2d 4 2 3))
+    (manual-seed! 0)
+    (define bare (ConvTranspose2d 4 2 3 #:bias? #f))
+    (check-equal? (map tensor-shape (parameters bare)) '((4 2 3 3)))
+    (check-equal? (map car (named-parameters bare)) '("weight"))
+    (check-equal? (tensor->list (car (parameters bare)))
+                  (tensor->list (car (parameters with-bias)))
+                  "the same weight draw")
+    (check-equal? (tensor-shape (bare (randn 1 4 5 5))) '(1 2 7 7)))
+
+  (test-case "Linear without a bias draws the weight alone"
+    (check-equal? (draw-after (lambda () (Linear 3 2 #:bias? #f)))
+                  (draw-after (lambda () (kaiming-uniform '(2 3))))
+                  "the weight is the only draw")
+    (manual-seed! 0)
+    (define with-bias (Linear 3 2))
+    (manual-seed! 0)
+    (define bare (Linear 3 2 #:bias? #f))
+    (check-equal? (map car (named-parameters bare)) '("weight"))
+    (check-equal? (tensor->list (car (parameters bare)))
+                  (tensor->list (car (parameters with-bias)))
+                  "the same weight draw")
+    (check-equal? (tensor->list (bare (zeros 1 3))) '(0.0 0.0)
+                  "no bias: a zero input maps to zero"))
 
   (test-case "Conv2d non-square kernel + per-axis padding"
     (manual-seed! 0)

@@ -4,6 +4,8 @@
          (only-in "../foreign.rkt" randn tensor? uniform! zeros)
          (only-in "../private/contract.rkt" define/checked-out))
 
+(provide uniform-bias)
+
 (define dims/c (listof exact-nonnegative-integer?))
 
 ;; zeros + uniform! consumes the RNG exactly as torch's empty().uniform_().
@@ -28,3 +30,8 @@
   (define gain (sqrt (/ 2.0 (+ 1.0 (* a a)))))
   (define bound (* (sqrt 3.0) (/ gain (sqrt (fan-in dims)))))
   (uniform-init dims (- bound) bound))
+
+;; the bias of nn.Linear and _ConvNd: U(-1/sqrt fan, 1/sqrt fan)
+(define (uniform-bias n fan)
+  (define bound (/ 1.0 (sqrt fan)))
+  (uniform-init (list n) (- bound) bound))

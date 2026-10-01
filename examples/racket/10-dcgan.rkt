@@ -29,14 +29,18 @@ tangent on the output, so the images live in @tt{[-1, 1]}.
 twice with transposed convolutions of kernel 4, stride 2 and padding 1;
 the discriminator halves it twice with the same kernel shape and reads a
 logit off the 128x7x7 map. The generator's first batch norm is one
-dimensional, over the flat features, as in the reference code.
+dimensional, over the flat features, as in the reference code. The three
+layers a batch norm follows carry no bias: the normalization subtracts the
+mean of each feature or channel, which cancels any constant offset, so a
+bias there would have a gradient of exactly zero and train only on
+rounding noise.
 
 @chunk[<r10-model>
 (define-layer generator (fc bn0 up1 bn1 up2)
   #:init (#:latent [latent 100])
-  (set! fc (Linear latent (* 128 7 7)))
+  (set! fc (Linear latent (* 128 7 7) #:bias? #f))
   (set! bn0 (BatchNorm1d (* 128 7 7)))
-  (set! up1 (ConvTranspose2d 128 64 4 #:stride 2 #:padding 1))
+  (set! up1 (ConvTranspose2d 128 64 4 #:stride 2 #:padding 1 #:bias? #f))
   (set! bn1 (BatchNorm2d 64))
   (set! up2 (ConvTranspose2d 64 1 4 #:stride 2 #:padding 1))
   #:forward (z)
@@ -45,7 +49,7 @@ dimensional, over the flat features, as in the reference code.
 (define-layer discriminator (conv1 conv2 bn fc)
   #:init ()
   (set! conv1 (Conv2d 1 64 4 #:stride 2 #:padding 1))
-  (set! conv2 (Conv2d 64 128 4 #:stride 2 #:padding 1))
+  (set! conv2 (Conv2d 64 128 4 #:stride 2 #:padding 1 #:bias? #f))
   (set! bn (BatchNorm2d 128))
   (set! fc (Linear (* 128 7 7) 1))
   #:forward (x)

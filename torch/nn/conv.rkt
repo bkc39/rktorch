@@ -6,7 +6,7 @@
          (only-in "../foreign/contracts.rkt"
                   nonneg-size-1d/c nonneg-size/c pos-size-1d/c pos-size/c)
          (only-in "../foreign/size.rkt" ->1d ->2d)
-         (only-in "init.rkt" fan-in kaiming-uniform uniform-init)
+         (only-in "init.rkt" fan-in kaiming-uniform uniform-bias)
          (only-in "layer.rkt" define-layer)
          (only-in "parameter.rkt" Parameter))
 
@@ -27,9 +27,7 @@
   (define shape (list out-channels in-channels (car kernel-size)))
   ;; weight before bias: nn.Conv1d.reset_parameters' RNG draw order
   (set! weight (Parameter (kaiming-uniform shape)))
-  (set! bias
-        (let ([bound (/ 1.0 (sqrt (fan-in shape)))])
-          (Parameter (uniform-init (list out-channels) (- bound) bound))))
+  (set! bias (Parameter (uniform-bias out-channels (fan-in shape))))
   #:forward (x)
   (conv1d x weight #:bias bias #:stride stride #:padding padding
           #:dilation dilation))
@@ -50,12 +48,7 @@
     (list out-channels in-channels (car kernel-size) (cadr kernel-size)))
   ;; weight before bias: nn.Conv2d.reset_parameters' RNG draw order
   (set! weight (Parameter (kaiming-uniform shape)))
-  (set! bias
-        (cond
-          [bias?
-           (define bound (/ 1.0 (sqrt (fan-in shape))))
-           (Parameter (uniform-init (list out-channels) (- bound) bound))]
-          [else #f]))
+  (set! bias (and bias? (Parameter (uniform-bias out-channels (fan-in shape)))))
   #:forward (x)
   (conv2d x weight #:bias bias #:stride stride #:padding padding))
 
@@ -68,7 +61,8 @@
                    #:padding [padding nonneg-size/c]
                    #:output-padding [output-padding nonneg-size/c]
                    #:dilation [dilation pos-size/c]
-                   #:groups [groups exact-positive-integer?])
+                   #:groups [groups exact-positive-integer?]
+                   #:bias? [bias? boolean?])
                   #:pre/name (in-channels out-channels groups)
                   "groups must divide both channel counts"
                   (or (unsupplied-arg? groups)
@@ -80,7 +74,8 @@
           #:padding [padding 0]
           #:output-padding [output-padding 0]
           #:dilation [dilation 1]
-          #:groups [groups 1])
+          #:groups [groups 1]
+          #:bias? [bias? #t])
   (set! kernel-size (->2d kernel-size))
   (set! stride (->2d stride))
   (set! padding (->2d padding))
@@ -92,9 +87,7 @@
           (car kernel-size) (cadr kernel-size)))
   ;; weight before bias: _ConvNd.reset_parameters' RNG draw order
   (set! weight (Parameter (kaiming-uniform shape)))
-  (set! bias
-        (let ([bound (/ 1.0 (sqrt (fan-in shape)))])
-          (Parameter (uniform-init (list out-channels) (- bound) bound))))
+  (set! bias (and bias? (Parameter (uniform-bias out-channels (fan-in shape)))))
   #:forward (x)
   (conv-transpose2d x weight #:bias bias #:stride stride #:padding padding
                     #:output-padding output-padding #:dilation dilation

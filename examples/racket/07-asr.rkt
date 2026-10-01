@@ -511,10 +511,9 @@ system cache dir) and by default trains on @emph{all} of it. Utterances
 sort by their frame counts --- read from FLAC headers via
 @racket[audio-info], no decode --- so each @racket[batch]-sized bucket
 pads its members to nearly-equal lengths and the rectangle wastes little.
-The spectral front end stays on the CPU --- the cu130 builds' cuFFT
-raises @tt{CUFFT_INTERNAL_ERROR} on this driver stack, and an
-@tt{[80, T]} feature transfer per utterance is noise next to the model
-compute anyway --- and the mels move to the training device.
+The spectral front end stays on the CPU, since an @tt{[80, T]} feature
+transfer per utterance is noise next to the model compute, and the mels
+move to the training device.
 dev-clean is ~5.4 hours of speech --- small for
 character-level seq2seq --- so expect recognizable words and partial
 spellings, not a production recognizer; the 100-hour train-clean-100
