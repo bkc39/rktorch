@@ -16,6 +16,7 @@
          (only-in "format.rkt"
                   tensor->pytorch-repr
                   tensor-tree->pytorch-repr)
+         (only-in "raw/fault.rkt" native-fault? note-native-fault!)
          (only-in "raw/memory.rkt" tr-tensor-free/checked)
          (only-in "raw/syntax.rkt" Tensor?)
          (only-in "raw/tensor.rkt"
@@ -180,15 +181,19 @@
   #:property prop:custom-write
   (lambda (t port _mode)
     (define h (tensor-impl-handle t))
-    (cond
-      [(not (cpointer-has-tag? h 'Tensor))
-       (fprintf port "#<tensor (freed)>")]
-      [else
-       (with-handlers ([exn:fail?
-                        (lambda (_e)
-                          (fprintf port "#<tensor:~a>"
-                                   (shape->string (tensor-impl-shape t))))])
-         (write-string (handle->repr h (tensor-impl-shape t)) port))])))
+    (write-string
+     (cond
+       [(not (cpointer-has-tag? h 'Tensor)) "#<tensor (freed)>"]
+       [else
+        (with-handlers ([(lambda (e) (not (exn:break? e)))
+                         (lambda (e)
+                           (when (native-fault? e)
+                             (note-native-fault! "printing a tensor"))
+                           (string-append "#<tensor:"
+                                          (shape->string (tensor-impl-shape t))
+                                          ">"))])
+          (handle->repr h (tensor-impl-shape t)))])
+     port)))
 
 (define/checked-out (tensor? v) ;; noqa
   (-> any/c boolean?)

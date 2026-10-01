@@ -12,6 +12,7 @@
                   collect-and-wait!
                   finalizer-runs
                   note-finalizer-run!)
+         (only-in "fault.rkt" native-fault? note-native-fault!)
          (only-in "pressure.rkt"
                   call-with-ledger
                   collect-under-pressure!
@@ -95,7 +96,9 @@
 ;; Guarded: this is the handler below, so nothing else protects it.
 (define (record-failure! e)
   (with-handlers ([(lambda (_) #t) void])
-    (record-failure!/unguarded e)))
+    (record-failure!/unguarded e)
+    (when (native-fault? e)
+      (note-native-fault! "running a finalizer"))))
 
 (define (record-failure!/unguarded e)
   (call-with-ledger
@@ -135,7 +138,10 @@
   #:c-id tr_tensor_device)
 
 (define (account! t)
-  (with-handlers ([exn:fail? (lambda (_) #f)])
+  (with-handlers ([exn:fail? (lambda (e)
+                               (when (native-fault? e)
+                                 (note-native-fault! "accounting a tensor"))
+                               #f)])
     (define-values (nb-rc nbytes) (tr-tensor-nbytes/raw t))
     (define-values (dev-rc type index) (tr-tensor-device/raw t))
     (and (zero? nb-rc)

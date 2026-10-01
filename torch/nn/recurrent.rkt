@@ -6,6 +6,7 @@
          (only-in "../foreign.rkt"
                   device-type exn:fail:rktorch:oom? tensor-device tensor-dtype
                   tensor-shape tensor? with-no-grad zeros)
+         (only-in "../foreign/raw/fault.rkt" native-fault? note-native-fault!)
          (only-in "../generated.rkt"
                   cudnn-rnn-flatten-weight gru-input lstm-input)
          (only-in "init.rkt" uniform-init)
@@ -70,6 +71,9 @@
 (define (flatten-weights! spec weights)
   (with-handlers ([exn:fail:rktorch:oom? raise]
                   [exn:fail:contract? raise]
+                  [native-fault? (lambda (e)
+                                   (note-native-fault! "flattening RNN weights")
+                                   (raise e))]
                   [exn:fail? (lambda (_e) (hash-set! refused (car weights) #t))])
     (with-no-grad
       (void

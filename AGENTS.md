@@ -460,7 +460,9 @@ module's full export set (`racket/runtime-path`, `syntax/parse/pre`).
   finalizer); `foreign/error.rkt` — `check-ok` / `check-handle`;
   `foreign/format.rkt` — the PyTorch-repr reproducer.
 - `foreign/raw/*.rkt` — direct FFI, one module per C translation unit:
-  `syntax` (the pure FFI definer + `_Tensor` cpointer), `pressure` (no
+  `syntax` (the FFI definer + `_Tensor` cpointer), `fault` (the
+  native-fault latch `define-torch` puts under every binding, #76),
+  `pressure` (no
   FFI of its own: the collection policy under the ledger, the two troughs
   and the capacity backstop, #145), `memory` (the lifetime substrate:
   frees, pressure ledger, `tensor-allocator`, op-definer macros),
@@ -478,7 +480,12 @@ module's full export set (`racket/runtime-path`, `syntax/parse/pre`).
   `(allocator ...)` wrap (skips the ledger).
   Explicit synchronous release goes through the raising,
   finalizer-cancelling `tr-tensor-free/checked`; OOM reaches users as
-  `exn:fail:rktorch:oom` (catch by type, not message).
+  `exn:fail:rktorch:oom` (catch by type, not message). A handler broad
+  enough to catch an `invalid memory reference` and not re-raise it to the
+  caller (a finalizer guard, the printer) must call `note-native-fault!`
+  when `native-fault?` holds, so the first fault no caller sees latches the
+  library; never bind native code with `define-ffi-definer` or
+  `get-ffi-obj` directly, which bypasses the latch.
 - `nn.rkt` — pure re-export facade over `nn/` (`layer.rkt` = `gen:layer`, `LayerList` +
   the `define-layer` macro, whose `#:forward` takes a rest argument, whose
   fields admit `parameters-by-key` beside `children-by-key`, and whose
