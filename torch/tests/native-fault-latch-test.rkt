@@ -1,12 +1,14 @@
 #lang racket/base
 
-;; This file latches its own process on purpose, so it holds one test case
-;; whose steps run in order; nothing native can run after the latch.
+;; raco cover runs every test file in one process, so the latch this file
+;; sets is cleared before the next one runs.
 (module+ test
   (require (only-in ffi/unsafe _intptr cast)
            rackunit
-           (only-in "../foreign.rkt" ones)
-           (only-in "../foreign/raw/fault.rkt" latched native-faulted)
+           (only-in "../foreign.rkt" ones tensor-shape)
+           (only-in "../foreign/raw/fault.rkt"
+                    latched native-faulted reset-native-fault-latch!)
+           (only-in "../foreign/raw/memory.rkt" reaccount!)
            (only-in "../foreign/raw/syntax.rkt" _Tensor)
            (only-in "../foreign/structs.rkt" tensor-impl))
 
@@ -24,17 +26,43 @@
     (for/list ([p (in-list arities)] [n (in-naturals)])
       (apply p (build-list n values))))
 
-  (define disabled #rx"^rktorch: native code faulted earlier, while printing a tensor")
+  (define (bad) (cast 8 _intptr _Tensor))
+
+  (define (disabled doing)
+    (regexp (string-append "^rktorch: native code faulted earlier, while " doing)))
+
+  (define passed-through (for/list ([n (in-range 8)]) (build-list n values)))
 
   (test-case "the first fault in the printer disables every native call after it"
-    (check-equal? (call-each) (for/list ([n (in-range 8)]) (build-list n values))
-                  "before any fault the latch passes every argument through")
+    (dynamic-wind
+     void
+     (lambda ()
+       (check-equal? (call-each) passed-through
+                     "before any fault the latch passes every argument through")
+       (check-false (native-faulted))
+       (check-equal? (format "~a" (tensor-impl (bad) '(2 2)))
+                     "#<tensor:2x2>"
+                     "the printer falls back to the shape")
+       (check-equal? (native-faulted) "printing a tensor")
+       (for ([p (in-list arities)] [n (in-naturals)])
+         (check-exn (disabled "printing a tensor")
+                    (lambda () (apply p (build-list n values)))))
+       (check-exn (disabled "printing a tensor") (lambda () (ones 2 2))
+                  "a real binding raises without entering native code"))
+     reset-native-fault-latch!))
+
+  (test-case "a fault while accounting a tensor disables the library too"
+    (dynamic-wind
+     void
+     (lambda ()
+       (check-false (native-faulted))
+       (check-not-exn (lambda () (reaccount! (bad)))
+                      "the accounting swallows the fault")
+       (check-equal? (native-faulted) "accounting a tensor")
+       (check-exn (disabled "accounting a tensor") (lambda () (ones 2 2))))
+     reset-native-fault-latch!))
+
+  (test-case "clearing the latch lets native calls through again"
     (check-false (native-faulted))
-    (check-equal? (format "~a" (tensor-impl (cast 8 _intptr _Tensor) '(2 2)))
-                  "#<tensor:2x2>"
-                  "the printer falls back to the shape")
-    (check-equal? (native-faulted) "printing a tensor")
-    (for ([p (in-list arities)] [n (in-naturals)])
-      (check-exn disabled (lambda () (apply p (build-list n values)))))
-    (check-exn disabled (lambda () (ones 2 2))
-               "a real binding raises without entering native code")))
+    (check-equal? (call-each) passed-through)
+    (check-equal? (tensor-shape (ones 2 2)) '(2 2))))

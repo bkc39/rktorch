@@ -6,7 +6,8 @@
          native-fault?
          native-fault-policy
          native-faulted
-         note-native-fault!)
+         note-native-fault!
+         reset-native-fault-latch!)
 
 (define (native-fault? v)
   (and (exn:fail? v)
@@ -29,6 +30,8 @@
 (define faulted (box #f))
 
 (define (native-faulted) (unbox faulted))
+
+(define (reset-native-fault-latch!) (set-box! faulted #f))
 
 (define (note-native-fault! doing)
   (case native-fault-policy
