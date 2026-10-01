@@ -5,6 +5,9 @@ Status: **decided / implemented**. The nn.Module gate at the end is closed:
 generic interface, module-tree parameter registry, no VarStore). See *Open
 decision gate* at the end for the recorded rationale.
 
+Since #235 a layer is called only by applying it, `(net x)`; the `forward`
+function in the sketches below no longer exists.
+
 Companion: `plans/v0-scaffold.md` (what shipped).
 
 ---
