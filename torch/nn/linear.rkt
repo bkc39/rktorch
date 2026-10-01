@@ -2,7 +2,7 @@
 
 (require (only-in racket/contract/base ->*)
          (only-in "../foreign.rkt" linear)
-         (only-in "init.rkt" kaiming-uniform uniform-init)
+         (only-in "init.rkt" kaiming-uniform uniform-bias)
          (only-in "layer.rkt" define-layer)
          (only-in "parameter.rkt" Parameter))
 
@@ -13,11 +13,6 @@
   #:init (in-features out-features #:bias? [bias? #t])
   ;; weight before bias: nn.Linear.reset_parameters' RNG draw order
   (set! weight (Parameter (kaiming-uniform (list out-features in-features))))
-  (set! bias
-        (cond
-          [bias?
-           (define bound (/ 1.0 (sqrt in-features)))
-           (Parameter (uniform-init (list out-features) (- bound) bound))]
-          [else #f]))
+  (set! bias (and bias? (Parameter (uniform-bias out-features in-features))))
   #:forward (x)
   (linear x weight #:bias bias))
