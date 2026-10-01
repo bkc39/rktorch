@@ -136,7 +136,15 @@
     (check-equal? (tensor-shape (c (randn 4 1 28 28))) '(4 8 28 28))
     (check-equal? (object-name c) 'Conv2d))
 
+  (define (draw-after build)
+    (manual-seed! 0)
+    (build)
+    (tensor->list (randn 4)))
+
   (test-case "Conv2d without a bias draws the weight alone"
+    (check-equal? (draw-after (lambda () (Conv2d 1 8 3 #:bias? #f)))
+                  (draw-after (lambda () (kaiming-uniform '(8 1 3 3))))
+                  "the weight is the only draw")
     (manual-seed! 0)
     (define with-bias (Conv2d 1 8 3))
     (manual-seed! 0)
@@ -149,6 +157,9 @@
     (check-equal? (tensor-shape (bare (randn 2 1 8 8))) '(2 8 6 6)))
 
   (test-case "ConvTranspose2d without a bias draws the weight alone"
+    (check-equal? (draw-after (lambda () (ConvTranspose2d 4 2 3 #:bias? #f)))
+                  (draw-after (lambda () (kaiming-uniform '(4 2 3 3))))
+                  "the weight is the only draw")
     (manual-seed! 0)
     (define with-bias (ConvTranspose2d 4 2 3))
     (manual-seed! 0)
@@ -161,6 +172,9 @@
     (check-equal? (tensor-shape (bare (randn 1 4 5 5))) '(1 2 7 7)))
 
   (test-case "Linear without a bias draws the weight alone"
+    (check-equal? (draw-after (lambda () (Linear 3 2 #:bias? #f)))
+                  (draw-after (lambda () (kaiming-uniform '(2 3))))
+                  "the weight is the only draw")
     (manual-seed! 0)
     (define with-bias (Linear 3 2))
     (manual-seed! 0)

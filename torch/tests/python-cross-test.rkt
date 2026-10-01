@@ -702,8 +702,7 @@
                    (cat (for/list ([p (in-list (append (parameters gen)
                                                        (parameters disc)))])
                           (reshape p -1))))))
-       ;; batch norm in both networks: a few dozen of the 1.3M parameters
-       ;; land just past tol after three alternating steps, as for 09_resnet
+       ;; batch norm in both networks, so the 5e-4 tol of 09_resnet
        (check-training-twin "10_dcgan" "python/10_dcgan.py" train-on 'cpu 5e-4)
        (when (and (cuda-available?)
                   (python-cuda-available?))
