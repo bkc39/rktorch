@@ -1,17 +1,13 @@
 # Automatic Claude Code review of every pull request, each layer of a stack
-# included, against its own base branch. Authenticates with a Claude
-# subscription (Pro/Max) OAuth token so reviews draw on the account's token
-# budget rather than API billing: run `claude setup-token` locally, then
-# store the result as the CLAUDE_CODE_OAUTH_TOKEN repository secret
-# (Settings > Secrets and variables > Actions). Posts findings as PR
-# comments / inline annotations.
+# against its own base branch. Authenticates with a Claude subscription
+# (Pro/Max) OAuth token so reviews draw on the account's token budget rather
+# than API billing: run `claude setup-token` locally, then store the result
+# as the CLAUDE_CODE_OAUTH_TOKEN repository secret (Settings > Secrets and
+# variables > Actions). Posts findings as PR comments / inline annotations.
 #
-# A pull request is reviewed in full until a review has run on it, then each
-# push incrementally from the head that review covered, against the earlier
-# threads and their replies; a push that only merges its base or master is
-# not reviewed (.github/scripts/review_context.py, which also names the
-# stack). The action skips the review while this file differs from master's,
-# so only a run that reaches "Record review" counts as one.
+# The action skips the review, and the job still succeeds, while this file
+# differs from master's; a run counts as a review only when it uploads the
+# reviewed-<number> artifact.
 
 name: claude-code-review
 
@@ -26,6 +22,14 @@ permissions:
   id-token: write
 
 jobs:
+  context-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - run: python3 .github/scripts/test_review_context.py
+
   claude-review:
     runs-on: ubuntu-latest
     steps:
@@ -41,7 +45,6 @@ jobs:
           PR: ${{ github.event.pull_request.number }}
           AFTER: ${{ github.event.pull_request.head.sha }}
           BASE_REF: ${{ github.event.pull_request.base.ref }}
-          HEAD_REF: ${{ github.event.pull_request.head.ref }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           REPO: ${{ github.repository }}
         run: python3 .github/scripts/review_context.py .review-context
@@ -58,4 +61,10 @@ jobs:
 
       - name: Record review
         if: steps.context.outputs.mode == 'none' || steps.review.outputs.conclusion == 'success'
-        run: echo "reviewed through ${{ github.event.pull_request.head.sha }}"
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.context.outputs.record }}
+          path: .review-context/context.md
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 90
