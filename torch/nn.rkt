@@ -44,7 +44,6 @@
 
 (provide define-layer
          gen:layer
-         layer-forward
          layer-parameters
          layer-named-parameters
          layer-buffers
@@ -66,7 +65,6 @@
          named-buffers
          children
          named-children
-         forward
          train!
          eval!
          set-mode!

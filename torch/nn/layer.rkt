@@ -28,7 +28,6 @@
 ;; the noqa'd exports are macro expansions raco review cannot see
 (provide gen:layer
          layer?
-         (rename-out [call-layer layer-forward])
          layer-parameters ;; noqa
          layer-named-parameters ;; noqa
          layer-buffers ;; noqa
@@ -52,6 +51,7 @@
   (layer-mode layer)
   (layer-set-mode! layer mode)
   #:derive-property prop:to (lambda (m dev dtype) (move-layer! m dev dtype))
+  #:derive-property prop:procedure (lambda (m . inputs) (apply call-layer m inputs))
   #:fallbacks
   [(define (layer-parameters self) '()) ;; noqa
    (define (layer-named-parameters self prefix) '()) ;; noqa
@@ -168,10 +168,6 @@
   (-> layer? (listof (cons/c string? layer?)))
   (remove-duplicates (layer-named-children m) eq? #:key cdr))
 
-(define/contract-out (forward m . inputs) ;; noqa
-  (-> layer? any/c ... any)
-  (apply call-layer m inputs))
-
 (define/contract-out (train! m) ;; noqa
   (-> layer? layer?)
   (layer-set-mode! m 'train)
@@ -241,11 +237,11 @@
 
 (define layer-call-key (make-continuation-mark-key 'layer-call))
 
-;; Every call reaches the method through here, which is exported as
-;; layer-forward, so a layer written by hand gets the trough too. The mark
-;; tells a nested call from the outermost one, whose return is where a
-;; no-grad loop's memory is at its lowest.
-(define (call-layer m . inputs)
+;; Applying any layer reaches the method through here, since gen:layer
+;; derives prop:procedure from it, so a layer written by hand gets the
+;; trough too. The mark tells a nested call from the outermost one, whose
+;; return is where a no-grad loop's memory is at its lowest.
+(define (call-layer m . inputs) ;; noqa
   (cond
     [(continuation-mark-set-first #f layer-call-key)
      (apply layer-forward m inputs)]
@@ -255,7 +251,6 @@
              (collect-at-forward-trough!))]))
 
 (struct registry (forward params buffers children [mode #:mutable])
-  #:property prop:procedure call-layer
   #:methods gen:layer
   [(define (layer-forward self . inputs)
      (apply (registry-forward self) self inputs))

@@ -30,10 +30,7 @@
     (check-equal? (map tensor-shape ps) '((3 4) (3)))
     (check-true (andmap requires-grad? ps))
     (define y (l (randn 5 4)))
-    (check-equal? (tensor-shape y) '(5 3))
-    (manual-seed! 1)
-    (define x (randn 2 4))
-    (check-equal? (tensor->list (forward l x)) (tensor->list (l x))))
+    (check-equal? (tensor-shape y) '(5 3)))
 
   (test-case "kaiming-uniform stays within the PyTorch bound"
     (manual-seed! 0)

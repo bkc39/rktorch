@@ -343,11 +343,12 @@
     (check-exn #rx"^Sequential: contract violation"
                (lambda () (Sequential (Linear 1 1) 'relu))))
 
-  (test-case "Sequential forwards through layer-forward, so a step need not be applicable"
+  (test-case "a hand-written layer is applicable, alone and as a step"
     (struct Plus ()
       #:methods gen:layer
       [(define (layer-forward self . inputs) (add (car inputs) 1))])
-    (check-false (procedure? (Plus)))
+    (check-true (procedure? (Plus)))
+    (check-equal? (tensor->list ((Plus) (zeros 2))) '(1.0 1.0))
     (check-equal? (parameters (Plus)) '())
     (check-equal? (state-dict (Plus)) '())
     (check-equal? (children (Plus)) '())
@@ -355,6 +356,17 @@
     (define s (Sequential (Plus) relu (Plus)))
     (check-equal? (tensor->list (s (zeros 2))) '(2.0 2.0))
     (check-equal? (tensor->list (s (full -5.0 2))) '(1.0 1.0)))
+
+  (define-namespace-anchor here)
+
+  (test-case "a layer that sets prop:procedure itself is rejected"
+    (check-exn #rx"duplicate property"
+               (lambda ()
+                 (eval '(struct Own () ;; noqa
+                          #:property prop:procedure (lambda (self x) x) ;; noqa
+                          #:methods gen:layer
+                          [(define (layer-forward self . inputs) (car inputs))]) ;; noqa
+                       (namespace-anchor->namespace here)))))
 
   (test-case "Sequential takes its steps as arguments or as one list"
     (manual-seed! 0)
