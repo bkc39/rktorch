@@ -90,11 +90,10 @@
     [else
      (define device (mps-device))
 
-     ;; 4 MiB blocks enough to pass a mark of 1/200 of this machine's working
-     ;; set, with room for a 96 MiB cache a test may have filled first
+     ;; 4 MiB blocks enough to pass a mark of 1/200 of this machine's working set
      (define (blocks-past-mark)
        (define capacity (cdr (assq 'recommended-max (mps-memory-info))))
-       (+ 8 (quotient (+ (quotient capacity 200) (* 96 mib)) (* 4 mib))))
+       (+ 8 (quotient (quotient capacity 200) (* 4 mib))))
 
      (test-case "the MPS capacity query answers, and it is what the mark uses"
        (define info (mps-memory-info))
@@ -129,15 +128,22 @@
        (collect-and-wait!)
        (define cached-before (cached))
        (define before (backstops))
-       (define blocks (blocks-past-mark))
+       ;; 256 KiB tensors come from MPS's small pool, so they cannot reuse
+       ;; the 4 MiB blocks above: only a release shrinks that cache. The
+       ;; backstop reads the cache too, so these need only cover the rest of
+       ;; the mark: 64 of them on a machine where the cache alone passes it.
+       (define capacity (cdr (assq 'recommended-max (mps-memory-info))))
+       (define small
+         (+ 64 (quotient (max 0 (- (quotient capacity 200) (* 96 mib)))
+                         (* 256 1024))))
        (define held
          (parameterize ([native-memory-limit #f]
                         [native-memory-fraction 1/200]
                         [native-collect-margin never]
                         [release-spacing 0])
            (with-default-device device
-             (for/list ([_ (in-range blocks)]) (randn 1024 1024)))))
-       (check-equal? (length held) blocks)
+             (for/list ([_ (in-range small)]) (randn 256 256)))))
+       (check-equal? (length held) small)
        (check-true (> (backstops) before) "the backstop never fired")
        (check-true (< (cached) cached-before)
                    (format "the cache stayed at ~a MiB after the backstop"
