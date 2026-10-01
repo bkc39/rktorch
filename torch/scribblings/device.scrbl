@@ -361,7 +361,9 @@ the mark is not collected on every step.
 The ledger also charges Racket's collector for what it cannot see. At every
 trough, before collecting, it reads each device's allocator and charges the
 bytes allocated there beyond the ledger's own total as one more phantom
-charge for that device. Storage that only the autograd graph or libtorch
+charge for that device, and reads again after a collection that finished,
+which may have freed storage only a dropped graph held. A device whose
+allocator cannot answer at that moment keeps its previous charge. Storage that only the autograd graph or libtorch
 itself holds reaches no tensor, so this is the only way the collector's own
 schedule learns of it. It is read only at a trough, because a charge that
 followed the graph through a forward pass would push Racket past its

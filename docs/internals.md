@@ -232,9 +232,14 @@ the CPU, whose allocator keeps no count.
   full collection that follows sets Racket's
   next trigger with the shadow already inside it. Raised after that
   collection instead, it would sit above a trigger computed without it,
-  and Racket would force a major early in the next forward.
+  and Racket would force a major early in the next forward. A collection
+  that drained is followed by a second refresh: it may have freed storage
+  only a dropped graph held, and what that refresh changes is a charge the
+  collection's own trigger already counted, moved rather than added.
   `reclaim-native-memory!` refreshes it too, once the caches are
   emptied, so memory a dropped graph held stops being charged at once.
+  An allocator that cannot answer at a refresh leaves its device's charge
+  as it was.
 - It is not refreshed during a forward. At the backstop's samples, one
   every 1/32 of the mark once its gate opens, it would track the graph as
   it grows and push Racket past its trigger at the peak. Measured on the
