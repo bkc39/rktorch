@@ -19,7 +19,9 @@
                   tr-tensor-requires-grad/raw
                   tr-tensor-sub!/raw
                   tr-tensor-zero!/raw)
-         (only-in "raw/pressure.rkt" collect-at-trough!)
+         (only-in "raw/pressure.rkt"
+                  collect-at-trough! native-collect-at-troughs
+                  refresh-shadows!)
          (only-in "structs.rkt" tensor? wrap-tensor))
 
 (provide collect-at-forward-trough!
@@ -37,7 +39,7 @@
 
 (define/contract-out (backward! t) (-> tensor? void?)
   (check-ok (tr-tensor-backward/raw t) 'backward!)
-  (collect-at-trough!))
+  (at-trough!))
 
 ;; With gradients off nothing outlives a forward pass but its result, so the
 ;; return of an outermost layer call is a trough like the end of backward!.
@@ -45,7 +47,14 @@
 (define (collect-at-forward-trough!)
   (define-values (rc on?) (tr-is-grad-enabled/raw))
   (when (and (zero? rc) (not on?))
-    (collect-at-trough! #:young? #t)))
+    (at-trough! #:young? #t)))
+
+;; The switch turns off the collection, a pause; the shadow's refresh is
+;; accounting, so a trough still takes it.
+(define (at-trough! #:young? [young? #f])
+  (if (native-collect-at-troughs)
+      (collect-at-trough! #:young? young?)
+      (refresh-shadows!)))
 
 (define/contract-out (grad t) (-> tensor? tensor?)
   (wrap-tensor (check-handle 'grad (tr-tensor-grad/raw t))))

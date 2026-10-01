@@ -14,6 +14,7 @@
                               cuda-reset-peak-stats! device device/c device?
                               dtype dtype/c eye finalizer-diagnostics full
                               full-like mps-device mps-memory-info
+                              native-collect-at-troughs
                               native-collect-budget native-collect-margin
                               native-memory-fraction native-memory-limit
                               native-memory-unaccounted
@@ -390,6 +391,11 @@ memory for throughput. The defaults are deliberately cautious, and were
 measured on one model on one card, so a machine with more memory than
 compute has room to relax them.
 
+The collections at the two troughs happen inside @racket[backward!] and a
+layer call, where nothing at the call site suggests a pause. Code that
+times those calls, or cannot afford the pause, turns both off with
+@racket[native-collect-at-troughs]; the backstop still runs.
+
 @defproc[(native-memory-use) (listof (cons/c device? exact-nonnegative-integer?))]{
 Live native bytes per device as the ledger sees them: every handle not yet
 released, at the byte count of its own extent. Views charge their full
@@ -435,6 +441,15 @@ The share of wall-clock time collections at a trough may take, @racket[1/20]
 by default. After one costing @racket[t] the next waits @racket[t] divided
 by the budget, so a smaller budget spaces them further apart and a larger
 one collects more eagerly.
+}
+
+@defparam[native-collect-at-troughs on? boolean?]{
+Whether @racket[backward!] and the outermost layer call under
+@racket[with-no-grad] collect at their return, @racket[#t] by default.
+With it off neither does, and a loop that relied on them grows until the
+backstop's mark catches it. Either way both still read the allocator for
+the charge @racket[native-memory-unaccounted] reports, which costs no
+pause.
 }
 
 @defproc[(mps-memory-info)
