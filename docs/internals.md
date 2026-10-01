@@ -207,7 +207,10 @@ the last defence when a trough collection is not yet due:
   reading, and is not charged. A cache emptied outside the backstop, by
   `mps-empty-cache!` or the OOM retry's `collect-and-drain!`, is followed
   by the same lowering, and a sample whose allocator cannot answer leaves
-  the shadow alone. Tensors that a finished collection moves into the
+  the shadow alone. The lowering reads the ledger before the allocator and
+  skips if the ledger has moved by the time it would apply, since another
+  thread's tensor accounted or released in between would leave the two
+  figures describing different moments. Tensors that a finished collection moves into the
   cache are charged again by the trough's refresh after its collection;
   a backstop collection, mid-forward, does not raise the charge for them,
   and the backstop itself still reads `driver-allocated` in full.

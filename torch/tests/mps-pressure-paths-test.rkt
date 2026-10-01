@@ -90,6 +90,12 @@
     [else
      (define device (mps-device))
 
+     ;; 4 MiB blocks enough to pass a mark of 1/200 of this machine's working
+     ;; set, with room for a 96 MiB cache a test may have filled first
+     (define (blocks-past-mark)
+       (define capacity (cdr (assq 'recommended-max (mps-memory-info))))
+       (+ 8 (quotient (+ (quotient capacity 200) (* 96 mib)) (* 4 mib))))
+
      (test-case "the MPS capacity query answers, and it is what the mark uses"
        (define info (mps-memory-info))
        (define capacity (cdr (assq 'recommended-max info)))
@@ -99,13 +105,14 @@
        ;; and the only number it can be using is the queried capacity.
        (settle!)
        (define before (backstops))
+       (define blocks (blocks-past-mark))
        (define held
          (parameterize ([native-memory-limit #f]
                         [native-memory-fraction 1/200]
                         [native-collect-margin never])
            (with-default-device device
-             (for/list ([_ (in-range 24)]) (randn 1024 1024)))))
-       (check-equal? (length held) 24)
+             (for/list ([_ (in-range blocks)]) (randn 1024 1024)))))
+       (check-equal? (length held) blocks)
        (check-true (> (backstops) before)
                    "the backstop never fired off the queried MPS capacity")
        (settle!))
@@ -122,14 +129,15 @@
        (collect-and-wait!)
        (define cached-before (cached))
        (define before (backstops))
+       (define blocks (blocks-past-mark))
        (define held
          (parameterize ([native-memory-limit #f]
                         [native-memory-fraction 1/200]
                         [native-collect-margin never]
                         [release-spacing 0])
            (with-default-device device
-             (for/list ([_ (in-range 24)]) (randn 1024 1024)))))
-       (check-equal? (length held) 24)
+             (for/list ([_ (in-range blocks)]) (randn 1024 1024)))))
+       (check-equal? (length held) blocks)
        (check-true (> (backstops) before) "the backstop never fired")
        (check-true (< (cached) cached-before)
                    (format "the cache stayed at ~a MiB after the backstop"

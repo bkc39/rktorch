@@ -15,7 +15,7 @@
                     drain-deadline install-device-queries! margin-over
                     native-collect-budget native-collect-margin
                     native-memory-fraction release-spacing
-                    reset-pressure-state! shadow-refresh)
+                    reset-pressure-state! shadow-refresh lower-shadows!)
            (only-in "../nn.rkt"
                     Linear Sequential forward gen:layer layer-forward))
 
@@ -609,4 +609,24 @@
       (charge-cache!)
       (collect-and-drain!)
       (check-equal? (cpu-unaccounted) 0 "the OOM retry's drain left the cache charged"))
+    (settle!))
+
+  ;; the stand-in reports a cache shrunk to 200 MiB, then a tensor is
+  ;; accounted before the ledger is read again, as another thread's could be
+  (test-case "a lowering skips a reading the ledger moved under"
+    (settle!)
+    (parameterize ([allocator-reading (lambda (_dev) (+ (cpu-bytes) (* 256 mib)))]
+                   [native-collect-margin idle-margin])
+      (collect-at-trough!))
+    (define late '())
+    (parameterize ([allocator-reading
+                    (lambda (_dev)
+                      (define reading (+ (cpu-bytes) (* 200 mib)))
+                      (set! late (cons (zeros 4096 4096) late))
+                      reading)])
+      (lower-shadows!))
+    (check-equal? (length late) 1)
+    (check-true (>= (cpu-unaccounted) (* 255 mib))
+                (format "lowered to ~a MiB from a reading older than the ledger"
+                        (quotient (cpu-unaccounted) mib)))
     (settle!)))

@@ -230,7 +230,11 @@
      (define query (queries-allocated the-queries))
      (and query (query dev)))))
 
+(define (live-of dev)
+  (call-with-ledger (lambda () (account-live (account-of dev)))))
+
 (define (sample-allocator! dev)
+  (define live (live-of dev))
   (define known ((allocator-reading) dev))
   (define reading (or known 0))
   (call-with-ledger
@@ -241,7 +245,7 @@
      (when known
        (if (eq? (shadow-refresh) 'samples)
            (set-shadow! a reading)
-           (lower-shadow! a reading))))))
+           (lower-shadow! a reading live))))))
 
 ;; --- the shadow: what the allocator holds that the ledger cannot see ---
 
@@ -271,17 +275,23 @@
 ;; charged the allocator's cache, and new tensors that reuse it, or a release
 ;; that empties it, bring the reading down, so those bytes stop being charged
 ;; twice; what the graph holds mid-forward raises the reading and is not
-;; charged.
-(define (lower-shadow! a reading)
-  (when (< (max 0 (- reading (account-live a))) (account-unaccounted a))
-    (set-shadow! a reading)))
+;; charged. `live` is the ledger as it stood when the allocator was read; if
+;; another thread has accounted or released a tensor since, the two no
+;; longer describe the same moment and nothing is lowered.
+(define (lower-shadow! a reading live)
+  (define excess (max 0 (- reading live)))
+  (when (and (= live (account-live a))
+             (< excess (account-unaccounted a)))
+    (charge-shadow! a excess)))
 
 ;; for a cache emptied outside the backstop: the OOM retry, or by hand
 (define (lower-shadows!)
   (for ([dev (in-list (call-with-ledger (lambda () (hash-keys accounts))))])
+    (define live (live-of dev))
     (define reading ((allocator-reading) dev))
     (when reading
-      (call-with-ledger (lambda () (lower-shadow! (account-of dev) reading))))))
+      (call-with-ledger
+       (lambda () (lower-shadow! (account-of dev) reading live))))))
 
 ;; An allocator that cannot answer right now leaves its device's charge as
 ;; it was; with charging off every charge goes to zero.

@@ -78,7 +78,7 @@
      (and (zero? rc) allocated)]
     [(mps)
      ;; on unified memory the allocator's cache is host memory, so what it
-     ;; has taken from the driver is what costs the machine (#175)
+     ;; has taken from the driver is what costs the machine
      (define-values (rc _allocated driver _recommended)
        (tr-mps-memory-info/raw))
      (and (zero? rc) driver)]
