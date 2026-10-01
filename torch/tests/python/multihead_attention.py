@@ -1,10 +1,11 @@
 """nn.MultiheadAttention: seeded init, outputs, weights and gradients.
 
-The twin of torch/tests/multihead-attention-parity-test.rkt. Each case
-seeds, builds the layer on the CPU, so that its parameters are drawn as the
-Racket layer draws its own with nothing copied across, moves it to
-RKTORCH_PARITY_DEVICE, then draws its inputs, its float masks and the
-loss weights in the Racket test's order.
+The twin of the MultiheadAttention half of
+torch/tests/attention-parity-test.rkt. Each case seeds, builds the layer on
+the CPU, so that its parameters are drawn as the Racket layer draws its own
+with nothing copied across, moves it to RKTORCH_PARITY_DEVICE, then draws
+its inputs, its float masks and the loss weights in the Racket test's
+order.
 
 The Racket layer keeps four Linears where PyTorch fuses the input
 projection, so every parameter and gradient is reported under the Racket

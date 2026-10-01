@@ -75,8 +75,12 @@ means attend}. PyTorch is not consistent about it.
 @tt{key_padding_mask} mean the opposite, @bold{@racket[#t] means hidden},
 and every layer here that mirrors @tt{nn.MultiheadAttention} keeps that
 sense, as does the @racket[masked-fill] idiom, which fills where its mask
-is @racket[#t]. A float mask is additive in both. @racket[(eq mask 0)]
-turns a boolean mask of one sense into the other.
+is @racket[#t]. @racket[MultiheadAttention]'s @racket[#:key-padding-mask]
+and @racket[#:attn-mask] are such masks, @racket[#t] where a key is
+hidden, and the layer turns them around itself before it calls this
+function (@secref["attention-multihead-apply"]). A float mask is additive
+in both. @racket[(eq mask 0)] turns a boolean mask of one sense into the
+other.
 
 @torch-examples[
 (define attend (tril (ones 2 2 #:dtype 'bool)))
