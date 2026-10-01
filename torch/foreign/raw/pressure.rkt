@@ -8,6 +8,7 @@
          call-as-the-collector
          note-accounted!
          note-adopted!
+         note-unadopted!
          shadow-generation
          note-unaccounted!
          note-finalizer-run!
@@ -272,6 +273,11 @@
 (define (note-adopted! dev nbytes)
   (define a (account-of dev))
   (charge-shadow! a (max 0 (- (account-unaccounted a) nbytes))))
+
+;; and leaves it when that handle is released, the storage still held
+(define (note-unadopted! dev nbytes)
+  (define a (account-of dev))
+  (charge-shadow! a (+ (account-unaccounted a) nbytes)))
 
 ;; Between troughs a sample may only lower the shadow. On MPS the trough
 ;; charged the allocator's cache, and new tensors that reuse it, or a release

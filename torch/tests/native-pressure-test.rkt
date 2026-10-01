@@ -11,8 +11,9 @@
            (only-in "../foreign/raw/memory.rkt"
                     collect-and-drain! native-memory-use/fold)
            (only-in "../foreign/raw/pressure.rkt"
-                    allocator-reading call-as-the-collector collect-at-trough!
-                    drain-deadline install-device-queries! margin-over
+                    allocator-reading call-as-the-collector collect-and-wait!
+                    collect-at-trough! drain-deadline install-device-queries!
+                    margin-over
                     native-collect-budget native-collect-margin
                     native-memory-fraction release-spacing
                     reset-pressure-state! shadow-refresh lower-shadows!)
@@ -212,6 +213,24 @@
       (check-equal? (- recharged (cpu-unaccounted)) (* 4 mib)
                     "after a new refresh the gradient's bytes did not move")
       (check-true (and g g-again g-next #t)))
+    (settle!))
+
+  ;; the optimizer's handle on a gradient dies after the step; the parameter
+  ;; still holds the storage
+  (test-case "a gradient's handle gives its bytes back to the shadow when it dies"
+    (settle!)
+    (define w (zeros 1024 1024 #:requires-grad? #t))
+    (parameterize ([allocator-reading (lambda (_dev) (+ (cpu-bytes) (* 256 mib)))]
+                   [native-collect-margin idle-margin])
+      (backward! (sum (matmul w w))))
+    (define charged (cpu-unaccounted))
+    (define (take-and-drop!) (void (grad w)))
+    (take-and-drop!)
+    (check-equal? (- charged (cpu-unaccounted)) (* 4 mib) "the gradient was not adopted")
+    (collect-and-wait!)
+    (check-equal? (cpu-unaccounted) charged
+                  "the dead handle's bytes did not go back to the shadow")
+    (check-true (and w #t))
     (settle!))
 
   (test-case "the charge never counts a ledger byte twice"
