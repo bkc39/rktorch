@@ -1,10 +1,10 @@
 Start with .review-context/context.md. It says whether this is
 a full review of the pull request or an incremental review of
-one push, and names the stack when the pull request is one
-layer of one. For an incremental review, review only
-.review-context/changes.patch and comment only on lines it
-changes; the rest of the pull request was reviewed before. In a
-stack, review only this layer's diff against its base branch.
+one push and, when the pull request is one layer of a stack,
+which layers sit below and above it. For an incremental review,
+review only .review-context/changes.patch and comment only on
+lines it changes; the rest of the pull request was reviewed
+before.
 
 .review-context/threads.md holds every earlier review thread
 on this pull request, resolved or open, with the replies. Do

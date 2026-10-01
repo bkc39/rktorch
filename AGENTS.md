@@ -742,8 +742,9 @@ prompt (`.github/claude-review-prompt.md`) sends it here.
 - A pull request whose base is another pull request's branch is one layer
   of a stack. Review only its diff against that base. The layers below are
   separate pull requests, reviewed there, and their code is already on the
-  base branch: do not flag it, and do not ask for anything a lower layer
-  provides.
+  base branch: do not flag what that code already did, and do not ask for
+  anything a lower layer provides, but do flag what this layer's diff
+  breaks in it.
 
 ### Generated code
 
