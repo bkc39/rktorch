@@ -550,6 +550,30 @@
                              #:allocated (lambda (_dev) #f))
     (settle!))
 
+  ;; the stand-in's allocator holds a cache no release frees, so a release
+  ;; that runs reclaims nothing and backs the backstop off, while one the
+  ;; spacing holds back must leave the interval alone
+  (test-case "a release the spacing holds back does not back the backstop off"
+    (define (fired spacing)
+      (settle!)
+      (define before (collections))
+      (parameterize ([native-memory-fraction 1/2]
+                     [release-spacing spacing])
+        (define held (for/list ([_ (in-range 60)]) (zeros 1024 1024)))
+        (check-equal? (length held) 60))
+      (- (collections) before))
+    (install-device-queries! #:capacity (lambda (_dev) (* 128 mib))
+                             #:allocated (lambda (_dev) (+ (cpu-bytes) (* 256 mib)))
+                             #:release (lambda (_dev) #t))
+    (define spaced (fired +inf.0))
+    (define released (fired 0))
+    (check-true (> spaced released)
+                (format "~a backstop collections with the release held back, ~a without"
+                        spaced released))
+    (install-device-queries! #:capacity (lambda (_dev) #f)
+                             #:allocated (lambda (_dev) #f))
+    (settle!))
+
   ;; the stand-in's allocator holds the ledger plus `cache` bytes, which a
   ;; release may or may not give back
   (test-case "a release lowers the shadow by what it gave back, never raising it"

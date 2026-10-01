@@ -84,9 +84,16 @@
      (and (zero? rc) driver)]
     [else #f]))
 
+(define (mps-driver-bytes)
+  (define-values (rc _allocated driver _recommended) (tr-mps-memory-info/raw))
+  (if (zero? rc) driver 0))
+
+;; a release that found the cache already empty frees nothing, and says so
 (define (device-release dev)
   (and (eq? (device-type dev) 'mps)
-       (zero? (tr-mps-empty-cache/raw))))
+       (let ([before (mps-driver-bytes)])
+         (and (zero? (tr-mps-empty-cache/raw))
+              (< (mps-driver-bytes) before)))))
 
 (install-device-queries! #:capacity device-capacity
                          #:allocated device-allocated

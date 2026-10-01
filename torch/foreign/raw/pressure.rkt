@@ -72,7 +72,6 @@
 (define reclaim-fraction 1/20)
 (define capacity-retry-ms 1000.0)
 
-;; the least time in ms between two cache releases by the backstop on a device
 (define release-spacing (make-parameter 5000.0))
 
 ;; #f: the floor itself, kept between the two bounds below
@@ -364,8 +363,7 @@
   (define-values (_observed drained?) (collect-and-wait!))
   ;; after a drain that ran out of time, finalizers still to run would
   ;; refill the cache behind the release and spend its spacing for nothing
-  (when drained?
-    (release-cache! dev))
+  (define released (and drained? (release-cache! dev)))
   (sample-allocator! dev)
   (define after (pressure-reading dev))
   (call-with-ledger
@@ -376,12 +374,16 @@
      ;; A drain that ran out of time measured nothing, so it neither backs
      ;; the interval off nor counts as this device's check: the next
      ;; allocation looks again. Looking is cheap, and the mark still guards
-     ;; the collection itself.
+     ;; the collection itself. A release the spacing held back left the
+     ;; cache in the reading, which says nothing of the working set, so the
+     ;; interval stays where it was.
      (when drained?
        (set-account-interval! a
-                              (if (< reclaimed (* reclaim-fraction mark))
-                                  (min (* 2 interval) (* 2 mark))
-                                  base))
+                              (cond
+                                [(eq? released 'spaced) interval]
+                                [(< reclaimed (* reclaim-fraction mark))
+                                 (min (* 2 interval) (* 2 mark))]
+                                [else base]))
        (reset-checks!))
      (set-stats-backstop-collections!
       the-stats (add1 (stats-backstop-collections the-stats)))
@@ -391,16 +393,20 @@
 ;; collection frees tensors into that cache and the reading does not move,
 ;; so the backstop also empties it. Spaced in time, not bytes: emptying is
 ;; quick, but the blocks the next steps need then come from the driver again.
+;; Answers 'released, 'spaced when the spacing held it back, or #f.
 (define (release-cache! dev)
   (define release (queries-release the-queries))
-  (when (and release
-             (>= (current-inexact-milliseconds)
-                 (call-with-ledger
-                  (lambda () (account-release-after (account-of dev)))))
-             (release dev))
-    (define next (+ (current-inexact-milliseconds) (release-spacing)))
-    (call-with-ledger
-     (lambda () (set-account-release-after! (account-of dev) next)))))
+  (cond
+    [(not release) #f]
+    [(< (current-inexact-milliseconds)
+        (call-with-ledger (lambda () (account-release-after (account-of dev)))))
+     'spaced]
+    [(release dev)
+     (define next (+ (current-inexact-milliseconds) (release-spacing)))
+     (call-with-ledger
+      (lambda () (set-account-release-after! (account-of dev) next)))
+     'released]
+    [else #f]))
 
 ;; --- the troughs ---
 
