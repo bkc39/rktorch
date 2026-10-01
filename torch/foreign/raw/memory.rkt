@@ -16,6 +16,7 @@
                   live-bytes-by-device
                   note-accounted!
                   note-adopted!
+                  shadow-generation
                   note-finalizer-run!
                   note-unaccounted!
                   pressure-diagnostics
@@ -29,7 +30,7 @@
          finalizer-failures
          finalizer-diagnostics
          tensor-allocator
-         tensor-allocator/adopted
+         adopt-gradient!
          tensor-allocator/no-retry
          tensor-allocator/outputs
          tensor-allocator/outputs/no-retry
@@ -254,36 +255,42 @@
                           #:collect! [collect! collect-and-drain!])
   (retry-on-oom (lambda (rc) (= rc 1)) oom? collect!))
 
-(define (((accounted adopted?) wrapped) . args)
+(define ((accounted wrapped) . args)
   (define t (apply wrapped args))
   (when t
     (define dev (account! t))
     (when dev
-      (when adopted?
-        (call-with-ledger
-         (lambda ()
-           (define entry (hash-ref allocations t #f))
-           (when entry
-             (note-adopted! dev (allocation-nbytes entry))))))
       (collect-under-pressure! dev)))
   t)
+
+;; A gradient is storage the backward pass wrote before any handle pointed
+;; at it, so the shadow's last refresh may charge it. The first handle taken
+;; on a parameter's gradient since that refresh moves those bytes to the
+;; ledger; a later one, which the ledger charges again as it does any second
+;; handle, moves nothing.
+(define adopted-at (make-weak-hasheq))
+
+(define (adopt-gradient! param t)
+  (call-with-ledger
+   (lambda ()
+     (define now (shadow-generation))
+     (unless (eqv? (hash-ref adopted-at param #f) now)
+       (hash-set! adopted-at param now)
+       (define entry (hash-ref allocations t #f))
+       (when entry
+         (note-adopted! (allocation-device entry) (allocation-nbytes entry)))))))
 
 ;; The retry composes OUTSIDE the allocator wrap: ffi/unsafe/alloc runs
 ;; the wrapped call in atomic mode, where the drain's blocking wait is an
 ;; internal error.
 (define (tensor-allocator raw-fn)
-  ((accounted #f) ((oom-retry) ((allocator tr-tensor-free/finalizer) raw-fn))))
-
-;; For a handle onto storage that already existed natively, such as a
-;; gradient: the shadow may already charge its bytes.
-(define (tensor-allocator/adopted raw-fn)
-  ((accounted #t) ((oom-retry) ((allocator tr-tensor-free/finalizer) raw-fn))))
+  (accounted ((oom-retry) ((allocator tr-tensor-free/finalizer) raw-fn))))
 
 ;; No retry: re-running these after an OOM would repeat something the
 ;; first call already did — a draw from the global RNG stream, or an
 ;; in-place update of a tensor the caller handed in.
 (define (tensor-allocator/no-retry raw-fn)
-  ((accounted #f) ((allocator tr-tensor-free/finalizer) raw-fn)))
+  (accounted ((allocator tr-tensor-free/finalizer) raw-fn)))
 
 (define adopt-handle ((allocator tr-tensor-free/finalizer) values))
 

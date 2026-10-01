@@ -199,7 +199,17 @@
       (define g (grad w))
       (check-equal? (- charged (cpu-unaccounted)) (* 4 mib)
                     "the gradient is charged as a tensor and in the shadow")
-      (check-true (and g #t)))
+      ;; clipping and then the optimizer each take the gradient
+      (define g-again (grad w))
+      (check-equal? (- charged (cpu-unaccounted)) (* 4 mib)
+                    "a second handle on the same gradient moved its bytes again")
+      ;; the next step's refresh charges the gradient anew
+      (backward! (sum (matmul w w)))
+      (define recharged (cpu-unaccounted))
+      (define g-next (grad w))
+      (check-equal? (- recharged (cpu-unaccounted)) (* 4 mib)
+                    "after a new refresh the gradient's bytes did not move")
+      (check-true (and g g-again g-next #t)))
     (settle!))
 
   (test-case "the charge never counts a ledger byte twice"

@@ -19,6 +19,7 @@
                   tr-tensor-requires-grad/raw
                   tr-tensor-sub!/raw
                   tr-tensor-zero!/raw)
+         (only-in "raw/memory.rkt" adopt-gradient!)
          (only-in "raw/pressure.rkt"
                   collect-at-trough! native-collect-at-troughs
                   refresh-shadows!)
@@ -55,7 +56,9 @@
       (refresh-shadows!)))
 
 (define/contract-out (grad t) (-> tensor? tensor?)
-  (wrap-tensor (check-handle 'grad (tr-tensor-grad/raw t))))
+  (define g (check-handle 'grad (tr-tensor-grad/raw t)))
+  (adopt-gradient! t g)
+  (wrap-tensor g))
 
 (define/contract-out (has-grad? t) (-> tensor? boolean?)
   (define-values (rc on?) (tr-tensor-has-grad/raw t))
