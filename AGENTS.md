@@ -767,7 +767,8 @@ master's copy.
 - PyTorch parity: an allowlist op needs a recipe in
   `generated-parity-test.rkt`, and a `'device-only` one its own
   device-guarded test; a hand-written op needs a python cross-test check
-  beside its gtest golden.
+  beside its gtest golden; a new example comes with its Python twin
+  (`examples/python/`) and its runner (`examples/test/`).
 - Conventions: contracts at the definition site ("Validating arguments");
   an op named like a racket/base, racket/list or racket/math function
   defers to it for anything but a tensor; Racket modules within the
