@@ -169,7 +169,8 @@ class Stack(unittest.TestCase):
         text = rc.stack_markdown(layers, 2, "a")
         self.assertIn("- #1 bottom (merged), on `master`", text)
         self.assertIn("- #2 layer 2 (this pull request), on `a`", text)
-        self.assertIn("do flag anything this layer's changes break", text)
+        self.assertIn("rule for stacked pull requests in `review-rules.md`",
+                      text)
 
     def test_a_failed_lookup_leaves_the_stack_out(self):
         failure = subprocess.CalledProcessError(1, "gh")
@@ -229,6 +230,26 @@ class LastReviewed(unittest.TestCase):
         self.assertIn("uses: actions/upload-artifact@", text)
         self.assertIn("name: ${{ steps.context.outputs.record }}", text)
         self.assertIn("include-hidden-files: true", text)
+
+
+class ReviewRules(unittest.TestCase):
+    def rules(self, agents):
+        with mock.patch.object(rc, "run", lambda *args, check=True: agents):
+            return rc.review_rules("master")
+
+    def test_the_section_ends_at_the_next_top_level_heading(self):
+        agents = ("# AGENTS.md\n\n## CI\n\nci\n\n## Code Review Rules\n\n"
+                  "### Stacks\n\n- one layer\n\n## Later\n\nlater\n")
+        self.assertEqual(self.rules(agents),
+                         "## Code Review Rules\n\n### Stacks\n\n- one layer\n")
+
+    def test_the_section_may_end_the_file(self):
+        agents = "# AGENTS.md\n\n## Code Review Rules\n\n- last\n"
+        self.assertEqual(self.rules(agents), "## Code Review Rules\n\n- last\n")
+
+    def test_a_master_without_the_section_says_so(self):
+        self.assertIn("has no `## Code Review Rules` section",
+                      self.rules("# AGENTS.md\n\n## CI\n"))
 
 
 class Retarget(unittest.TestCase):
