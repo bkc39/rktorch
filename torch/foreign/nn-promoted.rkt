@@ -1,7 +1,8 @@
 #lang racket/base
 
 (require (only-in racket/contract/base
-                  -> ->* ->i non-empty-listof or/c unsupplied-arg?)
+                  -> ->* ->i </c >=/c and/c non-empty-listof or/c
+                  unsupplied-arg?)
          (prefix-in g: (only-in "../generated.rkt"
                                 adaptive-avg-pool2d
                                 avg-pool2d
@@ -19,13 +20,15 @@
                                 masked-fill-scalar
                                 max-pool2d
                                 repeat-interleave-self-int
+                                scaled-dot-product-attention
                                 silu
                                 tril
                                 triu))
          (only-in "../private/contract.rkt" define/contract-out)
          (only-in "contracts.rkt"
-                  image-batch/c index/c nonneg-size-1d/c nonneg-size/c
-                  pool-size/c pos-size-1d/c pos-size/c)
+                  attention-input/c image-batch/c index/c nonneg-size-1d/c
+                  nonneg-size/c pool-size/c pos-size-1d/c pos-size/c)
+         (only-in "ops.rkt" tensor-shape)
          (only-in "size.rkt" ->1d ->2d)
          (only-in "structs.rkt" tensor?))
 
@@ -198,6 +201,33 @@
 (define/contract-out (linear input weight #:bias [bias #f]) ;; noqa
   (->* [tensor? tensor?] [#:bias (or/c tensor? #f)] tensor?)
   (g:linear input weight bias))
+
+(define (size-from-end t i)
+  (list-ref (reverse (tensor-shape t)) i))
+
+(define/contract-out (scaled-dot-product-attention query key value ;; noqa
+                                                   #:mask [mask #f]
+                                                   #:causal? [causal? #f]
+                                                   #:dropout [dropout 0.0]
+                                                   #:scale [scale #f])
+  (->i ([query attention-input/c]
+        [key attention-input/c]
+        [value attention-input/c])
+       (#:mask [mask (or/c tensor? #f)]
+        #:causal? [causal? boolean?]
+        #:dropout [dropout (and/c real? (>=/c 0) (</c 1))]
+        #:scale [scale (or/c real? #f)])
+       #:pre/name (query key) "query and key end in the same size, E"
+       (= (size-from-end query 0) (size-from-end key 0))
+       #:pre/name (key value) "key and value have the same length, S"
+       (= (size-from-end key 1) (size-from-end value 1))
+       #:pre/name (mask causal?)
+       "either #:mask or #:causal?, not both"
+       (not (and (supplied mask) (supplied causal?)))
+       [result tensor?])
+  (g:scaled-dot-product-attention query key value mask
+                                  (exact->inexact dropout) causal?
+                                  (and scale (exact->inexact scale)) #f))
 
 (define/contract-out (leaky-relu self #:negative-slope [negative-slope 0.01]) ;; noqa
   (->* [tensor?] [#:negative-slope real?] tensor?)

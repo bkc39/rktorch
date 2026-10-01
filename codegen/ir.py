@@ -7,8 +7,9 @@ and a return of one or more Tensors (several come back through out
 pointers beside an integer status). The tranche-2 (#3) additions widen this to
 optional Tensor/int/IntArrayRef/ScalarType (marshalled as a NULL pointer
 or a sentinel), tranche 4 (#84) to optional Scalar (a double plus a
-presence flag), and in-place ops (a mutable receiver + integer status,
-the tr_tensor_sub_ shape). Everything else is skipped with a reason --
+presence flag), tranche 8 (#210) to optional float (the same encoding),
+and in-place ops (a mutable receiver + integer status, the
+tr_tensor_sub_ shape). Everything else is skipped with a reason --
 the generator reports skips instead of guessing.
 """
 
@@ -40,6 +41,8 @@ OPTIONAL_INT64 = "optional-int64"
 OPTIONAL_INT_ARRAY = "optional-int-array"
 OPTIONAL_DTYPE = "optional-dtype"
 OPTIONAL_SCALAR = "optional-scalar"
+# Tranche 8 (#210): float? -> double + presence flag, like Scalar?.
+OPTIONAL_DOUBLE = "optional-double"
 # Tranche 7 (#153): a tr_generator handle, NULL for the global stream.
 OPTIONAL_GENERATOR = "optional-generator"
 
@@ -126,6 +129,8 @@ def _param_kind(ty) -> str | None:
                 return OPTIONAL_DTYPE
             if elem.name is BaseTy.Scalar:
                 return OPTIONAL_SCALAR
+            if elem.name is BaseTy.float:
+                return OPTIONAL_DOUBLE
             if elem.name is BaseTy.Generator:
                 return OPTIONAL_GENERATOR
         if _int_list(elem):
