@@ -241,13 +241,18 @@ the CPU, whose allocator keeps no count.
   what the refresh frees counts toward `pressure-reclaimed`.
 - A gradient is storage the backward pass wrote before any handle pointed
   at it, so the trough's refresh can already charge it. The first `grad`
-  taken on a parameter since the last refresh (`adopt-gradient!`, keyed by
-  the parameter and a generation every refresh bumps) takes the bytes it
-  puts on the ledger off the shadow, so wrapping it moves the charge
-  instead of doubling it. A second `grad` in the same step, from clipping
-  and then the optimizer say, moves nothing: the ledger charges that
-  handle again, as it does any second handle on shared storage, but the
-  shadow keeps covering the rest of what the graph and libtorch hold.
+  taken on a parameter since the last refresh takes the bytes it puts on
+  the ledger off the shadow, so wrapping it moves the charge instead of
+  doubling it. `tensor-allocator/gradient` does this between accounting
+  the handle and the pressure check (`adopt-gradient!`, keyed by the
+  parameter and a generation every refresh bumps), and takes at most what
+  the shadow holds. A second `grad` in the same step, from clipping and
+  then the optimizer say, moves nothing: the ledger charges that handle
+  again, as it does any second handle on shared storage, but the shadow
+  keeps covering the rest of what the graph and libtorch hold. The ledger
+  entry records what its adoption took, and releasing the handle gives
+  exactly that back to the shadow, since the parameter still holds the
+  gradient (`zero-grad!` zeroes it in place).
   `reclaim-native-memory!` refreshes it too, once the caches are
   emptied, so memory a dropped graph held stops being charged at once.
   An allocator that cannot answer at a refresh leaves its device's charge

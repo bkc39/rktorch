@@ -231,6 +231,21 @@
     (check-true (and w #t))
     (settle!))
 
+  ;; with no charge to move (no allocator figure, as on the CPU), there is
+  ;; nothing for the release to give back
+  (test-case "a gradient the shadow never charged gives nothing back"
+    (settle!)
+    (define w (zeros 1024 1024 #:requires-grad? #t))
+    (parameterize ([native-collect-margin idle-margin])
+      (backward! (sum (matmul w w))))
+    (define (take-and-drop!) (void (grad w)))
+    (take-and-drop!)
+    (collect-and-wait!)
+    (check-equal? (cpu-unaccounted) 0
+                  "a release gave back bytes its adoption never took")
+    (check-true (and w #t))
+    (settle!))
+
   (test-case "the charge never counts a ledger byte twice"
     (settle!)
     (define held (for/list ([_ (in-range 4)]) (zeros 1024 1024)))

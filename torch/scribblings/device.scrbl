@@ -366,7 +366,8 @@ which may have freed storage only a dropped graph held. A device whose
 allocator cannot answer at that moment keeps its previous charge. A
 gradient is storage the backward pass wrote before any tensor pointed at
 it, so taking it with @racket[grad] moves its bytes from this charge to the
-ledger rather than charging them twice. Storage that only the autograd graph or libtorch
+ledger rather than charging them twice, and releasing that tensor moves
+them back, since the parameter still holds the gradient. Storage that only the autograd graph or libtorch
 itself holds reaches no tensor, so this is the only way the collector's own
 schedule learns of it. It is read only at a trough, because a charge that
 followed the graph through a forward pass would push Racket past its

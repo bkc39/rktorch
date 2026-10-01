@@ -113,7 +113,7 @@
     (call-with-ledger note-finalizer-run!)
     (release t)))
 
-(struct allocation (phantom nbytes device [adopted? #:mutable]))
+(struct allocation (phantom nbytes device [adopted #:mutable]))
 
 (define allocations (make-weak-hasheq))
 
@@ -139,7 +139,7 @@
     (and (zero? nb-rc)
          (zero? dev-rc)
          (let* ([dev (device type (if (eq? type 'cpu) 0 index))]
-                [entry (allocation (make-phantom-bytes nbytes) nbytes dev #f)])
+                [entry (allocation (make-phantom-bytes nbytes) nbytes dev 0)])
            (call-with-ledger
             (lambda ()
               (hash-set! allocations t entry)
@@ -156,8 +156,8 @@
          (hash-remove! allocations t)
          (note-unaccounted! (allocation-device a) (allocation-nbytes a))
          ;; the parameter still holds the gradient this handle took over
-         (when (allocation-adopted? a)
-           (note-unadopted! (allocation-device a) (allocation-nbytes a))))))))
+         (when (positive? (allocation-adopted a))
+           (note-unadopted! (allocation-device a) (allocation-adopted a))))))))
 
 ;; An in-place move (tr_tensor_to_) changes the device and byte count under
 ;; the same handle, so its ledger entry is replaced rather than added to. When
@@ -175,7 +175,7 @@
 (define (restore-entry! t old)
   (define nbytes (allocation-nbytes old))
   (define dev (allocation-device old))
-  (define entry (allocation (make-phantom-bytes nbytes) nbytes dev #f))
+  (define entry (allocation (make-phantom-bytes nbytes) nbytes dev 0))
   (call-with-ledger
    (lambda ()
      (hash-set! allocations t entry)
@@ -288,8 +288,9 @@
      (define entry (hash-ref allocations t #f))
      (when (and entry (not (eqv? (hash-ref adopted-at param #f) now)))
        (hash-set! adopted-at param now)
-       (set-allocation-adopted?! entry #t)
-       (note-adopted! (allocation-device entry) (allocation-nbytes entry))))))
+       (set-allocation-adopted!
+        entry
+        (note-adopted! (allocation-device entry) (allocation-nbytes entry)))))))
 
 ;; The retry composes OUTSIDE the allocator wrap: ffi/unsafe/alloc runs
 ;; the wrapped call in atomic mode, where the drain's blocking wait is an
