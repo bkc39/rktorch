@@ -1009,7 +1009,11 @@
        (for ([a (in-list (tensor->list rg))]
              [b (in-list (hash-ref jg 'values))]
              [i (in-naturals)])
-         (check-= a b tol (format "gelu parity ~a" i))))
+         (check-= a b tol (format "gelu parity ~a" i)))
+       (for ([a (in-list (tensor->list (gelu xg #:approximate 'tanh)))]
+             [b (in-list (hash-ref jg 'tanh))]
+             [i (in-naturals)])
+         (check-= a b tol (format "gelu tanh parity ~a" i))))
      (let ()
        (define jt (python-check "transpose_all.py"))
        (manual-seed! 0)

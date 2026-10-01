@@ -74,7 +74,7 @@ void torchrkt_c_api_compile_check(void) {
   tr_tensor* (*cat)(const tr_tensor* const*, int64_t, int64_t) = tr_cat;
   tr_tensor* (*add)(const tr_tensor*, const tr_tensor*) = tr_add;
   tr_tensor* (*add_scalar)(const tr_tensor*, double) = tr_add_scalar;
-  tr_tensor* (*gelu)(const tr_tensor*) = tr_gelu;
+  tr_tensor* (*gelu)(const tr_tensor*, const char*) = tr_gelu;
   tr_tensor* (*softmax)(const tr_tensor*, int64_t) = tr_softmax;
   tr_tensor* (*matmul)(const tr_tensor*, const tr_tensor*) = tr_matmul;
   int (*item)(const tr_tensor*, double*) = tr_tensor_item;
@@ -245,6 +245,9 @@ void torchrkt_c_api_compile_check(void) {
   int (*gen_gru)(const tr_tensor*, const tr_tensor*, const tr_tensor* const*,
                  int64_t, bool, int64_t, double, bool, bool, bool, tr_tensor**,
                  tr_tensor**) = tr_gen_gru_input;
+  tr_tensor* (*gen_sdpa)(const tr_tensor*, const tr_tensor*, const tr_tensor*,
+                         const tr_tensor*, double, bool, double, bool, bool) =
+      tr_gen_scaled_dot_product_attention;
   int (*cuda_available)(void) = tr_cuda_is_available;
   int (*cuda_count)(void) = tr_cuda_device_count;
   int (*cuda_stats)(int64_t, int64_t*, int64_t*, int64_t*) =
@@ -303,6 +306,7 @@ void torchrkt_c_api_compile_check(void) {
   (void)cat;
   (void)add;
   (void)add_scalar;
+  (void)gelu;
   (void)softmax;
   (void)matmul;
   (void)item;
@@ -390,6 +394,7 @@ void torchrkt_c_api_compile_check(void) {
   (void)gen_lstm;
   (void)gen_gru;
   (void)gen_flatten_weight;
+  (void)gen_sdpa;
   (void)cuda_available;
   (void)cuda_count;
   (void)cuda_stats;

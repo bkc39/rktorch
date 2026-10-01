@@ -169,7 +169,7 @@ with `backward!` outside the form as PyTorch recommends). From
   batch: `convert-image-dtype` (uint8 0-255 to float 0-1 and back, the
   torchvision scaling), `resize #:antialias?` (short side or `(h w)`,
   float only; two matmuls with host-computed bilinear or Pillow-filter
-  weights, since `upsample_bilinear2d` needs the unmarshalled `float?`),
+  weights; `upsample_bilinear2d` is not bound),
   `center-crop` (offsets round half to even), `normalize`,
   `imagenet-normalize`, `imagenet-mean`, `imagenet-std`
 - pretrained weights (`torch/vision/weights.rkt`, #199):
@@ -259,8 +259,13 @@ clamp`, tranche 4, #84; `upsample-nearest2d` over `repeat_interleave`, tranche
 #152; `Linear` runs on the fused `linear`, so autocast casts the whole affine
 map; `BatchNorm2d`/`BatchNorm1d` keep `running-mean`, `running-var` and
 `num-batches-tracked` as `Buffer`s that ATen updates in place in `'train`
-mode) live on `torch` beside the other functional ops; the GPT
-causal-mask idiom is `(masked-fill scores (eq (tril (ones T T)) 0) -inf.0)`. `define-layer` is the Python-style
+mode) and attention (`scaled-dot-product-attention #:mask #:causal?
+#:dropout #:scale`, tranche 8, #210, the fused kernel behind
+`F.scaled_dot_product_attention`; `gelu #:approximate 'tanh`, GPT-2's form,
+on the hand-written shim) live on `torch` beside the other functional ops;
+the GPT causal-mask idiom is `(masked-fill scores (eq (tril (ones T T)) 0)
+-inf.0)`, whose mask is `#t` = hidden, while the fused kernel's boolean
+`#:mask` is `#t` = attend, as PyTorch's function is. `define-layer` is the Python-style
 `nn.Module` analog: `#:init` is the constructor body and assigns declared
 fields with `set!`, a field's value classifies it at construction
 (`Parameter?`, `Buffer?`, `layer?`, `#f` for absent, anything else plain),
@@ -416,7 +421,7 @@ is differentiable both ways, rather than routing darwin to the CPU.
   an int status plus one `tr_tensor**` out pointer per return, every one
   NULL unless the whole call succeeded) every op body reduces to — new ops must use them rather
   than hand-rolling try/catch.
-- `tests/torchrkt/{random,ops,autograd,generated_golden,generated_tranche2..7}_test.cpp`
+- `tests/torchrkt/{random,ops,autograd,generated_golden,generated_tranche2..8}_test.cpp`
   — GoogleTest goldens per family (generated families get a C-boundary
   golden: a correctness case + a null/length-guard case).
   `c_api_compile_test.c` proves the headers are valid C (add a
@@ -534,8 +539,8 @@ Conventions:
   (Tensor / Scalar→double / int64 / bool / IntArrayRef / TensorList args,
   one or more Tensor returns). Unsupported signatures are skipped with a report —
   widening the IR is a generator change, not a hand-written shim.
-- Optional *types* are in the IR: `Tensor?` is a NULL pointer, `int?` and
-  `Scalar?` carry a presence flag, `int[]?` a length plus flag, and
+- Optional *types* are in the IR: `Tensor?` is a NULL pointer, `int?`,
+  `Scalar?` and `float?` carry a presence flag, `int[]?` a length plus flag, and
   `ScalarType?` a -1 sentinel, and `Generator?` a `tr_generator` handle
   (NULL for the global stream; an op that draws still needs the allowlist
   `rng` flag). In-place ops (`add_`) emit a mutable receiver

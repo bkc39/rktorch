@@ -16,6 +16,7 @@ know PyTorch's API.
 @include-section["guide/autograd.scrbl"]
 @include-section["guide/layers.scrbl"]
 @include-section["guide/training.scrbl"]
+@include-section["guide/transformers.scrbl"]
 @include-section["guide/pretrained.scrbl"]
 @include-section["guide/finetune.scrbl"]
 @include-section["guide/examples.scrbl"]

@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "torchrkt/c_api/generated/attention.h"
 #include "torchrkt/c_api/generated/compare.h"
 #include "torchrkt/c_api/generated/conv.h"
 #include "torchrkt/c_api/generated/inplace.h"

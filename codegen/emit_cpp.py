@@ -7,6 +7,7 @@ from .ir import (
     DOUBLE,
     INT64,
     INT_ARRAY,
+    OPTIONAL_DOUBLE,
     OPTIONAL_DTYPE,
     OPTIONAL_GENERATOR,
     OPTIONAL_INT64,
@@ -40,12 +41,14 @@ _C_DECLS = {
     OPTIONAL_INT_ARRAY: "const int64_t* {n}, int64_t {n}_len, bool {n}_has",
     OPTIONAL_DTYPE: "int32_t {n}",  # -1 == c10::nullopt
     OPTIONAL_SCALAR: "double {n}, bool {n}_has",
+    OPTIONAL_DOUBLE: "double {n}, bool {n}_has",
     OPTIONAL_GENERATOR: "const tr_generator* {n}",  # NULL == global stream
 }
 
 # Kinds whose C decl mentions `bool`, so the header needs <stdbool.h>.
 _BOOL_DECL_KINDS = frozenset(
-    {BOOL, OPTIONAL_INT64, OPTIONAL_INT_ARRAY, OPTIONAL_SCALAR})
+    {BOOL, OPTIONAL_INT64, OPTIONAL_INT_ARRAY, OPTIONAL_SCALAR,
+     OPTIONAL_DOUBLE})
 
 
 def _c_decl(p: Param, *, receiver: bool, header: bool = False) -> str:
@@ -102,6 +105,9 @@ def _arg_expr(p: Param) -> str:
     if p.kind == OPTIONAL_SCALAR:
         return (f"{p.name}_has ? c10::optional<at::Scalar>({p.name}) "
                 f": c10::optional<at::Scalar>()")
+    if p.kind == OPTIONAL_DOUBLE:
+        return (f"{p.name}_has ? c10::optional<double>({p.name}) "
+                f": c10::optional<double>()")
     if p.kind == OPTIONAL_GENERATOR:
         return (f"{p.name} ? c10::optional<at::Generator>({p.name}->value) "
                 f": c10::optional<at::Generator>()")
