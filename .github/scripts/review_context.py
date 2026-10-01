@@ -1,6 +1,6 @@
-"""The review bot's prompt and context: full, incremental or none, the patch
-since the last review, the stack the pull request belongs to, the earlier
-threads, and master's review rules; see claude-code-review.yml.
+"""The review bot's prompt and context: full, incremental, none or held, the
+patch since the last review, the stack the pull request belongs to, the
+earlier threads, and master's review rules; see claude-code-review.yml.
 
     python3 .github/scripts/review_context.py OUT_DIR
 """
@@ -16,6 +16,12 @@ PROMPT = ".github/claude-review-prompt.md"
 RECORD = "reviewed-{pr}"
 
 RULES = "## Code Review Rules"
+
+ACTION_CONFIG = [".claude", ".mcp.json", ".claude.json", ".gitmodules",
+                 ".ripgreprc", "CLAUDE.md", "CLAUDE.local.md", ".husky"]
+
+LOOKUP_ERRORS = (subprocess.CalledProcessError, KeyError, TypeError,
+                 ValueError)
 
 THREADS = """
 query($owner: String!, $name: String!, $pr: Int!, $after: String) {
@@ -85,12 +91,19 @@ def succeeds(*args):
     return subprocess.run(args, capture_output=True).returncode == 0
 
 
-def graphql(query, repo, pr):
+def graphql(query, **variables):
+    args = ["gh", "api", "graphql", "-f", f"query={query}"]
+    for key, value in variables.items():
+        if value is not None:
+            args += ["-F" if isinstance(value, int) else "-f",
+                     f"{key}={value}"]
+    return json.loads(run(*args))["data"]
+
+
+def pull_request(query, repo, pr, **variables):
     owner, name = repo.split("/")
-    return json.loads(run(
-        "gh", "api", "graphql", "-f", f"query={query}", "-f", f"owner={owner}",
-        "-f", f"name={name}", "-F", f"pr={pr}"))["data"]["repository"][
-            "pullRequest"]
+    return graphql(query, owner=owner, name=name, pr=pr,
+                   **variables)["repository"]["pullRequest"]
 
 
 def pulls(repo, **query):
@@ -98,28 +111,34 @@ def pulls(repo, **query):
     return json.loads(run("gh", "api", f"repos/{repo}/pulls?{query}"))
 
 
-def last_reviewed(repo, pr, run_id):
+def last_reviewed(repo, pr):
     rows = run("gh", "api", "--paginate",
                f"repos/{repo}/actions/artifacts?per_page=100"
                f"&name={RECORD.format(pr=pr)}",
-               "--jq", ".artifacts[] | [.created_at, .workflow_run.id, "
-               ".workflow_run.head_sha] | @tsv").splitlines()
-    reviews = sorted(row.split("\t") for row in rows)
-    for created, run_id_, head in reversed(reviews):
-        if run_id_ != run_id:
-            return head, created
-    return None, None
+               "--jq", ".artifacts[] | [.workflow_run.id, "
+               ".workflow_run.head_sha] | @tsv").split()
+    if not rows:
+        return None, None
+    run_id, head = max(zip(map(int, rows[0::2]), rows[1::2]))
+    started = json.loads(run("gh", "api", f"repos/{repo}/actions/runs/{run_id}"))
+    return head, started["created_at"]
+
+
+def lower_layer_merged(repo, branch, retargeted_at):
+    owner = repo.split("/")[0]
+    earlier = [p for p in pulls(repo, state="all", head=f"{owner}:{branch}")
+               if p["created_at"] < retargeted_at]
+    layer = max(earlier, key=lambda p: p["created_at"], default=None)
+    return bool(layer and layer["merged_at"])
 
 
 def unmerged_bases_left(repo, pr, default, since):
-    owner = repo.split("/")[0]
-    left = {event["previousRefName"]
-            for event in graphql(RETARGETS, repo, pr)["timelineItems"]["nodes"]
-            if event["createdAt"] > since
-            and event["previousRefName"] != default}
-    return sorted(base for base in left
-                  if not any(p["merged_at"] for p in
-                             pulls(repo, state="all", head=f"{owner}:{base}")))
+    events = pull_request(RETARGETS, repo, pr)["timelineItems"]["nodes"]
+    return sorted({e["previousRefName"] for e in events
+                   if e["createdAt"] > since
+                   and e["previousRefName"] != default
+                   and not lower_layer_merged(repo, e["previousRefName"],
+                                              e["createdAt"])})
 
 
 def review_mode(before, after):
@@ -166,6 +185,12 @@ def changes(before, after, exclude):
     return "\n".join(parts)
 
 
+def config_from_base(base, default):
+    return base != default and not succeeds(
+        "git", "diff", "--quiet", f"origin/{default}...origin/{base}", "--",
+        *ACTION_CONFIG)
+
+
 def layer(pr):
     return {"number": pr["number"], "title": pr["title"],
             "state": pr["state"].lower(),
@@ -173,15 +198,18 @@ def layer(pr):
 
 
 def native_stack(repo, pr):
-    stack = graphql(STACK, repo, pr)["stack"]
+    stack = pull_request(STACK, repo, pr)["stack"]
     if not stack:
         return None
     entries = sorted(stack["entries"]["nodes"], key=lambda e: e["position"])
     return [layer(e["pullRequest"]) for e in entries if e["pullRequest"]]
 
 
-def branch_chain(pr, owner, default, find):
-    below, branch, seen = [], pr["base"]["ref"], {pr["head"]["ref"], default}
+def branch_chain(pr, repo, default, find):
+    owner, head = repo.split("/")[0], pr["head"]["ref"]
+    if (pr["head"].get("repo") or {}).get("full_name") != repo:
+        return [layer(pr)]
+    below, branch, seen = [], pr["base"]["ref"], {head, default}
     while branch not in seen:
         seen.add(branch)
         lower = find(head=f"{owner}:{branch}")
@@ -189,7 +217,7 @@ def branch_chain(pr, owner, default, find):
             break
         below.insert(0, lower[0])
         branch = lower[0]["base"]["ref"]
-    above, frontier = [], [pr["head"]["ref"]]
+    above, frontier = [], [] if head == default else [head]
     while frontier:
         for upper in find(base=frontier.pop(0)):
             if upper["head"]["ref"] not in seen:
@@ -203,13 +231,11 @@ def stack_layers(repo, pr, default):
     lookups = [
         ("native stack", lambda: native_stack(repo, pr["number"])),
         ("branch chain", lambda: branch_chain(
-            pr, repo.split("/")[0], default,
-            lambda **query: pulls(repo, **query)))]
+            pr, repo, default, lambda **query: pulls(repo, **query)))]
     for source, lookup in lookups:
         try:
             layers = lookup()
-        except (subprocess.CalledProcessError, KeyError, TypeError,
-                ValueError) as e:
+        except LOOKUP_ERRORS as e:
             print(f"::warning::{source} lookup failed: {e}")
             continue
         if layers:
@@ -233,9 +259,10 @@ def stack_markdown(layers, number, base):
             "each on the base branch named, lowest first:\n\n"
             + "\n".join(lines) + "\n\n"
             f"The layers below this one are already on `{base}` and in the "
-            "checkout; the layers above build on this one. Within the scope "
-            "above, the rule for stacked pull requests in `review-rules.md` "
-            "says what to leave to the other layers.\n\n")
+            "checkout; the layers above build on this one. Each layer is "
+            "reviewed on its own pull request. Within the scope above, the "
+            "rule for stacked pull requests in `review-rules.md` says what "
+            "to leave to the other layers.\n\n")
 
 
 def review_rules(default):
@@ -250,25 +277,17 @@ def all_comments(thread):
     comments = thread["comments"]
     nodes = list(comments["nodes"])
     while comments["pageInfo"]["hasNextPage"]:
-        comments = json.loads(run(
-            "gh", "api", "graphql", "-f", f"query={MORE_COMMENTS}",
-            "-f", f"id={thread['id']}",
-            "-f", f"after={comments['pageInfo']['endCursor']}"))["data"][
-                "node"]["comments"]
+        comments = graphql(MORE_COMMENTS, id=thread["id"],
+                           after=comments["pageInfo"]["endCursor"])["node"][
+                               "comments"]
         nodes += comments["nodes"]
     return nodes
 
 
 def threads(repo, pr):
-    owner, name = repo.split("/")
     nodes, cursor = [], None
     while True:
-        args = ["gh", "api", "graphql", "-f", f"query={THREADS}",
-                "-f", f"owner={owner}", "-f", f"name={name}", "-F", f"pr={pr}"]
-        if cursor:
-            args += ["-f", f"after={cursor}"]
-        page = json.loads(run(*args))["data"]["repository"]["pullRequest"][
-            "reviewThreads"]
+        page = pull_request(THREADS, repo, pr, after=cursor)["reviewThreads"]
         for thread in page["nodes"]:
             thread["comments"] = all_comments(thread)
         nodes += page["nodes"]
@@ -293,6 +312,11 @@ def threads_markdown(nodes):
     return "\n".join(out)
 
 
+def write(out_dir, name, text):
+    with open(os.path.join(out_dir, name), "w") as f:
+        f.write(text)
+
+
 def main():
     out_dir = sys.argv[1]
     os.makedirs(out_dir, exist_ok=True)
@@ -302,34 +326,38 @@ def main():
     pr = json.loads(run("gh", "api", f"repos/{repo}/pulls/{number}"))
     base = pr["base"]["ref"]
     exclude = sorted({f"origin/{base}", f"origin/{default}"})
-    before, reviewed_at = last_reviewed(repo, number, env["GITHUB_RUN_ID"])
+    before, reviewed_at = last_reviewed(repo, number)
     before = before or ""
     mode = review_mode(before, after)
-    left = (unmerged_bases_left(repo, number, default, reviewed_at)
-            if mode == "incremental" else [])
-    if left:
-        mode = "full"
+    reason = ("no review has run on this pull request yet, or its history "
+              "was rewritten since")
+    if mode == "incremental":
+        try:
+            left = unmerged_bases_left(repo, number, default, reviewed_at)
+        except LOOKUP_ERRORS as e:
+            print(f"::warning::retarget lookup failed: {e}")
+            left, mode, reason = [], "full", "the retarget lookup failed"
+        if left:
+            mode, reason = "full", (
+                "since the last review this pull request moved off "
+                f"{', '.join(f'`{b}`' for b in left)}, whose pull request did "
+                "not merge, so commits reviewed only there are now part of "
+                "this one")
     if mode == "incremental":
         patch = changes(before, after, exclude)
         if patch.strip():
-            with open(os.path.join(out_dir, "changes.patch"), "w") as f:
-                f.write(patch)
+            write(out_dir, "changes.patch", patch)
         else:
             mode = "none"
-    source, layers = stack_layers(repo, pr, default)
-    with open(os.path.join(out_dir, "threads.md"), "w") as f:
-        f.write(threads_markdown(threads(repo, number)))
-    with open(os.path.join(out_dir, "review-rules.md"), "w") as f:
-        f.write(review_rules(default))
-    full = (f"Full review: since the last review this pull request moved off "
-            f"{', '.join(f'`{b}`' for b in left)}, whose pull request did not "
-            "merge, so commits reviewed only there are now part of this one."
-            if left else
-            "Full review: no review has run on this pull request yet, or its "
-            "history was rewritten since.")
+    if mode != "none" and config_from_base(base, default):
+        mode = "held"
+        print(f"::warning::not reviewed: the action restores its "
+              f"configuration ({', '.join(ACTION_CONFIG)}) from `{base}`, "
+              f"which changes it from {default}'s; this layer is reviewed "
+              "once that change lands")
     summary = {
-        "full": f"{full} Review the whole diff against `{base}` "
-                "(`gh pr diff`).",
+        "full": f"Full review: {reason}. Review the whole diff against "
+                f"`{base}` (`gh pr diff`).",
         "incremental": f"Incremental review of {before[:7]}..{after[:7]}: "
                        f"{before[:7]} is the head the last review covered, "
                        "and the rest of the pull request was reviewed then. "
@@ -338,13 +366,20 @@ def main():
                        "with what their merge commits change.",
         "none": "Nothing to review: the commits since the last review add "
                 "nothing of this pull request's own.",
+        "held": f"Held: `{base}` changes the configuration the action "
+                "restores from it.",
     }[mode]
-    with open(os.path.join(out_dir, "context.md"), "w") as f:
-        f.write(f"# Review context\n\n{summary}\n\n"
-                + stack_markdown(layers, number, base)
-                + "`threads.md` lists every earlier review thread on this "
-                "pull request with its replies; `review-rules.md` is the "
-                f"Code Review Rules section of {default}'s AGENTS.md.\n")
+    source, layers = "no stack", []
+    if mode in ("full", "incremental"):
+        source, layers = stack_layers(repo, pr, default)
+        write(out_dir, "threads.md", threads_markdown(threads(repo, number)))
+        write(out_dir, "review-rules.md", review_rules(default))
+    write(out_dir, "context.md",
+          f"# Review context\n\n{summary}\n\n"
+          + stack_markdown(layers, number, base)
+          + "`threads.md` lists every earlier review thread on this pull "
+          "request with its replies; `review-rules.md` is the Code Review "
+          f"Rules section of {default}'s AGENTS.md.\n")
     prompt = (f"Review pull request #{number} in {repo}.\n\n"
               + run("git", "show", f"origin/{default}:{PROMPT}"))
     delimiter = f"PROMPT_{secrets.token_hex(16)}"
