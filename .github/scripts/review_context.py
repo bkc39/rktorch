@@ -1,6 +1,6 @@
 """The review bot's prompt and context: full, incremental or none, the patch
-since the last review, the stack the pull request belongs to, and the earlier
-threads; see claude-code-review.yml.
+since the last review, the stack the pull request belongs to, the earlier
+threads, and master's review rules; see claude-code-review.yml.
 
     python3 .github/scripts/review_context.py OUT_DIR
 """
@@ -14,6 +14,8 @@ import urllib.parse
 PROMPT = ".github/claude-review-prompt.md"
 
 RECORD = "reviewed-{pr}"
+
+RULES = "## Code Review Rules"
 
 THREADS = """
 query($owner: String!, $name: String!, $pr: Int!, $after: String) {
@@ -231,11 +233,17 @@ def stack_markdown(layers, number, base):
             "each on the base branch named, lowest first:\n\n"
             + "\n".join(lines) + "\n\n"
             f"The layers below this one are already on `{base}` and in the "
-            "checkout, and are reviewed on their own pull requests; the "
-            "layers above build on this one. Within the scope above, do not "
-            "flag what another layer's code already did, and do not ask for "
-            "anything a layer below provides, but do flag anything this "
-            "layer's changes break in another layer's code.\n\n")
+            "checkout; the layers above build on this one. Within the scope "
+            "above, the rule for stacked pull requests in `review-rules.md` "
+            "says what to leave to the other layers.\n\n")
+
+
+def review_rules(default):
+    agents = run("git", "show", f"origin/{default}:AGENTS.md", check=False)
+    section = agents.partition(f"\n{RULES}\n")[2]
+    if not section:
+        return f"{default}'s AGENTS.md has no `{RULES}` section yet.\n"
+    return f"{RULES}\n" + section.split("\n## ", 1)[0].rstrip() + "\n"
 
 
 def all_comments(thread):
@@ -311,6 +319,8 @@ def main():
     source, layers = stack_layers(repo, pr, default)
     with open(os.path.join(out_dir, "threads.md"), "w") as f:
         f.write(threads_markdown(threads(repo, number)))
+    with open(os.path.join(out_dir, "review-rules.md"), "w") as f:
+        f.write(review_rules(default))
     full = (f"Full review: since the last review this pull request moved off "
             f"{', '.join(f'`{b}`' for b in left)}, whose pull request did not "
             "merge, so commits reviewed only there are now part of this one."
@@ -333,7 +343,8 @@ def main():
         f.write(f"# Review context\n\n{summary}\n\n"
                 + stack_markdown(layers, number, base)
                 + "`threads.md` lists every earlier review thread on this "
-                "pull request with its replies.\n")
+                "pull request with its replies; `review-rules.md` is the "
+                f"Code Review Rules section of {default}'s AGENTS.md.\n")
     prompt = (f"Review pull request #{number} in {repo}.\n\n"
               + run("git", "show", f"origin/{default}:{PROMPT}"))
     delimiter = f"PROMPT_{secrets.token_hex(16)}"
