@@ -90,10 +90,12 @@
 
 ;; a release that found the cache already empty frees nothing, and says so
 (define (device-release dev)
-  (and (eq? (device-type dev) 'mps)
-       (let ([before (mps-driver-bytes)])
-         (and (zero? (tr-mps-empty-cache/raw))
-              (< (mps-driver-bytes) before)))))
+  (cond
+    [(eq? (device-type dev) 'mps)
+     (define before (mps-driver-bytes))
+     (and (zero? (tr-mps-empty-cache/raw))
+          (< (mps-driver-bytes) before))]
+    [else #f]))
 
 (install-device-queries! #:capacity device-capacity
                          #:allocated device-allocated

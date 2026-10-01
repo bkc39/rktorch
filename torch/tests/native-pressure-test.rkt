@@ -10,9 +10,10 @@
                     zeros)
            (only-in "../foreign/raw/memory.rkt"
                     collect-and-drain! native-memory-use/fold)
+           (only-in "../foreign/raw/collector.rkt"
+                    call-as-the-collector collect-and-wait! drain-deadline)
            (only-in "../foreign/raw/pressure.rkt"
-                    allocator-reading call-as-the-collector collect-and-wait!
-                    collect-at-trough! drain-deadline install-device-queries!
+                    allocator-reading collect-at-trough! install-device-queries!
                     margin-over
                     native-collect-budget native-collect-margin
                     native-memory-fraction release-spacing

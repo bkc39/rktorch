@@ -1,18 +1,16 @@
 #lang racket/base
 
-(require (only-in ffi/unsafe register-finalizer)
-         (only-in ffi/unsafe/atomic call-as-atomic in-atomic-mode?)
-         (only-in "../device-type.rkt" device-type))
+(require (only-in ffi/unsafe/atomic call-as-atomic in-atomic-mode?)
+         (only-in "../device-type.rkt" device-type)
+         (only-in "collector.rkt"
+                  call-as-the-collector collect-and-wait! drain-finalizers!))
 
 (provide call-with-ledger
-         call-as-the-collector
          note-accounted!
          note-adopted!
          note-unadopted!
          shadow-generation
          note-unaccounted!
-         note-finalizer-run!
-         finalizer-runs
          live-bytes-by-device
          unaccounted-bytes-by-device
          shadow-refresh
@@ -22,12 +20,10 @@
          install-device-queries!
          collect-under-pressure!
          collect-at-trough!
-         collect-and-wait!
          margin-over
          pressure-diagnostics
          reset-pressure-state!
          allocator-reading
-         drain-deadline
          native-collect-at-troughs
          native-collect-budget
          native-collect-margin
@@ -50,19 +46,17 @@
    [sample #:mutable] [interval #:mutable] [capacity #:mutable]
    [floor #:mutable] shadow [unaccounted #:mutable] [release-after #:mutable]))
 
-(struct stats
-  (finalizer-runs backstop-collections reclaimed trough-collections
-   trough-minors)
+(struct stats (backstop-collections reclaimed trough-collections trough-minors)
   #:mutable)
 
-;; when each trough stage may next run, and the thread inside a collection
-(struct schedule (next-full-ms next-minor-ms holder) #:mutable)
+;; when each trough stage may next run
+(struct schedule (next-full-ms next-minor-ms) #:mutable)
 
 (struct queries (capacity allocated release) #:mutable)
 
 (define accounts (make-hash))
-(define the-stats (stats 0 0 0 0 0))
-(define the-schedule (schedule 0.0 0.0 #f))
+(define the-stats (stats 0 0 0 0))
+(define the-schedule (schedule 0.0 0.0))
 (define the-queries (queries #f #f #f))
 
 (define native-memory-limit (make-parameter #f))
@@ -142,12 +136,6 @@
   (call-with-ledger (lambda () (account-reading (account-of dev)))))
 
 ;; --- statistics ---
-
-(define (note-finalizer-run!)
-  (set-stats-finalizer-runs! the-stats (add1 (stats-finalizer-runs the-stats))))
-
-(define (finalizer-runs)
-  (stats-finalizer-runs the-stats))
 
 (define (note-reclaimed! bytes)
   (set-stats-reclaimed! the-stats (+ (stats-reclaimed the-stats) (max 0 bytes))))
@@ -315,25 +303,6 @@
 (define generation 0)
 (define (shadow-generation) generation)
 (define (next-shadow-generation!) (set! generation (add1 generation)))
-
-;; --- one collection at a time ---
-
-;; A second thread that finds a trigger due while the first is inside its
-;; collection skips instead of collecting again. The claim names its thread,
-;; because kill-thread runs no dynamic-wind exit: a claimant that has died
-;; holds nothing.
-(define (call-as-the-collector thunk)
-  (define claimed?
-    (call-with-ledger
-     (lambda ()
-       (define holder (schedule-holder the-schedule))
-       (and (or (not holder) (thread-dead? holder))
-            (set-schedule-holder! the-schedule (current-thread))
-            #t))))
-  (when claimed?
-    (dynamic-wind void
-                  thunk
-                  (lambda () (set-schedule-holder! the-schedule #f)))))
 
 ;; --- the backstop, from every accounting ---
 
@@ -511,31 +480,3 @@
   (call-with-ledger
    (lambda ()
      (for/sum ([a (in-hash-values accounts)]) (account-unaccounted a)))))
-
-;; --- a collection that has really finished ---
-
-;; The canary shows the finalizer thread has started on this collection's
-;; batch, not that it has finished: finalization order is unspecified and
-;; the thread runs only while this one yields. So yield until the run count
-;; has stood still for a few turns, within a deadline. Two results: whether
-;; the canary was seen, and whether the drain finished inside the deadline.
-(define drain-deadline (make-parameter 2000))
-(define quiet-turns 3)
-
-(define (collect-and-wait!)
-  (define canary-finalized (make-semaphore 0))
-  (register-finalizer (box 0) (lambda (_) (semaphore-post canary-finalized)))
-  (collect-garbage)
-  (define observed (sync/timeout 0.5 canary-finalized))
-  (values (and observed #t) (drain-finalizers!)))
-
-(define (drain-finalizers!)
-  (define deadline (+ (current-inexact-milliseconds) (drain-deadline)))
-  (let loop ([runs (finalizer-runs)] [quiet 0])
-    (sleep 0)
-    (define now (finalizer-runs))
-    (cond
-      [(>= (current-inexact-milliseconds) deadline) #f]
-      [(not (= now runs)) (loop now 0)]
-      [(< (add1 quiet) quiet-turns) (loop now (add1 quiet))]
-      [else #t])))
