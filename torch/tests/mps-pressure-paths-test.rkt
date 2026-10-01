@@ -122,14 +122,16 @@
        (collect-and-wait!)
        (define cached-before (cached))
        (define before (backstops))
+       ;; 256 KiB tensors come from MPS's small pool, so they cannot reuse
+       ;; the 4 MiB blocks above: only a release shrinks that cache
        (define held
          (parameterize ([native-memory-limit #f]
                         [native-memory-fraction 1/200]
                         [native-collect-margin never]
                         [release-spacing 0])
            (with-default-device device
-             (for/list ([_ (in-range 24)]) (randn 1024 1024)))))
-       (check-equal? (length held) 24)
+             (for/list ([_ (in-range 64)]) (randn 256 256)))))
+       (check-equal? (length held) 64)
        (check-true (> (backstops) before) "the backstop never fired")
        (check-true (< (cached) cached-before)
                    (format "the cache stayed at ~a MiB after the backstop"
