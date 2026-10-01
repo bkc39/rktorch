@@ -259,7 +259,9 @@
 ;; pass wrote, joins the ledger with bytes the shadow may already charge.
 (define (note-adopted! dev nbytes)
   (define a (account-of dev))
-  (charge-shadow! a (max 0 (- (account-unaccounted a) nbytes))))
+  (define taken (min nbytes (account-unaccounted a)))
+  (charge-shadow! a (- (account-unaccounted a) taken))
+  taken)
 
 ;; and leaves it when that handle is released, the storage still held
 (define (note-unadopted! dev nbytes)
