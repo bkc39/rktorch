@@ -8,6 +8,7 @@
          call-as-the-collector
          note-accounted!
          note-adopted!
+         shadow-generation
          note-unaccounted!
          note-finalizer-run!
          finalizer-runs
@@ -171,6 +172,7 @@
        (set-account-floor! a 0)
        (set-shadow! a 0)
        (set-account-release-after! a 0.0))
+     (next-shadow-generation!)
      (set-schedule-next-full-ms! the-schedule 0.0)
      (set-schedule-next-minor-ms! the-schedule 0.0))))
 
@@ -301,7 +303,13 @@
     (define reading (and charging? ((allocator-reading) dev)))
     (when (or reading (not charging?))
       (call-with-ledger
-       (lambda () (set-shadow! (account-of dev) (or reading 0)))))))
+       (lambda () (set-shadow! (account-of dev) (or reading 0))))))
+  (call-with-ledger next-shadow-generation!))
+
+;; counts refreshes, so a gradient adopted since the last one is known
+(define generation 0)
+(define (shadow-generation) generation)
+(define (next-shadow-generation!) (set! generation (add1 generation)))
 
 ;; --- one collection at a time ---
 
