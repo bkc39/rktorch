@@ -79,7 +79,7 @@ keeping the outputs at the wanted indices and stopping after the last.
              #:result found)
             ([(step i) (in-indexed (in-layers (child-ref net "features")))]
              #:break (> i last-layer))
-    (define y (forward step x))
+    (define y (step x))
     (values y (if (memv i layers) (hash-set found i y) found))))]
 
 @bold{Gram matrices.} A feature map of shape @tt{[N, C, H, W]} becomes a

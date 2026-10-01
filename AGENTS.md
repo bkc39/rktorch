@@ -245,7 +245,7 @@ provided as plain renames (no contract overhead on the numeric fast path),
 per `foreign/operators.rkt`.
 
 From `torch/nn`: `define-layer procedure->Layer gen:layer layer? Parameter Buffer LayerList LayerHash parameters
-named-parameters in-named-parameters buffers children forward Linear Conv2d MaxPool2d Flatten Dropout
+named-parameters in-named-parameters buffers children Linear Conv2d MaxPool2d Flatten Dropout
 Sequential Embedding LayerNorm ConvTranspose2d GroupNorm BatchNorm2d BatchNorm1d
 LSTM GRU sgd adam rmsprop step! zero-grads! clip-grad-norm! learning-rate
 set-learning-rate! step-lr multi-step-lr exponential-lr cosine-annealing-lr
@@ -266,7 +266,10 @@ fields with `set!`, a field's value classifies it at construction
 (`Parameter?`, `Buffer?`, `layer?`, `#f` for absent, anything else plain),
 `(with-mode body)` binds `mode` (`'train` or `'eval`, predicates `training?`/`evaluating?`) in `#:forward` to the instance's own mode (`train!`/`eval!` set it and recurse; every layer starts in `'train`),
 models are plain struct trees owned by the GC (no global parameter store),
-and `prop:procedure` makes `(net x)` work like `__call__`. `LSTM` and `GRU` (`nn/recurrent.rkt`, #153) are
+and a layer is called by applying it, `(net x)`, the analog of `__call__`:
+`gen:layer` derives `prop:procedure`, so every layer, hand-written ones
+included, is applicable, and there is no separate `forward` or callable
+`layer-forward` (#235). `LSTM` and `GRU` (`nn/recurrent.rkt`, #153) are
 `define-layer` forms whose parameter set depends on `#:num-layers` and
 `#:bidirectional?`: `parameters-by-key` registers them under PyTorch's own
 names (`weight_ih_l0` .. `bias_hh_l1_reverse`) the way `children-by-key`
