@@ -19,7 +19,7 @@
                     native-memory-fraction release-spacing
                     reset-pressure-state! shadow-refresh lower-shadows!)
            (only-in "../nn.rkt"
-                    Linear Sequential gen:layer))
+                    Linear MultiheadAttention Sequential gen:layer))
 
   (define mib (* 1024 1024))
 
@@ -329,6 +329,18 @@
       (define y (with-no-grad (net x)))
       (check-equal? (- (trough-minors) before) 1
                     "the nested Linear calls must not count")
+      (check-true (and y #t))))
+
+  (test-case "a keyword application is a trough too, its nested calls not"
+    (settle!)
+    (define net (MultiheadAttention 512 #:heads 8))
+    (define x (zeros 256 4 512))
+    (parameterize ([native-collect-margin (* 1 mib)]
+                   [native-collect-budget 1000])
+      (define before (trough-minors))
+      (define y (with-no-grad (net x x x #:causal? #t)))
+      (check-equal? (- (trough-minors) before) 1
+                    "the four nested Linear calls must not count")
       (check-true (and y #t))))
 
   (test-case "with gradients on a layer call is the peak, not a trough"

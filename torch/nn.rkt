@@ -4,7 +4,8 @@
 ;; unused
 #|review: ignore|#
 
-(require "nn/batch-norm.rkt"
+(require "nn/attention.rkt"
+         "nn/batch-norm.rkt"
          (except-in "nn/buffer.rkt" Buffer?)
          (submod "nn/buffer.rkt" checked)
          "nn/clip.rkt"
@@ -124,7 +125,9 @@
          LSTM
          lstm?
          GRU
-         gru?)
+         gru?
+         MultiheadAttention
+         multihead-attention?)
 
 (provide uniform-init
          normal-init
