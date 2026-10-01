@@ -49,8 +49,6 @@
   (when (and (zero? rc) (not on?))
     (at-trough! #:young? #t)))
 
-;; The switch turns off the collection, a pause; the shadow's refresh is
-;; accounting, so a trough still takes it.
 (define (at-trough! #:young? [young? #f])
   (if (native-collect-at-troughs)
       (collect-at-trough! #:young? young?)

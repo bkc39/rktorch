@@ -3,7 +3,7 @@
 (module+ test
   (require rackunit
            (only-in "../foreign.rkt"
-                    add backward! cpu-device finalizer-diagnostics matmul
+                    add backward! cpu-device finalizer-diagnostics grad matmul
                     native-collect-at-troughs native-memory-limit
                     native-memory-unaccounted native-memory-use
                     reclaim-native-memory! sum with-no-grad zeros)
@@ -153,9 +153,12 @@
 
   ;; the stand-in's hidden storage lives until the trough's own collection
   ;; has run, as a dropped graph's would until its owner is collected
+  (define (reclaimed) (cdr (assq 'pressure-reclaimed (finalizer-diagnostics))))
+
   (test-case "a trough whose collection frees hidden storage stops charging it"
     (settle!)
     (define before (trough-collections))
+    (define reclaimed-before (reclaimed))
     (define (hidden) (if (= (trough-collections) before) (* 256 mib) 0))
     (parameterize ([allocator-reading (lambda (_dev) (+ (cpu-bytes) (hidden)))]
                    [native-collect-margin (* 16 mib)]
@@ -164,7 +167,40 @@
       (collect-at-trough!))
     (check-equal? (- (trough-collections) before) 1 "the trough did not collect")
     (check-equal? (cpu-unaccounted) 0
-                  "the charge outlived the storage the collection freed"))
+                  "the charge outlived the storage the collection freed")
+    (check-true (>= (- (reclaimed) reclaimed-before) (* 256 mib))
+                "the freed hidden storage is missing from pressure-reclaimed"))
+
+  ;; a zero deadline makes the trough's drain report that it ran out of time
+  (test-case "a trough whose drain stalls leaves the charge for the next one"
+    (settle!)
+    (define before (trough-collections))
+    (define (hidden) (if (= (trough-collections) before) (* 256 mib) 0))
+    (parameterize ([allocator-reading (lambda (_dev) (+ (cpu-bytes) (hidden)))]
+                   [native-collect-margin (* 16 mib)]
+                   [native-collect-budget no-backoff]
+                   [drain-deadline 0])
+      (step! 8)
+      (collect-at-trough!))
+    (check-equal? (- (trough-collections) before) 1 "the trough did not collect")
+    (check-true (>= (cpu-unaccounted) (* 255 mib))
+                "a stalled drain refreshed from finalizers still to run")
+    (settle!))
+
+  ;; a stand-in reading that holds steady, as the allocator's does when the
+  ;; backward pass has written a gradient no handle points at yet
+  (test-case "wrapping a gradient moves its bytes off the shadow"
+    (settle!)
+    (define w (zeros 1024 1024 #:requires-grad? #t))
+    (parameterize ([allocator-reading (lambda (_dev) (+ (cpu-bytes) (* 256 mib)))]
+                   [native-collect-margin idle-margin])
+      (backward! (sum (matmul w w)))
+      (define charged (cpu-unaccounted))
+      (define g (grad w))
+      (check-equal? (- charged (cpu-unaccounted)) (* 4 mib)
+                    "the gradient is charged as a tensor and in the shadow")
+      (check-true (and g #t)))
+    (settle!))
 
   (test-case "the charge never counts a ledger byte twice"
     (settle!)
@@ -192,6 +228,14 @@
       (check-equal? (length kept) 48)
       (check-true (positive? (cpu-unaccounted))
                   "no trough ran, so only a sample could have set it"))
+    (define charged (cpu-unaccounted))
+    (parameterize ([shadow-refresh 'samples]
+                   [native-memory-limit (* 64 mib)]
+                   [allocator-reading (lambda (_dev) #f)])
+      (define more (for/list ([_ (in-range 48)]) (zeros 512 512)))
+      (check-equal? (length more) 48))
+    (check-equal? (cpu-unaccounted) charged
+                  "a sample that could not read the allocator changed the charge")
     (settle!)
     (check-equal? (cpu-unaccounted) 0 "a reset must clear the charge"))
 

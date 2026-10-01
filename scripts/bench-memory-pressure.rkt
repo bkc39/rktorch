@@ -52,15 +52,18 @@
   (let ([from (getenv "TRACE")])
     (and from (string->number from))))
 
-(define major-collections (box 0))
+;; read when counted rather than by a thread of its own, so a count
+;; includes every major logged before it
+(define majors-seen 0)
 (define gc-receiver (make-log-receiver (current-logger) 'debug 'GC))
-(void
- (thread
-  (lambda ()
-    (let loop ()
-      (when (regexp-match? #rx"MAJ" (vector-ref (sync gc-receiver) 1))
-        (set-box! major-collections (add1 (unbox major-collections))))
-      (loop)))))
+(define (major-collections)
+  (let loop ()
+    (define event (sync/timeout 0 gc-receiver))
+    (when event
+      (when (regexp-match? #rx"MAJ" (vector-ref event 1))
+        (set! majors-seen (add1 majors-seen)))
+      (loop)))
+  majors-seen)
 
 (define never (expt 2 60))
 (define mib (* 1024 1024))
@@ -177,7 +180,7 @@
   (define (ledger-collections)
     (+ (diagnostic 'pressure-collections) (diagnostic 'trough-collections)))
   ;; building the model may already have collected, so count from here
-  (define majors0 (unbox major-collections))
+  (define majors0 (major-collections))
   (define ledger0 (ledger-collections))
   (define manual-majors 0)
   (define window-majors (box majors0))
@@ -193,7 +196,7 @@
               (stat 'allocated)
               (stat 'peak-allocated)
               (diagnostic 'pressure-collections)
-              (unbox major-collections)
+              (major-collections)
               (quotient (current-memory-use) mib)))
     (when (and (eq? MODE 'manual) (zero? (remainder i GC-EVERY)))
       (collect-garbage)
@@ -202,7 +205,7 @@
     (cond
       [(zero? (remainder i 10))
        (define now (current-inexact-milliseconds))
-       (define majors (unbox major-collections))
+       (define majors (major-collections))
        (printf "~a ~a ~a ~a ~a ~a ~a ~a ~a ~a ~a ~a ~a\n"
                i
                (stat 'peak-allocated)
@@ -223,7 +226,7 @@
        (reset-peak!)
        now]
       [else window-start]))
-  (define majors (- (unbox major-collections) majors0))
+  (define majors (- (major-collections) majors0))
   (define ledger-majors (- (ledger-collections) ledger0))
   (printf "total ~a s, gc ~a ms, reclaimed ~a MiB: ~a backstop, ~a trough, ~a minors\n"
           (~r (/ (- (current-inexact-milliseconds) t0) 1000.0) #:precision '(= 1))

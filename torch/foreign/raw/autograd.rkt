@@ -1,7 +1,7 @@
 #lang racket/base
 
 (require (only-in ffi/unsafe _bool _double _fun _int _ptr)
-         (only-in "memory.rkt" tensor-allocator)
+         (only-in "memory.rkt" tensor-allocator tensor-allocator/adopted)
          (only-in "syntax.rkt" _Tensor _Tensor/null define-torch))
 
 (provide tr-tensor-requires-grad!/raw
@@ -41,7 +41,7 @@
 (define-torch tr-tensor-grad/raw
   (_fun (t : _Tensor) -> _Tensor/null)
   #:c-id tr_tensor_grad
-  #:wrap tensor-allocator)
+  #:wrap tensor-allocator/adopted)
 
 (define-torch tr-tensor-detach/raw
   (_fun (t : _Tensor) -> _Tensor/null)
