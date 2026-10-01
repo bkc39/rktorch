@@ -731,3 +731,41 @@ another tailnet machine, add the same two lines as `extra-substituters`
 / `extra-trusted-public-keys` to the daemon's `/etc/nix/nix.conf` (a
 multi-user Nix ignores them in `~/.config/nix/nix.conf` unless the
 caller is in `trusted-users`).
+
+## Code Review Rules
+
+For both review bots: Codex reads this section, and the Claude workflow's
+prompt (`.github/claude-review-prompt.md`) sends it here.
+
+### Stacked pull requests
+
+- A pull request whose base is another pull request's branch is one layer
+  of a stack. Review only its diff against that base. The layers below are
+  separate pull requests, reviewed there, and their code is already on the
+  base branch: do not flag it, and do not ask for anything a lower layer
+  provides.
+
+### Generated code
+
+- `cpp/include/torchrkt/c_api/generated.h`, everything under a
+  `generated/` directory, `torch/generated.rkt` and
+  `torch/tests/generated-parity.rktd` are the generator's output and carry
+  a DO-NOT-EDIT header. Review the generator (`codegen/*.py`) and
+  `codegen/allowlist.txt` that produce them, not the generated bodies.
+  `codegen/aten/` is the vendored upstream schema.
+
+### What matters most
+
+- Native memory: a tensor-returning binding carries `tensor-allocator`
+  (`/rng` when it draws from the RNG, `/outputs` for several results),
+  never a bare `(allocator ...)`; a C++ op reduces to the
+  `detail/op_call.hpp` helpers and reports failure through the integer
+  status and `tr_last_error`.
+- PyTorch parity: a new op is checked against PyTorch (a parity recipe for
+  an allowlist op, a cross-test or gtest golden for a hand-written one),
+  and a seeded op never draws twice on an OOM retry.
+- Contracts at the definition site, per "Validating arguments"; an op that
+  shadows a racket/base name defers to it for anything but a tensor.
+
+Formatting, clang-tidy, Resyntax, the C++ 500-line gate and codegen drift
+are CI's checks; leave them to CI.
