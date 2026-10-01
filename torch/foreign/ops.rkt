@@ -46,6 +46,7 @@
                   collect-and-drain!
                   [finalizer-diagnostics raw:finalizer-diagnostics]
                   [finalizer-failures raw:finalizer-failures]
+                  [native-memory-unaccounted raw:native-memory-unaccounted]
                   [native-memory-use raw:native-memory-use]
                   oom-retry/status
                   reaccount!)
@@ -54,7 +55,8 @@
                   [native-collect-budget raw:native-collect-budget]
                   [native-collect-margin raw:native-collect-margin]
                   [native-memory-fraction raw:native-memory-fraction]
-                  [native-memory-limit raw:native-memory-limit])
+                  [native-memory-limit raw:native-memory-limit]
+                  refresh-shadows!)
          (only-in "raw/random.rkt" tr-tensor-uniform!/raw)
          (only-in "raw/tensor.rkt"
                   dtype-code->symbol
@@ -251,6 +253,10 @@
   (-> (listof (cons/c device? exact-nonnegative-integer?)))
   raw:native-memory-use)
 
+(define/contract-out native-memory-unaccounted ;; noqa
+  (-> (listof (cons/c device? exact-nonnegative-integer?)))
+  raw:native-memory-unaccounted)
+
 ;; the high-water mark for every device; #f defers to the device's capacity
 (define/contract-out native-memory-limit ;; noqa
   (parameter/c (or/c #f exact-positive-integer?))
@@ -298,7 +304,9 @@
                (or (< now prev) (not drained?)))
       (loop now (sub1 rounds))))
   (cuda-empty-cache!)
-  (mps-empty-cache!))
+  (mps-empty-cache!)
+  ;; what was graph-held is gone now, so its charge must not wait for a trough
+  (refresh-shadows!))
 
 (define (ledger-total)
   (for/sum ([entry (in-list (native-memory-use))])

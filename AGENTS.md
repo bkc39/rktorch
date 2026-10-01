@@ -68,7 +68,9 @@ with `backward!` outside the form as PyTorch recommends). From
   in-place tensor primitive behind it; `device/c` and `dtype/c` are
   exported for user contracts
 - memory: `native-memory-use` (per-device outstanding native bytes from
-  the #37 ledger), `cuda-memory-stats` / `cuda-empty-cache!` /
+  the #37 ledger), `native-memory-unaccounted` (per device, the
+  allocator's bytes past the ledger's as of the last trough, charged to
+  the collector as the shadow, #213), `cuda-memory-stats` / `cuda-empty-cache!` /
   `mps-empty-cache!` (the caching allocators' own gauges + release, #51),
   `reclaim-native-memory!` (collect -> finalizer drain -> cache release,
   the phase-boundary release-now sequence), `finalizer-failures`

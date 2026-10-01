@@ -7,10 +7,16 @@
 (provide call-with-ledger
          call-as-the-collector
          note-accounted!
+         note-adopted!
+         note-unadopted!
+         shadow-generation
          note-unaccounted!
          note-finalizer-run!
          finalizer-runs
          live-bytes-by-device
+         unaccounted-bytes-by-device
+         shadow-refresh
+         refresh-shadows!
          install-device-queries!
          collect-under-pressure!
          collect-at-trough!
@@ -33,10 +39,13 @@
 
 ;; One per device: what the ledger holds there and what the two triggers
 ;; remember about it. `capacity` is 'unknown until queried, then bytes, #f for
-;; a device that has none, or (retry-at . ms) after a failed query.
+;; a device that has none, or (retry-at . ms) after a failed query. `shadow`
+;; charges the collector, as phantom bytes, for the `unaccounted` bytes the
+;; allocator holds beyond the ledger, and is adjusted, never replaced.
 (struct account
-  (live since-check since-sample sample interval capacity floor)
-  #:mutable)
+  ([live #:mutable] [since-check #:mutable] [since-sample #:mutable]
+   [sample #:mutable] [interval #:mutable] [capacity #:mutable]
+   [floor #:mutable] shadow [unaccounted #:mutable]))
 
 (struct stats
   (finalizer-runs backstop-collections reclaimed trough-collections
@@ -74,7 +83,8 @@
 ;; --- the accounts, all inside the atomic section ---
 
 (define (account-of dev)
-  (hash-ref! accounts dev (lambda () (account 0 0 0 0 #f 'unknown 0))))
+  (hash-ref! accounts dev
+             (lambda () (account 0 0 0 0 #f 'unknown 0 (make-phantom-bytes 0) 0))))
 
 (define (note-accounted! dev nbytes)
   (define a (account-of dev))
@@ -104,6 +114,12 @@
    (lambda ()
      (for/list ([(dev a) (in-hash accounts)])
        (cons dev (account-live a))))))
+
+(define (unaccounted-bytes-by-device)
+  (call-with-ledger
+   (lambda ()
+     (for/list ([(dev a) (in-hash accounts)])
+       (cons dev (account-unaccounted a))))))
 
 (define (ledger-total)
   (call-with-ledger
@@ -147,7 +163,9 @@
        (set-account-sample! a 0)
        (set-account-interval! a #f)
        (set-account-capacity! a 'unknown)
-       (set-account-floor! a 0))
+       (set-account-floor! a 0)
+       (set-shadow! a 0))
+     (next-shadow-generation!)
      (set-schedule-next-full-ms! the-schedule 0.0)
      (set-schedule-next-minor-ms! the-schedule 0.0))))
 
@@ -203,12 +221,62 @@
      (and query (query dev)))))
 
 (define (sample-allocator! dev)
-  (define reading (or ((allocator-reading) dev) 0))
+  (define known ((allocator-reading) dev))
+  (define reading (or known 0))
   (call-with-ledger
    (lambda ()
      (define a (account-of dev))
      (set-account-sample! a reading)
-     (set-account-since-sample! a 0))))
+     (set-account-since-sample! a 0)
+     (when (and known (eq? (shadow-refresh) 'samples))
+       (set-shadow! a reading)))))
+
+;; --- the shadow: what the allocator holds that the ledger cannot see ---
+
+;; Storage only the autograd graph or libtorch itself holds reaches no
+;; wrapper, so the ledger never charges it; the allocator's figure less the
+;; ledger's is that remainder, and never counts a ledger byte twice. 'troughs
+;; refreshes it only at a trough, before its collection, so the collection
+;; that follows sets Racket's next major trigger with the shadow already in
+;; it. 'samples also refreshes it at the backstop's samples, which in a large
+;; forward means tracking the graph as it grows; #f charges nothing.
+(define shadow-refresh (make-parameter 'troughs))
+
+(define (charge-shadow! a bytes)
+  (set-account-unaccounted! a bytes)
+  (set-phantom-bytes! (account-shadow a) bytes))
+
+(define (set-shadow! a reading)
+  (charge-shadow! a (max 0 (- reading (account-live a)))))
+
+;; A handle onto storage that existed before it, a gradient the backward
+;; pass wrote, joins the ledger with bytes the shadow may already charge.
+(define (note-adopted! dev nbytes)
+  (define a (account-of dev))
+  (define taken (min nbytes (account-unaccounted a)))
+  (charge-shadow! a (- (account-unaccounted a) taken))
+  taken)
+
+;; and leaves it when that handle is released, the storage still held
+(define (note-unadopted! dev nbytes)
+  (define a (account-of dev))
+  (charge-shadow! a (+ (account-unaccounted a) nbytes)))
+
+;; An allocator that cannot answer right now leaves its device's charge as
+;; it was; with charging off every charge goes to zero.
+(define (refresh-shadows!)
+  (define charging? (shadow-refresh))
+  (for ([dev (in-list (call-with-ledger (lambda () (hash-keys accounts))))])
+    (define reading (and charging? ((allocator-reading) dev)))
+    (when (or reading (not charging?))
+      (call-with-ledger
+       (lambda () (set-shadow! (account-of dev) (or reading 0))))))
+  (call-with-ledger next-shadow-generation!))
+
+;; counts refreshes, so a gradient adopted since the last one is known
+(define generation 0)
+(define (shadow-generation) generation)
+(define (next-shadow-generation!) (set! generation (add1 generation)))
 
 ;; --- one collection at a time ---
 
@@ -315,19 +383,22 @@
 ;; be freed would hide that residue from the next trough. The next time is
 ;; set either way, so a stalled stage cannot spin.
 (define (trough-stage! next-ms set-next! bump! collect! on-drained! budget)
-  (when (due? (next-ms the-schedule))
-    (define started (current-inexact-milliseconds))
-    (define before (ledger-total))
-    (define drained? (collect!))
-    (define finished (current-inexact-milliseconds))
-    (define after (ledger-total))
-    (call-with-ledger
-     (lambda ()
-       (when drained?
-         (on-drained!))
-       (set-next! the-schedule (+ finished (/ (- finished started) budget)))
-       (bump! the-stats)
-       (note-reclaimed! (- before after))))))
+  (cond
+    [(due? (next-ms the-schedule))
+     (define started (current-inexact-milliseconds))
+     (define before (ledger-total))
+     (define drained? (collect!))
+     (define finished (current-inexact-milliseconds))
+     (define after (ledger-total))
+     (call-with-ledger
+      (lambda ()
+        (when drained?
+          (on-drained!))
+        (set-next! the-schedule (+ finished (/ (- finished started) budget)))
+        (bump! the-stats)
+        (note-reclaimed! (- before after))))
+     drained?]
+    [else 'skipped]))
 
 (define (collect-young-at-trough! budget)
   (trough-stage! schedule-next-minor-ms
@@ -355,13 +426,26 @@
 (define (collect-at-trough! #:young? [young? #f])
   (unless (in-atomic-mode?)
     (lower-floors!)
+    (refresh-shadows!)
     (define budget
       (if young? (/ (native-collect-budget) 2) (native-collect-budget)))
     (call-as-the-collector
      (lambda ()
-       (when young?
-         (collect-young-at-trough! budget))
-       (collect-old-at-trough! budget)))))
+       (define young (if young? (collect-young-at-trough! budget) 'skipped))
+       (define old (collect-old-at-trough! budget))
+       ;; what the last stage that ran freed may include storage only a
+       ;; dropped graph held; the charge moves with it rather than adding
+       ;; to it, and only a finished drain shows what was freed
+       (when (eq? #t (if (eq? old 'skipped) young old))
+         (define before (unaccounted-total))
+         (refresh-shadows!)
+         (call-with-ledger
+          (lambda () (note-reclaimed! (- before (unaccounted-total))))))))))
+
+(define (unaccounted-total)
+  (call-with-ledger
+   (lambda ()
+     (for/sum ([a (in-hash-values accounts)]) (account-unaccounted a)))))
 
 ;; --- a collection that has really finished ---
 

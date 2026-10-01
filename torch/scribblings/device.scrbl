@@ -7,7 +7,8 @@
                               accelerator-if-available arange autocast-dtype
                               autocast-enabled? backward! bytes->tensor
                               call-with-autocast cpu-device cuda-if-available
-                              default-device device-type set-default-device!
+                              default-device detach device-type grad
+                              set-default-device!
                               cuda-allocator-settings!
                               cuda-device cuda-memory-info cuda-memory-stats
                               cuda-reset-peak-stats! device device/c device?
@@ -16,6 +17,7 @@
                               native-collect-at-troughs
                               native-collect-budget native-collect-margin
                               native-memory-fraction native-memory-limit
+                              native-memory-unaccounted
                               native-memory-use ones ones-like prop:to rand
                               rand-like randn randn-like
                               reclaim-native-memory! tensor tensor-device
@@ -323,9 +325,12 @@ to the collector as phantom bytes, so ordinary programs never call the
 collector by hand. A training loop is the exception. Handles that survive
 the collections of a step wait for a full one, and when Racket happens to
 run a full collection in the middle of a forward pass, that pass's
-intermediates are promoted to the oldest generation, where Racket will not
-look again until its memory use has doubled: a whole step's storage stays
-behind and the next step runs out. The ledger therefore collects by itself,
+intermediates are promoted to the oldest generation. Racket does not look
+there again until the memory in use, @racket[n] bytes after that collection,
+has grown by a further 8192·√@racket[n] bytes, which is a doubling at
+64 MiB but only 8% at 10 GB. A whole step's storage stays behind until
+then, and on a device already more than half full the next step runs out
+first. The ledger therefore collects by itself,
 in two places. The first is the trough of a training step:
 @racket[backward!] has just released the graph, the forward pass's
 intermediates are dead and little is live, so a full collection there
@@ -353,6 +358,23 @@ measured in bytes allocated, and when a collection reclaims under 5% of the
 mark that spacing doubles, so a working set that legitimately sits above
 the mark is not collected on every step.
 
+The ledger also charges Racket's collector for what it cannot see. At every
+trough, before collecting, it reads each device's allocator and charges the
+bytes allocated there beyond the ledger's own total as one more phantom
+charge for that device, and reads again after a collection that finished,
+which may have freed storage only a dropped graph held. A device whose
+allocator cannot answer at that moment keeps its previous charge. A
+gradient is storage the backward pass wrote before any tensor pointed at
+it, so taking it with @racket[grad] moves its bytes from this charge to the
+ledger rather than charging them twice, and releasing that tensor moves
+them back, since the parameter still holds the gradient. Storage that only the autograd graph or libtorch
+itself holds reaches no tensor, so this is the only way the collector's own
+schedule learns of it. It is read only at a trough, because a charge that
+followed the graph through a forward pass would push Racket past its
+trigger at the peak, the moment a full collection does the most harm. The
+charge is zero on the CPU, whose allocator keeps no count, and
+@racket[native-memory-unaccounted] reports it.
+
 Every knob above is a parameter, so a training script can tune the whole
 policy for its own machine by wrapping its loop once:
 
@@ -378,6 +400,17 @@ Live native bytes per device as the ledger sees them: every handle not yet
 released, at the byte count of its own extent. Views charge their full
 extent, so shared storage is counted once per handle, and libtorch's own
 internal allocations are absent.
+}
+
+@defproc[(native-memory-unaccounted)
+         (listof (cons/c device? exact-nonnegative-integer?))]{
+Per device, the bytes the allocator had allocated beyond the ledger's
+total at the last trough: what the autograd graph, a retained graph, or
+libtorch itself was holding that no tensor accounts for. Between training
+steps it should stay near zero, so a figure that climbs from one step to
+the next is a graph that is not being released, such as a missing
+@racket[detach]. Devices with nothing unaccounted are left out, and the
+CPU never appears.
 }
 
 @defparam[native-memory-limit limit (or/c #f exact-positive-integer?)]{
@@ -412,7 +445,9 @@ one collects more eagerly.
 Whether @racket[backward!] and the outermost layer call under
 @racket[with-no-grad] collect at their return, @racket[#t] by default.
 With it off neither does, and a loop that relied on them grows until the
-backstop's mark catches it.
+backstop's mark catches it. Either way both still read the allocator for
+the charge @racket[native-memory-unaccounted] reports, which costs no
+pause.
 }
 
 @defproc[(mps-memory-info)
@@ -458,8 +493,11 @@ CUDA; raises on a string the allocator's parser rejects.
 
 @defproc[(reclaim-native-memory!) void?]{
 Collects and drains repeatedly, up to four rounds, while the ledger keeps
-shrinking, then returns the CUDA and MPS caches to their drivers. For epoch
-boundaries and script exits; a training loop no longer needs it.
+shrinking, then returns the CUDA and MPS caches to their drivers and reads
+each allocator again for the charge @racket[native-memory-unaccounted]
+reports, so memory a dropped graph held stops being charged at once rather
+than at the next trough. For epoch boundaries and script exits; a training
+loop no longer needs it.
 }
 
 @defproc[(finalizer-diagnostics)
@@ -469,7 +507,9 @@ failure messages, the number of ledger entries, and the collections the
 ledger has made: @racket['trough-collections] and @racket['trough-minors],
 the full and minor collections at a trough, @racket['pressure-collections]
 from the high-water backstop, and under @racket['pressure-reclaimed] the
-bytes all of them released.
+bytes all of them released, including allocator bytes a trough's collection
+freed that only the charge @racket[native-memory-unaccounted] reports had
+covered.
 
 @racket['trough-floor] is the baseline residue at a trough is measured
 against, summed over the devices; @racket[native-collect-margin] is the

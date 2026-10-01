@@ -15,9 +15,13 @@
                   finalizer-runs
                   live-bytes-by-device
                   note-accounted!
+                  note-adopted!
                   note-finalizer-run!
                   note-unaccounted!
-                  pressure-diagnostics)
+                  note-unadopted!
+                  pressure-diagnostics
+                  shadow-generation
+                  unaccounted-bytes-by-device)
          (only-in "syntax.rkt" _Tensor _Tensor/null define-torch))
 
 (provide tr-tensor-free/finalizer
@@ -27,6 +31,7 @@
          finalizer-failures
          finalizer-diagnostics
          tensor-allocator
+         tensor-allocator/gradient
          tensor-allocator/no-retry
          tensor-allocator/outputs
          tensor-allocator/outputs/no-retry
@@ -38,6 +43,7 @@
          tr-last-error-kind/raw
          native-memory-use
          native-memory-use/fold
+         native-memory-unaccounted
          _tr-device-type ;; noqa
          tr-tensor-device/raw
          define-unary/raw
@@ -107,7 +113,7 @@
     (call-with-ledger note-finalizer-run!)
     (release t)))
 
-(struct allocation (phantom nbytes device))
+(struct allocation (phantom nbytes device [adopted #:mutable]))
 
 (define allocations (make-weak-hasheq))
 
@@ -133,7 +139,7 @@
     (and (zero? nb-rc)
          (zero? dev-rc)
          (let* ([dev (device type (if (eq? type 'cpu) 0 index))]
-                [entry (allocation (make-phantom-bytes nbytes) nbytes dev)])
+                [entry (allocation (make-phantom-bytes nbytes) nbytes dev 0)])
            (call-with-ledger
             (lambda ()
               (hash-set! allocations t entry)
@@ -148,7 +154,10 @@
        (when a
          (set-phantom-bytes! (allocation-phantom a) 0)
          (hash-remove! allocations t)
-         (note-unaccounted! (allocation-device a) (allocation-nbytes a)))))))
+         (note-unaccounted! (allocation-device a) (allocation-nbytes a))
+         ;; the parameter still holds the gradient this handle took over
+         (when (positive? (allocation-adopted a))
+           (note-unadopted! (allocation-device a) (allocation-adopted a))))))))
 
 ;; An in-place move (tr_tensor_to_) changes the device and byte count under
 ;; the same handle, so its ledger entry is replaced rather than added to. When
@@ -166,7 +175,7 @@
 (define (restore-entry! t old)
   (define nbytes (allocation-nbytes old))
   (define dev (allocation-device old))
-  (define entry (allocation (make-phantom-bytes nbytes) nbytes dev))
+  (define entry (allocation (make-phantom-bytes nbytes) nbytes dev 0))
   (call-with-ledger
    (lambda ()
      (hash-set! allocations t entry)
@@ -182,9 +191,14 @@
              (< (device-index dx) (device-index dy))]
             [else (eq? (device-type dx) 'cpu)]))))
 
+(define (positive-by-device totals)
+  (sort-by-device (filter (lambda (entry) (positive? (cdr entry))) totals)))
+
 (define (native-memory-use)
-  (sort-by-device (filter (lambda (entry) (positive? (cdr entry)))
-                          (live-bytes-by-device))))
+  (positive-by-device (live-bytes-by-device)))
+
+(define (native-memory-unaccounted)
+  (positive-by-device (unaccounted-bytes-by-device)))
 
 ;; The entry-by-entry fold; the counters above must agree with it.
 (define (native-memory-use/fold)
@@ -245,25 +259,56 @@
                           #:collect! [collect! collect-and-drain!])
   (retry-on-oom (lambda (rc) (= rc 1)) oom? collect!))
 
-(define ((accounted wrapped) . args)
+;; `adopt` runs after the accounting and before the pressure check, so the
+;; check sees the charge where it will stay.
+(define (((accounted adopt) wrapped) . args)
   (define t (apply wrapped args))
   (when t
     (define dev (account! t))
     (when dev
+      (adopt args t)
       (collect-under-pressure! dev)))
   t)
+
+(define (adopt-nothing _args _t)
+  (void))
+
+;; A gradient is storage the backward pass wrote before any handle pointed
+;; at it, so the shadow's last refresh may charge it. The first handle taken
+;; on a parameter's gradient since that refresh moves those bytes to the
+;; ledger; a later one, which the ledger charges again as it does any second
+;; handle, moves nothing.
+(define adopted-at (make-weak-hasheq))
+
+(define (adopt-gradient! args t)
+  (define param (car args))
+  (call-with-ledger
+   (lambda ()
+     (define now (shadow-generation))
+     (define entry (hash-ref allocations t #f))
+     (when (and entry (not (eqv? (hash-ref adopted-at param #f) now)))
+       (hash-set! adopted-at param now)
+       (set-allocation-adopted!
+        entry
+        (note-adopted! (allocation-device entry) (allocation-nbytes entry)))))))
 
 ;; The retry composes OUTSIDE the allocator wrap: ffi/unsafe/alloc runs
 ;; the wrapped call in atomic mode, where the drain's blocking wait is an
 ;; internal error.
 (define (tensor-allocator raw-fn)
-  (accounted ((oom-retry) ((allocator tr-tensor-free/finalizer) raw-fn))))
+  ((accounted adopt-nothing)
+   ((oom-retry) ((allocator tr-tensor-free/finalizer) raw-fn))))
+
+;; for tr_tensor_grad, whose first argument is the parameter
+(define (tensor-allocator/gradient raw-fn)
+  ((accounted adopt-gradient!)
+   ((oom-retry) ((allocator tr-tensor-free/finalizer) raw-fn))))
 
 ;; No retry: re-running these after an OOM would repeat something the
 ;; first call already did — a draw from the global RNG stream, or an
 ;; in-place update of a tensor the caller handed in.
 (define (tensor-allocator/no-retry raw-fn)
-  (accounted ((allocator tr-tensor-free/finalizer) raw-fn)))
+  ((accounted adopt-nothing) ((allocator tr-tensor-free/finalizer) raw-fn)))
 
 (define adopt-handle ((allocator tr-tensor-free/finalizer) values))
 

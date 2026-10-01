@@ -105,10 +105,13 @@ the step. Two things escape them (#145, measured with
   12 MiB per step on a 15 GB working set;
 - the fatal one: when Racket runs a *major* collection in the middle of
   a forward pass, every intermediate alive at that moment is promoted
-  to the oldest generation, and Racket schedules its next major for
-  when memory use has doubled from there, which on a card that is more
-  than half full is never. That step's storage, a whole working set of
-  it, stays behind and the next step's `backward!` fails.
+  to the oldest generation, and Racket does not run another major until
+  memory use has grown past `n + 8192·√n`, `n` being the bytes left
+  after this one (rumble's trigger, `memory.ss`, Racket 9.3; phantom
+  bytes count toward it). That is a doubling at 64 MiB but only 8% at
+  10 GB, and a promoted working set is what fills that room. That step's
+  storage stays behind, and on a card more than half full the next
+  step's `backward!` fails first.
 
 The ledger closes the gap itself, first at the trough and then with a
 backstop at the peak.
@@ -116,8 +119,8 @@ backstop at the peak.
 **The trough.** `backward!` ends by calling `collect-at-trough!`. At that
 moment the graph has been released, the forward's intermediates are dead
 and almost nothing is live, so a full collection reclaims the most,
-promotes the least, and leaves Racket's doubling rule a small baseline
-to double from. The dead intermediates have aged past the nursery by
+promotes the least, and leaves Racket's trigger a small baseline to
+grow from. The dead intermediates have aged past the nursery by
 then (a minor collection there was tried and reclaimed next to nothing),
 so the collection is a full one, drained as below. It runs when the
 ledger exceeds its *floor*, its size after the previous trough
@@ -161,8 +164,9 @@ the last defence when a trough collection is not yet due:
 
 - Each device has one `account` record: live bytes, bytes accounted
   since the last check and since the last allocator sample, that sample,
-  the backstop's current interval, the cached capacity mark and the
-  trough floor. `account!` updates it through `note-accounted!`, so a
+  the backstop's current interval, the cached capacity mark, the
+  trough floor, and the shadow below with its byte count. `account!`
+  updates it through `note-accounted!`, so a
   check is one table lookup and field reads. The counters are a `stats`
   record, the two next-collection times and the thread inside a
   collection a `schedule` record, and the two CUDA queries handed down
@@ -212,6 +216,61 @@ the last defence when a trough collection is not yet due:
 - `finalizer-diagnostics` reports `trough-collections`, `trough-minors`,
   `pressure-collections` (the backstop) and `pressure-reclaimed` (bytes,
   all kinds).
+
+**The shadow** (#213). Storage that only the autograd graph or libtorch
+holds reaches no wrapper, so the per-tensor phantoms never charge it:
+saved state such as a dropout mask or `layer_norm`'s statistics, and the
+storage of a wrapper that died while the graph still holds it. At the
+#145 failure that was 12.6 GB on the ledger against 21.4 GB on the card.
+Each account therefore carries one more phantom, set to
+`max(0, allocated − live)` from the same allocator reading the backstop
+uses: the difference, so no ledger byte is charged twice, and zero on
+the CPU, whose allocator keeps no count.
+
+- It is refreshed by `refresh-shadows!` at every trough, *before* the
+  trough collects, and at a trough whose collection
+  `native-collect-at-troughs` has switched off, since the refresh is
+  accounting and costs no pause. Refreshed before the collection, the
+  full collection that follows sets Racket's
+  next trigger with the shadow already inside it. Raised after that
+  collection instead, it would sit above a trigger computed without it,
+  and Racket would force a major early in the next forward. When the last
+  stage the trough ran drained, a second refresh follows: that collection
+  may have freed storage only a dropped graph held, and what the refresh
+  changes is a charge the collection's own trigger already counted, moved
+  rather than added. A stage whose drain ran out of time gets no second
+  refresh, since finalizers still to run would be read as held storage;
+  what the refresh frees counts toward `pressure-reclaimed`.
+- A gradient is storage the backward pass wrote before any handle pointed
+  at it, so the trough's refresh can already charge it. The first `grad`
+  taken on a parameter since the last refresh takes the bytes it puts on
+  the ledger off the shadow, so wrapping it moves the charge instead of
+  doubling it. `tensor-allocator/gradient` does this between accounting
+  the handle and the pressure check (`adopt-gradient!`, keyed by the
+  parameter and a generation every refresh bumps), and takes at most what
+  the shadow holds. A second `grad` in the same step, from clipping and
+  then the optimizer say, moves nothing: the ledger charges that handle
+  again, as it does any second handle on shared storage, but the shadow
+  keeps covering the rest of what the graph and libtorch hold. The ledger
+  entry records what its adoption took, and releasing the handle gives
+  exactly that back to the shadow, since the parameter still holds the
+  gradient (`zero-grad!` zeroes it in place).
+  `reclaim-native-memory!` refreshes it too, once the caches are
+  emptied, so memory a dropped graph held stops being charged at once.
+  An allocator that cannot answer at a refresh leaves its device's charge
+  as it was.
+- It is not refreshed during a forward. At the backstop's samples, one
+  every 1/32 of the mark once its gate opens, it would track the graph as
+  it grows and push Racket past its trigger at the peak. Measured on the
+  #145 conv stack at batch 1024: 127 majors forced by Racket against 88
+  with the shadow off, and a peak of 15.0 GB against 12.9 GB. Refreshed
+  at troughs only, it matches the shadow off to within noise over three
+  interleaved pairs. The internal `shadow-refresh` parameter keeps both
+  placements and off, for `scripts/bench-memory-pressure.rkt`.
+- `native-memory-unaccounted` reports it per device. Between steps it
+  sits near zero; with a never-differentiated loss kept each step
+  (`LEAK=1` in the bench) it climbs by about 540 MiB a step, and Racket's
+  `current-memory-use` follows the device only while the shadow is on.
 
 ### In-place moves
 
