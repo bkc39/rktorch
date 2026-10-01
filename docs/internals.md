@@ -165,25 +165,57 @@ the last defence when a trough collection is not yet due:
 - Each device has one `account` record: live bytes, bytes accounted
   since the last check and since the last allocator sample, that sample,
   the backstop's current interval, the cached capacity mark, the
-  trough floor, and the shadow below with its byte count. `account!`
-  updates it through `note-accounted!`, so a
+  trough floor, the shadow below with its byte count, and when the
+  backstop may next empty the device's cache. `account!` updates it
+  through `note-accounted!`, so a
   check is one table lookup and field reads. The counters are a `stats`
   record, the two next-collection times and the thread inside a
-  collection a `schedule` record, and the two CUDA queries handed down
-  from `raw/device.rkt` a `queries` record. Every field is written
-  inside `call-with-ledger`.
+  collection a `schedule` record, and the three device queries handed
+  down from `raw/device.rkt` (capacity, allocated, release) a `queries`
+  record. Every field is written inside `call-with-ledger`.
 - `accounted`, which runs outside the allocator's atomic wrap, checks
   after each accounting: accounted-since past the current interval and
   live bytes above the device's high-water mark means
-  `collect-and-wait!`, the drain half of `collect-and-drain!` without
-  the cache emptying, which is the OOM retry's business.
-- Live bytes are the larger of the ledger's counter and the caching
-  allocator's `allocated`, sampled once per 1/32 of the mark in
-  accounted bytes (`allocator-reading`, a parameter so tests can fake
-  it). `raw/device.rkt` installs both readings with
+  `collect-and-wait!`, the drain half of `collect-and-drain!`. On CUDA
+  it leaves the cache alone, since emptying it is the OOM retry's
+  business; on MPS see the release below.
+- Live bytes are the larger of the ledger's counter and the allocator's
+  own figure, sampled once per 1/32 of the mark in accounted bytes
+  (`allocator-reading`, a parameter so tests can fake it). On CUDA that
+  figure is `allocated`: handles the young collections free mid-step
+  leave their storage with the autograd graph, where only the allocator
+  can see it. On MPS it is `driver-allocated`, the cache included,
+  because on unified memory the cache is host RAM (#175: an M2 Pro run
+  read 2.4 GB allocated against 8.5 GB taken from the driver and a
+  9.7 GB mark, and went 5.7 GB into swap while the backstop never
+  fired). `raw/device.rkt` installs the readings with
   `install-device-queries!`; each takes a device and dispatches on its
-  type, so CUDA and MPS share one path and the CPU answers `#f`. Handles the young collections free mid-step leave their storage
-  with the autograd graph, where only the allocator can see it.
+  type, so CUDA and MPS share one path and the CPU answers `#f`.
+- On MPS a collection frees tensors into that cache without moving
+  `driver-allocated`, so the backstop would fire, reclaim nothing
+  measurable and back off. After a collection whose drain finished, it
+  therefore also calls the `#:release` query, which `raw/device.rkt`
+  answers for MPS alone by emptying the cache. Releases are spaced in
+  time, at least `release-spacing` (5 s) apart per device, not by the
+  byte hysteresis: emptying is quick, but the blocks the next steps need
+  then come from the driver again. A drain that ran out of time does
+  not release, since finalizers still to run would refill the cache
+  behind the release and spend its spacing.
+- Every allocator sample may lower the shadow, never raise it. On MPS
+  the trough charged the cache, and new tensors that reuse those blocks,
+  or a release that empties them, bring `driver-allocated` down relative
+  to the ledger; without the lowering those bytes would be charged twice
+  until the next trough. What the graph holds mid-forward raises the
+  reading, and is not charged. A cache emptied outside the backstop, by
+  `mps-empty-cache!` or the OOM retry's `collect-and-drain!`, is followed
+  by the same lowering, and a sample whose allocator cannot answer leaves
+  the shadow alone. The lowering reads the ledger before the allocator and
+  skips if the ledger has moved by the time it would apply, since another
+  thread's tensor accounted or released in between would leave the two
+  figures describing different moments. Tensors that a finished collection moves into the
+  cache are charged again by the trough's refresh after its collection;
+  a backstop collection, mid-forward, does not raise the charge for them,
+  and the backstop itself still reads `driver-allocated` in full.
 - `collect-and-wait!` must really drain. The canary shows the finalizer
   thread has started on the batch, not finished it: finalization order
   is unspecified, and that thread runs only while the main one yields,
@@ -259,7 +291,8 @@ the CPU, whose allocator keeps no count.
   emptied, so memory a dropped graph held stops being charged at once.
   An allocator that cannot answer at a refresh leaves its device's charge
   as it was.
-- It is not refreshed during a forward. At the backstop's samples, one
+- It is not raised during a forward; the backstop's samples may only
+  lower it (see the backstop above). Raised at those samples, one
   every 1/32 of the mark once its gate opens, it would track the graph as
   it grows and push Racket past its trigger at the peak. Measured on the
   #145 conv stack at batch 1024: 127 majors forced by Racket against 88

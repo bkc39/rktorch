@@ -56,6 +56,7 @@
                   [native-collect-margin raw:native-collect-margin]
                   [native-memory-fraction raw:native-memory-fraction]
                   [native-memory-limit raw:native-memory-limit]
+                  lower-shadows!
                   refresh-shadows!)
          (only-in "raw/random.rkt" tr-tensor-uniform!/raw)
          (only-in "raw/tensor.rkt"
@@ -245,7 +246,7 @@
 
 (define/contract-out (mps-empty-cache!) (-> void?)
   (check-ok (tr-mps-empty-cache/raw) 'mps-empty-cache!)
-  (void))
+  (lower-shadows!))
 
 ;; a handle-attributed estimate: views charge their full extents (shared
 ;; storage double-counts) and ATen-internal allocations are absent

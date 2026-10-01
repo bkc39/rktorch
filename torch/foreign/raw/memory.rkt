@@ -8,15 +8,17 @@
          (only-in ffi/unsafe/atomic call-as-atomic)
          (only-in racket/list remove-duplicates)
          (only-in "../device-type.rkt" device device-index device-type)
+         (only-in "collector.rkt"
+                  collect-and-wait!
+                  finalizer-runs
+                  note-finalizer-run!)
          (only-in "pressure.rkt"
                   call-with-ledger
-                  collect-and-wait!
                   collect-under-pressure!
-                  finalizer-runs
                   live-bytes-by-device
+                  lower-shadows!
                   note-accounted!
                   note-adopted!
-                  note-finalizer-run!
                   note-unaccounted!
                   note-unadopted!
                   pressure-diagnostics
@@ -237,6 +239,7 @@
   (define-values (observed _drained?) (collect-and-wait!))
   (void (tr-cuda-empty-cache/raw))
   (void (tr-mps-empty-cache/raw))
+  (lower-shadows!)
   observed)
 
 ;; one retry after a collect when a failed call was an OOM; the two
