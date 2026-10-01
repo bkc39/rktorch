@@ -2,25 +2,30 @@
 
     python3 .github/scripts/test_review_context.py
 """
+import contextlib
+import io
 import json
 import os
 import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import review_context as rc  # noqa: E402
 
+WORKFLOW = ".github/workflows/claude-code-review.yml"
 SQUASH_232 = "08a13db5d3372361effe89150b0b267350a79468"
 BEFORE_SQUASH_233 = "26ff5892996b1ac24f58ddba02fc3ee29a75b54b"
 OURS_MERGE_233 = "826b02c8a30c13e590c426c8a71ecb3afb1ccbe5"
 LAST_PUSH_233 = "60177b2a6"
+RESOLVED_MERGE_233 = "57f08da37"
 
 
-def git(*args, cwd=None):
-    return subprocess.run(("git",) + args, cwd=cwd, check=True,
-                          capture_output=True, text=True).stdout.strip()
+def git(*args):
+    return subprocess.run(("git",) + args, check=True, capture_output=True,
+                          text=True).stdout.strip()
 
 
 def have(sha):
@@ -55,9 +60,8 @@ class Cascade233(unittest.TestCase):
         self.assertNotIn(OURS_MERGE_233, patch)
 
     def test_real_conflict_resolutions_are_still_reviewed(self):
-        merge = "57f08da37"
-        parents = git("rev-list", "--parents", "-1", merge).split()[1:]
-        label, patch = rc.merge_patch(git("rev-parse", merge), parents)
+        line = git("rev-list", "--parents", "-1", RESOLVED_MERGE_233).split()
+        label, patch = rc.merge_patch(line[0], line[1:])
         self.assertEqual(label, "Conflict resolution in this merge")
         self.assertTrue(patch.strip())
 
@@ -66,9 +70,16 @@ class Synthetic(unittest.TestCase):
     """master <- layer1 <- layer2, layer1 squash-merged into master."""
 
     def setUp(self):
-        self.cwd = os.getcwd()
-        self.dir = tempfile.TemporaryDirectory()
-        os.chdir(self.dir.name)
+        environ = {k: v for k, v in os.environ.items()
+                   if not k.startswith("GIT_")}
+        environ.update(GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM="1")
+        patcher = mock.patch.dict(os.environ, environ, clear=True)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.addCleanup(os.chdir, os.getcwd())
+        os.chdir(directory.name)
         git("init", "-q", "-b", "master")
         git("config", "user.email", "t@example.com")
         git("config", "user.name", "t")
@@ -81,10 +92,6 @@ class Synthetic(unittest.TestCase):
         git("checkout", "-q", "master")
         git("merge", "-q", "--squash", "layer1")
         git("commit", "-q", "-m", "S: layer1 squashed")
-
-    def tearDown(self):
-        os.chdir(self.cwd)
-        self.dir.cleanup()
 
     def commit(self, path, text, message):
         with open(path, "w") as f:
@@ -108,6 +115,20 @@ class Synthetic(unittest.TestCase):
         self.assertIn("Conflict resolution in this merge", patch)
         self.assertIn("on master after the squash", patch)
 
+    def test_ours_merge_that_drops_a_revert_on_master_is_reviewed(self):
+        git("checkout", "-q", "layer2")
+        git("reset", "-q", "--hard", "layer1")
+        self.commit("g", "layer two\n", "L2 again")
+        reviewed = git("rev-parse", "HEAD")
+        git("checkout", "-q", "master")
+        git("reset", "-q", "--hard", "layer1")
+        git("revert", "--no-edit", "HEAD")
+        self.assertEqual(rc.tree("master"), rc.tree("master~2"))
+        head = self.merge_master_ours()
+        self.assertFalse(rc.already_merged(reviewed, "master"))
+        self.assertIn("Conflict resolution in this merge",
+                      rc.changes(reviewed, head, ["master"]))
+
     def test_merging_master_into_an_upper_layer_adds_nothing(self):
         self.commit("h", "on master\n", "X")
         git("checkout", "-q", "layer2")
@@ -126,19 +147,19 @@ def pr(number, base, head, title=None):
 class Stack(unittest.TestCase):
     def setUp(self):
         self.prs = [pr(1, "master", "a"), pr(2, "a", "b"), pr(3, "b", "c"),
-                    pr(4, "master", "z")]
+                    pr(4, "master", "z"), pr(5, "b", "master")]
 
-    def pulls(self, head=None, base=None):
+    def find(self, head=None, base=None):
         return [p for p in self.prs
                 if (head is None or f"o:{p['head']['ref']}" == head)
                 and (base is None or p["base"]["ref"] == base)]
 
     def test_chain_from_the_middle(self):
-        layers = rc.branch_chain(self.prs[1], "o", "master", self.pulls)
+        layers = rc.branch_chain(self.prs[1], "o", "master", self.find)
         self.assertEqual([e["number"] for e in layers], [1, 2, 3])
 
     def test_a_lone_pull_request_has_no_stack(self):
-        layers = rc.branch_chain(self.prs[3], "o", "master", self.pulls)
+        layers = rc.branch_chain(self.prs[3], "o", "master", self.find)
         self.assertEqual(rc.stack_markdown(layers, 4, "master"), "")
 
     def test_markdown_marks_this_layer_and_merged_ones(self):
@@ -146,42 +167,77 @@ class Stack(unittest.TestCase):
                             "baseRefName": "master"}),
                   rc.layer(self.prs[1])]
         text = rc.stack_markdown(layers, 2, "a")
-        self.assertIn("1. #1 bottom (merged); base `master`", text)
-        self.assertIn("2. #2 layer 2 (this pull request); base `a`", text)
-        self.assertIn("do not flag code that lives in another layer", text)
+        self.assertIn("- #1 bottom (merged), on `master`", text)
+        self.assertIn("- #2 layer 2 (this pull request), on `a`", text)
+        self.assertIn("do flag anything this layer's changes break", text)
+
+    def test_a_failed_lookup_leaves_the_stack_out(self):
+        failure = subprocess.CalledProcessError(1, "gh")
+        out = io.StringIO()
+        with mock.patch.object(rc, "run", side_effect=failure), \
+                contextlib.redirect_stdout(out):
+            self.assertEqual(rc.stack_layers("o/r", self.prs[1], "master"), [])
+        self.assertIn("no stack in the review context", out.getvalue())
+
+
+def fake_gh(artifacts=(), retargets=(), merged=()):
+    def run(*args, check=True):
+        path = next(a for a in args[2:] if not a.startswith("-"))
+        if "artifacts" in path:
+            return "".join(f"{created}\t{run_id}\t{head}\n"
+                           for created, run_id, head in artifacts)
+        if path == "graphql":
+            return json.dumps({"data": {"repository": {"pullRequest": {
+                "timelineItems": {"nodes": [
+                    {"createdAt": at, "previousRefName": ref}
+                    for at, ref in retargets]}}}}})
+        head = path.split("head=")[1].split("%3A")[1]
+        return json.dumps([{"merged_at": "t" if head in merged else None}])
+    return run
 
 
 class LastReviewed(unittest.TestCase):
-    """A run whose review step was skipped (workflow validation) covers nothing."""
+    def test_the_newest_other_run_is_the_last_review(self):
+        artifacts = [("2026-10-01T10:00:00Z", "1", "c1"),
+                     ("2026-10-01T12:00:00Z", "3", "c3"),
+                     ("2026-10-01T11:00:00Z", "2", "c2")]
+        with mock.patch.object(rc, "run", fake_gh(artifacts)):
+            self.assertEqual(rc.last_reviewed("o/r", 7, "9"),
+                             ("c3", "2026-10-01T12:00:00Z"))
+            self.assertEqual(rc.last_reviewed("o/r", 7, "3"),
+                             ("c2", "2026-10-01T11:00:00Z"))
 
-    def setUp(self):
-        self.real_run = rc.run
-        runs = {"workflow_runs": [
-            {"id": 3, "head_sha": "c3", "pull_requests": [{"number": 7}]},
-            {"id": 2, "head_sha": "c2", "pull_requests": [{"number": 7}]},
-            {"id": 1, "head_sha": "c1", "pull_requests": [{"number": 7}]}]}
-        steps = {3: "skipped", 2: "skipped", 1: "success"}
+    def test_no_recorded_review(self):
+        with mock.patch.object(rc, "run", fake_gh()):
+            self.assertEqual(rc.last_reviewed("o/r", 7, "9"), (None, None))
 
-        def fake(*args, check=True):
-            path = args[2]
-            if "/jobs" in path:
-                run_id = int(path.split("/")[-2])
-                return json.dumps({"jobs": [{"steps": [
-                    {"name": rc.RECORD_STEP, "conclusion": steps[run_id]}]}]})
-            return json.dumps(runs)
-        rc.run = fake
+    def test_the_workflow_uploads_the_record_the_script_names(self):
+        with open(WORKFLOW) as f:
+            text = f.read()
+        self.assertIn("uses: actions/upload-artifact@", text)
+        self.assertIn("name: ${{ steps.context.outputs.record }}", text)
+        self.assertIn("include-hidden-files: true", text)
 
-    def tearDown(self):
-        rc.run = self.real_run
 
-    def test_skipped_reviews_are_not_counted(self):
-        self.assertEqual(rc.last_reviewed("o/r", "w.yml", "b", 7, "9"), "c1")
+class Retarget(unittest.TestCase):
+    def left(self, retargets, merged):
+        with mock.patch.object(rc, "run", fake_gh(retargets=retargets,
+                                                  merged=merged)):
+            return rc.unmerged_bases_left("o/r", 7, "master",
+                                          "2026-10-01T12:00:00Z")
 
-    def test_the_current_run_is_not_counted(self):
-        self.assertIsNone(rc.last_reviewed("o/r", "w.yml", "b", 7, "1"))
+    def test_moving_off_a_merged_lower_layer_keeps_the_review_incremental(self):
+        self.assertEqual(self.left([("2026-10-01T13:00:00Z", "l1")], {"l1"}),
+                         [])
 
-    def test_another_pull_requests_runs_are_not_counted(self):
-        self.assertIsNone(rc.last_reviewed("o/r", "w.yml", "b", 8, "9"))
+    def test_moving_off_an_unmerged_layer_needs_a_full_review(self):
+        self.assertEqual(self.left([("2026-10-01T13:00:00Z", "l1")], set()),
+                         ["l1"])
+
+    def test_earlier_and_default_branch_retargets_do_not_count(self):
+        self.assertEqual(self.left([("2026-10-01T11:00:00Z", "l1"),
+                                    ("2026-10-01T13:00:00Z", "master")],
+                                   set()), [])
 
 
 if __name__ == "__main__":
