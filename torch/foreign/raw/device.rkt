@@ -79,22 +79,22 @@
     [(mps)
      ;; on unified memory the allocator's cache is host memory, so what it
      ;; has taken from the driver is what costs the machine
-     (define-values (rc _allocated driver _recommended)
-       (tr-mps-memory-info/raw))
-     (and (zero? rc) driver)]
+     (mps-driver-bytes)]
     [else #f]))
 
 (define (mps-driver-bytes)
   (define-values (rc _allocated driver _recommended) (tr-mps-memory-info/raw))
-  (if (zero? rc) driver 0))
+  (and (zero? rc) driver))
 
-;; a release that found the cache already empty frees nothing, and says so
+;; a release that found the cache already empty frees nothing, and says so;
+;; one whose reading failed shows nothing either
 (define (device-release dev)
   (cond
     [(eq? (device-type dev) 'mps)
      (define before (mps-driver-bytes))
-     (and (zero? (tr-mps-empty-cache/raw))
-          (< (mps-driver-bytes) before))]
+     (define emptied? (zero? (tr-mps-empty-cache/raw)))
+     (define after (mps-driver-bytes))
+     (and emptied? before after (< after before))]
     [else #f]))
 
 (install-device-queries! #:capacity device-capacity
