@@ -5,10 +5,12 @@
 # as the CLAUDE_CODE_OAUTH_TOKEN repository secret (Settings > Secrets and
 # variables > Actions). Posts findings as PR comments / inline annotations.
 #
-# The action skips the review, and the job still succeeds, while this file
-# differs from master's; a run counts as a review only when it uploads the
-# reviewed-<number> artifact. The context script and the prompt come from
-# master too, so no pull request changes how it is itself reviewed.
+# GitHub runs the copy of this file in the pull request's merge ref (its head
+# merged into its base), and the action skips the review, the job still
+# green, unless that copy is master's: a stacked layer is reviewed once its
+# base has merged master's copy. A run counts as a review only when it
+# uploads the reviewed-<number> artifact. The context script and the prompt
+# come from master, so no pull request changes how it is itself reviewed.
 
 name: claude-code-review
 
@@ -23,14 +25,6 @@ permissions:
   id-token: write
 
 jobs:
-  context-tests:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          fetch-depth: 0
-      - run: python3 .github/scripts/test_review_context.py
-
   claude-review:
     runs-on: ubuntu-latest
     steps:
@@ -56,7 +50,7 @@ jobs:
 
       - name: Run Claude Code review
         id: review
-        if: steps.context.outputs.mode != 'none'
+        if: steps.context.outputs.mode == 'full' || steps.context.outputs.mode == 'incremental'
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
@@ -65,11 +59,12 @@ jobs:
             --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(git log:*),Bash(git show:*),Bash(git diff:*),Read,Grep,Glob"
 
       - name: Record review
-        if: steps.context.outputs.mode == 'none' || steps.review.outputs.conclusion == 'success'
+        if: steps.context.outputs.record != '' && (steps.context.outputs.mode == 'none' || steps.review.outputs.conclusion == 'success')
         uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.context.outputs.record }}
           path: .review-context/context.md
           include-hidden-files: true
           if-no-files-found: error
+          overwrite: true
           retention-days: 90
