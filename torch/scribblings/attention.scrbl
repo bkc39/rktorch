@@ -107,10 +107,11 @@ It applies whenever it is above zero: like PyTorch's function, and unlike
 @racket[Dropout], there is no training mode to consult, so a caller that
 evaluates passes @racket[0.0] itself.
 
-Each device chooses its own kernel: on CUDA, FlashAttention for
-@racket['float16] and @racket['bfloat16] inputs it supports and the
-memory-efficient kernel otherwise, falling back to the computation above.
-There is nothing to select here, and the kernels agree up to rounding.
+Each device chooses its own kernel. On CUDA that is a fused one wherever
+the inputs allow it, FlashAttention for @racket['float16] and
+@racket['bfloat16], otherwise the memory-efficient kernel or cuDNN's,
+and the computation above as the fallback. There is nothing to select
+here, and the kernels agree up to rounding.
 Gradients flow to @racket[query], @racket[key] and @racket[value].
 
 PyTorch's @tt{enable_gqa}, grouped-query attention with fewer key and
