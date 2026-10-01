@@ -131,8 +131,13 @@
                 "the collector was not charged for the allocator's excess")
     (parameterize ([native-collect-margin idle-margin])
       (collect-at-trough!))
+    (check-true (>= (cpu-unaccounted) (* 255 mib))
+                "an allocator that cannot answer must leave the charge as it was")
+    (parameterize ([allocator-reading (lambda (_dev) (cpu-bytes))]
+                   [native-collect-margin idle-margin])
+      (collect-at-trough!))
     (check-equal? (cpu-unaccounted) 0
-                  "a trough where the allocator says nothing must clear the charge")
+                  "an allocator holding only the ledger's bytes must clear the charge")
     (check-equal? (length held) 4))
 
   (test-case "reclaiming clears a charge the allocator no longer backs"
@@ -141,9 +146,25 @@
                    [native-collect-margin idle-margin])
       (collect-at-trough!))
     (check-true (positive? (cpu-unaccounted)))
-    (reclaim-native-memory!)
+    (parameterize ([allocator-reading (lambda (_dev) (cpu-bytes))])
+      (reclaim-native-memory!))
     (check-equal? (cpu-unaccounted) 0
                   "the charge outlived the reclamation that ended it"))
+
+  ;; the stand-in's hidden storage lives until the trough's own collection
+  ;; has run, as a dropped graph's would until its owner is collected
+  (test-case "a trough whose collection frees hidden storage stops charging it"
+    (settle!)
+    (define before (trough-collections))
+    (define (hidden) (if (= (trough-collections) before) (* 256 mib) 0))
+    (parameterize ([allocator-reading (lambda (_dev) (+ (cpu-bytes) (hidden)))]
+                   [native-collect-margin (* 16 mib)]
+                   [native-collect-budget no-backoff])
+      (step! 8)
+      (collect-at-trough!))
+    (check-equal? (- (trough-collections) before) 1 "the trough did not collect")
+    (check-equal? (cpu-unaccounted) 0
+                  "the charge outlived the storage the collection freed"))
 
   (test-case "the charge never counts a ledger byte twice"
     (settle!)

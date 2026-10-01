@@ -253,7 +253,6 @@
   (-> (listof (cons/c device? exact-nonnegative-integer?)))
   raw:native-memory-use)
 
-;; the allocator's bytes past the ledger's, as of the last trough
 (define/contract-out native-memory-unaccounted ;; noqa
   (-> (listof (cons/c device? exact-nonnegative-integer?)))
   raw:native-memory-unaccounted)

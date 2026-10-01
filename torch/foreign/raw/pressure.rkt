@@ -264,11 +264,15 @@
   (when (< (max 0 (- reading (account-live a))) (account-unaccounted a))
     (set-shadow! a reading)))
 
+;; An allocator that cannot answer right now leaves its device's charge as
+;; it was; with charging off every charge goes to zero.
 (define (refresh-shadows!)
   (define charging? (shadow-refresh))
   (for ([dev (in-list (call-with-ledger (lambda () (hash-keys accounts))))])
-    (define reading (if charging? (or ((allocator-reading) dev) 0) 0))
-    (call-with-ledger (lambda () (set-shadow! (account-of dev) reading)))))
+    (define reading (and charging? ((allocator-reading) dev)))
+    (when (or reading (not charging?))
+      (call-with-ledger
+       (lambda () (set-shadow! (account-of dev) (or reading 0)))))))
 
 ;; --- one collection at a time ---
 
@@ -394,19 +398,22 @@
 ;; be freed would hide that residue from the next trough. The next time is
 ;; set either way, so a stalled stage cannot spin.
 (define (trough-stage! next-ms set-next! bump! collect! on-drained! budget)
-  (when (due? (next-ms the-schedule))
-    (define started (current-inexact-milliseconds))
-    (define before (ledger-total))
-    (define drained? (collect!))
-    (define finished (current-inexact-milliseconds))
-    (define after (ledger-total))
-    (call-with-ledger
-     (lambda ()
-       (when drained?
-         (on-drained!))
-       (set-next! the-schedule (+ finished (/ (- finished started) budget)))
-       (bump! the-stats)
-       (note-reclaimed! (- before after))))))
+  (cond
+    [(due? (next-ms the-schedule))
+     (define started (current-inexact-milliseconds))
+     (define before (ledger-total))
+     (define drained? (collect!))
+     (define finished (current-inexact-milliseconds))
+     (define after (ledger-total))
+     (call-with-ledger
+      (lambda ()
+        (when drained?
+          (on-drained!))
+        (set-next! the-schedule (+ finished (/ (- finished started) budget)))
+        (bump! the-stats)
+        (note-reclaimed! (- before after))))
+     drained?]
+    [else #f]))
 
 (define (collect-young-at-trough! budget)
   (trough-stage! schedule-next-minor-ms
@@ -439,9 +446,12 @@
       (if young? (/ (native-collect-budget) 2) (native-collect-budget)))
     (call-as-the-collector
      (lambda ()
-       (when young?
-         (collect-young-at-trough! budget))
-       (collect-old-at-trough! budget)))))
+       (define young-drained? (and young? (collect-young-at-trough! budget)))
+       (define old-drained? (collect-old-at-trough! budget))
+       ;; what that collection freed may include storage only a dropped
+       ;; graph held; the charge moves with it rather than adding to it
+       (when (or young-drained? old-drained?)
+         (refresh-shadows!))))))
 
 ;; --- a collection that has really finished ---
 
