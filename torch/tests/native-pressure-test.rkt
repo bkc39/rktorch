@@ -14,7 +14,7 @@
                     native-collect-budget native-collect-margin
                     native-memory-fraction reset-pressure-state!)
            (only-in "../nn.rkt"
-                    Linear Sequential forward gen:layer layer-forward))
+                    Linear Sequential forward gen:layer))
 
   (define mib (* 1024 1024))
 
@@ -169,7 +169,6 @@
 
   (test-case "a hand-written layer is a trough, however it is called"
     (struct Hand (w)
-      #:property prop:procedure layer-forward
       #:methods gen:layer
       [(define (layer-forward self . inputs)
          (add (matmul (car inputs) (Hand-w self)) 1))])
@@ -178,8 +177,7 @@
     (parameterize ([native-collect-margin (* 1 mib)]
                    [native-collect-budget 1000])
       (for ([call (in-list (list (lambda () (hand x))
-                                 (lambda () (forward hand x))
-                                 (lambda () (layer-forward hand x))))])
+                                 (lambda () (forward hand x))))])
         (settle!)
         (define before (trough-minors))
         (check-true (and (with-no-grad (call)) #t))

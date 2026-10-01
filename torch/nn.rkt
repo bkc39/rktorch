@@ -44,7 +44,6 @@
 
 (provide define-layer
          gen:layer
-         layer-forward
          layer-parameters
          layer-named-parameters
          layer-buffers

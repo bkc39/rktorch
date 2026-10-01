@@ -42,8 +42,7 @@ and a struct with one slot per @racket[field].  An instance is a
 @racket[layer?] and applies as a procedure, running @racket[body] with
 every field in scope.  A call with other than one argument per
 @racket[input] raises @racket[exn:fail:contract:arity] under
-@racket[name], whether made directly, through @racket[forward], or
-through @racket[layer-forward].
+@racket[name], whether made directly or through @racket[forward].
 
 An @racket[input] written @racket[[id : contract-expr]] states what the
 layer accepts there, and a call that does not satisfy it is a contract
@@ -180,7 +179,7 @@ layers with the functional interface:
                                      ms)))
   #:forward (x)
   (for/fold ([acc x]) ([m (in-layers steps)])
-    (layer-forward m acc)))
+    (m acc)))
 ]
 
 An invariant that relates two arguments is a @racket[->i] precondition
@@ -291,8 +290,8 @@ also takes a dtype target; a plain tensor field does neither.
                           [#:buffers bufs (listof (cons/c child-name/c Buffer?)) '()]
                           [#:children kids (listof (cons/c child-name/c layer?)) '()])
          layer?]{
-Wraps @racket[proc] as a callable layer. Calls through the layer itself,
-@racket[forward], or @racket[layer-forward] pass positional arguments to
+Wraps @racket[proc] as a callable layer. Calls through the layer itself
+or @racket[forward] pass positional arguments to
 @racket[proc] and preserve its return values and exceptions. Keyword
 arguments to the wrapped procedure are not supported.
 
@@ -533,21 +532,25 @@ Whether @racket[v] is an average built by @racket[ema].
 @section[#:tag "layer-interface"]{The layer interface}
 
 Every layer, whether from @racket[define-layer] or written by hand,
-implements @racket[gen:layer]. A hand-written layer needs only
-@racket[layer-forward]; the collection methods have empty fallbacks, and
-the containers reach every tensor by walking @racket[layer-named-children].
+implements @racket[gen:layer]. A hand-written layer needs only a
+@racket[layer-forward] method; the collection methods have empty
+fallbacks, and the containers reach every tensor by walking
+@racket[layer-named-children].
 
-Every call reaches a layer's @racket[layer-forward] method through the
-function of the same name, which is what @racket[forward] and applying a
-layer call too. That is where the return of an outermost layer call under
-@racket[with-no-grad] collects (see @racket[native-collect-at-troughs]),
-so a hand-written layer gets it the same way a @racket[define-layer] one
-does. Such a layer is not applicable unless its structure asks for it,
-with @racket[#:property prop:procedure layer-forward].
+Every layer is a procedure, and applying it is the one way to call it:
+@racket[gen:layer] derives @racket[prop:procedure] for each structure that
+implements it, so applying a layer reaches its @racket[layer-forward]
+method through one entry point. That is where the return of an outermost
+layer call under @racket[with-no-grad] collects (see
+@racket[native-collect-at-troughs]), so a hand-written layer gets it the
+same way a @racket[define-layer] one does. A structure that implements
+@racket[gen:layer] and sets @racket[prop:procedure] itself is rejected
+when it is defined. Inside a @racket[#:methods gen:layer] block the name
+@racket[layer-forward] is the method being defined, so a layer calls its
+children by applying them.
 
 @racketblock[
 (struct Twice (inner)
-  #:property prop:procedure layer-forward
   #:methods gen:layer
   [(define (layer-forward self . inputs)
      (define inner (Twice-inner self))
@@ -563,14 +566,9 @@ The generic interface, with methods @racket[layer-forward],
 @racket[layer-named-children], @racket[layer-own-tensors],
 @racket[layer-mode] and @racket[layer-set-mode!]. A structure implements
 it with @racket[#:methods]; it derives @racket[prop:to], so every layer is
-@racket[to-able?].}
-
-@defproc[(layer-forward [m layer?] [input any/c] ...) any]{
-Runs the layer's computation on its inputs: the @racket[layer-forward]
-method, which @racket[define-layer]'s @racket[#:forward] clause supplies.
-Inside a @racket[#:methods gen:layer] block the name is the method being
-defined; everywhere else it is this function, so a call cannot skip the
-collection at an outermost call's return.}
+@racket[to-able?], and @racket[prop:procedure], so every layer applies to
+its inputs. @racket[define-layer]'s @racket[#:forward] clause supplies the
+@racket[layer-forward] method.}
 
 @defproc[(forward [m layer?] [input any/c] ...) any]{
 Calls @racket[layer-forward]; the explicit spelling of @racket[(m input)].}

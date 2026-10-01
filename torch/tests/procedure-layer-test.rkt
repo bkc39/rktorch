@@ -5,7 +5,7 @@
          (only-in "../main.rkt" + backward! has-grad? lambda~> ones relu sum
                   tensor->list zeros)
          (only-in "../nn.rkt" Buffer Dropout LayerList Linear Parameter Sequential
-                  buffers children eval! forward layer-forward layer-training?
+                  buffers children eval! forward layer-training?
                   layer? named-parameters parameters procedure->Layer sgd
                   state-dict step! train!))
 
@@ -15,7 +15,7 @@
     (check-true (layer? identity))
     (check-equal? (call-with-values (lambda () (identity 1 2)) list) '(1 2))
     (check-equal? (call-with-values (lambda () (forward identity)) list) '())
-    (check-equal? (layer-forward identity 7) 7)
+    (check-equal? (identity 7) 7)
     (check-equal? (parameters identity) '())
     (check-equal? (buffers identity) '())
     (check-equal? (children identity) '())

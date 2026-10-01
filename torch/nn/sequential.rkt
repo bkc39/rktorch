@@ -2,8 +2,7 @@
 
 (require (only-in racket/contract/base ->* list/c listof or/c)
          (only-in "layer.rkt"
-                  children-by-index define-layer in-layers layer-forward
-                  step/c))
+                  children-by-index define-layer in-layers step/c))
 
 (define-layer Sequential (steps) ;; noqa
   #:contract (->* [] #:rest (or/c (list/c (listof step/c)) (listof step/c))
@@ -15,4 +14,4 @@
   #:forward (x)
   (for/fold ([acc x])
             ([m (in-layers steps)])
-    (layer-forward m acc)))
+    (m acc)))
