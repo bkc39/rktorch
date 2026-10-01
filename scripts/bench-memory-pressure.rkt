@@ -174,7 +174,12 @@
   (displayln "step window-peak-MiB allocated-MiB reserved-MiB backstop trough minors entries racket-MiB rss-MiB s/step majors unaccounted-MiB")
   (reset-peak!)
   (define gc0 (current-gc-milliseconds))
+  (define (ledger-collections)
+    (+ (diagnostic 'pressure-collections) (diagnostic 'trough-collections)))
+  ;; building the model may already have collected, so count from here
   (define majors0 (unbox major-collections))
+  (define ledger0 (ledger-collections))
+  (define manual-majors 0)
   (define window-majors (box majors0))
   (define t0 (current-inexact-milliseconds))
   (for/fold ([window-start t0]) ([i (in-range 1 (add1 STEPS))])
@@ -192,6 +197,7 @@
               (quotient (current-memory-use) mib)))
     (when (and (eq? MODE 'manual) (zero? (remainder i GC-EVERY)))
       (collect-garbage)
+      (set! manual-majors (add1 manual-majors))
       (sleep 0))
     (cond
       [(zero? (remainder i 10))
@@ -218,8 +224,7 @@
        now]
       [else window-start]))
   (define majors (- (unbox major-collections) majors0))
-  (define ledger-majors
-    (+ (diagnostic 'pressure-collections) (diagnostic 'trough-collections)))
+  (define ledger-majors (- (ledger-collections) ledger0))
   (printf "total ~a s, gc ~a ms, reclaimed ~a MiB: ~a backstop, ~a trough, ~a minors\n"
           (~r (/ (- (current-inexact-milliseconds) t0) 1000.0) #:precision '(= 1))
           (- (current-gc-milliseconds) gc0)
@@ -227,8 +232,9 @@
           (diagnostic 'pressure-collections)
           (diagnostic 'trough-collections)
           (diagnostic 'trough-minors))
-  (printf "majors ~a: ~a the ledger's, ~a forced by Racket\n"
-          majors ledger-majors (max 0 (- majors ledger-majors))))
+  (printf "majors ~a: ~a the ledger's, ~a by hand, ~a forced by Racket\n"
+          majors ledger-majors manual-majors
+          (max 0 (- majors ledger-majors manual-majors))))
 
 (module+ main
   (require (only-in torch/foreign/raw/pressure shadow-refresh))
