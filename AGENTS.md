@@ -402,8 +402,11 @@ needs a differently-linked libtorch plus the host driver). Confirm with
 **No MPS kernel gaps.** Since libtorch 2.14 every op the examples use has an
 MPS kernel, `aten::_ctc_loss` and `aten::native_group_norm_backward` included
 (#139), so `pick-device` returns `accelerator-if-available` unmodified. When a
-new op lacks one, route that op alone through the CPU with `to-device`, which
-is differentiable both ways, rather than routing darwin to the CPU.
+new op lacks one, or its kernel is wrong for some shapes, route that op alone
+through the CPU with `to-device`, which is differentiable both ways, rather
+than routing darwin to the CPU. `ctc-loss` does this for targets of 512 labels
+or more, where 2.14's MPS backward returns wrong or NaN gradients while the
+forward stays right; a green loss curve does not catch that.
 
 ## Architecture
 

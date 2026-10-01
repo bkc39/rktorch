@@ -486,6 +486,30 @@
             [m (in-list (tensor->list (to-device mps-grad 'cpu)))])
         (check-= m c 1e-5))))
 
+  (test-case "ctc-loss on mps: a 512-label target gets the CPU's gradient"
+    (when (mps-available?)
+      (manual-seed! 0)
+      (define frames (randn 1100 1 5))
+      (define targets (to-dtype (mul (rand 1 512) 4) 'int64))
+      (define (loss+grad dev)
+        (define w (requires-grad! (detach (to-device frames dev))))
+        (define loss
+          (ctc-loss (log-softmax w 2) (to-device targets dev)
+                    #:input-lengths '(1100)
+                    #:target-lengths '(512)
+                    #:blank 4
+                    #:zero-infinity? #t))
+        (backward! loss)
+        (values loss (grad w)))
+      (define-values (cpu-loss cpu-grad) (loss+grad 'cpu))
+      (define-values (mps-loss mps-grad) (loss+grad 'mps))
+      (check-equal? (tensor-device mps-loss) (mps-device))
+      (check-equal? (tensor-device mps-grad) (mps-device))
+      (check-= (item mps-loss) (item cpu-loss) 1e-5)
+      (define d (sub (to-device mps-grad 'cpu) cpu-grad))
+      (check-= (sqrt (item (sum (mul d d)))) 0.0 1e-5
+               "the gradient differs from the CPU's")))
+
   (test-case "a few Adam steps reduce the training loss"
     (manual-seed! 0)
     (define net (mlp 4 8 2))
