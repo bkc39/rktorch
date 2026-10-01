@@ -65,7 +65,6 @@
          named-buffers
          children
          named-children
-         forward
          train!
          eval!
          set-mode!

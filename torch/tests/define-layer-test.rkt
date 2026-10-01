@@ -362,10 +362,10 @@
   (test-case "a layer that sets prop:procedure itself is rejected"
     (check-exn #rx"duplicate property"
                (lambda ()
-                 (eval '(struct Own ()
-                          #:property prop:procedure (lambda (self x) x)
+                 (eval '(struct Own () ;; noqa
+                          #:property prop:procedure (lambda (self x) x) ;; noqa
                           #:methods gen:layer
-                          [(define (layer-forward self . inputs) (car inputs))])
+                          [(define (layer-forward self . inputs) (car inputs))]) ;; noqa
                        (namespace-anchor->namespace here)))))
 
   (test-case "Sequential takes its steps as arguments or as one list"

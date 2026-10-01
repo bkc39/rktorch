@@ -168,10 +168,6 @@
   (-> layer? (listof (cons/c string? layer?)))
   (remove-duplicates (layer-named-children m) eq? #:key cdr))
 
-(define/contract-out (forward m . inputs) ;; noqa
-  (-> layer? any/c ... any)
-  (apply call-layer m inputs))
-
 (define/contract-out (train! m) ;; noqa
   (-> layer? layer?)
   (layer-set-mode! m 'train)
@@ -245,7 +241,7 @@
 ;; derives prop:procedure from it, so a layer written by hand gets the
 ;; trough too. The mark tells a nested call from the outermost one, whose
 ;; return is where a no-grad loop's memory is at its lowest.
-(define (call-layer m . inputs)
+(define (call-layer m . inputs) ;; noqa
   (cond
     [(continuation-mark-set-first #f layer-call-key)
      (apply layer-forward m inputs)]

@@ -14,7 +14,7 @@
                     native-collect-budget native-collect-margin
                     native-memory-fraction reset-pressure-state!)
            (only-in "../nn.rkt"
-                    Linear Sequential forward gen:layer))
+                    Linear Sequential gen:layer))
 
   (define mib (* 1024 1024))
 
@@ -167,7 +167,7 @@
       (check-equal? (trough-minors) before)
       (check-true (and y #t))))
 
-  (test-case "a hand-written layer is a trough, however it is called"
+  (test-case "applying a hand-written layer with gradients off is a trough, once"
     (struct Hand (w)
       #:methods gen:layer
       [(define (layer-forward self . inputs)
@@ -176,13 +176,11 @@
     (define x (zeros 1024 1024))
     (parameterize ([native-collect-margin (* 1 mib)]
                    [native-collect-budget 1000])
-      (for ([call (in-list (list (lambda () (hand x))
-                                 (lambda () (forward hand x))))])
-        (settle!)
-        (define before (trough-minors))
-        (check-true (and (with-no-grad (call)) #t))
-        (check-equal? (- (trough-minors) before) 1
-                      "the call's return collects once"))))
+      (settle!)
+      (define before (trough-minors))
+      (check-true (and (with-no-grad (hand x)) #t))
+      (check-equal? (- (trough-minors) before) 1
+                    "the application's return collects once")))
 
   (test-case "native-collect-at-troughs #f turns off both implicit collections"
     (define net (Linear 1024 1024))

@@ -42,7 +42,7 @@ and a struct with one slot per @racket[field].  An instance is a
 @racket[layer?] and applies as a procedure, running @racket[body] with
 every field in scope.  A call with other than one argument per
 @racket[input] raises @racket[exn:fail:contract:arity] under
-@racket[name], whether made directly or through @racket[forward].
+@racket[name].
 
 An @racket[input] written @racket[[id : contract-expr]] states what the
 layer accepts there, and a call that does not satisfy it is a contract
@@ -290,9 +290,9 @@ also takes a dtype target; a plain tensor field does neither.
                           [#:buffers bufs (listof (cons/c child-name/c Buffer?)) '()]
                           [#:children kids (listof (cons/c child-name/c layer?)) '()])
          layer?]{
-Wraps @racket[proc] as a callable layer. Calls through the layer itself
-or @racket[forward] pass positional arguments to
-@racket[proc] and preserve its return values and exceptions. Keyword
+Wraps @racket[proc] as a callable layer. Applying the layer passes
+positional arguments to @racket[proc] and preserves its return values and
+exceptions. Keyword
 arguments to the wrapped procedure are not supported.
 
 The optional association lists register captured parameters, buffers, and
@@ -569,9 +569,6 @@ it with @racket[#:methods]; it derives @racket[prop:to], so every layer is
 @racket[to-able?], and @racket[prop:procedure], so every layer applies to
 its inputs. @racket[define-layer]'s @racket[#:forward] clause supplies the
 @racket[layer-forward] method.}
-
-@defproc[(forward [m layer?] [input any/c] ...) any]{
-Calls @racket[layer-forward]; the explicit spelling of @racket[(m input)].}
 
 @deftogether[(@defproc[(layer-parameters [m layer?]) (listof tensor?)]
               @defproc[(layer-buffers [m layer?]) (listof tensor?)])]{
