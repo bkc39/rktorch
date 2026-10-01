@@ -1,8 +1,10 @@
 Start with .review-context/context.md. It says whether this is
 a full review of the pull request or an incremental review of
-one push. For an incremental review, review only
-.review-context/changes.patch and comment only on lines it
-changes; the rest of the pull request was reviewed before.
+one push and, when the pull request is one layer of a stack,
+which layers sit below and above it. For an incremental review,
+review only .review-context/changes.patch and comment only on
+lines it changes; the rest of the pull request was reviewed
+before.
 
 .review-context/threads.md holds every earlier review thread
 on this pull request, resolved or open, with the replies. Do
@@ -12,18 +14,17 @@ a reply, say why in your summary comment, not in a new inline
 thread.
 
 This repository is torchrkt: Racket bindings to libtorch via a
-hand-written extern "C" shim. Read AGENTS.md first for the
-project's conventions, then review the diff for:
-- correctness bugs (memory ownership across the FFI boundary,
-  the integer-status + tr_last_error contract, GC finalizer
-  registration on tensor-returning bindings)
-- violations of repo conventions (files <= 500 lines, ops.cpp
-  boundary helpers in detail/op_call.hpp, allocator-wrapped raw
-  bindings, contracts at the definition site, the
-  name-shadowing dispatch convention)
-- missing test or parity coverage for new ops (gtest goldens,
-  example triples, generated-parity-test recipes for allowlist
-  ops, python-cross-test checks for hand-written ops)
+hand-written extern "C" shim. Review against
+.review-context/review-rules.md, the Code Review Rules from
+master's AGENTS.md: they say what to leave to other layers of a
+stack, that generated files are reviewed through the generator
+and codegen/allowlist.txt rather than their bodies, and what
+this repository checks hardest. Read AGENTS.md in the checkout
+for the conventions they point to. Look first for correctness
+bugs: memory ownership across the FFI boundary, finalizer
+registration on tensor-returning bindings, and errors that
+cross the C boundary without the shim's status, NULL and
+tr_last_error contract.
 
 Report genuine issues only: name the input or state that goes
 wrong and what happens. Do not restate the diff or praise
