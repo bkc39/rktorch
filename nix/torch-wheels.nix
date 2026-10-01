@@ -8,8 +8,8 @@
 # on torch gets this one. With `cudaLibs` (library directories) it is the cu130
 # build, patched against those directories: the CUDA libraries the Racket side
 # loads, so a CUDA parity test runs the same ones on both sides. torchaudio's
-# last release is 2.11; its wheel runs on torch 2.14 with its version pin
-# unchecked.
+# last release is 2.11; its extensions build against torch's stable ABI, so
+# its wheel runs on torch 2.14.
 { lib, stdenv, fetchurl, autoPatchelfHook, ffmpeg-headless, libheif
 , cudaLibs ? null }:
 
@@ -34,7 +34,11 @@ let
   torchLibs = "${self.torch}/${sitePackages}/torch";
   ffmpegMajor = lib.versions.major ffmpeg-headless.version;
 
+  # every URL below names a cp314 wheel
   wheel = { pname, version, url, sha256, dependencies, extra ? { } }:
+    assert lib.assertMsg (self.python.pythonVersion == "3.14")
+      ("nix/torch-wheels.nix fetches cp314 wheels, but the python set is "
+       + self.python.pythonVersion);
     self.buildPythonPackage ({
       inherit pname version dependencies;
       format = "wheel";
@@ -94,8 +98,6 @@ in
     pname = "torchaudio";
     version = "2.11.0";
     dependencies = with self; [ torch torchcodec ];
-    # its metadata pins torch==2.11.0
-    extra.dontCheckRuntimeDeps = true;
   };
 
   # torchaudio.load decodes through torchcodec. The wheel carries one core
