@@ -4,6 +4,7 @@ earlier threads, and master's review rules; see claude-code-review.yml.
 
     python3 .github/scripts/review_context.py OUT_DIR
 """
+import datetime
 import json
 import os
 import secrets
@@ -14,6 +15,8 @@ import urllib.parse
 PROMPT = ".github/claude-review-prompt.md"
 
 RECORD = "reviewed-{pr}"
+
+WORKFLOW = ".github/workflows/claude-code-review.yml"
 
 RULES = "## Code Review Rules"
 
@@ -117,40 +120,50 @@ def last_reviewed(repo, pr):
                f"&name={RECORD.format(pr=pr)}",
                "--jq", ".artifacts[] | [.workflow_run.id, "
                ".workflow_run.head_sha] | @tsv").split()
-    if not rows:
-        return None, None
-    run_id, head = max(zip(map(int, rows[0::2]), rows[1::2]))
-    started = json.loads(run("gh", "api", f"repos/{repo}/actions/runs/{run_id}"))
-    return head, started["created_at"]
+    for run_id, head in sorted(zip(map(int, rows[0::2]), rows[1::2]),
+                               reverse=True):
+        recorder = json.loads(run("gh", "api",
+                                  f"repos/{repo}/actions/runs/{run_id}"))
+        if recorder["path"] == WORKFLOW and recorder["event"] == "pull_request":
+            return head, recorder["created_at"]
+    return None, None
 
 
-def later_commits_taken(branch, merged_head, after):
-    if not succeeds("git", "rev-parse", "--verify", "-q", f"origin/{branch}"):
-        return False
-    later = run("git", "rev-list", f"origin/{branch}", "--not",
-                merged_head).split()
-    return any(succeeds("git", "merge-base", "--is-ancestor", sha, after)
-               for sha in later)
+def merged_beyond(merged_head, merged_at, after, default):
+    since = datetime.datetime.fromisoformat(
+        merged_at.replace("Z", "+00:00")).timestamp()
+    for line in run("git", "log", "--merges", "--format=%ct %P", after,
+                    "--not", f"origin/{default}").splitlines():
+        committed, _, *others = line.split()
+        if int(committed) < since:
+            continue
+        for parent in others:
+            if not any(succeeds("git", "merge-base", "--is-ancestor", parent,
+                                known) for known in
+                       (merged_head, f"origin/{default}")):
+                return True
+    return False
 
 
-def lower_layer_merged(repo, branch, retargeted_at, after):
+def lower_layer_merged(repo, branch, retargeted_at, after, default):
     owner = repo.split("/")[0]
     earlier = [p for p in pulls(repo, state="all", head=f"{owner}:{branch}")
                if p["created_at"] < retargeted_at]
     layer = max(earlier, key=lambda p: p["created_at"], default=None)
     return bool(layer and layer["merged_at"]
                 and layer["merged_at"] <= retargeted_at
-                and not later_commits_taken(branch, layer["head"]["sha"],
-                                            after))
+                and not merged_beyond(layer["head"]["sha"], layer["merged_at"],
+                                      after, default))
 
 
 def unmerged_bases_left(repo, pr, default, since, after):
     events = pull_request(RETARGETS, repo, pr)["timelineItems"]["nodes"]
     return sorted({e["previousRefName"] for e in events
-                   if e["createdAt"] > since
+                   if e["createdAt"] >= since
                    and e["previousRefName"] != default
                    and not lower_layer_merged(repo, e["previousRefName"],
-                                              e["createdAt"], after)})
+                                              e["createdAt"], after,
+                                              default)})
 
 
 def review_mode(before, after):
