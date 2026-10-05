@@ -4,13 +4,14 @@ earlier threads, and master's review rules; see claude-code-review.yml.
 
     python3 .github/scripts/review_context.py OUT_DIR
 """
-import datetime
+import io
 import json
 import os
 import secrets
 import subprocess
 import sys
 import urllib.parse
+import zipfile
 
 PROMPT = ".github/claude-review-prompt.md"
 
@@ -72,19 +73,6 @@ query($owner: String!, $name: String!, $pr: Int!) {
 }
 """
 
-RETARGETS = """
-query($owner: String!, $name: String!, $pr: Int!) {
-  repository(owner: $owner, name: $name) {
-    pullRequest(number: $pr) {
-      timelineItems(itemTypes: [BASE_REF_CHANGED_EVENT], last: 100) {
-        nodes { ... on BaseRefChangedEvent { createdAt previousRefName } }
-      }
-    }
-  }
-}
-"""
-
-
 def run(*args, check=True):
     return subprocess.run(args, capture_output=True, text=True,
                           check=check).stdout
@@ -114,56 +102,60 @@ def pulls(repo, **query):
     return json.loads(run("gh", "api", f"repos/{repo}/pulls?{query}"))
 
 
-def last_reviewed(repo, pr):
+def trusted(head, default):
+    return (succeeds("git", "cat-file", "-e", f"{head}^{{commit}}")
+            and run("git", "show", f"{head}:{WORKFLOW}", check=False)
+            == run("git", "show", f"origin/{default}:{WORKFLOW}"))
+
+
+def record_of(repo, artifact):
+    archive = subprocess.run(
+        ["gh", "api", f"repos/{repo}/actions/artifacts/{artifact}/zip"],
+        capture_output=True, check=True).stdout
+    with zipfile.ZipFile(io.BytesIO(archive)) as z:
+        return json.loads(z.read("record.json"))
+
+
+def last_reviewed(repo, pr, default):
     rows = run("gh", "api", "--paginate",
                f"repos/{repo}/actions/artifacts?per_page=100"
                f"&name={RECORD.format(pr=pr)}",
-               "--jq", ".artifacts[] | [.workflow_run.id, "
+               "--jq", ".artifacts[] | [.workflow_run.id, .id, "
                ".workflow_run.head_sha] | @tsv").split()
-    for run_id, head in sorted(zip(map(int, rows[0::2]), rows[1::2]),
-                               reverse=True):
+    for run_id, artifact, head in sorted(
+            zip(map(int, rows[0::3]), rows[1::3], rows[2::3]), reverse=True):
         recorder = json.loads(run("gh", "api",
                                   f"repos/{repo}/actions/runs/{run_id}"))
-        if recorder["path"] == WORKFLOW and recorder["event"] == "pull_request":
-            return head, recorder["created_at"]
-    return None, None
-
-
-def merged_beyond(merged_head, merged_at, after, default):
-    since = datetime.datetime.fromisoformat(
-        merged_at.replace("Z", "+00:00")).timestamp()
-    for line in run("git", "log", "--merges", "--format=%ct %P", after,
-                    "--not", f"origin/{default}").splitlines():
-        committed, _, *others = line.split()
-        if int(committed) < since:
+        if (recorder["path"].split("@")[0] != WORKFLOW
+                or recorder["event"] != "pull_request"
+                or not trusted(head, default)):
             continue
-        for parent in others:
-            if not any(succeeds("git", "merge-base", "--is-ancestor", parent,
-                                known) for known in
-                       (merged_head, f"origin/{default}")):
-                return True
-    return False
+        try:
+            return record_of(repo, artifact)
+        except (subprocess.CalledProcessError, KeyError, ValueError,
+                zipfile.BadZipFile):
+            continue
+    return None
 
 
-def lower_layer_merged(repo, branch, retargeted_at, after, default):
-    owner = repo.split("/")[0]
-    earlier = [p for p in pulls(repo, state="all", head=f"{owner}:{branch}")
-               if p["created_at"] < retargeted_at]
-    layer = max(earlier, key=lambda p: p["created_at"], default=None)
-    return bool(layer and layer["merged_at"]
-                and layer["merged_at"] <= retargeted_at
-                and not merged_beyond(layer["head"]["sha"], layer["merged_at"],
-                                      after, default))
+def rev_list(*args):
+    return set(run("git", "rev-list", *args).split())
 
 
-def unmerged_bases_left(repo, pr, default, since, after):
-    events = pull_request(RETARGETS, repo, pr)["timelineItems"]["nodes"]
-    return sorted({e["previousRefName"] for e in events
-                   if e["createdAt"] >= since
-                   and e["previousRefName"] != default
-                   and not lower_layer_merged(repo, e["previousRefName"],
-                                              e["createdAt"], after,
-                                              default)})
+def exposed(before, after, base_then, exclude):
+    if not succeeds("git", "cat-file", "-e", f"{base_then}^{{commit}}"):
+        return None
+    reviewed = rev_list(before, "--not", base_then, *exclude)
+    own = rev_list(before, "--not", *exclude) - reviewed
+    if not own:
+        return []
+    base_trees = set(run("git", "log", "--format=%T", *exclude,
+                         "--not", before).split())
+    anchors = [sha for sha, tree in (
+        line.split() for line in run("git", "log", "--format=%H %T", after,
+                                     "--not", *exclude).splitlines())
+               if tree in base_trees]
+    return sorted(own - (rev_list(*anchors) if anchors else set()))
 
 
 def review_mode(before, after):
@@ -212,7 +204,7 @@ def changes(before, after, exclude):
 
 def config_from_base(base, default):
     return base != default and not succeeds(
-        "git", "diff", "--quiet", f"origin/{default}...origin/{base}", "--",
+        "git", "diff", "--quiet", f"origin/{default}", f"origin/{base}", "--",
         *ACTION_CONFIG)
 
 
@@ -354,24 +346,22 @@ def main():
     pr = json.loads(run("gh", "api", f"repos/{repo}/pulls/{number}"))
     base = pr["base"]["ref"]
     exclude = sorted({f"origin/{base}", f"origin/{default}"})
-    before, reviewed_at = last_reviewed(repo, number)
-    before = before or ""
+    record = last_reviewed(repo, number, default)
+    before = record["head"] if record else ""
     mode = review_mode(before, after)
     reason = ("no review has run on this pull request yet, or its history "
               "was rewritten since")
     if mode == "incremental":
-        try:
-            left = unmerged_bases_left(repo, number, default, reviewed_at,
-                                       after)
-        except LOOKUP_ERRORS as e:
-            print(f"::warning::retarget lookup failed: {e}")
-            left, mode, reason = [], "full", "the retarget lookup failed"
-        if left:
+        newly_own = exposed(before, after, record["base_sha"], exclude)
+        if newly_own is None:
             mode, reason = "full", (
-                "since the last review this pull request moved off "
-                f"{', '.join(f'`{b}`' for b in left)}, whose pull request did "
-                "not merge, so commits reviewed only there are now part of "
-                "this one")
+                f"the base the last review ran on, {record['base_sha'][:7]} "
+                f"of `{record['base']}`, is no longer in the history")
+        elif newly_own:
+            mode, reason = "full", (
+                f"{len(newly_own)} commits that were on the base "
+                f"(`{record['base']}`) at the last review are now this pull "
+                "request's own and were never reviewed here")
     if mode == "incremental":
         patch = changes(before, after, exclude)
         if patch.strip():
@@ -382,8 +372,8 @@ def main():
         mode = "held"
         print(f"::warning::not reviewed: the action restores its "
               f"configuration ({', '.join(ACTION_CONFIG)}) from `{base}`, "
-              f"which changes it from {default}'s; this layer is reviewed "
-              "once that change lands")
+              f"where it differs from {default}'s; this layer is reviewed "
+              f"once `{base}` matches {default} there")
     summary = {
         "full": f"Full review: {reason}. Review the whole diff against "
                 f"`{base}` (`gh pr diff`).",
@@ -395,9 +385,12 @@ def main():
                        "with what their merge commits change.",
         "none": "Nothing to review: the commits since the last review add "
                 "nothing of this pull request's own.",
-        "held": f"Held: `{base}` changes the configuration the action "
-                "restores from it.",
+        "held": f"Held: the configuration the action restores from `{base}` "
+                f"differs from {default}'s.",
     }[mode]
+    write(out_dir, "record.json", json.dumps({
+        "head": after, "base": base,
+        "base_sha": run("git", "rev-parse", f"origin/{base}").strip()}))
     source, layers = "no stack", []
     if mode in ("full", "incremental"):
         source, layers = stack_layers(repo, pr, default)
