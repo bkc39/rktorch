@@ -6,7 +6,7 @@
          (only-in "../foreign.rkt"
                   device-type exn:fail:rktorch:oom? tensor-device tensor-dtype
                   tensor-shape tensor? with-no-grad zeros)
-         (only-in "../foreign/raw/fault.rkt" native-fault? note-native-fault!)
+         (only-in "../foreign/raw/fault.rkt" native-fault?)
          (only-in "../generated.rkt"
                   cudnn-rnn-flatten-weight gru-input lstm-input)
          (only-in "init.rkt" uniform-init)
@@ -63,18 +63,20 @@
 
 ;; Flattening is an optimisation cudnn asks for, never a requirement: a build
 ;; or a dtype it refuses still runs, on compacted copies, and refusing again
-;; on the next call would cost an FFI round trip for the same answer. Two
+;; on the next call would cost an FFI round trip for the same answer. Three
 ;; failures are not that and reach the caller: an OOM, which is transient, so
-;; the layer stays unflattened and retries once the pressure clears; and a
+;; the layer stays unflattened and retries once the pressure clears; a
 ;; contract violation, which is a defect here rather than an answer from
-;; cudnn, and would otherwise read as the fallback path.
+;; cudnn, and would otherwise read as the fallback path; and a native fault.
+(define (cudnn-refusal? e)
+  (and (exn:fail? e)
+       (not (or (exn:fail:rktorch:oom? e)
+                (exn:fail:contract? e)
+                (native-fault? e)))))
+
 (define (flatten-weights! spec weights)
-  (with-handlers ([exn:fail:rktorch:oom? raise]
-                  [exn:fail:contract? raise]
-                  [native-fault? (lambda (e)
-                                   (note-native-fault! "flattening RNN weights")
-                                   (raise e))]
-                  [exn:fail? (lambda (_e) (hash-set! refused (car weights) #t))])
+  (with-handlers ([cudnn-refusal?
+                   (lambda (_e) (hash-set! refused (car weights) #t))])
     (with-no-grad
       (void
        (cudnn-rnn-flatten-weight weights
@@ -197,6 +199,6 @@
   (with-mode (run spec entries gru-input x state mode)))
 
 (module+ private
-  (provide flattened-placement flatten-refused?)
+  (provide cudnn-refusal? flattened-placement flatten-refused?)
   (define (flattened-placement weight) (hash-ref flattened weight #f))
   (define (flatten-refused? weight) (hash-ref refused weight #f)))

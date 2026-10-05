@@ -481,11 +481,12 @@ module's full export set (`racket/runtime-path`, `syntax/parse/pre`).
   Explicit synchronous release goes through the raising,
   finalizer-cancelling `tr-tensor-free/checked`; OOM reaches users as
   `exn:fail:rktorch:oom` (catch by type, not message). A handler broad
-  enough to catch an `invalid memory reference` and not re-raise it to the
-  caller (a finalizer guard, the printer) must call `note-native-fault!`
-  when `native-fault?` holds, so the first fault no caller sees latches the
-  library; never bind native code with `define-ffi-definer` or
-  `get-ffi-obj` directly, which bypasses the latch.
+  enough to catch an `invalid memory reference` either lets it through to
+  the caller, which latches nothing, or, where no caller is waiting (a
+  finalizer guard, the printer, `account!`), calls `note-native-fault!`
+  when `native-fault?` holds, so that fault latches the library; never bind
+  native code with `define-ffi-definer` or `get-ffi-obj` directly, which
+  bypasses the latch.
 - `nn.rkt` — pure re-export facade over `nn/` (`layer.rkt` = `gen:layer`, `LayerList` +
   the `define-layer` macro, whose `#:forward` takes a rest argument, whose
   fields admit `parameters-by-key` beside `children-by-key`, and whose

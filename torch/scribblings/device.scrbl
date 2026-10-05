@@ -542,7 +542,7 @@ and the library carries on.
 
 Where no caller is waiting, a fault is taken as evidence that native memory
 can no longer be trusted. That covers a finalizer freeing a dead tensor, the
-printer rendering one, and the error path reading libtorch's last message.
+printer rendering one, and the library measuring a new one for the collector.
 One line goes to standard error, and the native library is disabled for the
 rest of the process. Every later native call raises an exception saying so,
 without entering native code; the printer falls back to the tensor's shape,

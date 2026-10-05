@@ -74,12 +74,9 @@ binding in `latched`, so from then on each native call raises without entering
 native code. That is one `unbox` per call, and it sits beneath each binding's
 own `#:wrap`.
 
-The same check sits in every other catch broad enough to swallow a fault:
-
-- the tensor printer
-- `account!`
-- the error path's `last-failure`
-- the RNN weight flatten
+The same check sits in the two other catches broad enough to swallow a fault:
+the tensor printer and `account!`. The RNN weight flatten, which reads any
+other failure as cuDNN refusing the layout, lets a fault through instead.
 
 A fault in a caller's own native call still raises to that caller and latches
 nothing. `RKTORCH_ON_NATIVE_FAULT=exit` replaces the latch with `_exit(70)`,

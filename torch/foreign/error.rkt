@@ -2,7 +2,6 @@
 
 (require (only-in ffi/unsafe/atomic call-as-atomic)
          (only-in racket/contract/base -> any/c contract-out)
-         (only-in "raw/fault.rkt" native-fault? note-native-fault!)
          (only-in "raw/global.rkt" tr-last-error-kind/raw tr-last-error/raw))
 
 (provide check-ok
@@ -17,12 +16,8 @@
 
 ;; Atomic so the (message, kind) pair comes from ONE failure, not two.
 (define (last-failure)
-  (with-handlers ([native-fault?
-                   (lambda (e)
-                     (note-native-fault! "reading a native error")
-                     (raise e))])
-    (call-as-atomic
-     (lambda () (values (tr-last-error/raw) (tr-last-error-kind/raw))))))
+  (call-as-atomic
+   (lambda () (values (tr-last-error/raw) (tr-last-error-kind/raw)))))
 
 (define (raise-torch-failure who describe)
   (define-values (message kind) (last-failure))

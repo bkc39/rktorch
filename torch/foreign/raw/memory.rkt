@@ -96,9 +96,9 @@
 ;; Guarded: this is the handler below, so nothing else protects it.
 (define (record-failure! e)
   (with-handlers ([(lambda (_) #t) void])
-    (record-failure!/unguarded e)
     (when (native-fault? e)
-      (note-native-fault! "running a finalizer"))))
+      (note-native-fault! "running a finalizer"))
+    (record-failure!/unguarded e)))
 
 (define (record-failure!/unguarded e)
   (call-with-ledger
