@@ -150,20 +150,28 @@ def rev_list(*args):
     return set(run("git", "rev-list", *args).split())
 
 
-def exposed(before, after, base_then, exclude):
+def content_in(targets, commit, since=None):
+    for target in targets:
+        result = subprocess.run(
+            ["git", "merge-tree", "--write-tree",
+             *([f"--merge-base={since}"] if since else []), target, commit],
+            capture_output=True, text=True)
+        if not result.returncode and result.stdout.split()[0] == tree(target):
+            return True
+    return False
+
+
+def exposed(before, base_then, exclude, targets=None):
+    targets = targets or exclude
     if not succeeds("git", "cat-file", "-e", f"{base_then}^{{commit}}"):
         return None
     reviewed = rev_list(before, "--not", base_then, *exclude)
     own = rev_list(before, "--not", *exclude) - reviewed
     if not own:
         return []
-    base_trees = set(run("git", "log", "--format=%T", *exclude,
-                         "--not", before).split())
-    anchors = [sha for sha, tree in (
-        line.split() for line in run("git", "log", "--format=%H %T", after,
-                                     "--not", *exclude).splitlines())
-               if tree in base_trees]
-    return sorted(own - (rev_list(*anchors) if anchors else set()))
+    tips = own - set(run("git", "log", "--no-walk", "--format=%P",
+                         *own).split())
+    return sorted(tip for tip in tips if not content_in(targets, tip))
 
 
 def review_mode(before, after):
@@ -185,16 +193,22 @@ def already_merged(branch, other):
                               "--not", other).split()
 
 
-def merge_patch(sha, parents):
+def merge_patch(sha, parents, targets):
     first, others = parents[0], parents[1:]
     if all(already_merged(first, other) for other in others):
         return ("What this merge changes beyond its first parent",
                 run("git", "diff", first, sha))
-    return ("Conflict resolution in this merge",
-            run("git", "show", "--remerge-diff", "--format=", sha))
+    if all(content_in(targets, other,
+                      run("git", "merge-base", first, other).strip())
+           for other in others):
+        return ("Conflict resolution in this merge",
+                run("git", "show", "--remerge-diff", "--format=", sha))
+    return ("What this merge brings in that the base no longer has",
+            run("git", "diff", first, sha))
 
 
-def changes(before, after, exclude):
+def changes(before, after, exclude, targets=None):
+    targets = targets or exclude
     parts = []
     for line in run("git", "rev-list", "--reverse", "--topo-order", "--parents",
                     f"{before}..{after}", "--not", *exclude).splitlines():
@@ -203,7 +217,7 @@ def changes(before, after, exclude):
             parts.append(run("git", "show", "--format=fuller", "--stat",
                              "--patch", sha))
             continue
-        label, patch = merge_patch(sha, parents)
+        label, patch = merge_patch(sha, parents, targets)
         if patch.strip():
             parts.append(run("git", "show", "--no-patch", "--format=fuller", sha)
                          + f"\n{label}:\n\n" + patch)
@@ -354,13 +368,15 @@ def main():
     pr = json.loads(run("gh", "api", f"repos/{repo}/pulls/{number}"))
     base = pr["base"]["ref"]
     exclude = sorted({f"origin/{base}", f"origin/{default}"})
+    targets = [run("git", "merge-base", after, f"origin/{base}").strip(),
+               f"origin/{default}"]
     record = last_reviewed(repo, number, default)
     before = record["head"] if record else ""
     mode = review_mode(before, after)
     reason = ("no review has run on this pull request yet, or its history "
               "was rewritten since")
     if mode == "incremental":
-        newly_own = exposed(before, after, record["base_sha"], exclude)
+        newly_own = exposed(before, record["base_sha"], exclude, targets)
         if newly_own is None:
             mode, reason = "full", (
                 f"the base the last review ran on, {record['base_sha'][:7]} "
@@ -371,7 +387,7 @@ def main():
                 f"(`{record['base']}`) at the last review are now this pull "
                 "request's own and were never reviewed here")
     if mode == "incremental":
-        patch = changes(before, after, exclude)
+        patch = changes(before, after, exclude, targets)
         if patch.strip():
             write(out_dir, "changes.patch", patch)
         else:
