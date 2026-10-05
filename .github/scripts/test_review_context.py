@@ -10,7 +10,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
-import urllib.parse
+import zipfile
 from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -60,10 +60,10 @@ class Cascade233(unittest.TestCase):
         self.assertIn(f"commit {git('rev-parse', LAST_PUSH_233)}", patch)
         self.assertNotIn(OURS_MERGE_233, patch)
 
-    def test_the_cascade_took_nothing_from_232_after_it_merged(self):
-        self.assertFalse(rc.merged_beyond(
-            "93caacd6fae0388893ba9b8562a47107db3edd66", "2026-10-01T17:15:03Z",
-            LAST_PUSH_233, "master"))
+    def test_the_squash_cascade_exposes_nothing(self):
+        self.assertEqual(rc.exposed(BEFORE_SQUASH_233, OURS_MERGE_233,
+                                    "93caacd6fae0388893ba9b8562a47107db3edd66",
+                                    [SQUASH_232]), [])
 
     def test_real_conflict_resolutions_are_still_reviewed(self):
         line = git("rev-list", "--parents", "-1", RESOLVED_MERGE_233).split()
@@ -149,35 +149,58 @@ class Synthetic(unittest.TestCase):
         for branch in branches:
             git("update-ref", f"refs/remotes/origin/{branch}", branch)
 
-    def test_commits_a_merged_branch_got_later_are_caught(self):
-        merged_head, merged_at = git("rev-parse", "layer1"), "2000-01-01T00:00Z"
-        self.publish("master")
-        git("checkout", "-q", "layer1")
-        self.commit("f", "one\ntwo\n3\n", "L1b, after the merge")
-        git("checkout", "-q", "layer2")
-        git("merge", "-q", "-s", "ours", "-m", "merge master", "master")
-        self.publish("master")
-        self.assertFalse(
-            rc.merged_beyond(merged_head, merged_at, "HEAD", "master"))
-        git("merge", "-q", "-m", "merge layer1", "layer1")
-        git("branch", "-q", "-D", "layer1")
-        self.assertTrue(
-            rc.merged_beyond(merged_head, merged_at, "HEAD", "master"))
-        self.assertFalse(rc.merged_beyond(merged_head, "2999-01-01T00:00Z",
-                                          "HEAD", "master"))
+    def test_a_squashed_lower_layer_exposes_nothing(self):
+        head = self.merge_master_ours()
+        self.assertEqual(rc.exposed(self.reviewed, head, "layer1", ["master"]),
+                         [])
 
-    def test_a_base_that_changes_the_actions_configuration_holds_the_review(self):
+    def test_a_lower_layer_that_never_merged_is_exposed(self):
+        git("checkout", "-q", "master")
+        git("reset", "-q", "--hard", "HEAD~1")
+        self.assertEqual(
+            rc.exposed(self.reviewed, self.reviewed, "layer1", ["master"]),
+            [git("rev-parse", "layer1")])
+
+    def test_commits_the_lower_branch_got_after_its_squash_are_exposed(self):
+        git("checkout", "-q", "layer1")
+        self.commit("f", "one\ntwo\n3\n", "L1b, after the squash")
+        git("checkout", "-q", "-b", "layer2b")
+        self.commit("g", "layer two\n", "L2 on L1b")
+        reviewed = git("rev-parse", "HEAD")
+        head = self.merge_master_ours()
+        git("checkout", "-q", "layer2b")
+        git("merge", "-q", "-s", "ours", "-m", "merge master", "master")
+        self.assertEqual(rc.exposed(reviewed, "HEAD", "layer1", ["master"]),
+                         [git("rev-parse", "layer1")])
+        self.assertEqual(rc.exposed(self.reviewed, head, "layer1~1",
+                                    ["master"]), [])
+
+    def test_a_rewritten_lower_layer_is_exposed(self):
+        old = git("rev-parse", "layer1")
+        git("checkout", "-q", "layer1")
+        git("reset", "-q", "--hard", "HEAD~1")
+        self.commit("f", "uno\n2\n3\n", "L1, rewritten")
+        self.assertEqual(rc.exposed(self.reviewed, self.reviewed, old,
+                                    ["layer1", "master~1"]), [old])
+
+    def test_a_base_no_longer_in_the_history_is_unknown(self):
+        self.assertIsNone(rc.exposed(self.reviewed, self.reviewed, "0" * 40,
+                                     ["master"]))
+
+    def test_a_base_whose_action_configuration_differs_holds_the_review(self):
         git("checkout", "-q", "master")
         self.commit("CLAUDE.md", "master's\n", "master changes its config")
         self.publish("master", "layer1")
-        self.assertFalse(rc.config_from_base("layer1", "master"))
+        self.assertTrue(rc.config_from_base("layer1", "master"))
         git("checkout", "-q", "layer1")
+        git("merge", "-q", "-m", "merge master", "master")
+        self.publish("layer1")
+        self.assertFalse(rc.config_from_base("layer1", "master"))
         os.mkdir(".claude")
         self.commit(".claude/settings.json", "{}\n", "layer1 adds settings")
         self.publish("layer1")
         self.assertTrue(rc.config_from_base("layer1", "master"))
         self.assertFalse(rc.config_from_base("master", "master"))
-
 
 def pr(number, base, head, repo="o/r"):
     return {"number": number, "title": f"layer {number}", "state": "open",
@@ -245,52 +268,59 @@ class Stack(unittest.TestCase):
         self.assertEqual([e["number"] for e in layers], [1, 2, 3])
 
 
-def fake_gh(artifacts=(), started=None, retargets=(), branches=None):
-    def run(*args, check=True):
-        path = next(a for a in args[2:] if not a.startswith("-"))
-        if "/artifacts?" in path:
-            return "".join(f"{run_id}\t{head}\n" for run_id, head in artifacts)
-        if "/actions/runs/" in path:
-            created, workflow = started[path.rsplit("/", 1)[1]]
-            return json.dumps({"created_at": created, "path": workflow,
-                               "event": "pull_request"})
-        if path == "graphql":
-            return json.dumps({"data": {"repository": {"pullRequest": {
-                "timelineItems": {"nodes": [
-                    {"createdAt": at, "previousRefName": ref}
-                    for at, ref in retargets]}}}}})
-        head = urllib.parse.unquote(path.split("head=")[1]).split(":")[1]
-        return json.dumps([{"created_at": created, "merged_at": merged,
-                            "head": {"sha": "merged-head"}}
-                           for created, merged in branches.get(head, [])])
-    return run
+def zipped(record):
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as z:
+        z.writestr("record.json", json.dumps(record))
+    return buffer.getvalue()
 
 
 class LastReviewed(unittest.TestCase):
+    def last(self, records, runs, trusted=lambda head, default: True):
+        def run(*args, check=True):
+            path = next(a for a in args[2:] if not a.startswith("-"))
+            if "/artifacts?" in path:
+                return "".join(f"{r}\t{a}\t{h}\n" for r, a, h in records)
+            workflow, event = runs[path.rsplit("/", 1)[1]]
+            return json.dumps({"path": workflow, "event": event})
+
+        def fetch(args, **kwargs):
+            artifact = args[2].split("/")[-2]
+            return subprocess.CompletedProcess(
+                args, 0, zipped({"head": f"head of {artifact}"}))
+        with mock.patch.object(rc, "run", run), \
+                mock.patch.object(rc, "trusted", trusted), \
+                mock.patch.object(rc.subprocess, "run", fetch):
+            return rc.last_reviewed("o/r", 7, "master")
+
     def test_the_last_review_is_the_latest_run_not_the_latest_finish(self):
-        artifacts = [("1", "c1"), ("3", "c3"), ("2", "c2")]
-        started = {"3": ("2026-10-01T11:00:00Z", rc.WORKFLOW)}
-        with mock.patch.object(rc, "run", fake_gh(artifacts, started)):
-            self.assertEqual(rc.last_reviewed("o/r", 7),
-                             ("c3", "2026-10-01T11:00:00Z"))
+        records = [("1", "a1", "c1"), ("3", "a3", "c3"), ("2", "a2", "c2")]
+        runs = {r: (rc.WORKFLOW + "@refs/pull/7/merge", "pull_request")
+                for r in "123"}
+        self.assertEqual(self.last(records, runs), {"head": "head of a3"})
 
     def test_a_record_from_another_workflow_is_not_a_review(self):
-        artifacts = [("2", "c2"), ("3", "c3")]
-        started = {"3": ("2026-10-01T11:00:00Z", ".github/workflows/x.yml"),
-                   "2": ("2026-10-01T10:00:00Z", rc.WORKFLOW)}
-        with mock.patch.object(rc, "run", fake_gh(artifacts, started)):
-            self.assertEqual(rc.last_reviewed("o/r", 7),
-                             ("c2", "2026-10-01T10:00:00Z"))
+        records = [("2", "a2", "c2"), ("3", "a3", "c3")]
+        runs = {"3": (".github/workflows/x.yml", "pull_request"),
+                "2": (rc.WORKFLOW, "pull_request")}
+        self.assertEqual(self.last(records, runs), {"head": "head of a2"})
+
+    def test_a_record_from_a_rewritten_review_workflow_is_not_a_review(self):
+        records = [("2", "a2", "c2"), ("3", "a3", "c3")]
+        runs = {r: (rc.WORKFLOW, "pull_request") for r in "23"}
+        self.assertEqual(
+            self.last(records, runs, lambda head, default: head == "c2"),
+            {"head": "head of a2"})
 
     def test_no_recorded_review(self):
-        with mock.patch.object(rc, "run", fake_gh()):
-            self.assertEqual(rc.last_reviewed("o/r", 7), (None, None))
+        self.assertIsNone(self.last([], {}))
 
     def test_the_workflow_uploads_the_record_the_script_names(self):
         with open(WORKFLOW) as f:
             text = f.read()
         self.assertIn("uses: actions/upload-artifact@", text)
         self.assertIn("name: ${{ steps.context.outputs.record }}", text)
+        self.assertIn(".review-context/record.json", text)
         self.assertIn("include-hidden-files: true", text)
         self.assertIn("overwrite: true", text)
 
@@ -319,51 +349,6 @@ class ReviewRules(unittest.TestCase):
     def test_a_master_without_the_section_says_so(self):
         self.assertIn("has no `## Code Review Rules` section",
                       self.rules("# AGENTS.md\n\n## CI\n"))
-
-
-class Retarget(unittest.TestCase):
-    MERGED = {"l1": [("2026-10-01T09:00:00Z", "2026-10-01T12:30:00Z")]}
-
-    def left(self, retargets, branches):
-        with mock.patch.object(rc, "run", fake_gh(retargets=retargets,
-                                                  branches=branches)), \
-                mock.patch.object(rc, "merged_beyond",
-                                  lambda head, at, after, default: False):
-            return rc.unmerged_bases_left("o/r", 7, "master",
-                                          "2026-10-01T12:00:00Z", "after")
-
-    def test_moving_off_a_merged_lower_layer_keeps_the_review_incremental(self):
-        self.assertEqual(self.left([("2026-10-01T13:00:00Z", "l1")],
-                                   self.MERGED), [])
-
-    def test_moving_off_an_unmerged_layer_needs_a_full_review(self):
-        branches = {"l1": [("2026-10-01T09:00:00Z", None)]}
-        self.assertEqual(self.left([("2026-10-01T13:00:00Z", "l1")],
-                                   branches), ["l1"])
-
-    def test_a_layer_that_merged_after_the_retarget_counts_as_unmerged(self):
-        branches = {"l1": [("2026-10-01T09:00:00Z", "2026-10-01T14:00:00Z")]}
-        self.assertEqual(self.left([("2026-10-01T13:00:00Z", "l1")],
-                                   branches), ["l1"])
-
-    def test_a_reused_branch_name_is_judged_by_its_latest_pull_request(self):
-        branches = {"l1": [("2026-06-01T09:00:00Z", "2026-06-02T09:00:00Z"),
-                           ("2026-10-01T09:00:00Z", None)]}
-        self.assertEqual(self.left([("2026-10-01T13:00:00Z", "l1")],
-                                   branches), ["l1"])
-
-    def test_a_retarget_while_the_last_review_ran_counts(self):
-        self.assertEqual(self.left([("2026-10-01T12:00:01Z", "l1")], {}),
-                         ["l1"])
-
-    def test_a_retarget_in_the_second_the_last_review_began_counts(self):
-        self.assertEqual(self.left([("2026-10-01T12:00:00Z", "l1")], {}),
-                         ["l1"])
-
-    def test_earlier_and_default_branch_retargets_do_not_count(self):
-        self.assertEqual(self.left([("2026-10-01T11:00:00Z", "l1"),
-                                    ("2026-10-01T13:00:00Z", "master")], {}),
-                         [])
 
 
 if __name__ == "__main__":
