@@ -16,7 +16,7 @@ name: claude-code-review
 
 on:
   pull_request:
-    types: [opened, synchronize]
+    types: [opened, synchronize, edited]
 
 permissions:
   actions: read
@@ -26,6 +26,7 @@ permissions:
 
 jobs:
   claude-review:
+    if: github.event.action != 'edited' || github.event.changes.base
     runs-on: ubuntu-latest
     steps:
       # full history: the incremental range and the base branch must resolve

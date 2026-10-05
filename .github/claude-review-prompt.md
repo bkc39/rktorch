@@ -12,8 +12,9 @@ a reply, say why in your summary comment, not in a new inline
 thread.
 
 This repository is torchrkt: Racket bindings to libtorch via a
-hand-written extern "C" shim. Read AGENTS.md first for the
-project's conventions, then review the diff for:
+hand-written extern "C" shim. Read .review-context/AGENTS.md,
+master's copy, first for the project's conventions, then review
+the diff for:
 - correctness bugs (memory ownership across the FFI boundary,
   the integer-status + tr_last_error contract, GC finalizer
   registration on tensor-returning bindings)

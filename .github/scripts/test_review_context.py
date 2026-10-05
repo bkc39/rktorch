@@ -261,11 +261,17 @@ class LastReviewed(unittest.TestCase):
         self.assertIn("include-hidden-files: true", text)
         self.assertIn("overwrite: true", text)
 
+    def test_a_retarget_runs_the_review_and_other_edits_do_not(self):
+        with open(WORKFLOW) as f:
+            text = f.read()
+        self.assertIn("types: [opened, synchronize, edited]", text)
+        self.assertIn("if: github.event.action != 'edited' || "
+                      "github.event.changes.base", text)
+
 
 class ReviewRules(unittest.TestCase):
     def rules(self, agents):
-        with mock.patch.object(rc, "run", lambda *args, check=True: agents):
-            return rc.review_rules("master")
+        return rc.review_rules("master", agents)
 
     def test_the_section_ends_at_the_next_top_level_heading(self):
         agents = ("# AGENTS.md\n\n## CI\n\nci\n\n## Code Review Rules\n\n"
@@ -297,6 +303,11 @@ class Retarget(unittest.TestCase):
 
     def test_moving_off_an_unmerged_layer_needs_a_full_review(self):
         branches = {"l1": [("2026-10-01T09:00:00Z", None)]}
+        self.assertEqual(self.left([("2026-10-01T13:00:00Z", "l1")],
+                                   branches), ["l1"])
+
+    def test_a_layer_that_merged_after_the_retarget_counts_as_unmerged(self):
+        branches = {"l1": [("2026-10-01T09:00:00Z", "2026-10-01T14:00:00Z")]}
         self.assertEqual(self.left([("2026-10-01T13:00:00Z", "l1")],
                                    branches), ["l1"])
 
