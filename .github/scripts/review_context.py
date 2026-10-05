@@ -129,7 +129,8 @@ def lower_layer_merged(repo, branch, retargeted_at):
     earlier = [p for p in pulls(repo, state="all", head=f"{owner}:{branch}")
                if p["created_at"] < retargeted_at]
     layer = max(earlier, key=lambda p: p["created_at"], default=None)
-    return bool(layer and layer["merged_at"])
+    return bool(layer and layer["merged_at"]
+                and layer["merged_at"] <= retargeted_at)
 
 
 def unmerged_bases_left(repo, pr, default, since):
@@ -265,8 +266,11 @@ def stack_markdown(layers, number, base):
             "to leave to the other layers.\n\n")
 
 
-def review_rules(default):
-    agents = run("git", "show", f"origin/{default}:AGENTS.md", check=False)
+def master_agents(default):
+    return run("git", "show", f"origin/{default}:AGENTS.md", check=False)
+
+
+def review_rules(default, agents):
     section = agents.partition(f"\n{RULES}\n")[2]
     if not section:
         return f"{default}'s AGENTS.md has no `{RULES}` section yet.\n"
@@ -373,13 +377,16 @@ def main():
     if mode in ("full", "incremental"):
         source, layers = stack_layers(repo, pr, default)
         write(out_dir, "threads.md", threads_markdown(threads(repo, number)))
-        write(out_dir, "review-rules.md", review_rules(default))
+        agents = master_agents(default)
+        write(out_dir, "AGENTS.md", agents)
+        write(out_dir, "review-rules.md", review_rules(default, agents))
     write(out_dir, "context.md",
           f"# Review context\n\n{summary}\n\n"
           + stack_markdown(layers, number, base)
           + "`threads.md` lists every earlier review thread on this pull "
-          "request with its replies; `review-rules.md` is the Code Review "
-          f"Rules section of {default}'s AGENTS.md.\n")
+          f"request with its replies; `AGENTS.md` is {default}'s, the "
+          "conventions this pull request is held to, and `review-rules.md` "
+          "its Code Review Rules section.\n")
     prompt = (f"Review pull request #{number} in {repo}.\n\n"
               + run("git", "show", f"origin/{default}:{PROMPT}"))
     delimiter = f"PROMPT_{secrets.token_hex(16)}"

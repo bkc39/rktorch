@@ -19,9 +19,9 @@ hand-written extern "C" shim. Review against
 master's AGENTS.md: they say what to leave to other layers of a
 stack, that generated files are reviewed through the generator
 and codegen/allowlist.txt rather than their bodies, and what
-this repository checks hardest. Read AGENTS.md in the checkout
-for the conventions they point to. Look first for correctness
-bugs: memory ownership across the FFI boundary, finalizer
+this repository checks hardest. Read .review-context/AGENTS.md,
+master's copy, for the conventions they point to. Look first for
+correctness bugs: memory ownership across the FFI boundary, finalizer
 registration on tensor-returning bindings, and errors that
 cross the C boundary without the shim's status, NULL and
 tr_last_error contract.
