@@ -39,9 +39,11 @@
          "nn/scheduler.rkt"
          (except-in "nn/parameter.rkt" Parameter Parameter?)
          (submod "nn/parameter.rkt" checked)
+         "nn/positions.rkt"
          "nn/recurrent.rkt"
          "nn/sequential.rkt"
-         "nn/state-dict.rkt")
+         "nn/state-dict.rkt"
+         "nn/transformer.rkt")
 
 (provide define-layer
          gen:layer
@@ -127,7 +129,18 @@
          GRU
          gru?
          MultiheadAttention
-         multihead-attention?)
+         multihead-attention?
+         TransformerEncoderLayer
+         transformer-encoder-layer?
+         TransformerDecoderLayer
+         transformer-decoder-layer?
+         TransformerEncoder
+         transformer-encoder?
+         TransformerDecoder
+         transformer-decoder?)
+
+(provide causal-mask
+         sinusoidal-positions)
 
 (provide uniform-init
          normal-init

@@ -3,8 +3,9 @@
 ;; Run: raco test torch/tests/attention-parity-test.rkt (inside `nix develop`
 ;; or `.#cuda`, which provide Python torch; SKIPS when python3 can't import
 ;; torch). Every draw MUST stay in the order of the twins,
-;; torch/tests/python/scaled_dot_product_attention.py and
-;; torch/tests/python/multihead_attention.py.
+;; torch/tests/python/scaled_dot_product_attention.py,
+;; torch/tests/python/multihead_attention.py and
+;; torch/tests/python/transformer_layers.py.
 
 (module+ test
   (require (only-in racket/match match-define)
@@ -242,6 +243,216 @@
                      (hash-ref got 'param-grads)
                      (hash-ref expected 'param_grads) tolerance))))
 
+  (define (sequence-shape batch-first? batch length width)
+    (if batch-first? (list batch length width) (list length batch width)))
+
+  (define (later length source)
+    (triu (ones length source #:dtype 'bool) 1))
+
+  (define (built constructor stack width layers norm?
+                 #:heads [heads 2] #:dropout p #:activation activation
+                 #:norm-first? norm-first? #:batch-first? batch-first?
+                 #:bias? bias? #:eps eps)
+    (define (make-layer)
+      (constructor width #:heads heads #:ffn-width 16 #:dropout p
+                   #:activation activation #:norm-first? norm-first?
+                   #:batch-first? batch-first? #:bias? bias?
+                   #:layer-norm-eps eps))
+    (if layers
+        (stack make-layer #:layers layers #:norm (and norm? (LayerNorm width)))
+        (make-layer)))
+
+  (define (backward-from m device out leaves)
+    (backward! (sum (* out (to-device (randn (tensor-shape out)) device))))
+    (hash 'out out
+          'input-grads (map grad leaves)
+          'param-grads (named-values m grad)))
+
+  (define (run-encoder device
+                       #:heads [heads 2]
+                       #:batch [batch 3]
+                       #:layers [layers #f]
+                       #:norm? [norm? #f]
+                       #:unbatched? [unbatched? #f]
+                       #:padding [make-padding void]
+                       #:mask [make-mask void]
+                       #:causal? [causal? #f]
+                       #:train? [train? #t]
+                       #:dropout [p 0.0]
+                       #:activation [activation 'relu]
+                       #:norm-first? [norm-first? #f]
+                       #:batch-first? [batch-first? #f]
+                       #:bias? [bias? #t]
+                       #:eps [eps 1e-5])
+    (manual-seed! 0)
+    (define m
+      (built TransformerEncoderLayer TransformerEncoder 8 layers norm?
+             #:heads heads #:dropout p #:activation activation
+             #:norm-first? norm-first? #:batch-first? batch-first?
+             #:bias? bias? #:eps eps))
+    (define params (named-values m values))
+    (to m device)
+    (unless train? (eval! m))
+    (define src
+      (requires-grad!
+       (to-device (randn (if unbatched?
+                             (list 5 8)
+                             (sequence-shape batch-first? batch 5 8)))
+                  device)))
+    (define (on-device t) (and (tensor? t) (to-device t device)))
+    (define padding (on-device (make-padding)))
+    (define mask (on-device (make-mask)))
+    (define out
+      (m src #:mask mask #:key-padding-mask padding #:causal? causal?))
+    (hash-set (backward-from m device out (list src)) 'params params))
+
+  (define (run-decoder device
+                       #:layers [layers #f]
+                       #:norm? [norm? #f]
+                       #:tgt-padding [make-tgt-padding void]
+                       #:memory-padding [make-memory-padding void]
+                       #:tgt-mask [make-tgt-mask void]
+                       #:memory-mask [make-memory-mask void]
+                       #:tgt-causal? [tgt-causal? #f]
+                       #:memory-causal? [memory-causal? #f]
+                       #:train? [train? #t]
+                       #:dropout [p 0.0]
+                       #:activation [activation 'relu]
+                       #:norm-first? [norm-first? #f]
+                       #:batch-first? [batch-first? #f])
+    (manual-seed! 0)
+    (define m
+      (built TransformerDecoderLayer TransformerDecoder 8 layers norm?
+             #:dropout p #:activation activation #:norm-first? norm-first?
+             #:batch-first? batch-first? #:bias? #t #:eps 1e-5))
+    (define params (named-values m values))
+    (to m device)
+    (unless train? (eval! m))
+    (define (leaf n)
+      (requires-grad!
+       (to-device (randn (sequence-shape batch-first? 2 n 8)) device)))
+    (define tgt (leaf 4))
+    (define memory (leaf 5))
+    (define (on-device t) (and (tensor? t) (to-device t device)))
+    (define tgt-padding (on-device (make-tgt-padding)))
+    (define memory-padding (on-device (make-memory-padding)))
+    (define tgt-mask (on-device (make-tgt-mask)))
+    (define memory-mask (on-device (make-memory-mask)))
+    (define out
+      (m tgt memory
+         #:tgt-mask tgt-mask
+         #:memory-mask memory-mask
+         #:tgt-key-padding-mask tgt-padding
+         #:memory-key-padding-mask memory-padding
+         #:tgt-causal? tgt-causal?
+         #:memory-causal? memory-causal?))
+    (hash-set (backward-from m device out (list tgt memory)) 'params params))
+
+  (define (fast-path device)
+    (manual-seed! 0)
+    (define m (TransformerEncoderLayer 8 #:heads 2 #:ffn-width 16
+                                       #:dropout 0.1 #:batch-first? #t))
+    (define params (named-values m values))
+    (to m device)
+    (eval! m)
+    (define src (to-device (randn 3 5 8) device))
+    (define padding (to-device (padded-keys 3 5 2) device))
+    (hash 'params params 'out (m src #:key-padding-mask padding)))
+
+  (define transformer-cases
+    (list
+     (list 'encoder_post_relu
+           (lambda (d)
+             (run-encoder d #:padding (lambda () (padded-keys 3 5 2)))))
+     (list 'encoder_pre_gelu_causal
+           (lambda (d)
+             (run-encoder d #:norm-first? #t #:activation 'gelu
+                          #:batch-first? #t #:batch 2 #:causal? #t)))
+     (list 'encoder_pre_gelu_tanh
+           (lambda (d)
+             (run-encoder d #:norm-first? #t #:activation 'gelu-tanh
+                          #:batch-first? #t #:batch 2
+                          #:mask (lambda () (randn 5 5))
+                          #:padding (lambda () (padded-keys 2 5 1)))))
+     (list 'encoder_causal_padding
+           (lambda (d)
+             (run-encoder d #:heads 4 #:causal? #t
+                          #:padding (lambda () (padded-keys 3 5 2)))))
+     (list 'encoder_eval
+           (lambda (d)
+             (run-encoder d #:dropout 0.1 #:train? #f #:causal? #t
+                          #:padding (lambda () (padded-keys 3 5 1)))))
+     (list 'encoder_no_bias_unbatched
+           (lambda (d)
+             (run-encoder d #:bias? #f #:unbatched? #t #:eps 1e-6)))
+     (list 'encoder_dropout
+           (lambda (d) (run-encoder d #:dropout 0.5 #:batch 2)))
+     (list 'decoder_post_relu
+           (lambda (d)
+             (run-decoder d #:tgt-causal? #t
+                          #:memory-padding (lambda () (padded-keys 2 5 2)))))
+     (list 'decoder_pre_gelu
+           (lambda (d)
+             (run-decoder d #:norm-first? #t #:activation 'gelu
+                          #:batch-first? #t
+                          #:tgt-mask (lambda () (randn 4 4))
+                          #:tgt-padding (lambda () (padded-keys 2 4 1))
+                          #:memory-mask (lambda () (later 4 5)))))
+     (list 'decoder_memory_causal
+           (lambda (d)
+             (run-decoder d #:memory-causal? #t #:tgt-causal? #t)))
+     (list 'decoder_eval
+           (lambda (d)
+             (run-decoder d #:dropout 0.1 #:train? #f #:tgt-causal? #t
+                          #:memory-padding (lambda () (padded-keys 2 5 1)))))
+     (list 'decoder_dropout
+           (lambda (d) (run-decoder d #:dropout 0.5 #:norm-first? #t)))
+     (list 'encoder_stack
+           (lambda (d)
+             (run-encoder d #:layers 3 #:norm? #t
+                          #:padding (lambda () (padded-keys 3 5 2)))))
+     (list 'encoder_stack_pre_causal
+           (lambda (d)
+             (run-encoder d #:layers 2 #:norm-first? #t #:batch-first? #t
+                          #:batch 2 #:activation 'gelu-tanh #:causal? #t)))
+     (list 'decoder_stack
+           (lambda (d)
+             (run-decoder d #:layers 2 #:norm? #t #:tgt-causal? #t
+                          #:memory-padding (lambda () (padded-keys 2 5 2)))))
+     (list 'decoder_stack_pre
+           (lambda (d)
+             (run-decoder d #:layers 3 #:norm-first? #t #:norm? #t
+                          #:batch-first? #t #:activation 'gelu
+                          #:tgt-causal? #t)))
+     (list 'fast_path fast-path)))
+
+  (define (check-transformer-twin device tolerance)
+    (define j
+      (call-with-python-env
+       #:env (list (cons "RKTORCH_PARITY_DEVICE" (symbol->string device)))
+       (lambda () (python-check "transformer_layers.py"))))
+    (with-default-device 'cpu
+      (for ([row (in-list transformer-cases)])
+        (match-define (list key run-case) row)
+        (define expected (hash-ref j key))
+        (define label (format "transformer ~a [~a]" key device))
+        (define got (run-case device))
+        (check-named (format "~a: init" label) (hash-ref got 'params)
+                     (hash-ref expected 'params) 0.0)
+        (check-equal? (tensor-shape (hash-ref got 'out))
+                      (hash-ref expected 'out_shape) label)
+        (check-numbers (format "~a: output" label) (flat (hash-ref got 'out))
+                       (hash-ref expected 'out) tolerance)
+        (when (hash-has-key? got 'input-grads)
+          (for ([g (in-list (hash-ref got 'input-grads))]
+                [e (in-list (hash-ref expected 'input_grads))]
+                [i (in-naturals)])
+            (check-numbers (format "~a: input ~a gradient" label i) (flat g)
+                           e tolerance))
+          (check-named (format "~a: gradient" label)
+                       (hash-ref got 'param-grads)
+                       (hash-ref expected 'param_grads) tolerance)))))
+
   (cond
     [(not (python-torch-available?))
      (printf "[attention-parity-test] skipped: python3 `torch` ~a\n"
@@ -249,7 +460,9 @@
     [else
      (check-attention-twin 'cpu tol)
      (check-mha-twin 'cpu tol)
+     (check-transformer-twin 'cpu tol)
      (when (and (cuda-available?)
                 (python-cuda-available?))
        (check-attention-twin 'cuda tol)
-       (check-mha-twin 'cuda tol))]))
+       (check-mha-twin 'cuda tol)
+       (check-transformer-twin 'cuda tol))]))

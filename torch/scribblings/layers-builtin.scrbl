@@ -238,12 +238,15 @@ come out.
 
 @defproc[(LayerNorm [normalized-shape (or/c exact-positive-integer?
                                             (non-empty-listof exact-positive-integer?))]
-                    [#:eps eps real? 1e-5])
+                    [#:eps eps real? 1e-5]
+                    [#:bias? bias? boolean? #t])
          layer?]{
 Normalizes each input over its trailing @racket[normalized-shape]
 dimensions to zero mean and unit variance, then scales and shifts by a
 learned @racket["weight"] and @racket["bias"] of that shape; the
-normalization inside a transformer block.}
+normalization inside a transformer block. With @racket[bias?]
+@racket[#f] it only scales, and has no @racket["bias"], PyTorch's
+@tt{bias=False}.}
 
 @defproc[(GroupNorm [groups exact-positive-integer?]
                     [channels exact-positive-integer?]

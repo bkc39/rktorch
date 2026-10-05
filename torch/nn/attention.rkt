@@ -3,7 +3,7 @@
 (require (only-in racket/contract/base
                   ->i </c >=/c and/c any contract flat-named-contract or/c)
          (only-in racket/list last)
-         (only-in racket/match match match-define match-let)
+         (only-in racket/match match match-define)
          (only-in "../foreign.rkt"
                   add copy! masked-fill matmul mul narrow ones permute reshape
                   scaled-dot-product-attention softmax squeeze tensor-device
@@ -59,22 +59,41 @@
 (define (rank x)
   (length (tensor-shape x)))
 
+(define (batch+length x batch-first?)
+  (match (tensor-shape x)
+    [(list l _) (list #f l)]
+    [(list a b _) (if batch-first? (list a b) (list b a))]))
+
+(define (wide who x expected)
+  (define width (last (tensor-shape x)))
+  (or (= width expected)
+      (format "~a is ~a wide, not ~a" who width expected)))
+
+(define (shaped who m expected)
+  (or (not m)
+      (and (member (tensor-shape m) expected) #t)
+      (format "~a has shape ~a, not ~a" who (tensor-shape m)
+              (if (null? (cdr expected))
+                  (car expected)
+                  (format "~a or ~a" (car expected) (cadr expected))))))
+
+(define (same-batch who-q q who-k k batch-first?)
+  (define n (car (batch+length q batch-first?)))
+  (define m (car (batch+length k batch-first?)))
+  (or (not (and n m))
+      (= n m)
+      (format "~a has batch ~a and ~a ~a" who-q n who-k m)))
+
+(define (padding-shaped who mask keys batch-first?)
+  (match-define (list n s) (batch+length keys batch-first?))
+  (shaped who mask (list (if n (list n s) (list s)))))
+
+(define (attn-mask-shaped who mask queries keys heads batch-first?)
+  (match-define (list n l) (batch+length queries batch-first?))
+  (match-define (list _ s) (batch+length keys batch-first?))
+  (shaped who mask (list (list l s) (list (* (or n 1) heads) l s))))
+
 (define (call/c embed-dim key-dim value-dim heads batch-first?)
-  (define (batch+length x)
-    (match (tensor-shape x)
-      [(list l _) (list #f l)]
-      [(list a b _) (if batch-first? (list a b) (list b a))]))
-  (define (wide who x expected)
-    (define width (last (tensor-shape x)))
-    (or (= width expected)
-        (format "~a is ~a wide, not ~a" who width expected)))
-  (define (shaped who m expected)
-    (or (not m)
-        (and (member (tensor-shape m) expected) #t)
-        (format "~a has shape ~a, not ~a" who (tensor-shape m)
-                (if (null? (cdr expected))
-                    (car expected)
-                    (format "~a or ~a" (car expected) (cadr expected))))))
   (->i ([query attention-sequence/c]
         [key attention-sequence/c]
         [value attention-sequence/c]
@@ -91,26 +110,28 @@
            (string-append "query, key and value are all batched (rank 3)"
                           " or all unbatched (rank 2)"))
        #:pre/desc (query key value)
-       (let ([k (batch+length key)] [v (batch+length value)])
+       (let ([k (batch+length key batch-first?)]
+             [v (batch+length value batch-first?)])
          (or (not (= (rank key) (rank value)))
              (equal? k v)
              (format "key and value differ in batch or length: ~a and ~a"
                      k v)))
        #:pre/desc (query key value)
-       (let ([n (car (batch+length query))] [m (car (batch+length key))])
-         (or (not (and n m))
-             (= n m)
-             (format "query has batch ~a and key ~a" n m)))
+       (same-batch "query" query "key" key batch-first?)
        #:pre/desc (query key value key-padding-mask)
-       (match-let ([(list n s) (batch+length key)])
-         (shaped "key-padding-mask" key-padding-mask
-                 (list (if n (list n s) (list s)))))
+       (padding-shaped "key-padding-mask" key-padding-mask key batch-first?)
        #:pre/desc (query key value attn-mask)
-       (match-let ([(list n l) (batch+length query)]
-                   [(list _ s) (batch+length key)])
-         (shaped "attn-mask" attn-mask
-                 (list (list l s) (list (* (or n 1) heads) l s))))
+       (attn-mask-shaped "attn-mask" attn-mask query key heads batch-first?)
        any))
+
+(module+ private
+  (provide attention-mask/c
+           attention-sequence/c
+           attn-mask-shaped
+           padding-shaped
+           rank
+           same-batch
+           wide))
 
 (define (split-heads x heads batch-first?)
   (match-define (list a b width) (tensor-shape x))
