@@ -60,6 +60,11 @@ class Cascade233(unittest.TestCase):
         self.assertIn(f"commit {git('rev-parse', LAST_PUSH_233)}", patch)
         self.assertNotIn(OURS_MERGE_233, patch)
 
+    def test_the_cascade_took_nothing_from_232_after_it_merged(self):
+        self.assertFalse(rc.merged_beyond(
+            "93caacd6fae0388893ba9b8562a47107db3edd66", "2026-10-01T17:15:03Z",
+            LAST_PUSH_233, "master"))
+
     def test_real_conflict_resolutions_are_still_reviewed(self):
         line = git("rev-list", "--parents", "-1", RESOLVED_MERGE_233).split()
         label, patch = rc.merge_patch(line[0], line[1:])
@@ -145,16 +150,21 @@ class Synthetic(unittest.TestCase):
             git("update-ref", f"refs/remotes/origin/{branch}", branch)
 
     def test_commits_a_merged_branch_got_later_are_caught(self):
-        merged_head = git("rev-parse", "layer1")
+        merged_head, merged_at = git("rev-parse", "layer1"), "2000-01-01T00:00Z"
+        self.publish("master")
         git("checkout", "-q", "layer1")
         self.commit("f", "one\ntwo\n3\n", "L1b, after the merge")
-        self.publish("layer1")
-        self.assertFalse(
-            rc.later_commits_taken("layer1", merged_head, self.reviewed))
         git("checkout", "-q", "layer2")
+        git("merge", "-q", "-s", "ours", "-m", "merge master", "master")
+        self.publish("master")
+        self.assertFalse(
+            rc.merged_beyond(merged_head, merged_at, "HEAD", "master"))
         git("merge", "-q", "-m", "merge layer1", "layer1")
-        self.assertTrue(rc.later_commits_taken("layer1", merged_head, "HEAD"))
-        self.assertFalse(rc.later_commits_taken("gone", merged_head, "HEAD"))
+        git("branch", "-q", "-D", "layer1")
+        self.assertTrue(
+            rc.merged_beyond(merged_head, merged_at, "HEAD", "master"))
+        self.assertFalse(rc.merged_beyond(merged_head, "2999-01-01T00:00Z",
+                                          "HEAD", "master"))
 
     def test_a_base_that_changes_the_actions_configuration_holds_the_review(self):
         git("checkout", "-q", "master")
@@ -241,7 +251,9 @@ def fake_gh(artifacts=(), started=None, retargets=(), branches=None):
         if "/artifacts?" in path:
             return "".join(f"{run_id}\t{head}\n" for run_id, head in artifacts)
         if "/actions/runs/" in path:
-            return json.dumps({"created_at": started[path.rsplit("/", 1)[1]]})
+            created, workflow = started[path.rsplit("/", 1)[1]]
+            return json.dumps({"created_at": created, "path": workflow,
+                               "event": "pull_request"})
         if path == "graphql":
             return json.dumps({"data": {"repository": {"pullRequest": {
                 "timelineItems": {"nodes": [
@@ -257,10 +269,18 @@ def fake_gh(artifacts=(), started=None, retargets=(), branches=None):
 class LastReviewed(unittest.TestCase):
     def test_the_last_review_is_the_latest_run_not_the_latest_finish(self):
         artifacts = [("1", "c1"), ("3", "c3"), ("2", "c2")]
-        started = {"3": "2026-10-01T11:00:00Z"}
+        started = {"3": ("2026-10-01T11:00:00Z", rc.WORKFLOW)}
         with mock.patch.object(rc, "run", fake_gh(artifacts, started)):
             self.assertEqual(rc.last_reviewed("o/r", 7),
                              ("c3", "2026-10-01T11:00:00Z"))
+
+    def test_a_record_from_another_workflow_is_not_a_review(self):
+        artifacts = [("2", "c2"), ("3", "c3")]
+        started = {"3": ("2026-10-01T11:00:00Z", ".github/workflows/x.yml"),
+                   "2": ("2026-10-01T10:00:00Z", rc.WORKFLOW)}
+        with mock.patch.object(rc, "run", fake_gh(artifacts, started)):
+            self.assertEqual(rc.last_reviewed("o/r", 7),
+                             ("c2", "2026-10-01T10:00:00Z"))
 
     def test_no_recorded_review(self):
         with mock.patch.object(rc, "run", fake_gh()):
@@ -307,8 +327,8 @@ class Retarget(unittest.TestCase):
     def left(self, retargets, branches):
         with mock.patch.object(rc, "run", fake_gh(retargets=retargets,
                                                   branches=branches)), \
-                mock.patch.object(rc, "later_commits_taken",
-                                  lambda branch, head, after: False):
+                mock.patch.object(rc, "merged_beyond",
+                                  lambda head, at, after, default: False):
             return rc.unmerged_bases_left("o/r", 7, "master",
                                           "2026-10-01T12:00:00Z", "after")
 
@@ -334,6 +354,10 @@ class Retarget(unittest.TestCase):
 
     def test_a_retarget_while_the_last_review_ran_counts(self):
         self.assertEqual(self.left([("2026-10-01T12:00:01Z", "l1")], {}),
+                         ["l1"])
+
+    def test_a_retarget_in_the_second_the_last_review_began_counts(self):
+        self.assertEqual(self.left([("2026-10-01T12:00:00Z", "l1")], {}),
                          ["l1"])
 
     def test_earlier_and_default_branch_retargets_do_not_count(self):
