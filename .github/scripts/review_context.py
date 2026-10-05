@@ -102,10 +102,17 @@ def pulls(repo, **query):
     return json.loads(run("gh", "api", f"repos/{repo}/pulls?{query}"))
 
 
-def trusted(head, default):
-    return (succeeds("git", "cat-file", "-e", f"{head}^{{commit}}")
-            and run("git", "show", f"{head}:{WORKFLOW}", check=False)
-            == run("git", "show", f"origin/{default}:{WORKFLOW}"))
+def trusted(record, head, default):
+    if record.get("head") != head or not all(
+            succeeds("git", "cat-file", "-e", f"{sha}^{{commit}}")
+            for sha in (head, record.get("base_sha", ""))):
+        return False
+    fork = run("git", "merge-base", head, record["base_sha"],
+               check=False).strip()
+    return bool(fork) and succeeds(
+        "git", "diff", "--quiet", fork, head, "--", WORKFLOW) and (
+        run("git", "show", f"{record['base_sha']}:{WORKFLOW}", check=False)
+        == run("git", "show", f"origin/{default}:{WORKFLOW}"))
 
 
 def record_of(repo, artifact):
@@ -127,14 +134,15 @@ def last_reviewed(repo, pr, default):
         recorder = json.loads(run("gh", "api",
                                   f"repos/{repo}/actions/runs/{run_id}"))
         if (recorder["path"].split("@")[0] != WORKFLOW
-                or recorder["event"] != "pull_request"
-                or not trusted(head, default)):
+                or recorder["event"] != "pull_request"):
             continue
         try:
-            return record_of(repo, artifact)
+            record = record_of(repo, artifact)
         except (subprocess.CalledProcessError, KeyError, ValueError,
                 zipfile.BadZipFile):
             continue
+        if trusted(record, head, default):
+            return record
     return None
 
 

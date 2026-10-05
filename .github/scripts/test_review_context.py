@@ -183,6 +183,29 @@ class Synthetic(unittest.TestCase):
         self.assertEqual(rc.exposed(self.reviewed, self.reviewed, old,
                                     ["layer1", "master~1"]), [old])
 
+    def test_a_record_is_trusted_by_the_workflow_its_merge_ref_ran(self):
+        self.publish("master")
+        workflow = ".github/workflows/claude-code-review.yml"
+        os.makedirs(".github/workflows")
+        git("checkout", "-q", "master")
+        self.commit(workflow, "v2\n", "master's newer workflow")
+        self.publish("master")
+        master = git("rev-parse", "master")
+        record = {"head": self.reviewed, "base_sha": master}
+        self.assertTrue(rc.trusted(record, self.reviewed, "master"))
+        self.assertFalse(rc.trusted(record, "layer1", "master"))
+        git("checkout", "-q", "layer2")
+        os.makedirs(".github/workflows", exist_ok=True)
+        self.commit(workflow, "forged\n", "layer2 rewrites the workflow")
+        forged = git("rev-parse", "HEAD")
+        self.assertFalse(rc.trusted({"head": forged, "base_sha": master},
+                                    forged, "master"))
+        self.assertFalse(rc.trusted({"head": forged, "base_sha": forged},
+                                    forged, "master"))
+        self.assertFalse(rc.trusted(
+            {"head": self.reviewed, "base_sha": git("rev-parse", "master~1")},
+            self.reviewed, "master"))
+
     def test_a_base_no_longer_in_the_history_is_unknown(self):
         self.assertIsNone(rc.exposed(self.reviewed, self.reviewed, "0" * 40,
                                      ["master"]))
@@ -276,7 +299,8 @@ def zipped(record):
 
 
 class LastReviewed(unittest.TestCase):
-    def last(self, records, runs, trusted=lambda head, default: True):
+    def last(self, records, runs,
+             trusted=lambda record, head, default: True):
         def run(*args, check=True):
             path = next(a for a in args[2:] if not a.startswith("-"))
             if "/artifacts?" in path:
@@ -309,7 +333,8 @@ class LastReviewed(unittest.TestCase):
         records = [("2", "a2", "c2"), ("3", "a3", "c3")]
         runs = {r: (rc.WORKFLOW, "pull_request") for r in "23"}
         self.assertEqual(
-            self.last(records, runs, lambda head, default: head == "c2"),
+            self.last(records, runs,
+                      lambda record, head, default: head == "c2"),
             {"head": "head of a2"})
 
     def test_no_recorded_review(self):
