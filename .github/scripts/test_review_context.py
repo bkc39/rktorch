@@ -61,13 +61,13 @@ class Cascade233(unittest.TestCase):
         self.assertNotIn(OURS_MERGE_233, patch)
 
     def test_the_squash_cascade_exposes_nothing(self):
-        self.assertEqual(rc.exposed(BEFORE_SQUASH_233, OURS_MERGE_233,
+        self.assertEqual(rc.exposed(BEFORE_SQUASH_233,
                                     "93caacd6fae0388893ba9b8562a47107db3edd66",
                                     [SQUASH_232]), [])
 
     def test_real_conflict_resolutions_are_still_reviewed(self):
         line = git("rev-list", "--parents", "-1", RESOLVED_MERGE_233).split()
-        label, patch = rc.merge_patch(line[0], line[1:])
+        label, patch = rc.merge_patch(line[0], line[1:], [line[2]])
         self.assertEqual(label, "Conflict resolution in this merge")
         self.assertTrue(patch.strip())
 
@@ -150,15 +150,15 @@ class Synthetic(unittest.TestCase):
             git("update-ref", f"refs/remotes/origin/{branch}", branch)
 
     def test_a_squashed_lower_layer_exposes_nothing(self):
-        head = self.merge_master_ours()
-        self.assertEqual(rc.exposed(self.reviewed, head, "layer1", ["master"]),
+        self.merge_master_ours()
+        self.assertEqual(rc.exposed(self.reviewed, "layer1", ["master"]),
                          [])
 
     def test_a_lower_layer_that_never_merged_is_exposed(self):
         git("checkout", "-q", "master")
         git("reset", "-q", "--hard", "HEAD~1")
         self.assertEqual(
-            rc.exposed(self.reviewed, self.reviewed, "layer1", ["master"]),
+            rc.exposed(self.reviewed, "layer1", ["master"]),
             [git("rev-parse", "layer1")])
 
     def test_commits_the_lower_branch_got_after_its_squash_are_exposed(self):
@@ -167,20 +167,42 @@ class Synthetic(unittest.TestCase):
         git("checkout", "-q", "-b", "layer2b")
         self.commit("g", "layer two\n", "L2 on L1b")
         reviewed = git("rev-parse", "HEAD")
-        head = self.merge_master_ours()
+        self.merge_master_ours()
         git("checkout", "-q", "layer2b")
         git("merge", "-q", "-s", "ours", "-m", "merge master", "master")
-        self.assertEqual(rc.exposed(reviewed, "HEAD", "layer1", ["master"]),
+        self.assertEqual(rc.exposed(reviewed, "layer1", ["master"]),
                          [git("rev-parse", "layer1")])
-        self.assertEqual(rc.exposed(self.reviewed, head, "layer1~1",
+        self.assertEqual(rc.exposed(self.reviewed, "layer1~1",
                                     ["master"]), [])
+
+    def test_a_reverted_squash_leaves_the_lower_layer_exposed(self):
+        git("checkout", "-q", "master")
+        git("revert", "--no-edit", "HEAD")
+        self.assertEqual(rc.exposed(self.reviewed, "layer1", ["master"]),
+                         [git("rev-parse", "layer1")])
+
+    def test_merging_a_base_commit_the_base_later_reverted_adds_nothing(self):
+        git("checkout", "-q", "master")
+        self.commit("h", "reverted later\n", "X")
+        x = git("rev-parse", "HEAD")
+        git("revert", "--no-edit", "HEAD")
+        git("checkout", "-q", "layer2")
+        git("merge", "-q", "-s", "ours", "-m", "merge S", "master~2")
+        git("merge", "-q", "-m", "merge the pre-revert X", x)
+        head = git("rev-parse", "HEAD")
+        baseline = git("merge-base", head, "master")
+        self.assertEqual(
+            rc.changes(self.reviewed, head, ["master"], [baseline, "master"]),
+            "")
+        merged = git("merge-tree", "--write-tree", "master", head)
+        self.assertNotIn("\th\n", git("ls-tree", merged) + "\n")
 
     def test_a_rewritten_lower_layer_is_exposed(self):
         old = git("rev-parse", "layer1")
         git("checkout", "-q", "layer1")
         git("reset", "-q", "--hard", "HEAD~1")
         self.commit("f", "uno\n2\n3\n", "L1, rewritten")
-        self.assertEqual(rc.exposed(self.reviewed, self.reviewed, old,
+        self.assertEqual(rc.exposed(self.reviewed, old,
                                     ["layer1", "master~1"]), [old])
 
     def test_a_record_is_trusted_by_the_workflow_its_merge_ref_ran(self):
@@ -207,7 +229,7 @@ class Synthetic(unittest.TestCase):
             self.reviewed, "master"))
 
     def test_a_base_no_longer_in_the_history_is_unknown(self):
-        self.assertIsNone(rc.exposed(self.reviewed, self.reviewed, "0" * 40,
+        self.assertIsNone(rc.exposed(self.reviewed, "0" * 40,
                                      ["master"]))
 
     def test_a_base_whose_action_configuration_differs_holds_the_review(self):
