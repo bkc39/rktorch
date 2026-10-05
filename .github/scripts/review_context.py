@@ -124,22 +124,33 @@ def last_reviewed(repo, pr):
     return head, started["created_at"]
 
 
-def lower_layer_merged(repo, branch, retargeted_at):
+def later_commits_taken(branch, merged_head, after):
+    if not succeeds("git", "rev-parse", "--verify", "-q", f"origin/{branch}"):
+        return False
+    later = run("git", "rev-list", f"origin/{branch}", "--not",
+                merged_head).split()
+    return any(succeeds("git", "merge-base", "--is-ancestor", sha, after)
+               for sha in later)
+
+
+def lower_layer_merged(repo, branch, retargeted_at, after):
     owner = repo.split("/")[0]
     earlier = [p for p in pulls(repo, state="all", head=f"{owner}:{branch}")
                if p["created_at"] < retargeted_at]
     layer = max(earlier, key=lambda p: p["created_at"], default=None)
     return bool(layer and layer["merged_at"]
-                and layer["merged_at"] <= retargeted_at)
+                and layer["merged_at"] <= retargeted_at
+                and not later_commits_taken(branch, layer["head"]["sha"],
+                                            after))
 
 
-def unmerged_bases_left(repo, pr, default, since):
+def unmerged_bases_left(repo, pr, default, since, after):
     events = pull_request(RETARGETS, repo, pr)["timelineItems"]["nodes"]
     return sorted({e["previousRefName"] for e in events
                    if e["createdAt"] > since
                    and e["previousRefName"] != default
                    and not lower_layer_merged(repo, e["previousRefName"],
-                                              e["createdAt"])})
+                                              e["createdAt"], after)})
 
 
 def review_mode(before, after):
@@ -337,7 +348,8 @@ def main():
               "was rewritten since")
     if mode == "incremental":
         try:
-            left = unmerged_bases_left(repo, number, default, reviewed_at)
+            left = unmerged_bases_left(repo, number, default, reviewed_at,
+                                       after)
         except LOOKUP_ERRORS as e:
             print(f"::warning::retarget lookup failed: {e}")
             left, mode, reason = [], "full", "the retarget lookup failed"

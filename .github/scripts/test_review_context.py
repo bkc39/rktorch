@@ -144,6 +144,18 @@ class Synthetic(unittest.TestCase):
         for branch in branches:
             git("update-ref", f"refs/remotes/origin/{branch}", branch)
 
+    def test_commits_a_merged_branch_got_later_are_caught(self):
+        merged_head = git("rev-parse", "layer1")
+        git("checkout", "-q", "layer1")
+        self.commit("f", "one\ntwo\n3\n", "L1b, after the merge")
+        self.publish("layer1")
+        self.assertFalse(
+            rc.later_commits_taken("layer1", merged_head, self.reviewed))
+        git("checkout", "-q", "layer2")
+        git("merge", "-q", "-m", "merge layer1", "layer1")
+        self.assertTrue(rc.later_commits_taken("layer1", merged_head, "HEAD"))
+        self.assertFalse(rc.later_commits_taken("gone", merged_head, "HEAD"))
+
     def test_a_base_that_changes_the_actions_configuration_holds_the_review(self):
         git("checkout", "-q", "master")
         self.commit("CLAUDE.md", "master's\n", "master changes its config")
@@ -236,7 +248,8 @@ def fake_gh(artifacts=(), started=None, retargets=(), branches=None):
                     {"createdAt": at, "previousRefName": ref}
                     for at, ref in retargets]}}}}})
         head = urllib.parse.unquote(path.split("head=")[1]).split(":")[1]
-        return json.dumps([{"created_at": created, "merged_at": merged}
+        return json.dumps([{"created_at": created, "merged_at": merged,
+                            "head": {"sha": "merged-head"}}
                            for created, merged in branches.get(head, [])])
     return run
 
@@ -293,9 +306,11 @@ class Retarget(unittest.TestCase):
 
     def left(self, retargets, branches):
         with mock.patch.object(rc, "run", fake_gh(retargets=retargets,
-                                                  branches=branches)):
+                                                  branches=branches)), \
+                mock.patch.object(rc, "later_commits_taken",
+                                  lambda branch, head, after: False):
             return rc.unmerged_bases_left("o/r", 7, "master",
-                                          "2026-10-01T12:00:00Z")
+                                          "2026-10-01T12:00:00Z", "after")
 
     def test_moving_off_a_merged_lower_layer_keeps_the_review_incremental(self):
         self.assertEqual(self.left([("2026-10-01T13:00:00Z", "l1")],
