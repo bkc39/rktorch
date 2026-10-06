@@ -144,7 +144,11 @@
      ;; 1e-8, Adam's eps, where the libtorch-bin-vs-wheel last bits move
      ;; that step by most of lr; every other parameter agrees within 2.2e-4
      (check-training-twin "07_asr" "python/07_asr.py" train-on 'cpu 2e-3)
+     ;; 1e-2, not 5e-3: the builds' CUDA kernels differ more, and a
+     ;; dilated-convolution channel that goes dead after the first step
+     ;; keeps moving on Adam's momentum, carrying that step's difference;
+     ;; one parameter lands 5.8e-3 apart, every other within 4.7e-3
      (when (and (cuda-available?)
                 (python-cuda-available?))
        (check-training-twin "07_asr" "python/07_asr.py" train-on
-                            'cuda 5e-3))]))
+                            'cuda 1e-2))]))
