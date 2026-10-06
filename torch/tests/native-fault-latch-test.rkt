@@ -29,7 +29,7 @@
   (define (bad) (cast 8 _intptr _Tensor))
 
   (define (disabled doing)
-    (regexp (string-append "^rktorch: native code faulted earlier, while " doing)))
+    (regexp (format "^rktorch: native code faulted earlier, while ~a" doing)))
 
   (define passed-through (for/list ([n (in-range 8)]) (build-list n values)))
 

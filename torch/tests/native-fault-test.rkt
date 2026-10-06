@@ -3,53 +3,49 @@
 (module+ test
   (require (only-in ffi/unsafe _int _intptr _pointer cast ptr-ref)
            (only-in racket/port port->string)
-           (only-in racket/string string-join)
            rackunit
            (only-in "../foreign/raw/fault.rkt" native-fault? native-fault-policy))
 
+  ;; Each program runs in its own racket: the exit policy ends the process,
+  ;; and the fault notice goes to file descriptor 2, past every port.
   ;; A handle at address 8 faults on first use, the same way every time.
   (define prelude
-    (string-join
-     '("(require torch"
-       "  (only-in ffi/unsafe cast _intptr)"
-       "  (only-in ffi/unsafe/alloc allocator)"
-       "  (only-in torch/foreign/raw/syntax _Tensor)"
-       "  (only-in torch/foreign/structs tensor-impl)"
-       "  (only-in torch/foreign/raw/tensor tr-tensor-dtype/raw)"
-       "  (only-in torch/foreign/raw/memory"
-       "           tr-tensor-free/finalizer finalizer-failures))"
-       "(define (bad) (cast 8 _intptr _Tensor))"
-       "(define (then-probe)"
-       "  (with-handlers ([exn:fail? (lambda (e)"
-       "                               (printf \"then: ~a\\n\" (exn-message e)))])"
-       "    (void (ones 2 2))"
-       "    (printf \"then: usable\\n\")))")
-     "\n"))
+    '((require torch
+               (only-in ffi/unsafe cast _intptr)
+               (only-in ffi/unsafe/alloc allocator)
+               (only-in torch/foreign/raw/syntax _Tensor)
+               (only-in torch/foreign/structs tensor-impl)
+               (only-in torch/foreign/raw/tensor tr-tensor-dtype/raw)
+               (only-in torch/foreign/raw/memory
+                        tr-tensor-free/finalizer finalizer-failures))
+      (define (bad) (cast 8 _intptr _Tensor))
+      (define (then-probe)
+        (with-handlers ([exn:fail? (lambda (e)
+                                     (printf "then: ~a\n" (exn-message e)))])
+          (void (ones 2 2))
+          (printf "then: usable\n")))))
 
   (define finalizer-fault
-    (string-append
-     prelude
-     "(define adopt ((allocator tr-tensor-free/finalizer) values))"
-     "(for ([_ (in-range 5)]) (void (adopt (bad))))"
-     "(for ([_ (in-range 3)]) (collect-garbage))"
-     "(sleep 1)"
-     "(printf \"survived failures=~a\\n\" (finalizer-failures))"
-     "(then-probe)"))
+    `(,@prelude
+      (define adopt ((allocator tr-tensor-free/finalizer) values))
+      (for ([_ (in-range 5)]) (void (adopt (bad))))
+      (for ([_ (in-range 3)]) (collect-garbage))
+      (sleep 1)
+      (printf "survived failures=~a\n" (finalizer-failures))
+      (then-probe)))
 
   (define printer-fault
-    (string-append
-     prelude
-     "(printf \"~a\\n\" (tensor-impl (bad) '(2 2)))"
-     "(printf \"survived\\n\")"
-     "(then-probe)"))
+    `(,@prelude
+      (printf "~a\n" (tensor-impl (bad) '(2 2)))
+      (printf "survived\n")
+      (then-probe)))
 
   (define call-fault
-    (string-append
-     prelude
-     "(with-handlers ([exn:fail? (lambda (_) (printf \"caught\\n\"))])"
-     "  (tr-tensor-dtype/raw (bad)))"
-     "(printf \"survived\\n\")"
-     "(then-probe)"))
+    `(,@prelude
+      (with-handlers ([exn:fail? (lambda (_) (printf "caught\n"))])
+        (tr-tensor-dtype/raw (bad)))
+      (printf "survived\n")
+      (then-probe)))
 
   (define (run-racket program #:policy policy)
     (parameterize ([current-environment-variables
@@ -58,7 +54,8 @@
                                   #"RKTORCH_ON_NATIVE_FAULT"
                                   (and policy (string->bytes/utf-8 policy)))
       (define-values (sp out in err)
-        (subprocess #f #f #f (find-system-path 'exec-file) "-e" program))
+        (subprocess #f #f #f (find-system-path 'exec-file)
+                    "-e" (format "~s" `(begin ,@program))))
       (close-output-port in)
       (define stdout (box ""))
       (define stderr (box ""))
