@@ -367,14 +367,15 @@ the allocators that only throw plain `c10::Error`: the CPU allocator's
 backend out of memory" (high-water mark) and "Invalid buffer size:"
 (Metal's per-buffer cap) — so an oversized request gets the typed OOM
 on every backend. Ops that draw from the global
-RNG stream use `tensor-allocator/rng` — the same wrap minus the retry,
-because a retried draw would advance the generator stream and break
-seeded reproducibility. An op with several tensor outputs (`topk`,
+RNG stream, or that also update an argument (batch_norm's running
+statistics), use `tensor-allocator/no-retry` — the same wrap minus the
+retry, because a retried draw would advance the generator stream and
+break seeded reproducibility, and a retried update would apply twice. An op with several tensor outputs (`topk`,
 `sort`) reports an integer status and writes its handles through out
 pointers; `tensor-allocator/outputs` runs the call and registers every
 handle's finalizer inside one atomic section, accounts each in the
 ledger, and retries the whole call on OOM exactly as the single-output
-wrap does (`tensor-allocator/outputs/rng` omits the retry). The shim
+wrap does (`tensor-allocator/outputs/no-retry` omits the retry). The shim
 writes no out pointer until every handle exists, so a failed call leaves
 nothing to free.
 
