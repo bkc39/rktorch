@@ -473,7 +473,10 @@ module's full export set (`racket/runtime-path`, `syntax/parse/pre`).
   native-fault latch `define-torch` puts under every binding, #76),
   `pressure` (no
   FFI of its own: the collection policy under the ledger, the two troughs
-  and the capacity backstop, #145), `memory` (the lifetime substrate:
+  and the capacity backstop, #145), `pressure-settings` (its parameters;
+  `RKTORCH_MEMORY_FRACTION` and `RKTORCH_MEMORY_LIMIT` in MiB set the
+  mark's initial values, #236), `device-queries` (the capacity, allocator
+  and release queries `device` hands down to it), `memory` (the lifetime substrate:
   frees, pressure ledger, `tensor-allocator`, op-definer macros),
   `global`, `tensor`, `random`, `creation`,
   `shape-ops`, `elementwise`, `reduce`, `linalg`, `autograd`.

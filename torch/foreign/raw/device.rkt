@@ -2,13 +2,13 @@
 
 (require (only-in ffi/unsafe _fun _int _int64 _ptr _string/utf-8)
          (only-in "../device-type.rkt" device-index device-type)
+         (only-in "device-queries.rkt" install-device-queries!)
          (only-in "memory.rkt"
                   _tr-device-type
                   tensor-allocator
                   tr-cuda-empty-cache/raw
                   tr-mps-empty-cache/raw
                   tr-tensor-device/raw)
-         (only-in "pressure.rkt" install-device-queries!)
          (only-in "syntax.rkt" _Tensor _Tensor/null define-torch)
          (only-in "tensor.rkt" _tr-dtype))
 
