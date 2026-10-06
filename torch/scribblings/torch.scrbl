@@ -41,14 +41,6 @@ introduction, from a first tensor through to a training loop; the
 Every example in this manual is evaluated when it is built, so the printed
 results are the ones the library produces.
 
-@bold{AI disclosure.} Most of rktorch was written by AI coding agents:
-Anthropic's Claude, working through Claude Code under the author's
-direction. That covers the code, the tests and this manual, and most
-commits carry a Claude co-author line. The author sets the design, reviews
-the work and decides what is merged. The agents' work is held to the same
-checks as everything else: the test suite, and parity tests that compare
-the library's results with PyTorch's own on the same inputs.
-
 @bold{License.} rktorch's code is under the Apache License 2.0. The data
 fixtures it ships keep their sources' licenses, recorded in the
 @filepath{NOTICE} beside each: the LibriSpeech utterance is CC BY 4.0 and
@@ -68,6 +60,9 @@ pretrained weights are torchvision's. The data comes from LibriSpeech
 (Panayotov, Chen, Povey and Khudanpur), the Tatoeba Project, MNIST,
 CIFAR-10 and Project Gutenberg. The photographs come from Wikimedia
 Commons, among them one by Fredrik Lähnn, who asks to be credited.
+
+@bold{AI disclosure.} This library and its documentation were created with
+the use of AI tools.
 
 @local-table-of-contents[]
 
