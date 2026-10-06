@@ -49,17 +49,11 @@ the Tatoeba sentence pairs CC BY 2.0 FR, so the package as a whole is
 @italic{Heart of Darkness} excerpt are in the public domain. libtorch
 itself is under PyTorch's BSD-3-Clause license.
 
-@bold{Acknowledgements.} The tensors, kernels and autograd are libtorch's,
-the work of the PyTorch team. The design follows
-@hyperlink["https://github.com/janestreet/torch"]{ocaml-torch}, by Laurent
-Mazare and Jane Street, which this project keeps as a reference
-implementation. Several worked examples follow published work: PyTorch's
-tutorials on translation, transfer learning and style transfer, the neural
-style algorithm of Gatys, Ecker and Bethge, and Karpathy's char-rnn. The
-pretrained weights are torchvision's. The data comes from LibriSpeech
-(Panayotov, Chen, Povey and Khudanpur), the Tatoeba Project, MNIST,
-CIFAR-10 and Project Gutenberg. The photographs come from Wikimedia
-Commons, among them one by Fredrik Lähnn, who asks to be credited.
+@bold{Acknowledgements.} Many thanks to
+@hyperlink["https://pytorch.org/"]{PyTorch} and its developers, and to
+Laurent Mazare and Jane Street for
+@hyperlink["https://github.com/janestreet/torch"]{ocaml-torch}, whose
+design this library follows.
 
 @bold{AI disclosure.} This library and its documentation were created with
 the use of AI tools.
