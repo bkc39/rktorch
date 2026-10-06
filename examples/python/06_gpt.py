@@ -1,11 +1,11 @@
 """Parity twin of examples/racket/06-gpt.rkt: same seed, the same GPT in the
 same declaration order, 5 full-batch Adam steps on the committed fixture.
 
-The blocks are nn.TransformerEncoderLayer, pre-norm with an exact-gelu MLP
-four times the width and no dropout, one per block in an nn.ModuleList so
-each draws its own initial values, as the Racket stack's #:copies? #f does
-(nn.TransformerEncoder would deep-copy the first). PyTorch's is_causal is
-only a hint that the mask beside it is the causal mask, so the forward
+The stack is the standard nn.TransformerEncoder over a pre-norm
+nn.TransformerEncoderLayer with an exact-gelu MLP four times the width and
+no dropout, ending in a LayerNorm, as the Racket TransformerEncoder with
+#:norm? #t builds it: every block a copy of the first. PyTorch's is_causal
+is only a hint that the mask beside it is the causal mask, so the forward
 passes both; the Racket #:causal? builds the mask itself.
 
 The parameters are reported in the Racket model's order: each attention's
@@ -43,19 +43,17 @@ def load_fixture():
     return xs, ys, len(vocab)
 
 
-def gpt_block():
-    return nn.TransformerEncoderLayer(
-        N_EMBD, N_HEAD, dim_feedforward=4 * N_EMBD, dropout=0.0,
-        activation="gelu", norm_first=True, batch_first=True)
-
-
 class GPT(nn.Module):
     def __init__(self, vocab_size):
         super().__init__()
         self.tok_emb = nn.Embedding(vocab_size, N_EMBD)
         self.pos_emb = nn.Embedding(BLOCK_SIZE, N_EMBD)
-        self.blocks = nn.ModuleList(gpt_block() for _ in range(N_LAYER))
-        self.ln_f = nn.LayerNorm(N_EMBD)
+        self.transformer = nn.TransformerEncoder(
+            nn.TransformerEncoderLayer(
+                N_EMBD, N_HEAD, dim_feedforward=4 * N_EMBD,
+                activation="gelu", norm_first=True, dropout=0.0,
+                batch_first=True),
+            N_LAYER, norm=nn.LayerNorm(N_EMBD), enable_nested_tensor=False)
         self.head = nn.Linear(N_EMBD, vocab_size)
 
     def forward(self, idx):
@@ -64,9 +62,7 @@ class GPT(nn.Module):
         causal = nn.Transformer.generate_square_subsequent_mask(
             seq_len, device=idx.device)
         h = self.tok_emb(idx) + self.pos_emb(pos)
-        for block in self.blocks:
-            h = block(h, src_mask=causal, is_causal=True)
-        return self.head(self.ln_f(h))
+        return self.head(self.transformer(h, mask=causal, is_causal=True))
 
 
 def racket_order(net):

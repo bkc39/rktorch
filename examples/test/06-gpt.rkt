@@ -4,7 +4,7 @@
 
 (require (only-in racket/list first last)
          (only-in racket/math nan?)
-         (only-in racket/string string-contains?)
+         (only-in racket/string string-contains? string-prefix?)
          torch
          torch/nn
          (only-in torch/data/text encode)
@@ -57,14 +57,17 @@
   ;; the embedding tables are sized by the fixture vocab and block-size 16.
   (check-equal? (tensor-shape (car (parameters net))) (list v-size 32))
   (check-equal? (tensor-shape (cadr (parameters net))) '(16 32))
-  ;; #:copies? #f: each block draws its own initial values
+  ;; the standard stack starts every block as a copy of the first, as
+  ;; nn.TransformerEncoder does
   (manual-seed! 0)
   (define fresh (named-parameters (gpt v-size 16)))
-  (define (query-weights layer)
-    (tensor->list
-     (cdr (assoc (format "transformer.layers.~a.self-attn.query.weight" layer)
-                 fresh))))
-  (check-not-equal? (query-weights 0) (query-weights 1))
+  (define (block-values layer)
+    (define prefix (format "transformer.layers.~a." layer))
+    (for/list ([named (in-list fresh)]
+               #:when (string-prefix? (car named) prefix))
+      (tensor->list (cdr named))))
+  (check-equal? (length (block-values 1)) 16)
+  (check-equal? (block-values 1) (block-values 0))
   ;; causal: changing the last character leaves the earlier positions'
   ;; logits where they were
   (define (logits-of s)
