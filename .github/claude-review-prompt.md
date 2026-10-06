@@ -11,7 +11,7 @@ push changes the code it concerns. If you still disagree with
 a reply, say why in your summary comment, not in a new inline
 thread.
 
-This repository is torchrkt: Racket bindings to libtorch via a
+This repository is rktorch: Racket bindings to libtorch via a
 hand-written extern "C" shim. Read .review-context/AGENTS.md,
 master's copy, first for the project's conventions, then review
 the diff for:
