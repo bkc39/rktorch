@@ -7,6 +7,7 @@
          (only-in racket/string string-contains?)
          torch
          torch/nn
+         (only-in torch/data/text encode)
          "../racket/06-gpt.rkt")
 
 (module+ main
@@ -34,24 +35,46 @@
               (format "non-finite loss: ~a" losses))
   (check-true (< (last losses) (first losses))
               (format "losses did not decrease: ~a" losses))
-  ;; The parameter tree: 2 embeddings + 2 blocks x (2 pre-norm residuals,
-  ;; each a LayerNorm plus its branch: 4 attention Linears or 2 MLP Linears,
-  ;; every one weight+bias) + final ln + head = 38 tensors, named through
-  ;; Sequential's index and the residual wrappers' norm/branch fields.
+  ;; The parameter tree: 2 embeddings + 2 blocks x (4 attention projections,
+  ;; 2 feed-forward Linears and 2 LayerNorms, every one weight+bias) + the
+  ;; stack's final norm + head = 38 tensors, under PyTorch's layer names.
   (define names (map car (named-parameters net)))
   (check-equal? (length names) 38)
   (check-equal? (first names) "tok-emb.weight")
   (check-equal? (last names) "head.bias")
-  (check-not-false (member "blocks.0.attention.norm.weight" names))
-  (check-not-false (member "blocks.0.attention.branch.wq.weight" names))
-  (check-not-false (member "blocks.1.mlp.norm.bias" names))
-  (check-not-false (member "blocks.1.mlp.branch.fc2.bias" names))
-  ;; the flat names from before the block was factored are gone
-  (check-false (member "blocks.0.ln1.weight" names))
+  (check-not-false (member "transformer.layers.0.norm1.weight" names))
+  (check-not-false
+   (member "transformer.layers.0.self-attn.query.weight" names))
+  (check-not-false (member "transformer.layers.1.self-attn.out.bias" names))
+  (check-not-false (member "transformer.layers.1.linear2.bias" names))
+  (check-not-false (member "transformer.norm.weight" names))
+  ;; the hand-written blocks' names are gone
+  (check-false (member "blocks.0.attention.branch.wq.weight" names))
+  (define v-size (vector-length vocab))
+  (check-equal? (for/sum ([p (in-list (parameters net))]) (numel p))
+                (+ (* 65 v-size) 25984))
   ;; the embedding tables are sized by the fixture vocab and block-size 16.
-  (check-equal? (tensor-shape (car (parameters net)))
-                (list (vector-length vocab) 32))
+  (check-equal? (tensor-shape (car (parameters net))) (list v-size 32))
   (check-equal? (tensor-shape (cadr (parameters net))) '(16 32))
+  ;; #:copies? #f: each block draws its own initial values
+  (manual-seed! 0)
+  (define fresh (named-parameters (gpt v-size 16)))
+  (define (query-weights layer)
+    (tensor->list
+     (cdr (assoc (format "transformer.layers.~a.self-attn.query.weight" layer)
+                 fresh))))
+  (check-not-equal? (query-weights 0) (query-weights 1))
+  ;; causal: changing the last character leaves the earlier positions'
+  ;; logits where they were
+  (define (logits-of s)
+    (with-no-grad (net (reshape (encode vocab s) 1 -1))))
+  (define (prefix t) (narrow t 1 0 6))
+  (check-true (< (item (max (abs (- (prefix (logits-of "The sea"))
+                                    (prefix (logits-of "The set"))))))
+                 1e-6))
+  (check-true (> (item (max (abs (- (logits-of "The sea")
+                                    (logits-of "The set")))))
+                 1e-3))
   ;; generation smoke: greedy sampling appends exactly #:steps chars, stays
   ;; inside the training vocab, and leaves the net back in train mode.
   (define sample (generate net vocab "The " #:steps 20))
@@ -68,12 +91,14 @@
   (unless (eq? (device-type accel) 'cpu)
     (define-values (a-losses a-net a-vocab _a-dev) (run-example #:device accel))
     (check-equal? (tensor-device (car (parameters a-net))) accel)
-    (check-true (andmap (lambda (l) (and (rational? l) (not (nan? l)))) a-losses)
+    (check-true (andmap (lambda (l) (and (rational? l) (not (nan? l))))
+                        a-losses)
                 (format "non-finite loss on ~a: ~a" accel a-losses))
     (check-true (< (last a-losses) (first a-losses))
                 (format "~a losses did not decrease: ~a" accel a-losses))
     ;; generate reads its device from the net's parameters, not the default
-    (check-equal? (string-length (generate a-net a-vocab "The " #:steps 20)) 24))
+    (check-equal? (string-length (generate a-net a-vocab "The " #:steps 20))
+                  24))
   ;; The committed Part I excerpt behind train-excerpt: data integrity only
   ;; (training it is minutes of CPU — the offline demo, not a CI job).
   (define excerpt (load-excerpt))

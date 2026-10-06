@@ -213,6 +213,9 @@ rather than a guard in the body:
   ...)
 ]
 
+The library's own @racket[MultiheadAttention] states its @racket[#:heads]
+invariant this way.
+
 @racket[#:on-move] runs after @racket[to] has moved the layer, with every
 field in scope, and only when the move actually rebound something: the
 device and dtype of every parameter and buffer are read either side of it

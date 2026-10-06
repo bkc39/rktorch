@@ -5,21 +5,21 @@
 
 @title[#:tag "ex-gpt"]{Training a char-GPT on Heart of Darkness}
 
-The v3 capstone: a decoder-only transformer language model over characters,
-trained on Joseph Conrad's @emph{Heart of Darkness} (Project Gutenberg #219).
-The architecture is the standard pre-norm GPT: token + learned positional
-embeddings into @racket[n-layer] blocks of (layer-norm @tt{->} causal
-self-attention @tt{->} residual) and (layer-norm @tt{->} MLP @tt{->} residual),
-then a final layer-norm and a linear head back to vocabulary logits.
+A decoder-only transformer language model over characters, trained on
+Joseph Conrad's @emph{Heart of Darkness} (Project Gutenberg #219). The
+architecture is the standard pre-norm GPT: token and learned position
+embeddings, then @racket[n-layer] blocks that each run causal
+self-attention and a feed-forward network on the residual stream, then a
+final layer norm and a linear head back to vocabulary logits.
 
-The block is written as the architecture names it: a causal self-attention
-layer, a feed-forward layer, and a pre-norm residual wrapper that puts each
-of them on the residual stream. Attention itself is still built from
-primitives --- @racket[Linear] projections, @racket[reshape]/@racket[transpose]
-head splitting, @racket[matmul] scores, the @racket[tril]-derived causal mask
-through @racket[masked-fill], and @racket[softmax] --- because watching the
-tensor shapes move is the point of the example. (A library-level
-@tt{TransformerEncoderBlock} is #32.)
+Every piece of that is a library layer. Each block is a
+@racket[TransformerEncoderLayer], the blocks are stacked by
+@racket[TransformerEncoder], and the attention inside them is
+@racket[MultiheadAttention] running @racket[scaled-dot-product-attention]
+over every head at once. @secref["guide-transformers"] builds those layers
+up from bare tensors; this chapter puts them to work, so its code is the
+model's arrangement and its training loop rather than the arithmetic of
+attention.
 
 @chunk[<r06-require>
 (require racket/runtime-path
@@ -35,128 +35,110 @@ tensor shapes move is the point of the example. (A library-level
                   text->vocab))]
 
 @chunk[<r06-provide>
-(provide causal-self-attention feed-forward pre-norm-residual gpt-block gpt
-         pick-device load-excerpt run-example train-excerpt train-novel
-         generate)]
+(provide gpt-block gpt pick-device load-excerpt run-example train-excerpt
+         train-novel generate)]
 
-@bold{Causal self-attention.} The input is projected to queries, keys and
-values and split into @racket[n-head] heads of @tt{head-dim = n-embd / n-head}
-(the @racket[reshape] + @racket[transpose] dance takes @tt{[B, T, C]} to
-@tt{[B, H, T, D]}), then scored against itself, scaled by @tt{sqrt(head-dim)}.
-The upper triangle of the @tt{[T, T]} score matrix --- pairs where a position
-would attend to its own future --- is filled with @tt{-inf} @emph{before}
-@racket[softmax], so those weights come out exactly zero: the causal mask that
-makes this a language model rather than an oracle. The @tt{[T, T]} bool mask
-broadcasts over the batched @tt{[B, H, T, T]} scores. The heads are joined
-back to @tt{[B, T, C]} and pass through the output projection. The mask is
-built on the input's device, so a net trained on an accelerator applies
-outside any @racket[with-default-device] extent.
+@bold{One block.} A GPT block is what PyTorch calls a transformer
+@emph{encoder} layer: self-attention and then a feed-forward network, with
+nothing to read from an encoder. (That third sublayer, cross-attention
+over an encoder's output, is what a @racket[TransformerDecoderLayer] adds,
+and a decoder-only model has no encoder.) Two things make the layer a GPT
+block: the causal mask the model applies it under, below, and four
+settings. @racket[#:norm-first? #t] is pre-norm, as GPT-2 settled it: each
+sublayer reads a normalized view of the residual stream and adds its
+answer to the stream untouched. @racket[#:ffn-width] four times the width
+and @racket[#:activation 'gelu] make the feed-forward the GPT-standard
+MLP, widened 4x inside through the exact @racket[gelu] (GPT-2 trained with
+its tanh approximation, @racket['gelu-tanh]; a model trained from scratch
+has no reason to prefer either). @racket[#:dropout 0.0] turns off the
+dropout PyTorch's default applies in four places, so the seeded parity
+twin compares arithmetic rather than random masks. And
+@racket[#:batch-first? #t] takes batches as the @tt{[B, T, C]} the
+embeddings produce.
 
-@chunk[<r06-attention>
-(define-layer causal-self-attention (n-embd n-head wq wk wv wo)
-  #:init (n-embd n-head)
-  (unless (zero? (remainder n-embd n-head))
-    (error 'causal-self-attention "n-embd ~a not divisible by n-head ~a"
-           n-embd n-head))
-  (set! wq (Linear n-embd n-embd))
-  (set! wk (Linear n-embd n-embd))
-  (set! wv (Linear n-embd n-embd))
-  (set! wo (Linear n-embd n-embd))
-  #:forward (x)
-  (with-default-device (tensor-device x)
-    (define shape (tensor-shape x))
-    (define batch (car shape))
-    (define seq-len (cadr shape))
-    (define head-dim (quotient n-embd n-head))
-    (define (split-heads m)
-      (transpose (reshape m batch seq-len n-head head-dim) 1 2))
-    (define q (split-heads (wq x)))
-    (define k (split-heads (wk x)))
-    (define v (split-heads (wv x)))
-    (define scores (/ (matmul q (transpose k 2 3)) (sqrt head-dim)))
-    (define causal (eq (tril (ones seq-len seq-len)) 0))
-    (define att (softmax (masked-fill scores causal -inf.0) -1))
-    (~> (matmul att v) (transpose 1 2) (reshape batch seq-len n-embd) wo)))]
+Written out, with the child names the layer gives its pieces, a block
+applied under the causal mask computes
 
-@bold{The MLP.} Two @racket[Linear] layers through @racket[gelu], widened 4x
-inside, the GPT-standard shape.
+@verbatim[#:indent 2]{
+x ← x + self-attn(norm1(x), causal)
+x ← x + linear2(gelu(linear1(norm2(x))))
+}
 
-@chunk[<r06-mlp>
-(define-layer feed-forward (fc1 fc2)
-  #:init (n-embd)
-  (set! fc1 (Linear n-embd (* 4 n-embd)))
-  (set! fc2 (Linear (* 4 n-embd) n-embd))
-  #:forward (x)
-  (~> x fc1 gelu fc2))]
-
-@bold{The pre-norm residual.} Pre-norm, as GPT-2 settled it: the residual
-stream is only ever @emph{added to}, each sub-layer reading a normalized view.
-The wrapper owns the @racket[LayerNorm] and takes the sub-layer it guards as
-a constructor argument, so the same three lines serve attention and the MLP.
-Its two children register as @tt{norm} and @tt{branch}, which is where the
-dotted parameter paths below come from.
-
-@chunk[<r06-residual>
-(define-layer pre-norm-residual (norm branch)
-  #:init (n-embd branch)
-  (set! norm (LayerNorm n-embd))
-  #:forward (x)
-  (~> x norm branch (+ x)))]
-
-@bold{One transformer block.} Attention on the residual stream, then the
-MLP on the residual stream; the block's forward is the diagram. The
-sub-layers are constructed inside the wrappers' argument positions, so the
-@racket[Linear] initializers still draw from the RNG in the order
-@tt{wq, wk, wv, wo, fc1, fc2}, which is what keeps the seeded parity with the
-Python twin.
+where @tt{self-attn} projects its input through its @tt{query}, @tt{key}
+and @tt{value} children, splits each projection into @racket[n-head] heads
+of @tt{n-embd / n-head}, attends every head at once with later positions
+hidden, joins the heads and projects them back through @tt{out}.
+@secref["transformers-blocks"] checks that arithmetic against the layer by
+hand, and @secref["attention-transformer-layers"] documents every keyword.
 
 @chunk[<r06-block>
-(define-layer gpt-block (attention mlp)
-  #:init (n-embd n-head)
-  (set! attention
-        (pre-norm-residual n-embd (causal-self-attention n-embd n-head)))
-  (set! mlp (pre-norm-residual n-embd (feed-forward n-embd)))
-  #:forward (x)
-  (~> x attention mlp))]
+(define (gpt-block n-embd n-head)
+  (TransformerEncoderLayer n-embd
+                           #:heads n-head
+                           #:ffn-width (* 4 n-embd)
+                           #:dropout 0.0
+                           #:activation 'gelu
+                           #:norm-first? #t
+                           #:batch-first? #t))]
 
 @bold{The model.} Token ids gather rows from a learned @racket[Embedding]
 table; a second table indexed by @racket[(arange seq-len)] adds a learned
-position signal (its @tt{[T, C]} rows broadcast over the batch). The blocks
-stack in a @racket[Sequential], whose indexed naming gives PyTorch-style
-dotted paths: @tt{blocks.0.attention.norm.weight} is the first block's
-attention layer-norm, @tt{blocks.0.attention.branch.wq.weight} its query
-projection, @tt{blocks.0.mlp.branch.fc1.weight} its MLP's first layer. Those
-paths changed when the block was factored (they were
-@tt{blocks.0.ln1.weight}, @tt{blocks.0.wq.weight}, @tt{blocks.0.fc1.weight}),
-so a checkpoint saved by the earlier flat block does not load into this one;
-retrain with @filepath{scripts/train-gpt.rkt}. @racket[block-size] only sizes the
-position table --- cropping inputs to fit is the caller's job. Both forwards
-scope their temporaries --- the position @racket[arange] here, the
-causal-mask @racket[ones] in the attention layer --- to the @emph{input's} device, so
-a CUDA-trained net can be applied directly, outside any
-@racket[with-default-device] extent, exactly like the Python twin's
-@tt{device=idx.device}. The keyword
-defaults are the fixture-scale configuration that @racket[run-example] and the
-parity twin train; @racket[train-novel] passes something bigger.
+position signal, its @tt{[T, C]} rows broadcasting over the batch
+(@secref["attention-positions"]). @racket[TransformerEncoder] stacks
+@racket[n-layer] blocks and ends with the final @racket[LayerNorm] as its
+@racket[#:norm]: a pre-norm block never normalizes the stream it passes
+on, so the stack does before the head reads it. @racket[#:copies? #f]
+calls @racket[gpt-block] once per block, so each block draws its own
+initial values, as GPT-2's do; by default the stack would start every
+block as a copy of the first, as PyTorch's @tt{nn.TransformerEncoder}
+does. The forward applies the stack with @racket[#:causal? #t], which
+every block hands to its attention: each position may attend only to
+itself and the positions before it, the mask that makes this a language
+model rather than an oracle.
+
+The parameter paths are PyTorch's (@secref["attention-transformer-pytorch"]):
+@tt{transformer.layers.0.norm1.weight} is the first block's attention
+layer norm, @tt{transformer.layers.0.self-attn.query.weight} its query
+projection, @tt{transformer.layers.0.linear1.weight} its MLP's first layer,
+and @tt{transformer.norm.weight} the final norm. Those paths are new: the
+hand-written blocks this chapter used before named the same pieces
+@tt{blocks.0.attention.norm.weight}, @tt{blocks.0.attention.branch.wq.weight}
+and @tt{blocks.0.mlp.branch.fc1.weight}, and drew different initial values
+(@racket[MultiheadAttention] starts its query, key and value from one
+xavier draw with zero biases). A checkpoint saved before the change does
+not load into this model: @racket[load-state!] refuses it, naming the
+missing and unexpected keys. Retrain with @filepath{scripts/train-gpt.rkt}.
+
+@racket[block-size] only sizes the position table --- cropping inputs to
+fit is the caller's job. The forward scopes the position
+@racket[arange] to the @emph{input's} device, so a CUDA-trained net can be
+applied directly, outside any @racket[with-default-device] extent, exactly
+like the Python twin's @tt{device=idx.device}; the causal flag is not a
+tensor and needs no placing. The keyword defaults are the fixture-scale
+configuration that @racket[run-example] and the parity twin train;
+@racket[train-novel] passes something bigger.
 
 @chunk[<r06-model>
-(define-layer gpt (tok-emb pos-emb blocks ln-f head)
+(define-layer gpt (tok-emb pos-emb transformer head)
   #:init (vocab-size block-size
           #:n-embd [n-embd 32]
           #:n-head [n-head 4]
           #:n-layer [n-layer 2])
   (set! tok-emb (Embedding vocab-size n-embd))
   (set! pos-emb (Embedding block-size n-embd))
-  (set! blocks (Sequential (for/list ([_ (in-range n-layer)])
-                             (gpt-block n-embd n-head))))
-  (set! ln-f (LayerNorm n-embd))
+  (set! transformer
+        (TransformerEncoder (lambda () (gpt-block n-embd n-head))
+                            #:layers n-layer
+                            #:norm (LayerNorm n-embd)
+                            #:copies? #f))
   (set! head (Linear n-embd vocab-size))
   #:forward (idx)
   (with-default-device (tensor-device idx)
     (define seq-len (cadr (tensor-shape idx)))
     (define pos (to-dtype (arange seq-len) 'int64))
     (~> (+ (tok-emb idx) (pos-emb pos))
-        blocks ln-f head)))]
+        (transformer #:causal? #t)
+        head)))]
 
 @bold{The device.} As in the MNIST capstone: pick the accelerator when one is
 present, and let @racket[with-default-device] scope it so parameters and
@@ -172,10 +154,13 @@ entry the test harness and the PyTorch parity twin both drive: the committed
 fixture-scale @racket[gpt] trains for @racket[steps] full-batch @racket[adam]
 steps. The next-char loss is @racket[cross-entropy] with the @tt{[B, T, V]}
 logits and @tt{[B, T]} targets flattened to one @tt{[B*T]}-row classification
-problem. Full-batch, no shuffling: with a shared seed the @racket[Embedding]
-and @racket[Linear] inits draw value-for-value like their @tt{nn.*}
-counterparts (declaration order is RNG-draw order on both sides), and the
-updates track @tt{torch.optim.Adam} within float tolerance.
+problem. Full-batch, no shuffling: with a shared seed the
+@racket[Embedding], @racket[TransformerEncoderLayer] and @racket[Linear]
+inits draw value-for-value like their @tt{nn.*} counterparts (declaration
+order is RNG-draw order on both sides, and the twin builds its blocks from
+@tt{nn.TransformerEncoderLayer} with the same settings, one per block in an
+@tt{nn.ModuleList}), and the updates track @tt{torch.optim.Adam} within
+float tolerance.
 
 @chunk[<r06-run>
 (define fixture-block-size 16)
@@ -213,8 +198,10 @@ tail-drop semantics as @racket[train-novel] and the train script
 most of it with the previous window every epoch, a worse bias than
 skipping under half a percent of the data). The per-epoch mean loss prints
 so the run is watchable; the model is scaled down to match the data
-(64-dim, 2 blocks, 32-char context). On a GPU the default 60 epochs finish in well
-under a minute; on CPU it's a few minutes.
+(64-dim, 2 blocks, 32-char context). The default 60 epochs take under
+twenty seconds on an RTX 3090 Ti and about as long on an eight-core CPU:
+the model is too small to keep a GPU busy. The mean loss falls from
+about 2.3 at the tenth epoch to about 0.8 at the sixtieth.
 
 @chunk[<r06-train-excerpt>
 (define-runtime-path excerpt-path "../data/heart-of-darkness-part-i.txt")
@@ -259,9 +246,10 @@ under a minute; on CPU it's a few minutes.
 (cached under @envvar{RKTORCH_TEXT_DIR} or the system cache dir; the Project
 Gutenberg boilerplate is stripped by the loader), carves it into ~3300
 64-char blocks, and trains a 4-layer model on deterministic contiguous
-minibatches --- the batch window just cycles through the text, since a
-shuffling loader would need @tt{randperm}, which isn't on the surface yet.
-On the CPU this is a coffee-length run; on a GPU it's minutes.
+minibatches --- the batch window cycles through the text in order, the
+same sweep as the training script's epochs. The default 2000 steps take
+about 40 seconds on an RTX 3090 Ti and three and a half minutes on an
+eight-core CPU, the loss falling from 4.4 to about 1.4.
 
 @chunk[<r06-train-novel>
 (define (train-novel #:steps [steps 2000] #:batch [batch 64]
@@ -354,9 +342,6 @@ on any character outside it).
 @chunk[<*>
   <r06-require>
   <r06-provide>
-  <r06-attention>
-  <r06-mlp>
-  <r06-residual>
   <r06-block>
   <r06-model>
   <r06-device>
