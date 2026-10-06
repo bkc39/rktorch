@@ -31,23 +31,46 @@
               (format "non-finite loss: ~a" losses))
   (check-true (< (last losses) (first losses))
               (format "losses did not decrease: ~a" losses))
+  ;; conv1, conv2 and four dilated convolutions, each weight+bias; 6 encoder
+  ;; layers x (4 attention projections, 2 feed-forward Linears and 2
+  ;; LayerNorms, every one weight+bias) and the stack's norm; the CTC head;
+  ;; the token table; 6 decoder layers x (8 projections, 2 Linears and 3
+  ;; LayerNorms) and the stack's norm; the head: 273 tensors.
   (define names (map car (named-parameters net)))
   (check-equal? (length names) 273)
   (check-equal? (first names) "conv1.weight")
   (check-equal? (last names) "head.bias")
   (check-not-false (member "dilations.3.bias" names))
-  (check-not-false (member "encoders.5.attention.wq.weight" names))
-  (check-not-false (member "encoders.0.mlp.fc1.weight" names))
+  (check-not-false (member "encoder.layers.5.self-attn.query.weight" names))
+  (check-not-false (member "encoder.layers.0.linear1.weight" names))
+  (check-not-false (member "encoder.norm.weight" names))
   (check-not-false (member "tok-emb.weight" names))
-  (check-not-false (member "decoders.5.cross.wo.bias" names))
-  (check-not-false (member "decoders.0.attention.wk.bias" names))
-  ;; the flat names from before the stacks were factored are gone
-  (check-false (member "dil4.bias" names))
-  (check-false (member "enc6.wq.weight" names))
+  (check-not-false
+   (member "decoder.layers.5.multihead-attn.out.bias" names))
+  (check-not-false (member "decoder.layers.0.self-attn.key.bias" names))
+  (check-not-false (member "decoder.layers.0.norm3.weight" names))
+  (check-not-false (member "decoder.norm.bias" names))
+  ;; the hand-written blocks' names are gone
+  (check-false (member "encoders.5.attention.wq.weight" names))
+  (check-false (member "decoders.5.cross.wo.bias" names))
+  (check-false (member "ln-enc.weight" names))
+  (define v-size (vector-length vocab))
+  (check-equal? (for/sum ([p (in-list (parameters net))]) (numel p))
+                (+ (* 194 v-size) 778114))
   (check-equal? (tensor-shape (car (parameters net))) '(64 80 3))
   (check-equal? (tensor-shape
                  (cdr (assoc "tok-emb.weight" (named-parameters net))))
-                (list (+ (vector-length vocab) 2) 64))
+                (list (+ v-size 2) 64))
+  ;; #:copies? #f: each block draws its own initial values
+  (let ()
+    (manual-seed! 0)
+    (define fresh (named-parameters (asr 80 v-size)))
+    (define (query-weights stack layer)
+      (tensor->list
+       (cdr (assoc (format "~a.layers.~a.self-attn.query.weight" stack layer)
+                   fresh))))
+    (check-not-equal? (query-weights "encoder" 0) (query-weights "encoder" 1))
+    (check-not-equal? (query-weights "decoder" 0) (query-weights "decoder" 1)))
   (define-values (samples rate transcript) (load-librispeech-fixture))
   (define features (utterance-features samples rate))
   (define ctc-hyp (greedy-decode net vocab features))
@@ -89,6 +112,22 @@
           [i (in-naturals)])
       (check-= a b 1e-4
                (format "padding perturbed encoder output ~a" i))))
+  ;; causal: changing the last decoder input leaves the earlier positions'
+  ;; logits where they were
+  (let ()
+    (define (logits-of ids)
+      (with-no-grad
+        (define-values (_ctc logits)
+          (net features (unsqueeze (to-dtype (tensor ids) 'int64) 0) #f))
+        logits))
+    (define sos (add1 v-size))
+    (define (prefix t) (narrow t 1 0 3))
+    (check-true (< (item (max (abs (- (prefix (logits-of (list sos 1 2 3)))
+                                      (prefix (logits-of (list sos 1 2 4)))))))
+                   1e-6))
+    (check-true (> (item (max (abs (- (logits-of (list sos 1 2 3))
+                                      (logits-of (list sos 1 2 4))))))
+                   1e-4)))
   (check-true (<= (string-length att-hyp) 500)
               (format "transcribe failed to terminate: ~v" att-hyp))
   (check-true (device? (pick-device)))

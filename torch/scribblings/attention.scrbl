@@ -722,8 +722,9 @@ as it is, and over a sequence-first @tt{[L, N, width]} one once
 and PyTorch's tutorial's, puts @tt{sin} in the even columns and @tt{cos} in
 the odd ones. @racket['halves] puts every @tt{sin} first and every
 @tt{cos} after, the layout tensor2tensor and the DDPM time embedding use;
-it reproduces the speech example's positions (@secref["ex-asr"]) and the
-diffusion UNet's @racket[sinusoidal-embedding] value for value. The two
+the speech example's frames and characters take their positions this way
+(@secref["ex-asr"]), and the diffusion UNet's
+@racket[sinusoidal-embedding] is this layout over its timesteps. The two
 layouts hold the same numbers in another order, so a model trained with one
 needs that one.
 

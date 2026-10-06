@@ -1,6 +1,19 @@
 """Parity twin of examples/racket/07-asr.rkt: same seed, same hybrid
 CTC/attention encoder-decoder in the same declaration order, 5 Adam steps
-on the committed MISTER QUILTER fixture."""
+on the committed MISTER QUILTER fixture.
+
+The blocks are nn.TransformerEncoderLayer and nn.TransformerDecoderLayer,
+pre-norm with an exact-gelu feed-forward four times the width and no
+dropout, one per block in an nn.ModuleList so each draws its own initial
+values, as the Racket stacks' #:copies? #f does. Each stack's final
+LayerNorm follows its blocks. PyTorch's tgt_is_causal is only a hint that
+the mask beside it is the causal mask, so the forward passes both; the
+Racket #:tgt-causal? builds the mask itself.
+
+The parameters are reported in the Racket model's order: each attention's
+fused in_proj_weight and in_proj_bias split by rows into query, key and
+value, each projection's weight followed by its bias.
+"""
 
 import json
 import math
@@ -19,6 +32,7 @@ DEVICE = os.environ.get("RKTORCH_PARITY_DEVICE") or "cpu"
 N_MELS = 80
 N_EMBD = 64
 N_HEAD = 4
+N_LAYER = 6
 CTC_WEIGHT = 0.3
 
 
@@ -37,7 +51,7 @@ def log_mel(x, rate):
 
 
 def sinusoidal_positions(t_len, n_embd):
-    """The racket side's sin-half | cos-half layout, not interleaved."""
+    """sinusoidal-positions #:layout 'halves: sines, then cosines."""
     half = n_embd // 2
     positions = torch.arange(t_len, dtype=torch.float32).unsqueeze(1)
     freqs = torch.exp(torch.arange(half, dtype=torch.float32)
@@ -46,94 +60,9 @@ def sinusoidal_positions(t_len, n_embd):
     return torch.cat([torch.sin(angles), torch.cos(angles)], dim=1)
 
 
-class SelfAttention(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.wq = nn.Linear(N_EMBD, N_EMBD)
-        self.wk = nn.Linear(N_EMBD, N_EMBD)
-        self.wv = nn.Linear(N_EMBD, N_EMBD)
-        self.wo = nn.Linear(N_EMBD, N_EMBD)
-
-    def forward(self, x, mask=None):
-        b, t, _ = x.shape
-        hd = N_EMBD // N_HEAD
-
-        def split(m):
-            return m.reshape(b, t, N_HEAD, hd).transpose(1, 2)
-
-        q, k, v = split(self.wq(x)), split(self.wk(x)), split(self.wv(x))
-        scores = q @ k.transpose(2, 3) / math.sqrt(hd)
-        if mask is not None:
-            scores = scores.masked_fill(mask, -torch.inf)
-        att = torch.softmax(scores, dim=-1)
-        return self.wo((att @ v).transpose(1, 2).reshape(b, t, N_EMBD))
-
-
-class CrossAttention(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.wq = nn.Linear(N_EMBD, N_EMBD)
-        self.wk = nn.Linear(N_EMBD, N_EMBD)
-        self.wv = nn.Linear(N_EMBD, N_EMBD)
-        self.wo = nn.Linear(N_EMBD, N_EMBD)
-
-    def forward(self, x, memory, mask=None):
-        b, s, _ = x.shape
-        m = memory.shape[1]
-        hd = N_EMBD // N_HEAD
-
-        def split(t, length):
-            return t.reshape(b, length, N_HEAD, hd).transpose(1, 2)
-
-        q = split(self.wq(x), s)
-        k = split(self.wk(memory), m)
-        v = split(self.wv(memory), m)
-        scores = q @ k.transpose(2, 3) / math.sqrt(hd)
-        if mask is not None:
-            scores = scores.masked_fill(mask, -torch.inf)
-        att = torch.softmax(scores, dim=-1)
-        return self.wo((att @ v).transpose(1, 2).reshape(b, s, N_EMBD))
-
-
-class FeedForward(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.fc1 = nn.Linear(N_EMBD, 4 * N_EMBD)
-        self.fc2 = nn.Linear(4 * N_EMBD, N_EMBD)
-
-    def forward(self, x):
-        return self.fc2(nn.functional.gelu(self.fc1(x)))
-
-
-class EncoderBlock(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.ln1 = nn.LayerNorm(N_EMBD)
-        self.attention = SelfAttention()
-        self.ln2 = nn.LayerNorm(N_EMBD)
-        self.mlp = FeedForward()
-
-    def forward(self, x, mask=None):
-        x1 = x + self.attention(self.ln1(x), mask)
-        return x1 + self.mlp(self.ln2(x1))
-
-
-class DecoderBlock(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.ln1 = nn.LayerNorm(N_EMBD)
-        self.attention = SelfAttention()
-        self.ln2 = nn.LayerNorm(N_EMBD)
-        self.cross = CrossAttention()
-        self.ln3 = nn.LayerNorm(N_EMBD)
-        self.mlp = FeedForward()
-
-    def forward(self, x, memory, mem_mask=None):
-        s = x.shape[1]
-        causal = torch.tril(torch.ones(s, s, device=x.device)) == 0
-        x1 = x + self.attention(self.ln1(x), causal)
-        x2 = x1 + self.cross(self.ln2(x1), memory, mem_mask)
-        return x2 + self.mlp(self.ln3(x2))
+def block_settings():
+    return dict(dim_feedforward=4 * N_EMBD, dropout=0.0, activation="gelu",
+                norm_first=True, batch_first=True)
 
 
 class ASR(nn.Module):
@@ -144,12 +73,16 @@ class ASR(nn.Module):
         self.dils = nn.ModuleList([
             nn.Conv1d(N_EMBD, N_EMBD, 3, dilation=d, padding=d)
             for d in (1, 2, 4, 8)])
-        self.encs = nn.ModuleList([EncoderBlock() for _ in range(6)])
-        self.ln_enc = nn.LayerNorm(N_EMBD)
+        self.encoder = nn.ModuleList(
+            nn.TransformerEncoderLayer(N_EMBD, N_HEAD, **block_settings())
+            for _ in range(N_LAYER))
+        self.encoder_norm = nn.LayerNorm(N_EMBD)
         self.ctc_head = nn.Linear(N_EMBD, vocab_size + 1)
         self.tok_emb = nn.Embedding(vocab_size + 2, N_EMBD)
-        self.decs = nn.ModuleList([DecoderBlock() for _ in range(6)])
-        self.ln_dec = nn.LayerNorm(N_EMBD)
+        self.decoder = nn.ModuleList(
+            nn.TransformerDecoderLayer(N_EMBD, N_HEAD, **block_settings())
+            for _ in range(N_LAYER))
+        self.decoder_norm = nn.LayerNorm(N_EMBD)
         self.head = nn.Linear(N_EMBD, vocab_size + 1)
 
     def forward(self, x, dec_in, lengths=None):
@@ -175,25 +108,38 @@ class ASR(nn.Module):
         c = clip(torch.relu(self.conv2(c)), l2, t2)
         for dil in self.dils:
             c = clip(c + torch.relu(dil(c)), l2, t2)
-        enc_mask = None
+        padding = None
         if l2:
             idx = torch.arange(t2, device=x.device).unsqueeze(0)
-            enc_mask = (idx >= torch.tensor(l2, device=x.device,
-                                            dtype=torch.float32).unsqueeze(1)
-                        ).reshape(len(l2), 1, 1, t2)
-        t = c.shape[2]
-        pos = sinusoidal_positions(t, N_EMBD).to(x.device)
-        e = c.transpose(1, 2) + pos
-        for enc in self.encs:
-            e = enc(e, enc_mask)
-        memory = self.ln_enc(e)
+            padding = idx >= torch.tensor(l2, device=x.device,
+                                          dtype=torch.float32).unsqueeze(1)
+        e = c.transpose(1, 2) + sinusoidal_positions(
+            c.shape[2], N_EMBD).to(x.device)
+        for layer in self.encoder:
+            e = layer(e, src_key_padding_mask=padding)
+        memory = self.encoder_norm(e)
         ctc_log_probs = torch.log_softmax(self.ctc_head(memory), dim=2)
         s = dec_in.shape[1]
-        dpos = sinusoidal_positions(s, N_EMBD).to(x.device)
-        d = self.tok_emb(dec_in) + dpos
-        for dec in self.decs:
-            d = dec(d, memory, enc_mask)
-        return ctc_log_probs, self.head(self.ln_dec(d))
+        causal = nn.Transformer.generate_square_subsequent_mask(
+            s, device=x.device)
+        d = self.tok_emb(dec_in) + sinusoidal_positions(
+            s, N_EMBD).to(x.device)
+        for layer in self.decoder:
+            d = layer(d, memory, tgt_mask=causal, tgt_is_causal=True,
+                      memory_key_padding_mask=padding)
+        return ctc_log_probs, self.head(self.decoder_norm(d))
+
+
+def racket_order(net):
+    for name, p in net.named_parameters():
+        if name.endswith("in_proj_weight"):
+            attention = net.get_submodule(name.rsplit(".", 1)[0])
+            for weight, bias in zip(attention.in_proj_weight.chunk(3),
+                                    attention.in_proj_bias.chunk(3)):
+                yield weight
+                yield bias
+        elif not name.endswith("in_proj_bias"):
+            yield p
 
 
 waveform, rate = torchaudio.load(FIXTURE)
@@ -236,7 +182,7 @@ for _ in range(5):
     opt.step()
     losses.append(loss.item())
 
-params = torch.cat([p.detach().flatten() for p in net.parameters()])
+params = torch.cat([p.detach().flatten() for p in racket_order(net)])
 
 print(json.dumps({
     "shape": list(params.shape),

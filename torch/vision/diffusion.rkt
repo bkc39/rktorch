@@ -3,16 +3,17 @@
 (require (only-in racket/contract/base
                   -> ->* ->i </c >=/c and/c any/c between/c contract-out
                   flat-named-contract listof or/c unsupplied-arg?)
+         (only-in racket/match match-define)
          (only-in racket/math infinite? nan? pi)
          (only-in threading ~>)
          (only-in "../foreign.rkt"
-                  add arange cat cos dtype exp index-select length log matmul
-                  mul reshape shape silu sin softmax sqrt sub tensor
-                  tensor-device tensor? to-dtype transpose unsqueeze
-                  upsample-nearest2d)
+                  add cat dtype index-select length mul reshape
+                  scaled-dot-product-attention shape silu sqrt sub tensor
+                  tensor? to-dtype transpose upsample-nearest2d)
          (only-in "../nn.rkt"
                   Conv2d Dropout Embedding GroupNorm LayerList Linear
-                  define-layer in-layers named-children parameters)
+                  define-layer in-layers named-children parameters
+                  sinusoidal-positions)
          (only-in "../private/contract.rkt" define/contract-out))
 
 (struct schedule (steps betas alphas alpha-bars) ;; noqa
@@ -90,12 +91,7 @@
 
 (define/contract-out (sinusoidal-embedding t dim) ;; noqa
   (-> timesteps/c even-dim/c tensor?)
-  (define half (quotient dim 2))
-  (define freqs
-    (exp (mul (arange half #:device (tensor-device t))
-              (- (/ (log 10000.0) half)))))
-  (define angles (mul (unsqueeze (to-dtype t 'float32) 1) (unsqueeze freqs 0)))
-  (cat (list (sin angles) (cos angles)) 1))
+  (sinusoidal-positions t dim #:layout 'halves))
 
 (define-layer TimeEmbedding (dim fc1 fc2) ;; noqa
   #:contract (-> even-dim/c time-embedding?)
@@ -157,14 +153,11 @@
   (set! v (Linear channels channels))
   (set! proj (Linear channels channels))
   #:forward (x)
-  (define dims (shape x))
-  (define n (car dims))
-  (define c (cadr dims))
-  (define tokens (transpose (reshape (norm x) n c (* (caddr dims) (cadddr dims))) 1 2))
-  (define scores (mul (matmul (q tokens) (transpose (k tokens) 1 2))
-                      (/ 1.0 (sqrt c))))
-  (define mixed (proj (matmul (softmax scores -1) (v tokens))))
-  (add x (reshape (transpose mixed 1 2) n c (caddr dims) (cadddr dims))))
+  (match-define (list n c h w) (shape x))
+  (define tokens (~> (norm x) (reshape n 1 c (* h w)) (transpose 2 3)))
+  (define mixed
+    (scaled-dot-product-attention (q tokens) (k tokens) (v tokens)))
+  (add x (~> (proj mixed) (transpose 2 3) (reshape n c h w))))
 
 (define-layer Downsample (conv) ;; noqa
   #:contract (-> channels/c downsample?)
