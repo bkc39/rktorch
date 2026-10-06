@@ -41,13 +41,8 @@ introduction, from a first tensor through to a training loop; the
 Every example in this manual is evaluated when it is built, so the printed
 results are the ones the library produces.
 
-@bold{License.} rktorch's code is under the Apache License 2.0. The data
-fixtures it ships keep their sources' licenses, recorded in the
-@filepath{NOTICE} beside each: the LibriSpeech utterance is CC BY 4.0 and
-the Tatoeba sentence pairs CC BY 2.0 FR, so the package as a whole is
-@tt{Apache-2.0 AND CC-BY-4.0 AND CC-BY-2.0-FR}. The photographs and the
-@italic{Heart of Darkness} excerpt are in the public domain. libtorch
-itself is under PyTorch's BSD-3-Clause license.
+@bold{License.} Apache 2.0. Some data fixtures carry other licenses; see
+the @filepath{NOTICE} file beside each.
 
 @bold{Acknowledgements.} Many thanks to
 @hyperlink["https://pytorch.org/"]{PyTorch} and its developers, and to
