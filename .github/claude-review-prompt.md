@@ -13,7 +13,7 @@ push changes the code it concerns. If you still disagree with
 a reply, say why in your summary comment, not in a new inline
 thread.
 
-This repository is torchrkt: Racket bindings to libtorch via a
+This repository is rktorch: Racket bindings to libtorch via a
 hand-written extern "C" shim. Review against
 .review-context/review-rules.md, the Code Review Rules from
 master's AGENTS.md: they say what to leave to other layers of a
