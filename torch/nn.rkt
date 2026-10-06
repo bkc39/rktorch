@@ -135,8 +135,10 @@
          TransformerDecoderLayer
          transformer-decoder-layer?
          TransformerEncoder
+         GenericTransformerEncoder
          transformer-encoder?
          TransformerDecoder
+         GenericTransformerDecoder
          transformer-decoder?)
 
 (provide causal-mask

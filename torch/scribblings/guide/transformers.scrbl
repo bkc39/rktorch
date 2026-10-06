@@ -280,20 +280,16 @@ masks as its attention, in the same sense, @racket[#t] hiding a key:
 @racket[(block tokens #:key-padding-mask padding #:causal? #t)].
 
 A model is several blocks in a row. @racket[TransformerEncoder] builds the
-row from a procedure that makes one block, and can end it with a norm,
-which a stack of pre-norm blocks needs, since none of them normalizes its
-output:
+row in one call: it takes the block's arguments, the number of blocks,
+and whether to end with a norm, which a stack of pre-norm blocks needs,
+since none of them normalizes its output:
 
 @torch-examples[
 (manual-seed! 0)
 (define encoder
-  (TransformerEncoder (lambda ()
-                        (TransformerEncoderLayer 4 #:heads 2 #:ffn-width 8
-                                                 #:dropout 0.0
-                                                 #:batch-first? #t
-                                                 #:norm-first? #t))
-                      #:layers 2
-                      #:norm (LayerNorm 4)))
+  (TransformerEncoder 4 #:heads 2 #:ffn-width 8 #:dropout 0.0
+                      #:batch-first? #t #:norm-first? #t
+                      #:layers 2 #:norm? #t))
 (map car (named-children encoder))
 (length (named-parameters encoder))
 (car (map car (named-parameters encoder)))
@@ -305,7 +301,10 @@ The names are the ones a PyTorch checkpoint of the same stack uses, with
 split into @racket["query"], @racket["key"] and @racket["value"]; the
 whole mapping is in @secref["attention-transformer-pytorch"]. Like
 PyTorch's, the stack starts every block from the same values, copies of
-the first; @racket[#:copies? #f] draws each block afresh, as GPT-2 does.
+the first, and training moves them apart. A stack of some other block, a
+different final norm, or blocks drawn independently, as GPT-2 draws its
+own, takes the general form, @racket[GenericTransformerEncoder], which
+builds the row from a procedure that makes one block.
 
 Nothing so far knows where a token sits. Attention compares contents, so
 shuffling the tokens only shuffles the answers:
@@ -346,14 +345,12 @@ padded after three, and targets of four:
 @torch-examples[
 (manual-seed! 0)
 (define embed (Embedding 10 8))
-(define (layer-of constructor)
-  (lambda ()
-    (constructor 8 #:heads 2 #:ffn-width 16 #:dropout 0.0
-                 #:batch-first? #t)))
 (define source-encoder
-  (TransformerEncoder (layer-of TransformerEncoderLayer) #:layers 2))
+  (TransformerEncoder 8 #:heads 2 #:ffn-width 16 #:dropout 0.0
+                      #:batch-first? #t #:layers 2))
 (define target-decoder
-  (TransformerDecoder (layer-of TransformerDecoderLayer) #:layers 2))
+  (TransformerDecoder 8 #:heads 2 #:ffn-width 16 #:dropout 0.0
+                      #:batch-first? #t #:layers 2))
 (define to-vocabulary (Linear 8 10))
 (define source (tensor '((1 4 6 2 3) (5 7 2 0 0))))
 (define source-padding (eq source 0))

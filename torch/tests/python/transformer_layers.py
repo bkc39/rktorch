@@ -6,6 +6,11 @@ drawn as the Racket layer draws its own with nothing copied across, moves it
 to RKTORCH_PARITY_DEVICE, then draws its inputs, its float masks and the
 loss weights in the Racket test's order.
 
+The Racket TransformerEncoder and TransformerDecoder are
+nn.TransformerEncoder(nn.TransformerEncoderLayer(...), n, norm=...) and its
+decoder twin; the generic stacks with #:copies? #f are Stack, a ModuleList
+of layers each drawn in turn.
+
 Every parameter and gradient is reported under the Racket names: the fused
 in_proj_weight and in_proj_bias of each attention split by rows into query,
 key and value, out_proj as out, and self_attn and multihead_attn spelled
@@ -95,6 +100,27 @@ def layer_options(o):
                 layer_norm_eps=o.get("eps", 1e-5))
 
 
+class Stack(nn.Module):
+    """Independently drawn layers, the twin of #:copies? #f."""
+
+    def __init__(self, layers, norm):
+        super().__init__()
+        self.layers = nn.ModuleList(layers)
+        self.norm = norm
+
+    def forward(self, x, *args, **kwargs):
+        for layer in self.layers:
+            x = layer(x, *args, **kwargs)
+        return x if self.norm is None else self.norm(x)
+
+
+def final_norm(width, norm, o):
+    if not norm:
+        return None
+    return nn.LayerNorm(width, eps=o.get("eps", 1e-5),
+                        bias=o.get("bias", True))
+
+
 def report(m, out, leaves):
     loss = (out * torch.randn(*out.shape).to(device)).sum()
     loss.backward()
@@ -108,12 +134,19 @@ def report(m, out, leaves):
 
 def encoder(width=8, heads=2, length=5, batch=3, layers=None, norm=False,
             unbatched=False, kpm=None, mask=None, causal=False, train=True,
-            **o):
+            independent=False, **o):
     torch.manual_seed(0)
-    layer = nn.TransformerEncoderLayer(width, heads, **layer_options(o))
-    if layers:
+
+    def make():
+        return nn.TransformerEncoderLayer(width, heads, **layer_options(o))
+
+    layer = make()
+    if independent:
+        m = Stack([layer] + [make() for _ in range(layers - 1)],
+                  final_norm(width, norm, o))
+    elif layers:
         m = nn.TransformerEncoder(layer, layers,
-                                  norm=nn.LayerNorm(width) if norm else None,
+                                  norm=final_norm(width, norm, o),
                                   enable_nested_tensor=False)
     else:
         m = layer
@@ -128,7 +161,7 @@ def encoder(width=8, heads=2, length=5, batch=3, layers=None, norm=False,
     if causal:
         mask = nn.Transformer.generate_square_subsequent_mask(length)
     keywords = dict(src_key_padding_mask=on_device(kpm), is_causal=causal)
-    if layers:
+    if layers and not independent:
         out = m(src, mask=on_device(mask), **keywords)
     else:
         out = m(src, src_mask=on_device(mask), **keywords)
@@ -138,12 +171,19 @@ def encoder(width=8, heads=2, length=5, batch=3, layers=None, norm=False,
 def decoder(width=8, heads=2, length=4, source=5, batch=2, layers=None,
             norm=False, tgt_kpm=None, memory_kpm=None, tgt_mask=None,
             memory_mask=None, tgt_causal=False, memory_causal=False,
-            train=True, **o):
+            train=True, independent=False, **o):
     torch.manual_seed(0)
-    layer = nn.TransformerDecoderLayer(width, heads, **layer_options(o))
-    if layers:
+
+    def make():
+        return nn.TransformerDecoderLayer(width, heads, **layer_options(o))
+
+    layer = make()
+    if independent:
+        m = Stack([layer] + [make() for _ in range(layers - 1)],
+                  final_norm(width, norm, o))
+    elif layers:
         m = nn.TransformerDecoder(layer, layers,
-                                  norm=nn.LayerNorm(width) if norm else None)
+                                  norm=final_norm(width, norm, o))
     else:
         m = layer
     params = by_name(m, lambda p: p)
@@ -226,6 +266,15 @@ print(json.dumps({
                              memory_kpm=lambda: padding(2, 5, 2)),
     "decoder_stack_pre": decoder(layers=3, norm_first=True, norm=True,
                                  batch_first=True, activation="gelu",
-                                 tgt_causal=True),
+                                 tgt_causal=True, bias=False, eps=1e-6),
+    "generic_encoder_independent": encoder(layers=2, norm=True,
+                                           independent=True,
+                                           kpm=lambda: padding(3, 5, 2)),
+    "generic_decoder_independent": decoder(layers=2, independent=True,
+                                           norm_first=True,
+                                           activation=gelu_tanh,
+                                           batch_first=True, tgt_causal=True,
+                                           memory_kpm=lambda: padding(2, 5,
+                                                                      1)),
     "fast_path": fast_path(),
 }))
