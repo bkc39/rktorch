@@ -370,9 +370,9 @@ freeing anything the step can do without. On MPS the reading alone cannot
 show this, because emptying the cache brings the driver's figure down
 however little the collection freed, and the next step takes those bytes
 straight back. So a release counts as reclaiming memory only once the
-figure has stayed under the mark for a further mark's worth of allocation,
-and one whose bytes come back sooner doubles the spacing as a fruitless
-collection does. That spaces such collections out, but they still buy
+figure has stayed under the mark for a further mark's worth of allocation
+and for the five seconds before the next release, and one whose bytes come
+back sooner doubles the spacing as a fruitless collection does. That spaces such collections out, but they still buy
 nothing: a mark that @racket['pressure-collections] in
 @racket[finalizer-diagnostics] shows firing step after step is better
 raised.

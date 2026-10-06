@@ -7,8 +7,9 @@
                     reclaim-native-memory! zeros)
            (only-in (submod "../foreign.rkt" unsafe) tensor-free!)
            (only-in "../foreign/raw/pressure.rkt"
-                    backstop-interval install-device-queries!
-                    native-memory-limit release-spacing reset-pressure-state!))
+                    backstop-interval collect-at-trough! install-device-queries!
+                    native-collect-margin native-memory-limit release-spacing
+                    reset-pressure-state!))
 
   (define mib (* 1024 1024))
   (define block (* 4 mib))
@@ -53,11 +54,19 @@
 
   ;; in 4 MiB tensors, each freed at once, so the ledger never moves the
   ;; reading off the stand-in's
-  (define (allocate! share-of-mark)
+  (define (allocate! share-of-mark #:spacing [spacing 0])
     (parameterize ([native-memory-limit mark]
-                   [release-spacing 0])
+                   [release-spacing spacing])
       (for ([_ (in-range (ceiling (/ (* share-of-mark mark) block)))])
         (tensor-free! (zeros 1024 1024)))))
+
+  ;; a step's end that reads the allocator but has nothing to collect
+  (define (trough!)
+    (parameterize ([native-memory-limit mark]
+                   [native-collect-margin (* 1024 1024 mib)])
+      (collect-at-trough!)))
+
+  (define a-minute 60000.0)
 
   (test-case "a release whose bytes come back backs the backstop off"
     (settle!)
@@ -106,4 +115,47 @@
     (check-equal? (- (collections) before) 2
                   "the backstop fired again though the cache stayed empty")
     (check-equal? (interval) (quotient mark 8) "a release that held moved the interval")
+    (settle!))
+
+  ;; the cache comes back after the trial's mark of allocation, but while the
+  ;; spacing still holds the next release back
+  (test-case "a release stays on trial until its spacing has passed"
+    (settle!)
+    (install-stand-in! #:empties? #t)
+    (set! cache (* 768 mib))
+    (set! comes-back 0)
+    (allocate! 1/4 #:spacing a-minute)
+    (allocate! 2 #:spacing a-minute)
+    (check-equal? (interval) (quotient mark 8))
+    (set! cache (* 768 mib))
+    (define before (collections))
+    (allocate! 2 #:spacing a-minute)
+    (define fired (- (collections) before))
+    (check-equal? (interval) (* 2 mark)
+                  "a firing inside the spacing must back off, not stay at the base")
+    (check-true (<= 1 fired 6)
+                (format "~a backstop collections over 2 marks inside the spacing"
+                        fired))
+    (settle!))
+
+  ;; fruitless releases first raise the interval past what is allocated
+  ;; between the troughs below, so the gate never reopens to end the trial
+  (test-case "a trough credits a trial the gate never reopened to see out"
+    (settle!)
+    (install-stand-in! #:empties? #f)
+    (set! cache (* 768 mib))
+    (set! comes-back 0)
+    (allocate! 2)
+    (install-stand-in! #:empties? #t)
+    (allocate! 2)
+    (check-equal? (interval) (* 2 mark) "the release went on trial at the cap")
+    (allocate! 3/2)
+    (set! cache (* 768 mib))
+    (trough!)
+    (check-equal? (interval) (* 2 mark)
+                  "a trough reading over the mark must not credit the release")
+    (set! cache 0)
+    (trough!)
+    (check-equal? (interval) (quotient mark 8)
+                  "a trough under the mark after the trial must credit it")
     (settle!)))

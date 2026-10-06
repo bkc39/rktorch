@@ -193,7 +193,7 @@ the last defence when a trough collection is not yet due:
   record, the two next-collection times and the thread inside a
   collection a `schedule` record, and the three device queries handed
   down from `raw/device.rkt` (capacity, allocated, release) a `queries`
-  record. Every field is written inside `call-with-ledger`.
+  record in `raw/device-queries.rkt`. Every field is written inside `call-with-ledger`.
 - `accounted`, which runs outside the allocator's atomic wrap, checks
   after each accounting: accounted-since past the current interval and
   live bytes above the device's high-water mark means
@@ -228,15 +228,26 @@ the last defence when a trough collection is not yet due:
   once the next step takes those bytes straight back: 08-diffusion at
   `native-memory-fraction` 1/2 on a 16 GB M2 Pro (#236) fired 188 times in
   782 steps for no gain in time or swap, because each release reset the
-  interval. The trial ends at the first sample that finds the reading
+  interval. The trial ends at the first look that finds the reading
   under the mark after a further mark's worth of allocation, counted from
-  the bytes accounted between samples; that sample credits the release and
-  returns the interval to an eighth of the mark, which until then stays
-  where it was. A backstop collection before the credit means the
-  release's bytes came back, and the interval doubles as it would for a
-  collection that reclaimed little, whatever this one reclaimed and
-  whether or not the spacing held its own release back. A collection that
-  reclaims without a release, as on CUDA, is credited at once as before.
+  the bytes accounted between samples, and after the release's spacing
+  has passed; that look credits the release and returns the interval to
+  an eighth of the mark, which until then stays where it was. A backstop
+  collection before the credit means the release's bytes came back, and
+  the interval doubles as it would for a collection that reclaimed
+  little, whatever this one reclaimed and whether or not the spacing held
+  its own release back. Requiring the spacing as well matters when
+  allocation is fast: 07-asr's longest buckets account a mark in under a
+  second on an M2 Pro, so a trial ended by bytes alone was credited before
+  `driver-allocated` re-crossed the mark, and every backstop for the rest
+  of the five seconds, its release `'spaced`, collected at the base
+  interval: 28 to 40 collections in a few seconds at the end of an epoch
+  (#245). The backstop's samples are one place to look; every trough is
+  the other (`refresh-shadows!` reads the allocator there), because a
+  drained trough collection resets the bytes-since-check count, and an
+  interval backed off past what a step allocates would otherwise never
+  open the gate to end the trial. A collection that reclaims without a
+  release, as on CUDA, is credited at once as before.
 - Every allocator sample may lower the shadow, never raise it. On MPS
   the trough charged the cache, and new tensors that reuse those blocks,
   or a release that empties them, bring `driver-allocated` down relative

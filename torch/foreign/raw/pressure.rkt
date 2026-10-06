@@ -4,6 +4,9 @@
          (only-in "../device-type.rkt" device-type)
          (only-in "collector.rkt"
                   call-as-the-collector collect-and-wait! drain-finalizers!)
+         (only-in "device-queries.rkt"
+                  allocator-reading install-device-queries! queried-capacity
+                  release-query)
          (only-in "pressure-settings.rkt"
                   margin-over native-collect-at-troughs native-collect-budget
                   native-collect-margin native-memory-fraction
@@ -20,13 +23,13 @@
          shadow-refresh
          refresh-shadows!
          lower-shadows!
-         install-device-queries!
          backstop-interval
          collect-under-pressure!
          collect-at-trough!
          pressure-diagnostics
          reset-pressure-state!
          allocator-reading
+         install-device-queries!
          (all-from-out "pressure-settings.rkt"))
 
 ;; Atomic mode, not a semaphore: finalizers run in atomic mode, where
@@ -54,12 +57,10 @@
 ;; when each trough stage may next run
 (struct schedule (next-full-ms next-minor-ms) #:mutable)
 
-(struct queries (capacity allocated release) #:mutable)
 
 (define accounts (make-hash))
 (define the-stats (stats 0 0 0 0))
 (define the-schedule (schedule 0.0 0.0))
-(define the-queries (queries #f #f #f))
 
 (define interval-divisor 8)
 (define sample-divisor 32)
@@ -154,23 +155,6 @@
 
 ;; --- the device's capacity and allocator, from raw/device.rkt ---
 
-;; raw/device.rkt owns the device bindings and requires the ledger, so it
-;; hands these over at instantiation instead of being required from here.
-;; Each takes a device and answers in bytes, or #f where it cannot say;
-;; `release` empties the device's allocator cache and answers whether it had
-;; one to empty.
-(define (install-device-queries! #:capacity capacity
-                                 #:allocated allocated
-                                 #:release [release #f])
-  (set-queries-capacity! the-queries capacity)
-  (set-queries-allocated! the-queries allocated)
-  (set-queries-release! the-queries release))
-
-(define (queried-capacity dev)
-  (define query (queries-capacity the-queries))
-  (define total (and query (query dev)))
-  (and total (positive? total) total))
-
 ;; The capacity is cached once known, and a failed query on a device that
 ;; should have one is retried after a moment, so one early failure cannot
 ;; switch the backstop off for the rest of the process.
@@ -199,14 +183,6 @@
   (or (native-memory-limit)
       (let ([capacity (device-capacity dev)])
         (and capacity (floor (* (native-memory-fraction) capacity))))))
-
-;; The allocator's own allocated bytes: the ledger double-counts views and
-;; cannot see storage only the autograd graph holds. #f when unknown.
-(define allocator-reading
-  (make-parameter
-   (lambda (dev)
-     (define query (queries-allocated the-queries))
-     (and query (query dev)))))
 
 (define (live-of dev)
   (call-with-ledger (lambda () (account-live (account-of dev)))))
@@ -293,7 +269,8 @@
     (when (or reading (not charging?))
       (call-with-ledger
        (lambda () (set-shadow! (account-of dev) (or reading 0))))))
-  (call-with-ledger next-shadow-generation!))
+  (call-with-ledger next-shadow-generation!)
+  (end-trials-at-trough!))
 
 ;; counts refreshes, so a gradient adopted since the last one is known
 (define generation 0)
@@ -324,14 +301,28 @@
 
 ;; A release empties the cache, and below the working set the next steps take
 ;; those bytes straight back. So it earns the reset a collection earns only
-;; when the backstop looks again after another mark's worth of allocation
-;; and finds the reading still under the mark. Until then a reading back over
-;; it means the release's bytes came back, and the interval backs off.
+;; when a look after another mark's worth of allocation, and after its
+;; spacing, finds the reading still under the mark. Until then a reading back
+;; over it means the release's bytes came back, and the interval backs off.
 (define (end-trial! a base)
   (define trial (account-trial a))
-  (when (and trial (<= trial 0))
+  (when (and trial
+             (<= trial (account-since-sample a))
+             (>= (current-inexact-milliseconds) (account-release-after a)))
     (set-account-interval! a base)
     (set-account-trial! a #f)))
+
+;; A trough looks too, since troughs reset the gate's count: an interval
+;; backed off past a step's allocation would otherwise never reopen it.
+(define (end-trials-at-trough!)
+  (for ([dev (in-list (call-with-ledger (lambda () (hash-keys accounts))))]
+        #:when (call-with-ledger (lambda () (account-trial (account-of dev)))))
+    (define mark (device-high-water dev))
+    (define reading ((allocator-reading) dev))
+    (when (and mark reading (<= (max reading (live-of dev)) mark))
+      (call-with-ledger
+       (lambda ()
+         (end-trial! (account-of dev) (quotient mark interval-divisor)))))))
 
 ;; Reclaiming little means the working set itself sits above the mark, so
 ;; the interval to the next collection doubles instead of thrashing. A drain
@@ -378,7 +369,7 @@
 ;; quick, but the blocks the next steps need then come from the driver again.
 ;; Answers 'released, 'spaced when the spacing held it back, or #f.
 (define (release-cache! dev)
-  (define release (queries-release the-queries))
+  (define release (release-query))
   (cond
     [(not release) #f]
     [(< (current-inexact-milliseconds)
