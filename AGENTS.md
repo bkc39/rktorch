@@ -248,7 +248,8 @@ From `torch/nn`: `define-layer procedure->Layer gen:layer layer? Parameter Buffe
 named-parameters in-named-parameters buffers children Linear Conv2d MaxPool2d Flatten Dropout
 Sequential Embedding LayerNorm ConvTranspose2d GroupNorm BatchNorm2d BatchNorm1d
 LSTM GRU MultiheadAttention TransformerEncoderLayer TransformerDecoderLayer
-TransformerEncoder TransformerDecoder sinusoidal-positions causal-mask
+TransformerEncoder TransformerDecoder GenericTransformerEncoder
+GenericTransformerDecoder sinusoidal-positions causal-mask
 sgd adam rmsprop step! zero-grads! clip-grad-norm! learning-rate
 set-learning-rate! step-lr multi-step-lr exponential-lr cosine-annealing-lr
 linear-lr one-cycle-lr lambda-lr ema ema-update! ema-average cross-entropy
@@ -315,13 +316,21 @@ children (`self-attn` `multihead-attn` `linear1` `dropout` `linear2`
 `#:bias?` for it); applied as `(enc src #:mask #:key-padding-mask
 #:causal?)` and `(dec tgt memory #:tgt-mask #:memory-mask
 #:tgt-key-padding-mask #:memory-key-padding-mask #:tgt-causal?
-#:memory-causal?)`, masks in MHA's sense. The stacks `TransformerEncoder`
-and `TransformerDecoder` take a thunk building one layer plus `#:layers n
-#:norm #:copies?`; with copies (the default) the thunk runs once with
+#:memory-causal?)`, masks in MHA's sense. The stacks come in two forms
+building one struct each (predicates `transformer-encoder?` and
+`transformer-decoder?` for both). `GenericTransformerEncoder` /
+`GenericTransformerDecoder` take a thunk building one layer plus `#:layers
+n #:norm #:copies?`; with copies (the default) the thunk runs once with
 draws and `n - 1` more times under `init.rkt`'s `call-without-drawing`
 (the uniform and normal initializers fill zeros instead of drawing), the
-prototype's values then copied in, which is what keeps seeded parity with
-`nn.TransformerEncoder(layer, n)`'s deep copies, stream position included.
+first layer's values then copied in, which keeps seeded parity with
+`nn.TransformerEncoder(layer, n)`'s deep copies, stream position included;
+`#:copies? #f` draws each layer. The standard `TransformerEncoder` /
+`TransformerDecoder` take the layer's arguments (`d-model #:heads` and
+every layer keyword, same defaults) plus `#:layers n` and `#:norm?` (a
+final `LayerNorm` with the stack's eps and bias) and call the generic form
+with copies. The layer and standard-stack constructor contracts come from
+one `transformer/c` macro.
 `sinusoidal-positions` (`#:layout 'interleaved | 'halves`, a length or a
 position tensor) and `causal-mask` (`#t` above the diagonal, or the float
 `-inf` form) live in `nn/positions.rkt`. `clip-grad-norm!` (`nn/clip.rkt`) keeps its scale on the
