@@ -49,7 +49,9 @@ racket scripts/coverage.rkt       # expression coverage, with a floor
 
 The first entry into a shell installs the Racket dependencies into a
 per-checkout `.racket-user` directory and stages `libtorchrkt` under
-`torch/native-libs/`. After changing C++, re-stage the library with
+`torch/native-libs/`. Resyntax, racket-review and `cover` come pinned and
+precompiled from `nix/racket-linters.nix`, which says how to bump them, so
+that step needs no network. After changing C++, re-stage the library with
 `nix run .#copy-native-libs` before running `raco test`.
 
 ## The native library
