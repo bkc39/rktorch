@@ -264,6 +264,8 @@
           pkgsRacket = import nixpkgsRacket { inherit system; };
           racketPkg = racketFor pkgs pkgsRacket;
           racket-deps = racketDepsFor pkgs racketPkg;
+          racket-linters =
+            pkgs.callPackage ./nix/racket-linters.nix { racket = racketPkg; };
 
           cppCommonInputs = [ torch pkgs.gtest pkgs.libsndfile pkgs.stb ];
           cppNativeInputs = [ pkgs.cmake pkgs.clang-tools pkgs.ninja pkgs.pkg-config ];
@@ -491,7 +493,7 @@
         {
           default = racket;
           inherit cpp cpp-format cpp-line-count cpp-tidy racket
-            racket92 racket-deps codegen copy-native-libs;
+            racket92 racket-deps racket-linters codegen copy-native-libs;
         }
         // pkgs.lib.optionalAttrs pkgs.stdenv.isLinux {
           # The CUDA libtorch-bin has no darwin download, so even evaluating
@@ -524,6 +526,7 @@
           racket-deps = racketDepsFor pkgs racketPkg;
           cpp = self.packages.${system}.cpp;
           cpp-cuda = self.packages.${system}.cpp-cuda;
+          racket-linters = self.packages.${system}.racket-linters;
           pkgsCuda = import nixpkgs {
             inherit system;
             config = {
@@ -612,7 +615,7 @@
             # Bump the ordinal whenever the installed package list below
             # changes: the stamp is what makes provisioning a one-time cost,
             # so an already-provisioned checkout would otherwise skip the new
-            # package and only fail later, where it is used. (deps3: cover-lib)
+            # package and only fail later, where it is used.
             deps_stamp="$PLTUSERHOME/.deps3-installed-torch-''${_rkt_ver}"
             # In-tree zo caches compiled piecewise across commits can defeat
             # the compilation manager, so bytecode is keyed to HEAD by a
@@ -647,27 +650,37 @@
               # A shell hook has no errexit, so every step is chained: the
               # stamp is what makes provisioning a one-time cost, and stamping
               # a half-provisioned checkout leaves it broken until someone
-              # deletes the stamp by hand. The dev tools come unpinned from the
-              # live catalog, cover-lib beside the linters; it rides along when
-              # #63 pins them, and it cannot join the racket-deps FOD as things
-              # stand, since a fixed-output derivation may not reference store
-              # paths and the doc packages in that closure embed them.
+              # deletes the stamp by hand.
               if raco pkg install --batch --copy --no-docs --no-setup \
                      --scope user --skip-installed ${racket-deps}/*/ \
                  && raco pkg install --batch --auto --no-setup --link \
                       --scope user --skip-installed --name torch "$PWD/torch" \
-                 && raco setup --no-docs --pkgs torch \
-                 && { echo "Installing Racket dev tools (Resyntax + racket-review + cover)..."
-                      raco pkg install --batch --auto --scope user \
-                        --skip-installed resyntax review cover-lib; }; then
+                 && raco setup --no-docs --pkgs torch; then
                 touch "$deps_stamp"
               else
                 echo "WARNING: provisioning failed; not stamping, so the next" >&2
                 echo "         shell entry retries it." >&2
               fi
-              echo "Done. Lint: resyntax analyze --local-git-repository . origin/master"
-              echo "      full sweep: resyntax analyze --directory torch  |  raco review <files>"
-              echo "      coverage:   racket scripts/coverage.rkt"
+            fi
+            # Stamped by the dev tools' store path, so a bump reaches checkouts
+            # provisioned before it: install adds the missing packages, then
+            # update moves all of them, from an older pin or the live catalog
+            # alike, onto these trees.
+            linters_stamp="$PLTUSERHOME/.linters-${builtins.baseNameOf racket-linters}"
+            if [ ! -f "$linters_stamp" ]; then
+              echo "Installing the pinned Racket dev tools (Resyntax + racket-review + cover)..."
+              if raco pkg install --batch --copy --no-docs --no-setup --deps fail \
+                     --scope user --skip-installed ${racket-linters}/*/ \
+                 && raco pkg update --batch --copy --no-docs --no-trash \
+                      --deps fail --scope user ${racket-linters}/*/; then
+                touch "$linters_stamp"
+                echo "Done. Lint: resyntax analyze --local-git-repository . origin/master"
+                echo "      full sweep: resyntax analyze --directory torch  |  raco review <files>"
+                echo "      coverage:   racket scripts/coverage.rkt"
+              else
+                echo "WARNING: installing the dev tools failed; not stamping, so" >&2
+                echo "         the next shell entry retries it." >&2
+              fi
             fi
             export PATH="$(racket -e '(require setup/dirs)(display (path->string (find-user-console-bin-dir)))'):$PATH"
           '';

@@ -361,6 +361,15 @@ raco review torch/**/*.rkt
 `raco review` does not expand macros, so the pure re-export facades
 (`main.rkt`, `foreign.rkt`) and `info.rkt` carry a `#|review: ignore|#` directive.
 
+Resyntax, racket-review and `cover` are pinned, one commit per package, in
+`nix/racket-linters.nix`, which also compiles them; shell entry copies them
+into `.racket-user` with no network, and the CI lane runs the same trees, so
+lint findings change only when the flake does (#63). To bump: change the
+package's `rev`, set its `hash` to `""`, `nix build .#racket-linters`, paste
+the hash Nix reports, and run the full sweep (`resyntax analyze --directory
+torch`), since CI scans only changed files. Each checkout moves to the new
+trees on its next shell entry.
+
 ### PyTorch parity
 
 The default `nix develop` shell ships a Python with `torch`, so you can explore
