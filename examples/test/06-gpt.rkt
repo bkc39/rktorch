@@ -51,6 +51,7 @@
   ;; the hand-written blocks' names are gone
   (check-false (member "blocks.0.attention.branch.wq.weight" names))
   (define v-size (vector-length vocab))
+  ;; 32 token-table + 33 head scalars per character, 25984 for the rest
   (check-equal? (for/sum ([p (in-list (parameters net))]) (numel p))
                 (+ (* 65 v-size) 25984))
   ;; the embedding tables are sized by the fixture vocab and block-size 16.
