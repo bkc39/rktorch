@@ -1,7 +1,8 @@
 #lang racket/base
 
 (module+ test
-  (require (only-in ffi/unsafe _int _intptr _pointer cast ptr-ref)
+  (require (for-syntax racket/base)
+           (only-in ffi/unsafe _int _intptr _pointer cast ptr-ref)
            (only-in racket/port port->string)
            (only-in racket/sandbox
                     get-output kill-evaluator sandbox-error-output
@@ -9,6 +10,7 @@
                     sandbox-path-permissions sandbox-security-guard)
            rackunit
            (only-in scribble/example make-base-eval)
+           syntax/parse/define
            (only-in "../foreign/raw/fault.rkt" native-fault? native-fault-policy))
 
   ;; A handle at address 8 faults on first use, the same way every time.
@@ -55,24 +57,26 @@
     env)
 
   ;; Under the raise policy a fresh evaluator has its own instance of the
-  ;; latch, so each case starts with the library enabled. Returns what the
-  ;; program printed and what disabled the library, if anything.
+  ;; latch, so each case starts with the library enabled.
+  (define (make-fault-eval)
+    (parameterize ([current-environment-variables (environment-with #f)]
+                   [sandbox-output 'string]
+                   [sandbox-error-output 'string]
+                   [sandbox-memory-limit #f]
+                   [sandbox-eval-limits #f]
+                   [sandbox-security-guard current-security-guard]
+                   [sandbox-path-permissions '((exists "/"))])
+      (apply make-base-eval prelude)))
+
+  (define-syntax-parse-rule (with-fault-eval (ev:id) body:expr ...+)
+    (let ([ev (make-fault-eval)])
+      (dynamic-wind void (lambda () body ...) (lambda () (kill-evaluator ev)))))
+
+  ;; What the program printed, and what disabled the library, if anything.
   (define (run-in-sandbox program)
-    (define ev
-      (parameterize ([current-environment-variables (environment-with #f)]
-                     [sandbox-output 'string]
-                     [sandbox-error-output 'string]
-                     [sandbox-memory-limit #f]
-                     [sandbox-eval-limits #f]
-                     [sandbox-security-guard current-security-guard]
-                     [sandbox-path-permissions '((exists "/"))])
-        (apply make-base-eval prelude)))
-    (dynamic-wind
-     void
-     (lambda ()
-       (for ([form (in-list program)]) (ev form))
-       (values (get-output ev) (ev '(native-faulted))))
-     (lambda () (kill-evaluator ev))))
+    (with-fault-eval (ev)
+      (for ([form (in-list program)]) (ev form))
+      (values (get-output ev) (ev '(native-faulted)))))
 
   ;; The exit policy ends the process, and its notice goes to file
   ;; descriptor 2 past every port, so those cases run in a child racket.

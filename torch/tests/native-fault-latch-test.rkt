@@ -3,8 +3,10 @@
 ;; raco cover runs every test file in one process, so the latch this file
 ;; sets is cleared before the next one runs.
 (module+ test
-  (require (only-in ffi/unsafe _intptr cast)
+  (require (for-syntax racket/base)
+           (only-in ffi/unsafe _intptr cast)
            rackunit
+           syntax/parse/define
            (only-in "../foreign.rkt" ones tensor-shape)
            (only-in "../foreign/raw/fault.rkt"
                     latched native-faulted reset-native-fault-latch!)
@@ -33,34 +35,31 @@
 
   (define passed-through (for/list ([n (in-range 8)]) (build-list n values)))
 
+  (define-syntax-parse-rule (with-latch-cleared-after body:expr ...+)
+    (dynamic-wind void (lambda () body ...) reset-native-fault-latch!))
+
   (test-case "the first fault in the printer disables every native call after it"
-    (dynamic-wind
-     void
-     (lambda ()
-       (check-equal? (call-each) passed-through
-                     "before any fault the latch passes every argument through")
-       (check-false (native-faulted))
-       (check-equal? (format "~a" (tensor-impl (bad) '(2 2)))
-                     "#<tensor:2x2>"
-                     "the printer falls back to the shape")
-       (check-equal? (native-faulted) "printing a tensor")
-       (for ([p (in-list arities)] [n (in-naturals)])
-         (check-exn (disabled "printing a tensor")
-                    (lambda () (apply p (build-list n values)))))
-       (check-exn (disabled "printing a tensor") (lambda () (ones 2 2))
-                  "a real binding raises without entering native code"))
-     reset-native-fault-latch!))
+    (with-latch-cleared-after
+      (check-equal? (call-each) passed-through
+                    "before any fault the latch passes every argument through")
+      (check-false (native-faulted))
+      (check-equal? (format "~a" (tensor-impl (bad) '(2 2)))
+                    "#<tensor:2x2>"
+                    "the printer falls back to the shape")
+      (check-equal? (native-faulted) "printing a tensor")
+      (for ([p (in-list arities)] [n (in-naturals)])
+        (check-exn (disabled "printing a tensor")
+                   (lambda () (apply p (build-list n values)))))
+      (check-exn (disabled "printing a tensor") (lambda () (ones 2 2))
+                 "a real binding raises without entering native code")))
 
   (test-case "a fault while accounting a tensor disables the library too"
-    (dynamic-wind
-     void
-     (lambda ()
-       (check-false (native-faulted))
-       (check-not-exn (lambda () (reaccount! (bad)))
-                      "the accounting swallows the fault")
-       (check-equal? (native-faulted) "accounting a tensor")
-       (check-exn (disabled "accounting a tensor") (lambda () (ones 2 2))))
-     reset-native-fault-latch!))
+    (with-latch-cleared-after
+      (check-false (native-faulted))
+      (check-not-exn (lambda () (reaccount! (bad)))
+                     "the accounting swallows the fault")
+      (check-equal? (native-faulted) "accounting a tensor")
+      (check-exn (disabled "accounting a tensor") (lambda () (ones 2 2)))))
 
   (test-case "clearing the latch lets native calls through again"
     (check-false (native-faulted))
