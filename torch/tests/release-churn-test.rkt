@@ -6,9 +6,9 @@
                     cpu-device finalizer-diagnostics native-memory-use
                     reclaim-native-memory! zeros)
            (only-in (submod "../foreign.rkt" unsafe) tensor-free!)
+           (only-in "../foreign/raw/device-queries.rkt" install-device-queries!)
            (only-in "../foreign/raw/pressure.rkt"
-                    backstop-interval collect-at-trough! install-device-queries!
-                    native-collect-margin native-memory-limit release-spacing
+                    backstop-interval collect-at-trough! native-collect-margin native-memory-limit release-spacing
                     reset-pressure-state!))
 
   (define mib (* 1024 1024))

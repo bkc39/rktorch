@@ -5,8 +5,7 @@
          (only-in "collector.rkt"
                   call-as-the-collector collect-and-wait! drain-finalizers!)
          (only-in "device-queries.rkt"
-                  allocator-reading install-device-queries! queried-capacity
-                  release-query)
+                  allocator-reading queried-capacity release-query)
          (only-in "pressure-settings.rkt"
                   margin-over native-collect-at-troughs native-collect-budget
                   native-collect-margin native-memory-fraction
@@ -28,8 +27,6 @@
          collect-at-trough!
          pressure-diagnostics
          reset-pressure-state!
-         allocator-reading
-         install-device-queries!
          (all-from-out "pressure-settings.rkt"))
 
 ;; Atomic mode, not a semaphore: finalizers run in atomic mode, where
