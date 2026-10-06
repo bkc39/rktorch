@@ -62,6 +62,26 @@ outcome bypasses both paths: a C++ throw during storage release
 unwinds through libtorch's own noexcept frames to `std::terminate`
 before any handler can run — `finalizer_death_test.cpp` pins this.
 
+A native fault is the exception to "swallowed and counted". Racket CS reports a
+segfault as an exception whose message begins `invalid memory reference`. One
+arriving at that guard means native memory may already be corrupt: every later
+free can fault too, and in #76 and #82 that became a cascade that ignored
+SIGTERM.
+
+So the first fault latches the library. `note-native-fault!` in `raw/fault.rkt`
+writes one line with write(2) and sets the latch. `define-torch` wraps every
+binding in `latched`, so from then on each native call raises without entering
+native code. That is one `unbox` per call, and it sits beneath each binding's
+own `#:wrap`.
+
+The same check sits in the two other catches broad enough to swallow a fault:
+the tensor printer and `account!`. The RNN weight flatten, which reads any
+other failure as cuDNN refusing the layout, lets a fault through instead.
+
+A fault in a caller's own native call still raises to that caller and latches
+nothing. `RKTORCH_ON_NATIVE_FAULT=exit` replaces the latch with `_exit(70)`,
+which bypasses ports and exit handlers.
+
 ## Phantom-bytes accounting
 
 `make-phantom-bytes` is Racket-CS's way to charge native allocations

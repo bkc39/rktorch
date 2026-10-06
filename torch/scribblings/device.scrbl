@@ -560,6 +560,34 @@ smaller, whether or not it goes on to collect, so a floor left high by an
 earlier peak cannot hide later growth.
 }
 
+@section{Native faults}
+
+A native fault is a segmentation fault inside libtorch or the shim: code
+reading or writing memory it does not own. Racket turns one into an
+exception whose message begins @tt{invalid memory reference}, so a program
+that calls a native function sees the fault as an exception it can catch,
+and the library carries on.
+
+Where no caller is waiting, a fault is taken as evidence that native memory
+can no longer be trusted. That covers a finalizer freeing a dead tensor, the
+printer rendering one, and the library measuring a new one for the collector.
+One line goes to standard error, and the native library is disabled for the
+rest of the process. Every later native call raises an exception saying so,
+without entering native code; the printer falls back to the tensor's shape,
+and @racket[finalizer-diagnostics] keeps counting. The process stays
+responsive, so work that does not need tensors can be saved before
+restarting.
+
+Disabling rather than continuing is what stops a single fault from becoming
+a runaway. Before, every later free faulted too, each report re-entered
+native code, and the nested messages grew until the process had to be
+killed.
+
+Set the environment variable @tt{RKTORCH_ON_NATIVE_FAULT} to @tt{exit}
+before the process starts to stop at the first such fault instead: one line
+on standard error, then exit status 70. Unattended jobs may prefer a clean
+stop to a disabled library.
+
 @section{Unsafe}
 
 @defmodule[(submod torch/foreign unsafe)]

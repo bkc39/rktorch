@@ -361,6 +361,15 @@ raco review torch/**/*.rkt
 `raco review` does not expand macros, so the pure re-export facades
 (`main.rkt`, `foreign.rkt`) and `info.rkt` carry a `#|review: ignore|#` directive.
 
+Resyntax, racket-review and `cover` are pinned, one commit per package, in
+`nix/racket-linters.nix`, which also compiles them; shell entry copies them
+into `.racket-user` with no network, and the CI lane runs the same trees, so
+lint findings change only when the flake does (#63). To bump: change the
+package's `rev`, set its `hash` to `""`, `nix build .#racket-linters`, paste
+the hash Nix reports, and run the full sweep (`resyntax analyze --directory
+torch`), since CI scans only changed files. Each checkout moves to the new
+trees on its next shell entry.
+
 ### PyTorch parity
 
 The default `nix develop` shell ships a Python with `torch`, so you can explore
@@ -460,7 +469,9 @@ module's full export set (`racket/runtime-path`, `syntax/parse/pre`).
   finalizer); `foreign/error.rkt` — `check-ok` / `check-handle`;
   `foreign/format.rkt` — the PyTorch-repr reproducer.
 - `foreign/raw/*.rkt` — direct FFI, one module per C translation unit:
-  `syntax` (the pure FFI definer + `_Tensor` cpointer), `pressure` (no
+  `syntax` (the FFI definer + `_Tensor` cpointer), `fault` (the
+  native-fault latch `define-torch` puts under every binding, #76),
+  `pressure` (no
   FFI of its own: the collection policy under the ledger, the two troughs
   and the capacity backstop, #145), `pressure-settings` (its parameters;
   `RKTORCH_MEMORY_FRACTION` and `RKTORCH_MEMORY_LIMIT` in MiB set the
@@ -480,7 +491,13 @@ module's full export set (`racket/runtime-path`, `syntax/parse/pre`).
   `(allocator ...)` wrap (skips the ledger).
   Explicit synchronous release goes through the raising,
   finalizer-cancelling `tr-tensor-free/checked`; OOM reaches users as
-  `exn:fail:rktorch:oom` (catch by type, not message).
+  `exn:fail:rktorch:oom` (catch by type, not message). A handler broad
+  enough to catch an `invalid memory reference` either lets it through to
+  the caller, which latches nothing, or, where no caller is waiting (a
+  finalizer guard, the printer, `account!`), calls `note-native-fault!`
+  when `native-fault?` holds, so that fault latches the library; never bind
+  native code with `define-ffi-definer` or `get-ffi-obj` directly, which
+  bypasses the latch.
 - `nn.rkt` — pure re-export facade over `nn/` (`layer.rkt` = `gen:layer`, `LayerList` +
   the `define-layer` macro, whose `#:forward` takes a rest argument, whose
   fields admit `parameters-by-key` beside `children-by-key`, and whose
