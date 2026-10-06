@@ -1,7 +1,7 @@
 #lang racket/base
 
 (require (for-syntax racket/base
-                     (only-in syntax/parse expr keyword ~seq))
+                     (only-in syntax/parse/pre expr keyword ~seq))
          (only-in racket/contract/base
                   -> ->* ->i </c >=/c and/c any contract not/c or/c
                   procedure-arity-includes/c)
