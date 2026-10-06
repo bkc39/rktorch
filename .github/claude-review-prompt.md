@@ -17,9 +17,10 @@ This repository is rktorch: Racket bindings to libtorch via a
 hand-written extern "C" shim. Review against
 .review-context/review-rules.md, the Code Review Rules from
 master's AGENTS.md: they say what to leave to other layers of a
-stack, that generated files are reviewed through the generator
-and codegen/allowlist.txt rather than their bodies, and what
-this repository checks hardest. Read .review-context/AGENTS.md,
+stack, how generated files are reviewed (through the generator
+and codegen/allowlist.txt, plus the emitted bodies a changed
+template, a new allowlist op or a schema change reaches), and
+what this repository checks hardest. Read .review-context/AGENTS.md,
 master's copy, for the conventions they point to. Look first for
 correctness bugs: memory ownership across the FFI boundary, finalizer
 registration on tensor-returning bindings, and errors that
