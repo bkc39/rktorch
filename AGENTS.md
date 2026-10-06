@@ -779,8 +779,11 @@ master's copy.
   `torch/tests/generated-parity.rktd`. Review the generator
   (`codegen/*.py`) and `codegen/allowlist.txt` instead of their bodies;
   when a template changes, check one emitted body per changed template
-  path against it. Any other file is reviewed like any other, header or
-  not.
+  path against it. When the allowlist gains an op, check its emitted C
+  signature, Racket binding and allocator wrap: a new schema shape can
+  reach a classifier path no earlier op exercised, and codegen drift only
+  proves the output is reproducible. Any other file is reviewed like any
+  other, header or not.
 - The vendored schema under `codegen/aten/` is upstream data: when it
   changes, check its sha256 against the pin in `codegen/aten/README.md`
   and review the emitted bodies of allowlisted ops whose schema changed,
@@ -795,8 +798,10 @@ master's copy.
 - PyTorch parity: an allowlist op needs a recipe in
   `generated-parity-test.rkt`, and a `'device-only` one its own
   device-guarded test; a hand-written op needs a python cross-test check
-  beside its gtest golden; a new example comes with its Python twin
-  (`examples/python/`) and its runner (`examples/test/`).
+  beside its gtest golden; a new example comes with its runner
+  (`examples/test/`) and a Python twin, either in `examples/python/` or
+  as a parity suite under `torch/tests/python/` (as 16-style-transfer's
+  is).
 - Conventions: contracts at the definition site ("Validating arguments");
   an op named like a racket/base, racket/list or racket/math function
   defers to it for anything but a tensor; Racket modules within the
