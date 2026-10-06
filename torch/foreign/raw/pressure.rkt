@@ -277,24 +277,26 @@
 ;; --- the backstop, from every accounting ---
 
 (define (collect-under-pressure! dev)
-  (unless (in-atomic-mode?)
-    (define mark (device-high-water dev))
-    (when mark
-      (define base (quotient mark interval-divisor))
-      (define-values (gate-open? sample-due?)
-        (call-with-ledger
-         (lambda ()
-           (define a (account-of dev))
-           (values (>= (account-since-check a) (or (account-interval a) base))
-                   (>= (account-since-sample a) (quotient mark sample-divisor))))))
-      (when gate-open?
-        (when sample-due?
-          (sample-allocator! dev))
-        (if (> (pressure-reading dev) mark)
-            (call-as-the-collector
-             (lambda () (pressure-collect! dev mark base)))
-            (when sample-due?
-              (call-with-ledger (lambda () (end-trial! (account-of dev) base)))))))))
+  (define mark (and (not (in-atomic-mode?)) (device-high-water dev)))
+  (define base (and mark (quotient mark interval-divisor)))
+  (define-values (gate-open? sample-due?)
+    (if mark (gate-state dev mark base) (values #f #f)))
+  (when (and gate-open? sample-due?)
+    (sample-allocator! dev))
+  (cond
+    [(and gate-open? (> (pressure-reading dev) mark))
+     (call-as-the-collector (lambda () (pressure-collect! dev mark base)))]
+    [(and gate-open? sample-due?)
+     (call-with-ledger (lambda () (end-trial! (account-of dev) base)))]
+    [else (void)]))
+
+;; whether the backstop looks at all, and whether that look samples
+(define (gate-state dev mark base)
+  (call-with-ledger
+   (lambda ()
+     (define a (account-of dev))
+     (values (>= (account-since-check a) (or (account-interval a) base))
+             (>= (account-since-sample a) (quotient mark sample-divisor))))))
 
 ;; A release empties the cache, and below the working set the next steps take
 ;; those bytes straight back. So it earns the reset a collection earns only
