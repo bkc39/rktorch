@@ -2,6 +2,8 @@
 
 (require (for-syntax racket/base)
          (only-in ffi/unsafe/atomic call-as-atomic in-atomic-mode?)
+         (only-in racket/dict dict-ref)
+         (only-in racket/list remove-duplicates)
          (only-in racket/string string-join)
          (only-in rackunit define-check fail-check)
          ;; whole-module: the pattern's syntax classes live at phase 1 and
@@ -13,7 +15,8 @@
          (only-in (submod "../../foreign.rkt" unsafe) tensor-free!)
          (only-in "../../foreign/raw/fault.rkt" native-faulted)
          (only-in "../../foreign/raw/memory.rkt" native-memory-use/fold)
-         (only-in "../../foreign/raw/pressure.rkt" reset-pressure-state!)
+         (only-in "../../foreign/raw/pressure.rkt"
+                  live-bytes-by-device reset-pressure-state!)
          (only-in "../../foreign/raw/race-points.rkt" race-hook))
 
 (provide with-race-hook
@@ -101,10 +104,18 @@
                releases
                [released #:mutable]
                [finalized #:mutable]
-               [doubled #:mutable]))
+               [doubled #:mutable]
+               unaccounts
+               [unaccounted-twice #:mutable]))
 
 (define (make-watch)
-  (watch (make-hasheq) 0 (make-weak-hasheq) 0 0 0))
+  (watch (make-hasheq) 0 (make-weak-hasheq) 0 0 0 (make-weak-hasheq) 0))
+
+(define (note-unaccount! w key)
+  (define unaccounts (watch-unaccounts w))
+  (hash-update! unaccounts key add1 0)
+  (when (= 2 (hash-ref unaccounts key))
+    (set-watch-unaccounted-twice! w (add1 (watch-unaccounted-twice w)))))
 
 (define (note-release! w handle)
   (define releases (watch-releases w))
@@ -131,6 +142,8 @@
      (call-as-atomic (lambda () (hash-remove! (watch-holders w) subject)))]
     [(free-unaccounted)
      (call-as-atomic (lambda () (note-release! w subject)))]
+    [(unaccount-entry-read)
+     (call-as-atomic (lambda () (note-unaccount! w subject)))]
     [(finalizer-releasing)
      (call-as-atomic
       (lambda ()
@@ -215,20 +228,31 @@
 (define (positive-entries totals)
   (filter (lambda (entry) (positive? (cdr entry))) totals))
 
+(define (counter-mismatches)
+  (define counters (live-bytes-by-device))
+  (define fold (native-memory-use/fold))
+  (for/list ([dev (in-list (remove-duplicates (map car (append counters fold))))]
+             #:unless (let ([live (dict-ref counters dev 0)])
+                        (and (>= live 0) (= live (dict-ref fold dev 0)))))
+    (list dev (dict-ref counters dev 0) (dict-ref fold dev 0))))
+
 (define (ledger-violations #:baseline [base #f] #:watch [w #f])
   (define counters (positive-entries (native-memory-use)))
-  (define fold (positive-entries (native-memory-use/fold)))
+  (define mismatches (counter-mismatches))
   (define doubled (if w (watch-doubled w) 0))
+  (define unaccounted-twice (if w (watch-unaccounted-twice w) 0))
   (filter
    values
    (list
-    (and (not (equal? counters fold))
-         (format "I1: counters ~s differ from the fold ~s" counters fold))
+    (and (pair? mismatches)
+         (format "I1: (device counter fold) ~s" mismatches))
     (and w (> (watch-max-holders w) 1)
          (format "I2: ~a collectors held the claim at once"
                  (watch-max-holders w)))
     (and (positive? doubled)
          (format "I3: ~a handles released more than once" doubled))
+    (and (positive? unaccounted-twice)
+         (format "I3: ~a entries unaccounted more than once" unaccounted-twice))
     (and base (not (equal? counters (positive-entries (snapshot-use base))))
          (format "ledger ~s, not back to ~s after the drop"
                  counters (snapshot-use base)))

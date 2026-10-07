@@ -167,8 +167,8 @@
     (call-with-ledger
      (lambda ()
        (define a (hash-ref allocations t #f))
-       (race-point unaccount-entry-read t)
        (when a
+         (race-point unaccount-entry-read t)
          (set-phantom-bytes! (allocation-phantom a) 0)
          (hash-remove! allocations t)
          (note-unaccounted! (allocation-device a) (allocation-nbytes a))

@@ -43,6 +43,8 @@
           (release-gate! g)
           (join a)))
       (settle!))
+    (check-equal? (watch-finalized w) 0
+                  "the finalizer released an explicitly freed handle")
     (check-ledger base w))
 
   (test-case "an explicit free and the finalizer release a handle once (I3)"
@@ -71,6 +73,7 @@
        (= 1 (racing-frees pool)))))
 
   (define (double-unaccount pool)
+    (define w (make-watch))
     (define key (box 'entry))
     (define dev (device 'cuda 13))
     (record-allocation! key 4096 dev)
@@ -78,7 +81,7 @@
       (make-gate 'unaccount-entry-read
                  #:when (lambda (subject)
                           (and (eq? subject key) ((labelled 'a) subject)))))
-    (with-race-hook (gate-hook g)
+    (with-race-hook (hooks (watch-hook w) (gate-hook g))
       (define a (spawn (lambda () (unaccount! key)) #:pool pool #:label 'a))
       (define read (wait-for-arrival g))
       (join (spawn (lambda () (unaccount! key)) #:pool pool #:label 'b))
@@ -86,7 +89,7 @@
       (record-allocation! witness 4096 dev)
       (release-gate! g)
       (join a)
-      (define violations (ledger-violations))
+      (define violations (ledger-violations #:watch w))
       (unaccount! witness)
       (check-equal? violations '())
       (check-eq? read 'atomic "the entry is read and removed in one section")))
