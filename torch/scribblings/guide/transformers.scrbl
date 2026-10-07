@@ -11,8 +11,10 @@
 A transformer reads a sequence by letting every position look at every
 other and take a weighted average of what it finds. That step is
 @deftech{attention}, and the rest of the architecture is arranged around
-it. This chapter computes it by hand on tensors small enough to read, then
-hands the same work to the library's fused call.
+it. This chapter computes it by hand on tensors small enough to read,
+hands the same work to the library's fused call, and then builds the rest
+of a transformer around it: heads and masks, blocks and stacks, and the
+positions that tell a model where each token sits.
 
 @section[#:tag "transformers-by-hand"]{Attention by hand}
 
@@ -206,5 +208,193 @@ one row per query and one column per encoded position.
 
 That is the whole of multi-head attention: projections, heads cut from
 them, one fused attention over every head at once, and a projection back.
-A transformer stacks it with a feed-forward layer and residual
-connections; @secref["ex-gpt"] builds one end to end.
+A transformer wraps it in a block with a feed-forward layer and residual
+connections, and stacks the blocks.
+
+@section[#:tag "transformers-blocks"]{Blocks, stacks and positions}
+
+A transformer block gives each position two chances to change. Attention
+lets it gather from the other positions; then a small feed-forward
+network, the same two @racket[Linear] layers at every position, works on
+what it gathered. Each of the two adds its answer to its input rather
+than replacing it, a @deftech{residual connection}, so the sequence flows
+through the block as a stream that every sublayer only adds to, and a
+@racket[LayerNorm] keeps that stream in scale.
+
+@racket[TransformerEncoderLayer] is that block. On the toy batch from the
+last section, four wide with two heads, and a feed-forward eight wide
+inside:
+
+@torch-examples[
+(manual-seed! 0)
+(define block
+  (TransformerEncoderLayer 4 #:heads 2 #:ffn-width 8 #:dropout 0.0
+                           #:batch-first? #t))
+(map car (named-children block))
+(shape (block tokens))
+]
+
+The children are the attention, the feed-forward's two @racket[Linear]s
+around a @racket[Dropout], a norm for each sublayer and a dropout after
+each, under the names PyTorch gives them. With the dropouts off, the block
+is attention and then the feed-forward, each added back and normalized:
+
+@torch-examples[
+(define (self-attend x)
+  ((child-ref block "self-attn") x x x))
+(define (feed-forward x)
+  ((child-ref block "linear2") (relu ((child-ref block "linear1") x))))
+(define after-attention
+  ((child-ref block "norm1") (+ tokens (self-attend tokens))))
+(define post-norm
+  ((child-ref block "norm2")
+   (+ after-attention (feed-forward after-attention))))
+(~> (- post-norm (block tokens)) abs max item (< 1e-6))
+]
+
+That is @deftech{post-norm}, the original transformer's arrangement and
+BERT's: normalize after adding. GPT-2 and the vision transformer use
+@deftech{pre-norm} instead: normalize each sublayer's input and add its
+answer to the stream untouched, so the stream itself is never normalized
+inside the block. Deep stacks train more steadily that way.
+@racket[#:norm-first? #t] chooses it:
+
+@torch-examples[
+(manual-seed! 0)
+(define pre
+  (TransformerEncoderLayer 4 #:heads 2 #:ffn-width 8 #:dropout 0.0
+                           #:batch-first? #t #:norm-first? #t))
+(define (pre-attend x) ((child-ref pre "self-attn") x x x))
+(define (pre-feed x)
+  ((child-ref pre "linear2") (relu ((child-ref pre "linear1") x))))
+(define stream (+ tokens (pre-attend ((child-ref pre "norm1") tokens))))
+(define pre-norm (+ stream (pre-feed ((child-ref pre "norm2") stream))))
+(~> (- pre-norm (pre tokens)) abs max item (< 1e-6))
+]
+
+The feed-forward's activation is @racket[relu] unless @racket[#:activation]
+says otherwise; GPT-2 uses @racket['gelu-tanh]. The block takes the same
+masks as its attention, in the same sense, @racket[#t] hiding a key:
+@racket[(block tokens #:key-padding-mask padding #:causal? #t)].
+
+A model is several blocks in a row. @racket[TransformerEncoder] builds the
+row in one call: it takes the block's arguments, the number of blocks,
+and whether to end with a norm, which a stack of pre-norm blocks needs,
+since none of them normalizes its output:
+
+@torch-examples[
+(manual-seed! 0)
+(define encoder
+  (TransformerEncoder 4 #:heads 2 #:ffn-width 8 #:dropout 0.0
+                      #:batch-first? #t #:norm-first? #t
+                      #:layers 2 #:norm #t))
+(map car (named-children encoder))
+(length (named-parameters encoder))
+(car (map car (named-parameters encoder)))
+(shape (encoder tokens #:key-padding-mask padding))
+]
+
+The names are the ones a PyTorch checkpoint of the same stack uses, with
+@tt{self_attn} spelled @racket["self-attn"] and its fused in-projection
+split into @racket["query"], @racket["key"] and @racket["value"]; the
+whole mapping is in @secref["attention-transformer-pytorch"]. Like
+PyTorch's, the stack starts every block from the same values, copies of
+the first, and training moves them apart.
+
+The first argument can also be a block itself, which the stack copies, as
+@tt{nn.TransformerEncoder(layer, n)} does, or a procedure that makes one,
+which the stack calls once per block so that each draws its own values,
+as GPT-2 draws its blocks. Either way @racket[#:norm] takes the final norm
+as a layer:
+
+@torch-examples[
+(define copied (TransformerEncoder block #:layers 2))
+(define drawn
+  (TransformerEncoder (lambda ()
+                        (TransformerEncoderLayer 4 #:heads 2 #:ffn-width 8
+                                                 #:batch-first? #t))
+                      #:layers 2
+                      #:norm (LayerNorm 4)))
+(map car (named-children drawn))
+]
+
+Nothing so far knows where a token sits. Attention compares contents, so
+shuffling the tokens only shuffles the answers:
+
+@torch-examples[
+(define reversed (flip tokens 1))
+(~> (encoder reversed) (flip 1) (- (encoder tokens)) abs max item (< 1e-5))
+]
+
+The order has to be added to the input. The original transformer adds
+fixed waves, a sine and a cosine at each of several frequencies, one row
+per position; @racket[sinusoidal-positions] computes them, and the rows
+broadcast over the batch:
+
+@torch-examples[
+(define waves (sinusoidal-positions 3 4))
+waves
+(define (placed x) (+ x waves))
+(~> (placed reversed) encoder (flip 1) (- (encoder (placed tokens)))
+    abs max item)
+]
+
+With the positions added, a reversed sentence is a different input, not
+the same one reordered, and the answers differ by far more than rounding.
+GPT-2, BERT and ViT learn their positions instead, from an
+@racket[Embedding] with one row per position, indexed like tokens;
+@secref["attention-positions"] shows both.
+
+An encoder–decoder puts the pieces together. The encoder reads a source
+sequence into memory; the decoder reads the target so far, under a causal
+mask so it cannot peek at the tokens it is learning to predict, and
+attends to the memory through a cross-attention that hides the source's
+padding. A toy translation model over a vocabulary of ten token ids, eight
+wide, with a source batch of two sentences of five tokens, the second
+padded after three, and targets of four:
+
+@torch-examples[
+(manual-seed! 0)
+(define embed (Embedding 10 8))
+(define source-encoder
+  (TransformerEncoder 8 #:heads 2 #:ffn-width 16 #:dropout 0.0
+                      #:batch-first? #t #:layers 2))
+(define target-decoder
+  (TransformerDecoder 8 #:heads 2 #:ffn-width 16 #:dropout 0.0
+                      #:batch-first? #t #:layers 2))
+(define to-vocabulary (Linear 8 10))
+(define source (tensor '((1 4 6 2 3) (5 7 2 0 0))))
+(define source-padding (eq source 0))
+(define target (tensor '((1 8 9 3) (1 6 6 2))))
+(define (embedded ids)
+  (+ (embed ids) (~> (shape ids) cadr (sinusoidal-positions 8))))
+(define (translate source target)
+  (define memory
+    (source-encoder (embedded source) #:key-padding-mask source-padding))
+  (~> (embedded target)
+      (target-decoder memory
+                      #:tgt-causal? #t
+                      #:memory-key-padding-mask source-padding)
+      to-vocabulary))
+(shape (translate source target))
+]
+
+The answer is a score for every token of the vocabulary at every target
+position, which a cross-entropy loss against the targets shifted by one
+would train. The causal mask is what makes that training honest: change
+the last target token, and every earlier position's scores stay put.
+
+@torch-examples[
+(define changed (tensor '((1 8 9 7) (1 6 6 5))))
+(~> (translate source target)
+    (narrow 1 0 3)
+    (- (narrow (translate source changed) 1 0 3))
+    abs max item (< 1e-6))
+]
+
+That is a transformer: attention, a feed-forward, residual connections and
+norms in a block; blocks in a stack; positions added to the input; and
+masks to say who may read whom. @secref["ex-gpt"] trains a
+character-level GPT, a decoder-only stack of pre-norm blocks, and
+@secref["ex-asr"] a speech recognizer whose decoder reads an encoded
+utterance through cross-attention.
