@@ -414,7 +414,7 @@ novella. Its whole stack is one call:
                     #:norm-first? #t
                     #:dropout 0.0
                     #:batch-first? #t
-                    #:norm? #t)
+                    #:norm #t)
 ]
 
 That is @tt{nn.TransformerEncoder(nn.TransformerEncoderLayer(...),

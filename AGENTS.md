@@ -270,7 +270,7 @@ a causal mask built by hand is `(masked-fill scores (eq (tril (ones T T)) 0)
 -inf.0)`, whose mask is `#t` = hidden, while the fused kernel's boolean
 `#:mask` is `#t` = attend, as PyTorch's function is (the layers'
 `#:causal?` flags build the mask themselves; `examples/racket/06-gpt.rkt`
-is one standard `TransformerEncoder` call, pre-norm with `#:norm? #t`,
+is one standard `TransformerEncoder` call, pre-norm with `#:norm #t`,
 applied with `#:causal? #t`, #210 L3). `define-layer` is the Python-style
 `nn.Module` analog: `#:init` is the constructor body and assigns declared
 fields with `set!`, a field's value classifies it at construction

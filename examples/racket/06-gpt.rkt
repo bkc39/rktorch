@@ -79,12 +79,12 @@ position signal, its @tt{[T, C]} rows broadcasting over the batch
 whole stack in one call, as
 @tt{nn.TransformerEncoder(nn.TransformerEncoderLayer(...), n_layer,
 norm=nn.LayerNorm(n_embd))} builds PyTorch's: the width, the heads and
-the block settings above, @racket[n-layer] blocks, and @racket[#:norm? #t]
+the block settings above, @racket[n-layer] blocks, and @racket[#:norm #t]
 for the final @racket[LayerNorm], which a pre-norm stack needs because no
 block normalizes the stream it passes on. Like PyTorch's, the stack starts
 every block as a copy of the first, and training moves them apart. (GPT-2
-draws each block afresh instead; @racket[GenericTransformerEncoder] with
-@racket[#:copies? #f] builds that stack,
+draws each block afresh instead; passing @racket[TransformerEncoder] a
+procedure that builds one block, rather than the width, builds that stack,
 @secref["attention-transformer-stacks"].) The forward applies the stack
 with @racket[#:causal? #t], which every block hands to its attention: each
 position may attend only to itself and the positions before it, the mask
@@ -128,7 +128,7 @@ configuration that @racket[run-example] and the parity twin train;
                                         #:norm-first? #t
                                         #:dropout 0.0
                                         #:batch-first? #t
-                                        #:norm? #t))
+                                        #:norm #t))
   (set! head (Linear n-embd vocab-size))
   #:forward (idx)
   (with-default-device (tensor-device idx)

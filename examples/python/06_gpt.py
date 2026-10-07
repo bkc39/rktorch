@@ -4,7 +4,7 @@ same declaration order, 5 full-batch Adam steps on the committed fixture.
 The stack is the standard nn.TransformerEncoder over a pre-norm
 nn.TransformerEncoderLayer with an exact-gelu MLP four times the width and
 no dropout, ending in a LayerNorm, as the Racket TransformerEncoder with
-#:norm? #t builds it: every block a copy of the first. PyTorch's is_causal
+#:norm #t builds it: every block a copy of the first. PyTorch's is_causal
 is only a hint that the mask beside it is the causal mask, so the forward
 passes both; the Racket #:causal? builds the mask itself.
 
