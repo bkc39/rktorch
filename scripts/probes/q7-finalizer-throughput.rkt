@@ -78,7 +78,7 @@
         (~r gc-share #:precision 2)
         (~r (/ (max peak lag) 1048576.0) #:precision 1)
         (~r (/ lag 1048576.0) #:precision 1)
-        (if (< rounds drain-round-limit) rounds (format "NOT DRAINED after ~a" rounds))
+        rounds
         (fmt-ms drain-ms)
         ((prototype-live-bytes p))
         (load-average)))
@@ -97,5 +97,9 @@
   (for* ([k (in-range variant-count)]
          [workers (in-list worker-counts)])
     (define v (list-ref (workload-variants) k))
-    (print-table-row (churn-row (car v) (ops-randn (cdr v)) workers)))
+    (define row (churn-row (car v) (ops-randn (cdr v)) workers))
+    (print-table-row row)
+    (unless (zero? (list-ref row 10))
+      (error 'q7 "the ledger did not drain after ~a collections; later rows would inherit its finalizers"
+             drain-round-limit)))
   (printf "\nload average (1 min) at end: ~a\n" (load-average)))
