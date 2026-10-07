@@ -2,6 +2,7 @@
 
 (require (only-in racket/list first last)
          (only-in racket/math nan?)
+         (only-in racket/string string-prefix?)
          torch
          torch/nn
          (only-in torch/audio/librispeech
@@ -61,16 +62,22 @@
   (check-equal? (tensor-shape
                  (cdr (assoc "tok-emb.weight" (named-parameters net))))
                 (list (+ v-size 2) 64))
-  ;; #:copies? #f: each block draws its own initial values
+  ;; the standard stacks start every block as a copy of the first, as
+  ;; nn.TransformerEncoder and nn.TransformerDecoder do
   (let ()
     (manual-seed! 0)
     (define fresh (named-parameters (asr 80 v-size)))
-    (define (query-weights stack layer)
-      (tensor->list
-       (cdr (assoc (format "~a.layers.~a.self-attn.query.weight" stack layer)
-                   fresh))))
-    (check-not-equal? (query-weights "encoder" 0) (query-weights "encoder" 1))
-    (check-not-equal? (query-weights "decoder" 0) (query-weights "decoder" 1)))
+    (define (block-values stack layer)
+      (define prefix (format "~a.layers.~a." stack layer))
+      (for/list ([named (in-list fresh)]
+                 #:when (string-prefix? (car named) prefix))
+        (tensor->list (cdr named))))
+    (check-equal? (length (block-values "encoder" 5)) 16)
+    (check-equal? (length (block-values "decoder" 5)) 26)
+    (for ([layer (in-range 1 6)])
+      (check-equal? (block-values "encoder" layer) (block-values "encoder" 0))
+      (check-equal? (block-values "decoder" layer)
+                    (block-values "decoder" 0))))
   (define-values (samples rate transcript) (load-librispeech-fixture))
   (define features (utterance-features samples rate))
   (define ctc-hyp (greedy-decode net vocab features))

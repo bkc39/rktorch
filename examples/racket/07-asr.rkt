@@ -38,9 +38,8 @@ CTC aligns, attention spells.
          (only-in torch/data/text decode encode text->vocab))]
 
 @chunk[<r07-provide>
-(provide asr asr-encoder-block asr-decoder-block pick-device
-         run-example greedy-decode transcribe utterance-features
-         hybrid-batch-loss train-librispeech evaluate)]
+(provide asr pick-device run-example greedy-decode transcribe
+         utterance-features hybrid-batch-loss train-librispeech evaluate)]
 
 The transformer half of the model is the library's: the encoder and
 decoder blocks are @racket[TransformerEncoderLayer] and
@@ -107,13 +106,14 @@ they would be if the utterance were encoded alone.
                      'float32)
            (length lengths) 1 t-len))]
 
-@bold{The encoder block.} The GPT block with the causal mask deleted:
-audio is all there at once, so every frame may attend to every other,
-forward and backward. It is a @racket[TransformerEncoderLayer] with the
-settings GPT-2 made standard. @racket[#:norm-first? #t] is pre-norm: each
-sublayer reads a normalized view of the residual stream and adds its
-answer to the stream untouched. @racket[#:ffn-width] four times the width
-through @racket[#:activation 'gelu] is the GPT feed-forward.
+@bold{The blocks.} An encoder block is the GPT block with the causal mask
+deleted: audio is all there at once, so every frame may attend to every
+other, forward and backward. It is a @racket[TransformerEncoderLayer]
+with the settings GPT-2 made standard, which the model passes its stack
+below. @racket[#:norm-first? #t] is pre-norm: each sublayer reads a
+normalized view of the residual stream and adds its answer to the stream
+untouched. @racket[#:ffn-width] four times the width through
+@racket[#:activation 'gelu] is the GPT feed-forward.
 @racket[#:dropout 0.0] keeps the encoder free of dropout, as it has always
 been here, against the layer's default of 0.1. @racket[#:batch-first? #t]
 takes the @tt{[B, T, C]} frames the front end produces. With the child
@@ -124,26 +124,16 @@ x ← x + self-attn(norm1(x), padding)
 x ← x + linear2(gelu(linear1(norm2(x))))
 }
 
-@chunk[<r07-encoder-block>
-(define (asr-encoder-block n-embd n-head)
-  (TransformerEncoderLayer n-embd
-                           #:heads n-head
-                           #:ffn-width (* 4 n-embd)
-                           #:dropout 0.0
-                           #:activation 'gelu
-                           #:norm-first? #t
-                           #:batch-first? #t))]
-
-@bold{The decoder block.} Three sublayers now, a
-@racket[TransformerDecoderLayer] with the same settings. Causal
-self-attention first: the decoder is autoregressive over characters, so
-each position may read only itself and the characters before it. Then the
-new move, @emph{cross}-attention, the layer's @tt{multihead-attn}, where
-the queries come from the character stream but the keys and values come
-from the encoder's @racket[memory]: each character position reaches
-across into the audio and pulls out the frames that sound like it. The
-only mask there is the padding mask, hiding the padded audio frames. The
-feed-forward comes last, as always:
+A decoder block has three sublayers, a @racket[TransformerDecoderLayer]
+with the same settings. Causal self-attention comes first: the decoder is
+autoregressive over characters, so each position may read only itself
+and the characters before it. Then the new move, @emph{cross}-attention,
+the layer's @tt{multihead-attn}, where the queries come from the
+character stream but the keys and values come from the encoder's
+@racket[memory]: each character position reaches across into the audio
+and pulls out the frames that sound like it. The only mask there is the
+padding mask, hiding the padded audio frames. The feed-forward comes
+last, as always:
 
 @verbatim[#:indent 2]{
 x ← x + self-attn(norm1(x), causal)
@@ -155,17 +145,9 @@ The decoder's @racket[#:dropout] is the model's, zero by default. Above
 zero, the layer drops in PyTorch's places: the attention weights, each
 sublayer's answer before it joins the stream, and the feed-forward's
 hidden activations. The model drops the decoder stack's output once more
-before its head.
-
-@chunk[<r07-decoder-block>
-(define (asr-decoder-block n-embd n-head #:dropout [p-drop 0.0])
-  (TransformerDecoderLayer n-embd
-                           #:heads n-head
-                           #:ffn-width (* 4 n-embd)
-                           #:dropout p-drop
-                           #:activation 'gelu
-                           #:norm-first? #t
-                           #:batch-first? #t))]
+before its head. @secref["transformers-blocks"] checks a pre-norm block's
+arithmetic against the layer by hand, and
+@secref["attention-transformer-layers"] documents every keyword.
 
 @bold{The model.} The spectrogram side first: two strided @racket[Conv1d]
 layers halve time twice (~40ms frames), then four @emph{dilated} residual
@@ -183,14 +165,19 @@ teacher-forced character input, and the list of true frame counts
 convolution multiplier at each downsampling stage and the padding mask,
 and returns both heads' views.
 
-@racket[TransformerEncoder] and @racket[TransformerDecoder] stack the
-blocks, each ending with a final @racket[LayerNorm] as its
-@racket[#:norm]: a pre-norm block never normalizes the stream it passes
-on, so the stack does before a head reads it. @racket[#:copies? #f]
-calls the block constructor once per block, so each block draws its own
-initial values; by default a stack starts every block as a copy of the
-first, as PyTorch's @tt{nn.TransformerEncoder} does. The decoder stack
-runs with @racket[#:tgt-causal? #t], which every block hands to its
+@racket[TransformerEncoder] builds the encoder stack in one call, as
+@tt{nn.TransformerEncoder(nn.TransformerEncoderLayer(...), 6,
+norm=nn.LayerNorm(n_embd))} builds PyTorch's: the width, the heads and
+the block settings above, six blocks, and @racket[#:norm? #t] for the
+final @racket[LayerNorm], which a pre-norm stack needs because no block
+normalizes the stream it passes on. @racket[TransformerDecoder] builds
+the decoder stack the same way, PyTorch's @tt{nn.TransformerDecoder}
+over @tt{nn.TransformerDecoderLayer}, with the model's dropout. Like
+PyTorch's, each stack starts every block as a copy of its first, and
+training moves them apart; a stack of independently drawn blocks is
+@racket[GenericTransformerEncoder] with @racket[#:copies? #f]
+(@secref["attention-transformer-stacks"]). The decoder stack runs with
+@racket[#:tgt-causal? #t], which every block hands to its
 self-attention, and both stacks take the padding mask.
 
 The parameter paths are PyTorch's (@secref["attention-transformer-pytorch"]):
@@ -200,11 +187,11 @@ and @tt{decoder.layers.0.linear1.weight}. The hand-written blocks this
 chapter used before named the same pieces
 @tt{encoders.0.attention.wq.weight}, @tt{ln-enc.weight},
 @tt{decoders.5.cross.wo.bias} and @tt{decoders.0.mlp.fc1.weight}, with
-the same 273 tensors, and drew different initial values
-(@racket[MultiheadAttention] starts its query, key and value from one
-xavier draw with zero biases). A checkpoint saved before the change does
-not load into this model: @racket[load-state!] refuses it, naming the
-missing and unexpected keys. Retrain with
+the same 273 tensors, and drew different initial values: one draw per
+block, where @racket[MultiheadAttention] starts its query, key and value
+from one xavier draw with zero biases. A checkpoint saved before the
+change does not load into this model: @racket[load-state!] refuses it,
+naming the missing and unexpected keys. Retrain with
 @filepath{scripts/train-asr.rkt}. The keyword defaults are the
 fixture-scale configuration the parity twin trains;
 @racket[train-librispeech] passes something wider.
@@ -223,20 +210,26 @@ fixture-scale configuration the parity twin trains;
   (set! dilations
         (LayerList (for/list ([d '(1 2 4 8)])
                      (Conv1d n-embd n-embd 3 #:dilation d #:padding d))))
-  (set! encoder
-        (TransformerEncoder (lambda () (asr-encoder-block n-embd n-head))
-                            #:layers 6
-                            #:norm (LayerNorm n-embd)
-                            #:copies? #f))
+  (set! encoder (TransformerEncoder n-embd
+                                    #:heads n-head
+                                    #:layers 6
+                                    #:ffn-width (* 4 n-embd)
+                                    #:activation 'gelu
+                                    #:norm-first? #t
+                                    #:dropout 0.0
+                                    #:batch-first? #t
+                                    #:norm? #t))
   (set! ctc-head (Linear n-embd (add1 vocab-size)))
   (set! tok-emb (Embedding (+ vocab-size 2) n-embd))
-  (set! decoder
-        (TransformerDecoder (lambda ()
-                              (asr-decoder-block n-embd n-head
-                                                 #:dropout p-drop))
-                            #:layers 6
-                            #:norm (LayerNorm n-embd)
-                            #:copies? #f))
+  (set! decoder (TransformerDecoder n-embd
+                                    #:heads n-head
+                                    #:layers 6
+                                    #:ffn-width (* 4 n-embd)
+                                    #:activation 'gelu
+                                    #:norm-first? #t
+                                    #:dropout p-drop
+                                    #:batch-first? #t
+                                    #:norm? #t))
   (set! hdrop (Dropout #:p p-drop))
   (set! head (Linear n-embd (add1 vocab-size)))
   #:forward (x dec-in lengths)
@@ -373,10 +366,10 @@ NaN the parameters mid-epoch.
 offline entry the test harness and the PyTorch parity twin both drive:
 5 @racket[adam] steps of the hybrid loss on the committed MISTER QUILTER
 fixture --- a batch of one, so no padding and no padding mask --- at the
-fixture-scale defaults. The twin builds its blocks from PyTorch's
-@tt{nn.TransformerEncoderLayer} and @tt{nn.TransformerDecoderLayer} with
-the same settings, one per block, and under one seed both sides draw the
-same initial values, declaration order being draw order.
+fixture-scale defaults. The twin builds its stacks as
+@tt{nn.TransformerEncoder} and @tt{nn.TransformerDecoder} with the same
+settings, and under one seed both sides draw the same initial values,
+declaration order being draw order.
 
 @chunk[<r07-run>
 (define (run-example #:steps [steps 5] #:device [device (pick-device)])
@@ -477,19 +470,20 @@ For calibration, @tt{EPOCHS=40 racket scripts/train-asr.rkt} in the CUDA
 shell trains at these defaults on all of dev-clean but the last three
 utterances, which the script holds out and scores. On an RTX 3090 Ti the
 40 epochs take about ten minutes, fifteen seconds each, and drive the
-mean hybrid loss from 2.58 in the first epoch to 0.12 in the last. The
-CTC head spells phonetically (@tt{ARK TEIRS} for @emph{Arcturus},
-@tt{STAD FAST} for @emph{steadfast}), while the attention decoder emits
-real words in roughly the right places (@tt{BY THE KING OF FIRE} for
-@emph{thy kingdom fair}) but over-generates, and on one utterance falls
-into a loop (@tt{THE LOWN IN THE LOWN}) that runs to the step cap. Every
-inserted character counts as an edit, so the three score 1.03 CER and
-1.69 WER, both above one. Three utterances are a small sample, and one
-runaway hypothesis dominates them. Scored by @racket[evaluate] on every
-26th utterance of test-clean, a hundred the model never saw, the same
-checkpoint's attention decoder lands at 0.74 CER and 1.18 WER, with one
-hypothesis in ten running to the cap; the CTC head's greedy decode,
-scored the same way, reaches 0.51 CER.
+mean hybrid loss from 2.60 in the first epoch to 0.16 in the last. The
+CTC head spells phonetically (@tt{STUDFAS} for @emph{steadfast},
+@tt{LOWD OF} for @emph{load of}), while the attention decoder emits real
+words in roughly the right places (@tt{PRAYES OF MAIN PURAYES} for
+@emph{praise of maiden pure}, @tt{WITH THE KARTY SENS} for @emph{with
+tardy sense}) but over-generates, and on one utterance falls into a loop
+(@tt{THE LOAD OF LOAD OF LOAD OF}) that runs on long past the reference.
+Every inserted character counts as an edit, so the three score 1.02 CER
+and 1.65 WER, both above one. Three utterances are a small sample, and
+one runaway hypothesis dominates them. Scored by @racket[evaluate] on
+every 26th utterance of test-clean, a hundred the model never saw, the
+same checkpoint's attention decoder lands at 0.79 CER and 1.20 WER, with
+9 of the 100 hypotheses running to the step cap; the CTC head's greedy
+decode, scored the same way, reaches 0.51 CER.
 
 @chunk[<r07-train>
 (define (train-librispeech #:epochs [epochs 20] #:limit [limit #f]
@@ -602,8 +596,6 @@ reference:
 <r07-require>
 <r07-provide>
 <r07-mask>
-<r07-encoder-block>
-<r07-decoder-block>
 <r07-model>
 <r07-device>
 <r07-features>

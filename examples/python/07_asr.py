@@ -2,13 +2,14 @@
 CTC/attention encoder-decoder in the same declaration order, 5 Adam steps
 on the committed MISTER QUILTER fixture.
 
-The blocks are nn.TransformerEncoderLayer and nn.TransformerDecoderLayer,
-pre-norm with an exact-gelu feed-forward four times the width and no
-dropout, one per block in an nn.ModuleList so each draws its own initial
-values, as the Racket stacks' #:copies? #f does. Each stack's final
-LayerNorm follows its blocks. PyTorch's tgt_is_causal is only a hint that
-the mask beside it is the causal mask, so the forward passes both; the
-Racket #:tgt-causal? builds the mask itself.
+The stacks are the standard nn.TransformerEncoder and nn.TransformerDecoder
+over pre-norm nn.TransformerEncoderLayer and nn.TransformerDecoderLayer
+with an exact-gelu feed-forward four times the width and no dropout, each
+ending in a LayerNorm, as the Racket TransformerEncoder and
+TransformerDecoder with #:norm? #t build them: every block a copy of the
+first. PyTorch's tgt_is_causal is only a hint that the mask beside it is
+the causal mask, so the forward passes both; the Racket #:tgt-causal?
+builds the mask itself.
 
 The parameters are reported in the Racket model's order: each attention's
 fused in_proj_weight and in_proj_bias split by rows into query, key and
@@ -73,16 +74,14 @@ class ASR(nn.Module):
         self.dils = nn.ModuleList([
             nn.Conv1d(N_EMBD, N_EMBD, 3, dilation=d, padding=d)
             for d in (1, 2, 4, 8)])
-        self.encoder = nn.ModuleList(
-            nn.TransformerEncoderLayer(N_EMBD, N_HEAD, **block_settings())
-            for _ in range(N_LAYER))
-        self.encoder_norm = nn.LayerNorm(N_EMBD)
+        self.encoder = nn.TransformerEncoder(
+            nn.TransformerEncoderLayer(N_EMBD, N_HEAD, **block_settings()),
+            N_LAYER, norm=nn.LayerNorm(N_EMBD), enable_nested_tensor=False)
         self.ctc_head = nn.Linear(N_EMBD, vocab_size + 1)
         self.tok_emb = nn.Embedding(vocab_size + 2, N_EMBD)
-        self.decoder = nn.ModuleList(
-            nn.TransformerDecoderLayer(N_EMBD, N_HEAD, **block_settings())
-            for _ in range(N_LAYER))
-        self.decoder_norm = nn.LayerNorm(N_EMBD)
+        self.decoder = nn.TransformerDecoder(
+            nn.TransformerDecoderLayer(N_EMBD, N_HEAD, **block_settings()),
+            N_LAYER, norm=nn.LayerNorm(N_EMBD))
         self.head = nn.Linear(N_EMBD, vocab_size + 1)
 
     def forward(self, x, dec_in, lengths=None):
@@ -115,19 +114,16 @@ class ASR(nn.Module):
                                           dtype=torch.float32).unsqueeze(1)
         e = c.transpose(1, 2) + sinusoidal_positions(
             c.shape[2], N_EMBD).to(x.device)
-        for layer in self.encoder:
-            e = layer(e, src_key_padding_mask=padding)
-        memory = self.encoder_norm(e)
+        memory = self.encoder(e, src_key_padding_mask=padding)
         ctc_log_probs = torch.log_softmax(self.ctc_head(memory), dim=2)
         s = dec_in.shape[1]
         causal = nn.Transformer.generate_square_subsequent_mask(
             s, device=x.device)
         d = self.tok_emb(dec_in) + sinusoidal_positions(
             s, N_EMBD).to(x.device)
-        for layer in self.decoder:
-            d = layer(d, memory, tgt_mask=causal, tgt_is_causal=True,
-                      memory_key_padding_mask=padding)
-        return ctc_log_probs, self.head(self.decoder_norm(d))
+        d = self.decoder(d, memory, tgt_mask=causal, tgt_is_causal=True,
+                         memory_key_padding_mask=padding)
+        return ctc_log_probs, self.head(d)
 
 
 def racket_order(net):
