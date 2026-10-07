@@ -47,7 +47,13 @@
              0))
    (vector "call-as-uninterruptible alone" full
            (lambda (b) (call-as-uninterruptible (lambda () (bump! b)))))
-   (vector "call-as-atomic" (quotient full 10) atomic-increment!)))
+   (vector "call-as-atomic" (quotient full 10) atomic-increment!)
+   (vector "start-atomic / end-atomic" (quotient full 10)
+           (lambda (b)
+             (start-atomic)
+             (bump! b)
+             (end-atomic)
+             0))))
 
 (define (measure total step #:threads [n threads] #:pool [pool 'own])
   (define per-thread (quotient total n))

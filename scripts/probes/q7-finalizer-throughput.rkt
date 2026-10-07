@@ -13,6 +13,7 @@
 (define churn-seconds 2.0)
 (define n 64)
 (define worker-counts '(1 4 8))
+(define drain-round-limit 200)
 
 (define (churn! randn deadline)
   (let loop ([made 0])
@@ -32,7 +33,7 @@
   (define start (current-inexact-monotonic-milliseconds))
   (let loop ([rounds 0])
     (cond
-      [(or (zero? ((prototype-live-bytes p))) (= rounds 200))
+      [(or (zero? ((prototype-live-bytes p))) (= rounds drain-round-limit))
        (values rounds (- (current-inexact-monotonic-milliseconds) start))]
       [else
        (collect-garbage 'major)
@@ -77,7 +78,7 @@
         (~r gc-share #:precision 2)
         (~r (/ (max peak lag) 1048576.0) #:precision 1)
         (~r (/ lag 1048576.0) #:precision 1)
-        rounds
+        (if (< rounds drain-round-limit) rounds (format "NOT DRAINED after ~a" rounds))
         (fmt-ms drain-ms)
         ((prototype-live-bytes p))
         (load-average)))
@@ -92,8 +93,9 @@
    '("allocator" "workers" "tensors made/s" "finalizer runs/s during churn"
      "runs / made" "GC ms per wall ms" "peak ledger MiB" "ledger MiB at stop"
      "major collections to drain" "drain ms" "ledger bytes after drain" "load"))
-  (for* ([v (in-list (workload-variants))]
+  (define variant-count (length (workload-variants)))
+  (for* ([k (in-range variant-count)]
          [workers (in-list worker-counts)])
-    (define p (car v))
-    (print-table-row (churn-row p (ops-randn (cdr v)) workers)))
+    (define v (list-ref (workload-variants) k))
+    (print-table-row (churn-row (car v) (ops-randn (cdr v)) workers)))
   (printf "\nload average (1 min) at end: ~a\n" (load-average)))

@@ -39,9 +39,15 @@
 (struct record (state nbytes phantom))
 
 ;; A record goes live -> freed exactly once, whichever of the explicit free
-;; and the finalizer gets there first.
+;; and the finalizer gets there first. box-cas! may fail spuriously, so a
+;; failure only counts as losing once the state is no longer live.
 (define (claim! r)
-  (box-cas! (record-state r) 'live 'freed))
+  (define state (record-state r))
+  (let retry ()
+    (cond
+      [(box-cas! state 'live 'freed) #t]
+      [(eq? (unbox state) 'live) (retry)]
+      [else #f])))
 
 (define (make-record t)
   (define nbytes (or (shim-nbytes t) 0))

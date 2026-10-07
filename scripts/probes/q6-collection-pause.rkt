@@ -86,9 +86,12 @@
       (cond
         [call (in-call-while call measure)]
         [else (parked measure)])))
-  (format "~a (~a%)"
-          (fmt-ms (median (map car samples)))
-          (fmt-ms (* 100 (apply min (map cdr samples))))))
+  (define least-share (apply min (map cdr samples)))
+  (cond
+    [(and call (zero? least-share)) "call returned before the measurement"]
+    [else (format "~a (~a%)"
+                  (fmt-ms (median (map car samples)))
+                  (fmt-ms (* 100 least-share)))]))
 
 (module+ main
   (print-banner (format "Q6: collection pauses while one parallel worker is in a foreign call (median of ~a)"

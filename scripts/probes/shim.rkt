@@ -30,19 +30,32 @@
 
 (define shim-version (get-ffi-obj "tr_version" shim (_fun -> _string)))
 
+(define last-error (get-ffi-obj "tr_last_error" shim (_fun -> _string)))
+
+;; tr_last_error is thread_local, so it is read in the same plain call's
+;; result handling, on the OS thread that failed.
+(define (checked who t)
+  (or t (error who "~a" (last-error))))
+
 (define randn/raw
-  (get-ffi-obj "tr_randn" shim (_fun _s64vector _int64 -> _pointer)))
+  (get-ffi-obj "tr_randn" shim
+               (_fun _s64vector _int64 -> (t : _pointer) -> (checked 'tr_randn t))))
 
 (define (shim-randn . dims)
   (randn/raw (apply s64vector dims) (length dims)))
 
-(define shim-add (get-ffi-obj "tr_add" shim (_fun _pointer _pointer -> _pointer)))
+(define shim-add
+  (get-ffi-obj "tr_add" shim
+               (_fun _pointer _pointer -> (t : _pointer) -> (checked 'tr_add t))))
 
 (define shim-matmul
-  (get-ffi-obj "tr_matmul" shim (_fun _pointer _pointer -> _pointer)))
+  (get-ffi-obj "tr_matmul" shim
+               (_fun _pointer _pointer -> (t : _pointer) -> (checked 'tr_matmul t))))
 
 (define shim-matmul/blocking
-  (get-ffi-obj "tr_matmul" shim (_fun #:blocking? #t _pointer _pointer -> _pointer)))
+  (get-ffi-obj "tr_matmul" shim
+               (_fun #:blocking? #t _pointer _pointer
+                     -> (t : _pointer) -> (checked 'tr_matmul t))))
 
 (define shim-free (get-ffi-obj "tr_tensor_free" shim (_fun _pointer -> _void)))
 
