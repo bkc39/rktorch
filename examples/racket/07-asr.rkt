@@ -323,7 +323,8 @@ together. Both accelerators run this model natively, so Apple silicon
 trains on the GPU like CUDA does. The one exception is @racket[ctc-loss] on
 dev-clean's longest bucket, whose transcripts pass 511 characters: MPS
 computes that one loss on the CPU, since its own kernel's gradients are
-wrong there.
+wrong there. That is a temporary workaround for an upstream bug
+(@hyperlink["https://github.com/bkc39/rktorch/issues/258"]{#258}).
 
 @chunk[<r07-device>
 (define (pick-device)

@@ -157,7 +157,10 @@ alignment can reach rather than propagating an infinity.
 On MPS, a batch whose longest target has 512 or more labels is computed on
 the CPU and its loss moved back to the device, because libtorch 2.14's MPS
 kernel returns wrong gradients there. Gradients still reach
-@racket[log-probs] on the device, and shorter targets stay on MPS.}
+@racket[log-probs] on the device, and shorter targets stay on MPS. This is
+a temporary workaround for an upstream bug, tracked in
+@hyperlink["https://github.com/bkc39/rktorch/issues/258"]{#258}, and goes
+once a libtorch release fixes the kernel.}
 
 @section{More layers}
 

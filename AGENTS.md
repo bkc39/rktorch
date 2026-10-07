@@ -406,7 +406,9 @@ new op lacks one, or its kernel is wrong for some shapes, route that op alone
 through the CPU with `to-device`, which is differentiable both ways, rather
 than routing darwin to the CPU. `ctc-loss` does this for targets of 512 labels
 or more, where 2.14's MPS backward returns wrong or NaN gradients while the
-forward stays right; a green loss curve does not catch that.
+forward stays right; a green loss curve does not catch that. That routing is
+a temporary workaround for an upstream PyTorch bug (#258): remove it, and keep
+its regression test, once a pinned libtorch fixes the kernel.
 
 ## Architecture
 

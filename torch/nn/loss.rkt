@@ -64,6 +64,7 @@
                         input-lengths target-lengths blank 1 zero-infinity?))
   (if via-cpu? (to-device loss home) loss))
 
+;; WORKAROUND (#258), remove once a pinned libtorch fixes it upstream:
 ;; libtorch 2.14's MPS ctc_loss backward returns wrong or NaN gradients once
 ;; a target reaches 512 labels (2S+1 past a 1024-thread threadgroup); its
 ;; forward is right, and below 512 both match the CPU
