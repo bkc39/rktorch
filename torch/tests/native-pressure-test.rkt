@@ -12,9 +12,10 @@
                     collect-and-drain! native-memory-use/fold)
            (only-in "../foreign/raw/collector.rkt"
                     call-as-the-collector collect-and-wait! drain-deadline)
+           (only-in "../foreign/raw/device-queries.rkt"
+                    allocator-reading install-device-queries!)
            (only-in "../foreign/raw/pressure.rkt"
-                    allocator-reading collect-at-trough! install-device-queries!
-                    margin-over
+                    collect-at-trough! margin-over
                     native-collect-budget native-collect-margin
                     native-memory-fraction release-spacing
                     reset-pressure-state! shadow-refresh lower-shadows!)
