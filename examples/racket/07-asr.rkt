@@ -319,8 +319,12 @@ something wider.
 
 @bold{The device.} As in the earlier capstones: take the accelerator and
 let @racket[with-default-device] scope it, so parameters and batches land
-together. Both accelerators run this model natively, @racket[ctc-loss]
-included, so Apple silicon trains on the GPU like CUDA does.
+together. Both accelerators run this model natively, so Apple silicon
+trains on the GPU like CUDA does. The one exception is @racket[ctc-loss] on
+dev-clean's longest bucket, whose transcripts pass 511 characters: MPS
+computes that one loss on the CPU, since its own kernel's gradients are
+wrong there. That is a temporary workaround for an upstream bug
+(@hyperlink["https://github.com/bkc39/rktorch/issues/258"]{#258}).
 
 @chunk[<r07-device>
 (define (pick-device)
