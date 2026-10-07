@@ -149,15 +149,17 @@
    '("register-finalizer called" "objects" "registration wall ms"
      "registrations/s" "finalizer runs" "never ran" "ran twice"
      "major collections to drain" "drain ms" "exactly once" "load"))
-  (print-table-row (cons "plain, first registrations in the process"
-                         (finalizer-round 100000 #:protect plain)))
-  (print-table-row (cons "plain" (finalizer-round 100000 #:protect plain)))
-  (print-table-row (cons "plain, one thread making all of them"
-                         (finalizer-round 800000 #:protect plain #:threads 1)))
-  (print-table-row (cons "under parameterize-break #f"
-                         (finalizer-round 100000 #:protect break-disabled)))
-  (print-table-row (cons "in uninterruptible mode"
-                         (finalizer-round 100000 #:protect call-as-uninterruptible)))
+  (for ([spec (in-list
+                 (list (list "plain, first registrations in the process" 100000 plain 8)
+                       (list "plain" 100000 plain 8)
+                       (list "plain, one thread making all of them" 800000 plain 1)
+                       (list "under parameterize-break #f" 100000 break-disabled 8)
+                       (list "in uninterruptible mode" 100000 call-as-uninterruptible 8)))])
+    (define-values (label per-thread protect threads) (apply values spec))
+    (define row (finalizer-round per-thread #:protect protect #:threads threads))
+    (print-table-row (cons label row))
+    (unless (zero? (list-ref row 4))
+      (error 'q3 "finalizers still pending after the drain; later rows would run them")))
   (newline)
   (print-table-header
    '("phantoms" "churn (set to the churn size and back)" "expected MiB"

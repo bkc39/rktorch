@@ -10,11 +10,13 @@
 (define matmul-n 3072)
 (define stall-window-ms 300)
 
-;; Answers the measurement and the share of it the call was in flight for.
-;; A plain call holds the collection until it returns, so its share reads
-;; 1 even though it returns just before the measurement ends.
+;; Answers the measurement and the share of it the call was in flight for,
+;; from the worker's last timestamp before the call to its first after. A
+;; plain call holds the collection until it returns, so its share reads 1
+;; even though it returns just before the measurement ends.
 (define (in-call-while call measure)
   (define inside (make-semaphore 0))
+  (define entered-at (box #f))
   (define returned-at (box #f))
   (define failure (box #f))
   (define worker
@@ -22,6 +24,7 @@
               (at-set-num-threads 1)
               (semaphore-post inside)
               (with-handlers ([(lambda (_) #t) (lambda (e) (set-box! failure e))])
+                (set-box! entered-at (current-inexact-monotonic-milliseconds))
                 (call))
               (set-box! returned-at (current-inexact-monotonic-milliseconds)))
             #:pool 'own))
@@ -33,7 +36,8 @@
   (thread-wait worker)
   (when (unbox failure)
     (raise (unbox failure)))
-  (define in-flight (- (min (unbox returned-at) ended-at) started-at))
+  (define in-flight (- (min (unbox returned-at) ended-at)
+                       (max (unbox entered-at) started-at)))
   (cons result (max 0.0 (/ in-flight (max (- ended-at started-at) 1e-3)))))
 
 (define (timed thunk)
@@ -62,7 +66,9 @@
   (lambda ()
     (shim-free (matmul-fn a a))))
 
-(define calls
+;; Built after the intra-op count is set, since the matmul inputs are the
+;; first libtorch ops.
+(define (make-calls)
   (list (cons "none (worker parked on a semaphore)" #f)
         (cons "usleep 1.5 s, plain _fun" (sleep-call usleep))
         (cons "usleep 1.5 s, #:blocking? #t" (sleep-call usleep/blocking))
@@ -98,6 +104,7 @@
                         repeats)
                 #:torch-version (shim-version))
   (at-set-num-threads 1)
+  (define calls (make-calls))
   (define call-ms (timed (cdr (list-ref calls 3))))
   (printf "- one ~a matmul alone, 1 intra-op thread, on the main thread: ~a ms\n" matmul-n
           (fmt-ms call-ms))

@@ -157,9 +157,12 @@
                       (busy-loop)))
                   #:pool 'own)))
       (for ([_ (in-range 4)]) (semaphore-wait busy))
-      (define result (and (not (unbox failure)) (thunk)))
-      (semaphore-post stop)
-      (for-each thread-wait workers)
+      (define result
+        (dynamic-wind void
+                      (lambda () (and (not (unbox failure)) (thunk)))
+                      (lambda ()
+                        (semaphore-post stop)
+                        (for-each thread-wait workers))))
       (when (unbox failure) (raise (unbox failure)))
       result)
     (parallel-add!)
