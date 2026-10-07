@@ -37,7 +37,7 @@
                                          #:norm-first? #t
                                          #:dropout 0.0
                                          #:batch-first? #t
-                                         #:norm? #t))
+                                         #:norm #t))
        (set! ctc-head (Linear n-embd (add1 vocab-size)))
        (set! tok-emb (Embedding (+ vocab-size 2) n-embd))
        (set! decoder (TransformerDecoder n-embd
@@ -48,7 +48,7 @@
                                          #:norm-first? #t
                                          #:dropout 0.0
                                          #:batch-first? #t
-                                         #:norm? #t))
+                                         #:norm #t))
        (set! head (Linear n-embd (add1 vocab-size)))
        #:forward (x dec-in lengths)
        (with-default-device (tensor-device x)

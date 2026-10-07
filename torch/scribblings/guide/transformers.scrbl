@@ -453,7 +453,7 @@ stacks are one call each:
                     #:norm-first? #t
                     #:dropout 0.0
                     #:batch-first? #t
-                    #:norm? #t)
+                    #:norm #t)
 (TransformerDecoder n-embd
                     #:heads n-head
                     #:layers 6
@@ -462,7 +462,7 @@ stacks are one call each:
                     #:norm-first? #t
                     #:dropout p-drop
                     #:batch-first? #t
-                    #:norm? #t)
+                    #:norm #t)
 ]
 
 That is @tt{nn.TransformerEncoder(nn.TransformerEncoderLayer(...), 6,

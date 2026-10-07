@@ -6,7 +6,7 @@ The stacks are the standard nn.TransformerEncoder and nn.TransformerDecoder
 over pre-norm nn.TransformerEncoderLayer and nn.TransformerDecoderLayer
 with an exact-gelu feed-forward four times the width and no dropout, each
 ending in a LayerNorm, as the Racket TransformerEncoder and
-TransformerDecoder with #:norm? #t build them: every block a copy of the
+TransformerDecoder with #:norm #t build them: every block a copy of the
 first. PyTorch's tgt_is_causal is only a hint that the mask beside it is
 the causal mask, so the forward passes both; the Racket #:tgt-causal?
 builds the mask itself.

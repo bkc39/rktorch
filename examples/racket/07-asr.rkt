@@ -168,14 +168,14 @@ and returns both heads' views.
 @racket[TransformerEncoder] builds the encoder stack in one call, as
 @tt{nn.TransformerEncoder(nn.TransformerEncoderLayer(...), 6,
 norm=nn.LayerNorm(n_embd))} builds PyTorch's: the width, the heads and
-the block settings above, six blocks, and @racket[#:norm? #t] for the
+the block settings above, six blocks, and @racket[#:norm #t] for the
 final @racket[LayerNorm], which a pre-norm stack needs because no block
 normalizes the stream it passes on. @racket[TransformerDecoder] builds
 the decoder stack the same way, PyTorch's @tt{nn.TransformerDecoder}
 over @tt{nn.TransformerDecoderLayer}, with the model's dropout. Like
 PyTorch's, each stack starts every block as a copy of its first, and
-training moves them apart; a stack of independently drawn blocks is
-@racket[GenericTransformerEncoder] with @racket[#:copies? #f]
+training moves them apart; for independently drawn blocks, pass the stack
+a procedure that builds one block instead of the width
 (@secref["attention-transformer-stacks"]). The decoder stack runs with
 @racket[#:tgt-causal? #t], which every block hands to its
 self-attention, and both stacks take the padding mask.
@@ -218,7 +218,7 @@ fixture-scale configuration the parity twin trains;
                                     #:norm-first? #t
                                     #:dropout 0.0
                                     #:batch-first? #t
-                                    #:norm? #t))
+                                    #:norm #t))
   (set! ctc-head (Linear n-embd (add1 vocab-size)))
   (set! tok-emb (Embedding (+ vocab-size 2) n-embd))
   (set! decoder (TransformerDecoder n-embd
@@ -229,7 +229,7 @@ fixture-scale configuration the parity twin trains;
                                     #:norm-first? #t
                                     #:dropout p-drop
                                     #:batch-first? #t
-                                    #:norm? #t))
+                                    #:norm #t))
   (set! hdrop (Dropout #:p p-drop))
   (set! head (Linear n-embd (add1 vocab-size)))
   #:forward (x dec-in lengths)
