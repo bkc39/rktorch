@@ -144,9 +144,8 @@ heads back. By hand:
                                 (heads ((child-ref mha "value") tokens))))
 (shape per-head)
 (define joined (reshape (transpose per-head 1 2) 2 3 4))
-(< (item (max (abs (- ((child-ref mha "out") joined)
-                      (mha tokens tokens tokens)))))
-   1e-6)
+(~> (- ((child-ref mha "out") joined) (mha tokens tokens tokens))
+    abs max item (< 1e-6))
 ]
 
 Sequences in a batch rarely have the same length. The shorter ones are

@@ -5,10 +5,10 @@
          (only-in racket/list last)
          (only-in racket/match match match-define match-let)
          (only-in "../foreign.rkt"
-                  add copy! masked-fill matmul mul narrow ones permute reshape
-                  scaled-dot-product-attention softmax squeeze tensor-device
-                  tensor-dtype tensor-shape tensor? to-dtype transpose triu
-                  unsqueeze with-no-grad zero! zeros zeros-like)
+                  add copy! device dtype masked-fill matmul mul narrow ones
+                  permute reshape scaled-dot-product-attention shape softmax
+                  squeeze tensor? to-dtype transpose triu unsqueeze
+                  with-no-grad zero! zeros zeros-like)
          (only-in "../generated.rkt" dropout mean-dim)
          (only-in "init.rkt" uniform-init)
          (only-in "layer.rkt" define-layer named-parameters training? with-mode)
@@ -22,7 +22,7 @@
   (uniform-init dims (- bound) bound))
 
 (define (rows packed start count)
-  (define t (zeros count (cadr (tensor-shape packed))))
+  (define t (zeros count (cadr (shape packed))))
   (copy! t (narrow packed 0 start count))
   t)
 
@@ -46,32 +46,32 @@
 (define attention-sequence/c
   (flat-named-contract
    'attention-sequence
-   (lambda (x) (and (tensor? x) (memv (length (tensor-shape x)) '(2 3)) #t))))
+   (lambda (x) (and (tensor? x) (memv (length (shape x)) '(2 3)) #t))))
 
 (define attention-mask/c
   (flat-named-contract
    'attention-mask
    (lambda (m)
      (and (tensor? m)
-          (memq (tensor-dtype m) '(bool float32 float64 float16 bfloat16))
+          (memq (dtype m) '(bool float32 float64 float16 bfloat16))
           #t))))
 
 (define (rank x)
-  (length (tensor-shape x)))
+  (length (shape x)))
 
 (define (call/c embed-dim key-dim value-dim heads batch-first?)
   (define (batch+length x)
-    (match (tensor-shape x)
+    (match (shape x)
       [(list l _) (list #f l)]
       [(list a b _) (if batch-first? (list a b) (list b a))]))
   (define (wide who x expected)
-    (define width (last (tensor-shape x)))
+    (define width (last (shape x)))
     (or (= width expected)
         (format "~a is ~a wide, not ~a" who width expected)))
   (define (shaped who m expected)
     (or (not m)
-        (and (member (tensor-shape m) expected) #t)
-        (format "~a has shape ~a, not ~a" who (tensor-shape m)
+        (and (member (shape m) expected) #t)
+        (format "~a has shape ~a, not ~a" who (shape m)
                 (if (null? (cdr expected))
                     (car expected)
                     (format "~a or ~a" (car expected) (cadr expected))))))
@@ -113,37 +113,37 @@
        any))
 
 (define (split-heads x heads batch-first?)
-  (match-define (list a b width) (tensor-shape x))
+  (match-define (list a b width) (shape x))
   (define split (reshape x a b heads (quotient width heads)))
   (if batch-first? (permute split 0 2 1 3) (permute split 1 2 0 3)))
 
 (define (merge-heads x batch-first?)
-  (match-define (list n heads l d) (tensor-shape x))
+  (match-define (list n heads l d) (shape x))
   (if batch-first?
       (reshape (permute x 0 2 1 3) n l (* heads d))
       (reshape (permute x 2 0 1 3) l n (* heads d))))
 
-(define (additive mask dtype)
-  (if (eq? (tensor-dtype mask) 'bool)
-      (masked-fill (zeros-like mask #:dtype dtype) mask -inf.0)
-      (to-dtype mask dtype)))
+(define (additive mask float-type)
+  (if (eq? (dtype mask) 'bool)
+      (masked-fill (zeros-like mask #:dtype float-type) mask -inf.0)
+      (to-dtype mask float-type)))
 
 (define (causal-mask l s like)
-  (define device (tensor-device like))
-  (masked-fill (zeros l s #:device device #:dtype (tensor-dtype like))
-               (triu (ones l s #:device device #:dtype 'bool) 1)
+  (define dev (device like))
+  (masked-fill (zeros l s #:device dev #:dtype (dtype like))
+               (triu (ones l s #:device dev #:dtype 'bool) 1)
                -inf.0))
 
 (define (combined-mask padding mask causal? like heads s)
-  (match-define (list n _ l _) (tensor-shape like))
-  (define dtype (tensor-dtype like))
+  (match-define (list n _ l _) (shape like))
+  (define float-type (dtype like))
   (define parts
     (append
-     (if padding (list (reshape (additive padding dtype) n 1 1 s)) '())
+     (if padding (list (reshape (additive padding float-type) n 1 1 s)) '())
      (if mask
          (list (if (= 3 (rank mask))
-                   (reshape (additive mask dtype) n heads l s)
-                   (additive mask dtype)))
+                   (reshape (additive mask float-type) n heads l s)
+                   (additive mask float-type)))
          '())
      (if causal? (list (causal-mask l s like)) '())))
   (and (pair? parts)
@@ -153,7 +153,7 @@
 (define (attend-heads qh kh vh mask causal? p need-weights?)
   (cond
     [need-weights?
-     (define scale (sqrt (/ 1.0 (last (tensor-shape qh)))))
+     (define scale (sqrt (/ 1.0 (last (shape qh)))))
      (define scores (matmul (mul qh scale) (transpose kh 2 3)))
      (define weights (softmax (if mask (add scores mask) scores) 3))
      (define dropped (if (positive? p) (dropout weights p #t) weights))
@@ -187,7 +187,7 @@
   (define-values (attended weights)
     (attend-heads qh kh vh
                   (combined-mask padding mask (and causal? (not fused-causal?))
-                                 qh heads (caddr (tensor-shape kh)))
+                                 qh heads (caddr (shape kh)))
                   fused-causal? p need-weights?))
   (define projected (out (merge-heads attended batch-first?)))
   (define output (if unbatched? (squeeze projected batch-dim) projected))

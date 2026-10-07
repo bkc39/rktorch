@@ -105,13 +105,13 @@
                           #:key-dim key-dim #:value-dim value-dim))
     (define params (named-values mha values))
     (to mha device)
-    (define (shape n width)
+    (define (dims n width)
       (cond
         [unbatched? (list n width)]
         [batch-first? (list batch n width)]
         [else (list n batch width)]))
     (define (leaf n width)
-      (requires-grad! (to-device (randn (shape n width)) device)))
+      (requires-grad! (to-device (randn (dims n width)) device)))
     (define leaves
       (if cross?
           (list (leaf length embed) (leaf source key-dim)
@@ -132,7 +132,7 @@
     (define-values (out weights)
       (if need-weights? (apply-layer) (values (apply-layer) #f)))
     (define (weighed t)
-      (sum (* t (to-device (randn (tensor-shape t)) device))))
+      (sum (* t (to-device (randn (shape t)) device))))
     (backward! (if weights (+ (weighed out) (weighed weights)) (weighed out)))
     (hash 'params params
           'out out
@@ -220,14 +220,14 @@
         (define got (run-case device))
         (check-named (format "~a: init" label) (hash-ref got 'params)
                      (hash-ref expected 'params) tolerance)
-        (check-equal? (tensor-shape (hash-ref got 'out))
+        (check-equal? (shape (hash-ref got 'out))
                       (hash-ref expected 'out_shape) label)
         (check-numbers (format "~a: output" label) (flat (hash-ref got 'out))
                        (hash-ref expected 'out) tolerance)
         (define weights (hash-ref got 'weights))
         (cond
           [weights
-           (check-equal? (tensor-shape weights)
+           (check-equal? (shape weights)
                          (hash-ref expected 'weights_shape) label)
            (check-numbers (format "~a: weights" label) (flat weights)
                           (hash-ref expected 'weights) tolerance)]
