@@ -131,8 +131,8 @@ configuration that @racket[run-example] and the parity twin train;
                                         #:norm #t))
   (set! head (Linear n-embd vocab-size))
   #:forward (idx)
-  (with-default-device (tensor-device idx)
-    (define seq-len (cadr (tensor-shape idx)))
+  (with-default-device (device idx)
+    (define seq-len (cadr (shape idx)))
     (define pos (to-dtype (arange seq-len) 'int64))
     (~> (+ (tok-emb idx) (pos-emb pos))
         (transformer #:causal? #t)
@@ -146,16 +146,65 @@ batches land together.
 (define (pick-device)
   (accelerator-if-available))]
 
+@bold{The training loop.} The three ways to train below differ in their
+text, their sizes, the order they train in and what they print;
+@racket[gpt-trainer] is everything else, written once. It takes the text,
+the context length as @racket[#:block-size], the rows of a step as
+@racket[#:batch] (every block at once when it is @racket[#f]), the
+learning rate as @racket[#:lr], and the model's @racket[#:n-embd],
+@racket[#:n-head] and @racket[#:n-layer]. It seeds the generator with 0,
+builds the vocabulary from the text, carves the encoded text into
+@racket[contiguous-blocks], and draws a @racket[gpt] and its
+@racket[adam]. It returns four values: the net, the vocabulary, the number
+of windows, and a procedure that trains one step. A window is a batch of
+consecutive blocks; the windows tile the blocks in order, and the ragged
+tail, fewer than a batch, belongs to none of them. The procedure takes a
+window's index, runs one @racket[adam] step on it, and returns that step's
+loss as a real. The loss is @racket[cross-entropy] with the
+@tt{[B, T, V]} logits and @tt{[B, T]} targets flattened to one
+@tt{[B*T]}-row classification problem.
+
+@chunk[<r06-trainer>
+(define (gpt-trainer text
+                     #:block-size block-size
+                     #:batch [batch #f]
+                     #:lr lr
+                     #:n-embd [n-embd 32]
+                     #:n-head [n-head 4]
+                     #:n-layer [n-layer 2])
+  (manual-seed! 0)
+  (define vocab (text->vocab text))
+  (define v-size (vector-length vocab))
+  (define-values (xs ys) (contiguous-blocks (encode vocab text) block-size))
+  (define n (car (shape xs)))
+  (define rows (or batch n))
+  (unless (<= rows n)
+    (error 'gpt-trainer "batch ~a exceeds the text's ~a blocks" rows n))
+  (define net
+    (gpt v-size block-size #:n-embd n-embd #:n-head n-head #:n-layer n-layer))
+  (define opt (adam (parameters net) #:lr lr))
+  (define (train-window! window)
+    (define (in-window t) (narrow t 0 (* window rows) rows))
+    (zero-grads! opt)
+    (define loss
+      (~> (in-window xs)
+          net
+          (reshape -1 v-size)
+          (cross-entropy (reshape (in-window ys) -1))))
+    (backward! loss)
+    (step! opt)
+    (item loss))
+  (values net vocab (quotient n rows) train-window!))]
+
 @bold{The deterministic core.} @racket[run-example] is the seeded, offline
 entry the test harness and the PyTorch parity twin both drive: the committed
-841-char fixture becomes @racket[contiguous-blocks] of 16 chars, and a
-fixture-scale @racket[gpt] trains for @racket[steps] full-batch @racket[adam]
-steps. The next-char loss is @racket[cross-entropy] with the @tt{[B, T, V]}
-logits and @tt{[B, T]} targets flattened to one @tt{[B*T]}-row classification
-problem. Full-batch, no shuffling: with a shared seed the
-@racket[Embedding], @racket[TransformerEncoder] and @racket[Linear]
-inits draw value-for-value like their @tt{nn.*} counterparts (declaration
-order is RNG-draw order on both sides, and the twin builds its stack as
+841-char fixture becomes blocks of 16 chars, and a fixture-scale
+@racket[gpt] trains for @racket[steps] full-batch @racket[adam] steps, each
+on the one window that holds every block. Full-batch, no shuffling: with a
+shared seed the @racket[Embedding], @racket[TransformerEncoder] and
+@racket[Linear] inits draw value-for-value like their @tt{nn.*}
+counterparts (declaration order is RNG-draw order on both sides, and the
+twin builds its stack as
 @tt{nn.TransformerEncoder(nn.TransformerEncoderLayer(...), 2,
 norm=nn.LayerNorm(32))} with the same settings), and the updates track
 @tt{torch.optim.Adam} within float tolerance.
@@ -165,22 +214,13 @@ norm=nn.LayerNorm(32))} with the same settings), and the updates track
 
 (define (run-example #:steps [steps 5] #:device [device (pick-device)])
   (with-default-device device
-    (manual-seed! 0)
-    (define text (load-text-fixture))
-    (define vocab (text->vocab text))
-    (define-values (xs ys)
-      (contiguous-blocks (encode vocab text) fixture-block-size))
-    (define net (gpt (vector-length vocab) fixture-block-size))
-    (define opt (adam (parameters net) #:lr 0.001))
+    (define-values (net vocab _windows train-window!)
+      (gpt-trainer (load-text-fixture)
+                   #:block-size fixture-block-size
+                   #:lr 0.001))
     (define losses
       (for/list ([_ (in-range steps)])
-        (zero-grads! opt)
-        (define logits (net xs))
-        (define loss (cross-entropy (reshape logits -1 (vector-length vocab))
-                                    (reshape ys -1)))
-        (backward! loss)
-        (step! opt)
-        (item loss)))
+        (train-window! 0)))
     (values losses net vocab device)))]
 
 @bold{The middle path: offline training on a committed excerpt.} Between the
@@ -188,18 +228,18 @@ norm=nn.LayerNorm(32))} with the same settings), and the updates track
 download sits @filepath{examples/data/heart-of-darkness-part-i.txt}: the
 opening ~31k characters of Part I, committed to the repo, so this trains a
 real --- if small --- language model with @emph{no network at all}. The loop
-is epoch-shaped: sequential batch-stride passes over the excerpt's
-contiguous blocks, with the ragged trailing remainder --- fewer than
-@racket[batch] rows; 4 of 964 here --- dropped each epoch, the same
-tail-drop semantics as @racket[train-novel] and the train script
-(re-training the final @racket[n - batch] window instead would overlap
-most of it with the previous window every epoch, a worse bias than
-skipping under half a percent of the data). The per-epoch mean loss prints
-so the run is watchable; the model is scaled down to match the data
-(64-dim, 2 blocks, 32-char context). The default 60 epochs take about
-twenty seconds on an RTX 3090 Ti and about as long on an eight-core CPU:
-the model is too small to keep a GPU busy. The mean loss falls from
-about 2.3 at the tenth epoch to about 0.8 at the sixtieth.
+is epoch-shaped: each epoch trains every window once, in order, so the
+ragged trailing remainder --- fewer than @racket[batch] rows; 4 of 964
+here --- is dropped each epoch, the same tail-drop semantics as
+@racket[train-novel] and the train script (re-training the final
+@racket[n - batch] window instead would overlap most of it with the
+previous window every epoch, a worse bias than skipping under half a
+percent of the data). The per-epoch mean loss prints so the run is
+watchable; the model is scaled down to match the data (64-dim, 2 blocks,
+32-char context). The default 60 epochs take about twenty seconds on an
+RTX 3090 Ti and about as long on an eight-core CPU: the model is too small
+to keep a GPU busy. The mean loss falls from about 2.3 at the tenth epoch
+to about 0.8 at the sixtieth.
 
 @chunk[<r06-train-excerpt>
 (define-runtime-path excerpt-path "../data/heart-of-darkness-part-i.txt")
@@ -212,40 +252,31 @@ about 2.3 at the tenth epoch to about 0.8 at the sixtieth.
                        #:device [device (pick-device)]
                        #:log-every [log-every 10])
   (with-default-device device
-    (manual-seed! 0)
-    (define text (load-excerpt))
-    (define vocab (text->vocab text))
-    (define v-size (vector-length vocab))
-    (define-values (xs ys)
-      (contiguous-blocks (encode vocab text) block-size))
-    (define n (car (tensor-shape xs)))
-    (unless (<= batch n)
-      (error 'train-excerpt "batch ~a exceeds the excerpt's ~a blocks"
-             batch n))
-    (define net (gpt v-size block-size #:n-embd 64 #:n-head 4 #:n-layer 2))
-    (define opt (adam (parameters net) #:lr 0.001))
+    (define-values (net vocab windows train-window!)
+      (gpt-trainer (load-excerpt)
+                   #:block-size block-size
+                   #:batch batch
+                   #:lr 0.001
+                   #:n-embd 64 #:n-head 4 #:n-layer 2))
     (for ([epoch (in-range 1 (add1 epochs))])
-      (define-values (total steps)
-        (for/fold ([total 0.0] [steps 0])
-                  ([start (in-range 0 (add1 (- n batch)) batch)])
-          (zero-grads! opt)
-          (define loss
-            (cross-entropy
-             (reshape (net (narrow xs 0 start batch)) -1 v-size)
-             (reshape (narrow ys 0 start batch) -1)))
-          (backward! loss)
-          (step! opt)
-          (values (+ total (item loss)) (add1 steps))))
+      (define total
+        (for/sum ([window (in-range windows)])
+          (train-window! window)))
       (when (zero? (modulo epoch log-every))
-        (printf "epoch ~a/~a: mean loss ~a\n" epoch epochs (/ total steps))))
+        (printf "epoch ~a/~a: mean loss ~a\n" epoch epochs (/ total windows))))
     (values net vocab)))]
 
 @bold{The real thing.} @racket[train-novel] downloads the full novella
 (cached under @envvar{RKTORCH_TEXT_DIR} or the system cache dir; the Project
 Gutenberg boilerplate is stripped by the loader), carves it into ~3300
 64-char blocks, and trains a 4-layer model on deterministic contiguous
-minibatches --- the batch window cycles through the text in order, the
-same sweep as the training script's epochs. The default 2000 steps take
+minibatches. It counts steps rather than epochs: step @racket[k] trains
+window @racket[k] modulo the number of windows, so the batch window cycles
+through the text in order and visits every window once per pass, the same
+sweep as the training script's epochs. (Advancing the start by
+@racket[batch] blocks modulo the block count instead would reach every
+start only when the two share no factor; at the novella's size it would
+skip most of them, the final window among them.) The default 2000 steps take
 about 40 seconds on an RTX 3090 Ti and about four minutes on an
 eight-core CPU, the loss falling from 4.4 or 4.5 at the first step to
 about 1.4.
@@ -256,34 +287,16 @@ about 1.4.
                      #:device [device (pick-device)]
                      #:log-every [log-every 100])
   (with-default-device device
-    (manual-seed! 0)
-    (define text (load-heart-of-darkness))
-    (define vocab (text->vocab text))
-    (define-values (xs ys) (contiguous-blocks (encode vocab text) block-size))
-    (define n (car (tensor-shape xs)))
-    (unless (<= batch n)
-      (error 'train-novel "batch ~a exceeds the corpus's ~a blocks" batch n))
-    (define net (gpt (vector-length vocab) block-size
-                     #:n-embd 128 #:n-head 4 #:n-layer 4))
-    (define opt (adam (parameters net) #:lr 0.0003))
-    ;; Sequential wraparound sweep, aligned with scripts/train-gpt.rkt's
-    ;; epoch loop: batch-stride windows tile the corpus and every one is
-    ;; visited each `windows` steps. (A (* step batch)-mod-M cycle only
-    ;; covers all offsets when gcd(batch, M) = 1 — at the novella's size it
-    ;; would skip most of them, including the final window.) The trailing
-    ;; partial window (< batch blocks) is dropped, as in the script.
-    (define windows (quotient n batch))
+    (define-values (net vocab windows train-window!)
+      (gpt-trainer (load-heart-of-darkness)
+                   #:block-size block-size
+                   #:batch batch
+                   #:lr 0.0003
+                   #:n-embd 128 #:n-head 4 #:n-layer 4))
     (for ([step (in-range steps)])
-      (define start (* batch (modulo step windows)))
-      (zero-grads! opt)
-      (define loss
-        (cross-entropy
-         (reshape (net (narrow xs 0 start batch)) -1 (vector-length vocab))
-         (reshape (narrow ys 0 start batch) -1)))
-      (backward! loss)
-      (step! opt)
+      (define loss (train-window! (modulo step windows)))
       (when (zero? (modulo step log-every))
-        (printf "step ~a: loss ~a\n" step (item loss))))
+        (printf "step ~a: loss ~a\n" step loss)))
     (values net vocab)))]
 
 @bold{Generation.} Autoregressive and greedy: run the context through the
@@ -311,30 +324,29 @@ on any character outside it).
 (define (generate net vocab prompt
                   #:steps [steps 256]
                   #:block-size [block-size #f]
-                  #:device [device #f])
+                  #:device [requested #f])
   (when (zero? (string-length prompt))
     (error 'generate "prompt must be non-empty"))
   ;; Any parameter's device works (a model's tensors are colocated); the
   ;; context limit comes from pos-emb's row count by *name*, so it survives
   ;; a reordering of gpt's #:init body.
-  (define dev (or device (tensor-device (car (parameters net)))))
+  (define dev (or requested (~> (parameters net) car device)))
   (define ctx-limit
     (or block-size
-        (car (tensor-shape
-              (cdr (assoc "pos-emb.weight" (named-parameters net)))))))
+        (~> (assoc "pos-emb.weight" (named-parameters net)) cdr shape car)))
   (with-default-device dev
     (in-eval-mode net
       (with-no-grad
         (define start
-          (map inexact->exact (tensor->list (encode vocab prompt))))
+          (~>> (encode vocab prompt) tensor->list (map inexact->exact)))
         (define ids
           (for/fold ([ids start]) ([_ (in-range steps)])
             (define ctx (take-right ids (min (length ids) ctx-limit)))
             (define idx
-              (reshape (to-dtype (tensor ctx) 'int64) 1 (length ctx)))
+              (~> (tensor ctx) (to-dtype 'int64) (reshape 1 (length ctx))))
             (define logits (net idx))
             (define next-logits (narrow logits 1 (- (length ctx) 1) 1))
-            (define next (inexact->exact (item (argmax next-logits))))
+            (define next (~> (argmax next-logits) item inexact->exact))
             (append ids (list next))))
         (decode vocab ids)))))]
 
@@ -343,6 +355,7 @@ on any character outside it).
   <r06-provide>
   <r06-model>
   <r06-device>
+  <r06-trainer>
   <r06-run>
   <r06-train-excerpt>
   <r06-train-novel>
