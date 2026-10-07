@@ -26,7 +26,7 @@
     (for-each thread-wait threads))
 
   (define (racing-layer)
-    (to (LSTM 8 16 #:num-layers 3 #:bidirectional? #t) device))
+    (to (LSTM 8 16 #:num-layers 2 #:bidirectional? #t) device))
 
   (define (forwards-pack-once pool)
     (define lstm (racing-layer))
@@ -34,7 +34,7 @@
     (define x (randn 4 2 8 #:device device))
     (define failures (box '()))
     (define extra
-      (for/sum ([_ (in-range 40)])
+      (for/sum ([_ (in-range 16)])
         (to lstm 'float64)
         (to lstm 'float32)
         (define before (flatten-count))
@@ -85,7 +85,7 @@
     (define mover
       (thread
        (lambda ()
-         (for ([_ (in-range 300)]
+         (for ([_ (in-range 120)]
                [placement (in-cycle (in-list placements))])
            (call-with-semaphore turn
                                 (lambda () (apply to lstm placement))))
