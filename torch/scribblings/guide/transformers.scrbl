@@ -14,7 +14,9 @@ other and take a weighted average of what it finds. That step is
 it. This chapter computes it by hand on tensors small enough to read,
 hands the same work to the library's fused call, and then builds the rest
 of a transformer around it: heads and masks, blocks and stacks, and the
-positions that tell a model where each token sits.
+positions that tell a model where each token sits. The last two sections
+point into the worked examples that train the two arrangements, a
+language model and a speech recognizer.
 
 @section[#:tag "transformers-by-hand"]{Attention by hand}
 
@@ -430,5 +432,63 @@ shifted by one.
 The chapter's PyTorch twin builds the same model from
 @tt{nn.TransformerEncoder} and matches it under one seed, so the example
 doubles as a check that these layers train as PyTorch's do.
-@secref["ex-asr"] uses the other arrangement, an encoder and a decoder,
-the decoder reading an encoded utterance through cross-attention.
+
+@section[#:tag "transformers-asr"]{A speech recognizer from the pieces}
+
+A speech recognizer uses the other arrangement, the toy translation model
+of @secref["transformers-blocks"] grown to real data. Its encoder reads a
+whole utterance at once, every frame attending to every other. Its decoder
+writes the transcript a character at a time under a causal mask, and
+reads the encoded audio through cross-attention. @secref["ex-asr"] builds
+one from this chapter's pieces and trains it on LibriSpeech. Its two
+stacks are one call each:
+
+@racketblock[
+(TransformerEncoder n-embd
+                    #:heads n-head
+                    #:layers 6
+                    #:ffn-width (* 4 n-embd)
+                    #:activation 'gelu
+                    #:norm-first? #t
+                    #:dropout 0.0
+                    #:batch-first? #t
+                    #:norm #t)
+(TransformerDecoder n-embd
+                    #:heads n-head
+                    #:layers 6
+                    #:ffn-width (* 4 n-embd)
+                    #:activation 'gelu
+                    #:norm-first? #t
+                    #:dropout p-drop
+                    #:batch-first? #t
+                    #:norm #t)
+]
+
+That is @tt{nn.TransformerEncoder(nn.TransformerEncoderLayer(...), 6,
+norm=nn.LayerNorm(n_embd))} and its @tt{nn.TransformerDecoder}
+counterpart, pre-norm as the GPT's are. Around them the example puts the
+rest of this chapter:
+
+@itemlist[
+ @item{a front end of strided and dilated convolutions turns a
+       spectrogram into frames as wide as the model, and
+       @racket[sinusoidal-positions] with @racket[#:layout 'halves] gives
+       the frames and the characters their positions, with no table and
+       no length cap;}
+ @item{utterances differ in length, so a batch is padded at the end,
+       and one @tt{[B, T]} mask, @racket[#t] at each padded frame, goes to
+       the encoder as @racket[#:key-padding-mask] and to the decoder as
+       @racket[#:memory-key-padding-mask], so neither the encoder's
+       self-attention nor the decoder's cross-attention reads the
+       padding;}
+ @item{the decoder runs with @racket[#:tgt-causal? #t] and needs no
+       padding mask of its own: with the characters padded at the end, the
+       causal mask already keeps every real character from reading a pad;}
+ @item{two heads read the model: a CTC head on the encoder, trained by
+       @racket[ctc-loss] with no alignment between frames and characters,
+       and a character head on the decoder, trained by
+       @racket[cross-entropy] against the transcript shifted by one.}]
+
+Its PyTorch twin builds the same model from @tt{nn.TransformerEncoder}
+and @tt{nn.TransformerDecoder} and matches it under one seed, so the
+decoder's cross-attention trains as PyTorch's does too.

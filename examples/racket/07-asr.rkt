@@ -38,29 +38,29 @@ CTC aligns, attention spells.
          (only-in torch/data/text decode encode text->vocab))]
 
 @chunk[<r07-provide>
-(provide asr asr-encoder-block asr-decoder-block
-         self-attention cross-attention feed-forward pick-device
-         run-example greedy-decode transcribe utterance-features
-         hybrid-batch-loss train-librispeech evaluate)]
+(provide asr pick-device run-example greedy-decode transcribe
+         utterance-features hybrid-batch-loss train-librispeech evaluate)]
+
+The transformer half of the model is the library's: the encoder and
+decoder blocks are @racket[TransformerEncoderLayer] and
+@racket[TransformerDecoderLayer], stacked by @racket[TransformerEncoder]
+and @racket[TransformerDecoder], and the attention inside them is
+@racket[MultiheadAttention] running @racket[scaled-dot-product-attention]
+over every head at once. @secref["guide-transformers"] builds those
+layers up from bare tensors and @secref["attention"] documents them; this
+chapter is about what a recognizer adds around them, the spectrogram
+front end, the masks a batch of unequal utterances needs, and the two
+losses.
 
 @bold{Positions without a table.} Attention is permutation-blind, so both
 the encoder frames and the decoder characters need a position signal. The
-GPT capstone learned one; here the classic sinusoids are computed on the
-fly --- no length cap, no parameters, and the @racket[arange], @racket[sin],
-@racket[cos], and @racket[exp] primitives this arc ported get their
-showcase. Frequencies fall geometrically from 1 to 1/10000; the sine half
-and cosine half concatenate to @tt{[T, d]} rows that broadcast over the
-batch. (The classic presentation interleaves sine and cosine columns;
-concatenating halves is the same code under a column permutation, and both
-sides of the parity twin spell it this way.)
-
-@chunk[<r07-positions>
-(define (sinusoidal-positions t-len n-embd)
-  (define half (quotient n-embd 2))
-  (define positions (unsqueeze (arange t-len) 1))
-  (define freqs (exp (mul (arange half) (- (/ (log 10000.0) half)))))
-  (define angles (mul positions (unsqueeze freqs 0)))
-  (cat (list (sin angles) (cos angles)) 1))]
+GPT example learned one; here the classic sinusoids come from
+@racket[sinusoidal-positions], computed on the fly with no length cap and
+no parameters. Frequencies fall geometrically from 1 to 1/10000, and the
+@tt{[T, d]} rows broadcast over the batch. @racket[#:layout 'halves] puts
+every sine column before every cosine column rather than interleaving
+them: the same numbers under a column permutation, in the layout this
+model has always used, which the diffusion UNet's time embedding shares.
 
 @bold{Padding masks.} Batching utterances of different lengths means
 right-padding them to a rectangle, and neither the convolutions nor the
@@ -68,13 +68,17 @@ attention may treat that padding as audio. Two masks do the work, both
 built by comparing an @racket[arange] over frame indices against each
 row's true length.
 
-@racket[key-padding-mask] marks padded @emph{key} columns for attention,
-shaped @tt{[B, 1, 1, T]} so it broadcasts over every head and query of
-the @tt{[B, H, T, T]} scores. Only keys are ever masked: a padded
-@emph{query} row still attends the real keys and produces
+@racket[key-padding-mask] marks the padded frames, @tt{[B, T]} and
+@racket[#t] where a frame is padding, which is the sense
+@racket[MultiheadAttention] and the transformer layers read: a
+@racket[#t] key is hidden (@secref["attention-multihead-apply"]). The
+encoder's self-attention takes it as @racket[#:key-padding-mask] and the
+decoder's cross-attention as @racket[#:memory-key-padding-mask], and the
+layers broadcast it over every head and query. Only keys are ever masked:
+a padded @emph{query} row still attends the real keys and produces
 garbage-but-finite output that the losses ignore, whereas masking whole
-rows would feed @racket[softmax] a row of @tt{-inf} and breed NaNs.
-The decoder's own stream needs no such mask: with right padding, the
+rows would leave a row with nothing to attend and breed NaNs. The
+decoder's own stream needs no padding mask: with right padding, the
 causal mask already stops every real character from seeing pad positions.
 
 @racket[frame-keep] is the convolutional counterpart, a @tt{[B, 1, T]}
@@ -94,8 +98,7 @@ they would be if the utterance were encoded alone.
   (unsqueeze (tensor (map exact->inexact lengths)) 1))
 
 (define (key-padding-mask lengths t-len)
-  (reshape (ge (unsqueeze (arange t-len) 0) (row-lengths lengths))
-           (length lengths) 1 1 t-len))
+  (ge (unsqueeze (arange t-len) 0) (row-lengths lengths)))
 
 (define (frame-keep lengths t-len)
   (reshape (to-dtype (lt (unsqueeze (arange t-len) 0)
@@ -103,165 +106,99 @@ they would be if the utterance were encoded alone.
                      'float32)
            (length lengths) 1 t-len))]
 
-@bold{Attention, twice.} Both blocks below share one attention mechanic:
-project to queries, keys and values, split into @racket[n-head] heads
-(@tt{[B, T, C]} to @tt{[B, H, T, D]}), scale the scores by
-@tt{sqrt(head-dim)}, mask, @racket[softmax], join the heads and project
-out. What differs is where the keys and values come from and which mask
-applies, so there are two layers rather than one with switches.
-@racket[self-attention] reads keys and values from its own input and takes
-whatever mask the caller hands it --- @racket[#f], the encoder's
-key-padding mask, or the decoder's causal mask. @racket[cross-attention]
-reads keys and values from the encoder's @racket[memory], whose padding
-mask is the only one that applies. The @tt{[B, 1, 1, T]} and @tt{[T, T]}
-masks both broadcast over the @tt{[B, H, T, T]} scores.
+@bold{The blocks.} An encoder block is the GPT block with the causal mask
+deleted: audio is all there at once, so every frame may attend to every
+other, forward and backward. It is a @racket[TransformerEncoderLayer]
+with the settings GPT-2 made standard, which the model passes its stack
+below. @racket[#:norm-first? #t] is pre-norm: each sublayer reads a
+normalized view of the residual stream and adds its answer to the stream
+untouched. @racket[#:ffn-width] four times the width through
+@racket[#:activation 'gelu] is the GPT feed-forward.
+@racket[#:dropout 0.0] keeps the encoder free of dropout, as it has always
+been here, against the layer's default of 0.1. @racket[#:batch-first? #t]
+takes the @tt{[B, T, C]} frames the front end produces. With the child
+names the layer gives its pieces, a block under the padding mask computes
 
-@chunk[<r07-attention>
-(define-layer self-attention (n-embd n-head wq wk wv wo)
-  #:init (n-embd n-head)
-  (unless (and (exact-positive-integer? n-head)
-               (zero? (remainder n-embd n-head)))
-    (error 'self-attention
-           "n-head ~a must be positive and divide n-embd ~a"
-           n-head n-embd))
-  (set! wq (Linear n-embd n-embd))
-  (set! wk (Linear n-embd n-embd))
-  (set! wv (Linear n-embd n-embd))
-  (set! wo (Linear n-embd n-embd))
-  #:forward (x mask)
-  (define batch (car (tensor-shape x)))
-  (define seq-len (cadr (tensor-shape x)))
-  (define head-dim (quotient n-embd n-head))
-  (define (split-heads m)
-    (transpose (reshape m batch seq-len n-head head-dim) 1 2))
-  (define q (split-heads (wq x)))
-  (define k (split-heads (wk x)))
-  (define v (split-heads (wv x)))
-  (define scores (/ (matmul q (transpose k 2 3)) (sqrt head-dim)))
-  (define att
-    (softmax (if mask (masked-fill scores mask -inf.0) scores) -1))
-  (~> (matmul att v) (transpose 1 2) (reshape batch seq-len n-embd) wo))
+@verbatim[#:indent 2]{
+x ← x + self-attn(norm1(x), padding)
+x ← x + linear2(gelu(linear1(norm2(x))))
+}
 
-(define-layer cross-attention (n-embd n-head wq wk wv wo)
-  #:init (n-embd n-head)
-  (unless (and (exact-positive-integer? n-head)
-               (zero? (remainder n-embd n-head)))
-    (error 'cross-attention
-           "n-head ~a must be positive and divide n-embd ~a"
-           n-head n-embd))
-  (set! wq (Linear n-embd n-embd))
-  (set! wk (Linear n-embd n-embd))
-  (set! wv (Linear n-embd n-embd))
-  (set! wo (Linear n-embd n-embd))
-  #:forward (x memory mask)
-  (define batch (car (tensor-shape x)))
-  (define seq-len (cadr (tensor-shape x)))
-  (define mem-len (cadr (tensor-shape memory)))
-  (define head-dim (quotient n-embd n-head))
-  (define (split-heads m len)
-    (transpose (reshape m batch len n-head head-dim) 1 2))
-  (define q (split-heads (wq x) seq-len))
-  (define k (split-heads (wk memory) mem-len))
-  (define v (split-heads (wv memory) mem-len))
-  (define scores (/ (matmul q (transpose k 2 3)) (sqrt head-dim)))
-  (define att
-    (softmax (if mask (masked-fill scores mask -inf.0) scores) -1))
-  (~> (matmul att v) (transpose 1 2) (reshape batch seq-len n-embd) wo))]
+A decoder block has three sublayers, a @racket[TransformerDecoderLayer]
+with the same settings. Causal self-attention comes first: the decoder is
+autoregressive over characters, so each position may read only itself
+and the characters before it. Then the new move, @emph{cross}-attention,
+the layer's @tt{multihead-attn}, where the queries come from the
+character stream but the keys and values come from the encoder's
+@racket[memory]: each character position reaches across into the audio
+and pulls out the frames that sound like it. The only mask there is the
+padding mask, hiding the padded audio frames. The feed-forward comes
+last, as always:
 
-@bold{The MLP.} The GPT block's, unchanged: two @racket[Linear] layers
-through @racket[gelu], widened 4x inside. Deliberately a local copy of the
-CharGPT example's rather than a shared library layer; a third user with the
-same shape is what would justify promoting it.
+@verbatim[#:indent 2]{
+x ← x + self-attn(norm1(x), causal)
+x ← x + multihead-attn(norm2(x), memory, padding)
+x ← x + linear2(gelu(linear1(norm3(x))))
+}
 
-@chunk[<r07-mlp>
-(define-layer feed-forward (fc1 fc2)
-  #:init (n-embd)
-  (set! fc1 (Linear n-embd (* 4 n-embd)))
-  (set! fc2 (Linear (* 4 n-embd) n-embd))
-  #:forward (x)
-  (~> x fc1 gelu fc2))]
-
-@bold{The encoder block.} The GPT block with the causal mask deleted:
-audio is all there at once, so every frame may attend to every other,
-forward and backward. Pre-norm, self-attention under the key-padding
-mask, then the MLP, residuals throughout. The residual pattern
-@tt{x + branch(norm(x))} stays written out here rather than wrapped as
-CharGPT's @racket[pre-norm-residual]: these branches take a mask, and in
-the decoder the memory, beside the stream, and a wrapper for that is the
-syntax question in #117. @racket[mask] is @racket[#f] on the unbatched
-paths.
-
-@chunk[<r07-encoder-block>
-(define-layer asr-encoder-block (ln1 attention ln2 mlp)
-  #:init (n-embd n-head)
-  (set! ln1 (LayerNorm n-embd))
-  (set! attention (self-attention n-embd n-head))
-  (set! ln2 (LayerNorm n-embd))
-  (set! mlp (feed-forward n-embd))
-  #:forward (x mask)
-  (define x1 (+ x (attention (ln1 x) mask)))
-  (+ x1 (mlp (ln2 x1))))]
-
-@bold{The decoder block.} Three sub-layers now. Causal self-attention
-first --- the decoder is autoregressive over characters, so the
-@racket[tril] mask from the GPT block returns, built on the input's device
-and handed to @racket[self-attention]. Then the new move:
-@emph{cross}-attention, where the queries come from the character stream
-but the keys and values come from the encoder's @racket[memory] --- each
-character position reaches across into the audio and pulls out the frames
-that sound like it. The only mask there is @racket[mem-mask], hiding the
-padded audio frames. MLP last, as always.
-
-@chunk[<r07-decoder-block>
-(define-layer asr-decoder-block (p-drop cdrop ln1 attention ln2 cross ln3 mlp)
-  #:init (n-embd n-head #:dropout [p-drop 0.0])
-  (set! cdrop (Dropout #:p p-drop))
-  (set! ln1 (LayerNorm n-embd))
-  (set! attention (self-attention n-embd n-head))
-  (set! ln2 (LayerNorm n-embd))
-  (set! cross (cross-attention n-embd n-head))
-  (set! ln3 (LayerNorm n-embd))
-  (set! mlp (feed-forward n-embd))
-  #:forward (x memory mem-mask)
-  (with-default-device (tensor-device x)
-    (define seq-len (cadr (tensor-shape x)))
-    (define causal (eq (tril (ones seq-len seq-len)) 0))
-    (define x1 (+ x (attention (ln1 x) causal)))
-    ;; skipped outright at p=0 so no RNG is drawn and the twin stays
-    ;; value-for-value
-    (define x1n (if (zero? p-drop) (ln2 x1) (cdrop (ln2 x1))))
-    (define x2 (+ x1 (cross x1n memory mem-mask)))
-    (+ x2 (mlp (ln3 x2)))))]
+The decoder's @racket[#:dropout] is the model's, zero by default. Above
+zero, the layer drops in PyTorch's places: the attention weights, each
+sublayer's answer before it joins the stream, and the feed-forward's
+hidden activations. The model drops the decoder stack's output once more
+before its head. @secref["transformers-blocks"] checks a pre-norm block's
+arithmetic against the layer by hand, and
+@secref["attention-transformer-layers"] documents every keyword.
 
 @bold{The model.} The spectrogram side first: two strided @racket[Conv1d]
 layers halve time twice (~40ms frames), then four @emph{dilated} residual
 convolutions --- dilation 1, 2, 4, 8 --- stretch the receptive field past
 a second of context without losing any more time resolution. The frames
 transpose to @tt{[B, T', d]}, take their sinusoids, and climb six encoder
-blocks (every sub-layer residual). Two heads read the result: the CTC
-head (@tt{vocab + 1} classes, blank indexed @emph{after} the characters
-so ids pass through unshifted) and the six-block decoder stack. The
-decoder embeds characters from a @tt{vocab + 2} table ---
-@tt{eos} at @racket[vocab-size], @tt{sos} one past it --- and its head
-predicts @tt{vocab + 1} classes: characters or @tt{eos}, never @tt{sos}.
-The forward takes the audio batch, the teacher-forced character input,
-and the list of true frame counts (@racket[#f] when nothing is padded),
-from which it derives the convolution multiplier at each downsampling
-stage and the attention key mask, and returns both heads' views. The
-dilated convolutions and the two block stacks are @racket[LayerList]s
-walked with @racket[for/fold], so parameters read @tt{dilations.3.weight},
-@tt{encoders.0.attention.wq.weight} and @tt{decoders.5.cross.wo.bias};
-those replaced @tt{dil4.weight}, @tt{enc1.wq.weight} and @tt{dec6.co.bias},
-so a checkpoint from the earlier flat model does not load into this one
-(retrain with @filepath{scripts/train-asr.rkt}). The keyword defaults are the fixture-scale
-configuration the parity twin trains; @racket[train-librispeech] passes
-something wider.
+blocks. Two heads read the result: the CTC head (@tt{vocab + 1} classes,
+blank indexed @emph{after} the characters so ids pass through unshifted)
+and the six-block decoder stack. The decoder embeds characters from a
+@tt{vocab + 2} table --- @tt{eos} at @racket[vocab-size], @tt{sos} one
+past it --- and its head predicts @tt{vocab + 1} classes: characters or
+@tt{eos}, never @tt{sos}. The forward takes the audio batch, the
+teacher-forced character input, and the list of true frame counts
+(@racket[#f] when nothing is padded), from which it derives the
+convolution multiplier at each downsampling stage and the padding mask,
+and returns both heads' views.
+
+@racket[TransformerEncoder] builds the encoder stack in one call, as
+@tt{nn.TransformerEncoder(nn.TransformerEncoderLayer(...), 6,
+norm=nn.LayerNorm(n_embd))} builds PyTorch's: the width, the heads and
+the block settings above, six blocks, and @racket[#:norm #t] for the
+final @racket[LayerNorm], which a pre-norm stack needs because no block
+normalizes the stream it passes on. @racket[TransformerDecoder] builds
+the decoder stack the same way, PyTorch's @tt{nn.TransformerDecoder}
+over @tt{nn.TransformerDecoderLayer}, with the model's dropout. Like
+PyTorch's, each stack starts every block as a copy of its first, and
+training moves them apart; for independently drawn blocks, pass the stack
+a procedure that builds one block instead of the width
+(@secref["attention-transformer-stacks"]). The decoder stack runs with
+@racket[#:tgt-causal? #t], which every block hands to its
+self-attention, and both stacks take the padding mask.
+
+The parameter paths are PyTorch's (@secref["attention-transformer-pytorch"]):
+@tt{dilations.3.weight}, @tt{encoder.layers.0.self-attn.query.weight},
+@tt{encoder.norm.weight}, @tt{decoder.layers.5.multihead-attn.out.bias}
+and @tt{decoder.layers.0.linear1.weight}. The hand-written blocks this
+chapter used before named the same pieces
+@tt{encoders.0.attention.wq.weight}, @tt{ln-enc.weight},
+@tt{decoders.5.cross.wo.bias} and @tt{decoders.0.mlp.fc1.weight}, with
+the same 273 tensors, and drew different initial values: one draw per
+block, where @racket[MultiheadAttention] starts its query, key and value
+from one xavier draw with zero biases. A checkpoint saved before the
+change does not load into this model: @racket[load-state!] refuses it,
+naming the missing and unexpected keys. Retrain with
+@filepath{scripts/train-asr.rkt}. The keyword defaults are the
+fixture-scale configuration the parity twin trains;
+@racket[train-librispeech] passes something wider.
 
 @chunk[<r07-model>
-(define-layer asr (n-embd p-drop
-                   conv1 conv2 dilations
-                   encoders ln-enc ctc-head
-                   tok-emb decoders ln-dec hdrop head)
+(define-layer asr (n-embd conv1 conv2 dilations encoder ctc-head
+                   tok-emb decoder hdrop head)
   #:init (n-mels vocab-size
           #:n-embd [n-embd 64]
           #:n-head [n-head 4]
@@ -273,23 +210,32 @@ something wider.
   (set! dilations
         (LayerList (for/list ([d '(1 2 4 8)])
                      (Conv1d n-embd n-embd 3 #:dilation d #:padding d))))
-  (set! encoders
-        (LayerList (for/list ([_ (in-range 6)])
-                     (asr-encoder-block n-embd n-head))))
-  (set! ln-enc (LayerNorm n-embd))
+  (set! encoder (TransformerEncoder n-embd
+                                    #:heads n-head
+                                    #:layers 6
+                                    #:ffn-width (* 4 n-embd)
+                                    #:activation 'gelu
+                                    #:norm-first? #t
+                                    #:dropout 0.0
+                                    #:batch-first? #t
+                                    #:norm #t))
   (set! ctc-head (Linear n-embd (add1 vocab-size)))
   (set! tok-emb (Embedding (+ vocab-size 2) n-embd))
-  (set! decoders
-        (LayerList (for/list ([_ (in-range 6)])
-                     (asr-decoder-block n-embd n-head #:dropout p-drop))))
-  (set! ln-dec (LayerNorm n-embd))
+  (set! decoder (TransformerDecoder n-embd
+                                    #:heads n-head
+                                    #:layers 6
+                                    #:ffn-width (* 4 n-embd)
+                                    #:activation 'gelu
+                                    #:norm-first? #t
+                                    #:dropout p-drop
+                                    #:batch-first? #t
+                                    #:norm #t))
   (set! hdrop (Dropout #:p p-drop))
   (set! head (Linear n-embd (add1 vocab-size)))
   #:forward (x dec-in lengths)
-  (with-default-device (tensor-device x)
+  (with-default-device (device x)
     (define (halve n) (quotient (add1 n) 2))
-    (define t0 (caddr (tensor-shape x)))
-    (define t1 (halve t0))
+    (define t1 (halve (caddr (shape x))))
     (define t2 (halve t1))
     (define l1 (and lengths (map halve lengths)))
     (define l2 (and l1 (map halve l1)))
@@ -302,25 +248,23 @@ something wider.
     (define c4
       (for/fold ([h c0]) ([dil (in-layers dilations)])
         (clip (+ h (relu (dil h))) l2 t2)))
-    (define enc-mask (and l2 (key-padding-mask l2 t2)))
-    (define t-len (caddr (tensor-shape c4)))
-    (define e0 (+ (transpose c4 1 2) (sinusoidal-positions t-len n-embd)))
+    (define padding (and l2 (key-padding-mask l2 t2)))
+    (define (positioned v)
+      (+ v (sinusoidal-positions (cadr (shape v)) n-embd
+                                 #:layout 'halves)))
     (define memory
-      (ln-enc (for/fold ([h e0]) ([enc (in-layers encoders)])
-                (enc h enc-mask))))
-    (define ctc-log-probs (log-softmax (ctc-head memory) 2))
-    (define s-len (cadr (tensor-shape dec-in)))
-    (define d0 (+ (tok-emb dec-in) (sinusoidal-positions s-len n-embd)))
-    (define d
-      (ln-dec (for/fold ([h d0]) ([dec (in-layers decoders)])
-                (dec h memory enc-mask))))
-    (values ctc-log-probs
-            (head (if (zero? p-drop) d (hdrop d))))))]
+      (encoder (positioned (transpose c4 1 2)) #:key-padding-mask padding))
+    (values (log-softmax (ctc-head memory) 2)
+            (~> (decoder (positioned (tok-emb dec-in)) memory
+                         #:tgt-causal? #t
+                         #:memory-key-padding-mask padding)
+                hdrop
+                head))))]
 
 @bold{The device.} As in the earlier capstones: take the accelerator and
 let @racket[with-default-device] scope it, so parameters and batches land
 together. Both accelerators run this model natively, @racket[ctc-loss]
-included, so Apple silicon trains on the GPU like CUDA does.
+included.
 
 @chunk[<r07-device>
 (define (pick-device)
@@ -373,19 +317,19 @@ NaN the parameters mid-epoch.
            (length mels) (length transcripts)))
   ;; the mels carry the device: this is exported, so callers reach it
   ;; from outside whatever extent built the net
-  (with-default-device (tensor-device (car mels))
+  (with-default-device (device (car mels))
     (define v-size (vector-length vocab))
     (define eos v-size)
     (define sos (add1 v-size))
     (define frame-lengths
-      (for/list ([m (in-list mels)]) (cadr (tensor-shape m))))
+      (for/list ([m (in-list mels)]) (cadr (shape m))))
     (define t-max (apply max frame-lengths))
     (define x
       (stack (for/list ([m (in-list mels)]
                         [t (in-list frame-lengths)])
                (if (= t t-max)
                    m
-                   (cat (list m (zeros (car (tensor-shape m)) (- t-max t)))
+                   (cat (list m (zeros (car (shape m)) (- t-max t)))
                         1)))
              0))
     (define batched? (< 1 (length mels)))
@@ -421,8 +365,11 @@ NaN the parameters mid-epoch.
 @bold{The deterministic core.} @racket[run-example] is the seeded,
 offline entry the test harness and the PyTorch parity twin both drive:
 5 @racket[adam] steps of the hybrid loss on the committed MISTER QUILTER
-fixture --- a batch of one, so no padding and no mask --- at the
-fixture-scale defaults.
+fixture --- a batch of one, so no padding and no padding mask --- at the
+fixture-scale defaults. The twin builds its stacks as
+@tt{nn.TransformerEncoder} and @tt{nn.TransformerDecoder} with the same
+settings, and under one seed both sides draw the same initial values,
+declaration order being draw order.
 
 @chunk[<r07-run>
 (define (run-example #:steps [steps 5] #:device [device (pick-device)])
@@ -457,7 +404,7 @@ CTC's phonetic stutter next to attention's spelling is the payoff.
 (define (greedy-decode net vocab features)
   (define v-size (vector-length vocab))
   ;; any parameter's device works: a model's tensors are colocated
-  (define dev (tensor-device (car (parameters net))))
+  (define dev (device (car (parameters net))))
   (define x (to-device features dev))
   (with-default-device dev
     (in-eval-mode net
@@ -482,7 +429,7 @@ CTC's phonetic stutter next to attention's spelling is the payoff.
   (define v-size (vector-length vocab))
   (define eos v-size)
   (define sos (add1 v-size))
-  (define dev (tensor-device (car (parameters net))))
+  (define dev (device (car (parameters net))))
   (define x (to-device features dev))
   (with-default-device dev
     (in-eval-mode net
@@ -490,7 +437,7 @@ CTC's phonetic stutter next to attention's spelling is the payoff.
         ;; the cap is the encoder's own frame count, arithmetic on the
         ;; input shape — no forward pass needed to learn it
         (define cap
-          (or max-steps (downsampled-length (caddr (tensor-shape x)))))
+          (or max-steps (downsampled-length (caddr (shape x)))))
         (define (next-id ids)
           (define dec-in
             (unsqueeze (to-dtype (tensor ids) 'int64) 0))
@@ -519,14 +466,24 @@ character-level seq2seq --- so expect recognizable words and partial
 spellings, not a production recognizer; the 100-hour train-clean-100
 split is the natural next scale.
 
-For calibration, 40 epochs at these defaults on an RTX 3090 Ti take
-about twenty minutes and drive the hybrid loss from 2.57 to 0.11. On
-held-out utterances that lands around @tt{0.6} CER --- the CTC head
-spelling phonetically (@tt{ARKTHRIS} for @emph{Arcturus},
-@tt{STEUDFAS} for @emph{steadfast}) while the attention decoder emits
-real words in roughly the right places. Word error rate stays just
-above 1.0, because the decoder over-generates and every insertion
-counts against it.
+For calibration, @tt{EPOCHS=40 racket scripts/train-asr.rkt} in the CUDA
+shell trains at these defaults on all of dev-clean but the last three
+utterances, which the script holds out and scores. On an RTX 3090 Ti the
+40 epochs take about ten minutes, fifteen seconds each, and drive the
+mean hybrid loss from 2.60 in the first epoch to 0.16 in the last. The
+CTC head spells phonetically (@tt{STUDFAS} for @emph{steadfast},
+@tt{LOWD OF} for @emph{load of}), while the attention decoder emits real
+words in roughly the right places (@tt{PRAYES OF MAIN PURAYES} for
+@emph{praise of maiden pure}, @tt{WITH THE KARTY SENS} for @emph{with
+tardy sense}) but over-generates, and on one utterance falls into a loop
+(@tt{THE LOAD OF LOAD OF LOAD OF}) that runs on long past the reference.
+Every inserted character counts as an edit, so the three score 1.02 CER
+and 1.65 WER, both above one. Three utterances are a small sample, and
+one runaway hypothesis dominates them. Scored by @racket[evaluate] on
+every 26th utterance of test-clean, a hundred the model never saw, the
+same checkpoint's attention decoder lands at 0.79 CER and 1.20 WER, with
+9 of the 100 hypotheses running to the step cap; the CTC head's greedy
+decode, scored the same way, reaches 0.51 CER.
 
 @chunk[<r07-train>
 (define (train-librispeech #:epochs [epochs 20] #:limit [limit #f]
@@ -638,12 +595,7 @@ reference:
 @chunk[<*>
 <r07-require>
 <r07-provide>
-<r07-positions>
 <r07-mask>
-<r07-attention>
-<r07-mlp>
-<r07-encoder-block>
-<r07-decoder-block>
 <r07-model>
 <r07-device>
 <r07-features>

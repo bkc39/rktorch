@@ -120,8 +120,11 @@ with `backward!` outside the form as PyTorch recommends). From
   `pairs->tensors` padding to a width
 - diffusion (`torch/vision/diffusion.rkt`, #84): `linear-schedule`
   `cosine-schedule` (betas, alphas, alpha-bars as device tensors), `q-sample`
-  (closed-form `q(x_t | x_0)`), `sinusoidal-embedding`, and the layers
-  `TimeEmbedding` `ResBlock` (with `#:dropout`) `AttentionBlock`
+  (closed-form `q(x_t | x_0)`), `sinusoidal-embedding` (`sinusoidal-positions`
+  in its `'halves` layout over int64 timesteps), and the layers
+  `TimeEmbedding` `ResBlock` (with `#:dropout`) `AttentionBlock` (one head
+  over the H·W tokens through `scaled-dot-product-attention`, its `q` `k`
+  `v` `proj` children kept as `Linear`s)
   `Downsample` `Upsample` `UNet` (the DDPM CIFAR-10 network by default:
   `#:base #:mults #:blocks #:attention #:dropout`, `#:classes` for a
   class-conditional net with a null label); the training loop is
