@@ -248,8 +248,8 @@ From `torch/nn`: `define-layer procedure->Layer gen:layer layer? Parameter Buffe
 named-parameters in-named-parameters buffers children Linear Conv2d MaxPool2d Flatten Dropout
 Sequential Embedding LayerNorm ConvTranspose2d GroupNorm BatchNorm2d BatchNorm1d
 LSTM GRU MultiheadAttention TransformerEncoderLayer TransformerDecoderLayer
-TransformerEncoder TransformerDecoder GenericTransformerEncoder
-GenericTransformerDecoder sinusoidal-positions causal-mask
+TransformerEncoder TransformerDecoder sinusoidal-positions causal-mask
+layer-copy layer-rebuild
 sgd adam rmsprop step! zero-grads! clip-grad-norm! learning-rate
 set-learning-rate! step-lr multi-step-lr exponential-lr cosine-annealing-lr
 linear-lr one-cycle-lr lambda-lr ema ema-update! ema-average cross-entropy
@@ -316,21 +316,28 @@ children (`self-attn` `multihead-attn` `linear1` `dropout` `linear2`
 `#:bias?` for it); applied as `(enc src #:mask #:key-padding-mask
 #:causal?)` and `(dec tgt memory #:tgt-mask #:memory-mask
 #:tgt-key-padding-mask #:memory-key-padding-mask #:tgt-causal?
-#:memory-causal?)`, masks in MHA's sense. The stacks come in two forms
-building one struct each (predicates `transformer-encoder?` and
-`transformer-decoder?` for both). `GenericTransformerEncoder` /
-`GenericTransformerDecoder` take a thunk building one layer plus `#:layers
-n #:norm #:copies?`; with copies (the default) the thunk runs once with
-draws and `n - 1` more times under `init.rkt`'s `call-without-drawing`
-(the uniform and normal initializers fill zeros instead of drawing), the
-first layer's values then copied in, which keeps seeded parity with
-`nn.TransformerEncoder(layer, n)`'s deep copies, stream position included;
-`#:copies? #f` draws each layer. The standard `TransformerEncoder` /
-`TransformerDecoder` take the layer's arguments (`d-model #:heads` and
-every layer keyword, same defaults) plus `#:layers n` and `#:norm?` (a
-final `LayerNorm` with the stack's eps and bias) and call the generic form
-with copies. The layer and standard-stack constructor contracts come from
-one `transformer/c` macro.
+#:memory-causal?)`, masks in MHA's sense. `TransformerEncoder` /
+`TransformerDecoder` take `#:layers n` and `#:norm` (`#f`, a layer, or
+`#t` for a `LayerNorm` of the model width) and three kinds of first
+argument: a model width with `#:heads` and the layer keywords (one layer
+built, then `n` `layer-copy`s of it: `nn.TransformerEncoder(
+nn.TransformerEncoderLayer(...), n)`, seeded parity and stream position
+included), a layer (`n` copies of it, the layer itself left out, as
+PyTorch's deep copies), or a thunk (called `n` times, each layer drawing
+its own values); the stack contract rejects layer keywords or `#:norm #t`
+beside a layer or thunk. `layer-copy` (`nn/copy.rkt`) is a deep copy
+with no RNG draws: fresh tensors with the same values, device, dtype and
+requires-grad (no gradients), children copied recursively, modes kept,
+shared layers and tensors kept shared through a memo. It runs on the
+`gen:layer` method `layer-rebuild layer child tensor`, which
+`define-layer` derives (the generated `rebuild` remakes the struct with
+each registered child through `child` and every tensor in its fields,
+plain lists, vectors and boxes included, through `tensor`, then
+reclassifies; `LSTM`'s plain `entries` list is why plain fields are
+walked); a stateless `procedure->Layer` copies, one with state refuses,
+and a hand-written `gen:layer` without the method refuses, naming
+`layer-copy`. The layer constructor contracts come from one
+`transformer/c` macro.
 `sinusoidal-positions` (`#:layout 'interleaved | 'halves`, a length or a
 position tensor) and `causal-mask` (`#t` above the diagonal, or the float
 `-inf` form) live in `nn/positions.rkt`. `clip-grad-norm!` (`nn/clip.rkt`) keeps its scale on the
@@ -566,7 +573,7 @@ module's full export set (`racket/runtime-path`, `syntax/parse/pre`).
   fields admit `parameters-by-key` beside `children-by-key`, and whose
   `#:on-move` body runs after a `to` that rebound anything; `parameter.rkt`, `buffer.rkt`, `linear.rkt`,
   `init.rkt`, `optim.rkt`, `ema.rkt`, `loss.rkt`, `recurrent.rkt`,
-  `attention.rkt`, `transformer.rkt`, `positions.rkt`, `clip.rkt`).
+  `attention.rkt`, `transformer.rkt`, `positions.rkt`, `copy.rkt`, `clip.rkt`).
 - `private/download.rkt` — the one download path (#195): a temp file in the
   cache's directory, checked, then installed. `call-with-verified-download`
   checks an exact size and SHA-256 (pretrained weights, hymenoptera);

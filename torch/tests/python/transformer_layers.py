@@ -6,10 +6,10 @@ drawn as the Racket layer draws its own with nothing copied across, moves it
 to RKTORCH_PARITY_DEVICE, then draws its inputs, its float masks and the
 loss weights in the Racket test's order.
 
-The Racket TransformerEncoder and TransformerDecoder are
-nn.TransformerEncoder(nn.TransformerEncoderLayer(...), n, norm=...) and its
-decoder twin; the generic stacks with #:copies? #f are Stack, a ModuleList
-of layers each drawn in turn.
+The Racket TransformerEncoder and TransformerDecoder built from a model
+width or from a layer are nn.TransformerEncoder(layer, n, norm=...) and its
+decoder twin, the layer drawn first under the same seed; built from a
+procedure they are Stack, a ModuleList of layers each drawn in turn.
 
 Every parameter and gradient is reported under the Racket names: the fused
 in_proj_weight and in_proj_bias of each attention split by rows into query,
@@ -101,7 +101,8 @@ def layer_options(o):
 
 
 class Stack(nn.Module):
-    """Independently drawn layers, the twin of #:copies? #f."""
+    """Independently drawn layers, the twin of a stack built from a
+    procedure."""
 
     def __init__(self, layers, norm):
         super().__init__()
@@ -267,14 +268,15 @@ print(json.dumps({
     "decoder_stack_pre": decoder(layers=3, norm_first=True, norm=True,
                                  batch_first=True, activation="gelu",
                                  tgt_causal=True, bias=False, eps=1e-6),
-    "generic_encoder_independent": encoder(layers=2, norm=True,
-                                           independent=True,
-                                           kpm=lambda: padding(3, 5, 2)),
-    "generic_decoder_independent": decoder(layers=2, independent=True,
-                                           norm_first=True,
-                                           activation=gelu_tanh,
-                                           batch_first=True, tgt_causal=True,
-                                           memory_kpm=lambda: padding(2, 5,
-                                                                      1)),
+    "layer_encoder": encoder(layers=3, norm=True, norm_first=True,
+                             bias=False, kpm=lambda: padding(3, 5, 2)),
+    "layer_decoder": decoder(layers=2, batch_first=True, tgt_causal=True,
+                             memory_kpm=lambda: padding(2, 5, 2)),
+    "procedure_encoder": encoder(layers=2, norm=True, independent=True,
+                                 kpm=lambda: padding(3, 5, 2)),
+    "procedure_decoder": decoder(layers=2, independent=True,
+                                 norm_first=True, activation=gelu_tanh,
+                                 batch_first=True, tgt_causal=True,
+                                 memory_kpm=lambda: padding(2, 5, 1)),
     "fast_path": fast_path(),
 }))
