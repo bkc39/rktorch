@@ -13,7 +13,8 @@
            "../main.rkt"
            "../nn.rkt"
            (only-in (submod "../nn/recurrent.rkt" private)
-                    cudnn-refusal? flatten-refused? flattened-placement)
+                    cudnn-refusal? flatten-refused? flattened-signature
+                    record-flattened! storage-signature)
            "private/python-env.rkt")
 
   (define (flat ts)
@@ -128,42 +129,51 @@
                     "with gradients on a layer call is the peak, not a trough")
       (check-true (and train-out #t))))
 
-  (test-case "only a move that rebinds the weights forgets the flattening"
+  (test-case "a forward records the weights' addresses, a move changes them"
     (define gru (GRU 3 4))
-    (define w (cdr (assoc "weight_ih_l0" (named-parameters gru))))
-    (define (recorded) (flattened-placement w))
-    (define (now) (cons (tensor-device w) (tensor-dtype w)))
+    (define weights (parameters gru))
+    (define (recorded) (flattened-signature (car weights)))
     (define-values (out _h) (gru (randn 5 2 3)))
     (check-true (and out #t))
-    (check-equal? (recorded) (now) "the first forward recorded nothing")
+    (check-equal? (recorded) (storage-signature weights))
     (to gru 'cpu)
-    (check-equal? (recorded) (now)
-                  "a move that changed nothing would re-flatten")
+    (check-equal? (recorded) (storage-signature weights)
+                  "a move that changed nothing moved the weights")
     (to gru 'float64)
-    (check-false (recorded)
-                 "a move that rebound the storage left its flattening behind"))
+    (check-not-equal? (recorded) (storage-signature weights)
+                      "a move that rebound the storage kept its addresses")
+    (define-values (wide _wh) (gru (randn 5 2 3 #:dtype 'float64)))
+    (check-true (and wide #t))
+    (check-equal? (recorded) (storage-signature weights)
+                  "the next forward did not record the new addresses"))
 
-  (test-case "a nested recurrent layer hears the move too"
+  (test-case "a nested recurrent layer re-records after its parent moves"
     (define-layer Wrap (inner) ;; noqa
       #:init ()
       (set! inner (LSTM 3 4))
       #:forward (x)
       (let-values ([(out _h _c) (inner x)]) out))
     (define net (Wrap))
-    (define w (cdr (assoc "inner.weight_ih_l0" (named-parameters net))))
-    (define (recorded) (flattened-placement w))
-    (define (now) (cons (tensor-device w) (tensor-dtype w)))
+    (define weights (parameters net))
+    (define (recorded) (flattened-signature (car weights)))
     (void (net (randn 5 2 3)))
-    (check-equal? (recorded) (now))
-    (to net (cpu-device))
-    (check-equal? (recorded) (now)
-                  "a device move that changed nothing forgot the flattening")
-    (to net (cpu-device) 'float32)
-    (check-equal? (recorded) (now)
-                  "a device and dtype move that changed nothing forgot it")
+    (check-equal? (recorded) (storage-signature weights))
     (to net 'float64)
-    (check-false (recorded)
-                 "moving the parent left the child's flattening behind"))
+    (void (net (randn 5 2 3 #:dtype 'float64)))
+    (check-equal? (recorded) (storage-signature weights)))
+
+  (test-case "element addresses alone do not pass for the recorded packing"
+    (define gru (GRU 3 4))
+    (define weights (parameters gru))
+    (define real (storage-signature weights))
+    (define one-storage (cdr (car real)))
+    (record-flattened! (car weights)
+                       (for/list ([entry (in-list real)])
+                         (cons (car entry) one-storage)))
+    (define-values (out _h) (gru (randn 5 2 3)))
+    (check-true (and out #t))
+    (check-equal? (flattened-signature (car weights)) real
+                  "copies at the packed offsets read as still packed"))
 
   (test-case "only an answer from cudnn reads as a refusal to flatten"
     (define (raised message make)
@@ -267,6 +277,9 @@
                          (lambda () (GRU 3 4 #:bias? #f #:batch-first? #t))
                          "GRU without bias")])
 
+  (define (packed? weights)
+    (apply = (map cdr (storage-signature weights))))
+
   (when (cuda-available?)
     (test-case "cudnn-rnn-flatten-weight packs the weights into one buffer"
       (manual-seed! 0)
@@ -306,9 +319,13 @@
       (backward! (sum gpu-out))
       (for ([p (in-list (parameters lstm))])
         (check-equal? (tensor-shape (grad p)) (tensor-shape p)))
+      (check-true (packed? (parameters lstm)))
       (to lstm 'cpu)
       (to lstm 'cuda)
+      (check-false (packed? (parameters lstm)))
       (define-values (round-trip _rh _rc) (lstm (to-device x 'cuda)))
+      (check-true (packed? (parameters lstm))
+                  "the forward after a round trip did not re-pack")
       (check-close (tensor->list (to-device round-trip 'cpu))
                    (tensor->list cpu-out) "after a CPU round trip" 1e-4)
       (define opt (adam (parameters lstm)))

@@ -60,9 +60,13 @@ are drawn as @tt{reset_parameters} draws them, uniform within
 @tt{1/sqrt(hidden-size)}: under one seed a layer starts from PyTorch's
 values.
 
-After a move with @racket[to], the first call on a CUDA device packs the
-weights into the single buffer cudnn wants; the parameters stay the same
-tensors, so an optimizer built before or after sees them alike.
+On a CUDA device a call packs the weights into the single buffer cudnn
+wants whenever they are not already there: the first call, and the first
+after anything gave them new storage, a move with @racket[to] or a round
+trip through the CPU included. A call checks this by the weights' storage
+addresses, so a layer that has not moved pays no more than reading them.
+The parameters stay the same tensors, so an optimizer built before or
+after sees them alike.
 
 The input's dtype has to be the layer's. On the CPU a mismatch reaches
 oneDNN, which is chosen on the input's dtype and then reads the weights,

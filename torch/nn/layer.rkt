@@ -15,9 +15,8 @@
          (only-in racket/generic define-generics)
          (only-in racket/list append-map check-duplicates remove-duplicates)
          (only-in racket/stxparam define-syntax-parameter syntax-parameterize)
-         (only-in syntax/parse/define define-syntax-parse-rule)
          (only-in "../foreign.rkt"
-                  prop:to tensor-device tensor-dtype tensor? to)
+                  prop:to tensor-device tensor-dtype tensor?)
          (only-in (submod "../foreign.rkt" unsafe) to!)
          (only-in "../foreign/autograd-ops.rkt" collect-at-forward-trough!)
          (only-in "../private/contract.rkt"
@@ -35,8 +34,8 @@
          layer-named-children ;; noqa
          layer-mode ;; noqa
          layer-set-mode! ;; noqa
-         in-mode
-         in-eval-mode
+         registry?
+         set-registry-mode!
          with-mode
          define-layer)
 
@@ -62,7 +61,7 @@
    (define (layer-mode self) 'train) ;; noqa
    (define (layer-set-mode! self mode) (void))]) ;; noqa
 
-(define/contract-out mode/c contract?
+(define/checked-out mode/c contract?
   (flat-named-contract 'mode/c (or/c 'train 'eval)))
 
 (define/checked-out (training? mode) ;; noqa
@@ -84,12 +83,11 @@
 (define (floating? t)
   (and (memq (tensor-dtype t) floating-dtypes) #t))
 
-;; What `#:on-move` reacts to: `to` is the identity when nothing changes, and
-;; a device round trip returns to the placement it started from, so the pair
-;; is read either side of one move rather than compared across several.
-(define (placement-of m)
-  (for/list ([t (in-list (append (parameters m) (buffers m)))])
-    (cons (tensor-device t) (tensor-dtype t))))
+(define-values (prop:on-move on-move? on-move-ref)
+  (make-struct-type-property 'on-move))
+
+(define (placement t)
+  (cons (tensor-device t) (tensor-dtype t)))
 
 (define (move-tensor! t dev dtype)
   (define dt (and dtype (floating? t) dtype))
@@ -112,18 +110,43 @@
              #:unless (hash-ref theirs t #f))
     t))
 
+;; `#:on-move` reacts to what one `to` rebound, so every placement is read
+;; before any child moves: a tensor tied across siblings is moved by the first
+;; and would look untouched to the second if each read its own.
 (define (move-layer! m dev dtype)
   (when (and dtype (not (memq dtype floating-dtypes)))
     (raise-arguments-error 'to "a layer only moves to a floating-point dtype"
                            "dtype" dtype))
-  (for ([c (in-list (layer-named-children m))])
-    (cond
-      [(and dev dtype) (to (cdr c) dev dtype)]
-      [dev (to (cdr c) dev)]
-      [else (to (cdr c) dtype)]))
-  (for ([t (in-list (layer-own-tensors m))])
-    (move-tensor! t dev dtype))
+  (define before
+    (and (hooked? m)
+         (for/hasheq ([t (in-list (append (parameters m) (buffers m)))])
+           (values t (placement t)))))
+  (move-tree! m dev dtype before (make-hasheq))
   m)
+
+(define (hooked? m)
+  (or (on-move? m)
+      (for/or ([c (in-list (layer-named-children m))]) (hooked? (cdr c)))))
+
+(define (move-tree! m dev dtype before seen)
+  (cond
+    [(hash-has-key? seen m) (hash-ref seen m)]
+    [else
+     (define children-moved?
+       (for/fold ([moved? #f]) ([c (in-list (layer-named-children m))])
+         (or (move-tree! (cdr c) dev dtype before seen) moved?)))
+     (define own (layer-own-tensors m))
+     (for ([t (in-list own)])
+       (move-tensor! t dev dtype))
+     (define moved?
+       (and before
+            (or children-moved?
+                (for/or ([t (in-list own)])
+                  (not (equal? (hash-ref before t) (placement t)))))))
+     (hash-set! seen m moved?)
+     (when (and moved? (on-move? m))
+       ((on-move-ref m) m))
+     moved?]))
 
 ;; Depth-first, own params before children's, in declaration order —
 ;; PyTorch's parameters() order, which seeded-init parity relies on.
@@ -167,59 +190,6 @@
 (define/contract-out (named-children m) ;; noqa
   (-> layer? (listof (cons/c string? layer?)))
   (remove-duplicates (layer-named-children m) eq? #:key cdr))
-
-(define/contract-out (train! m) ;; noqa
-  (-> layer? layer?)
-  (layer-set-mode! m 'train)
-  m)
-
-(define/contract-out (eval! m) ;; noqa
-  (-> layer? layer?)
-  (layer-set-mode! m 'eval)
-  m)
-
-(define/contract-out (set-mode! m mode) ;; noqa
-  (-> layer? mode/c layer?)
-  (layer-set-mode! m mode)
-  m)
-
-(define/contract-out (layer-training? m) ;; noqa
-  (-> layer? boolean?)
-  (training? (layer-mode m)))
-
-(define (mode-snapshot m)
-  (define seen (make-hasheq))
-  (let walk ([m m])
-    (cond
-      [(hash-ref seen m #f) '()]
-      [else
-       (hash-set! seen m #t)
-       (cons (cons m (layer-mode m))
-             (append-map (lambda (c) (walk (cdr c)))
-                         (layer-named-children m)))])))
-
-(define (restore-modes! before)
-  (for ([e (in-list before)] #:unless (registry? (car e)))
-    (layer-set-mode! (car e) (cdr e)))
-  (for ([e (in-list before)] #:when (registry? (car e)))
-    (set-registry-mode! (car e) (cdr e))))
-
-(define/contract-out (call-with-mode m mode thunk) ;; noqa
-  (-> layer? mode/c (-> any) any)
-  (define before (mode-snapshot m))
-  (dynamic-wind (lambda () (layer-set-mode! m mode))
-                thunk
-                (lambda () (restore-modes! before))))
-
-(define/contract-out (call-with-eval-mode m thunk) ;; noqa
-  (-> layer? (-> any) any)
-  (call-with-mode m 'eval thunk))
-
-(define-syntax-parse-rule (in-mode m:expr mode:expr body:expr ...+)
-  (call-with-mode m mode (lambda () body ...)))
-
-(define-syntax-parse-rule (in-eval-mode m:expr body:expr ...+)
-  (call-with-mode m 'eval (lambda () body ...)))
 
 (define-syntax-parameter with-mode
   (lambda (stx)
@@ -482,21 +452,16 @@
              (let (checked-binding ...) body ...))
          #'(lambda (input.id ...)
              (let (checked-binding ...) body ...)))
-     #:with (moved-defn ...)
-     (if (attribute moved-body)
-         #'((define (moved-proc self dev dtype)
-              (define before (placement-of self))
-              (begin0 (move-layer! self dev dtype)
-                      (unless (equal? before (placement-of self))
-                        (let ([field.id (field-acc self)] ...)
-                          moved-body ...)))))
-         #'())
      #:with (moved-clause ...)
-     (if (attribute moved-body) #'(#:property prop:to moved-proc) #'())
+     (if (attribute moved-body)
+         #'(#:property prop:on-move
+            (lambda (self)
+              (let ([field.id (field-acc self)] ...)
+                moved-body ...)))
+         #'())
      #:with export (contract-export stx #'name #'name?
                                     (attribute ctc) (attribute pred))
      #'(begin
-         moved-defn ...
          (struct sid registry (field.id ...)
            #:reflection-name reflect-name
            moved-clause ...)

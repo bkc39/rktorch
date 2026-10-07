@@ -24,6 +24,7 @@
                     parameters-by-key
                     in-layers
                     layer?
+                    mode/c
                     named-buffers
                     named-parameters
                     step/c
@@ -31,6 +32,7 @@
          (submod "nn/layer.rkt" checked)
          "nn/linear.rkt"
          "nn/loss.rkt"
+         "nn/mode.rkt"
          (only-in "nn/optim.rkt"
                   adam adam? learning-rate rmsprop rmsprop?
                   set-learning-rate! sgd sgd? step! zero-grads!)

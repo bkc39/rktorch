@@ -25,6 +25,8 @@ void torchrkt_c_api_compile_check(void) {
   void (*tensor_free)(tr_tensor*) = tr_tensor_free;
   int (*numel)(const tr_tensor*, int64_t*) = tr_tensor_numel;
   int (*nbytes)(const tr_tensor*, int64_t*) = tr_tensor_nbytes;
+  int (*data_ptr)(const tr_tensor*, uint64_t*) = tr_tensor_data_ptr;
+  int (*storage_ptr)(const tr_tensor*, uint64_t*) = tr_tensor_storage_ptr;
   int (*copy_data)(const tr_tensor*, uint64_t, float*, uint64_t*) =
       tr_tensor_copy_data;
   tr_tensor* (*zeros)(const int64_t*, int64_t) = tr_zeros;
@@ -275,6 +277,8 @@ void torchrkt_c_api_compile_check(void) {
   (void)tensor_free;
   (void)numel;
   (void)nbytes;
+  (void)data_ptr;
+  (void)storage_ptr;
   (void)copy_data;
   (void)zeros;
   (void)from_data;

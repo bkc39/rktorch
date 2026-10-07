@@ -3,6 +3,7 @@
 #include <torch/torch.h>
 
 #include <algorithm>
+#include <cstdint>
 #include <cstring>
 #include <exception>
 #include <sstream>
@@ -36,6 +37,24 @@ int tr_tensor_nbytes(const tr_tensor* t, int64_t* out) {
   }
   return torchrkt::status_call("tr_tensor_nbytes", [&] {
     *out = static_cast<int64_t>(t->value.nbytes());
+  });
+}
+
+int tr_tensor_data_ptr(const tr_tensor* t, uint64_t* out) {
+  if (!t || !out) {
+    return torchrkt::null_arg_status("tr_tensor_data_ptr");
+  }
+  return torchrkt::status_call("tr_tensor_data_ptr", [&] {
+    *out = reinterpret_cast<std::uintptr_t>(t->value.const_data_ptr());
+  });
+}
+
+int tr_tensor_storage_ptr(const tr_tensor* t, uint64_t* out) {
+  if (!t || !out) {
+    return torchrkt::null_arg_status("tr_tensor_storage_ptr");
+  }
+  return torchrkt::status_call("tr_tensor_storage_ptr", [&] {
+    *out = reinterpret_cast<std::uintptr_t>(t->value.storage().data());
   });
 }
 

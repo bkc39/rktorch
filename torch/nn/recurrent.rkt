@@ -6,7 +6,10 @@
          (only-in "../foreign.rkt"
                   device-type exn:fail:rktorch:oom? tensor-device tensor-dtype
                   tensor-shape tensor? with-no-grad zeros)
+         (only-in "../foreign/error.rkt" check-ok)
          (only-in "../foreign/raw/fault.rkt" native-fault?)
+         (only-in "../foreign/raw/tensor.rkt"
+                  tr-tensor-data-ptr/raw tr-tensor-storage-ptr/raw)
          (only-in "../generated.rkt"
                   cudnn-rnn-flatten-weight gru-input lstm-input)
          (only-in "init.rkt" uniform-init)
@@ -44,22 +47,27 @@
     (cons (format "~a_l~a~a" (car entry) layer suffix)
           (apply draw (cdr entry)))))
 
-;; Keyed on the first weight, which `to!` mutates in place and so survives a
-;; move. A move that rebinds the storage drops the entry through `#:on-move`,
-;; which a placement read at forward time could not do: a device round trip
-;; ends where it started.
+;; Keyed on the first weight, which `to!` mutates in place, against the
+;; addresses the weights had once flattened. Packed weights are views of one
+;; storage, so the storage address goes in beside each element's: separate
+;; copies that a CUDA round trip happened to allocate at the packed offsets
+;; would otherwise read as still packed.
 (define flattened (make-weak-hasheq))
 
 ;; Which weights cudnn refused to flatten. The refusal is swallowed so the
-;; layer still runs, and the placement is cached either way so it is not asked
-;; twice, which together would hide a defect in the arguments we pass as a
-;; silent fall back to compacted copies; recording it lets a test say the
+;; layer still runs, and the addresses are recorded either way so it is not
+;; asked twice, which together would hide a defect in the arguments we pass as
+;; a silent fall back to compacted copies; recording it lets a test say the
 ;; flattening happened rather than only that the outputs agree.
 (define refused (make-weak-hasheq))
 
-(define (placement weights)
-  (define w (car weights))
-  (cons (tensor-device w) (tensor-dtype w)))
+(define (storage-signature weights)
+  (for/list ([w (in-list weights)])
+    (define-values (data-rc data) (tr-tensor-data-ptr/raw w))
+    (check-ok data-rc 'storage-signature)
+    (define-values (storage-rc storage) (tr-tensor-storage-ptr/raw w))
+    (check-ok storage-rc 'storage-signature)
+    (cons data storage)))
 
 ;; Flattening is an optimisation cudnn asks for, never a requirement: a build
 ;; or a dtype it refuses still runs, on compacted copies, and refusing again
@@ -90,15 +98,17 @@
                                  (rnn-bidirectional? spec))))))
 
 (define (ensure-flat! spec weights)
-  (define now (placement weights))
-  (unless (equal? now (hash-ref flattened (car weights) #f))
-    (when (eq? (device-type (car now)) 'cuda)
-      (hash-remove! refused (car weights))
-      (flatten-weights! spec weights))
-    (hash-set! flattened (car weights) now)))
-
-(define (forget-flattening! entries)
-  (hash-remove! flattened (cdr (car entries))))
+  (define key (car weights))
+  (define now (storage-signature weights))
+  (define stale? (not (equal? now (hash-ref flattened key #f))))
+  (define cuda? (and stale? (eq? (device-type (tensor-device key)) 'cuda)))
+  (cond
+    [cuda?
+     (hash-remove! refused key)
+     (flatten-weights! spec weights)
+     (hash-set! flattened key (storage-signature weights))]
+    [stale? (hash-set! flattened key now)]
+    [else (void)]))
 
 (define (zero-state spec x)
   (define batch
@@ -172,7 +182,6 @@
                   batch-first? (exact->inexact dropout) bidirectional?))
   (set! entries (draw-parameters spec))
   (set! params (parameters-by-key entries))
-  #:on-move (forget-flattening! entries)
   #:forward (x . state)
   (with-mode (run spec entries lstm-input x state mode)))
 
@@ -194,11 +203,13 @@
                   batch-first? (exact->inexact dropout) bidirectional?))
   (set! entries (draw-parameters spec))
   (set! params (parameters-by-key entries))
-  #:on-move (forget-flattening! entries)
   #:forward (x . state)
   (with-mode (run spec entries gru-input x state mode)))
 
 (module+ private
-  (provide cudnn-refusal? flattened-placement flatten-refused?)
-  (define (flattened-placement weight) (hash-ref flattened weight #f))
+  (provide cudnn-refusal? flattened-signature flatten-refused?
+           record-flattened! storage-signature)
+  (define (flattened-signature weight) (hash-ref flattened weight #f))
+  (define (record-flattened! weight signature)
+    (hash-set! flattened weight signature))
   (define (flatten-refused? weight) (hash-ref refused weight #f)))

@@ -3,8 +3,9 @@
 @(require (for-label racket/base
                      racket/contract
                      (only-in racket/string string-replace)
-                     (only-in torch backward! lambda~> native-collect-at-troughs
-                              prop:to relu tensor? to to-able? with-no-grad)
+                     (only-in torch backward! lambda~> matmul
+                              native-collect-at-troughs prop:to randn relu
+                              tensor? to to-able? with-no-grad)
                      (only-in torch/data/loader in-dataloader)
                      torch/nn
                      torch/private/contract))
@@ -196,23 +197,30 @@ rather than a guard in the body:
 ]
 
 @racket[#:on-move] runs after @racket[to] has moved the layer, with every
-field in scope, and only when the move actually rebound something: the
-device and dtype of every parameter and buffer are read either side of it
-and compared.  @racket[to] is the identity when nothing changes, so a loop
-that defensively moves a model to the device it is already on runs the body
-not at all; a device round trip runs it twice, once per move, which reading
-the placement after the fact could not detect.  It is for state derived
-from where the tensors live --- a cached layout, a handle onto their
-storage --- which a move invalidates:
+field in scope, and only when the move actually rebound one of its
+parameters or buffers, its children's included.  The device and dtype of
+every tensor in the tree being moved are read once, before anything moves,
+and compared afterwards, so a tensor shared with a sibling counts as moved
+for both layers, whichever moved it.  @racket[to] is the identity when
+nothing changes, so a loop that defensively moves a model to the device it
+is already on runs the body not at all; a device round trip runs it twice,
+once per move, which reading the placement after the fact could not
+detect.  Bodies run children first, once per layer however often it appears
+in the tree.  It is for state derived from where the tensors live --- a
+cached layout, a handle onto their storage --- which a move invalidates:
 
 @racketblock[
-(define-layer LSTM (spec entries params)
-  #:init (input-size hidden-size)
-  (code:comment "...")
-  #:on-move (forget-flattening! entries)
-  #:forward (x . state)
-  (with-mode (run spec entries lstm-input x state mode)))
+(define-layer Packed (weight packed)
+  #:init (n)
+  (set! weight (Parameter (randn n n)))
+  (set! packed (box #f))
+  #:on-move (set-box! packed #f)
+  #:forward (x)
+  (matmul x (or (unbox packed) (pack! packed weight))))
 ]
+
+State that can check itself at the call needs no hook: @racket[LSTM]
+compares its weights' storage addresses with those its last packing left.
 
 Without @racket[#:contract] nothing is exported; a layer local to a model
 or a test needs no contract boundary.
