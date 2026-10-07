@@ -10,6 +10,7 @@
          (submod "nn/buffer.rkt" checked)
          "nn/clip.rkt"
          "nn/conv.rkt"
+         (submod "nn/copy.rkt" checked)
          "nn/dropout.rkt"
          "nn/ema.rkt"
          "nn/embedding.rkt"
@@ -54,6 +55,8 @@
          layer-named-children
          layer-mode
          layer-set-mode!
+         layer-rebuild
+         layer-copy
          with-mode
          in-mode
          in-eval-mode)
@@ -135,10 +138,8 @@
          TransformerDecoderLayer
          transformer-decoder-layer?
          TransformerEncoder
-         GenericTransformerEncoder
          transformer-encoder?
          TransformerDecoder
-         GenericTransformerDecoder
          transformer-decoder?)
 
 (provide causal-mask
