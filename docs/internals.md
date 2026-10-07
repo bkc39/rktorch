@@ -270,9 +270,12 @@ the last defence when a trough collection is not yet due:
   until `finalizer-run-count` has stood still for three turns, within
   two seconds. Without this a collection found 13 GB of garbage and
   the next `backward!` still failed, the frees not yet made.
-- The mark is `native-memory-fraction` of the device's capacity, 80% by
-  default: `tr_cuda_mem_get_info`'s total on CUDA and
-  `tr_mps_memory_info`'s recommended maximum on MPS. The capacity is
+- The mark is a share of the device's capacity: `tr_cuda_mem_get_info`'s
+  total on CUDA and `tr_mps_memory_info`'s recommended maximum on MPS. The
+  share is `native-memory-fraction` when set; unset, it is 80% on CUDA and
+  50% on MPS, where the capacity is host RAM. On a 16 GB M2 Pro, 07-asr at
+  80% peaked 6 GB into swap and at 50% about 2 GB, and ran fastest; 08-
+  diffusion fired 5 times in 782 steps at 50% (#244). The capacity is
   cached once known, and a failed query on a device that should have one
   is retried after a second, so one early failure cannot switch the
   backstop off. The fraction is applied at each check, not folded into

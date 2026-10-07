@@ -264,7 +264,7 @@
   raw:native-memory-limit)
 
 (define/contract-out native-memory-fraction ;; noqa
-  (parameter/c (and/c real? positive? (lambda (x) (<= x 1))))
+  (parameter/c (or/c #f (and/c real? positive? (lambda (x) (<= x 1)))))
   raw:native-memory-fraction)
 
 (define/contract-out native-collect-margin ;; noqa
