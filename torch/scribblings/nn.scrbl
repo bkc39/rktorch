@@ -1,11 +1,13 @@
 #lang scribble/manual
 
-@(require (for-label racket/base
+@(require "common.rkt"
+          (for-label racket/base
                      racket/contract
                      (only-in racket/string string-replace)
-                     (only-in torch backward! lambda~> mul
-                              native-collect-at-troughs prop:to relu tensor?
-                              to to-able? with-no-grad)
+                     (only-in torch backward! copy! lambda~> manual-seed!
+                              mul native-collect-at-troughs prop:to randn
+                              relu tensor->list tensor? to to-able?
+                              with-no-grad zeros)
                      (only-in torch/data/loader in-dataloader)
                      torch/nn
                      torch/private/contract))
@@ -587,7 +589,8 @@ The generic interface, with methods @racket[layer-forward],
 @racket[layer-parameters], @racket[layer-named-parameters],
 @racket[layer-buffers], @racket[layer-named-buffers],
 @racket[layer-named-children], @racket[layer-own-tensors],
-@racket[layer-mode] and @racket[layer-set-mode!]. A structure implements
+@racket[layer-mode], @racket[layer-set-mode!] and @racket[layer-rebuild].
+A structure implements
 it with @racket[#:methods]; it derives @racket[prop:to], so every layer is
 @racket[to-able?], and @racket[prop:procedure], so every layer applies to
 its inputs. @racket[define-layer]'s @racket[#:forward] clause supplies the
@@ -618,6 +621,79 @@ paths, as @racket[parameters] and @racket[named-parameters] do for
 parameters. Buffers move with the layer under @racket[to] and are saved
 by @racket[save-state!], but no optimizer updates them: running
 statistics, masks, position tables.}
+
+@subsection[#:tag "layer-copy"]{Copying layers}
+
+@defproc[(layer-copy [m layer?]) layer?]{
+A deep copy of @racket[m], PyTorch's @tt{copy.deepcopy(module)}: a layer
+of the same kind and configuration whose parameters and buffers are fresh
+tensors holding the same values, on the same device and with the same
+dtype, each @racket[Parameter] keeping whether it requires gradients.
+Child layers are copied the same way, all the way down, and every layer of
+the copy starts in its original's mode. Nothing is drawn from the random
+stream.
+
+The copy shares nothing that training changes: an optimizer stepping one
+leaves the other where it was, and moving one with @racket[to] leaves the
+other on its device. Gradients are not copied, as PyTorch's deep copy of a
+parameter does not copy them either. Within one copy, sharing is kept: a
+layer or a tensor that appears twice in @racket[m], as tied weights do,
+appears twice in the copy as one layer or one tensor. Tensors a layer
+keeps outside its parameters and buffers, in a plain field or inside a
+list, vector or box there, are copied too; any other value a field holds,
+a number or a procedure, is shared.
+
+Every layer @racket[define-layer] builds can be copied, the built-in ones
+included, and so can a @racket[procedure->Layer] layer with no
+parameters, buffers or children. One with them is refused, since its
+procedure reads the original's tensors. A hand-written layer is copied
+through its @racket[layer-rebuild] method, and refused when it has none.
+
+@torch-examples[
+(manual-seed! 0)
+(define net (Sequential (Linear 2 3) relu (Linear 3 1)))
+(define twin (layer-copy net))
+(equal? (map car (named-parameters twin)) (map car (named-parameters net)))
+(eq? (car (parameters twin)) (car (parameters net)))
+(define x (randn 4 2))
+(equal? (tensor->list (twin x)) (tensor->list (net x)))
+(with-no-grad (copy! (car (parameters net)) (zeros 1)))
+(equal? (tensor->list (twin x)) (tensor->list (net x)))
+]}
+
+@defproc[(layer-rebuild [m layer?]
+                        [child (-> string? layer? layer?)]
+                        [tensor (-> tensor? tensor?)])
+         layer?]{
+The @racket[gen:layer] method @racket[layer-copy] is built on: a new layer
+of @racket[m]'s kind and configuration, in its mode, whose every child
+@racket[c] registered under @racket[name] is replaced by
+@racket[(child name c)], and whose every tensor, its own parameters and
+buffers and the tensors in its plain fields, is replaced by
+@racket[(tensor t)]. It does not recurse by itself; @racket[child] decides
+what each child becomes. @racket[layer-copy] passes a @racket[child] that
+copies each child the same way and a @racket[tensor] that copies each
+tensor, both remembering what they have done, so shared values stay
+shared. A @racket[child] that answers some children with other layers
+rebuilds the tree with those leaves replaced, the shape a wrapper over
+named layers takes.
+
+@racket[define-layer] supplies the method. A hand-written layer that
+should be copyable defines it in its @racket[#:methods gen:layer] block,
+returning a new structure of its own:
+
+@racketblock[
+(struct Scaled (weight)
+  #:methods gen:layer
+  [(define (layer-forward self . inputs)
+     (* (car inputs) (Scaled-weight self)))
+   (define (layer-parameters self)
+     (list (Scaled-weight self)))
+   (define (layer-rebuild self child tensor)
+     (Scaled (tensor (Scaled-weight self))))])
+]
+
+Without it, @racket[layer-copy] refuses the layer, naming the method.}
 
 @section[#:tag "optimizers"]{Optimizers and schedules}
 

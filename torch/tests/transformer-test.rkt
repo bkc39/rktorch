@@ -1,11 +1,10 @@
 #lang racket/base
 
 (module+ test
-  (require (only-in racket/list make-list remove-duplicates take-right)
+  (require (only-in racket/list remove-duplicates take-right)
            rackunit
            "../main.rkt"
            "../nn.rkt"
-           (only-in "../nn/init.rkt" call-without-drawing)
            (only-in "../vision/diffusion.rkt" sinusoidal-embedding))
 
   (define (close? a b [eps 1e-5])
@@ -255,7 +254,7 @@
   (test-case "a stack copies one layer, as nn.TransformerEncoder does"
     (manual-seed! 0)
     (define stack
-      (TransformerEncoder 8 #:heads 2 #:ffn-width 16 #:layers 3 #:norm? #t))
+      (TransformerEncoder 8 #:heads 2 #:ffn-width 16 #:layers 3 #:norm #t))
     (define after (tensor->list (randn 3)))
     (check-pred transformer-encoder? stack)
     (check-equal? (map car (named-children stack)) '("layers" "norm"))
@@ -318,7 +317,7 @@
       (TransformerDecoder 8 #:heads 2 #:ffn-width 16 #:layers 2 #:dropout 0.0
                           #:norm-first? #t #:activation 'gelu-tanh
                           #:batch-first? #t #:bias? #f #:layer-norm-eps 1e-3
-                          #:norm? #t))
+                          #:norm #t))
     (manual-seed! 0)
     (define one
       (TransformerDecoderLayer 8 #:heads 2 #:ffn-width 16 #:dropout 0.0
@@ -339,32 +338,46 @@
                       (one h mem #:tgt-causal? #t
                            #:memory-key-padding-mask gaps))))))
 
-  (test-case "the generic stack builds from a procedure, as PyTorch's does"
-    (define (make) (TransformerEncoderLayer 8 #:heads 2 #:ffn-width 16))
+  (test-case "a layer stacks as copies of it, the layer itself left out"
     (manual-seed! 0)
-    (define standard
-      (TransformerEncoder 8 #:heads 2 #:ffn-width 16 #:layers 2 #:norm? #t))
+    (define width
+      (TransformerEncoder 8 #:heads 2 #:ffn-width 16 #:layers 2 #:norm #t))
     (manual-seed! 0)
-    (define generic
-      (GenericTransformerEncoder make #:layers 2 #:norm (LayerNorm 8)))
-    (check-pred transformer-encoder? standard)
-    (check-pred transformer-encoder? generic)
-    (check-false (transformer-decoder? generic))
-    (check-equal? (named generic) (named standard))
-    (for ([a (in-list (parameters generic))]
-          [b (in-list (parameters standard))])
+    (define prototype (TransformerEncoderLayer 8 #:heads 2 #:ffn-width 16))
+    (define after (tensor->list (randn 3)))
+    (manual-seed! 0)
+    (TransformerEncoderLayer 8 #:heads 2 #:ffn-width 16)
+    (check-equal? (tensor->list (randn 3)) after)
+    (define stacked
+      (TransformerEncoder prototype #:layers 2 #:norm (LayerNorm 8)))
+    (check-pred transformer-encoder? width)
+    (check-pred transformer-encoder? stacked)
+    (check-false (transformer-decoder? stacked))
+    (check-equal? (named stacked) (named width))
+    (for ([a (in-list (parameters stacked))]
+          [b (in-list (parameters width))])
       (check-equal? (tensor->list a) (tensor->list b)))
+    (for ([l (in-list (layers-of stacked))])
+      (check-false (eq? l prototype))
+      (for ([a (in-list (parameters l))]
+            [b (in-list (parameters prototype))])
+        (check-false (eq? a b))))
+    (with-no-grad
+      (for ([p (in-list (parameters prototype))]) (zero! p)))
+    (check-equal? (tensor->list (car (parameters stacked)))
+                  (tensor->list (car (parameters width)))
+                  "the stack does not share the given layer's tensors")
     (define custom
-      (GenericTransformerEncoder make #:layers 1 #:norm (Linear 8 8)))
+      (TransformerEncoder (encoder-layer) #:layers 1 #:norm (Linear 8 8)))
     (check-equal? (take-right (named custom) 2) '("norm.weight" "norm.bias"))
     (eval! custom)
     (check-true (close? (custom x)
                         ((child custom "norm") ((car (layers-of custom)) x)))))
 
-  (test-case "#:copies? #f draws every layer afresh"
+  (test-case "a procedure stacks one fresh layer per call"
     (define (make) (TransformerDecoderLayer 8 #:heads 2 #:ffn-width 16))
     (manual-seed! 0)
-    (define stack (GenericTransformerDecoder make #:layers 2 #:copies? #f))
+    (define stack (TransformerDecoder make #:layers 2))
     (define after (tensor->list (randn 3)))
     (manual-seed! 0)
     (define first-layer (make))
@@ -383,7 +396,7 @@
     (check-true (close? (stack tgt memory #:tgt-causal? #t)
                         (for/fold ([h tgt]) ([l (in-list layers)])
                           (l h memory #:tgt-causal? #t))))
-    (define copied (GenericTransformerDecoder make #:layers 2))
+    (define copied (TransformerDecoder (make) #:layers 2))
     (check-equal? (tensor->list (car (parameters (car (layers-of copied)))))
                   (tensor->list (car (parameters (cadr (layers-of copied)))))))
 
@@ -392,7 +405,7 @@
     (define stack
       (TransformerDecoder 8 #:heads 2 #:ffn-width 16 #:layers 2
                           #:norm-first? #t #:activation 'gelu-tanh
-                          #:norm? #t))
+                          #:norm #t))
     (define tgt (requires-grad! (randn 4 2 8)))
     (define mem (requires-grad! (randn 7 2 8)))
     (define out (stack tgt mem #:tgt-causal? #t))
@@ -450,15 +463,6 @@
     (check-true (close? (mha x x x #:attn-mask (causal-mask 5))
                         (mha x x x #:causal? #t))))
 
-  (test-case "building without drawing leaves the stream where it was"
-    (manual-seed! 0)
-    (define zeros-instead
-      (call-without-drawing (lambda () (normal-init '(2 3)))))
-    (check-equal? (tensor->list zeros-instead) (make-list 6 0.0))
-    (define next (tensor->list (randn 2)))
-    (manual-seed! 0)
-    (check-equal? (tensor->list (randn 2)) next))
-
   (test-case "the constructors' contracts blame their caller"
     (define blames-this-test
       (message-matching #rx"blaming: [(][^)]*transformer-test[.]rkt"))
@@ -483,33 +487,39 @@
                (lambda () (TransformerEncoder 8 #:heads 2 #:layers 0)))
     (check-exn blames-this-test
                (lambda () (TransformerDecoder 8 #:heads 2 #:layers 2
-                                              #:norm? 'yes)))
+                                              #:norm 'yes)))
     (check-exn blames-this-test
                (lambda () (TransformerEncoder 8 #:heads 2 #:layers 2
                                               #:activation 'tanh)))
     (check-exn exn:fail:contract?
                (lambda () (TransformerEncoder 8 #:heads 2)))
-    (check-exn exn:fail:contract?
-               (lambda () (TransformerDecoder 8 #:heads 2 #:layers 2
-                                              #:norm (LayerNorm 8))))
+    (check-exn (message-matching #rx"a model width needs #:heads")
+               (lambda () (TransformerEncoder 8 #:layers 2)))
+    (define layer (TransformerEncoderLayer 8 #:heads 2))
+    (define (make) (TransformerEncoderLayer 8 #:heads 2))
+    (define keywords-alone
+      (message-matching #rx"the layer keywords configure layers built from"))
+    (check-exn keywords-alone
+               (lambda () (TransformerEncoder layer #:layers 2 #:heads 2)))
+    (check-exn keywords-alone
+               (lambda () (TransformerEncoder make #:layers 2 #:bias? #f)))
     (check-exn blames-this-test
-               (lambda () (GenericTransformerEncoder (lambda () (Linear 8 8))
-                                                     #:layers 2)))
+               (lambda () (TransformerEncoder layer #:layers 2 #:dropout 0.0)))
+    (check-exn (message-matching #rx"#:norm #t makes a LayerNorm")
+               (lambda () (TransformerEncoder layer #:layers 2 #:norm #t)))
     (check-exn blames-this-test
-               (lambda ()
-                 (GenericTransformerDecoder
-                  (lambda () (TransformerEncoderLayer 8 #:heads 2))
-                  #:layers 2)))
-    (check-exn #rx"^GenericTransformerEncoder: contract violation"
-               (lambda ()
-                 (GenericTransformerEncoder
-                  (lambda () (TransformerEncoderLayer 8 #:heads 2))
-                  #:layers 0)))
-    (check-exn (message-matching #rx"expected: [(]not/c layer[?][)]")
-               (lambda ()
-                 (GenericTransformerEncoder
-                  (TransformerEncoderLayer 8 #:heads 2)
-                  #:layers 2)))
+               (lambda () (TransformerDecoder make #:layers 2 #:norm #t)))
+    (check-exn blames-this-test
+               (lambda () (TransformerEncoder (lambda () (Linear 8 8))
+                                              #:layers 2)))
+    (check-exn blames-this-test
+               (lambda () (TransformerDecoder make #:layers 2)))
+    (check-exn blames-this-test
+               (lambda () (TransformerDecoder layer #:layers 2)))
+    (check-exn blames-this-test
+               (lambda () (TransformerEncoder (Linear 8 8) #:layers 2)))
+    (check-exn #rx"^TransformerEncoder: contract violation"
+               (lambda () (TransformerEncoder make #:layers 0)))
     (check-exn (message-matching #rx"expected: even-width")
                (lambda () (sinusoidal-positions 4 7)))
     (check-exn (message-matching #rx"expected: .*position-vector")

@@ -365,7 +365,7 @@
                                                #:norm-first? #t
                                                #:dropout 0.0
                                                #:batch-first? #t
-                                               #:norm? #t))
+                                               #:norm #t))
          (set! head (Linear 32 vocab-size))
          #:forward (idx)
          (with-default-device (tensor-device idx)

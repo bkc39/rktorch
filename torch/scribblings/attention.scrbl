@@ -7,13 +7,11 @@
                      racket/contract
                      torch
                      (only-in torch/nn
-                              Dropout Embedding GenericTransformerDecoder
-                              GenericTransformerEncoder LSTM LayerList
-                              LayerNorm Linear MultiheadAttention
-                              TransformerDecoder
+                              Dropout Embedding LSTM LayerList LayerNorm
+                              Linear MultiheadAttention TransformerDecoder
                               TransformerDecoderLayer TransformerEncoder
                               TransformerEncoderLayer causal-mask child-ref
-                              eval! in-layers layer? load-state!
+                              eval! in-layers layer-copy layer? load-state!
                               multihead-attention? named-children
                               named-parameters parameters sinusoidal-positions
                               transformer-decoder-layer? transformer-decoder?
@@ -421,7 +419,7 @@ where the normalization goes, written here for one sublayer @tt{f}:
 
 A pre-norm layer never normalizes the sum it passes on, so a stack of them
 trains more steadily as it deepens, and ends with a normalization of its
-own (@racket[TransformerEncoder]'s @racket[#:norm?]).
+own (@racket[TransformerEncoder]'s @racket[#:norm]).
 
 @racket[activation] is applied between the feed-forward's two
 @racket[Linear]s: @racket['relu], PyTorch's default; @racket['gelu], the
@@ -615,74 +613,86 @@ downstream should read them either way. PyTorch's @tt{device} and
 
 @defmodule[torch/nn #:link-target? #f]
 
-@deftogether[(@defproc[(TransformerEncoder
-                        [d-model exact-positive-integer?]
-                        [#:heads heads exact-positive-integer?]
-                        [#:layers layers exact-positive-integer?]
-                        [#:ffn-width ffn-width exact-positive-integer? 2048]
-                        [#:dropout dropout (and/c real? (>=/c 0) (</c 1)) 0.1]
-                        [#:activation activation
-                                      (or/c 'relu 'gelu 'gelu-tanh
-                                            (procedure-arity-includes/c 1))
-                                      'relu]
-                        [#:norm-first? norm-first? boolean? #f]
-                        [#:layer-norm-eps layer-norm-eps
-                                          (and/c real? positive?) 1e-5]
-                        [#:batch-first? batch-first? boolean? #f]
-                        [#:bias? bias? boolean? #t]
-                        [#:norm? norm? boolean? #f])
-                       transformer-encoder?]
-              @defproc[(TransformerDecoder
-                        [d-model exact-positive-integer?]
-                        [#:heads heads exact-positive-integer?]
-                        [#:layers layers exact-positive-integer?]
-                        [#:ffn-width ffn-width exact-positive-integer? 2048]
-                        [#:dropout dropout (and/c real? (>=/c 0) (</c 1)) 0.1]
-                        [#:activation activation
-                                      (or/c 'relu 'gelu 'gelu-tanh
-                                            (procedure-arity-includes/c 1))
-                                      'relu]
-                        [#:norm-first? norm-first? boolean? #f]
-                        [#:layer-norm-eps layer-norm-eps
-                                          (and/c real? positive?) 1e-5]
-                        [#:batch-first? batch-first? boolean? #f]
-                        [#:bias? bias? boolean? #t]
-                        [#:norm? norm? boolean? #f])
-                       transformer-decoder?])]{
-PyTorch's @tt{nn.TransformerEncoder} and @tt{nn.TransformerDecoder} in
-their standard use,
-@tt{nn.TransformerEncoder(nn.TransformerEncoderLayer(d_model, nhead),
-num_layers)}: @racket[layers] transformer layers applied in turn, then a
-final norm when @racket[norm?] asks for one. The stack builds its own
-layers, every one a @racket[TransformerEncoderLayer] or a
-@racket[TransformerDecoderLayer] made from @racket[d-model],
-@racket[heads] and the keywords after @racket[layers], which mean and
-default to what they do for the layer
-(@secref["attention-transformer-layers"]). Other layers, another norm or
-independently drawn layers take the general form,
-@racket[GenericTransformerEncoder] and @racket[GenericTransformerDecoder]
-below, of which this is a case. A stack applies with exactly
-its layers' arguments and keywords
+@defproc*[([(TransformerEncoder
+             [d-model exact-positive-integer?]
+             [#:heads heads exact-positive-integer?]
+             [#:layers layers exact-positive-integer?]
+             [#:ffn-width ffn-width exact-positive-integer? 2048]
+             [#:dropout dropout (and/c real? (>=/c 0) (</c 1)) 0.1]
+             [#:activation activation
+                           (or/c 'relu 'gelu 'gelu-tanh
+                                 (procedure-arity-includes/c 1))
+                           'relu]
+             [#:norm-first? norm-first? boolean? #f]
+             [#:layer-norm-eps layer-norm-eps (and/c real? positive?) 1e-5]
+             [#:batch-first? batch-first? boolean? #f]
+             [#:bias? bias? boolean? #t]
+             [#:norm norm (or/c boolean? layer?) #f])
+            transformer-encoder?]
+           [(TransformerEncoder
+             [layer transformer-encoder-layer?]
+             [#:layers layers exact-positive-integer?]
+             [#:norm norm (or/c #f layer?) #f])
+            transformer-encoder?]
+           [(TransformerEncoder
+             [make-layer (and/c (not/c layer?)
+                                (-> transformer-encoder-layer?))]
+             [#:layers layers exact-positive-integer?]
+             [#:norm norm (or/c #f layer?) #f])
+            transformer-encoder?])]{
+PyTorch's @tt{nn.TransformerEncoder}: @racket[layers] encoder layers
+applied in turn, then a final norm when there is one. The first argument
+says where the layers come from:
+
+@tabular[#:sep @hspace[2]
+         #:style 'boxed
+         (list (list @bold{first argument} @bold{the layers}
+                     @bold{in PyTorch})
+               (list "a model width"
+                     @elem{a @racket[TransformerEncoderLayer] built from it
+                           and the keywords, then copied}
+                     @tt{nn.TransformerEncoder(nn.TransformerEncoderLayer(d_model, nhead), num_layers)})
+               (list @elem{a @racket[TransformerEncoderLayer]}
+                     "copies of it"
+                     @tt{nn.TransformerEncoder(layer, num_layers)})
+               (list "a procedure of no arguments"
+                     "one call to it per layer"
+                     @tt{nn.ModuleList([make_layer() for _ in range(num_layers)])}))]
+
+The model width is the form to reach for. @racket[heads] is required with
+it, and the keywords from @racket[#:ffn-width] to @racket[#:bias?] mean
+and default to what they do for the layer
+(@secref["attention-transformer-layers"]). They configure only the layers
+a width builds, so passing one beside a layer or a procedure is a contract
+violation, as is a width without @racket[#:heads].
+
+PyTorch's stack deep-copies the layer it is given @tt{num_layers} times,
+so every layer of a fresh stack starts from the same values and the layer
+given is not one of them. Here the copies are @racket[layer-copy]'s: the
+stack holds @racket[layers] copies of the layer, which draw nothing from
+the random stream and share no tensor with it. With a model width, the
+layer copied is built first, drawing its values once. So under one seed
+@racket[(TransformerEncoder e #:heads h #:layers n)] and
+@racket[(TransformerEncoder (TransformerEncoderLayer e #:heads h) #:layers n)]
+start from the values of
+@tt{nn.TransformerEncoder(nn.TransformerEncoderLayer(e, h), n)} and leave
+the stream where PyTorch leaves it. PyTorch's documentation warns about
+those equal starts; a procedure builds every layer afresh instead, each
+drawing its own values, as GPT-2 and BERT build their stacks.
+
+@racket[norm] is the final norm: @racket[#f] for none, any layer to use as
+it is, as PyTorch's @tt{norm} is used, or @racket[#t], with a model width,
+for @racket[(LayerNorm d-model #:eps layer-norm-eps #:bias? bias?)], the
+norm @tt{nn.Transformer} gives its stacks. A stack of pre-norm layers
+needs one, since their last sum is never normalized otherwise. With a
+layer or a procedure, @racket[#t] is a contract violation: pass the norm
+layer itself.
+
+A stack applies with exactly its layers' arguments and keywords
 (@secref["attention-transformer-apply"]), hands every one of them to every
-layer, and answers the last layer's output, normalized.
-
-PyTorch's constructor takes one layer and deep-copies it @tt{num_layers}
-times, so every layer of a fresh stack starts from the same values. Here
-the first layer draws its values and the others are built as copies of
-it, which draw nothing. So under one seed
-@racket[(TransformerEncoder e #:heads h #:layers n)] starts from the values
-of @tt{nn.TransformerEncoder(nn.TransformerEncoderLayer(e, h), n)} and
-leaves the random stream where PyTorch leaves it; the decoder stack does
-the same. PyTorch's documentation warns about those equal starts and
-suggests initializing each layer again by hand; the general form with
-@racket[#:copies? #f] builds independently drawn layers instead.
-
-@racket[norm?] @racket[#t] ends the stack with
-@racket[(LayerNorm d-model #:eps layer-norm-eps #:bias? bias?)], the
-@tt{norm} that @tt{nn.Transformer} passes its stacks. A stack of pre-norm
-layers needs it, since their last sum is never normalized otherwise. The
-children are @racket["layers"], a @racket[LayerList], and @racket["norm"]
-when there is one, so the parameter names are PyTorch's:
+layer, and answers the last layer's output, normalized. Its children are
+@racket["layers"], a @racket[LayerList], and @racket["norm"] when there is
+one, so the parameter names are PyTorch's:
 @racket["layers.0.linear1.weight"] and so on
 (@secref["attention-transformer-pytorch"]).
 
@@ -690,7 +700,7 @@ when there is one, so the parameter names are PyTorch's:
 (manual-seed! 0)
 (define encoder
   (TransformerEncoder 8 #:heads 2 #:layers 3 #:ffn-width 32
-                      #:norm-first? #t #:norm? #t))
+                      #:norm-first? #t #:norm #t))
 (map car (named-children encoder))
 (length (parameters encoder))
 (define stacked
@@ -698,70 +708,65 @@ when there is one, so the parameter names are PyTorch's:
 (equal? (tensor->list (car (parameters (car stacked))))
         (tensor->list (car (parameters (cadr stacked)))))
 (shape (encoder src #:key-padding-mask short))
+(define prototype (TransformerEncoderLayer 8 #:heads 2 #:ffn-width 32))
+(define from-layer (TransformerEncoder prototype #:layers 2))
+(memq prototype (for/list ([l (in-layers (child-ref from-layer "layers"))])
+                  l))
+(define fresh
+  (TransformerEncoder (lambda () (TransformerEncoderLayer 8 #:heads 2
+                                                          #:ffn-width 32))
+                      #:layers 2
+                      #:norm (LayerNorm 8 #:bias? #f)))
+(define drawn (for/list ([l (in-layers (child-ref fresh "layers"))]) l))
+(equal? (tensor->list (car (parameters (car drawn))))
+        (tensor->list (car (parameters (cadr drawn)))))
+]}
+
+@defproc*[([(TransformerDecoder
+             [d-model exact-positive-integer?]
+             [#:heads heads exact-positive-integer?]
+             [#:layers layers exact-positive-integer?]
+             [#:ffn-width ffn-width exact-positive-integer? 2048]
+             [#:dropout dropout (and/c real? (>=/c 0) (</c 1)) 0.1]
+             [#:activation activation
+                           (or/c 'relu 'gelu 'gelu-tanh
+                                 (procedure-arity-includes/c 1))
+                           'relu]
+             [#:norm-first? norm-first? boolean? #f]
+             [#:layer-norm-eps layer-norm-eps (and/c real? positive?) 1e-5]
+             [#:batch-first? batch-first? boolean? #f]
+             [#:bias? bias? boolean? #t]
+             [#:norm norm (or/c boolean? layer?) #f])
+            transformer-decoder?]
+           [(TransformerDecoder
+             [layer transformer-decoder-layer?]
+             [#:layers layers exact-positive-integer?]
+             [#:norm norm (or/c #f layer?) #f])
+            transformer-decoder?]
+           [(TransformerDecoder
+             [make-layer (and/c (not/c layer?)
+                                (-> transformer-decoder-layer?))]
+             [#:layers layers exact-positive-integer?]
+             [#:norm norm (or/c #f layer?) #f])
+            transformer-decoder?])]{
+PyTorch's @tt{nn.TransformerDecoder}, in the same three forms as
+@racket[TransformerEncoder] over @racket[TransformerDecoderLayer]s: a
+model width builds one and copies it,
+@tt{nn.TransformerDecoder(nn.TransformerDecoderLayer(d_model, nhead), num_layers)};
+a layer is copied, @tt{nn.TransformerDecoder(layer, num_layers)}; and a
+procedure is called once per layer. The keywords, the copies and
+@racket[norm] work as they do there, and the stack applies with its
+layers' target, memory and keywords.
+
+@torch-examples[
 (define decoder (TransformerDecoder 8 #:heads 2 #:layers 2 #:ffn-width 32))
 (shape (decoder tgt (encoder src) #:tgt-causal? #t))
 ]}
 
-@deftogether[(@defproc[(GenericTransformerEncoder
-                        [make-layer (and/c (not/c layer?)
-                                           (-> transformer-encoder-layer?))]
-                        [#:layers layers exact-positive-integer?]
-                        [#:norm norm (or/c #f layer?) #f]
-                        [#:copies? copies? boolean? #t])
-                       transformer-encoder?]
-              @defproc[(GenericTransformerDecoder
-                        [make-layer (and/c (not/c layer?)
-                                           (-> transformer-decoder-layer?))]
-                        [#:layers layers exact-positive-integer?]
-                        [#:norm norm (or/c #f layer?) #f]
-                        [#:copies? copies? boolean? #t])
-                       transformer-decoder?])]{
-The general form of the two stacks, whose constructors take what PyTorch's
-do: a way to build the layer, a count and a norm. @racket[TransformerEncoder]
-and @racket[TransformerDecoder] are this form with
-@racket[TransformerEncoderLayer]s or @racket[TransformerDecoderLayer]s
-built from their arguments and a @racket[LayerNorm] as the norm. The
-result is the same kind of stack, a @racket[transformer-encoder?] or a
-@racket[transformer-decoder?], applied the same way and named the same way.
-
-@racket[make-layer] is a procedure of no arguments that builds one layer,
-so the layers can be configured in ways the standard form's keywords do
-not reach. @racket[norm] is any layer, or @racket[#f] for none: PyTorch's
-@tt{norm}. Passing a layer as @racket[make-layer], as PyTorch's signature
-would suggest, is a contract violation: wrap it in a @racket[lambda].
-
-With @racket[copies?] @racket[#t], the default, the stack calls
-@racket[make-layer] once, drawing that layer's values, and builds the
-other layers through it as copies, which draw nothing, as
-@tt{nn.TransformerEncoder(layer, n)} does. With @racket[copies?]
-@racket[#f] it calls @racket[make-layer] once per layer, so each draws
-its own values. That is how GPT-2 and BERT build their stacks, a list of
-independently initialized layers, and it matches a seeded
-@tt{nn.ModuleList([make_layer() for _ in range(n)])}.
-
-@torch-examples[
-(manual-seed! 0)
-(define independent
-  (GenericTransformerDecoder (lambda ()
-                               (TransformerDecoderLayer 8 #:heads 2
-                                                        #:ffn-width 32
-                                                        #:norm-first? #t))
-                             #:layers 2
-                             #:norm (LayerNorm 8 #:bias? #f)
-                             #:copies? #f))
-(transformer-decoder? independent)
-(define drawn
-  (for/list ([l (in-layers (child-ref independent "layers"))]) l))
-(equal? (tensor->list (car (parameters (car drawn))))
-        (tensor->list (car (parameters (cadr drawn)))))
-(shape (independent tgt (encoder src) #:tgt-causal? #t))
-]}
-
 @deftogether[(@defproc[(transformer-encoder? [v any/c]) boolean?]
               @defproc[(transformer-decoder? [v any/c]) boolean?])]{
-Whether @racket[v] is an encoder or a decoder stack, built by either form:
-@racket[TransformerEncoder] or @racket[GenericTransformerEncoder],
-@racket[TransformerDecoder] or @racket[GenericTransformerDecoder].
+Whether @racket[v] was built by @racket[TransformerEncoder] or by
+@racket[TransformerDecoder], in any of their forms.
 }
 
 @section[#:tag "attention-positions"]{Positions and causal masks}

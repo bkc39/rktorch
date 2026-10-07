@@ -3,21 +3,20 @@
 (require (for-syntax racket/base
                      (only-in syntax/parse/pre expr keyword ~seq))
          (only-in racket/contract/base
-                  -> ->* ->i </c >=/c and/c any contract not/c or/c
-                  procedure-arity-includes/c)
+                  -> ->i </c >=/c and/c any contract not/c or/c
+                  procedure-arity-includes/c unsupplied-arg?)
          (only-in syntax/parse/define define-syntax-parse-rule)
          (only-in threading ~>)
-         (only-in "../foreign.rkt" add copy! gelu relu with-no-grad)
-         (only-in "../private/contract.rkt" define/contract-out)
+         (only-in "../foreign.rkt" add gelu relu)
          (only-in "attention.rkt" MultiheadAttention)
          (only-in (submod "attention.rkt" private)
                   attention-mask/c attention-sequence/c attn-mask-shaped
                   padding-shaped rank same-batch wide)
+         (only-in "copy.rkt" layer-copy)
          (only-in "dropout.rkt" Dropout)
-         (only-in "init.rkt" call-without-drawing)
          (only-in "layer-list.rkt" LayerList)
          (only-in "layer-norm.rkt" LayerNorm)
-         (only-in "layer.rkt" define-layer in-layers layer? parameters)
+         (only-in "layer.rkt" define-layer in-layers layer?)
          (only-in "linear.rkt" Linear))
 
 (define probability/c (and/c real? (>=/c 0) (</c 1)))
@@ -206,35 +205,83 @@
                 (lambda (x)
                   (~> x linear1 activation dropout linear2 dropout3)))))
 
-(define (copy-of prototype make-layer)
-  (define copy (call-without-drawing make-layer))
-  (with-no-grad
-    (for ([to (in-list (parameters copy))]
-          [from (in-list (parameters prototype))])
-      (copy! to from)))
-  copy)
 
+(define (stack/c element? result?)
+  (->i ([spec (or/c exact-positive-integer?
+                    element?
+                    (and/c (not/c layer?) (-> element?)))]
+        #:layers [n exact-positive-integer?])
+       (#:norm [norm (or/c boolean? layer?)]
+        #:heads [heads exact-positive-integer?]
+        #:ffn-width [ffn-width exact-positive-integer?]
+        #:dropout [p probability/c]
+        #:activation [activation activation/c]
+        #:norm-first? [norm-first? boolean?]
+        #:layer-norm-eps [eps (and/c real? positive?)]
+        #:batch-first? [batch-first? boolean?]
+        #:bias? [bias? boolean?])
+       #:pre/name (spec heads)
+       "a model width needs #:heads"
+       (or (not (exact-integer? spec)) (not (unsupplied-arg? heads)))
+       #:pre/name (spec heads)
+       "#:heads divides the model width"
+       (or (not (exact-integer? spec))
+           (unsupplied-arg? heads)
+           (zero? (remainder spec heads)))
+       #:pre/desc (spec norm)
+       (or (exact-integer? spec)
+           (not (eq? norm #t))
+           (string-append "#:norm #t makes a LayerNorm as wide as the model;"
+                          " with a layer or a procedure, pass the norm layer"))
+       #:pre/desc (spec heads ffn-width p activation norm-first? eps
+                        batch-first? bias?)
+       (or (exact-integer? spec)
+           (andmap unsupplied-arg?
+                   (list heads ffn-width p activation norm-first? eps
+                         batch-first? bias?))
+           (string-append "the layer keywords configure layers built from a"
+                          " model width; a layer or a procedure brings its"
+                          " own"))
+       [_ result?]))
 
-(define (stacked make-layer n copies?)
-  (define first-layer (make-layer))
-  (LayerList (cons first-layer
-                   (for/list ([_ (in-range (sub1 n))])
-                     (if copies?
-                         (copy-of first-layer make-layer)
-                         (make-layer))))))
+(define (stacked spec n build)
+  (define (copies prototype)
+    (for/list ([_ (in-range n)]) (layer-copy prototype)))
+  (LayerList
+   (cond
+     [(exact-integer? spec) (copies (build))]
+     [(layer? spec) (copies spec)]
+     [else (for/list ([_ (in-range n)]) (spec))])))
 
-(define (generic/c element? result?)
-  (->* [(and/c (not/c layer?) (-> element?))
-        #:layers exact-positive-integer?]
-       [#:norm (or/c #f layer?) #:copies? boolean?]
-       result?))
+(define (final-norm requested d-model eps bias?)
+  (if (eq? requested #t)
+      (LayerNorm d-model #:eps eps #:bias? bias?)
+      requested))
 
-(define-layer GenericTransformerEncoder (layers norm) ;; noqa
-  #:reflection-name 'TransformerEncoder
-  #:predicate transformer-encoder?
-  #:contract (generic/c transformer-encoder-layer? transformer-encoder?)
-  #:init (make-layer #:layers n #:norm [norm #f] #:copies? [copies? #t])
-  (set! layers (stacked make-layer n copies?))
+(define-layer TransformerEncoder (layers norm) ;; noqa
+  #:contract (stack/c transformer-encoder-layer? transformer-encoder?)
+  #:init (spec #:layers n
+               #:norm [norm #f]
+               #:heads [heads #f]
+               #:ffn-width [ffn-width 2048]
+               #:dropout [p 0.1]
+               #:activation [activation 'relu]
+               #:norm-first? [norm-first? #f]
+               #:layer-norm-eps [eps 1e-5]
+               #:batch-first? [batch-first? #f]
+               #:bias? [bias? #t])
+  (set! layers
+        (stacked spec n
+                 (lambda ()
+                   (TransformerEncoderLayer spec #:heads heads
+                                            #:ffn-width ffn-width
+                                            #:dropout p
+                                            #:activation activation
+                                            #:norm-first? norm-first?
+                                            #:layer-norm-eps eps
+                                            #:batch-first? batch-first?
+                                            #:bias? bias?))))
+  (set! norm (final-norm norm spec eps bias?))
   #:forward (src
              #:mask [mask #f]
              #:key-padding-mask [padding #f]
@@ -244,12 +291,30 @@
             (layer x #:mask mask #:key-padding-mask padding
                    #:causal? causal?))))
 
-(define-layer GenericTransformerDecoder (layers norm) ;; noqa
-  #:reflection-name 'TransformerDecoder
-  #:predicate transformer-decoder?
-  #:contract (generic/c transformer-decoder-layer? transformer-decoder?)
-  #:init (make-layer #:layers n #:norm [norm #f] #:copies? [copies? #t])
-  (set! layers (stacked make-layer n copies?))
+(define-layer TransformerDecoder (layers norm) ;; noqa
+  #:contract (stack/c transformer-decoder-layer? transformer-decoder?)
+  #:init (spec #:layers n
+               #:norm [norm #f]
+               #:heads [heads #f]
+               #:ffn-width [ffn-width 2048]
+               #:dropout [p 0.1]
+               #:activation [activation 'relu]
+               #:norm-first? [norm-first? #f]
+               #:layer-norm-eps [eps 1e-5]
+               #:batch-first? [batch-first? #f]
+               #:bias? [bias? #t])
+  (set! layers
+        (stacked spec n
+                 (lambda ()
+                   (TransformerDecoderLayer spec #:heads heads
+                                            #:ffn-width ffn-width
+                                            #:dropout p
+                                            #:activation activation
+                                            #:norm-first? norm-first?
+                                            #:layer-norm-eps eps
+                                            #:batch-first? batch-first?
+                                            #:bias? bias?))))
+  (set! norm (final-norm norm spec eps bias?))
   #:forward (tgt memory
                  #:tgt-mask [tgt-mask #f]
                  #:memory-mask [memory-mask #f]
@@ -266,57 +331,3 @@
                    #:memory-key-padding-mask memory-padding
                    #:tgt-causal? tgt-causal?
                    #:memory-causal? memory-causal?))))
-
-(define/contract-out (TransformerEncoder d-model ;; noqa
-                                         #:heads heads
-                                         #:layers n
-                                         #:ffn-width [ffn-width 2048]
-                                         #:dropout [p 0.1]
-                                         #:activation [activation 'relu]
-                                         #:norm-first? [norm-first? #f]
-                                         #:layer-norm-eps [eps 1e-5]
-                                         #:batch-first? [batch-first? #f]
-                                         #:bias? [bias? #t]
-                                         #:norm? [norm? #f])
-  (transformer/c transformer-encoder?
-                 (#:layers [layers exact-positive-integer?])
-                 (#:norm? [norm? boolean?]))
-  (GenericTransformerEncoder
-   (lambda ()
-     (TransformerEncoderLayer d-model #:heads heads
-                              #:ffn-width ffn-width
-                              #:dropout p
-                              #:activation activation
-                              #:norm-first? norm-first?
-                              #:layer-norm-eps eps
-                              #:batch-first? batch-first?
-                              #:bias? bias?))
-   #:layers n
-   #:norm (and norm? (LayerNorm d-model #:eps eps #:bias? bias?))))
-
-(define/contract-out (TransformerDecoder d-model ;; noqa
-                                         #:heads heads
-                                         #:layers n
-                                         #:ffn-width [ffn-width 2048]
-                                         #:dropout [p 0.1]
-                                         #:activation [activation 'relu]
-                                         #:norm-first? [norm-first? #f]
-                                         #:layer-norm-eps [eps 1e-5]
-                                         #:batch-first? [batch-first? #f]
-                                         #:bias? [bias? #t]
-                                         #:norm? [norm? #f])
-  (transformer/c transformer-decoder?
-                 (#:layers [layers exact-positive-integer?])
-                 (#:norm? [norm? boolean?]))
-  (GenericTransformerDecoder
-   (lambda ()
-     (TransformerDecoderLayer d-model #:heads heads
-                              #:ffn-width ffn-width
-                              #:dropout p
-                              #:activation activation
-                              #:norm-first? norm-first?
-                              #:layer-norm-eps eps
-                              #:batch-first? batch-first?
-                              #:bias? bias?))
-   #:layers n
-   #:norm (and norm? (LayerNorm d-model #:eps eps #:bias? bias?))))
