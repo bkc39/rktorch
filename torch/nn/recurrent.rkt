@@ -61,13 +61,19 @@
 ;; flattening happened rather than only that the outputs agree.
 (define refused (make-weak-hasheq))
 
+(define (element-address t)
+  (define-values (rc address) (tr-tensor-data-ptr/raw t))
+  (check-ok rc 'storage-signature)
+  address)
+
+(define (storage-start t)
+  (define-values (rc address) (tr-tensor-storage-ptr/raw t))
+  (check-ok rc 'storage-signature)
+  address)
+
 (define (storage-signature weights)
   (for/list ([w (in-list weights)])
-    (define-values (data-rc data) (tr-tensor-data-ptr/raw w))
-    (check-ok data-rc 'storage-signature)
-    (define-values (storage-rc storage) (tr-tensor-storage-ptr/raw w))
-    (check-ok storage-rc 'storage-signature)
-    (cons data storage)))
+    (cons (element-address w) (storage-start w))))
 
 ;; Flattening is an optimisation cudnn asks for, never a requirement: a build
 ;; or a dtype it refuses still runs, on compacted copies, and refusing again
@@ -82,33 +88,51 @@
                 (exn:fail:contract? e)
                 (native-fault? e)))))
 
+(define flattenings 0)
+
 (define (flatten-weights! spec weights)
+  (set! flattenings (add1 flattenings))
+  (hash-remove! refused (car weights))
   (with-handlers ([cudnn-refusal?
-                   (lambda (_e) (hash-set! refused (car weights) #t))])
+                   (lambda (_e) (hash-set! refused (car weights) #t) #f)])
     (with-no-grad
-      (void
-       (cudnn-rnn-flatten-weight weights
-                                 (if (rnn-bias? spec) 4 2)
-                                 (rnn-input-size spec)
-                                 (rnn-cudnn-mode spec)
-                                 (rnn-hidden-size spec)
-                                 0
-                                 (rnn-num-layers spec)
-                                 (rnn-batch-first? spec)
-                                 (rnn-bidirectional? spec))))))
+      (cudnn-rnn-flatten-weight weights
+                                (if (rnn-bias? spec) 4 2)
+                                (rnn-input-size spec)
+                                (rnn-cudnn-mode spec)
+                                (rnn-hidden-size spec)
+                                0
+                                (rnn-num-layers spec)
+                                (rnn-batch-first? spec)
+                                (rnn-bidirectional? spec)))))
+
+;; Threads forwarding one layer take turns here, so one packs the weights and
+;; the rest find them packed. A `to` on another thread takes no turn, so a
+;; packing is recorded only while the weights still lie in the buffer it
+;; built; a move between the two leaves nothing recorded and the next forward
+;; packs again.
+(define packing (make-semaphore 1))
+
+(define after-packing (make-parameter void))
 
 (define (ensure-flat! spec weights)
+  (call-with-semaphore packing check-packing! #f spec weights))
+
+(define (check-packing! spec weights)
   (define key (car weights))
   (define now (storage-signature weights))
   (define stale? (not (equal? now (hash-ref flattened key #f))))
   (define cuda? (and stale? (eq? (device-type (tensor-device key)) 'cuda)))
+  (define buffer (and cuda? (flatten-weights! spec weights)))
+  (when buffer ((after-packing)))
+  (define packed (and buffer (storage-signature weights)))
+  (define buffer-start (and buffer (storage-start buffer)))
   (cond
-    [cuda?
-     (hash-remove! refused key)
-     (flatten-weights! spec weights)
-     (hash-set! flattened key (storage-signature weights))]
-    [stale? (hash-set! flattened key now)]
-    [else (void)]))
+    [(not stale?) (void)]
+    [(not buffer) (hash-set! flattened key now)]
+    [(for/and ([entry (in-list packed)]) (= (cdr entry) buffer-start))
+     (hash-set! flattened key packed)]
+    [else (hash-remove! flattened key)]))
 
 (define (zero-state spec x)
   (define batch
@@ -207,8 +231,9 @@
   (with-mode (run spec entries gru-input x state mode)))
 
 (module+ private
-  (provide cudnn-refusal? flattened-signature flatten-refused?
-           record-flattened! storage-signature)
+  (provide after-packing cudnn-refusal? flattened-signature flatten-count
+           flatten-refused? record-flattened! storage-signature)
+  (define (flatten-count) flattenings)
   (define (flattened-signature weight) (hash-ref flattened weight #f))
   (define (record-flattened! weight signature)
     (hash-set! flattened weight signature))

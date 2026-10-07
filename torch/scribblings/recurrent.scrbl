@@ -68,6 +68,13 @@ addresses, so a layer that has not moved pays no more than reading them.
 The parameters stay the same tensors, so an optimizer built before or
 after sees them alike.
 
+Threads may forward one layer at once: the first to find the weights
+unpacked packs them while the others wait, and they then find them
+packed. Moving a layer while another thread forwards it is a race on its
+parameters, as it is in PyTorch; the packing survives it, since a move
+between packing and recording leaves nothing recorded and the next call
+packs again.
+
 The input's dtype has to be the layer's. On the CPU a mismatch reaches
 oneDNN, which is chosen on the input's dtype and then reads the weights,
 and raises @tt{get_mkldnn_dtype: unsupported data type} rather than the

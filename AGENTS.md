@@ -280,7 +280,10 @@ the parameters keep their identity) whenever their storage addresses
 (`tr_tensor_data_ptr` and `tr_tensor_storage_ptr`, each weight's element and
 storage start) differ from those the last flattening left, which catches a
 device round trip and a replaced parameter with no move hook, costs `to`'s
-identity case nothing, and retries a transient OOM rather than latching it. `clip-grad-norm!` (`nn/clip.rkt`) keeps its scale on the
+identity case nothing, and retries a transient OOM rather than latching it.
+One semaphore serializes that check across threads, and a packing is
+recorded only while the weights still lie in the buffer it built, so a `to`
+racing the check (which takes no turn) leaves nothing recorded (#189). `clip-grad-norm!` (`nn/clip.rkt`) keeps its scale on the
 device. Layer init mirrors
 PyTorch RNG consumption (`nn.Linear.reset_parameters`), so a shared
 `manual-seed!` yields bit-comparable parameters — the MLP cross-test relies
