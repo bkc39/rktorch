@@ -2,7 +2,8 @@
 
 (require (only-in json read-json write-json)
          (only-in racket/list drop)
-         (only-in "harness.rkt" summarize))
+         (only-in torch accelerator-if-available device-type torch-version)
+         (only-in "harness.rkt" host-meta summarize))
 
 (provide record-steps!
          read-steps
@@ -15,7 +16,14 @@
         (loop (cons (vector-ref event 2) acc))
         (reverse acc))))
 
+(define (torch-checkout)
+  (define-values (dir _name _dir?) (split-path (collection-file-path "main.rkt" "torch")))
+  dir)
+
 (define (record-steps! runner out)
+  (define meta (host-meta #:device (device-type (accelerator-if-available))
+                          #:libtorch (torch-version)
+                          #:repo (torch-checkout)))
   (define receiver (make-log-receiver (current-logger) 'debug 'rktorch-step))
   (define t0 (current-inexact-monotonic-milliseconds))
   (dynamic-require `(submod (file ,runner) main) #f)
@@ -25,12 +33,13 @@
       (list (vector-ref e 0) (vector-ref e 1) (vector-ref e 2))))
   (call-with-output-file out #:exists 'truncate
     (lambda (port)
-      (write-json (hasheq 'wall_ms wall 'steps steps) port))))
+      (write-json (hasheq 'wall_ms wall 'steps steps 'meta meta) port))))
 
 (define (read-steps path)
   (define data (call-with-input-file path read-json))
   (values (for/list ([s (in-list (hash-ref data 'steps))]) (list->vector s))
-          (hash-ref data 'wall_ms)))
+          (hash-ref data 'wall_ms)
+          (hash-ref data 'meta #f)))
 
 (define (differences xs)
   (for/list ([a (in-list xs)] [b (in-list (cdr xs))]) (- b a)))
@@ -123,7 +132,8 @@
     (define path (make-temporary-file "steps-~a.json"))
     (call-with-output-file path #:exists 'truncate
       (lambda (port) (write-json (hasheq 'wall_ms 5.0 'steps '((1 2.0 3))) port)))
-    (define-values (events wall) (read-steps path))
+    (define-values (events wall meta) (read-steps path))
     (delete-file path)
     (check-equal? events (list (vector 1 2.0 3)))
-    (check-equal? wall 5.0)))
+    (check-equal? wall 5.0)
+    (check-false meta)))

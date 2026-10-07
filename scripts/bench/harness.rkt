@@ -163,9 +163,10 @@
       (hasheq 'threads n 'threads_source "OMP_NUM_THREADS")
       (hasheq 'threads (processor-count) 'threads_source "default")))
 
-(define (host-meta #:device device #:libtorch libtorch)
-  (define sha (command-output "git" "rev-parse" "HEAD"))
-  (define status (command-output "git" "status" "--porcelain" "--untracked-files=no"))
+(define (host-meta #:device device #:libtorch libtorch #:repo [repo (current-directory)])
+  (define (git . args) (apply command-output "git" "-C" (path->string repo) args))
+  (define sha (git "rev-parse" "HEAD"))
+  (define status (git "status" "--porcelain" "--untracked-files=no"))
   (define threads (thread-setting))
   (hasheq 'git_sha (or sha "unknown")
           'git_dirty (and status (positive? (string-length status)))

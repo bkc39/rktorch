@@ -1,13 +1,14 @@
 #lang racket/base
 
 (require (only-in racket/format ~a)
+         (only-in racket/match match-define)
          (only-in racket/string string-split)
          (only-in torch accelerator-if-available device-type torch-version)
          (only-in "contracts.rkt" contract-workloads pipeline-case)
          (only-in "crossings.rkt" crossing-cases)
          (only-in "e2e.rkt"
-                  cache-env e2e-cases example-env example-epochs-var example-name
-                  examples find-examples)
+                  cache-env e2e-cases example-epochs-var example-name examples
+                  find-examples merged-settings settings->jsexpr)
          (only-in "harness.rkt"
                   format-result host-meta load-average measure result->record
                   result-name summarize write-record)
@@ -21,9 +22,9 @@
 (define micro-suites '(crossings layers ops contracts))
 
 (define (parse-variant text)
-  (define parts (string-split text ":"))
-  (cons (car parts)
-        (for/list ([kv (in-list (if (null? (cdr parts)) '() (string-split (cadr parts) ",")))])
+  (match-define (list _ name settings) (regexp-match #rx"^([^:]*)(?::(.*))?$" text))
+  (cons name
+        (for/list ([kv (in-list (if settings (string-split settings ",") '()))])
           (define m (regexp-match #rx"^([^=]+)=(.*)$" kv))
           (unless m (raise-user-error 'run "a variant setting is VAR=VALUE, got ~s" kv))
           (cons (cadr m) (caddr m)))))
@@ -39,7 +40,7 @@
        (loop)])))
 
 (define (run-suites suites
-                    #:rounds [rounds 5]
+                    #:rounds [rounds #f]
                     #:warmup [warmup 1]
                     #:scale [scale 1]
                     #:device [device 'cpu]
@@ -57,7 +58,7 @@
     (wait-for-load max-load log)
     (define meta (host-meta #:device on-device #:libtorch libtorch))
     (fprintf log "~a~a\n" group (if case-name (format " ~a" case-name) ""))
-    (for ([r (in-list (measure cases #:warmup warmup #:rounds rounds))])
+    (for ([r (in-list (measure cases #:warmup warmup #:rounds (or rounds 5)))])
       (fprintf log "  ~a\n" (format-result r #:unit unit #:scale unit-scale))
       (write-record
        (result->record r #:suite "micro" #:group (~a group) #:unit unit #:meta meta
@@ -79,7 +80,7 @@
        (measure-group 'pipeline (list (pipeline-case)) #:unit "ms" #:scale 1)]
       [(e2e)
        (run-e2e (if only (find-examples only) examples)
-                #:rounds rounds #:full? full? #:variants variants #:cache cache
+                #:rounds (or rounds 1) #:full? full? #:variants variants #:cache cache
                 #:max-load max-load #:libtorch libtorch #:out out #:log log)]
       [else (raise-user-error 'run "unknown suite ~a" suite)])))
 
@@ -95,15 +96,18 @@
     (define meta (host-meta #:device device #:libtorch libtorch))
     (define rates (make-hash))
     (define gcs (make-hash))
+    (define metas (make-hash))
     (define (on-run run-of variant analysis)
       (hash-update! rates variant (lambda (xs) (cons (hash-ref analysis 'steps_per_s 0.0) xs)) '())
       (hash-update! gcs variant (lambda (xs) (cons (hash-ref analysis 'gc_ms 0) xs)) '())
+      (hash-ref! metas variant (lambda () (or (hash-ref analysis 'meta #f) meta)))
       (fprintf log "~a~a: ~a steps/s, epochs ~a s\n" (example-name run-of)
                (if variant (format "/~a" variant) "")
                (hash-ref analysis 'steps_per_s #f) (hash-ref analysis 'epoch_s '()))
       (write-record (hash-set* analysis 'schema 1 'suite "e2e" 'group "run"
                                'case (example-name run-of) 'variant variant
-                               'load (load-average) 'meta meta)
+                               'load (load-average)
+                               'meta (or (hash-ref analysis 'meta #f) meta))
                     out))
     (define unit (if (example-epochs-var ex) "s/epoch" "ms/step"))
     (with-handlers ([exn:fail:user?
@@ -119,12 +123,13 @@
                  #:warmup 0 #:rounds rounds))
       (for ([r (in-list results)] [v (in-list variants)])
         (write-record
-         (result->record r #:suite "e2e" #:group "summary" #:unit unit #:meta meta
+         (result->record r #:suite "e2e" #:group "summary" #:unit unit
+                         #:meta (hash-ref metas (car v) meta)
                          #:scale (if (example-epochs-var ex) 1e-3 1)
                          #:extra (hasheq 'case (example-name ex)
                                          'variant (car v)
-                                         'settings (for/hasheq ([s (in-list (example-env ex scale))])
-                                                     (values (string->symbol (car s)) (~a (cdr s))))
+                                         'settings (settings->jsexpr
+                                                    (merged-settings ex scale (cdr v)))
                                          'gc_ms (reverse (hash-ref gcs (car v)))
                                          'steps_per_s (summarize (hash-ref rates (car v)))))
          out)))))
@@ -162,7 +167,7 @@
        (string->symbol x))))
   (define (go out)
     (run-suites suites
-                #:rounds (or rounds (if (equal? suites '(e2e)) 1 5))
+                #:rounds rounds
                 #:warmup warmup #:scale scale #:device device #:full? full? #:only only
                 #:variants (if (null? variants) '((#f)) variants)
                 #:cache cache #:max-load max-load #:out out))
@@ -180,6 +185,8 @@
     (check-equal? (parse-variant "base") '("base"))
     (check-equal? (parse-variant "one:OMP_NUM_THREADS=1,X=a=b")
                   '("one" ("OMP_NUM_THREADS" . "1") ("X" . "a=b")))
+    (check-equal? (parse-variant "alt:LD_LIBRARY_PATH=/a:/b")
+                  '("alt" ("LD_LIBRARY_PATH" . "/a:/b")))
     (check-exn #rx"VAR=VALUE" (lambda () (parse-variant "bad:X"))))
 
   (test-case "every micro suite runs, records and summarises"

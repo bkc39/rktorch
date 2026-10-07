@@ -20,7 +20,7 @@ error.
 
 | option | |
 |---|---|
-| `--rounds N` | timed rounds, 5 by default (1 for `e2e`) |
+| `--rounds N` | timed rounds; 5 by default for the micro suites, 1 for `e2e` |
 | `--warmup N` | untimed rounds first, 1 by default (none for `e2e`) |
 | `--scale X` | multiplies the micro suites' repetitions |
 | `--device cuda` | where the `ops` suite runs; the others run on the CPU |
@@ -97,7 +97,9 @@ and 15-minute averages), and `meta`: `git_sha`, `git_dirty`, `racket`,
 `libtorch`, `device`, `gpu`, `threads` and where that came from, `cores`,
 `cpu`, `affinity`, `host`, `os`. An `e2e` run also writes one `run` record
 per child: `steps`, `steps_per_epoch`, `epoch_s`, `epoch_gc_ms`, `step_ms`,
-`steps_per_s`, `steps_per_s_wall`, `wall_s`, `exit_code`, `settings`.
+`steps_per_s`, `steps_per_s_wall`, `wall_s`, `exit_code`, `settings`. An `e2e`
+record's `meta` comes from the child that ran it, so an A/B across
+checkouts records each one's commit.
 
 ## Baseline
 

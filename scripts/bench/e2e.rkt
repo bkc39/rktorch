@@ -16,6 +16,8 @@
          examples
          find-examples
          example-env
+         merged-settings
+         settings->jsexpr
          cache-env
          run-example
          e2e-cases)
@@ -60,8 +62,18 @@
   (if root
       (for/list ([v (in-list cache-variables)]
                  #:unless (getenv (car v)))
-        (cons (car v) (path->string (build-path root (cdr v)))))
+        (cons (car v) (path->string (simplify-path (path->complete-path
+                                                     (build-path root (cdr v)))))))
       '()))
+
+(define (merged-settings ex scale extra)
+  (append (for/list ([s (in-list (example-env ex scale))]
+                     #:unless (assoc (car s) extra))
+            s)
+          extra))
+
+(define (settings->jsexpr settings)
+  (for/hasheq ([s (in-list settings)]) (values (string->symbol (car s)) (~a (cdr s)))))
 
 (define (child-environment settings)
   (define env (environment-variables-copy (current-environment-variables)))
@@ -92,24 +104,22 @@
                      #:scale [scale 'short]
                      #:settings [extra '()]
                      #:log [log (current-error-port)])
-  (define env
-    (append (for/list ([s (in-list (example-env ex scale))]
-                       #:unless (assoc (car s) extra))
-              s)
-            extra))
+  (define env (merged-settings ex scale extra))
   (define out (make-temporary-file "rktorch-steps-~a.json"))
   (delete-file out)
   (managed-compile-zo runner)
   (define code (run-child runner out env log))
-  (define-values (events wall)
-    (if (file-exists? out) (read-steps out) (values '() #f)))
+  (define-values (events wall meta)
+    (if (file-exists? out) (read-steps out) (values '() #f #f)))
   (when (file-exists? out) (delete-file out))
-  (define epochs (let ([v (example-epochs-var ex)]) (and v (cdr (assoc v env)))))
+  (define epoch-setting (and (example-epochs-var ex) (assoc (example-epochs-var ex) env)))
+  (define epochs (and epoch-setting (string->number (~a (cdr epoch-setting)))))
   (define analysis (analyze-steps events #:epochs epochs #:warmup (example-warmup ex)))
   (hash-set* analysis
              'exit_code code
              'wall_s (and wall (/ wall 1000.0))
-             'settings (for/hasheq ([s (in-list env)]) (values (string->symbol (car s)) (~a (cdr s))))))
+             'meta meta
+             'settings (settings->jsexpr env)))
 
 (define (primary-ms ex analysis)
   (cond
@@ -162,7 +172,8 @@
                                                    #"RKTORCH_MNIST_DIR" #"/m")])
       (define env (cache-env "/c"))
       (check-false (assoc "RKTORCH_MNIST_DIR" env))
-      (check-equal? (cdr (assoc "RKTORCH_CIFAR10_DIR" env)) "/c/cifar10")))
+      (check-equal? (cdr (assoc "RKTORCH_CIFAR10_DIR" env)) "/c/cifar10")
+      (check-true (absolute-path? (cdr (assoc "RKTORCH_TEXT_DIR" (cache-env "rel")))))))
 
   (test-case "a child run is timed from its optimizer's steps"
     (define a (run-example fixture #:runner stepper #:scale 'full #:log quiet))
@@ -171,13 +182,14 @@
     (check-equal? (hash-ref a 'steps_per_epoch) 3)
     (check-equal? (length (hash-ref a 'epoch_s)) 3)
     (check-equal? (hash-ref (hash-ref a 'settings) 'EPOCHS) "4")
-    (check-true (positive? (hash-ref a 'wall_s))))
+    (check-true (positive? (hash-ref a 'wall_s)))
+    (check-true (string? (hash-ref (hash-ref a 'meta) 'libtorch))))
 
   (test-case "variants alternate, and a failed run raises"
     (define seen '())
     (define cases
       (e2e-cases (list fixture)
-                 #:variants '(("a") ("b" ("EPOCHS" . 2)))
+                 #:variants '(("a") ("b" ("EPOCHS" . "2")))
                  #:runner-for (lambda (_ex) stepper)
                  #:log quiet
                  #:on-run (lambda (_ex v a) (set! seen (cons (cons v (hash-ref a 'steps)) seen)))))
