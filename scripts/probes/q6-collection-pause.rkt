@@ -8,37 +8,45 @@
 
 (define repeats 3)
 (define matmul-n 3072)
+(define stall-window-ms 300)
 
-;; #f when the call returned before the measurement started, so nothing
-;; overlapped it.
+;; Answers the measurement and the share of it the call was in flight for.
+;; A plain call holds the collection until it returns, so its share reads
+;; 1 even though it returns just before the measurement ends.
 (define (in-call-while call measure)
   (define inside (make-semaphore 0))
   (define returned-at (box #f))
+  (define failure (box #f))
   (define worker
     (thread (lambda ()
               (at-set-num-threads 1)
               (semaphore-post inside)
-              (call)
+              (with-handlers ([(lambda (_) #t) (lambda (e) (set-box! failure e))])
+                (call))
               (set-box! returned-at (current-inexact-monotonic-milliseconds)))
             #:pool 'own))
   (semaphore-wait inside)
   (sleep 0.1)
   (define started-at (current-inexact-monotonic-milliseconds))
   (define result (measure))
+  (define ended-at (current-inexact-monotonic-milliseconds))
   (thread-wait worker)
-  (and (> (unbox returned-at) started-at) result))
+  (when (unbox failure)
+    (raise (unbox failure)))
+  (define in-flight (- (min (unbox returned-at) ended-at) started-at))
+  (cons result (max 0.0 (/ in-flight (max (- ended-at started-at) 1e-3)))))
 
 (define (timed thunk)
   (define start (current-inexact-monotonic-milliseconds))
   (thunk)
   (- (current-inexact-monotonic-milliseconds) start))
 
-;; The trainer's view: allocate for a second and report the longest gap
+;; The trainer's view: allocate for a while and report the longest gap
 ;; between two iterations, which is how long it was held at a collection.
 (define sink (box #f))
 
 (define (longest-stall)
-  (define end (+ (current-inexact-monotonic-milliseconds) 1000))
+  (define end (+ (current-inexact-monotonic-milliseconds) stall-window-ms))
   (let loop ([last (current-inexact-monotonic-milliseconds)] [worst 0.0])
     (define now (current-inexact-monotonic-milliseconds))
     (define worst* (max worst (- now last)))
@@ -68,7 +76,7 @@
   (define worker (thread (lambda () (semaphore-post inside) (semaphore-wait release))
                          #:pool 'own))
   (semaphore-wait inside)
-  (begin0 (measure)
+  (begin0 (cons (measure) 0.0)
           (semaphore-post release)
           (thread-wait worker)))
 
@@ -78,9 +86,9 @@
       (cond
         [call (in-call-while call measure)]
         [else (parked measure)])))
-  (cond
-    [(andmap values samples) (fmt-ms (median samples))]
-    [else "call returned before the measurement"]))
+  (format "~a (~a%)"
+          (fmt-ms (median (map car samples)))
+          (fmt-ms (* 100 (apply min (map cdr samples))))))
 
 (module+ main
   (print-banner (format "Q6: collection pauses while one parallel worker is in a foreign call (median of ~a)"
@@ -88,11 +96,14 @@
                 #:torch-version (shim-version))
   (at-set-num-threads 1)
   (define call-ms (timed (cdr (list-ref calls 3))))
-  (printf "- one ~a matmul alone, 1 intra-op thread, on the main thread: ~a ms\n\n"
-          matmul-n (fmt-ms call-ms))
+  (printf "- one ~a matmul alone, 1 intra-op thread, on the main thread: ~a ms\n" matmul-n
+          (fmt-ms call-ms))
+  (displayln
+   "- each cell: median ms (the least share of a measurement any run's call was in flight for)\n")
   (print-table-header
-   '("worker is inside" "(collect-garbage 'major) ms" "(collect-garbage 'minor) ms"
-     "trainer's longest stall while allocating for 1 s, ms" "load"))
+   (list "worker is inside" "(collect-garbage 'major) ms" "(collect-garbage 'minor) ms"
+         (format "trainer's longest stall while allocating for ~a ms, ms" stall-window-ms)
+         "load"))
   (for ([c (in-list calls)])
     (define call (cdr c))
     (print-table-row

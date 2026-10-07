@@ -1,13 +1,11 @@
 #lang racket/base
 
-(require (only-in ffi/unsafe _fun _uintptr get-ffi-obj)
+(require (only-in ffi/unsafe _double _fun _int _pointer _uintptr get-ffi-obj malloc ptr-ref)
          (only-in racket/date date->string date-display-format)
-         (only-in racket/file file->string)
          (only-in racket/format ~a ~r)
          (only-in racket/future processor-count)
-         (only-in racket/list first)
          (only-in racket/math exact-round)
-         (only-in racket/string string-join string-split))
+         (only-in racket/string string-join))
 
 (provide pthread-self
          main-os-thread
@@ -34,8 +32,14 @@
 (define (os-thread-label id)
   (if (= id main-os-thread) "main" "own"))
 
+(define getloadavg (get-ffi-obj "getloadavg" #f (_fun _pointer _int -> _int)))
+
+;; The 1-minute figure, from libc on Linux and macOS alike.
 (define (load-average)
-  (first (string-split (file->string "/proc/loadavg"))))
+  (define out (malloc 3 _double 'atomic-interior))
+  (cond
+    [(< (getloadavg out 3) 1) "unknown"]
+    [else (~r (ptr-ref out _double 0) #:precision 2)]))
 
 (define (os-task-count)
   (length (directory-list "/proc/self/task")))

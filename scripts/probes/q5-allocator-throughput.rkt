@@ -32,8 +32,9 @@
 (define repeats 3)
 
 ;; workers = 0 runs the loop on the main thread itself, the single-threaded
-;; path that must not regress. Answers the rate and the share of the wall
-;; clock spent collecting, when every thread in the place stands still.
+;; path that must not regress. Answers the rate and current-gc-milliseconds
+;; (collector CPU time) per wall millisecond; a collection stops every
+;; thread in the place.
 (define (ops-per-second p o n workers)
   (define gc-before (current-gc-milliseconds))
   (define deadline (+ (current-inexact-monotonic-milliseconds)
@@ -65,7 +66,7 @@
    (append '("allocator" "n")
            (for/list ([w (in-list worker-counts)])
              (if (zero? w) "main thread" (format "~a workers" w)))
-           '("8 workers / 1 worker" "GC share of wall, 8 workers"
+           '("8 workers / 1 worker" "GC ms per wall ms, 8 workers"
              "ledger bytes after" "load")))
   (for* ([v (in-list (workload-variants #:bare? #t))]
          [n (in-list sizes)])

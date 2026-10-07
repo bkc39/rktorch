@@ -45,8 +45,7 @@
   (define gc-before (current-gc-milliseconds))
   (define deadline (+ (current-inexact-monotonic-milliseconds) (* 1000 churn-seconds)))
   (define finished (box #f))
-  (define made-box (box 0))
-  (define interval-box (box #f))
+  (define at-stop (box #f))
   (define churner
     (thread (lambda ()
               (define-values (ms made)
@@ -54,16 +53,19 @@
                               (lambda (_i)
                                 (at-set-num-threads 1)
                                 (churn! randn deadline))))
-              (set-box! made-box (apply + made))
-              (set-box! interval-box (/ ms 1000.0))
+              (set-box! at-stop
+                        (vector (apply + made)
+                                (/ ms 1000.0)
+                                ((prototype-finalizer-runs p))
+                                (current-gc-milliseconds)
+                                ((prototype-live-bytes p))))
               (set-box! finished #t))))
   (define peak (sample-until (lambda () (unbox finished)) p))
   (thread-wait churner)
-  (define made (unbox made-box))
-  (define runs-during (- ((prototype-finalizer-runs p)) runs-before))
-  (define interval (unbox interval-box))
-  (define gc-share (/ (- (current-gc-milliseconds) gc-before) (* 1000 interval)))
-  (define lag ((prototype-live-bytes p)))
+  (define-values (made interval runs-at-stop gc-at-stop lag)
+    (vector->values (unbox at-stop)))
+  (define runs-during (- runs-at-stop runs-before))
+  (define gc-share (/ (- gc-at-stop gc-before) (* 1000 interval)))
   (define-values (rounds drain-ms) (drain! p))
   (list (prototype-name p)
         workers
@@ -86,7 +88,7 @@
    #:torch-version (shim-version))
   (print-table-header
    '("allocator" "workers" "tensors made/s" "finalizer runs/s during churn"
-     "runs / made" "GC share of wall" "peak ledger MiB" "ledger MiB at stop"
+     "runs / made" "GC ms per wall ms" "peak ledger MiB" "ledger MiB at stop"
      "major collections to drain" "drain ms" "ledger bytes after drain" "load"))
   (for* ([v (in-list (workload-variants))]
          [workers (in-list worker-counts)])
