@@ -45,6 +45,7 @@ raco test examples/test/          # the literate examples
 racket -ie "(require torch)"      # a REPL with the package loaded
 resyntax analyze --local-git-repository . origin/master   # the lint gate
 racket scripts/coverage.rkt       # expression coverage, with a floor
+racket scripts/bench/run.rkt micro   # benchmarks, docs/benchmarks/README.md
 ```
 
 The first entry into a shell installs the Racket dependencies into a
