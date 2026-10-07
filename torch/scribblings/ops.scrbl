@@ -303,15 +303,31 @@ of feature maps into a batch of vectors. On anything else,
 @section{Activations}
 
 @deftogether[(@defproc[(sigmoid [t tensor?]) tensor?]
-              @defproc[(gelu [t tensor?]) tensor?]
               @defproc[(leaky-relu [t tensor?]
                                    [#:negative-slope slope real? 0.01])
                        tensor?])]{
-The logistic function, the Gaussian error linear unit, and the rectifier
-with a small slope for negative inputs. @racket[tanh] is generic over
-tensors and reals, like @racket[exp].
+The logistic function, and the rectifier with a small slope for negative
+inputs. @racket[tanh] is generic over tensors and reals, like
+@racket[exp].
 
 @torch-examples[(sigmoid (tensor '(0.0)))]}
+
+@defproc[(gelu [t tensor?]
+               [#:approximate approximate (or/c 'none 'tanh) 'none])
+         tensor?]{
+The Gaussian error linear unit, the activation inside a transformer's
+feed-forward block: @tt{x @"·" @"Φ"(x)}, @tt{@"Φ"} the
+standard normal distribution function. With @racket[approximate]
+@racket['tanh] it is the tanh approximation
+@tt{0.5x(1 + tanh(@"√"(2/@"π")(x + 0.044715x@superscript{3})))}
+instead, PyTorch's @tt{approximate="tanh"}, which GPT-2 was trained with;
+its weights expect that form. The two never differ by more than
+@racket[5e-4].
+
+@torch-examples[
+(gelu (tensor '(-1.0 0.0 1.0)))
+(gelu (tensor '(-1.0 0.0 1.0)) #:approximate 'tanh)
+]}
 
 @section{Softmax}
 

@@ -183,3 +183,11 @@ random multinomial no-retry
 # a fresh flat buffer, in place; it has a CUDA kernel only, so its parity
 # recipe is `device-only` and a CUDA-guarded test drives it.
 rnn _cudnn_rnn_flatten_weight
+
+# --- tranche 8 (#210): attention --------------------------------------------
+
+# The fused attention kernel, which libtorch routes to the flash or
+# memory-efficient kernel on CUDA. scale introduces the optional-float
+# kind (float? -> double + presence flag, like Scalar?). A positive
+# dropout_p draws its mask from the global stream, hence the no-retry flag.
+attention scaled_dot_product_attention no-retry

@@ -249,7 +249,19 @@
     (define g (gelu (tensor '(0.0 1.0 -1.0))))
     (check-= (car (tensor->list g)) 0.0 1e-6)
     (check-= (cadr (tensor->list g)) 0.841345 1e-5)
-    (check-= (caddr (tensor->list g)) -0.158655 1e-5))
+    (check-= (caddr (tensor->list g)) -0.158655 1e-5)
+    (check-equal? (tensor->list (gelu (tensor '(0.0 1.0 -1.0))
+                                      #:approximate 'none))
+                  (tensor->list g)))
+
+  (test-case "gelu #:approximate 'tanh is GPT-2's tanh form"
+    (define g (tensor->list (gelu (tensor '(0.0 1.0 -1.0))
+                                  #:approximate 'tanh)))
+    (check-= (car g) 0.0 1e-6)
+    (check-= (cadr g) 0.841192 1e-5)
+    (check-= (caddr g) -0.158808 1e-5)
+    (check-exn exn:fail:contract?
+               (lambda () (gelu (tensor '(1.0)) #:approximate 'erf))))
 
   (test-case "silu: x * sigmoid(x)"
     (define y (tensor->list (silu (tensor '(0.0 1.0 -1.0)))))
