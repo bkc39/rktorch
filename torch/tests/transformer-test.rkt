@@ -8,7 +8,7 @@
            (only-in "../vision/diffusion.rkt" sinusoidal-embedding))
 
   (define (close? a b [eps 1e-5])
-    (and (equal? (tensor-shape a) (tensor-shape b))
+    (and (equal? (shape a) (shape b))
          (for/and ([x (in-flattened-tensor a)] [y (in-flattened-tensor b)])
            (< (abs (- x y)) eps))))
 
@@ -86,7 +86,7 @@
                     "linear1.weight" "linear1.bias"
                     "linear2.weight" "linear2.bias"
                     "norm1.weight" "norm1.bias" "norm2.weight" "norm2.bias"))
-    (check-equal? (map tensor-shape (parameters layer))
+    (check-equal? (map shape (parameters layer))
                   '((8 8) (8) (8 8) (8) (8 8) (8) (8 8) (8)
                     (16 8) (16) (8 16) (8) (8) (8) (8) (8)))
     (check-equal? (named (encoder-layer #:bias? #f))
@@ -94,7 +94,7 @@
                     "self-attn.value.weight" "self-attn.out.weight"
                     "linear1.weight" "linear2.weight"
                     "norm1.weight" "norm2.weight"))
-    (check-equal? (map tensor-shape
+    (check-equal? (map shape
                        (parameters (child (TransformerEncoderLayer 8 #:heads 2)
                                           "linear1")))
                   '((2048 8) (2048))
@@ -109,7 +109,7 @@
                     "norm1" "norm2" "norm3" "dropout1" "dropout2" "dropout3"))
     (check-equal? (length (parameters layer)) 26)
     (check-equal? (length (parameters (decoder-layer #:bias? #f))) 13)
-    (check-equal? (map tensor-shape
+    (check-equal? (map shape
                        (parameters (child (TransformerDecoderLayer 8 #:heads 2)
                                           "linear2")))
                   '((8 2048) (8))))
@@ -159,17 +159,17 @@
     (define seq (encoder-layer))
     (define batch (encoder-layer #:batch-first? #t))
     (define xt (transpose x 0 1))
-    (check-equal? (tensor-shape (seq x)) '(5 2 8))
-    (check-equal? (tensor-shape (batch xt)) '(2 5 8))
+    (check-equal? (shape (seq x)) '(5 2 8))
+    (check-equal? (shape (batch xt)) '(2 5 8))
     (check-true (close? (transpose (seq x #:key-padding-mask padded) 0 1)
                         (batch xt #:key-padding-mask padded)))
     (define one (select x 1 0))
-    (check-equal? (tensor-shape (seq one)) '(5 8))
+    (check-equal? (shape (seq one)) '(5 8))
     (check-true (close? (seq one) (select (seq x) 1 0)))
     (define dseq (decoder-layer))
     (define dbatch (decoder-layer #:batch-first? #t))
     (define tgt (randn 4 2 8))
-    (check-equal? (tensor-shape (dseq tgt memory)) '(4 2 8))
+    (check-equal? (shape (dseq tgt memory)) '(4 2 8))
     (check-true (close? (transpose (dseq tgt memory #:tgt-causal? #t) 0 1)
                         (dbatch (transpose tgt 0 1) (transpose memory 0 1)
                                 #:tgt-causal? #t)))
@@ -293,9 +293,9 @@
     (define encoder (TransformerEncoder 8 #:heads 2 #:layers 2))
     (manual-seed! 0)
     (define one (TransformerEncoderLayer 8 #:heads 2))
-    (check-equal? (map tensor-shape (parameters encoder))
-                  (append (map tensor-shape (parameters one))
-                          (map tensor-shape (parameters one))))
+    (check-equal? (map shape (parameters encoder))
+                  (append (map shape (parameters one))
+                          (map shape (parameters one))))
     (check-false (close? (encoder x) (encoder x)) "dropout 0.1 in training")
     (eval! encoder)
     (eval! one)
@@ -417,12 +417,12 @@
   (test-case "to moves a layer, and the masks follow the input"
     (define layer (encoder-layer #:norm-first? #t))
     (check-eq? (to layer 'float64) layer)
-    (check-equal? (remove-duplicates (map tensor-dtype (parameters layer)))
+    (check-equal? (remove-duplicates (map dtype (parameters layer)))
                   '(float64))
-    (check-equal? (tensor-dtype (layer (to x 'float64)
-                                       #:key-padding-mask padded
-                                       #:causal? #t
-                                       #:mask (randn 5 5)))
+    (check-equal? (dtype (layer (to x 'float64)
+                                #:key-padding-mask padded
+                                #:causal? #t
+                                #:mask (randn 5 5)))
                   'float64))
 
   (test-case "LayerNorm without a bias, as bias=False builds it"
@@ -432,7 +432,7 @@
 
   (test-case "sinusoidal positions: interleaved by default, or in halves"
     (define p (sinusoidal-positions 6 8))
-    (check-equal? (tensor-shape p) '(6 8))
+    (check-equal? (shape p) '(6 8))
     (for* ([pos (in-range 6)] [i (in-range 4)])
       (define angle (* pos (exp (* i (- (/ (log 10000.0) 4))))))
       (check-= (ref p pos (* 2 i)) (sin angle) 1e-5)
@@ -447,18 +447,18 @@
                   "the halves layout is the diffusion embedding, bit for bit")
     (check-true (close? (sinusoidal-positions (tensor '(2 4)) 8)
                         (index-select p 0 (tensor '(2 4)))))
-    (check-equal? (tensor-shape (sinusoidal-positions 0 4)) '(0 4))
-    (check-equal? (tensor-device (sinusoidal-positions 2 4 #:device 'cpu))
+    (check-equal? (shape (sinusoidal-positions 0 4)) '(0 4))
+    (check-equal? (device (sinusoidal-positions 2 4 #:device 'cpu))
                   (cpu-device)))
 
   (test-case "the causal mask is #t above the diagonal, or -inf as a float"
     (check-equal? (tensor->list (causal-mask 3))
                   '(0.0 1.0 1.0 0.0 0.0 1.0 0.0 0.0 0.0))
-    (check-equal? (tensor-dtype (causal-mask 3)) 'bool)
+    (check-equal? (dtype (causal-mask 3)) 'bool)
     (check-equal? (tensor->list (causal-mask 2 #:dtype 'float64))
                   '(0.0 -inf.0 0.0 0.0))
-    (check-equal? (tensor-dtype (causal-mask 2 #:dtype 'float64)) 'float64)
-    (check-equal? (tensor-shape (causal-mask 0)) '(0 0))
+    (check-equal? (dtype (causal-mask 2 #:dtype 'float64)) 'float64)
+    (check-equal? (shape (causal-mask 0)) '(0 0))
     (define mha (MultiheadAttention 8 #:heads 2))
     (check-true (close? (mha x x x #:attn-mask (causal-mask 5))
                         (mha x x x #:causal? #t))))
@@ -594,7 +594,7 @@
             [b (in-list (both encoder decoder (on-cuda x) (on-cuda tgt)
                               (on-cuda memory) (on-cuda padded)))])
         (check-true (close? a (to-device b 'cpu) 1e-4)))
-      (check-equal? (tensor-device (causal-mask 2 #:device 'cuda))
+      (check-equal? (device (causal-mask 2 #:device 'cuda))
                     (cuda-device))
       (check-true (close? (sinusoidal-positions 4 8)
                           (to-device (sinusoidal-positions 4 8 #:device 'cuda)

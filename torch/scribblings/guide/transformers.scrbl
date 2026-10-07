@@ -249,7 +249,7 @@ is attention and then the feed-forward, each added back and normalized:
 (define post-norm
   ((child-ref block "norm2")
    (+ after-attention (feed-forward after-attention))))
-(< (item (max (abs (- post-norm (block tokens))))) 1e-6)
+(~> (- post-norm (block tokens)) abs max item (< 1e-6))
 ]
 
 That is @deftech{post-norm}, the original transformer's arrangement and
@@ -269,7 +269,7 @@ inside the block. Deep stacks train more steadily that way.
   ((child-ref pre "linear2") (relu ((child-ref pre "linear1") x))))
 (define stream (+ tokens (pre-attend ((child-ref pre "norm1") tokens))))
 (define pre-norm (+ stream (pre-feed ((child-ref pre "norm2") stream))))
-(< (item (max (abs (- pre-norm (pre tokens))))) 1e-6)
+(~> (- pre-norm (pre tokens)) abs max item (< 1e-6))
 ]
 
 The feed-forward's activation is @racket[relu] unless @racket[#:activation]
@@ -323,8 +323,7 @@ shuffling the tokens only shuffles the answers:
 
 @torch-examples[
 (define reversed (flip tokens 1))
-(< (item (max (abs (- (flip (encoder reversed) 1) (encoder tokens)))))
-   1e-5)
+(~> (encoder reversed) (flip 1) (- (encoder tokens)) abs max item (< 1e-5))
 ]
 
 The order has to be added to the input. The original transformer adds
@@ -336,8 +335,8 @@ broadcast over the batch:
 (define waves (sinusoidal-positions 3 4))
 waves
 (define (placed x) (+ x waves))
-(item (max (abs (- (flip (encoder (placed reversed)) 1)
-                   (encoder (placed tokens))))))
+(~> (placed reversed) encoder (flip 1) (- (encoder (placed tokens)))
+    abs max item)
 ]
 
 With the positions added, a reversed sentence is a different input, not
@@ -368,14 +367,15 @@ padded after three, and targets of four:
 (define source-padding (eq source 0))
 (define target (tensor '((1 8 9 3) (1 6 6 2))))
 (define (embedded ids)
-  (+ (embed ids) (sinusoidal-positions (cadr (shape ids)) 8)))
+  (+ (embed ids) (~> (shape ids) cadr (sinusoidal-positions 8))))
 (define (translate source target)
   (define memory
     (source-encoder (embedded source) #:key-padding-mask source-padding))
-  (to-vocabulary
-   (target-decoder (embedded target) memory
-                   #:tgt-causal? #t
-                   #:memory-key-padding-mask source-padding)))
+  (~> (embedded target)
+      (target-decoder memory
+                      #:tgt-causal? #t
+                      #:memory-key-padding-mask source-padding)
+      to-vocabulary))
 (shape (translate source target))
 ]
 
@@ -386,9 +386,10 @@ the last target token, and every earlier position's scores stay put.
 
 @torch-examples[
 (define changed (tensor '((1 8 9 7) (1 6 6 5))))
-(< (item (max (abs (- (narrow (translate source target) 1 0 3)
-                      (narrow (translate source changed) 1 0 3)))))
-   1e-6)
+(~> (translate source target)
+    (narrow 1 0 3)
+    (- (narrow (translate source changed) 1 0 3))
+    abs max item (< 1e-6))
 ]
 
 That is a transformer: attention, a feed-forward, residual connections and

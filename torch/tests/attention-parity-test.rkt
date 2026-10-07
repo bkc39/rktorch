@@ -271,7 +271,7 @@
       [else (make-layer)]))
 
   (define (backward-from m device out leaves)
-    (backward! (sum (* out (to-device (randn (tensor-shape out)) device))))
+    (backward! (sum (* out (to-device (randn (shape out)) device))))
     (hash 'out out
           'input-grads (map grad leaves)
           'param-grads (named-values m grad)))
@@ -471,7 +471,7 @@
         (define got (run-case device))
         (check-named (format "~a: init" label) (hash-ref got 'params)
                      (hash-ref expected 'params) 0.0)
-        (check-equal? (tensor-shape (hash-ref got 'out))
+        (check-equal? (shape (hash-ref got 'out))
                       (hash-ref expected 'out_shape) label)
         (check-numbers (format "~a: output" label) (flat (hash-ref got 'out))
                        (hash-ref expected 'out) tolerance)
