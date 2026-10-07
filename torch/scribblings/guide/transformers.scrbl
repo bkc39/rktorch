@@ -282,20 +282,16 @@ masks as its attention, in the same sense, @racket[#t] hiding a key:
 @racket[(block tokens #:key-padding-mask padding #:causal? #t)].
 
 A model is several blocks in a row. @racket[TransformerEncoder] builds the
-row from a procedure that makes one block, and can end it with a norm,
-which a stack of pre-norm blocks needs, since none of them normalizes its
-output:
+row in one call: it takes the block's arguments, the number of blocks,
+and whether to end with a norm, which a stack of pre-norm blocks needs,
+since none of them normalizes its output:
 
 @torch-examples[
 (manual-seed! 0)
 (define encoder
-  (TransformerEncoder (lambda ()
-                        (TransformerEncoderLayer 4 #:heads 2 #:ffn-width 8
-                                                 #:dropout 0.0
-                                                 #:batch-first? #t
-                                                 #:norm-first? #t))
-                      #:layers 2
-                      #:norm (LayerNorm 4)))
+  (TransformerEncoder 4 #:heads 2 #:ffn-width 8 #:dropout 0.0
+                      #:batch-first? #t #:norm-first? #t
+                      #:layers 2 #:norm? #t))
 (map car (named-children encoder))
 (length (named-parameters encoder))
 (car (map car (named-parameters encoder)))
@@ -307,7 +303,10 @@ The names are the ones a PyTorch checkpoint of the same stack uses, with
 split into @racket["query"], @racket["key"] and @racket["value"]; the
 whole mapping is in @secref["attention-transformer-pytorch"]. Like
 PyTorch's, the stack starts every block from the same values, copies of
-the first; @racket[#:copies? #f] draws each block afresh, as GPT-2 does.
+the first, and training moves them apart. A stack of some other block, a
+different final norm, or blocks drawn independently, as GPT-2 draws its
+own, takes the general form, @racket[GenericTransformerEncoder], which
+builds the row from a procedure that makes one block.
 
 Nothing so far knows where a token sits. Attention compares contents, so
 shuffling the tokens only shuffles the answers:
@@ -348,14 +347,12 @@ padded after three, and targets of four:
 @torch-examples[
 (manual-seed! 0)
 (define embed (Embedding 10 8))
-(define (layer-of constructor)
-  (lambda ()
-    (constructor 8 #:heads 2 #:ffn-width 16 #:dropout 0.0
-                 #:batch-first? #t)))
 (define source-encoder
-  (TransformerEncoder (layer-of TransformerEncoderLayer) #:layers 2))
+  (TransformerEncoder 8 #:heads 2 #:ffn-width 16 #:dropout 0.0
+                      #:batch-first? #t #:layers 2))
 (define target-decoder
-  (TransformerDecoder (layer-of TransformerDecoderLayer) #:layers 2))
+  (TransformerDecoder 8 #:heads 2 #:ffn-width 16 #:dropout 0.0
+                      #:batch-first? #t #:layers 2))
 (define to-vocabulary (Linear 8 10))
 (define source (tensor '((1 4 6 2 3) (5 7 2 0 0))))
 (define source-padding (eq source 0))
@@ -392,27 +389,36 @@ masks to say who may read whom.
 
 A GPT has no encoder to read from and so no cross-attention. It is an
 encoder stack run under a causal mask, so that every position predicts
-the next token from the ones before it. @secref["ex-gpt"] builds a character-level
-one from this chapter's pieces and trains it on a novella:
+the next token from the ones before it. @secref["ex-gpt"] builds a
+character-level one from this chapter's pieces and trains it on a
+novella. Its whole stack is one call:
 
-@itemlist[
- @item{each block is a @racket[TransformerEncoderLayer] with
-       @racket[#:norm-first? #t], pre-norm as GPT-2 has it, and a
-       feed-forward four times the model's width through
-       @racket[#:activation 'gelu];}
- @item{a @racket[TransformerEncoder] stacks them with
-       @racket[#:copies? #f], so each block draws its own initial values,
-       and ends with the final @racket[LayerNorm] as its @racket[#:norm];}
- @item{the positions are learned, an @racket[Embedding] indexed by
-       position and added to the token embeddings;}
- @item{the stack runs with @racket[#:causal? #t], and a @racket[Linear]
-       head turns each position's output into a score for every character,
-       trained by @racket[cross-entropy] against the text shifted by
-       one.}]
+@racketblock[
+(TransformerEncoder n-embd
+                    #:heads n-head
+                    #:layers n-layer
+                    #:ffn-width (* 4 n-embd)
+                    #:activation 'gelu
+                    #:norm-first? #t
+                    #:dropout 0.0
+                    #:batch-first? #t
+                    #:norm? #t)
+]
+
+That is @tt{nn.TransformerEncoder(nn.TransformerEncoderLayer(...),
+n_layer, norm=nn.LayerNorm(n_embd))} with the same settings: pre-norm
+blocks as GPT-2 has them, a feed-forward four times the model's width
+through @racket[gelu], and the final norm a pre-norm stack needs. Around
+it the example puts the rest of this chapter: learned positions, an
+@racket[Embedding] indexed by position and added to the token
+embeddings; @racket[#:causal? #t] on every application; and a
+@racket[Linear] head that turns each position's output into a score for
+every character, trained by @racket[cross-entropy] against the text
+shifted by one.
 
 The chapter's PyTorch twin builds the same model from
-@tt{nn.TransformerEncoderLayer} and matches it under one seed, so the
-example doubles as a check that these layers train as PyTorch's do.
+@tt{nn.TransformerEncoder} and matches it under one seed, so the example
+doubles as a check that these layers train as PyTorch's do.
 
 @section[#:tag "transformers-asr"]{A speech recognizer from the pieces}
 
@@ -421,7 +427,34 @@ of @secref["transformers-blocks"] grown to real data. Its encoder reads a
 whole utterance at once, every frame attending to every other. Its decoder
 writes the transcript a character at a time under a causal mask, and
 reads the encoded audio through cross-attention. @secref["ex-asr"] builds
-one from this chapter's pieces and trains it on LibriSpeech:
+one from this chapter's pieces and trains it on LibriSpeech. Its two
+stacks are one call each:
+
+@racketblock[
+(TransformerEncoder n-embd
+                    #:heads n-head
+                    #:layers 6
+                    #:ffn-width (* 4 n-embd)
+                    #:activation 'gelu
+                    #:norm-first? #t
+                    #:dropout 0.0
+                    #:batch-first? #t
+                    #:norm? #t)
+(TransformerDecoder n-embd
+                    #:heads n-head
+                    #:layers 6
+                    #:ffn-width (* 4 n-embd)
+                    #:activation 'gelu
+                    #:norm-first? #t
+                    #:dropout p-drop
+                    #:batch-first? #t
+                    #:norm? #t)
+]
+
+That is @tt{nn.TransformerEncoder(nn.TransformerEncoderLayer(...), 6,
+norm=nn.LayerNorm(n_embd))} and its @tt{nn.TransformerDecoder}
+counterpart, pre-norm as the GPT's are. Around them the example puts the
+rest of this chapter:
 
 @itemlist[
  @item{a front end of strided and dilated convolutions turns a
@@ -429,11 +462,6 @@ one from this chapter's pieces and trains it on LibriSpeech:
        @racket[sinusoidal-positions] with @racket[#:layout 'halves] gives
        the frames and the characters their positions, with no table and
        no length cap;}
- @item{the encoder is a @racket[TransformerEncoder] of six pre-norm
-       @racket[TransformerEncoderLayer]s and the decoder a
-       @racket[TransformerDecoder] of six
-       @racket[TransformerDecoderLayer]s, each stack built with
-       @racket[#:copies? #f] and ending with its own @racket[LayerNorm];}
  @item{utterances differ in length, so a batch is padded at the end,
        and one @tt{[B, T]} mask, @racket[#t] at each padded frame, goes to
        the encoder as @racket[#:key-padding-mask] and to the decoder as
@@ -448,7 +476,6 @@ one from this chapter's pieces and trains it on LibriSpeech:
        and a character head on the decoder, trained by
        @racket[cross-entropy] against the transcript shifted by one.}]
 
-Its PyTorch twin builds the same model from
-@tt{nn.TransformerEncoderLayer} and @tt{nn.TransformerDecoderLayer} and
-matches it under one seed, so the decoder layer's cross-attention trains
-as PyTorch's does too.
+Its PyTorch twin builds the same model from @tt{nn.TransformerEncoder}
+and @tt{nn.TransformerDecoder} and matches it under one seed, so the
+decoder's cross-attention trains as PyTorch's does too.

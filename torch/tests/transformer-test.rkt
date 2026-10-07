@@ -255,10 +255,7 @@
   (test-case "a stack copies one layer, as nn.TransformerEncoder does"
     (manual-seed! 0)
     (define stack
-      (TransformerEncoder (lambda () (TransformerEncoderLayer 8 #:heads 2
-                                                              #:ffn-width 16))
-                          #:layers 3
-                          #:norm (LayerNorm 8)))
+      (TransformerEncoder 8 #:heads 2 #:ffn-width 16 #:layers 3 #:norm? #t))
     (define after (tensor->list (randn 3)))
     (check-pred transformer-encoder? stack)
     (check-equal? (map car (named-children stack)) '("layers" "norm"))
@@ -281,23 +278,93 @@
     (for ([a (in-list (parameters one))]
           [b (in-list (parameters (car layers)))])
       (check-equal? (tensor->list a) (tensor->list b)))
+    (check-pred layer-norm? (child stack "norm"))
     (eval! stack)
     (check-true (close? (stack x #:key-padding-mask padded #:causal? #t)
                         ((child stack "norm")
                          (for/fold ([h x]) ([l (in-list layers)])
                            (l h #:key-padding-mask padded #:causal? #t)))))
-    (define bare
-      (TransformerEncoder (lambda () (TransformerEncoderLayer 8 #:heads 2
-                                                              #:ffn-width 16))
-                          #:layers 1))
+    (define bare (TransformerEncoder 8 #:heads 2 #:ffn-width 16 #:layers 1))
     (check-equal? (map car (named-children bare)) '("layers"))
     (eval! bare)
     (check-true (close? (bare x) ((car (layers-of bare)) x))))
 
+  (test-case "a stack's defaults are its layer's"
+    (manual-seed! 0)
+    (define encoder (TransformerEncoder 8 #:heads 2 #:layers 2))
+    (manual-seed! 0)
+    (define one (TransformerEncoderLayer 8 #:heads 2))
+    (check-equal? (map tensor-shape (parameters encoder))
+                  (append (map tensor-shape (parameters one))
+                          (map tensor-shape (parameters one))))
+    (check-false (close? (encoder x) (encoder x)) "dropout 0.1 in training")
+    (eval! encoder)
+    (eval! one)
+    (check-true (close? (encoder x) (one (one x))))
+    (manual-seed! 0)
+    (define decoder (TransformerDecoder 8 #:heads 2 #:layers 2))
+    (manual-seed! 0)
+    (define one-decoder (TransformerDecoderLayer 8 #:heads 2))
+    (check-equal? (map car (named-children decoder)) '("layers"))
+    (eval! decoder)
+    (eval! one-decoder)
+    (define tgt (randn 4 2 8))
+    (check-true (close? (decoder tgt memory)
+                        (one-decoder (one-decoder tgt memory) memory))))
+
+  (test-case "a stack hands its keywords to every layer and to its norm"
+    (manual-seed! 0)
+    (define stack
+      (TransformerDecoder 8 #:heads 2 #:ffn-width 16 #:layers 2 #:dropout 0.0
+                          #:norm-first? #t #:activation 'gelu-tanh
+                          #:batch-first? #t #:bias? #f #:layer-norm-eps 1e-3
+                          #:norm? #t))
+    (manual-seed! 0)
+    (define one
+      (TransformerDecoderLayer 8 #:heads 2 #:ffn-width 16 #:dropout 0.0
+                               #:norm-first? #t #:activation 'gelu-tanh
+                               #:batch-first? #t #:bias? #f
+                               #:layer-norm-eps 1e-3))
+    (check-pred transformer-decoder? stack)
+    (check-equal? (length (parameters stack)) (+ (* 2 13) 1))
+    (check-equal? (take-right (named stack) 2)
+                  '("layers.1.norm3.weight" "norm.weight"))
+    (define tgt (randn 2 4 8))
+    (define mem (randn 2 7 8))
+    (define gaps (eq (tensor '((0 0 0 0 0 0 0) (0 0 0 0 0 1 1))) 1))
+    (define final (LayerNorm 8 #:eps 1e-3 #:bias? #f))
+    (check-true
+     (close? (stack tgt mem #:tgt-causal? #t #:memory-key-padding-mask gaps)
+             (final (for/fold ([h tgt]) ([_ (in-range 2)])
+                      (one h mem #:tgt-causal? #t
+                           #:memory-key-padding-mask gaps))))))
+
+  (test-case "the generic stack builds from a procedure, as PyTorch's does"
+    (define (make) (TransformerEncoderLayer 8 #:heads 2 #:ffn-width 16))
+    (manual-seed! 0)
+    (define standard
+      (TransformerEncoder 8 #:heads 2 #:ffn-width 16 #:layers 2 #:norm? #t))
+    (manual-seed! 0)
+    (define generic
+      (GenericTransformerEncoder make #:layers 2 #:norm (LayerNorm 8)))
+    (check-pred transformer-encoder? standard)
+    (check-pred transformer-encoder? generic)
+    (check-false (transformer-decoder? generic))
+    (check-equal? (named generic) (named standard))
+    (for ([a (in-list (parameters generic))]
+          [b (in-list (parameters standard))])
+      (check-equal? (tensor->list a) (tensor->list b)))
+    (define custom
+      (GenericTransformerEncoder make #:layers 1 #:norm (Linear 8 8)))
+    (check-equal? (take-right (named custom) 2) '("norm.weight" "norm.bias"))
+    (eval! custom)
+    (check-true (close? (custom x)
+                        ((child custom "norm") ((car (layers-of custom)) x)))))
+
   (test-case "#:copies? #f draws every layer afresh"
     (define (make) (TransformerDecoderLayer 8 #:heads 2 #:ffn-width 16))
     (manual-seed! 0)
-    (define stack (TransformerDecoder make #:layers 2 #:copies? #f))
+    (define stack (GenericTransformerDecoder make #:layers 2 #:copies? #f))
     (define after (tensor->list (randn 3)))
     (manual-seed! 0)
     (define first-layer (make))
@@ -313,26 +380,19 @@
     (check-equal? (length (parameters stack)) 52)
     (define tgt (randn 4 2 8))
     (eval! stack)
-    (check-true
-     (close? (stack tgt memory #:tgt-causal? #t #:memory-key-padding-mask
-                    (eq (tensor '((0 0 0 0 0 0 0) (0 0 0 0 0 1 1))) 1))
-             (for/fold ([h tgt]) ([l (in-list layers)])
-               (l h memory #:tgt-causal? #t #:memory-key-padding-mask
-                  (eq (tensor '((0 0 0 0 0 0 0) (0 0 0 0 0 1 1))) 1)))))
-    (check-true (close? (stack tgt memory)
+    (check-true (close? (stack tgt memory #:tgt-causal? #t)
                         (for/fold ([h tgt]) ([l (in-list layers)])
-                          (l h memory))))
-    (define normed (TransformerDecoder make #:layers 2 #:norm (LayerNorm 8)))
-    (check-equal? (take-right (named normed) 2) '("norm.weight" "norm.bias")))
+                          (l h memory #:tgt-causal? #t))))
+    (define copied (GenericTransformerDecoder make #:layers 2))
+    (check-equal? (tensor->list (car (parameters (car (layers-of copied)))))
+                  (tensor->list (car (parameters (cadr (layers-of copied)))))))
 
   (test-case "gradients reach every parameter of a stack and its inputs"
     (manual-seed! 0)
     (define stack
-      (TransformerDecoder (lambda ()
-                            (TransformerDecoderLayer 8 #:heads 2 #:ffn-width 16
-                                                     #:norm-first? #t
-                                                     #:activation 'gelu-tanh))
-                          #:layers 2 #:norm (LayerNorm 8)))
+      (TransformerDecoder 8 #:heads 2 #:ffn-width 16 #:layers 2
+                          #:norm-first? #t #:activation 'gelu-tanh
+                          #:norm? #t))
     (define tgt (requires-grad! (randn 4 2 8)))
     (define mem (requires-grad! (randn 7 2 8)))
     (define out (stack tgt mem #:tgt-causal? #t))
@@ -415,23 +475,41 @@
                (lambda () (TransformerEncoderLayer 8 #:heads 2
                                                    #:layer-norm-eps 0)))
     (check-exn exn:fail:contract? (lambda () (TransformerEncoderLayer 8)))
+    (check-exn (message-matching #rx"#:heads divides the model width")
+               (lambda () (TransformerEncoder 8 #:heads 3 #:layers 2)))
     (check-exn blames-this-test
-               (lambda () (TransformerEncoder (lambda () (Linear 8 8))
-                                              #:layers 2)))
+               (lambda () (TransformerDecoder 8 #:heads 3 #:layers 2)))
+    (check-exn #rx"^TransformerEncoder: contract violation"
+               (lambda () (TransformerEncoder 8 #:heads 2 #:layers 0)))
     (check-exn blames-this-test
-               (lambda ()
-                 (TransformerDecoder (lambda () (TransformerEncoderLayer
-                                                 8 #:heads 2))
-                                     #:layers 2)))
+               (lambda () (TransformerDecoder 8 #:heads 2 #:layers 2
+                                              #:norm? 'yes)))
+    (check-exn blames-this-test
+               (lambda () (TransformerEncoder 8 #:heads 2 #:layers 2
+                                              #:activation 'tanh)))
     (check-exn exn:fail:contract?
+               (lambda () (TransformerEncoder 8 #:heads 2)))
+    (check-exn exn:fail:contract?
+               (lambda () (TransformerDecoder 8 #:heads 2 #:layers 2
+                                              #:norm (LayerNorm 8))))
+    (check-exn blames-this-test
+               (lambda () (GenericTransformerEncoder (lambda () (Linear 8 8))
+                                                     #:layers 2)))
+    (check-exn blames-this-test
                (lambda ()
-                 (TransformerEncoder (lambda () (TransformerEncoderLayer
-                                                 8 #:heads 2))
-                                     #:layers 0)))
+                 (GenericTransformerDecoder
+                  (lambda () (TransformerEncoderLayer 8 #:heads 2))
+                  #:layers 2)))
+    (check-exn #rx"^GenericTransformerEncoder: contract violation"
+               (lambda ()
+                 (GenericTransformerEncoder
+                  (lambda () (TransformerEncoderLayer 8 #:heads 2))
+                  #:layers 0)))
     (check-exn (message-matching #rx"expected: [(]not/c layer[?][)]")
                (lambda ()
-                 (TransformerEncoder (TransformerEncoderLayer 8 #:heads 2)
-                                     #:layers 2)))
+                 (GenericTransformerEncoder
+                  (TransformerEncoderLayer 8 #:heads 2)
+                  #:layers 2)))
     (check-exn (message-matching #rx"expected: even-width")
                (lambda () (sinusoidal-positions 4 7)))
     (check-exn (message-matching #rx"expected: .*position-vector")

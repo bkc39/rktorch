@@ -352,21 +352,20 @@
                [i (in-naturals)])
            (check-= r p tol (format "mnist shuffle twin: parameter ~a" i)))))
      (let ()
-       ;; MUST stay in sync with examples/racket/06-gpt.rkt's gpt-block and gpt
+       ;; MUST stay in sync with examples/racket/06-gpt.rkt's gpt
        (define-layer gpt (tok-emb pos-emb transformer head)
          #:init (vocab-size block-size)
          (set! tok-emb (Embedding vocab-size 32))
          (set! pos-emb (Embedding block-size 32))
-         (set! transformer
-               (TransformerEncoder
-                (lambda ()
-                  (TransformerEncoderLayer 32 #:heads 4 #:ffn-width 128
-                                           #:dropout 0.0 #:activation 'gelu
-                                           #:norm-first? #t
-                                           #:batch-first? #t))
-                #:layers 2
-                #:norm (LayerNorm 32)
-                #:copies? #f))
+         (set! transformer (TransformerEncoder 32
+                                               #:heads 4
+                                               #:layers 2
+                                               #:ffn-width 128
+                                               #:activation 'gelu
+                                               #:norm-first? #t
+                                               #:dropout 0.0
+                                               #:batch-first? #t
+                                               #:norm? #t))
          (set! head (Linear 32 vocab-size))
          #:forward (idx)
          (with-default-device (tensor-device idx)

@@ -249,7 +249,7 @@
   (define (later length source)
     (triu (ones length source #:dtype 'bool) 1))
 
-  (define (built constructor stack width layers norm?
+  (define (built constructor stack generic width layers norm?
                  #:heads [heads 2] #:dropout p #:activation activation
                  #:norm-first? norm-first? #:batch-first? batch-first?
                  #:bias? bias? #:eps eps)
@@ -258,9 +258,16 @@
                    #:activation activation #:norm-first? norm-first?
                    #:batch-first? batch-first? #:bias? bias?
                    #:layer-norm-eps eps))
-    (if layers
-        (stack make-layer #:layers layers #:norm (and norm? (LayerNorm width)))
-        (make-layer)))
+    (cond
+      [generic
+       (generic make-layer #:layers layers #:copies? #f
+                #:norm (and norm? (LayerNorm width #:eps eps #:bias? bias?)))]
+      [layers
+       (stack width #:heads heads #:ffn-width 16 #:dropout p
+              #:activation activation #:norm-first? norm-first?
+              #:batch-first? batch-first? #:bias? bias?
+              #:layer-norm-eps eps #:layers layers #:norm? norm?)]
+      [else (make-layer)]))
 
   (define (backward-from m device out leaves)
     (backward! (sum (* out (to-device (randn (tensor-shape out)) device))))
@@ -283,10 +290,12 @@
                        #:norm-first? [norm-first? #f]
                        #:batch-first? [batch-first? #f]
                        #:bias? [bias? #t]
-                       #:eps [eps 1e-5])
+                       #:eps [eps 1e-5]
+                       #:independent? [independent? #f])
     (manual-seed! 0)
     (define m
-      (built TransformerEncoderLayer TransformerEncoder 8 layers norm?
+      (built TransformerEncoderLayer TransformerEncoder
+             (and independent? GenericTransformerEncoder) 8 layers norm?
              #:heads heads #:dropout p #:activation activation
              #:norm-first? norm-first? #:batch-first? batch-first?
              #:bias? bias? #:eps eps))
@@ -319,12 +328,16 @@
                        #:dropout [p 0.0]
                        #:activation [activation 'relu]
                        #:norm-first? [norm-first? #f]
-                       #:batch-first? [batch-first? #f])
+                       #:batch-first? [batch-first? #f]
+                       #:bias? [bias? #t]
+                       #:eps [eps 1e-5]
+                       #:independent? [independent? #f])
     (manual-seed! 0)
     (define m
-      (built TransformerDecoderLayer TransformerDecoder 8 layers norm?
+      (built TransformerDecoderLayer TransformerDecoder
+             (and independent? GenericTransformerDecoder) 8 layers norm?
              #:dropout p #:activation activation #:norm-first? norm-first?
-             #:batch-first? batch-first? #:bias? #t #:eps 1e-5))
+             #:batch-first? batch-first? #:bias? bias? #:eps eps))
     (define params (named-values m values))
     (to m device)
     (unless train? (eval! m))
@@ -423,7 +436,17 @@
            (lambda (d)
              (run-decoder d #:layers 3 #:norm-first? #t #:norm? #t
                           #:batch-first? #t #:activation 'gelu
-                          #:tgt-causal? #t)))
+                          #:tgt-causal? #t #:bias? #f #:eps 1e-6)))
+     (list 'generic_encoder_independent
+           (lambda (d)
+             (run-encoder d #:layers 2 #:norm? #t #:independent? #t
+                          #:padding (lambda () (padded-keys 3 5 2)))))
+     (list 'generic_decoder_independent
+           (lambda (d)
+             (run-decoder d #:layers 2 #:independent? #t #:norm-first? #t
+                          #:activation 'gelu-tanh #:batch-first? #t
+                          #:tgt-causal? #t
+                          #:memory-padding (lambda () (padded-keys 2 5 1)))))
      (list 'fast_path fast-path)))
 
   (define (check-transformer-twin device tolerance)
