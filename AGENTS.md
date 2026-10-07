@@ -276,9 +276,11 @@ names (`weight_ih_l0` .. `bias_hh_l1_reverse`) the way `children-by-key`
 registers children, and a rest-argument `#:forward` lets an initial state
 follow the input. Applying one answers `(values output h-n [c-n])`. On CUDA
 the weights are flattened for cudnn (`cudnn-rnn-flatten-weight`, in place,
-the parameters keep their identity) whenever their device or dtype differs
-from the placement the last flattening was built for, so `to`'s identity
-case costs nothing and a transient OOM is retried rather than latched. `clip-grad-norm!` (`nn/clip.rkt`) keeps its scale on the
+the parameters keep their identity) whenever their storage addresses
+(`tr_tensor_data_ptr` and `tr_tensor_storage_ptr`, each weight's element and
+storage start) differ from those the last flattening left, which catches a
+device round trip and a replaced parameter with no move hook, costs `to`'s
+identity case nothing, and retries a transient OOM rather than latching it. `clip-grad-norm!` (`nn/clip.rkt`) keeps its scale on the
 device. Layer init mirrors
 PyTorch RNG consumption (`nn.Linear.reset_parameters`), so a shared
 `manual-seed!` yields bit-comparable parameters — the MLP cross-test relies
@@ -508,7 +510,10 @@ module's full export set (`racket/runtime-path`, `syntax/parse/pre`).
 - `nn.rkt` — pure re-export facade over `nn/` (`layer.rkt` = `gen:layer`, `LayerList` +
   the `define-layer` macro, whose `#:forward` takes a rest argument, whose
   fields admit `parameters-by-key` beside `children-by-key`, and whose
-  `#:on-move` body runs after a `to` that rebound anything; `parameter.rkt`, `buffer.rkt`, `linear.rkt`,
+  `#:on-move` body runs after a `to` that rebound any tensor in its subtree,
+  judged against placements read before anything moved, so a tensor tied
+  across siblings counts for both; `mode.rkt` = `train!`, `eval!`,
+  `call-with-mode` and `in-mode`; `parameter.rkt`, `buffer.rkt`, `linear.rkt`,
   `init.rkt`, `optim.rkt`, `ema.rkt`, `loss.rkt`, `recurrent.rkt`,
   `clip.rkt`).
 - `private/download.rkt` — the one download path (#195): a temp file in the
