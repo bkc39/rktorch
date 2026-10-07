@@ -233,9 +233,9 @@ fixture-scale configuration the parity twin trains;
   (set! hdrop (Dropout #:p p-drop))
   (set! head (Linear n-embd (add1 vocab-size)))
   #:forward (x dec-in lengths)
-  (with-default-device (tensor-device x)
+  (with-default-device (device x)
     (define (halve n) (quotient (add1 n) 2))
-    (define t1 (halve (caddr (tensor-shape x))))
+    (define t1 (halve (caddr (shape x))))
     (define t2 (halve t1))
     (define l1 (and lengths (map halve lengths)))
     (define l2 (and l1 (map halve l1)))
@@ -250,7 +250,7 @@ fixture-scale configuration the parity twin trains;
         (clip (+ h (relu (dil h))) l2 t2)))
     (define padding (and l2 (key-padding-mask l2 t2)))
     (define (positioned v)
-      (+ v (sinusoidal-positions (cadr (tensor-shape v)) n-embd
+      (+ v (sinusoidal-positions (cadr (shape v)) n-embd
                                  #:layout 'halves)))
     (define memory
       (encoder (positioned (transpose c4 1 2)) #:key-padding-mask padding))
@@ -317,19 +317,19 @@ NaN the parameters mid-epoch.
            (length mels) (length transcripts)))
   ;; the mels carry the device: this is exported, so callers reach it
   ;; from outside whatever extent built the net
-  (with-default-device (tensor-device (car mels))
+  (with-default-device (device (car mels))
     (define v-size (vector-length vocab))
     (define eos v-size)
     (define sos (add1 v-size))
     (define frame-lengths
-      (for/list ([m (in-list mels)]) (cadr (tensor-shape m))))
+      (for/list ([m (in-list mels)]) (cadr (shape m))))
     (define t-max (apply max frame-lengths))
     (define x
       (stack (for/list ([m (in-list mels)]
                         [t (in-list frame-lengths)])
                (if (= t t-max)
                    m
-                   (cat (list m (zeros (car (tensor-shape m)) (- t-max t)))
+                   (cat (list m (zeros (car (shape m)) (- t-max t)))
                         1)))
              0))
     (define batched? (< 1 (length mels)))
@@ -404,7 +404,7 @@ CTC's phonetic stutter next to attention's spelling is the payoff.
 (define (greedy-decode net vocab features)
   (define v-size (vector-length vocab))
   ;; any parameter's device works: a model's tensors are colocated
-  (define dev (tensor-device (car (parameters net))))
+  (define dev (device (car (parameters net))))
   (define x (to-device features dev))
   (with-default-device dev
     (in-eval-mode net
@@ -429,7 +429,7 @@ CTC's phonetic stutter next to attention's spelling is the payoff.
   (define v-size (vector-length vocab))
   (define eos v-size)
   (define sos (add1 v-size))
-  (define dev (tensor-device (car (parameters net))))
+  (define dev (device (car (parameters net))))
   (define x (to-device features dev))
   (with-default-device dev
     (in-eval-mode net
@@ -437,7 +437,7 @@ CTC's phonetic stutter next to attention's spelling is the payoff.
         ;; the cap is the encoder's own frame count, arithmetic on the
         ;; input shape — no forward pass needed to learn it
         (define cap
-          (or max-steps (downsampled-length (caddr (tensor-shape x)))))
+          (or max-steps (downsampled-length (caddr (shape x)))))
         (define (next-id ids)
           (define dec-in
             (unsqueeze (to-dtype (tensor ids) 'int64) 0))

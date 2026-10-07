@@ -74,7 +74,7 @@
          (define padding
            (and l2 (ge (unsqueeze (arange t2) 0) (row-lengths l2))))
          (define (positioned v)
-           (+ v (sinusoidal-positions (cadr (tensor-shape v)) n-embd
+           (+ v (sinusoidal-positions (cadr (shape v)) n-embd
                                       #:layout 'halves)))
          (define memory
            (encoder (positioned (transpose c4 1 2))
@@ -87,7 +87,7 @@
      (define vocab (text->vocab transcript))
      (define v-size (vector-length vocab))
      (let* ([named (named-parameters (asr 80 v-size))]
-            [shapes (map (lambda (p) (tensor-shape (cdr p))) named)])
+            [shapes (map (lambda (p) (shape (cdr p))) named)])
        (check-equal? (length shapes) 273
                      "asr parameter count must match 07-asr.rkt")
        (check-equal? (car shapes) '(64 80 3))
