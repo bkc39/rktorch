@@ -408,7 +408,7 @@ gets the point's name and a subject (a handle, a device, a thread).
 | `account-created` | a device's first account, inside the ledger section | device |
 | `gate-read` | the backstop has read its gate, before it acts | device |
 | `checks-resetting` | a backstop collection has measured, before it resets the checks | device |
-| `unaccount-entry-read` | inside the ledger section, entry read but not removed | handle |
+| `unaccount-entry-read` | inside the ledger section, an entry found but not removed | handle |
 | `free-unaccounted` | an explicit free has unaccounted, before the native release | handle |
 | `finalizer-releasing` | a finalizer's release, before it unaccounts | handle |
 | `collector-claiming` | inside the claim's atomic section, decided but not taken | whether free |
@@ -421,11 +421,12 @@ gets the point's name and a subject (a handle, a device, a thread).
   B runs. A point inside an atomic section cannot park, and the gate says
   so (`'atomic`), which is the guard holding. Each case runs for ordinary
   and `#:pool 'own` threads.
-- The oracle (`ledger-violations`): I1 counters equal the fold, I2 at most
-  one collector holds the claim (counted from the claim's points), I3 no
-  handle released twice (counted from the release points), the ledger back
-  to its baseline after the drop, no finalizer failures, the fault latch
-  clear.
+- The oracle (`ledger-violations`): I1 every device's counter equals the
+  fold, zero and negative counters included; I2 at most one collector holds
+  the claim (counted from the claim's points); I3 no handle released twice
+  and no entry unaccounted twice (counted from the release and unaccount
+  points); the ledger back to its baseline after the drop; no finalizer
+  failures; the fault latch clear.
 - Seeded fuzzing (`race-fuzz-test.rkt`): every point outside atomic mode
   yields or sleeps by a per-thread generator seeded from the run's seed and
   the thread's label. A failure prints the seed;
