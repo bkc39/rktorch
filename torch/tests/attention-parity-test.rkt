@@ -35,7 +35,7 @@
                                     #:mask (and mask (to-device mask device))
                                     #:causal? causal?
                                     #:scale scale))
-    (define weights (to-device (randn (tensor-shape out)) device))
+    (define weights (to-device (randn (shape out)) device))
     (backward! (sum (* out weights)))
     (values out (list q k v)))
 
@@ -58,7 +58,7 @@
         (define label (format "sdpa ~a [~a]" key device))
         (define-values (out leaves)
           (attend device query-length make-mask causal? scale))
-        (check-equal? (tensor-shape out) (hash-ref expected 'shape) label)
+        (check-equal? (shape out) (hash-ref expected 'shape) label)
         (check-values (format "~a: output" label) out (hash-ref expected 'out)
                       tolerance)
         (for ([leaf (in-list leaves)]

@@ -60,7 +60,7 @@ which on a GPU runs as a single fused kernel:
 @torch-examples[
 (define fused (scaled-dot-product-attention query key value))
 fused
-(< (item (max (abs (- fused by-hand)))) 1e-6)
+(~> (- fused by-hand) abs max item (< 1e-6))
 ]
 
 @section[#:tag "transformers-causal"]{Hiding the future}
@@ -73,10 +73,10 @@ with @racket[-inf.0], which the softmax turns into a weight of zero.
 
 @torch-examples[
 (define x (tensor '((1.0 0.0) (0.0 1.0) (1.0 1.0))))
-(define later (eq (tril (ones 3 3)) 0))
+(define later (~> (ones 3 3) tril (eq 0)))
 later
 (define causal-weights
-  (softmax (masked-fill (/ (|@| x (T x)) (sqrt 2)) later -inf.0) -1))
+  (~> (|@| x (T x)) (/ (sqrt 2)) (masked-fill later -inf.0) (softmax -1)))
 causal-weights
 ]
 
@@ -86,7 +86,7 @@ fused call takes the same restriction as @racket[#:causal? #t]:
 @torch-examples[
 (define causal (scaled-dot-product-attention x x x #:causal? #t))
 causal
-(< (item (max (abs (- causal (|@| causal-weights x))))) 1e-6)
+(~> (- causal (|@| causal-weights x)) abs max item (< 1e-6))
 ]
 
 A boolean @racket[#:mask] states the restriction position by position. Its
@@ -95,9 +95,8 @@ query may attend to, so the causal mask is the lower triangle itself.
 
 @torch-examples[
 (define attend (tril (ones 3 3 #:dtype 'bool)))
-(< (item (max (abs (- causal
-                      (scaled-dot-product-attention x x x #:mask attend)))))
-   1e-6)
+(~> (- causal (scaled-dot-product-attention x x x #:mask attend))
+    abs max item (< 1e-6))
 ]
 
 The two senses are easy to confuse, and PyTorch itself uses both;
