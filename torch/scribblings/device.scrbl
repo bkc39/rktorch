@@ -356,9 +356,12 @@ from the driver, its cache included, because on unified memory that cache
 is the machine's own memory. A collection frees tensors into the cache
 without moving that figure, so on MPS a backstop collection whose drain
 finished also empties the cache, at most once every five seconds, since
-the next steps then take their memory from the driver again. The mark is @racket[native-memory-fraction] of the device's
-capacity, from @racket[cuda-memory-info] on CUDA and
+the next steps then take their memory from the driver again. The mark is a
+share of the device's capacity, from @racket[cuda-memory-info] on CUDA and
 @racket[mps-memory-info] on MPS, or @racket[native-memory-limit] when set.
+The share is @racket[native-memory-fraction] when set, and otherwise 4/5 on
+CUDA and 1/2 on MPS, whose capacity is the host's own memory: at 4/5 a
+16 GB Mac swaps several gigabytes before the backstop engages.
 A collection is never run within an eighth of the mark of the previous one,
 measured in bytes allocated, and when a collection reclaims under 5% of the
 mark that spacing doubles, so a working set that legitimately sits above
@@ -409,8 +412,8 @@ policy for its own machine by wrapping its loop once:
 
 Raising the fraction and the margin and lowering the budget all trade peak
 memory for throughput. The defaults are deliberately cautious, and were
-measured on one model on one card, so a machine with more memory than
-compute has room to relax them.
+measured on one model on one card and, for MPS's share, on one 16 GB Mac,
+so a machine with more memory than compute has room to relax them.
 
 The mark can also be set without code, for an example runner, a script or
 a REPL session: @envvar{RKTORCH_MEMORY_FRACTION} and
@@ -456,13 +459,15 @@ pressure collection off. @envvar{RKTORCH_MEMORY_LIMIT} sets the initial
 value in MiB, rounded down to whole bytes.
 }
 
-@defparam[native-memory-fraction fraction (and/c real? positive? (<=/c 1))]{
-The share of a device's capacity the backstop treats as its high-water
-mark, @racket[4/5] by default. @envvar{RKTORCH_MEMORY_FRACTION} sets the
-initial value, as a fraction such as @tt{1/2} or a decimal such as
-@tt{0.5}. Read at every check, so it may be parameterized at any point in a
-run. Ignored where @racket[native-memory-limit] is set or the capacity is
-unknown.
+@defparam[native-memory-fraction fraction
+          (or/c #f (and/c real? positive? (<=/c 1)))]{
+The share of every device's capacity the backstop treats as its
+high-water mark. @racket[#f], the default, takes each device's own share:
+@racket[4/5] on CUDA and @racket[1/2] on MPS, whose capacity is the host's
+own memory. @envvar{RKTORCH_MEMORY_FRACTION} sets the initial value, as a
+fraction such as @tt{1/2} or a decimal such as @tt{0.5}. Read at every
+check, so it may be parameterized at any point in a run. Ignored where
+@racket[native-memory-limit] is set or the capacity is unknown.
 }
 
 @defparam[native-collect-margin margin (or/c #f exact-positive-integer?)]{

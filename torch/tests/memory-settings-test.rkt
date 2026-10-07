@@ -5,7 +5,8 @@
   (require racket/runtime-path
            rackunit
            (only-in "../foreign/raw/pressure-settings.rkt"
-                    memory-fraction-from-env memory-limit-from-env))
+                    default-memory-fraction memory-fraction-from-env
+                    memory-limit-from-env))
 
   (define-runtime-path settings-module "../foreign/raw/pressure-settings.rkt")
 
@@ -31,8 +32,13 @@
                message))
 
   (test-case "unset, both settings keep their defaults"
-    (check-equal? (fraction-from #f) 4/5)
+    (check-equal? (fraction-from #f) #f)
     (check-equal? (limit-from #f) #f))
+
+  (test-case "with no fraction set, each device type has its own share"
+    (check-equal? (default-memory-fraction 'mps) 1/2)
+    (check-equal? (default-memory-fraction 'cuda) 4/5)
+    (check-equal? (default-memory-fraction 'cpu) 4/5))
 
   (test-case "RKTORCH_MEMORY_FRACTION takes a share of capacity, decimals exact"
     (check-equal? (fraction-from "1/2") 1/2)
@@ -65,7 +71,7 @@
             ((dynamic-require settings-module 'native-memory-limit)))))
 
   (test-case "the parameters start from the environment"
-    (check-equal? (initial-values (hash)) (list 4/5 #f))
+    (check-equal? (initial-values (hash)) (list #f #f))
     (check-equal? (initial-values (hash "RKTORCH_MEMORY_FRACTION" "2/3"
                                         "RKTORCH_MEMORY_LIMIT" "6062"))
                   (list 2/3 (* 6062 mib)))

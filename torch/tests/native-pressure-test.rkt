@@ -526,6 +526,10 @@
     (check-true (positive? (collections-over 1/2 20)))
     ;; all of it is a 128 MiB mark, which the same 80 MiB stays under
     (check-equal? (collections-over 1 20) 0)
+    ;; unset, the device type's share applies: 4/5 off MPS, a 102 MiB mark
+    ;; that 80 MiB stays under and 120 MiB passes
+    (check-equal? (collections-over #f 20) 0)
+    (check-true (positive? (collections-over #f 30)))
     (install-device-queries! #:capacity (lambda (_dev) #f)
                              #:allocated (lambda (_dev) #f))
     (settle!))

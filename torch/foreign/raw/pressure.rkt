@@ -7,7 +7,8 @@
          (only-in "device-queries.rkt"
                   allocator-reading queried-capacity release-query)
          (only-in "pressure-settings.rkt"
-                  margin-over native-collect-at-troughs native-collect-budget
+                  default-memory-fraction margin-over
+                  native-collect-at-troughs native-collect-budget
                   native-collect-margin native-memory-fraction
                   native-memory-limit release-spacing))
 
@@ -179,7 +180,10 @@
 (define (device-high-water dev)
   (or (native-memory-limit)
       (let ([capacity (device-capacity dev)])
-        (and capacity (floor (* (native-memory-fraction) capacity))))))
+        (and capacity
+             (floor (* (or (native-memory-fraction)
+                           (default-memory-fraction (device-type dev)))
+                       capacity))))))
 
 (define (live-of dev)
   (call-with-ledger (lambda () (account-live (account-of dev)))))
