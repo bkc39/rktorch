@@ -10,7 +10,7 @@
            (only-in "../vision/vgg.rkt" vgg16-features))
 
   (define (close? a b [eps 1e-6])
-    (and (equal? (tensor-shape a) (tensor-shape b))
+    (and (equal? (shape a) (shape b))
          (for/and ([x (in-flattened-tensor a)] [y (in-flattened-tensor b)])
            (<= (abs (- x y)) eps))))
 
@@ -27,9 +27,9 @@
     (append (parameters m) (buffers m)))
 
   (define (same? a b)
-    (and (equal? (tensor-shape a) (tensor-shape b))
-         (eq? (tensor-dtype a) (tensor-dtype b))
-         (equal? (tensor-device a) (tensor-device b))
+    (and (equal? (shape a) (shape b))
+         (eq? (dtype a) (dtype b))
+         (equal? (device a) (device b))
          (zero? (item (max (abs (- (to-dtype a 'float64)
                                    (to-dtype b 'float64))))))))
 
@@ -161,7 +161,7 @@
     (backward! (sum (l (to (randn 4 2) 'float64))))
     (define c (layer-copy l))
     (check-equal? (map requires-grad? (parameters c)) '(#f #t))
-    (check-equal? (map tensor-dtype (parameters c)) '(float64 float64))
+    (check-equal? (map dtype (parameters c)) '(float64 float64))
     (check-false (has-grad? (cadr (parameters c))))
     (define net (Sequential (Linear 2 2) (Dropout)))
     (eval! (child-ref net "1"))
@@ -256,7 +256,7 @@
       (define reference (first-output lstm (list x)))
       (define c (layer-copy lstm))
       (check-false (flattened-placement (car (parameters c))))
-      (check-equal? (map device-type (map tensor-device (parameters c)))
+      (check-equal? (map device-type (map device (parameters c)))
                     (map (lambda (_p) 'cuda) (parameters c)))
       (define copied (first-output c (list x)))
       (check-true (close? (to-device copied 'cpu) (to-device reference 'cpu)
