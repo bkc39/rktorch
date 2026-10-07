@@ -247,7 +247,7 @@ per `foreign/operators.rkt`.
 From `torch/nn`: `define-layer procedure->Layer gen:layer layer? Parameter Buffer LayerList LayerHash parameters
 named-parameters in-named-parameters buffers children Linear Conv2d MaxPool2d Flatten Dropout
 Sequential Embedding LayerNorm ConvTranspose2d GroupNorm BatchNorm2d BatchNorm1d
-LSTM GRU sgd adam rmsprop step! zero-grads! clip-grad-norm! learning-rate
+LSTM GRU MultiheadAttention sgd adam rmsprop step! zero-grads! clip-grad-norm! learning-rate
 set-learning-rate! step-lr multi-step-lr exponential-lr cosine-annealing-lr
 linear-lr one-cycle-lr lambda-lr ema ema-update! ema-average cross-entropy
 nll-loss mse-loss binary-cross-entropy-with-logits huber-loss l1-loss
@@ -283,7 +283,24 @@ follow the input. Applying one answers `(values output h-n [c-n])`. On CUDA
 the weights are flattened for cudnn (`cudnn-rnn-flatten-weight`, in place,
 the parameters keep their identity) whenever their device or dtype differs
 from the placement the last flattening was built for, so `to`'s identity
-case costs nothing and a transient OOM is retried rather than latched. `clip-grad-norm!` (`nn/clip.rkt`) keeps its scale on the
+case costs nothing and a transient OOM is retried rather than latched.
+A `#:forward` may declare keyword inputs (`#:kw id` or `#:kw [id
+default]`, the default seeing the fields); `gen:layer`'s `prop:procedure`
+is a keyword procedure that hands them to a `define-layer` or
+`procedure->Layer` forward, while a hand-written `layer-forward`, a generic
+method, refuses them. `MultiheadAttention` (`nn/attention.rkt`, #210 L1)
+is the first such layer: four `Linear` children `query` `key` `value`
+`out` (not PyTorch's fused `in_proj`; `linear.rkt`'s `private` submodule
+builds a `Linear` from given tensors so the xavier `[3E, E]` draw splits
+without extra RNG use), `#:heads #:dropout #:bias? #:batch-first?
+#:key-dim #:value-dim`, applied as `(mha q k v #:key-padding-mask
+#:attn-mask #:causal? #:need-weights? #:average-attn-weights?)`; its
+boolean masks are `#t` = hidden like `nn.MultiheadAttention`'s (turned
+into additive float masks before the fused call), `#:causal?` builds the
+causal mask rather than PyTorch's hint, and only `#:need-weights? #t`
+leaves the fused kernel, answering `(values output weights)`. Its
+application shapes are a per-instance `->i` contract built in `#:init` and
+applied with `caller` blame. `clip-grad-norm!` (`nn/clip.rkt`) keeps its scale on the
 device. Layer init mirrors
 PyTorch RNG consumption (`nn.Linear.reset_parameters`), so a shared
 `manual-seed!` yields bit-comparable parameters — the MLP cross-test relies
@@ -511,11 +528,12 @@ module's full export set (`racket/runtime-path`, `syntax/parse/pre`).
   native code with `define-ffi-definer` or `get-ffi-obj` directly, which
   bypasses the latch.
 - `nn.rkt` — pure re-export facade over `nn/` (`layer.rkt` = `gen:layer`, `LayerList` +
-  the `define-layer` macro, whose `#:forward` takes a rest argument, whose
+  the `define-layer` macro, whose `#:forward` takes a rest argument and
+  keyword inputs, whose
   fields admit `parameters-by-key` beside `children-by-key`, and whose
   `#:on-move` body runs after a `to` that rebound anything; `parameter.rkt`, `buffer.rkt`, `linear.rkt`,
   `init.rkt`, `optim.rkt`, `ema.rkt`, `loss.rkt`, `recurrent.rkt`,
-  `clip.rkt`).
+  `attention.rkt`, `clip.rkt`).
 - `private/download.rkt` — the one download path (#195): a temp file in the
   cache's directory, checked, then installed. `call-with-verified-download`
   checks an exact size and SHA-256 (pretrained weights, hymenoptera);

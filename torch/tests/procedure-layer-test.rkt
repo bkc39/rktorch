@@ -22,6 +22,13 @@
     (check-exn #rx"original failure"
                (lambda () ((procedure->Layer (lambda () (error "original failure")))))))
 
+  (test-case "keyword arguments reach the procedure"
+    (define scale (procedure->Layer (lambda (x #:by [by 2]) (* x by))))
+    (check-equal? (scale 3) 6)
+    (check-equal? (scale 3 #:by 5) 15)
+    (check-exn #rx"given keyword: #:nope"
+               (lambda () (scale 3 #:nope 1))))
+
   (test-case "captured parameters and buffers require explicit registration"
     (define weight (Parameter (ones 2)))
     (define offset (Buffer (ones 2)))
