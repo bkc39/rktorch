@@ -21,8 +21,9 @@
            (only-in (submod "../foreign.rkt" unsafe) to!)
            (only-in "../foreign/raw/memory.rkt" native-memory-use/fold)
            (only-in "../foreign/raw/collector.rkt" collect-and-wait!)
+           (only-in "../foreign/raw/device-queries.rkt" allocator-reading)
            (only-in "../foreign/raw/pressure.rkt"
-                    allocator-reading native-collect-budget
+                    native-collect-budget
                     native-collect-margin native-memory-fraction
                     release-spacing reset-pressure-state!)
            (only-in "../nn.rkt" Linear Sequential parameters)

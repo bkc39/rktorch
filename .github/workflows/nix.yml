@@ -76,8 +76,9 @@ jobs:
         with:
           ts-oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
           ts-oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
-      # The default dev shell provisions Resyntax into the user scope, so the
-      # linter runs on the same nix-provided Racket as the rest of the build.
+      # The dev shell provisions the Resyntax pinned in nix/racket-linters.nix
+      # into the user scope, so the lane lints with the same version, on the
+      # same nix-provided Racket, as every local shell.
       - name: Resyntax lint
         env:
           # on a master push the empty diff against origin/master reports
