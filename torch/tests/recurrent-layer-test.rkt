@@ -4,14 +4,16 @@
 ;; without it.
 
 (module+ test
-  (require (only-in racket/file make-temporary-file)
+  (require (only-in ffi/unsafe _int _intptr _pointer cast ptr-ref)
+           (only-in racket/file make-temporary-file)
            (only-in racket/list append-map)
            rackunit
+           (only-in "../foreign/error.rkt" exn:fail:rktorch:oom)
+           (only-in "../generated.rkt" cudnn-rnn-flatten-weight)
            "../main.rkt"
            "../nn.rkt"
-           (only-in "../generated.rkt" cudnn-rnn-flatten-weight)
            (only-in (submod "../nn/recurrent.rkt" private)
-                    flatten-refused? flattened-placement)
+                    cudnn-refusal? flatten-refused? flattened-placement)
            "private/python-env.rkt")
 
   (define (flat ts)
@@ -162,6 +164,19 @@
     (to net 'float64)
     (check-false (recorded)
                  "moving the parent left the child's flattening behind"))
+
+  (test-case "only an answer from cudnn reads as a refusal to flatten"
+    (define (raised message make)
+      (make message (current-continuation-marks)))
+    (define fault
+      (with-handlers ([(lambda (_) #t) values])
+        (ptr-ref (cast 8 _intptr _pointer) _int)))
+    (check-true (cudnn-refusal? (raised "cudnn refused" exn:fail)))
+    (check-false (cudnn-refusal? fault)
+                 "a native fault would be swallowed as a refusal")
+    (check-false (cudnn-refusal? (raised "out of memory" exn:fail:rktorch:oom)))
+    (check-false (cudnn-refusal? (raised "bad argument" exn:fail:contract)))
+    (check-false (cudnn-refusal? 'not-an-exception)))
 
   (test-case "constructor contracts"
     (check-exn exn:fail:contract? (lambda () (LSTM 0 4)))

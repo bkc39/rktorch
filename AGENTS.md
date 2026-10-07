@@ -416,6 +416,15 @@ raco review torch/**/*.rkt
 `raco review` does not expand macros, so the pure re-export facades
 (`main.rkt`, `foreign.rkt`) and `info.rkt` carry a `#|review: ignore|#` directive.
 
+Resyntax, racket-review and `cover` are pinned, one commit per package, in
+`nix/racket-linters.nix`, which also compiles them; shell entry copies them
+into `.racket-user` with no network, and the CI lane runs the same trees, so
+lint findings change only when the flake does (#63). To bump: change the
+package's `rev`, set its `hash` to `""`, `nix build .#racket-linters`, paste
+the hash Nix reports, and run the full sweep (`resyntax analyze --directory
+torch`), since CI scans only changed files. Each checkout moves to the new
+trees on its next shell entry.
+
 ### PyTorch parity
 
 The default `nix develop` shell ships a Python with `torch`, so you can explore
@@ -515,25 +524,42 @@ module's full export set (`racket/runtime-path`, `syntax/parse/pre`).
   finalizer); `foreign/error.rkt` — `check-ok` / `check-handle`;
   `foreign/format.rkt` — the PyTorch-repr reproducer.
 - `foreign/raw/*.rkt` — direct FFI, one module per C translation unit:
-  `syntax` (the pure FFI definer + `_Tensor` cpointer), `pressure` (no
+  `syntax` (the FFI definer + `_Tensor` cpointer), `fault` (the
+  native-fault latch `define-torch` puts under every binding, #76),
+  `pressure` (no
   FFI of its own: the collection policy under the ledger, the two troughs
-  and the capacity backstop, #145), `memory` (the lifetime substrate:
+  and the capacity backstop, #145), `pressure-settings` (its parameters;
+  `RKTORCH_MEMORY_FRACTION` and `RKTORCH_MEMORY_LIMIT` in MiB set the
+  mark's initial values, #236), `device-queries` (the capacity, allocator
+  and release queries `device` hands down to it), `memory` (the lifetime substrate:
   frees, pressure ledger, `tensor-allocator`, op-definer macros),
   `global`, `tensor`, `random`, `creation`,
   `shape-ops`, `elementwise`, `reduce`, `linalg`, `autograd`.
   **`docs/internals.md` is the canonical memory-management narrative**
   (lifetime chain, phantom-bytes pressure, typed OOM + retry). The
   rules agents must not break: every tensor-returning binding carries
-  `tensor-allocator` — or `tensor-allocator/rng` for bindings that draw
-  from the global RNG stream (randn/rand; ops flagged `rng` in the
-  codegen allowlist) so a retry can never double-draw and break seeded
-  parity; a binding with several tensor outputs carries
-  `tensor-allocator/outputs` (or `/outputs/rng`), which registers and
+  `tensor-allocator` — or `tensor-allocator/no-retry` for bindings a
+  second call would not repeat harmlessly, a draw from the global RNG
+  stream (randn/rand) or a tensor-returning op that also updates an
+  argument (batch_norm's running statistics; such generated ops are
+  flagged `no-retry` in the codegen allowlist, while status-returning
+  in-place ops like `add_` take no allocator wrap and no flag), so a
+  retry can never double-draw and break seeded parity or apply an
+  update twice; `tr_tensor_grad`
+  carries `tensor-allocator/gradient`; a binding with several tensor
+  outputs carries `tensor-allocator/outputs` (or `/outputs/no-retry`),
+  which registers and
   accounts every handle inside one atomic section; never a bare
   `(allocator ...)` wrap (skips the ledger).
   Explicit synchronous release goes through the raising,
   finalizer-cancelling `tr-tensor-free/checked`; OOM reaches users as
-  `exn:fail:rktorch:oom` (catch by type, not message).
+  `exn:fail:rktorch:oom` (catch by type, not message). A handler broad
+  enough to catch an `invalid memory reference` either lets it through to
+  the caller, which latches nothing, or, where no caller is waiting (a
+  finalizer guard, the printer, `account!`), calls `note-native-fault!`
+  when `native-fault?` holds, so that fault latches the library; never bind
+  native code with `define-ffi-definer` or `get-ffi-obj` directly, which
+  bypasses the latch.
 - `nn.rkt` — pure re-export facade over `nn/` (`layer.rkt` = `gen:layer`, `LayerList` +
   the `define-layer` macro, whose `#:forward` takes a rest argument and
   keyword inputs, whose
@@ -594,7 +620,7 @@ Conventions:
   `Scalar?` and `float?` carry a presence flag, `int[]?` a length plus flag, and
   `ScalarType?` a -1 sentinel, and `Generator?` a `tr_generator` handle
   (NULL for the global stream; an op that draws still needs the allowlist
-  `rng` flag). In-place ops (`add_`) emit a mutable receiver
+  `no-retry` flag). In-place ops (`add_`) emit a mutable receiver
   plus an integer status. An op with several Tensor returns (`topk`,
   `sort`, #154) emits an integer status plus trailing out pointers in C
   and a `#:returns N` clause in Racket, where it answers multiple values
@@ -787,3 +813,58 @@ another tailnet machine, add the same two lines as `extra-substituters`
 / `extra-trusted-public-keys` to the daemon's `/etc/nix/nix.conf` (a
 multi-user Nix ignores them in `~/.config/nix/nix.conf` unless the
 caller is in `trusted-users`).
+
+## Code Review Rules
+
+Codex reads this section; the Claude review workflow gives its bot
+master's copy.
+
+### Stacked pull requests
+
+- A pull request whose base is another pull request's branch is one layer
+  of a stack, and what it changes is its diff against that base. The
+  lower layers' code is already on the base branch and is reviewed on
+  their own pull requests: do not flag what that code already did, and do
+  not ask for anything a lower layer provides, but do flag what this
+  layer's diff breaks in another layer's code.
+
+### Generated code
+
+- The generator's output is the files it emits, each with an
+  `@generated by codegen ... DO NOT EDIT` header:
+  `cpp/include/torchrkt/c_api/generated.h`, the `.h` files in
+  `cpp/include/torchrkt/c_api/generated/`, the `.cpp` and `.cmake` files
+  in `cpp/src/torchrkt/generated/`, `torch/generated.rkt` and
+  `torch/tests/generated-parity.rktd`. Review the generator
+  (`codegen/*.py`) and `codegen/allowlist.txt` instead of their bodies;
+  when a template changes, check one emitted body per changed template
+  path against it. When the allowlist gains an op, check its emitted C
+  signature, Racket binding and allocator wrap: a new schema shape can
+  reach a classifier path no earlier op exercised, and codegen drift only
+  proves the output is reproducible. Any other file is reviewed like any
+  other, header or not.
+- The vendored schema under `codegen/aten/` is upstream data: when it
+  changes, check its sha256 against the pin in `codegen/aten/README.md`
+  and review the emitted bodies of allowlisted ops whose schema changed,
+  not the YAML itself.
+
+### What matters most
+
+- Native memory across the FFI boundary: the allocator wrap on every
+  tensor-returning binding, with its no-retry and gradient variants
+  (Architecture > Racket, `foreign/raw/*.rkt`); the `detail/op_call.hpp`
+  helpers every C++ op body reduces to (Architecture > C++).
+- PyTorch parity: an allowlist op needs a recipe in
+  `generated-parity-test.rkt`, and a `'device-only` one its own
+  device-guarded test; a hand-written op needs a python cross-test check
+  beside its gtest golden; a new example comes with its runner
+  (`examples/test/`) and a Python twin, either in `examples/python/` or
+  as a parity suite under `torch/tests/python/` (as 16-style-transfer's
+  is).
+- Conventions: contracts at the definition site ("Validating arguments");
+  an op named like a racket/base, racket/list or racket/math function
+  defers to it for anything but a tensor; Racket modules within the
+  500-line target.
+
+Formatting, clang-tidy, Resyntax, the C++ 500-line gate and codegen drift
+are CI's checks; leave them to CI.
