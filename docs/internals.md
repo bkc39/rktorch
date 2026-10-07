@@ -385,6 +385,102 @@ than a second wrapper over the same storage.
   `native-memory-use/fold`, the cross-check the tests run.
 - The finalizer failure count is likewise incremented atomically in
   the guarded finalizer context.
+- A finalizer sees its handle's ledger entry: `allocations` is an ordinary
+  weak table, but Chez keeps a weak key whose object still has a pending
+  finalizer, so the fold and the counters agree between a collection and
+  the finalizer that follows it.
+
+### Race harness (#40)
+
+The tests that later legs of #168 (#255, #194) must keep green. They run
+against today's code, so every result below is the baseline.
+
+**Race points.** `race-point` (`raw/race-points.rkt`) names a place between
+the steps of a critical section. In production it is one `unbox` of the
+`race-hook` box and a branch: about 1.5 ns on a loaded host, below the fault
+latch's cost measured the same way. A test puts a procedure in the box; it
+gets the point's name and a subject (a handle, a device, a thread).
+
+| point | where | subject |
+|---|---|---|
+| `op-returned` | the op and its finalizer registration are done, nothing accounted | handle |
+| `ledger-entry-added` | inside the ledger section, between the table and the counters | handle |
+| `account-created` | a device's first account, inside the ledger section | device |
+| `gate-read` | the backstop has read its gate, before it acts | device |
+| `checks-resetting` | a backstop collection has measured, before it resets the checks | device |
+| `unaccount-entry-read` | inside the ledger section, entry read but not removed | handle |
+| `free-unaccounted` | an explicit free has unaccounted, before the native release | handle |
+| `finalizer-releasing` | a finalizer's release, before it unaccounts | handle |
+| `collector-claiming` | inside the claim's atomic section, decided but not taken | whether free |
+| `collector-claimed`, `collector-releasing` | the claim is held, or about to be dropped | thread |
+| `failure-reading` | a failed call, before its error is read | who |
+
+**Tests** (`torch/tests/race-*.rkt`, helpers in `tests/private/race-harness.rkt`):
+
+- Deterministic interleavings: a gate parks thread A at a point and thread
+  B runs. A point inside an atomic section cannot park, and the gate says
+  so (`'atomic`), which is the guard holding. Each case runs for ordinary
+  and `#:pool 'own` threads.
+- The oracle (`ledger-violations`): I1 counters equal the fold, I2 at most
+  one collector holds the claim (counted from the claim's points), I3 no
+  handle released twice (counted from the release points), the ledger back
+  to its baseline after the drop, no finalizer failures, the fault latch
+  clear.
+- Seeded fuzzing (`race-fuzz-test.rkt`): every point outside atomic mode
+  yields or sleeps by a per-thread generator seeded from the run's seed and
+  the thread's label. A failure prints the seed;
+  `RKTORCH_RACE_SEED=n` replays that seed's decisions (the OS still
+  schedules parallel threads), `RKTORCH_RACE_SEEDS=n` runs seeds 1 to n.
+- Stress (`race-stress-test.rkt`): 2, 4, 8 and 16 parallel threads churn
+  tensors, half freed explicitly, under a 256 KiB `native-memory-limit`,
+  beside a trainer calling `backward!` and an adversary looping
+  collections. `RKTORCH_STRESS_SECONDS` sets each phase (0.5 s by
+  default); a long soak is `RKTORCH_STRESS_SECONDS=300`. To force
+  preemption, run it on fewer cores than threads:
+  `taskset -c 0,1 raco test torch/tests/race-stress-test.rkt`. On a
+  loaded host set `OMP_NUM_THREADS=1`: libtorch's OpenMP teams spin
+  against the load and slow each op tenfold.
+- `cpp/tests/torchrkt/threads_test.cpp`: `std::thread`s through the C API.
+  Under ThreadSanitizer the shim is instrumented and libtorch is not.
+  The threads tests are clean; the rest of the suite reports races only
+  inside libtorch's OpenMP regions, whose libgomp barriers TSan cannot
+  see, and is clean with `OMP_NUM_THREADS=1`:
+
+  ```bash
+  nix develop -c cmake -S cpp -B /tmp/tsan -G Ninja -DBUILD_TESTING=ON \
+    -DCMAKE_CXX_FLAGS=-fsanitize=thread -DCMAKE_C_FLAGS=-fsanitize=thread \
+    -DCMAKE_EXE_LINKER_FLAGS=-fsanitize=thread \
+    -DCMAKE_SHARED_LINKER_FLAGS=-fsanitize=thread
+  nix develop -c cmake --build /tmp/tsan --target torchrkt_tests
+  OMP_NUM_THREADS=1 TSAN_OPTIONS=allocator_may_return_null=1 \
+    nix develop -c /tmp/tsan/torchrkt_tests
+  ```
+
+**Known failures.** `check-known-failure` passes while a property still
+fails and fails once it holds, so the leg that fixes it must turn it into
+an ordinary check:
+
+- #194: grad mode and autocast follow the OS thread an op runs on. Every
+  tensor op runs on the main OS thread, inside `ffi/unsafe/alloc`'s atomic
+  section, while a parallel thread's plain calls (`with-no-grad`,
+  `with-autocast`) run on its own. So an ordinary thread's modes reach
+  every thread, the trainer's modes reach a parallel worker's ops, and a
+  parallel worker's own modes miss its ops.
+- #194: `tr_last_error` is per OS thread, and `last-failure` reads it in
+  an atomic section, on the main OS thread. A failure parked before that
+  read gets another thread's message, and a failing plain call on a
+  parallel thread reads the main thread's last error.
+- #266: `tensor-free!` checks the handle's tag, then frees; two threads
+  freeing one tensor can both pass the check, so both release it.
+- #168 stage 2: a backstop collection resets `since-check` to zero, losing
+  bytes accounted while it collected; the next check comes up to that
+  many bytes late.
+
+**Futures and places.** A tensor op inside a future blocks it, and the op
+runs on the runtime thread when the future is touched. A tensor sent
+through a place channel arrives as a bare `cpointer` to the same handle,
+with no finalizer and no ledger entry, while the sender's finalizer still
+frees it; the manual says not to.
 
 ## Allocation failure
 

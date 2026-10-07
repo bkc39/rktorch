@@ -9,7 +9,8 @@
          (only-in "pressure-settings.rkt"
                   margin-over native-collect-at-troughs native-collect-budget
                   native-collect-margin native-memory-fraction
-                  native-memory-limit release-spacing))
+                  native-memory-limit release-spacing)
+         (only-in "race-points.rkt" race-point))
 
 (provide call-with-ledger
          note-accounted!
@@ -18,6 +19,7 @@
          shadow-generation
          note-unaccounted!
          live-bytes-by-device
+         since-check-of
          unaccounted-bytes-by-device
          shadow-refresh
          refresh-shadows!
@@ -69,6 +71,7 @@
 (define (account-of dev)
   (hash-ref! accounts dev
              (lambda ()
+               (race-point account-created dev)
                (account 0 0 0 0 #f 'unknown 0 (make-phantom-bytes 0) 0 0.0 #f))))
 
 (define (note-accounted! dev nbytes)
@@ -99,6 +102,9 @@
    (lambda ()
      (for/list ([(dev a) (in-hash accounts)])
        (cons dev (account-live a))))))
+
+(define (since-check-of dev)
+  (call-with-ledger (lambda () (account-since-check (account-of dev)))))
 
 (define (unaccounted-bytes-by-device)
   (call-with-ledger
@@ -281,6 +287,7 @@
   (define base (and mark (quotient mark interval-divisor)))
   (define-values (gate-open? sample-due?)
     (if mark (gate-state dev mark base) (values #f #f)))
+  (race-point gate-read dev)
   (when (and gate-open? sample-due?)
     (sample-allocator! dev))
   (cond
@@ -334,6 +341,7 @@
   (define released (and drained? (release-cache! dev)))
   (sample-allocator! dev)
   (define after (pressure-reading dev))
+  (race-point checks-resetting dev)
   (call-with-ledger
    (lambda ()
      (define a (account-of dev))
