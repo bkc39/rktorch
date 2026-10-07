@@ -8,7 +8,8 @@
                   add addcdiv! addcmul! copy! full maybe-grad mul mul! sqrt
                   sub! tensor-device tensor-dtype tensor? to with-no-grad
                   zero-grad! zeros-like)
-         (only-in "../private/contract.rkt" define/contract-out))
+         (only-in "../private/contract.rkt" define/contract-out)
+         (only-in "../private/step-log.rkt" log-optimizer-step!))
 
 (provide gen:optimizer
          optimizer?
@@ -65,7 +66,9 @@
   [(define (optimizer-parameters opt) (sgd-params opt))
    (define (optimizer-lr opt) (sgd-lr opt))
    (define (optimizer-set-lr! opt lr) (set-sgd-lr! opt lr))
-   (define (optimizer-step! opt) (sgd-do-step! opt))])
+   (define (optimizer-step! opt)
+     (sgd-do-step! opt)
+     (log-optimizer-step! opt))])
 
 (define/contract-out (sgd params ;; noqa
                           #:lr lr
@@ -121,7 +124,9 @@
   [(define (optimizer-parameters opt) (adam-params opt))
    (define (optimizer-lr opt) (adam-lr opt))
    (define (optimizer-set-lr! opt lr) (set-adam-lr! opt lr))
-   (define (optimizer-step! opt) (adam-do-step! opt))])
+   (define (optimizer-step! opt)
+     (adam-do-step! opt)
+     (log-optimizer-step! opt))])
 
 (define/contract-out (adam params ;; noqa
                            #:lr [lr 1e-3]
@@ -169,7 +174,9 @@
   [(define (optimizer-parameters opt) (rmsprop-params opt))
    (define (optimizer-lr opt) (rmsprop-lr opt))
    (define (optimizer-set-lr! opt lr) (set-rmsprop-lr! opt lr))
-   (define (optimizer-step! opt) (rmsprop-do-step! opt))])
+   (define (optimizer-step! opt)
+     (rmsprop-do-step! opt)
+     (log-optimizer-step! opt))])
 
 (define/contract-out (rmsprop params ;; noqa
                               #:lr [lr 1e-2]

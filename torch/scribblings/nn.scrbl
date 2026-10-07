@@ -653,6 +653,13 @@ of every schedule.
 @defproc[(step! [opt optimizer?]) void?]{
 Applies one update to every parameter that has a gradient, under
 @racket[with-no-grad]; on a schedule, advances it and writes its rate.
+
+Each optimizer's step logs a @racket['debug] event on the topic
+@racket['rktorch-step] when a receiver listens for one. Its data is
+@racket[(vector _id _ms _gc-ms)]: the optimizer's @racket[eq-hash-code],
+@racket[(current-inexact-monotonic-milliseconds)] and
+@racket[(current-gc-milliseconds)] as the step ends. A schedule's step logs
+nothing. The benchmark harness times training runs from these events.
 }
 
 @defproc[(zero-grads! [opt optimizer?]) void?]{
