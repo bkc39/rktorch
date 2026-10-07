@@ -1,0 +1,21 @@
+name: review-context-tests
+
+on:
+  pull_request:
+    paths:
+      - .github/scripts/**
+      - .github/claude-review-prompt.md
+      - .github/workflows/claude-code-review.yml
+      - .github/workflows/review-context-tests.yml
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - run: python3 .github/scripts/test_review_context.py

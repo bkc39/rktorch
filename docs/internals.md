@@ -62,6 +62,26 @@ outcome bypasses both paths: a C++ throw during storage release
 unwinds through libtorch's own noexcept frames to `std::terminate`
 before any handler can run — `finalizer_death_test.cpp` pins this.
 
+A native fault is the exception to "swallowed and counted". Racket CS reports a
+segfault as an exception whose message begins `invalid memory reference`. One
+arriving at that guard means native memory may already be corrupt: every later
+free can fault too, and in #76 and #82 that became a cascade that ignored
+SIGTERM.
+
+So the first fault latches the library. `note-native-fault!` in `raw/fault.rkt`
+writes one line with write(2) and sets the latch. `define-torch` wraps every
+binding in `latched`, so from then on each native call raises without entering
+native code. That is one `unbox` per call, and it sits beneath each binding's
+own `#:wrap`.
+
+The same check sits in the two other catches broad enough to swallow a fault:
+the tensor printer and `account!`. The RNN weight flatten, which reads any
+other failure as cuDNN refusing the layout, lets a fault through instead.
+
+A fault in a caller's own native call still raises to that caller and latches
+nothing. `RKTORCH_ON_NATIVE_FAULT=exit` replaces the latch with `_exit(70)`,
+which bypasses ports and exit handlers.
+
 ## Phantom-bytes accounting
 
 `make-phantom-bytes` is Racket-CS's way to charge native allocations
@@ -165,14 +185,15 @@ the last defence when a trough collection is not yet due:
 - Each device has one `account` record: live bytes, bytes accounted
   since the last check and since the last allocator sample, that sample,
   the backstop's current interval, the cached capacity mark, the
-  trough floor, the shadow below with its byte count, and when the
-  backstop may next empty the device's cache. `account!` updates it
+  trough floor, the shadow below with its byte count, when the
+  backstop may next empty the device's cache, and the trial the last
+  release is on (below). `account!` updates it
   through `note-accounted!`, so a
   check is one table lookup and field reads. The counters are a `stats`
   record, the two next-collection times and the thread inside a
   collection a `schedule` record, and the three device queries handed
   down from `raw/device.rkt` (capacity, allocated, release) a `queries`
-  record. Every field is written inside `call-with-ledger`.
+  record in `raw/device-queries.rkt`. Every field is written inside `call-with-ledger`.
 - `accounted`, which runs outside the allocator's atomic wrap, checks
   after each accounting: accounted-since past the current interval and
   live bytes above the device's high-water mark means
@@ -201,6 +222,32 @@ the last defence when a trough collection is not yet due:
   then come from the driver again. A drain that ran out of time does
   not release, since finalizers still to run would refill the cache
   behind the release and spend its spacing.
+- A release that brings the reading down is put on trial rather than
+  credited. Emptying the cache lowers `driver-allocated` however little
+  the collection freed, and when the mark sits below what a step needs at
+  once the next step takes those bytes straight back: 08-diffusion at
+  `native-memory-fraction` 1/2 on a 16 GB M2 Pro (#236) fired 188 times in
+  782 steps for no gain in time or swap, because each release reset the
+  interval. The trial ends at the first look that finds the reading
+  under the mark after a further mark's worth of allocation, counted from
+  the bytes accounted between samples, and after the release's spacing
+  has passed; that look credits the release and returns the interval to
+  an eighth of the mark, which until then stays where it was. A backstop
+  collection before the credit means the release's bytes came back, and
+  the interval doubles as it would for a collection that reclaimed
+  little, whatever this one reclaimed and whether or not the spacing held
+  its own release back. Requiring the spacing as well matters when
+  allocation is fast: 07-asr's longest buckets account a mark in under a
+  second on an M2 Pro, so a trial ended by bytes alone was credited before
+  `driver-allocated` re-crossed the mark, and every backstop for the rest
+  of the five seconds, its release `'spaced`, collected at the base
+  interval: 28 to 40 collections in a few seconds at the end of an epoch
+  (#245). The backstop's samples are one place to look; every trough is
+  the other (`refresh-shadows!` reads the allocator there), because a
+  drained trough collection resets the bytes-since-check count, and an
+  interval backed off past what a step allocates would otherwise never
+  open the gate to end the trial. A collection that reclaims without a
+  release, as on CUDA, is credited at once as before.
 - Every allocator sample may lower the shadow, never raise it. On MPS
   the trough charged the cache, and new tensors that reuse those blocks,
   or a release that empties them, bring `driver-allocated` down relative
@@ -231,11 +278,15 @@ the last defence when a trough collection is not yet due:
   backstop off. The fraction is applied at each check, not folded into
   the cache, so a program may change it mid-run; `native-memory-limit` overrides it for every
   device and is how the CPU tests exercise the path. No capacity and no
-  limit means the check is off.
+  limit means the check is off. Both parameters, with the trough's margin
+  and budget, live in `raw/pressure-settings.rkt`, which reads
+  `RKTORCH_MEMORY_FRACTION` and `RKTORCH_MEMORY_LIMIT` (MiB) once, at
+  instantiation, as their initial values, and raises a user error naming
+  the variable for a value that does not parse or is out of range.
 - Hysteresis: the interval starts at an eighth of the mark; a
   collection that reclaims under 5% of the mark doubles it (capped at
-  twice the mark), one that reclaims more resets it, and one whose
-  drain ran out of time leaves it alone. A stalled drain also leaves the
+  twice the mark), one that reclaims more resets it (a release only
+  after its trial), and one whose drain ran out of time leaves it alone. A stalled drain also leaves the
   bytes-since-check counters and the trough floors where they were: it
   measured nothing, so it earns no credit, and the next allocation looks
   again. Looking is cheap; the mark and the trough margin still guard the
@@ -347,14 +398,15 @@ the allocators that only throw plain `c10::Error`: the CPU allocator's
 backend out of memory" (high-water mark) and "Invalid buffer size:"
 (Metal's per-buffer cap) — so an oversized request gets the typed OOM
 on every backend. Ops that draw from the global
-RNG stream use `tensor-allocator/rng` — the same wrap minus the retry,
-because a retried draw would advance the generator stream and break
-seeded reproducibility. An op with several tensor outputs (`topk`,
+RNG stream, or that also update an argument (batch_norm's running
+statistics), use `tensor-allocator/no-retry` — the same wrap minus the
+retry, because a retried draw would advance the generator stream and
+break seeded reproducibility, and a retried update would apply twice. An op with several tensor outputs (`topk`,
 `sort`) reports an integer status and writes its handles through out
 pointers; `tensor-allocator/outputs` runs the call and registers every
 handle's finalizer inside one atomic section, accounts each in the
 ledger, and retries the whole call on OOM exactly as the single-output
-wrap does (`tensor-allocator/outputs/rng` omits the retry). The shim
+wrap does (`tensor-allocator/outputs/no-retry` omits the retry). The shim
 writes no out pointer until every handle exists, so a failed call leaves
 nothing to free.
 

@@ -6,7 +6,8 @@
          (only-in ffi/unsafe define-cpointer-type ffi-lib)
          (only-in ffi/unsafe/define define-ffi-definer)
          ;; whole-module require on purpose (only-in breaks its expansion)
-         racket/runtime-path)
+         racket/runtime-path
+         (only-in "fault.rkt" latched))
 
 (provide define-torch
          _Tensor
@@ -51,7 +52,20 @@
                                                   (exn-message e))))])
     (ffi-lib (build-path native-libs-dir "libtorchrkt"))))
 
-(define-ffi-definer define-torch native-library)
+(define-ffi-definer define-torch/ffi native-library) ;; noqa
+
+(define ((latched-under wrap) f) ;; noqa
+  (wrap (latched f)))
+
+(define-syntax (define-torch stx)
+  (syntax-parse stx
+    [(_ name:id type:expr
+        (~alt (~optional (~seq #:wrap wrap:expr))
+              (~seq option:keyword value:expr))
+        ...)
+     #'(define-torch/ffi name type
+         #:wrap (latched-under (~? wrap values))
+         (~@ option value) ...)]))
 
 (define-cpointer-type _Tensor)
 

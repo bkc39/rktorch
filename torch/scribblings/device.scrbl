@@ -364,6 +364,19 @@ measured in bytes allocated, and when a collection reclaims under 5% of the
 mark that spacing doubles, so a working set that legitimately sits above
 the mark is not collected on every step.
 
+The mark belongs above the most a step needs at once. Below it, every step
+crosses the mark on its way to its peak, and the backstop collects without
+freeing anything the step can do without. On MPS the reading alone cannot
+show this, because emptying the cache brings the driver's figure down
+however little the collection freed, and the next step takes those bytes
+straight back. So a release counts as reclaiming memory only once the
+figure has stayed under the mark for a further mark's worth of allocation
+and for the five seconds before the next release, and one whose bytes come
+back sooner doubles the spacing as a fruitless collection does. That spaces such collections out, but they still buy
+nothing: a mark that @racket['pressure-collections] in
+@racket[finalizer-diagnostics] shows firing step after step is better
+raised.
+
 The ledger also charges Racket's collector for what it cannot see. At every
 trough, before collecting, it reads each device's allocator and charges the
 bytes allocated there beyond the ledger's own total as one more phantom
@@ -399,6 +412,18 @@ memory for throughput. The defaults are deliberately cautious, and were
 measured on one model on one card, so a machine with more memory than
 compute has room to relax them.
 
+The mark can also be set without code, for an example runner, a script or
+a REPL session: @envvar{RKTORCH_MEMORY_FRACTION} and
+@envvar{RKTORCH_MEMORY_LIMIT} give @racket[native-memory-fraction] and
+@racket[native-memory-limit] their initial values, read once when the
+library is loaded, and a @racket[parameterize] still overrides them.
+
+@commandline{RKTORCH_MEMORY_FRACTION=2/3 EPOCHS=1 racket examples/test/08-diffusion.rkt}
+
+A value that is not a number in range stops the program with an error that
+names the variable and what it was given, rather than leaving the default
+in place.
+
 The collections at the two troughs happen inside @racket[backward!] and a
 layer call, where nothing at the call site suggests a pause. Code that
 times those calls, or cannot afford the pause, turns both off with
@@ -427,14 +452,17 @@ never appears.
 The high-water mark in bytes for every device, overriding the capacity-
 derived mark. @racket[#f], the default, defers to the device's capacity;
 on a device whose capacity is unknown, such as the CPU, the default leaves
-pressure collection off.
+pressure collection off. @envvar{RKTORCH_MEMORY_LIMIT} sets the initial
+value in MiB, rounded down to whole bytes.
 }
 
 @defparam[native-memory-fraction fraction (and/c real? positive? (<=/c 1))]{
 The share of a device's capacity the backstop treats as its high-water
-mark, @racket[4/5] by default. Read at every check, so it may be
-parameterized at any point in a run. Ignored where
-@racket[native-memory-limit] is set or the capacity is unknown.
+mark, @racket[4/5] by default. @envvar{RKTORCH_MEMORY_FRACTION} sets the
+initial value, as a fraction such as @tt{1/2} or a decimal such as
+@tt{0.5}. Read at every check, so it may be parameterized at any point in a
+run. Ignored where @racket[native-memory-limit] is set or the capacity is
+unknown.
 }
 
 @defparam[native-collect-margin margin (or/c #f exact-positive-integer?)]{
@@ -531,6 +559,34 @@ next trough. Every trough also lowers it to the live size first if that is
 smaller, whether or not it goes on to collect, so a floor left high by an
 earlier peak cannot hide later growth.
 }
+
+@section{Native faults}
+
+A native fault is a segmentation fault inside libtorch or the shim: code
+reading or writing memory it does not own. Racket turns one into an
+exception whose message begins @tt{invalid memory reference}, so a program
+that calls a native function sees the fault as an exception it can catch,
+and the library carries on.
+
+Where no caller is waiting, a fault is taken as evidence that native memory
+can no longer be trusted. That covers a finalizer freeing a dead tensor, the
+printer rendering one, and the library measuring a new one for the collector.
+One line goes to standard error, and the native library is disabled for the
+rest of the process. Every later native call raises an exception saying so,
+without entering native code; the printer falls back to the tensor's shape,
+and @racket[finalizer-diagnostics] keeps counting. The process stays
+responsive, so work that does not need tensors can be saved before
+restarting.
+
+Disabling rather than continuing is what stops a single fault from becoming
+a runaway. Before, every later free faulted too, each report re-entered
+native code, and the nested messages grew until the process had to be
+killed.
+
+Set the environment variable @tt{RKTORCH_ON_NATIVE_FAULT} to @tt{exit}
+before the process starts to stop at the first such fault instead: one line
+on standard error, then exit status 70. Unattended jobs may prefer a clean
+stop to a disabled library.
 
 @section{Unsafe}
 
