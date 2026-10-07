@@ -1,7 +1,8 @@
 #lang racket/base
 
 (require (only-in ffi/unsafe register-finalizer)
-         (only-in ffi/unsafe/atomic call-as-atomic))
+         (only-in ffi/unsafe/atomic call-as-atomic)
+         (only-in "race-points.rkt" race-point))
 
 (provide call-as-the-collector
          collect-and-wait!
@@ -31,13 +32,18 @@
   (define claimed?
     (call-as-atomic
      (lambda ()
-       (and (or (not holder) (thread-dead? holder))
+       (define free? (or (not holder) (thread-dead? holder)))
+       (race-point collector-claiming free?)
+       (and free?
             (set! holder (current-thread))
             #t))))
   (when claimed?
+    (race-point collector-claimed (current-thread))
     (dynamic-wind void
                   thunk
-                  (lambda () (set! holder #f)))))
+                  (lambda ()
+                    (race-point collector-releasing (current-thread))
+                    (set! holder #f)))))
 
 ;; --- a collection that has really finished ---
 

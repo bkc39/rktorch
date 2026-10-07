@@ -476,7 +476,10 @@ module's full export set (`racket/runtime-path`, `syntax/parse/pre`).
   and the capacity backstop, #145), `pressure-settings` (its parameters;
   `RKTORCH_MEMORY_FRACTION` and `RKTORCH_MEMORY_LIMIT` in MiB set the
   mark's initial values, #236), `device-queries` (the capacity, allocator
-  and release queries `device` hands down to it), `memory` (the lifetime substrate:
+  and release queries `device` hands down to it), `race-points` (no FFI:
+  the race points between the steps of each critical section, one `unbox`
+  when no test hook is installed; a new step in a critical section gets a
+  point and a case in `torch/tests/race-*.rkt`, #40), `memory` (the lifetime substrate:
   frees, pressure ledger, `tensor-allocator`, op-definer macros),
   `global`, `tensor`, `random`, `creation`,
   `shape-ops`, `elementwise`, `reduce`, `linalg`, `autograd`.
