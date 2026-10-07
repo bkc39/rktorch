@@ -1,6 +1,6 @@
 #lang racket/base
 
-;; Plain bindings to the staged shim, libtorch and libgomp for the probes:
+;; Plain bindings to the staged shim, libtorch and OpenMP for the probes:
 ;; no allocator wrap, no ledger, no fault latch. The library itself must
 ;; never bind native code this way (AGENTS.md); these exist so a probe can
 ;; run an op on the calling thread's own OS thread and free it by hand.
@@ -8,10 +8,7 @@
 (require (only-in ffi/unsafe
                   _fun _int _int64 _pointer _ptr _string _uint _void
                   ffi-lib get-ffi-obj)
-         (only-in ffi/vector _s64vector s64vector)
-         (only-in racket/file file->lines)
-         (only-in racket/list last)
-         (only-in racket/string string-split))
+         (only-in ffi/vector _s64vector s64vector))
 
 (provide shim-randn
          shim-add
@@ -30,14 +27,6 @@
 
 (define shim
   (ffi-lib (build-path (collection-path "torch") "native-libs" "libtorchrkt")))
-
-(define (loaded-library-path name)
-  (for/first ([line (in-list (file->lines "/proc/self/maps"))]
-              #:when (regexp-match? (regexp-quote name) line))
-    (last (string-split line))))
-
-(define libtorch-cpu (ffi-lib (loaded-library-path "libtorch_cpu.so")))
-(define libgomp (ffi-lib (loaded-library-path "libgomp")))
 
 (define shim-version (get-ffi-obj "tr_version" shim (_fun -> _string)))
 
@@ -64,20 +53,26 @@
 
 (define (shim-nbytes t) (nbytes/raw t))
 
-(define at-get-num-threads
-  (get-ffi-obj "_ZN2at15get_num_threadsEv" libtorch-cpu (_fun -> _int)))
+;; Looked up through the shim's handle, which reaches the libraries it was
+;; linked against: libtorch_cpu everywhere, and on Linux the MKL inside it and
+;; libgomp. A symbol a platform lacks binds to a procedure that raises when
+;; called, so the probes that never call it still load.
+(define (shim-symbol name type)
+  (get-ffi-obj name shim type
+               (lambda ()
+                 (lambda _
+                   (error 'probes "~a is not reachable from the shim on this platform"
+                          name)))))
 
-(define at-set-num-threads
-  (get-ffi-obj "_ZN2at15set_num_threadsEi" libtorch-cpu (_fun _int -> _void)))
+(define at-get-num-threads (shim-symbol "_ZN2at15get_num_threadsEv" (_fun -> _int)))
 
-(define mkl-get-max-threads
-  (get-ffi-obj "mkl_get_max_threads" libtorch-cpu (_fun -> _int)))
+(define at-set-num-threads (shim-symbol "_ZN2at15set_num_threadsEi" (_fun _int -> _void)))
 
-(define omp-get-max-threads
-  (get-ffi-obj "omp_get_max_threads" libgomp (_fun -> _int)))
+(define mkl-get-max-threads (shim-symbol "mkl_get_max_threads" (_fun -> _int)))
 
-(define omp-set-num-threads
-  (get-ffi-obj "omp_set_num_threads" libgomp (_fun _int -> _void)))
+(define omp-get-max-threads (shim-symbol "omp_get_max_threads" (_fun -> _int)))
+
+(define omp-set-num-threads (shim-symbol "omp_set_num_threads" (_fun _int -> _void)))
 
 (define usleep (get-ffi-obj "usleep" #f (_fun _uint -> _int)))
 

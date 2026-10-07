@@ -36,22 +36,24 @@
 ;; (collector CPU time) per wall millisecond; a collection stops every
 ;; thread in the place.
 (define (ops-per-second p o n workers)
-  (define gc-before (current-gc-milliseconds))
   (define deadline (+ (current-inexact-monotonic-milliseconds)
                       (* 1000 seconds-per-cell)))
-  (define-values (ms iterations)
+  (define-values (ms iterations gc-ms)
     (cond
       [(zero? workers)
+       (define gc-start (current-gc-milliseconds))
        (define start (current-inexact-monotonic-milliseconds))
        (define done (loop-until deadline p o n))
-       (values (- (current-inexact-monotonic-milliseconds) start) (list done))]
+       (values (- (current-inexact-monotonic-milliseconds) start)
+               (list done)
+               (- (current-gc-milliseconds) gc-start))]
       [else
-       (run-parallel workers
-                     (lambda (_i)
-                       (at-set-num-threads 1)
-                       (loop-until deadline p o n)))]))
+       (run-parallel/gc workers
+                        (lambda (_i)
+                          (at-set-num-threads 1)
+                          (loop-until deadline p o n)))]))
   (cons (/ (* tensors-per-iteration (apply + iterations)) (/ ms 1000.0))
-        (/ (- (current-gc-milliseconds) gc-before) ms)))
+        (/ gc-ms ms)))
 
 (define sizes '(8 64 256))
 (define worker-counts '(0 1 2 4 8))

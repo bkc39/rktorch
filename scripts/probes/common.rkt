@@ -18,6 +18,7 @@
          print-table-header
          print-table-row
          run-parallel
+         run-parallel/gc
          median
          fmt-ms
          fmt-rate)
@@ -71,24 +72,37 @@
   (for-each print-table-row rows)
   (newline))
 
-;; Every worker waits on one gate, so the clock starts with all of them ready.
-(define (run-parallel n body #:pool [pool 'own])
+;; Every worker waits on one gate, so the clock starts with all of them
+;; ready. Answers the wall ms from the gate, each worker's result, and the
+;; collector's ms over the same interval; a worker's exception is re-raised
+;; once all have joined.
+(define (run-parallel/gc n body #:pool [pool 'own])
   (define ready (make-semaphore 0))
   (define gate (make-semaphore 0))
   (define results (make-vector n #f))
+  (define failures (make-vector n #f))
   (define workers
     (for/list ([i (in-range n)])
       (thread (lambda ()
                 (semaphore-post ready)
                 (semaphore-wait gate)
-                (vector-set! results i (body i)))
+                (with-handlers ([(lambda (_) #t) (lambda (e) (vector-set! failures i e))])
+                  (vector-set! results i (body i))))
               #:pool pool)))
   (for ([_ (in-range n)]) (semaphore-wait ready))
+  (define gc-start (current-gc-milliseconds))
   (define start (current-inexact-monotonic-milliseconds))
   (for ([_ (in-range n)]) (semaphore-post gate))
   (for-each thread-wait workers)
-  (values (- (current-inexact-monotonic-milliseconds) start)
-          (vector->list results)))
+  (define ms (- (current-inexact-monotonic-milliseconds) start))
+  (define gc-ms (- (current-gc-milliseconds) gc-start))
+  (define failure (for/first ([e (in-vector failures)] #:when e) e))
+  (when failure (raise failure))
+  (values ms (vector->list results) gc-ms))
+
+(define (run-parallel n body #:pool [pool 'own])
+  (define-values (ms results _gc-ms) (run-parallel/gc n body #:pool pool))
+  (values ms results))
 
 (define (median xs)
   (define sorted (sort xs <))
