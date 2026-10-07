@@ -41,8 +41,8 @@ introduction, from a first tensor through to a training loop; the
 Every example in this manual is evaluated when it is built, so the printed
 results are the ones the library produces.
 
-@bold{License.} Apache 2.0. Some data fixtures carry other licenses; see
-the @filepath{NOTICE} file beside each.
+@bold{License.} Apache 2.0. Bundled data fixtures keep their sources'
+terms; see the @filepath{NOTICE} files in the fixture directories.
 
 @bold{Acknowledgements.} Many thanks to
 @hyperlink["https://pytorch.org/"]{PyTorch} and its developers, and to
