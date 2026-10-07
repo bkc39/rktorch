@@ -46,7 +46,7 @@
                                              (lambda (_v)
                                                (vector-cas-add1! runs id)))))))))
   (define (ran) (for/sum ([n (in-vector runs)]) n))
-  (define-values (rounds drain-ms) (collect-until (lambda () (= (ran) total))))
+  (define-values (rounds drain-ms) (collect-until (lambda () (>= (ran) total))))
   (define never (for/sum ([n (in-vector runs)]) (if (zero? n) 1 0)))
   (define twice (for/sum ([n (in-vector runs)]) (if (> n 1) 1 0)))
   (list total (fmt-ms ms) (fmt-rate (/ total (/ ms 1000.0)))

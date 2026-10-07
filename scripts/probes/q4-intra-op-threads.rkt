@@ -97,12 +97,20 @@
            (parallel-add!)
            (list (cons "the worker that set 1" worker)
                  (cons "trainer, first queried after" (counts)))))
-   (cons "trainer ran only a matmul, then a worker sets 1"
+   (cons "trainer ran randn and a matmul, no at::parallel_for op, then a worker sets 1"
          '((parallel-matmul!)
            (define worker (on-worker (lambda () (at-set-num-threads 1) (counts))))
            (parallel-add!)
            (list (cons "the worker that set 1" worker)
                  (cons "trainer after its first parallel add" (counts)))))
+   (cons "trainer calls at::get_num_threads first, then a worker sets 1"
+         '((define pinned (at-get-num-threads))
+           (define worker (on-worker (lambda () (at-set-num-threads 1) (counts))))
+           (parallel-add!)
+           (list (cons "trainer's count when it asked" pinned)
+                 (cons "the worker that set 1" worker)
+                 (cons "trainer after its first parallel add" (counts))
+                 (cons "a later fresh worker" (on-worker counts)))))
    (cons "OpenMP teams: 4 workers at the default count"
          '((team-scenario void)))
    (cons "OpenMP teams: 4 workers that call at::set_num_threads(1) first"
