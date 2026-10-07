@@ -55,7 +55,7 @@
   (check-equal? (for/sum ([p (in-list (parameters net))]) (numel p))
                 (+ (* 65 v-size) 25984))
   ;; the embedding tables are sized by the fixture vocab and block-size 16.
-  (check-equal? (tensor-shape (car (parameters net))) (list v-size 32))
+  (check-equal? (shape (car (parameters net))) (list v-size 32))
   (check-equal? (tensor-shape (cadr (parameters net))) '(16 32))
   ;; the standard stack starts every block as a copy of the first, as
   ;; nn.TransformerEncoder does

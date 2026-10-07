@@ -3,8 +3,8 @@
 (require (only-in racket/contract/base
                   ->* ->i flat-named-contract or/c unsupplied-arg?)
          (only-in "../foreign.rkt"
-                  arange cat cos default-device device/c exp masked-fill mul
-                  ones reshape sin stack tensor-device tensor-shape tensor?
+                  arange cat cos default-device device device/c exp
+                  masked-fill mul ones reshape shape sin stack tensor?
                   to-dtype triu unsqueeze zeros)
          (only-in "../private/contract.rkt" define/contract-out))
 
@@ -16,11 +16,11 @@
 (define position-vector/c
   (flat-named-contract
    'position-vector
-   (lambda (t) (and (tensor? t) (= 1 (length (tensor-shape t)))))))
+   (lambda (t) (and (tensor? t) (= 1 (length (shape t)))))))
 
 (define/contract-out (sinusoidal-positions positions width ;; noqa
                                            #:layout [layout 'interleaved]
-                                           #:device [device (default-device)])
+                                           #:device [dev (default-device)])
   (->i ([positions (or/c exact-nonnegative-integer? position-vector/c)]
         [width even-width/c])
        (#:layout [layout (or/c 'interleaved 'halves)]
@@ -32,16 +32,16 @@
   (define at
     (if (tensor? positions)
         (to-dtype positions 'float32)
-        (arange positions #:device device)))
+        (arange positions #:device dev)))
   (define half (quotient width 2))
   (define frequencies
-    (exp (mul (arange half #:device (tensor-device at))
+    (exp (mul (arange half #:device (device at))
               (- (/ (log 10000.0) half)))))
   (define angles (mul (unsqueeze at 1) (unsqueeze frequencies 0)))
   (define waves (list (sin angles) (cos angles)))
   (if (eq? layout 'halves)
       (cat waves 1)
-      (reshape (stack waves 2) (car (tensor-shape at)) width)))
+      (reshape (stack waves 2) (car (shape at)) width)))
 
 (define/contract-out (causal-mask size ;; noqa
                                   #:device [device (default-device)]

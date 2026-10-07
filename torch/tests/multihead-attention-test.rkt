@@ -14,7 +14,7 @@
     (mean-dim weights '(1) #f #f))
 
   (define (close? a b [eps 1e-5])
-    (and (equal? (tensor-shape a) (tensor-shape b))
+    (and (equal? (shape a) (shape b))
          (for/and ([x (in-list (tensor->list a))]
                    [y (in-list (tensor->list b))])
            (< (abs (- x y)) eps))))
@@ -34,7 +34,7 @@
     (define projected-q ((child-ref mha "query") q))
     (define projected-k ((child-ref mha "key") k))
     (define projected-v ((child-ref mha "value") v))
-    (define d (quotient (last (tensor-shape projected-q)) heads))
+    (define d (quotient (last (shape projected-q)) heads))
     (define (head t h) (narrow t -1 (* h d) d))
     ((child-ref mha "out")
      (cat (for/list ([h (in-range heads)])
@@ -67,13 +67,13 @@
     (check-equal? (map car (named-parameters mha))
                   '("query.weight" "query.bias" "key.weight" "key.bias"
                     "value.weight" "value.bias" "out.weight" "out.bias"))
-    (check-equal? (map tensor-shape (parameters mha))
+    (check-equal? (map shape (parameters mha))
                   '((8 8) (8) (8 8) (8) (8 8) (8) (8 8) (8)))
     (check-equal? (map car (named-parameters (MultiheadAttention 8 #:heads 2
                                                                  #:bias? #f)))
                   '("query.weight" "key.weight" "value.weight" "out.weight"))
     (define cross (MultiheadAttention 8 #:heads 4 #:key-dim 5 #:value-dim 3))
-    (check-equal? (map tensor-shape (parameters cross))
+    (check-equal? (map shape (parameters cross))
                   '((8 8) (8) (8 5) (8) (8 3) (8) (8 8) (8))))
 
   (test-case "the draws follow nn.MultiheadAttention: out first, then xavier"
@@ -116,32 +116,32 @@
     (define sequence-first (seeded 8 #:heads 2))
     (define batch-first (seeded 8 #:heads 2 #:batch-first? #t))
     (define xt (transpose x 0 1))
-    (check-equal? (tensor-shape (sequence-first xt xt xt)) '(5 2 8))
+    (check-equal? (shape (sequence-first xt xt xt)) '(5 2 8))
     (check-true (close? (transpose (sequence-first xt xt xt) 0 1)
                         (batch-first x x x)))
     (define one (select x 0 0))
-    (check-equal? (tensor-shape (batch-first one one one)) '(5 8))
+    (check-equal? (shape (batch-first one one one)) '(5 8))
     (check-true (close? (batch-first one one one)
                         (select (batch-first x x x) 0 0)))
     (check-true (close? (sequence-first one one one)
                         (batch-first one one one)))
     (define-values (_out weights)
       (sequence-first one one one #:need-weights? #t))
-    (check-equal? (tensor-shape weights) '(5 5))
+    (check-equal? (shape weights) '(5 5))
     (define-values (_out2 per-head)
       (sequence-first one one one #:need-weights? #t
                       #:average-attn-weights? #f))
-    (check-equal? (tensor-shape per-head) '(2 5 5)))
+    (check-equal? (shape per-head) '(2 5 5)))
 
   (test-case "the weights are a distribution over the keys, per query"
     (define mha (seeded 8 #:heads 2 #:batch-first? #t))
     (define-values (out weights) (mha x x x #:need-weights? #t))
-    (check-equal? (tensor-shape weights) '(2 5 5))
+    (check-equal? (shape weights) '(2 5 5))
     (check-true (close? (sum-over-keys weights) (ones 2 5)))
     (check-true (close? out (mha x x x)) "the fused path agrees")
     (define-values (_out per-head)
       (mha x x x #:need-weights? #t #:average-attn-weights? #f))
-    (check-equal? (tensor-shape per-head) '(2 2 5 5))
+    (check-equal? (shape per-head) '(2 2 5 5))
     (check-true (close? (sum-over-keys per-head) (ones 2 2 5)))
     (check-true (close? (mean-over-heads per-head) weights)))
 
@@ -240,8 +240,8 @@
     (define memory-v (randn 2 7 3))
     (define-values (out weights)
       (mha x memory-k memory-v #:need-weights? #t))
-    (check-equal? (tensor-shape out) '(2 5 8))
-    (check-equal? (tensor-shape weights) '(2 5 7))
+    (check-equal? (shape out) '(2 5 8))
+    (check-equal? (shape weights) '(2 5 7))
     (check-true (close? out (heads-by-hand mha 2 x memory-k memory-v)))
     (define gaps (eq (tensor '((0 0 0 0 0 0 0) (0 0 0 0 1 1 1))) 1))
     (check-true (close? (mha x memory-k memory-v #:key-padding-mask gaps)
@@ -296,13 +296,13 @@
   (test-case "to moves the four projections, and the masks follow the input"
     (define mha (seeded 8 #:heads 2 #:batch-first? #t))
     (check-eq? (to mha 'float64) mha)
-    (check-equal? (map tensor-dtype (parameters mha)) (make-list 8 'float64))
+    (check-equal? (map dtype (parameters mha)) (make-list 8 'float64))
     (define wide (to x 'float64))
     (define-values (out weights)
       (mha wide wide wide #:key-padding-mask padded #:causal? #t
            #:attn-mask (randn 5 5) #:need-weights? #t))
-    (check-equal? (tensor-dtype out) 'float64)
-    (check-equal? (tensor-dtype weights) 'float64))
+    (check-equal? (dtype out) 'float64)
+    (check-equal? (dtype weights) 'float64))
 
   (test-case "the constructor's contract blames its caller"
     (define blames-this-test

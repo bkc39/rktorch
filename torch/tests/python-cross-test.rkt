@@ -369,7 +369,7 @@
          (set! head (Linear 32 vocab-size))
          #:forward (idx)
          (with-default-device (tensor-device idx)
-           (define pos (to-dtype (arange (cadr (tensor-shape idx))) 'int64))
+           (define pos (to-dtype (arange (cadr (shape idx))) 'int64))
            (~> (add (tok-emb idx) (pos-emb pos))
                (transformer #:causal? #t)
                head)))

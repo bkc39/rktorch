@@ -5,13 +5,13 @@
            "../main.rkt")
 
   (define (close? a b [eps 1e-5])
-    (and (equal? (tensor-shape a) (tensor-shape b))
+    (and (equal? (shape a) (shape b))
          (for/and ([x (in-list (tensor->list a))]
                    [y (in-list (tensor->list b))])
            (< (abs (- x y)) eps))))
 
   (define (attention-by-hand q k v #:scale [scale #f] #:bias [bias #f])
-    (define e (car (reverse (tensor-shape q))))
+    (define e (car (reverse (shape q))))
     (define scores (* (@ q (transpose k -2 -1)) (or scale (/ 1 (sqrt e)))))
     (@ (softmax (if bias (+ scores bias) scores) -1) v))
 
@@ -30,15 +30,13 @@
 
   (test-case "softmax(q k^T / sqrt E) v over [... L E] [... S E] [... S Ev]"
     (define out (scaled-dot-product-attention q k v))
-    (check-equal? (tensor-shape out) '(2 3 6))
+    (check-equal? (shape out) '(2 3 6))
     (check-true (close? out (attention-by-hand q k v)))
     (define heads (randn 2 4 3 8))
-    (check-equal? (tensor-shape
-                   (scaled-dot-product-attention heads heads heads))
+    (check-equal? (shape (scaled-dot-product-attention heads heads heads))
                   '(2 4 3 8))
-    (check-equal? (tensor-shape
-                   (scaled-dot-product-attention (randn 3 4) (randn 5 4)
-                                                 (randn 5 2)))
+    (check-equal? (shape (scaled-dot-product-attention (randn 3 4) (randn 5 4)
+                                                       (randn 5 2)))
                   '(3 2)))
 
   (test-case "#:scale replaces 1/sqrt E; zero averages the values"
@@ -151,7 +149,6 @@
                           'cpu)
                (zeros 2 3 6)))
       (define half (to (on-cuda (randn 2 4 8 16)) 'bfloat16))
-      (check-equal? (tensor-dtype
-                     (scaled-dot-product-attention half half half
-                                                   #:causal? #t))
+      (check-equal? (dtype (scaled-dot-product-attention half half half
+                                                         #:causal? #t))
                     'bfloat16))))

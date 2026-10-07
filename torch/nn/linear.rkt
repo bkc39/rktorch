@@ -29,10 +29,10 @@
 ;; Linear that draws nothing; #:drawn is outside the exported contract.
 (module+ private
   (require (only-in racket/match match-define)
-           (only-in "../foreign.rkt" tensor-shape))
+           (only-in "../foreign.rkt" shape))
   (provide tensors->Linear) ;; noqa
   (define (tensors->Linear weight bias)
-    (match-define (list out-features in-features) (tensor-shape weight))
+    (match-define (list out-features in-features) (shape weight))
     (Linear in-features out-features
             #:bias? (and bias #t)
             #:drawn (cons weight bias))))
