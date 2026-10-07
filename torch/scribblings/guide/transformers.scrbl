@@ -394,7 +394,41 @@ the last target token, and every earlier position's scores stay put.
 
 That is a transformer: attention, a feed-forward, residual connections and
 norms in a block; blocks in a stack; positions added to the input; and
-masks to say who may read whom. @secref["ex-gpt"] trains a
-character-level GPT, a decoder-only stack of pre-norm blocks, and
-@secref["ex-asr"] a speech recognizer whose decoder reads an encoded
-utterance through cross-attention.
+masks to say who may read whom.
+
+@section[#:tag "transformers-gpt"]{A language model from the pieces}
+
+A GPT has no encoder to read from and so no cross-attention. It is an
+encoder stack run under a causal mask, so that every position predicts
+the next token from the ones before it. @secref["ex-gpt"] builds a
+character-level one from this chapter's pieces and trains it on a
+novella. Its whole stack is one call:
+
+@racketblock[
+(TransformerEncoder n-embd
+                    #:heads n-head
+                    #:layers n-layer
+                    #:ffn-width (* 4 n-embd)
+                    #:activation 'gelu
+                    #:norm-first? #t
+                    #:dropout 0.0
+                    #:batch-first? #t
+                    #:norm #t)
+]
+
+That is @tt{nn.TransformerEncoder(nn.TransformerEncoderLayer(...),
+n_layer, norm=nn.LayerNorm(n_embd))} with the same settings: pre-norm
+blocks as GPT-2 has them, a feed-forward four times the model's width
+through @racket[gelu], and the final norm a pre-norm stack needs. Around
+it the example puts the rest of this chapter: learned positions, an
+@racket[Embedding] indexed by position and added to the token
+embeddings; @racket[#:causal? #t] on every application; and a
+@racket[Linear] head that turns each position's output into a score for
+every character, trained by @racket[cross-entropy] against the text
+shifted by one.
+
+The chapter's PyTorch twin builds the same model from
+@tt{nn.TransformerEncoder} and matches it under one seed, so the example
+doubles as a check that these layers train as PyTorch's do.
+@secref["ex-asr"] uses the other arrangement, an encoder and a decoder,
+the decoder reading an encoded utterance through cross-attention.

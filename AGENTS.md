@@ -266,9 +266,12 @@ mode) and attention (`scaled-dot-product-attention #:mask #:causal?
 #:dropout #:scale`, tranche 8, #210, the fused kernel behind
 `F.scaled_dot_product_attention`; `gelu #:approximate 'tanh`, GPT-2's form,
 on the hand-written shim) live on `torch` beside the other functional ops;
-the GPT causal-mask idiom is `(masked-fill scores (eq (tril (ones T T)) 0)
+a causal mask built by hand is `(masked-fill scores (eq (tril (ones T T)) 0)
 -inf.0)`, whose mask is `#t` = hidden, while the fused kernel's boolean
-`#:mask` is `#t` = attend, as PyTorch's function is. `define-layer` is the Python-style
+`#:mask` is `#t` = attend, as PyTorch's function is (the layers'
+`#:causal?` flags build the mask themselves; `examples/racket/06-gpt.rkt`
+is one standard `TransformerEncoder` call, pre-norm with `#:norm #t`,
+applied with `#:causal? #t`, #210 L3). `define-layer` is the Python-style
 `nn.Module` analog: `#:init` is the constructor body and assigns declared
 fields with `set!`, a field's value classifies it at construction
 (`Parameter?`, `Buffer?`, `layer?`, `#f` for absent, anything else plain),
