@@ -224,7 +224,9 @@ with `backward!` outside the form as PyTorch recommends). From
   `(clip (+ h (relu (dil h))) l t)` to `(~> (dil h) relu (+ h) (clip l t))`,
   following first arguments and either operand of a two-operand `+` or `*`
   while the other arguments are names or literals (a call that joins two
-  computations starts the chain)
+  computations starts the chain). An expansion analyzer keeps it off a call
+  that is already a `~>` or `~>>` step, which receives an argument it does
+  not show
 - reductions: `sum mean max min argmax softmax log-softmax`
 - ordering and sampling (`torch/foreign/order-ops.rkt`, tranche 7, #153):
   `topk` and `sort` answer `(values entries indices)`; `argsort`;

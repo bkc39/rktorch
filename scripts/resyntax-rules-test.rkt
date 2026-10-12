@@ -43,7 +43,8 @@
   (define calls
     '((define (f . xs) (car xs))
       (define (g . xs) (car xs))
-      (define (h . xs) (car xs))))
+      (define (h . xs) (car xs))
+      (define (k #:y [y 0] . xs) (cons y xs))))
 
   (define (threaded . forms)
     (apply program '(require torch) (append calls forms)))
@@ -93,6 +94,24 @@
       (check-suite-refactors
        (threaded '(f (g (- (h 1) (h 2)))))
        (threaded '(~> (- (h 1) (h 2)) g f))))
+
+    (test-case "a keyword call threads like any other"
+      (check-suite-refactors
+       (threaded '(k (g (h 1)) #:y 2))
+       (threaded '(~> (h 1) g (k #:y 2)))))
+
+    (test-case "a ~> step already takes the previous result"
+      (check-suite-does-not-refactor (threaded '(~> 1 (f (g (h 2)))))))
+
+    (test-case "a ~>> step takes it last"
+      (check-suite-does-not-refactor (threaded '(~>> 1 (f (g (h 2)))))))
+
+    (test-case "a keyword step takes it too"
+      (check-suite-does-not-refactor (threaded '(~> 1 (k (g (h 2)) #:y 3)))))
+
+    (test-case "a contracted torch step takes it too"
+      (check-suite-does-not-refactor
+       (threaded '(~> (tensor (list 1.0 2.0)) (reshape (g (h -1)))))))
 
     (test-case "a computed argument beside the chain stops it"
       (check-suite-does-not-refactor (threaded '(f (g (h 1)) (h 2)))))

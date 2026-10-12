@@ -284,10 +284,10 @@ encoder frames --- the per-utterance CTC input lengths.
 
 @chunk[<r07-features>
 (define (utterance-features samples rate)
-  (unsqueeze (log-mel-spectrogram (ref samples 0) #:sample-rate rate) 0))
+  (~> (ref samples 0) (log-mel-spectrogram #:sample-rate rate) (unsqueeze 0)))
 
 (define (downsampled-length t)
-  (quotient (add1 (quotient (add1 t) 2)) 2))
+  (~> (add1 t) (quotient 2) add1 (quotient 2)))
 
 (define (transcript-ids vocab transcript)
   (map inexact->exact (tensor->list (encode vocab transcript))))]
@@ -382,7 +382,7 @@ declaration order being draw order.
     (manual-seed! 0)
     (define-values (samples rate transcript) (load-librispeech-fixture))
     (define vocab (text->vocab transcript))
-    (define mel (to-device (ref (utterance-features samples rate) 0) device))
+    (define mel (~> (utterance-features samples rate) (ref 0) (to-device device)))
     (define net (asr 80 (vector-length vocab)))
     (define opt (adam (parameters net) #:lr 0.001))
     (define losses
@@ -415,7 +415,7 @@ CTC's phonetic stutter next to attention's spelling is the payoff.
     (in-eval-mode net
       (with-no-grad
         (define sos-in
-          (unsqueeze (to-dtype (tensor (list (add1 v-size))) 'int64) 0))
+          (~> (tensor (list (add1 v-size))) (to-dtype 'int64) (unsqueeze 0)))
         (define-values (ctc-lp _logits) (net x sos-in #f))
         (define ids
           (map inexact->exact (tensor->list (argmax ctc-lp 2))))
@@ -445,10 +445,9 @@ CTC's phonetic stutter next to attention's spelling is the payoff.
           (or max-steps (~> (shape x) caddr downsampled-length)))
         (define (next-id ids)
           (define dec-in
-            (unsqueeze (to-dtype (tensor ids) 'int64) 0))
+            (~> (tensor ids) (to-dtype 'int64) (unsqueeze 0)))
           (define-values (_ctc-lp logits) (net x dec-in #f))
-          (inexact->exact
-           (item (argmax (narrow logits 1 (sub1 (length ids)) 1) 2))))
+          (~> (narrow logits 1 (sub1 (length ids)) 1) (argmax 2) item inexact->exact))
         (define ids
           (let loop ([ids (list sos)])
             (define next (next-id ids))
@@ -538,8 +537,7 @@ decode, scored the same way, reaches 0.51 CER.
       (for/list ([bucket (in-list buckets)])
         (cons (for/list ([u (in-list bucket)])
                 (define-values (samples rate) (load-utterance u))
-                (to-device (ref (utterance-features samples rate) 0)
-                           device))
+                (~> (utterance-features samples rate) (ref 0) (to-device device)))
               (map utterance-transcript bucket))))
 
     (for ([epoch (in-range 1 (add1 epochs))])
