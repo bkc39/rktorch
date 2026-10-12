@@ -1,6 +1,7 @@
 #lang racket/base
 
-(require (only-in racket/treelist in-treelist treelist-length)
+(require (only-in racket/match match-define)
+         (only-in racket/treelist in-treelist treelist-length)
          (only-in resyntax/base
                   define-refactoring-rule define-refactoring-suite)
          (only-in resyntax/default-recommendations default-recommendations)
@@ -12,34 +13,44 @@
          (only-in resyntax/private/syntax-neighbors syntax-original-path)
          (only-in syntax/parse/pre
                   attribute boolean define-syntax-class expr id keyword
-                  number pattern str syntax-parse this-syntax ~and)
+                  number pattern str syntax-parse this-syntax ~optional)
          (only-in threading ~>)
-         (only-in torch ge gt le lt)
-         (prefix-in torch: (only-in torch * + < <= > >=)))
+         (only-in torch add div ge gt le lt matmul mul sub)
+         (prefix-in torch: (only-in torch * + - / < <= > >= @)))
 
 (provide rktorch-rules rktorch-recommendations)
 
-(define-syntax-class named-ordering
-  #:attributes (operator)
-  #:literals (ge gt le lt)
-  (pattern (~and name ge)
-    #:with operator (datum->syntax #'name '>= #'name)
-    #:when (free-identifier=? #'operator #'torch:>=))
-  (pattern (~and name gt)
-    #:with operator (datum->syntax #'name '> #'name)
-    #:when (free-identifier=? #'operator #'torch:>))
-  (pattern (~and name le)
-    #:with operator (datum->syntax #'name '<= #'name)
-    #:when (free-identifier=? #'operator #'torch:<=))
-  (pattern (~and name lt)
-    #:with operator (datum->syntax #'name '< #'name)
-    #:when (free-identifier=? #'operator #'torch:<)))
+(define named-operators ;; noqa
+  (list (list #'add '+ #'torch:+)
+        (list #'sub '- #'torch:-)
+        (list #'mul '* #'torch:*)
+        (list #'div '/ #'torch:/)
+        (list #'matmul '@ #'torch:@)
+        (list #'ge '>= #'torch:>=)
+        (list #'gt '> #'torch:>)
+        (list #'le '<= #'torch:<=)
+        (list #'lt '< #'torch:<)))
 
-(define-refactoring-rule named-comparison-to-operator
+;; The operator must be torch's where the call is written, or the rewrite
+;; would hand tensors to racket/base.
+(define-syntax-class named-operator
+  #:attributes (operator)
+  (pattern name:id
+    #:do [(define symbol
+            (for/first ([entry (in-list named-operators)]
+                        #:do [(match-define (list named symbol operator) entry)]
+                        #:when (free-identifier=? #'name named)
+                        #:when (free-identifier=?
+                                (datum->syntax #'name symbol) operator))
+              symbol))]
+    #:when symbol
+    #:with operator (datum->syntax #'name symbol #'name)))
+
+(define-refactoring-rule named-operator-to-symbol
   #:description
-  "Compare with torch's operators: `>=`, `>`, `<=` and `<` dispatch to `ge`, `gt`, `le` and `lt`."
-  (comparison:named-ordering a:expr b:expr)
-  (comparison.operator a b))
+  "Use torch's operators: `+`, `-`, `*`, `/` and `@` dispatch to `add`, `sub`, `mul`, `div` and `matmul`, and `>=`, `>`, `<=` and `<` to `ge`, `gt`, `le` and `lt`. A `~>` step shows one operand and keeps it."
+  (op:named-operator a:expr (~optional b:expr))
+  (op.operator a (~? b)))
 
 (define core-form-heads ;; noqa
   '(quote quasiquote syntax quasisyntax unquote unquote-splicing unsyntax
@@ -171,7 +182,7 @@
   (~> start.root step ... later ...))
 
 (define-refactoring-suite rktorch-rules
-  #:rules (named-comparison-to-operator
+  #:rules (named-operator-to-symbol
            nested-calls-to-threading
            threading-from-innermost-call))
 

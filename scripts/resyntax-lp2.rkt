@@ -13,7 +13,10 @@
          (only-in resyntax resyntax-analyze)
          (only-in resyntax/grimoire/source string-source)
          (only-in resyntax/grimoire/string-replacement
-                  string-replacement-apply string-replacement-union)
+                  inserted-string inserted-string-contents inserted-string?
+                  string-replacement string-replacement-apply
+                  string-replacement-contents string-replacement-original-end
+                  string-replacement-start string-replacement-union)
          (only-in resyntax/private/git git-diff-modified-lines)
          (only-in resyntax/private/refactoring-result
                   refactoring-result-message refactoring-result-new-code
@@ -80,6 +83,22 @@
                     (if (or (vector-ref keep i) (char=? c #\newline)) c #\space))))
   (string-append shadow-lang (substring blanked (string-length shadow-lang))))
 
+;; The at-reader takes a bare @ for the start of an @-form, so a rule's `@`
+;; operator is written |@| in a literate file.
+(define (at-symbol-spelling text)
+  (regexp-replace* #px"(?<![^\\s(\\[])@(?![^\\s)\\]])" text "|@|"))
+
+(define (at-reader-spelling replacement)
+  (string-replacement
+   #:start (string-replacement-start replacement)
+   #:end (string-replacement-original-end replacement)
+   #:contents
+   (for/list ([piece (in-list (string-replacement-contents replacement))])
+     (cond
+       [(inserted-string? piece)
+        (inserted-string (at-symbol-spelling (inserted-string-contents piece)))]
+       [else piece]))))
+
 (define (indent text)
   (string-join (for/list ([line (in-list (string-split text "\n" #:trim? #f))])
                  (string-append "  " line))
@@ -93,13 +112,17 @@
   (printf "\n\n~a\n" (indent (refactoring-result-message result)))
   (printf "\n\n~a\n\n\n~a\n\n\n"
           (indent (~a (refactoring-result-original-code result)))
-          (indent (~a (refactoring-result-new-code result)))))
+          (indent (at-symbol-spelling
+                   (~a (refactoring-result-new-code result))))))
 
 (define (write-fixes! path results)
+  (define replacements
+    (for/list ([result (in-list results)])
+      (at-reader-spelling (refactoring-result-string-replacement result))))
   (define replacement
-    (for/fold ([acc (refactoring-result-string-replacement (car results))])
-              ([result (in-list (cdr results))])
-      (string-replacement-union acc (refactoring-result-string-replacement result))))
+    (for/fold ([acc (car replacements)])
+              ([next (in-list (cdr replacements))])
+      (string-replacement-union acc next)))
   (display-to-file (string-replacement-apply replacement (file->string path))
                    path #:exists 'truncate/replace))
 
@@ -167,7 +190,8 @@
            ;; only-in strips
            racket/runtime-path
            (only-in racket/string string-prefix?)
-           (only-in rackunit check-equal? check-true test-case))
+           (only-in rackunit check-equal? check-true test-case)
+           (only-in resyntax/grimoire/string-replacement copied-string))
 
   (define-runtime-path asr "../examples/racket/07-asr.rkt")
   (define text (file->string asr))
@@ -195,6 +219,17 @@
     (check-true (blank? (cadr (shadow-line-of "@bold{The model.}"))))
     (check-true (blank? (cadr (shadow-line-of "@chunk[<r07-model>"))))
     (check-true (blank? (cadr (shadow-line-of "<r07-model>")))))
+
+  (test-case "an inserted @ is spelled for the at-reader"
+    (define replacement
+      (string-replacement
+       #:start 0
+       #:end 18
+       #:contents (list (inserted-string "(@ ") (copied-string 8 17)
+                        (inserted-string ")"))))
+    (check-equal? (string-replacement-apply (at-reader-spelling replacement)
+                                            "(matmul m (|@| n))")
+                  "(|@| m (|@| n))"))
 
   (test-case "code lines are kept verbatim"
     (define model (shadow-line-of "(define-layer asr"))

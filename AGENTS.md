@@ -212,9 +212,11 @@ with `backward!` outside the form as PyTorch recommends). From
 - operators: `+ - * /` shadow racket/base rkt-polars-style (numeric fast
   path to racket/base, tensor operands dispatch to add/sub/mul/div, chains
   fold left); so do `< <= > >=`, which dispatch to lt/le/gt/ge, mirror a
-  real on the left, and take two operands with a tensor. Write comparisons
-  with them, not the names: `scripts/resyntax-rules.rkt` rewrites
-  `(ge a b)` to `(>= a b)`; `@` is matmul, like Python's `a @ b`; `t`/`Σ` are terse
+  real on the left, and take two operands with a tensor; `@` is matmul,
+  like Python's `a @ b` (`|@|` under the at-reader: lp2 examples and
+  Scribble). Write arithmetic, comparisons and matmul with these, not the
+  names: `scripts/resyntax-rules.rkt` rewrites `(mul a b)` to `(* a b)`,
+  `(ge a b)` to `(>= a b)` and `(matmul a b)` to `(@ a b)`; `t`/`Σ` are terse
   aliases for transpose/sum; unary `T` reverses all axes like Python's `x.T`
   (use `transpose` on the last two axes for batched attention);
   `~> ~>> lambda~> lambda~>>` are re-provided

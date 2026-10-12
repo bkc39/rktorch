@@ -29,6 +29,37 @@
                 '(let ([t (tensor (list 1 2 3))])
                    (list (> t 1) (<= t 2) (< t (tensor (list 3 2 1))))))))
 
+    (test-case "add, sub, mul and div become +, -, * and /"
+      (check-suite-refactors
+       (program '(require torch)
+                '(let ([t (tensor (list 1.0 2.0))])
+                   (list (add t 1.0) (sub 1.0 t) (mul t t) (div t 2.0))))
+       (program '(require torch)
+                '(let ([t (tensor (list 1.0 2.0))])
+                   (list (+ t 1.0) (- 1.0 t) (* t t) (/ t 2.0))))))
+
+    (test-case "matmul becomes @"
+      (check-suite-refactors
+       (program '(require torch)
+                '(let ([m (eye 2)]) (matmul m m)))
+       (program '(require torch)
+                '(let ([m (eye 2)]) (@ m m)))))
+
+    (test-case "a named operator in a ~> step becomes the symbol"
+      (check-suite-refactors
+       (program '(require torch) '(~> (tensor (list 1.0 2.0)) (mul 2.0)))
+       (program '(require torch) '(~> (tensor (list 1.0 2.0)) (* 2.0)))))
+
+    (test-case "a ~>> step keeps its operand first"
+      (check-suite-refactors
+       (program '(require torch) '(~>> (tensor (list 1.0 2.0)) (sub 1.0)))
+       (program '(require torch) '(~>> (tensor (list 1.0 2.0)) (- 1.0)))))
+
+    (test-case "mul stays where * is racket/base's"
+      (check-suite-does-not-refactor
+       (program '(require (only-in torch mul tensor))
+                '(mul (tensor (list 1.0 2.0)) 2.0))))
+
     (test-case "ge stays where >= is racket/base's"
       (check-suite-does-not-refactor
        (program '(require (only-in torch ge tensor))

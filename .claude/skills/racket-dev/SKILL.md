@@ -108,7 +108,7 @@ nix develop .#ci --command \
 ```
 
 `scripts/resyntax` runs Resyntax's default rules plus the repository's own
-in `scripts/resyntax-rules.rkt`, such as `(ge a b)` → `(>= a b)` and
+in `scripts/resyntax-rules.rkt`, such as `(mul a b)` → `(* a b)` and
 `(clip (+ h (relu (dil h))) l t)` → `(~> (dil h) relu (+ h) (clip l t))`. A
 style point the owner raises in review that is a meaning-preserving rewrite
 becomes a rule there, with a case in `scripts/resyntax-rules-test.rkt`.
