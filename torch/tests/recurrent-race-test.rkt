@@ -75,6 +75,20 @@
   (test-case "a refusal on weights a round trip gave back their addresses forgets them"
     (check-false (packing-record found #f found #t)))
 
+  (test-case "unpacked weights a move rebound since they were read are not recorded"
+    (check-false (packing-record found #f '((300 . 300) (400 . 400)) #t)))
+
+  (test-case "a move between reading and recording CPU weights leaves nothing recorded"
+    (define lstm (LSTM 8 16 #:num-layers 2))
+    (define weights (parameters lstm))
+    (parameterize ([packing-hook
+                    (match-lambda
+                      ['stale (to lstm 'float64) (to lstm 'float32)]
+                      [_ (void)])])
+      (forward lstm (randn 4 2 8)))
+    (check-false (flattened-signature (car weights))
+                 "the addresses read before the move were recorded"))
+
   (define (forward-together lstm x pool)
     (define failures (box '()))
     (define gate (make-semaphore 0))

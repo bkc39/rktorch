@@ -1,7 +1,7 @@
 #lang racket/base
 
-(require (for-syntax racket/base)
-         syntax/parse/define)
+(require (for-syntax racket/base (only-in syntax/parse/pre ...+ expr))
+         (only-in syntax/parse/define define-syntax-parse-rule))
 
 (provide call-with-lock
          make-lock
@@ -30,7 +30,9 @@
 
 (define (release! lock me)
   (memory-order-release)
-  (set-box! lock #f)
+  (let retry ()
+    (when (and (eq? (unbox lock) me) (not (box-cas! lock me #f)))
+      (retry)))
   (semaphore-post (holder-released me)))
 
 ;; a killed holder never releases, so a waiter takes the lock over once it is dead
@@ -39,8 +41,13 @@
   (parameterize-break #f
     (define me (acquire! lock breaks?))
     (dynamic-wind void
-                  (lambda () (parameterize-break breaks? (thunk)))
+                  (lambda ()
+                    (call-with-continuation-barrier
+                     (lambda () (parameterize-break breaks? (thunk)))))
                   (lambda () (release! lock me)))))
 
 (define-syntax-parse-rule (with-lock lock:expr body:expr ...+)
   (call-with-lock lock (lambda () body ...)))
+
+(module+ private
+  (provide acquire! release!))

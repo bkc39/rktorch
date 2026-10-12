@@ -2,7 +2,8 @@
 
 (module+ test
   (require rackunit
-           "../private/lock.rkt")
+           "../private/lock.rkt"
+           (only-in (submod "../private/lock.rkt" private) acquire! release!))
 
   (define (finishes? thunk)
     (and (sync/timeout 10 (thread thunk)) #t))
@@ -144,4 +145,29 @@
     (define lock (make-lock))
     (check-exn #rx"with-lock: the current thread already holds this lock"
                (lambda () (with-lock lock (with-lock lock 'inner))))
-    (check-true (finishes? (lambda () (with-lock lock 'again))))))
+    (check-true (finishes? (lambda () (with-lock lock 'again)))))
+
+  (test-case "a continuation captured in the body cannot re-enter it"
+    (define lock (make-lock))
+    (define reentered (box #f))
+    (define k
+      (with-lock lock
+        (define v (let/cc k k))
+        (when (eq? v 'again)
+          (set-box! reentered #t))
+        v))
+    (when (continuation? k)
+      (check-exn exn:fail:contract:continuation? (lambda () (k 'again))))
+    (check-false (unbox reentered))
+    (check-true (finishes? (lambda () (with-lock lock 'free)))))
+
+  (test-case "a stale release leaves another thread's hold in place"
+    (define lock (make-lock))
+    (define stale (acquire! lock #f))
+    (release! lock stale)
+    (define holder (hold lock))
+    (release! lock stale)
+    (define waiter (thread (lambda () (with-lock lock 'mine))))
+    (check-false (sync/timeout 0.05 waiter))
+    (kill-thread holder)
+    (check-not-false (sync/timeout 10 waiter))))

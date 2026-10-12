@@ -85,9 +85,9 @@
 
 (define packing-hook (make-parameter void))
 
-;; a `to` on another thread takes no turn, so record the packing only if no move
-;; ran during it, since a round trip can hand back the old addresses, and only
-;; while the weights still lie in the buffer
+;; a `to` on another thread takes no turn, so record only if no move ran since
+;; the signature was read, on any device, since a round trip can hand back the
+;; old addresses, and a packing only while the weights still lie in the buffer
 (define (packing-record now buffer-start packed moved?)
   (cond
     [moved? #f]
@@ -105,22 +105,23 @@
     (unless (box-cas! moves seen (add1 seen))
       (retry))))
 
-(define (repack! spec weights now moves)
+(define (repack! spec weights)
   ((packing-hook) 'before)
   (hash-remove! refused (car weights))
   (define buffer (flatten-weights! spec weights))
   ((packing-hook) 'after)
-  (packing-record now
-                  (and buffer (tensor-storage-ptr buffer))
-                  (storage-signature weights)
-                  (not (= moves (unbox (rnn-moves spec))))))
+  (and buffer (tensor-storage-ptr buffer)))
 
 (define (record-packing! spec weights now moves)
   (define key (car weights))
+  (define buffer-start
+    (and (eq? (device-type (tensor-device key)) 'cuda)
+         (repack! spec weights)))
   (define record
-    (if (eq? (device-type (tensor-device key)) 'cuda)
-        (repack! spec weights now moves)
-        now))
+    (packing-record now
+                    buffer-start
+                    (storage-signature weights)
+                    (not (= moves (unbox (rnn-moves spec))))))
   (cond
     [record (hash-set! flattened key record)]
     [else
