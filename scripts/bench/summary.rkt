@@ -34,15 +34,18 @@
           (if (string? sha) (substring sha 0 (min 7 (string-length sha))) "?")
           (if (ref r 'meta 'git_dirty) " (dirty)" "")))
 
-(define (machine r)
+(define (host r)
   (define m (ref r 'meta))
-  (format "~a (~a, ~a, cpus ~a), ~a, ~a threads (~a)~a"
-          (ref m 'host) (ref m 'cpu) (ref m 'os) (ref m 'affinity)
+  (format "~a (~a, ~a, cpus ~a)" (ref m 'host) (ref m 'cpu) (ref m 'os) (ref m 'affinity)))
+
+(define (execution r)
+  (define m (ref r 'meta))
+  (format "~a, ~a threads (~a)~a"
           (ref m 'device) (ref m 'threads) (ref m 'threads_source)
           (if (string? (ref m 'gpu)) (format ", ~a" (ref m 'gpu)) "")))
 
-(define (build-and-machine r)
-  (format "~a, ~a" (commit r) (machine r)))
+(define (invocation r)
+  (format "~a, ~a, ~a, run ~a" (commit r) (host r) (execution r) (ref r 'run_id)))
 
 (define (table header rows)
   (string-join
@@ -140,11 +143,11 @@
 
 (define (e2e-section records)
   (define runs
-    (table '("example" "variant" "commit" "settings" "unit" "median" "IQR" "steps/s" "runs"
-             "load")
+    (table '("example" "variant" "commit" "execution" "settings" "unit" "median" "IQR"
+             "steps/s" "runs" "load")
            (for/list ([r (in-list records)])
              (define settings (ref r 'settings))
-             (list (ref r 'case) (or (ref r 'variant) "-") (commit r)
+             (list (ref r 'case) (or (ref r 'variant) "-") (commit r) (execution r)
                    (if (hash? settings)
                        (string-join (for/list ([(k v) (in-hash settings)]) (format "~a=~a" k v))
                                     " ")
@@ -162,13 +165,12 @@
 
 (define sections
   (list (section "micro" "crossings" "Native crossings by signature class"
-                 (plain-section "crossing") build-and-machine)
-        (section "micro" "layers" "The op stack, layer by layer" layer-section build-and-machine)
-        (section "micro" "ops" "Per op" op-section build-and-machine)
-        (section "micro" "contracts" "Validation strategies" contract-section build-and-machine)
-        (section "micro" "pipeline" "A real pipeline" (plain-section "pipeline")
-                 build-and-machine)
-        (section "e2e" "summary" "End to end" e2e-section machine)))
+                 (plain-section "crossing") invocation)
+        (section "micro" "layers" "The op stack, layer by layer" layer-section invocation)
+        (section "micro" "ops" "Per op" op-section invocation)
+        (section "micro" "contracts" "Validation strategies" contract-section invocation)
+        (section "micro" "pipeline" "A real pipeline" (plain-section "pipeline") invocation)
+        (section "e2e" "summary" "End to end" e2e-section host)))
 
 (define (header records)
   (define (all key) (string-join (remove-duplicates (map (lambda (r) (~a (ref r 'meta key))) records))
@@ -201,14 +203,18 @@
 (module+ test
   (require rackunit)
 
-  (define (meta host)
-    (hasheq 'git_sha "abcdef0123" 'device "cpu" 'threads 4 'threads_source "default"
+  (define (meta host #:threads [threads 4] #:source [source "default"])
+    (hasheq 'git_sha "abcdef0123" 'device "cpu" 'threads threads 'threads_source source
             'host host 'cpu "Some CPU" 'os "linux-x86_64" 'affinity "0-3"))
 
-  (define (summary-record variant run-id host samples)
+  (define (summary-record variant run-id host samples #:meta [m (meta host)])
     (hasheq 'suite "e2e" 'group "summary" 'case "stepper" 'variant variant 'unit "ms/step"
             'run_id run-id 'samples samples 'stats (hasheq 'median (car samples) 'n 2)
-            'meta (meta host)))
+            'meta m))
+
+  (define (crossing-record run-id median)
+    (hasheq 'suite "micro" 'group "crossings" 'case "scalar" 'unit "ns" 'run_id run-id
+            'stats (hasheq 'median median 'iqr 1.0) 'meta (meta "lab")))
 
   (test-case "ratios pair variants within one run, never across runs"
     (define md
@@ -227,4 +233,22 @@
              (summary-record "b" "r2" "laptop" '(5.0 5.0)))))
     (check-equal? (length (regexp-match* #rx"## End to end" md)) 2)
     (check-regexp-match #rx"lab \\(Some CPU, linux-x86_64, cpus 0-3\\)" md)
-    (check-false (regexp-match? #rx"vs" md))))
+    (check-false (regexp-match? #rx"vs" md)))
+
+  (test-case "an A/B over OMP_NUM_THREADS shares a section and yields a ratio"
+    (define md
+      (summary-markdown
+       (list (summary-record "one" "r1" "lab" '(20.0 20.0)
+                             #:meta (meta "lab" #:threads 1 #:source "OMP_NUM_THREADS"))
+             (summary-record "four" "r1" "lab" '(5.0 5.0)
+                             #:meta (meta "lab" #:threads 4 #:source "OMP_NUM_THREADS")))))
+    (check-equal? (length (regexp-match* #rx"## End to end" md)) 1)
+    (check-regexp-match #rx"\\| stepper \\| four vs one \\| 0\\.250 \\|" md)
+    (check-regexp-match #rx"cpu, 1 threads \\(OMP_NUM_THREADS\\)" md)
+    (check-regexp-match #rx"cpu, 4 threads \\(OMP_NUM_THREADS\\)" md))
+
+  (test-case "appended micro invocations keep a section each"
+    (define md (summary-markdown (list (crossing-record "r1" 100.0) (crossing-record "r2" 200.0))))
+    (check-equal? (length (regexp-match* #rx"## Native crossings" md)) 2)
+    (check-regexp-match #rx"run r1\\)\n\n[^#]*\\| scalar \\| 100\\.0 \\|" md)
+    (check-regexp-match #rx"run r2\\)\n\n[^#]*\\| scalar \\| 200\\.0 \\|" md)))

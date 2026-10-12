@@ -14,9 +14,10 @@ racket scripts/bench/run.rkt e2e --cache ~/.racket/rktorch --out results.jsonl
 racket scripts/bench/summary.rkt results.jsonl > results.md
 ```
 
-`micro` is `crossings layers ops contracts`. Records go to `--out`
-(appended) or standard output; a readable line per case goes to standard
-error.
+`micro` is `crossings layers ops contracts`. Options go before or after
+the suite names, and an unknown suite stops the run before anything is
+measured. Records go to `--out` (appended) or standard output; a readable
+line per case goes to standard error.
 
 | option | |
 |---|---|
@@ -114,7 +115,11 @@ and 15-minute averages), and `meta`: `git_sha`, `git_dirty`, `racket`,
 `libtorch`, `device`, `gpu`, `threads` and where that came from, `cores`,
 `cpu`, `affinity`, `host`, `os`; `run_id` is shared by every record one
 `run.rkt` invocation writes, and the summary pairs A/B ratios only within
-one. An `e2e` run also writes one `run` record
+one. The summary gives each micro invocation its own section, headed by its
+commit, host, execution (device, threads and their source, GPU) and run id,
+so appended runs never merge. `e2e` sections are per host (name, CPU, OS,
+affinity) with the execution per row, so an A/B over `OMP_NUM_THREADS` or
+the device still yields its ratio. An `e2e` run also writes one `run` record
 per child: `steps`, `steps_per_epoch`, `epoch_s`, `epoch_gc_ms`, `step_ms`,
 `steps_per_s`, `steps_per_s_median`, `wall_s`, `exit_code`, `settings`. An
 `e2e` record's `meta` comes from the child that ran it, so an A/B across

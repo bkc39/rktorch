@@ -658,9 +658,9 @@ A step of one of the built-in optimizers logs a @racket['debug] event on
 the topic @racket['rktorch-step] when a receiver listens for one. Its data
 is @racket[(vector _id _ms _gc-ms)]: the optimizer's @racket[eq-hash-code],
 @racket[(current-inexact-monotonic-milliseconds)] and
-@racket[(current-gc-milliseconds)] as the step ends. On an accelerator the
-step first waits for the device to finish it, and only while a receiver
-listens. A schedule's step logs nothing.
+@racket[(current-gc-milliseconds)] as the step ends. While a receiver
+listens, the step first waits for every accelerator holding one of its
+parameters to finish it. A schedule's step logs nothing.
 }
 
 @defproc[(zero-grads! [opt optimizer?]) void?]{

@@ -1,6 +1,7 @@
 #lang racket/base
 
-(require (only-in racket/format ~a)
+(require (only-in racket/cmdline command-line)
+         (only-in racket/format ~a)
          (only-in racket/list check-duplicates)
          (only-in racket/match match match-define)
          (only-in racket/os getpid)
@@ -18,10 +19,17 @@
          (only-in "ops.rkt" op-cases))
 
 (provide run-suites
+         parse-arguments
          parse-variant
          micro-suites)
 
 (define micro-suites '(crossings layers ops contracts))
+(define known-suites (append micro-suites '(e2e)))
+
+(define (check-suites suites)
+  (define unknown (for/first ([s (in-list suites)] #:unless (memq s known-suites)) s))
+  (when unknown
+    (raise-user-error 'run "unknown suite ~a; known: micro ~a" unknown known-suites)))
 
 (define (parse-variant text)
   (match-define (list _ name settings) (regexp-match #rx"^([^:]*)(?::(.*))?$" text))
@@ -66,6 +74,7 @@
                     #:run-id [run-id (fresh-run-id)]
                     #:out [out (current-output-port)]
                     #:log [log (current-error-port)])
+  (check-suites suites)
   (define libtorch (torch-version))
   (define emit (record-writer run-id out))
   (define (n reps) (max 1 (inexact->exact (round (* reps scale)))))
@@ -99,8 +108,7 @@
       [(e2e)
        (run-e2e (if only (find-examples only) examples)
                 #:rounds (or rounds 1) #:full? full? #:variants variants #:cache cache
-                #:max-load max-load #:libtorch libtorch #:run-id run-id #:out out #:log log)]
-      [else (raise-user-error 'run "unknown suite ~a" suite)])))
+                #:max-load max-load #:libtorch libtorch #:run-id run-id #:out out #:log log)])))
 
 (define (run-e2e exs #:rounds rounds #:full? full? #:variants variants #:cache cache
                  #:max-load max-load #:libtorch libtorch #:out out #:log log
@@ -152,48 +160,59 @@
                                          'gc_ms (reverse (hash-ref gcs (car v)))
                                          'steps_per_s (summarize (hash-ref rates (car v))))))))))
 
-(module+ main
-  (require (only-in racket/cmdline command-line))
-  (define rounds #f)
-  (define warmup 1)
-  (define scale 1)
-  (define device 'cpu)
-  (define full? #f)
-  (define only #f)
-  (define variants '())
-  (define cache #f)
-  (define max-load #f)
-  (define out-path #f)
+(define (parse-arguments argv)
+  (define options (make-hasheq))
+  (define (option! key value) (hash-set! options key value))
+  (define names
+    (let parse ([argv argv] [names '()])
+      (command-line
+       #:program "run.rkt"
+       #:argv argv
+       #:usage-help "Suites: micro crossings layers ops contracts e2e."
+                    "Options go before or after the suites."
+       #:once-each
+       [("--rounds") n "Timed rounds (default 5; e2e 1)" (option! 'rounds (string->number n))]
+       [("--warmup") n "Untimed rounds before them (default 1; e2e runs none)"
+                     (option! 'warmup (string->number n))]
+       [("--scale") x "Multiply micro repetitions by x" (option! 'scale (string->number x))]
+       [("--device") d "Device for the ops suite: cpu or cuda" (option! 'device (string->symbol d))]
+       [("--full") "Run examples at their full settings" (option! 'full? #t)]
+       [("--only") names "Comma-separated example numbers"
+                   (option! 'only (string-split names ","))]
+       [("--cache") dir "Shared dataset cache root for the examples" (option! 'cache dir)]
+       [("--max-load") l "Wait for a load below l (busy cores over 1 s on Linux)"
+                       (option! 'max-load (string->number l))]
+       [("--out") file "Append JSON lines to file" (option! 'out file)]
+       #:multi
+       [("--variant") v "name:VAR=VALUE,... (repeat for A/B)"
+                      (hash-update! options 'variants
+                                    (lambda (vs) (append vs (list (parse-variant v))))
+                                    '())]
+       #:args suite
+       (match suite
+         ['() (reverse names)]
+         [(cons name more) (parse more (cons name names))]))))
   (define suites
-    (command-line
-     #:once-each
-     [("--rounds") n "Timed rounds (default 5; e2e 1)" (set! rounds (string->number n))]
-     [("--warmup") n "Untimed rounds before them (default 1; e2e runs none)"
-                   (set! warmup (string->number n))]
-     [("--scale") x "Multiply micro repetitions by x" (set! scale (string->number x))]
-     [("--device") d "Device for the ops suite: cpu or cuda" (set! device (string->symbol d))]
-     [("--full") "Run examples at their full settings" (set! full? #t)]
-     [("--only") names "Comma-separated example numbers" (set! only (string-split names ","))]
-     [("--cache") dir "Shared dataset cache root for the examples" (set! cache dir)]
-     [("--max-load") l "Wait for a load below l (busy cores over 1 s on Linux)"
-                     (set! max-load (string->number l))]
-     [("--out") file "Append JSON lines to file" (set! out-path file)]
-     #:multi
-     [("--variant") v "name:VAR=VALUE,... (repeat for A/B)"
-                    (set! variants (append variants (list (parse-variant v))))]
-     #:args suite-names
-     (for*/list ([s (in-list suite-names)]
-                 [x (in-list (if (equal? s "micro") (map symbol->string micro-suites) (list s)))])
-       (string->symbol x))))
+    (for*/list ([s (in-list names)]
+                [x (in-list (if (equal? s "micro") (map symbol->string micro-suites) (list s)))])
+      (string->symbol x)))
+  (check-suites suites)
+  (values suites options))
+
+(module+ main
+  (define-values (suites options)
+    (parse-arguments (current-command-line-arguments)))
+  (define (option key [default #f]) (hash-ref options key default))
   (define (go out)
     (run-suites suites
-                #:rounds rounds
-                #:warmup warmup #:scale scale #:device device #:full? full? #:only only
-                #:variants (if (null? variants) '((#f)) variants)
-                #:cache cache #:max-load max-load #:out out))
-  (if out-path
-      (call-with-output-file out-path #:exists 'append go)
-      (go (current-output-port))))
+                #:rounds (option 'rounds)
+                #:warmup (option 'warmup 1) #:scale (option 'scale 1)
+                #:device (option 'device 'cpu) #:full? (option 'full?) #:only (option 'only)
+                #:variants (option 'variants '((#f)))
+                #:cache (option 'cache) #:max-load (option 'max-load) #:out out))
+  (match (option 'out)
+    [#f (go (current-output-port))]
+    [path (call-with-output-file path #:exists 'append go)]))
 
 (module+ test
   (require (for-syntax racket/base)
@@ -236,7 +255,7 @@
     (for ([heading (in-list '("## Native crossings" "## The op stack" "## Per op"
                               "## Validation strategies" "## A real pipeline"))])
       (check-regexp-match (regexp-quote heading) md))
-    (check-exn #rx"unknown suite"
+    (check-exn #rx"unknown suite nope"
                (lambda () (run-suites '(nope) #:log quiet)))
     (check-exn #rx"two variants are named a"
                (lambda () (run-suites '(e2e) #:variants '(("a") ("a" ("X" . "1")))
@@ -266,4 +285,31 @@
     (define md (summary-markdown records))
     (check-regexp-match #rx"## End to end" md)
     (check-regexp-match #rx"\\| stepper \\| b vs a \\|" md)
-    (check-regexp-match #rx"n < 6" md)))
+    (check-regexp-match #rx"n < 6" md))
+
+  (test-case "flags go before or after the suites"
+    (define (parsed . argv)
+      (define-values (suites options) (parse-arguments (list->vector argv)))
+      (list suites options))
+    (check-equal? (parsed "micro" "--out" "r.jsonl" "--max-load" "3")
+                  (list micro-suites (make-hasheq '((out . "r.jsonl") (max-load . 3)))))
+    (check-equal? (parsed "--max-load" "3" "ops" "--device" "cuda" "--out" "r.jsonl")
+                  (list '(ops) (make-hasheq '((max-load . 3) (device . cuda) (out . "r.jsonl")))))
+    (check-equal? (parsed "e2e" "--cache" "c" "--variant" "a" "--out" "r.jsonl"
+                          "--variant" "b:X=1")
+                  (list '(e2e) (make-hasheq '((cache . "c") (out . "r.jsonl")
+                                              (variants . (("a") ("b" ("X" . "1"))))))))
+    (check-equal? (parsed "crossings" "--rounds" "2" "layers")
+                  (list '(crossings layers) (make-hasheq '((rounds . 2))))))
+
+  (test-case "an unknown suite fails before any suite runs"
+    (check-exn #rx"unknown suite --out"
+               (lambda () (parse-arguments (vector "micro" "--" "--out" "r.jsonl"))))
+    (check-exn #rx"unknown suite nope"
+               (lambda () (parse-arguments (vector "micro" "nope" "--out" "r.jsonl"))))
+    (check-equal? (records-of (lambda (out)
+                                (check-exn #rx"unknown suite nope"
+                                           (lambda ()
+                                             (run-suites '(crossings nope) #:rounds 1 #:warmup 0
+                                                         #:scale 0.001 #:out out #:log quiet)))))
+                  '())))
