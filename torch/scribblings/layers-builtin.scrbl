@@ -152,7 +152,15 @@ Connectionist temporal classification: @racket[log-probs] is @tt{[T N C]}
 log-softmaxed frames, @racket[targets] the @tt{[N S]} label sequences, and
 the two length lists say how much of each is real. Averaged over the batch
 as PyTorch's default is; @racket[#:zero-infinity?] zeroes a loss that no
-alignment can reach rather than propagating an infinity.}
+alignment can reach rather than propagating an infinity.
+
+On MPS, a batch whose longest target has 512 or more labels is computed on
+the CPU and its loss moved back to the device, because libtorch 2.14's MPS
+kernel returns wrong gradients there. Gradients still reach
+@racket[log-probs] on the device, and shorter targets stay on MPS. This is
+a temporary workaround for an upstream bug, tracked in
+@hyperlink["https://github.com/bkc39/rktorch/issues/258"]{#258}, and goes
+once a libtorch release fixes the kernel.}
 
 @section{More layers}
 
