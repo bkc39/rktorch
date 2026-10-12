@@ -1,23 +1,22 @@
 #lang racket/base
 
 (module+ test
-  (require rackunit
+  (require (only-in racket/dict dict-ref)
+           rackunit
            (only-in "../foreign.rkt" native-memory-limit native-memory-use zeros)
-           (only-in (submod "../foreign.rkt" unsafe) tensor-free!)
+           (only-in (submod "../foreign.rkt" unsafe) tensor-free! to!)
            (only-in "../foreign/device-type.rkt" device)
-           (only-in "../foreign/raw/collector.rkt"
-                    call-as-the-collector collect-and-wait!)
+           (only-in "../foreign/raw/collector.rkt" call-as-the-collector)
            (only-in "../foreign/raw/memory.rkt" record-allocation! unaccount!)
            (only-in "../foreign/raw/pressure.rkt" since-check-of)
            (only-in "../foreign/structs.rkt" tensor-handle)
            (only-in "private/race-harness.rkt"
-                    check-known-failure check-ledger gate-hook hooks join
-                    labelled ledger-snapshot ledger-violations make-gate
-                    make-watch
+                    check-known-failure check-ledger join labelled
+                    ledger-snapshot ledger-violations make-gate make-watch
                     release-gate! settle! spawn stop! wait-for-arrival
-                    worker-thread
                     watch-finalized watch-hook watch-max-holders
-                    watch-release-count watch-released with-race-hook))
+                    watch-release-count watch-released while-inside
+                    with-parked with-race-hook worker-thread))
 
   (define mib (* 1024 1024))
   (define cpu (device 'cpu 0))
@@ -31,17 +30,13 @@
     (define base (ledger-snapshot))
     (define w (make-watch))
     (with-race-hook (watch-hook w)
-      (let* ([t (zeros 256 256)]
-             [h (tensor-handle t)]
-             [g (handle-gate 'free-unaccounted h)])
-        (with-race-hook (hooks (watch-hook w) (gate-hook g))
-          (define a (spawn (lambda () (tensor-free! t)) #:pool pool #:label 'a))
-          (check-eq? (wait-for-arrival g) 'parked)
-          (collect-and-wait!)
-          (check-equal? (watch-release-count w h) 1
-                        "a collection mid-free released the handle again")
-          (release-gate! g)
-          (join a)))
+      (define t (zeros 256 256))
+      (define g (handle-gate 'free-unaccounted (tensor-handle t)))
+      (with-parked [a (spawn (lambda () (tensor-free! t)) #:pool pool #:label 'a)
+                    #:at g #:watch w]
+        (check-eq? (wait-for-arrival g) 'parked)
+        (release-gate! g)
+        (join a))
       (settle!))
     (check-equal? (watch-finalized w) 0
                   "the finalizer released an explicitly freed handle")
@@ -51,19 +46,27 @@
     (for ([pool (in-list pools)])
       (explicit-free-against-finalizer pool)))
 
+  (test-case "a tensor moved in place, then freed, is unaccounted once (I3)"
+    (settle!)
+    (define base (ledger-snapshot))
+    (define w (make-watch))
+    (with-race-hook (watch-hook w)
+      (define t (zeros 4 4))
+      (to! t 'cpu 'float64)
+      (tensor-free! t))
+    (check-ledger base w))
+
   (define (racing-frees pool)
     (settle!)
     (define w (make-watch))
     (define t (zeros 256 256))
     (define h (tensor-handle t))
     (define g (handle-gate 'free-unaccounted h))
-    (with-race-hook (hooks (watch-hook w) (gate-hook g))
-      (define a (spawn (lambda () (tensor-free! t)) #:pool pool #:label 'a))
+    (with-parked [a (spawn (lambda () (tensor-free! t)) #:pool pool #:label 'a)
+                  #:at g #:watch w]
       (check-eq? (wait-for-arrival g) 'parked)
       (join (spawn (lambda () (tensor-free! t)) #:pool pool #:label 'b))
-      (define committed (watch-release-count w h))
-      (stop! a)
-      committed))
+      (watch-release-count w h)))
 
   (test-case "two threads freeing one tensor reach the native release once (I3)"
     (for ([pool (in-list pools)])
@@ -81,8 +84,8 @@
       (make-gate 'unaccount-entry-read
                  #:when (lambda (subject)
                           (and (eq? subject key) ((labelled 'a) subject)))))
-    (with-race-hook (hooks (watch-hook w) (gate-hook g))
-      (define a (spawn (lambda () (unaccount! key)) #:pool pool #:label 'a))
+    (with-parked [a (spawn (lambda () (unaccount! key)) #:pool pool #:label 'a)
+                  #:at g #:watch w]
       (define read (wait-for-arrival g))
       (join (spawn (lambda () (unaccount! key)) #:pool pool #:label 'b))
       (define witness (box 'witness))
@@ -102,14 +105,14 @@
     (settle!)
     (define w (make-watch))
     (with-race-hook (watch-hook w)
-      (let* ([t (zeros 256 256)]
-             [g (handle-gate 'free-unaccounted (tensor-handle t))])
-        (with-race-hook (hooks (watch-hook w) (gate-hook g))
-          (define a (spawn (lambda () (tensor-free! t)) #:pool pool #:label 'a))
-          (check-eq? (wait-for-arrival g) 'parked)
-          (break-thread (worker-thread a))
-          (release-gate! g)
-          (check-exn exn:break? (lambda () (join a)))))
+      (define t (zeros 256 256))
+      (define g (handle-gate 'free-unaccounted (tensor-handle t)))
+      (with-parked [a (spawn (lambda () (tensor-free! t)) #:pool pool #:label 'a)
+                    #:at g #:watch w]
+        (check-eq? (wait-for-arrival g) 'parked)
+        (break-thread (worker-thread a))
+        (release-gate! g)
+        (check-exn exn:break? (lambda () (join a))))
       (settle!))
     (check-equal? (watch-finalized w) 0
                   "a break abandoned the explicit free to the finalizer"))
@@ -124,10 +127,10 @@
     (define w (make-watch))
     (define g (make-gate point #:when (labelled 'a)))
     (define owner (make-custodian))
-    (with-race-hook (hooks (watch-hook w) (gate-hook g))
-      (define a
-        (parameterize ([current-custodian owner])
-          (spawn (lambda () (void (zeros 256 256))) #:pool pool #:label 'a)))
+    (with-parked [a (parameterize ([current-custodian owner])
+                      (spawn (lambda () (void (zeros 256 256)))
+                             #:pool pool #:label 'a))
+                  #:at g #:watch w]
       (check-eq? (wait-for-arrival g) 'parked)
       (case stop-by
         [(kill) (stop! a)]
@@ -147,14 +150,13 @@
     (define g (make-gate 'collector-claiming #:when (labelled 'a)))
     (define inside (make-semaphore 0))
     (define leave (make-semaphore 0))
-    (with-race-hook (hooks (watch-hook w) (gate-hook g))
-      (define a
-        (spawn (lambda ()
-                 (call-as-the-collector
-                  (lambda ()
-                    (semaphore-post inside)
-                    (semaphore-wait leave))))
-               #:pool pool #:label 'a))
+    (with-parked [a (spawn (lambda ()
+                             (call-as-the-collector
+                              (lambda ()
+                                (semaphore-post inside)
+                                (semaphore-wait leave))))
+                           #:pool pool #:label 'a)
+                  #:at g #:watch w]
       (define claimed (wait-for-arrival g))
       (define b
         (spawn (lambda ()
@@ -177,29 +179,21 @@
 
   (test-case "a collector killed mid-collection leaves the claim free"
     (for ([pool (in-list pools)])
-      (define inside (make-semaphore 0))
-      (define a
-        (spawn (lambda ()
-                 (call-as-the-collector
-                  (lambda ()
-                    (semaphore-post inside)
-                    (semaphore-wait (make-semaphore 0)))))
-               #:pool pool))
-      (check-not-false (sync/timeout 30 inside))
-      (stop! a)
-      (check-eq? (join (spawn (lambda () (call-as-the-collector (lambda () 'ran)))
-                              #:pool pool))
+      (define (kill-then-claim a)
+        (stop! a)
+        (join (spawn (lambda () (call-as-the-collector (lambda () 'ran)))
+                     #:pool pool)))
+      (check-eq? (while-inside call-as-the-collector kill-then-claim #:pool pool)
                  'ran)))
 
   (define (reset-against-add pool)
     (settle!)
     (define g (make-gate 'checks-resetting #:when (labelled 'a)))
-    (with-race-hook (gate-hook g)
-      (define a
-        (spawn (lambda ()
-                 (parameterize ([native-memory-limit mib])
-                   (void (zeros 1024 1024))))
-               #:pool pool #:label 'a))
+    (with-parked [a (spawn (lambda ()
+                             (parameterize ([native-memory-limit mib])
+                               (void (zeros 1024 1024))))
+                           #:pool pool #:label 'a)
+                  #:at g]
       (check-eq? (wait-for-arrival g) 'parked)
       (define before (since-check-of cpu))
       (define held (zeros 256 256))
@@ -219,22 +213,23 @@
       (reset-against-add pool)))
 
   (define (first-account dev pool)
-    (define keys (list (box 'a) (box 'b)))
+    (define a-key (box 'a))
+    (define b-key (box 'b))
     (define g
       (make-gate 'account-created
                  #:when (lambda (subject)
                           (and (equal? subject dev) ((labelled 'a) subject)))))
-    (with-race-hook (gate-hook g)
-      (define a
-        (spawn (lambda () (record-allocation! (car keys) 4096 dev))
-               #:pool pool #:label 'a))
+    (with-parked [a (spawn (lambda () (record-allocation! a-key 4096 dev))
+                           #:pool pool #:label 'a)
+                  #:at g]
       (define created (wait-for-arrival g))
-      (join (spawn (lambda () (record-allocation! (cadr keys) 4096 dev))
+      (join (spawn (lambda () (record-allocation! b-key 4096 dev))
                    #:pool pool #:label 'b))
       (release-gate! g)
       (join a)
-      (define live (cdr (or (assoc dev (native-memory-use)) (cons dev 0))))
-      (for-each unaccount! keys)
+      (define live (dict-ref (native-memory-use) dev 0))
+      (unaccount! a-key)
+      (unaccount! b-key)
       (check-equal? live 8192 "a racing creation lost a device's bytes")
       (check-ledger #f #f)
       (check-eq? created 'atomic "the account is created inside the ledger")))

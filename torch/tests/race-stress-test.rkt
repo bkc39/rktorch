@@ -1,26 +1,22 @@
 #lang racket/base
 
 (module+ test
-  (require rackunit
+  (require (only-in racket/match match-define)
+           rackunit
            (only-in "../foreign.rkt"
                     backward! finalizer-diagnostics native-memory-limit ones
                     sum)
            (only-in "../nn.rkt" Linear)
            (only-in "private/race-harness.rkt"
-                    check-ledger churn-once! hooks join-all ledger-snapshot
-                    make-watch seeded-generator settle! spawn watch-hook
-                    with-race-hook))
+                    check-ledger churn-once! env-number join-all
+                    ledger-snapshot make-watch seeded-generator settle! spawn
+                    watch-hook with-race-hook))
 
   (define mib (* 1024 1024))
 
-  (define seconds-per-phase
-    (let ([text (getenv "RKTORCH_STRESS_SECONDS")])
-      (or (and text (string->number text)) 0.5)))
+  (define seconds-per-phase (env-number "RKTORCH_STRESS_SECONDS" 0.5))
 
   (define widths '(2 4 8 16))
-
-  (define (ledger-entries)
-    (cdr (assq 'ledger-entries (finalizer-diagnostics))))
 
   (define (rss-bytes)
     (define status "/proc/self/status")
@@ -29,11 +25,14 @@
            (lambda (in)
              (for/first ([line (in-lines in)]
                          #:when (regexp-match? #rx"^VmRSS:" line))
-               (* 1024 (string->number
-                        (cadr (regexp-match #rx"([0-9]+) kB" line)))))))))
+               (match-define (list _ kb) (regexp-match #rx"([0-9]+) kB" line))
+               (* 1024 (string->number kb)))))))
 
   (define (diagnostic key)
     (cdr (assq key (finalizer-diagnostics))))
+
+  (define (ledger-entries)
+    (diagnostic 'ledger-entries))
 
   (define ((until-stopped stop? step!))
     (let loop ([n 0])
@@ -65,7 +64,7 @@
     (define w (make-watch))
     (define stop? (box #f))
     (define counts
-      (with-race-hook (hooks (watch-hook w))
+      (with-race-hook (watch-hook w)
         (define workers
           (parameterize ([native-memory-limit (quotient mib 4)])
             (append
@@ -79,14 +78,15 @@
         (set-box! stop? #t)
         (begin0 (join-all workers #:seconds 300)
                 (settle!))))
+    (match-define (list worker-steps ... trainer-steps _adversary-steps) counts) ;; noqa
     (printf "stress: ~a workers, ~a steps, ~a trainer steps, ~a collections\n"
             width
-            (apply + (reverse (cddr (reverse counts))))
-            (list-ref counts width)
+            (apply + worker-steps)
+            trainer-steps
             (- (diagnostic 'pressure-collections) before))
     (check-ledger base w)
     (check-equal? (ledger-entries) entries "ledger entries left behind")
-    (check-true (positive? (list-ref counts width)) "the trainer never stepped"))
+    (check-true (positive? trainer-steps) "the trainer never stepped"))
 
   (test-case "parallel threads churning tensors keep the ledger invariants"
     (define rss-before (rss-bytes))
@@ -94,8 +94,10 @@
       (with-check-info (['workers width])
         (phase width)))
     (define rss-after (rss-bytes))
-    (when rss-before
-      (printf "stress: RSS ~a MiB -> ~a MiB\n"
-              (quotient rss-before mib) (quotient rss-after mib))
-      (check-true (< (- rss-after rss-before) (* 512 mib))
-                  "RSS grew past the churn's working set"))))
+    (cond
+      [rss-before
+       (printf "stress: RSS ~a MiB -> ~a MiB\n"
+               (quotient rss-before mib) (quotient rss-after mib))
+       (check-true (< (- rss-after rss-before) (* 512 mib))
+                   "RSS grew past the churn's working set")]
+      [else (void)])))

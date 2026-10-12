@@ -4,13 +4,13 @@
          (only-in ffi/unsafe/atomic call-as-atomic in-atomic-mode?)
          (only-in racket/dict dict-ref)
          (only-in racket/list remove-duplicates)
+         (only-in racket/match match)
          (only-in racket/string string-join)
          (only-in rackunit define-check fail-check)
-         ;; whole-module: the pattern's syntax classes live at phase 1 and
-         ;; only-in would strip them
          syntax/parse/define
+         (only-in threading ~>)
          (only-in "../../foreign.rkt"
-                  add finalizer-failures matmul native-memory-use
+                  + finalizer-failures matmul native-memory-use
                   reclaim-native-memory! sum zeros)
          (only-in (submod "../../foreign.rkt" unsafe) tensor-free!)
          (only-in "../../foreign/raw/fault.rkt" native-faulted)
@@ -20,6 +20,8 @@
          (only-in "../../foreign/raw/race-points.rkt" race-hook))
 
 (provide with-race-hook
+         with-parked
+         while-inside
          hooks
          labelled
          make-gate
@@ -39,6 +41,7 @@
          worker-thread
          join-all
          settle!
+         env-number
          seeded-generator
          churn-once!
          ledger-snapshot
@@ -52,6 +55,10 @@
     (dynamic-wind (lambda () (set-box! race-hook installed))
                   (lambda () body ...)
                   (lambda () (set-box! race-hook previous)))))
+
+(define (env-number name default)
+  (define text (getenv name))
+  (or (and text (string->number text)) default))
 
 (define ((hooks . all) name subject)
   (for ([h (in-list all)])
@@ -135,21 +142,18 @@
   (set-watch-max-holders! w (max (watch-max-holders w) (hash-count holders))))
 
 (define ((watch-hook w) name subject)
-  (case name
-    [(collector-claimed)
-     (call-as-atomic (lambda () (note-holder! w subject)))]
-    [(collector-releasing)
-     (call-as-atomic (lambda () (hash-remove! (watch-holders w) subject)))]
-    [(free-unaccounted)
-     (call-as-atomic (lambda () (note-release! w subject)))]
-    [(unaccount-entry-read)
-     (call-as-atomic (lambda () (note-unaccount! w subject)))]
-    [(finalizer-releasing)
-     (call-as-atomic
-      (lambda ()
+  (call-as-atomic
+   (lambda ()
+     (case name
+       [(collector-claimed) (note-holder! w subject)]
+       [(collector-releasing) (hash-remove! (watch-holders w) subject)]
+       [(free-unaccounted) (note-release! w subject)]
+       [(unaccount-entry-read) (note-unaccount! w subject)]
+       [(ledger-entry-added) (hash-remove! (watch-unaccounts w) subject)]
+       [(finalizer-releasing)
         (set-watch-finalized! w (add1 (watch-finalized w)))
-        (note-release! w subject)))]
-    [else (void)]))
+        (note-release! w subject)]
+       [else (void)]))))
 
 (define (seeded-generator seed label)
   (define g (make-pseudo-random-generator))
@@ -173,7 +177,7 @@
           g)))
   (lambda (_name _subject)
     (unless (in-atomic-mode?)
-      (perturb! (random (generator))))))
+      (~> (generator) random perturb!))))
 
 (struct worker (thread outcome))
 
@@ -188,24 +192,61 @@
 
 (define (join w #:seconds [seconds 60])
   (sync/timeout seconds (thread-dead-evt (worker-thread w)))
-  (define outcome (unbox (worker-outcome w)))
-  (cond
-    [(not outcome)
+  (match (unbox (worker-outcome w))
+    [(cons 'raised e) (raise e)]
+    [(cons 'returned v) v]
+    [#f
      (kill-thread (worker-thread w))
-     (error 'join "a worker did not finish within ~a s, or was killed" seconds)]
-    [(eq? (car outcome) 'raised) (raise (cdr outcome))]
-    [else (cdr outcome)]))
+     (error 'join "a worker did not finish within ~a s, or was killed" seconds)]))
 
 (define (stop! w)
   (kill-thread (worker-thread w)))
 
 (define (join-all workers #:seconds [seconds 120])
-  (for/list ([w (in-list workers)])
-    (join w #:seconds seconds)))
+  (map (lambda (w) (join w #:seconds seconds)) workers))
+
+(define (parking-hook g w)
+  (cond
+    [w (hooks (watch-hook w) (gate-hook g))]
+    [else (gate-hook g)]))
+
+(define-syntax-parse-rule
+  (with-parked [worker:id spawned:expr #:at g:expr
+                (~optional (~seq #:watch w:expr) #:defaults ([w #'#f]))]
+    body:expr ...+)
+  (let ([the-gate g])
+    (with-race-hook (parking-hook the-gate w)
+      (let ([worker spawned])
+        (dynamic-wind void
+                      (lambda () body ...)
+                      (lambda ()
+                        (release-gate! the-gate)
+                        (stop! worker)))))))
+
+(define (while-inside enter observe #:pool [pool #f])
+  (define inside (make-semaphore 0))
+  (define leave (make-semaphore 0))
+  (define w
+    (spawn (lambda ()
+             (enter (lambda ()
+                      (semaphore-post inside)
+                      (semaphore-wait leave))))
+           #:pool pool))
+  (define (observed)
+    (cond
+      [(sync/timeout 30 inside) (observe w)]
+      [else (error 'while-inside "the worker never got inside")]))
+  (dynamic-wind void
+                (lambda ()
+                  (define seen (observed))
+                  (cond
+                    [(thread-dead? (worker-thread w)) seen]
+                    [else (semaphore-post leave) (join w) seen]))
+                (lambda () (stop! w))))
 
 (define (churn-once! rng)
   (define a (zeros 64 64))
-  (define b (add a 1.0))
+  (define b (+ a 1.0))
   (define c (matmul b a))
   (define total (sum c))
   (cond
@@ -229,8 +270,9 @@
   (filter (lambda (entry) (positive? (cdr entry))) totals))
 
 (define (counter-mismatches)
-  (define counters (live-bytes-by-device))
-  (define fold (native-memory-use/fold))
+  (define-values (counters fold)
+    (call-as-atomic
+     (lambda () (values (live-bytes-by-device) (native-memory-use/fold)))))
   (for/list ([dev (in-list (remove-duplicates (map car (append counters fold))))]
              #:unless (let ([live (dict-ref counters dev 0)])
                         (and (>= live 0) (= live (dict-ref fold dev 0)))))

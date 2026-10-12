@@ -414,6 +414,7 @@ gets the point's name and a subject (a handle, a device, a thread).
 | `collector-claiming` | inside the claim's atomic section, decided but not taken | whether free |
 | `collector-claimed`, `collector-releasing` | the claim is held, or about to be dropped | thread |
 | `failure-reading` | a failed call, before its error is read | who |
+| `oom-kind-reading` | a failed call under the OOM retry, before its error kind is read | the raw procedure |
 
 **Tests** (`torch/tests/race-*.rkt`, helpers in `tests/private/race-harness.rkt`):
 
@@ -425,7 +426,8 @@ gets the point's name and a subject (a handle, a device, a thread).
   fold, zero and negative counters included; I2 at most one collector holds
   the claim (counted from the claim's points); I3 no handle released twice
   and no entry unaccounted twice (counted from the release and unaccount
-  points); the ledger back to its baseline after the drop; no finalizer
+  points; an entry added again under its handle, as an in-place move
+  does, starts a fresh count); the ledger back to its baseline after the drop; no finalizer
   failures; the fault latch clear.
 - Seeded fuzzing (`race-fuzz-test.rkt`): every point outside atomic mode
   yields or sleeps by a per-thread generator seeded from the run's seed and
@@ -470,7 +472,10 @@ an ordinary check:
 - #194: `tr_last_error` is per OS thread, and `last-failure` reads it in
   an atomic section, on the main OS thread. A failure parked before that
   read gets another thread's message, and a failing plain call on a
-  parallel thread reads the main thread's last error.
+  parallel thread reads the main thread's last error. The OOM retry reads
+  the error kind the same way, outside the call's atomic section, so a
+  failure parked before that read can retry on another thread's OOM or
+  miss its own.
 - #266: `tensor-free!` checks the handle's tag, then frees; two threads
   freeing one tensor can both pass the check, so both release it.
 - #168 stage 2: a backstop collection resets `since-check` to zero, losing
@@ -481,7 +486,8 @@ an ordinary check:
 runs on the runtime thread when the future is touched. A tensor sent
 through a place channel arrives as a bare `cpointer` to the same handle,
 with no finalizer and no ledger entry, while the sender's finalizer still
-frees it; the manual says not to.
+frees it; the manual says not to. `race-place-test.rkt` runs an op in a
+future and sends a tensor through a place.
 
 ## Allocation failure
 

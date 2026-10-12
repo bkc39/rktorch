@@ -1,27 +1,23 @@
 #lang racket/base
 
 (module+ test
-  (require rackunit
+  (require (only-in racket/list range)
+           rackunit
            (only-in "../foreign.rkt" native-memory-limit)
            (only-in "../foreign/raw/pressure.rkt" collect-at-trough!)
            (only-in "private/race-harness.rkt"
-                    check-ledger churn-once! fuzz-hook hooks join-all
-                    ledger-snapshot make-watch seeded-generator settle! spawn
-                    watch-hook with-race-hook))
+                    check-ledger churn-once! env-number fuzz-hook hooks
+                    join-all ledger-snapshot make-watch seeded-generator
+                    settle! spawn watch-hook with-race-hook))
 
   (define mib (* 1024 1024))
   (define threads 4)
   (define rounds 12)
 
-  (define (env-number name default)
-    (define text (getenv name))
-    (or (and text (string->number text)) default))
-
   (define seeds
     (cond
       [(env-number "RKTORCH_RACE_SEED" #f) => list]
-      [else (for/list ([k (in-range (env-number "RKTORCH_RACE_SEEDS" 16))])
-              (add1 k))]))
+      [else (range 1 (add1 (env-number "RKTORCH_RACE_SEEDS" 16)))]))
 
   (define (churn! seed label)
     (define rng (seeded-generator seed (list 'work label)))

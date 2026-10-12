@@ -254,10 +254,14 @@
 (define (((retry-on-oom failed? oom? collect!) raw-fn) . args)
   (define result (apply raw-fn args))
   (cond
-    [(and (failed? result) (oom?))
+    [(and (failed? result) (oom-kind? oom? raw-fn))
      (collect!)
      (apply raw-fn args)]
     [else result]))
+
+(define (oom-kind? oom? raw-fn)
+  (race-point oom-kind-reading raw-fn)
+  (oom?))
 
 ;; handle-returning raw calls: #f is the failure
 (define (oom-retry #:oom? [oom? last-error-oom?]
