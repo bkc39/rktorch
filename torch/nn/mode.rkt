@@ -1,9 +1,9 @@
 #lang racket/base
 
-(require (for-syntax racket/base)
+(require (for-syntax racket/base (only-in syntax/parse/pre ...+ expr))
          (only-in racket/contract/base -> any)
          (only-in racket/list append-map)
-         syntax/parse/define
+         (only-in syntax/parse/define define-syntax-parse-rule)
          (only-in "../private/contract.rkt" define/contract-out)
          (only-in "layer.rkt"
                   layer-mode layer-named-children layer-set-mode! layer?

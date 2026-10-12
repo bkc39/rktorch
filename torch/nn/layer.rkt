@@ -133,8 +133,15 @@
   m)
 
 (define (hooked? m)
-  (or (on-move? m)
-      (for/or ([c (in-list (layer-named-children m))]) (hooked? (cdr c)))))
+  (define seen (make-hasheq))
+  (let walk ([m m])
+    (cond
+      [(hash-has-key? seen m) #f]
+      [else
+       (hash-set! seen m #t)
+       (or (on-move? m)
+           (for/or ([c (in-list (layer-named-children m))])
+             (walk (cdr c))))])))
 
 (define (move-tree! m dev dtype before seen)
   (cond

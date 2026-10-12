@@ -35,6 +35,16 @@
      (define (layer-named-children self)
        (list (cons "inner" (Twice-inner self))))])
 
+  (struct Diamond (inner listings)
+    #:methods gen:layer
+    [(define (layer-forward self . inputs) (car inputs))
+     (define (layer-named-children self)
+       (set-box! (Diamond-listings self) (add1 (unbox (Diamond-listings self))))
+       (define inner (Diamond-inner self))
+       (if inner
+           (list (cons "left" inner) (cons "right" inner))
+           '()))])
+
   (test-case "the body runs only for a move that rebinds a tensor"
     (define runs (box 0))
     (define m (Counted runs))
@@ -80,4 +90,14 @@
     (define child (Counted runs))
     (to (Twice child) 'float64)
     (check-equal? (unbox runs) 1)
-    (check-equal? (tensor-dtype (car (parameters child))) 'float64)))
+    (check-equal? (tensor-dtype (car (parameters child))) 'float64))
+
+  (test-case "a move lists each child of a shared-children DAG a bounded number of times"
+    (define listings (box 0))
+    (define depth 24)
+    (define m
+      (for/fold ([inner #f]) ([_ (in-range depth)])
+        (Diamond inner listings)))
+    (to m 'float64)
+    (check-true (<= (unbox listings) (* 4 depth))
+                (format "~a listings for ~a layers" (unbox listings) depth))))
