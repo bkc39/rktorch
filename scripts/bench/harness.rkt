@@ -26,6 +26,9 @@
          load-average
          parse-cpu-times
          busy-cores
+         thread-setting
+         cuda-gpu-id
+         first-line
          with-temporary-path
          host-meta
          result->record
@@ -197,28 +200,54 @@
      (lambda () body ...)
      (lambda () (delete-directory/files name #:must-exist? #f)))))
 
-(define (thread-setting)
-  (define omp (getenv "OMP_NUM_THREADS"))
-  (define n (and omp (string->number omp)))
-  (if (exact-positive-integer? n)
-      (hasheq 'threads n 'threads_source "OMP_NUM_THREADS")
-      (hasheq 'threads (processor-count) 'threads_source "default")))
+(define (thread-count text)
+  (define n (and text (string->number text)))
+  (and (exact-positive-integer? n) n))
 
-(define (host-meta #:device device #:libtorch libtorch #:repo [repo (current-directory)])
+(define (thread-setting #:aten aten #:omp omp #:mkl mkl #:cores cores)
+  (define mkl-n (thread-count mkl))
+  (define omp-n (thread-count omp))
+  (define-values (threads source)
+    (cond
+      [(exact-positive-integer? aten) (values aten "at::get_num_threads")]
+      [mkl-n (values mkl-n "MKL_NUM_THREADS")]
+      [omp-n (values omp-n "OMP_NUM_THREADS")]
+      [else (values cores "default")]))
+  (hasheq 'threads threads 'threads_source source
+          'omp_num_threads omp 'mkl_num_threads mkl))
+
+(define (cuda-gpu-id visible)
+  (match (and visible (string-split visible ","))
+    [(cons id _) (string-trim id)]
+    [_ "0"]))
+
+(define (first-line text)
+  (match (and text (string-split text "\n"))
+    [(cons line _) (string-trim line)]
+    [_ #f]))
+
+(define (host-meta #:device device #:libtorch libtorch #:threads [aten #f]
+                   #:repo [repo (current-directory)])
   (define (git . args) (apply command-output "git" "-C" (path->string repo) args))
   (define sha (git "rev-parse" "HEAD"))
   (define status (git "status" "--porcelain" "--untracked-files=no"))
-  (define threads (thread-setting))
+  (define threads (thread-setting #:aten aten #:omp (getenv "OMP_NUM_THREADS")
+                                  #:mkl (getenv "MKL_NUM_THREADS") #:cores (processor-count)))
   (hasheq 'git_sha (or sha "unknown")
           'git_dirty (and status (positive? (string-length status)))
           'racket (string-append (version) " " (symbol->string (system-type 'vm)))
           'libtorch libtorch
           'device (~a device)
           'gpu (and (eq? device 'cuda)
-                    (command-output "nvidia-smi" "--query-gpu=name"
-                                    "--format=csv,noheader"))
+                    (first-line
+                     (command-output "nvidia-smi"
+                                     (string-append "--id="
+                                                    (cuda-gpu-id (getenv "CUDA_VISIBLE_DEVICES")))
+                                     "--query-gpu=name" "--format=csv,noheader")))
           'threads (hash-ref threads 'threads)
           'threads_source (hash-ref threads 'threads_source)
+          'omp_num_threads (hash-ref threads 'omp_num_threads)
+          'mkl_num_threads (hash-ref threads 'mkl_num_threads)
           'cores (processor-count)
           'cpu (or (proc-field "/proc/cpuinfo" "model name")
                    (command-output "sysctl" "-n" "machdep.cpu.brand_string"))
@@ -346,6 +375,30 @@
     (check-equal? (parse-load-average "1.50 2.25 3.00 4/1701 99") '(1.5 2.25 3.0))
     (check-equal? (parse-load-average "{ 1.23 1.45 1.67 }") '(1.23 1.45 1.67))
     (check-false (parse-load-average "")))
+
+  (test-case "threads come from ATen, else the variable MKL ops obey"
+    (define (label aten omp mkl)
+      (define t (thread-setting #:aten aten #:omp omp #:mkl mkl #:cores 16))
+      (list (hash-ref t 'threads) (hash-ref t 'threads_source)))
+    (check-equal? (label 3 "2" "3") '(3 "at::get_num_threads"))
+    (check-equal? (label #f "2" "3") '(3 "MKL_NUM_THREADS"))
+    (check-equal? (label #f "2" "x") '(2 "OMP_NUM_THREADS"))
+    (check-equal? (label #f #f "0") '(16 "default"))
+    (define t (thread-setting #:aten 8 #:omp #f #:mkl "3" #:cores 16))
+    (check-false (hash-ref t 'omp_num_threads))
+    (check-equal? (hash-ref t 'mkl_num_threads) "3")
+    (check-equal? (hash-ref (host-meta #:device 'cpu #:libtorch "x" #:threads 5) 'threads_source)
+                  "at::get_num_threads"))
+
+  (test-case "the GPU is the selected device's, one line"
+    (check-equal? (cuda-gpu-id #f) "0")
+    (check-equal? (cuda-gpu-id "") "0")
+    (check-equal? (cuda-gpu-id "2,3") "2")
+    (check-equal? (cuda-gpu-id "GPU-8a1f,GPU-77c2") "GPU-8a1f")
+    (check-equal? (first-line "NVIDIA A100\nNVIDIA RTX 3090\n") "NVIDIA A100")
+    (check-equal? (first-line "NVIDIA GeForce RTX 3090 Ti\n") "NVIDIA GeForce RTX 3090 Ti")
+    (check-false (first-line ""))
+    (check-false (first-line #f)))
 
   (test-case "a record is one JSON line carrying its samples and host"
     (define meta (host-meta #:device 'cpu #:libtorch "2.14.0"))

@@ -112,8 +112,10 @@ One JSON object per line: `suite` (`micro`, `e2e`), `group`, `case`,
 `variant`, `unit`, `reps`, `samples` (one per round), `gc_ms`, `stats`
 (`median` `q1` `q3` `iqr` `min` `max` `n`), `load` and `load_end` (1, 5
 and 15-minute averages), and `meta`: `git_sha`, `git_dirty`, `racket`,
-`libtorch`, `device`, `gpu`, `threads` and where that came from, `cores`,
-`cpu`, `affinity`, `host`, `os`; `run_id` is shared by every record one
+`libtorch`, `device`, `gpu` (the selected CUDA device's name), `threads`
+and where that came from (`at::get_num_threads`, else `MKL_NUM_THREADS`,
+`OMP_NUM_THREADS` or the core count), `omp_num_threads` and
+`mkl_num_threads` as set, `cores`, `cpu`, `affinity`, `host`, `os`; `run_id` is shared by every record one
 `run.rkt` invocation writes, and the summary pairs A/B ratios only within
 one. The summary gives each micro invocation its own section, headed by its
 commit, host, execution (device, threads and their source, GPU) and run id,
@@ -124,6 +126,10 @@ per child: `steps`, `steps_per_epoch`, `epoch_s`, `epoch_gc_ms`, `step_ms`,
 `steps_per_s`, `steps_per_s_median`, `wall_s`, `exit_code`, `settings`. An
 `e2e` record's `meta` comes from the child that ran it, so an A/B across
 checkouts records each one's commit, and the summary shows it per row.
+A child sees none of the caller's example variables (`EPOCHS`, `STEPS`,
+`EXCERPT`, `OUT`, ... as its runner reads them) except those its settings
+give. A failed example writes an `error` record (`case`, `variant`,
+`exit_code`, `error`), listed under Failures in the summary.
 
 ## Baseline
 

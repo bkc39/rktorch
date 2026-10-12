@@ -2,8 +2,9 @@
 
 (require (for-syntax racket/base)
          (only-in compiler/find-exe find-exe)
-         (only-in racket/file make-temporary-directory)
+         (only-in racket/file file->string make-temporary-directory)
          (only-in racket/format ~a)
+         (only-in racket/list remove-duplicates)
          (only-in racket/match match match-define)
          (only-in racket/runtime-path define-runtime-path)
          (only-in racket/system process*/ports)
@@ -12,9 +13,11 @@
          (only-in "training.rkt" analyze-steps read-steps))
 
 (provide (struct-out example)
+         (struct-out exn:fail:user:e2e)
          examples
          find-examples
          example-env
+         control-variables
          merged-settings
          settings->jsexpr
          cache-env
@@ -26,6 +29,8 @@
 (define-runtime-path recorder "training.rkt")
 
 (struct example (name short full epochs-var warmup optimizer) #:transparent)
+
+(struct exn:fail:user:e2e exn:fail:user (variant exit-code))
 
 (define examples
   (list (example "05-mnist" '(("EPOCHS" . 3)) '(("EPOCHS" . 3)) "EPOCHS" 0 'first)
@@ -87,19 +92,28 @@
 (define (settings->jsexpr settings)
   (for/hasheq ([s (in-list settings)]) (values (string->symbol (car s)) (~a (cdr s)))))
 
-(define (child-environment settings)
+(define (control-variables ex runner)
+  (remove-duplicates
+   (append (map car (example-short ex))
+           (map car (example-full ex))
+           (regexp-match* #px"\\((?:env-number|getenv) \"([^\"]+)\"" (file->string runner)
+                          #:match-select cadr))))
+
+(define (child-environment cleared settings)
   (define env (environment-variables-copy (current-environment-variables)))
+  (for ([name (in-list cleared)])
+    (environment-variables-set! env (string->bytes/utf-8 name) #f))
   (for ([s (in-list settings)])
     (environment-variables-set! env (string->bytes/utf-8 (car s))
                                 (string->bytes/utf-8 (~a (cdr s)))))
   env)
 
-(define (run-child runner dir out settings log)
+(define (run-child runner dir out cleared settings log)
   (define form
     `(begin
        (require (only-in (file ,(path->string recorder)) record-steps!))
        (record-steps! ,(path->string runner) ,(path->string out))))
-  (parameterize ([current-environment-variables (child-environment settings)]
+  (parameterize ([current-environment-variables (child-environment cleared settings)]
                  [current-directory dir])
     (match-define (list _out _in _pid _err control)
       (process*/ports log (open-input-bytes #"") log
@@ -119,7 +133,7 @@
   (define-values (code events wall meta)
     (with-temporary-path (dir (make-temporary-directory "rktorch-bench-~a"))
       (define out (build-path dir "rktorch-steps.json"))
-      (define code (run-child runner dir out env log))
+      (define code (run-child runner dir out (control-variables ex runner) env log))
       (define-values (events wall meta)
         (if (file-exists? out) (read-steps out) (values '() #f #f)))
       (values code events wall meta)))
@@ -133,11 +147,15 @@
              'meta meta
              'settings (settings->jsexpr env)))
 
-(define (primary-ms ex analysis)
+(define (primary-ms ex variant analysis)
   (cond
     [(hash-ref analysis 'error #f)
-     (raise-user-error 'e2e "~a: ~a (exit code ~a)" (example-name ex)
-                       (hash-ref analysis 'error) (hash-ref analysis 'exit_code))]
+     (raise (exn:fail:user:e2e
+             (format "e2e: ~a: ~a (exit code ~a)" (example-name ex)
+                     (hash-ref analysis 'error) (hash-ref analysis 'exit_code))
+             (current-continuation-marks)
+             variant
+             (hash-ref analysis 'exit_code)))]
     [(pair? (hash-ref analysis 'epoch_s '()))
      (define epochs (hash-ref analysis 'epoch_s))
      (/ (* 1000.0 (apply + epochs)) (length epochs))]
@@ -157,7 +175,7 @@
                     (run-example ex #:runner (runner-for ex) #:scale scale
                                  #:settings (cdr v) #:log log))
                   (on-run ex (car v) analysis)
-                  (primary-ms ex analysis))
+                  (primary-ms ex (car v) analysis))
                 #:self-timed? #t)))
 
 (module+ test
@@ -207,6 +225,20 @@
     (check-true (positive? (hash-ref a 'wall_s)))
     (check-true (string? (hash-ref (hash-ref a 'meta) 'libtorch))))
 
+  (test-case "a child sees only the example settings it is given"
+    (check-equal? (control-variables (cadr examples) (example-runner (cadr examples)))
+                  '("STEPS" "EXCERPT"))
+    (check-equal? (control-variables fixture stepper) '("EPOCHS" "STEPS"))
+    (parameterize ([current-environment-variables
+                    (environment-variables-copy (current-environment-variables))])
+      (putenv "STEPS" "5")
+      (putenv "EPOCHS" "1")
+      (check-equal? (hash-ref (run-example fixture #:runner stepper #:log quiet) 'steps) 9)
+      (define given (run-example fixture #:runner stepper #:settings '(("STEPS" . "7"))
+                                 #:log quiet))
+      (check-equal? (hash-ref given 'steps) 7)
+      (check-equal? (hash-ref (hash-ref given 'settings) 'STEPS) "7")))
+
   (test-case "variants alternate, and a failed run raises"
     (define seen '())
     (define cases
@@ -221,5 +253,9 @@
     (check-true (andmap positive? (result-per-call (car results))))
     (define broken (e2e-cases (list fixture) #:variants '((#f ("EPOCHS" . 1)))
                               #:runner-for (lambda (_ex) stepper) #:log quiet))
-    (check-exn #rx"stepper: no measured steps"
+    (check-exn (lambda (e)
+                 (and (exn:fail:user:e2e? e)
+                      (regexp-match? #rx"stepper: no measured steps" (exn-message e))
+                      (not (exn:fail:user:e2e-variant e))
+                      (equal? (exn:fail:user:e2e-exit-code e) 0)))
                (lambda () (measure broken #:warmup 0 #:rounds 1 #:load void)))))

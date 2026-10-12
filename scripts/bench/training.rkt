@@ -4,7 +4,7 @@
          (only-in json read-json write-json)
          (only-in racket/list drop last remove-duplicates)
          (only-in "harness.rkt" host-meta summarize)
-         (only-in "shim.rkt" torch-dir))
+         (only-in "shim.rkt" aten-threads torch-dir))
 
 (provide record-steps!
          read-steps
@@ -23,6 +23,7 @@
   (define accelerator-if-available (dynamic-require 'torch 'accelerator-if-available))
   (define meta (host-meta #:device (device-type (accelerator-if-available))
                           #:libtorch ((dynamic-require 'torch 'torch-version))
+                          #:threads (aten-threads)
                           #:repo torch-dir))
   (define receiver (make-log-receiver (current-logger) 'debug 'rktorch-step))
   (define t0 (current-inexact-monotonic-milliseconds))

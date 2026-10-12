@@ -11,12 +11,14 @@
          (only-in "crossings.rkt" crossing-cases)
          (only-in "e2e.rkt"
                   cache-env e2e-cases example-epochs-var example-name example-runner
-                  examples find-examples merged-settings settings->jsexpr)
+                  examples exn:fail:user:e2e-exit-code exn:fail:user:e2e-variant
+                  exn:fail:user:e2e? find-examples merged-settings settings->jsexpr)
          (only-in "harness.rkt"
                   busy-cores format-result host-meta load-average measure result->record
                   result-name summarize write-record)
          (only-in "layers.rkt" layer-cases)
-         (only-in "ops.rkt" op-cases))
+         (only-in "ops.rkt" op-cases)
+         (only-in "shim.rkt" aten-threads))
 
 (provide run-suites
          parse-arguments
@@ -84,7 +86,7 @@
   (define (measure-group group cases #:unit [unit "ns"] #:scale [unit-scale 1e6]
                          #:case-name [case-name #f] #:on-device [on-device 'cpu])
     (wait-for-load max-load log)
-    (define meta (host-meta #:device on-device #:libtorch libtorch))
+    (define meta (host-meta #:device on-device #:libtorch libtorch #:threads (aten-threads)))
     (fprintf log "~a~a\n" group (if case-name (format " ~a" case-name) ""))
     (for ([r (in-list (measure cases #:warmup warmup #:rounds (or rounds 5)))])
       (fprintf log "  ~a\n" (format-result r #:unit unit #:scale unit-scale))
@@ -122,7 +124,7 @@
     (for/list ([v (in-list variants)]) (cons (car v) (append cached (cdr v)))))
   (for ([ex (in-list exs)])
     (wait-for-load max-load log)
-    (define meta (host-meta #:device device #:libtorch libtorch))
+    (define meta (host-meta #:device device #:libtorch libtorch #:threads (aten-threads)))
     (define rates (make-hash))
     (define gcs (make-hash))
     (define metas (make-hash))
@@ -141,14 +143,18 @@
     (with-handlers ([exn:fail:user?
                      (lambda (e)
                        (fprintf log "~a\n" (exn-message e))
+                       (define failed? (exn:fail:user:e2e? e))
                        (emit (hasheq 'schema 1 'suite "e2e" 'group "error"
-                                     'case (example-name ex) 'error (exn-message e)
+                                     'case (example-name ex)
+                                     'variant (and failed? (exn:fail:user:e2e-variant e))
+                                     'exit_code (and failed? (exn:fail:user:e2e-exit-code e))
+                                     'error (exn-message e)
                                      'meta meta)))])
       (define results
         (measure (e2e-cases (list ex) #:scale scale #:variants with-cache #:on-run on-run
                             #:log log #:runner-for runner-for)
                  #:warmup 0 #:rounds rounds))
-      (for ([r (in-list results)] [v (in-list variants)])
+      (for ([r (in-list results)] [v (in-list with-cache)])
         (emit
          (result->record r #:suite "e2e" #:group "summary" #:unit unit
                          #:meta (hash-ref metas (car v) meta)
@@ -285,7 +291,27 @@
     (define md (summary-markdown records))
     (check-regexp-match #rx"## End to end" md)
     (check-regexp-match #rx"\\| stepper \\| b vs a \\|" md)
-    (check-regexp-match #rx"n < 6" md))
+    (check-regexp-match #rx"n < 6" md)
+    (check-regexp-match #rx"## Failures" md)
+    (check-regexp-match #rx"\\| stepper \\| - \\| 0 \\| e2e: stepper: no measured steps" md))
+
+  (test-case "with a cache, the summary records the settings its runs used"
+    (define fixture (example "stepper" '(("EPOCHS" . 2)) '(("EPOCHS" . 2)) "EPOCHS" 0 'first))
+    (define env (environment-variables-copy (current-environment-variables)))
+    (for ([name (in-list (environment-variables-names env))]
+          #:when (regexp-match? #rx#"^RKTORCH_.*_DIR$" name))
+      (environment-variables-set! env name #f))
+    (define records
+      (parameterize ([current-environment-variables env])
+        (records-of (lambda (out)
+                      (run-e2e (list fixture) #:rounds 1 #:full? #f #:variants '(("a"))
+                               #:cache "c" #:max-load #f #:libtorch "x" #:out out #:log quiet
+                               #:runner-for (lambda (_ex) stepper))))))
+    (match-define (list run summary)
+      (filter (lambda (r) (member (hash-ref r 'group) '("run" "summary"))) records))
+    (check-equal? (hash-ref summary 'settings) (hash-ref run 'settings))
+    (check-true (for/or ([k (in-hash-keys (hash-ref summary 'settings))])
+                  (regexp-match? #rx"^RKTORCH_.*_DIR$" (symbol->string k)))))
 
   (test-case "flags go before or after the suites"
     (define (parsed . argv)

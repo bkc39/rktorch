@@ -4,7 +4,7 @@
          (only-in racket/format ~a ~r)
          (only-in racket/list append* remove-duplicates)
          (only-in racket/match match-define)
-         (only-in racket/string string-join)
+         (only-in racket/string string-join string-trim)
          (only-in "harness.rkt" paired-ratio)
          (only-in "layers.rkt" layer-order))
 
@@ -47,6 +47,12 @@
 (define (invocation r)
   (format "~a, ~a, ~a, run ~a" (commit r) (host r) (execution r) (ref r 'run_id)))
 
+(define (one-line text)
+  (regexp-replace* #rx"[ \t]*[\r\n]+[ \t]*" (string-trim (~a text)) " / "))
+
+(define (cell text)
+  (regexp-replace* #rx"\\|" (one-line text) "\\\\|"))
+
 (define (table header rows)
   (string-join
    (append (list (string-join header " | " #:before-first "| " #:after-last " |")
@@ -55,7 +61,7 @@
                               #:before-first "|"
                               #:after-last "|"))
            (for/list ([row (in-list rows)])
-             (string-join (map ~a row) " | " #:before-first "| " #:after-last " |")))
+             (string-join (map cell row) " | " #:before-first "| " #:after-last " |")))
    "\n"))
 
 (define (median r) (ref r 'stats 'median))
@@ -161,6 +167,12 @@
                             ratios))
       runs))
 
+(define (failure-section records)
+  (table '("example" "variant" "exit code" "error")
+         (for/list ([r (in-list records)])
+           (list (ref r 'case) (or (ref r 'variant) "-") (or (ref r 'exit_code) "-")
+                 (or (ref r 'error) "-")))))
+
 (struct section (suite group title render context))
 
 (define sections
@@ -170,7 +182,8 @@
         (section "micro" "ops" "Per op" op-section invocation)
         (section "micro" "contracts" "Validation strategies" contract-section invocation)
         (section "micro" "pipeline" "A real pipeline" (plain-section "pipeline") invocation)
-        (section "e2e" "summary" "End to end" e2e-section host)))
+        (section "e2e" "summary" "End to end" e2e-section host)
+        (section "e2e" "error" "Failures" failure-section host)))
 
 (define (header records)
   (define (all key) (string-join (remove-duplicates (map (lambda (r) (~a (ref r 'meta key))) records))
@@ -187,7 +200,8 @@
                 [rs (in-value (select records (section-suite s) (section-group s)))]
                 #:when (pair? rs)
                 [c (in-list (by-context rs (section-context s)))])
-      (string-append "## " (section-title s) " (" (car c) ")\n\n" ((section-render s) (cdr c))
+      (string-append "## " (section-title s) " (" (one-line (car c)) ")\n\n"
+                     ((section-render s) (cdr c))
                      "\n")))
    "\n"))
 
@@ -201,7 +215,10 @@
   (display (summary-markdown (read-records paths) #:title title)))
 
 (module+ test
-  (require rackunit)
+  (require (only-in json write-json)
+           (only-in racket/file make-temporary-file)
+           rackunit
+           (only-in "harness.rkt" with-temporary-path))
 
   (define (meta host #:threads [threads 4] #:source [source "default"])
     (hasheq 'git_sha "abcdef0123" 'device "cpu" 'threads threads 'threads_source source
@@ -246,6 +263,36 @@
     (check-regexp-match #rx"\\| stepper \\| four vs one \\| 0\\.250 \\|" md)
     (check-regexp-match #rx"cpu, 1 threads \\(OMP_NUM_THREADS\\)" md)
     (check-regexp-match #rx"cpu, 4 threads \\(OMP_NUM_THREADS\\)" md))
+
+  (define (error-record variant code message)
+    (hasheq 'suite "e2e" 'group "error" 'case "stepper" 'variant variant 'exit_code code
+            'error message 'run_id "r1" 'meta (meta "lab")))
+
+  (define (markdown-of records)
+    (with-temporary-path (path (make-temporary-file "summary-~a.jsonl"))
+      (call-with-output-file path #:exists 'truncate
+        (lambda (out) (for ([r (in-list records)]) (write-json r out) (newline out))))
+      (summary-markdown (read-records (list path)))))
+
+  (test-case "a file of failures alone still reports them"
+    (define md (markdown-of (list (error-record "b" 1 "e2e: stepper: boom (exit code 1)")
+                                  (hasheq 'suite "e2e" 'group "error" 'case "06-gpt"
+                                          'error "no example" 'meta (meta "lab")))))
+    (check-false (regexp-match? #rx"## End to end" md))
+    (check-regexp-match #rx"## Failures \\(lab " md)
+    (check-regexp-match #rx"\\| stepper \\| b \\| 1 \\| e2e: stepper: boom \\(exit code 1\\) \\|" md)
+    (check-regexp-match #rx"\\| 06-gpt \\| - \\| - \\| no example \\|" md))
+
+  (test-case "failures follow the runs that succeeded"
+    (define md (markdown-of (list (summary-record "a" "r1" "lab" '(10.0 10.0))
+                                  (error-record "b" 137 "killed\nby | signal"))))
+    (check-regexp-match #rx"## End to end[^#]*\\| stepper \\| a \\|[^#]*## Failures" md)
+    (check-regexp-match #rx"\\| stepper \\| b \\| 137 \\| killed / by \\\\\\| signal \\|\n" md))
+
+  (test-case "a multi-line GPU name stays in its cell"
+    (define m (hash-set* (meta "lab") 'device "cuda" 'gpu "GPU A\nGPU B"))
+    (define md (summary-markdown (list (summary-record "a" "r1" "lab" '(1.0 1.0) #:meta m))))
+    (check-regexp-match #rx"cuda, 4 threads \\(default\\), GPU A / GPU B \\|" md))
 
   (test-case "appended micro invocations keep a section each"
     (define md (summary-markdown (list (crossing-record "r1" 100.0) (crossing-record "r2" 200.0))))
