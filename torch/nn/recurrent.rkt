@@ -6,19 +6,19 @@
          (only-in "../foreign.rkt"
                   device-type exn:fail:rktorch:oom? tensor-device tensor-dtype
                   tensor-shape tensor? with-no-grad zeros)
-         (only-in "../foreign/error.rkt" check-ok)
+         (only-in "../foreign/addresses.rkt"
+                  tensor-data-ptr tensor-storage-ptr)
          (only-in "../foreign/raw/fault.rkt" native-fault?)
-         (only-in "../foreign/raw/tensor.rkt"
-                  tr-tensor-data-ptr/raw tr-tensor-storage-ptr/raw)
          (only-in "../generated.rkt"
                   cudnn-rnn-flatten-weight gru-input lstm-input)
+         (only-in "../private/lock.rkt" make-lock with-lock)
          (only-in "init.rkt" uniform-init)
          (only-in "layer.rkt"
                   define-layer parameters-by-key training? with-mode)
          (only-in "parameter.rkt" Parameter))
 
 (struct rnn (who gates state-count cudnn-mode input-size hidden-size
-             num-layers bias? batch-first? dropout bidirectional?))
+             num-layers bias? batch-first? dropout bidirectional? lock))
 
 ;; nn.RNNBase's order, which is both the flat-weight order ATen expects and
 ;; reset_parameters' draw order: per layer, per direction, w_ih w_hh b_ih b_hh
@@ -47,33 +47,14 @@
     (cons (format "~a_l~a~a" (car entry) layer suffix)
           (apply draw (cdr entry)))))
 
-;; Keyed on the first weight, which `to!` mutates in place, against the
-;; addresses the weights had once flattened. Packed weights are views of one
-;; storage, so the storage address goes in beside each element's: separate
-;; copies that a CUDA round trip happened to allocate at the packed offsets
-;; would otherwise read as still packed.
+;; packed weights are views of one storage, so compare the storage address too
 (define flattened (make-weak-hasheq))
 
-;; Which weights cudnn refused to flatten. The refusal is swallowed so the
-;; layer still runs, and the addresses are recorded either way so it is not
-;; asked twice, which together would hide a defect in the arguments we pass as
-;; a silent fall back to compacted copies; recording it lets a test say the
-;; flattening happened rather than only that the outputs agree.
 (define refused (make-weak-hasheq))
-
-(define (element-address t)
-  (define-values (rc address) (tr-tensor-data-ptr/raw t))
-  (check-ok rc 'storage-signature)
-  address)
-
-(define (storage-start t)
-  (define-values (rc address) (tr-tensor-storage-ptr/raw t))
-  (check-ok rc 'storage-signature)
-  address)
 
 (define (storage-signature weights)
   (for/list ([w (in-list weights)])
-    (cons (element-address w) (storage-start w))))
+    (cons (tensor-data-ptr w) (tensor-storage-ptr w))))
 
 ;; Flattening is an optimisation cudnn asks for, never a requirement: a build
 ;; or a dtype it refuses still runs, on compacted copies, and refusing again
@@ -88,11 +69,7 @@
                 (exn:fail:contract? e)
                 (native-fault? e)))))
 
-(define flattenings 0)
-
 (define (flatten-weights! spec weights)
-  (set! flattenings (add1 flattenings))
-  (hash-remove! refused (car weights))
   (with-handlers ([cudnn-refusal?
                    (lambda (_e) (hash-set! refused (car weights) #t) #f)])
     (with-no-grad
@@ -106,33 +83,45 @@
                                 (rnn-batch-first? spec)
                                 (rnn-bidirectional? spec)))))
 
-;; Threads forwarding one layer take turns here, so one packs the weights and
-;; the rest find them packed. A `to` on another thread takes no turn, so a
-;; packing is recorded only while the weights still lie in the buffer it
-;; built; a move between the two leaves nothing recorded and the next forward
-;; packs again.
-(define packing (make-semaphore 1))
+(define packing-hook (make-parameter void))
 
-(define after-packing (make-parameter void))
+;; a `to` on another thread takes no turn, so record the packing only while the
+;; weights still lie in the buffer
+(define (packing-record now buffer-start packed)
+  (cond
+    [(and buffer-start
+          (for/and ([entry (in-list packed)]) (= (cdr entry) buffer-start)))
+     packed]
+    [buffer-start #f]
+    [(equal? now packed) now]
+    [else #f]))
 
-(define (ensure-flat! spec weights)
-  (call-with-semaphore packing check-packing! #f spec weights))
+(define (repack! spec weights now)
+  ((packing-hook) 'before)
+  (hash-remove! refused (car weights))
+  (define buffer (flatten-weights! spec weights))
+  ((packing-hook) 'after)
+  (packing-record now
+                  (and buffer (tensor-storage-ptr buffer))
+                  (storage-signature weights)))
 
 (define (check-packing! spec weights)
   (define key (car weights))
   (define now (storage-signature weights))
   (define stale? (not (equal? now (hash-ref flattened key #f))))
   (define cuda? (and stale? (eq? (device-type (tensor-device key)) 'cuda)))
-  (define buffer (and cuda? (flatten-weights! spec weights)))
-  (when buffer ((after-packing)))
-  (define packed (and buffer (storage-signature weights)))
-  (define buffer-start (and buffer (storage-start buffer)))
+  (define record (if cuda? (repack! spec weights now) now))
   (cond
     [(not stale?) (void)]
-    [(not buffer) (hash-set! flattened key now)]
-    [(for/and ([entry (in-list packed)]) (= (cdr entry) buffer-start))
-     (hash-set! flattened key packed)]
-    [else (hash-remove! flattened key)]))
+    [record (hash-set! flattened key record)]
+    [else
+     (hash-remove! flattened key)
+     (hash-remove! refused key)]))
+
+(define (ensure-flat! spec weights)
+  (unless (equal? (storage-signature weights)
+                  (hash-ref flattened (car weights) #f))
+    (with-lock (rnn-lock spec) (check-packing! spec weights))))
 
 (define (zero-state spec x)
   (define batch
@@ -203,7 +192,8 @@
           #:dropout [dropout 0.0]
           #:bidirectional? [bidirectional? #f])
   (set! spec (rnn 'LSTM 4 2 2 input-size hidden-size num-layers bias?
-                  batch-first? (exact->inexact dropout) bidirectional?))
+                  batch-first? (exact->inexact dropout) bidirectional?
+                  (make-lock)))
   (set! entries (draw-parameters spec))
   (set! params (parameters-by-key entries))
   #:forward (x . state)
@@ -224,16 +214,16 @@
           #:dropout [dropout 0.0]
           #:bidirectional? [bidirectional? #f])
   (set! spec (rnn 'GRU 3 1 3 input-size hidden-size num-layers bias?
-                  batch-first? (exact->inexact dropout) bidirectional?))
+                  batch-first? (exact->inexact dropout) bidirectional?
+                  (make-lock)))
   (set! entries (draw-parameters spec))
   (set! params (parameters-by-key entries))
   #:forward (x . state)
   (with-mode (run spec entries gru-input x state mode)))
 
 (module+ private
-  (provide after-packing cudnn-refusal? flattened-signature flatten-count
-           flatten-refused? record-flattened! storage-signature)
-  (define (flatten-count) flattenings)
+  (provide cudnn-refusal? flattened-signature flatten-refused? packing-hook
+           packing-record record-flattened! storage-signature)
   (define (flattened-signature weight) (hash-ref flattened weight #f))
   (define (record-flattened! weight signature)
     (hash-set! flattened weight signature))

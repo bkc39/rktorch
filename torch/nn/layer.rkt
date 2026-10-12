@@ -110,18 +110,26 @@
              #:unless (hash-ref theirs t #f))
     t))
 
-;; `#:on-move` reacts to what one `to` rebound, so every placement is read
-;; before any child moves: a tensor tied across siblings is moved by the first
-;; and would look untouched to the second if each read its own.
+(define (tree-placements m)
+  (define seen (make-hasheq))
+  (define before (make-hasheq))
+  (let walk ([m m])
+    (cond
+      [(hash-has-key? seen m) (void)]
+      [else
+       (hash-set! seen m #t)
+       (for ([c (in-list (layer-named-children m))])
+         (walk (cdr c)))
+       (for ([t (in-list (layer-own-tensors m))])
+         (hash-set! before t (placement t)))]))
+  before)
+
+;; a tensor tied across siblings moves with the first, so read placements first
 (define (move-layer! m dev dtype)
   (when (and dtype (not (memq dtype floating-dtypes)))
     (raise-arguments-error 'to "a layer only moves to a floating-point dtype"
                            "dtype" dtype))
-  (define before
-    (and (hooked? m)
-         (for/hasheq ([t (in-list (append (parameters m) (buffers m)))])
-           (values t (placement t)))))
-  (move-tree! m dev dtype before (make-hasheq))
+  (move-tree! m dev dtype (and (hooked? m) (tree-placements m)) (make-hasheq))
   m)
 
 (define (hooked? m)

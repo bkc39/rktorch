@@ -27,6 +27,14 @@
     #:forward (x)
     x)
 
+  (struct Twice (inner)
+    #:methods gen:layer
+    [(define (layer-forward self . inputs)
+       (define inner (Twice-inner self))
+       (inner (apply inner inputs)))
+     (define (layer-named-children self)
+       (list (cons "inner" (Twice-inner self))))])
+
   (test-case "the body runs only for a move that rebinds a tensor"
     (define runs (box 0))
     (define m (Counted runs))
@@ -65,4 +73,11 @@
     (define m (Pair child child))
     (to m 'float64)
     (check-equal? (unbox runs) 1)
-    (check-equal? (tensor-dtype (car (parameters m))) 'float64)))
+    (check-equal? (tensor-dtype (car (parameters m))) 'float64))
+
+  (test-case "a handwritten wrapper that lists no tensors still moves its child"
+    (define runs (box 0))
+    (define child (Counted runs))
+    (to (Twice child) 'float64)
+    (check-equal? (unbox runs) 1)
+    (check-equal? (tensor-dtype (car (parameters child))) 'float64)))

@@ -1,15 +1,14 @@
 #lang racket/base
 
-;; The CUDA cases are where flattening happens; on the CPU the same loops run
-;; the bookkeeping with nothing to pack.
-
 (module+ test
-  (require rackunit
+  (require (only-in racket/list make-list)
+           (only-in racket/match == match-lambda)
+           rackunit
            "../main.rkt"
            "../nn.rkt"
            (only-in (submod "../nn/recurrent.rkt" private)
-                    after-packing flatten-count flattened-signature
-                    storage-signature))
+                    flatten-refused? flattened-signature packing-hook
+                    packing-record storage-signature))
 
   (define device (if (cuda-available?) 'cuda 'cpu))
 
@@ -17,44 +16,79 @@
     (apply = (map cdr signature)))
 
   (define (forward m x)
-    (call-with-values (lambda () (m x)) list))
+    (define-values (out _h _c) (m x))
+    out)
 
-  (define (spawn pool thunk)
-    (thread thunk #:pool pool))
+  (define placement-race-failure
+    (regexp (string-append "get_mkldnn_dtype: unsupported data type"
+                           "|Input and parameter tensors are not at the same device"
+                           "|Input and parameter tensors are not the same dtype")))
 
-  (define (join-all threads)
-    (for-each thread-wait threads))
+  (define (expected-race-failure? e)
+    (and (exn:fail? e)
+         (regexp-match? placement-race-failure (exn-message e))))
 
   (define (racing-layer)
     (to (LSTM 8 16 #:num-layers 2 #:bidirectional? #t) device))
+
+  (define (count-packings thunk)
+    (define count (box 0))
+    (parameterize ([packing-hook
+                    (match-lambda
+                      ['before (set-box! count (add1 (unbox count)))]
+                      [_ (void)])])
+      (thunk))
+    (unbox count))
+
+  (define found '((100 . 100) (200 . 200)))
+  (define buffer-start 1000)
+  (define packed '((1000 . 1000) (1064 . 1000)))
+
+  (test-case "weights that lie in the buffer record the packing"
+    (check-equal? (packing-record found buffer-start packed) packed))
+
+  (test-case "a weight moved off the buffer before recording forgets the packing"
+    (check-false (packing-record found buffer-start '((1000 . 1000) (300 . 300)))))
+
+  (test-case "a refusal on weights that did not move records them as they are"
+    (check-equal? (packing-record found #f found) found))
+
+  (test-case "a refusal on weights a move rebound forgets them"
+    (check-false (packing-record found #f '((300 . 300) (400 . 400)))))
+
+  (define (forward-together lstm x pool)
+    (define failures (box '()))
+    (define gate (make-semaphore 0))
+    (define threads
+      (for/list ([_ (in-range 4)])
+        (thread (lambda ()
+                  (semaphore-wait gate)
+                  (with-handlers ([exn:fail?
+                                   (lambda (e)
+                                     (set-box! failures
+                                               (cons (exn-message e)
+                                                     (unbox failures))))])
+                    (forward lstm x)))
+                #:pool pool)))
+    (for ([_ (in-list threads)]) (semaphore-post gate))
+    (for-each thread-wait threads)
+    (unbox failures))
 
   (define (forwards-pack-once pool)
     (define lstm (racing-layer))
     (define weights (parameters lstm))
     (define x (randn 4 2 8 #:device device))
-    (define failures (box '()))
-    (define extra
-      (for/sum ([_ (in-range 16)])
+    (define failures '())
+    (define counts
+      (for/list ([_ (in-range 16)])
         (to lstm 'float64)
         (to lstm 'float32)
-        (define before (flatten-count))
-        (define gate (make-semaphore 0))
-        (define threads
-          (for/list ([_ (in-range 4)])
-            (spawn pool
-                   (lambda ()
-                     (semaphore-wait gate)
-                     (with-handlers ([exn:fail?
-                                      (lambda (e)
-                                        (set-box! failures
-                                                  (cons (exn-message e)
-                                                        (unbox failures))))])
-                       (forward lstm x))))))
-        (for ([_ (in-list threads)]) (semaphore-post gate))
-        (join-all threads)
-        (- (flatten-count) before (if (eq? device 'cuda) 1 0))))
-    (check-equal? (unbox failures) '())
-    (check-equal? extra 0 "a forward packed weights another had just packed")
+        (count-packings
+         (lambda ()
+           (set! failures (append (forward-together lstm x pool) failures))))))
+    (check-equal? failures '())
+    (check-equal? counts (make-list 16 (if (eq? device 'cuda) 1 0))
+                  "a forward packed weights another had just packed")
     (check-equal? (flattened-signature (car weights))
                   (storage-signature weights)))
 
@@ -75,6 +109,7 @@
     (define turn (make-semaphore 1))
     (define stale-claims (box 0))
     (define forwards (box 0))
+    (define unexpected (box '()))
     (define done? (box #f))
     (define (check-claim!)
       (define now (storage-signature weights))
@@ -94,12 +129,18 @@
       (thread
        (lambda ()
          (let loop ()
-           (with-handlers ([exn:fail? void])
+           (with-handlers ([expected-race-failure? void]
+                           [exn:fail?
+                            (lambda (e)
+                              (set-box! unexpected
+                                        (cons (exn-message e)
+                                              (unbox unexpected))))])
              (forward lstm x)
              (set-box! forwards (add1 (unbox forwards))))
            (call-with-semaphore turn check-claim!)
            (unless (unbox done?) (loop))))))
-    (join-all (list mover forwarder))
+    (for-each thread-wait (list mover forwarder))
+    (check-equal? (unbox unexpected) '())
     (check-equal? (unbox stale-claims) 0
                   "a packing was recorded for weights a move had unpacked")
     (check-true (positive? (unbox forwards)) "no forward ran to completion")
@@ -111,15 +152,33 @@
       (check-true (packed? (storage-signature weights)))))
 
   (when (cuda-available?)
+    (define (move-at phase lstm placement)
+      (match-lambda
+        [(== phase) (apply to lstm placement)]
+        [_ (void)]))
+
     (test-case "a move between packing and recording leaves nothing recorded"
       (define lstm (racing-layer))
       (define weights (parameters lstm))
       (define x (randn 4 2 8 #:device 'cuda))
-      (parameterize ([after-packing (lambda () (to lstm 'float64))])
-        (check-exn exn:fail? (lambda () (forward lstm x))))
-      (check-false (equal? (flattened-signature (car weights))
-                           (storage-signature weights))
+      (parameterize ([packing-hook (move-at 'after lstm '(cuda float64))])
+        (check-exn #rx"not the same dtype" (lambda () (forward lstm x))))
+      (check-false (flattened-signature (car weights))
                    "unpacked weights were recorded as packed")
       (to lstm 'float32)
+      (forward lstm x)
+      (check-true (packed? (storage-signature weights))))
+
+    (test-case "a refusal caused by a racing move is neither recorded nor latched"
+      (define lstm (racing-layer))
+      (define weights (parameters lstm))
+      (define x (randn 4 2 8 #:device 'cuda))
+      (parameterize ([packing-hook (move-at 'before lstm '(cpu float32))])
+        (check-exn #rx"not at the same device" (lambda () (forward lstm x))))
+      (check-false (flattened-signature (car weights))
+                   "the moved weights' addresses were recorded as refused")
+      (check-false (flatten-refused? (car weights))
+                   "a refusal caused by the move was latched")
+      (to lstm 'cuda)
       (forward lstm x)
       (check-true (packed? (storage-signature weights))))))
