@@ -186,7 +186,7 @@
 
   (test-case "the shadow keeps every code character at its position"
     (check-equal? (string-length shadow) (string-length text))
-    (check-true (string-prefix? shadow "#lang racket/base"))
+    (check-equal? (car shadow-lines) "#lang racket/base ")
     (check-true (for/and ([kept (in-string shadow (string-length lp2-lang))]
                           [original (in-string text (string-length lp2-lang))])
                   (or (char=? kept original) (char=? kept #\space)))))
