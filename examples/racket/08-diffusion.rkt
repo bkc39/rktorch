@@ -1,6 +1,7 @@
 #lang scribble/lp2
 
-@(require (for-label (except-in racket/base abs cos exp log sin sort sqrt max min length + - * /)
+@(require (for-label (except-in racket/base abs cos exp log sin sort sqrt max min length
+                                + - * / < <= > >=)
                      torch torch/nn torch/data/loader torch/vision/cifar10
                      torch/vision/diffusion))
 
@@ -49,7 +50,7 @@ draws them. The device is the accelerator when there is one.
   (define noise (to (randn-like xs #:device 'cpu) device))
   (define y
     (and ys
-         (where (to (lt (rand n #:device 'cpu) label-dropout) device)
+         (where (to (< (rand n #:device 'cpu) label-dropout) device)
                 (full null-label n #:dtype 'int64 #:device device)
                 ys)))
   (zero-grads! opt)

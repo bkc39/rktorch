@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+#
+# Resyntax with this repository's suite: the default recommendations plus
+# the rules in scripts/resyntax-rules.rkt, tested by
+# scripts/resyntax-rules-test.rkt.
+#
+#   nix develop .#ci --command scripts/resyntax analyze \
+#     --local-git-repository . origin/master --analyzer-timeout 30000
+#   nix develop .#ci --command scripts/resyntax fix \
+#     --local-git-repository . origin/master
+set -euo pipefail
+
+root=$(git rev-parse --show-toplevel)
+command=$1
+shift
+exec resyntax "$command" \
+  --refactoring-suite "(file \"$root/scripts/resyntax-rules.rkt\")" \
+  rktorch-recommendations "$@"

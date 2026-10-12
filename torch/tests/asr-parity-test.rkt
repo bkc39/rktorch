@@ -61,8 +61,8 @@
            (unsqueeze (tensor (map exact->inexact lens)) 1))
          (define (clip v lens t)
            (if lens
-               (mul v (reshape (to-dtype (lt (unsqueeze (arange t) 0)
-                                             (row-lengths lens))
+               (mul v (reshape (to-dtype (< (unsqueeze (arange t) 0)
+                                            (row-lengths lens))
                                          'float32)
                                (length lens) 1 t))
                v))
@@ -72,7 +72,7 @@
            (for/fold ([h c0]) ([dil (in-layers dilations)])
              (clip (+ h (relu (dil h))) l2 t2)))
          (define padding
-           (and l2 (ge (unsqueeze (arange t2) 0) (row-lengths l2))))
+           (and l2 (>= (unsqueeze (arange t2) 0) (row-lengths l2))))
          (define (positioned v)
            (+ v (sinusoidal-positions (cadr (shape v)) n-embd
                                       #:layout 'halves)))

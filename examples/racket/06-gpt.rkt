@@ -1,6 +1,7 @@
 #lang scribble/lp2
 
-@(require (for-label (except-in racket/base abs cos exp log sin sort sqrt max min length + - * /)
+@(require (for-label (except-in racket/base abs cos exp log sin sort sqrt max min length
+                                + - * / < <= > >=)
                      torch torch/nn))
 
 @title[#:tag "ex-gpt"]{Training a char-GPT on Heart of Darkness}

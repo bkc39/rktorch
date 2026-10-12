@@ -679,10 +679,24 @@
   (test-case "comparison dispatchers: tensor rhs and real rhs agree"
     (define a (tensor '(1 2 3)))
     (check-equal? (tensor->list (eq a (tensor '(1 5 3)))) '(1.0 0.0 1.0))
-    (check-equal? (tensor->list (lt a (tensor '(2 2 2)))) '(1.0 0.0 0.0))
-    (check-equal? (tensor->list (ge a 2)) '(0.0 1.0 1.0))
+    (check-equal? (tensor->list (< a (tensor '(2 2 2)))) '(1.0 0.0 0.0))
+    (check-equal? (tensor->list (>= a 2)) '(0.0 1.0 1.0))
     (check-equal? (tensor->list (ne a 2)) '(1.0 0.0 1.0))
-    (check-equal? (tensor->list (gt a 2.5)) '(0.0 0.0 1.0)))
+    (check-equal? (tensor->list (> a 2.5)) '(0.0 0.0 1.0)))
+
+  (test-case "the ordering operators dispatch on a tensor and defer on reals"
+    (define a (tensor '(1 2 3)))
+    (check-equal? (tensor->list (< a 2)) '(1.0 0.0 0.0))
+    (check-equal? (tensor->list (<= a (tensor '(2 2 2)))) '(1.0 1.0 0.0))
+    (check-equal? (tensor->list (< 2 a)) '(0.0 0.0 1.0) "a real lhs mirrors")
+    (check-equal? (tensor->list (>= 2 a)) '(1.0 1.0 0.0) "a real lhs mirrors")
+    (check-equal? (dtype (>= a 2)) 'bool)
+    (check-true (< 1 2 3))
+    (check-false (>= 1 2))
+    (check-true (> 3))
+    (check-exn #rx"<: a tensor comparison takes two operands"
+               (lambda () (< 0 a 3)))
+    (check-exn #rx"contract violation" (lambda () (>= "a" 1))))
 
   (test-case "flatten collapses dims and rejects an invalid range"
     (define t (reshape (arange 120) 2 3 4 5))

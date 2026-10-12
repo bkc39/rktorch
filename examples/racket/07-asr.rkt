@@ -1,6 +1,7 @@
 #lang scribble/lp2
 
-@(require (for-label (except-in racket/base abs cos exp log sin sort sqrt max min length + - * /)
+@(require (for-label (except-in racket/base abs cos exp log sin sort sqrt max min length
+                                + - * / < <= > >=)
                      torch torch/nn))
 
 @title[#:tag "ex-asr"]{Speech to text on LibriSpeech with CTC and attention}
@@ -98,11 +99,11 @@ they would be if the utterance were encoded alone.
   (unsqueeze (tensor (map exact->inexact lengths)) 1))
 
 (define (key-padding-mask lengths t-len)
-  (ge (unsqueeze (arange t-len) 0) (row-lengths lengths)))
+  (>= (unsqueeze (arange t-len) 0) (row-lengths lengths)))
 
 (define (frame-keep lengths t-len)
-  (reshape (to-dtype (lt (unsqueeze (arange t-len) 0)
-                         (row-lengths lengths))
+  (reshape (to-dtype (< (unsqueeze (arange t-len) 0)
+                        (row-lengths lengths))
                      'float32)
            (length lengths) 1 t-len))]
 

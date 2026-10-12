@@ -3,7 +3,7 @@
 @(require "common.rkt"
           (for-label (except-in racket/base
                                 abs cos exp log sin sort sqrt max min length
-                                + - * /)
+                                + - * / < <= > >=)
                      racket/contract
                      torch
                      (only-in torch/data/loader dataloader define-dataset)
@@ -186,11 +186,12 @@ tensor or a real that broadcasts. The mask feeds @racket[where],
               @defproc[(gt [a tensor?] [b (or/c tensor? real?)]) tensor?]
               @defproc[(ge [a tensor?] [b (or/c tensor? real?)]) tensor?])]{
 Equal, not equal, less than, less than or equal, greater than, greater
-than or equal.
+than or equal. Write the last four as @racket[<], @racket[<=], @racket[>]
+and @racket[>=], which dispatch to them.
 
 @torch-examples[
 (eq (tensor '(1 2 3)) 2)
-(item (sum (ge (tensor '(1 2 3)) 2)))
+(item (sum (>= (tensor '(1 2 3)) 2)))
 ]}
 
 @section{Selection}
@@ -431,4 +432,17 @@ dispatches to the tensor operation, and a chain folds left.
 (+ 1 2)
 (+ (tensor '(1 2 3)) (tensor '(10 20 30)))
 (+ (tensor '(1 2 3)) 10)
+]}
+
+@deftogether[(@defidform[<] @defidform[<=] @defidform[>] @defidform[>=])]{
+The ordering comparisons, provided as renames like the arithmetic
+operators. Reals take @racketmodname[racket/base]'s path, chains included.
+A tensor on either side dispatches to @racket[lt], @racket[le], @racket[gt]
+or @racket[ge], a real on the left mirrored, and takes exactly two operands.
+
+@torch-examples[
+(< 1 2 3)
+(>= (tensor '(1 2 3)) 2)
+(< 2 (tensor '(1 2 3)))
+(eval:error (< 0 (tensor '(1 2 3)) 3))
 ]}

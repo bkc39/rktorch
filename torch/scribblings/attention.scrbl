@@ -3,7 +3,7 @@
 @(require "common.rkt"
           (for-label (except-in racket/base
                                 abs cos exp log sin sort sqrt max min length
-                                + - * /)
+                                + - * / < <= > >=)
                      racket/contract
                      torch
                      (only-in torch/nn

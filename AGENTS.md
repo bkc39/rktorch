@@ -211,7 +211,10 @@ with `backward!` outside the form as PyTorch recommends). From
   (binary ops take a real on either side)
 - operators: `+ - * /` shadow racket/base rkt-polars-style (numeric fast
   path to racket/base, tensor operands dispatch to add/sub/mul/div, chains
-  fold left); `@` is matmul, like Python's `a @ b`; `t`/`Σ` are terse
+  fold left); so do `< <= > >=`, which dispatch to lt/le/gt/ge, mirror a
+  real on the left, and take two operands with a tensor. Write comparisons
+  with them, not the names: `scripts/resyntax-rules.rkt` rewrites
+  `(ge a b)` to `(>= a b)`; `@` is matmul, like Python's `a @ b`; `t`/`Σ` are terse
   aliases for transpose/sum; unary `T` reverses all axes like Python's `x.T`
   (use `transpose` on the last two axes for batched attention);
   `~> ~>> lambda~> lambda~>>` are re-provided
@@ -238,12 +241,12 @@ numeric code. New ops that collide must follow the same dispatch pattern
 (check racket/base first — `tanh` was missed initially and broke numeric
 callers), and scribble examples need
 `(for-label (except-in racket/base abs cos exp log sin sort sqrt max min
-length + - * /) torch)` — the `except-in` alone leaves those names
+length + - * / < <= > >=) torch)` — the `except-in` alone leaves those names
 unbound, so `torch` has to follow it. Each chapter carries that line
 itself: re-exporting it from a shared module tags every link to that
 module rather than to `torch`, so the links miss their entries.
 Dispatching named ops carry dependent (`->i`) contracts so the wrong shape
-gets contract blame, not a runtime error; the `+ - * / @` operators are
+gets contract blame, not a runtime error; the `+ - * / < <= > >= @` operators are
 provided as plain renames (no contract overhead on the numeric fast path),
 per `foreign/operators.rkt`.
 
@@ -416,10 +419,13 @@ racket scripts/coverage.rkt --changed   # expression coverage (#173); exits
                                # non-zero below the floor and lists the lines
                                # of the files you touched that no test reaches
 
-resyntax analyze --local-git-repository . origin/master   # lint gate
+scripts/resyntax analyze --local-git-repository . origin/master   # lint gate
                                      # (CI fails on any suggestion; scans
-                                     #  changed files, torch/ included)
-resyntax fix --directory torch
+                                     #  changed files, torch/ included; the
+                                     #  default rules plus
+                                     #  scripts/resyntax-rules.rkt)
+scripts/resyntax fix --directory torch
+raco test scripts/resyntax-rules-test.rkt   # the repository's own rules
 raco review torch/**/*.rkt
 ```
 
@@ -431,8 +437,8 @@ Resyntax, racket-review and `cover` are pinned, one commit per package, in
 into `.racket-user` with no network, and the CI lane runs the same trees, so
 lint findings change only when the flake does (#63). To bump: change the
 package's `rev`, set its `hash` to `""`, `nix build .#racket-linters`, paste
-the hash Nix reports, and run the full sweep (`resyntax analyze --directory
-torch`), since CI scans only changed files. Each checkout moves to the new
+the hash Nix reports, and run the full sweep (`scripts/resyntax analyze
+--directory torch`), since CI scans only changed files. Each checkout moves to the new
 trees on its next shell entry.
 
 ### PyTorch parity
