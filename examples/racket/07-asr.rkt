@@ -243,7 +243,7 @@ fixture-scale configuration the parity twin trains;
     (define t2 (halve t1))
     (define l1 (and lengths (map halve lengths)))
     (define l2 (and l1 (map halve l1)))
-    (define (clip v lens t) (if lens (mul v (frame-keep lens t)) v))
+    (define (clip v lens t) (if lens (* v (frame-keep lens t)) v))
     (define c (~> (conv1 x) relu (clip l1 t1)))
     (define c0 (~> (conv2 c) relu (clip l2 t2)))
     (define c4
@@ -363,8 +363,8 @@ it outside whatever extent built the net; it runs on the mels' device.
     (define loss-ce
       (cross-entropy (reshape logits -1 (add1 v-size))
                      (reshape dec-out -1)))
-    (add (mul ctc-weight loss-ctc)
-         (mul (- 1.0 ctc-weight) loss-ce))))]
+    (+ (* ctc-weight loss-ctc)
+       (* (- 1.0 ctc-weight) loss-ce))))]
 
 @bold{The deterministic core.} @racket[run-example] is the seeded,
 offline entry the test harness and the PyTorch parity twin both drive:

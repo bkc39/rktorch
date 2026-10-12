@@ -4,13 +4,13 @@
 ;; sync with examples/racket/07-asr.rkt, as the 05/06 twins do.
 
 (module+ test
-  (require rackunit
-           (only-in racket/list last)
-           "../main.rkt"
-           "../nn.rkt"
+  (require (only-in racket/list last)
+           rackunit
            (only-in "../audio/functional.rkt" log-mel-spectrogram)
            (only-in "../audio/librispeech.rkt" load-librispeech-fixture)
            (only-in "../data/text.rkt" encode text->vocab)
+           "../main.rkt"
+           "../nn.rkt"
            "private/python-env.rkt")
 
   (cond
@@ -61,10 +61,10 @@
            (~> (map exact->inexact lens) tensor (unsqueeze 1)))
          (define (clip v lens t)
            (if lens
-               (mul v (reshape (to-dtype (< (unsqueeze (arange t) 0)
-                                            (row-lengths lens))
-                                         'float32)
-                               (length lens) 1 t))
+               (* v (reshape (to-dtype (< (unsqueeze (arange t) 0)
+                                          (row-lengths lens))
+                                       'float32)
+                             (length lens) 1 t))
                v))
          (define c (~> (conv1 x) relu (clip l1 t1)))
          (define c0 (~> (conv2 c) relu (clip l2 t2)))
@@ -140,7 +140,7 @@
                (cross-entropy (reshape logits -1 (add1 v-size))
                               (reshape dec-out -1)))
              (define loss
-               (add (mul 0.3 loss-ctc) (mul 0.7 loss-ce)))
+               (+ (* 0.3 loss-ctc) (* 0.7 loss-ce)))
              (backward! loss)
              (step! opt)
              (item loss)))

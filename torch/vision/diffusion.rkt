@@ -7,8 +7,8 @@
          (only-in racket/math infinite? nan? pi)
          (only-in threading ~>)
          (only-in "../foreign.rkt"
-                  add cat dtype index-select length mul reshape
-                  scaled-dot-product-attention shape silu sqrt sub tensor
+                  * + - cat dtype index-select length reshape
+                  scaled-dot-product-attention shape silu sqrt tensor
                   tensor? to-dtype transpose upsample-nearest2d)
          (only-in "../nn.rkt"
                   Conv2d Dropout Embedding GroupNorm LayerList Linear
@@ -82,8 +82,8 @@
             (= (car (shape x0)) (car (shape t)))
             (equal? (shape x0) (shape noise)))
        [result tensor?])
-  (define a (reshape (index-select (schedule-alpha-bars sched) 0 t) -1 1 1 1))
-  (add (mul (sqrt a) x0) (mul (sqrt (sub 1.0 a)) noise)))
+  (define a (~> (schedule-alpha-bars sched) (index-select 0 t) (reshape -1 1 1 1)))
+  (+ (* (sqrt a) x0) (~> (- 1.0 a) sqrt (* noise))))
 
 (define even-dim/c
   (flat-named-contract 'even-positive-integer
@@ -142,7 +142,7 @@
   #:forward (x temb)
   (define h (~> x norm1 silu conv1))
   (define shift (~> temb silu emb (reshape (length temb) -1 1 1)))
-  (add (~> (add h shift) norm2 silu drop conv2) (if skip (skip x) x)))
+  (+ (~> (+ h shift) norm2 silu drop conv2) (if skip (skip x) x)))
 
 (define-layer AttentionBlock (norm q k v proj) ;; noqa
   #:contract (-> channels/c attention-block?)
@@ -157,7 +157,7 @@
   (define tokens (~> (norm x) (reshape n 1 c (* h w)) (transpose 2 3)))
   (define mixed
     (scaled-dot-product-attention (q tokens) (k tokens) (v tokens)))
-  (add x (~> (proj mixed) (transpose 2 3) (reshape n c h w))))
+  (+ x (~> (proj mixed) (transpose 2 3) (reshape n c h w))))
 
 (define-layer Downsample (conv) ;; noqa
   #:contract (-> channels/c downsample?)
@@ -245,7 +245,7 @@
                            "images" x "timesteps" t "labels" y))
   (define temb
     (let ([te (time t)])
-      (if classes (add te (classes y)) te)))
+      (if classes (+ te (classes y)) te)))
   (define x0 (in-conv x))
   (define-values (bottom stack)
     (for/fold ([down x0] [stack (list x0)]) ([layer (in-layers downs)])
