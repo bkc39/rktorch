@@ -22,7 +22,8 @@
   (define placement-race-failure
     (regexp (string-append "get_mkldnn_dtype: unsupported data type"
                            "|Input and parameter tensors are not at the same device"
-                           "|Input and parameter tensors are not the same dtype")))
+                           "|Input and parameter tensors are not the same dtype"
+                           "|(mat1|self) and mat2 must have the same dtype")))
 
   (define (expected-race-failure? e)
     (and (exn:fail? e)
