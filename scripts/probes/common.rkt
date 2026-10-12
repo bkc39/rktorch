@@ -34,7 +34,6 @@
 
 (define getloadavg (get-ffi-obj "getloadavg" #f (_fun _pointer _int -> _int)))
 
-;; The 1-minute figure, from libc on Linux and macOS alike.
 (define (load-average)
   (define out (malloc 3 _double 'atomic-interior))
   (cond
@@ -71,18 +70,23 @@
   (for-each print-table-row rows)
   (newline))
 
-(define (run-parallel/gc n body #:pool [pool 'own])
+(define (run-parallel/gc n body #:pool [pool 'own] #:setup [setup void])
   (define ready (make-semaphore 0))
   (define gate (make-semaphore 0))
   (define results (make-vector n #f))
   (define failures (make-vector n #f))
+  (define (succeeded? i thunk)
+    (with-handlers ([(lambda (_) #t) (lambda (e) (vector-set! failures i e) #f)])
+      (thunk)
+      #t))
   (define workers
     (for/list ([i (in-range n)])
       (thread (lambda ()
+                (define set-up? (succeeded? i setup))
                 (semaphore-post ready)
                 (semaphore-wait gate)
-                (with-handlers ([(lambda (_) #t) (lambda (e) (vector-set! failures i e))])
-                  (vector-set! results i (body i))))
+                (when set-up?
+                  (succeeded? i (lambda () (vector-set! results i (body i))))))
               #:pool pool)))
   (for ([_ (in-range n)]) (semaphore-wait ready))
   (define gc-start (current-gc-milliseconds))

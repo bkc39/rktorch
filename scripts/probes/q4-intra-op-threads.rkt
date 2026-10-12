@@ -1,7 +1,5 @@
 #lang racket/base
 
-;; Q4: libtorch's intra-op thread count and OpenMP teams per OS thread.
-;;
 ;; libtorch applies its thread count lazily, once per OS thread, so each
 ;; scenario runs in a fresh process.
 
@@ -132,10 +130,6 @@
    (cons "OpenMP teams: 4 workers that call omp_set_num_threads(1) first"
          '((team-scenario (lambda () (omp-set-num-threads 1)))))))
 
-;; The trainer's 1024 matmul, alone and while 4 workers loop matmuls of their
-;; own at the default count or limited to 1. The trainer runs a parallel op
-;; first, as a training step would, so its own count is fixed before any
-;; worker sets one.
 (define timing-scenario
   '((define (time-trainer reps)
       (define a (shim-randn 1024 1024))

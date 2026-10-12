@@ -1,7 +1,5 @@
 #lang racket/base
 
-;; Q2: box-cas! against the other guards for one counter shared by parallel threads.
-
 (require (only-in ffi/unsafe/atomic
                   call-as-atomic
                   call-as-uninterruptible
@@ -65,8 +63,6 @@
                   #:pool pool))
   (list (unbox b) (apply + retries) ms))
 
-;; What one atomic section costs by where it is entered from: the main OS
-;; thread's coroutine, a lone parallel thread, and 8 of them contending.
 (define (hop-row label n pool total)
   (define ms
     (median < (for/list ([_ (in-range repeats)])
@@ -88,8 +84,6 @@
         (fmt-ms (/ (* ms 1e6) total))
         (load-average)))
 
-;; The Stage 2 ledger's mix: parallel workers add while a coroutine thread in
-;; atomic mode, as a finalizer runs, subtracts.
 (define (cas-against-atomic-subtractor)
   (define per-thread (quotient full threads))
   (define b (box 0))

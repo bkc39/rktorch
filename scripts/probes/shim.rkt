@@ -1,7 +1,5 @@
 #lang racket/base
 
-;; Plain shim, libtorch and OpenMP bindings: no allocator, ledger or fault latch.
-
 (require (only-in ffi/unsafe
                   _fun _int _int64 _pointer _ptr _string _uint _void
                   ffi-lib get-ffi-obj)
@@ -69,10 +67,6 @@
                (_fun _pointer (type : (_ptr o _int)) (_ptr o _int64) -> (rc : _int)
                      -> (and (zero? rc) type))))
 
-;; Looked up through the shim's handle, which reaches the libraries it was
-;; linked against: libtorch_cpu everywhere, and on Linux the MKL inside it and
-;; libgomp. A symbol a platform lacks binds to a procedure that raises when
-;; called, so the probes that never call it still load.
 (define (shim-symbol name type)
   (get-ffi-obj name shim type
                (lambda ()

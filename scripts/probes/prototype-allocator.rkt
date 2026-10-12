@@ -1,8 +1,7 @@
 #lang racket/base
 
-;; Probe-local L2 candidates over the plain shim bindings, each with its own ledger.
-
-(require (only-in ffi/unsafe register-finalizer)
+(require (for-syntax racket/base)
+         (only-in ffi/unsafe register-finalizer)
          (only-in ffi/unsafe/alloc allocator deallocator)
          (only-in ffi/unsafe/atomic
                   end-atomic
@@ -10,6 +9,8 @@
                   start-atomic
                   uninterruptible-lock-acquire
                   uninterruptible-lock-release)
+         ;; whole-module require: only-in strips the phase-1 syntax classes
+         syntax/parse/define
          "shim.rkt")
 
 (provide (struct-out prototype)
@@ -19,9 +20,14 @@
          stage-2
          alloc/uninterruptible)
 
-;; wrap: raw op -> op over handles; handle: what the caller holds -> the
-;; native pointer; free!: explicit release.
 (struct prototype (name wrap handle free! live-bytes finalizer-runs))
+
+(define-syntax-parse-rule (with-uninterruptible-lock lock:expr body:expr ...+)
+  (let ([held-lock lock])
+    (dynamic-wind
+     (lambda () (uninterruptible-lock-acquire held-lock))
+     (lambda () body ...)
+     (lambda () (uninterruptible-lock-release held-lock)))))
 
 (define (cas-add! b n)
   (let retry ()
@@ -127,16 +133,11 @@
   (define runs (box 0))
   (define records (make-weak-hasheq))
   (define records-lock (make-uninterruptible-lock))
-  (define (call-with-records thunk)
-    (uninterruptible-lock-acquire records-lock)
-    (begin0 (thunk)
-            (uninterruptible-lock-release records-lock)))
   (define (unaccount! t)
     (define r
-      (call-with-records
-       (lambda ()
-         (begin0 (hash-ref records t #f)
-                 (hash-remove! records t)))))
+      (with-uninterruptible-lock records-lock
+        (begin0 (hash-ref records t #f)
+                (hash-remove! records t))))
     (when r
       (cas-add! live (- (record-nbytes r)))
       (set-phantom-bytes! (record-phantom r) 0)))
@@ -150,7 +151,7 @@
     (lambda args
       (define t (apply wrapped args))
       (define r (make-record t))
-      (call-with-records (lambda () (hash-set! records t r)))
+      (with-uninterruptible-lock records-lock (hash-set! records t r))
       (cas-add! live (record-nbytes r))
       t))
   (define (free! t)

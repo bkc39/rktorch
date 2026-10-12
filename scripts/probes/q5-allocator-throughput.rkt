@@ -1,7 +1,5 @@
 #lang racket/base
 
-;; Q5: tensors made per second from N parallel workers, today's allocator against the prototypes.
-
 (require (only-in math/statistics median)
          (only-in racket/format ~r)
          (only-in racket/match match-define)
@@ -45,20 +43,21 @@
       [(= rounds settle-round-limit) #f]
       [else (loop (add1 rounds) now quiet*)])))
 
-(struct cell (workers rate gc-share finalizer-runs settled?))
+(struct cell (workers rate gc-share finalizer-runs))
 
-;; workers = 0 runs the loop on the main thread itself, the single-threaded
-;; path that must not regress. gc-share is current-gc-milliseconds (collector
-;; CPU time) per wall millisecond; a collection stops every thread in the
-;; place.
+(struct unsettled (reason))
+
 (define (measure-cell p o n workers)
-  (define settled? (settle-finalizers! p))
+  (unless (settle-finalizers! p)
+    (raise (unsettled (format "~a: finalizers did not settle in ~a major collections before n = ~a, ~a workers"
+                              (prototype-name p) settle-round-limit n workers))))
   (define runs-before ((prototype-finalizer-runs p)))
   (define deadline (+ (current-inexact-monotonic-milliseconds)
                       (* 1000 seconds-per-cell)))
   (define-values (ms iterations gc-ms)
     (cond
       [(zero? workers)
+       (at-set-num-threads 1)
        (define gc-start (current-gc-milliseconds))
        (define start (current-inexact-monotonic-milliseconds))
        (define done (loop-until deadline p o n))
@@ -67,21 +66,18 @@
                (- (current-gc-milliseconds) gc-start))]
       [else
        (run-parallel/gc workers
-                        (lambda (_i)
-                          (at-set-num-threads 1)
-                          (loop-until deadline p o n)))]))
+                        (lambda (_i) (loop-until deadline p o n))
+                        #:setup (lambda () (at-set-num-threads 1)))]))
   (cell workers
         (/ (* tensors-per-iteration (apply + iterations)) (/ ms 1000.0))
         (/ gc-ms ms)
-        (- ((prototype-finalizer-runs p)) runs-before)
-        settled?))
+        (- ((prototype-finalizer-runs p)) runs-before)))
 
 (define (median-cell samples)
   (cell (cell-workers (car samples))
         (median < (map cell-rate samples))
         (median < (map cell-gc-share samples))
-        (median < (map cell-finalizer-runs samples))
-        (andmap cell-settled? samples)))
+        (median < (map cell-finalizer-runs samples))))
 
 (define sizes '(8 64 256))
 (define worker-counts '(0 1 2 4 8))
@@ -100,24 +96,28 @@
            (for/list ([w (in-list worker-counts)])
              (if (zero? w) "main thread" (format "~a workers" w)))
            '("8 workers / 1 worker" "GC ms per wall ms, 8 workers"
-             "finalizer runs per cell, by column" "finalizers settled before every cell"
+             "finalizer runs per cell, by column"
              "ledger bytes after" "load")))
-  (for ([make (in-list (variant-makers #:bare? #t))])
-    (match-define (variant p o _) (make))
-    (for ([n (in-list sizes)])
-      (iteration! p o n)
-      (define cells
-        (for/list ([w (in-list worker-counts)])
-          (median-cell (for/list ([_ (in-range repeats)]) (measure-cell p o n w)))))
-      (define one (cell-for cells 1))
-      (define eight (cell-for cells 8))
-      (print-table-row
-       (append (list (prototype-name p) n)
-               (map (lambda (c) (fmt-rate (cell-rate c))) cells)
-               (list (~r (/ (cell-rate eight) (cell-rate one)) #:precision 2)
-                     (~r (cell-gc-share eight) #:precision 2)
-                     (string-join (map (lambda (c) (fmt-rate (cell-finalizer-runs c))) cells) " / ")
-                     (if (andmap cell-settled? cells) "yes" "NO")
-                     ((prototype-live-bytes p))
-                     (load-average))))))
+  (with-handlers ([unsettled?
+                   (lambda (e)
+                     (printf "\nstopped: ~a, so the cell would time another row's finalizers\n"
+                             (unsettled-reason e)))])
+    (for ([make (in-list (variant-makers #:bare? #t))])
+      (match-define (variant p o) (make))
+      (for ([n (in-list sizes)])
+        (iteration! p o n)
+        (define cells
+          (for/list ([w (in-list worker-counts)])
+            (median-cell (for/list ([_ (in-range repeats)]) (measure-cell p o n w)))))
+        (define one (cell-for cells 1))
+        (define eight (cell-for cells 8))
+        (print-table-row
+         (append (list (prototype-name p) n)
+                 (map (lambda (c) (fmt-rate (cell-rate c))) cells)
+                 (list (~r (/ (cell-rate eight) (cell-rate one)) #:precision 2)
+                       (~r (cell-gc-share eight) #:precision 2)
+                       (string-join (map (lambda (c) (fmt-rate (cell-finalizer-runs c))) cells)
+                                    " / ")
+                       ((prototype-live-bytes p))
+                       (load-average)))))))
   (printf "\nload average (1 min) at end: ~a\n" (load-average)))

@@ -1,7 +1,5 @@
 #lang racket/base
 
-;; The allocators Q5 and Q7 compare, each with the three ops the workloads use.
-
 (require (only-in ffi/vector s64vector)
          (only-in torch/foreign/raw/collector finalizer-runs)
          (only-in torch/foreign/raw/elementwise tr-add/raw)
@@ -17,7 +15,7 @@
 
 (struct ops (randn add matmul))
 
-(struct variant (prototype ops global-ledger?))
+(struct variant (prototype ops))
 
 (define (today)
   (variant
@@ -27,15 +25,13 @@
               tr-tensor-free/checked
               (lambda () (for/sum ([d (in-list (native-memory-use))]) (cdr d)))
               finalizer-runs)
-   (ops (lambda (n) (tr-randn/raw (s64vector n n) 2)) tr-add/raw tr-matmul/raw)
-   #t))
+   (ops (lambda (n) (tr-randn/raw (s64vector n n) 2)) tr-add/raw tr-matmul/raw)))
 
 (define ((fresh make))
   (define p (make))
   (define wrap (prototype-wrap p))
   (variant p
-           (ops (wrap (lambda (n) (shim-randn n n))) (wrap shim-add) (wrap shim-matmul))
-           #f))
+           (ops (wrap (lambda (n) (shim-randn n n))) (wrap shim-add) (wrap shim-matmul))))
 
 (define (variant-makers #:bare? [bare? #f])
   (cons today

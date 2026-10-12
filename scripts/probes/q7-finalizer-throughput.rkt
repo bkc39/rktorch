@@ -1,7 +1,5 @@
 #lang racket/base
 
-;; Q7: finalizer throughput and ledger lag while N parallel workers drop tensors.
-
 (require (only-in racket/format ~r)
          (only-in racket/match match-define)
          "common.rkt"
@@ -28,12 +26,11 @@
        (sleep 0.05)
        (loop (max peak ((prototype-live-bytes p))))])))
 
-(define (drain! p runs-before made)
+(define (drain! p)
   (define start (current-inexact-monotonic-milliseconds))
-  (define (all-ran?) (>= (- ((prototype-finalizer-runs p)) runs-before) made))
   (let loop ([rounds 0])
     (cond
-      [(or (zero? ((prototype-live-bytes p))) (all-ran?) (= rounds drain-round-limit))
+      [(or (zero? ((prototype-live-bytes p))) (= rounds drain-round-limit))
        (values rounds (- (current-inexact-monotonic-milliseconds) start))]
       [else
        (collect-garbage 'major)
@@ -52,9 +49,8 @@
               (with-handlers ([(lambda (_) #t) (lambda (e) (set-box! failure e))])
                 (define-values (ms made gc-ms)
                   (run-parallel/gc workers
-                                   (lambda (_i)
-                                     (at-set-num-threads 1)
-                                     (churn! randn deadline))))
+                                   (lambda (_i) (churn! randn deadline))
+                                   #:setup (lambda () (at-set-num-threads 1))))
                 (set-box! at-stop
                           (vector (apply + made)
                                   (/ ms 1000.0)
@@ -69,7 +65,7 @@
     (vector->values (unbox at-stop)))
   (define runs-during (- runs-at-stop runs-before))
   (define gc-share (/ gc-ms (* 1000 interval)))
-  (define-values (rounds drain-ms) (drain! p runs-before made))
+  (define-values (rounds drain-ms) (drain! p))
   (define after ((prototype-live-bytes p)))
   (values
    (list (prototype-name p)
@@ -85,11 +81,6 @@
          after)
    (zero? after)))
 
-(define (drained-label drained? tainted?)
-  (cond
-    [tainted? "unreliable: an earlier today row did not drain"]
-    [drained? "yes"]
-    [else "did not drain"]))
 
 (module+ main
   (at-set-num-threads 1)
@@ -101,12 +92,16 @@
    '("allocator" "workers" "tensors made/s" "finalizer runs/s during churn"
      "runs / made" "GC ms per wall ms" "peak ledger MiB" "ledger MiB at stop"
      "major collections to drain" "drain ms" "ledger bytes after drain" "drained" "load"))
-  (for*/fold ([today-tainted? #f] #:result (void))
-             ([make (in-list (variant-makers))]
+  (define undrained
+    (for*/or ([make (in-list (variant-makers))]
               [workers (in-list worker-counts)])
-    (match-define (variant p o global-ledger?) (make))
-    (define tainted? (and global-ledger? today-tainted?))
-    (define-values (row drained?) (churn-row p (ops-randn o) workers))
-    (print-table-row (append row (list (drained-label drained? tainted?) (load-average))))
-    (or today-tainted? (and global-ledger? (not drained?))))
+      (match-define (variant p o) (make))
+      (define-values (row drained?) (churn-row p (ops-randn o) workers))
+      (print-table-row
+       (append row (list (if drained? "yes" "**NO: sweep stopped**") (load-average))))
+      (and (not drained?) (format "~a with ~a workers" (prototype-name p) workers))))
+  (when undrained
+    (printf "\nstopped: ~a did not drain in ~a major collections, ~a\n"
+            undrained drain-round-limit
+            "and its pending finalizers would run during every later row"))
   (printf "\nload average (1 min) at end: ~a\n" (load-average)))

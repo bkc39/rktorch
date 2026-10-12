@@ -1,7 +1,5 @@
 #lang racket/base
 
-;; Q1: which OS thread runs each kind of protected region entered from a parallel thread.
-
 (require (only-in ffi/unsafe/atomic
                   call-as-atomic
                   call-as-uninterruptible

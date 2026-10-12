@@ -1,7 +1,5 @@
 #lang racket/base
 
-;; Q6: how long a collection waits while a parallel worker is in a plain or #:blocking? call.
-
 (require (only-in math/statistics median)
          (only-in racket/match match-define)
          "common.rkt"
@@ -11,10 +9,6 @@
 (define matmul-n 3072)
 (define stall-window-ms 300)
 
-;; Answers the measurement and the share of it the call was in flight for,
-;; from the worker's last timestamp before the call to its first after. A
-;; plain call holds the collection until it returns, so its share reads 1
-;; even though it returns just before the measurement ends.
 (define (in-call-while call measure)
   (define inside (make-semaphore 0))
   (define entered-at (box #f))

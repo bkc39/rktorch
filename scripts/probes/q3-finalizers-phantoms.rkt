@@ -1,12 +1,9 @@
 #lang racket/base
 
-;; Q3: finalizers, phantom bytes and the eq? tables ffi/unsafe/alloc uses, from parallel threads.
-
 (require (only-in '#%foreign make-late-weak-hasheq)
          (only-in ffi/unsafe register-finalizer)
          (only-in ffi/unsafe/atomic call-as-uninterruptible)
          (only-in racket/match match-define)
-         (only-in racket/string string-join)
          "common.rkt")
 
 (define default-threads 8)
@@ -65,8 +62,6 @@
   (collect-garbage 'major)
   (current-memory-use))
 
-;; Phantom totals: the GC's count must rise by exactly what the threads
-;; registered and fall back when they zero it, after any amount of churn.
 (define (phantom-round count-per-thread size churn churn-size
                        #:threads [threads default-threads])
   (define base (settled-memory))
@@ -105,9 +100,6 @@
         (fmt-ms zero-ms)
         (load-average)))
 
-;; Distinct keys per thread, so a correct table ends with every key present
-;; once, then empty; a lost insertion or a corrupted bucket shows in the
-;; counts.
 (define (table-round label make-table per-thread #:protect protect
                      #:threads [threads default-threads])
   (define table (make-table))
@@ -145,36 +137,32 @@
 (define (in-indexed v)
   (in-parallel (in-vector v) (in-naturals)))
 
-(module+ main
-  (print-banner "Q3: finalizers, phantom bytes and eq? tables from 8 parallel threads")
+(define (print-finalizer-table)
   (print-table-header
    '("register-finalizer called" "objects" "registration wall ms"
      "registrations/s" "finalizer runs" "never ran" "ran twice"
      "major collections to drain" "drain ms" "exactly once" "load"))
-  (define pending
-    (for/fold ([pending '()] #:result (reverse pending))
-              ([spec (in-list
-                      (list (list "plain, first registrations in the process" 100000 plain 8)
-                            (list "plain" 100000 plain 8)
-                            (list "plain, one thread making all of them" 800000 plain 1)
-                            (list "under parameterize-break #f" 100000 break-disabled 8)
-                            (list "in uninterruptible mode" 100000 call-as-uninterruptible 8)))])
-      (match-define (list label per-thread protect threads) spec)
-      (define-values (row never) (finalizer-round per-thread #:protect protect #:threads threads))
-      (print-table-row (cons label row))
-      (if (zero? never) pending (cons label pending))))
-  (unless (null? pending)
-    (printf "\nfinalizers still pending after the drain, so later rows ran them: ~a\n"
-            (string-join pending "; ")))
-  (newline)
+  (for/or ([spec (in-list
+                  (list (list "plain, first registrations in the process" 100000 plain 8)
+                        (list "plain" 100000 plain 8)
+                        (list "plain, one thread making all of them" 800000 plain 1)
+                        (list "under parameterize-break #f" 100000 break-disabled 8)
+                        (list "in uninterruptible mode" 100000 call-as-uninterruptible 8)))])
+    (match-define (list label per-thread protect threads) spec)
+    (define-values (row never) (finalizer-round per-thread #:protect protect #:threads threads))
+    (print-table-row (cons label row))
+    (and (positive? never) (format "~a finalizers of \"~a\" still pending after the drain" never label))))
+
+(define (print-phantom-table)
   (print-table-header
    '("phantoms" "churn (set to the churn size and back)" "expected MiB"
      "held MiB" "after churn MiB" "after zeroing MiB" "set-phantom-bytes!/s"
      "make wall ms" "zero wall ms" "load"))
   (print-table-row (phantom-round 2000 (* 64 1024) 20000 (* 16 mib)))
   (print-table-row (phantom-round 1 (* 64 1024) 100000 (* 64 mib)))
-  (print-table-row (phantom-round 1 (* 64 1024) 800000 (* 64 mib) #:threads 1))
-  (newline)
+  (print-table-row (phantom-round 1 (* 64 1024) 800000 (* 64 mib) #:threads 1)))
+
+(define (print-eq-table)
   (print-table-header
    '("table, distinct keys per thread" "keys" "count after inserts"
      "wrong or missing values" "count after removes" "correct"
@@ -186,5 +174,17 @@
     (print-table-row (table-round (format "make-weak-hasheq, ~a" how)
                                   make-weak-hasheq 100000 #:protect protect))
     (print-table-row (table-round (format "make-late-weak-hasheq (alloc.rkt's), ~a" how)
-                                  make-late-weak-hasheq 100000 #:protect protect)))
+                                  make-late-weak-hasheq 100000 #:protect protect))))
+
+(module+ main
+  (print-banner "Q3: finalizers, phantom bytes and eq? tables from 8 parallel threads")
+  (define pending (print-finalizer-table))
+  (cond
+    [pending
+     (printf "\nstopped: ~a, and they would run during every later row\n" pending)]
+    [else
+     (newline)
+     (print-phantom-table)
+     (newline)
+     (print-eq-table)])
   (printf "\nload average (1 min) at end: ~a\n" (load-average)))
