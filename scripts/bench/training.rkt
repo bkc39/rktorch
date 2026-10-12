@@ -1,9 +1,10 @@
 #lang racket/base
 
-(require (only-in json read-json write-json)
-         (only-in racket/list drop)
-         (only-in torch accelerator-if-available device-type torch-version)
-         (only-in "harness.rkt" host-meta summarize))
+(require (only-in compiler/cm managed-compile-zo)
+         (only-in json read-json write-json)
+         (only-in racket/list drop last remove-duplicates)
+         (only-in "harness.rkt" host-meta summarize)
+         (only-in "shim.rkt" torch-dir))
 
 (provide record-steps!
          read-steps
@@ -16,21 +17,18 @@
         (loop (cons (vector-ref event 2) acc))
         (reverse acc))))
 
-(define (torch-checkout)
-  (define-values (dir _name _dir?) (split-path (collection-file-path "main.rkt" "torch")))
-  dir)
-
 (define (record-steps! runner out)
+  (managed-compile-zo runner)
+  (define device-type (dynamic-require 'torch 'device-type))
+  (define accelerator-if-available (dynamic-require 'torch 'accelerator-if-available))
   (define meta (host-meta #:device (device-type (accelerator-if-available))
-                          #:libtorch (torch-version)
-                          #:repo (torch-checkout)))
+                          #:libtorch ((dynamic-require 'torch 'torch-version))
+                          #:repo torch-dir))
   (define receiver (make-log-receiver (current-logger) 'debug 'rktorch-step))
   (define t0 (current-inexact-monotonic-milliseconds))
   (dynamic-require `(submod (file ,runner) main) #f)
   (define wall (- (current-inexact-monotonic-milliseconds) t0))
-  (define steps
-    (for/list ([e (in-list (drain receiver))])
-      (list (vector-ref e 0) (vector-ref e 1) (vector-ref e 2))))
+  (define steps (map vector->list (drain receiver)))
   (call-with-output-file out #:exists 'truncate
     (lambda (port)
       (write-json (hasheq 'wall_ms wall 'steps steps 'meta meta) port))))
@@ -47,23 +45,30 @@
 (define (every-nth xs n)
   (for/list ([x (in-list xs)] [i (in-naturals 1)] #:when (zero? (modulo i n))) x))
 
-(define (primary-steps events)
-  (define id (and (pair? events) (vector-ref (car events) 0)))
-  (for/list ([e (in-list events)] #:when (equal? (vector-ref e 0) id)) e))
+(define (column events k)
+  (map (lambda (e) (vector-ref e k)) events))
 
-(define (analyze-steps events #:epochs [epochs #f] #:warmup [warmup 0])
-  (define steps (primary-steps events))
+(define (timed-steps events which)
+  (define ids (remove-duplicates (column events 0)))
+  (define id (and (pair? ids) (if (eq? which 'last) (last ids) (car ids))))
+  (filter (lambda (e) (equal? (vector-ref e 0) id)) events))
+
+(define (analyze-steps events
+                       #:epochs [epochs #f]
+                       #:warmup [warmup 0]
+                       #:optimizer [which 'first])
+  (define steps (timed-steps events which))
   (define total (length steps))
   (define per-epoch
     (and epochs (>= epochs 2) (zero? (remainder total epochs)) (quotient total epochs)))
   (define skip (if epochs (or per-epoch total) warmup))
   (define measured (if (< skip total) (drop steps (max 0 (sub1 skip))) '()))
-  (define ms (map (lambda (e) (vector-ref e 1)) measured))
-  (define gc (map (lambda (e) (vector-ref e 2)) measured))
+  (define ms (column measured 1))
+  (define gc (column measured 2))
   (define intervals (if (pair? ms) (differences ms) '()))
-  (define boundaries (and per-epoch (every-nth steps per-epoch)))
-  (define epoch-ms (if boundaries (differences (map (lambda (e) (vector-ref e 1)) boundaries)) '()))
-  (define epoch-gc (if boundaries (differences (map (lambda (e) (vector-ref e 2)) boundaries)) '()))
+  (define boundaries (if per-epoch (every-nth steps per-epoch) '()))
+  (define epoch-ms (if (pair? boundaries) (differences (column boundaries 1)) '()))
+  (define epoch-gc (if (pair? boundaries) (differences (column boundaries 2)) '()))
   (cond
     [(null? intervals)
      (hasheq 'steps total
@@ -71,20 +76,21 @@
                             total epochs warmup))]
     [else
      (define step-stats (summarize intervals))
-     (define span (- (car (reverse ms)) (car ms)))
+     (define span (- (last ms) (car ms)))
      (hasheq 'steps total
              'steps_per_epoch per-epoch
              'measured_steps (length intervals)
              'step_ms step-stats
-             'steps_per_s (/ 1000.0 (hash-ref step-stats 'median))
-             'steps_per_s_wall (/ (* 1000.0 (length intervals)) span)
+             'steps_per_s (/ (* 1000.0 (length intervals)) span)
+             'steps_per_s_median (/ 1000.0 (hash-ref step-stats 'median))
              'epoch_s (map (lambda (x) (/ x 1000.0)) epoch-ms)
              'epoch_gc_ms epoch-gc
-             'gc_ms (- (car (reverse gc)) (car gc)))]))
+             'gc_ms (- (last gc) (car gc)))]))
 
 (module+ test
   (require (only-in racket/file make-temporary-file)
-           rackunit)
+           rackunit
+           (only-in "harness.rkt" with-temporary-path))
 
   (define (steps-at times #:id [id 7] #:gc [gc (lambda (t) (quotient t 10))])
     (for/list ([t (in-list times)]) (vector id (exact->inexact t) (gc t))))
@@ -100,18 +106,22 @@
     (check-equal? (hash-ref a 'epoch_s) '(0.1 0.104))
     (check-equal? (hash-ref a 'measured_steps) 6)
     (check-equal? (hash-ref (hash-ref a 'step_ms) 'median) 12.0)
-    (check-= (hash-ref a 'steps_per_s_wall) (/ 6000.0 204) 1e-9)
+    (check-= (hash-ref a 'steps_per_s) (/ 6000.0 204) 1e-9)
+    (check-= (hash-ref a 'steps_per_s_median) (/ 1000.0 12) 1e-9)
     (check-equal? (hash-ref a 'epoch_gc_ms) '(10 10))
     (check-equal? (hash-ref a 'gc_ms) 20))
 
-  (test-case "only the first optimizer to step is timed"
+  (test-case "the first optimizer to step is timed, or the last to start"
     (define events
       (for*/list ([t (in-list '(10 20 30 40))]
                   [id (in-list '(1 2))])
         (vector id (exact->inexact (+ t id)) 0)))
     (define a (analyze-steps events #:epochs 2))
     (check-equal? (hash-ref a 'steps) 4)
-    (check-equal? (hash-ref a 'epoch_s) '(0.02)))
+    (check-equal? (hash-ref a 'epoch_s) '(0.02))
+    (define phases (append (steps-at '(1 2 3 4) #:id 1) (steps-at '(10 20 40 80) #:id 2)))
+    (check-equal? (hash-ref (analyze-steps phases #:epochs 2 #:optimizer 'last) 'epoch_s)
+                  '(0.06)))
 
   (test-case "a run by steps skips its warmup"
     (define a (analyze-steps (steps-at '(0 50 60 70 80 95)) #:warmup 2))
@@ -129,11 +139,11 @@
                         (hash-ref (analyze-steps (steps-at '(1 2)) #:epochs 1) 'error)))
 
   (test-case "a recorded run round-trips through its file"
-    (define path (make-temporary-file "steps-~a.json"))
-    (call-with-output-file path #:exists 'truncate
-      (lambda (port) (write-json (hasheq 'wall_ms 5.0 'steps '((1 2.0 3))) port)))
-    (define-values (events wall meta) (read-steps path))
-    (delete-file path)
+    (define-values (events wall meta)
+      (with-temporary-path (path (make-temporary-file "steps-~a.json"))
+        (call-with-output-file path #:exists 'truncate
+          (lambda (port) (write-json (hasheq 'wall_ms 5.0 'steps '((1 2.0 3))) port)))
+        (read-steps path)))
     (check-equal? events (list (vector 1 2.0 3)))
     (check-equal? wall 5.0)
     (check-false meta)))

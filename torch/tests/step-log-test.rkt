@@ -14,7 +14,7 @@
 
   (define (fresh-parameter)
     (define p (Parameter (ones 2)))
-    (backward! (sum (mul p p)))
+    (~> (* p p) sum backward!)
     p)
 
   (test-case "every optimizer logs its own steps, a schedule none"

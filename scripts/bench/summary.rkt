@@ -4,6 +4,7 @@
          (only-in racket/format ~a ~r)
          (only-in racket/list remove-duplicates)
          (only-in racket/string string-join)
+         (only-in "harness.rkt" paired-ratio)
          (only-in "layers.rkt" layer-order))
 
 (provide read-records
@@ -26,11 +27,20 @@
   (define l (ref r 'load))
   (if (pair? l) (num (car l)) "-"))
 
-(define (context r)
+(define (commit r)
+  (define sha (ref r 'meta 'git_sha))
+  (format "`~a`~a"
+          (if (string? sha) (substring sha 0 (min 7 (string-length sha))) "?")
+          (if (ref r 'meta 'git_dirty) " (dirty)" "")))
+
+(define (machine r)
   (define m (ref r 'meta))
   (format "~a, ~a threads (~a)~a"
           (ref m 'device) (ref m 'threads) (ref m 'threads_source)
           (if (string? (ref m 'gpu)) (format ", ~a" (ref m 'gpu)) "")))
+
+(define (build-and-machine r)
+  (format "~a, ~a" (commit r) (machine r)))
 
 (define (table header rows)
   (string-join
@@ -51,7 +61,7 @@
              #:when (and (equal? (ref r 'suite) suite) (equal? (ref r 'group) group)))
     r))
 
-(define (by-context records)
+(define (by-context records context)
   (for/list ([c (in-list (remove-duplicates (map context records)))])
     (cons c (filter (lambda (r) (equal? (context r) c)) records))))
 
@@ -108,41 +118,70 @@
            (list w s (num (at "intra")) (num (at "cross"))
                  (if (and base (at "cross")) (num (/ (at "cross") base) 2) "-")))))
 
+(define (ratio-rows records)
+  (for*/list ([example (in-list (remove-duplicates (map (lambda (r) (ref r 'case)) records)))]
+              [runs (in-value (filter (lambda (r) (equal? (ref r 'case) example)) records))]
+              [base (in-value (car runs))]
+              [other (in-list (cdr runs))]
+              #:when (equal? (length (ref base 'samples)) (length (ref other 'samples))))
+    (define cmp (paired-ratio (ref base 'samples) (ref other 'samples)))
+    (define n (hash-ref cmp 'n))
+    (list example
+          (format "~a vs ~a" (or (ref other 'variant) "-") (or (ref base 'variant) "-"))
+          (num (hash-ref cmp 'median) 3)
+          (format "~a-~a" (num (hash-ref cmp 'lo) 3) (num (hash-ref cmp 'hi) 3))
+          (format "~a%~a" (~r (* 100 (hash-ref cmp 'confidence)) #:precision 0) (if (< n 6) " (n < 6)" ""))
+          n)))
+
 (define (e2e-section records)
-  (table '("example" "variant" "settings" "unit" "median" "IQR" "steps/s" "runs" "load")
-         (for/list ([r (in-list records)])
-           (define settings (ref r 'settings))
-           (list (ref r 'case) (or (ref r 'variant) "-")
-                 (if (hash? settings)
-                     (string-join (for/list ([(k v) (in-hash settings)]) (format "~a=~a" k v)) " ")
-                     "-")
-                 (ref r 'unit) (num (median r) 2) (num (iqr r) 2)
-                 (num (ref r 'steps_per_s 'median) 2) (ref r 'stats 'n) (load-text r)))))
+  (define runs
+    (table '("example" "variant" "commit" "settings" "unit" "median" "IQR" "steps/s" "runs"
+             "load")
+           (for/list ([r (in-list records)])
+             (define settings (ref r 'settings))
+             (list (ref r 'case) (or (ref r 'variant) "-") (commit r)
+                   (if (hash? settings)
+                       (string-join (for/list ([(k v) (in-hash settings)]) (format "~a=~a" k v))
+                                    " ")
+                       "-")
+                   (ref r 'unit) (num (median r) 2) (num (iqr r) 2)
+                   (num (ref r 'steps_per_s 'median) 2) (ref r 'stats 'n) (load-text r)))))
+  (define ratios (ratio-rows records))
+  (if (pair? ratios)
+      (string-append runs "\n\n"
+                     (table '("example" "time ratio" "median" "interval" "confidence" "rounds")
+                            ratios))
+      runs))
+
+(struct section (suite group title render context))
 
 (define sections
-  (list (list "micro" "crossings" "Native crossings by signature class" (plain-section "crossing"))
-        (list "micro" "layers" "The op stack, layer by layer" layer-section)
-        (list "micro" "ops" "Per op" op-section)
-        (list "micro" "contracts" "Validation strategies" contract-section)
-        (list "micro" "pipeline" "A real pipeline" (plain-section "pipeline"))
-        (list "e2e" "summary" "End to end" e2e-section)))
+  (list (section "micro" "crossings" "Native crossings by signature class"
+                 (plain-section "crossing") build-and-machine)
+        (section "micro" "layers" "The op stack, layer by layer" layer-section build-and-machine)
+        (section "micro" "ops" "Per op" op-section build-and-machine)
+        (section "micro" "contracts" "Validation strategies" contract-section build-and-machine)
+        (section "micro" "pipeline" "A real pipeline" (plain-section "pipeline")
+                 build-and-machine)
+        (section "e2e" "summary" "End to end" e2e-section machine)))
 
 (define (header records)
-  (define m (ref (car records) 'meta))
-  (format "Commit `~a`~a, Racket ~a, libtorch ~a, ~a (~a cores)."
-          (let ([sha (ref m 'git_sha)]) (if (string? sha) (substring sha 0 (min 7 (string-length sha))) "?"))
-          (if (ref m 'git_dirty) " (dirty)" "")
-          (ref m 'racket) (ref m 'libtorch) (ref m 'cpu) (ref m 'cores)))
+  (define (all key) (string-join (remove-duplicates (map (lambda (r) (~a (ref r 'meta key))) records))
+                                 " / "))
+  (format "Commits ~a; Racket ~a, libtorch ~a, ~a (~a cores)."
+          (string-join (remove-duplicates (map commit records)) ", ")
+          (all 'racket) (all 'libtorch) (all 'cpu) (all 'cores)))
 
 (define (summary-markdown records #:title [title "Benchmarks"])
   (string-join
    (append
     (list (format "# ~a" title) "" (if (pair? records) (header records) "No records.") "")
     (for*/list ([s (in-list sections)]
-                [rs (in-value (select records (car s) (cadr s)))]
+                [rs (in-value (select records (section-suite s) (section-group s)))]
                 #:when (pair? rs)
-                [c (in-list (by-context rs))])
-      (string-append "## " (caddr s) " (" (car c) ")\n\n" ((cadddr s) (cdr c)) "\n")))
+                [c (in-list (by-context rs (section-context s)))])
+      (string-append "## " (section-title s) " (" (car c) ")\n\n" ((section-render s) (cdr c))
+                     "\n")))
    "\n"))
 
 (module+ main

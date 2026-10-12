@@ -17,8 +17,7 @@
            (only-in "private/env.rkt" env-number))
   ;; The headline run: torchvision's VGG-16 features (a 56 MiB range of
   ;; the checkpoint, fetched once), 1000 Adam steps at 384 pixels, the
-  ;; result written beside the working directory. Pass STEPS and IMAGE_SIZE to
-  ;; override.
+  ;; result written beside the working directory.
   (define device (pick-device))
   (define size (env-number "IMAGE_SIZE" 384))
   (printf "device: ~a\n" device)

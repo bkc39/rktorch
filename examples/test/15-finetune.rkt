@@ -12,8 +12,7 @@
            (only-in "private/env.rkt" env-number))
   ;; The headline run: the tutorial's ants and bees (downloads and caches
   ;; the 47 MB archive once) on torchvision's ResNet-18 (and its 47 MB
-  ;; checkpoint), both phases, validation accuracy after every epoch. Pass
-  ;; FEATURE_EPOCHS and FINETUNE_EPOCHS to override.
+  ;; checkpoint), both phases, validation accuracy after every epoch.
   (printf "device: ~a\n" (pick-device))
   (define-values (records _net)
     (finetune #:feature-epochs (env-number "FEATURE_EPOCHS" 10)

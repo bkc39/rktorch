@@ -1,15 +1,14 @@
 #lang racket/base
 
-(require (only-in compiler/cm managed-compile-zo)
+(require (for-syntax racket/base)
          (only-in compiler/find-exe find-exe)
-         (only-in racket/file
-                  delete-directory/files make-temporary-directory make-temporary-file)
+         (only-in racket/file make-temporary-directory)
          (only-in racket/format ~a)
-         (only-in racket/match match-define)
-         ;; whole-module require on purpose (only-in breaks its expansion)
-         racket/runtime-path
+         (only-in racket/match match match-define)
+         (only-in racket/runtime-path define-runtime-path)
          (only-in racket/system process*/ports)
-         (only-in "harness.rkt" bench-case)
+         (only-in threading ~>)
+         (only-in "harness.rkt" bench-case with-temporary-path)
          (only-in "training.rkt" analyze-steps read-steps))
 
 (provide (struct-out example)
@@ -19,28 +18,29 @@
          merged-settings
          settings->jsexpr
          cache-env
+         example-runner
          run-example
          e2e-cases)
 
 (define-runtime-path examples-dir "../../examples/test")
 (define-runtime-path recorder "training.rkt")
 
-(struct example (name short full epochs-var warmup) #:transparent)
+(struct example (name short full epochs-var warmup optimizer) #:transparent)
 
 (define examples
-  (list (example "05-mnist" '(("EPOCHS" . 3)) '(("EPOCHS" . 3)) "EPOCHS" 0)
-        (example "06-gpt" '(("STEPS" . 300)) '(("STEPS" . 2000)) #f 50)
-        (example "08-diffusion" '(("EPOCHS" . 2)) '(("EPOCHS" . 10)) "EPOCHS" 0)
-        (example "09-resnet" '(("EPOCHS" . 3)) '(("EPOCHS" . 30)) "EPOCHS" 0)
-        (example "10-dcgan" '(("EPOCHS" . 3)) '(("EPOCHS" . 5)) "EPOCHS" 0)
-        (example "11-vae" '(("EPOCHS" . 3)) '(("EPOCHS" . 10)) "EPOCHS" 0)
-        (example "12-char-rnn" '(("EPOCHS" . 3)) '(("EPOCHS" . 30)) "EPOCHS" 0)
-        (example "13-translation" '(("EPOCHS" . 3)) '(("EPOCHS" . 30)) "EPOCHS" 0)
+  (list (example "05-mnist" '(("EPOCHS" . 3)) '(("EPOCHS" . 3)) "EPOCHS" 0 'first)
+        (example "06-gpt" '(("STEPS" . 300)) '(("STEPS" . 2000)) #f 50 'first)
+        (example "08-diffusion" '(("EPOCHS" . 2)) '(("EPOCHS" . 10)) "EPOCHS" 0 'first)
+        (example "09-resnet" '(("EPOCHS" . 3)) '(("EPOCHS" . 30)) "EPOCHS" 0 'first)
+        (example "10-dcgan" '(("EPOCHS" . 3)) '(("EPOCHS" . 5)) "EPOCHS" 0 'first)
+        (example "11-vae" '(("EPOCHS" . 3)) '(("EPOCHS" . 10)) "EPOCHS" 0 'first)
+        (example "12-char-rnn" '(("EPOCHS" . 3)) '(("EPOCHS" . 30)) "EPOCHS" 0 'first)
+        (example "13-translation" '(("EPOCHS" . 3)) '(("EPOCHS" . 30)) "EPOCHS" 0 'first)
         (example "15-finetune"
                  '(("FEATURE_EPOCHS" . 0) ("FINETUNE_EPOCHS" . 3))
                  '(("FEATURE_EPOCHS" . 0) ("FINETUNE_EPOCHS" . 15))
-                 "FINETUNE_EPOCHS" 0)
-        (example "16-style-transfer" '(("STEPS" . 100)) '(("STEPS" . 1000)) #f 20)))
+                 "FINETUNE_EPOCHS" 0 'last)
+        (example "16-style-transfer" '(("STEPS" . 100)) '(("STEPS" . 1000)) #f 20 'first)))
 
 (define (find-examples names)
   (for/list ([n (in-list names)])
@@ -62,15 +62,27 @@
   (if root
       (for/list ([v (in-list cache-variables)]
                  #:unless (getenv (car v)))
-        (cons (car v) (path->string (simplify-path (path->complete-path
-                                                     (build-path root (cdr v)))))))
+        (cons (car v) (~> (build-path root (cdr v)) path->complete-path simplify-path
+                          path->string)))
       '()))
 
+(define (path-variable? name)
+  (or (member name '("PLTUSERHOME" "PLTADDONDIR"))
+      (regexp-match? #rx"^RKTORCH_.*_DIR$" name)))
+
+(define (resolved setting)
+  (match setting
+    [(cons name (? path-string? value))
+     #:when (path-variable? name)
+     (cons name (~> value path->complete-path simplify-path path->string))]
+    [_ setting]))
+
 (define (merged-settings ex scale extra)
-  (append (for/list ([s (in-list (example-env ex scale))]
-                     #:unless (assoc (car s) extra))
-            s)
-          extra))
+  (map resolved
+       (append (for/list ([s (in-list (example-env ex scale))]
+                          #:unless (assoc (car s) extra))
+                 s)
+               extra)))
 
 (define (settings->jsexpr settings)
   (for/hasheq ([s (in-list settings)]) (values (string->symbol (car s)) (~a (cdr s)))))
@@ -82,39 +94,39 @@
                                 (string->bytes/utf-8 (~a (cdr s)))))
   env)
 
-(define (run-child runner out settings log)
+(define (run-child runner dir out settings log)
   (define form
     `(begin
        (require (only-in (file ,(path->string recorder)) record-steps!))
        (record-steps! ,(path->string runner) ,(path->string out))))
-  (define dir (make-temporary-directory "rktorch-bench-~a"))
-  (define code
-    (parameterize ([current-environment-variables (child-environment settings)]
-                   [current-directory dir])
-      (match-define (list _out _in _pid _err control)
-        (process*/ports log (open-input-bytes #"") log
-                        (find-exe) "-l" "racket/base" "-e" (format "~s" form)))
-      (control 'wait)
-      (control 'exit-code)))
-  (delete-directory/files dir)
-  code)
+  (parameterize ([current-environment-variables (child-environment settings)]
+                 [current-directory dir])
+    (match-define (list _out _in _pid _err control)
+      (process*/ports log (open-input-bytes #"") log
+                      (find-exe) "-l" "racket/base" "-e" (format "~s" form)))
+    (control 'wait)
+    (control 'exit-code)))
+
+(define (example-runner ex)
+  (build-path examples-dir (string-append (example-name ex) ".rkt")))
 
 (define (run-example ex
-                     #:runner [runner (build-path examples-dir (string-append (example-name ex) ".rkt"))]
+                     #:runner [runner (example-runner ex)]
                      #:scale [scale 'short]
                      #:settings [extra '()]
                      #:log [log (current-error-port)])
   (define env (merged-settings ex scale extra))
-  (define out (make-temporary-file "rktorch-steps-~a.json"))
-  (delete-file out)
-  (managed-compile-zo runner)
-  (define code (run-child runner out env log))
-  (define-values (events wall meta)
-    (if (file-exists? out) (read-steps out) (values '() #f #f)))
-  (when (file-exists? out) (delete-file out))
+  (define-values (code events wall meta)
+    (with-temporary-path (dir (make-temporary-directory "rktorch-bench-~a"))
+      (define out (build-path dir "rktorch-steps.json"))
+      (define code (run-child runner dir out env log))
+      (define-values (events wall meta)
+        (if (file-exists? out) (read-steps out) (values '() #f #f)))
+      (values code events wall meta)))
   (define epoch-setting (and (example-epochs-var ex) (assoc (example-epochs-var ex) env)))
-  (define epochs (and epoch-setting (string->number (~a (cdr epoch-setting)))))
-  (define analysis (analyze-steps events #:epochs epochs #:warmup (example-warmup ex)))
+  (define epochs (and epoch-setting (~> epoch-setting cdr ~a string->number)))
+  (define analysis (analyze-steps events #:epochs epochs #:warmup (example-warmup ex)
+                                  #:optimizer (example-optimizer ex)))
   (hash-set* analysis
              'exit_code code
              'wall_s (and wall (/ wall 1000.0))
@@ -129,23 +141,21 @@
     [(pair? (hash-ref analysis 'epoch_s '()))
      (define epochs (hash-ref analysis 'epoch_s))
      (/ (* 1000.0 (apply + epochs)) (length epochs))]
-    [else (hash-ref (hash-ref analysis 'step_ms) 'median)]))
+    [else (/ 1000.0 (hash-ref analysis 'steps_per_s))]))
 
 (define (e2e-cases exs
                    #:scale [scale 'short]
                    #:variants [variants '((#f))]
                    #:on-run [on-run void]
                    #:log [log (current-error-port)]
-                   #:runner-for [runner-for #f])
+                   #:runner-for [runner-for example-runner])
   (for*/list ([ex (in-list exs)] [v (in-list variants)])
     (define name (if (car v) (format "~a/~a" (example-name ex) (car v)) (example-name ex)))
     (bench-case (string->symbol name)
                 (lambda (_reps)
                   (define analysis
-                    (if runner-for
-                        (run-example ex #:runner (runner-for ex) #:scale scale
-                                     #:settings (cdr v) #:log log)
-                        (run-example ex #:scale scale #:settings (cdr v) #:log log)))
+                    (run-example ex #:runner (runner-for ex) #:scale scale
+                                 #:settings (cdr v) #:log log))
                   (on-run ex (car v) analysis)
                   (primary-ms ex analysis))
                 #:self-timed? #t)))
@@ -156,7 +166,7 @@
            (only-in "harness.rkt" measure result-name result-per-call))
 
   (define-runtime-path stepper "fixtures/stepper.rkt")
-  (define fixture (example "stepper" '(("EPOCHS" . 3)) '(("EPOCHS" . 4)) "EPOCHS" 0))
+  (define fixture (example "stepper" '(("EPOCHS" . 3)) '(("EPOCHS" . 4)) "EPOCHS" 0 'first))
   (define quiet (open-output-nowhere))
 
   (test-case "examples are found by their number"
@@ -174,6 +184,18 @@
       (check-false (assoc "RKTORCH_MNIST_DIR" env))
       (check-equal? (cdr (assoc "RKTORCH_CIFAR10_DIR" env)) "/c/cifar10")
       (check-true (absolute-path? (cdr (assoc "RKTORCH_TEXT_DIR" (cache-env "rel")))))))
+
+  (test-case "a variant's relative paths are the caller's"
+    (define settings
+      (merged-settings fixture 'short '(("PLTUSERHOME" . "other/.racket-user")
+                                        ("RKTORCH_MNIST_DIR" . "data")
+                                        ("OMP_NUM_THREADS" . "1"))))
+    (check-equal? (cdr (assoc "PLTUSERHOME" settings))
+                  (path->string (build-path (current-directory) "other" ".racket-user")))
+    (check-equal? (cdr (assoc "RKTORCH_MNIST_DIR" settings))
+                  (path->string (build-path (current-directory) "data")))
+    (check-equal? (cdr (assoc "OMP_NUM_THREADS" settings)) "1")
+    (check-equal? (cdr (assoc "EPOCHS" settings)) 3))
 
   (test-case "a child run is timed from its optimizer's steps"
     (define a (run-example fixture #:runner stepper #:scale 'full #:log quiet))

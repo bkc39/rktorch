@@ -1,16 +1,17 @@
 #lang racket/base
 
 (require (only-in racket/format ~a)
-         (only-in racket/match match-define)
+         (only-in racket/list check-duplicates)
+         (only-in racket/match match match-define)
          (only-in racket/string string-split)
          (only-in torch accelerator-if-available device-type torch-version)
          (only-in "contracts.rkt" contract-workloads pipeline-case)
          (only-in "crossings.rkt" crossing-cases)
          (only-in "e2e.rkt"
-                  cache-env e2e-cases example-epochs-var example-name examples
-                  find-examples merged-settings settings->jsexpr)
+                  cache-env e2e-cases example-epochs-var example-name example-runner
+                  examples find-examples merged-settings settings->jsexpr)
          (only-in "harness.rkt"
-                  format-result host-meta load-average measure result->record
+                  busy-cores format-result host-meta load-average measure result->record
                   result-name summarize write-record)
          (only-in "layers.rkt" layer-cases)
          (only-in "ops.rkt" op-cases))
@@ -25,18 +26,24 @@
   (match-define (list _ name settings) (regexp-match #rx"^([^:]*)(?::(.*))?$" text))
   (cons name
         (for/list ([kv (in-list (if settings (string-split settings ",") '()))])
-          (define m (regexp-match #rx"^([^=]+)=(.*)$" kv))
-          (unless m (raise-user-error 'run "a variant setting is VAR=VALUE, got ~s" kv))
-          (cons (cadr m) (caddr m)))))
+          (match kv
+            [(regexp #rx"^([^=]+)=(.*)$" (list _ var value)) (cons var value)]
+            [_ (raise-user-error 'run "a variant setting is VAR=VALUE, got ~s" kv)]))))
+
+(define (current-load)
+  (or (busy-cores)
+      (match (load-average)
+        [(cons one-minute _) one-minute]
+        [_ #f])))
 
 (define (wait-for-load limit log)
   (let loop ()
-    (define load (load-average))
+    (define load (and limit (current-load)))
     (cond
-      [(or (not limit) (not load) (< (car load) limit)) (void)]
+      [(or (not load) (< load limit)) (void)]
       [else
-       (fprintf log "load ~a, waiting for < ~a\n" (car load) limit)
-       (sleep 30)
+       (fprintf log "load ~a, waiting for < ~a\n" load limit)
+       (sleep 10)
        (loop)])))
 
 (define (run-suites suites
@@ -53,6 +60,9 @@
                     #:log [log (current-error-port)])
   (define libtorch (torch-version))
   (define (n reps) (max 1 (inexact->exact (round (* reps scale)))))
+  (define twice (check-duplicates (map car variants)))
+  (when twice
+    (raise-user-error 'run "two variants are named ~a" twice))
   (define (measure-group group cases #:unit [unit "ns"] #:scale [unit-scale 1e6]
                          #:case-name [case-name #f] #:on-device [on-device 'cpu])
     (wait-for-load max-load log)
@@ -85,7 +95,8 @@
       [else (raise-user-error 'run "unknown suite ~a" suite)])))
 
 (define (run-e2e exs #:rounds rounds #:full? full? #:variants variants #:cache cache
-                 #:max-load max-load #:libtorch libtorch #:out out #:log log)
+                 #:max-load max-load #:libtorch libtorch #:out out #:log log
+                 #:runner-for [runner-for example-runner])
   (define device (device-type (accelerator-if-available)))
   (define scale (if full? 'full 'short))
   (define cached (cache-env cache))
@@ -119,7 +130,7 @@
                                      out))])
       (define results
         (measure (e2e-cases (list ex) #:scale scale #:variants with-cache #:on-run on-run
-                            #:log log)
+                            #:log log #:runner-for runner-for)
                  #:warmup 0 #:rounds rounds))
       (for ([r (in-list results)] [v (in-list variants)])
         (write-record
@@ -150,13 +161,15 @@
     (command-line
      #:once-each
      [("--rounds") n "Timed rounds (default 5; e2e 1)" (set! rounds (string->number n))]
-     [("--warmup") n "Untimed rounds before them (default 1)" (set! warmup (string->number n))]
+     [("--warmup") n "Untimed rounds before them (default 1; e2e runs none)"
+                   (set! warmup (string->number n))]
      [("--scale") x "Multiply micro repetitions by x" (set! scale (string->number x))]
      [("--device") d "Device for the ops suite: cpu or cuda" (set! device (string->symbol d))]
      [("--full") "Run examples at their full settings" (set! full? #t)]
      [("--only") names "Comma-separated example numbers" (set! only (string-split names ","))]
      [("--cache") dir "Shared dataset cache root for the examples" (set! cache dir)]
-     [("--max-load") l "Wait for a 1-minute load below l" (set! max-load (string->number l))]
+     [("--max-load") l "Wait for a load below l (busy cores over 1 s on Linux)"
+                     (set! max-load (string->number l))]
      [("--out") file "Append JSON lines to file" (set! out-path file)]
      #:multi
      [("--variant") v "name:VAR=VALUE,... (repeat for A/B)"
@@ -176,10 +189,22 @@
       (go (current-output-port))))
 
 (module+ test
-  (require (only-in racket/file make-temporary-file)
+  (require (for-syntax racket/base)
+           (only-in racket/file make-temporary-file)
            (only-in racket/port open-output-nowhere)
+           (only-in racket/runtime-path define-runtime-path)
            rackunit
+           (only-in "e2e.rkt" example)
+           (only-in "harness.rkt" with-temporary-path)
            (only-in "summary.rkt" read-records summary-markdown))
+
+  (define-runtime-path stepper "fixtures/stepper.rkt")
+  (define quiet (open-output-nowhere))
+
+  (define (records-of thunk)
+    (with-temporary-path (path (make-temporary-file "bench-~a.jsonl"))
+      (call-with-output-file path #:exists 'truncate thunk)
+      (read-records (list path))))
 
   (test-case "a variant names its settings"
     (check-equal? (parse-variant "base") '("base"))
@@ -190,13 +215,10 @@
     (check-exn #rx"VAR=VALUE" (lambda () (parse-variant "bad:X"))))
 
   (test-case "every micro suite runs, records and summarises"
-    (define path (make-temporary-file "bench-~a.jsonl"))
-    (call-with-output-file path #:exists 'truncate
-      (lambda (out)
-        (run-suites micro-suites #:rounds 1 #:warmup 0 #:scale 0.001
-                    #:out out #:log (open-output-nowhere))))
-    (define records (read-records (list path)))
-    (delete-file path)
+    (define records
+      (records-of (lambda (out)
+                    (run-suites micro-suites #:rounds 1 #:warmup 0 #:scale 0.001
+                                #:out out #:log quiet))))
     (define groups (for/list ([r (in-list records)]) (hash-ref r 'group)))
     (for ([g (in-list '("crossings" "layers" "ops" "contracts" "pipeline"))])
       (check-not-false (member g groups) g))
@@ -207,4 +229,30 @@
                               "## Validation strategies" "## A real pipeline"))])
       (check-regexp-match (regexp-quote heading) md))
     (check-exn #rx"unknown suite"
-               (lambda () (run-suites '(nope) #:log (open-output-nowhere))))))
+               (lambda () (run-suites '(nope) #:log quiet)))
+    (check-exn #rx"two variants are named a"
+               (lambda () (run-suites '(e2e) #:variants '(("a") ("a" ("X" . "1")))
+                                      #:log quiet))))
+
+  (test-case "an e2e run records every child, a summary per variant, and a failure"
+    (define fixture (example "stepper" '(("EPOCHS" . 3)) '(("EPOCHS" . 4)) "EPOCHS" 0 'first))
+    (define (run variants rounds out)
+      (run-e2e (list fixture) #:rounds rounds #:full? #f #:variants variants #:cache #f
+               #:max-load #f #:libtorch "x" #:out out #:log quiet
+               #:runner-for (lambda (_ex) stepper)))
+    (define records
+      (records-of (lambda (out)
+                    (run '(("a") ("b" ("EPOCHS" . "2"))) 2 out)
+                    (run '((#f ("EPOCHS" . "1"))) 1 out))))
+    (define (group g) (filter (lambda (r) (equal? (hash-ref r 'group) g)) records))
+    (check-equal? (map (lambda (r) (hash-ref r 'steps)) (group "run")) '(9 6 6 9 3))
+    (check-regexp-match #rx"no measured steps" (hash-ref (car (group "error")) 'error))
+    (define summaries (group "summary"))
+    (check-equal? (map (lambda (r) (hash-ref r 'variant)) summaries) '("a" "b"))
+    (check-equal? (map (lambda (r) (hash-ref (hash-ref r 'settings) 'EPOCHS)) summaries)
+                  '("3" "2"))
+    (check-equal? (map (lambda (r) (hash-ref (hash-ref r 'stats) 'n)) summaries) '(2 2))
+    (define md (summary-markdown records))
+    (check-regexp-match #rx"## End to end" md)
+    (check-regexp-match #rx"\\| stepper \\| b vs a \\|" md)
+    (check-regexp-match #rx"n < 6" md)))

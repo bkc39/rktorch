@@ -1,13 +1,17 @@
 #lang racket/base
 
-(require (only-in json jsexpr->string)
+(require (for-syntax racket/base syntax/parse)
+         (only-in json jsexpr->string)
+         (only-in racket/file delete-directory/files)
          (only-in racket/format ~a ~r)
          (only-in racket/future processor-count)
          (only-in racket/list drop take)
-         (only-in racket/match match-define)
+         (only-in racket/match match match-define)
          (only-in racket/port open-output-nowhere port->string with-output-to-string)
          (only-in racket/string string-split string-trim)
-         (only-in racket/system process*/ports))
+         (only-in racket/system process*/ports)
+         (only-in syntax/parse/define define-syntax-parse-rule)
+         (only-in threading ~>))
 
 (provide bench-case
          bench-case?
@@ -20,6 +24,9 @@
          rotate
          parse-load-average
          load-average
+         parse-cpu-times
+         busy-cores
+         with-temporary-path
          host-meta
          result->record
          write-record
@@ -27,9 +34,9 @@
 
 (struct bench-case (name run reps before self-timed?)
   #:constructor-name make-bench-case
-  #:name bench-case-type) ;; noqa
+  #:omit-define-syntaxes)
 
-(define (bench-case name run
+(define (bench-case name run ;; noqa
                     #:reps [reps 1]
                     #:before [before void]
                     #:self-timed? [self-timed? #f])
@@ -149,12 +156,46 @@
   (and (string? text) (parse-load-average text)))
 
 (define (proc-field path key)
+  (define pattern (regexp (string-append "^" (regexp-quote key) "[^:]*:(.*)$")))
   (and (file-exists? path)
        (call-with-input-file path
          (lambda (in)
-           (for/first ([line (in-lines in)]
-                       #:when (regexp-match? (regexp (string-append "^" key)) line))
-             (string-trim (cadr (regexp-match #rx":(.*)$" line))))))))
+           (for/or ([line (in-lines in)])
+             (match line
+               [(regexp pattern (list _ value)) (string-trim value)]
+               [_ #f]))))))
+
+(define (parse-cpu-times text)
+  (define fields
+    (match (and (string? text) (string-split text))
+      [(cons "cpu" rest) (map string->number rest)]
+      [_ '()]))
+  (match fields
+    [(list user nice system idle iowait irq softirq steal _ ...)
+     #:when (andmap exact-nonnegative-integer? fields)
+     (define busy (+ user nice system irq softirq steal))
+     (cons busy (+ busy idle iowait))]
+    [_ #f]))
+
+(define (busy-cores #:interval [interval 1.0])
+  (define (sample) (parse-cpu-times (read-first-line "/proc/stat")))
+  (define before (sample))
+  (cond
+    [(not before) #f]
+    [else
+     (sleep interval)
+     (match-define (cons busy total) (sample))
+     (define elapsed (- total (cdr before)))
+     (if (positive? elapsed)
+         (* (processor-count) (/ (- busy (car before)) elapsed 1.0))
+         0.0)]))
+
+(define-syntax-parse-rule (with-temporary-path (name:id make:expr) body:expr ...+)
+  (let ([name make])
+    (dynamic-wind
+     void
+     (lambda () body ...)
+     (lambda () (delete-directory/files name #:must-exist? #f)))))
 
 (define (thread-setting)
   (define omp (getenv "OMP_NUM_THREADS"))
@@ -209,7 +250,7 @@
   (flush-output out))
 
 (define (format-result r #:unit unit #:scale [scale 1e6])
-  (define s (summarize (map (lambda (ms) (* ms scale)) (result-per-call r))))
+  (define s (~> r result-per-call (map (lambda (ms) (* ms scale)) _) summarize))
   (format "~a ~a ~a  IQR ~a  gc ~a ms"
           (~a (result-name r) #:min-width 28)
           (~a (~r (hash-ref s 'median) #:precision '(= 1)) #:min-width 10 #:align 'right)
@@ -219,6 +260,7 @@
 
 (module+ test
   (require (only-in json string->jsexpr)
+           (only-in racket/file make-temporary-directory make-temporary-file)
            (only-in racket/list make-list)
            rackunit)
 
@@ -246,16 +288,46 @@
     (check-equal? (length (result-per-call (car results))) 4)
     (check-equal? (result-load (car results)) '((1.0 2.0 3.0) (1.0 2.0 3.0))))
 
-  (test-case "a case may time itself, and before runs untimed"
-    (define befores 0)
+  (test-case "a case may time itself"
     (define r
       (car (measure (list (bench-case 'self (lambda (reps) (* 10.0 reps))
-                                      #:reps 4 #:self-timed? #t
-                                      #:before (lambda () (set! befores (add1 befores)))))
+                                      #:reps 4 #:self-timed? #t))
                     #:warmup 2 #:rounds 3 #:load void)))
     (check-equal? (result-per-call r) '(10.0 10.0 10.0))
-    (check-equal? befores 5)
     (check-equal? (result-reps r) 4))
+
+  (test-case "before runs every round, outside the timed span"
+    (define befores 0)
+    (define r
+      (car (measure (list (bench-case 'quick void
+                                      #:before (lambda ()
+                                                 (set! befores (add1 befores))
+                                                 (sleep 0.05))))
+                    #:warmup 1 #:rounds 2 #:load void)))
+    (check-equal? befores 3)
+    (for ([ms (in-list (result-per-call r))])
+      (check-true (< ms 50.0) (format "~a ms" ms))))
+
+  (test-case "busy cores come from the aggregate cpu line"
+    (check-equal? (parse-cpu-times "cpu  100 5 20 800 30 1 2 3 7 0") '(131 . 961))
+    (check-false (parse-cpu-times "cpu0 100 5 20 800 30 1 2 3 7 0"))
+    (check-false (parse-cpu-times "cpu 1 2 3"))
+    (check-false (parse-cpu-times #f))
+    (define busy (busy-cores #:interval 0.05))
+    (check-true (or (not busy) (<= 0.0 busy (processor-count)))))
+
+  (test-case "a temporary path is removed however its body leaves"
+    (define kept #f)
+    (check-exn #rx"boom"
+               (lambda ()
+                 (with-temporary-path (dir (make-temporary-directory))
+                   (set! kept dir)
+                   (call-with-output-file (build-path dir "f") void)
+                   (error "boom"))))
+    (check-false (directory-exists? kept))
+    (with-temporary-path (file (make-temporary-file))
+      (set! kept file))
+    (check-false (file-exists? kept)))
 
   (test-case "the paired ratio's interval comes from order statistics"
     (define a '(10 10 10 10 10 10 10 10))
