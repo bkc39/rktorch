@@ -124,3 +124,9 @@ per child: `steps`, `steps_per_epoch`, `epoch_s`, `epoch_gc_ms`, `step_ms`,
 `steps_per_s`, `steps_per_s_median`, `wall_s`, `exit_code`, `settings`. An
 `e2e` record's `meta` comes from the child that ran it, so an A/B across
 checkouts records each one's commit, and the summary shows it per row.
+
+## Baseline
+
+`baseline-2026-10-12.jsonl` and its summary `baseline-2026-10-12.md`, taken at
+`c2428f0` on the lab host (i9-9900K, RTX 3090 Ti): `micro`, `ops --device
+cuda` and the short `e2e`, each started once the 1-minute load was below 4.
