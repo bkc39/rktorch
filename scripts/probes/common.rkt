@@ -19,7 +19,6 @@
          print-table-row
          run-parallel
          run-parallel/gc
-         median
          fmt-ms
          fmt-rate)
 
@@ -72,10 +71,6 @@
   (for-each print-table-row rows)
   (newline))
 
-;; Every worker waits on one gate, so the clock starts with all of them
-;; ready. Answers the wall ms from the gate, each worker's result, and the
-;; collector's ms over the same interval; a worker's exception is re-raised
-;; once all have joined.
 (define (run-parallel/gc n body #:pool [pool 'own])
   (define ready (make-semaphore 0))
   (define gate (make-semaphore 0))
@@ -103,15 +98,6 @@
 (define (run-parallel n body #:pool [pool 'own])
   (define-values (ms results _gc-ms) (run-parallel/gc n body #:pool pool))
   (values ms results))
-
-(define (median xs)
-  (define sorted (sort xs <))
-  (define n (length sorted))
-  (cond
-    [(odd? n) (list-ref sorted (quotient n 2))]
-    [else (/ (+ (list-ref sorted (sub1 (quotient n 2)))
-                (list-ref sorted (quotient n 2)))
-             2)]))
 
 (define (fmt-ms ms)
   (~r ms #:precision 1))

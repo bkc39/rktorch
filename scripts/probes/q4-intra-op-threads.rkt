@@ -1,8 +1,6 @@
 #lang racket/base
 
-;; #262 question 4: is libtorch's intra-op thread count per OS thread, does
-;; at::set_num_threads from a worker change the trainer's, and does each OS
-;; thread that runs a parallel op get its own OpenMP team?
+;; Q4: libtorch's intra-op thread count and OpenMP teams per OS thread.
 ;;
 ;; libtorch applies its thread count lazily, once per OS thread, so each
 ;; scenario runs in a fresh process.
@@ -10,6 +8,7 @@
 (require (for-syntax racket/base)
          (only-in compiler/find-exe find-exe)
          (only-in racket/format ~a ~s)
+         (only-in racket/match match-define)
          (only-in racket/port port->string with-input-from-string)
          ;; whole-module require on purpose (only-in breaks its expansion)
          racket/runtime-path
@@ -22,7 +21,9 @@
 (define (run-scenario body)
   (define program
     `(begin
-       (require (file ,(path->string shim-path))
+       (require racket/match
+                syntax/parse/define
+                (file ,(path->string shim-path))
                 (file ,(path->string common-path)))
        (define elements (* 4 1024 1024))
        (define (parallel-add!)
@@ -56,20 +57,29 @@
          (for-each thread-wait workers)
          (when (unbox failure) (raise (unbox failure)))
          tasks)
+       (define (tasks-back-to baseline)
+         (let loop ([tries 0])
+           (define now (os-task-count))
+           (cond
+             [(or (<= now baseline) (= tries 500)) now]
+             [else (sleep 0.01) (loop (add1 tries))])))
        (define (team-scenario prepare)
          (define start (os-task-count))
          (parallel-add!)
          (define after-trainer (os-task-count))
+         (define add-round (team-round prepare parallel-add!))
+         (define before-matmul (tasks-back-to after-trainer))
          (list (cons "OS threads at start" start)
                (cons "after the trainer's parallel add" after-trainer)
-               (cons "while 4 workers that ran a parallel add are parked"
-                     (team-round prepare parallel-add!))
+               (cons "while 4 workers that ran a parallel add are parked" add-round)
+               (cons "after those workers exit, before the matmul round" before-matmul)
                (cons "while 4 workers that ran a 1024 matmul are parked"
                      (team-round prepare parallel-matmul!))
                (cons "trainer at / omp / mkl" (counts))))
        (define (on-worker thunk)
          (define-values (_ms results) (run-parallel 1 (lambda (_i) (thunk))))
-         (car results))
+         (match-define (list result) results)
+         result)
        (write (let () ,@body))))
   (define-values (out in _pid _err control)
     (apply values (process*/ports #f #f (current-error-port)
@@ -134,7 +144,7 @@
       (for ([_ (in-range reps)]) (shim-free (shim-matmul a a)))
       (begin0 (/ (- (current-inexact-monotonic-milliseconds) start) reps)
               (shim-free a)))
-    (define (with-busy-workers prepare thunk)
+    (define (call-with-busy-workers prepare thunk)
       (define stop (make-semaphore 0))
       (define busy (make-semaphore 0))
       (define failure (box #f))
@@ -165,16 +175,16 @@
                         (for-each thread-wait workers))))
       (when (unbox failure) (raise (unbox failure)))
       result)
+    (define-syntax-parse-rule (with-busy-workers prepare:expr body:expr ...+)
+      (call-with-busy-workers prepare (lambda () body ...)))
     (parallel-add!)
     (define before (counts))
     (define alone (time-trainer 50))
-    (define busy-default (with-busy-workers void (lambda () (time-trainer 50))))
+    (define busy-default (with-busy-workers void (time-trainer 50)))
     (define busy-omp
-      (with-busy-workers (lambda () (omp-set-num-threads 1))
-                         (lambda () (time-trainer 50))))
+      (with-busy-workers (lambda () (omp-set-num-threads 1)) (time-trainer 50)))
     (define busy-at
-      (with-busy-workers (lambda () (at-set-num-threads 1))
-                         (lambda () (time-trainer 50))))
+      (with-busy-workers (lambda () (at-set-num-threads 1)) (time-trainer 50)))
     (list (cons "trainer at / omp / mkl before" before)
           (cons "trainer 1024 matmul ms, alone" (fmt-ms alone))
           (cons "with 4 workers looping 512 matmuls, default threads"
@@ -190,7 +200,9 @@
   (print-banner "Q4: libtorch intra-op threads from parallel threads"
                 #:torch-version shim-version)
   (print-table-header '("scenario (fresh process)" "measurement" "value"))
-  (for* ([s (in-list (append scenarios (list (cons "oversubscription timing" timing-scenario))))]
-         [m (in-list (run-scenario (cdr s)))])
-    (print-table-row (list (car s) (car m) (~a (cdr m)))))
+  (for ([s (in-list (append scenarios (list (cons "oversubscription timing" timing-scenario))))])
+    (match-define (cons scenario body) s)
+    (for ([m (in-list (run-scenario body))])
+      (match-define (cons what value) m)
+      (print-table-row (list scenario what (~a value)))))
   (printf "\nload average (1 min) at end: ~a\n" (load-average)))

@@ -1,28 +1,21 @@
 #lang racket/base
 
-;; Probe-local allocators over the plain shim bindings, the shapes the #168
-;; design proposes for L2. Nothing here is library code: each keeps its own
-;; ledger so a probe can check it returns to zero.
-;;
-;;   stage 1  the op runs plainly on the caller's OS thread, then one short
-;;            atomic section registers the finalizer, the table entry and the
-;;            counter
-;;   stage 2  no atomic section: the finalizer is registered with breaks
-;;            disabled, the counter moves by box-cas!, the record rides on
-;;            the value the caller holds
-;;   alloc/u  ffi/unsafe/alloc's own wrap with #:merely-uninterruptible?,
-;;            and stage 2's counter
-;;   bare     the op and an explicit free with no bookkeeping at all: the
-;;            ceiling, and what libtorch alone does with N threads
+;; Probe-local L2 candidates over the plain shim bindings, each with its own ledger.
 
 (require (only-in ffi/unsafe register-finalizer)
          (only-in ffi/unsafe/alloc allocator deallocator)
-         (only-in ffi/unsafe/atomic end-atomic start-atomic)
+         (only-in ffi/unsafe/atomic
+                  end-atomic
+                  make-uninterruptible-lock
+                  start-atomic
+                  uninterruptible-lock-acquire
+                  uninterruptible-lock-release)
          "shim.rkt")
 
 (provide (struct-out prototype)
          bare
          stage-1
+         stage-1/gate
          stage-2
          alloc/uninterruptible)
 
@@ -57,35 +50,50 @@
   (prototype "bare: plain op, explicit free, no finalizer or ledger"
              values values shim-free (lambda () 0) (lambda () 0)))
 
-(define (stage-1)
+(define gate-interval (* 128 1024 1024))
+
+(define (stage-1-with name gate?)
   (define table (make-weak-hasheq))
+  (define since-check (make-hasheqv))
   (define live (box 0))
   (define runs (box 0))
-  (define (release! r t)
+  (define (count-toward-gate! dev nbytes)
+    (define since (+ (hash-ref since-check dev 0) nbytes))
+    (hash-set! since-check dev (if (>= since gate-interval) 0 since)))
+  (define (release! t find-record)
     (start-atomic)
-    (hash-remove! table t)
-    (set-box! live (- (unbox live) (record-nbytes r)))
+    (define r (find-record))
+    (define claimed? (and r (claim! r)))
+    (when claimed?
+      (hash-remove! table t)
+      (set-box! live (- (unbox live) (record-nbytes r))))
     (end-atomic)
-    (set-phantom-bytes! (record-phantom r) 0)
-    (shim-free t))
+    (when claimed?
+      (set-phantom-bytes! (record-phantom r) 0)
+      (shim-free t)))
   (define ((finalizer-for r) t)
     (cas-add! runs 1)
-    (when (claim! r)
-      (release! r t)))
+    (release! t (lambda () r)))
   (define ((wrap op) . args)
     (define t (apply op args))
     (define r (make-record t))
+    (define dev (and gate? (shim-device t)))
     (start-atomic)
     (register-finalizer t (finalizer-for r))
     (hash-set! table t r)
     (set-box! live (+ (unbox live) (record-nbytes r)))
+    (when dev (count-toward-gate! dev (record-nbytes r)))
     (end-atomic)
     t)
   (define (free! t)
-    (define r (hash-ref table t #f))
-    (when (and r (claim! r)) (release! r t)))
-  (prototype "stage 1: plain op, one atomic section" wrap values free!
-             (lambda () (unbox live)) (lambda () (unbox runs))))
+    (release! t (lambda () (hash-ref table t #f))))
+  (prototype name wrap values free! (lambda () (unbox live)) (lambda () (unbox runs))))
+
+(define (stage-1)
+  (stage-1-with "stage 1: plain op, one atomic section; no pressure gate, no device query" #f))
+
+(define (stage-1/gate)
+  (stage-1-with "stage 1 + gate: device query, gate count inside the one atomic section" #t))
 
 (struct held (handle record))
 
@@ -110,17 +118,26 @@
   (define (free! h)
     (define r (held-record h))
     (when (claim! r) (release! r (held-handle h))))
-  (prototype "stage 2: plain op, no atomic section" wrap held-handle free!
+  (prototype "stage 2: plain op, no atomic section; no pressure gate, no device query"
+             wrap held-handle free!
              (lambda () (unbox live)) (lambda () (unbox runs))))
 
 (define (alloc/uninterruptible)
   (define live (box 0))
   (define runs (box 0))
   (define records (make-weak-hasheq))
+  (define records-lock (make-uninterruptible-lock))
+  (define (call-with-records thunk)
+    (uninterruptible-lock-acquire records-lock)
+    (begin0 (thunk)
+            (uninterruptible-lock-release records-lock)))
   (define (unaccount! t)
-    (define r (hash-ref records t #f))
+    (define r
+      (call-with-records
+       (lambda ()
+         (begin0 (hash-ref records t #f)
+                 (hash-remove! records t)))))
     (when r
-      (hash-remove! records t)
       (cas-add! live (- (record-nbytes r)))
       (set-phantom-bytes! (record-phantom r) 0)))
   (define (finalize t)
@@ -133,11 +150,12 @@
     (lambda args
       (define t (apply wrapped args))
       (define r (make-record t))
-      (hash-set! records t r)
+      (call-with-records (lambda () (hash-set! records t r)))
       (cas-add! live (record-nbytes r))
       t))
   (define (free! t)
     (unaccount! t)
     (free-handle t))
-  (prototype "ffi/unsafe/alloc #:merely-uninterruptible?" wrap values free!
+  (prototype "ffi/unsafe/alloc #:merely-uninterruptible?; no pressure gate, no device query"
+             wrap values free!
              (lambda () (unbox live)) (lambda () (unbox runs))))

@@ -1,9 +1,6 @@
 #lang racket/base
 
-;; Plain bindings to the staged shim, libtorch and OpenMP for the probes:
-;; no allocator wrap, no ledger, no fault latch. The library itself must
-;; never bind native code this way (AGENTS.md); these exist so a probe can
-;; run an op on the calling thread's own OS thread and free it by hand.
+;; Plain shim, libtorch and OpenMP bindings: no allocator, ledger or fault latch.
 
 (require (only-in ffi/unsafe
                   _fun _int _int64 _pointer _ptr _string _uint _void
@@ -12,6 +9,7 @@
 
 (provide shim-randn
          shim-add
+         shim-device
          shim-matmul
          shim-matmul/blocking
          shim-free
@@ -65,6 +63,11 @@
                      -> (and (zero? rc) out))))
 
 (define (shim-nbytes t) (nbytes/raw t))
+
+(define shim-device
+  (get-ffi-obj "tr_tensor_device" shim
+               (_fun _pointer (type : (_ptr o _int)) (_ptr o _int64) -> (rc : _int)
+                     -> (and (zero? rc) type))))
 
 ;; Looked up through the shim's handle, which reaches the libraries it was
 ;; linked against: libtorch_cpu everywhere, and on Linux the MKL inside it and

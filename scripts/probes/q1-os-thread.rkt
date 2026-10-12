@@ -1,7 +1,6 @@
 #lang racket/base
 
-;; #262 question 1: which OS thread runs each kind of protected region
-;; entered from a parallel thread.
+;; Q1: which OS thread runs each kind of protected region entered from a parallel thread.
 
 (require (only-in ffi/unsafe/atomic
                   call-as-atomic
@@ -61,9 +60,6 @@
       (tally (cdr region) #:pool pool))
     (list label (car region) runs inside-main inside-own returned)))
 
-;; A thread in a shared pool can be resumed on another of the pool's OS
-;; threads; this counts how often two plain calls with a yield between them
-;; land on different OS threads.
 (define (migrations pool threads calls)
   (define-values (_ms per-thread)
     (run-parallel threads

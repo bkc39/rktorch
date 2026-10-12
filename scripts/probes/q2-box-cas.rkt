@@ -1,7 +1,6 @@
 #lang racket/base
 
-;; #262 question 2: is box-cas! exact across parallel threads, against the
-;; other ways a shared counter could be guarded?
+;; Q2: box-cas! against the other guards for one counter shared by parallel threads.
 
 (require (only-in ffi/unsafe/atomic
                   call-as-atomic
@@ -11,6 +10,8 @@
                   start-atomic
                   uninterruptible-lock-acquire
                   uninterruptible-lock-release)
+         (only-in math/statistics median)
+         (only-in racket/match match-define)
          "common.rkt")
 
 (define threads 8)
@@ -33,8 +34,6 @@
 (define (atomic-increment! b)
   (call-as-atomic (lambda () (bump! b))))
 
-;; call-as-atomic hops to the main OS thread for every increment, so it gets
-;; a tenth of the increments to finish in minutes rather than hours.
 (define strategies
   (list
    (vector "unprotected unbox / set-box!" full bump!)
@@ -69,9 +68,9 @@
 ;; What one atomic section costs by where it is entered from: the main OS
 ;; thread's coroutine, a lone parallel thread, and 8 of them contending.
 (define (hop-row label n pool total)
-  (define ms (median (for/list ([_ (in-range repeats)])
-                       (caddr (measure total atomic-increment!
-                                       #:threads n #:pool pool)))))
+  (define ms
+    (median < (for/list ([_ (in-range repeats)])
+                (caddr (measure total atomic-increment! #:threads n #:pool pool)))))
   (list label n total (fmt-ms ms) (fmt-ms (/ (* ms 1e6) total)) (load-average)))
 
 (define (strategy-row strategy)
@@ -79,7 +78,7 @@
   (define samples
     (for/list ([_ (in-range repeats)]) (measure total (vector-ref strategy 2))))
   (define counts (map car samples))
-  (define ms (median (map caddr samples)))
+  (define ms (median < (map caddr samples)))
   (list (vector-ref strategy 0)
         total
         (format "~a" counts)
@@ -96,25 +95,41 @@
   (define b (box 0))
   (define subtractions 1000000)
   (define go (make-semaphore 0))
+  (define subtractor-window (box #f))
   (define subtractor
     (thread (lambda ()
               (semaphore-wait go)
+              (define start (current-inexact-monotonic-milliseconds))
               (for ([_ (in-range subtractions)])
                 (start-atomic)
                 (cas-add! b -1)
-                (end-atomic)))))
-  (define-values (ms _retries)
+                (end-atomic))
+              (set-box! subtractor-window
+                        (cons start (current-inexact-monotonic-milliseconds))))))
+  (define-values (ms adder-windows)
     (run-parallel threads
                   (lambda (i)
                     (when (zero? i) (semaphore-post go))
-                    (for ([_ (in-range per-thread)]) (cas-add! b 1)))))
+                    (define start (current-inexact-monotonic-milliseconds))
+                    (for ([_ (in-range per-thread)]) (cas-add! b 1))
+                    (cons start (current-inexact-monotonic-milliseconds)))))
   (thread-wait subtractor)
+  (define adders-start (apply min (map car adder-windows)))
+  (define adders-end (apply max (map cdr adder-windows)))
+  (match-define (cons subtractor-start subtractor-end) (unbox subtractor-window))
+  (define overlap (- (min adders-end subtractor-end) (max adders-start subtractor-start)))
   (define expected (- full subtractions))
+  (define (since-adders t) (fmt-ms (- t adders-start)))
   (list "box-cas! adds from 8 parallel threads, 1M subtractions from a coroutine thread in atomic mode"
         full
         (format "(~a)" (unbox b))
-        (if (= (unbox b) expected) "yes" "NO")
-        (format "expected ~a" expected)
+        (cond
+          [(not (= (unbox b) expected)) "NO"]
+          [(positive? overlap) "yes"]
+          [else "exact, but the subtractor never overlapped the adders"])
+        (format "expected ~a; subtractor ran ~a to ~a ms, adders 0 to ~a ms"
+                expected (since-adders subtractor-start) (since-adders subtractor-end)
+                (since-adders adders-end))
         (fmt-ms ms)
         ""
         (load-average)))

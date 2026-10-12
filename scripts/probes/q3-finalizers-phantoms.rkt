@@ -1,12 +1,12 @@
 #lang racket/base
 
-;; #262 question 3: register-finalizer, make-phantom-bytes and
-;; set-phantom-bytes! called from parallel threads, plus the shared eq?-keyed
-;; tables ffi/unsafe/alloc keeps its registrations in.
+;; Q3: finalizers, phantom bytes and the eq? tables ffi/unsafe/alloc uses, from parallel threads.
 
 (require (only-in '#%foreign make-late-weak-hasheq)
          (only-in ffi/unsafe register-finalizer)
          (only-in ffi/unsafe/atomic call-as-uninterruptible)
+         (only-in racket/match match-define)
+         (only-in racket/string string-join)
          "common.rkt")
 
 (define default-threads 8)
@@ -49,10 +49,11 @@
   (define-values (rounds drain-ms) (collect-until (lambda () (for/and ([n (in-vector runs)]) (positive? n)))))
   (define never (for/sum ([n (in-vector runs)]) (if (zero? n) 1 0)))
   (define twice (for/sum ([n (in-vector runs)]) (if (> n 1) 1 0)))
-  (list total (fmt-ms ms) (fmt-rate (/ total (/ ms 1000.0)))
-        (ran) never twice rounds (fmt-ms drain-ms)
-        (if (and (zero? never) (zero? twice)) "yes" "NO")
-        (load-average)))
+  (values (list total (fmt-ms ms) (fmt-rate (/ total (/ ms 1000.0)))
+                (ran) never twice rounds (fmt-ms drain-ms)
+                (if (and (zero? never) (zero? twice)) "yes" "NO")
+                (load-average))
+          never))
 
 (define (plain f) (f))
 (define (break-disabled f) (parameterize-break #f (f)))
@@ -69,27 +70,28 @@
 (define (phantom-round count-per-thread size churn churn-size
                        #:threads [threads default-threads])
   (define base (settled-memory))
-  (define-values (make-ms phantoms)
+  (define-values (make-ms phantom-lists)
     (run-parallel threads
                   (lambda (_t)
                     (for/vector #:length count-per-thread
                                 ([_ (in-range count-per-thread)])
                       (make-phantom-bytes size)))))
+  (define phantoms (list->vector phantom-lists))
   (define held (- (settled-memory) base))
   (define expected (* threads count-per-thread size))
   (define-values (churn-ms _)
     (run-parallel threads
                   (lambda (t)
-                    (define mine (list-ref phantoms t))
+                    (define mine (vector-ref phantoms t))
                     (for ([i (in-range churn)])
-                        (define p (vector-ref mine (modulo i count-per-thread)))
+                      (define p (vector-ref mine (modulo i count-per-thread)))
                       (set-phantom-bytes! p churn-size)
                       (set-phantom-bytes! p size)))))
   (define after-churn (- (settled-memory) base))
   (define-values (zero-ms __)
     (run-parallel threads
                   (lambda (t)
-                    (for ([p (in-vector (list-ref phantoms t))])
+                    (for ([p (in-vector (vector-ref phantoms t))])
                       (set-phantom-bytes! p 0)))))
   (define after-zero (- (settled-memory) base))
   (list (format "~a x ~a x ~a KiB" threads count-per-thread (quotient size 1024))
@@ -149,17 +151,21 @@
    '("register-finalizer called" "objects" "registration wall ms"
      "registrations/s" "finalizer runs" "never ran" "ran twice"
      "major collections to drain" "drain ms" "exactly once" "load"))
-  (for ([spec (in-list
-                 (list (list "plain, first registrations in the process" 100000 plain 8)
-                       (list "plain" 100000 plain 8)
-                       (list "plain, one thread making all of them" 800000 plain 1)
-                       (list "under parameterize-break #f" 100000 break-disabled 8)
-                       (list "in uninterruptible mode" 100000 call-as-uninterruptible 8)))])
-    (define-values (label per-thread protect threads) (apply values spec))
-    (define row (finalizer-round per-thread #:protect protect #:threads threads))
-    (print-table-row (cons label row))
-    (unless (zero? (list-ref row 4))
-      (error 'q3 "finalizers still pending after the drain; later rows would run them")))
+  (define pending
+    (for/fold ([pending '()] #:result (reverse pending))
+              ([spec (in-list
+                      (list (list "plain, first registrations in the process" 100000 plain 8)
+                            (list "plain" 100000 plain 8)
+                            (list "plain, one thread making all of them" 800000 plain 1)
+                            (list "under parameterize-break #f" 100000 break-disabled 8)
+                            (list "in uninterruptible mode" 100000 call-as-uninterruptible 8)))])
+      (match-define (list label per-thread protect threads) spec)
+      (define-values (row never) (finalizer-round per-thread #:protect protect #:threads threads))
+      (print-table-row (cons label row))
+      (if (zero? never) pending (cons label pending))))
+  (unless (null? pending)
+    (printf "\nfinalizers still pending after the drain, so later rows ran them: ~a\n"
+            (string-join pending "; ")))
   (newline)
   (print-table-header
    '("phantoms" "churn (set to the churn size and back)" "expected MiB"

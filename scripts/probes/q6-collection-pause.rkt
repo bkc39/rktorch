@@ -1,9 +1,10 @@
 #lang racket/base
 
-;; #262 question 6: how long a collection waits while one parallel worker is
-;; inside a long foreign call, plain against #:blocking? #t.
+;; Q6: how long a collection waits while a parallel worker is in a plain or #:blocking? call.
 
-(require "common.rkt"
+(require (only-in math/statistics median)
+         (only-in racket/match match-define)
+         "common.rkt"
          "shim.rkt")
 
 (define repeats 3)
@@ -45,8 +46,6 @@
   (thunk)
   (- (current-inexact-monotonic-milliseconds) start))
 
-;; The trainer's view: allocate for a while and report the longest gap
-;; between two iterations, which is how long it was held at a collection.
 (define sink (box #f))
 
 (define (longest-stall)
@@ -66,13 +65,11 @@
   (lambda ()
     (shim-free (matmul-fn a a))))
 
-;; Built after the intra-op count is set, since the matmul inputs are the
-;; first libtorch ops.
-(define (make-calls)
+(define (make-calls plain-matmul)
   (list (cons "none (worker parked on a semaphore)" #f)
         (cons "usleep 1.5 s, plain _fun" (sleep-call usleep))
         (cons "usleep 1.5 s, #:blocking? #t" (sleep-call usleep/blocking))
-        (cons (format "~a matmul, plain _fun" matmul-n) (matmul-call shim-matmul))
+        (cons (format "~a matmul, plain _fun" matmul-n) plain-matmul)
         (cons (format "~a matmul, #:blocking? #t" matmul-n)
               (matmul-call shim-matmul/blocking))))
 
@@ -96,7 +93,7 @@
   (cond
     [(and call (zero? least-share)) "call returned before the measurement"]
     [else (format "~a (~a%)"
-                  (fmt-ms (median (map car samples)))
+                  (fmt-ms (median < (map car samples)))
                   (fmt-ms (* 100 least-share)))]))
 
 (module+ main
@@ -104,8 +101,9 @@
                         repeats)
                 #:torch-version (shim-version))
   (at-set-num-threads 1)
-  (define calls (make-calls))
-  (define call-ms (timed (cdr (list-ref calls 3))))
+  (define plain-matmul (matmul-call shim-matmul))
+  (define call-ms (timed plain-matmul))
+  (define calls (make-calls plain-matmul))
   (printf "- one ~a matmul alone, 1 intra-op thread, on the main thread: ~a ms\n" matmul-n
           (fmt-ms call-ms))
   (displayln
@@ -115,9 +113,9 @@
          (format "trainer's longest stall while allocating for ~a ms, ms" stall-window-ms)
          "load"))
   (for ([c (in-list calls)])
-    (define call (cdr c))
+    (match-define (cons label call) c)
     (print-table-row
-     (list (car c)
+     (list label
            (measure-under call (lambda () (timed (lambda () (collect-garbage 'major)))))
            (measure-under call (lambda () (timed (lambda () (collect-garbage 'minor)))))
            (measure-under call longest-stall)

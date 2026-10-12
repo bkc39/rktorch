@@ -1,10 +1,9 @@
 #lang racket/base
 
-;; #262 question 7: N parallel workers make tensors and drop them to the
-;; collector; how fast do the finalizers run, and how far does the ledger
-;; lag behind what is really live?
+;; Q7: finalizer throughput and ledger lag while N parallel workers drop tensors.
 
 (require (only-in racket/format ~r)
+         (only-in racket/match match-define)
          "common.rkt"
          "prototype-allocator.rkt"
          "shim.rkt"
@@ -29,11 +28,12 @@
        (sleep 0.05)
        (loop (max peak ((prototype-live-bytes p))))])))
 
-(define (drain! p)
+(define (drain! p runs-before made)
   (define start (current-inexact-monotonic-milliseconds))
+  (define (all-ran?) (>= (- ((prototype-finalizer-runs p)) runs-before) made))
   (let loop ([rounds 0])
     (cond
-      [(or (zero? ((prototype-live-bytes p))) (= rounds drain-round-limit))
+      [(or (zero? ((prototype-live-bytes p))) (all-ran?) (= rounds drain-round-limit))
        (values rounds (- (current-inexact-monotonic-milliseconds) start))]
       [else
        (collect-garbage 'major)
@@ -69,19 +69,27 @@
     (vector->values (unbox at-stop)))
   (define runs-during (- runs-at-stop runs-before))
   (define gc-share (/ gc-ms (* 1000 interval)))
-  (define-values (rounds drain-ms) (drain! p))
-  (list (prototype-name p)
-        workers
-        (fmt-rate (/ made interval))
-        (fmt-rate (/ runs-during interval))
-        (~r (/ runs-during (max made 1)) #:precision 2)
-        (~r gc-share #:precision 2)
-        (~r (/ (max peak lag) 1048576.0) #:precision 1)
-        (~r (/ lag 1048576.0) #:precision 1)
-        rounds
-        (fmt-ms drain-ms)
-        ((prototype-live-bytes p))
-        (load-average)))
+  (define-values (rounds drain-ms) (drain! p runs-before made))
+  (define after ((prototype-live-bytes p)))
+  (values
+   (list (prototype-name p)
+         workers
+         (fmt-rate (/ made interval))
+         (fmt-rate (/ runs-during interval))
+         (~r (/ runs-during (max made 1)) #:precision 2)
+         (~r gc-share #:precision 2)
+         (~r (/ (max peak lag) 1048576.0) #:precision 1)
+         (~r (/ lag 1048576.0) #:precision 1)
+         rounds
+         (fmt-ms drain-ms)
+         after)
+   (zero? after)))
+
+(define (drained-label drained? tainted?)
+  (cond
+    [tainted? "unreliable: an earlier today row did not drain"]
+    [drained? "yes"]
+    [else "did not drain"]))
 
 (module+ main
   (at-set-num-threads 1)
@@ -92,14 +100,13 @@
   (print-table-header
    '("allocator" "workers" "tensors made/s" "finalizer runs/s during churn"
      "runs / made" "GC ms per wall ms" "peak ledger MiB" "ledger MiB at stop"
-     "major collections to drain" "drain ms" "ledger bytes after drain" "load"))
-  (define variant-count (length (workload-variants)))
-  (for* ([k (in-range variant-count)]
-         [workers (in-list worker-counts)])
-    (define v (list-ref (workload-variants) k))
-    (define row (churn-row (car v) (ops-randn (cdr v)) workers))
-    (print-table-row row)
-    (unless (zero? (list-ref row 10))
-      (error 'q7 "the ledger did not drain after ~a collections; later rows would inherit its finalizers"
-             drain-round-limit)))
+     "major collections to drain" "drain ms" "ledger bytes after drain" "drained" "load"))
+  (for*/fold ([today-tainted? #f] #:result (void))
+             ([make (in-list (variant-makers))]
+              [workers (in-list worker-counts)])
+    (match-define (variant p o global-ledger?) (make))
+    (define tainted? (and global-ledger? today-tainted?))
+    (define-values (row drained?) (churn-row p (ops-randn o) workers))
+    (print-table-row (append row (list (drained-label drained? tainted?) (load-average))))
+    (or today-tainted? (and global-ledger? (not drained?))))
   (printf "\nload average (1 min) at end: ~a\n" (load-average)))

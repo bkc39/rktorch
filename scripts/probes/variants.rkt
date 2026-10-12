@@ -1,7 +1,6 @@
 #lang racket/base
 
-;; The allocators Q5 and Q7 compare: today's library path and the
-;; probe-local prototypes, each with the three ops the workloads use.
+;; The allocators Q5 and Q7 compare, each with the three ops the workloads use.
 
 (require (only-in ffi/vector s64vector)
          (only-in torch/foreign/raw/collector finalizer-runs)
@@ -13,31 +12,33 @@
          "shim.rkt")
 
 (provide (struct-out ops)
-         workload-variants)
+         (struct-out variant)
+         variant-makers)
 
-(define (today)
-  (prototype "today: ffi/unsafe/alloc + ledger (library raw bindings)"
-             (lambda (op) op)
-             values
-             tr-tensor-free/checked
-             (lambda () (for/sum ([d (in-list (native-memory-use))]) (cdr d)))
-             finalizer-runs))
-
-;; randn, add and matmul as each variant makes them.
 (struct ops (randn add matmul))
 
-(define (today-ops)
-  (ops (lambda (n) (tr-randn/raw (s64vector n n) 2)) tr-add/raw tr-matmul/raw))
+(struct variant (prototype ops global-ledger?))
 
-(define (prototype-ops p)
+(define (today)
+  (variant
+   (prototype "today: ffi/unsafe/alloc + ledger + pressure gate (library raw bindings)"
+              (lambda (op) op)
+              values
+              tr-tensor-free/checked
+              (lambda () (for/sum ([d (in-list (native-memory-use))]) (cdr d)))
+              finalizer-runs)
+   (ops (lambda (n) (tr-randn/raw (s64vector n n) 2)) tr-add/raw tr-matmul/raw)
+   #t))
+
+(define ((fresh make))
+  (define p (make))
   (define wrap (prototype-wrap p))
-  (ops (wrap (lambda (n) (shim-randn n n))) (wrap shim-add) (wrap shim-matmul)))
+  (variant p
+           (ops (wrap (lambda (n) (shim-randn n n))) (wrap shim-add) (wrap shim-matmul))
+           #f))
 
-(define (workload-variants #:bare? [bare? #f])
-  (define makers
-    (append (list stage-1 stage-2 alloc/uninterruptible)
-            (if bare? (list bare) '())))
-  (cons (cons (today) (today-ops))
-        (for/list ([make (in-list makers)])
-          (define p (make))
-          (cons p (prototype-ops p)))))
+(define (variant-makers #:bare? [bare? #f])
+  (cons today
+        (map fresh
+             (append (list stage-1 stage-1/gate stage-2 alloc/uninterruptible)
+                     (if bare? (list bare) '())))))
