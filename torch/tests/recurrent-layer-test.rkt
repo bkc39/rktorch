@@ -122,30 +122,40 @@
       (define-values (out _h) (with-no-grad (gru x)))
       (check-equal? (- (trough-minors) before) 1
                     "a hand-written gen:layer must reach the forward trough")
-      (check-true (and out #t))
+      (check-equal? (tensor-shape out) '(1 8 512))
       (define with-grad (trough-minors))
       (define-values (train-out _th) (gru x))
       (check-equal? (trough-minors) with-grad
                     "with gradients on a layer call is the peak, not a trough")
-      (check-true (and train-out #t))))
+      (check-equal? (tensor-shape train-out) '(1 8 512))))
 
-  (test-case "a forward records the weights' addresses, a move changes them"
+  (test-case "a forward records the weights' addresses"
+    (define gru (GRU 3 4))
+    (define weights (parameters gru))
+    (check-false (flattened-signature (car weights)))
+    (define-values (out _h) (gru (randn 5 2 3)))
+    (check-equal? (tensor-shape out) '(5 2 4))
+    (check-equal? (flattened-signature (car weights))
+                  (storage-signature weights)))
+
+  (test-case "a move that changes nothing keeps the weights' addresses"
+    (define gru (GRU 3 4))
+    (define weights (parameters gru))
+    (define-values (_out _h) (gru (randn 5 2 3)))
+    (to gru 'cpu)
+    (check-equal? (flattened-signature (car weights))
+                  (storage-signature weights)))
+
+  (test-case "a move that rebinds the storage is re-recorded by the next forward"
     (define gru (GRU 3 4))
     (define weights (parameters gru))
     (define (recorded) (flattened-signature (car weights)))
-    (define-values (out _h) (gru (randn 5 2 3)))
-    (check-true (and out #t))
-    (check-equal? (recorded) (storage-signature weights))
-    (to gru 'cpu)
-    (check-equal? (recorded) (storage-signature weights)
-                  "a move that changed nothing moved the weights")
+    (define-values (_out _h) (gru (randn 5 2 3)))
     (to gru 'float64)
-    (check-not-equal? (recorded) (storage-signature weights)
-                      "a move that rebound the storage kept its addresses")
+    (check-not-equal? (recorded) (storage-signature weights))
     (define-values (wide _wh) (gru (randn 5 2 3 #:dtype 'float64)))
-    (check-true (and wide #t))
-    (check-equal? (recorded) (storage-signature weights)
-                  "the next forward did not record the new addresses"))
+    (check-equal? (tensor-dtype wide) 'float64)
+    (check-equal? (recorded) (storage-signature weights)))
 
   (test-case "a nested recurrent layer re-records after its parent moves"
     (define-layer Wrap (inner) ;; noqa
@@ -171,7 +181,7 @@
                        (for/list ([entry (in-list real)])
                          (cons (car entry) one-storage)))
     (define-values (out _h) (gru (randn 5 2 3)))
-    (check-true (and out #t))
+    (check-equal? (tensor-shape out) '(5 2 4))
     (check-equal? (flattened-signature (car weights)) real
                   "copies at the packed offsets read as still packed"))
 

@@ -6,10 +6,9 @@
          (only-in "../foreign.rkt"
                   device-type exn:fail:rktorch:oom? tensor-device tensor-dtype
                   tensor-shape tensor? with-no-grad zeros)
-         (only-in "../foreign/error.rkt" check-ok)
+         (only-in "../foreign/addresses.rkt"
+                  tensor-data-ptr tensor-storage-ptr)
          (only-in "../foreign/raw/fault.rkt" native-fault?)
-         (only-in "../foreign/raw/tensor.rkt"
-                  tr-tensor-data-ptr/raw tr-tensor-storage-ptr/raw)
          (only-in "../generated.rkt"
                   cudnn-rnn-flatten-weight gru-input lstm-input)
          (only-in "init.rkt" uniform-init)
@@ -47,27 +46,14 @@
     (cons (format "~a_l~a~a" (car entry) layer suffix)
           (apply draw (cdr entry)))))
 
-;; Keyed on the first weight, which `to!` mutates in place, against the
-;; addresses the weights had once flattened. Packed weights are views of one
-;; storage, so the storage address goes in beside each element's: separate
-;; copies that a CUDA round trip happened to allocate at the packed offsets
-;; would otherwise read as still packed.
+;; packed weights are views of one storage, so compare the storage address too
 (define flattened (make-weak-hasheq))
 
-;; Which weights cudnn refused to flatten. The refusal is swallowed so the
-;; layer still runs, and the addresses are recorded either way so it is not
-;; asked twice, which together would hide a defect in the arguments we pass as
-;; a silent fall back to compacted copies; recording it lets a test say the
-;; flattening happened rather than only that the outputs agree.
 (define refused (make-weak-hasheq))
 
 (define (storage-signature weights)
   (for/list ([w (in-list weights)])
-    (define-values (data-rc data) (tr-tensor-data-ptr/raw w))
-    (check-ok data-rc 'storage-signature)
-    (define-values (storage-rc storage) (tr-tensor-storage-ptr/raw w))
-    (check-ok storage-rc 'storage-signature)
-    (cons data storage)))
+    (cons (tensor-data-ptr w) (tensor-storage-ptr w))))
 
 ;; Flattening is an optimisation cudnn asks for, never a requirement: a build
 ;; or a dtype it refuses still runs, on compacted copies, and refusing again

@@ -22,6 +22,5 @@
   (test-case "call-with-eval-mode restores a child reachable twice"
     (define child (Linear 2 2))
     (define m (Twice child))
-    (check-equal? (call-with-eval-mode m (lambda () (layer-training? child)))
-                  #f)
+    (check-false (call-with-eval-mode m (lambda () (layer-training? child))))
     (check-true (layer-training? child))))
