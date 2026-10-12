@@ -31,11 +31,14 @@
   (define (racing-layer)
     (to (LSTM 8 16 #:num-layers 2 #:bidirectional? #t) device))
 
-  (define (bump! counter)
+  (define (update! b f)
     (let retry ()
-      (define seen (unbox counter))
-      (unless (box-cas! counter seen (add1 seen))
+      (define seen (unbox b))
+      (unless (box-cas! b seen (f seen))
         (retry))))
+
+  (define (bump! counter)
+    (update! counter add1))
 
   (define (count-decisions thunk)
     (define stale (box 0))
@@ -80,9 +83,9 @@
                   (semaphore-wait gate)
                   (with-handlers ([exn:fail?
                                    (lambda (e)
-                                     (set-box! failures
-                                               (cons (exn-message e)
-                                                     (unbox failures))))])
+                                     (update! failures
+                                              (lambda (seen)
+                                                (cons (exn-message e) seen))))])
                     (forward lstm x)))
                 #:pool pool)))
     (for ([_ (in-list threads)]) (semaphore-post gate))
