@@ -31,30 +31,45 @@
   (define (racing-layer)
     (to (LSTM 8 16 #:num-layers 2 #:bidirectional? #t) device))
 
-  (define (count-packings thunk)
-    (define count (box 0))
+  (define (bump! counter)
+    (let retry ()
+      (define seen (unbox counter))
+      (unless (box-cas! counter seen (add1 seen))
+        (retry))))
+
+  (define (count-decisions thunk)
+    (define stale (box 0))
+    (define packings (box 0))
     (parameterize ([packing-hook
                     (match-lambda
-                      ['before (set-box! count (add1 (unbox count)))]
+                      ['stale (bump! stale) (sleep 0.01)]
+                      ['before (bump! packings)]
                       [_ (void)])])
       (thunk))
-    (unbox count))
+    (list (unbox stale) (unbox packings)))
 
   (define found '((100 . 100) (200 . 200)))
   (define buffer-start 1000)
   (define packed '((1000 . 1000) (1064 . 1000)))
 
   (test-case "weights that lie in the buffer record the packing"
-    (check-equal? (packing-record found buffer-start packed) packed))
+    (check-equal? (packing-record found buffer-start packed #f) packed))
 
   (test-case "a weight moved off the buffer before recording forgets the packing"
-    (check-false (packing-record found buffer-start '((1000 . 1000) (300 . 300)))))
+    (check-false
+     (packing-record found buffer-start '((1000 . 1000) (300 . 300)) #f)))
+
+  (test-case "a packing during which the layer moved forgets it"
+    (check-false (packing-record found buffer-start packed #t)))
 
   (test-case "a refusal on weights that did not move records them as they are"
-    (check-equal? (packing-record found #f found) found))
+    (check-equal? (packing-record found #f found #f) found))
 
   (test-case "a refusal on weights a move rebound forgets them"
-    (check-false (packing-record found #f '((300 . 300) (400 . 400)))))
+    (check-false (packing-record found #f '((300 . 300) (400 . 400)) #f)))
+
+  (test-case "a refusal on weights a round trip gave back their addresses forgets them"
+    (check-false (packing-record found #f found #t)))
 
   (define (forward-together lstm x pool)
     (define failures (box '()))
@@ -83,12 +98,12 @@
       (for/list ([_ (in-range 16)])
         (to lstm 'float64)
         (to lstm 'float32)
-        (count-packings
+        (count-decisions
          (lambda ()
            (set! failures (append (forward-together lstm x pool) failures))))))
     (check-equal? failures '())
-    (check-equal? counts (make-list 16 (if (eq? device 'cuda) 1 0))
-                  "a forward packed weights another had just packed")
+    (check-equal? counts (make-list 16 (list 1 (if (eq? device 'cuda) 1 0)))
+                  "a forward found stale weights another had just checked")
     (check-equal? (flattened-signature (car weights))
                   (storage-signature weights)))
 

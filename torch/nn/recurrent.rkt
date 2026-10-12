@@ -18,7 +18,7 @@
          (only-in "parameter.rkt" Parameter))
 
 (struct rnn (who gates state-count cudnn-mode input-size hidden-size
-             num-layers bias? batch-first? dropout bidirectional? lock))
+             num-layers bias? batch-first? dropout bidirectional? lock moves))
 
 ;; nn.RNNBase's order, which is both the flat-weight order ATen expects and
 ;; reset_parameters' draw order: per layer, per direction, w_ih w_hh b_ih b_hh
@@ -85,10 +85,12 @@
 
 (define packing-hook (make-parameter void))
 
-;; a `to` on another thread takes no turn, so record the packing only while the
-;; weights still lie in the buffer
-(define (packing-record now buffer-start packed)
+;; a `to` on another thread takes no turn, so record the packing only if no move
+;; ran during it, since a round trip can hand back the old addresses, and only
+;; while the weights still lie in the buffer
+(define (packing-record now buffer-start packed moved?)
   (cond
+    [moved? #f]
     [(and buffer-start
           (for/and ([entry (in-list packed)]) (= (cdr entry) buffer-start)))
      packed]
@@ -96,32 +98,43 @@
     [(equal? now packed) now]
     [else #f]))
 
-(define (repack! spec weights now)
+(define (count-move! spec)
+  (define moves (rnn-moves spec))
+  (let retry ()
+    (define seen (unbox moves))
+    (unless (box-cas! moves seen (add1 seen))
+      (retry))))
+
+(define (repack! spec weights now moves)
   ((packing-hook) 'before)
   (hash-remove! refused (car weights))
   (define buffer (flatten-weights! spec weights))
   ((packing-hook) 'after)
   (packing-record now
                   (and buffer (tensor-storage-ptr buffer))
-                  (storage-signature weights)))
+                  (storage-signature weights)
+                  (not (= moves (unbox (rnn-moves spec))))))
 
-(define (check-packing! spec weights)
+(define (record-packing! spec weights now moves)
   (define key (car weights))
-  (define now (storage-signature weights))
-  (define stale? (not (equal? now (hash-ref flattened key #f))))
-  (define cuda? (and stale? (eq? (device-type (tensor-device key)) 'cuda)))
-  (define record (if cuda? (repack! spec weights now) now))
+  (define record
+    (if (eq? (device-type (tensor-device key)) 'cuda)
+        (repack! spec weights now moves)
+        now))
   (cond
-    [(not stale?) (void)]
     [record (hash-set! flattened key record)]
     [else
      (hash-remove! flattened key)
      (hash-remove! refused key)]))
 
-(define (ensure-flat! spec weights)
-  (unless (equal? (storage-signature weights)
-                  (hash-ref flattened (car weights) #f))
-    (with-lock (rnn-lock spec) (check-packing! spec weights))))
+(define (check-packing! spec weights)
+  (define moves (unbox (rnn-moves spec)))
+  (define now (storage-signature weights))
+  (cond
+    [(equal? now (hash-ref flattened (car weights) #f)) (void)]
+    [else
+     ((packing-hook) 'stale)
+     (record-packing! spec weights now moves)]))
 
 (define (zero-state spec x)
   (define batch
@@ -160,7 +173,7 @@
 (define (run spec entries op x state mode)
   (check-inputs spec x state)
   (define weights (map cdr entries))
-  (ensure-flat! spec weights)
+  (with-lock (rnn-lock spec) (check-packing! spec weights))
   (define initial
     (if (null? state)
         (for/list ([_ (in-range (rnn-state-count spec))]) (zero-state spec x))
@@ -193,9 +206,10 @@
           #:bidirectional? [bidirectional? #f])
   (set! spec (rnn 'LSTM 4 2 2 input-size hidden-size num-layers bias?
                   batch-first? (exact->inexact dropout) bidirectional?
-                  (make-lock)))
+                  (make-lock) (box 0)))
   (set! entries (draw-parameters spec))
   (set! params (parameters-by-key entries))
+  #:on-move (count-move! spec)
   #:forward (x . state)
   (with-mode (run spec entries lstm-input x state mode)))
 
@@ -215,9 +229,10 @@
           #:bidirectional? [bidirectional? #f])
   (set! spec (rnn 'GRU 3 1 3 input-size hidden-size num-layers bias?
                   batch-first? (exact->inexact dropout) bidirectional?
-                  (make-lock)))
+                  (make-lock) (box 0)))
   (set! entries (draw-parameters spec))
   (set! params (parameters-by-key entries))
+  #:on-move (count-move! spec)
   #:forward (x . state)
   (with-mode (run spec entries gru-input x state mode)))
 

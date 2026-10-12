@@ -281,10 +281,13 @@ the parameters keep their identity) whenever their storage addresses
 storage start) differ from those the last flattening left, which catches a
 device round trip and a replaced parameter with no move hook, costs `to`'s
 identity case nothing, and retries a transient OOM rather than latching it.
-Once the addresses differ, a per-layer lock (`private/lock.rkt`, which a
-waiter takes over from a killed holder) serializes the repacking, and a
-packing, or a refusal, is recorded only while the weights still lie where it
-found them, so a `to` racing the check (which takes no turn) leaves nothing
+Every call checks under a per-layer lock (`private/lock.rkt`: not reentrant,
+breakable while waiting, and a waiter takes it over from a killed holder),
+never reading the addresses outside it, since a flattening on another thread
+rebinds the weights' storage; and a packing, or a refusal, is recorded only
+while the weights still lie where it found them and the layer's `#:on-move`
+count did not change during it (a round trip can hand back the old
+addresses), so a `to` racing the check (which takes no turn) leaves nothing
 recorded (#189). `clip-grad-norm!` (`nn/clip.rkt`) keeps its scale on the
 device. Layer init mirrors
 PyTorch RNG consumption (`nn.Linear.reset_parameters`), so a shared
