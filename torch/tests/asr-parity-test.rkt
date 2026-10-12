@@ -53,12 +53,12 @@
        #:forward (x dec-in lengths)
        (with-default-device (tensor-device x)
          (define (halve n) (quotient (add1 n) 2))
-         (define t1 (halve (caddr (tensor-shape x))))
+         (define t1 (~> (tensor-shape x) caddr halve))
          (define t2 (halve t1))
          (define l1 (and lengths (map halve lengths)))
          (define l2 (and l1 (map halve l1)))
          (define (row-lengths lens)
-           (unsqueeze (tensor (map exact->inexact lens)) 1))
+           (~> (map exact->inexact lens) tensor (unsqueeze 1)))
          (define (clip v lens t)
            (if lens
                (mul v (reshape (to-dtype (< (unsqueeze (arange t) 0)
@@ -66,23 +66,29 @@
                                          'float32)
                                (length lens) 1 t))
                v))
-         (define c (clip (relu (conv1 x)) l1 t1))
-         (define c0 (clip (relu (conv2 c)) l2 t2))
+         (define c (~> (conv1 x) relu (clip l1 t1)))
+         (define c0 (~> (conv2 c) relu (clip l2 t2)))
          (define c4
            (for/fold ([h c0]) ([dil (in-layers dilations)])
-             (clip (+ h (relu (dil h))) l2 t2)))
+             (~> (dil h) relu (+ h) (clip l2 t2))))
          (define padding
            (and l2 (>= (unsqueeze (arange t2) 0) (row-lengths l2))))
          (define (positioned v)
-           (+ v (sinusoidal-positions (cadr (shape v)) n-embd
-                                      #:layout 'halves)))
+           (~> (shape v)
+               cadr
+               (sinusoidal-positions n-embd #:layout 'halves)
+               (+ v)))
          (define memory
-           (encoder (positioned (transpose c4 1 2))
-                    #:key-padding-mask padding))
+           (~> (transpose c4 1 2)
+               positioned
+               (encoder #:key-padding-mask padding)))
          (values (log-softmax (ctc-head memory) 2)
-                 (head (decoder (positioned (tok-emb dec-in)) memory
-                                #:tgt-causal? #t
-                                #:memory-key-padding-mask padding)))))
+                 (~> (tok-emb dec-in)
+                     positioned
+                     (decoder memory
+                              #:tgt-causal? #t
+                              #:memory-key-padding-mask padding)
+                     head))))
      (define-values (samples rate transcript) (load-librispeech-fixture))
      (define vocab (text->vocab transcript))
      (define v-size (vector-length vocab))
@@ -167,7 +173,8 @@
          (for/fold ([start 0] [drifted 0] [front-end-size 0])
                    ([np (in-list named)])
            (define front-end? (and (member (car np) front-end-weights) #t))
-           (define mine (tensor->list (reshape (to-device (cdr np) 'cpu) -1)))
+           (define mine
+             (~> (cdr np) (to-device 'cpu) (reshape -1) tensor->list))
            (define gaps
              (for/list ([r (in-list mine)] [i (in-naturals start)])
                (define gap (abs (- r (vector-ref theirs i))))

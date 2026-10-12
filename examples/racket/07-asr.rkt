@@ -96,7 +96,7 @@ they would be if the utterance were encoded alone.
 
 @chunk[<r07-mask>
 (define (row-lengths lengths)
-  (unsqueeze (tensor (map exact->inexact lengths)) 1))
+  (~> (map exact->inexact lengths) tensor (unsqueeze 1)))
 
 (define (key-padding-mask lengths t-len)
   (>= (unsqueeze (arange t-len) 0) (row-lengths lengths)))
@@ -236,7 +236,7 @@ fixture-scale configuration the parity twin trains;
   #:forward (x dec-in lengths)
   (with-default-device (device x)
     (define (halve n) (quotient (add1 n) 2))
-    (define t1 (halve (caddr (shape x))))
+    (define t1 (~> (shape x) caddr halve))
     (define t2 (halve t1))
     (define l1 (and lengths (map halve lengths)))
     (define l2 (and l1 (map halve l1)))
@@ -244,19 +244,23 @@ fixture-scale configuration the parity twin trains;
     ;; so pad regions come out nonzero and the next kernel would blend
     ;; them into real boundary frames
     (define (clip v lens t) (if lens (mul v (frame-keep lens t)) v))
-    (define c (clip (relu (conv1 x)) l1 t1))
-    (define c0 (clip (relu (conv2 c)) l2 t2))
+    (define c (~> (conv1 x) relu (clip l1 t1)))
+    (define c0 (~> (conv2 c) relu (clip l2 t2)))
     (define c4
       (for/fold ([h c0]) ([dil (in-layers dilations)])
-        (clip (+ h (relu (dil h))) l2 t2)))
+        (~> (dil h) relu (+ h) (clip l2 t2))))
     (define padding (and l2 (key-padding-mask l2 t2)))
     (define (positioned v)
-      (+ v (sinusoidal-positions (cadr (shape v)) n-embd
-                                 #:layout 'halves)))
+      (~> (shape v)
+          cadr
+          (sinusoidal-positions n-embd #:layout 'halves)
+          (+ v)))
     (define memory
-      (encoder (positioned (transpose c4 1 2)) #:key-padding-mask padding))
+      (~> (transpose c4 1 2) positioned (encoder #:key-padding-mask padding)))
     (values (log-softmax (ctc-head memory) 2)
-            (~> (decoder (positioned (tok-emb dec-in)) memory
+            (~> (tok-emb dec-in)
+                positioned
+                (decoder memory
                          #:tgt-causal? #t
                          #:memory-key-padding-mask padding)
                 hdrop
@@ -405,7 +409,7 @@ CTC's phonetic stutter next to attention's spelling is the payoff.
 (define (greedy-decode net vocab features)
   (define v-size (vector-length vocab))
   ;; any parameter's device works: a model's tensors are colocated
-  (define dev (device (car (parameters net))))
+  (define dev (~> (parameters net) car device))
   (define x (to-device features dev))
   (with-default-device dev
     (in-eval-mode net
@@ -430,7 +434,7 @@ CTC's phonetic stutter next to attention's spelling is the payoff.
   (define v-size (vector-length vocab))
   (define eos v-size)
   (define sos (add1 v-size))
-  (define dev (device (car (parameters net))))
+  (define dev (~> (parameters net) car device))
   (define x (to-device features dev))
   (with-default-device dev
     (in-eval-mode net
@@ -438,7 +442,7 @@ CTC's phonetic stutter next to attention's spelling is the payoff.
         ;; the cap is the encoder's own frame count, arithmetic on the
         ;; input shape — no forward pass needed to learn it
         (define cap
-          (or max-steps (downsampled-length (caddr (shape x)))))
+          (or max-steps (~> (shape x) caddr downsampled-length)))
         (define (next-id ids)
           (define dec-in
             (unsqueeze (to-dtype (tensor ids) 'int64) 0))

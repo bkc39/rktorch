@@ -113,7 +113,7 @@
                                     (matmul weights ((child "v") tokens)))
                                    1 2)
                         2 32 4 4)))
-      (check-true (< (item (max (abs (sub (ab x) written-out)))) 1e-5)
+      (check-true (~> (ab x) (sub written-out) abs max item (< 1e-5))
                   "the fused kernel computes the single-head attention"))
     (check-equal? (tensor-shape ((Downsample 32) (randn 2 32 8 8) #f)) '(2 32 4 4))
     (check-equal? (tensor-shape ((Upsample 32) (randn 2 32 4 4))) '(2 32 8 8))

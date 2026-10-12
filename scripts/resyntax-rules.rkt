@@ -3,9 +3,12 @@
 (require (only-in resyntax/base
                   define-refactoring-rule define-refactoring-suite)
          (only-in resyntax/default-recommendations default-recommendations)
-         (only-in syntax/parse/pre define-syntax-class expr pattern ~and)
+         (only-in syntax/parse/pre
+                  attribute boolean define-syntax-class expr id keyword
+                  number pattern str syntax-parse this-syntax ~and)
+         (only-in threading ~>)
          (only-in torch ge gt le lt)
-         (prefix-in torch: (only-in torch < <= > >=)))
+         (prefix-in torch: (only-in torch * + < <= > >=)))
 
 (provide rktorch-rules rktorch-recommendations)
 
@@ -31,8 +34,89 @@
   (comparison:named-ordering a:expr b:expr)
   (comparison.operator a b))
 
+(define core-form-heads ;; noqa
+  '(quote quasiquote syntax quasisyntax unquote unquote-splicing unsyntax
+    unsyntax-splicing define define-values define-syntax define-syntaxes
+    define-syntax-rule define-syntax-parse-rule lambda λ case-lambda let let*
+    letrec let-values let*-values letrec-values if cond case when unless begin
+    begin0 set! and or for for/list for/vector for/hash for/fold for/sum
+    for/and for/or for/first for/last for* for*/list match match-define
+    match-let with-syntax syntax-parse syntax-case syntax-rules require
+    provide struct define-struct parameterize with-handlers do delay module
+    module+ module* ~> ~>> and~> and~>> lambda~> lambda~>> #%app #%datum
+    #%top))
+
+(define peer-heads '(cons list list* values vector)) ;; noqa
+
+;; Body macros are named with-…, so a with- form's first argument is a
+;; setting, not a subject to thread.
+(define-syntax-class step-head
+  (pattern head:id
+    #:do [(define name (syntax-e #'head))]
+    #:fail-when (or (memq name core-form-heads) (memq name peer-heads)) #f
+    #:fail-when (regexp-match? #px"^(check-|test-|with-|define)"
+                               (symbol->string name))
+                #f
+    #:when (identifier-binding #'head)))
+
+(define-syntax-class commutative-operator
+  (pattern head:id
+    #:when (for/or ([operator (in-list (list #'+ #'* #'torch:+ #'torch:*))])
+             (free-identifier=? #'head operator))))
+
+;; A call whose other arguments compute something joins two chains, and
+;; threading would hide one; a swapped operand must not run code.
+(define-syntax-class atom
+  #:literals (quote)
+  (pattern :id)
+  (pattern :number)
+  (pattern :boolean)
+  (pattern :str)
+  (pattern :keyword)
+  (pattern (quote _)))
+
+(define-syntax-class call-chain
+  #:attributes (root [step 1])
+  (pattern (head:step-head inner:call-chain arg:atom ...)
+    #:with root #'inner.root
+    #:with (step ...) #'(inner.step ... (head arg ...)))
+  (pattern (head:commutative-operator other:atom inner:call-chain)
+    #:with root #'inner.root
+    #:with (step ...) #'(inner.step ... (head other)))
+  (pattern (head:step-head arg0 arg ...)
+    #:with root this-syntax
+    #:with (step ...) #'()))
+
+(define (bare-when-unary step)
+  (syntax-parse step
+    [(head) #'head]
+    [_ step]))
+
+(define (threading-here? stx)
+  (free-identifier=? (datum->syntax stx '~>) #'~>))
+
+(define-refactoring-rule nested-calls-to-threading
+  #:description
+  "This chain of three or more calls reads better threaded with `~>`: each call takes the previous result as its first argument, or as either operand of a two-operand `+` or `*`, beside only names and literals."
+  chain:call-chain
+  #:when (>= (length (attribute chain.step)) 2)
+  #:when (threading-here? this-syntax)
+  #:with (step ...) (map bare-when-unary (attribute chain.step))
+  (~> chain.root step ...))
+
+(define-refactoring-rule threading-from-innermost-call
+  #:description
+  "This `~>` starts from a nested call; thread from the innermost call instead."
+  #:literals (~>)
+  (~> start:call-chain later ...)
+  #:when (pair? (attribute start.step))
+  #:with (step ...) (map bare-when-unary (attribute start.step))
+  (~> start.root step ... later ...))
+
 (define-refactoring-suite rktorch-rules
-  #:rules (named-comparison-to-operator))
+  #:rules (named-comparison-to-operator
+           nested-calls-to-threading
+           threading-from-innermost-call))
 
 (define-refactoring-suite rktorch-recommendations
   #:suites (default-recommendations rktorch-rules))

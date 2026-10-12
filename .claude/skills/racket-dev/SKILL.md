@@ -102,20 +102,24 @@ the input, a dead guard to delete — see `torch/foreign/ops.rkt`'s
 ### 5. Resyntax — exactly what CI runs
 
 ```bash
-nix develop .#ci --command raco test scripts/resyntax-rules-test.rkt
+nix develop .#ci --command raco test scripts/resyntax-rules-test.rkt scripts/resyntax-lp2.rkt
 nix develop .#ci --command \
   scripts/resyntax analyze --local-git-repository . origin/master --analyzer-timeout 30000
 ```
 
 `scripts/resyntax` runs Resyntax's default rules plus the repository's own
-in `scripts/resyntax-rules.rkt`, such as `(ge a b)` → `(>= a b)`. A style
-point the owner raises in review that is a meaning-preserving rewrite
+in `scripts/resyntax-rules.rkt`, such as `(ge a b)` → `(>= a b)` and
+`(clip (+ h (relu (dil h))) l t)` → `(~> (dil h) relu (+ h) (clip l t))`. A
+style point the owner raises in review that is a meaning-preserving rewrite
 becomes a rule there, with a case in `scripts/resyntax-rules-test.rkt`.
 
 CI fails on **any** suggestion. `scripts/resyntax fix --local-git-repository . origin/master`
 applies them. Resyntax skips a file whose `compiled/` was built by a different
-Racket than the shell's, and it skips `#lang scribble/lp2` files entirely, so
-a clean run on the literate examples proves nothing.
+Racket than the shell's, and it skips `#lang scribble/lp2` files. The wrapper
+then lints the literate examples through `scripts/resyntax-lp2.rkt`: the
+same suite over a `racket/base` shadow that blanks the prose and keeps
+every chunk at its own position, so the lines, columns and fixes are the
+literate file's. A change that touches only prose skips the expansion.
 
 ### 6. raco review
 

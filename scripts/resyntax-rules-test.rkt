@@ -38,4 +38,90 @@
       (check-suite-does-not-refactor
        (program '(require torch)
                 '(define (ge a b) (>= a b))
-                '(ge 2 1))))))
+                '(ge 2 1)))))
+
+  (define calls
+    '((define (f . xs) (car xs))
+      (define (g . xs) (car xs))
+      (define (h . xs) (car xs))))
+
+  (define (threaded . forms)
+    (apply program '(require torch) (append calls forms)))
+
+  (parameterize ([current-suite-under-test rktorch-rules])
+    (test-case "three nested calls thread from the innermost call"
+      (check-suite-refactors
+       (threaded '(f (g (h 1))))
+       (threaded '(~> (h 1) g f))))
+
+    (test-case "steps keep their trailing arguments"
+      (check-suite-refactors
+       (threaded '(f (g (h 1 2) 3) 4))
+       (threaded '(~> (h 1 2) (g 3) (f 4)))))
+
+    (test-case "a residual sum threads through its second operand"
+      (check-suite-refactors
+       (threaded '(lambda (x) (f (+ x (g (h x))) 2)))
+       (threaded '(lambda (x) (~> (h x) g (+ x) (f 2))))))
+
+    (test-case "a product threads through either operand"
+      (check-suite-refactors
+       (threaded '(list (* 2 (g (h 1))) (* (g (h 1)) 2)))
+       (threaded '(list (~> (h 1) g (* 2)) (~> (h 1) g (* 2))))))
+
+    (test-case "values and list collect peers rather than take a step"
+      (check-suite-refactors
+       (threaded '(values (f (g (h 1))) (list (g (h 1)) 2)))
+       (threaded '(values (~> (h 1) g f) (list (g (h 1)) 2)))))
+
+    (test-case "racket/base's + threads the same way"
+      (check-suite-refactors
+       (program '(require threading) '(+ 1 (add1 (abs 1))))
+       (program '(require threading) '(~> (abs 1) add1 (+ 1)))))
+
+    (test-case "a ~> starting from nested calls starts from the innermost"
+      (check-suite-refactors
+       (threaded '(~> (f (g (h 1)) 2) h))
+       (threaded '(~> (h 1) g (f 2) h))))
+
+    (test-case "quoted data rides along as an argument"
+      (check-suite-refactors
+       (threaded '(f (g (h 1) 'v)))
+       (threaded '(~> (h 1) (g 'v) f))))
+
+    (test-case "a call joining two computations starts the chain"
+      (check-suite-refactors
+       (threaded '(f (g (- (h 1) (h 2)))))
+       (threaded '(~> (- (h 1) (h 2)) g f))))
+
+    (test-case "a computed argument beside the chain stops it"
+      (check-suite-does-not-refactor (threaded '(f (g (h 1)) (h 2)))))
+
+    (test-case "two calls stay"
+      (check-suite-does-not-refactor (threaded '(f (g 1)))))
+
+    (test-case "an operand that runs code keeps its place"
+      (check-suite-does-not-refactor (threaded '(+ (f 1) (g (h 1))))))
+
+    (test-case "a non-commutative operator keeps its operands"
+      (check-suite-does-not-refactor
+       (threaded '(lambda (x) (f (- x (g (h x))))))))
+
+    (test-case "a sum of three operands stays"
+      (check-suite-does-not-refactor (threaded '(+ 1 2 (g (h 1))))))
+
+    (test-case "a core form breaks the chain"
+      (check-suite-does-not-refactor (threaded '(f (g (if (h 1) 2 3))))))
+
+    (test-case "a with- form keeps its setting in place"
+      (check-suite-refactors
+       (threaded '(with-default-device (f (g (h 'cpu))) 1))
+       (threaded '(with-default-device (~> (h 'cpu) g f) 1))))
+
+    (test-case "an assertion is not a step"
+      (check-suite-does-not-refactor
+       (threaded '(define (check-true x) x) '(check-true (f (g 1))))))
+
+    (test-case "without threading's ~> nothing threads"
+      (check-suite-does-not-refactor
+       (program '(add1 (sub1 (abs 1))))))))

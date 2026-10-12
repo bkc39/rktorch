@@ -219,7 +219,12 @@ with `backward!` outside the form as PyTorch recommends). From
   (use `transpose` on the last two axes for batched attention);
   `~> ~>> lambda~> lambda~>>` are re-provided
   from the `threading` library (dep `threading-lib`, prefetched offline by
-  the `racket-deps` fixed-output derivation in flake.nix)
+  the `racket-deps` fixed-output derivation in flake.nix). Thread a chain
+  of three or more calls: the same rules file rewrites
+  `(clip (+ h (relu (dil h))) l t)` to `(~> (dil h) relu (+ h) (clip l t))`,
+  following first arguments and either operand of a two-operand `+` or `*`
+  while the other arguments are names or literals (a call that joins two
+  computations starts the chain)
 - reductions: `sum mean max min argmax softmax log-softmax`
 - ordering and sampling (`torch/foreign/order-ops.rkt`, tranche 7, #153):
   `topk` and `sort` answer `(values entries indices)`; `argsort`;
@@ -423,9 +428,11 @@ scripts/resyntax analyze --local-git-repository . origin/master   # lint gate
                                      # (CI fails on any suggestion; scans
                                      #  changed files, torch/ included; the
                                      #  default rules plus
-                                     #  scripts/resyntax-rules.rkt)
+                                     #  scripts/resyntax-rules.rkt; the
+                                     #  literate examples' chunks through
+                                     #  scripts/resyntax-lp2.rkt)
 scripts/resyntax fix --directory torch
-raco test scripts/resyntax-rules-test.rkt   # the repository's own rules
+raco test scripts/resyntax-rules-test.rkt scripts/resyntax-lp2.rkt   # the repository's own rules
 raco review torch/**/*.rkt
 ```
 

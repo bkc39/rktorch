@@ -58,9 +58,10 @@
   (define v-size (vector-length vocab))
   (check-equal? (for/sum ([p (in-list (parameters net))]) (numel p))
                 (+ (* 194 v-size) 778114))
-  (check-equal? (tensor-shape (car (parameters net))) '(64 80 3))
-  (check-equal? (tensor-shape
-                 (cdr (assoc "tok-emb.weight" (named-parameters net))))
+  (check-equal? (~> (parameters net) car tensor-shape) '(64 80 3))
+  (check-equal? (~> (assoc "tok-emb.weight" (named-parameters net))
+                    cdr
+                    tensor-shape)
                 (list (+ v-size 2) 64))
   ;; the standard stacks start every block as a copy of the first, as
   ;; nn.TransformerEncoder and nn.TransformerDecoder do
@@ -125,16 +126,22 @@
     (define (logits-of ids)
       (with-no-grad
         (define-values (_ctc logits)
-          (net features (unsqueeze (to-dtype (tensor ids) 'int64) 0) #f))
+          (net features (~> (tensor ids) (to-dtype 'int64) (unsqueeze 0)) #f))
         logits))
     (define sos (add1 v-size))
     (define (prefix t) (narrow t 1 0 3))
-    (check-true (< (item (max (abs (- (prefix (logits-of (list sos 1 2 3)))
-                                      (prefix (logits-of (list sos 1 2 4)))))))
-                   1e-6))
-    (check-true (> (item (max (abs (- (logits-of (list sos 1 2 3))
-                                      (logits-of (list sos 1 2 4))))))
-                   1e-4)))
+    (check-true (~> (- (prefix (logits-of (list sos 1 2 3)))
+                       (prefix (logits-of (list sos 1 2 4))))
+                    abs
+                    max
+                    item
+                    (< 1e-6)))
+    (check-true (~> (- (logits-of (list sos 1 2 3))
+                       (logits-of (list sos 1 2 4)))
+                    abs
+                    max
+                    item
+                    (> 1e-4))))
   (check-true (<= (string-length att-hyp) 500)
               (format "transcribe failed to terminate: ~v" att-hyp))
   (check-true (device? (pick-device)))
