@@ -164,7 +164,10 @@ past it --- and its head predicts @tt{vocab + 1} classes: characters or
 teacher-forced character input, and the list of true frame counts
 (@racket[#f] when nothing is padded), from which it derives the
 convolution multiplier at each downsampling stage and the padding mask,
-and returns both heads' views.
+and returns both heads' views. The multiplier re-zeroes the padding after
+every convolution: each convolution adds a bias, so the padded frames come
+out nonzero, and the next kernel would blend them into the real frames at
+the boundary.
 
 @racket[TransformerEncoder] builds the encoder stack in one call, as
 @tt{nn.TransformerEncoder(nn.TransformerEncoderLayer(...), 6,
@@ -240,9 +243,6 @@ fixture-scale configuration the parity twin trains;
     (define t2 (halve t1))
     (define l1 (and lengths (map halve lengths)))
     (define l2 (and l1 (map halve l1)))
-    ;; re-zero the padding after every convolution: each carries a bias,
-    ;; so pad regions come out nonzero and the next kernel would blend
-    ;; them into real boundary frames
     (define (clip v lens t) (if lens (mul v (frame-keep lens t)) v))
     (define c (~> (conv1 x) relu (clip l1 t1)))
     (define c0 (~> (conv2 c) relu (clip l2 t2)))
@@ -306,7 +306,8 @@ An utterance spoken faster than the encoder's frame rate --- more
 characters than downsampled frames --- has @emph{no} valid CTC alignment
 and an infinite loss by definition; @racket[#:zero-infinity?] zeroes
 those (and their gradients) instead of letting one degenerate utterance
-NaN the parameters mid-epoch.
+NaN the parameters mid-epoch. The loss is exported, so a caller can reach
+it outside whatever extent built the net; it runs on the mels' device.
 
 @chunk[<r07-loss>
 (define ctc-weight 0.3)
@@ -320,8 +321,6 @@ NaN the parameters mid-epoch.
   (unless (= (length mels) (length transcripts))
     (error 'hybrid-batch-loss "~a mels but ~a transcripts"
            (length mels) (length transcripts)))
-  ;; the mels carry the device: this is exported, so callers reach it
-  ;; from outside whatever extent built the net
   (with-default-device (device (car mels))
     (define v-size (vector-length vocab))
     (define eos v-size)
@@ -402,13 +401,15 @@ separate a genuine double letter). @racket[transcribe] is the attention
 path: generate from @tt{sos} one character at a time, feeding each choice
 back in, until @tt{eos} or one character per encoder frame --- the
 autoregressive loop of the GPT capstone's @racket[generate] with the
-audio riding along in cross-attention. The script prints both; watching
-CTC's phonetic stutter next to attention's spelling is the payoff.
+audio riding along in cross-attention. The frame count comes from the
+input's shape by @racket[downsampled-length], so the cap needs no forward
+pass. Both read the device off the model's first parameter, since a
+model's tensors are colocated. The script prints both; watching CTC's
+phonetic stutter next to attention's spelling is the payoff.
 
 @chunk[<r07-decode>
 (define (greedy-decode net vocab features)
   (define v-size (vector-length vocab))
-  ;; any parameter's device works: a model's tensors are colocated
   (define dev (~> (parameters net) car device))
   (define x (to-device features dev))
   (with-default-device dev
@@ -419,7 +420,6 @@ CTC's phonetic stutter next to attention's spelling is the payoff.
         (define-values (ctc-lp _logits) (net x sos-in #f))
         (define ids
           (map inexact->exact (tensor->list (argmax ctc-lp 2))))
-
         (define kept
           (for/fold ([prev #f] [acc '()] #:result (reverse acc))
                     ([id (in-list ids)])
@@ -439,8 +439,6 @@ CTC's phonetic stutter next to attention's spelling is the payoff.
   (with-default-device dev
     (in-eval-mode net
       (with-no-grad
-        ;; the cap is the encoder's own frame count, arithmetic on the
-        ;; input shape — no forward pass needed to learn it
         (define cap
           (or max-steps (~> (shape x) caddr downsampled-length)))
         (define (next-id ids)
@@ -464,7 +462,10 @@ sort by their frame counts --- read from FLAC headers via
 pads its members to nearly-equal lengths and the rectangle wastes little.
 The spectral front end stays on the CPU, since an @tt{[80, T]} feature
 transfer per utterance is noise next to the model compute, and the mels
-move to the training device.
+move to the training device. Every utterance is decoded and featurized
+once, before the first epoch, and its mels stay cached there (~800MB for
+all of dev-clean), so each epoch is pure model compute. The model is built
+before that pass, so a bad width fails at once rather than after it.
 dev-clean is ~5.4 hours of speech --- small for
 character-level seq2seq --- so expect recognizable words and partial
 spellings, not a production recognizer; the 100-hour train-clean-100
@@ -526,20 +527,15 @@ decode, scored the same way, reaches 0.51 CER.
     (define vocab
       (text->vocab (apply string-append
                           (map utterance-transcript utts))))
-    ;; constructed before the featurization pass so a bad width fails
-    ;; immediately rather than after ~800MB of preprocessing
     (define net (asr 80 (vector-length vocab) #:n-embd n-embd
                      #:dropout p-drop))
     (define opt (adam (parameters net) #:lr 0.0003))
-    ;; decode + featurize once, cache the mels on the training device
-    ;; (~800MB for all of dev-clean) so every epoch is pure model compute
     (define bucket-data
       (for/list ([bucket (in-list buckets)])
         (cons (for/list ([u (in-list bucket)])
                 (define-values (samples rate) (load-utterance u))
                 (~> (utterance-features samples rate) (ref 0) (to-device device)))
               (map utterance-transcript bucket))))
-
     (for ([epoch (in-range 1 (add1 epochs))])
       (define-values (total steps)
         (for/fold ([total 0.0] [steps 0])

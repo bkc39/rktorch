@@ -309,9 +309,9 @@ steers @emph{newly created} tensors, so the rollout context must be built
 where the weights already are --- a @racket[train-novel] net on an accelerator
 would
 otherwise device-mismatch), and the context limit from the position table's
-row count, looked up as @tt{"pos-emb.weight"} in
-@racket[named-parameters] (a 64-block net would otherwise be silently
-cropped to the fixture's 16). Greedy sampling is deterministic (no
+row count, looked up by name as @tt{"pos-emb.weight"} in
+@racket[named-parameters], so reordering the layer's fields cannot break it
+(a 64-block net would otherwise be silently cropped to the fixture's 16). Greedy sampling is deterministic (no
 temperature knob to seed), which is what the smoke test wants; it also
 produces the characteristically repetitive prose greedy decoding is known
 for, which is half the fun. Inference-only, so the model runs under
@@ -328,9 +328,6 @@ on any character outside it).
                   #:device [requested #f])
   (when (zero? (string-length prompt))
     (error 'generate "prompt must be non-empty"))
-  ;; Any parameter's device works (a model's tensors are colocated); the
-  ;; context limit comes from pos-emb's row count by *name*, so it survives
-  ;; a reordering of gpt's #:init body.
   (define dev (or requested (~> (parameters net) car device)))
   (define ctx-limit
     (or block-size
