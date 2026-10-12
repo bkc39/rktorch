@@ -112,7 +112,9 @@ One JSON object per line: `suite` (`micro`, `e2e`), `group`, `case`,
 (`median` `q1` `q3` `iqr` `min` `max` `n`), `load` and `load_end` (1, 5
 and 15-minute averages), and `meta`: `git_sha`, `git_dirty`, `racket`,
 `libtorch`, `device`, `gpu`, `threads` and where that came from, `cores`,
-`cpu`, `affinity`, `host`, `os`. An `e2e` run also writes one `run` record
+`cpu`, `affinity`, `host`, `os`; `run_id` is shared by every record one
+`run.rkt` invocation writes, and the summary pairs A/B ratios only within
+one. An `e2e` run also writes one `run` record
 per child: `steps`, `steps_per_epoch`, `epoch_s`, `epoch_gc_ms`, `step_ms`,
 `steps_per_s`, `steps_per_s_median`, `wall_s`, `exit_code`, `settings`. An
 `e2e` record's `meta` comes from the child that ran it, so an A/B across

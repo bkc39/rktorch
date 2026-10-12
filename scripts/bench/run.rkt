@@ -3,6 +3,7 @@
 (require (only-in racket/format ~a)
          (only-in racket/list check-duplicates)
          (only-in racket/match match match-define)
+         (only-in racket/os getpid)
          (only-in racket/string string-split)
          (only-in torch accelerator-if-available device-type torch-version)
          (only-in "contracts.rkt" contract-workloads pipeline-case)
@@ -30,6 +31,12 @@
             [(regexp #rx"^([^=]+)=(.*)$" (list _ var value)) (cons var value)]
             [_ (raise-user-error 'run "a variant setting is VAR=VALUE, got ~s" kv)]))))
 
+(define (fresh-run-id)
+  (format "~a-~a-~a" (current-milliseconds) (getpid) (random 1000000000)))
+
+(define ((record-writer run-id out) record)
+  (write-record (hash-set record 'run_id run-id) out))
+
 (define (current-load)
   (or (busy-cores)
       (match (load-average)
@@ -56,9 +63,11 @@
                     #:variants [variants '((#f))]
                     #:cache [cache #f]
                     #:max-load [max-load #f]
+                    #:run-id [run-id (fresh-run-id)]
                     #:out [out (current-output-port)]
                     #:log [log (current-error-port)])
   (define libtorch (torch-version))
+  (define emit (record-writer run-id out))
   (define (n reps) (max 1 (inexact->exact (round (* reps scale)))))
   (define twice (check-duplicates (map car variants)))
   (when twice
@@ -70,13 +79,12 @@
     (fprintf log "~a~a\n" group (if case-name (format " ~a" case-name) ""))
     (for ([r (in-list (measure cases #:warmup warmup #:rounds (or rounds 5)))])
       (fprintf log "  ~a\n" (format-result r #:unit unit #:scale unit-scale))
-      (write-record
+      (emit
        (result->record r #:suite "micro" #:group (~a group) #:unit unit #:meta meta
                        #:scale unit-scale
                        #:extra (if case-name
                                    (hasheq 'case (~a case-name) 'variant (~a (result-name r)))
-                                   (hasheq)))
-       out)))
+                                   (hasheq))))))
   (for ([suite (in-list suites)])
     (case suite
       [(crossings) (measure-group 'crossings (crossing-cases #:reps (n 200000)))]
@@ -91,12 +99,14 @@
       [(e2e)
        (run-e2e (if only (find-examples only) examples)
                 #:rounds (or rounds 1) #:full? full? #:variants variants #:cache cache
-                #:max-load max-load #:libtorch libtorch #:out out #:log log)]
+                #:max-load max-load #:libtorch libtorch #:run-id run-id #:out out #:log log)]
       [else (raise-user-error 'run "unknown suite ~a" suite)])))
 
 (define (run-e2e exs #:rounds rounds #:full? full? #:variants variants #:cache cache
                  #:max-load max-load #:libtorch libtorch #:out out #:log log
+                 #:run-id [run-id (fresh-run-id)]
                  #:runner-for [runner-for example-runner])
+  (define emit (record-writer run-id out))
   (define device (device-type (accelerator-if-available)))
   (define scale (if full? 'full 'short))
   (define cached (cache-env cache))
@@ -115,25 +125,23 @@
       (fprintf log "~a~a: ~a steps/s, epochs ~a s\n" (example-name run-of)
                (if variant (format "/~a" variant) "")
                (hash-ref analysis 'steps_per_s #f) (hash-ref analysis 'epoch_s '()))
-      (write-record (hash-set* analysis 'schema 1 'suite "e2e" 'group "run"
-                               'case (example-name run-of) 'variant variant
-                               'load (load-average)
-                               'meta (or (hash-ref analysis 'meta #f) meta))
-                    out))
+      (emit (hash-set* analysis 'schema 1 'suite "e2e" 'group "run"
+                       'case (example-name run-of) 'variant variant
+                       'load (load-average)
+                       'meta (or (hash-ref analysis 'meta #f) meta))))
     (define unit (if (example-epochs-var ex) "s/epoch" "ms/step"))
     (with-handlers ([exn:fail:user?
                      (lambda (e)
                        (fprintf log "~a\n" (exn-message e))
-                       (write-record (hasheq 'schema 1 'suite "e2e" 'group "error"
-                                             'case (example-name ex) 'error (exn-message e)
-                                             'meta meta)
-                                     out))])
+                       (emit (hasheq 'schema 1 'suite "e2e" 'group "error"
+                                     'case (example-name ex) 'error (exn-message e)
+                                     'meta meta)))])
       (define results
         (measure (e2e-cases (list ex) #:scale scale #:variants with-cache #:on-run on-run
                             #:log log #:runner-for runner-for)
                  #:warmup 0 #:rounds rounds))
       (for ([r (in-list results)] [v (in-list variants)])
-        (write-record
+        (emit
          (result->record r #:suite "e2e" #:group "summary" #:unit unit
                          #:meta (hash-ref metas (car v) meta)
                          #:scale (if (example-epochs-var ex) 1e-3 1)
@@ -142,8 +150,7 @@
                                          'settings (settings->jsexpr
                                                     (merged-settings ex scale (cdr v)))
                                          'gc_ms (reverse (hash-ref gcs (car v)))
-                                         'steps_per_s (summarize (hash-ref rates (car v)))))
-         out)))))
+                                         'steps_per_s (summarize (hash-ref rates (car v))))))))))
 
 (module+ main
   (require (only-in racket/cmdline command-line))
@@ -191,6 +198,7 @@
 (module+ test
   (require (for-syntax racket/base)
            (only-in racket/file make-temporary-file)
+           (only-in racket/list remove-duplicates)
            (only-in racket/port open-output-nowhere)
            (only-in racket/runtime-path define-runtime-path)
            rackunit
@@ -245,6 +253,9 @@
                     (run '(("a") ("b" ("EPOCHS" . "2"))) 2 out)
                     (run '((#f ("EPOCHS" . "1"))) 1 out))))
     (define (group g) (filter (lambda (r) (equal? (hash-ref r 'group) g)) records))
+    (match-define (list _ second-run)
+      (remove-duplicates (map (lambda (r) (hash-ref r 'run_id)) records)))
+    (check-equal? (map (lambda (r) (hash-ref r 'run_id)) (group "error")) (list second-run))
     (check-equal? (map (lambda (r) (hash-ref r 'steps)) (group "run")) '(9 6 6 9 3))
     (check-regexp-match #rx"no measured steps" (hash-ref (car (group "error")) 'error))
     (define summaries (group "summary"))

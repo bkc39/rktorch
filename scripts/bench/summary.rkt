@@ -2,7 +2,8 @@
 
 (require (only-in json read-json)
          (only-in racket/format ~a ~r)
-         (only-in racket/list remove-duplicates)
+         (only-in racket/list append* remove-duplicates)
+         (only-in racket/match match-define)
          (only-in racket/string string-join)
          (only-in "harness.rkt" paired-ratio)
          (only-in "layers.rkt" layer-order))
@@ -35,7 +36,8 @@
 
 (define (machine r)
   (define m (ref r 'meta))
-  (format "~a, ~a threads (~a)~a"
+  (format "~a (~a, ~a, cpus ~a), ~a, ~a threads (~a)~a"
+          (ref m 'host) (ref m 'cpu) (ref m 'os) (ref m 'affinity)
           (ref m 'device) (ref m 'threads) (ref m 'threads_source)
           (if (string? (ref m 'gpu)) (format ", ~a" (ref m 'gpu)) "")))
 
@@ -118,20 +120,23 @@
            (list w s (num (at "intra")) (num (at "cross"))
                  (if (and base (at "cross")) (num (/ (at "cross") base) 2) "-")))))
 
+(define (ratio-row example base other)
+  (define cmp (paired-ratio (ref base 'samples) (ref other 'samples)))
+  (define n (hash-ref cmp 'n))
+  (list example
+        (format "~a vs ~a" (or (ref other 'variant) "-") (or (ref base 'variant) "-"))
+        (num (hash-ref cmp 'median) 3)
+        (format "~a-~a" (num (hash-ref cmp 'lo) 3) (num (hash-ref cmp 'hi) 3))
+        (format "~a%~a" (~r (* 100 (hash-ref cmp 'confidence)) #:precision 0) (if (< n 6) " (n < 6)" ""))
+        n))
+
 (define (ratio-rows records)
-  (for*/list ([example (in-list (remove-duplicates (map (lambda (r) (ref r 'case)) records)))]
-              [runs (in-value (filter (lambda (r) (equal? (ref r 'case) example)) records))]
-              [base (in-value (car runs))]
-              [other (in-list (cdr runs))]
-              #:when (equal? (length (ref base 'samples)) (length (ref other 'samples))))
-    (define cmp (paired-ratio (ref base 'samples) (ref other 'samples)))
-    (define n (hash-ref cmp 'n))
-    (list example
-          (format "~a vs ~a" (or (ref other 'variant) "-") (or (ref base 'variant) "-"))
-          (num (hash-ref cmp 'median) 3)
-          (format "~a-~a" (num (hash-ref cmp 'lo) 3) (num (hash-ref cmp 'hi) 3))
-          (format "~a%~a" (~r (* 100 (hash-ref cmp 'confidence)) #:precision 0) (if (< n 6) " (n < 6)" ""))
-          n)))
+  (append*
+   (for/list ([g (in-list (by-context records (lambda (r) (list (ref r 'case) (ref r 'run_id)))))])
+     (match-define (list* (list example _) base others) g)
+     (for/list ([other (in-list others)]
+                #:when (equal? (length (ref base 'samples)) (length (ref other 'samples))))
+       (ratio-row example base other)))))
 
 (define (e2e-section records)
   (define runs
@@ -192,3 +197,34 @@
      #:once-each [("--title") t "Heading" (set! title t)]
      #:args paths paths))
   (display (summary-markdown (read-records paths) #:title title)))
+
+(module+ test
+  (require rackunit)
+
+  (define (meta host)
+    (hasheq 'git_sha "abcdef0123" 'device "cpu" 'threads 4 'threads_source "default"
+            'host host 'cpu "Some CPU" 'os "linux-x86_64" 'affinity "0-3"))
+
+  (define (summary-record variant run-id host samples)
+    (hasheq 'suite "e2e" 'group "summary" 'case "stepper" 'variant variant 'unit "ms/step"
+            'run_id run-id 'samples samples 'stats (hasheq 'median (car samples) 'n 2)
+            'meta (meta host)))
+
+  (test-case "ratios pair variants within one run, never across runs"
+    (define md
+      (summary-markdown
+       (list (summary-record "a" "r1" "lab" '(10.0 10.0))
+             (summary-record "b" "r1" "lab" '(5.0 5.0))
+             (summary-record "a" "r2" "lab" '(20.0 20.0))
+             (summary-record "b" "r2" "lab" '(10.0 10.0)))))
+    (check-equal? (length (regexp-match* #rx"\\| stepper \\| b vs a \\| 0\\.500 \\|" md)) 2)
+    (check-false (regexp-match? #rx"a vs a|b vs b|a vs b" md)))
+
+  (test-case "e2e sections split by host"
+    (define md
+      (summary-markdown
+       (list (summary-record "a" "r1" "lab" '(10.0 10.0))
+             (summary-record "b" "r2" "laptop" '(5.0 5.0)))))
+    (check-equal? (length (regexp-match* #rx"## End to end" md)) 2)
+    (check-regexp-match #rx"lab \\(Some CPU, linux-x86_64, cpus 0-3\\)" md)
+    (check-false (regexp-match? #rx"vs" md))))
