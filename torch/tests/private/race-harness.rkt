@@ -28,6 +28,7 @@
          gate-hook
          wait-for-arrival
          release-gate!
+         release-pending?
          make-watch
          watch-hook
          watch-max-holders
@@ -105,6 +106,9 @@
 
 (define (release-gate! g)
   (semaphore-post (gate-resume g)))
+
+(define (release-pending? g)
+  (and (sync/timeout 0 (semaphore-peek-evt (gate-resume g))) #t))
 
 (struct watch (holders
                [max-holders #:mutable]
@@ -199,8 +203,11 @@
      (kill-thread (worker-thread w))
      (error 'join "a worker did not finish within ~a s, or was killed" seconds)]))
 
-(define (stop! w)
-  (kill-thread (worker-thread w)))
+(define (stop! w #:seconds [seconds 30])
+  (define t (worker-thread w))
+  (kill-thread t)
+  (unless (sync/timeout seconds (thread-dead-evt t))
+    (error 'stop! "a killed worker was still running after ~a s" seconds)))
 
 (define (join-all workers #:seconds [seconds 120])
   (map (lambda (w) (join w #:seconds seconds)) workers))
@@ -219,9 +226,7 @@
       (let ([worker spawned])
         (dynamic-wind void
                       (lambda () body ...)
-                      (lambda ()
-                        (release-gate! the-gate)
-                        (stop! worker)))))))
+                      (lambda () (stop! worker)))))))
 
 (define (while-inside enter observe #:pool [pool #f])
   (define inside (make-semaphore 0))
