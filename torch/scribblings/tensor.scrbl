@@ -117,8 +117,9 @@ integer dtype refuses @racket[0.5].
 
 @defproc[(fill-value/c [dtype dtype/c]) flat-contract?]{
 The values @racket[full] accepts for @racket[dtype]. For @racket['int64], an
-integer a double represents exactly; for @racket['uint8], 0–255; for
-@racket['bool], 0 or 1; any real otherwise.}
+integer from −2@superscript{63} to 2@superscript{63} − 1 that a double
+represents exactly; for @racket['uint8], 0–255; for @racket['bool], 0 or 1;
+any real otherwise.}
 
 @defproc[(eye [n exact-nonnegative-integer?] [m exact-nonnegative-integer? n]
               [#:device device device/c #f]

@@ -413,7 +413,8 @@ both spatial axes.
 Batch normalization over the channel axis of an @tt{[N C ...]} input, by
 the batch's statistics when @racket[training?] and by the running ones
 otherwise; the layer forms are @racket[BatchNorm1d] and
-@racket[BatchNorm2d].
+@racket[BatchNorm2d]. @racket[running-mean] and @racket[running-var]
+come as a pair, required unless @racket[training?] is true.
 
 @torch-examples[(shape (batch-norm (randn 4 3) #:training? #t))]}
 

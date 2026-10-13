@@ -1,9 +1,9 @@
 #lang racket/base
 
-;; raco review lints without macro expansion and cannot see the re-export.
 #|review: ignore|#
 
-(require racket/require
+;; Re-export facade: raco review reads its whole-module requires as unused.
+(require (only-in racket/require subtract-in)
          (for-label (subtract-in racket torch torch/nn)
                     torch
                     torch/nn))

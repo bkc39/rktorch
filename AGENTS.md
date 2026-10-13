@@ -523,8 +523,9 @@ Thin re-export facades over small modules (target ≤ 500 lines/file).
 explicit, alphabetized name lists — never whole-module requires — so each
 file documents exactly what it pulls in. Exemptions, each marked with a
 comment at the require site: pure re-export facades (`main.rkt`,
-`foreign.rkt`, `nn.rkt`), and macro-heavy modules whose expansions need the
-module's full export set (`racket/runtime-path`, `syntax/parse/pre`).
+`foreign.rkt`, `nn.rkt`, `scribblings/labels.rkt`), and macro-heavy modules
+whose expansions need the module's full export set (`racket/runtime-path`,
+`syntax/parse/pre`).
 
 - `info.rkt` — package metadata + native-library pre-install hook.
 - `main.rkt` — high-level facade (re-exports `foreign.rkt`).
