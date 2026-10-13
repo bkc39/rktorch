@@ -65,8 +65,7 @@
 
 (define (cache-env root)
   (if root
-      (for/list ([v (in-list cache-variables)]
-                 #:unless (getenv (car v)))
+      (for/list ([v (in-list cache-variables)])
         (cons (car v) (~> (build-path root (cdr v)) path->complete-path simplify-path
                           path->string)))
       '()))
@@ -105,7 +104,7 @@
     (environment-variables-set! env (string->bytes/utf-8 name) #f))
   (for ([s (in-list settings)])
     (environment-variables-set! env (string->bytes/utf-8 (car s))
-                                (string->bytes/utf-8 (~a (cdr s)))))
+                                (~> s cdr ~a string->bytes/utf-8)))
   env)
 
 (define (run-child runner dir out cleared settings log)
@@ -195,12 +194,13 @@
     (check-equal? (example-env (car examples) 'full) '(("EPOCHS" . 3)))
     (check-equal? (cdr (assoc "STEPS" (example-env (cadr examples) 'short))) 300))
 
-  (test-case "a cache root fills every unset cache variable"
+  (test-case "a cache root sets every cache variable, inherited or not"
     (check-equal? (cache-env #f) '())
     (parameterize ([current-environment-variables (make-environment-variables
                                                    #"RKTORCH_MNIST_DIR" #"/m")])
       (define env (cache-env "/c"))
-      (check-false (assoc "RKTORCH_MNIST_DIR" env))
+      (check-equal? (length env) 6)
+      (check-equal? (cdr (assoc "RKTORCH_MNIST_DIR" env)) "/c/mnist")
       (check-equal? (cdr (assoc "RKTORCH_CIFAR10_DIR" env)) "/c/cifar10")
       (check-true (absolute-path? (cdr (assoc "RKTORCH_TEXT_DIR" (cache-env "rel")))))))
 

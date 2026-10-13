@@ -42,6 +42,14 @@
             [(regexp #rx"^([^=]+)=(.*)$" (list _ var value)) (cons var value)]
             [_ (raise-user-error 'run "a variant setting is VAR=VALUE, got ~s" kv)]))))
 
+(define (flag-number flag ok? expected text)
+  (match (string->number text)
+    [(and (? real? n) (? ok?)) n]
+    [_ (raise-user-error 'run "~a expects ~a, got ~s" flag expected text)]))
+
+(define (positive-real? x)
+  (and (real? x) (positive? x)))
+
 (define (fresh-run-id)
   (format "~a-~a-~a" (current-milliseconds) (getpid) (random 1000000000)))
 
@@ -122,7 +130,9 @@
   (define scale (if full? 'full 'short))
   (define cached (cache-env cache))
   (define with-cache
-    (for/list ([v (in-list variants)]) (cons (car v) (append cached (cdr v)))))
+    (for/list ([v (in-list variants)])
+      (match-define (cons name settings) v)
+      (cons name (append (filter (lambda (c) (not (assoc (car c) settings))) cached) settings))))
   (for ([ex (in-list exs)])
     (wait-for-load max-load log)
     (define meta (host-meta #:device device #:libtorch libtorch #:threads (aten-threads)))
@@ -180,17 +190,24 @@
        #:usage-help "Suites: micro crossings layers ops contracts e2e."
                     "Options go before or after the suites."
        #:once-each
-       [("--rounds") n "Timed rounds (default 5; e2e 1)" (option! 'rounds (string->number n))]
+       [("--rounds") n "Timed rounds (default 5; e2e 1)"
+                     (option! 'rounds
+                              (flag-number "--rounds" exact-positive-integer? "a positive integer"
+                                           n))]
        [("--warmup") n "Untimed rounds before them (default 1; e2e runs none)"
-                     (option! 'warmup (string->number n))]
-       [("--scale") x "Multiply micro repetitions by x" (option! 'scale (string->number x))]
+                     (option! 'warmup
+                              (flag-number "--warmup" exact-nonnegative-integer?
+                                           "a non-negative integer" n))]
+       [("--scale") x "Multiply micro repetitions by x"
+                    (option! 'scale (flag-number "--scale" positive-real? "a positive number" x))]
        [("--device") d "Device for the ops suite: cpu or cuda" (option! 'device (string->symbol d))]
        [("--full") "Run examples at their full settings" (option! 'full? #t)]
        [("--only") names "Comma-separated example numbers"
                    (option! 'only (string-split names ","))]
        [("--cache") dir "Shared dataset cache root for the examples" (option! 'cache dir)]
        [("--max-load") l "Wait for a load below l (busy cores over 1 s on Linux)"
-                       (option! 'max-load (string->number l))]
+                       (option! 'max-load
+                                (flag-number "--max-load" positive-real? "a positive number" l))]
        [("--out") file "Append JSON lines to file" (option! 'out file)]
        #:multi
        [("--variant") v "name:VAR=VALUE,... (repeat for A/B)"
@@ -225,7 +242,7 @@
 
 (module+ test
   (require (for-syntax racket/base)
-           (only-in racket/file make-temporary-file)
+           (only-in racket/file make-temporary-directory make-temporary-file)
            (only-in racket/list remove-duplicates)
            (only-in racket/port open-output-nowhere)
            (only-in racket/runtime-path define-runtime-path)
@@ -236,6 +253,7 @@
 
   (define-runtime-path stepper "fixtures/stepper.rkt")
   (define-runtime-path broken "fixtures/broken.rkt")
+  (define-runtime-path cache-reader "fixtures/cache-reader.rkt")
   (define quiet (open-output-nowhere))
 
   (define (records-of thunk)
@@ -317,6 +335,37 @@
     (check-true (for/or ([k (in-hash-keys (hash-ref summary 'settings))])
                   (regexp-match? #rx"^RKTORCH_.*_DIR$" (symbol->string k)))))
 
+  (test-case "a cache root overrides inherited caches, and a variant overrides the cache"
+    (define fixture (example "stepper" '(("EPOCHS" . 2)) '(("EPOCHS" . 2)) "EPOCHS" 0 'first))
+    (define env (environment-variables-copy (current-environment-variables)))
+    (environment-variables-set! env #"RKTORCH_MNIST_DIR" #"/inherited/mnist")
+    (environment-variables-set! env #"RKTORCH_CIFAR10_DIR" #"/inherited/cifar10")
+    (define (cache-dir name) (path->string (build-path (current-directory) "c" name)))
+    (with-temporary-path (dir (make-temporary-directory "bench-cache-~a"))
+      (define (seen-by v) (path->string (build-path dir v)))
+      (define records
+        (parameterize ([current-environment-variables env])
+          (records-of
+           (lambda (out)
+             (run-e2e (list fixture) #:rounds 1 #:full? #f
+                      #:variants `(("a" ("BENCH_ENV_OUT" . ,(seen-by "a")))
+                                   ("b" ("BENCH_ENV_OUT" . ,(seen-by "b"))
+                                        ("RKTORCH_CIFAR10_DIR" . "/variant/cifar10")))
+                      #:cache "c" #:max-load #f #:libtorch "x" #:out out #:log quiet
+                      #:runner-for (lambda (_ex) cache-reader))))))
+      (define expected
+        (hash "a" (list (cache-dir "mnist") (cache-dir "cifar10"))
+              "b" (list (cache-dir "mnist") "/variant/cifar10")))
+      (for ([v (in-list '("a" "b"))])
+        (check-equal? (call-with-input-file (seen-by v) read) (hash-ref expected v) v))
+      (check-equal? (map (lambda (r) (hash-ref r 'group)) records)
+                    '("run" "run" "summary" "summary"))
+      (for ([r (in-list records)])
+        (define settings (hash-ref r 'settings))
+        (check-equal? (list (hash-ref settings 'RKTORCH_MNIST_DIR)
+                            (hash-ref settings 'RKTORCH_CIFAR10_DIR))
+                      (hash-ref expected (hash-ref r 'variant))))))
+
   (test-case "a child that fails before its first step records its own meta"
     (define fixture (example "stepper" '(("EPOCHS" . 1)) '(("EPOCHS" . 1)) "EPOCHS" 0 'first))
     (match-define (list run failure)
@@ -343,6 +392,25 @@
                                               (variants . (("a") ("b" ("X" . "1"))))))))
     (check-equal? (parsed "crossings" "--rounds" "2" "layers")
                   (list '(crossings layers) (make-hasheq '((rounds . 2))))))
+
+  (test-case "a numeric flag rejects what is not its number"
+    (define (fails flag value expected)
+      (check-exn (regexp (string-append (regexp-quote flag) " expects " expected ", got \""
+                                        (regexp-quote value) "\""))
+                 (lambda () (parse-arguments (vector "micro" flag value)))))
+    (fails "--rounds" "six" "a positive integer")
+    (fails "--rounds" "0" "a positive integer")
+    (fails "--rounds" "1.5" "a positive integer")
+    (fails "--warmup" "-1" "a non-negative integer")
+    (fails "--warmup" "one" "a non-negative integer")
+    (fails "--scale" "big" "a positive number")
+    (fails "--scale" "0" "a positive number")
+    (fails "--scale" "1+2i" "a positive number")
+    (fails "--max-load" "high" "a positive number")
+    (fails "--max-load" "+nan.0" "a positive number")
+    (define-values (_suites options)
+      (parse-arguments (vector "micro" "--warmup" "0" "--scale" "0.5" "--max-load" "2.5")))
+    (check-equal? options (make-hasheq '((warmup . 0) (scale . 0.5) (max-load . 2.5)))))
 
   (test-case "an unknown suite fails before any suite runs"
     (check-exn #rx"unknown suite --out"

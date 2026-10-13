@@ -232,7 +232,7 @@
       [(cons id _) (string-trim id)]
       ['() "0"]))
   (define index (and (regexp-match? #px"^\\d+$" id) (string->number id)))
-  (define homogeneous? (= 1 (length (remove-duplicates (map gpu-name gpus)))))
+  (define homogeneous? (= 1 (~> gpus (map gpu-name _) remove-duplicates length)))
   (define candidates
     (cond
       [(regexp-match? #rx"^(GPU|MIG)-" id)
@@ -300,7 +300,7 @@
   (define s (~> r result-per-call (map (lambda (ms) (* ms scale)) _) summarize))
   (format "~a ~a ~a  IQR ~a  gc ~a ms"
           (~a (result-name r) #:min-width 28)
-          (~a (~r (hash-ref s 'median) #:precision '(= 1)) #:min-width 10 #:align 'right)
+          (~> s (hash-ref 'median) (~r #:precision '(= 1)) (~a #:min-width 10 #:align 'right))
           unit
           (~r (hash-ref s 'iqr) #:precision '(= 1))
           (apply + (result-gc-ms r))))
