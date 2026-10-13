@@ -173,10 +173,10 @@
       runs))
 
 (define (failure-section records)
-  (table '("example" "variant" "exit code" "error")
+  (table '("example" "variant" "commit" "execution" "exit code" "error")
          (for/list ([r (in-list records)])
-           (list (ref r 'case) (or (ref r 'variant) "-") (or (ref r 'exit_code) "-")
-                 (or (ref r 'error) "-")))))
+           (list (ref r 'case) (or (ref r 'variant) "-") (commit r) (execution r)
+                 (or (ref r 'exit_code) "-") (or (ref r 'error) "-")))))
 
 (struct section (suite group title render context))
 
@@ -294,14 +294,26 @@
                                           'error "no example" 'meta (meta "lab")))))
     (check-false (regexp-match? #rx"## End to end" md))
     (check-regexp-match #rx"## Failures \\(lab " md)
-    (check-regexp-match #rx"\\| stepper \\| b \\| 1 \\| e2e: stepper: boom \\(exit code 1\\) \\|" md)
-    (check-regexp-match #rx"\\| 06-gpt \\| - \\| - \\| no example \\|" md))
+    (check-regexp-match
+     #rx"\\| stepper \\| b \\| `abcdef0` \\| cpu, 4 threads \\(default\\) \\| 1 \\| e2e: " md)
+    (check-regexp-match #rx"\\| 06-gpt \\| - \\| `abcdef0` \\| [^|]* \\| - \\| no example \\|" md))
 
   (test-case "failures follow the runs that succeeded"
     (define md (markdown-of (list (summary-record "a" "r1" "lab" '(10.0 10.0))
                                   (error-record "b" 137 "killed\nby | signal"))))
     (check-regexp-match #rx"## End to end[^#]*\\| stepper \\| a \\|[^#]*## Failures" md)
-    (check-regexp-match #rx"\\| stepper \\| b \\| 137 \\| killed / by \\\\\\| signal \\|\n" md))
+    (check-regexp-match #rx"\\| b \\| [^|]* \\| [^|]* \\| 137 \\| killed / by \\\\\\| signal \\|\n"
+                        md))
+
+  (test-case "each failure names the build and the execution that produced it"
+    (define (failure variant sha device)
+      (hash-set* (error-record variant 1 "boom")
+                 'meta (hash-set* (meta "lab") 'git_sha sha 'device device)))
+    (define md (markdown-of (list (failure "old" "1111111aaa" "cpu")
+                                  (failure "new" "2222222bbb" "cuda"))))
+    (check-equal? (length (regexp-match* #rx"## Failures" md)) 1)
+    (check-regexp-match #rx"\\| stepper \\| old \\| `1111111` \\| cpu, 4 threads " md)
+    (check-regexp-match #rx"\\| stepper \\| new \\| `2222222` \\| cuda, 4 threads " md))
 
   (test-case "a multi-line GPU name stays in its cell"
     (define m (hash-set* (meta "lab") 'device "cuda" 'gpu "GPU A\nGPU B"))

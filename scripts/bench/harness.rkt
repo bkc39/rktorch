@@ -69,14 +69,16 @@
 (define (measure cases
                  #:warmup [warmup 1]
                  #:rounds [rounds 5]
-                 #:load [load load-average])
+                 #:load [load load-average]
+                 #:on-failure [on-failure #f])
   (for* ([_ (in-range warmup)] [c (in-list cases)])
     (run-once c))
   (define samples (make-hasheq))
   (define start-load (load))
-  (for* ([i (in-range rounds)] [c (in-list (rotate cases i))])
-    (define sample (run-once c))
-    (hash-update! samples c (lambda (acc) (cons sample acc)) '()))
+  (with-handlers ([(lambda (e) (and on-failure (exn:fail? e))) on-failure])
+    (for* ([i (in-range rounds)] [c (in-list (rotate cases i))])
+      (define sample (run-once c))
+      (hash-update! samples c (lambda (acc) (cons sample acc)) '())))
   (define end-load (load))
   (for/list ([c (in-list cases)])
     (define rows (reverse (hash-ref samples c '())))
@@ -334,6 +336,24 @@
     (check-equal? (map result-name results) '(a b))
     (check-equal? (length (result-per-call (car results))) 4)
     (check-equal? (result-load (car results)) '((1.0 2.0 3.0) (1.0 2.0 3.0))))
+
+  (test-case "with on-failure, a failed sample ends the rounds and keeps the samples before it"
+    (define calls 0)
+    (define (flaky _reps)
+      (set! calls (add1 calls))
+      (when (= calls 3)
+        (raise-user-error 'flaky "round two")))
+    (define failures '())
+    (define (failed! e) (set! failures (cons (exn-message e) failures)))
+    (define results
+      (measure (list (bench-case 'a void) (bench-case 'b flaky)) #:warmup 0 #:rounds 3
+               #:load void #:on-failure failed!))
+    (check-equal? failures '("flaky: round two"))
+    (check-equal? (map (lambda (r) (length (result-per-call r))) results) '(3 2))
+    (check-exn #rx"round two"
+               (lambda ()
+                 (set! calls 2)
+                 (measure (list (bench-case 'b flaky)) #:warmup 0 #:rounds 1 #:load void))))
 
   (test-case "a case may time itself"
     (define r

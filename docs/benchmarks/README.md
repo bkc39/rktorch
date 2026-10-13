@@ -24,7 +24,7 @@ line per case goes to standard error.
 | `--rounds N` | timed rounds; 5 by default for the micro suites, 1 for `e2e` |
 | `--warmup N` | untimed rounds first, 1 by default; ignored by `e2e`, which runs none |
 | `--scale X` | multiplies the micro suites' repetitions |
-| `--device cuda` | where the `ops` suite runs; the others run on the CPU |
+| `--device cuda` | where the `ops` suite runs (`cpu`, `cuda` or `mps`); the others run on the CPU |
 | `--only 05,09` | examples for `e2e` |
 | `--full` | the examples' full settings instead of the short ones |
 | `--cache DIR` | one dataset cache for every example (`DIR/mnist`, ...) |
@@ -134,7 +134,9 @@ A child sees none of the caller's example variables (`EPOCHS`, `STEPS`,
 `EXCERPT`, `OUT`, ... as its runner reads them) except those its settings
 give. A failed example writes an `error` record (`case`, `variant`,
 `exit_code`, `error`, and `meta_from`: `child`, or `parent` when the child
-died before recording its own), listed under Failures in the summary.
+died before recording its own), listed under Failures in the summary with
+its commit and execution. A failure ends that example's rounds; the
+variants' completed runs still get their summaries.
 
 ## Baseline
 
