@@ -29,7 +29,7 @@
   (define after (pthread-self))
   (list before inside after))
 
-(define (tally enter #:pool pool)
+(define (tally-region enter #:pool pool)
   (for/fold ([inside-main 0] [inside-own 0] [returned 0])
             ([_ (in-range runs)])
     (match-define (list (list before inside after))
@@ -41,7 +41,7 @@
 (define (region-rows label pool)
   (for/list ([region (in-list regions)])
     (match-define (list name enter) region)
-    (define-values (inside-main inside-own returned) (tally enter #:pool pool))
+    (define-values (inside-main inside-own returned) (tally-region enter #:pool pool))
     (list label name runs inside-main inside-own returned)))
 
 (define (migrations pool threads calls)

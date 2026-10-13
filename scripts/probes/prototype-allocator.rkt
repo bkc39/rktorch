@@ -4,7 +4,11 @@
          (only-in ffi/unsafe/alloc allocator deallocator)
          (only-in ffi/unsafe/atomic make-uninterruptible-lock)
          (only-in racket/function const)
-         (only-in "common.rkt" cas-update! with-atomic with-uninterruptible-lock)
+         (only-in "common.rkt"
+                  cas-update!
+                  with-atomic
+                  with-finalizer-in-flight
+                  with-uninterruptible-lock)
          "shim.rkt")
 
 (provide (struct-out prototype)
@@ -58,10 +62,11 @@
     (set-phantom-bytes! (record-phantom r) 0)
     (shim-free t))
   (define ((finalizer-for r) t)
-    (cas-update! calls add1)
-    (when (claim-record! t (const r))
-      (cas-update! frees add1)
-      (release! r t)))
+    (with-finalizer-in-flight
+      (cas-update! calls add1)
+      (when (claim-record! t (const r))
+        (cas-update! frees add1)
+        (release! r t))))
   (define ((wrap op) . args)
     (define t (apply op args))
     (define r (make-record t))
@@ -95,11 +100,12 @@
     (set-phantom-bytes! (record-phantom r) 0)
     (shim-free t))
   (define (finalize h)
-    (cas-update! calls add1)
-    (define r (held-record h))
-    (when (claim! r)
-      (cas-update! frees add1)
-      (release! r (held-handle h))))
+    (with-finalizer-in-flight
+      (cas-update! calls add1)
+      (define r (held-record h))
+      (when (claim! r)
+        (cas-update! frees add1)
+        (release! r (held-handle h)))))
   (define ((wrap op) . args)
     (define t (apply op args))
     (define h (held t (make-record t)))
@@ -128,9 +134,10 @@
       (cas-update! live - (record-nbytes r))
       (set-phantom-bytes! (record-phantom r) 0)))
   (define (finalize t)
-    (cas-update! runs add1)
-    (unaccount! t)
-    (shim-free t))
+    (with-finalizer-in-flight
+      (cas-update! runs add1)
+      (unaccount! t)
+      (shim-free t)))
   (define free-handle ((deallocator #:merely-uninterruptible? #t) shim-free))
   (define (wrap op)
     (define wrapped ((allocator finalize #:merely-uninterruptible? #t) op))

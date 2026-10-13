@@ -42,7 +42,8 @@
                         (lambda ()
                           (register-finalizer (make-vector 2 id)
                                               (lambda (_v)
-                                                (cas-update! (vector-ref runs id) add1))))))))))
+                                                (with-finalizer-in-flight
+                                                  (cas-update! (vector-ref runs id) add1)))))))))))
   (define-values (rounds drain-ms settled? timed-out?)
     (collect-until (lambda () (for/and ([id (in-range total)]) (positive? (run-count id))))))
   (define final-counts (build-list total run-count))

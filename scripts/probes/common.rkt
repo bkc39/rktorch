@@ -46,6 +46,7 @@
          with-uninterruptible
          with-uninterruptible-lock
          with-final-post
+         with-finalizer-in-flight
          cas-update!
          now-ms
          ms->seconds
@@ -116,7 +117,7 @@
   (define raised (unbox wills-raised))
   (printf "\nload average (1 min) at end: ~a\n" (load-average))
   (when (pair? raised)
-    (printf "wills that raised while settling on the main thread: ~a (first: ~a)\n"
+    (printf "wills that raised while settling: ~a (first: ~a)\n"
             (length raised) (last raised))))
 
 (define (row->line cells)
@@ -155,6 +156,18 @@
 (define-syntax-parse-rule (with-final-post sema:expr body:expr ...+)
   (let ([posted sema])
     (with-finally (semaphore-post posted) body ...)))
+
+(define finalizers-in-flight (box 0))
+(define finalizers-exited (box 0))
+
+(define (finalizer-exited!)
+  (cas-update! finalizers-exited add1)
+  (cas-update! finalizers-in-flight sub1))
+
+(define-syntax-parse-rule (with-finalizer-in-flight body:expr ...+)
+  (dynamic-wind (lambda () (cas-update! finalizers-in-flight add1))
+                (lambda () body ...)
+                finalizer-exited!))
 
 (define (cas-update! b f . args)
   (let retry ([tries 0])
@@ -416,14 +429,6 @@
 
 (define canary-timeout-seconds 0.5)
 
-(define (collect-past-canary!)
-  (define canary-finalized (make-semaphore 0))
-  (register-finalizer (box 0) (lambda (_) (semaphore-post canary-finalized)))
-  (collect-garbage 'major)
-  (unless (sync/timeout canary-timeout-seconds canary-finalized)
-    (error 'collect-past-canary! "the finalizer thread did not run a canary within ~a s"
-           canary-timeout-seconds)))
-
 (define finalizer-executor
   (delay
     (let ([closure ((vm-primitive 'inspect/object) register-finalizer)])
@@ -457,10 +462,31 @@
       (run-ready-wills!))
     (sleep 0)))
 
+(define (collect-past-canary!)
+  (define canary-finalized (make-semaphore 0))
+  (define drained (box #f))
+  (register-finalizer (box 0)
+                      (lambda (_)
+                        (with-atomic
+                          (set-box! drained (run-ready-wills!))
+                          (semaphore-post canary-finalized))))
+  (collect-garbage 'major)
+  (unless (sync/timeout canary-timeout-seconds canary-finalized)
+    (error 'collect-past-canary! "the finalizer thread did not run a canary within ~a s"
+           canary-timeout-seconds))
+  (unbox drained))
+
 (define (settle-wills! #:limit [limit 50])
-  (let loop ([collections 1] [ran 0])
+  (let loop ([collections 0] [ran 0])
+    (define exited (unbox finalizers-exited))
     (define now (collect-and-run-wills!))
+    (define fenced (and (zero? now) (collect-past-canary!)))
+    (define so-far (+ collections (if fenced 2 1)))
+    (define quiet?
+      (and (eqv? fenced 0)
+           (= exited (unbox finalizers-exited))
+           (zero? (unbox finalizers-in-flight))))
     (cond
-      [(zero? now) (values ran collections)]
-      [(= collections limit) (values #f collections)]
-      [else (loop (add1 collections) (+ ran now))])))
+      [quiet? (values ran so-far)]
+      [(>= so-far limit) (values #f so-far)]
+      [else (loop so-far (+ ran now (or fenced 0)))])))
