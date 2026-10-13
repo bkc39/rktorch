@@ -102,6 +102,109 @@ query may attend to, so the causal mask is the lower triangle itself.
 The two senses are easy to confuse, and PyTorch itself uses both;
 @secref["attention-function"] in the reference lays out which form takes
 which, along with float masks that add to the scores. Everything else in
-a transformer is arrangement around this one call: several attentions side
-by side, a feed-forward layer after them, and a record of where each token
-sits.
+a transformer is arrangement around this one call, starting with several
+attentions side by side.
+
+@section[#:tag "transformers-heads"]{Heads and masks}
+
+One attention compares a query with a key along their whole width at once,
+so it can weigh the positions in only one way. Multi-head attention
+projects the queries, keys and values, cuts each projection into
+@deftech{heads}, narrower slices that attend independently, and joins the
+heads' answers back together. The layer is @racket[MultiheadAttention].
+Here it is on a toy batch, two sequences of three tokens each four wide,
+split into two heads two wide:
+
+@torch-examples[
+(require torch/nn)
+(manual-seed! 0)
+(define mha (MultiheadAttention 4 #:heads 2 #:batch-first? #t))
+(map car (named-children mha))
+(define tokens (randn 2 3 4))
+(shape (mha tokens tokens tokens))
+]
+
+@racket[#:batch-first? #t] takes the batch as the first axis, as the toy
+batch has it. Without it, the layer expects the sequence first, as
+PyTorch's does.
+
+The four children are @racket[Linear] layers. The first three project the
+input, and the heads are nothing more than a reshape of those projections:
+the four columns become two heads of two, and moving the head axis in
+front of the tokens makes each head a batch of its own for
+@racket[scaled-dot-product-attention]. The last child projects the joined
+heads back. By hand:
+
+@torch-examples[
+(define (heads t)
+  (transpose (reshape t 2 3 2 2) 1 2))
+(define per-head
+  (scaled-dot-product-attention (heads ((child-ref mha "query") tokens))
+                                (heads ((child-ref mha "key") tokens))
+                                (heads ((child-ref mha "value") tokens))))
+(shape per-head)
+(define joined (reshape (transpose per-head 1 2) 2 3 4))
+(~> (- ((child-ref mha "out") joined) (mha tokens tokens tokens))
+    abs max item (< 1e-6))
+]
+
+Sequences in a batch rarely have the same length. The shorter ones are
+padded at the end, and a @deftech{padding mask} keeps every query from
+attending to the padding. Say the second sequence is only two tokens
+long. Its padding mask is @racket[#t] at the third position, and asking for
+the weights shows that no query looks there:
+
+@torch-examples[
+(define padding (eq (tensor '((0 0 0) (0 0 1))) 1))
+(define-values (out weights)
+  (mha tokens tokens tokens #:key-padding-mask padding #:need-weights? #t))
+weights
+]
+
+Mind the sense: this mask is @racket[#t] where a key is @emph{hidden}, the
+opposite of the boolean mask @racket[scaled-dot-product-attention] took
+above. The layer mirrors PyTorch's @tt{nn.MultiheadAttention}, which
+reads its masks that way, and turns them around itself before the fused
+call. The full table is in @secref["attention-multihead-apply"].
+
+The weights come back averaged over the heads, one row per query, each
+summing to one. @racket[#:average-attn-weights? #f] keeps the heads apart,
+and leaving out @racket[#:need-weights?] skips the weights altogether and
+lets the fused kernel do the work, which is how a model runs the layer:
+ask for the weights only to look at them.
+
+@racket[#:causal? #t] hides the future, as it did for the single attention
+above, and it combines with the padding mask:
+
+@torch-examples[
+(define-values (causal-out causal-weights)
+  (mha tokens tokens tokens #:causal? #t #:key-padding-mask padding
+       #:need-weights? #t))
+causal-weights
+]
+
+Every query so far came from the same sequence as the keys:
+@deftech{self-attention}, one tensor passed three times. In
+@deftech{cross-attention} the queries come from one sequence and the keys
+and values from another, as when a translation decoder reads the
+encoded source sentence. The two can differ in length, and in width too
+when @racket[#:key-dim] and @racket[#:value-dim] say so. Three decoder
+positions, four wide, reading five encoded ones six wide:
+
+@torch-examples[
+(define reader (MultiheadAttention 4 #:heads 2 #:batch-first? #t
+                                   #:key-dim 6 #:value-dim 6))
+(define encoded (randn 2 5 6))
+(define-values (attended attended-weights)
+  (reader (randn 2 3 4) encoded encoded #:need-weights? #t))
+(shape attended)
+(shape attended-weights)
+]
+
+The answer has one row per query, in the queries' width; the weights have
+one row per query and one column per encoded position.
+
+That is the whole of multi-head attention: projections, heads cut from
+them, one fused attention over every head at once, and a projection back.
+A transformer stacks it with a feed-forward layer and residual
+connections; @secref["ex-gpt"] builds one end to end.

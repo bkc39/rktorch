@@ -3,8 +3,9 @@
 @(require (for-label racket/base
                      racket/contract
                      (only-in racket/string string-replace)
-                     (only-in torch backward! lambda~> native-collect-at-troughs
-                              prop:to relu tensor? to to-able? with-no-grad)
+                     (only-in torch backward! lambda~> mul
+                              native-collect-at-troughs prop:to relu tensor?
+                              to to-able? with-no-grad)
                      (only-in torch/data/loader in-dataloader)
                      torch/nn
                      torch/private/contract))
@@ -33,7 +34,9 @@
                   (code:line keyword id)
                   (code:line keyword [id default-expr])]
           [input id
-                 [id : input-contract-expr]])
+                 [id : input-contract-expr]
+                 (code:line keyword id)
+                 (code:line keyword [id default-expr])])
          #:contracts ([contract-expr contract?]
                       [input-contract-expr contract?])]{
 
@@ -53,6 +56,21 @@ where the layer is defined, so it costs one flat check per call; the
 party blamed is the label @tt{caller}, since a layer's forward has no
 module boundary of its own to name the caller by. A bare @racket[id]
 accepts anything, as before.
+
+A @racket[keyword] input is a keyword argument of the application, in the
+grammar of @racket[define]: required without a @racket[default-expr],
+optional with one, and the @racket[default-expr] sees the fields. The count
+of positional inputs is checked as before, and a keyword the forward does
+not declare is refused by the application under @racket[name], as it is
+for any procedure. A forward that declares no keyword refuses them all.
+
+@racketblock[
+(define-layer Scaled (factor)
+  #:forward (x #:by [by factor])
+  (mul x by))
+((Scaled 2) x)
+((Scaled 2) x #:by 3)
+]
 
 @racketblock[
 (define-layer BatchNorm2d (weight bias running-mean running-var)
@@ -290,10 +308,9 @@ also takes a dtype target; a plain tensor field does neither.
                           [#:buffers bufs (listof (cons/c child-name/c Buffer?)) '()]
                           [#:children kids (listof (cons/c child-name/c layer?)) '()])
          layer?]{
-Wraps @racket[proc] as a callable layer. Applying the layer passes
-positional arguments to @racket[proc] and preserves its return values and
-exceptions. Keyword
-arguments to the wrapped procedure are not supported.
+Wraps @racket[proc] as a callable layer. Applying the layer passes its
+positional and keyword arguments to @racket[proc] and preserves its return
+values and exceptions.
 
 The optional association lists register captured parameters, buffers, and
 child layers. Names must be unique across all three lists and must not
@@ -547,7 +564,10 @@ same way a @racket[define-layer] one does. A structure that implements
 @racket[gen:layer] and sets @racket[prop:procedure] itself is rejected
 when it is defined. Inside a @racket[#:methods gen:layer] block the name
 @racket[layer-forward] is the method being defined, so a layer calls its
-children by applying them.
+children by applying them. A generic method takes no keyword arguments, so
+a hand-written layer applied with one is refused, naming
+@racket[layer-forward]; a forward with keyword inputs belongs in
+@racket[define-layer] or @racket[procedure->Layer].
 
 @racketblock[
 (struct Twice (inner)
