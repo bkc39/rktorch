@@ -163,6 +163,7 @@
          group-norm
          batch-norm
          linear
+         scaled-dot-product-attention
          upsample-nearest2d)
 
 (provide eq

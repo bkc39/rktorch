@@ -8,9 +8,9 @@
 ;; and a thin uncontracted wrapper. Promotion into the contracted
 ;; public facade (torch/foreign.rkt) is hand-curated.
 ;;
-;; Conventions: an optional tensor/int/int-array/scalar argument takes #f
-;; for "absent" (an empty list '() is also absent for int-arrays);
-;; loss ops follow ATen (nll_loss wants log-probabilities,
+;; Conventions: an optional tensor/int/int-array/scalar/float argument
+;; takes #f for "absent" (an empty list '() is also absent for
+;; int-arrays); loss ops follow ATen (nll_loss wants log-probabilities,
 ;; cross_entropy_loss wants raw logits).
 ;; An op with several Tensor returns carries #:returns N and answers
 ;; them as multiple values, in schema order.
@@ -87,6 +87,7 @@
          nonzero
          repeat-interleave-self-int
          reshape
+         scaled-dot-product-attention
          scatter-add!
          scatter-src!
          scatter-value!
@@ -312,6 +313,9 @@
 
 (define-generated-op reshape tr_gen_reshape
   ([self tensor] [shape int-array]))
+
+(define-generated-op scaled-dot-product-attention tr_gen_scaled_dot_product_attention #:no-retry
+  ([query tensor] [key tensor] [value tensor] [attn-mask optional-tensor] [dropout-p double] [is-causal bool] [scale optional-double] [enable-gqa bool]))
 
 (define-generated-op scatter-add! tr_gen_scatter_add_ #:inplace
   ([self tensor] [dim int64] [index tensor] [src tensor]))

@@ -2,6 +2,7 @@
 
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <vector>
 
 #include "torchrkt/c_api.h"
@@ -370,14 +371,22 @@ TEST(TorchrktOps, Elementwise) {
   const Handle squared(tr_pow_scalar(a.t, 2.0));
   EXPECT_EQ(data_of(squared.t), (std::vector<float>{1, 4, 9, 16}));
 
-  // the +-1 goldens pin exact (erf) gelu against the tanh approximation
+  // the two forms differ by 1.5e-4 at +-1, so these goldens tell them apart
   const Handle unit = make({0.0F, 1.0F, -1.0F}, {3});
-  const Handle smoothed(tr_gelu(unit.t));
+  const Handle smoothed(tr_gelu(unit.t, "none"));
   const std::vector<float> g = data_of(smoothed.t);
   EXPECT_FLOAT_EQ(g.at(0), 0.0F);
   EXPECT_NEAR(g.at(1), 0.841345F, 1e-5F);
   EXPECT_NEAR(g.at(2), -0.158655F, 1e-5F);
-  EXPECT_EQ(tr_gelu(nullptr), nullptr);
+  const Handle approximated(tr_gelu(unit.t, "tanh"));
+  const std::vector<float> tanh_form = data_of(approximated.t);
+  EXPECT_FLOAT_EQ(tanh_form.at(0), 0.0F);
+  EXPECT_NEAR(tanh_form.at(1), 0.841192F, 1e-5F);
+  EXPECT_NEAR(tanh_form.at(2), -0.158808F, 1e-5F);
+  EXPECT_EQ(tr_gelu(nullptr, "none"), nullptr);
+  EXPECT_EQ(tr_gelu(unit.t, nullptr), nullptr);
+  EXPECT_EQ(tr_gelu(unit.t, "erf"), nullptr);
+  EXPECT_NE(std::strstr(tr_last_error(), "tr_gelu"), nullptr);
 }
 
 TEST(TorchrktOps, ReduceAndItem) {

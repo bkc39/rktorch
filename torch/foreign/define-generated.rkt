@@ -46,7 +46,7 @@
     [(optional-int64)
      (values (list #`(#,arg : _int64) #`(#,has-arg : _stdbool))
              (list #`(or #,arg 0) #`(and #,arg #t)))]
-    [(optional-scalar)
+    [(optional-scalar optional-double)
      (values (list #`(#,arg : _double) #`(#,has-arg : _stdbool))
              (list #`(or #,arg 0.0) #`(and #,arg #t)))]
     [(optional-int-array)
