@@ -147,17 +147,21 @@
                 #:when (equal? (length (ref base 'samples)) (length (ref other 'samples))))
        (ratio-row example base other)))))
 
+(define (settings-text settings)
+  (if (hash? settings)
+      (string-join (for/list ([k (in-list (sort (hash-keys settings) symbol<?))]
+                              #:unless (regexp-match? #rx"^RKTORCH_.*_DIR$" (symbol->string k)))
+                     (format "~a=~a" k (hash-ref settings k)))
+                   " ")
+      "-"))
+
 (define (e2e-section records)
   (define runs
     (table '("example" "variant" "commit" "execution" "settings" "unit" "median" "IQR"
              "steps/s" "runs" "load")
            (for/list ([r (in-list records)])
-             (define settings (ref r 'settings))
              (list (ref r 'case) (or (ref r 'variant) "-") (commit r) (execution r)
-                   (if (hash? settings)
-                       (string-join (for/list ([(k v) (in-hash settings)]) (format "~a=~a" k v))
-                                    " ")
-                       "-")
+                   (settings-text (ref r 'settings))
                    (ref r 'unit) (num (median r) 2) (num (iqr r) 2)
                    (num (ref r 'steps_per_s 'median) 2) (ref r 'stats 'n) (load-text r)))))
   (define ratios (ratio-rows records))
@@ -242,6 +246,15 @@
              (summary-record "b" "r2" "lab" '(10.0 10.0)))))
     (check-equal? (length (regexp-match* #rx"\\| stepper \\| b vs a \\| 0\\.500 \\|" md)) 2)
     (check-false (regexp-match? #rx"a vs a|b vs b|a vs b" md)))
+
+  (test-case "the settings cell leaves the dataset caches out, in key order"
+    (define md
+      (summary-markdown
+       (list (hash-set (summary-record "a" "r1" "lab" '(10.0 10.0))
+                       'settings (hasheq 'STEPS "300" 'RKTORCH_MNIST_DIR "/c/mnist"
+                                         'EPOCHS "3" 'OMP_NUM_THREADS "1")))))
+    (check-regexp-match #rx"\\| EPOCHS=3 OMP_NUM_THREADS=1 STEPS=300 \\|" md)
+    (check-false (regexp-match? #rx"RKTORCH_MNIST_DIR" md)))
 
   (test-case "e2e sections split by host"
     (define md

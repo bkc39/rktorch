@@ -123,7 +123,8 @@ so appended runs never merge. `e2e` sections are per host (name, CPU, OS,
 affinity) with the execution per row, so an A/B over `OMP_NUM_THREADS` or
 the device still yields its ratio. An `e2e` run also writes one `run` record
 per child: `steps`, `steps_per_epoch`, `epoch_s`, `epoch_gc_ms`, `step_ms`,
-`steps_per_s`, `steps_per_s_median`, `wall_s`, `exit_code`, `settings`. An
+`steps_per_s`, `steps_per_s_median`, `wall_s`, `exit_code`, `settings`
+(the summary shows them without the `RKTORCH_*_DIR` caches). An
 `e2e` record's `meta` comes from the child that ran it, so an A/B across
 checkouts records each one's commit, and the summary shows it per row.
 A child sees none of the caller's example variables (`EPOCHS`, `STEPS`,
@@ -133,6 +134,7 @@ give. A failed example writes an `error` record (`case`, `variant`,
 
 ## Baseline
 
-`baseline-2026-10-12.jsonl` and its summary `baseline-2026-10-12.md`, taken at
-`c2428f0` on the lab host (i9-9900K, RTX 3090 Ti): `micro`, `ops --device
-cuda` and the short `e2e`, each started once the 1-minute load was below 4.
+`baseline-2026-10-13.jsonl` and its summary `baseline-2026-10-13.md`, taken at
+`f8b9014` on the lab host (i9-9900K, RTX 3090 Ti, 8 ATen threads): `micro`,
+`ops --device cuda` and the short `e2e`, each started once the 1-minute load
+was below 4.
