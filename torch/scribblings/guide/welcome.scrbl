@@ -2,7 +2,7 @@
 @(require "../common.rkt"
           (for-label (except-in racket/base
                                 abs cos exp log sin sort sqrt max min length
-                                + - * /)
+                                + - * / < <= > >=)
                      torch
                      torch/nn))
 
@@ -56,7 +56,7 @@ collides: no prefix and no @racket[except-in] are needed.
 A handful of tensor operations share names with @racketmodname[racket/base]
 --- @racket[abs], @racket[cos], @racket[exp], @racket[log], @racket[sin],
 @racket[sqrt], @racket[max], @racket[min], @racket[sort], @racket[length],
-and the arithmetic operators. rktorch provides these as @emph{generic}
+and the arithmetic and ordering operators. rktorch provides these as @emph{generic}
 operations: a tensor argument goes to libtorch, and anything else falls
 through to the binding @racketmodname[racket/base] would have given you.
 
@@ -81,7 +81,7 @@ keeps @tt{torch.tensor([1,2,3]) + 10} at @tt{int64}. Cast with
 
 @margin-note{When you write Scribble documentation that mentions these
 names, the @racket[for-label] import needs
-@racket[(except-in racket/base abs cos exp log sin sort sqrt max min length + - * /)],
+@racket[(except-in racket/base abs cos exp log sin sort sqrt max min length + - * / < <= > >=)],
 so the links resolve to the tensor operations, followed by
 @racketmodname[torch] itself. Each chapter of this manual carries that line
 --- re-exporting it from a shared module tags every link to that module

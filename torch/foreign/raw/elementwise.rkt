@@ -1,9 +1,12 @@
 #lang racket/base
 
-(require (only-in "memory.rkt"
+(require (only-in ffi/unsafe _fun _symbol)
+         (only-in "memory.rkt"
                   define-binary/raw
                   define-scalar/raw
-                  define-unary/raw))
+                  define-unary/raw
+                  tensor-allocator)
+         (only-in "syntax.rkt" _Tensor _Tensor/null define-torch))
 
 (provide tr-add/raw
          tr-sub/raw
@@ -43,4 +46,8 @@
 (define-unary/raw tr-relu/raw tr_relu)
 (define-unary/raw tr-sigmoid/raw tr_sigmoid)
 (define-unary/raw tr-tanh/raw tr_tanh)
-(define-unary/raw tr-gelu/raw tr_gelu)
+
+(define-torch tr-gelu/raw
+  (_fun (t : _Tensor) (approximate : _symbol) -> _Tensor/null)
+  #:c-id tr_gelu
+  #:wrap tensor-allocator)
