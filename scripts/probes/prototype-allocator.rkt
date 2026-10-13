@@ -1,16 +1,9 @@
 #lang racket/base
 
-(require (for-syntax racket/base)
-         (only-in ffi/unsafe register-finalizer)
+(require (only-in ffi/unsafe register-finalizer)
          (only-in ffi/unsafe/alloc allocator deallocator)
-         (only-in ffi/unsafe/atomic
-                  end-atomic
-                  make-uninterruptible-lock
-                  start-atomic
-                  uninterruptible-lock-acquire
-                  uninterruptible-lock-release)
-         ;; whole-module require: only-in strips the phase-1 syntax classes
-         syntax/parse/define
+         (only-in ffi/unsafe/atomic make-uninterruptible-lock)
+         (only-in "common.rkt" cas-update! with-atomic with-uninterruptible-lock)
          "shim.rkt")
 
 (provide (struct-out prototype)
@@ -22,27 +15,8 @@
 
 (struct prototype (name wrap handle free! live-bytes finalizer-frees finalizer-calls))
 
-(define-syntax-parse-rule (with-atomic body:expr ...+)
-  (dynamic-wind start-atomic (lambda () body ...) end-atomic))
-
-(define-syntax-parse-rule (with-uninterruptible-lock lock:expr body:expr ...+)
-  (let ([held-lock lock])
-    (dynamic-wind
-     (lambda () (uninterruptible-lock-acquire held-lock))
-     (lambda () body ...)
-     (lambda () (uninterruptible-lock-release held-lock)))))
-
-(define (cas-add! b n)
-  (let retry ()
-    (define old (unbox b))
-    (unless (box-cas! b old (+ old n))
-      (retry))))
-
 (struct record (state nbytes phantom))
 
-;; A record goes live -> freed exactly once, whichever of the explicit free
-;; and the finalizer gets there first. box-cas! may fail spuriously, so a
-;; failure only counts as losing once the state is no longer live.
 (define (claim! r)
   (define state (record-state r))
   (let retry ()
@@ -87,9 +61,9 @@
        #t]
       [else #f]))
   (define ((finalizer-for r) t)
-    (cas-add! calls 1)
+    (cas-update! calls add1)
     (when (release! t (lambda () r))
-      (cas-add! frees 1)))
+      (cas-update! frees add1)))
   (define ((wrap op) . args)
     (define t (apply op args))
     (define r (make-record t))
@@ -118,21 +92,21 @@
   (define frees (box 0))
   (define calls (box 0))
   (define (release! r t)
-    (cas-add! live (- (record-nbytes r)))
+    (cas-update! live - (record-nbytes r))
     (set-phantom-bytes! (record-phantom r) 0)
     (shim-free t))
   (define (finalize h)
-    (cas-add! calls 1)
+    (cas-update! calls add1)
     (define r (held-record h))
     (when (claim! r)
-      (cas-add! frees 1)
+      (cas-update! frees add1)
       (release! r (held-handle h))))
   (define ((wrap op) . args)
     (define t (apply op args))
     (define h (held t (make-record t)))
     (parameterize-break #f
       (register-finalizer h finalize)
-      (cas-add! live (record-nbytes (held-record h))))
+      (cas-update! live + (record-nbytes (held-record h))))
     h)
   (define (free! h)
     (define r (held-record h))
@@ -152,10 +126,10 @@
         (begin0 (hash-ref records t #f)
                 (hash-remove! records t))))
     (when r
-      (cas-add! live (- (record-nbytes r)))
+      (cas-update! live - (record-nbytes r))
       (set-phantom-bytes! (record-phantom r) 0)))
   (define (finalize t)
-    (cas-add! runs 1)
+    (cas-update! runs add1)
     (unaccount! t)
     (shim-free t))
   (define free-handle ((deallocator #:merely-uninterruptible? #t) shim-free))
@@ -165,7 +139,7 @@
       (define t (apply wrapped args))
       (define r (make-record t))
       (with-uninterruptible-lock records-lock (hash-set! records t r))
-      (cas-add! live (record-nbytes r))
+      (cas-update! live + (record-nbytes r))
       t))
   (define (free! t)
     (unaccount! t)

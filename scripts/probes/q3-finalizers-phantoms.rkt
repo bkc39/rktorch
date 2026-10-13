@@ -8,28 +8,24 @@
 
 (define default-threads 8)
 
-(define (vector-cas-add1! v i)
-  (let retry ()
-    (define old (vector-ref v i))
-    (unless (vector-cas! v i old (add1 old))
-      (retry))))
-
 (define (collect-until done? #:limit-ms [limit-ms 60000])
-  (define start (current-inexact-monotonic-milliseconds))
-  (let loop ([rounds 1])
-    (collect-garbage 'major)
-    (sleep 0.02)
-    (define elapsed (- (current-inexact-monotonic-milliseconds) start))
-    (cond
-      [(done?) (values rounds elapsed)]
-      [(> elapsed limit-ms) (values rounds elapsed)]
-      [else (loop (add1 rounds))])))
+  (define deadline (+ (now-ms) limit-ms))
+  (define collecting
+    (measure-span
+     (lambda ()
+       (let loop ([rounds 1])
+         (collect-garbage 'major)
+         (sleep 0.02)
+         (cond
+           [(done?) rounds]
+           [(> (now-ms) deadline) rounds]
+           [else (loop (add1 rounds))])))))
+  (values (span-value collecting) (span-ms collecting)))
 
-;; A lost run reads 0, a doubled one 2. The process's first registration races
-;; from 8 threads, which ffi/unsafe/private/finalizer.rkt allows.
 (define (finalizer-round per-thread #:protect protect #:threads [threads default-threads])
   (define total (* threads per-thread))
-  (define runs (make-vector total 0))
+  (define runs (build-vector total (lambda (_) (box 0))))
+  (define (run-count id) (unbox (vector-ref runs id)))
   (define-values (ms _)
     (run-parallel threads
                   (lambda (t)
@@ -39,13 +35,14 @@
                        (lambda ()
                          (register-finalizer (make-vector 2 id)
                                              (lambda (_v)
-                                               (vector-cas-add1! runs id)))))))))
-  (define (ran) (for/sum ([n (in-vector runs)]) n))
-  (define-values (rounds drain-ms) (collect-until (lambda () (for/and ([n (in-vector runs)]) (positive? n)))))
-  (define never (for/sum ([n (in-vector runs)]) (if (zero? n) 1 0)))
-  (define twice (for/sum ([n (in-vector runs)]) (if (> n 1) 1 0)))
+                                               (cas-update! (vector-ref runs id) add1)))))))))
+  (define-values (rounds drain-ms)
+    (collect-until (lambda () (for/and ([id (in-range total)]) (positive? (run-count id))))))
+  (define final-counts (build-list total run-count))
+  (define never (for/sum ([n (in-list final-counts)]) (if (zero? n) 1 0)))
+  (define twice (for/sum ([n (in-list final-counts)]) (if (> n 1) 1 0)))
   (values (list total (fmt-ms ms) (fmt-rate (/ total (/ ms 1000.0)))
-                (ran) never twice rounds (fmt-ms drain-ms)
+                (apply + final-counts) never twice rounds (fmt-ms drain-ms)
                 (if (and (zero? never) (zero? twice)) "yes" "NO")
                 (load-average))
           never))
@@ -185,4 +182,4 @@
      (print-phantom-table)
      (newline)
      (print-eq-table)])
-  (printf "\nload average (1 min) at end: ~a\n" (load-average)))
+  (print-footer))

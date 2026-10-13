@@ -1,7 +1,6 @@
 #lang racket/base
 
 (require (for-syntax racket/base)
-         (only-in math/statistics median)
          (only-in racket/match match-define)
          ;; whole-module require: only-in strips the phase-1 syntax classes
          syntax/parse/define
@@ -14,34 +13,19 @@
 
 (define (in-call-while call measure)
   (define inside (make-semaphore 0))
-  (define entered-at (box #f))
-  (define returned-at (box #f))
-  (define failure (box #f))
-  (define worker
-    (thread (lambda ()
-              (at-set-num-threads 1)
-              (semaphore-post inside)
-              (with-handlers ([(lambda (_) #t) (lambda (e) (set-box! failure e))])
-                (set-box! entered-at (current-inexact-monotonic-milliseconds))
-                (call))
-              (set-box! returned-at (current-inexact-monotonic-milliseconds)))
-            #:pool 'own))
-  (semaphore-wait inside)
-  (sleep 0.1)
-  (define started-at (current-inexact-monotonic-milliseconds))
-  (define result (measure))
-  (define ended-at (current-inexact-monotonic-milliseconds))
-  (thread-wait worker)
-  (when (unbox failure)
-    (raise (unbox failure)))
-  (define in-flight (- (min (unbox returned-at) ended-at)
-                       (max (unbox entered-at) started-at)))
-  (cons result (max 0.0 (/ in-flight (max (- ended-at started-at) 1e-3)))))
-
-(define (timed thunk)
-  (define start (current-inexact-monotonic-milliseconds))
-  (thunk)
-  (- (current-inexact-monotonic-milliseconds) start))
+  (define-values (measured calls)
+    (call-with-workers 1
+                       (lambda (_i)
+                         (with-final-post inside (at-set-num-threads 1))
+                         (measure-span call))
+                       (lambda (_workers)
+                         (semaphore-wait inside)
+                         (sleep 0.1)
+                         (measure-span measure))))
+  (match-define (list in-call) calls)
+  (define in-flight (- (min (span-end in-call) (span-end measured))
+                       (max (span-start in-call) (span-start measured))))
+  (cons (span-value measured) (max 0.0 (/ in-flight (max (span-ms measured) 1e-3)))))
 
 (define sink (box #f))
 
@@ -70,29 +54,34 @@
         (cons (format "~a matmul, #:blocking? #t" matmul-n)
               (matmul-call shim-matmul/blocking))))
 
+(define (call-with-parked-worker thunk)
+  (define release (make-semaphore 0))
+  (define inside (make-semaphore 0))
+  (define-values (result _)
+    (call-with-workers 1
+                       (lambda (_i)
+                         (semaphore-post inside)
+                         (semaphore-wait release))
+                       (lambda (_workers)
+                         (semaphore-wait inside)
+                         (thunk))
+                       #:release (lambda () (semaphore-post release))))
+  result)
+
 (define-syntax-parse-rule (with-parked-worker body:expr ...+)
-  (let ([release (make-semaphore 0)]
-        [inside (make-semaphore 0)])
-    (define worker (thread (lambda () (semaphore-post inside) (semaphore-wait release))
-                           #:pool 'own))
-    (semaphore-wait inside)
-    (dynamic-wind void
-                  (lambda () body ...)
-                  (lambda ()
-                    (semaphore-post release)
-                    (thread-wait worker)))))
+  (call-with-parked-worker (lambda () body ...)))
 
 (define (measure-under call measure)
-  (define samples
-    (for/list ([_ (in-range repeats)])
-      (cond
-        [call (in-call-while call measure)]
-        [else (with-parked-worker (cons (measure) 0.0))])))
+  (define run
+    (cond
+      [call (lambda () (in-call-while call measure))]
+      [else (lambda () (with-parked-worker (cons (measure) 0.0)))]))
+  (define samples (repeat-runs repeats run))
   (define least-share (apply min (map cdr samples)))
   (cond
     [(and call (zero? least-share)) "call returned before the measurement"]
     [else (format "~a (~a%)"
-                  (fmt-ms (median < (map car samples)))
+                  (fmt-ms (median-of (map car samples)))
                   (fmt-ms (* 100 least-share)))]))
 
 (module+ main
@@ -119,4 +108,4 @@
            (measure-under call (lambda () (timed (lambda () (collect-garbage 'minor)))))
            (measure-under call longest-stall)
            (load-average))))
-  (printf "\nload average (1 min) at end: ~a\n" (load-average)))
+  (print-footer))

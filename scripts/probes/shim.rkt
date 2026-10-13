@@ -28,8 +28,6 @@
 
 (define last-error (get-ffi-obj "tr_last_error" shim (_fun -> _string)))
 
-;; tr_last_error is thread_local, so it is read in the same plain call's
-;; result handling, on the OS thread that failed.
 (define (checked who t)
   (or t (error who "~a" (last-error))))
 

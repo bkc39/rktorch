@@ -1,9 +1,9 @@
 #lang racket/base
 
-(require (only-in math/statistics median)
-         (only-in racket/format ~r)
+(require (only-in racket/format ~r)
          (only-in racket/match match-define)
          (only-in racket/string string-join)
+         (only-in threading ~>)
          "common.rkt"
          "prototype-allocator.rkt"
          "shim.rkt"
@@ -25,14 +25,11 @@
 (define seconds-per-cell 1.0)
 
 (define (loop-for-cell p o n)
-  (define deadline (+ (current-inexact-monotonic-milliseconds) (* 1000 seconds-per-cell)))
-  (let loop ([iterations 0])
-    (cond
-      [(> (current-inexact-monotonic-milliseconds) deadline) iterations]
-      [else (iteration! p o n) (loop (add1 iterations))])))
+  (loop-for-seconds seconds-per-cell (lambda () (iteration! p o n))))
 
 (define repeats 3)
 (define settle-round-limit 50)
+
 (define (settle-finalizers! p)
   (define calls (prototype-finalizer-calls p))
   (let loop ([rounds 1] [before (calls)] [quiet 0])
@@ -45,53 +42,50 @@
       [(= rounds settle-round-limit) #f]
       [else (loop (add1 rounds) now quiet*)])))
 
+(define (settle-or-stop! p stop when-settling)
+  (unless (settle-finalizers! p)
+    (stop (format "~a: finalizers did not settle in ~a major collections ~a"
+                  (prototype-name p) settle-round-limit when-settling))))
+
 (struct cell (workers rate gc-share frees pending settle-ms))
 
-(struct unsettled (reason))
-
-(define (settle-or-stop! p when-settling)
-  (unless (settle-finalizers! p)
-    (raise (unsettled (format "~a: finalizers did not settle in ~a major collections ~a"
-                              (prototype-name p) settle-round-limit when-settling)))))
-
-(define (measure-cell p o n workers mode)
-  (settle-or-stop! p (format "before n = ~a, ~a workers" n workers))
+(define (measure-cell p o n workers mode stop)
+  (settle-or-stop! p stop (format "before n = ~a, ~a workers" n workers))
   (define frees (prototype-finalizer-frees p))
-  (define calls (prototype-finalizer-calls p))
-  (define-values (ms iterations gc-ms finalizer-frees)
+  (define window
     (cond
       [(zero? workers)
        (at-set-num-threads 1)
-       (define frees-start (frees))
-       (define gc-start (current-gc-milliseconds))
-       (define start (current-inexact-monotonic-milliseconds))
-       (define done (loop-for-cell p o n))
-       (define ms (- (current-inexact-monotonic-milliseconds) start))
-       (define gc-ms (- (current-gc-milliseconds) gc-start))
-       (values ms (list done) gc-ms (- (frees) frees-start))]
+       (define alone (measure-span (lambda () (loop-for-cell p o n)) #:counter frees))
+       (struct-copy span alone [value (list (span-value alone))])]
       [else
        (run-parallel/gc workers
                         (lambda (_i) (loop-for-cell p o n))
                         #:setup (lambda () (at-set-num-threads 1))
                         #:counter frees
                         #:main mode)]))
-  (define calls-at-stop (calls))
-  (define settle-start (current-inexact-monotonic-milliseconds))
-  (settle-or-stop! p (format "after n = ~a, ~a workers" n workers))
+  (define settling
+    (measure-span (lambda ()
+                    (settle-or-stop! p stop (format "after n = ~a, ~a workers" n workers)))
+                  #:counter (prototype-finalizer-calls p)))
   (cell workers
-        (/ (* tensors-per-iteration (apply + iterations)) (/ ms 1000.0))
-        (/ gc-ms ms)
-        finalizer-frees
-        (- (calls) calls-at-stop)
-        (- (current-inexact-monotonic-milliseconds) settle-start)))
+        (/ (* tensors-per-iteration (apply + (span-value window))) (/ (span-ms window) 1000.0))
+        (/ (span-gc-ms window) (span-ms window))
+        (span-counted window)
+        (span-counted settling)
+        (span-ms settling)))
 
-(define (median-cell samples)
-  (cell (cell-workers (car samples))
-        (median < (map cell-rate samples))
-        (median < (map cell-gc-share samples))
-        (median < (map cell-frees samples))
-        (median < (map cell-pending samples))
-        (median < (map cell-settle-ms samples))))
+(define (median-cell workers samples)
+  (define (median-by field) (median-of (map field samples)))
+  (cell workers
+        (median-by cell-rate)
+        (median-by cell-gc-share)
+        (median-by cell-frees)
+        (median-by cell-pending)
+        (median-by cell-settle-ms)))
+
+(define (measured p o n workers mode stop)
+  (median-cell workers (repeat-runs repeats (lambda () (measure-cell p o n workers mode stop)))))
 
 (define sizes '(8 64 256))
 (define worker-counts '(1 2 4 8))
@@ -100,10 +94,30 @@
   (findf (lambda (c) (and c (= (cell-workers c) workers))) cells))
 
 (define (by-column cells show)
-  (string-join (map (lambda (c) (if c (show c) "-")) cells) " / "))
+  (~> cells
+      (map (lambda (c) (if c (show c) "-")) _)
+      (string-join " / ")))
 
-(define (measured p o n workers mode)
-  (median-cell (for/list ([_ (in-range repeats)]) (measure-cell p o n workers mode))))
+(define (allocator-rows p o n stop)
+  (iteration! p o n)
+  (define alone (measured p o n 0 main-blocked stop))
+  (for ([mode (in-list main-modes)]
+        [i (in-naturals)])
+    (define cells
+      (cons (and (zero? i) alone)
+            (for/list ([w (in-list worker-counts)]) (measured p o n w mode stop))))
+    (define one (cell-for cells 1))
+    (define eight (cell-for cells 8))
+    (print-table-row
+     (append (list (prototype-name p) n (main-mode-label mode))
+             (map (lambda (c) (if c (fmt-rate (cell-rate c)) "-")) cells)
+             (list (~r (/ (cell-rate eight) (cell-rate one)) #:precision 2)
+                   (~r (cell-gc-share eight) #:precision 2)
+                   (by-column cells (lambda (c) (fmt-rate (cell-frees c))))
+                   (by-column cells (lambda (c) (fmt-rate (cell-pending c))))
+                   (by-column cells (lambda (c) (fmt-ms (cell-settle-ms c))))
+                   ((prototype-live-bytes p))
+                   (load-average))))))
 
 (module+ main
   (at-set-num-threads 1)
@@ -119,31 +133,14 @@
              "allocator finalizer calls still pending at stop, by column"
              "ms to settle after stop, by column"
              "ledger bytes after" "load")))
-  (with-handlers ([unsettled?
-                   (lambda (e)
-                     (printf "\nstopped: ~a, so the cell would time another row's finalizers\n"
-                             (unsettled-reason e)))])
-    (for ([make (in-list (variant-makers #:bare? #t))])
-      (match-define (variant p o) (make))
-      (for ([n (in-list sizes)])
-        (iteration! p o n)
-        (define alone (measured p o n 0 main-busy))
-        (for ([mode (in-list main-modes)]
-              [first? (in-sequences (list #t) (in-cycle (list #f)))])
-          (define cells
-            (cons (and first? alone)
-                  (for/list ([w (in-list worker-counts)]) (measured p o n w mode))))
-          (define one (cell-for cells 1))
-          (define eight (cell-for cells 8))
-          (print-table-row
-           (append (list (prototype-name p) n (main-mode-label mode))
-                   (map (lambda (c) (if c (fmt-rate (cell-rate c)) "-")) cells)
-                   (list (~r (/ (cell-rate eight) (cell-rate one)) #:precision 2)
-                         (~r (cell-gc-share eight) #:precision 2)
-                         (by-column cells (lambda (c) (fmt-rate (cell-frees c))))
-                         (by-column cells (lambda (c) (fmt-rate (cell-pending c))))
-                         (by-column cells (lambda (c) (fmt-ms (cell-settle-ms c))))
-                         ((prototype-live-bytes p))
-                         (load-average))))))
-      (settle-or-stop! p "after its last row, before the next allocator")))
-  (printf "\nload average (1 min) at end: ~a\n" (load-average)))
+  (define stopped
+    (let/ec stop
+      (for ([make (in-list (variant-makers #:bare? #t))])
+        (match-define (variant p o) (make))
+        (for ([n (in-list sizes)])
+          (allocator-rows p o n stop))
+        (settle-or-stop! p stop "after its last row, before the next allocator"))
+      #f))
+  (when stopped
+    (printf "\nstopped: ~a, so the cell would time another row's finalizers\n" stopped))
+  (print-footer))

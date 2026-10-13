@@ -3,13 +3,8 @@
 (require (only-in ffi/unsafe/atomic
                   call-as-atomic
                   call-as-uninterruptible
-                  end-atomic
-                  end-uninterruptible
-                  make-uninterruptible-lock
-                  start-atomic
-                  start-uninterruptible
-                  uninterruptible-lock-acquire
-                  uninterruptible-lock-release)
+                  make-uninterruptible-lock)
+         (only-in racket/match match-define)
          "common.rkt")
 
 (define runs 50)
@@ -18,23 +13,14 @@
 
 (define regions
   (list
-   (cons "plain call" (lambda (f) (f)))
-   (cons "call-as-atomic" call-as-atomic)
-   (cons "start-atomic / end-atomic"
-         (lambda (f)
-           (start-atomic)
-           (begin0 (f) (end-atomic))))
-   (cons "call-as-uninterruptible" call-as-uninterruptible)
-   (cons "start-uninterruptible / end-uninterruptible"
-         (lambda (f)
-           (start-uninterruptible)
-           (begin0 (f) (end-uninterruptible))))
-   (cons "uninterruptible-lock held"
-         (lambda (f)
-           (uninterruptible-lock-acquire lock)
-           (begin0 (f) (uninterruptible-lock-release lock))))
-   (cons "parameterize-break #f"
-         (lambda (f) (parameterize-break #f (f))))))
+   (list "plain call" (lambda (f) (f)))
+   (list "call-as-atomic" call-as-atomic)
+   (list "with-atomic (start-atomic / end-atomic)" (lambda (f) (with-atomic (f))))
+   (list "call-as-uninterruptible" call-as-uninterruptible)
+   (list "with-uninterruptible (start-uninterruptible / end-uninterruptible)"
+         (lambda (f) (with-uninterruptible (f))))
+   (list "uninterruptible-lock held" (lambda (f) (with-uninterruptible-lock lock (f))))
+   (list "parameterize-break #f" (lambda (f) (parameterize-break #f (f))))))
 
 (define (observe enter)
   (define before (pthread-self))
@@ -47,16 +33,16 @@
             ([_ (in-range runs)])
     (define-values (_ms results)
       (run-parallel 1 (lambda (_i) (observe enter)) #:pool pool))
-    (define-values (before inside after) (apply values (car results)))
+    (match-define (list (list before inside after)) results)
     (values (+ inside-main (if (= inside main-os-thread) 1 0))
             (+ inside-own (if (= inside before) 1 0))
             (+ returned (if (= before after) 1 0)))))
 
 (define (region-rows label pool)
   (for/list ([region (in-list regions)])
-    (define-values (inside-main inside-own returned)
-      (tally (cdr region) #:pool pool))
-    (list label (car region) runs inside-main inside-own returned)))
+    (match-define (list name enter) region)
+    (define-values (inside-main inside-own returned) (tally enter #:pool pool))
+    (list label name runs inside-main inside-own returned)))
 
 (define (migrations pool threads calls)
   (define-values (_ms per-thread)
@@ -85,4 +71,4 @@
    (list (list "'own" 4 calls (migrations 'own 4 calls))
          (list "(make-parallel-thread-pool 2)" 4 calls
                (migrations (make-parallel-thread-pool 2) 4 calls))))
-  (printf "load average (1 min) at end: ~a\n" (load-average)))
+  (print-footer))

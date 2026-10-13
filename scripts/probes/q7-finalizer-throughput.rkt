@@ -2,6 +2,7 @@
 
 (require (only-in racket/format ~r)
          (only-in racket/match match-define)
+         (only-in threading ~>)
          "common.rkt"
          "prototype-allocator.rkt"
          "shim.rkt"
@@ -16,26 +17,26 @@
 (define modes (list main-blocked (main-polling 10) (main-polling 50) main-busy))
 
 (define (churn! randn live capped)
-  (define deadline (+ (current-inexact-monotonic-milliseconds) (* 1000 churn-seconds)))
-  (let loop ([made 0])
-    (cond
-      [(> (current-inexact-monotonic-milliseconds) deadline) made]
-      [(and (zero? (modulo made cap-check-every)) (> (live) ledger-cap))
-       (set-box! capped #t)
-       made]
-      [else (randn n) (loop (add1 made))])))
+  (define (over-cap? made)
+    (and (zero? (modulo made cap-check-every))
+         (> (live) ledger-cap)
+         (box-cas! capped #f #t)))
+  (loop-for-seconds churn-seconds (lambda () (randn n)) #:stop? over-cap?))
 
 (define (drain! p)
-  (define start (current-inexact-monotonic-milliseconds))
-  (let loop ([rounds 0])
-    (define settled? (and (zero? ((prototype-live-bytes p))) (collect-past-canary!)))
-    (cond
-      [(or settled? (= rounds drain-round-limit))
-       (values rounds (- (current-inexact-monotonic-milliseconds) start) settled?)]
-      [else
-       (collect-garbage 'major)
-       (sleep 0.01)
-       (loop (add1 rounds))])))
+  (define draining
+    (measure-span
+     (lambda ()
+       (let loop ([rounds 0])
+         (define settled? (and (zero? ((prototype-live-bytes p))) (collect-past-canary!)))
+         (cond
+           [(or settled? (= rounds drain-round-limit)) (cons rounds settled?)]
+           [else
+            (collect-garbage 'major)
+            (sleep 0.01)
+            (loop (add1 rounds))])))))
+  (match-define (cons rounds settled?) (span-value draining))
+  (values rounds (span-ms draining) settled?))
 
 (define (mib bytes)
   (~r (/ bytes 1048576.0) #:precision 1))
@@ -45,7 +46,7 @@
   (define live (prototype-live-bytes p))
   (define peak (box #f))
   (define capped (box #f))
-  (define-values (ms made gc-ms frees)
+  (define churned
     (run-parallel/gc workers
                      (lambda (_i) (churn! randn live capped))
                      #:setup (lambda () (at-set-num-threads 1))
@@ -53,8 +54,10 @@
                      #:main mode
                      #:on-wake (lambda () (set-box! peak (max (or (unbox peak) 0) (live))))))
   (define lag (live))
+  (define ms (span-ms churned))
   (define interval (/ ms 1000.0))
-  (define total-made (apply + made))
+  (define total-made (apply + (span-value churned)))
+  (define frees (span-counted churned))
   (define-values (rounds drain-ms settled?) (drain! p))
   (values
    (list (prototype-name p)
@@ -63,8 +66,8 @@
          (fmt-rate (/ total-made interval))
          (fmt-rate (/ frees interval))
          (~r (/ frees (max total-made 1)) #:precision 2)
-         (~r (/ gc-ms ms) #:precision 2)
-         (if (unbox peak) (mib (max (unbox peak) lag)) "not sampled")
+         (~> (span-gc-ms churned) (/ ms) (~r #:precision 2))
+         (if (unbox peak) (~> (unbox peak) (max lag) mib) "not sampled")
          (if (unbox capped) (format "~a (cap)" (mib lag)) (mib lag))
          rounds
          (fmt-ms drain-ms)
@@ -73,9 +76,7 @@
 
 (module+ main
   (at-set-num-threads 1)
-  ;; Registering first from one thread starts exactly one finalizer thread,
-  ;; so the drain's canary runs after every earlier callback has returned.
-  (void (collect-past-canary!))
+  (start-finalizer-thread!)
   (print-banner
    (format "Q7: finalizer throughput, ~a x ~a float32 randn made and dropped for ~a s or until the ledger passes ~a MiB; finalizers run only when the main thread's scheduler wakes"
            n n churn-seconds (mib ledger-cap))
@@ -91,12 +92,13 @@
               [mode (in-list modes)])
       (match-define (variant p o) (make))
       (define-values (row drained?) (churn-row p (ops-randn o) workers mode))
-      (print-table-row
-       (append row (list (if drained? "yes" "**NO: sweep stopped**") (load-average))))
+      (~> (list (if drained? "yes" "**NO: sweep stopped**") (load-average))
+          (append row _)
+          print-table-row)
       (and (not drained?)
            (format "~a with ~a workers, main ~a" (prototype-name p) workers (main-mode-label mode)))))
   (when undrained
     (printf "\nstopped: ~a did not drain in ~a major collections, ~a\n"
             undrained drain-round-limit
             "and its pending finalizers would run during every later row"))
-  (printf "\nload average (1 min) at end: ~a\n" (load-average)))
+  (print-footer))
