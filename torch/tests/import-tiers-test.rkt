@@ -169,6 +169,8 @@
   (define shadowing-modules '(torch/foreign torch/main torch/operators))
 
   (test-case "L4: every other public module requires beside racket"
+    (check-true (subset? (seteq 'torch/generated 'torch/nn 'torch/safe)
+                         (list->seteq public-modules)))
     (for ([module (in-list public-modules)]
           #:unless (memq module shadowing-modules))
       (check-true (composes? 'racket 'threading module)
