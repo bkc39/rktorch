@@ -2,7 +2,7 @@
 
 (require (only-in racket/contract/base
                   -> ->* <=/c >=/c and/c contract-out)
-         (only-in racket/match match match-define)
+         (only-in racket/match == match match-define)
          (only-in "../foreign.rkt"
                   device-type exn:fail:rktorch:oom? tensor-device tensor-dtype
                   tensor-shape tensor? with-no-grad zeros)
@@ -49,6 +49,8 @@
 
 ;; packed weights are views of one storage, so compare the storage address too
 (define flattened (make-weak-hasheq))
+
+(struct claim (moves signature) #:transparent)
 
 (define refused (make-weak-hasheq))
 
@@ -136,7 +138,9 @@
                     (storage-signature weights)
                     (not (= seen (unbox moves)))))
   (cond
-    [record (hash-set! flattened key record)]
+    [record
+     ((packing-hook) 'publish)
+     (hash-set! flattened key (claim seen record))]
     [else
      (hash-remove! flattened key)
      (hash-remove! refused key)]))
@@ -145,7 +149,7 @@
   (define seen (unbox moves))
   (define now (storage-signature weights))
   (cond
-    [(equal? now (hash-ref flattened (car weights) #f)) (void)]
+    [(equal? (claim seen now) (hash-ref flattened (car weights) #f)) (void)]
     [else
      ((packing-hook) 'stale)
      (record-packing! spec weights now moves seen)]))
@@ -250,12 +254,15 @@
   (with-mode (run spec entries gru-input x state mode)))
 
 (module+ private
-  (provide cudnn-refusal? flattened-signature flatten-refused? move-count
-           packing-hook packing-lock packing-record record-flattened!
-           storage-signature)
+  (provide count-move! cudnn-refusal? flattened-signature flatten-refused?
+           move-count packing-hook packing-lock packing-record
+           record-flattened! storage-signature)
   (define (move-count weight) (unbox (guard-moves (guard-of weight))))
   (define (packing-lock weight) (guard-lock (guard-of weight)))
-  (define (flattened-signature weight) (hash-ref flattened weight #f))
+  (define (flattened-signature weight)
+    (match (hash-ref flattened weight #f)
+      [(claim (== (move-count weight)) signature) signature]
+      [_ #f]))
   (define (record-flattened! weight signature)
-    (hash-set! flattened weight signature))
+    (hash-set! flattened weight (claim (move-count weight) signature)))
   (define (flatten-refused? weight) (hash-ref refused weight #f)))

@@ -7,8 +7,8 @@
            "../main.rkt"
            "../nn.rkt"
            (only-in (submod "../nn/recurrent.rkt" private)
-                    flatten-refused? flattened-signature packing-hook
-                    packing-record storage-signature))
+                    count-move! flatten-refused? flattened-signature
+                    packing-hook packing-record storage-signature))
 
   (define device (if (cuda-available?) 'cuda 'cpu))
 
@@ -88,6 +88,21 @@
       (forward lstm (randn 4 2 8)))
     (check-false (flattened-signature (car weights))
                  "the addresses read before the move were recorded"))
+
+  (test-case "a round trip completed while a check publishes makes the next check repack"
+    (define lstm (racing-layer))
+    (define weights (parameters lstm))
+    (define x (randn 4 2 8 #:device device))
+    (parameterize ([packing-hook
+                    (match-lambda
+                      ['publish (count-move! weights)]
+                      [_ (void)])])
+      (forward lstm x))
+    (check-equal? (count-decisions (lambda () (forward lstm x)))
+                  (list 1 (if (eq? device 'cuda) 1 0))
+                  "a claim published across a move was accepted")
+    (check-equal? (flattened-signature (car weights))
+                  (storage-signature weights)))
 
   (define (forward-together lstm x pool)
     (define failures (box '()))
