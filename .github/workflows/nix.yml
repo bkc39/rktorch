@@ -55,6 +55,7 @@ jobs:
       # emitted-but-uncommitted files also fail.
       - name: Regenerate and diff
         run: |
+          nix develop .#ci --command racket scripts/racket-names.rkt
           nix run .#codegen
           if [ -n "$(git status --porcelain)" ]; then
             echo "::error::Generated output is stale. Run: nix run .#codegen and commit the result."

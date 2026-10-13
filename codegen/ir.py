@@ -84,8 +84,6 @@ class Skip:
     shard: str
 
 
-# The names racket and threading export (scripts/racket-names.rkt); a
-# generated op named like one gains -tensor, and _HAND_SHIMMED ones skip.
 RACKET_NAMES = frozenset(
     (Path(__file__).resolve().parent / "racket-names.txt")
     .read_text().split())
@@ -200,7 +198,7 @@ def classify(f: NativeFunction, shard: str) -> Op | Skip:
     if func.name.name.base in _HAND_SHIMMED:
         return skip(f"name collides with a shadow-dispatched binding "
                     f"({rkt_name}); promote by hand with the dispatch shim")
-    if func.name.name.base.lstrip("_").replace("_", "-") in RACKET_NAMES:
+    if {rkt_name, rkt_name.removesuffix("!")} & RACKET_NAMES:
         rkt_name = (f"{rkt_name[:-1]}-tensor!" if rkt_name.endswith("!")
                     else f"{rkt_name}-tensor")
 
