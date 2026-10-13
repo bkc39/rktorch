@@ -33,8 +33,8 @@
                                 select-int
                                 sin-tensor
                                 slice-tensor
-                                take
                                 take-along-dim
+                                take-tensor
                                 where-scalar
                                 where-scalarother
                                 where-scalarself
@@ -193,7 +193,7 @@
           (g:index-select
            flat 0 (wrap-negative-positions idx-flat flat 0)))
         (apply reshape flat-out (tensor-shape idx))]
-       [else (g:take v idx)])]))
+       [else (g:take-tensor v idx)])]))
 
 (define/contract-out (gather t dim index) ;; noqa
   (->i ([t tensor?]

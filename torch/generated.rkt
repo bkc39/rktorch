@@ -97,8 +97,8 @@
          slice-tensor
          sort-tensor
          sum-dim-intlist
-         take
          take-along-dim
+         take-tensor
          topk
          tril
          triu
@@ -344,11 +344,11 @@
 (define-generated-op sum-dim-intlist tr_gen_sum_dim_intlist
   ([self tensor] [dim optional-int-array] [keepdim bool] [dtype optional-dtype]))
 
-(define-generated-op take tr_gen_take
-  ([self tensor] [index tensor]))
-
 (define-generated-op take-along-dim tr_gen_take_along_dim
   ([self tensor] [indices tensor] [dim optional-int64]))
+
+(define-generated-op take-tensor tr_gen_take
+  ([self tensor] [index tensor]))
 
 (define-generated-op topk tr_gen_topk #:returns 2
   ([self tensor] [k int64] [dim int64] [largest bool] [sorted bool]))

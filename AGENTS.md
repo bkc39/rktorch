@@ -249,7 +249,14 @@ anything else defers to the original — so `(require torch)` never breaks
 numeric code. New ops that collide must follow the same dispatch pattern
 (check racket/base first — `tanh` was missed initially and broke numeric
 callers), and docs require `torch/scribblings/labels` for their `for-label`
-bindings of `racket`, `torch` and `torch/nn`.
+bindings of `racket`, `torch` and `torch/nn`. `torch/safe` is `torch` minus
+every name `racket` exports and `torch/operators` is the rest, both computed
+with `subtract-in` (laws in `torch/tests/import-tiers-test.rkt`): a new
+colliding op joins `torch/operators` by itself and needs an L6 row. Every
+other public module stays disjoint from `racket` (L4); codegen renames a
+generated op named like a `racket` or `threading` export to `<name>-tensor`
+from `codegen/racket-names.txt`, which `racket scripts/racket-names.rkt`
+rewrites.
 Dispatching named ops carry dependent (`->i`) contracts so the wrong shape
 gets contract blame, not a runtime error; the `+ - * / < <= > >= @` operators are
 provided as plain renames (no contract overhead on the numeric fast path),
