@@ -161,7 +161,12 @@
           'gru-input '((tensor 5 2 3) (tensor 1 2 4)
                        (tensors (12 3) (12 4) (12) (12))
                        (bool #t) (int64 1) (double 0.0) (bool #f) (bool #f)
-                       (bool #f))))
+                       (bool #f))
+          'scaled-dot-product-attention '((tensor 2 3 4) (tensor 2 5 4)
+                                          (tensor 2 5 6) (optional-tensor #f)
+                                          (double 0.0) (bool #f)
+                                          (kwarg "scale" none)
+                                          (kwarg "enable_gqa" #f))))
 
   ;; Tensor specs draw seeded randns left to right — both sides consume the
   ;; same RNG stream, so spec order and draw counts must match exactly.
@@ -495,4 +500,31 @@
         (tensors (12 3) (12 4) (12 3) (12 4)
                  (12 8) (12 4) (12 8) (12 4))
         (bool #f) (int64 2) (double 0.0) (bool #f) (bool #t) (bool #t))
-      "[2-layer-bidirectional-batch-first-no-bias]")]))
+      "[2-layer-bidirectional-batch-first-no-bias]")
+     (check-generated-parity
+      (assq 'scaled-dot-product-attention manifest)
+      '((tensor 2 3 4) (tensor 2 5 4) (tensor 2 5 6) (optional-tensor #f)
+        (double 0.0) (bool #f) (kwarg "scale" 0.5) (kwarg "enable_gqa" #f))
+      "[scale=0.5]")
+     (check-generated-parity
+      (assq 'scaled-dot-product-attention manifest)
+      '((tensor 2 3 4) (tensor 2 5 4) (tensor 2 5 6) (optional-tensor 3 5)
+        (double 0.0) (bool #f) (kwarg "scale" none) (kwarg "enable_gqa" #f))
+      "[float-mask]")
+     (check-generated-parity
+      (assq 'scaled-dot-product-attention manifest)
+      '((tensor 2 3 4) (tensor 2 5 4) (tensor 2 5 6)
+        (bool-tensor (1 0 1 1 0)) (double 0.0) (bool #f) (kwarg "scale" none)
+        (kwarg "enable_gqa" #f))
+      "[bool-mask]")
+     (check-generated-parity
+      (assq 'scaled-dot-product-attention manifest)
+      '((tensor 2 5 4) (tensor 2 5 4) (tensor 2 5 6) (optional-tensor #f)
+        (double 0.0) (bool #t) (kwarg "scale" none) (kwarg "enable_gqa" #f))
+      "[causal]")
+     (check-generated-parity
+      (assq 'scaled-dot-product-attention manifest)
+      '((tensor 2 4 3 8) (tensor 2 2 5 8) (tensor 2 2 5 8)
+        (optional-tensor #f) (double 0.0) (bool #f) (kwarg "scale" none)
+        (kwarg "enable_gqa" #t))
+      "[grouped-query]")]))

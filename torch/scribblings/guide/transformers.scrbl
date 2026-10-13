@@ -1,0 +1,494 @@
+#lang scribble/manual
+@(require "../common.rkt"
+          (for-label (except-in racket/base
+                                abs cos exp log sin sort sqrt max min length
+                                + - * / < <= > >=)
+                     torch
+                     torch/nn))
+
+@title[#:tag "guide-transformers"]{Attention and transformers}
+
+A transformer reads a sequence by letting every position look at every
+other and take a weighted average of what it finds. That step is
+@deftech{attention}, and the rest of the architecture is arranged around
+it. This chapter computes it by hand on tensors small enough to read,
+hands the same work to the library's fused call, and then builds the rest
+of a transformer around it: heads and masks, blocks and stacks, and the
+positions that tell a model where each token sits. The last two sections
+point into the worked examples that train the two arrangements, a
+language model and a speech recognizer.
+
+@section[#:tag "transformers-by-hand"]{Attention by hand}
+
+Attention takes three tensors. Each row of the @emph{query} asks a
+question, each row of the @emph{key} is what a position offers to be
+matched against, and each row of the @emph{value} is what that position
+hands back when it matches. Three queries, four keys and four values, all
+two wide:
+
+@torch-examples[
+(require torch)
+(define query (tensor '((1.0 0.0) (0.0 1.0) (1.0 1.0))))
+(define key (tensor '((1.0 0.0) (0.0 1.0) (-1.0 0.0) (0.0 -1.0))))
+(define value (tensor '((1.0 2.0) (3.0 4.0) (5.0 6.0) (7.0 8.0))))
+]
+
+A query matches a key by their dot product, so one matrix product scores
+every query against every key, one row per query and one column per key:
+
+@torch-examples[
+(define scores (|@| query (T key)))
+scores
+]
+
+The scores are divided by the square root of the width, two here, so that
+wider keys do not make the softmax that follows sharper. The softmax along
+each row turns a query's scores into weights that sum to one:
+
+@torch-examples[
+(define weights (softmax (/ scores (sqrt 2)) -1))
+weights
+]
+
+The first query matched the first key best and gives it the largest
+weight. Each query's answer is its weights applied to the values:
+
+@torch-examples[
+(define by-hand (|@| weights value))
+by-hand
+]
+
+@racket[scaled-dot-product-attention] is those four steps as one call,
+which on a GPU runs as a single fused kernel:
+
+@torch-examples[
+(define fused (scaled-dot-product-attention query key value))
+fused
+(~> (- fused by-hand) abs max item (< 1e-6))
+]
+
+@section[#:tag "transformers-causal"]{Hiding the future}
+
+When a sequence attends to itself the queries, keys and values all come
+from the same rows. A model that predicts the next token must not read
+it, so each position may attend only to itself and the positions before
+it. By hand, that is a mask over the scores: fill every later position
+with @racket[-inf.0], which the softmax turns into a weight of zero.
+
+@torch-examples[
+(define x (tensor '((1.0 0.0) (0.0 1.0) (1.0 1.0))))
+(define later (~> (ones 3 3) tril (eq 0)))
+later
+(define causal-weights
+  (~> (|@| x (T x)) (/ (sqrt 2)) (masked-fill later -inf.0) (softmax -1)))
+causal-weights
+]
+
+The first position sees only itself, so its whole weight sits there. The
+fused call takes the same restriction as @racket[#:causal? #t]:
+
+@torch-examples[
+(define causal (scaled-dot-product-attention x x x #:causal? #t))
+causal
+(~> (- causal (|@| causal-weights x)) abs max item (< 1e-6))
+]
+
+A boolean @racket[#:mask] states the restriction position by position. Its
+sense is the opposite of @racket[later] above: @racket[#t] marks a key the
+query may attend to, so the causal mask is the lower triangle itself.
+
+@torch-examples[
+(define attend (tril (ones 3 3 #:dtype 'bool)))
+(~> (- causal (scaled-dot-product-attention x x x #:mask attend))
+    abs max item (< 1e-6))
+]
+
+The two senses are easy to confuse, and PyTorch itself uses both;
+@secref["attention-function"] in the reference lays out which form takes
+which, along with float masks that add to the scores. Everything else in
+a transformer is arrangement around this one call, starting with several
+attentions side by side.
+
+@section[#:tag "transformers-heads"]{Heads and masks}
+
+One attention compares a query with a key along their whole width at once,
+so it can weigh the positions in only one way. Multi-head attention
+projects the queries, keys and values, cuts each projection into
+@deftech{heads}, narrower slices that attend independently, and joins the
+heads' answers back together. The layer is @racket[MultiheadAttention].
+Here it is on a toy batch, two sequences of three tokens each four wide,
+split into two heads two wide:
+
+@torch-examples[
+(require torch/nn)
+(manual-seed! 0)
+(define mha (MultiheadAttention 4 #:heads 2 #:batch-first? #t))
+(map car (named-children mha))
+(define tokens (randn 2 3 4))
+(shape (mha tokens tokens tokens))
+]
+
+@racket[#:batch-first? #t] takes the batch as the first axis, as the toy
+batch has it. Without it, the layer expects the sequence first, as
+PyTorch's does.
+
+The four children are @racket[Linear] layers. The first three project the
+input, and the heads are nothing more than a reshape of those projections:
+the four columns become two heads of two, and moving the head axis in
+front of the tokens makes each head a batch of its own for
+@racket[scaled-dot-product-attention]. The last child projects the joined
+heads back. By hand:
+
+@torch-examples[
+(define (heads t)
+  (transpose (reshape t 2 3 2 2) 1 2))
+(define per-head
+  (scaled-dot-product-attention (heads ((child-ref mha "query") tokens))
+                                (heads ((child-ref mha "key") tokens))
+                                (heads ((child-ref mha "value") tokens))))
+(shape per-head)
+(define joined (reshape (transpose per-head 1 2) 2 3 4))
+(~> (- ((child-ref mha "out") joined) (mha tokens tokens tokens))
+    abs max item (< 1e-6))
+]
+
+Sequences in a batch rarely have the same length. The shorter ones are
+padded at the end, and a @deftech{padding mask} keeps every query from
+attending to the padding. Say the second sequence is only two tokens
+long. Its padding mask is @racket[#t] at the third position, and asking for
+the weights shows that no query looks there:
+
+@torch-examples[
+(define padding (eq (tensor '((0 0 0) (0 0 1))) 1))
+(define-values (out weights)
+  (mha tokens tokens tokens #:key-padding-mask padding #:need-weights? #t))
+weights
+]
+
+Mind the sense: this mask is @racket[#t] where a key is @emph{hidden}, the
+opposite of the boolean mask @racket[scaled-dot-product-attention] took
+above. The layer mirrors PyTorch's @tt{nn.MultiheadAttention}, which
+reads its masks that way, and turns them around itself before the fused
+call. The full table is in @secref["attention-multihead-apply"].
+
+The weights come back averaged over the heads, one row per query, each
+summing to one. @racket[#:average-attn-weights? #f] keeps the heads apart,
+and leaving out @racket[#:need-weights?] skips the weights altogether and
+lets the fused kernel do the work, which is how a model runs the layer:
+ask for the weights only to look at them.
+
+@racket[#:causal? #t] hides the future, as it did for the single attention
+above, and it combines with the padding mask:
+
+@torch-examples[
+(define-values (causal-out causal-weights)
+  (mha tokens tokens tokens #:causal? #t #:key-padding-mask padding
+       #:need-weights? #t))
+causal-weights
+]
+
+Every query so far came from the same sequence as the keys:
+@deftech{self-attention}, one tensor passed three times. In
+@deftech{cross-attention} the queries come from one sequence and the keys
+and values from another, as when a translation decoder reads the
+encoded source sentence. The two can differ in length, and in width too
+when @racket[#:key-dim] and @racket[#:value-dim] say so. Three decoder
+positions, four wide, reading five encoded ones six wide:
+
+@torch-examples[
+(define reader (MultiheadAttention 4 #:heads 2 #:batch-first? #t
+                                   #:key-dim 6 #:value-dim 6))
+(define encoded (randn 2 5 6))
+(define-values (attended attended-weights)
+  (reader (randn 2 3 4) encoded encoded #:need-weights? #t))
+(shape attended)
+(shape attended-weights)
+]
+
+The answer has one row per query, in the queries' width; the weights have
+one row per query and one column per encoded position.
+
+That is the whole of multi-head attention: projections, heads cut from
+them, one fused attention over every head at once, and a projection back.
+A transformer wraps it in a block with a feed-forward layer and residual
+connections, and stacks the blocks.
+
+@section[#:tag "transformers-blocks"]{Blocks, stacks and positions}
+
+A transformer block gives each position two chances to change. Attention
+lets it gather from the other positions; then a small feed-forward
+network, the same two @racket[Linear] layers at every position, works on
+what it gathered. Each of the two adds its answer to its input rather
+than replacing it, a @deftech{residual connection}, so the sequence flows
+through the block as a stream that every sublayer only adds to, and a
+@racket[LayerNorm] keeps that stream in scale.
+
+@racket[TransformerEncoderLayer] is that block. On the toy batch from the
+last section, four wide with two heads, and a feed-forward eight wide
+inside:
+
+@torch-examples[
+(manual-seed! 0)
+(define block
+  (TransformerEncoderLayer 4 #:heads 2 #:ffn-width 8 #:dropout 0.0
+                           #:batch-first? #t))
+(map car (named-children block))
+(shape (block tokens))
+]
+
+The children are the attention, the feed-forward's two @racket[Linear]s
+around a @racket[Dropout], a norm for each sublayer and a dropout after
+each, under the names PyTorch gives them. With the dropouts off, the block
+is attention and then the feed-forward, each added back and normalized:
+
+@torch-examples[
+(define (self-attend x)
+  ((child-ref block "self-attn") x x x))
+(define (feed-forward x)
+  ((child-ref block "linear2") (relu ((child-ref block "linear1") x))))
+(define after-attention
+  ((child-ref block "norm1") (+ tokens (self-attend tokens))))
+(define post-norm
+  ((child-ref block "norm2")
+   (+ after-attention (feed-forward after-attention))))
+(~> (- post-norm (block tokens)) abs max item (< 1e-6))
+]
+
+That is @deftech{post-norm}, the original transformer's arrangement and
+BERT's: normalize after adding. GPT-2 and the vision transformer use
+@deftech{pre-norm} instead: normalize each sublayer's input and add its
+answer to the stream untouched, so the stream itself is never normalized
+inside the block. Deep stacks train more steadily that way.
+@racket[#:norm-first? #t] chooses it:
+
+@torch-examples[
+(manual-seed! 0)
+(define pre
+  (TransformerEncoderLayer 4 #:heads 2 #:ffn-width 8 #:dropout 0.0
+                           #:batch-first? #t #:norm-first? #t))
+(define (pre-attend x) ((child-ref pre "self-attn") x x x))
+(define (pre-feed x)
+  ((child-ref pre "linear2") (relu ((child-ref pre "linear1") x))))
+(define stream (+ tokens (pre-attend ((child-ref pre "norm1") tokens))))
+(define pre-norm (+ stream (pre-feed ((child-ref pre "norm2") stream))))
+(~> (- pre-norm (pre tokens)) abs max item (< 1e-6))
+]
+
+The feed-forward's activation is @racket[relu] unless @racket[#:activation]
+says otherwise; GPT-2 uses @racket['gelu-tanh]. The block takes the same
+masks as its attention, in the same sense, @racket[#t] hiding a key:
+@racket[(block tokens #:key-padding-mask padding #:causal? #t)].
+
+A model is several blocks in a row. @racket[TransformerEncoder] builds the
+row in one call: it takes the block's arguments, the number of blocks,
+and whether to end with a norm, which a stack of pre-norm blocks needs,
+since none of them normalizes its output:
+
+@torch-examples[
+(manual-seed! 0)
+(define encoder
+  (TransformerEncoder 4 #:heads 2 #:ffn-width 8 #:dropout 0.0
+                      #:batch-first? #t #:norm-first? #t
+                      #:layers 2 #:norm #t))
+(map car (named-children encoder))
+(length (named-parameters encoder))
+(car (map car (named-parameters encoder)))
+(shape (encoder tokens #:key-padding-mask padding))
+]
+
+The names are the ones a PyTorch checkpoint of the same stack uses, with
+@tt{self_attn} spelled @racket["self-attn"] and its fused in-projection
+split into @racket["query"], @racket["key"] and @racket["value"]; the
+whole mapping is in @secref["attention-transformer-pytorch"]. Like
+PyTorch's, the stack starts every block from the same values, copies of
+the first, and training moves them apart.
+
+The first argument can also be a block itself, which the stack copies, as
+@tt{nn.TransformerEncoder(layer, n)} does, or a procedure that makes one,
+which the stack calls once per block so that each draws its own values,
+as GPT-2 draws its blocks. Either way @racket[#:norm] takes the final norm
+as a layer:
+
+@torch-examples[
+(define copied (TransformerEncoder block #:layers 2))
+(define drawn
+  (TransformerEncoder (lambda ()
+                        (TransformerEncoderLayer 4 #:heads 2 #:ffn-width 8
+                                                 #:batch-first? #t))
+                      #:layers 2
+                      #:norm (LayerNorm 4)))
+(map car (named-children drawn))
+]
+
+Nothing so far knows where a token sits. Attention compares contents, so
+shuffling the tokens only shuffles the answers:
+
+@torch-examples[
+(define reversed (flip tokens 1))
+(~> (encoder reversed) (flip 1) (- (encoder tokens)) abs max item (< 1e-5))
+]
+
+The order has to be added to the input. The original transformer adds
+fixed waves, a sine and a cosine at each of several frequencies, one row
+per position; @racket[sinusoidal-positions] computes them, and the rows
+broadcast over the batch:
+
+@torch-examples[
+(define waves (sinusoidal-positions 3 4))
+waves
+(define (placed x) (+ x waves))
+(~> (placed reversed) encoder (flip 1) (- (encoder (placed tokens)))
+    abs max item)
+]
+
+With the positions added, a reversed sentence is a different input, not
+the same one reordered, and the answers differ by far more than rounding.
+GPT-2, BERT and ViT learn their positions instead, from an
+@racket[Embedding] with one row per position, indexed like tokens;
+@secref["attention-positions"] shows both.
+
+An encoder–decoder puts the pieces together. The encoder reads a source
+sequence into memory; the decoder reads the target so far, under a causal
+mask so it cannot peek at the tokens it is learning to predict, and
+attends to the memory through a cross-attention that hides the source's
+padding. A toy translation model over a vocabulary of ten token ids, eight
+wide, with a source batch of two sentences of five tokens, the second
+padded after three, and targets of four:
+
+@torch-examples[
+(manual-seed! 0)
+(define embed (Embedding 10 8))
+(define source-encoder
+  (TransformerEncoder 8 #:heads 2 #:ffn-width 16 #:dropout 0.0
+                      #:batch-first? #t #:layers 2))
+(define target-decoder
+  (TransformerDecoder 8 #:heads 2 #:ffn-width 16 #:dropout 0.0
+                      #:batch-first? #t #:layers 2))
+(define to-vocabulary (Linear 8 10))
+(define source (tensor '((1 4 6 2 3) (5 7 2 0 0))))
+(define source-padding (eq source 0))
+(define target (tensor '((1 8 9 3) (1 6 6 2))))
+(define (embedded ids)
+  (+ (embed ids) (~> (shape ids) cadr (sinusoidal-positions 8))))
+(define (translate source target)
+  (define memory
+    (source-encoder (embedded source) #:key-padding-mask source-padding))
+  (~> (embedded target)
+      (target-decoder memory
+                      #:tgt-causal? #t
+                      #:memory-key-padding-mask source-padding)
+      to-vocabulary))
+(shape (translate source target))
+]
+
+The answer is a score for every token of the vocabulary at every target
+position, which a cross-entropy loss against the targets shifted by one
+would train. The causal mask is what makes that training honest: change
+the last target token, and every earlier position's scores stay put.
+
+@torch-examples[
+(define changed (tensor '((1 8 9 7) (1 6 6 5))))
+(~> (translate source target)
+    (narrow 1 0 3)
+    (- (narrow (translate source changed) 1 0 3))
+    abs max item (< 1e-6))
+]
+
+That is a transformer: attention, a feed-forward, residual connections and
+norms in a block; blocks in a stack; positions added to the input; and
+masks to say who may read whom.
+
+@section[#:tag "transformers-gpt"]{A language model from the pieces}
+
+A GPT has no encoder to read from and so no cross-attention. It is an
+encoder stack run under a causal mask, so that every position predicts
+the next token from the ones before it. @secref["ex-gpt"] builds a
+character-level one from this chapter's pieces and trains it on a
+novella. Its whole stack is one call:
+
+@racketblock[
+(TransformerEncoder n-embd
+                    #:heads n-head
+                    #:layers n-layer
+                    #:ffn-width (* 4 n-embd)
+                    #:activation 'gelu
+                    #:norm-first? #t
+                    #:dropout 0.0
+                    #:batch-first? #t
+                    #:norm #t)
+]
+
+That is @tt{nn.TransformerEncoder(nn.TransformerEncoderLayer(...),
+n_layer, norm=nn.LayerNorm(n_embd))} with the same settings: pre-norm
+blocks as GPT-2 has them, a feed-forward four times the model's width
+through @racket[gelu], and the final norm a pre-norm stack needs. Around
+it the example puts the rest of this chapter: learned positions, an
+@racket[Embedding] indexed by position and added to the token
+embeddings; @racket[#:causal? #t] on every application; and a
+@racket[Linear] head that turns each position's output into a score for
+every character, trained by @racket[cross-entropy] against the text
+shifted by one.
+
+The chapter's PyTorch twin builds the same model from
+@tt{nn.TransformerEncoder} and matches it under one seed, so the example
+doubles as a check that these layers train as PyTorch's do.
+
+@section[#:tag "transformers-asr"]{A speech recognizer from the pieces}
+
+A speech recognizer uses the other arrangement, the toy translation model
+of @secref["transformers-blocks"] grown to real data. Its encoder reads a
+whole utterance at once, every frame attending to every other. Its decoder
+writes the transcript a character at a time under a causal mask, and
+reads the encoded audio through cross-attention. @secref["ex-asr"] builds
+one from this chapter's pieces and trains it on LibriSpeech. Its two
+stacks are one call each:
+
+@racketblock[
+(TransformerEncoder n-embd
+                    #:heads n-head
+                    #:layers 6
+                    #:ffn-width (* 4 n-embd)
+                    #:activation 'gelu
+                    #:norm-first? #t
+                    #:dropout 0.0
+                    #:batch-first? #t
+                    #:norm #t)
+(TransformerDecoder n-embd
+                    #:heads n-head
+                    #:layers 6
+                    #:ffn-width (* 4 n-embd)
+                    #:activation 'gelu
+                    #:norm-first? #t
+                    #:dropout p-drop
+                    #:batch-first? #t
+                    #:norm #t)
+]
+
+That is @tt{nn.TransformerEncoder(nn.TransformerEncoderLayer(...), 6,
+norm=nn.LayerNorm(n_embd))} and its @tt{nn.TransformerDecoder}
+counterpart, pre-norm as the GPT's are. Around them the example puts the
+rest of this chapter:
+
+@itemlist[
+ @item{a front end of strided and dilated convolutions turns a
+       spectrogram into frames as wide as the model, and
+       @racket[sinusoidal-positions] with @racket[#:layout 'halves] gives
+       the frames and the characters their positions, with no table and
+       no length cap;}
+ @item{utterances differ in length, so a batch is padded at the end,
+       and one @tt{[B, T]} mask, @racket[#t] at each padded frame, goes to
+       the encoder as @racket[#:key-padding-mask] and to the decoder as
+       @racket[#:memory-key-padding-mask], so neither the encoder's
+       self-attention nor the decoder's cross-attention reads the
+       padding;}
+ @item{the decoder runs with @racket[#:tgt-causal? #t] and needs no
+       padding mask of its own: with the characters padded at the end, the
+       causal mask already keeps every real character from reading a pad;}
+ @item{two heads read the model: a CTC head on the encoder, trained by
+       @racket[ctc-loss] with no alignment between frames and characters,
+       and a character head on the decoder, trained by
+       @racket[cross-entropy] against the transcript shifted by one.}]
+
+Its PyTorch twin builds the same model from @tt{nn.TransformerEncoder}
+and @tt{nn.TransformerDecoder} and matches it under one seed, so the
+decoder's cross-attention trains as PyTorch's does too.

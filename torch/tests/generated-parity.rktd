@@ -76,6 +76,7 @@
  (nonzero "nonzero" (tensor) #f 1)
  (repeat-interleave-self-int "repeat_interleave.self_int" (tensor int64 optional-int64 optional-int64) #f 1)
  (reshape "reshape" (tensor int-array) #f 1)
+ (scaled-dot-product-attention "scaled_dot_product_attention" (tensor tensor tensor optional-tensor double bool optional-double bool) #f 1)
  (scatter-add! "scatter_add_" (tensor int64 tensor tensor) #t 1)
  (scatter-src! "scatter_.src" (tensor int64 tensor tensor) #t 1)
  (scatter-value! "scatter_.value" (tensor int64 tensor scalar) #t 1)
