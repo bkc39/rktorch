@@ -11,7 +11,7 @@ same material in the order you meet it.
 @include-section["order.scrbl"]
 @include-section["device.scrbl"]
 @include-section["data.scrbl"]
-@include-section["translation.scrbl"]
+@include-section["text.scrbl"]
 @include-section["audio.scrbl"]
 @include-section["vision.scrbl"]
 @include-section["nn.scrbl"]

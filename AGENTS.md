@@ -539,13 +539,12 @@ module's full export set (`racket/runtime-path`, `syntax/parse/pre`).
   its 256-record fixture and `vision/fixtures/images/` the reader's
   synthetic JPEGs and PNGs (`scripts/gen-image-fixtures.py`);
   `vision/image.rkt` — the image reader; `vision/diffusion.rkt` — DDPM schedules, `q-sample`
-  and the UNet layers.
+  and the UNet layers; `vision/mnist.rkt` — MNIST loader.
+- `text/data.rkt` — character corpora, vocabularies and token blocks;
+  `text/translation.rkt` — the seq2seq tutorial's eng-fra pairs;
+  `text/fixtures/` their committed excerpts.
 - `data/loader.rkt` — `tensor-dataset`, `dataloader`, `in-dataloader`,
-  `in-epochs`, re-exporting `data/dataset.rkt`. `data/` holds only this
-  modality-neutral machinery; the loaders live with their modality (#88):
-  `vision/mnist.rkt` (its `mnist-256-*` fixtures in `vision/fixtures/`),
-  `text/data.rkt` and `text/translation.rkt` (their excerpts in
-  `text/fixtures/`).
+  `in-epochs`, re-exporting `data/dataset.rkt`.
 - `foreign/ops.rkt` — version/seed + marshalling (`item`, `to-dtype`,
   `uniform!`, `to`); `foreign/creation-ops.rkt` — the constructors
   (`zeros` .. `rand`, `tensor`, `arange`, `eye`, the `*-like` family, with
