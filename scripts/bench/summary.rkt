@@ -35,10 +35,12 @@
           (if (string? sha) (substring sha 0 (min 7 (string-length sha))) "?")
           (if (ref r 'meta 'git_dirty) " (dirty)" "")))
 
+(define (meta-text r key)
+  (or (ref r 'meta key) "?"))
+
 (define (host r)
-  (define m (ref r 'meta))
-  (format "~a (~a, ~a, cpus ~a)" (or (ref m 'host) "?") (ref m 'cpu) (ref m 'os)
-          (ref m 'affinity)))
+  (format "~a (~a, ~a, cpus ~a)" (meta-text r 'host) (meta-text r 'cpu) (meta-text r 'os)
+          (meta-text r 'affinity)))
 
 (define (execution r)
   (define m (ref r 'meta))
@@ -192,8 +194,8 @@
         (section "e2e" "error" "Failures" failure-section host)))
 
 (define (header records)
-  (define (all key) (string-join (remove-duplicates (map (lambda (r) (~a (ref r 'meta key))) records))
-                                 " / "))
+  (define (all key)
+    (string-join (remove-duplicates (map (lambda (r) (~a (meta-text r key))) records)) " / "))
   (format "Commits ~a; Racket ~a, libtorch ~a, ~a (~a cores)."
           (string-join (remove-duplicates (map commit records)) ", ")
           (all 'racket) (all 'libtorch) (all 'cpu) (all 'cores)))
@@ -258,9 +260,13 @@
     (check-regexp-match #rx"\\| EPOCHS=3 OMP_NUM_THREADS=1 STEPS=300 \\|" md)
     (check-false (regexp-match? #rx"RKTORCH_MNIST_DIR" md)))
 
-  (test-case "a record without a host names it ?"
-    (define md (summary-markdown (list (summary-record "a" "r1" #f '(10.0 10.0)))))
-    (check-regexp-match #rx"## End to end \\(\\? \\(Some CPU" md))
+  (test-case "a record without host details names them ?"
+    (define md
+      (summary-markdown
+       (list (summary-record "a" "r1" #f '(10.0 10.0)
+                             #:meta (hash-remove (hash-remove (meta #f) 'cpu) 'affinity)))))
+    (check-regexp-match #rx"## End to end \\(\\? \\(\\?, linux-x86_64, cpus \\?\\)\\)" md)
+    (check-false (regexp-match? #rx"#f" md)))
 
   (test-case "e2e sections split by host"
     (define md
