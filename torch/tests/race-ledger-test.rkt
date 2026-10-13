@@ -14,9 +14,9 @@
                     check-known-failure check-ledger join labelled
                     ledger-snapshot ledger-violations make-gate make-watch
                     release-gate! settle! spawn stop! wait-for-arrival
-                    watch-finalized watch-hook watch-max-holders
-                    watch-release-count watch-released while-inside
-                    with-parked with-race-hook worker-thread))
+                    watch-finalized watch-freed-count watch-hook
+                    watch-max-holders watch-release-count watch-released
+                    while-inside with-parked with-race-hook worker-thread))
 
   (define mib (* 1024 1024))
   (define cpu (device 'cpu 0))
@@ -106,13 +106,16 @@
     (define w (make-watch))
     (with-race-hook (watch-hook w)
       (define t (zeros 256 256))
-      (define g (handle-gate 'free-unaccounted (tensor-handle t)))
+      (define h (tensor-handle t))
+      (define g (handle-gate 'free-unaccounted h))
       (with-parked [a (spawn (lambda () (tensor-free! t)) #:pool pool #:label 'a)
                     #:at g #:watch w]
         (check-eq? (wait-for-arrival g) 'parked)
         (break-thread (worker-thread a))
         (release-gate! g)
-        (check-exn exn:break? (lambda () (join a))))
+        (check-exn exn:break? (lambda () (join a)))
+        (check-equal? (watch-freed-count w h) 1
+                      "a break cut the explicit free off before its release"))
       (settle!))
     (check-equal? (watch-finalized w) 0
                   "a break abandoned the explicit free to the finalizer"))

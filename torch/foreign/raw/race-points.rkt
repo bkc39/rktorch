@@ -1,7 +1,7 @@
 #lang racket/base
 
-(require (for-syntax racket/base)
-         syntax/parse/define)
+(require (for-syntax racket/base syntax/parse)
+         (only-in syntax/parse/define define-syntax-parse-rule))
 
 (provide race-hook
          race-point)

@@ -66,7 +66,8 @@
     (lambda (t)
       (unaccount! t)
       (race-point free-unaccounted t)
-      (release t))))
+      (release t)
+      (race-point free-released t))))
 
 (define finalizer-failure-count (box 0))
 (define captured-failures (box '()))

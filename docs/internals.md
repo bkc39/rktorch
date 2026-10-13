@@ -410,6 +410,7 @@ gets the point's name and a subject (a handle, a device, a thread).
 | `checks-resetting` | a backstop collection has measured, before it resets the checks | device |
 | `unaccount-entry-read` | inside the ledger section, an entry found but not removed | handle |
 | `free-unaccounted` | an explicit free has unaccounted, before the native release | handle |
+| `free-released` | an explicit free's native release has returned | handle |
 | `finalizer-releasing` | a finalizer's release, before it unaccounts | handle |
 | `collector-claiming` | inside the claim's atomic section, decided but not taken | whether free |
 | `collector-claimed`, `collector-releasing` | the claim is held, or about to be dropped | thread |

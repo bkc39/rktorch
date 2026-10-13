@@ -1,13 +1,13 @@
 #lang racket/base
 
-(require (for-syntax racket/base)
+(require (for-syntax racket/base syntax/parse)
          (only-in ffi/unsafe/atomic call-as-atomic in-atomic-mode?)
          (only-in racket/dict dict-ref)
          (only-in racket/list remove-duplicates)
          (only-in racket/match match)
          (only-in racket/string string-join)
          (only-in rackunit define-check fail-check)
-         syntax/parse/define
+         (only-in syntax/parse/define define-syntax-parse-rule)
          (only-in threading ~>)
          (only-in "../../foreign.rkt"
                   + finalizer-failures matmul native-memory-use
@@ -34,6 +34,7 @@
          watch-max-holders
          watch-release-count
          watch-released
+         watch-freed-count
          watch-finalized
          fuzz-hook
          spawn
@@ -117,10 +118,12 @@
                [finalized #:mutable]
                [doubled #:mutable]
                unaccounts
-               [unaccounted-twice #:mutable]))
+               [unaccounted-twice #:mutable]
+               freed))
 
 (define (make-watch)
-  (watch (make-hasheq) 0 (make-weak-hasheq) 0 0 0 (make-weak-hasheq) 0))
+  (watch (make-hasheq) 0 (make-weak-hasheq) 0 0 0 (make-weak-hasheq) 0
+         (make-weak-hasheq)))
 
 (define (note-unaccount! w key)
   (define unaccounts (watch-unaccounts w))
@@ -138,6 +141,9 @@
 (define (watch-release-count w handle)
   (call-as-atomic (lambda () (hash-ref (watch-releases w) handle 0))))
 
+(define (watch-freed-count w handle)
+  (call-as-atomic (lambda () (hash-ref (watch-freed w) handle 0))))
+
 (define (note-holder! w holder)
   (define holders (watch-holders w))
   (for ([t (in-list (hash-keys holders))] #:when (thread-dead? t))
@@ -152,6 +158,7 @@
        [(collector-claimed) (note-holder! w subject)]
        [(collector-releasing) (hash-remove! (watch-holders w) subject)]
        [(free-unaccounted) (note-release! w subject)]
+       [(free-released) (hash-update! (watch-freed w) subject add1 0)]
        [(unaccount-entry-read) (note-unaccount! w subject)]
        [(ledger-entry-added) (hash-remove! (watch-unaccounts w) subject)]
        [(finalizer-releasing)
