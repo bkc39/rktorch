@@ -52,7 +52,7 @@
              (end-atomic)
              0))))
 
-(define (measure total step #:threads [n threads] #:pool [pool 'own])
+(define (measure total step #:threads [n threads] #:pool [pool 'own] #:main [mode main-blocked])
   (define per-thread (quotient total n))
   (define b (box 0))
   (define-values (ms retries)
@@ -60,14 +60,24 @@
                   (lambda (_i)
                     (for/fold ([retries 0]) ([_ (in-range per-thread)])
                       (+ retries (step b))))
-                  #:pool pool))
+                  #:pool pool
+                  #:main mode))
   (list (unbox b) (apply + retries) ms))
 
-(define (hop-row label n pool total)
-  (define ms
-    (median < (for/list ([_ (in-range repeats)])
-                (caddr (measure total atomic-increment! #:threads n #:pool pool)))))
-  (list label n total (fmt-ms ms) (fmt-ms (/ (* ms 1e6) total)) (load-average)))
+(define hop-sections 400000)
+(define hop-sections/busy 2000)
+
+(define (hop-ms n pool total mode)
+  (median < (for/list ([_ (in-range repeats)])
+              (caddr (measure total atomic-increment! #:threads n #:pool pool #:main mode)))))
+
+(define (hop-row label n pool)
+  (define blocked-ms (hop-ms n pool hop-sections main-blocked))
+  (define busy-ms (hop-ms n pool hop-sections/busy main-busy))
+  (list label n
+        hop-sections (fmt-ms blocked-ms) (fmt-ms (/ (* blocked-ms 1e6) hop-sections))
+        hop-sections/busy (fmt-ms busy-ms) (fmt-ms (/ (* busy-ms 1e6) hop-sections/busy))
+        (load-average)))
 
 (define (strategy-row strategy)
   (define total (vector-ref strategy 1))
@@ -139,10 +149,13 @@
   (print-table-row (cas-against-atomic-subtractor))
   (newline)
   (print-table-header
-   '("call-as-atomic entered from" "threads" "sections" "median wall ms"
-     "ns per section" "load"))
-  (print-table-row (hop-row "coroutine thread (main OS thread)" 1 #f 400000))
-  (print-table-row (hop-row "one parallel thread" 1 'own 400000))
-  (print-table-row (hop-row "two parallel threads" 2 'own 400000))
-  (print-table-row (hop-row "eight parallel threads" 8 'own 400000))
+   (list "call-as-atomic entered from" "threads"
+         "sections, main blocked in thread-wait" "median wall ms, main blocked"
+         "ns per section, main blocked"
+         (format "sections, main ~a" (main-mode-label main-busy)) "median wall ms, main busy"
+         "ns per section, main busy" "load"))
+  (print-table-row (hop-row "coroutine thread (main OS thread)" 1 #f))
+  (print-table-row (hop-row "one parallel thread" 1 'own))
+  (print-table-row (hop-row "two parallel threads" 2 'own))
+  (print-table-row (hop-row "eight parallel threads" 8 'own))
   (printf "\nload average (1 min) at end: ~a\n" (load-average)))

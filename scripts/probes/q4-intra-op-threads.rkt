@@ -134,8 +134,10 @@
    (cons "OpenMP teams: 4 workers that call omp_set_num_threads(1) first"
          '((team-scenario (lambda () (omp-set-num-threads 1)))))))
 
+(define timing-repeats 3)
+
 (define timing-scenario
-  '((define (time-trainer reps)
+  `((define (time-trainer reps)
       (define a (shim-randn 1024 1024))
       (shim-free (shim-matmul a a))
       (define start (current-inexact-monotonic-milliseconds))
@@ -175,20 +177,24 @@
       result)
     (define-syntax-parse-rule (with-busy-workers prepare:expr body:expr ...+)
       (call-with-busy-workers prepare (lambda () body ...)))
+    (define (median-ms thunk)
+      (fmt-ms (median-of-runs ,timing-repeats thunk)))
     (parallel-add!)
     (define before (counts))
-    (define alone (time-trainer 50))
-    (define busy-default (with-busy-workers void (time-trainer 50)))
+    (define alone (median-ms (lambda () (time-trainer 50))))
+    (define busy-default
+      (median-ms (lambda () (with-busy-workers void (time-trainer 50)))))
     (define busy-omp
-      (with-busy-workers (lambda () (omp-set-num-threads 1)) (time-trainer 50)))
+      (median-ms (lambda ()
+                   (with-busy-workers (lambda () (omp-set-num-threads 1)) (time-trainer 50)))))
     (define busy-at
-      (with-busy-workers (lambda () (at-set-num-threads 1)) (time-trainer 50)))
+      (median-ms (lambda ()
+                   (with-busy-workers (lambda () (at-set-num-threads 1)) (time-trainer 50)))))
     (list (cons "trainer at / omp / mkl before" before)
-          (cons "trainer 1024 matmul ms, alone" (fmt-ms alone))
-          (cons "with 4 workers looping 512 matmuls, default threads"
-                (fmt-ms busy-default))
-          (cons "with 4 workers that set omp_set_num_threads(1)" (fmt-ms busy-omp))
-          (cons "with 4 workers that set at::set_num_threads(1)" (fmt-ms busy-at))
+          (cons ,(format "trainer 1024 matmul ms, alone (median of ~a)" timing-repeats) alone)
+          (cons "with 4 workers looping 512 matmuls, default threads" busy-default)
+          (cons "with 4 workers that set omp_set_num_threads(1)" busy-omp)
+          (cons "with 4 workers that set at::set_num_threads(1)" busy-at)
           (cons "trainer at / omp / mkl after" (counts))
           (cons "load" (load-average)))))
 

@@ -13,6 +13,7 @@
          (only-in racket/date date->string date-display-format)
          (only-in racket/format ~a ~r)
          (only-in racket/future processor-count)
+         (only-in math/statistics median)
          (only-in racket/math exact-round)
          (only-in racket/string string-join))
 
@@ -28,6 +29,12 @@
          print-table-row
          run-parallel
          run-parallel/gc
+         (struct-out main-mode)
+         main-blocked
+         main-polling
+         main-busy
+         main-modes
+         median-of-runs
          collect-past-canary!
          fmt-ms
          fmt-rate)
@@ -81,10 +88,49 @@
   (for-each print-table-row rows)
   (newline))
 
+(struct main-mode (label wait))
+
+(define (all-dead? workers)
+  (andmap thread-dead? workers))
+
+(define main-blocked
+  (main-mode "blocked in thread-wait"
+             (lambda (workers _on-wake) (for-each thread-wait workers))))
+
+(define (main-polling ms)
+  (main-mode (format "polling every ~a ms" ms)
+             (lambda (workers on-wake)
+               (let loop ()
+                 (define running (findf (lambda (w) (not (thread-dead? w))) workers))
+                 (cond
+                   [(not running) (void)]
+                   [else
+                    (sync/timeout (/ ms 1000.0) (thread-dead-evt running))
+                    (on-wake)
+                    (loop)])))))
+
+(define busy-sink (box #f))
+(define busy-wake-ms 1.0)
+
+(define main-busy
+  (main-mode "busy allocating Racket vectors"
+             (lambda (workers on-wake)
+               (let loop ([woke (current-inexact-monotonic-milliseconds)])
+                 (set-box! busy-sink (make-vector 64 #f))
+                 (define now (current-inexact-monotonic-milliseconds))
+                 (cond
+                   [(all-dead? workers) (void)]
+                   [(> (- now woke) busy-wake-ms) (on-wake) (loop now)]
+                   [else (loop woke)])))))
+
+(define main-modes (list main-blocked (main-polling 10) main-busy))
+
 (define (run-parallel/gc n body
                          #:pool [pool 'own]
                          #:setup [setup void]
-                         #:counter [counter (lambda () 0)])
+                         #:counter [counter (lambda () 0)]
+                         #:main [mode main-blocked]
+                         #:on-wake [on-wake void])
   (define ready (make-semaphore 0))
   (define gate (make-semaphore 0))
   (define results (make-vector n #f))
@@ -107,17 +153,22 @@
   (define gc-start (current-gc-milliseconds))
   (define start (current-inexact-monotonic-milliseconds))
   (for ([_ (in-range n)]) (semaphore-post gate))
-  (for-each thread-wait workers)
+  ((main-mode-wait mode) workers on-wake)
   (define ms (- (current-inexact-monotonic-milliseconds) start))
   (define gc-ms (- (current-gc-milliseconds) gc-start))
   (define counted (- (counter) count-start))
+  (for-each thread-wait workers)
   (define failure (for/first ([e (in-vector failures)] #:when e) e))
   (when failure (raise failure))
   (values ms (vector->list results) gc-ms counted))
 
-(define (run-parallel n body #:pool [pool 'own])
-  (define-values (ms results _gc-ms _counted) (run-parallel/gc n body #:pool pool))
+(define (run-parallel n body #:pool [pool 'own] #:main [mode main-blocked])
+  (define-values (ms results _gc-ms _counted)
+    (run-parallel/gc n body #:pool pool #:main mode))
   (values ms results))
+
+(define (median-of-runs n thunk)
+  (median < (for/list ([_ (in-range n)]) (thunk))))
 
 (define (fmt-ms ms)
   (~r ms #:precision 1))

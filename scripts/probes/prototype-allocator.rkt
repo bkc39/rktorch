@@ -20,7 +20,7 @@
          stage-2
          alloc/uninterruptible)
 
-(struct prototype (name wrap handle free! live-bytes finalizer-runs))
+(struct prototype (name wrap handle free! live-bytes finalizer-frees finalizer-calls))
 
 (define-syntax-parse-rule (with-atomic body:expr ...+)
   (dynamic-wind start-atomic (lambda () body ...) end-atomic))
@@ -57,7 +57,7 @@
 
 (define (bare)
   (prototype "bare: plain op, explicit free, no finalizer or ledger"
-             values values shim-free (lambda () 0) (lambda () 0)))
+             values values shim-free (lambda () 0) (lambda () 0) (lambda () 0)))
 
 (define gate-interval (* 128 1024 1024))
 
@@ -65,7 +65,8 @@
   (define table (make-weak-hasheq))
   (define since-check (make-hasheqv))
   (define live (box 0))
-  (define runs (box 0))
+  (define frees (box 0))
+  (define calls (box 0))
   (define (count-toward-gate! dev nbytes)
     (define since (+ (hash-ref since-check dev 0) nbytes))
     (hash-set! since-check dev (if (>= since gate-interval) 0 since)))
@@ -79,12 +80,16 @@
            (set-box! live (- (unbox live) (record-nbytes r)))
            r]
           [else #f])))
-    (when claimed
-      (set-phantom-bytes! (record-phantom claimed) 0)
-      (shim-free t)))
+    (cond
+      [claimed
+       (set-phantom-bytes! (record-phantom claimed) 0)
+       (shim-free t)
+       #t]
+      [else #f]))
   (define ((finalizer-for r) t)
-    (cas-add! runs 1)
-    (release! t (lambda () r)))
+    (cas-add! calls 1)
+    (when (release! t (lambda () r))
+      (cas-add! frees 1)))
   (define ((wrap op) . args)
     (define t (apply op args))
     (define r (make-record t))
@@ -96,8 +101,9 @@
       (when dev (count-toward-gate! dev (record-nbytes r))))
     t)
   (define (free! t)
-    (release! t (lambda () (hash-ref table t #f))))
-  (prototype name wrap values free! (lambda () (unbox live)) (lambda () (unbox runs))))
+    (void (release! t (lambda () (hash-ref table t #f)))))
+  (prototype name wrap values free!
+             (lambda () (unbox live)) (lambda () (unbox frees)) (lambda () (unbox calls))))
 
 (define (stage-1)
   (stage-1-with "stage 1: plain op, one atomic section; no pressure gate, no device query" #f))
@@ -109,15 +115,18 @@
 
 (define (stage-2)
   (define live (box 0))
-  (define runs (box 0))
+  (define frees (box 0))
+  (define calls (box 0))
   (define (release! r t)
     (cas-add! live (- (record-nbytes r)))
     (set-phantom-bytes! (record-phantom r) 0)
     (shim-free t))
   (define (finalize h)
-    (cas-add! runs 1)
+    (cas-add! calls 1)
     (define r (held-record h))
-    (when (claim! r) (release! r (held-handle h))))
+    (when (claim! r)
+      (cas-add! frees 1)
+      (release! r (held-handle h))))
   (define ((wrap op) . args)
     (define t (apply op args))
     (define h (held t (make-record t)))
@@ -130,7 +139,7 @@
     (when (claim! r) (release! r (held-handle h))))
   (prototype "stage 2: plain op, no atomic section; no pressure gate, no device query"
              wrap held-handle free!
-             (lambda () (unbox live)) (lambda () (unbox runs))))
+             (lambda () (unbox live)) (lambda () (unbox frees)) (lambda () (unbox calls))))
 
 (define (alloc/uninterruptible)
   (define live (box 0))
@@ -163,4 +172,4 @@
     (free-handle t))
   (prototype "ffi/unsafe/alloc #:merely-uninterruptible?; no pressure gate, no device query"
              wrap values free!
-             (lambda () (unbox live)) (lambda () (unbox runs))))
+             (lambda () (unbox live)) (lambda () (unbox runs)) (lambda () (unbox runs))))
