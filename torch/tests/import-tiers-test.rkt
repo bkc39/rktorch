@@ -39,7 +39,8 @@
       [(list "info.rkt") #f]
       [(or (list (regexp #rx"[.]rkt$"))
            (cons (or "audio" "data" "text" "vision")
-                 (app last (regexp #rx"[.]rkt$"))))
+                 (app last (regexp #rx"[.]rkt$")))
+           (list* "foreign" "raw" (app last (regexp #rx"[.]rkt$"))))
        (~>> (path-replace-extension relative #"")
             path->string
             (string-append "torch/")
@@ -64,7 +65,8 @@
     (check-true (set-empty? (export-names 'torch/scribblings/labels values))))
 
   (test-case "the walk finds the public modules and skips info.rkt"
-    (check-true (subset? (seteq 'torch/main 'torch/data/loader 'torch/vision/mnist)
+    (check-true (subset? (seteq 'torch/main 'torch/data/loader 'torch/vision/mnist
+                                'torch/foreign/raw/tensor)
                          (list->seteq public-modules)))
     (check-false (member 'torch/info public-modules)))
 
@@ -86,10 +88,14 @@
                #:unless (composes? `(for-label torch torch/nn ,module)))
       module))
 
-  (test-case "only torch/generated clashes with torch and torch/nn for label"
-    (check-equal? clashing-modules '(torch/generated)))
+  (test-case "only torch/generated and three raw FFI modules clash for label"
+    (check-equal? clashing-modules
+                  '(torch/foreign/raw/memory
+                    torch/foreign/raw/pressure
+                    torch/foreign/raw/pressure-settings
+                    torch/generated)))
 
-  (test-case "the helper composes with every public module but torch/generated"
+  (test-case "the helper composes with every public module but the clashing ones"
     (for ([module (in-list public-modules)]
           #:unless (memq module clashing-modules))
       (check-true (composes? 'torch/scribblings/labels `(for-label ,module))
