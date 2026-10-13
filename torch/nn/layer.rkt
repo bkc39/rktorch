@@ -35,6 +35,7 @@
          layer-named-children ;; noqa
          layer-mode ;; noqa
          layer-set-mode! ;; noqa
+         layer-rebuild ;; noqa
          in-mode
          in-eval-mode
          with-mode
@@ -50,6 +51,7 @@
   (layer-own-tensors layer)
   (layer-mode layer)
   (layer-set-mode! layer mode)
+  (layer-rebuild layer child tensor)
   #:derive-property prop:to (lambda (m dev dtype) (move-layer! m dev dtype))
   #:derive-property prop:procedure
   (make-keyword-procedure
@@ -63,7 +65,12 @@
    (define (layer-named-children self) '()) ;; noqa
    (define (layer-own-tensors self) (own-tensors self)) ;; noqa
    (define (layer-mode self) 'train) ;; noqa
-   (define (layer-set-mode! self mode) (void))]) ;; noqa
+   (define (layer-set-mode! self mode) (void)) ;; noqa
+   (define (layer-rebuild self child tensor) ;; noqa
+     (raise-arguments-error
+      'layer-copy
+      "a hand-written gen:layer has no layer-rebuild method to copy it with"
+      "layer" self))])
 
 (define/contract-out mode/c contract?
   (flat-named-contract 'mode/c (or/c 'train 'eval)))
@@ -290,7 +297,32 @@
      (for ([c (in-list (registry-children self))])
        (child-set-mode! c mode)))
    (define (layer-mode self)
-     (registry-mode self))])
+     (registry-mode self))
+   (define (layer-rebuild self child tensor)
+     ((rebuilder-of self) self child tensor))])
+
+(define-values (prop:rebuilder rebuilder? rebuilder-of) ;; noqa
+  (make-struct-type-property 'rebuilder))
+
+(define (rebuilt-value name v child tensor) ;; noqa
+  (let walk ([v v])
+    (cond
+      [(layer? v) (child name v)]
+      [(tensor? v) (tensor v)]
+      [(Parameters%? v)
+       (Parameters% (for/list ([e (in-list (Parameters%-alist v))])
+                      (cons (car e) (tensor (cdr e)))))]
+      [(Children%? v)
+       (Children% (for/list ([e (in-list (Children%-alist v))])
+                    (cons (car e) (child (car e) (cdr e)))))]
+      [(pair? v) (cons (walk (car v)) (walk (cdr v)))]
+      [(vector? v)
+       (define copy (for/vector #:length (vector-length v)
+                                ([x (in-vector v)])
+                      (walk x)))
+       (if (immutable? v) (vector->immutable-vector copy) copy)]
+      [(box? v) (box (walk (unbox v)))]
+      [else v])))
 
 (define (child-parameters c)
   (layer-parameters (cdr c)))
@@ -311,7 +343,18 @@
   (layer-named-buffers (cdr c) (child-prefix c prefix)))
 
 (struct Fn% registry (proc)
-  #:reflection-name 'Fn)
+  #:reflection-name 'Fn
+  #:property prop:rebuilder
+  (lambda (self _child _tensor)
+    (unless (null? (append (registry-params self) (registry-buffers self)
+                           (registry-children self)))
+      (raise-arguments-error
+       'layer-copy
+       (string-append "a procedure->Layer layer with parameters, buffers or"
+                      " children cannot be copied: its procedure would"
+                      " still read the original's")
+       "layer" self))
+    (Fn% fn-forward '() '() '() (registry-mode self) (Fn%-proc self))))
 
 (define fn-forward
   (make-keyword-procedure
@@ -518,8 +561,20 @@
          moved-defn ...
          (struct sid registry (field.id ...)
            #:reflection-name reflect-name
+           #:property prop:rebuilder
+           (lambda (self child tensor) (rebuild self child tensor))
            moved-clause ...)
          (define name? sid?)
+         (define (rebuild self child tensor)
+           (let ([field.id
+                  (rebuilt-value 'field-name (field-acc self) child tensor)]
+                 ...)
+             (let-values ([(params buffers children)
+                           (classify '(field-name ...) (list field.id ...))])
+               (check-names
+                'name
+                (sid forward-proc params buffers children (registry-mode self)
+                     field.id ...)))))
          checker-def ...
          (define (run-forward self kws kw-args inputs)
            (unless (enough? (length inputs) n-inputs)

@@ -50,6 +50,14 @@ last two dimensions, as Python's @tt{keys.mT} does, where @racket[T]
 reverses every axis. PyTorch deprecates @tt{.T} for tensors whose rank is
 not two; @racket[T] supports every rank without a warning.}
 
+@defproc[(flip [t tensor?]
+               [dims (or/c exact-integer? (non-empty-listof exact-integer?))])
+         tensor?]{
+A copy of @racket[t] with its entries in reverse order along each axis in
+@racket[dims], which count from the end when negative; @tt{torch.flip}.
+
+@torch-examples[(flip (tensor '((1 2 3) (4 5 6))) 1)]}
+
 @section{Arithmetic}
 
 @defproc[(mul [a (or/c tensor? real?)]
