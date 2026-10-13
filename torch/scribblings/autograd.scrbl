@@ -1,14 +1,7 @@
 #lang scribble/manual
 
 @(require "common.rkt"
-          (for-label racket/base
-                     racket/contract
-                     (only-in torch
-                              backward! detach grad grad-enabled? has-grad?
-                              maybe-grad mul native-collect-at-troughs
-                              requires-grad! requires-grad? sum tensor tensor?
-                              with-no-grad)
-                     (only-in torch/nn zero-grads!)))
+          torch/scribblings/labels)
 
 @title{Automatic differentiation}
 

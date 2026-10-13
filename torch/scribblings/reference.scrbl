@@ -18,4 +18,3 @@ same material in the order you meet it.
 @include-section["layers-builtin.scrbl"]
 @include-section["recurrent.scrbl"]
 @include-section["attention.scrbl"]
-@include-section["contract.scrbl"]

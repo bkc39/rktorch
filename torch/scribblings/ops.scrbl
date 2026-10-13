@@ -1,13 +1,8 @@
 #lang scribble/manual
 
 @(require "common.rkt"
-          (for-label (except-in racket/base
-                                abs cos exp log sin sort sqrt max min length
-                                + - * / < <= > >=)
-                     racket/contract
-                     torch
-                     (only-in torch/data/loader dataloader define-dataset)
-                     (only-in torch/nn MaxPool2d cross-entropy nll-loss)))
+          torch/scribblings/labels
+          (for-label (only-in torch/data/loader dataloader define-dataset)))
 
 @title{Operations on tensors}
 
@@ -354,6 +349,27 @@ their own, @emph{Ordering and sampling}.
 
 @section{Spatial}
 
+@defproc[(conv2d [t tensor?]
+                 [weight tensor?]
+                 [#:bias bias (or/c tensor? #f) #f]
+                 [#:stride stride (or/c exact-integer?
+                                        (list/c exact-integer? exact-integer?))
+                           1]
+                 [#:padding padding (or/c exact-integer?
+                                          (list/c exact-integer? exact-integer?))
+                            0]
+                 [#:dilation dilation (or/c exact-integer?
+                                            (list/c exact-integer? exact-integer?))
+                             1]
+                 [#:groups groups exact-integer? 1])
+         tensor?]{
+The 2-D convolution of an @tt{[N C H W]} batch with an
+@tt{[out C/groups kH kW]} @racket[weight], as
+@tt{torch.nn.functional.conv2d}; a single integer applies to both axes.
+The layer form is @racket[Conv2d].
+
+@torch-examples[(shape (conv2d (zeros 1 3 8 8) (zeros 4 3 3 3) #:padding 1))]}
+
 @defproc[(max-pool2d [t tensor?]
                      [kernel (or/c exact-positive-integer?
                                    (list/c exact-positive-integer?
@@ -383,6 +399,25 @@ Each pixel of an @tt{[N C H W]} batch repeated @racket[scale] times along
 both spatial axes.
 
 @torch-examples[(shape (upsample-nearest2d (zeros 1 1 4 4)))]}
+
+@section{Normalization}
+
+@defproc[(batch-norm [t tensor?]
+                     [#:running-mean running-mean (or/c tensor? #f) #f]
+                     [#:running-var running-var (or/c tensor? #f) #f]
+                     [#:weight weight (or/c tensor? #f) #f]
+                     [#:bias bias (or/c tensor? #f) #f]
+                     [#:training? training? boolean? #f]
+                     [#:momentum momentum real? 0.1]
+                     [#:eps eps real? 1e-5])
+         tensor?]{
+Batch normalization over the channel axis of an @tt{[N C ...]} input, as
+@tt{torch.nn.functional.batch_norm}. Training normalizes by the batch's
+statistics and folds them into the running ones by @racket[momentum];
+otherwise the running statistics normalize, and both are required. The
+layer forms are @racket[BatchNorm1d] and @racket[BatchNorm2d].
+
+@torch-examples[(shape (batch-norm (randn 4 3) #:training? #t))]}
 
 @section{Length}
 

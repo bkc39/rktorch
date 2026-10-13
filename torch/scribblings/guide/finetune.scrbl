@@ -2,12 +2,8 @@
 @(require (only-in racket/format ~a ~r)
           (only-in racket/list last)
           "../common.rkt"
-          (for-label (except-in racket/base
-                                abs cos exp log sin sort sqrt max min length
-                                + - * / < <= > >=)
-                     torch
-                     torch/nn
-                     torch/data/loader
+          torch/scribblings/labels
+          (for-label torch/data/loader
                      torch/vision/hymenoptera
                      torch/vision/image-folder
                      torch/vision/resnet

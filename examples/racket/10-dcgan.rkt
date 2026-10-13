@@ -1,9 +1,7 @@
 #lang scribble/lp2
 
-@(require (for-label (except-in racket/base abs cos exp log sin sort sqrt max min length
-                                + - * / < <= > >=)
-                     torch torch/nn torch/data/loader torch/vision/mnist
-                     torch/vision/ppm))
+@(require torch/scribblings/labels
+          (for-label torch/data/loader torch/vision/mnist torch/vision/ppm))
 
 @title[#:tag "ex-dcgan"]{Training a DCGAN on MNIST}
 

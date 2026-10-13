@@ -38,7 +38,8 @@
     (match (map path->string (explode-path relative))
       [(list "info.rkt") #f]
       [(or (list (regexp #rx"[.]rkt$"))
-           (list (or "audio" "data" "text" "vision") _ ... (regexp #rx"[.]rkt$")))
+           (cons (or "audio" "data" "text" "vision")
+                 (app last (regexp #rx"[.]rkt$"))))
        (~>> (path-replace-extension relative #"")
             path->string
             (string-append "torch/")

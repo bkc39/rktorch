@@ -1,16 +1,8 @@
 #lang scribble/manual
 
 @(require "common.rkt"
-          (for-label racket/base
-                     racket/contract
-                     (only-in racket/string string-replace)
-                     (only-in torch backward! copy! lambda~> manual-seed!
-                              mul native-collect-at-troughs prop:to randn
-                              relu tensor->list tensor? to to-able?
-                              with-no-grad zeros)
-                     (only-in torch/data/loader in-dataloader)
-                     torch/nn
-                     torch/private/contract))
+          torch/scribblings/labels
+          (for-label (only-in torch/data/loader in-dataloader)))
 
 @title{Layers}
 
@@ -152,8 +144,8 @@ follows a lowercase letter or a digit, then downcases:
 @racket[conv2d?], @racket[MaxPool2d] exports @racket[max-pool2d?].
 @racket[#:predicate] names the exported predicate instead.  Both names
 are bound in the defining module, so @racket[contract-expr] may use the
-lowercase one as its range.  Like @racket[define/contract-out], the clause
-is allowed only at module level.
+lowercase one as its range.  The clause is allowed only at module
+level.
 
 @racketblock[
 (define-layer Conv2d (kernel-size stride padding weight bias)
@@ -670,7 +662,7 @@ of @racket[m]'s kind and configuration, in its mode, whose every child
 @racket[c] registered under @racket[name] is replaced by
 @racket[(child name c)], and whose every tensor, its own parameters and
 buffers and the tensors in its plain fields, is replaced by
-@racket[(tensor t)]. It does not recurse by itself; @racket[child] decides
+@racket[(tensor _t)]. It does not recurse by itself; @racket[child] decides
 what each child becomes. @racket[layer-copy] passes a @racket[child] that
 copies each child the same way and a @racket[tensor] that copies each
 tensor, both remembering what they have done, so shared values stay

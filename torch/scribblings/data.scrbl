@@ -1,13 +1,7 @@
 #lang scribble/manual
 
-@(require (for-label (except-in racket/base length)
-                     racket/contract
-                     racket/sequence
-                     (only-in torch
-                              device? draw-seed generator? index-select length
-                              make-generator narrow randn randperm seed/c select
-                              size/c stack tensor tensor?)
-                     torch/data/loader))
+@(require torch/scribblings/labels
+          (for-label torch/data/loader))
 
 @title{Datasets and loaders}
 

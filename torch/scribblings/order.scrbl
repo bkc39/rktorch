@@ -1,12 +1,6 @@
 #lang scribble/manual
 
-@(require (for-label (except-in racket/base sort)
-                     racket/contract/base
-                     (only-in torch
-                              argsort generator? log-softmax make-generator
-                              manual-seed! multinomial softmax sort tensor?
-                              topk)
-                     (only-in torch/nn nll-loss)))
+@(require torch/scribblings/labels)
 
 @title{Ordering and sampling}
 

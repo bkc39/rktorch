@@ -3,12 +3,8 @@
           (only-in racket/list drop-right last)
           (only-in racket/string string-join)
           "../common.rkt"
-          (for-label (except-in racket/base
-                                abs cos exp log sin sort sqrt max min length
-                                + - * / < <= > >=)
-                     torch
-                     torch/nn
-                     torch/vision/image
+          torch/scribblings/labels
+          (for-label torch/vision/image
                      torch/vision/imagenet
                      torch/vision/resnet
                      torch/vision/transforms

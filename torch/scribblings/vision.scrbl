@@ -1,15 +1,8 @@
 #lang scribble/manual
 
 @(require "common.rkt"
-          (for-label racket/base
-                     racket/contract
-                     (only-in torch cuda-if-available device/c draw-seed generator?
-                              make-generator matmul narrow randn-like
-                              scaled-dot-product-attention tensor?
-                              to-dtype upsample-nearest2d)
-                     torch/data/loader
-                     (only-in torch/nn Conv2d Dropout Embedding GroupNorm Linear
-                              define-layer load-state! sinusoidal-positions)
+          torch/scribblings/labels
+          (for-label torch/data/loader
                      torch/vision/cifar10
                      torch/vision/hymenoptera
                      torch/vision/image
@@ -219,8 +212,8 @@ features. Every block's output on the way down is concatenated back in on
 the way up. With @racket[classes] the network is class-conditional: an
 @racket[Embedding] of that many labels plus one null label, added to the
 time embedding, so a label of @racket[classes] means "no label" for
-classifier-free guidance. Called as @racket[(net x t y)] it returns the
-noise estimate for @racket[x] at timesteps @racket[t] and int64 labels
+classifier-free guidance. Called as @racket[(net x _t y)] it returns the
+noise estimate for @racket[x] at timesteps @racket[_t] and int64 labels
 @racket[y], which is @racket[#f] for an unconditional network. The
 default network has 35.7 million parameters.
 }
