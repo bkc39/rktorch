@@ -184,8 +184,9 @@ against:
 - [A two-layer perceptron](examples/racket/04-mlp.rkt)
 - [A convolutional network on MNIST](examples/racket/05-mnist.rkt), trained on
   shuffled minibatches from a dataloader
-- [A character-level GPT](examples/racket/06-gpt.rkt), with
-  [training](scripts/train-gpt.rkt) and [generation](scripts/generate-gpt.rkt) scripts
+- [A character-level GPT](examples/racket/06-gpt.rkt) on the library's
+  transformer layers, with [training](scripts/train-gpt.rkt) and
+  [generation](scripts/generate-gpt.rkt) scripts
 - [Speech recognition on LibriSpeech](examples/racket/07-asr.rkt): a spectral
   front end, a transformer encoder-decoder, and CTC, with a
   [training script](scripts/train-asr.rkt)
