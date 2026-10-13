@@ -1,12 +1,13 @@
 #lang racket/base
 
-;; Runner + tests for the literate example torch/examples/00-randn.rkt.
+;; Runner + tests for the literate example
+;; torch/scribblings/examples/00-randn.rkt.
 ;; The example itself is a #lang scribble/lp2 program (woven into the manual);
 ;; lp2 submodules can't see chunk-level bindings, so main/test live here and
 ;; require the example's provides.
 
 (require torch
-         torch/examples/00-randn)
+         torch/scribblings/examples/00-randn)
 
 (module+ main
   (define t (run-example))

@@ -8,8 +8,8 @@
          (only-in racket/format ~r)
          (only-in racket/path path-only)
          torch
-         (only-in torch/examples/06-gpt generate gpt pick-device)
          torch/nn
+         (only-in torch/scribblings/examples/06-gpt generate gpt pick-device)
          (only-in torch/text/data
                   contiguous-blocks
                   encode

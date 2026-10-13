@@ -3,8 +3,8 @@
 (require (only-in racket/list first last)
          (only-in racket/math nan?)
          torch
-         torch/examples/12-char-rnn
-         torch/nn)
+         torch/nn
+         torch/scribblings/examples/12-char-rnn)
 
 (module+ main
   (require (only-in "private/env.rkt" env-number))

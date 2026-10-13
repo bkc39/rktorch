@@ -1,5 +1,5 @@
-"""Parity twin of torch/examples/04-mlp.rkt: seeded 4-8-2 MLP, 5 SGD steps;
-prints per-step losses + flattened post-training parameters."""
+"""Parity twin of torch/scribblings/examples/04-mlp.rkt: seeded 4-8-2 MLP, 5
+SGD steps; prints per-step losses + flattened post-training parameters."""
 
 import json
 

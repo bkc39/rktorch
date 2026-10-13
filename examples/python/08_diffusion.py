@@ -1,7 +1,7 @@
-"""Parity twin of torch/examples/08-diffusion.rkt: same seed, the same UNet
-in the same declaration order (a small configuration of the DDPM CIFAR-10
-network: base 64, two levels, attention at 16x16, no dropout), a linear
-schedule, 5 full-batch Adam steps on the committed CIFAR-10 fixture with
+"""Parity twin of torch/scribblings/examples/08-diffusion.rkt: same seed, the
+same UNet in the same declaration order (a small configuration of the DDPM
+CIFAR-10 network: base 64, two levels, attention at 16x16, no dropout), a
+linear schedule, 5 full-batch Adam steps on the committed CIFAR-10 fixture with
 timesteps and noise drawn on the CPU."""
 
 import json

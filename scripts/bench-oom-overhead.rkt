@@ -6,9 +6,12 @@
 
 (require racket/format
          torch
-         (only-in torch/examples/04-mlp [run-example mlp-run])
-         (only-in torch/examples/05-mnist [run-example mnist-run])
-         (only-in torch/examples/06-gpt [run-example gpt-run]))
+         (only-in torch/scribblings/examples/04-mlp
+                  [run-example mlp-run])
+         (only-in torch/scribblings/examples/05-mnist
+                  [run-example mnist-run])
+         (only-in torch/scribblings/examples/06-gpt
+                  [run-example gpt-run]))
 
 (define (time-once thunk)
   (collect-garbage)

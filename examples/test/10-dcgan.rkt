@@ -1,12 +1,12 @@
 #lang racket/base
 
-;; Runner + tests for the literate torch/examples/10-dcgan.rkt.
+;; Runner + tests for the literate torch/scribblings/examples/10-dcgan.rkt.
 
 (require (except-in racket/list argmax flatten take)
          (only-in racket/math nan?)
          torch
-         torch/examples/10-dcgan
-         torch/nn)
+         torch/nn
+         torch/scribblings/examples/10-dcgan)
 
 (module+ main
   (require (only-in "private/env.rkt" env-number))

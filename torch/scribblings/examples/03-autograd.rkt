@@ -26,8 +26,9 @@ Racket exactly as in Python — refuses gradients on integer tensors.
   (backward! (~> x (* x) Σ))
   (grad x))]
 
-The matching @filepath{python/03_autograd.py} runs the same computation in
-PyTorch; both sides are deterministic, so the cross-test checks exact values.
+The matching @filepath{examples/python/03_autograd.py} runs the same
+computation in PyTorch; both sides are deterministic, so the cross-test
+checks exact values.
 
 @chunk[<*>
   <r03-require>

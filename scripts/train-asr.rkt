@@ -9,10 +9,10 @@
          torch
          (only-in torch/audio/librispeech
                   librispeech-utterances load-utterance utterance-transcript)
-         (only-in torch/examples/07-asr
+         torch/nn
+         (only-in torch/scribblings/examples/07-asr
                   evaluate greedy-decode pick-device train-librispeech
-                  transcribe utterance-features)
-         torch/nn)
+                  transcribe utterance-features))
 
 (define (env-number name default)
   (define v (getenv name))

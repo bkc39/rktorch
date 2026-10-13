@@ -424,8 +424,9 @@
               runHook preCheck
               # python-cross-test self-skips when python3 `torch` is absent.
               raco test ./torch/
-              # Each torch/examples/NN-name.rkt is a literate scribble/lp2
-              # program; its runner + RackUnit checks live in examples/test/.
+              # Each torch/scribblings/examples/NN-name.rkt is a literate
+              # scribble/lp2 program; its runner + RackUnit checks live in
+              # examples/test/.
               raco test examples/test/
               runHook postCheck
             '';

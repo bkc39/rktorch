@@ -3,8 +3,8 @@
 (require (only-in racket/list first last [take list-take])
          (only-in racket/math nan?)
          torch
-         torch/examples/13-translation
          torch/nn
+         torch/scribblings/examples/13-translation
          torch/text/translation)
 
 (module+ main

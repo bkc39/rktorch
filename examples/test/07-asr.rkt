@@ -7,8 +7,8 @@
          (only-in torch/audio/librispeech
                   librispeech-utterances load-librispeech-fixture)
          (only-in torch/audio/metrics cer wer)
-         torch/examples/07-asr
-         torch/nn)
+         torch/nn
+         torch/scribblings/examples/07-asr)
 
 (module+ main
   (require (only-in "private/env.rkt" env-number))

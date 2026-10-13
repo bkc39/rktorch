@@ -128,7 +128,7 @@ with `backward!` outside the form as PyTorch recommends). From
   `Downsample` `Upsample` `UNet` (the DDPM CIFAR-10 network by default:
   `#:base #:mults #:blocks #:attention #:dropout`, `#:classes` for a
   class-conditional net with a null label); the training loop is
-  `torch/examples/08-diffusion.rkt`
+  `torch/scribblings/examples/08-diffusion.rkt`
 - vision (`torch/vision/cifar10.rkt`, #84): `load-cifar10` (binary archive
   cached and unpacked in memory, float32 `[N 3 32 32]` in `[-1, 1]` plus
   int64 labels), `cifar10-dataset #:device`, `cifar10-label-names`,
@@ -141,29 +141,30 @@ with `backward!` outside the form as PyTorch recommends). From
   ants and bees (`hymenoptera-dataset` `hymenoptera-root`
   `hymenoptera-cached?`, zip checked by size and SHA-256 through
   `torch/private/download.rkt`, shared with the weights); the fine-tune
-  example is `torch/examples/15-finetune.rkt`, with a `random-resized-crop`
-  in the transforms
+  example is `torch/scribblings/examples/15-finetune.rkt`, with a
+  `random-resized-crop` in the transforms
 - ImageNet networks (`torch/vision/resnet.rkt`, #199): `resnet18`
   `resnet34` `resnet50` (`#:pretrained?`, `#:classes`; another head size
   keeps the loaded backbone and starts a fresh `fc`), `ImageNetResNet
   blocks #:block #:classes`, `Bottleneck`, `torchvision-key` (the load
   rename: `downsample` is `shortcut`, `_` is `-`); `imagenet-classes`
   (`torch/vision/imagenet.rkt`, label order) and `imagenet-preprocess`;
-  the predict example is `torch/examples/14-imagenet.rkt`, parity against
-  torchvision in `imagenet-parity-test.rkt` (default shell, cached weights)
+  the predict example is `torch/scribblings/examples/14-imagenet.rkt`,
+  parity against torchvision in `imagenet-parity-test.rkt` (default shell,
+  cached weights)
 - VGG (`torch/vision/vgg.rkt`, #202): `vgg16-features #:pretrained?`, the
   convolutional half of VGG-16 as one `features` child, a `Sequential` of
   31 steps in torchvision's slots (so `features.N.weight` loads without a
   rename; walk it with `in-layers` for activations); `vgg16-features?`.
-  The style-transfer example is `torch/examples/16-style-transfer.rkt`;
-  its runner's test holds it to `torch/tests/python/style_transfer.py`
-  (default shell, cached weights). A test under `torch/tests/` cannot
-  require an example: the flake installs `torch/` as a copied package
+  The style-transfer example is
+  `torch/scribblings/examples/16-style-transfer.rkt`; its runner's test
+  holds it to `torch/tests/python/style_transfer.py` (default shell, cached
+  weights).
 - resnet (`torch/vision/resnet.rkt`, #152): `BasicBlock` and `ResNet`
   (`#:classes #:base #:blocks`, ResNet-18 for 32x32 images by default,
   bias-free convolutions under `BatchNorm2d`); the training loop with
   device-side augmentation, SGD under `one-cycle-lr` and `with-autocast` is
-  `torch/examples/09-resnet.rkt`
+  `torch/scribblings/examples/09-resnet.rkt`
 - transforms (`torch/vision/transforms.rkt`, #152): `random-horizontal-flip
   #:p` and `random-crop #:padding` on an image batch where it lives; each
   takes `#:generator` and draws one seed per batch from it, so a seeded
@@ -195,9 +196,10 @@ with `backward!` outside the form as PyTorch recommends). From
   `src/torchrkt/detail/stb_image.c`; PNGs match
   torchvision.io exactly, JPEGs within a count or two
   (`image-parity-test.rkt`, against torchvision in both shells)
-- generative examples on MNIST (#152): `torch/examples/10-dcgan.rkt` (a
-  DCGAN shrunk to 28x28, `ConvTranspose2d` and `BatchNorm2d` in the
-  generator, `leaky-relu` in the discriminator, two `adam`s at 2e-4 with
+- generative examples on MNIST (#152):
+  `torch/scribblings/examples/10-dcgan.rkt` (a DCGAN shrunk to 28x28,
+  `ConvTranspose2d` and `BatchNorm2d` in the generator, `leaky-relu` in the
+  discriminator, two `adam`s at 2e-4 with
   `#:beta1 0.5`) and `11-vae.rkt` (the linear VAE, the reparameterization
   with the caller's noise, the reference loss over the batch); both write a
   10x10 sample grid per epoch through `image-grid` and `write-ppm`
@@ -289,10 +291,11 @@ on the hand-written shim) live on `torch` beside the other functional ops;
 a causal mask built by hand is `(masked-fill scores (eq (tril (ones T T)) 0)
 -inf.0)`, whose mask is `#t` = hidden, while the fused kernel's boolean
 `#:mask` is `#t` = attend, as PyTorch's function is (the layers'
-`#:causal?` flags build the mask themselves; `torch/examples/06-gpt.rkt`
-is one standard `TransformerEncoder` call, pre-norm with `#:norm #t`,
-applied with `#:causal? #t`, #210 L3). `define-layer` is the Python-style
-`nn.Module` analog: `#:init` is the constructor body and assigns declared
+`#:causal?` flags build the mask themselves;
+`torch/scribblings/examples/06-gpt.rkt` is one standard `TransformerEncoder`
+call, pre-norm with `#:norm #t`, applied with `#:causal? #t`, #210 L3).
+`define-layer` is the Python-style `nn.Module` analog: `#:init` is the
+constructor body and assigns declared
 fields with `set!`, a field's value classifies it at construction
 (`Parameter?`, `Buffer?`, `layer?`, `#f` for absent, anything else plain),
 `(with-mode body)` binds `mode` (`'train` or `'eval`, predicates `training?`/`evaluating?`) in `#:forward` to the instance's own mode (`train!`/`eval!` set it and recurse; every layer starts in `'train`),
@@ -631,6 +634,8 @@ whose expansions need the module's full export set (`racket/runtime-path`,
   CPU shim, and a deleted or truncated shim is replaced rather than skipped. After
   changing C++, `nix run .#copy-native-libs` (or re-enter the shell) before
   `raco test`.
+- `scribblings/examples/` — the literate `scribble/lp2` programs woven into
+  the guide; exempt from the import convention.
 
 ### Codegen (`codegen/`)
 
@@ -710,8 +715,8 @@ express, in one or two lines:
 Never keepers: narration of what the next line does, why a change was
 made (commit message's job), review-round archaeology, restated names, or
 issue-number tags on every mention of a mechanism. Exempt: the literate
-examples (`torch/examples/*.rkt`, prose-by-design) and the python
-parity twins (`examples/python/*.py`, whose docstrings identify the
+examples (`torch/scribblings/examples/*.rkt`, prose-by-design) and the
+python parity twins (`examples/python/*.py`, whose docstrings identify the
 Racket twin they mirror).
 
 ## Validating arguments

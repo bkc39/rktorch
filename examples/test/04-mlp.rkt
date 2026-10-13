@@ -1,11 +1,12 @@
 #lang racket/base
 
-;; Runner + tests for the literate example torch/examples/04-mlp.rkt.
+;; Runner + tests for the literate example
+;; torch/scribblings/examples/04-mlp.rkt.
 
 (require (except-in racket/list argmax flatten take)
          torch
-         torch/examples/04-mlp
-         torch/nn)
+         torch/nn
+         torch/scribblings/examples/04-mlp)
 
 (module+ main
   (define-values (losses net device) (run-example))

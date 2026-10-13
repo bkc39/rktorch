@@ -1,12 +1,12 @@
 #lang racket/base
 
-;; Runner + tests for the literate torch/examples/09-resnet.rkt.
+;; Runner + tests for the literate torch/scribblings/examples/09-resnet.rkt.
 
 (require (except-in racket/list argmax flatten take)
          (only-in racket/math nan?)
          torch
-         torch/examples/09-resnet
          torch/nn
+         torch/scribblings/examples/09-resnet
          (only-in torch/vision/cifar10 load-cifar10-fixture))
 
 (module+ main

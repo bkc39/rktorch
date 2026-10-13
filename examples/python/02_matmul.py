@@ -1,4 +1,4 @@
-"""Parity twin of torch/examples/02-matmul.rkt: a @ a.T."""
+"""Parity twin of torch/scribblings/examples/02-matmul.rkt: a @ a.T."""
 
 import json
 

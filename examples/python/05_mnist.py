@@ -1,5 +1,6 @@
-"""Parity twin of torch/examples/05-mnist.rkt: same seed, same convnet in
-the same declaration order, 5 full-batch Adam steps on the committed fixture."""
+"""Parity twin of torch/scribblings/examples/05-mnist.rkt: same seed, same
+convnet in the same declaration order, 5 full-batch Adam steps on the committed
+fixture."""
 
 import json
 import os

@@ -1,4 +1,4 @@
-"""Parity twin of torch/examples/07-asr.rkt: same seed, same hybrid
+"""Parity twin of torch/scribblings/examples/07-asr.rkt: same seed, same hybrid
 CTC/attention encoder-decoder in the same declaration order, 5 Adam steps
 on the committed MISTER QUILTER fixture.
 

@@ -29,9 +29,9 @@ rather than seeded.
   (define x (tensor '((1.0 -2.0) (3.0 -4.0))))
   (* (+ x 1) (relu x)))]
 
-The harness @filepath{test/01-arith.rkt} pins the expected values; the
-matching @filepath{python/01_arith.py} computes the same expression in PyTorch
-for the cross-test.
+The harness @filepath{examples/test/01-arith.rkt} pins the expected values;
+the matching @filepath{examples/python/01_arith.py} computes the same
+expression in PyTorch for the cross-test.
 
 @chunk[<*>
   <r01-require>

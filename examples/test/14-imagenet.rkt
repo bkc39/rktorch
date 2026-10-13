@@ -1,6 +1,6 @@
 #lang racket/base
 
-;; Runner + tests for the literate torch/examples/14-imagenet.rkt.
+;; Runner + tests for the literate torch/scribblings/examples/14-imagenet.rkt.
 
 (require racket/runtime-path)
 
@@ -16,7 +16,7 @@
 
 (module+ main
   (require (only-in racket/format ~r)
-           torch/examples/14-imagenet)
+           torch/scribblings/examples/14-imagenet)
   ;; The headline run: torchvision's ResNet-18 (fetches the 47 MB
   ;; checkpoint once) on the paths given, or on the fixture photographs.
   (define args (vector->list (current-command-line-arguments)))
@@ -33,7 +33,7 @@
   (require (only-in racket/list first)
            rackunit
            (only-in torch tensor-shape)
-           torch/examples/14-imagenet
+           torch/scribblings/examples/14-imagenet
            (only-in torch/vision/weights pretrained-weights-cached?))
   ;; Offline: random weights on the CPU, so only the plumbing is checked.
   (define photos (fixture-photos))

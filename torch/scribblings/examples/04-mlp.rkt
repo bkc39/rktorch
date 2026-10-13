@@ -42,10 +42,10 @@ chose so callers can report it.
 
 @bold{The loop.} Each step: clear gradients, forward, MSE loss, backward,
 update. On the CPU path, with the same seed this matches
-@filepath{python/04_mlp.py} draw-for-draw: the two @racket[Linear] inits consume
-the RNG exactly like @tt{nn.Linear}, then the batch is sampled identically. (The
-GPU uses its own RNG, so CUDA and MPS runs train just as well but draw
-different values.)
+@filepath{examples/python/04_mlp.py} draw-for-draw: the two @racket[Linear]
+inits consume the RNG exactly like @tt{nn.Linear}, then the batch is sampled
+identically. (The GPU uses its own RNG, so CUDA and MPS runs train just as
+well but draw different values.)
 
 @bold{Restoring the default.} @racket[set-default-device!] is a process-wide
 side effect, so @racket[run-example] captures the prior default and wraps the

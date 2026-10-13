@@ -104,7 +104,7 @@ the parity test holds all three networks to.
 
 The four photographs committed with the library, two ants and two bees
 in the public domain, and ResNet-18's five most likely classes for each,
-as @filepath{torch/examples/14-imagenet.rkt} reported them on
+as @filepath{torch/scribblings/examples/14-imagenet.rkt} reported them on
 @(hash-ref results 'device) on @(hash-ref results 'date). The ant on a
 stalk of hedge mustard is the one the network gets wrong: the yellow
 flowers fill most of the frame, so "rapeseed" comes first and "ant"

@@ -99,9 +99,10 @@ produced by the library at build time. An example that would need a GPU or
 a download must not be written as a live one.
 
 The guide's "Worked examples" part weaves the literate programs under
-`torch/examples/` into the manual by collection path
-(`guide/examples.scrbl` includes `(submod torch/examples/NN-name doc)`), so
-a `raco pkg install --copy` of `torch/` renders them too. Their harnesses
+`torch/scribblings/examples/` into the manual by collection path
+(`guide/examples.scrbl` includes
+`(submod torch/scribblings/examples/NN-name doc)`), so a
+`raco pkg install --copy` of `torch/` renders them too. Their harnesses
 (`examples/test/`) and PyTorch twins (`examples/python/`) stay outside the
 package.
 

@@ -13,7 +13,7 @@
          (only-in racket/pretty pretty-write)
          racket/runtime-path
          torch
-         torch/examples/16-style-transfer
+         torch/scribblings/examples/16-style-transfer
          (only-in torch/vision/transforms convert-image-dtype))
 
 (define-runtime-path content-path

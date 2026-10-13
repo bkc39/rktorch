@@ -1,6 +1,6 @@
-"""Parity twin of torch/examples/12-char-rnn.rkt: same seed, the same
-embedding -> LSTM -> linear model in the same declaration order, 5 full-batch
-Adam steps with gradient-norm clipping on the committed fixture."""
+"""Parity twin of torch/scribblings/examples/12-char-rnn.rkt: same seed, the
+same embedding -> LSTM -> linear model in the same declaration order, 5
+full-batch Adam steps with gradient-norm clipping on the committed fixture."""
 
 import json
 import os

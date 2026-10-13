@@ -1,10 +1,10 @@
 """torchvision's VGG-16 features and five steps of the style transfer in
-torch/examples/16-style-transfer.rkt, for style-transfer-parity-test.rkt.
-The weights come from the features-only safetensors file the Racket side
-loads (RKTORCH_PARITY_WEIGHTS names its directory). The content and style
-images travel back as the pixels used here, so both sides start from the
-same tensors: the activations at the five style layers, then each step's
-two losses and the final image.
+torch/scribblings/examples/16-style-transfer.rkt, for
+style-transfer-parity-test.rkt. The weights come from the features-only
+safetensors file the Racket side loads (RKTORCH_PARITY_WEIGHTS names its
+directory). The content and style images travel back as the pixels used
+here, so both sides start from the same tensors: the activations at the
+five style layers, then each step's two losses and the final image.
 """
 import json
 import os

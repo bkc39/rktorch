@@ -1,7 +1,8 @@
-"""Parity twin of torch/examples/13-translation.rkt: same seed, the same GRU
-encoder and Bahdanau-attention GRU decoder in the same declaration order, the
-same data preparation over the committed eng-fra excerpt, 5 full-batch Adam
-steps with a per-batch teacher-forcing coin and gradient-norm clipping."""
+"""Parity twin of torch/scribblings/examples/13-translation.rkt: same seed, the
+same GRU encoder and Bahdanau-attention GRU decoder in the same declaration
+order, the same data preparation over the committed eng-fra excerpt, 5
+full-batch Adam steps with a per-batch teacher-forcing coin and gradient-norm
+clipping."""
 
 import json
 import os

@@ -1,6 +1,6 @@
 #lang racket/base
 
-;; Runner + tests for the literate torch/examples/15-finetune.rkt.
+;; Runner + tests for the literate torch/scribblings/examples/15-finetune.rkt.
 
 (require racket/runtime-path)
 
@@ -8,7 +8,7 @@
 
 (module+ main
   (require (only-in racket/format ~r)
-           torch/examples/15-finetune)
+           torch/scribblings/examples/15-finetune)
   ;; The headline run: the tutorial's ants and bees (downloads and caches
   ;; the 47 MB archive once) on torchvision's ResNet-18 (and its 47 MB
   ;; checkpoint), both phases, validation accuracy after every epoch.
@@ -27,8 +27,8 @@
            (only-in racket/math nan?)
            rackunit
            torch
-           torch/examples/15-finetune
            torch/nn
+           torch/scribblings/examples/15-finetune
            (only-in torch/vision/image-folder image-folder))
   ;; Offline and deterministic: random weights, the four fixture photos as
   ;; both sets, one epoch per phase in batches of two, on the CPU.

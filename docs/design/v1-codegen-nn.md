@@ -268,7 +268,7 @@ mutually exclusive**: ship the VarStore runtime first, then layer the
 
 Each phase is independently green in CI. Example-driven per `torch-plan.md`:
 every op/feature lands with an `examples/python/NN_*.py` +
-`torch/examples/NN-*.rkt` pair and a tolerant parity test.
+`torch/scribblings/examples/NN-*.rkt` pair and a tolerant parity test.
 
 1. **Tensor tranche** (hand-written shim widening v0): creation
    (`zeros/ones/full/arange/eye/randn`, `tensor` from a flat vector + shape),
