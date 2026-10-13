@@ -55,10 +55,13 @@
 
 (struct unsettled (reason))
 
-(define (measure-cell p o n workers)
+(define (settle-or-stop! p when-settling)
   (unless (settle-finalizers! p)
-    (raise (unsettled (format "~a: finalizers did not settle in ~a major collections before n = ~a, ~a workers"
-                              (prototype-name p) settle-round-limit n workers))))
+    (raise (unsettled (format "~a: finalizers did not settle in ~a major collections ~a"
+                              (prototype-name p) settle-round-limit when-settling)))))
+
+(define (measure-cell p o n workers)
+  (settle-or-stop! p (format "before n = ~a, ~a workers" n workers))
   (define runs (prototype-finalizer-runs p))
   (define deadline (+ (current-inexact-monotonic-milliseconds)
                       (* 1000 seconds-per-cell)))
@@ -129,5 +132,6 @@
                        (string-join (map (lambda (c) (fmt-rate (cell-finalizer-runs c))) cells)
                                     " / ")
                        ((prototype-live-bytes p))
-                       (load-average)))))))
+                       (load-average)))))
+      (settle-or-stop! p "after its last row, before the next allocator")))
   (printf "\nload average (1 min) at end: ~a\n" (load-average)))
