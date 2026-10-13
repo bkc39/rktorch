@@ -2,6 +2,7 @@
 
 (require (only-in racket/format ~a ~r)
          (only-in racket/function const)
+         (only-in racket/list argmax)
          (only-in racket/match match match-define)
          (only-in racket/math exact-round)
          (only-in racket/string string-join)
@@ -41,11 +42,6 @@
 
 (struct cell (workers rate gc-share longest-gap made calls pending unaccounted))
 
-(define (no-count p)
-  (cond
-    [(prototype-finalizer-frees p) "uncounted"]
-    [else "n/a"]))
-
 (define (measure-cell p o n workers mode)
   (settle! p (format "before n = ~a, ~a workers" n workers))
   (define calls (prototype-finalizer-calls p))
@@ -62,6 +58,7 @@
                   #:setup (lambda () (at-set-num-threads 1))
                   #:counters (list made-so-far (or calls (const 0)))
                   #:main mode
+                  #:on-start (lambda () (tally-open! t))
                   #:on-end (lambda () (tally-close! t))
                   #:stop stop))
   (define calls-after (and calls (calls)))
@@ -73,7 +70,7 @@
       [calls (values window-calls
                      (- calls-settled calls-after)
                      (- (made-so-far) (- calls-settled calls-before)))]
-      [else (values (no-count p) (no-count p) (no-count p))]))
+      [else (values #f #f #f)]))
   (cell workers
         (/ made (ms->seconds (span-ms window)))
         (/ (span-gc-ms window) (span-ms window))
@@ -83,21 +80,24 @@
         pending
         unaccounted))
 
+(define (worst-unaccounted samples)
+  (match (map cell-unaccounted samples)
+    [(cons #f _) #f]
+    [ks (argmax abs ks)]))
+
 (define (median-cell workers samples)
   (define (median-by field)
-    (match (map field samples)
-      [(list (? real? xs) ...) (median-of xs)]
-      [(cons marker _) marker]))
-  (define middle (middle-by cell-made samples))
-  (define middle-gap (middle-by (lambda (c) (gap-ms (cell-longest-gap c))) samples))
+    (median-of (map field samples)))
+  (define median-made-cell (middle-by cell-made samples))
+  (define median-gap-cell (middle-by (lambda (c) (gap-ms (cell-longest-gap c))) samples))
   (cell workers
         (median-by cell-rate)
         (median-by cell-gc-share)
-        (cell-longest-gap middle-gap)
-        (cell-made middle)
-        (cell-calls middle)
-        (cell-pending middle)
-        (median-by cell-unaccounted)))
+        (cell-longest-gap median-gap-cell)
+        (cell-made median-made-cell)
+        (cell-calls median-made-cell)
+        (cell-pending median-made-cell)
+        (worst-unaccounted samples)))
 
 (define (measured p o n workers mode)
   (median-cell workers (repeat-runs repeats (lambda () (measure-cell p o n workers mode)))))
@@ -108,10 +108,11 @@
 (define (cell-for cells workers)
   (findf (lambda (c) (and c (= (cell-workers c) workers))) cells))
 
-(define (count->string k)
+(define (count->string p k)
   (cond
-    [(real? k) (~a (exact-round k))]
-    [else k]))
+    [k (~a (exact-round k))]
+    [(prototype-finalizer-frees p) "uncounted"]
+    [else "n/a"]))
 
 (define ((or-dash show) c)
   (if c (show c) "-"))
@@ -121,8 +122,8 @@
       (map (or-dash show) _)
       (string-join " / ")))
 
-(define (count-column cells field)
-  (by-column cells (lambda (c) (count->string (field c)))))
+(define (count-column p cells field)
+  (by-column cells (lambda (c) (count->string p (field c)))))
 
 (define (scaling one eight mode)
   (cond
@@ -145,10 +146,10 @@
              (list (scaling one eight mode)
                    (~r (cell-gc-share eight) #:precision 2)
                    (by-column cells (lambda (c) (gap->string (cell-longest-gap c))))
-                   (count-column cells cell-made)
-                   (count-column cells cell-calls)
-                   (count-column cells cell-pending)
-                   (count-column cells cell-unaccounted)
+                   (count-column p cells cell-made)
+                   (count-column p cells cell-calls)
+                   (count-column p cells cell-pending)
+                   (count-column p cells cell-unaccounted)
                    ((prototype-live-bytes p))
                    (load-average))))))
 
@@ -161,7 +162,7 @@
    (append '("allocator" "n" "main thread" "main alone")
            (for/list ([w (in-list worker-counts)]) (format "~a workers" w))
            '("8 / 1 workers" "GC share, 8 workers" "longest gap ms" "made" "finalizer calls"
-             "pending at stop" "unaccounted" "ledger bytes after" "load")))
+             "pending at stop" "unaccounted, worst run" "ledger bytes after" "load")))
   (with-handlers ([exn:fail:unsettled?
                    (lambda (e)
                      (printf "\nstopped: ~a\n" (exn-message e)))])

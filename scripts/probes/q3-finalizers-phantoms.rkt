@@ -9,23 +9,24 @@
          "common.rkt")
 
 (define default-threads 8)
+(define drain-limit-ms 60000)
 
-(define (collect-until done? #:limit-ms [limit-ms 60000])
-  (define deadline (+ (now-ms) limit-ms))
+(define (collect-until done?)
+  (define deadline (+ (now-ms) drain-limit-ms))
   (define collecting
     (measure-span
      (lambda ()
-       (define rounds
-         (let loop ([rounds 1])
-           (collect-garbage 'major)
-           (sleep 0.02)
-           (cond
-             [(or (done?) (> (now-ms) deadline)) rounds]
-             [else (loop (add1 rounds))])))
-       (define-values (settled settling) (settle-wills!))
-       (cons (+ rounds settling) settled))))
-  (match-define (cons rounds settled?) (span-value collecting))
-  (values rounds (span-ms collecting) settled?))
+       (let loop ([rounds 1])
+         (collect-garbage 'major)
+         (sleep 0.02)
+         (cond
+           [(done?)
+            (define-values (settled settling) (settle-wills!))
+            (list (+ rounds settling) settled #f)]
+           [(> (now-ms) deadline) (list rounds #f #t)]
+           [else (loop (add1 rounds))])))))
+  (match-define (list rounds settled? timed-out?) (span-value collecting))
+  (values rounds (span-ms collecting) settled? timed-out?))
 
 (define (finalizer-round per-thread #:protect protect #:threads [threads default-threads])
   (define total (* threads per-thread))
@@ -42,7 +43,7 @@
                           (register-finalizer (make-vector 2 id)
                                               (lambda (_v)
                                                 (cas-update! (vector-ref runs id) add1))))))))))
-  (define-values (rounds drain-ms settled?)
+  (define-values (rounds drain-ms settled? timed-out?)
     (collect-until (lambda () (for/and ([id (in-range total)]) (positive? (run-count id))))))
   (define final-counts (build-list total run-count))
   (define never (count zero? final-counts))
@@ -52,6 +53,8 @@
                 (if (and settled? (zero? never) (zero? twice)) "yes" "NO")
                 (load-average))
           (cond
+            [timed-out? (format "finalizers still pending after ~a s of collections"
+                                (ms->seconds drain-limit-ms))]
             [(positive? never) (format "~a finalizers never ran" never)]
             [(not settled?) "wills still running after settling"]
             [else #f])))

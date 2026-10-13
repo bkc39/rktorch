@@ -60,6 +60,7 @@
                   #:setup (lambda () (at-set-num-threads 1))
                   #:counters (list (lambda () (tally-total t)) (prototype-finalizer-frees p))
                   #:main mode
+                  #:on-start (lambda () (tally-open! t))
                   #:on-end (lambda () (tally-close! t))
                   #:stop stop
                   #:on-wake (lambda () (set-box! peak (max (or (unbox peak) 0) (live))))))

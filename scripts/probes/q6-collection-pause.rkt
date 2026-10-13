@@ -13,6 +13,8 @@
 (define matmul-n 3072)
 (define stall-window-ms 300)
 
+(struct foreign-call (run release))
+
 (define (in-call-while call measure)
   (define inside (make-semaphore 0))
   (define-values (measured calls)
@@ -41,20 +43,17 @@
   (lambda () (timed (lambda () (collect-garbage kind)))))
 
 (define (measure-call call)
-  (define s (measure-span call))
-  ((span-value s))
+  (match-define (foreign-call run release) call)
+  (define s (measure-span run))
+  (release (span-value s))
   s)
 
 (define (sleep-call usleep-fn)
-  (lambda ()
-    (usleep-fn 1500000)
-    void))
+  (foreign-call (lambda () (usleep-fn 1500000)) void))
 
 (define (matmul-call matmul-fn)
   (define a (shim-randn matmul-n matmul-n))
-  (lambda ()
-    (define c (matmul-fn a a))
-    (lambda () (shim-free c))))
+  (foreign-call (lambda () (matmul-fn a a)) shim-free))
 
 (define (make-calls plain-matmul)
   (list (cons "none (worker parked on a semaphore)" #f)
