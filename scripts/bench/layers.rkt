@@ -4,6 +4,7 @@
          (only-in ffi/unsafe/alloc allocator)
          (only-in torch [add facade-add] randn reclaim-native-memory!)
          (only-in torch/foreign/error check-handle)
+         (only-in torch/foreign/raw/collector finalizer-runs)
          (only-in torch/foreign/raw/fault latched)
          (only-in torch/foreign/raw/memory
                   collect-and-drain!
@@ -58,9 +59,16 @@
                  (define t0 (current-inexact-monotonic-milliseconds))
                  (collect-and-drain!)
                  (define idle (- (current-inexact-monotonic-milliseconds) t0))
-                 (for ([_ (in-range n)]) (tr-add/retry a b))
+                 (define held (box (for/list ([_ (in-range n)]) (tr-add/retry a b))))
+                 (define runs (finalizer-runs))
                  (define t1 (current-inexact-monotonic-milliseconds))
+                 (set-box! held #f)
                  (collect-and-drain!)
-                 (- (current-inexact-monotonic-milliseconds) t1 idle))
+                 (define elapsed (- (current-inexact-monotonic-milliseconds) t1 idle))
+                 (define drained (- (finalizer-runs) runs))
+                 (cond
+                   [(= drained n) elapsed]
+                   [else (raise-user-error 'finalization "the drain freed ~a of ~a tensors"
+                                           drained n)]))
                #:reps drain
                #:self-timed? #t)))

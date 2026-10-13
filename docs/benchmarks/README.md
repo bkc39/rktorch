@@ -59,7 +59,8 @@ median, quartiles and IQR, and the load average before and after.
   the `_fun` call (with an explicit free), the fault latch, the allocator
   and its finalizer, accounting and the pressure check, the OOM retry,
   shape readback, dispatch and the facade contract. `finalization` is the
-  drain's cost per dead tensor.
+  drain's cost per dead tensor; the round fails unless the timed drain
+  frees every one.
 - **ops** — `add` 8x8, `matmul` 64 and 512, a 3-to-16-channel `conv2d` on
   one 32x32 image, and a 64-wide `Linear` forward and backward, each through
   the facade, unchecked (the defining module's binding) and raw (the
@@ -67,8 +68,8 @@ median, quartiles and IQR, and the load average before and after.
   with an `item`.
 - **contracts** — what each validation strategy costs, from AGENTS.md's
   "What the strategies cost", plus `log-mel-spectrogram` on the speech
-  fixture. Each strategy is a submodule, so a `cross` loop crosses a module
-  boundary and an `intra` loop does not. Callees come from their defining
+  fixture, `--scale` calls per round. Each strategy is a submodule, so a
+  `cross` loop crosses a module boundary and an `intra` loop does not. Callees come from their defining
   modules, never the contracted `torch` facade. Arguments arrive as
   parameters, since a literal lets the compiler fold an uncontracted callee
   away, and the shape loop cycles through eight tensors so the accessor is
@@ -132,7 +133,8 @@ checkouts records each one's commit, and the summary shows it per row.
 A child sees none of the caller's example variables (`EPOCHS`, `STEPS`,
 `EXCERPT`, `OUT`, ... as its runner reads them) except those its settings
 give. A failed example writes an `error` record (`case`, `variant`,
-`exit_code`, `error`), listed under Failures in the summary.
+`exit_code`, `error`, and `meta_from`: `child`, or `parent` when the child
+died before recording its own), listed under Failures in the summary.
 
 ## Baseline
 

@@ -147,8 +147,11 @@
    (workload 'cached-shape-read (n 1000000) (intra 'shape) (cross-loops shape-loop shape-wrap)
              (build-vector 8 (lambda (_) (randn 8 8))) #f)))
 
-(define (pipeline-case)
+(define (pipeline-case #:reps [reps 1])
   (define-values (samples rate) (load-audio-fixture))
   (bench-case 'log-mel-spectrogram
-              (lambda (_n) (log-mel-spectrogram samples #:sample-rate rate))
+              (lambda (n)
+                (for ([_ (in-range n)])
+                  (log-mel-spectrogram samples #:sample-rate rate)))
+              #:reps reps
               #:before reclaim-native-memory!))

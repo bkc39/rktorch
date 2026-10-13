@@ -11,8 +11,9 @@
          (only-in "crossings.rkt" crossing-cases)
          (only-in "e2e.rkt"
                   cache-env e2e-cases example-epochs-var example-name example-runner
-                  examples exn:fail:user:e2e-exit-code exn:fail:user:e2e-variant
-                  exn:fail:user:e2e? find-examples merged-settings settings->jsexpr)
+                  examples exn:fail:user:e2e-exit-code exn:fail:user:e2e-meta
+                  exn:fail:user:e2e-variant exn:fail:user:e2e? find-examples merged-settings
+                  settings->jsexpr)
          (only-in "harness.rkt"
                   busy-cores format-result host-meta load-average measure result->record
                   result-name summarize write-record)
@@ -106,7 +107,7 @@
       [(contracts)
        (for ([w (in-list (contract-workloads #:scale scale))])
          (measure-group 'contracts (cdr w) #:case-name (car w)))
-       (measure-group 'pipeline (list (pipeline-case)) #:unit "ms" #:scale 1)]
+       (measure-group 'pipeline (list (pipeline-case #:reps (n 1))) #:unit "ms" #:scale 1)]
       [(e2e)
        (run-e2e (if only (find-examples only) examples)
                 #:rounds (or rounds 1) #:full? full? #:variants variants #:cache cache
@@ -144,12 +145,14 @@
                      (lambda (e)
                        (fprintf log "~a\n" (exn-message e))
                        (define failed? (exn:fail:user:e2e? e))
+                       (define child-meta (and failed? (exn:fail:user:e2e-meta e)))
                        (emit (hasheq 'schema 1 'suite "e2e" 'group "error"
                                      'case (example-name ex)
                                      'variant (and failed? (exn:fail:user:e2e-variant e))
                                      'exit_code (and failed? (exn:fail:user:e2e-exit-code e))
                                      'error (exn-message e)
-                                     'meta meta)))])
+                                     'meta (or child-meta meta)
+                                     'meta_from (if child-meta "child" "parent"))))])
       (define results
         (measure (e2e-cases (list ex) #:scale scale #:variants with-cache #:on-run on-run
                             #:log log #:runner-for runner-for)
@@ -232,6 +235,7 @@
            (only-in "summary.rkt" read-records summary-markdown))
 
   (define-runtime-path stepper "fixtures/stepper.rkt")
+  (define-runtime-path broken "fixtures/broken.rkt")
   (define quiet (open-output-nowhere))
 
   (define (records-of thunk)
@@ -312,6 +316,18 @@
     (check-equal? (hash-ref summary 'settings) (hash-ref run 'settings))
     (check-true (for/or ([k (in-hash-keys (hash-ref summary 'settings))])
                   (regexp-match? #rx"^RKTORCH_.*_DIR$" (symbol->string k)))))
+
+  (test-case "a child that fails before its first step records its own meta"
+    (define fixture (example "stepper" '(("EPOCHS" . 1)) '(("EPOCHS" . 1)) "EPOCHS" 0 'first))
+    (match-define (list run failure)
+      (records-of (lambda (out)
+                    (run-e2e (list fixture) #:rounds 1 #:full? #f #:variants '((#f))
+                             #:cache #f #:max-load #f #:libtorch "x" #:out out #:log quiet
+                             #:runner-for (lambda (_ex) broken)))))
+    (check-equal? (map (lambda (r) (hash-ref r 'group)) (list run failure)) '("run" "error"))
+    (check-not-equal? (hash-ref failure 'exit_code) 0)
+    (check-equal? (hash-ref failure 'meta_from) "child")
+    (check-not-equal? (hash-ref (hash-ref failure 'meta) 'libtorch) "x"))
 
   (test-case "flags go before or after the suites"
     (define (parsed . argv)

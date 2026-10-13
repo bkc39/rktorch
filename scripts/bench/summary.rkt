@@ -2,7 +2,7 @@
 
 (require (only-in json read-json)
          (only-in racket/format ~a ~r)
-         (only-in racket/list append* remove-duplicates)
+         (only-in racket/list append* append-map remove-duplicates)
          (only-in racket/match match-define)
          (only-in racket/string string-join string-trim)
          (only-in "harness.rkt" paired-ratio)
@@ -11,11 +11,12 @@
 (provide read-records
          summary-markdown)
 
-(define (read-records paths)
-  (for*/list ([p (in-list paths)]
-              [r (in-port read-json (open-input-file p))]
-              #:when (hash? r))
+(define (records-in in)
+  (for/list ([r (in-port read-json in)] #:when (hash? r))
     r))
+
+(define (read-records paths)
+  (append-map (lambda (p) (call-with-input-file p records-in)) paths))
 
 (define (ref r . keys)
   (for/fold ([v r]) ([k (in-list keys)])

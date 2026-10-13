@@ -17,27 +17,30 @@
         (loop (cons (vector-ref event 2) acc))
         (reverse acc))))
 
+(define (write-steps out data)
+  (call-with-output-file out #:exists 'truncate
+    (lambda (port) (write-json data port))))
+
 (define (record-steps! runner out)
-  (managed-compile-zo runner)
   (define device-type (dynamic-require 'torch 'device-type))
   (define accelerator-if-available (dynamic-require 'torch 'accelerator-if-available))
   (define meta (host-meta #:device (device-type (accelerator-if-available))
                           #:libtorch ((dynamic-require 'torch 'torch-version))
                           #:threads (aten-threads)
                           #:repo torch-dir))
+  (write-steps out (hasheq 'meta meta))
+  (managed-compile-zo runner)
   (define receiver (make-log-receiver (current-logger) 'debug 'rktorch-step))
   (define t0 (current-inexact-monotonic-milliseconds))
   (dynamic-require `(submod (file ,runner) main) #f)
   (define wall (- (current-inexact-monotonic-milliseconds) t0))
   (define steps (map vector->list (drain receiver)))
-  (call-with-output-file out #:exists 'truncate
-    (lambda (port)
-      (write-json (hasheq 'wall_ms wall 'steps steps 'meta meta) port))))
+  (write-steps out (hasheq 'wall_ms wall 'steps steps 'meta meta)))
 
 (define (read-steps path)
   (define data (call-with-input-file path read-json))
-  (values (for/list ([s (in-list (hash-ref data 'steps))]) (list->vector s))
-          (hash-ref data 'wall_ms)
+  (values (map list->vector (hash-ref data 'steps '()))
+          (hash-ref data 'wall_ms #f)
           (hash-ref data 'meta #f)))
 
 (define (differences xs)
@@ -147,4 +150,13 @@
         (read-steps path)))
     (check-equal? events (list (vector 1 2.0 3)))
     (check-equal? wall 5.0)
-    (check-false meta)))
+    (check-false meta))
+
+  (test-case "a run that dies after the recorder starts leaves its meta"
+    (define-values (events wall meta)
+      (with-temporary-path (path (make-temporary-file "steps-~a.json"))
+        (write-steps path (hasheq 'meta (hasheq 'git_sha "abc")))
+        (read-steps path)))
+    (check-equal? events '())
+    (check-false wall)
+    (check-equal? meta (hasheq 'git_sha "abc"))))

@@ -30,7 +30,7 @@
 
 (struct example (name short full epochs-var warmup optimizer) #:transparent)
 
-(struct exn:fail:user:e2e exn:fail:user (variant exit-code))
+(struct exn:fail:user:e2e exn:fail:user (variant exit-code meta))
 
 (define examples
   (list (example "05-mnist" '(("EPOCHS" . 3)) '(("EPOCHS" . 3)) "EPOCHS" 0 'first)
@@ -155,7 +155,8 @@
                      (hash-ref analysis 'error) (hash-ref analysis 'exit_code))
              (current-continuation-marks)
              variant
-             (hash-ref analysis 'exit_code)))]
+             (hash-ref analysis 'exit_code)
+             (hash-ref analysis 'meta #f)))]
     [(pair? (hash-ref analysis 'epoch_s '()))
      (define epochs (hash-ref analysis 'epoch_s))
      (/ (* 1000.0 (apply + epochs)) (length epochs))]
