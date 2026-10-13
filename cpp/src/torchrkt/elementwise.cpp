@@ -50,7 +50,14 @@ TR_UNARY_OP(tr_sqrt, t->value.sqrt())
 TR_UNARY_OP(tr_relu, t->value.relu())
 TR_UNARY_OP(tr_sigmoid, t->value.sigmoid())
 TR_UNARY_OP(tr_tanh, t->value.tanh())
-TR_UNARY_OP(tr_gelu, at::gelu(t->value))
+
+tr_tensor* tr_gelu(const tr_tensor* t, const char* approximate) {
+  if (!t || !approximate) {
+    return torchrkt::null_arg("tr_gelu");
+  }
+  return torchrkt::alloc_result(
+      "tr_gelu", [&] { return at::gelu(t->value, approximate); });
+}
 
 }  // extern "C"
 

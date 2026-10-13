@@ -4,11 +4,12 @@
           (for-label racket/base
                      racket/contract
                      (only-in torch cuda-if-available device/c draw-seed generator?
-                              make-generator matmul narrow randn-like tensor?
+                              make-generator matmul narrow randn-like
+                              scaled-dot-product-attention tensor?
                               to-dtype upsample-nearest2d)
                      torch/data/loader
                      (only-in torch/nn Conv2d Dropout Embedding GroupNorm Linear
-                              define-layer load-state!)
+                              define-layer load-state! sinusoidal-positions)
                      torch/vision/cifar10
                      torch/vision/hymenoptera
                      torch/vision/image
@@ -135,7 +136,9 @@ typically @racket[randn-like], so a seeded run replays.
          tensor?]{
 Timesteps @racket[t], shape @tt{[N]}, as @tt{[N dim]} sinusoidal features:
 the sine half then the cosine half over frequencies falling geometrically
-from @tt{1} to @tt{1/10000}.
+from @tt{1} to @tt{1/10000}. It is @racket[sinusoidal-positions] with
+@racket[#:layout 'halves], the timesteps as the positions, under a name
+and a contract that ask for int64 timesteps.
 }
 
 @defproc[(TimeEmbedding [dim even-positive-integer?]) time-embedding?]{
@@ -157,10 +160,13 @@ through a 1x1 convolution when the widths differ. Widths are multiples of
 @defproc[(AttentionBlock [channels channels/c]) attention-block?]{
 Single-head self-attention over a feature map, the DDPM form: after a
 norm each pixel's channels are one token, @racket[Linear] maps give the
-queries, keys and values, softmax over the scaled dot products mixes the
-tokens, a @racket[Linear] projection follows, and the result is added to
-the input. The convolutional path before the block is the encoder that
-turns pixels into these tokens.
+queries, keys and values, softmax over the dot products scaled by
+@tt{1/sqrt(channels)} mixes the tokens, a @racket[Linear] projection
+follows, and the result is added to the input. The convolutional path
+before the block is the encoder that turns pixels into these tokens. The
+attention itself is one call to @racket[scaled-dot-product-attention]
+over all @tt{H·W} tokens of each image, with no mask, so libtorch can run
+a fused kernel rather than hold the @tt{[H·W, H·W]} weights.
 }
 
 @defproc[(Downsample [channels channels/c]) downsample?]{

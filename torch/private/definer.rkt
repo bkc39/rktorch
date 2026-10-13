@@ -10,6 +10,7 @@
 (provide contract-export
          ctor-formal
          forward-formal
+         forward-keyword
          init-formals)
 
 (define (predicate-name name)
@@ -71,6 +72,13 @@
     #:attr ctc #f)
   (pattern [id:id (~datum :) c:expr]
     #:attr ctc #'c))
+
+(define-splicing-syntax-class forward-keyword ;; noqa
+  #:description "keyword forward formal (#:kw id or #:kw [id default])"
+  (pattern (~seq kw:keyword id:id)
+    #:with (decl ...) #'(kw id))
+  (pattern (~seq kw:keyword [id:id default:expr])
+    #:with (decl ...) #'(kw [id default])))
 
 (define-syntax-class init-formals
   #:description "#:init formals: (formal ... [#:rest id]) or (formal ... . id)"

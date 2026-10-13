@@ -152,7 +152,15 @@ Connectionist temporal classification: @racket[log-probs] is @tt{[T N C]}
 log-softmaxed frames, @racket[targets] the @tt{[N S]} label sequences, and
 the two length lists say how much of each is real. Averaged over the batch
 as PyTorch's default is; @racket[#:zero-infinity?] zeroes a loss that no
-alignment can reach rather than propagating an infinity.}
+alignment can reach rather than propagating an infinity.
+
+On MPS, a batch whose longest target has 512 or more labels is computed on
+the CPU and its loss moved back to the device, because libtorch 2.14's MPS
+kernel returns wrong gradients there. Gradients still reach
+@racket[log-probs] on the device, and shorter targets stay on MPS. This is
+a temporary workaround for an upstream bug, tracked in
+@hyperlink["https://github.com/bkc39/rktorch/issues/258"]{#258}, and goes
+once a libtorch release fixes the kernel.}
 
 @section{More layers}
 
@@ -238,12 +246,15 @@ come out.
 
 @defproc[(LayerNorm [normalized-shape (or/c exact-positive-integer?
                                             (non-empty-listof exact-positive-integer?))]
-                    [#:eps eps real? 1e-5])
+                    [#:eps eps real? 1e-5]
+                    [#:bias? bias? boolean? #t])
          layer?]{
 Normalizes each input over its trailing @racket[normalized-shape]
 dimensions to zero mean and unit variance, then scales and shifts by a
 learned @racket["weight"] and @racket["bias"] of that shape; the
-normalization inside a transformer block.}
+normalization inside a transformer block. With @racket[bias?]
+@racket[#f] it only scales, and has no @racket["bias"], PyTorch's
+@tt{bias=False}.}
 
 @defproc[(GroupNorm [groups exact-positive-integer?]
                     [channels exact-positive-integer?]

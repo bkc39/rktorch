@@ -19,7 +19,10 @@ nix flake check           # the Nix checks: cpp, format, tidy, line gate, racket
 ```
 
 CI runs two more jobs that `nix flake check` does not cover. The Resyntax gate
-is the `resyntax analyze` command below, and it fails on any suggestion. The
+is the `scripts/resyntax analyze` command below, Resyntax's default rules plus
+the repository's own in `scripts/resyntax-rules.rkt`, and it fails on any
+suggestion. Resyntax skips `#lang scribble/lp2`, so the wrapper lints the
+literate examples' code chunks through `scripts/resyntax-lp2.rkt`. The
 code-generation drift check regenerates the ATen bindings and fails if the
 committed output differs:
 
@@ -43,7 +46,7 @@ raco test torch/                  # unit tests; the PyTorch parity tests self-sk
                                   # where python3 cannot import torch
 raco test examples/test/          # the literate examples
 racket -ie "(require torch)"      # a REPL with the package loaded
-resyntax analyze --local-git-repository . origin/master   # the lint gate
+scripts/resyntax analyze --local-git-repository . origin/master   # the lint gate
 racket scripts/coverage.rkt       # expression coverage, with a floor
 ```
 
