@@ -2,7 +2,7 @@
 
 (require (only-in racket/contract/base
                   -> ->* <=/c >=/c and/c contract-out)
-         (only-in racket/match match)
+         (only-in racket/match match match-define)
          (only-in "../foreign.rkt"
                   device-type exn:fail:rktorch:oom? tensor-device tensor-dtype
                   tensor-shape tensor? with-no-grad zeros)
@@ -18,7 +18,7 @@
          (only-in "parameter.rkt" Parameter))
 
 (struct rnn (who gates state-count cudnn-mode input-size hidden-size
-             num-layers bias? batch-first? dropout bidirectional? lock moves))
+             num-layers bias? batch-first? dropout bidirectional?))
 
 ;; nn.RNNBase's order, which is both the flat-weight order ATen expects and
 ;; reset_parameters' draw order: per layer, per direction, w_ih w_hh b_ih b_hh
@@ -51,6 +51,19 @@
 (define flattened (make-weak-hasheq))
 
 (define refused (make-weak-hasheq))
+
+;; keyed by the weights rather than kept in the spec, which a layer-copy
+;; shares, so a copy's new weights get a lock and a move count of their own
+(struct guard (lock moves))
+
+(define guards (make-weak-hasheq))
+
+(define guards-lock (make-lock))
+
+(define (guard-of key)
+  (or (hash-ref guards key #f)
+      (with-lock guards-lock
+        (hash-ref! guards key (lambda () (guard (make-lock) (box 0)))))))
 
 (define (storage-signature weights)
   (for/list ([w (in-list weights)])
@@ -98,8 +111,8 @@
     [(equal? now packed) now]
     [else #f]))
 
-(define (count-move! spec)
-  (define moves (rnn-moves spec))
+(define (count-move! weights)
+  (define moves (guard-moves (guard-of (car weights))))
   (let retry ()
     (define seen (unbox moves))
     (unless (box-cas! moves seen (add1 seen))
@@ -112,7 +125,7 @@
   ((packing-hook) 'after)
   (and buffer (tensor-storage-ptr buffer)))
 
-(define (record-packing! spec weights now moves)
+(define (record-packing! spec weights now moves seen)
   (define key (car weights))
   (define buffer-start
     (and (eq? (device-type (tensor-device key)) 'cuda)
@@ -121,21 +134,21 @@
     (packing-record now
                     buffer-start
                     (storage-signature weights)
-                    (not (= moves (unbox (rnn-moves spec))))))
+                    (not (= seen (unbox moves)))))
   (cond
     [record (hash-set! flattened key record)]
     [else
      (hash-remove! flattened key)
      (hash-remove! refused key)]))
 
-(define (check-packing! spec weights)
-  (define moves (unbox (rnn-moves spec)))
+(define (check-packing! spec weights moves)
+  (define seen (unbox moves))
   (define now (storage-signature weights))
   (cond
     [(equal? now (hash-ref flattened (car weights) #f)) (void)]
     [else
      ((packing-hook) 'stale)
-     (record-packing! spec weights now moves)]))
+     (record-packing! spec weights now moves seen)]))
 
 (define (zero-state spec x)
   (define batch
@@ -174,7 +187,8 @@
 (define (run spec entries op x state mode)
   (check-inputs spec x state)
   (define weights (map cdr entries))
-  (with-lock (rnn-lock spec) (check-packing! spec weights))
+  (match-define (guard lock moves) (guard-of (car weights)))
+  (with-lock lock (check-packing! spec weights moves))
   (define initial
     (if (null? state)
         (for/list ([_ (in-range (rnn-state-count spec))]) (zero-state spec x))
@@ -206,11 +220,10 @@
           #:dropout [dropout 0.0]
           #:bidirectional? [bidirectional? #f])
   (set! spec (rnn 'LSTM 4 2 2 input-size hidden-size num-layers bias?
-                  batch-first? (exact->inexact dropout) bidirectional?
-                  (make-lock) (box 0)))
+                  batch-first? (exact->inexact dropout) bidirectional?))
   (set! entries (draw-parameters spec))
   (set! params (parameters-by-key entries))
-  #:on-move (count-move! spec)
+  #:on-move (count-move! (map cdr entries))
   #:forward (x . state)
   (with-mode (run spec entries lstm-input x state mode)))
 
@@ -229,17 +242,19 @@
           #:dropout [dropout 0.0]
           #:bidirectional? [bidirectional? #f])
   (set! spec (rnn 'GRU 3 1 3 input-size hidden-size num-layers bias?
-                  batch-first? (exact->inexact dropout) bidirectional?
-                  (make-lock) (box 0)))
+                  batch-first? (exact->inexact dropout) bidirectional?))
   (set! entries (draw-parameters spec))
   (set! params (parameters-by-key entries))
-  #:on-move (count-move! spec)
+  #:on-move (count-move! (map cdr entries))
   #:forward (x . state)
   (with-mode (run spec entries gru-input x state mode)))
 
 (module+ private
-  (provide cudnn-refusal? flattened-signature flatten-refused? packing-hook
-           packing-record record-flattened! storage-signature)
+  (provide cudnn-refusal? flattened-signature flatten-refused? move-count
+           packing-hook packing-lock packing-record record-flattened!
+           storage-signature)
+  (define (move-count weight) (unbox (guard-moves (guard-of weight))))
+  (define (packing-lock weight) (guard-lock (guard-of weight)))
   (define (flattened-signature weight) (hash-ref flattened weight #f))
   (define (record-flattened! weight signature)
     (hash-set! flattened weight signature))

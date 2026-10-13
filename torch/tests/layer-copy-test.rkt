@@ -4,7 +4,8 @@
   (require rackunit
            "../main.rkt"
            "../nn.rkt"
-           (only-in (submod "../nn/recurrent.rkt" private) flattened-signature)
+           (only-in (submod "../nn/recurrent.rkt" private)
+                    flattened-signature move-count packing-lock)
            (only-in "../vision/diffusion.rkt" UNet)
            (only-in "../vision/resnet.rkt" ImageNetResNet ResNet)
            (only-in "../vision/vgg.rkt" vgg16-features))
@@ -247,6 +248,21 @@
     (check-equal? (reverse seen) '("0" "1"))
     (check-eq? (child-ref rebuilt "0") (child-ref net "0"))
     (check-false (eq? rebuilt net)))
+
+  (test-case "a copied LSTM has its own packing lock and move count"
+    (define lstm (LSTM 3 4 #:num-layers 2))
+    (define c (layer-copy lstm))
+    (define key (car (parameters lstm)))
+    (define copy-key (car (parameters c)))
+    (check-false (eq? (packing-lock key) (packing-lock copy-key)))
+    (define copy-moves (move-count copy-key))
+    (define moves (move-count key))
+    (to lstm 'float64)
+    (check-equal? (move-count key) (add1 moves))
+    (check-equal? (move-count copy-key) copy-moves)
+    (to c 'float64)
+    (check-equal? (move-count copy-key) (add1 copy-moves))
+    (check-equal? (move-count key) (add1 moves)))
 
   (when (cuda-available?)
     (test-case "on CUDA the copy lives there too, the LSTM flattened afresh"

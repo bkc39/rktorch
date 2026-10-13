@@ -4,9 +4,9 @@
                      racket/contract
                      (only-in torch backward! tensor? to zeros)
                      (only-in torch/nn
-                              GRU LSTM adam clip-grad-norm! eval! gru? load-state!
-                              lstm? named-parameters parameters step!
-                              zero-grads!)))
+                              GRU LSTM adam clip-grad-norm! eval! gru? layer-copy
+                              load-state! lstm? named-parameters parameters
+                              step! zero-grads!)))
 
 @title{Recurrent layers}
 
@@ -70,9 +70,10 @@ The parameters stay the same tensors, so an optimizer built before or
 after sees them alike.
 
 Threads may forward one layer at once: each call checks the weights
-under a lock of the layer's own, so the first to find them unpacked packs
+under a lock on those weights, so the first to find them unpacked packs
 them while the others forwarding that layer wait, and they then find them
-packed; other layers do not wait. Moving a layer while
+packed; layers with other weights, a @racket[layer-copy] among them, do not
+wait. Moving a layer while
 another thread forwards it is a race on its parameters, as it is in
 PyTorch, and the forward may fail; the next call after the move still
 packs the weights, since a move during packing leaves nothing recorded.
