@@ -51,7 +51,8 @@
     [else (~r (ptr-ref out _double 0) #:precision 2)]))
 
 (define (os-task-count)
-  (length (directory-list "/proc/self/task")))
+  (define tasks "/proc/self/task")
+  (and (directory-exists? tasks) (length (directory-list tasks))))
 
 (define (print-banner title #:torch-version [torch-version #f])
   (printf "## ~a\n\n" title)

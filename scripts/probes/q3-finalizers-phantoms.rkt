@@ -25,10 +25,8 @@
       [(> elapsed limit-ms) (values rounds elapsed)]
       [else (loop (add1 rounds))])))
 
-;; Every object's finalizer bumps its own slot, so a lost run reads 0 and a
-;; doubled one reads 2. The first registration in the process is one of
-;; these, made from 8 threads at once: that is the race finalizer.rkt
-;; accepts by allowing several finalizer threads.
+;; A lost run reads 0, a doubled one 2. The process's first registration races
+;; from 8 threads, which ffi/unsafe/private/finalizer.rkt allows.
 (define (finalizer-round per-thread #:protect protect #:threads [threads default-threads])
   (define total (* threads per-thread))
   (define runs (make-vector total 0))

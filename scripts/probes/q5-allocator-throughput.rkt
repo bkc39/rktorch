@@ -21,13 +21,15 @@
 
 (define tensors-per-iteration 3)
 
-(define (loop-until deadline p o n)
+(define seconds-per-cell 1.0)
+
+(define (loop-for-cell p o n)
+  (define deadline (+ (current-inexact-monotonic-milliseconds) (* 1000 seconds-per-cell)))
   (let loop ([iterations 0])
     (cond
       [(> (current-inexact-monotonic-milliseconds) deadline) iterations]
       [else (iteration! p o n) (loop (add1 iterations))])))
 
-(define seconds-per-cell 1.0)
 (define repeats 3)
 (define settle-round-limit 50)
 (define (settle-finalizers! p)
@@ -54,8 +56,6 @@
 (define (measure-cell p o n workers)
   (settle-or-stop! p (format "before n = ~a, ~a workers" n workers))
   (define runs (prototype-finalizer-runs p))
-  (define deadline (+ (current-inexact-monotonic-milliseconds)
-                      (* 1000 seconds-per-cell)))
   (define-values (ms iterations gc-ms finalizer-runs)
     (cond
       [(zero? workers)
@@ -63,13 +63,13 @@
        (define runs-start (runs))
        (define gc-start (current-gc-milliseconds))
        (define start (current-inexact-monotonic-milliseconds))
-       (define done (loop-until deadline p o n))
+       (define done (loop-for-cell p o n))
        (define ms (- (current-inexact-monotonic-milliseconds) start))
        (define gc-ms (- (current-gc-milliseconds) gc-start))
        (values ms (list done) gc-ms (- (runs) runs-start))]
       [else
        (run-parallel/gc workers
-                        (lambda (_i) (loop-until deadline p o n))
+                        (lambda (_i) (loop-for-cell p o n))
                         #:setup (lambda () (at-set-num-threads 1))
                         #:counter runs)]))
   (cell workers

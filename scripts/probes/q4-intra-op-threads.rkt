@@ -61,7 +61,7 @@
            (cond
              [(or (<= now baseline) (= tries 500)) now]
              [else (sleep 0.01) (loop (add1 tries))])))
-       (define (team-scenario prepare)
+       (define (team-counts prepare)
          (define start (os-task-count))
          (parallel-add!)
          (define after-trainer (os-task-count))
@@ -74,6 +74,10 @@
                (cons "while 4 workers that ran a 1024 matmul are parked"
                      (team-round prepare parallel-matmul!))
                (cons "trainer at / omp / mkl" (counts))))
+       (define (team-scenario prepare)
+         (cond
+           [(os-task-count) (team-counts prepare)]
+           [else (list (cons "OS threads" "n/a: no /proc/self/task on this platform"))]))
        (define (on-worker thunk)
          (define-values (_ms results) (run-parallel 1 (lambda (_i) (thunk))))
          (match-define (list result) results)

@@ -67,20 +67,25 @@
                (_fun _pointer (type : (_ptr o _int)) (_ptr o _int64) -> (rc : _int)
                      -> (and (zero? rc) type))))
 
-(define (shim-symbol name type)
-  (get-ffi-obj name shim type
-               (lambda ()
-                 (lambda _
-                   (error 'probes "~a is not reachable from the shim on this platform"
-                          name)))))
+(define (shim-symbol name type
+                     #:missing [missing
+                                (lambda _
+                                  (error 'probes "~a is not reachable from the shim on this platform"
+                                         name))])
+  (get-ffi-obj name shim type (lambda () missing)))
 
-(define at-get-num-threads (shim-symbol "_ZN2at15get_num_threadsEv" (_fun -> _int)))
+(define (unreachable) "n/a")
+
+(define at-get-num-threads
+  (shim-symbol "_ZN2at15get_num_threadsEv" (_fun -> _int) #:missing unreachable))
 
 (define at-set-num-threads (shim-symbol "_ZN2at15set_num_threadsEi" (_fun _int -> _void)))
 
-(define mkl-get-max-threads (shim-symbol "mkl_get_max_threads" (_fun -> _int)))
+(define mkl-get-max-threads
+  (shim-symbol "mkl_get_max_threads" (_fun -> _int) #:missing unreachable))
 
-(define omp-get-max-threads (shim-symbol "omp_get_max_threads" (_fun -> _int)))
+(define omp-get-max-threads
+  (shim-symbol "omp_get_max_threads" (_fun -> _int) #:missing unreachable))
 
 (define omp-set-num-threads (shim-symbol "omp_set_num_threads" (_fun _int -> _void)))
 

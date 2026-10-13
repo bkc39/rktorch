@@ -12,7 +12,8 @@
 (define worker-counts '(1 4 8))
 (define drain-round-limit 200)
 
-(define (churn! randn deadline)
+(define (churn! randn)
+  (define deadline (+ (current-inexact-monotonic-milliseconds) (* 1000 churn-seconds)))
   (let loop ([made 0])
     (cond
       [(> (current-inexact-monotonic-milliseconds) deadline) made]
@@ -40,7 +41,6 @@
 
 (define (churn-row p randn workers)
   (collect-garbage 'major)
-  (define deadline (+ (current-inexact-monotonic-milliseconds) (* 1000 churn-seconds)))
   (define finished (box #f))
   (define failure (box #f))
   (define at-stop (box #f))
@@ -49,7 +49,7 @@
               (with-handlers ([(lambda (_) #t) (lambda (e) (set-box! failure e))])
                 (define-values (ms made gc-ms runs)
                   (run-parallel/gc workers
-                                   (lambda (_i) (churn! randn deadline))
+                                   (lambda (_i) (churn! randn))
                                    #:setup (lambda () (at-set-num-threads 1))
                                    #:counter (prototype-finalizer-runs p)))
                 (set-box! at-stop
@@ -84,6 +84,9 @@
 
 (module+ main
   (at-set-num-threads 1)
+  ;; Registering first from one thread starts exactly one finalizer thread,
+  ;; so the drain's canary runs after every earlier callback has returned.
+  (void (collect-past-canary!))
   (print-banner
    (format "Q7: finalizer throughput, ~a x ~a float32 randn made and dropped for ~a s"
            n n churn-seconds)

@@ -88,8 +88,8 @@
   (define ((wrap op) . args)
     (define t (apply op args))
     (define r (make-record t))
-    (define dev (and gate? (shim-device t)))
     (with-atomic
+      (define dev (and gate? (shim-device t)))
       (register-finalizer t (finalizer-for r))
       (hash-set! table t r)
       (set-box! live (+ (unbox live) (record-nbytes r)))
