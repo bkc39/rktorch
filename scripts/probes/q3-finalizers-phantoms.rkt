@@ -15,13 +15,17 @@
   (define collecting
     (measure-span
      (lambda ()
-       (let loop ([rounds 1])
-         (collect-garbage 'major)
-         (sleep 0.02)
-         (cond
-           [(or (done?) (> (now-ms) deadline)) rounds]
-           [else (loop (add1 rounds))])))))
-  (values (span-value collecting) (span-ms collecting)))
+       (define rounds
+         (let loop ([rounds 1])
+           (collect-garbage 'major)
+           (sleep 0.02)
+           (cond
+             [(or (done?) (> (now-ms) deadline)) rounds]
+             [else (loop (add1 rounds))])))
+       (define-values (settled settling) (settle-wills!))
+       (cons (+ rounds settling) settled))))
+  (match-define (cons rounds settled?) (span-value collecting))
+  (values rounds (span-ms collecting) settled?))
 
 (define (finalizer-round per-thread #:protect protect #:threads [threads default-threads])
   (define total (* threads per-thread))
@@ -38,16 +42,19 @@
                           (register-finalizer (make-vector 2 id)
                                               (lambda (_v)
                                                 (cas-update! (vector-ref runs id) add1))))))))))
-  (define-values (rounds drain-ms)
+  (define-values (rounds drain-ms settled?)
     (collect-until (lambda () (for/and ([id (in-range total)]) (positive? (run-count id))))))
   (define final-counts (build-list total run-count))
   (define never (count zero? final-counts))
   (define twice (count (lambda (n) (> n 1)) final-counts))
   (values (list total (real->decimal-string ms 1) (rate->string (/ total (ms->seconds ms)))
                 (apply + final-counts) never twice rounds (real->decimal-string drain-ms 1)
-                (if (and (zero? never) (zero? twice)) "yes" "NO")
+                (if (and settled? (zero? never) (zero? twice)) "yes" "NO")
                 (load-average))
-          never))
+          (cond
+            [(positive? never) (format "~a finalizers never ran" never)]
+            [(not settled?) "wills still running after settling"]
+            [else #f])))
 
 (define (plain f) (f))
 (define (break-disabled f) (parameterize-break #f (f)))
@@ -131,9 +138,6 @@
         (real->decimal-string remove-ms 1)
         (load-average)))
 
-(define (in-indexed v)
-  (in-parallel (in-vector v) (in-naturals)))
-
 (define (print-finalizer-table)
   (print-table-header
    '("register-finalizer called" "objects" "registration wall ms"
@@ -146,9 +150,9 @@
                         (list "under parameterize-break #f" 100000 break-disabled 8)
                         (list "in uninterruptible mode" 100000 call-as-uninterruptible 8)))])
     (match-define (list label per-thread protect threads) spec)
-    (define-values (row never) (finalizer-round per-thread #:protect protect #:threads threads))
+    (define-values (row pending) (finalizer-round per-thread #:protect protect #:threads threads))
     (print-table-row (cons label row))
-    (and (positive? never) (format "~a finalizers of \"~a\" still pending after the drain" never label))))
+    (and pending (format "~a: ~a" label pending))))
 
 (define (print-phantom-table)
   (print-table-header
@@ -178,7 +182,7 @@
   (define pending (print-finalizer-table))
   (cond
     [pending
-     (printf "\nstopped: ~a, and they would run during every later row\n" pending)]
+     (printf "\nstopped: ~a\n" pending)]
     [else
      (newline)
      (print-phantom-table)

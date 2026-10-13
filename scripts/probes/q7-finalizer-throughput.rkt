@@ -16,11 +16,11 @@
 (define cap-check-every 256)
 (define modes (append (main-modes churn-seconds) (list (main-polling 50))))
 
-(define (churn! randn live capped stop tally i)
+(define (churn! randn live capped stop t i)
   (define (mark-if-over-cap! made)
     (when (and (zero? (modulo made cap-check-every)) (> (live) ledger-cap))
       (set-box! capped #t)))
-  (tally-loop-for-seconds tally i churn-seconds
+  (tally-loop-for-seconds t i churn-seconds
                           (lambda (made)
                             (randn n)
                             (mark-if-over-cap! made))
@@ -53,16 +53,18 @@
   (define peak (box #f))
   (define capped (box #f))
   (define stop (box #f))
-  (define tally (make-tally workers))
+  (define t (tally workers))
   (define churned
     (run-parallel workers
-                  (lambda (i) (churn! randn live capped stop tally i))
+                  (lambda (i) (churn! randn live capped stop t i))
                   #:setup (lambda () (at-set-num-threads 1))
-                  #:counters (list (lambda () (tally-total tally)) (prototype-finalizer-frees p))
+                  #:counters (list (lambda () (tally-total t)) (prototype-finalizer-frees p))
                   #:main mode
+                  #:on-end (lambda () (tally-close! t))
                   #:stop stop
                   #:on-wake (lambda () (set-box! peak (max (or (unbox peak) 0) (live))))))
   (define lag (live))
+  (define lag-mib (bytes->mib-string lag))
   (define ms (span-ms churned))
   (define interval (ms->seconds ms))
   (match-define (list made frees) (span-counts churned))
@@ -75,39 +77,38 @@
          (rate->string (/ frees interval))
          (~r (/ frees (max made 1)) #:precision 2)
          (~> (span-gc-ms churned) (/ ms) (~r #:precision 2))
-         (real->decimal-string (tally-max-gap tally) 1)
+         (gap->string (tally-max-gap t))
          (if (unbox peak) (~> (unbox peak) (max lag) bytes->mib-string) "not sampled")
-         (if (unbox capped) (format "~a (cap)" (bytes->mib-string lag)) (bytes->mib-string lag))
+         (if (unbox capped) (format "~a (cap)" lag-mib) lag-mib)
          collections
          (real->decimal-string drain-ms 1)
          (live))
+   collections
    settled?))
 
 (module+ main
   (at-set-num-threads 1)
   (collect-past-canary!)
   (print-banner
-   (format "Q7: finalizer throughput, ~a x ~a float32 randn made and dropped by worker threads for ~a s or until the ledger passes ~a MiB, under each main-thread mode; made and frees counted in the window (until the workers exit, or in the foreign-call modes until main's last wake), then drained by major collections"
+   (format "Q7: finalizer throughput, ~a x ~a randn for ~a s or ~a MiB"
            n n churn-seconds (bytes->mib-string ledger-cap))
    #:torch-version (shim-version))
   (print-table-header
-   '("allocator" "workers" "main thread while workers churn" "tensors made/s"
-     "finalizer frees/s in the window" "frees / made" "GC wall ms per wall ms (excludes rendezvous wait)"
-     "longest ms between a worker's iterations"
-     "peak ledger MiB, sampled when main wakes" "ledger MiB at stop"
-     "major collections to drain, settling's included" "drain ms" "ledger bytes after drain" "drained" "load"))
+   '("allocator" "workers" "main thread" "made/s" "frees/s" "frees / made" "GC share"
+     "longest gap ms" "peak ledger MiB" "ledger MiB at stop" "major collections to drain"
+     "drain ms" "ledger bytes after drain" "drained" "load"))
   (define undrained
     (for*/or ([make (in-list (variant-makers))]
               [workers (in-list worker-counts)]
               [mode (in-list modes)])
       (match-define (variant p o) (make))
-      (define-values (row drained?) (churn-row p (ops-randn o) workers mode))
-      (~> (list (if drained? "yes" "**NO: sweep stopped**") (load-average))
+      (define-values (row collections drained?) (churn-row p (ops-randn o) workers mode))
+      (~> (list (if drained? "yes" "NO") (load-average))
           (append row _)
           print-table-row)
       (and (not drained?)
-           (format "~a with ~a workers, main ~a" (prototype-name p) workers (main-mode-label mode)))))
+           (format "~a, ~a workers, main ~a: not drained after ~a major collections"
+                   (prototype-name p) workers (main-mode-label mode) collections))))
   (when undrained
-    (printf "\nstopped: ~a did not drain in ~a major collections, and its pending finalizers would run during every later row\n"
-            undrained drain-round-limit))
+    (printf "\nstopped: ~a\n" undrained))
   (print-footer))

@@ -32,7 +32,7 @@
 
 (define (bare)
   (prototype "bare: plain op, explicit free, no finalizer or ledger"
-             values values shim-free (const 0) (const 0) (const 0)))
+             values values shim-free (const 0) #f #f))
 
 (define gate-interval (* 128 1024 1024))
 
@@ -45,26 +45,23 @@
   (define (count-toward-gate! dev nbytes)
     (define since (+ (hash-ref since-check dev 0) nbytes))
     (hash-set! since-check dev (if (>= since gate-interval) 0 since)))
-  (define (release! t find-record)
-    (define claimed
-      (with-atomic
-        (define r (find-record))
-        (cond
-          [(and r (claim! r))
-           (hash-remove! table t)
-           (set-box! live (- (unbox live) (record-nbytes r)))
-           r]
-          [else #f])))
-    (cond
-      [claimed
-       (set-phantom-bytes! (record-phantom claimed) 0)
-       (shim-free t)
-       #t]
-      [else #f]))
+  (define (claim-record! t find-record)
+    (with-atomic
+      (define r (find-record))
+      (cond
+        [(and r (claim! r))
+         (hash-remove! table t)
+         (set-box! live (- (unbox live) (record-nbytes r)))
+         r]
+        [else #f])))
+  (define (release! r t)
+    (set-phantom-bytes! (record-phantom r) 0)
+    (shim-free t))
   (define ((finalizer-for r) t)
     (cas-update! calls add1)
-    (when (release! t (lambda () r))
-      (cas-update! frees add1)))
+    (when (claim-record! t (const r))
+      (cas-update! frees add1)
+      (release! r t)))
   (define ((wrap op) . args)
     (define t (apply op args))
     (define r (make-record t))
@@ -76,7 +73,8 @@
       (when dev (count-toward-gate! dev (record-nbytes r))))
     t)
   (define (free! t)
-    (void (release! t (lambda () (hash-ref table t #f)))))
+    (define r (claim-record! t (lambda () (hash-ref table t #f))))
+    (when r (release! r t)))
   (prototype name wrap values free!
              (lambda () (unbox live)) (lambda () (unbox frees)) (lambda () (unbox calls))))
 

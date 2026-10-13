@@ -19,7 +19,7 @@
     (call-with-workers 1
                        (lambda (_i)
                          (with-final-post inside (at-set-num-threads 1))
-                         (measure-span call))
+                         (measure-call call))
                        (lambda (_workers)
                          (semaphore-wait inside)
                          (sleep 0.1)
@@ -32,21 +32,29 @@
 (define sink (box #f))
 
 (define (longest-stall)
-  (define end (+ (current-inexact-monotonic-milliseconds) stall-window-ms))
-  (let loop ([last (current-inexact-monotonic-milliseconds)] [worst 0.0])
-    (define now (current-inexact-monotonic-milliseconds))
-    (define worst* (max worst (- now last)))
-    (set-box! sink (make-vector 256 #f))
-    (cond
-      [(> now end) worst*]
-      [else (loop now worst*)])))
+  (define t (tally 1))
+  (tally-loop-for-seconds t 0 (ms->seconds stall-window-ms)
+                          (lambda (_i) (set-box! sink (make-vector 256 #f))))
+  (gap-ms (tally-max-gap t)))
 
-(define (sleep-call usleep-fn) (lambda () (usleep-fn 1500000)))
+(define (collection-ms kind)
+  (lambda () (timed (lambda () (collect-garbage kind)))))
+
+(define (measure-call call)
+  (define s (measure-span call))
+  ((span-value s))
+  s)
+
+(define (sleep-call usleep-fn)
+  (lambda ()
+    (usleep-fn 1500000)
+    void))
 
 (define (matmul-call matmul-fn)
   (define a (shim-randn matmul-n matmul-n))
   (lambda ()
-    (shim-free (matmul-fn a a))))
+    (define c (matmul-fn a a))
+    (lambda () (shim-free c))))
 
 (define (make-calls plain-matmul)
   (list (cons "none (worker parked on a semaphore)" #f)
@@ -87,29 +95,24 @@
                   (~r (* 100 least-share) #:precision 1))]))
 
 (module+ main
-  (print-banner (format "Q6: collection pauses while one parallel worker is in a foreign call (median of ~a)"
+  (print-banner (format "Q6: collection pauses, one parallel worker in a foreign call (median of ~a)"
                         repeats)
                 #:torch-version (shim-version))
   (at-set-num-threads 1)
   (define plain-matmul (matmul-call shim-matmul))
-  (define call-ms (timed plain-matmul))
+  (define call-ms (span-ms (measure-call plain-matmul)))
   (define calls (make-calls plain-matmul))
-  (printf "- one ~a matmul alone, 1 intra-op thread, on the main thread: ~a ms\n" matmul-n
-          (real->decimal-string call-ms 1))
+  (printf "- ~a matmul alone: ~a ms\n" matmul-n (real->decimal-string call-ms 1))
   (newline)
   (print-table-header
-   (list "worker is inside"
-         "(collect-garbage 'major), median ms (least share any run's call was in flight)"
-         "(collect-garbage 'minor), median ms (least share any run's call was in flight)"
-         (format "trainer's longest stall while allocating for ~a ms, median ms (least share any run's call was in flight)"
-                 stall-window-ms)
-         "load"))
+   (list "worker is inside" "major ms (min in-flight %)" "minor ms (min in-flight %)"
+         (format "longest stall in ~a ms (min in-flight %)" stall-window-ms) "load"))
   (for ([c (in-list calls)])
     (match-define (cons label call) c)
     (print-table-row
      (list label
-           (measure-under call (lambda () (timed (lambda () (collect-garbage 'major)))))
-           (measure-under call (lambda () (timed (lambda () (collect-garbage 'minor)))))
+           (measure-under call (collection-ms 'major))
+           (measure-under call (collection-ms 'minor))
            (measure-under call longest-stall)
            (load-average))))
   (print-footer))

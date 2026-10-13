@@ -12,6 +12,7 @@
 
 (define threads 8)
 (define full 4000000)
+(define subtractions 1000000)
 (define repeats 3)
 
 (define lock (make-uninterruptible-lock))
@@ -110,7 +111,6 @@
 (define (cas-against-atomic-subtractor)
   (define per-thread (quotient full threads))
   (define b (box 0))
-  (define subtractions 1000000)
   (define go (make-semaphore 0))
   (define-values (adders subtractor)
     (call-with-workers 1
@@ -134,7 +134,8 @@
                      (max adders-start (span-start subtracted))))
   (define expected (- full subtractions))
   (define (since-adders t) (real->decimal-string (- t adders-start) 1))
-  (list "box-cas! adds from 8 parallel threads, 1M subtractions from a coroutine thread in atomic mode"
+  (list (format "box-cas! adds from ~a parallel threads, ~a subtractions from a coroutine thread in atomic mode"
+                threads subtractions)
         full
         (format "(~a)" (unbox b))
         (cond
@@ -162,7 +163,8 @@
    (append '("call-as-atomic entered from" "threads")
            (append*
             (for/list ([hop (in-list hop-modes)])
-              (define main (main-mode-label (car hop)))
+              (match-define (cons mode _) hop)
+              (define main (main-mode-label mode))
               (list (format "sections in the window, main ~a" main)
                     (format "window ms, main ~a" main)
                     (format "ns per section, main ~a" main))))

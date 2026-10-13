@@ -61,12 +61,16 @@
          measure-span
          timed
          loop-for-seconds
-         make-tally
+         tally
          tally-loop-for-seconds
+         tally-close!
          tally-total
          tally-max-gap
+         gap-ms
+         gap->string
          call-with-workers
          run-parallel
+         in-indexed
          main-mode-label
          main-mode-polls-scheduler?
          main-blocked
@@ -210,32 +214,64 @@
       [(stop? done) done]
       [else (step done) (loop (add1 done))])))
 
-(struct tally (steps gaps marks))
+(struct tally (steps gaps marks open-gaps closed-at) #:name tally-info #:constructor-name raw-tally)
 
-(define (make-tally n)
+(define (tally n)
   (define slots (max n 1))
-  (tally (make-vector slots 0) (make-vector slots 0.0) (make-vector slots 0.0)))
+  (raw-tally (make-vector slots 0)
+             (make-vector slots 0.0)
+             (make-vector slots 0.0)
+             (make-vector slots 0.0)
+             (box +inf.0)))
 
 (define (tally-step! t i)
   (define now (now-ms))
-  (define gap (- now (vector-ref (tally-marks t) i)))
-  (vector-set! (tally-marks t) i now)
-  (vector-set! (tally-gaps t) i (max gap (vector-ref (tally-gaps t) i)))
-  (vector-set! (tally-steps t) i (~> (tally-steps t) (vector-ref i) add1)))
+  (vector-set! (tally-steps t) i (~> (tally-steps t) (vector-ref i) add1))
+  (cond
+    [(> now (unbox (tally-closed-at t))) (void)]
+    [else
+     (define gap (- now (vector-ref (tally-marks t) i)))
+     (vector-set! (tally-marks t) i now)
+     (vector-set! (tally-gaps t) i (max gap (vector-ref (tally-gaps t) i)))]))
 
 (define (tally-loop-for-seconds t i seconds step #:stop? [stop? (const #f)])
   (vector-set! (tally-marks t) i (now-ms))
-  (loop-for-seconds seconds
-                    (lambda (done)
-                      (step done)
-                      (tally-step! t i))
-                    #:stop? stop?))
+  (begin0
+    (loop-for-seconds seconds
+                      (lambda (done)
+                        (step done)
+                        (tally-step! t i))
+                      #:stop? stop?)
+    (vector-set! (tally-marks t) i +inf.0)))
+
+(define (tally-close! t)
+  (define now (now-ms))
+  (set-box! (tally-closed-at t) now)
+  (for ([(mark i) (in-indexed (tally-marks t))])
+    (vector-set! (tally-open-gaps t) i (- now mark))))
 
 (define (tally-total t)
   (for/sum ([steps (in-vector (tally-steps t))]) steps))
 
+(struct gap (ms open?))
+
 (define (tally-max-gap t)
-  (for/fold ([longest 0.0]) ([gap (in-vector (tally-gaps t))]) (max longest gap)))
+  (for/fold ([longest (gap 0.0 #f)])
+            ([closed (in-vector (tally-gaps t))]
+             [open (in-vector (tally-open-gaps t))])
+    (cond
+      [(> open (max closed (gap-ms longest))) (gap open #t)]
+      [(> closed (gap-ms longest)) (gap closed #f)]
+      [else longest])))
+
+(define (gap->string g)
+  (define ms (real->decimal-string (gap-ms g) 1))
+  (cond
+    [(gap-open? g) (format "≥ ~a" ms)]
+    [else ms]))
+
+(define (in-indexed v)
+  (in-parallel (in-vector v) (in-naturals)))
 
 (define (call-with-workers n work main #:pool [pool 'own] #:release [release void])
   (define results (make-vector n #f))
@@ -246,12 +282,10 @@
                 (with-handlers ([exn:fail? (lambda (e) (vector-set! failures i e))])
                   (vector-set! results i (work i))))
               #:pool pool)))
-  (define result
-    (dynamic-wind void
-                  (lambda () (main workers))
-                  (lambda ()
-                    (release)
-                    (for-each thread-wait workers))))
+  (define (release-and-wait!)
+    (release)
+    (for-each thread-wait workers))
+  (define result (with-finally (release-and-wait!) (main workers)))
   (cond
     [(for/first ([e (in-vector failures)] #:when e) e) => raise]
     [else (values result (vector->list results))]))
@@ -327,6 +361,7 @@
                       #:counters [counters '()]
                       #:main [mode main-blocked]
                       #:on-wake [on-wake void]
+                      #:on-end [on-end void]
                       #:stop [stop (box #f)])
   (define arrived (box 0))
   (define go (box #f))
@@ -339,14 +374,15 @@
       (unless (unbox go) (spin)))
     (body i))
   (define (await-arrivals)
-    (unless (= (unbox arrived) n)
-      (sleep 0)
-      (await-arrivals)))
+    (cond
+      [(= (unbox arrived) n) (void)]
+      [else (sleep 0) (await-arrivals)]))
   (define (measure-workers workers)
     (await-arrivals)
     (measure-span (lambda ()
                     (set-box! go #t)
-                    ((main-mode-wait mode) workers on-wake))
+                    ((main-mode-wait mode) workers on-wake)
+                    (on-end))
                   #:counters counters))
   (cond
     [(zero? n)
