@@ -2,21 +2,14 @@
 
 @(require (only-in racket/list add-between)
           (only-in scribble/racket to-element)
+          (only-in torch/private/exports export-names)
           "common.rkt"
           torch/scribblings/labels)
 
 @(define tiers-eval (make-base-eval))
 
-@(define (exported-names module)
-   (module-declared? module #t)
-   (define-values (variables syntaxes) (module->exports module))
-   (sort (for*/list ([phase+exports (in-list (append variables syntaxes))]
-                     [export (in-list (cdr phase+exports))])
-           (car export))
-         symbol<?))
-
 @(define operator-list
-   (add-between (for/list ([name (in-list (exported-names 'torch/operators))])
+   (add-between (for/list ([name (in-list (export-names 'torch/operators))])
                   (to-element (datum->syntax (quote-syntax here) name)))
                 " "))
 
@@ -33,14 +26,14 @@ two modules would supply the same name. Two modules split
 
 Every binding of @racketmodname[torch] whose name @racketmodname[racket]
 does not export, so it requires beside @racketmodname[racket] and
-@racketmodfont{threading}. Tensor arithmetic is spelled @racket[add],
-@racket[mul] and the other named operators; the rest of
-@racketmodname[torch/operators] is a @racket[prefix-in] away.
+@racketmodfont{threading}. The tensor operators, @racket[+] and
+@racket[sqrt] among them, are a @racket[prefix-in] of
+@racketmodname[torch/operators] away.
 
 @examples[#:eval tiers-eval
   (require racket torch/safe (prefix-in t: torch/operators))
   (define x (tensor (list 1.0 4.0 9.0)))
-  (mul x 2.0)
+  (t:* x 2.0)
   (t:sqrt x)]
 
 @defmodule[torch/operators #:no-declare]

@@ -6,18 +6,13 @@
 (define-runtime-path names-file
   (build-path 'up "codegen" "racket-names.txt"))
 
-(define (export-names module)
-  (module-declared? module #t)
-  (define-values (variables syntaxes) (module->exports module))
-  (for*/list ([phase+exports (in-list (append variables syntaxes))]
-              [export (in-list (cdr phase+exports))])
-    (symbol->string (car export))))
-
 (module+ main
   (require (only-in racket/file display-lines-to-file)
            (only-in racket/list append-map remove-duplicates)
-           (only-in threading ~>))
+           (only-in threading ~>)
+           (only-in "../torch/private/exports.rkt" export-names))
   (~> (append-map export-names '(racket threading))
       remove-duplicates
-      (sort string<?)
+      (sort symbol<?)
+      (map symbol->string _)
       (display-lines-to-file names-file #:exists 'truncate)))
