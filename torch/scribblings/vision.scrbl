@@ -408,7 +408,7 @@ The residual network for 32x32 images: a 3x3 stem in place of ImageNet's
 7x7 stem and max-pool, four stages of basic blocks doubling the width and
 halving the resolution, global average pooling and a linear head. Every
 convolution is bias-free, as its batch norm absorbs the bias. The training
-loop is @filepath{examples/racket/09-resnet.rkt}.
+loop is @filepath{torch/examples/09-resnet.rkt}.
 
 @defproc[(BasicBlock [in exact-positive-integer?]
                      [out exact-positive-integer?]

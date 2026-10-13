@@ -4,8 +4,8 @@
 ;; Run:  racket scripts/generate-gpt.rkt [prefix] [prompt ...]
 
 (require torch
-         torch/nn
-         (only-in "../examples/racket/06-gpt.rkt" generate gpt))
+         (only-in torch/examples/06-gpt generate gpt)
+         torch/nn)
 
 (define args (vector->list (current-command-line-arguments)))
 (define prefix (if (pair? args) (car args) "checkpoints/gpt-hod"))

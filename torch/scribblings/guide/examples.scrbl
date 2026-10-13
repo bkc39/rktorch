@@ -5,7 +5,7 @@
 @title[#:tag "examples" #:style 'toc]{Worked examples}
 
 Each example is a literate program: the prose and the code are one file
-under @filepath{examples/racket/}, and the chapters below are those files
+under @filepath{torch/examples/}, and the chapters below are those files
 rendered. Every one exports a @racket[run-example] thunk that a harness
 under @filepath{examples/test/} drives from its @racket[main] submodule and
 checks from its @racket[test] submodule, and most have a PyTorch twin under
@@ -29,24 +29,20 @@ pretrained weights: classifying photographs with ImageNet's ResNet-18,
 fine-tuning it on ants and bees, and painting a photograph in the style of
 another with VGG-16's features.
 
-@margin-note{These chapters are woven from files outside the
-@racketmodname[torch] package, so they render from a checkout or a
-link-mode install; see @filepath{docs/building.md}.}
-
-@include-section[(submod "../../../examples/racket/00-randn.rkt" doc)]
-@include-section[(submod "../../../examples/racket/01-arith.rkt" doc)]
-@include-section[(submod "../../../examples/racket/02-matmul.rkt" doc)]
-@include-section[(submod "../../../examples/racket/03-autograd.rkt" doc)]
-@include-section[(submod "../../../examples/racket/04-mlp.rkt" doc)]
-@include-section[(submod "../../../examples/racket/05-mnist.rkt" doc)]
-@include-section[(submod "../../../examples/racket/06-gpt.rkt" doc)]
-@include-section[(submod "../../../examples/racket/07-asr.rkt" doc)]
-@include-section[(submod "../../../examples/racket/08-diffusion.rkt" doc)]
-@include-section[(submod "../../../examples/racket/09-resnet.rkt" doc)]
-@include-section[(submod "../../../examples/racket/10-dcgan.rkt" doc)]
-@include-section[(submod "../../../examples/racket/11-vae.rkt" doc)]
-@include-section[(submod "../../../examples/racket/12-char-rnn.rkt" doc)]
-@include-section[(submod "../../../examples/racket/13-translation.rkt" doc)]
-@include-section[(submod "../../../examples/racket/14-imagenet.rkt" doc)]
-@include-section[(submod "../../../examples/racket/15-finetune.rkt" doc)]
-@include-section[(submod "../../../examples/racket/16-style-transfer.rkt" doc)]
+@include-section[(submod torch/examples/00-randn doc)]
+@include-section[(submod torch/examples/01-arith doc)]
+@include-section[(submod torch/examples/02-matmul doc)]
+@include-section[(submod torch/examples/03-autograd doc)]
+@include-section[(submod torch/examples/04-mlp doc)]
+@include-section[(submod torch/examples/05-mnist doc)]
+@include-section[(submod torch/examples/06-gpt doc)]
+@include-section[(submod torch/examples/07-asr doc)]
+@include-section[(submod torch/examples/08-diffusion doc)]
+@include-section[(submod torch/examples/09-resnet doc)]
+@include-section[(submod torch/examples/10-dcgan doc)]
+@include-section[(submod torch/examples/11-vae doc)]
+@include-section[(submod torch/examples/12-char-rnn doc)]
+@include-section[(submod torch/examples/13-translation doc)]
+@include-section[(submod torch/examples/14-imagenet doc)]
+@include-section[(submod torch/examples/15-finetune doc)]
+@include-section[(submod torch/examples/16-style-transfer doc)]

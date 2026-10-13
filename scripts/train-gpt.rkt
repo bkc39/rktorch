@@ -8,13 +8,13 @@
          (only-in racket/format ~r)
          (only-in racket/path path-only)
          torch
+         (only-in torch/examples/06-gpt generate gpt pick-device)
          torch/nn
          (only-in torch/text/data
                   contiguous-blocks
                   encode
                   load-heart-of-darkness
-                  text->vocab)
-         (only-in "../examples/racket/06-gpt.rkt" generate gpt pick-device))
+                  text->vocab))
 
 (define epochs (string->number (or (getenv "EPOCHS") "40")))
 (define batch (string->number (or (getenv "BATCH") "64")))

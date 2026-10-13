@@ -1,5 +1,5 @@
 """torchvision's VGG-16 features and five steps of the style transfer in
-examples/racket/16-style-transfer.rkt, for style-transfer-parity-test.rkt.
+torch/examples/16-style-transfer.rkt, for style-transfer-parity-test.rkt.
 The weights come from the features-only safetensors file the Racket side
 loads (RKTORCH_PARITY_WEIGHTS names its directory). The content and style
 images travel back as the pixels used here, so both sides start from the

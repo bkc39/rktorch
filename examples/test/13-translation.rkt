@@ -3,9 +3,9 @@
 (require (only-in racket/list first last [take list-take])
          (only-in racket/math nan?)
          torch
+         torch/examples/13-translation
          torch/nn
-         torch/text/translation
-         "../racket/13-translation.rkt")
+         torch/text/translation)
 
 (module+ main
   (require (only-in "private/env.rkt" env-number))

@@ -224,7 +224,7 @@ norm=nn.LayerNorm(32))} with the same settings), and the updates track
 
 @bold{The middle path: offline training on a committed excerpt.} Between the
 841-char parity fixture (too small to learn from) and the full-novella
-download sits @filepath{examples/data/heart-of-darkness-part-i.txt}: the
+download sits @filepath{torch/examples/data/heart-of-darkness-part-i.txt}: the
 opening ~31k characters of Part I, committed to the repo, so this trains a
 real --- if small --- language model with @emph{no network at all}. The loop
 is epoch-shaped: each epoch trains every window once, in order, so the
@@ -241,7 +241,7 @@ to keep a GPU busy. The mean loss falls from about 2.3 at the tenth epoch
 to about 0.8 at the sixtieth.
 
 @chunk[<r06-train-excerpt>
-(define-runtime-path excerpt-path "../data/heart-of-darkness-part-i.txt")
+(define-runtime-path excerpt-path "data/heart-of-darkness-part-i.txt")
 
 (define (load-excerpt)
   (file->string excerpt-path))

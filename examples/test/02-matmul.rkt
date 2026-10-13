@@ -1,9 +1,9 @@
 #lang racket/base
 
-;; Runner + tests for the literate example ../../examples/racket/02-matmul.rkt.
+;; Runner + tests for the literate example torch/examples/02-matmul.rkt.
 
 (require torch
-         "../racket/02-matmul.rkt")
+         torch/examples/02-matmul)
 
 (module+ main
   (define t (run-example))

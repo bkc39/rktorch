@@ -4,11 +4,11 @@
          (only-in racket/math nan?)
          (only-in racket/string string-prefix?)
          torch
-         torch/nn
          (only-in torch/audio/librispeech
                   librispeech-utterances load-librispeech-fixture)
          (only-in torch/audio/metrics cer wer)
-         "../racket/07-asr.rkt")
+         torch/examples/07-asr
+         torch/nn)
 
 (module+ main
   (require (only-in "private/env.rkt" env-number))

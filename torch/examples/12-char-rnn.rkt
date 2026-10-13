@@ -136,7 +136,7 @@ excerpt, and @envvar{EPOCHS}, @envvar{TEMPERATURE} and @envvar{SEED} override
 the defaults.
 
 @chunk[<r12-train>
-(define-runtime-path excerpt-path "../data/heart-of-darkness-part-i.txt")
+(define-runtime-path excerpt-path "data/heart-of-darkness-part-i.txt")
 
 (define (load-excerpt)
   (file->string excerpt-path))

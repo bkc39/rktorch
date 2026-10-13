@@ -9,10 +9,10 @@
 ;; host memory — the finalizer guard in raw/memory.rkt broke.
 
 (require torch
+         (only-in torch/examples/06-gpt gpt)
          torch/nn
          (only-in torch/text/data
-                  contiguous-blocks encode load-heart-of-darkness text->vocab)
-         (only-in "../examples/racket/06-gpt.rkt" gpt))
+                  contiguous-blocks encode load-heart-of-darkness text->vocab))
 
 (with-default-device 'cuda
   (manual-seed! 0)

@@ -7,12 +7,12 @@
          (only-in racket/format ~r)
          (only-in racket/path path-only)
          torch
-         torch/nn
          (only-in torch/audio/librispeech
                   librispeech-utterances load-utterance utterance-transcript)
-         (only-in "../examples/racket/07-asr.rkt"
+         (only-in torch/examples/07-asr
                   evaluate greedy-decode pick-device train-librispeech
-                  transcribe utterance-features))
+                  transcribe utterance-features)
+         torch/nn)
 
 (define (env-number name default)
   (define v (getenv name))

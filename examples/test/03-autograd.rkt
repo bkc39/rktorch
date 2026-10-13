@@ -1,9 +1,9 @@
 #lang racket/base
 
-;; Runner + tests for the literate example ../../examples/racket/03-autograd.rkt.
+;; Runner + tests for the literate example torch/examples/03-autograd.rkt.
 
 (require torch
-         "../racket/03-autograd.rkt")
+         torch/examples/03-autograd)
 
 (module+ main
   (define g (run-example))

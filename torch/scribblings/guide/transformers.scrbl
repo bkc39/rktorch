@@ -1,5 +1,5 @@
 #lang scribble/manual
-@(require "../common.rkt"
+@(require torch/scribblings/common
           torch/scribblings/labels)
 
 @title[#:tag "guide-transformers"]{Attention and transformers}

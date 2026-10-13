@@ -1,4 +1,4 @@
-"""Parity twin of examples/racket/05-mnist.rkt: same seed, same convnet in
+"""Parity twin of torch/examples/05-mnist.rkt: same seed, same convnet in
 the same declaration order, 5 full-batch Adam steps on the committed fixture."""
 
 import json

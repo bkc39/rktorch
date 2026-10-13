@@ -1,4 +1,4 @@
-"""Parity twin of examples/racket/09-resnet.rkt: the same narrow ResNet
+"""Parity twin of torch/examples/09-resnet.rkt: the same narrow ResNet
 (base width 16, blocks 2-2-2-2, bias-free convolutions, batch norm) in the
 same declaration order, seeded, and 3 full-batch steps of SGD at lr 0.005 with
 momentum 0.9 and weight decay 5e-4 (a gentle rate: batch norm amplifies the

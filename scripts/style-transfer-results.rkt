@@ -13,8 +13,8 @@
          (only-in racket/pretty pretty-write)
          racket/runtime-path
          torch
-         (only-in torch/vision/transforms convert-image-dtype)
-         "../examples/racket/16-style-transfer.rkt")
+         torch/examples/16-style-transfer
+         (only-in torch/vision/transforms convert-image-dtype))
 
 (define-runtime-path content-path
   "../torch/vision/fixtures/hymenoptera/bees/honey-bee.jpg")
