@@ -3,7 +3,7 @@
 #|review: ignore|#
 
 ;; Re-export facade: raco review reads its whole-module requires as unused.
-(require racket/require
+(require (only-in racket/require subtract-in)
          (subtract-in "main.rkt" "safe.rkt"))
 
 (provide (all-from-out "main.rkt"))
