@@ -136,4 +136,103 @@
                  (expands?
                   '(module clashing '#%kernel
                      (#%require torch/scribblings/labels
-                                (for-label racket/base))))))))
+                                (for-label racket/base)))))))
+
+  (define torch-exports (export-names 'torch any-phase))
+  (define safe-exports (export-names 'torch/safe any-phase))
+  (define operator-exports (export-names 'torch/operators any-phase))
+  (define racket-exports (export-names 'racket any-phase))
+
+  (test-case "L1: torch/safe and torch/operators partition torch"
+    (check-equal? (set-union safe-exports operator-exports) torch-exports)
+    (check-true (set-empty? (set-intersect safe-exports operator-exports)))
+    (check-true (composes? 'torch 'torch/safe 'torch/operators)))
+
+  (test-case "L2: torch/operators is what torch shares with racket"
+    (check-false (set-empty? operator-exports))
+    (check-equal? operator-exports (set-intersect torch-exports racket-exports)))
+
+  (test-case "L3: torch/safe requires beside racket and threading"
+    (check-true (composes? 'racket 'threading 'torch/safe))
+    (check-true (composes? '(for-label racket threading torch/safe))))
+
+  (test-case "L3': torch beside racket/list or racket/base is refused"
+    (check-exn #rx"identifier already required"
+               (lambda ()
+                 (expands? '(module clashing '#%kernel
+                              (#%require racket/list torch)))))
+    (check-exn #rx"already required for label"
+               (lambda ()
+                 (expands? '(module clashing '#%kernel
+                              (#%require (for-label racket/base torch)))))))
+
+  (define shadowing-modules '(torch/foreign torch/main torch/operators))
+
+  (test-case "L4: every other public module requires beside racket"
+    (for ([module (in-list public-modules)]
+          #:unless (memq module shadowing-modules))
+      (check-true (composes? 'racket 'threading module)
+                  (symbol->string module))
+      (check-true (composes? `(for-label racket threading ,module))
+                  (symbol->string module))))
+
+  (test-case "L5: the public modules require together"
+    (check-true
+     (apply composes? '(submod torch/foreign unsafe)
+            (remq* clashing-modules public-modules))))
+
+  (define fallback-rows
+    '((+ () (1) (1 2 3) (1/2 0.5))
+      (- (1) (5 2 1))
+      (* () (2 3 4))
+      (/ (2) (1 2 4))
+      (< (1 2) (1 2 3) (2 1))
+      (<= (1 1) (1 2 2))
+      (> (2 1) (3 2 1))
+      (>= (1 1) (2 2 1))
+      (abs (-3) (-1/2))
+      (argmax (car ((1 a) (3 b))))
+      (cos (0) (1.0))
+      (exp (0) (1.0))
+      (flatten ((1 (2 (3)))))
+      (length ((1 2 3)))
+      (log (1) (8 2) (2.0))
+      (max (1 2.0 3))
+      (min (1 2 3))
+      (sin (0) (1.0))
+      (sort ((3 1 2) <))
+      (sqrt (4) (-4) (2.0))
+      (take ((1 2 3) 2))
+      (tanh (0) (0.5))))
+
+  (define (argument-values arguments)
+    (parameterize ([current-namespace ns])
+      (eval `(list ,@(for/list ([argument (in-list arguments)])
+                       (match argument
+                         [(? pair?) `(quote ,argument)]
+                         [_ argument]))))))
+
+  (define (operator-pair name)
+    (parameterize ([current-namespace ns])
+      (values (dynamic-require 'torch/operators name)
+              (dynamic-require 'racket name))))
+
+  (test-case "L6: the fallback table has a row for each operator"
+    (check-equal? (list->seteq (map car fallback-rows)) operator-exports))
+
+  (test-case "L6: each operator falls back to racket's on plain values"
+    (for* ([row (in-list fallback-rows)]
+           #:when (set-member? operator-exports (car row))
+           [arguments (in-list (cdr row))])
+      (define-values (torch-operator racket-operator) (operator-pair (car row)))
+      (define plain (argument-values arguments))
+      (define message (format "~s" (cons (car row) arguments)))
+      (check-not-eq? torch-operator racket-operator message)
+      (check-equal? (apply torch-operator plain)
+                    (apply racket-operator plain)
+                    message)))
+
+  (test-case "L8: requiring torch/safe does not load racket"
+    (parameterize ([current-namespace (make-base-empty-namespace)])
+      (dynamic-require 'torch/safe (void))
+      (check-false (module-declared? 'racket #f)))))
