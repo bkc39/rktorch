@@ -160,9 +160,9 @@ level.
   (set! kernel-size (->2d kernel-size))
   (set! stride (->2d stride))
   (set! padding (->2d padding))
-  (define shape
+  (define kernel-dims
     (list out-channels in-channels (car kernel-size) (cadr kernel-size)))
-  (set! weight (Parameter (kaiming-uniform shape)))
+  (set! weight (Parameter (kaiming-uniform kernel-dims)))
   (set! bias
         (and bias? (Parameter (uniform-init (list out-channels) -0.1 0.1))))
   #:forward (x)
@@ -325,12 +325,12 @@ it, so a mode-dependent step belongs in a registered child such as
 
 @racketblock[
 (define projection (Linear 32 32))
-(define drop (Dropout #:p 0.1))
+(define dropout (Dropout #:p 0.1))
 (define block
   (procedure->Layer
-   (lambda~> projection relu drop)
+   (lambda~> projection relu dropout)
    #:children (list (cons "projection" projection)
-                    (cons "drop" drop))))
+                    (cons "dropout" dropout))))
 (eval! block)
 ]
 
@@ -567,13 +567,13 @@ a hand-written layer applied with one is refused, naming
 @racket[define-layer] or @racket[procedure->Layer].
 
 @racketblock[
-(struct Twice (inner)
+(struct Twice (wrapped)
   #:methods gen:layer
   [(define (layer-forward self . inputs)
-     (define inner (Twice-inner self))
-     (inner (apply inner inputs)))
+     (define wrapped (Twice-wrapped self))
+     (wrapped (apply wrapped inputs)))
    (define (layer-named-children self)
-     (list (cons "inner" (Twice-inner self))))])
+     (list (cons "wrapped" (Twice-wrapped self))))])
 ]
 
 @defthing[gen:layer any/c]{

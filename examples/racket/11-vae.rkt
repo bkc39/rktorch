@@ -109,22 +109,22 @@ legible digits a linear VAE is known for; the loss settles near 105.
     (define opt (adam (parameters net) #:lr 1e-3))
     (define fixed-z (randn 100 20))
     (for/list ([epoch (in-range epochs)])
-      (define-values (total count)
-        (for/fold ([total 0.0] [count 0]) ([(xb) (in-dataloader loader)])
+      (define-values (total seen)
+        (for/fold ([total 0.0] [seen 0]) ([(xb) (in-dataloader loader)])
           (define eps (randn (length xb) 20))
           (zero-grads! opt)
           (define-values (logits mu logvar) (net xb eps))
           (define loss (vae-loss logits xb mu logvar))
           (backward! loss)
           (step! opt)
-          (values (+ total (* (length xb) (item loss))) (+ count (length xb)))))
+          (values (+ total (* (length xb) (item loss))) (+ seen (length xb)))))
       (when out
         (define samples
           (with-no-grad (reshape (sigmoid (decode net fixed-z)) 100 1 28 28)))
         (write-ppm (build-path out (format "vae-epoch-~a.ppm" (add1 epoch)))
                    (image-grid samples #:columns 10)
                    #:range '(0 1)))
-      (/ total count))))]
+      (/ total seen))))]
 
 @chunk[<*>
   <r11-require>

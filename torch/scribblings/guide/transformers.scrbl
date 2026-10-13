@@ -265,8 +265,8 @@ inside the block. Deep stacks train more steadily that way.
 (define (pre-attend x) ((child-ref pre "self-attn") x x x))
 (define (pre-feed x)
   ((child-ref pre "linear2") (relu ((child-ref pre "linear1") x))))
-(define stream (+ tokens (pre-attend ((child-ref pre "norm1") tokens))))
-(define pre-norm (+ stream (pre-feed ((child-ref pre "norm2") stream))))
+(define attended (+ tokens (pre-attend ((child-ref pre "norm1") tokens))))
+(define pre-norm (+ attended (pre-feed ((child-ref pre "norm2") attended))))
 (~> (- pre-norm (pre tokens)) abs max item (< 1e-6))
 ]
 

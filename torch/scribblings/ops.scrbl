@@ -364,9 +364,8 @@ their own, @emph{Ordering and sampling}.
                  [#:groups groups exact-integer? 1])
          tensor?]{
 The 2-D convolution of an @tt{[N C H W]} batch with an
-@tt{[out C/groups kH kW]} @racket[weight], as
-@tt{torch.nn.functional.conv2d}; a single integer applies to both axes.
-The layer form is @racket[Conv2d].
+@tt{[out C/groups kH kW]} @racket[weight], a single integer applying to both
+axes; the layer form is @racket[Conv2d].
 
 @torch-examples[(shape (conv2d (zeros 1 3 8 8) (zeros 4 3 3 3) #:padding 1))]}
 
@@ -411,11 +410,10 @@ both spatial axes.
                      [#:momentum momentum real? 0.1]
                      [#:eps eps real? 1e-5])
          tensor?]{
-Batch normalization over the channel axis of an @tt{[N C ...]} input, as
-@tt{torch.nn.functional.batch_norm}. Training normalizes by the batch's
-statistics and folds them into the running ones by @racket[momentum];
-otherwise the running statistics normalize, and both are required. The
-layer forms are @racket[BatchNorm1d] and @racket[BatchNorm2d].
+Batch normalization over the channel axis of an @tt{[N C ...]} input, by
+the batch's statistics when @racket[training?] and by the running ones
+otherwise; the layer forms are @racket[BatchNorm1d] and
+@racket[BatchNorm2d].
 
 @torch-examples[(shape (batch-norm (randn 4 3) #:training? #t))]}
 

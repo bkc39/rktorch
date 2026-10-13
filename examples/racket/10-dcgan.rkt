@@ -141,19 +141,19 @@ give recognisable digits.
     (define opt-d (adam (parameters disc) #:lr 2e-4 #:beta1 0.5))
     (define fixed-z (randn 100 100))
     (for/list ([epoch (in-range epochs)])
-      (define-values (d-total g-total count)
-        (for/fold ([d-total 0.0] [g-total 0.0] [count 0])
+      (define-values (d-total g-total seen)
+        (for/fold ([d-total 0.0] [g-total 0.0] [seen 0])
                   ([(xb) (in-dataloader loader)])
           (define-values (d g) (train-step gen disc opt-g opt-d xb device))
           (values (+ d-total (* (length xb) d))
                   (+ g-total (* (length xb) g))
-                  (+ count (length xb)))))
+                  (+ seen (length xb)))))
       (when out
         (define samples (in-eval-mode gen (with-no-grad (gen fixed-z))))
         (write-ppm (build-path out (format "dcgan-epoch-~a.ppm" (add1 epoch)))
                    (image-grid samples #:columns 10)
                    #:range '(-1 1)))
-      (list (/ d-total count) (/ g-total count)))))]
+      (list (/ d-total seen) (/ g-total seen)))))]
 
 @chunk[<*>
   <r10-require>

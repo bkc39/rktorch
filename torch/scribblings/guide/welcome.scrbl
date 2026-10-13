@@ -75,9 +75,10 @@ scalar comes back @racket['float32]. This is a known deviation: PyTorch
 keeps @tt{torch.tensor([1,2,3]) + 10} at @tt{int64}. Cast with
 @racket[to-dtype] where the dtype matters.}
 
-@margin-note{Scribble documentation that mentions these names requires
-@racketmodfont{torch/scribblings/labels} in place of a @racket[for-label]
-import, so the links resolve to the tensor operations.}
+@margin-note{Torch shadows some of @racketmodname[racket]'s names, so
+Scribble documentation that mentions them subtracts torch's names from
+@racketmodname[racket] for label:
+@racket[(require racket/require (for-label (subtract-in racket torch) torch))].}
 
 @section[#:tag "welcome-next"]{Where to go next}
 
