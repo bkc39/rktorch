@@ -5,6 +5,7 @@
          (only-in racket/match match-define)
          ;; whole-module require: only-in strips the phase-1 syntax classes
          syntax/parse/define
+         (only-in threading ~>)
          "common.rkt"
          "shim.rkt")
 
@@ -82,7 +83,7 @@
   (cond
     [(and call (zero? least-share)) "call returned before the measurement"]
     [else (format "~a (~a%)"
-                  (ms->string (median-of (map car samples)))
+                  (~> samples (map car _) median-of (real->decimal-string 1))
                   (~r (* 100 least-share) #:precision 1))]))
 
 (module+ main
@@ -94,12 +95,14 @@
   (define call-ms (timed plain-matmul))
   (define calls (make-calls plain-matmul))
   (printf "- one ~a matmul alone, 1 intra-op thread, on the main thread: ~a ms\n" matmul-n
-          (ms->string call-ms))
-  (displayln
-   "- each cell: median ms (the least share of a measurement any run's call was in flight for)\n")
+          (real->decimal-string call-ms 1))
+  (newline)
   (print-table-header
-   (list "worker is inside" "(collect-garbage 'major) ms" "(collect-garbage 'minor) ms"
-         (format "trainer's longest stall while allocating for ~a ms, ms" stall-window-ms)
+   (list "worker is inside"
+         "(collect-garbage 'major), median ms (least share any run's call was in flight)"
+         "(collect-garbage 'minor), median ms (least share any run's call was in flight)"
+         (format "trainer's longest stall while allocating for ~a ms, median ms (least share any run's call was in flight)"
+                 stall-window-ms)
          "load"))
   (for ([c (in-list calls)])
     (match-define (cons label call) c)

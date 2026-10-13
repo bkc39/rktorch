@@ -19,6 +19,7 @@
     `(begin
        (require racket/match
                 syntax/parse/define
+                (only-in threading ~>)
                 (file ,(path->string shim-path))
                 (file ,(path->string common-path)))
        (define elements (* 4 1024 1024))
@@ -162,7 +163,7 @@
     (define-syntax-parse-rule (with-busy-workers prepare:expr body:expr ...+)
       (call-with-busy-workers prepare (lambda () body ...)))
     (define (median-ms thunk)
-      (ms->string (median-of (repeat-runs ,timing-repeats thunk))))
+      (~> (repeat-runs ,timing-repeats thunk) median-of (real->decimal-string 1)))
     (parallel-add!)
     (define before (counts))
     (define alone (median-ms (lambda () (time-trainer 50))))

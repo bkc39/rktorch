@@ -37,45 +37,53 @@
    (strategy "with-atomic (dynamic-wind + start-atomic / end-atomic)" (quotient full 10)
              (lambda (b) (with-atomic (bump! b))))))
 
-(struct sample (count retries ms woke))
+(struct sample (count in-window retries ms))
 
 (define (measure total step #:threads [n threads] #:pool [pool 'own] #:main [mode main-blocked])
   (define per-thread (quotient total n))
   (define b (box 0))
-  (define woke (box #f))
+  (define stop (box #f))
   (define window
     (run-parallel n
                   (lambda (_i)
-                    (for/fold ([retries 0]) ([_ (in-range per-thread)])
+                    (for/fold ([retries 0]) ([_ (in-range per-thread)] #:break (unbox stop))
                       (+ retries (step b))))
                   #:pool pool
                   #:main mode
-                  #:on-wake (lambda () (set-box! woke (unbox b)))))
-  (sample (unbox b) (apply + (span-value window)) (span-ms window) (unbox woke)))
+                  #:stop stop
+                  #:counters (list (lambda () (unbox b)))))
+  (match-define (list in-window) (span-counts window))
+  (sample (unbox b) in-window (apply + (span-value window)) (span-ms window)))
 
 (define (ns-per ms count)
-  (~> ms (* 1e6) (/ count) (~r #:precision 1)))
+  (cond
+    [(zero? count) "-"]
+    [else (~> ms (* 1e6) (/ count) (~r #:precision 1))]))
 
 (define hop-sections 400000)
 (define hop-sections/busy 2000)
-(define hop-sections/foreign 200)
 (define hop-foreign-seconds 0.5)
 
 (define hop-modes
-  (list (cons main-blocked hop-sections)
-        (cons main-busy hop-sections/busy)
-        (cons (main-in-foreign hop-foreign-seconds) hop-sections/foreign)))
+  (list* (cons main-blocked hop-sections)
+         (cons main-busy hop-sections/busy)
+         (for/list ([mode (in-list (foreign-modes hop-foreign-seconds))])
+           (cons mode hop-sections))))
+
+(define (sample-ns-per s)
+  (cond
+    [(zero? (sample-in-window s)) +inf.0]
+    [else (/ (sample-ms s) (sample-in-window s))]))
 
 (define (hop-columns n pool total mode)
-  (define samples
-    (repeat-runs repeats
-                 (lambda () (measure total atomic-increment! #:threads n #:pool pool #:main mode))))
-  (define ms (median-of (map sample-ms samples)))
-  (define woke (map sample-woke samples))
-  (list total
-        (ms->string ms)
-        (ns-per ms total)
-        (if (andmap values woke) (median-of woke) "-")))
+  (define middle
+    (middle-by sample-ns-per
+               (repeat-runs repeats
+                            (lambda ()
+                              (measure total atomic-increment! #:threads n #:pool pool #:main mode)))))
+  (list (sample-in-window middle)
+        (real->decimal-string (sample-ms middle) 1)
+        (ns-per (sample-ms middle) (sample-in-window middle))))
 
 (define (hop-row label n pool)
   (append (list label n)
@@ -95,7 +103,7 @@
         (format "~a" counts)
         (if (andmap (lambda (c) (= c total)) counts) "yes" "NO")
         (format "~a" (map sample-retries samples))
-        (ms->string ms)
+        (real->decimal-string ms 1)
         (ns-per ms total)
         (load-average)))
 
@@ -125,7 +133,7 @@
   (define overlap (- (min adders-end (span-end subtracted))
                      (max adders-start (span-start subtracted))))
   (define expected (- full subtractions))
-  (define (since-adders t) (ms->string (- t adders-start)))
+  (define (since-adders t) (real->decimal-string (- t adders-start) 1))
   (list "box-cas! adds from 8 parallel threads, 1M subtractions from a coroutine thread in atomic mode"
         full
         (format "(~a)" (unbox b))
@@ -136,7 +144,7 @@
         (format "expected ~a; subtractor ran ~a to ~a ms, adders 0 to ~a ms"
                 expected (since-adders (span-start subtracted)) (since-adders (span-end subtracted))
                 (since-adders adders-end))
-        (ms->string (span-ms adders))
+        (real->decimal-string (span-ms adders) 1)
         ""
         (load-average)))
 
@@ -150,23 +158,17 @@
     (print-table-row (strategy-row s)))
   (print-table-row (cas-against-atomic-subtractor))
   (newline)
-  (displayln
-   (string-append
-    "- with main in foreign calls, wall time includes the foreign phase; the count at main's last"
-    " wake is what the threads finished while main was in foreign calls\n"))
   (print-table-header
    (append '("call-as-atomic entered from" "threads")
            (append*
             (for/list ([hop (in-list hop-modes)])
               (define main (main-mode-label (car hop)))
-              (list (format "sections, main ~a" main)
-                    (format "median wall ms, main ~a" main)
-                    (format "ns per section, main ~a" main)
-                    (format "sections done at main's last wake, main ~a" main))))
+              (list (format "sections in the window, main ~a" main)
+                    (format "window ms, main ~a" main)
+                    (format "ns per section, main ~a" main))))
            '("load")))
   (print-table-row
-   (hop-row "coroutine thread (main OS thread; while main is busy or in foreign calls this times sharing main's time slices, not the section)"
-            1 #f))
+   (hop-row "coroutine thread (main OS thread)" 1 #f))
   (print-table-row (hop-row "one parallel thread" 1 'own))
   (print-table-row (hop-row "two parallel threads" 2 'own))
   (print-table-row (hop-row "eight parallel threads" 8 'own))
