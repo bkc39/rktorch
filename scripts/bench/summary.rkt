@@ -37,7 +37,8 @@
 
 (define (host r)
   (define m (ref r 'meta))
-  (format "~a (~a, ~a, cpus ~a)" (ref m 'host) (ref m 'cpu) (ref m 'os) (ref m 'affinity)))
+  (format "~a (~a, ~a, cpus ~a)" (or (ref m 'host) "?") (ref m 'cpu) (ref m 'os)
+          (ref m 'affinity)))
 
 (define (execution r)
   (define m (ref r 'meta))
@@ -256,6 +257,10 @@
                                          'EPOCHS "3" 'OMP_NUM_THREADS "1")))))
     (check-regexp-match #rx"\\| EPOCHS=3 OMP_NUM_THREADS=1 STEPS=300 \\|" md)
     (check-false (regexp-match? #rx"RKTORCH_MNIST_DIR" md)))
+
+  (test-case "a record without a host names it ?"
+    (define md (summary-markdown (list (summary-record "a" "r1" #f '(10.0 10.0)))))
+    (check-regexp-match #rx"## End to end \\(\\? \\(Some CPU" md))
 
   (test-case "e2e sections split by host"
     (define md
