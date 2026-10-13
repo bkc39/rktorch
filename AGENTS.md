@@ -120,8 +120,11 @@ with `backward!` outside the form as PyTorch recommends). From
   `pairs->tensors` padding to a width
 - diffusion (`torch/vision/diffusion.rkt`, #84): `linear-schedule`
   `cosine-schedule` (betas, alphas, alpha-bars as device tensors), `q-sample`
-  (closed-form `q(x_t | x_0)`), `sinusoidal-embedding`, and the layers
-  `TimeEmbedding` `ResBlock` (with `#:dropout`) `AttentionBlock`
+  (closed-form `q(x_t | x_0)`), `sinusoidal-embedding` (`sinusoidal-positions`
+  in its `'halves` layout over int64 timesteps), and the layers
+  `TimeEmbedding` `ResBlock` (with `#:dropout`) `AttentionBlock` (one head
+  over the H·W tokens through `scaled-dot-product-attention`, its `q` `k`
+  `v` `proj` children kept as `Linear`s)
   `Downsample` `Upsample` `UNet` (the DDPM CIFAR-10 network by default:
   `#:base #:mults #:blocks #:attention #:dropout`, `#:classes` for a
   class-conditional net with a null label); the training loop is
@@ -208,12 +211,24 @@ with `backward!` outside the form as PyTorch recommends). From
   (binary ops take a real on either side)
 - operators: `+ - * /` shadow racket/base rkt-polars-style (numeric fast
   path to racket/base, tensor operands dispatch to add/sub/mul/div, chains
-  fold left); `@` is matmul, like Python's `a @ b`; `t`/`Σ` are terse
+  fold left); so do `< <= > >=`, which dispatch to lt/le/gt/ge, mirror a
+  real on the left, and take two operands with a tensor; `@` is matmul,
+  like Python's `a @ b` (`|@|` under the at-reader: lp2 examples and
+  Scribble). Write arithmetic, comparisons and matmul with these, not the
+  names: `scripts/resyntax-rules.rkt` rewrites `(mul a b)` to `(* a b)`,
+  `(ge a b)` to `(>= a b)` and `(matmul a b)` to `(@ a b)`; `t`/`Σ` are terse
   aliases for transpose/sum; unary `T` reverses all axes like Python's `x.T`
   (use `transpose` on the last two axes for batched attention);
   `~> ~>> lambda~> lambda~>>` are re-provided
   from the `threading` library (dep `threading-lib`, prefetched offline by
-  the `racket-deps` fixed-output derivation in flake.nix)
+  the `racket-deps` fixed-output derivation in flake.nix). Thread a chain
+  of three or more calls: the same rules file rewrites
+  `(clip (+ h (relu (dil h))) l t)` to `(~> (dil h) relu (+ h) (clip l t))`,
+  following first arguments and either operand of a two-operand `+` or `*`
+  while the other arguments are names or literals (a call that joins two
+  computations starts the chain). An expansion analyzer keeps it off a call
+  that is already a `~>` or `~>>` step, which receives an argument it does
+  not show
 - reductions: `sum mean max min argmax softmax log-softmax`
 - ordering and sampling (`torch/foreign/order-ops.rkt`, tranche 7, #153):
   `topk` and `sort` answer `(values entries indices)`; `argsort`;
@@ -235,12 +250,12 @@ numeric code. New ops that collide must follow the same dispatch pattern
 (check racket/base first — `tanh` was missed initially and broke numeric
 callers), and scribble examples need
 `(for-label (except-in racket/base abs cos exp log sin sort sqrt max min
-length + - * /) torch)` — the `except-in` alone leaves those names
+length + - * / < <= > >=) torch)` — the `except-in` alone leaves those names
 unbound, so `torch` has to follow it. Each chapter carries that line
 itself: re-exporting it from a shared module tags every link to that
 module rather than to `torch`, so the links miss their entries.
 Dispatching named ops carry dependent (`->i`) contracts so the wrong shape
-gets contract blame, not a runtime error; the `+ - * / @` operators are
+gets contract blame, not a runtime error; the `+ - * / < <= > >= @` operators are
 provided as plain renames (no contract overhead on the numeric fast path),
 per `foreign/operators.rkt`.
 
@@ -413,10 +428,15 @@ racket scripts/coverage.rkt --changed   # expression coverage (#173); exits
                                # non-zero below the floor and lists the lines
                                # of the files you touched that no test reaches
 
-resyntax analyze --local-git-repository . origin/master   # lint gate
+scripts/resyntax analyze --local-git-repository . origin/master   # lint gate
                                      # (CI fails on any suggestion; scans
-                                     #  changed files, torch/ included)
-resyntax fix --directory torch
+                                     #  changed files, torch/ included; the
+                                     #  default rules plus
+                                     #  scripts/resyntax-rules.rkt; the
+                                     #  literate examples' chunks through
+                                     #  scripts/resyntax-lp2.rkt)
+scripts/resyntax fix --directory torch
+raco test scripts/resyntax-rules-test.rkt scripts/resyntax-lp2.rkt   # the repository's own rules
 raco review torch/**/*.rkt
 ```
 
@@ -428,8 +448,8 @@ Resyntax, racket-review and `cover` are pinned, one commit per package, in
 into `.racket-user` with no network, and the CI lane runs the same trees, so
 lint findings change only when the flake does (#63). To bump: change the
 package's `rev`, set its `hash` to `""`, `nix build .#racket-linters`, paste
-the hash Nix reports, and run the full sweep (`resyntax analyze --directory
-torch`), since CI scans only changed files. Each checkout moves to the new
+the hash Nix reports, and run the full sweep (`scripts/resyntax analyze
+--directory torch`), since CI scans only changed files. Each checkout moves to the new
 trees on its next shell entry.
 
 ### PyTorch parity

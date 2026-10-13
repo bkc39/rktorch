@@ -1,6 +1,7 @@
 #lang scribble/lp2
 
-@(require (for-label (except-in racket/base abs cos exp log sin sort sqrt max min length + - * /)
+@(require (for-label (except-in racket/base abs cos exp log sin sort sqrt max min length
+                                + - * / < <= > >=)
                      torch))
 
 @title[#:tag "ex-randn"]{Seeding the RNG and sampling a tensor}

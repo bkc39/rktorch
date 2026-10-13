@@ -188,8 +188,8 @@ against:
   transformer layers, with [training](scripts/train-gpt.rkt) and
   [generation](scripts/generate-gpt.rkt) scripts
 - [Speech recognition on LibriSpeech](examples/racket/07-asr.rkt): a spectral
-  front end, a transformer encoder-decoder, and CTC, with a
-  [training script](scripts/train-asr.rkt)
+  front end, an encoder-decoder on the library's transformer layers, and
+  CTC, with a [training script](scripts/train-asr.rkt)
 - [Image generation on CIFAR-10](examples/racket/08-diffusion.rkt): a
   class-conditional DDPM with a UNet, trained with an EMA of the weights
 - [A character-level LSTM](examples/racket/12-char-rnn.rkt): gradient

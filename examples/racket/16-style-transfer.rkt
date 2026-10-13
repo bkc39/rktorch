@@ -2,7 +2,8 @@
 
 @(require (only-in racket/format ~r)
           (only-in torch/scribblings/common photo)
-          (for-label (except-in racket/base abs cos exp log sin sort sqrt max min length + - * /)
+          (for-label (except-in racket/base abs cos exp log sin sort sqrt max min length
+                                + - * / < <= > >=)
                      racket/match
                      torch torch/nn torch/vision/image torch/vision/transforms
                      torch/vision/vgg))

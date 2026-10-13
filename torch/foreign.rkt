@@ -35,7 +35,8 @@
 
 (provide ref ref! with-no-grad with-autocast with-default-device)
 
-(provide (rename-out [t+ +] [t- -] [t* *] [t/ /])
+(provide (rename-out [t+ +] [t- -] [t* *] [t/ /]
+                     [t< <] [t<= <=] [t> >] [t>= >=])
          @)
 
 ;; every name below is contracted at its definition site
