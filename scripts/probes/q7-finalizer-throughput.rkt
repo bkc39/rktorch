@@ -99,17 +99,18 @@
      "longest gap ms" "peak ledger MiB" "ledger MiB at stop" "major collections to drain"
      "drain ms" "ledger bytes after drain" "drained" "load"))
   (define undrained
-    (for*/or ([make (in-list (variant-makers))]
-              [workers (in-list worker-counts)]
-              [mode (in-list modes)])
-      (match-define (variant p o) (make))
-      (define-values (row collections drained?) (churn-row p (ops-randn o) workers mode))
-      (~> (list (if drained? "yes" "NO") (load-average))
-          (append row _)
-          print-table-row)
-      (and (not drained?)
-           (format "~a, ~a workers, main ~a: not drained after ~a major collections"
-                   (prototype-name p) workers (main-mode-label mode) collections))))
+    (with-handlers ([exn:fail:unsettled? exn-message])
+      (for*/or ([make (in-list (variant-makers))]
+                [workers (in-list worker-counts)]
+                [mode (in-list modes)])
+        (match-define (variant p o) (make))
+        (define-values (row collections drained?) (churn-row p (ops-randn o) workers mode))
+        (~> (list (if drained? "yes" "NO") (load-average))
+            (append row _)
+            print-table-row)
+        (and (not drained?)
+             (format "~a, ~a workers, main ~a: not drained after ~a major collections"
+                     (prototype-name p) workers (main-mode-label mode) collections)))))
   (when undrained
     (printf "\nstopped: ~a\n" undrained))
   (print-footer))

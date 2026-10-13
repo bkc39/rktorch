@@ -85,6 +85,8 @@
          middle-by
          collect-past-canary!
          settle-wills!
+         exn:fail:unsettled
+         exn:fail:unsettled?
          rate->string)
 
 (define pthread-self (get-ffi-obj "pthread_self" #f (_fun -> _uintptr)))
@@ -165,9 +167,9 @@
   (cas-update! finalizers-in-flight sub1))
 
 (define-syntax-parse-rule (with-finalizer-in-flight body:expr ...+)
-  (dynamic-wind (lambda () (cas-update! finalizers-in-flight add1))
-                (lambda () body ...)
-                finalizer-exited!))
+  (begin
+    (cas-update! finalizers-in-flight add1)
+    (with-finally (finalizer-exited!) body ...)))
 
 (define (cas-update! b f . args)
   (let retry ([tries 0])
@@ -448,8 +450,7 @@
                                e)])
     (will-try-execute executor no-will)))
 
-(define (run-ready-wills!)
-  (define executor (force finalizer-executor))
+(define (run-ready-wills! executor)
   (let loop ([ran 0])
     (cond
       [(eq? (try-will executor) no-will) ran]
@@ -459,34 +460,40 @@
   (begin0
     (with-atomic
       (collect-garbage 'major)
-      (run-ready-wills!))
+      (run-ready-wills! (force finalizer-executor)))
     (sleep 0)))
 
+(struct exn:fail:unsettled exn:fail ())
+
 (define (collect-past-canary!)
+  (define executor (force finalizer-executor))
   (define canary-finalized (make-semaphore 0))
   (define drained (box #f))
   (register-finalizer (box 0)
                       (lambda (_)
                         (with-atomic
-                          (set-box! drained (run-ready-wills!))
+                          (set-box! drained (run-ready-wills! executor))
                           (semaphore-post canary-finalized))))
   (collect-garbage 'major)
   (unless (sync/timeout canary-timeout-seconds canary-finalized)
-    (error 'collect-past-canary! "the finalizer thread did not run a canary within ~a s"
-           canary-timeout-seconds))
+    (raise (exn:fail:unsettled
+            (format "a will held the finalizer thread past the ~a s canary" canary-timeout-seconds)
+            (current-continuation-marks))))
   (unbox drained))
+
+(define (collect-round!)
+  (define now (collect-and-run-wills!))
+  (cond
+    [(positive? now) (values now 1)]
+    [else (values (collect-past-canary!) 2)]))
 
 (define (settle-wills! #:limit [limit 50])
   (let loop ([collections 0] [ran 0])
     (define exited (unbox finalizers-exited))
-    (define now (collect-and-run-wills!))
-    (define fenced (and (zero? now) (collect-past-canary!)))
-    (define so-far (+ collections (if fenced 2 1)))
-    (define quiet?
-      (and (eqv? fenced 0)
-           (= exited (unbox finalizers-exited))
-           (zero? (unbox finalizers-in-flight))))
+    (define-values (now round-collections) (collect-round!))
+    (define so-far (+ collections round-collections))
     (cond
-      [quiet? (values ran so-far)]
+      [(and (zero? now) (= exited (unbox finalizers-exited)) (zero? (unbox finalizers-in-flight)))
+       (values ran so-far)]
       [(>= so-far limit) (values #f so-far)]
-      [else (loop so-far (+ ran now (or fenced 0)))])))
+      [else (loop so-far (+ ran now))])))

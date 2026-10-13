@@ -31,6 +31,7 @@
 (define (finalizer-round per-thread #:protect protect #:threads [threads default-threads])
   (define total (* threads per-thread))
   (define runs (build-vector total (lambda (_) (box 0))))
+  (define ran-on (make-vector total #f))
   (define (run-count id) (unbox (vector-ref runs id)))
   (define ms
     (span-ms
@@ -43,14 +44,17 @@
                           (register-finalizer (make-vector 2 id)
                                               (lambda (_v)
                                                 (with-finalizer-in-flight
+                                                  (vector-set! ran-on id (current-thread))
                                                   (cas-update! (vector-ref runs id) add1)))))))))))
   (define-values (rounds drain-ms settled? timed-out?)
     (collect-until (lambda () (for/and ([id (in-range total)]) (positive? (run-count id))))))
   (define final-counts (build-list total run-count))
   (define never (count zero? final-counts))
   (define twice (count (lambda (n) (> n 1)) final-counts))
+  (define finalizer-threads
+    (hash-count (for/hasheq ([t (in-vector ran-on)] #:when t) (values t #t))))
   (values (list total (real->decimal-string ms 1) (rate->string (/ total (ms->seconds ms)))
-                (apply + final-counts) never twice rounds (real->decimal-string drain-ms 1)
+                (apply + final-counts) finalizer-threads never twice rounds (real->decimal-string drain-ms 1)
                 (if (and settled? (zero? never) (zero? twice)) "yes" "NO")
                 (load-average))
           (cond
@@ -145,7 +149,7 @@
 (define (print-finalizer-table)
   (print-table-header
    '("register-finalizer called" "objects" "registration wall ms"
-     "registrations/s" "finalizer runs" "never ran" "ran twice"
+     "registrations/s" "finalizer runs" "threads running them" "never ran" "ran twice"
      "major collections to drain" "drain ms" "exactly once" "load"))
   (for/or ([spec (in-list
                   (list (list "plain, first registrations in the process" 100000 plain 8)
@@ -183,7 +187,9 @@
 
 (module+ main
   (print-banner "Q3: finalizers, phantom bytes and eq? tables from 8 parallel threads")
-  (define pending (print-finalizer-table))
+  (define pending
+    (with-handlers ([exn:fail:unsettled? exn-message])
+      (print-finalizer-table)))
   (cond
     [pending
      (printf "\nstopped: ~a\n" pending)]

@@ -30,8 +30,6 @@
 (define repeats 3)
 (define settle-round-limit 50)
 
-(struct exn:fail:unsettled exn:fail ())
-
 (define (settle! p when-settling)
   (define-values (ran _collections) (settle-wills! #:limit settle-round-limit))
   (or ran
