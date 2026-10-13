@@ -1,10 +1,7 @@
 #lang racket/base
 
 (require (for-syntax racket/base)
-         (only-in racket/file display-lines-to-file)
-         (only-in racket/list append-map remove-duplicates)
-         (only-in racket/runtime-path define-runtime-path)
-         (only-in threading ~>))
+         (only-in racket/runtime-path define-runtime-path))
 
 (define-runtime-path names-file
   (build-path 'up "codegen" "racket-names.txt"))
@@ -17,6 +14,9 @@
     (symbol->string (car export))))
 
 (module+ main
+  (require (only-in racket/file display-lines-to-file)
+           (only-in racket/list append-map remove-duplicates)
+           (only-in threading ~>))
   (~> (append-map export-names '(racket threading))
       remove-duplicates
       (sort string<?)
