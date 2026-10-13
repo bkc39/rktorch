@@ -70,7 +70,10 @@
   (for-each print-table-row rows)
   (newline))
 
-(define (run-parallel/gc n body #:pool [pool 'own] #:setup [setup void])
+(define (run-parallel/gc n body
+                         #:pool [pool 'own]
+                         #:setup [setup void]
+                         #:counter [counter (lambda () 0)])
   (define ready (make-semaphore 0))
   (define gate (make-semaphore 0))
   (define results (make-vector n #f))
@@ -89,18 +92,20 @@
                   (succeeded? i (lambda () (vector-set! results i (body i))))))
               #:pool pool)))
   (for ([_ (in-range n)]) (semaphore-wait ready))
+  (define count-start (counter))
   (define gc-start (current-gc-milliseconds))
   (define start (current-inexact-monotonic-milliseconds))
   (for ([_ (in-range n)]) (semaphore-post gate))
   (for-each thread-wait workers)
   (define ms (- (current-inexact-monotonic-milliseconds) start))
   (define gc-ms (- (current-gc-milliseconds) gc-start))
+  (define counted (- (counter) count-start))
   (define failure (for/first ([e (in-vector failures)] #:when e) e))
   (when failure (raise failure))
-  (values ms (vector->list results) gc-ms))
+  (values ms (vector->list results) gc-ms counted))
 
 (define (run-parallel n body #:pool [pool 'own])
-  (define-values (ms results _gc-ms) (run-parallel/gc n body #:pool pool))
+  (define-values (ms results _gc-ms _counted) (run-parallel/gc n body #:pool pool))
   (values ms results))
 
 (define (fmt-ms ms)

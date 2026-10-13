@@ -1,6 +1,7 @@
 #lang racket/base
 
-(require (only-in math/statistics median)
+(require (only-in ffi/unsafe register-finalizer)
+         (only-in math/statistics median)
          (only-in racket/format ~r)
          (only-in racket/match match-define)
          (only-in racket/string string-join)
@@ -30,14 +31,21 @@
 (define seconds-per-cell 1.0)
 (define repeats 3)
 (define settle-round-limit 50)
+(define canary-timeout-seconds 0.5)
+
+(define (collect-past-canary!)
+  (define canary-finalized (make-semaphore 0))
+  (register-finalizer (box 0) (lambda (_) (semaphore-post canary-finalized)))
+  (collect-garbage 'major)
+  (and (sync/timeout canary-timeout-seconds canary-finalized) #t))
 
 (define (settle-finalizers! p)
   (define runs (prototype-finalizer-runs p))
   (let loop ([rounds 1] [before (runs)] [quiet 0])
-    (collect-garbage 'major)
+    (define canary-seen? (collect-past-canary!))
     (sleep 0.01)
     (define now (runs))
-    (define quiet* (if (= now before) (add1 quiet) 0))
+    (define quiet* (if (and canary-seen? (= now before)) (add1 quiet) 0))
     (cond
       [(= quiet* 2) #t]
       [(= rounds settle-round-limit) #f]
@@ -51,27 +59,29 @@
   (unless (settle-finalizers! p)
     (raise (unsettled (format "~a: finalizers did not settle in ~a major collections before n = ~a, ~a workers"
                               (prototype-name p) settle-round-limit n workers))))
-  (define runs-before ((prototype-finalizer-runs p)))
+  (define runs (prototype-finalizer-runs p))
   (define deadline (+ (current-inexact-monotonic-milliseconds)
                       (* 1000 seconds-per-cell)))
-  (define-values (ms iterations gc-ms)
+  (define-values (ms iterations gc-ms finalizer-runs)
     (cond
       [(zero? workers)
        (at-set-num-threads 1)
+       (define runs-start (runs))
        (define gc-start (current-gc-milliseconds))
        (define start (current-inexact-monotonic-milliseconds))
        (define done (loop-until deadline p o n))
-       (values (- (current-inexact-monotonic-milliseconds) start)
-               (list done)
-               (- (current-gc-milliseconds) gc-start))]
+       (define ms (- (current-inexact-monotonic-milliseconds) start))
+       (define gc-ms (- (current-gc-milliseconds) gc-start))
+       (values ms (list done) gc-ms (- (runs) runs-start))]
       [else
        (run-parallel/gc workers
                         (lambda (_i) (loop-until deadline p o n))
-                        #:setup (lambda () (at-set-num-threads 1)))]))
+                        #:setup (lambda () (at-set-num-threads 1))
+                        #:counter runs)]))
   (cell workers
         (/ (* tensors-per-iteration (apply + iterations)) (/ ms 1000.0))
         (/ gc-ms ms)
-        (- ((prototype-finalizer-runs p)) runs-before)))
+        finalizer-runs))
 
 (define (median-cell samples)
   (cell (cell-workers (car samples))

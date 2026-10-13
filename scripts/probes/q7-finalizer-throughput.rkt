@@ -39,7 +39,6 @@
 
 (define (churn-row p randn workers)
   (collect-garbage 'major)
-  (define runs-before ((prototype-finalizer-runs p)))
   (define deadline (+ (current-inexact-monotonic-milliseconds) (* 1000 churn-seconds)))
   (define finished (box #f))
   (define failure (box #f))
@@ -47,23 +46,23 @@
   (define churner
     (thread (lambda ()
               (with-handlers ([(lambda (_) #t) (lambda (e) (set-box! failure e))])
-                (define-values (ms made gc-ms)
+                (define-values (ms made gc-ms runs)
                   (run-parallel/gc workers
                                    (lambda (_i) (churn! randn deadline))
-                                   #:setup (lambda () (at-set-num-threads 1))))
+                                   #:setup (lambda () (at-set-num-threads 1))
+                                   #:counter (prototype-finalizer-runs p)))
                 (set-box! at-stop
                           (vector (apply + made)
                                   (/ ms 1000.0)
-                                  ((prototype-finalizer-runs p))
+                                  runs
                                   gc-ms
                                   ((prototype-live-bytes p)))))
               (set-box! finished #t))))
   (define peak (sample-until (lambda () (unbox finished)) p))
   (thread-wait churner)
   (when (unbox failure) (raise (unbox failure)))
-  (define-values (made interval runs-at-stop gc-ms lag)
+  (define-values (made interval runs-during gc-ms lag)
     (vector->values (unbox at-stop)))
-  (define runs-during (- runs-at-stop runs-before))
   (define gc-share (/ gc-ms (* 1000 interval)))
   (define-values (rounds drain-ms) (drain! p))
   (define after ((prototype-live-bytes p)))

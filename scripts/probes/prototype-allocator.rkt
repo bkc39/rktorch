@@ -22,6 +22,9 @@
 
 (struct prototype (name wrap handle free! live-bytes finalizer-runs))
 
+(define-syntax-parse-rule (with-atomic body:expr ...+)
+  (dynamic-wind start-atomic (lambda () body ...) end-atomic))
+
 (define-syntax-parse-rule (with-uninterruptible-lock lock:expr body:expr ...+)
   (let ([held-lock lock])
     (dynamic-wind
@@ -67,15 +70,17 @@
     (define since (+ (hash-ref since-check dev 0) nbytes))
     (hash-set! since-check dev (if (>= since gate-interval) 0 since)))
   (define (release! t find-record)
-    (start-atomic)
-    (define r (find-record))
-    (define claimed? (and r (claim! r)))
-    (when claimed?
-      (hash-remove! table t)
-      (set-box! live (- (unbox live) (record-nbytes r))))
-    (end-atomic)
-    (when claimed?
-      (set-phantom-bytes! (record-phantom r) 0)
+    (define claimed
+      (with-atomic
+        (define r (find-record))
+        (cond
+          [(and r (claim! r))
+           (hash-remove! table t)
+           (set-box! live (- (unbox live) (record-nbytes r)))
+           r]
+          [else #f])))
+    (when claimed
+      (set-phantom-bytes! (record-phantom claimed) 0)
       (shim-free t)))
   (define ((finalizer-for r) t)
     (cas-add! runs 1)
@@ -84,12 +89,11 @@
     (define t (apply op args))
     (define r (make-record t))
     (define dev (and gate? (shim-device t)))
-    (start-atomic)
-    (register-finalizer t (finalizer-for r))
-    (hash-set! table t r)
-    (set-box! live (+ (unbox live) (record-nbytes r)))
-    (when dev (count-toward-gate! dev (record-nbytes r)))
-    (end-atomic)
+    (with-atomic
+      (register-finalizer t (finalizer-for r))
+      (hash-set! table t r)
+      (set-box! live (+ (unbox live) (record-nbytes r)))
+      (when dev (count-toward-gate! dev (record-nbytes r))))
     t)
   (define (free! t)
     (release! t (lambda () (hash-ref table t #f))))

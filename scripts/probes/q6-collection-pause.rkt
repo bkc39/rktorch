@@ -1,7 +1,10 @@
 #lang racket/base
 
-(require (only-in math/statistics median)
+(require (for-syntax racket/base)
+         (only-in math/statistics median)
          (only-in racket/match match-define)
+         ;; whole-module require: only-in strips the phase-1 syntax classes
+         syntax/parse/define
          "common.rkt"
          "shim.rkt")
 
@@ -67,22 +70,24 @@
         (cons (format "~a matmul, #:blocking? #t" matmul-n)
               (matmul-call shim-matmul/blocking))))
 
-(define (parked measure)
-  (define release (make-semaphore 0))
-  (define inside (make-semaphore 0))
-  (define worker (thread (lambda () (semaphore-post inside) (semaphore-wait release))
-                         #:pool 'own))
-  (semaphore-wait inside)
-  (begin0 (cons (measure) 0.0)
-          (semaphore-post release)
-          (thread-wait worker)))
+(define-syntax-parse-rule (with-parked-worker body:expr ...+)
+  (let ([release (make-semaphore 0)]
+        [inside (make-semaphore 0)])
+    (define worker (thread (lambda () (semaphore-post inside) (semaphore-wait release))
+                           #:pool 'own))
+    (semaphore-wait inside)
+    (dynamic-wind void
+                  (lambda () body ...)
+                  (lambda ()
+                    (semaphore-post release)
+                    (thread-wait worker)))))
 
 (define (measure-under call measure)
   (define samples
     (for/list ([_ (in-range repeats)])
       (cond
         [call (in-call-while call measure)]
-        [else (parked measure)])))
+        [else (with-parked-worker (cons (measure) 0.0))])))
   (define least-share (apply min (map cdr samples)))
   (cond
     [(and call (zero? least-share)) "call returned before the measurement"]
