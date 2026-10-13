@@ -169,8 +169,7 @@
 (define (seeded-generator seed label)
   (define g (make-pseudo-random-generator))
   (parameterize ([current-pseudo-random-generator g])
-    (random-seed (modulo (+ (* 1000003 seed) (equal-hash-code label))
-                         2147483647)))
+    (~> label equal-hash-code (+ (* 1000003 seed)) (modulo 2147483647) random-seed))
   g)
 
 (define (perturb! r)
