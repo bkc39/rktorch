@@ -1,7 +1,9 @@
 #lang racket/base
 
 (require (only-in racket/contract/base -> ->* >/c and/c listof or/c)
-         (only-in "../foreign.rkt" mean mul sub tensor? to-dtype)
+         (only-in "../foreign.rkt"
+                  device-type mean mul sub tensor? tensor-device to-device
+                  to-dtype)
          (only-in "../generated.rkt"
                   [binary-cross-entropy-with-logits
                    g:binary-cross-entropy-with-logits]
@@ -54,8 +56,21 @@
        (#:blank exact-nonnegative-integer?
         #:zero-infinity? boolean?)
        tensor?)
-  (g:ctc-loss-intlist log-probs (to-dtype targets 'int64)
-                      input-lengths target-lengths blank 1 zero-infinity?))
+  (define home (tensor-device log-probs))
+  (define via-cpu? (mps-ctc-backward-wrong? home target-lengths))
+  (define (placed t) (if via-cpu? (to-device t 'cpu) t))
+  (define loss
+    (g:ctc-loss-intlist (placed log-probs) (placed (to-dtype targets 'int64))
+                        input-lengths target-lengths blank 1 zero-infinity?))
+  (if via-cpu? (to-device loss home) loss))
+
+;; WORKAROUND (#258), remove once a pinned libtorch fixes it upstream:
+;; libtorch 2.14's MPS ctc_loss backward returns wrong or NaN gradients once
+;; a target reaches 512 labels (2S+1 past a 1024-thread threadgroup); its
+;; forward is right, and below 512 both match the CPU
+(define (mps-ctc-backward-wrong? dev target-lengths)
+  (and (eq? (device-type dev) 'mps)
+       (<= 512 (apply max target-lengths))))
 
 (define reductions '#hasheq((none . 0) (mean . 1) (sum . 2)))
 

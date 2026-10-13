@@ -120,8 +120,11 @@ with `backward!` outside the form as PyTorch recommends). From
   `pairs->tensors` padding to a width
 - diffusion (`torch/vision/diffusion.rkt`, #84): `linear-schedule`
   `cosine-schedule` (betas, alphas, alpha-bars as device tensors), `q-sample`
-  (closed-form `q(x_t | x_0)`), `sinusoidal-embedding`, and the layers
-  `TimeEmbedding` `ResBlock` (with `#:dropout`) `AttentionBlock`
+  (closed-form `q(x_t | x_0)`), `sinusoidal-embedding` (`sinusoidal-positions`
+  in its `'halves` layout over int64 timesteps), and the layers
+  `TimeEmbedding` `ResBlock` (with `#:dropout`) `AttentionBlock` (one head
+  over the H·W tokens through `scaled-dot-product-attention`, its `q` `k`
+  `v` `proj` children kept as `Linear`s)
   `Downsample` `Upsample` `UNet` (the DDPM CIFAR-10 network by default:
   `#:base #:mults #:blocks #:attention #:dropout`, `#:classes` for a
   class-conditional net with a null label); the training loop is
@@ -169,7 +172,7 @@ with `backward!` outside the form as PyTorch recommends). From
   batch: `convert-image-dtype` (uint8 0-255 to float 0-1 and back, the
   torchvision scaling), `resize #:antialias?` (short side or `(h w)`,
   float only; two matmuls with host-computed bilinear or Pillow-filter
-  weights, since `upsample_bilinear2d` needs the unmarshalled `float?`),
+  weights; `upsample_bilinear2d` is not bound),
   `center-crop` (offsets round half to even), `normalize`,
   `imagenet-normalize`, `imagenet-mean`, `imagenet-std`
 - pretrained weights (`torch/vision/weights.rkt`, #199):
@@ -208,12 +211,24 @@ with `backward!` outside the form as PyTorch recommends). From
   (binary ops take a real on either side)
 - operators: `+ - * /` shadow racket/base rkt-polars-style (numeric fast
   path to racket/base, tensor operands dispatch to add/sub/mul/div, chains
-  fold left); `@` is matmul, like Python's `a @ b`; `t`/`Σ` are terse
+  fold left); so do `< <= > >=`, which dispatch to lt/le/gt/ge, mirror a
+  real on the left, and take two operands with a tensor; `@` is matmul,
+  like Python's `a @ b` (`|@|` under the at-reader: lp2 examples and
+  Scribble). Write arithmetic, comparisons and matmul with these, not the
+  names: `scripts/resyntax-rules.rkt` rewrites `(mul a b)` to `(* a b)`,
+  `(ge a b)` to `(>= a b)` and `(matmul a b)` to `(@ a b)`; `t`/`Σ` are terse
   aliases for transpose/sum; unary `T` reverses all axes like Python's `x.T`
   (use `transpose` on the last two axes for batched attention);
   `~> ~>> lambda~> lambda~>>` are re-provided
   from the `threading` library (dep `threading-lib`, prefetched offline by
-  the `racket-deps` fixed-output derivation in flake.nix)
+  the `racket-deps` fixed-output derivation in flake.nix). Thread a chain
+  of three or more calls: the same rules file rewrites
+  `(clip (+ h (relu (dil h))) l t)` to `(~> (dil h) relu (+ h) (clip l t))`,
+  following first arguments and either operand of a two-operand `+` or `*`
+  while the other arguments are names or literals (a call that joins two
+  computations starts the chain). An expansion analyzer keeps it off a call
+  that is already a `~>` or `~>>` step, which receives an argument it does
+  not show
 - reductions: `sum mean max min argmax softmax log-softmax`
 - ordering and sampling (`torch/foreign/order-ops.rkt`, tranche 7, #153):
   `topk` and `sort` answer `(values entries indices)`; `argsort`;
@@ -235,19 +250,22 @@ numeric code. New ops that collide must follow the same dispatch pattern
 (check racket/base first — `tanh` was missed initially and broke numeric
 callers), and scribble examples need
 `(for-label (except-in racket/base abs cos exp log sin sort sqrt max min
-length + - * /) torch)` — the `except-in` alone leaves those names
+length + - * / < <= > >=) torch)` — the `except-in` alone leaves those names
 unbound, so `torch` has to follow it. Each chapter carries that line
 itself: re-exporting it from a shared module tags every link to that
 module rather than to `torch`, so the links miss their entries.
 Dispatching named ops carry dependent (`->i`) contracts so the wrong shape
-gets contract blame, not a runtime error; the `+ - * / @` operators are
+gets contract blame, not a runtime error; the `+ - * / < <= > >= @` operators are
 provided as plain renames (no contract overhead on the numeric fast path),
 per `foreign/operators.rkt`.
 
 From `torch/nn`: `define-layer procedure->Layer gen:layer layer? Parameter Buffer LayerList LayerHash parameters
 named-parameters in-named-parameters buffers children Linear Conv2d MaxPool2d Flatten Dropout
 Sequential Embedding LayerNorm ConvTranspose2d GroupNorm BatchNorm2d BatchNorm1d
-LSTM GRU sgd adam rmsprop step! zero-grads! clip-grad-norm! learning-rate
+LSTM GRU MultiheadAttention TransformerEncoderLayer TransformerDecoderLayer
+TransformerEncoder TransformerDecoder sinusoidal-positions causal-mask
+layer-copy layer-rebuild
+sgd adam rmsprop step! zero-grads! clip-grad-norm! learning-rate
 set-learning-rate! step-lr multi-step-lr exponential-lr cosine-annealing-lr
 linear-lr one-cycle-lr lambda-lr ema ema-update! ema-average cross-entropy
 nll-loss mse-loss binary-cross-entropy-with-logits huber-loss l1-loss
@@ -259,8 +277,16 @@ clamp`, tranche 4, #84; `upsample-nearest2d` over `repeat_interleave`, tranche
 #152; `Linear` runs on the fused `linear`, so autocast casts the whole affine
 map; `BatchNorm2d`/`BatchNorm1d` keep `running-mean`, `running-var` and
 `num-batches-tracked` as `Buffer`s that ATen updates in place in `'train`
-mode) live on `torch` beside the other functional ops; the GPT
-causal-mask idiom is `(masked-fill scores (eq (tril (ones T T)) 0) -inf.0)`. `define-layer` is the Python-style
+mode) and attention (`scaled-dot-product-attention #:mask #:causal?
+#:dropout #:scale`, tranche 8, #210, the fused kernel behind
+`F.scaled_dot_product_attention`; `gelu #:approximate 'tanh`, GPT-2's form,
+on the hand-written shim) live on `torch` beside the other functional ops;
+a causal mask built by hand is `(masked-fill scores (eq (tril (ones T T)) 0)
+-inf.0)`, whose mask is `#t` = hidden, while the fused kernel's boolean
+`#:mask` is `#t` = attend, as PyTorch's function is (the layers'
+`#:causal?` flags build the mask themselves; `examples/racket/06-gpt.rkt`
+is one standard `TransformerEncoder` call, pre-norm with `#:norm #t`,
+applied with `#:causal? #t`, #210 L3). `define-layer` is the Python-style
 `nn.Module` analog: `#:init` is the constructor body and assigns declared
 fields with `set!`, a field's value classifies it at construction
 (`Parameter?`, `Buffer?`, `layer?`, `#f` for absent, anything else plain),
@@ -278,7 +304,58 @@ follow the input. Applying one answers `(values output h-n [c-n])`. On CUDA
 the weights are flattened for cudnn (`cudnn-rnn-flatten-weight`, in place,
 the parameters keep their identity) whenever their device or dtype differs
 from the placement the last flattening was built for, so `to`'s identity
-case costs nothing and a transient OOM is retried rather than latched. `clip-grad-norm!` (`nn/clip.rkt`) keeps its scale on the
+case costs nothing and a transient OOM is retried rather than latched.
+A `#:forward` may declare keyword inputs (`#:kw id` or `#:kw [id
+default]`, the default seeing the fields); `gen:layer`'s `prop:procedure`
+is a keyword procedure that hands them to a `define-layer` or
+`procedure->Layer` forward, while a hand-written `layer-forward`, a generic
+method, refuses them. `MultiheadAttention` (`nn/attention.rkt`, #210 L1)
+is the first such layer: four `Linear` children `query` `key` `value`
+`out` (not PyTorch's fused `in_proj`; `linear.rkt`'s `private` submodule
+builds a `Linear` from given tensors so the xavier `[3E, E]` draw splits
+without extra RNG use), `#:heads #:dropout #:bias? #:batch-first?
+#:key-dim #:value-dim`, applied as `(mha q k v #:key-padding-mask
+#:attn-mask #:causal? #:need-weights? #:average-attn-weights?)`; its
+boolean masks are `#t` = hidden like `nn.MultiheadAttention`'s (turned
+into additive float masks before the fused call), `#:causal?` builds the
+causal mask rather than PyTorch's hint, and only `#:need-weights? #t`
+leaves the fused kernel, answering `(values output weights)`. Its
+application shapes are a per-instance `->i` contract built in `#:init` and
+applied with `caller` blame (the shape checks are shared through
+`attention.rkt`'s `private` submodule). `TransformerEncoderLayer` and
+`TransformerDecoderLayer` (`nn/transformer.rkt`, #210 L2) mirror PyTorch's
+children (`self-attn` `multihead-attn` `linear1` `dropout` `linear2`
+`norm1..3` `dropout1..3`, `_` spelled `-`) and draw order; `#:heads
+#:ffn-width #:dropout #:activation ('relu 'gelu 'gelu-tanh or a procedure)
+#:norm-first? #:layer-norm-eps #:batch-first? #:bias?` (`LayerNorm` gained
+`#:bias?` for it); applied as `(enc src #:mask #:key-padding-mask
+#:causal?)` and `(dec tgt memory #:tgt-mask #:memory-mask
+#:tgt-key-padding-mask #:memory-key-padding-mask #:tgt-causal?
+#:memory-causal?)`, masks in MHA's sense. `TransformerEncoder` /
+`TransformerDecoder` take `#:layers n` and `#:norm` (`#f`, a layer, or
+`#t` for a `LayerNorm` of the model width) and three kinds of first
+argument: a model width with `#:heads` and the layer keywords (one layer
+built, then `n` `layer-copy`s of it: `nn.TransformerEncoder(
+nn.TransformerEncoderLayer(...), n)`, seeded parity and stream position
+included), a layer (`n` copies of it, the layer itself left out, as
+PyTorch's deep copies), or a thunk (called `n` times, each layer drawing
+its own values); the stack contract rejects layer keywords or `#:norm #t`
+beside a layer or thunk. `layer-copy` (`nn/copy.rkt`) is a deep copy
+with no RNG draws: fresh tensors with the same values, device, dtype and
+requires-grad (no gradients), children copied recursively, modes kept,
+shared layers and tensors kept shared through a memo. It runs on the
+`gen:layer` method `layer-rebuild layer child tensor`, which
+`define-layer` derives (the generated `rebuild` remakes the struct with
+each registered child through `child` and every tensor in its fields,
+plain lists, vectors and boxes included, through `tensor`, then
+reclassifies; `LSTM`'s plain `entries` list is why plain fields are
+walked); a stateless `procedure->Layer` copies, one with state refuses,
+and a hand-written `gen:layer` without the method refuses, naming
+`layer-copy`. The layer constructor contracts come from one
+`transformer/c` macro.
+`sinusoidal-positions` (`#:layout 'interleaved | 'halves`, a length or a
+position tensor) and `causal-mask` (`#t` above the diagonal, or the float
+`-inf` form) live in `nn/positions.rkt`. `clip-grad-norm!` (`nn/clip.rkt`) keeps its scale on the
 device. Layer init mirrors
 PyTorch RNG consumption (`nn.Linear.reset_parameters`), so a shared
 `manual-seed!` yields bit-comparable parameters — the MLP cross-test relies
@@ -353,10 +430,15 @@ racket scripts/coverage.rkt --changed   # expression coverage (#173); exits
                                # non-zero below the floor and lists the lines
                                # of the files you touched that no test reaches
 
-resyntax analyze --local-git-repository . origin/master   # lint gate
+scripts/resyntax analyze --local-git-repository . origin/master   # lint gate
                                      # (CI fails on any suggestion; scans
-                                     #  changed files, torch/ included)
-resyntax fix --directory torch
+                                     #  changed files, torch/ included; the
+                                     #  default rules plus
+                                     #  scripts/resyntax-rules.rkt; the
+                                     #  literate examples' chunks through
+                                     #  scripts/resyntax-lp2.rkt)
+scripts/resyntax fix --directory torch
+raco test scripts/resyntax-rules-test.rkt scripts/resyntax-lp2.rkt   # the repository's own rules
 raco review torch/**/*.rkt
 ```
 
@@ -368,8 +450,8 @@ Resyntax, racket-review and `cover` are pinned, one commit per package, in
 into `.racket-user` with no network, and the CI lane runs the same trees, so
 lint findings change only when the flake does (#63). To bump: change the
 package's `rev`, set its `hash` to `""`, `nix build .#racket-linters`, paste
-the hash Nix reports, and run the full sweep (`resyntax analyze --directory
-torch`), since CI scans only changed files. Each checkout moves to the new
+the hash Nix reports, and run the full sweep (`scripts/resyntax analyze
+--directory torch`), since CI scans only changed files. Each checkout moves to the new
 trees on its next shell entry.
 
 ### PyTorch parity
@@ -404,8 +486,13 @@ needs a differently-linked libtorch plus the host driver). Confirm with
 **No MPS kernel gaps.** Since libtorch 2.14 every op the examples use has an
 MPS kernel, `aten::_ctc_loss` and `aten::native_group_norm_backward` included
 (#139), so `pick-device` returns `accelerator-if-available` unmodified. When a
-new op lacks one, route that op alone through the CPU with `to-device`, which
-is differentiable both ways, rather than routing darwin to the CPU.
+new op lacks one, or its kernel is wrong for some shapes, route that op alone
+through the CPU with `to-device`, which is differentiable both ways, rather
+than routing darwin to the CPU. `ctc-loss` does this for targets of 512 labels
+or more, where 2.14's MPS backward returns wrong or NaN gradients while the
+forward stays right; a green loss curve does not catch that. That routing is
+a temporary workaround for an upstream PyTorch bug (#258): remove it, and keep
+its regression test, once a pinned libtorch fixes the kernel.
 
 ## Architecture
 
@@ -427,7 +514,7 @@ is differentiable both ways, rather than routing darwin to the CPU.
   an int status plus one `tr_tensor**` out pointer per return, every one
   NULL unless the whole call succeeded) every op body reduces to — new ops must use them rather
   than hand-rolling try/catch.
-- `tests/torchrkt/{random,ops,autograd,generated_golden,generated_tranche2..7}_test.cpp`
+- `tests/torchrkt/{random,ops,autograd,generated_golden,generated_tranche2..8}_test.cpp`
   — GoogleTest goldens per family (generated families get a C-boundary
   golden: a correctness case + a null/length-guard case).
   `c_api_compile_test.c` proves the headers are valid C (add a
@@ -508,11 +595,12 @@ module's full export set (`racket/runtime-path`, `syntax/parse/pre`).
   native code with `define-ffi-definer` or `get-ffi-obj` directly, which
   bypasses the latch.
 - `nn.rkt` — pure re-export facade over `nn/` (`layer.rkt` = `gen:layer`, `LayerList` +
-  the `define-layer` macro, whose `#:forward` takes a rest argument, whose
+  the `define-layer` macro, whose `#:forward` takes a rest argument and
+  keyword inputs, whose
   fields admit `parameters-by-key` beside `children-by-key`, and whose
   `#:on-move` body runs after a `to` that rebound anything; `parameter.rkt`, `buffer.rkt`, `linear.rkt`,
   `init.rkt`, `optim.rkt`, `ema.rkt`, `loss.rkt`, `recurrent.rkt`,
-  `clip.rkt`).
+  `attention.rkt`, `transformer.rkt`, `positions.rkt`, `copy.rkt`, `clip.rkt`).
 - `private/download.rkt` — the one download path (#195): a temp file in the
   cache's directory, checked, then installed. `call-with-verified-download`
   checks an exact size and SHA-256 (pretrained weights, hymenoptera);
@@ -562,8 +650,8 @@ Conventions:
   (Tensor / Scalar→double / int64 / bool / IntArrayRef / TensorList args,
   one or more Tensor returns). Unsupported signatures are skipped with a report —
   widening the IR is a generator change, not a hand-written shim.
-- Optional *types* are in the IR: `Tensor?` is a NULL pointer, `int?` and
-  `Scalar?` carry a presence flag, `int[]?` a length plus flag, and
+- Optional *types* are in the IR: `Tensor?` is a NULL pointer, `int?`,
+  `Scalar?` and `float?` carry a presence flag, `int[]?` a length plus flag, and
   `ScalarType?` a -1 sentinel, and `Generator?` a `tr_generator` handle
   (NULL for the global stream; an op that draws still needs the allowlist
   `no-retry` flag). In-place ops (`add_`) emit a mutable receiver

@@ -677,8 +677,8 @@
                  && raco pkg update --batch --copy --no-docs --no-trash \
                       --deps fail --scope user ${racket-linters}/*/; then
                 touch "$linters_stamp"
-                echo "Done. Lint: resyntax analyze --local-git-repository . origin/master"
-                echo "      full sweep: resyntax analyze --directory torch  |  raco review <files>"
+                echo "Done. Lint: scripts/resyntax analyze --local-git-repository . origin/master"
+                echo "      full sweep: scripts/resyntax analyze --directory torch  |  raco review <files>"
                 echo "      coverage:   racket scripts/coverage.rkt"
               else
                 echo "WARNING: installing the dev tools failed; not stamping, so" >&2
