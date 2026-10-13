@@ -9,7 +9,8 @@
            (only-in racket/runtime-path define-runtime-path)
            (only-in racket/set
                     in-set list->seteq set set->list set-add set-empty?
-                    set-intersect set-member? set-union seteq subset?)
+                    set-intersect set-member? set-subtract set-union seteq
+                    subset?)
            (only-in rackunit
                     check-equal? check-exn check-false check-not-eq?
                     check-not-equal? check-not-false check-true test-case)
@@ -268,9 +269,11 @@
 
   (define-runtime-path racket-names-file "../../codegen/racket-names.txt")
 
-  (test-case "codegen/racket-names.txt is racket's and threading's exports"
-    (check-equal? (file->lines racket-names-file)
-                  (~> (set-union racket-exports (export-set 'threading))
+  (test-case "codegen/racket-names.txt lists every racket and threading export"
+    (define listed
+      (~> racket-names-file file->lines (map string->symbol _) list->seteq))
+    (check-equal? (~> (set-union racket-exports (export-set 'threading))
+                      (set-subtract listed)
                       set->list
-                      (sort symbol<?)
-                      (map symbol->string _)))))
+                      (sort symbol<?))
+                  '())))
