@@ -1,6 +1,7 @@
 #lang racket/base
 
 (require (for-syntax racket/base)
+         (only-in racket/format ~r)
          (only-in racket/match match-define)
          ;; whole-module require: only-in strips the phase-1 syntax classes
          syntax/parse/define
@@ -81,8 +82,8 @@
   (cond
     [(and call (zero? least-share)) "call returned before the measurement"]
     [else (format "~a (~a%)"
-                  (fmt-ms (median-of (map car samples)))
-                  (fmt-ms (* 100 least-share)))]))
+                  (ms->string (median-of (map car samples)))
+                  (~r (* 100 least-share) #:precision 1))]))
 
 (module+ main
   (print-banner (format "Q6: collection pauses while one parallel worker is in a foreign call (median of ~a)"
@@ -93,7 +94,7 @@
   (define call-ms (timed plain-matmul))
   (define calls (make-calls plain-matmul))
   (printf "- one ~a matmul alone, 1 intra-op thread, on the main thread: ~a ms\n" matmul-n
-          (fmt-ms call-ms))
+          (ms->string call-ms))
   (displayln
    "- each cell: median ms (the least share of a measurement any run's call was in flight for)\n")
   (print-table-header

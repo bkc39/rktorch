@@ -6,6 +6,7 @@
                   _fun
                   _int
                   _pointer
+                  _uint
                   _uintptr
                   get-ffi-obj
                   malloc
@@ -18,10 +19,13 @@
                   start-uninterruptible
                   uninterruptible-lock-acquire
                   uninterruptible-lock-release)
+         (only-in ffi/unsafe/vm vm-eval vm-primitive)
          (only-in math/statistics median)
          (only-in racket/date date->string date-display-format)
          (only-in racket/format ~a ~r)
+         (only-in racket/function const)
          (only-in racket/future processor-count)
+         (only-in racket/list filter-not)
          (only-in racket/math exact-round)
          (only-in racket/string string-join)
          ;; whole-module require: only-in strips the phase-1 syntax classes
@@ -29,8 +33,6 @@
 
 (provide pthread-self
          main-os-thread
-         on-main-os-thread?
-         os-thread-label
          load-average
          os-task-count
          print-banner
@@ -44,36 +46,37 @@
          with-final-post
          cas-update!
          now-ms
-         (struct-out span)
+         ms->seconds
+         bytes->mib
+         mib->bytes
+         span-start
+         span-end
+         span-gc-ms
+         span-counted
+         span-value
          span-ms
          measure-span
          timed
          loop-for-seconds
          call-with-workers
          run-parallel
-         run-parallel/gc
-         (struct-out main-mode)
+         main-mode-label
          main-blocked
          main-polling
          main-busy
+         main-in-foreign
          main-modes
          repeat-runs
          median-of
-         median-of-runs
          collect-past-canary!
-         start-finalizer-thread!
-         fmt-ms
-         fmt-rate)
+         settle-wills!
+         ms->string
+         mib->string
+         rate->string)
 
 (define pthread-self (get-ffi-obj "pthread_self" #f (_fun -> _uintptr)))
 
 (define main-os-thread (pthread-self))
-
-(define (on-main-os-thread?)
-  (= (pthread-self) main-os-thread))
-
-(define (os-thread-label id)
-  (if (= id main-os-thread) "main" "own"))
 
 (define getloadavg (get-ffi-obj "getloadavg" #f (_fun _pointer _int -> _int)))
 
@@ -105,7 +108,7 @@
 
 (define (print-table-header header)
   (displayln (row->line header))
-  (displayln (row->line (map (lambda (_) "---") header)))
+  (displayln (row->line (map (const "---") header)))
   (flush-output))
 
 (define (print-table-row row)
@@ -134,44 +137,58 @@
   (let ([posted sema])
     (dynamic-wind void (lambda () body ...) (lambda () (semaphore-post posted)))))
 
-(define (cas-retry b f)
+(define (cas-update! b f . args)
   (let retry ([tries 0])
     (define old (unbox b))
     (cond
-      [(box-cas! b old (f old)) tries]
+      [(box-cas! b old (apply f old args)) tries]
       [else (retry (add1 tries))])))
-
-(define cas-update!
-  (case-lambda
-    [(b f) (cas-retry b f)]
-    [(b f arg) (cas-retry b (lambda (old) (f old arg)))]))
 
 (define (now-ms)
   (current-inexact-monotonic-milliseconds))
+
+(define (ms->seconds ms)
+  (/ ms 1000.0))
+
+(define (seconds->ms seconds)
+  (* 1000.0 seconds))
+
+(define bytes-per-mib (* 1024 1024))
+
+(define (bytes->mib bytes)
+  (/ bytes bytes-per-mib 1.0))
+
+(define (mib->bytes mib)
+  (* mib bytes-per-mib))
+
+(define gc-wall-ms
+  (vm-eval '(lambda ()
+              (let ([t (sstats-gc-real (statistics))])
+                (+ (* 1000. (time-second t)) (/ (time-nanosecond t) 1e6))))))
 
 (struct span (start end gc-ms counted value))
 
 (define (span-ms s)
   (- (span-end s) (span-start s)))
 
-(define (measure-span thunk #:counter [counter (lambda () 0)])
+(define (measure-span thunk #:counter [counter (const 0)])
   (define count-start (counter))
-  (define gc-start (current-gc-milliseconds))
+  (define gc-start (gc-wall-ms))
   (define start (now-ms))
   (define value (thunk))
   (define end (now-ms))
-  (span start end (- (current-gc-milliseconds) gc-start) (- (counter) count-start) value))
+  (span start end (- (gc-wall-ms) gc-start) (- (counter) count-start) value))
 
 (define (timed thunk)
   (span-ms (measure-span thunk)))
 
-(define (loop-for-seconds seconds step #:stop? [stop? (lambda (_done) #f)])
-  (define deadline (+ (now-ms) (* 1000 seconds)))
+(define (loop-for-seconds seconds step #:stop? [stop? (const #f)])
+  (define deadline (+ (now-ms) (seconds->ms seconds)))
   (let loop ([done 0])
     (cond
       [(> (now-ms) deadline) done]
       [(stop? done) done]
-      [else (step) (loop (add1 done))])))
+      [else (step done) (loop (add1 done))])))
 
 (define (call-with-workers n work main #:pool [pool 'own] #:release [release void])
   (define results (make-vector n #f))
@@ -179,7 +196,7 @@
   (define workers
     (for/list ([i (in-range n)])
       (thread (lambda ()
-                (with-handlers ([(lambda (_) #t) (lambda (e) (vector-set! failures i e))])
+                (with-handlers ([exn:fail? (lambda (e) (vector-set! failures i e))])
                   (vector-set! results i (work i))))
               #:pool pool)))
   (define result
@@ -188,9 +205,9 @@
                   (lambda ()
                     (release)
                     (for-each thread-wait workers))))
-  (for ([e (in-vector failures)] #:when e)
-    (raise e))
-  (values result (vector->list results)))
+  (cond
+    [(for/first ([e (in-vector failures)] #:when e) e) => raise]
+    [else (values result (vector->list results))]))
 
 (struct main-mode (label wait))
 
@@ -198,76 +215,88 @@
   (main-mode "blocked in thread-wait"
              (lambda (workers _on-wake) (for-each thread-wait workers))))
 
-(define (main-polling ms)
-  (main-mode (format "polling every ~a ms" ms)
+(define (waking-mode label pause #:for [seconds +inf.0])
+  (main-mode label
              (lambda (workers on-wake)
+               (define deadline (+ (now-ms) (seconds->ms seconds)))
                (let loop ()
-                 (define running (findf (lambda (w) (not (thread-dead? w))) workers))
                  (cond
-                   [(not running) (void)]
-                   [else
-                    (sync/timeout (/ ms 1000.0) (thread-dead-evt running))
-                    (on-wake)
-                    (loop)])))))
+                   [(andmap thread-dead? workers) (void)]
+                   [(> (now-ms) deadline) (for-each thread-wait workers)]
+                   [else (pause workers) (on-wake) (loop)])))))
+
+(define (main-polling ms)
+  (waking-mode (format "polling every ~a ms" ms)
+               (lambda (workers)
+                 (sync/timeout (ms->seconds ms)
+                               (apply choice-evt (map thread-dead-evt
+                                                      (filter-not thread-dead? workers)))))))
 
 (define busy-sink (box #f))
 (define busy-wake-ms 1.0)
 
 (define main-busy
-  (main-mode "busy allocating Racket vectors"
-             (lambda (workers on-wake)
-               (let loop ([woke (now-ms)])
-                 (set-box! busy-sink (make-vector 64 #f))
-                 (define now (now-ms))
-                 (cond
-                   [(andmap thread-dead? workers) (void)]
-                   [(> (- now woke) busy-wake-ms) (on-wake) (loop now)]
-                   [else (loop woke)])))))
+  (waking-mode "busy allocating Racket vectors (Racket-only)"
+               (lambda (_workers)
+                 (loop-for-seconds (ms->seconds busy-wake-ms)
+                                   (lambda (_i) (set-box! busy-sink (make-vector 64 #f)))))))
 
-(define main-modes (list main-blocked (main-polling 10) main-busy))
+(define foreign-usleep (get-ffi-obj "usleep" #f (_fun _uint -> _int)))
+(define foreign-call-us 5000)
 
-(define (run-parallel/gc n body
-                         #:pool [pool 'own]
-                         #:setup [setup void]
-                         #:counter [counter (lambda () 0)]
-                         #:main [mode main-blocked]
-                         #:on-wake [on-wake void])
+(define (main-in-foreign seconds)
+  (waking-mode (format "in ~a ms foreign calls (usleep, plain _fun) for ~a s, then blocked"
+                       (/ foreign-call-us 1000) seconds)
+               (lambda (_workers) (foreign-usleep foreign-call-us))
+               #:for seconds))
+
+(define (main-modes foreign-seconds)
+  (list main-blocked (main-polling 10) main-busy (main-in-foreign foreign-seconds)))
+
+(define (run-parallel n body
+                      #:pool [pool 'own]
+                      #:setup [setup void]
+                      #:counter [counter (const 0)]
+                      #:main [mode main-blocked]
+                      #:on-wake [on-wake void])
   (define ready (make-semaphore 0))
   (define gate (make-semaphore 0))
   (define (open-gate) (for ([_ (in-range n)]) (semaphore-post gate)))
-  (define-values (window results)
-    (call-with-workers n
-                       (lambda (i)
-                         (with-final-post ready (setup))
-                         (semaphore-wait gate)
-                         (body i))
-                       (lambda (workers)
-                         (for ([_ (in-range n)]) (semaphore-wait ready))
-                         (measure-span (lambda ()
-                                         (open-gate)
-                                         ((main-mode-wait mode) workers on-wake))
-                                       #:counter counter))
-                       #:pool pool
-                       #:release open-gate))
-  (struct-copy span window [value results]))
-
-(define (run-parallel n body #:pool [pool 'own] #:main [mode main-blocked])
-  (define window (run-parallel/gc n body #:pool pool #:main mode))
-  (values (span-ms window) (span-value window)))
+  (define (measure-workers)
+    (define-values (window results)
+      (call-with-workers n
+                         (lambda (i)
+                           (with-final-post ready (setup))
+                           (semaphore-wait gate)
+                           (body i))
+                         (lambda (workers)
+                           (for ([_ (in-range n)]) (semaphore-wait ready))
+                           (measure-span (lambda ()
+                                           (open-gate)
+                                           ((main-mode-wait mode) workers on-wake))
+                                         #:counter counter))
+                         #:pool pool
+                         #:release open-gate))
+    (struct-copy span window [value results]))
+  (cond
+    [(zero? n)
+     (setup)
+     (measure-span (lambda () (list (body 0))) #:counter counter)]
+    [else (measure-workers)]))
 
 (define (repeat-runs n thunk)
-  (for/list ([_ (in-range n)]) (thunk)))
+  (build-list n (lambda (_) (thunk))))
 
 (define (median-of xs)
   (median < xs))
 
-(define (median-of-runs n thunk)
-  (median-of (repeat-runs n thunk)))
-
-(define (fmt-ms ms)
+(define (ms->string ms)
   (~r ms #:precision 1))
 
-(define (fmt-rate per-second)
+(define (mib->string mib)
+  (~r mib #:precision 1))
+
+(define (rate->string per-second)
   (~a (exact-round per-second)))
 
 (define canary-timeout-seconds 0.5)
@@ -278,5 +307,33 @@
   (collect-garbage 'major)
   (and (sync/timeout canary-timeout-seconds canary-finalized) #t))
 
-(define (start-finalizer-thread!)
-  (void (collect-past-canary!)))
+(define finalizer-executor
+  (let ([closure ((vm-primitive 'inspect/object) register-finalizer)])
+    (or (for*/first ([k (in-range (closure 'length))]
+                     [v (in-value (((closure 'ref k) 'ref) 'value))]
+                     #:when (will-executor? v))
+          v)
+        (error 'probes "register-finalizer closes over no will executor on this VM"))))
+
+(define no-will (string->uninterned-symbol "no-will"))
+
+(define (run-ready-wills!)
+  (let loop ([ran 0])
+    (cond
+      [(eq? (will-try-execute finalizer-executor no-will) no-will) ran]
+      [else (loop (add1 ran))])))
+
+(define (collect-and-run-wills!)
+  (begin0
+    (with-atomic
+      (collect-garbage 'major)
+      (run-ready-wills!))
+    (sleep 0)))
+
+(define (settle-wills! #:limit [limit 50])
+  (let loop ([rounds 1] [ran 0])
+    (define now (collect-and-run-wills!))
+    (cond
+      [(zero? now) ran]
+      [(= rounds limit) #f]
+      [else (loop (add1 rounds) (+ ran now))])))

@@ -12,23 +12,26 @@
 (define n 64)
 (define worker-counts '(1 4 8))
 (define drain-round-limit 200)
-(define ledger-cap (* 512 1024 1024))
+(define ledger-cap (mib->bytes 512))
 (define cap-check-every 256)
-(define modes (list main-blocked (main-polling 10) (main-polling 50) main-busy))
+(define modes (append (main-modes churn-seconds) (list (main-polling 50))))
 
 (define (churn! randn live capped)
-  (define (over-cap? made)
-    (and (zero? (modulo made cap-check-every))
-         (> (live) ledger-cap)
-         (box-cas! capped #f #t)))
-  (loop-for-seconds churn-seconds (lambda () (randn n)) #:stop? over-cap?))
+  (define (mark-if-over-cap! made)
+    (when (and (zero? (modulo made cap-check-every)) (> (live) ledger-cap))
+      (set-box! capped #t)))
+  (loop-for-seconds churn-seconds
+                    (lambda (made)
+                      (randn n)
+                      (mark-if-over-cap! made))
+                    #:stop? (lambda (_made) (unbox capped))))
 
 (define (drain! p)
   (define draining
     (measure-span
      (lambda ()
        (let loop ([rounds 0])
-         (define settled? (and (zero? ((prototype-live-bytes p))) (collect-past-canary!)))
+         (define settled? (and (zero? ((prototype-live-bytes p))) (settle-wills!) #t))
          (cond
            [(or settled? (= rounds drain-round-limit)) (cons rounds settled?)]
            [else
@@ -38,8 +41,8 @@
   (match-define (cons rounds settled?) (span-value draining))
   (values rounds (span-ms draining) settled?))
 
-(define (mib bytes)
-  (~r (/ bytes 1048576.0) #:precision 1))
+(define (bytes->mib-string bytes)
+  (mib->string (bytes->mib bytes)))
 
 (define (churn-row p randn workers mode)
   (collect-garbage 'major)
@@ -47,15 +50,15 @@
   (define peak (box #f))
   (define capped (box #f))
   (define churned
-    (run-parallel/gc workers
-                     (lambda (_i) (churn! randn live capped))
-                     #:setup (lambda () (at-set-num-threads 1))
-                     #:counter (prototype-finalizer-frees p)
-                     #:main mode
-                     #:on-wake (lambda () (set-box! peak (max (or (unbox peak) 0) (live))))))
+    (run-parallel workers
+                  (lambda (_i) (churn! randn live capped))
+                  #:setup (lambda () (at-set-num-threads 1))
+                  #:counter (prototype-finalizer-frees p)
+                  #:main mode
+                  #:on-wake (lambda () (set-box! peak (max (or (unbox peak) 0) (live))))))
   (define lag (live))
   (define ms (span-ms churned))
-  (define interval (/ ms 1000.0))
+  (define interval (ms->seconds ms))
   (define total-made (apply + (span-value churned)))
   (define frees (span-counted churned))
   (define-values (rounds drain-ms settled?) (drain! p))
@@ -63,27 +66,28 @@
    (list (prototype-name p)
          workers
          (main-mode-label mode)
-         (fmt-rate (/ total-made interval))
-         (fmt-rate (/ frees interval))
+         (rate->string (/ total-made interval))
+         (rate->string (/ frees interval))
          (~r (/ frees (max total-made 1)) #:precision 2)
          (~> (span-gc-ms churned) (/ ms) (~r #:precision 2))
-         (if (unbox peak) (~> (unbox peak) (max lag) mib) "not sampled")
-         (if (unbox capped) (format "~a (cap)" (mib lag)) (mib lag))
+         (if (unbox peak) (~> (unbox peak) (max lag) bytes->mib-string) "not sampled")
+         (if (unbox capped) (format "~a (cap)" (bytes->mib-string lag)) (bytes->mib-string lag))
          rounds
-         (fmt-ms drain-ms)
+         (ms->string drain-ms)
          (live))
    settled?))
 
 (module+ main
   (at-set-num-threads 1)
-  (start-finalizer-thread!)
+  (unless (collect-past-canary!)
+    (error 'q7 "the finalizer thread did not run a canary"))
   (print-banner
-   (format "Q7: finalizer throughput, ~a x ~a float32 randn made and dropped for ~a s or until the ledger passes ~a MiB; finalizers run only when the main thread's scheduler wakes"
-           n n churn-seconds (mib ledger-cap))
+   (format "Q7: finalizer throughput, ~a x ~a float32 randn made and dropped by worker threads for ~a s or until the ledger passes ~a MiB, under each main-thread mode; frees counted during the churn, then drained by major collections"
+           n n churn-seconds (bytes->mib-string ledger-cap))
    #:torch-version (shim-version))
   (print-table-header
    '("allocator" "workers" "main thread while workers churn" "tensors made/s"
-     "finalizer frees/s during churn" "frees / made" "GC ms per wall ms"
+     "finalizer frees/s during churn" "frees / made" "GC wall ms per wall ms (excludes rendezvous wait)"
      "peak ledger MiB, sampled when main wakes" "ledger MiB at stop"
      "major collections to drain" "drain ms" "ledger bytes after drain" "drained" "load"))
   (define undrained
@@ -98,7 +102,6 @@
       (and (not drained?)
            (format "~a with ~a workers, main ~a" (prototype-name p) workers (main-mode-label mode)))))
   (when undrained
-    (printf "\nstopped: ~a did not drain in ~a major collections, ~a\n"
-            undrained drain-round-limit
-            "and its pending finalizers would run during every later row"))
+    (printf "\nstopped: ~a did not drain in ~a major collections, and its pending finalizers would run during every later row\n"
+            undrained drain-round-limit))
   (print-footer))

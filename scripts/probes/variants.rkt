@@ -25,7 +25,7 @@
               tr-tensor-free/checked
               (lambda () (for/sum ([d (in-list (native-memory-use))]) (cdr d)))
               finalizer-runs
-              finalizer-runs)
+              #f)
    (ops (lambda (n) (tr-randn/raw (s64vector n n) 2)) tr-add/raw tr-matmul/raw)))
 
 (define ((fresh make))

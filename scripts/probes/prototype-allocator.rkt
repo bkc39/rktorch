@@ -3,6 +3,7 @@
 (require (only-in ffi/unsafe register-finalizer)
          (only-in ffi/unsafe/alloc allocator deallocator)
          (only-in ffi/unsafe/atomic make-uninterruptible-lock)
+         (only-in racket/function const)
          (only-in "common.rkt" cas-update! with-atomic with-uninterruptible-lock)
          "shim.rkt")
 
@@ -31,7 +32,7 @@
 
 (define (bare)
   (prototype "bare: plain op, explicit free, no finalizer or ledger"
-             values values shim-free (lambda () 0) (lambda () 0) (lambda () 0)))
+             values values shim-free (const 0) (const 0) (const 0)))
 
 (define gate-interval (* 128 1024 1024))
 
@@ -146,4 +147,4 @@
     (free-handle t))
   (prototype "ffi/unsafe/alloc #:merely-uninterruptible?; no pressure gate, no device query"
              wrap values free!
-             (lambda () (unbox live)) (lambda () (unbox runs)) (lambda () (unbox runs))))
+             (lambda () (unbox live)) (lambda () (unbox runs)) #f))

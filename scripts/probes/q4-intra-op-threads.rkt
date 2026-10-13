@@ -72,8 +72,7 @@
            [(os-task-count) (team-counts prepare)]
            [else (list (cons "OS threads" "n/a: no /proc/self/task on this platform"))]))
        (define (on-worker thunk)
-         (define-values (_ms results) (run-parallel 1 (lambda (_i) (thunk))))
-         (match-define (list result) results)
+         (match-define (list result) (span-value (run-parallel 1 (lambda (_i) (thunk)))))
          result)
        (write (let () ,@body))))
   (define-values (out in _pid _err control)
@@ -163,7 +162,7 @@
     (define-syntax-parse-rule (with-busy-workers prepare:expr body:expr ...+)
       (call-with-busy-workers prepare (lambda () body ...)))
     (define (median-ms thunk)
-      (fmt-ms (median-of-runs ,timing-repeats thunk)))
+      (ms->string (median-of (repeat-runs ,timing-repeats thunk))))
     (parallel-add!)
     (define before (counts))
     (define alone (median-ms (lambda () (time-trainer 50))))
