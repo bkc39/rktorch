@@ -1,7 +1,6 @@
 #lang racket/base
 
-(require (only-in ffi/unsafe register-finalizer)
-         (only-in math/statistics median)
+(require (only-in math/statistics median)
          (only-in racket/format ~r)
          (only-in racket/match match-define)
          (only-in racket/string string-join)
@@ -31,14 +30,6 @@
 (define seconds-per-cell 1.0)
 (define repeats 3)
 (define settle-round-limit 50)
-(define canary-timeout-seconds 0.5)
-
-(define (collect-past-canary!)
-  (define canary-finalized (make-semaphore 0))
-  (register-finalizer (box 0) (lambda (_) (semaphore-post canary-finalized)))
-  (collect-garbage 'major)
-  (and (sync/timeout canary-timeout-seconds canary-finalized) #t))
-
 (define (settle-finalizers! p)
   (define runs (prototype-finalizer-runs p))
   (let loop ([rounds 1] [before (runs)] [quiet 0])

@@ -1,6 +1,15 @@
 #lang racket/base
 
-(require (only-in ffi/unsafe _double _fun _int _pointer _uintptr get-ffi-obj malloc ptr-ref)
+(require (only-in ffi/unsafe
+                  _double
+                  _fun
+                  _int
+                  _pointer
+                  _uintptr
+                  get-ffi-obj
+                  malloc
+                  ptr-ref
+                  register-finalizer)
          (only-in racket/date date->string date-display-format)
          (only-in racket/format ~a ~r)
          (only-in racket/future processor-count)
@@ -19,6 +28,7 @@
          print-table-row
          run-parallel
          run-parallel/gc
+         collect-past-canary!
          fmt-ms
          fmt-rate)
 
@@ -113,3 +123,11 @@
 
 (define (fmt-rate per-second)
   (~a (exact-round per-second)))
+
+(define canary-timeout-seconds 0.5)
+
+(define (collect-past-canary!)
+  (define canary-finalized (make-semaphore 0))
+  (register-finalizer (box 0) (lambda (_) (semaphore-post canary-finalized)))
+  (collect-garbage 'major)
+  (and (sync/timeout canary-timeout-seconds canary-finalized) #t))

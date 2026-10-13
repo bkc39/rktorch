@@ -29,9 +29,10 @@
 (define (drain! p)
   (define start (current-inexact-monotonic-milliseconds))
   (let loop ([rounds 0])
+    (define settled? (and (zero? ((prototype-live-bytes p))) (collect-past-canary!)))
     (cond
-      [(or (zero? ((prototype-live-bytes p))) (= rounds drain-round-limit))
-       (values rounds (- (current-inexact-monotonic-milliseconds) start))]
+      [(or settled? (= rounds drain-round-limit))
+       (values rounds (- (current-inexact-monotonic-milliseconds) start) settled?)]
       [else
        (collect-garbage 'major)
        (sleep 0.01)
@@ -64,7 +65,7 @@
   (define-values (made interval runs-during gc-ms lag)
     (vector->values (unbox at-stop)))
   (define gc-share (/ gc-ms (* 1000 interval)))
-  (define-values (rounds drain-ms) (drain! p))
+  (define-values (rounds drain-ms settled?) (drain! p))
   (define after ((prototype-live-bytes p)))
   (values
    (list (prototype-name p)
@@ -78,7 +79,7 @@
          rounds
          (fmt-ms drain-ms)
          after)
-   (zero? after)))
+   settled?))
 
 
 (module+ main
