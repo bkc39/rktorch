@@ -4,7 +4,7 @@
   (require rackunit
            (only-in racket/list take)
            (only-in "../main.rkt" tensor-shape tensor->list)
-           (only-in "../data/mnist.rkt"
+           (only-in "../vision/mnist.rkt"
                     load-mnist-fixture
                     read-idx
                     download-cached))

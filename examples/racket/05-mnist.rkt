@@ -22,7 +22,7 @@ classes; the @emph{functional} ops stay lowercase on @racketmodname[torch]
 
 @chunk[<r05-require>
 (require torch torch/nn torch/data/loader
-         (only-in torch/data/mnist load-mnist load-mnist-fixture))]
+         (only-in torch/vision/mnist load-mnist load-mnist-fixture))]
 
 @chunk[<r05-provide>
 (provide convnet pick-device accuracy run-example train-mnist)]

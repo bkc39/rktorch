@@ -2,7 +2,7 @@
 
 @(require (for-label (except-in racket/base abs cos exp log sin sort sqrt max min length
                                 + - * / < <= > >=)
-                     torch torch/nn torch/data/loader torch/data/mnist
+                     torch torch/nn torch/data/loader torch/vision/mnist
                      torch/vision/ppm))
 
 @title[#:tag "ex-dcgan"]{Training a DCGAN on MNIST}
@@ -18,7 +18,7 @@ tangent on the output, so the images live in @tt{[-1, 1]}.
 
 @chunk[<r10-require>
 (require torch torch/nn torch/data/loader
-         (only-in torch/data/mnist load-mnist load-mnist-fixture)
+         (only-in torch/vision/mnist load-mnist load-mnist-fixture)
          torch/vision/ppm)]
 
 @chunk[<r10-provide>

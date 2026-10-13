@@ -25,7 +25,7 @@ the whole context.
          (only-in racket/list last)
          (only-in racket/match match)
          torch torch/nn
-         (only-in torch/data/text
+         (only-in torch/text/data
                   contiguous-blocks
                   decode
                   encode

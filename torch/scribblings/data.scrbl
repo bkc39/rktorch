@@ -10,8 +10,8 @@
                               make-generator narrow randn randperm seed/c select
                               size/c stack tensor tensor? tensor->list)
                      torch/data/loader
-                     torch/data/mnist
-                     torch/data/text))
+                     torch/vision/mnist
+                     torch/text/data))
 
 @title{Datasets and loaders}
 
@@ -274,7 +274,7 @@ One int64 drawn from @racket[generator] or the global stream, as
 
 @section{MNIST}
 
-@defmodule[torch/data/mnist]
+@defmodule[torch/vision/mnist]
 
 The handwritten digits, fetched once from the mirror torchvision uses into
 the cache directory and decoded from the IDX files.
@@ -291,7 +291,7 @@ train on.}
 
 @section{Text}
 
-@defmodule[torch/data/text]
+@defmodule[torch/text/data]
 
 Character-level text: a corpus as one string, a vocabulary of its
 characters, and the int64 token tensors a language model consumes.
@@ -314,7 +314,7 @@ index in the vector is its token.}
 character outside the vocabulary is an error.
 
 @torch-examples[
-(require torch/data/text)
+(require torch/text/data)
 (define vocab (text->vocab "hello"))
 vocab
 (encode vocab "ole")

@@ -2,7 +2,7 @@
 
 @(require (for-label (except-in racket/base abs cos exp log sin sort sqrt max min length
                                 + - * / < <= > >=)
-                     torch torch/nn torch/data/loader torch/data/translation))
+                     torch torch/nn torch/data/loader torch/text/translation))
 
 @title[#:tag "ex-translation"]{Translating French with a GRU and attention}
 
@@ -11,7 +11,7 @@ ocaml-torch's @tt{translation} example: a @racket[GRU] encoder reads a French
 sentence into a sequence of states, and a @racket[GRU] decoder writes the
 English one word at a time, looking back over the encoder's states through
 Bahdanau attention at every step. The data is the tutorial's too, the short
-sentence pairs @racketmodname[torch/data/translation] prepares.
+sentence pairs @racketmodname[torch/text/translation] prepares.
 
 Everything recurrent in the library meets here: the layers' carried state (the
 decoder is one @racket[GRU] applied a step at a time), @racket[topk] for greedy
@@ -24,8 +24,8 @@ batch.
          (only-in racket/string string-split)
          torch torch/nn
          torch/data/loader
-         torch/data/translation
-         (only-in torch/audio/functional edit-distance))]
+         (only-in torch/audio/functional edit-distance)
+         torch/text/translation)]
 
 @chunk[<r13-provide>
 (provide encoder attention decoder seq2seq

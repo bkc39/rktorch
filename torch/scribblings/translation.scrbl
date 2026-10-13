@@ -5,11 +5,11 @@
                      (only-in torch tensor?)
                      (only-in torch/data/loader dataloader tensor-dataset)
                      (only-in torch/nn nll-loss)
-                     torch/data/translation))
+                     torch/text/translation))
 
 @title{Translation pairs}
 
-@defmodule[torch/data/translation]
+@defmodule[torch/text/translation]
 
 The English-French sentence pairs of the PyTorch seq2seq tutorial, prepared as
 the tutorial prepares them: each sentence lower-cased and reduced to ASCII

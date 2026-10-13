@@ -9,7 +9,7 @@
          (only-in racket/path path-only)
          torch
          torch/nn
-         (only-in torch/data/text
+         (only-in torch/text/data
                   contiguous-blocks
                   encode
                   load-heart-of-darkness

@@ -2,7 +2,7 @@
 
 @(require (for-label (except-in racket/base abs cos exp log sin sort sqrt max min length
                                 + - * / < <= > >=)
-                     torch torch/nn torch/data/loader torch/data/mnist
+                     torch torch/nn torch/data/loader torch/vision/mnist
                      torch/vision/ppm))
 
 @title[#:tag "ex-vae"]{Training a variational autoencoder on MNIST}
@@ -17,7 +17,7 @@ the PyTorch examples repository.
 
 @chunk[<r11-require>
 (require torch torch/nn torch/data/loader
-         (only-in torch/data/mnist load-mnist load-mnist-fixture)
+         (only-in torch/vision/mnist load-mnist load-mnist-fixture)
          torch/vision/ppm)]
 
 @chunk[<r11-provide>

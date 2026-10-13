@@ -9,7 +9,7 @@ import torch
 from torch import nn
 
 FIXTURES = os.path.join(
-    os.path.dirname(__file__), "..", "..", "torch", "data", "fixtures")
+    os.path.dirname(__file__), "..", "..", "torch", "vision", "fixtures")
 
 DEVICE = os.environ.get("RKTORCH_PARITY_DEVICE") or "cpu"
 

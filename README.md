@@ -117,7 +117,7 @@ instance applies as a procedure.
 
 ```racket
 (require torch torch/nn torch/data/loader
-         (only-in torch/data/mnist load-mnist-fixture))
+         (only-in torch/vision/mnist load-mnist-fixture))
 
 (define-layer mlp (flat fc1 fc2)
   #:init (hidden)
@@ -233,4 +233,5 @@ follows and which it keeps as a reference implementation.
 [`torch/info.rkt`](torch/info.rkt). The code is Apache-2.0; the committed
 data fixtures carry the licenses of their sources, recorded in the `NOTICE`
 beside each one ([`torch/audio/fixtures`](torch/audio/fixtures/NOTICE),
-[`torch/data/fixtures`](torch/data/fixtures/NOTICE)).
+[`torch/text/fixtures`](torch/text/fixtures/NOTICE),
+[`torch/vision/fixtures`](torch/vision/fixtures/NOTICE)).

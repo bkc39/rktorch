@@ -6,7 +6,7 @@
          (only-in racket/math nan?)
          torch
          torch/nn
-         (only-in torch/data/mnist load-mnist-fixture)
+         (only-in torch/vision/mnist load-mnist-fixture)
          "../racket/05-mnist.rkt")
 
 (module+ main

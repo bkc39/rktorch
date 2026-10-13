@@ -7,7 +7,7 @@
          (only-in racket/string string-contains? string-prefix?)
          torch
          torch/nn
-         (only-in torch/data/text encode)
+         (only-in torch/text/data encode)
          "../racket/06-gpt.rkt")
 
 (module+ main

@@ -12,7 +12,7 @@ import torch.nn.functional as F
 from torch import nn
 
 FIXTURE = os.path.join(os.path.dirname(__file__), "..", "..", "torch",
-                       "data", "fixtures", "mnist-256-images-idx3-ubyte")
+                       "vision", "fixtures", "mnist-256-images-idx3-ubyte")
 DEVICE = os.environ.get("RKTORCH_PARITY_DEVICE") or "cpu"
 
 

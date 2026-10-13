@@ -27,7 +27,7 @@ attention.
          (only-in racket/file file->string)
          (only-in racket/list take-right)
          torch torch/nn
-         (only-in torch/data/text
+         (only-in torch/text/data
                   contiguous-blocks
                   decode
                   encode

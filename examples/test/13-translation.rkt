@@ -4,7 +4,7 @@
          (only-in racket/math nan?)
          torch
          torch/nn
-         torch/data/translation
+         torch/text/translation
          "../racket/13-translation.rkt")
 
 (module+ main
