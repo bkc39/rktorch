@@ -39,7 +39,7 @@
     #:methods gen:layer
     [(define (layer-forward self . inputs) (car inputs))
      (define (layer-named-children self)
-       (set-box! (Diamond-listings self) (add1 (unbox (Diamond-listings self))))
+       (set-box! (Diamond-listings self) (~> (Diamond-listings self) unbox add1))
        (define inner (Diamond-inner self))
        (if inner
            (list (cons "left" inner) (cons "right" inner))

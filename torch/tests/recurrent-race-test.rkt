@@ -147,7 +147,8 @@
     (define (check-claim!)
       (define now (storage-signature weights))
       (define claimed? (equal? now (flattened-signature (car weights))))
-      (define on-cuda? (eq? (device-type (tensor-device (car weights))) 'cuda))
+      (define on-cuda?
+        (~> (car weights) tensor-device device-type (eq? 'cuda)))
       (when (and claimed? on-cuda? (not (packed? now)))
         (set-box! stale-claims (add1 (unbox stale-claims)))))
     (define mover

@@ -17,7 +17,8 @@
          (only-in "slice.rkt" slice-end slice-start slice-step slice?)
          (only-in "structs.rkt" tensor?))
 
-(provide bool-tensor/c
+(provide attention-input/c
+         bool-tensor/c
          feature-batch/c
          image-batch/c
          rgb-image-batch/c
@@ -65,6 +66,11 @@
                             (define shape (tensor-shape x))
                             (and (= 4 (length shape)) (= 3 (cadr shape)))]
                            [else #f]))))
+
+(define attention-input/c
+  (flat-named-contract 'attention-input
+                       (lambda (x)
+                         (and (tensor? x) (<= 2 (length (tensor-shape x)))))))
 
 (define feature-batch/c
   (flat-named-contract 'feature-batch

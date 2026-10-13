@@ -7,7 +7,7 @@
                      syntax/parse/pre
                      (only-in "../private/definer.rkt"
                               contract-export ctor-formal forward-formal
-                              init-formals))
+                              forward-keyword init-formals))
          (only-in racket/contract/base
                   -> ->* ->i and/c any any/c cons/c contract contract-out
                   contract? flat-named-contract listof not/c or/c
@@ -15,6 +15,7 @@
          (only-in racket/generic define-generics)
          (only-in racket/list append-map check-duplicates remove-duplicates)
          (only-in racket/stxparam define-syntax-parameter syntax-parameterize)
+         (only-in syntax/parse/define define-syntax-parse-rule)
          (only-in "../foreign.rkt"
                   prop:to tensor-device tensor-dtype tensor?)
          (only-in (submod "../foreign.rkt" unsafe) to!)
@@ -34,6 +35,7 @@
          layer-named-children ;; noqa
          layer-mode ;; noqa
          layer-set-mode! ;; noqa
+         layer-rebuild ;; noqa
          registry?
          set-registry-mode!
          with-mode
@@ -49,8 +51,12 @@
   (layer-own-tensors layer)
   (layer-mode layer)
   (layer-set-mode! layer mode)
+  (layer-rebuild layer child tensor)
   #:derive-property prop:to (lambda (m dev dtype) (move-layer! m dev dtype))
-  #:derive-property prop:procedure (lambda (m . inputs) (apply call-layer m inputs))
+  #:derive-property prop:procedure
+  (make-keyword-procedure
+   (lambda (kws kw-args m . inputs) (call-layer/keywords m kws kw-args inputs))
+   (lambda (m . inputs) (apply call-layer m inputs)))
   #:fallbacks
   [(define (layer-parameters self) '()) ;; noqa
    (define (layer-named-parameters self prefix) '()) ;; noqa
@@ -59,7 +65,12 @@
    (define (layer-named-children self) '()) ;; noqa
    (define (layer-own-tensors self) (own-tensors self)) ;; noqa
    (define (layer-mode self) 'train) ;; noqa
-   (define (layer-set-mode! self mode) (void))]) ;; noqa
+   (define (layer-set-mode! self mode) (void)) ;; noqa
+   (define (layer-rebuild self child tensor) ;; noqa
+     (raise-arguments-error
+      'layer-copy
+      "a hand-written gen:layer has no layer-rebuild method to copy it with"
+      "layer" self))])
 
 (define/checked-out mode/c contract?
   (flat-named-contract 'mode/c (or/c 'train 'eval)))
@@ -226,14 +237,21 @@
 ;; derives prop:procedure from it, so a layer written by hand gets the
 ;; trough too. The mark tells a nested call from the outermost one, whose
 ;; return is where a no-grad loop's memory is at its lowest.
+(define-syntax-parse-rule (at-forward-trough call:expr)
+  (if (continuation-mark-set-first #f layer-call-key)
+      call
+      (begin0 (with-continuation-mark layer-call-key #t call)
+              (collect-at-forward-trough!))))
+
 (define (call-layer m . inputs) ;; noqa
-  (cond
-    [(continuation-mark-set-first #f layer-call-key)
-     (apply layer-forward m inputs)]
-    [else
-     (begin0 (with-continuation-mark layer-call-key #t
-               (apply layer-forward m inputs))
-             (collect-at-forward-trough!))]))
+  (at-forward-trough (apply layer-forward m inputs)))
+
+;; Only define-layer's forward and procedure->Layer's take keywords; a
+;; hand-written layer-forward is a generic method, which cannot, so the
+;; application reports that method as the one refusing them.
+(define (call-layer/keywords m kws kw-args inputs) ;; noqa
+  (define forward (if (registry? m) (registry-forward m) layer-forward))
+  (at-forward-trough (keyword-apply forward kws kw-args m inputs)))
 
 (struct registry (forward params buffers children [mode #:mutable])
   #:methods gen:layer
@@ -265,7 +283,32 @@
      (for ([c (in-list (registry-children self))])
        (child-set-mode! c mode)))
    (define (layer-mode self)
-     (registry-mode self))])
+     (registry-mode self))
+   (define (layer-rebuild self child tensor)
+     ((rebuilder-of self) self child tensor))])
+
+(define-values (prop:rebuilder rebuilder? rebuilder-of) ;; noqa
+  (make-struct-type-property 'rebuilder))
+
+(define (rebuilt-value name v child tensor) ;; noqa
+  (let walk ([v v])
+    (cond
+      [(layer? v) (child name v)]
+      [(tensor? v) (tensor v)]
+      [(Parameters%? v)
+       (Parameters% (for/list ([e (in-list (Parameters%-alist v))])
+                      (cons (car e) (tensor (cdr e)))))]
+      [(Children%? v)
+       (Children% (for/list ([e (in-list (Children%-alist v))])
+                    (cons (car e) (child (car e) (cdr e)))))]
+      [(pair? v) (cons (walk (car v)) (walk (cdr v)))]
+      [(vector? v)
+       (define copy (for/vector #:length (vector-length v)
+                                ([x (in-vector v)])
+                      (walk x)))
+       (if (immutable? v) (vector->immutable-vector copy) copy)]
+      [(box? v) (box (walk (unbox v)))]
+      [else v])))
 
 (define (child-parameters c)
   (layer-parameters (cdr c)))
@@ -286,10 +329,25 @@
   (layer-named-buffers (cdr c) (child-prefix c prefix)))
 
 (struct Fn% registry (proc)
-  #:reflection-name 'Fn)
+  #:reflection-name 'Fn
+  #:property prop:rebuilder
+  (lambda (self _child _tensor)
+    (unless (null? (append (registry-params self) (registry-buffers self)
+                           (registry-children self)))
+      (raise-arguments-error
+       'layer-copy
+       (string-append "a procedure->Layer layer with parameters, buffers or"
+                      " children cannot be copied: its procedure would"
+                      " still read the original's")
+       "layer" self))
+    (Fn% fn-forward '() '() '() (registry-mode self) (Fn%-proc self))))
 
-(define (fn-forward self . inputs)
-  (apply (Fn%-proc self) inputs))
+(define fn-forward
+  (make-keyword-procedure
+   (lambda (kws kw-args self . inputs)
+     (keyword-apply (Fn%-proc self) kws kw-args inputs))
+   (lambda (self . inputs)
+     (apply (Fn%-proc self) inputs))))
 
 (define (as-layer v)
   (if (layer? v) v (procedure->Layer v)))
@@ -415,8 +473,10 @@
               (~optional (~seq #:contract ctc:expr))
               (~optional (~seq #:predicate pred:id))
               (~optional (~seq #:on-move moved-body:expr ...+))) ...
-        #:forward (~or* (input:forward-formal ...)
-                        (input:forward-formal ... . restarg:id))
+        #:forward (~or* ((~alt input:forward-formal kw-input:forward-keyword)
+                         ...)
+                        ((~alt input:forward-formal kw-input:forward-keyword)
+                         ... . restarg:id))
         body:expr ...+)
      #:fail-when
      (and (attribute init)
@@ -461,12 +521,15 @@
      #:with expected (if (attribute restarg)
                          #`(arity-at-least #,arity)
                          #`#,arity)
+     #:with (kw-decl ...) #'((~@ kw-input.decl ...) ...)
      #:with forward-lambda
-     (if (attribute restarg)
-         #'(lambda (input.id ... . restarg)
-             (let (checked-binding ...) body ...))
-         #'(lambda (input.id ...)
-             (let (checked-binding ...) body ...)))
+     (syntax-property
+      (if (attribute restarg)
+          #'(lambda (input.id ... kw-decl ... . restarg)
+              (let (checked-binding ...) body ...))
+          #'(lambda (input.id ... kw-decl ...)
+              (let (checked-binding ...) body ...)))
+      'inferred-name (syntax-e #'name))
      #:with (moved-clause ...)
      (if (attribute moved-body)
          #'(#:property prop:on-move
@@ -479,15 +542,33 @@
      #'(begin
          (struct sid registry (field.id ...)
            #:reflection-name reflect-name
+           #:property prop:rebuilder
+           (lambda (self child tensor) (rebuild self child tensor))
            moved-clause ...)
          (define name? sid?)
+         (define (rebuild self child tensor)
+           (let ([field.id
+                  (rebuilt-value 'field-name (field-acc self) child tensor)]
+                 ...)
+             (let-values ([(params buffers children)
+                           (classify '(field-name ...) (list field.id ...))])
+               (check-names
+                'name
+                (sid forward-proc params buffers children (registry-mode self)
+                     field.id ...)))))
          checker-def ...
-         (define (forward-proc self . inputs)
+         (define (run-forward self kws kw-args inputs)
            (unless (enough? (length inputs) n-inputs)
              (apply raise-arity-error 'name expected inputs))
            (let ([field.id (field-acc self)] ...)
              (syntax-parameterize ([with-mode (with-mode-transformer #'self)])
-               (apply forward-lambda inputs))))
+               (keyword-apply forward-lambda kws kw-args inputs))))
+         (define forward-proc
+           (make-keyword-procedure
+            (lambda (kws kw-args self . inputs)
+              (run-forward self kws kw-args inputs))
+            (lambda (self . inputs)
+              (run-forward self '() '() inputs))))
          (define (name . formals)
            (let ([absent #f] ...)
              assign ...

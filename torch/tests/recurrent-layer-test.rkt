@@ -166,10 +166,10 @@
     (define net (Wrap))
     (define weights (parameters net))
     (define (recorded) (flattened-signature (car weights)))
-    (void (net (randn 5 2 3)))
+    (~> (randn 5 2 3) net void)
     (check-equal? (recorded) (storage-signature weights))
     (to net 'float64)
-    (void (net (randn 5 2 3 #:dtype 'float64)))
+    (~> (randn 5 2 3 #:dtype 'float64) net void)
     (check-equal? (recorded) (storage-signature weights)))
 
   (test-case "element addresses alone do not pass for the recorded packing"

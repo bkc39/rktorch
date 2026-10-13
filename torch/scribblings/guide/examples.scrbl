@@ -2,7 +2,7 @@
 
 @(require (for-label (except-in racket/base
                                 abs cos exp log sin sort sqrt max min length
-                                + - * /)
+                                + - * / < <= > >=)
                      torch))
 
 @title[#:tag "examples" #:style 'toc]{Worked examples}
