@@ -5,10 +5,10 @@
          (only-in racket/file delete-directory/files)
          (only-in racket/format ~a ~r)
          (only-in racket/future processor-count)
-         (only-in racket/list drop take)
+         (only-in racket/list drop filter-map remove-duplicates take)
          (only-in racket/match match match-define)
          (only-in racket/port open-output-nowhere port->string with-output-to-string)
-         (only-in racket/string string-split string-trim)
+         (only-in racket/string string-prefix? string-split string-trim)
          (only-in racket/system process*/ports)
          (only-in syntax/parse/define define-syntax-parse-rule)
          (only-in threading ~>))
@@ -27,8 +27,7 @@
          parse-cpu-times
          busy-cores
          thread-setting
-         cuda-gpu-id
-         first-line
+         cuda-gpu-name
          with-temporary-path
          host-meta
          result->record
@@ -216,14 +215,33 @@
   (hasheq 'threads threads 'threads_source source
           'omp_num_threads omp 'mkl_num_threads mkl))
 
-(define (cuda-gpu-id visible)
-  (match (and visible (string-split visible ","))
-    [(cons id _) (string-trim id)]
-    [_ "0"]))
+(struct gpu (index uuid name))
 
-(define (first-line text)
-  (match (and text (string-split text "\n"))
-    [(cons line _) (string-trim line)]
+(define (listing->gpus text)
+  (filter-map
+   (lambda (line)
+     (match (regexp-match #px"^\\s*(\\d+)\\s*,\\s*(\\S+)\\s*,\\s*(.*\\S)\\s*$" line)
+       [(list _ index uuid name) (gpu (string->number index) uuid name)]
+       [#f #f]))
+   (string-split (or text "") "\n")))
+
+(define (cuda-gpu-name visible order listing)
+  (define gpus (listing->gpus listing))
+  (define id
+    (match (string-split (or visible "") ",")
+      [(cons id _) (string-trim id)]
+      ['() "0"]))
+  (define index (and (regexp-match? #px"^\\d+$" id) (string->number id)))
+  (define homogeneous? (= 1 (length (remove-duplicates (map gpu-name gpus)))))
+  (define candidates
+    (cond
+      [(regexp-match? #rx"^(GPU|MIG)-" id)
+       (filter (lambda (g) (string-prefix? (gpu-uuid g) id)) gpus)]
+      [(and index (or (equal? order "PCI_BUS_ID") homogeneous?))
+       (filter (lambda (g) (= (gpu-index g) index)) gpus)]
+      [else '()]))
+  (match candidates
+    [(list g) (gpu-name g)]
     [_ #f]))
 
 (define (host-meta #:device device #:libtorch libtorch #:threads [aten #f]
@@ -239,11 +257,11 @@
           'libtorch libtorch
           'device (~a device)
           'gpu (and (eq? device 'cuda)
-                    (first-line
-                     (command-output "nvidia-smi"
-                                     (string-append "--id="
-                                                    (cuda-gpu-id (getenv "CUDA_VISIBLE_DEVICES")))
-                                     "--query-gpu=name" "--format=csv,noheader")))
+                    (cuda-gpu-name (getenv "CUDA_VISIBLE_DEVICES")
+                                   (getenv "CUDA_DEVICE_ORDER")
+                                   (command-output "nvidia-smi"
+                                                   "--query-gpu=index,uuid,name"
+                                                   "--format=csv,noheader")))
           'threads (hash-ref threads 'threads)
           'threads_source (hash-ref threads 'threads_source)
           'omp_num_threads (hash-ref threads 'omp_num_threads)
@@ -390,15 +408,32 @@
     (check-equal? (hash-ref (host-meta #:device 'cpu #:libtorch "x" #:threads 5) 'threads_source)
                   "at::get_num_threads"))
 
-  (test-case "the GPU is the selected device's, one line"
-    (check-equal? (cuda-gpu-id #f) "0")
-    (check-equal? (cuda-gpu-id "") "0")
-    (check-equal? (cuda-gpu-id "2,3") "2")
-    (check-equal? (cuda-gpu-id "GPU-8a1f,GPU-77c2") "GPU-8a1f")
-    (check-equal? (first-line "NVIDIA A100\nNVIDIA RTX 3090\n") "NVIDIA A100")
-    (check-equal? (first-line "NVIDIA GeForce RTX 3090 Ti\n") "NVIDIA GeForce RTX 3090 Ti")
-    (check-false (first-line ""))
-    (check-false (first-line #f)))
+  (test-case "the GPU is the selected device's when the listing pins it down"
+    (define mixed
+      (string-append "0, GPU-8a1f0c2d-0000-0000-0000-000000000000, NVIDIA A100-SXM4-40GB\n"
+                     "1, GPU-8a1f77c2-0000-0000-0000-000000000000, NVIDIA GeForce RTX 3090\n"
+                     "2, GPU-5fd7e1aa-0000-0000-0000-000000000000, NVIDIA GeForce RTX 3090\n"))
+    (define same
+      (string-append "0, GPU-11110000-0000-0000-0000-000000000000, NVIDIA L4\n"
+                     "1, GPU-22220000-0000-0000-0000-000000000000, NVIDIA L4\n"))
+    (check-equal? (cuda-gpu-name "GPU-5fd7,GPU-8a1f0" #f mixed) "NVIDIA GeForce RTX 3090")
+    (check-equal? (cuda-gpu-name "GPU-8a1f0c" #f mixed) "NVIDIA A100-SXM4-40GB")
+    (check-false (cuda-gpu-name "GPU-8a1f" "PCI_BUS_ID" mixed))
+    (check-false (cuda-gpu-name "GPU-ffff" #f mixed))
+    (check-false (cuda-gpu-name "MIG-8a1f0c2d" #f mixed))
+    (check-equal? (cuda-gpu-name "1,2" "PCI_BUS_ID" mixed) "NVIDIA GeForce RTX 3090")
+    (check-equal? (cuda-gpu-name "0" "PCI_BUS_ID" mixed) "NVIDIA A100-SXM4-40GB")
+    (check-equal? (cuda-gpu-name "1" #f same) "NVIDIA L4")
+    (check-false (cuda-gpu-name "1" #f mixed))
+    (check-false (cuda-gpu-name "1" "FASTEST_FIRST" mixed))
+    (check-false (cuda-gpu-name "7" "PCI_BUS_ID" mixed))
+    (check-equal? (cuda-gpu-name #f #f same) "NVIDIA L4")
+    (check-equal? (cuda-gpu-name "" #f same) "NVIDIA L4")
+    (check-equal? (cuda-gpu-name #f "PCI_BUS_ID" mixed) "NVIDIA A100-SXM4-40GB")
+    (check-false (cuda-gpu-name #f #f mixed))
+    (check-false (cuda-gpu-name "" #f mixed))
+    (check-false (cuda-gpu-name "0" #f #f))
+    (check-false (cuda-gpu-name "0" "PCI_BUS_ID" "")))
 
   (test-case "a record is one JSON line carrying its samples and host"
     (define meta (host-meta #:device 'cpu #:libtorch "2.14.0"))

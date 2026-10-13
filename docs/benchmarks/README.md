@@ -112,7 +112,9 @@ One JSON object per line: `suite` (`micro`, `e2e`), `group`, `case`,
 `variant`, `unit`, `reps`, `samples` (one per round), `gc_ms`, `stats`
 (`median` `q1` `q3` `iqr` `min` `max` `n`), `load` and `load_end` (1, 5
 and 15-minute averages), and `meta`: `git_sha`, `git_dirty`, `racket`,
-`libtorch`, `device`, `gpu` (the selected CUDA device's name), `threads`
+`libtorch`, `device`, `gpu` (the selected CUDA device's name, null unless
+`CUDA_VISIBLE_DEVICES` names it by a unique UUID prefix, or by index under
+`CUDA_DEVICE_ORDER=PCI_BUS_ID` or on a host whose GPUs are all one model), `threads`
 and where that came from (`at::get_num_threads`, else `MKL_NUM_THREADS`,
 `OMP_NUM_THREADS` or the core count), `omp_num_threads` and
 `mkl_num_threads` as set, `cores`, `cpu`, `affinity`, `host`, `os`; `run_id` is shared by every record one
