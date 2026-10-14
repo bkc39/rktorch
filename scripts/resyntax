@@ -6,12 +6,7 @@
 # scripts/resyntax-lp2.rkt then lints the literate examples' chunks with
 # the same suite; it takes --file, --directory, --local-git-repository and
 # --analyzer-timeout.
-#
-# --local-git-repository DIR [REF] diffs against the merge base of HEAD and
-# REF, so only the branch's own changes are linted. REF defaults to the base
-# of the open pull request for the branch, or for HEAD's commit when HEAD is
-# detached (gh), when origin has that base; else origin/master. Tested by
-# scripts/resyntax-wrapper-test.rkt.
+# REF after --local-git-repository DIR: the PR's base, else origin/master.
 #
 #   nix develop .#ci --command scripts/resyntax analyze \
 #     --local-git-repository . --analyzer-timeout 30000
@@ -25,27 +20,38 @@ fail() {
 }
 
 pr_base() {
+  local query key
   if git symbolic-ref -q HEAD >/dev/null; then
-    timeout 20 gh pr view --json state,baseRefName \
-      --jq '.state + " " + .baseRefName' 2>/dev/null |
-      awk '$1 == "OPEN" { print $2 }'
+    query=(view --json 'state,baseRefName' --jq '.state + " " + .baseRefName')
+    key=OPEN
   else
-    timeout 20 gh pr list --state open --limit 200 \
-      --json headRefOid,baseRefName \
-      --jq '.[] | .headRefOid + " " + .baseRefName' 2>/dev/null |
-      awk -v head="$(git rev-parse HEAD)" '$1 == head { print $2 }'
+    query=(list --state open --limit 200 --json 'headRefOid,baseRefName'
+           --jq '.[] | .headRefOid + " " + .baseRefName')
+    key=$(git rev-parse HEAD)
   fi
+  timeout 20 gh pr "${query[@]}" 2>/dev/null |
+    awk -v key="$key" '$1 == key { print $2 }'
 }
 
 default_ref() {
   local name
-  name=$(cd "$1" && pr_base) || name=
+  name=$(pr_base) || name=
   if [ -n "$name" ] &&
-     git -C "$1" rev-parse -q --verify "origin/$name^{commit}" >/dev/null; then
+     git rev-parse -q --verify "origin/$name^{commit}" >/dev/null; then
     echo "origin/$name"
   else
     echo origin/master
   fi
+}
+
+since() {
+  local ref base
+  cd "$1" || exit 2
+  ref=${2:-$(default_ref)}
+  base=$(git merge-base HEAD "$ref") ||
+    fail "no merge base of HEAD and $ref in $1 (shallow clone or unrelated history?)"
+  echo "resyntax: linting changes since $ref (merge base ${base:0:12})" >&2
+  echo "$base"
 }
 
 root=$(git rev-parse --show-toplevel)
@@ -53,27 +59,24 @@ command=$1
 shift
 args=()
 while [ $# -gt 0 ]; do
-  if [ "$1" != --local-git-repository ]; then
-    args+=("$1")
-    shift
-    continue
-  fi
-  if [ $# -lt 2 ] || [[ $2 == --* ]]; then
-    fail "--local-git-repository needs DIR [REF]"
-  fi
-  dir=$2
-  shift 2
-  if [ $# -gt 0 ] && [[ $1 != --* ]]; then
-    ref=$1
-    shift
-  else
-    ref=$(default_ref "$dir")
-  fi
-  base=$(git -C "$dir" merge-base HEAD "$ref") ||
-    fail "no merge base of HEAD and $ref in $dir" \
-         "(shallow clone or unrelated history?)"
-  echo "resyntax: linting changes since $ref (merge base ${base:0:12})" >&2
-  args+=(--local-git-repository "$dir" "$base")
+  case $1 in
+    --local-git-repository)
+      [[ ${2-} && $2 != --* ]] || fail "--local-git-repository needs DIR [REF]"
+      dir=$2
+      ref=
+      shift 2
+      if [[ ${1-} && $1 != --* ]]; then
+        ref=$1
+        shift
+      fi
+      base=$(since "$dir" "$ref")
+      args+=(--local-git-repository "$dir" "$base")
+      ;;
+    *)
+      args+=("$1")
+      shift
+      ;;
+  esac
 done
 lp2_flags=()
 if [ "$command" = fix ]; then

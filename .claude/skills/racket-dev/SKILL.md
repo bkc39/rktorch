@@ -115,9 +115,8 @@ style point the owner raises in review that is a meaning-preserving rewrite
 becomes a rule there, with a case in `scripts/resyntax-rules-test.rkt`.
 
 CI fails on **any** suggestion. `scripts/resyntax fix --local-git-repository .`
-applies them. Both diff against the merge base with the open pull request's
-base branch, else origin/master; pass the REF explicitly on a detached HEAD
-or a stacked leg when unsure. Resyntax skips a file whose `compiled/` was built by a different
+applies them; `AGENTS.md`'s build commands say which REF both diff
+against. Resyntax skips a file whose `compiled/` was built by a different
 Racket than the shell's, and it skips `#lang scribble/lp2` files. The wrapper
 then lints the literate examples through `scripts/resyntax-lp2.rkt`: the
 same suite over a `racket/base` shadow that blanks the prose and keeps
