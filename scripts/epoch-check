@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+#
+# Trains every example for a few epochs on this host's accelerator and checks
+# each headline against the record in docs/epoch-check.md, which says when to
+# run it and what each verdict means.
+#
+#   nix develop .#cuda -c scripts/epoch-check
+#   nix develop .#cuda -c scripts/epoch-check 12-char-rnn 13-translation
+set -u -o pipefail
+
+root=$(cd "$(dirname "$0")/.." && pwd)
+out=${EPOCH_CHECK_OUT:-$root/.scratch/epoch-check}
+number='[0-9]+(\.[0-9]+)?(e[-+]?[0-9]+)?'
+
+# One tab-separated line per row of the record:
+# example, budget, pattern, better, record, tolerance.
+rows=$(awk -F'|' '/^\| [0-9][0-9]-/ {
+  for (i = 2; i <= 8; i++) { gsub(/^ +| +$/, "", $i); gsub(/`/, "", $i) }
+  print $2 "\t" $3 "\t" $5 "\t" $6 "\t" $7 "\t" $8 }' "$root/docs/epoch-check.md")
+
+selected=()
+runners=()
+while IFS=$'\t' read -r example _; do
+  if [ $# -eq 0 ] || [[ " $* " == *" $example "* ]]; then
+    selected+=("$example")
+    runners+=("$root/examples/test/$example.rkt")
+  fi
+done <<< "$rows"
+raco make "${runners[@]}" || exit 1
+
+status=0
+printf '| example | budget | record | this run | verdict | wall | peak GPU MiB |\n'
+printf '|---|---|---|---|---|---|---|\n'
+while IFS=$'\t' read -r example budget pattern better record tolerance; do
+  if [[ " ${selected[*]} " != *" $example "* ]]; then continue; fi
+  dir=$out/$example
+  mkdir -p "$dir"
+  overrides=()
+  if [ "$budget" != default ]; then read -r -a overrides <<< "$budget"; fi
+  nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits -lms 500 \
+    > "$dir/gpu" 2>/dev/null < /dev/null &
+  sampler=$!
+  start=$(date +%s)
+  (cd "$dir" && env OUT="$dir" "${overrides[@]}" \
+     racket "$root/examples/test/$example.rkt" > "$dir/log" 2>&1 < /dev/null)
+  rc=$?
+  wall=$(( $(date +%s) - start ))
+  kill $sampler 2>/dev/null
+  peak=$(sort -n "$dir/gpu" 2>/dev/null | tail -1)
+  value=$(grep -oE "$pattern" "$dir/log" | tail -1 | grep -oE "$number" | tail -1)
+  if [ $rc -ne 0 ] || [ -z "$value" ]; then
+    verdict="FAILED, see $dir/log"
+    status=1
+  else
+    verdict=$(awk -v v="$value" -v r="$record" -v t="$tolerance" -v b="$better" 'BEGIN {
+      worse = (b == "lower") ? v - r : r - v
+      print (worse > t) ? "REGRESSION" : (-worse > t) ? "moved" : "ok" }')
+    if [ "$verdict" = REGRESSION ]; then status=1; fi
+  fi
+  printf '| %s | %s | %s | %s | %s | %ss | %s |\n' \
+    "$example" "$budget" "$record" "${value:--}" "$verdict" "$wall" "${peak:--}"
+done <<< "$rows"
+exit $status
