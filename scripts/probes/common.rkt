@@ -39,7 +39,6 @@
          os-task-count
          print-banner
          print-footer
-         print-table
          print-table-header
          print-table-row
          with-atomic
@@ -61,7 +60,6 @@
          span-ms
          measure-span
          timed
-         loop-for-seconds
          tally
          tally-open!
          tally-loop-for-seconds
@@ -86,7 +84,7 @@
          collect-past-canary!
          settle-wills!
          exn:fail:unsettled
-         exn:fail:unsettled?
+         with-unsettled-stop
          rate->string)
 
 (define pthread-self (get-ffi-obj "pthread_self" #f (_fun -> _uintptr)))
@@ -115,8 +113,10 @@
     (printf "- libtorch ~a\n" torch-version))
   (printf "- load average (1 min) at start: ~a\n\n" (load-average)))
 
-(define (print-footer)
+(define (print-footer #:stopped [stopped #f])
   (define raised (unbox wills-raised))
+  (when stopped
+    (printf "\nstopped: ~a\n" stopped))
   (printf "\nload average (1 min) at end: ~a\n" (load-average))
   (when (pair? raised)
     (printf "wills that raised while settling: ~a (first: ~a)\n"
@@ -133,11 +133,6 @@
 (define (print-table-row row)
   (displayln (row->line row))
   (flush-output))
-
-(define (print-table header rows)
-  (print-table-header header)
-  (for-each print-table-row rows)
-  (newline))
 
 (define-syntax-parse-rule (with-atomic body:expr ...+)
   (dynamic-wind start-atomic (lambda () body ...) end-atomic))
@@ -464,6 +459,10 @@
     (sleep 0)))
 
 (struct exn:fail:unsettled exn:fail ())
+
+(define-syntax-parse-rule (with-unsettled-stop context:expr body:expr ...+)
+  (let ([reason (with-handlers ([exn:fail:unsettled? exn-message]) body ...)])
+    (and reason (format "~a: ~a" context reason))))
 
 (define (collect-past-canary!)
   (define executor (force finalizer-executor))

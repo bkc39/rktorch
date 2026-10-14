@@ -30,18 +30,20 @@
 (define repeats 3)
 (define settle-round-limit 50)
 
-(define (settle! p when-settling)
-  (define-values (ran _collections) (settle-wills! #:limit settle-round-limit))
-  (or ran
-      (raise (exn:fail:unsettled
-              (format "~a: wills still ran after ~a major collections ~a"
-                      (prototype-name p) settle-round-limit when-settling)
-              (current-continuation-marks)))))
+(define (settle! when-settling)
+  (define stop
+    (with-unsettled-stop when-settling
+      (define-values (ran _collections) (settle-wills! #:limit settle-round-limit))
+      (and (not ran)
+           (format "wills still ran after ~a major collections" settle-round-limit))))
+  (and stop (raise (exn:fail:unsettled stop (current-continuation-marks)))))
 
 (struct cell (workers rate gc-share longest-gap made calls pending unaccounted))
 
 (define (measure-cell p o n workers mode)
-  (settle! p (format "before n = ~a, ~a workers" n workers))
+  (define (cell-context side)
+    (format "~a n = ~a, ~a workers, main ~a" side n workers (main-mode-label mode)))
+  (settle! (cell-context "before"))
   (define calls (prototype-finalizer-calls p))
   (define t (tally workers))
   (define stop (box #f))
@@ -60,7 +62,7 @@
                   #:on-end (lambda () (tally-close! t))
                   #:stop stop))
   (define calls-after (and calls (calls)))
-  (settle! p (format "after n = ~a, ~a workers" n workers))
+  (settle! (cell-context "after"))
   (define calls-settled (and calls (calls)))
   (match-define (list made window-calls) (span-counts window))
   (define-values (counted-calls pending unaccounted)
@@ -161,12 +163,11 @@
            (for/list ([w (in-list worker-counts)]) (format "~a workers" w))
            '("8 / 1 workers" "GC share, 8 workers" "longest gap ms" "made" "finalizer calls"
              "pending at stop" "unaccounted, worst run" "ledger bytes after" "load")))
-  (with-handlers ([exn:fail:unsettled?
-                   (lambda (e)
-                     (printf "\nstopped: ~a\n" (exn-message e)))])
-    (for ([make (in-list (variant-makers #:bare? #t))])
+  (define stopped
+    (for/or ([make (in-list (variant-makers #:bare? #t))])
       (match-define (variant p o) (make))
-      (for ([n (in-list sizes)])
-        (allocator-rows p o n))
-      (settle! p "after its last row, before the next allocator")))
-  (print-footer))
+      (with-unsettled-stop (prototype-name p)
+        (for ([n (in-list sizes)])
+          (allocator-rows p o n))
+        (settle! "after its last row, before the next allocator"))))
+  (print-footer #:stopped stopped))

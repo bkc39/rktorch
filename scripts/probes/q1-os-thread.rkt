@@ -57,6 +57,11 @@
                   #:pool pool))
   (apply + (span-value moves)))
 
+(define (print-table header rows)
+  (print-table-header header)
+  (for-each print-table-row rows)
+  (newline))
+
 (module+ main
   (print-banner "Q1: which OS thread runs a protected region")
   (print-table

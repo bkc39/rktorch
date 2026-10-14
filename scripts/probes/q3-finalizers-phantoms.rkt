@@ -6,6 +6,7 @@
          (only-in racket/format ~r)
          (only-in racket/list count)
          (only-in racket/match match-define)
+         (only-in racket/set for/seteq set-count)
          "common.rkt")
 
 (define default-threads 8)
@@ -51,10 +52,10 @@
   (define final-counts (build-list total run-count))
   (define never (count zero? final-counts))
   (define twice (count (lambda (n) (> n 1)) final-counts))
-  (define finalizer-threads
-    (hash-count (for/hasheq ([t (in-vector ran-on)] #:when t) (values t #t))))
+  (define finalizer-threads (set-count (for/seteq ([t (in-vector ran-on)] #:when t) t)))
   (values (list total (real->decimal-string ms 1) (rate->string (/ total (ms->seconds ms)))
-                (apply + final-counts) finalizer-threads never twice rounds (real->decimal-string drain-ms 1)
+                (apply + final-counts) finalizer-threads never twice rounds
+                (real->decimal-string drain-ms 1)
                 (if (and settled? (zero? never) (zero? twice)) "yes" "NO")
                 (load-average))
           (cond
@@ -158,9 +159,10 @@
                         (list "under parameterize-break #f" 100000 break-disabled 8)
                         (list "in uninterruptible mode" 100000 call-as-uninterruptible 8)))])
     (match-define (list label per-thread protect threads) spec)
-    (define-values (row pending) (finalizer-round per-thread #:protect protect #:threads threads))
-    (print-table-row (cons label row))
-    (and pending (format "~a: ~a" label pending))))
+    (with-unsettled-stop label
+      (define-values (row pending) (finalizer-round per-thread #:protect protect #:threads threads))
+      (print-table-row (cons label row))
+      pending)))
 
 (define (print-phantom-table)
   (print-table-header
@@ -187,15 +189,10 @@
 
 (module+ main
   (print-banner "Q3: finalizers, phantom bytes and eq? tables from 8 parallel threads")
-  (define pending
-    (with-handlers ([exn:fail:unsettled? exn-message])
-      (print-finalizer-table)))
-  (cond
-    [pending
-     (printf "\nstopped: ~a\n" pending)]
-    [else
-     (newline)
-     (print-phantom-table)
-     (newline)
-     (print-eq-table)])
-  (print-footer))
+  (define stopped (print-finalizer-table))
+  (unless stopped
+    (newline)
+    (print-phantom-table)
+    (newline)
+    (print-eq-table))
+  (print-footer #:stopped stopped))
