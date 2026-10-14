@@ -1,8 +1,6 @@
 #lang scribble/lp2
 
-@(require (for-label (except-in racket/base abs cos exp log sin sort sqrt max min length
-                                + - * / < <= > >=)
-                     torch torch/nn))
+@(require torch/scribblings/labels)
 
 @title[#:tag "ex-mnist"]{Training a convnet on MNIST}
 
@@ -22,7 +20,7 @@ classes; the @emph{functional} ops stay lowercase on @racketmodname[torch]
 
 @chunk[<r05-require>
 (require torch torch/nn torch/data/loader
-         (only-in torch/data/mnist load-mnist load-mnist-fixture))]
+         (only-in torch/vision/mnist load-mnist load-mnist-fixture))]
 
 @chunk[<r05-provide>
 (provide convnet pick-device accuracy run-example train-mnist)]

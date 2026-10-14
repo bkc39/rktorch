@@ -1,34 +1,7 @@
 #lang scribble/manual
 
 @(require "common.rkt"
-          (for-label racket/base
-                     racket/contract
-                     (only-in torch
-                              accelerator-if-available arange autocast-dtype
-                              autocast-enabled? backward! bytes->tensor
-                              call-with-autocast cpu-device cuda-if-available
-                              default-device detach device-type grad
-                              set-default-device!
-                              cuda-allocator-settings!
-                              cuda-device cuda-memory-info cuda-memory-stats
-                              cuda-reset-peak-stats! device device/c device?
-                              dtype dtype/c eye finalizer-diagnostics full
-                              full-like mps-device mps-memory-info
-                              native-collect-at-troughs
-                              native-collect-budget native-collect-margin
-                              native-memory-fraction native-memory-limit
-                              native-memory-unaccounted
-                              native-memory-use ones ones-like prop:to rand
-                              rand-like randn randn-like
-                              reclaim-native-memory! tensor tensor-device
-                              tensor->bytes tensor-dtype tensor? to to-able?
-                              to-device
-                              to-dtype with-autocast with-default-device
-                              with-no-grad
-                              zeros zeros-like ~>)
-                     (only-in torch/nn
-                              Buffer Linear Parameter adam buffers gen:layer
-                              layer? load-state! parameters step!)))
+          torch/scribblings/labels)
 
 @title{Devices and dtypes}
 
@@ -474,7 +447,7 @@ collects less often and holds more.
 
 @defparam[native-collect-budget budget (and/c real? positive?)]{
 The share of wall-clock time collections at a trough may take, @racket[1/20]
-by default. After one costing @racket[t] the next waits @racket[t] divided
+by default. After one costing @racket[_t] the next waits @racket[_t] divided
 by the budget, so a smaller budget spaces them further apart and a larger
 one collects more eagerly.
 }
