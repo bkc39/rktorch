@@ -307,9 +307,19 @@ names (`weight_ih_l0` .. `bias_hh_l1_reverse`) the way `children-by-key`
 registers children, and a rest-argument `#:forward` lets an initial state
 follow the input. Applying one answers `(values output h-n [c-n])`. On CUDA
 the weights are flattened for cudnn (`cudnn-rnn-flatten-weight`, in place,
-the parameters keep their identity) whenever their device or dtype differs
-from the placement the last flattening was built for, so `to`'s identity
-case costs nothing and a transient OOM is retried rather than latched.
+the parameters keep their identity) whenever their storage addresses
+(`tr_tensor_data_ptr` and `tr_tensor_storage_ptr`, each weight's element and
+storage start) differ from those the last flattening left, which catches a
+device round trip and a replaced parameter with no move hook, costs `to`'s
+identity case nothing, and retries a transient OOM rather than latching it.
+Every call checks under a per-layer lock (`private/lock.rkt`: not reentrant,
+breakable while waiting, and a waiter takes it over from a killed holder),
+never reading the addresses outside it, since a flattening on another thread
+rebinds the weights' storage; and a packing, or a refusal, is recorded only
+while the weights still lie where it found them and the layer's `#:on-move`
+count did not change during it (a round trip can hand back the old
+addresses), so a `to` racing the check (which takes no turn) leaves nothing
+recorded (#189).
 A `#:forward` may declare keyword inputs (`#:kw id` or `#:kw [id
 default]`, the default seeing the fields); `gen:layer`'s `prop:procedure`
 is a keyword procedure that hands them to a `define-layer` or
@@ -612,7 +622,10 @@ whose expansions need the module's full export set (`racket/runtime-path`,
   the `define-layer` macro, whose `#:forward` takes a rest argument and
   keyword inputs, whose
   fields admit `parameters-by-key` beside `children-by-key`, and whose
-  `#:on-move` body runs after a `to` that rebound anything; `parameter.rkt`, `buffer.rkt`, `linear.rkt`,
+  `#:on-move` body runs after a `to` that rebound any tensor in its subtree,
+  judged against placements read before anything moved, so a tensor tied
+  across siblings counts for both; `mode.rkt` = `train!`, `eval!`,
+  `call-with-mode` and `in-mode`; `parameter.rkt`, `buffer.rkt`, `linear.rkt`,
   `init.rkt`, `optim.rkt`, `ema.rkt`, `loss.rkt`, `recurrent.rkt`,
   `attention.rkt`, `transformer.rkt`, `positions.rkt`, `copy.rkt`, `clip.rkt`).
 - `private/download.rkt` — the one download path (#195): a temp file in the
