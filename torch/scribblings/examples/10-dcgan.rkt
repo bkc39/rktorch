@@ -1,9 +1,7 @@
 #lang scribble/lp2
 
-@(require (for-label (except-in racket/base abs cos exp log sin sort sqrt max min length
-                                + - * / < <= > >=)
-                     torch torch/nn torch/data/loader torch/data/mnist
-                     torch/vision/ppm))
+@(require torch/scribblings/labels
+          (for-label torch/data/loader torch/vision/mnist torch/vision/ppm))
 
 @title[#:tag "ex-dcgan"]{Training a DCGAN on MNIST}
 
@@ -18,7 +16,7 @@ tangent on the output, so the images live in @tt{[-1, 1]}.
 
 @chunk[<r10-require>
 (require torch torch/nn torch/data/loader
-         (only-in torch/data/mnist load-mnist load-mnist-fixture)
+         (only-in torch/vision/mnist load-mnist load-mnist-fixture)
          torch/vision/ppm)]
 
 @chunk[<r10-provide>
@@ -143,19 +141,19 @@ give recognisable digits.
     (define opt-d (adam (parameters disc) #:lr 2e-4 #:beta1 0.5))
     (define fixed-z (randn 100 100))
     (for/list ([epoch (in-range epochs)])
-      (define-values (d-total g-total count)
-        (for/fold ([d-total 0.0] [g-total 0.0] [count 0])
+      (define-values (d-total g-total seen)
+        (for/fold ([d-total 0.0] [g-total 0.0] [seen 0])
                   ([(xb) (in-dataloader loader)])
           (define-values (d g) (train-step gen disc opt-g opt-d xb device))
           (values (+ d-total (* (length xb) d))
                   (+ g-total (* (length xb) g))
-                  (+ count (length xb)))))
+                  (+ seen (length xb)))))
       (when out
         (define samples (in-eval-mode gen (with-no-grad (gen fixed-z))))
         (write-ppm (build-path out (format "dcgan-epoch-~a.ppm" (add1 epoch)))
                    (image-grid samples #:columns 10)
                    #:range '(-1 1)))
-      (list (/ d-total count) (/ g-total count)))))]
+      (list (/ d-total seen) (/ g-total seen)))))]
 
 @chunk[<*>
   <r10-require>

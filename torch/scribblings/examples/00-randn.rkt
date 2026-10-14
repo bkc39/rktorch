@@ -1,8 +1,6 @@
 #lang scribble/lp2
 
-@(require (for-label (except-in racket/base abs cos exp log sin sort sqrt max min length
-                                + - * / < <= > >=)
-                     torch))
+@(require torch/scribblings/labels)
 
 @title[#:tag "ex-randn"]{Seeding the RNG and sampling a tensor}
 
@@ -30,11 +28,12 @@ Every example exports a @racket[run-example] thunk so the test harness in
   (manual-seed! 0)
   (randn 2 2))]
 
-The companion harness @filepath{test/00-randn.rkt} renders it with
+The companion harness @filepath{examples/test/00-randn.rkt} renders it with
 @racket[tensor->string] and reads the values back with @racket[tensor->list];
 its @racket[test] submodule checks the shape and element count. The matching
-@filepath{python/00_randn.py} samples the same seed/shape in PyTorch, and
-@filepath{torchrkt/tests/python-cross-test.rkt} checks the two agree.
+@filepath{examples/python/00_randn.py} samples the same seed/shape in
+PyTorch, and @filepath{torch/tests/python-cross-test.rkt} checks the two
+agree.
 
 @chunk[<*>
   <r00-require>

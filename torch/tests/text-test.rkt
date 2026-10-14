@@ -9,7 +9,7 @@
            (only-in racket/list take)
            (only-in racket/string string-contains?)
            (only-in "../main.rkt" tensor-shape tensor->list)
-           (only-in "../data/text.rkt"
+           (only-in "../text/data.rkt"
                     strip-gutenberg-boilerplate
                     text->vocab
                     encode

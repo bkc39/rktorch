@@ -1,8 +1,7 @@
 #lang scribble/lp2
 
-@(require (for-label (except-in racket/base abs cos exp log sin sort sqrt max min length
-                                + - * / < <= > >=)
-                     torch torch/nn torch/data/loader torch/vision/cifar10
+@(require torch/scribblings/labels
+          (for-label torch/data/loader torch/vision/cifar10
                      torch/vision/resnet torch/vision/transforms))
 
 @title[#:tag "ex-resnet"]{Training a ResNet classifier on CIFAR-10}

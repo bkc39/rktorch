@@ -191,7 +191,7 @@
       # identical bytes faults a live REPL and wedges it, TERM-immune (#72).
       # rename swaps the directory entry and leaves the old inode alive, so
       # running processes keep the old code and new ones get the new lib.
-      # Same discipline as torch/data/mnist.rkt's cache write.
+      # Same discipline as torch/vision/mnist.rkt's cache write.
       stageNativeLibs = src: ''
         _dest="$PWD/torch/native-libs"
         _stage_failed=0
@@ -424,8 +424,9 @@
               runHook preCheck
               # python-cross-test self-skips when python3 `torch` is absent.
               raco test ./torch/
-              # Each examples/racket/NN-name.rkt is a literate scribble/lp2
-              # program; its runner + RackUnit checks live in examples/test/.
+              # Each torch/scribblings/examples/NN-name.rkt is a literate
+              # scribble/lp2 program; its runner + RackUnit checks live in
+              # examples/test/.
               raco test examples/test/
               # The benchmark harness's own logic and a seconds-long smoke
               # pass of every suite; never its numbers.

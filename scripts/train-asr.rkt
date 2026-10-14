@@ -7,10 +7,10 @@
          (only-in racket/format ~r)
          (only-in racket/path path-only)
          torch
-         torch/nn
          (only-in torch/audio/librispeech
                   librispeech-utterances load-utterance utterance-transcript)
-         (only-in "../examples/racket/07-asr.rkt"
+         torch/nn
+         (only-in torch/scribblings/examples/07-asr
                   evaluate greedy-decode pick-device train-librispeech
                   transcribe utterance-features))
 

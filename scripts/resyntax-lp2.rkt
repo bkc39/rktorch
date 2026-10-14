@@ -193,7 +193,7 @@
            (only-in rackunit check-equal? check-true test-case)
            (only-in resyntax/grimoire/string-replacement copied-string))
 
-  (define-runtime-path asr "../examples/racket/07-asr.rkt")
+  (define-runtime-path asr "../torch/scribblings/examples/07-asr.rkt")
   (define text (file->string asr))
   (define shadow (lp2-shadow asr))
   (define text-lines (string-split text "\n" #:trim? #f))
