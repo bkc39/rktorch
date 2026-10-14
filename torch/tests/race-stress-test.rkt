@@ -1,7 +1,7 @@
 #lang racket/base
 
 (module+ test
-  (require (only-in racket/match match-define)
+  (require (only-in racket/match match match-define)
            rackunit
            (only-in "../foreign.rkt"
                     backward! finalizer-diagnostics native-memory-limit ones
@@ -17,6 +17,8 @@
   (define seconds-per-phase (env-number "RKTORCH_STRESS_SECONDS" 0.5))
 
   (define widths '(2 4 8 16))
+
+  (define start-deadline-seconds 60)
 
   (define (rss-bytes)
     (define status "/proc/self/status")
@@ -34,7 +36,22 @@
   (define (ledger-entries)
     (diagnostic 'ledger-entries))
 
-  (define ((until-stopped stop? step!))
+  (define (count-in! counter)
+    (define n (unbox counter))
+    (unless (box-cas! counter n (add1 n))
+      (count-in! counter)))
+
+  (define (await-count! counter n)
+    (define deadline
+      (+ (current-inexact-milliseconds) (* 1000 start-deadline-seconds)))
+    (let loop ()
+      (cond
+        [(>= (unbox counter) n) (void)]
+        [(> (current-inexact-milliseconds) deadline) (void)]
+        [else (sleep 0.001) (loop)])))
+
+  (define ((until-stopped started stop? step!))
+    (count-in! started)
     (let loop ([n 0])
       (cond
         [(unbox stop?) n]
@@ -56,6 +73,12 @@
       (collect-garbage (if (zero? (modulo n 8)) 'major 'minor))
       (sleep 0.002)))
 
+  (define (role-step label)
+    (match label
+      ['trainer (trainer-step)]
+      ['adversary (adversary-step)]
+      [k (worker-step k)]))
+
   (define (phase width)
     (settle!)
     (define base (ledger-snapshot))
@@ -63,17 +86,17 @@
     (define before (diagnostic 'pressure-collections))
     (define w (make-watch))
     (define stop? (box #f))
+    (define started (box 0))
+    (define labels (append (build-list width values) '(trainer adversary)))
     (define counts
       (with-race-hook (watch-hook w)
         (define workers
           (parameterize ([native-memory-limit (quotient mib 4)])
-            (append
-             (for/list ([k (in-range width)])
-               (spawn (until-stopped stop? (worker-step k)) #:pool 'own #:label k))
-             (list (spawn (until-stopped stop? (trainer-step)) #:pool 'own
-                          #:label 'trainer)
-                   (spawn (until-stopped stop? (adversary-step)) #:pool 'own
-                          #:label 'adversary)))))
+            (for/list ([label (in-list labels)])
+              (spawn (until-stopped started stop? (role-step label))
+                     #:pool 'own
+                     #:label label))))
+        (await-count! started (length labels))
         (sleep seconds-per-phase)
         (set-box! stop? #t)
         (begin0 (join-all workers #:seconds 300)
@@ -86,7 +109,9 @@
             (- (diagnostic 'pressure-collections) before))
     (check-ledger base w)
     (check-equal? (ledger-entries) entries "ledger entries left behind")
-    (check-true (positive? trainer-steps) "the trainer never stepped"))
+    (for ([label (in-list labels)]
+          [n (in-list counts)])
+      (check-true (positive? n) (format "role ~a never stepped" label))))
 
   (test-case "parallel threads churning tensors keep the ledger invariants"
     (define rss-before (rss-bytes))
