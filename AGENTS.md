@@ -451,9 +451,13 @@ scripts/resyntax analyze --local-git-repository .   # lint gate
                                      #  default rules plus
                                      #  scripts/resyntax-rules.rkt; the
                                      #  literate examples' chunks through
-                                     #  scripts/resyntax-lp2.rkt)
+                                     #  scripts/resyntax-lp2.rkt; pass the
+                                     #  REF explicitly on a detached HEAD or
+                                     #  a stacked leg when unsure)
 scripts/resyntax fix --directory torch
-raco test scripts/resyntax-rules-test.rkt scripts/resyntax-lp2.rkt   # the repository's own rules
+raco test scripts/resyntax-rules-test.rkt scripts/resyntax-lp2.rkt \
+  scripts/resyntax-wrapper-test.rkt   # the repository's own rules and
+                                      # the wrapper's base-ref handling
 raco review torch/**/*.rkt
 ```
 
