@@ -233,8 +233,10 @@ cached layout, a handle onto their storage --- which a move invalidates:
   (matmul x (or (unbox packed) (pack! packed weight))))
 ]
 
-State that can check itself at the call needs no hook: @racket[LSTM]
-compares its weights' storage addresses with those its last packing left.
+State that can check itself at the call needs no hook to stay correct:
+@racket[LSTM] compares its weights' storage addresses with those its last
+packing left, and counts its moves only to tell whether one ran during a
+packing.
 
 Without @racket[#:contract] nothing is exported; a layer local to a model
 or a test needs no contract boundary.

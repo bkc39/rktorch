@@ -58,9 +58,19 @@ On a CUDA device a call packs the weights into the single buffer cudnn
 wants whenever they are not already there: the first call, and the first
 after anything gave them new storage, a move with @racket[to] or a round
 trip through the CPU included. A call checks this by the weights' storage
-addresses, so a layer that has not moved pays no more than reading them.
+addresses, so a layer that has not moved pays no more than taking its
+lock and reading them.
 The parameters stay the same tensors, so an optimizer built before or
 after sees them alike.
+
+Threads may forward one layer at once: each call checks the weights
+under a lock on those weights, so the first to find them unpacked packs
+them while the others forwarding that layer wait, and they then find them
+packed; layers with other weights, a @racket[layer-copy] among them, do not
+wait. Moving a layer while
+another thread forwards it is a race on its parameters, as it is in
+PyTorch, and the forward may fail; the next call after the move still
+packs the weights, since a move during packing leaves nothing recorded.
 
 The input's dtype has to be the layer's. On the CPU a mismatch reaches
 oneDNN, which is chosen on the input's dtype and then reads the weights,

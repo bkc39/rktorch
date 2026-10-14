@@ -312,6 +312,14 @@ the parameters keep their identity) whenever their storage addresses
 storage start) differ from those the last flattening left, which catches a
 device round trip and a replaced parameter with no move hook, costs `to`'s
 identity case nothing, and retries a transient OOM rather than latching it.
+Every call checks under a per-layer lock (`private/lock.rkt`: not reentrant,
+breakable while waiting, and a waiter takes it over from a killed holder),
+never reading the addresses outside it, since a flattening on another thread
+rebinds the weights' storage; and a packing, or a refusal, is recorded only
+while the weights still lie where it found them and the layer's `#:on-move`
+count did not change during it (a round trip can hand back the old
+addresses), so a `to` racing the check (which takes no turn) leaves nothing
+recorded (#189).
 A `#:forward` may declare keyword inputs (`#:kw id` or `#:kw [id
 default]`, the default seeing the fields); `gen:layer`'s `prop:procedure`
 is a keyword procedure that hands them to a `define-layer` or
