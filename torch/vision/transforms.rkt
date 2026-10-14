@@ -7,9 +7,10 @@
                   real-in)
          (only-in racket/math exact-floor exact-round exact-truncate)
          (only-in "../foreign.rkt"
-                  copy! div draw-seed flip generator? matmul mul narrow ne
-                  reshape select stack sub tensor tensor-device tensor-dtype
-                  tensor-shape tensor? to-dtype transpose where zeros)
+                  copy! device div draw-seed dtype flip generator? matmul mul
+                  narrow ne reshape select stack sub tensor tensor-device
+                  tensor-dtype tensor-shape tensor? to-dtype transpose where
+                  zeros)
          (only-in "../foreign/contracts.rkt" image-batch/c)
          (only-in "../private/contract.rkt" define/contract-out))
 
@@ -34,7 +35,7 @@
      (define rng (batch-rng generator))
      (define flipped
        (for/list ([_ (in-range n)]) (if (< (random rng) p) 1 0)))
-     (define mask (reshape (ne (tensor flipped #:device (tensor-device x)) 0)
+     (define mask (reshape (ne (tensor flipped #:device (device x)) 0)
                            n 1 1 1))
      (where mask (flip x 3) x)]))
 
@@ -54,8 +55,8 @@
   (define h (caddr dims))
   (define w (cadddr dims))
   (define padded (zeros n (cadr dims) (+ h (* 2 padding)) (+ w (* 2 padding))
-                        #:device (tensor-device x)
-                        #:dtype (tensor-dtype x)))
+                        #:device (device x)
+                        #:dtype (dtype x)))
   (copy! (narrow (narrow padded 2 padding h) 3 padding w) x)
   (define rng (batch-rng generator))
   (define span (add1 (* 2 padding)))
@@ -88,7 +89,7 @@
   (flat-named-contract
    'float-image-or-batch
    (and/c image-or-batch/c
-          (lambda (x) (and (memq (tensor-dtype x) float-dtypes) #t)))))
+          (lambda (x) (and (memq (dtype x) float-dtypes) #t)))))
 
 (define size/c
   (flat-named-contract
@@ -205,8 +206,8 @@
        [result tensor?])
   (define (per-channel vs)
     (reshape (tensor (map exact->inexact vs)
-                     #:dtype (tensor-dtype x)
-                     #:device (tensor-device x))
+                     #:dtype (dtype x)
+                     #:device (device x))
              (length vs) 1 1))
   (div (sub x (per-channel mean)) (per-channel std)))
 
@@ -232,7 +233,7 @@
 (define image-tensor/c
   (flat-named-contract
    'image-dtype-tensor
-   (lambda (t) (and (tensor? t) (memq (tensor-dtype t) image-dtypes) #t))))
+   (lambda (t) (and (tensor? t) (memq (dtype t) image-dtypes) #t))))
 
 (define/contract-out (convert-image-dtype x [dtype 'float32]) ;; noqa
   (->* [image-tensor/c] [image-dtype/c] tensor?)

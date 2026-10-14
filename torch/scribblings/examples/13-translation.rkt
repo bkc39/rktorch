@@ -50,7 +50,7 @@ batched @racket[matmul].
   #:forward (tokens)
   (define-values (outputs _final) (~> tokens embed dropout gru))
   (define at-eos
-    (unsqueeze (to-dtype (eq tokens eos-id) (tensor-dtype outputs)) 1))
+    (unsqueeze (to-dtype (eq tokens eos-id) (dtype outputs)) 1))
   (values outputs (transpose (matmul at-eos outputs) 0 1)))]
 
 @bold{Attention.} Bahdanau's additive score: project the decoder's state (the

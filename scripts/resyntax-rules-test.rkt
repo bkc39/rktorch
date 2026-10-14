@@ -83,6 +83,63 @@
                 '(define (ge a b) (>= a b))
                 '(ge 2 1)))))
 
+  (parameterize ([current-suite-under-test rktorch-rules])
+    (test-case "tensor-device and tensor-dtype become device and dtype"
+      (check-suite-refactors
+       (program '(require torch)
+                '(let ([t (tensor (list 1 2))])
+                   (list (tensor-device t) (tensor-dtype t))))
+       (program '(require torch)
+                '(let ([t (tensor (list 1 2))])
+                   (list (device t) (dtype t))))))
+
+    (test-case "a long getter passed as a value becomes the short one"
+      (check-suite-refactors
+       (program '(require torch)
+                '(map tensor-dtype (list (tensor (list 1 2)))))
+       (program '(require torch)
+                '(map dtype (list (tensor (list 1 2)))))))
+
+    (test-case "a long getter as a ~> step becomes the short one"
+      (check-suite-refactors
+       (program '(require torch) '(~> (tensor (list 1.0)) tensor-device))
+       (program '(require torch) '(~> (tensor (list 1.0)) device))))
+
+    (test-case "a long getter call as a ~>> step becomes the short one"
+      (check-suite-refactors
+       (program '(require torch)
+                '(~>> (tensor (list 1.0)) (tensor-dtype) (list 1)))
+       (program '(require torch)
+                '(~>> (tensor (list 1.0)) (dtype) (list 1)))))
+
+    (test-case "tensor-device stays where device names a local"
+      (check-suite-does-not-refactor
+       (program '(require torch)
+                '(define (place xs)
+                   (define device (tensor-device xs))
+                   device))))
+
+    (test-case "tensor-dtype stays where dtype is not imported"
+      (check-suite-does-not-refactor
+       (program '(require (only-in torch tensor tensor-dtype))
+                '(tensor-dtype (tensor (list 1 2))))))
+
+    (test-case "a tensor-dtype that is not torch's stays"
+      (check-suite-does-not-refactor
+       (program '(require torch)
+                '(define (tensor-dtype t) 'float32)
+                '(tensor-dtype 1))))
+
+    (test-case "a renamed import of tensor-dtype stays"
+      (check-suite-does-not-refactor
+       (program '(require (rename-in torch [tensor-dtype long-dtype]))
+                '(long-dtype (tensor (list 1 2))))))
+
+    (test-case "a require naming both getters stays"
+      (check-suite-does-not-refactor
+       (program '(require (only-in torch dtype tensor tensor-dtype))
+                '(dtype (tensor (list 1 2)))))))
+
   (define calls
     '((define (f . xs) (car xs))
       (define (g . xs) (car xs))

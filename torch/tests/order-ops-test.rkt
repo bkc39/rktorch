@@ -54,7 +54,7 @@
     (define draws
       (multinomial (tensor '((0.0 1.0 0.0) (0.5 0.0 0.5))) 8 #:replacement? #t))
     (check-equal? (tensor-shape draws) '(2 8))
-    (check-equal? (tensor-dtype draws) 'int64)
+    (check-equal? (dtype draws) 'int64)
     (define flat (tensor->list draws))
     (for ([i (in-range 8)])
       (check-equal? (list-ref flat i) 1)

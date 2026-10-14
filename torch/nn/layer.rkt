@@ -17,7 +17,7 @@
          (only-in racket/stxparam define-syntax-parameter syntax-parameterize)
          (only-in syntax/parse/define define-syntax-parse-rule)
          (only-in "../foreign.rkt"
-                  prop:to tensor-device tensor-dtype tensor? to)
+                  device dtype prop:to tensor? to)
          (only-in (submod "../foreign.rkt" unsafe) to!)
          (only-in "../foreign/autograd-ops.rkt" collect-at-forward-trough!)
          (only-in "../private/contract.rkt"
@@ -92,14 +92,14 @@
 (define floating-dtypes '(float32 float64 float16 bfloat16))
 
 (define (floating? t)
-  (and (memq (tensor-dtype t) floating-dtypes) #t))
+  (and (memq (dtype t) floating-dtypes) #t))
 
 ;; What `#:on-move` reacts to: `to` is the identity when nothing changes, and
 ;; a device round trip returns to the placement it started from, so the pair
 ;; is read either side of one move rather than compared across several.
 (define (placement-of m)
   (for/list ([t (in-list (append (parameters m) (buffers m)))])
-    (cons (tensor-device t) (tensor-dtype t))))
+    (cons (device t) (dtype t))))
 
 (define (move-tensor! t dev dtype)
   (define dt (and dtype (floating? t) dtype))

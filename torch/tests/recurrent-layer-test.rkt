@@ -97,10 +97,10 @@
   (test-case "to moves a recurrent layer through its own move path"
     (define gru (GRU 3 4))
     (check-eq? (to gru 'float64) gru)
-    (check-equal? (map tensor-dtype (parameters gru))
+    (check-equal? (map dtype (parameters gru))
                   '(float64 float64 float64 float64))
     (define-values (out _h) (gru (randn 5 2 3 #:dtype 'float64)))
-    (check-equal? (tensor-dtype out) 'float64))
+    (check-equal? (dtype out) 'float64))
 
   (test-case "the input dtype has to be the layer's"
     (define lstm (LSTM 3 4))
@@ -132,7 +132,7 @@
     (define gru (GRU 3 4))
     (define w (cdr (assoc "weight_ih_l0" (named-parameters gru))))
     (define (recorded) (flattened-placement w))
-    (define (now) (cons (tensor-device w) (tensor-dtype w)))
+    (define (now) (cons (device w) (dtype w)))
     (define-values (out _h) (gru (randn 5 2 3)))
     (check-true (and out #t))
     (check-equal? (recorded) (now) "the first forward recorded nothing")
@@ -152,7 +152,7 @@
     (define net (Wrap))
     (define w (cdr (assoc "inner.weight_ih_l0" (named-parameters net))))
     (define (recorded) (flattened-placement w))
-    (define (now) (cons (tensor-device w) (tensor-dtype w)))
+    (define (now) (cons (device w) (dtype w)))
     (void (net (randn 5 2 3)))
     (check-equal? (recorded) (now))
     (to net (cpu-device))
@@ -276,7 +276,7 @@
       (define buffer
         (with-no-grad
           (cudnn-rnn-flatten-weight weights 4 3 3 4 0 2 #f #t)))
-      (check-equal? (device-type (tensor-device buffer)) 'cuda)
+      (check-equal? (device-type (device buffer)) 'cuda)
       (check-true (>= (tensor-numel buffer)
                       (for/sum ([w (in-list weights)]) (tensor-numel w))))
       (check-equal? (flat (map (lambda (w) (to-device w 'cpu)) weights)) before)

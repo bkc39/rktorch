@@ -4,8 +4,8 @@
                   -> ->* <=/c >=/c and/c contract-out)
          (only-in racket/match match)
          (only-in "../foreign.rkt"
-                  device-type exn:fail:rktorch:oom? tensor-device tensor-dtype
-                  tensor-shape tensor? with-no-grad zeros)
+                  device device-type dtype exn:fail:rktorch:oom? tensor-shape
+                  tensor? with-no-grad zeros)
          (only-in "../foreign/raw/fault.rkt" native-fault?)
          (only-in "../generated.rkt"
                   cudnn-rnn-flatten-weight gru-input lstm-input)
@@ -59,7 +59,7 @@
 
 (define (placement weights)
   (define w (car weights))
-  (cons (tensor-device w) (tensor-dtype w)))
+  (cons (device w) (dtype w)))
 
 ;; Flattening is an optimisation cudnn asks for, never a requirement: a build
 ;; or a dtype it refuses still runs, on compacted copies, and refusing again
@@ -108,8 +108,8 @@
   (zeros (* (rnn-num-layers spec) (if (rnn-bidirectional? spec) 2 1))
          batch
          (rnn-hidden-size spec)
-         #:device (tensor-device x)
-         #:dtype (tensor-dtype x)))
+         #:device (device x)
+         #:dtype (dtype x)))
 
 ;; raise-arity-error prints no expected line for an arity that is neither one
 ;; number nor a lower bound, and these accept the input alone or the input and

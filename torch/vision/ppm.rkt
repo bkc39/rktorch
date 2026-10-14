@@ -3,9 +3,9 @@
 (require (only-in racket/contract/base
                   ->* ->i and/c flat-named-contract list/c unsupplied-arg?)
          (only-in "../foreign.rkt"
-                  add clamp copy! fill-value/c full mul narrow permute select
-                  sub tensor-device tensor-dtype tensor-shape tensor->vector
-                  tensor? to-dtype with-no-grad)
+                  add clamp copy! device dtype fill-value/c full mul narrow
+                  permute select sub tensor-shape tensor->vector tensor?
+                  to-dtype with-no-grad)
          (only-in "../foreign/contracts.rkt" image-batch/c)
          (only-in "../private/contract.rkt" define/contract-out))
 
@@ -16,7 +16,7 @@
    'image
    (lambda (x)
      (and (tensor? x)
-          (and (memq (tensor-dtype x) ppm-dtypes) #t)
+          (and (memq (dtype x) ppm-dtypes) #t)
           (let ([dims (tensor-shape x)])
             (and (= 3 (length dims))
                  (= 3 (car dims))
@@ -62,7 +62,7 @@
   (->i ([images non-empty-image-batch/c])
        (#:columns [columns exact-positive-integer?]
         #:padding [padding exact-nonnegative-integer?]
-        #:pad-value [pad-value (images) (fill-value/c (tensor-dtype images))])
+        #:pad-value [pad-value (images) (fill-value/c (dtype images))])
        [result tensor?])
   (define dims (tensor-shape images))
   (define n (car dims))
@@ -80,8 +80,8 @@
   (cond
     [(= c 1)
      (define out (full 0.0 3 h w
-                       #:device (tensor-device image)
-                       #:dtype (tensor-dtype image)))
+                       #:device (device image)
+                       #:dtype (dtype image)))
      (copy! out image)
      out]
     [else image]))
@@ -93,8 +93,8 @@
     (full pad-value (if (= c 1) 3 c)
           (+ (* rows (+ h padding)) padding)
           (+ (* cols (+ w padding)) padding)
-          #:device (tensor-device images)
-          #:dtype (tensor-dtype images)))
+          #:device (device images)
+          #:dtype (dtype images)))
   (for ([i (in-range n)])
     (define top (+ padding (* (quotient i cols) (+ h padding))))
     (define left (+ padding (* (remainder i cols) (+ w padding))))
@@ -108,7 +108,7 @@
        #:pre/name (image value-range)
        "the range's scale must be a number in the image's dtype"
        (or (unsupplied-arg? value-range)
-           (scale-fits? value-range (tensor-dtype image)))
+           (scale-fits? value-range (dtype image)))
        [_ void?])
   (define dims (tensor-shape image))
   (define lo (car value-range))
@@ -116,7 +116,7 @@
   (define pixels
     (with-no-grad
       (tensor->vector
-       (permute (if (eq? (tensor-dtype image) 'uint8)
+       (permute (if (eq? (dtype image) 'uint8)
                     image
                     (to-dtype (clamp (add (mul (sub image lo)
                                                (/ 255.0 (- hi lo)))

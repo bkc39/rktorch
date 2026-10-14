@@ -13,9 +13,12 @@
          (only-in resyntax/private/syntax-neighbors syntax-original-path)
          (only-in syntax/parse/pre
                   attribute boolean define-syntax-class expr id keyword
-                  number pattern str syntax-parse this-syntax ~optional)
-         (only-in threading ~>)
-         (only-in torch add div ge gt le lt matmul mul sub)
+                  number pattern str syntax-parse this-syntax ~and ~optional
+                  ~or)
+         (only-in threading ~> ~>>)
+         (only-in torch
+                  add device div dtype ge gt le lt matmul mul sub tensor-device
+                  tensor-dtype)
          (prefix-in torch: (only-in torch * + - / < <= > >= @)))
 
 (provide rktorch-rules rktorch-recommendations)
@@ -51,6 +54,57 @@
   "Use torch's operators: `+`, `-`, `*`, `/` and `@` dispatch to `add`, `sub`, `mul`, `div` and `matmul`, and `>=`, `>`, `<=` and `<` to `ge`, `gt`, `le` and `lt`. A `~>` step shows one operand and keeps it."
   (op:named-operator a:expr (~optional b:expr))
   (op.operator a (~? b)))
+
+(define long-getters ;; noqa
+  (list (list #'tensor-device 'device #'device)
+        (list #'tensor-dtype 'dtype #'dtype)))
+
+;; The short name must be torch's where the getter is written: a module may
+;; bind `device` to a value, or import only the long name.
+(define-syntax-class long-getter
+  #:attributes (short)
+  (pattern name:id
+    #:do [(define symbol
+            (for/first ([entry (in-list long-getters)]
+                        #:do [(match-define (list long symbol short) entry)]
+                        #:when (eq? (syntax-e #'name) (syntax-e long))
+                        #:when (free-identifier=? #'name long)
+                        #:when (free-identifier=?
+                                (datum->syntax #'name symbol) short))
+              symbol))]
+    #:when symbol
+    #:with short (datum->syntax #'name symbol #'name)))
+
+(define-syntax-class long-getter-use
+  #:attributes (short)
+  (pattern getter:long-getter
+    #:with short #'getter.short)
+  (pattern (getter:long-getter arg ...)
+    #:with short #'(getter.short arg ...)))
+
+;; A threading step is rewritten into a call the expander never visits as
+;; written, so the step is matched from its ~> or ~>> form.
+(define-syntax-class getter-step
+  #:attributes (short long?)
+  (pattern use:long-getter-use
+    #:with short #'use.short
+    #:attr long? #t)
+  (pattern short
+    #:attr long? #f))
+
+(define-refactoring-rule tensor-getter-to-short-name
+  #:description
+  "Use torch's short getters: `device` and `dtype` answer what `tensor-device` and `tensor-dtype` do."
+  use:long-getter-use
+  use.short)
+
+(define-refactoring-rule tensor-getter-step-to-short-name
+  #:description
+  "Use torch's short getters in a threading step: `device` and `dtype` answer what `tensor-device` and `tensor-dtype` do."
+  #:literals (~> ~>>)
+  ((~and threader (~or ~> ~>>)) start step:getter-step ...)
+  #:when (ormap values (attribute step.long?))
+  (threader start step.short ...))
 
 (define core-form-heads ;; noqa
   '(quote quasiquote syntax quasisyntax unquote unquote-splicing unsyntax
@@ -184,6 +238,8 @@
 (define-refactoring-suite rktorch-rules
   #:rules (named-operator-to-symbol
            nested-calls-to-threading
+           tensor-getter-step-to-short-name
+           tensor-getter-to-short-name
            threading-from-innermost-call))
 
 (define-refactoring-suite rktorch-recommendations

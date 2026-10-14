@@ -32,7 +32,7 @@
     (check-true (same? (random-crop x #:padding 0) x))
     (define y (random-crop x #:padding 2 #:generator (make-generator 0)))
     (check-equal? (tensor-shape y) '(2 1 4 4))
-    (check-equal? (tensor-dtype y) 'float32)
+    (check-equal? (dtype y) 'float32)
     ;; every output pixel is either padding or a pixel of its own image
     (for ([i (in-range 2)])
       (define values (tensor->list (select x 0 i)))
@@ -58,8 +58,8 @@
   (test-case "transforms keep the device of their input"
     (when (cuda-available?)
       (define x (to (randn 8 3 32 32) (cuda-device)))
-      (check-equal? (tensor-device (random-horizontal-flip x)) (cuda-device))
-      (check-equal? (tensor-device (random-crop x)) (cuda-device))))
+      (check-equal? (device (random-horizontal-flip x)) (cuda-device))
+      (check-equal? (device (random-crop x)) (cuda-device))))
 
   (define (close? a expected [eps 1e-6])
     (define values (tensor->list a))
@@ -130,7 +130,7 @@
     (check-equal? (tensor->list (convert-image-dtype floats 'uint8))
                   '(0 127 255))
     (check-eq? (convert-image-dtype floats 'float32) floats)
-    (check-equal? (tensor-dtype (convert-image-dtype floats 'float64))
+    (check-equal? (dtype (convert-image-dtype floats 'float64))
                   'float64))
 
   (test-case "imagenet-preprocess: the four steps in order, from bytes or floats"
