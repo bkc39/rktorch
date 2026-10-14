@@ -7,15 +7,40 @@
 # the same suite; it takes --file, --directory, --local-git-repository and
 # --analyzer-timeout.
 #
+# --local-git-repository DIR [REF] diffs against the merge base of HEAD and
+# REF, so only the branch's own changes are linted. REF defaults to the
+# branch's pull request base (gh), else origin/master.
+#
 #   nix develop .#ci --command scripts/resyntax analyze \
-#     --local-git-repository . origin/master --analyzer-timeout 30000
+#     --local-git-repository . --analyzer-timeout 30000
 #   nix develop .#ci --command scripts/resyntax fix \
-#     --local-git-repository . origin/master
+#     --local-git-repository .
 set -euo pipefail
 
 root=$(git rev-parse --show-toplevel)
 command=$1
 shift
+args=()
+while [ $# -gt 0 ]; do
+  if [ "$1" != --local-git-repository ]; then
+    args+=("$1")
+    shift
+    continue
+  fi
+  dir=$2
+  shift 2
+  if [ $# -gt 0 ] && [[ $1 != --* ]]; then
+    ref=$1
+    shift
+  else
+    pr_base=$(cd "$dir" && timeout 20 gh pr view --json baseRefName \
+                --jq .baseRefName 2>/dev/null) || pr_base=
+    ref=origin/${pr_base:-master}
+  fi
+  base=$(git -C "$dir" merge-base HEAD "$ref")
+  echo "resyntax: linting changes since $ref (merge base ${base:0:12})" >&2
+  args+=(--local-git-repository "$dir" "$base")
+done
 lp2_flags=()
 if [ "$command" = fix ]; then
   lp2_flags=(--fix)
@@ -23,6 +48,6 @@ fi
 rc=0
 resyntax "$command" \
   --refactoring-suite "(file \"$root/scripts/resyntax-rules.rkt\")" \
-  rktorch-recommendations "$@" || rc=$?
-racket "$root/scripts/resyntax-lp2.rkt" "${lp2_flags[@]}" "$@" || rc=$?
+  rktorch-recommendations "${args[@]}" || rc=$?
+racket "$root/scripts/resyntax-lp2.rkt" "${lp2_flags[@]}" "${args[@]}" || rc=$?
 exit "$rc"

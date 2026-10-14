@@ -443,9 +443,11 @@ racket scripts/coverage.rkt --changed   # expression coverage (#173); exits
                                # non-zero below the floor and lists the lines
                                # of the files you touched that no test reaches
 
-scripts/resyntax analyze --local-git-repository . origin/master   # lint gate
+scripts/resyntax analyze --local-git-repository .   # lint gate
                                      # (CI fails on any suggestion; scans
-                                     #  changed files, torch/ included; the
+                                     #  the files changed since the merge
+                                     #  base with the PR's base branch, else
+                                     #  origin/master, torch/ included; the
                                      #  default rules plus
                                      #  scripts/resyntax-rules.rkt; the
                                      #  literate examples' chunks through

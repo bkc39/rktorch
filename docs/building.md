@@ -46,7 +46,7 @@ raco test torch/                  # unit tests; the PyTorch parity tests self-sk
                                   # where python3 cannot import torch
 raco test examples/test/          # the literate examples
 racket -ie "(require torch)"      # a REPL with the package loaded
-scripts/resyntax analyze --local-git-repository . origin/master   # the lint gate
+scripts/resyntax analyze --local-git-repository .   # the lint gate
 racket scripts/coverage.rkt       # expression coverage, with a floor
 ```
 
