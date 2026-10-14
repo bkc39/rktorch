@@ -75,8 +75,9 @@ scalar comes back @racket['float32]. This is a known deviation: PyTorch
 keeps @tt{torch.tensor([1,2,3]) + 10} at @tt{int64}. Cast with
 @racket[to-dtype] where the dtype matters.}
 
-@margin-note{Torch shadows some of @racketmodname[racket]'s names; to
-require it beside @racketmodname[racket], see @secref["imports"].}
+@margin-note{@racket[(require torch)] shadows some of
+@racketmodname[racket]'s names with ones that also take tensors; see
+@secref["imports"].}
 
 @section[#:tag "welcome-next"]{Where to go next}
 

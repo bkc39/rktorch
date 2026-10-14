@@ -250,17 +250,14 @@ with `backward!` outside the form as PyTorch recommends). From
 sqrt take tanh`) are generic — tensors hit libtorch, anything else defers to
 racket's binding — so `(require torch)` never breaks numeric code. New ops
 that collide must follow the same dispatch pattern (check all of `racket` —
-`tanh`, from racket/math, was missed initially and broke numeric callers), and docs require `torch/scribblings/labels` for their `for-label`
-bindings of `racket`, `torch` and `torch/nn`. `torch/safe` is `torch` minus
-every name `racket` exports and `torch/operators` is the rest, both computed
-with `subtract-in` (laws in `torch/tests/import-tiers-test.rkt`): a new
-colliding op joins `torch/operators` by itself and needs an L6 row. Every
-other public module stays disjoint from `racket` (L4). Codegen skips the
-`_HAND_SHIMMED` bases in `codegen/ir.py` (promoted by hand with the dispatch
-shim) and appends `-tensor` to any other op whose full Racket name, `!`
-aside, `codegen/racket-names.txt` lists (`take` → `take-tensor`, in place
-`<name>-tensor!`); `racket scripts/racket-names.rkt` rewrites that file and
-`import-tiers-test.rkt` fails while it is stale.
+`tanh`, from racket/math, was missed initially and broke numeric callers),
+and docs require `torch/scribblings/labels` for their `for-label` bindings of
+`racket`, `torch` and `torch/nn`. `torch/safe` is `torch` minus every name
+`racket` exports and `torch/operators` is the rest, both computed with
+`subtract-in` (laws in `torch/tests/import-tiers-test.rkt`): a new colliding
+op joins `torch/operators` by itself and needs an L6 row. Every other public
+module stays disjoint from `racket` (L4), except `torch/generated`, whose
+`take` L4 pins.
 Dispatching named ops carry dependent (`->i`) contracts so the wrong shape
 gets contract blame, not a runtime error; the `+ - * / < <= > >= @` operators are
 provided as plain renames (no contract overhead on the numeric fast path),
@@ -546,7 +543,7 @@ whose expansions need the module's full export set (`racket/runtime-path`,
 - `safe.rkt` — `torch` minus `racket`'s names; `operators.rkt` — the rest
   (the import tiers, `scribblings/imports.scrbl`).
 - `private/exports.rkt` — `export-names`, a module's sorted export names,
-  shared by the tiers test, the imports chapter and `scripts/racket-names.rkt`.
+  shared by the tiers test and the imports chapter.
 - `foreign.rkt` — the contracted layer + the `unsafe` submodule.
 - `data/dataset.rkt` — `define-dataset` and `gen:dataset`;
   `private/definer.rkt` — the clause grammar it shares with `define-layer`.

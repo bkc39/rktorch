@@ -39,7 +39,7 @@
                           (optional-int64 5) (int64 2))
           'index-select '((tensor 4 3) (int64 0) (int-tensor (0 2)))
           'masked-select '((tensor 6) (bool-tensor (0 1 0 1 1 0)))
-          'take-tensor '((tensor 2 3) (int-tensor (0 5 3)))
+          'take '((tensor 2 3) (int-tensor (0 5 3)))
           'gather '((tensor 2 3) (int64 1) (int-tensor-2d ((0 2) (1 0)))
                     (kwarg "sparse_grad" #f))
           'take-along-dim '((tensor 2 3) (int-tensor-2d ((0) (2)))
