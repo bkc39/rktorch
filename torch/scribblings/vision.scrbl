@@ -742,7 +742,7 @@ image viewer and converter reads.
 @defproc[(image-grid [images tensor?]
                      [#:columns columns exact-positive-integer? 8]
                      [#:padding padding exact-nonnegative-integer? 2]
-                     [#:pad-value pad-value (fill-value/c (tensor-dtype images)) 0])
+                     [#:pad-value pad-value (fill-value/c (dtype images)) 0])
          tensor?]{
 Lays the @tt{[N C H W]} batch @racket[images], a rank-4 tensor with at
 least one image and no zero dimension, out as one @tt{[C H' W']} image,

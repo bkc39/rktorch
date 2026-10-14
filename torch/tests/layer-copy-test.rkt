@@ -4,7 +4,8 @@
   (require rackunit
            "../main.rkt"
            "../nn.rkt"
-           (only-in (submod "../nn/recurrent.rkt" private) flattened-placement)
+           (only-in (submod "../nn/recurrent.rkt" private)
+                    flattened-signature move-count packing-lock)
            (only-in "../vision/diffusion.rkt" UNet)
            (only-in "../vision/resnet.rkt" ImageNetResNet ResNet)
            (only-in "../vision/vgg.rkt" vgg16-features))
@@ -12,7 +13,7 @@
   (define (close? a b [eps 1e-6])
     (and (equal? (shape a) (shape b))
          (for/and ([x (in-flattened-tensor a)] [y (in-flattened-tensor b)])
-           (<= (abs (- x y)) eps))))
+           (~> (- x y) abs (<= eps)))))
 
   (define ((message-matching pattern) e)
     (and (exn:fail? e)
@@ -30,8 +31,8 @@
     (and (equal? (shape a) (shape b))
          (eq? (dtype a) (dtype b))
          (equal? (device a) (device b))
-         (zero? (item (max (abs (- (to-dtype a 'float64)
-                                   (to-dtype b 'float64))))))))
+         (~> (- (to-dtype a 'float64) (to-dtype b 'float64))
+             abs max item zero?)))
 
   (define (same-state? m n)
     (define (entries l) (append (named-parameters l) (named-buffers l)))
@@ -145,7 +146,7 @@
     (define twin (layer-copy net))
     (define before (state net))
     (define opt (sgd (parameters twin) #:lr 0.5))
-    (backward! (sum (twin (randn 8 3))))
+    (~> (randn 8 3) twin sum backward!)
     (step! opt)
     (check-equal? (state net) before "training the copy leaves the original")
     (check-false (equal? (state twin) before))
@@ -157,8 +158,8 @@
 
   (test-case "gradients stay behind; requires-grad, dtype and modes carry over"
     (define l (to (Linear 2 3) 'float64))
-    (requires-grad! (car (parameters l)) #f)
-    (backward! (sum (l (to (randn 4 2) 'float64))))
+    (~> (parameters l) car (requires-grad! #f))
+    (~> (randn 4 2) (to 'float64) l sum backward!)
     (define c (layer-copy l))
     (check-equal? (map requires-grad? (parameters c)) '(#f #t))
     (check-equal? (map dtype (parameters c)) '(float64 float64))
@@ -181,7 +182,7 @@
       (set! b p)
       #:forward (x)
       (* x a b))
-    (define t (tied (Parameter (ones 2))))
+    (define t (~> (ones 2) Parameter tied))
     (define tc (layer-copy t))
     (check-equal? (length (parameters tc)) 1)
     (check-equal? (map car (named-parameters tc)) '("a")))
@@ -228,8 +229,8 @@
          (* (car inputs) (scaled-w self)))
        (define (layer-parameters self) (list (scaled-w self)))
        (define (layer-rebuild self child tensor)
-         (scaled (tensor (scaled-w self))))])
-    (define s (scaled (Parameter (ones 2))))
+         (~> (scaled-w self) tensor scaled))])
+    (define s (~> (ones 2) Parameter scaled))
     (define c (layer-copy s))
     (check-false (eq? (scaled-w c) (scaled-w s)))
     (check-equal? (tensor->list (scaled-w c)) '(1.0 1.0))
@@ -248,6 +249,21 @@
     (check-eq? (child-ref rebuilt "0") (child-ref net "0"))
     (check-false (eq? rebuilt net)))
 
+  (test-case "a copied LSTM has its own packing lock and move count"
+    (define lstm (LSTM 3 4 #:num-layers 2))
+    (define c (layer-copy lstm))
+    (define key (car (parameters lstm)))
+    (define copy-key (car (parameters c)))
+    (check-false (eq? (packing-lock key) (packing-lock copy-key)))
+    (define copy-moves (move-count copy-key))
+    (define moves (move-count key))
+    (to lstm 'float64)
+    (check-equal? (move-count key) (add1 moves))
+    (check-equal? (move-count copy-key) copy-moves)
+    (to c 'float64)
+    (check-equal? (move-count copy-key) (add1 copy-moves))
+    (check-equal? (move-count key) (add1 moves)))
+
   (when (cuda-available?)
     (test-case "on CUDA the copy lives there too, the LSTM flattened afresh"
       (manual-seed! 0)
@@ -255,7 +271,7 @@
       (define x (to-device (randn 5 2 3) 'cuda))
       (define reference (first-output lstm (list x)))
       (define c (layer-copy lstm))
-      (check-false (flattened-placement (car (parameters c))))
+      (check-false (flattened-signature (car (parameters c))))
       (check-equal? (map device-type (map device (parameters c)))
                     (map (lambda (_p) 'cuda) (parameters c)))
       (define copied (first-output c (list x)))
