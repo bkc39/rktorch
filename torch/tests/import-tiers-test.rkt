@@ -1,12 +1,17 @@
 #lang racket/base
 
 (module+ test
-  (require racket/list
-           racket/match
-           racket/path
-           racket/set
-           rackunit
-           threading)
+  (require (only-in racket/list filter-map last)
+           (only-in racket/match match)
+           (only-in racket/path file-name-from-path path-only)
+           (only-in racket/set
+                    in-set list->seteq set set-add set-empty? set-intersect
+                    set-member? set-union seteq subset?)
+           (only-in rackunit
+                    check-equal? check-exn check-false check-not-eq?
+                    check-not-equal? check-not-false check-true test-case)
+           (only-in threading ~> ~>>)
+           (only-in torch/private/exports export-names))
 
   (define ns (make-base-namespace))
 
@@ -15,16 +20,10 @@
       (expand form)
       #t))
 
-  (define (export-names mod phase-ok?)
+  (define (export-set module . phase-ok?)
     (parameterize ([current-namespace ns])
-      (module-declared? mod #t)
-      (define-values (variables syntaxes) (module->exports mod))
-      (for*/seteq ([phase+exports (in-list (append variables syntaxes))]
-                   #:when (phase-ok? (car phase+exports))
-                   [export (in-list (cdr phase+exports))])
-        (car export))))
+      (list->seteq (apply export-names module phase-ok?))))
 
-  (define (any-phase _) #t)
   (define (run-time phase) (eqv? phase 0))
 
   (define torch-dir
@@ -56,13 +55,13 @@
           (sort symbol<?))))
 
   (test-case "the label helper exports racket, torch and torch/nn"
-    (check-equal? (export-names 'torch/scribblings/labels not)
-                  (set-union (export-names 'racket any-phase)
-                             (export-names 'torch run-time)
-                             (export-names 'torch/nn run-time))))
+    (check-equal? (export-set 'torch/scribblings/labels not)
+                  (set-union (export-set 'racket)
+                             (export-set 'torch run-time)
+                             (export-set 'torch/nn run-time))))
 
   (test-case "the label helper exports nothing outside the label phase"
-    (check-true (set-empty? (export-names 'torch/scribblings/labels values))))
+    (check-true (set-empty? (export-set 'torch/scribblings/labels values))))
 
   (test-case "the walk finds the public modules and skips info.rkt"
     (check-true (subset? (seteq 'torch/main 'torch/data/loader 'torch/vision/mnist
@@ -119,9 +118,9 @@
     (define torch-ns (label-namespace '(for-label torch torch/nn)))
     (define racket-ns (label-namespace '(for-label racket)))
     (define shared
-      (set-intersect (set-union (export-names 'torch run-time)
-                                (export-names 'torch/nn run-time))
-                     (export-names 'racket any-phase)))
+      (set-intersect (set-union (export-set 'torch run-time)
+                                (export-set 'torch/nn run-time))
+                     (export-set 'racket)))
     (check-false (set-empty? shared))
     (for ([name (in-set shared)])
       (define source (label-source helper-ns name))
@@ -136,4 +135,150 @@
                  (expands?
                   '(module clashing '#%kernel
                      (#%require torch/scribblings/labels
-                                (for-label racket/base))))))))
+                                (for-label racket/base)))))))
+
+  (define torch-exports (export-set 'torch))
+  (define safe-exports (export-set 'torch/safe))
+  (define operator-exports (export-set 'torch/operators))
+  (define racket-exports (export-set 'racket))
+
+  (test-case "L1: torch/safe and torch/operators partition torch"
+    (check-equal? (set-union safe-exports operator-exports) torch-exports)
+    (check-true (set-empty? (set-intersect safe-exports operator-exports)))
+    (check-true (composes? 'torch 'torch/safe 'torch/operators)))
+
+  (test-case "L2: torch/operators is what torch shares with racket"
+    (check-false (set-empty? operator-exports))
+    (check-equal? operator-exports (set-intersect torch-exports racket-exports)))
+
+  (test-case "L3: torch/safe requires beside racket and threading"
+    (check-true (composes? 'racket 'threading 'torch/safe))
+    (check-true (composes? '(for-label racket threading torch/safe))))
+
+  (test-case "L3': torch beside racket/list or racket/base is refused"
+    (check-exn #rx"identifier already required"
+               (lambda ()
+                 (expands? '(module clashing '#%kernel
+                              (#%require racket/list torch)))))
+    (check-exn #rx"already required for label"
+               (lambda ()
+                 (expands? '(module clashing '#%kernel
+                              (#%require (for-label racket/base torch)))))))
+
+  (test-case "L3'': torch shadows racket/base and racket as a module language"
+    (for ([language (in-list '(racket/base racket))])
+      (parameterize ([current-namespace (make-base-namespace)])
+        (eval `(module natural ,language
+                 (require torch)
+                 (provide results)
+                 (define results
+                   (list (sqrt 4)
+                         (take '(1 2 3) 2)
+                         (tensor? (* (tensor (list 1.0 4.0)) 2.0))
+                         (tensor->list (sqrt (tensor (list 1.0 4.0))))))))
+        (check-equal? (dynamic-require ''natural 'results)
+                      '(2 (1 2) #t (1.0 2.0))
+                      (symbol->string language)))))
+
+  (define shadowing-modules
+    '(torch/foreign torch/generated torch/main torch/operators))
+
+  (test-case "L4: torch/generated shares only take with racket"
+    (check-equal? (set-intersect (export-set 'torch/generated) racket-exports)
+                  (seteq 'take)))
+
+  (test-case "L4: every other public module requires beside racket"
+    (check-true (subset? (seteq 'torch/nn 'torch/safe)
+                         (list->seteq public-modules)))
+    (for ([module (in-list public-modules)]
+          #:unless (memq module shadowing-modules))
+      (check-true (composes? 'racket 'threading module)
+                  (symbol->string module))
+      (check-true (composes? `(for-label racket threading ,module))
+                  (symbol->string module))))
+
+  (test-case "L5: the public modules require together"
+    (check-true
+     (apply composes? '(submod torch/foreign unsafe)
+            (remq* clashing-modules public-modules))))
+
+  (define fallback-rows
+    '((+ () (1) (1 2 3) (1/2 0.5))
+      (- (1) (5 2 1))
+      (* () (2 3 4))
+      (/ (2) (1 2 4))
+      (< (1 2) (1 2 3) (2 1))
+      (<= (1 1) (1 2 2))
+      (> (2 1) (3 2 1))
+      (>= (1 1) (2 2 1))
+      (abs (-3) (-1/2))
+      (argmax (car '((1 a) (3 b))))
+      (cos (0) (1.0))
+      (exp (0) (1.0))
+      (flatten ('(1 (2 (3)))))
+      (length ('(1 2 3)))
+      (log (1) (8 2) (2.0))
+      (max (1 2.0 3))
+      (min (1 2 3))
+      (sin (0) (1.0))
+      (sort ('(3 1 2) <))
+      (sqrt (4) (-4) (2.0))
+      (take ('(1 2 3) 2))
+      (tanh (0) (0.5))))
+
+  (define (argument-values arguments)
+    (parameterize ([current-namespace ns])
+      (eval `(list ,@arguments))))
+
+  (define (operator-pair name)
+    (parameterize ([current-namespace ns])
+      (values (dynamic-require 'torch/operators name)
+              (dynamic-require 'racket name))))
+
+  (test-case "L6: the fallback table has a row for each operator"
+    (check-equal? (list->seteq (map car fallback-rows)) operator-exports))
+
+  (test-case "L6: each operator falls back to racket's on plain values"
+    (for* ([row (in-list fallback-rows)]
+           #:when (set-member? operator-exports (car row))
+           [arguments (in-list (cdr row))])
+      (define-values (torch-operator racket-operator) (operator-pair (car row)))
+      (define plain (argument-values arguments))
+      (define message (format "~s" (cons (car row) arguments)))
+      (check-not-eq? torch-operator racket-operator message)
+      (check-equal? (apply torch-operator plain)
+                    (apply racket-operator plain)
+                    message)))
+
+  (define (rebase import self)
+    (define-values (path base) (module-path-index-split import))
+    (cond
+      [(not path) self]
+      [(module-path-index? base) (module-path-index-join path (rebase base self))]
+      [else (module-path-index-join path base)]))
+
+  (define (static-imports root)
+    (let walk ([pending (list (module-path-index-resolve
+                               (module-path-index-join root #f) #t))]
+               [seen (set)])
+      (match pending
+        ['() seen]
+        [(cons name rest)
+         #:when (set-member? seen name)
+         (walk rest seen)]
+        [(cons name rest)
+         (walk (append (for*/list ([phase+imports (in-list (module->imports name))]
+                                   #:when (car phase+imports)
+                                   [import (in-list (cdr phase+imports))])
+                         (module-path-index-resolve (rebase import name) #t))
+                       rest)
+               (set-add seen name))])))
+
+  (define racket-main
+    (make-resolved-module-path (collection-file-path "main.rkt" "racket")))
+
+  (test-case "L8: torch/safe's static imports do not reach racket"
+    (parameterize ([current-namespace (make-base-namespace)])
+      (eval '(module requires-racket racket/base (require racket)))
+      (check-true (set-member? (static-imports ''requires-racket) racket-main))
+      (check-false (set-member? (static-imports 'torch/safe) racket-main)))))

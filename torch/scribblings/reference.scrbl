@@ -5,6 +5,7 @@
 What each binding accepts and answers. The @secref["guide"] introduces the
 same material in the order you meet it.
 
+@include-section["imports.scrbl"]
 @include-section["tensor.scrbl"]
 @include-section["ops.scrbl"]
 @include-section["autograd.scrbl"]

@@ -28,6 +28,10 @@ The library is split across a few modules:
  @item{@racketmodname[torch/data/loader] --- datasets, batching and
  iteration.}
 
+ @item{@racketmodname[torch/safe] and @racketmodname[torch/operators] ---
+ @racketmodname[torch] split by whether @racketmodname[racket] exports the
+ name, for programs that require both; see @secref["imports"].}
+
 ]
 
 This manual has two parts. The @secref["guide"] is a narrative

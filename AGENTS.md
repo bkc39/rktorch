@@ -243,13 +243,19 @@ with `backward!` outside the form as PyTorch recommends). From
   `cpp/src/torchrkt/autocast.cpp`; per thread and per device type like
   grad mode, restored by `dynamic-wind`, the cast cache dropped on exit)
 
-**Name shadowing convention:** ops colliding with racket/base or racket/list
-(`exp log sqrt tanh max min argmax sort`) are generic — tensors hit libtorch,
-anything else defers to the original — so `(require torch)` never breaks
-numeric code. New ops that collide must follow the same dispatch pattern
-(check racket/base first — `tanh` was missed initially and broke numeric
-callers), and docs require `torch/scribblings/labels` for their `for-label`
-bindings of `racket`, `torch` and `torch/nn`.
+**Name shadowing convention:** the 22 ops named like a `racket` export
+(`+ - * / < <= > >= abs argmax cos exp flatten length log max min sin sort
+sqrt take tanh`) are generic — tensors hit libtorch, anything else defers to
+racket's binding — so `(require torch)` never breaks numeric code. New ops
+that collide must follow the same dispatch pattern (check all of `racket` —
+`tanh`, from racket/math, was missed initially and broke numeric callers),
+and docs require `torch/scribblings/labels` for their `for-label` bindings of
+`racket`, `torch` and `torch/nn`. `torch/safe` is `torch` minus every name
+`racket` exports and `torch/operators` is the rest, both computed with
+`subtract-in` (laws in `torch/tests/import-tiers-test.rkt`): a new colliding
+op joins `torch/operators` by itself and needs an L6 row. Every other public
+module stays disjoint from `racket` (L4), except `torch/generated`, whose
+`take` L4 pins.
 Dispatching named ops carry dependent (`->i`) contracts so the wrong shape
 gets contract blame, not a runtime error; the `+ - * / < <= > >= @` operators are
 provided as plain renames (no contract overhead on the numeric fast path),
@@ -437,7 +443,8 @@ raco review torch/**/*.rkt
 ```
 
 `raco review` does not expand macros, so the pure re-export facades
-(`main.rkt`, `foreign.rkt`) and `info.rkt` carry a `#|review: ignore|#` directive.
+(`main.rkt`, `foreign.rkt`, `nn.rkt`, `safe.rkt`, `operators.rkt`,
+`scribblings/labels.rkt`) and `info.rkt` carry a `#|review: ignore|#` directive.
 
 Resyntax, racket-review and `cover` are pinned, one commit per package, in
 `nix/racket-linters.nix`, which also compiles them; shell entry copies them
@@ -523,12 +530,17 @@ Thin re-export facades over small modules (target ≤ 500 lines/file).
 explicit, alphabetized name lists — never whole-module requires — so each
 file documents exactly what it pulls in. Exemptions, each marked with a
 comment at the require site: pure re-export facades (`main.rkt`,
-`foreign.rkt`, `nn.rkt`, `scribblings/labels.rkt`), and macro-heavy modules
+`foreign.rkt`, `nn.rkt`, `safe.rkt`, `operators.rkt`,
+`scribblings/labels.rkt`), and macro-heavy modules
 whose expansions need the module's full export set (`racket/runtime-path`,
 `syntax/parse/pre`).
 
 - `info.rkt` — package metadata + native-library pre-install hook.
 - `main.rkt` — high-level facade (re-exports `foreign.rkt`).
+- `safe.rkt` — `torch` minus `racket`'s names; `operators.rkt` — the rest
+  (the import tiers, `scribblings/imports.scrbl`).
+- `private/exports.rkt` — `export-names`, a module's sorted export names,
+  shared by the tiers test and the imports chapter.
 - `foreign.rkt` — the contracted layer + the `unsafe` submodule.
 - `data/dataset.rkt` — `define-dataset` and `gen:dataset`;
   `private/definer.rkt` — the clause grammar it shares with `define-layer`.
