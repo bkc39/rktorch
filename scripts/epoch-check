@@ -26,6 +26,12 @@ while IFS=$'\t' read -r example _; do
     runners+=("$root/examples/test/$example.rkt")
   fi
 done <<< "$rows"
+for wanted in "$@"; do
+  if [[ " ${selected[*]} " != *" $wanted "* ]]; then
+    echo "epoch-check: docs/epoch-check.md has no row for $wanted" >&2
+    exit 2
+  fi
+done
 raco make "${runners[@]}" || exit 1
 
 status=0
