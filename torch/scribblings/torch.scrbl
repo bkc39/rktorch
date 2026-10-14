@@ -1,11 +1,7 @@
 #lang scribble/manual
 
 @(require "common.rkt"
-          (for-label (except-in racket/base
-                                abs cos exp log sin sort sqrt max min length
-                                + - * / < <= > >=)
-                     torch
-                     torch/nn))
+          torch/scribblings/labels)
 
 @title{rktorch: Racket bindings to libtorch}
 @author{bkc}
@@ -31,6 +27,10 @@ The library is split across a few modules:
 
  @item{@racketmodname[torch/data/loader] --- datasets, batching and
  iteration.}
+
+ @item{@racketmodname[torch/safe] and @racketmodname[torch/operators] ---
+ @racketmodname[torch] split by whether @racketmodname[racket] exports the
+ name, for programs that require both; see @secref["imports"].}
 
 ]
 

@@ -1,12 +1,6 @@
 #lang scribble/manual
 
-@(require (for-label racket/base
-                     racket/contract
-                     (only-in torch backward! tensor? to zeros)
-                     (only-in torch/nn
-                              GRU LSTM adam clip-grad-norm! eval! gru? layer-copy
-                              load-state! lstm? named-parameters parameters
-                              step! zero-grads!)))
+@(require torch/scribblings/labels)
 
 @title{Recurrent layers}
 

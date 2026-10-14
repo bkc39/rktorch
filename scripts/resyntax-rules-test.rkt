@@ -60,6 +60,18 @@
        (program '(require (only-in torch mul tensor))
                 '(mul (tensor (list 1.0 2.0)) 2.0))))
 
+    (test-case "L9: mul stays under torch/safe alone"
+      (check-suite-does-not-refactor
+       (program '(require torch/safe)
+                '(let ([t (tensor (list 1.0 2.0))]) (mul t 2.0)))))
+
+    (test-case "L9: mul becomes * under torch/safe and torch/operators"
+      (check-suite-refactors
+       (program '(require torch/operators torch/safe)
+                '(let ([t (tensor (list 1.0 2.0))]) (mul t 2.0)))
+       (program '(require torch/operators torch/safe)
+                '(let ([t (tensor (list 1.0 2.0))]) (* t 2.0)))))
+
     (test-case "ge stays where >= is racket/base's"
       (check-suite-does-not-refactor
        (program '(require (only-in torch ge tensor))

@@ -5,7 +5,7 @@
 
 (require torch
          torch/nn
-         (only-in "../examples/racket/06-gpt.rkt" generate gpt))
+         (only-in torch/scribblings/examples/06-gpt generate gpt))
 
 (define args (vector->list (current-command-line-arguments)))
 (define prefix (if (pair? args) (car args) "checkpoints/gpt-hod"))

@@ -1,12 +1,12 @@
 #lang racket/base
 
-;; Runner + tests for the literate ../../examples/racket/11-vae.rkt.
+;; Runner + tests for the literate torch/scribblings/examples/11-vae.rkt.
 
 (require (except-in racket/list argmax flatten take)
          (only-in racket/math nan?)
          torch
          torch/nn
-         "../racket/11-vae.rkt")
+         torch/scribblings/examples/11-vae)
 
 (module+ main
   (require (only-in "private/env.rkt" env-number))

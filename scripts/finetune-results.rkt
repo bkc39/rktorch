@@ -1,8 +1,9 @@
 #lang racket/base
 
 ;; Regenerates torch/scribblings/results/finetune.rktd, the table the
-;; guide's fine-tuning chapter shows: examples/racket/15-finetune.rkt on the
-;; full ants-and-bees set, every epoch of both phases.
+;; guide's fine-tuning chapter shows:
+;; torch/scribblings/examples/15-finetune.rkt on the full ants-and-bees set,
+;; every epoch of both phases.
 ;;
 ;;   nix develop .#cuda --command racket scripts/finetune-results.rkt
 
@@ -11,7 +12,7 @@
          (only-in racket/pretty pretty-write)
          racket/runtime-path
          torch
-         "../examples/racket/15-finetune.rkt")
+         torch/scribblings/examples/15-finetune)
 
 (define-runtime-path out "../torch/scribblings/results/finetune.rktd")
 

@@ -12,7 +12,7 @@ import torch
 from torch import nn
 from torch.utils.data import DataLoader, TensorDataset
 
-FIXTURES = os.path.join(os.path.dirname(__file__), "..", "..", "data", "fixtures")
+FIXTURES = os.path.join(os.path.dirname(__file__), "..", "..", "vision", "fixtures")
 
 
 def read_idx(path):

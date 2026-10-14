@@ -1,9 +1,10 @@
 #lang racket/base
 
-;; Runner + tests for the literate example ../../examples/racket/01-arith.rkt.
+;; Runner + tests for the literate example
+;; torch/scribblings/examples/01-arith.rkt.
 
 (require torch
-         "../racket/01-arith.rkt")
+         torch/scribblings/examples/01-arith)
 
 (module+ main
   (define t (run-example))
