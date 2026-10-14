@@ -1,6 +1,7 @@
 #lang racket/base
 
 (require (for-syntax racket/base)
+         (only-in compiler/find-exe find-exe)
          (only-in ffi/unsafe
                   _double
                   _fun
@@ -22,13 +23,15 @@
          (only-in ffi/unsafe/vm vm-eval vm-primitive)
          (only-in math/statistics median)
          (only-in racket/date date->string date-display-format)
-         (only-in racket/format ~a ~r)
+         (only-in racket/format ~a ~r ~s)
          (only-in racket/function const)
          (only-in racket/future processor-count)
          (only-in racket/list filter-not last)
          (only-in racket/math exact-round)
+         (only-in racket/port port->string with-input-from-string)
          (only-in racket/promise delay force)
          (only-in racket/string string-join)
+         (only-in racket/system process*/ports)
          ;; whole-module require: only-in strips the phase-1 syntax classes
          syntax/parse/define
          (only-in threading ~>))
@@ -69,6 +72,7 @@
          gap-ms
          gap->string
          call-with-workers
+         run-fresh-racket
          run-parallel
          in-indexed
          main-mode-label
@@ -83,6 +87,7 @@
          middle-by
          collect-past-canary!
          settle-wills!
+         exn:fail:unsettled?
          with-unsettled-stop
          rate->string)
 
@@ -301,6 +306,21 @@
   (cond
     [(for/first ([e (in-vector failures)] #:when e) e) => raise]
     [else (values result (vector->list results))]))
+
+(define (run-fresh-racket program)
+  (define-values (out in _pid _err control)
+    (~> program
+        ~s
+        (process*/ports #f #f (current-error-port) (find-exe) "-l" "racket/base" "-e" _)
+        (apply values _)))
+  (close-output-port in)
+  (define text (port->string out))
+  (control 'wait)
+  (close-input-port out)
+  (define result (with-input-from-string text read))
+  (when (eof-object? result)
+    (error 'run-fresh-racket "the program exited ~a with no result" (control 'exit-code)))
+  result)
 
 (struct main-mode (label polls-scheduler? wait))
 

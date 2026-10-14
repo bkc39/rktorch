@@ -59,14 +59,13 @@
                   #:on-start (lambda () (tally-open! t))
                   #:on-end (lambda () (tally-close! t))
                   #:stop stop))
-  (define calls-after (and calls (calls)))
   (settle! (cell-context "after"))
   (define calls-settled (and calls (calls)))
   (match-define (list made window-calls) (span-counts window))
   (define-values (counted-calls pending unaccounted)
     (cond
       [calls (values window-calls
-                     (- calls-settled calls-after)
+                     (- calls-settled calls-before window-calls)
                      (- (made-so-far) (- calls-settled calls-before)))]
       [else (values #f #f #f)]))
   (cell workers

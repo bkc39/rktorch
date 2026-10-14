@@ -1,13 +1,18 @@
 #lang racket/base
 
-(require (only-in '#%foreign make-late-weak-hasheq)
+(require (for-syntax racket/base)
+         (only-in '#%foreign make-late-weak-hasheq)
          (only-in ffi/unsafe register-finalizer)
          (only-in ffi/unsafe/atomic call-as-uninterruptible)
          (only-in racket/format ~r)
          (only-in racket/list count)
-         (only-in racket/match match-define)
-         (only-in racket/set for/seteq set-count)
+         (only-in racket/match match match-define)
+         ;; whole-module require on purpose (only-in breaks its expansion)
+         racket/runtime-path
+         (only-in threading ~>)
          "common.rkt")
+
+(define-runtime-path q3-path "q3-finalizers-phantoms.rkt")
 
 (define default-threads 8)
 (define drain-limit-ms 60000)
@@ -32,7 +37,7 @@
 (define (finalizer-round per-thread #:protect protect #:threads [threads default-threads])
   (define total (* threads per-thread))
   (define runs (build-vector total (lambda (_) (box 0))))
-  (define ran-on (make-vector total #f))
+  (define ran-on (box #hasheq()))
   (define (run-count id) (unbox (vector-ref runs id)))
   (define ms
     (span-ms
@@ -45,14 +50,14 @@
                           (register-finalizer (make-vector 2 id)
                                               (lambda (_v)
                                                 (with-finalizer-in-flight
-                                                  (vector-set! ran-on id (current-thread))
+                                                  (cas-update! ran-on hash-set (current-thread) #t)
                                                   (cas-update! (vector-ref runs id) add1)))))))))))
   (define-values (rounds drain-ms settled? timed-out?)
     (collect-until (lambda () (for/and ([id (in-range total)]) (positive? (run-count id))))))
   (define final-counts (build-list total run-count))
   (define never (count zero? final-counts))
   (define twice (count (lambda (n) (> n 1)) final-counts))
-  (define finalizer-threads (set-count (for/seteq ([t (in-vector ran-on)] #:when t) t)))
+  (define finalizer-threads (~> (unbox ran-on) (hash-remove (current-thread)) hash-count))
   (values (list total (real->decimal-string ms 1) (rate->string (/ total (ms->seconds ms)))
                 (apply + final-counts) finalizer-threads never twice rounds
                 (real->decimal-string drain-ms 1)
@@ -147,22 +152,47 @@
         (real->decimal-string remove-ms 1)
         (load-average)))
 
+(define (start-finalizer-thread-on-main!)
+  (settle-wills!)
+  (void))
+
+(define finalizer-rows
+  (list (list "plain, first registrations in the process" 100000 plain 8 void)
+        (list "plain" 100000 plain 8 start-finalizer-thread-on-main!)
+        (list "plain, one thread making all of them" 800000 plain 1 start-finalizer-thread-on-main!)
+        (list "under parameterize-break #f" 100000 break-disabled 8 start-finalizer-thread-on-main!)
+        (list "in uninterruptible mode" 100000 call-as-uninterruptible 8
+              start-finalizer-thread-on-main!)))
+
+(define (finalizer-row i)
+  (match-define (list _label per-thread protect threads prepare) (list-ref finalizer-rows i))
+  (with-handlers ([exn:fail:unsettled? (lambda (e) (list #f (exn-message e)))])
+    (prepare)
+    (define-values (row pending) (finalizer-round per-thread #:protect protect #:threads threads))
+    (list row pending)))
+
+(module* finalizer-row #f
+  (provide finalizer-row))
+
+(define (finalizer-row-in-fresh-racket i)
+  (run-fresh-racket
+   `(begin
+      (require (submod (file ,(path->string q3-path)) finalizer-row))
+      (write (finalizer-row ,i)))))
+
 (define (print-finalizer-table)
   (print-table-header
-   '("register-finalizer called" "objects" "registration wall ms"
-     "registrations/s" "finalizer runs" "threads running them" "never ran" "ran twice"
+   '("register-finalizer called (fresh process per row)" "objects" "registration wall ms"
+     "registrations/s" "finalizer runs" "finalizer threads running them" "never ran" "ran twice"
      "major collections to drain" "drain ms" "exactly once" "load"))
-  (for/or ([spec (in-list
-                  (list (list "plain, first registrations in the process" 100000 plain 8)
-                        (list "plain" 100000 plain 8)
-                        (list "plain, one thread making all of them" 800000 plain 1)
-                        (list "under parameterize-break #f" 100000 break-disabled 8)
-                        (list "in uninterruptible mode" 100000 call-as-uninterruptible 8)))])
-    (match-define (list label per-thread protect threads) spec)
+  (for/or ([spec (in-list finalizer-rows)] [i (in-naturals)])
+    (match-define (cons label _) spec)
     (with-unsettled-stop label
-      (define-values (row pending) (finalizer-round per-thread #:protect protect #:threads threads))
-      (print-table-row (cons label row))
-      pending)))
+      (match (finalizer-row-in-fresh-racket i)
+        [(list #f reason) reason]
+        [(list row pending)
+         (print-table-row (cons label row))
+         pending]))))
 
 (define (print-phantom-table)
   (print-table-header
@@ -180,12 +210,11 @@
      "insert wall ms" "remove wall ms" "load"))
   (for ([protect (list plain call-as-uninterruptible)]
         [how (list "plain" "uninterruptible")])
-    (print-table-row (table-round (format "make-hasheq, ~a" how)
-                                  make-hasheq 100000 #:protect protect))
-    (print-table-row (table-round (format "make-weak-hasheq, ~a" how)
-                                  make-weak-hasheq 100000 #:protect protect))
-    (print-table-row (table-round (format "make-late-weak-hasheq (alloc.rkt's), ~a" how)
-                                  make-late-weak-hasheq 100000 #:protect protect))))
+    (for ([kind (list "make-hasheq" "make-weak-hasheq" "make-late-weak-hasheq (alloc.rkt's)")]
+          [make-table (list make-hasheq make-weak-hasheq make-late-weak-hasheq)])
+      (~> (format "~a, ~a" kind how)
+          (table-round make-table 100000 #:protect protect)
+          print-table-row))))
 
 (module+ main
   (print-banner "Q3: finalizers, phantom bytes and eq? tables from 8 parallel threads")

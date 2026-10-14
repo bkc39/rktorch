@@ -1,14 +1,10 @@
 #lang racket/base
 
 (require (for-syntax racket/base)
-         (only-in compiler/find-exe find-exe)
-         (only-in racket/format ~a ~s)
+         (only-in racket/format ~a)
          (only-in racket/match match-define)
-         (only-in racket/port port->string with-input-from-string)
          ;; whole-module require on purpose (only-in breaks its expansion)
          racket/runtime-path
-         (only-in racket/system process*/ports)
-         (only-in threading ~>)
          "common.rkt")
 
 (define-runtime-path shim-path "shim.rkt")
@@ -76,19 +72,7 @@
          (match-define (list result) (span-value (run-parallel 1 (lambda (_i) (thunk)))))
          result)
        (write (let () ,@body))))
-  (define-values (out in _pid _err control)
-    (~> program
-        ~s
-        (process*/ports #f #f (current-error-port) (find-exe) "-l" "racket/base" "-e" _)
-        (apply values _)))
-  (close-output-port in)
-  (define text (port->string out))
-  (control 'wait)
-  (close-input-port out)
-  (define result (with-input-from-string text read))
-  (when (eof-object? result)
-    (error 'run-scenario "the scenario exited ~a with no result" (control 'exit-code)))
-  result)
+  (run-fresh-racket program))
 
 (define scenarios
   (list
