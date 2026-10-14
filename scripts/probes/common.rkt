@@ -87,6 +87,8 @@
          middle-by
          collect-past-canary!
          settle-wills!
+         raised-wills
+         record-raised-wills!
          exn:fail:unsettled?
          with-unsettled-stop
          rate->string)
@@ -118,7 +120,7 @@
   (printf "- load average (1 min) at start: ~a\n\n" (load-average)))
 
 (define (print-footer #:stopped [stopped #f])
-  (define raised (unbox wills-raised))
+  (define raised (raised-wills))
   (when stopped
     (printf "\nstopped: ~a\n" stopped))
   (printf "\nload average (1 min) at end: ~a\n" (load-average))
@@ -317,10 +319,12 @@
   (define text (port->string out))
   (control 'wait)
   (close-input-port out)
-  (define result (with-input-from-string text read))
-  (when (eof-object? result)
-    (error 'run-fresh-racket "the program exited ~a with no result" (control 'exit-code)))
-  result)
+  (define status (control 'exit-code))
+  (define result (and (zero? status) (with-input-from-string text read)))
+  (cond
+    [(and (zero? status) (not (eof-object? result))) result]
+    [(zero? status) (error 'run-fresh-racket "the program exited 0 with no result")]
+    [else (error 'run-fresh-racket "the program exited ~a" status)]))
 
 (struct main-mode (label polls-scheduler? wait))
 
@@ -458,9 +462,15 @@
 
 (define wills-raised (box '()))
 
+(define (raised-wills)
+  (unbox wills-raised))
+
+(define (record-raised-wills! newest-first)
+  (cas-update! wills-raised (lambda (old) (append newest-first old))))
+
 (define (try-will executor)
   (with-handlers ([exn:fail? (lambda (e)
-                               (set-box! wills-raised (cons (exn-message e) (unbox wills-raised)))
+                               (record-raised-wills! (list (exn-message e)))
                                e)])
     (will-try-execute executor no-will)))
 

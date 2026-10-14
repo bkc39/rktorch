@@ -7,6 +7,7 @@
          (only-in racket/format ~r)
          (only-in racket/list count)
          (only-in racket/match match match-define)
+         (only-in racket/set seteq set-add set-count set-remove)
          ;; whole-module require on purpose (only-in breaks its expansion)
          racket/runtime-path
          (only-in threading ~>)
@@ -37,7 +38,7 @@
 (define (finalizer-round per-thread #:protect protect #:threads [threads default-threads])
   (define total (* threads per-thread))
   (define runs (build-vector total (lambda (_) (box 0))))
-  (define ran-on (box #hasheq()))
+  (define ran-on (box (seteq)))
   (define (run-count id) (unbox (vector-ref runs id)))
   (define ms
     (span-ms
@@ -50,14 +51,14 @@
                           (register-finalizer (make-vector 2 id)
                                               (lambda (_v)
                                                 (with-finalizer-in-flight
-                                                  (cas-update! ran-on hash-set (current-thread) #t)
+                                                  (cas-update! ran-on set-add (current-thread))
                                                   (cas-update! (vector-ref runs id) add1)))))))))))
   (define-values (rounds drain-ms settled? timed-out?)
     (collect-until (lambda () (for/and ([id (in-range total)]) (positive? (run-count id))))))
   (define final-counts (build-list total run-count))
   (define never (count zero? final-counts))
   (define twice (count (lambda (n) (> n 1)) final-counts))
-  (define finalizer-threads (~> (unbox ran-on) (hash-remove (current-thread)) hash-count))
+  (define finalizer-threads (~> (unbox ran-on) (set-remove (current-thread)) set-count))
   (values (list total (real->decimal-string ms 1) (rate->string (/ total (ms->seconds ms)))
                 (apply + final-counts) finalizer-threads never twice rounds
                 (real->decimal-string drain-ms 1)
@@ -156,20 +157,30 @@
   (settle-wills!)
   (void))
 
-(define finalizer-rows
-  (list (list "plain, first registrations in the process" 100000 plain 8 void)
-        (list "plain" 100000 plain 8 start-finalizer-thread-on-main!)
-        (list "plain, one thread making all of them" 800000 plain 1 start-finalizer-thread-on-main!)
-        (list "under parameterize-break #f" 100000 break-disabled 8 start-finalizer-thread-on-main!)
-        (list "in uninterruptible mode" 100000 call-as-uninterruptible 8
-              start-finalizer-thread-on-main!)))
+(struct finalizer-spec (label per-thread protect threads prepare))
+
+(define finalizer-specs
+  (vector (finalizer-spec "plain, first registrations in the process" 100000 plain 8 void)
+          (finalizer-spec "plain" 100000 plain 8 start-finalizer-thread-on-main!)
+          (finalizer-spec "plain, one thread making all of them" 800000 plain 1
+                          start-finalizer-thread-on-main!)
+          (finalizer-spec "under parameterize-break #f" 100000 break-disabled 8
+                          start-finalizer-thread-on-main!)
+          (finalizer-spec "in uninterruptible mode" 100000 call-as-uninterruptible 8
+                          start-finalizer-thread-on-main!)))
+
+(struct finalizer-outcome (raised-wills) #:prefab)
+(struct finalizer-measured finalizer-outcome (row pending) #:prefab)
+(struct finalizer-unsettled finalizer-outcome (reason) #:prefab)
 
 (define (finalizer-row i)
-  (match-define (list _label per-thread protect threads prepare) (list-ref finalizer-rows i))
-  (with-handlers ([exn:fail:unsettled? (lambda (e) (list #f (exn-message e)))])
+  (match-define (finalizer-spec _ per-thread protect threads prepare)
+    (vector-ref finalizer-specs i))
+  (with-handlers ([exn:fail:unsettled?
+                   (lambda (e) (finalizer-unsettled (raised-wills) (exn-message e)))])
     (prepare)
     (define-values (row pending) (finalizer-round per-thread #:protect protect #:threads threads))
-    (list row pending)))
+    (finalizer-measured (raised-wills) row pending)))
 
 (module* finalizer-row #f
   (provide finalizer-row))
@@ -185,12 +196,14 @@
    '("register-finalizer called (fresh process per row)" "objects" "registration wall ms"
      "registrations/s" "finalizer runs" "finalizer threads running them" "never ran" "ran twice"
      "major collections to drain" "drain ms" "exactly once" "load"))
-  (for/or ([spec (in-list finalizer-rows)] [i (in-naturals)])
-    (match-define (cons label _) spec)
+  (for/or ([spec (in-vector finalizer-specs)] [i (in-naturals)])
+    (define label (finalizer-spec-label spec))
     (with-unsettled-stop label
-      (match (finalizer-row-in-fresh-racket i)
-        [(list #f reason) reason]
-        [(list row pending)
+      (define outcome (finalizer-row-in-fresh-racket i))
+      (record-raised-wills! (finalizer-outcome-raised-wills outcome))
+      (match outcome
+        [(finalizer-unsettled _ reason) reason]
+        [(finalizer-measured _ row pending)
          (print-table-row (cons label row))
          pending]))))
 
@@ -208,13 +221,11 @@
    '("table, distinct keys per thread" "keys" "count after inserts"
      "wrong or missing values" "count after removes" "correct"
      "insert wall ms" "remove wall ms" "load"))
-  (for ([protect (list plain call-as-uninterruptible)]
-        [how (list "plain" "uninterruptible")])
-    (for ([kind (list "make-hasheq" "make-weak-hasheq" "make-late-weak-hasheq (alloc.rkt's)")]
-          [make-table (list make-hasheq make-weak-hasheq make-late-weak-hasheq)])
-      (~> (format "~a, ~a" kind how)
-          (table-round make-table 100000 #:protect protect)
-          print-table-row))))
+  (for* ([protect (list plain call-as-uninterruptible)]
+         [make-table (list make-hasheq make-weak-hasheq make-late-weak-hasheq)])
+    (~> (format "~a, ~a" (object-name make-table) (object-name protect))
+        (table-round make-table 100000 #:protect protect)
+        print-table-row)))
 
 (module+ main
   (print-banner "Q3: finalizers, phantom bytes and eq? tables from 8 parallel threads")
