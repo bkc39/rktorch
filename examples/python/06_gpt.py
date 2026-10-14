@@ -20,7 +20,7 @@ import torch
 from torch import nn
 
 FIXTURE = os.path.join(
-    os.path.dirname(__file__), "..", "..", "torch", "data", "fixtures",
+    os.path.dirname(__file__), "..", "..", "torch", "text", "fixtures",
     "heart-of-darkness-excerpt.txt")
 
 DEVICE = os.environ.get("RKTORCH_PARITY_DEVICE") or "cpu"

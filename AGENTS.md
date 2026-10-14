@@ -110,7 +110,7 @@ with `backward!` outside the form as PyTorch recommends). From
   continuing), `in-epochs`; synchronous, single-threaded like
   `num_workers=0`; a seeded loader replays `DataLoader(generator=g)`'s
   batch order
-- translation (`torch/data/translation.rkt`, #153): the PyTorch seq2seq
+- translation (`torch/text/translation.rkt`, #153): the PyTorch seq2seq
   tutorial's eng-fra pairs, `load-translation-pairs` (zip cached, 11445
   pairs after the tutorial's normalisation and filter) and
   `load-translation-fixture` (287 committed pairs),
@@ -539,11 +539,12 @@ module's full export set (`racket/runtime-path`, `syntax/parse/pre`).
   its 256-record fixture and `vision/fixtures/images/` the reader's
   synthetic JPEGs and PNGs (`scripts/gen-image-fixtures.py`);
   `vision/image.rkt` — the image reader; `vision/diffusion.rkt` — DDPM schedules, `q-sample`
-  and the UNet layers.
+  and the UNet layers; `vision/mnist.rkt` — MNIST loader.
+- `text/data.rkt` — character corpora, vocabularies and token blocks;
+  `text/translation.rkt` — the seq2seq tutorial's eng-fra pairs;
+  `text/fixtures/` their committed excerpts.
 - `data/loader.rkt` — `tensor-dataset`, `dataloader`, `in-dataloader`,
-  `in-epochs`, re-exporting `data/dataset.rkt`; `data/mnist.rkt`,
-  `data/text.rkt`, `data/translation.rkt` — the modality loaders (moving
-  under #88).
+  `in-epochs`, re-exporting `data/dataset.rkt`.
 - `foreign/ops.rkt` — version/seed + marshalling (`item`, `to-dtype`,
   `uniform!`, `to`); `foreign/creation-ops.rkt` — the constructors
   (`zeros` .. `rand`, `tensor`, `arange`, `eye`, the `*-like` family, with

@@ -8,9 +8,9 @@
            rackunit
            (only-in "../audio/functional.rkt" log-mel-spectrogram)
            (only-in "../audio/librispeech.rkt" load-librispeech-fixture)
-           (only-in "../data/text.rkt" encode text->vocab)
            "../main.rkt"
            "../nn.rkt"
+           (only-in "../text/data.rkt" encode text->vocab)
            "private/python-env.rkt")
 
   (cond

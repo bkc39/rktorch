@@ -15,6 +15,7 @@
                      torch/vision/image
                      torch/vision/image-folder
                      torch/vision/imagenet
+                     torch/vision/mnist
                      torch/vision/ppm
                      torch/vision/resnet
                      torch/vision/transforms
@@ -90,6 +91,23 @@ whether to trigger the fetch; the tests only touch a cached archive.
 The regular files of an uncompressed tar buffer, name and contents,
 enough for the archives the datasets ship in.
 }
+
+@section{MNIST}
+
+@defmodule[torch/vision/mnist]
+
+The handwritten digits, fetched once from the mirror torchvision uses into
+the cache directory and decoded from the IDX files.
+
+@defproc[(load-mnist [split (or/c 'train 'test) 'train]) (values tensor? tensor?)]{
+The split's images as a float32 tensor of shape @tt{[N 1 28 28]} with
+pixels in @tt{[0, 1]}, and its labels as an int64 tensor of shape
+@tt{[N]}: 60000 training digits or 10000 test ones.}
+
+@defproc[(load-mnist-fixture) (values tensor? tensor?)]{
+The first 256 training digits, committed with the package, in the same
+form as @racket[load-mnist]; what the tests and the offline examples
+train on.}
 
 @section{Diffusion}
 

@@ -10,7 +10,7 @@
 
 (require torch
          torch/nn
-         (only-in torch/data/text
+         (only-in torch/text/data
                   contiguous-blocks encode load-heart-of-darkness text->vocab)
          (only-in "../examples/racket/06-gpt.rkt" gpt))
 

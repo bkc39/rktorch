@@ -11,15 +11,15 @@
            "../data/loader.rkt"
            "../main.rkt"
            "../nn.rkt"
-           (only-in "../data/mnist.rkt" load-mnist-fixture)
-           (only-in "../data/text.rkt"
+           (only-in "../text/data.rkt"
                     contiguous-blocks encode load-text-fixture text->vocab)
-           (only-in "../data/translation.rkt"
+           (only-in "../text/translation.rkt"
                     eos-id load-translation-fixture pad-id pairs->tensors
                     pairs->vocabs sos-id vocab-size)
            (only-in "../vision/cifar10.rkt" load-cifar10-fixture)
            (only-in "../vision/diffusion.rkt"
                     UNet linear-schedule q-sample schedule-steps)
+           (only-in "../vision/mnist.rkt" load-mnist-fixture)
            (only-in "../vision/ppm.rkt" image-grid write-ppm)
            (only-in "../vision/resnet.rkt" ResNet)
            "private/python-env.rkt")

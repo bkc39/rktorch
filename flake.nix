@@ -191,7 +191,7 @@
       # identical bytes faults a live REPL and wedges it, TERM-immune (#72).
       # rename swaps the directory entry and leaves the old inode alive, so
       # running processes keep the old code and new ones get the new lib.
-      # Same discipline as torch/data/mnist.rkt's cache write.
+      # Same discipline as torch/vision/mnist.rkt's cache write.
       stageNativeLibs = src: ''
         _dest="$PWD/torch/native-libs"
         _stage_failed=0
