@@ -196,7 +196,7 @@
    '("register-finalizer called (fresh process per row)" "objects" "registration wall ms"
      "registrations/s" "finalizer runs" "finalizer threads running them" "never ran" "ran twice"
      "major collections to drain" "drain ms" "exactly once" "load"))
-  (for/or ([spec (in-vector finalizer-specs)] [i (in-naturals)])
+  (for/or ([(spec i) (in-indexed finalizer-specs)])
     (define label (finalizer-spec-label spec))
     (with-unsettled-stop label
       (define outcome (finalizer-row-in-fresh-racket i))
