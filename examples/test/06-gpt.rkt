@@ -1,14 +1,14 @@
 #lang racket/base
 
-;; Runner + tests for the literate ../../examples/racket/06-gpt.rkt.
+;; Runner + tests for the literate torch/scribblings/examples/06-gpt.rkt.
 
 (require (only-in racket/list first last)
          (only-in racket/math nan?)
          (only-in racket/string string-contains? string-prefix?)
          torch
          torch/nn
-         (only-in torch/text/data encode)
-         "../racket/06-gpt.rkt")
+         torch/scribblings/examples/06-gpt
+         (only-in torch/text/data encode))
 
 (module+ main
   (require (only-in "private/env.rkt" env-number))

@@ -4,8 +4,8 @@
          (only-in racket/math nan?)
          torch
          torch/nn
-         torch/text/translation
-         "../racket/13-translation.rkt")
+         torch/scribblings/examples/13-translation
+         torch/text/translation)
 
 (module+ main
   (require (only-in "private/env.rkt" env-number))

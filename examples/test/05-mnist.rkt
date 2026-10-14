@@ -1,13 +1,13 @@
 #lang racket/base
 
-;; Runner + tests for the literate ../../examples/racket/05-mnist.rkt.
+;; Runner + tests for the literate torch/scribblings/examples/05-mnist.rkt.
 
 (require (except-in racket/list argmax flatten take)
          (only-in racket/math nan?)
          torch
          torch/nn
-         (only-in torch/vision/mnist load-mnist-fixture)
-         "../racket/05-mnist.rkt")
+         torch/scribblings/examples/05-mnist
+         (only-in torch/vision/mnist load-mnist-fixture))
 
 (module+ main
   (require (only-in "private/env.rkt" env-number))

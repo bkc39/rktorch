@@ -1,7 +1,7 @@
 #lang scribble/manual
 @(require (only-in racket/format ~a ~r)
           (only-in racket/list last)
-          "../common.rkt"
+          torch/scribblings/common
           torch/scribblings/labels
           (for-label torch/data/loader
                      torch/vision/hymenoptera
@@ -85,8 +85,8 @@ fixed feature extractor with a small classifier on top:
 
 @section[#:tag "finetune-run"]{Two phases}
 
-@filepath{examples/racket/15-finetune.rkt} trains in two phases. First
-only the head learns, with the backbone frozen, at a rate of 0.001 with
+@filepath{torch/scribblings/examples/15-finetune.rkt} trains in two phases.
+First only the head learns, with the backbone frozen, at a rate of 0.001 with
 momentum 0.9 and a tenfold decay every seven epochs. Then every weight is
 unfrozen and the whole network trains at a tenth of that rate, so the
 pretrained features move only as far as the new task needs. Training

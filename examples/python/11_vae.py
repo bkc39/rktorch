@@ -1,8 +1,8 @@
-"""Parity twin of examples/racket/11-vae.rkt: the same linear VAE in the
-same declaration order under one seed, a reseed so the noise draws replay
-on every device, 5 full-batch Adam steps on the committed MNIST fixture
-with the reference loss divided by the batch size; prints per-step losses
-and the flattened parameters."""
+"""Parity twin of torch/scribblings/examples/11-vae.rkt: the same linear VAE in
+the same declaration order under one seed, a reseed so the noise draws replay
+on every device, 5 full-batch Adam steps on the committed MNIST fixture with
+the reference loss divided by the batch size; prints per-step losses and the
+flattened parameters."""
 
 import json
 import os

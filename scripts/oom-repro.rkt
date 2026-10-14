@@ -10,9 +10,9 @@
 
 (require torch
          torch/nn
+         (only-in torch/scribblings/examples/06-gpt gpt)
          (only-in torch/text/data
-                  contiguous-blocks encode load-heart-of-darkness text->vocab)
-         (only-in "../examples/racket/06-gpt.rkt" gpt))
+                  contiguous-blocks encode load-heart-of-darkness text->vocab))
 
 (with-default-device 'cuda
   (manual-seed! 0)

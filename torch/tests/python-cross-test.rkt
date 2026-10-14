@@ -283,11 +283,11 @@
              [i (in-naturals)])
          (check-= r p tol (format "04_mlp: parameter ~a parity" i))))
      (let ()
-       ;; Re-declared (torch/ can't reach examples/ once installed by copy in
-       ;; the nix build): MUST stay in sync with examples/racket/05-mnist.rkt
-       ;; — model, seed, steps, lr, full-batch regime. The shape guard below
-       ;; catches structural drift; a forward/recipe edit surfaces as a
-       ;; loss-parity mismatch. Same contract for the 06 gpt twin below.
+       ;; Re-declared: MUST stay in sync with
+       ;; torch/scribblings/examples/05-mnist.rkt — model, seed, steps, lr,
+       ;; full-batch regime. The shape guard below catches structural drift;
+       ;; a forward/recipe edit surfaces as a loss-parity mismatch. Same
+       ;; contract for the 06 gpt twin below.
        (define-layer convnet (c1 c2 f1 f2)
          #:init ()
          (set! c1 (Conv2d 1 16 3))
@@ -303,7 +303,7 @@
        (check-equal? (map tensor-shape (parameters (convnet)))
                      '((16 1 3 3) (16) (32 16 3 3) (32)
                        (128 800) (128) (10 128) (10))
-                     "convnet shape must match examples/racket/05-mnist.rkt")
+                     "convnet shape must match torch/scribblings/examples/05-mnist.rkt")
        (define (train-on device)
          (with-default-device device
            (manual-seed! 0)
@@ -352,7 +352,7 @@
                [i (in-naturals)])
            (check-= r p tol (format "mnist shuffle twin: parameter ~a" i)))))
      (let ()
-       ;; MUST stay in sync with examples/racket/06-gpt.rkt's gpt
+       ;; MUST stay in sync with torch/scribblings/examples/06-gpt.rkt's gpt
        (define-layer gpt (tok-emb pos-emb transformer head)
          #:init (vocab-size block-size)
          (set! tok-emb (Embedding vocab-size 32))
@@ -385,7 +385,7 @@
                              block-shapes block-shapes
                              (list '(32) '(32) (list v-size 32)
                                    (list v-size)))
-                     "gpt shape must match examples/racket/06-gpt.rkt")
+                     "gpt shape must match torch/scribblings/examples/06-gpt.rkt")
        (define (train-on device)
          (with-default-device device
            (manual-seed! 0)
@@ -410,7 +410,7 @@
                               'cuda 5e-3)))
      (let ()
        ;; Re-declared like the gpt above: MUST stay in sync with
-       ;; examples/racket/12-char-rnn.rkt
+       ;; torch/scribblings/examples/12-char-rnn.rkt
        (define-layer char-rnn (embed lstm head)
          #:init (vocab-size)
          (set! embed (Embedding vocab-size 32))
@@ -426,7 +426,7 @@
                      (list (list v-size 32)
                            '(256 32) '(256 64) '(256) '(256)
                            (list v-size 64) (list v-size))
-                     "char-rnn shape must match examples/racket/12-char-rnn.rkt")
+                     "char-rnn shape must match torch/scribblings/examples/12-char-rnn.rkt")
        (define (train-on device)
          (with-default-device device
            (manual-seed! 0)
@@ -453,7 +453,8 @@
          (check-training-twin "12_char_rnn" "python/12_char_rnn.py" train-on
                               'cuda 5e-3)))
      (let ()
-       ;; Re-declared: MUST stay in sync with examples/racket/13-translation.rkt
+       ;; Re-declared: MUST stay in sync with
+       ;; torch/scribblings/examples/13-translation.rkt
        (define hidden 32)
        (define-layer encoder (embed gru)
          #:init (vocab-size)
@@ -516,7 +517,7 @@
                            '(32 32) '(32) '(32 32) '(32) '(1 32) '(1)
                            '(96 64) '(96 32) '(96) '(96)
                            (list v-size hidden) (list v-size))
-                     "seq2seq shape must match examples/racket/13-translation.rkt at #:hidden 32")
+                     "seq2seq shape must match torch/scribblings/examples/13-translation.rkt at #:hidden 32")
        (define (train-on device)
          (with-default-device device
            (manual-seed! 0)
@@ -581,7 +582,8 @@
          (check-training-twin "08_diffusion" "python/08_diffusion.py" train-on
                               'cuda 5e-3)))
      (let ()
-       ;; MUST stay in sync with examples/racket/09-resnet.rkt's run-example
+       ;; MUST stay in sync with torch/scribblings/examples/09-resnet.rkt's
+       ;; run-example
        (define (train-on device)
          (with-default-device device
            (manual-seed! 0)
@@ -609,9 +611,10 @@
          (check-training-twin "09_resnet" "python/09_resnet.py" train-on
                               'cuda 5e-3)))
      (let ()
-       ;; MUST stay in sync with examples/racket/10-dcgan.rkt: the losses
-       ;; are the discriminator's and the generator's per step, interleaved,
-       ;; and the parameters are the generator's then the discriminator's
+       ;; MUST stay in sync with torch/scribblings/examples/10-dcgan.rkt: the
+       ;; losses are the discriminator's and the generator's per step,
+       ;; interleaved, and the parameters are the generator's then the
+       ;; discriminator's
        (define-layer gen-twin (fc bn0 up1 bn1 up2)
          #:init ()
          (set! fc (Linear 100 (* 128 7 7) #:bias? #f))
@@ -673,7 +676,7 @@
          (check-training-twin "10_dcgan" "python/10_dcgan.py" train-on
                               'cuda 5e-3)))
      (let ()
-       ;; MUST stay in sync with examples/racket/11-vae.rkt
+       ;; MUST stay in sync with torch/scribblings/examples/11-vae.rkt
        (define-layer vae-twin (enc mu-head logvar-head dec1 dec2)
          #:init ()
          (set! enc (Linear 784 400))

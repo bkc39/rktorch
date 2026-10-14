@@ -1,9 +1,9 @@
-"""Parity twin of examples/racket/10-dcgan.rkt: the same generator and
-discriminator in the same declaration order under one seed, a reseed so
-the latent draws replay on every device, and 3 full-batch steps on the
-committed MNIST fixture with Adam(lr=2e-4, betas=(0.5, 0.999)); prints the
-discriminator and generator losses per step interleaved and the flattened
-parameters of both networks, generator first."""
+"""Parity twin of torch/scribblings/examples/10-dcgan.rkt: the same generator
+and discriminator in the same declaration order under one seed, a reseed so the
+latent draws replay on every device, and 3 full-batch steps on the committed
+MNIST fixture with Adam(lr=2e-4, betas=(0.5, 0.999)); prints the discriminator
+and generator losses per step interleaved and the flattened parameters of both
+networks, generator first."""
 
 import json
 import os
