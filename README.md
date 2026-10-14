@@ -117,7 +117,7 @@ instance applies as a procedure.
 
 ```racket
 (require torch torch/nn torch/data/loader
-         (only-in torch/data/mnist load-mnist-fixture))
+         (only-in torch/vision/mnist load-mnist-fixture))
 
 (define-layer mlp (flat fc1 fc2)
   #:init (hidden)
@@ -178,24 +178,30 @@ Parameters are named as PyTorch names them, so checkpoints read naturally:
 The examples are literate programs, each with a PyTorch twin it is tested
 against:
 
-- [Seeded draws](examples/racket/00-randn.rkt), [arithmetic](examples/racket/01-arith.rkt),
-  and [matrix products](examples/racket/02-matmul.rkt)
-- [Autograd](examples/racket/03-autograd.rkt)
-- [A two-layer perceptron](examples/racket/04-mlp.rkt)
-- [A convolutional network on MNIST](examples/racket/05-mnist.rkt), trained on
-  shuffled minibatches from a dataloader
-- [A character-level GPT](examples/racket/06-gpt.rkt) on the library's
-  transformer layers, with [training](scripts/train-gpt.rkt) and
+- [Seeded draws](torch/scribblings/examples/00-randn.rkt),
+  [arithmetic](torch/scribblings/examples/01-arith.rkt), and
+  [matrix products](torch/scribblings/examples/02-matmul.rkt)
+- [Autograd](torch/scribblings/examples/03-autograd.rkt)
+- [A two-layer perceptron](torch/scribblings/examples/04-mlp.rkt)
+- [A convolutional network on
+  MNIST](torch/scribblings/examples/05-mnist.rkt), trained on shuffled
+  minibatches from a dataloader
+- [A character-level GPT](torch/scribblings/examples/06-gpt.rkt) on the
+  library's transformer layers, with [training](scripts/train-gpt.rkt) and
   [generation](scripts/generate-gpt.rkt) scripts
-- [Speech recognition on LibriSpeech](examples/racket/07-asr.rkt): a spectral
-  front end, an encoder-decoder on the library's transformer layers, and
-  CTC, with a [training script](scripts/train-asr.rkt)
-- [Image generation on CIFAR-10](examples/racket/08-diffusion.rkt): a
+- [Speech recognition on
+  LibriSpeech](torch/scribblings/examples/07-asr.rkt): a spectral front end,
+  an encoder-decoder on the library's transformer layers, and CTC, with a
+  [training script](scripts/train-asr.rkt)
+- [Image generation on
+  CIFAR-10](torch/scribblings/examples/08-diffusion.rkt): a
   class-conditional DDPM with a UNet, trained with an EMA of the weights
-- [A character-level LSTM](examples/racket/12-char-rnn.rkt): gradient
-  clipping, and sampling at a temperature from a carried state
-- [French to English translation](examples/racket/13-translation.rkt): a GRU
-  encoder-decoder with Bahdanau attention, teacher forcing, and greedy decoding
+- [A character-level LSTM](torch/scribblings/examples/12-char-rnn.rkt):
+  gradient clipping, and sampling at a temperature from a carried state
+- [French to English
+  translation](torch/scribblings/examples/13-translation.rkt): a GRU
+  encoder-decoder with Bahdanau attention, teacher forcing, and greedy
+  decoding
 
 ## Documentation
 
@@ -233,4 +239,5 @@ follows and which it keeps as a reference implementation.
 [`torch/info.rkt`](torch/info.rkt). The code is Apache-2.0; the committed
 data fixtures carry the licenses of their sources, recorded in the `NOTICE`
 beside each one ([`torch/audio/fixtures`](torch/audio/fixtures/NOTICE),
-[`torch/data/fixtures`](torch/data/fixtures/NOTICE)).
+[`torch/text/fixtures`](torch/text/fixtures/NOTICE),
+[`torch/vision/fixtures`](torch/vision/fixtures/NOTICE)).

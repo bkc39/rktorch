@@ -1,8 +1,6 @@
 #lang scribble/lp2
 
-@(require (for-label (except-in racket/base abs cos exp log sin sort sqrt max min length
-                                + - * / < <= > >=)
-                     torch torch/nn))
+@(require torch/scribblings/labels)
 
 @title[#:tag "ex-char-rnn"]{A character-level LSTM on Heart of Darkness}
 
@@ -25,7 +23,7 @@ the whole context.
          (only-in racket/list last)
          (only-in racket/match match)
          torch torch/nn
-         (only-in torch/data/text
+         (only-in torch/text/data
                   contiguous-blocks
                   decode
                   encode
@@ -138,7 +136,7 @@ excerpt, and @envvar{EPOCHS}, @envvar{TEMPERATURE} and @envvar{SEED} override
 the defaults.
 
 @chunk[<r12-train>
-(define-runtime-path excerpt-path "../data/heart-of-darkness-part-i.txt")
+(define-runtime-path excerpt-path "data/heart-of-darkness-part-i.txt")
 
 (define (load-excerpt)
   (file->string excerpt-path))

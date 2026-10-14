@@ -1,5 +1,6 @@
-"""Parity twin of examples/racket/06-gpt.rkt: same seed, the same GPT in the
-same declaration order, 5 full-batch Adam steps on the committed fixture.
+"""Parity twin of torch/scribblings/examples/06-gpt.rkt: same seed, the same
+GPT in the same declaration order, 5 full-batch Adam steps on the committed
+fixture.
 
 The stack is the standard nn.TransformerEncoder over a pre-norm
 nn.TransformerEncoderLayer with an exact-gelu MLP four times the width and
@@ -20,7 +21,7 @@ import torch
 from torch import nn
 
 FIXTURE = os.path.join(
-    os.path.dirname(__file__), "..", "..", "torch", "data", "fixtures",
+    os.path.dirname(__file__), "..", "..", "torch", "text", "fixtures",
     "heart-of-darkness-excerpt.txt")
 
 DEVICE = os.environ.get("RKTORCH_PARITY_DEVICE") or "cpu"

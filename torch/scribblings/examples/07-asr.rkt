@@ -1,8 +1,6 @@
 #lang scribble/lp2
 
-@(require (for-label (except-in racket/base abs cos exp log sin sort sqrt max min length
-                                + - * / < <= > >=)
-                     torch torch/nn))
+@(require torch/scribblings/labels)
 
 @title[#:tag "ex-asr"]{Speech to text on LibriSpeech with CTC and attention}
 
@@ -36,7 +34,7 @@ CTC aligns, attention spells.
                   librispeech-utterances load-librispeech-fixture
                   load-utterance utterance-path utterance-transcript)
          (only-in torch/audio/metrics cer wer)
-         (only-in torch/data/text decode encode text->vocab))]
+         (only-in torch/text/data decode encode text->vocab))]
 
 @chunk[<r07-provide>
 (provide asr pick-device run-example greedy-decode transcribe

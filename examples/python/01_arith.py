@@ -1,4 +1,5 @@
-"""Parity twin of examples/racket/01-arith.rkt: (x + 1) * relu(x)."""
+"""Parity twin of torch/scribblings/examples/01-arith.rkt:
+(x + 1) * relu(x)."""
 
 import json
 

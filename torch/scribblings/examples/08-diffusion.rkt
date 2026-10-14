@@ -1,8 +1,7 @@
 #lang scribble/lp2
 
-@(require (for-label (except-in racket/base abs cos exp log sin sort sqrt max min length
-                                + - * / < <= > >=)
-                     torch torch/nn torch/data/loader torch/vision/cifar10
+@(require torch/scribblings/labels
+          (for-label torch/data/loader torch/vision/cifar10
                      torch/vision/diffusion))
 
 @title[#:tag "ex-diffusion"]{Training a denoising diffusion model on CIFAR-10}
@@ -111,11 +110,11 @@ example works in.
     (define opt (adam (parameters net) #:lr lr))
     (manual-seed! 0)
     (for/list ([epoch (in-range epochs)])
-      (define-values (total count)
-        (for/fold ([total 0.0] [count 0]) ([(xb yb) loader])
+      (define-values (total seen)
+        (for/fold ([total 0.0] [seen 0]) ([(xb yb) loader])
           (values (+ total (* (length xb) (train-step net sched opt xb yb device)))
-                  (+ count (length xb)))))
-      (/ total count))))]
+                  (+ seen (length xb)))))
+      (/ total seen))))]
 
 @chunk[<*>
   <r08-require>

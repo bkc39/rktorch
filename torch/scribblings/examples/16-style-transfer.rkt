@@ -2,10 +2,8 @@
 
 @(require (only-in racket/format ~r)
           (only-in torch/scribblings/common photo)
-          (for-label (except-in racket/base abs cos exp log sin sort sqrt max min length
-                                + - * / < <= > >=)
-                     racket/match
-                     torch torch/nn torch/vision/image torch/vision/transforms
+          torch/scribblings/labels
+          (for-label torch/vision/image torch/vision/transforms
                      torch/vision/vgg))
 
 @title[#:tag "ex-style-transfer"]{Painting a photograph in the style of another}

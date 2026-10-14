@@ -4,7 +4,7 @@
          (only-in racket/math nan?)
          torch
          torch/nn
-         "../racket/12-char-rnn.rkt")
+         torch/scribblings/examples/12-char-rnn)
 
 (module+ main
   (require (only-in "private/env.rkt" env-number))

@@ -1,22 +1,8 @@
 #lang scribble/manual
 
 @(require "common.rkt"
-          (for-label (except-in racket/base
-                                abs cos exp log sin sort sqrt max min length
-                                + - * / < <= > >=)
-                     racket/contract
-                     torch
-                     (only-in torch/nn
-                              Dropout Embedding LSTM LayerList LayerNorm
-                              Linear MultiheadAttention TransformerDecoder
-                              TransformerDecoderLayer TransformerEncoder
-                              TransformerEncoderLayer causal-mask child-ref
-                              eval! in-layers layer-copy layer? load-state!
-                              multihead-attention? named-children
-                              named-parameters parameters sinusoidal-positions
-                              transformer-decoder-layer? transformer-decoder?
-                              transformer-encoder-layer? transformer-encoder?)
-                     (only-in torch/vision/diffusion sinusoidal-embedding)))
+          torch/scribblings/labels
+          (for-label (only-in torch/vision/diffusion sinusoidal-embedding)))
 
 @title[#:tag "attention"]{Attention and transformer layers}
 

@@ -1,15 +1,64 @@
 #lang scribble/manual
 
-@(require (for-label racket/base
-                     racket/contract
-                     (only-in torch tensor?)
-                     (only-in torch/data/loader dataloader tensor-dataset)
-                     (only-in torch/nn nll-loss)
-                     torch/data/translation))
+@(require torch/scribblings/labels
+          (for-label (only-in torch/data/loader dataloader tensor-dataset)
+                     torch/text/data
+                     torch/text/translation)
+          "common.rkt")
 
-@title{Translation pairs}
+@title{Text datasets}
 
-@defmodule[torch/data/translation]
+@defmodule[torch/text/data]
+
+Character-level text: a corpus as one string, a vocabulary of its
+characters, and the int64 token tensors a language model consumes.
+
+@defproc[(load-heart-of-darkness) string?]{
+Conrad's novella from Project Gutenberg, fetched once into the cache
+directory with the licence boilerplate stripped; the corpus of the
+character GPT and the character LSTM.}
+
+@defproc[(load-text-fixture) string?]{
+A committed excerpt of the same text, for the tests and the offline
+examples.}
+
+@defproc[(text->vocab [text string?]) (vectorof char?)]{
+The distinct characters of @racket[text], sorted, so that a character's
+index in the vector is its token.}
+
+@defproc[(encode [vocab (vectorof char?)] [text string?]) tensor?]{
+@racket[text] as an int64 tensor of tokens under @racket[vocab]. A
+character outside the vocabulary is an error.
+
+@torch-examples[
+(require torch/text/data)
+(define vocab (text->vocab "hello"))
+vocab
+(encode vocab "ole")
+]}
+
+@defproc[(decode [vocab (vectorof char?)]
+                 [tokens (or/c tensor? (listof exact-nonnegative-integer?))])
+         string?]{
+The inverse: tokens, as a tensor or a list, back to a string.
+
+@torch-examples[(decode (text->vocab "hello") '(1 0 2 2 3))]}
+
+@defproc[(contiguous-blocks [tokens tensor?] [block-size exact-positive-integer?])
+         (values tensor? tensor?)]{
+The token vector cut into as many whole blocks of @racket[block-size] as
+fit, as two @tt{[B block-size]} tensors: the inputs, and the same tokens
+shifted one place on, which are the targets a next-token model predicts.
+Both are views over @racket[tokens]. Deterministic, so a parity twin sees
+the same batches.
+
+@torch-examples[
+(contiguous-blocks (arange 7 #:dtype 'int64) 3)
+]}
+
+@section{Translation pairs}
+
+@defmodule[torch/text/translation]
 
 The English-French sentence pairs of the PyTorch seq2seq tutorial, prepared as
 the tutorial prepares them: each sentence lower-cased and reduced to ASCII
@@ -80,7 +129,7 @@ The English openings the tutorial keeps: @tt{"i am "}, @tt{"i m "},
 and @italic{they} counterparts.
 }
 
-@section{Vocabularies}
+@subsection{Vocabularies}
 
 @deftogether[(@defthing[pad-id exact-nonnegative-integer?]
               @defthing[sos-id exact-nonnegative-integer?]

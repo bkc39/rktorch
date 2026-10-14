@@ -1,6 +1,7 @@
 #lang racket/base
 
-;; Runner + tests for the literate ../../examples/racket/16-style-transfer.rkt.
+;; Runner + tests for the literate
+;; torch/scribblings/examples/16-style-transfer.rkt.
 
 (require racket/runtime-path)
 
@@ -12,8 +13,8 @@
 (module+ main
   (require (only-in racket/format ~r)
            (only-in torch select)
-           (only-in torch/vision/ppm write-ppm)
-           "../racket/16-style-transfer.rkt")
+           torch/scribblings/examples/16-style-transfer
+           (only-in torch/vision/ppm write-ppm))
   ;; The headline run: torchvision's VGG-16 features (a 56 MiB range of
   ;; the checkpoint, fetched once), 1000 Adam steps at 384 pixels, the
   ;; result written beside the working directory.
@@ -38,7 +39,7 @@
            rackunit
            torch
            (only-in torch/nn in-parameters)
-           "../racket/16-style-transfer.rkt")
+           torch/scribblings/examples/16-style-transfer)
   ;; Offline and deterministic: random weights, both images at 32 pixels,
   ;; five steps on the CPU.
   (manual-seed! 0)

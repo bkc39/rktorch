@@ -1,10 +1,10 @@
-"""The two phases of examples/racket/15-finetune.rkt at fixture scale, for
-imagenet-parity-test.rkt: torchvision's ResNet-18 with its ImageNet
-weights and a fresh two-way head, three SGD steps on the head alone with
-the backbone frozen, then three on everything at a tenth of the rate.
-The batch is the four committed photographs through the ImageNet
-preprocessing, with no augmentation, so every step is deterministic. The
-fresh head travels back so the Racket side starts from the same network.
+"""The two phases of torch/scribblings/examples/15-finetune.rkt at fixture
+scale, for imagenet-parity-test.rkt: torchvision's ResNet-18 with its ImageNet
+weights and a fresh two-way head, three SGD steps on the head alone with the
+backbone frozen, then three on everything at a tenth of the rate. The batch is
+the four committed photographs through the ImageNet preprocessing, with no
+augmentation, so every step is deterministic. The fresh head travels back so
+the Racket side starts from the same network.
 """
 import json
 

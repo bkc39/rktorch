@@ -1,9 +1,9 @@
-"""Parity twin of examples/racket/09-resnet.rkt: the same narrow ResNet
-(base width 16, blocks 2-2-2-2, bias-free convolutions, batch norm) in the
-same declaration order, seeded, and 3 full-batch steps of SGD at lr 0.005 with
-momentum 0.9 and weight decay 5e-4 (a gentle rate: batch norm amplifies the
-last-bit kernel differences between torch builds) on the committed CIFAR-10 fixture; prints per-step
-losses and the flattened parameters."""
+"""Parity twin of torch/scribblings/examples/09-resnet.rkt: the same narrow
+ResNet (base width 16, blocks 2-2-2-2, bias-free convolutions, batch norm) in
+the same declaration order, seeded, and 3 full-batch steps of SGD at lr 0.005
+with momentum 0.9 and weight decay 5e-4 (a gentle rate: batch norm amplifies
+the last-bit kernel differences between torch builds) on the committed CIFAR-10
+fixture; prints per-step losses and the flattened parameters."""
 
 import json
 import os
