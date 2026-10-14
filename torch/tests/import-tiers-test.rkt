@@ -1,16 +1,12 @@
 #lang racket/base
 
 (module+ test
-  (require (for-syntax racket/base)
-           (only-in racket/file file->lines)
-           (only-in racket/list filter-map last)
+  (require (only-in racket/list filter-map last)
            (only-in racket/match match)
            (only-in racket/path file-name-from-path path-only)
-           (only-in racket/runtime-path define-runtime-path)
            (only-in racket/set
-                    in-set list->seteq set set->list set-add set-empty?
-                    set-intersect set-member? set-subtract set-union seteq
-                    subset?)
+                    in-set list->seteq set set-add set-empty? set-intersect
+                    set-member? set-union seteq subset?)
            (only-in rackunit
                     check-equal? check-exn check-false check-not-eq?
                     check-not-equal? check-not-false check-true test-case)
@@ -169,10 +165,30 @@
                  (expands? '(module clashing '#%kernel
                               (#%require (for-label racket/base torch)))))))
 
-  (define shadowing-modules '(torch/foreign torch/main torch/operators))
+  (test-case "L3'': torch shadows racket/base and racket as a module language"
+    (for ([language (in-list '(racket/base racket))])
+      (parameterize ([current-namespace (make-base-namespace)])
+        (eval `(module natural ,language
+                 (require torch)
+                 (provide results)
+                 (define results
+                   (list (sqrt 4)
+                         (take '(1 2 3) 2)
+                         (tensor? (* (tensor (list 1.0 4.0)) 2.0))
+                         (tensor->list (sqrt (tensor (list 1.0 4.0))))))))
+        (check-equal? (dynamic-require ''natural 'results)
+                      '(2 (1 2) #t (1.0 2.0))
+                      (symbol->string language)))))
+
+  (define shadowing-modules
+    '(torch/foreign torch/generated torch/main torch/operators))
+
+  (test-case "L4: torch/generated shares only take with racket"
+    (check-equal? (set-intersect (export-set 'torch/generated) racket-exports)
+                  (seteq 'take)))
 
   (test-case "L4: every other public module requires beside racket"
-    (check-true (subset? (seteq 'torch/generated 'torch/nn 'torch/safe)
+    (check-true (subset? (seteq 'torch/nn 'torch/safe)
                          (list->seteq public-modules)))
     (for ([module (in-list public-modules)]
           #:unless (memq module shadowing-modules))
@@ -265,15 +281,4 @@
     (parameterize ([current-namespace (make-base-namespace)])
       (eval '(module requires-racket racket/base (require racket)))
       (check-true (set-member? (static-imports ''requires-racket) racket-main))
-      (check-false (set-member? (static-imports 'torch/safe) racket-main))))
-
-  (define-runtime-path racket-names-file "../../codegen/racket-names.txt")
-
-  (test-case "codegen/racket-names.txt lists every racket and threading export"
-    (define listed
-      (~> racket-names-file file->lines (map string->symbol _) list->seteq))
-    (check-equal? (~> (set-union racket-exports (export-set 'threading))
-                      (set-subtract listed)
-                      set->list
-                      (sort symbol<?))
-                  '())))
+      (check-false (set-member? (static-imports 'torch/safe) racket-main)))))

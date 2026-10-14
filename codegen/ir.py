@@ -16,7 +16,6 @@ the generator reports skips instead of guessing.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
 
 from torchgen.model import (
     BaseTy,
@@ -84,16 +83,14 @@ class Skip:
     shard: str
 
 
-RACKET_NAMES = frozenset(
-    (Path(__file__).resolve().parent / "racket-names.txt")
-    .read_text().split())
-
-_HAND_SHIMMED = frozenset({
+# Base-colliding names: _RACKET_COLLISIONS have hand-written tr_* shims
+# (skip); _BASE_SHADOWED generate as <name>-tensor, promoted by hand.
+_RACKET_COLLISIONS = frozenset({
     "exp", "log", "sqrt", "tanh", "max", "min", "argmax", "flatten",
     "round", "floor", "ceiling", "truncate",
 })
 
-assert _HAND_SHIMMED <= RACKET_NAMES
+_BASE_SHADOWED = frozenset({"abs", "cos", "sin", "sort"})
 
 _BASE_KINDS = {
     BaseTy.Tensor: TENSOR,
@@ -195,10 +192,10 @@ def classify(f: NativeFunction, shard: str) -> Op | Skip:
                     "first argument")
 
     rkt_name = _racket_name(func.name)
-    if func.name.name.base in _HAND_SHIMMED:
+    if func.name.name.base in _RACKET_COLLISIONS:
         return skip(f"name collides with a shadow-dispatched binding "
                     f"({rkt_name}); promote by hand with the dispatch shim")
-    if {rkt_name, rkt_name.removesuffix("!")} & RACKET_NAMES:
+    if func.name.name.base in _BASE_SHADOWED:
         rkt_name = (f"{rkt_name[:-1]}-tensor!" if rkt_name.endswith("!")
                     else f"{rkt_name}-tensor")
 

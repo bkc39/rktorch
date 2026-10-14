@@ -15,26 +15,36 @@
 
 @title[#:tag "imports"]{Importing beside racket}
 
-@racketmodname[torch] extends some of @racketmodname[racket]'s own names to
-tensors, so @racket[(require torch)] works under @racketmodname[racket/base]
-but not beside @racketmodname[racket] or @racketmodname[racket/list], where
-two modules would supply the same name. Two modules split
-@racketmodname[torch] along that line; together they are
+In a module written in @racketmodname[racket/base] or @racketmodname[racket],
+@racket[(require torch)] shadows the language's bindings. @racket[+],
+@racket[*], @racket[sqrt], @racket[take] and the rest of
+@racketmodname[torch/operators] take a tensor to libtorch and hand anything
+else to @racketmodname[racket]'s binding.
+
+@examples[#:eval tiers-eval
+  (require torch)
+  (define x (tensor (list 1.0 4.0 9.0)))
+  (* x 2.0)
+  (sqrt x)
+  (sqrt 4)
+  (take (list 1 2 3) 2)]
+
+A require cannot shadow another require, so @racketmodname[torch] does not
+require beside @racketmodname[racket] or @racketmodname[racket/list], for
+label or otherwise:
+
+@examples[#:eval tiers-eval #:label #f
+  (eval:error (module twice racket/base (require racket torch)))]
+
+Two modules split @racketmodname[torch] along that line; together they are
 @racketmodname[torch].
 
 @defmodule[torch/safe #:no-declare]
 
 Every binding of @racketmodname[torch] whose name @racketmodname[racket]
 does not export, so it requires beside @racketmodname[racket] and
-@racketmodfont{threading}. The tensor operators, @racket[+] and
-@racket[sqrt] among them, are a @racket[prefix-in] of
-@racketmodname[torch/operators] away.
-
-@examples[#:eval tiers-eval
-  (require racket torch/safe (prefix-in t: torch/operators))
-  (define x (tensor (list 1.0 4.0 9.0)))
-  (t:* x 2.0)
-  (t:sqrt x)]
+@racketmodfont{threading}, for label too.
+@racket[(prefix-in t: torch/operators)] adds the operators beside it.
 
 @defmodule[torch/operators #:no-declare]
 
