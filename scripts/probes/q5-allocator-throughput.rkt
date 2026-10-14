@@ -31,12 +31,10 @@
 (define settle-round-limit 50)
 
 (define (settle! when-settling)
-  (define stop
-    (with-unsettled-stop when-settling
-      (define-values (ran _collections) (settle-wills! #:limit settle-round-limit))
-      (and (not ran)
-           (format "wills still ran after ~a major collections" settle-round-limit))))
-  (and stop (raise (exn:fail:unsettled stop (current-continuation-marks)))))
+  (with-unsettled-stop when-settling
+    (define-values (ran _collections) (settle-wills! #:limit settle-round-limit))
+    (and (not ran)
+         (format "wills still ran after ~a major collections" settle-round-limit))))
 
 (struct cell (workers rate gc-share longest-gap made calls pending unaccounted))
 

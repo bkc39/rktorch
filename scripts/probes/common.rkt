@@ -83,7 +83,6 @@
          middle-by
          collect-past-canary!
          settle-wills!
-         exn:fail:unsettled
          with-unsettled-stop
          rate->string)
 
@@ -460,9 +459,24 @@
 
 (struct exn:fail:unsettled exn:fail ())
 
+(define unsettled-contexts (make-parameter '()))
+
+(define (raise-unsettled reason)
+  (raise (exn:fail:unsettled (~> (unsettled-contexts) (cons reason _) reverse (string-join ": "))
+                             (current-continuation-marks))))
+
+(define (call-with-unsettled-stop context thunk)
+  (define outer (unsettled-contexts))
+  (define (run)
+    (parameterize ([unsettled-contexts (cons context outer)])
+      (define reason (thunk))
+      (and reason (raise-unsettled reason))))
+  (cond
+    [(pair? outer) (run)]
+    [else (with-handlers ([exn:fail:unsettled? exn-message]) (run))]))
+
 (define-syntax-parse-rule (with-unsettled-stop context:expr body:expr ...+)
-  (let ([reason (with-handlers ([exn:fail:unsettled? exn-message]) body ...)])
-    (and reason (format "~a: ~a" context reason))))
+  (call-with-unsettled-stop context (lambda () body ...)))
 
 (define (collect-past-canary!)
   (define executor (force finalizer-executor))
@@ -475,9 +489,8 @@
                           (semaphore-post canary-finalized))))
   (collect-garbage 'major)
   (unless (sync/timeout canary-timeout-seconds canary-finalized)
-    (raise (exn:fail:unsettled
-            (format "a will held the finalizer thread past the ~a s canary" canary-timeout-seconds)
-            (current-continuation-marks))))
+    (raise-unsettled
+     (format "a will held the finalizer thread past the ~a s canary" canary-timeout-seconds)))
   (unbox drained))
 
 (define (collect-round!)
