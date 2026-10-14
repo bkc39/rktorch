@@ -1,8 +1,6 @@
 #lang scribble/lp2
 
-@(require (for-label (except-in racket/base abs cos exp log sin sort sqrt max min length
-                                + - * / < <= > >=)
-                     torch))
+@(require torch/scribblings/labels)
 
 @title[#:tag "ex-autograd"]{Autograd: gradients by backpropagation}
 
@@ -28,8 +26,9 @@ Racket exactly as in Python — refuses gradients on integer tensors.
   (backward! (~> x (* x) Σ))
   (grad x))]
 
-The matching @filepath{python/03_autograd.py} runs the same computation in
-PyTorch; both sides are deterministic, so the cross-test checks exact values.
+The matching @filepath{examples/python/03_autograd.py} runs the same
+computation in PyTorch; both sides are deterministic, so the cross-test
+checks exact values.
 
 @chunk[<*>
   <r03-require>

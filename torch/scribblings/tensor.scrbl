@@ -1,16 +1,7 @@
 #lang scribble/manual
 
 @(require "common.rkt"
-          (for-label racket/base
-                     racket/contract
-                     (only-in torch
-                              arange device device? device/c dtype dtype/c
-                              eye full full-like in-flattened-tensor in-tensor
-                              item manual-seed! numel ones ones-like rand
-                              rand-like randn randn-like shape sum tensor
-                              tensor->list tensor->string tensor-device
-                              tensor-dtype tensor-numel tensor-shape tensor?
-                              to-dtype zeros zeros-like)))
+          torch/scribblings/labels)
 
 @title{Tensors}
 
@@ -123,6 +114,12 @@ A tensor of the given shape filled with @racket[value], as
 integer dtype refuses @racket[0.5].
 
 @torch-examples[(full 7 2 2)]}
+
+@defproc[(fill-value/c [dtype dtype/c]) flat-contract?]{
+The values @racket[full] accepts for @racket[dtype]. For @racket['int64], an
+integer from −2@superscript{63} to 2@superscript{63} − 1 that a double
+represents exactly; for @racket['uint8], 0–255; for @racket['bool], 0 or 1;
+any real otherwise.}
 
 @defproc[(eye [n exact-nonnegative-integer?] [m exact-nonnegative-integer? n]
               [#:device device device/c #f]

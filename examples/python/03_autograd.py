@@ -1,4 +1,5 @@
-"""Parity twin of examples/racket/03-autograd.rkt: d(sum(x*x))/dx == 2x."""
+"""Parity twin of torch/scribblings/examples/03-autograd.rkt:
+d(sum(x*x))/dx == 2x."""
 
 import json
 

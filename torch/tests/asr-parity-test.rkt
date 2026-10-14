@@ -1,16 +1,16 @@
 #lang racket/base
 
 ;; Needs the `nix develop` python; the model re-declaration MUST stay in
-;; sync with examples/racket/07-asr.rkt, as the 05/06 twins do.
+;; sync with torch/scribblings/examples/07-asr.rkt, as the 05/06 twins do.
 
 (module+ test
   (require (only-in racket/list last)
            rackunit
            (only-in "../audio/functional.rkt" log-mel-spectrogram)
            (only-in "../audio/librispeech.rkt" load-librispeech-fixture)
-           (only-in "../data/text.rkt" encode text->vocab)
            "../main.rkt"
            "../nn.rkt"
+           (only-in "../text/data.rkt" encode text->vocab)
            "private/python-env.rkt")
 
   (cond

@@ -1,8 +1,7 @@
 #lang scribble/lp2
 
-@(require (for-label (except-in racket/base abs cos exp log sin sort sqrt max min length
-                                + - * / < <= > >=)
-                     torch torch/nn torch/data/loader torch/data/translation))
+@(require torch/scribblings/labels
+          (for-label torch/data/loader torch/text/translation))
 
 @title[#:tag "ex-translation"]{Translating French with a GRU and attention}
 
@@ -11,7 +10,7 @@ ocaml-torch's @tt{translation} example: a @racket[GRU] encoder reads a French
 sentence into a sequence of states, and a @racket[GRU] decoder writes the
 English one word at a time, looking back over the encoder's states through
 Bahdanau attention at every step. The data is the tutorial's too, the short
-sentence pairs @racketmodname[torch/data/translation] prepares.
+sentence pairs @racketmodname[torch/text/translation] prepares.
 
 Everything recurrent in the library meets here: the layers' carried state (the
 decoder is one @racket[GRU] applied a step at a time), @racket[topk] for greedy
@@ -24,8 +23,8 @@ batch.
          (only-in racket/string string-split)
          torch torch/nn
          torch/data/loader
-         torch/data/translation
-         (only-in torch/audio/functional edit-distance))]
+         (only-in torch/audio/functional edit-distance)
+         torch/text/translation)]
 
 @chunk[<r13-provide>
 (provide encoder attention decoder seq2seq
@@ -43,13 +42,13 @@ simply the output at that position. A one-hot mask of the @tt{<eos>} positions,
 batched @racket[matmul].
 
 @chunk[<r13-encoder>
-(define-layer encoder (embed drop gru)
-  #:init (vocab-size hidden dropout)
+(define-layer encoder (embed dropout gru)
+  #:init (vocab-size hidden p)
   (set! embed (Embedding vocab-size hidden))
-  (set! drop (Dropout #:p dropout))
+  (set! dropout (Dropout #:p p))
   (set! gru (GRU hidden hidden #:batch-first? #t))
   #:forward (tokens)
-  (define-values (outputs _final) (gru (drop (embed tokens))))
+  (define-values (outputs _final) (~> tokens embed dropout gru))
   (define at-eos
     (unsqueeze (to-dtype (eq tokens eos-id) (tensor-dtype outputs)) 1))
   (values outputs (transpose (matmul at-eos outputs) 0 1)))]
@@ -82,15 +81,15 @@ the state. The new output goes through a @racket[Linear] head to vocabulary
 logits. The step answers the logits, the new state and the attention weights.
 
 @chunk[<r13-decoder>
-(define-layer decoder (embed drop attend gru head)
-  #:init (vocab-size hidden dropout)
+(define-layer decoder (embed dropout attend gru head)
+  #:init (vocab-size hidden p)
   (set! embed (Embedding vocab-size hidden))
-  (set! drop (Dropout #:p dropout))
+  (set! dropout (Dropout #:p p))
   (set! attend (attention hidden))
   (set! gru (GRU (* 2 hidden) hidden #:batch-first? #t))
   (set! head (Linear hidden vocab-size))
   #:forward (previous state keys padding)
-  (define embedded (drop (embed previous)))
+  (define embedded (dropout (embed previous)))
   (define-values (context weights)
     (attend (transpose state 0 1) keys padding))
   (define-values (output next-state)

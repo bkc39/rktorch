@@ -1,10 +1,6 @@
 #lang scribble/manual
-@(require "../common.rkt"
-          (for-label (except-in racket/base
-                                abs cos exp log sin sort sqrt max min length
-                                + - * / < <= > >=)
-                     torch
-                     torch/nn))
+@(require torch/scribblings/common
+          torch/scribblings/labels)
 
 @title[#:tag "guide-autograd"]{Automatic differentiation}
 

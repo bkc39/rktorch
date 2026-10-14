@@ -1,5 +1,6 @@
-"""Parity twin of examples/racket/05-mnist.rkt: same seed, same convnet in
-the same declaration order, 5 full-batch Adam steps on the committed fixture."""
+"""Parity twin of torch/scribblings/examples/05-mnist.rkt: same seed, same
+convnet in the same declaration order, 5 full-batch Adam steps on the committed
+fixture."""
 
 import json
 import os
@@ -9,7 +10,7 @@ import torch
 from torch import nn
 
 FIXTURES = os.path.join(
-    os.path.dirname(__file__), "..", "..", "torch", "data", "fixtures")
+    os.path.dirname(__file__), "..", "..", "torch", "vision", "fixtures")
 
 DEVICE = os.environ.get("RKTORCH_PARITY_DEVICE") or "cpu"
 
