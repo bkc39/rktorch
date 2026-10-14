@@ -1,10 +1,7 @@
 #lang scribble/manual
 
-@(require (for-label racket/base
-                     racket/contract
-                     (only-in torch arange tensor?)
-                     (only-in torch/data/loader dataloader tensor-dataset)
-                     (only-in torch/nn nll-loss)
+@(require torch/scribblings/labels
+          (for-label (only-in torch/data/loader dataloader tensor-dataset)
                      torch/text/data
                      torch/text/translation)
           "common.rkt")

@@ -1,11 +1,7 @@
 #lang scribble/manual
 
 @(require "common.rkt"
-          (for-label (except-in racket/base
-                                abs cos exp log sin sort sqrt max min length
-                                + - * / < <= > >=)
-                     torch
-                     torch/nn))
+          torch/scribblings/labels)
 
 @title{rktorch: Racket bindings to libtorch}
 @author{bkc}

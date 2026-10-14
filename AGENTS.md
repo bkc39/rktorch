@@ -248,12 +248,8 @@ with `backward!` outside the form as PyTorch recommends). From
 anything else defers to the original — so `(require torch)` never breaks
 numeric code. New ops that collide must follow the same dispatch pattern
 (check racket/base first — `tanh` was missed initially and broke numeric
-callers), and scribble examples need
-`(for-label (except-in racket/base abs cos exp log sin sort sqrt max min
-length + - * / < <= > >=) torch)` — the `except-in` alone leaves those names
-unbound, so `torch` has to follow it. Each chapter carries that line
-itself: re-exporting it from a shared module tags every link to that
-module rather than to `torch`, so the links miss their entries.
+callers), and docs require `torch/scribblings/labels` for their `for-label`
+bindings of `racket`, `torch` and `torch/nn`.
 Dispatching named ops carry dependent (`->i`) contracts so the wrong shape
 gets contract blame, not a runtime error; the `+ - * / < <= > >= @` operators are
 provided as plain renames (no contract overhead on the numeric fast path),
@@ -527,8 +523,9 @@ Thin re-export facades over small modules (target ≤ 500 lines/file).
 explicit, alphabetized name lists — never whole-module requires — so each
 file documents exactly what it pulls in. Exemptions, each marked with a
 comment at the require site: pure re-export facades (`main.rkt`,
-`foreign.rkt`, `nn.rkt`), and macro-heavy modules whose expansions need the
-module's full export set (`racket/runtime-path`, `syntax/parse/pre`).
+`foreign.rkt`, `nn.rkt`, `scribblings/labels.rkt`), and macro-heavy modules
+whose expansions need the module's full export set (`racket/runtime-path`,
+`syntax/parse/pre`).
 
 - `info.rkt` — package metadata + native-library pre-install hook.
 - `main.rkt` — high-level facade (re-exports `foreign.rkt`).

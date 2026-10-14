@@ -1,8 +1,6 @@
 #lang scribble/lp2
 
-@(require (for-label (except-in racket/base abs cos exp log sin sort sqrt max min length
-                                + - * / < <= > >=)
-                     torch torch/nn))
+@(require torch/scribblings/labels)
 
 @title[#:tag "ex-asr"]{Speech to text on LibriSpeech with CTC and attention}
 

@@ -1,8 +1,7 @@
 #lang scribble/lp2
 
-@(require (for-label (except-in racket/base abs cos exp log sin sort sqrt max min length
-                                + - * / < <= > >=)
-                     torch torch/nn torch/vision/image torch/vision/imagenet
+@(require torch/scribblings/labels
+          (for-label torch/vision/image torch/vision/imagenet
                      torch/vision/resnet torch/vision/transforms
                      torch/vision/weights))
 

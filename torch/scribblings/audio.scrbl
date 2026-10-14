@@ -1,10 +1,7 @@
 #lang scribble/manual
 
-@(require (for-label racket/base
-                     racket/contract
-                     (only-in torch tensor tensor? with-default-device)
-                     (only-in torch/nn ctc-loss)
-                     torch/audio/data
+@(require torch/scribblings/labels
+          (for-label torch/audio/data
                      torch/audio/functional
                      torch/audio/librispeech
                      torch/audio/metrics))

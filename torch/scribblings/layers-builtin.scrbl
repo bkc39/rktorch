@@ -1,21 +1,7 @@
 #lang scribble/manual
 
 @(require "common.rkt"
-          (for-label racket/base
-                     racket/contract
-                     (only-in torch dtype flatten log-softmax max-pool2d relu
-                              shape tensor tensor? zeros)
-                     (only-in torch/nn
-                              Conv1d Conv2d ConvTranspose2d Dropout Embedding
-                              Flatten GroupNorm LayerNorm Linear MaxPool2d
-                              Parameter Sequential batch-norm1d? batch-norm2d?
-                              binary-cross-entropy-with-logits conv2d?
-                              cross-entropy ctc-loss define-layer dropout?
-                              in-named-parameters in-parameters
-                              kaiming-uniform layer?
-                              linear? load-state! max-pool2d? mse-loss
-                              named-buffers named-parameters parameters
-                              save-state! uniform-init)))
+          torch/scribblings/labels)
 
 @title{Built-in layers and losses}
 
