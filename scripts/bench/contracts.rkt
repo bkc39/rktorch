@@ -100,6 +100,7 @@
   (define intra (intra-loops scale add-wrap split-heads shape-wrap)))
 
 (require (for-syntax racket/base racket/syntax syntax/parse)
+         (only-in racket/match match-lambda)
          (only-in racket/syntax format-symbol)
          (only-in syntax/parse/define define-syntax-parse-rule)
          (only-in torch device dtype numel randn reclaim-native-memory! shape)
@@ -152,16 +153,21 @@
 
 (define (getter-cases #:reps [reps 200000])
   (define t (randn 8 8))
-  (define (getter-case name getter)
-    (bench-case name
-                (lambda (n)
-                  (for ([_ (in-range n)])
-                    (getter t)))
-                #:reps reps))
-  (map getter-case
-       '(device tensor-device dtype tensor-dtype shape tensor-shape numel tensor-numel)
-       (list device long:tensor-device dtype long:tensor-dtype shape long:tensor-shape numel
-             long:tensor-numel)))
+  (map (match-lambda
+         [(cons name getter)
+          (bench-case name
+                      (lambda (n)
+                        (for ([_ (in-range n)])
+                          (getter t)))
+                      #:reps reps)])
+       (list (cons 'device device)
+             (cons 'tensor-device long:tensor-device)
+             (cons 'dtype dtype)
+             (cons 'tensor-dtype long:tensor-dtype)
+             (cons 'shape shape)
+             (cons 'tensor-shape long:tensor-shape)
+             (cons 'numel numel)
+             (cons 'tensor-numel long:tensor-numel))))
 
 (define (pipeline-case #:reps [reps 1])
   (define-values (samples rate) (load-audio-fixture))

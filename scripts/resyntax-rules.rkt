@@ -2,6 +2,7 @@
 
 (require (only-in racket/list append* append-map filter-map)
          (only-in racket/match match-define)
+         (only-in racket/set for*/set in-set set-member?)
          (only-in racket/treelist in-treelist treelist-length)
          (only-in resyntax/base
                   define-refactoring-rule define-refactoring-suite)
@@ -165,8 +166,6 @@
     [(head:id . _) (list #'head)]
     [_ '()]))
 
-;; A call to a contracted export expands without its head, which survives
-;; only in the expansion's 'origin.
 (define (origin-ids stx)
   (let loop ([origin (syntax-property stx 'origin)])
     (cond
@@ -212,12 +211,12 @@
 
 (define (written-node-entries nodes)
   (define references
-    (for*/hash ([node (in-list nodes)]
-                [path (in-list (written-node-references node))])
-      (values path #t)))
+    (for*/set ([node (in-list nodes)]
+               [path (in-list (written-node-references node))])
+      path))
   (define reference-parts
     (for/fold ([parts (hash)])
-              ([path (in-hash-keys references)]
+              ([path (in-set references)]
                #:when (child-syntax-path? path))
       (hash-update parts
                    (syntax-path-parent path)
@@ -228,9 +227,10 @@
                       node)]
               #:when here
               [(key value)
-               (in-hash (hash 'arguments-written-here? arguments-here?
-                              'variable-reference? (hash-ref references here #f)
-                              'reference-parts (hash-ref reference-parts here #f)))]
+               (in-parallel '(arguments-written-here? variable-reference? reference-parts)
+                            (list arguments-here?
+                                  (set-member? references here)
+                                  (hash-ref reference-parts here #f)))]
               #:when value)
     (syntax-property-entry expansion-path key value)))
 

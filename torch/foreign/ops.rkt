@@ -17,7 +17,7 @@
                   s64vector?)
          (only-in racket/contract/base
                   -> ->* ->i and/c any any/c cons/c contract-out contract?
-                  list/c listof none/c or/c parameter/c)
+                  flat-named-contract list/c listof none/c or/c parameter/c)
          (only-in racket/match match)
          (only-in "../private/contract.rkt"
                   define/checked-out define/contract-out)
@@ -423,10 +423,12 @@
 
 (define/contract-out (device . arguments)
   (->* ()
-       #:rest (or/c (list/c tensor?)
-                    (list/c (or/c 'cpu 'cuda 'mps))
-                    (list/c (or/c 'cpu 'mps) 0)
-                    (list/c 'cuda exact-nonnegative-integer?))
+       #:rest (flat-named-contract
+               "a tensor, or 'cpu/'mps with index 0, or 'cuda with a natural index"
+               (or/c (list/c tensor?)
+                     (list/c (or/c 'cpu 'cuda 'mps))
+                     (list/c (or/c 'cpu 'mps) (and/c exact-integer? zero?))
+                     (list/c 'cuda exact-nonnegative-integer?)))
        device?)
   (match arguments
     [(list (? tensor? t)) (tensor-device t)]

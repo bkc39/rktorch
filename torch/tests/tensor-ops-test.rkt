@@ -2,9 +2,13 @@
 
 (module+ test
   (require (only-in ffi/vector f32vector s64vector)
-           (only-in racket/contract/base contract-name value-contract)
-           (only-in racket/contract/combinator exn:fail:contract:blame?)
+           (only-in racket/contract/combinator
+                    blame-positive
+                    exn:fail:contract:blame-object
+                    exn:fail:contract:blame?)
            (only-in racket/list drop)
+           (only-in racket/string string-contains?)
+           (only-in syntax/location quote-module-name)
            rackunit
            "../main.rkt"
            (prefix-in long:
@@ -19,19 +23,20 @@
     (check-equal? (device 'cpu) (cpu-device))
     (check-equal? (dtype (zeros 2 #:dtype 'float64)) 'float64))
 
-  (test-case "device states its argument rules in a first-order contract"
-    (check-false (regexp-match? #rx"->i"
-                                (format "~s" (contract-name (value-contract device))))))
-
   (test-case "device blames its caller for each argument it rejects"
+    (define expected
+      "expected: \"a tensor, or 'cpu/'mps with index 0, or 'cuda with a natural index\"")
     (define (blames-caller? e)
       (and (exn:fail:contract:blame? e)
-           (regexp-match? #rx"blaming: [^\n]*tensor-ops-test" (exn-message e))))
+           (equal? (blame-positive (exn:fail:contract:blame-object e)) (quote-module-name))
+           (string-contains? (exn-message e) expected)))
     (for ([arguments (in-list (list (list (zeros 2) 0)
                                     (list 'cuda -1)
                                     (list 'metal)
                                     (list 'mps 1)
-                                    (list 'cpu 1)))])
+                                    (list 'cpu 1)
+                                    (list 'cpu 0.0)
+                                    (list 'mps 0.0)))])
       (check-exn blames-caller? (lambda () (apply device arguments)) (format "~s" arguments))))
 
   (test-case "creation goldens"
