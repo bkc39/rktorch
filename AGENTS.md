@@ -881,6 +881,23 @@ another tailnet machine, add the same two lines as `extra-substituters`
 multi-user Nix ignores them in `~/.config/nix/nix.conf` unless the
 caller is in `trusted-users`).
 
+## Before a stack is ready for review
+
+CI never trains past a few fixture steps on a CPU, so it cannot see a change
+that keeps an example running but stops it learning. Before a stack is marked
+ready for review, and before a release, run the epoch check at its top commit
+on the lab host:
+
+```bash
+nix develop .#cuda -c scripts/epoch-check
+```
+
+It trains every example for a few epochs and compares each headline with the
+record in `docs/epoch-check.md`; its table goes in the top pull request's
+review packet. A `REGRESSION` or `FAILED` row blocks the stack until it is
+explained, and a change that moves a number on purpose updates the record in
+the same pull request.
+
 ## Code Review Rules
 
 Codex reads this section; the Claude review workflow gives its bot
@@ -925,9 +942,9 @@ master's copy.
   `generated-parity-test.rkt`, and a `'device-only` one its own
   device-guarded test; a hand-written op needs a python cross-test check
   beside its gtest golden; a new example comes with its runner
-  (`examples/test/`) and a Python twin, either in `examples/python/` or
-  as a parity suite under `torch/tests/python/` (as 16-style-transfer's
-  is).
+  (`examples/test/`), a row in `docs/epoch-check.md`, and a Python twin,
+  either in `examples/python/` or as a parity suite under
+  `torch/tests/python/` (as 16-style-transfer's is).
 - Conventions: contracts at the definition site ("Validating arguments");
   an op named like a racket/base, racket/list or racket/math function
   defers to it for anything but a tensor; Racket modules within the
