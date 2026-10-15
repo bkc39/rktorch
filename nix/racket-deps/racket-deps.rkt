@@ -1,9 +1,9 @@
 #lang racket/base
-(require (only-in pkg/lib installed-pkg-names)
+(require (only-in pkg/lib installed-pkg-names pkg-directory)
          (only-in racket/contract/base ->)
          (only-in racket/contract/region define/contract)
          (only-in racket/file file->lines)
-         (only-in racket/list remove-duplicates)
+         (only-in racket/list partition remove-duplicates)
          (only-in racket/match match)
          (only-in racket/path file-name-from-path path-has-extension?)
          (only-in racket/sequence sequence->list)
@@ -39,14 +39,15 @@
         (raise-user-error 'racket-deps "no info.rkt in ~a" info-dir)))
   (append (info 'deps (λ () '())) (info 'build-deps (λ () '()))))
 
+(define (declared-deps info-dir)
+  (define have (installed-pkg-names #:scope 'installation))
+  (partition (λ (dep) (not (member (dep-name dep) have)))
+             (remove-duplicates (info-deps info-dir))))
+
 (define/contract (catalog-deps info-dir)
   (-> directory-exists? list?)
-  (define have (installed-pkg-names #:scope 'installation))
-  (define wanted
-    (for/list ([dep (info-deps info-dir)]
-               #:unless (member (dep-name dep) have))
-      dep))
-  (define deps (sort (remove-duplicates wanted) string<? #:key dep->string))
+  (define-values (wanted _installed) (declared-deps info-dir))
+  (define deps (sort wanted string<? #:key dep->string))
   (define platform-dep (findf platform-dep? deps))
   (cond
     [(null? deps)
@@ -60,29 +61,35 @@
                        (dep-option platform-dep '#:platform))]
     [else deps]))
 
-(define (check-version dep deps-dir)
+(define (check-version dep pkg-dir where)
   (define required (dep-option dep '#:version))
-  (define info (and required (get-info/full (build-path deps-dir (dep-name dep)))))
+  (define info (and required pkg-dir (get-info/full pkg-dir)))
   (define found (and info (info 'version (λ () "0.0"))))
   (cond
     [(not required) (void)]
     [(and found (version<=? required found)) (void)]
     [else
      (raise-user-error 'racket-deps
-                       "~a requires #:version ~a; found ~a in ~a"
+                       "~a requires #:version ~a; found ~a ~a"
                        (dep-name dep)
                        required
                        (or found "no package")
-                       deps-dir)]))
+                       where)]))
 
 (define/contract (check-current info-dir deps-dir)
   (-> directory-exists? directory-exists? void?)
   (define manifest (build-path deps-dir manifest-name))
   (define built (if (file-exists? manifest) (file->lines manifest) '()))
+  (define-values (_wanted installed) (declared-deps info-dir))
   (define deps (catalog-deps info-dir))
   (define declared (map dep->string deps))
+  (define fetched-from (format "in ~a" deps-dir))
   (cond
-    [(equal? built declared) (for-each (λ (dep) (check-version dep deps-dir)) deps)]
+    [(equal? built declared)
+     (for ([dep (in-list installed)])
+       (check-version dep (pkg-directory (dep-name dep)) "(installation)"))
+     (for ([dep (in-list deps)])
+       (check-version dep (build-path deps-dir (dep-name dep)) fetched-from))]
     [else
      (raise-user-error 'racket-deps
                        (string-append

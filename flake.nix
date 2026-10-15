@@ -157,6 +157,8 @@
             [ "$(rd names ${fixtures}/no-build-deps)" = threading-lib ]
             fails rd names ${fixtures}/distribution-only
             rd check ${fixtures}/base-versioned "$built"
+            fails rd check ${fixtures}/base-unmet "$built"
+            grep -qF "base requires #:version 99.0; found $(racket -e '(display (version))') (installation)" "$TMPDIR/log"
             for v in 1.2 1.3; do
               cp -r ${fixtures}/fetched-$v "$TMPDIR/fetched-$v"
               chmod -R u+w "$TMPDIR/fetched-$v"
