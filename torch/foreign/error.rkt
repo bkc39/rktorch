@@ -2,7 +2,8 @@
 
 (require (only-in ffi/unsafe/atomic call-as-atomic)
          (only-in racket/contract/base -> any/c contract-out)
-         (only-in "raw/global.rkt" tr-last-error-kind/raw tr-last-error/raw))
+         (only-in "raw/global.rkt" tr-last-error-kind/raw tr-last-error/raw)
+         (only-in "raw/race-points.rkt" race-point))
 
 (provide check-ok
          check-handle
@@ -20,6 +21,7 @@
    (lambda () (values (tr-last-error/raw) (tr-last-error-kind/raw)))))
 
 (define (raise-torch-failure who describe)
+  (race-point failure-reading who)
   (define-values (message kind) (last-failure))
   (define full (format "~a: ~a" who (describe message)))
   (when (= 1 kind)
