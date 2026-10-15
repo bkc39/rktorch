@@ -239,7 +239,7 @@
     (define opt3 (adam (parameters m3) #:lr 0.1))
     (backward! (m3 (ones 3)))
     (step! opt3)
-    (define after-one (tensor->list (car (parameters m3))))
+    (define after-one (~> (parameters m3) car tensor->list))
     (to m3 'float64)
     (~> (ones 3) (to 'float64) m3 backward!)
     (step! opt3)
