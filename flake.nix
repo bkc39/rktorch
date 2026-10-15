@@ -598,7 +598,8 @@
               CELL_RACKET_CELL = "${racketCell}";
               CELL_DRIVER_FARM = "${cudaDriverFarm}";
             };
-            text = builtins.readFile ./nix/matrix/cuda-cell.sh;
+            text = builtins.readFile ./nix/matrix/drain.sh
+              + builtins.readFile ./nix/matrix/cuda-cell.sh;
           };
 
           # Steps name .drv files: evaluating the matrix builds nothing.
@@ -653,7 +654,8 @@
               MATRIX_SYSTEM = system;
               MATRIX_CELLS = "${matrixCells}";
             };
-            text = builtins.readFile ./nix/matrix/run.sh;
+            text = builtins.readFile ./nix/matrix/drain.sh
+              + builtins.readFile ./nix/matrix/run.sh;
             passthru.cells = matrixCells;
           };
 

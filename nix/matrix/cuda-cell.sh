@@ -14,17 +14,8 @@ awk -v l="$load" -v c="$cores" 'BEGIN { exit !(l < c) }' \
 set -m
 work=$(mktemp -d -t torch-matrix-cuda.XXXXXX)
 cleanup() {
-  local g tries
-  for g in $(jobs -p); do
-    kill -TERM -- -"$g" 2>/dev/null || continue
-    tries=0
-    while kill -0 -- -"$g" 2>/dev/null && [ "$tries" -lt 50 ]; do
-      tries=$((tries + 1))
-      sleep 0.1
-    done
-    kill -KILL -- -"$g" 2>/dev/null || true
-    wait "$g" 2>/dev/null || true
-  done
+  local g
+  for g in $(jobs -p); do drain "$g"; done
   chmod -R u+w "$work"
   rm -rf "$work"
 }

@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-runner=$1/run.sh
-cell=$1/cuda-cell.sh
 farm=${DRIVER_FARM:-$1/../cuda-driver-farm.sh}
-shift
 t=$(mktemp -d)
+runner=$t/run.sh
+cell=$t/cuda-cell.sh
+cat "$1/drain.sh" "$1/run.sh" >"$runner"
+cat "$1/drain.sh" "$1/cuda-cell.sh" >"$cell"
+shift
 bash=$(command -v bash)
 set -m
 stubs=()
@@ -348,21 +350,30 @@ EOF
   }
   hang=$(cat "$t/cuda/gtests.pid")
   stubs+=("$hang")
-  started=$SECONDS
+  [ ! -s "$t/cuda/linger.pid" ] || stubs+=(-"$(cat "$t/cuda/linger.pid")")
+  started=$(now)
   kill -TERM -- -"$pid"
   status=0
   wait "$pid" || status=$?
   status_is 143
-  [ $((SECONDS - started)) -le 10 ] || { echo "run-test: $case: took $((SECONDS - started))s" >&2; exit 1; }
+  within "$started" "$2"
   if alive "$hang"; then
     echo "run-test: $case: gtests $hang outlived the cell" >&2
     exit 1
   fi
   [ -z "$(ls -A "$t/cuda/tmp")" ] || { echo "run-test: $case: the work dir survived" >&2; exit 1; }
+  [ ! -s "$t/cuda/zombie.pid" ] || [ "$(state "$(cat "$t/cuda/zombie.pid")")" = Z ] \
+    || { echo "run-test: $case: no zombie lingered in the group" >&2; exit 1; }
 }
 
-case_cuda_cell() { cuda_cell ''; }
-case_cuda_cell_deaf() { cuda_cell "trap '' TERM"; }
+case_cuda_cell() { cuda_cell '' 10000; }
+case_cuda_cell_deaf() { cuda_cell "trap '' TERM" 10000; }
+case_cuda_cell_linger() {
+  [ -r /proc/self/stat ] || return 0
+  cuda_cell "( sleep 0.2 & echo \$! >\"$t/cuda/zombie.pid\"; exec timeout 8 sleep 8 ) &
+echo \$! >\"$t/cuda/linger.pid\"
+sleep 0.5" 2500
+}
 
 case_zombie() {
   [ -r /proc/self/stat ] || return 0
@@ -441,7 +452,7 @@ EOF
 
 cases=("$@")
 [ "${#cases[@]}" -gt 0 ] || cases=(rows no_match failure_line interrupt interrupt_deaf terminate deadline linger guard
-    cuda_cell cuda_cell_deaf zombie driver_farm)
+    cuda_cell cuda_cell_deaf cuda_cell_linger zombie driver_farm)
 for case in "${cases[@]}"; do
   "case_$case"
   echo "run-test: $case ok"
