@@ -101,7 +101,12 @@ median, quartiles and IQR, and the load average before and after.
 
 An A/B run alternates its variants every round, and each variant is a set
 of environment variables; `PLTUSERHOME=<checkout>/.racket-user` runs the
-other checkout's `torch`. Relative paths in `PLTUSERHOME`, `PLTADDONDIR`
+other checkout's `torch`. A checkout older than the `rktorch-step` event
+logs no steps, so a child that completes without one is timed whole, from
+the end of its compile to its exit (`timing` `wall`, no `error`). When any
+run of an example is timed whole, every variant's summary for it uses the
+whole-run times (`timing` `wall`, unit `s/run`), so the ratio compares like
+with like; otherwise `timing` is `steps`. Relative paths in `PLTUSERHOME`, `PLTADDONDIR`
 and the `RKTORCH_*_DIR` cache variables are taken from the working
 directory. The summary compares each variant with the first by
 `paired-ratio`: the median of the per-round time ratios (below 1 is
@@ -126,7 +131,7 @@ so appended runs never merge. `e2e` sections are per host (name, CPU, OS,
 affinity) with the execution per row, so an A/B over `OMP_NUM_THREADS` or
 the device still yields its ratio. An `e2e` run also writes one `run` record
 per child: `steps`, `steps_per_epoch`, `epoch_s`, `epoch_gc_ms`, `step_ms`,
-`steps_per_s`, `steps_per_s_median`, `wall_s`, `exit_code`, `settings`
+`steps_per_s`, `steps_per_s_median`, `wall_s`, `timing`, `exit_code`, `settings`
 (the summary shows them without the `RKTORCH_*_DIR` caches). An
 `e2e` record's `meta` comes from the child that ran it, so an A/B across
 checkouts records each one's commit, and the summary shows it per row.

@@ -138,8 +138,13 @@
       (values code events wall meta)))
   (define epoch-setting (and (example-epochs-var ex) (assoc (example-epochs-var ex) env)))
   (define epochs (and epoch-setting (~> epoch-setting cdr ~a string->number)))
-  (define analysis (analyze-steps events #:epochs epochs #:warmup (example-warmup ex)
-                                  #:optimizer (example-optimizer ex)))
+  (define analysis
+    (cond
+      [(and (null? events) wall) (hasheq 'steps 0 'timing "wall")]
+      [else
+       (hash-set (analyze-steps events #:epochs epochs #:warmup (example-warmup ex)
+                                #:optimizer (example-optimizer ex))
+                 'timing "steps")]))
   (hash-set* analysis
              'exit_code code
              'wall_s (and wall (/ wall 1000.0))
@@ -156,6 +161,7 @@
              variant
              (hash-ref analysis 'exit_code)
              (hash-ref analysis 'meta #f)))]
+    [(equal? (hash-ref analysis 'timing) "wall") (* 1000.0 (hash-ref analysis 'wall_s))]
     [(pair? (hash-ref analysis 'epoch_s '()))
      (define epochs (hash-ref analysis 'epoch_s))
      (/ (* 1000.0 (apply + epochs)) (length epochs))]
@@ -226,10 +232,27 @@
     (check-true (positive? (hash-ref a 'wall_s)))
     (check-true (string? (hash-ref (hash-ref a 'meta) 'libtorch))))
 
+  (test-case "a child whose torch logs no steps is timed whole, and says so"
+    (define a (run-example fixture #:runner stepper #:settings '(("BENCH_PREHOOK" . "1"))
+                           #:log quiet))
+    (check-equal? (hash-ref a 'exit_code) 0)
+    (check-equal? (hash-ref a 'timing) "wall")
+    (check-equal? (hash-ref a 'steps) 0)
+    (check-false (hash-ref a 'error #f))
+    (check-true (positive? (hash-ref a 'wall_s)))
+    (check-equal? (hash-ref (run-example fixture #:runner stepper #:log quiet) 'timing) "steps")
+    (define runs '())
+    (define cases
+      (e2e-cases (list fixture) #:variants '(("old" ("BENCH_PREHOOK" . "1")))
+                 #:runner-for (lambda (_ex) stepper) #:log quiet
+                 #:on-run (lambda (_ex _v a) (set! runs (cons a runs)))))
+    (match-define (list r) (measure cases #:warmup 0 #:rounds 1 #:load void))
+    (check-equal? (result-per-call r) (list (* 1000.0 (hash-ref (car runs) 'wall_s)))))
+
   (test-case "a child sees only the example settings it is given"
     (check-equal? (control-variables (cadr examples) (example-runner (cadr examples)))
                   '("STEPS" "EXCERPT"))
-    (check-equal? (control-variables fixture stepper) '("EPOCHS" "STEPS"))
+    (check-equal? (control-variables fixture stepper) '("EPOCHS" "BENCH_PREHOOK" "STEPS"))
     (parameterize ([current-environment-variables
                     (environment-variables-copy (current-environment-variables))])
       (putenv "STEPS" "5")

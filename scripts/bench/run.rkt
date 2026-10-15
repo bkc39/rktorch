@@ -13,8 +13,8 @@
                   cache-env e2e-cases example-epochs-var example-name example-runner
                   examples exn:fail:user:e2e find-examples merged-settings settings->jsexpr)
          (only-in "harness.rkt"
-                  busy-cores format-result host-meta load-average measure result->record
-                  result-name result-per-call summarize write-record)
+                  busy-cores format-result host-meta load-average measure result
+                  result->record result-name result-per-call summarize write-record)
          (only-in "layers.rkt" layer-cases)
          (only-in "ops.rkt" op-cases)
          (only-in "shim.rkt" aten-threads))
@@ -45,8 +45,8 @@
     [(? ok? v) v]
     [_ (raise-user-error 'run "~a expects ~a, got ~s" flag expected text)]))
 
-(define (positive-real? x)
-  (and (real? x) (positive? x)))
+(define (finite-positive-real? x)
+  (and (real? x) (< 0 x +inf.0)))
 
 (define (ops-device? d)
   (and (memq d '(cpu cuda mps)) #t))
@@ -140,6 +140,8 @@
     (define rates (make-hash))
     (define gcs (make-hash))
     (define metas (make-hash))
+    (define walls (make-hash))
+    (define timings (make-hash))
     (define (on-run run-of variant analysis)
       (define run-meta (or (hash-ref analysis 'meta #f) meta))
       (fprintf log "~a~a: ~a steps/s, epochs ~a s\n" (example-name run-of)
@@ -149,13 +151,15 @@
                        'case (example-name run-of) 'variant variant
                        'load (load-average)
                        'meta run-meta))
+      (define (push! table value)
+        (hash-update! table variant (lambda (xs) (if value (cons value xs) xs)) '()))
       (cond
         [(hash-ref analysis 'error #f) (void)]
         [else
-         (hash-update! rates variant
-                       (lambda (xs) (cons (hash-ref analysis 'steps_per_s 0.0) xs))
-                       '())
-         (hash-update! gcs variant (lambda (xs) (cons (hash-ref analysis 'gc_ms 0) xs)) '())
+         (push! rates (hash-ref analysis 'steps_per_s #f))
+         (push! gcs (hash-ref analysis 'gc_ms #f))
+         (push! walls (hash-ref analysis 'wall_s #f))
+         (push! timings (hash-ref analysis 'timing))
          (hash-ref! metas variant run-meta)]))
     (define (on-failure e)
       (match-define (list variant exit-code child-meta)
@@ -171,22 +175,39 @@
                     'error (exn-message e)
                     'meta (or child-meta meta)
                     'meta_from (if child-meta "child" "parent"))))
-    (define unit (if (example-epochs-var ex) "s/epoch" "ms/step"))
     (define results
       (measure (e2e-cases (list ex) #:scale scale #:variants with-cache #:on-run on-run
                           #:log log #:runner-for runner-for)
                #:warmup 0 #:rounds rounds #:on-failure on-failure))
-    (for ([r (in-list results)] [v (in-list with-cache)] #:when (pair? (result-per-call r)))
+    (define by-wall?
+      (for/or ([ts (in-hash-values timings)]) (and (member "wall" ts) #t)))
+    (define-values (timing unit unit-scale)
+      (cond
+        [by-wall? (values "wall" "s/run" 1e-3)]
+        [(example-epochs-var ex) (values "steps" "s/epoch" 1e-3)]
+        [else (values "steps" "ms/step" 1)]))
+    (define (variant-list table v)
+      (reverse (hash-ref table (car v) '())))
+    (define (timed-result r v)
+      (if by-wall?
+          (struct-copy result r [per-call (map (lambda (s) (* 1000.0 s)) (variant-list walls v))])
+          r))
+    (for* ([(r v) (in-parallel (in-list results) (in-list with-cache))]
+           [timed (in-value (timed-result r v))]
+           #:when (pair? (result-per-call timed)))
+      (define rates-of (variant-list rates v))
       (emit
-       (result->record r #:suite "e2e" #:group "summary" #:unit unit
+       (result->record timed #:suite "e2e" #:group "summary" #:unit unit
                        #:meta (hash-ref metas (car v) meta)
-                       #:scale (if (example-epochs-var ex) 1e-3 1)
+                       #:scale unit-scale
                        #:extra (hasheq 'case (example-name ex)
                                        'variant (car v)
+                                       'timing timing
                                        'settings (settings->jsexpr
                                                   (merged-settings ex scale (cdr v)))
-                                       'gc_ms (reverse (hash-ref gcs (car v)))
-                                       'steps_per_s (summarize (hash-ref rates (car v)))))))))
+                                       'gc_ms (variant-list gcs v)
+                                       'steps_per_s (and (pair? rates-of)
+                                                         (summarize rates-of))))))))
 
 (define (parse-arguments argv)
   (define options (make-hasheq))
@@ -209,8 +230,8 @@
                                           "a non-negative integer" n))]
        [("--scale") x "Multiply micro repetitions by x"
                     (option! 'scale
-                             (flag-value "--scale" string->number positive-real?
-                                         "a positive number" x))]
+                             (flag-value "--scale" string->number finite-positive-real?
+                                         "a finite positive number" x))]
        [("--device") d "Device for the ops suite: cpu, cuda or mps"
                      (option! 'device
                               (flag-value "--device" string->symbol ops-device? "cpu, cuda or mps"
@@ -221,8 +242,8 @@
        [("--cache") dir "Shared dataset cache root for the examples" (option! 'cache dir)]
        [("--max-load") l "Wait for a load below l (busy cores over 1 s on Linux)"
                        (option! 'max-load
-                                (flag-value "--max-load" string->number positive-real?
-                                            "a positive number" l))]
+                                (flag-value "--max-load" string->number finite-positive-real?
+                                            "a finite positive number" l))]
        [("--out") file "Append JSON lines to file" (option! 'out file)]
        #:multi
        [("--variant") v "name:VAR=VALUE,... (repeat for A/B)"
@@ -325,6 +346,8 @@
     (check-equal? (map (lambda (r) (hash-ref (hash-ref r 'settings) 'EPOCHS)) summaries)
                   '("3" "2"))
     (check-equal? (map (lambda (r) (hash-ref (hash-ref r 'stats) 'n)) summaries) '(2 2))
+    (check-equal? (map (lambda (r) (list (hash-ref r 'timing) (hash-ref r 'unit))) summaries)
+                  '(("steps" "s/epoch") ("steps" "s/epoch")))
     (define md (summary-markdown records))
     (check-regexp-match #rx"## End to end" md)
     (check-regexp-match #rx"\\| stepper \\| b vs a \\|" md)
@@ -332,6 +355,33 @@
     (check-regexp-match #rx"## Failures" md)
     (check-regexp-match
      #rx"\\| stepper \\| - \\| `[^`]*`[^|]* \\| [^|]* \\| 0 \\| e2e: stepper: no measured" md))
+
+  (test-case "an A/B against a checkout without the step hook compares whole runs"
+    (define fixture (example "stepper" '(("EPOCHS" . 3)) '(("EPOCHS" . 4)) "EPOCHS" 0 'first))
+    (define records
+      (records-of (lambda (out)
+                    (run-e2e (list fixture) #:rounds 2 #:full? #f
+                             #:variants '(("a") ("old" ("BENCH_PREHOOK" . "1"))) #:cache #f
+                             #:max-load #f #:libtorch "x" #:out out #:log quiet
+                             #:runner-for (lambda (_ex) stepper)))))
+    (define (group g) (filter (lambda (r) (equal? (hash-ref r 'group) g)) records))
+    (define runs (group "run"))
+    (check-equal? (map (lambda (r) (hash-ref r 'timing)) runs) '("steps" "wall" "wall" "steps"))
+    (define summaries (group "summary"))
+    (check-equal? (for/list ([r (in-list summaries)])
+                    (list (hash-ref r 'variant) (hash-ref r 'timing) (hash-ref r 'unit)))
+                  '(("a" "wall" "s/run") ("old" "wall" "s/run")))
+    (for ([s (in-list summaries)])
+      (define walls
+        (for/list ([r (in-list runs)] #:when (equal? (hash-ref r 'variant) (hash-ref s 'variant)))
+          (hash-ref r 'wall_s)))
+      (check-equal? (length (hash-ref s 'samples)) 2)
+      (for ([sample (in-list (hash-ref s 'samples))] [wall (in-list walls)])
+        (check-= sample wall 1e-9)))
+    (check-false (hash-ref (cadr summaries) 'steps_per_s))
+    (check-true (hash? (hash-ref (car summaries) 'steps_per_s)))
+    (check-equal? (group "error") '())
+    (check-regexp-match #rx"\\| stepper \\| old vs a \\|" (summary-markdown records)))
 
   (test-case "a failed variant keeps the summaries of the runs that completed"
     (define fixture (example "stepper" '(("EPOCHS" . 3)) '(("EPOCHS" . 4)) "EPOCHS" 0 'first))
@@ -437,11 +487,9 @@
     (fails "--rounds" "1.5" "a positive integer")
     (fails "--warmup" "-1" "a non-negative integer")
     (fails "--warmup" "one" "a non-negative integer")
-    (fails "--scale" "big" "a positive number")
-    (fails "--scale" "0" "a positive number")
-    (fails "--scale" "1+2i" "a positive number")
-    (fails "--max-load" "high" "a positive number")
-    (fails "--max-load" "+nan.0" "a positive number")
+    (for* ([flag (in-list '("--scale" "--max-load"))]
+           [value (in-list '("big" "0" "-1" "1+2i" "+inf.0" "-inf.0" "+nan.0"))])
+      (fails flag value "a finite positive number"))
     (fails "--device" "gpu" "cpu, cuda or mps")
     (fails "--device" "CUDA" "cpu, cuda or mps")
     (define-values (_suites options)
