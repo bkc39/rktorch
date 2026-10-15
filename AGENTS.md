@@ -474,7 +474,9 @@ trees on its next shell entry.
 beyond the Racket distribution, as source trees only. When those deps change,
 or a fresh store reports a hash mismatch (upstream moved), set its
 `outputHash` to `""`, `nix build .#racket-deps`, paste the reported hash. The
-`racket-deps-current` check says "info.rkt changed; bump racket-deps outputHash".
+`racket-deps-current` check says "info.rkt changed; bump racket-deps outputHash",
+and also fails on an unmet `#:version` minimum. A `#:platform` dep is refused:
+one hash cannot hold a per-system fetch.
 
 ### PyTorch parity
 

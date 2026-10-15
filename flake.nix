@@ -79,6 +79,7 @@
             done
             racket ${racketDepsScript} manifest "$TMPDIR/torch-info" > "$out/.info-deps"
             racket ${racketDepsScript} guard "$out"
+            racket ${racketDepsScript} check "$TMPDIR/torch-info" "$out"
             runHook postBuild
           '';
           dontInstall = true;
@@ -114,17 +115,19 @@
             t=$TMPDIR/trees
             mkdir -p "$t/source/pkg/doc" "$t/zo/pkg/compiled" "$t/sxref/pkg/doc/pkg" \
               "$t/linked/pkg" "$t/elsewhere/compiled" \
-              "$t/sealed/pkg/compiled" "$t/sealed/pkg/private"
+              "$t/sealed/pkg/private"
             touch "$t/source/pkg/main.rkt" "$t/source/pkg/doc/guide.scrbl" \
               "$t/zo/pkg/compiled/x_rkt.zo" "$t/sxref/pkg/doc/pkg/out0.sxref" \
-              "$t/elsewhere/compiled/x_rkt.zo" "$t/sealed/pkg/compiled/x_rkt.zo"
+              "$t/elsewhere/compiled/x_rkt.zo" "$t/sealed/pkg/main.rkt"
             ln -s "$t/elsewhere/compiled" "$t/linked/pkg/compiled"
             chmod 000 "$t/sealed/pkg/private"
+            [ ! -r "$t/sealed/pkg/private" ]
             rd guard "$t/source"
             fails rd guard "$t/zo"
             fails rd guard "$t/sxref"
             fails rd guard "$t/linked"
             fails rd guard "$t/sealed"
+            grep -q 'could not open directory' "$TMPDIR/log"
             chmod 755 "$t/sealed/pkg/private"
           '';
           racket-deps-info-test = run "torch-rkt-racket-deps-info-test" ''
@@ -138,6 +141,17 @@
             fails rd check ${fixtures}/removed "$built"
             [ "$(rd names ${fixtures}/no-build-deps)" = threading-lib ]
             fails rd names ${fixtures}/distribution-only
+            rd check ${fixtures}/base-versioned "$built"
+            for v in 1.2 1.3; do
+              cp -r ${fixtures}/fetched-$v "$TMPDIR/fetched-$v"
+              chmod -R u+w "$TMPDIR/fetched-$v"
+              rd manifest ${fixtures}/versioned > "$TMPDIR/fetched-$v/.info-deps"
+            done
+            fails rd check ${fixtures}/versioned "$TMPDIR/fetched-1.2"
+            grep -q 'threading-lib requires #:version 1.3; found 1.2' "$TMPDIR/log"
+            rd check ${fixtures}/versioned "$TMPDIR/fetched-1.3"
+            fails rd names ${fixtures}/platform
+            grep -q 'extra-lib has #:platform unix; platform-qualified' "$TMPDIR/log"
           '';
         };
 
