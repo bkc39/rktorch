@@ -1,0 +1,117 @@
+#lang racket/base
+
+(require (for-syntax racket/base)
+         (only-in racket/format ~r)
+         (only-in racket/match match-define)
+         ;; whole-module require: only-in strips the phase-1 syntax classes
+         syntax/parse/define
+         (only-in threading ~>)
+         "common.rkt"
+         "shim.rkt")
+
+(define repeats 3)
+(define matmul-n 3072)
+(define stall-window-ms 300)
+
+(struct foreign-call (run release))
+
+(define (in-call-while call measure)
+  (define inside (make-semaphore 0))
+  (define-values (measured calls)
+    (call-with-workers 1
+                       (lambda (_i)
+                         (with-final-post inside (at-set-num-threads 1))
+                         (measure-call call))
+                       (lambda (_workers)
+                         (semaphore-wait inside)
+                         (sleep 0.1)
+                         (measure-span measure))))
+  (match-define (list in-call) calls)
+  (define in-flight (- (min (span-end in-call) (span-end measured))
+                       (max (span-start in-call) (span-start measured))))
+  (cons (span-value measured) (max 0.0 (/ in-flight (max (span-ms measured) 1e-3)))))
+
+(define sink (box #f))
+
+(define (longest-stall)
+  (define t (tally 1))
+  (tally-loop-for-seconds t 0 (ms->seconds stall-window-ms)
+                          (lambda (_i) (set-box! sink (make-vector 256 #f))))
+  (gap-ms (tally-max-gap t)))
+
+(define (collection-ms kind)
+  (lambda () (timed (lambda () (collect-garbage kind)))))
+
+(define (measure-call call)
+  (match-define (foreign-call run release) call)
+  (define s (measure-span run))
+  (release (span-value s))
+  s)
+
+(define (sleep-call usleep-fn)
+  (foreign-call (lambda () (usleep-fn 1500000)) void))
+
+(define (matmul-call matmul-fn)
+  (define a (shim-randn matmul-n matmul-n))
+  (foreign-call (lambda () (matmul-fn a a)) shim-free))
+
+(define (make-calls plain-matmul)
+  (list (cons "none (worker parked on a semaphore)" #f)
+        (cons "usleep 1.5 s, plain _fun" (sleep-call usleep))
+        (cons "usleep 1.5 s, #:blocking? #t" (sleep-call usleep/blocking))
+        (cons (format "~a matmul, plain _fun" matmul-n) plain-matmul)
+        (cons (format "~a matmul, #:blocking? #t" matmul-n)
+              (matmul-call shim-matmul/blocking))))
+
+(define (call-with-parked-worker thunk)
+  (define release (make-semaphore 0))
+  (define inside (make-semaphore 0))
+  (define-values (result _)
+    (call-with-workers 1
+                       (lambda (_i)
+                         (semaphore-post inside)
+                         (semaphore-wait release))
+                       (lambda (_workers)
+                         (semaphore-wait inside)
+                         (thunk))
+                       #:release (lambda () (semaphore-post release))))
+  result)
+
+(define-syntax-parse-rule (with-parked-worker body:expr ...+)
+  (call-with-parked-worker (lambda () body ...)))
+
+(define (measure-under call measure)
+  (define run
+    (cond
+      [call (lambda () (in-call-while call measure))]
+      [else (lambda () (with-parked-worker (cons (measure) 0.0)))]))
+  (define samples (repeat-runs repeats run))
+  (define least-share (apply min (map cdr samples)))
+  (cond
+    [(and call (zero? least-share)) "call returned before the measurement"]
+    [else (format "~a (~a%)"
+                  (~> samples (map car _) median-of (real->decimal-string 1))
+                  (~r (* 100 least-share) #:precision 1))]))
+
+(module+ main
+  (print-banner (format "Q6: collection pauses, one parallel worker in a foreign call (median of ~a)"
+                        repeats)
+                #:torch-version (shim-version))
+  (at-set-num-threads 1)
+  (define plain-matmul (matmul-call shim-matmul))
+  (define call-ms (span-ms (measure-call plain-matmul)))
+  (define calls (make-calls plain-matmul))
+  (printf "- ~a matmul alone: ~a ms\n" matmul-n (real->decimal-string call-ms 1))
+  (newline)
+  (print-table-header
+   (list "worker is inside" "major ms (min in-flight %)" "minor ms (min in-flight %)"
+         (format "longest stall in ~a ms (min in-flight %)" stall-window-ms) "load"))
+  (for ([c (in-list calls)])
+    (match-define (cons label call) c)
+    (print-table-row
+     (list label
+           (measure-under call (collection-ms 'major))
+           (measure-under call (collection-ms 'minor))
+           (measure-under call longest-stall)
+           (load-average))))
+  (print-footer))

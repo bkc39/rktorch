@@ -439,6 +439,8 @@ raco test examples/test/     # literate-example runners
 racket -ie "(require torch)"   # REPL with the package loaded
                                # (`racket -l torch` runs module+ main instead)
 
+racket scripts/bench/run.rkt micro      # benchmarks, never a gate (#253):
+                               # docs/benchmarks/README.md
 racket scripts/coverage.rkt --changed   # expression coverage (#173); exits
                                # non-zero below the floor and lists the lines
                                # of the files you touched that no test reaches
@@ -587,7 +589,10 @@ whose expansions need the module's full export set (`racket/runtime-path`,
   and the capacity backstop, #145), `pressure-settings` (its parameters;
   `RKTORCH_MEMORY_FRACTION` and `RKTORCH_MEMORY_LIMIT` in MiB set the
   mark's initial values, #236), `device-queries` (the capacity, allocator
-  and release queries `device` hands down to it), `memory` (the lifetime substrate:
+  and release queries `device` hands down to it), `race-points` (no FFI:
+  the race points between the steps of each critical section, one `unbox`
+  when no test hook is installed; a new step in a critical section gets a
+  point and a case in `torch/tests/race-*.rkt`, #40), `memory` (the lifetime substrate:
   frees, pressure ledger, `tensor-allocator`, op-definer macros),
   `global`, `tensor`, `random`, `creation`,
   `shape-ops`, `elementwise`, `reduce`, `linalg`, `autograd`.
@@ -794,7 +799,7 @@ used.  (`resyntax`, the CI gate, is unaffected.)
 
 ### What the strategies cost
 
-`scripts/bench-contract-overhead.rkt`, lab host, rounded.  The tensor
+`racket scripts/bench/run.rkt contracts`, lab host, rounded.  The tensor
 columns are noisy: the 8x8 `add` baseline moves ~20% between runs, enough
 that its 1.0x-1.1x rows should be read as "lost in the noise" rather than
 as a measured overhead.  Every callee is imported from its defining
@@ -875,6 +880,23 @@ another tailnet machine, add the same two lines as `extra-substituters`
 multi-user Nix ignores them in `~/.config/nix/nix.conf` unless the
 caller is in `trusted-users`).
 
+## Before a stack is ready for review
+
+CI never trains past a few fixture steps on a CPU, so it cannot see a change
+that keeps an example running but stops it learning. Before a stack is marked
+ready for review, and before a release, run the epoch check at its top commit
+on the lab host:
+
+```bash
+nix develop .#cuda -c scripts/epoch-check
+```
+
+It trains every example for a few epochs and compares each headline with the
+record in `docs/epoch-check.md`; its table goes in the top pull request's
+review packet. A `REGRESSION` or `FAILED` row blocks the stack until it is
+explained, and a change that moves a number on purpose updates the record in
+the same pull request.
+
 ## Code Review Rules
 
 Codex reads this section; the Claude review workflow gives its bot
@@ -919,9 +941,9 @@ master's copy.
   `generated-parity-test.rkt`, and a `'device-only` one its own
   device-guarded test; a hand-written op needs a python cross-test check
   beside its gtest golden; a new example comes with its runner
-  (`examples/test/`) and a Python twin, either in `examples/python/` or
-  as a parity suite under `torch/tests/python/` (as 16-style-transfer's
-  is).
+  (`examples/test/`), a row in `docs/epoch-check.md`, and a Python twin,
+  either in `examples/python/` or as a parity suite under
+  `torch/tests/python/` (as 16-style-transfer's is).
 - Conventions: contracts at the definition site ("Validating arguments");
   an op named like a racket/base, racket/list or racket/math function
   defers to it for anything but a tensor; Racket modules within the
