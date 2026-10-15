@@ -9,7 +9,7 @@ image=$1 parent=$(realpath "$2") pkg=$3 installer=$(realpath "$4")
 here=$(cd "$(dirname "$0")" && pwd)
 
 docker run --rm --name "torchrkt-host-$$" --cpus 4 --memory 12g \
-  -e PKG="$pkg" \
+  -e PKG="$pkg" ${DOCFLAG+-e DOCFLAG="$DOCFLAG"} \
   -v "$parent:/pkg:ro" -v "$installer:/installer/$(basename "$installer"):ro" \
   -v "$here:/scripts:ro" \
   "$image" bash /scripts/in-host-smoke.sh
