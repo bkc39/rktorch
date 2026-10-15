@@ -58,10 +58,13 @@
       # the release catalog serves built packages, whose compiled/ and doc/
       # trees belong to one Racket version, and this output serves every
       # version the checks run. Unpacked trees keep the hash mtime-free and
-      # platform-stable. Bump outputHash when a package moves in the catalog
-      # or info.rkt gains one.
+      # platform-stable. Bump outputHash whenever info.rkt's catalog deps
+      # change, and when a package moves upstream: a hash mismatch on a fresh
+      # store (often macOS CI first) means upstream moved. AGENTS.md has the
+      # procedure.
+      racketDepsScript = ./nix/racket-deps/racket-deps.rkt;
       racketDepsFor = pkgs: racketPkg:
-        pkgs.stdenvNoCC.mkDerivation {
+        pkgs.stdenvNoCC.mkDerivation (finalAttrs: {
           name = "torch-rkt-racket-deps";
           dontUnpack = true;
           nativeBuildInputs = [ racketPkg pkgs.cacert pkgs.unzip ];
@@ -72,17 +75,14 @@
             export SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt
             mkdir -p "$PLTUSERHOME" "$TMPDIR/torch-info"
             cp ${./torch/info.rkt} "$TMPDIR/torch-info/info.rkt"
-            mapfile -t wanted < <(racket -e \
-              '(require pkg/lib setup/getinfo)
-               (define info (get-info/full (build-path (getenv "TMPDIR") "torch-info")))
-               (define have (installed-pkg-names #:scope (quote installation)))
-               (for ([d (append (info (quote deps)) (info (quote build-deps)))])
-                 (define name (if (pair? d) (car d) d))
-                 (unless (member name have) (displayln name)))')
+            racket ${racketDepsScript} names "$TMPDIR/torch-info" > "$TMPDIR/wanted"
+            mapfile -t wanted < "$TMPDIR/wanted"
             raco pkg install --batch --auto --no-setup --scope user \
               --catalog https://pkgs.racket-lang.org "''${wanted[@]}"
-            mapfile -t deps < <(racket -e \
-              '(require pkg/lib)(for ([p (installed-pkg-names #:scope (quote user))]) (displayln p))')
+            racket -e \
+              '(require pkg/lib)(for ([p (installed-pkg-names #:scope (quote user))]) (displayln p))' \
+              > "$TMPDIR/deps"
+            mapfile -t deps < "$TMPDIR/deps"
             raco pkg archive "$TMPDIR/archive" "''${deps[@]}"
             mkdir -p "$out"
             for z in "$TMPDIR"/archive/pkgs/*.zip; do
@@ -90,16 +90,72 @@
               mkdir -p "$out/$name"
               unzip -q "$z" -d "$out/$name"
             done
-            if find "$out" -type d \( -name compiled -o -name doc \) | grep .; then
-              echo "racket-deps: the trees above are build output, not source" >&2
-              exit 1
-            fi
+            racket ${racketDepsScript} manifest "$TMPDIR/torch-info" > "$out/.info-deps"
+            racket ${racketDepsScript} guard "$out"
             runHook postBuild
           '';
           dontInstall = true;
           outputHashMode = "recursive";
           outputHashAlgo = "sha256";
-          outputHash = "sha256-pnZ0LA/WcxcGmbX1z1wvpUv6swSiS8gjMGvk/bTZ8IU=";
+          outputHash = "sha256-YyR47U1gR5twmnllsNOddO8mhFJ4MCtmsDu8WjY2JRI=";
+          passthru.tests = racketDepsTestsFor pkgs racketPkg finalAttrs.finalPackage;
+        });
+
+      # racket-deps-current fails when torch/info.rkt no longer matches the
+      # manifest racket-deps was built from: a stale output keeps its store
+      # path until outputHash moves, and would otherwise surface only as a
+      # missing dependency in raco setup.
+      racketDepsTestsFor = pkgs: racketPkg: racket-deps:
+        let
+          run = name: script: pkgs.runCommand name { nativeBuildInputs = [ racketPkg ]; } ''
+            export HOME=$TMPDIR/home PLTUSERHOME=$TMPDIR/plt
+            rd() { racket ${racketDepsScript} "$@"; }
+            fails() {
+              if "$@" > "$TMPDIR/log" 2>&1; then
+                echo "expected a failure: $*" >&2
+                exit 1
+              fi
+            }
+            ${script}
+            mkdir "$out"
+          '';
+          fixtures = ./nix/racket-deps/fixtures;
+        in
+        {
+          racket-deps-current = run "torch-rkt-racket-deps-current" ''
+            mkdir -p "$TMPDIR/info"
+            cp ${./torch/info.rkt} "$TMPDIR/info/info.rkt"
+            rd check "$TMPDIR/info" ${racket-deps}
+          '';
+          racket-deps-guard-test = run "torch-rkt-racket-deps-guard-test" ''
+            t=$TMPDIR/trees
+            mkdir -p "$t/source/pkg/doc" "$t/zo/pkg/compiled" "$t/sxref/pkg/doc/pkg" \
+              "$t/linked/pkg" "$t/elsewhere/compiled" \
+              "$t/sealed/pkg/compiled" "$t/sealed/pkg/private"
+            touch "$t/source/pkg/main.rkt" "$t/source/pkg/doc/guide.scrbl" \
+              "$t/zo/pkg/compiled/x_rkt.zo" "$t/sxref/pkg/doc/pkg/out0.sxref" \
+              "$t/elsewhere/compiled/x_rkt.zo" "$t/sealed/pkg/compiled/x_rkt.zo"
+            ln -s "$t/elsewhere/compiled" "$t/linked/pkg/compiled"
+            chmod 000 "$t/sealed/pkg/private"
+            rd guard "$t/source"
+            fails rd guard "$t/zo"
+            fails rd guard "$t/sxref"
+            fails rd guard "$t/linked"
+            fails rd guard "$t/sealed"
+            chmod 755 "$t/sealed/pkg/private"
+          '';
+          racket-deps-info-test = run "torch-rkt-racket-deps-info-test" ''
+            built=$TMPDIR/built
+            mkdir -p "$built"
+            rd manifest ${fixtures}/current > "$built/.info-deps"
+            rd check ${fixtures}/current "$built"
+            fails rd check ${fixtures}/added "$built"
+            grep -q 'bump racket-deps outputHash' "$TMPDIR/log"
+            fails rd check ${fixtures}/versioned "$built"
+            fails rd check ${fixtures}/removed "$built"
+            [ "$(rd names ${fixtures}/no-build-deps)" = threading-lib ]
+            fails rd names ${fixtures}/distribution-only
+          '';
         };
 
       # nixpkgs' libtorch-bin is still 2.9.0 (#140), so torchPackageFor points
@@ -406,7 +462,13 @@
             inherit pname version;
             src = ./.;
 
-            nativeBuildInputs = [ racketPkg pkgs.makeWrapper ];
+            # racket-deps-current first, so a stale racket-deps fails with its
+            # hint instead of a missing dependency.
+            nativeBuildInputs = [
+              racketPkg
+              pkgs.makeWrapper
+              racket-deps.tests.racket-deps-current
+            ];
             buildInputs = [ cpp ];
 
             buildPhase = ''
@@ -532,7 +594,7 @@
       checks = forAllSystems (system: {
         inherit (self.packages.${system})
           cpp cpp-format cpp-line-count cpp-tidy racket racket92;
-      });
+      } // self.packages.${system}.racket-deps.tests);
 
       devShells = forAllSystems (system:
         let
