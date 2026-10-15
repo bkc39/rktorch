@@ -1,20 +1,22 @@
 #lang racket/base
 
-(require (only-in racket/list append-map)
+(require (only-in racket/list append* append-map filter-map)
          (only-in racket/match match-define)
          (only-in racket/treelist in-treelist treelist-length)
          (only-in resyntax/base
                   define-refactoring-rule define-refactoring-suite)
          (only-in resyntax/default-recommendations default-recommendations)
          (only-in resyntax/grimoire/syntax-path
-                  syntax-label-paths syntax-path-elements)
+                  child-syntax-path? syntax-label-paths syntax-path-elements
+                  syntax-path-last-element syntax-path-parent)
          (only-in resyntax/grimoire/syntax-property-bundle
                   sequence->syntax-property-bundle syntax-property-entry)
          (only-in resyntax/private/analyzer make-expansion-analyzer)
          (only-in resyntax/private/syntax-neighbors syntax-original-path)
          (only-in syntax/parse/pre
-                  attribute boolean define-syntax-class expr id keyword
-                  number pattern str syntax-parse this-syntax ~and ~optional ~var)
+                  attribute boolean define-syntax-class expr id kernel-literals
+                  keyword number pattern str syntax-parse this-syntax ~and
+                  ~optional ~or* ~var)
          (only-in threading ~> ~>>)
          (only-in torch
                   add device div dtype ge gt le lt matmul mul sub tensor-device
@@ -42,8 +44,6 @@
   (match-define (list _ _ _ name _ ...) (identifier-binding id))
   name)
 
-;; The short name must be torch's where the long one is written, or the
-;; rewrite would hand tensors to racket/base.
 (define-syntax-class (renamed-in table)
   #:attributes (short)
   (pattern name:id
@@ -64,54 +64,6 @@
   "Use torch's operators: `+`, `-`, `*`, `/` and `@` dispatch to `add`, `sub`, `mul`, `div` and `matmul`, and `>=`, `>`, `<=` and `<` to `ge`, `gt`, `le` and `lt`. A `~>` step shows one operand and keeps it."
   ((~var op (renamed-in named-operators)) a:expr (~optional b:expr))
   (op.short a (~? b)))
-
-(define-syntax-class getter-part
-  #:attributes (short renamed?)
-  (pattern (~var getter (renamed-in long-getters))
-    #:with short #'getter.short
-    #:attr renamed? #t)
-  (pattern ((~var getter (renamed-in long-getters)) arg ...)
-    #:with short #'(getter.short arg ...)
-    #:attr renamed? #t)
-  (pattern short
-    #:attr renamed? #f))
-
-(define (application-entries stx)
-  (define inner (append-map application-entries (syntax-parts stx)))
-  (define application?
-    (syntax-parse stx
-      [(head:id _ ...) (free-identifier=? #'head #'#%plain-app)]
-      [_ #f]))
-  (cond
-    [(and application? (syntax-original-path stx))
-     (cons (syntax-property-entry (syntax-property stx 'expansion-path)
-                                  'written-application?
-                                  #t)
-           inner)]
-    [else inner]))
-
-(define written-applications-analyzer
-  (make-expansion-analyzer
-   #:name 'written-applications-analyzer
-   (lambda (expanded)
-     (~> expanded
-         (syntax-label-paths 'expansion-path)
-         application-entries
-         sequence->syntax-property-bundle))))
-
-(define (threading-head? stx)
-  (and (identifier? stx)
-       (or (free-identifier=? stx #'~>) (free-identifier=? stx #'~>>))))
-
-(define-refactoring-rule tensor-getter-to-short-name
-  #:description
-  "Use torch's short getters: `device` and `dtype` answer what `tensor-device` and `tensor-dtype` do."
-  #:analyzers (list written-applications-analyzer)
-  (~and (head _ ...) (part:getter-part ...))
-  #:when (or (syntax-property this-syntax 'written-application?)
-             (threading-head? #'head))
-  #:when (memq #t (attribute part.renamed?))
-  (part.short ...))
 
 (define core-form-heads ;; noqa
   '(quote quasiquote syntax quasisyntax unquote unquote-splicing unsyntax
@@ -189,43 +141,142 @@
                  [element (in-treelist elements)])
          (= outer-element element))))
 
+(define (formal-ids formals)
+  (syntax-parse formals
+    [() '()]
+    [rest:id (list #'rest)]
+    [(id:id . rest) (cons #'id (formal-ids #'rest))]))
+
+(define (form-non-references stx)
+  (syntax-parse stx
+    #:literal-sets (kernel-literals)
+    [((~or* quote quote-syntax #%provide #%require #%declare define-syntaxes
+            begin-for-syntax)
+      . _)
+     #f]
+    [((~or* module module*) name language . _) (list #'name #'language)]
+    [((~and head define-values) (id ...) _) (cons #'head (attribute id))]
+    [((~and head (~or* let-values letrec-values)) ([(id ...) _] ...) . _)
+     (cons #'head (append* (attribute id)))]
+    [((~and head #%plain-lambda) formals . _) (cons #'head (formal-ids #'formals))]
+    [((~and head case-lambda) [formals . _] ...)
+     (cons #'head (append-map formal-ids (attribute formals)))]
+    [((~and head set!) id _) (list #'head #'id)]
+    [(head:id . _) (list #'head)]
+    [_ '()]))
+
+;; A call to a contracted export expands without its head, which survives
+;; only in the expansion's 'origin.
+(define (origin-ids stx)
+  (let loop ([origin (syntax-property stx 'origin)])
+    (cond
+      [(identifier? origin) (list origin)]
+      [(pair? origin) (append (loop (car origin)) (loop (cdr origin)))]
+      [else '()])))
+
+(struct written-node (expansion-path original-path arguments-here? references))
+
 ;; A ~> or ~>> step receives the previous result from a sibling form, and a
 ;; keyword call binds it a few levels down, so every original form anywhere
 ;; inside the expansion counts, not just the call's direct arguments.
-(define (written-argument-entries stx entries)
-  (define-values (inner-entries inner-paths)
-    (for/fold ([entries entries] [paths '()])
+(define (written-nodes stx nodes non-references)
+  (define own-non-references (form-non-references stx))
+  (define part-non-references
+    (and non-references own-non-references
+         (append own-non-references non-references)))
+  (define-values (inner-nodes inner-paths)
+    (for/fold ([nodes nodes] [paths '()])
               ([part (in-list (syntax-parts stx))])
-      (define-values (part-entries part-paths)
-        (written-argument-entries part entries))
-      (values part-entries (append part-paths paths))))
+      (define-values (part-nodes part-paths)
+        (written-nodes part nodes part-non-references))
+      (values part-nodes (append part-paths paths))))
   (define here (syntax-original-path stx))
+  (define referenced-ids
+    (cond
+      [(not non-references) '()]
+      [(and (identifier? stx) (not (memq stx non-references)))
+       (cons stx (origin-ids stx))]
+      [else (origin-ids stx)]))
+  (define node
+    (written-node (syntax-property stx 'expansion-path)
+                  here
+                  (and here
+                       (for/and ([path (in-list inner-paths)])
+                         (path-within? path here)))
+                  (filter-map syntax-original-path referenced-ids)))
   (cond
-    [here
-     (values (cons (syntax-property-entry
-                    (syntax-property stx 'expansion-path)
-                    'arguments-written-here?
-                    (for/and ([path (in-list inner-paths)])
-                      (path-within? path here)))
-                   inner-entries)
-             (list here))]
-    [else (values inner-entries inner-paths)]))
+    [here (values (cons node inner-nodes) (list here))]
+    [(pair? (written-node-references node))
+     (values (cons node inner-nodes) inner-paths)]
+    [else (values inner-nodes inner-paths)]))
 
-(define written-arguments-analyzer
+(define (written-node-entries nodes)
+  (define references
+    (for*/hash ([node (in-list nodes)]
+                [path (in-list (written-node-references node))])
+      (values path #t)))
+  (define reference-parts
+    (for/fold ([parts (hash)])
+              ([path (in-hash-keys references)]
+               #:when (child-syntax-path? path))
+      (hash-update parts
+                   (syntax-path-parent path)
+                   (lambda (indices) (cons (syntax-path-last-element path) indices))
+                   '())))
+  (for*/list ([node (in-list nodes)]
+              #:do [(match-define (written-node expansion-path here arguments-here? _)
+                      node)]
+              #:when here
+              [(key value)
+               (in-hash (hash 'arguments-written-here? arguments-here?
+                              'variable-reference? (hash-ref references here #f)
+                              'reference-parts (hash-ref reference-parts here #f)))]
+              #:when value)
+    (syntax-property-entry expansion-path key value)))
+
+(define written-forms-analyzer
   (make-expansion-analyzer
-   #:name 'written-arguments-analyzer
+   #:name 'written-forms-analyzer
    (lambda (expanded)
-     (define-values (entries _outermost)
-       (written-argument-entries (syntax-label-paths expanded 'expansion-path)
-                                 '()))
-     (sequence->syntax-property-bundle entries))))
+     (define-values (nodes _outermost)
+       (written-nodes (syntax-label-paths expanded 'expansion-path) '() '()))
+     (sequence->syntax-property-bundle (written-node-entries nodes)))))
+
+(define (short-getter part)
+  (syntax-parse part
+    [(~var getter (renamed-in long-getters))
+     (syntax-property #'getter.short 'replacement-for part)]
+    [_ part]))
+
+(define-syntax-class getter-reference
+  #:attributes (replacement)
+  (pattern (~var getter (renamed-in long-getters))
+    #:when (syntax-property this-syntax 'variable-reference?)
+    #:attr replacement (short-getter this-syntax))
+  (pattern (part ...)
+    #:do [(define indices (or (syntax-property this-syntax 'reference-parts) '()))
+          (define parts
+            (for/list ([part (in-list (attribute part))]
+                       [index (in-naturals)])
+              (cond
+                [(memv index indices) (short-getter part)]
+                [else part])))]
+    #:when (not (andmap eq? parts (attribute part)))
+    #:attr replacement (datum->syntax this-syntax parts this-syntax)))
+
+(define-refactoring-rule tensor-getter-to-short-name
+  #:description
+  "Use torch's short getters: `device` and `dtype` answer what `tensor-device` and `tensor-dtype` do."
+  #:analyzers (list written-forms-analyzer)
+  reference:getter-reference
+  reference.replacement)
 
 ;; A form the analyzer could not place carries no property, so the rule stays
 ;; quiet rather than rewrite a step it cannot see.
 (define-refactoring-rule nested-calls-to-threading
   #:description
   "This chain of three or more calls reads better threaded with `~>`: each call takes the previous result as its first argument, or as either operand of a two-operand `+` or `*`, beside only names and literals."
-  #:analyzers (list written-arguments-analyzer)
+  #:analyzers (list written-forms-analyzer)
   chain:call-chain
   #:when (>= (length (attribute chain.step)) 2)
   #:when (syntax-property this-syntax 'arguments-written-here?)

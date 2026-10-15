@@ -3,14 +3,15 @@
 (require (only-in racket/contract/base
                   -> ->* ->i =/c >=/c and/c any/c listof or/c
                   unsupplied-arg?)
+         (only-in threading ~>)
          (only-in "../foreign/error.rkt" check-handle)
          (only-in "../foreign/ops.rkt" float-dtype/c placement)
          (only-in "../foreign/raw/spectral.rkt"
                   tr-hann-window/raw tr-stft/raw)
          (only-in "../foreign/structs.rkt" wrap-tensor)
          (only-in "../main.rkt"
-                  add device device/c dtype log matmul mul ref sqrt t tensor
-                  tensor? to-dtype)
+                  * + @ device device/c dtype log ref sqrt t tensor tensor?
+                  to-dtype)
          (only-in "../private/contract.rkt" define/contract-out))
 
 (define maybe-length/c (or/c #f exact-positive-integer?))
@@ -68,7 +69,7 @@
                        #:center? center?))
   (define re (ref frames .. 0))
   (define im (ref frames .. 1))
-  (define magnitude-squared (add (mul re re) (mul im im)))
+  (define magnitude-squared (+ (* re re) (* im im)))
   (if (= power 2) magnitude-squared (sqrt magnitude-squared)))
 
 ;; twins torchaudio.functional.edit_distance
@@ -155,15 +156,16 @@
         #:n-mels exact-positive-integer?
         #:eps (and/c rational? (>=/c 0)))
        tensor?)
+  (define samples-device (device samples))
   (define spec
     (spectrogram samples #:n-fft n-fft #:hop-length hop-length
                  #:window (hann-window n-fft
-                                       #:device (device samples)
+                                       #:device samples-device
                                        #:dtype (dtype samples))))
   (define fb
     (mel-filterbank #:n-freqs (add1 (quotient n-fft 2))
                     #:n-mels n-mels
                     #:sample-rate sample-rate
-                    #:device (device samples)
+                    #:device samples-device
                     #:dtype (dtype spec)))
-  (log (add (matmul (t fb 0 1) spec) eps)))
+  (~> (t fb 0 1) (@ spec) (+ eps) log))

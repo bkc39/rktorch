@@ -150,9 +150,6 @@
    (workload 'cached-shape-read (n 1000000) (intra 'shape) (cross-loops shape-loop shape-wrap)
              (build-vector 8 (lambda (_) (randn 8 8))) #f)))
 
-(define-syntax-parse-rule (named-cases make:id name:id ...)
-  (list (make 'name name) ...))
-
 (define (getter-cases #:reps [reps 200000])
   (define t (randn 8 8))
   (define (getter-case name getter)
@@ -161,8 +158,9 @@
                   (for ([_ (in-range n)])
                     (getter t)))
                 #:reps reps))
-  (named-cases getter-case
-               device tensor-device dtype tensor-dtype shape tensor-shape numel tensor-numel))
+  (map getter-case
+       '(device tensor-device dtype tensor-dtype shape tensor-shape numel tensor-numel)
+       (list device tensor-device dtype tensor-dtype shape tensor-shape numel tensor-numel)))
 
 (define (pipeline-case #:reps [reps 1])
   (define-values (samples rate) (load-audio-fixture))

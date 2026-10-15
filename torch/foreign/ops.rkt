@@ -18,6 +18,7 @@
          (only-in racket/contract/base
                   -> ->* ->i and/c any any/c cons/c contract-out contract?
                   list/c listof none/c or/c parameter/c)
+         (only-in racket/match match)
          (only-in "../private/contract.rkt"
                   define/checked-out define/contract-out)
          (only-in "device-type.rkt"
@@ -420,19 +421,17 @@
 (define/contract-out dtype (-> tensor? dtype/c) tensor-dtype) ;; noqa
 (define/contract-out numel (-> tensor? exact-nonnegative-integer?) tensor-numel) ;; noqa
 
-(define/contract-out (device x [index #f])
-  (->* ((or/c tensor? 'cpu 'cuda 'mps)) (exact-nonnegative-integer?) device?)
-  (cond
-    [(and (tensor? x) (not index)) (tensor-device x)]
-    [(tensor? x)
-     (raise-arguments-error 'device "an index makes no sense when querying a tensor"
-                            "tensor" x
-                            "index" index)]
-    [(and index (positive? index) (not (eq? x 'cuda)))
-     (raise-arguments-error 'device "only a CUDA device takes a nonzero index"
-                            "kind" x
-                            "index" index)]
-    [else (make-device x (or index 0))]))
+(define/contract-out (device . arguments)
+  (->* ()
+       #:rest (or/c (list/c tensor?)
+                    (list/c (or/c 'cpu 'cuda 'mps))
+                    (list/c (or/c 'cpu 'mps) 0)
+                    (list/c 'cuda exact-nonnegative-integer?))
+       device?)
+  (match arguments
+    [(list (? tensor? t)) (tensor-device t)]
+    [(list kind) (make-device kind 0)]
+    [(list kind index) (make-device kind index)]))
 
 (define/contract-out (tensor->vector t)
   (-> tensor? (or/c f32vector? f64vector? s64vector? bytes?))

@@ -2,6 +2,8 @@
 
 (module+ test
   (require (only-in ffi/vector f32vector s64vector)
+           (only-in racket/contract/base contract-name value-contract)
+           (only-in racket/contract/combinator exn:fail:contract:blame?)
            (only-in racket/list drop)
            rackunit
            "../main.rkt"
@@ -17,18 +19,20 @@
     (check-equal? (device 'cpu) (cpu-device))
     (check-equal? (dtype (zeros 2 #:dtype 'float64)) 'float64))
 
-  (test-case "A1: device on a tensor takes no index"
-    (define t (zeros 2))
-    (check-exn #rx"an index makes no sense when querying a tensor"
-               (lambda () (device t 0)))
-    (check-exn exn:fail:contract? (lambda () (device t 0)))
-    (check-exn exn:fail:contract? (lambda () (device 'cuda -1)))
-    (check-exn exn:fail:contract? (lambda () (device 'metal)))
-    (check-exn exn:fail:contract? (lambda () (device 'mps 1)))
-    (check-exn #rx"only a CUDA device takes a nonzero index"
-               (lambda () (device 'cpu 1)))
-    (check-equal? (device 'cuda 2) (cuda-device 2))
-    (check-equal? (device 'mps) (mps-device)))
+  (test-case "device states its argument rules in a first-order contract"
+    (check-false (regexp-match? #rx"->i"
+                                (format "~s" (contract-name (value-contract device))))))
+
+  (test-case "device blames its caller for each argument it rejects"
+    (define (blames-caller? e)
+      (and (exn:fail:contract:blame? e)
+           (regexp-match? #rx"blaming: [^\n]*tensor-ops-test" (exn-message e))))
+    (for ([arguments (in-list (list (list (zeros 2) 0)
+                                    (list 'cuda -1)
+                                    (list 'metal)
+                                    (list 'mps 1)
+                                    (list 'cpu 1)))])
+      (check-exn blames-caller? (lambda () (apply device arguments)) (format "~s" arguments))))
 
   (test-case "creation goldens"
     (check-equal? (tensor->list (zeros 2 2)) '(0.0 0.0 0.0 0.0))

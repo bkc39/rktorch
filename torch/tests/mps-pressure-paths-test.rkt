@@ -88,7 +88,7 @@
   ;; ------------------------------------------------------------------
   (cond
     [(not (mps-available?))
-     (displayln "[mps-pressure-paths] no MPS target-device; skipping")]
+     (displayln "[mps-pressure-paths] no MPS device; skipping")]
     [else
      (define mps (mps-device))
 
