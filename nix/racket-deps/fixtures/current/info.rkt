@@ -1,3 +1,3 @@
 #lang info
-(define deps (quote ("base" "threading-lib")))
-(define build-deps (quote ("rackunit-lib" "threading-doc")))
+(define deps '("base" "threading-lib"))
+(define build-deps '("rackunit-lib" "threading-doc"))

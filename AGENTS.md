@@ -470,19 +470,11 @@ the hash Nix reports, and run the full sweep (`scripts/resyntax analyze
 --directory torch`), since CI scans only changed files. Each checkout moves to the new
 trees on its next shell entry.
 
-The catalog packages `torch/info.rkt` declares beyond the Racket distribution
-(`threading-lib`, `threading-doc`) come from `racket-deps`, a fixed-output
-derivation in `flake.nix` that reads the list from `info.rkt` and holds source
-trees only, resolved against `pkgs.racket-lang.org` (it fails on any
-`compiled/` tree, `.zo`, `.dep` or `.sxref` file, or symlink), so one output
-serves every Racket version the checks run. Changing those deps in
-`info.rkt` is an `outputHash` bump and nothing else: set it to `""`, `nix
-build .#racket-deps`, paste the hash Nix reports. Until then the
-`racket-deps-current` check fails with "info.rkt changed; bump racket-deps
-outputHash". A hash mismatch on a fresh store, often macOS CI first, means
-upstream moved; bump as above. `nix build .#racket-deps --rebuild` checks
-locally. The dev shell's provisioning stamp names the output's store path, so
-checkouts pick the new trees up on their next shell entry.
+`racket-deps` (flake.nix) holds the catalog deps `torch/info.rkt` declares
+beyond the Racket distribution, as source trees only. When those deps change,
+or a fresh store reports a hash mismatch (upstream moved), set its
+`outputHash` to `""`, `nix build .#racket-deps`, paste the reported hash. The
+`racket-deps-current` check says "info.rkt changed; bump racket-deps outputHash".
 
 ### PyTorch parity
 

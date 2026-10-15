@@ -1,2 +1,2 @@
 #lang info
-(define deps (quote ("base" "threading-lib")))
+(define deps '("base" "threading-lib"))

@@ -50,18 +50,7 @@
            + "(see the flake inputs comment)");
         pkgsRacket.racket;
 
-      # The packages torch/info.rkt declares that the Racket distribution
-      # lacks, read from info.rkt itself, prefetched with their closure as
-      # unpacked source trees by a fixed-output derivation (network is
-      # permitted in FODs) so the sandboxed racket build installs offline.
-      # They resolve against pkgs.racket-lang.org alone, a source catalog:
-      # the release catalog serves built packages, whose compiled/ and doc/
-      # trees belong to one Racket version, and this output serves every
-      # version the checks run. Unpacked trees keep the hash mtime-free and
-      # platform-stable. Bump outputHash whenever info.rkt's catalog deps
-      # change, and when a package moves upstream: a hash mismatch on a fresh
-      # store (often macOS CI first) means upstream moved. AGENTS.md has the
-      # procedure.
+      # Source catalog only: a built package's compiled/ belongs to one Racket.
       racketDepsScript = ./nix/racket-deps/racket-deps.rkt;
       racketDepsFor = pkgs: racketPkg:
         pkgs.stdenvNoCC.mkDerivation (finalAttrs: {
@@ -79,9 +68,7 @@
             mapfile -t wanted < "$TMPDIR/wanted"
             raco pkg install --batch --auto --no-setup --scope user \
               --catalog https://pkgs.racket-lang.org "''${wanted[@]}"
-            racket -e \
-              '(require pkg/lib)(for ([p (installed-pkg-names #:scope (quote user))]) (displayln p))' \
-              > "$TMPDIR/deps"
+            racket ${racketDepsScript} installed > "$TMPDIR/deps"
             mapfile -t deps < "$TMPDIR/deps"
             raco pkg archive "$TMPDIR/archive" "''${deps[@]}"
             mkdir -p "$out"
@@ -101,10 +88,6 @@
           passthru.tests = racketDepsTestsFor pkgs racketPkg finalAttrs.finalPackage;
         });
 
-      # racket-deps-current fails when torch/info.rkt no longer matches the
-      # manifest racket-deps was built from: a stale output keeps its store
-      # path until outputHash moves, and would otherwise surface only as a
-      # missing dependency in raco setup.
       racketDepsTestsFor = pkgs: racketPkg: racket-deps:
         let
           run = name: script: pkgs.runCommand name { nativeBuildInputs = [ racketPkg ]; } ''
@@ -462,8 +445,6 @@
             inherit pname version;
             src = ./.;
 
-            # racket-deps-current first, so a stale racket-deps fails with its
-            # hint instead of a missing dependency.
             nativeBuildInputs = [
               racketPkg
               pkgs.makeWrapper
@@ -694,11 +675,7 @@
             export TORCHRKT_NATIVE_LIB_PATH="${shim}"
             export PLTUSERHOME="$PWD/.racket-user"
             _rkt_ver=$(racket --version 2>&1 | grep -oE 'v[0-9]+\.[0-9]+' | tr -d 'v' | tr '.' '-')
-            # The stamp is what makes provisioning a one-time cost, so it
-            # names racket-deps' store path, which moves with its outputHash:
-            # an already-provisioned checkout would otherwise skip a new or
-            # moved package and only fail later, where it is used. Bump the
-            # ordinal when the install steps below change.
+            # Re-provisions on an outputHash bump; bump deps4 when the steps below change.
             deps_stamp="$PLTUSERHOME/.deps4-${builtins.baseNameOf racket-deps}-''${_rkt_ver}"
             # In-tree zo caches compiled piecewise across commits can defeat
             # the compilation manager, so bytecode is keyed to HEAD by a
