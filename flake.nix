@@ -30,13 +30,6 @@
       #               (often uncached on darwin) from-source build.
       torchSource = "bin";
 
-      # threading-lib and its dependency closure, prefetched as unpacked
-      # source trees via a fixed-output derivation (network is permitted in
-      # FODs) so the sandboxed racket build installs offline — the same
-      # pattern as rkt-polars' racket-deps. Unpacked trees (not archive
-      # zips) so the output hash is mtime-free and platform-stable. Bump
-      # outputHash when the threading version in the catalog changes or a
-      # new runtime dep lands in torch/info.rkt.
       # The Racket toolchain from the scoped pin, guarded by the ordering
       # invariant the nixpkgsRacket input comment documents: the Racket
       # binary dlopens libtorchrkt built against the MAIN pin's glibc, and
@@ -57,6 +50,16 @@
            + "(see the flake inputs comment)");
         pkgsRacket.racket;
 
+      # The packages torch/info.rkt declares that the Racket distribution
+      # lacks, read from info.rkt itself, prefetched with their closure as
+      # unpacked source trees by a fixed-output derivation (network is
+      # permitted in FODs) so the sandboxed racket build installs offline.
+      # They resolve against pkgs.racket-lang.org alone, a source catalog:
+      # the release catalog serves built packages, whose compiled/ and doc/
+      # trees belong to one Racket version, and this output serves every
+      # version the checks run. Unpacked trees keep the hash mtime-free and
+      # platform-stable. Bump outputHash when a package moves in the catalog
+      # or info.rkt gains one.
       racketDepsFor = pkgs: racketPkg:
         pkgs.stdenvNoCC.mkDerivation {
           name = "torch-rkt-racket-deps";
@@ -67,8 +70,17 @@
             export HOME=$TMPDIR/home
             export PLTUSERHOME=$TMPDIR/plt
             export SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt
-            mkdir -p "$PLTUSERHOME"
-            raco pkg install --batch --auto --no-setup --scope user threading-lib
+            mkdir -p "$PLTUSERHOME" "$TMPDIR/torch-info"
+            cp ${./torch/info.rkt} "$TMPDIR/torch-info/info.rkt"
+            mapfile -t wanted < <(racket -e \
+              '(require pkg/lib setup/getinfo)
+               (define info (get-info/full (build-path (getenv "TMPDIR") "torch-info")))
+               (define have (installed-pkg-names #:scope (quote installation)))
+               (for ([d (append (info (quote deps)) (info (quote build-deps)))])
+                 (define name (if (pair? d) (car d) d))
+                 (unless (member name have) (displayln name)))')
+            raco pkg install --batch --auto --no-setup --scope user \
+              --catalog https://pkgs.racket-lang.org "''${wanted[@]}"
             mapfile -t deps < <(racket -e \
               '(require pkg/lib)(for ([p (installed-pkg-names #:scope (quote user))]) (displayln p))')
             raco pkg archive "$TMPDIR/archive" "''${deps[@]}"
@@ -78,12 +90,16 @@
               mkdir -p "$out/$name"
               unzip -q "$z" -d "$out/$name"
             done
+            if find "$out" -type d \( -name compiled -o -name doc \) | grep .; then
+              echo "racket-deps: the trees above are build output, not source" >&2
+              exit 1
+            fi
             runHook postBuild
           '';
           dontInstall = true;
           outputHashMode = "recursive";
           outputHashAlgo = "sha256";
-          outputHash = "sha256-7149ciHUXyTKKg+3KGRPKU9aTHrAA5gw5XWibaf1avw=";
+          outputHash = "sha256-pnZ0LA/WcxcGmbX1z1wvpUv6swSiS8gjMGvk/bTZ8IU=";
         };
 
       # nixpkgs' libtorch-bin is still 2.9.0 (#140), so torchPackageFor points
@@ -613,11 +629,12 @@
             export TORCHRKT_NATIVE_LIB_PATH="${shim}"
             export PLTUSERHOME="$PWD/.racket-user"
             _rkt_ver=$(racket --version 2>&1 | grep -oE 'v[0-9]+\.[0-9]+' | tr -d 'v' | tr '.' '-')
-            # Bump the ordinal whenever the installed package list below
-            # changes: the stamp is what makes provisioning a one-time cost,
-            # so an already-provisioned checkout would otherwise skip the new
-            # package and only fail later, where it is used.
-            deps_stamp="$PLTUSERHOME/.deps3-installed-torch-''${_rkt_ver}"
+            # The stamp is what makes provisioning a one-time cost, so it
+            # names racket-deps' store path, which moves with its outputHash:
+            # an already-provisioned checkout would otherwise skip a new or
+            # moved package and only fail later, where it is used. Bump the
+            # ordinal when the install steps below change.
+            deps_stamp="$PLTUSERHOME/.deps4-${builtins.baseNameOf racket-deps}-''${_rkt_ver}"
             # In-tree zo caches compiled piecewise across commits can defeat
             # the compilation manager, so bytecode is keyed to HEAD by a
             # stamp-and-clear (a per-rev PLTCOMPILEDROOTS would recompile
@@ -654,6 +671,8 @@
               # deletes the stamp by hand.
               if raco pkg install --batch --copy --no-docs --no-setup \
                      --scope user --skip-installed ${racket-deps}/*/ \
+                 && raco pkg update --batch --copy --no-docs --no-setup \
+                      --no-trash --deps fail --scope user ${racket-deps}/*/ \
                  && raco pkg install --batch --auto --no-setup --link \
                       --scope user --skip-installed --name torch "$PWD/torch" \
                  && raco setup --no-docs --pkgs torch; then

@@ -468,6 +468,17 @@ the hash Nix reports, and run the full sweep (`scripts/resyntax analyze
 --directory torch`), since CI scans only changed files. Each checkout moves to the new
 trees on its next shell entry.
 
+The catalog packages `torch/info.rkt` declares beyond the Racket distribution
+(`threading-lib`, `threading-doc`) come from `racket-deps`, a fixed-output
+derivation in `flake.nix` that reads the list from `info.rkt` and holds source
+trees only, resolved against `pkgs.racket-lang.org` (it fails on any
+`compiled/` or `doc/` tree), so one output serves every Racket version the
+checks run. Adding such a dep, or picking up a new upstream commit, is an
+`outputHash` bump and nothing else: set it to `""`, `nix build
+.#racket-deps`, paste the hash Nix reports. The dev shell's provisioning stamp
+names the output's store path, so checkouts pick the new trees up on their
+next shell entry.
+
 ### PyTorch parity
 
 The default `nix develop` shell ships a Python with `torch`, so you can explore
