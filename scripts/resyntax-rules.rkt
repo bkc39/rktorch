@@ -1,6 +1,7 @@
 #lang racket/base
 
-(require (only-in racket/match match-define)
+(require (only-in racket/list append-map)
+         (only-in racket/match match-define)
          (only-in racket/treelist in-treelist treelist-length)
          (only-in resyntax/base
                   define-refactoring-rule define-refactoring-suite)
@@ -13,8 +14,7 @@
          (only-in resyntax/private/syntax-neighbors syntax-original-path)
          (only-in syntax/parse/pre
                   attribute boolean define-syntax-class expr id keyword
-                  number pattern str syntax-parse this-syntax ~and ~optional
-                  ~or)
+                  number pattern str syntax-parse this-syntax ~and ~optional ~var)
          (only-in threading ~> ~>>)
          (only-in torch
                   add device div dtype ge gt le lt matmul mul sub tensor-device
@@ -24,87 +24,94 @@
 (provide rktorch-rules rktorch-recommendations)
 
 (define named-operators ;; noqa
-  (list (list #'add '+ #'torch:+)
-        (list #'sub '- #'torch:-)
-        (list #'mul '* #'torch:*)
-        (list #'div '/ #'torch:/)
-        (list #'matmul '@ #'torch:@)
-        (list #'ge '>= #'torch:>=)
-        (list #'gt '> #'torch:>)
-        (list #'le '<= #'torch:<=)
-        (list #'lt '< #'torch:<)))
+  (list (list #'add #'torch:+)
+        (list #'sub #'torch:-)
+        (list #'mul #'torch:*)
+        (list #'div #'torch:/)
+        (list #'matmul #'torch:@)
+        (list #'ge #'torch:>=)
+        (list #'gt #'torch:>)
+        (list #'le #'torch:<=)
+        (list #'lt #'torch:<)))
 
-;; The operator must be torch's where the call is written, or the rewrite
-;; would hand tensors to racket/base.
-(define-syntax-class named-operator
-  #:attributes (operator)
+(define long-getters ;; noqa
+  (list (list #'tensor-device #'device)
+        (list #'tensor-dtype #'dtype)))
+
+(define (exported-name id)
+  (match-define (list _ _ _ name _ ...) (identifier-binding id))
+  name)
+
+;; The short name must be torch's where the long one is written, or the
+;; rewrite would hand tensors to racket/base.
+(define-syntax-class (renamed-in table)
+  #:attributes (short)
   (pattern name:id
-    #:do [(define symbol
-            (for/first ([entry (in-list named-operators)]
-                        #:do [(match-define (list named symbol operator) entry)]
-                        #:when (free-identifier=? #'name named)
-                        #:when (free-identifier=?
-                                (datum->syntax #'name symbol) operator))
-              symbol))]
-    #:when symbol
-    #:with operator (datum->syntax #'name symbol #'name)))
+    #:do [(define renamed
+            (for/first ([entry (in-list table)]
+                        #:do [(match-define (list long short) entry)]
+                        #:when (eq? (syntax-e #'name) (syntax-e long))
+                        #:when (free-identifier=? #'name long)
+                        #:do [(define here
+                                (datum->syntax #'name (exported-name short) #'name))]
+                        #:when (free-identifier=? here short))
+              here))]
+    #:when renamed
+    #:with short renamed))
 
 (define-refactoring-rule named-operator-to-symbol
   #:description
   "Use torch's operators: `+`, `-`, `*`, `/` and `@` dispatch to `add`, `sub`, `mul`, `div` and `matmul`, and `>=`, `>`, `<=` and `<` to `ge`, `gt`, `le` and `lt`. A `~>` step shows one operand and keeps it."
-  (op:named-operator a:expr (~optional b:expr))
-  (op.operator a (~? b)))
+  ((~var op (renamed-in named-operators)) a:expr (~optional b:expr))
+  (op.short a (~? b)))
 
-(define long-getters ;; noqa
-  (list (list #'tensor-device 'device #'device)
-        (list #'tensor-dtype 'dtype #'dtype)))
-
-;; The short name must be torch's where the getter is written: a module may
-;; bind `device` to a value, or import only the long name.
-(define-syntax-class long-getter
-  #:attributes (short)
-  (pattern name:id
-    #:do [(define symbol
-            (for/first ([entry (in-list long-getters)]
-                        #:do [(match-define (list long symbol short) entry)]
-                        #:when (eq? (syntax-e #'name) (syntax-e long))
-                        #:when (free-identifier=? #'name long)
-                        #:when (free-identifier=?
-                                (datum->syntax #'name symbol) short))
-              symbol))]
-    #:when symbol
-    #:with short (datum->syntax #'name symbol #'name)))
-
-(define-syntax-class long-getter-use
-  #:attributes (short)
-  (pattern getter:long-getter
-    #:with short #'getter.short)
-  (pattern (getter:long-getter arg ...)
-    #:with short #'(getter.short arg ...)))
-
-;; A threading step is rewritten into a call the expander never visits as
-;; written, so the step is matched from its ~> or ~>> form.
-(define-syntax-class getter-step
-  #:attributes (short long?)
-  (pattern use:long-getter-use
-    #:with short #'use.short
-    #:attr long? #t)
+(define-syntax-class getter-part
+  #:attributes (short renamed?)
+  (pattern (~var getter (renamed-in long-getters))
+    #:with short #'getter.short
+    #:attr renamed? #t)
+  (pattern ((~var getter (renamed-in long-getters)) arg ...)
+    #:with short #'(getter.short arg ...)
+    #:attr renamed? #t)
   (pattern short
-    #:attr long? #f))
+    #:attr renamed? #f))
+
+(define (application-entries stx)
+  (define inner (append-map application-entries (syntax-parts stx)))
+  (define application?
+    (syntax-parse stx
+      [(head:id _ ...) (free-identifier=? #'head #'#%plain-app)]
+      [_ #f]))
+  (cond
+    [(and application? (syntax-original-path stx))
+     (cons (syntax-property-entry (syntax-property stx 'expansion-path)
+                                  'written-application?
+                                  #t)
+           inner)]
+    [else inner]))
+
+(define written-applications-analyzer
+  (make-expansion-analyzer
+   #:name 'written-applications-analyzer
+   (lambda (expanded)
+     (~> expanded
+         (syntax-label-paths 'expansion-path)
+         application-entries
+         sequence->syntax-property-bundle))))
+
+(define (threading-head? stx)
+  (and (identifier? stx)
+       (or (free-identifier=? stx #'~>) (free-identifier=? stx #'~>>))))
 
 (define-refactoring-rule tensor-getter-to-short-name
   #:description
   "Use torch's short getters: `device` and `dtype` answer what `tensor-device` and `tensor-dtype` do."
-  use:long-getter-use
-  use.short)
-
-(define-refactoring-rule tensor-getter-step-to-short-name
-  #:description
-  "Use torch's short getters in a threading step: `device` and `dtype` answer what `tensor-device` and `tensor-dtype` do."
-  #:literals (~> ~>>)
-  ((~and threader (~or ~> ~>>)) start step:getter-step ...)
-  #:when (ormap values (attribute step.long?))
-  (threader start step.short ...))
+  #:analyzers (list written-applications-analyzer)
+  (~and (head _ ...) (part:getter-part ...))
+  #:when (or (syntax-property this-syntax 'written-application?)
+             (threading-head? #'head))
+  #:when (memq #t (attribute part.renamed?))
+  (part.short ...))
 
 (define core-form-heads ;; noqa
   '(quote quasiquote syntax quasisyntax unquote unquote-splicing unsyntax
@@ -238,7 +245,6 @@
 (define-refactoring-suite rktorch-rules
   #:rules (named-operator-to-symbol
            nested-calls-to-threading
-           tensor-getter-step-to-short-name
            tensor-getter-to-short-name
            threading-from-innermost-call))
 

@@ -102,7 +102,9 @@
 (require (for-syntax racket/base racket/syntax syntax/parse)
          (only-in racket/syntax format-symbol)
          (only-in syntax/parse/define define-syntax-parse-rule)
-         (only-in torch randn reclaim-native-memory!)
+         (only-in torch
+                  device dtype numel randn reclaim-native-memory! shape tensor-device
+                  tensor-dtype tensor-numel tensor-shape)
          (only-in torch/audio/data load-audio-fixture)
          (only-in torch/audio/functional log-mel-spectrogram)
          (prefix-in bare: (submod "." bare))
@@ -113,6 +115,7 @@
          (only-in "harness.rkt" bench-case))
 
 (provide contract-workloads
+         getter-cases
          pipeline-case)
 
 (define strategies '(bare unless+error define/contract contract-out))
@@ -146,6 +149,20 @@
              (randn 8 8) (randn 8 8))
    (workload 'cached-shape-read (n 1000000) (intra 'shape) (cross-loops shape-loop shape-wrap)
              (build-vector 8 (lambda (_) (randn 8 8))) #f)))
+
+(define-syntax-parse-rule (named-cases make:id name:id ...)
+  (list (make 'name name) ...))
+
+(define (getter-cases #:reps [reps 200000])
+  (define t (randn 8 8))
+  (define (getter-case name getter)
+    (bench-case name
+                (lambda (n)
+                  (for ([_ (in-range n)])
+                    (getter t)))
+                #:reps reps))
+  (named-cases getter-case
+               device tensor-device dtype tensor-dtype shape tensor-shape numel tensor-numel))
 
 (define (pipeline-case #:reps [reps 1])
   (define-values (samples rate) (load-audio-fixture))

@@ -421,19 +421,17 @@
 (define/contract-out numel (-> tensor? exact-nonnegative-integer?) tensor-numel) ;; noqa
 
 (define/contract-out (device x [index #f])
-  (->i ([target (or/c tensor? 'cpu 'cuda 'mps)])
-       ([index (target)
-               (case target
-                 [(cuda) exact-nonnegative-integer?]
-                 [(cpu mps) 0]
-                 [else none/c])])
-       [result device?])
+  (->* ((or/c tensor? 'cpu 'cuda 'mps)) (exact-nonnegative-integer?) device?)
   (cond
+    [(and (tensor? x) (not index)) (tensor-device x)]
     [(tensor? x)
-     (when index
-       (error 'device "an ordinal makes no sense when querying a tensor: ~e"
-              index))
-     (tensor-device x)]
+     (raise-arguments-error 'device "an index makes no sense when querying a tensor"
+                            "tensor" x
+                            "index" index)]
+    [(and index (positive? index) (not (eq? x 'cuda)))
+     (raise-arguments-error 'device "only a CUDA device takes a nonzero index"
+                            "kind" x
+                            "index" index)]
     [else (make-device x (or index 0))]))
 
 (define/contract-out (tensor->vector t)

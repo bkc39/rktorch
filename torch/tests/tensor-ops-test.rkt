@@ -11,7 +11,24 @@
   (test-case "tensor-device and tensor-dtype answer as device and dtype"
     (define t (zeros 2 #:dtype 'int64))
     (check-equal? (long:tensor-device t) (device t))
-    (check-equal? (long:tensor-dtype t) (dtype t)))
+    (check-equal? (long:tensor-dtype t) (dtype t))
+    (check-exn exn:fail:contract? (lambda () (long:tensor-device 'cpu)))
+    (check-exn exn:fail:contract? (lambda () (long:tensor-dtype 'float32)))
+    (check-equal? (device 'cpu) (cpu-device))
+    (check-equal? (dtype (zeros 2 #:dtype 'float64)) 'float64))
+
+  (test-case "A1: device on a tensor takes no index"
+    (define t (zeros 2))
+    (check-exn #rx"an index makes no sense when querying a tensor"
+               (lambda () (device t 0)))
+    (check-exn exn:fail:contract? (lambda () (device t 0)))
+    (check-exn exn:fail:contract? (lambda () (device 'cuda -1)))
+    (check-exn exn:fail:contract? (lambda () (device 'metal)))
+    (check-exn exn:fail:contract? (lambda () (device 'mps 1)))
+    (check-exn #rx"only a CUDA device takes a nonzero index"
+               (lambda () (device 'cpu 1)))
+    (check-equal? (device 'cuda 2) (cuda-device 2))
+    (check-equal? (device 'mps) (mps-device)))
 
   (test-case "creation goldens"
     (check-equal? (tensor->list (zeros 2 2)) '(0.0 0.0 0.0 0.0))

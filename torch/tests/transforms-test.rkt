@@ -94,9 +94,9 @@
                   "upsampling clamps at the edges")))
 
   (test-case "resize: float64 and the half dtypes keep their dtype"
-    (for ([dtype (in-list '(float64 float16 bfloat16))])
-      (define out (resize (to-dtype (rand 3 8 8) dtype) 4))
-      (check-equal? (tensor-dtype out) dtype)
+    (for ([source-dtype (in-list '(float64 float16 bfloat16))])
+      (define out (resize (to-dtype (rand 3 8 8) source-dtype) 4))
+      (check-equal? (dtype out) source-dtype)
       (check-equal? (tensor-shape out) '(3 4 4)))
     (check-exn exn:fail:contract?
                (lambda () (resize (to-dtype (rand 3 8 8) 'uint8) 4)))

@@ -189,6 +189,7 @@
         (section "micro" "layers" "The op stack, layer by layer" layer-section invocation)
         (section "micro" "ops" "Per op" op-section invocation)
         (section "micro" "contracts" "Validation strategies" contract-section invocation)
+        (section "micro" "getters" "Short and long getters" (plain-section "getter") invocation)
         (section "micro" "pipeline" "A real pipeline" (plain-section "pipeline") invocation)
         (section "e2e" "summary" "End to end" e2e-section host)
         (section "e2e" "error" "Failures" failure-section host)))

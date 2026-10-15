@@ -138,7 +138,27 @@
     (test-case "a require naming both getters stays"
       (check-suite-does-not-refactor
        (program '(require (only-in torch dtype tensor tensor-dtype))
-                '(dtype (tensor (list 1 2)))))))
+                '(dtype (tensor (list 1 2))))))
+
+    (test-case "A2: a contract-out export of tensor-device stays"
+      (check-suite-does-not-refactor
+       (program '(require racket/contract/base torch)
+                '(provide (contract-out [tensor-device any/c])))))
+
+    (test-case "A2: a plain export of tensor-dtype stays"
+      (check-suite-does-not-refactor
+       (program '(require torch)
+                '(provide tensor-dtype))))
+
+    (test-case "A2: a quoted tensor-dtype stays"
+      (check-suite-does-not-refactor
+       (program '(require torch)
+                '(list 'tensor-dtype (quote tensor-device)))))
+
+    (test-case "a renamed import of add stays"
+      (check-suite-does-not-refactor
+       (program '(require (rename-in torch [add plus]))
+                '(plus (tensor (list 1.0)) 1.0)))))
 
   (define calls
     '((define (f . xs) (car xs))

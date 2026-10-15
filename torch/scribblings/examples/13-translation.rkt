@@ -261,14 +261,14 @@ dropout off, and @racket[with-no-grad], on the device the weights are on.
 
 @chunk[<r13-translate>
 (define (translate net source-vocab target-vocab sentences)
-  (define device (tensor-device (car (parameters net))))
+  (define weights-device (~> net parameters car device))
   (in-eval-mode net
     (with-no-grad
       (define sources
         (to-device (sentences->tensor source-vocab
                                       (map normalize-sentence sentences)
                                       #:width sentence-width)
-                   device))
+                   weights-device))
       (define best
         (to-device (argmax (net sources #f sentence-width #f) 2) 'cpu))
       (for/list ([row (in-range (length sentences))])
