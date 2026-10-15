@@ -26,9 +26,18 @@ in flake.nix" when the declared deps no longer match the fetched ones, and
 names any dep whose `#:version` minimum the fetched tree or the Racket
 installation does not meet;
 `racket-deps-guard-test` and `racket-deps-info-test` test
-`nix/racket-deps/racket-deps.rkt`. To bump, set `outputHash` to `""`, run
-`nix build .#racket-deps`, and paste the hash Nix reports. A `#:platform` dep
-is refused: one hash cannot hold a per-system fetch.
+`nix/racket-deps/racket-deps.rkt`; `racket-deps-provision-test` tests
+`nix/racket-deps/provision.sh`, the dev shells' provisioning. To bump, set
+`outputHash` to `""`, run `nix build .#racket-deps`, and paste the hash Nix
+reports. A `#:platform` dep is refused: one hash cannot hold a per-system
+fetch. A package source (a URL or path) is refused too: racket-deps fetches
+catalog packages by name.
+
+`nix develop` provisions `.racket-user` again whenever racket-deps, the Racket
+version or `torch/info.rkt` changes. It runs the same drift check first and
+stops on it, removes the packages only the previous racket-deps held, and
+installs `torch` with `--deps fail`, so a dep missing from racket-deps fails
+the shell entry instead of being fetched from the live catalog.
 
 The package supports Racket 9.1 and later. `nix run .#matrix` builds and tests
 every supported Racket against the pinned libtorch on the host's system.
