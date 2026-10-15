@@ -50,6 +50,16 @@ int tr_tensor_numel(const tr_tensor* t, int64_t* out);
  * view's extent, not the underlying (possibly shared) storage's. */
 int tr_tensor_nbytes(const tr_tensor* t, int64_t* out);
 
+/* Address of the first element, torch.Tensor.data_ptr(): a view at a
+ * nonzero offset differs from its base, a copy never matches its source, and
+ * an in-place move (tr_tensor_to_) changes it whenever it moves anything. */
+int tr_tensor_data_ptr(const tr_tensor* t, uint64_t* out);
+
+/* Address of the start of the tensor's storage,
+ * torch.Tensor.untyped_storage().data_ptr(): every view of one storage
+ * answers the same, whatever its offset. */
+int tr_tensor_storage_ptr(const tr_tensor* t, uint64_t* out);
+
 /* Number of dimensions. */
 int tr_tensor_ndim(const tr_tensor* t, int64_t* out);
 
