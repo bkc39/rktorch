@@ -2,6 +2,7 @@
 
 (require (only-in compiler/cm managed-compile-zo)
          (only-in json read-json write-json)
+         (only-in racket/file call-with-atomic-output-file)
          (only-in racket/list drop last remove-duplicates)
          (only-in "harness.rkt" host-meta summarize)
          (only-in "shim.rkt" aten-threads torch-dir))
@@ -21,8 +22,7 @@
         (reverse acc))))
 
 (define (write-steps out data)
-  (call-with-output-file out #:exists 'truncate
-    (lambda (port) (write-json data port))))
+  (call-with-atomic-output-file out (lambda (port _tmp) (write-json data port))))
 
 (define (record-steps! runner out)
   (define device-type (dynamic-require 'torch 'device-type))
@@ -164,4 +164,10 @@
       (with-temporary-path (path (make-temporary-file "steps-~a.json"))
         (write-steps path (hasheq 'meta (hasheq 'git_sha "abc") 'torch_dir "/t/torch/"))
         (read-steps path)))
-    (check-equal? run (recorded-run '() #f (hasheq 'git_sha "abc") "/t/torch/"))))
+    (check-equal? run (recorded-run '() #f (hasheq 'git_sha "abc") "/t/torch/")))
+
+  (test-case "a write that fails leaves the last complete record"
+    (with-temporary-path (path (make-temporary-file "steps-~a.json"))
+      (write-steps path (hasheq 'wall_ms 5.0 'steps '((1 2.0 3))))
+      (check-exn exn:fail? (lambda () (write-steps path (hasheq 'steps (list 1 (void))))))
+      (check-equal? (read-steps path) (recorded-run (list (vector 1 2.0 3)) 5.0 #f #f)))))
