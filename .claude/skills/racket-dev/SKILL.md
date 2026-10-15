@@ -159,6 +159,16 @@ git add -A && nix flake check
 What CI runs, minus the Resyntax lane (step 5) and the coverage floor
 (step 4). Green here means the racket jobs pass in CI.
 
+### 9. Before a stack is ready for review: the epoch check
+
+```bash
+nix develop .#cuda -c scripts/epoch-check
+```
+
+At the stack's top commit, on the lab host: every example trains for a few
+epochs and each headline is compared with `docs/epoch-check.md`, which says
+what each verdict means. The table goes in the top pull request's packet.
+
 ## Conventions the gates assume
 
 - **Contracts at the definition site**, via `define/contract-out` /
