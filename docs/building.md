@@ -23,7 +23,8 @@ nix flake check           # the Nix checks: cpp, format, tidy, line gate, racket
 beyond the Racket distribution, fetched as source trees under one hash.
 `racket-deps-current` fails with "info.rkt changed; bump racket-deps outputHash
 in flake.nix" when the declared deps no longer match the fetched ones, and
-names any dep whose `#:version` minimum the fetched tree does not meet;
+names any dep whose `#:version` minimum the fetched tree or the Racket
+installation does not meet;
 `racket-deps-guard-test` and `racket-deps-info-test` test
 `nix/racket-deps/racket-deps.rkt`. To bump, set `outputHash` to `""`, run
 `nix build .#racket-deps`, and paste the hash Nix reports. A `#:platform` dep
