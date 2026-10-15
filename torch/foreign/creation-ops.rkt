@@ -26,6 +26,7 @@
                   or/c
                   unsupplied-arg?)
          (only-in racket/list append-map)
+         (only-in racket/math infinite? nan?)
          (only-in "../private/contract.rkt"
                   define/checked-out
                   define/contract-out)
@@ -57,6 +58,7 @@
                   tr-from-data-u8-on-device/raw
                   tr-from-data-u8/raw
                   tr-from-data/raw
+                  tr-full-i64-on/raw
                   tr-full-on/raw
                   tr-ones-on/raw
                   tr-zeros-on/raw)
@@ -102,35 +104,41 @@
        #:rest shape-rest/c tensor?)
   (shaped 'ones tr-ones-on/raw dims device dtype requires-grad?))
 
-;; the fill crosses the FFI as a double: a fractional value would truncate,
-;; an int64 fill outside the exact range of a double would round and a
-;; uint8 fill outside 0..255 would wrap, so the contract refuses all three
-;; where torch takes them silently
-(define (fill-crosses-exactly? value dtype)
+;; torch truncates a fractional integer fill, wraps a negative uint8 fill,
+;; takes any real as a bool and rounds a half-precision fill past the
+;; largest finite value down to it or up to an infinity; the contract
+;; refuses all four
+(define float-max
+  (hasheq 'float16 65504.0
+          'bfloat16 3.3895313892515355e38
+          'float32 3.4028234663852886e38
+          'float64 1.7976931348623157e308))
+
+(define (fill-verdict value dtype)
+  (define dt (if (unsupplied-arg? dtype) 'float32 dtype))
+  (define limit (hash-ref float-max dt #f))
   (cond
-    [(unsupplied-arg? dtype) #t]
-    [(eq? dtype 'int64)
-     (or (and (integer? value)
-              (<= (- (expt 2 63)) value (sub1 (expt 2 63)))
-              (= (exact->inexact value) value))
-         "an int64 fill value must be an integer exactly representable as a double")]
-    [(eq? dtype 'uint8)
+    [limit
+     (or (<= (- limit) value limit)
+         (nan? value)
+         (infinite? value)
+         (format "a ~a fill value must be NaN, infinite or within ±~a"
+                 dt limit))]
+    [(eq? dt 'int64)
+     (or (and (integer? value) (<= (- (expt 2 63)) value (sub1 (expt 2 63))))
+         "an int64 fill value must be an integer from -2^63 to 2^63 - 1")]
+    [(eq? dt 'uint8)
      (or (and (integer? value) (<= 0 value 255))
          "a uint8 fill value must be an integer from 0 to 255")]
-    [(eq? dtype 'bool)
+    [else
      (or (and (integer? value) (<= 0 value 1))
-         "a bool fill value must be 0 or 1")]
-    [else #t]))
+         "a bool fill value must be 0 or 1")]))
 
 (define/contract-out (fill-value/c dtype) ;; noqa
   (-> dtype/c flat-contract?)
   (flat-named-contract
-   (case dtype
-     [(int64) 'int64-fill-value]
-     [(uint8) 'uint8-fill-value]
-     [(bool) 'bool-fill-value]
-     [else 'fill-value])
-   (lambda (v) (and (real? v) (eq? #t (fill-crosses-exactly? v dtype))))))
+   (string->symbol (format "~a-fill-value" dtype))
+   (lambda (v) (and (real? v) (eq? #t (fill-verdict v dtype))))))
 
 (define/contract-out (full value #:device [device #f] #:dtype [dtype #f]
                            #:requires-grad? [requires-grad? #f]
@@ -140,10 +148,13 @@
         #:dtype [dtype dtype/c]
         #:requires-grad? [requires-grad? boolean?])
        #:rest [dims shape-rest/c]
-       #:pre/desc (value dtype) (fill-crosses-exactly? value dtype)
+       #:pre/desc (value dtype) (fill-verdict value dtype)
        [result tensor?])
-  (shaped 'full tr-full-on/raw dims device dtype requires-grad?
-          (exact->inexact value)))
+  (define-values (raw fill)
+    (if (eq? dtype 'int64)
+        (values tr-full-i64-on/raw (inexact->exact value))
+        (values tr-full-on/raw (exact->inexact value))))
+  (shaped 'full raw dims device dtype requires-grad? fill))
 
 (define/contract-out (randn #:device [device #f] #:dtype [dtype #f]
                             #:requires-grad? [requires-grad? #f]
@@ -213,7 +224,7 @@
        [#:device device/c #:dtype dtype/c #:requires-grad? boolean?]
        tensor?)
   (define-values (dev dt) (like t device dtype))
-  (define verdict (fill-crosses-exactly? value dt))
+  (define verdict (fill-verdict value dt))
   (unless (eq? verdict #t)
     (raise-argument-error 'full-like verdict value))
   (full value (tensor-shape t) #:device dev #:dtype dt

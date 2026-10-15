@@ -222,6 +222,24 @@ TEST(TorchrktCreationOn, PlacesAndTypesAtConstruction) {
       nullptr);
 }
 
+TEST(TorchrktCreationOn, FullI64IsExactPastTwoToTheFiftyThree) {
+  const std::vector<int64_t> dims = {2};
+  for (const int64_t value :
+       {(int64_t{1} << 53) + 1, INT64_MAX, INT64_MIN, int64_t{-7}}) {
+    const Handle f(tr_full_i64_on(dims.data(), 1, value, TR_DEVICE_KEEP, 0,
+                                  TR_DTYPE_INT64));
+    ASSERT_NE(f.t, nullptr) << tr_last_error();
+    EXPECT_EQ(dtype_of(f.t), TR_DTYPE_INT64);
+    std::vector<int64_t> out(2, 0);
+    std::uint64_t numel = 0;
+    EXPECT_EQ(tr_tensor_copy_data_i64(f.t, out.size(), out.data(), &numel), 0)
+        << tr_last_error();
+    EXPECT_EQ(out, std::vector<int64_t>(2, value));
+  }
+  EXPECT_EQ(tr_full_i64_on(nullptr, 1, 1, TR_DEVICE_KEEP, 0, TR_DTYPE_INT64),
+            nullptr);
+}
+
 TEST(TorchrktCreationOn, ArangeEyeAndRandomTakeOptions) {
   const Handle ar(
       tr_arange_on(0.0, 3.0, 1.0, TR_DEVICE_KEEP, 0, TR_DTYPE_INT64));

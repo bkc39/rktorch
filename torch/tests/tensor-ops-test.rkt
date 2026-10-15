@@ -2,7 +2,9 @@
 
 (module+ test
   (require (only-in ffi/vector f32vector s64vector)
+           (only-in racket/contract/base contract-name)
            (only-in racket/list drop)
+           (only-in racket/math nan?)
            rackunit
            "../main.rkt")
 
@@ -26,11 +28,30 @@
     (check-equal? (tensor-dtype (zeros-like ref #:dtype 'int64)) 'int64)
     (check-equal? (tensor->list (ones-like (zeros 3))) '(1.0 1.0 1.0))
     (check-equal? (tensor->list (full 9007199254740992 1 #:dtype 'int64))
-                  '(9007199254740992) "2^53 survives the double crossing")
-    (check-exn #rx"exactly representable as a double"
-               (lambda () (full 9007199254740993 1 #:dtype 'int64)))
-    (check-exn #rx"exactly representable as a double"
-               (lambda () (full (expt 10 400) 1 #:dtype 'int64)))
+                  '(9007199254740992))
+    (check-equal? (tensor->list (full 9007199254740993 1 #:dtype 'int64))
+                  '(9007199254740993) "2^53 + 1 crosses as an int64")
+    (check-equal? (tensor->list (full (sub1 (expt 2 63)) 1 #:dtype 'int64))
+                  (list (sub1 (expt 2 63))))
+    (check-equal? (tensor->list (full -4e18 1 #:dtype 'int64))
+                  '(-4000000000000000000))
+    (check-exn #rx"from -2\\^63 to 2\\^63 - 1"
+               (lambda () (full (expt 2 63) 1 #:dtype 'int64)))
+    (check-exn #rx"from -2\\^63 to 2\\^63 - 1"
+               (lambda () (full 0.5 1 #:dtype 'int64)))
+    (check-exn #rx"a float32 fill value must be NaN, infinite or within"
+               (lambda () (full 1e300 1 #:dtype 'float32)))
+    (check-exn #rx"^full: contract violation.*float32 fill value"
+               (lambda () (full 1e300 1)))
+    (check-exn #rx"float16 fill value"
+               (lambda () (full 65505 1 #:dtype 'float16)))
+    (check-exn #rx"float64 fill value"
+               (lambda () (full (expt 2 1024) 1 #:dtype 'float64)))
+    (check-equal? (tensor->list (full 1e300 1 #:dtype 'float64)) '(1e300))
+    (check-equal? (tensor->list (full -inf.0 1 #:dtype 'bfloat16)) '(-inf.0))
+    (check-true (nan? (item (full +nan.0 '() #:dtype 'float16))))
+    (check-equal? (tensor->list (full 65504 1 #:dtype 'float16)) '(65504.0))
+    (check-equal? (contract-name (fill-value/c 'float32)) 'float32-fill-value)
     (check-equal? (tensor-dtype (zeros 2 #:dtype 'float16)) 'float16)
     (check-equal? (tensor-dtype (ones 2 #:dtype 'bfloat16)) 'bfloat16)
     (check-exn exn:fail:contract? (lambda () (zeros 2 #:dtype 'float8)))

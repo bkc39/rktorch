@@ -201,6 +201,15 @@ tr_tensor* tr_full_on(const int64_t* dims, int64_t ndim, double value,
       });
 }
 
+tr_tensor* tr_full_i64_on(const int64_t* dims, int64_t ndim, int64_t value,
+                          tr_device_type type, int64_t index, tr_dtype dtype) {
+  return torchrkt::shaped_result(
+      "tr_full_i64_on", dims, ndim, [&](const std::vector<int64_t>& shape) {
+        return torch::full(shape, value,
+                           torchrkt::options_on(type, index, dtype));
+      });
+}
+
 tr_tensor* tr_from_data_on_device(const float* data, uint64_t numel,
                                   const int64_t* dims, int64_t ndim,
                                   tr_device_type device_type,

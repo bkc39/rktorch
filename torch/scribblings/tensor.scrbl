@@ -110,16 +110,23 @@ As @racket[randn], drawing uniformly from @tt{[0, 1)}.}
                [#:requires-grad? requires-grad? boolean? #f])
          tensor?]{
 A tensor of the given shape filled with @racket[value], as
-@tt{torch.full}. The value must be one the dtype holds exactly: an
-integer dtype refuses @racket[0.5].
+@tt{torch.full}. The value must satisfy @racket[(fill-value/c dtype)]: an
+integer dtype refuses @racket[0.5] and @racket['float32] refuses
+@racket[1e300].
 
 @torch-examples[(full 7 2 2)]}
 
 @defproc[(fill-value/c [dtype dtype/c]) flat-contract?]{
-The values @racket[full] accepts for @racket[dtype]. For @racket['int64], an
-integer from −2@superscript{63} to 2@superscript{63} − 1 that a double
-represents exactly; for @racket['uint8], 0–255; for @racket['bool], 0 or 1;
-any real otherwise.}
+The values @racket[full] accepts for @racket[dtype]. For a floating dtype,
+NaN, either infinity, or a real of magnitude at most the dtype's largest
+finite value, (2 − 2@superscript{−m}) · 2@superscript{e} with m, e = 10, 15
+for @racket['float16] (65504); 7, 127 for @racket['bfloat16]; 23, 127 for
+@racket['float32]; and 52, 1023 for @racket['float64]. For @racket['int64], an integer from −2@superscript{63}
+to 2@superscript{63} − 1; for @racket['uint8], 0–255; for @racket['bool],
+0 or 1. Without a dtype, @racket[full] checks against @racket['float32].
+Where @tt{torch.full} would truncate a fraction, wrap a negative
+@racket['uint8], take any real as a @racket['bool] or round a half-precision
+value past its largest finite one, the contract refuses.}
 
 @defproc[(eye [n exact-nonnegative-integer?] [m exact-nonnegative-integer? n]
               [#:device device device/c #f]

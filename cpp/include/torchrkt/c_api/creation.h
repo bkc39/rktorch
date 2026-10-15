@@ -35,6 +35,11 @@ tr_tensor* tr_ones_on(const int64_t* dims, int64_t ndim, tr_device_type type,
 tr_tensor* tr_full_on(const int64_t* dims, int64_t ndim, double value,
                       tr_device_type type, int64_t index, tr_dtype dtype);
 
+/* tr_full_on with an int64 fill, exact across the whole int64 range where a
+ * double holds only integers up to 2^53. */
+tr_tensor* tr_full_i64_on(const int64_t* dims, int64_t ndim, int64_t value,
+                          tr_device_type type, int64_t index, tr_dtype dtype);
+
 /* Values in [start, end) with the given stride, like torch.arange (always
  * float32 here, where PyTorch would infer int64 from integer arguments). */
 tr_tensor* tr_arange(double start, double end, double step);
