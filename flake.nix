@@ -727,7 +727,7 @@
           inherit (self.packages.${system})
             cpp cpp-format cpp-line-count cpp-tidy racket racket91;
           matrix-runner-test = pkgs.runCommand "torch-matrix-runner-test" { } ''
-            timeout -k 10 600 bash ${./nix/matrix/run-test.sh} ${./nix/matrix}
+            DRIVER_FARM=${cudaDriverFarm} timeout -k 10 600 bash ${./nix/matrix/run-test.sh} ${./nix/matrix}
             mkdir $out
           '';
         } // self.packages.${system}.racket-deps.tests

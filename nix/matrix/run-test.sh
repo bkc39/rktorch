@@ -3,6 +3,7 @@ set -euo pipefail
 
 runner=$1/run.sh
 cell=$1/cuda-cell.sh
+farm=${DRIVER_FARM:-$1/../cuda-driver-farm.sh}
 shift
 t=$(mktemp -d)
 bash=$(command -v bash)
@@ -10,7 +11,7 @@ set -m
 stubs=()
 cleanup() {
   local pid
-  for pid in "${stubs[@]}"; do kill -KILL "$pid" 2>/dev/null || true; done
+  for pid in "${stubs[@]}"; do kill -KILL -- "$pid" 2>/dev/null || true; done
 }
 trap cleanup EXIT
 
@@ -26,6 +27,10 @@ case "\$name" in
   hang) echo \$\$ >"$t/hang.pid"; exec sleep 300 ;;
   deaf) trap '' TERM; echo \$\$ >"$t/hang.pid"; exec sleep 300 ;;
   slow) sleep 1.5 ;;
+  linger)
+    ( sleep 0.2 & echo \$! >"$t/linger.zombie"; exec timeout 8 sleep 8 ) &
+    echo \$! >"$t/linger.pid"
+    exec sleep 300 ;;
 esac
 if [ -f "$t/fixtures/\$name.log" ]; then
   cat "$t/fixtures/\$name.log" >&2
@@ -114,7 +119,8 @@ printf '%s\t%s\t%s\t%s\t%s\n' \
   9.3 toollog nix build "shim=/s/good toolchain=/s/toolfail" \
   9.3 hang nix build "shim=/s/hang" \
   9.3 deaf nix build "shim=/s/deaf" \
-  9.3 slow nix build "shim=/s/slow toolchain=/s/slow" >"$t/cells"
+  9.3 slow nix build "shim=/s/slow toolchain=/s/slow" \
+  9.3 linger nix build "shim=/s/linger" >"$t/cells"
 
 row() { echo "^aarch64-darwin +$1 +nix +[0-9]+s +$2\$"; }
 
@@ -130,6 +136,13 @@ expect() {
     cat "$t/table" "$t/err" >&2
     exit 1
   }
+}
+
+now() { echo "${EPOCHREALTIME//[!0-9]/}"; }
+
+within() {
+  local took=$((($(now) - $1) / 1000))
+  [ "$took" -le "$2" ] || { echo "run-test: $case: took ${took}ms, over $2ms" >&2; exit 1; }
 }
 
 status_is() {
@@ -255,12 +268,27 @@ case_terminate() {
 }
 
 case_deadline() {
-  local started=$SECONDS
+  local started
+  started=$(now)
   status=0
   MATRIX_CELL_TIMEOUT=2s run 'slow' >"$t/table" || status=$?
   status_is 1
   expect "$(row '9\.3 +slow' 'fail \(toolchain\): timed out after 2s')"
-  [ $((SECONDS - started)) -le 5 ] || { echo "run-test: $case: took $((SECONDS - started))s" >&2; exit 1; }
+  within "$started" 3500
+}
+
+case_linger() {
+  [ -r /proc/self/stat ] || command -v ps >/dev/null || return 0
+  local started
+  rm -f "$t/linger.pid" "$t/linger.zombie"
+  started=$(now)
+  status=0
+  MATRIX_CELL_TIMEOUT=1s run 'linger' >"$t/table" || status=$?
+  [ ! -s "$t/linger.pid" ] || stubs+=(-"$(cat "$t/linger.pid")")
+  status_is 1
+  expect "$(row '9\.3 +linger' 'fail \(shim\): timed out after 1s')"
+  [ "$(state "$(cat "$t/linger.zombie")")" = Z ] || { echo "run-test: $case: no zombie lingered in the group" >&2; exit 1; }
+  within "$started" 2500
 }
 
 case_guard() {
@@ -365,9 +393,55 @@ case_zombie() {
   wait "$sleeper" 2>/dev/null || true
 }
 
+drivers=(libcuda.so.1 libnvidia-ml.so.1 libnvidia-ptxjitcompiler.so.1)
+
+driver_farm() {
+  status=0
+  TORCHRKT_DRIVER_DIRS="$t/driver/$1" LDCONFIG="$t/driver/$2" bash "$farm" "$t/farm" >"$t/table" 2>"$t/err" \
+    || status=$?
+}
+
+farm_links() {
+  local lib links=("$t/farm"/*)
+  [ "${#links[@]}" -eq 3 ] || { echo "run-test: $case: the farm is not three links" >&2; ls -l "$t/farm" >&2; exit 1; }
+  for lib in "${drivers[@]}"; do
+    [ "$(readlink "$t/farm/$lib")" = "$1/$lib" ] || {
+      echo "run-test: $case: $lib does not link into $1" >&2
+      ls -l "$t/farm" >&2
+      exit 1
+    }
+  done
+}
+
+case_driver_farm() {
+  local lib
+  rm -rf "$t/driver" "$t/farm"
+  mkdir -p "$t/driver/nixos" "$t/driver/none"
+  for lib in "${drivers[@]}"; do : >"$t/driver/nixos/$lib"; done
+  cat >"$t/driver/ldconfig" <<EOF
+#!$bash
+cat <<'CACHE'
+	libnvidia-ml.so.1 (libc6,x86-64) => /usr/lib/x86_64-linux-gnu/libnvidia-ml.so.1
+	libnvidia-ptxjitcompiler.so.1 (libc6,x86-64) => /usr/lib/x86_64-linux-gnu/libnvidia-ptxjitcompiler.so.1
+	libcuda.so.1 (libc6,x86-64) => /usr/lib/x86_64-linux-gnu/libcuda.so.1
+CACHE
+EOF
+  chmod +x "$t/driver/ldconfig"
+  driver_farm nixos missing
+  status_is 0
+  farm_links "$t/driver/nixos"
+  driver_farm none ldconfig
+  status_is 0
+  farm_links /usr/lib/x86_64-linux-gnu
+  driver_farm none missing
+  status_is 1
+  grep -q '^WARNING: libcuda.so.1 not found' "$t/err" || { echo "run-test: $case: no warning" >&2; cat "$t/err" >&2; exit 1; }
+  [ -z "$(ls -A "$t/farm")" ] || { echo "run-test: $case: links without a driver" >&2; exit 1; }
+}
+
 cases=("$@")
-[ "${#cases[@]}" -gt 0 ] || cases=(rows no_match failure_line interrupt interrupt_deaf terminate deadline guard cuda_cell
-    cuda_cell_deaf zombie)
+[ "${#cases[@]}" -gt 0 ] || cases=(rows no_match failure_line interrupt interrupt_deaf terminate deadline linger guard
+    cuda_cell cuda_cell_deaf zombie driver_farm)
 for case in "${cases[@]}"; do
   "case_$case"
   echo "run-test: $case ok"
