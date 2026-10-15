@@ -111,7 +111,8 @@ per-epoch 1.76–1.96 s with the SIGN FLIPPING between rounds (+2.3%,
 −2.5%) — noise, no measurable cost. Seeded parity held in production:
 3-epoch GPU training losses bit-identical to master
 (3.1683/2.6523/2.5509). The kind probe runs only on the failure path;
-success pays one NULL-check branch (scripts/bench-oom-overhead.rkt).
+success pays one NULL-check branch (then scripts/bench-oom-overhead.rkt,
+now the `ops` and `e2e` suites of scripts/bench/run.rkt).
 
 Refactor note (from PR #43 review): DONE in PR C — extracted as
 `raw/memory.rkt` (frees, the finalizer guard (now
