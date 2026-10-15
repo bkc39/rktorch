@@ -20,11 +20,11 @@
       (with-autocast #:device 'cpu
         (check-true (autocast-enabled? 'cpu))
         (check-equal? (autocast-dtype 'cpu) 'bfloat16)
-        (matmul a b)))
+        (@ a b)))
     (check-equal? (dtype inside) 'bfloat16)
     (check-equal? (tensor->list inside) '(0.5 1.0 1.5 2.0))
     (check-false (autocast-enabled? 'cpu))
-    (check-equal? (dtype (matmul a b)) 'float32)
+    (check-equal? (dtype (@ a b)) 'float32)
     (check-equal? (dtype a) 'float32 "the inputs are never touched"))
 
   (test-case "leaving restores the dtype even where autocast was off"
@@ -51,7 +51,7 @@
 
   (test-case "call-with-autocast takes a device struct and a thunk"
     (define out
-      (call-with-autocast (lambda () (matmul (ones 2 2) (ones 2 2)))
+      (call-with-autocast (lambda () (@ (ones 2 2) (ones 2 2)))
                           #:device (cpu-device)))
     (check-equal? (dtype out) 'bfloat16)
     (check-equal? (tensor->list out) '(2.0 2.0 2.0 2.0)))
@@ -70,7 +70,7 @@
       (with-autocast #:device 'cpu
         (define y (l x))
         (check-equal? (dtype y) 'bfloat16)
-        (mean (mul y y))))
+        (mean (* y y))))
     (backward! loss)
     (for ([p (in-list (parameters l))])
       (check-true (has-grad? p))

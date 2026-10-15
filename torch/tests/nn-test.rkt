@@ -506,8 +506,8 @@
       (check-equal? (device mps-loss) (mps-device))
       (check-equal? (device mps-grad) (mps-device))
       (check-= (item mps-loss) (item cpu-loss) 1e-5)
-      (define d (sub (to-device mps-grad 'cpu) cpu-grad))
-      (check-= (sqrt (item (sum (mul d d)))) 0.0 1e-5
+      (define d (- (to-device mps-grad 'cpu) cpu-grad))
+      (check-= (sqrt (item (sum (* d d)))) 0.0 1e-5
                "the gradient differs from the CPU's")))
 
   (test-case "a few Adam steps reduce the training loss"

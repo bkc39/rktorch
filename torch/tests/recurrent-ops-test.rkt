@@ -96,7 +96,8 @@
 
     (test-case "multinomial samples on the device"
       (define draws
-        (multinomial (to-device (tensor '(0.0 1.0 0.0)) 'cuda) 4
-                     #:replacement? #t))
+        (~> (tensor '(0.0 1.0 0.0))
+            (to-device 'cuda)
+            (multinomial 4 #:replacement? #t)))
       (check-equal? (device-type (device draws)) 'cuda)
       (check-equal? (tensor->list (to-device draws 'cpu)) '(1 1 1 1)))))

@@ -369,8 +369,8 @@
          (set! head (Linear 32 vocab-size))
          #:forward (idx)
          (with-default-device (device idx)
-           (define pos (to-dtype (arange (cadr (shape idx))) 'int64))
-           (~> (add (tok-emb idx) (pos-emb pos))
+           (define pos (~> (shape idx) cadr arange (to-dtype 'int64)))
+           (~> (+ (tok-emb idx) (pos-emb pos))
                (transformer #:causal? #t)
                head)))
        (define text (load-text-fixture))
@@ -464,7 +464,7 @@
          (define-values (outputs _final) (gru (embed tokens)))
          (define at-eos
            (unsqueeze (to-dtype (eq tokens eos-id) (dtype outputs)) 1))
-         (values outputs (transpose (matmul at-eos outputs) 0 1)))
+         (values outputs (transpose (@ at-eos outputs) 0 1)))
        (define-layer attention (wa ua va)
          #:init ()
          (set! wa (Linear hidden hidden))
@@ -1063,7 +1063,7 @@
          (define prod
            (with-autocast #:device 'cpu
              (check-equal? (autocast-enabled? 'cpu) (hash-ref h 'inside))
-             (matmul a b)))
+             (@ a b)))
          (check-equal? (autocast-enabled? 'cpu) (hash-ref h 'after))
          (check-equal? (format "torch.~a" (dtype prod))
                        (hash-ref h 'prod_dtype))
@@ -1079,10 +1079,10 @@
              (define y (lin xa))
              (check-equal? (format "torch.~a" (dtype y))
                            (hash-ref h 'y_dtype))
-             (mean (mul y y))))
+             (mean (* y y))))
          (check-= (item loss) (hash-ref h 'loss) half-tol "autocast loss")
          (backward! loss)
-         (define g (grad (car (parameters lin))))
+         (define g (~> (parameters lin) car grad))
          (check-equal? (format "torch.~a" (dtype g))
                        (hash-ref h 'grad_dtype))
          (for ([r (in-list (tensor->list g))]
@@ -1293,8 +1293,8 @@
                                      (make-list 5 (list->bytes (range 256))))))
                      (hash-ref j 'summarized_repr))
        (check-equal? (tensor->list
-                      (div (to (tensor (list->bytes (range 256))) 'float32)
-                           255.0))
+                      (/ (to (tensor (list->bytes (range 256))) 'float32)
+                         255.0))
                      (hash-ref j 'scaled))
        (check-equal? (format "torch.~a" (dtype (to t 'int64)))
                      (hash-ref j 'as_int64_dtype))

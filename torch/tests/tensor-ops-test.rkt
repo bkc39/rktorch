@@ -80,7 +80,7 @@
     (check-equal? (tensor-shape (rand 2 3 #:device 'cpu)) '(2 3))
     (check-exn exn:fail:contract? (lambda () (randn 2 #:dtype 'int64)))
     (check-exn exn:fail:contract? (lambda () (rand 2 #:dtype 'bool)))
-    (define r (rand-like (to (ones 2 3) 'float64)))
+    (define r (~> (ones 2 3) (to 'float64) rand-like))
     (check-equal? (dtype r) 'float64)
     (check-equal? (tensor-shape r) '(2 3))
     (check-true (andmap (lambda (v) (and (>= v 0.0) (< v 1.0)))
