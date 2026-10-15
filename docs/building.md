@@ -16,7 +16,8 @@ nix build                 # native lib + Racket package + tests + examples
 ./result/bin/torch        # prints the libtorch version and a 2x2 draw
 nix build .#cpp           # CMake build and the GoogleTest suite only
 nix flake check           # the Nix checks: cpp, format, tidy, line gate, racket,
-                          # and the racket-deps-* checks
+                          # racket91, racket-floor, matrix-runner-test and the
+                          # racket-deps-* checks
 ```
 
 `racket-deps` (flake.nix) is the catalog packages `torch/info.rkt` declares

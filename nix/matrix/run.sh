@@ -66,15 +66,12 @@ failure() {
 drain() {
   local tries=0
   kill -TERM -- -"$1" 2>/dev/null || return 0
-  wait "$1" 2>/dev/null || true
-  while kill -0 -- -"$1" 2>/dev/null; do
+  while kill -0 -- -"$1" 2>/dev/null && [ "$tries" -lt 50 ]; do
     tries=$((tries + 1))
-    if [ "$tries" -ge 50 ]; then
-      kill -KILL -- -"$1" 2>/dev/null || true
-      return 0
-    fi
     sleep 0.1
   done
+  kill -KILL -- -"$1" 2>/dev/null || true
+  wait "$1" 2>/dev/null || true
 }
 
 group=

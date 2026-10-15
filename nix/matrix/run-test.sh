@@ -24,6 +24,7 @@ name=\${drv##*/}
 case "\$name" in
   bad) echo "error: builder for '\$drv' failed with exit code 1" >&2; exit 1 ;;
   hang) echo \$\$ >"$t/hang.pid"; exec sleep 300 ;;
+  deaf) trap '' TERM; echo \$\$ >"$t/hang.pid"; exec sleep 300 ;;
   slow) sleep 1.5 ;;
 esac
 if [ -f "$t/fixtures/\$name.log" ]; then
@@ -112,6 +113,7 @@ printf '%s\t%s\t%s\t%s\t%s\n' \
   9.3 shimlog nix build "shim=/s/shimfail" \
   9.3 toollog nix build "shim=/s/good toolchain=/s/toolfail" \
   9.3 hang nix build "shim=/s/hang" \
+  9.3 deaf nix build "shim=/s/deaf" \
   9.3 slow nix build "shim=/s/slow toolchain=/s/slow" >"$t/cells"
 
 row() { echo "^aarch64-darwin +$1 +nix +[0-9]+s +$2\$"; }
@@ -187,22 +189,22 @@ await_hang() {
 }
 
 hang_gone() {
-  local started=$1
+  local started=$1 hung=$2
   [ $((SECONDS - started)) -le 10 ] || { echo "run-test: $case: took $((SECONDS - started))s" >&2; exit 1; }
   if kill -0 "$hang" 2>/dev/null; then
     echo "run-test: $case: the running step $hang outlived the runner" >&2
     exit 1
   fi
   expect "$(row '9\.1 +zip' 'pass')"
-  expect "$(row '9\.3 +hang' 'fail \(shim\): interrupted')"
+  expect "$(row "9\\.3 +$hung" 'fail \(shim\): interrupted')"
   grep -q '^logs: ' "$t/table"
 }
 
-case_interrupt() {
+interrupt() {
   rm -f "$t/hang.pid"
   PATH="$t/bin:$PATH" MATRIX_SYSTEM=aarch64-darwin MATRIX_CELLS="$t/cells" \
     MATRIX_LOG_DIR="$t/logs" MATRIX_MIN_FREE_GB=0 \
-    timeout -k 5 60 bash -euo pipefail "$runner" '9.1 zip' 'hang' >"$t/table" 2>"$t/err" &
+    timeout -k 20 60 bash -euo pipefail "$runner" '9.1 zip' "$1" >"$t/table" 2>"$t/err" &
   local pid=$! started
   await_hang
   started=$SECONDS
@@ -210,8 +212,11 @@ case_interrupt() {
   status=0
   wait "$pid" || status=$?
   status_is 130
-  hang_gone "$started"
+  hang_gone "$started" "$1"
 }
+
+case_interrupt() { interrupt hang; }
+case_interrupt_deaf() { interrupt deaf; }
 
 case_terminate() {
   rm -f "$t/hang.pid"
@@ -225,7 +230,7 @@ case_terminate() {
   await_hang
   wait "$pid" || status=$?
   status_is 143
-  hang_gone "$started"
+  hang_gone "$started" hang
 }
 
 case_deadline() {
@@ -261,11 +266,13 @@ case_guard() {
   grep -Eq 'pass \(free memory unread, guard off\)$' "$t/table" || { echo "run-test: $case: no unread note" >&2; cat "$t/table" >&2; exit 1; }
 }
 
-case_cuda_cell() {
+cuda_cell() {
   [ -r /proc/loadavg ] || return 0
+  rm -rf "$t/cuda"
   mkdir -p "$t/cuda/shim/libexec/torchrkt" "$t/cuda/tmp"
   cat >"$t/cuda/shim/libexec/torchrkt/torchrkt_tests" <<EOF
 #!$bash
+$1
 echo \$\$ >"$t/cuda/gtests.pid"
 exec sleep 300
 EOF
@@ -277,7 +284,7 @@ EOF
   TMPDIR="$t/cuda/tmp" MATRIX_MIN_FREE_GB=0 CELL_SRC=/nonexistent CELL_SHIM="$t/cuda/shim" \
     CELL_DEPS=/nonexistent CELL_CUDNN=/nonexistent CELL_RACKET_CELL=/nonexistent \
     CELL_DRIVER_FARM="$t/cuda/farm" \
-    timeout -k 5 60 bash -euo pipefail "$cell" >"$t/table" 2>"$t/err" &
+    timeout -k 20 60 bash -euo pipefail "$cell" >"$t/table" 2>"$t/err" &
   pid=$!
   until [ -s "$t/cuda/gtests.pid" ] || ! kill -0 "$pid" 2>/dev/null; do sleep 0.1; done
   if grep -q '^matrix-skip: load' "$t/table"; then
@@ -305,8 +312,12 @@ EOF
   [ -z "$(ls -A "$t/cuda/tmp")" ] || { echo "run-test: $case: the work dir survived" >&2; exit 1; }
 }
 
+case_cuda_cell() { cuda_cell ''; }
+case_cuda_cell_deaf() { cuda_cell "trap '' TERM"; }
+
 cases=("$@")
-[ "${#cases[@]}" -gt 0 ] || cases=(rows no_match failure_line interrupt terminate deadline guard cuda_cell)
+[ "${#cases[@]}" -gt 0 ] || cases=(rows no_match failure_line interrupt interrupt_deaf terminate deadline guard cuda_cell
+    cuda_cell_deaf)
 for case in "${cases[@]}"; do
   "case_$case"
   echo "run-test: $case ok"

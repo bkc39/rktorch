@@ -17,13 +17,13 @@ cleanup() {
   local g tries
   for g in $(jobs -p); do
     kill -TERM -- -"$g" 2>/dev/null || continue
-    wait "$g" 2>/dev/null || true
     tries=0
     while kill -0 -- -"$g" 2>/dev/null && [ "$tries" -lt 50 ]; do
       tries=$((tries + 1))
       sleep 0.1
     done
     kill -KILL -- -"$g" 2>/dev/null || true
+    wait "$g" 2>/dev/null || true
   done
   chmod -R u+w "$work"
   rm -rf "$work"

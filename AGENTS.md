@@ -419,7 +419,8 @@ for a change, and the gates it has to pass before it is done, are the
 nix build              # builds cpp, installs the pkg, runs raco test + examples
 nix build .#cpp        # CMake build + gtest only
 nix flake check        # the Nix checks: cpp, format, tidy, line-count, racket,
-                       # and the racket-deps-* checks
+                       # racket91, racket-floor, matrix-runner-test and the
+                       # racket-deps-* checks
                        # (CI also runs the Resyntax gate and codegen-drift)
 nix develop            # dev shell (includes a Python with `torch`)
 nix develop .#ci       # lean shell without Python torch (used by the lint job)
