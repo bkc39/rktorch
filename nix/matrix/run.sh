@@ -30,8 +30,14 @@ failure() {
   local log=$1 mark stage error
   mark=$(grep -n 'matrix-stage: ' "$log" | tail -1 | cut -d: -f1 || true)
   stage=$(grep -o 'matrix-stage: .*' "$log" | tail -1 | cut -d' ' -f2- || true)
-  error=$(tail -n +"${mark:-1}" "$log" | grep -m1 -E '[Ee]rror|FAIL|[Ff]ailed|failure|Aborted' \
-    | sed -E 's/^[^ ]*> //' | cut -c1-120 || true)
+  error=$(tail -n +"${mark:-1}" "$log" | awk '
+    { sub(/^[^ ]*> /, "") }
+    /^raco test: / { prev = ""; next }
+    /^known failure / { next }
+    check != "" && NF { print check " " name ": " $0; exit }
+    /^(ERROR|FAILURE)$/ { check = $0; name = prev; next }
+    /[Ee]rror|FAIL|[Ff]ailed|failures|Aborted/ { print; exit }
+    { prev = $0 }' | cut -c1-160 || true)
   echo "fail (${stage:-?}): ${error:-see log}"
 }
 

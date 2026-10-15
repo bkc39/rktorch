@@ -6,7 +6,7 @@ set -euo pipefail
 runner=$1
 t=$(mktemp -d)
 bash=$(command -v bash)
-mkdir -p "$t/bin" "$t/out/skiprun/bin" "$t/out/failrun/bin" "$t/out/good"
+mkdir -p "$t/bin" "$t/out/skiprun/bin" "$t/out/failrun/bin" "$t/out/rackfail/bin" "$t/out/good"
 
 cat >"$t/bin/nix" <<EOF
 #!$bash
@@ -28,6 +28,17 @@ echo "matrix-stage: gtests"
 echo "[  FAILED  ] Ops.Add"
 exit 1
 EOF
+cat >"$t/out/rackfail/bin/cell" <<EOF
+#!$bash
+echo "matrix-stage: test"
+echo 'raco test: (file "./torch/foreign/error.rkt")'
+echo "--------------------"
+echo "modes stay with their thread"
+echo "ERROR"
+echo ""
+echo "result arity mismatch;"
+exit 1
+EOF
 chmod +x "$t/bin/nix" "$t"/out/*/bin/cell
 
 printf '%s\t%s\t%s\t%s\t%s\n' \
@@ -35,7 +46,8 @@ printf '%s\t%s\t%s\t%s\t%s\n' \
   9.1 zip nix build "shim=/s/good cell=/s/bad" \
   9.2 cached nix skip "2.12.0 < floor 2.14" \
   9.3 cuda nix build "shim=/s/good run=/s/skiprun" \
-  9.3 cuda2 nix build "run=/s/failrun" >"$t/cells"
+  9.3 cuda2 nix build "run=/s/failrun" \
+  9.3 rack nix build "run=/s/rackfail" >"$t/cells"
 
 run() {
   PATH="$t/bin:$PATH" MATRIX_SYSTEM=test-system MATRIX_CELLS="$t/cells" \
@@ -59,7 +71,8 @@ expect '^test-system +9\.1 +zip +nix +[0-9]+s +fail \(cell\): error: builder for
 expect '^test-system +9\.2 +cached +nix +[0-9]+s +skip: 2\.12\.0 < floor 2\.14$'
 expect '^test-system +9\.3 +cuda +nix +[0-9]+s +skip: no NVIDIA driver on this host$'
 expect '^test-system +9\.3 +cuda2 +nix +[0-9]+s +fail \(gtests\): \[  FAILED  \] Ops\.Add$'
-[ "$(grep -c '^test-system' "$t/table")" = 5 ]
+expect '^test-system +9\.3 +rack +nix +[0-9]+s +fail \(test\): ERROR modes stay with their thread: result arity mismatch;$'
+[ "$(grep -c '^test-system' "$t/table")" = 6 ]
 
 run '9.2 cached' >"$t/table"
 expect '^test-system +9\.2 +cached'
