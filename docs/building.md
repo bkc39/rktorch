@@ -29,10 +29,8 @@ names any dep whose `#:version` minimum the fetched tree does not meet;
 `nix build .#racket-deps`, and paste the hash Nix reports. A `#:platform` dep
 is refused: one hash cannot hold a per-system fetch.
 
-The package supports Racket 9.0 and later. `nix run .#matrix` builds and tests
-every supported Racket (9.0 to 9.3) against the pinned libtorch on the host's
-system, CUDA included on a Linux host with a driver, and ends with a
-pass/fail/skip table; one failing cell does not stop the others.
+The package supports Racket 9.1 and later. `nix run .#matrix` builds and tests
+every supported Racket against the pinned libtorch on the host's system.
 
 CI runs two more jobs that `nix flake check` does not cover. The Resyntax gate
 is the `scripts/resyntax analyze` command below, Resyntax's default rules plus

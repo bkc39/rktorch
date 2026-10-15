@@ -36,7 +36,7 @@
       # glibc symbol versioning only tolerates older-built-lib into
       # newer-glibc-process — so the scoped pin's glibc must be at least
       # as new. Enforced here (not just prose) so a re-pin in the wrong
-      # direction fails at evaluation, symmetric with racket92's floor
+      # direction fails at evaluation, symmetric with racketReleases' version
       # assert. Darwin has no glibc; dyld versioning does not share the
       # constraint.
       racketFor = pkgs: pkgsRacket:
@@ -50,13 +50,8 @@
            + "(see the flake inputs comment)");
         pkgsRacket.racket;
 
-      # The supported Racket releases, oldest first: the head is the `base`
-      # floor torch/info.rkt declares, which racket-floor checks.
-      racketVersions = [ "9.0" "9.1" "9.2" "9.3" ];
-      # Releases neither pin carries, built from source on the main pin so
-      # every matrix cell shares one glibc and one shim.
+      racketVersions = [ "9.1" "9.2" "9.3" ];
       racketSources = {
-        "9.0" = "04blaz9qbqkw1mf8dicq7567qis9f1vvpjpswsl7siw96w858px0";
         "9.1" = "0gl3yvj0bn17rm3iq6wzd43gs3a4f22k2rdmb2ks5138hbhxqqhh";
       };
       racketFromSource = pkgs: v: pkgs.racket.overrideAttrs {
@@ -175,15 +170,6 @@
             [ "$(rd base-version ${fixtures}/floored)" = 9.0 ]
             fails rd base-version ${fixtures}/current
             fails rd base-version ${fixtures}/versioned
-          '';
-          racket-floor = run "torch-rkt-racket-floor" ''
-            mkdir -p "$TMPDIR/info"
-            cp ${./torch/info.rkt} "$TMPDIR/info/info.rkt"
-            floor=$(rd base-version "$TMPDIR/info")
-            if [ "$floor" != ${builtins.head racketVersions} ]; then
-              echo "torch/info.rkt's base floor is $floor; the matrix's oldest Racket is ${builtins.head racketVersions}" >&2
-              exit 1
-            fi
           '';
         };
 
@@ -411,7 +397,6 @@
                 runHook postCheck
               '';
             } // p.lib.optionalAttrs installTests {
-              # For a host run: the build tree's rpath entry would not survive fixup.
               postInstall = ''
                 rpath=$(patchelf --print-rpath torchrkt_tests | tr : '\n' \
                   | grep -v "^$NIX_BUILD_TOP" | paste -sd:)
@@ -490,13 +475,17 @@
             '';
           };
 
-          # `racket` (the scoped pin's 9.3) and `racket92` (the main pin's)
-          # are in `checks`; the matrix builds every release in racketVersions
-          # with docs. racket-deps is shared: its trees are sources only.
-          mkRacketPackage = { pname, toolchain, shim ? cpp, docs ? false }:
+          mkRacketPackage = { pname, toolchain, shim ? cpp, docs ? false
+                            , floorTest ? false }:
             pkgs.stdenv.mkDerivation {
               inherit pname version;
               src = ./.;
+              passthru = {
+                inherit toolchain;
+                tests = pkgs.lib.optionalAttrs floorTest {
+                  racket-floor = racketFloorTest toolchain;
+                };
+              };
 
               nativeBuildInputs = [
                 toolchain
@@ -533,8 +522,26 @@
               '';
             };
 
-          # Each release is the version it is listed as: a pin that moves
-          # trips this rather than testing one release twice (#41/#50).
+          racketFloorTest = toolchain:
+            let
+              oldest = builtins.head racketVersions;
+              checked = pkgs.lib.versions.majorMinor toolchain.version;
+            in
+            pkgs.runCommand "torch-rkt-racket-floor"
+              { nativeBuildInputs = [ racketPkg ]; } ''
+              export HOME=$TMPDIR/home PLTUSERHOME=$TMPDIR/plt
+              same() { [ "$1" = "$2" ] && [ "$2" = "$3" ]; }
+              if same 9.0 9.1 9.1 || same 9.1 9.1 9.2; then exit 1; fi
+              mkdir -p "$TMPDIR/info"
+              cp ${./torch/info.rkt} "$TMPDIR/info/info.rkt"
+              floor=$(racket ${racketDepsScript} base-version "$TMPDIR/info")
+              if ! same "$floor" ${oldest} ${checked}; then
+                echo "torch/info.rkt's base floor is $floor, racketVersions' oldest is ${oldest}, the floor check builds ${checked}" >&2
+                exit 1
+              fi
+              mkdir $out
+            '';
+
           racketReleases = pkgs.lib.genAttrs racketVersions (v:
             let
               toolchain = { "9.2" = pkgs.racket; "9.3" = racketPkg; }.${v}
@@ -550,13 +557,12 @@
             pname = "torch-rkt";
             toolchain = racketReleases."9.3";
           };
-          racket92 = mkRacketPackage {
-            pname = "torch-rkt-racket92";
-            toolchain = racketReleases."9.2";
+          racket91 = mkRacketPackage {
+            pname = "torch-rkt-racket91";
+            toolchain = racketReleases."9.1";
+            floorTest = true;
           };
 
-          # The newest libtorch nixpkgs itself carries; its cells skip while it
-          # is older than the floor the pinned zip sets.
           cachedTorch = pkgs.lib.last (pkgs.lib.sort
             (a: b: pkgs.lib.versionOlder a.version b.version)
             [ pkgs.libtorch-bin pkgs.python314Packages.torch ]);
@@ -586,8 +592,7 @@
             text = builtins.readFile ./nix/matrix/cuda-cell.sh;
           };
 
-          # A row per cell; steps name .drv files, so evaluating the matrix
-          # builds nothing and one cell's failure leaves the others to run.
+          # Steps name .drv files: evaluating the matrix builds nothing.
           matrixRow = { racket, libtorch, skip ? null, steps ? [ ] }:
             let
               step = s: s.label + "="
@@ -643,8 +648,6 @@
             passthru.cells = matrixCells;
           };
 
-          # The pinned CPU zip, unpacked and unmodified, for builds outside
-          # Nix (#279); the `libtorchZips` output carries its url and hash.
           libtorch-zip = pkgs.fetchzip libtorchZips."${system}-cpu";
 
           copy-native-libs = pkgs.writeShellApplication {
@@ -682,7 +685,7 @@
         in
         {
           default = racket;
-          inherit cpp cpp-format cpp-line-count cpp-tidy racket racket92
+          inherit cpp cpp-format cpp-line-count cpp-tidy racket racket91
             racket-deps racket-linters codegen copy-native-libs matrix
             libtorch-zip;
         }
@@ -707,20 +710,19 @@
         };
       });
 
-      # The pinned libtorch downloads (#279); `hash` is fetchzip's, over the
-      # unpacked tree that `packages.<system>.libtorch-zip` builds.
       inherit libtorchZips;
 
       checks = forAllSystems (system:
         let pkgs = import nixpkgs { inherit system; };
         in {
           inherit (self.packages.${system})
-            cpp cpp-format cpp-line-count cpp-tidy racket racket92;
+            cpp cpp-format cpp-line-count cpp-tidy racket racket91;
           matrix-runner-test = pkgs.runCommand "torch-matrix-runner-test" { } ''
-            bash ${./nix/matrix/run-test.sh} ${./nix/matrix/run.sh}
+            timeout -k 10 600 bash ${./nix/matrix/run-test.sh} ${./nix/matrix}
             mkdir $out
           '';
-        } // self.packages.${system}.racket-deps.tests);
+        } // self.packages.${system}.racket-deps.tests
+          // self.packages.${system}.racket91.tests);
 
       devShells = forAllSystems (system:
         let

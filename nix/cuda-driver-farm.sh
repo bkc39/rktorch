@@ -1,7 +1,5 @@
 #!/usr/bin/env bash
-# Links the host NVIDIA driver libraries into <dir>: nix's glibc never reads
-# the host's ld.so.cache. Exits 1 when any is missing.
-#   cuda-driver-farm.sh <dir>
+# nix's glibc never reads the host's ld.so.cache.
 set -uo pipefail
 
 farm=$1

@@ -470,21 +470,6 @@ the hash Nix reports, and run the full sweep (`scripts/resyntax analyze
 --directory torch`), since CI scans only changed files. Each checkout moves to the new
 trees on its next shell entry.
 
-### The build matrix (#278)
-
-`nix run .#matrix` runs every cell for the host's system: Racket 9.0–9.3
-(`racketVersions`; 9.0 and 9.1 are built from source on the main pin) ×
-the pinned libtorch zip, plus a nixpkgs-libtorch cell that skips while it is
-older than 2.14, plus on Linux a CUDA cell run on the host (it skips without
-a driver, under 30 GB available, or at load ≥ cores). A cell builds the shim
-and its gtests, installs offline, runs `raco setup` with docs and
-`raco test`; a failed cell does not stop the rest, and the run ends with a
-pass/fail/skip table and the log directory. `nix run .#matrix -- '9.0 zip'`
-runs the cells whose "racket libtorch" contains the filter; `MATRIX_CORES`
-and `MATRIX_MAX_JOBS` default to 4 and 1. The floor is `("base" #:version
-"9.0")` in `torch/info.rkt`; the `racket-floor` check holds it to the
-oldest of `racketVersions`. `libtorchZips` exports the pinned downloads.
-
 `racket-deps` (flake.nix) holds the catalog deps `torch/info.rkt` declares
 beyond the Racket distribution, as source trees only. When those deps change,
 or a fresh store reports a hash mismatch (upstream moved), set its
@@ -492,6 +477,18 @@ or a fresh store reports a hash mismatch (upstream moved), set its
 `racket-deps-current` check says "info.rkt changed; bump racket-deps outputHash",
 and also fails on an unmet `#:version` minimum. A `#:platform` dep is refused:
 one hash cannot hold a per-system fetch.
+
+### The build matrix
+
+`nix run .#matrix` builds and tests every cell for the host's system and ends
+with a pass/fail/skip table; `nix run .#matrix -- '9.1 zip'` runs only the
+cells whose "racket libtorch" contains the filter. Its knobs are
+`MATRIX_CELL_TIMEOUT` (6h a cell), `MATRIX_MIN_FREE_GB` (30),
+`MATRIX_LOG_DIR`, `MATRIX_CORES` (4) and `MATRIX_MAX_JOBS` (1). The floor is
+Racket 9.1, `("base" #:version "9.1")` in `torch/info.rkt`: 9.0's parallel
+threads can lose a `semaphore-wait` result, fixed in 9.1. The `racket-floor`
+check holds that floor, the oldest of `racketVersions` and the `racket91`
+check's Racket to one release.
 
 ### PyTorch parity
 

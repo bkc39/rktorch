@@ -1,7 +1,4 @@
 #!/usr/bin/env bash
-# One cell's Racket half, run from a source checkout with PLTUSERHOME set.
-#   racket-cell.sh install <shim> <racket-deps> docs|no-docs
-#   racket-cell.sh test
 set -euo pipefail
 
 stage() { echo "matrix-stage: $1"; }
