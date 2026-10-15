@@ -16,9 +16,10 @@ ldd --version | head -1
 ls /usr/lib64/libstdc++.so.6* /usr/lib/x86_64-linux-gnu/libstdc++.so.6* 2>/dev/null
 
 step ca certificates
-# raco reaches the catalog over https; minimal images ship no CA bundle.
+# raco reaches the catalog over https, and raco setup indexes docs in SQLite;
+# minimal images ship neither a CA bundle nor libsqlite3.
 if command -v apt-get >/dev/null; then
-  (apt-get update -qq && apt-get install -y -qq ca-certificates) >/dev/null 2>&1 && echo "installed ca-certificates"
+  (apt-get update -qq && apt-get install -y -qq ca-certificates libsqlite3-0) >/dev/null 2>&1 && echo "installed ca-certificates libsqlite3-0"
 fi
 ls /etc/ssl/certs/ca-certificates.crt /etc/pki/tls/certs/ca-bundle.crt 2>/dev/null
 

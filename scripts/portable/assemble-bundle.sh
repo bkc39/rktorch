@@ -4,6 +4,8 @@
 # libraries, libshm and libtorch_global_deps stay out), then audit it.
 #   scripts/portable/assemble-bundle.sh <libtorchrkt.so> <libtorch/lib> <out-dir> [extra.so ...]
 # Extra libraries (a bundled libsndfile and its codecs) are copied as given.
+# STRIP=1 drops libtorch's .symtab (--strip-unneeded): libtorch_cpu.so goes
+# from 438 MB to 349 MB; the dynamic symbol table is untouched.
 set -euo pipefail
 
 shim=$1 tlib=$2 out=$3
@@ -21,7 +23,11 @@ while ((${#queue[@]})); do
   queue=("${queue[@]:1}")
   for n in $(needed_of "$lib"); do
     if [[ -f $tlib/$n && ! -f $out/$n ]]; then
-      cp "$tlib/$n" "$out/$n"
+      if [[ ${STRIP:-0} == 1 ]]; then
+        strip --strip-unneeded -o "$out/$n" "$tlib/$n"
+      else
+        cp "$tlib/$n" "$out/$n"
+      fi
       queue+=("$out/$n")
     fi
   done
