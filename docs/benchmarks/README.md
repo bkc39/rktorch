@@ -40,8 +40,10 @@ A CPU run with one thread sets `OMP_NUM_THREADS=1`; `taskset -c` pins it.
 average would still count the previous example's child for a minute after
 it exits.
 
-Each `e2e` child runs in its own process group under the time limit; a
-terminal with `stty tostop` stops a child that writes to it.
+Each `e2e` child runs in its own process group under the time limit, and
+the group is killed when the child exits, so a background job it leaves
+does not run into the next case; a terminal with `stty tostop` stops a
+child that writes to it.
 
 ## How a case is timed
 

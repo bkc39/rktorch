@@ -2,6 +2,7 @@
 
 (require (for-syntax racket/base)
          (only-in compiler/find-exe find-exe)
+         (only-in ffi/unsafe -> _fun _int get-ffi-obj)
          (only-in racket/file file->string make-temporary-directory)
          (only-in racket/format ~a)
          (only-in racket/list remove-duplicates)
@@ -115,8 +116,20 @@
     [(file-stream-port? log) (proc log)]
     [else
      (define path (build-path dir "child.log"))
-     (begin0 (call-with-output-file path proc)
-             (call-with-input-file path (lambda (in) (copy-port in log))))]))
+     (define child-log (open-output-file path))
+     (dynamic-wind
+      void
+      (lambda () (proc child-log))
+      (lambda ()
+        (close-output-port child-log)
+        (call-with-input-file path (lambda (in) (copy-port in log)))))]))
+
+(define kill (get-ffi-obj "kill" #f (_fun _int _int -> _int)))
+
+(define sigkill 9)
+
+(define (kill-process-group! child)
+  (void (kill (- (subprocess-pid child)) sigkill)))
 
 (define (run-child runner dir out cleared settings log time-limit)
   (define form
@@ -134,11 +147,10 @@
            (subprocess child-log #f 'stdout (find-exe) "-l" "racket/base" "-e" (format "~s" form))))
        (close-output-port stdin)
        (define exited?
-         (with-handlers ([exn:break? (lambda (e) (subprocess-kill child #t) (raise e))])
+         (with-handlers ([exn:break? (lambda (e) (kill-process-group! child) (raise e))])
            (sync/timeout/enable-break time-limit child)))
-       (unless exited?
-         (subprocess-kill child #t)
-         (subprocess-wait child))
+       (kill-process-group! child)
+       (subprocess-wait child)
        (list (subprocess-status child) (not exited?))))))
 
 (define (example-runner ex)
@@ -397,31 +409,42 @@
        (check-regexp-match #rx"no exit within 15 s" (hash-ref a 'error #f))
        (check-true (within? 10 (lambda () (dead? (grandchild-pid pid-file))))))))
 
+  (define (break-grandchild-run pid-setting pid-file log)
+    (define raised (box #f))
+    (define running
+      (thread (lambda ()
+                (with-handlers ([exn:break? (lambda (e) (set-box! raised e))])
+                  (run-example fixture #:runner grandchild #:settings (list pid-setting)
+                               #:time-limit 600 #:log log)))))
+    (check-true (within? 120 (lambda () (file-exists? pid-file))))
+    (break-thread running)
+    (check-not-false (sync/timeout 30 running))
+    (unbox raised))
+
   (test-case "a break kills the child's process group and is re-raised"
     (call-with-pid-file
      (lambda (pid-setting pid-file)
-       (define raised (box #f))
-       (define running
-         (thread (lambda ()
-                   (with-handlers ([exn:break? (lambda (e) (set-box! raised e))])
-                     (run-example fixture #:runner grandchild #:settings (list pid-setting)
-                                  #:time-limit 600 #:log quiet)))))
-       (check-true (within? 120 (lambda () (file-exists? pid-file))))
-       (break-thread running)
-       (check-not-false (sync/timeout 30 running))
-       (check-pred exn:break? (unbox raised))
+       (check-pred exn:break? (break-grandchild-run pid-setting pid-file quiet))
        (check-true (within? 10 (lambda () (dead? (grandchild-pid pid-file))))))))
 
-  (test-case "a child that exits leaving a background job is not held by it"
+  (test-case "a broken child's output still reaches a log that is not a file"
     (call-with-pid-file
-     (lambda (pid-setting _pid-file)
+     (lambda (pid-setting pid-file)
+       (define log (open-output-string))
+       (check-pred exn:break? (break-grandchild-run pid-setting pid-file log))
+       (check-regexp-match #rx"grandchild running" (get-output-string log)))))
+
+  (test-case "a child that exits leaving a background job is not held by it, and the job is killed"
+    (call-with-pid-file
+     (lambda (pid-setting pid-file)
        (define t0 (current-inexact-monotonic-milliseconds))
        (define a (run-example fixture #:runner lingering #:settings (list pid-setting)
                               #:time-limit 60 #:log quiet))
        (check-true (< (- (current-inexact-monotonic-milliseconds) t0) 60000.0))
        (check-equal? (hash-ref a 'exit_code) 0)
        (check-false (hash-ref a 'error #f))
-       (check-equal? (hash-ref a 'steps) 9))))
+       (check-equal? (hash-ref a 'steps) 9)
+       (check-true (within? 10 (lambda () (dead? (grandchild-pid pid-file))))))))
 
   (test-case "a child that exits non-zero says so beside why it has no time"
     (check-regexp-match #rx"^exited non-zero; .*no measured steps"

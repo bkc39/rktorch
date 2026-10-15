@@ -14,5 +14,7 @@
     (lambda (port _tmp) (write (list (getpid) (subprocess-pid grandchild)) port))))
 
 (module+ main
+  (displayln "grandchild running")
+  (flush-output)
   (start-grandchild!)
   (sleep 120))
