@@ -29,6 +29,7 @@ case "\$name" in
   hang) echo \$\$ >"$t/hang.pid"; exec sleep 300 ;;
   deaf) trap '' TERM; echo \$\$ >"$t/hang.pid"; exec sleep 300 ;;
   slow) sleep 1.5 ;;
+  oom) kill -9 \$\$ ;;
   linger)
     ( sleep 0.2 & echo \$! >"$t/linger.zombie"; exec timeout 8 sleep 8 ) &
     echo \$! >"$t/linger.pid"
@@ -122,7 +123,8 @@ printf '%s\t%s\t%s\t%s\t%s\n' \
   9.3 hang nix build "shim=/s/hang" \
   9.3 deaf nix build "shim=/s/deaf" \
   9.3 slow nix build "shim=/s/slow toolchain=/s/slow" \
-  9.3 linger nix build "shim=/s/linger" >"$t/cells"
+  9.3 linger nix build "shim=/s/linger" \
+  9.3 oom nix build "shim=/s/oom" >"$t/cells"
 
 row() { echo "^aarch64-darwin +$1 +nix +[0-9]+s +$2\$"; }
 
@@ -291,6 +293,25 @@ case_linger() {
   expect "$(row '9\.3 +linger' 'fail \(shim\): timed out after 1s')"
   [ "$(state "$(cat "$t/linger.zombie")")" = Z ] || { echo "run-test: $case: no zombie lingered in the group" >&2; exit 1; }
   within "$started" 2500
+}
+
+case_kill_after() {
+  local started
+  rm -f "$t/hang.pid"
+  started=$(now)
+  status=0
+  MATRIX_CELL_TIMEOUT=1s MATRIX_KILL_AFTER=1s run 'deaf' >"$t/table" || status=$?
+  [ ! -s "$t/hang.pid" ] || stubs+=("$(cat "$t/hang.pid")")
+  status_is 1
+  expect "$(row '9\.3 +deaf' 'fail \(shim\): timed out after 1s')"
+  within "$started" 4000
+}
+
+case_killed() {
+  status=0
+  run 'oom' >"$t/table" || status=$?
+  status_is 1
+  expect "$(row '9\.3 +oom' 'fail \(shim\): see log')"
 }
 
 case_guard() {
@@ -469,7 +490,8 @@ EOF
 }
 
 cases=("$@")
-[ "${#cases[@]}" -gt 0 ] || cases=(rows no_match failure_line interrupt interrupt_deaf terminate deadline linger guard
+[ "${#cases[@]}" -gt 0 ] || cases=(rows no_match failure_line interrupt interrupt_deaf terminate deadline linger
+    kill_after killed guard
     cuda_cell cuda_cell_deaf cuda_cell_linger cuda_cell_load zombie driver_farm)
 for case in "${cases[@]}"; do
   "case_$case"

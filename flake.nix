@@ -63,6 +63,8 @@
       };
 
       racketCell = ./nix/matrix/racket-cell.sh;
+      cudaCellText = builtins.readFile ./nix/matrix/drain.sh
+        + builtins.readFile ./nix/matrix/cuda-cell.sh;
       cudaDriverFarm = ./nix/cuda-driver-farm.sh;
 
       # Source catalog only: a built package's compiled/ belongs to one Racket.
@@ -598,8 +600,7 @@
               CELL_RACKET_CELL = "${racketCell}";
               CELL_DRIVER_FARM = "${cudaDriverFarm}";
             };
-            text = builtins.readFile ./nix/matrix/drain.sh
-              + builtins.readFile ./nix/matrix/cuda-cell.sh;
+            text = cudaCellText;
           };
 
           # Steps name .drv files: evaluating the matrix builds nothing.
@@ -727,7 +728,11 @@
         let pkgs = import nixpkgs { inherit system; };
         in {
           inherit (self.packages.${system})
-            cpp cpp-format cpp-line-count cpp-tidy racket racket91;
+            cpp cpp-format cpp-line-count cpp-tidy racket racket91 matrix;
+          matrix-cuda-cell = pkgs.writeShellApplication {
+            name = "torch-matrix-cuda-cell";
+            text = cudaCellText;
+          };
           matrix-runner-test = pkgs.runCommand "torch-matrix-runner-test" { } ''
             DRIVER_FARM=${cudaDriverFarm} timeout -k 10 600 bash ${./nix/matrix/run-test.sh} ${./nix/matrix}
             mkdir $out

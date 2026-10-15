@@ -1,12 +1,17 @@
 logs=${MATRIX_LOG_DIR:-$(mktemp -d -t torch-matrix.XXXXXX)}
 min_free=${MATRIX_MIN_FREE_GB:-30}
 cell_timeout=${MATRIX_CELL_TIMEOUT:-6h}
+kill_after=${MATRIX_KILL_AFTER:-30s}
 nix_flags=(--no-link --print-out-paths --print-build-logs
   --max-jobs "${MATRIX_MAX_JOBS:-1}" --cores "${MATRIX_CORES:-4}"
   --max-silent-time 3600)
 mkdir -p "$logs"
 set -m
 
+[[ $kill_after =~ ^[0-9]+[smhd]?$ ]] || {
+  echo "torch-matrix: MATRIX_KILL_AFTER is N[smhd], got $kill_after" >&2
+  exit 2
+}
 [[ $cell_timeout =~ ^([0-9]+)([smhd]?)$ ]] || {
   echo "torch-matrix: MATRIX_CELL_TIMEOUT is N[smhd], got $cell_timeout" >&2
   exit 2
@@ -95,7 +100,7 @@ run_cell() {
     if ! left=$(remaining); then
       code=124
     else
-      step "$log.out" "$log" timeout --foreground -k 30 "$left" \
+      step "$log.out" "$log" timeout --foreground -k "$kill_after" "$left" \
         nix build "${nix_flags[@]}" "$drv^out" || code=$?
     fi
     out=$(cat "$log.out")
@@ -104,9 +109,10 @@ run_cell() {
     elif ! left=$(remaining); then
       code=124
     else
-      step "$log" "$log" timeout --foreground -k 30 "$left" \
+      step "$log" "$log" timeout --foreground -k "$kill_after" "$left" \
         "$out/bin/$(ls "$out/bin")" || code=$?
     fi
+    [ "$code" != 137 ] || remaining >/dev/null || code=124
     case "$code" in
       0) ;;
       124)
