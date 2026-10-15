@@ -429,6 +429,9 @@
               # scribble/lp2 program; its runner + RackUnit checks live in
               # examples/test/.
               raco test examples/test/
+              # The benchmark harness's own logic and a seconds-long smoke
+              # pass of every suite; never its numbers.
+              raco test scripts/bench/
               runHook postCheck
             '';
 

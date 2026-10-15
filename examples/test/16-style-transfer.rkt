@@ -14,17 +14,19 @@
   (require (only-in racket/format ~r)
            (only-in torch select)
            torch/scribblings/examples/16-style-transfer
-           (only-in torch/vision/ppm write-ppm))
+           (only-in torch/vision/ppm write-ppm)
+           (only-in "private/env.rkt" env-number))
   ;; The headline run: torchvision's VGG-16 features (a 56 MiB range of
   ;; the checkpoint, fetched once), 1000 Adam steps at 384 pixels, the
   ;; result written beside the working directory.
   (define device (pick-device))
+  (define size (env-number "IMAGE_SIZE" 384))
   (printf "device: ~a\n" device)
   (define net (frozen-vgg device))
   (define-values (image losses)
-    (style-transfer net (load-image content-path 384 device)
-                    (load-image style-path 384 device)
-                    #:steps 1000))
+    (style-transfer net (load-image content-path size device)
+                    (load-image style-path size device)
+                    #:steps (env-number "STEPS" 1000)))
   (for ([record (in-list losses)]
         #:when (zero? (modulo (car record) 100)))
     (printf "step ~a: style ~a, content ~a\n" (car record)
