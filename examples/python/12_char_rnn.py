@@ -1,6 +1,6 @@
-"""Parity twin of examples/racket/12-char-rnn.rkt: same seed, the same
-embedding -> LSTM -> linear model in the same declaration order, 5 full-batch
-Adam steps with gradient-norm clipping on the committed fixture."""
+"""Parity twin of torch/scribblings/examples/12-char-rnn.rkt: same seed, the
+same embedding -> LSTM -> linear model in the same declaration order, 5
+full-batch Adam steps with gradient-norm clipping on the committed fixture."""
 
 import json
 import os
@@ -9,7 +9,7 @@ import torch
 from torch import nn
 
 FIXTURE = os.path.join(
-    os.path.dirname(__file__), "..", "..", "torch", "data", "fixtures",
+    os.path.dirname(__file__), "..", "..", "torch", "text", "fixtures",
     "heart-of-darkness-excerpt.txt")
 
 DEVICE = os.environ.get("RKTORCH_PARITY_DEVICE") or "cpu"

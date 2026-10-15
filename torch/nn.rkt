@@ -4,11 +4,13 @@
 ;; unused
 #|review: ignore|#
 
-(require "nn/batch-norm.rkt"
+(require "nn/attention.rkt"
+         "nn/batch-norm.rkt"
          (except-in "nn/buffer.rkt" Buffer?)
          (submod "nn/buffer.rkt" checked)
          "nn/clip.rkt"
          "nn/conv.rkt"
+         (submod "nn/copy.rkt" checked)
          "nn/dropout.rkt"
          "nn/ema.rkt"
          "nn/embedding.rkt"
@@ -24,6 +26,7 @@
                     parameters-by-key
                     in-layers
                     layer?
+                    mode/c
                     named-buffers
                     named-parameters
                     step/c
@@ -31,6 +34,7 @@
          (submod "nn/layer.rkt" checked)
          "nn/linear.rkt"
          "nn/loss.rkt"
+         "nn/mode.rkt"
          (only-in "nn/optim.rkt"
                   adam adam? learning-rate rmsprop rmsprop?
                   set-learning-rate! sgd sgd? step! zero-grads!)
@@ -38,9 +42,11 @@
          "nn/scheduler.rkt"
          (except-in "nn/parameter.rkt" Parameter Parameter?)
          (submod "nn/parameter.rkt" checked)
+         "nn/positions.rkt"
          "nn/recurrent.rkt"
          "nn/sequential.rkt"
-         "nn/state-dict.rkt")
+         "nn/state-dict.rkt"
+         "nn/transformer.rkt")
 
 (provide define-layer
          gen:layer
@@ -51,6 +57,8 @@
          layer-named-children
          layer-mode
          layer-set-mode!
+         layer-rebuild
+         layer-copy
          with-mode
          in-mode
          in-eval-mode)
@@ -124,7 +132,20 @@
          LSTM
          lstm?
          GRU
-         gru?)
+         gru?
+         MultiheadAttention
+         multihead-attention?
+         TransformerEncoderLayer
+         transformer-encoder-layer?
+         TransformerDecoderLayer
+         transformer-decoder-layer?
+         TransformerEncoder
+         transformer-encoder?
+         TransformerDecoder
+         transformer-decoder?)
+
+(provide causal-mask
+         sinusoidal-positions)
 
 (provide uniform-init
          normal-init

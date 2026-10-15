@@ -1,13 +1,8 @@
 #lang scribble/manual
 
 @(require "common.rkt"
-          (for-label (except-in racket/base
-                                abs cos exp log sin sort sqrt max min length
-                                + - * /)
-                     racket/contract
-                     torch
-                     (only-in torch/data/loader dataloader define-dataset)
-                     (only-in torch/nn MaxPool2d cross-entropy nll-loss)))
+          torch/scribblings/labels
+          (for-label (only-in torch/data/loader dataloader define-dataset)))
 
 @title{Operations on tensors}
 
@@ -49,6 +44,14 @@ For batched attention keys, @racket[(transpose keys -2 -1)] swaps only the
 last two dimensions, as Python's @tt{keys.mT} does, where @racket[T]
 reverses every axis. PyTorch deprecates @tt{.T} for tensors whose rank is
 not two; @racket[T] supports every rank without a warning.}
+
+@defproc[(flip [t tensor?]
+               [dims (or/c exact-integer? (non-empty-listof exact-integer?))])
+         tensor?]{
+A copy of @racket[t] with its entries in reverse order along each axis in
+@racket[dims], which count from the end when negative; @tt{torch.flip}.
+
+@torch-examples[(flip (tensor '((1 2 3) (4 5 6))) 1)]}
 
 @section{Arithmetic}
 
@@ -178,11 +181,12 @@ tensor or a real that broadcasts. The mask feeds @racket[where],
               @defproc[(gt [a tensor?] [b (or/c tensor? real?)]) tensor?]
               @defproc[(ge [a tensor?] [b (or/c tensor? real?)]) tensor?])]{
 Equal, not equal, less than, less than or equal, greater than, greater
-than or equal.
+than or equal. Write the last four as @racket[<], @racket[<=], @racket[>]
+and @racket[>=], which dispatch to them.
 
 @torch-examples[
 (eq (tensor '(1 2 3)) 2)
-(item (sum (ge (tensor '(1 2 3)) 2)))
+(item (sum (>= (tensor '(1 2 3)) 2)))
 ]}
 
 @section{Selection}
@@ -303,15 +307,31 @@ of feature maps into a batch of vectors. On anything else,
 @section{Activations}
 
 @deftogether[(@defproc[(sigmoid [t tensor?]) tensor?]
-              @defproc[(gelu [t tensor?]) tensor?]
               @defproc[(leaky-relu [t tensor?]
                                    [#:negative-slope slope real? 0.01])
                        tensor?])]{
-The logistic function, the Gaussian error linear unit, and the rectifier
-with a small slope for negative inputs. @racket[tanh] is generic over
-tensors and reals, like @racket[exp].
+The logistic function, and the rectifier with a small slope for negative
+inputs. @racket[tanh] is generic over tensors and reals, like
+@racket[exp].
 
 @torch-examples[(sigmoid (tensor '(0.0)))]}
+
+@defproc[(gelu [t tensor?]
+               [#:approximate approximate (or/c 'none 'tanh) 'none])
+         tensor?]{
+The Gaussian error linear unit, the activation inside a transformer's
+feed-forward block: @tt{x @"·" @"Φ"(x)}, @tt{@"Φ"} the
+standard normal distribution function. With @racket[approximate]
+@racket['tanh] it is the tanh approximation
+@tt{0.5x(1 + tanh(@"√"(2/@"π")(x + 0.044715x@superscript{3})))}
+instead, PyTorch's @tt{approximate="tanh"}, which GPT-2 was trained with;
+its weights expect that form. The two never differ by more than
+@racket[5e-4].
+
+@torch-examples[
+(gelu (tensor '(-1.0 0.0 1.0)))
+(gelu (tensor '(-1.0 0.0 1.0)) #:approximate 'tanh)
+]}
 
 @section{Softmax}
 
@@ -328,6 +348,26 @@ The largest entries, sorting and sampling from a distribution,
 their own, @emph{Ordering and sampling}.
 
 @section{Spatial}
+
+@defproc[(conv2d [t tensor?]
+                 [weight tensor?]
+                 [#:bias bias (or/c tensor? #f) #f]
+                 [#:stride stride (or/c exact-integer?
+                                        (list/c exact-integer? exact-integer?))
+                           1]
+                 [#:padding padding (or/c exact-integer?
+                                          (list/c exact-integer? exact-integer?))
+                            0]
+                 [#:dilation dilation (or/c exact-integer?
+                                            (list/c exact-integer? exact-integer?))
+                             1]
+                 [#:groups groups exact-integer? 1])
+         tensor?]{
+The 2-D convolution of an @tt{[N C H W]} batch with an
+@tt{[out C/groups kH kW]} @racket[weight], a single integer applying to both
+axes; the layer form is @racket[Conv2d].
+
+@torch-examples[(shape (conv2d (zeros 1 3 8 8) (zeros 4 3 3 3) #:padding 1))]}
 
 @defproc[(max-pool2d [t tensor?]
                      [kernel (or/c exact-positive-integer?
@@ -358,6 +398,25 @@ Each pixel of an @tt{[N C H W]} batch repeated @racket[scale] times along
 both spatial axes.
 
 @torch-examples[(shape (upsample-nearest2d (zeros 1 1 4 4)))]}
+
+@section{Normalization}
+
+@defproc[(batch-norm [t tensor?]
+                     [#:running-mean running-mean (or/c tensor? #f) #f]
+                     [#:running-var running-var (or/c tensor? #f) #f]
+                     [#:weight weight (or/c tensor? #f) #f]
+                     [#:bias bias (or/c tensor? #f) #f]
+                     [#:training? training? boolean? #f]
+                     [#:momentum momentum real? 0.1]
+                     [#:eps eps real? 1e-5])
+         tensor?]{
+Batch normalization over the channel axis of an @tt{[N C ...]} input, by
+the batch's statistics when @racket[training?] and by the running ones
+otherwise; the layer forms are @racket[BatchNorm1d] and
+@racket[BatchNorm2d]. @racket[running-mean] and @racket[running-var]
+come as a pair, required unless @racket[training?] is true.
+
+@torch-examples[(shape (batch-norm (randn 4 3) #:training? #t))]}
 
 @section{Length}
 
@@ -407,4 +466,17 @@ dispatches to the tensor operation, and a chain folds left.
 (+ 1 2)
 (+ (tensor '(1 2 3)) (tensor '(10 20 30)))
 (+ (tensor '(1 2 3)) 10)
+]}
+
+@deftogether[(@defidform[<] @defidform[<=] @defidform[>] @defidform[>=])]{
+The ordering comparisons, provided as renames like the arithmetic
+operators. Reals take @racketmodname[racket/base]'s path, chains included.
+A tensor on either side dispatches to @racket[lt], @racket[le], @racket[gt]
+or @racket[ge], a real on the left mirrored, and takes exactly two operands.
+
+@torch-examples[
+(< 1 2 3)
+(>= (tensor '(1 2 3)) 2)
+(< 2 (tensor '(1 2 3)))
+(eval:error (< 0 (tensor '(1 2 3)) 3))
 ]}

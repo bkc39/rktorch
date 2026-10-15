@@ -19,7 +19,10 @@ nix flake check           # the Nix checks: cpp, format, tidy, line gate, racket
 ```
 
 CI runs two more jobs that `nix flake check` does not cover. The Resyntax gate
-is the `resyntax analyze` command below, and it fails on any suggestion. The
+is the `scripts/resyntax analyze` command below, Resyntax's default rules plus
+the repository's own in `scripts/resyntax-rules.rkt`, and it fails on any
+suggestion. Resyntax skips `#lang scribble/lp2`, so the wrapper lints the
+literate examples' code chunks through `scripts/resyntax-lp2.rkt`. The
 code-generation drift check regenerates the ATen bindings and fails if the
 committed output differs:
 
@@ -43,8 +46,9 @@ raco test torch/                  # unit tests; the PyTorch parity tests self-sk
                                   # where python3 cannot import torch
 raco test examples/test/          # the literate examples
 racket -ie "(require torch)"      # a REPL with the package loaded
-resyntax analyze --local-git-repository . origin/master   # the lint gate
+scripts/resyntax analyze --local-git-repository . origin/master   # the lint gate
 racket scripts/coverage.rkt       # expression coverage, with a floor
+racket scripts/bench/run.rkt micro   # benchmarks, docs/benchmarks/README.md
 ```
 
 The first entry into a shell installs the Racket dependencies into a
@@ -96,13 +100,12 @@ produced by the library at build time. An example that would need a GPU or
 a download must not be written as a live one.
 
 The guide's "Worked examples" part weaves the literate programs under
-`examples/racket/` into the manual by relative path
-(`guide/examples.scrbl` includes `(submod "../../../examples/racket/NN.rkt"
-doc)`). That is the one place the manual reaches outside the `torch/`
-package: it renders from a checkout or a link-mode install, and it does
-not from a `raco pkg install --copy` of `torch/`, which is how the flake and
-a catalog install the package. The examples' eventual move inside the
-package is tracked on #88.
+`torch/scribblings/examples/` into the manual by collection path
+(`guide/examples.scrbl` includes
+`(submod torch/scribblings/examples/NN-name doc)`), so a
+`raco pkg install --copy` of `torch/` renders them too. Their harnesses
+(`examples/test/`) and PyTorch twins (`examples/python/`) stay outside the
+package.
 
 `raco setup` renders both into `torch/doc/` (gitignored), and `raco docs`
 opens them:

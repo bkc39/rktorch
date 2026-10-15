@@ -1,34 +1,7 @@
 #lang scribble/manual
 
 @(require "common.rkt"
-          (for-label racket/base
-                     racket/contract
-                     (only-in torch
-                              accelerator-if-available arange autocast-dtype
-                              autocast-enabled? backward! bytes->tensor
-                              call-with-autocast cpu-device cuda-if-available
-                              default-device detach device-type grad
-                              set-default-device!
-                              cuda-allocator-settings!
-                              cuda-device cuda-memory-info cuda-memory-stats
-                              cuda-reset-peak-stats! device device/c device?
-                              dtype dtype/c eye finalizer-diagnostics full
-                              full-like mps-device mps-memory-info
-                              native-collect-at-troughs
-                              native-collect-budget native-collect-margin
-                              native-memory-fraction native-memory-limit
-                              native-memory-unaccounted
-                              native-memory-use ones ones-like prop:to rand
-                              rand-like randn randn-like
-                              reclaim-native-memory! tensor tensor-device
-                              tensor->bytes tensor-dtype tensor? to to-able?
-                              to-device
-                              to-dtype with-autocast with-default-device
-                              with-no-grad
-                              zeros zeros-like ~>)
-                     (only-in torch/nn
-                              Buffer Linear Parameter adam buffers gen:layer
-                              layer? load-state! parameters step!)))
+          torch/scribblings/labels)
 
 @title{Devices and dtypes}
 
@@ -479,7 +452,7 @@ collects less often and holds more.
 
 @defparam[native-collect-budget budget (and/c real? positive?)]{
 The share of wall-clock time collections at a trough may take, @racket[1/20]
-by default. After one costing @racket[t] the next waits @racket[t] divided
+by default. After one costing @racket[_t] the next waits @racket[_t] divided
 by the budget, so a smaller budget spaces them further apart and a larger
 one collects more eagerly.
 }
@@ -564,6 +537,23 @@ next trough. Every trough also lowers it to the live size first if that is
 smaller, whether or not it goes on to collect, so a floor left high by an
 earlier peak cannot hide later growth.
 }
+
+@section{Threads and places}
+
+Racket threads of one place share tensors, parallel threads made with
+@racket[#:pool] included: they share one ledger, one set of finalizers and
+one collector. That sharing covers reading a tensor from several threads at
+once, not writing it. An in-place mutation, @racket[copy!] or an optimizer's
+@racket[step!], writes the native storage the other threads read, and
+nothing in the library orders those writes, so a program that mutates a
+shared tensor must synchronise its threads itself. Two further limits
+remain. Grad mode, autocast and the message of a failed call are not yet
+kept per thread, and a tensor should be freed explicitly by one thread only.
+
+A tensor must not be sent to another place. It is accepted as a place
+message but arrives as a bare pointer to the same native storage, with no
+finalizer and no ledger entry, and the sending place frees that storage
+when its own handle is collected.
 
 @section{Native faults}
 

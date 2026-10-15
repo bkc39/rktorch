@@ -7,7 +7,7 @@
                   [max base:max]
                   [min base:min]
                   [sqrt base:sqrt])
-         (only-in racket/contract/base -> ->* non-empty-listof)
+         (only-in racket/contract/base -> ->* non-empty-listof or/c)
          (only-in racket/list [argmax base:argmax])
          (only-in racket/math [tanh base:tanh])
          (only-in "../private/contract.rkt"
@@ -180,9 +180,9 @@
   unary-numeric/c
   (if (tensor? v) (wrap 'tanh (tr-tanh/raw v)) (base:tanh v)))
 
-(define/contract-out (gelu t)
-  (-> tensor? tensor?)
-  (wrap 'gelu (tr-gelu/raw t)))
+(define/contract-out (gelu t #:approximate [approximate 'none])
+  (->* [tensor?] [#:approximate (or/c 'none 'tanh)] tensor?)
+  (wrap 'gelu (tr-gelu/raw t approximate)))
 
 ;; -------------------------------------------------------------- reductions
 

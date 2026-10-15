@@ -1,11 +1,7 @@
 #lang scribble/manual
 
 @(require "common.rkt"
-          (for-label (except-in racket/base
-                                abs cos exp log sin sort sqrt max min length
-                                + - * /)
-                     torch
-                     torch/nn))
+          torch/scribblings/labels)
 
 @title{rktorch: Racket bindings to libtorch}
 @author{bkc}
@@ -32,6 +28,10 @@ The library is split across a few modules:
  @item{@racketmodname[torch/data/loader] --- datasets, batching and
  iteration.}
 
+ @item{@racketmodname[torch/safe] and @racketmodname[torch/operators] ---
+ @racketmodname[torch] split by whether @racketmodname[racket] exports the
+ name, for programs that require both; see @secref["imports"].}
+
 ]
 
 This manual has two parts. The @secref["guide"] is a narrative
@@ -40,6 +40,18 @@ introduction, from a first tensor through to a training loop; the
 
 Every example in this manual is evaluated when it is built, so the printed
 results are the ones the library produces.
+
+@bold{License.} Apache 2.0, except some bundled data fixtures, whose
+terms are recorded in @filepath{NOTICE} files beside them where known.
+
+@bold{Acknowledgements.} Many thanks to
+@hyperlink["https://pytorch.org/"]{PyTorch} and its developers, and to
+Laurent Mazare and Jane Street for
+@hyperlink["https://github.com/janestreet/torch"]{ocaml-torch}, whose
+design this library follows.
+
+@bold{AI disclosure.} This library and its documentation were created with
+the use of AI tools.
 
 @local-table-of-contents[]
 

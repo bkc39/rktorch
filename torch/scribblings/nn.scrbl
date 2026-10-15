@@ -1,13 +1,8 @@
 #lang scribble/manual
 
-@(require (for-label racket/base
-                     racket/contract
-                     (only-in racket/string string-replace)
-                     (only-in torch backward! lambda~> native-collect-at-troughs
-                              prop:to relu tensor? to to-able? with-no-grad)
-                     (only-in torch/data/loader in-dataloader)
-                     torch/nn
-                     torch/private/contract))
+@(require "common.rkt"
+          torch/scribblings/labels
+          (for-label (only-in torch/data/loader in-dataloader)))
 
 @title{Layers}
 
@@ -33,7 +28,9 @@
                   (code:line keyword id)
                   (code:line keyword [id default-expr])]
           [input id
-                 [id : input-contract-expr]])
+                 [id : input-contract-expr]
+                 (code:line keyword id)
+                 (code:line keyword [id default-expr])])
          #:contracts ([contract-expr contract?]
                       [input-contract-expr contract?])]{
 
@@ -53,6 +50,21 @@ where the layer is defined, so it costs one flat check per call; the
 party blamed is the label @tt{caller}, since a layer's forward has no
 module boundary of its own to name the caller by. A bare @racket[id]
 accepts anything, as before.
+
+A @racket[keyword] input is a keyword argument of the application, in the
+grammar of @racket[define]: required without a @racket[default-expr],
+optional with one, and the @racket[default-expr] sees the fields. The count
+of positional inputs is checked as before, and a keyword the forward does
+not declare is refused by the application under @racket[name], as it is
+for any procedure. A forward that declares no keyword refuses them all.
+
+@racketblock[
+(define-layer Scaled (factor)
+  #:forward (x #:by [by factor])
+  (mul x by))
+((Scaled 2) x)
+((Scaled 2) x #:by 3)
+]
 
 @racketblock[
 (define-layer BatchNorm2d (weight bias running-mean running-var)
@@ -132,8 +144,8 @@ follows a lowercase letter or a digit, then downcases:
 @racket[conv2d?], @racket[MaxPool2d] exports @racket[max-pool2d?].
 @racket[#:predicate] names the exported predicate instead.  Both names
 are bound in the defining module, so @racket[contract-expr] may use the
-lowercase one as its range.  Like @racket[define/contract-out], the clause
-is allowed only at module level.
+lowercase one as its range.  The clause is allowed only at module
+level.
 
 @racketblock[
 (define-layer Conv2d (kernel-size stride padding weight bias)
@@ -148,9 +160,9 @@ is allowed only at module level.
   (set! kernel-size (->2d kernel-size))
   (set! stride (->2d stride))
   (set! padding (->2d padding))
-  (define shape
+  (define kernel-dims
     (list out-channels in-channels (car kernel-size) (cadr kernel-size)))
-  (set! weight (Parameter (kaiming-uniform shape)))
+  (set! weight (Parameter (kaiming-uniform kernel-dims)))
   (set! bias
         (and bias? (Parameter (uniform-init (list out-channels) -0.1 0.1))))
   #:forward (x)
@@ -195,24 +207,36 @@ rather than a guard in the body:
   ...)
 ]
 
+The library's own @racket[MultiheadAttention] states its @racket[#:heads]
+invariant this way.
+
 @racket[#:on-move] runs after @racket[to] has moved the layer, with every
-field in scope, and only when the move actually rebound something: the
-device and dtype of every parameter and buffer are read either side of it
-and compared.  @racket[to] is the identity when nothing changes, so a loop
-that defensively moves a model to the device it is already on runs the body
-not at all; a device round trip runs it twice, once per move, which reading
-the placement after the fact could not detect.  It is for state derived
-from where the tensors live --- a cached layout, a handle onto their
-storage --- which a move invalidates:
+field in scope, and only when the move actually rebound one of its
+parameters or buffers, its children's included.  The device and dtype of
+every tensor in the tree being moved are read once, before anything moves,
+and compared afterwards, so a tensor shared with a sibling counts as moved
+for both layers, whichever moved it.  @racket[to] is the identity when
+nothing changes, so a loop that defensively moves a model to the device it
+is already on runs the body not at all; a device round trip runs it twice,
+once per move, which reading the placement after the fact could not
+detect.  Bodies run children first, once per layer however often it appears
+in the tree.  It is for state derived from where the tensors live --- a
+cached layout, a handle onto their storage --- which a move invalidates:
 
 @racketblock[
-(define-layer LSTM (spec entries params)
-  #:init (input-size hidden-size)
-  (code:comment "...")
-  #:on-move (forget-flattening! entries)
-  #:forward (x . state)
-  (with-mode (run spec entries lstm-input x state mode)))
+(define-layer Packed (weight packed)
+  #:init (n)
+  (set! weight (Parameter (randn n n)))
+  (set! packed (box #f))
+  #:on-move (set-box! packed #f)
+  #:forward (x)
+  (matmul x (or (unbox packed) (pack! packed weight))))
 ]
+
+State that can check itself at the call needs no hook to stay correct:
+@racket[LSTM] compares its weights' storage addresses with those its last
+packing left, and counts its moves only to tell whether one ran during a
+packing.
 
 Without @racket[#:contract] nothing is exported; a layer local to a model
 or a test needs no contract boundary.
@@ -290,10 +314,9 @@ also takes a dtype target; a plain tensor field does neither.
                           [#:buffers bufs (listof (cons/c child-name/c Buffer?)) '()]
                           [#:children kids (listof (cons/c child-name/c layer?)) '()])
          layer?]{
-Wraps @racket[proc] as a callable layer. Applying the layer passes
-positional arguments to @racket[proc] and preserves its return values and
-exceptions. Keyword
-arguments to the wrapped procedure are not supported.
+Wraps @racket[proc] as a callable layer. Applying the layer passes its
+positional and keyword arguments to @racket[proc] and preserves its return
+values and exceptions.
 
 The optional association lists register captured parameters, buffers, and
 child layers. Names must be unique across all three lists and must not
@@ -311,12 +334,12 @@ it, so a mode-dependent step belongs in a registered child such as
 
 @racketblock[
 (define projection (Linear 32 32))
-(define drop (Dropout #:p 0.1))
+(define dropout (Dropout #:p 0.1))
 (define block
   (procedure->Layer
-   (lambda~> projection relu drop)
+   (lambda~> projection relu dropout)
    #:children (list (cons "projection" projection)
-                    (cons "drop" drop))))
+                    (cons "dropout" dropout))))
 (eval! block)
 ]
 
@@ -547,16 +570,19 @@ same way a @racket[define-layer] one does. A structure that implements
 @racket[gen:layer] and sets @racket[prop:procedure] itself is rejected
 when it is defined. Inside a @racket[#:methods gen:layer] block the name
 @racket[layer-forward] is the method being defined, so a layer calls its
-children by applying them.
+children by applying them. A generic method takes no keyword arguments, so
+a hand-written layer applied with one is refused, naming
+@racket[layer-forward]; a forward with keyword inputs belongs in
+@racket[define-layer] or @racket[procedure->Layer].
 
 @racketblock[
-(struct Twice (inner)
+(struct Twice (wrapped)
   #:methods gen:layer
   [(define (layer-forward self . inputs)
-     (define inner (Twice-inner self))
-     (inner (apply inner inputs)))
+     (define wrapped (Twice-wrapped self))
+     (wrapped (apply wrapped inputs)))
    (define (layer-named-children self)
-     (list (cons "inner" (Twice-inner self))))])
+     (list (cons "wrapped" (Twice-wrapped self))))])
 ]
 
 @defthing[gen:layer any/c]{
@@ -564,7 +590,8 @@ The generic interface, with methods @racket[layer-forward],
 @racket[layer-parameters], @racket[layer-named-parameters],
 @racket[layer-buffers], @racket[layer-named-buffers],
 @racket[layer-named-children], @racket[layer-own-tensors],
-@racket[layer-mode] and @racket[layer-set-mode!]. A structure implements
+@racket[layer-mode], @racket[layer-set-mode!] and @racket[layer-rebuild].
+A structure implements
 it with @racket[#:methods]; it derives @racket[prop:to], so every layer is
 @racket[to-able?], and @racket[prop:procedure], so every layer applies to
 its inputs. @racket[define-layer]'s @racket[#:forward] clause supplies the
@@ -595,6 +622,79 @@ paths, as @racket[parameters] and @racket[named-parameters] do for
 parameters. Buffers move with the layer under @racket[to] and are saved
 by @racket[save-state!], but no optimizer updates them: running
 statistics, masks, position tables.}
+
+@subsection[#:tag "layer-copy"]{Copying layers}
+
+@defproc[(layer-copy [m layer?]) layer?]{
+A deep copy of @racket[m], PyTorch's @tt{copy.deepcopy(module)}: a layer
+of the same kind and configuration whose parameters and buffers are fresh
+tensors holding the same values, on the same device and with the same
+dtype, each @racket[Parameter] keeping whether it requires gradients.
+Child layers are copied the same way, all the way down, and every layer of
+the copy starts in its original's mode. Nothing is drawn from the random
+stream.
+
+The copy shares nothing that training changes: an optimizer stepping one
+leaves the other where it was, and moving one with @racket[to] leaves the
+other on its device. Gradients are not copied, as PyTorch's deep copy of a
+parameter does not copy them either. Within one copy, sharing is kept: a
+layer or a tensor that appears twice in @racket[m], as tied weights do,
+appears twice in the copy as one layer or one tensor. Tensors a layer
+keeps outside its parameters and buffers, in a plain field or inside a
+list, vector or box there, are copied too; any other value a field holds,
+a number or a procedure, is shared.
+
+Every layer @racket[define-layer] builds can be copied, the built-in ones
+included, and so can a @racket[procedure->Layer] layer with no
+parameters, buffers or children. One with them is refused, since its
+procedure reads the original's tensors. A hand-written layer is copied
+through its @racket[layer-rebuild] method, and refused when it has none.
+
+@torch-examples[
+(manual-seed! 0)
+(define net (Sequential (Linear 2 3) relu (Linear 3 1)))
+(define twin (layer-copy net))
+(equal? (map car (named-parameters twin)) (map car (named-parameters net)))
+(eq? (car (parameters twin)) (car (parameters net)))
+(define x (randn 4 2))
+(equal? (tensor->list (twin x)) (tensor->list (net x)))
+(with-no-grad (copy! (car (parameters net)) (zeros 1)))
+(equal? (tensor->list (twin x)) (tensor->list (net x)))
+]}
+
+@defproc[(layer-rebuild [m layer?]
+                        [child (-> string? layer? layer?)]
+                        [tensor (-> tensor? tensor?)])
+         layer?]{
+The @racket[gen:layer] method @racket[layer-copy] is built on: a new layer
+of @racket[m]'s kind and configuration, in its mode, whose every child
+@racket[c] registered under @racket[name] is replaced by
+@racket[(child name c)], and whose every tensor, its own parameters and
+buffers and the tensors in its plain fields, is replaced by
+@racket[(tensor _t)]. It does not recurse by itself; @racket[child] decides
+what each child becomes. @racket[layer-copy] passes a @racket[child] that
+copies each child the same way and a @racket[tensor] that copies each
+tensor, both remembering what they have done, so shared values stay
+shared. A @racket[child] that answers some children with other layers
+rebuilds the tree with those leaves replaced, the shape a wrapper over
+named layers takes.
+
+@racket[define-layer] supplies the method. A hand-written layer that
+should be copyable defines it in its @racket[#:methods gen:layer] block,
+returning a new structure of its own:
+
+@racketblock[
+(struct Scaled (weight)
+  #:methods gen:layer
+  [(define (layer-forward self . inputs)
+     (* (car inputs) (Scaled-weight self)))
+   (define (layer-parameters self)
+     (list (Scaled-weight self)))
+   (define (layer-rebuild self child tensor)
+     (Scaled (tensor (Scaled-weight self))))])
+]
+
+Without it, @racket[layer-copy] refuses the layer, naming the method.}
 
 @section[#:tag "optimizers"]{Optimizers and schedules}
 
@@ -653,6 +753,14 @@ of every schedule.
 @defproc[(step! [opt optimizer?]) void?]{
 Applies one update to every parameter that has a gradient, under
 @racket[with-no-grad]; on a schedule, advances it and writes its rate.
+
+A step of one of the built-in optimizers logs a @racket['debug] event on
+the topic @racket['rktorch-step] when a receiver listens for one. Its data
+is @racket[(vector _id _ms _gc-ms)]: the optimizer's @racket[eq-hash-code],
+@racket[(current-inexact-monotonic-milliseconds)] and
+@racket[(current-gc-milliseconds)] as the step ends. While a receiver
+listens, the step first waits for every accelerator holding one of its
+parameters to finish it. A schedule's step logs nothing.
 }
 
 @defproc[(zero-grads! [opt optimizer?]) void?]{

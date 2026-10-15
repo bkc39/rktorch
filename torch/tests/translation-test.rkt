@@ -7,8 +7,8 @@
                     display-to-file file->bytes make-directory*
                     make-temporary-directory delete-directory/files)
            (only-in racket/list first last)
-           "../data/translation.rkt"
-           "../main.rkt")
+           "../main.rkt"
+           "../text/translation.rkt")
 
   (test-case "normalize-sentence follows the tutorial's normalizeString"
     (check-equal? (normalize-sentence "Go.") "go")

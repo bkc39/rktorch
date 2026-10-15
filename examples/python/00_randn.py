@@ -1,4 +1,5 @@
-"""Parity twin of examples/racket/00-randn.rkt: seeded randn(2, 2)."""
+"""Parity twin of torch/scribblings/examples/00-randn.rkt:
+seeded randn(2, 2)."""
 
 import json
 

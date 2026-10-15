@@ -102,14 +102,24 @@ the input, a dead guard to delete — see `torch/foreign/ops.rkt`'s
 ### 5. Resyntax — exactly what CI runs
 
 ```bash
+nix develop .#ci --command raco test scripts/resyntax-rules-test.rkt scripts/resyntax-lp2.rkt
 nix develop .#ci --command \
-  resyntax analyze --local-git-repository . origin/master --analyzer-timeout 30000
+  scripts/resyntax analyze --local-git-repository . origin/master --analyzer-timeout 30000
 ```
 
-CI fails on **any** suggestion. `resyntax fix --local-git-repository . origin/master`
+`scripts/resyntax` runs Resyntax's default rules plus the repository's own
+in `scripts/resyntax-rules.rkt`, such as `(mul a b)` → `(* a b)` and
+`(clip (+ h (relu (dil h))) l t)` → `(~> (dil h) relu (+ h) (clip l t))`. A
+style point the owner raises in review that is a meaning-preserving rewrite
+becomes a rule there, with a case in `scripts/resyntax-rules-test.rkt`.
+
+CI fails on **any** suggestion. `scripts/resyntax fix --local-git-repository . origin/master`
 applies them. Resyntax skips a file whose `compiled/` was built by a different
-Racket than the shell's, and it skips `#lang scribble/lp2` files entirely, so
-a clean run on the literate examples proves nothing.
+Racket than the shell's, and it skips `#lang scribble/lp2` files. The wrapper
+then lints the literate examples through `scripts/resyntax-lp2.rkt`: the
+same suite over a `racket/base` shadow that blanks the prose and keeps
+every chunk at its own position, so the lines, columns and fixes are the
+literate file's. A change that touches only prose skips the expansion.
 
 ### 6. raco review
 
@@ -165,7 +175,7 @@ What CI runs, minus the Resyntax lane (step 5) and the coverage floor
 - **Modules target ≤ 500 lines.** Split by family rather than fighting it.
 - **Shadowing racket/base** (`exp log sqrt max min + - * /` …) means the new
   op must dispatch: tensors to libtorch, everything else to the original, so
-  `(require torch)` never breaks numeric code. Scribble examples then need
-  `(for-label (except-in racket/base ...))`.
+  `(require torch)` never breaks numeric code. Scribble documentation
+  requires `torch/scribblings/labels` for its `for-label` bindings.
 - **Comments** explain a constraint the code cannot show. Usage documentation
   belongs in Scribble; narration and review archaeology get deleted.

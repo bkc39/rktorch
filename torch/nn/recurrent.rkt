@@ -2,13 +2,16 @@
 
 (require (only-in racket/contract/base
                   -> ->* <=/c >=/c and/c contract-out)
-         (only-in racket/match match)
+         (only-in racket/match == match match-define)
          (only-in "../foreign.rkt"
                   device-type exn:fail:rktorch:oom? tensor-device tensor-dtype
                   tensor-shape tensor? with-no-grad zeros)
+         (only-in "../foreign/addresses.rkt"
+                  tensor-data-ptr tensor-storage-ptr)
          (only-in "../foreign/raw/fault.rkt" native-fault?)
          (only-in "../generated.rkt"
                   cudnn-rnn-flatten-weight gru-input lstm-input)
+         (only-in "../private/lock.rkt" make-lock with-lock)
          (only-in "init.rkt" uniform-init)
          (only-in "layer.rkt"
                   define-layer parameters-by-key training? with-mode)
@@ -44,22 +47,29 @@
     (cons (format "~a_l~a~a" (car entry) layer suffix)
           (apply draw (cdr entry)))))
 
-;; Keyed on the first weight, which `to!` mutates in place and so survives a
-;; move. A move that rebinds the storage drops the entry through `#:on-move`,
-;; which a placement read at forward time could not do: a device round trip
-;; ends where it started.
+;; packed weights are views of one storage, so compare the storage address too
 (define flattened (make-weak-hasheq))
 
-;; Which weights cudnn refused to flatten. The refusal is swallowed so the
-;; layer still runs, and the placement is cached either way so it is not asked
-;; twice, which together would hide a defect in the arguments we pass as a
-;; silent fall back to compacted copies; recording it lets a test say the
-;; flattening happened rather than only that the outputs agree.
+(struct claim (moves signature) #:transparent)
+
 (define refused (make-weak-hasheq))
 
-(define (placement weights)
-  (define w (car weights))
-  (cons (tensor-device w) (tensor-dtype w)))
+;; keyed by the weights rather than kept in the spec, which a layer-copy
+;; shares, so a copy's new weights get a lock and a move count of their own
+(struct guard (lock moves))
+
+(define guards (make-weak-hasheq))
+
+(define guards-lock (make-lock))
+
+(define (guard-of key)
+  (or (hash-ref guards key #f)
+      (with-lock guards-lock
+        (hash-ref! guards key (lambda () (guard (make-lock) (box 0)))))))
+
+(define (storage-signature weights)
+  (for/list ([w (in-list weights)])
+    (cons (tensor-data-ptr w) (tensor-storage-ptr w))))
 
 ;; Flattening is an optimisation cudnn asks for, never a requirement: a build
 ;; or a dtype it refuses still runs, on compacted copies, and refusing again
@@ -76,29 +86,73 @@
 
 (define (flatten-weights! spec weights)
   (with-handlers ([cudnn-refusal?
-                   (lambda (_e) (hash-set! refused (car weights) #t))])
+                   (lambda (_e) (hash-set! refused (car weights) #t) #f)])
     (with-no-grad
-      (void
-       (cudnn-rnn-flatten-weight weights
-                                 (if (rnn-bias? spec) 4 2)
-                                 (rnn-input-size spec)
-                                 (rnn-cudnn-mode spec)
-                                 (rnn-hidden-size spec)
-                                 0
-                                 (rnn-num-layers spec)
-                                 (rnn-batch-first? spec)
-                                 (rnn-bidirectional? spec))))))
+      (cudnn-rnn-flatten-weight weights
+                                (if (rnn-bias? spec) 4 2)
+                                (rnn-input-size spec)
+                                (rnn-cudnn-mode spec)
+                                (rnn-hidden-size spec)
+                                0
+                                (rnn-num-layers spec)
+                                (rnn-batch-first? spec)
+                                (rnn-bidirectional? spec)))))
 
-(define (ensure-flat! spec weights)
-  (define now (placement weights))
-  (unless (equal? now (hash-ref flattened (car weights) #f))
-    (when (eq? (device-type (car now)) 'cuda)
-      (hash-remove! refused (car weights))
-      (flatten-weights! spec weights))
-    (hash-set! flattened (car weights) now)))
+(define packing-hook (make-parameter void))
 
-(define (forget-flattening! entries)
-  (hash-remove! flattened (cdr (car entries))))
+;; a `to` on another thread takes no turn, so record only if no move ran since
+;; the signature was read, on any device, since a round trip can hand back the
+;; old addresses, and a packing only while the weights still lie in the buffer
+(define (packing-record now buffer-start packed moved?)
+  (cond
+    [moved? #f]
+    [(and buffer-start
+          (for/and ([entry (in-list packed)]) (= (cdr entry) buffer-start)))
+     packed]
+    [buffer-start #f]
+    [(equal? now packed) now]
+    [else #f]))
+
+(define (count-move! weights)
+  (define moves (guard-moves (guard-of (car weights))))
+  (let retry ()
+    (define seen (unbox moves))
+    (unless (box-cas! moves seen (add1 seen))
+      (retry))))
+
+(define (repack! spec weights)
+  ((packing-hook) 'before)
+  (hash-remove! refused (car weights))
+  (define buffer (flatten-weights! spec weights))
+  ((packing-hook) 'after)
+  (and buffer (tensor-storage-ptr buffer)))
+
+(define (record-packing! spec weights now moves seen)
+  (define key (car weights))
+  (define buffer-start
+    (and (eq? (device-type (tensor-device key)) 'cuda)
+         (repack! spec weights)))
+  (define record
+    (packing-record now
+                    buffer-start
+                    (storage-signature weights)
+                    (not (= seen (unbox moves)))))
+  (cond
+    [record
+     ((packing-hook) 'publish)
+     (hash-set! flattened key (claim seen record))]
+    [else
+     (hash-remove! flattened key)
+     (hash-remove! refused key)]))
+
+(define (check-packing! spec weights moves)
+  (define seen (unbox moves))
+  (define now (storage-signature weights))
+  (cond
+    [(equal? (claim seen now) (hash-ref flattened (car weights) #f)) (void)]
+    [else
+     ((packing-hook) 'stale)
+     (record-packing! spec weights now moves seen)]))
 
 (define (zero-state spec x)
   (define batch
@@ -137,7 +191,8 @@
 (define (run spec entries op x state mode)
   (check-inputs spec x state)
   (define weights (map cdr entries))
-  (ensure-flat! spec weights)
+  (match-define (guard lock moves) (guard-of (car weights)))
+  (with-lock lock (check-packing! spec weights moves))
   (define initial
     (if (null? state)
         (for/list ([_ (in-range (rnn-state-count spec))]) (zero-state spec x))
@@ -172,7 +227,7 @@
                   batch-first? (exact->inexact dropout) bidirectional?))
   (set! entries (draw-parameters spec))
   (set! params (parameters-by-key entries))
-  #:on-move (forget-flattening! entries)
+  #:on-move (count-move! (map cdr entries))
   #:forward (x . state)
   (with-mode (run spec entries lstm-input x state mode)))
 
@@ -194,11 +249,20 @@
                   batch-first? (exact->inexact dropout) bidirectional?))
   (set! entries (draw-parameters spec))
   (set! params (parameters-by-key entries))
-  #:on-move (forget-flattening! entries)
+  #:on-move (count-move! (map cdr entries))
   #:forward (x . state)
   (with-mode (run spec entries gru-input x state mode)))
 
 (module+ private
-  (provide cudnn-refusal? flattened-placement flatten-refused?)
-  (define (flattened-placement weight) (hash-ref flattened weight #f))
+  (provide count-move! cudnn-refusal? flattened-signature flatten-refused?
+           move-count packing-hook packing-lock packing-record
+           record-flattened! storage-signature)
+  (define (move-count weight) (unbox (guard-moves (guard-of weight))))
+  (define (packing-lock weight) (guard-lock (guard-of weight)))
+  (define (flattened-signature weight)
+    (match (hash-ref flattened weight #f)
+      [(claim (== (move-count weight)) signature) signature]
+      [_ #f]))
+  (define (record-flattened! weight signature)
+    (hash-set! flattened weight (claim (move-count weight) signature)))
   (define (flatten-refused? weight) (hash-ref refused weight #f)))

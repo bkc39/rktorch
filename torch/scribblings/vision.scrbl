@@ -1,19 +1,14 @@
 #lang scribble/manual
 
 @(require "common.rkt"
-          (for-label racket/base
-                     racket/contract
-                     (only-in torch cuda-if-available device/c draw-seed generator?
-                              make-generator matmul narrow randn-like tensor?
-                              to-dtype upsample-nearest2d)
-                     torch/data/loader
-                     (only-in torch/nn Conv2d Dropout Embedding GroupNorm Linear
-                              define-layer load-state!)
+          torch/scribblings/labels
+          (for-label torch/data/loader
                      torch/vision/cifar10
                      torch/vision/hymenoptera
                      torch/vision/image
                      torch/vision/image-folder
                      torch/vision/imagenet
+                     torch/vision/mnist
                      torch/vision/ppm
                      torch/vision/resnet
                      torch/vision/transforms
@@ -90,6 +85,23 @@ The regular files of an uncompressed tar buffer, name and contents,
 enough for the archives the datasets ship in.
 }
 
+@section{MNIST}
+
+@defmodule[torch/vision/mnist]
+
+The handwritten digits, fetched once from the mirror torchvision uses into
+the cache directory and decoded from the IDX files.
+
+@defproc[(load-mnist [split (or/c 'train 'test) 'train]) (values tensor? tensor?)]{
+The split's images as a float32 tensor of shape @tt{[N 1 28 28]} with
+pixels in @tt{[0, 1]}, and its labels as an int64 tensor of shape
+@tt{[N]}: 60000 training digits or 10000 test ones.}
+
+@defproc[(load-mnist-fixture) (values tensor? tensor?)]{
+The first 256 training digits, committed with the package, in the same
+form as @racket[load-mnist]; what the tests and the offline examples
+train on.}
+
 @section{Diffusion}
 
 @defmodule[torch/vision/diffusion]
@@ -135,7 +147,9 @@ typically @racket[randn-like], so a seeded run replays.
          tensor?]{
 Timesteps @racket[t], shape @tt{[N]}, as @tt{[N dim]} sinusoidal features:
 the sine half then the cosine half over frequencies falling geometrically
-from @tt{1} to @tt{1/10000}.
+from @tt{1} to @tt{1/10000}. It is @racket[sinusoidal-positions] with
+@racket[#:layout 'halves], the timesteps as the positions, under a name
+and a contract that ask for int64 timesteps.
 }
 
 @defproc[(TimeEmbedding [dim even-positive-integer?]) time-embedding?]{
@@ -157,10 +171,13 @@ through a 1x1 convolution when the widths differ. Widths are multiples of
 @defproc[(AttentionBlock [channels channels/c]) attention-block?]{
 Single-head self-attention over a feature map, the DDPM form: after a
 norm each pixel's channels are one token, @racket[Linear] maps give the
-queries, keys and values, softmax over the scaled dot products mixes the
-tokens, a @racket[Linear] projection follows, and the result is added to
-the input. The convolutional path before the block is the encoder that
-turns pixels into these tokens.
+queries, keys and values, softmax over the dot products scaled by
+@tt{1/sqrt(channels)} mixes the tokens, a @racket[Linear] projection
+follows, and the result is added to the input. The convolutional path
+before the block is the encoder that turns pixels into these tokens. The
+attention itself is one call to @racket[scaled-dot-product-attention]
+over all @tt{H·W} tokens of each image, with no mask, so libtorch can run
+a fused kernel rather than hold the @tt{[H·W, H·W]} weights.
 }
 
 @defproc[(Downsample [channels channels/c]) downsample?]{
@@ -195,8 +212,8 @@ features. Every block's output on the way down is concatenated back in on
 the way up. With @racket[classes] the network is class-conditional: an
 @racket[Embedding] of that many labels plus one null label, added to the
 time embedding, so a label of @racket[classes] means "no label" for
-classifier-free guidance. Called as @racket[(net x t y)] it returns the
-noise estimate for @racket[x] at timesteps @racket[t] and int64 labels
+classifier-free guidance. Called as @racket[(net x _t y)] it returns the
+noise estimate for @racket[x] at timesteps @racket[_t] and int64 labels
 @racket[y], which is @racket[#f] for an unconditional network. The
 default network has 35.7 million parameters.
 }
@@ -391,7 +408,7 @@ The residual network for 32x32 images: a 3x3 stem in place of ImageNet's
 7x7 stem and max-pool, four stages of basic blocks doubling the width and
 halving the resolution, global average pooling and a linear head. Every
 convolution is bias-free, as its batch norm absorbs the bias. The training
-loop is @filepath{examples/racket/09-resnet.rkt}.
+loop is @filepath{torch/scribblings/examples/09-resnet.rkt}.
 
 @defproc[(BasicBlock [in exact-positive-integer?]
                      [out exact-positive-integer?]

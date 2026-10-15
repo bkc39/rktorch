@@ -1,12 +1,12 @@
 #lang racket/base
 
-;; Runner + tests for the literate ../../examples/racket/08-diffusion.rkt.
+;; Runner + tests for the literate torch/scribblings/examples/08-diffusion.rkt.
 
 (require (except-in racket/list argmax flatten take)
          (only-in racket/math nan?)
          torch
          torch/nn
-         "../racket/08-diffusion.rkt")
+         torch/scribblings/examples/08-diffusion)
 
 (module+ main
   (require (only-in "private/env.rkt" env-number))

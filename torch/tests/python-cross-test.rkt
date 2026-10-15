@@ -11,15 +11,15 @@
            "../data/loader.rkt"
            "../main.rkt"
            "../nn.rkt"
-           (only-in "../data/mnist.rkt" load-mnist-fixture)
-           (only-in "../data/text.rkt"
+           (only-in "../text/data.rkt"
                     contiguous-blocks encode load-text-fixture text->vocab)
-           (only-in "../data/translation.rkt"
+           (only-in "../text/translation.rkt"
                     eos-id load-translation-fixture pad-id pairs->tensors
                     pairs->vocabs sos-id vocab-size)
            (only-in "../vision/cifar10.rkt" load-cifar10-fixture)
            (only-in "../vision/diffusion.rkt"
                     UNet linear-schedule q-sample schedule-steps)
+           (only-in "../vision/mnist.rkt" load-mnist-fixture)
            (only-in "../vision/ppm.rkt" image-grid write-ppm)
            (only-in "../vision/resnet.rkt" ResNet)
            "private/python-env.rkt")
@@ -283,11 +283,11 @@
              [i (in-naturals)])
          (check-= r p tol (format "04_mlp: parameter ~a parity" i))))
      (let ()
-       ;; Re-declared (torch/ can't reach examples/ once installed by copy in
-       ;; the nix build): MUST stay in sync with examples/racket/05-mnist.rkt
-       ;; — model, seed, steps, lr, full-batch regime. The shape guard below
-       ;; catches structural drift; a forward/recipe edit surfaces as a
-       ;; loss-parity mismatch. Same contract for the 06 gpt twin below.
+       ;; Re-declared: MUST stay in sync with
+       ;; torch/scribblings/examples/05-mnist.rkt — model, seed, steps, lr,
+       ;; full-batch regime. The shape guard below catches structural drift;
+       ;; a forward/recipe edit surfaces as a loss-parity mismatch. Same
+       ;; contract for the 06 gpt twin below.
        (define-layer convnet (c1 c2 f1 f2)
          #:init ()
          (set! c1 (Conv2d 1 16 3))
@@ -303,7 +303,7 @@
        (check-equal? (map tensor-shape (parameters (convnet)))
                      '((16 1 3 3) (16) (32 16 3 3) (32)
                        (128 800) (128) (10 128) (10))
-                     "convnet shape must match examples/racket/05-mnist.rkt")
+                     "convnet shape must match torch/scribblings/examples/05-mnist.rkt")
        (define (train-on device)
          (with-default-device device
            (manual-seed! 0)
@@ -352,76 +352,40 @@
                [i (in-naturals)])
            (check-= r p tol (format "mnist shuffle twin: parameter ~a" i)))))
      (let ()
-       (define-layer causal-self-attention (n-embd n-head wq wk wv wo)
-         #:init (n-embd n-head)
-         (unless (zero? (remainder n-embd n-head))
-           (error 'causal-self-attention
-                  "n-embd ~a not divisible by n-head ~a" n-embd n-head))
-         (set! wq (Linear n-embd n-embd))
-         (set! wk (Linear n-embd n-embd))
-         (set! wv (Linear n-embd n-embd))
-         (set! wo (Linear n-embd n-embd))
-         #:forward (x)
-         (with-default-device (tensor-device x)
-           (define shape (tensor-shape x))
-           (define batch (car shape))
-           (define seq-len (cadr shape))
-           (define head-dim (quotient n-embd n-head))
-           (define (split-heads m)
-             (transpose (reshape m batch seq-len n-head head-dim) 1 2))
-           (define q (split-heads (wq x)))
-           (define k (split-heads (wk x)))
-           (define v (split-heads (wv x)))
-           (define scores (/ (matmul q (transpose k 2 3)) (sqrt head-dim)))
-           (define causal (eq (tril (ones seq-len seq-len)) 0))
-           (define att (softmax (masked-fill scores causal -inf.0) -1))
-           (~> (matmul att v) (transpose 1 2) (reshape batch seq-len n-embd) wo)))
-       (define-layer feed-forward (fc1 fc2)
-         #:init (n-embd)
-         (set! fc1 (Linear n-embd (* 4 n-embd)))
-         (set! fc2 (Linear (* 4 n-embd) n-embd))
-         #:forward (x)
-         (~> x fc1 gelu fc2))
-       (define-layer pre-norm-residual (norm branch)
-         #:init (n-embd branch)
-         (set! norm (LayerNorm n-embd))
-         #:forward (x)
-         (~> x norm branch (+ x)))
-       (define-layer gpt-block (attention mlp)
-         #:init (n-embd n-head)
-         (set! attention
-               (pre-norm-residual n-embd (causal-self-attention n-embd n-head)))
-         (set! mlp (pre-norm-residual n-embd (feed-forward n-embd)))
-         #:forward (x)
-         (~> x attention mlp))
-       (define-layer gpt (tok-emb pos-emb blocks ln-f head)
+       ;; MUST stay in sync with torch/scribblings/examples/06-gpt.rkt's gpt
+       (define-layer gpt (tok-emb pos-emb transformer head)
          #:init (vocab-size block-size)
          (set! tok-emb (Embedding vocab-size 32))
          (set! pos-emb (Embedding block-size 32))
-         (set! blocks (Sequential (gpt-block 32 4) (gpt-block 32 4)))
-         (set! ln-f (LayerNorm 32))
+         (set! transformer (TransformerEncoder 32
+                                               #:heads 4
+                                               #:layers 2
+                                               #:ffn-width 128
+                                               #:activation 'gelu
+                                               #:norm-first? #t
+                                               #:dropout 0.0
+                                               #:batch-first? #t
+                                               #:norm #t))
          (set! head (Linear 32 vocab-size))
          #:forward (idx)
          (with-default-device (tensor-device idx)
-           (define seq-len (cadr (tensor-shape idx)))
-           (define pos (to-dtype (arange seq-len) 'int64))
+           (define pos (to-dtype (arange (cadr (shape idx))) 'int64))
            (~> (add (tok-emb idx) (pos-emb pos))
-               blocks ln-f head)))
+               (transformer #:causal? #t)
+               head)))
        (define text (load-text-fixture))
        (define vocab (text->vocab text))
        (define v-size (vector-length vocab))
        (define block-shapes
-         '((32) (32)
-           (32 32) (32) (32 32) (32)
-           (32 32) (32) (32 32) (32)
-           (32) (32)
-           (128 32) (128) (32 128) (32)))
+         '((32 32) (32) (32 32) (32) (32 32) (32) (32 32) (32)
+           (128 32) (128) (32 128) (32)
+           (32) (32) (32) (32)))
        (check-equal? (map tensor-shape (parameters (gpt v-size 16)))
                      (append (list (list v-size 32) '(16 32))
                              block-shapes block-shapes
                              (list '(32) '(32) (list v-size 32)
                                    (list v-size)))
-                     "gpt shape must match examples/racket/06-gpt.rkt")
+                     "gpt shape must match torch/scribblings/examples/06-gpt.rkt")
        (define (train-on device)
          (with-default-device device
            (manual-seed! 0)
@@ -446,7 +410,7 @@
                               'cuda 5e-3)))
      (let ()
        ;; Re-declared like the gpt above: MUST stay in sync with
-       ;; examples/racket/12-char-rnn.rkt
+       ;; torch/scribblings/examples/12-char-rnn.rkt
        (define-layer char-rnn (embed lstm head)
          #:init (vocab-size)
          (set! embed (Embedding vocab-size 32))
@@ -462,7 +426,7 @@
                      (list (list v-size 32)
                            '(256 32) '(256 64) '(256) '(256)
                            (list v-size 64) (list v-size))
-                     "char-rnn shape must match examples/racket/12-char-rnn.rkt")
+                     "char-rnn shape must match torch/scribblings/examples/12-char-rnn.rkt")
        (define (train-on device)
          (with-default-device device
            (manual-seed! 0)
@@ -489,7 +453,8 @@
          (check-training-twin "12_char_rnn" "python/12_char_rnn.py" train-on
                               'cuda 5e-3)))
      (let ()
-       ;; Re-declared: MUST stay in sync with examples/racket/13-translation.rkt
+       ;; Re-declared: MUST stay in sync with
+       ;; torch/scribblings/examples/13-translation.rkt
        (define hidden 32)
        (define-layer encoder (embed gru)
          #:init (vocab-size)
@@ -552,7 +517,7 @@
                            '(32 32) '(32) '(32 32) '(32) '(1 32) '(1)
                            '(96 64) '(96 32) '(96) '(96)
                            (list v-size hidden) (list v-size))
-                     "seq2seq shape must match examples/racket/13-translation.rkt at #:hidden 32")
+                     "seq2seq shape must match torch/scribblings/examples/13-translation.rkt at #:hidden 32")
        (define (train-on device)
          (with-default-device device
            (manual-seed! 0)
@@ -617,7 +582,8 @@
          (check-training-twin "08_diffusion" "python/08_diffusion.py" train-on
                               'cuda 5e-3)))
      (let ()
-       ;; MUST stay in sync with examples/racket/09-resnet.rkt's run-example
+       ;; MUST stay in sync with torch/scribblings/examples/09-resnet.rkt's
+       ;; run-example
        (define (train-on device)
          (with-default-device device
            (manual-seed! 0)
@@ -645,9 +611,10 @@
          (check-training-twin "09_resnet" "python/09_resnet.py" train-on
                               'cuda 5e-3)))
      (let ()
-       ;; MUST stay in sync with examples/racket/10-dcgan.rkt: the losses
-       ;; are the discriminator's and the generator's per step, interleaved,
-       ;; and the parameters are the generator's then the discriminator's
+       ;; MUST stay in sync with torch/scribblings/examples/10-dcgan.rkt: the
+       ;; losses are the discriminator's and the generator's per step,
+       ;; interleaved, and the parameters are the generator's then the
+       ;; discriminator's
        (define-layer gen-twin (fc bn0 up1 bn1 up2)
          #:init ()
          (set! fc (Linear 100 (* 128 7 7) #:bias? #f))
@@ -709,7 +676,7 @@
          (check-training-twin "10_dcgan" "python/10_dcgan.py" train-on
                               'cuda 5e-3)))
      (let ()
-       ;; MUST stay in sync with examples/racket/11-vae.rkt
+       ;; MUST stay in sync with torch/scribblings/examples/11-vae.rkt
        (define-layer vae-twin (enc mu-head logvar-head dec1 dec2)
          #:init ()
          (set! enc (Linear 784 400))
@@ -1009,7 +976,11 @@
        (for ([a (in-list (tensor->list rg))]
              [b (in-list (hash-ref jg 'values))]
              [i (in-naturals)])
-         (check-= a b tol (format "gelu parity ~a" i))))
+         (check-= a b tol (format "gelu parity ~a" i)))
+       (for ([a (in-list (tensor->list (gelu xg #:approximate 'tanh)))]
+             [b (in-list (hash-ref jg 'tanh))]
+             [i (in-naturals)])
+         (check-= a b tol (format "gelu tanh parity ~a" i))))
      (let ()
        (define jt (python-check "transpose_all.py"))
        (manual-seed! 0)

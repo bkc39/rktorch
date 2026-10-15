@@ -124,10 +124,13 @@ if(BUILD_TESTING)
     tests/torchrkt/generated_tranche5_test.cpp
     tests/torchrkt/generated_tranche6_test.cpp
     tests/torchrkt/generated_tranche7_test.cpp
+    tests/torchrkt/generated_tranche8_test.cpp
     tests/torchrkt/image_test.cpp
     tests/torchrkt/ops_test.cpp
     tests/torchrkt/random_test.cpp
     tests/torchrkt/spectral_test.cpp
+    tests/torchrkt/storage_test.cpp
+    tests/torchrkt/threads_test.cpp
     tests/torchrkt/to_test.cpp
     $<TARGET_OBJECTS:torchrkt_c_api_compile_test>
   )
