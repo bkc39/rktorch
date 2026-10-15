@@ -19,4 +19,5 @@
 ;; `raco test --drdr` defaults to a 90s per-test timeout; the native-backed
 ;; tests get generous headroom so a loaded builder cannot transiently time out.
 (define test-timeouts
-  '(("tests/foreign-test.rkt" 300)))
+  '(("tests/foreign-test.rkt" 300)
+    ("tests/finalizer-thread-test.rkt" 120)))

@@ -62,6 +62,12 @@ outcome bypasses both paths: a C++ throw during storage release
 unwinds through libtorch's own noexcept frames to `std::terminate`
 before any handler can run — `finalizer_death_test.cpp` pins this.
 
+Every finalizer runs on one thread. Racket starts its finalizer thread
+at the process's first registration, and parallel threads that race
+that registration can each start one, so `collector.rkt` registers a
+finalizer as `torch/foreign` is instantiated and the drain below can
+assume the one thread (`finalizer-thread-test.rkt`).
+
 A native fault is the exception to "swallowed and counted". Racket CS reports a
 segfault as an exception whose message begins `invalid memory reference`. One
 arriving at that guard means native memory may already be corrupt: every later
