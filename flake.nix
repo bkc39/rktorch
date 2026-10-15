@@ -50,6 +50,26 @@
            + "(see the flake inputs comment)");
         pkgsRacket.racket;
 
+      # The supported Racket releases, oldest first: the head is the `base`
+      # floor torch/info.rkt declares, which racket-floor checks.
+      racketVersions = [ "9.0" "9.1" "9.2" "9.3" ];
+      # Releases neither pin carries, built from source on the main pin so
+      # every matrix cell shares one glibc and one shim.
+      racketSources = {
+        "9.0" = "04blaz9qbqkw1mf8dicq7567qis9f1vvpjpswsl7siw96w858px0";
+        "9.1" = "0gl3yvj0bn17rm3iq6wzd43gs3a4f22k2rdmb2ks5138hbhxqqhh";
+      };
+      racketFromSource = pkgs: v: pkgs.racket.overrideAttrs {
+        version = v;
+        src = pkgs.fetchurl {
+          url = "https://mirror.racket-lang.org/installers/${v}/racket-${v}-src.tgz";
+          sha256 = racketSources.${v};
+        };
+      };
+
+      racketCell = ./nix/matrix/racket-cell.sh;
+      cudaDriverFarm = ./nix/cuda-driver-farm.sh;
+
       # Source catalog only: a built package's compiled/ belongs to one Racket.
       racketDepsScript = ./nix/racket-deps/racket-deps.rkt;
       racketDepsFor = pkgs: racketPkg:
@@ -152,6 +172,18 @@
             rd check ${fixtures}/versioned "$TMPDIR/fetched-1.3"
             fails rd names ${fixtures}/platform
             grep -q 'extra-lib has #:platform unix; platform-qualified' "$TMPDIR/log"
+            [ "$(rd base-version ${fixtures}/floored)" = 9.0 ]
+            fails rd base-version ${fixtures}/current
+            fails rd base-version ${fixtures}/versioned
+          '';
+          racket-floor = run "torch-rkt-racket-floor" ''
+            mkdir -p "$TMPDIR/info"
+            cp ${./torch/info.rkt} "$TMPDIR/info/info.rkt"
+            floor=$(rd base-version "$TMPDIR/info")
+            if [ "$floor" != ${builtins.head racketVersions} ]; then
+              echo "torch/info.rkt's base floor is $floor; the matrix's oldest Racket is ${builtins.head racketVersions}" >&2
+              exit 1
+            fi
           '';
         };
 
@@ -353,15 +385,16 @@
           # it can find a CUDA toolkit (even though the runtime libs are bundled
           # in the cu130 download), so the cuda variant adds the matching
           # cudaPackages_13 toolkit and points legacy/modern FindCUDA at it.
-          mkCpp = { p, doCheck ? true, cuda ? false }:
+          mkCpp = { p, doCheck ? true, cuda ? false, torch ? torchPackageFor p
+                  , installTests ? false }:
             let cudaTk = p.cudaPackages_13.cudatoolkit;
-            in p.stdenv.mkDerivation {
+            in p.stdenv.mkDerivation ({
               pname = "torchrkt-cpp";
               inherit version doCheck;
               src = ./cpp;
               nativeBuildInputs = [ p.cmake p.clang-tools p.ninja p.pkg-config ]
                 ++ p.lib.optional cuda p.cudaPackages_13.cuda_nvcc;
-              buildInputs = [ (torchPackageFor p) p.gtest p.libsndfile p.stb ]
+              buildInputs = [ torch p.gtest p.libsndfile p.stb ]
                 ++ p.lib.optional cuda cudaTk;
               cmakeFlags = cppCmakeFlags ++ p.lib.optionals cuda [
                 "-DCUDA_TOOLKIT_ROOT_DIR=${cudaTk}"
@@ -377,7 +410,15 @@
                 ctest --output-on-failure
                 runHook postCheck
               '';
-            };
+            } // p.lib.optionalAttrs installTests {
+              # For a host run: the build tree's rpath entry would not survive fixup.
+              postInstall = ''
+                rpath=$(patchelf --print-rpath torchrkt_tests | tr : '\n' \
+                  | grep -v "^$NIX_BUILD_TOP" | paste -sd:)
+                install -Dm755 torchrkt_tests $out/libexec/torchrkt/torchrkt_tests
+                patchelf --set-rpath "$out/lib:$rpath" $out/libexec/torchrkt/torchrkt_tests
+              '';
+            });
           cpp = mkCpp { p = pkgs; };
           cpp-cuda = mkCpp {
             p = pkgsCuda;
@@ -449,90 +490,162 @@
             '';
           };
 
-          # One builder, two Racket versions: `racket` (the 9.3 default from
-          # the scoped pin) and `racket92` (the previous version from the main
-          # pin — the supported floor). Both live in `checks`, so every
-          # `nix flake check` — locally and in each CI cell — exercises both;
-          # racket-deps is shared (the prefetched package sources are
-          # version-independent).
-          mkRacketPackage = pname: racketPkg: pkgs.stdenv.mkDerivation {
-            inherit pname version;
-            src = ./.;
+          # `racket` (the scoped pin's 9.3) and `racket92` (the main pin's)
+          # are in `checks`; the matrix builds every release in racketVersions
+          # with docs. racket-deps is shared: its trees are sources only.
+          mkRacketPackage = { pname, toolchain, shim ? cpp, docs ? false }:
+            pkgs.stdenv.mkDerivation {
+              inherit pname version;
+              src = ./.;
 
-            nativeBuildInputs = [
-              racketPkg
-              pkgs.makeWrapper
-              racket-deps.tests.racket-deps-current
-            ];
-            buildInputs = [ cpp ];
+              nativeBuildInputs = [
+                toolchain
+                pkgs.makeWrapper
+                racket-deps.tests.racket-deps-current
+              ];
+              buildInputs = [ shim ];
 
-            buildPhase = ''
-              runHook preBuild
+              buildPhase = ''
+                runHook preBuild
+                export PLTUSERHOME=$TMPDIR/racket-home
+                bash ${racketCell} install ${shim} ${racket-deps} ${if docs then "docs" else "no-docs"}
+                runHook postBuild
+              '';
 
-              export PLTUSERHOME=$TMPDIR/racket-home
-              export TORCHRKT_NATIVE_LIB_PATH=${cpp}
-              mkdir -p $PLTUSERHOME
+              doCheck = true;
+              checkPhase = ''
+                runHook preCheck
+                bash ${racketCell} test
+                runHook postCheck
+              '';
 
-              # Runtime deps (threading-lib + closure) install offline from
-              # the prefetched source trees; the sandbox has no network.
-              raco pkg install --batch --copy --no-docs --no-setup --scope user \
-                ${racket-deps}/*/
+              installPhase = ''
+                runHook preInstall
 
-              # Stage the native lib so define-runtime-path resolves it during
-              # testing.  libtorch itself is reached via the rpath Nix baked
-              # into libtorchrkt, so it is NOT copied (it is multi-GB).
-              ${stageNativeLibs cpp}
-              [ "$_stage_failed" = 0 ] || exit 1
+                mkdir -p $out/share $out/bin
+                cp -r $PLTUSERHOME $out/share/racket-home
 
-              raco pkg install --batch --deps fail --no-setup --copy --scope user \
-                --name torch ./torch
+                makeWrapper ${toolchain}/bin/racket $out/bin/torch \
+                  --set PLTUSERHOME $out/share/racket-home \
+                  --add-flags "-l torch"
 
-              raco setup --no-docs --pkgs torch
+                runHook postInstall
+              '';
+            };
 
-              runHook postBuild
-            '';
+          # Each release is the version it is listed as: a pin that moves
+          # trips this rather than testing one release twice (#41/#50).
+          racketReleases = pkgs.lib.genAttrs racketVersions (v:
+            let
+              toolchain = { "9.2" = pkgs.racket; "9.3" = racketPkg; }.${v}
+                or (racketFromSource pkgs v);
+            in
+            assert pkgs.lib.assertMsg
+              (pkgs.lib.versions.majorMinor toolchain.version == v)
+              ("racket " + v + ": the toolchain is now " + toolchain.version
+               + "; re-point racketReleases or the floor (see #41/#50)");
+            toolchain);
 
-            doCheck = true;
-            checkPhase = ''
-              runHook preCheck
-              # python-cross-test self-skips when python3 `torch` is absent.
-              raco test ./torch/
-              # Each torch/scribblings/examples/NN-name.rkt is a literate
-              # scribble/lp2 program; its runner + RackUnit checks live in
-              # examples/test/.
-              raco test examples/test/
-              # The benchmark harness's own logic and a seconds-long smoke
-              # pass of every suite; never its numbers.
-              raco test scripts/bench/
-              runHook postCheck
-            '';
-
-            installPhase = ''
-              runHook preInstall
-
-              mkdir -p $out/share $out/bin
-              cp -r $PLTUSERHOME $out/share/racket-home
-
-              makeWrapper ${racketPkg}/bin/racket $out/bin/torch \
-                --set PLTUSERHOME $out/share/racket-home \
-                --add-flags "-l torch"
-
-              runHook postInstall
-            '';
+          racket = mkRacketPackage {
+            pname = "torch-rkt";
+            toolchain = racketReleases."9.3";
+          };
+          racket92 = mkRacketPackage {
+            pname = "torch-rkt-racket92";
+            toolchain = racketReleases."9.2";
           };
 
-          racket = mkRacketPackage "torch-rkt" racketPkg;
-          # The floor check is only meaningful while the main pin actually
-          # carries 9.2: this assertion trips loudly when a main-pin update
-          # moves pkgs.racket, forcing a deliberate new-floor decision
-          # (re-point a scoped input at the old rev, or advance the floor —
-          # see #41/#50) instead of silently testing 9.3 twice.
-          racket92 = assert pkgs.lib.assertMsg
-            (pkgs.lib.versions.majorMinor pkgs.racket.version == "9.2")
-            ("racket92 floor check: the main pin's racket is now "
-             + pkgs.racket.version
-             + ", not 9.2 — re-point the supported floor (see #41/#50)");
-            mkRacketPackage "torch-rkt-racket92" pkgs.racket;
+          # The newest libtorch nixpkgs itself carries; its cells skip while it
+          # is older than the floor the pinned zip sets.
+          cachedTorch = pkgs.lib.last (pkgs.lib.sort
+            (a: b: pkgs.lib.versionOlder a.version b.version)
+            [ pkgs.libtorch-bin pkgs.python314Packages.torch ]);
+          cachedTorchSkip =
+            if pkgs.lib.versionAtLeast cachedTorch.version libtorchVersion then null
+            else cachedTorch.version + " < floor "
+              + pkgs.lib.versions.majorMinor libtorchVersion;
+
+          cppCudaTests = mkCpp {
+            p = pkgsCuda;
+            doCheck = false;
+            cuda = true;
+            installTests = true;
+          };
+          cudaCell = pkgs.writeShellApplication {
+            name = "torch-matrix-cuda-cell";
+            runtimeInputs = [ racketReleases."9.3" ] ++ pkgs.stdenv.initialPath;
+            inheritPath = false;
+            runtimeEnv = {
+              CELL_SRC = "${./.}";
+              CELL_SHIM = "${cppCudaTests}";
+              CELL_DEPS = "${racket-deps}";
+              CELL_CUDNN = "${pkgs.lib.getLib (cudnnFor pkgsCuda)}/lib";
+              CELL_RACKET_CELL = "${racketCell}";
+              CELL_DRIVER_FARM = "${cudaDriverFarm}";
+            };
+            text = builtins.readFile ./nix/matrix/cuda-cell.sh;
+          };
+
+          # A row per cell; steps name .drv files, so evaluating the matrix
+          # builds nothing and one cell's failure leaves the others to run.
+          matrixRow = { racket, libtorch, skip ? null, steps ? [ ] }:
+            let
+              step = s: s.label + "="
+                + builtins.unsafeDiscardOutputDependency s.drv.drvPath;
+              rest = if skip != null then [ "skip" skip ] else [
+                "build"
+                (pkgs.lib.concatMapStringsSep " " step steps)
+              ];
+            in
+            pkgs.lib.concatStringsSep "\t" ([ racket libtorch "nix" ] ++ rest) + "\n";
+          cpuRows = libtorch: shim: skip: map
+            (v: matrixRow {
+              racket = v;
+              inherit libtorch skip;
+              steps = [
+                { label = "shim"; drv = shim; }
+                { label = "toolchain"; drv = racketReleases.${v}; }
+                {
+                  label = "cell";
+                  drv = mkRacketPackage {
+                    pname = "torch-rkt-matrix-racket${v}";
+                    toolchain = racketReleases.${v};
+                    inherit shim;
+                    docs = true;
+                  };
+                }
+              ];
+            })
+            racketVersions;
+          matrixCells = pkgs.writeText "torch-matrix-${system}.tsv"
+            (pkgs.lib.concatStrings (
+              cpuRows "zip ${libtorchVersion}" cpp null
+              ++ cpuRows "nixpkgs ${cachedTorch.version}"
+                (mkCpp { p = pkgs; torch = cachedTorch; })
+                cachedTorchSkip
+              ++ pkgs.lib.optional pkgs.stdenv.isLinux (matrixRow {
+                racket = "9.3";
+                libtorch = "zip ${libtorchVersion} cu130";
+                steps = [
+                  { label = "shim"; drv = cppCudaTests; }
+                  { label = "toolchain"; drv = racketReleases."9.3"; }
+                  { label = "run"; drv = cudaCell; }
+                ];
+              })));
+          matrix = pkgs.writeShellApplication {
+            name = "torch-matrix";
+            runtimeInputs = [ pkgs.coreutils pkgs.gawk pkgs.gnugrep pkgs.gnused ];
+            runtimeEnv = {
+              MATRIX_SYSTEM = system;
+              MATRIX_CELLS = "${matrixCells}";
+            };
+            text = builtins.readFile ./nix/matrix/run.sh;
+            passthru.cells = matrixCells;
+          };
+
+          # The pinned CPU zip, unpacked and unmodified, for builds outside
+          # Nix (#279); the `libtorchZips` output carries its url and hash.
+          libtorch-zip = pkgs.fetchzip libtorchZips."${system}-cpu";
 
           copy-native-libs = pkgs.writeShellApplication {
             name = "copy-native-libs";
@@ -569,8 +682,9 @@
         in
         {
           default = racket;
-          inherit cpp cpp-format cpp-line-count cpp-tidy racket
-            racket92 racket-deps racket-linters codegen copy-native-libs;
+          inherit cpp cpp-format cpp-line-count cpp-tidy racket racket92
+            racket-deps racket-linters codegen copy-native-libs matrix
+            libtorch-zip;
         }
         // pkgs.lib.optionalAttrs pkgs.stdenv.isLinux {
           # The CUDA libtorch-bin has no darwin download, so even evaluating
@@ -587,12 +701,26 @@
           type = "app";
           program = "${self.packages.${system}.copy-native-libs}/bin/copy-native-libs";
         };
+        matrix = {
+          type = "app";
+          program = "${self.packages.${system}.matrix}/bin/torch-matrix";
+        };
       });
 
-      checks = forAllSystems (system: {
-        inherit (self.packages.${system})
-          cpp cpp-format cpp-line-count cpp-tidy racket racket92;
-      } // self.packages.${system}.racket-deps.tests);
+      # The pinned libtorch downloads (#279); `hash` is fetchzip's, over the
+      # unpacked tree that `packages.<system>.libtorch-zip` builds.
+      inherit libtorchZips;
+
+      checks = forAllSystems (system:
+        let pkgs = import nixpkgs { inherit system; };
+        in {
+          inherit (self.packages.${system})
+            cpp cpp-format cpp-line-count cpp-tidy racket racket92;
+          matrix-runner-test = pkgs.runCommand "torch-matrix-runner-test" { } ''
+            bash ${./nix/matrix/run-test.sh} ${./nix/matrix/run.sh}
+            mkdir $out
+          '';
+        } // self.packages.${system}.racket-deps.tests);
 
       devShells = forAllSystems (system:
         let
@@ -778,18 +906,7 @@
           cudaHook = ''
             echo "Staging host NVIDIA driver farm..."
             _drv_farm="$PWD/.cuda-driver"
-            rm -rf "$_drv_farm"; mkdir -p "$_drv_farm"
-            for _l in libcuda.so.1 libnvidia-ml.so.1 libnvidia-ptxjitcompiler.so.1; do
-              # Match the lib name as a fixed string (its dots are ERE
-              # metacharacters), then take the path field of that ldconfig line.
-              _p=$(/sbin/ldconfig -p 2>/dev/null \
-                | grep -F "$_l" | grep -oE '/[^ ]+' | head -1)
-              if [ -n "$_p" ]; then
-                ln -sf "$_p" "$_drv_farm/$_l"
-              else
-                echo "WARNING: $_l not found via ldconfig; CUDA calls may fail" >&2
-              fi
-            done
+            bash ${cudaDriverFarm} "$_drv_farm"
             # Driver farm first (host libcuda), then the cuDNN lib dir — conv/pool
             # dlopen libcudnn_*.so.9 by soname, and the autoAddDriverRunpath
             # doesn't cover that. (matmul and friends work without it; only the

@@ -33,14 +33,17 @@
 (define (platform-dep? dep)
   (and (dep-option dep '#:platform) #t))
 
-(define/contract (catalog-deps info-dir)
-  (-> directory-exists? list?)
+(define (info-deps info-dir)
   (define info
     (or (get-info/full info-dir)
         (raise-user-error 'racket-deps "no info.rkt in ~a" info-dir)))
+  (append (info 'deps (λ () '())) (info 'build-deps (λ () '()))))
+
+(define/contract (catalog-deps info-dir)
+  (-> directory-exists? list?)
   (define have (installed-pkg-names #:scope 'installation))
   (define wanted
-    (for/list ([dep (append (info 'deps (λ () '())) (info 'build-deps (λ () '())))]
+    (for/list ([dep (info-deps info-dir)]
                #:unless (member (dep-name dep) have))
       dep))
   (define deps (sort (remove-duplicates wanted) string<? #:key dep->string))
@@ -88,6 +91,12 @@
                        (string-join declared " ")
                        (string-join built " "))]))
 
+(define/contract (base-version info-dir)
+  (-> directory-exists? string?)
+  (define base (findf (λ (dep) (equal? (dep-name dep) "base")) (info-deps info-dir)))
+  (or (and base (dep-option base '#:version))
+      (raise-user-error 'racket-deps "~a declares no (\"base\" #:version ...) floor" info-dir)))
+
 (define (build-output? p)
   (or (link-exists? p)
       (equal? (file-name-from-path p) (string->path "compiled"))
@@ -109,6 +118,7 @@
      (for-each (λ (dep) (displayln (dep->string dep))) (catalog-deps info-dir))]
     [(vector "names" info-dir)
      (for-each (λ (dep) (displayln (dep-name dep))) (catalog-deps info-dir))]
+    [(vector "base-version" info-dir) (displayln (base-version info-dir))]
     [(vector "installed")
      (for-each displayln (installed-pkg-names #:scope 'user))]
     [(vector "check" info-dir deps-dir) (check-current info-dir deps-dir)]
@@ -117,7 +127,7 @@
      (raise-user-error
       'racket-deps
       (string-append
-       "usage: manifest <info-dir> | names <info-dir> | installed\n"
+       "usage: manifest <info-dir> | names <info-dir> | base-version <info-dir> | installed\n"
        "     | check <info-dir> <deps-dir> | guard <tree>\n"
        "got ~s")
       args)]))
