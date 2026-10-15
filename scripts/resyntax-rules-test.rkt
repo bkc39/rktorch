@@ -287,6 +287,26 @@
                 '(define-runtime-path here ".")
                 '(>= (tensor (list 1 2 3)) 2))))
 
+    (test-case "a module re-exporting racket/runtime-path keeps it whole"
+      (check-suite-refactors
+       (program '(require racket/runtime-path torch)
+                '(provide (all-from-out racket/runtime-path))
+                '(ge (tensor (list 1 2 3)) 2))
+       (program '(require racket/runtime-path torch)
+                '(provide (all-from-out racket/runtime-path))
+                '(>= (tensor (list 1 2 3)) 2))))
+
+    (test-case "a local binding named like another racket/runtime-path form keeps it whole"
+      (check-suite-refactors
+       (program '(require racket/runtime-path torch)
+                '(define runtime-paths 1)
+                '(define-runtime-path here ".")
+                '(ge (tensor (list 1 2 3)) 2))
+       (program '(require racket/runtime-path torch)
+                '(define runtime-paths 1)
+                '(define-runtime-path here ".")
+                '(>= (tensor (list 1 2 3)) 2))))
+
     (test-case "an only-in racket/runtime-path stays"
       (check-suite-does-not-refactor
        (program '(require (only-in racket/runtime-path #%datum define-runtime-path))
