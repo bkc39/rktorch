@@ -6,6 +6,7 @@
            (only-in racket/list drop)
            (only-in racket/math nan?)
            rackunit
+           (only-in "../foreign/ops.rkt" dtype-symbols)
            "../main.rkt")
 
   (test-case "creation goldens"
@@ -52,6 +53,22 @@
     (check-true (nan? (item (full +nan.0 '() #:dtype 'float16))))
     (check-equal? (tensor->list (full 65504 1 #:dtype 'float16)) '(65504.0))
     (check-equal? (contract-name (fill-value/c 'float32)) 'float32-fill-value)
+    (check-equal? (contract-name (fill-value/c)) 'float32-fill-value)
+    (for ([dtype (in-list dtype-symbols)])
+      (check-exn (regexp (format "^full: contract violation.* ~a fill value"
+                                 dtype))
+                 (lambda () (full (expt 2 1024) 1 #:dtype dtype))
+                 (format "~a is judged by its own range" dtype)))
+    (check-exn #rx"^full-like: contract violation.*float32 fill value.*blaming"
+               (lambda () (full-like (zeros 2) 1e300)))
+    (check-exn #rx"^full-like: contract violation.*uint8 fill value"
+               (lambda () (full-like (zeros 2) 300 #:dtype 'uint8)))
+    (check-equal? (tensor->list (full-like (zeros 2 #:dtype 'uint8) 1e300
+                                           #:dtype 'float64))
+                  '(1e300 1e300))
+    (check-equal? (tensor->list (full-like (zeros 1 #:dtype 'int64)
+                                           (add1 (expt 2 60))))
+                  (list (add1 (expt 2 60))))
     (check-equal? (tensor-dtype (zeros 2 #:dtype 'float16)) 'float16)
     (check-equal? (tensor-dtype (ones 2 #:dtype 'bfloat16)) 'bfloat16)
     (check-exn exn:fail:contract? (lambda () (zeros 2 #:dtype 'float8)))

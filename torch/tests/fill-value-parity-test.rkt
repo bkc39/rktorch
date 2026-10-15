@@ -2,50 +2,55 @@
 
 (module+ test
   (require (only-in racket/contract/base flat-contract-predicate)
-           (only-in racket/match match-define)
-           (only-in racket/math infinite? nan?)
-           (only-in rackunit check-equal? check-exn check-true)
+           (only-in rackunit check-equal? check-exn check-not-false)
+           (only-in "../foreign/ops.rkt" float-dtype-max)
            (only-in "../main.rkt" fill-value/c full item)
            "private/python-env.rkt")
 
-  (define float-max
-    (hasheq 'float16 65504.0
-            'bfloat16 3.3895313892515355e38
-            'float32 3.4028234663852886e38
-            'float64 1.7976931348623157e308))
+  (define documented-deviations
+    (hasheq 'float16 '("rounds")
+            'bfloat16 '("rounds")
+            'float32 '()
+            'float64 '()
+            'int64 '("truncates")
+            'uint8 '("truncates" "wraps")
+            'bool '("any-real-bool")))
 
-  (define (read-value s) (read (open-input-string s)))
-
-  (define (documented-stricter? dtype v)
-    (case dtype
-      [(float16 bfloat16)
-       (not (or (nan? v) (infinite? v)
-                (<= (abs v) (hash-ref float-max dtype))))]
-      [(float32 float64) #f]
-      [(uint8) (or (not (integer? v)) (negative? v))]
-      [(bool) (not (and (integer? v) (<= 0 v 1)))]
-      [else (not (integer? v))]))
+  (define (probe-row dtype row)
+    (define text (hash-ref row 'value))
+    (define v (string->number text))
+    (define fills (hash-ref row 'fills #f))
+    (define deviation (and (string? (hash-ref row 'deviation #f))
+                           (hash-ref row 'deviation)))
+    (define label (format "(full ~a 1 #:dtype '~a)" text dtype))
+    (define ours? ((flat-contract-predicate (fill-value/c dtype)) v))
+    (check-equal? ours? (and fills (not deviation) #t)
+                  (format "~a: accepted exactly where torch.full fills as asked"
+                          label))
+    (cond
+      [ours?
+       (check-equal? (item (full v 1 #:dtype dtype)) (string->number fills)
+                     (format "~a fills what torch.full fills" label))]
+      [else
+       (check-exn #rx"^full: contract violation"
+                  (lambda () (full v 1 #:dtype dtype))
+                  (format "~a blames the caller" label))])
+    (check-not-false (or (not deviation)
+                         (member deviation
+                                 (hash-ref documented-deviations dtype)))
+                     (format "~a: torch.full ~a, undocumented at ~a"
+                             label deviation dtype)))
 
   (cond
     [(not (python-torch-available?))
      (printf "[fill-value-parity-test] skipped: python3 `torch` not available ~a\n"
              "(run inside the default `nix develop`)")]
     [else
-     (for* ([(dtype probes) (in-hash (python-check "fill_value_ranges.py"))]
-            [probe (in-list probes)])
-       (match-define (list text theirs) probe)
-       (define v (read-value text))
-       (define label (format "(full ~a 1 #:dtype '~a)" text dtype))
-       (define ours? ((flat-contract-predicate (fill-value/c dtype)) v))
-       (cond
-         [ours?
-          (check-equal? (item (full v 1 #:dtype dtype)) (read-value theirs)
-                        (format "~a fills what torch.full fills" label))]
-         [else
-          (check-exn #rx"^full: contract violation"
-                     (lambda () (full v 1 #:dtype dtype))
-                     (format "~a blames the caller" label))
-          (check-true (or (equal? theirs "refused")
-                          (documented-stricter? dtype v))
-                      (format "~a refused where torch.full gives ~a"
-                              label theirs))]))]))
+     (define j (python-check "fill_value_ranges.py"))
+     (check-equal? float-dtype-max
+                   (for/hasheq ([(dtype m) (in-hash (hash-ref j 'max))])
+                     (values dtype (string->number m)))
+                   "each float dtype's limit is torch.finfo(dtype).max")
+     (for* ([(dtype rows) (in-hash (hash-ref j 'probes))]
+            [row (in-list rows)])
+       (probe-row dtype row))]))

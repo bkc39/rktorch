@@ -238,6 +238,7 @@ TEST(TorchrktCreationOn, FullI64IsExactPastTwoToTheFiftyThree) {
   }
   EXPECT_EQ(tr_full_i64_on(nullptr, 1, 1, TR_DEVICE_KEEP, 0, TR_DTYPE_INT64),
             nullptr);
+  EXPECT_NE(std::strstr(tr_last_error(), "tr_full_i64_on"), nullptr);
 }
 
 TEST(TorchrktCreationOn, ArangeEyeAndRandomTakeOptions) {

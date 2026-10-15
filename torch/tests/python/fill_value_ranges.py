@@ -1,16 +1,17 @@
-"""torch.full at each dtype's boundary: what it fills, or that it refuses.
+"""torch.full at each dtype's range edges: what it fills, or that it refuses.
 
-Values travel as Racket-readable strings, so infinities, NaN and integers
-past 2^53 survive the JSON; a bool fill reads back as rktorch's item does,
+Each probe records the fill, "refused", or the documented deviation the
+fill shows: "truncates" a fractional integer fill, "wraps" an out-of-range
+uint8, "any-real-bool" a bool from anything but 0 or 1, "rounds" a finite
+half-precision value past the largest finite one. Values travel as
+Racket-readable strings, because JSON carries neither NaN, the infinities
+nor -0.0 through read-json; a bool fill reads back as rktorch's item does,
 0.0 or 1.0.
 """
 import json
 import math
-import random
 
 import torch
-
-random.seed(284)
 
 
 def rkt(v):
@@ -23,52 +24,58 @@ def rkt(v):
     return repr(v)
 
 
-def steps(x, n, direction):
-    out = []
-    for _ in range(n):
-        x = math.nextafter(x, direction)
-        out.append(x)
-    return out
-
-
 def float_probes(dtype):
     top = float(torch.finfo(dtype).max)
     below = torch.nextafter(torch.tensor(top, dtype=dtype),
                             torch.tensor(0.0, dtype=dtype)).item()
     rounding_edge = top + (top - below) / 2
-    jitter = (top * random.uniform(0.999, 1.001) for _ in range(16))
-    near = [top, below, rounding_edge]
-    near += steps(top, 3, 0.0) + steps(top, 3, math.inf)
-    near += steps(rounding_edge, 2, 0.0) + steps(rounding_edge, 2, math.inf)
-    near += [v for v in jitter if math.isfinite(v)]
+    near = [top, below, math.nextafter(top, math.inf), rounding_edge,
+            math.nextafter(rounding_edge, 0.0),
+            math.nextafter(rounding_edge, math.inf)]
     return [s * v for v in near for s in (1, -1)] + [
         math.inf, -math.inf, math.nan, 0.0, -0.0, 1e-50]
 
 
 def int_probes(lo, hi):
-    edges = [lo + k for k in range(-2, 3)] + [hi + k for k in range(-2, 3)]
+    edges = [lo - 1, lo, lo + 1, hi - 1, hi, hi + 1]
     return edges + [0.5, -0.5, float(lo), math.inf, -math.inf, math.nan]
 
 
+FLOATS = ("float16", "bfloat16", "float32", "float64")
+
 PROBES = {
-    "float16": float_probes(torch.float16),
-    "bfloat16": float_probes(torch.bfloat16),
-    "float32": float_probes(torch.float32),
-    "float64": float_probes(torch.float64) + [2**1024, -(2**1024)],
-    "int64": int_probes(-2**63, 2**63 - 1)
-    + [2**53 + k for k in range(-2, 3)] + [-(2**53) - 1],
-    "uint8": int_probes(0, 255),
-    "bool": int_probes(0, 1) + [2, -1],
+    **{d: float_probes(getattr(torch, d)) for d in FLOATS},
+    "int64": int_probes(-2**63, 2**63 - 1) + [2**53 + 1, -(2**53) - 1],
+    "uint8": int_probes(0, 255) + [-2],
+    "bool": int_probes(0, 1),
 }
+PROBES["float64"] += [2**1024, -(2**1024)]
+
+
+def deviation(v, out, dtype):
+    if dtype in FLOATS:
+        past = math.isfinite(v) and abs(v) > torch.finfo(
+            getattr(torch, dtype)).max
+        return "rounds" if past else None
+    if out == v:
+        return None
+    if dtype == "bool":
+        return "any-real-bool"
+    return "wraps" if v == int(v) else "truncates"
 
 
 def fill(v, dtype):
     try:
-        out = torch.full((1,), v, dtype=getattr(torch, dtype))
+        t = torch.full((1,), v, dtype=getattr(torch, dtype))
     except (RuntimeError, OverflowError):
-        return "refused"
-    return rkt(out.float().item() if dtype == "bool" else out.item())
+        return {"value": rkt(v), "refused": True}
+    out = t.float().item() if dtype == "bool" else t.item()
+    return {"value": rkt(v), "fills": rkt(out),
+            "deviation": deviation(v, out, dtype)}
 
 
-print(json.dumps({d: [[rkt(v), fill(v, d)] for v in vs]
-                  for d, vs in PROBES.items()}))
+print(json.dumps({
+    "max": {d: rkt(float(torch.finfo(getattr(torch, d)).max))
+            for d in FLOATS},
+    "probes": {d: [fill(v, d) for v in vs] for d, vs in PROBES.items()},
+}))
