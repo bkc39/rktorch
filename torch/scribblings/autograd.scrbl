@@ -1,14 +1,7 @@
 #lang scribble/manual
 
 @(require "common.rkt"
-          (for-label racket/base
-                     racket/contract
-                     (only-in torch
-                              backward! detach grad grad-enabled? has-grad?
-                              maybe-grad mul native-collect-at-troughs
-                              requires-grad! requires-grad? sum tensor tensor?
-                              with-no-grad)
-                     (only-in torch/nn zero-grads!)))
+          torch/scribblings/labels)
 
 @title{Automatic differentiation}
 
@@ -93,7 +86,7 @@ updates a leaf that requires a gradient, such as the image a style
 transfer optimises, without recording the write.
 
 @torch-examples[
-(define t (zeros 3))
-(copy! t (tensor '(1.0 2.0 3.0)))
-(tensor->list t)
+(define x (zeros 3))
+(copy! x (tensor '(1.0 2.0 3.0)))
+(tensor->list x)
 ]}

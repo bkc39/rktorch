@@ -6,7 +6,7 @@
            (only-in racket/file make-temporary-file)
            "../main.rkt"
            "../nn.rkt"
-           (only-in "../data/mnist.rkt" load-mnist-fixture))
+           (only-in "../vision/mnist.rkt" load-mnist-fixture))
 
   ;; fc in-features: 28-3+1 = 26 after conv, /2 = 13 after pool, 8*13*13 = 1352
   (define-layer convnet (c1 fc)

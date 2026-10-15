@@ -185,7 +185,7 @@ what each verdict means. The table goes in the top pull request's packet.
 - **Modules target ≤ 500 lines.** Split by family rather than fighting it.
 - **Shadowing racket/base** (`exp log sqrt max min + - * /` …) means the new
   op must dispatch: tensors to libtorch, everything else to the original, so
-  `(require torch)` never breaks numeric code. Scribble examples then need
-  `(for-label (except-in racket/base ...))`.
+  `(require torch)` never breaks numeric code. Scribble documentation
+  requires `torch/scribblings/labels` for its `for-label` bindings.
 - **Comments** explain a constraint the code cannot show. Usage documentation
   belongs in Scribble; narration and review archaeology get deleted.

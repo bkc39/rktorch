@@ -2,7 +2,8 @@
 
 (require (only-in racket/math exact-floor))
 
-(provide margin-over
+(provide default-memory-fraction
+         margin-over
          memory-fraction-from-env
          memory-limit-from-env
          native-collect-at-troughs
@@ -35,7 +36,11 @@
   (setting-from-env "RKTORCH_MEMORY_LIMIT" mib->bytes #f "a positive number of MiB"))
 
 (define (memory-fraction-from-env)
-  (setting-from-env "RKTORCH_MEMORY_FRACTION" fraction 4/5 "a number in (0, 1]"))
+  (setting-from-env "RKTORCH_MEMORY_FRACTION" fraction #f "a number in (0, 1]"))
+
+;; MPS's capacity is a share of the host's own RAM, so its mark sits lower
+(define (default-memory-fraction type)
+  (if (eq? type 'mps) 1/2 4/5))
 
 (define native-memory-limit (make-parameter (memory-limit-from-env)))
 (define native-memory-fraction (make-parameter (memory-fraction-from-env)))

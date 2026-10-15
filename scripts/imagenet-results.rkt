@@ -1,8 +1,9 @@
 #lang racket/base
 
 ;; Regenerates torch/scribblings/results/imagenet-top5.rktd, the table the
-;; guide's pretrained chapter shows: examples/racket/14-imagenet.rkt's
-;; ResNet-18 on the committed photographs.
+;; guide's pretrained chapter shows:
+;; torch/scribblings/examples/14-imagenet.rkt's ResNet-18 on the committed
+;; photographs.
 ;;
 ;;   nix develop .#cuda --command racket scripts/imagenet-results.rkt
 
@@ -11,8 +12,8 @@
          (only-in racket/pretty pretty-write)
          racket/runtime-path
          torch
-         (only-in torch/vision/weights pretrained-weights)
-         "../examples/racket/14-imagenet.rkt")
+         torch/scribblings/examples/14-imagenet
+         (only-in torch/vision/weights pretrained-weights))
 
 (define-runtime-path photos-dir "../torch/vision/fixtures/hymenoptera")
 (define-runtime-path out "../torch/scribblings/results/imagenet-top5.rktd")
