@@ -15,10 +15,12 @@
 
 (provide dtype-code->symbol
          tr-tensor-copy-data-f64/raw
+         tr-tensor-data-ptr/raw
          tr-tensor-narrow/raw
          tr-tensor-numel/raw
          tr-tensor-ndim/raw
          tr-tensor-shape/raw
+         tr-tensor-storage-ptr/raw
          tr-tensor-copy-data-i64/raw
          tr-tensor-copy-data-u8/raw
          tr-tensor-copy-bytes/raw
@@ -35,6 +37,20 @@
         -> (rc : _int)
         -> (values rc out))
   #:c-id tr_tensor_numel)
+
+(define-torch tr-tensor-data-ptr/raw
+  (_fun (t : _Tensor)
+        (out : (_ptr o _uint64))
+        -> (rc : _int)
+        -> (values rc out))
+  #:c-id tr_tensor_data_ptr)
+
+(define-torch tr-tensor-storage-ptr/raw
+  (_fun (t : _Tensor)
+        (out : (_ptr o _uint64))
+        -> (rc : _int)
+        -> (values rc out))
+  #:c-id tr_tensor_storage_ptr)
 
 (define-torch tr-tensor-ndim/raw
   (_fun (t : _Tensor)
