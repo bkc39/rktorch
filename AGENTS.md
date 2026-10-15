@@ -441,6 +441,8 @@ raco test examples/test/     # literate-example runners
 racket -ie "(require torch)"   # REPL with the package loaded
                                # (`racket -l torch` runs module+ main instead)
 
+racket scripts/bench/run.rkt micro      # benchmarks, never a gate (#253):
+                               # docs/benchmarks/README.md
 racket scripts/coverage.rkt --changed   # expression coverage (#173); exits
                                # non-zero below the floor and lists the lines
                                # of the files you touched that no test reaches
@@ -798,7 +800,7 @@ used.  (`resyntax`, the CI gate, is unaffected.)
 
 ### What the strategies cost
 
-`scripts/bench-contract-overhead.rkt`, lab host, rounded.  The tensor
+`racket scripts/bench/run.rkt contracts`, lab host, rounded.  The tensor
 columns are noisy: the 8x8 `add` baseline moves ~20% between runs, enough
 that its 1.0x-1.1x rows should be read as "lost in the noise" rather than
 as a measured overhead.  Every callee is imported from its defining

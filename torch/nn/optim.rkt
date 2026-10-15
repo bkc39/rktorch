@@ -7,7 +7,8 @@
          (only-in "../foreign.rkt"
                   add addcdiv! addcmul! copy! device dtype full maybe-grad mul
                   mul! sqrt sub! tensor? to with-no-grad zero-grad! zeros-like)
-         (only-in "../private/contract.rkt" define/contract-out))
+         (only-in "../private/contract.rkt" define/contract-out)
+         (only-in "../private/step-log.rkt" log-optimizer-step!))
 
 (provide gen:optimizer
          optimizer?
@@ -208,7 +209,9 @@
 
 (define/contract-out (step! opt) ;; noqa
   (-> optimizer? void?)
-  (optimizer-step! opt))
+  (optimizer-step! opt)
+  (when (or (sgd? opt) (adam? opt) (rmsprop? opt))
+    (log-optimizer-step! opt (optimizer-parameters opt))))
 
 (define/contract-out (zero-grads! opt) ;; noqa
   (-> optimizer? void?)
