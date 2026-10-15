@@ -317,8 +317,7 @@ case_guard() {
   grep -Eq 'pass \(free memory unread, guard off\)$' "$t/table" || { echo "run-test: $case: no unread note" >&2; cat "$t/table" >&2; exit 1; }
 }
 
-cuda_cell() {
-  [ -r /proc/loadavg ] || return 0
+cuda_stubs() {
   rm -rf "$t/cuda"
   mkdir -p "$t/cuda/shim/libexec/torchrkt" "$t/cuda/tmp"
   cat >"$t/cuda/shim/libexec/torchrkt/torchrkt_tests" <<EOF
@@ -327,22 +326,28 @@ $1
 echo \$\$ >"$t/cuda/gtests.pid"
 exec sleep 300
 EOF
-  cat >"$t/cuda/farm" <<'EOF'
-mkdir -p "$1"
+  cat >"$t/cuda/farm" <<EOF
+touch "$t/cuda/farm.ran"
+mkdir -p "\$1"
 EOF
   chmod +x "$t/cuda/shim/libexec/torchrkt/torchrkt_tests"
-  local started pid
-  TMPDIR="$t/cuda/tmp" MATRIX_MIN_FREE_GB=0 CELL_SRC=/nonexistent CELL_SHIM="$t/cuda/shim" \
+}
+
+run_cell() {
+  TMPDIR="$t/cuda/tmp" MATRIX_MIN_FREE_GB=0 MATRIX_MAX_LOAD="${MATRIX_MAX_LOAD:-1000000}" \
+    CELL_SRC=/nonexistent CELL_SHIM="$t/cuda/shim" \
     CELL_DEPS=/nonexistent CELL_CUDNN=/nonexistent CELL_RACKET_CELL=/nonexistent \
     CELL_DRIVER_FARM="$t/cuda/farm" \
-    timeout -k 20 60 bash -euo pipefail "$cell" >"$t/table" 2>"$t/err" &
+    exec timeout -k 20 60 bash -euo pipefail "$cell" >"$t/table" 2>"$t/err"
+}
+
+cuda_cell() {
+  [ -r /proc/loadavg ] || return 0
+  cuda_stubs "$1"
+  local started pid
+  run_cell &
   pid=$!
   until [ -s "$t/cuda/gtests.pid" ] || ! alive "$pid"; do sleep 0.1; done
-  if grep -q '^matrix-skip: load' "$t/table"; then
-    wait "$pid" || true
-    echo "run-test: $case: skipped, the host is loaded" >&2
-    return 0
-  fi
   [ -s "$t/cuda/gtests.pid" ] || {
     echo "run-test: $case: gtests never started" >&2
     cat "$t/table" "$t/err" >&2
@@ -373,6 +378,19 @@ case_cuda_cell_linger() {
   cuda_cell "( sleep 0.2 & echo \$! >\"$t/cuda/zombie.pid\"; exec timeout 8 sleep 8 ) &
 echo \$! >\"$t/cuda/linger.pid\"
 sleep 0.5" 2500
+}
+
+case_cuda_cell_load() {
+  [ -r /proc/loadavg ] || return 0
+  cuda_stubs ''
+  MATRIX_MAX_LOAD=0 run_cell &
+  status=0
+  wait "$!" || status=$?
+  status_is 77
+  expect '^matrix-skip: load [0-9.]+ >= 0 cores$'
+  [ ! -e "$t/cuda/farm.ran" ] && [ ! -e "$t/cuda/gtests.pid" ] \
+    || { echo "run-test: $case: a step ran past the load guard" >&2; exit 1; }
+  [ -z "$(ls -A "$t/cuda/tmp")" ] || { echo "run-test: $case: the guard made a work dir" >&2; exit 1; }
 }
 
 case_zombie() {
@@ -452,7 +470,7 @@ EOF
 
 cases=("$@")
 [ "${#cases[@]}" -gt 0 ] || cases=(rows no_match failure_line interrupt interrupt_deaf terminate deadline linger guard
-    cuda_cell cuda_cell_deaf cuda_cell_linger zombie driver_farm)
+    cuda_cell cuda_cell_deaf cuda_cell_linger cuda_cell_load zombie driver_farm)
 for case in "${cases[@]}"; do
   "case_$case"
   echo "run-test: $case ok"

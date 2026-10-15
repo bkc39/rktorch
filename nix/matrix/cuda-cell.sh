@@ -6,10 +6,10 @@ skip() {
 min_free=${MATRIX_MIN_FREE_GB:-30}
 free_gb=$(awk '/^MemAvailable:/ { print int($2 / 1048576) }' /proc/meminfo)
 load=$(cut -d' ' -f1 /proc/loadavg)
-cores=$(nproc)
+max_load=${MATRIX_MAX_LOAD:-$(nproc)}
 [ "$free_gb" -ge "$min_free" ] || skip "${free_gb} GB available < ${min_free}"
-awk -v l="$load" -v c="$cores" 'BEGIN { exit !(l < c) }' \
-  || skip "load ${load} >= ${cores} cores"
+awk -v l="$load" -v c="$max_load" 'BEGIN { exit !(l < c) }' \
+  || skip "load ${load} >= ${max_load} cores"
 
 set -m
 work=$(mktemp -d -t torch-matrix-cuda.XXXXXX)
