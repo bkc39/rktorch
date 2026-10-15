@@ -177,6 +177,27 @@ case_failure_line() {
   expect "$(row '9\.3 +toollog' "fail \(toolchain\): error: Cannot build '/nix/store/bbbb-racket-9\.1\.drv'\.")"
 }
 
+state() {
+  local stat
+  if [ -r /proc/self/stat ]; then
+    { read -r stat <"/proc/$1/stat"; } 2>/dev/null || return 1
+    stat=${stat##*") "}
+  else
+    stat=$(ps -o stat= -p "$1" 2>/dev/null) || return 1
+    stat=${stat#"${stat%%[! ]*}"}
+  fi
+  echo "${stat:0:1}"
+}
+
+alive() {
+  local s
+  if [ -r /proc/self/stat ] || command -v ps >/dev/null; then
+    s=$(state "$1") && [ -n "$s" ] && [ "$s" != Z ]
+  else
+    kill -0 "$1" 2>/dev/null
+  fi
+}
+
 await_hang() {
   local tries=0
   until [ -s "$t/hang.pid" ]; do
@@ -191,7 +212,7 @@ await_hang() {
 hang_gone() {
   local started=$1 hung=$2
   [ $((SECONDS - started)) -le 10 ] || { echo "run-test: $case: took $((SECONDS - started))s" >&2; exit 1; }
-  if kill -0 "$hang" 2>/dev/null; then
+  if alive "$hang"; then
     echo "run-test: $case: the running step $hang outlived the runner" >&2
     exit 1
   fi
@@ -286,7 +307,7 @@ EOF
     CELL_DRIVER_FARM="$t/cuda/farm" \
     timeout -k 20 60 bash -euo pipefail "$cell" >"$t/table" 2>"$t/err" &
   pid=$!
-  until [ -s "$t/cuda/gtests.pid" ] || ! kill -0 "$pid" 2>/dev/null; do sleep 0.1; done
+  until [ -s "$t/cuda/gtests.pid" ] || ! alive "$pid"; do sleep 0.1; done
   if grep -q '^matrix-skip: load' "$t/table"; then
     wait "$pid" || true
     echo "run-test: $case: skipped, the host is loaded" >&2
@@ -305,7 +326,7 @@ EOF
   wait "$pid" || status=$?
   status_is 143
   [ $((SECONDS - started)) -le 10 ] || { echo "run-test: $case: took $((SECONDS - started))s" >&2; exit 1; }
-  if kill -0 "$hang" 2>/dev/null; then
+  if alive "$hang"; then
     echo "run-test: $case: gtests $hang outlived the cell" >&2
     exit 1
   fi
@@ -315,9 +336,38 @@ EOF
 case_cuda_cell() { cuda_cell ''; }
 case_cuda_cell_deaf() { cuda_cell "trap '' TERM"; }
 
+case_zombie() {
+  [ -r /proc/self/stat ] || return 0
+  rm -f "$t/zombie.pid"
+  (
+    parent=$BASHPID
+    (
+      n=0
+      until grep -qx sleep "/proc/$parent/comm" || [ "$n" -ge 200 ]; do n=$((n + 1)); sleep 0.05; done
+    ) &
+    echo $! >"$t/zombie.pid"
+    exec sleep 30
+  ) &
+  local sleeper=$! zombie tries=0
+  stubs+=("$sleeper")
+  until [ -s "$t/zombie.pid" ] && zombie=$(cat "$t/zombie.pid") && [ "$(state "$zombie")" = Z ]; do
+    tries=$((tries + 1))
+    [ "$tries" -lt 200 ] || { echo "run-test: $case: no zombie appeared" >&2; exit 1; }
+    sleep 0.05
+  done
+  kill -0 "$zombie"
+  if alive "$zombie"; then
+    echo "run-test: $case: the zombie $zombie counts as alive" >&2
+    exit 1
+  fi
+  alive "$sleeper" || { echo "run-test: $case: the live sleeper $sleeper counts as dead" >&2; exit 1; }
+  kill -KILL "$sleeper"
+  wait "$sleeper" 2>/dev/null || true
+}
+
 cases=("$@")
 [ "${#cases[@]}" -gt 0 ] || cases=(rows no_match failure_line interrupt interrupt_deaf terminate deadline guard cuda_cell
-    cuda_cell_deaf)
+    cuda_cell_deaf zombie)
 for case in "${cases[@]}"; do
   "case_$case"
   echo "run-test: $case ok"
