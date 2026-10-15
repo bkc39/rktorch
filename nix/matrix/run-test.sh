@@ -155,6 +155,17 @@ case_rows() {
   [ "$(grep -c '^aarch64-darwin' "$t/table")" = 1 ]
 }
 
+case_no_match() {
+  status=0
+  run '9.0' 'nonesuch' >"$t/table" || status=$?
+  status_is 2
+  grep -qx "torch-matrix: no cell matches '9.0' 'nonesuch'" "$t/err" || {
+    echo "run-test: $case: no 'no cell matches' error" >&2
+    cat "$t/table" "$t/err" >&2
+    exit 1
+  }
+}
+
 case_failure_line() {
   status=0
   run 'gtest' 'shimlog' 'toollog' >"$t/table" || status=$?
@@ -295,7 +306,7 @@ EOF
 }
 
 cases=("$@")
-[ "${#cases[@]}" -gt 0 ] || cases=(rows failure_line interrupt terminate deadline guard cuda_cell)
+[ "${#cases[@]}" -gt 0 ] || cases=(rows no_match failure_line interrupt terminate deadline guard cuda_cell)
 for case in "${cases[@]}"; do
   "case_$case"
   echo "run-test: $case ok"

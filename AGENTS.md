@@ -482,8 +482,8 @@ one hash cannot hold a per-system fetch.
 
 `nix run .#matrix` builds and tests every cell for the host's system and ends
 with a pass/fail/skip table; `nix run .#matrix -- '9.1 zip'` runs only the
-cells whose "racket libtorch" contains the filter. Its knobs are
-`MATRIX_CELL_TIMEOUT` (6h a cell), `MATRIX_MIN_FREE_GB` (30),
+cells whose "racket libtorch" contains the filter, and exits 2 when none does.
+Its knobs are `MATRIX_CELL_TIMEOUT` (6h a cell), `MATRIX_MIN_FREE_GB` (30),
 `MATRIX_LOG_DIR`, `MATRIX_CORES` (4) and `MATRIX_MAX_JOBS` (1). The floor is
 Racket 9.1, `("base" #:version "9.1")` in `torch/info.rkt`: 9.0's parallel
 threads can lose a `semaphore-wait` result, fixed in 9.1. The `racket-floor`

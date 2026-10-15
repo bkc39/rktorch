@@ -166,11 +166,13 @@ stop() {
 trap 'stop 130' INT
 trap 'stop 143' TERM
 
+selected=0
 passed=0
 failed=0
 guarded=0
 while IFS=$'\t' read -r racket libtorch shim mode rest; do
   wanted "$racket $libtorch" "$@" || continue
+  selected=$((selected + 1))
   name="${racket}-${libtorch// /-}-${shim}"
   log="$logs/$name.log"
   : >"$log"
@@ -199,6 +201,10 @@ while IFS=$'\t' read -r racket libtorch shim mode rest; do
   row "$racket" "$libtorch" "$shim" "$((SECONDS - started))" "$result$note"
 done <"$MATRIX_CELLS"
 
+if [ "$#" -gt 0 ] && [ "$selected" = 0 ]; then
+  echo "torch-matrix: no cell matches$(printf " '%s'" "$@")" >&2
+  exit 2
+fi
 table
 if [ "$failed" = 1 ]; then
   exit 1
