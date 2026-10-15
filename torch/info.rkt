@@ -16,8 +16,11 @@
   '("machine-learning" "deep-learning" "tensor" "pytorch" "libtorch"))
 (define pre-install-collection "private/install-torchrkt-native.rkt")
 
-;; `raco test --drdr` defaults to a 90s per-test timeout; the native-backed
-;; tests get generous headroom so a loaded builder cannot transiently time out.
+;; Enforced under `raco test --timeout` (the flake's check passes 300s as the
+;; default). The parity suites self-skip without python3 `torch` and take
+;; minutes with it.
 (define test-timeouts
-  '(("tests/foreign-test.rkt" 300)
-    ("tests/finalizer-thread-test.rkt" 120)))
+  '(("tests/finalizer-thread-test.rkt" 120)
+    ("tests/foreign-test.rkt" 300)
+    ("tests/generated-parity-test.rkt" 900)
+    ("tests/python-cross-test.rkt" 1200)))
