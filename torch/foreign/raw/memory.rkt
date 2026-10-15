@@ -25,6 +25,7 @@
                   pressure-diagnostics
                   shadow-generation
                   unaccounted-bytes-by-device)
+         (only-in "race-points.rkt" race-point)
          (only-in "syntax.rkt" _Tensor _Tensor/null define-torch))
 
 (provide tr-tensor-free/finalizer
@@ -41,6 +42,8 @@
          oom-retry
          oom-retry/status
          reaccount!
+         record-allocation!
+         unaccount!
          tr-cuda-empty-cache/raw
          tr-mps-empty-cache/raw
          tr-last-error-kind/raw
@@ -62,7 +65,9 @@
   (let ([release ((deallocator) tr-tensor-free/unwrapped)])
     (lambda (t)
       (unaccount! t)
-      (release t))))
+      (race-point free-unaccounted t)
+      (release t)
+      (race-point free-released t))))
 
 (define finalizer-failure-count (box 0))
 (define captured-failures (box '()))
@@ -146,13 +151,17 @@
     (define-values (dev-rc type index) (tr-tensor-device/raw t))
     (and (zero? nb-rc)
          (zero? dev-rc)
-         (let* ([dev (device type (if (eq? type 'cpu) 0 index))]
-                [entry (allocation (make-phantom-bytes nbytes) nbytes dev 0)])
-           (call-with-ledger
-            (lambda ()
-              (hash-set! allocations t entry)
-              (note-accounted! dev nbytes)))
+         (let ([dev (device type (if (eq? type 'cpu) 0 index))])
+           (record-allocation! t nbytes dev)
            dev))))
+
+(define (record-allocation! t nbytes dev)
+  (define entry (allocation (make-phantom-bytes nbytes) nbytes dev 0))
+  (call-with-ledger
+   (lambda ()
+     (hash-set! allocations t entry)
+     (race-point ledger-entry-added t)
+     (note-accounted! dev nbytes))))
 
 (define (unaccount! t)
   (with-handlers ([exn:fail? void])
@@ -160,6 +169,7 @@
      (lambda ()
        (define a (hash-ref allocations t #f))
        (when a
+         (race-point unaccount-entry-read t)
          (set-phantom-bytes! (allocation-phantom a) 0)
          (hash-remove! allocations t)
          (note-unaccounted! (allocation-device a) (allocation-nbytes a))
@@ -177,17 +187,8 @@
   (define dev (account! t))
   (cond
     [dev (collect-under-pressure! dev)]
-    [old (restore-entry! t old)]
+    [old (record-allocation! t (allocation-nbytes old) (allocation-device old))]
     [else (void)]))
-
-(define (restore-entry! t old)
-  (define nbytes (allocation-nbytes old))
-  (define dev (allocation-device old))
-  (define entry (allocation (make-phantom-bytes nbytes) nbytes dev 0))
-  (call-with-ledger
-   (lambda ()
-     (hash-set! allocations t entry)
-     (note-accounted! dev nbytes))))
 
 (define (sort-by-device totals)
   (sort totals
@@ -223,6 +224,7 @@
 (define tr-tensor-free/finalizer
   (swallow-and-count-failure
    (lambda (t)
+     (race-point finalizer-releasing t)
      (unaccount! t)
      (tr-tensor-free/unwrapped t))))
 
@@ -253,10 +255,14 @@
 (define (((retry-on-oom failed? oom? collect!) raw-fn) . args)
   (define result (apply raw-fn args))
   (cond
-    [(and (failed? result) (oom?))
+    [(and (failed? result) (oom-kind? oom? raw-fn))
      (collect!)
      (apply raw-fn args)]
     [else result]))
+
+(define (oom-kind? oom? raw-fn)
+  (race-point oom-kind-reading raw-fn)
+  (oom?))
 
 ;; handle-returning raw calls: #f is the failure
 (define (oom-retry #:oom? [oom? last-error-oom?]
@@ -272,6 +278,7 @@
 ;; check sees the charge where it will stay.
 (define (((accounted adopt) wrapped) . args)
   (define t (apply wrapped args))
+  (race-point op-returned t)
   (when t
     (define dev (account! t))
     (when dev
