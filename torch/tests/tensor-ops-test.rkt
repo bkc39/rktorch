@@ -24,13 +24,13 @@
     (check-equal? (dtype (zeros 2 #:dtype 'float64)) 'float64))
 
   (test-case "device blames its caller for each argument it rejects"
-    (define expected
-      "expected: \"a tensor, or 'cpu/'mps with index 0, or 'cuda with a natural index\"")
+    (define expected "expected: device-arguments")
     (define (blames-caller? e)
       (and (exn:fail:contract:blame? e)
            (equal? (blame-positive (exn:fail:contract:blame-object e)) (quote-module-name))
            (string-contains? (exn-message e) expected)))
-    (for ([arguments (in-list (list (list (zeros 2) 0)
+    (for ([arguments (in-list (list (list)
+                                    (list (zeros 2) 0)
                                     (list 'cuda -1)
                                     (list 'metal)
                                     (list 'mps 1)

@@ -424,7 +424,7 @@
 (define/contract-out (device . arguments)
   (->* ()
        #:rest (flat-named-contract
-               "a tensor, or 'cpu/'mps with index 0, or 'cuda with a natural index"
+               'device-arguments
                (or/c (list/c tensor?)
                      (list/c (or/c 'cpu 'cuda 'mps))
                      (list/c (or/c 'cpu 'mps) (and/c exact-integer? zero?))
