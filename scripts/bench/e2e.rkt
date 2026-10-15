@@ -129,7 +129,7 @@
 (define sigkill 9)
 
 (define (kill-process-group! child)
-  (void (kill (- (subprocess-pid child)) sigkill)))
+  (~> (subprocess-pid child) - (kill sigkill) void))
 
 (define (run-child runner dir out cleared settings log time-limit)
   (define form
