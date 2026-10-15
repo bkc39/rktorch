@@ -237,7 +237,7 @@
     ;; parameter at the next step instead of stranding on the old dtype
     (define m3 (Mixed))
     (define opt3 (adam (parameters m3) #:lr 0.1))
-    (backward! (m3 (ones 3)))
+    (~> (ones 3) m3 backward!)
     (step! opt3)
     (define after-one (~> (parameters m3) car tensor->list))
     (to m3 'float64)

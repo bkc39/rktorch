@@ -95,7 +95,7 @@
 
   (test-case "resize: float64 and the half dtypes keep their dtype"
     (for ([source-dtype (in-list '(float64 float16 bfloat16))])
-      (define out (resize (to-dtype (rand 3 8 8) source-dtype) 4))
+      (define out (~> (rand 3 8 8) (to-dtype source-dtype) (resize 4)))
       (check-equal? (dtype out) source-dtype)
       (check-equal? (tensor-shape out) '(3 4 4)))
     (check-exn exn:fail:contract?
