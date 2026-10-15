@@ -10,7 +10,7 @@
          (only-in racket/system process*/ports)
          (only-in threading ~>)
          (only-in "harness.rkt" bench-case with-temporary-path)
-         (only-in "training.rkt" analyze-steps read-steps))
+         (only-in "training.rkt" analyze-steps read-steps recorded-run))
 
 (provide (struct-out example)
          (struct-out exn:fail:user:e2e)
@@ -107,18 +107,26 @@
                                 (~> s cdr ~a string->bytes/utf-8)))
   env)
 
-(define (run-child runner dir out cleared settings log)
+(define time-limits (hasheq 'short 3600 'full 43200))
+
+(define (run-child runner dir out cleared settings log time-limit)
   (define form
     `(begin
        (require (only-in (file ,(path->string recorder)) record-steps!))
        (record-steps! ,(path->string runner) ,(path->string out))))
   (parameterize ([current-environment-variables (child-environment cleared settings)]
-                 [current-directory dir])
+                 [current-directory dir]
+                 [subprocess-group-enabled #t])
     (match-define (list _out _in _pid _err control)
       (process*/ports log (open-input-bytes #"") log
                       (find-exe) "-l" "racket/base" "-e" (format "~s" form)))
-    (control 'wait)
-    (control 'exit-code)))
+    (define waiter (thread (lambda () (control 'wait))))
+    (define exited?
+      (with-handlers ([exn:break? (lambda (e) (control 'kill) (raise e))])
+        (sync/timeout time-limit waiter)))
+    (unless exited? (control 'kill))
+    (thread-wait waiter)
+    (values (control 'exit-code) (not exited?))))
 
 (define (example-runner ex)
   (build-path examples-dir (string-append (example-name ex) ".rkt")))
@@ -126,37 +134,46 @@
 (define (step-hook? torch-dir)
   (file-exists? (build-path torch-dir "private" "step-log.rkt")))
 
+(define (classify events wall torch-dir
+                  #:epochs [epochs #f] #:warmup [warmup 0] #:optimizer [optimizer 'first])
+  (define pre-hook? (and torch-dir (not (step-hook? torch-dir))))
+  (cond
+    [(and (null? events) wall pre-hook?) (hasheq 'steps 0 'timing "wall")]
+    [(and (null? events) wall torch-dir)
+     (hasheq 'steps 0
+             'timing "steps"
+             'error (format "torch at ~a has the step hook but logged no steps" torch-dir))]
+    [(and (null? events) wall)
+     (hasheq 'steps 0 'timing "steps" 'error "logged no steps and named no torch")]
+    [else
+     (hash-set (analyze-steps events #:epochs epochs #:warmup warmup #:optimizer optimizer)
+               'timing "steps")]))
+
 (define (run-example ex
                      #:runner [runner (example-runner ex)]
                      #:scale [scale 'short]
                      #:settings [extra '()]
-                     #:torch-dir [torch-dir #f]
+                     #:time-limit [time-limit (hash-ref time-limits scale)]
                      #:log [log (current-error-port)])
   (define env (merged-settings ex scale extra))
-  (define-values (code events wall meta child-torch-dir)
+  (define-values (code killed? recorded)
     (with-temporary-path (dir (make-temporary-directory "rktorch-bench-~a"))
       (define out (build-path dir "rktorch-steps.json"))
-      (define code (run-child runner dir out (control-variables ex runner) env log))
-      (define-values (events wall meta child-torch-dir)
-        (if (file-exists? out) (read-steps out) (values '() #f #f #f)))
-      (values code events wall meta child-torch-dir)))
-  (define measured-torch (or torch-dir child-torch-dir))
-  (define hooked? (and measured-torch (step-hook? measured-torch)))
+      (define-values (code killed?)
+        (run-child runner dir out (control-variables ex runner) env log time-limit))
+      (values code killed? (if (file-exists? out) (read-steps out) (recorded-run '() #f #f #f)))))
+  (match-define (recorded-run events wall meta torch-dir) recorded)
   (define epoch-setting (and (example-epochs-var ex) (assoc (example-epochs-var ex) env)))
   (define epochs (and epoch-setting (~> epoch-setting cdr ~a string->number)))
   (define analysis
+    (classify events wall torch-dir
+              #:epochs epochs #:warmup (example-warmup ex) #:optimizer (example-optimizer ex)))
+  (define failure
     (cond
-      [(and (null? events) wall hooked?)
-       (hasheq 'steps 0
-               'timing "steps"
-               'error (format "torch at ~a has the step hook but logged no steps"
-                              measured-torch))]
-      [(and (null? events) wall) (hasheq 'steps 0 'timing "wall")]
-      [else
-       (hash-set (analyze-steps events #:epochs epochs #:warmup (example-warmup ex)
-                                #:optimizer (example-optimizer ex))
-                 'timing "steps")]))
-  (hash-set* analysis
+      [killed? (format "killed after no exit within ~a s" time-limit)]
+      [(zero? code) #f]
+      [else "exited non-zero"]))
+  (hash-set* (if failure (hash-set analysis 'error failure) analysis)
              'exit_code code
              'wall_s (and wall (/ wall 1000.0))
              'meta meta
@@ -183,15 +200,14 @@
                    #:variants [variants '((#f))]
                    #:on-run [on-run void]
                    #:log [log (current-error-port)]
-                   #:runner-for [runner-for example-runner]
-                   #:torch-dir [torch-dir #f])
+                   #:runner-for [runner-for example-runner])
   (for*/list ([ex (in-list exs)] [v (in-list variants)])
     (define name (if (car v) (format "~a/~a" (example-name ex) (car v)) (example-name ex)))
     (bench-case (string->symbol name)
                 (lambda (_reps)
                   (define analysis
                     (run-example ex #:runner (runner-for ex) #:scale scale
-                                 #:settings (cdr v) #:torch-dir torch-dir #:log log))
+                                 #:settings (cdr v) #:log log))
                   (on-run ex (car v) analysis)
                   (primary-ms ex (car v) analysis))
                 #:self-timed? #t)))
@@ -199,9 +215,13 @@
 (module+ test
   (require (only-in racket/port open-output-nowhere)
            rackunit
-           (only-in "harness.rkt" measure result-name result-per-call))
+           (only-in "fixtures/pre-hook-torch.rkt" call-with-pre-hook-torch)
+           (only-in "harness.rkt" measure result-name result-per-call)
+           (only-in "shim.rkt" torch-dir))
 
+  (define-runtime-path sleeper "fixtures/sleeper.rkt")
   (define-runtime-path stepper "fixtures/stepper.rkt")
+  (define-runtime-path teardown-crash "fixtures/teardown-crash.rkt")
   (define fixture (example "stepper" '(("EPOCHS" . 3)) '(("EPOCHS" . 4)) "EPOCHS" 0 'first))
   (define quiet (open-output-nowhere))
 
@@ -245,45 +265,70 @@
     (check-true (string? (hash-ref (hash-ref a 'meta) 'libtorch))))
 
   (test-case "a child whose torch has the step hook but logs no steps fails"
-    (define a (run-example fixture #:runner stepper #:settings '(("BENCH_PREHOOK" . "1"))
+    (define a (run-example fixture #:runner stepper #:settings '(("STEPPER_SILENT" . "1"))
                            #:log quiet))
     (check-equal? (hash-ref a 'exit_code) 0)
     (check-equal? (hash-ref a 'steps) 0)
-    (check-regexp-match #rx"has the step hook but logged no steps" (hash-ref a 'error #f))
+    (check-regexp-match #rx"step hook" (hash-ref a 'error #f))
     (define cases
-      (e2e-cases (list fixture) #:variants '(("new" ("BENCH_PREHOOK" . "1")))
+      (e2e-cases (list fixture) #:variants '(("new" ("STEPPER_SILENT" . "1")))
                  #:runner-for (lambda (_ex) stepper) #:log quiet))
     (check-exn (lambda (e)
                  (and (exn:fail:user:e2e? e)
-                      (regexp-match? #rx"^e2e: stepper: torch at .*torch/ has the step hook"
-                                     (exn-message e))
+                      (regexp-match? #rx"step hook" (exn-message e))
                       (equal? (exn:fail:user:e2e-variant e) "new")))
                (lambda () (measure cases #:warmup 0 #:rounds 1 #:load void))))
 
   (test-case "a child of a checkout without the step hook is timed whole, and says so"
+    (call-with-pre-hook-torch
+     (lambda (old-torch)
+       (define a (run-example fixture #:runner stepper
+                              #:settings (list old-torch '("STEPPER_SILENT" . "1"))
+                              #:log quiet))
+       (check-equal? (hash-ref a 'exit_code) 0)
+       (check-equal? (hash-ref a 'timing) "wall")
+       (check-equal? (hash-ref a 'steps) 0)
+       (check-false (hash-ref a 'error #f))
+       (check-true (positive? (hash-ref a 'wall_s))))))
+
+  (test-case "a child of a checkout without the step hook that logs steps is timed by them"
+    (call-with-pre-hook-torch
+     (lambda (old-torch)
+       (define a (run-example fixture #:runner stepper #:settings (list old-torch) #:log quiet))
+       (check-equal? (hash-ref a 'timing) "steps")
+       (check-equal? (hash-ref a 'steps) 9))))
+
+  (test-case "a run timed whole is measured by its wall time"
+    (check-equal? (primary-ms fixture "old" (hasheq 'timing "wall" 'wall_s 2.5 'exit_code 0))
+                  2500.0))
+
+  (test-case "a run without steps is timed whole only from a torch known to lack the hook"
+    (check-regexp-match #rx"named no torch" (hash-ref (classify '() 5.0 #f) 'error))
+    (check-regexp-match #rx"step hook" (hash-ref (classify '() 5.0 torch-dir) 'error))
     (with-temporary-path (old (make-temporary-directory "torch-~a"))
-      (define a (run-example fixture #:runner stepper #:settings '(("BENCH_PREHOOK" . "1"))
-                             #:torch-dir old #:log quiet))
-      (check-equal? (hash-ref a 'exit_code) 0)
-      (check-equal? (hash-ref a 'timing) "wall")
-      (check-equal? (hash-ref a 'steps) 0)
-      (check-false (hash-ref a 'error #f))
-      (check-true (positive? (hash-ref a 'wall_s)))
-      (check-equal? (hash-ref (run-example fixture #:runner stepper #:torch-dir old #:log quiet)
-                              'timing)
-                    "steps")
-      (define runs '())
-      (define cases
-        (e2e-cases (list fixture) #:variants '(("old" ("BENCH_PREHOOK" . "1")))
-                   #:runner-for (lambda (_ex) stepper) #:torch-dir old #:log quiet
-                   #:on-run (lambda (_ex _v a) (set! runs (cons a runs)))))
-      (match-define (list r) (measure cases #:warmup 0 #:rounds 1 #:load void))
-      (check-equal? (result-per-call r) (list (* 1000.0 (hash-ref (car runs) 'wall_s))))))
+      (check-equal? (classify '() 5.0 old) (hasheq 'steps 0 'timing "wall"))))
+
+  (test-case "a child that exits non-zero after a full run fails"
+    (define a (run-example fixture #:runner teardown-crash #:log quiet))
+    (check-equal? (hash-ref a 'exit_code) 139)
+    (check-equal? (hash-ref a 'steps) 9)
+    (check-regexp-match #rx"exited non-zero" (hash-ref a 'error #f))
+    (check-exn (lambda (e)
+                 (and (exn:fail:user:e2e? e)
+                      (equal? (exn:fail:user:e2e-exit-code e) 139)))
+               (lambda () (primary-ms fixture #f a))))
+
+  (test-case "a child past its time limit is killed and fails"
+    (define t0 (current-inexact-monotonic-milliseconds))
+    (define a (run-example fixture #:runner sleeper #:time-limit 5 #:log quiet))
+    (check-true (< (- (current-inexact-monotonic-milliseconds) t0) 60000.0))
+    (check-regexp-match #rx"no exit within 5 s" (hash-ref a 'error #f))
+    (check-not-equal? (hash-ref a 'exit_code) 0))
 
   (test-case "a child sees only the example settings it is given"
     (check-equal? (control-variables (cadr examples) (example-runner (cadr examples)))
                   '("STEPS" "EXCERPT"))
-    (check-equal? (control-variables fixture stepper) '("EPOCHS" "BENCH_PREHOOK" "STEPS"))
+    (check-equal? (control-variables fixture stepper) '("EPOCHS" "STEPPER_SILENT" "STEPS"))
     (parameterize ([current-environment-variables
                     (environment-variables-copy (current-environment-variables))])
       (putenv "STEPS" "5")

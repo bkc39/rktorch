@@ -125,8 +125,7 @@
 (define (run-e2e exs #:rounds rounds #:full? full? #:variants variants #:cache cache
                  #:max-load max-load #:libtorch libtorch #:out out #:log log
                  #:run-id [run-id (fresh-run-id)]
-                 #:runner-for [runner-for example-runner]
-                 #:torch-dir [torch-dir #f])
+                 #:runner-for [runner-for example-runner])
   (define emit (record-writer run-id out))
   (define device (device-type (accelerator-if-available)))
   (define scale (if full? 'full 'short))
@@ -178,7 +177,7 @@
                     'meta_from (if child-meta "child" "parent"))))
     (define results
       (measure (e2e-cases (list ex) #:scale scale #:variants with-cache #:on-run on-run
-                          #:log log #:runner-for runner-for #:torch-dir torch-dir)
+                          #:log log #:runner-for runner-for)
                #:warmup 0 #:rounds rounds #:on-failure on-failure))
     (define by-wall?
       (for/or ([ts (in-hash-values timings)]) (and (member "wall" ts) #t)))
@@ -285,6 +284,7 @@
            (only-in racket/runtime-path define-runtime-path)
            rackunit
            (only-in "e2e.rkt" example)
+           (only-in "fixtures/pre-hook-torch.rkt" call-with-pre-hook-torch)
            (only-in "harness.rkt" with-temporary-path)
            (only-in "summary.rkt" read-records summary-markdown))
 
@@ -359,31 +359,46 @@
 
   (test-case "an A/B against a checkout without the step hook compares whole runs"
     (define fixture (example "stepper" '(("EPOCHS" . 3)) '(("EPOCHS" . 4)) "EPOCHS" 0 'first))
-    (define records
-      (with-temporary-path (old (make-temporary-directory "torch-~a"))
-        (records-of (lambda (out)
-                      (run-e2e (list fixture) #:rounds 2 #:full? #f
-                               #:variants '(("a") ("old" ("BENCH_PREHOOK" . "1"))) #:cache #f
-                               #:max-load #f #:libtorch "x" #:out out #:log quiet
-                               #:runner-for (lambda (_ex) stepper) #:torch-dir old)))))
-    (define (group g) (filter (lambda (r) (equal? (hash-ref r 'group) g)) records))
-    (define runs (group "run"))
-    (check-equal? (map (lambda (r) (hash-ref r 'timing)) runs) '("steps" "wall" "wall" "steps"))
-    (define summaries (group "summary"))
-    (check-equal? (for/list ([r (in-list summaries)])
-                    (list (hash-ref r 'variant) (hash-ref r 'timing) (hash-ref r 'unit)))
-                  '(("a" "wall" "s/run") ("old" "wall" "s/run")))
-    (for ([s (in-list summaries)])
-      (define walls
-        (for/list ([r (in-list runs)] #:when (equal? (hash-ref r 'variant) (hash-ref s 'variant)))
-          (hash-ref r 'wall_s)))
-      (check-equal? (length (hash-ref s 'samples)) 2)
-      (for ([sample (in-list (hash-ref s 'samples))] [wall (in-list walls)])
-        (check-= sample wall 1e-9)))
-    (check-false (hash-ref (cadr summaries) 'steps_per_s))
-    (check-true (hash? (hash-ref (car summaries) 'steps_per_s)))
-    (check-equal? (group "error") '())
-    (check-regexp-match #rx"\\| stepper \\| old vs a \\|" (summary-markdown records)))
+    (call-with-pre-hook-torch
+     (lambda (old-torch)
+       (define records
+         (records-of (lambda (out)
+                       (run-e2e (list fixture) #:rounds 2 #:full? #f
+                                #:variants `(("a") ("old" ,old-torch ("STEPPER_SILENT" . "1")))
+                                #:cache #f #:max-load #f #:libtorch "x" #:out out #:log quiet
+                                #:runner-for (lambda (_ex) stepper)))))
+       (define (group g) (filter (lambda (r) (equal? (hash-ref r 'group) g)) records))
+       (define runs (group "run"))
+       (check-equal? (map (lambda (r) (hash-ref r 'timing)) runs) '("steps" "wall" "wall" "steps"))
+       (check-equal? (group "error") '())
+       (define summaries (group "summary"))
+       (check-equal? (for/list ([r (in-list summaries)])
+                       (list (hash-ref r 'variant) (hash-ref r 'timing) (hash-ref r 'unit)))
+                     '(("a" "wall" "s/run") ("old" "wall" "s/run")))
+       (for ([s (in-list summaries)])
+         (define walls
+           (for/list ([r (in-list runs)]
+                      #:when (equal? (hash-ref r 'variant) (hash-ref s 'variant)))
+             (hash-ref r 'wall_s)))
+         (check-equal? (length (hash-ref s 'samples)) 2)
+         (for ([sample (in-list (hash-ref s 'samples))] [wall (in-list walls)])
+           (check-= sample wall 1e-9)))
+       (check-false (hash-ref (cadr summaries) 'steps_per_s))
+       (check-true (hash? (hash-ref (car summaries) 'steps_per_s)))
+       (check-regexp-match #rx"\\| stepper \\| old vs a \\|" (summary-markdown records)))))
+
+  (test-case "a child of a checkout without the step hook that fails is no whole-run time"
+    (define fixture (example "broken" '(("EPOCHS" . 1)) '(("EPOCHS" . 1)) "EPOCHS" 0 'first))
+    (call-with-pre-hook-torch
+     (lambda (old-torch)
+       (define records
+         (records-of (lambda (out)
+                       (run-e2e (list fixture) #:rounds 1 #:full? #f
+                                #:variants `(("old" ,old-torch)) #:cache #f #:max-load #f
+                                #:libtorch "x" #:out out #:log quiet
+                                #:runner-for (lambda (_ex) broken)))))
+       (check-equal? (map (lambda (r) (list (hash-ref r 'group) (hash-ref r 'timing #f))) records)
+                     '(("run" "steps") ("error" #f))))))
 
   (test-case "a failed variant keeps the summaries of the runs that completed"
     (define fixture (example "stepper" '(("EPOCHS" . 3)) '(("EPOCHS" . 4)) "EPOCHS" 0 'first))
