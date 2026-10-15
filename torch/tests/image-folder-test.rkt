@@ -1,10 +1,9 @@
 #lang racket/base
 
 (module+ test
-  (require (for-syntax racket/base)
-           (only-in net/url path->url url->string)
+  (require (only-in net/url path->url url->string)
            (only-in racket/file copy-directory/files make-directory*)
-           (only-in racket/runtime-path define-runtime-path)
+           (only-in racket/runtime-path #%datum define-runtime-path)
            (only-in rackunit
                     check-equal? check-exn check-false check-true test-case)
            (only-in "../data/dataset.rkt" dataset-ref)

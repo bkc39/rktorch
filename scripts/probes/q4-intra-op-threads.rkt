@@ -3,7 +3,7 @@
 (require (for-syntax racket/base)
          (only-in racket/format ~a)
          (only-in racket/match match-define)
-         (only-in racket/runtime-path define-runtime-path)
+         (only-in racket/runtime-path #%datum define-runtime-path)
          "common.rkt")
 
 (define-runtime-path shim-path "shim.rkt")

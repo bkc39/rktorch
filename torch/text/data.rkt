@@ -1,8 +1,7 @@
 #lang racket/base
 
-(require (for-syntax racket/base)
-         (only-in racket/file file->string)
-         (only-in racket/runtime-path define-runtime-path)
+(require (only-in racket/file file->string)
+         (only-in racket/runtime-path #%datum define-runtime-path)
          (only-in racket/set for/set set->list)
          (only-in racket/string string-replace string-trim)
          (only-in "../private/download.rkt" download-cached)

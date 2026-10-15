@@ -1,11 +1,10 @@
 #lang racket/base
 
-(require (for-syntax racket/base)
-         (only-in racket/contract/base -> any cons/c listof or/c)
-         (only-in file/gunzip gunzip-through-ports)
+(require (only-in file/gunzip gunzip-through-ports)
          (only-in file/untar untar)
+         (only-in racket/contract/base -> any cons/c listof or/c)
          (only-in racket/list first)
-         (only-in racket/runtime-path define-runtime-path)
+         (only-in racket/runtime-path #%datum define-runtime-path)
          (only-in racket/string string-split string-trim)
          (only-in "../private/contract.rkt" define/contract-out)
          (only-in "../private/util.rkt" with-temporary-directory)

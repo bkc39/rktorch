@@ -1,13 +1,12 @@
 #lang racket/base
 
-(require (for-syntax racket/base)
-         (only-in ffi/vector
+(require (only-in ffi/vector
                   f32vector-set! make-f32vector make-s64vector s64vector-set!)
          (only-in file/gunzip gunzip-through-ports)
          (only-in racket/contract/base -> ->* cons/c listof or/c)
          (only-in racket/file file->bytes)
          (only-in racket/list take)
-         (only-in racket/runtime-path define-runtime-path)
+         (only-in racket/runtime-path #%datum define-runtime-path)
          (only-in "../data/loader.rkt" dataset? tensor-dataset)
          (only-in "../main.rkt" device/c reshape tensor tensor?)
          (only-in "../private/contract.rkt" define/contract-out)

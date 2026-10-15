@@ -1,8 +1,7 @@
 #lang racket/base
 
 (module+ test
-  (require (for-syntax racket/base)
-           (only-in racket/runtime-path define-runtime-path)
+  (require (only-in racket/runtime-path #%datum define-runtime-path)
            (only-in rackunit check-equal? check-true)
            (only-in "../main.rkt"
                     abs bytes->tensor item max mean mul sub tensor->bytes

@@ -277,11 +277,10 @@
     [path (call-with-output-file path #:exists 'append go)]))
 
 (module+ test
-  (require (for-syntax racket/base)
-           (only-in racket/file make-temporary-directory make-temporary-file)
+  (require (only-in racket/file make-temporary-directory make-temporary-file)
            (only-in racket/list remove-duplicates)
            (only-in racket/port open-output-nowhere)
-           (only-in racket/runtime-path define-runtime-path)
+           (only-in racket/runtime-path #%datum define-runtime-path)
            rackunit
            (only-in "e2e.rkt" example)
            (only-in "harness.rkt" with-temporary-path)

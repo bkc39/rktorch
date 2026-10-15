@@ -3,8 +3,7 @@
 ;; Runner + tests for the literate
 ;; torch/scribblings/examples/16-style-transfer.rkt.
 
-(require (for-syntax racket/base)
-         (only-in racket/runtime-path define-runtime-path))
+(require (only-in racket/runtime-path #%datum define-runtime-path))
 
 (define-runtime-path content-path
   "../../torch/vision/fixtures/hymenoptera/bees/honey-bee.jpg")

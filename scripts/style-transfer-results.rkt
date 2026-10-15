@@ -6,13 +6,12 @@
 ;;
 ;;   nix develop .#cuda --command racket scripts/style-transfer-results.rkt
 
-(require (for-syntax racket/base)
-         (only-in racket/class send)
+(require (only-in racket/class send)
          (only-in racket/date current-date date->string date-display-format)
          (only-in racket/draw make-bitmap)
          (only-in racket/match match-define)
          (only-in racket/pretty pretty-write)
-         (only-in racket/runtime-path define-runtime-path)
+         (only-in racket/runtime-path #%datum define-runtime-path)
          torch
          torch/scribblings/examples/16-style-transfer
          (only-in torch/vision/transforms convert-image-dtype))

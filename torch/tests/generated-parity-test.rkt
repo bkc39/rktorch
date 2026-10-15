@@ -4,12 +4,11 @@
 ;; which provides Python torch; SKIPS when python3 can't import torch).
 
 (module+ test
-  (require (for-syntax racket/base)
-           json
-           racket/port
-           (only-in racket/runtime-path define-runtime-path)
-           racket/string
-           racket/system
+  (require (only-in json read-json)
+           (only-in racket/port open-output-nowhere)
+           (only-in racket/runtime-path #%datum define-runtime-path)
+           (only-in racket/string string-join)
+           (only-in racket/system system*)
            rackunit
            "../main.rkt"
            "private/python-env.rkt")

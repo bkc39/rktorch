@@ -80,7 +80,7 @@ jobs:
       # into the user scope, so the lane lints with the same version, on the
       # same nix-provided Racket, as every local shell.
       - name: Resyntax rules
-        run: nix develop .#ci --command raco test scripts/resyntax-rules-test.rkt scripts/resyntax-lp2.rkt scripts/runtime-path-requires.rkt
+        run: nix develop .#ci --command raco test scripts/resyntax-rules-test.rkt scripts/resyntax-lp2.rkt
       - name: Resyntax lint
         env:
           # on a master push the empty diff against origin/master reports

@@ -5,7 +5,7 @@
                      syntax/parse/pre)
          (only-in ffi/unsafe define-cpointer-type ffi-lib)
          (only-in ffi/unsafe/define define-ffi-definer)
-         (only-in racket/runtime-path define-runtime-path)
+         (only-in racket/runtime-path #%datum define-runtime-path)
          (only-in "fault.rkt" latched))
 
 (provide define-torch

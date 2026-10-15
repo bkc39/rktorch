@@ -1,13 +1,12 @@
 #lang racket/base
 
-(require (for-syntax racket/base)
+(require (only-in ffi/vector make-s32vector s32vector-ref)
          (only-in racket/contract/base
                   -> ->* </c and/c any any/c flat-named-contract or/c)
          (only-in racket/file make-directory*)
          (only-in racket/math exact-round)
          (only-in racket/path normalize-path)
-         (only-in racket/runtime-path define-runtime-path)
-         (only-in ffi/vector make-s32vector s32vector-ref)
+         (only-in racket/runtime-path #%datum define-runtime-path)
          (only-in "../foreign/error.rkt" check-handle check-ok)
          (only-in "../foreign/raw/audio.rkt"
                   tr-audio-info/raw tr-audio-load/raw tr-audio-save/raw)

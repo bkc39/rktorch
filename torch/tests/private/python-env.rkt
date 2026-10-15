@@ -2,13 +2,12 @@
 
 ;; Shared python-subprocess infra for the PyTorch parity suites.
 
-(require (for-syntax racket/base)
-         ;; whole-module: the pattern's syntax classes live at phase 1 and
+(require ;; whole-module: the pattern's syntax classes live at phase 1 and
          ;; only-in would strip them
          syntax/parse/define
          (only-in json read-json)
          (only-in racket/port open-output-nowhere)
-         (only-in racket/runtime-path define-runtime-path)
+         (only-in racket/runtime-path #%datum define-runtime-path)
          (only-in racket/system system*)
          (only-in rackunit check-= check-equal?)
          (only-in "../../main.rkt" bytes->tensor tensor-shape tensor->list to-device))

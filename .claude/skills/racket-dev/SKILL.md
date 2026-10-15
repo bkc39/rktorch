@@ -102,7 +102,7 @@ the input, a dead guard to delete — see `torch/foreign/ops.rkt`'s
 ### 5. Resyntax — exactly what CI runs
 
 ```bash
-nix develop .#ci --command raco test scripts/resyntax-rules-test.rkt scripts/resyntax-lp2.rkt scripts/runtime-path-requires.rkt
+nix develop .#ci --command raco test scripts/resyntax-rules-test.rkt scripts/resyntax-lp2.rkt
 nix develop .#ci --command \
   scripts/resyntax analyze --local-git-repository . origin/master --analyzer-timeout 30000
 ```

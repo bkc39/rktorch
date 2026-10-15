@@ -1,7 +1,6 @@
 #lang racket/base
 
-(require (for-syntax racket/base)
-         (only-in file/unzip
+(require (only-in file/unzip
                   call-with-unzip-entry read-zip-directory unzip-entry
                   zip-directory-contains?)
          (only-in racket/contract/base
@@ -9,7 +8,7 @@
          (only-in racket/file file->string)
          (only-in racket/list append-map index-of remove-duplicates)
          (only-in racket/port copy-port open-output-nowhere)
-         (only-in racket/runtime-path define-runtime-path)
+         (only-in racket/runtime-path #%datum define-runtime-path)
          (only-in racket/string string-prefix? string-split string-trim)
          (only-in "../main.rkt" tensor tensor? tensor->list to-dtype)
          (only-in "../private/contract.rkt" define/contract-out)

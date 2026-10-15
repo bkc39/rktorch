@@ -1,13 +1,12 @@
 #lang racket/base
 
 (module+ test
-  (require (for-syntax racket/base)
-           rackunit
+  (require rackunit
            (only-in racket/file
                     delete-directory/files file->bytes
                     make-temporary-directory)
            (only-in racket/path path-only)
-           (only-in racket/runtime-path define-runtime-path)
+           (only-in racket/runtime-path #%datum define-runtime-path)
            (only-in ffi/vector make-s32vector s32vector-ref)
            (only-in "../audio/data.rkt"
                     audio-info download-audio-cached load-audio

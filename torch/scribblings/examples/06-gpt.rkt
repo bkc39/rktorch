@@ -21,10 +21,9 @@ model's arrangement and its training loop rather than the arithmetic of
 attention.
 
 @chunk[<r06-require>
-(require (for-syntax (only-in racket/base #%datum))
-         (only-in racket/file file->string)
+(require (only-in racket/file file->string)
          (only-in racket/list take-right)
-         (only-in racket/runtime-path define-runtime-path)
+         (only-in racket/runtime-path #%datum define-runtime-path)
          torch torch/nn
          (only-in torch/text/data
                   contiguous-blocks

@@ -1,9 +1,8 @@
 #lang racket/base
 
 (module+ test
-  (require (for-syntax racket/base)
-           (only-in racket/file file->bytes)
-           (only-in racket/runtime-path define-runtime-path)
+  (require (only-in racket/file file->bytes)
+           (only-in racket/runtime-path #%datum define-runtime-path)
            (only-in rackunit check-equal? check-exn check-true test-case)
            (only-in "../main.rkt"
                     cpu-device select tensor->bytes tensor->list tensor-device

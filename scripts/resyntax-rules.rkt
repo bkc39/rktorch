@@ -1,6 +1,8 @@
 #lang racket/base
 
-(require (only-in racket/match match-define)
+(require (only-in racket/list append-map)
+         (only-in racket/match match-define)
+         (only-in racket/runtime-path define-runtime-path)
          (only-in racket/treelist in-treelist treelist-length)
          (only-in resyntax/base
                   define-refactoring-rule define-refactoring-suite)
@@ -13,7 +15,8 @@
          (only-in resyntax/private/syntax-neighbors syntax-original-path)
          (only-in syntax/parse/pre
                   attribute boolean define-syntax-class expr id keyword
-                  number pattern str syntax-parse this-syntax ~datum ~optional)
+                  number pattern str syntax-parse this-syntax ~and ~datum
+                  ~optional)
          (only-in threading ~>)
          (only-in torch add div ge gt le lt matmul mul sub)
          (prefix-in torch: (only-in torch * + - / < <= > >= @)))
@@ -181,26 +184,50 @@
   #:with (step ...) (map bare-when-unary (attribute start.step))
   (~> start.root step ... later ...))
 
-(define-syntax-class phase-1-base
-  #:literals (for-syntax)
-  (pattern (for-syntax _ ... (~datum racket/base) _ ...)))
+(define other-runtime-path-forms
+  '(define-runtime-paths define-runtime-path-list define-runtime-module-path
+    define-runtime-module-path-index runtime-require runtime-paths))
 
-(define (phase-1-base? spec)
-  (syntax-parse spec
-    [:phase-1-base #t]
-    [_ #f]))
+(define (origin-mentions-other-runtime-path-form? origin)
+  (cond
+    [(pair? origin)
+     (or (origin-mentions-other-runtime-path-form? (car origin))
+         (origin-mentions-other-runtime-path-form? (cdr origin)))]
+    [(identifier? origin)
+     (and (memq (syntax-e origin) other-runtime-path-forms) #t)]
+    [else #f]))
+
+(define (uses-other-runtime-path-form? stx)
+  (or (origin-mentions-other-runtime-path-form? (syntax-property stx 'origin))
+      (ormap uses-other-runtime-path-form? (syntax-parts stx))))
+
+(define (original-forms stx)
+  (define inner (append-map original-forms (syntax-parts stx)))
+  (if (syntax-original-path stx) (cons stx inner) inner))
+
+(define runtime-path-forms-analyzer
+  (make-expansion-analyzer
+   #:name 'runtime-path-forms-analyzer
+   (lambda (expanded)
+     (define only-define? (not (uses-other-runtime-path-form? expanded)))
+     (define forms
+       (original-forms (syntax-label-paths expanded 'expansion-path)))
+     (sequence->syntax-property-bundle
+      (for/list ([form (in-list forms)])
+        (syntax-property-entry (syntax-property form 'expansion-path)
+                               'only-define-runtime-path?
+                               only-define?))))))
 
 (define-refactoring-rule runtime-path-only-in
   #:description
-  "Require `(only-in racket/runtime-path define-runtime-path)` beside `(for-syntax racket/base)`, not the whole module."
+  "Require `(only-in racket/runtime-path #%datum define-runtime-path)`."
+  #:analyzers (list runtime-path-forms-analyzer)
   #:literals (require)
-  (require before ... (~datum racket/runtime-path) after ...)
-  #:with (base ...)
-  (if (ormap phase-1-base? (append (attribute before) (attribute after)))
-      '()
-      (list #'(for-syntax racket/base)))
-  #:with definer (datum->syntax this-syntax 'define-runtime-path)
-  (require base ... before ... (only-in racket/runtime-path definer) after ...))
+  (require before ... (~and module-path (~datum racket/runtime-path)) after ...)
+  #:when (syntax-property #'module-path 'only-define-runtime-path?)
+  (require before ...
+           (only-in racket/runtime-path #%datum define-runtime-path)
+           after ...))
 
 (define-refactoring-suite rktorch-rules
   #:rules (named-operator-to-symbol

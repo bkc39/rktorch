@@ -2,17 +2,22 @@
 
 (module+ test
   (require (only-in racket/port call-with-output-string)
+           (only-in racket/pretty pretty-print-columns pretty-write)
            (only-in rackunit test-case)
            resyntax/test/private/rackunit
            "resyntax-rules.rkt")
 
-  (define (program . forms)
+  (define (program #:columns [columns #f] . forms)
     (code-block
      (call-with-output-string
       (lambda (out)
         (displayln "#lang racket/base" out)
         (for ([form (in-list forms)])
-          (writeln form out))))))
+          (cond
+            [columns
+             (parameterize ([pretty-print-columns columns])
+               (pretty-write form out))]
+            [else (writeln form out)]))))))
 
   (parameterize ([current-suite-under-test rktorch-rules])
     (test-case "ge on a tensor becomes >="
@@ -192,50 +197,44 @@
       (check-suite-refactors
        (program '(require racket/runtime-path)
                 '(define-runtime-path here "."))
-       (code-block #<<RKT
-#lang racket/base
-(require (for-syntax racket/base)
-         (only-in racket/runtime-path define-runtime-path))
-(define-runtime-path here ".")
+       (program '(require (only-in racket/runtime-path #%datum define-runtime-path))
+                '(define-runtime-path here "."))))
 
-RKT
-                   )))
-
-    (test-case "a require that has racket/base at phase 1 keeps the one it has"
+    (test-case "the other required modules keep their places"
       (check-suite-refactors
-       (program '(require (for-syntax racket/base) racket/runtime-path)
+       (program '(require json racket/runtime-path racket/list)
                 '(define-runtime-path here "."))
-       (code-block #<<RKT
-#lang racket/base
-(require (for-syntax racket/base)
-         (only-in racket/runtime-path define-runtime-path))
-(define-runtime-path here ".")
-
-RKT
-                   )))
+       (program #:columns 72
+                '(require json
+                          (only-in racket/runtime-path #%datum define-runtime-path)
+                          racket/list)
+                '(define-runtime-path here "."))))
 
     (test-case "a test submodule's require is rewritten too"
       (check-suite-refactors
-       (code-block #<<RKT
-#lang racket/base
-(module+ test
-  (require racket/runtime-path)
-  (define-runtime-path here "."))
+       (program '(module+ test (require racket/runtime-path)))
+       (program '(module+ test
+                   (require (only-in racket/runtime-path #%datum define-runtime-path))))))
 
-RKT
-                   )
-       (code-block #<<RKT
-#lang racket/base
-(module+ test
-  (require (for-syntax racket/base)
-           (only-in racket/runtime-path define-runtime-path))
-  (define-runtime-path here "."))
+    (test-case "a module using another racket/runtime-path form keeps it whole"
+      (check-suite-refactors
+       (program '(require (for-syntax racket/base) racket/runtime-path torch)
+                '(define-runtime-paths (a b) (values "a" "b"))
+                '(ge (tensor (list 1 2 3)) 2))
+       (program '(require (for-syntax racket/base) racket/runtime-path torch)
+                '(define-runtime-paths (a b) (values "a" "b"))
+                '(>= (tensor (list 1 2 3)) 2))))
 
-RKT
-                   )))
+    (test-case "a submodule using another racket/runtime-path form keeps it whole"
+      (check-suite-refactors
+       (program '(require racket/runtime-path torch)
+                '(ge (tensor (list 1 2 3)) 2)
+                '(module+ test (runtime-require racket/list)))
+       (program '(require racket/runtime-path torch)
+                '(>= (tensor (list 1 2 3)) 2)
+                '(module+ test (runtime-require racket/list)))))
 
     (test-case "an only-in racket/runtime-path stays"
       (check-suite-does-not-refactor
-       (program '(require (for-syntax racket/base)
-                          (only-in racket/runtime-path define-runtime-path))
+       (program '(require (only-in racket/runtime-path #%datum define-runtime-path))
                 '(define-runtime-path here "."))))))

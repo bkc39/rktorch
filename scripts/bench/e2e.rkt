@@ -1,12 +1,11 @@
 #lang racket/base
 
-(require (for-syntax racket/base)
-         (only-in compiler/find-exe find-exe)
+(require (only-in compiler/find-exe find-exe)
          (only-in racket/file file->string make-temporary-directory)
          (only-in racket/format ~a)
          (only-in racket/list remove-duplicates)
          (only-in racket/match match match-define)
-         (only-in racket/runtime-path define-runtime-path)
+         (only-in racket/runtime-path #%datum define-runtime-path)
          (only-in racket/system process*/ports)
          (only-in threading ~>)
          (only-in "harness.rkt" bench-case with-temporary-path)

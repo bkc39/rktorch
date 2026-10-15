@@ -1,12 +1,11 @@
 #lang racket/base
 
-(require (for-syntax racket/base)
+(require (only-in file/gunzip gunzip-through-ports)
          (only-in racket/file file->bytes)
-         (only-in racket/runtime-path define-runtime-path)
-         (only-in file/gunzip gunzip-through-ports)
+         (only-in racket/runtime-path #%datum define-runtime-path)
+         (only-in "../main.rkt" div reshape tensor to-dtype)
          (only-in "../private/download.rkt" [download-cached fetch-cached])
-         (only-in "../private/util.rkt" cache-dir)
-         (only-in "../main.rkt" div reshape tensor to-dtype))
+         (only-in "../private/util.rkt" cache-dir))
 
 (provide read-idx
          idx->images

@@ -116,9 +116,8 @@
              (lambda () (plain:twice "a"))))
 
 (module+ test
-  (require (for-syntax racket/base)
-           (only-in racket/file file->string)
-           (only-in racket/runtime-path define-runtime-path)
+  (require (only-in racket/file file->string)
+           (only-in racket/runtime-path #%datum define-runtime-path)
            (only-in racket/sequence sequence->list))
 
   (define-runtime-path foreign-dir "../foreign")
