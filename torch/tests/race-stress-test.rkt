@@ -8,9 +8,10 @@
                     sum)
            (only-in "../nn.rkt" Linear)
            (only-in "private/race-harness.rkt"
-                    check-ledger churn-once! env-number join-all
-                    ledger-snapshot make-watch seeded-generator settle! spawn
-                    watch-hook with-race-hook))
+                    await-roles! check-ledger churn-once! env-number join-all
+                    ledger-snapshot make-roster make-watch seeded-generator
+                    settle! spawn stop-roles! until-stopped watch-hook
+                    with-race-hook))
 
   (define mib (* 1024 1024))
 
@@ -35,27 +36,6 @@
 
   (define (ledger-entries)
     (diagnostic 'ledger-entries))
-
-  (define (count-in! counter)
-    (define n (unbox counter))
-    (unless (box-cas! counter n (add1 n))
-      (count-in! counter)))
-
-  (define (await-count! counter n)
-    (define deadline
-      (+ (current-inexact-milliseconds) (* 1000 start-deadline-seconds)))
-    (let loop ()
-      (cond
-        [(>= (unbox counter) n) (void)]
-        [(> (current-inexact-milliseconds) deadline) (void)]
-        [else (sleep 0.001) (loop)])))
-
-  (define ((until-stopped started stop? step!))
-    (count-in! started)
-    (let loop ([n 0])
-      (cond
-        [(unbox stop?) n]
-        [else (step!) (loop (add1 n))])))
 
   (define (worker-step k)
     (define rng (seeded-generator 40 (list 'stress k)))
@@ -85,20 +65,19 @@
     (define entries (ledger-entries))
     (define before (diagnostic 'pressure-collections))
     (define w (make-watch))
-    (define stop? (box #f))
-    (define started (box 0))
+    (define r (make-roster))
     (define labels (append (build-list width values) '(trainer adversary)))
     (define counts
       (with-race-hook (watch-hook w)
         (define workers
           (parameterize ([native-memory-limit (quotient mib 4)])
             (for/list ([label (in-list labels)])
-              (spawn (until-stopped started stop? (role-step label))
+              (spawn (until-stopped r label (role-step label))
                      #:pool 'own
                      #:label label))))
-        (await-count! started (length labels))
+        (await-roles! r labels #:seconds start-deadline-seconds)
         (sleep seconds-per-phase)
-        (set-box! stop? #t)
+        (stop-roles! r)
         (begin0 (join-all workers #:seconds 300)
                 (settle!))))
     (match-define (list worker-steps ... trainer-steps _adversary-steps) counts) ;; noqa

@@ -42,6 +42,10 @@
          stop!
          worker-thread
          join-all
+         make-roster
+         until-stopped
+         await-roles!
+         stop-roles!
          settle!
          env-number
          seeded-generator
@@ -217,6 +221,40 @@
 
 (define (join-all workers #:seconds [seconds 120])
   (map (lambda (w) (join w #:seconds seconds)) workers))
+
+(struct roster (started stop?))
+
+(define (make-roster)
+  (roster (box '()) (box #f)))
+
+(define (note-started! started label)
+  (define seen (unbox started))
+  (unless (box-cas! started seen (cons label seen))
+    (note-started! started label)))
+
+(define ((until-stopped r label step!))
+  (step!)
+  (note-started! (roster-started r) label)
+  (let loop ([n 1])
+    (cond
+      [(unbox (roster-stop? r)) n]
+      [else (step!) (loop (add1 n))])))
+
+(define (stop-roles! r)
+  (set-box! (roster-stop? r) #t))
+
+(define (await-roles! r labels #:seconds [seconds 60])
+  (define deadline (+ (current-inexact-milliseconds) (* 1000 seconds)))
+  (let loop ()
+    (define missing (~> (roster-started r) unbox (remove* labels)))
+    (cond
+      [(null? missing) (void)]
+      [(> (current-inexact-milliseconds) deadline)
+       (stop-roles! r)
+       (error 'await-roles!
+              "roles never completed a first step within ~a s: ~a"
+              seconds missing)]
+      [else (sleep 0.001) (loop)])))
 
 (define (parking-hook g w)
   (cond
