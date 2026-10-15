@@ -7,7 +7,6 @@
                     exn:fail:contract:blame-object
                     exn:fail:contract:blame?)
            (only-in racket/list drop)
-           (only-in racket/string string-contains?)
            (only-in syntax/location quote-module-name)
            rackunit
            "../main.rkt"
@@ -23,14 +22,16 @@
     (check-equal? (device 'cpu) (cpu-device))
     (check-equal? (dtype (zeros 2 #:dtype 'float64)) 'float64))
 
+  (test-case "device accepts one or two arguments"
+    (check-equal? (procedure-arity device) '(1 2))
+    (check-exn exn:fail:contract:arity? (lambda () (device)))
+    (check-exn exn:fail:contract:arity? (lambda () (device 'cuda 0 0))))
+
   (test-case "device blames its caller for each argument it rejects"
-    (define expected "expected: device-arguments")
     (define (blames-caller? e)
       (and (exn:fail:contract:blame? e)
-           (equal? (blame-positive (exn:fail:contract:blame-object e)) (quote-module-name))
-           (string-contains? (exn-message e) expected)))
-    (for ([arguments (in-list (list (list)
-                                    (list (zeros 2) 0)
+           (equal? (blame-positive (exn:fail:contract:blame-object e)) (quote-module-name))))
+    (for ([arguments (in-list (list (list (zeros 2) 0)
                                     (list 'cuda -1)
                                     (list 'metal)
                                     (list 'mps 1)
