@@ -443,10 +443,7 @@ racket scripts/coverage.rkt --changed   # expression coverage (#173); exits
                                # non-zero below the floor and lists the lines
                                # of the files you touched that no test reaches
 
-scripts/resyntax analyze --local-git-repository .   # lint gate (since the
-                                     # merge base with the PR's base, else
-                                     # origin/master; pass REF explicitly on
-                                     # a detached HEAD or stacked leg)
+scripts/resyntax analyze --local-git-repository . [REF]   # lint gate
                                      # (CI fails on any suggestion; scans
                                      #  changed files, torch/ included; the
                                      #  default rules plus
@@ -454,7 +451,8 @@ scripts/resyntax analyze --local-git-repository .   # lint gate (since the
                                      #  literate examples' chunks through
                                      #  scripts/resyntax-lp2.rkt)
 scripts/resyntax fix --directory torch
-raco test --timeout 600 scripts/resyntax-rules-test.rkt scripts/resyntax-lp2.rkt scripts/resyntax-wrapper-test.rkt   # the lint suite's own tests
+raco test --timeout 600 scripts/resyntax-rules-test.rkt \
+  scripts/resyntax-lp2.rkt scripts/resyntax-wrapper-test.rkt   # lint suite tests
 raco review torch/**/*.rkt
 ```
 
