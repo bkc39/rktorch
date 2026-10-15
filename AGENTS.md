@@ -453,7 +453,7 @@ scripts/resyntax analyze --local-git-repository . origin/master   # lint gate
                                      #  literate examples' chunks through
                                      #  scripts/resyntax-lp2.rkt)
 scripts/resyntax fix --directory torch
-raco test scripts/resyntax-rules-test.rkt scripts/resyntax-lp2.rkt   # the repository's own rules
+raco test scripts/resyntax-rules-test.rkt scripts/resyntax-lp2.rkt scripts/runtime-path-requires.rkt   # the repository's own rules
 raco review torch/**/*.rkt
 ```
 
@@ -547,8 +547,16 @@ file documents exactly what it pulls in. Exemptions, each marked with a
 comment at the require site: pure re-export facades (`main.rkt`,
 `foreign.rkt`, `nn.rkt`, `safe.rkt`, `operators.rkt`,
 `scribblings/labels.rkt`), and macro-heavy modules
-whose expansions need the module's full export set (`racket/runtime-path`,
-`syntax/parse/pre`).
+whose expansions need the module's full export set (`syntax/parse/pre`).
+`racket/runtime-path` is no exemption: require
+`(only-in racket/runtime-path define-runtime-path)` beside
+`(for-syntax racket/base)`, which its expansion needs at phase 1; the
+`runtime-path-only-in` Resyntax rule suggests the fix and
+`scripts/runtime-path-requires.rkt` fails on any whole require of it,
+which Resyntax skips when a comment sits in the require. A literate example
+requires its chunks' modules for label, where all of `racket/base` clashes
+with `torch`'s names, so it takes `(for-syntax (only-in racket/base
+#%datum))` instead.
 
 - `info.rkt` — package metadata + native-library pre-install hook.
 - `main.rkt` — high-level facade (re-exports `foreign.rkt`).

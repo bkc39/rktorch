@@ -2,7 +2,8 @@
 
 ;; Runner + tests for the literate torch/scribblings/examples/14-imagenet.rkt.
 
-(require racket/runtime-path)
+(require (for-syntax racket/base)
+         (only-in racket/runtime-path define-runtime-path))
 
 (define-runtime-path photos-dir "../../torch/vision/fixtures/hymenoptera")
 

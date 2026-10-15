@@ -18,10 +18,11 @@ everything read so far, so each new character costs one step, not a pass over
 the whole context.
 
 @chunk[<r12-require>
-(require racket/runtime-path
+(require (for-syntax (only-in racket/base #%datum))
          (only-in racket/file file->string)
          (only-in racket/list last)
          (only-in racket/match match)
+         (only-in racket/runtime-path define-runtime-path)
          torch torch/nn
          (only-in torch/text/data
                   contiguous-blocks

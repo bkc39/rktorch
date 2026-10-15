@@ -1,12 +1,12 @@
 #lang racket/base
 
-;; whole-module on purpose: the expansion needs bindings only-in would strip
-(require racket/runtime-path
+(require (for-syntax racket/base)
          (only-in racket/contract/base
                   -> ->* </c and/c any any/c flat-named-contract or/c)
          (only-in racket/file make-directory*)
          (only-in racket/math exact-round)
          (only-in racket/path normalize-path)
+         (only-in racket/runtime-path define-runtime-path)
          (only-in ffi/vector make-s32vector s32vector-ref)
          (only-in "../foreign/error.rkt" check-handle check-ok)
          (only-in "../foreign/raw/audio.rkt"

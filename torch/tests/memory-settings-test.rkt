@@ -1,8 +1,8 @@
 #lang racket/base
 
 (module+ test
-  ;; whole-module on purpose: the expansion needs bindings only-in would strip
-  (require racket/runtime-path
+  (require (for-syntax racket/base)
+           (only-in racket/runtime-path define-runtime-path)
            rackunit
            (only-in "../foreign/raw/pressure-settings.rkt"
                     default-memory-fraction memory-fraction-from-env

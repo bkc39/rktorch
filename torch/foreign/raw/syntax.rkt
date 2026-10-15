@@ -5,8 +5,7 @@
                      syntax/parse/pre)
          (only-in ffi/unsafe define-cpointer-type ffi-lib)
          (only-in ffi/unsafe/define define-ffi-definer)
-         ;; whole-module require on purpose (only-in breaks its expansion)
-         racket/runtime-path
+         (only-in racket/runtime-path define-runtime-path)
          (only-in "fault.rkt" latched))
 
 (provide define-torch

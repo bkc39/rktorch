@@ -8,8 +8,7 @@
          (only-in racket/list count)
          (only-in racket/match match match-define)
          (only-in racket/set seteq set-add set-count set-remove)
-         ;; whole-module require on purpose (only-in breaks its expansion)
-         racket/runtime-path
+         (only-in racket/runtime-path define-runtime-path)
          (only-in threading ~>)
          "common.rkt")
 

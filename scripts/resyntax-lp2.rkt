@@ -186,9 +186,8 @@
   (exit (if (unbox failed?) 1 0)))
 
 (module+ test
-  (require ;; whole-module: define-runtime-path needs phase-1 bindings
-           ;; only-in strips
-           racket/runtime-path
+  (require (for-syntax racket/base)
+           (only-in racket/runtime-path define-runtime-path)
            (only-in racket/string string-prefix?)
            (only-in rackunit check-equal? check-true test-case)
            (only-in resyntax/grimoire/string-replacement copied-string))

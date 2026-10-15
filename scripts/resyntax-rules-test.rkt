@@ -186,4 +186,56 @@
 
     (test-case "without threading's ~> nothing threads"
       (check-suite-does-not-refactor
-       (program '(add1 (sub1 (abs 1))))))))
+       (program '(add1 (sub1 (abs 1))))))
+
+    (test-case "a whole racket/runtime-path becomes only-in"
+      (check-suite-refactors
+       (program '(require racket/runtime-path)
+                '(define-runtime-path here "."))
+       (code-block #<<RKT
+#lang racket/base
+(require (for-syntax racket/base)
+         (only-in racket/runtime-path define-runtime-path))
+(define-runtime-path here ".")
+
+RKT
+                   )))
+
+    (test-case "a require that has racket/base at phase 1 keeps the one it has"
+      (check-suite-refactors
+       (program '(require (for-syntax racket/base) racket/runtime-path)
+                '(define-runtime-path here "."))
+       (code-block #<<RKT
+#lang racket/base
+(require (for-syntax racket/base)
+         (only-in racket/runtime-path define-runtime-path))
+(define-runtime-path here ".")
+
+RKT
+                   )))
+
+    (test-case "a test submodule's require is rewritten too"
+      (check-suite-refactors
+       (code-block #<<RKT
+#lang racket/base
+(module+ test
+  (require racket/runtime-path)
+  (define-runtime-path here "."))
+
+RKT
+                   )
+       (code-block #<<RKT
+#lang racket/base
+(module+ test
+  (require (for-syntax racket/base)
+           (only-in racket/runtime-path define-runtime-path))
+  (define-runtime-path here "."))
+
+RKT
+                   )))
+
+    (test-case "an only-in racket/runtime-path stays"
+      (check-suite-does-not-refactor
+       (program '(require (for-syntax racket/base)
+                          (only-in racket/runtime-path define-runtime-path))
+                '(define-runtime-path here "."))))))

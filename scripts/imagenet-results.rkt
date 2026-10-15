@@ -7,10 +7,11 @@
 ;;
 ;;   nix develop .#cuda --command racket scripts/imagenet-results.rkt
 
-(require (only-in racket/date current-date date->string date-display-format)
+(require (for-syntax racket/base)
+         (only-in racket/date current-date date->string date-display-format)
          (only-in racket/list last)
          (only-in racket/pretty pretty-write)
-         racket/runtime-path
+         (only-in racket/runtime-path define-runtime-path)
          torch
          torch/scribblings/examples/14-imagenet
          (only-in torch/vision/weights pretrained-weights))

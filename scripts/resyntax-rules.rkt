@@ -13,7 +13,7 @@
          (only-in resyntax/private/syntax-neighbors syntax-original-path)
          (only-in syntax/parse/pre
                   attribute boolean define-syntax-class expr id keyword
-                  number pattern str syntax-parse this-syntax ~optional)
+                  number pattern str syntax-parse this-syntax ~datum ~optional)
          (only-in threading ~>)
          (only-in torch add div ge gt le lt matmul mul sub)
          (prefix-in torch: (only-in torch * + - / < <= > >= @)))
@@ -181,9 +181,31 @@
   #:with (step ...) (map bare-when-unary (attribute start.step))
   (~> start.root step ... later ...))
 
+(define-syntax-class phase-1-base
+  #:literals (for-syntax)
+  (pattern (for-syntax _ ... (~datum racket/base) _ ...)))
+
+(define (phase-1-base? spec)
+  (syntax-parse spec
+    [:phase-1-base #t]
+    [_ #f]))
+
+(define-refactoring-rule runtime-path-only-in
+  #:description
+  "Require `(only-in racket/runtime-path define-runtime-path)` beside `(for-syntax racket/base)`, not the whole module."
+  #:literals (require)
+  (require before ... (~datum racket/runtime-path) after ...)
+  #:with (base ...)
+  (if (ormap phase-1-base? (append (attribute before) (attribute after)))
+      '()
+      (list #'(for-syntax racket/base)))
+  #:with definer (datum->syntax this-syntax 'define-runtime-path)
+  (require base ... before ... (only-in racket/runtime-path definer) after ...))
+
 (define-refactoring-suite rktorch-rules
   #:rules (named-operator-to-symbol
            nested-calls-to-threading
+           runtime-path-only-in
            threading-from-innermost-call))
 
 (define-refactoring-suite rktorch-recommendations

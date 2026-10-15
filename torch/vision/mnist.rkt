@@ -1,8 +1,8 @@
 #lang racket/base
 
-;; whole-module on purpose: the expansion needs bindings only-in would strip
-(require racket/runtime-path
+(require (for-syntax racket/base)
          (only-in racket/file file->bytes)
+         (only-in racket/runtime-path define-runtime-path)
          (only-in file/gunzip gunzip-through-ports)
          (only-in "../private/download.rkt" [download-cached fetch-cached])
          (only-in "../private/util.rkt" cache-dir)

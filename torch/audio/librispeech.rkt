@@ -1,11 +1,11 @@
 #lang racket/base
 
-;; whole-module on purpose: the expansion needs bindings only-in would strip
-(require racket/runtime-path
+(require (for-syntax racket/base)
          (only-in racket/contract/base -> any cons/c listof or/c)
          (only-in file/gunzip gunzip-through-ports)
          (only-in file/untar untar)
          (only-in racket/list first)
+         (only-in racket/runtime-path define-runtime-path)
          (only-in racket/string string-split string-trim)
          (only-in "../private/contract.rkt" define/contract-out)
          (only-in "../private/util.rkt" with-temporary-directory)

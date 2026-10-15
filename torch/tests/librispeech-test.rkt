@@ -1,11 +1,11 @@
 #lang racket/base
 
 (module+ test
-  ;; whole-module on purpose: the expansion needs bindings only-in would strip
-  (require racket/runtime-path
+  (require (for-syntax racket/base)
            rackunit
            (only-in file/tar tar-gzip)
            (only-in racket/file delete-directory/files make-directory*)
+           (only-in racket/runtime-path define-runtime-path)
            (only-in "../private/util.rkt" with-temporary-directory)
            (only-in "../audio/librispeech.rkt"
                     librispeech-utterances load-librispeech-fixture

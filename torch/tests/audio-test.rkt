@@ -1,13 +1,13 @@
 #lang racket/base
 
 (module+ test
-  ;; whole-module on purpose: the expansion needs bindings only-in would strip
-  (require racket/runtime-path
+  (require (for-syntax racket/base)
            rackunit
            (only-in racket/file
                     delete-directory/files file->bytes
                     make-temporary-directory)
            (only-in racket/path path-only)
+           (only-in racket/runtime-path define-runtime-path)
            (only-in ffi/vector make-s32vector s32vector-ref)
            (only-in "../audio/data.rkt"
                     audio-info download-audio-cached load-audio

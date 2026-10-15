@@ -1,10 +1,9 @@
 #lang racket/base
 
-(require (only-in racket/contract/base listof)
+(require (for-syntax racket/base)
+         (only-in racket/contract/base listof)
          (only-in racket/file file->lines)
-         ;; whole-module: define-runtime-path needs phase-1 bindings only-in
-         ;; strips
-         racket/runtime-path
+         (only-in racket/runtime-path define-runtime-path)
          (only-in "../private/contract.rkt" define/contract-out))
 
 (define-runtime-path classes-file "imagenet-classes.txt")

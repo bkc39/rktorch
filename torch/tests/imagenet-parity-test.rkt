@@ -1,10 +1,9 @@
 #lang racket/base
 
 (module+ test
-  (require (only-in racket/path path-only)
-           ;; whole-module: define-runtime-path needs phase-1 bindings
-           ;; only-in strips
-           racket/runtime-path
+  (require (for-syntax racket/base)
+           (only-in racket/path path-only)
+           (only-in racket/runtime-path define-runtime-path)
            (only-in rackunit check-= check-equal? check-true)
            (only-in "../main.rkt"
                     abs backward! copy! item max requires-grad!

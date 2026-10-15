@@ -1,8 +1,8 @@
 #lang racket/base
 
 (module+ test
-  ;; whole-module: define-runtime-path needs phase-1 bindings only-in strips
-  (require racket/runtime-path
+  (require (for-syntax racket/base)
+           (only-in racket/runtime-path define-runtime-path)
            (only-in rackunit check-equal? check-true)
            (only-in "../main.rkt"
                     abs bytes->tensor item max mean mul sub tensor->bytes
