@@ -125,7 +125,8 @@
 (define (run-e2e exs #:rounds rounds #:full? full? #:variants variants #:cache cache
                  #:max-load max-load #:libtorch libtorch #:out out #:log log
                  #:run-id [run-id (fresh-run-id)]
-                 #:runner-for [runner-for example-runner])
+                 #:runner-for [runner-for example-runner]
+                 #:torch-dir [torch-dir #f])
   (define emit (record-writer run-id out))
   (define device (device-type (accelerator-if-available)))
   (define scale (if full? 'full 'short))
@@ -177,7 +178,7 @@
                     'meta_from (if child-meta "child" "parent"))))
     (define results
       (measure (e2e-cases (list ex) #:scale scale #:variants with-cache #:on-run on-run
-                          #:log log #:runner-for runner-for)
+                          #:log log #:runner-for runner-for #:torch-dir torch-dir)
                #:warmup 0 #:rounds rounds #:on-failure on-failure))
     (define by-wall?
       (for/or ([ts (in-hash-values timings)]) (and (member "wall" ts) #t)))
@@ -359,11 +360,12 @@
   (test-case "an A/B against a checkout without the step hook compares whole runs"
     (define fixture (example "stepper" '(("EPOCHS" . 3)) '(("EPOCHS" . 4)) "EPOCHS" 0 'first))
     (define records
-      (records-of (lambda (out)
-                    (run-e2e (list fixture) #:rounds 2 #:full? #f
-                             #:variants '(("a") ("old" ("BENCH_PREHOOK" . "1"))) #:cache #f
-                             #:max-load #f #:libtorch "x" #:out out #:log quiet
-                             #:runner-for (lambda (_ex) stepper)))))
+      (with-temporary-path (old (make-temporary-directory "torch-~a"))
+        (records-of (lambda (out)
+                      (run-e2e (list fixture) #:rounds 2 #:full? #f
+                               #:variants '(("a") ("old" ("BENCH_PREHOOK" . "1"))) #:cache #f
+                               #:max-load #f #:libtorch "x" #:out out #:log quiet
+                               #:runner-for (lambda (_ex) stepper) #:torch-dir old)))))
     (define (group g) (filter (lambda (r) (equal? (hash-ref r 'group) g)) records))
     (define runs (group "run"))
     (check-equal? (map (lambda (r) (hash-ref r 'timing)) runs) '("steps" "wall" "wall" "steps"))

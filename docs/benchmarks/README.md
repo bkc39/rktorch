@@ -102,8 +102,10 @@ median, quartiles and IQR, and the load average before and after.
 An A/B run alternates its variants every round, and each variant is a set
 of environment variables; `PLTUSERHOME=<checkout>/.racket-user` runs the
 other checkout's `torch`. A checkout older than the `rktorch-step` event
-logs no steps, so a child that completes without one is timed whole, from
-the end of its compile to its exit (`timing` `wall`, no `error`). When any
+(its `torch` has no `private/step-log.rkt`) logs no steps, so its child is
+timed whole, from the end of its compile to its exit (`timing` `wall`, no
+`error`). A child whose `torch` has the hook and logs no steps is an
+`error` naming that `torch`, never a whole-run time. When any
 run of an example is timed whole, every variant's summary for it uses the
 whole-run times (`timing` `wall`, unit `s/run`), so the ratio compares like
 with like; otherwise `timing` is `steps`. Relative paths in `PLTUSERHOME`, `PLTADDONDIR`

@@ -123,23 +123,34 @@
 (define (example-runner ex)
   (build-path examples-dir (string-append (example-name ex) ".rkt")))
 
+(define (step-hook? torch-dir)
+  (file-exists? (build-path torch-dir "private" "step-log.rkt")))
+
 (define (run-example ex
                      #:runner [runner (example-runner ex)]
                      #:scale [scale 'short]
                      #:settings [extra '()]
+                     #:torch-dir [torch-dir #f]
                      #:log [log (current-error-port)])
   (define env (merged-settings ex scale extra))
-  (define-values (code events wall meta)
+  (define-values (code events wall meta child-torch-dir)
     (with-temporary-path (dir (make-temporary-directory "rktorch-bench-~a"))
       (define out (build-path dir "rktorch-steps.json"))
       (define code (run-child runner dir out (control-variables ex runner) env log))
-      (define-values (events wall meta)
-        (if (file-exists? out) (read-steps out) (values '() #f #f)))
-      (values code events wall meta)))
+      (define-values (events wall meta child-torch-dir)
+        (if (file-exists? out) (read-steps out) (values '() #f #f #f)))
+      (values code events wall meta child-torch-dir)))
+  (define measured-torch (or torch-dir child-torch-dir))
+  (define hooked? (and measured-torch (step-hook? measured-torch)))
   (define epoch-setting (and (example-epochs-var ex) (assoc (example-epochs-var ex) env)))
   (define epochs (and epoch-setting (~> epoch-setting cdr ~a string->number)))
   (define analysis
     (cond
+      [(and (null? events) wall hooked?)
+       (hasheq 'steps 0
+               'timing "steps"
+               'error (format "torch at ~a has the step hook but logged no steps"
+                              measured-torch))]
       [(and (null? events) wall) (hasheq 'steps 0 'timing "wall")]
       [else
        (hash-set (analyze-steps events #:epochs epochs #:warmup (example-warmup ex)
@@ -172,14 +183,15 @@
                    #:variants [variants '((#f))]
                    #:on-run [on-run void]
                    #:log [log (current-error-port)]
-                   #:runner-for [runner-for example-runner])
+                   #:runner-for [runner-for example-runner]
+                   #:torch-dir [torch-dir #f])
   (for*/list ([ex (in-list exs)] [v (in-list variants)])
     (define name (if (car v) (format "~a/~a" (example-name ex) (car v)) (example-name ex)))
     (bench-case (string->symbol name)
                 (lambda (_reps)
                   (define analysis
                     (run-example ex #:runner (runner-for ex) #:scale scale
-                                 #:settings (cdr v) #:log log))
+                                 #:settings (cdr v) #:torch-dir torch-dir #:log log))
                   (on-run ex (car v) analysis)
                   (primary-ms ex (car v) analysis))
                 #:self-timed? #t)))
@@ -232,22 +244,41 @@
     (check-true (positive? (hash-ref a 'wall_s)))
     (check-true (string? (hash-ref (hash-ref a 'meta) 'libtorch))))
 
-  (test-case "a child whose torch logs no steps is timed whole, and says so"
+  (test-case "a child whose torch has the step hook but logs no steps fails"
     (define a (run-example fixture #:runner stepper #:settings '(("BENCH_PREHOOK" . "1"))
                            #:log quiet))
     (check-equal? (hash-ref a 'exit_code) 0)
-    (check-equal? (hash-ref a 'timing) "wall")
     (check-equal? (hash-ref a 'steps) 0)
-    (check-false (hash-ref a 'error #f))
-    (check-true (positive? (hash-ref a 'wall_s)))
-    (check-equal? (hash-ref (run-example fixture #:runner stepper #:log quiet) 'timing) "steps")
-    (define runs '())
+    (check-regexp-match #rx"has the step hook but logged no steps" (hash-ref a 'error #f))
     (define cases
-      (e2e-cases (list fixture) #:variants '(("old" ("BENCH_PREHOOK" . "1")))
-                 #:runner-for (lambda (_ex) stepper) #:log quiet
-                 #:on-run (lambda (_ex _v a) (set! runs (cons a runs)))))
-    (match-define (list r) (measure cases #:warmup 0 #:rounds 1 #:load void))
-    (check-equal? (result-per-call r) (list (* 1000.0 (hash-ref (car runs) 'wall_s)))))
+      (e2e-cases (list fixture) #:variants '(("new" ("BENCH_PREHOOK" . "1")))
+                 #:runner-for (lambda (_ex) stepper) #:log quiet))
+    (check-exn (lambda (e)
+                 (and (exn:fail:user:e2e? e)
+                      (regexp-match? #rx"^e2e: stepper: torch at .*torch/ has the step hook"
+                                     (exn-message e))
+                      (equal? (exn:fail:user:e2e-variant e) "new")))
+               (lambda () (measure cases #:warmup 0 #:rounds 1 #:load void))))
+
+  (test-case "a child of a checkout without the step hook is timed whole, and says so"
+    (with-temporary-path (old (make-temporary-directory "torch-~a"))
+      (define a (run-example fixture #:runner stepper #:settings '(("BENCH_PREHOOK" . "1"))
+                             #:torch-dir old #:log quiet))
+      (check-equal? (hash-ref a 'exit_code) 0)
+      (check-equal? (hash-ref a 'timing) "wall")
+      (check-equal? (hash-ref a 'steps) 0)
+      (check-false (hash-ref a 'error #f))
+      (check-true (positive? (hash-ref a 'wall_s)))
+      (check-equal? (hash-ref (run-example fixture #:runner stepper #:torch-dir old #:log quiet)
+                              'timing)
+                    "steps")
+      (define runs '())
+      (define cases
+        (e2e-cases (list fixture) #:variants '(("old" ("BENCH_PREHOOK" . "1")))
+                   #:runner-for (lambda (_ex) stepper) #:torch-dir old #:log quiet
+                   #:on-run (lambda (_ex _v a) (set! runs (cons a runs)))))
+      (match-define (list r) (measure cases #:warmup 0 #:rounds 1 #:load void))
+      (check-equal? (result-per-call r) (list (* 1000.0 (hash-ref (car runs) 'wall_s))))))
 
   (test-case "a child sees only the example settings it is given"
     (check-equal? (control-variables (cadr examples) (example-runner (cadr examples)))
