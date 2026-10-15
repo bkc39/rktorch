@@ -8,19 +8,19 @@ nix_flags=(--no-link --print-out-paths --print-build-logs
 mkdir -p "$logs"
 set -m
 
-[[ $kill_after =~ ^[0-9]+[smhd]?$ ]] || {
-  echo "torch-matrix: MATRIX_KILL_AFTER is N[smhd], got $kill_after" >&2
+[[ $kill_after =~ ^0*[1-9][0-9]*[smhd]?$ ]] || {
+  echo "torch-matrix: MATRIX_KILL_AFTER is a positive N[smhd], got $kill_after" >&2
   exit 2
 }
-[[ $cell_timeout =~ ^([0-9]+)([smhd]?)$ ]] || {
-  echo "torch-matrix: MATRIX_CELL_TIMEOUT is N[smhd], got $cell_timeout" >&2
+[[ $cell_timeout =~ ^(0*[1-9][0-9]*)([smhd]?)$ ]] || {
+  echo "torch-matrix: MATRIX_CELL_TIMEOUT is a positive N[smhd], got $cell_timeout" >&2
   exit 2
 }
 case "${BASH_REMATCH[2]}" in
-  d) budget=$((BASH_REMATCH[1] * 86400000000)) ;;
-  h) budget=$((BASH_REMATCH[1] * 3600000000)) ;;
-  m) budget=$((BASH_REMATCH[1] * 60000000)) ;;
-  *) budget=$((BASH_REMATCH[1] * 1000000)) ;;
+  d) budget=$((10#${BASH_REMATCH[1]} * 86400000000)) ;;
+  h) budget=$((10#${BASH_REMATCH[1]} * 3600000000)) ;;
+  m) budget=$((10#${BASH_REMATCH[1]} * 60000000)) ;;
+  *) budget=$((10#${BASH_REMATCH[1]} * 1000000)) ;;
 esac
 
 wanted() {

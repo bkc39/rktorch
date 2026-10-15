@@ -307,6 +307,28 @@ case_kill_after() {
   within "$started" 4000
 }
 
+case_durations() {
+  local var value
+  for var in MATRIX_KILL_AFTER MATRIX_CELL_TIMEOUT; do
+    for value in 0 0s 00 000m; do
+      status=0
+      (export "$var=$value"; run '9.1 zip') >"$t/table" || status=$?
+      status_is 2
+      grep -qx "torch-matrix: $var is a positive N\[smhd\], got $value" "$t/err" || {
+        echo "run-test: $case: $var=$value not rejected" >&2
+        cat "$t/table" "$t/err" >&2
+        exit 1
+      }
+    done
+    for value in 1s 30 010s 08s; do
+      status=0
+      (export "$var=$value"; run '9.1 zip') >"$t/table" || status=$?
+      status_is 0
+      expect "$(row '9\.1 +zip' 'pass')"
+    done
+  done
+}
+
 case_killed() {
   status=0
   run 'oom' >"$t/table" || status=$?
@@ -491,7 +513,7 @@ EOF
 
 cases=("$@")
 [ "${#cases[@]}" -gt 0 ] || cases=(rows no_match failure_line interrupt interrupt_deaf terminate deadline linger
-    kill_after killed guard
+    kill_after durations killed guard
     cuda_cell cuda_cell_deaf cuda_cell_linger cuda_cell_load zombie driver_farm)
 for case in "${cases[@]}"; do
   "case_$case"
