@@ -20,6 +20,11 @@ step ca certificates
 # minimal images ship neither a CA bundle nor libsqlite3.
 if command -v apt-get >/dev/null; then
   (apt-get update -qq && apt-get install -y -qq ca-certificates libsqlite3-0) >/dev/null 2>&1 && echo "installed ca-certificates libsqlite3-0"
+  # Building torch's manual loads racket/draw, which dlopens cairo/pango.
+  if [[ ${DOCFLAG-unset} == "" ]]; then
+    apt-get install -y -qq libcairo2 libpango-1.0-0 libpangocairo-1.0-0 libfontconfig1 \
+      libjpeg-turbo8 libpng16-16t64 >/dev/null 2>&1 && echo "installed racket/draw libraries"
+  fi
 fi
 ls /etc/ssl/certs/ca-certificates.crt /etc/pki/tls/certs/ca-bundle.crt 2>/dev/null
 
