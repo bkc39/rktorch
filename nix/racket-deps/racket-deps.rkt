@@ -1,5 +1,6 @@
 #lang racket/base
 (require (only-in pkg/lib installed-pkg-names pkg-directory)
+         (only-in pkg/name package-source->name+type)
          (only-in racket/contract/base ->)
          (only-in racket/contract/region define/contract)
          (only-in racket/file file->lines)
@@ -33,6 +34,10 @@
 (define (platform-dep? dep)
   (and (dep-option dep '#:platform) #t))
 
+(define (source-dep? dep)
+  (define-values (_name type) (package-source->name+type (dep-name dep) #f))
+  (not (eq? type 'name)))
+
 (define (declared-deps info-dir)
   (define info
     (or (get-info/full info-dir)
@@ -46,11 +51,16 @@
   (define-values (wanted _installed) (declared-deps info-dir))
   (define deps (sort wanted string<? #:key dep->string))
   (define platform-dep (findf platform-dep? deps))
+  (define source-dep (findf source-dep? deps))
   (cond
     [(null? deps)
      (raise-user-error 'racket-deps
                        "~a declares no package outside the Racket distribution"
                        info-dir)]
+    [source-dep
+     (raise-user-error 'racket-deps
+                       "~a is a package source; racket-deps fetches catalog packages by name"
+                       (dep-name source-dep))]
     [platform-dep
      (raise-user-error 'racket-deps
                        "~a has #:platform ~s; platform-qualified deps are not fetched from the catalog"

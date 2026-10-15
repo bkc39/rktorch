@@ -51,7 +51,8 @@
         pkgsRacket.racket;
 
       # Source catalog only: a built package's compiled/ belongs to one Racket.
-      racketDepsScript = ./nix/racket-deps/racket-deps.rkt;
+      racketDepsDir = ./nix/racket-deps;
+      racketDepsScript = "${racketDepsDir}/racket-deps.rkt";
       racketDepsFor = pkgs: racketPkg:
         pkgs.stdenvNoCC.mkDerivation (finalAttrs: {
           name = "torch-rkt-racket-deps";
@@ -154,6 +155,12 @@
             rd check ${fixtures}/versioned "$TMPDIR/fetched-1.3"
             fails rd names ${fixtures}/platform
             grep -q 'extra-lib has #:platform unix; platform-qualified' "$TMPDIR/log"
+            fails rd names ${fixtures}/source
+            grep -qF 'https://example.com/foo.git is a package source; racket-deps fetches catalog packages by name' "$TMPDIR/log"
+          '';
+          racket-deps-provision-test = run "torch-rkt-racket-deps-provision-test" ''
+            timeout -k 10 600 bash ${racketDepsDir}/provision-test.sh \
+              ${racketDepsDir}/provision.sh ${fixtures}/provision
           '';
         };
 
@@ -690,9 +697,6 @@
           provisionRacketFor = shim: ''
             export TORCHRKT_NATIVE_LIB_PATH="${shim}"
             export PLTUSERHOME="$PWD/.racket-user"
-            _rkt_ver=$(racket --version 2>&1 | grep -oE 'v[0-9]+\.[0-9]+' | tr -d 'v' | tr '.' '-')
-            # Re-provisions on an outputHash bump; bump deps4 when the steps below change.
-            deps_stamp="$PLTUSERHOME/.deps4-${builtins.baseNameOf racket-deps}-''${_rkt_ver}"
             # In-tree zo caches compiled piecewise across commits can defeat
             # the compilation manager, so bytecode is keyed to HEAD by a
             # stamp-and-clear (a per-rev PLTCOMPILEDROOTS would recompile
@@ -702,7 +706,7 @@
             _old_rev=$(cat "$_rev_stamp" 2>/dev/null || echo none)
             if [ "$_old_rev" != "$_rev" ]; then
               _clear_ok=1
-              if [ "$_old_rev" != "none" ] || [ -f "$deps_stamp" ]; then
+              if [ "$_old_rev" != "none" ] || compgen -G "$PLTUSERHOME/.deps[0-9]*" > /dev/null; then
                 echo "bytecode cache: clearing compiled/ (''${_old_rev:0:12} -> ''${_rev:0:12})"
                 for _d in torch examples scripts codegen; do
                   [ -d "$_d" ] || continue
@@ -720,25 +724,10 @@
               fi
             fi
             ${stageNativeLibsIfStale shim}
-            if [ ! -f "$deps_stamp" ]; then
-              echo "Installing Racket package (link mode, Racket ''${_rkt_ver})..."
-              mkdir -p "$PLTUSERHOME"
-              # A shell hook has no errexit, so every step is chained: the
-              # stamp is what makes provisioning a one-time cost, and stamping
-              # a half-provisioned checkout leaves it broken until someone
-              # deletes the stamp by hand.
-              if raco pkg install --batch --copy --no-docs --no-setup \
-                     --scope user --skip-installed ${racket-deps}/*/ \
-                 && raco pkg update --batch --copy --no-docs --no-setup \
-                      --no-trash --deps fail --scope user ${racket-deps}/*/ \
-                 && raco pkg install --batch --auto --no-setup --link \
-                      --scope user --skip-installed --name torch "$PWD/torch" \
-                 && raco setup --no-docs --pkgs torch; then
-                touch "$deps_stamp"
-              else
-                echo "WARNING: provisioning failed; not stamping, so the next" >&2
-                echo "         shell entry retries it." >&2
-              fi
+            if ! bash ${racketDepsDir}/provision.sh ${racket-deps} "$PWD/torch" \
+                   ${racket-linters}; then
+              echo "WARNING: provisioning failed; not stamping, so the next" >&2
+              echo "         shell entry retries it." >&2
             fi
             # Stamped by the dev tools' store path, so a bump reaches checkouts
             # provisioned before it: install adds the missing packages, then
