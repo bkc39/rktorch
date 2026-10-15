@@ -118,11 +118,14 @@ integer dtype refuses @racket[0.5] and @racket['float32] refuses
 
 @defproc[(fill-value/c [dtype dtype/c 'float32]) flat-contract?]{
 The values @racket[full] accepts for @racket[dtype]. A floating dtype takes
-NaN, either infinity, or a real within its largest finite value;
-@racket['int64] an integer from −2@superscript{63} to
-2@superscript{63} − 1; @racket['uint8] 0–255; @racket['bool] 0 or 1.
-Without a dtype, @racket['float32] applies. Where @tt{torch.full} would
-truncate, wrap or round, the contract refuses.}
+NaN, either infinity, or a real within its largest finite value, and
+refuses a finite real past it; an accepted real is rounded to the nearest
+value the dtype holds, possibly zero, as @racket[1e-50] is in
+@racket['float16]. @racket['int64] takes an integer from
+−2@superscript{63} to 2@superscript{63} − 1 and @racket['uint8] one from
+0 to 255, refusing the non-integers and out-of-range integers
+@tt{torch.full} would truncate or wrap; @racket['bool] takes only 0 or 1.
+Without a dtype, @racket['float32] applies.}
 
 @defproc[(eye [n exact-nonnegative-integer?] [m exact-nonnegative-integer? n]
               [#:device device device/c #f]

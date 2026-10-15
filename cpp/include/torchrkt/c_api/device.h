@@ -17,8 +17,8 @@ typedef enum tr_device_type {
   /* "leave the device alone", meaning the tensor's own device for a
    * conversion and the process default device for a constructor. Accepted
    * by tr_tensor_to, tr_tensor_to_, tr_tensor_to_device, tr_zeros_on,
-   * tr_ones_on, and tr_full_on; every other entry point rejects it as an
-   * unknown device type. */
+   * tr_ones_on, tr_full_on, and tr_full_i64_on; every other entry point
+   * rejects it as an unknown device type. */
   TR_DEVICE_KEEP = -1
 } tr_device_type;
 
