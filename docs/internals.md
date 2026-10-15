@@ -62,11 +62,17 @@ outcome bypasses both paths: a C++ throw during storage release
 unwinds through libtorch's own noexcept frames to `std::terminate`
 before any handler can run — `finalizer_death_test.cpp` pins this.
 
-Every finalizer runs on one thread. Racket starts its finalizer thread
-at the process's first registration, and parallel threads that race
-that registration can each start one, so `collector.rkt` registers a
-finalizer as `torch/foreign` is instantiated and the drain below can
-assume the one thread (`finalizer-thread-test.rkt`).
+Racket starts a finalizer thread at the first registration in each
+namespace (each instance of `ffi/unsafe`'s finalizer module, so each
+module registry and each place), and parallel threads that race that
+registration can each start one: a drain's canary registers outside an
+atomic section, so several workers whose first registration is a drain
+do race it (`finalizer-thread-test.rkt`). `collector.rkt` therefore
+registers a finalizer as `torch/foreign` is instantiated. Every
+finalizer then runs on one thread, provided `torch` is required before
+any parallel thread registers a finalizer in that namespace; a program
+whose parallel threads register through another FFI library first can
+already have several.
 
 A native fault is the exception to "swallowed and counted". Racket CS reports a
 segfault as an exception whose message begins `invalid memory reference`. One

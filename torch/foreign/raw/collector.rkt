@@ -41,10 +41,10 @@
 
 ;; --- a collection that has really finished ---
 
-;; Racket starts the finalizer thread at the process's first registration,
-;; and parallel threads racing that registration can each start one. This
-;; registration, made as the module is instantiated, starts the only one.
-(register-finalizer (box 0) void)
+(define (start-finalizer-thread!)
+  (register-finalizer (box 0) void))
+
+(start-finalizer-thread!)
 
 ;; The canary shows the finalizer thread has started on this collection's
 ;; batch, not that it has finished: finalization order is unspecified and
