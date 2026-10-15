@@ -1,10 +1,5 @@
 #!/usr/bin/env bash
 # Resyntax with the rktorch suite
-#
-#   nix develop .#ci --command scripts/resyntax analyze \
-#     --local-git-repository . [REF] --analyzer-timeout 30000
-#   nix develop .#ci --command scripts/resyntax fix \
-#     --local-git-repository . [REF]
 set -euo pipefail
 
 fail() {
@@ -43,7 +38,7 @@ ref_arg() {
 
 since() {
   local ref base
-  cd -- "$1" >/dev/null 2>&1 || fail "no directory $1"
+  CDPATH='' cd -- "$1" >/dev/null 2>&1 || fail "no directory $1"
   ref=${2:-$(default_ref)}
   base=$(git merge-base HEAD "$ref") ||
     fail "no merge base of HEAD and $ref in $1 (shallow clone or unrelated history?)"

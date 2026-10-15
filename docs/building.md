@@ -21,7 +21,10 @@ nix flake check           # the Nix checks: cpp, format, tidy, line gate, racket
 CI runs two more jobs that `nix flake check` does not cover. The Resyntax gate
 is the `scripts/resyntax analyze` command below, Resyntax's default rules plus
 the repository's own in `scripts/resyntax-rules.rkt`, and it fails on any
-suggestion. Resyntax skips `#lang scribble/lp2`, so the wrapper lints the
+suggestion. It lints the changes since the merge base with an optional `REF`
+after the directory, which defaults to the open pull request's base from `gh`
+(found by head commit on a detached HEAD) when origin has that branch, else
+`origin/master`. Resyntax skips `#lang scribble/lp2`, so the wrapper lints the
 literate examples' code chunks through `scripts/resyntax-lp2.rkt`. The
 code-generation drift check regenerates the ATen bindings and fails if the
 committed output differs:
