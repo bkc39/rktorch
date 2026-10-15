@@ -102,9 +102,9 @@
 (require (for-syntax racket/base racket/syntax syntax/parse)
          (only-in racket/syntax format-symbol)
          (only-in syntax/parse/define define-syntax-parse-rule)
-         (only-in torch
-                  device dtype numel randn reclaim-native-memory! shape tensor-device
-                  tensor-dtype tensor-numel tensor-shape)
+         (only-in torch device dtype numel randn reclaim-native-memory! shape)
+         (prefix-in long:
+                    (only-in torch tensor-device tensor-dtype tensor-numel tensor-shape))
          (only-in torch/audio/data load-audio-fixture)
          (only-in torch/audio/functional log-mel-spectrogram)
          (prefix-in bare: (submod "." bare))
@@ -160,7 +160,8 @@
                 #:reps reps))
   (map getter-case
        '(device tensor-device dtype tensor-dtype shape tensor-shape numel tensor-numel)
-       (list device tensor-device dtype tensor-dtype shape tensor-shape numel tensor-numel)))
+       (list device long:tensor-device dtype long:tensor-dtype shape long:tensor-shape numel
+             long:tensor-numel)))
 
 (define (pipeline-case #:reps [reps 1])
   (define-values (samples rate) (load-audio-fixture))
