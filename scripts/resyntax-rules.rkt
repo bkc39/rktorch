@@ -23,6 +23,9 @@
 
 (provide rktorch-rules rktorch-recommendations)
 
+(module+ private
+  (provide runtime-path-forms-analyzer))
+
 (define named-operators ;; noqa
   (list (list #'add '+ #'torch:+)
         (list #'sub '- #'torch:-)
@@ -188,22 +191,28 @@
   '(define-runtime-paths define-runtime-path-list define-runtime-module-path
     define-runtime-module-path-index runtime-require runtime-paths))
 
-(define (origin-mentions-other-runtime-path-form? origin)
+(define (mentions-other-runtime-path-form? identifiers)
   (cond
-    [(pair? origin)
-     (or (origin-mentions-other-runtime-path-form? (car origin))
-         (origin-mentions-other-runtime-path-form? (cdr origin)))]
-    [(identifier? origin)
-     (and (memq (syntax-e origin) other-runtime-path-forms) #t)]
+    [(pair? identifiers)
+     (or (mentions-other-runtime-path-form? (car identifiers))
+         (mentions-other-runtime-path-form? (cdr identifiers)))]
+    [(identifier? identifiers)
+     (and (memq (syntax-e identifiers) other-runtime-path-forms) #t)]
     [else #f]))
 
 (define (uses-other-runtime-path-form? stx)
-  (or (origin-mentions-other-runtime-path-form? (syntax-property stx 'origin))
+  (or (mentions-other-runtime-path-form? stx)
+      (mentions-other-runtime-path-form? (syntax-property stx 'origin))
       (ormap uses-other-runtime-path-form? (syntax-parts stx))))
 
-(define (original-forms stx)
-  (define inner (append-map original-forms (syntax-parts stx)))
-  (if (syntax-original-path stx) (cons stx inner) inner))
+(define (original-runtime-path-module-paths stx)
+  (define inner
+    (append-map original-runtime-path-module-paths (syntax-parts stx)))
+  (cond
+    [(and (syntax-original-path stx)
+          (eq? (syntax-e stx) 'racket/runtime-path))
+     (cons stx inner)]
+    [else inner]))
 
 (define runtime-path-forms-analyzer
   (make-expansion-analyzer
@@ -211,7 +220,8 @@
    (lambda (expanded)
      (define only-define? (not (uses-other-runtime-path-form? expanded)))
      (define forms
-       (original-forms (syntax-label-paths expanded 'expansion-path)))
+       (original-runtime-path-module-paths
+        (syntax-label-paths expanded 'expansion-path)))
      (sequence->syntax-property-bundle
       (for/list ([form (in-list forms)])
         (syntax-property-entry (syntax-property form 'expansion-path)

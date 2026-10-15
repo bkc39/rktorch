@@ -3,9 +3,17 @@
 (module+ test
   (require (only-in racket/port call-with-output-string)
            (only-in racket/pretty pretty-print-columns pretty-write)
-           (only-in rackunit test-case)
+           (only-in racket/sequence sequence-length)
+           (only-in rackunit check-equal? test-case)
+           (only-in resyntax/grimoire/syntax-property-bundle
+                    syntax-property-bundle-entries)
+           (only-in resyntax/private/analyzer expansion-analyze)
+           (only-in resyntax/private/syntax-neighbors
+                    syntax-label-original-paths)
            resyntax/test/private/rackunit
-           "resyntax-rules.rkt")
+           (only-in threading ~>)
+           "resyntax-rules.rkt"
+           (submod "resyntax-rules.rkt" private))
 
   (define (program #:columns [columns #f] . forms)
     (code-block
@@ -18,6 +26,23 @@
              (parameterize ([pretty-print-columns columns])
                (pretty-write form out))]
             [else (writeln form out)]))))))
+
+  (define (runtime-path-analysis-entry-count . forms)
+    (define expanded
+      (parameterize ([current-namespace (make-base-namespace)])
+        (~> `(module analyzed racket/base ,@forms)
+            (datum->syntax #f _)
+            syntax-label-original-paths
+            expand)))
+    (~> (expansion-analyze runtime-path-forms-analyzer expanded)
+        syntax-property-bundle-entries
+        sequence-length))
+
+  (test-case "the runtime-path analyzer labels only the racket/runtime-path module path"
+    (check-equal? (runtime-path-analysis-entry-count '(require racket/runtime-path)
+                                                     '(define a 1)
+                                                     '(define b 2))
+                  1))
 
   (parameterize ([current-suite-under-test rktorch-rules])
     (test-case "ge on a tensor becomes >="
@@ -233,6 +258,34 @@
        (program '(require racket/runtime-path torch)
                 '(>= (tensor (list 1 2 3)) 2)
                 '(module+ test (runtime-require racket/list)))))
+
+    (test-case "a macro template using another racket/runtime-path form keeps it whole"
+      (check-suite-refactors
+       (program '(require (for-syntax racket/base) racket/runtime-path torch)
+                '(provide mk)
+                '(define-syntax (mk stx)
+                   (syntax-case stx ()
+                     [(_ a b) (syntax (define-runtime-paths (a b) (values "a" "b")))]))
+                '(define-runtime-path here ".")
+                '(ge (tensor (list 1 2 3)) 2))
+       (program '(require (for-syntax racket/base) racket/runtime-path torch)
+                '(provide mk)
+                '(define-syntax (mk stx)
+                   (syntax-case stx ()
+                     [(_ a b) (syntax (define-runtime-paths (a b) (values "a" "b")))]))
+                '(define-runtime-path here ".")
+                '(>= (tensor (list 1 2 3)) 2))))
+
+    (test-case "a quoted runtime-require for syntax keeps racket/runtime-path whole"
+      (check-suite-refactors
+       (program '(require (for-syntax racket/base) racket/runtime-path torch)
+                '(begin-for-syntax (define template (quote-syntax (runtime-require racket/list))))
+                '(define-runtime-path here ".")
+                '(ge (tensor (list 1 2 3)) 2))
+       (program '(require (for-syntax racket/base) racket/runtime-path torch)
+                '(begin-for-syntax (define template (quote-syntax (runtime-require racket/list))))
+                '(define-runtime-path here ".")
+                '(>= (tensor (list 1 2 3)) 2))))
 
     (test-case "an only-in racket/runtime-path stays"
       (check-suite-does-not-refactor
