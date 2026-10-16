@@ -10,7 +10,7 @@
          (only-in racket/sequence sequence->list)
          (only-in racket/string string-join)
          (only-in setup/getinfo get-info/full)
-         (only-in version/utils version<=?))
+         (only-in version/utils valid-version? version<=?))
 
 (define manifest-name ".info-deps")
 
@@ -34,6 +34,10 @@
 (define (platform-dep? dep)
   (and (dep-option dep '#:platform) #t))
 
+(define (invalid-version-dep? dep)
+  (define version (dep-option dep '#:version))
+  (and version (not (valid-version? version))))
+
 (define (source-dep? dep)
   (define-values (_name type) (package-source->name+type (dep-name dep) #f))
   (not (eq? type 'name)))
@@ -42,7 +46,20 @@
   (define info
     (or (get-info/full info-dir)
         (raise-user-error 'racket-deps "no info.rkt in ~a" info-dir)))
-  (append (info 'deps (λ () '())) (info 'build-deps (λ () '()))))
+  (define declared (append (info 'deps (λ () '())) (info 'build-deps (λ () '()))))
+  (define platform-dep (findf platform-dep? declared))
+  (when platform-dep
+    (raise-user-error 'racket-deps
+                      "~a has #:platform ~s; platform-qualified deps are not fetched from the catalog"
+                      (dep-name platform-dep)
+                      (dep-option platform-dep '#:platform)))
+  (define invalid-version-dep (findf invalid-version-dep? declared))
+  (when invalid-version-dep
+    (raise-user-error 'racket-deps
+                      "~a has #:version ~s, which is not a valid Racket version"
+                      (dep-name invalid-version-dep)
+                      (dep-option invalid-version-dep '#:version)))
+  declared)
 
 (define (declared-deps info-dir)
   (define have (installed-pkg-names #:scope 'installation))
@@ -53,7 +70,6 @@
   (-> directory-exists? list?)
   (define-values (wanted _installed) (declared-deps info-dir))
   (define deps (sort wanted string<? #:key dep->string))
-  (define platform-dep (findf platform-dep? deps))
   (define source-dep (findf source-dep? deps))
   (cond
     [(null? deps)
@@ -64,11 +80,6 @@
      (raise-user-error 'racket-deps
                        "~a is a package source; racket-deps fetches catalog packages by name"
                        (dep-name source-dep))]
-    [platform-dep
-     (raise-user-error 'racket-deps
-                       "~a has #:platform ~s; platform-qualified deps are not fetched from the catalog"
-                       (dep-name platform-dep)
-                       (dep-option platform-dep '#:platform))]
     [else deps]))
 
 (define (check-version dep pkg-dir where)

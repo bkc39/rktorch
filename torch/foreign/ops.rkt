@@ -80,6 +80,8 @@
 
 (provide device->type+index
          dims-rest/c
+         dtype-symbols
+         float-dtype-max
          float-dtype/c
          placement
          with-default-device)
@@ -93,6 +95,12 @@
 (define dims-rest/c (listof exact-nonnegative-integer?))
 
 (define dtype-symbols '(float32 float64 int64 bool uint8 float16 bfloat16))
+
+(define float-dtype-max
+  (hasheq 'float16 65504.0
+          'bfloat16 3.3895313892515355e38
+          'float32 3.4028234663852886e38
+          'float64 1.7976931348623157e308))
 
 (define/checked-out dtype/c contract? (apply or/c dtype-symbols))
 

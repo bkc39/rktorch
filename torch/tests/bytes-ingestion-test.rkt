@@ -66,8 +66,8 @@
                (lambda () (full 0.5 2 #:dtype 'int64)))
     (check-exn #rx"int64 fill value must be an integer"
                (lambda () (full 1/2 2 #:dtype 'int64)))
-    (check-exn #rx"int64 fill value must be an integer"
-               (lambda () (full (add1 (expt 2 60)) 2 #:dtype 'int64)))
+    (check-equal? (tensor->list (full (add1 (expt 2 60)) 2 #:dtype 'int64))
+                  (list (add1 (expt 2 60)) (add1 (expt 2 60))))
     (check-exn #rx"int64 fill value must be an integer"
                (lambda () (full (expt 2 63) 2 #:dtype 'int64)))
     (check-equal? (tensor->list (full 1 2 #:dtype 'bool)) '(1.0 1.0))

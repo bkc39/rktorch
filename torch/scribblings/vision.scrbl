@@ -751,8 +751,8 @@ and @racket[padding] pixels of @racket[pad-value] around every image, on
 the device the batch lives on. One channel becomes three. A batch of one
 image comes back as that image, with no border, which is what
 @tt{make_grid} returns there. The layout is torchvision's
-@tt{make_grid}. @racket[pad-value] must be a value the batch's dtype
-holds exactly, so a uint8 batch takes 0 through 255. The grid is built
+@tt{make_grid}. @racket[pad-value] must satisfy @racket[fill-value/c] at
+the batch's dtype, so a uint8 batch takes 0 through 255. The grid is built
 under @racket[with-no-grad], as @tt{make_grid} is decorated with
 @tt{no_grad}: it is a picture of the batch, not a step in its graph. The one-image case returns the batch's own image, so there it
 carries whatever the batch carried, again as @tt{make_grid} does.

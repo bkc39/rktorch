@@ -3,6 +3,7 @@ set -euo pipefail
 
 provision=$1
 f=$2
+step=$3
 t=$(mktemp -d)
 trap 'chmod -R u+w "$t"; rm -rf "$t"' EXIT
 app=$t/rdfix-app
@@ -26,6 +27,9 @@ mkout() {
   rd manifest "$app" > "$out/.info-deps"
 }
 provision() { bash "$provision" "$t/$1" "$app" "$keep" > "$log" 2>&1; }
+enter() {
+  bash -c 'source "$0" "$@"; echo entered' "$step" "$t/$1" "$app" "$keep" > "$log" 2>&1
+}
 fails() {
   if "$@"; then
     echo "expected a failure: $*" >&2
@@ -63,10 +67,16 @@ expect "$(installed)" "rdfix-a rdfix-app rdfix-k"
 second=$(stamps)
 expect "$(wc -w <<< "$second")" 1
 [ "$second" != "$first" ]
+enter out-2
+expect "$(cat "$log")" entered
 
 mkapp app-drift
 fails provision out-2
 grep -q 'bump racket-deps outputHash' "$log"
+expect "$(stamps)" "$second"
+fails enter out-2
+grep -q 'provisioning failed; not stamping' "$log"
+fails grep -q entered "$log"
 expect "$(stamps)" "$second"
 
 export PLTUSERHOME=$t/plt-fresh
@@ -74,4 +84,8 @@ mkout out-3 rdfix-a
 fails provision out-3
 grep -q 'missing dependencies' "$log"
 grep -q '^ *rdfix-c$' "$log"
+expect "$(stamps)" ""
+fails enter out-3
+grep -q 'provisioning failed; not stamping' "$log"
+fails grep -q entered "$log"
 expect "$(stamps)" ""

@@ -36,6 +36,8 @@ void torchrkt_c_api_compile_check(void) {
                         tr_dtype) = tr_ones_on;
   tr_tensor* (*full_on)(const int64_t*, int64_t, double, tr_device_type,
                         int64_t, tr_dtype) = tr_full_on;
+  tr_tensor* (*full_i64_on)(const int64_t*, int64_t, int64_t, tr_device_type,
+                            int64_t, tr_dtype) = tr_full_i64_on;
   tr_tensor* (*from_data)(const float*, uint64_t, const int64_t*, int64_t) =
       tr_from_data;
   tr_tensor* (*from_data_on)(const float*, uint64_t, const int64_t*, int64_t,
@@ -416,6 +418,7 @@ void torchrkt_c_api_compile_check(void) {
   (void)zeros_on;
   (void)ones_on;
   (void)full_on;
+  (void)full_i64_on;
   (void)to_inplace;
   (void)tensor_device;
 }

@@ -70,6 +70,13 @@
       # Source catalog only: a built package's compiled/ belongs to one Racket.
       racketDepsDir = ./nix/racket-deps;
       racketDepsScript = "${racketDepsDir}/racket-deps.rkt";
+      provisionDepsStep = deps: pkgDir: keep: ''
+        if ! bash ${racketDepsDir}/provision.sh ${deps} ${pkgDir} ${keep}; then
+          echo "ERROR: provisioning failed; not stamping, so the next" >&2
+          echo "       shell entry retries it." >&2
+          exit 1
+        fi
+      '';
       racketDepsFor = pkgs: racketPkg:
         pkgs.stdenvNoCC.mkDerivation (finalAttrs: {
           name = "torch-rkt-racket-deps";
@@ -175,12 +182,25 @@
             [ "$(rd base-version ${fixtures}/floored)" = 9.0 ]
             fails rd base-version ${fixtures}/current
             fails rd base-version ${fixtures}/versioned
+            fails rd check ${fixtures}/base-platform "$built"
+            grep -q 'base has #:platform windows; platform-qualified' "$TMPDIR/log"
+            fails rd names ${fixtures}/base-platform
+            grep -q 'base has #:platform windows; platform-qualified' "$TMPDIR/log"
+            fails rd check ${fixtures}/bad-version "$built"
+            grep -qF 'base has #:version "99", which is not a valid Racket version' "$TMPDIR/log"
+            fails rd names ${fixtures}/bad-version
+            grep -qF 'base has #:version "99", which is not a valid Racket version' "$TMPDIR/log"
+            fails rd base-version ${fixtures}/base-platform
+            grep -q 'base has #:platform windows; platform-qualified' "$TMPDIR/log"
+            fails rd base-version ${fixtures}/bad-version
+            grep -qF 'base has #:version "99", which is not a valid Racket version' "$TMPDIR/log"
             fails rd names ${fixtures}/source
             grep -qF 'https://example.com/foo.git is a package source; racket-deps fetches catalog packages by name' "$TMPDIR/log"
           '';
           racket-deps-provision-test = run "torch-rkt-racket-deps-provision-test" ''
             timeout -k 10 600 bash ${racketDepsDir}/provision-test.sh \
-              ${racketDepsDir}/provision.sh ${fixtures}/provision
+              ${racketDepsDir}/provision.sh ${fixtures}/provision \
+              ${pkgs.writeText "provision-deps-step" (provisionDepsStep ''"$1"'' ''"$2"'' ''"$3"'')}
           '';
         };
 
@@ -866,11 +886,7 @@
               fi
             fi
             ${stageNativeLibsIfStale shim}
-            if ! bash ${racketDepsDir}/provision.sh ${racket-deps} "$PWD/torch" \
-                   ${racket-linters}; then
-              echo "WARNING: provisioning failed; not stamping, so the next" >&2
-              echo "         shell entry retries it." >&2
-            fi
+            ${provisionDepsStep racket-deps ''"$PWD/torch"'' racket-linters}
             # Stamped by the dev tools' store path, so a bump reaches checkouts
             # provisioned before it: install adds the missing packages, then
             # update moves all of them, from an older pin or the live catalog

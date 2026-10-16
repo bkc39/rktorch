@@ -110,16 +110,22 @@ As @racket[randn], drawing uniformly from @tt{[0, 1)}.}
                [#:requires-grad? requires-grad? boolean? #f])
          tensor?]{
 A tensor of the given shape filled with @racket[value], as
-@tt{torch.full}. The value must be one the dtype holds exactly: an
-integer dtype refuses @racket[0.5].
+@tt{torch.full}. The value must satisfy @racket[(fill-value/c dtype)]: an
+integer dtype refuses @racket[0.5] and @racket['float32] refuses
+@racket[1e300].
 
 @torch-examples[(full 7 2 2)]}
 
-@defproc[(fill-value/c [dtype dtype/c]) flat-contract?]{
-The values @racket[full] accepts for @racket[dtype]. For @racket['int64], an
-integer from −2@superscript{63} to 2@superscript{63} − 1 that a double
-represents exactly; for @racket['uint8], 0–255; for @racket['bool], 0 or 1;
-any real otherwise.}
+@defproc[(fill-value/c [dtype dtype/c 'float32]) flat-contract?]{
+The values @racket[full] accepts for @racket[dtype]. A floating dtype takes
+NaN, either infinity, or a real within its largest finite value, and
+refuses a finite real past it; an accepted real is rounded to the nearest
+value the dtype holds, possibly zero, as @racket[1e-50] is in
+@racket['float16]. @racket['int64] takes an integer from
+−2@superscript{63} to 2@superscript{63} − 1 and @racket['uint8] one from
+0 to 255, refusing the non-integers and out-of-range integers
+@tt{torch.full} would truncate or wrap; @racket['bool] takes only 0 or 1.
+Without a dtype, @racket['float32] applies.}
 
 @defproc[(eye [n exact-nonnegative-integer?] [m exact-nonnegative-integer? n]
               [#:device device device/c #f]
@@ -152,8 +158,11 @@ The @racket[n] by @racket[m] identity, ones on the diagonal.
                        tensor?])]{
 Each constructor with @racket[t]'s shape, device and dtype unless
 overridden, as @tt{torch.ones_like} and friends; @racket[zeros-like] is
-described with @racket[zeros]. The noise a diffusion step adds is
-@racket[(randn-like x0)], so it lands where the images live.
+described with @racket[zeros]. The @racket[value] given to
+@racket[full-like] must satisfy @racket[fill-value/c] at the dtype it
+builds, so @racket[(full-like (zeros 2) 1e300)] is refused. The noise a
+diffusion step adds is @racket[(randn-like x0)], so it lands where the
+images live.
 
 @torch-examples[(ones-like (zeros 2 3))]}
 
