@@ -47,6 +47,11 @@
 
 ;; --- a collection that has really finished ---
 
+(define (start-finalizer-thread!)
+  (register-finalizer (box 0) void))
+
+(start-finalizer-thread!)
+
 ;; The canary shows the finalizer thread has started on this collection's
 ;; batch, not that it has finished: finalization order is unspecified and
 ;; the thread runs only while this one yields. So yield until the run count

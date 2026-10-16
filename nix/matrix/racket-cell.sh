@@ -26,7 +26,7 @@ case "$1" in
     ;;
   test)
     stage test
-    raco test ./torch/
+    raco test --timeout 300 ./torch/
     raco test examples/test/
     raco test --timeout 1200 scripts/bench/
     ;;
