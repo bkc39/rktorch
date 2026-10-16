@@ -423,7 +423,8 @@
             checkPhase = ''
               runHook preCheck
               # python-cross-test self-skips when python3 `torch` is absent.
-              raco test ./torch/
+              # --timeout makes torch/info.rkt's test-timeouts apply.
+              raco test --timeout 300 ./torch/
               # Each torch/scribblings/examples/NN-name.rkt is a literate
               # scribble/lp2 program; its runner + RackUnit checks live in
               # examples/test/.
