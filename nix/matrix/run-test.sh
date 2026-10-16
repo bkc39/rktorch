@@ -474,11 +474,13 @@ driver_farm() {
 }
 
 farm_links() {
-  local lib links=("$t/farm"/*)
-  [ "${#links[@]}" -eq 3 ] || { echo "run-test: $case: the farm is not three links" >&2; ls -l "$t/farm" >&2; exit 1; }
-  for lib in "${drivers[@]}"; do
-    [ "$(readlink "$t/farm/$lib")" = "$1/$lib" ] || {
-      echo "run-test: $case: $lib does not link into $1" >&2
+  local lib dir=$1 links=("$t/farm"/*)
+  shift
+  [ "$#" -gt 0 ] || set -- "${drivers[@]}"
+  [ "${#links[@]}" -eq "$#" ] || { echo "run-test: $case: the farm is not $# links" >&2; ls -l "$t/farm" >&2; exit 1; }
+  for lib; do
+    [ "$(readlink "$t/farm/$lib")" = "$dir/$lib" ] || {
+      echo "run-test: $case: $lib does not link into $dir" >&2
       ls -l "$t/farm" >&2
       exit 1
     }
@@ -488,8 +490,10 @@ farm_links() {
 case_driver_farm() {
   local lib
   rm -rf "$t/driver" "$t/farm"
-  mkdir -p "$t/driver/nixos" "$t/driver/none"
+  mkdir -p "$t/driver/nixos" "$t/driver/none" "$t/driver/compute" "$t/driver/aux"
   for lib in "${drivers[@]}"; do : >"$t/driver/nixos/$lib"; done
+  : >"$t/driver/compute/libcuda.so.1"
+  for lib in "${drivers[@]:1}"; do : >"$t/driver/aux/$lib"; done
   cat >"$t/driver/ldconfig" <<EOF
 #!$bash
 cat <<'CACHE'
@@ -505,6 +509,14 @@ EOF
   driver_farm none ldconfig
   status_is 0
   farm_links /usr/lib/x86_64-linux-gnu
+  driver_farm compute missing
+  status_is 0
+  farm_links "$t/driver/compute" libcuda.so.1
+  for lib in "${drivers[@]:1}"; do
+    grep -q "^WARNING: $lib not found" "$t/err" || { echo "run-test: $case: no warning for $lib" >&2; cat "$t/err" >&2; exit 1; }
+  done
+  driver_farm aux missing
+  status_is 1
   driver_farm none missing
   status_is 1
   grep -q '^WARNING: libcuda.so.1 not found' "$t/err" || { echo "run-test: $case: no warning" >&2; cat "$t/err" >&2; exit 1; }

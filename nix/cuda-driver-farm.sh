@@ -30,7 +30,7 @@ for lib in libcuda.so.1 libnvidia-ml.so.1 libnvidia-ptxjitcompiler.so.1; do
     ln -sf "$path" "$farm/$lib"
   else
     echo "WARNING: $lib not found in ${dirs[*]} or via ldconfig; CUDA calls may fail" >&2
-    missing=1
+    [ "$lib" != libcuda.so.1 ] || missing=1
   fi
 done
 exit "$missing"
