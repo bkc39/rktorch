@@ -66,6 +66,16 @@
   (partition (λ (dep) (not (member (dep-name dep) have)))
              (remove-duplicates (info-deps info-dir))))
 
+(define/contract (check-closure pkgs-dir)
+  (-> directory-exists? void?)
+  (for ([pkg (in-list (directory-list pkgs-dir))]
+        #:when (get-info/full (build-path pkgs-dir pkg)))
+    (with-handlers ([exn:fail:user?
+                     (λ (e)
+                       (raise (exn:fail:user (format "~a\n  declared in ~a/info.rkt" (exn-message e) pkg)
+                                             (exn-continuation-marks e))))])
+      (info-deps (build-path pkgs-dir pkg)))))
+
 (define/contract (catalog-deps info-dir)
   (-> directory-exists? list?)
   (define-values (wanted _installed) (declared-deps info-dir))
@@ -150,12 +160,13 @@
     [(vector "installed")
      (for-each displayln (installed-pkg-names #:scope 'user))]
     [(vector "check" info-dir deps-dir) (check-current info-dir deps-dir)]
+    [(vector "closure" pkgs-dir) (check-closure pkgs-dir)]
     [(vector "guard" tree) (guard tree)]
     [args
      (raise-user-error
       'racket-deps
       (string-append
        "usage: manifest <info-dir> | names <info-dir> | base-version <info-dir> | installed\n"
-       "     | check <info-dir> <deps-dir> | guard <tree>\n"
+       "     | check <info-dir> <deps-dir> | closure <pkgs-dir> | guard <tree>\n"
        "got ~s")
       args)]))
