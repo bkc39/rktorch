@@ -3,9 +3,9 @@
 (module+ test
   (require (only-in rackunit check-equal? check-exn check-true test-case)
            (only-in "../main.rkt"
-                    arange copy! cuda-available? cuda-device in-flattened-tensor
-                    in-tensor item reshape tensor tensor->list tensor-device
-                    tensor-shape to zeros))
+                    arange copy! cuda-available? cuda-device device
+                    in-flattened-tensor in-tensor item reshape tensor
+                    tensor->list tensor-shape to zeros))
 
   (define m (reshape (arange 6) 2 3))
 
@@ -56,6 +56,6 @@
     (when (cuda-available?)
       (define g (to m (cuda-device)))
       (check-true (for/and ([row (in-tensor g)])
-                    (equal? (tensor-device row) (cuda-device))))
+                    (equal? (device row) (cuda-device))))
       (check-equal? (for/list ([x (in-flattened-tensor g)]) x)
                     '(0.0 1.0 2.0 3.0 4.0 5.0)))))

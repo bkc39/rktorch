@@ -5,9 +5,8 @@
                   unsupplied-arg?)
          (only-in racket/generic define-generics)
          (only-in "../foreign.rkt"
-                  add addcdiv! addcmul! copy! full maybe-grad mul mul! sqrt
-                  sub! tensor-device tensor-dtype tensor? to with-no-grad
-                  zero-grad! zeros-like)
+                  add addcdiv! addcmul! copy! device dtype full maybe-grad mul
+                  mul! sqrt sub! tensor? to with-no-grad zero-grad! zeros-like)
          (only-in "../private/contract.rkt" define/contract-out)
          (only-in "../private/step-log.rkt" log-optimizer-step!))
 
@@ -35,22 +34,22 @@
 ;; it after a move
 (define (moment-on table p)
   (define m (hash-ref! table p (lambda () (zeros-like p))))
-  (define dev (tensor-device p))
-  (define dt (tensor-dtype p))
+  (define dev (device p))
+  (define dt (dtype p))
   (cond
-    [(and (equal? (tensor-device m) dev) (eq? (tensor-dtype m) dt)) m]
+    [(and (equal? (device m) dev) (eq? (dtype m) dt)) m]
     [else
      (define moved (to m dev dt))
      (hash-set! table p moved)
      moved]))
 
 (define (scalar-on table value p)
-  (define dev (tensor-device p))
-  (define dt (tensor-dtype p))
+  (define dev (device p))
+  (define dt (dtype p))
   (define (fresh) (full value #:device dev #:dtype dt))
   (define s (hash-ref! table p fresh))
   (cond
-    [(and (equal? (tensor-device s) dev) (eq? (tensor-dtype s) dt)) s]
+    [(and (equal? (device s) dev) (eq? (dtype s) dt)) s]
     [else
      (define moved (fresh))
      (hash-set! table p moved)

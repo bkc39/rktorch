@@ -5,9 +5,9 @@
                   or/c unsupplied-arg?)
          (only-in racket/list first)
          (only-in "../foreign.rkt"
-                  draw-seed generator? index-select make-generator narrow
-                  gen:sized length randperm select shape tensor tensor-device
-                  tensor? to)
+                  device draw-seed generator? index-select make-generator
+                  narrow gen:sized length randperm select shape tensor tensor?
+                  to)
          (only-in "../private/contract.rkt" define/contract-out)
          (only-in "dataset.rkt"
                   collate/c dataset-batch dataset-device dataset-length
@@ -37,7 +37,7 @@
 (define (same-device/c t)
   (flat-named-contract
    'same-device
-   (lambda (u) (and (tensor? u) (equal? (tensor-device u) (tensor-device t))))))
+   (lambda (u) (and (tensor? u) (equal? (device u) (device t))))))
 
 (define-dataset tensor-dataset (tensors) ;; noqa
   #:contract (->i ([t batched/c])
@@ -49,7 +49,7 @@
   #:length (car (shape (first tensors)))
   #:ref (i)
   (apply values (for/list ([t (in-list tensors)]) (select t 0 i)))
-  #:device (tensor-device (first tensors))
+  #:device (device (first tensors))
   #:batch (indices collate)
   (cond
     [(not (default-collate? collate))
@@ -64,7 +64,7 @@
                (for/list ([t (in-list tensors)])
                  (narrow t 0 start (length indices)))]
               [else
-               (define dev (tensor-device (first tensors)))
+               (define dev (device (first tensors)))
                (define index
                  (if (tensor? indices)
                      (to indices dev)

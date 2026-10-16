@@ -6,9 +6,7 @@
          (only-in racket/contract/base -> ->* cons/c listof or/c)
          (only-in racket/file file->bytes)
          (only-in racket/list take)
-         ;; whole-module on purpose: the expansion needs bindings only-in
-         ;; would strip
-         racket/runtime-path
+         (only-in racket/runtime-path #%datum define-runtime-path)
          (only-in "../data/loader.rkt" dataset? tensor-dataset)
          (only-in "../main.rkt" device/c reshape tensor tensor?)
          (only-in "../private/contract.rkt" define/contract-out)

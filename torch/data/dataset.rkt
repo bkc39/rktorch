@@ -13,7 +13,7 @@
          (only-in racket/generic define-generics)
          (only-in racket/list first)
          (only-in "../foreign.rkt"
-                  device? dtype gen:sized length shape stack tensor-device
+                  device device? dtype gen:sized length shape stack
                   tensor->list tensor?)
          (only-in "../private/contract.rkt" define/contract-out))
 
@@ -87,7 +87,7 @@
               (and (= (length item) (length lead))
                    (andmap (lambda (t u)
                              (and (equal? (shape t) (shape u))
-                                  (equal? (tensor-device t) (tensor-device u))))
+                                  (equal? (device t) (device u))))
                            item
                            lead))))))))
 

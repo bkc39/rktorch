@@ -4,8 +4,8 @@
   (require (only-in racket/match match-define)
            rackunit
            (only-in "../foreign.rkt"
-                    * copy! matmul ones requires-grad? tensor-dtype
-                    with-autocast with-no-grad zeros)
+                    * @ copy! dtype ones requires-grad? with-autocast
+                    with-no-grad zeros)
            (only-in "../foreign/error.rkt" check-handle)
            (only-in "../foreign/raw/linalg.rkt" tr-mm/raw)
            (only-in "../foreign/raw/memory.rkt" oom-retry)
@@ -89,7 +89,7 @@
     (requires-grad? (* x 2.0)))
 
   (define (matmul-dtype)
-    (tensor-dtype (matmul (ones 4 4) (ones 4 4))))
+    (dtype (@ (ones 4 4) (ones 4 4))))
 
   (define (in-worker pool thunk)
     (join (spawn thunk #:pool pool)))

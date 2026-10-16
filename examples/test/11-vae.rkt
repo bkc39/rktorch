@@ -23,9 +23,9 @@
 (module+ test
   (require rackunit)
   ;; Deterministic, offline: three steps on thirty-two fixture images.
-  (define-values (losses net device)
+  (define-values (losses net trained-on)
     (run-example #:device 'cpu #:batch 32 #:steps 3))
-  (check-equal? device 'cpu)
+  (check-equal? trained-on 'cpu)
   (check-equal? (length losses) 3)
   (check-true (andmap (lambda (l) (and (rational? l) (not (nan? l)))) losses)
               (format "non-finite loss: ~a" losses))
@@ -47,7 +47,7 @@
   (unless (eq? (device-type accel) 'cpu)
     (define-values (a-losses a-net _a-dev)
       (run-example #:device accel #:batch 32 #:steps 3))
-    (check-equal? (tensor-device (car (parameters a-net))) accel)
+    (check-equal? (device (car (parameters a-net))) accel)
     (check-true (andmap (lambda (l) (and (rational? l) (not (nan? l)))) a-losses)
                 (format "non-finite loss on ~a: ~a" accel a-losses))
     (check-true (< (last a-losses) (first a-losses))

@@ -28,7 +28,7 @@ case "$1" in
     stage test
     raco test ./torch/
     raco test examples/test/
-    raco test scripts/bench/
+    raco test --timeout 1200 scripts/bench/
     ;;
   *)
     echo "usage: racket-cell.sh install <shim> <racket-deps> docs|no-docs | test" >&2

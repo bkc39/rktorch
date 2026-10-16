@@ -2,7 +2,7 @@
 
 (require (only-in racket/contract/base -> ->i any/c contract-out real-in)
          (only-in "../foreign.rkt"
-                  copy! dtype full lerp! shape tensor-device with-no-grad)
+                  copy! device dtype full lerp! shape with-no-grad)
          (only-in "../private/contract.rkt" define/contract-out)
          (only-in "layer.rkt" layer? parameters))
 
@@ -23,7 +23,7 @@
        (for/and ([p (in-list ps)] [q (in-list qs)])
          (and (not (memq q ps))
               (equal? (shape p) (shape q))
-              (equal? (tensor-device p) (tensor-device q))
+              (equal? (device p) (device q))
               (eq? (dtype p) (dtype q))))))
 
 (define (copy-parameters! e)
@@ -56,12 +56,12 @@
          (lerp! q p (weight-on e q))))]))
 
 (define (weight-on e q)
-  (define dev (tensor-device q))
+  (define dev (device q))
   (define dt (dtype q))
   (define (fresh) (full (- 1.0 (ema-decay e)) #:device dev #:dtype dt))
   (define w (hash-ref! (ema-weights e) q fresh))
   (cond
-    [(and (equal? (tensor-device w) dev) (eq? (dtype w) dt)) w]
+    [(and (equal? (device w) dev) (eq? (dtype w) dt)) w]
     [else
      (define moved (fresh))
      (hash-set! (ema-weights e) q moved)

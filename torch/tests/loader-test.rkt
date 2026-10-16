@@ -304,8 +304,8 @@
         (dataloader ds #:batch-size 4 #:shuffle? #t #:generator (make-generator 3)))
       (define seen
         (for/list ([(xb yb) (in-dataloader loader)])
-          (check-equal? (tensor-device xb) dev)
-          (check-equal? (tensor-device yb) dev)
+          (check-equal? (device xb) dev)
+          (check-equal? (device yb) dev)
           (tensor->list yb)))
       (check-equal? (sort (apply append seen) <) '(0 1 2 3 4 5))
       (check-equal? seen

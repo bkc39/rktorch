@@ -231,6 +231,8 @@ with `backward!` outside the form as PyTorch recommends). From
   computations starts the chain). An expansion analyzer keeps it off a call
   that is already a `~>` or `~>>` step, which receives an argument it does
   not show
+- getters: write `device` and `dtype`, not `tensor-device` or
+  `tensor-dtype`; `scripts/resyntax-rules.rkt` rewrites the long names
 - reductions: `sum mean max min argmax softmax log-softmax`
 - ordering and sampling (`torch/foreign/order-ops.rkt`, tranche 7, #153):
   `topk` and `sort` answer `(values entries indices)`; `argsort`;
@@ -447,7 +449,7 @@ racket scripts/coverage.rkt --changed   # expression coverage (#173); exits
                                # non-zero below the floor and lists the lines
                                # of the files you touched that no test reaches
 
-scripts/resyntax analyze --local-git-repository . origin/master   # lint gate
+scripts/resyntax analyze --local-git-repository . [REF]   # lint gate
                                      # (CI fails on any suggestion; scans
                                      #  changed files, torch/ included; the
                                      #  default rules plus
@@ -455,7 +457,8 @@ scripts/resyntax analyze --local-git-repository . origin/master   # lint gate
                                      #  literate examples' chunks through
                                      #  scripts/resyntax-lp2.rkt)
 scripts/resyntax fix --directory torch
-raco test scripts/resyntax-rules-test.rkt scripts/resyntax-lp2.rkt   # the repository's own rules
+raco test --timeout 600 scripts/resyntax-rules-test.rkt \
+  scripts/resyntax-lp2.rkt scripts/resyntax-wrapper-test.rkt   # lint suite tests
 raco review torch/**/*.rkt
 ```
 
@@ -576,8 +579,8 @@ file documents exactly what it pulls in. Exemptions, each marked with a
 comment at the require site: pure re-export facades (`main.rkt`,
 `foreign.rkt`, `nn.rkt`, `safe.rkt`, `operators.rkt`,
 `scribblings/labels.rkt`), and macro-heavy modules
-whose expansions need the module's full export set (`racket/runtime-path`,
-`syntax/parse/pre`).
+whose expansions need the module's full export set (`syntax/parse/pre`).
+Runtime paths take `(only-in racket/runtime-path #%datum define-runtime-path)`.
 
 - `info.rkt` — package metadata + native-library pre-install hook.
 - `main.rkt` — high-level facade (re-exports `foreign.rkt`).

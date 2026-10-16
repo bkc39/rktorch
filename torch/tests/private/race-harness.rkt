@@ -10,7 +10,7 @@
          (only-in syntax/parse/define define-syntax-parse-rule)
          (only-in threading ~>)
          (only-in "../../foreign.rkt"
-                  + finalizer-failures matmul native-memory-use
+                  + @ finalizer-failures native-memory-use
                   reclaim-native-memory! sum zeros)
          (only-in (submod "../../foreign.rkt" unsafe) tensor-free!)
          (only-in "../../foreign/raw/fault.rkt" native-faulted)
@@ -296,7 +296,7 @@
 (define (churn-once! rng)
   (define a (zeros 64 64))
   (define b (+ a 1.0))
-  (define c (matmul b a))
+  (define c (@ b a))
   (define total (sum c))
   (cond
     [(< (random rng) 0.5)
