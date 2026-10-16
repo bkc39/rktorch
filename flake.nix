@@ -166,6 +166,10 @@
             grep -q 'base has #:platform windows; platform-qualified' "$TMPDIR/log"
             fails rd names ${fixtures}/base-platform
             grep -q 'base has #:platform windows; platform-qualified' "$TMPDIR/log"
+            fails rd check ${fixtures}/bad-version "$built"
+            grep -qF 'base has #:version "99", which is not a valid Racket version' "$TMPDIR/log"
+            fails rd names ${fixtures}/bad-version
+            grep -qF 'base has #:version "99", which is not a valid Racket version' "$TMPDIR/log"
             fails rd names ${fixtures}/source
             grep -qF 'https://example.com/foo.git is a package source; racket-deps fetches catalog packages by name' "$TMPDIR/log"
           '';

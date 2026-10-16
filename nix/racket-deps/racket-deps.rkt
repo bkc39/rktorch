@@ -10,7 +10,7 @@
          (only-in racket/sequence sequence->list)
          (only-in racket/string string-join)
          (only-in setup/getinfo get-info/full)
-         (only-in version/utils version<=?))
+         (only-in version/utils valid-version? version<=?))
 
 (define manifest-name ".info-deps")
 
@@ -34,6 +34,10 @@
 (define (platform-dep? dep)
   (and (dep-option dep '#:platform) #t))
 
+(define (invalid-version-dep? dep)
+  (define version (dep-option dep '#:version))
+  (and version (not (valid-version? version))))
+
 (define (source-dep? dep)
   (define-values (_name type) (package-source->name+type (dep-name dep) #f))
   (not (eq? type 'name)))
@@ -50,6 +54,12 @@
                       "~a has #:platform ~s; platform-qualified deps are not fetched from the catalog"
                       (dep-name platform-dep)
                       (dep-option platform-dep '#:platform)))
+  (define invalid-version-dep (findf invalid-version-dep? declared))
+  (when invalid-version-dep
+    (raise-user-error 'racket-deps
+                      "~a has #:version ~s, which is not a valid Racket version"
+                      (dep-name invalid-version-dep)
+                      (dep-option invalid-version-dep '#:version)))
   (define have (installed-pkg-names #:scope 'installation))
   (partition (λ (dep) (not (member (dep-name dep) have))) declared))
 
