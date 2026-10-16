@@ -7,6 +7,7 @@
                   permute select sub tensor-shape tensor->vector tensor?
                   to-dtype with-no-grad)
          (only-in "../foreign/contracts.rkt" image-batch/c)
+         (only-in "../foreign/ops.rkt" float-dtype-max)
          (only-in "../private/contract.rkt" define/contract-out))
 
 (define ppm-dtypes '(float16 bfloat16 float32 float64 uint8))
@@ -43,7 +44,7 @@
   (define span (- (exact->inexact (cadr value-range))
                   (exact->inexact (car value-range))))
   (or (memq dtype '(float64 uint8))
-      (<= (/ 255.0 span) 3.4028234663852886e38)))
+      (<= (/ 255.0 span) (hash-ref float-dtype-max 'float32))))
 
 (define value-range/c
   (flat-named-contract
