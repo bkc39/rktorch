@@ -6,7 +6,7 @@
          (only-in racket/match match match-define)
          (only-in racket/string string-split)
          (only-in torch torch-version)
-         (only-in "contracts.rkt" contract-workloads pipeline-case)
+         (only-in "contracts.rkt" contract-workloads getter-cases pipeline-case)
          (only-in "crossings.rkt" crossing-cases)
          (only-in "e2e.rkt" examples find-examples)
          (only-in "e2e-suite.rkt" run-e2e)
@@ -92,6 +92,7 @@
       [(contracts)
        (for ([w (in-list (contract-workloads #:scale scale))])
          (measure-group 'contracts (cdr w) #:case-name (car w)))
+       (measure-group 'getters (getter-cases #:reps (n 200000)))
        (measure-group 'pipeline (list (pipeline-case #:reps (n 1))) #:unit "ms" #:scale 1)]
       [(e2e)
        (run-e2e (if only (find-examples only) examples)
@@ -199,13 +200,14 @@
                     (run-suites micro-suites #:rounds 1 #:warmup 0 #:scale 0.001
                                 #:out out #:log quiet))))
     (define groups (for/list ([r (in-list records)]) (hash-ref r 'group)))
-    (for ([g (in-list '("crossings" "layers" "ops" "contracts" "pipeline"))])
+    (for ([g (in-list '("crossings" "layers" "ops" "contracts" "getters" "pipeline"))])
       (check-not-false (member g groups) g))
     (for ([r (in-list records)] #:unless (equal? (hash-ref r 'case) "finalization"))
       (check-true (positive? (hash-ref (hash-ref r 'stats) 'median)) (hash-ref r 'case)))
     (define md (summary-markdown records))
     (for ([heading (in-list '("## Native crossings" "## The op stack" "## Per op"
-                              "## Validation strategies" "## A real pipeline"))])
+                              "## Validation strategies" "## Short and long getters"
+                              "## A real pipeline"))])
       (check-regexp-match (regexp-quote heading) md))
     (check-exn #rx"unknown suite nope"
                (lambda () (run-suites '(nope) #:log quiet)))

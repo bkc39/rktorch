@@ -79,7 +79,10 @@ median, quartiles and IQR, and the load average before and after.
   modules, never the contracted `torch` facade. Arguments arrive as
   parameters, since a literal lets the compiler fold an uncontracted callee
   away, and the shape loop cycles through eight tensors so the accessor is
-  not hoisted out of the loop.
+  not hoisted out of the loop. Its `getters` group calls each short getter
+  (`device`, `dtype`, `shape`, `numel`) and its `tensor-` alias on one 8x8
+  tensor through the `torch` facade, so a contract that makes one name
+  dearer than the other shows as a gap between the pair.
 - **e2e** — the examples' runners in a child process each, with their
   `env-number` overrides. The child compiles the runner under its own
   environment before its clock starts. Every built-in optimizer's `step!`

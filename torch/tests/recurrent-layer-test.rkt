@@ -98,10 +98,10 @@
   (test-case "to moves a recurrent layer through its own move path"
     (define gru (GRU 3 4))
     (check-eq? (to gru 'float64) gru)
-    (check-equal? (map tensor-dtype (parameters gru))
+    (check-equal? (map dtype (parameters gru))
                   '(float64 float64 float64 float64))
     (define-values (out _h) (gru (randn 5 2 3 #:dtype 'float64)))
-    (check-equal? (tensor-dtype out) 'float64))
+    (check-equal? (dtype out) 'float64))
 
   (test-case "the input dtype has to be the layer's"
     (define lstm (LSTM 3 4))
@@ -154,7 +154,7 @@
     (to gru 'float64)
     (check-not-equal? (recorded) (storage-signature weights))
     (define-values (wide _wh) (gru (randn 5 2 3 #:dtype 'float64)))
-    (check-equal? (tensor-dtype wide) 'float64)
+    (check-equal? (dtype wide) 'float64)
     (check-equal? (recorded) (storage-signature weights)))
 
   (test-case "a nested recurrent layer re-records after its parent moves"
@@ -299,7 +299,7 @@
       (define buffer
         (with-no-grad
           (cudnn-rnn-flatten-weight weights 4 3 3 4 0 2 #f #t)))
-      (check-equal? (device-type (tensor-device buffer)) 'cuda)
+      (check-equal? (device-type (device buffer)) 'cuda)
       (check-true (>= (tensor-numel buffer)
                       (for/sum ([w (in-list weights)]) (tensor-numel w))))
       (check-equal? (flat (map (lambda (w) (to-device w 'cpu)) weights)) before)

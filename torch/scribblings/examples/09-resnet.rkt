@@ -52,10 +52,10 @@ float32.
 @chunk[<r09-step>
 (define (train-step net opt xs ys #:schedule [schedule #f])
   (zero-grads! opt)
-  (define device (tensor-device xs))
+  (define batch-device (device xs))
   (define loss
-    (if (eq? (device-type device) 'cuda)
-        (with-autocast #:device device (cross-entropy (net xs) ys))
+    (if (eq? (device-type batch-device) 'cuda)
+        (with-autocast #:device batch-device (cross-entropy (net xs) ys))
         (cross-entropy (net xs) ys)))
   (backward! loss)
   (step! opt)

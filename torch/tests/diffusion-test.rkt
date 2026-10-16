@@ -62,7 +62,7 @@
     (for ([dev (in-list (list (and (cuda-available?) (cuda-device))
                               (and (mps-available?) (mps-device))))]
           #:when dev)
-      (check-equal? (tensor-device (sinusoidal-embedding (to (tensor '(3) #:dtype 'int64) dev) 8))
+      (check-equal? (device (sinusoidal-embedding (to (tensor '(3) #:dtype 'int64) dev) 8))
                     dev
                     "the frequency table follows the timesteps, not the default device"))
     (check-equal? (list-take (tensor->list e) 8) '(0.0 0.0 0.0 0.0 1.0 1.0 1.0 1.0))
@@ -78,7 +78,7 @@
     (define te (TimeEmbedding 8))
     (check-true (time-embedding? te))
     (check-equal? (tensor-shape (te (tensor '(0 5) #:dtype 'int64))) '(2 32))
-    (check-equal? (tensor-dtype ((to (TimeEmbedding 8) 'float64) (tensor '(0 5) #:dtype 'int64)))
+    (check-equal? (dtype ((to (TimeEmbedding 8) 'float64) (tensor '(0 5) #:dtype 'int64)))
                   'float64
                   "the features follow the layer's dtype")
     (define rb (ResBlock 32 64 128))

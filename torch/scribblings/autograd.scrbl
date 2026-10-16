@@ -32,7 +32,7 @@ not a tracked leaf. Use @racket[has-grad?] to ask first, or
 
 @torch-examples[
 (define x (requires-grad! (tensor '(2.0 3.0))))
-(backward! (sum (mul x x)))
+(backward! (sum (* x x)))
 (grad x)
 ]}
 

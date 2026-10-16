@@ -6,7 +6,7 @@
          (only-in racket/match match match-define)
          (only-in "../foreign.rkt"
                   bytes->tensor
-                  tensor-dtype
+                  dtype
                   tensor->bytes
                   tensor-shape
                   tensor?
@@ -31,11 +31,11 @@
   (for/first ([e (in-list tags)] #:when (equal? (cadr e) tag)) e))
 
 (define (encode name t)
-  (define tag (assq (tensor-dtype t) tags))
+  (define tag (assq (dtype t) tags))
   (unless tag
     (raise-arguments-error 'save-state! "unsupported dtype"
                            "entry" name
-                           "dtype" (tensor-dtype t)))
+                           "dtype" (dtype t)))
   (values (cadr tag) (tensor->bytes t)))
 
 (define/contract-out (save-state! model path) ;; noqa
