@@ -6,7 +6,7 @@
 
 (define collection "torch")
 (define version "0.1")
-(define deps '("base" "threading-lib"))
+(define deps '(("base" #:version "9.1") "threading-lib"))
 (define build-deps
   '("at-exp-lib"
     "draw-lib"

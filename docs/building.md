@@ -16,7 +16,8 @@ nix build                 # native lib + Racket package + tests + examples
 ./result/bin/torch        # prints the libtorch version and a 2x2 draw
 nix build .#cpp           # CMake build and the GoogleTest suite only
 nix flake check           # the Nix checks: cpp, format, tidy, line gate, racket,
-                          # and the racket-deps-* checks
+                          # racket91, racket-floor, matrix-runner-test and the
+                          # racket-deps-* checks
 ```
 
 `racket-deps` (flake.nix) is the catalog packages `torch/info.rkt` declares
@@ -39,6 +40,9 @@ version or `torch/info.rkt` changes. It runs the same drift check first and
 stops on it, removes the packages only the previous racket-deps held, and
 installs `torch` with `--deps fail`, so a dep missing from racket-deps fails
 the shell entry instead of being fetched from the live catalog.
+
+The package supports Racket 9.1 and later. `nix run .#matrix` builds and tests
+every supported Racket against the pinned libtorch on the host's system.
 
 CI runs two more jobs that `nix flake check` does not cover. The Resyntax gate
 is the `scripts/resyntax analyze` command below, Resyntax's default rules plus
