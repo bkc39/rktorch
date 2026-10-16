@@ -231,6 +231,8 @@ with `backward!` outside the form as PyTorch recommends). From
   computations starts the chain). An expansion analyzer keeps it off a call
   that is already a `~>` or `~>>` step, which receives an argument it does
   not show
+- getters: write `device` and `dtype`, not `tensor-device` or
+  `tensor-dtype`; `scripts/resyntax-rules.rkt` rewrites the long names
 - reductions: `sum mean max min argmax softmax log-softmax`
 - ordering and sampling (`torch/foreign/order-ops.rkt`, tranche 7, #153):
   `topk` and `sort` answer `(values entries indices)`; `argsort`;

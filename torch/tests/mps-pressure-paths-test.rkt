@@ -13,10 +13,10 @@
 (module+ test
   (require rackunit
            (only-in "../foreign.rkt"
-                    add cpu-device div finalizer-diagnostics full item
+                    add cpu-device device div finalizer-diagnostics full item
                     mean mps-available? mps-device mps-memory-info mul
                     native-memory-limit native-memory-use randn randn-like
-                    reclaim-native-memory! shape sub tensor->list tensor-device
+                    reclaim-native-memory! shape sub tensor->list
                     with-default-device with-no-grad zeros)
            (only-in (submod "../foreign.rkt" unsafe) to!)
            (only-in "../foreign/raw/memory.rkt" native-memory-use/fold)
@@ -62,9 +62,9 @@
   ;; One DDPM reverse step. Every image in the batch shares a timestep, so the
   ;; schedule's per-t coefficients are plain Racket reals pulled once, which
   ;; keeps this loop to the ops the trough path actually cares about.
-  (define (reverse-step net x t beta alpha alpha-bar device)
+  (define (reverse-step net x t beta alpha alpha-bar target-device)
     (define n (car (shape x)))
-    (define ts (full t n #:dtype 'int64 #:device device))
+    (define ts (full t n #:dtype 'int64 #:device target-device))
     (define eps (net x ts #f))
     (define coeff (/ beta (sqrt (- 1.0 alpha-bar))))
     (define mean-term (div (sub x (mul eps coeff)) (sqrt alpha)))
@@ -72,25 +72,25 @@
         mean-term
         (add mean-term (mul (randn-like x) (sqrt beta)))))
 
-  (define (run-sampler net sched steps device)
+  (define (run-sampler net sched steps target-device)
     (define betas (tensor->list (schedule-betas sched)))
     (define alphas (tensor->list (schedule-alphas sched)))
     (define alpha-bars (tensor->list (schedule-alpha-bars sched)))
     (define total (schedule-steps sched))
-    (for/fold ([x (randn sample-batch 3 32 32 #:device device)])
+    (for/fold ([x (randn sample-batch 3 32 32 #:device target-device)])
               ([k (in-range steps)])
       (define t (- total 1 k))
       (with-no-grad
         (reverse-step net x t
                       (list-ref betas t) (list-ref alphas t)
-                      (list-ref alpha-bars t) device))))
+                      (list-ref alpha-bars t) target-device))))
 
   ;; ------------------------------------------------------------------
   (cond
     [(not (mps-available?))
      (displayln "[mps-pressure-paths] no MPS device; skipping")]
     [else
-     (define device (mps-device))
+     (define mps (mps-device))
 
      ;; 4 MiB blocks enough to pass a mark of 1/200 of this machine's working set
      (define (blocks-past-mark)
@@ -111,7 +111,7 @@
          (parameterize ([native-memory-limit #f]
                         [native-memory-fraction 1/200]
                         [native-collect-margin never])
-           (with-default-device device
+           (with-default-device mps
              (for/list ([_ (in-range blocks)]) (randn 1024 1024)))))
        (check-equal? (length held) blocks)
        (check-true (> (backstops) before)
@@ -122,10 +122,10 @@
        (settle!)
        (define (gauge key) (cdr (assq key (mps-memory-info))))
        (define (cached) (- (gauge 'driver-allocated) (gauge 'allocated)))
-       (check-equal? ((allocator-reading) device) (gauge 'driver-allocated)
+       (check-equal? ((allocator-reading) mps) (gauge 'driver-allocated)
                      "on unified memory the reading is what the driver gave")
        ;; tensors freed by a collection go back to the cache, not the driver
-       (with-default-device device
+       (with-default-device mps
          (for ([_ (in-range 24)]) (randn 1024 1024)))
        (collect-and-wait!)
        (define cached-before (cached))
@@ -143,7 +143,7 @@
                         [native-memory-fraction 1/200]
                         [native-collect-margin never]
                         [release-spacing 0])
-           (with-default-device device
+           (with-default-device mps
              (for/list ([_ (in-range small)]) (randn 256 256)))))
        (check-equal? (length held) small)
        (check-true (> (backstops) before) "the backstop never fired")
@@ -154,14 +154,14 @@
 
      (test-case "a no-grad sampler loop troughs, with a minor before the full"
        (settle!)
-       (define net (with-default-device device (small-unet)))
+       (define net (with-default-device mps (small-unet)))
        (define sched (linear-schedule))
        (define before-minors (minors))
        (define before-troughs (troughs))
        (define out
          (parameterize ([native-collect-margin (* 16 mib)]
                         [native-collect-budget 1])
-           (run-sampler net sched 6 device)))
+           (run-sampler net sched 6 mps)))
        (check-equal? (shape out) (list sample-batch 3 32 32))
        (check-true (> (minors) before-minors)
                    "the no-grad trough never ran a minor collection")
@@ -171,14 +171,14 @@
 
      (test-case "one outermost call per step, however deep the UNet nests"
        (settle!)
-       (define net (with-default-device device (small-unet)))
+       (define net (with-default-device mps (small-unet)))
        (define sched (linear-schedule))
        (define steps 4)
        (define before (minors))
        (void
         (parameterize ([native-collect-margin always-due]
                        [native-collect-budget no-backoff])
-          (run-sampler net sched steps device)))
+          (run-sampler net sched steps mps)))
        ;; The UNet calls dozens of sub-layers per forward. Counting those would
        ;; put the tally far above the step count; the mark must hold it to one.
        ;; Both gates are off, so neither a quick step nor garbage the collector
@@ -189,12 +189,12 @@
 
      (test-case "with gradients on, the same shape is the peak, not a trough"
        (settle!)
-       (define net (with-default-device device (small-unet)))
+       (define net (with-default-device mps (small-unet)))
        (define before (minors))
        (void
         (parameterize ([native-collect-margin (* 16 mib)]
                        [native-collect-budget 1])
-          (with-default-device device
+          (with-default-device mps
             (define x (randn 8 3 32 32))
             (define ts (full 500 8 #:dtype 'int64))
             (for ([_ (in-range 3)]) (net x ts #f)))))
@@ -204,10 +204,10 @@
 
      (test-case "an exception inside a no-grad forward leaves no mark behind"
        (settle!)
-       (define net (with-default-device device (small-unet)))
+       (define net (with-default-device mps (small-unet)))
        (parameterize ([native-collect-margin (* 16 mib)]
                       [native-collect-budget 1])
-         (with-default-device device
+         (with-default-device mps
            ;; a [N 3 32 32] batch is the contract; 16x16 raises inside forward
            (check-exn exn:fail?
                       (lambda ()
@@ -235,10 +235,10 @@
        (define high-water
          (parameterize ([native-memory-limit mark]
                         [native-collect-margin never])
-           (with-default-device device
+           (with-default-device mps
              (for/fold ([peak 0]) ([_ (in-range 12)])
                (define batch (for/list ([_ (in-range 32)]) (randn 1024 1024)))
-               (define seen (max peak (device-bytes device)))
+               (define seen (max peak (device-bytes mps)))
                (void (length batch))
                seen))))
        (check-true (> (backstops) before) "the backstop never fired")
@@ -257,7 +257,7 @@
        (define kept
          (parameterize ([native-memory-limit (* 32 mib)]
                         [native-collect-margin never])
-           (with-default-device device
+           (with-default-device mps
              (define resident (for/list ([_ (in-range 16)]) (randn 1024 1024)))
              (for ([_ (in-range 40)]) (void (randn 512 512)))
              resident)))
@@ -270,13 +270,13 @@
 
      (test-case "an in-place move re-accounts, and the counters match the fold"
        (settle!)
-       (define t (with-default-device device (randn 512 512)))
-       (check-equal? (tensor-device t) device)
-       (define on-mps (device-bytes device))
+       (define t (with-default-device mps (randn 512 512)))
+       (check-equal? (device t) mps)
+       (define on-mps (device-bytes mps))
        (check-true (positive? on-mps) "the tensor was never charged to MPS")
        (void (to! t (cpu-device)))
-       (check-equal? (tensor-device t) (cpu-device))
-       (check-true (< (device-bytes device) on-mps)
+       (check-equal? (device t) (cpu-device))
+       (check-true (< (device-bytes mps) on-mps)
                    "the MPS charge survived the move off the device")
        (check-true (positive? (device-bytes (cpu-device)))
                    "the CPU was never charged after the move")
@@ -292,7 +292,7 @@
 
      (test-case "two threads at a trough: the work is not done twice over"
        (settle!)
-       (define net (with-default-device device (small-unet)))
+       (define net (with-default-device mps (small-unet)))
        (define sched (linear-schedule))
        (define before (minors))
        (define threads
@@ -301,7 +301,7 @@
             (lambda ()
               (parameterize ([native-collect-margin (* 16 mib)]
                              [native-collect-budget 1])
-                (void (run-sampler net sched 3 device)))))))
+                (void (run-sampler net sched 3 mps)))))))
        (for-each thread-wait threads)
        (define fired (- (minors) before))
        ;; six outermost calls between the two threads; a claim that let both

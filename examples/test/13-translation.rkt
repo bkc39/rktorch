@@ -80,7 +80,7 @@
   (unless (eq? (device-type accel) 'cpu)
     (define-values (a-losses a-net a-source a-target)
       (run-example #:device accel))
-    (check-equal? (tensor-device (car (parameters a-net))) accel)
+    (check-equal? (device (car (parameters a-net))) accel)
     (check-true (andmap finite? a-losses)
                 (format "non-finite loss on ~a: ~a" accel a-losses))
     (check-true (< (last a-losses) (first a-losses))

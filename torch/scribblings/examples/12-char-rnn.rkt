@@ -214,7 +214,7 @@ and only the chosen index crosses to the host each step.
     (error 'sample "prompt must be non-empty"))
   (unless (positive? temperature)
     (error 'sample "temperature must be positive, got ~a" temperature))
-  (define device (tensor-device (car (parameters net))))
+  (define weights-device (~> net parameters car device))
   (define (last-step-logits logits)
     (define seq-len (cadr (tensor-shape logits)))
     (~> logits (narrow 1 (sub1 seq-len) 1) (reshape 1 -1)))
@@ -223,7 +223,7 @@ and only the chosen index crosses to the host each step.
   (in-eval-mode net
     (with-no-grad
       (define prompt-ids
-        (~> (encode vocab prompt) (reshape 1 -1) (to device)))
+        (~> (encode vocab prompt) (reshape 1 -1) (to weights-device)))
       (define-values (prompt-logits primed) (net prompt-ids #f))
       (define-values (drawn _logits _state)
         (for/fold ([drawn '()]

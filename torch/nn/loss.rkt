@@ -2,8 +2,7 @@
 
 (require (only-in racket/contract/base -> ->* >/c and/c listof or/c)
          (only-in "../foreign.rkt"
-                  device-type mean mul sub tensor? tensor-device to-device
-                  to-dtype)
+                  device device-type mean mul sub tensor? to-device to-dtype)
          (only-in "../generated.rkt"
                   [binary-cross-entropy-with-logits
                    g:binary-cross-entropy-with-logits]
@@ -56,7 +55,7 @@
        (#:blank exact-nonnegative-integer?
         #:zero-infinity? boolean?)
        tensor?)
-  (define home (tensor-device log-probs))
+  (define home (device log-probs))
   (define via-cpu? (mps-ctc-backward-wrong? home target-lengths))
   (define (placed t) (if via-cpu? (to-device t 'cpu) t))
   (define loss

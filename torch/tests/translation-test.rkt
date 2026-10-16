@@ -102,7 +102,7 @@
   (test-case "sentences pad to a common width after their <eos>"
     (define v (words->vocab '("je vais bien" "oui")))
     (define t (sentences->tensor v '("je vais bien" "oui")))
-    (check-equal? (tensor-dtype t) 'int64)
+    (check-equal? (dtype t) 'int64)
     (check-equal? (tensor-shape t) '(2 4))
     (check-equal? (tensor->list t) '(3 4 5 2 6 2 0 0))
     (check-equal? (tensor-shape (sentences->tensor v '("oui") #:width 10))
