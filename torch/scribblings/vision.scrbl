@@ -258,11 +258,11 @@ names and take an image, @tt{[C H W]}, or a batch, @tt{[N C H W]}, as does
 @racket[imagenet-preprocess].
 
 @defproc[(convert-image-dtype [x tensor?]
-                              [dtype (or/c 'uint8 'float16 'bfloat16
-                                           'float32 'float64)
-                                     'float32])
+                              [target-dtype (or/c 'uint8 'float16 'bfloat16
+                                                  'float32 'float64)
+                                            'float32])
          tensor?]{
-@racket[x] as @racket[dtype], rescaled between the two conventions for
+@racket[x] as @racket[target-dtype], rescaled between the two conventions for
 pixels: a @racket['uint8] image holds 0 to 255, a float one 0 to 1. So a
 decoded image divides by 255 on the way to a float dtype, and a float
 image multiplies by @racket[255.999] and truncates on the way back, which
@@ -742,7 +742,7 @@ image viewer and converter reads.
 @defproc[(image-grid [images tensor?]
                      [#:columns columns exact-positive-integer? 8]
                      [#:padding padding exact-nonnegative-integer? 2]
-                     [#:pad-value pad-value (fill-value/c (tensor-dtype images)) 0])
+                     [#:pad-value pad-value (fill-value/c (dtype images)) 0])
          tensor?]{
 Lays the @tt{[N C H W]} batch @racket[images], a rank-4 tensor with at
 least one image and no zero dimension, out as one @tt{[C H' W']} image,

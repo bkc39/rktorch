@@ -33,7 +33,7 @@
                   '(3 4 8))
     (define bytes-batch (to-dtype (full 9.0 2 3 2 2) 'uint8))
     (define byte-grid (image-grid bytes-batch #:padding 1 #:pad-value 7))
-    (check-equal? (tensor-dtype byte-grid) 'uint8)
+    (check-equal? (dtype byte-grid) 'uint8)
     (check-equal? (tensor->list (select (select byte-grid 0 0) 0 0))
                   '(7 7 7 7 7 7 7))
     (check-exn #rx"^image-grid: contract violation"
@@ -101,7 +101,7 @@
                               11)
                     (bytes 128 128 128)
                     (format "~a takes a scale past its own range" half))
-      (check-equal? (tensor-dtype (image-grid (to-dtype (full 9.0 2 3 2 2) half)))
+      (check-equal? (dtype (image-grid (to-dtype (full 9.0 2 3 2 2) half)))
                     half
                     (format "a ~a batch grids in its dtype" half))))
 
@@ -166,7 +166,7 @@
     (when (cuda-available?)
       (define x (to (rand 4 3 8 8) (cuda-device)))
       (define grid (image-grid x #:columns 2))
-      (check-equal? (tensor-device grid) (cuda-device))
+      (check-equal? (device grid) (cuda-device))
       ;; two rows of two 8x8 images with padding 2: 22 by 22, 13 header bytes
       (check-equal? (tensor-shape grid) '(3 22 22))
       (check-equal? (bytes-length (written grid)) (+ 13 (* 3 22 22))))))

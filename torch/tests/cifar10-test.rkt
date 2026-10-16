@@ -6,8 +6,8 @@
            rackunit
            (only-in "../data/loader.rkt" dataset-ref)
            (only-in "../main.rkt"
-                    cuda-available? cuda-device dtype length mps-available?
-                    mps-device ref shape tensor->list tensor-device)
+                    cuda-available? cuda-device device dtype length
+                    mps-available? mps-device ref shape tensor->list)
            (only-in "../vision/cifar10.rkt"
                     cifar10-archive-files
                     cifar10-cached?
@@ -45,8 +45,8 @@
           #:when dev)
       (define-values (imgs lbls)
         (cifar10-records->tensors (make-bytes (* 2 3073) 9) #:device dev))
-      (check-equal? (tensor-device imgs) dev)
-      (check-equal? (tensor-device lbls) dev)
+      (check-equal? (device imgs) dev)
+      (check-equal? (device lbls) dev)
       (check-equal? (shape imgs) '(2 3 32 32))))
 
   (test-case "records must come whole"

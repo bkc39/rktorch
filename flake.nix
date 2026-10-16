@@ -423,14 +423,15 @@
             checkPhase = ''
               runHook preCheck
               # python-cross-test self-skips when python3 `torch` is absent.
-              raco test ./torch/
+              # --timeout makes torch/info.rkt's test-timeouts apply.
+              raco test --timeout 300 ./torch/
               # Each torch/scribblings/examples/NN-name.rkt is a literate
               # scribble/lp2 program; its runner + RackUnit checks live in
               # examples/test/.
               raco test examples/test/
               # The benchmark harness's own logic and a seconds-long smoke
               # pass of every suite; never its numbers.
-              raco test scripts/bench/
+              raco test --timeout 1200 scripts/bench/
               runHook postCheck
             '';
 
@@ -678,7 +679,7 @@
                  && raco pkg update --batch --copy --no-docs --no-trash \
                       --deps fail --scope user ${racket-linters}/*/; then
                 touch "$linters_stamp"
-                echo "Done. Lint: scripts/resyntax analyze --local-git-repository . origin/master"
+                echo "Done. Lint: scripts/resyntax analyze --local-git-repository ."
                 echo "      full sweep: scripts/resyntax analyze --directory torch  |  raco review <files>"
                 echo "      coverage:   racket scripts/coverage.rkt"
               else

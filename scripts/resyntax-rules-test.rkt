@@ -2,17 +2,47 @@
 
 (module+ test
   (require (only-in racket/port call-with-output-string)
-           (only-in rackunit test-case)
+           (only-in racket/pretty pretty-print-columns pretty-write)
+           (only-in racket/sequence sequence-length)
+           (only-in rackunit check-equal? test-case)
+           (only-in resyntax/grimoire/syntax-property-bundle
+                    syntax-property-bundle-entries)
+           (only-in resyntax/private/analyzer expansion-analyze)
+           (only-in resyntax/private/syntax-neighbors
+                    syntax-label-original-paths)
            resyntax/test/private/rackunit
-           "resyntax-rules.rkt")
+           (only-in threading ~>)
+           "resyntax-rules.rkt"
+           (submod "resyntax-rules.rkt" private))
 
-  (define (program . forms)
+  (define (program #:columns [columns #f] . forms)
     (code-block
      (call-with-output-string
       (lambda (out)
         (displayln "#lang racket/base" out)
         (for ([form (in-list forms)])
-          (writeln form out))))))
+          (cond
+            [columns
+             (parameterize ([pretty-print-columns columns])
+               (pretty-write form out))]
+            [else (writeln form out)]))))))
+
+  (define (runtime-path-analysis-entry-count . forms)
+    (define expanded
+      (parameterize ([current-namespace (make-base-namespace)])
+        (~> `(module analyzed racket/base ,@forms)
+            (datum->syntax #f _)
+            syntax-label-original-paths
+            expand)))
+    (~> (expansion-analyze runtime-path-forms-analyzer expanded)
+        syntax-property-bundle-entries
+        sequence-length))
+
+  (test-case "the runtime-path analyzer labels only the racket/runtime-path module path"
+    (check-equal? (runtime-path-analysis-entry-count '(require racket/runtime-path)
+                                                     '(define a 1)
+                                                     '(define b 2))
+                  1))
 
   (parameterize ([current-suite-under-test rktorch-rules])
     (test-case "ge on a tensor becomes >="
@@ -82,6 +112,117 @@
        (program '(require torch)
                 '(define (ge a b) (>= a b))
                 '(ge 2 1)))))
+
+  (parameterize ([current-suite-under-test rktorch-rules])
+    (test-case "tensor-device and tensor-dtype become device and dtype"
+      (check-suite-refactors
+       (program '(require torch)
+                '(let ([t (tensor (list 1 2))])
+                   (list (tensor-device t) (tensor-dtype t))))
+       (program '(require torch)
+                '(let ([t (tensor (list 1 2))])
+                   (list (device t) (dtype t))))))
+
+    (test-case "a long getter passed as a value becomes the short one"
+      (check-suite-refactors
+       (program '(require torch)
+                '(map tensor-dtype (list (tensor (list 1 2)))))
+       (program '(require torch)
+                '(map dtype (list (tensor (list 1 2)))))))
+
+    (test-case "a long getter passed as a keyword argument becomes the short one"
+      (check-suite-refactors
+       (program '(require torch)
+                '(sort (list (tensor (list 1.0))) symbol<? #:key tensor-dtype))
+       (program '(require torch)
+                '(sort (list (tensor (list 1.0))) symbol<? #:key dtype))))
+
+    (test-case "a long getter bound by define becomes the short one"
+      (check-suite-refactors
+       (program '(require torch) '(define get tensor-dtype))
+       (program '(require torch) '(define get dtype))))
+
+    (test-case "a long getter bound by let becomes the short one"
+      (check-suite-refactors
+       (program '(require torch) '(let ([get tensor-dtype]) get))
+       (program '(require torch) '(let ([get dtype]) get))))
+
+    (test-case "a getter call keeps the comment inside it"
+      (check-suite-refactors
+       (code-block (string-append "#lang racket/base\n"
+                                  "(require torch)\n"
+                                  "(tensor-dtype ; the tensor\n"
+                                  " (tensor (list 1.0)))\n"))
+       (code-block (string-append "#lang racket/base\n"
+                                  "(require torch)\n"
+                                  "(dtype ; the tensor\n"
+                                  " (tensor (list 1.0)))\n"))))
+
+    (test-case "a long getter as a ~> step becomes the short one"
+      (check-suite-refactors
+       (program '(require torch) '(~> (tensor (list 1.0)) tensor-device))
+       (program '(require torch) '(~> (tensor (list 1.0)) device))))
+
+    (test-case "a long getter call as a ~>> step becomes the short one"
+      (check-suite-refactors
+       (program '(require torch)
+                '(~>> (tensor (list 1.0)) (tensor-dtype) (list 1)))
+       (program '(require torch)
+                '(~>> (tensor (list 1.0)) (dtype) (list 1)))))
+
+    (test-case "tensor-device stays where device names a local"
+      (check-suite-does-not-refactor
+       (program '(require torch)
+                '(define (place xs)
+                   (define device (tensor-device xs))
+                   device))))
+
+    (test-case "tensor-dtype stays where dtype is not imported"
+      (check-suite-does-not-refactor
+       (program '(require (only-in torch tensor tensor-dtype))
+                '(tensor-dtype (tensor (list 1 2))))))
+
+    (test-case "a tensor-dtype that is not torch's stays"
+      (check-suite-does-not-refactor
+       (program '(require torch)
+                '(define (tensor-dtype t) 'float32)
+                '(tensor-dtype 1))))
+
+    (test-case "a renamed import of tensor-dtype stays"
+      (check-suite-does-not-refactor
+       (program '(require (rename-in torch [tensor-dtype long-dtype]))
+                '(long-dtype (tensor (list 1 2))))))
+
+    (test-case "a require naming both getters stays"
+      (check-suite-does-not-refactor
+       (program '(require (only-in torch dtype tensor tensor-dtype))
+                '(dtype (tensor (list 1 2))))))
+
+    (test-case "a contract-out export of tensor-device stays"
+      (check-suite-does-not-refactor
+       (program '(require racket/contract/base torch)
+                '(provide (contract-out [tensor-device any/c])))))
+
+    (test-case "a plain export of tensor-dtype stays"
+      (check-suite-does-not-refactor
+       (program '(require torch)
+                '(provide tensor-dtype))))
+
+    (test-case "a quoted tensor-dtype stays"
+      (check-suite-does-not-refactor
+       (program '(require torch)
+                '(list 'tensor-dtype (quote tensor-device)))))
+
+    (test-case "a getter written inside a quasiquote stays"
+      (check-suite-does-not-refactor
+       (program '(require torch)
+                '(define t (tensor (list 1.0)))
+                '(list `(tensor-dtype ,t)))))
+
+    (test-case "a renamed import of add stays"
+      (check-suite-does-not-refactor
+       (program '(require (rename-in torch [add plus]))
+                '(plus (tensor (list 1.0)) 1.0)))))
 
   (define calls
     '((define (f . xs) (car xs))
@@ -186,4 +327,98 @@
 
     (test-case "without threading's ~> nothing threads"
       (check-suite-does-not-refactor
-       (program '(add1 (sub1 (abs 1))))))))
+       (program '(add1 (sub1 (abs 1))))))
+
+    (test-case "a whole racket/runtime-path becomes only-in"
+      (check-suite-refactors
+       (program '(require racket/runtime-path)
+                '(define-runtime-path here "."))
+       (program '(require (only-in racket/runtime-path #%datum define-runtime-path))
+                '(define-runtime-path here "."))))
+
+    (test-case "the other required modules keep their places"
+      (check-suite-refactors
+       (program '(require json racket/runtime-path racket/list)
+                '(define-runtime-path here "."))
+       (program #:columns 72
+                '(require json
+                          (only-in racket/runtime-path #%datum define-runtime-path)
+                          racket/list)
+                '(define-runtime-path here "."))))
+
+    (test-case "a test submodule's require is rewritten too"
+      (check-suite-refactors
+       (program '(module+ test (require racket/runtime-path)))
+       (program '(module+ test
+                   (require (only-in racket/runtime-path #%datum define-runtime-path))))))
+
+    (test-case "a module using another racket/runtime-path form keeps it whole"
+      (check-suite-refactors
+       (program '(require (for-syntax racket/base) racket/runtime-path torch)
+                '(define-runtime-paths (a b) (values "a" "b"))
+                '(ge (tensor (list 1 2 3)) 2))
+       (program '(require (for-syntax racket/base) racket/runtime-path torch)
+                '(define-runtime-paths (a b) (values "a" "b"))
+                '(>= (tensor (list 1 2 3)) 2))))
+
+    (test-case "a submodule using another racket/runtime-path form keeps it whole"
+      (check-suite-refactors
+       (program '(require racket/runtime-path torch)
+                '(ge (tensor (list 1 2 3)) 2)
+                '(module+ test (runtime-require racket/list)))
+       (program '(require racket/runtime-path torch)
+                '(>= (tensor (list 1 2 3)) 2)
+                '(module+ test (runtime-require racket/list)))))
+
+    (test-case "a macro template using another racket/runtime-path form keeps it whole"
+      (check-suite-refactors
+       (program '(require (for-syntax racket/base) racket/runtime-path torch)
+                '(provide mk)
+                '(define-syntax (mk stx)
+                   (syntax-case stx ()
+                     [(_ a b) (syntax (define-runtime-paths (a b) (values "a" "b")))]))
+                '(define-runtime-path here ".")
+                '(ge (tensor (list 1 2 3)) 2))
+       (program '(require (for-syntax racket/base) racket/runtime-path torch)
+                '(provide mk)
+                '(define-syntax (mk stx)
+                   (syntax-case stx ()
+                     [(_ a b) (syntax (define-runtime-paths (a b) (values "a" "b")))]))
+                '(define-runtime-path here ".")
+                '(>= (tensor (list 1 2 3)) 2))))
+
+    (test-case "a quoted runtime-require for syntax keeps racket/runtime-path whole"
+      (check-suite-refactors
+       (program '(require (for-syntax racket/base) racket/runtime-path torch)
+                '(begin-for-syntax (define template (quote-syntax (runtime-require racket/list))))
+                '(define-runtime-path here ".")
+                '(ge (tensor (list 1 2 3)) 2))
+       (program '(require (for-syntax racket/base) racket/runtime-path torch)
+                '(begin-for-syntax (define template (quote-syntax (runtime-require racket/list))))
+                '(define-runtime-path here ".")
+                '(>= (tensor (list 1 2 3)) 2))))
+
+    (test-case "a module re-exporting racket/runtime-path keeps it whole"
+      (check-suite-refactors
+       (program '(require racket/runtime-path torch)
+                '(provide (all-from-out racket/runtime-path))
+                '(ge (tensor (list 1 2 3)) 2))
+       (program '(require racket/runtime-path torch)
+                '(provide (all-from-out racket/runtime-path))
+                '(>= (tensor (list 1 2 3)) 2))))
+
+    (test-case "a local binding named like another racket/runtime-path form keeps it whole"
+      (check-suite-refactors
+       (program '(require racket/runtime-path torch)
+                '(define runtime-paths 1)
+                '(define-runtime-path here ".")
+                '(ge (tensor (list 1 2 3)) 2))
+       (program '(require racket/runtime-path torch)
+                '(define runtime-paths 1)
+                '(define-runtime-path here ".")
+                '(>= (tensor (list 1 2 3)) 2))))
+
+    (test-case "an only-in racket/runtime-path stays"
+      (check-suite-does-not-refactor
+       (program '(require (only-in racket/runtime-path #%datum define-runtime-path))
+                '(define-runtime-path here "."))))))

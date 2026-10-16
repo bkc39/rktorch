@@ -2,7 +2,7 @@
 
 (require (only-in racket/list remove-duplicates)
          (only-in "../foreign.rkt"
-                  device-type flatten item numel select tensor-device with-no-grad))
+                  device device-type flatten item numel select with-no-grad))
 
 (provide log-optimizer-step!
          settle!)
@@ -10,7 +10,7 @@
 (define-logger rktorch-step)
 
 (define (accelerator-of p)
-  (define d (tensor-device p))
+  (define d (device p))
   (and (not (eq? (device-type d) 'cpu)) d))
 
 (define (settle! params #:accelerator-of [accelerator-of accelerator-of])

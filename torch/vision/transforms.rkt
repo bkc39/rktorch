@@ -7,9 +7,9 @@
                   real-in)
          (only-in racket/math exact-floor exact-round exact-truncate)
          (only-in "../foreign.rkt"
-                  copy! div draw-seed flip generator? matmul mul narrow ne
-                  reshape select stack sub tensor tensor-device tensor-dtype
-                  tensor-shape tensor? to-dtype transpose where zeros)
+                  @ copy! device div draw-seed dtype flip generator? mul narrow
+                  ne reshape select stack sub tensor tensor-shape tensor?
+                  to-dtype transpose where zeros)
          (only-in "../foreign/contracts.rkt" image-batch/c)
          (only-in "../private/contract.rkt" define/contract-out))
 
@@ -34,7 +34,7 @@
      (define rng (batch-rng generator))
      (define flipped
        (for/list ([_ (in-range n)]) (if (< (random rng) p) 1 0)))
-     (define mask (reshape (ne (tensor flipped #:device (tensor-device x)) 0)
+     (define mask (reshape (ne (tensor flipped #:device (device x)) 0)
                            n 1 1 1))
      (where mask (flip x 3) x)]))
 
@@ -54,8 +54,8 @@
   (define h (caddr dims))
   (define w (cadddr dims))
   (define padded (zeros n (cadr dims) (+ h (* 2 padding)) (+ w (* 2 padding))
-                        #:device (tensor-device x)
-                        #:dtype (tensor-dtype x)))
+                        #:device (device x)
+                        #:dtype (dtype x)))
   (copy! (narrow (narrow padded 2 padding h) 3 padding w) x)
   (define rng (batch-rng generator))
   (define span (add1 (* 2 padding)))
@@ -88,7 +88,7 @@
   (flat-named-contract
    'float-image-or-batch
    (and/c image-or-batch/c
-          (lambda (x) (and (memq (tensor-dtype x) float-dtypes) #t)))))
+          (lambda (x) (and (memq (dtype x) float-dtypes) #t)))))
 
 (define size/c
   (flat-named-contract
@@ -152,9 +152,9 @@
 
 ;; the weights are written at the image's own width, so the matrix is built
 ;; where the image lives with no float64 copy, which MPS could not hold
-(define (interpolation-matrix in out antialias? dtype device)
+(define (interpolation-matrix in out antialias? image)
   (define-values (make-weights put!)
-    (if (eq? dtype 'float64)
+    (if (eq? (dtype image) 'float64)
         (values make-f64vector f64vector-set!)
         (values make-f32vector f32vector-set!)))
   (define weights (make-weights (* out in) 0.0))
@@ -163,30 +163,26 @@
   (for* ([row (in-range out)]
          [kw (in-list (row-of row in scale))])
     (put! weights (+ (* row in) (car kw)) (cdr kw)))
-  (reshape (tensor weights #:device device) out in))
+  (reshape (tensor weights #:device (device image)) out in))
 
 (define (resized x oh ow antialias?)
   (define-values (h w) (spatial-size x))
-  (define dtype (tensor-dtype x))
-  (define device (tensor-device x))
   (define rows
     (if (= oh h)
         x
-        (matmul (interpolation-matrix h oh antialias? dtype device) x)))
+        (@ (interpolation-matrix h oh antialias? x) x)))
   (if (= ow w)
       rows
-      (matmul rows
-              (transpose (interpolation-matrix w ow antialias? dtype device)
-                         0 1))))
+      (@ rows (transpose (interpolation-matrix w ow antialias? x) 0 1))))
 
 (define/contract-out (resize x size #:antialias? [antialias? #t]) ;; noqa
   (->* [float-image/c size/c] [#:antialias? boolean?] tensor?)
   (define-values (h w) (spatial-size x))
   (define-values (oh ow) (output-size size h w))
-  (define dtype (tensor-dtype x))
+  (define source-dtype (dtype x))
   ;; the half dtypes interpolate in float32, as ATen's CPU kernels do
-  (if (memq dtype '(float16 bfloat16))
-      (to-dtype (resized (to-dtype x 'float32) oh ow antialias?) dtype)
+  (if (memq source-dtype '(float16 bfloat16))
+      (to-dtype (resized (to-dtype x 'float32) oh ow antialias?) source-dtype)
       (resized x oh ow antialias?)))
 
 (define/contract-out (center-crop x size) ;; noqa
@@ -205,8 +201,8 @@
        [result tensor?])
   (define (per-channel vs)
     (reshape (tensor (map exact->inexact vs)
-                     #:dtype (tensor-dtype x)
-                     #:device (tensor-device x))
+                     #:dtype (dtype x)
+                     #:device (device x))
              (length vs) 1 1))
   (div (sub x (per-channel mean)) (per-channel std)))
 
@@ -232,17 +228,17 @@
 (define image-tensor/c
   (flat-named-contract
    'image-dtype-tensor
-   (lambda (t) (and (tensor? t) (memq (tensor-dtype t) image-dtypes) #t))))
+   (lambda (t) (and (tensor? t) (memq (dtype t) image-dtypes) #t))))
 
-(define/contract-out (convert-image-dtype x [dtype 'float32]) ;; noqa
+(define/contract-out (convert-image-dtype x [target-dtype 'float32]) ;; noqa
   (->* [image-tensor/c] [image-dtype/c] tensor?)
-  (define from (tensor-dtype x))
+  (define from (dtype x))
   (cond
-    [(eq? from dtype) x]
-    [(eq? from 'uint8) (div (to-dtype x dtype) 255)]
+    [(eq? from target-dtype) x]
+    [(eq? from 'uint8) (div (to-dtype x target-dtype) 255)]
     ;; convert_image_dtype's scale: 1.0 lands on 255 and nothing past it
-    [(eq? dtype 'uint8) (to-dtype (mul x (- 256.0 1e-3)) 'uint8)]
-    [else (to-dtype x dtype)]))
+    [(eq? target-dtype 'uint8) (to-dtype (mul x (- 256.0 1e-3)) 'uint8)]
+    [else (to-dtype x target-dtype)]))
 
 (define rgb-image/c
   (three-channels/c 'three-channel-image-or-batch

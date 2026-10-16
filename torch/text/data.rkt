@@ -1,8 +1,7 @@
 #lang racket/base
 
-;; whole-module on purpose: the expansion needs bindings only-in would strip
-(require racket/runtime-path
-         (only-in racket/file file->string)
+(require (only-in racket/file file->string)
+         (only-in racket/runtime-path #%datum define-runtime-path)
          (only-in racket/set for/set set->list)
          (only-in racket/string string-replace string-trim)
          (only-in "../private/download.rkt" download-cached)

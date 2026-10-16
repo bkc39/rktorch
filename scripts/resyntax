@@ -1,21 +1,70 @@
 #!/usr/bin/env bash
-#
-# Resyntax with this repository's suite: the default recommendations plus
-# the rules in scripts/resyntax-rules.rkt, tested by
-# scripts/resyntax-rules-test.rkt. Resyntax skips #lang scribble/lp2, so
-# scripts/resyntax-lp2.rkt then lints the literate examples' chunks with
-# the same suite; it takes --file, --directory, --local-git-repository and
-# --analyzer-timeout.
-#
-#   nix develop .#ci --command scripts/resyntax analyze \
-#     --local-git-repository . origin/master --analyzer-timeout 30000
-#   nix develop .#ci --command scripts/resyntax fix \
-#     --local-git-repository . origin/master
+# Resyntax with the rktorch suite
 set -euo pipefail
+
+fail() {
+  echo "resyntax: $*" >&2
+  exit 2
+}
+
+pr_base() {
+  local query key
+  if git symbolic-ref -q HEAD >/dev/null; then
+    query=(view --json 'state,baseRefName' --jq '.state + " " + .baseRefName')
+    key=OPEN
+  else
+    query=(list --state open --limit 200 --json 'headRefOid,baseRefName'
+           --jq '.[] | .headRefOid + " " + .baseRefName')
+    key=$(git rev-parse HEAD)
+  fi
+  timeout 20 gh pr "${query[@]}" 2>/dev/null |
+    awk -v key="$key" '$1 == key { print $2 }'
+}
+
+default_ref() {
+  local name
+  name=$(pr_base) || name=
+  if [ -n "$name" ] &&
+     git rev-parse -q --verify "origin/$name^{commit}" >/dev/null; then
+    echo "origin/$name"
+  else
+    echo origin/master
+  fi
+}
+
+ref_arg() {
+  [[ ${1-} == --* ]] || echo "${1-}"
+}
+
+since() {
+  local ref base
+  CDPATH='' cd -- "$1" >/dev/null 2>&1 || fail "no directory $1"
+  ref=${2:-$(default_ref)}
+  base=$(git merge-base HEAD "$ref") ||
+    fail "no merge base of HEAD and $ref in $1 (shallow clone or unrelated history?)"
+  echo "resyntax: linting changes since $ref (merge base ${base:0:12})" >&2
+  echo "$base"
+}
 
 root=$(git rev-parse --show-toplevel)
 command=$1
 shift
+args=()
+while [ $# -gt 0 ]; do
+  case $1 in
+    --local-git-repository)
+      [[ ${2-} && $2 != --* ]] || fail "--local-git-repository needs DIR [REF]"
+      ref=$(ref_arg "${3-}")
+      base=$(since "$2" "$ref")
+      args+=(--local-git-repository "$2" "$base")
+      shift $((${#ref} ? 3 : 2))
+      ;;
+    *)
+      args+=("$1")
+      shift
+      ;;
+  esac
+done
 lp2_flags=()
 if [ "$command" = fix ]; then
   lp2_flags=(--fix)
@@ -23,6 +72,6 @@ fi
 rc=0
 resyntax "$command" \
   --refactoring-suite "(file \"$root/scripts/resyntax-rules.rkt\")" \
-  rktorch-recommendations "$@" || rc=$?
-racket "$root/scripts/resyntax-lp2.rkt" "${lp2_flags[@]}" "$@" || rc=$?
+  rktorch-recommendations "${args[@]}" || rc=$?
+racket "$root/scripts/resyntax-lp2.rkt" "${lp2_flags[@]}" "${args[@]}" || rc=$?
 exit "$rc"

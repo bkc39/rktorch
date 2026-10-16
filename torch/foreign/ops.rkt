@@ -18,6 +18,7 @@
          (only-in racket/contract/base
                   -> ->* ->i and/c any any/c cons/c contract-out contract?
                   list/c listof none/c or/c parameter/c)
+         (only-in racket/match match)
          (only-in "../private/contract.rkt"
                   define/checked-out define/contract-out)
          (only-in "device-type.rkt"
@@ -428,21 +429,17 @@
 (define/contract-out dtype (-> tensor? dtype/c) tensor-dtype) ;; noqa
 (define/contract-out numel (-> tensor? exact-nonnegative-integer?) tensor-numel) ;; noqa
 
-(define/contract-out (device x [index #f])
+(define/contract-out (device target [index 0])
   (->i ([target (or/c tensor? 'cpu 'cuda 'mps)])
        ([index (target)
-               (case target
-                 [(cuda) exact-nonnegative-integer?]
-                 [(cpu mps) 0]
-                 [else none/c])])
+               (match target
+                 ['cuda exact-nonnegative-integer?]
+                 [(or 'cpu 'mps) (and/c exact-integer? zero?)]
+                 [_ none/c])])
        [result device?])
-  (cond
-    [(tensor? x)
-     (when index
-       (error 'device "an ordinal makes no sense when querying a tensor: ~e"
-              index))
-     (tensor-device x)]
-    [else (make-device x (or index 0))]))
+  (match target
+    [(? tensor?) (tensor-device target)]
+    [kind (make-device kind index)]))
 
 (define/contract-out (tensor->vector t)
   (-> tensor? (or/c f32vector? f64vector? s64vector? bytes?))

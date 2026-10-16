@@ -117,7 +117,7 @@
 
 (module+ test
   (require (only-in racket/file file->string)
-           racket/runtime-path
+           (only-in racket/runtime-path #%datum define-runtime-path)
            (only-in racket/sequence sequence->list))
 
   (define-runtime-path foreign-dir "../foreign")

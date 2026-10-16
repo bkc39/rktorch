@@ -17,7 +17,7 @@
          (only-in racket/stxparam define-syntax-parameter syntax-parameterize)
          (only-in syntax/parse/define define-syntax-parse-rule)
          (only-in "../foreign.rkt"
-                  prop:to tensor-device tensor-dtype tensor?)
+                  device dtype prop:to tensor?)
          (only-in (submod "../foreign.rkt" unsafe) to!)
          (only-in "../foreign/autograd-ops.rkt" collect-at-forward-trough!)
          (only-in "../private/contract.rkt"
@@ -92,13 +92,13 @@
 (define floating-dtypes '(float32 float64 float16 bfloat16))
 
 (define (floating? t)
-  (and (memq (tensor-dtype t) floating-dtypes) #t))
+  (and (memq (dtype t) floating-dtypes) #t))
 
 (define-values (prop:on-move on-move? on-move-ref)
   (make-struct-type-property 'on-move))
 
 (define (placement t)
-  (cons (tensor-device t) (tensor-dtype t)))
+  (cons (device t) (dtype t)))
 
 (define (move-tensor! t dev dtype)
   (define dt (and dtype (floating? t) dtype))

@@ -43,8 +43,8 @@
   (test-case "tensor #:device places construction; cuda-if-available picks"
     (set-default-device! 'cpu)
     (define t (tensor '(1 2 3) #:device (cpu-device)))
-    (check-equal? (tensor-device t) (cpu-device))
-    (check-equal? (tensor-device (tensor '(1 2) #:device 'cpu)) (cpu-device))
+    (check-equal? (device t) (cpu-device))
+    (check-equal? (device (tensor '(1 2) #:device 'cpu)) (cpu-device))
     (check-equal? (default-device) (cpu-device))
     (check-true (requires-grad?
                  (tensor '(1.0) #:device (cpu-device) #:requires-grad? #t)))
@@ -56,12 +56,12 @@
     (check-equal? (device-index (mps-if-available)) 0)
     (when (cuda-available?)
       (define g (tensor '(1 2 3) #:device (cuda-device)))
-      (check-equal? (tensor-device g) (cuda-device 0))
+      (check-equal? (device g) (cuda-device 0))
       (check-equal? (tensor->list (to-device g (cpu-device))) '(1 2 3))
       (check-equal? (default-device) (cpu-device))
       ;; an explicitly-CPU tensor under a CUDA default lands on CPU
       (with-default-device (cuda-device)
-        (check-equal? (tensor-device (tensor '(4 5) #:device (cpu-device)))
+        (check-equal? (device (tensor '(4 5) #:device (cpu-device)))
                       (cpu-device)))
       (check-equal? (default-device) (cpu-device))
       ;; python indexing accepts CPU indices/masks for CUDA tensors
@@ -89,7 +89,7 @@
        (check-true (<= (cdr (assq 'reserved (cuda-memory-stats)))
                        (stat 'reserved)))
        ;; keep g live through the gauge reads
-       (check-equal? (tensor-device g) (cuda-device 0))]
+       (check-equal? (device g) (cuda-device 0))]
       [else
        (check-exn exn:fail? (lambda () (cuda-memory-stats)))
        (check-not-exn cuda-empty-cache!)]))
@@ -113,7 +113,7 @@
         (lambda () (cuda-allocator-settings! "garbage_collection_threshold:0.9")))
        (check-exn exn:fail?
                   (lambda () (cuda-allocator-settings! "no_such_option:1")))
-       (check-equal? (tensor-device g) (cuda-device 0))]
+       (check-equal? (device g) (cuda-device 0))]
       [else
        (check-exn exn:fail? (lambda () (cuda-memory-info)))
        (check-exn exn:fail? (lambda () (cuda-reset-peak-stats!)))
@@ -138,8 +138,8 @@
     (set-default-device! 'cpu)
     (check-equal? (default-device) (cpu-device))
     (define t (zeros 2))
-    (check-equal? (tensor-device (to-device t (cpu-device))) (cpu-device))
-    (check-equal? (tensor-device (to-device t 'cpu)) (cpu-device))
+    (check-equal? (device (to-device t (cpu-device))) (cpu-device))
+    (check-equal? (device (to-device t 'cpu)) (cpu-device))
     (with-default-device (cpu-device)
       (check-equal? (default-device) (cpu-device))))
 
@@ -177,19 +177,19 @@
                     [(mps-available?) 'mps]
                     [else 'cpu]))
     (check-equal? (device-index picked) 0)
-    (check-equal? (tensor-device (tensor '(1 2 3) #:device picked)) picked))
+    (check-equal? (device (tensor '(1 2 3) #:device picked)) picked))
 
   (test-case "new tensors and to-device land on cpu"
     (define t (zeros 2 2))
-    (check-equal? (tensor-device t) (cpu-device))
+    (check-equal? (device t) (cpu-device))
     (define c (to-device t 'cpu))
-    (check-equal? (tensor-device c) (cpu-device))
+    (check-equal? (device c) (cpu-device))
     (check-equal? (tensor->list c) '(0.0 0.0 0.0 0.0)))
 
   (test-case "set-default-device! round-trips on cpu"
     (set-default-device! 'cpu)
     (check-equal? (default-device) (cpu-device))
-    (check-equal? (tensor-device (ones 3)) (cpu-device)))
+    (check-equal? (device (ones 3)) (cpu-device)))
 
   (test-case "requesting an unavailable cuda device errors"
     (unless (cuda-available?)
@@ -214,9 +214,9 @@
       (with-default-device 'cuda
         (check-equal? (default-device) (cuda-device 0))
         (define g (zeros 2 2))
-        (check-equal? (tensor-device g) (cuda-device 0))
+        (check-equal? (device g) (cuda-device 0))
         (define back (to-device g 'cpu))
-        (check-equal? (tensor-device back) (cpu-device))
+        (check-equal? (device back) (cpu-device))
         (check-equal? (tensor->list back) '(0.0 0.0 0.0 0.0))
         ;; cuBLAS has no int64 matmul: floats work, int64 must reject
         (define a (to-device (tensor '((1.0 2.0) (3.0 4.0))) 'cuda))
@@ -242,10 +242,10 @@
                       '(5.0 6.0 1.0 2.0 5.0 6.0))
         (define x (to-device (tensor '((1.0 2.0 3.0) (4.0 6.0 8.0))) 'cuda))
         (define ln (layer-norm x 3 #:weight (ones 3) #:bias (zeros 3)))
-        (check-equal? (tensor-device ln) (cuda-device 0))
+        (check-equal? (device ln) (cuda-device 0))
         (check-= (car (tensor->list (to-device ln 'cpu))) -1.2247 1e-4)
-        (define mask (eq (tril (ones 2 2)) 0))
-        (check-equal? (tensor-device mask) (cuda-device 0))
+        (define mask (~> (ones 2 2) tril (eq 0)))
+        (check-equal? (device mask) (cuda-device 0))
         (check-equal? (tensor->list
                        (to-device (masked-fill (ones 2 2) mask 0) 'cpu))
                       '(1.0 0.0 1.0 1.0)))
@@ -257,18 +257,18 @@
       (with-default-device 'mps
         (check-equal? (default-device) (mps-device))
         (define g (zeros 2 2))
-        (check-equal? (tensor-device g) (mps-device))
+        (check-equal? (device g) (mps-device))
         (define back (to-device g 'cpu))
-        (check-equal? (tensor-device back) (cpu-device))
+        (check-equal? (device back) (cpu-device))
         (check-equal? (tensor->list back) '(0.0 0.0 0.0 0.0))
         (define a (to-device (tensor '((1.0 2.0) (3.0 4.0))) 'mps))
         (define b (to-device (tensor '((5.0 6.0) (7.0 8.0))) 'mps))
-        (check-equal? (tensor->list (to-device (matmul a b) 'cpu))
+        (check-equal? (tensor->list (to-device (@ a b) 'cpu))
                       '(19.0 22.0 43.0 50.0))
-        (check-equal? (tensor-device (tensor '(4 5) #:device (cpu-device)))
+        (check-equal? (device (tensor '(4 5) #:device (cpu-device)))
                       (cpu-device))
         (manual-seed! 42)
-        (define r1 (tensor->list (to-device (randn 4) 'cpu)))
+        (define r1 (~> (randn 4) (to-device 'cpu) tensor->list))
         (manual-seed! 42)
         (check-equal? (tensor->list (to-device (randn 4) 'cpu)) r1)
         (mps-empty-cache!))
@@ -287,10 +287,10 @@
                       '(5.0 6.0 1.0 2.0 5.0 6.0))
         (define x (to-device (tensor '((1.0 2.0 3.0) (4.0 6.0 8.0))) 'mps))
         (define ln (layer-norm x 3 #:weight (ones 3) #:bias (zeros 3)))
-        (check-equal? (tensor-device ln) (mps-device))
+        (check-equal? (device ln) (mps-device))
         (check-= (car (tensor->list (to-device ln 'cpu))) -1.2247 1e-4)
-        (define mask (eq (tril (ones 2 2)) 0))
-        (check-equal? (tensor-device mask) (mps-device))
+        (define mask (~> (ones 2 2) tril (eq 0)))
+        (check-equal? (device mask) (mps-device))
         (check-equal? (tensor->list
                        (to-device (masked-fill (ones 2 2) mask 0) 'cpu))
                       '(1.0 0.0 1.0 1.0)))

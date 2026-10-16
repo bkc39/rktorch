@@ -61,7 +61,7 @@ for any procedure. A forward that declares no keyword refuses them all.
 @racketblock[
 (define-layer Scaled (factor)
   #:forward (x #:by [by factor])
-  (mul x by))
+  (* x by))
 ((Scaled 2) x)
 ((Scaled 2) x #:by 3)
 ]
@@ -230,7 +230,7 @@ cached layout, a handle onto their storage --- which a move invalidates:
   (set! packed (box #f))
   #:on-move (set-box! packed #f)
   #:forward (x)
-  (matmul x (or (unbox packed) (pack! packed weight))))
+  (|@| x (or (unbox packed) (pack! packed weight))))
 ]
 
 State that can check itself at the call needs no hook to stay correct:

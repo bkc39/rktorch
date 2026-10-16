@@ -25,8 +25,8 @@
 
 (module+ test
   (require rackunit)
-  (define-values (losses net vocab device) (run-example #:device 'cpu))
-  (check-equal? device 'cpu)
+  (define-values (losses net vocab trained-on) (run-example #:device 'cpu))
+  (check-equal? trained-on 'cpu)
   (check-equal? (length losses) 5)
   (check-true (andmap (lambda (l) (and (rational? l) (not (nan? l)))) losses)
               (format "non-finite loss: ~a" losses))
@@ -168,7 +168,7 @@
   (unless (eq? (device-type accel) 'cpu)
     (define-values (a-losses a-net a-vocab _a-dev)
       (run-example #:device accel))
-    (check-equal? (tensor-device (car (parameters a-net))) accel)
+    (check-equal? (device (car (parameters a-net))) accel)
     (check-true (andmap (lambda (l) (and (rational? l) (not (nan? l))))
                         a-losses)
                 (format "non-finite loss on ~a: ~a" accel a-losses))
@@ -182,6 +182,6 @@
       (hybrid-batch-loss a-net a-vocab
                          (list a-mel (narrow a-mel 1 0 200))
                          (list transcript "MISTER QUILTER")))
-    (check-equal? (tensor-device a-batch-loss) accel)
+    (check-equal? (device a-batch-loss) accel)
     (check-true (rational? (item a-batch-loss)))
     (check-false (nan? (item a-batch-loss)))))
