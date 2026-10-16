@@ -42,15 +42,21 @@
   (define info
     (or (get-info/full info-dir)
         (raise-user-error 'racket-deps "no info.rkt in ~a" info-dir)))
+  (define declared
+    (remove-duplicates (append (info 'deps (λ () '())) (info 'build-deps (λ () '())))))
+  (define platform-dep (findf platform-dep? declared))
+  (when platform-dep
+    (raise-user-error 'racket-deps
+                      "~a has #:platform ~s; platform-qualified deps are not fetched from the catalog"
+                      (dep-name platform-dep)
+                      (dep-option platform-dep '#:platform)))
   (define have (installed-pkg-names #:scope 'installation))
-  (partition (λ (dep) (not (member (dep-name dep) have)))
-             (remove-duplicates (append (info 'deps (λ () '())) (info 'build-deps (λ () '()))))))
+  (partition (λ (dep) (not (member (dep-name dep) have))) declared))
 
 (define/contract (catalog-deps info-dir)
   (-> directory-exists? list?)
   (define-values (wanted _installed) (declared-deps info-dir))
   (define deps (sort wanted string<? #:key dep->string))
-  (define platform-dep (findf platform-dep? deps))
   (define source-dep (findf source-dep? deps))
   (cond
     [(null? deps)
@@ -61,11 +67,6 @@
      (raise-user-error 'racket-deps
                        "~a is a package source; racket-deps fetches catalog packages by name"
                        (dep-name source-dep))]
-    [platform-dep
-     (raise-user-error 'racket-deps
-                       "~a has #:platform ~s; platform-qualified deps are not fetched from the catalog"
-                       (dep-name platform-dep)
-                       (dep-option platform-dep '#:platform))]
     [else deps]))
 
 (define (check-version dep pkg-dir where)

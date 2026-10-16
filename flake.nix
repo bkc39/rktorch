@@ -155,6 +155,10 @@
             rd check ${fixtures}/versioned "$TMPDIR/fetched-1.3"
             fails rd names ${fixtures}/platform
             grep -q 'extra-lib has #:platform unix; platform-qualified' "$TMPDIR/log"
+            fails rd check ${fixtures}/base-platform "$built"
+            grep -q 'base has #:platform windows; platform-qualified' "$TMPDIR/log"
+            fails rd names ${fixtures}/base-platform
+            grep -q 'base has #:platform windows; platform-qualified' "$TMPDIR/log"
             fails rd names ${fixtures}/source
             grep -qF 'https://example.com/foo.git is a package source; racket-deps fetches catalog packages by name' "$TMPDIR/log"
           '';
