@@ -30,6 +30,7 @@ line per case goes to standard error.
 | `--cache DIR` | one dataset cache for every example (`DIR/mnist`, ...) |
 | `--variant NAME:VAR=VALUE,...` | repeat for an A/B run of `e2e`; names must differ |
 | `--max-load L` | wait for a load below `L` before each group |
+| `--time-limit S` | kill an `e2e` child after `S` seconds; an hour by default, twelve with `--full` |
 
 CUDA runs need the CUDA shell, `env -u LD_LIBRARY_PATH nix develop .#cuda`.
 A CPU run with one thread sets `OMP_NUM_THREADS=1`; `taskset -c` pins it.
@@ -38,6 +39,11 @@ A CPU run with one thread sets `OMP_NUM_THREADS=1`; `taskset -c` pins it.
 (the 1-minute load average where there is no `/proc/stat`). The load
 average would still count the previous example's child for a minute after
 it exits.
+
+Each `e2e` child runs in its own process group under the time limit, and
+the group is killed when the child exits, so a background job it leaves
+does not run into the next case; a terminal with `stty tostop` stops a
+child that writes to it.
 
 ## How a case is timed
 
@@ -105,8 +111,13 @@ median, quartiles and IQR, and the load average before and after.
 An A/B run alternates its variants every round, and each variant is a set
 of environment variables; `PLTUSERHOME=<checkout>/.racket-user` runs the
 other checkout's `torch`. A checkout older than the `rktorch-step` event
-logs no steps, so a child that completes without one is timed whole, from
-the end of its compile to its exit (`timing` `wall`, no `error`). When any
+(its `torch` has neither `private/step-log.rkt` nor its compiled `.zo`) logs no steps, so a child of
+such a checkout that completes is timed whole, from the end of its compile
+to its exit (`timing` `wall`, no `error`). A child whose `torch` has the
+hook, or that does not name its `torch`, and logs no steps is an `error`,
+never a whole-run time. So is a child that exits non-zero, even after
+logging every step, and one still running after its time limit, which is
+killed with its process group. When any
 run of an example is timed whole, every variant's summary for it uses the
 whole-run times (`timing` `wall`, unit `s/run`), so the ratio compares like
 with like; otherwise `timing` is `steps`. Relative paths in `PLTUSERHOME`, `PLTADDONDIR`

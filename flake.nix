@@ -430,7 +430,7 @@
               raco test examples/test/
               # The benchmark harness's own logic and a seconds-long smoke
               # pass of every suite; never its numbers.
-              raco test scripts/bench/
+              raco test --timeout 1200 scripts/bench/
               runHook postCheck
             '';
 
