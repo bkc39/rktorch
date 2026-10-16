@@ -29,8 +29,8 @@ installation does not meet;
 `nix/racket-deps/racket-deps.rkt`; `racket-deps-provision-test` tests
 `nix/racket-deps/provision.sh`, the dev shells' provisioning. To bump, set
 `outputHash` to `""`, run `nix build .#racket-deps`, and paste the hash Nix
-reports. A `#:platform` dep is refused: one hash cannot hold a per-system
-fetch. A package source (a URL or path) is refused too: racket-deps fetches
+reports. A `#:platform` dep is refused, whether `torch/info.rkt` or a
+fetched package declares it: one hash cannot hold a per-system fetch. A package source (a URL or path) is refused too: racket-deps fetches
 catalog packages by name.
 
 `nix develop` provisions `.racket-user` again whenever racket-deps, the Racket

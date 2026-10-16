@@ -479,8 +479,9 @@ beyond the Racket distribution, as source trees only. When those deps change,
 or a fresh store reports a hash mismatch (upstream moved), set its
 `outputHash` to `""`, `nix build .#racket-deps`, paste the reported hash. The
 `racket-deps-current` check says "info.rkt changed; bump racket-deps outputHash",
-and also fails on an unmet `#:version` minimum. A `#:platform` dep is refused:
-one hash cannot hold a per-system fetch; so is a package source (a URL or
+and also fails on an unmet `#:version` minimum. A `#:platform` dep is refused,
+whether `torch/info.rkt` or a fetched package declares it: one hash cannot
+hold a per-system fetch; so is a package source (a URL or
 path): racket-deps fetches catalog packages by name. `racket-deps-guard-test`
 and `racket-deps-info-test` test `nix/racket-deps/racket-deps.rkt`;
 `racket-deps-provision-test` tests `nix/racket-deps/provision.sh`, the dev
