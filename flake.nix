@@ -245,43 +245,45 @@
              + " use torchSource = \"bin\" until nixpkgs' Python torch"
              + " reaches it");
           torch
-        else
-          let
-            cuda = pkgs.config.cudaSupport;
-            device = if cuda then "cuda" else "cpu";
-          in
-          pkgs.libtorch-bin.overrideAttrs (old: {
-            version = libtorchVersion;
-            src = pkgs.fetchzip
-              libtorchZips."${pkgs.stdenv.hostPlatform.system}-${device}";
-          } // pkgs.lib.optionalAttrs pkgs.stdenv.isDarwin {
-            # The darwin zip's libomp, libshm, libtorch and libtorch_cpu carry
-            # plain ad-hoc signatures (not linker-signed), which the
-            # derivation's own `install_name_tool -id` postFixup invalidates
-            # rather than re-signs. macOS 27 then SIGKILLs anything that loads
-            # them (26 tolerated it), so re-sign every dylib after that edit.
-            nativeBuildInputs = (old.nativeBuildInputs or [ ])
-              ++ [ pkgs.darwin.sigtool ];
-            postFixup = (old.postFixup or "") + ''
-              for lib in $out/lib/*.dylib; do
-                codesign -f -s - "$lib"
-              done
-            '';
-          } // pkgs.lib.optionalAttrs cuda {
-            # Drop the bundled dispatcher so autoPatchelf resolves
-            # libcudnn.so.9 to cuDNN 9.24, whose own RUNPATH ($ORIGIN) finds
-            # the libcudnn_* libraries it dlopens.
-            buildInputs = (old.buildInputs or [ ]) ++ [ (cudnnFor pkgs) ];
-            installPhase = old.installPhase + ''
-              rm $out/lib/libcudnn.so.9
-            '';
-            # The bundled libnvrtc.so.13 is CUDA 13.0.88 and dlopens
-            # libnvrtc-builtins.so.13.0, which the zip leaves out; this is the
-            # matching nvrtc, appended to every library's RUNPATH.
-            appendRunpaths = [
-              "${pkgs.lib.getLib pkgs.cudaPackages_13_0.cuda_nvrtc}/lib"
-            ];
-          });
+        else zipTorchFor pkgs;
+
+      zipTorchFor = pkgs:
+        let
+          cuda = pkgs.config.cudaSupport;
+          device = if cuda then "cuda" else "cpu";
+        in
+        pkgs.libtorch-bin.overrideAttrs (old: {
+          version = libtorchVersion;
+          src = pkgs.fetchzip
+            libtorchZips."${pkgs.stdenv.hostPlatform.system}-${device}";
+        } // pkgs.lib.optionalAttrs pkgs.stdenv.isDarwin {
+          # The darwin zip's libomp, libshm, libtorch and libtorch_cpu carry
+          # plain ad-hoc signatures (not linker-signed), which the
+          # derivation's own `install_name_tool -id` postFixup invalidates
+          # rather than re-signs. macOS 27 then SIGKILLs anything that loads
+          # them (26 tolerated it), so re-sign every dylib after that edit.
+          nativeBuildInputs = (old.nativeBuildInputs or [ ])
+            ++ [ pkgs.darwin.sigtool ];
+          postFixup = (old.postFixup or "") + ''
+            for lib in $out/lib/*.dylib; do
+              codesign -f -s - "$lib"
+            done
+          '';
+        } // pkgs.lib.optionalAttrs cuda {
+          # Drop the bundled dispatcher so autoPatchelf resolves
+          # libcudnn.so.9 to cuDNN 9.24, whose own RUNPATH ($ORIGIN) finds
+          # the libcudnn_* libraries it dlopens.
+          buildInputs = (old.buildInputs or [ ]) ++ [ (cudnnFor pkgs) ];
+          installPhase = old.installPhase + ''
+            rm $out/lib/libcudnn.so.9
+          '';
+          # The bundled libnvrtc.so.13 is CUDA 13.0.88 and dlopens
+          # libnvrtc-builtins.so.13.0, which the zip leaves out; this is the
+          # matching nvrtc, appended to every library's RUNPATH.
+          appendRunpaths = [
+            "${pkgs.lib.getLib pkgs.cudaPackages_13_0.cuda_nvrtc}/lib"
+          ];
+        });
 
       # Stage libtorchrkt into ./torch/native-libs by temp file + rename(2).
       # `cp` opens the destination O_TRUNC, and that invalidates the page-cache
@@ -584,6 +586,7 @@
 
           cppCudaTests = mkCpp {
             p = pkgsCuda;
+            torch = zipTorchFor pkgsCuda;
             doCheck = false;
             cuda = true;
             installTests = true;
@@ -635,7 +638,9 @@
             racketVersions;
           matrixCells = pkgs.writeText "torch-matrix-${system}.tsv"
             (pkgs.lib.concatStrings (
-              cpuRows "zip ${libtorchVersion}" cpp null
+              cpuRows "zip ${libtorchVersion}"
+                (mkCpp { p = pkgs; torch = zipTorchFor pkgs; })
+                null
               ++ cpuRows "nixpkgs ${cachedTorch.version}"
                 (mkCpp { p = pkgs; torch = cachedTorch; })
                 cachedTorchSkip
