@@ -1,15 +1,18 @@
 #lang racket/base
 
-(require (only-in compiler/find-exe find-exe)
+(require (for-syntax racket/base)
+         (only-in compiler/find-exe find-exe)
+         (only-in ffi/unsafe -> _fun _int get-ffi-obj)
          (only-in racket/file file->string make-temporary-directory)
          (only-in racket/format ~a)
          (only-in racket/list remove-duplicates)
          (only-in racket/match match match-define)
+         (only-in racket/port copy-port)
          (only-in racket/runtime-path #%datum define-runtime-path)
-         (only-in racket/system process*/ports)
+         (only-in racket/string string-join)
          (only-in threading ~>)
          (only-in "harness.rkt" bench-case with-temporary-path)
-         (only-in "training.rkt" analyze-steps read-steps))
+         (only-in "training.rkt" analyze-steps read-steps recorded-run))
 
 (provide (struct-out example)
          (struct-out exn:fail:user:e2e)
@@ -106,45 +109,107 @@
                                 (~> s cdr ~a string->bytes/utf-8)))
   env)
 
-(define (run-child runner dir out cleared settings log)
+(define time-limits (hasheq 'short 3600 'full 43200))
+
+(define (call-with-child-log dir log proc)
+  (cond
+    [(file-stream-port? log) (proc log)]
+    [else
+     (define path (build-path dir "child.log"))
+     (define child-log (open-output-file path))
+     (dynamic-wind
+      void
+      (lambda () (proc child-log))
+      (lambda ()
+        (close-output-port child-log)
+        (call-with-input-file path (lambda (in) (copy-port in log)))))]))
+
+(define kill (get-ffi-obj "kill" #f (_fun _int _int -> _int)))
+
+(define sigkill 9)
+
+(define (kill-process-group! child)
+  (~> (subprocess-pid child) - (kill sigkill) void))
+
+(define (run-child runner dir out cleared settings log time-limit)
   (define form
     `(begin
        (require (only-in (file ,(path->string recorder)) record-steps!))
        (record-steps! ,(path->string runner) ,(path->string out))))
-  (parameterize ([current-environment-variables (child-environment cleared settings)]
-                 [current-directory dir])
-    (match-define (list _out _in _pid _err control)
-      (process*/ports log (open-input-bytes #"") log
-                      (find-exe) "-l" "racket/base" "-e" (format "~s" form)))
-    (control 'wait)
-    (control 'exit-code)))
+  (call-with-child-log
+   dir log
+   (lambda (child-log)
+     (parameterize-break #f
+       (define-values (child _stdout stdin _stderr)
+         (parameterize ([current-environment-variables (child-environment cleared settings)]
+                        [current-directory dir]
+                        [subprocess-group-enabled #t])
+           (subprocess child-log #f 'stdout (find-exe) "-l" "racket/base" "-e" (format "~s" form))))
+       (close-output-port stdin)
+       (define exited?
+         (with-handlers ([exn:break? (lambda (e) (kill-process-group! child) (raise e))])
+           (sync/timeout/enable-break time-limit child)))
+       (kill-process-group! child)
+       (subprocess-wait child)
+       (list (subprocess-status child) (not exited?))))))
 
 (define (example-runner ex)
   (build-path examples-dir (string-append (example-name ex) ".rkt")))
+
+(define (step-hook? torch-dir)
+  (or (file-exists? (build-path torch-dir "private" "step-log.rkt"))
+      (file-exists? (build-path torch-dir "private" "compiled" "step-log_rkt.zo"))))
+
+(define (classify events wall torch-dir
+                  #:epochs [epochs #f] #:warmup [warmup 0] #:optimizer [optimizer 'first])
+  (define pre-hook? (and torch-dir (not (step-hook? torch-dir))))
+  (cond
+    [(and (null? events) wall pre-hook?) (hasheq 'steps 0 'timing "wall")]
+    [(and (null? events) wall torch-dir)
+     (hasheq 'steps 0
+             'timing "steps"
+             'error (format "torch at ~a has the step hook but logged no steps" torch-dir))]
+    [(and (null? events) wall)
+     (hasheq 'steps 0 'timing "steps" 'error "logged no steps and named no torch")]
+    [else
+     (hash-set (analyze-steps events #:epochs epochs #:warmup warmup #:optimizer optimizer)
+               'timing "steps")]))
+
+(define no-run (recorded-run '() #f #f #f))
+
+(define (recorded-steps out)
+  (with-handlers ([exn:fail? (lambda (e)
+                               (values no-run (format "unreadable steps file: ~a" (exn-message e))))])
+    (values (if (file-exists? out) (read-steps out) no-run) #f)))
 
 (define (run-example ex
                      #:runner [runner (example-runner ex)]
                      #:scale [scale 'short]
                      #:settings [extra '()]
+                     #:time-limit [time-limit #f]
                      #:log [log (current-error-port)])
   (define env (merged-settings ex scale extra))
-  (define-values (code events wall meta)
+  (define limit (or time-limit (hash-ref time-limits scale)))
+  (define-values (status recorded unreadable)
     (with-temporary-path (dir (make-temporary-directory "rktorch-bench-~a"))
       (define out (build-path dir "rktorch-steps.json"))
-      (define code (run-child runner dir out (control-variables ex runner) env log))
-      (define-values (events wall meta)
-        (if (file-exists? out) (read-steps out) (values '() #f #f)))
-      (values code events wall meta)))
+      (define status (run-child runner dir out (control-variables ex runner) env log limit))
+      (define-values (recorded unreadable) (recorded-steps out))
+      (values status recorded unreadable)))
+  (match-define (list code killed?) status)
+  (match-define (recorded-run events wall meta torch-dir) recorded)
   (define epoch-setting (and (example-epochs-var ex) (assoc (example-epochs-var ex) env)))
   (define epochs (and epoch-setting (~> epoch-setting cdr ~a string->number)))
   (define analysis
+    (classify events wall torch-dir
+              #:epochs epochs #:warmup (example-warmup ex) #:optimizer (example-optimizer ex)))
+  (define exit-failure
     (cond
-      [(and (null? events) wall) (hasheq 'steps 0 'timing "wall")]
-      [else
-       (hash-set (analyze-steps events #:epochs epochs #:warmup (example-warmup ex)
-                                #:optimizer (example-optimizer ex))
-                 'timing "steps")]))
-  (hash-set* analysis
+      [killed? (format "killed after no exit within ~a s" limit)]
+      [(zero? code) #f]
+      [else "exited non-zero"]))
+  (define errors (filter values (list exit-failure unreadable (hash-ref analysis 'error #f))))
+  (hash-set* (if (pair? errors) (hash-set analysis 'error (string-join errors "; ")) analysis)
              'exit_code code
              'wall_s (and wall (/ wall 1000.0))
              'meta meta
@@ -170,6 +235,7 @@
                    #:scale [scale 'short]
                    #:variants [variants '((#f))]
                    #:on-run [on-run void]
+                   #:time-limit [time-limit #f]
                    #:log [log (current-error-port)]
                    #:runner-for [runner-for example-runner])
   (for*/list ([ex (in-list exs)] [v (in-list variants)])
@@ -178,19 +244,60 @@
                 (lambda (_reps)
                   (define analysis
                     (run-example ex #:runner (runner-for ex) #:scale scale
-                                 #:settings (cdr v) #:log log))
+                                 #:settings (cdr v) #:time-limit time-limit #:log log))
                   (on-run ex (car v) analysis)
                   (primary-ms ex (car v) analysis))
                 #:self-timed? #t)))
 
 (module+ test
-  (require (only-in racket/port open-output-nowhere)
+  (require (only-in racket/file make-directory*)
+           (only-in racket/port open-output-nowhere)
+           (only-in racket/system system*)
            rackunit
-           (only-in "harness.rkt" measure result-name result-per-call))
+           (only-in "fixtures/pre-hook-torch.rkt" call-with-pre-hook-torch)
+           (only-in "harness.rkt" measure result-name result-per-call)
+           (only-in "shim.rkt" torch-dir))
 
+  (define-runtime-path broken "fixtures/broken.rkt")
+  (define-runtime-path grandchild "fixtures/grandchild.rkt")
+  (define-runtime-path lingering "fixtures/lingering.rkt")
+  (define-runtime-path partial-steps "fixtures/partial-steps.rkt")
+  (define-runtime-path sleeper "fixtures/sleeper.rkt")
   (define-runtime-path stepper "fixtures/stepper.rkt")
+  (define-runtime-path teardown-crash "fixtures/teardown-crash.rkt")
   (define fixture (example "stepper" '(("EPOCHS" . 3)) '(("EPOCHS" . 4)) "EPOCHS" 0 'first))
   (define quiet (open-output-nowhere))
+
+  (define (signal! flag pid)
+    (parameterize ([current-output-port quiet] [current-error-port quiet])
+      (system* (find-executable-path "kill") flag (~a pid))))
+
+  (define (dead? pid)
+    (not (signal! "-0" pid)))
+
+  (define (within? seconds done?)
+    (define deadline (+ (current-inexact-monotonic-milliseconds) (* 1000.0 seconds)))
+    (let poll ()
+      (cond
+        [(done?) #t]
+        [(> (current-inexact-monotonic-milliseconds) deadline) #f]
+        [else (sleep 0.1) (poll)])))
+
+  (define (call-with-pid-file proc)
+    (with-temporary-path (dir (make-temporary-directory "bench-pids-~a"))
+      (define pid-file (build-path dir "pids"))
+      (define (started)
+        (if (file-exists? pid-file) (call-with-input-file pid-file read) '()))
+      (dynamic-wind
+       void
+       (lambda () (proc (cons "BENCH_PID_FILE" (path->string pid-file)) pid-file))
+       (lambda ()
+         (for ([pid (in-list (started))] #:unless (dead? pid))
+           (signal! "-KILL" pid))))))
+
+  (define (grandchild-pid pid-file)
+    (match-define (list _child pid) (call-with-input-file pid-file read))
+    pid)
 
   (test-case "examples are found by their number"
     (check-equal? (map example-name (find-examples '("05" "16")))
@@ -231,27 +338,134 @@
     (check-true (positive? (hash-ref a 'wall_s)))
     (check-true (string? (hash-ref (hash-ref a 'meta) 'libtorch))))
 
-  (test-case "a child whose torch logs no steps is timed whole, and says so"
-    (define a (run-example fixture #:runner stepper #:settings '(("BENCH_PREHOOK" . "1"))
+  (test-case "a child whose torch has the step hook but logs no steps fails"
+    (define a (run-example fixture #:runner stepper #:settings '(("STEPPER_SILENT" . "1"))
                            #:log quiet))
     (check-equal? (hash-ref a 'exit_code) 0)
-    (check-equal? (hash-ref a 'timing) "wall")
     (check-equal? (hash-ref a 'steps) 0)
-    (check-false (hash-ref a 'error #f))
-    (check-true (positive? (hash-ref a 'wall_s)))
-    (check-equal? (hash-ref (run-example fixture #:runner stepper #:log quiet) 'timing) "steps")
-    (define runs '())
+    (check-regexp-match #rx"step hook" (hash-ref a 'error #f))
     (define cases
-      (e2e-cases (list fixture) #:variants '(("old" ("BENCH_PREHOOK" . "1")))
-                 #:runner-for (lambda (_ex) stepper) #:log quiet
-                 #:on-run (lambda (_ex _v a) (set! runs (cons a runs)))))
-    (match-define (list r) (measure cases #:warmup 0 #:rounds 1 #:load void))
-    (check-equal? (result-per-call r) (list (* 1000.0 (hash-ref (car runs) 'wall_s)))))
+      (e2e-cases (list fixture) #:variants '(("new" ("STEPPER_SILENT" . "1")))
+                 #:runner-for (lambda (_ex) stepper) #:log quiet))
+    (check-exn (lambda (e)
+                 (and (exn:fail:user:e2e? e)
+                      (regexp-match? #rx"step hook" (exn-message e))
+                      (equal? (exn:fail:user:e2e-variant e) "new")))
+               (lambda () (measure cases #:warmup 0 #:rounds 1 #:load void))))
+
+  (test-case "a child of a checkout without the step hook is timed whole, and says so"
+    (call-with-pre-hook-torch
+     (lambda (old-torch)
+       (define a (run-example fixture #:runner stepper
+                              #:settings (list old-torch '("STEPPER_SILENT" . "1"))
+                              #:log quiet))
+       (check-equal? (hash-ref a 'exit_code) 0)
+       (check-equal? (hash-ref a 'timing) "wall")
+       (check-equal? (hash-ref a 'steps) 0)
+       (check-false (hash-ref a 'error #f))
+       (check-true (positive? (hash-ref a 'wall_s))))))
+
+  (test-case "a child of a checkout without the step hook that logs steps is timed by them"
+    (call-with-pre-hook-torch
+     (lambda (old-torch)
+       (define a (run-example fixture #:runner stepper #:settings (list old-torch) #:log quiet))
+       (check-equal? (hash-ref a 'timing) "steps")
+       (check-equal? (hash-ref a 'steps) 9))))
+
+  (test-case "a run timed whole is measured by its wall time"
+    (check-equal? (primary-ms fixture "old" (hasheq 'timing "wall" 'wall_s 2.5 'exit_code 0))
+                  2500.0))
+
+  (test-case "a run without steps is timed whole only from a torch known to lack the hook"
+    (check-regexp-match #rx"named no torch" (hash-ref (classify '() 5.0 #f) 'error))
+    (check-regexp-match #rx"step hook" (hash-ref (classify '() 5.0 torch-dir) 'error))
+    (with-temporary-path (old (make-temporary-directory "torch-~a"))
+      (check-equal? (classify '() 5.0 old) (hasheq 'steps 0 'timing "wall"))))
+
+  (test-case "a child that exits non-zero after a full run fails"
+    (define a (run-example fixture #:runner teardown-crash #:log quiet))
+    (check-equal? (hash-ref a 'exit_code) 139)
+    (check-equal? (hash-ref a 'steps) 9)
+    (check-regexp-match #rx"exited non-zero" (hash-ref a 'error #f))
+    (check-exn (lambda (e)
+                 (and (exn:fail:user:e2e? e)
+                      (equal? (exn:fail:user:e2e-exit-code e) 139)))
+               (lambda () (primary-ms fixture #f a))))
+
+  (test-case "a child past its time limit is killed and fails"
+    (define t0 (current-inexact-monotonic-milliseconds))
+    (define a (run-example fixture #:runner sleeper #:time-limit 5 #:log quiet))
+    (check-true (< (- (current-inexact-monotonic-milliseconds) t0) 60000.0))
+    (check-regexp-match #rx"no exit within 5 s" (hash-ref a 'error #f))
+    (check-not-equal? (hash-ref a 'exit_code) 0))
+
+  (test-case "a child past its time limit is killed with its process group"
+    (call-with-pid-file
+     (lambda (pid-setting pid-file)
+       (define t0 (current-inexact-monotonic-milliseconds))
+       (define a (run-example fixture #:runner grandchild #:settings (list pid-setting)
+                              #:time-limit 15 #:log quiet))
+       (check-true (< (- (current-inexact-monotonic-milliseconds) t0) 60000.0))
+       (check-regexp-match #rx"no exit within 15 s" (hash-ref a 'error #f))
+       (check-true (within? 10 (lambda () (dead? (grandchild-pid pid-file))))))))
+
+  (define (break-grandchild-run pid-setting pid-file log)
+    (define raised (box #f))
+    (define running
+      (thread (lambda ()
+                (with-handlers ([exn:break? (lambda (e) (set-box! raised e))])
+                  (run-example fixture #:runner grandchild #:settings (list pid-setting)
+                               #:time-limit 600 #:log log)))))
+    (check-true (within? 120 (lambda () (file-exists? pid-file))))
+    (break-thread running)
+    (check-not-false (sync/timeout 30 running))
+    (unbox raised))
+
+  (test-case "a break kills the child's process group and is re-raised"
+    (call-with-pid-file
+     (lambda (pid-setting pid-file)
+       (check-pred exn:break? (break-grandchild-run pid-setting pid-file quiet))
+       (check-true (within? 10 (lambda () (dead? (grandchild-pid pid-file))))))))
+
+  (test-case "a broken child's output still reaches a log that is not a file"
+    (call-with-pid-file
+     (lambda (pid-setting pid-file)
+       (define log (open-output-string))
+       (check-pred exn:break? (break-grandchild-run pid-setting pid-file log))
+       (check-regexp-match #rx"grandchild running" (get-output-string log)))))
+
+  (test-case "a child that exits leaving a background job is not held by it, and the job is killed"
+    (call-with-pid-file
+     (lambda (pid-setting pid-file)
+       (define t0 (current-inexact-monotonic-milliseconds))
+       (define a (run-example fixture #:runner lingering #:settings (list pid-setting)
+                              #:time-limit 60 #:log quiet))
+       (check-true (< (- (current-inexact-monotonic-milliseconds) t0) 60000.0))
+       (check-equal? (hash-ref a 'exit_code) 0)
+       (check-false (hash-ref a 'error #f))
+       (check-equal? (hash-ref a 'steps) 9)
+       (check-true (within? 10 (lambda () (dead? (grandchild-pid pid-file))))))))
+
+  (test-case "a child that exits non-zero says so beside why it has no time"
+    (check-regexp-match #rx"^exited non-zero; .*no measured steps"
+                        (hash-ref (run-example fixture #:runner broken #:log quiet) 'error #f)))
+
+  (test-case "a child that leaves a partial steps file is an error, not a raise"
+    (define a (run-example fixture #:runner partial-steps #:log quiet))
+    (check-equal? (hash-ref a 'exit_code) 1)
+    (check-regexp-match #rx"unreadable steps file" (hash-ref a 'error #f)))
+
+  (test-case "a torch installed compiled only still has the step hook"
+    (with-temporary-path (compiled-only (make-temporary-directory "torch-~a"))
+      (define compiled (build-path compiled-only "private" "compiled"))
+      (make-directory* compiled)
+      (call-with-output-file (build-path compiled "step-log_rkt.zo") void)
+      (check-regexp-match #rx"step hook" (hash-ref (classify '() 5.0 compiled-only) 'error))))
 
   (test-case "a child sees only the example settings it is given"
     (check-equal? (control-variables (cadr examples) (example-runner (cadr examples)))
                   '("STEPS" "EXCERPT"))
-    (check-equal? (control-variables fixture stepper) '("EPOCHS" "BENCH_PREHOOK" "STEPS"))
+    (check-equal? (control-variables fixture stepper) '("EPOCHS" "STEPPER_SILENT" "STEPS"))
     (parameterize ([current-environment-variables
                     (environment-variables-copy (current-environment-variables))])
       (putenv "STEPS" "5")

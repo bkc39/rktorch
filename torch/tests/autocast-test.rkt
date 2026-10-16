@@ -20,12 +20,12 @@
       (with-autocast #:device 'cpu
         (check-true (autocast-enabled? 'cpu))
         (check-equal? (autocast-dtype 'cpu) 'bfloat16)
-        (matmul a b)))
-    (check-equal? (tensor-dtype inside) 'bfloat16)
+        (@ a b)))
+    (check-equal? (dtype inside) 'bfloat16)
     (check-equal? (tensor->list inside) '(0.5 1.0 1.5 2.0))
     (check-false (autocast-enabled? 'cpu))
-    (check-equal? (tensor-dtype (matmul a b)) 'float32)
-    (check-equal? (tensor-dtype a) 'float32 "the inputs are never touched"))
+    (check-equal? (dtype (@ a b)) 'float32)
+    (check-equal? (dtype a) 'float32 "the inputs are never touched"))
 
   (test-case "leaving restores the dtype even where autocast was off"
     (check-false (autocast-enabled? 'cpu))
@@ -51,9 +51,9 @@
 
   (test-case "call-with-autocast takes a device struct and a thunk"
     (define out
-      (call-with-autocast (lambda () (matmul (ones 2 2) (ones 2 2)))
+      (call-with-autocast (lambda () (@ (ones 2 2) (ones 2 2)))
                           #:device (cpu-device)))
-    (check-equal? (tensor-dtype out) 'bfloat16)
+    (check-equal? (dtype out) 'bfloat16)
     (check-equal? (tensor->list out) '(2.0 2.0 2.0 2.0)))
 
   (test-case "with-autocast rejects a full-precision dtype as contract blame"
@@ -69,13 +69,13 @@
     (define loss
       (with-autocast #:device 'cpu
         (define y (l x))
-        (check-equal? (tensor-dtype y) 'bfloat16)
-        (mean (mul y y))))
+        (check-equal? (dtype y) 'bfloat16)
+        (mean (* y y))))
     (backward! loss)
     (for ([p (in-list (parameters l))])
       (check-true (has-grad? p))
-      (check-equal? (tensor-dtype (grad p)) 'float32)
-      (check-equal? (tensor-dtype p) 'float32 "the weights stay float32")))
+      (check-equal? (dtype (grad p)) 'float32)
+      (check-equal? (dtype p) 'float32 "the weights stay float32")))
 
   (test-case "autocast on CUDA casts a convolution"
     (when (cuda-available?)
@@ -83,20 +83,20 @@
       (define x (to (randn 2 3 8 8) (cuda-device)))
       (check-false (autocast-enabled? 'cuda))
       (define y (with-autocast #:device 'cuda (conv x)))
-      (check-equal? (tensor-dtype y) 'bfloat16)
-      (check-equal? (tensor-device y) (cuda-device))
+      (check-equal? (dtype y) 'bfloat16)
+      (check-equal? (device y) (cuda-device))
       (define z (with-autocast #:device 'cuda #:dtype 'float16 (conv x)))
-      (check-equal? (tensor-dtype z) 'float16)
+      (check-equal? (dtype z) 'float16)
       (check-false (autocast-enabled? 'cuda))
-      (check-equal? (tensor-dtype (conv x)) 'float32)))
+      (check-equal? (dtype (conv x)) 'float32)))
 
   (test-case "a nested extent in the other half dtype does not reuse casts"
     (when (cuda-available?)
       (define lin (to (Linear 8 4) (cuda-device)))
       (define x (to (randn 2 8) (cuda-device)))
       (with-autocast #:device 'cuda #:dtype 'bfloat16
-        (check-equal? (tensor-dtype (lin x)) 'bfloat16)
+        (check-equal? (dtype (lin x)) 'bfloat16)
         (with-autocast #:device 'cuda #:dtype 'float16
-          (check-equal? (tensor-dtype (lin x)) 'float16
+          (check-equal? (dtype (lin x)) 'float16
                         "the outer extent's bfloat16 weight cast is not reused"))
-        (check-equal? (tensor-dtype (lin x)) 'bfloat16)))))
+        (check-equal? (dtype (lin x)) 'bfloat16)))))

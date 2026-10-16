@@ -5,8 +5,8 @@
            (only-in racket/runtime-path #%datum define-runtime-path)
            (only-in rackunit check-equal? check-exn check-true test-case)
            (only-in "../main.rkt"
-                    cpu-device select tensor->bytes tensor->list tensor-device
-                    tensor-dtype tensor-shape)
+                    cpu-device device dtype select tensor->bytes tensor->list
+                    tensor-shape)
            (only-in "../vision/image.rkt" decode-image read-image))
 
   (define-runtime-path fixtures "../vision/fixtures/images")
@@ -20,7 +20,7 @@
   (test-case "a PNG comes back [C H W] uint8, every pixel as drawn"
     (define img (read-image (fixture "gradient.png")))
     (check-equal? (tensor-shape img) '(3 23 37))
-    (check-equal? (tensor-dtype img) 'uint8)
+    (check-equal? (dtype img) 'uint8)
     (check-equal? (plane img 0) (drawn (lambda (x _) (modulo (* 7 x) 256))))
     (check-equal? (plane img 1) (drawn (lambda (_ y) (modulo (* 11 y) 256))))
     (check-equal? (plane img 2)
@@ -70,7 +70,7 @@
     (define path (fixture "smooth.jpg"))
     (define from-bytes (decode-image (file->bytes path) #:device 'cpu))
     (check-equal? (tensor->bytes from-bytes) (tensor->bytes (read-image path)))
-    (check-equal? (tensor-device from-bytes) (cpu-device)))
+    (check-equal? (device from-bytes) (cpu-device)))
 
   (test-case "an image over the pixel limit is refused from its header"
     (define (be32 n) (integer->integer-bytes n 4 #f #t))

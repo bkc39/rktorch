@@ -10,7 +10,7 @@
                     count-move! flatten-refused? flattened-signature
                     packing-hook packing-record storage-signature))
 
-  (define device (if (cuda-available?) 'cuda 'cpu))
+  (define device-kind (if (cuda-available?) 'cuda 'cpu))
 
   (define (packed? signature)
     (apply = (map cdr signature)))
@@ -30,7 +30,7 @@
          (regexp-match? placement-race-failure (exn-message e))))
 
   (define (racing-layer)
-    (to (LSTM 8 16 #:num-layers 2 #:bidirectional? #t) device))
+    (to (LSTM 8 16 #:num-layers 2 #:bidirectional? #t) device-kind))
 
   (define (update! b f)
     (let retry ()
@@ -92,14 +92,14 @@
   (test-case "a round trip completed while a check publishes makes the next check repack"
     (define lstm (racing-layer))
     (define weights (parameters lstm))
-    (define x (randn 4 2 8 #:device device))
+    (define x (randn 4 2 8 #:device device-kind))
     (parameterize ([packing-hook
                     (match-lambda
                       ['publish (count-move! weights)]
                       [_ (void)])])
       (forward lstm x))
     (check-equal? (count-decisions (lambda () (forward lstm x)))
-                  (list 1 (if (eq? device 'cuda) 1 0))
+                  (list 1 (if (eq? device-kind 'cuda) 1 0))
                   "a claim published across a move was accepted")
     (check-equal? (flattened-signature (car weights))
                   (storage-signature weights)))
@@ -125,7 +125,7 @@
   (define (forwards-pack-once pool)
     (define lstm (racing-layer))
     (define weights (parameters lstm))
-    (define x (randn 4 2 8 #:device device))
+    (define x (randn 4 2 8 #:device device-kind))
     (define failures '())
     (define counts
       (for/list ([_ (in-range 16)])
@@ -135,7 +135,7 @@
          (lambda ()
            (set! failures (append (forward-together lstm x pool) failures))))))
     (check-equal? failures '())
-    (check-equal? counts (make-list 16 (list 1 (if (eq? device 'cuda) 1 0)))
+    (check-equal? counts (make-list 16 (list 1 (if (eq? device-kind 'cuda) 1 0)))
                   "a forward found stale weights another had just checked")
     (check-equal? (flattened-signature (car weights))
                   (storage-signature weights)))
@@ -149,9 +149,9 @@
   (test-case "a move racing forwards never leaves a stale packing recorded"
     (define lstm (racing-layer))
     (define weights (parameters lstm))
-    (define x (randn 4 2 8 #:device device))
+    (define x (randn 4 2 8 #:device device-kind))
     (define placements
-      (if (eq? device 'cuda)
+      (if (eq? device-kind 'cuda)
           '((cuda float32) (cuda float64) (cpu float32))
           '((cpu float32) (cpu float64))))
     (define turn (make-semaphore 1))
@@ -163,7 +163,7 @@
       (define now (storage-signature weights))
       (define claimed? (equal? now (flattened-signature (car weights))))
       (define on-cuda?
-        (~> (car weights) tensor-device device-type (eq? 'cuda)))
+        (~> (car weights) device device-type (eq? 'cuda)))
       (when (and claimed? on-cuda? (not (packed? now)))
         (set-box! stale-claims (add1 (unbox stale-claims)))))
     (define mover
@@ -197,7 +197,7 @@
     (forward lstm x)
     (check-equal? (flattened-signature (car weights))
                   (storage-signature weights))
-    (when (eq? device 'cuda)
+    (when (eq? device-kind 'cuda)
       (check-true (packed? (storage-signature weights)))))
 
   (when (cuda-available?)

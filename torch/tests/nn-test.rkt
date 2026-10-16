@@ -281,7 +281,7 @@
     (check-equal? (map car (named-buffers bn))
                   '("running-mean" "running-var" "num-batches-tracked"))
     (check-equal? (map tensor-shape (buffers bn)) '((3) (3) ()))
-    (check-equal? (tensor-dtype (caddr (buffers bn))) 'int64)
+    (check-equal? (dtype (caddr (buffers bn))) 'int64)
     (check-equal? (tensor->list (car (buffers bn))) '(0.0 0.0 0.0))
     (check-equal? (tensor->list (cadr (buffers bn))) '(1.0 1.0 1.0))
     (manual-seed! 0)
@@ -318,7 +318,7 @@
     (define counter (caddr (buffers bn)))
     (copy! counter (tensor (expt 2 24)))
     (bn (randn 3 2 4 4))
-    (check-equal? (tensor-dtype counter) 'int64)
+    (check-equal? (dtype counter) 'int64)
     (check-= (item counter) (add1 (expt 2 24)) 0))
 
   (test-case "BatchNorm2d: gradients reach the affine parameters"
@@ -451,8 +451,8 @@
         (values y (grad x)))
       (define-values (cpu-y cpu-g) (out+grad 'cpu))
       (define-values (mps-y mps-g) (out+grad 'mps))
-      (check-equal? (tensor-device mps-y) (mps-device))
-      (check-equal? (tensor-device mps-g) (mps-device))
+      (check-equal? (device mps-y) (mps-device))
+      (check-equal? (device mps-g) (mps-device))
       (for ([a (in-list (tensor->list cpu-y))]
             [b (in-list (tensor->list (to-device mps-y 'cpu)))])
         (check-= a b 1e-5))
@@ -479,8 +479,8 @@
         (values loss (grad w)))
       (define-values (cpu-loss cpu-grad) (loss+grad 'cpu))
       (define-values (mps-loss mps-grad) (loss+grad 'mps))
-      (check-equal? (tensor-device mps-loss) (mps-device))
-      (check-equal? (tensor-device mps-grad) (mps-device))
+      (check-equal? (device mps-loss) (mps-device))
+      (check-equal? (device mps-grad) (mps-device))
       (check-= (item mps-loss) (item cpu-loss) 1e-5)
       (for ([c (in-list (tensor->list cpu-grad))]
             [m (in-list (tensor->list (to-device mps-grad 'cpu)))])
@@ -503,11 +503,11 @@
         (values loss (grad w)))
       (define-values (cpu-loss cpu-grad) (loss+grad 'cpu))
       (define-values (mps-loss mps-grad) (loss+grad 'mps))
-      (check-equal? (tensor-device mps-loss) (mps-device))
-      (check-equal? (tensor-device mps-grad) (mps-device))
+      (check-equal? (device mps-loss) (mps-device))
+      (check-equal? (device mps-grad) (mps-device))
       (check-= (item mps-loss) (item cpu-loss) 1e-5)
-      (define d (sub (to-device mps-grad 'cpu) cpu-grad))
-      (check-= (sqrt (item (sum (mul d d)))) 0.0 1e-5
+      (define d (- (to-device mps-grad 'cpu) cpu-grad))
+      (check-= (sqrt (item (sum (* d d)))) 0.0 1e-5
                "the gradient differs from the CPU's")))
 
   (test-case "a few Adam steps reduce the training loss"
@@ -559,7 +559,7 @@
     (to net 'float64)
     (to (ema-average avg) 'float64)
     (ema-update! avg)
-    (check-equal? (tensor-dtype (car (parameters (ema-average avg)))) 'float64
+    (check-equal? (dtype (car (parameters (ema-average avg)))) 'float64
                   "the cached weight follows the average across a move")
     (check-exn #rx"^ema: contract violation"
                (lambda () (ema net (Linear 2 2) #:decay 2))))
@@ -663,7 +663,7 @@
                     "num-batches-tracked"))
     (for ([a (in-list (state-dict bn))] [b (in-list (state-dict bn2))])
       (check-equal? (tensor->list (cdr a)) (tensor->list (cdr b))))
-    (check-equal? (tensor-dtype (caddr (buffers bn2))) 'int64)
+    (check-equal? (dtype (caddr (buffers bn2))) 'int64)
     (check-= (item (caddr (buffers bn2))) 1 0)
     (delete-file path))
 
@@ -702,12 +702,12 @@
         (copy! t (zeros-like t))))
     (load-state! b path)
     (for ([x (in-list (state-dict a))] [y (in-list (state-dict b))])
-      (check-equal? (tensor-dtype (cdr x)) (tensor-dtype (cdr y)) (car x))
+      (check-equal? (dtype (cdr x)) (dtype (cdr y)) (car x))
       (check-equal? (tensor->list (cdr x)) (tensor->list (cdr y)) (car x)))
     ;; a file in one dtype loads into a model in another: copy! converts
     (define c (Wide))
     (load-state! c path)
-    (check-equal? (map (lambda (e) (tensor-dtype (cdr e))) (state-dict c))
+    (check-equal? (map (lambda (e) (dtype (cdr e))) (state-dict c))
                   '(float32 float32 float32 float32 float32 float32))
     (check-equal? (tensor->list (cdr (assoc "u8" (state-dict c))))
                   '(0.0 9.0 255.0))

@@ -231,6 +231,8 @@ with `backward!` outside the form as PyTorch recommends). From
   computations starts the chain). An expansion analyzer keeps it off a call
   that is already a `~>` or `~>>` step, which receives an argument it does
   not show
+- getters: write `device` and `dtype`, not `tensor-device` or
+  `tensor-dtype`; `scripts/resyntax-rules.rkt` rewrites the long names
 - reductions: `sum mean max min argmax softmax log-softmax`
 - ordering and sampling (`torch/foreign/order-ops.rkt`, tranche 7, #153):
   `topk` and `sort` answer `(values entries indices)`; `argsort`;
@@ -445,7 +447,7 @@ racket scripts/coverage.rkt --changed   # expression coverage (#173); exits
                                # non-zero below the floor and lists the lines
                                # of the files you touched that no test reaches
 
-scripts/resyntax analyze --local-git-repository . origin/master   # lint gate
+scripts/resyntax analyze --local-git-repository . [REF]   # lint gate
                                      # (CI fails on any suggestion; scans
                                      #  changed files, torch/ included; the
                                      #  default rules plus
@@ -453,7 +455,8 @@ scripts/resyntax analyze --local-git-repository . origin/master   # lint gate
                                      #  literate examples' chunks through
                                      #  scripts/resyntax-lp2.rkt)
 scripts/resyntax fix --directory torch
-raco test scripts/resyntax-rules-test.rkt scripts/resyntax-lp2.rkt   # the repository's own rules
+raco test --timeout 600 scripts/resyntax-rules-test.rkt \
+  scripts/resyntax-lp2.rkt scripts/resyntax-wrapper-test.rkt   # lint suite tests
 raco review torch/**/*.rkt
 ```
 
