@@ -14,6 +14,7 @@
          tr-ones-on/raw
          tr-full/raw
          tr-full-on/raw
+         tr-full-i64-on/raw
          tr-arange/raw
          tr-eye/raw
          tr-from-data/raw
@@ -93,6 +94,17 @@
         (dtype : _tr-dtype)
         -> _Tensor/null)
   #:c-id tr_full_on
+  #:wrap tensor-allocator)
+
+(define-torch tr-full-i64-on/raw
+  (_fun (dims : (_s64vector i))
+        (ndim : _int64)
+        (value : _int64)
+        (type : _tr-device-type)
+        (index : _int64)
+        (dtype : _tr-dtype)
+        -> _Tensor/null)
+  #:c-id tr_full_i64_on
   #:wrap tensor-allocator)
 
 (define-torch tr-arange-on/raw
