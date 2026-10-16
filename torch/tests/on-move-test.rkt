@@ -83,14 +83,14 @@
     (define m (Pair child child))
     (to m 'float64)
     (check-equal? (unbox runs) 1)
-    (check-equal? (tensor-dtype (car (parameters m))) 'float64))
+    (check-equal? (dtype (car (parameters m))) 'float64))
 
   (test-case "a handwritten wrapper that lists no tensors still moves its child"
     (define runs (box 0))
     (define child (Counted runs))
     (to (Twice child) 'float64)
     (check-equal? (unbox runs) 1)
-    (check-equal? (tensor-dtype (car (parameters child))) 'float64))
+    (check-equal? (dtype (car (parameters child))) 'float64))
 
   (test-case "a move lists each child of a shared-children DAG a bounded number of times"
     (define listings (box 0))

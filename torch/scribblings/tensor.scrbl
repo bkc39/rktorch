@@ -30,8 +30,8 @@ Without @racket[#:dtype] the element type is inferred as PyTorch infers it
 
 @torch-examples[
 (tensor '((1 2) (3 4)))
-(tensor-dtype (tensor '(1.0 2.0)))
-(tensor-dtype (tensor '(1.0 2.0) #:dtype 'int64))
+(dtype (tensor '(1.0 2.0)))
+(dtype (tensor '(1.0 2.0) #:dtype 'int64))
 ]
 
 Construction offers only the three dtypes above; reach the others, such as
@@ -94,7 +94,7 @@ It stays @racket['float32] by default, so
 @torch-examples[
 (arange 6)
 (tensor->list (arange 0 6 2))
-(tensor-dtype (arange 6 #:dtype 'int64))
+(dtype (arange 6 #:dtype 'int64))
 ]}
 
 @defproc[(rand [dim exact-nonnegative-integer?] ...

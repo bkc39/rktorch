@@ -73,7 +73,7 @@ so a run replays.
        (random-resized-crop (vector-ref images i) 224 #:generator generator))))
   (values (random-horizontal-flip (stack crops 0) #:generator generator)
           (index-select labels 0 (tensor indices
-                                         #:device (tensor-device labels)))))]
+                                         #:device (device labels)))))]
 
 @bold{Freezing.} A frozen weight does not require a gradient: the
 backward pass stops short of it and an optimizer never moves it. The head

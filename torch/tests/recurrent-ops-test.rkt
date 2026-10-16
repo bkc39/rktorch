@@ -68,7 +68,7 @@
       (define-values (gpu-out gpu-h gpu-c)
         (lstm-input (on-gpu input) (map on-gpu (list h0 c0))
                     (map on-gpu lstm-ws) #t 1 0.0 #f #f #f))
-      (check-equal? (device-type (tensor-device gpu-out)) 'cuda)
+      (check-equal? (device-type (device gpu-out)) 'cuda)
       (check-true (close? cpu-out (to-device gpu-out 'cpu)))
       (check-true (close? cpu-h (to-device gpu-h 'cpu)))
       (check-true (close? cpu-c (to-device gpu-c 'cpu)))
@@ -89,14 +89,15 @@
       (define before (cuda-bytes))
       (define-values (top indices) (topk scores 16))
       (check-equal? (- (cuda-bytes) before) (+ (* 16 4) (* 16 8)))
-      (check-equal? (device-type (tensor-device indices)) 'cuda)
+      (check-equal? (device-type (device indices)) 'cuda)
       (check-equal? (tensor-shape top) '(16))
       ;; scores outlives the reading, or its finalizer can land before it
       (check-equal? (tensor-shape scores) '(64)))
 
     (test-case "multinomial samples on the device"
       (define draws
-        (multinomial (to-device (tensor '(0.0 1.0 0.0)) 'cuda) 4
-                     #:replacement? #t))
-      (check-equal? (device-type (tensor-device draws)) 'cuda)
+        (~> (tensor '(0.0 1.0 0.0))
+            (to-device 'cuda)
+            (multinomial 4 #:replacement? #t)))
+      (check-equal? (device-type (device draws)) 'cuda)
       (check-equal? (tensor->list (to-device draws 'cpu)) '(1 1 1 1)))))

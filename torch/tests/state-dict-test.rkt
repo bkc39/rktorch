@@ -5,7 +5,7 @@
            (only-in json jsexpr->string string->jsexpr)
            (only-in racket/file file->bytes make-temporary-file)
            (only-in rackunit check-equal? check-exn check-not-exn test-case)
-           (only-in "../main.rkt" manual-seed! tensor tensor->list tensor-dtype
+           (only-in "../main.rkt" dtype manual-seed! tensor tensor->list
                     tensor-shape zeros)
            (only-in "../nn.rkt" Buffer Linear buffers define-layer load-state!
                     named-parameters parameters save-state!))
@@ -35,12 +35,12 @@
   (test-case "tensor builds float64 exactly, from a list or an f64vector"
     (define wide (+ 1.0 (expt 2.0 -52)))
     (define t (tensor (list 0.1 wide) #:dtype 'float64))
-    (check-equal? (tensor-dtype t) 'float64)
+    (check-equal? (dtype t) 'float64)
     (check-equal? (tensor->list t) (list 0.1 wide))
     (define v (tensor (f64vector 0.1 wide)))
-    (check-equal? (tensor-dtype v) 'float64 "an f64vector is float64 data")
+    (check-equal? (dtype v) 'float64 "an f64vector is float64 data")
     (check-equal? (tensor->list v) (list 0.1 wide))
-    (check-equal? (tensor-dtype (tensor (f64vector 1.5) #:dtype 'float32))
+    (check-equal? (dtype (tensor (f64vector 1.5) #:dtype 'float32))
                   'float32)
     (check-equal? (tensor-shape (tensor '((1 2) (3 4)) #:dtype 'float64))
                   '(2 2)))
@@ -183,7 +183,7 @@
     (save-state! (Typed #t) path)
     (define loaded (Typed #f))
     (check-not-exn (lambda () (load-state! loaded path)))
-    (check-equal? (map tensor-dtype (buffers loaded)) '(uint8 float64 int64))
+    (check-equal? (map dtype (buffers loaded)) '(uint8 float64 int64))
     (check-equal? (map tensor->list (buffers loaded))
                   '((0 1 255) (0.1) (9007199254740993)))
     (delete-file path)

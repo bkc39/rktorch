@@ -2,7 +2,7 @@
 
 ;; Runner + tests for the literate torch/scribblings/examples/15-finetune.rkt.
 
-(require racket/runtime-path)
+(require (only-in racket/runtime-path #%datum define-runtime-path))
 
 (define-runtime-path photos-dir "../../torch/vision/fixtures/hymenoptera")
 
@@ -60,7 +60,7 @@
   (define accel (accelerator-if-available))
   (unless (eq? (device-type accel) 'cpu)
     (define-values (a-records a-net) (run accel))
-    (check-equal? (tensor-device (last (parameters a-net))) accel)
+    (check-equal? (device (last (parameters a-net))) accel)
     (for ([r (in-list a-records)])
       (check-true (rational? (list-ref r 2))
                   (format "non-finite loss on ~a: ~a" accel r)))))
