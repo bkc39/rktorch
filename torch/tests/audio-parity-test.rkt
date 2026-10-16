@@ -4,11 +4,10 @@
 ;; SKIPS the torchaudio/soundfile batteries when those imports fail).
 
 (module+ test
-  ;; whole-module on purpose: the expansion needs bindings only-in would strip
-  (require racket/runtime-path
-           rackunit
+  (require rackunit
            (only-in racket/file
                     delete-directory/files make-temporary-directory)
+           (only-in racket/runtime-path #%datum define-runtime-path)
            (only-in "../audio/functional.rkt"
                     edit-distance hann-window log-mel-spectrogram
                     mel-filterbank stft)

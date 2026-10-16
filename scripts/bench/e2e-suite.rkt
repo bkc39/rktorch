@@ -105,7 +105,7 @@
            (only-in racket/file make-temporary-directory make-temporary-file)
            (only-in racket/list remove-duplicates)
            (only-in racket/port open-output-nowhere)
-           (only-in racket/runtime-path define-runtime-path)
+           (only-in racket/runtime-path #%datum define-runtime-path)
            rackunit
            (only-in "e2e.rkt" example)
            (only-in "fixtures/pre-hook-torch.rkt" call-with-pre-hook-torch)

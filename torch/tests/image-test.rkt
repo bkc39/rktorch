@@ -2,9 +2,7 @@
 
 (module+ test
   (require (only-in racket/file file->bytes)
-           ;; whole-module: define-runtime-path needs phase-1 bindings
-           ;; only-in strips
-           racket/runtime-path
+           (only-in racket/runtime-path #%datum define-runtime-path)
            (only-in rackunit check-equal? check-exn check-true test-case)
            (only-in "../main.rkt"
                     cpu-device device dtype select tensor->bytes tensor->list

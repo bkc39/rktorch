@@ -2,7 +2,7 @@
 
 ;; Runner + tests for the literate torch/scribblings/examples/15-finetune.rkt.
 
-(require racket/runtime-path)
+(require (only-in racket/runtime-path #%datum define-runtime-path))
 
 (define-runtime-path photos-dir "../../torch/vision/fixtures/hymenoptera")
 

@@ -550,8 +550,8 @@ file documents exactly what it pulls in. Exemptions, each marked with a
 comment at the require site: pure re-export facades (`main.rkt`,
 `foreign.rkt`, `nn.rkt`, `safe.rkt`, `operators.rkt`,
 `scribblings/labels.rkt`), and macro-heavy modules
-whose expansions need the module's full export set (`racket/runtime-path`,
-`syntax/parse/pre`).
+whose expansions need the module's full export set (`syntax/parse/pre`).
+Runtime paths take `(only-in racket/runtime-path #%datum define-runtime-path)`.
 
 - `info.rkt` — package metadata + native-library pre-install hook.
 - `main.rkt` — high-level facade (re-exports `foreign.rkt`).

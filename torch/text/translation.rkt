@@ -8,9 +8,7 @@
          (only-in racket/file file->string)
          (only-in racket/list append-map index-of remove-duplicates)
          (only-in racket/port copy-port open-output-nowhere)
-         ;; whole-module on purpose: the expansion needs bindings only-in
-         ;; would strip
-         racket/runtime-path
+         (only-in racket/runtime-path #%datum define-runtime-path)
          (only-in racket/string string-prefix? string-split string-trim)
          (only-in "../main.rkt" tensor tensor? tensor->list to-dtype)
          (only-in "../private/contract.rkt" define/contract-out)

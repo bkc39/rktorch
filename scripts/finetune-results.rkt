@@ -10,7 +10,7 @@
 (require (only-in racket/date current-date date->string date-display-format)
          (only-in racket/format ~r)
          (only-in racket/pretty pretty-write)
-         racket/runtime-path
+         (only-in racket/runtime-path #%datum define-runtime-path)
          torch
          torch/scribblings/examples/15-finetune)
 

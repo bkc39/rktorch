@@ -8,7 +8,7 @@
          (only-in racket/list remove-duplicates)
          (only-in racket/match match match-define)
          (only-in racket/port copy-port)
-         (only-in racket/runtime-path define-runtime-path)
+         (only-in racket/runtime-path #%datum define-runtime-path)
          (only-in racket/string string-join)
          (only-in threading ~>)
          (only-in "harness.rkt" bench-case with-temporary-path)

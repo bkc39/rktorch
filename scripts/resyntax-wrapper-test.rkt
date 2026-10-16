@@ -6,9 +6,7 @@
                   delete-directory/files display-lines-to-file display-to-file
                   file->lines make-directory* make-temporary-directory)
          (only-in racket/match == match match-define)
-         ;; whole-module: define-runtime-path needs phase-1 bindings
-         ;; only-in strips
-         racket/runtime-path
+         (only-in racket/runtime-path #%datum define-runtime-path)
          (only-in racket/string string-trim)
          (only-in racket/system process*/ports)
          (only-in rackunit check-equal? check-false check-match test-case)

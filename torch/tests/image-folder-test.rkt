@@ -3,9 +3,7 @@
 (module+ test
   (require (only-in net/url path->url url->string)
            (only-in racket/file copy-directory/files make-directory*)
-           ;; whole-module: define-runtime-path needs phase-1 bindings
-           ;; only-in strips
-           racket/runtime-path
+           (only-in racket/runtime-path #%datum define-runtime-path)
            (only-in rackunit
                     check-equal? check-exn check-false check-true test-case)
            (only-in "../data/dataset.rkt" dataset-ref)

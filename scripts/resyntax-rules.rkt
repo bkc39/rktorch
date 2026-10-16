@@ -2,6 +2,7 @@
 
 (require (only-in racket/list append* append-map filter-map)
          (only-in racket/match match-define)
+         (only-in racket/runtime-path define-runtime-path)
          (only-in racket/set for*/set in-set set-member?)
          (only-in racket/treelist in-treelist treelist-length)
          (only-in resyntax/base
@@ -17,7 +18,7 @@
          (only-in syntax/parse/pre
                   attribute boolean define-syntax-class expr id kernel-literals
                   keyword number pattern str syntax-parse this-syntax ~and
-                  ~optional ~or* ~var)
+                  ~datum ~optional ~or* ~var)
          (only-in threading ~> ~>>)
          (only-in torch
                   add device div dtype ge gt le lt matmul mul sub tensor-device
@@ -25,6 +26,9 @@
          (prefix-in torch: (only-in torch * + - / < <= > >= @)))
 
 (provide rktorch-rules rktorch-recommendations)
+
+(module+ private
+  (provide runtime-path-forms-analyzer))
 
 (define named-operators ;; noqa
   (list (list #'add #'torch:+)
@@ -293,9 +297,62 @@
   #:with (step ...) (map bare-when-unary (attribute start.step))
   (~> start.root step ... later ...))
 
+(define other-runtime-path-forms
+  '(define-runtime-paths define-runtime-path-list define-runtime-module-path
+    define-runtime-module-path-index runtime-require runtime-paths))
+
+(define (mentions-other-runtime-path-form? identifiers)
+  (cond
+    [(pair? identifiers)
+     (or (mentions-other-runtime-path-form? (car identifiers))
+         (mentions-other-runtime-path-form? (cdr identifiers)))]
+    [(identifier? identifiers)
+     (and (memq (syntax-e identifiers) other-runtime-path-forms) #t)]
+    [else #f]))
+
+(define (uses-other-runtime-path-form? stx)
+  (or (mentions-other-runtime-path-form? stx)
+      (mentions-other-runtime-path-form? (syntax-property stx 'origin))
+      (ormap uses-other-runtime-path-form? (syntax-parts stx))))
+
+(define (original-runtime-path-module-paths stx)
+  (define inner
+    (append-map original-runtime-path-module-paths (syntax-parts stx)))
+  (cond
+    [(and (syntax-original-path stx)
+          (eq? (syntax-e stx) 'racket/runtime-path))
+     (cons stx inner)]
+    [else inner]))
+
+(define runtime-path-forms-analyzer
+  (make-expansion-analyzer
+   #:name 'runtime-path-forms-analyzer
+   (lambda (expanded)
+     (define only-define? (not (uses-other-runtime-path-form? expanded)))
+     (define forms
+       (original-runtime-path-module-paths
+        (syntax-label-paths expanded 'expansion-path)))
+     (sequence->syntax-property-bundle
+      (for/list ([form (in-list forms)])
+        (syntax-property-entry (syntax-property form 'expansion-path)
+                               'only-define-runtime-path?
+                               only-define?))))))
+
+(define-refactoring-rule runtime-path-only-in
+  #:description
+  "Require `(only-in racket/runtime-path #%datum define-runtime-path)`."
+  #:analyzers (list runtime-path-forms-analyzer)
+  #:literals (require)
+  (require before ... (~and module-path (~datum racket/runtime-path)) after ...)
+  #:when (syntax-property #'module-path 'only-define-runtime-path?)
+  (require before ...
+           (only-in racket/runtime-path #%datum define-runtime-path)
+           after ...))
+
 (define-refactoring-suite rktorch-rules
   #:rules (named-operator-to-symbol
            nested-calls-to-threading
+           runtime-path-only-in
            tensor-getter-to-short-name
            threading-from-innermost-call))
 

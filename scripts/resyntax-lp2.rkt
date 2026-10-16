@@ -186,12 +186,13 @@
   (exit (if (unbox failed?) 1 0)))
 
 (module+ test
-  (require ;; whole-module: define-runtime-path needs phase-1 bindings
-           ;; only-in strips
-           racket/runtime-path
-           (only-in racket/string string-prefix?)
-           (only-in rackunit check-equal? check-true test-case)
-           (only-in resyntax/grimoire/string-replacement copied-string))
+  (require (only-in racket/port open-output-nowhere)
+           (only-in racket/runtime-path #%datum define-runtime-path)
+           (only-in racket/string string-contains? string-prefix?)
+           (only-in rackunit
+                    check-equal? check-false check-not-exn check-true test-case)
+           (only-in resyntax/grimoire/string-replacement copied-string)
+           (only-in torch/private/util with-temporary-directory))
 
   (define-runtime-path asr "../torch/scribblings/examples/07-asr.rkt")
   (define text (file->string asr))
@@ -233,7 +234,33 @@
 
   (test-case "code lines are kept verbatim"
     (define model (shadow-line-of "(define-layer asr"))
-    (check-equal? (cadr model) (car model))))
+    (check-equal? (cadr model) (car model)))
+
+  (test-case "a chunk's fixed racket/runtime-path require compiles"
+    (with-temporary-directory (directory)
+      (define literate (build-path directory "runtime-path.rkt"))
+      (with-output-to-file literate
+        (lambda ()
+          (displayln lp2-lang)
+          (displayln "@chunk[<main>")
+          (writeln '(require racket/runtime-path torch))
+          (writeln '(define-runtime-path here "."))
+          (displayln "]")))
+      (parameterize ([current-output-port (open-output-nowhere)]
+                     [fix? #t]
+                     [timeout-ms 180000])
+        (lint! (path->string literate) every-line))
+      (check-not-exn
+       (lambda ()
+         (parameterize ([current-namespace (make-base-namespace)]
+                        [read-accept-reader #t])
+           (expand (with-input-from-file literate
+                     (lambda () (read-syntax literate)))))))
+      (define fixed (file->string literate))
+      (check-false (string-contains? fixed "racket/base"))
+      (check-true (string-contains?
+                   fixed
+                   "(only-in racket/runtime-path #%datum define-runtime-path)")))))
 
 (module+ main
   (command-line
