@@ -15,8 +15,30 @@ change to a build target or a shell belongs in both.
 nix build                 # native lib + Racket package + tests + examples
 ./result/bin/torch        # prints the libtorch version and a 2x2 draw
 nix build .#cpp           # CMake build and the GoogleTest suite only
-nix flake check           # the Nix checks: cpp, format, tidy, line gate, racket
+nix flake check           # the Nix checks: cpp, format, tidy, line gate, racket,
+                          # and the racket-deps-* checks
 ```
+
+`racket-deps` (flake.nix) is the catalog packages `torch/info.rkt` declares
+beyond the Racket distribution, fetched as source trees under one hash.
+`racket-deps-current` fails with "info.rkt changed; bump racket-deps outputHash
+in flake.nix" when the declared deps no longer match the fetched ones, and
+names any dep whose `#:version` minimum the fetched tree or the Racket
+installation does not meet;
+`racket-deps-guard-test` and `racket-deps-info-test` test
+`nix/racket-deps/racket-deps.rkt`; `racket-deps-provision-test` tests
+`nix/racket-deps/provision.sh`, the dev shells' provisioning. To bump, set
+`outputHash` to `""`, run `nix build .#racket-deps`, and paste the hash Nix
+reports. A `#:platform` dep is refused, whether `torch/info.rkt` or a
+fetched package declares it: one hash cannot hold a per-system fetch. A
+package source (a URL or path) is refused too: racket-deps fetches catalog
+packages by name.
+
+`nix develop` provisions `.racket-user` again whenever racket-deps, the Racket
+version or `torch/info.rkt` changes. It runs the same drift check first and
+stops on it, removes the packages only the previous racket-deps held, and
+installs `torch` with `--deps fail`, so a dep missing from racket-deps fails
+the shell entry instead of being fetched from the live catalog.
 
 CI runs two more jobs that `nix flake check` does not cover. The Resyntax gate
 is the `scripts/resyntax analyze` command below, Resyntax's default rules plus

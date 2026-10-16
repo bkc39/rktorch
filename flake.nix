@@ -30,13 +30,6 @@
       #               (often uncached on darwin) from-source build.
       torchSource = "bin";
 
-      # threading-lib and its dependency closure, prefetched as unpacked
-      # source trees via a fixed-output derivation (network is permitted in
-      # FODs) so the sandboxed racket build installs offline — the same
-      # pattern as rkt-polars' racket-deps. Unpacked trees (not archive
-      # zips) so the output hash is mtime-free and platform-stable. Bump
-      # outputHash when the threading version in the catalog changes or a
-      # new runtime dep lands in torch/info.rkt.
       # The Racket toolchain from the scoped pin, guarded by the ordering
       # invariant the nixpkgsRacket input comment documents: the Racket
       # binary dlopens libtorchrkt built against the MAIN pin's glibc, and
@@ -57,8 +50,18 @@
            + "(see the flake inputs comment)");
         pkgsRacket.racket;
 
+      # Source catalog only: a built package's compiled/ belongs to one Racket.
+      racketDepsDir = ./nix/racket-deps;
+      racketDepsScript = "${racketDepsDir}/racket-deps.rkt";
+      provisionDepsStep = deps: pkgDir: keep: ''
+        if ! bash ${racketDepsDir}/provision.sh ${deps} ${pkgDir} ${keep}; then
+          echo "ERROR: provisioning failed; not stamping, so the next" >&2
+          echo "       shell entry retries it." >&2
+          exit 1
+        fi
+      '';
       racketDepsFor = pkgs: racketPkg:
-        pkgs.stdenvNoCC.mkDerivation {
+        pkgs.stdenvNoCC.mkDerivation (finalAttrs: {
           name = "torch-rkt-racket-deps";
           dontUnpack = true;
           nativeBuildInputs = [ racketPkg pkgs.cacert pkgs.unzip ];
@@ -67,10 +70,14 @@
             export HOME=$TMPDIR/home
             export PLTUSERHOME=$TMPDIR/plt
             export SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt
-            mkdir -p "$PLTUSERHOME"
-            raco pkg install --batch --auto --no-setup --scope user threading-lib
-            mapfile -t deps < <(racket -e \
-              '(require pkg/lib)(for ([p (installed-pkg-names #:scope (quote user))]) (displayln p))')
+            mkdir -p "$PLTUSERHOME" "$TMPDIR/torch-info"
+            cp ${./torch/info.rkt} "$TMPDIR/torch-info/info.rkt"
+            racket ${racketDepsScript} names "$TMPDIR/torch-info" > "$TMPDIR/wanted"
+            mapfile -t wanted < "$TMPDIR/wanted"
+            raco pkg install --batch --auto --no-setup --scope user \
+              --catalog https://pkgs.racket-lang.org "''${wanted[@]}"
+            racket ${racketDepsScript} installed > "$TMPDIR/deps"
+            mapfile -t deps < "$TMPDIR/deps"
             raco pkg archive "$TMPDIR/archive" "''${deps[@]}"
             mkdir -p "$out"
             for z in "$TMPDIR"/archive/pkgs/*.zip; do
@@ -78,12 +85,104 @@
               mkdir -p "$out/$name"
               unzip -q "$z" -d "$out/$name"
             done
+            racket ${racketDepsScript} closure "$out"
+            racket ${racketDepsScript} manifest "$TMPDIR/torch-info" > "$out/.info-deps"
+            racket ${racketDepsScript} guard "$out"
+            racket ${racketDepsScript} check "$TMPDIR/torch-info" "$out"
             runHook postBuild
           '';
           dontInstall = true;
           outputHashMode = "recursive";
           outputHashAlgo = "sha256";
-          outputHash = "sha256-7149ciHUXyTKKg+3KGRPKU9aTHrAA5gw5XWibaf1avw=";
+          outputHash = "sha256-YyR47U1gR5twmnllsNOddO8mhFJ4MCtmsDu8WjY2JRI=";
+          passthru.tests = racketDepsTestsFor pkgs racketPkg finalAttrs.finalPackage;
+        });
+
+      racketDepsTestsFor = pkgs: racketPkg: racket-deps:
+        let
+          run = name: script: pkgs.runCommand name { nativeBuildInputs = [ racketPkg ]; } ''
+            export HOME=$TMPDIR/home PLTUSERHOME=$TMPDIR/plt
+            rd() { racket ${racketDepsScript} "$@"; }
+            fails() {
+              if "$@" > "$TMPDIR/log" 2>&1; then
+                echo "expected a failure: $*" >&2
+                exit 1
+              fi
+            }
+            ${script}
+            mkdir "$out"
+          '';
+          fixtures = ./nix/racket-deps/fixtures;
+        in
+        {
+          racket-deps-current = run "torch-rkt-racket-deps-current" ''
+            mkdir -p "$TMPDIR/info"
+            cp ${./torch/info.rkt} "$TMPDIR/info/info.rkt"
+            rd check "$TMPDIR/info" ${racket-deps}
+          '';
+          racket-deps-guard-test = run "torch-rkt-racket-deps-guard-test" ''
+            t=$TMPDIR/trees
+            mkdir -p "$t/source/pkg/doc" "$t/zo/pkg/compiled" "$t/sxref/pkg/doc/pkg" \
+              "$t/linked/pkg" "$t/elsewhere/compiled" \
+              "$t/sealed/pkg/private"
+            touch "$t/source/pkg/main.rkt" "$t/source/pkg/doc/guide.scrbl" \
+              "$t/zo/pkg/compiled/x_rkt.zo" "$t/sxref/pkg/doc/pkg/out0.sxref" \
+              "$t/elsewhere/compiled/x_rkt.zo" "$t/sealed/pkg/main.rkt"
+            ln -s "$t/elsewhere/compiled" "$t/linked/pkg/compiled"
+            chmod 000 "$t/sealed/pkg/private"
+            [ ! -r "$t/sealed/pkg/private" ]
+            rd guard "$t/source"
+            fails rd guard "$t/zo"
+            fails rd guard "$t/sxref"
+            fails rd guard "$t/linked"
+            fails rd guard "$t/sealed"
+            grep -q 'could not open directory' "$TMPDIR/log"
+            chmod 755 "$t/sealed/pkg/private"
+          '';
+          racket-deps-info-test = run "torch-rkt-racket-deps-info-test" ''
+            built=$TMPDIR/built
+            mkdir -p "$built"
+            rd manifest ${fixtures}/current > "$built/.info-deps"
+            rd check ${fixtures}/current "$built"
+            fails rd check ${fixtures}/added "$built"
+            grep -q 'bump racket-deps outputHash' "$TMPDIR/log"
+            fails rd check ${fixtures}/versioned "$built"
+            fails rd check ${fixtures}/removed "$built"
+            [ "$(rd names ${fixtures}/no-build-deps)" = threading-lib ]
+            fails rd names ${fixtures}/distribution-only
+            rd check ${fixtures}/base-versioned "$built"
+            fails rd check ${fixtures}/base-unmet "$built"
+            grep -qF "base requires #:version 99.0; found $(racket -e '(display (version))') (installation)" "$TMPDIR/log"
+            for v in 1.2 1.3; do
+              cp -r ${fixtures}/fetched-$v "$TMPDIR/fetched-$v"
+              chmod -R u+w "$TMPDIR/fetched-$v"
+              rd manifest ${fixtures}/versioned > "$TMPDIR/fetched-$v/.info-deps"
+            done
+            fails rd check ${fixtures}/versioned "$TMPDIR/fetched-1.2"
+            grep -q 'threading-lib requires #:version 1.3; found 1.2' "$TMPDIR/log"
+            rd check ${fixtures}/versioned "$TMPDIR/fetched-1.3"
+            fails rd names ${fixtures}/platform
+            grep -q 'extra-lib has #:platform unix; platform-qualified' "$TMPDIR/log"
+            fails rd check ${fixtures}/base-platform "$built"
+            grep -q 'base has #:platform windows; platform-qualified' "$TMPDIR/log"
+            fails rd names ${fixtures}/base-platform
+            grep -q 'base has #:platform windows; platform-qualified' "$TMPDIR/log"
+            fails rd check ${fixtures}/bad-version "$built"
+            grep -qF 'base has #:version "99", which is not a valid Racket version' "$TMPDIR/log"
+            fails rd names ${fixtures}/bad-version
+            grep -qF 'base has #:version "99", which is not a valid Racket version' "$TMPDIR/log"
+            fails rd names ${fixtures}/source
+            grep -qF 'https://example.com/foo.git is a package source; racket-deps fetches catalog packages by name' "$TMPDIR/log"
+            rd closure ${fixtures}/closure-clean
+            fails rd closure ${fixtures}/closure-platform
+            grep -q 'extra-lib has #:platform unix; platform-qualified' "$TMPDIR/log"
+            grep -q 'declared in plat-lib/info.rkt' "$TMPDIR/log"
+          '';
+          racket-deps-provision-test = run "torch-rkt-racket-deps-provision-test" ''
+            timeout -k 10 600 bash ${racketDepsDir}/provision-test.sh \
+              ${racketDepsDir}/provision.sh ${fixtures}/provision \
+              ${pkgs.writeText "provision-deps-step" (provisionDepsStep ''"$1"'' ''"$2"'' ''"$3"'')}
+          '';
         };
 
       # nixpkgs' libtorch-bin is still 2.9.0 (#140), so torchPackageFor points
@@ -390,7 +489,11 @@
             inherit pname version;
             src = ./.;
 
-            nativeBuildInputs = [ racketPkg pkgs.makeWrapper ];
+            nativeBuildInputs = [
+              racketPkg
+              pkgs.makeWrapper
+              racket-deps.tests.racket-deps-current
+            ];
             buildInputs = [ cpp ];
 
             buildPhase = ''
@@ -520,7 +623,7 @@
       checks = forAllSystems (system: {
         inherit (self.packages.${system})
           cpp cpp-format cpp-line-count cpp-tidy racket racket92;
-      });
+      } // self.packages.${system}.racket-deps.tests);
 
       devShells = forAllSystems (system:
         let
@@ -616,12 +719,6 @@
           provisionRacketFor = shim: ''
             export TORCHRKT_NATIVE_LIB_PATH="${shim}"
             export PLTUSERHOME="$PWD/.racket-user"
-            _rkt_ver=$(racket --version 2>&1 | grep -oE 'v[0-9]+\.[0-9]+' | tr -d 'v' | tr '.' '-')
-            # Bump the ordinal whenever the installed package list below
-            # changes: the stamp is what makes provisioning a one-time cost,
-            # so an already-provisioned checkout would otherwise skip the new
-            # package and only fail later, where it is used.
-            deps_stamp="$PLTUSERHOME/.deps3-installed-torch-''${_rkt_ver}"
             # In-tree zo caches compiled piecewise across commits can defeat
             # the compilation manager, so bytecode is keyed to HEAD by a
             # stamp-and-clear (a per-rev PLTCOMPILEDROOTS would recompile
@@ -631,7 +728,7 @@
             _old_rev=$(cat "$_rev_stamp" 2>/dev/null || echo none)
             if [ "$_old_rev" != "$_rev" ]; then
               _clear_ok=1
-              if [ "$_old_rev" != "none" ] || [ -f "$deps_stamp" ]; then
+              if [ "$_old_rev" != "none" ] || compgen -G "$PLTUSERHOME/.deps[0-9]*" > /dev/null; then
                 echo "bytecode cache: clearing compiled/ (''${_old_rev:0:12} -> ''${_rev:0:12})"
                 for _d in torch examples scripts codegen; do
                   [ -d "$_d" ] || continue
@@ -649,24 +746,7 @@
               fi
             fi
             ${stageNativeLibsIfStale shim}
-            if [ ! -f "$deps_stamp" ]; then
-              echo "Installing Racket package (link mode, Racket ''${_rkt_ver})..."
-              mkdir -p "$PLTUSERHOME"
-              # A shell hook has no errexit, so every step is chained: the
-              # stamp is what makes provisioning a one-time cost, and stamping
-              # a half-provisioned checkout leaves it broken until someone
-              # deletes the stamp by hand.
-              if raco pkg install --batch --copy --no-docs --no-setup \
-                     --scope user --skip-installed ${racket-deps}/*/ \
-                 && raco pkg install --batch --auto --no-setup --link \
-                      --scope user --skip-installed --name torch "$PWD/torch" \
-                 && raco setup --no-docs --pkgs torch; then
-                touch "$deps_stamp"
-              else
-                echo "WARNING: provisioning failed; not stamping, so the next" >&2
-                echo "         shell entry retries it." >&2
-              fi
-            fi
+            ${provisionDepsStep racket-deps ''"$PWD/torch"'' racket-linters}
             # Stamped by the dev tools' store path, so a bump reaches checkouts
             # provisioned before it: install adds the missing packages, then
             # update moves all of them, from an older pin or the live catalog

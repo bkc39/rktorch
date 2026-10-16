@@ -420,7 +420,8 @@ for a change, and the gates it has to pass before it is done, are the
 ```bash
 nix build              # builds cpp, installs the pkg, runs raco test + examples
 nix build .#cpp        # CMake build + gtest only
-nix flake check        # the Nix checks: cpp, format, tidy, line-count, racket
+nix flake check        # the Nix checks: cpp, format, tidy, line-count, racket,
+                       # and the racket-deps-* checks
                        # (CI also runs the Resyntax gate and codegen-drift)
 nix develop            # dev shell (includes a Python with `torch`)
 nix develop .#ci       # lean shell without Python torch (used by the lint job)
@@ -472,6 +473,22 @@ package's `rev`, set its `hash` to `""`, `nix build .#racket-linters`, paste
 the hash Nix reports, and run the full sweep (`scripts/resyntax analyze
 --directory torch`), since CI scans only changed files. Each checkout moves to the new
 trees on its next shell entry.
+
+`racket-deps` (flake.nix) holds the catalog deps `torch/info.rkt` declares
+beyond the Racket distribution, as source trees only. When those deps change,
+or a fresh store reports a hash mismatch (upstream moved), set its
+`outputHash` to `""`, `nix build .#racket-deps`, paste the reported hash. The
+`racket-deps-current` check says "info.rkt changed; bump racket-deps outputHash",
+and also fails on an unmet `#:version` minimum. A `#:platform` dep is refused,
+whether `torch/info.rkt` or a fetched package declares it: one hash cannot
+hold a per-system fetch; so is a package source (a URL or
+path): racket-deps fetches catalog packages by name. `racket-deps-guard-test`
+and `racket-deps-info-test` test `nix/racket-deps/racket-deps.rkt`;
+`racket-deps-provision-test` tests `nix/racket-deps/provision.sh`, the dev
+shells' provisioning. It re-runs when racket-deps, the Racket version or
+`torch/info.rkt` changes, runs the same drift check first, removes packages
+only the previous racket-deps held, and installs `torch` with `--deps fail`,
+never from the live catalog.
 
 ### PyTorch parity
 
