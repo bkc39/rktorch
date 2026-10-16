@@ -42,12 +42,11 @@
   (define-values (_name type) (package-source->name+type (dep-name dep) #f))
   (not (eq? type 'name)))
 
-(define (declared-deps info-dir)
+(define (info-deps info-dir)
   (define info
     (or (get-info/full info-dir)
         (raise-user-error 'racket-deps "no info.rkt in ~a" info-dir)))
-  (define declared
-    (remove-duplicates (append (info 'deps (λ () '())) (info 'build-deps (λ () '())))))
+  (define declared (append (info 'deps (λ () '())) (info 'build-deps (λ () '()))))
   (define platform-dep (findf platform-dep? declared))
   (when platform-dep
     (raise-user-error 'racket-deps
@@ -60,8 +59,22 @@
                       "~a has #:version ~s, which is not a valid Racket version"
                       (dep-name invalid-version-dep)
                       (dep-option invalid-version-dep '#:version)))
+  declared)
+
+(define (declared-deps info-dir)
   (define have (installed-pkg-names #:scope 'installation))
-  (partition (λ (dep) (not (member (dep-name dep) have))) declared))
+  (partition (λ (dep) (not (member (dep-name dep) have)))
+             (remove-duplicates (info-deps info-dir))))
+
+(define/contract (check-closure pkgs-dir)
+  (-> directory-exists? void?)
+  (for ([pkg (in-list (directory-list pkgs-dir))]
+        #:when (get-info/full (build-path pkgs-dir pkg)))
+    (with-handlers ([exn:fail:user?
+                     (λ (e)
+                       (raise (exn:fail:user (format "~a\n  declared in ~a/info.rkt" (exn-message e) pkg)
+                                             (exn-continuation-marks e))))])
+      (info-deps (build-path pkgs-dir pkg)))))
 
 (define/contract (catalog-deps info-dir)
   (-> directory-exists? list?)
@@ -140,12 +153,13 @@
     [(vector "installed")
      (for-each displayln (installed-pkg-names #:scope 'user))]
     [(vector "check" info-dir deps-dir) (check-current info-dir deps-dir)]
+    [(vector "closure" pkgs-dir) (check-closure pkgs-dir)]
     [(vector "guard" tree) (guard tree)]
     [args
      (raise-user-error
       'racket-deps
       (string-append
        "usage: manifest <info-dir> | names <info-dir> | installed\n"
-       "     | check <info-dir> <deps-dir> | guard <tree>\n"
+       "     | check <info-dir> <deps-dir> | closure <pkgs-dir> | guard <tree>\n"
        "got ~s")
       args)]))

@@ -85,6 +85,7 @@
               mkdir -p "$out/$name"
               unzip -q "$z" -d "$out/$name"
             done
+            racket ${racketDepsScript} closure "$out"
             racket ${racketDepsScript} manifest "$TMPDIR/torch-info" > "$out/.info-deps"
             racket ${racketDepsScript} guard "$out"
             racket ${racketDepsScript} check "$TMPDIR/torch-info" "$out"
@@ -172,6 +173,10 @@
             grep -qF 'base has #:version "99", which is not a valid Racket version' "$TMPDIR/log"
             fails rd names ${fixtures}/source
             grep -qF 'https://example.com/foo.git is a package source; racket-deps fetches catalog packages by name' "$TMPDIR/log"
+            rd closure ${fixtures}/closure-clean
+            fails rd closure ${fixtures}/closure-platform
+            grep -q 'extra-lib has #:platform unix; platform-qualified' "$TMPDIR/log"
+            grep -q 'declared in plat-lib/info.rkt' "$TMPDIR/log"
           '';
           racket-deps-provision-test = run "torch-rkt-racket-deps-provision-test" ''
             timeout -k 10 600 bash ${racketDepsDir}/provision-test.sh \
