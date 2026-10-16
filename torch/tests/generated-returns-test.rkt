@@ -19,7 +19,7 @@
       (g:topk (tensor '((1.0 5.0 3.0) (4.0 2.0 6.0))) 2 -1 #t #t))
     (check-equal? (tensor-shape values-t) '(2 2))
     (check-equal? (tensor->list values-t) '(5.0 3.0 6.0 4.0))
-    (check-equal? (tensor-dtype indices-t) 'int64)
+    (check-equal? (dtype indices-t) 'int64)
     (check-equal? (tensor->list indices-t) '(1 2 2 0)))
 
   (test-case "sort-tensor answers the sorted values and their source indices"

@@ -231,6 +231,8 @@ with `backward!` outside the form as PyTorch recommends). From
   computations starts the chain). An expansion analyzer keeps it off a call
   that is already a `~>` or `~>>` step, which receives an argument it does
   not show
+- getters: write `device` and `dtype`, not `tensor-device` or
+  `tensor-dtype`; `scripts/resyntax-rules.rkt` rewrites the long names
 - reductions: `sum mean max min argmax softmax log-softmax`
 - ordering and sampling (`torch/foreign/order-ops.rkt`, tranche 7, #153):
   `topk` and `sort` answer `(values entries indices)`; `argsort`;
@@ -445,7 +447,7 @@ racket scripts/coverage.rkt --changed   # expression coverage (#173); exits
                                # non-zero below the floor and lists the lines
                                # of the files you touched that no test reaches
 
-scripts/resyntax analyze --local-git-repository . origin/master   # lint gate
+scripts/resyntax analyze --local-git-repository . [REF]   # lint gate
                                      # (CI fails on any suggestion; scans
                                      #  changed files, torch/ included; the
                                      #  default rules plus
@@ -453,7 +455,8 @@ scripts/resyntax analyze --local-git-repository . origin/master   # lint gate
                                      #  literate examples' chunks through
                                      #  scripts/resyntax-lp2.rkt)
 scripts/resyntax fix --directory torch
-raco test scripts/resyntax-rules-test.rkt scripts/resyntax-lp2.rkt   # the repository's own rules
+raco test --timeout 600 scripts/resyntax-rules-test.rkt \
+  scripts/resyntax-lp2.rkt scripts/resyntax-wrapper-test.rkt   # lint suite tests
 raco review torch/**/*.rkt
 ```
 
@@ -547,8 +550,8 @@ file documents exactly what it pulls in. Exemptions, each marked with a
 comment at the require site: pure re-export facades (`main.rkt`,
 `foreign.rkt`, `nn.rkt`, `safe.rkt`, `operators.rkt`,
 `scribblings/labels.rkt`), and macro-heavy modules
-whose expansions need the module's full export set (`racket/runtime-path`,
-`syntax/parse/pre`).
+whose expansions need the module's full export set (`syntax/parse/pre`).
+Runtime paths take `(only-in racket/runtime-path #%datum define-runtime-path)`.
 
 - `info.rkt` — package metadata + native-library pre-install hook.
 - `main.rkt` — high-level facade (re-exports `foreign.rkt`).
@@ -879,6 +882,23 @@ another tailnet machine, add the same two lines as `extra-substituters`
 multi-user Nix ignores them in `~/.config/nix/nix.conf` unless the
 caller is in `trusted-users`).
 
+## Before a stack is ready for review
+
+CI never trains past a few fixture steps on a CPU, so it cannot see a change
+that keeps an example running but stops it learning. Before a stack is marked
+ready for review, and before a release, run the epoch check at its top commit
+on the lab host:
+
+```bash
+nix develop .#cuda -c scripts/epoch-check
+```
+
+It trains every example for a few epochs and compares each headline with the
+record in `docs/epoch-check.md`; its table goes in the top pull request's
+review packet. A `REGRESSION` or `FAILED` row blocks the stack until it is
+explained, and a change that moves a number on purpose updates the record in
+the same pull request.
+
 ## Code Review Rules
 
 Codex reads this section; the Claude review workflow gives its bot
@@ -923,9 +943,9 @@ master's copy.
   `generated-parity-test.rkt`, and a `'device-only` one its own
   device-guarded test; a hand-written op needs a python cross-test check
   beside its gtest golden; a new example comes with its runner
-  (`examples/test/`) and a Python twin, either in `examples/python/` or
-  as a parity suite under `torch/tests/python/` (as 16-style-transfer's
-  is).
+  (`examples/test/`), a row in `docs/epoch-check.md`, and a Python twin,
+  either in `examples/python/` or as a parity suite under
+  `torch/tests/python/` (as 16-style-transfer's is).
 - Conventions: contracts at the definition site ("Validating arguments");
   an op named like a racket/base, racket/list or racket/math function
   defers to it for anything but a tensor; Racket modules within the

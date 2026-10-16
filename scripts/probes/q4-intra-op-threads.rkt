@@ -3,8 +3,7 @@
 (require (for-syntax racket/base)
          (only-in racket/format ~a)
          (only-in racket/match match-define)
-         ;; whole-module require on purpose (only-in breaks its expansion)
-         racket/runtime-path
+         (only-in racket/runtime-path #%datum define-runtime-path)
          "common.rkt")
 
 (define-runtime-path shim-path "shim.rkt")

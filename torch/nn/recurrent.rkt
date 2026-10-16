@@ -4,8 +4,8 @@
                   -> ->* <=/c >=/c and/c contract-out)
          (only-in racket/match == match match-define)
          (only-in "../foreign.rkt"
-                  device-type exn:fail:rktorch:oom? tensor-device tensor-dtype
-                  tensor-shape tensor? with-no-grad zeros)
+                  device device-type dtype exn:fail:rktorch:oom? tensor-shape
+                  tensor? with-no-grad zeros)
          (only-in "../foreign/addresses.rkt"
                   tensor-data-ptr tensor-storage-ptr)
          (only-in "../foreign/raw/fault.rkt" native-fault?)
@@ -130,7 +130,7 @@
 (define (record-packing! spec weights now moves seen)
   (define key (car weights))
   (define buffer-start
-    (and (eq? (device-type (tensor-device key)) 'cuda)
+    (and (eq? (device-type (device key)) 'cuda)
          (repack! spec weights)))
   (define record
     (packing-record now
@@ -162,8 +162,8 @@
   (zeros (* (rnn-num-layers spec) (if (rnn-bidirectional? spec) 2 1))
          batch
          (rnn-hidden-size spec)
-         #:device (tensor-device x)
-         #:dtype (tensor-dtype x)))
+         #:device (device x)
+         #:dtype (dtype x)))
 
 ;; raise-arity-error prints no expected line for an arity that is neither one
 ;; number nor a lower bound, and these accept the input alone or the input and

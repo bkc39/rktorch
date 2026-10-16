@@ -11,7 +11,7 @@
          (only-in racket/draw make-bitmap)
          (only-in racket/match match-define)
          (only-in racket/pretty pretty-write)
-         racket/runtime-path
+         (only-in racket/runtime-path #%datum define-runtime-path)
          torch
          torch/scribblings/examples/16-style-transfer
          (only-in torch/vision/transforms convert-image-dtype))

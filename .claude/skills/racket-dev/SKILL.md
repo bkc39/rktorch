@@ -102,18 +102,20 @@ the input, a dead guard to delete — see `torch/foreign/ops.rkt`'s
 ### 5. Resyntax — exactly what CI runs
 
 ```bash
-nix develop .#ci --command raco test scripts/resyntax-rules-test.rkt scripts/resyntax-lp2.rkt
+nix develop .#ci --command raco test --timeout 600 \
+  scripts/resyntax-rules-test.rkt scripts/resyntax-lp2.rkt scripts/resyntax-wrapper-test.rkt
 nix develop .#ci --command \
-  scripts/resyntax analyze --local-git-repository . origin/master --analyzer-timeout 30000
+  scripts/resyntax analyze --local-git-repository . --analyzer-timeout 30000
 ```
 
 `scripts/resyntax` runs Resyntax's default rules plus the repository's own
-in `scripts/resyntax-rules.rkt`, such as `(mul a b)` → `(* a b)` and
+in `scripts/resyntax-rules.rkt`, such as `(mul a b)` → `(* a b)`,
+`(tensor-dtype t)` → `(dtype t)` and
 `(clip (+ h (relu (dil h))) l t)` → `(~> (dil h) relu (+ h) (clip l t))`. A
 style point the owner raises in review that is a meaning-preserving rewrite
 becomes a rule there, with a case in `scripts/resyntax-rules-test.rkt`.
 
-CI fails on **any** suggestion. `scripts/resyntax fix --local-git-repository . origin/master`
+CI fails on **any** suggestion. `scripts/resyntax fix --local-git-repository .`
 applies them. Resyntax skips a file whose `compiled/` was built by a different
 Racket than the shell's, and it skips `#lang scribble/lp2` files. The wrapper
 then lints the literate examples through `scripts/resyntax-lp2.rkt`: the
@@ -158,6 +160,16 @@ git add -A && nix flake check
 
 What CI runs, minus the Resyntax lane (step 5) and the coverage floor
 (step 4). Green here means the racket jobs pass in CI.
+
+### 9. Before a stack is ready for review: the epoch check
+
+```bash
+nix develop .#cuda -c scripts/epoch-check
+```
+
+At the stack's top commit, on the lab host: every example trains for a few
+epochs and each headline is compared with `docs/epoch-check.md`, which says
+what each verdict means. The table goes in the top pull request's packet.
 
 ## Conventions the gates assume
 

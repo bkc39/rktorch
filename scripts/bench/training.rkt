@@ -2,13 +2,17 @@
 
 (require (only-in compiler/cm managed-compile-zo)
          (only-in json read-json write-json)
+         (only-in racket/file call-with-atomic-output-file)
          (only-in racket/list drop last remove-duplicates)
          (only-in "harness.rkt" host-meta summarize)
          (only-in "shim.rkt" aten-threads torch-dir))
 
-(provide record-steps!
+(provide (struct-out recorded-run)
+         record-steps!
          read-steps
          analyze-steps)
+
+(struct recorded-run (events wall meta torch-dir) #:transparent)
 
 (define (drain receiver)
   (let loop ([acc '()])
@@ -18,8 +22,7 @@
         (reverse acc))))
 
 (define (write-steps out data)
-  (call-with-output-file out #:exists 'truncate
-    (lambda (port) (write-json data port))))
+  (call-with-atomic-output-file out (lambda (port _tmp) (write-json data port))))
 
 (define (record-steps! runner out)
   (define device-type (dynamic-require 'torch 'device-type))
@@ -28,20 +31,22 @@
                           #:libtorch ((dynamic-require 'torch 'torch-version))
                           #:threads (aten-threads)
                           #:repo torch-dir))
-  (write-steps out (hasheq 'meta meta))
+  (define torch-dir-string (path->string torch-dir))
+  (write-steps out (hasheq 'meta meta 'torch_dir torch-dir-string))
   (managed-compile-zo runner)
   (define receiver (make-log-receiver (current-logger) 'debug 'rktorch-step))
   (define t0 (current-inexact-monotonic-milliseconds))
   (dynamic-require `(submod (file ,runner) main) #f)
   (define wall (- (current-inexact-monotonic-milliseconds) t0))
   (define steps (map vector->list (drain receiver)))
-  (write-steps out (hasheq 'wall_ms wall 'steps steps 'meta meta)))
+  (write-steps out (hasheq 'wall_ms wall 'steps steps 'meta meta 'torch_dir torch-dir-string)))
 
 (define (read-steps path)
   (define data (call-with-input-file path read-json))
-  (values (map list->vector (hash-ref data 'steps '()))
-          (hash-ref data 'wall_ms #f)
-          (hash-ref data 'meta #f)))
+  (recorded-run (map list->vector (hash-ref data 'steps '()))
+                (hash-ref data 'wall_ms #f)
+                (hash-ref data 'meta #f)
+                (hash-ref data 'torch_dir #f)))
 
 (define (differences xs)
   (for/list ([a (in-list xs)] [b (in-list (cdr xs))]) (- b a)))
@@ -143,20 +148,26 @@
                         (hash-ref (analyze-steps (steps-at '(1 2)) #:epochs 1) 'error)))
 
   (test-case "a recorded run round-trips through its file"
-    (define-values (events wall meta)
+    (define run
       (with-temporary-path (path (make-temporary-file "steps-~a.json"))
         (call-with-output-file path #:exists 'truncate
-          (lambda (port) (write-json (hasheq 'wall_ms 5.0 'steps '((1 2.0 3))) port)))
+          (lambda (port)
+            (write-json (hasheq 'wall_ms 5.0 'steps '((1 2.0 3)) 'torch_dir "/t/torch/") port)))
         (read-steps path)))
-    (check-equal? events (list (vector 1 2.0 3)))
-    (check-equal? wall 5.0)
-    (check-false meta))
+    (check-equal? (recorded-run-events run) (list (vector 1 2.0 3)))
+    (check-equal? (recorded-run-wall run) 5.0)
+    (check-false (recorded-run-meta run))
+    (check-equal? (recorded-run-torch-dir run) "/t/torch/"))
 
   (test-case "a run that dies after the recorder starts leaves its meta"
-    (define-values (events wall meta)
+    (define run
       (with-temporary-path (path (make-temporary-file "steps-~a.json"))
-        (write-steps path (hasheq 'meta (hasheq 'git_sha "abc")))
+        (write-steps path (hasheq 'meta (hasheq 'git_sha "abc") 'torch_dir "/t/torch/"))
         (read-steps path)))
-    (check-equal? events '())
-    (check-false wall)
-    (check-equal? meta (hasheq 'git_sha "abc"))))
+    (check-equal? run (recorded-run '() #f (hasheq 'git_sha "abc") "/t/torch/")))
+
+  (test-case "a write that fails leaves the last complete record"
+    (with-temporary-path (path (make-temporary-file "steps-~a.json"))
+      (write-steps path (hasheq 'wall_ms 5.0 'steps '((1 2.0 3))))
+      (check-exn exn:fail? (lambda () (write-steps path (hasheq 'steps (list 1 (void))))))
+      (check-equal? (read-steps path) (recorded-run (list (vector 1 2.0 3)) 5.0 #f #f)))))

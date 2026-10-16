@@ -51,7 +51,7 @@
                                          #:norm #t))
        (set! head (Linear n-embd (add1 vocab-size)))
        #:forward (x dec-in lengths)
-       (with-default-device (tensor-device x)
+       (with-default-device (device x)
          (define (halve n) (quotient (add1 n) 2))
          (define t1 (~> (tensor-shape x) caddr halve))
          (define t2 (halve t1))

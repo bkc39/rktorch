@@ -3,14 +3,12 @@
 (module+ test
   (require (only-in net/url path->url url->string)
            (only-in racket/file copy-directory/files make-directory*)
-           ;; whole-module: define-runtime-path needs phase-1 bindings
-           ;; only-in strips
-           racket/runtime-path
+           (only-in racket/runtime-path #%datum define-runtime-path)
            (only-in rackunit
                     check-equal? check-exn check-false check-true test-case)
            (only-in "../data/dataset.rkt" dataset-ref)
            (only-in "../main.rkt"
-                    item length tensor-dtype tensor-shape to-dtype)
+                    dtype item length tensor-shape to-dtype)
            (only-in "../private/util.rkt" with-temporary-directory)
            (only-in "../vision/hymenoptera.rkt"
                     hymenoptera-cached? hymenoptera-dataset hymenoptera-root)
@@ -43,14 +41,14 @@
     (check-equal? (length folder) 4)
     (define-values (image label) (dataset-ref folder 2))
     (check-equal? (tensor-shape image) '(3 353 500))
-    (check-equal? (tensor-dtype image) 'uint8)
+    (check-equal? (dtype image) 'uint8)
     (check-equal? (item label) 1)
-    (check-equal? (tensor-dtype label) 'int64)
+    (check-equal? (dtype label) 'int64)
     (define-values (floats _)
       (dataset-ref (image-folder fixture
                                  #:transform (lambda (x) (to-dtype x 'float32)))
                    0))
-    (check-equal? (tensor-dtype floats) 'float32))
+    (check-equal? (dtype floats) 'float32))
 
   (test-case "only image files count, nested directories included"
     (with-temporary-directory (root)
