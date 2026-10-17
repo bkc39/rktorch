@@ -6,7 +6,7 @@ set -euo pipefail
 usage="usage: assemble.sh <bundle-dir> <out-dir>"
 bundle=$(realpath "${1:?$usage}")
 out=$(realpath -m "${2:?$usage}")
-cd "$(git rev-parse --show-toplevel)"
+cd "$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"
 name=torch-x86_64-linux
 stage=$out/$name
 

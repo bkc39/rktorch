@@ -7,7 +7,7 @@ usage="usage: catalog.sh <platform-zip> <out-dir> [<url-root>]"
 platform=$(realpath "${1:?$usage}")
 out=$(realpath -m "${2:?$usage}")
 url_root=${3:-/catalog}
-cd "$(git rev-parse --show-toplevel)"
+cd "$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"
 
 rm -rf "$out"
 mkdir -p "$out/src" "$out/zips" "$out/catalog/pkg"
