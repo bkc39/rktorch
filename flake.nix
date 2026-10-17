@@ -70,8 +70,8 @@
       # Source catalog only: a built package's compiled/ belongs to one Racket.
       racketDepsDir = ./nix/racket-deps;
       racketDepsScript = "${racketDepsDir}/racket-deps.rkt";
-      provisionDepsStep = deps: pkgDir: keep: ''
-        if ! bash ${racketDepsDir}/provision.sh ${deps} ${pkgDir} ${keep}; then
+      provisionDepsStep = deps: pkgDir: keep: platformDir: ''
+        if ! bash ${racketDepsDir}/provision.sh ${deps} ${pkgDir} ${keep} ${platformDir}; then
           echo "ERROR: provisioning failed; not stamping, so the next" >&2
           echo "       shell entry retries it." >&2
           exit 1
@@ -180,6 +180,17 @@
             rd check ${fixtures}/versioned "$TMPDIR/fetched-1.3"
             fails rd names ${fixtures}/platform
             grep -q 'extra-lib has #:platform unix; platform-qualified' "$TMPDIR/log"
+            rd check ${fixtures}/own-platform "$built"
+            here=torch-$(racket -e '(display (system-library-subpath #f))')
+            [ "$(rd platform-packages ${fixtures}/own-platform ${fixtures}/own-platform/pkgs)" \
+              = "${fixtures}/own-platform/pkgs/$here" ]
+            fails rd platform-packages ${fixtures}/own-platform-skew ${fixtures}/own-platform/pkgs
+            grep -qF 'torch-x86_64-linux has #:version "0.1"; ${fixtures}/own-platform-skew is version "0.2"' "$TMPDIR/log"
+            fails rd platform-packages ${fixtures}/own-platform-ahead ${fixtures}/own-platform/pkgs
+            grep -qF 'torch-x86_64-linux is version "0.1"; ${fixtures}/own-platform-ahead is version "0.2"' "$TMPDIR/log"
+            mkdir "$TMPDIR/no-skeletons"
+            fails rd platform-packages ${fixtures}/own-platform "$TMPDIR/no-skeletons"
+            grep -q 'torch-x86_64-linux has no info.rkt with a version' "$TMPDIR/log"
             [ "$(rd base-version ${fixtures}/floored)" = 9.0 ]
             fails rd base-version ${fixtures}/current
             fails rd base-version ${fixtures}/versioned
@@ -205,7 +216,7 @@
           racket-deps-provision-test = run "torch-rkt-racket-deps-provision-test" ''
             timeout -k 10 600 bash ${racketDepsDir}/provision-test.sh \
               ${racketDepsDir}/provision.sh ${fixtures}/provision \
-              ${pkgs.writeText "provision-deps-step" (provisionDepsStep ''"$1"'' ''"$2"'' ''"$3"'')}
+              ${pkgs.writeText "provision-deps-step" (provisionDepsStep ''"$1"'' ''"$2"'' ''"$3"'' ''"$4"'')}
           '';
         };
 
@@ -961,7 +972,7 @@
               fi
             fi
             ${stageNativeLibsIfStale shim}
-            ${provisionDepsStep racket-deps ''"$PWD/torch"'' racket-linters}
+            ${provisionDepsStep racket-deps ''"$PWD/torch"'' racket-linters ''"$PWD/pkgs"''}
             # Stamped by the dev tools' store path, so a bump reaches checkouts
             # provisioned before it: install adds the missing packages, then
             # update moves all of them, from an older pin or the live catalog

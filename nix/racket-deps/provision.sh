@@ -2,13 +2,14 @@
 set -euo pipefail
 export LC_ALL=C
 
-[ $# -eq 3 ] || {
-  echo "usage: provision.sh <racket-deps> <pkg-dir> <keep-tree>" >&2
+[ $# -eq 4 ] || {
+  echo "usage: provision.sh <racket-deps> <pkg-dir> <keep-tree> <platform-pkgs-dir>" >&2
   exit 2
 }
 deps=$1
 pkg_dir=$2
 keep=$3
+platform_dir=$4
 
 rd() { racket "$(dirname "${BASH_SOURCE[0]}")/racket-deps.rkt" "$@"; }
 names() { for d in "$@"; do if [ -d "$d" ]; then basename "$d"; fi; done | sort -u; }
@@ -22,6 +23,7 @@ record="$PLTUSERHOME/.racket-deps-pkgs"
 
 echo "Installing Racket package $pkg (link mode, Racket $ver)..."
 rd check "$pkg_dir" "$deps"
+platform=$(rd platform-packages "$pkg_dir" "$platform_dir")
 mkdir -p "$PLTUSERHOME"
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
@@ -39,6 +41,11 @@ raco pkg install --batch --copy --no-docs --no-setup --scope user \
   --skip-installed "$deps"/*/
 raco pkg update --batch --copy --no-docs --no-setup --no-trash --deps fail \
   --scope user "$deps"/*/
+if [ -n "$platform" ]; then
+  mapfile -t platform <<< "$platform"
+  raco pkg install --batch --deps fail --no-setup --link --scope user \
+    --skip-installed "${platform[@]}"
+fi
 raco pkg install --batch --deps fail --no-setup --link --scope user \
   --skip-installed --name "$pkg" "$pkg_dir"
 raco setup --no-docs --pkgs "$pkg"
