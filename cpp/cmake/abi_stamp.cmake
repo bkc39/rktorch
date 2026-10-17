@@ -1,13 +1,7 @@
-# The ABI stamp: a SHA-256 over every header under include/torchrkt/c_api/,
-# each named by its path relative to that directory, in sorted order.
-#
 #   include(cmake/abi_stamp.cmake)    configure time, from CMakeLists.txt
 #   cmake -P cpp/cmake/abi_stamp.cmake                  prints the stamp
 #   cmake -DOUT=<file> -P cpp/cmake/abi_stamp.cmake     writes it as .rktd
 #   cmake -DC_API_DIR=<dir> ...                         hashes another copy
-#
-# The bindings' copy, torch/foreign/raw/abi-stamp.rktd, is written by the
-# second form; the Racket loader refuses a shim whose stamp differs.
 
 function(torchrkt_abi_stamp out_var c_api_dir)
   file(GLOB_RECURSE headers RELATIVE "${c_api_dir}" "${c_api_dir}/*.h")

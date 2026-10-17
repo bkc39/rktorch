@@ -209,9 +209,6 @@
           '';
         };
 
-      # torch/foreign/raw/abi-stamp.rktd is the stamp of the c_api headers the
-      # bindings were written against; the loader refuses a shim whose
-      # tr_abi_stamp differs. cpp/cmake/abi_stamp.cmake is the one computation.
       abiStampTestsFor = pkgs:
         let
           cApi = ./cpp/include/torchrkt/c_api;

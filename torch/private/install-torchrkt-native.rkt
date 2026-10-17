@@ -1,14 +1,5 @@
 #lang racket/base
 
-;; Pre-install hook: stage libtorchrkt.{so,dylib} into torch/native-libs/ so
-;; `define-runtime-path` in foreign/raw/syntax.rkt resolves it.
-;;
-;; v0 supports the Nix path: the flake's racket build (and the `nix develop`
-;; shell) set TORCHRKT_NATIVE_LIB_PATH to the cpp derivation, whose lib/ holds
-;; the shared library; libtorch itself is found via the rpath baked into
-;; libtorchrkt by Nix.  Catalog-style installs without Nix must pre-populate
-;; native-libs/ (a portable-candidate story, as in xgboost-rkt, is deferred).
-
 (provide pre-installer)
 
 (require (only-in racket/file file->bytes make-directory*)

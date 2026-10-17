@@ -571,8 +571,9 @@ its regression test, once a pinned libtorch fixes the kernel.
   family, plus any function whose signature shape is new).
 - **Existing C signatures are append-only.** A change to an existing
   `extern "C"` signature, or to a struct or enum that crosses the boundary,
-  gets a new symbol instead (`tr_full_on` beside `tr_full_i64_on`), so an older
-  platform package and the CPU/CUDA stubs in `device.cpp` keep working.
+  gets a new symbol instead (`tr_full_on` beside `tr_full_i64_on`), so existing
+  callers and the CPU/CUDA stubs in `device.cpp` stay consistent, and a
+  compatible-range stamp check stays possible later.
 - **The ABI stamp.** `tr_abi_stamp()` is a SHA-256 over every header under
   `include/torchrkt/c_api/` (generated ones included), each named by its
   relative path, in sorted order; `cmake/abi_stamp.cmake` is the one

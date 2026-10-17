@@ -138,8 +138,6 @@ if(BUILD_TESTING)
     tests/torchrkt/to_test.cpp
     $<TARGET_OBJECTS:torchrkt_c_api_compile_test>
   )
-  target_compile_definitions(torchrkt_tests
-    PRIVATE "TORCHRKT_ABI_STAMP=\"${TORCHRKT_ABI_STAMP}\"")
   target_include_directories(torchrkt_tests
     PRIVATE
       ${CMAKE_CURRENT_SOURCE_DIR}/tests
