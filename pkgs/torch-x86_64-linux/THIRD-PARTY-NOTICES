@@ -24,6 +24,13 @@ libtorch_cpu.so, libc10.so, libtorch.so
   https://github.com/pytorch/pytorch/tree/v2.14.0
   https://download.pytorch.org/libtorch/cpu/libtorch-shared-with-deps-2.14.0%2Bcpu.zip
 
+  libtorch_cpu.so contains Intel oneAPI Math Kernel Library 2024.2 (Product
+  Build 20240605), linked statically by PyTorch's build and shipped
+  unmodified. Intel Simplified Software License (Version October 2022):
+  licenses/mkl-LICENSE, the LICENSE.txt of the mkl-static 2024.2.0 wheel.
+  https://pypi.org/project/mkl-static/2024.2.0/
+  https://www.intel.com/content/www/us/en/developer/tools/oneapi/onemkl.html
+
 libgomp.so.1
   The GNU OpenMP runtime, as shipped in the libtorch zip above.
   GPL-3.0-or-later WITH GCC-exception-3.1: licenses/gcc-COPYING3 and

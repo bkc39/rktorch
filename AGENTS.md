@@ -421,7 +421,8 @@ for a change, and the gates it has to pass before it is done, are the
 nix build              # builds cpp, installs the pkg, runs raco test + examples
 nix build .#cpp        # CMake build + gtest only
 nix flake check        # the Nix checks: cpp, format, tidy, line-count, racket,
-                       # racket91, racket-floor, matrix-runner-test, the
+                       # racket91, racket-floor, matrix-runner-test,
+                       # platform-audit-test (Linux), the
                        # racket-deps-* and abi-stamp-* checks
                        # (CI also runs the Resyntax gate and codegen-drift)
 nix develop            # dev shell (includes a Python with `torch`)
@@ -483,11 +484,14 @@ or a fresh store reports a hash mismatch (upstream moved), set its
 and also fails on an unmet `#:version` minimum. torch's own platform packages
 (`torch-x86_64-linux`, `torch-aarch64-macosx`: `own-platform-packages` in
 `racket-deps.rkt`, which must name the same packages as `platform-packages`
-in `torch/foreign/raw/native-location.rkt`) are dropped from the fetch.
+in `torch/foreign/raw/native-location.rkt`; `racket-deps-info-test` fails
+when they differ) are dropped from the fetch.
 Instead, the library-less skeleton under `pkgs/` is installed beside `torch`,
 and the staged shim wins over it. `racket-deps.rkt platform-packages
-<info-dir> <pkgs-dir>` names the skeletons that apply to the host, and fails
-unless each dep's `#:version` and each skeleton's `version` equal torch's.
+<info-dir> <pkgs-dir> [<platform>]` names the skeletons that apply to the
+host (or to `<platform>`), and fails unless each dep's `#:version` and each
+skeleton's `version` equal torch's; `install-platform <info-dir> <pkgs-dir>
+--copy|--link` installs them with `--deps fail`.
 Any other `#:platform` dep is refused, whether `torch/info.rkt` or a fetched
 package declares it: one hash cannot hold a per-system fetch. So is a
 package source (a URL or path): racket-deps fetches catalog packages by
@@ -499,7 +503,8 @@ shells' provisioning. It re-runs when racket-deps, the Racket version or
 only the previous racket-deps held, and installs `torch` with `--deps fail`,
 never from the live catalog. The flake's install (`nix/matrix/racket-cell.sh`,
 which the build, the checks and every matrix cell run) and the shell
-provisioning install the host's skeleton first, so `--deps fail` finds it.
+provisioning install the host's skeleton first with `install-platform`, so
+`--deps fail` finds it.
 
 ### The platform package
 
@@ -518,11 +523,14 @@ scripts/platform/linux/smoke.sh ubuntu:24.04 racket-9.1-x86_64-linux-buster-cs.s
 ```
 
 `audit-bundle.sh` fails the build on a `/nix/store` reference, a RUNPATH
-other than `$ORIGIN`, a GLIBC, GLIBCXX or CXXABI version above libtorch
-2.14's (2.28, 3.4.22, 1.3.11), or a NEEDED library outside the bundle and
-the system set. It follows NEEDED entries only, so a dlopened library slips
-past it. Every fetched source is pinned by sha256 in `sources.txt`. The
-scripts never commit a library.
+other than `$ORIGIN`, a missing `$ORIGIN` beside a NEEDED library in the
+bundle, a GLIBC, GLIBCXX or CXXABI version above libtorch 2.14's (2.28,
+3.4.22, 1.3.11), symbol versions that `objdump -T` and `readelf -V` read
+differently, or a NEEDED library outside the bundle and the system set. It
+follows NEEDED entries only, so a dlopened library slips past it. The
+`platform-audit-test` check is its negative control: the Nix-built shim must
+fail it. Every fetched source is pinned by sha256 in `sources.txt`, and the
+build's caches are keyed on those sums. The scripts never commit a library.
 
 ### The build matrix
 

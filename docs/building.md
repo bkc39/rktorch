@@ -16,7 +16,8 @@ nix build                 # native lib + Racket package + tests + examples
 ./result/bin/torch        # prints the libtorch version and a 2x2 draw
 nix build .#cpp           # CMake build and the GoogleTest suite only
 nix flake check           # the Nix checks: cpp, format, tidy, line gate, racket,
-                          # racket91, racket-floor, matrix-runner-test and the
+                          # racket91, racket-floor, matrix-runner-test,
+                          # platform-audit-test (Linux) and the
                           # racket-deps-* checks
 ```
 
@@ -27,7 +28,10 @@ in flake.nix" when the declared deps no longer match the fetched ones, and
 names any dep whose `#:version` minimum the fetched tree or the Racket
 installation does not meet;
 `racket-deps-guard-test` and `racket-deps-info-test` test
-`nix/racket-deps/racket-deps.rkt`; `racket-deps-provision-test` tests
+`nix/racket-deps/racket-deps.rkt`, and the info test also fails when
+`own-platform-packages` there and `platform-packages` in
+`torch/foreign/raw/native-location.rkt` name different packages;
+`racket-deps-provision-test` tests
 `nix/racket-deps/provision.sh`, the dev shells' provisioning. To bump, set
 `outputHash` to `""`, run `nix build .#racket-deps`, and paste the hash Nix
 reports. torch's own platform packages, such as `torch-x86_64-linux`, are left
@@ -161,7 +165,9 @@ scripts/platform/linux/assemble.sh .scratch/platform/bundle .scratch/pkg
 ```
 
 `build.sh` runs in Docker, capped at four CPUs, and keeps its downloads and
-builds in the directory it is given, so a second run rebuilds only the shim.
+builds in the directory it is given, so a second run rebuilds only the shim;
+the unpacked libtorch, the codecs and GoogleTest are rebuilt when the sha256
+that `sources.txt` pins for them changes.
 Every source it fetches is pinned by sha256 in
 `scripts/platform/linux/sources.txt`: the libtorch zip, the codecs,
 libsndfile, stb and GoogleTest. It builds the codecs and libsndfile as shared
@@ -174,16 +180,21 @@ The audit, `scripts/platform/linux/audit-bundle.sh <dir>`, fails the build if
 any library:
 
 - mentions `/nix/store`;
-- has an RPATH or RUNPATH entry other than `$ORIGIN`;
+- has an RPATH or RUNPATH entry other than `$ORIGIN`, or lacks `$ORIGIN`
+  while it needs a library in the bundle;
 - needs a GLIBC, GLIBCXX or CXXABI symbol version newer than libtorch's own
   (2.28, 3.4.22, 1.3.11);
 - or needs a library that is neither in the bundle nor in the system set
   (libc, libm, libdl, libpthread, librt, the dynamic loader, libstdc++,
   libgcc_s).
 
-It follows NEEDED entries only, so a library loaded with `dlopen` is neither
-bundled nor audited; the CPU bundle loads none. Pointed at a Nix-built shim,
-it fails on each of these rules.
+It reads the symbol versions twice, from `objdump -T` and from `readelf -V`,
+and fails when the two disagree, so a tool whose output it cannot parse fails
+the audit instead of passing it. It follows NEEDED entries only, so a library
+loaded with `dlopen` is neither bundled nor audited; the CPU bundle loads
+none. The `platform-audit-test` flake check points it at the Nix-built shim,
+which it must fail on `/nix/store`, RUNPATH and GLIBC, and at the same shim
+with an `objdump` that prints nothing.
 
 `assemble.sh` copies the skeleton, adds the bundle and writes
 `torch-x86_64-linux.zip` with `raco pkg create`. To try an install on a host

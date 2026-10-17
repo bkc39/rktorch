@@ -10,4 +10,5 @@
 (define license
   '(Apache-2.0 AND BSD-3-Clause AND (MIT OR Unlicense)
     AND (GPL-3.0-or-later WITH GCC-exception-3.1)
-    AND LGPL-2.1-or-later AND LGPL-2.1-only AND LGPL-2.0-or-later))
+    AND LGPL-2.1-or-later AND LGPL-2.1-only AND LGPL-2.0-or-later
+    AND LicenseRef-Intel-Simplified-Software-License))

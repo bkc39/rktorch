@@ -53,7 +53,8 @@ raco pkg install --auto --no-docs torch
 
 On x86_64 Linux this also installs `torch-x86_64-linux`, about 118 MB to
 download and 445 MB installed. It holds `libtorchrkt`, the CPU build of
-libtorch 2.14 and libsndfile, and needs only glibc 2.28 or later. `--no-docs`
+libtorch 2.14 and libsndfile, and needs only glibc 2.28 or later and libstdc++.
+`--no-docs`
 skips building the manual, which runs its examples against libtorch and
 needs racket/draw's libraries (cairo, pango, fontconfig) and libsqlite3 on the host;
 leave it off where those are installed.
