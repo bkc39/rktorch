@@ -15,7 +15,17 @@
           [_ #f]))
       (raise-user-error 'platform-lists "~a defines no ~a" file name)))
 
-(match-define (vector racket-deps native-location) (current-command-line-arguments))
+(define (dep-name dep)
+  (match dep
+    [(cons name _) name]
+    [name name]))
+
+(define (dep-platform dep)
+  (match dep
+    [(list _ _ ... '#:platform platform _ ...) platform]
+    [_ #f]))
+
+(match-define (vector racket-deps native-location info) (current-command-line-arguments))
 
 (define own
   (match (definition racket-deps 'own-platform-packages)
@@ -24,12 +34,29 @@
 (define located
   (match (definition native-location 'platform-packages)
     [`(hash ,pairs ...)
-     (let loop ([pairs pairs])
+     (let loop ([pairs pairs] [table (hash)])
        (match pairs
-         ['() '()]
-         [(list* (? string?) (? string? name) more) (cons name (loop more))]))]))
+         ['() table]
+         [(list* (? string? platform) (? string? name) more)
+          (loop more (hash-set table platform name))]))]))
 
-(unless (equal? (sort own string<?) (sort located string<?))
+(unless (equal? (sort own string<?) (sort (hash-values located) string<?))
   (raise-user-error 'platform-lists
                     "own-platform-packages in ~a is ~s, but platform-packages in ~a names ~s"
-                    racket-deps own native-location located))
+                    racket-deps own native-location (hash-values located)))
+
+(define deps
+  (match (definition info 'deps)
+    [`(quote ,deps) deps]))
+
+(for ([dep (in-list deps)]
+      #:when (member (dep-name dep) own))
+  (define platform (dep-platform dep))
+  (unless (equal? (hash-ref located platform #f) (dep-name dep))
+    (raise-user-error 'platform-lists
+                      "~a declares ~a with #:platform ~s, which platform-packages in ~a maps to ~s"
+                      info
+                      (dep-name dep)
+                      platform
+                      native-location
+                      (hash-ref located platform #f))))

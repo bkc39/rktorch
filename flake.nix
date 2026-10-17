@@ -187,7 +187,10 @@
             done
             [ -z "$(rd platform-packages ${fixtures}/own-platform ${fixtures}/own-platform/pkgs aarch64-darwin)" ]
             racket ${racketDepsDir}/platform-lists-test.rkt ${racketDepsScript} \
-              ${./torch/foreign/raw/native-location.rkt}
+              ${./torch/foreign/raw/native-location.rkt} ${./torch/info.rkt}
+            fails racket ${racketDepsDir}/platform-lists-test.rkt ${racketDepsScript} \
+              ${./torch/foreign/raw/native-location.rkt} ${fixtures}/own-platform-crossed/info.rkt
+            grep -qF 'declares torch-x86_64-linux with #:platform "aarch64-macosx", which platform-packages' "$TMPDIR/log"
             fails rd platform-packages ${fixtures}/own-platform-skew ${fixtures}/own-platform/pkgs
             grep -qF 'torch-x86_64-linux has #:version "0.1"; ${fixtures}/own-platform-skew is version "0.2"' "$TMPDIR/log"
             fails rd platform-packages ${fixtures}/own-platform-ahead ${fixtures}/own-platform/pkgs
