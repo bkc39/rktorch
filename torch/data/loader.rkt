@@ -176,8 +176,81 @@
     (dataset-batch ds indices (dataloader-collate loader)))
   (values count batch finish!))
 
+(define (sampler-draws loader)
+  (define ds (dataloader-dataset loader))
+  (define n (dataset-length ds))
+  (define b (dataloader-batch-size loader))
+  (define g (dataloader-generator loader))
+  (define shuffle? (dataloader-shuffle? loader))
+  (define sampler #f)
+  (define (sampler!)
+    (unless sampler
+      (set! sampler (or g (make-generator (draw-seed)))))
+    sampler)
+  (define perm #f)
+  (define (permutation!)
+    (unless perm
+      (define drawn (randperm n #:generator (sampler!)))
+      (define dev (dataset-device ds))
+      (set! perm (if dev (to drawn dev) drawn)))
+    perm)
+  (define remainder-drawn? #f)
+  (define (finish!)
+    (when (and shuffle? (not remainder-drawn?))
+      (permutation!)
+      (set! remainder-drawn? #t)
+      (void (randperm n #:generator (sampler!)))))
+  (define (indices k)
+    (define start (* k b))
+    (define len (min b (- n start)))
+    (if shuffle?
+        (narrow (permutation!) 0 start len)
+        (for/list ([i (in-range start (+ start len))]) i)))
+  (values indices finish!))
+
+;; DataLoader's multi-process iterator: the base seed and workers × prefetch
+;; requests when the traversal starts, then one request per delivered batch,
+;; made before the batch is returned or its failure re-raised. The sampler
+;; draws when a request needs it, so the trailing permutation lands at the
+;; request that exhausts the first.
 (define (worker-epoch-batches loader)
-  (error 'worker-epoch-batches "unimplemented"))
+  (define ds (dataloader-dataset loader))
+  (define n (dataset-length ds))
+  (define b (dataloader-batch-size loader))
+  (define workers (dataloader-workers loader))
+  (define ahead (* workers (dataloader-prefetch loader)))
+  (define base (draw-seed #:generator (dataloader-generator loader)))
+  (define pool (start-workers ds (dataloader-collate loader) workers base))
+  (define-values (indices finish!) (sampler-draws loader))
+  (define count (batch-count loader))
+  (define partial-last?
+    (and (not (dataloader-drop-last? loader)) (positive? (remainder n b))))
+  (define exhausting (if partial-last? (sub1 count) count))
+  (define (request! r)
+    (when (< r count)
+      (hand-off! pool r (indices r)))
+    (when (= r exhausting)
+      (finish!)))
+  (for ([r (in-range ahead)])
+    (request! r))
+  (define failure #f)
+  (define (fail! v)
+    (set! failure (box v))
+    (stop-workers! pool)
+    (raise v))
+  (define (batch k)
+    (cond
+      [failure (raise (unbox failure))]
+      [else
+       (define-values (ok? payload) (await-batch pool k))
+       (request! (+ k ahead))
+       (when (= k (sub1 count))
+         (stop-workers! pool))
+       (if ok? (apply values payload) (fail! payload))]))
+  (define (exhausted!)
+    (finish!)
+    (stop-workers! pool))
+  (values count batch exhausted!))
 
 (define (traversal loader)
   (if (zero? (dataloader-workers loader))
