@@ -1209,8 +1209,6 @@
          (check-equal? (partial (cadr case) (caddr case))
                        (hash-ref (hash-ref j 'partial_orders) (car case))
                        (format "partial traversal ~a" (car case))))
-       ;; with workers, each worker's draws come from its own stream,
-       ;; seeded base + k as DataLoader seeds worker k
        (define (drawing-collate items)
          (values (stack (map car items))
                  (draw-seed)

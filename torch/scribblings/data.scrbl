@@ -210,12 +210,20 @@ PyTorch seeds a worker. Batches arrive in order. At most
 consumed, so the sampler draws as PyTorch's multi-process iterator does: the
 permutation when the traversal starts, the trailing one when its request is
 made. A batch whose construction raises raises again when the traversal
-reaches it. The workers stop when the traversal is exhausted, when the
+reaches it, as does a batch whose worker exited without building it; the
+traversal then stops its workers and raises the same value for every later
+batch. A break while waiting for a batch leaves the batch to the next
+request. The workers stop when the traversal is exhausted, when the
 custodian shuts down, or once the loop that held the traversal has let it
 go and a collection runs. Workers build CPU tensors, so @racket[ds] must not
 be on an accelerator. @racket[#:prefetch] needs @racket[workers] above 0.
 A dataset's @racket[#:ref] and @racket[#:batch], and @racket[collate], run
 in several threads at once, so any state they share must be synchronized.
+Until @hyperlink["https://github.com/bkc39/rktorch/issues/194"]{#194} is
+fixed, the consumer's @racket[with-autocast], @racket[with-no-grad] and
+@racket[default-device] also apply to the batches workers build while the
+consumer is inside them, so a batch can differ from the one
+@racket[#:workers 0] builds.
 
 @torch-examples[
 (require torch/data/loader)

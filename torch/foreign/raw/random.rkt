@@ -1,8 +1,7 @@
 #lang racket/base
 
-;; Tensor draws take the global stream unless handed a generator or
-;; current-generator holds one: no-retry wrap only, since a retried draw
-;; would advance the stream.
+;; Tensor draws take the global stream unless handed a generator: no-retry
+;; wrap only, since a retried draw would advance the stream.
 
 (require (only-in ffi/unsafe
                   _double _fun _int _int64 _ptr _uint64 _void
@@ -31,7 +30,6 @@
 
 (define current-generator/raw (make-parameter #f))
 
-;; the one point where a #f generator resolves, so an explicit one wins
 (define _Generator/current
   (make-ctype _Generator/null (lambda (g) (or g (current-generator/raw))) #f))
 

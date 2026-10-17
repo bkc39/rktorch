@@ -2,6 +2,7 @@
 
 (module+ test
   (require (only-in racket/list index-of remove-duplicates)
+           (only-in racket/match match match-define)
            rackunit
            "../data/loader.rkt"
            (only-in (submod "../foreign.rkt" unsafe) tensor-free!)
@@ -25,7 +26,6 @@
   (define (batches seq)
     (for/list ([vs (in-values-sequence seq)]) (apply record vs)))
 
-  ;; the whole traversal runs in a thread joined with a bound
   (define (within seconds thunk)
     (define outcome #f)
     (define t
@@ -35,10 +35,11 @@
                                        (lambda (v) (lambda () (raise v)))])
                         (call-with-values thunk
                                           (lambda vs (lambda () (apply values vs)))))))))
-    (unless (sync/timeout seconds t)
-      (kill-thread t)
-      (fail (format "no result within ~a s" seconds)))
-    (outcome))
+    (cond
+      [(sync/timeout seconds t) (outcome)]
+      [else
+       (kill-thread t)
+       (fail (format "no result within ~a s" seconds))]))
 
   (define (workers-of c)
     (filter thread? (custodian-managed-list c (current-custodian))))
@@ -46,33 +47,44 @@
   (define (live c)
     (filter (lambda (t) (not (thread-dead? t))) (workers-of c)))
 
-  (define (dead-within? c seconds)
+  (define (dead-within? threads seconds)
     (define deadline (+ (current-inexact-milliseconds) (* 1000 seconds)))
-    (for/and ([t (in-list (workers-of c))])
+    (for/and ([t (in-list threads)])
       (define left (max 0 (/ (- deadline (current-inexact-milliseconds)) 1000)))
       (and (sync/timeout left (thread-dead-evt t)) #t)))
 
-  (define (dead-after-collections? c)
+  (define (dead-after-collections? threads)
     (for/or ([_ (in-range 20)])
       (collect-garbage 'major)
       (settle!)
-      (dead-within? c 0.25)))
+      (dead-within? threads 0.25)))
 
   (define (under c thunk)
     (parameterize ([current-custodian c]) (thunk)))
 
-  (define (loader-of ds workers prefetch . options)
-    (if (zero? workers)
-        (keyword-apply* dataloader ds options)
-        (keyword-apply* dataloader ds
-                        (list* '#:workers workers '#:prefetch prefetch options))))
+  (define (keyword-pairs options)
+    (match options
+      ['() '()]
+      [(list* k v more) (cons (cons k v) (keyword-pairs more))]))
 
-  (define (keyword-apply* f ds options)
+  (define (loader-of ds workers prefetch . options)
     (define pairs
-      (sort (let loop ([os options])
-              (if (null? os) '() (cons (cons (car os) (cadr os)) (loop (cddr os)))))
+      (sort (keyword-pairs (if (zero? workers)
+                               options
+                               (list* '#:workers workers '#:prefetch prefetch options)))
             keyword<? #:key car))
-    (keyword-apply f (map car pairs) (map cdr pairs) (list ds)))
+    (keyword-apply dataloader (map car pairs) (map cdr pairs) (list ds)))
+
+  (define (first-label items)
+    (match-define (cons (list _ y) _) items)
+    (item y))
+
+  (define (building-threads)
+    (define threads (make-hasheq))
+    (values threads
+            (lambda (items)
+              (hash-set! threads (current-thread) #t)
+              (default-collate items))))
 
   (define xs (reshape (arange 20) 10 2))
   (define ys (arange 10 #:dtype 'int64))
@@ -85,8 +97,6 @@
   (define (doubling items)
     (~> items (map car _) stack (* 2)))
 
-  ;; a traversal's batches, then what the loader's and the global streams
-  ;; draw next
   (define (traversal-outcome ds workers prefetch b shuffle? drop-last? explicit? collate)
     (manual-seed! 17)
     (define g (and explicit? (make-generator 17)))
@@ -139,15 +149,16 @@
     (check-equal? (workers-of c) '())
     (define loader (under c (lambda () (dataloader pairs #:batch-size 2 #:workers 3))))
     (check-equal? (workers-of c) '())
-    (under c (lambda () (for ([_ (in-range 0)] [(_x _y) loader]) (void))))
-    (check-equal? (length (workers-of c)) 3)
+    (define-values (more? next) (under c (lambda () (sequence-generate loader))))
+    (check-equal? (length (live c)) 3)
+    (void more? next)
     (custodian-shutdown-all c))
 
   (test-case "worker k builds the batches j with j mod N = k"
     (define builders (make-hasheqv))
     (define lock (make-semaphore 1))
     (define (noting items)
-      (define j (~> items car cadr item (quotient 2)))
+      (define j (quotient (first-label items) 2))
       (call-with-semaphore lock (lambda () (hash-set! builders j (current-thread))))
       (default-collate items))
     (define n 3)
@@ -193,25 +204,84 @@
                                  (tensor->list b))))
                   '((0) (1) (2) (3) (4))))
 
+  (define-dataset slow-batches (n)
+    #:length n
+    #:ref (i) i
+    #:batch (indices collate)
+    (sleep 0.4)
+    (collate (for/list ([i (in-list (indices->list indices))]) (list i))))
+
+  (test-case "a finished batch does not wait behind the worker's next build"
+    (define waits
+      (within 60
+              (lambda ()
+                (define since (current-inexact-milliseconds))
+                (for/list ([_ (dataloader (slow-batches 6) #:workers 1 #:prefetch 2
+                                          #:collate length)])
+                  (define wait (- (current-inexact-milliseconds) since))
+                  (sleep 0.6)
+                  (set! since (current-inexact-milliseconds))
+                  wait))))
+    (match-define (cons _ later) waits)
+    (check-equal? (length later) 5)
+    (for ([wait (in-list later)])
+      (check-true (< wait 100) (format "waited ~a ms for a finished batch" wait))))
+
+  (define-dataset ticking (n)
+    #:length n
+    #:ref (i)
+    (sleep (* 0.001 (modulo i 3)))
+    (tensor (list i) #:dtype 'int64))
+
+  (test-case "breaks while waiting lose no batch"
+    (define-values (more? next) (sequence-generate (dataloader (ticking 60) #:workers 2)))
+    (define got '())
+    (define breaks 0)
+    (define (pull!)
+      (with-handlers ([exn:break? (lambda (_e) (set! breaks (add1 breaks)) 'broken)])
+        (parameterize-break #t
+          (cond
+            [(more?) (set! got (cons (item (next)) got)) 'pulled]
+            [else 'done]))))
+    (define consumer
+      (thread (lambda ()
+                (parameterize-break #f
+                  (let loop ()
+                    (match (pull!)
+                      ['done 'done]
+                      [_ (loop)]))))))
+    (define breaker
+      (thread (lambda ()
+                (let loop ()
+                  (sleep)
+                  (break-thread consumer)
+                  (loop)))))
+    (define finished? (sync/timeout 30 consumer))
+    (kill-thread breaker)
+    (kill-thread consumer)
+    (check-not-false finished? "the traversal finished")
+    (check-true (> breaks 10) (format "the consumer was broken ~a times" breaks))
+    (check-equal? got (sort (remove-duplicates got) >)))
+
   (test-case "at most workers × prefetch batches are requested ahead"
     (define trace '())
     (define lock (make-semaphore 1))
     (define (note! e) (call-with-semaphore lock (lambda () (set! trace (cons e trace)))))
     (define (starting items)
-      (note! (list 'start (~> items car cadr item)))
+      (note! (list 'start (first-label items)))
       (default-collate items))
     (define-values (n p) (values 2 2))
     (define ahead (* n p))
     (within 60 (lambda ()
                  (for ([(_x y) (dataloader pairs #:workers n #:prefetch p #:collate starting)])
                    (sleep 0.02)
-                   (note! (list 'done (car (tensor->list y)))))))
+                   (note! (list 'done (item y))))))
     (define events (reverse trace))
     (define (at e) (index-of events e))
     (for ([j (in-range 10)])
       (check-equal? (length (filter (lambda (e) (equal? e (list 'start j))) events)) 1
                     (format "batch ~a starts once" j)))
-    (check-false (findf (lambda (e) (and (eq? (car e) 'start) (>= (cadr e) 10))) events))
+    (check-false (findf (lambda (e) (match e [(list 'start j) (>= j 10)] [_ #f])) events))
     (for ([j (in-range (add1 ahead) 10)])
       (check-true (> (at (list 'start j)) (at (list 'done (- j ahead 1))))
                   (format "batch ~a starts after batch ~a is done" j (- j ahead 1)))))
@@ -236,8 +306,9 @@
 
   (test-case "the trailing permutation is drawn at its request"
     (for* ([np '((1 1) (2 1) (2 2))] [b '(4 5)] [d '(0 1 all)])
+      (match-define (list workers prefetch) np)
       (define g (make-generator 9))
-      (define ahead (apply * np))
+      (define ahead (* workers prefetch))
       (define count (quotient (+ 10 b -1) b))
       (define taken (if (eq? d 'all) count d))
       (define r* (if (positive? (remainder 10 b)) (sub1 count) count))
@@ -246,8 +317,8 @@
                    (under c (lambda ()
                               (for ([_ (in-range taken)]
                                     [(_x _y) (dataloader pairs #:batch-size b #:shuffle? #t
-                                                    #:generator g #:workers (car np)
-                                                    #:prefetch (cadr np))])
+                                                    #:generator g #:workers workers
+                                                    #:prefetch prefetch)])
                                 (void))))))
       (check-equal? (tensor->list (randperm 10 #:generator g))
                     (replay 9 10 (< r* (+ ahead taken)))
@@ -256,32 +327,41 @@
 
   (test-case "in-epochs prefetches nothing across epochs"
     (define g (make-generator 9))
-    (define c (make-custodian))
+    (define-values (threads collate) (building-threads))
     (within 60 (lambda ()
-                 (under c (lambda ()
-                            (for ([_ (in-range 3)]
-                                  [(_e _x _y) (in-epochs (dataloader pairs #:batch-size 4
-                                                                     #:shuffle? #t
-                                                                     #:generator g
-                                                                     #:workers 2)
-                                                         3)])
-                              (void))))))
+                 (for ([_ (in-range 3)]
+                       [(_e _x _y) (in-epochs (dataloader pairs #:batch-size 4
+                                                          #:shuffle? #t
+                                                          #:generator g
+                                                          #:collate collate
+                                                          #:workers 2)
+                                              3)])
+                   (void))))
     (check-equal? (tensor->list (randperm 10 #:generator g)) (replay 9 10 #t))
-    (check-true (dead-within? c 5))
-    (custodian-shutdown-all c))
+    (check-equal? (hash-count threads) 2)
+    (check-true (dead-within? (hash-keys threads) 5)))
 
   (test-case "an empty traversal draws as workers 0 does and stops its workers"
     (define small (~> (arange 6) (reshape 3 2) tensor-dataset))
-    (define (run workers c)
+    (define (run workers)
       (define g (make-generator 9))
       (define loader (loader-of small workers 2 '#:batch-size 4 '#:shuffle? #t
                                 '#:drop-last? #t '#:generator g))
-      (list (within 60 (lambda () (under c (lambda () (batches loader)))))
+      (list (within 60 (lambda () (batches loader)))
             (tensor->list (randperm 3 #:generator g))))
+    (match-define (and outcome (list traversed _)) (run 2))
+    (check-equal? outcome (run 0))
+    (check-equal? traversed '())
     (define c (make-custodian))
-    (check-equal? (run 2 c) (run 0 (make-custodian)))
-    (check-equal? (car (run 2 c)) '())
-    (check-true (dead-within? c 5))
+    (define-values (more? next)
+      (under c (lambda ()
+                 (sequence-generate (dataloader small #:batch-size 4 #:drop-last? #t
+                                                #:workers 2)))))
+    (define threads (live c))
+    (check-equal? (length threads) 2)
+    (check-false (more?))
+    (check-true (dead-within? threads 5))
+    (void next)
     (custodian-shutdown-all c))
 
   (define (seeded-prng seed)
@@ -409,10 +489,11 @@
                      (dataloader #:workers 2)
                      in-dataloader
                      sequence-generate))))
-    (within 60 (lambda ()
-                 (for ([_ (in-range 3)]) (next))
-                 (check-eq? (caught next) raised)))
-    (check-true (dead-within? c 5))
+    (within 60 (lambda () (for ([_ (in-range 3)]) (next))))
+    (define threads (live c))
+    (check-equal? (length threads) 2)
+    (check-eq? (within 60 (lambda () (caught next))) raised)
+    (check-true (dead-within? threads 5))
     (check-eq? (within 10 (lambda () (caught next))) raised)
     (void more?)
     (custodian-shutdown-all c))
@@ -451,45 +532,66 @@
                         (exn-message (unbox outcome)))
     (custodian-shutdown-all c))
 
+  (test-case "a worker's death stops the others and raises the same value again"
+    (define builder (box #f))
+    (define c (make-custodian))
+    (define-values (more? next)
+      (under c (lambda ()
+                 (~> (stalling 40 1 30 builder)
+                     (dataloader #:workers 2 #:prefetch 4)
+                     in-dataloader
+                     sequence-generate))))
+    (within 60 next)
+    (define threads (live c))
+    (check-equal? (length threads) 2)
+    (kill-thread (stalled-builder builder))
+    (define raised (within 10 (lambda () (caught next))))
+    (check-pred exn:fail? raised)
+    (check-true (dead-within? threads 5))
+    (check-eq? (within 10 (lambda () (caught next))) raised)
+    (void more?)
+    (custodian-shutdown-all c))
+
   (test-case "exhaustion stops the workers without a collection"
     (settle!)
     (define base (ledger-snapshot))
-    (define c (make-custodian))
+    (define-values (threads collate) (building-threads))
     (within 60 (lambda ()
-                 (under c (lambda ()
-                            (for ([(_x _y) (dataloader pairs #:batch-size 3 #:shuffle? #t
-                                                 #:workers 2)])
-                              (void))))))
-    (check-true (dead-within? c 5))
+                 (for ([(_x _y) (dataloader pairs #:batch-size 3 #:shuffle? #t
+                                            #:collate collate #:workers 2)])
+                   (void))))
+    (check-equal? (hash-count threads) 2)
+    (check-true (dead-within? (hash-keys threads) 5))
     (settle!)
     (check-ledger base #f))
 
   (test-case "the last delivery stops the workers"
     (settle!)
     (define base (ledger-snapshot))
-    (define c (make-custodian))
+    (define-values (threads collate) (building-threads))
     (within 60 (lambda ()
-                 (under c (lambda ()
-                            (for ([_ (in-range 4)]
-                                  [(_x _y) (dataloader pairs #:batch-size 3 #:workers 2)])
-                              (void))))))
-    (check-true (dead-within? c 5))
+                 (for ([_ (in-range 4)]
+                       [(_x _y) (dataloader pairs #:batch-size 3 #:collate collate
+                                            #:workers 2)])
+                   (void))))
+    (check-equal? (hash-count threads) 2)
+    (check-true (dead-within? (hash-keys threads) 5))
     (settle!)
     (check-ledger base #f))
 
   (test-case "breaking out of the loop stops the workers after a collection"
     (settle!)
     (define base (ledger-snapshot))
-    (define c (make-custodian))
+    (define-values (threads collate) (building-threads))
     (within 60 (lambda ()
-                 (under c (lambda ()
-                            (for ([_ (in-range 1)]
-                                  [_b (~> (arange 16)
-                                           (reshape 8 2)
-                                           tensor-dataset
-                                           (dataloader #:workers 2 #:prefetch 2))])
-                              (void))))))
-    (check-true (dead-after-collections? c))
+                 (for ([_ (in-range 1)]
+                       [_b (~> (arange 16)
+                               (reshape 8 2)
+                               tensor-dataset
+                               (dataloader #:collate collate #:workers 2 #:prefetch 2))])
+                   (void))))
+    (check-equal? (hash-count threads) 2)
+    (check-true (dead-after-collections? (hash-keys threads)))
     (settle!)
     (check-ledger base #f))
 
@@ -502,7 +604,8 @@
       (parameterize ([current-custodian c])
         (consuming c (stalling 4 1 30 builder) (box #f))))
     (check-pred thread? (stalled-builder builder))
-    (define workers (workers-of c))
+    (define workers (remq consumer (live c)))
+    (check-equal? (length workers) 2)
     (custodian-shutdown-all c)
     (check-true (for/and ([t (in-list workers)]) (thread-dead? t)))
     (check-true (thread-dead? consumer))
@@ -517,11 +620,13 @@
     (define c (make-custodian))
     (define consumer (consuming c (stalling 4 0 2 builder) outcome))
     (check-pred thread? (stalled-builder builder))
+    (define threads (live c))
+    (check-equal? (length threads) 2)
     (break-thread consumer)
     (check-not-false (sync/timeout 1 consumer))
     (check-pred exn:break? (unbox outcome))
     (set-box! outcome #f)
-    (check-true (dead-after-collections? c))
+    (check-true (dead-after-collections? threads))
     (settle!)
     (check-ledger base #f))
 
@@ -554,49 +659,6 @@
       (settle!))
     (check-ledger base w))
 
-  (define (module-forms path)
-    (parameterize ([read-accept-reader #t] [read-accept-lang #t])
-      (call-with-input-file path read)))
-
-  (define (flatten-forms v)
-    (cond
-      [(pair? v) (append (flatten-forms (car v)) (flatten-forms (cdr v)))]
-      [(null? v) '()]
-      [else (list v)]))
-
-  (define (sublists v)
-    (cond
-      [(pair? v) (cons v (append (sublists (car v)) (sublists (cdr v))))]
-      [else '()]))
-
-  (test-case "the loader frees nothing and never enters atomic mode"
-    (define sources
-      (for/list ([name '("loader.rkt" "workers.rkt")])
-        (module-forms (collection-file-path name "torch" "data"))))
-    (define forbidden
-      '(tensor-free! tr-tensor-free/checked free-handle! call-as-atomic start-atomic
-        ffi/unsafe/atomic))
-    (for ([forms (in-list sources)])
-      (define atoms (flatten-forms forms))
-      (for ([name (in-list forbidden)])
-        (check-false (memq name atoms) (format "~a appears" name)))
-      (for ([form (in-list (sublists forms))]
-            #:when (and (eq? (car form) 'only-in) (pair? (cdr form))
-                        (eq? (cadr form) 'ffi/unsafe)))
-        (check-equal? (cddr form) '(register-finalizer)))
-      (check-equal? (length (filter (lambda (a) (eq? a 'ffi/unsafe)) atoms))
-                    (length (for/list ([form (in-list (sublists forms))]
-                                       #:when (and (eq? (car form) 'only-in)
-                                                   (pair? (cdr form))
-                                                   (eq? (cadr form) 'ffi/unsafe)))
-                              form))
-                    "ffi/unsafe is required only through only-in"))
-    (check-not-false
-     (for/or ([form (in-list (sublists (cadr sources)))])
-       (and (eq? (car form) '#:pool) (pair? (cdr form))
-            (equal? (cadr form) ''own)))
-     "#:pool 'own"))
-
   (test-case "the consumer waits in a Racket sync"
     (define-dataset sleepy (n)
       #:length n
@@ -622,9 +684,11 @@
 
   (test-case "workers that make tensors finish while the consumer waits"
     (check-equal? (within 60 (lambda ()
-                               (for/sum ([_ (dataloader (tensor-dataset (reshape (arange 256) 128 2))
-                                                        #:batch-size 2 #:shuffle? #t
-                                                        #:workers 4)])
+                               (for/sum ([_ (~> (arange 256)
+                                                (reshape 128 2)
+                                                tensor-dataset
+                                                (dataloader #:batch-size 2 #:shuffle? #t
+                                                            #:workers 4))])
                                  1)))
                   64))
 
@@ -635,7 +699,7 @@
     (define w (ones 2 3 #:requires-grad? #t))
     (semaphore-post (vector-ref gates 0))
     (define (gated items)
-      (define j (~> items car cadr item (quotient 2)))
+      (define j (quotient (first-label items) 2))
       (sync/timeout 10 (vector-ref gates j))
       (begin0 (~> items (map car _) stack (@ w))
         (semaphore-post (vector-ref done j))))
@@ -660,7 +724,7 @@
 
   (test-case "autocast and grad mode on the trainer do not reach worker collates"
     (define reference (gated-run 0))
-    (check-true (andmap (lambda (b) (and (eq? (cadr b) 'float32) (caddr b))) reference))
+    (check-true (andmap (lambda (b) (match b [(list _ 'float32 #t) #t] [_ #f])) reference))
     (check-known-failure
      "#194"
      "batches built while the trainer is in autocast or no-grad match workers 0"

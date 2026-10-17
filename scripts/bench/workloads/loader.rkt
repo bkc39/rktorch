@@ -1,10 +1,5 @@
 #lang racket/base
 
-;; The #168 loader workload: one tiny training step per batch, so the steps
-;; per second the harness records are the loader's batches per second.
-;; DATASET=folder decodes hymenoptera's JPEGs in the shim; DATASET=racket
-;; does DECODE_WORK passes of pure-Racket work per sample.
-
 (module+ main
   (require (only-in ffi/vector f32vector-ref f32vector-set! make-f32vector)
            (only-in torch
