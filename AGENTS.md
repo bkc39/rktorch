@@ -480,16 +480,49 @@ beyond the Racket distribution, as source trees only. When those deps change,
 or a fresh store reports a hash mismatch (upstream moved), set its
 `outputHash` to `""`, `nix build .#racket-deps`, paste the reported hash. The
 `racket-deps-current` check says "info.rkt changed; bump racket-deps outputHash",
-and also fails on an unmet `#:version` minimum. A `#:platform` dep is refused,
-whether `torch/info.rkt` or a fetched package declares it: one hash cannot
-hold a per-system fetch; so is a package source (a URL or
-path): racket-deps fetches catalog packages by name. `racket-deps-guard-test`
+and also fails on an unmet `#:version` minimum. torch's own platform packages
+(`torch-x86_64-linux`, `torch-aarch64-macosx`: `own-platform-packages` in
+`racket-deps.rkt`, which must name the same packages as `platform-packages`
+in `torch/foreign/raw/native-location.rkt`) are dropped from the fetch.
+Instead, the library-less skeleton under `pkgs/` is installed beside `torch`,
+and the staged shim wins over it. `racket-deps.rkt platform-packages
+<info-dir> <pkgs-dir>` names the skeletons that apply to the host, and fails
+unless each dep's `#:version` and each skeleton's `version` equal torch's.
+Any other `#:platform` dep is refused, whether `torch/info.rkt` or a fetched
+package declares it: one hash cannot hold a per-system fetch. So is a
+package source (a URL or path): racket-deps fetches catalog packages by
+name. `racket-deps-guard-test`
 and `racket-deps-info-test` test `nix/racket-deps/racket-deps.rkt`;
 `racket-deps-provision-test` tests `nix/racket-deps/provision.sh`, the dev
 shells' provisioning. It re-runs when racket-deps, the Racket version or
 `torch/info.rkt` changes, runs the same drift check first, removes packages
 only the previous racket-deps held, and installs `torch` with `--deps fail`,
-never from the live catalog.
+never from the live catalog. The flake's install (`nix/matrix/racket-cell.sh`,
+which the build, the checks and every matrix cell run) and the shell
+provisioning install the host's skeleton first, so `--deps fail` finds it.
+
+### The platform package
+
+`pkgs/torch-x86_64-linux/` is the skeleton of the x86_64 Linux platform
+package: its `info.rkt` (collection `torch-native`, version equal to
+torch's) and the bundled libraries' licences. `scripts/platform/linux/`
+builds the libraries into it, outside Nix, at the glibc 2.28 baseline;
+[`docs/building.md`](docs/building.md#the-platform-package) has the steps.
+
+```bash
+scripts/platform/linux/build.sh .scratch/platform     # manylinux_2_28, docker
+                                 # --cpus 4: codecs, shim, audit, gtests
+scripts/platform/linux/assemble.sh .scratch/platform/bundle .scratch/pkg
+scripts/platform/linux/catalog.sh .scratch/pkg/torch-x86_64-linux.zip .scratch/catalog
+scripts/platform/linux/smoke.sh ubuntu:24.04 racket-9.1-x86_64-linux-buster-cs.sh .scratch/catalog
+```
+
+`audit-bundle.sh` fails the build on a `/nix/store` reference, a RUNPATH
+other than `$ORIGIN`, a GLIBC, GLIBCXX or CXXABI version above libtorch
+2.14's (2.28, 3.4.22, 1.3.11), or a NEEDED library outside the bundle and
+the system set. It follows NEEDED entries only, so a dlopened library slips
+past it. Every fetched source is pinned by sha256 in `sources.txt`. The
+scripts never commit a library.
 
 ### The build matrix
 
@@ -689,6 +722,9 @@ Runtime paths take `(only-in racket/runtime-path #%datum define-runtime-path)`.
   loader keeps its own cache-directory function and override variable.
 - `private/install-torchrkt-native.rkt` — stages `libtorchrkt.*` into
   `native-libs/` from `TORCHRKT_NATIVE_LIB_PATH` (set by the Nix build/shell).
+  Without the variable it prints nothing when `native-location` finds the
+  shim, staged or in `torch-native`, and otherwise prints its not-found
+  message: the package server fails a package on any stderr from `raco setup`.
   Every staging path (here and the flake's three shell ones) writes a temp file
   and `rename(2)`s it into place, so restaging under a live process is safe:
   rename leaves the old inode alive and anything already running keeps
@@ -902,9 +938,9 @@ uncontracted copy of the pipeline, which has not been built.
 
 `.github/workflows/nix.yml`: `nix flake check` on `ubuntu-latest` +
 `macos-latest`, a `resyntax` lint gate, and a `codegen-drift` job
-(regenerate + fail on porcelain). (A `raco-catalog` workflow is deferred
-until the portable native-candidate story exists — libtorch is too large to
-bundle the xgboost way.)
+(regenerate + fail on porcelain). The platform package
+(`scripts/platform/linux/`) is built and smoked by hand for now; its CI lane
+is #339.
 
 ### Binary cache (#79)
 
