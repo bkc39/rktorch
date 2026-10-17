@@ -36,7 +36,9 @@
         "  bindings ABI stamp: " (abbreviated bindings) "\n"
         "  found in: " (path->string where) "\n"
         (platform-advice "raco pkg update torch")
-        "  In a checkout: re-enter the Nix dev shell, or run"
+        "  In a checkout, after editing a c_api header: run `nix run .#abi-stamp`"
+        " and commit the stamp.\n"
+        "  Otherwise the staged shim is stale: re-enter the Nix dev shell, or run"
         " `nix run .#copy-native-libs`.\n"
         "  See docs/building.md.")))
 

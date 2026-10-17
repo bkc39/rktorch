@@ -1,18 +1,15 @@
 #lang racket/base
 
 (module+ test
-  (require (only-in racket/file delete-directory/files make-directory*
-                    make-temporary-directory)
+  (require (only-in racket/file make-directory*)
            rackunit
            (only-in (submod "../foreign/raw/native-library.rkt" checked)
                     abi-stamp-problem bindings-abi-stamp open-native-library)
            (only-in (submod "../foreign/raw/native-location.rkt" checked)
                     native-library-directory native-library-load-failure-message
                     native-library-not-found-message native-library-path
-                    platform-package))
-
-  (define (shim-file-name)
-    (string-append "libtorchrkt" (bytes->string/utf-8 (system-type 'so-suffix))))
+                    platform-package shim-file-name)
+           (only-in "../private/util.rkt" with-temporary-directory))
 
   (define (touch! dir name)
     (make-directory* dir)
@@ -20,18 +17,14 @@
     dir)
 
   (define (call-with-layout proc)
-    (define root (make-temporary-directory))
-    (dynamic-wind
-     void
-     (lambda ()
-       (define staged (build-path root "native-libs"))
-       (define collects (build-path root "collects"))
-       (make-directory* staged)
-       (make-directory* collects)
-       (parameterize ([current-library-collection-links (list #f)]
-                      [current-library-collection-paths (list collects)])
-         (proc staged (build-path collects "torch-native"))))
-     (lambda () (delete-directory/files root))))
+    (with-temporary-directory (root)
+      (define staged (build-path root "native-libs"))
+      (define collects (build-path root "collects"))
+      (make-directory* staged)
+      (make-directory* collects)
+      (parameterize ([current-library-collection-links (list #f)]
+                     [current-library-collection-paths (list collects)])
+        (proc staged (build-path collects "torch-native")))))
 
   (test-case "a staged shim wins over the platform package"
     (call-with-layout
@@ -48,6 +41,23 @@
        (touch! native (shim-file-name))
        (check-equal? (native-library-directory #:staged staged)
                      (path->directory-path native)))))
+
+  (test-case "a staged library under another suffix does not shadow the platform package"
+    (call-with-layout
+     (lambda (staged native)
+       (touch! staged (if (equal? (system-type 'so-suffix) #".so")
+                          "libtorchrkt.dylib"
+                          "libtorchrkt.so"))
+       (touch! staged (string-append (shim-file-name) ".1"))
+       (touch! native (shim-file-name))
+       (check-equal? (native-library-directory #:staged staged)
+                     (path->directory-path native)))))
+
+  (test-case "with neither, the path raises the not-found message"
+    (call-with-layout
+     (lambda (staged native)
+       (make-directory* native)
+       (check-exn #rx"was not found" (lambda () (native-library-path #:staged staged))))))
 
   (test-case "with neither, there is no directory"
     (call-with-layout
@@ -83,6 +93,12 @@
     (check-regexp-match #rx"cannot open shared object file" broken)
     (check-false (regexp-match? #rx"was not found" broken)))
 
+  (test-case "a shim file that would not open raises the load failure"
+    (with-temporary-directory (dir)
+      (touch! dir (shim-file-name))
+      (check-exn #rx"found but would not load"
+                 (lambda () (open-native-library (build-path dir "libtorchrkt"))))))
+
   (define bindings (make-string 64 #\a))
   (define where (string->path "/x/native-libs"))
 
@@ -97,6 +113,7 @@
     (check-regexp-match #rx"found in: /x/native-libs" said)
     (check-regexp-match (regexp-quote (or (platform-package) "has no prebuilt platform package"))
                         said)
+    (check-regexp-match #rx"nix run [.]#abi-stamp` and commit the stamp" said)
     (check-regexp-match #rx"nix run [.]#copy-native-libs" said))
 
   (test-case "a shim without the stamp symbol says it predates the stamp"

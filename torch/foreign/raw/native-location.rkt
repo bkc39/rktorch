@@ -13,13 +13,12 @@
   (hash "x86_64-linux" "torch-x86_64-linux"
         "aarch64-macosx" "torch-aarch64-macosx"))
 
-(define (shim-file-name)
+(define/checked-out (shim-file-name)
+  (-> string?)
   (string-append "libtorchrkt" (bytes->string/utf-8 (system-type 'so-suffix))))
 
 (define (holds-shim? dir)
-  (and (directory-exists? dir)
-       (for/or ([f (in-list (directory-list dir))])
-         (regexp-match? #rx"^libtorchrkt[.]" (path->string f)))))
+  (file-exists? (build-path dir (shim-file-name))))
 
 (define/checked-out (native-library-directory #:staged [staged staged-native-libs])
   (->* [] [#:staged path-string?] (or/c path? #f))
@@ -57,8 +56,6 @@
    " and reinstall.\n"
    "  See docs/building.md."))
 
-;; ffi-lib reports a missing file and a dlopen that failed on a transitive
-;; dependency the same way, so the resolver probes the directory first.
 (define/checked-out (native-library-load-failure-message where loader-message) ;; noqa
   (-> path? string? string?)
   (string-append
@@ -69,9 +66,9 @@
    " carries an rpath to it.\n"
    "  See docs/building.md."))
 
-(define/checked-out (native-library-path) ;; noqa
-  (-> path?)
-  (define where (native-library-directory))
+(define/checked-out (native-library-path #:staged [staged staged-native-libs]) ;; noqa
+  (->* [] [#:staged path-string?] path?)
+  (define where (native-library-directory #:staged staged))
   (unless where
-    (error 'torch "~a" (native-library-not-found-message)))
+    (error 'torch "~a" (native-library-not-found-message #:staged staged)))
   (build-path where "libtorchrkt"))
