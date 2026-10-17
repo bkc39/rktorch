@@ -304,8 +304,9 @@ is @racket[#f]: @racket[rand], @racket[randn], @racket[rand-like],
 @racket[multinomial], the random transforms, and a loader's own draws.
 @racket[#f], the default, is the global stream seeded by
 @racket[manual-seed!]. An explicit @racket[#:generator] wins. Each loader
-worker sets it to its own generator. @racket[uniform!] and dropout take no
-generator and draw from the global stream.
+worker sets it to its own generator. @racket[uniform-init],
+@racket[kaiming-uniform] and dropout draw from the global stream whatever it
+holds.
 @torch-examples[
 (parameterize ([current-generator (make-generator 0)])
   (randperm 5))

@@ -13,11 +13,10 @@
 
   (define blamed #rx"blaming: [(][^)]*loader-workers-test[.]rkt")
 
-  (define (contract-violation? rx)
-    (lambda (e)
-      (and (exn:fail:contract? e)
-           (regexp-match? blamed (exn-message e))
-           (regexp-match? rx (exn-message e)))))
+  (define ((contract-violation? rx) e)
+    (and (exn:fail:contract? e)
+         (regexp-match? blamed (exn-message e))
+         (regexp-match? rx (exn-message e))))
 
   (define (record . vs)
     (for/list ([v (in-list vs)])
@@ -84,7 +83,7 @@
     #:ref (i) (values (select xs 0 i) (select ys 0 i)))
 
   (define (doubling items)
-    (* (stack (map car items)) 2))
+    (~> items (map car _) stack (* 2)))
 
   ;; a traversal's batches, then what the loader's and the global streams
   ;; draw next
@@ -148,7 +147,7 @@
     (define builders (make-hasheqv))
     (define lock (make-semaphore 1))
     (define (noting items)
-      (define j (quotient (item (cadr (car items))) 2))
+      (define j (~> items car cadr item (quotient 2)))
       (call-with-semaphore lock (lambda () (hash-set! builders j (current-thread))))
       (default-collate items))
     (define n 3)
@@ -184,7 +183,7 @@
   (define-dataset slow-first (n)
     #:length n
     #:ref (i)
-    (sleep (/ (- 50 (* 10 i)) 1000))
+    (~> (* 10 i) (- 50 _) (/ 1000) sleep)
     (tensor (list i) #:dtype 'int64))
 
   (test-case "batches arrive in order when later ones finish first"
@@ -199,7 +198,7 @@
     (define lock (make-semaphore 1))
     (define (note! e) (call-with-semaphore lock (lambda () (set! trace (cons e trace)))))
     (define (starting items)
-      (note! (list 'start (item (cadr (car items)))))
+      (note! (list 'start (~> items car cadr item)))
       (default-collate items))
     (define-values (n p) (values 2 2))
     (define ahead (* n p))
@@ -272,7 +271,7 @@
     (custodian-shutdown-all c))
 
   (test-case "an empty traversal draws as workers 0 does and stops its workers"
-    (define small (tensor-dataset (reshape (arange 6) 3 2)))
+    (define small (~> (arange 6) (reshape 3 2) tensor-dataset))
     (define (run workers c)
       (define g (make-generator 9))
       (define loader (loader-of small workers 2 '#:batch-size 4 '#:shuffle? #t
@@ -406,8 +405,10 @@
     (define c (make-custodian))
     (define-values (more? next)
       (under c (lambda ()
-                 (sequence-generate (in-dataloader (dataloader (failing-at 3 raised #t)
-                                                               #:workers 2))))))
+                 (~> (failing-at 3 raised #t)
+                     (dataloader #:workers 2)
+                     in-dataloader
+                     sequence-generate))))
     (within 60 (lambda ()
                  (for ([_ (in-range 3)]) (next))
                  (check-eq? (caught next) raised)))
@@ -483,8 +484,10 @@
     (within 60 (lambda ()
                  (under c (lambda ()
                             (for ([_ (in-range 1)]
-                                  [_b (dataloader (tensor-dataset (reshape (arange 16) 8 2))
-                                                  #:workers 2 #:prefetch 2)])
+                                  [_b (~> (arange 16)
+                                           (reshape 8 2)
+                                           tensor-dataset
+                                           (dataloader #:workers 2 #:prefetch 2))])
                               (void))))))
     (check-true (dead-after-collections? c))
     (settle!)
@@ -530,7 +533,7 @@
     (define c (make-custodian))
     (define-values (more? next)
       (under c (lambda ()
-                 (sequence-generate (in-dataloader (dataloader pairs #:workers 2))))))
+                 (~> pairs (dataloader #:workers 2) in-dataloader sequence-generate))))
     (define boxes (within 60 (lambda () (first-batch-boxes next))))
     (collect-garbage 'major)
     (check-equal? (map weak-box-value boxes) '(#f #f))
@@ -627,14 +630,14 @@
 
   (define (gated-run workers)
     (define n 8)
-    (define gates (for/vector ([_ (in-range n)]) (make-semaphore 0)))
-    (define done (for/vector ([_ (in-range n)]) (make-semaphore 0)))
+    (define gates (for/vector #:length n ([_ (in-range n)]) (make-semaphore 0)))
+    (define done (for/vector #:length n ([_ (in-range n)]) (make-semaphore 0)))
     (define w (ones 2 3 #:requires-grad? #t))
     (semaphore-post (vector-ref gates 0))
     (define (gated items)
-      (define j (quotient (item (cadr (car items))) 2))
+      (define j (~> items car cadr item (quotient 2)))
       (sync/timeout 10 (vector-ref gates j))
-      (begin0 (@ (stack (map car items)) w)
+      (begin0 (~> items (map car _) stack (@ w))
         (semaphore-post (vector-ref done j))))
     (define (step k thunk)
       (if (even? k) (with-autocast #:device 'cpu (thunk)) (with-no-grad (thunk))))
