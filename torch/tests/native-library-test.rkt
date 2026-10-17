@@ -2,13 +2,14 @@
 
 (module+ test
   (require (only-in racket/file make-directory*)
+           (only-in racket/string string-contains?)
            rackunit
            (only-in (submod "../foreign/raw/native-library.rkt" checked)
                     abi-stamp-problem bindings-abi-stamp open-native-library)
            (only-in (submod "../foreign/raw/native-location.rkt" checked)
                     native-library-directory native-library-load-failure-message
                     native-library-not-found-message native-library-path
-                    platform-package shim-file-name)
+                    platform-advice platform-package shim-file-name)
            (only-in "../private/util.rkt" with-temporary-directory))
 
   (define (touch! dir name)
@@ -120,7 +121,7 @@
     (define said (abi-stamp-problem bindings #f where))
     (check-regexp-match #rx"no tr_abi_stamp" said)
     (check-regexp-match #rx"bindings ABI stamp: aaaaaaaaaaaa" said)
-    (check-regexp-match #rx"raco pkg update torch" said))
+    (check-true (string-contains? said (platform-advice "raco pkg update torch"))))
 
   (test-case "the committed stamp is a SHA-256"
     (check-regexp-match #px"^[0-9a-f]{64}$" bindings-abi-stamp))
