@@ -875,6 +875,12 @@
               grep -q 'FAIL libtorchrkt.so: mentions /nix/store/' "$TMPDIR/log"
               grep -q 'FAIL libtorchrkt.so: runpath entry /nix/store/' "$TMPDIR/log"
               grep -q 'FAIL libtorchrkt.so: needs GLIBC_2\.[0-9]* > 2.28' "$TMPDIR/log"
+              grep -qF 'FAIL libtorchrkt.so: NEEDs libc10.so, neither bundled nor a system library' "$TMPDIR/log"
+              mkdir "$TMPDIR/sibling"
+              cp ${self.packages.${system}.cpp}/lib/libtorchrkt.so "$TMPDIR/sibling/"
+              cp ${self.packages.${system}.cpp}/lib/libtorchrkt.so "$TMPDIR/sibling/libc10.so"
+              audit "$TMPDIR/sibling"
+              grep -qF 'FAIL libtorchrkt.so: NEEDs bundled libc10.so, but its runpath lacks $ORIGIN' "$TMPDIR/log"
               PATH=${pkgs.writeShellScriptBin "objdump" "true"}/bin:$PATH \
                 audit ${self.packages.${system}.cpp}/lib
               grep -q 'objdump -T reads GLIBC_<none>, readelf -V GLIBC_2\.' "$TMPDIR/log"
