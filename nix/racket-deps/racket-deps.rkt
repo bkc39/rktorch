@@ -159,20 +159,19 @@
 (define (check-skeleton dep skeleton info-dir version)
   (define wanted (dep-option dep '#:version))
   (define found (skeleton-version skeleton))
-  (cond
-    [(not (equal? wanted version))
-     (raise-user-error 'racket-deps "~a has #:version ~s; ~a is version ~s"
-                       (dep-name dep) wanted info-dir version)]
-    [(not found)
-     (raise-user-error 'racket-deps "~a has no info.rkt with a version; ~a is version ~s"
-                       skeleton info-dir version)]
-    [(not (equal? found version))
-     (raise-user-error 'racket-deps "~a is version ~s; ~a is version ~s"
-                       skeleton found info-dir version)]))
+  (unless (equal? wanted version)
+    (raise-user-error 'racket-deps "~a has #:version ~s; ~a is version ~s"
+                      (dep-name dep) wanted info-dir version))
+  (unless found
+    (raise-user-error 'racket-deps "~a has no info.rkt with a version; ~a is version ~s"
+                      skeleton info-dir version))
+  (unless (equal? found version)
+    (raise-user-error 'racket-deps "~a is version ~s; ~a is version ~s"
+                      skeleton found info-dir version)))
 
 (define/contract (platform-packages info-dir pkgs-dir
                                     #:platform [subpath (path->string (system-library-subpath #f))])
-  (->* (directory-exists? directory-exists?) (#:platform string?) (listof path?))
+  (->* [directory-exists? directory-exists?] [#:platform string?] (listof path?))
   (define info (read-info info-dir))
   (define version (info 'version (λ () "0.0")))
   (define own (filter own-platform-dep? (all-deps info)))

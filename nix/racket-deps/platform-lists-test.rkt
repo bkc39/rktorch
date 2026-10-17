@@ -19,7 +19,7 @@
 
 (define own
   (match (definition racket-deps 'own-platform-packages)
-    [`(quote ,(list (? string? names) ...)) names]))
+    [`(quote ,names) #:when (andmap string? names) names]))
 
 (define located
   (match (definition native-location 'platform-packages)
