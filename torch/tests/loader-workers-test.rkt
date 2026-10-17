@@ -234,7 +234,8 @@
     (tensor (list i) #:dtype 'int64))
 
   (test-case "breaks while waiting lose no batch"
-    (define-values (more? next) (sequence-generate (dataloader (ticking 60) #:workers 2)))
+    (define-values (more? next)
+      (~> (ticking 60) (dataloader #:workers 2) sequence-generate))
     (define got '())
     (define breaks 0)
     (define (pull!)
