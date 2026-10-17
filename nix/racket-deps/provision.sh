@@ -23,6 +23,7 @@ record="$PLTUSERHOME/.racket-deps-pkgs"
 
 echo "Installing Racket package $pkg (link mode, Racket $ver)..."
 rd check "$pkg_dir" "$deps"
+rd platform-packages "$pkg_dir" "$platform_dir" >/dev/null
 mkdir -p "$PLTUSERHOME"
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT

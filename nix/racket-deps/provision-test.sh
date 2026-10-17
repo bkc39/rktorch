@@ -75,7 +75,10 @@ expect "$(cat "$log")" entered
 
 mkapp app-platform
 provision out-2
-platform=$(rd platform-packages "$app" "$t/pkgs" | sed 's,.*/,,')
+case $(racket -e '(display (system-library-subpath #f))') in
+  x86_64-linux) platform=torch-x86_64-linux ;;
+  *) platform= ;;
+esac
 expect "$(installed)" "$(printf '%s\n' rdfix-a rdfix-app rdfix-k $platform | sort | paste -sd' ')"
 third=$(stamps)
 
@@ -97,4 +100,12 @@ expect "$(stamps)" ""
 fails enter out-3
 grep -q 'provisioning failed; not stamping' "$log"
 fails grep -q entered "$log"
+expect "$(stamps)" ""
+
+export PLTUSERHOME=$t/plt-skew
+mkapp app-skew
+mkout out-4 rdfix-a
+fails provision out-4
+grep -qF 'torch-x86_64-linux is version "1.0"; ' "$log"
+expect "$(installed)" ""
 expect "$(stamps)" ""
