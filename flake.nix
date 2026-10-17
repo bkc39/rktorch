@@ -195,6 +195,10 @@
             mkdir "$TMPDIR/no-skeletons"
             fails rd platform-packages ${fixtures}/own-platform "$TMPDIR/no-skeletons"
             grep -q 'torch-x86_64-linux has no info.rkt with a version' "$TMPDIR/log"
+            fails rd platform-packages ${fixtures}/own-platform-symbol ${fixtures}/own-platform/pkgs
+            grep -qF 'torch-x86_64-linux has #:platform unix; expected a string such as "x86_64-linux"' "$TMPDIR/log"
+            fails rd names ${fixtures}/own-platform-symbol
+            grep -qF 'torch-x86_64-linux has #:platform unix; expected a string' "$TMPDIR/log"
             [ "$(rd base-version ${fixtures}/floored)" = 9.0 ]
             fails rd base-version ${fixtures}/current
             fails rd base-version ${fixtures}/versioned

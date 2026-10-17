@@ -39,7 +39,14 @@
   (and (dep-option dep '#:platform) #t))
 
 (define (own-platform-dep? dep)
-  (and (platform-dep? dep) (member (dep-name dep) own-platform-packages) #t))
+  (define platform (dep-option dep '#:platform))
+  (and platform
+       (member (dep-name dep) own-platform-packages)
+       (or (string? platform)
+           (raise-user-error 'racket-deps
+                             "~a has #:platform ~s; expected a string such as \"x86_64-linux\""
+                             (dep-name dep)
+                             platform))))
 
 (define (invalid-version-dep? dep)
   (define version (dep-option dep '#:version))
@@ -146,12 +153,6 @@
   (or (and base (dep-option base '#:version))
       (raise-user-error 'racket-deps "~a declares no (\"base\" #:version ...) floor" info-dir)))
 
-(define (this-platform? spec subpath)
-  (match spec
-    [(? symbol?) (eq? spec (system-type))]
-    [(? string?) (equal? spec subpath)]
-    [(? regexp?) (regexp-match? spec subpath)]))
-
 (define (skeleton-version skeleton)
   (define info (get-info/full skeleton))
   (and info (info 'version (λ () #f))))
@@ -179,7 +180,7 @@
   (for ([dep (in-list own)])
     (check-skeleton dep (skeleton dep) info-dir version))
   (for/list ([dep (in-list own)]
-             #:when (this-platform? (dep-option dep '#:platform) subpath))
+             #:when (equal? (dep-option dep '#:platform) subpath))
     (skeleton dep)))
 
 (define/contract (install-platform info-dir pkgs-dir mode)
