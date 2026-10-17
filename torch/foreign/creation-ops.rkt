@@ -67,7 +67,7 @@
                   tr-zeros-on/raw)
          (only-in "raw/random.rkt"
                   Generator?
-                  [current-generator raw:current-generator]
+                  current-generator/raw
                   tr-generator-draw-seed/raw
                   tr-generator-new/raw
                   tr-rand-on/raw
@@ -172,7 +172,7 @@
 
 (define/contract-out current-generator ;; noqa
   (parameter/c (or/c generator? #f))
-  raw:current-generator)
+  current-generator/raw)
 
 (define (drawn who raw dims device dtype requires-grad? generator)
   (define shape (shape-of dims))

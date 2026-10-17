@@ -1,11 +1,11 @@
 #lang racket/base
 
 (module+ test
-  (require (only-in racket/list index-of last remove-duplicates)
+  (require (only-in racket/list index-of remove-duplicates)
            rackunit
            "../data/loader.rkt"
-           "../main.rkt"
            (only-in (submod "../foreign.rkt" unsafe) tensor-free!)
+           "../main.rkt"
            (only-in "../vision/transforms.rkt" random-crop random-horizontal-flip)
            (only-in "private/race-harness.rkt"
                     check-known-failure check-ledger ledger-snapshot make-watch
@@ -88,7 +88,7 @@
 
   ;; a traversal's batches, then what the loader's and the global streams
   ;; draw next
-  (define (outcome ds workers prefetch b shuffle? drop-last? explicit? collate)
+  (define (traversal-outcome ds workers prefetch b shuffle? drop-last? explicit? collate)
     (manual-seed! 17)
     (define g (and explicit? (make-generator 17)))
     (define loader
@@ -102,9 +102,9 @@
 
   (define (check-parity ds collate)
     (for* ([shuffle? '(#f #t)] [drop-last? '(#f #t)] [b '(3 5)] [explicit? '(#t #f)])
-      (define reference (outcome ds 0 #f b shuffle? drop-last? explicit? collate))
+      (define reference (traversal-outcome ds 0 #f b shuffle? drop-last? explicit? collate))
       (for* ([n '(1 2 4)] [p '(1 2 3)])
-        (check-equal? (outcome ds n p b shuffle? drop-last? explicit? collate)
+        (check-equal? (traversal-outcome ds n p b shuffle? drop-last? explicit? collate)
                       reference
                       (format "workers ~a prefetch ~a batch ~a shuffle ~a drop ~a generator ~a"
                               n p b shuffle? drop-last? explicit?)))))
@@ -217,7 +217,7 @@
       (check-true (> (at (list 'start j)) (at (list 'done (- j ahead 1))))
                   (format "batch ~a starts after batch ~a is done" j (- j ahead 1)))))
 
-  (define (replay seed n b r*-drawn?)
+  (define (replay seed n r*-drawn?)
     (define g (make-generator seed))
     (draw-seed #:generator g)
     (randperm n #:generator g)
@@ -232,7 +232,7 @@
                      [(_x _y) (dataloader pairs #:batch-size 2 #:shuffle? #t #:generator g
                                      #:workers 1 #:prefetch 1)])
                  (void))))
-    (check-equal? (tensor->list (randperm 10 #:generator g)) (replay 9 10 2 #f))
+    (check-equal? (tensor->list (randperm 10 #:generator g)) (replay 9 10 #f))
     (custodian-shutdown-all c))
 
   (test-case "the trailing permutation is drawn at its request"
@@ -251,7 +251,7 @@
                                                     #:prefetch (cadr np))])
                                 (void))))))
       (check-equal? (tensor->list (randperm 10 #:generator g))
-                    (replay 9 10 b (< r* (+ ahead taken)))
+                    (replay 9 10 (< r* (+ ahead taken)))
                     (format "P' ~a, batch ~a, taken ~a" ahead b taken))
       (custodian-shutdown-all c)))
 
@@ -267,7 +267,7 @@
                                                                      #:workers 2)
                                                          3)])
                               (void))))))
-    (check-equal? (tensor->list (randperm 10 #:generator g)) (replay 9 10 4 #t))
+    (check-equal? (tensor->list (randperm 10 #:generator g)) (replay 9 10 #t))
     (check-true (dead-within? c 5))
     (custodian-shutdown-all c))
 

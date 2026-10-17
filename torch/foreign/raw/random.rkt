@@ -17,7 +17,7 @@
 (provide Generator? ;; noqa
          _Generator/current
          _Generator/null
-         current-generator
+         current-generator/raw
          tr-generator-draw-seed/raw
          tr-generator-new/raw
          tr-randn/raw
@@ -29,11 +29,11 @@
 
 (define-cpointer-type _Generator)
 
-(define current-generator (make-parameter #f))
+(define current-generator/raw (make-parameter #f))
 
 ;; the one point where a #f generator resolves, so an explicit one wins
 (define _Generator/current
-  (make-ctype _Generator/null (lambda (g) (or g (current-generator))) #f))
+  (make-ctype _Generator/null (lambda (g) (or g (current-generator/raw))) #f))
 
 (define-torch tr-generator-free/unwrapped
   (_fun _Generator -> _void)

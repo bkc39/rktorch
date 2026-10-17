@@ -3,8 +3,8 @@
 (module+ test
   (require rackunit
            "../data/loader.rkt"
-           "../main.rkt"
            (prefix-in g: (only-in "../generated.rkt" multinomial))
+           "../main.rkt"
            (only-in "../vision/transforms.rkt"
                     random-crop random-horizontal-flip random-resized-crop))
 
@@ -13,7 +13,7 @@
   (define (drawn v)
     (if (tensor? v) (tensor->list v) v))
 
-  (define images (reshape (arange (* 4 3 6 6)) 4 3 6 6))
+  (define images (~> (* 4 3 6 6) arange (reshape 4 3 6 6)))
   (define probabilities (tensor '(0.1 0.2 0.3 0.4 0.5)))
 
   (define random-ops
@@ -95,8 +95,9 @@
 
   (test-case "a loader without a generator draws from current-generator"
     (define loader
-      (dataloader (tensor-dataset (arange 10 #:dtype 'int64))
-                  #:batch-size 3 #:shuffle? #t))
+      (~> (arange 10 #:dtype 'int64)
+          tensor-dataset
+          (dataloader #:batch-size 3 #:shuffle? #t)))
     (define (order)
       (parameterize ([current-generator (make-generator 3)])
         (for/list ([ib loader]) (tensor->list ib))))

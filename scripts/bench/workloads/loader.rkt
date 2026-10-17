@@ -60,9 +60,10 @@
 
   (define loader
     (if (equal? (getenv "DATASET") "folder")
-        (loader-over (image-folder (build-path (hymenoptera-root) "train")
-                                   #:transform imagenet-preprocess)
-                     default-collate)
+        (~> (hymenoptera-root)
+            (build-path "train")
+            (image-folder #:transform imagenet-preprocess)
+            (loader-over default-collate))
         (loader-over (synthetic samples) one-tensor)))
 
   (define head (Linear 3 2))

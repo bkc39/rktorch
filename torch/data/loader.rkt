@@ -239,14 +239,13 @@
     (stop-workers! pool)
     (raise v))
   (define (batch k)
-    (cond
-      [failure (raise (unbox failure))]
-      [else
-       (define-values (ok? payload) (await-batch pool k))
-       (request! (+ k ahead))
-       (when (= k (sub1 count))
-         (stop-workers! pool))
-       (if ok? (apply values payload) (fail! payload))]))
+    (when failure
+      (raise (unbox failure)))
+    (define-values (ok? payload) (await-batch pool k))
+    (request! (+ k ahead))
+    (when (= k (sub1 count))
+      (stop-workers! pool))
+    (if ok? (apply values payload) (fail! payload)))
   (define (exhausted!)
     (finish!)
     (stop-workers! pool))
