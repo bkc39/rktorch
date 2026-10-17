@@ -52,23 +52,27 @@ EOF
 
 codecs=(libogg-1.3.6.tar.gz libvorbis-1.3.7.tar.gz flac-1.5.0.tar.xz opus-1.5.2.tar.gz
         mpg123-1.33.4.tar.bz2 lame-3.100.tar.gz libsndfile-1.2.2.tar.xz)
-codecs_pinned=$(for tarball in "${codecs[@]}"; do echo "${pinned[$tarball]}"; done)
-if ! current "$deps/.pinned" "$codecs_pinned"; then
+codec_cflags="-O2 -fPIC"
+declare -A configure_flags=(
+  [flac-1.5.0.tar.xz]="--disable-programs --disable-examples --disable-doxygen-docs --disable-cpplibs"
+  [opus-1.5.2.tar.gz]="--disable-doc --disable-extra-programs"
+  [lame-3.100.tar.gz]="--disable-frontend --disable-decoder"
+  [mpg123-1.33.4.tar.bz2]="--disable-components --enable-libmpg123 --with-cpu=x86-64"
+  [libsndfile-1.2.2.tar.xz]="--disable-full-suite --disable-sqlite --disable-alsa"
+)
+codecs_key=$(echo "CFLAGS=$codec_cflags"
+             for tarball in "${codecs[@]}"; do
+               echo "${pinned[$tarball]} $tarball ${configure_flags[$tarball]-}"
+             done)
+if ! current "$deps/.pinned" "$codecs_key"; then
   rm -rf "$deps" "$work/codec-build"
   mkdir -p "$work/codec-build"
   export PKG_CONFIG_PATH=$deps/lib/pkgconfig
-  export CFLAGS="-O2 -fPIC" CPPFLAGS="-I$deps/include" LDFLAGS="-L$deps/lib"
+  export CFLAGS=$codec_cflags CPPFLAGS="-I$deps/include" LDFLAGS="-L$deps/lib"
   for tarball in "${codecs[@]}"; do
     codec=${tarball%.tar.*}
     tar -C "$work/codec-build" -xf "$dl/$tarball"
-    case $codec in
-      flac-*) extra=(--disable-programs --disable-examples --disable-doxygen-docs --disable-cpplibs) ;;
-      opus-*) extra=(--disable-doc --disable-extra-programs) ;;
-      lame-*) extra=(--disable-frontend --disable-decoder) ;;
-      mpg123-*) extra=(--disable-components --enable-libmpg123 --with-cpu=x86-64) ;;
-      libsndfile-*) extra=(--disable-full-suite --disable-sqlite --disable-alsa) ;;
-      *) extra=() ;;
-    esac
+    read -ra extra <<<"${configure_flags[$tarball]-}"
     (cd "$work/codec-build/$codec" &&
        ./configure --prefix="$deps" --disable-static --enable-shared "${extra[@]}" &&
        make -j"$jobs" && make install) >"$log/$codec.log" 2>&1 ||
@@ -79,7 +83,7 @@ if ! current "$deps/.pinned" "$codecs_pinned"; then
     grep -q "$line" "$sndfile_log" || failed "libsndfile without its codecs" "$sndfile_log"
   done
   unset PKG_CONFIG_PATH CFLAGS CPPFLAGS LDFLAGS
-  echo "$codecs_pinned" >"$deps/.pinned"
+  echo "$codecs_key" >"$deps/.pinned"
 fi
 
 gtest=googletest-1.17.0
@@ -92,6 +96,13 @@ if ! current "$work/gtest/.pinned" "${pinned[$gtest.tar.gz]}"; then
      cmake --install "$work/gtest-build") >"$log/googletest.log" 2>&1 ||
     failed googletest "$log/googletest.log"
   echo "${pinned[$gtest.tar.gz]}" >"$work/gtest/.pinned"
+fi
+
+shim_key=$(printf '%s\n' "${pinned[$libtorch_zip]}" "$codecs_key" "${pinned[$gtest.tar.gz]}")
+if ! current "$work/shim-build/.inputs" "$shim_key"; then
+  rm -rf "$work/shim-build"
+  mkdir -p "$work/shim-build"
+  echo "$shim_key" >"$work/shim-build/.inputs"
 fi
 
 # --exclude-libs keeps gcc-toolset's static libstdc++_nonshared pieces out of
