@@ -42,7 +42,7 @@ if ! current "$work/libtorch/.pinned" "${pinned[$libtorch_zip]}"; then
 fi
 
 mkdir -p "$work/stb/include/stb" "$work/stb/lib/pkgconfig"
-cp "$dl/stb_image.h" "$work/stb/include/stb/"
+cp -p "$dl/stb_image.h" "$work/stb/include/stb/"
 cat >"$work/stb/lib/pkgconfig/stb.pc" <<EOF
 Name: stb
 Description: stb single-file libraries
