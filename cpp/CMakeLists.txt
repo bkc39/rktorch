@@ -11,6 +11,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 include(cmake/TorchrktWarnings.cmake)
 include(cmake/TorchrktTools.cmake)
+include(cmake/abi_stamp.cmake)
 
 # Provided by libtorch-bin (or python3Packages.torch's dev output) on
 # CMAKE_PREFIX_PATH; see flake.nix's `torchSource` knob.
@@ -50,6 +51,9 @@ target_sources(torchrkt
     src/torchrkt/spectral.cpp
     src/torchrkt/tensor.cpp
 )
+
+set_source_files_properties(src/torchrkt/global.cpp
+  PROPERTIES COMPILE_DEFINITIONS "TORCHRKT_ABI_STAMP=\"${TORCHRKT_ABI_STAMP}\"")
 
 # Generated shim sources; the file is owned by the codegen generator
 # (python3 -m codegen), which rewrites it on every run.
@@ -134,6 +138,8 @@ if(BUILD_TESTING)
     tests/torchrkt/to_test.cpp
     $<TARGET_OBJECTS:torchrkt_c_api_compile_test>
   )
+  target_compile_definitions(torchrkt_tests
+    PRIVATE "TORCHRKT_ABI_STAMP=\"${TORCHRKT_ABI_STAMP}\"")
   target_include_directories(torchrkt_tests
     PRIVATE
       ${CMAKE_CURRENT_SOURCE_DIR}/tests
