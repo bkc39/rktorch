@@ -15,6 +15,7 @@
 
 (provide Generator? ;; noqa
          _Generator/null
+         current-generator
          tr-generator-draw-seed/raw
          tr-generator-new/raw
          tr-randn/raw
@@ -25,6 +26,8 @@
          tr-tensor-uniform!/raw)
 
 (define-cpointer-type _Generator)
+
+(define current-generator (make-parameter #f))
 
 (define-torch tr-generator-free/unwrapped
   (_fun _Generator -> _void)

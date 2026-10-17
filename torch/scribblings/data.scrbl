@@ -1,6 +1,7 @@
 #lang scribble/manual
 
-@(require torch/scribblings/labels
+@(require torch/scribblings/common
+          torch/scribblings/labels
           (for-label torch/data/loader))
 
 @title{Datasets and loaders}
@@ -174,15 +175,18 @@ to any other collate.
                      [#:drop-last? drop-last? boolean? #f]
                      [#:collate collate (-> (non-empty-listof list?) any)
                       default-collate]
-                     [#:generator generator (or/c generator? #f) #f])
+                     [#:generator generator (or/c generator? #f) #f]
+                     [#:workers workers exact-nonnegative-integer? 0]
+                     [#:prefetch prefetch exact-positive-integer? 2])
          dataloader?]{
 A loader over @racket[ds], as @tt{DataLoader(ds, batch_size, shuffle,
-drop_last, collate_fn, generator)} with @tt{num_workers=0}: batches are
-built on the calling thread when they are asked for. A shuffled loader
+drop_last, collate_fn, generator, num_workers, prefetch_factor)}. With
+@racket[workers] at 0, batches are built on the calling thread when they
+are asked for. A shuffled loader
 needs a non-empty dataset within @racket[size/c], as @tt{RandomSampler}
 and @racket[randperm] do; an empty one may still be traversed in order. Every traversal
 draws what one @tt{DataLoader} iterator draws, in its order, from
-@racket[generator] or else the global stream: one @racket[draw-seed] when
+@racket[generator] or else @racket[(current-generator)]: one @racket[draw-seed] when
 the traversal starts, shuffled or not; with @racket[#:shuffle?] the
 permutation when the first batch is asked for, and once it is used up the trailing permutation its sampler
 discards, before a final partial batch or else when the traversal is
@@ -194,7 +198,36 @@ epoch after epoch. Without a generator the draws come from the global
 stream the way @tt{RandomSampler} makes them, seeding a fresh generator
 per epoch. Without @racket[#:shuffle?] the batches are the items in order,
 and a batch size equal to the length yields the dataset's own tensors.
-}
+
+With @racket[workers] above 0, each traversal starts that many parallel
+threads under the current custodian, and batch @racket[j] is built by
+worker @racket[(modulo j workers)]. Worker @racket[k] runs with
+@racket[current-generator] set to @racket[(make-generator (+ s k))], where
+@racket[s] is the traversal's @racket[draw-seed], and with its own
+@racket[current-pseudo-random-generator] seeded from the same number, as
+PyTorch seeds a worker. Batches arrive in order. At most
+@racket[(* workers prefetch)] batches are requested ahead of the one being
+consumed, so the sampler draws as PyTorch's multi-process iterator does: the
+permutation when the traversal starts, the trailing one when its request is
+made. A batch whose construction raises raises again when the traversal
+reaches it. The workers stop when the traversal is exhausted, when the
+custodian shuts down, or once the loop that held the traversal has let it
+go and a collection runs. Workers build CPU tensors, so @racket[ds] must not
+be on an accelerator. @racket[#:prefetch] needs @racket[workers] above 0.
+A dataset's @racket[#:ref] and @racket[#:batch], and @racket[collate], run
+in several threads at once, so any state they share must be synchronized.
+
+@torch-examples[
+(require torch/data/loader)
+(define ds (tensor-dataset (arange 10)))
+(define (epoch workers)
+  (for/list ([xb (dataloader ds #:batch-size 4 #:shuffle? #t
+                             #:generator (make-generator 0)
+                             #:workers workers)])
+    (tensor->list xb)))
+(epoch 2)
+(equal? (epoch 0) (epoch 2))
+]}
 
 @defproc[(dataloader? [v any/c]) boolean?]{
 Recognises the result of @racket[dataloader].
@@ -217,7 +250,9 @@ is the same epoch, as @tt{for xb, yb in loader} is.
 @racket[n] epochs in one sequence: each element is the epoch number
 followed by the batch's values, so @racket[(for ([(epoch xb yb) (in-epochs
 loader n)]) ...)] is the nested @racket[for*] over @racket[in-range] and
-@racket[in-dataloader] written as one clause.
+@racket[in-dataloader] written as one clause. With workers, an epoch starts
+its workers when its first batch is asked for; nothing is prefetched across
+epochs.
 }
 
 @section{Generators}
@@ -249,15 +284,30 @@ A natural number below @racket[(expt 2 63)], the native size range.
                    [#:generator generator (or/c generator? #f) #f])
          tensor?]{
 An int64 permutation of @racket[0] to @racket[n-1] on the CPU, drawn from
-@racket[generator] or from the global stream, as @tt{torch.randperm}. Drawn
+@racket[generator] or else from @racket[(current-generator)], as @tt{torch.randperm}. Drawn
 on the CPU whatever the default device, as PyTorch's sampler does, so a
 permutation replays across devices.
 }
 
 @defproc[(draw-seed [#:generator generator (or/c generator? #f) #f])
          exact-nonnegative-integer?]{
-One int64 drawn from @racket[generator] or the global stream, as
+One int64 drawn from @racket[generator] or else from @racket[(current-generator)], as
 @tt{torch.empty((), dtype=torch.int64).random_(generator=g).item()}. A
 @tt{DataLoader} makes this draw once per epoch before its permutation;
 @racket[dataloader] makes it too, so the streams stay in step.
 }
+
+@defparam[current-generator generator (or/c generator? #f)]{
+The generator a random operation draws from when its @racket[#:generator]
+is @racket[#f]: @racket[rand], @racket[randn], @racket[rand-like],
+@racket[randn-like], @racket[randperm], @racket[draw-seed],
+@racket[multinomial], the random transforms, and a loader's own draws.
+@racket[#f], the default, is the global stream seeded by
+@racket[manual-seed!]. An explicit @racket[#:generator] wins. Each loader
+worker sets it to its own generator. @racket[uniform!] and dropout take no
+generator and draw from the global stream.
+@torch-examples[
+(parameterize ([current-generator (make-generator 0)])
+  (randperm 5))
+(randperm 5 #:generator (make-generator 0))
+]}

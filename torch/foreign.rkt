@@ -70,6 +70,7 @@
          generator?
          randperm
          draw-seed
+         current-generator
          seed/c
          size/c
          arange
