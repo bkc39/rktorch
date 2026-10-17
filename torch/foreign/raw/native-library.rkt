@@ -1,7 +1,7 @@
 #lang racket/base
 
-(require (only-in ffi/unsafe _fun _string/utf-8 ffi-lib ffi-lib? get-ffi-obj)
-         (only-in racket/contract/base ->* or/c)
+(require (only-in ffi/unsafe _cprocedure _string/utf-8 ffi-lib ffi-lib? get-ffi-obj)
+         (only-in racket/contract/base -> ->* or/c) ;; noqa
          (only-in racket/path path-only)
          (only-in racket/runtime-path #%datum define-runtime-path)
          (only-in "../../private/contract.rkt" define/checked-out)
@@ -23,7 +23,7 @@
   (substring stamp 0 (min 12 (string-length stamp))))
 
 (define/checked-out (abi-stamp-problem bindings shim where)
-  (->* (string? (or/c string? #f) path?) () (or/c string? #f))
+  (-> string? (or/c string? #f) path? (or/c string? #f))
   (and (not (equal? bindings shim))
        (string-append
         (if shim
@@ -42,11 +42,11 @@
 
 (define (shim-abi-stamp lib)
   (define stamp
-    (get-ffi-obj "tr_abi_stamp" lib (_fun -> _string/utf-8) (lambda () #f)))
+    (get-ffi-obj "tr_abi_stamp" lib (_cprocedure '() _string/utf-8) (lambda () #f)))
   (and stamp ((latched stamp))))
 
 (define/checked-out (open-native-library file #:expect [expected bindings-abi-stamp])
-  (->* (path?) (#:expect string?) ffi-lib?)
+  (->* [path?] [#:expect string?] ffi-lib?)
   (define where (path-only file))
   (define lib
     (with-handlers ([exn:fail?

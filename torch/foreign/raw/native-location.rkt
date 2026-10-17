@@ -1,6 +1,6 @@
 #lang racket/base
 
-(require (only-in racket/contract/base -> ->* or/c)
+(require (only-in racket/contract/base -> ->* or/c) ;; noqa
          (only-in racket/path path-only)
          (only-in racket/runtime-path #%datum define-runtime-path)
          (only-in "../../private/contract.rkt" define/checked-out))
@@ -22,7 +22,7 @@
          (regexp-match? #rx"^libtorchrkt[.]" (path->string f)))))
 
 (define/checked-out (native-library-directory #:staged [staged staged-native-libs])
-  (->* () (#:staged path-string?) (or/c path? #f))
+  (->* [] [#:staged path-string?] (or/c path? #f))
   (cond
     [(holds-shim? staged) (simplify-path staged)]
     [else
@@ -31,11 +31,11 @@
      (and shim (file-exists? shim) (path-only shim))]))
 
 (define/checked-out (platform-package [subpath (system-library-subpath #f)])
-  (->* () (path-for-some-system?) (or/c string? #f))
+  (->* [] [path-for-some-system?] (or/c string? #f))
   (hash-ref platform-packages (path->string subpath) #f))
 
 (define/checked-out (platform-advice command [subpath (system-library-subpath #f)])
-  (->* (string?) (path-for-some-system?) string?)
+  (->* [string?] [path-for-some-system?] string?)
   (define package (platform-package subpath))
   (if package
       (string-append "  For a catalog install: " command " " package "\n")
@@ -45,7 +45,7 @@
 (define/checked-out (native-library-not-found-message
                      #:staged [staged staged-native-libs]
                      #:platform [subpath (system-library-subpath #f)])
-  (->* () (#:staged path-string? #:platform path-for-some-system?) string?)
+  (->* [] [#:staged path-string? #:platform path-for-some-system?] string?)
   (string-append
    "the native library libtorchrkt was not found.\n"
    "  looked in: " (path->string (simplify-path staged)) "\n"
@@ -59,7 +59,7 @@
 
 ;; ffi-lib reports a missing file and a dlopen that failed on a transitive
 ;; dependency the same way, so the resolver probes the directory first.
-(define/checked-out (native-library-load-failure-message where loader-message)
+(define/checked-out (native-library-load-failure-message where loader-message) ;; noqa
   (-> path? string? string?)
   (string-append
    "the native library libtorchrkt was found but would not load.\n"
@@ -69,7 +69,7 @@
    " carries an rpath to it.\n"
    "  See docs/building.md."))
 
-(define/checked-out (native-library-path)
+(define/checked-out (native-library-path) ;; noqa
   (-> path?)
   (define where (native-library-directory))
   (unless where
