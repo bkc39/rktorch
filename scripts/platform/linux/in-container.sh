@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 #
-# The manylinux_2_28 half of build.sh, which mounts the repository read-only
-# at /src and the work directory at /work.
+#   bash /src/scripts/platform/linux/in-container.sh   (run by build.sh)
 set -euo pipefail
 
 jobs=${JOBS:-4}
@@ -20,18 +19,26 @@ failed() {
   exit 1
 }
 
+current() {
+  [ -f "$1" ] && [ "$(cat "$1")" = "$2" ]
+}
+
+declare -A pinned
 while read -r sum file url; do
-  [[ -n $sum && $sum != \#* ]] || continue
-  if [[ ! -f $dl/$file ]]; then
+  case $sum in '' | \#*) continue ;; esac
+  if [ ! -f "$dl/$file" ]; then
     curl -fsSL -o "$dl/$file.part" "$url"
     mv "$dl/$file.part" "$dl/$file"
   fi
   echo "$sum  $dl/$file" | sha256sum --check --quiet -
+  pinned[$file]=$sum
+  case $file in libtorch-*.zip) libtorch_zip=$file ;; esac
 done <"$here/sources.txt"
 
-if [[ ! -f $libtorch/build-version ]]; then
+if ! current "$work/libtorch/.pinned" "${pinned[$libtorch_zip]}"; then
   rm -rf "$work/libtorch"
-  unzip -q -d "$work/libtorch" "$dl"/libtorch-shared-with-deps-*.zip
+  unzip -q -d "$work/libtorch" "$dl/$libtorch_zip"
+  echo "${pinned[$libtorch_zip]}" >"$work/libtorch/.pinned"
 fi
 
 mkdir -p "$work/stb/include/stb" "$work/stb/lib/pkgconfig"
@@ -43,15 +50,17 @@ Version: 1
 Cflags: -I$work/stb/include/stb
 EOF
 
-codecs=(libogg-1.3.6 libvorbis-1.3.7 flac-1.5.0 opus-1.5.2 mpg123-1.33.4 lame-3.100
-        libsndfile-1.2.2)
-if [[ ! -f $deps/.done ]]; then
+codecs=(libogg-1.3.6.tar.gz libvorbis-1.3.7.tar.gz flac-1.5.0.tar.xz opus-1.5.2.tar.gz
+        mpg123-1.33.4.tar.bz2 lame-3.100.tar.gz libsndfile-1.2.2.tar.xz)
+codecs_pinned=$(for tarball in "${codecs[@]}"; do echo "${pinned[$tarball]}"; done)
+if ! current "$deps/.pinned" "$codecs_pinned"; then
   rm -rf "$deps" "$work/codec-build"
   mkdir -p "$work/codec-build"
   export PKG_CONFIG_PATH=$deps/lib/pkgconfig
   export CFLAGS="-O2 -fPIC" CPPFLAGS="-I$deps/include" LDFLAGS="-L$deps/lib"
-  for codec in "${codecs[@]}"; do
-    tar -C "$work/codec-build" -xf "$dl/$codec".tar.*
+  for tarball in "${codecs[@]}"; do
+    codec=${tarball%.tar.*}
+    tar -C "$work/codec-build" -xf "$dl/$tarball"
     case $codec in
       flac-*) extra=(--disable-programs --disable-examples --disable-doxygen-docs --disable-cpplibs) ;;
       opus-*) extra=(--disable-doc --disable-extra-programs) ;;
@@ -65,23 +74,24 @@ if [[ ! -f $deps/.done ]]; then
        make -j"$jobs" && make install) >"$log/$codec.log" 2>&1 ||
       failed "$codec" "$log/$codec.log"
   done
+  sndfile_log=$log/${codecs[-1]%.tar.*}.log
   for line in 'External FLAC/Ogg/Vorbis/Opus : [.]* yes' 'External MPEG Lame/MPG123 : [.]* yes'; do
-    grep -q "$line" "$log/libsndfile-1.2.2.log" ||
-      failed "libsndfile without its codecs" "$log/libsndfile-1.2.2.log"
+    grep -q "$line" "$sndfile_log" || failed "libsndfile without its codecs" "$sndfile_log"
   done
   unset PKG_CONFIG_PATH CFLAGS CPPFLAGS LDFLAGS
-  touch "$deps/.done"
+  echo "$codecs_pinned" >"$deps/.pinned"
 fi
 
-if [[ ! -f $work/gtest/.done ]]; then
-  rm -rf "$work/gtest" "$work/gtest-build"
-  tar -C "$work" -xf "$dl/googletest-1.17.0.tar.gz"
-  (cmake -S "$work/googletest-1.17.0" -B "$work/gtest-build" -DCMAKE_BUILD_TYPE=Release \
+gtest=googletest-1.17.0
+if ! current "$work/gtest/.pinned" "${pinned[$gtest.tar.gz]}"; then
+  rm -rf "$work/gtest" "$work/gtest-build" "$work/$gtest"
+  tar -C "$work" -xf "$dl/$gtest.tar.gz"
+  (cmake -S "$work/$gtest" -B "$work/gtest-build" -DCMAKE_BUILD_TYPE=Release \
      -DBUILD_GMOCK=OFF -DCMAKE_INSTALL_PREFIX="$work/gtest" &&
      cmake --build "$work/gtest-build" -j "$jobs" &&
      cmake --install "$work/gtest-build") >"$log/googletest.log" 2>&1 ||
     failed googletest "$log/googletest.log"
-  touch "$work/gtest/.done"
+  echo "${pinned[$gtest.tar.gz]}" >"$work/gtest/.pinned"
 fi
 
 # --exclude-libs keeps gcc-toolset's static libstdc++_nonshared pieces out of
@@ -103,14 +113,14 @@ rm -rf "$bundle"
 mkdir -p "$bundle"
 strip --strip-unneeded -o "$bundle/libtorchrkt.so" "$work/shim-build/libtorchrkt.so"
 queue=("$bundle/libtorchrkt.so")
-while ((${#queue[@]})); do
+while [ "${#queue[@]}" -gt 0 ]; do
   lib=${queue[0]}
   queue=("${queue[@]:1}")
   for needed in $(readelf -d "$lib" | sed -n 's/.*(NEEDED).*\[\(.*\)\]/\1/p'); do
-    [[ ! -e $bundle/$needed ]] || continue
-    if [[ -f $libtorch/lib/$needed ]]; then
+    [ ! -e "$bundle/$needed" ] || continue
+    if [ -f "$libtorch/lib/$needed" ]; then
       cp "$libtorch/lib/$needed" "$bundle/"
-    elif [[ -e $deps/lib/$needed ]]; then
+    elif [ -e "$deps/lib/$needed" ]; then
       strip --strip-unneeded -o "$bundle/$needed" "$deps/lib/$needed"
       patchelf --set-rpath '$ORIGIN' "$bundle/$needed"
     else

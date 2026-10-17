@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 #
-# The container half of smoke.sh, which mounts the catalog at /catalog, the
-# Racket installer at /installer/racket.sh and this directory at /scripts.
+#   bash /scripts/linux/in-host-smoke.sh   (run by smoke.sh)
 set -euo pipefail
 
 distro=$(. /etc/os-release && echo "$ID-$VERSION_ID")
@@ -25,7 +24,7 @@ raco pkg install --batch --auto --no-docs -j 4 torch >/tmp/raco.out 2>/tmp/raco.
 echo "wall $(($(date +%s) - start)) s"
 grep -E '^Inferred|^Downloading|^raco setup: (pre-installing|--- compiling)' /tmp/raco.out || true
 du -sh "$(racket -e '(display (find-system-path (quote addon-dir)))')"
-if [[ -s /tmp/raco.err ]]; then
+if [ -s /tmp/raco.err ]; then
   echo "stderr was not empty:"
   cat /tmp/raco.err
   exit 1
@@ -33,22 +32,9 @@ fi
 echo "stderr: empty"
 
 step "04-mlp"
-racket -l racket/base -e '
-(require torch torch/scribblings/examples/04-mlp
-         (only-in torch/foreign/raw/native-location native-library-directory))
-(printf "shim from ~a\n" (native-library-directory))
-(define-values (losses net device) (run-example))
-(printf "device ~a, losses ~a\n" device losses)
-(unless (< (list-ref losses 4) (list-ref losses 0)) (error "04-mlp: the loss did not fall"))'
+raco test /scripts/mlp-smoke.rkt
 
 step "FLAC round trip"
-racket -l racket/base -e '
-(require torch torch/audio/data)
-(define fixture (collection-file-path "sine-440-16k.flac" "torch/audio/fixtures"))
-(define-values (s rate) (load-audio fixture))
-(save-audio "/tmp/roundtrip.flac" s rate)
-(define-values (s2 rate2) (load-audio "/tmp/roundtrip.flac"))
-(printf "~a Hz ~a -> ~a Hz ~a\n" rate (shape s) rate2 (shape s2))
-(unless (and (= rate rate2) (equal? (shape s) (shape s2))) (error "the round trip differs"))'
+raco test /scripts/flac-round-trip.rkt
 
 step "SMOKE OK: $distro, racket $(racket -e '(display (version))')"
