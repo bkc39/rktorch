@@ -21,8 +21,8 @@
     [name name]))
 
 (define (dep-platform dep)
-  (match dep
-    [(list _ _ ... '#:platform platform _ ...) platform]
+  (match (and (pair? dep) (member '#:platform (cdr dep)))
+    [(list* _ platform _) platform]
     [_ #f]))
 
 (match-define (vector racket-deps native-location info) (current-command-line-arguments))
