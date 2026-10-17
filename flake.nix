@@ -181,9 +181,13 @@
             fails rd names ${fixtures}/platform
             grep -q 'extra-lib has #:platform unix; platform-qualified' "$TMPDIR/log"
             rd check ${fixtures}/own-platform "$built"
-            here=torch-$(racket -e '(display (system-library-subpath #f))')
-            [ "$(rd platform-packages ${fixtures}/own-platform ${fixtures}/own-platform/pkgs)" \
-              = "${fixtures}/own-platform/pkgs/$here" ]
+            for platform in x86_64-linux aarch64-macosx; do
+              [ "$(rd platform-packages ${fixtures}/own-platform ${fixtures}/own-platform/pkgs $platform)" \
+                = "${fixtures}/own-platform/pkgs/torch-$platform" ]
+            done
+            [ -z "$(rd platform-packages ${fixtures}/own-platform ${fixtures}/own-platform/pkgs aarch64-darwin)" ]
+            racket ${racketDepsDir}/platform-lists-test.rkt ${racketDepsScript} \
+              ${./torch/foreign/raw/native-location.rkt}
             fails rd platform-packages ${fixtures}/own-platform-skew ${fixtures}/own-platform/pkgs
             grep -qF 'torch-x86_64-linux has #:version "0.1"; ${fixtures}/own-platform-skew is version "0.2"' "$TMPDIR/log"
             fails rd platform-packages ${fixtures}/own-platform-ahead ${fixtures}/own-platform/pkgs
@@ -849,7 +853,27 @@
           '';
         } // self.packages.${system}.racket-deps.tests
           // self.packages.${system}.racket91.tests
-          // abiStampTestsFor pkgs);
+          // abiStampTestsFor pkgs
+          // pkgs.lib.optionalAttrs pkgs.stdenv.isLinux {
+            platform-audit-test = pkgs.runCommand "torch-rkt-platform-audit-test"
+              { nativeBuildInputs = [ pkgs.binutils ]; } ''
+              audit() {
+                if bash ${./scripts/platform/linux/audit-bundle.sh} "$@" > "$TMPDIR/log" 2>&1; then
+                  echo "the audit passed $*" >&2
+                  cat "$TMPDIR/log" >&2
+                  exit 1
+                fi
+              }
+              audit ${self.packages.${system}.cpp}/lib
+              grep -q 'FAIL libtorchrkt.so: mentions /nix/store/' "$TMPDIR/log"
+              grep -q 'FAIL libtorchrkt.so: runpath entry /nix/store/' "$TMPDIR/log"
+              grep -q 'FAIL libtorchrkt.so: needs GLIBC_2\.[0-9]* > 2.28' "$TMPDIR/log"
+              PATH=${pkgs.writeShellScriptBin "objdump" "true"}/bin:$PATH \
+                audit ${self.packages.${system}.cpp}/lib
+              grep -q 'objdump -T reads GLIBC_<none>, readelf -V GLIBC_2\.' "$TMPDIR/log"
+              mkdir "$out"
+            '';
+          });
 
       devShells = forAllSystems (system:
         let

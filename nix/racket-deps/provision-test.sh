@@ -75,8 +75,8 @@ expect "$(cat "$log")" entered
 
 mkapp app-platform
 provision out-2
-platform=torch-$(racket -e '(display (system-library-subpath #f))')
-expect "$(installed)" "rdfix-a rdfix-app rdfix-k $platform"
+platform=$(rd platform-packages "$app" "$t/pkgs" | sed 's,.*/,,')
+expect "$(installed)" "$(printf '%s\n' rdfix-a rdfix-app rdfix-k $platform | sort | paste -sd' ')"
 third=$(stamps)
 
 mkapp app-drift

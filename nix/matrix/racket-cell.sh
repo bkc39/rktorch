@@ -15,11 +15,7 @@ case "$1" in
     raco pkg install --batch --copy --no-docs --no-setup --scope user "$deps"/*/
     # libtorch is reached through the shim's rpath, so only the shim is staged.
     install -m 0555 "$shim"/lib/libtorchrkt.* torch/native-libs/
-    platform=$(racket nix/racket-deps/racket-deps.rkt platform-packages ./torch ./pkgs)
-    if [ -n "$platform" ]; then
-      mapfile -t platform <<< "$platform"
-      raco pkg install --batch --deps fail --no-setup --copy --scope user "${platform[@]}"
-    fi
+    racket nix/racket-deps/racket-deps.rkt install-platform ./torch ./pkgs --copy
     raco pkg install --batch --deps fail --no-setup --copy --scope user \
       --name torch ./torch
     stage "setup ($docs)"

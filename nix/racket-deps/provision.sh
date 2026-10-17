@@ -23,7 +23,6 @@ record="$PLTUSERHOME/.racket-deps-pkgs"
 
 echo "Installing Racket package $pkg (link mode, Racket $ver)..."
 rd check "$pkg_dir" "$deps"
-platform=$(rd platform-packages "$pkg_dir" "$platform_dir")
 mkdir -p "$PLTUSERHOME"
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
@@ -41,11 +40,7 @@ raco pkg install --batch --copy --no-docs --no-setup --scope user \
   --skip-installed "$deps"/*/
 raco pkg update --batch --copy --no-docs --no-setup --no-trash --deps fail \
   --scope user "$deps"/*/
-if [ -n "$platform" ]; then
-  mapfile -t platform <<< "$platform"
-  raco pkg install --batch --deps fail --no-setup --link --scope user \
-    --skip-installed "${platform[@]}"
-fi
+rd install-platform "$pkg_dir" "$platform_dir" --link
 raco pkg install --batch --deps fail --no-setup --link --scope user \
   --skip-installed --name "$pkg" "$pkg_dir"
 raco setup --no-docs --pkgs "$pkg"
