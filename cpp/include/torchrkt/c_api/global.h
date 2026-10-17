@@ -8,6 +8,9 @@ extern "C" {
 
 const char* tr_version(void);
 
+/* SHA-256 of the c_api headers this shim was built from. */
+const char* tr_abi_stamp(void);
+
 /* Thread-local, as is tr_last_error_kind. */
 const char* tr_last_error(void);
 

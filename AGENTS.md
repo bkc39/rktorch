@@ -421,8 +421,8 @@ for a change, and the gates it has to pass before it is done, are the
 nix build              # builds cpp, installs the pkg, runs raco test + examples
 nix build .#cpp        # CMake build + gtest only
 nix flake check        # the Nix checks: cpp, format, tidy, line-count, racket,
-                       # racket91, racket-floor, matrix-runner-test and the
-                       # racket-deps-* checks
+                       # racket91, racket-floor, matrix-runner-test, the
+                       # racket-deps-* and abi-stamp-* checks
                        # (CI also runs the Resyntax gate and codegen-drift)
 nix develop            # dev shell (includes a Python with `torch`)
 nix develop .#ci       # lean shell without Python torch (used by the lint job)
@@ -569,6 +569,19 @@ its regression test, once a pinned libtorch fixes the kernel.
   `c_api_compile_test.c` proves the headers are valid C (add a
   function-pointer line for at least one representative of each new op
   family, plus any function whose signature shape is new).
+- **Existing C signatures are append-only.** A change to an existing
+  `extern "C"` signature, or to a struct or enum that crosses the boundary,
+  gets a new symbol instead (`tr_full_on` beside `tr_full_i64_on`), so existing
+  callers and the CPU/CUDA stubs in `device.cpp` stay consistent, and a
+  compatible-range stamp check stays possible later.
+- **The ABI stamp.** `tr_abi_stamp()` is a SHA-256 over every header under
+  `include/torchrkt/c_api/` (generated ones included), each named by its
+  relative path, in sorted order; `cmake/abi_stamp.cmake` is the one
+  computation, run at configure time and by `cmake -P`. The bindings carry a
+  copy in `torch/foreign/raw/abi-stamp.rktd`, and the loader refuses a shim
+  whose stamp differs. Any edit to a `c_api` header, a comment included, means
+  `nix run .#abi-stamp` (`nix run .#codegen` also rewrites it) and committing
+  the copy; the `abi-stamp-current` flake check fails until then.
 
 ### Racket (`torch/`)
 
@@ -614,7 +627,12 @@ Runtime paths take `(only-in racket/runtime-path #%datum define-runtime-path)`.
   finalizer); `foreign/error.rkt` — `check-ok` / `check-handle`;
   `foreign/format.rkt` — the PyTorch-repr reproducer.
 - `foreign/raw/*.rkt` — direct FFI, one module per C translation unit:
-  `syntax` (the FFI definer + `_Tensor` cpointer), `fault` (the
+  `syntax` (the FFI definer + `_Tensor` cpointer), `native-location` (the
+  one resolver for the shim: the staged `torch/native-libs/` first, then
+  collection `torch-native` from the platform package; scripts use its
+  `native-library-path`, never a hard-coded `native-libs`),
+  `native-library` (opens it and checks the ABI stamp before any binding
+  is defined), `fault` (the
   native-fault latch `define-torch` puts under every binding, #76),
   `pressure` (no
   FFI of its own: the collection policy under the ledger, the two troughs
