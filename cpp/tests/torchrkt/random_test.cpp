@@ -33,7 +33,8 @@ TEST(TorchrktRandom, VersionLooksLikeSemver) {
 TEST(TorchrktRandom, AbiStampIsSixtyFourLowercaseHexDigits) {
   const std::string stamp = tr_abi_stamp();
   EXPECT_EQ(stamp.size(), 64U);
-  EXPECT_EQ(stamp.find_first_not_of("0123456789abcdef"), std::string::npos) << stamp;
+  EXPECT_EQ(stamp.find_first_not_of("0123456789abcdef"), std::string::npos)
+      << stamp;
 }
 
 TEST(TorchrktRandom, ShapeAndNumel) {
