@@ -106,6 +106,7 @@ Set `TORCHRKT_NATIVE_LIB_PATH` to a directory whose `lib/` subdirectory holds
 the library, and the package's pre-install hook copies it into place:
 
 ```bash
+raco pkg install ./pkgs/torch-x86_64-linux   # x86_64 Linux: meets torch's platform dep
 TORCHRKT_NATIVE_LIB_PATH=/path/to/prefix raco pkg install --name torch ./torch
 # /path/to/prefix/lib/libtorchrkt.so   (libtorchrkt.dylib on darwin)
 ```
