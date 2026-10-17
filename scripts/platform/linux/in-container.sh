@@ -1,0 +1,129 @@
+#!/usr/bin/env bash
+#
+# The manylinux_2_28 half of build.sh, which mounts the repository read-only
+# at /src and the work directory at /work.
+set -euo pipefail
+
+jobs=${JOBS:-4}
+here=/src/scripts/platform/linux
+work=/work
+dl=$work/dl
+log=$work/log
+deps=$work/deps
+libtorch=$work/libtorch/libtorch
+bundle=$work/bundle
+mkdir -p "$dl" "$log"
+
+failed() {
+  echo "build: $1 failed; see $2" >&2
+  tail -30 "$2" >&2
+  exit 1
+}
+
+while read -r sum file url; do
+  [[ -n $sum && $sum != \#* ]] || continue
+  if [[ ! -f $dl/$file ]]; then
+    curl -fsSL -o "$dl/$file.part" "$url"
+    mv "$dl/$file.part" "$dl/$file"
+  fi
+  echo "$sum  $dl/$file" | sha256sum --check --quiet -
+done <"$here/sources.txt"
+
+if [[ ! -f $libtorch/build-version ]]; then
+  rm -rf "$work/libtorch"
+  unzip -q -d "$work/libtorch" "$dl"/libtorch-shared-with-deps-*.zip
+fi
+
+mkdir -p "$work/stb/include/stb" "$work/stb/lib/pkgconfig"
+cp "$dl/stb_image.h" "$work/stb/include/stb/"
+cat >"$work/stb/lib/pkgconfig/stb.pc" <<EOF
+Name: stb
+Description: stb single-file libraries
+Version: 1
+Cflags: -I$work/stb/include/stb
+EOF
+
+codecs=(libogg-1.3.6 libvorbis-1.3.7 flac-1.5.0 opus-1.5.2 mpg123-1.33.4 lame-3.100
+        libsndfile-1.2.2)
+if [[ ! -f $deps/.done ]]; then
+  rm -rf "$deps" "$work/codec-build"
+  mkdir -p "$work/codec-build"
+  export PKG_CONFIG_PATH=$deps/lib/pkgconfig
+  export CFLAGS="-O2 -fPIC" CPPFLAGS="-I$deps/include" LDFLAGS="-L$deps/lib"
+  for codec in "${codecs[@]}"; do
+    tar -C "$work/codec-build" -xf "$dl/$codec".tar.*
+    case $codec in
+      flac-*) extra=(--disable-programs --disable-examples --disable-doxygen-docs --disable-cpplibs) ;;
+      opus-*) extra=(--disable-doc --disable-extra-programs) ;;
+      lame-*) extra=(--disable-frontend --disable-decoder) ;;
+      mpg123-*) extra=(--disable-components --enable-libmpg123 --with-cpu=x86-64) ;;
+      libsndfile-*) extra=(--disable-full-suite --disable-sqlite --disable-alsa) ;;
+      *) extra=() ;;
+    esac
+    (cd "$work/codec-build/$codec" &&
+       ./configure --prefix="$deps" --disable-static --enable-shared "${extra[@]}" &&
+       make -j"$jobs" && make install) >"$log/$codec.log" 2>&1 ||
+      failed "$codec" "$log/$codec.log"
+  done
+  for line in 'External FLAC/Ogg/Vorbis/Opus : [.]* yes' 'External MPEG Lame/MPG123 : [.]* yes'; do
+    grep -q "$line" "$log/libsndfile-1.2.2.log" ||
+      failed "libsndfile without its codecs" "$log/libsndfile-1.2.2.log"
+  done
+  unset PKG_CONFIG_PATH CFLAGS CPPFLAGS LDFLAGS
+  touch "$deps/.done"
+fi
+
+if [[ ! -f $work/gtest/.done ]]; then
+  rm -rf "$work/gtest" "$work/gtest-build"
+  tar -C "$work" -xf "$dl/googletest-1.17.0.tar.gz"
+  (cmake -S "$work/googletest-1.17.0" -B "$work/gtest-build" -DCMAKE_BUILD_TYPE=Release \
+     -DBUILD_GMOCK=OFF -DCMAKE_INSTALL_PREFIX="$work/gtest" &&
+     cmake --build "$work/gtest-build" -j "$jobs" &&
+     cmake --install "$work/gtest-build") >"$log/googletest.log" 2>&1 ||
+    failed googletest "$log/googletest.log"
+  touch "$work/gtest/.done"
+fi
+
+# --exclude-libs keeps gcc-toolset's static libstdc++_nonshared pieces out of
+# the shim's exports.
+export PKG_CONFIG_PATH=$deps/lib/pkgconfig:$work/stb/lib/pkgconfig
+export LD_LIBRARY_PATH=$deps/lib:$libtorch/lib
+(cmake -S /src/cpp -B "$work/shim-build" -G "Unix Makefiles" \
+   -DCMAKE_BUILD_TYPE=Release \
+   -DBUILD_TESTING=ON \
+   "-DCMAKE_PREFIX_PATH=$libtorch;$work/gtest" \
+   -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON \
+   '-DCMAKE_INSTALL_RPATH=$ORIGIN' \
+   "-DCMAKE_SHARED_LINKER_FLAGS=-Wl,--no-undefined -Wl,--exclude-libs,ALL -Wl,--enable-new-dtags -Wl,--as-needed" &&
+   cmake --build "$work/shim-build" -j "$jobs") >"$log/shim.log" 2>&1 ||
+  failed "the shim" "$log/shim.log"
+unset LD_LIBRARY_PATH
+
+rm -rf "$bundle"
+mkdir -p "$bundle"
+strip --strip-unneeded -o "$bundle/libtorchrkt.so" "$work/shim-build/libtorchrkt.so"
+queue=("$bundle/libtorchrkt.so")
+while ((${#queue[@]})); do
+  lib=${queue[0]}
+  queue=("${queue[@]:1}")
+  for needed in $(readelf -d "$lib" | sed -n 's/.*(NEEDED).*\[\(.*\)\]/\1/p'); do
+    [[ ! -e $bundle/$needed ]] || continue
+    if [[ -f $libtorch/lib/$needed ]]; then
+      cp "$libtorch/lib/$needed" "$bundle/"
+    elif [[ -e $deps/lib/$needed ]]; then
+      strip --strip-unneeded -o "$bundle/$needed" "$deps/lib/$needed"
+      patchelf --set-rpath '$ORIGIN' "$bundle/$needed"
+    else
+      continue
+    fi
+    queue+=("$bundle/$needed")
+  done
+done
+chmod 0644 "$bundle"/*
+
+bash "$here/audit-bundle.sh" "$bundle" | tee "$log/audit.txt"
+
+LD_LIBRARY_PATH=$bundle "$work/shim-build/torchrkt_tests" --gtest_brief=1 \
+  >"$log/gtest.log" 2>&1 || failed "the gtests against the bundle" "$log/gtest.log"
+tail -3 "$log/gtest.log"
+du -sb "$bundle" | awk '{ printf "bundle: %s, %.1f MB\n", $2, $1 / 1e6 }'
