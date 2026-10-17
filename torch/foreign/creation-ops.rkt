@@ -174,6 +174,13 @@
   (parameter/c (or/c generator? #f))
   raw:current-generator)
 
+(define (drawn who raw dims device dtype requires-grad? generator)
+  (define shape (shape-of dims))
+  (define-values (type index dt) (placement device dtype))
+  (finish (wrap who (raw (list->s64vector shape) (length shape) type index dt
+                         generator))
+          requires-grad?))
+
 (define/contract-out (randn #:device [device #f] #:dtype [dtype #f]
                             #:requires-grad? [requires-grad? #f]
                             #:generator [generator #f]
@@ -184,9 +191,7 @@
         #:requires-grad? boolean?
         #:generator (or/c generator? #f)]
        #:rest shape-rest/c tensor?)
-  (if generator
-      (error 'randn "unimplemented")
-      (shaped 'randn tr-randn-on/raw dims device dtype requires-grad?)))
+  (drawn 'randn tr-randn-on/raw dims device dtype requires-grad? generator))
 
 (define/contract-out (rand #:device [device #f] #:dtype [dtype #f]
                            #:requires-grad? [requires-grad? #f]
@@ -198,9 +203,7 @@
         #:requires-grad? boolean?
         #:generator (or/c generator? #f)]
        #:rest shape-rest/c tensor?)
-  (if generator
-      (error 'rand "unimplemented")
-      (shaped 'rand tr-rand-on/raw dims device dtype requires-grad?)))
+  (drawn 'rand tr-rand-on/raw dims device dtype requires-grad? generator))
 
 (define/contract-out (randperm n #:generator [generator #f]) ;; noqa
   (->* [size/c] [#:generator (or/c generator? #f)] tensor?)

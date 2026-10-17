@@ -1,11 +1,12 @@
 #lang racket/base
 
-;; Tensor draws take the global stream unless handed a generator: no-retry
-;; wrap only, since a retried draw would advance the stream.
+;; Tensor draws take the global stream unless handed a generator or
+;; current-generator holds one: no-retry wrap only, since a retried draw
+;; would advance the stream.
 
 (require (only-in ffi/unsafe
                   _double _fun _int _int64 _ptr _uint64 _void
-                  define-cpointer-type)
+                  define-cpointer-type make-ctype)
          (only-in ffi/unsafe/alloc allocator)
          (only-in ffi/vector _s64vector)
          (only-in "memory.rkt"
@@ -14,6 +15,7 @@
          (only-in "tensor.rkt" _tr-dtype))
 
 (provide Generator? ;; noqa
+         _Generator/current
          _Generator/null
          current-generator
          tr-generator-draw-seed/raw
@@ -29,6 +31,10 @@
 
 (define current-generator (make-parameter #f))
 
+;; the one point where a #f generator resolves, so an explicit one wins
+(define _Generator/current
+  (make-ctype _Generator/null (lambda (g) (or g (current-generator))) #f))
+
 (define-torch tr-generator-free/unwrapped
   (_fun _Generator -> _void)
   #:c-id tr_generator_free)
@@ -41,14 +47,14 @@
   #:wrap (allocator (swallow-and-count-failure tr-generator-free/unwrapped)))
 
 (define-torch tr-generator-draw-seed/raw
-  (_fun (generator : _Generator/null) (out : (_ptr o _int64))
+  (_fun (generator : _Generator/current) (out : (_ptr o _int64))
         -> (rc : _int)
         -> (values rc out))
   #:c-id tr_generator_draw_seed)
 
 ;; a draw from either stream; no retry, as for the other RNG bindings
 (define-torch tr-randperm/raw
-  (_fun (n : _int64) (generator : _Generator/null) -> _Tensor/null)
+  (_fun (n : _int64) (generator : _Generator/current) -> _Tensor/null)
   #:c-id tr_randperm
   #:wrap tensor-allocator/no-retry)
 
@@ -58,6 +64,7 @@
         (type : _tr-device-type)
         (index : _int64)
         (dtype : _tr-dtype)
+        (generator : _Generator/current)
         -> _Tensor/null)
   #:c-id tr_randn_on
   #:wrap tensor-allocator/no-retry)
@@ -68,6 +75,7 @@
         (type : _tr-device-type)
         (index : _int64)
         (dtype : _tr-dtype)
+        (generator : _Generator/current)
         -> _Tensor/null)
   #:c-id tr_rand_on
   #:wrap tensor-allocator/no-retry)
