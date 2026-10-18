@@ -136,6 +136,9 @@
             mkdir -p "$TMPDIR/info"
             cp ${./torch/info.rkt} "$TMPDIR/info/info.rkt"
             rd check "$TMPDIR/info" ${racket-deps}
+            for platform in x86_64-linux aarch64-macosx; do
+              [ "$(rd platform-packages "$TMPDIR/info" ${./pkgs} $platform)" = "${./pkgs}/torch-$platform" ]
+            done
           '';
           racket-deps-guard-test = run "torch-rkt-racket-deps-guard-test" ''
             t=$TMPDIR/trees
