@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 #
 #   . scripts/platform/build-common.sh   (sourced by linux/in-container.sh and macos/build.sh,
-#                                         which set work, jobs, libtorch_zip, codec_cflags
-#                                         and codec_ldflags)
+#                                         which set work, jobs, toolchain, libtorch_zip,
+#                                         codec_cflags and codec_ldflags)
 # shellcheck disable=SC2154
 
 [ "${BASH_VERSINFO[0]}" -ge 4 ] || { echo "build: needs bash 4 or later, not $BASH_VERSION" >&2; exit 1; }
@@ -72,6 +72,7 @@ EOF
 
 codecs_key() {
   local tarball
+  echo "TOOLCHAIN=$toolchain"
   echo "CFLAGS=$codec_cflags LDFLAGS=$codec_ldflags"
   for tarball in "${codecs[@]}"; do
     echo "${pinned[$tarball]} $tarball ${configure_flags[$tarball]-}"
@@ -107,7 +108,7 @@ build_codecs() {
 }
 
 gtest_key() {
-  echo "${pinned[$gtest.tar.gz]} $*"
+  printf '%s\n' "TOOLCHAIN=$toolchain" "${pinned[$gtest.tar.gz]} $*"
 }
 
 build_gtest() {

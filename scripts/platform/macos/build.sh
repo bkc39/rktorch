@@ -16,6 +16,7 @@ export MACOSX_DEPLOYMENT_TARGET=$target
 libtorch_zip="libtorch-macos-arm64-2.14.0.zip"
 codec_cflags="-O2 -fPIC -mmacosx-version-min=$target"
 codec_ldflags="-Wl,-headerpad_max_install_names"
+toolchain="$(xcrun clang --version | sed -n 1p), SDK $(xcrun --show-sdk-version)"
 # shellcheck source=scripts/platform/build-common.sh
 . "$here/../build-common.sh"
 configure_flags["mpg123-1.33.4.tar.bz2"]+=" --with-cpu=aarch64"

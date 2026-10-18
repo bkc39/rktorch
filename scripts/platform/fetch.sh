@@ -21,7 +21,7 @@ sha256() {
 for file in "$@"; do
   read -r sum url < <(awk -v file="$file" '$1 !~ /^#/ && $2 == file { print $1, $3 }' "$sources") ||
     { echo "fetch: $file is not pinned in $sources" >&2; exit 1; }
-  if [ ! -f "$dl/$file" ]; then
+  if [ ! -f "$dl/$file" ] || [ "$(sha256 "$dl/$file")" != "$sum" ]; then
     echo "fetch: $url" >&2
     curl -fsSL --retry 3 -o "$dl/$file.part" "$url"
     mv "$dl/$file.part" "$dl/$file"

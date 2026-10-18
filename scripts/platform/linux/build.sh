@@ -10,6 +10,6 @@ mkdir -p "$work"
 
 docker run --rm --name "torchrkt-manylinux-$$" \
   --cpus 4 --memory 16g \
-  -u "$(id -u):$(id -g)" -e HOME=/work -e JOBS=4 \
+  -u "$(id -u):$(id -g)" -e HOME=/work -e JOBS=4 -e IMAGE="$image" \
   -v "$PWD:/src:ro" -v "$work:/work" \
   "$image" bash /src/scripts/platform/linux/in-container.sh

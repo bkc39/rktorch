@@ -5,6 +5,7 @@ set -euo pipefail
 
 jobs=${JOBS:-4}
 work=/work
+toolchain=${IMAGE:?build.sh passes the image reference}
 here=/src/scripts/platform/linux
 libtorch_zip="libtorch-shared-with-deps-2.14.0-cpu.zip"
 codec_cflags="-O2 -fPIC"
