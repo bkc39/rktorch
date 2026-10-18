@@ -21,16 +21,6 @@ toolchain="$(xcrun clang --version | sed -n 1p), SDK $(xcrun --show-sdk-version)
 . "$here/../build-common.sh"
 configure_flags["mpg123-1.33.4.tar.bz2"]+=" --with-cpu=aarch64"
 
-patch_codec() {
-  case $1 in
-    # Dropped upstream after 1.3.7; clang rejects it for arm64.
-    libvorbis-*) sed -i.orig 's/ -force_cpusubtype_ALL//g' "$2/configure" ;;
-    # lame.h makes lame_init_old static, and Apple's ld refuses an export
-    # list that names an undefined symbol.
-    lame-*) sed -i.orig '/^lame_init_old$/d' "$2/include/libmp3lame.sym" ;;
-  esac
-}
-
 commands() {
   "$here/load-commands.sh" "$1"
 }

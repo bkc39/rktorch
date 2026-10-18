@@ -70,9 +70,21 @@ Cflags: -I$work/stb/include/stb
 EOF
 }
 
+patch_codec() {
+  case $1 in
+    # Dropped upstream after 1.3.7; clang rejects it for arm64.
+    libvorbis-*) sed -i.orig 's/ -force_cpusubtype_ALL//g' "$2/configure" ;;
+    # --disable-decoder leaves hip_* and lame_decode* undefined, and lame.h
+    # makes lame_init_old static; Apple's ld refuses an export list that
+    # names an undefined symbol.
+    lame-*) sed -i.orig -E '/^(lame_init_old|hip_.*|lame_decode.*)$/d' "$2/include/libmp3lame.sym" ;;
+  esac
+}
+
 codecs_key() {
   local tarball
   echo "TOOLCHAIN=$toolchain"
+  declare -f patch_codec
   echo "CFLAGS=$codec_cflags LDFLAGS=$codec_ldflags"
   for tarball in "${codecs[@]}"; do
     echo "${pinned[$tarball]} $tarball ${configure_flags[$tarball]-}"
@@ -89,9 +101,7 @@ build_codecs() {
     codec=${tarball%.tar.*}
     step "$codec"
     tar -C "$work/codec-build" -xf "$dl/$tarball"
-    if declare -F patch_codec >/dev/null; then
-      patch_codec "$codec" "$work/codec-build/$codec"
-    fi
+    patch_codec "$codec" "$work/codec-build/$codec"
     read -ra extra <<<"${configure_flags[$tarball]-}"
     (export PKG_CONFIG_LIBDIR=$deps/lib/pkgconfig CFLAGS=$codec_cflags CPPFLAGS="-I$deps/include" \
             LDFLAGS="-L$deps/lib $codec_ldflags"
