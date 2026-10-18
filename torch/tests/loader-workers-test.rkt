@@ -637,20 +637,24 @@
     (check-ledger base #f))
 
   (define (first-batch-boxes next)
-    (define-values (x y) (next))
-    (list (make-weak-box x) (make-weak-box y)))
+    (call-with-values next (lambda vs (map make-weak-box vs))))
 
   (test-case "a delivered batch is unreachable from the workers"
+    (define builder (box #f))
     (define c (make-custodian))
     (define-values (more? next)
       (under c (lambda ()
-                 (~> pairs (dataloader #:workers 2) in-dataloader sequence-generate))))
+                 (~> (stalling 4 1 30 builder) (dataloader #:workers 2) in-dataloader
+                     sequence-generate))))
     (define boxes (within 60 (lambda () (first-batch-boxes next))))
-    (call-with-values (lambda () (within 60 next)) void)
+    (check-pred thread? (stalled-builder builder))
+    (define waiter (thread next))
+    (check-false (sync/timeout 0.2 waiter) "batch 1 is still being built")
     (collect-garbage 'major)
-    (check-equal? (map weak-box-value boxes) '(#f #f))
+    (check-equal? (map weak-box-value boxes) '(#f))
     (check-equal? (length (live c)) 2 "the workers were alive throughout")
-    (void more? next)
+    (kill-thread waiter)
+    (void more?)
     (custodian-shutdown-all c))
 
   (test-case "freeing each delivered batch at once never double-releases"
@@ -758,7 +762,7 @@
     (check-equal? (within 10 (lambda () (drawn-indices (lambda () (map indices (range 3))))))
                   (range 6)))
 
-  (test-case "a batch asked for again is delivered again"
+  (test-case "a batch re-asked after a break is delivered again"
     (define c (make-custodian))
     (define-values (count batch _finish!)
       (under c (lambda () (traversal (dataloader pairs #:batch-size 3 #:workers 2)))))

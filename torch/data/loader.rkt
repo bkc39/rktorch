@@ -250,7 +250,8 @@
   (define (take-once! k breakable?)
     (match taken
       [(cons (== k) result) result]
-      [_ (define result (take! k breakable?))
+      [_ (set! taken #f)
+         (define result (take! k breakable?))
          (set! taken (cons k result))
          result]))
   (define (batch k)
