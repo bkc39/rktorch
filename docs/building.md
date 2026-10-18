@@ -215,11 +215,12 @@ on a host without Nix, `catalog.sh` puts that zip and a zip of this
 checkout's `torch` in a directory catalog, and `smoke.sh` installs both from
 it into a distro image with a Racket from download.racket-lang.org. Inside
 the image, `smoke-install.sh` installs into a Racket user home of its own,
-`$SMOKE_HOME` or else a fresh temporary directory, whatever `PLTUSERHOME` it
-inherits. It fails if `raco pkg install` wrote anything to stderr, then
-trains `04-mlp` on the device it picks, and on the CPU as well when that is
-an accelerator, printing `(mps-available?)` on the way, and round-trips a
-FLAC file:
+`$SMOKE_HOME` or else a fresh temporary directory, and ignores any
+`PLTUSERHOME`, `PLTADDONDIR` or `TORCHRKT_NATIVE_LIB_PATH` it inherits, so
+even from `nix develop` it tests the platform package. It fails if
+`raco pkg install` wrote anything to stderr, then trains `04-mlp` on the
+device it picks, and on the CPU as well when that is an accelerator,
+printing `(mps-available?)` on the way, and round-trips a FLAC file:
 
 ```bash
 scripts/platform/catalog.sh .scratch/pkg/torch-x86_64-linux.zip .scratch/catalog

@@ -10,7 +10,7 @@ here=$(cd "$(dirname "$0")" && pwd)
 tmp=$(mktemp -d)
 step() { printf '\n== %s\n' "$*"; }
 
-unset PLTADDONDIR
+unset PLTADDONDIR TORCHRKT_NATIVE_LIB_PATH
 export PLTUSERHOME=${SMOKE_HOME:-$(mktemp -d)}
 mkdir -p "$PLTUSERHOME"
 
