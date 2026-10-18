@@ -6,13 +6,15 @@
            rackunit
            "../data/loader.rkt"
            (only-in (submod "../data/loader.rkt" private) sampler-draws traversal)
+           (only-in (submod "../data/workers.rkt" private) pool-guard-threads pool-guard?
+                    worker-custodian)
            (only-in (submod "../foreign.rkt" unsafe) tensor-free!)
            "../main.rkt"
            (only-in "../vision/transforms.rkt" random-crop random-horizontal-flip)
            (only-in "private/race-harness.rkt"
                     check-known-failure check-ledger ledger-snapshot make-watch
                     settle! watch-hook with-race-hook)
-           (only-in "private/wedge.rkt" shut-down-custodian! with-process-deadline))
+           (only-in "private/wedge.rkt" with-process-deadline))
 
   (with-process-deadline 540
     (define blamed #rx"blaming: [(][^)]*loader-workers-test[.]rkt")
@@ -44,8 +46,15 @@
          (kill-thread t)
          (fail (format "no result within ~a s" seconds))]))
 
+    (define top (current-custodian))
+
+    (define (guards-of c)
+      (filter pool-guard? (custodian-managed-list c top)))
+
     (define (workers-of c)
-      (filter thread? (custodian-managed-list c (current-custodian))))
+      (for*/list ([guard (in-list (guards-of c))]
+                  [t (in-vector (pool-guard-threads guard))])
+        t))
 
     (define (live c)
       (filter (lambda (t) (not (thread-dead? t))) (workers-of c)))
@@ -84,10 +93,8 @@
 
     (define (workers-seen-by c loop!)
       (define seen '())
-      (define outer (current-custodian))
       (define (see!)
-        (define now (under outer (lambda () (live c))))
-        (set! seen (remove-duplicates (append seen now) eq?)))
+        (set! seen (remove-duplicates (append seen (live c)) eq?)))
       (within 60 (lambda () (under c (lambda () (loop! see!)))))
       seen)
 
@@ -148,16 +155,42 @@
       (check-exn (contract-violation? #rx"needs #:workers above 0")
                  (lambda () (dataloader pairs #:workers 0 #:prefetch 3))))
 
-    (test-case "workers 0 starts no threads; a traversal starts N under its custodian"
+    (test-case "workers 0 starts no threads; a traversal starts N outside its custodian"
       (define c (make-custodian))
       (under c (lambda () (for ([(_x _y) (dataloader pairs #:batch-size 2)]) (void))))
-      (check-equal? (workers-of c) '())
+      (check-equal? (custodian-managed-list c top) '())
       (define loader (under c (lambda () (dataloader pairs #:batch-size 2 #:workers 3))))
-      (check-equal? (workers-of c) '())
+      (check-equal? (custodian-managed-list c top) '())
       (define-values (more? next) (under c (lambda () (sequence-generate loader))))
-      (check-equal? (length (live c)) 3)
+      (define workers (live c))
+      (check-equal? (length workers) 3)
+      (check-equal? (custodian-managed-list c top) (guards-of c) "c manages no thread")
       (void more? next)
-      (shut-down-custodian! c))
+      (custodian-shutdown-all c)
+      (check-true (dead-within? workers 5)))
+
+    (test-case "a traversal under a shut-down custodian raises"
+      (define c (make-custodian))
+      (define loader (dataloader pairs #:batch-size 2 #:workers 2))
+      (custodian-shutdown-all c)
+      (check-exn #rx"custodian has been shut down"
+                 (lambda () (under c (lambda () (sequence-generate loader))))))
+
+    (test-case "a finished traversal leaves nothing registered with its custodian"
+      (define c (make-custodian))
+      (define loader (dataloader pairs #:batch-size 3 #:workers 2))
+      (define registered
+        (within 60 (lambda ()
+                     (under c (lambda ()
+                                (for/list ([_ (in-range 50)])
+                                  (for/fold ([n #f]) ([(_x _y) loader])
+                                    (or n (length (guards-of c))))))))))
+      (check-true (andmap positive? registered) "a running traversal is registered")
+      (check-not-false (for/or ([_ (in-range 500)])
+                         (or (null? (custodian-managed-list c top))
+                             (and (sync/timeout 0.01 never-evt) #f)))
+                       "every registration is withdrawn")
+      (custodian-shutdown-all c))
 
     (test-case "worker k builds the batches j with j mod N = k"
       (define builders (make-hasheqv))
@@ -308,7 +341,7 @@
                                        #:workers 1 #:prefetch 1)])
                    (void))))
       (check-equal? (tensor->list (randperm 10 #:generator g)) (replay 9 10 #f))
-      (shut-down-custodian! c))
+      (custodian-shutdown-all c))
 
     (test-case "the trailing permutation is drawn at its request"
       (for* ([np '((1 1) (2 1) (2 2))] [b '(4 5)] [d '(0 1 all)])
@@ -329,7 +362,7 @@
         (check-equal? (tensor->list (randperm 10 #:generator g))
                       (replay 9 10 (< r* (+ ahead taken)))
                       (format "P' ~a, batch ~a, taken ~a" ahead b taken))
-        (shut-down-custodian! c)))
+        (custodian-shutdown-all c)))
 
     (test-case "in-epochs prefetches nothing across epochs"
       (define g (make-generator 9))
@@ -368,7 +401,7 @@
       (check-false (more?))
       (check-true (dead-within? threads 5))
       (void next)
-      (shut-down-custodian! c))
+      (custodian-shutdown-all c))
 
     (define (seeded-prng seed)
       (define prng (make-pseudo-random-generator))
@@ -502,7 +535,7 @@
       (check-true (dead-within? threads 5))
       (check-eq? (within 10 (lambda () (caught next))) raised)
       (void more?)
-      (shut-down-custodian! c))
+      (custodian-shutdown-all c))
 
     (define-dataset stalling (n stall-at stall builder)
       #:length n
@@ -515,6 +548,9 @@
     (define (stalled-builder builder)
       (for/or ([_ (in-range 1000)])
         (or (unbox builder) (and (sync/timeout 0.01 never-evt) #f))))
+
+    (define (kill-worker t)
+      (under worker-custodian (lambda () (kill-thread t))))
 
     (define (consuming c ds outcome)
       (thread (lambda ()
@@ -531,12 +567,12 @@
       (define consumer (consuming c (stalling 4 1 30 builder) outcome))
       (define worker (stalled-builder builder))
       (check-pred thread? worker)
-      (kill-thread worker)
+      (kill-worker worker)
       (check-not-false (sync/timeout 10 consumer))
       (check-pred exn:fail? (unbox outcome))
       (check-regexp-match #rx"worker [0-9]+ exited before delivering batch"
                           (exn-message (unbox outcome)))
-      (shut-down-custodian! c))
+      (custodian-shutdown-all c))
 
     (test-case "a worker's death stops the others and raises the same value again"
       (define builder (box #f))
@@ -550,13 +586,13 @@
       (within 60 next)
       (define threads (live c))
       (check-equal? (length threads) 2)
-      (kill-thread (stalled-builder builder))
+      (kill-worker (stalled-builder builder))
       (define raised (within 10 (lambda () (caught next))))
       (check-pred exn:fail? raised)
       (check-true (dead-within? threads 5))
       (check-eq? (within 10 (lambda () (caught next))) raised)
       (void more?)
-      (shut-down-custodian! c))
+      (custodian-shutdown-all c))
 
     (test-case "exhaustion stops the workers without a collection"
       (settle!)
@@ -603,25 +639,38 @@
       (settle!)
       (check-ledger base #f))
 
-    (test-case "custodian shutdown stops the workers"
-      (settle!)
-      (define base (ledger-snapshot))
-      (define builder (box #f))
-      (define c (make-custodian))
-      (define consumer
-        (parameterize ([current-custodian c])
-          (consuming c (stalling 4 1 30 builder) (box #f))))
-      (check-pred thread? (stalled-builder builder))
-      (define workers (remq consumer (live c)))
-      (check-equal? (length workers) 2)
-      ;; a worker still running when its custodian shuts down wedges Racket
-      ;; 9.3 (see private/wedge.rkt); by now both are parked
-      (sleep 0.2)
-      (custodian-shutdown-all c)
-      (check-true (for/and ([t (in-list workers)]) (thread-dead? t)))
-      (check-true (thread-dead? consumer))
-      (settle!)
-      (check-ledger base #f))
+    (define-dataset churning (n work busy)
+      #:length n
+      #:ref (i)
+      (when (= i 1)
+        (set-box! busy (current-thread))
+        (define end (+ (current-inexact-milliseconds) 30000))
+        (let loop ()
+          (when (< (current-inexact-milliseconds) end)
+            (work)
+            (loop))))
+      (tensor (list i) #:dtype 'int64))
+
+    (test-case "custodian shutdown stops busy workers"
+      (for ([work (list (lambda () (make-vector 1000))
+                        (lambda () (+ (randn 16) 1)))])
+        (settle!)
+        (define base (ledger-snapshot))
+        (define busy (box #f))
+        (define c (make-custodian))
+        (define consumer
+          (parameterize ([current-custodian c])
+            (consuming c (churning 4 work busy) (box #f))))
+        (define worker (stalled-builder busy))
+        (check-pred thread? worker)
+        (define workers (live c))
+        (check-equal? (length workers) 2)
+        (check-not-false (memq worker workers))
+        (custodian-shutdown-all c)
+        (check-true (dead-within? workers 5))
+        (check-true (thread-dead? consumer))
+        (settle!)
+        (check-ledger base #f)))
 
     (test-case "a break while waiting leaves no live workers"
       (settle!)
@@ -660,7 +709,7 @@
       (check-equal? (length (live c)) 2 "the workers were alive throughout")
       (kill-thread waiter)
       (void more?)
-      (shut-down-custodian! c))
+      (custodian-shutdown-all c))
 
     (test-case "freeing each delivered batch at once never double-releases"
       (settle!)
@@ -777,7 +826,7 @@
       (check-equal? (taken 0) first-take)
       (check-not-equal? (taken 1) first-take)
       (check-equal? count 4)
-      (shut-down-custodian! c))
+      (custodian-shutdown-all c))
 
     (test-case "the consumer waits in a Racket sync"
       (define-dataset sleepy (n)
@@ -798,6 +847,7 @@
         (values result ticks))
       (define-values (_slept baseline) (ticks-during (lambda () (sleep 1))))
       (define c (make-custodian))
+      (define seen '())
       (define-values (cpu ticks)
         (ticks-during
          (lambda ()
@@ -805,14 +855,15 @@
                         (define start (current-process-milliseconds (current-thread)))
                         (under c (lambda ()
                                    (for ([_b (dataloader (sleepy 4) #:workers 2)])
-                                     (void))))
+                                     (set! seen (live c)))))
                         (- (current-process-milliseconds (current-thread)) start))))))
       (check-true (< cpu 200) (format "the consumer spent ~a ms of CPU" cpu))
       (check-true (positive? baseline) "the ticker ran over a plain sleep")
       (check-true (>= (* 2 ticks) baseline)
                   (format "the ticker ran ~a times, ~a over a plain one-second sleep" ticks baseline))
-      (check-true (dead-within? (workers-of c) 5) "the traversal leaves no worker running")
-      (shut-down-custodian! c))
+      (check-equal? (length seen) 2)
+      (check-true (dead-within? seen 5) "the traversal leaves no worker running")
+      (custodian-shutdown-all c))
 
     (test-case "workers that make tensors finish while the consumer waits"
       (check-equal? (within 60 (lambda ()

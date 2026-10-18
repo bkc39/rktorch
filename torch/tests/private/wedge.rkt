@@ -8,7 +8,6 @@
 
 (provide call-with-process-deadline
          exit-status-of
-         shut-down-custodian!
          with-process-deadline)
 
 ;; Racket 9.3's custodian-shutdown-all holds the custodian lock while it
@@ -26,13 +25,6 @@
 
 (define-syntax-parse-rule (with-process-deadline seconds:expr body:expr ...+) ;; noqa
   (call-with-process-deadline seconds (lambda () body ...))) ;; noqa
-
-;; kill-thread takes no custodian lock, so a running parallel thread can stop
-(define (shut-down-custodian! c)
-  (for ([v (in-list (custodian-managed-list c (current-custodian)))]
-        #:when (thread? v))
-    (kill-thread v))
-  (custodian-shutdown-all c))
 
 ;; #f when the program is still running after `seconds`
 (define (exit-status-of program #:within seconds)
@@ -67,9 +59,6 @@
             (let loop ()
               (usleep 100000)
               (loop)))
-          (define (busy-worker-under c) ;; noqa
-            (parameterize ([current-custodian c])
-              (thread (lambda () (let loop () (make-vector 1000) (loop))) #:pool 'own)))
           ,body)
         (require 'run))
      #:within seconds))
@@ -81,12 +70,4 @@
     (check-false (run '(sync/timeout 1 (thread wedge)) #:within 5)))
 
   (test-case "the deadline is lifted when its body returns"
-    (check-equal? (run '(begin (with-process-deadline 1 'done) (sleep 2)) #:within 30) 0))
-
-  (test-case "a custodian holding a running parallel thread shuts down"
-    (check-equal? (run '(let ([c (make-custodian)])
-                          (busy-worker-under c)
-                          (sleep 0.1)
-                          (with-process-deadline 10 (shut-down-custodian! c)))
-                       #:within 30)
-                  0)))
+    (check-equal? (run '(begin (with-process-deadline 1 'done) (sleep 2)) #:within 30) 0)))

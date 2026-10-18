@@ -200,8 +200,7 @@ per epoch. Without @racket[#:shuffle?] the batches are the items in order,
 and a batch size equal to the length yields the dataset's own tensors.
 
 With @racket[workers] above 0, each traversal starts that many parallel
-threads under the current custodian, and batch @racket[j] is built by
-worker @racket[(modulo j workers)]. Worker @racket[k] runs with
+threads, and batch @racket[j] is built by worker @racket[(modulo j workers)]. Worker @racket[k] runs with
 @racket[current-generator] set to @racket[(make-generator (+ s k))], where
 @racket[s] is the traversal's @racket[draw-seed], and with its own
 @racket[current-pseudo-random-generator] seeded from the same number, as
@@ -214,8 +213,8 @@ reaches it, as does a batch whose worker exited without building it; the
 traversal then stops its workers and raises the same value for every later
 batch. A break while waiting for a batch leaves the batch to the next
 request. The workers stop when the traversal is exhausted, when the
-custodian shuts down, or once the loop that held the traversal has let it
-go and a collection runs. Workers build CPU tensors, so @racket[ds] must not
+custodian current at the traversal's start shuts down, or once the loop that
+held the traversal has let it go and a collection runs. Workers build CPU tensors, so @racket[ds] must not
 be on an accelerator. @racket[#:prefetch] needs @racket[workers] above 0.
 A dataset's @racket[#:ref] and @racket[#:batch], and @racket[collate], run
 in several threads at once, so any state they share must be synchronized.

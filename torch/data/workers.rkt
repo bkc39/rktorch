@@ -1,6 +1,9 @@
 #lang racket/base
 
 (require (only-in ffi/unsafe register-finalizer)
+         (only-in ffi/unsafe/custodian
+                  make-custodian-at-root register-custodian-shutdown
+                  unregister-custodian-shutdown)
          (only-in racket/contract/base -> any/c or/c)
          (only-in racket/match match)
          (only-in "../foreign.rkt"
@@ -11,6 +14,9 @@
 (provide (struct-out built)
          (struct-out raised))
 
+(module+ private
+  (provide (struct-out pool-guard) worker-custodian))
+
 (struct built (values-list))
 (struct raised (value))
 
@@ -18,6 +24,14 @@
 
 ;; Workers never reach the pool, so its finalizer can stop them.
 (struct worker-pool (threads results ready stop))
+
+;; Racket 9.3's custodian-shutdown-all holds the custodian lock while it waits
+;; for a running parallel thread that needs the lock to stop. Workers live under
+;; a custodian of their own, and the traversal's custodian holds a guard whose
+;; shutdown callback, run under that lock, only wakes the reaper.
+(struct pool-guard (threads kill))
+
+(define worker-custodian (make-custodian-at-root))
 
 (define (on-host? v)
   (or (not (tensor? v)) (eq? (device-type (device v)) 'cpu)))
@@ -51,20 +65,44 @@
        (loop)]
       [_ (void)])))
 
+(define (reap guard registration stop)
+  (define kill (pool-guard-kill guard))
+  (define woken (sync (semaphore-peek-evt stop) kill))
+  (unregister-custodian-shutdown guard registration)
+  (for ([t (in-vector (pool-guard-threads guard))]
+        #:when (eq? woken kill))
+    (kill-thread t)))
+
 (define/contract-out (start-workers ds collate n base-seed) ;; noqa
   (-> dataset? collate/c exact-positive-integer? exact-nonnegative-integer?
       worker-pool?)
   (define results (make-hasheqv))
   (define ready (make-semaphore 0))
   (define stop (make-semaphore 0))
+  (define caller (current-custodian))
   (define threads
-    (for/vector #:length n ([k (in-range n)])
-      (define seed (+ base-seed k))
-      (thread (lambda ()
-                (parameterize ([current-generator (make-generator seed)]
-                               [current-pseudo-random-generator (worker-prng seed)])
-                  (serve ds collate results ready stop)))
-              #:pool 'own)))
+    (parameterize ([current-custodian worker-custodian])
+      (for/vector #:length n ([k (in-range n)])
+        (define seed (+ base-seed k))
+        (thread (lambda ()
+                  (parameterize ([current-custodian caller]
+                                 [current-generator (make-generator seed)]
+                                 [current-pseudo-random-generator (worker-prng seed)])
+                    (serve ds collate results ready stop)))
+                #:pool 'own))))
+  (define guard (pool-guard threads (make-semaphore 0)))
+  (define registration
+    (register-custodian-shutdown guard
+                                 (lambda (g) (semaphore-post (pool-guard-kill g)))
+                                 caller))
+  (cond
+    [registration
+     (parameterize ([current-custodian worker-custodian])
+       (thread (lambda () (reap guard registration stop))))]
+    [else
+     (semaphore-post stop)
+     (raise-arguments-error 'dataloader "the custodian has been shut down"
+                            "custodian" caller)])
   (define pool (worker-pool threads results ready stop))
   (register-finalizer pool (lambda (_pool) (semaphore-post stop)))
   pool)
