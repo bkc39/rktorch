@@ -8,6 +8,8 @@ on:
       - "pkgs/**"
       - "torch/info.rkt"
       - ".github/workflows/platform-macos.yml"
+      - "!scripts/platform/linux/**"
+      - "!pkgs/torch-x86_64-linux/**"
   workflow_dispatch:
 
 permissions:
@@ -100,7 +102,7 @@ jobs:
       - name: Smoke, Racket 9.1
         run: |
           set -euo pipefail
-          export PATH="$RACKETS/9.1/bin:$PATH" PLTUSERHOME="$RACKETS/home-9.1"
+          export PATH="$RACKETS/9.1/bin:$PATH" SMOKE_HOME="$RACKETS/home-9.1"
           scripts/platform/smoke-install.sh "$OUT/catalog" "macOS $(sw_vers -productVersion)" 2>&1 |
             tee "$OUT/logs/smoke-9.1.log"
 
@@ -113,7 +115,7 @@ jobs:
         if: (success() || failure()) && steps.racket-9-3.outcome == 'success'
         run: |
           set -euo pipefail
-          export PATH="$RACKETS/9.3/bin:$PATH" PLTUSERHOME="$RACKETS/home-9.3"
+          export PATH="$RACKETS/9.3/bin:$PATH" SMOKE_HOME="$RACKETS/home-9.3"
           scripts/platform/smoke-install.sh "$OUT/catalog" "macOS $(sw_vers -productVersion)" 2>&1 |
             tee "$OUT/logs/smoke-9.3.log"
 

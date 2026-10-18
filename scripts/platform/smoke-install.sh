@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-#   scripts/platform/smoke-install.sh <catalog-dir> <host-label>
+#   [SMOKE_HOME=<dir>] scripts/platform/smoke-install.sh <catalog-dir> <host-label>
 set -euo pipefail
 
 usage="usage: smoke-install.sh <catalog-dir> <host-label>"
@@ -10,9 +10,14 @@ here=$(cd "$(dirname "$0")" && pwd)
 tmp=$(mktemp -d)
 step() { printf '\n== %s\n' "$*"; }
 
+unset PLTADDONDIR
+export PLTUSERHOME=${SMOKE_HOME:-$(mktemp -d)}
+mkdir -p "$PLTUSERHOME"
+
 step "racket"
 command -v racket
 racket --version
+echo "PLTUSERHOME=$PLTUSERHOME"
 
 step "raco pkg install --no-docs torch"
 raco pkg config --set catalogs "file://$catalog/catalog" ""
