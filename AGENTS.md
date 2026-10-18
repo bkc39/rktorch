@@ -508,21 +508,28 @@ provisioning install the host's skeleton first with `install-platform`, so
 
 ### The platform package
 
-`pkgs/torch-x86_64-linux/` is the skeleton of the x86_64 Linux platform
-package: its `info.rkt` (collection `torch-native`, version equal to
-torch's) and the bundled libraries' licences. `scripts/platform/linux/`
-builds the libraries into it, outside Nix, at the glibc 2.28 baseline;
+`pkgs/torch-x86_64-linux/` and `pkgs/torch-aarch64-macosx/` are the
+skeletons of the platform packages: each `info.rkt` (collection
+`torch-native`, version equal to torch's), a `THIRD-PARTY-NOTICES` and the
+licences only that platform bundles. The licences both carry (PyTorch's, stb's,
+the codecs') live once, in `scripts/platform/licenses/`, and `assemble.sh`
+adds them to the built package. `scripts/platform/linux/` builds the Linux
+libraries outside Nix at the glibc 2.28 baseline; `scripts/platform/macos/`
+builds the macOS ones on GitHub's arm64 runner, which the lab host cannot
+stand in for. Both source `scripts/platform/build-common.sh` (fetching, the
+codecs, GoogleTest, the shim's CMake, the gtests) and share `sources.txt`,
+`assemble.sh`, `catalog.sh`, `smoke-install.sh` and the `.rkt` checks;
 [`docs/building.md`](docs/building.md#the-platform-package) has the steps.
 
 ```bash
 scripts/platform/linux/build.sh .scratch/platform     # manylinux_2_28, docker
                                  # --cpus 4: codecs, shim, audit, gtests
-scripts/platform/linux/assemble.sh .scratch/platform/bundle .scratch/pkg
-scripts/platform/linux/catalog.sh .scratch/pkg/torch-x86_64-linux.zip .scratch/catalog
+scripts/platform/assemble.sh torch-x86_64-linux .scratch/platform/bundle .scratch/pkg
+scripts/platform/catalog.sh .scratch/pkg/torch-x86_64-linux.zip .scratch/catalog
 scripts/platform/linux/smoke.sh ubuntu:24.04 racket-9.1-x86_64-linux-buster-cs.sh .scratch/catalog
 ```
 
-`audit-bundle.sh` fails the build on a `/nix/store` reference, a RUNPATH
+`linux/audit-bundle.sh` fails the build on a `/nix/store` reference, a RUNPATH
 other than `$ORIGIN`, a missing `$ORIGIN` beside a NEEDED library in the
 bundle, a GLIBC, GLIBCXX or CXXABI version above libtorch 2.14's (2.28,
 3.4.22, 1.3.11), symbol versions that `objdump -T` and `readelf -V` read
@@ -531,6 +538,26 @@ follows NEEDED entries only, so a dlopened library slips past it. The
 `platform-audit-test` check is its negative control: the Nix-built shim must
 fail it. Every fetched source is pinned by sha256 in `sources.txt`, and the
 build's caches are keyed on those sums. The scripts never commit a library.
+
+The macOS package is built only by `.github/workflows/platform-macos.yml`
+(`macos-latest`, on pull requests that touch `cpp/`, `scripts/platform/`,
+`pkgs/` or `torch/info.rkt`, and on demand), one `macos/build.sh <work>
+<step>` per step. The deployment target is `macos/deployment-target`, 14.0,
+libtorch 2.14's own `minos`. `macos/audit-bundle.sh` fails on a
+`/nix/store` reference, an id other than `@rpath/<name>`, a load outside
+`@rpath`, `@loader_path`, `/usr/lib` and `/System`, a `/usr/lib` library
+other than libSystem, libc++ and libobjc, an `@rpath` load missing from the
+bundle, an `LC_RPATH` other than one `@loader_path`, a `minos` above the
+target, or a signature `codesign --verify` rejects; `macos/audit-test.sh`
+is its negative control, run on the raw libtorch zip and on a tampered
+copy of the shim. The workflow then installs racket-lang.org's Racket 9.1
+and 9.3 from their `.dmg` and runs `smoke-install.sh` with each.
+
+`(system-library-subpath #f)` is `aarch64-macosx` on racket-lang.org's
+Racket for macOS but `aarch64-darwin` on Nix's, so `torch/info.rkt`'s
+`#:platform "aarch64-macosx"` dep and native-location's advice match only
+the former, and the macOS Nix cell installs no skeleton. Never assume the
+host's string in a test.
 
 ### The build matrix
 
@@ -946,9 +973,11 @@ uncontracted copy of the pipeline, which has not been built.
 
 `.github/workflows/nix.yml`: `nix flake check` on `ubuntu-latest` +
 `macos-latest`, a `resyntax` lint gate, and a `codegen-drift` job
-(regenerate + fail on porcelain). The platform package
-(`scripts/platform/linux/`) is built and smoked by hand for now; its CI lane
-is #339.
+(regenerate + fail on porcelain).
+`.github/workflows/platform-macos.yml` builds, audits and smokes
+`torch-aarch64-macosx` on `macos-latest` (see [The platform
+package](#the-platform-package)). The Linux package (`scripts/platform/linux/`)
+is built and smoked by hand for now; the general CI lane for both is #339.
 
 ### Binary cache (#79)
 

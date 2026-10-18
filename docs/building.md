@@ -110,7 +110,8 @@ Set `TORCHRKT_NATIVE_LIB_PATH` to a directory whose `lib/` subdirectory holds
 the library, and the package's pre-install hook copies it into place:
 
 ```bash
-raco pkg install ./pkgs/torch-x86_64-linux   # x86_64 Linux: meets torch's platform dep
+raco pkg install ./pkgs/torch-x86_64-linux     # x86_64 Linux: meets torch's platform dep
+raco pkg install ./pkgs/torch-aarch64-macosx   # racket-lang.org's Racket on arm64 macOS
 TORCHRKT_NATIVE_LIB_PATH=/path/to/prefix raco pkg install --name torch ./torch
 # /path/to/prefix/lib/libtorchrkt.so   (libtorchrkt.dylib on darwin)
 ```
@@ -142,39 +143,51 @@ and the `abi-stamp-current` flake check fails until it is committed.
 
 ## The platform package
 
-On x86_64 Linux, `torch` depends on `torch-x86_64-linux`
-(`#:platform "x86_64-linux"`, same version), which provides the collection
-`torch-native`: `libtorchrkt.so`, libtorch 2.14.0's CPU libraries from
-PyTorch's official zip, and libsndfile with its codecs as separate shared
-libraries. Every library carries the RUNPATH `$ORIGIN` and needs nothing from
-the host beyond glibc 2.28 and libstdc++, which is what PyTorch's own
-libtorch asks for. The package is about 118 MB zipped and 445 MB installed.
+`torch` depends on one platform package per supported host, each providing
+the collection `torch-native` at torch's own version: `torch-x86_64-linux`
+(`#:platform "x86_64-linux"`) and `torch-aarch64-macosx`
+(`#:platform "aarch64-macosx"`). Each holds `libtorchrkt`, libtorch 2.14.0's
+libraries from PyTorch's official zip, and libsndfile with its codecs as
+separate shared libraries, and finds them all beside itself.
 
-Its skeleton lives in `pkgs/torch-x86_64-linux/`: the `info.rkt`, and the
-licences of every bundled library in `THIRD-PARTY-NOTICES` and `licenses/`.
-The Nix build and the shells install that skeleton, with no libraries in it,
-so `torch`'s dependency is met without a download; the staged
-`torch/native-libs/` still supplies the shim. The release package is the same
-skeleton plus the libraries, built outside Nix in PyTorch's own baseline image,
-`manylinux_2_28`, since a Nix toolchain links against a newer glibc than
-that baseline.
+Their skeletons live in `pkgs/`: the `info.rkt`, a `THIRD-PARTY-NOTICES`,
+and the licences only that platform bundles. The licences both packages carry
+(PyTorch's, stb's and the codecs') live once, in
+`scripts/platform/licenses/`, and `scripts/platform/assemble.sh` adds them
+when it builds a package. The Nix build and the shells install the host's
+skeleton, with no libraries in it, so `torch`'s dependency is met without a
+download; the staged `torch/native-libs/` still supplies the shim.
+
+`(system-library-subpath #f)` decides which dep applies. racket-lang.org's
+Racket for macOS reports `aarch64-macosx`, but Nix's Racket on the same Mac
+reports `aarch64-darwin`, so a Nix-built Racket on a Mac does not pull in
+`torch-aarch64-macosx` and has to build the shim, as the Nix shells do.
+
+Both builds share `scripts/platform/build-common.sh`, which fetches every
+source, checks it against the sha256 that `scripts/platform/sources.txt` pins
+(the libtorch zips, the codecs, libsndfile, stb, GoogleTest and the Racket
+installers the macOS smoke uses), builds the codecs and libsndfile as shared
+libraries, then GoogleTest and the shim, and runs the shim's gtests against
+the finished bundle. The work directory keeps the downloads and builds, so a
+second run rebuilds only the shim; the unpacked libtorch, the codecs and
+GoogleTest are rebuilt when the sha256 pinned for them changes.
+
+### x86_64 Linux
+
+Every library carries the RUNPATH `$ORIGIN` and needs nothing from the host
+beyond glibc 2.28 and libstdc++, which is what PyTorch's own libtorch asks
+for. The package is about 118 MB zipped and 445 MB installed. It is built
+outside Nix in PyTorch's own baseline image, `manylinux_2_28`, since a Nix
+toolchain links against a newer glibc than that baseline.
 
 ```bash
 scripts/platform/linux/build.sh .scratch/platform
-scripts/platform/linux/assemble.sh .scratch/platform/bundle .scratch/pkg
+scripts/platform/assemble.sh torch-x86_64-linux .scratch/platform/bundle .scratch/pkg
 ```
 
-`build.sh` runs in Docker, capped at four CPUs, and keeps its downloads and
-builds in the directory it is given, so a second run rebuilds only the shim;
-the unpacked libtorch, the codecs and GoogleTest are rebuilt when the sha256
-that `sources.txt` pins for them changes.
-Every source it fetches is pinned by sha256 in
-`scripts/platform/linux/sources.txt`: the libtorch zip, the codecs,
-libsndfile, stb and GoogleTest. It builds the codecs and libsndfile as shared
-libraries, then the shim and its GoogleTest suite, then collects the bundle:
-the shim plus every library it needs, followed through NEEDED entries, from
-the libtorch zip and the codec builds. It then audits the bundle and runs the
-gtests against it.
+`build.sh` runs in Docker, capped at four CPUs. It collects the bundle by
+following NEEDED entries from the shim through the libtorch zip and the codec
+builds, audits it, and runs the gtests against it.
 
 The audit, `scripts/platform/linux/audit-bundle.sh <dir>`, fails the build if
 any library:
@@ -196,18 +209,87 @@ none. The `platform-audit-test` flake check points it at the Nix-built shim,
 which it must fail on `/nix/store`, RUNPATH and GLIBC, and at the same shim
 with an `objdump` that prints nothing.
 
-`assemble.sh` copies the skeleton, adds the bundle and writes
-`torch-x86_64-linux.zip` with `raco pkg create`. To try an install on a host
-without Nix, `catalog.sh` puts that zip and a zip of this checkout's `torch`
-in a directory catalog, and `smoke.sh` installs both from it into a distro
-image with a Racket from download.racket-lang.org. It then trains `04-mlp`,
-round-trips a FLAC file, and fails if `raco pkg install` wrote anything to
-stderr:
+`assemble.sh` copies the skeleton and the shared licences, adds the bundle
+and writes `torch-x86_64-linux.zip` with `raco pkg create`. To try an install
+on a host without Nix, `catalog.sh` puts that zip and a zip of this
+checkout's `torch` in a directory catalog, and `smoke.sh` installs both from
+it into a distro image with a Racket from download.racket-lang.org. Inside
+the image, `smoke-install.sh` fails if `raco pkg install` wrote anything to
+stderr, then trains `04-mlp`, printing `(mps-available?)` on the way, and
+round-trips a FLAC file:
 
 ```bash
-scripts/platform/linux/catalog.sh .scratch/pkg/torch-x86_64-linux.zip .scratch/catalog
+scripts/platform/catalog.sh .scratch/pkg/torch-x86_64-linux.zip .scratch/catalog
 scripts/platform/linux/smoke.sh rockylinux:8 racket-9.1-x86_64-linux-buster-cs.sh .scratch/catalog
 ```
+
+### arm64 macOS
+
+The macOS package needs macOS 14.0 or later on Apple silicon, the `minos`
+that libtorch 2.14's own dylibs carry; `scripts/platform/macos/deployment-target`
+holds it, and the codecs, GoogleTest and the shim are all built for it. Every
+library's id is `@rpath/<name>`, each one that loads a bundled library has the
+single `LC_RPATH @loader_path`, and nothing else is loaded except libSystem,
+libc++ and libobjc from `/usr/lib` and frameworks from `/System`. libtorch
+uses the system's Accelerate and bundles no MKL; its OpenMP runtime,
+`libomp.dylib`, ships in the package. After every `install_name_tool` edit the
+library is re-signed ad hoc (`codesign --force --sign -`), since arm64 macOS
+refuses to load code whose signature no longer matches.
+
+A Linux host can neither build nor load any of this, so
+`.github/workflows/platform-macos.yml` builds it, on `macos-latest`, for every pull
+request that touches `cpp/`, `scripts/platform/`, `pkgs/` or
+`torch/info.rkt`, and on demand. Each step is one call on a Mac:
+
+```bash
+scripts/platform/macos/build.sh .scratch/macos codecs gtest shim bundle audit gtests
+scripts/platform/macos/audit-test.sh .scratch/macos/bundle .scratch/macos/libtorch/libtorch/lib
+scripts/platform/macos/install-racket.sh 9.1 .scratch/racket-9.1 .scratch/racket-dl
+PATH=$PWD/.scratch/racket-9.1/bin:$PATH scripts/platform/assemble.sh torch-aarch64-macosx \
+  .scratch/macos/bundle .scratch/pkg
+PATH=$PWD/.scratch/racket-9.1/bin:$PATH scripts/platform/catalog.sh \
+  .scratch/pkg/torch-aarch64-macosx.zip "$PWD/.scratch/catalog" "$PWD/.scratch/catalog"
+PATH=$PWD/.scratch/racket-9.1/bin:$PATH scripts/platform/smoke-install.sh \
+  "$PWD/.scratch/catalog" "macOS $(sw_vers -productVersion)"
+```
+
+`build.sh` needs bash 4 or later, `pkg-config` and Xcode's command-line
+tools; Homebrew's `bash` and `pkgconf` serve, and nothing else from Homebrew
+is used. It collects the bundle by following load commands from the shim
+through the libtorch zip and the codec builds. The audit,
+`scripts/platform/macos/audit-bundle.sh <dir> <target>`, reads each dylib with
+`otool -l` and fails the build if any:
+
+- mentions `/nix/store`;
+- has an id other than `@rpath/<name>`;
+- loads a library outside `@rpath`, `@loader_path`, `/usr/lib` and
+  `/System`, a `/usr/lib` library other than libSystem, libc++ and libobjc,
+  or an `@rpath` or `@loader_path` library that is not in the bundle;
+- has an `LC_RPATH` other than `@loader_path`, more than one, or none while
+  it loads a bundled library through `@rpath`;
+- has a `minos` above the target;
+- or has a signature that `codesign --verify` rejects.
+
+`audit-test.sh` is its negative control: the unmodified libtorch zip must fail
+on `libomp.dylib`'s `/opt/llvm-openmp` id and, against a 13.0 target, on
+`minos`, and a copy of the shim with a rewritten id, a `/nix/store`
+`LC_RPATH`, loads moved to Homebrew and to `/usr/lib`, and its signature
+removed must fail on each.
+
+The workflow then installs racket-lang.org's notarized Racket 9.1 and 9.3
+from their `.dmg` and runs `smoke-install.sh` with each, which also answers
+whether that Racket loads ad hoc-signed libraries. It uploads the zip, its
+`CHECKSUM`, the audit and every log as the run's `torch-aarch64-macosx`
+artifact.
+
+GitHub's runners have no usable GPU, so the MPS half is checked by hand on an
+Apple-silicon Mac, with the artifact's zip in a directory catalog as above:
+
+- `(mps-available?)` is `#t`;
+- `racket -l racket/base -l torch -l torch/scribblings/examples/04-mlp -e '(run-example (mps-device))'`
+  trains on `'mps` and its loss falls;
+- the FLAC round trip passes;
+- `raco pkg install` wrote nothing to stderr.
 
 ## The manual
 
