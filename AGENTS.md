@@ -515,10 +515,11 @@ licences only that platform bundles. The licences both carry (PyTorch's, stb's,
 the codecs') live once, in `scripts/platform/licenses/`, and `assemble.sh`
 adds them to the built package. `scripts/platform/linux/` builds the Linux
 libraries outside Nix at the glibc 2.28 baseline; `scripts/platform/macos/`
-builds the macOS ones on GitHub's arm64 runner, which the lab host cannot
-stand in for. Both source `scripts/platform/build-common.sh` (fetching, the
-codecs, GoogleTest, the shim's CMake, the gtests) and share `sources.txt`,
-`assemble.sh`, `catalog.sh`, `smoke-install.sh` and the `.rkt` checks;
+builds the macOS ones on GitHub's arm64 runner, since a Linux host cannot
+build or load them. Both source `scripts/platform/build-common.sh`
+(fetching, the codecs, GoogleTest, the shim's CMake, the gtests) and share
+`sources.txt`, `assemble.sh`, `catalog.sh`, `smoke-install.sh` and the
+`.rkt` checks;
 [`docs/building.md`](docs/building.md#the-platform-package) has the steps.
 
 ```bash
@@ -539,19 +540,11 @@ follows NEEDED entries only, so a dlopened library slips past it. The
 fail it. Every fetched source is pinned by sha256 in `sources.txt`, and the
 build's caches are keyed on those sums. The scripts never commit a library.
 
-The macOS package is built only by `.github/workflows/platform-macos.yml`
-(`macos-latest`, on pull requests that touch `cpp/`, `scripts/platform/`,
-`pkgs/` or `torch/info.rkt`, and on demand), one `macos/build.sh <work>
-<step>` per step. The deployment target is `macos/deployment-target`, 14.0,
-libtorch 2.14's own `minos`. `macos/audit-bundle.sh` fails on a
-`/nix/store` reference, an id other than `@rpath/<name>`, a load outside
-`@rpath`, `@loader_path`, `/usr/lib` and `/System`, a `/usr/lib` library
-other than libSystem, libc++ and libobjc, an `@rpath` load missing from the
-bundle, an `LC_RPATH` other than one `@loader_path`, a `minos` above the
-target, or a signature `codesign --verify` rejects; `macos/audit-test.sh`
-is its negative control, run on the raw libtorch zip and on a tampered
-copy of the shim. The workflow then installs racket-lang.org's Racket 9.1
-and 9.3 from their `.dmg` and runs `smoke-install.sh` with each.
+The macOS package is built only by `.github/workflows/platform-macos.yml`,
+one `macos/build.sh <work> <step>` per step, for the deployment target in
+`macos/deployment-target`; [`docs/building.md`](docs/building.md#arm64-macos)
+has the triggers, what `macos/audit-bundle.sh` fails on and its negative
+control.
 
 `(system-library-subpath #f)` is `aarch64-macosx` on racket-lang.org's
 Racket for macOS but `aarch64-darwin` on Nix's, so `torch/info.rkt`'s
