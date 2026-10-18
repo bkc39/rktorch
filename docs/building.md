@@ -253,9 +253,9 @@ PATH=$PWD/.scratch/racket-9.1/bin:$PATH scripts/platform/smoke-install.sh \
   "$PWD/.scratch/catalog" "macOS $(sw_vers -productVersion)"
 ```
 
-`build.sh` needs bash 4 or later, `pkg-config` and Xcode's command-line
-tools; Homebrew's `bash` and `pkgconf` serve, and nothing else from Homebrew
-is used. It collects the bundle by following load commands from the shim
+`build.sh` needs bash 4 or later, CMake, `pkg-config` and Xcode's
+command-line tools; Homebrew's `bash`, `cmake` and `pkgconf` serve, and no
+library from Homebrew is used. It collects the bundle by following load commands from the shim
 through the libtorch zip and the codec builds. The audit,
 `scripts/platform/macos/audit-bundle.sh <dir> <target>`, reads each dylib with
 `otool -l` and fails the build if any:
