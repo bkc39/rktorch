@@ -4,6 +4,7 @@
 set -euo pipefail
 
 jobs=${JOBS:-4}
+image=${IMAGE:?build.sh passes the image reference}
 here=/src/scripts/platform/linux
 work=/work
 dl=$work/dl
@@ -23,14 +24,18 @@ current() {
   [ -f "$1" ] && [ "$(cat "$1")" = "$2" ]
 }
 
+verified() {
+  echo "$1  $2" | sha256sum --check --status - 2>/dev/null
+}
+
 declare -A pinned
 while read -r sum file url; do
   case $sum in '' | \#*) continue ;; esac
-  if [ ! -f "$dl/$file" ]; then
+  if ! verified "$sum" "$dl/$file"; then
     curl -fsSL -o "$dl/$file.part" "$url"
     mv "$dl/$file.part" "$dl/$file"
+    echo "$sum  $dl/$file" | sha256sum --check --quiet -
   fi
-  echo "$sum  $dl/$file" | sha256sum --check --quiet -
   pinned[$file]=$sum
   case $file in libtorch-*.zip) libtorch_zip=$file ;; esac
 done <"$here/sources.txt"
@@ -60,7 +65,8 @@ declare -A configure_flags=(
   [mpg123-1.33.4.tar.bz2]="--disable-components --enable-libmpg123 --with-cpu=x86-64"
   [libsndfile-1.2.2.tar.xz]="--disable-full-suite --disable-sqlite --disable-alsa"
 )
-codecs_key=$(echo "CFLAGS=$codec_cflags"
+codecs_key=$(echo "IMAGE=$image"
+             echo "CFLAGS=$codec_cflags"
              for tarball in "${codecs[@]}"; do
                echo "${pinned[$tarball]} $tarball ${configure_flags[$tarball]-}"
              done)
@@ -87,7 +93,8 @@ if ! current "$deps/.pinned" "$codecs_key"; then
 fi
 
 gtest=googletest-1.17.0
-if ! current "$work/gtest/.pinned" "${pinned[$gtest.tar.gz]}"; then
+gtest_key=$(printf '%s\n' "IMAGE=$image" "${pinned[$gtest.tar.gz]}")
+if ! current "$work/gtest/.pinned" "$gtest_key"; then
   rm -rf "$work/gtest" "$work/gtest-build" "$work/$gtest"
   tar -C "$work" -xf "$dl/$gtest.tar.gz"
   (cmake -S "$work/$gtest" -B "$work/gtest-build" -DCMAKE_BUILD_TYPE=Release \
@@ -95,10 +102,10 @@ if ! current "$work/gtest/.pinned" "${pinned[$gtest.tar.gz]}"; then
      cmake --build "$work/gtest-build" -j "$jobs" &&
      cmake --install "$work/gtest-build") >"$log/googletest.log" 2>&1 ||
     failed googletest "$log/googletest.log"
-  echo "${pinned[$gtest.tar.gz]}" >"$work/gtest/.pinned"
+  echo "$gtest_key" >"$work/gtest/.pinned"
 fi
 
-shim_key=$(printf '%s\n' "${pinned[$libtorch_zip]}" "$codecs_key" "${pinned[$gtest.tar.gz]}")
+shim_key=$(printf '%s\n' "IMAGE=$image" "${pinned[$libtorch_zip]}" "$codecs_key" "$gtest_key")
 if ! current "$work/shim-build/.inputs" "$shim_key"; then
   rm -rf "$work/shim-build"
   mkdir -p "$work/shim-build"
