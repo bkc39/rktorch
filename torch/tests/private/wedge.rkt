@@ -1,43 +1,45 @@
 #lang racket/base
 
 (require (only-in ffi/unsafe _fun _uint get-ffi-obj)
-         (only-in racket/port port->string)
-         ;; whole-module: the pattern's syntax classes live at phase 1 and
-         ;; only-in would strip them
-         syntax/parse/define)
+         (only-in racket/port port->string))
 
-(provide call-with-process-deadline
-         exit-status-of
-         with-process-deadline)
+(provide arm-process-deadline!
+         call-with-process-deadline
+         exit-status-of)
 
-;; Racket 9.3's custodian-shutdown-all holds the custodian lock while it
-;; waits, asleep in atomic mode, for a running parallel thread to stop, and
-;; the thread needs that lock to stop: the place wedges. raco test's --timeout
-;; is a sync/timeout in that same scheduler and never fires. SIGALRM's default
-;; action ends the process from the kernel instead; one alarm per process, so
-;; an inner deadline replaces an outer one.
+;; SIGALRM ends a process wedged in atomic mode, and a process has one alarm.
 (define alarm (get-ffi-obj "alarm" #f (_fun _uint -> _uint)))
 
+(define (arm-process-deadline! seconds)
+  (define outer (alarm seconds))
+  (define armed-at (current-milliseconds))
+  (define (outer-left)
+    (max 1 (- outer (quotient (- (current-milliseconds) armed-at) 1000))))
+  (cond
+    [(zero? outer) (lambda () (void (alarm 0)))]
+    [else
+     (alarm (min seconds outer))
+     (lambda () (void (alarm (outer-left))))]))
+
 (define (call-with-process-deadline seconds thunk)
-  (dynamic-wind (lambda () (alarm seconds))
+  (define lift! #f)
+  (dynamic-wind (lambda () (set! lift! (arm-process-deadline! seconds)))
                 thunk
-                (lambda () (alarm 0))))
+                (lambda () (lift!))))
 
-(define-syntax-parse-rule (with-process-deadline seconds:expr body:expr ...+) ;; noqa
-  (call-with-process-deadline seconds (lambda () body ...))) ;; noqa
-
-;; #f when the program is still running after `seconds`
 (define (exit-status-of program #:within seconds)
   (define-values (sp out in err)
     (subprocess #f #f #f (find-system-path 'exec-file) "-e" (format "~s" program)))
   (close-output-port in)
   (define drains (for/list ([p (list out err)]) (thread (lambda () (port->string p)))))
-  (define exited? (and (sync/timeout seconds sp) #t))
-  (unless exited? (subprocess-kill sp #t))
+  (define status
+    (cond
+      [(sync/timeout seconds sp) (subprocess-status sp)]
+      [else (subprocess-kill sp #t) #f]))
   (for ([t (in-list drains)]) (sync/timeout 10 t))
   (close-input-port out)
   (close-input-port err)
-  (and exited? (subprocess-status sp)))
+  status)
 
 (module+ test
   (require rackunit)
@@ -64,10 +66,23 @@
      #:within seconds))
 
   (test-case "a process wedged in atomic mode ends at its deadline"
-    (check-equal? (run '(with-process-deadline 1 (wedge)) #:within 30) sigalrm-status))
-
-  (test-case "a Racket timeout does not end a process wedged in atomic mode"
-    (check-false (run '(sync/timeout 1 (thread wedge)) #:within 5)))
+    (check-equal? (run '(call-with-process-deadline 1 wedge) #:within 30) sigalrm-status))
 
   (test-case "the deadline is lifted when its body returns"
-    (check-equal? (run '(begin (with-process-deadline 1 'done) (sleep 2)) #:within 30) 0)))
+    (check-equal? (run '(begin (call-with-process-deadline 1 void) (sleep 2)) #:within 30) 0))
+
+  (test-case "an inner deadline's end re-arms the outer one"
+    (check-equal? (run '(call-with-process-deadline
+                         2
+                         (lambda ()
+                           (call-with-process-deadline 1 void)
+                           (wedge)))
+                       #:within 10)
+                  sigalrm-status))
+
+  (test-case "an inner deadline does not extend the outer one"
+    (check-equal? (run '(call-with-process-deadline
+                         1
+                         (lambda () (call-with-process-deadline 60 wedge)))
+                       #:within 10)
+                  sigalrm-status)))

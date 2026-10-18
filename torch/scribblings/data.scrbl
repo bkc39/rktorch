@@ -200,7 +200,8 @@ per epoch. Without @racket[#:shuffle?] the batches are the items in order,
 and a batch size equal to the length yields the dataset's own tensors.
 
 With @racket[workers] above 0, each traversal starts that many parallel
-threads, and batch @racket[j] is built by worker @racket[(modulo j workers)]. Worker @racket[k] runs with
+threads, and batch @racket[j] is built by worker
+@racket[(modulo j workers)]. Worker @racket[k] runs with
 @racket[current-generator] set to @racket[(make-generator (+ s k))], where
 @racket[s] is the traversal's @racket[draw-seed], and with its own
 @racket[current-pseudo-random-generator] seeded from the same number, as
@@ -214,12 +215,16 @@ traversal then stops its workers and raises the same value for every later
 batch. A break while waiting for a batch leaves the batch to the next
 request. The workers stop when the traversal is exhausted, when the
 custodian current at the traversal's start shuts down, or once the loop that
-held the traversal has let it go and a collection runs. Workers build CPU tensors, so @racket[ds] must not
-be on an accelerator. @racket[#:prefetch] needs @racket[workers] above 0.
-A dataset's @racket[#:ref] and @racket[#:batch], and @racket[collate], run
-in several threads at once, so any state they share must be synchronized.
-Until @hyperlink["https://github.com/bkc39/rktorch/issues/194"]{#194} is
-fixed, the consumer's @racket[with-autocast], @racket[with-no-grad] and
+held the traversal has let it go and a collection runs. They run outside
+that custodian, so a @racket[custodian-limit-memory] on it does not cover
+what they allocate. On Racket 9.3, a place that ends while one of its
+workers is building a batch hangs instead of exiting. Workers build CPU
+tensors, so @racket[ds] must not be on an accelerator. @racket[#:prefetch]
+needs @racket[workers] above 0. A dataset's @racket[#:ref] and
+@racket[#:batch], and @racket[collate], run in several threads at once, so
+any state they share must be synchronized. Until
+@hyperlink["https://github.com/bkc39/rktorch/issues/194"]{#194} is fixed,
+the consumer's @racket[with-autocast], @racket[with-no-grad] and
 @racket[default-device] also apply to the batches workers build while the
 consumer is inside them, so a batch can differ from the one
 @racket[#:workers 0] builds.
