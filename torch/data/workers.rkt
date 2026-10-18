@@ -27,7 +27,7 @@
 (struct worker-pool (guard results ready))
 
 ;; The guard's shutdown callback runs under the custodian lock, so it only posts.
-(struct pool-guard (threads stop kill))
+(struct pool-guard ([threads #:mutable] stop kill))
 
 (define worker-custodian (make-custodian-at-root))
 
@@ -72,19 +72,18 @@
     (kill-thread t))
   (unregister-custodian-shutdown guard registration))
 
-(define (start-reaper! guard caller)
-  (define registration
-    (register-custodian-shutdown guard
-                                 (lambda (g) (semaphore-post (pool-guard-kill g)))
-                                 caller))
-  (cond
-    [registration
-     (parameterize ([current-custodian worker-custodian])
-       (void (thread (lambda () (reap guard registration)))))]
-    [else
-     (semaphore-post (pool-guard-stop guard))
-     (raise-arguments-error 'dataloader "the custodian has been shut down"
-                            "custodian" caller)]))
+(define (guard-with! caller guard)
+  (or (register-custodian-shutdown guard
+                                   (lambda (g)
+                                     (semaphore-post (pool-guard-stop g))
+                                     (semaphore-post (pool-guard-kill g)))
+                                   caller)
+      (raise-arguments-error 'dataloader "the custodian has been shut down"
+                             "custodian" caller)))
+
+(define (start-reaper! guard registration)
+  (parameterize ([current-custodian worker-custodian])
+    (void (thread (lambda () (reap guard registration))))))
 
 (define (start-threads ds collate n base-seed results ready stop breaks)
   (define caller (current-custodian))
@@ -109,12 +108,15 @@
     (define results (make-hasheqv))
     (define ready (make-semaphore 0))
     (define stop (make-semaphore 0))
-    (define threads (start-threads ds collate n base-seed results ready stop breaks))
-    (race-point workers-started threads)
-    (define guard (pool-guard threads stop (make-semaphore 0)))
-    (start-reaper! guard (current-custodian))
+    ;; Both ways to stop exist before the first worker does.
+    (define guard (pool-guard (vector) stop (make-semaphore 0)))
     (define pool (worker-pool guard results ready))
     (register-finalizer pool (lambda (_pool) (semaphore-post stop)))
+    (define registration (guard-with! (current-custodian) guard))
+    (define threads (start-threads ds collate n base-seed results ready stop breaks))
+    (set-pool-guard-threads! guard threads)
+    (race-point workers-started threads)
+    (start-reaper! guard registration)
     pool))
 
 (define (worker-pool-threads pool)

@@ -1,6 +1,6 @@
 #lang racket/base
 
-(module+ test
+(module+ cases
   (require (only-in racket/list append* index-of range remove-duplicates)
            (only-in racket/match match match-define)
            rackunit
@@ -13,10 +13,7 @@
            (only-in "../vision/transforms.rkt" random-crop random-horizontal-flip)
            (only-in "private/race-harness.rkt"
                     check-known-failure check-ledger ledger-snapshot make-watch
-                    settle! watch-hook with-race-hook)
-           (only-in "private/wedge.rkt" arm-process-deadline!))
-
-  (define lift-deadline! (arm-process-deadline! 540))
+                    settle! watch-hook with-race-hook))
 
   (define blamed #rx"blaming: [(][^)]*loader-workers-test[.]rkt")
 
@@ -191,15 +188,14 @@
     (custodian-shutdown-all c)
     (check-true (dead-within? workers 5)))
 
-  (test-case "a traversal under a shut-down custodian raises and stops its workers"
+  (test-case "a traversal under a shut-down custodian raises and starts no workers"
     (define c (make-custodian))
     (define loader (dataloader pairs #:batch-size 2 #:workers 2))
     (custodian-shutdown-all c)
     (define-values (raised started)
       (workers-started-by (lambda () (under c (lambda () (sequence-generate loader))))))
     (check-regexp-match #rx"custodian has been shut down" (exn-message raised))
-    (check-equal? (length started) 2)
-    (check-true (dead-within? started 5)))
+    (check-equal? started '()))
 
   (test-case "a break while workers start leaves them to the custodian"
     (define c (make-custodian))
@@ -212,6 +208,28 @@
     (check-pred exn:break? raised)
     (check-equal? (length started) 2)
     (custodian-shutdown-all c)
+    (check-true (dead-within? started 5)))
+
+  (define (consumer-ended-at-start c end!)
+    (define loader (dataloader pairs #:batch-size 2 #:workers 2))
+    (define-values (_outcome started)
+      (workers-started-by (lambda ()
+                            (sync (under c (lambda ()
+                                             (thread (lambda () (sequence-generate loader)))))))
+                          #:on-start end!))
+    started)
+
+  (test-case "a consumer killed as its workers start leaves them to a collection"
+    (define c (make-custodian))
+    (define started (consumer-ended-at-start c (lambda () (kill-thread (current-thread)))))
+    (check-equal? (length started) 2)
+    (check-true (dead-after-collections? started))
+    (custodian-shutdown-all c))
+
+  (test-case "a consumer whose custodian shuts down as its workers start stops them"
+    (define c (make-custodian))
+    (define started (consumer-ended-at-start c (lambda () (custodian-shutdown-all c))))
+    (check-equal? (length started) 2)
     (check-true (dead-within? started 5)))
 
   (test-case "a finished traversal leaves nothing registered with its custodian"
@@ -991,6 +1009,11 @@
                                (for ([_ (dataloader (leaking 4) #:workers 2)])
                                  (void)))))))
       (check-pred exn:fail? v)
-      (check-regexp-match #rx"workers build CPU tensors" (exn-message v))))
+      (check-regexp-match #rx"workers build CPU tensors" (exn-message v)))))
 
-  (lift-deadline!))
+(module+ test
+  (require (only-in "private/wedge.rkt" call-with-process-deadline))
+  (define cases
+    (module-path-index-join '(submod ".." cases)
+                            (variable-reference->module-path-index (#%variable-reference))))
+  (call-with-process-deadline 540 (lambda () (dynamic-require cases #f))))

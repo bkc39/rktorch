@@ -71,6 +71,14 @@
   (test-case "the deadline is lifted when its body returns"
     (check-equal? (run '(begin (call-with-process-deadline 1 void) (sleep 2)) #:within 30) 0))
 
+  (test-case "the deadline is lifted when its body raises"
+    (check-equal? (run '(begin
+                          (with-handlers ([(lambda (_v) #t) void])
+                            (call-with-process-deadline 1 (lambda () (raise 'escaped))))
+                          (sleep 2))
+                       #:within 30)
+                  0))
+
   (test-case "an inner deadline's end re-arms the outer one"
     (check-equal? (run '(call-with-process-deadline
                          2
