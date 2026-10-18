@@ -14,7 +14,8 @@ jobs=${JOBS:-$(sysctl -n hw.ncpu)}
 target=$(cat "$here/deployment-target")
 export MACOSX_DEPLOYMENT_TARGET=$target
 libtorch_zip="libtorch-macos-arm64-2.14.0.zip"
-codec_cflags="-O2 -fPIC -mmacosx-version-min=$target"
+availability="-Werror=unguarded-availability -Werror=unguarded-availability-new"
+codec_cflags="-O2 -fPIC -mmacosx-version-min=$target $availability"
 codec_ldflags="-Wl,-headerpad_max_install_names"
 toolchain="$(xcrun clang --version | sed -n 1p), SDK $(xcrun --show-sdk-version)"
 # shellcheck source=scripts/platform/build-common.sh
@@ -89,6 +90,8 @@ for step_name in "${steps[@]}"; do
       stage_stb
       build_shim "-DCMAKE_OSX_DEPLOYMENT_TARGET=$target" \
         -DCMAKE_OSX_ARCHITECTURES=arm64 \
+        "-DCMAKE_C_FLAGS=$availability" \
+        "-DCMAKE_CXX_FLAGS=$availability" \
         -DCMAKE_INSTALL_RPATH=@loader_path \
         -DCMAKE_SHARED_LINKER_FLAGS=-Wl,-headerpad_max_install_names
       ;;
