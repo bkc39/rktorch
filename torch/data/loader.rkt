@@ -4,8 +4,7 @@
                   -> ->i and/c any/c contract-out flat-named-contract listof
                   or/c unsupplied-arg?)
          (only-in racket/list first)
-         (only-in racket/match match)
-         (only-in racket/promise delay force)
+         (only-in racket/match == match)
          (only-in threading ~>)
          (only-in "../foreign.rkt"
                   device device-type draw-seed generator? index-select
@@ -147,43 +146,77 @@
 ;; the base seed on creation, the permutation when the first batch is
 ;; asked for, and the remainder permutation RandomSampler discards once
 ;; the first is used up: before a final partial batch, else on exhaustion.
+(define (epoch-batches loader)
+  (define ds (dataloader-dataset loader))
+  (define n (dataset-length ds))
+  (define b (dataloader-batch-size loader))
+  (define g (dataloader-generator loader))
+  (draw-seed #:generator g)
+  (define shuffle? (dataloader-shuffle? loader))
+  ;; RandomSampler seeds its own generator on the first next, not on iter
+  (define sampler #f)
+  (define (sampler!)
+    (unless sampler
+      (set! sampler (or g (make-generator (draw-seed)))))
+    sampler)
+  (define perm #f)
+  (define (permutation!)
+    (unless perm
+      (define drawn (randperm n #:generator (sampler!)))
+      (define dev (dataset-device ds))
+      (set! perm (if dev (to drawn dev) drawn)))
+    perm)
+  (define count (batch-count loader))
+  (define remainder-drawn? #f)
+  (define (finish!)
+    (when (and shuffle? (not remainder-drawn?))
+      (permutation!)
+      (set! remainder-drawn? #t)
+      (void (randperm n #:generator (sampler!)))))
+  (define partial-last?
+    (and (not (dataloader-drop-last? loader)) (positive? (remainder n b))))
+  (define (batch k)
+    (define start (* k b))
+    (define len (min b (- n start)))
+    (define indices
+      (if shuffle?
+          (narrow (permutation!) 0 start len)
+          (for/list ([i (in-range start (+ start len))]) i)))
+    (when (and partial-last? (= k (sub1 count)))
+      (finish!))
+    (dataset-batch ds indices (dataloader-collate loader)))
+  (values count batch finish!))
+
 (define (sampler-draws loader)
   (define ds (dataloader-dataset loader))
   (define n (dataset-length ds))
   (define b (dataloader-batch-size loader))
   (define shuffle? (dataloader-shuffle? loader))
-  ;; RandomSampler seeds its own generator on the first next, not on iter
-  (define sampler
-    (delay (or (dataloader-generator loader) (make-generator (draw-seed)))))
-  (define permutation
-    (delay (define drawn (randperm n #:generator (force sampler)))
-           (define dev (dataset-device ds))
-           (if dev (to drawn dev) drawn)))
-  (define discarded
-    (delay (force permutation)
-           (void (randperm n #:generator (force sampler)))))
+  (define sampler #f)
+  (define (sampler!)
+    (unless sampler
+      (set! sampler (or (dataloader-generator loader) (make-generator (draw-seed)))))
+    sampler)
+  (define perm #f)
+  (define (permutation!)
+    (unless perm
+      (define drawn (randperm n #:generator (sampler!)))
+      (define dev (dataset-device ds))
+      (set! perm (if dev (to drawn dev) drawn)))
+    perm)
+  (define discarded? #f)
   (define (finish!)
-    (when shuffle?
-      (force discarded)))
+    (when (and shuffle? (not discarded?))
+      (permutation!)
+      (randperm n #:generator (sampler!))
+      (set! discarded? #t)))
   (define (indices k)
     (define start (* k b))
     (define len (min b (- n start)))
     (if shuffle?
-        (narrow (force permutation) 0 start len)
+        (narrow (permutation!) 0 start len)
         (for/list ([i (in-range start (+ start len))]) i)))
   (values indices finish!))
-
-(define (epoch-batches loader)
-  (draw-seed #:generator (dataloader-generator loader))
-  (define-values (indices finish!) (sampler-draws loader))
-  (define count (batch-count loader))
-  (define finishing (and (partial-last? loader) (sub1 count)))
-  (define (batch k)
-    (define batch-indices (indices k))
-    (when (eqv? k finishing)
-      (finish!))
-    (dataset-batch (dataloader-dataset loader) batch-indices (dataloader-collate loader)))
-  (values count batch finish!))
 
 (define (worker-epoch-batches loader)
   (define workers (dataloader-workers loader))
@@ -211,16 +244,26 @@
       (request! (+ k ahead))
       (when (= k (sub1 count))
         (stop-workers! pool))))
+  ;; a break between batch's return and the sequence recording its values
+  ;; asks for the same k again
+  (define taken #f)
+  (define (take-once! k breakable?)
+    (match taken
+      [(cons (== k) result) result]
+      [_ (define result (take! k breakable?))
+         (set! taken (cons k result))
+         result]))
   (define (batch k)
     (define breakable? (break-enabled))
     (parameterize-break #f
-      (match (or failure (take! k breakable?))
+      (match (or failure (take-once! k breakable?))
         [(built values-list) (apply values values-list)]
         [(and (raised v) failed)
          (set! failure failed)
          (stop-workers! pool)
          (raise v)])))
   (define (exhausted!)
+    (set! taken #f)
     (finish!)
     (stop-workers! pool))
   (values count batch exhausted!))
@@ -229,6 +272,9 @@
   (if (zero? (dataloader-workers loader))
       (epoch-batches loader)
       (worker-epoch-batches loader)))
+
+(module+ private
+  (provide sampler-draws traversal))
 
 (define/contract-out (in-dataloader loader) ;; noqa
   (-> dataloader? sequence?)
