@@ -134,7 +134,7 @@
       (quotient n b)
       (quotient (+ n b -1) b)))
 
-(define (partial-last? loader)
+(define (short-last-batch? loader)
   (and (not (dataloader-drop-last? loader))
        (~> loader
            dataloader-dataset
@@ -226,7 +226,7 @@
                               workers base))
   (define-values (indices finish!) (sampler-draws loader))
   (define count (batch-count loader))
-  (define exhausting (if (partial-last? loader) (sub1 count) count))
+  (define exhausting (if (short-last-batch? loader) (sub1 count) count))
   (define (refill! r)
     (define batch-indices (and (< r count) (indices r)))
     (cond
