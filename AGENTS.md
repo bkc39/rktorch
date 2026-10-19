@@ -547,10 +547,11 @@ has the triggers, what `macos/audit-bundle.sh` fails on and its negative
 control.
 
 `(system-library-subpath #f)` is `aarch64-macosx` on racket-lang.org's
-Racket for macOS but `aarch64-darwin` on Nix's, so `torch/info.rkt`'s
-`#:platform "aarch64-macosx"` dep and native-location's advice match only
-the former, and the macOS Nix cell installs no skeleton. Never assume the
-host's string in a test.
+Racket for macOS but `aarch64-darwin` on Nix's. `torch/info.rkt` declares
+`torch-aarch64-macosx` once for each string and native-location's
+`platform-packages` maps both to it, so the macOS Nix cell installs that
+skeleton as the Linux cell installs its own. Platform deps stay one string
+each, never a regexp. Never assume the host's string in a test.
 
 ### The build matrix
 

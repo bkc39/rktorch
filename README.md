@@ -55,11 +55,10 @@ On x86_64 Linux this also installs `torch-x86_64-linux`, about 118 MB to
 download and 445 MB installed. It holds `libtorchrkt`, the CPU build of
 libtorch 2.14 and libsndfile, and needs only glibc 2.28 or later and libstdc++.
 On an Apple-silicon Mac it installs `torch-aarch64-macosx` instead, which
-holds libtorch 2.14 with MPS support and needs macOS 14 or later. That
-package is matched by the Racket from
-[download.racket-lang.org](https://download.racket-lang.org), which reports
-the platform `aarch64-macosx`; a Racket built by Nix reports `aarch64-darwin`
-and gets no platform package, so build from a checkout there.
+holds libtorch 2.14 with MPS support and needs macOS 14 or later. Both the
+Racket from [download.racket-lang.org](https://download.racket-lang.org),
+which reports the platform `aarch64-macosx`, and a Racket built by Nix, which
+reports `aarch64-darwin`, install it.
 `--no-docs`
 skips building the manual, which runs its examples against libtorch and
 needs racket/draw's libraries (cairo, pango, fontconfig) and libsqlite3 on the host;

@@ -111,7 +111,7 @@ the library, and the package's pre-install hook copies it into place:
 
 ```bash
 raco pkg install ./pkgs/torch-x86_64-linux     # x86_64 Linux: meets torch's platform dep
-raco pkg install ./pkgs/torch-aarch64-macosx   # racket-lang.org's Racket on arm64 macOS
+raco pkg install ./pkgs/torch-aarch64-macosx   # arm64 macOS
 TORCHRKT_NATIVE_LIB_PATH=/path/to/prefix raco pkg install --name torch ./torch
 # /path/to/prefix/lib/libtorchrkt.so   (libtorchrkt.dylib on darwin)
 ```
@@ -145,8 +145,8 @@ and the `abi-stamp-current` flake check fails until it is committed.
 
 `torch` depends on one platform package per supported host, each providing
 the collection `torch-native` at torch's own version: `torch-x86_64-linux`
-(`#:platform "x86_64-linux"`) and `torch-aarch64-macosx`
-(`#:platform "aarch64-macosx"`). Each holds `libtorchrkt`, libtorch 2.14.0's
+(`#:platform "x86_64-linux"`) and `torch-aarch64-macosx` (one dep for each
+macOS platform string, below). Each holds `libtorchrkt`, libtorch 2.14.0's
 libraries from PyTorch's official zip, and libsndfile with its codecs as
 separate shared libraries, and finds them all beside itself.
 
@@ -160,8 +160,10 @@ download; the staged `torch/native-libs/` still supplies the shim.
 
 `(system-library-subpath #f)` decides which dep applies. racket-lang.org's
 Racket for macOS reports `aarch64-macosx`, but Nix's Racket on the same Mac
-reports `aarch64-darwin`, so a Nix-built Racket on a Mac does not pull in
-`torch-aarch64-macosx` and has to build the shim, as the Nix shells do.
+reports `aarch64-darwin`, so `torch/info.rkt` names `torch-aarch64-macosx`
+for both and either Racket installs it. The macOS Nix cell and `nix develop`
+on a Mac therefore install the `pkgs/torch-aarch64-macosx` skeleton, as the
+Linux cell installs its own.
 
 Both builds share `scripts/platform/build-common.sh`, which fetches every
 source, checks it against the sha256 that `scripts/platform/sources.txt` pins
