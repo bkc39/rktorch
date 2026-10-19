@@ -77,7 +77,7 @@ mkapp app-platform
 provision out-2
 case $(racket -e '(display (system-library-subpath #f))') in
   x86_64-linux) platform=torch-x86_64-linux ;;
-  aarch64-macosx) platform=torch-aarch64-macosx ;;
+  aarch64-darwin | aarch64-macosx) platform=torch-aarch64-macosx ;;
   *) platform= ;;
 esac
 expect "$(installed)" "$(printf '%s\n' rdfix-a rdfix-app rdfix-k $platform | sort | paste -sd' ')"

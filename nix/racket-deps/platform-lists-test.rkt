@@ -1,5 +1,6 @@
 #lang racket/base
-(require (only-in racket/match == match match-define)
+(require (only-in racket/list remove-duplicates)
+         (only-in racket/match == match match-define)
          (only-in syntax/modread with-module-reading-parameterization))
 
 (define (module-forms file)
@@ -40,10 +41,12 @@
          [(list* (? string? platform) (? string? name) more)
           (loop more (hash-set table platform name))]))]))
 
-(unless (equal? (sort own string<?) (sort (hash-values located) string<?))
+(define located-names (sort (remove-duplicates (hash-values located)) string<?))
+
+(unless (equal? (sort own string<?) located-names)
   (raise-user-error 'platform-lists
                     "own-platform-packages in ~a is ~s, but platform-packages in ~a names ~s"
-                    racket-deps own native-location (hash-values located)))
+                    racket-deps own native-location located-names))
 
 (define deps
   (match (definition info 'deps)

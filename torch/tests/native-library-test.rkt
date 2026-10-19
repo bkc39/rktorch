@@ -81,6 +81,7 @@
       (native-library-not-found-message #:staged "/x" #:platform (string->path platform)))
     (check-regexp-match #rx"raco pkg install torch-x86_64-linux" (said "x86_64-linux"))
     (check-regexp-match #rx"raco pkg install torch-aarch64-macosx" (said "aarch64-macosx"))
+    (check-regexp-match #rx"raco pkg install torch-aarch64-macosx" (said "aarch64-darwin"))
     (check-regexp-match #rx"riscv64-linux has no prebuilt platform package"
                         (said "riscv64-linux"))
     (check-false (regexp-match? #rx"raco pkg" (said "riscv64-linux"))))
