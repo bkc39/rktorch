@@ -1213,7 +1213,7 @@
          (values (stack (map car items))
                  (draw-seed)
                  (tensor->list (randperm 4))
-                 (tensor->list (multinomial (ones 5) 2))
+                 (~> (ones 5) (multinomial 2) tensor->list)
                  (tensor->list (rand 3))
                  (tensor->list (randn 3))))
        (define (workers-loader g nw pf batch drop-last? shuffle?)
