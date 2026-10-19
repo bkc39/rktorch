@@ -16,7 +16,7 @@
                   dataset-ref dataset? default-collate default-collate?
                   define-dataset gen:dataset indices->list indices/c)
          (only-in "workers.rkt"
-                  await-batch built hand-off! raised start-workers
+                  built raised receive-batch request-batch! start-workers
                   stop-workers!))
 
 (provide (all-from-out "dataset.rkt"))
@@ -231,33 +231,33 @@
     (define batch-indices (and (< r count) (indices r)))
     (cond
       [(and batch-indices (= r exhausting))
-       (hand-off! pool r batch-indices)
+       (request-batch! pool r batch-indices)
        (finish!)]
-      [batch-indices (hand-off! pool r batch-indices)]
+      [batch-indices (request-batch! pool r batch-indices)]
       [(= r exhausting) (finish!)]
       [else (void)]))
   (for ([r (in-range ahead)])
     (request! r))
   (define failure #f)
-  (define (take! k breakable?)
-    (begin0 (await-batch pool k breakable?)
+  (define (receive! k breakable?)
+    (begin0 (receive-batch pool k breakable?)
       (request! (+ k ahead))
       (when (= k (sub1 count))
         (stop-workers! pool))))
   ;; a break between batch's return and the sequence recording its values
   ;; asks for the same k again
   (define taken #f)
-  (define (take-once! k breakable?)
+  (define (receive-once! k breakable?)
     (match taken
       [(cons (== k) result) result]
       [_ (set! taken #f)
-         (define result (take! k breakable?))
+         (define result (receive! k breakable?))
          (set! taken (cons k result))
          result]))
   (define (batch k)
     (define breakable? (break-enabled))
     (parameterize-break #f
-      (match (or failure (take-once! k breakable?))
+      (match (or failure (receive-once! k breakable?))
         [(built values-list) (apply values values-list)]
         [(and (raised v) failed)
          (set! failure failed)

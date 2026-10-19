@@ -10,7 +10,9 @@
                   current-generator device device-type make-generator tensor?)
          (only-in "../foreign/raw/race-points.rkt" race-point)
          (only-in "../private/contract.rkt" define/contract-out)
-         (only-in "dataset.rkt" collate/c dataset-batch dataset? indices/c))
+         (only-in "dataset.rkt" collate/c dataset-batch dataset? indices/c)
+         (only-in "results-queue.rkt"
+                  results-queue results-queue-put! results-queue-take!))
 
 (provide (struct-out built)
          (struct-out raised))
@@ -24,7 +26,7 @@
 (define batch-result/c (or/c built? raised?))
 
 ;; Workers never reach the pool, so its finalizer can stop them.
-(struct worker-pool (guard results ready))
+(struct worker-pool (guard results))
 
 ;; The guard's shutdown callback runs under the custodian lock, so it only posts.
 (struct pool-guard ([threads #:mutable] stop kill))
@@ -52,14 +54,13 @@
     (random-seed (bitwise-and seed #x7FFFFFFF)))
   prng)
 
-(define (serve ds collate results ready stop)
+(define (serve ds collate results stop)
   (define stopped (semaphore-peek-evt stop))
   (define request (handle-evt (thread-receive-evt) (lambda (_) (thread-receive))))
   (let loop ()
     (match (and (not (sync/timeout 0 stopped)) (sync stopped request))
       [(cons r indices)
-       (hash-set! results r (build ds collate r indices))
-       (semaphore-post ready)
+       (results-queue-put! results r (build ds collate r indices))
        (loop)]
       [_ (void)])))
 
@@ -85,7 +86,7 @@
   (parameterize ([current-custodian worker-custodian])
     (void (thread (lambda () (reap guard registration))))))
 
-(define (start-threads ds collate n base-seed results ready stop breaks)
+(define (start-threads ds collate n base-seed results stop breaks)
   (define caller (current-custodian))
   (parameterize ([current-custodian worker-custodian])
     (for/vector #:length n ([k (in-range n)])
@@ -97,7 +98,7 @@
                    (parameterize ([current-custodian caller]
                                   [current-generator (make-generator seed)]
                                   [current-pseudo-random-generator (worker-prng seed)])
-                     (serve ds collate results ready stop)))))
+                     (serve ds collate results stop)))))
               #:pool 'own))))
 
 (define/contract-out (start-workers ds collate n base-seed) ;; noqa
@@ -105,15 +106,14 @@
       worker-pool?)
   (define breaks (current-break-parameterization))
   (parameterize-break #f
-    (define results (make-hasheqv))
-    (define ready (make-semaphore 0))
+    (define results (results-queue))
     (define stop (make-semaphore 0))
     ;; Both ways to stop exist before the first worker does.
     (define guard (pool-guard (vector) stop (make-semaphore 0)))
-    (define pool (worker-pool guard results ready))
+    (define pool (worker-pool guard results))
     (register-finalizer pool (lambda (_pool) (semaphore-post stop)))
     (define registration (guard-with! (current-custodian) guard))
-    (define threads (start-threads ds collate n base-seed results ready stop breaks))
+    (define threads (start-threads ds collate n base-seed results stop breaks))
     (set-pool-guard-threads! guard threads)
     (race-point workers-started threads)
     (start-reaper! guard registration)
@@ -125,29 +125,20 @@
 (define (worker-of pool r)
   (modulo r (vector-length (worker-pool-threads pool))))
 
-(define/contract-out (hand-off! pool r indices) ;; noqa
+(define/contract-out (request-batch! pool r indices) ;; noqa
   (-> worker-pool? exact-nonnegative-integer? indices/c void?)
   (void (thread-send (vector-ref (worker-pool-threads pool) (worker-of pool r))
                      (cons r indices)
                      #f)))
 
-(define/contract-out (await-batch pool r breakable?) ;; noqa
+(define/contract-out (receive-batch pool r breakable?) ;; noqa
   (-> worker-pool? exact-nonnegative-integer? boolean? batch-result/c)
-  (define results (worker-pool-results pool))
   (define k (worker-of pool r))
   (define dead (thread-dead-evt (vector-ref (worker-pool-threads pool) k)))
-  (define wait (if breakable? sync/enable-break sync))
-  (let loop ([exited? #f])
-    (define result (hash-ref results r #f))
-    (cond
-      [result
-       (hash-remove! results r)
-       result]
-      [exited?
-       (raised (make-exn:fail
-                (format "dataloader: worker ~a exited before delivering batch ~a" k r)
-                (current-continuation-marks)))]
-      [else (loop (eq? (wait (worker-pool-ready pool) dead) dead))])))
+  (or (results-queue-take! (worker-pool-results pool) r dead breakable?)
+      (raised (make-exn:fail
+               (format "dataloader: worker ~a exited before delivering batch ~a" k r)
+               (current-continuation-marks)))))
 
 (define/contract-out (stop-workers! pool) (-> worker-pool? void?) ;; noqa
   (semaphore-post (pool-guard-stop (worker-pool-guard pool))))

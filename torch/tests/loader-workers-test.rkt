@@ -833,7 +833,7 @@
 
   (test-case "the loader frees nothing and never enters atomic mode"
     (define sources
-      (for/list ([name '("loader.rkt" "workers.rkt")])
+      (for/list ([name '("loader.rkt" "workers.rkt" "results-queue.rkt")])
         (module-forms (collection-file-path name "torch" "data"))))
     (define forbidden
       '(tensor-free! tr-tensor-free/checked free-handle! call-as-atomic start-atomic
@@ -848,7 +848,7 @@
       (check-equal? (length (filter (lambda (a) (eq? a 'ffi/unsafe)) names))
                     (length imports)
                     "ffi/unsafe is required only through only-in"))
-    (match-define (list _ workers) sources)
+    (match-define (list _ workers _) sources)
     (check-not-false
      (for/or ([form (in-list (sublists workers))])
        (match form
