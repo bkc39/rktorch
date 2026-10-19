@@ -1,6 +1,6 @@
 #lang racket/base
 
-(require (only-in racket/contract/base -> not/c or/c)
+(require (only-in racket/contract/base -> any/c not/c)
          (only-in racket/function const)
          (only-in "../private/contract.rkt" define/contract-out))
 
@@ -26,7 +26,7 @@
                                           #:abandon abandon
                                           #:breakable? breakable?)
   (-> results-queue? batch-index/c #:abandon evt? #:breakable? boolean?
-      (or/c #f (not/c not)))
+      any/c)
   (define table (results-queue-table q))
   (define ready (wrap-evt (results-queue-ready q) (const #f)))
   (define abandoned (wrap-evt abandon (const #t)))
