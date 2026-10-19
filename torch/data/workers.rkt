@@ -4,7 +4,7 @@
          (only-in ffi/unsafe/custodian
                   make-custodian-at-root register-custodian-shutdown
                   unregister-custodian-shutdown)
-         (only-in racket/contract/base -> any/c or/c)
+         (only-in racket/contract/base -> or/c)
          (only-in racket/match match match-define)
          (only-in "../foreign.rkt"
                   current-generator device device-type make-generator tensor?)
@@ -12,7 +12,7 @@
          (only-in "../private/contract.rkt" define/contract-out)
          (only-in "dataset.rkt" collate/c dataset-batch dataset? indices/c)
          (only-in "results-queue.rkt"
-                  results-queue results-queue-put! results-queue-take!))
+                  batch-index/c results-queue results-queue-put! results-queue-take!))
 
 (provide (struct-out built)
          (struct-out raised))
@@ -22,6 +22,8 @@
 
 (struct built (values-list))
 (struct raised (value))
+
+(struct request (index indices))
 
 (define batch-result/c (or/c built? raised?))
 
@@ -36,7 +38,7 @@
 (define (on-host? v)
   (or (not (tensor? v)) (eq? (device-type (device v)) 'cpu)))
 
-(define (build ds collate r indices)
+(define (build ds collate index indices)
   (with-handlers ([(lambda (v) (not (exn:break? v))) raised])
     (define values-list
       (call-with-values (lambda () (dataset-batch ds indices collate)) list))
@@ -46,7 +48,7 @@
        (raise-arguments-error
         'dataloader
         "workers build CPU tensors, but a batch holds one on an accelerator"
-        "batch" r)])))
+        "batch" index)])))
 
 (define (worker-prng seed)
   (define prng (make-pseudo-random-generator))
@@ -56,11 +58,11 @@
 
 (define (serve ds collate results stop)
   (define stopped (semaphore-peek-evt stop))
-  (define request (handle-evt (thread-receive-evt) (lambda (_) (thread-receive))))
+  (define received (handle-evt (thread-receive-evt) (lambda (_) (thread-receive))))
   (let loop ()
-    (match (and (not (sync/timeout 0 stopped)) (sync stopped request))
-      [(cons r indices)
-       (results-queue-put! results r (build ds collate r indices))
+    (match (and (not (sync/timeout 0 stopped)) (sync stopped received))
+      [(request index indices)
+       (results-queue-put! results index (build ds collate index indices))
        (loop)]
       [_ (void)])))
 
@@ -122,22 +124,24 @@
 (define (worker-pool-threads pool)
   (pool-guard-threads (worker-pool-guard pool)))
 
-(define (worker-of pool r)
-  (modulo r (vector-length (worker-pool-threads pool))))
+(define (worker-of pool index)
+  (modulo index (vector-length (worker-pool-threads pool))))
 
-(define/contract-out (request-batch! pool r indices) ;; noqa
-  (-> worker-pool? exact-nonnegative-integer? indices/c void?)
-  (void (thread-send (vector-ref (worker-pool-threads pool) (worker-of pool r))
-                     (cons r indices)
+(define/contract-out (request-batch! pool index indices) ;; noqa
+  (-> worker-pool? batch-index/c indices/c void?)
+  (void (thread-send (vector-ref (worker-pool-threads pool) (worker-of pool index))
+                     (request index indices)
                      #f)))
 
-(define/contract-out (receive-batch pool r breakable?) ;; noqa
-  (-> worker-pool? exact-nonnegative-integer? boolean? batch-result/c)
-  (define k (worker-of pool r))
+(define/contract-out (receive-batch pool index breakable?) ;; noqa
+  (-> worker-pool? batch-index/c boolean? batch-result/c)
+  (define k (worker-of pool index))
   (define dead (thread-dead-evt (vector-ref (worker-pool-threads pool) k)))
-  (or (results-queue-take! (worker-pool-results pool) r dead breakable?)
+  (or (results-queue-take! (worker-pool-results pool) index
+                           #:abandon dead
+                           #:breakable? breakable?)
       (raised (make-exn:fail
-               (format "dataloader: worker ~a exited before delivering batch ~a" k r)
+               (format "dataloader: worker ~a exited before delivering batch ~a" k index)
                (current-continuation-marks)))))
 
 (define/contract-out (stop-workers! pool) (-> worker-pool? void?) ;; noqa

@@ -227,7 +227,7 @@
   (define-values (indices finish!) (sampler-draws loader))
   (define count (batch-count loader))
   (define exhausting (if (partial-last? loader) (sub1 count) count))
-  (define (request! r)
+  (define (refill! r)
     (define batch-indices (and (< r count) (indices r)))
     (cond
       [(and batch-indices (= r exhausting))
@@ -237,11 +237,11 @@
       [(= r exhausting) (finish!)]
       [else (void)]))
   (for ([r (in-range ahead)])
-    (request! r))
+    (refill! r))
   (define failure #f)
-  (define (receive! k breakable?)
+  (define (receive-and-refill! k breakable?)
     (begin0 (receive-batch pool k breakable?)
-      (request! (+ k ahead))
+      (refill! (+ k ahead))
       (when (= k (sub1 count))
         (stop-workers! pool))))
   ;; a break between batch's return and the sequence recording its values
@@ -251,7 +251,7 @@
     (match taken
       [(cons (== k) result) result]
       [_ (set! taken #f)
-         (define result (receive! k breakable?))
+         (define result (receive-and-refill! k breakable?))
          (set! taken (cons k result))
          result]))
   (define (batch k)

@@ -13,7 +13,8 @@
            (only-in "../vision/transforms.rkt" random-crop random-horizontal-flip)
            (only-in "private/race-harness.rkt"
                     check-known-failure check-ledger ledger-snapshot make-watch
-                    settle! watch-hook with-race-hook))
+                    settle! watch-hook with-race-hook)
+           (only-in "private/within.rkt" within))
 
   (define blamed #rx"blaming: [(][^)]*loader-workers-test[.]rkt")
 
@@ -28,21 +29,6 @@
 
   (define (batches seq)
     (for/list ([vs (in-values-sequence seq)]) (apply record vs)))
-
-  (define (within seconds thunk)
-    (define outcome #f)
-    (define t
-      (thread (lambda ()
-                (set! outcome
-                      (with-handlers ([(lambda (_v) #t)
-                                       (lambda (v) (lambda () (raise v)))])
-                        (call-with-values thunk
-                                          (lambda vs (lambda () (apply values vs)))))))))
-    (cond
-      [(sync/timeout seconds t) (outcome)]
-      [else
-       (kill-thread t)
-       (fail (format "no result within ~a s" seconds))]))
 
   (define top (current-custodian))
 

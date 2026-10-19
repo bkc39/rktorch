@@ -1,34 +1,41 @@
 #lang racket/base
 
-(require (only-in racket/contract/base -> any/c not/c)
+(require (only-in racket/contract/base -> not/c or/c)
+         (only-in racket/function const)
          (only-in "../private/contract.rkt" define/contract-out))
 
-;; A table and a counting semaphore, so a worker's put never waits for the main thread.
+;; A worker's put never waits for the main thread.
 (struct results-queue (table ready) ;; noqa
   #:constructor-name make-results-queue
   #:omit-define-syntaxes)
 
-(provide results-queue?)
+(provide batch-index/c
+         results-queue?)
+
+(define batch-index/c exact-nonnegative-integer?)
 
 (define/contract-out (results-queue) (-> results-queue?) ;; noqa
   (make-results-queue (make-hasheqv) (make-semaphore 0)))
 
-(define/contract-out (results-queue-put! q r v) ;; noqa
-  (-> results-queue? exact-nonnegative-integer? (not/c not) void?)
-  (hash-set! (results-queue-table q) r v)
+(define/contract-out (results-queue-put! q index result) ;; noqa
+  (-> results-queue? batch-index/c (not/c not) void?)
+  (hash-set! (results-queue-table q) index result)
   (semaphore-post (results-queue-ready q)))
 
-(define/contract-out (results-queue-take! q r abandon breakable?) ;; noqa
-  (-> results-queue? exact-nonnegative-integer? evt? boolean? any/c)
+(define/contract-out (results-queue-take! q index ;; noqa
+                                          #:abandon abandon
+                                          #:breakable? breakable?)
+  (-> results-queue? batch-index/c #:abandon evt? #:breakable? boolean?
+      (or/c #f (not/c not)))
   (define table (results-queue-table q))
-  (define ready (wrap-evt (results-queue-ready q) (lambda (_) #f)))
-  (define abandoned (wrap-evt abandon (lambda _results #t)))
+  (define ready (wrap-evt (results-queue-ready q) (const #f)))
+  (define abandoned (wrap-evt abandon (const #t)))
   (define wait (if breakable? sync/enable-break sync))
   (let loop ([abandoned? #f])
-    (define v (hash-ref table r #f))
+    (define result (hash-ref table index #f))
     (cond
-      [v
-       (hash-remove! table r)
-       v]
+      [result
+       (hash-remove! table index)
+       result]
       [abandoned? #f]
       [else (loop (wait ready abandoned))])))
