@@ -47,6 +47,8 @@ libmpg123.so.0
 
 libmp3lame.so.0
   LAME 3.100. LGPL-2.0-or-later: licenses/lame-COPYING.
+  The build deletes lame_init_old, hip_* and lame_decode* from LAME's
+  export list, include/libmp3lame.sym, since the decoder is not built.
   https://downloads.sourceforge.net/project/lame/lame/3.100/lame-3.100.tar.gz
 
 libFLAC.so.14
@@ -59,6 +61,8 @@ libogg.so.0
 
 libvorbis.so.0, libvorbisenc.so.2
   libvorbis 1.3.7. BSD-3-Clause: licenses/libvorbis-COPYING.
+  The build deletes -force_cpusubtype_ALL from configure, where only its
+  Darwin branch uses it.
   https://downloads.xiph.org/releases/vorbis/libvorbis-1.3.7.tar.gz
 
 libopus.so.0

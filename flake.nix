@@ -136,6 +136,10 @@
             mkdir -p "$TMPDIR/info"
             cp ${./torch/info.rkt} "$TMPDIR/info/info.rkt"
             rd check "$TMPDIR/info" ${racket-deps}
+            for platform in x86_64-linux aarch64-macosx; do
+              [ "$(rd platform-packages "$TMPDIR/info" ${./pkgs} $platform)" = "${./pkgs}/torch-$platform" ]
+            done
+            [ "$(rd platform-packages "$TMPDIR/info" ${./pkgs} aarch64-darwin)" = "${./pkgs}/torch-aarch64-macosx" ]
           '';
           racket-deps-guard-test = run "torch-rkt-racket-deps-guard-test" ''
             t=$TMPDIR/trees
@@ -185,12 +189,19 @@
               [ "$(rd platform-packages ${fixtures}/own-platform ${fixtures}/own-platform/pkgs $platform)" \
                 = "${fixtures}/own-platform/pkgs/torch-$platform" ]
             done
-            [ -z "$(rd platform-packages ${fixtures}/own-platform ${fixtures}/own-platform/pkgs aarch64-darwin)" ]
+            [ "$(rd platform-packages ${fixtures}/own-platform ${fixtures}/own-platform/pkgs aarch64-darwin)" \
+              = "${fixtures}/own-platform/pkgs/torch-aarch64-macosx" ]
+            [ -z "$(rd platform-packages ${fixtures}/own-platform ${fixtures}/own-platform/pkgs x86_64-macosx)" ]
             racket ${racketDepsDir}/platform-lists-test.rkt ${racketDepsScript} \
               ${./torch/foreign/raw/native-location.rkt} ${./torch/info.rkt}
+            racket ${racketDepsDir}/platform-lists-test.rkt ${racketDepsScript} \
+              ${./torch/foreign/raw/native-location.rkt} ${fixtures}/own-platform/info.rkt
             fails racket ${racketDepsDir}/platform-lists-test.rkt ${racketDepsScript} \
               ${./torch/foreign/raw/native-location.rkt} ${fixtures}/own-platform-crossed/info.rkt
             grep -qF 'declares torch-x86_64-linux with #:platform "aarch64-macosx", which platform-packages' "$TMPDIR/log"
+            fails racket ${racketDepsDir}/platform-lists-test.rkt ${racketDepsScript} \
+              ${./torch/foreign/raw/native-location.rkt} ${fixtures}/own-platform-unmapped/info.rkt
+            grep -qF 'declares torch-aarch64-macosx with #:platform "x86_64-macosx", which platform-packages' "$TMPDIR/log"
             fails rd platform-packages ${fixtures}/own-platform-skew ${fixtures}/own-platform/pkgs
             grep -qF 'torch-x86_64-linux has #:version "0.1"; ${fixtures}/own-platform-skew is version "0.2"' "$TMPDIR/log"
             fails rd platform-packages ${fixtures}/own-platform-ahead ${fixtures}/own-platform/pkgs

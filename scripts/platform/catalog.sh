@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 #
-#   scripts/platform/linux/catalog.sh <platform-zip> <out-dir> [<url-root>]
+#   scripts/platform/catalog.sh <platform-zip> <out-dir> [<url-root>]
 set -euo pipefail
 
 usage="usage: catalog.sh <platform-zip> <out-dir> [<url-root>]"
 platform=$(realpath "${1:?$usage}")
-out=$(realpath -m "${2:?$usage}")
+mkdir -p "${2:?$usage}"
+out=$(realpath "$2")
 url_root=${3:-/catalog}
 cd "$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"
 
