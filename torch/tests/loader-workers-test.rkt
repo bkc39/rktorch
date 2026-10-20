@@ -183,7 +183,7 @@
     (check-regexp-match #rx"custodian has been shut down" (exn-message raised))
     (check-equal? started '()))
 
-  (test-case "a break while workers start leaves them to the custodian"
+  (test-case "a break while workers start stops them"
     (define c (make-custodian))
     (define loader (dataloader pairs #:batch-size 2 #:workers 2))
     (define-values (raised started)
@@ -193,8 +193,8 @@
                           #:on-start (lambda () (break-thread (current-thread)))))
     (check-pred exn:break? raised)
     (check-equal? (length started) 2)
-    (custodian-shutdown-all c)
-    (check-true (dead-within? started 5)))
+    (check-true (dead-within? started 5))
+    (custodian-shutdown-all c))
 
   (define (consumer-ended-at-start c end!)
     (define loader (dataloader pairs #:batch-size 2 #:workers 2))
