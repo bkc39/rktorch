@@ -109,6 +109,19 @@ jobs:
       - name: Size budget
         run: scripts/platform/size-budget.sh "$OUT/pkg/torch-aarch64-macosx.zip"
 
+      - name: Catalog
+        run: |
+          set -euo pipefail
+          export PATH="$RACKETS/9.1/bin:$PATH"
+          scripts/platform/catalog.sh "$OUT/pkg/torch-aarch64-macosx.zip" "$OUT/catalog" "$OUT/catalog"
+
+      - name: Install and smoke, Racket 9.1
+        run: |
+          set -euo pipefail
+          export PATH="$RACKETS/9.1/bin:$PATH" SMOKE_HOME="$RACKETS/home-9.1"
+          scripts/platform/smoke-install.sh "$OUT/catalog" "macOS $(sw_vers -productVersion)" 2>&1 |
+            tee "$OUT/logs/smoke-macos-latest-9.1.log"
+
       - name: Upload the package and logs
         if: always()
         uses: actions/upload-artifact@v4
@@ -118,6 +131,7 @@ jobs:
           path: |
             .scratch/macos/out/pkg/torch-aarch64-macosx.zip
             .scratch/macos/out/pkg/torch-aarch64-macosx.zip.CHECKSUM
+            .scratch/macos/out/logs/
             .scratch/macos/work/log/
 
   install:
@@ -131,6 +145,7 @@ jobs:
     env:
       OUT: ${{ github.workspace }}/.scratch/macos/out
       RACKETS: ${{ github.workspace }}/.scratch/macos/racket
+      SMOKE_TESTS: torch/tests/native-library-test torch/tests/tensor-ops-test torch/tests/autograd-test
     steps:
       - uses: actions/checkout@v5
 
@@ -163,7 +178,7 @@ jobs:
           export PATH="$RACKETS/9.1/bin:$PATH"
           scripts/platform/catalog.sh "$OUT/pkg/torch-aarch64-macosx.zip" "$OUT/catalog" "$OUT/catalog"
 
-      - name: Smoke, Racket 9.1
+      - name: The CPU suites, Racket 9.1
         run: |
           set -euo pipefail
           export PATH="$RACKETS/9.1/bin:$PATH" SMOKE_HOME="$RACKETS/home-9.1"
@@ -175,7 +190,7 @@ jobs:
         if: (success() || failure()) && steps.catalog.outcome == 'success'
         run: scripts/platform/macos/install-racket.sh 9.3 "$RACKETS/9.3" "$RACKETS/dl"
 
-      - name: Smoke, Racket 9.3
+      - name: The CPU suites, Racket 9.3
         if: (success() || failure()) && steps.racket-9-3.outcome == 'success'
         run: |
           set -euo pipefail

@@ -980,9 +980,11 @@ gtests and does not exceed its size budget. `platform-linux.yml` proves it
 installs and passes the smoke on ubuntu-24.04 and `rockylinux:8`, and that the
 manual renders with all its deps declared. `platform-macos.yml` proves
 `torch-aarch64-macosx` builds, audits, installs and passes the smoke on
-`macos-14`, and, weekly or when asked, that its MPS tests pass. `pkg-build.yml`
-proves the package build server's own tool accepts the Linux zip (see [The
-package build server](#the-package-build-server)). The job-by-job detail is in
+`macos-latest`, passes the CPU suites on `macos-14` (whose runners advertise
+MPS but cannot allocate on it), and, weekly or when asked, that its MPS tests
+pass. `pkg-build.yml` proves the package build server's own tool accepts the
+Linux zip (see [The package build server](#the-package-build-server)). The
+job-by-job detail is in
 [`docs/building.md`](docs/building.md#continuous-integration-and-the-binary-cache).
 
 ### The package build server

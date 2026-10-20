@@ -308,13 +308,18 @@ compile time, where `-Werror=unguarded-availability` and
 `-Werror=unguarded-availability-new` make a call into the SDK newer than the
 target an error in the codecs and the shim.
 
-The build job uploads the zip, its `CHECKSUM`, the audit and the build logs
-as the run's `torch-aarch64-macosx` artifact. A second job, on `macos-14`, the
-package's floor, installs racket-lang.org's notarized Racket 9.1 and 9.3 from
-their `.dmg` and runs `smoke-install.sh` with each.
+The build job then puts the zip in a directory catalog and runs the full
+smoke on its Racket 9.1. `macos-latest` exposes a working GPU to its VM, so
+the smoke prints `mps-available? #t` there and trains `04-mlp` on `'mps` and
+on the CPU. The job uploads the zip, its `CHECKSUM`, the audit, the build logs
+and the smoke's log as the run's `torch-aarch64-macosx` artifact. A second
+job, on `macos-14`, the package's floor, installs racket-lang.org's notarized
+Racket 9.1 and 9.3 from their `.dmg` and runs `smoke-install.sh` with each,
+with `SMOKE_TESTS` (a space-separated list of modules in place of
+`torch/pkg-build/smoke`) naming only the CPU suites for the native library,
+tensor ops and autograd: GitHub's `macos-14` runners advertise MPS but cannot
+allocate on it, and those suites prove the dylibs load and compute there.
 
-The arm64 runner exposes a GPU to its VM: the smoke prints
-`mps-available? #t` there and trains `04-mlp` on `'mps` and on the CPU.
 Weekly, on demand, or when a calling workflow passes `mps: true`, an `mps` job
 on `macos-latest` installs the package on Racket 9.3, fails unless
 `(mps-available?)`, and runs the installed device, `to`, audio-device and
@@ -549,8 +554,10 @@ installs, so the platform packages have lanes of their own:
   in the workflow, on every push to master, weekly, and on demand.
 - **`platform-macos.yml`.** Its `build` job, on `macos-latest`, builds,
   audits (with the negative control) and gtests `torch-aarch64-macosx`, then
-  assembles and budgets the zip. `install`, on `macos-14`, smokes it at
-  Racket 9.1 and 9.3; `mps` runs the MPS suites ([above](#arm64-macos))
+  assembles and budgets the zip and runs the full smoke at Racket 9.1.
+  `install`, on `macos-14`, runs only the CPU suites at Racket 9.1 and 9.3,
+  since GitHub's `macos-14` runners advertise MPS but cannot allocate on it;
+  `mps` runs the MPS suites ([above](#arm64-macos))
   weekly, on demand, or when a calling workflow passes `mps: true`. The lane
   runs on pull requests that touch the paths listed in the workflow, weekly,
   and on demand.
