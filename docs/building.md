@@ -226,9 +226,13 @@ the image, `smoke-install.sh` installs into a Racket user home of its own,
 `$SMOKE_HOME` or else a fresh temporary directory, and ignores any
 `PLTUSERHOME`, `PLTADDONDIR` or `TORCHRKT_NATIVE_LIB_PATH` it inherits, so
 even from `nix develop` it tests the platform package. It fails if
-`raco pkg install` wrote anything to stderr, then trains `04-mlp` on the
-device it picks, and on the CPU as well when that is an accelerator,
-printing `(mps-available?)` on the way, and round-trips a FLAC file:
+`raco pkg install` wrote anything to stderr, then runs the installed
+`torch/pkg-build/smoke.rkt`, the module the package build server tests
+([below](#reproducing-the-package-build-server)), failing on any stderr
+there too. The smoke runs the suites for the native library, tensor ops,
+autograd and `nn`, trains `04-mlp` on the device it picks, and on the CPU as
+well when that is an accelerator, printing where the shim came from and
+`(mps-available?)` on the way, and round-trips a FLAC file:
 
 ```bash
 scripts/platform/catalog.sh .scratch/pkg/torch-x86_64-linux.zip .scratch/catalog
@@ -312,6 +316,84 @@ install, run Racket with `PLTUSERHOME` set to the `SMOKE_HOME` it used:
 PLTUSERHOME=$PWD/.scratch/smoke-home PATH=$PWD/.scratch/racket-9.1/bin:$PATH \
   racket -l racket/base -l torch -e '(mps-available?)'
 ```
+
+## Reproducing the package build server
+
+[pkg-build.racket-lang.org](https://pkg-build.racket-lang.org/about.html)
+builds every catalog package, and its three columns on
+pkgs.racket-lang.org are:
+
+- **build:** `raco pkg install` from the catalog in a fresh VM, which
+  compiles torch and renders its manual (the manual's examples load
+  libtorch), then `raco setup --check-pkg-deps`;
+- **docs:** the rendered manual it publishes;
+- **tests:** `raco pkg install -u --auto torch && raco test --drdr --package torch`,
+  in another fresh VM, from the built package.
+
+What it runs on, and what that asks of torch:
+
+- the `racket/pkg-build:deps-x86_64` image (Debian 10, glibc 2.28), or first
+  `deps-min-x86_64`, capped at 1 GB of memory and 1 GB of swap;
+- the current release's natipkg pkg-build installer, so
+  `(system-library-subpath #f)` is `x86_64-linux-natipkg` and
+  `torch-x86_64-linux` has to be declared for that string as well;
+- `--drdr`: as many parallel jobs as the VM has processors, every file in a
+  process of its own (a module without a `test` submodule is required
+  instead), a fresh `PLTUSERHOME` per file, any output to stderr a failure,
+  and 90 s per file unless `test-timeouts` says otherwise;
+- ten minutes for the whole test run, a limit nothing raises;
+- `PLT_PKG_BUILD_SERVICE` set while it builds and tests (with
+  `PLT_INFO_ALLOW_VARS` letting `info.rkt` read it).
+
+Every file loads libtorch, so the full suite there is hundreds of processes
+mapping 445 MB each in one 1 GB VM. With `PLT_PKG_BUILD_SERVICE` set,
+`torch/info.rkt` therefore omits every top-level entry of the collection but
+`pkg-build/`, whose one test module, `smoke.rkt`, requires the `test`
+submodules of `native-library-test`, `tensor-ops-test`, `autograd-test` and
+`nn-test`, trains `04-mlp` and round-trips a FLAC file, in one process. It
+also runs in the normal suite. `tests/server-test-set-test.rkt` asks
+`raco test` which files it would run with the variable set and fails unless
+the answer is `pkg-build/smoke.rkt` alone, so a new top-level directory has to
+be added to the omit list (or to the smoke) on purpose. In a checkout the
+smoke takes about a second and peaks at about 320 MB.
+
+`scripts/pkg-build/build.rkt` runs the same `pkg-build` tool the server
+uses, on `torch` alone, in those images under the same cap. It needs Docker,
+the `pkg-build` package and a directory catalog holding the Linux platform
+zip and this checkout's `torch`:
+
+```bash
+raco pkg install --auto pkg-build
+docker pull racket/pkg-build:deps-x86_64
+docker pull racket/pkg-build:deps-min-x86_64
+scripts/platform/catalog.sh .scratch/pkg/torch-x86_64-linux.zip "$PWD/.scratch/catalog" "$PWD/.scratch/catalog"
+PKG_BUILD_CATALOG=.scratch/catalog/catalog PKG_BUILD_JOBS=4 racket scripts/pkg-build/build.rkt
+racket scripts/pkg-build/report.rkt .scratch/pkg-build/out/work
+```
+
+The catalog's third argument has to be its absolute path: the zips' URLs are
+read on the host. `PKG_BUILD_CATALOG` takes directories or URLs, separated by
+spaces, consulted before pkgs.racket-lang.org, which supplies the other
+dependencies; `PKG_BUILD_RACKET` picks the release (9.3);
+`PKG_BUILD_WORK_DIR` the work directory (`.scratch/pkg-build/out/work`,
+reused incrementally); `PKG_BUILD_JOBS` the `--jobs` for `raco setup`, `raco
+pkg install` and `raco test`, which otherwise follow the processor count.
+pkg-build has no CPU cap for its containers, and the harness gives every step
+40 minutes, as pkg-build's own Docker example does, so it does not enforce
+the server's ten minutes for tests: the test transcript records how long the
+run took. `report.rkt` prints the
+transcripts and the columns and fails if any is red.
+`scripts/pkg-build/memory-peaks.sh watch <log>`, run beside it, samples each
+container's cgroup `memory.peak`; `report <log>` prints the peaks.
+
+`.github/workflows/pkg-build.yml` does all of it on GitHub's runner, from a
+fresh build of the Linux zip: weekly, on `workflow_dispatch` (with the
+Racket release as an input), and on a pull request that touches the
+harness, `torch/pkg-build/`, `torch/info.rkt`, `pkgs/torch-x86_64-linux/` or
+`scripts/platform/` outside `macos/`. It uploads the zip, the transcripts
+(`install`, `test-success` or `test-fail`, and any failure), `summary.rktd`,
+the memory peaks and the rendered manual as the `pkg-build-results`
+artifact.
 
 ## The manual
 
@@ -427,7 +509,8 @@ includes the OCaml toolchain.
 ## Continuous integration and the binary cache
 
 CI runs `nix flake check` on Linux and macOS, a Resyntax lint gate, and a
-code-generation drift check. Linux jobs substitute from a tailnet-only binary
+code-generation drift check; the platform packages and the package build
+server have workflows of their own (above). Linux jobs substitute from a tailnet-only binary
 cache; the details and the failure modes are in [`AGENTS.md`](../AGENTS.md),
 which is also the canonical guide to the repository's layout and conventions.
 
