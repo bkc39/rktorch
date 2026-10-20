@@ -4,17 +4,17 @@
   (require (only-in racket/list first last)
            (only-in racket/runtime-path #%datum define-runtime-path)
            rackunit
-           (only-in "../audio/data.rkt" load-audio save-audio)
-           (only-in "../foreign/raw/native-location.rkt" native-library-directory)
-           (only-in "../main.rkt"
+           (only-in torch
                     accelerator-if-available cpu-device device-type mps-available?
                     tensor->list)
-           (only-in "../private/util.rkt" with-temporary-file)
-           (only-in "../scribblings/examples/04-mlp.rkt" run-example)
-           (submod "../tests/autograd-test.rkt" test)
-           (submod "../tests/native-library-test.rkt" test)
-           (submod "../tests/nn-test.rkt" test)
-           (submod "../tests/tensor-ops-test.rkt" test))
+           (only-in torch/audio/data load-audio save-audio)
+           (only-in torch/foreign/raw/native-location native-library-directory)
+           (only-in torch/private/util with-temporary-file)
+           (only-in torch/scribblings/examples/04-mlp run-example)
+           (submod torch/tests/autograd-test test)
+           (submod torch/tests/native-library-test test)
+           (submod torch/tests/nn-test test)
+           (submod torch/tests/tensor-ops-test test))
 
   (define-runtime-path flac-fixture "../audio/fixtures/sine-440-16k.flac")
 
