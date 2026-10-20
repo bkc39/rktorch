@@ -107,9 +107,12 @@ with `backward!` outside the form as PyTorch recommends). From
   `default-collate`,
   `dataloader #:batch-size #:shuffle? #:drop-last? #:collate #:generator`,
   `in-dataloader` (one traversal = one epoch, the generator's stream
-  continuing), `in-epochs`; synchronous, single-threaded like
-  `num_workers=0`; a seeded loader replays `DataLoader(generator=g)`'s
-  batch order
+  continuing), `in-epochs`; `#:workers 0` builds batches on the calling
+  thread like `num_workers=0`, `#:workers n #:prefetch p` on n parallel
+  threads (#168), batch j by worker j mod n, in order, at most n*p ahead,
+  each worker seeded like PyTorch's; torch calls inside a worker are
+  serialized through the main thread until #296; a seeded loader replays
+  `DataLoader(generator=g)`'s batch order for any worker count
 - translation (`torch/text/translation.rkt`, #153): the PyTorch seq2seq
   tutorial's eng-fra pairs, `load-translation-pairs` (zip cached, 11445
   pairs after the tutorial's normalisation and filter) and
