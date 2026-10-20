@@ -995,7 +995,49 @@
                                (for ([_ (dataloader (leaking 4) #:workers 2)])
                                  (void)))))))
       (check-pred exn:fail? v)
-      (check-regexp-match #rx"workers build CPU tensors" (exn-message v)))))
+      (check-regexp-match #rx"workers build CPU tensors" (exn-message v))))
+
+  (struct held (cpu acc) #:transparent)
+  (struct shelved (cpu acc) #:prefab)
+
+  (define (collated wrap dev)
+    (define (collate _items)
+      (wrap (tensor (list 0)) (to (tensor (list 1)) dev)))
+    (within 60 (lambda ()
+                 (with-handlers ([(lambda (_v) #t) values])
+                   (for/list ([b (dataloader pairs #:workers 2 #:collate collate)])
+                     b)))))
+
+  (define (refused? v)
+    (and (exn:fail? v) (regexp-match? #rx"workers build CPU tensors" (exn-message v))))
+
+  (define containers
+    `((list . ,list)
+      (vector . ,vector)
+      (hash-value . ,(lambda (c a) (hash 'cpu c 'acc a)))
+      (hash-key . ,(lambda (c a) (hasheq a c)))
+      (box . ,(lambda (_c a) (box a)))
+      (transparent . ,held)
+      (prefab . ,shelved)
+      (nested . ,(lambda (c a) (list (vector (hash 'nested (cons c a))))))))
+
+  (test-case "a custom collate's containers hold only CPU tensors"
+    (define acc (accelerator-if-available))
+    (unless (eq? (device-type acc) 'cpu)
+      (check-equal? (for/list ([named (in-list containers)]
+                               #:unless (refused? (collated (cdr named) acc)))
+                      (car named))
+                    '()
+                    "containers whose accelerator tensor reached the consumer")))
+
+  (test-case "CPU tensors in containers, cyclic ones too, are delivered"
+    (define (cyclic c a)
+      (define v (make-vector 3 c))
+      (vector-set! v 1 a)
+      (vector-set! v 2 v)
+      v)
+    (for ([wrap (in-list (cons cyclic (map cdr containers)))])
+      (check-equal? (length (collated wrap (cpu-device))) 10))))
 
 (module+ test
   (require (only-in "private/wedge.rkt" call-with-process-deadline))

@@ -35,15 +35,31 @@
 
 (define worker-custodian (make-custodian-at-root))
 
+(define (parts v)
+  (match v
+    [(cons a d) (list a d)]
+    [(? vector?) (vector->list v)]
+    [(box b) (list b)]
+    [(? hash?) (append (hash-keys v) (hash-values v))]
+    [(? struct?) (cdr (vector->list (struct->vector v)))]
+    [_ '()]))
+
 (define (on-host? v)
-  (or (not (tensor? v)) (eq? (device-type (device v)) 'cpu)))
+  (define seen (make-hasheq))
+  (let walk ([v v])
+    (cond
+      [(tensor? v) (eq? (device-type (device v)) 'cpu)]
+      [(hash-ref seen v #f) #t]
+      [else
+       (hash-set! seen v #t)
+       (andmap walk (parts v))])))
 
 (define (build ds collate index indices)
   (with-handlers ([(lambda (v) (not (exn:break? v))) raised])
     (define values-list
       (call-with-values (lambda () (dataset-batch ds indices collate)) list))
     (cond
-      [(andmap on-host? values-list) (built values-list)]
+      [(on-host? values-list) (built values-list)]
       [else
        (raise-arguments-error
         'dataloader

@@ -219,7 +219,10 @@ held the traversal has let it go and a collection runs. They run outside
 that custodian, so a @racket[custodian-limit-memory] on it does not cover
 what they allocate. On Racket 9.3, a place that ends while one of its
 workers is building a batch hangs instead of exiting. Workers build CPU
-tensors, so @racket[ds] must not be on an accelerator. @racket[#:prefetch]
+tensors, so @racket[ds] must not be on an accelerator, and a batch raises at
+its position when one of its values holds an accelerator tensor, itself or
+inside the pairs, vectors, boxes, hash tables, and transparent or prefab
+structures a collate returns. @racket[#:prefetch]
 needs @racket[workers] above 0. A dataset's @racket[#:ref] and
 @racket[#:batch], and @racket[collate], run in several threads at once, so
 any state they share must be synchronized. Until
