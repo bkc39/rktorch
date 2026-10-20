@@ -1,14 +1,16 @@
 #lang racket/base
 (require (only-in pkg/lib installed-pkg-names pkg-directory)
          (only-in pkg/name package-source->name+type)
-         (only-in racket/contract/base ->)
+         (only-in racket/contract/base -> ->* listof or/c)
          (only-in racket/contract/region define/contract)
          (only-in racket/file file->lines)
-         (only-in racket/list partition remove-duplicates)
+         (only-in racket/list filter-not partition remove-duplicates)
          (only-in racket/match match)
          (only-in racket/path file-name-from-path path-has-extension?)
          (only-in racket/sequence sequence->list)
          (only-in racket/string string-join)
+         (only-in racket/system system*)
+         (only-in setup/dirs find-console-bin-dir)
          (only-in setup/getinfo get-info/full)
          (only-in version/utils valid-version? version<=?))
 
@@ -31,8 +33,20 @@
        [_ #f])]
     [_ #f]))
 
+(define own-platform-packages '("torch-aarch64-macosx" "torch-x86_64-linux"))
+
 (define (platform-dep? dep)
   (and (dep-option dep '#:platform) #t))
+
+(define (own-platform-dep? dep)
+  (define platform (dep-option dep '#:platform))
+  (and platform
+       (member (dep-name dep) own-platform-packages)
+       (or (string? platform)
+           (raise-user-error 'racket-deps
+                             "~a has #:platform ~s; expected a string such as \"x86_64-linux\""
+                             (dep-name dep)
+                             platform))))
 
 (define (invalid-version-dep? dep)
   (define version (dep-option dep '#:version))
@@ -42,11 +56,15 @@
   (define-values (_name type) (package-source->name+type (dep-name dep) #f))
   (not (eq? type 'name)))
 
+(define (read-info info-dir)
+  (or (get-info/full info-dir)
+      (raise-user-error 'racket-deps "no info.rkt in ~a" info-dir)))
+
+(define (all-deps info)
+  (append (info 'deps (λ () '())) (info 'build-deps (λ () '()))))
+
 (define (info-deps info-dir)
-  (define info
-    (or (get-info/full info-dir)
-        (raise-user-error 'racket-deps "no info.rkt in ~a" info-dir)))
-  (define declared (append (info 'deps (λ () '())) (info 'build-deps (λ () '()))))
+  (define declared (filter-not own-platform-dep? (all-deps (read-info info-dir))))
   (define platform-dep (findf platform-dep? declared))
   (when platform-dep
     (raise-user-error 'racket-deps
@@ -135,6 +153,47 @@
   (or (and base (dep-option base '#:version))
       (raise-user-error 'racket-deps "~a declares no (\"base\" #:version ...) floor" info-dir)))
 
+(define (skeleton-version skeleton)
+  (define info (get-info/full skeleton))
+  (and info (info 'version (λ () #f))))
+
+(define (check-skeleton dep skeleton info-dir version)
+  (define wanted (dep-option dep '#:version))
+  (define found (skeleton-version skeleton))
+  (unless (equal? wanted version)
+    (raise-user-error 'racket-deps "~a has #:version ~s; ~a is version ~s"
+                      (dep-name dep) wanted info-dir version))
+  (unless found
+    (raise-user-error 'racket-deps "~a has no info.rkt with a version; ~a is version ~s"
+                      skeleton info-dir version))
+  (unless (equal? found version)
+    (raise-user-error 'racket-deps "~a is version ~s; ~a is version ~s"
+                      skeleton found info-dir version)))
+
+(define/contract (platform-packages info-dir pkgs-dir
+                                    #:platform [subpath (path->string (system-library-subpath #f))])
+  (->* [directory-exists? directory-exists?] [#:platform string?] (listof path?))
+  (define info (read-info info-dir))
+  (define version (info 'version (λ () "0.0")))
+  (define own (filter own-platform-dep? (all-deps info)))
+  (define (skeleton dep) (build-path pkgs-dir (dep-name dep)))
+  (for ([dep (in-list own)])
+    (check-skeleton dep (skeleton dep) info-dir version))
+  (for/list ([dep (in-list own)]
+             #:when (equal? (dep-option dep '#:platform) subpath))
+    (skeleton dep)))
+
+(define/contract (install-platform info-dir pkgs-dir mode)
+  (-> directory-exists? directory-exists? (or/c "--copy" "--link") void?)
+  (match (platform-packages info-dir pkgs-dir)
+    ['() (void)]
+    [skeletons
+     (unless (apply system* (build-path (find-console-bin-dir) "raco")
+                    "pkg" "install" "--batch" "--deps" "fail" "--no-setup" "--scope" "user"
+                    "--skip-installed" mode skeletons)
+       (raise-user-error 'racket-deps "raco pkg install failed for ~a"
+                         (string-join (map path->string skeletons) " ")))]))
+
 (define (build-output? p)
   (or (link-exists? p)
       (equal? (file-name-from-path p) (string->path "compiled"))
@@ -157,6 +216,12 @@
     [(vector "names" info-dir)
      (for-each (λ (dep) (displayln (dep-name dep))) (catalog-deps info-dir))]
     [(vector "base-version" info-dir) (displayln (base-version info-dir))]
+    [(vector "platform-packages" info-dir pkgs-dir)
+     (for-each displayln (platform-packages info-dir pkgs-dir))]
+    [(vector "platform-packages" info-dir pkgs-dir platform)
+     (for-each displayln (platform-packages info-dir pkgs-dir #:platform platform))]
+    [(vector "install-platform" info-dir pkgs-dir mode)
+     (install-platform info-dir pkgs-dir mode)]
     [(vector "installed")
      (for-each displayln (installed-pkg-names #:scope 'user))]
     [(vector "check" info-dir deps-dir) (check-current info-dir deps-dir)]
@@ -167,6 +232,8 @@
       'racket-deps
       (string-append
        "usage: manifest <info-dir> | names <info-dir> | base-version <info-dir> | installed\n"
+       "     | platform-packages <info-dir> <pkgs-dir> [<platform>]\n"
+       "     | install-platform <info-dir> <pkgs-dir> --copy|--link\n"
        "     | check <info-dir> <deps-dir> | closure <pkgs-dir> | guard <tree>\n"
        "got ~s")
       args)]))

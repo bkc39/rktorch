@@ -70,8 +70,8 @@
       # Source catalog only: a built package's compiled/ belongs to one Racket.
       racketDepsDir = ./nix/racket-deps;
       racketDepsScript = "${racketDepsDir}/racket-deps.rkt";
-      provisionDepsStep = deps: pkgDir: keep: ''
-        if ! bash ${racketDepsDir}/provision.sh ${deps} ${pkgDir} ${keep}; then
+      provisionDepsStep = deps: pkgDir: keep: platformDir: ''
+        if ! bash ${racketDepsDir}/provision.sh ${deps} ${pkgDir} ${keep} ${platformDir}; then
           echo "ERROR: provisioning failed; not stamping, so the next" >&2
           echo "       shell entry retries it." >&2
           exit 1
@@ -136,6 +136,10 @@
             mkdir -p "$TMPDIR/info"
             cp ${./torch/info.rkt} "$TMPDIR/info/info.rkt"
             rd check "$TMPDIR/info" ${racket-deps}
+            for platform in x86_64-linux aarch64-macosx; do
+              [ "$(rd platform-packages "$TMPDIR/info" ${./pkgs} $platform)" = "${./pkgs}/torch-$platform" ]
+            done
+            [ "$(rd platform-packages "$TMPDIR/info" ${./pkgs} aarch64-darwin)" = "${./pkgs}/torch-aarch64-macosx" ]
           '';
           racket-deps-guard-test = run "torch-rkt-racket-deps-guard-test" ''
             t=$TMPDIR/trees
@@ -180,6 +184,35 @@
             rd check ${fixtures}/versioned "$TMPDIR/fetched-1.3"
             fails rd names ${fixtures}/platform
             grep -q 'extra-lib has #:platform unix; platform-qualified' "$TMPDIR/log"
+            rd check ${fixtures}/own-platform "$built"
+            for platform in x86_64-linux aarch64-macosx; do
+              [ "$(rd platform-packages ${fixtures}/own-platform ${fixtures}/own-platform/pkgs $platform)" \
+                = "${fixtures}/own-platform/pkgs/torch-$platform" ]
+            done
+            [ "$(rd platform-packages ${fixtures}/own-platform ${fixtures}/own-platform/pkgs aarch64-darwin)" \
+              = "${fixtures}/own-platform/pkgs/torch-aarch64-macosx" ]
+            [ -z "$(rd platform-packages ${fixtures}/own-platform ${fixtures}/own-platform/pkgs x86_64-macosx)" ]
+            racket ${racketDepsDir}/platform-lists-test.rkt ${racketDepsScript} \
+              ${./torch/foreign/raw/native-location.rkt} ${./torch/info.rkt}
+            racket ${racketDepsDir}/platform-lists-test.rkt ${racketDepsScript} \
+              ${./torch/foreign/raw/native-location.rkt} ${fixtures}/own-platform/info.rkt
+            fails racket ${racketDepsDir}/platform-lists-test.rkt ${racketDepsScript} \
+              ${./torch/foreign/raw/native-location.rkt} ${fixtures}/own-platform-crossed/info.rkt
+            grep -qF 'declares torch-x86_64-linux with #:platform "aarch64-macosx", which platform-packages' "$TMPDIR/log"
+            fails racket ${racketDepsDir}/platform-lists-test.rkt ${racketDepsScript} \
+              ${./torch/foreign/raw/native-location.rkt} ${fixtures}/own-platform-unmapped/info.rkt
+            grep -qF 'declares torch-aarch64-macosx with #:platform "x86_64-macosx", which platform-packages' "$TMPDIR/log"
+            fails rd platform-packages ${fixtures}/own-platform-skew ${fixtures}/own-platform/pkgs
+            grep -qF 'torch-x86_64-linux has #:version "0.1"; ${fixtures}/own-platform-skew is version "0.2"' "$TMPDIR/log"
+            fails rd platform-packages ${fixtures}/own-platform-ahead ${fixtures}/own-platform/pkgs
+            grep -qF 'torch-x86_64-linux is version "0.1"; ${fixtures}/own-platform-ahead is version "0.2"' "$TMPDIR/log"
+            mkdir "$TMPDIR/no-skeletons"
+            fails rd platform-packages ${fixtures}/own-platform "$TMPDIR/no-skeletons"
+            grep -q 'torch-x86_64-linux has no info.rkt with a version' "$TMPDIR/log"
+            fails rd platform-packages ${fixtures}/own-platform-symbol ${fixtures}/own-platform/pkgs
+            grep -qF 'torch-x86_64-linux has #:platform unix; expected a string such as "x86_64-linux"' "$TMPDIR/log"
+            fails rd names ${fixtures}/own-platform-symbol
+            grep -qF 'torch-x86_64-linux has #:platform unix; expected a string' "$TMPDIR/log"
             [ "$(rd base-version ${fixtures}/floored)" = 9.0 ]
             fails rd base-version ${fixtures}/current
             fails rd base-version ${fixtures}/versioned
@@ -205,7 +238,58 @@
           racket-deps-provision-test = run "torch-rkt-racket-deps-provision-test" ''
             timeout -k 10 600 bash ${racketDepsDir}/provision-test.sh \
               ${racketDepsDir}/provision.sh ${fixtures}/provision \
-              ${pkgs.writeText "provision-deps-step" (provisionDepsStep ''"$1"'' ''"$2"'' ''"$3"'')}
+              ${pkgs.writeText "provision-deps-step" (provisionDepsStep ''"$1"'' ''"$2"'' ''"$3"'' ''"$4"'')}
+          '';
+        };
+
+      abiStampTestsFor = pkgs:
+        let
+          cApi = ./cpp/include/torchrkt/c_api;
+          run = name: script: pkgs.runCommand name { nativeBuildInputs = [ pkgs.cmake ]; } ''
+            stamp() { cmake -DC_API_DIR="$1" -P ${./cpp/cmake/abi_stamp.cmake}; }
+            current() {
+              want=$(stamp "$1")
+              have=$(tr -d '"\n' < "$2")
+              if [ "$want" != "$have" ]; then
+                echo "torch/foreign/raw/abi-stamp.rktd holds $have, but the c_api headers hash to $want." >&2
+                echo "Regenerate it with: nix run .#abi-stamp (nix run .#codegen also does), and commit it." >&2
+                return 1
+              fi
+            }
+            fails() {
+              if "$@" > "$TMPDIR/log" 2>&1; then
+                echo "expected a failure: $*" >&2
+                exit 1
+              fi
+            }
+            ${script}
+            mkdir "$out"
+          '';
+        in
+        {
+          abi-stamp-current = run "torch-rkt-abi-stamp-current" ''
+            current ${cApi} ${./torch/foreign/raw/abi-stamp.rktd}
+          '';
+          abi-stamp-test = run "torch-rkt-abi-stamp-test" ''
+            base=$(stamp ${cApi})
+            [[ "$base" =~ ^[0-9a-f]{64}$ ]]
+            copy() { cp -r ${cApi} "$TMPDIR/$1"; chmod -R u+w "$TMPDIR/$1"; }
+            copy same
+            [ "$(stamp "$TMPDIR/same")" = "$base" ]
+            copy edited
+            echo >> "$TMPDIR/edited/global.h"
+            [ "$(stamp "$TMPDIR/edited")" != "$base" ]
+            fails current "$TMPDIR/edited" ${./torch/foreign/raw/abi-stamp.rktd}
+            grep -q 'nix run .#abi-stamp' "$TMPDIR/log"
+            copy renamed
+            mv "$TMPDIR/renamed/global.h" "$TMPDIR/renamed/global2.h"
+            [ "$(stamp "$TMPDIR/renamed")" != "$base" ]
+            copy nested
+            echo >> "$TMPDIR/nested/generated/math.h"
+            [ "$(stamp "$TMPDIR/nested")" != "$base" ]
+            copy added
+            touch "$TMPDIR/added/extra.h"
+            [ "$(stamp "$TMPDIR/added")" != "$base" ]
           '';
         };
 
@@ -715,6 +799,7 @@
             runtimeInputs = [
               (pkgs.python314.withPackages (ps: [ ps.torch ]))
               pkgs.clang-tools
+              pkgs.cmake
             ];
             text = ''
               if [ ! -f codegen/generate.py ]; then
@@ -724,10 +809,23 @@
               exec python3 -m codegen "$@"
             '';
           };
+
+          abi-stamp = pkgs.writeShellApplication {
+            name = "abi-stamp";
+            runtimeInputs = [ pkgs.cmake ];
+            text = ''
+              if [ ! -f cpp/cmake/abi_stamp.cmake ]; then
+                echo "abi-stamp: run from the repo root (cpp/cmake/abi_stamp.cmake not found)" >&2
+                exit 1
+              fi
+              cmake -DOUT=torch/foreign/raw/abi-stamp.rktd -P cpp/cmake/abi_stamp.cmake
+              echo "abi-stamp: torch/foreign/raw/abi-stamp.rktd is $(cat torch/foreign/raw/abi-stamp.rktd)"
+            '';
+          };
         in
         {
           default = racket;
-          inherit cpp cpp-format cpp-line-count cpp-tidy racket racket91
+          inherit abi-stamp cpp cpp-format cpp-line-count cpp-tidy racket racket91
             racket-deps racket-linters codegen copy-native-libs matrix
             libtorch-zip;
         }
@@ -738,6 +836,10 @@
         });
 
       apps = forAllSystems (system: {
+        abi-stamp = {
+          type = "app";
+          program = "${self.packages.${system}.abi-stamp}/bin/abi-stamp";
+        };
         codegen = {
           type = "app";
           program = "${self.packages.${system}.codegen}/bin/codegen";
@@ -768,7 +870,34 @@
             mkdir $out
           '';
         } // self.packages.${system}.racket-deps.tests
-          // self.packages.${system}.racket91.tests);
+          // self.packages.${system}.racket91.tests
+          // abiStampTestsFor pkgs
+          // pkgs.lib.optionalAttrs pkgs.stdenv.isLinux {
+            platform-audit-test = pkgs.runCommand "torch-rkt-platform-audit-test"
+              { nativeBuildInputs = [ pkgs.binutils ]; } ''
+              audit() {
+                if bash ${./scripts/platform/linux/audit-bundle.sh} "$@" > "$TMPDIR/log" 2>&1; then
+                  echo "the audit passed $*" >&2
+                  cat "$TMPDIR/log" >&2
+                  exit 1
+                fi
+              }
+              audit ${self.packages.${system}.cpp}/lib
+              grep -q 'FAIL libtorchrkt.so: mentions /nix/store/' "$TMPDIR/log"
+              grep -q 'FAIL libtorchrkt.so: runpath entry /nix/store/' "$TMPDIR/log"
+              grep -q 'FAIL libtorchrkt.so: needs GLIBC_2\.[0-9]* > 2.28' "$TMPDIR/log"
+              grep -qF 'FAIL libtorchrkt.so: NEEDs libc10.so, neither bundled nor a system library' "$TMPDIR/log"
+              mkdir "$TMPDIR/sibling"
+              cp ${self.packages.${system}.cpp}/lib/libtorchrkt.so "$TMPDIR/sibling/"
+              cp ${self.packages.${system}.cpp}/lib/libtorchrkt.so "$TMPDIR/sibling/libc10.so"
+              audit "$TMPDIR/sibling"
+              grep -qF 'FAIL libtorchrkt.so: NEEDs bundled libc10.so, but its runpath lacks $ORIGIN' "$TMPDIR/log"
+              PATH=${pkgs.writeShellScriptBin "objdump" "true"}/bin:$PATH \
+                audit ${self.packages.${system}.cpp}/lib
+              grep -q 'objdump -T reads GLIBC_<none>, readelf -V GLIBC_2\.' "$TMPDIR/log"
+              mkdir "$out"
+            '';
+          });
 
       devShells = forAllSystems (system:
         let
@@ -891,7 +1020,7 @@
               fi
             fi
             ${stageNativeLibsIfStale shim}
-            ${provisionDepsStep racket-deps ''"$PWD/torch"'' racket-linters}
+            ${provisionDepsStep racket-deps ''"$PWD/torch"'' racket-linters ''"$PWD/pkgs"''}
             # Stamped by the dev tools' store path, so a bump reaches checkouts
             # provisioned before it: install adds the missing packages, then
             # update moves all of them, from an older pin or the live catalog

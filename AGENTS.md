@@ -424,8 +424,9 @@ for a change, and the gates it has to pass before it is done, are the
 nix build              # builds cpp, installs the pkg, runs raco test + examples
 nix build .#cpp        # CMake build + gtest only
 nix flake check        # the Nix checks: cpp, format, tidy, line-count, racket,
-                       # racket91, racket-floor, matrix-runner-test and the
-                       # racket-deps-* checks
+                       # racket91, racket-floor, matrix-runner-test,
+                       # platform-audit-test (Linux), the
+                       # racket-deps-* and abi-stamp-* checks
                        # (CI also runs the Resyntax gate and codegen-drift)
 nix develop            # dev shell (includes a Python with `torch`)
 nix develop .#ci       # lean shell without Python torch (used by the lint job)
@@ -483,16 +484,77 @@ beyond the Racket distribution, as source trees only. When those deps change,
 or a fresh store reports a hash mismatch (upstream moved), set its
 `outputHash` to `""`, `nix build .#racket-deps`, paste the reported hash. The
 `racket-deps-current` check says "info.rkt changed; bump racket-deps outputHash",
-and also fails on an unmet `#:version` minimum. A `#:platform` dep is refused,
-whether `torch/info.rkt` or a fetched package declares it: one hash cannot
-hold a per-system fetch; so is a package source (a URL or
-path): racket-deps fetches catalog packages by name. `racket-deps-guard-test`
+and also fails on an unmet `#:version` minimum. torch's own platform packages
+(`torch-x86_64-linux`, `torch-aarch64-macosx`: `own-platform-packages` in
+`racket-deps.rkt`, which must name the same packages as `platform-packages`
+in `torch/foreign/raw/native-location.rkt`; `racket-deps-info-test` fails
+when they differ) are dropped from the fetch.
+Instead, the library-less skeleton under `pkgs/` is installed beside `torch`,
+and the staged shim wins over it. `racket-deps.rkt platform-packages
+<info-dir> <pkgs-dir> [<platform>]` names the skeletons that apply to the
+host (or to `<platform>`), and fails unless each dep's `#:version` and each
+skeleton's `version` equal torch's; `install-platform <info-dir> <pkgs-dir>
+--copy|--link` installs them with `--deps fail`.
+Any other `#:platform` dep is refused, whether `torch/info.rkt` or a fetched
+package declares it: one hash cannot hold a per-system fetch. So is a
+package source (a URL or path): racket-deps fetches catalog packages by
+name. `racket-deps-guard-test`
 and `racket-deps-info-test` test `nix/racket-deps/racket-deps.rkt`;
 `racket-deps-provision-test` tests `nix/racket-deps/provision.sh`, the dev
 shells' provisioning. It re-runs when racket-deps, the Racket version or
 `torch/info.rkt` changes, runs the same drift check first, removes packages
 only the previous racket-deps held, and installs `torch` with `--deps fail`,
-never from the live catalog.
+never from the live catalog. The flake's install (`nix/matrix/racket-cell.sh`,
+which the build, the checks and every matrix cell run) and the shell
+provisioning install the host's skeleton first with `install-platform`, so
+`--deps fail` finds it.
+
+### The platform package
+
+`pkgs/torch-x86_64-linux/` and `pkgs/torch-aarch64-macosx/` are the
+skeletons of the platform packages: each `info.rkt` (collection
+`torch-native`, version equal to torch's), a `THIRD-PARTY-NOTICES` and the
+licences only that platform bundles. The licences both carry (PyTorch's, stb's,
+the codecs') live once, in `scripts/platform/licenses/`, and `assemble.sh`
+adds them to the built package. `scripts/platform/linux/` builds the Linux
+libraries outside Nix at the glibc 2.28 baseline; `scripts/platform/macos/`
+builds the macOS ones on GitHub's arm64 runner, since a Linux host cannot
+build or load them. Both source `scripts/platform/build-common.sh`
+(fetching, the codecs, GoogleTest, the shim's CMake, the gtests) and share
+`sources.txt`, `assemble.sh`, `catalog.sh`, `smoke-install.sh` and the
+`.rkt` checks;
+[`docs/building.md`](docs/building.md#the-platform-package) has the steps.
+
+```bash
+scripts/platform/linux/build.sh .scratch/platform     # manylinux_2_28, docker
+                                 # --cpus 4: codecs, shim, audit, gtests
+scripts/platform/assemble.sh torch-x86_64-linux .scratch/platform/bundle .scratch/pkg
+scripts/platform/catalog.sh .scratch/pkg/torch-x86_64-linux.zip .scratch/catalog
+scripts/platform/linux/smoke.sh ubuntu:24.04 racket-9.1-x86_64-linux-buster-cs.sh .scratch/catalog
+```
+
+`linux/audit-bundle.sh` fails the build on a `/nix/store` reference, a RUNPATH
+other than `$ORIGIN`, a missing `$ORIGIN` beside a NEEDED library in the
+bundle, a GLIBC, GLIBCXX or CXXABI version above libtorch 2.14's (2.28,
+3.4.22, 1.3.11), symbol versions that `objdump -T` and `readelf -V` read
+differently, or a NEEDED library outside the bundle and the system set. It
+follows NEEDED entries only, so a dlopened library slips past it. The
+`platform-audit-test` check is its negative control: the Nix-built shim must
+fail it. Every fetched source is pinned by sha256 in `sources.txt`, and the
+build's caches are keyed on those sums. The scripts never commit a library.
+
+The macOS package is built only by `.github/workflows/platform-macos.yml`,
+one `macos/build.sh <work> <step>` per step, for the deployment target in
+`macos/deployment-target`; [`docs/building.md`](docs/building.md#arm64-macos)
+has the triggers, what `macos/audit-bundle.sh` fails on and its negative
+control.
+
+`(system-library-subpath #f)` is `aarch64-macosx` on racket-lang.org's
+Racket for macOS but `aarch64-darwin` on Nix's. `torch/info.rkt` declares
+`torch-aarch64-macosx` once for each string and native-location's
+`platform-packages` maps both to it, so the macOS Nix cell installs that
+skeleton as the Linux cell installs its own. Platform deps stay one string
+each, never a regexp. Never assume the host's string in a test.
 
 ### The build matrix
 
@@ -572,6 +634,19 @@ its regression test, once a pinned libtorch fixes the kernel.
   `c_api_compile_test.c` proves the headers are valid C (add a
   function-pointer line for at least one representative of each new op
   family, plus any function whose signature shape is new).
+- **Existing C signatures are append-only.** A change to an existing
+  `extern "C"` signature, or to a struct or enum that crosses the boundary,
+  gets a new symbol instead (`tr_full_on` beside `tr_full_i64_on`), so existing
+  callers and the CPU/CUDA stubs in `device.cpp` stay consistent, and a
+  compatible-range stamp check stays possible later.
+- **The ABI stamp.** `tr_abi_stamp()` is a SHA-256 over every header under
+  `include/torchrkt/c_api/` (generated ones included), each named by its
+  relative path, in sorted order; `cmake/abi_stamp.cmake` is the one
+  computation, run at configure time and by `cmake -P`. The bindings carry a
+  copy in `torch/foreign/raw/abi-stamp.rktd`, and the loader refuses a shim
+  whose stamp differs. Any edit to a `c_api` header, a comment included, means
+  `nix run .#abi-stamp` (`nix run .#codegen` also rewrites it) and committing
+  the copy; the `abi-stamp-current` flake check fails until then.
 
 ### Racket (`torch/`)
 
@@ -617,7 +692,12 @@ Runtime paths take `(only-in racket/runtime-path #%datum define-runtime-path)`.
   finalizer); `foreign/error.rkt` — `check-ok` / `check-handle`;
   `foreign/format.rkt` — the PyTorch-repr reproducer.
 - `foreign/raw/*.rkt` — direct FFI, one module per C translation unit:
-  `syntax` (the FFI definer + `_Tensor` cpointer), `fault` (the
+  `syntax` (the FFI definer + `_Tensor` cpointer), `native-location` (the
+  one resolver for the shim: the staged `torch/native-libs/` first, then
+  collection `torch-native` from the platform package; scripts use its
+  `native-library-path`, never a hard-coded `native-libs`),
+  `native-library` (opens it and checks the ABI stamp before any binding
+  is defined), `fault` (the
   native-fault latch `define-torch` puts under every binding, #76),
   `pressure` (no
   FFI of its own: the collection policy under the ledger, the two troughs
@@ -674,6 +754,9 @@ Runtime paths take `(only-in racket/runtime-path #%datum define-runtime-path)`.
   loader keeps its own cache-directory function and override variable.
 - `private/install-torchrkt-native.rkt` — stages `libtorchrkt.*` into
   `native-libs/` from `TORCHRKT_NATIVE_LIB_PATH` (set by the Nix build/shell).
+  Without the variable it prints nothing when `native-location` finds the
+  shim, staged or in `torch-native`, and otherwise prints its not-found
+  message: the package server fails a package on any stderr from `raco setup`.
   Every staging path (here and the flake's three shell ones) writes a temp file
   and `rename(2)`s it into place, so restaging under a live process is safe:
   rename leaves the old inode alive and anything already running keeps
@@ -887,9 +970,11 @@ uncontracted copy of the pipeline, which has not been built.
 
 `.github/workflows/nix.yml`: `nix flake check` on `ubuntu-latest` +
 `macos-latest`, a `resyntax` lint gate, and a `codegen-drift` job
-(regenerate + fail on porcelain). (A `raco-catalog` workflow is deferred
-until the portable native-candidate story exists — libtorch is too large to
-bundle the xgboost way.)
+(regenerate + fail on porcelain).
+`.github/workflows/platform-macos.yml` builds, audits and smokes
+`torch-aarch64-macosx` on `macos-latest` (see [The platform
+package](#the-platform-package)). The Linux package (`scripts/platform/linux/`)
+is built and smoked by hand for now; the general CI lane for both is #339.
 
 ### Binary cache (#79)
 

@@ -19,6 +19,10 @@ const char* tr_version(void) {
   return buf.c_str();
 }
 
+const char* tr_abi_stamp(void) {
+  return TORCHRKT_ABI_STAMP;
+}
+
 const char* tr_last_error(void) {
   static thread_local std::string buf;
   // The copy can allocate mid-exhaustion; the literal fallback cannot.

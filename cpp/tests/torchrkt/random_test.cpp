@@ -30,6 +30,13 @@ TEST(TorchrktRandom, VersionLooksLikeSemver) {
   EXPECT_NE(v.find('.'), std::string::npos) << "got: " << v;
 }
 
+TEST(TorchrktRandom, AbiStampIsSixtyFourLowercaseHexDigits) {
+  const std::string stamp = tr_abi_stamp();
+  EXPECT_EQ(stamp.size(), 64U);
+  EXPECT_EQ(stamp.find_first_not_of("0123456789abcdef"), std::string::npos)
+      << stamp;
+}
+
 TEST(TorchrktRandom, ShapeAndNumel) {
   ASSERT_EQ(tr_manual_seed(0), 0) << tr_last_error();
   tr_tensor* t = make_randn({2, 2});

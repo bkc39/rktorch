@@ -8,6 +8,7 @@
                     make-temporary-directory)
            (only-in racket/port port->string)
            rackunit
+           (only-in "../foreign/raw/native-location.rkt" platform-package shim-file-name)
            (only-in "../private/install-torchrkt-native.rkt" pre-installer))
 
   (define created '())
@@ -34,24 +35,40 @@
   (define (staged-path collection)
     (build-path collection "native-libs" "libtorchrkt.so"))
 
-  ;; The catalog's build server has neither, and a package that refuses to
-  ;; install there cannot be listed.
+  (define (hook-says collection #:collects [collects (temp-dir!)])
+    (parameterize ([current-environment-variables
+                    (environment-variables-copy
+                     (current-environment-variables))]
+                   [current-error-port (open-output-string)]
+                   [current-library-collection-links (list #f)]
+                   [current-library-collection-paths (list collects)])
+      (environment-variables-set!
+       (current-environment-variables) #"TORCHRKT_NATIVE_LIB_PATH" #f)
+      (check-not-exn (lambda () (pre-installer #f collection #f)))
+      (get-output-string (current-error-port))))
+
+  (define (touch-shim! dir)
+    (make-directory* dir)
+    (call-with-output-file (build-path dir (shim-file-name)) void))
+
   (test-case "with no source and nothing staged, the hook reports and returns"
     (define collection (temp-dir!))
-    (define said
-      (parameterize ([current-environment-variables
-                      (environment-variables-copy
-                       (current-environment-variables))]
-                     [current-error-port (open-output-string)])
-        (environment-variables-set!
-         (current-environment-variables) #"TORCHRKT_NATIVE_LIB_PATH" #f)
-        (check-not-exn (lambda () (pre-installer #f collection #f)))
-        (get-output-string (current-error-port))))
-    (check-true (regexp-match? #rx"libtorchrkt" said)
-                "it names what is missing")
-    (check-true (regexp-match? #rx"TORCHRKT_NATIVE_LIB_PATH" said)
-                "and one of the two ways to supply it")
+    (define said (hook-says collection))
+    (check-regexp-match #rx"libtorchrkt was not found" said)
+    (check-regexp-match (regexp-quote (or (platform-package) "has no prebuilt platform package"))
+                        said)
+    (check-regexp-match #rx"TORCHRKT_NATIVE_LIB_PATH" said)
     (check-false (file-exists? (staged-path collection))))
+
+  (test-case "with the shim staged, the hook says nothing"
+    (define collection (temp-dir!))
+    (touch-shim! (build-path collection "native-libs"))
+    (check-equal? (hook-says collection) ""))
+
+  (test-case "with the platform package's collection holding the shim, the hook says nothing"
+    (define collects (temp-dir!))
+    (touch-shim! (build-path collects "torch-native"))
+    (check-equal? (hook-says (temp-dir!) #:collects collects) ""))
 
   (test-case "staging places the source bytes at the destination"
     (define collection (temp-dir!))
