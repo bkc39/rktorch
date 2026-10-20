@@ -15,7 +15,10 @@ on:
       - ".github/workflows/platform-macos.yml"
       - "!scripts/platform/linux/**"
       - "!pkgs/torch-x86_64-linux/**"
+  schedule:
+    - cron: "0 8 * * 1"
   workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read
@@ -25,7 +28,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  torch-aarch64-macosx:
+  build:
     name: torch-aarch64-macosx
     runs-on: macos-latest
     timeout-minutes: 90
@@ -97,6 +100,56 @@ jobs:
           cat "$OUT/pkg/torch-aarch64-macosx.zip.CHECKSUM"
           echo
 
+      - name: Size budget
+        run: scripts/platform/size-budget.sh "$OUT/pkg/torch-aarch64-macosx.zip"
+
+      - name: Upload the package and logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: torch-aarch64-macosx
+          if-no-files-found: warn
+          path: |
+            .scratch/macos/out/pkg/torch-aarch64-macosx.zip
+            .scratch/macos/out/pkg/torch-aarch64-macosx.zip.CHECKSUM
+            .scratch/macos/work/log/
+
+  install:
+    name: install (macOS 14, Racket 9.1 and 9.3)
+    needs: build
+    runs-on: macos-14
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+    env:
+      OUT: ${{ github.workspace }}/.scratch/macos/out
+      RACKETS: ${{ github.workspace }}/.scratch/macos/racket
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Host
+        run: |
+          mkdir -p "$OUT/logs" "$RACKETS"
+          sw_vers
+          uname -m
+          sysctl -n hw.ncpu hw.memsize
+
+      - name: Cache the Racket installers
+        uses: actions/cache@v4
+        with:
+          path: .scratch/macos/racket/dl
+          key: platform-macos-racket-${{ hashFiles('scripts/platform/sources.txt') }}
+
+      - name: Download the macOS package
+        uses: actions/download-artifact@v4
+        with:
+          name: torch-aarch64-macosx
+          path: .scratch/macos
+
+      - name: Racket 9.1
+        run: scripts/platform/macos/install-racket.sh 9.1 "$RACKETS/9.1" "$RACKETS/dl"
+
       - name: Catalog
         id: catalog
         run: |
@@ -124,14 +177,77 @@ jobs:
           scripts/platform/smoke-install.sh "$OUT/catalog" "macOS $(sw_vers -productVersion)" 2>&1 |
             tee "$OUT/logs/smoke-9.3.log"
 
-      - name: Upload the package and logs
+      - name: Upload the smoke logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: torch-aarch64-macosx
+          name: torch-aarch64-macosx-install
           if-no-files-found: warn
-          path: |
-            .scratch/macos/out/pkg/torch-aarch64-macosx.zip
-            .scratch/macos/out/pkg/torch-aarch64-macosx.zip.CHECKSUM
-            .scratch/macos/out/logs/
-            .scratch/macos/work/log/
+          path: .scratch/macos/out/logs/
+
+  mps:
+    name: MPS tests (Racket 9.3)
+    needs: build
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: macos-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    env:
+      OUT: ${{ github.workspace }}/.scratch/macos/out
+      RACKETS: ${{ github.workspace }}/.scratch/macos/racket
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Host
+        run: |
+          mkdir -p "$OUT/logs" "$RACKETS"
+          sw_vers
+          uname -m
+          sysctl -n hw.ncpu hw.memsize
+
+      - name: Cache the Racket installers
+        uses: actions/cache@v4
+        with:
+          path: .scratch/macos/racket/dl
+          key: platform-macos-racket-${{ hashFiles('scripts/platform/sources.txt') }}
+
+      - name: Download the macOS package
+        uses: actions/download-artifact@v4
+        with:
+          name: torch-aarch64-macosx
+          path: .scratch/macos
+
+      - name: Racket 9.3
+        run: scripts/platform/macos/install-racket.sh 9.3 "$RACKETS/9.3" "$RACKETS/dl"
+
+      - name: Catalog
+        run: |
+          set -euo pipefail
+          export PATH="$RACKETS/9.3/bin:$PATH"
+          scripts/platform/catalog.sh "$OUT/pkg/torch-aarch64-macosx.zip" "$OUT/catalog" "$OUT/catalog"
+
+      - name: Install and smoke
+        run: |
+          set -euo pipefail
+          export PATH="$RACKETS/9.3/bin:$PATH" SMOKE_HOME="$RACKETS/home-9.3"
+          scripts/platform/smoke-install.sh "$OUT/catalog" "macOS $(sw_vers -productVersion)" 2>&1 |
+            tee "$OUT/logs/smoke-9.3.log"
+
+      - name: The installed package's MPS tests
+        run: |
+          set -euo pipefail
+          export PATH="$RACKETS/9.3/bin:$PATH" PLTUSERHOME="$RACKETS/home-9.3"
+          racket -l racket/base -l torch -e '(unless (mps-available?) (error "mps-available? is #f"))'
+          raco test -l torch/tests/device-test torch/tests/to-test \
+            torch/tests/audio-device-test torch/tests/mps-pressure-paths-test 2>&1 |
+            tee "$OUT/logs/mps-tests.log"
+
+      - name: Upload the logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: torch-aarch64-macosx-mps
+          if-no-files-found: warn
+          path: .scratch/macos/out/logs/
