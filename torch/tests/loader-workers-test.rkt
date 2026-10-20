@@ -577,6 +577,31 @@
     (void more?)
     (custodian-shutdown-all c))
 
+  (define-dataset relocating (moved?)
+    #:length 6
+    #:ref (i) i
+    #:device (and (unbox moved?)
+                  (raise (exn:fail:test "the dataset moved" (current-continuation-marks))))
+    #:batch (indices collate)
+    (collate (for/list ([i (in-list (indices->list indices))]) (list i))))
+
+  (test-case "a traversal whose setup raises stops its workers without a collection"
+    (define moved? (box #f))
+    (define loader (dataloader (relocating moved?) #:batch-size 2 #:shuffle? #t #:workers 2))
+    (set-box! moved? #t)
+    (define c (make-custodian))
+    (define started
+      (for/list ([_ (in-range 20)])
+        (define-values (raised threads)
+          (within 10 (lambda ()
+                       (workers-started-by (lambda ()
+                                             (under c (lambda () (sequence-generate loader))))))))
+        (check-regexp-match #rx"the dataset moved" (exn-message raised))
+        threads))
+    (check-equal? (length (append* started)) 40)
+    (check-true (dead-within? (append* started) 5))
+    (custodian-shutdown-all c))
+
   (define-dataset stalling (n stall-at stall builder)
     #:length n
     #:ref (i)

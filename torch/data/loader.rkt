@@ -220,10 +220,20 @@
 
 (define (worker-epoch-batches loader)
   (define workers (dataloader-workers loader))
-  (define ahead (* workers (dataloader-prefetch loader)))
   (define base (draw-seed #:generator (dataloader-generator loader)))
-  (define pool (start-workers (dataloader-dataset loader) (dataloader-collate loader)
-                              workers base))
+  (define breaks (current-break-parameterization))
+  (parameterize-break #f
+    (define pool (start-workers (dataloader-dataset loader) (dataloader-collate loader)
+                                workers base))
+    (with-handlers ([(lambda (_v) #t)
+                     (lambda (v)
+                       (stop-workers! pool)
+                       (raise v))])
+      (call-with-break-parameterization
+       breaks
+       (lambda () (pool-batches loader pool (* workers (dataloader-prefetch loader))))))))
+
+(define (pool-batches loader pool ahead)
   (define-values (indices finish!) (sampler-draws loader))
   (define count (batch-count loader))
   (define exhausting (if (short-last-batch? loader) (sub1 count) count))

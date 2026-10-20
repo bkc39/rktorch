@@ -213,7 +213,8 @@ made. A batch whose construction raises raises again when the traversal
 reaches it, as does a batch whose worker exited without building it; the
 traversal then stops its workers and raises the same value for every later
 batch. A break while waiting for a batch leaves the batch to the next
-request. The workers stop when the traversal is exhausted, when the
+request. The workers stop when the traversal is exhausted, when starting it
+raises after they have started, when the
 custodian current at the traversal's start shuts down, or once the loop that
 held the traversal has let it go and a collection runs. They run outside
 that custodian, so a @racket[custodian-limit-memory] on it does not cover
