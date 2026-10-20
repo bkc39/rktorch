@@ -176,9 +176,10 @@ source, checks it against the sha256 that `scripts/platform/sources.txt` pins
 (the libtorch zips, the codecs, libsndfile, stb, GoogleTest and the Racket
 installers the macOS and `rockylinux:8` smokes use), builds the codecs and
 libsndfile as shared libraries, then GoogleTest and the shim, and runs the
-shim's gtests against the finished bundle. The work directory keeps the downloads and builds, so a
-second run rebuilds only the shim; the unpacked libtorch, the codecs and
-GoogleTest are rebuilt when the sha256 pinned for them changes.
+shim's gtests against the finished bundle. The work directory keeps the
+downloads and builds, so a second run rebuilds only the shim; the unpacked
+libtorch, the codecs and GoogleTest are rebuilt when the sha256 pinned for
+them changes.
 
 ### x86_64 Linux
 
@@ -186,9 +187,9 @@ Every library carries the RUNPATH `$ORIGIN` and needs nothing from the host
 beyond glibc 2.28 and libstdc++, which is what PyTorch's own libtorch asks
 for. The package is about 118 MB zipped and 445 MB installed;
 `scripts/platform/size-budget.sh` fails a zip over 125 MB, and the macOS one
-over 100 MB. It is built
-outside Nix in PyTorch's own baseline image, `manylinux_2_28`, since a Nix
-toolchain links against a newer glibc than that baseline.
+over 100 MB. It is built outside Nix in PyTorch's own baseline image,
+`manylinux_2_28`, since a Nix toolchain links against a newer glibc than that
+baseline.
 
 ```bash
 scripts/platform/linux/build.sh .scratch/platform
@@ -237,7 +238,10 @@ autograd and `nn`, trains `04-mlp` on the device it picks, and on the CPU as
 well when that is an accelerator, printing where the shim came from and
 `(mps-available?)` on the way, and round-trips a FLAC file. Last,
 `raco setup --no-docs --check-pkg-deps --pkgs torch` fails on a module that
-requires a package `torch/info.rkt` does not declare:
+requires a package `torch/info.rkt` does not declare. With no manual rendered
+it checks the modules only; the Linux lane's `manual` job checks the manual's
+dependencies too ([below](#continuous-integration-and-the-binary-cache)). By
+hand:
 
 ```bash
 scripts/platform/catalog.sh .scratch/pkg/torch-x86_64-linux.zip .scratch/catalog
@@ -310,15 +314,16 @@ package's floor, installs racket-lang.org's notarized Racket 9.1 and 9.3 from
 their `.dmg` and runs `smoke-install.sh` with each.
 
 The arm64 runner exposes a GPU to its VM: the smoke prints
-`mps-available? #t` there and trains `04-mlp` on `'mps` and on the CPU. Weekly
-and on demand, an `mps` job on `macos-latest` installs the package on Racket
-9.3, fails unless `(mps-available?)`, and runs the installed device, `to`,
-audio-device and MPS-pressure suites, each of which asserts on MPS when it is
-there and skips without it. What
-it cannot show is a physical Apple-silicon Mac, so the one check left by hand
-is the same smoke on one, with the artifact's zip in a directory catalog as
-above. It must print `mps-available? #t` and pass. To try more against that
-install, run Racket with `PLTUSERHOME` set to the `SMOKE_HOME` it used:
+`mps-available? #t` there and trains `04-mlp` on `'mps` and on the CPU.
+Weekly, on demand, or when a calling workflow passes `mps: true`, an `mps` job
+on `macos-latest` installs the package on Racket 9.3, fails unless
+`(mps-available?)`, and runs the installed device, `to`, audio-device and
+MPS-pressure suites. Each of them asserts on MPS when it is there and skips
+without it. What the runner cannot show is a physical Apple-silicon Mac, so
+the one check left by hand is the same smoke on one, with the artifact's zip
+in a directory catalog as above. It must print `mps-available? #t` and pass.
+To try more against that install, run Racket with `PLTUSERHOME` set to the
+`SMOKE_HOME` it used:
 
 ```bash
 PLTUSERHOME=$PWD/.scratch/smoke-home PATH=$PWD/.scratch/racket-9.1/bin:$PATH \
@@ -534,23 +539,26 @@ installs, so the platform packages have lanes of their own:
   build a catalog from that zip and run `smoke-install.sh` with
   `Bogdanp/setup-racket`'s Racket 9.1 and `stable` on ubuntu-24.04, and with
   racket-lang.org's `buster` installers for 9.1 and 9.3 in `rockylinux:8`,
-  glibc 2.28. The `manual` job installs the zip, links the checkout's `torch`
-  over it, so the scribblings and `(require torch)` name the same files, runs
-  `scripts/build-docs`, and uploads the manual as `torch-manual`. It runs on
-  pull requests that touch `cpp/`, `flake.nix`, `torch/info.rkt`,
-  `torch/foreign/raw/`, `torch/scribblings/`, `torch/pkg-build/`, the four
-  suites the smoke runs, `pkgs/torch-x86_64-linux/`, `scripts/platform/`
-  outside `macos/`, `scripts/build-docs` or the two workflows; on every push
-  to master; weekly; and on demand.
+  glibc 2.28. The `manual` job installs the zip and links the checkout's
+  `torch` over it, so the scribblings and `(require torch)` name the same
+  files. That install renders the manual, so the deps check run after it,
+  `raco setup --check-pkg-deps --pkgs torch`, covers the manual's
+  dependencies as well as the modules', which the smoke's `--no-docs` run
+  cannot. The job then runs `scripts/build-docs` and uploads the manual as
+  `torch-manual`. The lane runs on pull requests that touch the paths listed
+  in the workflow, on every push to master, weekly, and on demand.
 - **`platform-macos.yml`.** Its `build` job, on `macos-latest`, builds,
   audits (with the negative control) and gtests `torch-aarch64-macosx`, then
   assembles and budgets the zip. `install`, on `macos-14`, smokes it at
-  Racket 9.1 and 9.3; `mps`, weekly and on demand only, runs the MPS suites
-  ([above](#arm64-macos)). It runs on pull requests that touch `cpp/`,
-  `scripts/platform/`, `pkgs/`, `torch/info.rkt`, `torch/pkg-build/` or the
-  four suites, outside the Linux scripts and skeleton; weekly; and on demand.
-- **`pkg-build.yml`** runs the same Linux build, then the package build
-  server on its zip ([above](#reproducing-the-package-build-server)).
+  Racket 9.1 and 9.3; `mps` runs the MPS suites ([above](#arm64-macos))
+  weekly, on demand, or when a calling workflow passes `mps: true`. The lane
+  runs on pull requests that touch the paths listed in the workflow, weekly,
+  and on demand.
+- **`pkg-build.yml`** calls `platform-linux-build.yml` itself, so it builds
+  the Linux zip in its own run, and its `pkg-build` job runs the package
+  build server on that zip ([above](#reproducing-the-package-build-server)).
+  A pull request that triggers both it and `platform-linux.yml` builds the
+  Linux zip twice, once in each.
 
 Both platform lanes take `workflow_call`, so a release workflow runs the same
 jobs. Linux jobs substitute from a tailnet-only binary cache; the details and

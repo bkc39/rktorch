@@ -520,7 +520,7 @@ build or load them. Both source `scripts/platform/build-common.sh`
 (fetching, the codecs, GoogleTest, the shim's CMake, the gtests) and share
 `sources.txt`, `assemble.sh`, `catalog.sh` (whose entries carry each zip's
 deps and build-deps), `size-budget.sh` and `smoke-install.sh`, which runs the
-installed `torch/pkg-build/smoke.rkt` and `raco setup --check-pkg-deps`;
+installed `torch/pkg-build/smoke.rkt` and checks the modules' package deps;
 [`docs/building.md`](docs/building.md#the-platform-package) has the steps.
 
 ```bash
@@ -975,20 +975,15 @@ uncontracted copy of the pipeline, which has not been built.
 `.github/workflows/nix.yml`: `nix flake check` on `ubuntu-latest` +
 `macos-latest`, a `resyntax` lint gate, and a `codegen-drift` job
 (regenerate + fail on porcelain).
-`.github/workflows/platform-linux-build.yml`, callable only, builds, audits
-and gtests `torch-x86_64-linux`, fails when its zip passes the budget in
-`scripts/platform/size-budget.sh`, and uploads it. `platform-linux.yml` runs it,
-then `smoke-install.sh` (the smoke and `raco setup --check-pkg-deps`) on
-ubuntu-24.04 at Racket 9.1 and `stable` and in `rockylinux:8` at 9.1 and 9.3,
-and `scripts/build-docs` with the checkout's `torch` linked over the built
-bundle. `platform-macos.yml` builds and audits `torch-aarch64-macosx` on
-`macos-latest`, smokes it on `macos-14` at 9.1 and 9.3, and, weekly or on
-demand, runs the installed package's MPS tests. Both lanes run weekly and are
-`workflow_call`-able; [`docs/building.md`](docs/building.md#continuous-integration-and-the-binary-cache)
-has their triggers. `.github/workflows/pkg-build.yml` takes the Linux zip from
-the same build and runs `scripts/pkg-build/build.rkt`, the official
-`pkg-build` tool in the package build server's images, on it (see [The package
-build server](#the-package-build-server)).
+`platform-linux-build.yml` proves the Linux zip builds, audits, passes its
+gtests and does not exceed its size budget. `platform-linux.yml` proves it
+installs and passes the smoke on ubuntu-24.04 and `rockylinux:8`, and that the
+manual renders with all its deps declared. `platform-macos.yml` proves
+`torch-aarch64-macosx` builds, audits, installs and passes the smoke on
+`macos-14`, and, weekly or when asked, that its MPS tests pass. `pkg-build.yml`
+proves the package build server's own tool accepts the Linux zip (see [The
+package build server](#the-package-build-server)). The job-by-job detail is in
+[`docs/building.md`](docs/building.md#continuous-integration-and-the-binary-cache).
 
 ### The package build server
 
