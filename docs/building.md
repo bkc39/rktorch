@@ -379,10 +379,13 @@ dependencies; `PKG_BUILD_RACKET` picks the release (9.3);
 reused incrementally); `PKG_BUILD_JOBS` the `--jobs` for `raco setup`, `raco
 pkg install` and `raco test`, which otherwise follow the processor count.
 pkg-build has no CPU cap for its containers, and the harness gives every step
-40 minutes, as pkg-build's own Docker example does, so it does not enforce
-the server's ten minutes for tests: the test transcript records how long the
-run took. `report.rkt` prints the
-transcripts and the columns and fails if any is red.
+40 minutes, as pkg-build's own Docker example does. `report.rkt` prints the
+transcripts and the server's columns from `summary.rktd`, and fails if any is
+red: build; dependencies (a clean build and no dependency failures);
+conflicts; docs (every manual rendered by this build, not salvaged or kept
+from an earlier run); and tests, which also fail when the test transcript's
+clock shows the install-and-test step took more than the server's ten
+minutes.
 `scripts/pkg-build/memory-peaks.sh watch <log>`, run beside it, samples each
 container's cgroup `memory.peak`; `report <log>` prints the peaks.
 
