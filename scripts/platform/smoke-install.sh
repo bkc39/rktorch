@@ -6,7 +6,6 @@ set -euo pipefail
 usage="usage: smoke-install.sh <catalog-dir> <host-label>"
 catalog=${1:?$usage}
 host=${2:?$usage}
-here=$(cd "$(dirname "$0")" && pwd)
 tmp=$(mktemp -d)
 step() { printf '\n== %s\n' "$*"; }
 
@@ -38,10 +37,7 @@ if [ -s "$tmp/raco.err" ]; then
 fi
 echo "stderr: empty"
 
-step "04-mlp"
-raco test "$here/mlp-smoke.rkt"
-
-step "FLAC round trip"
-raco test "$here/flac-round-trip.rkt"
+step "torch/pkg-build/smoke: the suites, 04-mlp and a FLAC round trip"
+raco test --check-stderr -l torch/pkg-build/smoke
 
 step "SMOKE OK: $host, racket $(racket -e '(display (version))')"

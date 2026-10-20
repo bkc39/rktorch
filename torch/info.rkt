@@ -29,6 +29,17 @@
   '("machine-learning" "deep-learning" "tensor" "pytorch" "libtorch"))
 (define pre-install-collection "private/install-torchrkt-native.rkt")
 
+;; pkg-build.racket-lang.org sets PLT_PKG_BUILD_SERVICE and runs
+;; `raco test --drdr --package torch`: one process per file, in a 1 GB VM, ten
+;; minutes in all. There only pkg-build/ runs, so libtorch loads once.
+;; tests/server-test-set-test.rkt fails when another entry joins that run.
+(define test-omit-paths
+  (if (getenv "PLT_PKG_BUILD_SERVICE")
+      '("audio" "data" "foreign" "foreign.rkt" "generated.rkt" "info.rkt" "main.rkt"
+        "nn" "nn.rkt" "operators.rkt" "private" "safe.rkt" "scribblings" "tests"
+        "text" "vision")
+      '()))
+
 ;; Enforced under `raco test --timeout` (the flake's check passes 300s as the
 ;; default). The parity suites self-skip without python3 `torch` and take
 ;; minutes with it.
