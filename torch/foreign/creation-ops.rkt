@@ -70,8 +70,8 @@
                   current-generator/raw
                   tr-generator-draw-seed/raw
                   tr-generator-new/raw
-                  tr-rand-on/raw
-                  tr-randn-on/raw
+                  tr-rand-gen-on/raw
+                  tr-randn-gen-on/raw
                   tr-randperm/raw)
          (only-in "structs.rkt" tensor? wrap-tensor))
 
@@ -191,7 +191,7 @@
         #:requires-grad? boolean?
         #:generator (or/c generator? #f)]
        #:rest shape-rest/c tensor?)
-  (drawn 'randn tr-randn-on/raw dims device dtype requires-grad? generator))
+  (drawn 'randn tr-randn-gen-on/raw dims device dtype requires-grad? generator))
 
 (define/contract-out (rand #:device [device #f] #:dtype [dtype #f]
                            #:requires-grad? [requires-grad? #f]
@@ -203,7 +203,7 @@
         #:requires-grad? boolean?
         #:generator (or/c generator? #f)]
        #:rest shape-rest/c tensor?)
-  (drawn 'rand tr-rand-on/raw dims device dtype requires-grad? generator))
+  (drawn 'rand tr-rand-gen-on/raw dims device dtype requires-grad? generator))
 
 (define/contract-out (randperm n #:generator [generator #f]) ;; noqa
   (->* [size/c] [#:generator (or/c generator? #f)] tensor?)

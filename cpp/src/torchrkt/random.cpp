@@ -48,24 +48,39 @@ std::optional<at::Generator> generator_of(tr_generator* g) {
   return std::nullopt;
 }
 
-}  // namespace
-
-tr_tensor* tr_randn_on(const int64_t* dims, int64_t ndim, tr_device_type type,
-                       int64_t index, tr_dtype dtype, tr_generator* g) {
+tr_tensor* drawn_on(const char* who, bool normal, const int64_t* dims,
+                    int64_t ndim, tr_device_type type, int64_t index,
+                    tr_dtype dtype, tr_generator* g) {
   return torchrkt::shaped_result(
-      "tr_randn_on", dims, ndim, [&](const std::vector<int64_t>& shape) {
-        return torch::randn(shape, generator_of(g),
-                            torchrkt::options_on(type, index, dtype));
+      who, dims, ndim, [&](const std::vector<int64_t>& shape) {
+        const auto options = torchrkt::options_on(type, index, dtype);
+        return normal ? torch::randn(shape, generator_of(g), options)
+                      : torch::rand(shape, generator_of(g), options);
       });
 }
 
+}  // namespace
+
+tr_tensor* tr_randn_on(const int64_t* dims, int64_t ndim, tr_device_type type,
+                       int64_t index, tr_dtype dtype) {
+  return drawn_on("tr_randn_on", true, dims, ndim, type, index, dtype, nullptr);
+}
+
 tr_tensor* tr_rand_on(const int64_t* dims, int64_t ndim, tr_device_type type,
-                      int64_t index, tr_dtype dtype, tr_generator* g) {
-  return torchrkt::shaped_result(
-      "tr_rand_on", dims, ndim, [&](const std::vector<int64_t>& shape) {
-        return torch::rand(shape, generator_of(g),
-                           torchrkt::options_on(type, index, dtype));
-      });
+                      int64_t index, tr_dtype dtype) {
+  return drawn_on("tr_rand_on", false, dims, ndim, type, index, dtype, nullptr);
+}
+
+tr_tensor* tr_randn_gen_on(const int64_t* dims, int64_t ndim,
+                           tr_device_type type, int64_t index, tr_dtype dtype,
+                           tr_generator* g) {
+  return drawn_on("tr_randn_gen_on", true, dims, ndim, type, index, dtype, g);
+}
+
+tr_tensor* tr_rand_gen_on(const int64_t* dims, int64_t ndim,
+                          tr_device_type type, int64_t index, tr_dtype dtype,
+                          tr_generator* g) {
+  return drawn_on("tr_rand_gen_on", false, dims, ndim, type, index, dtype, g);
 }
 
 int tr_tensor_uniform_(tr_tensor* t, double low, double high) {

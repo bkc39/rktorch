@@ -20,9 +20,9 @@
          tr-generator-draw-seed/raw
          tr-generator-new/raw
          tr-randn/raw
-         tr-randn-on/raw
+         tr-randn-gen-on/raw
          tr-rand/raw
-         tr-rand-on/raw
+         tr-rand-gen-on/raw
          tr-randperm/raw
          tr-tensor-uniform!/raw)
 
@@ -56,7 +56,7 @@
   #:c-id tr_randperm
   #:wrap tensor-allocator/no-retry)
 
-(define-torch tr-randn-on/raw
+(define-torch tr-randn-gen-on/raw
   (_fun (dims : (_s64vector i))
         (ndim : _int64)
         (type : _tr-device-type)
@@ -64,10 +64,10 @@
         (dtype : _tr-dtype)
         (generator : _Generator/current)
         -> _Tensor/null)
-  #:c-id tr_randn_on
+  #:c-id tr_randn_gen_on
   #:wrap tensor-allocator/no-retry)
 
-(define-torch tr-rand-on/raw
+(define-torch tr-rand-gen-on/raw
   (_fun (dims : (_s64vector i))
         (ndim : _int64)
         (type : _tr-device-type)
@@ -75,7 +75,7 @@
         (dtype : _tr-dtype)
         (generator : _Generator/current)
         -> _Tensor/null)
-  #:c-id tr_rand_on
+  #:c-id tr_rand_gen_on
   #:wrap tensor-allocator/no-retry)
 
 (define-torch tr-randn/raw

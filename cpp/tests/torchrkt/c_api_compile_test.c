@@ -86,9 +86,13 @@ void torchrkt_c_api_compile_check(void) {
   tr_tensor* (*to_dtype)(const tr_tensor*, tr_dtype) = tr_tensor_to_dtype;
   tr_tensor* (*rand_fn)(const int64_t*, int64_t) = tr_rand;
   tr_tensor* (*randn_on)(const int64_t*, int64_t, tr_device_type, int64_t,
-                         tr_dtype, tr_generator*) = tr_randn_on;
+                         tr_dtype) = tr_randn_on;
   tr_tensor* (*rand_on)(const int64_t*, int64_t, tr_device_type, int64_t,
-                        tr_dtype, tr_generator*) = tr_rand_on;
+                        tr_dtype) = tr_rand_on;
+  tr_tensor* (*randn_gen_on)(const int64_t*, int64_t, tr_device_type, int64_t,
+                             tr_dtype, tr_generator*) = tr_randn_gen_on;
+  tr_tensor* (*rand_gen_on)(const int64_t*, int64_t, tr_device_type, int64_t,
+                            tr_dtype, tr_generator*) = tr_rand_gen_on;
   tr_tensor* (*arange_on)(double, double, double, tr_device_type, int64_t,
                           tr_dtype) = tr_arange_on;
   tr_tensor* (*eye_on)(int64_t, int64_t, tr_device_type, int64_t, tr_dtype) =
@@ -322,6 +326,8 @@ void torchrkt_c_api_compile_check(void) {
   (void)rand_fn;
   (void)randn_on;
   (void)rand_on;
+  (void)randn_gen_on;
+  (void)rand_gen_on;
   (void)arange_on;
   (void)eye_on;
   (void)uniform_fn;
