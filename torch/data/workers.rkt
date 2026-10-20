@@ -145,9 +145,10 @@
 
 (define/contract-out (request-batch! pool index indices) ;; noqa
   (-> worker-pool? batch-index/c indices/c void?)
-  (void (thread-send (vector-ref (worker-pool-threads pool) (worker-of pool index))
-                     (request index indices)
-                     #f)))
+  (thread-send (vector-ref (worker-pool-threads pool) (worker-of pool index))
+               (request index indices)
+               #f)
+  (void (race-point batch-requested index)))
 
 (define/contract-out (receive-batch pool index breakable?) ;; noqa
   (-> worker-pool? batch-index/c boolean? batch-result/c)

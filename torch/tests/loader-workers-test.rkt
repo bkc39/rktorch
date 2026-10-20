@@ -2,7 +2,7 @@
 
 (module+ cases
   (require (only-in racket/list append* index-of range remove-duplicates)
-           (only-in racket/match match match-define)
+           (only-in racket/match match match* match-define)
            rackunit
            "../data/loader.rkt"
            (only-in (submod "../data/loader.rkt" private) sampler-draws traversal)
@@ -575,6 +575,42 @@
     (check-true (dead-within? threads 5))
     (check-eq? (within 10 (lambda () (caught next))) raised)
     (void more?)
+    (custodian-shutdown-all c))
+
+  (define-dataset failing-first (failure later-built later)
+    #:length 2
+    #:ref (i)
+    (cond
+      [(zero? i) (raise failure)]
+      [else
+       (set-box! later (add1 (unbox later)))
+       (semaphore-post later-built)
+       (tensor (list i) #:dtype 'int64)]))
+
+  (test-case "a failed batch requests no further batch"
+    (define raised (exn:fail:test "batch 0 failed" (current-continuation-marks)))
+    (define later (box 0))
+    (define later-built (make-semaphore 0))
+    (define started '())
+    (define (hook name subject)
+      (match* (name subject)
+        [('workers-started threads) (set! started (vector->list threads))]
+        [('batch-requested 1) (sync/timeout 5 later-built)]
+        [(_ _) (void)]))
+    (define c (make-custodian))
+    (with-race-hook hook
+      (define-values (more? next)
+        (under c (lambda ()
+                   (~> (failing-first raised later-built later)
+                       (dataloader #:workers 1 #:prefetch 1)
+                       in-dataloader
+                       sequence-generate))))
+      (check-eq? (within 60 (lambda () (caught next))) raised)
+      (check-equal? (length started) 1)
+      (check-true (dead-within? started 5))
+      (check-equal? (unbox later) 0 "batch 1 was never built")
+      (check-eq? (within 10 (lambda () (caught next))) raised)
+      (void more?))
     (custodian-shutdown-all c))
 
   (define-dataset relocating (moved?)

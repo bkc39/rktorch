@@ -431,6 +431,8 @@ gets the point's name and a subject (a handle, a device, a thread).
 | `collector-claimed`, `collector-releasing` | the claim is held, or about to be dropped | thread |
 | `failure-reading` | a failed call, before its error is read | who |
 | `oom-kind-reading` | a failed call under the OOM retry, before its error kind is read | the raw procedure |
+| `workers-started` | a loader's workers are running, before their reaper starts | the worker threads |
+| `batch-requested` | a loader has sent a batch request to its worker | the batch index |
 
 **Tests** (`torch/tests/race-*.rkt`, helpers in `tests/private/race-harness.rkt`):
 

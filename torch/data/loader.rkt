@@ -250,10 +250,14 @@
     (refill! r))
   (define failure #f)
   (define (receive-and-refill! k breakable?)
-    (begin0 (receive-batch pool k breakable?)
-      (refill! (+ k ahead))
-      (when (= k (sub1 count))
-        (stop-workers! pool))))
+    (define result (receive-batch pool k breakable?))
+    (match result
+      [(raised _) (void)]
+      [(built _)
+       (refill! (+ k ahead))
+       (when (= k (sub1 count))
+         (stop-workers! pool))])
+    result)
   ;; a break between batch's return and the sequence recording its values
   ;; asks for the same k again
   (define taken #f)
