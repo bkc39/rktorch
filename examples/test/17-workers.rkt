@@ -1,8 +1,6 @@
 #lang racket/base
 
-;; Runner + tests for the literate torch/scribblings/examples/17-workers.rkt.
-
-(require (only-in racket/match match-define)
+(require (only-in racket/match match match-define)
          (only-in racket/math nan?)
          torch
          torch/data/loader
@@ -24,54 +22,79 @@
   (printf "decode + jitter: ~a ms per image\n"
           (real->decimal-string (/ (- (current-inexact-milliseconds) start) (length ds)) 3))
   (for ([row (in-list (train-workers #:workers workers))])
-    (match-define (list n loss seconds acc) row)
+    (match-define (epoch-result n loss seconds acc) row)
     (printf "workers ~a: ~a s, mean loss ~a, test acc ~a\n"
             n (real->decimal-string seconds 2) (real->decimal-string loss 4)
             (real->decimal-string acc 4))))
 
+(define (pixels->floats pixels)
+  (apply bytes-append
+         (for/list ([p (in-bytes pixels)])
+           (real->floating-point-bytes (/ p 255.0) 4 (system-big-endian?)))))
+
+(define (shift pixels dx dy)
+  (apply bytes
+         (for*/list ([y (in-range 28)] [x (in-range 28)])
+           (define sx (- x dx))
+           (define sy (- y dy))
+           (if (and (< -1 sx 28) (< -1 sy 28))
+               (bytes-ref pixels (+ sx (* 28 sy)))
+               0))))
+
+(define (majority-share labels)
+  (define counts
+    (for/fold ([counts (hash)]) ([y (in-list labels)])
+      (hash-update counts y add1 0)))
+  (/ (apply max (hash-values counts)) (length labels)))
+
 (module+ test
   (require rackunit)
+  (define-values (xs ys) (load-mnist-fixture))
+  (define images
+    (let ([raw (~> xs (* 255) (+ 0.5) (to-dtype 'uint8) tensor->bytes)])
+      (for/list ([start (in-range 0 (bytes-length raw) 784)])
+        (subbytes raw start (+ start 784)))))
+  (define every-value
+    (apply bytes (for/list ([k (in-range 784)]) (modulo (* 7 k) 256))))
+
+  (for ([pixels (in-list (cons every-value images))])
+    (check-equal? (pgm-decode (pgm-encode pixels)) pixels))
+  (for ([pixels (in-list (list every-value (car images)))])
+    (check-equal? (jitter pixels 0 0 0) (pixels->floats pixels)
+                  "angle 0, shift 0 did not return the decoded image")
+    (check-equal? (jitter pixels 0 1 2) (pixels->floats (shift pixels 1 2))
+                  "a shift of (1, 2) did not move every pixel one right, two down"))
+
   (define rows (run-example #:workers 2 #:device 'cpu))
-  (check-equal? (map car rows) '(0 2))
+  (define majority (majority-share (tensor->list ys)))
+  (check-equal? (map epoch-result-workers rows) '(0 2))
   (for ([row (in-list rows)])
-    (match-define (list n loss seconds acc) row)
+    (match-define (epoch-result n loss seconds acc) row)
     (check-true (and (rational? loss) (not (nan? loss)))
                 (format "workers ~a: non-finite loss ~a" n loss))
     (check-true (positive? seconds))
-    (check-true (and (> acc 0.1) (<= acc 1.0))
-                (format "workers ~a: accuracy out of range ~a" n acc)))
-  (check-true (< (cadr (cadr rows)) (cadr (car rows)))
-              (format "the second epoch's loss did not fall: ~a" rows))
+    (check-true (and (> acc (+ majority 0.1)) (<= acc 1.0))
+                (format "workers ~a: accuracy ~a, majority class ~a" n acc majority)))
+  (match rows
+    [(list (epoch-result _ first-loss _ _) (epoch-result _ second-loss _ _))
+     (check-true (< second-loss first-loss)
+                 (format "the second epoch's loss did not fall: ~a" rows))])
 
-  (define-values (xs ys) (load-mnist-fixture))
   (define ds (encoded-digits xs ys))
   (check-equal? (length ds) 256)
   (check-equal? (first-labels ds 0) (first-labels ds 2)
                 "the batch order depends on the worker count")
   (define (first-images workers)
-    (for/first ([(xb _yb) (in-dataloader
-                           (dataloader ds #:batch-size 8 #:shuffle? #t
-                                       #:collate collate-digits
-                                       #:generator (make-generator 0)
-                                       #:workers workers))])
-      (check-equal? (shape xb) '(8 1 28 28))
-      (check-equal? (dtype xb) 'float32)
-      (tensor->list xb)))
+    (match-define (list xb _) (first-batch ds #:workers workers))
+    (check-equal? (shape xb) '(8 1 28 28))
+    (check-equal? (dtype xb) 'float32)
+    (tensor->list xb))
   (check-equal? (first-images 2) (first-images 2)
                 "a seeded loader did not replay its jitter")
-  (define plain
-    (for/first ([(xb _yb) (in-dataloader
-                           (dataloader (tensor-dataset xs ys)
-                                       #:batch-size 8 #:shuffle? #t
-                                       #:generator (make-generator 0)))])
-      xb))
-  (define jittered
-    (for/first ([(xb _yb) (in-dataloader
-                           (dataloader ds #:batch-size 8 #:shuffle? #t
-                                       #:collate collate-digits
-                                       #:generator (make-generator 0)))])
-      xb))
+  (match-define (list plain _)
+    (first-batch (tensor-dataset xs ys) #:collate default-collate))
+  (match-define (list jittered _) (first-batch ds))
   (check-not-equal? (tensor->list jittered) (tensor->list plain)
                     "the jitter left every image in place")
-  (check-true (< (item (mean (abs (- jittered plain)))) 0.2)
+  (check-true (< (item (mean (abs (- jittered plain)))) 0.12)
               "the decoded images are not the encoded ones, moved"))

@@ -38,8 +38,7 @@ on an RTX 3090 Ti with libtorch 2.14.0 (cu130). Two runs there, one at #272's
 head and one on master put cuDNN's run-to-run spread at 0.013 for 09's
 accuracy, 0.025 for 10's generator loss and under 0.001 for the rest; each
 tolerance sits above that with room to spare. An A/B at 0651574 differed only
-where #229, #249 and #250 changed the code on purpose. The 17-workers row
-was taken on 2026-10-20 on the #168 branch, on the same host.
+where #229, #249 and #250 changed the code on purpose.
 
 The script reads the table below: the headline is the last number on the last
 log line that `pattern` matches.
@@ -59,7 +58,7 @@ log line that `pattern` matches.
 | 14-imagenet | default | pretrained ResNet-18, percent for rapeseed on hedge mustard | `[0-9.]+%  rapeseed` | higher | 61.4 | 0.2 |
 | 15-finetune | default | fine-tuned ResNet-18, validation accuracy | `val acc [0-9.]+` | higher | 0.928 | 0.03 |
 | 16-style-transfer | default | VGG-16 style transfer, style loss at step 100 | `step 100: style [0-9.e-]+` | lower | 5.53e-05 | 1.5e-05 |
-| 17-workers | default | CNN on Racket-decoded images, four loader workers, test accuracy | `test acc [0-9.]+` | higher | 0.986 | 0.01 |
+| 17-workers | default | CNN on Racket-decoded images, four loader workers, test accuracy | `test acc [0-9.]+` | higher | 0.987 | 0.01 |
 
 ## Not covered
 
