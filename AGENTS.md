@@ -518,8 +518,9 @@ libraries outside Nix at the glibc 2.28 baseline; `scripts/platform/macos/`
 builds the macOS ones on GitHub's arm64 runner, since a Linux host cannot
 build or load them. Both source `scripts/platform/build-common.sh`
 (fetching, the codecs, GoogleTest, the shim's CMake, the gtests) and share
-`sources.txt`, `assemble.sh`, `catalog.sh`, `smoke-install.sh` and the
-`.rkt` checks;
+`sources.txt`, `assemble.sh`, `catalog.sh` (whose entries carry each zip's
+deps and build-deps) and `smoke-install.sh`, which runs the installed
+`torch/pkg-build/smoke.rkt`;
 [`docs/building.md`](docs/building.md#the-platform-package) has the steps.
 
 ```bash
@@ -550,8 +551,11 @@ control.
 Racket for macOS but `aarch64-darwin` on Nix's. `torch/info.rkt` declares
 `torch-aarch64-macosx` once for each string and native-location's
 `platform-packages` maps both to it, so the macOS Nix cell installs that
-skeleton as the Linux cell installs its own. Platform deps stay one string
-each, never a regexp. Never assume the host's string in a test.
+skeleton as the Linux cell installs its own. Likewise a natipkg Racket on
+x86_64 Linux, which is what pkg-build.racket-lang.org runs, reports
+`x86_64-linux-natipkg`, so `torch-x86_64-linux` is declared for that string
+too; Nix never reports it, and no cell provisions for it. Platform deps stay
+one string each, never a regexp. Never assume the host's string in a test.
 
 ### The build matrix
 
@@ -767,6 +771,9 @@ Runtime paths take `(only-in racket/runtime-path #%datum define-runtime-path)`.
   `raco test`.
 - `scribblings/examples/` — the literate `scribble/lp2` programs woven into
   the guide; exempt from the import convention.
+- `pkg-build/smoke.rkt` — the only test the package build server runs (see
+  [The package build server](#the-package-build-server)); its `info.rkt`
+  gives it 300 s and omits itself.
 
 ### Codegen (`codegen/`)
 
@@ -971,7 +978,35 @@ uncontracted copy of the pipeline, which has not been built.
 `.github/workflows/platform-macos.yml` builds, audits and smokes
 `torch-aarch64-macosx` on `macos-latest` (see [The platform
 package](#the-platform-package)). The Linux package (`scripts/platform/linux/`)
-is built and smoked by hand for now; the general CI lane for both is #339.
+is smoked (`scripts/platform/linux/smoke.sh`) by hand for now; the general CI lane
+for both is #339. `.github/workflows/pkg-build.yml` builds the Linux zip and runs
+`scripts/pkg-build/build.rkt`, the official `pkg-build` tool in the package
+build server's images, on it (see [The package build
+server](#the-package-build-server)).
+
+### The package build server
+
+pkg-build.racket-lang.org is a natipkg Racket (`x86_64-linux-natipkg`, so
+`torch/info.rkt` declares `torch-x86_64-linux` for that string too) in a
+1 GB VM. Its test column is `raco test --drdr --package torch`: one process
+per file, parallel to the processor count, any stderr a failure, 90 s a file
+and **ten minutes for the whole run, a hard limit**. It sets
+`PLT_PKG_BUILD_SERVICE` (and lists it in `PLT_INFO_ALLOW_VARS`, without which
+`#lang info`'s `getenv` sees nothing); key on that one, never `CI`, which
+GitHub sets too. With it set, `torch/info.rkt`'s `test-omit-paths` omits
+every top-level entry but `pkg-build/`, so the server runs only
+`torch/pkg-build/smoke.rkt`: the `test` submodules of a few fast suites,
+04-mlp and a FLAC round trip, loading libtorch once. Keep it cheap and
+silent on stderr; it runs in the normal suite as well. It requires torch by
+collection, never by relative path: `nix flake check` tests the source tree
+beside a `--copy` install, where `"../main.rkt"` is a second instance whose
+devices 04-mlp's contracts reject.
+`tests/server-test-set-test.rkt` asks `raco test` itself which files the
+server would run and fails on anything but the smoke, so a new top-level
+entry in `torch/` must join the omit list. The docs column renders the manual
+with libtorch loaded, also within the 1 GB.
+[`docs/building.md`](docs/building.md#reproducing-the-package-build-server)
+has the harness's knobs.
 
 ### Binary cache (#79)
 

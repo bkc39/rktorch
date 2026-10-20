@@ -11,7 +11,8 @@
     "threading-lib"
     ("torch-aarch64-macosx" #:platform "aarch64-darwin" #:version "0.1")
     ("torch-aarch64-macosx" #:platform "aarch64-macosx" #:version "0.1")
-    ("torch-x86_64-linux" #:platform "x86_64-linux" #:version "0.1")))
+    ("torch-x86_64-linux" #:platform "x86_64-linux" #:version "0.1")
+    ("torch-x86_64-linux" #:platform "x86_64-linux-natipkg" #:version "0.1")))
 (define build-deps
   '("at-exp-lib"
     "draw-lib"
@@ -27,6 +28,13 @@
 (define pkg-tags
   '("machine-learning" "deep-learning" "tensor" "pytorch" "libtorch"))
 (define pre-install-collection "private/install-torchrkt-native.rkt")
+
+(define test-omit-paths
+  (if (getenv "PLT_PKG_BUILD_SERVICE")
+      '("audio" "data" "foreign" "foreign.rkt" "generated.rkt" "info.rkt" "main.rkt"
+        "nn" "nn.rkt" "operators.rkt" "private" "safe.rkt" "scribblings" "tests"
+        "text" "vision")
+      '()))
 
 ;; Enforced under `raco test --timeout` (the flake's check passes 300s as the
 ;; default). The parity suites self-skip without python3 `torch` and take

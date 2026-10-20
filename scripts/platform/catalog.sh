@@ -18,7 +18,7 @@ cp "$platform" "$platform.CHECKSUM" "$out/zips/"
 
 for zip in "$out"/zips/*.zip; do
   name=$(basename "$zip" .zip)
-  racket scripts/platform/catalog-entry.rkt "$name" "file://$url_root/zips/$name.zip" \
-    "$zip.CHECKSUM" >"$out/catalog/pkg/$name"
+  racket scripts/platform/catalog-entry.rkt "$name" "file://$url_root/zips/$name.zip" "$zip" \
+    >"$out/catalog/pkg/$name"
 done
 ls -l "$out/zips"
