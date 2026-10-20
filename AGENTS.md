@@ -997,7 +997,10 @@ GitHub sets too. With it set, `torch/info.rkt`'s `test-omit-paths` omits
 every top-level entry but `pkg-build/`, so the server runs only
 `torch/pkg-build/smoke.rkt`: the `test` submodules of a few fast suites,
 04-mlp and a FLAC round trip, loading libtorch once. Keep it cheap and
-silent on stderr; it runs in the normal suite as well.
+silent on stderr; it runs in the normal suite as well. It requires torch by
+collection, never by relative path: `nix flake check` tests the source tree
+beside a `--copy` install, where `"../main.rkt"` is a second instance whose
+devices 04-mlp's contracts reject.
 `tests/server-test-set-test.rkt` asks `raco test` itself which files the
 server would run and fails on anything but the smoke, so a new top-level
 entry in `torch/` must join the omit list. The docs column renders the manual

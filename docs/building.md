@@ -389,7 +389,10 @@ from an earlier run); and tests, which also fail when the test transcript's
 clock shows the install-and-test step took more than the server's ten
 minutes.
 `scripts/pkg-build/memory-peaks.sh watch <log>`, run beside it, samples each
-container's cgroup `memory.peak`; `report <log>` prints the peaks.
+container's cgroup `memory.peak`, anonymous memory, swap peak and OOM kills;
+`report <log>` prints them per container. The peak counts page cache, which
+the kernel reclaims at the cap, so a container at 1024 MB with no OOM kills
+and modest anon was not short of memory.
 
 `.github/workflows/pkg-build.yml` does all of it on GitHub's runner, from a
 fresh build of the Linux zip: weekly, on `workflow_dispatch` (with the
