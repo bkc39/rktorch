@@ -71,7 +71,16 @@
     (check-within (floats->list (jitter pixels pi 0 0))
                   (~> pixels bytes->list reverse list->bytes pixels->floats floats->list)
                   1e-6
-                  "a half turn did not move every pixel to its mirror through the centre"))
+                  "a half turn did not move every pixel to its mirror through the centre")
+    (for ([dx+dy (in-list '((0.5 0) (0 0.5)))]
+          [neighbour (in-list (list (shift pixels 1 0) (shift pixels 0 1)))])
+      (check-within (floats->list (apply jitter pixels 0 dx+dy))
+                    (map (lambda (a b) (/ (+ a b) 2))
+                         (~> pixels pixels->floats floats->list)
+                         (~> neighbour pixels->floats floats->list))
+                    1e-6
+                    (format "a shift of ~a did not average each pixel with its neighbour"
+                            dx+dy))))
 
   (define rows (run-example #:workers 2 #:device 'cpu))
   (define majority (majority-share (tensor->list ys)))
@@ -105,7 +114,17 @@
     (parameterize ([current-pseudo-random-generator (make-pseudo-random-generator)])
       (random-seed 0)
       (first-batch ds)))
+  (match-define (list order _)
+    (~> (length ds)
+        (arange #:dtype 'int64)
+        (tensor-dataset ys)
+        (first-batch #:collate default-collate)))
+  (define replayed
+    (parameterize ([current-pseudo-random-generator (make-pseudo-random-generator)])
+      (random-seed 0)
+      (for/list ([i (in-list (tensor->list order))])
+        (apply jitter (list-ref images i) (jitter-draws)))))
+  (check-equal? (tensor->bytes jittered) (apply bytes-append replayed)
+                "the batch is not each image jittered by its own draws, in order")
   (check-not-equal? (tensor->list jittered) (tensor->list plain)
-                    "the jitter left every image in place")
-  (check-true (< (item (mean (abs (- jittered plain)))) 0.12)
-              "the decoded images are not the encoded ones, moved"))
+                    "the jitter left every image in place"))

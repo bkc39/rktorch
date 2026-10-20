@@ -24,7 +24,7 @@ The model, the device and @tt{accuracy} come from the MNIST chapter.
 @chunk[<r17-provide>
 (provide (struct-out epoch-result)
          collate-digits encoded-digits first-batch first-labels jitter
-         pgm-decode pgm-encode run-example train-workers)]
+         jitter-draws pgm-decode pgm-encode run-example train-workers)]
 
 @bold{The encoding.} A PGM file in its plain form is a header, @tt{P2},
 the width, the height and the largest value, then one decimal number per
@@ -49,9 +49,9 @@ a tensor.
 @tt{P2}; the first three are the header. @racket[jitter] rotates the digit by
 an angle in radians and shifts it by @racket[dx] and @racket[dy] pixels,
 sampling the source bilinearly, and writes float32 pixels;
-@racket[random-jitter] draws up to 15 degrees and two pixels from
+@racket[jitter-draws] draws up to 15 degrees and two pixels from
 @racket[current-pseudo-random-generator], which each worker sets to its own,
-seeded from the loader's generator.
+seeded from the loader's generator, and @racket[random-jitter] applies them.
 
 @chunk[<r17-decode>
 (define (pgm-decode bs)
@@ -94,11 +94,13 @@ seeded from the loader's generator.
      4 (system-big-endian?) out (~> y (* 28) (+ x) (* 4))))
   out)
 
+(define (jitter-draws)
+  (list (* (- (random) 0.5) (/ pi 6))
+        (* 4 (- (random) 0.5))
+        (* 4 (- (random) 0.5))))
+
 (define (random-jitter pixels)
-  (jitter pixels
-          (* (- (random) 0.5) (/ pi 6))
-          (* 4 (- (random) 0.5))
-          (* 4 (- (random) 0.5))))]
+  (apply jitter pixels (jitter-draws)))]
 
 @bold{The dataset.} Item @racket[i] is the decoded, jittered image as 3136
 bytes of float32, and its label. The collate builds one tensor per field for
