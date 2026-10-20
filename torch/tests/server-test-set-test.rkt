@@ -4,10 +4,12 @@
   (require (only-in compiler/find-exe find-exe)
            (only-in racket/list filter-map)
            (only-in racket/match match)
-           (only-in racket/port port->lines)
+           (only-in racket/port port->lines with-output-to-string)
            (only-in racket/runtime-path #%datum define-runtime-path)
            (only-in racket/system system*)
-           rackunit)
+           rackunit
+           (only-in setup/getinfo get-info/full)
+           (only-in threading ~>))
 
   (define-runtime-path collection "..")
   (define-runtime-path smoke "../pkg-build/smoke.rkt")
@@ -19,16 +21,13 @@
     env)
 
   (define (racket-lines env . args)
-    (define out (open-output-string))
     (define err (open-output-string))
-    (define ok?
+    (define out
       (parameterize ([current-environment-variables env]
-                     [current-output-port out]
                      [current-error-port err])
-        (apply system* (find-exe) args)))
+        (with-output-to-string (λ () (check-true (apply system* (find-exe) args))))))
     (check-equal? (get-output-string err) "")
-    (check-true ok?)
-    (port->lines (open-input-string (get-output-string out))))
+    (~> out open-input-string port->lines))
 
   (define (module-run line)
     (match (regexp-match #rx"^raco test: (?:[0-9]+ )?(.*)$" line)
@@ -47,9 +46,5 @@
     (check-equal? runs (list (simplify-path smoke))))
 
   (test-case "elsewhere the collection omits nothing from raco test"
-    (check-equal?
-     (racket-lines (environment #:service? #f)
-                   "-l" "racket/base" "-l" "setup/getinfo" "-e"
-                   (format "(write ((get-info/full ~s) 'test-omit-paths))"
-                           (path->string (simplify-path collection))))
-     '("()"))))
+    (parameterize ([current-environment-variables (environment #:service? #f)])
+      (check-equal? ((get-info/full (simplify-path collection)) 'test-omit-paths) '()))))

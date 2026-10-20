@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 #
-#   scripts/pkg-build/memory-peaks.sh watch <log>     (until killed)
-#   scripts/pkg-build/memory-peaks.sh report <log>
+#   scripts/pkg-build/memory-peaks.sh watch|report <log>
 set -uo pipefail
 
 usage="usage: memory-peaks.sh watch|report <log>"
