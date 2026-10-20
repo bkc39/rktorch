@@ -222,12 +222,15 @@ workers is building a batch hangs instead of exiting. Workers build CPU
 tensors, so @racket[ds] must not be on an accelerator. @racket[#:prefetch]
 needs @racket[workers] above 0. A dataset's @racket[#:ref] and
 @racket[#:batch], and @racket[collate], run in several threads at once, so
-any state they share must be synchronized. Torch operations called inside a
-worker run one at a time, through the main thread, until
-@hyperlink["https://github.com/bkc39/rktorch/issues/296"]{#296}, so per-item
-work parallelizes when it is Racket code and does not when it is torch calls;
-and a worker's atomic section can starve while the main thread is in a loop
-of foreign calls. Until
+any state they share must be synchronized. Until
+@hyperlink["https://github.com/bkc39/rktorch/issues/296"]{#296}, torch calls
+made inside a worker are serialized through the main thread: Racket code in a
+dataset runs in parallel, but a dataset whose per-item work is torch calls
+can be slower with workers than without. While the main thread is in a long
+run of foreign calls, as in a training step, a worker's torch call can stall
+the loader until the main thread blocks or yields. A native error from a
+worker's torch call carries the main thread's last error message, which can
+belong to another call. Until
 @hyperlink["https://github.com/bkc39/rktorch/issues/194"]{#194} is fixed,
 the consumer's @racket[with-autocast], @racket[with-no-grad] and
 @racket[default-device] also apply to the batches workers build while the

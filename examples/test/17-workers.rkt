@@ -1,7 +1,7 @@
 #lang racket/base
 
 (require (only-in racket/match match match-define)
-         (only-in racket/math nan?)
+         (only-in racket/math nan? pi)
          torch
          torch/data/loader
          torch/scribblings/examples/17-workers
@@ -31,6 +31,10 @@
   (apply bytes-append
          (for/list ([p (in-bytes pixels)])
            (real->floating-point-bytes (/ p 255.0) 4 (system-big-endian?)))))
+
+(define (floats->list floats)
+  (for/list ([start (in-range 0 (bytes-length floats) 4)])
+    (floating-point-bytes->real floats (system-big-endian?) start (+ start 4))))
 
 (define (shift pixels dx dy)
   (apply bytes
@@ -63,7 +67,11 @@
     (check-equal? (jitter pixels 0 0 0) (pixels->floats pixels)
                   "angle 0, shift 0 did not return the decoded image")
     (check-equal? (jitter pixels 0 1 2) (pixels->floats (shift pixels 1 2))
-                  "a shift of (1, 2) did not move every pixel one right, two down"))
+                  "a shift of (1, 2) did not move every pixel one right, two down")
+    (check-within (floats->list (jitter pixels pi 0 0))
+                  (~> pixels bytes->list reverse list->bytes pixels->floats floats->list)
+                  1e-6
+                  "a half turn did not move every pixel to its mirror through the centre"))
 
   (define rows (run-example #:workers 2 #:device 'cpu))
   (define majority (majority-share (tensor->list ys)))
@@ -93,7 +101,10 @@
                 "a seeded loader did not replay its jitter")
   (match-define (list plain _)
     (first-batch (tensor-dataset xs ys) #:collate default-collate))
-  (match-define (list jittered _) (first-batch ds))
+  (match-define (list jittered _)
+    (parameterize ([current-pseudo-random-generator (make-pseudo-random-generator)])
+      (random-seed 0)
+      (first-batch ds)))
   (check-not-equal? (tensor->list jittered) (tensor->list plain)
                     "the jitter left every image in place")
   (check-true (< (item (mean (abs (- jittered plain)))) 0.12)

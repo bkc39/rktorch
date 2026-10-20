@@ -38,7 +38,8 @@ on an RTX 3090 Ti with libtorch 2.14.0 (cu130). Two runs there, one at #272's
 head and one on master put cuDNN's run-to-run spread at 0.013 for 09's
 accuracy, 0.025 for 10's generator loss and under 0.001 for the rest; each
 tolerance sits above that with room to spare. An A/B at 0651574 differed only
-where #229, #249 and #250 changed the code on purpose.
+where #229, #249 and #250 changed the code on purpose. The 17-workers row
+was taken on 2026-10-20 at 452e8cb (#168), on the same host.
 
 The script reads the table below: the headline is the last number on the last
 log line that `pattern` matches.
