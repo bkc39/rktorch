@@ -1,7 +1,5 @@
 #lang racket/base
-(require (only-in net/url path->url url->string)
-         (only-in racket/format ~a)
-         (only-in racket/string string-split))
+(require (only-in net/url path->url url->string))
 
 (module test racket/base)
 
@@ -31,6 +29,9 @@
                                           #:memory-mb memory-mb)))
 
 (module+ main
+  (require (only-in racket/format ~a)
+           (only-in racket/string string-split))
+
   (define racket-version (setting "PKG_BUILD_RACKET" "9.3"))
   (define work-dir (path->complete-path (setting "PKG_BUILD_WORK_DIR" ".scratch/pkg-build/out/work")))
   (define jobs (string->number (setting "PKG_BUILD_JOBS" "")))

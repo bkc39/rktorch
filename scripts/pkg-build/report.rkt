@@ -1,7 +1,6 @@
 #lang racket/base
 (require (only-in racket/file file->string)
          (only-in racket/list take-right)
-         (only-in racket/match match-define)
          (only-in racket/string string-split))
 
 (define pkg "torch")
@@ -27,6 +26,8 @@
       '()))
 
 (module+ main
+  (require (only-in racket/match match-define))
+
   (match-define (vector work-arg) (current-command-line-arguments))
   (define work (path->complete-path work-arg))
   (define summary-file (build-path work "summary.rktd"))
