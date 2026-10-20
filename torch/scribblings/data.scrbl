@@ -185,8 +185,8 @@ drop_last, collate_fn, generator, num_workers, prefetch_factor)}. With
 are asked for. A shuffled loader
 needs a non-empty dataset within @racket[size/c], as @tt{RandomSampler}
 and @racket[randperm] do; an empty one may still be traversed in order. Every traversal
-draws what one @tt{DataLoader} iterator draws, in its order, from
-@racket[generator] or else @racket[(current-generator)]: one @racket[draw-seed] when
+draws what one @tt{DataLoader} iterator draws, in its order. With
+@racket[generator], every draw comes from it: one @racket[draw-seed] when
 the traversal starts, shuffled or not; with @racket[#:shuffle?] the
 permutation when the first batch is asked for, and once it is used up the trailing permutation its sampler
 discards, before a final partial batch or else when the traversal is
@@ -194,9 +194,14 @@ exhausted. A traversal abandoned early leaves the stream where PyTorch's
 would. The stream continues across traversals, so
 @racket[(make-generator s)] here and
 @tt{torch.Generator().manual_seed(s)} there yield the same batch order
-epoch after epoch. Without a generator the draws come from the global
-stream the way @tt{RandomSampler} makes them, seeding a fresh generator
-per epoch. Without @racket[#:shuffle?] the batches are the items in order,
+epoch after epoch. Without a generator, each traversal draws its seeds
+from @racket[(current-generator)], the global stream unless parameterized,
+the way @tt{RandomSampler} draws from torch's default generator; with
+@racket[#:shuffle?] one of them seeds a fresh sampler generator, which draws
+that traversal's permutations. So parameterizing @racket[current-generator]
+to @racket[g] is not passing @racket[g] as @racket[#:generator], just as
+setting torch's default generator is not passing @tt{generator=g}.
+Without @racket[#:shuffle?] the batches are the items in order,
 and a batch size equal to the length yields the dataset's own tensors.
 
 With @racket[workers] above 0, each traversal starts that many parallel
@@ -325,7 +330,7 @@ One int64 drawn from @racket[generator] or else from @racket[(current-generator)
 The generator a random operation draws from when its @racket[#:generator]
 is @racket[#f]: @racket[rand], @racket[randn], @racket[rand-like],
 @racket[randn-like], @racket[randperm], @racket[draw-seed],
-@racket[multinomial], the random transforms, and a loader's own draws.
+@racket[multinomial], the random transforms, and the seeds a loader draws.
 @racket[#f], the default, is the global stream seeded by
 @racket[manual-seed!]. An explicit @racket[#:generator] wins. Each loader
 worker sets it to its own generator. @racket[uniform-init],

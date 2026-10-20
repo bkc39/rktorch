@@ -106,4 +106,27 @@
     (manual-seed! 5)
     (define first-order (order))
     (check-equal? (order) first-order)
-    (check-equal? (tensor->list (randn 4)) baseline)))
+    (check-equal? (tensor->list (randn 4)) baseline))
+
+  (test-case "parameterizing current-generator is not passing it as #:generator"
+    (define (shuffled g)
+      (~> (arange 10 #:dtype 'int64)
+          tensor-dataset
+          (dataloader #:batch-size 10 #:shuffle? #t #:generator g)))
+    (define (first-batch loader)
+      (for/first ([b loader]) (tensor->list b)))
+    (define passed (~> 3 make-generator shuffled first-batch))
+    (define parameterized
+      (parameterize ([current-generator (make-generator 3)])
+        (first-batch (shuffled #f))))
+    (define g (make-generator 3))
+    (draw-seed #:generator g)
+    (check-equal? passed (tensor->list (randperm 10 #:generator g)))
+    (define h (make-generator 3))
+    (draw-seed #:generator h)
+    (check-equal? parameterized
+                  (~> (draw-seed #:generator h)
+                      make-generator
+                      (randperm 10 #:generator _)
+                      tensor->list))
+    (check-not-equal? parameterized passed)))
