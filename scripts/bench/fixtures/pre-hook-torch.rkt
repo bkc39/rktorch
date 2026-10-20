@@ -17,6 +17,4 @@
     (define fake (build-path collects "torch"))
     (make-directory* fake)
     (for-each (lambda (name) (write-reexport! fake name)) '(main nn))
-    (make-file-or-directory-link (build-path torch-dir "native-libs")
-                                 (build-path fake "native-libs"))
     (proc (cons "PLTCOLLECTS" (format "~a:" (path->string collects))))))

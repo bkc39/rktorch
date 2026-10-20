@@ -3,7 +3,8 @@
 (require (only-in ffi/unsafe
                   _fun _int _int64 _pointer _ptr _string _uint _void
                   ffi-lib get-ffi-obj)
-         (only-in ffi/vector _s64vector s64vector))
+         (only-in ffi/vector _s64vector s64vector)
+         (only-in (submod torch/foreign/raw/native-location checked) native-library-path))
 
 (provide shim-randn
          shim-add
@@ -21,8 +22,7 @@
          usleep
          usleep/blocking)
 
-(define shim
-  (ffi-lib (build-path (collection-path "torch") "native-libs" "libtorchrkt")))
+(define shim (ffi-lib (native-library-path)))
 
 (define shim-version (get-ffi-obj "tr_version" shim (_fun -> _string)))
 

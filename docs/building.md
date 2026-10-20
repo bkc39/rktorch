@@ -89,11 +89,14 @@ that step needs no network. After changing C++, re-stage the library with
 
 ## The native library
 
-`torch` loads `libtorchrkt` from `torch/native-libs/`, and reports which of the
-two failures it hit: nothing staged there, or something staged that the
-platform loader would not open. Nix stages it for you -- `nix build`, or the
-first entry into `nix develop` -- and `nix run .#copy-native-libs` re-stages it
-after a C++ change. Without Nix there are two ways to supply it.
+`torch` looks for `libtorchrkt` in two places, in order: the staged
+`torch/native-libs/`, then the collection `torch-native`, which a platform
+package (`torch-x86_64-linux`, `torch-aarch64-macosx`) provides. A staged
+library wins, so a linked checkout runs the shim it built even with a platform
+package installed. When neither has it, or what it found would not open, the
+error says which. Nix stages it for you -- `nix build`, or the first entry into
+`nix develop` -- and `nix run .#copy-native-libs` re-stages it after a C++
+change. Without Nix there are two ways to supply it.
 
 Set `TORCHRKT_NATIVE_LIB_PATH` to a directory whose `lib/` subdirectory holds
 the library, and the package's pre-install hook copies it into place:
@@ -112,8 +115,17 @@ cp libtorchrkt.so torch/native-libs/
 A hand-built library has to find libtorch at load time as well; the one Nix
 builds carries an rpath to it, so a copy from elsewhere may need
 `LD_LIBRARY_PATH` (`DYLD_LIBRARY_PATH` on darwin) to point at libtorch's `lib/`.
-A library that is staged but cannot resolve libtorch reports as staged, with
+A library that is staged but cannot resolve libtorch reports as found, with
 the loader's own message.
+
+The shim and the bindings must come from the same commit. `tr_abi_stamp()`
+returns a SHA-256 of every header under `cpp/include/torchrkt/c_api/`, baked in
+when CMake configures, and `torch` refuses a shim whose stamp differs from the
+copy in `torch/foreign/raw/abi-stamp.rktd`, naming both stamps and the fix:
+`raco pkg update torch torch-x86_64-linux` (the platform package for the host)
+for a catalog install, or re-staging in a checkout. After editing a `c_api`
+header, `nix run .#abi-stamp` rewrites the copy (`nix run .#codegen` does too),
+and the `abi-stamp-current` flake check fails until it is committed.
 
 ## The manual
 

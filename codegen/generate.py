@@ -25,6 +25,8 @@ CPP_UMBRELLA = ROOT / "cpp" / "include" / "torchrkt" / "c_api" / "generated.h"
 CPP_SRC = ROOT / "cpp" / "src" / "torchrkt" / "generated"
 RKT_WRAPPERS = ROOT / "torch" / "generated.rkt"
 MANIFEST = ROOT / "torch" / "tests" / "generated-parity.rktd"
+ABI_STAMP = ROOT / "torch" / "foreign" / "raw" / "abi-stamp.rktd"
+ABI_STAMP_SCRIPT = ROOT / "cpp" / "cmake" / "abi_stamp.cmake"
 
 
 def read_allowlist() -> list[tuple[str, str, bool]]:
@@ -73,6 +75,15 @@ def _clang_format(paths: list[Path]) -> None:
               file=sys.stderr)
         return
     subprocess.run([exe, "-i", *(str(p) for p in paths)], check=True)
+
+
+def _abi_stamp() -> None:
+    exe = shutil.which("cmake")
+    if exe is None:
+        sys.exit(f"codegen: cmake not on PATH; {ABI_STAMP.relative_to(ROOT)} "
+                 "would go stale (it hashes the headers just written)")
+    subprocess.run([exe, f"-DOUT={ABI_STAMP}", "-P", str(ABI_STAMP_SCRIPT)],
+                   check=True)
 
 
 def main() -> None:
@@ -132,6 +143,7 @@ def main() -> None:
     _write(RKT_WRAPPERS, emit_racket.emit_wrappers(shards))
     _write(MANIFEST, emit_racket.emit_manifest(shards))
     _clang_format(cpp_paths)
+    _abi_stamp()
 
     total = sum(len(ops) for ops in shards.values())
     print(f"codegen: generated {total} op(s) across "

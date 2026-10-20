@@ -209,6 +209,57 @@
           '';
         };
 
+      abiStampTestsFor = pkgs:
+        let
+          cApi = ./cpp/include/torchrkt/c_api;
+          run = name: script: pkgs.runCommand name { nativeBuildInputs = [ pkgs.cmake ]; } ''
+            stamp() { cmake -DC_API_DIR="$1" -P ${./cpp/cmake/abi_stamp.cmake}; }
+            current() {
+              want=$(stamp "$1")
+              have=$(tr -d '"\n' < "$2")
+              if [ "$want" != "$have" ]; then
+                echo "torch/foreign/raw/abi-stamp.rktd holds $have, but the c_api headers hash to $want." >&2
+                echo "Regenerate it with: nix run .#abi-stamp (nix run .#codegen also does), and commit it." >&2
+                return 1
+              fi
+            }
+            fails() {
+              if "$@" > "$TMPDIR/log" 2>&1; then
+                echo "expected a failure: $*" >&2
+                exit 1
+              fi
+            }
+            ${script}
+            mkdir "$out"
+          '';
+        in
+        {
+          abi-stamp-current = run "torch-rkt-abi-stamp-current" ''
+            current ${cApi} ${./torch/foreign/raw/abi-stamp.rktd}
+          '';
+          abi-stamp-test = run "torch-rkt-abi-stamp-test" ''
+            base=$(stamp ${cApi})
+            [[ "$base" =~ ^[0-9a-f]{64}$ ]]
+            copy() { cp -r ${cApi} "$TMPDIR/$1"; chmod -R u+w "$TMPDIR/$1"; }
+            copy same
+            [ "$(stamp "$TMPDIR/same")" = "$base" ]
+            copy edited
+            echo >> "$TMPDIR/edited/global.h"
+            [ "$(stamp "$TMPDIR/edited")" != "$base" ]
+            fails current "$TMPDIR/edited" ${./torch/foreign/raw/abi-stamp.rktd}
+            grep -q 'nix run .#abi-stamp' "$TMPDIR/log"
+            copy renamed
+            mv "$TMPDIR/renamed/global.h" "$TMPDIR/renamed/global2.h"
+            [ "$(stamp "$TMPDIR/renamed")" != "$base" ]
+            copy nested
+            echo >> "$TMPDIR/nested/generated/math.h"
+            [ "$(stamp "$TMPDIR/nested")" != "$base" ]
+            copy added
+            touch "$TMPDIR/added/extra.h"
+            [ "$(stamp "$TMPDIR/added")" != "$base" ]
+          '';
+        };
+
       # nixpkgs' libtorch-bin is still 2.9.0 (#140), so torchPackageFor points
       # its derivation at PyTorch's own 2.14.0 downloads. The darwin zip
       # bundles libomp.dylib behind @loader_path, so no Homebrew install name
@@ -715,6 +766,7 @@
             runtimeInputs = [
               (pkgs.python314.withPackages (ps: [ ps.torch ]))
               pkgs.clang-tools
+              pkgs.cmake
             ];
             text = ''
               if [ ! -f codegen/generate.py ]; then
@@ -724,10 +776,23 @@
               exec python3 -m codegen "$@"
             '';
           };
+
+          abi-stamp = pkgs.writeShellApplication {
+            name = "abi-stamp";
+            runtimeInputs = [ pkgs.cmake ];
+            text = ''
+              if [ ! -f cpp/cmake/abi_stamp.cmake ]; then
+                echo "abi-stamp: run from the repo root (cpp/cmake/abi_stamp.cmake not found)" >&2
+                exit 1
+              fi
+              cmake -DOUT=torch/foreign/raw/abi-stamp.rktd -P cpp/cmake/abi_stamp.cmake
+              echo "abi-stamp: torch/foreign/raw/abi-stamp.rktd is $(cat torch/foreign/raw/abi-stamp.rktd)"
+            '';
+          };
         in
         {
           default = racket;
-          inherit cpp cpp-format cpp-line-count cpp-tidy racket racket91
+          inherit abi-stamp cpp cpp-format cpp-line-count cpp-tidy racket racket91
             racket-deps racket-linters codegen copy-native-libs matrix
             libtorch-zip;
         }
@@ -738,6 +803,10 @@
         });
 
       apps = forAllSystems (system: {
+        abi-stamp = {
+          type = "app";
+          program = "${self.packages.${system}.abi-stamp}/bin/abi-stamp";
+        };
         codegen = {
           type = "app";
           program = "${self.packages.${system}.codegen}/bin/codegen";
@@ -768,7 +837,8 @@
             mkdir $out
           '';
         } // self.packages.${system}.racket-deps.tests
-          // self.packages.${system}.racket91.tests);
+          // self.packages.${system}.racket91.tests
+          // abiStampTestsFor pkgs);
 
       devShells = forAllSystems (system:
         let
