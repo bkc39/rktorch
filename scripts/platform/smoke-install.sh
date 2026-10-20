@@ -40,4 +40,7 @@ echo "stderr: empty"
 step "torch/pkg-build/smoke: the suites, 04-mlp and a FLAC round trip"
 raco test --drdr -l torch/pkg-build/smoke
 
+step "raco setup --check-pkg-deps --pkgs torch"
+raco setup --no-docs --check-pkg-deps --pkgs torch
+
 step "SMOKE OK: $host, racket $(racket -e '(display (version))')"
