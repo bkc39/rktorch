@@ -13,6 +13,8 @@ on:
     paths:
       - "scripts/pkg-build/**"
       - "torch/pkg-build/**"
+      - "torch/private/install-torchrkt-native.rkt"
+      - "torch/foreign/raw/**"
       - "torch/info.rkt"
       - "torch/tests/native-library-test.rkt"
       - "torch/tests/tensor-ops-test.rkt"
@@ -30,7 +32,7 @@ permissions:
 
 concurrency:
   group: pkg-build-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   build:

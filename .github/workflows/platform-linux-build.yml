@@ -8,7 +8,6 @@ permissions:
 
 jobs:
   torch-x86_64-linux:
-    name: torch-x86_64-linux
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     env:

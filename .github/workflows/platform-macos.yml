@@ -8,6 +8,8 @@ on:
       - "pkgs/**"
       - "torch/info.rkt"
       - "torch/pkg-build/**"
+      - "torch/private/install-torchrkt-native.rkt"
+      - "torch/foreign/raw/**"
       - "torch/tests/native-library-test.rkt"
       - "torch/tests/tensor-ops-test.rkt"
       - "torch/tests/autograd-test.rkt"
@@ -19,13 +21,17 @@ on:
     - cron: "0 8 * * 1"
   workflow_dispatch:
   workflow_call:
+    inputs:
+      mps:
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
 concurrency:
   group: platform-macos-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   build:
@@ -139,7 +145,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .scratch/macos/racket/dl
-          key: platform-macos-racket-${{ hashFiles('scripts/platform/sources.txt') }}
+          key: platform-macos-racket-install-${{ hashFiles('scripts/platform/sources.txt') }}
 
       - name: Download the macOS package
         uses: actions/download-artifact@v4
@@ -188,7 +194,7 @@ jobs:
   mps:
     name: MPS tests (Racket 9.3)
     needs: build
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    if: inputs.mps || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: macos-latest
     timeout-minutes: 60
     defaults:
@@ -211,7 +217,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .scratch/macos/racket/dl
-          key: platform-macos-racket-${{ hashFiles('scripts/platform/sources.txt') }}
+          key: platform-macos-racket-mps-${{ hashFiles('scripts/platform/sources.txt') }}
 
       - name: Download the macOS package
         uses: actions/download-artifact@v4
