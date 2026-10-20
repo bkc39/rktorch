@@ -519,8 +519,8 @@ builds the macOS ones on GitHub's arm64 runner, since a Linux host cannot
 build or load them. Both source `scripts/platform/build-common.sh`
 (fetching, the codecs, GoogleTest, the shim's CMake, the gtests) and share
 `sources.txt`, `assemble.sh`, `catalog.sh` (whose entries carry each zip's
-deps and build-deps) and `smoke-install.sh`, which runs the installed
-`torch/pkg-build/smoke.rkt`;
+deps and build-deps), `size-budget.sh` and `smoke-install.sh`, which runs the
+installed `torch/pkg-build/smoke.rkt` and `raco setup --check-pkg-deps`;
 [`docs/building.md`](docs/building.md#the-platform-package) has the steps.
 
 ```bash
@@ -975,14 +975,20 @@ uncontracted copy of the pipeline, which has not been built.
 `.github/workflows/nix.yml`: `nix flake check` on `ubuntu-latest` +
 `macos-latest`, a `resyntax` lint gate, and a `codegen-drift` job
 (regenerate + fail on porcelain).
-`.github/workflows/platform-macos.yml` builds, audits and smokes
-`torch-aarch64-macosx` on `macos-latest` (see [The platform
-package](#the-platform-package)). The Linux package (`scripts/platform/linux/`)
-is smoked (`scripts/platform/linux/smoke.sh`) by hand for now; the general CI lane
-for both is #339. `.github/workflows/pkg-build.yml` builds the Linux zip and runs
-`scripts/pkg-build/build.rkt`, the official `pkg-build` tool in the package
-build server's images, on it (see [The package build
-server](#the-package-build-server)).
+`.github/workflows/platform-linux-build.yml`, callable only, builds, audits
+and gtests `torch-x86_64-linux`, fails when its zip passes the budget in
+`scripts/platform/size-budget.sh`, and uploads it. `platform-linux.yml` runs it,
+then `smoke-install.sh` (the smoke and `raco setup --check-pkg-deps`) on
+ubuntu-24.04 at Racket 9.1 and `stable` and in `rockylinux:8` at 9.1 and 9.3,
+and `scripts/build-docs` with the checkout's `torch` linked over the built
+bundle. `platform-macos.yml` builds and audits `torch-aarch64-macosx` on
+`macos-latest`, smokes it on `macos-14` at 9.1 and 9.3, and, weekly or on
+demand, runs the installed package's MPS tests. Both lanes run weekly and are
+`workflow_call`-able; [`docs/building.md`](docs/building.md#continuous-integration-and-the-binary-cache)
+has their triggers. `.github/workflows/pkg-build.yml` takes the Linux zip from
+the same build and runs `scripts/pkg-build/build.rkt`, the official
+`pkg-build` tool in the package build server's images, on it (see [The package
+build server](#the-package-build-server)).
 
 ### The package build server
 
