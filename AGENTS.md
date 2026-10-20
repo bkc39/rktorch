@@ -978,8 +978,8 @@ uncontracted copy of the pipeline, which has not been built.
 `.github/workflows/platform-macos.yml` builds, audits and smokes
 `torch-aarch64-macosx` on `macos-latest` (see [The platform
 package](#the-platform-package)). The Linux package (`scripts/platform/linux/`)
-is built and smoked by hand for now; the general CI lane for both is #339.
-`.github/workflows/pkg-build.yml` builds the Linux zip and runs
+is smoked (`scripts/platform/linux/smoke.sh`) by hand for now; the general CI lane
+for both is #339. `.github/workflows/pkg-build.yml` builds the Linux zip and runs
 `scripts/pkg-build/build.rkt`, the official `pkg-build` tool in the package
 build server's images, on it (see [The package build
 server](#the-package-build-server)).

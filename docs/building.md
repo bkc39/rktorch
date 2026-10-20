@@ -228,8 +228,9 @@ the image, `smoke-install.sh` installs into a Racket user home of its own,
 even from `nix develop` it tests the platform package. It fails if
 `raco pkg install` wrote anything to stderr, then runs the installed
 `torch/pkg-build/smoke.rkt`, the module the package build server tests
-([below](#reproducing-the-package-build-server)), failing on any stderr
-there too. The smoke runs the suites for the native library, tensor ops,
+([below](#reproducing-the-package-build-server)), with `raco test --drdr` as
+the server does, so any stderr there fails too, the native library's
+included. The smoke runs the suites for the native library, tensor ops,
 autograd and `nn`, trains `04-mlp` on the device it picks, and on the CPU as
 well when that is an accelerator, printing where the shim came from and
 `(mps-available?)` on the way, and round-trips a FLAC file:
@@ -254,9 +255,10 @@ refuses to load code whose signature no longer matches.
 
 A Linux host can neither build nor load any of this, so
 `.github/workflows/platform-macos.yml` builds it, on `macos-latest`, for
-every pull request that touches `cpp/`, `scripts/platform/`, `pkgs/` or
-`torch/info.rkt` outside `scripts/platform/linux/` and
-`pkgs/torch-x86_64-linux/`, and on demand. Each step is one call on a Mac:
+every pull request that touches `cpp/`, `scripts/platform/`, `pkgs/`,
+`torch/info.rkt`, `torch/pkg-build/` or the four suites the smoke runs,
+outside `scripts/platform/linux/` and `pkgs/torch-x86_64-linux/`, and on
+demand. Each step is one call on a Mac:
 
 ```bash
 scripts/platform/macos/build.sh .scratch/macos codecs gtest shim bundle audit gtests
@@ -392,8 +394,9 @@ container's cgroup `memory.peak`; `report <log>` prints the peaks.
 `.github/workflows/pkg-build.yml` does all of it on GitHub's runner, from a
 fresh build of the Linux zip: weekly, on `workflow_dispatch` (with the
 Racket release as an input), and on a pull request that touches the
-harness, `torch/pkg-build/`, `torch/info.rkt`, `pkgs/torch-x86_64-linux/` or
-`scripts/platform/` outside `macos/`. It uploads the zip, the transcripts
+harness, `torch/pkg-build/`, the four suites the smoke runs, `torch/info.rkt`,
+`cpp/`, `pkgs/torch-x86_64-linux/` or `scripts/platform/` outside `macos/`.
+It uploads the zip, the transcripts
 (`install`, `test-success` or `test-fail`, and any failure), `summary.rktd`,
 the memory peaks and the rendered manual as the `pkg-build-results`
 artifact.

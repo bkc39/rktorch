@@ -38,6 +38,6 @@ fi
 echo "stderr: empty"
 
 step "torch/pkg-build/smoke: the suites, 04-mlp and a FLAC round trip"
-raco test --check-stderr -l torch/pkg-build/smoke
+raco test --drdr -l torch/pkg-build/smoke
 
 step "SMOKE OK: $host, racket $(racket -e '(display (version))')"
