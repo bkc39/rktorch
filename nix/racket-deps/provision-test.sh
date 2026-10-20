@@ -10,6 +10,8 @@ app=$t/rdfix-app
 keep=$t/keep
 log=$t/log
 mkdir -p "$keep/rdfix-k"
+cp -r "$f/pkgs" "$t/pkgs"
+chmod -R u+w "$t/pkgs"
 
 rd() { racket "$(dirname "$provision")/racket-deps.rkt" "$@"; }
 mkapp() {
@@ -26,9 +28,10 @@ mkout() {
   chmod -R u+w "$out"
   rd manifest "$app" > "$out/.info-deps"
 }
-provision() { bash "$provision" "$t/$1" "$app" "$keep" > "$log" 2>&1; }
+provision() { bash "$provision" "$t/$1" "$app" "$keep" "$t/pkgs" > "$log" 2>&1; }
 enter() {
-  bash -c 'source "$0" "$@"; echo entered' "$step" "$t/$1" "$app" "$keep" > "$log" 2>&1
+  bash -c 'source "$0" "$@"; echo entered' "$step" "$t/$1" "$app" "$keep" "$t/pkgs" \
+    > "$log" 2>&1
 }
 fails() {
   if "$@"; then
@@ -70,14 +73,24 @@ expect "$(wc -w <<< "$second")" 1
 enter out-2
 expect "$(cat "$log")" entered
 
+mkapp app-platform
+provision out-2
+case $(racket -e '(display (system-library-subpath #f))') in
+  x86_64-linux) platform=torch-x86_64-linux ;;
+  aarch64-macosx) platform=torch-aarch64-macosx ;;
+  *) platform= ;;
+esac
+expect "$(installed)" "$(printf '%s\n' rdfix-a rdfix-app rdfix-k $platform | sort | paste -sd' ')"
+third=$(stamps)
+
 mkapp app-drift
 fails provision out-2
 grep -q 'bump racket-deps outputHash' "$log"
-expect "$(stamps)" "$second"
+expect "$(stamps)" "$third"
 fails enter out-2
 grep -q 'provisioning failed; not stamping' "$log"
 fails grep -q entered "$log"
-expect "$(stamps)" "$second"
+expect "$(stamps)" "$third"
 
 export PLTUSERHOME=$t/plt-fresh
 mkout out-3 rdfix-a
@@ -88,4 +101,12 @@ expect "$(stamps)" ""
 fails enter out-3
 grep -q 'provisioning failed; not stamping' "$log"
 fails grep -q entered "$log"
+expect "$(stamps)" ""
+
+export PLTUSERHOME=$t/plt-skew
+mkapp app-skew
+mkout out-4 rdfix-a
+fails provision out-4
+grep -qF 'torch-x86_64-linux is version "1.0"; ' "$log"
+expect "$(installed)" ""
 expect "$(stamps)" ""

@@ -16,7 +16,8 @@ nix build                 # native lib + Racket package + tests + examples
 ./result/bin/torch        # prints the libtorch version and a 2x2 draw
 nix build .#cpp           # CMake build and the GoogleTest suite only
 nix flake check           # the Nix checks: cpp, format, tidy, line gate, racket,
-                          # racket91, racket-floor, matrix-runner-test and the
+                          # racket91, racket-floor, matrix-runner-test,
+                          # platform-audit-test (Linux) and the
                           # racket-deps-* checks
 ```
 
@@ -27,11 +28,18 @@ in flake.nix" when the declared deps no longer match the fetched ones, and
 names any dep whose `#:version` minimum the fetched tree or the Racket
 installation does not meet;
 `racket-deps-guard-test` and `racket-deps-info-test` test
-`nix/racket-deps/racket-deps.rkt`; `racket-deps-provision-test` tests
+`nix/racket-deps/racket-deps.rkt`, and the info test also fails when
+`own-platform-packages` there and `platform-packages` in
+`torch/foreign/raw/native-location.rkt` name different packages;
+`racket-deps-provision-test` tests
 `nix/racket-deps/provision.sh`, the dev shells' provisioning. To bump, set
 `outputHash` to `""`, run `nix build .#racket-deps`, and paste the hash Nix
-reports. A `#:platform` dep is refused, whether `torch/info.rkt` or a
-fetched package declares it: one hash cannot hold a per-system fetch. A
+reports. torch's own platform packages, such as `torch-x86_64-linux`, are left
+out of the fetch: the build and the shells install their library-less
+skeleton from `pkgs/` instead (see [The platform package](#the-platform-package)),
+after checking that the skeleton's version and the dep's `#:version` both
+equal torch's. Any other `#:platform` dep is refused, whether `torch/info.rkt`
+or a fetched package declares it: one hash cannot hold a per-system fetch. A
 package source (a URL or path) is refused too: racket-deps fetches catalog
 packages by name.
 
@@ -102,6 +110,7 @@ Set `TORCHRKT_NATIVE_LIB_PATH` to a directory whose `lib/` subdirectory holds
 the library, and the package's pre-install hook copies it into place:
 
 ```bash
+raco pkg install ./pkgs/torch-x86_64-linux   # x86_64 Linux: meets torch's platform dep
 TORCHRKT_NATIVE_LIB_PATH=/path/to/prefix raco pkg install --name torch ./torch
 # /path/to/prefix/lib/libtorchrkt.so   (libtorchrkt.dylib on darwin)
 ```
@@ -111,6 +120,10 @@ Or copy it in by hand, which the hook leaves alone:
 ```bash
 cp libtorchrkt.so torch/native-libs/
 ```
+
+When the variable is unset, the hook prints nothing if either place already
+holds the library, as a catalog install's platform package does, and
+otherwise prints the same not-found message the bindings raise.
 
 A hand-built library has to find libtorch at load time as well; the one Nix
 builds carries an rpath to it, so a copy from elsewhere may need
@@ -126,6 +139,75 @@ copy in `torch/foreign/raw/abi-stamp.rktd`, naming both stamps and the fix:
 for a catalog install, or re-staging in a checkout. After editing a `c_api`
 header, `nix run .#abi-stamp` rewrites the copy (`nix run .#codegen` does too),
 and the `abi-stamp-current` flake check fails until it is committed.
+
+## The platform package
+
+On x86_64 Linux, `torch` depends on `torch-x86_64-linux`
+(`#:platform "x86_64-linux"`, same version), which provides the collection
+`torch-native`: `libtorchrkt.so`, libtorch 2.14.0's CPU libraries from
+PyTorch's official zip, and libsndfile with its codecs as separate shared
+libraries. Every library carries the RUNPATH `$ORIGIN` and needs nothing from
+the host beyond glibc 2.28 and libstdc++, which is what PyTorch's own
+libtorch asks for. The package is about 118 MB zipped and 445 MB installed.
+
+Its skeleton lives in `pkgs/torch-x86_64-linux/`: the `info.rkt`, and the
+licences of every bundled library in `THIRD-PARTY-NOTICES` and `licenses/`.
+The Nix build and the shells install that skeleton, with no libraries in it,
+so `torch`'s dependency is met without a download; the staged
+`torch/native-libs/` still supplies the shim. The release package is the same
+skeleton plus the libraries, built outside Nix in PyTorch's own baseline image,
+`manylinux_2_28`, since a Nix toolchain links against a newer glibc than
+that baseline.
+
+```bash
+scripts/platform/linux/build.sh .scratch/platform
+scripts/platform/linux/assemble.sh .scratch/platform/bundle .scratch/pkg
+```
+
+`build.sh` runs in Docker, capped at four CPUs, and keeps its downloads and
+builds in the directory it is given, so a second run rebuilds only the shim;
+the unpacked libtorch, the codecs and GoogleTest are rebuilt when the sha256
+that `sources.txt` pins for them changes.
+Every source it fetches is pinned by sha256 in
+`scripts/platform/linux/sources.txt`: the libtorch zip, the codecs,
+libsndfile, stb and GoogleTest. It builds the codecs and libsndfile as shared
+libraries, then the shim and its GoogleTest suite, then collects the bundle:
+the shim plus every library it needs, followed through NEEDED entries, from
+the libtorch zip and the codec builds. It then audits the bundle and runs the
+gtests against it.
+
+The audit, `scripts/platform/linux/audit-bundle.sh <dir>`, fails the build if
+any library:
+
+- mentions `/nix/store`;
+- has an RPATH or RUNPATH entry other than `$ORIGIN`, or lacks `$ORIGIN`
+  while it needs a library in the bundle;
+- needs a GLIBC, GLIBCXX or CXXABI symbol version newer than libtorch's own
+  (2.28, 3.4.22, 1.3.11);
+- or needs a library that is neither in the bundle nor in the system set
+  (libc, libm, libdl, libpthread, librt, the dynamic loader, libstdc++,
+  libgcc_s).
+
+It reads the symbol versions twice, from `objdump -T` and from `readelf -V`,
+and fails when the two disagree, so a tool whose output it cannot parse fails
+the audit instead of passing it. It follows NEEDED entries only, so a library
+loaded with `dlopen` is neither bundled nor audited; the CPU bundle loads
+none. The `platform-audit-test` flake check points it at the Nix-built shim,
+which it must fail on `/nix/store`, RUNPATH and GLIBC, and at the same shim
+with an `objdump` that prints nothing.
+
+`assemble.sh` copies the skeleton, adds the bundle and writes
+`torch-x86_64-linux.zip` with `raco pkg create`. To try an install on a host
+without Nix, `catalog.sh` puts that zip and a zip of this checkout's `torch`
+in a directory catalog, and `smoke.sh` installs both from it into a distro
+image with a Racket from download.racket-lang.org. It then trains `04-mlp`,
+round-trips a FLAC file, and fails if `raco pkg install` wrote anything to
+stderr:
+
+```bash
+scripts/platform/linux/catalog.sh .scratch/pkg/torch-x86_64-linux.zip .scratch/catalog
+scripts/platform/linux/smoke.sh rockylinux:8 racket-9.1-x86_64-linux-buster-cs.sh .scratch/catalog
+```
 
 ## The manual
 

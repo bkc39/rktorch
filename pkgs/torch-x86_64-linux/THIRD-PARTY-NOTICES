@@ -1,0 +1,66 @@
+torch-x86_64-linux: third-party notices
+
+This package carries libtorchrkt, the native half of the Racket package
+`torch` (Apache-2.0, https://github.com/bkc39/rktorch), and the shared
+libraries it loads. Each is listed below with its version, licence and
+upstream source; the licence texts are under licenses/. The libraries are
+unmodified upstream builds, or were built from the listed sources by
+scripts/platform/linux/build.sh in the rktorch repository at the tag this
+package was released from. Every library licensed under the LGPL is shipped
+as a separate shared object that can be replaced.
+
+libtorchrkt.so
+  rktorch's own shim. Apache-2.0.
+  Compiles in stb_image (stb commit 5736b15f7ea0ffb08dd38af21067c314d6a3aae9),
+  MIT or Unlicense, at your option: licenses/stb-LICENSE.
+  https://github.com/nothings/stb
+
+libtorch_cpu.so, libc10.so, libtorch.so
+  PyTorch libtorch 2.14.0, CPU build, from the official
+  libtorch-shared-with-deps-2.14.0+cpu.zip. BSD-3-Clause:
+  licenses/pytorch-LICENSE, with the third-party notices of PyTorch's own
+  source in licenses/pytorch-NOTICE (both from the v2.14.0 tag; the zip
+  carries no licence text).
+  https://github.com/pytorch/pytorch/tree/v2.14.0
+  https://download.pytorch.org/libtorch/cpu/libtorch-shared-with-deps-2.14.0%2Bcpu.zip
+
+  libtorch_cpu.so contains Intel oneAPI Math Kernel Library 2024.2 (Product
+  Build 20240605), linked statically by PyTorch's build and shipped
+  unmodified. Intel Simplified Software License (Version October 2022):
+  licenses/mkl-LICENSE, the LICENSE.txt of the mkl-static 2024.2.0 wheel.
+  https://pypi.org/project/mkl-static/2024.2.0/
+  https://www.intel.com/content/www/us/en/developer/tools/oneapi/onemkl.html
+
+libgomp.so.1
+  The GNU OpenMP runtime, as shipped in the libtorch zip above.
+  GPL-3.0-or-later WITH GCC-exception-3.1: licenses/gcc-COPYING3 and
+  licenses/gcc-COPYING.RUNTIME.
+  https://gcc.gnu.org/
+
+libsndfile.so.1
+  libsndfile 1.2.2. LGPL-2.1-or-later: licenses/libsndfile-COPYING.
+  https://github.com/libsndfile/libsndfile/releases/download/1.2.2/libsndfile-1.2.2.tar.xz
+
+libmpg123.so.0
+  mpg123 1.33.4. LGPL-2.1-only: licenses/mpg123-COPYING.
+  https://www.mpg123.de/download/mpg123-1.33.4.tar.bz2
+
+libmp3lame.so.0
+  LAME 3.100. LGPL-2.0-or-later: licenses/lame-COPYING.
+  https://downloads.sourceforge.net/project/lame/lame/3.100/lame-3.100.tar.gz
+
+libFLAC.so.14
+  FLAC 1.5.0. BSD-3-Clause: licenses/flac-COPYING.Xiph.
+  https://downloads.xiph.org/releases/flac/flac-1.5.0.tar.xz
+
+libogg.so.0
+  libogg 1.3.6. BSD-3-Clause: licenses/libogg-COPYING.
+  https://downloads.xiph.org/releases/ogg/libogg-1.3.6.tar.gz
+
+libvorbis.so.0, libvorbisenc.so.2
+  libvorbis 1.3.7. BSD-3-Clause: licenses/libvorbis-COPYING.
+  https://downloads.xiph.org/releases/vorbis/libvorbis-1.3.7.tar.gz
+
+libopus.so.0
+  Opus 1.5.2. BSD-3-Clause: licenses/opus-COPYING.
+  https://downloads.xiph.org/releases/opus/opus-1.5.2.tar.gz
