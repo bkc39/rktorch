@@ -519,8 +519,8 @@ builds the macOS ones on GitHub's arm64 runner, since a Linux host cannot
 build or load them. Both source `scripts/platform/build-common.sh`
 (fetching, the codecs, GoogleTest, the shim's CMake, the gtests) and share
 `sources.txt`, `assemble.sh`, `catalog.sh` (whose entries carry each zip's
-deps and build-deps) and `smoke-install.sh`, which runs the installed
-`torch/pkg-build/smoke.rkt`;
+deps and build-deps), `size-budget.sh` and `smoke-install.sh`, which runs the
+installed `torch/pkg-build/smoke.rkt` and checks the modules' package deps;
 [`docs/building.md`](docs/building.md#the-platform-package) has the steps.
 
 ```bash
@@ -975,14 +975,17 @@ uncontracted copy of the pipeline, which has not been built.
 `.github/workflows/nix.yml`: `nix flake check` on `ubuntu-latest` +
 `macos-latest`, a `resyntax` lint gate, and a `codegen-drift` job
 (regenerate + fail on porcelain).
-`.github/workflows/platform-macos.yml` builds, audits and smokes
-`torch-aarch64-macosx` on `macos-latest` (see [The platform
-package](#the-platform-package)). The Linux package (`scripts/platform/linux/`)
-is smoked (`scripts/platform/linux/smoke.sh`) by hand for now; the general CI lane
-for both is #339. `.github/workflows/pkg-build.yml` builds the Linux zip and runs
-`scripts/pkg-build/build.rkt`, the official `pkg-build` tool in the package
-build server's images, on it (see [The package build
-server](#the-package-build-server)).
+`platform-linux-build.yml` proves the Linux zip builds, audits, passes its
+gtests and does not exceed its size budget. `platform-linux.yml` proves it
+installs and passes the smoke on ubuntu-24.04 and `rockylinux:8`, and that the
+manual renders with all its deps declared. `platform-macos.yml` proves
+`torch-aarch64-macosx` builds, audits, installs and passes the smoke on
+`macos-latest`, passes the CPU suites on `macos-14` (whose runners advertise
+MPS but cannot allocate on it), and, weekly or when asked, that its MPS tests
+pass. `pkg-build.yml` proves the package build server's own tool accepts the
+Linux zip (see [The package build server](#the-package-build-server)). The
+job-by-job detail is in
+[`docs/building.md`](docs/building.md#continuous-integration-and-the-binary-cache).
 
 ### The package build server
 

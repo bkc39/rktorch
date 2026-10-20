@@ -12,3 +12,5 @@ ddfe36cab873794038ae2c1210557ad34857a4b6bdc515785d1da9e175b1da1e  lame-3.100.tar
 65fab701d9829d38cb77c14acdc431d2108bfdbf8979e40eb8ae567edf10b27c  googletest-1.17.0.tar.gz  https://github.com/google/googletest/releases/download/v1.17.0/googletest-1.17.0.tar.gz
 999cc8f63a666959083eeaba040530e2ffccab3a2e9bdebeb2496b1455622b26  racket-9.1-aarch64-macosx-cs.dmg  https://download.racket-lang.org/installers/9.1/racket-9.1-aarch64-macosx-cs.dmg
 21f4937ca0bf37c31e60c1d77f5fd20f175e3ad51f6197f27149055bc222e559  racket-9.3-aarch64-macosx-cs.dmg  https://download.racket-lang.org/installers/9.3/racket-9.3-aarch64-macosx-cs.dmg
+7acbbec4cb03327b11650199dcb3ac617fdc2ad3888368e0180492a0143de2bd  racket-9.1-x86_64-linux-buster-cs.sh  https://download.racket-lang.org/installers/9.1/racket-9.1-x86_64-linux-buster-cs.sh
+30dc59d9b5af083eacf793253d35782c5231e8bfb7a7331fe32ccd9a41fd792f  racket-9.3-x86_64-linux-buster-cs.sh  https://download.racket-lang.org/installers/9.3/racket-9.3-x86_64-linux-buster-cs.sh

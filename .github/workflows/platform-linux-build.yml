@@ -1,0 +1,52 @@
+name: Linux platform package build
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  torch-x86_64-linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      WORK: ${{ github.workspace }}/.scratch/platform
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Cache downloads
+        uses: actions/cache@v4
+        with:
+          path: .scratch/platform/dl
+          key: platform-linux-dl-${{ hashFiles('scripts/platform/sources.txt') }}
+
+      - uses: Bogdanp/setup-racket@v1.15
+        with:
+          version: "9.3"
+          variant: CS
+          architecture: x64
+
+      - name: Build, audit and gtest the Linux libraries
+        run: scripts/platform/linux/build.sh "$WORK"
+
+      - name: Assemble
+        run: |
+          set -euo pipefail
+          scripts/platform/assemble.sh torch-x86_64-linux "$WORK/bundle" "$WORK/pkg"
+          cat "$WORK/pkg/torch-x86_64-linux.zip.CHECKSUM"
+          echo
+
+      - name: Size budget
+        run: scripts/platform/size-budget.sh "$WORK/pkg/torch-x86_64-linux.zip"
+
+      - name: Upload the package and logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: torch-x86_64-linux
+          if-no-files-found: warn
+          path: |
+            .scratch/platform/pkg/torch-x86_64-linux.zip
+            .scratch/platform/pkg/torch-x86_64-linux.zip.CHECKSUM
+            .scratch/platform/log/

@@ -13,6 +13,8 @@ on:
     paths:
       - "scripts/pkg-build/**"
       - "torch/pkg-build/**"
+      - "torch/private/install-torchrkt-native.rkt"
+      - "torch/foreign/raw/**"
       - "torch/info.rkt"
       - "torch/tests/native-library-test.rkt"
       - "torch/tests/tensor-ops-test.rkt"
@@ -23,17 +25,22 @@ on:
       - "scripts/platform/**"
       - "!scripts/platform/macos/**"
       - ".github/workflows/pkg-build.yml"
+      - ".github/workflows/platform-linux-build.yml"
 
 permissions:
   contents: read
 
 concurrency:
   group: pkg-build-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  build:
+    uses: ./.github/workflows/platform-linux-build.yml
+
   pkg-build:
     name: pkg-build (torch, x86_64-linux-natipkg)
+    needs: build
     runs-on: ubuntu-24.04
     timeout-minutes: 150
     env:
@@ -50,11 +57,11 @@ jobs:
           nproc
           free -m
 
-      - name: Cache downloads
-        uses: actions/cache@v4
+      - name: Download the Linux package
+        uses: actions/download-artifact@v4
         with:
-          path: .scratch/pkg-build/platform/dl
-          key: platform-linux-dl-${{ hashFiles('scripts/platform/sources.txt') }}
+          name: torch-x86_64-linux
+          path: .scratch/pkg-build/platform
 
       - uses: Bogdanp/setup-racket@v1.15
         with:
@@ -62,23 +69,8 @@ jobs:
           variant: CS
           architecture: x64
 
-      - name: The Linux libraries
-        run: scripts/platform/linux/build.sh "$WORK"
-
-      - name: Assemble
-        run: |
-          set -euo pipefail
-          scripts/platform/assemble.sh torch-x86_64-linux "$WORK/bundle" "$OUT/pkg"
-          cat "$OUT/pkg/torch-x86_64-linux.zip.CHECKSUM"
-          echo
-
-      - name: Free the build tree
-        run: |
-          find "$WORK" -mindepth 1 -maxdepth 1 ! -name dl ! -name log -exec rm -rf {} +
-          df -h / | tee -a "$OUT/logs/disk.txt"
-
       - name: Catalog
-        run: scripts/platform/catalog.sh "$OUT/pkg/torch-x86_64-linux.zip" "$OUT/catalog" "$OUT/catalog"
+        run: scripts/platform/catalog.sh "$WORK/pkg/torch-x86_64-linux.zip" "$OUT/catalog" "$OUT/catalog"
 
       - name: The pkg-build tool and the server's images
         run: |
@@ -108,17 +100,14 @@ jobs:
           df -h / | tee -a "$OUT/logs/disk.txt"
           racket scripts/pkg-build/report.rkt "$OUT/work"
 
-      - name: Upload the package, transcripts and manual
+      - name: Upload the transcripts and manual
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: pkg-build-results
           if-no-files-found: warn
           path: |
-            .scratch/pkg-build/out/pkg/torch-x86_64-linux.zip
-            .scratch/pkg-build/out/pkg/torch-x86_64-linux.zip.CHECKSUM
             .scratch/pkg-build/out/logs/
             .scratch/pkg-build/out/work/summary.rktd
             .scratch/pkg-build/out/work/server/built/*/torch*.txt
             .scratch/pkg-build/out/work/doc/*@torch/
-            .scratch/pkg-build/platform/log/
