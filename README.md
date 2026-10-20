@@ -54,6 +54,8 @@ raco pkg install --auto --no-docs torch
 On x86_64 Linux this also installs `torch-x86_64-linux`, about 118 MB to
 download and 445 MB installed. It holds `libtorchrkt`, the CPU build of
 libtorch 2.14 and libsndfile, and needs only glibc 2.28 or later and libstdc++.
+A "natipkg" Racket, which reports the platform `x86_64-linux-natipkg` (the
+package build server runs one), installs the same package.
 On an Apple-silicon Mac it installs `torch-aarch64-macosx` instead, which
 holds libtorch 2.14 with MPS support and needs macOS 14 or later. Both the
 Racket from [download.racket-lang.org](https://download.racket-lang.org),

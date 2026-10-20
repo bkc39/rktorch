@@ -550,8 +550,11 @@ control.
 Racket for macOS but `aarch64-darwin` on Nix's. `torch/info.rkt` declares
 `torch-aarch64-macosx` once for each string and native-location's
 `platform-packages` maps both to it, so the macOS Nix cell installs that
-skeleton as the Linux cell installs its own. Platform deps stay one string
-each, never a regexp. Never assume the host's string in a test.
+skeleton as the Linux cell installs its own. Likewise a natipkg Racket on
+x86_64 Linux, which is what pkg-build.racket-lang.org runs, reports
+`x86_64-linux-natipkg`, so `torch-x86_64-linux` is declared for that string
+too; Nix never reports it, and no cell provisions for it. Platform deps stay
+one string each, never a regexp. Never assume the host's string in a test.
 
 ### The build matrix
 

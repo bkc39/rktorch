@@ -140,6 +140,7 @@
               [ "$(rd platform-packages "$TMPDIR/info" ${./pkgs} $platform)" = "${./pkgs}/torch-$platform" ]
             done
             [ "$(rd platform-packages "$TMPDIR/info" ${./pkgs} aarch64-darwin)" = "${./pkgs}/torch-aarch64-macosx" ]
+            [ "$(rd platform-packages "$TMPDIR/info" ${./pkgs} x86_64-linux-natipkg)" = "${./pkgs}/torch-x86_64-linux" ]
           '';
           racket-deps-guard-test = run "torch-rkt-racket-deps-guard-test" ''
             t=$TMPDIR/trees
@@ -191,6 +192,8 @@
             done
             [ "$(rd platform-packages ${fixtures}/own-platform ${fixtures}/own-platform/pkgs aarch64-darwin)" \
               = "${fixtures}/own-platform/pkgs/torch-aarch64-macosx" ]
+            [ "$(rd platform-packages ${fixtures}/own-platform ${fixtures}/own-platform/pkgs x86_64-linux-natipkg)" \
+              = "${fixtures}/own-platform/pkgs/torch-x86_64-linux" ]
             [ -z "$(rd platform-packages ${fixtures}/own-platform ${fixtures}/own-platform/pkgs x86_64-macosx)" ]
             racket ${racketDepsDir}/platform-lists-test.rkt ${racketDepsScript} \
               ${./torch/foreign/raw/native-location.rkt} ${./torch/info.rkt}

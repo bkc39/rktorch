@@ -145,8 +145,8 @@ and the `abi-stamp-current` flake check fails until it is committed.
 
 `torch` depends on one platform package per supported host, each providing
 the collection `torch-native` at torch's own version: `torch-x86_64-linux`
-(`#:platform "x86_64-linux"`) and `torch-aarch64-macosx` (one dep for each
-macOS platform string, below). Each holds `libtorchrkt`, libtorch 2.14.0's
+and `torch-aarch64-macosx`, each declared once for every platform string
+that names its host (below). Each holds `libtorchrkt`, libtorch 2.14.0's
 libraries from PyTorch's official zip, and libsndfile with its codecs as
 separate shared libraries, and finds them all beside itself.
 
@@ -163,7 +163,13 @@ Racket for macOS reports `aarch64-macosx`, but Nix's Racket on the same Mac
 reports `aarch64-darwin`, so `torch/info.rkt` names `torch-aarch64-macosx`
 for both and either Racket installs it. The macOS Nix cell and `nix develop`
 on a Mac therefore install the `pkgs/torch-aarch64-macosx` skeleton, as the
-Linux cell installs its own.
+Linux cell installs its own. On x86_64 Linux a "natipkg" Racket, the build
+that bundles its own native libraries, reports `x86_64-linux-natipkg`; the
+package build server at pkg-build.racket-lang.org runs one, so `torch/info.rkt`
+names `torch-x86_64-linux` for that string too. Nix never reports it, so no
+Nix cell provisions for it. Platform deps are one string each, never a
+regexp, and `platform-packages` in `torch/foreign/raw/native-location.rkt`
+maps every string to its package.
 
 Both builds share `scripts/platform/build-common.sh`, which fetches every
 source, checks it against the sha256 that `scripts/platform/sources.txt` pins
