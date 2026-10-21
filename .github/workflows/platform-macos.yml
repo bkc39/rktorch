@@ -49,6 +49,8 @@ jobs:
       WORK: ${{ github.workspace }}/.scratch/macos/work
       OUT: ${{ github.workspace }}/.scratch/macos/out
       RACKETS: ${{ github.workspace }}/.scratch/macos/racket
+      SMOKE_TESTS: torch/pkg-build/smoke torch/tests/accelerator-test
+      RKTORCH_EXPECT_ACCELERATOR: mps
     steps:
       - uses: actions/checkout@v5
 
@@ -187,6 +189,7 @@ jobs:
           export PATH="$RACKETS/9.1/bin:$PATH" SMOKE_HOME="$RACKETS/home-9.1"
           scripts/platform/smoke-install.sh "$OUT/catalog" "macOS $(sw_vers -productVersion)" 2>&1 |
             tee "$OUT/logs/smoke-9.1.log"
+          PLTUSERHOME="$SMOKE_HOME" racket -l racket/base -l torch -e '(unless (mps-available?) (error "mps-available? is #f"))'
 
       - name: Racket 9.3
         id: racket-9-3

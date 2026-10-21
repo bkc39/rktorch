@@ -311,7 +311,9 @@ target an error in the codecs and the shim.
 The build job then puts the zip in a directory catalog and runs the full
 smoke on its Racket 9.1. `macos-latest` exposes a working GPU to its VM, so
 the smoke prints `mps-available? #t` there and trains `04-mlp` on `'mps` and
-on the CPU. The job uploads the zip, its `CHECKSUM`, the audit, the build logs
+on the CPU. Its `SMOKE_TESTS` adds the accelerator suite to the smoke with
+`RKTORCH_EXPECT_ACCELERATOR=mps`, so every pull request fails if the probe
+rejects a working MPS. The job uploads the zip, its `CHECKSUM`, the audit, the build logs
 and the smoke's log as the run's `torch-aarch64-macosx` artifact. A second
 job, on `macos-14`, the package's floor, installs racket-lang.org's notarized
 Racket 9.1 and 9.3 from their `.dmg` and runs `smoke-install.sh` with each,
@@ -321,7 +323,9 @@ tensor ops and autograd, and the accelerator suite: GitHub's `macos-14`
 runners advertise MPS but cannot allocate on it, so the device suites' MPS
 cases fail there. The job sets `RKTORCH_EXPECT_ACCELERATOR=cpu`, so the
 accelerator suite asserts that `accelerator-if-available` falls back to the
-CPU there and that the real probe's failure is logged once (#353).
+CPU there and that the real probe's failure is logged once (#353). After the
+Racket 9.1 suites it fails unless `(mps-available?)`, so a runner that stops
+advertising MPS cannot pass the `cpu` expectation by skipping the probe.
 
 Weekly, on demand, or when a calling workflow passes `mps: true`, an `mps` job
 on `macos-latest` installs the package on Racket 9.3, fails unless

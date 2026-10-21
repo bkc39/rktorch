@@ -47,20 +47,20 @@
           mine]))))
 
 (define (settle! probe done)
-  (parameterize-break #f
-    (define answer (probe-outcome (mps-probe-run probe)))
-    (set-mps-probe-state! probe answer)
-    (semaphore-post done)
-    answer))
+  (define answer (probe-outcome (mps-probe-run probe)))
+  (set-mps-probe-state! probe answer)
+  (semaphore-post done)
+  answer)
 
 (define/contract-out (mps-usable? probe)
   (-> mps-probe? boolean?)
-  (match (claim-or-read probe)
-    [(? boolean? answer) answer]
-    [(claim (== (current-thread)) done) (settle! probe done)]
-    [(claim holder done)
-     (sync (semaphore-peek-evt done) (thread-dead-evt holder))
-     (mps-usable? probe)]))
+  (parameterize-break #f
+    (match (claim-or-read probe)
+      [(? boolean? answer) answer]
+      [(claim (== (current-thread)) done) (settle! probe done)]
+      [(claim holder done)
+       (sync/enable-break (semaphore-peek-evt done) (thread-dead-evt holder))
+       (mps-usable? probe)])))
 
 (define/contract-out (pick-accelerator #:cuda? cuda? #:mps? mps? #:probe probe)
   (-> #:cuda? boolean? #:mps? boolean? #:probe mps-probe? device?)

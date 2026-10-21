@@ -1,7 +1,8 @@
 #lang racket/base
 
 (module+ test
-  (require rackunit
+  (require (only-in racket/match match)
+           rackunit
            (only-in torch
                     accelerator-if-available cpu-device cuda-device device device?
                     device-type mps-available? mps-device mps-if-available tensor)
@@ -128,6 +129,41 @@
     (check-equal? (sync/timeout 5 answer) (mps-device))
     (check-equal? (calls) 2)
     (kill-thread waiter))
+
+  (test-case "a break landing between the claim and the probe leaves no claim behind"
+    (define (probe-under-breaks count)
+      (for/fold ([unrun '()]) ([_ (in-range count)])
+        (for/sum ([k (in-range (random 64))]) k)
+        (define ran? (box #f))
+        (define probe (make-mps-probe (λ () (set-box! ran? #t))))
+        (with-handlers ([exn:break? (λ (_) (if (unbox ran?) unrun (cons probe unrun)))])
+          (parameterize-break #t (mps-usable? probe))
+          unrun)))
+    (define result (make-channel))
+    (define worker
+      (parameterize-break #f
+        (thread (λ ()
+                  (channel-put result (probe-under-breaks 30000))
+                  (sync never-evt)))))
+    (define deadline (+ (current-inexact-monotonic-milliseconds) 30000))
+    (define unrun
+      (let storm ()
+        (match (sync/timeout 0 result)
+          [#f #:when (< (current-inexact-monotonic-milliseconds) deadline)
+              (break-thread worker)
+              (sleep 0)
+              (storm)]
+          [answer answer])))
+    (define (answered-within seconds probe)
+      (define answer (make-channel))
+      (define asker (thread (λ () (channel-put answer (mps-usable? probe)))))
+      (begin0 (sync/timeout seconds answer) (kill-thread asker)))
+    (check-not-false unrun "the probing thread did not finish within 30 s")
+    (check-equal? (for/sum ([probe (in-list (or unrun '()))])
+                    (if (answered-within 0.05 probe) 0 1))
+                  0
+                  "another thread waited on a claim its living holder abandoned")
+    (kill-thread worker))
 
   (test-case "the real probe's OOM is caught and warned once"
     (cond
