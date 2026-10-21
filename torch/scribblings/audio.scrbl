@@ -74,7 +74,8 @@ they can be summed over a test set without drift.}
 
 The read-speech corpus, by split. An archive is fetched once into the
 cache directory and extracted; the utterances are its FLAC files with
-their transcripts.
+their transcripts. rktorch does not host or distribute the dataset and
+does not vouch that you may use it: check its license before you do.
 
 @defproc[(librispeech-utterances [split (or/c "dev-clean" "test-clean")])
          (listof utterance?)]{

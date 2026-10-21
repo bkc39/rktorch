@@ -135,7 +135,8 @@ with `backward!` outside the form as PyTorch recommends). From
 - vision (`torch/vision/cifar10.rkt`, #84): `load-cifar10` (binary archive
   cached and unpacked in memory, float32 `[N 3 32 32]` in `[-1, 1]` plus
   int64 labels), `cifar10-dataset #:device`, `cifar10-label-names`,
-  `load-cifar10-fixture` (256 committed records), `cifar10-records->tensors`,
+  `load-cifar10-fixture` (256 synthetic records from
+  `scripts/gen-cifar10-fixture.py`), `cifar10-records->tensors`,
   `tar-entries`
 - image folders (`torch/vision/image-folder.rkt`, #199): `image-folder
   #:transform #:extensions #:device` (torchvision's `ImageFolder`, items
@@ -514,9 +515,10 @@ provisioning install the host's skeleton first with `install-platform`, so
 `pkgs/torch-x86_64-linux/` and `pkgs/torch-aarch64-macosx/` are the
 skeletons of the platform packages: each `info.rkt` (collection
 `torch-native`, version equal to torch's), a `THIRD-PARTY-NOTICES` and the
-licences only that platform bundles. The licences both carry (PyTorch's, stb's,
-the codecs') live once, in `scripts/platform/licenses/`, and `assemble.sh`
-adds them to the built package. `scripts/platform/linux/` builds the Linux
+licences only that platform bundles. The licences both carry (PyTorch's and
+its third-party code's under `pytorch-third-party/`, stb's, the codecs') live
+once, in `scripts/platform/licenses/`, and `assemble.sh` adds them, and
+`torch/LICENSE` as the package's own, to the built package. `scripts/platform/linux/` builds the Linux
 libraries outside Nix at the glibc 2.28 baseline; `scripts/platform/macos/`
 builds the macOS ones on GitHub's arm64 runner, since a Linux host cannot
 build or load them. Both source `scripts/platform/build-common.sh`
@@ -675,7 +677,7 @@ Runtime paths take `(only-in racket/runtime-path #%datum define-runtime-path)`.
 - `data/dataset.rkt` — `define-dataset` and `gen:dataset`;
   `private/definer.rkt` — the clause grammar it shares with `define-layer`.
 - `vision/cifar10.rkt` — CIFAR-10 loader and dataset, `vision/fixtures/`
-  its 256-record fixture and `vision/fixtures/images/` the reader's
+  its 256-record synthetic fixture (`scripts/gen-cifar10-fixture.py`) and `vision/fixtures/images/` the reader's
   synthetic JPEGs and PNGs (`scripts/gen-image-fixtures.py`);
   `vision/image.rkt` — the image reader; `vision/diffusion.rkt` — DDPM schedules, `q-sample`
   and the UNet layers; `vision/mnist.rkt` — MNIST loader.

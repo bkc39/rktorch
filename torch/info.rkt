@@ -24,7 +24,8 @@
 (define scribblings (quote (("scribblings/torch.scrbl" (multi-page)))))
 (define pkg-desc "Racket bindings for libtorch (PyTorch)")
 (define pkg-authors (list (string-append "bkschemer" "@" "gmail" "." "com")))
-(define license '(Apache-2.0 AND CC-BY-4.0 AND CC-BY-2.0-FR))
+(define license
+  '(Apache-2.0 AND CC-BY-4.0 AND CC-BY-2.0-FR AND CC-BY-SA-3.0))
 (define pkg-tags
   '("machine-learning" "deep-learning" "tensor" "pytorch" "libtorch"))
 (define pre-install-collection "private/install-torchrkt-native.rkt")
