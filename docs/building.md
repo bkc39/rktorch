@@ -152,9 +152,9 @@ separate shared libraries, and finds them all beside itself.
 
 Their skeletons live in `pkgs/`: the `info.rkt`, a `THIRD-PARTY-NOTICES`,
 and the licences only that platform bundles. The licences both packages carry
-(PyTorch's, stb's and the codecs') live once, in
-`scripts/platform/licenses/`, and `scripts/platform/assemble.sh` adds them
-when it builds a package. The Nix build and the shells install the host's
+(PyTorch's and its third-party code's, stb's and the codecs') live once, in
+`scripts/platform/licenses/`, and `scripts/platform/assemble.sh` adds them,
+with `torch/LICENSE`, when it builds a package. The Nix build and the shells install the host's
 skeleton, with no libraries in it, so `torch`'s dependency is met without a
 download; the staged `torch/native-libs/` still supplies the shim.
 

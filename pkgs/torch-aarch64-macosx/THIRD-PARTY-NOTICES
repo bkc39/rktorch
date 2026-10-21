@@ -12,7 +12,7 @@ build edits noted below. Every library licensed under the LGPL is shipped as
 a separate shared library that can be replaced.
 
 libtorchrkt.dylib
-  rktorch's own shim. Apache-2.0.
+  rktorch's own shim. Apache-2.0: LICENSE.
   Compiles in stb_image (stb commit 5736b15f7ea0ffb08dd38af21067c314d6a3aae9),
   MIT or Unlicense, at your option: licenses/stb-LICENSE.
   https://github.com/nothings/stb
@@ -26,6 +26,17 @@ libtorch_cpu.dylib, libc10.dylib, libtorch.dylib
   contains no Intel MKL.
   https://github.com/pytorch/pytorch/tree/v2.14.0
   https://download.pytorch.org/libtorch/cpu/libtorch-macos-arm64-2.14.0.zip
+
+  libtorch also compiles in the third-party code of PyTorch's source tree,
+  among it KleidiAI, ONNX and FlatBuffers (Apache-2.0), SLEEF (BSL-1.0),
+  pocketfft, protobuf, gloo, TensorPipe and kineto (BSD-3-Clause), NNPACK,
+  cpuinfo and pthreadpool (BSD-2-Clause), and nlohmann json, miniz and
+  libuv (MIT). Their licence texts are under
+  licenses/pytorch-third-party/, at their paths in PyTorch's v2.14.0 tree:
+  the set the torch 2.14.0 wheel ships in its dist-info/licenses/third_party,
+  plus pocketfft (BSD-3-Clause), KleidiAI (Apache-2.0), asmjit (Zlib) and
+  nlohmann json (MIT), whose files that set misses, taken from the
+  submodule commits v2.14.0 pins.
 
 libomp.dylib
   The LLVM OpenMP runtime, as shipped in the libtorch zip above.

@@ -10,7 +10,7 @@ package was released from. Every library licensed under the LGPL is shipped
 as a separate shared object that can be replaced.
 
 libtorchrkt.so
-  rktorch's own shim. Apache-2.0.
+  rktorch's own shim. Apache-2.0: LICENSE.
   Compiles in stb_image (stb commit 5736b15f7ea0ffb08dd38af21067c314d6a3aae9),
   MIT or Unlicense, at your option: licenses/stb-LICENSE.
   https://github.com/nothings/stb
@@ -23,6 +23,17 @@ libtorch_cpu.so, libc10.so, libtorch.so
   carries no licence text).
   https://github.com/pytorch/pytorch/tree/v2.14.0
   https://download.pytorch.org/libtorch/cpu/libtorch-shared-with-deps-2.14.0%2Bcpu.zip
+
+  libtorch also compiles in the third-party code of PyTorch's source tree,
+  among it oneDNN, ONNX and FlatBuffers (Apache-2.0), SLEEF (BSL-1.0),
+  FBGEMM, XNNPACK, protobuf, gloo, TensorPipe and kineto (BSD-3-Clause),
+  NNPACK, cpuinfo and pthreadpool (BSD-2-Clause), asmjit (Zlib), and
+  nlohmann json, miniz and libuv (MIT). Their licence texts are under
+  licenses/pytorch-third-party/, at their paths in PyTorch's v2.14.0 tree:
+  the set the torch 2.14.0 wheel ships in its dist-info/licenses/third_party,
+  plus pocketfft (BSD-3-Clause), KleidiAI (Apache-2.0), asmjit (Zlib) and
+  nlohmann json (MIT), whose files that set misses, taken from the
+  submodule commits v2.14.0 pins.
 
   libtorch_cpu.so contains Intel oneAPI Math Kernel Library 2024.2 (Product
   Build 20240605), linked statically by PyTorch's build and shipped

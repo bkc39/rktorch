@@ -15,7 +15,8 @@ stage=$out/$name
 rm -rf "$stage" "$out/$name.zip" "$out/$name.zip.CHECKSUM"
 mkdir -p "$stage/licenses"
 cp -R "pkgs/$name/." "$stage/"
-cp scripts/platform/licenses/* "$stage/licenses/"
+cp -R scripts/platform/licenses/. "$stage/licenses/"
+cp torch/LICENSE "$stage/LICENSE"
 find "$stage" -type d -name compiled -prune -exec rm -rf {} +
 cp "$bundle"/* "$stage/"
 raco pkg create --format zip --dest "$out" "$stage" >/dev/null
