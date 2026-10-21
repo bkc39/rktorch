@@ -19,7 +19,7 @@
       # libtorch-bin ships only these two; the C++ side builds against it.
       supportedSystems = [ "aarch64-darwin" "x86_64-linux" ];
       forAllSystems = nixpkgs.lib.genAttrs supportedSystems;
-      version = "0.1.0";
+      version = "0.1";
 
       # The one knob that decides the PyTorch-parity story (see plans/):
       #   "bin"    -> pkgs.libtorch-bin: small prebuilt download, fast cached CI
@@ -299,6 +299,39 @@
             copy added
             touch "$TMPDIR/added/extra.h"
             [ "$(stamp "$TMPDIR/added")" != "$base" ]
+          '';
+        };
+
+      releaseTestsFor = pkgs: racketPkg:
+        let
+          src = pkgs.lib.fileset.toSource {
+            root = ./.;
+            fileset = pkgs.lib.fileset.unions [
+              ./flake.nix
+              ./nix/racket-deps/racket-deps.rkt
+              ./pkgs
+              ./scripts/platform/catalog-entry.rkt
+              ./scripts/platform/sources.txt
+              ./scripts/release
+              ./torch/foreign/raw/abi-stamp.rktd
+              ./torch/info.rkt
+            ];
+          };
+          run = name: script: pkgs.runCommand name { nativeBuildInputs = [ racketPkg ]; } ''
+            export HOME=$TMPDIR/home PLTUSERHOME=$TMPDIR/plt
+            cp -r ${src} "$TMPDIR/src"
+            chmod -R u+w "$TMPDIR/src"
+            cd "$TMPDIR/src"
+            ${script}
+            mkdir "$out"
+          '';
+        in
+        {
+          release-current = run "torch-rkt-release-current" ''
+            racket scripts/release/release.rkt plan ""
+          '';
+          release-test = run "torch-rkt-release-test" ''
+            raco test --timeout 300 scripts/release/release-test.rkt
           '';
         };
 
@@ -881,6 +914,7 @@
         } // self.packages.${system}.racket-deps.tests
           // self.packages.${system}.racket91.tests
           // abiStampTestsFor pkgs
+          // releaseTestsFor pkgs (racketFor pkgs (import nixpkgsRacket { inherit system; }))
           // pkgs.lib.optionalAttrs pkgs.stdenv.isLinux {
             platform-audit-test = pkgs.runCommand "torch-rkt-platform-audit-test"
               { nativeBuildInputs = [ pkgs.binutils ]; } ''

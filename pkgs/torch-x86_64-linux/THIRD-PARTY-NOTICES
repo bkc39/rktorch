@@ -7,7 +7,9 @@ upstream source; the licence texts are under licenses/. The libraries are
 unmodified upstream builds, or were built from the listed sources by
 scripts/platform/linux/build.sh in the rktorch repository at the tag this
 package was released from. Every library licensed under the LGPL is shipped
-as a separate shared object that can be replaced.
+as a separate shared object that can be replaced. The source tarballs of
+those libraries, exactly as listed below, are attached to the same GitHub
+release as this package's zip: https://github.com/bkc39/rktorch/releases
 
 libtorchrkt.so
   rktorch's own shim. Apache-2.0.

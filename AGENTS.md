@@ -426,7 +426,7 @@ nix build .#cpp        # CMake build + gtest only
 nix flake check        # the Nix checks: cpp, format, tidy, line-count, racket,
                        # racket91, racket-floor, matrix-runner-test,
                        # platform-audit-test (Linux), the
-                       # racket-deps-* and abi-stamp-* checks
+                       # racket-deps-*, abi-stamp-* and release-* checks
                        # (CI also runs the Resyntax gate and codegen-drift)
 nix develop            # dev shell (includes a Python with `torch`)
 nix develop .#ci       # lean shell without Python torch (used by the lint job)
@@ -987,7 +987,12 @@ manual renders with all its deps declared. `platform-macos.yml` proves
 `macos-latest`, passes the CPU suites on `macos-14` (whose runners advertise
 MPS but cannot allocate on it), and, weekly or when asked, that its MPS tests
 pass. `pkg-build.yml` proves the package build server's own tool accepts the
-Linux zip (see [The package build server](#the-package-build-server)). The
+Linux zip (see [The package build server](#the-package-build-server)).
+`release.yml`, on a `v*` tag, checks the versions and the ABI stamp
+(`scripts/release/`, tested by the `release-test` and `release-current`
+checks), calls both platform lanes when the natives changed, and drafts the
+GitHub release; `release-canary.yml` installs `torch` from the catalog
+weekly. [`docs/releasing.md`](docs/releasing.md) is the runbook. The
 job-by-job detail is in
 [`docs/building.md`](docs/building.md#continuous-integration-and-the-binary-cache).
 

@@ -568,8 +568,8 @@ installs, so the platform packages have lanes of their own:
   A pull request that triggers both it and `platform-linux.yml` builds the
   Linux zip twice, once in each.
 
-Both platform lanes take `workflow_call`, so a release workflow runs the same
-jobs. Linux jobs substitute from a tailnet-only binary cache; the details and
+Both platform lanes take `workflow_call`, so `release.yml` runs the same jobs
+before it drafts a release ([`releasing.md`](releasing.md)). Linux jobs substitute from a tailnet-only binary cache; the details and
 the failure modes are in [`AGENTS.md`](../AGENTS.md), which is also the
 canonical guide to the repository's layout and conventions.
 
