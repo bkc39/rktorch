@@ -2,15 +2,20 @@
 
 (require (only-in racket/match match match-define)
          (only-in torch accelerator-if-available device-type)
+         (only-in "child.rkt" python-runner?)
          (only-in "e2e.rkt"
                   cache-env e2e-cases example-epochs-var example-name example-runner
                   exn:fail:user:e2e merged-settings settings->jsexpr)
          (only-in "harness.rkt"
                   host-meta load-average measure result result->record result-per-call summarize)
+         (only-in "pytorch.rkt" merged-meta)
          (only-in "session.rkt" fresh-run-id record-writer wait-for-load)
          (only-in "shim.rkt" aten-threads))
 
 (provide run-e2e)
+
+(define (mean xs)
+  (and (pair? xs) (/ (apply + xs) (length xs) 1.0)))
 
 (define (run-e2e exs #:rounds rounds #:full? full? #:variants variants #:cache cache
                  #:max-load max-load #:libtorch libtorch #:out out #:log log
@@ -28,17 +33,22 @@
   (for ([ex (in-list exs)])
     (wait-for-load max-load log)
     (define meta (host-meta #:device device #:libtorch libtorch #:threads (aten-threads)))
+    (define impl (if (python-runner? (runner-for ex)) "pytorch" "rktorch"))
     (define rates (make-hash))
     (define gcs (make-hash))
+    (define epoch-gcs (make-hash))
+    (define step-mss (make-hash))
     (define metas (make-hash))
     (define walls (make-hash))
     (define timings (make-hash))
     (define (on-run run-of variant analysis)
-      (define run-meta (or (hash-ref analysis 'meta #f) meta))
+      (define child-meta (hash-ref analysis 'meta #f))
+      (define run-meta
+        (if (equal? impl "pytorch") (merged-meta meta child-meta) (or child-meta meta)))
       (fprintf log "~a~a: ~a steps/s, epochs ~a s\n" (example-name run-of)
                (if variant (format "/~a" variant) "")
                (hash-ref analysis 'steps_per_s #f) (hash-ref analysis 'epoch_s '()))
-      (emit (hash-set* analysis 'schema 1 'suite "e2e" 'group "run"
+      (emit (hash-set* analysis 'schema 1 'suite "e2e" 'group "run" 'impl impl
                        'case (example-name run-of) 'variant variant
                        'load (load-average)
                        'meta run-meta))
@@ -49,6 +59,8 @@
         [else
          (push! rates (hash-ref analysis 'steps_per_s #f))
          (push! gcs (hash-ref analysis 'gc_ms #f))
+         (push! epoch-gcs (mean (hash-ref analysis 'epoch_gc_ms '())))
+         (push! step-mss (hash-ref (hash-ref analysis 'step_ms (hasheq)) 'median #f))
          (push! walls (hash-ref analysis 'wall_s #f))
          (push! timings (hash-ref analysis 'timing))
          (hash-ref! metas variant run-meta)]))
@@ -59,7 +71,7 @@
           [(? exn:fail:user?) (list #f #f #f)]
           [_ (raise e)]))
       (fprintf log "~a\n" (exn-message e))
-      (emit (hasheq 'schema 1 'suite "e2e" 'group "error"
+      (emit (hasheq 'schema 1 'suite "e2e" 'group "error" 'impl impl
                     'case (example-name ex)
                     'variant variant
                     'exit_code exit-code
@@ -92,11 +104,14 @@
                        #:meta (hash-ref metas (car v) meta)
                        #:scale unit-scale
                        #:extra (hasheq 'case (example-name ex)
+                                       'impl impl
                                        'variant (car v)
                                        'timing timing
                                        'settings (settings->jsexpr
                                                   (merged-settings ex scale (cdr v)))
                                        'gc_ms (variant-list gcs v)
+                                       'epoch_gc_ms (variant-list epoch-gcs v)
+                                       'step_ms (variant-list step-mss v)
                                        'steps_per_s (and (pair? rates-of)
                                                          (summarize rates-of))))))))
 
@@ -107,9 +122,10 @@
            (only-in racket/port open-output-nowhere)
            (only-in racket/runtime-path #%datum define-runtime-path)
            rackunit
-           (only-in "e2e.rkt" example)
+           (only-in "e2e.rkt" example find-examples)
            (only-in "fixtures/pre-hook-torch.rkt" call-with-pre-hook-torch)
            (only-in "harness.rkt" with-temporary-path)
+           (only-in "pytorch.rkt" pytorch-available?)
            (only-in "summary.rkt" read-records summary-markdown))
 
   (define-runtime-path broken "fixtures/broken.rkt")
@@ -291,4 +307,32 @@
     (check-equal? (map (lambda (r) (hash-ref r 'group)) (list run failure)) '("run" "error"))
     (check-not-equal? (hash-ref failure 'exit_code) 0)
     (check-equal? (hash-ref failure 'meta_from) "child")
-    (check-not-equal? (hash-ref (hash-ref failure 'meta) 'libtorch) "x")))
+    (check-not-equal? (hash-ref (hash-ref failure 'meta) 'libtorch) "x"))
+
+  (test-case "the loader workload and the PyTorch twins run under e2e, and C pairs them"
+    (define tiny '(("DATASET" . "fixture") ("EPOCHS" . "2") ("BATCH" . "128") ("BASE" . "4")
+                   ("WORKERS" . "2")))
+    (define names (if (pytorch-available?) '("17-workers" "py-05" "py-09" "py-17") '("17-workers")))
+    (unless (pytorch-available?)
+      (displayln "[e2e-suite] PyTorch twins skipped: python3 `torch` not available"))
+    (define records
+      (records-of (lambda (out)
+                    (run-e2e (find-examples names) #:rounds 1 #:full? #f
+                             #:variants `(("crop" ("VARIANT" . "crop") ,@tiny) ("pgm" ,@tiny))
+                             #:cache #f #:max-load #f #:libtorch "x" #:out out #:log quiet
+                             #:time-limit 900))))
+    (define (group g) (filter (lambda (r) (equal? (hash-ref r 'group) g)) records))
+    (check-equal? (group "error") '())
+    (define summaries (group "summary"))
+    (check-equal? (length summaries) (* 2 (length names)))
+    (for ([r (in-list summaries)])
+      (define meta (hash-ref r 'meta))
+      (check-equal? (hash-ref r 'impl)
+                    (if (regexp-match? #rx"^py-" (hash-ref r 'case)) "pytorch" "rktorch"))
+      (check-equal? (hash-ref r 'unit) "s/epoch")
+      (check-true (string? (hash-ref meta 'git_sha)) (hash-ref r 'case))
+      (check-equal? (length (hash-ref r 'step_ms)) 1))
+    (when (pytorch-available?)
+      (define md (summary-markdown records))
+      (check-regexp-match #rx"## C\\. Loader end to end[^#]*\\| 17-workers \\| crop \\| s/epoch \\|" md)
+      (check-regexp-match #rx"\\| 17-workers \\| pgm \\| s/epoch \\|" md))))

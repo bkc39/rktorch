@@ -1,22 +1,21 @@
 #lang racket/base
 
 (require (for-syntax racket/base)
-         (only-in compiler/find-exe find-exe)
-         (only-in ffi/unsafe -> _fun _int get-ffi-obj)
          (only-in racket/file file->string make-temporary-directory)
          (only-in racket/format ~a)
          (only-in racket/list remove-duplicates)
          (only-in racket/match match match-define)
-         (only-in racket/port copy-port)
          (only-in racket/runtime-path #%datum define-runtime-path)
          (only-in racket/string string-join)
          (only-in threading ~>)
+         (only-in "child.rkt" run-child)
          (only-in "harness.rkt" bench-case with-temporary-path)
          (only-in "training.rkt" analyze-steps read-steps recorded-run))
 
 (provide (struct-out example)
          (struct-out exn:fail:user:e2e)
          examples
+         twins
          find-examples
          example-env
          control-variables
@@ -29,7 +28,7 @@
 
 (define-runtime-path examples-dir "../../examples/test")
 (define-runtime-path workloads-dir "workloads")
-(define-runtime-path recorder "training.rkt")
+(define-runtime-path python-dir "python")
 
 (struct example (name short full epochs-var warmup optimizer) #:transparent)
 
@@ -49,13 +48,24 @@
                  '(("FEATURE_EPOCHS" . 0) ("FINETUNE_EPOCHS" . 15))
                  "FINETUNE_EPOCHS" 0 'last)
         (example "16-style-transfer" '(("STEPS" . 100)) '(("STEPS" . 1000)) #f 20 'first)
-        (example "loader" '(("EPOCHS" . 2)) '(("EPOCHS" . 5)) "EPOCHS" 0 'first)))
+        (example "loader" '(("EPOCHS" . 2)) '(("EPOCHS" . 5)) "EPOCHS" 0 'first)
+        (example "17-workers" '(("EPOCHS" . 2)) '(("EPOCHS" . 3)) "EPOCHS" 0 'first)))
 
-(define runner-dirs (hash "loader" workloads-dir))
+(define twins
+  (list (example "py-05-mnist" '(("EPOCHS" . 3)) '(("EPOCHS" . 3)) "EPOCHS" 0 'first)
+        (example "py-09-resnet" '(("EPOCHS" . 3)) '(("EPOCHS" . 30)) "EPOCHS" 0 'first)
+        (example "py-17-workers" '(("EPOCHS" . 2)) '(("EPOCHS" . 3)) "EPOCHS" 0 'first)))
+
+(define runners
+  (hash "loader" (build-path workloads-dir "loader.rkt")
+        "17-workers" (build-path workloads-dir "workers.rkt")
+        "py-05-mnist" (build-path python-dir "mnist.py")
+        "py-09-resnet" (build-path python-dir "resnet.py")
+        "py-17-workers" (build-path python-dir "workers.py")))
 
 (define (find-examples names)
   (for/list ([n (in-list names)])
-    (or (for/first ([ex (in-list examples)]
+    (or (for/first ([ex (in-sequences (in-list examples) (in-list twins))]
                     #:when (regexp-match? (regexp (string-append "^" (regexp-quote n)))
                                           (example-name ex)))
           ex)
@@ -101,65 +111,15 @@
   (remove-duplicates
    (append (map car (example-short ex))
            (map car (example-full ex))
-           (regexp-match* #px"\\((?:env-number|getenv) \"([^\"]+)\"" (file->string runner)
+           (regexp-match* #px"(?:\\((?:env-number|getenv) |env_(?:number|text)\\()\"([^\"]+)\""
+                          (file->string runner)
                           #:match-select cadr))))
-
-(define (child-environment cleared settings)
-  (define env (environment-variables-copy (current-environment-variables)))
-  (for ([name (in-list cleared)])
-    (environment-variables-set! env (string->bytes/utf-8 name) #f))
-  (for ([s (in-list settings)])
-    (environment-variables-set! env (string->bytes/utf-8 (car s))
-                                (~> s cdr ~a string->bytes/utf-8)))
-  env)
 
 (define time-limits (hasheq 'short 3600 'full 43200))
 
-(define (call-with-child-log dir log proc)
-  (cond
-    [(file-stream-port? log) (proc log)]
-    [else
-     (define path (build-path dir "child.log"))
-     (define child-log (open-output-file path))
-     (dynamic-wind
-      void
-      (lambda () (proc child-log))
-      (lambda ()
-        (close-output-port child-log)
-        (call-with-input-file path (lambda (in) (copy-port in log)))))]))
-
-(define kill (get-ffi-obj "kill" #f (_fun _int _int -> _int)))
-
-(define sigkill 9)
-
-(define (kill-process-group! child)
-  (~> (subprocess-pid child) - (kill sigkill) void))
-
-(define (run-child runner dir out cleared settings log time-limit)
-  (define form
-    `(begin
-       (require (only-in (file ,(path->string recorder)) record-steps!))
-       (record-steps! ,(path->string runner) ,(path->string out))))
-  (call-with-child-log
-   dir log
-   (lambda (child-log)
-     (parameterize-break #f
-       (define-values (child _stdout stdin _stderr)
-         (parameterize ([current-environment-variables (child-environment cleared settings)]
-                        [current-directory dir]
-                        [subprocess-group-enabled #t])
-           (subprocess child-log #f 'stdout (find-exe) "-l" "racket/base" "-e" (format "~s" form))))
-       (close-output-port stdin)
-       (define exited?
-         (with-handlers ([exn:break? (lambda (e) (kill-process-group! child) (raise e))])
-           (sync/timeout/enable-break time-limit child)))
-       (kill-process-group! child)
-       (subprocess-wait child)
-       (list (subprocess-status child) (not exited?))))))
-
 (define (example-runner ex)
-  (build-path (hash-ref runner-dirs (example-name ex) examples-dir)
-              (string-append (example-name ex) ".rkt")))
+  (hash-ref runners (example-name ex)
+            (lambda () (build-path examples-dir (string-append (example-name ex) ".rkt")))))
 
 (define (step-hook? torch-dir)
   (or (file-exists? (build-path torch-dir "private" "step-log.rkt"))
@@ -311,7 +271,16 @@
     (check-true (file-exists? (example-runner (car (find-examples '("loader")))))
                 "a workload's runner is found in its own directory")
     (check-equal? (example-env (car examples) 'full) '(("EPOCHS" . 3)))
-    (check-equal? (cdr (assoc "STEPS" (example-env (cadr examples) 'short))) 300))
+    (check-equal? (cdr (assoc "STEPS" (example-env (cadr examples) 'short))) 300)
+    (check-equal? (map example-name (find-examples '("py-05" "17")))
+                  '("py-05-mnist" "17-workers"))
+    (for ([ex (in-list (append examples twins))])
+      (check-true (file-exists? (example-runner ex)) (example-name ex))))
+
+  (test-case "a PyTorch twin's settings are the ones its script reads"
+    (define twin (car (find-examples '("py-17"))))
+    (check-equal? (control-variables twin (example-runner twin))
+                  '("EPOCHS" "WORKERS" "BATCH" "VARIANT" "DATASET")))
 
   (test-case "a cache root sets every cache variable, inherited or not"
     (check-equal? (cache-env #f) '())

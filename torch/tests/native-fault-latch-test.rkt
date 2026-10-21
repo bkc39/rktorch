@@ -9,7 +9,7 @@
            syntax/parse/define
            (only-in "../foreign.rkt" ones tensor-shape)
            (only-in "../foreign/raw/fault.rkt"
-                    latched native-faulted reset-native-fault-latch!)
+                    crossing-hook latched native-faulted reset-native-fault-latch!)
            (only-in "../foreign/raw/memory.rkt" reaccount!)
            (only-in "../foreign/raw/syntax.rkt" _Tensor)
            (only-in "../foreign/structs.rkt" tensor-impl))
@@ -37,6 +37,20 @@
 
   (define-syntax-parse-rule (with-latch-cleared-after body:expr ...+)
     (dynamic-wind void (lambda () body ...) reset-native-fault-latch!))
+
+  (test-case "the crossing hook sees every latched call while it is set"
+    (define crossings 0)
+    (dynamic-wind
+     (lambda () (set-box! crossing-hook (lambda () (set! crossings (add1 crossings)))))
+     (lambda ()
+       (check-equal? (call-each) passed-through)
+       (check-equal? crossings 8)
+       (ones 2 2)
+       (check-true (> crossings 8) "a real binding crosses through the latch"))
+     (lambda () (set-box! crossing-hook #f)))
+    (define seen crossings)
+    (call-each)
+    (check-equal? crossings seen))
 
   (test-case "the first fault in the printer disables every native call after it"
     (with-latch-cleared-after

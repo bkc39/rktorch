@@ -1,8 +1,11 @@
 #lang racket/base
 
-(require (only-in ffi/unsafe _bytes _fun _int _intptr _void get-ffi-obj))
+(require (for-syntax racket/base syntax/parse)
+         (only-in ffi/unsafe _bytes _fun _int _intptr _void get-ffi-obj)
+         (only-in syntax/parse/define define-syntax-parse-rule))
 
-(provide latched
+(provide crossing-hook
+         latched
          native-fault?
          native-fault-policy
          native-faulted
@@ -56,17 +59,21 @@
      " at the first fault instead.")
     (current-continuation-marks))))
 
+(define crossing-hook (box #f))
+
+(define-syntax-parse-rule (enter!)
+  (begin
+    (when (unbox faulted) (raise-faulted))
+    (let ([hook (unbox crossing-hook)])
+      (when hook (hook)))))
+
 (define (latched f)
   (case (procedure-arity f)
-    [(0) (lambda () (when (unbox faulted) (raise-faulted)) (f))]
-    [(1) (lambda (a) (when (unbox faulted) (raise-faulted)) (f a))]
-    [(2) (lambda (a b) (when (unbox faulted) (raise-faulted)) (f a b))]
-    [(3) (lambda (a b c) (when (unbox faulted) (raise-faulted)) (f a b c))]
-    [(4) (lambda (a b c d) (when (unbox faulted) (raise-faulted)) (f a b c d))]
-    [(5) (lambda (a b c d e)
-           (when (unbox faulted) (raise-faulted))
-           (f a b c d e))]
-    [(6) (lambda (a b c d e g)
-           (when (unbox faulted) (raise-faulted))
-           (f a b c d e g))]
-    [else (lambda args (when (unbox faulted) (raise-faulted)) (apply f args))]))
+    [(0) (lambda () (enter!) (f))]
+    [(1) (lambda (a) (enter!) (f a))]
+    [(2) (lambda (a b) (enter!) (f a b))]
+    [(3) (lambda (a b c) (enter!) (f a b c))]
+    [(4) (lambda (a b c d) (enter!) (f a b c d))]
+    [(5) (lambda (a b c d e) (enter!) (f a b c d e))]
+    [(6) (lambda (a b c d e g) (enter!) (f a b c d e g))]
+    [else (lambda args (enter!) (apply f args))]))

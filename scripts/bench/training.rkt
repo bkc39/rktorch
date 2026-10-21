@@ -4,10 +4,13 @@
          (only-in json read-json write-json)
          (only-in racket/file call-with-atomic-output-file)
          (only-in racket/list drop last remove-duplicates)
+         (only-in racket/match match)
+         (only-in torch/foreign/raw/pressure-settings native-collect-at-troughs native-collect-budget)
          (only-in "harness.rkt" host-meta summarize)
          (only-in "shim.rkt" aten-threads torch-dir))
 
 (provide (struct-out recorded-run)
+         collect-settings
          record-steps!
          read-steps
          analyze-steps)
@@ -24,6 +27,26 @@
 (define (write-steps out data)
   (call-with-atomic-output-file out (lambda (port _tmp) (write-json data port))))
 
+(define (share text)
+  (define x (string->number text 10 'number-or-false 'decimal-as-exact))
+  (and (real? x) (< 0 x) (<= x 1) x))
+
+(define (collect-settings env)
+  (define at-troughs
+    (match (env "RKTORCH_BENCH_COLLECT_AT_TROUGHS")
+      [#f (native-collect-at-troughs)]
+      ["0" #f]
+      ["1" #t]
+      [text (raise-user-error 'record-steps "RKTORCH_BENCH_COLLECT_AT_TROUGHS is 0 or 1, got ~s"
+                              text)]))
+  (define budget
+    (match (env "RKTORCH_BENCH_COLLECT_BUDGET")
+      [#f (native-collect-budget)]
+      [(app share (? values x)) x]
+      [text (raise-user-error 'record-steps
+                              "RKTORCH_BENCH_COLLECT_BUDGET is a share in (0, 1], got ~s" text)]))
+  (hasheq 'at-troughs at-troughs 'budget budget))
+
 (define (record-steps! runner out)
   (define device-type (dynamic-require 'torch 'device-type))
   (define accelerator-if-available (dynamic-require 'torch 'accelerator-if-available))
@@ -35,8 +58,11 @@
   (write-steps out (hasheq 'meta meta 'torch_dir torch-dir-string))
   (managed-compile-zo runner)
   (define receiver (make-log-receiver (current-logger) 'debug 'rktorch-step))
+  (define collect (collect-settings getenv))
   (define t0 (current-inexact-monotonic-milliseconds))
-  (dynamic-require `(submod (file ,runner) main) #f)
+  (parameterize ([native-collect-at-troughs (hash-ref collect 'at-troughs)]
+                 [native-collect-budget (hash-ref collect 'budget)])
+    (dynamic-require `(submod (file ,runner) main) #f))
   (define wall (- (current-inexact-monotonic-milliseconds) t0))
   (define steps (map vector->list (drain receiver)))
   (write-steps out (hasheq 'wall_ms wall 'steps steps 'meta meta 'torch_dir torch-dir-string)))
@@ -165,6 +191,19 @@
         (write-steps path (hasheq 'meta (hasheq 'git_sha "abc") 'torch_dir "/t/torch/"))
         (read-steps path)))
     (check-equal? run (recorded-run '() #f (hasheq 'git_sha "abc") "/t/torch/")))
+
+  (test-case "the collection policy comes from the variant's settings"
+    (define (settings . kvs)
+      (collect-settings (lambda (name) (cond [(assoc name kvs) => cdr] [else #f]))))
+    (check-equal? (settings) (hasheq 'at-troughs #t 'budget 1/20))
+    (check-equal? (settings '("RKTORCH_BENCH_COLLECT_AT_TROUGHS" . "0")
+                            '("RKTORCH_BENCH_COLLECT_BUDGET" . "0.2"))
+                  (hasheq 'at-troughs #f 'budget 1/5))
+    (check-exn #rx"AT_TROUGHS is 0 or 1, got \"no\""
+               (lambda () (settings '("RKTORCH_BENCH_COLLECT_AT_TROUGHS" . "no"))))
+    (for ([bad (in-list '("0" "1.5" "x"))])
+      (check-exn #rx"BUDGET is a share in [(]0, 1[]]"
+                 (lambda () (settings (cons "RKTORCH_BENCH_COLLECT_BUDGET" bad))))))
 
   (test-case "a write that fails leaves the last complete record"
     (with-temporary-path (path (make-temporary-file "steps-~a.json"))

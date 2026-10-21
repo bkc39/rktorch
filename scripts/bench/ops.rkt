@@ -59,11 +59,11 @@
             (variant 'unchecked (lambda () (f-unchecked x y)) values)
             (variant 'raw (lambda () (f-raw x y)) wrap-tensor))))
 
-(define (conv-op device reps)
-  (define x (randn 1 3 32 32 #:device device))
+(define (conv-op device batch reps)
+  (define x (randn batch 3 32 32 #:device device))
   (define w (randn 16 3 3 3 #:device device))
   (define b (randn 16 #:device device))
-  (op 'conv2d-1x3x32x32-k16 reps
+  (op (string->symbol (format "conv2d-~ax3x32x32-k16" batch)) reps
       (list (variant 'facade (lambda () (facade-conv2d x w #:bias b #:padding 1)) values)
             (variant 'unchecked (lambda () (g:conv2d x w b '(1 1) '(1 1) '(1 1) 1)) values)
             (variant 'raw
@@ -91,14 +91,18 @@
   (define-values (a8 b8) (pair 8 8))
   (define-values (a64 b64) (pair 64 64))
   (define-values (a512 b512) (pair 512 512))
+  (define-values (a2048 b2048) (pair 2048 2048))
   (list (binary-op 'add-8x8 (n 20000) a8 b8 facade-add unchecked-add tr-add/raw)
         (binary-op 'matmul-64 (n 5000) a64 b64 facade-matmul unchecked-matmul tr-matmul/raw)
         (binary-op 'matmul-512 (n 100) a512 b512 facade-matmul unchecked-matmul tr-matmul/raw)
-        (conv-op device (n 2000))
+        (binary-op 'matmul-2048 (n 5) a2048 b2048 facade-matmul unchecked-matmul tr-matmul/raw)
+        (conv-op device 1 (n 2000))
+        (conv-op device 128 (n 100))
         (linear-op device (n 2000))))
 
 (define op-names
-  '(add-8x8 matmul-64 matmul-512 conv2d-1x3x32x32-k16 linear-64-fwd-bwd))
+  '(add-8x8 matmul-64 matmul-512 matmul-2048 conv2d-1x3x32x32-k16 conv2d-128x3x32x32-k16
+    linear-64-fwd-bwd))
 
 (define (op-cases #:device [device 'cpu] #:scale [scale 1])
   (define sync! (synchronizer device))
