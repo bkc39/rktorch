@@ -236,8 +236,8 @@
   (check-equal? (published-releases (list (release "v0.0.1" "2026-10-01T00:00:00Z" #:draft? #t)))
                 '()))
 
-(define (manifests native-versions)
-  (λ (tag) (hasheq 'native-version (hash-ref native-versions tag))))
+(define ((manifests native-versions) tag)
+  (hasheq 'native-version (hash-ref native-versions tag)))
 
 (test-case "the previous release has the highest native-version, then the latest date"
   (define natives (manifests (hash "v0.0.1" "0.1" "v0.0.2" "0.2" "v0.0.4" "0.1" "v0.0.5" "0.2")))
