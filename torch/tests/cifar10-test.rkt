@@ -22,18 +22,18 @@
     (check-equal? (shape imgs) '(256 3 32 32))
     (check-equal? (shape lbls) '(256))
     (check-equal? (dtype lbls) 'int64)
-    ;; the canonical first ten labels of data_batch_1
-    (check-equal? (take (tensor->list lbls) 10) '(6 9 9 4 1 1 2 7 8 3))
+    ;; the first ten labels scripts/gen-cifar10-fixture.py draws
+    (check-equal? (take (tensor->list lbls) 10) '(6 1 2 0 7 2 9 2 0 7))
     (check-equal? (map (lambda (l) (list-ref cifar10-label-names l))
                        (take (tensor->list lbls) 3))
-                  '("frog" "truck" "truck"))
-    ;; record 0 opens with red bytes 59 43 50, green 62 and blue 63 at pixel 0
+                  '("frog" "automobile" "bird"))
+    ;; record 0 opens with red bytes 166 165 175, green 84 and blue 0 at pixel 0
     (define (px c h w) (ref imgs 0 c h w))
-    (check-= (px 0 0 0) (- (/ 59 127.5) 1.0) 1e-6)
-    (check-= (px 0 0 1) (- (/ 43 127.5) 1.0) 1e-6)
-    (check-= (px 0 0 2) (- (/ 50 127.5) 1.0) 1e-6)
-    (check-= (px 1 0 0) (- (/ 62 127.5) 1.0) 1e-6)
-    (check-= (px 2 0 0) (- (/ 63 127.5) 1.0) 1e-6)
+    (check-= (px 0 0 0) (- (/ 166 127.5) 1.0) 1e-6)
+    (check-= (px 0 0 1) (- (/ 165 127.5) 1.0) 1e-6)
+    (check-= (px 0 0 2) (- (/ 175 127.5) 1.0) 1e-6)
+    (check-= (px 1 0 0) (- (/ 84 127.5) 1.0) 1e-6)
+    (check-= (px 2 0 0) (- (/ 0 127.5) 1.0) 1e-6)
     (define all (tensor->list imgs))
     (check-true (>= (apply min all) -1.0) "pixel below -1")
     (check-true (<= (apply max all) 1.0) "pixel above 1")
