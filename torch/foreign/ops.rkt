@@ -179,25 +179,14 @@
     [(mps) (mps-device)]
     [else (cuda-device index)]))
 
-(define/contract-out (cuda-available?) (-> boolean?)
+(define/checked-out (cuda-available?) (-> boolean?)
   (= 1 (tr-cuda-is-available/raw)))
 
 (define/contract-out (cuda-if-available) (-> device?) ;; noqa
   (if (cuda-available?) (cuda-device) (cpu-device)))
 
-(define/contract-out (mps-available?) (-> boolean?)
+(define/checked-out (mps-available?) (-> boolean?) ;; noqa
   (= 1 (tr-mps-is-available/raw)))
-
-(define/contract-out (mps-if-available) (-> device?) ;; noqa
-  (if (mps-available?) (mps-device) (cpu-device)))
-
-;; CUDA before MPS only for determinism; the two never coexist (MPS is
-;; darwin-only, and nixpkgs has no darwin CUDA libtorch).
-(define/contract-out (accelerator-if-available) (-> device?) ;; noqa
-  (cond
-    [(cuda-available?) (cuda-device)]
-    [(mps-available?) (mps-device)]
-    [else (cpu-device)]))
 
 (define/contract-out (cuda-device-count) (-> exact-nonnegative-integer?) ;; noqa
   (tr-cuda-device-count/raw))

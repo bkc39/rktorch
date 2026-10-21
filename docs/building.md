@@ -316,9 +316,11 @@ and the smoke's log as the run's `torch-aarch64-macosx` artifact. A second
 job, on `macos-14`, the package's floor, installs racket-lang.org's notarized
 Racket 9.1 and 9.3 from their `.dmg` and runs `smoke-install.sh` with each,
 with `SMOKE_TESTS` (a space-separated list of modules in place of
-`torch/pkg-build/smoke`) naming only the CPU suites for the native library,
-tensor ops and autograd: GitHub's `macos-14` runners advertise MPS but cannot
-allocate on it, and those suites prove the dylibs load and compute there.
+`torch/pkg-build/smoke`) naming the CPU suites for the native library,
+tensor ops and autograd, and the accelerator suite: GitHub's `macos-14`
+runners advertise MPS but cannot allocate on it, so the device suites' MPS
+cases fail there, while `accelerator-if-available` probes MPS, falls back to
+the CPU, and the accelerator suite trains `04-mlp` on what it picks (#353).
 
 Weekly, on demand, or when a calling workflow passes `mps: true`, an `mps` job
 on `macos-latest` installs the package on Racket 9.3, fails unless
@@ -555,8 +557,9 @@ installs, so the platform packages have lanes of their own:
 - **`platform-macos.yml`.** Its `build` job, on `macos-latest`, builds,
   audits (with the negative control) and gtests `torch-aarch64-macosx`, then
   assembles and budgets the zip and runs the full smoke at Racket 9.1.
-  `install`, on `macos-14`, runs only the CPU suites at Racket 9.1 and 9.3,
-  since GitHub's `macos-14` runners advertise MPS but cannot allocate on it;
+  `install`, on `macos-14`, runs the CPU suites and the accelerator suite at
+  Racket 9.1 and 9.3, since GitHub's `macos-14` runners advertise MPS but
+  cannot allocate on it;
   `mps` runs the MPS suites ([above](#arm64-macos))
   weekly, on demand, or when a calling workflow passes `mps: true`. The lane
   runs on pull requests that touch the paths listed in the workflow, weekly,

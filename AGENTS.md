@@ -590,10 +590,14 @@ Where python3 can't `import torch` (the sandboxed `nix build`, or the lean
 
 `accelerator-if-available` picks CUDA, then MPS, then CPU — what the examples'
 `pick-device` returns, and the analogue of PyTorch's
-`torch.accelerator.current_accelerator()`. The device suite guards its CUDA and
-MPS bodies separately; the example runners train on whichever accelerator the
-helper returns. Both verify real hardware where it exists and self-skip where it
-doesn't — never assume a case ran because it was green.
+`torch.accelerator.current_accelerator()`, except that it picks MPS only once
+one element has been allocated there (#353): GitHub's macos-14 runners
+advertise MPS and cannot allocate on it. `mps-available?` keeps PyTorch's
+meaning, so the device suite guards its CUDA and MPS bodies separately on the
+`-available?` predicates, and on such a host its MPS cases fail; the example
+runners train on whichever accelerator the helper returns. Both verify real
+hardware where it exists and self-skip where it doesn't — never assume a case
+ran because it was green.
 
 **Darwin needs no special shell.** The `aarch64-darwin` `libtorch-bin` ships the
 Metal backend, so plain `nix develop` is the MPS verification environment —

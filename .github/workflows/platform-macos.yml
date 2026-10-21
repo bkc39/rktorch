@@ -145,7 +145,7 @@ jobs:
     env:
       OUT: ${{ github.workspace }}/.scratch/macos/out
       RACKETS: ${{ github.workspace }}/.scratch/macos/racket
-      SMOKE_TESTS: torch/tests/native-library-test torch/tests/tensor-ops-test torch/tests/autograd-test
+      SMOKE_TESTS: torch/tests/native-library-test torch/tests/tensor-ops-test torch/tests/autograd-test torch/tests/accelerator-test
     steps:
       - uses: actions/checkout@v5
 

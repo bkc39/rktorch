@@ -220,9 +220,22 @@ only on CUDA asks this of the batch's device.
 
 @torch-examples[(device-type (device (zeros 1)))]}
 
+@deftogether[(@defproc[(cuda-available?) boolean?]
+              @defproc[(mps-available?) boolean?])]{
+Whether libtorch sees a CUDA device, and a Metal device, as Python's
+@tt{torch.cuda.is_available()} and @tt{torch.backends.mps.is_available()}.
+Neither allocates. A virtual machine may advertise a Metal device it cannot
+allocate on, GitHub's macOS 14 runners among them; @racket[mps-available?]
+answers @racket[#t] there, and the first tensor placed on
+@racket[(mps-device)] fails with an out-of-memory error.}
+
 @defproc[(cuda-if-available) device?]{
 The first CUDA device when one is present, else the CPU;
 @racket[accelerator-if-available] also considers Metal.}
+
+@defproc[(mps-if-available) device?]{
+The Metal device when it is available and can allocate, else the CPU. It
+shares @racket[accelerator-if-available]'s check.}
 
 @deftogether[(@defproc[(default-device) device?]
               @defproc[(set-default-device! [dev device/c]) void?])]{
@@ -236,7 +249,17 @@ the setter is for a script that picks a device once at the top.
 @defproc[(accelerator-if-available) device?]{
 The accelerator this process can use --- CUDA on a Linux machine with an
 NVIDIA GPU, Metal on Apple Silicon --- or the CPU device when there is
-none, mirroring @tt{torch.accelerator.current_accelerator()}.}
+none.
+
+Unlike @tt{torch.accelerator.current_accelerator()}, it checks that Metal
+can allocate. The first time @racket[mps-available?] answers
+@racket[#t], it places one element on @racket[(mps-device)] and copies it
+back, once per process, whichever thread asks first. If that fails, as on a
+virtual machine that advertises a Metal device it cannot use, it answers
+@racket[(cpu-device)] from then on and logs libtorch's message once, at
+@racket['warning] on the topic @racket['rktorch-device]. CUDA is not
+probed: a CUDA device that cannot allocate is usually one another process
+holds, and an error says so sooner than a run on the CPU would.}
 
 @defform[(with-default-device dev body ...+)]{
 Evaluates @racket[body] with @racket[dev] as the process default device, so

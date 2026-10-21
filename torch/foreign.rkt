@@ -10,11 +10,13 @@
          (only-in "foreign/structs.rkt" tensor-free!)
          (submod "foreign/structs.rkt" checked)
          (except-in "foreign/ops.rkt"
-                    any-float-dtype/c default-device
-                    device->type+index dims-rest/c dtype/c
+                    any-float-dtype/c cuda-available? default-device
+                    device->type+index dims-rest/c dtype/c mps-available?
                     item to-dtype tensor-dtype to-device tensor-device
                     tensor-shape tensor->list)
          (submod "foreign/ops.rkt" checked)
+         (only-in "foreign/accelerator.rkt"
+                  accelerator-if-available mps-if-available)
          (except-in "foreign/creation-ops.rkt" generator? tensor)
          (submod "foreign/creation-ops.rkt" checked)
          (except-in "foreign/tensor-ops.rkt"

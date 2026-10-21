@@ -51,9 +51,6 @@
     (check-equal? (device-type (cuda-if-available))
                   (if (cuda-available?) 'cuda 'cpu))
     (check-equal? (device-index (cuda-if-available)) 0)
-    (check-equal? (device-type (mps-if-available))
-                  (if (mps-available?) 'mps 'cpu))
-    (check-equal? (device-index (mps-if-available)) 0)
     (when (cuda-available?)
       (define g (tensor '(1 2 3) #:device (cuda-device)))
       (check-equal? (device g) (cuda-device 0))
@@ -167,17 +164,6 @@
                      (take mt (to-dtype (tensor '(0 1)) 'int64))))
         (check-equal? (shape (take mt '())) '(0))))
     (check-not-exn mps-empty-cache!))
-
-  (test-case "accelerator-if-available prefers cuda, then mps, then cpu"
-    (define picked (accelerator-if-available))
-    (check-true (device? picked))
-    (check-equal? (device-type picked)
-                  (cond
-                    [(cuda-available?) 'cuda]
-                    [(mps-available?) 'mps]
-                    [else 'cpu]))
-    (check-equal? (device-index picked) 0)
-    (check-equal? (device (tensor '(1 2 3) #:device picked)) picked))
 
   (test-case "new tensors and to-device land on cpu"
     (define t (zeros 2 2))
