@@ -9,9 +9,6 @@
          (only-in "error.rkt" exn:fail:rktorch:oom?)
          (only-in "ops.rkt" cuda-available? mps-available? to-device))
 
-;; The state is 'unprobed, a claim while a thread probes, then the answer.
-;; The claim names its thread because kill-thread runs no dynamic-wind exit:
-;; a claimant that has died holds nothing.
 (struct mps-probe (run [state #:mutable]))
 (struct claim (holder done))
 
