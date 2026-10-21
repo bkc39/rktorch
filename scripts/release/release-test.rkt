@@ -155,6 +155,23 @@
     (display-to-file "uncommitted" (build-path dir "pkgs" "torch-x86_64-linux" "scratch"))
     (check-equal? (natives-inputs dir) second "only HEAD counts")))
 
+(test-case "a natives' input may name one file, such as the workflow that builds them"
+  (with-temporary-directory (dir)
+    (define workflow (build-path dir ".github" "workflows" "platform-linux.yml"))
+    (make-root dir #:inputs '(".github/workflows/platform-linux.yml" "pkgs") #:excluded '())
+    (make-directory* (build-path dir ".github" "workflows"))
+    (display-to-file "first" workflow)
+    (display-to-file "elsewhere" (build-path dir ".github" "workflows" "nix.yml"))
+    (git dir "init" "-q")
+    (commit-all dir "first")
+    (define first (natives-inputs dir))
+    (display-to-file "changed" (build-path dir ".github" "workflows" "nix.yml") #:exists 'truncate)
+    (commit-all dir "another workflow")
+    (check-equal? (natives-inputs dir) first)
+    (display-to-file "second" workflow #:exists 'truncate)
+    (commit-all dir "the build's workflow")
+    (check-not-equal? (natives-inputs dir) first)))
+
 (test-case "natives-inputs fails outside a git checkout"
   (with-temporary-directory (dir)
     (make-root dir)

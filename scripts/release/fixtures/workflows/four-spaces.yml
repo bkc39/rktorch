@@ -1,0 +1,10 @@
+name: Four spaces
+
+on:
+  push:
+
+jobs:
+    plan:
+        runs-on: ubuntu-24.04
+        steps:
+            - run: echo plan

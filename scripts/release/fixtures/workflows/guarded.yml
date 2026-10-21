@@ -1,0 +1,77 @@
+name: Guarded
+
+on:
+  push:
+
+jobs:
+  plan:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+      - run: echo plan
+
+  build:
+    needs: plan
+    if: needs.plan.outputs.build == 'true'
+    uses: "./.github/workflows/build.yml"
+
+  carried:
+    needs: [plan]
+    if: needs.plan.outputs.build == 'false'
+    runs-on: ubuntu-24.04
+    steps:
+      - run: echo carried
+
+  # a plain condition is fine when nothing it needs may be skipped
+  check:
+    needs: plan
+    if: github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    steps:
+      - run: |
+          echo check
+  # comment: not a key
+
+  assemble:
+    needs:
+      - plan
+      - build
+      - carried
+    if: >-
+      !cancelled()
+      && (needs.build.result == 'success' || needs.carried.result == 'success')
+    runs-on: ubuntu-24.04
+    steps:
+      - run: echo assemble
+
+  draft:
+    needs: [plan, assemble] # the release
+    if: ${{ always() && needs.assemble.result == 'success' }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+      - name: Local
+        uses: "./.github/actions/draft"
+      - run: echo draft
+
+  publish:
+    needs: draft
+    if: success() && github.ref_type == 'tag'
+    runs-on: ubuntu-24.04
+    steps:
+      - run: echo publish
+
+  skipped-with-build:
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - run: echo after build
+
+  report:
+    needs: [assemble, draft]
+    if: failure()
+    uses: ./.github/workflows/report.yaml

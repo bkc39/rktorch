@@ -38,8 +38,10 @@ The previous release is the published release with a `manifest.json` whose
 release builds no platform package: its manifest and catalog entries point at
 the earlier release's assets. Any change to a file the natives are built from,
 a shim source, a build script, a notice, needs a `native-version` bump, or
-the run fails. A file that only tests or audits the build belongs in
-`natives-inputs-exclude`.
+the run fails. The inputs include the workflows that build the natives. A
+file that only tests or audits the build belongs in `natives-inputs-exclude`;
+every pull request runs `release.rkt natives-inputs`, which fails on an
+exclude that names no tracked file.
 
 ## Tagging
 
@@ -55,6 +57,9 @@ The run calls `platform-linux.yml` and `platform-macos.yml`, the same build,
 audit and install jobs CI runs, when the natives build. When they don't, its
 `carried` jobs install the earlier release's zips on Linux and macOS through
 a catalog that names them by their https URLs, so a dead URL fails the run.
+Each downloaded zip must have the sha256 in the previous `manifest.json` and
+the checksum in the previous `catalog-entry.rktd`, and each LGPL source
+attached beside it must still answer.
 The `assemble` job, with read-only permissions, builds the assets; the
 `draft` job, the only one that can write, attests them, creates the draft
 release (a pre-release when the tag has a suffix) and fails unless the
@@ -135,4 +140,7 @@ A draft can be deleted.
    into. The zip's file name is the package's name.
 3. A job in `release.yml` calling the workflow that builds it, added to the
    `assemble` job's `needs` and its `if`, and a `carried` matrix entry for a
-   runner that installs it.
+   runner that installs it. That workflow joins `natives-inputs`. A job that
+   needs a job which may be skipped states `!cancelled()`, `always()`,
+   `success()` or `failure()` in its `if`; `raco test scripts/release` fails
+   otherwise, since GitHub's implicit `success()` would skip it.

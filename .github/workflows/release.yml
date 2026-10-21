@@ -141,6 +141,12 @@ jobs:
           variant: CS
           architecture: ${{ runner.arch == 'ARM64' && 'arm64' || 'x64' }}
 
+      - name: Download the previous release's manifest and entries
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: release-previous
+          path: ${{ runner.temp }}/previous
+
       - name: Catalog the carried zip by its https URL
         run: |
           set -euo pipefail
@@ -149,8 +155,19 @@ jobs:
           for file in "$PACKAGE.zip" "$PACKAGE.zip.CHECKSUM"; do
             curl -fsSL --retry 3 -o "$RUNNER_TEMP/pkg/$file" "$root/$file"
           done
+          racket scripts/release/release.rkt check-carried "$RUNNER_TEMP/previous" "$PACKAGE" \
+            "$RUNNER_TEMP/pkg/$PACKAGE.zip"
           scripts/platform/catalog.sh "$RUNNER_TEMP/pkg/$PACKAGE.zip" "$RUNNER_TEMP/catalog" \
             "$RUNNER_TEMP/catalog" "$root"
+
+      - name: The carried LGPL sources are still attached
+        run: |
+          set -euo pipefail
+          mapfile -t urls < <(racket scripts/release/release.rkt carried-sources \
+            "$RUNNER_TEMP/previous/manifest.json" "$GITHUB_REPOSITORY")
+          for url in "${urls[@]}"; do
+            curl -fsSIL --retry 3 -o /dev/null "$url"
+          done
 
       - name: Install, smoke and check package deps
         run: scripts/platform/smoke-install.sh "$RUNNER_TEMP/catalog" "$RUNNER_OS $(uname -m)"
@@ -182,14 +199,14 @@ jobs:
 
       - name: Download the platform packages
         if: needs.plan.outputs.build-natives == 'true'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           pattern: torch-*
           path: ${{ runner.temp }}/artifacts
 
       - name: Download the previous release's manifest and entries
         if: needs.plan.outputs.build-natives == 'false'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: release-previous
           path: ${{ runner.temp }}/previous
@@ -226,7 +243,9 @@ jobs:
   draft:
     name: Attest the assets and draft the release
     needs: [plan, assemble]
-    if: github.event_name == 'push' && github.ref_type == 'tag' && needs.assemble.result == 'success'
+    if: >-
+      ${{ !cancelled() && github.event_name == 'push' && github.ref_type == 'tag'
+      && needs.plan.result == 'success' && needs.assemble.result == 'success' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
@@ -237,14 +256,14 @@ jobs:
       TAG: ${{ needs.plan.outputs.tag }}
     steps:
       - name: Download the assets
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: release-assets
           path: ${{ runner.temp }}/release
 
       - name: Attest the build provenance
         id: attest
-        uses: actions/attest-build-provenance@v3
+        uses: actions/attest-build-provenance@96278af6caaf10aea03fd8d33a09a777ca52d62f # v3.2.0
         with:
           subject-path: ${{ runner.temp }}/release/dist/*
 

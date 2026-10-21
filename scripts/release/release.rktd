@@ -8,6 +8,9 @@
  "mpg123-1.33.4.tar.bz2")
 
 (natives-inputs
+ ".github/workflows/platform-linux-build.yml"
+ ".github/workflows/platform-linux.yml"
+ ".github/workflows/platform-macos.yml"
  "cpp"
  "pkgs"
  "scripts/platform")

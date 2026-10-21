@@ -38,6 +38,7 @@
                    #:declared [declared packages]
                    #:listed [listed packages]
                    #:lgpl [lgpl '("lame-3.100.tar.gz")]
+                   #:inputs [inputs '("pkgs")]
                    #:excluded [excluded '("pkgs/torch-x86_64-linux/NOTES")]
                    #:stamp [stamp stamp-a])
   (write-forms (build-path dir "torch" "info.rkt") "#lang info"
@@ -65,7 +66,7 @@
                   ,@(for/list ([name (in-list listed)])
                       (format "~a/pkg/~a.zip" name name)))
                  (lgpl-sources ,@lgpl)
-                 (natives-inputs "pkgs")
+                 (natives-inputs ,@inputs)
                  (natives-inputs-exclude ,@excluded)))
   dir)
 

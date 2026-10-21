@@ -1,0 +1,52 @@
+name: Unguarded
+
+on:
+  push:
+
+jobs:
+  plan:
+    runs-on: ubuntu-24.04
+    steps:
+      - run: echo plan
+
+  build:
+    needs: plan
+    if: needs.plan.outputs.build == 'true'
+    runs-on: ubuntu-24.04
+    steps:
+      - run: echo build
+
+  assemble:
+    needs:
+      - plan
+      - build
+    if: >-
+      github.event_name == 'push'
+      && needs.build.result == 'success'
+    runs-on: ubuntu-24.04
+    steps:
+      - run: echo assemble
+
+  after-build:
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - run: echo after build
+
+  draft:
+    needs: ["plan", after-build]
+    if: ${{ github.ref_type == 'tag' }}
+    runs-on: ubuntu-24.04
+    permissions: write-all
+    steps:
+      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4
+      - name: Attest
+        uses: actions/attest-build-provenance@v3
+      - run: echo draft # success() in a step is not the job's
+
+  check:
+    needs: plan
+    if: github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    steps:
+      - run: echo check

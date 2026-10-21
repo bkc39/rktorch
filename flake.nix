@@ -307,6 +307,7 @@
           src = pkgs.lib.fileset.toSource {
             root = ./.;
             fileset = pkgs.lib.fileset.unions [
+              ./.github/workflows
               ./flake.nix
               ./nix/racket-deps/racket-deps.rkt
               ./pkgs

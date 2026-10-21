@@ -7,6 +7,7 @@
          (only-in racket/port port->list)
          (only-in racket/runtime-path #%datum define-runtime-path)
          (only-in "assets.rkt" assemble release-notes)
+         (only-in "carried.rkt" carried-source-urls check-carried)
          (only-in "checks.rkt" check-release natives-inputs natives-plan read-release-data refuse
                   release-data-sources)
          (only-in "github.rkt" download-root previous-release published-releases
@@ -27,6 +28,9 @@
    "  natives-root <manifest.json> <owner/name>\n"
    "  required-checks <rules.json> <check-runs.json>\n"
    "  lgpl-sources\n"
+   "  natives-inputs\n"
+   "  check-carried <previous-dir> <package> <zip>\n"
+   "  carried-sources <manifest.json> <owner/name>\n"
    "  assemble --tag <tag> --repository <owner/name> --commit <sha> --sources <dir>\n"
    "           --notes <file> [--artifacts <dir> | --previous <dir>] <out-dir>"))
 
@@ -122,6 +126,12 @@
     ['() (void)]
     [unmet (refuse "the tagged commit's required checks have not all passed: ~a" unmet)]))
 
+(define (check-carried-command previous name zip)
+  (check-carried (read-json-file (build-path previous "manifest.json"))
+                 (file->value (build-path previous "catalog-entry.rktd"))
+                 name
+                 zip))
+
 (define (assemble-command args)
   (define tag #f)
   (define repository #f)
@@ -171,6 +181,10 @@
     [(list "required-checks" rules check-runs) (required-checks-command rules check-runs)]
     [(list "lgpl-sources")
      (for-each displayln (release-data-sources (read-release-data root)))]
+    [(list "natives-inputs") (displayln (natives-inputs root))]
+    [(list "check-carried" previous name zip) (check-carried-command previous name zip)]
+    [(list "carried-sources" manifest repository)
+     (for-each displayln (carried-source-urls (read-json-file manifest) repository))]
     [(cons "assemble" args) (assemble-command args)]
     [args (refuse "~a\ngot ~s" usage args)]))
 
