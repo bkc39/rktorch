@@ -4,7 +4,6 @@
          (only-in racket/contract/base -> hash/c listof or/c)
          (only-in racket/contract/region define/contract)
          (only-in racket/file file->string make-directory*)
-         (only-in racket/match match)
          (only-in racket/pretty pretty-write)
          (only-in racket/string string-trim)
          (only-in "../platform/catalog-entry.rkt" catalog-entry)
@@ -31,8 +30,8 @@
   (bytes->hex-string (call-with-input-file file sha256-bytes)))
 
 (define (file-name file)
-  (let-values ([(_dir name _must-be-dir?) (split-path file)])
-    (path->string name)))
+  (define-values (_dir name _must-be-dir?) (split-path file))
+  (path->string name))
 
 (define (download-url repository tag file)
   (format "https://github.com/~a/releases/download/~a/~a" repository tag file))

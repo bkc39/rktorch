@@ -173,13 +173,12 @@
                       skeleton found info-dir version)))
 
 (define (native-version info info-dir)
-  (define version
-    (info 'native-version
-          (λ () (raise-user-error 'racket-deps "~a has no native-version" info-dir))))
-  (if (and (string? version) (valid-version? version))
-      version
-      (raise-user-error 'racket-deps "~a has native-version ~s, which is not a valid Racket version"
-                        info-dir version)))
+  (match (info 'native-version
+               (λ () (raise-user-error 'racket-deps "~a has no native-version" info-dir)))
+    [(? string? version) #:when (valid-version? version) version]
+    [version
+     (raise-user-error 'racket-deps "~a has native-version ~s, which is not a valid Racket version"
+                       info-dir version)]))
 
 (define/contract (platform-packages info-dir pkgs-dir
                                     #:platform [subpath (path->string (system-library-subpath #f))])
