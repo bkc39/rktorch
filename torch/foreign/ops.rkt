@@ -179,13 +179,13 @@
     [(mps) (mps-device)]
     [else (cuda-device index)]))
 
-(define/checked-out (cuda-available?) (-> boolean?)
+(define/contract-out (cuda-available?) (-> boolean?)
   (= 1 (tr-cuda-is-available/raw)))
 
 (define/contract-out (cuda-if-available) (-> device?) ;; noqa
   (if (cuda-available?) (cuda-device) (cpu-device)))
 
-(define/checked-out (mps-available?) (-> boolean?) ;; noqa
+(define/contract-out (mps-available?) (-> boolean?) ;; noqa
   (= 1 (tr-mps-is-available/raw)))
 
 (define/contract-out (cuda-device-count) (-> exact-nonnegative-integer?) ;; noqa

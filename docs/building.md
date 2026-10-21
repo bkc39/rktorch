@@ -319,14 +319,17 @@ with `SMOKE_TESTS` (a space-separated list of modules in place of
 `torch/pkg-build/smoke`) naming the CPU suites for the native library,
 tensor ops and autograd, and the accelerator suite: GitHub's `macos-14`
 runners advertise MPS but cannot allocate on it, so the device suites' MPS
-cases fail there, while `accelerator-if-available` probes MPS, falls back to
-the CPU, and the accelerator suite trains `04-mlp` on what it picks (#353).
+cases fail there. The job sets `RKTORCH_EXPECT_ACCELERATOR=cpu`, so the
+accelerator suite asserts that `accelerator-if-available` falls back to the
+CPU there and that the real probe's failure is logged once (#353).
 
 Weekly, on demand, or when a calling workflow passes `mps: true`, an `mps` job
 on `macos-latest` installs the package on Racket 9.3, fails unless
 `(mps-available?)`, and runs the installed device, `to`, audio-device and
 MPS-pressure suites. Each of them asserts on MPS when it is there and skips
-without it. What the runner cannot show is a physical Apple-silicon Mac, so
+without it. It also runs the accelerator suite with
+`RKTORCH_EXPECT_ACCELERATOR=mps`, so a probe that wrongly rejects a working
+MPS fails there. What the runner cannot show is a physical Apple-silicon Mac, so
 the one check left by hand is the same smoke on one, with the artifact's zip
 in a directory catalog as above. It must print `mps-available? #t` and pass.
 To try more against that install, run Racket with `PLTUSERHOME` set to the
