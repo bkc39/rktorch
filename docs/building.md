@@ -88,6 +88,10 @@ racket scripts/coverage.rkt       # expression coverage, with a floor
 racket scripts/bench/run.rkt micro   # benchmarks, docs/benchmarks/README.md
 ```
 
+In a source checkout, `dataset-fixtures-parity-test` needs a `python3`, any
+version and no packages, to regenerate the fixtures. Every Nix shell
+provides one.
+
 The first entry into a shell installs the Racket dependencies into a
 per-checkout `.racket-user` directory and stages `libtorchrkt` under
 `torch/native-libs/`. Resyntax, racket-review and `cover` come pinned and
