@@ -13,6 +13,8 @@
 (provide (struct-out phased)
          mnist-phases
          resnet-phases
+         call-in-phased-device
+         step-phases!
          run-phases!)
 
 (struct phased (example device settings phases sync!))
@@ -80,9 +82,14 @@
                   (cons 'loss-item (lambda () (item loss))))
             (lambda () (settle! (parameters net))))))
 
-(define (run-phases! p
-                     #:around [around (lambda (_name thunk) (thunk))]
-                     #:skip [skip '()])
-  (with-default-device (phased-device p)
-    (for ([ph (in-list (phased-phases p))] #:unless (memq (car ph) skip))
-      (around (car ph) (cdr ph)))))
+(define (call-in-phased-device p thunk)
+  (with-default-device (phased-device p) (thunk)))
+
+(define (step-phases! p
+                      #:around [around (lambda (_name thunk) (thunk))]
+                      #:skip [skip '()])
+  (for ([ph (in-list (phased-phases p))] #:unless (memq (car ph) skip))
+    (around (car ph) (cdr ph))))
+
+(define (run-phases! p)
+  (call-in-phased-device p (lambda () (step-phases! p))))

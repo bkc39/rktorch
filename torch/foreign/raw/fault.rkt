@@ -10,7 +10,8 @@
          native-fault-policy
          native-faulted
          note-native-fault!
-         reset-native-fault-latch!)
+         reset-native-fault-latch!
+         with-crossing-hook)
 
 (define (native-fault? v)
   (and (exn:fail? v)
@@ -60,6 +61,13 @@
     (current-continuation-marks))))
 
 (define crossing-hook (box #f))
+
+(define-syntax-parse-rule (with-crossing-hook hook:expr body:expr ...+)
+  (let ([installed hook]
+        [previous (unbox crossing-hook)])
+    (dynamic-wind (lambda () (set-box! crossing-hook installed))
+                  (lambda () body ...)
+                  (lambda () (set-box! crossing-hook previous)))))
 
 (define-syntax-parse-rule (enter!)
   (begin

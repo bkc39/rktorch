@@ -9,12 +9,20 @@ every step, test accuracy after each of EPOCHS epochs."""
 
 import random
 
-import torch
 import torch.nn.functional as F
-from torch import nn
+from common import (
+    StepLog,
+    batches,
+    env_number,
+    env_text,
+    load_cifar10,
+    optimizer_options,
+    pick_device,
+    steps_out,
+)
 
-from common import (StepLog, batches, env_number, env_text, load_cifar10,
-                    pick_device, steps_out)
+import torch
+from torch import nn
 
 
 class BasicBlock(nn.Module):
@@ -95,8 +103,8 @@ def accuracy(net, xs, ys, chunk=500):
     return correct / len(xs)
 
 
-def train_step(net, opt, schedule, xs, ys):
-    opt.zero_grad()
+def train_step(net, opt, schedule, xs, ys, set_to_none):
+    opt.zero_grad(set_to_none=set_to_none)
     if xs.device.type == "cuda":
         with torch.autocast("cuda", dtype=torch.bfloat16):
             loss = F.cross_entropy(net(xs), ys)
@@ -115,6 +123,8 @@ def main():
     base = env_number("BASE", 64)
     max_lr = 0.1
     dataset = env_text("DATASET", "full")
+    style = env_text("OPTIMIZER", "default")
+    options, set_to_none = optimizer_options(style)
     torch.backends.cudnn.benchmark = False
     device = pick_device()
     log = StepLog(out, device)
@@ -125,7 +135,8 @@ def main():
     with torch.device(device):
         net = ResNet(base=base)
     opt = torch.optim.SGD(net.parameters(), lr=max_lr, momentum=0.9,
-                          nesterov=True, weight_decay=5e-4)
+                          nesterov=True, weight_decay=5e-4, **options)
+    log.note_optimizer(style, opt, set_to_none)
     steps_per_epoch = (len(train_x) + batch - 1) // batch
     schedule = torch.optim.lr_scheduler.OneCycleLR(
         opt, max_lr=max_lr, total_steps=epochs * steps_per_epoch,
@@ -136,7 +147,7 @@ def main():
             xb = train_x.index_select(0, index)
             yb = train_y.index_select(0, index)
             augmented = random_horizontal_flip(random_crop(xb, 4, g), g)
-            loss = train_step(net, opt, schedule, augmented, yb)
+            loss = train_step(net, opt, schedule, augmented, yb, set_to_none)
             log.step()
             loss.item()
         print(f"test acc {accuracy(net, test_x, test_y)}", flush=True)

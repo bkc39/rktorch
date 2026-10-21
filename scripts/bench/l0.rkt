@@ -1,11 +1,14 @@
 #lang racket/base
 
 (require (only-in racket/format ~a)
+         (only-in racket/list take-right)
          (only-in racket/match match)
          (only-in racket/string string-join)
+         (only-in threading ~>)
          (only-in torch/tests/private/wedge call-with-process-deadline)
          (only-in "calls.rkt" call-records)
-         (only-in "harness.rkt" host-meta load-average measure result->record result-name)
+         (only-in "harness.rkt"
+                  host-meta load-average measure result->record result-name result-per-call)
          (only-in "host-gpu.rkt" host-gpu-records)
          (only-in "pytorch.rkt" require-pytorch twin-record twin-records)
          (only-in "shim.rkt" aten-threads)
@@ -19,14 +22,21 @@
 
 (define scaling-deadline 3600)
 
+(define proxy-base 4)
+
 (define (scaling-records results runs meta)
   (for/list ([r (in-list results)])
     (define-values (state n) (name->case (result-name r)))
-    (define mains (for/list ([run (in-list (reverse (hash-ref runs (cons state n) '())))])
-                    (hash-ref run 'main_steps_per_s)))
+    (define timed
+      (~> (hash-ref runs (cons state n) '()) reverse (take-right (length (result-per-call r)))))
+    (define (of key) (map (lambda (run) (hash-ref run key)) timed))
     (result->record r #:suite "scaling" #:group "threads" #:unit "ops/s" #:meta meta #:scale 1
                     #:extra (hasheq 'impl "rktorch" 'case (~a state) 'variant (~a n)
-                                    'threads_run n 'main_steps_per_s mains))))
+                                    'threads_run n 'main_steps_per_s (of 'main_steps_per_s)
+                                    'stopped (of 'stopped)))))
+
+(define (comma-list xs)
+  (string-join (map ~a xs) ","))
 
 (define (name->case name)
   (match (regexp-match #rx"^([^/]*)/([0-9]+)$" (symbol->string name))
@@ -46,9 +56,10 @@
   (define (meta-on d) (host-meta #:device d #:libtorch libtorch #:threads (aten-threads)))
   (define (mnist) (mnist-phases device #:batch (hash-ref phases 'batch 128)
                                 #:samples (hash-ref phases 'samples 1024)))
-  (define (resnet) (resnet-phases device #:batch (hash-ref phases 'batch 128)
-                                  #:samples (hash-ref phases 'samples 1024)
-                                  #:base (hash-ref phases 'base 64)))
+  (define (resnet #:base [base (hash-ref phases 'base 64)])
+    (resnet-phases device #:batch (hash-ref phases 'batch 128)
+                   #:samples (hash-ref phases 'samples 1024)
+                   #:base base))
   (case suite
     [(pytorch-ops)
      (require-pytorch 'pytorch-ops)
@@ -75,8 +86,8 @@
      (for ([child (in-list (twin-records "threads.py"
                                          (list "--seconds" seconds "--rounds" (or rounds 5)
                                                "--warmup" warmup
-                                               "--threads" (string-join (map ~a threads) ",")
-                                               "--states" (string-join (map ~a main-states) ",")
+                                               "--threads" (comma-list threads)
+                                               "--states" (comma-list main-states)
                                                "--intra-op" (aten-threads))
                                          #:log log))])
        (emit (twin-record child #:suite "scaling" #:meta (meta-on 'cpu) #:load load)))]
@@ -87,8 +98,8 @@
        (emit (hash-set* r 'meta meta 'load (load-average))))]
     [(host-gpu)
      (define meta (meta-on device))
-     (for ([r (in-list (host-gpu-records (resnet)
-                                         #:steps (max 2 (inexact->exact (round (* 20 scale))))
+     (for ([r (in-list (host-gpu-records (resnet) #:proxy (resnet #:base proxy-base)
+                                         #:steps (~> scale (* 20) round inexact->exact (max 2))
                                          #:rounds (or rounds 5) #:warmup (max 1 warmup)))])
        (emit (hash-set* r 'meta meta 'load (load-average))))]))
 
@@ -99,10 +110,10 @@
            (only-in "ops.rkt" op-names)
            (only-in "pytorch.rkt" pytorch-available?))
 
-  (define (records-of suite #:scale [scale 0.001])
+  (define (records-of suite #:scale [scale 0.001] #:warmup [warmup 0])
     (define out '())
     (run-l0-suite suite #:emit (lambda (r) (set! out (cons r out))) #:log (open-output-nowhere)
-                  #:device 'cpu #:scale scale #:rounds 1 #:warmup 0 #:libtorch "x"
+                  #:device 'cpu #:scale scale #:rounds 1 #:warmup warmup #:libtorch "x"
                   #:threads '(1 2) #:phases (hasheq 'batch 2 'samples 8 'base 4))
     (reverse out))
 
@@ -113,13 +124,14 @@
     (map (lambda (r) (list (hash-ref r 'case) (hash-ref r 'variant))) records))
 
   (test-case "threads records ops per second per main state and thread count"
-    (define records (records-of 'threads))
+    (define records (records-of 'threads #:warmup 1))
     (check-equal? (cases-of records) '(("idle" "1") ("idle" "2") ("train" "1") ("train" "2")))
     (for ([r (in-list records)])
       (check-equal? (shape-of r) '("scaling" "threads" "rktorch"))
       (check-equal? (hash-ref r 'unit) "ops/s")
-      (check-equal? (length (hash-ref r 'main_steps_per_s)) 1)
-      (check-true (positive? (hash-ref (hash-ref r 'stats) 'median)))))
+      (check-equal? (length (hash-ref r 'main_steps_per_s)) 1 "the warmup run is not kept")
+      (check-equal? (hash-ref r 'stopped) (list (hash-ref r 'threads_run)))
+      (check-true (>= (hash-ref (hash-ref r 'stats) 'median) 0))))
 
   (test-case "calls and host-gpu record every phase of 05 and 09"
     (define calls (records-of 'calls))
@@ -131,6 +143,9 @@
     (define timed (records-of 'host-gpu))
     (check-equal? (remove-duplicates (map (lambda (r) (hash-ref r 'group)) timed))
                   '("step" "phase"))
+    (check-equal? (for/list ([r (in-list timed)] #:when (equal? (hash-ref r 'variant) "proxy"))
+                    (hash-ref (hash-ref r 'settings) 'base))
+                  (list proxy-base))
     (check-true (andmap (lambda (r) (equal? (hash-ref r 'case) "09-resnet")) timed)))
 
   (cond

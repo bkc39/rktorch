@@ -1,21 +1,28 @@
 #lang racket/base
 
-(require (only-in racket/match match match-define)
+(require (only-in racket/list remove-duplicates)
+         (only-in racket/match match match-define)
          (only-in torch accelerator-if-available device-type)
          (only-in "child.rkt" python-runner?)
          (only-in "e2e.rkt"
                   cache-env e2e-cases example-epochs-var example-name example-runner
-                  exn:fail:user:e2e merged-settings settings->jsexpr)
+                  exn:fail:user:e2e merged-settings runner-reads settings->jsexpr)
          (only-in "harness.rkt"
-                  host-meta load-average measure result result->record result-per-call summarize)
+                  host-meta load-average mean measure result result->record result-per-call
+                  summarize)
          (only-in "pytorch.rkt" merged-meta)
          (only-in "session.rkt" fresh-run-id record-writer wait-for-load)
          (only-in "shim.rkt" aten-threads))
 
-(provide run-e2e)
+(provide run-e2e
+         paired-groups)
 
-(define (mean xs)
-  (and (pair? xs) (/ (apply + xs) (length xs) 1.0)))
+(define (pair-key ex)
+  (regexp-replace #rx"^py-(.*?)(-per-param)?$" (example-name ex) "\\1"))
+
+(define (paired-groups exs)
+  (for/list ([k (in-list (remove-duplicates (map pair-key exs)))])
+    (filter (lambda (ex) (equal? (pair-key ex) k)) exs)))
 
 (define (run-e2e exs #:rounds rounds #:full? full? #:variants variants #:cache cache
                  #:max-load max-load #:libtorch libtorch #:out out #:log log
@@ -30,18 +37,19 @@
     (for/list ([v (in-list variants)])
       (match-define (cons name settings) v)
       (cons name (append (filter (lambda (c) (not (assoc (car c) settings))) cached) settings))))
-  (for ([ex (in-list exs)])
+  (define (impl-of ex) (if (python-runner? (runner-for ex)) "pytorch" "rktorch"))
+  (for ([group (in-list (paired-groups exs))])
     (wait-for-load max-load log)
     (define meta (host-meta #:device device #:libtorch libtorch #:threads (aten-threads)))
-    (define impl (if (python-runner? (runner-for ex)) "pytorch" "rktorch"))
-    (define rates (make-hash))
-    (define gcs (make-hash))
-    (define epoch-gcs (make-hash))
-    (define step-mss (make-hash))
+    (define kept (make-hash))
     (define metas (make-hash))
-    (define walls (make-hash))
-    (define timings (make-hash))
+    (define (push! field key value)
+      (when value (hash-update! kept (cons field key) (lambda (xs) (cons value xs)) '())))
+    (define (pushed field key)
+      (reverse (hash-ref kept (cons field key) '())))
     (define (on-run run-of variant analysis)
+      (define impl (impl-of run-of))
+      (define key (cons (example-name run-of) variant))
       (define child-meta (hash-ref analysis 'meta #f))
       (define run-meta
         (if (equal? impl "pytorch") (merged-meta meta child-meta) (or child-meta meta)))
@@ -52,66 +60,74 @@
                        'case (example-name run-of) 'variant variant
                        'load (load-average)
                        'meta run-meta))
-      (define (push! table value)
-        (hash-update! table variant (lambda (xs) (if value (cons value xs) xs)) '()))
       (cond
         [(hash-ref analysis 'error #f) (void)]
         [else
-         (push! rates (hash-ref analysis 'steps_per_s #f))
-         (push! gcs (hash-ref analysis 'gc_ms #f))
-         (push! epoch-gcs (mean (hash-ref analysis 'epoch_gc_ms '())))
-         (push! step-mss (hash-ref (hash-ref analysis 'step_ms (hasheq)) 'median #f))
-         (push! walls (hash-ref analysis 'wall_s #f))
-         (push! timings (hash-ref analysis 'timing))
-         (hash-ref! metas variant run-meta)]))
+         (push! 'rates key (hash-ref analysis 'steps_per_s #f))
+         (push! 'gcs key (hash-ref analysis 'gc_ms #f))
+         (push! 'epoch-gcs key (mean (hash-ref analysis 'epoch_gc_ms '())))
+         (push! 'step-mss key (hash-ref (hash-ref analysis 'step_ms (hasheq)) 'median #f))
+         (push! 'walls key (hash-ref analysis 'wall_s #f))
+         (push! 'timings key (hash-ref analysis 'timing))
+         (hash-ref! metas key run-meta)]))
     (define (on-failure e)
-      (match-define (list variant exit-code child-meta)
+      (match-define (list case variant exit-code child-meta)
         (match e
-          [(exn:fail:user:e2e _ _ variant exit-code child-meta) (list variant exit-code child-meta)]
-          [(? exn:fail:user?) (list #f #f #f)]
+          [(exn:fail:user:e2e _ _ case variant exit-code child-meta)
+           (list case variant exit-code child-meta)]
+          [(? exn:fail:user?) (list (example-name (car group)) #f #f #f)]
           [_ (raise e)]))
       (fprintf log "~a\n" (exn-message e))
-      (emit (hasheq 'schema 1 'suite "e2e" 'group "error" 'impl impl
-                    'case (example-name ex)
+      (emit (hasheq 'schema 1 'suite "e2e" 'group "error"
+                    'impl (impl-of (for/first ([ex (in-list group)]
+                                               #:when (equal? (example-name ex) case))
+                                     ex))
+                    'case case
                     'variant variant
                     'exit_code exit-code
                     'error (exn-message e)
                     'meta (or child-meta meta)
                     'meta_from (if child-meta "child" "parent"))))
     (define results
-      (measure (e2e-cases (list ex) #:scale scale #:variants with-cache #:on-run on-run
+      (measure (e2e-cases group #:scale scale #:variants with-cache #:on-run on-run
                           #:time-limit time-limit #:log log #:runner-for runner-for)
                #:warmup 0 #:rounds rounds #:on-failure on-failure))
-    (define by-wall?
-      (for/or ([ts (in-hash-values timings)]) (and (member "wall" ts) #t)))
-    (define-values (timing unit unit-scale)
-      (cond
-        [by-wall? (values "wall" "s/run" 1e-3)]
-        [(example-epochs-var ex) (values "steps" "s/epoch" 1e-3)]
-        [else (values "steps" "ms/step" 1)]))
-    (define (variant-list table v)
-      (reverse (hash-ref table (car v) '())))
-    (define (timed-result r v)
-      (if by-wall?
-          (struct-copy result r [per-call (map (lambda (s) (* 1000.0 s)) (variant-list walls v))])
-          r))
-    (for* ([(r v) (in-parallel (in-list results) (in-list with-cache))]
-           [timed (in-value (timed-result r v))]
+    (define (by-wall? ex)
+      (for/or ([v (in-list with-cache)])
+        (and (member "wall" (pushed 'timings (cons (example-name ex) (car v)))) #t)))
+    (for* ([(r ex+v) (in-parallel (in-list results)
+                                  (in-list (for*/list ([ex (in-list group)] [v (in-list with-cache)])
+                                             (cons ex v))))]
+           [ex (in-value (car ex+v))]
+           [v (in-value (cdr ex+v))]
+           [key (in-value (cons (example-name ex) (car v)))]
+           [wall? (in-value (by-wall? ex))]
+           [timed (in-value (if wall?
+                                (struct-copy result r
+                                             [per-call (map (lambda (s) (* 1000.0 s))
+                                                            (pushed 'walls key))])
+                                r))]
            #:when (pair? (result-per-call timed)))
-      (define rates-of (variant-list rates v))
+      (define-values (timing unit unit-scale)
+        (cond
+          [wall? (values "wall" "s/run" 1e-3)]
+          [(example-epochs-var ex) (values "steps" "s/epoch" 1e-3)]
+          [else (values "steps" "ms/step" 1)]))
+      (define rates-of (pushed 'rates key))
       (emit
        (result->record timed #:suite "e2e" #:group "summary" #:unit unit
-                       #:meta (hash-ref metas (car v) meta)
+                       #:meta (hash-ref metas key meta)
                        #:scale unit-scale
                        #:extra (hasheq 'case (example-name ex)
-                                       'impl impl
+                                       'impl (impl-of ex)
                                        'variant (car v)
                                        'timing timing
                                        'settings (settings->jsexpr
                                                   (merged-settings ex scale (cdr v)))
-                                       'gc_ms (variant-list gcs v)
-                                       'epoch_gc_ms (variant-list epoch-gcs v)
-                                       'step_ms (variant-list step-mss v)
+                                       'reads (runner-reads ex (runner-for ex))
+                                       'gc_ms (pushed 'gcs key)
+                                       'epoch_gc_ms (pushed 'epoch-gcs key)
+                                       'step_ms (pushed 'step-mss key)
                                        'steps_per_s (and (pair? rates-of)
                                                          (summarize rates-of))))))))
 
@@ -170,6 +186,25 @@
     (check-regexp-match #rx"## Failures" md)
     (check-regexp-match
      #rx"\\| stepper \\| - \\| `[^`]*`[^|]* \\| [^|]* \\| 0 \\| e2e: stepper: no measured" md))
+
+  (test-case "an example and its twins share their rounds, in rotation"
+    (define (stepper-named name)
+      (example name '(("EPOCHS" . 3)) '(("EPOCHS" . 3)) "EPOCHS" 0 'first))
+    (check-equal? (map (lambda (g) (map example-name g))
+                       (paired-groups (find-examples '("05" "09" "py-05" "py-05-mnist-per"))))
+                  '(("05-mnist" "py-05-mnist" "py-05-mnist-per-param") ("09-resnet")))
+    (define records
+      (records-of (lambda (out)
+                    (run-e2e (list (stepper-named "stepper") (stepper-named "py-stepper"))
+                             #:rounds 2 #:full? #f #:variants '((#f)) #:cache #f #:max-load #f
+                             #:libtorch "x" #:out out #:log quiet
+                             #:runner-for (lambda (_ex) stepper)))))
+    (check-equal? (for/list ([r (in-list records)] #:when (equal? (hash-ref r 'group) "run"))
+                    (hash-ref r 'case))
+                  '("stepper" "py-stepper" "py-stepper" "stepper"))
+    (check-equal? (for/list ([r (in-list records)] #:when (equal? (hash-ref r 'group) "summary"))
+                    (list (hash-ref r 'case) (hash-ref (hash-ref r 'stats) 'n)))
+                  '(("stepper" 2) ("py-stepper" 2))))
 
   (test-case "an A/B against a checkout without the step hook compares whole runs"
     (define fixture (example "stepper" '(("EPOCHS" . 3)) '(("EPOCHS" . 4)) "EPOCHS" 0 'first))
@@ -312,7 +347,9 @@
   (test-case "the loader workload and the PyTorch twins run under e2e, and C pairs them"
     (define tiny '(("DATASET" . "fixture") ("EPOCHS" . "2") ("BATCH" . "128") ("BASE" . "4")
                    ("WORKERS" . "2")))
-    (define names (if (pytorch-available?) '("17-workers" "py-05" "py-09" "py-17") '("17-workers")))
+    (define names (if (pytorch-available?)
+                      '("17-workers" "py-05" "py-05-mnist-per" "py-09" "py-17" "py-17-workers-per")
+                      '("17-workers")))
     (unless (pytorch-available?)
       (displayln "[e2e-suite] PyTorch twins skipped: python3 `torch` not available"))
     (define records
@@ -331,7 +368,12 @@
                     (if (regexp-match? #rx"^py-" (hash-ref r 'case)) "pytorch" "rktorch"))
       (check-equal? (hash-ref r 'unit) "s/epoch")
       (check-true (string? (hash-ref meta 'git_sha)) (hash-ref r 'case))
-      (check-equal? (length (hash-ref r 'step_ms)) 1))
+      (check-equal? (length (hash-ref r 'step_ms)) 1)
+      (when (equal? (hash-ref r 'impl) "pytorch")
+        (define per-param? (regexp-match? #rx"-per-param$" (hash-ref r 'case)))
+        (check-equal? (hash-ref meta 'optimizer) (if per-param? "per-param" "default"))
+        (check-equal? (hash-ref meta 'set_to_none) (not per-param?))
+        (when per-param? (check-false (hash-ref meta 'foreach)))))
     (when (pytorch-available?)
       (define md (summary-markdown records))
       (check-regexp-match #rx"## C\\. Loader end to end[^#]*\\| 17-workers \\| crop \\| s/epoch \\|" md)

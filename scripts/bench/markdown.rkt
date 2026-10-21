@@ -2,7 +2,8 @@
 
 (require (only-in racket/format ~a ~r)
          (only-in racket/list remove-duplicates)
-         (only-in racket/string string-join string-trim))
+         (only-in racket/string string-join string-trim)
+         (only-in threading ~>))
 
 (provide ref
          num
@@ -59,7 +60,7 @@
   (format "~a, ~a, ~a, run ~a" (commit r) (host r) (execution r) (ref r 'run_id)))
 
 (define (one-line text)
-  (regexp-replace* #rx"[ \t]*[\r\n]+[ \t]*" (string-trim (~a text)) " / "))
+  (~> text ~a string-trim (regexp-replace* #rx"[ \t]*[\r\n]+[ \t]*" _ " / ")))
 
 (define (cell text)
   (regexp-replace* #rx"\\|" (one-line text) "\\\\|"))

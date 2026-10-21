@@ -4,12 +4,20 @@ drawn from the device-resident training set, test accuracy after each of
 EPOCHS epochs. Every optimizer step is logged, the device settled first,
 for the e2e suite to time."""
 
-import torch
 import torch.nn.functional as F
-from torch import nn
+from common import (
+    StepLog,
+    batches,
+    env_number,
+    env_text,
+    load_mnist,
+    optimizer_options,
+    pick_device,
+    steps_out,
+)
 
-from common import (StepLog, batches, env_number, env_text, load_mnist,
-                    pick_device, steps_out)
+import torch
+from torch import nn
 
 
 class ConvBlock(nn.Module):
@@ -42,6 +50,8 @@ def main():
     epochs = env_number("EPOCHS", 3)
     batch = env_number("BATCH", 128)
     dataset = env_text("DATASET", "full")
+    style = env_text("OPTIMIZER", "default")
+    options, set_to_none = optimizer_options(style)
     torch.backends.cudnn.benchmark = False
     device = pick_device()
     log = StepLog(out, device)
@@ -50,13 +60,14 @@ def main():
     test_x, test_y = load_mnist("test", device, dataset)
     with torch.device(device):
         net = convnet()
-    opt = torch.optim.Adam(net.parameters(), lr=0.001)
+    opt = torch.optim.Adam(net.parameters(), lr=0.001, **options)
+    log.note_optimizer(style, opt, set_to_none)
     generator = torch.Generator().manual_seed(0)
     for _ in range(epochs):
         for index in batches(len(train_x), batch, generator, device):
             xb = train_x.index_select(0, index)
             yb = train_y.index_select(0, index)
-            opt.zero_grad()
+            opt.zero_grad(set_to_none=set_to_none)
             loss = F.cross_entropy(net(xb), yb)
             loss.backward()
             opt.step()

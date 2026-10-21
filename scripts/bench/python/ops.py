@@ -6,11 +6,11 @@ import argparse
 import gc
 import time
 
-import torch
 import torch.nn.functional as F
-from torch import nn
-
 from common import GcClock, emit, meta, synchronize
+
+import torch
+from torch import nn
 
 
 def op_cases(device, scale):

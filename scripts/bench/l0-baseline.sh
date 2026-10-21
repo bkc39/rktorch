@@ -1,13 +1,5 @@
 #!/usr/bin/env bash
-#
-# The L0 baseline (#254): tables A-G of docs/benchmarks/README.md, CPU then
-# CUDA, each group started once the load is below BASELINE_MAX_LOAD, into
-# docs/benchmarks/baseline-<date>.{jsonl,md}. Run it from the host shell; it
-# enters the dev shells itself, one at a time.
-#
-#   scripts/bench/l0-baseline.sh             # all: cpu, cuda, summary
-#   scripts/bench/l0-baseline.sh cpu         # one stage
-#   BASELINE_SMOKE=1 BASELINE_OUT=/tmp/x/l0 scripts/bench/l0-baseline.sh
+# The L0 baseline (#254); its stages and variables are in docs/benchmarks/README.md.
 set -euo pipefail
 
 root=$(cd "$(dirname "$0")/../.." && pwd)
@@ -28,18 +20,20 @@ jsonl=$out.jsonl
 if [ "$smoke" = 1 ]; then
   micro=(--scale 0.01 --rounds 1 --warmup 0)
   e2e=(--rounds 1)
-  tiny=DATASET=fixture,EPOCHS=2,BATCH=128,BASE=4
-  budgets=(1)
+  loader_smoke=DATASET=fixture,EPOCHS=2,BATCH=128
+  training_smoke=EPOCHS=2
+  budgets=(0.05)
 else
   micro=()
   e2e=(--rounds "$rounds")
-  tiny=
+  loader_smoke=
+  training_smoke=
   budgets=(0.01 0.05 0.2 1)
 fi
 
 variant() {
-  local settings=$2
-  if [ -n "$tiny" ]; then settings=${settings:+$settings,}$tiny; fi
+  local settings=$2 smoke_settings=$3
+  if [ -n "$smoke_settings" ]; then settings=${settings:+$settings,}$smoke_settings; fi
   printf -- '--variant\n%s\n' "$1${settings:+:$settings}"
 }
 
@@ -67,18 +61,21 @@ stage_cuda() {
   local loader=()
   for v in pgm crop; do
     for w in 0 2 4; do
-      mapfile -t -O "${#loader[@]}" loader < <(variant "$v-$w" "VARIANT=$v,WORKERS=$w")
+      mapfile -t -O "${#loader[@]}" loader \
+        < <(variant "$v-$w" "VARIANT=$v,WORKERS=$w" "$loader_smoke")
     done
   done
-  bench e2e "${e2e[@]}" --cache "$cache" --only 17-workers,py-17-workers "${loader[@]}"
+  bench e2e "${e2e[@]}" --cache "$cache" \
+    --only 17-workers,py-17-workers,py-17-workers-per "${loader[@]}"
   local headline=()
-  mapfile -t headline < <(variant headline "")
-  bench e2e "${e2e[@]}" --cache "$cache" --only 05,py-05,09,py-09 "${headline[@]}"
+  mapfile -t headline < <(variant headline "" "$training_smoke")
+  bench e2e "${e2e[@]}" --cache "$cache" \
+    --only 05,py-05-mnist,py-05-mnist-per,09,py-09-resnet,py-09-resnet-per "${headline[@]}"
   local gc=()
-  mapfile -t gc < <(variant troughs "")
+  mapfile -t gc < <(variant no-troughs "RKTORCH_BENCH_COLLECT_AT_TROUGHS=0" "$training_smoke")
   for b in "${budgets[@]}"; do
-    mapfile -t -O "${#gc[@]}" gc \
-      < <(variant "no-troughs-$b" "RKTORCH_BENCH_COLLECT_AT_TROUGHS=0,RKTORCH_BENCH_COLLECT_BUDGET=$b")
+    mapfile -t -O "${#gc[@]}" gc < <(variant "troughs-$b" \
+      "RKTORCH_BENCH_COLLECT_AT_TROUGHS=1,RKTORCH_BENCH_COLLECT_BUDGET=$b" "$training_smoke")
   done
   bench e2e "${e2e[@]}" --cache "$cache" --only 05,09 "${gc[@]}"
 }

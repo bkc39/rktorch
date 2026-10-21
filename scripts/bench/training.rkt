@@ -42,6 +42,9 @@
   (define budget
     (match (env "RKTORCH_BENCH_COLLECT_BUDGET")
       [#f (native-collect-budget)]
+      [_ #:when (not at-troughs)
+         (raise-user-error 'record-steps
+                           "RKTORCH_BENCH_COLLECT_BUDGET is read only at troughs, which are off")]
       [(app share (? values x)) x]
       [text (raise-user-error 'record-steps
                               "RKTORCH_BENCH_COLLECT_BUDGET is a share in (0, 1], got ~s" text)]))
@@ -196,9 +199,14 @@
     (define (settings . kvs)
       (collect-settings (lambda (name) (cond [(assoc name kvs) => cdr] [else #f]))))
     (check-equal? (settings) (hasheq 'at-troughs #t 'budget 1/20))
-    (check-equal? (settings '("RKTORCH_BENCH_COLLECT_AT_TROUGHS" . "0")
+    (check-equal? (settings '("RKTORCH_BENCH_COLLECT_AT_TROUGHS" . "1")
                             '("RKTORCH_BENCH_COLLECT_BUDGET" . "0.2"))
-                  (hasheq 'at-troughs #f 'budget 1/5))
+                  (hasheq 'at-troughs #t 'budget 1/5))
+    (check-equal? (settings '("RKTORCH_BENCH_COLLECT_AT_TROUGHS" . "0"))
+                  (hasheq 'at-troughs #f 'budget 1/20))
+    (check-exn #rx"BUDGET is read only at troughs, which are off"
+               (lambda () (settings '("RKTORCH_BENCH_COLLECT_AT_TROUGHS" . "0")
+                                    '("RKTORCH_BENCH_COLLECT_BUDGET" . "0.2"))))
     (check-exn #rx"AT_TROUGHS is 0 or 1, got \"no\""
                (lambda () (settings '("RKTORCH_BENCH_COLLECT_AT_TROUGHS" . "no"))))
     (for ([bad (in-list '("0" "1.5" "x"))])

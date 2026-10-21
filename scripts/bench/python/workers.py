@@ -11,13 +11,20 @@ import math
 import random
 import struct
 
-import torch
 import torch.nn.functional as F
+from common import (
+    StepLog,
+    env_number,
+    env_text,
+    load_mnist,
+    optimizer_options,
+    pick_device,
+    steps_out,
+)
+from mnist import accuracy, convnet
 from torch.utils.data import DataLoader, Dataset
 
-from common import (StepLog, env_number, env_text, load_mnist, pick_device,
-                    steps_out)
-from mnist import accuracy, convnet
+import torch
 
 SIDE = 28
 
@@ -107,6 +114,8 @@ def main():
     batch = env_number("BATCH", 64)
     variant = env_text("VARIANT", "pgm")
     dataset = env_text("DATASET", "full")
+    style = env_text("OPTIMIZER", "default")
+    options, set_to_none = optimizer_options(style)
     torch.backends.cudnn.benchmark = False
     device = pick_device()
     log = StepLog(out, device)
@@ -119,14 +128,15 @@ def main():
     torch.manual_seed(0)
     with torch.device(device):
         net = convnet()
-    opt = torch.optim.Adam(net.parameters(), lr=0.001)
+    opt = torch.optim.Adam(net.parameters(), lr=0.001, **options)
+    log.note_optimizer(style, opt, set_to_none)
     xs, ys = test_x.to(device), test_y.to(device)
     loader = DataLoader(ds, batch_size=batch, shuffle=True,
                         num_workers=workers, worker_init_fn=seed_worker,
                         generator=torch.Generator().manual_seed(0))
     for _ in range(epochs):
         for xb, yb in loader:
-            opt.zero_grad()
+            opt.zero_grad(set_to_none=set_to_none)
             loss = F.cross_entropy(net(xb.to(device)), yb.to(device))
             loss.backward()
             opt.step()

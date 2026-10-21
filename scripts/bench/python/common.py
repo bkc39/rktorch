@@ -81,6 +81,36 @@ def clock_ms():
     return time.perf_counter() * 1000.0
 
 
+OPTIMIZER_STYLES = {
+    "default": ({"foreach": None}, True),
+    "per-param": ({"foreach": False}, False),
+}
+
+
+def optimizer_options(style):
+    """The optimizer keywords and zero_grad's set_to_none for OPTIMIZER:
+    "default" is PyTorch's (foreach kernels where it picks them, gradients
+    dropped), "per-param" steps each parameter alone and zeroes its gradient
+    in place, as rktorch's optimizers do."""
+    if style not in OPTIMIZER_STYLES:
+        sys.exit(f"OPTIMIZER is one of {sorted(OPTIMIZER_STYLES)}: {style!r}")
+    return OPTIMIZER_STYLES[style]
+
+
+def resolved_foreach(opt):
+    requested = opt.defaults.get("foreach")
+    if requested is not None:
+        return requested
+    params = [p for group in opt.param_groups for p in group["params"]]
+    try:
+        from torch.optim.optimizer import _default_to_fused_or_foreach
+    except ImportError:
+        return None
+    _, foreach = _default_to_fused_or_foreach(params, differentiable=False,
+                                              use_fused=False)
+    return foreach
+
+
 class StepLog:
     """One [optimizer, ms, gc_ms] row per optimizer step, the device settled
     first, as the rktorch-step event logs them."""
@@ -90,15 +120,25 @@ class StepLog:
         self.device = device
         self.gc = GcClock()
         self.steps = []
+        self.extra = {}
         self.t0 = clock_ms()
         self.write()
+
+    def note(self, **fields):
+        self.extra.update(fields)
+        self.write()
+
+    def note_optimizer(self, style, opt, set_to_none):
+        self.note(optimizer=style, foreach=resolved_foreach(opt),
+                  set_to_none=set_to_none)
 
     def step(self):
         synchronize(self.device)
         self.steps.append([1, clock_ms(), self.gc.ms()])
 
     def write(self, wall=None):
-        data = {"meta": meta(self.device), "steps": self.steps}
+        data = {"meta": {**meta(self.device), **self.extra},
+                "steps": self.steps}
         if wall is not None:
             data["wall_ms"] = wall
         tmp = self.out + ".tmp"

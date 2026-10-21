@@ -18,8 +18,11 @@
          bench-case-name
          (struct-out result)
          measure
+         clock-ms
          quantile
          summarize
+         mean
+         list-median
          paired-ratio
          rotate
          parse-load-average
@@ -94,6 +97,13 @@
   (define hi (min (sub1 n) (add1 lo)))
   (define frac (- h lo))
   (+ (vector-ref v lo) (* frac (- (vector-ref v hi) (vector-ref v lo)))))
+
+(define (mean xs)
+  (and (pair? xs) (/ (apply + xs) (length xs) 1.0)))
+
+(define (list-median xs)
+  (define reals (if (list? xs) (filter real? xs) '()))
+  (and (pair? reals) (quantile reals 0.5)))
 
 (define (summarize xs)
   (define q1 (quantile xs 0.25))
@@ -321,6 +331,14 @@
     (check-equal? (hash-ref s 'median) 3.0)
     (check-equal? (hash-ref s 'iqr) 2.0)
     (check-equal? (hash-ref s 'n) 5))
+
+  (test-case "a list's mean and median skip what is not there"
+    (check-equal? (mean '(1 2 6)) 3.0)
+    (check-false (mean '()))
+    (check-equal? (list-median '(5 1 3)) 3.0)
+    (check-equal? (list-median '(10.0 12.0 x)) 11.0)
+    (check-false (list-median '()))
+    (check-false (list-median #f)))
 
   (test-case "rounds rotate the case order, so two variants alternate"
     (check-equal? (rotate '(a b c) 1) '(b c a))

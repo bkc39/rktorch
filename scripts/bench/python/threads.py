@@ -7,11 +7,11 @@ import itertools
 import threading
 import time
 
-import torch
 import torch.nn.functional as F
-from torch import nn
-
 from common import GcClock, emit, meta
+
+import torch
+from torch import nn
 
 OPS_PER_ITERATION = 4
 

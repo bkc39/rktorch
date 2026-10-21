@@ -8,7 +8,7 @@
          (only-in racket/runtime-path #%datum define-runtime-path)
          (only-in racket/string string-join)
          (only-in threading ~>)
-         (only-in "child.rkt" run-child)
+         (only-in "child.rkt" python-runner? run-child)
          (only-in "harness.rkt" bench-case with-temporary-path)
          (only-in "training.rkt" analyze-steps read-steps recorded-run))
 
@@ -19,6 +19,7 @@
          find-examples
          example-env
          control-variables
+         runner-reads
          merged-settings
          settings->jsexpr
          cache-env
@@ -32,7 +33,7 @@
 
 (struct example (name short full epochs-var warmup optimizer) #:transparent)
 
-(struct exn:fail:user:e2e exn:fail:user (variant exit-code meta))
+(struct exn:fail:user:e2e exn:fail:user (example variant exit-code meta))
 
 (define examples
   (list (example "05-mnist" '(("EPOCHS" . 3)) '(("EPOCHS" . 3)) "EPOCHS" 0 'first)
@@ -51,17 +52,30 @@
         (example "loader" '(("EPOCHS" . 2)) '(("EPOCHS" . 5)) "EPOCHS" 0 'first)
         (example "17-workers" '(("EPOCHS" . 2)) '(("EPOCHS" . 3)) "EPOCHS" 0 'first)))
 
-(define twins
-  (list (example "py-05-mnist" '(("EPOCHS" . 3)) '(("EPOCHS" . 3)) "EPOCHS" 0 'first)
-        (example "py-09-resnet" '(("EPOCHS" . 3)) '(("EPOCHS" . 30)) "EPOCHS" 0 'first)
-        (example "py-17-workers" '(("EPOCHS" . 2)) '(("EPOCHS" . 3)) "EPOCHS" 0 'first)))
+(define (twin name-of-example script)
+  (define ex (for/first ([ex (in-list examples)] #:when (equal? (example-name ex) name-of-example))
+               ex))
+  (define per-param '(("OPTIMIZER" . "per-param")))
+  (define name (string-append "py-" (example-name ex)))
+  (list (cons (struct-copy example ex [name name]) script)
+        (cons (struct-copy example ex
+                           [name (string-append name "-per-param")]
+                           [short (append (example-short ex) per-param)]
+                           [full (append (example-full ex) per-param)])
+              script)))
+
+(define twin-runners
+  (append (twin "05-mnist" "mnist.py")
+          (twin "09-resnet" "resnet.py")
+          (twin "17-workers" "workers.py")))
+
+(define twins (map car twin-runners))
 
 (define runners
-  (hash "loader" (build-path workloads-dir "loader.rkt")
-        "17-workers" (build-path workloads-dir "workers.rkt")
-        "py-05-mnist" (build-path python-dir "mnist.py")
-        "py-09-resnet" (build-path python-dir "resnet.py")
-        "py-17-workers" (build-path python-dir "workers.py")))
+  (for/fold ([h (hash "loader" (build-path workloads-dir "loader.rkt")
+                      "17-workers" (build-path workloads-dir "workers.rkt"))])
+            ([t (in-list twin-runners)])
+    (hash-set h (example-name (car t)) (build-path python-dir (cdr t)))))
 
 (define (find-examples names)
   (for/list ([n (in-list names)])
@@ -107,13 +121,22 @@
 (define (settings->jsexpr settings)
   (for/hasheq ([s (in-list settings)]) (values (string->symbol (car s)) (~a (cdr s)))))
 
+(define recorder-variables
+  '("RKTORCH_BENCH_COLLECT_AT_TROUGHS" "RKTORCH_BENCH_COLLECT_BUDGET"))
+
 (define (control-variables ex runner)
   (remove-duplicates
    (append (map car (example-short ex))
            (map car (example-full ex))
+           recorder-variables
            (regexp-match* #px"(?:\\((?:env-number|getenv) |env_(?:number|text)\\()\"([^\"]+)\""
                           (file->string runner)
                           #:match-select cadr))))
+
+(define (runner-reads ex runner)
+  (for/list ([name (in-list (control-variables ex runner))]
+             #:unless (and (python-runner? runner) (member name recorder-variables)))
+    name))
 
 (define time-limits (hasheq 'short 3600 'full 43200))
 
@@ -187,6 +210,7 @@
              (format "e2e: ~a: ~a (exit code ~a)" (example-name ex)
                      (hash-ref analysis 'error) (hash-ref analysis 'exit_code))
              (current-continuation-marks)
+             (example-name ex)
              variant
              (hash-ref analysis 'exit_code)
              (hash-ref analysis 'meta #f)))]
@@ -224,6 +248,7 @@
            (only-in "shim.rkt" torch-dir))
 
   (define-runtime-path broken "fixtures/broken.rkt")
+  (define-runtime-path collect-reader "fixtures/collect-reader.rkt")
   (define-runtime-path grandchild "fixtures/grandchild.rkt")
   (define-runtime-path lingering "fixtures/lingering.rkt")
   (define-runtime-path partial-steps "fixtures/partial-steps.rkt")
@@ -280,7 +305,14 @@
   (test-case "a PyTorch twin's settings are the ones its script reads"
     (define twin (car (find-examples '("py-17"))))
     (check-equal? (control-variables twin (example-runner twin))
-                  '("EPOCHS" "WORKERS" "BATCH" "VARIANT" "DATASET")))
+                  (append '("EPOCHS") recorder-variables
+                          '("WORKERS" "BATCH" "VARIANT" "DATASET" "OPTIMIZER")))
+    (check-equal? (runner-reads twin (example-runner twin))
+                  '("EPOCHS" "WORKERS" "BATCH" "VARIANT" "DATASET" "OPTIMIZER"))
+    (define per-param (car (find-examples '("py-17-workers-per"))))
+    (check-equal? (example-name per-param) "py-17-workers-per-param")
+    (check-equal? (cdr (assoc "OPTIMIZER" (example-env per-param 'short))) "per-param")
+    (check-equal? (example-runner per-param) (example-runner twin)))
 
   (test-case "a cache root sets every cache variable, inherited or not"
     (check-equal? (cache-env #f) '())
@@ -440,8 +472,9 @@
 
   (test-case "a child sees only the example settings it is given"
     (check-equal? (control-variables (cadr examples) (example-runner (cadr examples)))
-                  '("STEPS" "EXCERPT"))
-    (check-equal? (control-variables fixture stepper) '("EPOCHS" "STEPPER_SILENT" "STEPS"))
+                  (append '("STEPS") recorder-variables '("EXCERPT")))
+    (check-equal? (control-variables fixture stepper)
+                  (append '("EPOCHS") recorder-variables '("STEPPER_SILENT" "STEPS")))
     (parameterize ([current-environment-variables
                     (environment-variables-copy (current-environment-variables))])
       (putenv "STEPS" "5")
@@ -451,6 +484,21 @@
                                  #:log quiet))
       (check-equal? (hash-ref given 'steps) 7)
       (check-equal? (hash-ref (hash-ref given 'settings) 'STEPS) "7")))
+
+  (test-case "the recorder child runs under the collection policy its variant sets, and no other"
+    (with-temporary-path (dir (make-temporary-directory "bench-collect-~a"))
+      (define (seen-by settings)
+        (define out (path->string (build-path dir "seen")))
+        (run-example fixture #:runner collect-reader
+                     #:settings (cons (cons "BENCH_ENV_OUT" out) settings) #:log quiet)
+        (call-with-input-file out read))
+      (check-equal? (seen-by '(("RKTORCH_BENCH_COLLECT_BUDGET" . "0.2"))) '(#t 1/5))
+      (check-equal? (seen-by '(("RKTORCH_BENCH_COLLECT_AT_TROUGHS" . "0"))) '(#f 1/20))
+      (parameterize ([current-environment-variables
+                      (environment-variables-copy (current-environment-variables))])
+        (putenv "RKTORCH_BENCH_COLLECT_AT_TROUGHS" "0")
+        (putenv "RKTORCH_BENCH_COLLECT_BUDGET" "0.5")
+        (check-equal? (seen-by '()) '(#t 1/20) "the parent's policy does not leak"))))
 
   (test-case "variants alternate, and a failed run raises"
     (define seen '())
