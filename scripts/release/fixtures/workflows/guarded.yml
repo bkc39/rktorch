@@ -57,6 +57,7 @@ jobs:
       - name: Local
         uses: "./.github/actions/draft"
       - run: echo draft
+        if: (success() || failure()) && github.ref_type == 'tag'
 
   # success() is fine when nothing the job needs may be skipped
   publish:

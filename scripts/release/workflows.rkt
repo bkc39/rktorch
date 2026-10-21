@@ -108,11 +108,14 @@
         (job-name j)))
     (if (null? more) names (grow (append names more)))))
 
-(define status-function #px"\\b(always|cancelled|failure)\\s*\\(")
+(define (guarded? condition)
+  (and (regexp-match? #px"\\b(always|cancelled|failure)\\s*\\(" condition)
+       (not (regexp-match? #px"\\bsuccess\\s*\\(" condition))))
 
 (define (skip-conditions by-name name seen)
   (match (hash-ref by-name name #f)
     [#f '()]
+    [(job _ _ (pregexp #px"\\balways\\s*\\(") _ _ _) '()]
     [(job _ _ (? string? condition) _ _ _) (list condition)]
     [(job _ needs #f _ _ _)
      (remove-duplicates
@@ -128,7 +131,7 @@
                       [(job name _ #f _ _ _)
                        (>= (length (skip-conditions by-name name (list name))) 2)]
                       [(job _ _ condition _ _ _)
-                       (and (not (regexp-match? status-function condition)) (needs-any? j names))]))
+                       (and (not (guarded? condition)) (needs-any? j names))]))
     (job-name j)))
 
 (define/contract (called-workflows jobs)

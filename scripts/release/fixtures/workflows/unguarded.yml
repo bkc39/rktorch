@@ -57,3 +57,10 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - run: echo check
+
+  either:
+    needs: [plan, build]
+    if: (success() || failure()) && needs.plan.result == 'success'
+    runs-on: ubuntu-24.04
+    steps:
+      - run: echo either

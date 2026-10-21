@@ -113,7 +113,9 @@ jobs:
   mps:
     name: MPS tests (Racket 9.3)
     needs: build
-    if: inputs.mps || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    if: >-
+      inputs.mps || (github.workflow == 'macOS platform package'
+      && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'))
     runs-on: macos-latest
     timeout-minutes: 60
     defaults:

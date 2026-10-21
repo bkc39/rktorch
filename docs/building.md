@@ -321,8 +321,8 @@ with `SMOKE_TESTS` (a space-separated list of modules in place of
 tensor ops and autograd: GitHub's `macos-14` runners advertise MPS but cannot
 allocate on it, and those suites prove the dylibs load and compute there.
 
-Weekly, on demand, or when a calling workflow passes `mps: true`, an `mps` job
-on `macos-latest` installs the package on Racket 9.3, fails unless
+Weekly or on a manual run of `platform-macos.yml` itself, or when a calling
+workflow passes `mps: true`, an `mps` job on `macos-latest` installs the package on Racket 9.3, fails unless
 `(mps-available?)`, and runs the installed device, `to`, audio-device and
 MPS-pressure suites. Each of them asserts on MPS when it is there and skips
 without it. What the runner cannot show is a physical Apple-silicon Mac, so

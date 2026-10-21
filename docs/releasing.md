@@ -142,8 +142,10 @@ A draft can be deleted.
    added to the `assemble` job's `needs` and its `if`, and a `carried` matrix
    entry for a runner that installs it. The reusable `*-build.yml` workflow
    that workflow calls joins `natives-inputs`; its install jobs do not. A job
-   that needs a job which may be skipped states `!cancelled()`, `always()` or
-   `failure()` in its `if`, and a job without an `if` needs no two jobs
-   skipped on different conditions; `raco test scripts/release` fails
-   otherwise, since GitHub's implicit `success()`, written or not, would skip
-   it.
+   that needs a job which may be skipped states `!cancelled()` or `always()`
+   in its job-level `if`, or `failure()` when it runs only on a failure, and
+   never `success()`, even beside `failure()`. A job without an `if` needs no
+   two jobs skipped on different conditions, where a job whose `if` states
+   `always()` counts as none. `raco test scripts/release` fails otherwise,
+   since GitHub's `success()`, written or implicit, would skip it. Steps'
+   `if`s are not checked.

@@ -1,0 +1,30 @@
+name: A job needing an always() job
+
+on:
+  push:
+
+jobs:
+  plan:
+    runs-on: ubuntu-24.04
+    steps:
+      - run: echo plan
+
+  report:
+    needs: plan
+    if: always()
+    runs-on: ubuntu-24.04
+    steps:
+      - run: echo report
+
+  deploy:
+    needs: plan
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    steps:
+      - run: echo deploy
+
+  notify:
+    needs: [report, deploy]
+    runs-on: ubuntu-24.04
+    steps:
+      - run: echo notify
