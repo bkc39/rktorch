@@ -147,5 +147,5 @@
          (lambda () (let loop () (unless (box-cas! ticks (unbox ticks) (add1 (unbox ticks))) (loop)))))
        (check-exn exn:misc:match? (lambda () (scaling-run 2 'bogus #:seconds 0.1 #:mix ticking)))
        (define seen (unbox ticks))
-       (sync (alarm-evt (+ (clock-ms) 300)))
+       (sync (alarm-evt (+ (clock-ms) 300) #t))
        (check-equal? (unbox ticks) seen "no worker ran after the raise")))))
