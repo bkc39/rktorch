@@ -588,6 +588,11 @@ nix develop --command raco test torch/tests/generated-parity-test.rkt
 
 Where python3 can't `import torch` (the sandboxed `nix build`, or the lean
 `.#ci` shell), the tests self-skip, so `nix build` / `raco test` stay green.
+The sandboxed build does carry a bare `python3Minimal`, for
+`dataset-fixtures-parity-test`: it regenerates the MNIST and CIFAR-10
+fixtures with `scripts/gen-dataset-fixtures.py` and compares them byte for
+byte. It skips only where the generator is absent (an installed package) and
+fails where the generator is present but python3 is not.
 
 ### Accelerators
 

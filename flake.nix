@@ -615,6 +615,7 @@
               nativeBuildInputs = [
                 toolchain
                 pkgs.makeWrapper
+                pkgs.python3Minimal
                 racket-deps.tests.racket-deps-current
               ];
               buildInputs = [ shim ];

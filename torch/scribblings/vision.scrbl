@@ -25,7 +25,8 @@ pixels in ten classes, 50000 for training and 10000 for testing. The
 archive is fetched once into the cache directory (or
 @envvar{RKTORCH_CIFAR10_DIR}), decoded in full before it is kept so a
 redirect page or a transfer cut short never reaches the cache, and unpacked
-in memory; nothing else is written.
+in memory; nothing else is written. Downloaded on demand, not distributed
+by rktorch: check its license before use.
 
 @racketblock[
 (define loader
@@ -90,7 +91,8 @@ enough for the archives the datasets ship in.
 @defmodule[torch/vision/mnist]
 
 The handwritten digits, fetched once from the mirror torchvision uses into
-the cache directory and decoded from the IDX files.
+the cache directory and decoded from the IDX files. Downloaded on demand,
+not distributed by rktorch: check its license before use.
 
 @defproc[(load-mnist [split (or/c 'train 'test) 'train]) (values tensor? tensor?)]{
 The split's images as a float32 tensor of shape @tt{[N 1 28 28]} with
@@ -672,7 +674,8 @@ and bees from ImageNet, 244 for training and 153 for validation. The
 archive is fetched once from @tt{download.pytorch.org}, checked against
 its size and SHA-256, and unpacked into the cache directory (or
 @envvar{RKTORCH_HYMENOPTERA_DIR}); @envvar{RKTORCH_HYMENOPTERA_URL} points
-at a mirror.
+at a mirror. Downloaded on demand, not distributed by rktorch: ImageNet's
+terms allow its photographs only for non-commercial research and education.
 
 @defproc[(hymenoptera-dataset [split (or/c 'train 'val)]
                               [#:transform transform (-> tensor? tensor?) values]

@@ -15,10 +15,14 @@
     '("cifar10-256.bin" "mnist-256-images-idx3-ubyte" "mnist-256-labels-idx1-ubyte"))
 
   (cond
-    [(not (and python (file-exists? generator)))
-     (displayln "[dataset-fixtures-parity-test] skipped: no python3 or no generator")]
+    [(not (file-exists? generator))
+     (displayln "[dataset-fixtures-parity-test] skipped: no generator (installed package)")]
+    [(not python)
+     (test-case "python3 is on PATH wherever the generator is"
+       (fail "scripts/gen-dataset-fixtures.py is present but python3 is not on PATH"))]
     [else
      (test-case "the committed fixtures are the generator's output, byte for byte"
+       (displayln "[dataset-fixtures-parity-test] running the generator")
        (define out (make-temporary-directory "dataset-fixtures-~a"))
        (check-true (system* python "-I" generator out))
        (for ([name (in-list generated)])

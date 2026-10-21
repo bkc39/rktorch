@@ -148,7 +148,7 @@ instance applies as a procedure.
   #:forward (x)
   (~> x flat fc1 relu fc2))
 
-(define-values (xs ys) (load-mnist-fixture))   ; 256 digits shipped with the package
+(define-values (xs ys) (load-mnist-fixture))   ; 256 synthetic digits shipped with the package
 (manual-seed! 0)
 (define net (mlp 64))
 (define opt (adam (parameters net) #:lr 0.01))
@@ -171,10 +171,10 @@ instance applies as a procedure.
 ```
 
 ```text
-epoch 0  accuracy 0.78515625
-epoch 1  accuracy 0.9375
-epoch 2  accuracy 0.93359375
-epoch 3  accuracy 0.9765625
+epoch 0  accuracy 0.98046875
+epoch 1  accuracy 1.0
+epoch 2  accuracy 1.0
+epoch 3  accuracy 1.0
 epoch 4  accuracy 1.0
 ```
 
@@ -262,4 +262,6 @@ lists what it bundles in its `THIRD-PARTY-NOTICES`
 ([Linux](pkgs/torch-x86_64-linux/THIRD-PARTY-NOTICES),
 [macOS](pkgs/torch-aarch64-macosx/THIRD-PARTY-NOTICES)). The package's
 license expression, from [`torch/info.rkt`](torch/info.rkt), is
-`Apache-2.0 AND CC-BY-4.0 AND LicenseRef-CC-BY-2.0-FR`.
+`(Apache-2.0 AND (CC-BY-4.0 AND LicenseRef-CC-BY-2.0-FR))`. The dataset
+loaders download data rktorch does not distribute: check each dataset's
+license before use.

@@ -32,12 +32,14 @@ libtorch_cpu.dylib, libc10.dylib, libtorch.dylib
   pocketfft, protobuf, gloo, TensorPipe and kineto (BSD-3-Clause), NNPACK,
   cpuinfo and pthreadpool (BSD-2-Clause), and nlohmann json, miniz and
   libuv (MIT). Their licence texts are under
-  licenses/pytorch-third-party/, at their paths in PyTorch's v2.14.0 tree:
-  the set the torch 2.14.0 wheel ships in its dist-info/licenses/third_party,
-  plus the files that set misses, taken from the submodule commits v2.14.0
-  pins: pocketfft (BSD-3-Clause), KleidiAI (Apache-2.0), asmjit (Zlib),
-  nlohmann json (MIT), and oneDNN's THIRD-PARTY-PROGRAMS, which covers the
-  Xbyak and ittnotify code compiled into oneDNN (BSD-3-Clause).
+  licenses/pytorch-third-party/, at their paths in PyTorch's v2.14.0 tree.
+  Both platform packages carry the same tree: the set the torch 2.14.0
+  wheel ships in its dist-info/licenses/third_party, plus the files that
+  set misses, taken from the submodule commits v2.14.0 pins: pocketfft
+  (BSD-3-Clause), KleidiAI (Apache-2.0), asmjit (Zlib), nlohmann json
+  (MIT), and oneDNN's THIRD-PARTY-PROGRAMS (BSD-3-Clause). oneDNN and
+  asmjit are not compiled into this macOS arm64 build; their texts are
+  there only because the tree is shared.
 
 libomp.dylib
   The LLVM OpenMP runtime, as shipped in the libtorch zip above.
