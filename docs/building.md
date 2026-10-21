@@ -145,8 +145,8 @@ and the `abi-stamp-current` flake check fails until it is committed.
 
 `torch` depends on one platform package per supported host, each providing
 the collection `torch-native` at torch's own version: `torch-x86_64-linux`
-(`#:platform "x86_64-linux"`) and `torch-aarch64-macosx` (one dep for each
-macOS platform string, below). Each holds `libtorchrkt`, libtorch 2.14.0's
+and `torch-aarch64-macosx`, each declared once for every platform string
+that names its host (below). Each holds `libtorchrkt`, libtorch 2.14.0's
 libraries from PyTorch's official zip, and libsndfile with its codecs as
 separate shared libraries, and finds them all beside itself.
 
@@ -163,24 +163,33 @@ Racket for macOS reports `aarch64-macosx`, but Nix's Racket on the same Mac
 reports `aarch64-darwin`, so `torch/info.rkt` names `torch-aarch64-macosx`
 for both and either Racket installs it. The macOS Nix cell and `nix develop`
 on a Mac therefore install the `pkgs/torch-aarch64-macosx` skeleton, as the
-Linux cell installs its own.
+Linux cell installs its own. On x86_64 Linux a "natipkg" Racket, the build
+that bundles its own native libraries, reports `x86_64-linux-natipkg`; the
+package build server at pkg-build.racket-lang.org runs one, so `torch/info.rkt`
+names `torch-x86_64-linux` for that string too. Nix never reports it, so no
+Nix cell provisions for it. Platform deps are one string each, never a
+regexp, and `platform-packages` in `torch/foreign/raw/native-location.rkt`
+maps every string to its package.
 
 Both builds share `scripts/platform/build-common.sh`, which fetches every
 source, checks it against the sha256 that `scripts/platform/sources.txt` pins
 (the libtorch zips, the codecs, libsndfile, stb, GoogleTest and the Racket
-installers the macOS smoke uses), builds the codecs and libsndfile as shared
-libraries, then GoogleTest and the shim, and runs the shim's gtests against
-the finished bundle. The work directory keeps the downloads and builds, so a
-second run rebuilds only the shim; the unpacked libtorch, the codecs and
-GoogleTest are rebuilt when the sha256 pinned for them changes.
+installers the macOS and `rockylinux:8` smokes use), builds the codecs and
+libsndfile as shared libraries, then GoogleTest and the shim, and runs the
+shim's gtests against the finished bundle. The work directory keeps the
+downloads and builds, so a second run rebuilds only the shim; the unpacked
+libtorch, the codecs and GoogleTest are rebuilt when the sha256 pinned for
+them changes.
 
 ### x86_64 Linux
 
 Every library carries the RUNPATH `$ORIGIN` and needs nothing from the host
 beyond glibc 2.28 and libstdc++, which is what PyTorch's own libtorch asks
-for. The package is about 118 MB zipped and 445 MB installed. It is built
-outside Nix in PyTorch's own baseline image, `manylinux_2_28`, since a Nix
-toolchain links against a newer glibc than that baseline.
+for. The package is about 118 MB zipped and 445 MB installed;
+`scripts/platform/size-budget.sh` fails a zip over 125 MB, and the macOS one
+over 100 MB. It is built outside Nix in PyTorch's own baseline image,
+`manylinux_2_28`, since a Nix toolchain links against a newer glibc than that
+baseline.
 
 ```bash
 scripts/platform/linux/build.sh .scratch/platform
@@ -220,9 +229,19 @@ the image, `smoke-install.sh` installs into a Racket user home of its own,
 `$SMOKE_HOME` or else a fresh temporary directory, and ignores any
 `PLTUSERHOME`, `PLTADDONDIR` or `TORCHRKT_NATIVE_LIB_PATH` it inherits, so
 even from `nix develop` it tests the platform package. It fails if
-`raco pkg install` wrote anything to stderr, then trains `04-mlp` on the
-device it picks, and on the CPU as well when that is an accelerator,
-printing `(mps-available?)` on the way, and round-trips a FLAC file:
+`raco pkg install` wrote anything to stderr, then runs the installed
+`torch/pkg-build/smoke.rkt`, the module the package build server tests
+([below](#reproducing-the-package-build-server)), with `raco test --drdr` as
+the server does, so any stderr there fails too, the native library's
+included. The smoke runs the suites for the native library, tensor ops,
+autograd and `nn`, trains `04-mlp` on the device it picks, and on the CPU as
+well when that is an accelerator, printing where the shim came from and
+`(mps-available?)` on the way, and round-trips a FLAC file. Last,
+`raco setup --no-docs --check-pkg-deps --pkgs torch` fails on a module that
+requires a package `torch/info.rkt` does not declare. With no manual rendered
+it checks the modules only; the Linux lane's `manual` job checks the manual's
+dependencies too ([below](#continuous-integration-and-the-binary-cache)). By
+hand:
 
 ```bash
 scripts/platform/catalog.sh .scratch/pkg/torch-x86_64-linux.zip .scratch/catalog
@@ -243,10 +262,9 @@ library is re-signed ad hoc (`codesign --force --sign -`), since arm64 macOS
 refuses to load code whose signature no longer matches.
 
 A Linux host can neither build nor load any of this, so
-`.github/workflows/platform-macos.yml` builds it, on `macos-latest`, for
-every pull request that touches `cpp/`, `scripts/platform/`, `pkgs/` or
-`torch/info.rkt` outside `scripts/platform/linux/` and
-`pkgs/torch-x86_64-linux/`, and on demand. Each step is one call on a Mac:
+`.github/workflows/platform-macos.yml` builds it on `macos-latest`
+([below](#continuous-integration-and-the-binary-cache) has when). Each step is
+one call on a Mac:
 
 ```bash
 scripts/platform/macos/build.sh .scratch/macos codecs gtest shim bundle audit gtests
@@ -290,22 +308,117 @@ compile time, where `-Werror=unguarded-availability` and
 `-Werror=unguarded-availability-new` make a call into the SDK newer than the
 target an error in the codecs and the shim.
 
-The workflow then installs racket-lang.org's notarized Racket 9.1 and 9.3
-from their `.dmg` and runs `smoke-install.sh` with each. It uploads the zip,
-its `CHECKSUM`, the audit and every log as the run's `torch-aarch64-macosx`
-artifact.
+The build job then puts the zip in a directory catalog and runs the full
+smoke on its Racket 9.1. `macos-latest` exposes a working GPU to its VM, so
+the smoke prints `mps-available? #t` there and trains `04-mlp` on `'mps` and
+on the CPU. The job uploads the zip, its `CHECKSUM`, the audit, the build logs
+and the smoke's log as the run's `torch-aarch64-macosx` artifact. A second
+job, on `macos-14`, the package's floor, installs racket-lang.org's notarized
+Racket 9.1 and 9.3 from their `.dmg` and runs `smoke-install.sh` with each,
+with `SMOKE_TESTS` (a space-separated list of modules in place of
+`torch/pkg-build/smoke`) naming only the CPU suites for the native library,
+tensor ops and autograd: GitHub's `macos-14` runners advertise MPS but cannot
+allocate on it, and those suites prove the dylibs load and compute there.
 
-The arm64 runner exposes a GPU to its VM: the smoke prints
-`mps-available? #t` there and trains `04-mlp` on `'mps` and on the CPU. What
-it cannot show is a physical Apple-silicon Mac, so the one check left by hand
-is the same smoke on one, with the artifact's zip in a directory catalog as
-above. It must print `mps-available? #t` and pass. To try more against that
-install, run Racket with `PLTUSERHOME` set to the `SMOKE_HOME` it used:
+Weekly, on demand, or when a calling workflow passes `mps: true`, an `mps` job
+on `macos-latest` installs the package on Racket 9.3, fails unless
+`(mps-available?)`, and runs the installed device, `to`, audio-device and
+MPS-pressure suites. Each of them asserts on MPS when it is there and skips
+without it. What the runner cannot show is a physical Apple-silicon Mac, so
+the one check left by hand is the same smoke on one, with the artifact's zip
+in a directory catalog as above. It must print `mps-available? #t` and pass.
+To try more against that install, run Racket with `PLTUSERHOME` set to the
+`SMOKE_HOME` it used:
 
 ```bash
 PLTUSERHOME=$PWD/.scratch/smoke-home PATH=$PWD/.scratch/racket-9.1/bin:$PATH \
   racket -l racket/base -l torch -e '(mps-available?)'
 ```
+
+## Reproducing the package build server
+
+[pkg-build.racket-lang.org](https://pkg-build.racket-lang.org/about.html)
+builds every catalog package, and its three columns on
+pkgs.racket-lang.org are:
+
+- **build:** `raco pkg install` from the catalog in a fresh VM, which
+  compiles torch and renders its manual (the manual's examples load
+  libtorch), then `raco setup --check-pkg-deps`;
+- **docs:** the rendered manual it publishes;
+- **tests:** `raco pkg install -u --auto torch && raco test --drdr --package torch`,
+  in another fresh VM, from the built package.
+
+What it runs on, and what that asks of torch:
+
+- the `racket/pkg-build:deps-x86_64` image (Debian 10, glibc 2.28), or first
+  `deps-min-x86_64`, capped at 1 GB of memory and 1 GB of swap;
+- the current release's natipkg pkg-build installer, so
+  `(system-library-subpath #f)` is `x86_64-linux-natipkg` and
+  `torch-x86_64-linux` has to be declared for that string as well;
+- `--drdr`: as many parallel jobs as the VM has processors, every file in a
+  process of its own (a module without a `test` submodule is required
+  instead), a fresh `PLTUSERHOME` per file, any output to stderr a failure,
+  and 90 s per file unless `test-timeouts` says otherwise;
+- ten minutes for the whole test run, a limit nothing raises;
+- `PLT_PKG_BUILD_SERVICE` set while it builds and tests (with
+  `PLT_INFO_ALLOW_VARS` letting `info.rkt` read it).
+
+Every file loads libtorch, so the full suite there is hundreds of processes
+mapping 445 MB each in one 1 GB VM. With `PLT_PKG_BUILD_SERVICE` set,
+`torch/info.rkt` therefore omits every top-level entry of the collection but
+`pkg-build/`, whose one test module, `smoke.rkt`, requires the `test`
+submodules of `native-library-test`, `tensor-ops-test`, `autograd-test` and
+`nn-test`, trains `04-mlp` and round-trips a FLAC file, in one process. It
+also runs in the normal suite. `tests/server-test-set-test.rkt` asks
+`raco test` which files it would run with the variable set and fails unless
+the answer is `pkg-build/smoke.rkt` alone, so a new top-level directory has to
+be added to the omit list (or to the smoke) on purpose. In a checkout the
+smoke takes about a second and peaks at about 320 MB.
+
+`scripts/pkg-build/build.rkt` runs the same `pkg-build` tool the server
+uses, on `torch` alone, in those images under the same cap. It needs Docker,
+the `pkg-build` package and a directory catalog holding the Linux platform
+zip and this checkout's `torch`:
+
+```bash
+raco pkg install --auto pkg-build
+docker pull racket/pkg-build:deps-x86_64
+docker pull racket/pkg-build:deps-min-x86_64
+scripts/platform/catalog.sh .scratch/pkg/torch-x86_64-linux.zip "$PWD/.scratch/catalog" "$PWD/.scratch/catalog"
+PKG_BUILD_CATALOG=.scratch/catalog/catalog PKG_BUILD_JOBS=4 racket scripts/pkg-build/build.rkt
+racket scripts/pkg-build/report.rkt .scratch/pkg-build/out/work
+```
+
+The catalog's third argument has to be its absolute path: the zips' URLs are
+read on the host. `PKG_BUILD_CATALOG` takes directories or URLs, separated by
+spaces, consulted before pkgs.racket-lang.org, which supplies the other
+dependencies; `PKG_BUILD_RACKET` picks the release (9.3);
+`PKG_BUILD_WORK_DIR` the work directory (`.scratch/pkg-build/out/work`,
+reused incrementally); `PKG_BUILD_JOBS` the `--jobs` for `raco setup`, `raco
+pkg install` and `raco test`, which otherwise follow the processor count.
+pkg-build has no CPU cap for its containers, and the harness gives every step
+40 minutes, as pkg-build's own Docker example does. `report.rkt` prints the
+transcripts and the server's columns from `summary.rktd`, and fails if any is
+red: build; dependencies (a clean build and no dependency failures);
+conflicts; docs (every manual rendered by this build, not salvaged or kept
+from an earlier run); and tests, which also fail when the test transcript's
+clock shows the install-and-test step took more than the server's ten
+minutes.
+`scripts/pkg-build/memory-peaks.sh watch <log>`, run beside it, samples each
+container's cgroup `memory.peak`, anonymous memory, swap peak and OOM kills;
+`report <log>` prints them per container. The peak counts page cache, which
+the kernel reclaims at the cap, so a container at 1024 MB with no OOM kills
+and modest anon was not short of memory.
+
+`.github/workflows/pkg-build.yml` does all of it on GitHub's runner, from a
+fresh build of the Linux zip: weekly, on `workflow_dispatch` (with the
+Racket release as an input), and on a pull request that touches the
+harness, `torch/pkg-build/`, the four suites the smoke runs, `torch/info.rkt`,
+`cpp/`, `pkgs/torch-x86_64-linux/` or `scripts/platform/` outside `macos/`.
+It uploads the zip, the transcripts
+(`install`, `test-success` or `test-fail`, and any failure), `summary.rktd`,
+the memory peaks and the rendered manual as the `pkg-build-results`
+artifact.
 
 ## The manual
 
@@ -421,9 +534,43 @@ includes the OCaml toolchain.
 ## Continuous integration and the binary cache
 
 CI runs `nix flake check` on Linux and macOS, a Resyntax lint gate, and a
-code-generation drift check. Linux jobs substitute from a tailnet-only binary
-cache; the details and the failure modes are in [`AGENTS.md`](../AGENTS.md),
-which is also the canonical guide to the repository's layout and conventions.
+code-generation drift check. Nothing there builds the package a user
+installs, so the platform packages have lanes of their own:
+
+- **`platform-linux.yml`.** Its `build` job, the reusable
+  `platform-linux-build.yml`, builds, audits and gtests `torch-x86_64-linux`
+  in `manylinux_2_28`, assembles the zip, fails it on the size budget, and
+  uploads it with the build logs as `torch-x86_64-linux`. The `install` jobs
+  build a catalog from that zip and run `smoke-install.sh` with
+  `Bogdanp/setup-racket`'s Racket 9.1 and `stable` on ubuntu-24.04, and with
+  racket-lang.org's `buster` installers for 9.1 and 9.3 in `rockylinux:8`,
+  glibc 2.28. The `manual` job installs the zip and links the checkout's
+  `torch` over it, so the scribblings and `(require torch)` name the same
+  files. That install renders the manual, so the deps check run after it,
+  `raco setup --check-pkg-deps --pkgs torch`, covers the manual's
+  dependencies as well as the modules', which the smoke's `--no-docs` run
+  cannot. The job then runs `scripts/build-docs` and uploads the manual as
+  `torch-manual`. The lane runs on pull requests that touch the paths listed
+  in the workflow, on every push to master, weekly, and on demand.
+- **`platform-macos.yml`.** Its `build` job, on `macos-latest`, builds,
+  audits (with the negative control) and gtests `torch-aarch64-macosx`, then
+  assembles and budgets the zip and runs the full smoke at Racket 9.1.
+  `install`, on `macos-14`, runs only the CPU suites at Racket 9.1 and 9.3,
+  since GitHub's `macos-14` runners advertise MPS but cannot allocate on it;
+  `mps` runs the MPS suites ([above](#arm64-macos))
+  weekly, on demand, or when a calling workflow passes `mps: true`. The lane
+  runs on pull requests that touch the paths listed in the workflow, weekly,
+  and on demand.
+- **`pkg-build.yml`** calls `platform-linux-build.yml` itself, so it builds
+  the Linux zip in its own run, and its `pkg-build` job runs the package
+  build server on that zip ([above](#reproducing-the-package-build-server)).
+  A pull request that triggers both it and `platform-linux.yml` builds the
+  Linux zip twice, once in each.
+
+Both platform lanes take `workflow_call`, so a release workflow runs the same
+jobs. Linux jobs substitute from a tailnet-only binary cache; the details and
+the failure modes are in [`AGENTS.md`](../AGENTS.md), which is also the
+canonical guide to the repository's layout and conventions.
 
 ## Further reading
 

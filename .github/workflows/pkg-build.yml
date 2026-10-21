@@ -1,0 +1,113 @@
+name: Package build server
+
+on:
+  schedule:
+    - cron: "0 7 * * 1"
+  workflow_dispatch:
+    inputs:
+      racket_version:
+        description: "Racket release the server's VM installs"
+        required: false
+        default: "9.3"
+  pull_request:
+    paths:
+      - "scripts/pkg-build/**"
+      - "torch/pkg-build/**"
+      - "torch/private/install-torchrkt-native.rkt"
+      - "torch/foreign/raw/**"
+      - "torch/info.rkt"
+      - "torch/tests/native-library-test.rkt"
+      - "torch/tests/tensor-ops-test.rkt"
+      - "torch/tests/autograd-test.rkt"
+      - "torch/tests/nn-test.rkt"
+      - "cpp/**"
+      - "pkgs/torch-x86_64-linux/**"
+      - "scripts/platform/**"
+      - "!scripts/platform/macos/**"
+      - ".github/workflows/pkg-build.yml"
+      - ".github/workflows/platform-linux-build.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pkg-build-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build:
+    uses: ./.github/workflows/platform-linux-build.yml
+
+  pkg-build:
+    name: pkg-build (torch, x86_64-linux-natipkg)
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    env:
+      WORK: ${{ github.workspace }}/.scratch/pkg-build/platform
+      OUT: ${{ github.workspace }}/.scratch/pkg-build/out
+      PKG_BUILD_RACKET: ${{ github.event.inputs.racket_version || '9.3' }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Disk
+        run: |
+          mkdir -p "$WORK" "$OUT/logs"
+          df -h / | tee "$OUT/logs/disk.txt"
+          nproc
+          free -m
+
+      - name: Download the Linux package
+        uses: actions/download-artifact@v4
+        with:
+          name: torch-x86_64-linux
+          path: .scratch/pkg-build/platform
+
+      - uses: Bogdanp/setup-racket@v1.15
+        with:
+          version: "9.3"
+          variant: CS
+          architecture: x64
+
+      - name: Catalog
+        run: scripts/platform/catalog.sh "$WORK/pkg/torch-x86_64-linux.zip" "$OUT/catalog" "$OUT/catalog"
+
+      - name: The pkg-build tool and the server's images
+        run: |
+          set -euo pipefail
+          raco pkg install --auto --batch pkg-build
+          docker pull racket/pkg-build:deps-x86_64
+          docker pull racket/pkg-build:deps-min-x86_64
+          df -h / | tee -a "$OUT/logs/disk.txt"
+
+      - name: Build, document and test torch as the server does
+        env:
+          PKG_BUILD_CATALOG: ${{ github.workspace }}/.scratch/pkg-build/out/catalog/catalog
+          PKG_BUILD_WORK_DIR: ${{ github.workspace }}/.scratch/pkg-build/out/work
+        run: |
+          set -euo pipefail
+          scripts/pkg-build/memory-peaks.sh watch "$OUT/logs/memory.log" &
+          watcher=$!
+          rc=0
+          racket scripts/pkg-build/build.rkt 2>&1 | tee "$OUT/logs/pkg-build.log" || rc=$?
+          kill "$watcher" || true
+          exit "$rc"
+
+      - name: Columns and transcripts
+        if: always()
+        run: |
+          scripts/pkg-build/memory-peaks.sh report "$OUT/logs/memory.log" | tee "$OUT/logs/memory-peaks.txt"
+          df -h / | tee -a "$OUT/logs/disk.txt"
+          racket scripts/pkg-build/report.rkt "$OUT/work"
+
+      - name: Upload the transcripts and manual
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pkg-build-results
+          if-no-files-found: warn
+          path: |
+            .scratch/pkg-build/out/logs/
+            .scratch/pkg-build/out/work/summary.rktd
+            .scratch/pkg-build/out/work/server/built/*/torch*.txt
+            .scratch/pkg-build/out/work/doc/*@torch/

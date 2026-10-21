@@ -1,12 +1,11 @@
 #!/usr/bin/env bash
 #
-#   [SMOKE_HOME=<dir>] scripts/platform/smoke-install.sh <catalog-dir> <host-label>
+#   [SMOKE_HOME=<dir>] [SMOKE_TESTS="<module> ..."] scripts/platform/smoke-install.sh <catalog-dir> <host-label>
 set -euo pipefail
 
 usage="usage: smoke-install.sh <catalog-dir> <host-label>"
 catalog=${1:?$usage}
 host=${2:?$usage}
-here=$(cd "$(dirname "$0")" && pwd)
 tmp=$(mktemp -d)
 step() { printf '\n== %s\n' "$*"; }
 
@@ -38,10 +37,11 @@ if [ -s "$tmp/raco.err" ]; then
 fi
 echo "stderr: empty"
 
-step "04-mlp"
-raco test "$here/mlp-smoke.rkt"
+read -ra tests <<<"${SMOKE_TESTS:-torch/pkg-build/smoke}"
+step "raco test --drdr -l ${tests[*]}"
+raco test --drdr -l "${tests[@]}"
 
-step "FLAC round trip"
-raco test "$here/flac-round-trip.rkt"
+step "raco setup --check-pkg-deps --pkgs torch"
+raco setup --no-docs --check-pkg-deps --pkgs torch
 
 step "SMOKE OK: $host, racket $(racket -e '(display (version))')"

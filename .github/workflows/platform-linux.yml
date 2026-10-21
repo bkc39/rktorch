@@ -1,0 +1,140 @@
+name: Linux platform package
+
+on:
+  pull_request:
+    paths:
+      - "cpp/**"
+      - "flake.nix"
+      - "torch/**"
+      - "!torch/tests/**"
+      - "torch/tests/native-library-test.rkt"
+      - "torch/tests/tensor-ops-test.rkt"
+      - "torch/tests/autograd-test.rkt"
+      - "torch/tests/nn-test.rkt"
+      - "pkgs/torch-x86_64-linux/**"
+      - "scripts/platform/**"
+      - "!scripts/platform/macos/**"
+      - "scripts/build-docs"
+      - ".github/workflows/platform-linux.yml"
+      - ".github/workflows/platform-linux-build.yml"
+  push:
+    branches: [master]
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: platform-linux-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build:
+    uses: ./.github/workflows/platform-linux-build.yml
+
+  install:
+    name: install (${{ matrix.image || 'ubuntu-24.04' }}, Racket ${{ matrix.racket }})
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - racket: "9.1"
+            host_racket: "9.1"
+          - racket: stable
+            host_racket: stable
+          - racket: "9.1"
+            host_racket: "9.3"
+            image: rockylinux:8
+          - racket: "9.3"
+            host_racket: "9.3"
+            image: rockylinux:8
+    env:
+      PKG: ${{ github.workspace }}/.scratch/platform
+      CATALOG: ${{ github.workspace }}/.scratch/catalog
+      RACKET_DL: ${{ github.workspace }}/.scratch/racket-dl
+      IMAGE: ${{ matrix.image }}
+      INSTALLER: racket-${{ matrix.racket }}-x86_64-linux-buster-cs.sh
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Download the Linux package
+        uses: actions/download-artifact@v4
+        with:
+          name: torch-x86_64-linux
+          path: .scratch/platform
+
+      - uses: Bogdanp/setup-racket@v1.15
+        with:
+          version: ${{ matrix.host_racket }}
+          variant: CS
+          architecture: x64
+
+      - name: Catalog
+        run: |
+          set -euo pipefail
+          if [ -n "$IMAGE" ]; then url_root=/catalog; else url_root=$CATALOG; fi
+          scripts/platform/catalog.sh "$PKG/pkg/torch-x86_64-linux.zip" "$CATALOG" "$url_root"
+
+      - name: Cache the Racket installer
+        if: matrix.image
+        uses: actions/cache@v4
+        with:
+          path: .scratch/racket-dl
+          key: platform-linux-racket-${{ matrix.racket }}-${{ hashFiles('scripts/platform/sources.txt') }}
+
+      - name: Fetch the Racket installer
+        if: matrix.image
+        run: scripts/platform/fetch.sh "$RACKET_DL" "$INSTALLER"
+
+      - name: Install, smoke and check package deps in the image
+        if: matrix.image
+        run: scripts/platform/linux/smoke.sh "$IMAGE" "$RACKET_DL/$INSTALLER" "$CATALOG"
+
+      - name: Install, smoke and check package deps on the host
+        if: ${{ !matrix.image }}
+        run: scripts/platform/smoke-install.sh "$CATALOG" "$(. /etc/os-release && echo "$ID-$VERSION_ID")"
+
+  manual:
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Download the Linux package
+        uses: actions/download-artifact@v4
+        with:
+          name: torch-x86_64-linux
+          path: .scratch/platform
+
+      - uses: Bogdanp/setup-racket@v1.15
+        with:
+          version: "9.3"
+          variant: CS
+          architecture: x64
+
+      - name: Install the Linux package and link the checkout's torch
+        run: |
+          set -euo pipefail
+          raco pkg install --batch --no-docs .scratch/platform/pkg/torch-x86_64-linux.zip
+          raco pkg install --batch --auto --link "$PWD/torch"
+
+      - name: Check the package deps, documentation included
+        run: raco setup --check-pkg-deps --pkgs torch
+
+      - name: Render the manual and check its links
+        run: scripts/build-docs
+
+      - name: Upload the manual
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: torch-manual
+          if-no-files-found: warn
+          path: manual/

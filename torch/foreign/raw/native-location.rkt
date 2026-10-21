@@ -11,6 +11,7 @@
 
 (define platform-packages
   (hash "x86_64-linux" "torch-x86_64-linux"
+        "x86_64-linux-natipkg" "torch-x86_64-linux"
         "aarch64-darwin" "torch-aarch64-macosx"
         "aarch64-macosx" "torch-aarch64-macosx"))
 
