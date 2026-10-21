@@ -31,9 +31,10 @@ libtorch_cpu.so, libc10.so, libtorch.so
   nlohmann json, miniz and libuv (MIT). Their licence texts are under
   licenses/pytorch-third-party/, at their paths in PyTorch's v2.14.0 tree:
   the set the torch 2.14.0 wheel ships in its dist-info/licenses/third_party,
-  plus pocketfft (BSD-3-Clause), KleidiAI (Apache-2.0), asmjit (Zlib) and
-  nlohmann json (MIT), whose files that set misses, taken from the
-  submodule commits v2.14.0 pins.
+  plus the files that set misses, taken from the submodule commits v2.14.0
+  pins: pocketfft (BSD-3-Clause), KleidiAI (Apache-2.0), asmjit (Zlib),
+  nlohmann json (MIT), and oneDNN's THIRD-PARTY-PROGRAMS, which covers the
+  Xbyak and ittnotify code compiled into oneDNN (BSD-3-Clause).
 
   libtorch_cpu.so contains Intel oneAPI Math Kernel Library 2024.2 (Product
   Build 20240605), linked statically by PyTorch's build and shipped

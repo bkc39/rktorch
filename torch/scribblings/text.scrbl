@@ -69,9 +69,7 @@ English words, the tutorial's own counts.
 
 A pair is @racket[(cons source target)], both normalized strings. The source
 language is French unless @racket[#:source] says otherwise, so the default
-task is translating into English, as in the tutorial. rktorch does not
-host or distribute the dataset and does not vouch that you may use it:
-check its license before you do.
+task is translating into English, as in the tutorial.
 
 @defproc[(load-translation-pairs
           [#:source source (or/c 'eng 'fra) 'fra]

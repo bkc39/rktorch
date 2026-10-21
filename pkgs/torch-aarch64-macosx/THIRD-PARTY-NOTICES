@@ -34,9 +34,10 @@ libtorch_cpu.dylib, libc10.dylib, libtorch.dylib
   libuv (MIT). Their licence texts are under
   licenses/pytorch-third-party/, at their paths in PyTorch's v2.14.0 tree:
   the set the torch 2.14.0 wheel ships in its dist-info/licenses/third_party,
-  plus pocketfft (BSD-3-Clause), KleidiAI (Apache-2.0), asmjit (Zlib) and
-  nlohmann json (MIT), whose files that set misses, taken from the
-  submodule commits v2.14.0 pins.
+  plus the files that set misses, taken from the submodule commits v2.14.0
+  pins: pocketfft (BSD-3-Clause), KleidiAI (Apache-2.0), asmjit (Zlib),
+  nlohmann json (MIT), and oneDNN's THIRD-PARTY-PROGRAMS, which covers the
+  Xbyak and ittnotify code compiled into oneDNN (BSD-3-Clause).
 
 libomp.dylib
   The LLVM OpenMP runtime, as shipped in the libtorch zip above.

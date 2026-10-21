@@ -41,11 +41,10 @@ introduction, from a first tensor through to a training loop; the
 Every example in this manual is evaluated when it is built, so the printed
 results are the ones the library produces.
 
-@bold{License.} Apache 2.0, except the data fixtures drawn from
-published datasets: MNIST's under CC BY-SA 3.0, LibriSpeech's under CC BY
-4.0 and Tatoeba's under CC BY 2.0 FR, each recorded in the
-@filepath{NOTICE} beside it. The dataset loaders download the full
-datasets at use time; rktorch does not host or distribute them.
+@bold{License.} Apache 2.0; the bundled fixtures and data are under the
+terms in the @filepath{NOTICE} files beside them. The dataset loaders
+download datasets that rktorch does not host or distribute: check each
+one's license before you use it.
 
 @bold{Acknowledgements.} Many thanks to
 @hyperlink["https://pytorch.org/"]{PyTorch} and its developers, and to
