@@ -2,14 +2,12 @@
 
 (require (only-in ffi/unsafe/atomic call-as-atomic)
          (only-in racket/contract/base -> ->* any)
-         (only-in racket/match match)
+         (only-in racket/match == match)
          (only-in "../private/contract.rkt" define/contract-out)
          (only-in "creation-ops.rkt" zeros)
          (only-in "device-type.rkt" cpu-device cuda-device device? mps-device)
          (only-in "error.rkt" exn:fail:rktorch:oom?)
          (only-in "ops.rkt" cuda-available? mps-available? to-device))
-
-(define-logger rktorch-device)
 
 ;; The state is 'unprobed, a claim while a thread probes, then the answer.
 ;; The claim names its thread because kill-thread runs no dynamic-wind exit:
@@ -21,12 +19,12 @@
   (to-device (zeros 1 #:device (mps-device)) (cpu-device)))
 
 (define/contract-out (make-mps-probe [run allocate-on-mps])
-  (->* () ((-> any)) mps-probe?)
+  (->* [] [(-> any)] mps-probe?)
   (mps-probe run 'unprobed))
 
 (define ((cpu-stands-in level why) raised)
   (define detail (if (exn? raised) (exn-message raised) "a non-exn value was raised"))
-  (log-message rktorch-device-logger level 'rktorch-device
+  (log-message (current-logger) level 'rktorch-device
                (format "~a, so the CPU stands in: ~a" why detail)
                raised)
   #f)
@@ -59,7 +57,7 @@
   (-> mps-probe? boolean?)
   (match (claim-or-read probe)
     [(? boolean? answer) answer]
-    [(claim (== (current-thread) eq?) done) (settle! probe done)]
+    [(claim (== (current-thread)) done) (settle! probe done)]
     [(claim holder done)
      (sync (semaphore-peek-evt done) (thread-dead-evt holder))
      (mps-usable? probe)]))

@@ -15,8 +15,9 @@
     (printf "[accelerator-test] skipped: ~a\n" why))
 
   (define (logged-during thunk)
-    (define receiver (make-log-receiver (current-logger) 'warning 'rktorch-device))
-    (define result (thunk))
+    (define isolated (make-logger))
+    (define receiver (make-log-receiver isolated 'warning 'rktorch-device))
+    (define result (parameterize ([current-logger isolated]) (thunk)))
     (values result
             (for/list ([event (in-producer (λ () (sync/timeout 0 receiver)) #f)])
               (cons (vector-ref event 0) (vector-ref event 1)))))
@@ -64,8 +65,8 @@
     (check-equal? (calls) 0))
 
   (test-case "a probe that fails other than by OOM falls back to the CPU and logs an error"
-    (for ([failure (list (λ (_call) (error 'probe "a Racket-side bug"))
-                         (λ (_call) (raise 'not-an-exn)))])
+    (for ([failure (list (λ () (error 'probe "a Racket-side bug"))
+                         (λ () (raise 'not-an-exn)))])
       (define-values (pick logged)
         (logged-during (λ () (pick-with-mps (make-mps-probe failure)))))
       (check-equal? pick (cpu-device))
@@ -145,6 +146,7 @@
     (cond
       [(not expected)
        (check-pred device? picked)
+       (check-pred device? (mps-if-available))
        (skipped "RKTORCH_EXPECT_ACCELERATOR is unset, so any device is right")]
       [else
        (check-equal? (device-type picked) (string->symbol expected))
