@@ -148,7 +148,7 @@
 
   (define (check-jitter pixels motion theirs what)
     (define difference
-      (worst-difference (floats->list (apply jitter pixels motion)) theirs))
+      (~> (apply jitter pixels motion) floats->list (worst-difference theirs)))
     (check-true (<= difference 1e-6)
                 (format "~a jittered by ~a: max |difference| ~a from torch's"
                         what motion difference)))
