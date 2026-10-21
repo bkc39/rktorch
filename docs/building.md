@@ -570,9 +570,10 @@ installs, so the platform packages have lanes of their own:
 
 Both platform lanes take `workflow_call`, so `release.yml` runs the same jobs
 before it drafts a release ([`releasing.md`](releasing.md)).
-`pkg-build.yml`, dispatched with `platform_release`, skips the build and
-gives the catalog a published release's zip by its https URL. Linux jobs substitute from a tailnet-only binary cache; the details and
-the failure modes are in [`AGENTS.md`](../AGENTS.md), which is also the
+`pkg-build.yml`, dispatched with `release_tag`, checks out that tag, skips
+the build and gives the catalog the zip its release's manifest names, by its
+https URL. Linux jobs substitute from a tailnet-only binary cache; the
+details and the failure modes are in [`AGENTS.md`](../AGENTS.md), which is also the
 canonical guide to the repository's layout and conventions.
 
 ## Further reading

@@ -117,7 +117,7 @@
 
       racketDepsTestsFor = pkgs: racketPkg: racket-deps:
         let
-          run = name: script: pkgs.runCommand name { nativeBuildInputs = [ racketPkg ]; } ''
+          run = name: script: pkgs.runCommand name { nativeBuildInputs = [ racketPkg pkgs.git ]; } ''
             export HOME=$TMPDIR/home PLTUSERHOME=$TMPDIR/plt
             rd() { racket ${racketDepsScript} "$@"; }
             fails() {
@@ -315,9 +315,10 @@
               ./scripts/release
               ./torch/foreign/raw/abi-stamp.rktd
               ./torch/info.rkt
+              ./torch/private/util.rkt
             ];
           };
-          run = name: script: pkgs.runCommand name { nativeBuildInputs = [ racketPkg ]; } ''
+          run = name: script: pkgs.runCommand name { nativeBuildInputs = [ racketPkg pkgs.git ]; } ''
             export HOME=$TMPDIR/home PLTUSERHOME=$TMPDIR/plt
             cp -r ${src} "$TMPDIR/src"
             chmod -R u+w "$TMPDIR/src"
@@ -328,10 +329,10 @@
         in
         {
           release-current = run "torch-rkt-release-current" ''
-            racket scripts/release/release.rkt plan ""
+            racket scripts/release/release.rkt check
           '';
           release-test = run "torch-rkt-release-test" ''
-            raco test --timeout 300 scripts/release/release-test.rkt
+            raco test --timeout 300 scripts/release
           '';
         };
 

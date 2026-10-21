@@ -19,7 +19,7 @@ concurrency:
 
 jobs:
   plan:
-    name: Versions, ABI stamp and the previous release
+    name: Versions, ABI stamp, natives' inputs and the previous release
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     outputs:
@@ -33,12 +33,30 @@ jobs:
       TAG: ${{ github.ref_type == 'tag' && github.ref_name || inputs.tag }}
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
 
-      - uses: Bogdanp/setup-racket@v1.15
+      - uses: Bogdanp/setup-racket@2466913449df77df2bad149d1f2fc4e1ea4795dd # v1.15
         with:
           version: "9.3"
           variant: CS
           architecture: x64
+
+      - name: A release is a tag on master whose required checks passed
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/master; then
+            echo "::error::$TAG is $GITHUB_SHA, which is not on master."
+            exit 1
+          fi
+          gh api "repos/$GITHUB_REPOSITORY/rules/branches/master" >"$RUNNER_TEMP/rules.json"
+          gh api --paginate "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/check-runs?per_page=100" \
+            >"$RUNNER_TEMP/check-runs.json"
+          racket scripts/release/release.rkt required-checks "$RUNNER_TEMP/rules.json" "$RUNNER_TEMP/check-runs.json"
 
       - name: The previous release
         id: previous
@@ -46,8 +64,16 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          except=()
+          if [ -n "$TAG" ]; then except=(--except "$TAG"); fi
           gh api --paginate "repos/$GITHUB_REPOSITORY/releases" >"$RUNNER_TEMP/releases.json"
-          line=$(racket scripts/release/release.rkt previous "$TAG" "$RUNNER_TEMP/releases.json")
+          mapfile -t published < <(racket scripts/release/release.rkt published "${except[@]}" "$RUNNER_TEMP/releases.json")
+          for tag in "${published[@]}"; do
+            gh release download "$tag" --repo "$GITHUB_REPOSITORY" \
+              --pattern manifest.json --dir "$RUNNER_TEMP/manifests/$tag"
+          done
+          line=$(racket scripts/release/release.rkt previous "${except[@]}" \
+            "$RUNNER_TEMP/releases.json" "$RUNNER_TEMP/manifests")
           echo "$line" | tee -a "$GITHUB_OUTPUT"
           previous=${line#previous=}
           mkdir -p "$RUNNER_TEMP/previous"
@@ -60,11 +86,12 @@ jobs:
         id: plan
         run: |
           set -euo pipefail
-          manifest=()
+          args=()
+          if [ -n "$TAG" ]; then args+=(--tag "$TAG"); fi
           if [ -f "$RUNNER_TEMP/previous/manifest.json" ]; then
-            manifest=("$RUNNER_TEMP/previous/manifest.json")
+            args+=(--previous "$RUNNER_TEMP/previous/manifest.json")
           fi
-          racket scripts/release/release.rkt plan "$TAG" "${manifest[@]}" | tee -a "$GITHUB_OUTPUT"
+          racket scripts/release/release.rkt plan "${args[@]}" | tee -a "$GITHUB_OUTPUT"
 
       - name: Keep the previous release's manifest and entries
         uses: actions/upload-artifact@v4
@@ -83,26 +110,71 @@ jobs:
     if: needs.plan.outputs.build-natives == 'true'
     uses: ./.github/workflows/platform-macos.yml
 
-  draft:
-    name: Assemble the assets and draft the release
-    needs: [plan, linux, macos]
+  carried:
+    name: install the carried ${{ matrix.package }} by its https URL
+    needs: plan
+    if: needs.plan.outputs.build-natives == 'false'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            package: torch-x86_64-linux
+          - os: macos-14
+            package: torch-aarch64-macosx
+    defaults:
+      run:
+        shell: bash
+    env:
+      PACKAGE: ${{ matrix.package }}
+      NATIVES_TAG: ${{ needs.plan.outputs.natives-tag }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - uses: Bogdanp/setup-racket@2466913449df77df2bad149d1f2fc4e1ea4795dd # v1.15
+        with:
+          version: "9.3"
+          variant: CS
+          architecture: ${{ runner.arch == 'ARM64' && 'arm64' || 'x64' }}
+
+      - name: Catalog the carried zip by its https URL
+        run: |
+          set -euo pipefail
+          root=https://github.com/$GITHUB_REPOSITORY/releases/download/$NATIVES_TAG
+          mkdir -p "$RUNNER_TEMP/pkg"
+          for file in "$PACKAGE.zip" "$PACKAGE.zip.CHECKSUM"; do
+            curl -fsSL --retry 3 -o "$RUNNER_TEMP/pkg/$file" "$root/$file"
+          done
+          scripts/platform/catalog.sh "$RUNNER_TEMP/pkg/$PACKAGE.zip" "$RUNNER_TEMP/catalog" \
+            "$RUNNER_TEMP/catalog" "$root"
+
+      - name: Install, smoke and check package deps
+        run: scripts/platform/smoke-install.sh "$RUNNER_TEMP/catalog" "$RUNNER_OS $(uname -m)"
+
+  assemble:
+    name: Assemble the assets
+    needs: [plan, linux, macos, carried]
     if: >-
       !cancelled() && needs.plan.result == 'success'
-      && (needs.plan.outputs.build-natives == 'false'
+      && ((needs.plan.outputs.build-natives == 'false' && needs.carried.result == 'success')
           || (needs.linux.result == 'success' && needs.macos.result == 'success'))
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
-      contents: write
-      id-token: write
-      attestations: write
+      contents: read
     env:
       TAG: ${{ needs.plan.outputs.tag }}
       BUILD_NATIVES: ${{ needs.plan.outputs.build-natives }}
     steps:
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
 
-      - uses: Bogdanp/setup-racket@v1.15
+      - uses: Bogdanp/setup-racket@2466913449df77df2bad149d1f2fc4e1ea4795dd # v1.15
         with:
           version: "9.3"
           variant: CS
@@ -138,23 +210,10 @@ jobs:
           racket scripts/release/release.rkt assemble --tag "$TAG" \
             --repository "$GITHUB_REPOSITORY" --commit "$GITHUB_SHA" \
             "${natives[@]}" --sources "$RUNNER_TEMP/sources" \
-            --notes "$RUNNER_TEMP/notes.md" "$RUNNER_TEMP/dist"
-          ls -l "$RUNNER_TEMP/dist"
-          cat "$RUNNER_TEMP/dist/manifest.json"
-          (cd "$RUNNER_TEMP/dist" && sha256sum --check SHA256SUMS)
-
-      - name: Attest the build provenance
-        id: attest
-        if: github.event_name == 'push' && github.ref_type == 'tag'
-        uses: actions/attest-build-provenance@v3
-        with:
-          subject-path: ${{ runner.temp }}/dist/*
-
-      - name: Add the provenance bundle
-        if: steps.attest.outcome == 'success'
-        env:
-          BUNDLE: ${{ steps.attest.outputs.bundle-path }}
-        run: cp "$BUNDLE" "$RUNNER_TEMP/dist/provenance.sigstore.json"
+            --notes "$RUNNER_TEMP/release/notes.md" "$RUNNER_TEMP/release/dist"
+          ls -l "$RUNNER_TEMP/release/dist"
+          cat "$RUNNER_TEMP/release/dist/manifest.json"
+          (cd "$RUNNER_TEMP/release/dist" && sha256sum --check SHA256SUMS)
 
       - name: Upload the assets
         if: always()
@@ -162,12 +221,39 @@ jobs:
         with:
           name: release-assets
           if-no-files-found: warn
-          path: |
-            ${{ runner.temp }}/dist/
-            ${{ runner.temp }}/notes.md
+          path: ${{ runner.temp }}/release/
+
+  draft:
+    name: Attest the assets and draft the release
+    needs: [plan, assemble]
+    if: github.event_name == 'push' && github.ref_type == 'tag' && needs.assemble.result == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    env:
+      TAG: ${{ needs.plan.outputs.tag }}
+    steps:
+      - name: Download the assets
+        uses: actions/download-artifact@v4
+        with:
+          name: release-assets
+          path: ${{ runner.temp }}/release
+
+      - name: Attest the build provenance
+        id: attest
+        uses: actions/attest-build-provenance@v3
+        with:
+          subject-path: ${{ runner.temp }}/release/dist/*
+
+      - name: Add the provenance bundle
+        env:
+          BUNDLE: ${{ steps.attest.outputs.bundle-path }}
+        run: cp "$BUNDLE" "$RUNNER_TEMP/release/dist/provenance.sigstore.json"
 
       - name: Draft the release
-        if: github.event_name == 'push' && github.ref_type == 'tag'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -179,4 +265,18 @@ jobs:
           prerelease=()
           case $TAG in *-*) prerelease=(--prerelease) ;; esac
           gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --draft --verify-tag \
-            "${prerelease[@]}" --title "$TAG" --notes-file "$RUNNER_TEMP/notes.md" "$RUNNER_TEMP"/dist/*
+            "${prerelease[@]}" --title "$TAG" --notes-file "$RUNNER_TEMP/release/notes.md" "$RUNNER_TEMP"/release/dist/*
+
+      - name: The draft carries exactly the assembled assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          expected=$(cd "$RUNNER_TEMP/release/dist" && for f in *; do printf '%s %s\n' "$f" "$(stat -c %s "$f")"; done | sort)
+          actual=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets \
+            --jq '.assets[] | "\(.name) \(.size)"' | sort)
+          if [ "$expected" != "$actual" ]; then
+            diff <(echo "$expected") <(echo "$actual") || true
+            echo "::error::The draft's assets (right) differ from the assembled ones (left)."
+            exit 1
+          fi

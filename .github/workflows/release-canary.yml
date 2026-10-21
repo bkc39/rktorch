@@ -23,29 +23,33 @@ jobs:
         shell: bash
     steps:
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
 
-      - name: Is torch on the catalog
-        id: catalog
-        run: |
-          set -euo pipefail
-          code=$(curl -sS -o /dev/null -w '%{http_code}' https://pkgs.racket-lang.org/pkg/torch)
-          if [ "$code" = 404 ] && [ "$GITHUB_EVENT_NAME" = schedule ]; then
-            echo "::notice::torch is not on pkgs.racket-lang.org yet; nothing to check."
-            echo "published=false" >>"$GITHUB_OUTPUT"
-          elif [ "$code" = 200 ]; then
-            echo "published=true" >>"$GITHUB_OUTPUT"
-          else
-            echo "::error::pkgs.racket-lang.org answered $code for torch."
-            exit 1
-          fi
-
-      - uses: Bogdanp/setup-racket@v1.15
-        if: steps.catalog.outputs.published == 'true'
+      - uses: Bogdanp/setup-racket@2466913449df77df2bad149d1f2fc4e1ea4795dd # v1.15
         with:
           version: ${{ matrix.racket }}
           variant: CS
           distribution: full
           architecture: ${{ runner.arch == 'ARM64' && 'arm64' || 'x64' }}
+
+      - name: Is torch released, and on the catalog
+        id: catalog
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api --paginate "repos/$GITHUB_REPOSITORY/releases" >"$RUNNER_TEMP/releases.json"
+          released=$(racket scripts/release/release.rkt published "$RUNNER_TEMP/releases.json")
+          code=$(curl -sS -o /dev/null -w '%{http_code}' https://pkgs.racket-lang.org/pkg/torch)
+          if [ "$code" = 200 ]; then
+            echo "published=true" >>"$GITHUB_OUTPUT"
+          elif [ "$code" = 404 ] && [ -z "$released" ]; then
+            echo "published=false" >>"$GITHUB_OUTPUT"
+          else
+            echo "::error::pkgs.racket-lang.org answered $code for torch; the published releases are: ${released//$'\n'/ }"
+            exit 1
+          fi
 
       - name: Install from the catalog, train 04-mlp, check the package deps
         if: steps.catalog.outputs.published == 'true'

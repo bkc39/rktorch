@@ -6,29 +6,40 @@
          (only-in racket/match match-define)
          (only-in racket/path path-only)
          (only-in racket/string string-trim)
-         (only-in setup/getinfo get-info/full))
+         (only-in setup/getinfo get-info/full)
+         (only-in "../../nix/racket-deps/racket-deps.rkt" info-dependencies))
 
-(provide catalog-entry)
+(provide catalog-entry
+         checksum-path
+         zip-catalog-entry)
+
+(define/contract (checksum-path zip)
+  (-> path-string? path?)
+  (string->path (format "~a.CHECKSUM" zip)))
 
 (define (zip-dependencies zip)
   (call-with-unzip-entry
    zip "info.rkt"
-   (λ (info-file)
-     (define info (get-info/full (path-only info-file)))
-     (append (info 'deps (λ () '())) (info 'build-deps (λ () '()))))))
+   (λ (info-file) (info-dependencies (get-info/full (path-only info-file))))))
 
-(define/contract (catalog-entry name source zip)
-  (-> string? string? path-string? hash?)
+(define/contract (catalog-entry name source #:checksum checksum #:dependencies dependencies)
+  (-> string? string? #:checksum string? #:dependencies list? hash?)
   (hash 'name name
         'source source
-        'checksum (string-trim (file->string (format "~a.CHECKSUM" (path->complete-path zip))))
+        'checksum checksum
         'author ""
         'description ""
         'tags '()
-        'dependencies (zip-dependencies zip)
+        'dependencies dependencies
         'modules '()))
+
+(define/contract (zip-catalog-entry name source zip)
+  (-> string? string? path-string? hash?)
+  (catalog-entry name source
+                 #:checksum (string-trim (file->string (checksum-path zip)))
+                 #:dependencies (zip-dependencies zip)))
 
 (module+ main
   (match-define (vector name source zip) (current-command-line-arguments))
-  (write (catalog-entry name source zip))
+  (write (zip-catalog-entry name source zip))
   (newline))

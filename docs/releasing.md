@@ -12,40 +12,54 @@ the owner publishes the draft and edits the catalog entries by hand.
 | `version` | `torch/info.rkt`, and `version` in `flake.nix` | the Racket bindings change, so every release |
 | `native-version` | `torch/info.rkt`; the `#:version` of every `#:platform` dep in it; `version` in each `pkgs/*/info.rkt` | the compiled bytes change: the shim, the libtorch pin or the build flags |
 | ABI stamp | `torch/foreign/raw/abi-stamp.rktd` (`nix run .#abi-stamp`) | a `cpp/include/torchrkt/c_api` header changes |
+| natives' inputs | a sha256 of `git ls-tree -r HEAD` over `natives-inputs` in `scripts/release/release.rktd`, less its `natives-inputs-exclude` paths | any tracked file the platform packages are built from changes |
 
 Racket versions take no suffix, so a pre-release lives in the tag:
 `v0.0.1-alpha` releases `version` 0.0.1. The workflow's `plan` job fails
 unless:
 
+- the tagged commit is on master, and the latest run of each status check
+  master's rules require succeeded on it;
 - the tag is `v<version>` or `v<version>-<suffix>`;
 - `flake.nix`'s `version` equals `torch/info.rkt`'s;
 - each platform dep's `#:version` and each `pkgs/*/info.rkt` `version` equal
   `native-version`;
-- `scripts/release/release.rktd` lists exactly the packages that
-  `torch/info.rkt` declares with `#:platform`, and each LGPL source it names
-  is pinned in `scripts/platform/sources.txt`;
-- the ABI stamp equals the one the last published natives were built with,
-  or `native-version` has moved past theirs.
+- `scripts/release/release.rktd` has one zip for each package that
+  `torch/info.rkt` declares with `#:platform`, and no other, and each LGPL
+  source it names is pinned in `scripts/platform/sources.txt`;
+- `version` is no older than the previous release's, and equal to it only
+  under a different tag (`v0.0.1-alpha`, then `v0.0.1`);
+- the ABI stamp and the natives' inputs equal those the previous release's
+  natives were built with, or `native-version` has moved past theirs.
 
-The last published natives are read from the newest published release that
-carries a `manifest.json`. When `native-version` and the ABI stamp both match
-it, the release builds no platform package: its manifest and catalog entries
-point at the earlier release's assets. A shim change that leaves the headers
-alone keeps the stamp, so bump `native-version` for it by hand, or it ships
-in no platform package.
+The previous release is the published release with a `manifest.json` whose
+`native-version` is highest, the latest published among equals. When
+`native-version`, the ABI stamp and the natives' inputs all match it, the
+release builds no platform package: its manifest and catalog entries point at
+the earlier release's assets. Any change to a file the natives are built from,
+a shim source, a build script, a notice, needs a `native-version` bump, or
+the run fails. A file that only tests or audits the build belongs in
+`natives-inputs-exclude`.
 
 ## Tagging
 
+`torch/info.rkt` and `flake.nix` carry the new `version`, and
+`native-version` moves too when the natives changed:
+
 ```bash
-# torch/info.rkt and flake.nix carry the new version; native-version too, if the natives changed
 git tag -a v0.0.1-alpha -m "torch 0.0.1-alpha"
 git push origin v0.0.1-alpha
 ```
 
 The run calls `platform-linux.yml` and `platform-macos.yml`, the same build,
-audit and install jobs CI runs, when the natives build. Its `draft` job then
-creates the draft release, a pre-release when the tag has a suffix. A draft
-for the tag that exists already fails the run: delete the draft and re-run.
+audit and install jobs CI runs, when the natives build. When they don't, its
+`carried` jobs install the earlier release's zips on Linux and macOS through
+a catalog that names them by their https URLs, so a dead URL fails the run.
+The `assemble` job, with read-only permissions, builds the assets; the
+`draft` job, the only one that can write, attests them, creates the draft
+release (a pre-release when the tag has a suffix) and fails unless the
+draft's asset names and sizes are the assembled ones. A draft for the tag
+that exists already fails the run: delete the draft and re-run.
 
 A `workflow_dispatch` run is a dry run. It takes an optional `tag` to check
 as if pushed, builds and assembles everything, uploads the assets as the
@@ -65,7 +79,7 @@ as if pushed, builds and assembles everything, uploads the assets as the
   for the tag that built them; `torch` at
   `https://github.com/bkc39/rktorch.git?path=torch#<tag>`.
 - `manifest.json`: the tag, commit, `version`, `native-version`, ABI stamp,
-  the tag that built the natives, and each zip's and tarball's size and
+  natives' inputs, the tag that built the natives, and each zip's and tarball's size and
   sha256.
 - `SHA256SUMS`, over every asset above.
 - `provenance.sigstore.json`, the bundle of the build provenance attestation;
@@ -87,16 +101,17 @@ published:
 
 ## After publishing
 
-- `pkg-build.yml`, dispatched with `platform_release: <tag>`, runs the
-  package build server against a catalog whose `torch-x86_64-linux` is the
-  published zip's https URL, before the next server build does the same.
+- `pkg-build.yml`, dispatched with `release_tag: <tag>`, checks out the tag
+  and runs the package build server against a catalog whose
+  `torch-x86_64-linux` is the https URL of the zip under the tag's
+  `manifest.json` `natives-tag`, before the next server build does the same.
 - The package server's build, docs and test columns for `torch` are green,
   and the manual renders with its example chapters.
 - `release-canary.yml`, dispatched: `raco pkg install torch` from
   pkgs.racket-lang.org on `ubuntu-latest` and `macos-14`, with Racket 9.1
   and stable, trains `04-mlp` and checks the package deps. It also runs
-  weekly, to catch catalog drift and new Racket releases; until `torch` is on
-  the catalog the weekly run passes with a notice, and a dispatched run fails.
+  weekly, to catch catalog drift and new Racket releases. Once a release is
+  published, a catalog that doesn't have `torch` fails it.
 - CUDA on the Nix route, on the lab host: `(cuda-available?)` and the MLP on
   `'cuda`.
 
@@ -115,8 +130,9 @@ A draft can be deleted.
    deps in `torch/info.rkt` (and `platform-packages` in
    `torch/foreign/raw/native-location.rkt`, `own-platform-packages` in
    `nix/racket-deps/racket-deps.rkt`).
-2. A line in `scripts/release/release.rktd`: the package's name and its zip's
-   path under the directory the `draft` job downloads every `torch-*`
-   artifact into.
+2. A line in `scripts/release/release.rktd`'s `platform-zips`: its zip's path
+   under the directory the `assemble` job downloads every `torch-*` artifact
+   into. The zip's file name is the package's name.
 3. A job in `release.yml` calling the workflow that builds it, added to the
-   `draft` job's `needs` and its `if`.
+   `assemble` job's `needs` and its `if`, and a `carried` matrix entry for a
+   runner that installs it.
