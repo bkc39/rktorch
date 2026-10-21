@@ -12,7 +12,7 @@
                   tensor-allocator/outputs
                   tensor-allocator/outputs/no-retry
                   tensor-allocator/no-retry)
-         (only-in "raw/random.rkt" _Generator/null)
+         (only-in "raw/random.rkt" _Generator/current)
          (only-in "raw/syntax.rkt" _Tensor _Tensor/null define-torch)
          (only-in "structs.rkt" wrap-tensor))
 
@@ -56,7 +56,7 @@
                    #`(if (pair? #,arg) (length #,arg) 0)
                    #`(and (pair? #,arg) #t)))]
     [(optional-generator)
-     (values (list #`(#,arg : _Generator/null)) (list arg))]
+     (values (list #`(#,arg : _Generator/current)) (list arg))]
     [(optional-dtype)
      (values (list #`(#,arg : _int32)) (list #`(opt-dtype->code #,arg)))]
     [else

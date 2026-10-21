@@ -365,6 +365,8 @@ draws: a torchvision pipeline on the same seed picks different crops.
          tensor?]{
 Mirrors each image of the rank-4 batch @racket[x] along its width with
 probability @racket[p]; the rest pass through unchanged.
+With @racket[generator] @racket[#f], the batch seed comes from
+@racket[(current-generator)].
 }
 
 @defproc[(random-resized-crop [x tensor?]
@@ -388,6 +390,8 @@ window. Both pairs are ascending.
 Unlike the two transforms below, it accepts a single image, because
 photographs of different sizes cannot share a batch until it has been
 applied.
+With @racket[generator] @racket[#f], the batch seed comes from
+@racket[(current-generator)].
 }
 
 @defproc[(random-crop [x tensor?]
@@ -398,6 +402,8 @@ Pads every image of the rank-4 batch @racket[x] with @racket[padding] zero
 pixels on each side and cuts a window of the original size at a per-image
 offset, torchvision's @tt{RandomCrop(32, padding=4)} for CIFAR-10. With
 @racket[padding] 0 it is the identity.
+With @racket[generator] @racket[#f], the batch seed comes from
+@racket[(current-generator)].
 }
 
 @section{ResNet}

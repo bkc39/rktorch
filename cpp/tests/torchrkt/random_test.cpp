@@ -216,4 +216,73 @@ TEST(TorchrktRandom, RandpermWithoutGeneratorAndErrors) {
   EXPECT_EQ(tr_randperm(-1, nullptr), nullptr);
 }
 
+std::vector<float> drawn_on(bool normal, tr_generator* g) {
+  const std::vector<int64_t> dims = {5};
+  tr_tensor* t =
+      normal
+          ? tr_randn_gen_on(dims.data(), 1, TR_DEVICE_CPU, 0, TR_DTYPE_KEEP, g)
+          : tr_rand_gen_on(dims.data(), 1, TR_DEVICE_CPU, 0, TR_DTYPE_KEEP, g);
+  EXPECT_NE(t, nullptr) << tr_last_error();
+  std::vector<float> out = data_of(t);
+  tr_tensor_free(t);
+  return out;
+}
+
+TEST(TorchrktRandom, RandOnDrawsFromItsGenerator) {
+  for (const bool normal : {false, true}) {
+    ASSERT_EQ(tr_manual_seed(9), 0) << tr_last_error();
+    const std::vector<float> global = drawn_on(normal, nullptr);
+    tr_generator* a = tr_generator_new(9);
+    tr_generator* b = tr_generator_new(9);
+    ASSERT_NE(a, nullptr) << tr_last_error();
+    ASSERT_NE(b, nullptr) << tr_last_error();
+    ASSERT_EQ(tr_manual_seed(9), 0) << tr_last_error();
+    const std::vector<float> from_a = drawn_on(normal, a);
+    EXPECT_EQ(drawn_on(normal, nullptr), global)
+        << "a generator's draw leaves the global stream alone";
+    EXPECT_EQ(drawn_on(normal, b), from_a) << "same seed, same draw";
+    EXPECT_NE(drawn_on(normal, a), from_a) << "the stream continues";
+    tr_generator_free(a);
+    tr_generator_free(b);
+  }
+}
+
+std::vector<float> drawn_without_generator(bool normal) {
+  const std::vector<int64_t> dims = {5};
+  tr_tensor* t =
+      normal ? tr_randn_on(dims.data(), 1, TR_DEVICE_CPU, 0, TR_DTYPE_KEEP)
+             : tr_rand_on(dims.data(), 1, TR_DEVICE_CPU, 0, TR_DTYPE_KEEP);
+  EXPECT_NE(t, nullptr) << tr_last_error();
+  std::vector<float> out = data_of(t);
+  tr_tensor_free(t);
+  return out;
+}
+
+TEST(TorchrktRandom, RandOnWithoutGeneratorDrawsTheGlobalStream) {
+  for (const bool normal : {false, true}) {
+    ASSERT_EQ(tr_manual_seed(9), 0) << tr_last_error();
+    const std::vector<float> old_symbol = drawn_without_generator(normal);
+    ASSERT_EQ(tr_manual_seed(9), 0) << tr_last_error();
+    EXPECT_EQ(drawn_on(normal, nullptr), old_symbol)
+        << "a NULL generator is the global stream, as without one";
+  }
+}
+
+TEST(TorchrktRandom, RandGenOnRejectsCpuGeneratorOffCpu) {
+  tr_generator* g = tr_generator_new(9);
+  ASSERT_NE(g, nullptr) << tr_last_error();
+  const std::vector<int64_t> dims = {5};
+  for (const tr_device_type type : {TR_DEVICE_CUDA, TR_DEVICE_MPS}) {
+    EXPECT_EQ(tr_randn_gen_on(dims.data(), 1, type, 0, TR_DTYPE_KEEP, g),
+              nullptr);
+    EXPECT_NE(std::string(tr_last_error()), "");
+    EXPECT_EQ(tr_rand_gen_on(dims.data(), 1, type, 0, TR_DTYPE_KEEP, g),
+              nullptr);
+    EXPECT_NE(std::string(tr_last_error()), "");
+  }
+  EXPECT_EQ(tr_rand_gen_on(nullptr, 2, TR_DEVICE_CPU, 0, TR_DTYPE_KEEP, g),
+            nullptr);
+  tr_generator_free(g);
+}
+
 }  // namespace

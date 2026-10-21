@@ -64,11 +64,14 @@ family accepts the whole of @racket[dtype/c].
 @defproc[(randn [dim exact-nonnegative-integer?] ...
                 [#:device device device/c #f]
                 [#:dtype dtype (or/c 'float32 'float64) #f]
-                [#:requires-grad? requires-grad? boolean? #f])
+                [#:requires-grad? requires-grad? boolean? #f]
+                [#:generator generator (or/c generator? #f) #f])
          tensor?]{
-Draws each element independently from the standard normal distribution.
-The dtype must be a floating-point one. Seed the generator with
-@racket[manual-seed!] to repeat a draw.
+Draws each element independently from the standard normal distribution,
+from @racket[generator] or else from @racket[(current-generator)], as
+@tt{torch.randn(..., generator=g)}. The dtype must be a floating-point
+one. Seed the global generator with @racket[manual-seed!] to repeat a
+draw. A generator is a CPU one, so it draws only a CPU tensor.
 
 @torch-examples[
 (manual-seed! 0)
@@ -100,7 +103,8 @@ It stays @racket['float32] by default, so
 @defproc[(rand [dim exact-nonnegative-integer?] ...
                [#:device device device/c #f]
                [#:dtype dtype (or/c 'float32 'float64) #f]
-               [#:requires-grad? requires-grad? boolean? #f])
+               [#:requires-grad? requires-grad? boolean? #f]
+               [#:generator generator (or/c generator? #f) #f])
          tensor?]{
 As @racket[randn], drawing uniformly from @tt{[0, 1)}.}
 
@@ -149,18 +153,22 @@ The @racket[n] by @racket[m] identity, ones on the diagonal.
               @defproc[(randn-like [t tensor?]
                                    [#:device device device/c #f]
                                    [#:dtype dtype (or/c 'float32 'float64) #f]
-                                   [#:requires-grad? requires-grad? boolean? #f])
+                                   [#:requires-grad? requires-grad? boolean? #f]
+                                   [#:generator generator (or/c generator? #f) #f])
                        tensor?]
               @defproc[(rand-like [t tensor?]
                                   [#:device device device/c #f]
                                   [#:dtype dtype (or/c 'float32 'float64) #f]
-                                  [#:requires-grad? requires-grad? boolean? #f])
+                                  [#:requires-grad? requires-grad? boolean? #f]
+                                  [#:generator generator (or/c generator? #f) #f])
                        tensor?])]{
 Each constructor with @racket[t]'s shape, device and dtype unless
 overridden, as @tt{torch.ones_like} and friends; @racket[zeros-like] is
 described with @racket[zeros]. The @racket[value] given to
 @racket[full-like] must satisfy @racket[fill-value/c] at the dtype it
-builds, so @racket[(full-like (zeros 2) 1e300)] is refused. The noise a
+builds, so @racket[(full-like (zeros 2) 1e300)] is refused.
+@racket[randn-like] and @racket[rand-like] draw from @racket[generator]
+or else from @racket[(current-generator)]. The noise a
 diffusion step adds is @racket[(randn-like x0)], so it lands where the
 images live.
 

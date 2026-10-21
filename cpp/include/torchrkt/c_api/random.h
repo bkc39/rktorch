@@ -30,6 +30,17 @@ int tr_tensor_uniform_(tr_tensor* t, double low, double high);
  * on NULL); NULL on error. */
 typedef struct tr_generator tr_generator;
 
+/* tr_randn_on / tr_rand_on with torch.randn / torch.rand(generator=g): they
+ * draw from g, or from the chosen device's default generator when g is NULL.
+ * A CPU g with a non-CPU device fails cleanly. */
+tr_tensor* tr_randn_gen_on(const int64_t* dims, int64_t ndim,
+                           tr_device_type type, int64_t index, tr_dtype dtype,
+                           tr_generator* g);
+
+tr_tensor* tr_rand_gen_on(const int64_t* dims, int64_t ndim,
+                          tr_device_type type, int64_t index, tr_dtype dtype,
+                          tr_generator* g);
+
 tr_generator* tr_generator_new(uint64_t seed);
 
 void tr_generator_free(tr_generator* g);

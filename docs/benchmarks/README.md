@@ -94,6 +94,13 @@ median, quartiles and IQR, and the load average before and after.
   pauses and periodic syncs count; the median interval is kept beside it.
   The first optimizer to step is the one timed, except in 15-finetune,
   where it is the last to start (the fine-tune phase).
+  `loader` is a workload, not an example: `scripts/bench/workloads/loader.rkt`
+  takes one tiny step per batch, so its steps per second are the loader's
+  batches per second (#168). `DATASET=folder` decodes hymenoptera's training
+  JPEGs in the shim and needs `--cache`; `DATASET=racket` does
+  `DECODE_WORK` passes (4, about 2 ms) of pure-Racket work per sample over
+  `SAMPLES` (2048). `WORKERS` (0), `PREFETCH` (2) and `BATCH` (16) set the
+  loader.
 
 | example | short | full | timed |
 |---|---|---|---|

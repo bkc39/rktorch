@@ -20,4 +20,5 @@
     ("12-char-rnn.rkt" 300)
     ("13-translation.rkt" 600)
     ("14-imagenet.rkt" 300)
-    ("15-finetune.rkt" 600)))
+    ("15-finetune.rkt" 600)
+    ("17-workers.rkt" 300)))

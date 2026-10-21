@@ -28,6 +28,7 @@
          e2e-cases)
 
 (define-runtime-path examples-dir "../../examples/test")
+(define-runtime-path workloads-dir "workloads")
 (define-runtime-path recorder "training.rkt")
 
 (struct example (name short full epochs-var warmup optimizer) #:transparent)
@@ -47,7 +48,10 @@
                  '(("FEATURE_EPOCHS" . 0) ("FINETUNE_EPOCHS" . 3))
                  '(("FEATURE_EPOCHS" . 0) ("FINETUNE_EPOCHS" . 15))
                  "FINETUNE_EPOCHS" 0 'last)
-        (example "16-style-transfer" '(("STEPS" . 100)) '(("STEPS" . 1000)) #f 20 'first)))
+        (example "16-style-transfer" '(("STEPS" . 100)) '(("STEPS" . 1000)) #f 20 'first)
+        (example "loader" '(("EPOCHS" . 2)) '(("EPOCHS" . 5)) "EPOCHS" 0 'first)))
+
+(define runner-dirs (hash "loader" workloads-dir))
 
 (define (find-examples names)
   (for/list ([n (in-list names)])
@@ -154,7 +158,8 @@
        (list (subprocess-status child) (not exited?))))))
 
 (define (example-runner ex)
-  (build-path examples-dir (string-append (example-name ex) ".rkt")))
+  (build-path (hash-ref runner-dirs (example-name ex) examples-dir)
+              (string-append (example-name ex) ".rkt")))
 
 (define (step-hook? torch-dir)
   (or (file-exists? (build-path torch-dir "private" "step-log.rkt"))
@@ -303,6 +308,8 @@
     (check-equal? (map example-name (find-examples '("05" "16")))
                   '("05-mnist" "16-style-transfer"))
     (check-exn #rx"no example named 99" (lambda () (find-examples '("99"))))
+    (check-true (file-exists? (example-runner (car (find-examples '("loader")))))
+                "a workload's runner is found in its own directory")
     (check-equal? (example-env (car examples) 'full) '(("EPOCHS" . 3)))
     (check-equal? (cdr (assoc "STEPS" (example-env (cadr examples) 'short))) 300))
 

@@ -6,7 +6,7 @@
 (module+ test
   (require (only-in json string->jsexpr)
            (only-in racket/file file->bytes make-temporary-file)
-           (only-in racket/list append* append-map make-list range)
+           (only-in racket/list append* append-map make-list range split-at)
            rackunit
            "../data/loader.rkt"
            "../main.rkt"
@@ -1209,6 +1209,64 @@
          (check-equal? (partial (cadr case) (caddr case))
                        (hash-ref (hash-ref j 'partial_orders) (car case))
                        (format "partial traversal ~a" (car case))))
+       (define (drawing-collate items)
+         (values (stack (map car items))
+                 (draw-seed)
+                 (tensor->list (randperm 4))
+                 (~> (ones 5) (multinomial 2) tensor->list)
+                 (tensor->list (rand 3))
+                 (tensor->list (randn 3))))
+       (define (workers-loader g nw pf batch drop-last? shuffle?)
+         (dataloader ids #:batch-size batch #:shuffle? shuffle?
+                     #:drop-last? drop-last? #:generator g
+                     #:collate drawing-collate #:workers nw #:prefetch pf))
+       (define (drawn-batches loader [limit +inf.0])
+         (for/list ([_ (in-range limit)]
+                    [(x seed perm picks uniform normal) loader])
+           (list (tensor->list x) seed perm picks uniform normal)))
+       (define (check-drawn-batches racket python what)
+         (check-equal? (length racket) (length python) what)
+         (for ([r (in-list racket)] [p (in-list python)] [i (in-naturals)])
+           (define-values (r-exact r-floats) (split-at r 4))
+           (define-values (p-exact p-floats) (split-at p 4))
+           (check-equal? r-exact p-exact (format "~a, batch ~a" what i))
+           (for* ([(rs ps) (in-parallel r-floats p-floats)]
+                  [(rv pv) (in-parallel rs ps)])
+             (check-= rv pv tol (format "~a, batch ~a draws" what i)))))
+       (for* ([np (in-list '((1 1) (2 2) (3 1)))]
+              [batch (in-list '(4 5))]
+              [drop-last? (in-list '(#f #t))]
+              [shuffle? (in-list '(#f #t))]
+              [take-n (in-list '(0 1 all))])
+         (define key
+           (string->symbol
+            (format "w~ap~ab~a~a~at~a" (car np) (cadr np) batch
+                    (if drop-last? "d" "") (if shuffle? "s" "") take-n)))
+         (define expected (hash-ref (hash-ref j 'workers) key))
+         (define g (make-generator 11))
+         (define loader
+           (workers-loader g (car np) (cadr np) batch drop-last? shuffle?))
+         (define taken
+           (if (eq? take-n 'all) (dataloader-length loader) take-n))
+         (define first-batches (drawn-batches loader taken))
+         (check-drawn-batches first-batches (hash-ref expected 'first)
+                              (format "workers: batch order matches DataLoader(num_workers=N) ~a"
+                                      key))
+         (check-equal? (tensor->list (randperm n #:generator g))
+                       (hash-ref expected 'then)
+                       (format "workers: the generator after a partial traversal matches ~a"
+                               key))
+         (for ([e (in-list (hash-ref expected 'epochs))] [k (in-naturals)])
+           (check-drawn-batches (drawn-batches loader) e
+                                (format "workers: per-batch worker draws match manual_seed(base + id) ~a epoch ~a"
+                                        key k))))
+       (manual-seed! 3)
+       (for ([_e (in-range 2)])
+         (drawn-batches (workers-loader #f 2 2 4 #f #t)))
+       (for ([r (in-list (tensor->list (randn 3)))]
+             [p (in-list (hash-ref j 'after_global_workers))]
+             [i (in-naturals)])
+         (check-= r p tol (format "workers: the global stream after traversals matches ~a" i)))
        (manual-seed! 0)
        (define model (Linear 3 1))
        (define opt (sgd (parameters model) #:lr 0.1))

@@ -24,6 +24,7 @@
                   integer-in
                   list/c
                   or/c
+                  parameter/c
                   unsupplied-arg?)
          (only-in racket/list append-map)
          (only-in racket/match match)
@@ -66,10 +67,11 @@
                   tr-zeros-on/raw)
          (only-in "raw/random.rkt"
                   Generator?
+                  current-generator/raw
                   tr-generator-draw-seed/raw
                   tr-generator-new/raw
-                  tr-rand-on/raw
-                  tr-randn-on/raw
+                  tr-rand-gen-on/raw
+                  tr-randn-gen-on/raw
                   tr-randperm/raw)
          (only-in "structs.rkt" tensor? wrap-tensor))
 
@@ -149,20 +151,6 @@
     [_ (shaped 'full tr-full-on/raw dims device dtype requires-grad?
                (exact->inexact value))]))
 
-(define/contract-out (randn #:device [device #f] #:dtype [dtype #f]
-                            #:requires-grad? [requires-grad? #f]
-                            . dims)
-  (->* [] [#:device device/c #:dtype any-float-dtype/c #:requires-grad? boolean?]
-       #:rest shape-rest/c tensor?)
-  (shaped 'randn tr-randn-on/raw dims device dtype requires-grad?))
-
-(define/contract-out (rand #:device [device #f] #:dtype [dtype #f]
-                           #:requires-grad? [requires-grad? #f]
-                           . dims)
-  (->* [] [#:device device/c #:dtype any-float-dtype/c #:requires-grad? boolean?]
-       #:rest shape-rest/c tensor?)
-  (shaped 'rand tr-rand-on/raw dims device dtype requires-grad?))
-
 (struct generator-impl (handle)
   #:reflection-name 'generator
   #:property prop:cpointer 0
@@ -181,6 +169,41 @@
 
 (define/checked-out (generator? v) (-> any/c boolean?) ;; noqa
   (and (generator-impl? v) (Generator? (generator-impl-handle v))))
+
+(define/contract-out current-generator ;; noqa
+  (parameter/c (or/c generator? #f))
+  current-generator/raw)
+
+(define (drawn who raw dims device dtype requires-grad? generator)
+  (define shape (shape-of dims))
+  (define-values (type index dt) (placement device dtype))
+  (finish (wrap who (raw (list->s64vector shape) (length shape) type index dt
+                         generator))
+          requires-grad?))
+
+(define/contract-out (randn #:device [device #f] #:dtype [dtype #f]
+                            #:requires-grad? [requires-grad? #f]
+                            #:generator [generator #f]
+                            . dims)
+  (->* []
+       [#:device device/c
+        #:dtype any-float-dtype/c
+        #:requires-grad? boolean?
+        #:generator (or/c generator? #f)]
+       #:rest shape-rest/c tensor?)
+  (drawn 'randn tr-randn-gen-on/raw dims device dtype requires-grad? generator))
+
+(define/contract-out (rand #:device [device #f] #:dtype [dtype #f]
+                           #:requires-grad? [requires-grad? #f]
+                           #:generator [generator #f]
+                           . dims)
+  (->* []
+       [#:device device/c
+        #:dtype any-float-dtype/c
+        #:requires-grad? boolean?
+        #:generator (or/c generator? #f)]
+       #:rest shape-rest/c tensor?)
+  (drawn 'rand tr-rand-gen-on/raw dims device dtype requires-grad? generator))
 
 (define/contract-out (randperm n #:generator [generator #f]) ;; noqa
   (->* [size/c] [#:generator (or/c generator? #f)] tensor?)
@@ -225,21 +248,29 @@
         #:requires-grad? requires-grad?))
 
 (define/contract-out (randn-like t #:device [device #f] #:dtype [dtype #f] ;; noqa
-                                 #:requires-grad? [requires-grad? #f])
+                                 #:requires-grad? [requires-grad? #f]
+                                 #:generator [generator #f])
   (->* [tensor?]
-       [#:device device/c #:dtype any-float-dtype/c #:requires-grad? boolean?]
+       [#:device device/c
+        #:dtype any-float-dtype/c
+        #:requires-grad? boolean?
+        #:generator (or/c generator? #f)]
        tensor?)
   (define-values (dev dt) (like t device dtype))
-  (randn (tensor-shape t) #:device dev #:dtype dt
+  (randn (tensor-shape t) #:device dev #:dtype dt #:generator generator
          #:requires-grad? requires-grad?))
 
 (define/contract-out (rand-like t #:device [device #f] #:dtype [dtype #f] ;; noqa
-                                #:requires-grad? [requires-grad? #f])
+                                #:requires-grad? [requires-grad? #f]
+                                #:generator [generator #f])
   (->* [tensor?]
-       [#:device device/c #:dtype any-float-dtype/c #:requires-grad? boolean?]
+       [#:device device/c
+        #:dtype any-float-dtype/c
+        #:requires-grad? boolean?
+        #:generator (or/c generator? #f)]
        tensor?)
   (define-values (dev dt) (like t device dtype))
-  (rand (tensor-shape t) #:device dev #:dtype dt
+  (rand (tensor-shape t) #:device dev #:dtype dt #:generator generator
         #:requires-grad? requires-grad?))
 
 (define/contract-out (arange a [b #f] [c #f]

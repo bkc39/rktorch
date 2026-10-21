@@ -59,8 +59,8 @@ The indices half of @racket[sort].
 Draws @racket[num-samples] category indices per row of
 @racket[probabilities], a vector or a matrix of non-negative weights that
 need not sum to one, as PyTorch's @tt{torch.multinomial}. The draw comes
-from @racket[generator]'s stream, or the global one seeded by
-@racket[manual-seed!]; under a shared seed the indices match PyTorch's on
+from @racket[generator]'s stream, or else from @racket[(current-generator)],
+by default the global one seeded by @racket[manual-seed!]; under a shared seed the indices match PyTorch's on
 the CPU. Sampling a token at a temperature:
 
 @racketblock[
