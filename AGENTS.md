@@ -545,8 +545,8 @@ follows NEEDED entries only, so a dlopened library slips past it. The
 fail it. Every fetched source is pinned by sha256 in `sources.txt`, and the
 build's caches are keyed on those sums. The scripts never commit a library.
 
-The macOS package is built only by `.github/workflows/platform-macos.yml`,
-one `macos/build.sh <work> <step>` per step, for the deployment target in
+The macOS package is built only by `.github/workflows/platform-macos-build.yml`,
+which `platform-macos.yml` calls, one `macos/build.sh <work> <step>` per step, for the deployment target in
 `macos/deployment-target`; [`docs/building.md`](docs/building.md#arm64-macos)
 has the triggers, what `macos/audit-bundle.sh` fails on and its negative
 control.
@@ -982,11 +982,11 @@ uncontracted copy of the pipeline, which has not been built.
 `platform-linux-build.yml` proves the Linux zip builds, audits, passes its
 gtests and does not exceed its size budget. `platform-linux.yml` proves it
 installs and passes the smoke on ubuntu-24.04 and `rockylinux:8`, and that the
-manual renders with all its deps declared. `platform-macos.yml` proves
+manual renders with all its deps declared. `platform-macos-build.yml` proves
 `torch-aarch64-macosx` builds, audits, installs and passes the smoke on
-`macos-latest`, passes the CPU suites on `macos-14` (whose runners advertise
-MPS but cannot allocate on it), and, weekly or when asked, that its MPS tests
-pass. `pkg-build.yml` proves the package build server's own tool accepts the
+`macos-latest`; `platform-macos.yml` calls it and proves the zip passes the
+CPU suites on `macos-14` (whose runners advertise MPS but cannot allocate on
+it), and, weekly or when asked, that its MPS tests pass. `pkg-build.yml` proves the package build server's own tool accepts the
 Linux zip (see [The package build server](#the-package-build-server)).
 `release.yml`, on a `v*` tag, checks the versions and the ABI stamp
 (`scripts/release/`, tested by the `release-test` and `release-current`

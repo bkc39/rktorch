@@ -138,9 +138,12 @@ A draft can be deleted.
 2. A line in `scripts/release/release.rktd`'s `platform-zips`: its zip's path
    under the directory the `assemble` job downloads every `torch-*` artifact
    into. The zip's file name is the package's name.
-3. A job in `release.yml` calling the workflow that builds it, added to the
-   `assemble` job's `needs` and its `if`, and a `carried` matrix entry for a
-   runner that installs it. That workflow joins `natives-inputs`. A job that
-   needs a job which may be skipped states `!cancelled()`, `always()`,
-   `success()` or `failure()` in its `if`; `raco test scripts/release` fails
-   otherwise, since GitHub's implicit `success()` would skip it.
+3. A job in `release.yml` calling the workflow that builds and installs it,
+   added to the `assemble` job's `needs` and its `if`, and a `carried` matrix
+   entry for a runner that installs it. The reusable `*-build.yml` workflow
+   that workflow calls joins `natives-inputs`; its install jobs do not. A job
+   that needs a job which may be skipped states `!cancelled()`, `always()` or
+   `failure()` in its `if`, and a job without an `if` needs no two jobs
+   skipped on different conditions; `raco test scripts/release` fails
+   otherwise, since GitHub's implicit `success()`, written or not, would skip
+   it.

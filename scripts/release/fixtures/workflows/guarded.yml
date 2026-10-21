@@ -58,8 +58,9 @@ jobs:
         uses: "./.github/actions/draft"
       - run: echo draft
 
+  # success() is fine when nothing the job needs may be skipped
   publish:
-    needs: draft
+    needs: plan
     if: success() && github.ref_type == 'tag'
     runs-on: ubuntu-24.04
     steps:

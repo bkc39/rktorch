@@ -149,16 +149,23 @@
     [(list _ path) path]
     [_ (refuse "git ls-tree printed ~s, not <mode> <type> <object>\\t<path>" line)]))
 
-(define/contract (natives-inputs-digest lines excluded)
-  (-> (listof string?) (listof string?) string?)
+(define (tracked? path entry)
+  (or (string=? path entry) (string-prefix? path (string-append entry "/"))))
+
+(define/contract (natives-inputs-digest lines inputs excluded)
+  (-> (listof string?) (listof string?) (listof string?) string?)
   (define paths (map ls-tree-path lines))
-  (define stale
-    (filter-not (λ (entry) (for/or ([path (in-list paths)]) (excluded? path (list entry))))
-                excluded))
+  (define (stale entries matches?)
+    (filter-not (λ (entry) (for/or ([path (in-list paths)]) (matches? path entry))) entries))
+  (define untracked-inputs (stale inputs tracked?))
+  (define stale-excludes (stale excluded (λ (path entry) (excluded? path (list entry)))))
   (cond
-    [(pair? stale)
+    [(pair? untracked-inputs)
+     (refuse "scripts/release/release.rktd names ~s as natives' inputs, but git tracks no such path"
+             untracked-inputs)]
+    [(pair? stale-excludes)
      (refuse "scripts/release/release.rktd excludes ~s from the natives' inputs, but git tracks no such file"
-             stale)]
+             stale-excludes)]
     [else
      (define kept
        (for/list ([line (in-list lines)]
@@ -181,7 +188,7 @@
     [(not listed?)
      (refuse "git ls-tree -r HEAD -- ~a failed in ~a" (string-join inputs " ") root)]
     [else
-     (natives-inputs-digest (string-split (get-output-string out) "\n") excluded)]))
+     (natives-inputs-digest (string-split (get-output-string out) "\n") inputs excluded)]))
 
 (define/contract (natives-plan checked previous)
   (-> (hash/c symbol? string?) (or/c #f jsexpr?) (values boolean? string?))

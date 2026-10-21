@@ -263,7 +263,7 @@ library is re-signed ad hoc (`codesign --force --sign -`), since arm64 macOS
 refuses to load code whose signature no longer matches.
 
 A Linux host can neither build nor load any of this, so
-`.github/workflows/platform-macos.yml` builds it on `macos-latest`
+`.github/workflows/platform-macos-build.yml` builds it on `macos-latest`
 ([below](#continuous-integration-and-the-binary-cache) has when). Each step is
 one call on a Mac:
 
@@ -553,7 +553,8 @@ installs, so the platform packages have lanes of their own:
   cannot. The job then runs `scripts/build-docs` and uploads the manual as
   `torch-manual`. The lane runs on pull requests that touch the paths listed
   in the workflow, on every push to master, weekly, and on demand.
-- **`platform-macos.yml`.** Its `build` job, on `macos-latest`, builds,
+- **`platform-macos.yml`.** Its `build` job, the reusable
+  `platform-macos-build.yml`, on `macos-latest`, builds,
   audits (with the negative control) and gtests `torch-aarch64-macosx`, then
   assembles and budgets the zip and runs the full smoke at Racket 9.1.
   `install`, on `macos-14`, runs only the CPU suites at Racket 9.1 and 9.3,

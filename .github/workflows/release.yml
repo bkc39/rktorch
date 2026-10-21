@@ -32,7 +32,7 @@ jobs:
     env:
       TAG: ${{ github.ref_type == 'tag' && github.ref_name || inputs.tag }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -67,7 +67,9 @@ jobs:
           except=()
           if [ -n "$TAG" ]; then except=(--except "$TAG"); fi
           gh api --paginate "repos/$GITHUB_REPOSITORY/releases" >"$RUNNER_TEMP/releases.json"
-          mapfile -t published < <(racket scripts/release/release.rkt published "${except[@]}" "$RUNNER_TEMP/releases.json")
+          out=$(racket scripts/release/release.rkt published "${except[@]}" "$RUNNER_TEMP/releases.json")
+          published=()
+          if [ -n "$out" ]; then mapfile -t published <<<"$out"; fi
           for tag in "${published[@]}"; do
             gh release download "$tag" --repo "$GITHUB_REPOSITORY" \
               --pattern manifest.json --dir "$RUNNER_TEMP/manifests/$tag"
@@ -94,7 +96,7 @@ jobs:
           racket scripts/release/release.rkt plan "${args[@]}" | tee -a "$GITHUB_OUTPUT"
 
       - name: Keep the previous release's manifest and entries
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: release-previous
           path: ${{ runner.temp }}/previous/
@@ -131,7 +133,7 @@ jobs:
       PACKAGE: ${{ matrix.package }}
       NATIVES_TAG: ${{ needs.plan.outputs.natives-tag }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
 
@@ -163,8 +165,10 @@ jobs:
       - name: The carried LGPL sources are still attached
         run: |
           set -euo pipefail
-          mapfile -t urls < <(racket scripts/release/release.rkt carried-sources \
+          out=$(racket scripts/release/release.rkt carried-sources \
             "$RUNNER_TEMP/previous/manifest.json" "$GITHUB_REPOSITORY")
+          urls=()
+          if [ -n "$out" ]; then mapfile -t urls <<<"$out"; fi
           for url in "${urls[@]}"; do
             curl -fsSIL --retry 3 -o /dev/null "$url"
           done
@@ -187,7 +191,7 @@ jobs:
       TAG: ${{ needs.plan.outputs.tag }}
       BUILD_NATIVES: ${{ needs.plan.outputs.build-natives }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
 
@@ -215,7 +219,9 @@ jobs:
         if: needs.plan.outputs.build-natives == 'true'
         run: |
           set -euo pipefail
-          mapfile -t files < <(racket scripts/release/release.rkt lgpl-sources)
+          out=$(racket scripts/release/release.rkt lgpl-sources)
+          files=()
+          if [ -n "$out" ]; then mapfile -t files <<<"$out"; fi
           scripts/platform/fetch.sh "$RUNNER_TEMP/sources" "${files[@]}"
 
       - name: Assemble
@@ -234,7 +240,7 @@ jobs:
 
       - name: Upload the assets
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: release-assets
           if-no-files-found: warn

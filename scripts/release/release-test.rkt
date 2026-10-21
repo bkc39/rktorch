@@ -103,23 +103,28 @@
   (define source (ls-tree-line "cpp/src/a.cpp" #\1))
   (define test-source (ls-tree-line "cpp/tests/a-test.cpp" #\2))
   (define info (ls-tree-line "pkgs/info.rkt" #\3))
+  (define inputs '("cpp" "pkgs"))
   (define excluded '("cpp/tests/" "pkgs/info.rkt"))
-  (define digest (natives-inputs-digest (list source test-source info) excluded))
-  (check-equal? (natives-inputs-digest (list source
-                                             (ls-tree-line "cpp/tests/a-test.cpp" #\9)
-                                             (ls-tree-line "pkgs/info.rkt" #\9))
-                                       excluded)
-                digest)
-  (check-not-equal? (natives-inputs-digest (list (ls-tree-line "cpp/src/a.cpp" #\9) test-source info)
-                                           excluded)
-                    digest)
-  (check-not-equal? (natives-inputs-digest
-                     (list source test-source (ls-tree-line "cpp/testsuite.cpp" #\4) info)
-                     excluded)
-                    digest
+  (define (digest . lines) (natives-inputs-digest lines inputs excluded))
+  (define first (digest source test-source info))
+  (check-equal? (digest source
+                        (ls-tree-line "cpp/tests/a-test.cpp" #\9)
+                        (ls-tree-line "pkgs/info.rkt" #\9))
+                first)
+  (check-not-equal? (digest (ls-tree-line "cpp/src/a.cpp" #\9) test-source info) first)
+  (check-not-equal? (digest source test-source (ls-tree-line "cpp/testsuite.cpp" #\4) info)
+                    first
                     "an excluded directory covers only the paths under it")
   (refused #rx"excludes \\(\"cpp/gone.sh\"\\) from the natives' inputs, but git tracks no such file"
-           (λ () (natives-inputs-digest (list source test-source info) (cons "cpp/gone.sh" excluded)))))
+           (λ () (natives-inputs-digest (list source test-source info) inputs (cons "cpp/gone.sh" excluded)))))
+
+(test-case "a natives' input that names no tracked path fails rather than hashing nothing"
+  (define lines (list (ls-tree-line "cpp/src/a.cpp" #\1) (ls-tree-line "pkgs/info.rkt" #\3)))
+  (check-true (string? (natives-inputs-digest lines '("cpp" "pkgs/info.rkt") '())))
+  (refused #rx"names \\(\"scripts/platfrom\"\\) as natives' inputs, but git tracks no such path"
+           (λ () (natives-inputs-digest lines '("cpp" "pkgs" "scripts/platfrom") '())))
+  (refused #rx"names \\(\"cpp/sr\"\\) as natives' inputs"
+           (λ () (natives-inputs-digest lines '("cpp/sr" "pkgs") '()))))
 
 (define (git dir . args)
   (check-true

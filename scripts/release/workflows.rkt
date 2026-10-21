@@ -1,7 +1,7 @@
 #lang racket/base
 (require (only-in racket/contract/base -> cons/c listof)
          (only-in racket/contract/region define/contract)
-         (only-in racket/list dropf remove-duplicates splitf-at takef)
+         (only-in racket/list append* dropf remove-duplicates splitf-at takef)
          (only-in racket/match match match*)
          (only-in racket/string string-join string-split string-trim)
          (only-in "checks.rkt" refuse))
@@ -48,7 +48,7 @@
      (define keys (job-keys more))
      (match (regexp-match #px"^    ([A-Za-z_-]+):\\s*(.*)$" line)
        [(list _ key inline) (hash-set keys key (cons (string-trim inline) continued))]
-       [#f keys])]))
+       [#f (refuse "expected a job's key: indented by four spaces, got ~s" line)])]))
 
 (define (unquote-scalar text)
   (match (regexp-match #px"^\\s*([\"']?)(.*?)\\1\\s*(#.*)?$" text)
@@ -64,6 +64,8 @@
          [#f (refuse "expected a - item under needs:, got ~s" item)]))]
     [(cons (pregexp #px"^\\[(.*)\\]\\s*(#.*)?$" (list _ items _)) _)
      (map unquote-scalar (string-split items ","))]
+    [(cons (and inline (pregexp #px"^\\[")) _)
+     (refuse "expected needs: [...] closed on its line, got ~s" inline)]
     [(cons inline _) (list (unquote-scalar inline))]))
 
 (define (scalar-value value)
@@ -106,15 +108,27 @@
         (job-name j)))
     (if (null? more) names (grow (append names more)))))
 
-(define status-function #px"\\b(always|cancelled|failure|success)\\s*\\(")
+(define status-function #px"\\b(always|cancelled|failure)\\s*\\(")
+
+(define (skip-conditions by-name name seen)
+  (match (hash-ref by-name name #f)
+    [#f '()]
+    [(job _ _ (? string? condition) _ _ _) (list condition)]
+    [(job _ needs #f _ _ _)
+     (remove-duplicates
+      (append* (for/list ([need (in-list needs)] #:unless (member need seen))
+                 (skip-conditions by-name need (cons need seen)))))]))
 
 (define/contract (unguarded-jobs jobs)
   (-> (listof job?) (listof string?))
   (define names (skippable jobs))
+  (define by-name (for/hash ([j (in-list jobs)]) (values (job-name j) j)))
   (for/list ([j (in-list jobs)]
-             #:when (job-condition j)
-             #:unless (regexp-match? status-function (job-condition j))
-             #:when (needs-any? j names))
+             #:when (match j
+                      [(job name _ #f _ _ _)
+                       (>= (length (skip-conditions by-name name (list name))) 2)]
+                      [(job _ _ condition _ _ _)
+                       (and (not (regexp-match? status-function condition)) (needs-any? j names))]))
     (job-name j)))
 
 (define/contract (called-workflows jobs)
@@ -128,7 +142,6 @@
 (define/contract (unpinned-actions jobs)
   (-> (listof job?) (listof (cons/c string? string?)))
   (for*/list ([j (in-list jobs)]
-              #:when (job-writes? j)
               [action (in-list (job-actions j))]
               #:unless (regexp-match? #px"^\\./|@[0-9a-f]{40}$" action))
     (cons (job-name j) action)))

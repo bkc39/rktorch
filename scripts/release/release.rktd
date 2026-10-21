@@ -9,8 +9,7 @@
 
 (natives-inputs
  ".github/workflows/platform-linux-build.yml"
- ".github/workflows/platform-linux.yml"
- ".github/workflows/platform-macos.yml"
+ ".github/workflows/platform-macos-build.yml"
  "cpp"
  "pkgs"
  "scripts/platform")
