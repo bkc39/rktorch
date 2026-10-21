@@ -20,6 +20,8 @@ declare -A source_dir=(
   [cudnn]=$(jq -r .cudnn <<<"$paths")/lib
   [nvrtc]=$(jq -r .nvrtc <<<"$paths")
 )
+nix --max-jobs 1 --cores 4 build --no-link "$repo#packages.x86_64-linux.cpp-cuda"
+nix-store --realise "${source_dir[@]%/lib}" >/dev/null
 patchelf=$(nix --max-jobs 1 --cores 4 build --inputs-from "$repo" --no-link --print-out-paths nixpkgs#patchelf)/bin/patchelf
 
 # A package's libraries find each other through $ORIGIN, and the other
