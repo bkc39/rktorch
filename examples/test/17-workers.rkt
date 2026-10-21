@@ -63,6 +63,9 @@
 
   (for ([pixels (in-list (cons every-value images))])
     (check-equal? (pgm-decode (pgm-encode pixels)) pixels))
+  (check-equal? (pgm-decode (regexp-replace #px#"\\s+$" (pgm-encode every-value) #""))
+                every-value
+                "a PGM with no trailing whitespace lost its last pixel")
   (for ([pixels (in-list (list every-value (car images)))])
     (check-equal? (jitter pixels 0 0 0) (pixels->floats pixels)
                   "angle 0, shift 0 did not return the decoded image")

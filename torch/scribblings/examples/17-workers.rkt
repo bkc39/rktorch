@@ -57,7 +57,7 @@ seeded from the loader's generator, and @racket[random-jitter] applies them.
 (define (pgm-decode bs)
   (define pixels (make-bytes 784))
   (for/fold ([count -3] [value #f] #:result pixels)
-            ([b (in-bytes bs 2)])
+            ([b (in-sequences (in-bytes bs 2) (in-value 32))])
     (cond
       [(<= 48 b 57) (values count (+ (* 10 (or value 0)) (- b 48)))]
       [(not value) (values count #f)]
