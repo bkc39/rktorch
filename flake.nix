@@ -206,9 +206,15 @@
               ${./torch/foreign/raw/native-location.rkt} ${fixtures}/own-platform-unmapped/info.rkt
             grep -qF 'declares torch-aarch64-macosx with #:platform "x86_64-macosx", which platform-packages' "$TMPDIR/log"
             fails rd platform-packages ${fixtures}/own-platform-skew ${fixtures}/own-platform/pkgs
-            grep -qF 'torch-x86_64-linux has #:version "0.1"; ${fixtures}/own-platform-skew is version "0.2"' "$TMPDIR/log"
+            grep -qF 'torch-x86_64-linux has #:version "0.1"; ${fixtures}/own-platform-skew has native-version "0.2"' "$TMPDIR/log"
             fails rd platform-packages ${fixtures}/own-platform-ahead ${fixtures}/own-platform/pkgs
-            grep -qF 'torch-x86_64-linux is version "0.1"; ${fixtures}/own-platform-ahead is version "0.2"' "$TMPDIR/log"
+            grep -qF 'torch-x86_64-linux is version "0.1"; ${fixtures}/own-platform-ahead has native-version "0.2"' "$TMPDIR/log"
+            [ "$(rd platform-packages ${fixtures}/own-platform-split ${fixtures}/own-platform/pkgs x86_64-linux)" \
+              = "${fixtures}/own-platform/pkgs/torch-x86_64-linux" ]
+            fails rd platform-packages ${fixtures}/own-platform-unversioned ${fixtures}/own-platform/pkgs
+            grep -qF '${fixtures}/own-platform-unversioned has no native-version' "$TMPDIR/log"
+            fails rd platform-packages ${fixtures}/own-platform-bad-native ${fixtures}/own-platform/pkgs
+            grep -qF 'has native-version "0.1-alpha", which is not a valid Racket version' "$TMPDIR/log"
             mkdir "$TMPDIR/no-skeletons"
             fails rd platform-packages ${fixtures}/own-platform "$TMPDIR/no-skeletons"
             grep -q 'torch-x86_64-linux has no info.rkt with a version' "$TMPDIR/log"

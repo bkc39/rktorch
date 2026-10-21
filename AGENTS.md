@@ -493,7 +493,7 @@ Instead, the library-less skeleton under `pkgs/` is installed beside `torch`,
 and the staged shim wins over it. `racket-deps.rkt platform-packages
 <info-dir> <pkgs-dir> [<platform>]` names the skeletons that apply to the
 host (or to `<platform>`), and fails unless each dep's `#:version` and each
-skeleton's `version` equal torch's; `install-platform <info-dir> <pkgs-dir>
+skeleton's `version` equal torch's `native-version`; `install-platform <info-dir> <pkgs-dir>
 --copy|--link` installs them with `--deps fail`.
 Any other `#:platform` dep is refused, whether `torch/info.rkt` or a fetched
 package declares it: one hash cannot hold a per-system fetch. So is a
@@ -513,7 +513,8 @@ provisioning install the host's skeleton first with `install-platform`, so
 
 `pkgs/torch-x86_64-linux/` and `pkgs/torch-aarch64-macosx/` are the
 skeletons of the platform packages: each `info.rkt` (collection
-`torch-native`, version equal to torch's), a `THIRD-PARTY-NOTICES` and the
+`torch-native`, version equal to torch's `native-version`, which moves only
+when the compiled bytes do, apart from torch's `version`), a `THIRD-PARTY-NOTICES` and the
 licences only that platform bundles. The licences both carry (PyTorch's, stb's,
 the codecs') live once, in `scripts/platform/licenses/`, and `assemble.sh`
 adds them to the built package. `scripts/platform/linux/` builds the Linux

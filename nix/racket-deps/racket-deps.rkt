@@ -14,6 +14,8 @@
          (only-in setup/getinfo get-info/full)
          (only-in version/utils valid-version? version<=?))
 
+(provide platform-packages)
+
 (define manifest-name ".info-deps")
 
 (define (dep->string dep)
@@ -161,21 +163,30 @@
   (define wanted (dep-option dep '#:version))
   (define found (skeleton-version skeleton))
   (unless (equal? wanted version)
-    (raise-user-error 'racket-deps "~a has #:version ~s; ~a is version ~s"
+    (raise-user-error 'racket-deps "~a has #:version ~s; ~a has native-version ~s"
                       (dep-name dep) wanted info-dir version))
   (unless found
-    (raise-user-error 'racket-deps "~a has no info.rkt with a version; ~a is version ~s"
+    (raise-user-error 'racket-deps "~a has no info.rkt with a version; ~a has native-version ~s"
                       skeleton info-dir version))
   (unless (equal? found version)
-    (raise-user-error 'racket-deps "~a is version ~s; ~a is version ~s"
+    (raise-user-error 'racket-deps "~a is version ~s; ~a has native-version ~s"
                       skeleton found info-dir version)))
+
+(define (native-version info info-dir)
+  (define version
+    (info 'native-version
+          (λ () (raise-user-error 'racket-deps "~a has no native-version" info-dir))))
+  (if (and (string? version) (valid-version? version))
+      version
+      (raise-user-error 'racket-deps "~a has native-version ~s, which is not a valid Racket version"
+                        info-dir version)))
 
 (define/contract (platform-packages info-dir pkgs-dir
                                     #:platform [subpath (path->string (system-library-subpath #f))])
   (->* [directory-exists? directory-exists?] [#:platform string?] (listof path?))
   (define info (read-info info-dir))
-  (define version (info 'version (λ () "0.0")))
   (define own (filter own-platform-dep? (all-deps info)))
+  (define version (and (pair? own) (native-version info info-dir)))
   (define (skeleton dep) (build-path pkgs-dir (dep-name dep)))
   (for ([dep (in-list own)])
     (check-skeleton dep (skeleton dep) info-dir version))

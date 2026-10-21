@@ -38,7 +38,7 @@ reports. torch's own platform packages, such as `torch-x86_64-linux`, are left
 out of the fetch: the build and the shells install their library-less
 skeleton from `pkgs/` instead (see [The platform package](#the-platform-package)),
 after checking that the skeleton's version and the dep's `#:version` both
-equal torch's. Any other `#:platform` dep is refused, whether `torch/info.rkt`
+equal torch's `native-version`. Any other `#:platform` dep is refused, whether `torch/info.rkt`
 or a fetched package declares it: one hash cannot hold a per-system fetch. A
 package source (a URL or path) is refused too: racket-deps fetches catalog
 packages by name.
@@ -144,7 +144,8 @@ and the `abi-stamp-current` flake check fails until it is committed.
 ## The platform package
 
 `torch` depends on one platform package per supported host, each providing
-the collection `torch-native` at torch's own version: `torch-x86_64-linux`
+the collection `torch-native` at torch's `native-version` (which moves only
+when the compiled bytes do; [`releasing.md`](releasing.md#versions)): `torch-x86_64-linux`
 and `torch-aarch64-macosx`, each declared once for every platform string
 that names its host (below). Each holds `libtorchrkt`, libtorch 2.14.0's
 libraries from PyTorch's official zip, and libsndfile with its codecs as

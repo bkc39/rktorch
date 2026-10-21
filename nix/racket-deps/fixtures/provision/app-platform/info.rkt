@@ -1,6 +1,7 @@
 #lang info
 (define collection "rdfix-app")
 (define version "1.0")
+(define native-version "1.0")
 (define deps '("base" "rdfix-a"
                ("torch-x86_64-linux" #:platform "x86_64-linux" #:version "1.0")
                ("torch-x86_64-linux" #:platform "x86_64-linux-natipkg" #:version "1.0")
