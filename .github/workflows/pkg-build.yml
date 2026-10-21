@@ -9,6 +9,10 @@ on:
         description: "Racket release the server's VM installs"
         required: false
         default: "9.3"
+      platform_release:
+        description: "A published release whose torch-x86_64-linux.zip the catalog names by its https URL (empty: build the zip)"
+        required: false
+        default: ""
   pull_request:
     paths:
       - "scripts/pkg-build/**"
@@ -36,17 +40,20 @@ concurrency:
 
 jobs:
   build:
+    if: ${{ !inputs.platform_release }}
     uses: ./.github/workflows/platform-linux-build.yml
 
   pkg-build:
     name: pkg-build (torch, x86_64-linux-natipkg)
     needs: build
+    if: ${{ !cancelled() && (needs.build.result == 'success' || (needs.build.result == 'skipped' && inputs.platform_release)) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 150
     env:
       WORK: ${{ github.workspace }}/.scratch/pkg-build/platform
       OUT: ${{ github.workspace }}/.scratch/pkg-build/out
       PKG_BUILD_RACKET: ${{ github.event.inputs.racket_version || '9.3' }}
+      PLATFORM_RELEASE: ${{ inputs.platform_release }}
     steps:
       - uses: actions/checkout@v5
 
@@ -58,10 +65,22 @@ jobs:
           free -m
 
       - name: Download the Linux package
+        if: ${{ !inputs.platform_release }}
         uses: actions/download-artifact@v4
         with:
           name: torch-x86_64-linux
           path: .scratch/pkg-build/platform
+
+      - name: Download the published Linux package
+        if: inputs.platform_release
+        run: |
+          set -euo pipefail
+          root=https://github.com/$GITHUB_REPOSITORY/releases/download/$PLATFORM_RELEASE
+          mkdir -p "$WORK/pkg"
+          for file in torch-x86_64-linux.zip torch-x86_64-linux.zip.CHECKSUM; do
+            curl -fsSL --retry 3 -o "$WORK/pkg/$file" "$root/$file"
+          done
+          echo "PLATFORM_ROOT=$root" >>"$GITHUB_ENV"
 
       - uses: Bogdanp/setup-racket@v1.15
         with:
@@ -70,7 +89,9 @@ jobs:
           architecture: x64
 
       - name: Catalog
-        run: scripts/platform/catalog.sh "$WORK/pkg/torch-x86_64-linux.zip" "$OUT/catalog" "$OUT/catalog"
+        run: >-
+          scripts/platform/catalog.sh "$WORK/pkg/torch-x86_64-linux.zip" "$OUT/catalog" "$OUT/catalog"
+          "${PLATFORM_ROOT:-}"
 
       - name: The pkg-build tool and the server's images
         run: |
