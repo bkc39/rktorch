@@ -128,3 +128,73 @@
                 "the batch is not each image jittered by its own draws, in order")
   (check-not-equal? (tensor->list jittered) (tensor->list plain)
                     "the jitter left every image in place"))
+
+(module+ test
+  ;; Parity against examples/python/17_workers.py: the PGM bytes, the jitter
+  ;; at the twin's fixed angles and shifts against torch's grid_sample, then
+  ;; five full-batch steps on the fixture jittered image by image.
+  (require (only-in file/sha1 hex-string->bytes)
+           (only-in torch/nn adam cross-entropy parameters step! zero-grads!)
+           (only-in torch/scribblings/examples/05-mnist convnet)
+           (only-in torch/tests/private/python-env
+                    check-training-twin python-result python-torch-available? tol))
+
+  (define (worst-difference ours theirs)
+    (for/fold ([worst 0.0]) ([a (in-list ours)] [b (in-list theirs)])
+      (max worst (abs (- a b)))))
+
+  (define (check-jitter pixels motion theirs what)
+    (define difference
+      (worst-difference (floats->list (apply jitter pixels motion)) theirs))
+    (check-true (<= difference 1e-6)
+                (format "~a jittered by ~a: max |difference| ~a from torch's"
+                        what motion difference)))
+
+  (define (check-parity)
+    (define j (python-result "python/17_workers.py"))
+    (define motions (hash-ref j 'cases))
+    (define (motion-for i) (list-ref motions (modulo i (length motions))))
+    (check-equal? (apply bytes-append (map pgm-encode (cons every-value images)))
+                  (hex-string->bytes (hash-ref j 'pgm))
+                  "the PGM bytes differ from the twin's")
+    (for ([loose (in-list (hash-ref j 'loose_pgms))]
+          [pixels (in-list (cons every-value images))])
+      (check-equal? (pgm-decode (hex-string->bytes loose)) pixels
+                    "a PGM spaced with tabs and CRLF decoded differently"))
+    (for ([motion (in-list motions)]
+          [theirs (in-list (hash-ref j 'pattern_jitters))])
+      (check-jitter every-value motion theirs "the pattern"))
+    (for ([pixels (in-list images)]
+          [theirs (in-list (hash-ref j 'image_jitters))]
+          [i (in-naturals)])
+      (check-jitter pixels (motion-for i) theirs (format "image ~a" i)))
+    (define (train-on device)
+      (with-default-device device
+        (manual-seed! 0)
+        (define net (convnet))
+        (define opt (adam (parameters net) #:lr 0.001))
+        (define-values (xb yb)
+          (collate-digits
+           (for/list ([pixels (in-list images)]
+                      [y (in-list (tensor->list ys))]
+                      [i (in-naturals)])
+             (list (apply jitter (~> pixels pgm-encode pgm-decode) (motion-for i))
+                   y))))
+        (define batch (to xb device))
+        (define labels (to yb device))
+        (define losses
+          (for/list ([_ (in-range 5)])
+            (zero-grads! opt)
+            (define loss (cross-entropy (net batch) labels))
+            (backward! loss)
+            (step! opt)
+            (item loss)))
+        (values losses
+                (cat (for/list ([p (in-list (parameters net))])
+                       (reshape p -1))))))
+    (check-training-twin "17-workers" "python/17_workers.py" train-on 'cpu tol))
+
+  (cond
+    [(not (python-torch-available?))
+     (displayln "[17-workers] parity skipped: python3 `torch` not available")]
+    [else (check-parity)]))
