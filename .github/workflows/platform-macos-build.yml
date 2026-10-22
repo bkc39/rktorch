@@ -1,0 +1,107 @@
+name: macOS platform package build
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  torch-aarch64-macosx:
+    runs-on: macos-latest
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: "1"
+      HOMEBREW_NO_INSTALL_CLEANUP: "1"
+      WORK: ${{ github.workspace }}/.scratch/macos/work
+      OUT: ${{ github.workspace }}/.scratch/macos/out
+      RACKETS: ${{ github.workspace }}/.scratch/macos/racket
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+
+      - name: Toolchain
+        run: |
+          set -euo pipefail
+          command -v pkg-config >/dev/null || brew install pkgconf
+          [ "$(bash -c 'echo "${BASH_VERSINFO[0]}"')" -ge 4 ] || brew install bash
+          mkdir -p "$WORK" "$OUT/logs" "$RACKETS"
+          sw_vers
+          uname -m
+          sysctl -n hw.ncpu hw.memsize
+          xcodebuild -version || true
+          clang --version | head -1
+          cmake --version | head -1
+          pkg-config --version
+          bash --version | head -1
+          command -v bash
+
+      - name: Cache downloads
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: |
+            .scratch/macos/work/dl
+            .scratch/macos/racket/dl
+          key: platform-macos-dl-${{ hashFiles('scripts/platform/sources.txt') }}
+
+      - name: Codecs and libsndfile
+        run: scripts/platform/macos/build.sh "$WORK" codecs
+
+      - name: GoogleTest
+        run: scripts/platform/macos/build.sh "$WORK" gtest
+
+      - name: The shim
+        run: scripts/platform/macos/build.sh "$WORK" shim
+
+      - name: Bundle
+        run: scripts/platform/macos/build.sh "$WORK" bundle
+
+      - name: Audit
+        run: scripts/platform/macos/build.sh "$WORK" audit
+
+      - name: Audit negative control
+        run: scripts/platform/macos/audit-test.sh "$WORK/bundle" "$WORK/libtorch/libtorch/lib"
+
+      - name: GoogleTest against the bundle
+        run: scripts/platform/macos/build.sh "$WORK" gtests
+
+      - name: Racket 9.1
+        run: scripts/platform/macos/install-racket.sh 9.1 "$RACKETS/9.1" "$RACKETS/dl"
+
+      - name: Assemble
+        run: |
+          set -euo pipefail
+          export PATH="$RACKETS/9.1/bin:$PATH"
+          scripts/platform/assemble.sh torch-aarch64-macosx "$WORK/bundle" "$OUT/pkg"
+          cat "$OUT/pkg/torch-aarch64-macosx.zip.CHECKSUM"
+          echo
+
+      - name: Size budget
+        run: scripts/platform/size-budget.sh "$OUT/pkg/torch-aarch64-macosx.zip"
+
+      - name: Catalog
+        run: |
+          set -euo pipefail
+          export PATH="$RACKETS/9.1/bin:$PATH"
+          scripts/platform/catalog.sh "$OUT/pkg/torch-aarch64-macosx.zip" "$OUT/catalog" "$OUT/catalog"
+
+      - name: Install and smoke, Racket 9.1
+        run: |
+          set -euo pipefail
+          export PATH="$RACKETS/9.1/bin:$PATH" SMOKE_HOME="$RACKETS/home-9.1"
+          scripts/platform/smoke-install.sh "$OUT/catalog" "macOS $(sw_vers -productVersion)" 2>&1 |
+            tee "$OUT/logs/smoke-macos-latest-9.1.log"
+
+      - name: Upload the package and logs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: torch-aarch64-macosx
+          if-no-files-found: warn
+          path: |
+            .scratch/macos/out/pkg/torch-aarch64-macosx.zip
+            .scratch/macos/out/pkg/torch-aarch64-macosx.zip.CHECKSUM
+            .scratch/macos/out/logs/
+            .scratch/macos/work/log/

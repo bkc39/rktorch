@@ -6,6 +6,7 @@
 
 (define collection "torch")
 (define version "0.1")
+(define native-version "0.1")
 (define deps
   '(("base" #:version "9.1")
     "threading-lib"

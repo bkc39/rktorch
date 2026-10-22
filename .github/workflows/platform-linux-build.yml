@@ -13,15 +13,15 @@ jobs:
     env:
       WORK: ${{ github.workspace }}/.scratch/platform
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
 
       - name: Cache downloads
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: .scratch/platform/dl
           key: platform-linux-dl-${{ hashFiles('scripts/platform/sources.txt') }}
 
-      - uses: Bogdanp/setup-racket@v1.15
+      - uses: Bogdanp/setup-racket@2466913449df77df2bad149d1f2fc4e1ea4795dd # v1.15
         with:
           version: "9.3"
           variant: CS
@@ -42,7 +42,7 @@ jobs:
 
       - name: Upload the package and logs
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: torch-x86_64-linux
           if-no-files-found: warn

@@ -69,7 +69,7 @@ jobs:
           name: torch-x86_64-linux
           path: .scratch/platform
 
-      - uses: Bogdanp/setup-racket@v1.15
+      - uses: Bogdanp/setup-racket@2466913449df77df2bad149d1f2fc4e1ea4795dd # v1.15
         with:
           version: ${{ matrix.host_racket }}
           variant: CS
@@ -113,7 +113,7 @@ jobs:
           name: torch-x86_64-linux
           path: .scratch/platform
 
-      - uses: Bogdanp/setup-racket@v1.15
+      - uses: Bogdanp/setup-racket@2466913449df77df2bad149d1f2fc4e1ea4795dd # v1.15
         with:
           version: "9.3"
           variant: CS

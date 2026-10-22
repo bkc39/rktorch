@@ -9,7 +9,9 @@ scripts/platform/macos/build.sh in the rktorch repository at the tag this
 package was released from. Their install names were rewritten to @rpath and
 each was re-signed ad hoc; their code is otherwise unchanged, apart from the
 build edits noted below. Every library licensed under the LGPL is shipped as
-a separate shared library that can be replaced.
+a separate shared library that can be replaced. The source tarballs of those
+libraries, exactly as listed below, are attached to the same GitHub release
+as this package's zip: https://github.com/bkc39/rktorch/releases
 
 libtorchrkt.dylib
   rktorch's own shim. Apache-2.0: LICENSE.

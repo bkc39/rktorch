@@ -1,0 +1,59 @@
+name: Release canary
+
+on:
+  schedule:
+    - cron: "0 9 * * 2"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  canary:
+    name: raco pkg install torch (${{ matrix.os }}, Racket ${{ matrix.racket }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-14]
+        racket: ["9.1", stable]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - uses: Bogdanp/setup-racket@2466913449df77df2bad149d1f2fc4e1ea4795dd # v1.15
+        with:
+          version: ${{ matrix.racket }}
+          variant: CS
+          distribution: full
+          architecture: ${{ runner.arch == 'ARM64' && 'arm64' || 'x64' }}
+
+      - name: Is torch released, and on the catalog
+        id: catalog
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api --paginate "repos/$GITHUB_REPOSITORY/releases" >"$RUNNER_TEMP/releases.json"
+          released=$(racket scripts/release/release.rkt published "$RUNNER_TEMP/releases.json")
+          code=$(curl -sS -o /dev/null -w '%{http_code}' https://pkgs.racket-lang.org/pkg/torch)
+          if [ "$code" = 200 ]; then
+            echo "published=true" >>"$GITHUB_OUTPUT"
+          elif [ "$code" = 404 ] && [ -z "$released" ]; then
+            echo "published=false" >>"$GITHUB_OUTPUT"
+          else
+            echo "::error::pkgs.racket-lang.org answered $code for torch; the published releases are: ${released//$'\n'/ }"
+            exit 1
+          fi
+
+      - name: Install from the catalog, train 04-mlp, check the package deps
+        if: steps.catalog.outputs.published == 'true'
+        run: |
+          set -euo pipefail
+          host="$RUNNER_OS $(uname -m)"
+          scripts/platform/smoke-install.sh https://pkgs.racket-lang.org "$host"
