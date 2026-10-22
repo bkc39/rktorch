@@ -95,5 +95,6 @@ def mnist(out):
 out = sys.argv[1] if len(sys.argv) > 1 else os.path.join(
     os.path.dirname(os.path.abspath(__file__)),
     "..", "torch", "vision", "fixtures")
+os.makedirs(out, exist_ok=True)
 cifar10(out)
 mnist(out)

@@ -23,10 +23,11 @@
     [else
      (test-case "the committed fixtures are the generator's output, byte for byte"
        (displayln "[dataset-fixtures-parity-test] running the generator")
-       (define out (make-temporary-directory "dataset-fixtures-~a"))
+       (define root (make-temporary-directory "dataset-fixtures-~a"))
+       (define out (build-path root "not-yet-created"))
        (check-true (system* python "-I" generator out))
        (for ([name (in-list generated)])
          (check-true (equal? (file->bytes (build-path out name))
                              (file->bytes (build-path fixtures name)))
                      (format "~a differs from the generator's output" name)))
-       (delete-directory/files out))]))
+       (delete-directory/files root))]))
