@@ -31,19 +31,27 @@
   (define whole (fresh-tally))
   (define current (box (fresh-tally)))
   (define rows '())
-  (define (count! field)
-    (bump! (field whole))
-    (bump! (field (unbox current))))
+  (define (count! . fields)
+    (define phase (unbox current))
+    (for ([field (in-list fields)])
+      (bump! (field whole))
+      (bump! (field phase))))
   (reclaim-native-memory!)
   (call-in-phased-device
    p
    (lambda ()
+     (define measuring (current-thread))
+     (define (measuring?) (eq? (current-thread) measuring))
      (parameterize ([native-collect-at-troughs #f])
-       (with-crossing-hook (lambda () (count! tally-crossings))
+       (with-crossing-hook (lambda () (when (measuring?) (count! tally-crossings)))
+         ;; A free off the measuring thread (the finalizer's) counts with its
+         ;; crossing as one event, so a phase boundary never splits the pair.
          (with-race-hook (lambda (name _subject)
+                           (define here? (measuring?))
                            (case name
-                             [(ledger-entry-added) (count! tally-tensors)]
-                             [(free-released finalizer-releasing) (count! tally-frees)]
+                             [(ledger-entry-added) (when here? (count! tally-tensors))]
+                             [(free-released finalizer-releasing)
+                              (if here? (count! tally-frees) (count! tally-frees tally-crossings))]
                              [else (void)]))
            (step-phases! p #:around (lambda (name thunk)
                                       (define phase (fresh-tally))
@@ -136,6 +144,32 @@
        (check-equal? (field free-phase 'tensors) '(1))
        (check-equal? (field free-phase 'op_calls) (field alloc-phase 'op_calls))
        (check-equal? (field topk-phase 'tensors) '(2)))
+
+     (test-case "a free off the measuring thread is no op call, wherever its crossing lands"
+       (define requests (make-channel))
+       (define done (make-channel))
+       (define finalizer
+         (thread (lambda ()
+                   (let loop ()
+                     ((channel-get requests))
+                     (channel-put done #t)
+                     (loop)))))
+       (define (on-finalizer call)
+         (channel-put requests call)
+         (channel-get done))
+       (define p
+         (phased "probe" 'cpu (hasheq)
+                 (list (cons 'quiet void)
+                       (cons 'release (lambda ()
+                                        (on-finalizer
+                                         (lambda () ((unbox race-hook) 'finalizer-releasing #f)))))
+                       (cons 'cross (lambda () (on-finalizer (lambda () ((unbox crossing-hook)))))))
+                 void))
+       (match-define (list quiet release cross _step) (call-records p #:warmup 0 #:rounds 1))
+       (kill-thread finalizer)
+       (check-equal? (field release 'frees) '(1))
+       (check-equal? (field release 'op_calls) (field quiet 'op_calls))
+       (check-equal? (field cross 'op_calls) (field quiet 'op_calls)))
 
      (test-case "the hooks are restored after counting"
        (check-false (unbox crossing-hook))

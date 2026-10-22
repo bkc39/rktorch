@@ -13,7 +13,7 @@ fi
 out=${BASELINE_OUT:-$root/docs/benchmarks/baseline-$date}
 export BASELINE_DATE=$date BASELINE_OUT=$out
 cache=${BASELINE_CACHE:-$HOME/.racket/rktorch}
-rounds=${BASELINE_ROUNDS:-3}
+rounds=${BASELINE_ROUNDS:-}
 load=${BASELINE_MAX_LOAD:-4}
 jsonl=$out.jsonl
 
@@ -25,7 +25,8 @@ if [ "$smoke" = 1 ]; then
   budgets=(0.05)
 else
   micro=()
-  e2e=(--rounds "$rounds")
+  if [ -n "$rounds" ]; then micro=(--rounds "$rounds"); fi
+  e2e=(--rounds "${rounds:-3}")
   loader_smoke=
   training_smoke=
   budgets=(0.01 0.05 0.2 1)
@@ -88,6 +89,7 @@ cd "$root"
 mkdir -p "$(dirname "$out")"
 case ${1:-all} in
   all)
+    : > "$jsonl"
     nix develop --max-jobs 1 --cores 4 -c "$self" cpu || failed=1
     env -u LD_LIBRARY_PATH nix develop --max-jobs 1 --cores 4 .#cuda -c "$self" cuda || failed=1
     nix develop --max-jobs 1 --cores 4 -c "$self" summary || failed=1

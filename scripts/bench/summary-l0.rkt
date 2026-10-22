@@ -173,9 +173,9 @@
   (list (make-section "micro" "ops" "A. Per op against PyTorch" twin-op-section placement)
         (make-section "scaling" "threads" "B. Thread scaling" scaling-section host)
         (make-section "e2e" "summary" "C. Loader end to end against PyTorch"
-                      (twin-e2e-section loader-example?) host)
+                      (twin-e2e-section loader-example?) placement)
         (make-section "e2e" "summary" "D. Training against PyTorch"
-                      (twin-e2e-section (lambda (c) (not (loader-example? c)))) host)
+                      (twin-e2e-section (lambda (c) (not (loader-example? c)))) placement)
         (make-section "calls" "phase" "E. Native calls per step" calls-section placement)
         (make-section "host-gpu" #f "F. Host and device time per step" host-gpu-section placement)
         (make-section "e2e" "summary" "G. GC per epoch" gc-section host #:keep rktorch?)))
@@ -245,6 +245,21 @@
     (check-regexp-match #rx"\\| 05-mnist \\| - \\| s/epoch \\| 1\\.30 \\| 1\\.00 \\| 1\\.30 \\| 1\\.30 \\| 1\\.00 \\| 2\\.60 \\| 2\\.00 \\| 1\\.30 \\| 2\\.00 \\| 1\\.30 \\| - \\|" d)
     (check-false (regexp-match? #rx"09-resnet|17-workers" d) "an example without a twin is left out")
     (check-false (render 3 (list (e2e "09-resnet" "rktorch" #f 14.0 30.0)))))
+
+  (test-case "C pairs an example with its twin on the same device and threads only"
+    (define (on device threads r)
+      (hash-set r 'meta (hash-set* meta 'device device 'threads threads)))
+    (define records (list (on "cpu" 8 (e2e "17-workers" "rktorch" "crop" 40.0 80.0))
+                          (on "cpu" 8 (e2e "py-17-workers" "pytorch" "crop" 10.0 20.0))
+                          (on "cuda" 8 (e2e "17-workers" "rktorch" "crop" 25.0 50.0))
+                          (on "cuda" 1 (e2e "py-17-workers" "pytorch" "crop" 2.0 4.0))
+                          (on "cuda" 8 (e2e "py-17-workers" "pytorch" "crop" 5.0 10.0))))
+    (define groups (by-context records (section-context (list-ref l0-sections 2))))
+    (check-equal? (length groups) 3)
+    (match-define (list cpu cuda cuda-1) (map (lambda (g) (render 2 (cdr g))) groups))
+    (check-regexp-match #rx"\\| 17-workers \\| crop \\| s/epoch \\| 40\\.00 \\| 10\\.00 \\| 4\\.00 \\|" cpu)
+    (check-regexp-match #rx"\\| 17-workers \\| crop \\| s/epoch \\| 25\\.00 \\| 5\\.00 \\| 5\\.00 \\|" cuda)
+    (check-false cuda-1 "a twin on another thread count has no rktorch run to pair with"))
 
   (test-case "D sets no ratio when a setting reaches only one side of a pair"
     (define settings (hasheq 'EPOCHS "2" 'BASE "4" 'DATASET "fixture" 'RKTORCH_CIFAR10_DIR "/c"))

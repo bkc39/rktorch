@@ -51,7 +51,7 @@
 
 (define (run-suites suites
                     #:rounds [rounds #f]
-                    #:warmup [warmup 1]
+                    #:warmup [warmup #f]
                     #:scale [scale 1]
                     #:device [device 'cpu]
                     #:full? [full? #f]
@@ -75,7 +75,7 @@
     (wait-for-load max-load log)
     (define meta (host-meta #:device on-device #:libtorch libtorch #:threads (aten-threads)))
     (fprintf log "~a~a\n" group (if case-name (format " ~a" case-name) ""))
-    (for ([r (in-list (measure cases #:warmup warmup #:rounds (or rounds 5)))])
+    (for ([r (in-list (measure cases #:warmup (or warmup 1) #:rounds (or rounds 5)))])
       (fprintf log "  ~a\n" (format-result r #:unit unit #:scale unit-scale))
       (emit
        (result->record r #:suite "micro" #:group (~a group) #:unit unit #:meta meta
@@ -123,7 +123,7 @@
                      (option! 'rounds
                               (flag-value "--rounds" string->number exact-positive-integer?
                                           "a positive integer" n))]
-       [("--warmup") n "Untimed rounds before them (default 1; e2e runs none)"
+       [("--warmup") n "Untimed rounds before them (default 1; calls 2; e2e runs none)"
                      (option! 'warmup
                               (flag-value "--warmup" string->number exact-nonnegative-integer?
                                           "a non-negative integer" n))]
@@ -171,7 +171,7 @@
   (define (go out)
     (run-suites suites
                 #:rounds (option 'rounds)
-                #:warmup (option 'warmup 1) #:scale (option 'scale 1)
+                #:warmup (option 'warmup #f) #:scale (option 'scale 1)
                 #:device (option 'device 'cpu) #:full? (option 'full?) #:only (option 'only)
                 #:variants (option 'variants '((#f)))
                 #:cache (option 'cache) #:max-load (option 'max-load)

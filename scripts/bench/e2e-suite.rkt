@@ -47,12 +47,13 @@
       (when value (hash-update! kept (cons field key) (lambda (xs) (cons value xs)) '())))
     (define (pushed field key)
       (reverse (hash-ref kept (cons field key) '())))
+    (define (meta-for impl child-meta)
+      (if (equal? impl "pytorch") (merged-meta meta child-meta) (or child-meta meta)))
     (define (on-run run-of variant analysis)
       (define impl (impl-of run-of))
       (define key (cons (example-name run-of) variant))
       (define child-meta (hash-ref analysis 'meta #f))
-      (define run-meta
-        (if (equal? impl "pytorch") (merged-meta meta child-meta) (or child-meta meta)))
+      (define run-meta (meta-for impl child-meta))
       (fprintf log "~a~a: ~a steps/s, epochs ~a s\n" (example-name run-of)
                (if variant (format "/~a" variant) "")
                (hash-ref analysis 'steps_per_s #f) (hash-ref analysis 'epoch_s '()))
@@ -77,16 +78,17 @@
            (list case variant exit-code child-meta)]
           [(? exn:fail:user?) (list (example-name (car group)) #f #f #f)]
           [_ (raise e)]))
+      (define impl (impl-of (for/first ([ex (in-list group)]
+                                        #:when (equal? (example-name ex) case))
+                              ex)))
       (fprintf log "~a\n" (exn-message e))
       (emit (hasheq 'schema 1 'suite "e2e" 'group "error"
-                    'impl (impl-of (for/first ([ex (in-list group)]
-                                               #:when (equal? (example-name ex) case))
-                                     ex))
+                    'impl impl
                     'case case
                     'variant variant
                     'exit_code exit-code
                     'error (exn-message e)
-                    'meta (or child-meta meta)
+                    'meta (meta-for impl child-meta)
                     'meta_from (if child-meta "child" "parent"))))
     (define results
       (measure (e2e-cases group #:scale scale #:variants with-cache #:on-run on-run
@@ -146,6 +148,7 @@
 
   (define-runtime-path broken "fixtures/broken.rkt")
   (define-runtime-path cache-reader "fixtures/cache-reader.rkt")
+  (define-runtime-path meta-then-fail "fixtures/meta_then_fail.py")
   (define-runtime-path sleeper "fixtures/sleeper.rkt")
   (define-runtime-path stepper "fixtures/stepper.rkt")
   (define-runtime-path teardown-crash "fixtures/teardown-crash.rkt")
@@ -343,6 +346,26 @@
     (check-not-equal? (hash-ref failure 'exit_code) 0)
     (check-equal? (hash-ref failure 'meta_from) "child")
     (check-not-equal? (hash-ref (hash-ref failure 'meta) 'libtorch) "x"))
+
+  (cond
+    [(not (find-executable-path "python3"))
+     (displayln "[e2e-suite] the failing-twin case skipped: no python3")]
+    [else
+     (test-case "a PyTorch twin that fails after writing its meta keeps the parent's under it"
+       (define fixture (example "py-stepper" '(("EPOCHS" . 1)) '(("EPOCHS" . 1)) "EPOCHS" 0 'first))
+       (define failure
+         (findf (lambda (r) (equal? (hash-ref r 'group) "error"))
+                (records-of (lambda (out)
+                              (run-e2e (list fixture) #:rounds 1 #:full? #f #:variants '((#f))
+                                       #:cache #f #:max-load #f #:libtorch "x" #:out out
+                                       #:log quiet #:time-limit 120
+                                       #:runner-for (lambda (_ex) meta-then-fail))))))
+       (define meta (hash-ref failure 'meta))
+       (check-equal? (hash-ref failure 'impl) "pytorch")
+       (check-equal? (hash-ref failure 'exit_code) 3)
+       (check-equal? (hash-ref failure 'meta_from) "child")
+       (check-equal? (hash-ref meta 'python) "3")
+       (check-equal? (hash-ref meta 'libtorch #f) "x" "the parent's meta is under the child's"))])
 
   (test-case "the loader workload and the PyTorch twins run under e2e, and C pairs them"
     (define tiny '(("DATASET" . "fixture") ("EPOCHS" . "2") ("BATCH" . "128") ("BASE" . "4")

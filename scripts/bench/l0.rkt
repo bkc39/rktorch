@@ -54,7 +54,8 @@
                       #:threads [threads thread-counts]
                       #:phases [phases (hasheq)])
   (define (meta-on d) (host-meta #:device d #:libtorch libtorch #:threads (aten-threads)))
-  (define scaling-warmup (max 1 warmup))
+  (define warm (or warmup 1))
+  (define scaling-warmup (max 1 warm))
   (define scaling-settings (hasheq 'seconds seconds 'warmup scaling-warmup))
   (define (mnist) (mnist-phases device #:batch (hash-ref phases 'batch 128)
                                 #:samples (hash-ref phases 'samples 1024)))
@@ -68,7 +69,7 @@
      (define load (load-average))
      (for ([child (in-list (twin-records "ops.py"
                                          (list "--device" device "--scale" scale
-                                               "--rounds" (or rounds 5) "--warmup" warmup
+                                               "--rounds" (or rounds 5) "--warmup" warm
                                                "--threads" (aten-threads))
                                          #:log log))])
        (emit (twin-record child #:suite "micro" #:meta (meta-on device) #:load load)))]
@@ -97,19 +98,20 @@
     [(calls)
      (define meta (meta-on device))
      (for* ([p (in-list (list (mnist) (resnet)))]
-            [r (in-list (call-records p #:rounds (or rounds 3)))])
+            [r (in-list (call-records p #:warmup (or warmup 2) #:rounds (or rounds 3)))])
        (emit (hash-set* r 'meta meta 'load (load-average))))]
     [(host-gpu)
      (define meta (meta-on device))
      (for ([r (in-list (host-gpu-records (resnet) #:proxy (resnet #:base proxy-base)
                                          #:steps (~> scale (* 20) round inexact->exact (max 2))
-                                         #:rounds (or rounds 5) #:warmup (max 1 warmup)))])
+                                         #:rounds (or rounds 5) #:warmup (max 1 warm)))])
        (emit (hash-set* r 'meta meta 'load (load-average))))]))
 
 (module+ test
   (require (only-in racket/list remove-duplicates)
            (only-in racket/port open-output-nowhere)
            rackunit
+           (only-in torch/tests/private/race-harness with-race-hook)
            (only-in "ops.rkt" op-names)
            (only-in "pytorch.rkt" pytorch-available?))
 
@@ -138,6 +140,15 @@
       (check-equal? (hash-ref r 'stopped) (list (hash-ref r 'threads_run)))
       (check-equal? (hash-ref r 'settings) scaling-floor "a smoke run still times whole seconds")
       (check-true (>= (hash-ref (hash-ref r 'stats) 'median) 0))))
+
+  (test-case "calls runs the warmup steps it is given"
+    (define (tensors-made warmup)
+      (define n 0)
+      (with-race-hook (lambda (name _subject)
+                        (when (eq? name 'ledger-entry-added) (set! n (add1 n))))
+        (records-of 'calls #:warmup warmup))
+      n)
+    (check-true (< (tensors-made 0) (tensors-made 1))))
 
   (test-case "calls and host-gpu record every phase of 05 and 09"
     (define calls (records-of 'calls))

@@ -33,7 +33,7 @@ def main():
           "stopped": slow["stopped"]})
     emit({"case": "stamped", "workers": len(stamps),
           "before_start": sum(1 for first in stamps
-                              if not first or first[0] < stamped["started_s"])})
+                              if first and first[0] < stamped["started_s"])})
 
 
 if __name__ == "__main__":

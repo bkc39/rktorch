@@ -25,7 +25,7 @@ line per case goes to standard error.
 | option | |
 |---|---|
 | `--rounds N` | timed rounds; 5 by default for the micro suites, 1 for `e2e` |
-| `--warmup N` | untimed rounds first, 1 by default; ignored by `e2e`, which runs none |
+| `--warmup N` | untimed rounds first, 1 by default and 2 for `calls`; ignored by `e2e`, which runs none |
 | `--scale X` | multiplies the micro suites' repetitions |
 | `--device cuda` | where `ops`, `pytorch-ops`, `calls` and `host-gpu` run (`cpu`, `cuda` or `mps`); the others run on the CPU |
 | `--only 05,09` | examples for `e2e`, by prefix; `py-05` is a PyTorch twin |
@@ -291,9 +291,11 @@ scripts/bench/l0-baseline.sh cpu     # one stage: cpu, cuda or summary
 BASELINE_SMOKE=1 BASELINE_OUT=/tmp/x/l0 scripts/bench/l0-baseline.sh
 ```
 
-`BASELINE_ROUNDS` (3), `BASELINE_MAX_LOAD` (4), `BASELINE_CACHE`
+`BASELINE_ROUNDS` sets every suite's rounds (unset, e2e runs 3 and the
+others their own defaults); `BASELINE_MAX_LOAD` (4), `BASELINE_CACHE`
 (`~/.racket/rktorch`), `BASELINE_DATE` and `BASELINE_OUT` change the
-defaults. `BASELINE_SMOKE=1`, which needs `BASELINE_OUT` outside `docs/`,
+defaults. The full run starts the JSONL afresh; a single stage appends to
+it. `BASELINE_SMOKE=1`, which needs `BASELINE_OUT` outside `docs/`,
 runs every step at the smallest settings both sides of a pair read: the
 loader on the MNIST fixture, 05 and 09 on the cached datasets at
 `EPOCHS=2` (their rktorch runners read nothing else), and G at one budget.

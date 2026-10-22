@@ -1,0 +1,3 @@
+#!/bin/sh
+# Stands in for raco in l0-baseline-test.
+echo "raco $*" >> "$FAKE_LOG"
