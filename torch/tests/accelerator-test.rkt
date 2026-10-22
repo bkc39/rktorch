@@ -8,7 +8,8 @@
                     device-type mps-available? mps-device mps-if-available tensor)
            (only-in torch/foreign/accelerator
                     make-mps-probe mps-usable? pick-accelerator)
-           (only-in torch/foreign/error exn:fail:rktorch:oom))
+           (only-in torch/foreign/error exn:fail:rktorch:oom)
+           (only-in torch/foreign/raw/fault native-fault?))
 
   (define expected (getenv "RKTORCH_EXPECT_ACCELERATOR"))
 
@@ -72,6 +73,31 @@
         (logged-during (λ () (pick-with-mps (make-mps-probe failure)))))
       (check-equal? pick (cpu-device))
       (check-equal? (map car logged) '(error))))
+
+  (test-case "a native fault in the probe reaches the prober, its waiters and later callers"
+    (define entered (make-semaphore 0))
+    (define gate (make-semaphore 0))
+    (define-values (run calls)
+      (counted-probe (λ (_call)
+                       (semaphore-post entered)
+                       (semaphore-wait gate)
+                       (raise (exn:fail "invalid memory reference.  Some debugging context lost"
+                                        (current-continuation-marks))))))
+    (define probe (make-mps-probe run))
+    (define (ask)
+      (define answer (make-channel))
+      (thread (λ () (channel-put answer (with-handlers ([(λ (_) #t) values])
+                                          (pick-with-mps probe)))))
+      answer)
+    (parameterize ([current-logger (make-logger)])
+      (define prober (ask))
+      (check-not-false (sync/timeout 5 entered))
+      (define waiter (ask))
+      (check-false (sync/timeout 0.1 waiter) "a waiter answered while the probe was still running")
+      (semaphore-post gate)
+      (for ([answer (list prober waiter (ask))])
+        (check-pred native-fault? (sync/timeout 5 answer))))
+    (check-equal? (calls) 1))
 
   (test-case "threads asking at once share one probe"
     (define entered (make-semaphore 0))

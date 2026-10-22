@@ -248,7 +248,9 @@ CUDA when it is present, else Metal when it can allocate, else the CPU. The
 first time it would answer @racket[(mps-device)] it allocates one element
 there, once per instance of the library; if that fails it answers
 @racket[(cpu-device)] and logs why on the topic @racket['rktorch-device], at
-@racket['warning] for an out-of-memory error and @racket['error] otherwise.}
+@racket['warning] for an out-of-memory error and @racket['error] otherwise.
+An invalid memory reference there is raised instead, by this call and by
+every later one.}
 
 @defform[(with-default-device dev body ...+)]{
 Evaluates @racket[body] with @racket[dev] as the process default device, so

@@ -7,10 +7,12 @@
          (only-in "creation-ops.rkt" zeros)
          (only-in "device-type.rkt" cpu-device cuda-device device? mps-device)
          (only-in "error.rkt" exn:fail:rktorch:oom?)
-         (only-in "ops.rkt" cuda-available? mps-available? to-device))
+         (only-in "ops.rkt" cuda-available? mps-available? to-device)
+         (only-in "raw/fault.rkt" native-fault?))
 
 (struct mps-probe (run [state #:mutable]))
 (struct claim (holder done))
+(struct faulted (fault))
 
 (define (allocate-on-mps)
   (to-device (zeros 1 #:device (mps-device)) (cpu-device)))
@@ -27,7 +29,8 @@
   #f)
 
 (define (probe-outcome run)
-  (with-handlers ([exn:fail:rktorch:oom?
+  (with-handlers ([native-fault? faulted]
+                  [exn:fail:rktorch:oom?
                    (cpu-stands-in 'warning "MPS is available but cannot allocate")]
                   [(λ (_) #t) (cpu-stands-in 'error "the MPS probe failed")])
     (run)
@@ -39,21 +42,22 @@
      (match (mps-probe-state probe)
        [(and (claim holder _) held) #:when (not (thread-dead? holder)) held]
        [(? boolean? answer) answer]
+       [(? faulted? fault) fault]
        [_ (define mine (claim (current-thread) (make-semaphore 0)))
           (set-mps-probe-state! probe mine)
           mine]))))
 
 (define (settle! probe done)
-  (define answer (probe-outcome (mps-probe-run probe)))
-  (set-mps-probe-state! probe answer)
+  (set-mps-probe-state! probe (probe-outcome (mps-probe-run probe)))
   (semaphore-post done)
-  answer)
+  (mps-usable? probe))
 
 (define/contract-out (mps-usable? probe)
   (-> mps-probe? boolean?)
   (parameterize-break #f
     (match (claim-or-read probe)
       [(? boolean? answer) answer]
+      [(faulted fault) (raise fault)]
       [(claim (== (current-thread)) done) (settle! probe done)]
       [(claim holder done)
        (sync/enable-break (semaphore-peek-evt done) (thread-dead-evt holder))
