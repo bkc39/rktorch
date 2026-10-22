@@ -9,6 +9,10 @@ on:
         description: "Racket release the server's VM installs"
         required: false
         default: "9.3"
+      release_tag:
+        description: "A published release to check out, whose manifest's torch-x86_64-linux.zip the catalog names by its https URL (empty: build the zip)"
+        required: false
+        default: ""
   pull_request:
     paths:
       - "scripts/pkg-build/**"
@@ -36,19 +40,25 @@ concurrency:
 
 jobs:
   build:
+    if: ${{ !inputs.release_tag }}
     uses: ./.github/workflows/platform-linux-build.yml
 
   pkg-build:
     name: pkg-build (torch, x86_64-linux-natipkg)
     needs: build
+    if: ${{ !cancelled() && (needs.build.result == 'success' || (needs.build.result == 'skipped' && inputs.release_tag)) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 150
     env:
       WORK: ${{ github.workspace }}/.scratch/pkg-build/platform
       OUT: ${{ github.workspace }}/.scratch/pkg-build/out
       PKG_BUILD_RACKET: ${{ github.event.inputs.racket_version || '9.3' }}
+      RELEASE_TAG: ${{ inputs.release_tag }}
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.release_tag }}
+          persist-credentials: false
 
       - name: Disk
         run: |
@@ -58,19 +68,38 @@ jobs:
           free -m
 
       - name: Download the Linux package
+        if: ${{ !inputs.release_tag }}
         uses: actions/download-artifact@v4
         with:
           name: torch-x86_64-linux
           path: .scratch/pkg-build/platform
 
-      - uses: Bogdanp/setup-racket@v1.15
+      - uses: Bogdanp/setup-racket@2466913449df77df2bad149d1f2fc4e1ea4795dd # v1.15
         with:
           version: "9.3"
           variant: CS
           architecture: x64
 
+      - name: Download the released Linux package
+        if: inputs.release_tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+            --pattern manifest.json --dir "$RUNNER_TEMP/release"
+          root=$(racket scripts/release/release.rkt natives-root "$RUNNER_TEMP/release/manifest.json" \
+            "$GITHUB_REPOSITORY")
+          mkdir -p "$WORK/pkg"
+          for file in torch-x86_64-linux.zip torch-x86_64-linux.zip.CHECKSUM; do
+            curl -fsSL --retry 3 -o "$WORK/pkg/$file" "$root/$file"
+          done
+          echo "PLATFORM_ROOT=$root" >>"$GITHUB_ENV"
+
       - name: Catalog
-        run: scripts/platform/catalog.sh "$WORK/pkg/torch-x86_64-linux.zip" "$OUT/catalog" "$OUT/catalog"
+        run: >-
+          scripts/platform/catalog.sh "$WORK/pkg/torch-x86_64-linux.zip" "$OUT/catalog" "$OUT/catalog"
+          "${PLATFORM_ROOT:-}"
 
       - name: The pkg-build tool and the server's images
         run: |

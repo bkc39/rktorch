@@ -1,0 +1,17 @@
+name: Unclosed needs
+
+on:
+  push:
+
+jobs:
+  plan:
+    runs-on: ubuntu-24.04
+    steps:
+      - run: echo plan
+
+  assemble:
+    needs: [plan,
+      build]
+    runs-on: ubuntu-24.04
+    steps:
+      - run: echo assemble

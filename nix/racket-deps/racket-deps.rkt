@@ -14,6 +14,10 @@
          (only-in setup/getinfo get-info/full)
          (only-in version/utils valid-version? version<=?))
 
+(provide info-dependencies
+         info-version
+         platform-packages)
+
 (define manifest-name ".info-deps")
 
 (define (dep->string dep)
@@ -60,11 +64,11 @@
   (or (get-info/full info-dir)
       (raise-user-error 'racket-deps "no info.rkt in ~a" info-dir)))
 
-(define (all-deps info)
+(define (info-dependencies info)
   (append (info 'deps (λ () '())) (info 'build-deps (λ () '()))))
 
 (define (info-deps info-dir)
-  (define declared (filter-not own-platform-dep? (all-deps (read-info info-dir))))
+  (define declared (filter-not own-platform-dep? (info-dependencies (read-info info-dir))))
   (define platform-dep (findf platform-dep? declared))
   (when platform-dep
     (raise-user-error 'racket-deps
@@ -157,28 +161,36 @@
   (define info (get-info/full skeleton))
   (and info (info 'version (λ () #f))))
 
-(define (check-skeleton dep skeleton info-dir version)
+(define (check-skeleton dep skeleton info-dir native-version)
   (define wanted (dep-option dep '#:version))
   (define found (skeleton-version skeleton))
-  (unless (equal? wanted version)
-    (raise-user-error 'racket-deps "~a has #:version ~s; ~a is version ~s"
-                      (dep-name dep) wanted info-dir version))
+  (unless (equal? wanted native-version)
+    (raise-user-error 'racket-deps "~a has #:version ~s; ~a has native-version ~s"
+                      (dep-name dep) wanted info-dir native-version))
   (unless found
-    (raise-user-error 'racket-deps "~a has no info.rkt with a version; ~a is version ~s"
-                      skeleton info-dir version))
-  (unless (equal? found version)
-    (raise-user-error 'racket-deps "~a is version ~s; ~a is version ~s"
-                      skeleton found info-dir version)))
+    (raise-user-error 'racket-deps "~a has no info.rkt with a version; ~a has native-version ~s"
+                      skeleton info-dir native-version))
+  (unless (equal? found native-version)
+    (raise-user-error 'racket-deps "~a is version ~s; ~a has native-version ~s"
+                      skeleton found info-dir native-version)))
+
+(define/contract (info-version who info info-dir key)
+  (-> symbol? procedure? path-string? symbol? string?)
+  (match (info key (λ () #f))
+    [#f (raise-user-error who "~a has no ~a" info-dir key)]
+    [(? string? version) #:when (valid-version? version) version]
+    [version
+     (raise-user-error who "~a has ~a ~s, which is not a valid Racket version" info-dir key version)]))
 
 (define/contract (platform-packages info-dir pkgs-dir
                                     #:platform [subpath (path->string (system-library-subpath #f))])
   (->* [directory-exists? directory-exists?] [#:platform string?] (listof path?))
   (define info (read-info info-dir))
-  (define version (info 'version (λ () "0.0")))
-  (define own (filter own-platform-dep? (all-deps info)))
+  (define own (filter own-platform-dep? (info-dependencies info)))
+  (define native-version (and (pair? own) (info-version 'racket-deps info info-dir 'native-version)))
   (define (skeleton dep) (build-path pkgs-dir (dep-name dep)))
   (for ([dep (in-list own)])
-    (check-skeleton dep (skeleton dep) info-dir version))
+    (check-skeleton dep (skeleton dep) info-dir native-version))
   (for/list ([dep (in-list own)]
              #:when (equal? (dep-option dep '#:platform) subpath))
     (skeleton dep)))

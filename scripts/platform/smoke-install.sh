@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 #
-#   [SMOKE_HOME=<dir>] [SMOKE_TESTS="<module> ..."] scripts/platform/smoke-install.sh <catalog-dir> <host-label>
+#   [SMOKE_HOME=<dir>] [SMOKE_TESTS="<module> ..."] scripts/platform/smoke-install.sh <catalog-dir|https-catalog> <host-label>
 set -euo pipefail
 
-usage="usage: smoke-install.sh <catalog-dir> <host-label>"
+usage="usage: smoke-install.sh <catalog-dir|https-catalog> <host-label>"
 catalog=${1:?$usage}
 host=${2:?$usage}
 tmp=$(mktemp -d)
@@ -19,7 +19,10 @@ racket --version
 echo "PLTUSERHOME=$PLTUSERHOME"
 
 step "raco pkg install --no-docs torch"
-raco pkg config --set catalogs "file://$catalog/catalog" ""
+case $catalog in
+  https://*) raco pkg config --set catalogs "$catalog" "" ;;
+  *) raco pkg config --set catalogs "file://$catalog/catalog" "" ;;
+esac
 start=$(date +%s)
 if ! raco pkg install --batch --auto --no-docs -j 4 torch >"$tmp/raco.out" 2>"$tmp/raco.err"; then
   tail -40 "$tmp/raco.out"
