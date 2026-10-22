@@ -128,3 +128,55 @@
         #:when (regexp-match? #rx"[.]rkt$" (path->string f)))
     (check-false (regexp-match? #rx"submod[^)]*checked" (file->string f))
                  (format "~a requires a checked submodule" f))))
+
+(module+ test
+  (require (only-in racket/contract/base has-contract?)
+           (only-in racket/match match match-define)
+           (only-in racket/path find-relative-path path-only)
+           (only-in racket/set list->set))
+
+  (define torch-dir (simplify-path (build-path foreign-dir 'up)))
+
+  (define (only-in-imports file spec)
+    (match spec
+      [`(only-in ,(? string? (and from (not (regexp #rx"^[.][.]/")))) ,names ...)
+       (for/list ([name (in-list names)])
+         (list (simplify-path (build-path (path-only file) from))
+               (match name [`[,original ,_] original] [_ name])))]
+      [_ '()]))
+
+  (define (sibling-imports file)
+    (match-define `(module ,_ ,_ (#%module-begin ,forms ...))
+      (parameterize ([read-accept-reader #t] [read-accept-lang #t])
+        (call-with-input-file file read)))
+    (for*/list ([form (in-list forms)]
+                [spec (in-list (match form [`(require ,specs ...) specs] [_ '()]))]
+                [import (in-list (only-in-imports file spec))])
+      import))
+
+  (define (contracted? from name)
+    (with-handlers ([exn:fail:syntax? (lambda (_) #f)])
+      (has-contract? (dynamic-require from name))))
+
+  (define known-crossings
+    (for*/list ([entry (in-list '(("foreign/operators.rkt" ge gt le lt)
+                                  ("nn/attention.rkt" Linear)
+                                  ("nn/batch-norm.rkt" Buffer)
+                                  ("nn/copy.rkt" Buffer)
+                                  ("nn/ema.rkt" parameters)
+                                  ("nn/transformer.rkt"
+                                   Dropout LayerList LayerNorm Linear MultiheadAttention)))]
+                [name (in-list (cdr entry))])
+      (list (car entry) name)))
+
+  (define crossings
+    (for*/list ([dir (in-list (list foreign-dir nn-dir))]
+                [f (in-directory (simplify-path dir))]
+                #:when (regexp-match? #rx"[.]rkt$" (path->string f))
+                [import (in-list (sibling-imports f))]
+                #:do [(match-define (list from name) import)]
+                #:when (contracted? from name))
+      (list (path->string (find-relative-path torch-dir f)) name)))
+
+  (check-equal? (list->set crossings) (list->set known-crossings)
+                "sibling imports crossing a contract: use define/checked-out, or drop a fixed one"))

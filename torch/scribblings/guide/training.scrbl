@@ -90,5 +90,5 @@ loop runs on an accelerator without being rewritten:
   (void))
 ]
 
-@racket[accelerator-if-available] answers CUDA on a Linux machine with an
-NVIDIA GPU, Metal on Apple Silicon, and the CPU otherwise.
+@racket[accelerator-if-available] answers CUDA when it is present, else Metal
+when it can allocate, else the CPU.

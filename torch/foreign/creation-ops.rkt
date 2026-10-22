@@ -94,9 +94,9 @@
                        (append extra (list type index dt))))
           requires-grad?))
 
-(define/contract-out (zeros #:device [device #f] #:dtype [dtype #f]
-                            #:requires-grad? [requires-grad? #f]
-                            . dims)
+(define/checked-out (zeros #:device [device #f] #:dtype [dtype #f]
+                           #:requires-grad? [requires-grad? #f]
+                           . dims)
   (->* [] [#:device device/c #:dtype dtype/c #:requires-grad? boolean?]
        #:rest shape-rest/c tensor?)
   (shaped 'zeros tr-zeros-on/raw dims device dtype requires-grad?))
