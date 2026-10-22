@@ -83,6 +83,8 @@ jobs:
       # The dev shell provisions the Resyntax pinned in nix/racket-linters.nix
       # into the user scope, so the lane lints with the same version, on the
       # same nix-provided Racket, as every local shell.
+      - name: The release's natives' inputs digest, and its excludes are tracked
+        run: nix develop .#ci --command racket scripts/release/release.rkt natives-inputs
       - name: Resyntax rules
         timeout-minutes: 30
         run: >-

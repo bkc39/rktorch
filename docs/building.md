@@ -38,7 +38,7 @@ reports. torch's own platform packages, such as `torch-x86_64-linux`, are left
 out of the fetch: the build and the shells install their library-less
 skeleton from `pkgs/` instead (see [The platform package](#the-platform-package)),
 after checking that the skeleton's version and the dep's `#:version` both
-equal torch's. Any other `#:platform` dep is refused, whether `torch/info.rkt`
+equal torch's `native-version`. Any other `#:platform` dep is refused, whether `torch/info.rkt`
 or a fetched package declares it: one hash cannot hold a per-system fetch. A
 package source (a URL or path) is refused too: racket-deps fetches catalog
 packages by name.
@@ -144,7 +144,8 @@ and the `abi-stamp-current` flake check fails until it is committed.
 ## The platform package
 
 `torch` depends on one platform package per supported host, each providing
-the collection `torch-native` at torch's own version: `torch-x86_64-linux`
+the collection `torch-native` at torch's `native-version` (which moves only
+when the compiled bytes do; [`releasing.md`](releasing.md#versions)): `torch-x86_64-linux`
 and `torch-aarch64-macosx`, each declared once for every platform string
 that names its host (below). Each holds `libtorchrkt`, libtorch 2.14.0's
 libraries from PyTorch's official zip, and libsndfile with its codecs as
@@ -262,7 +263,7 @@ library is re-signed ad hoc (`codesign --force --sign -`), since arm64 macOS
 refuses to load code whose signature no longer matches.
 
 A Linux host can neither build nor load any of this, so
-`.github/workflows/platform-macos.yml` builds it on `macos-latest`
+`.github/workflows/platform-macos-build.yml` builds it on `macos-latest`
 ([below](#continuous-integration-and-the-binary-cache) has when). Each step is
 one call on a Mac:
 
@@ -320,8 +321,8 @@ with `SMOKE_TESTS` (a space-separated list of modules in place of
 tensor ops and autograd: GitHub's `macos-14` runners advertise MPS but cannot
 allocate on it, and those suites prove the dylibs load and compute there.
 
-Weekly, on demand, or when a calling workflow passes `mps: true`, an `mps` job
-on `macos-latest` installs the package on Racket 9.3, fails unless
+Weekly or on a manual run of `platform-macos.yml` itself, or when a calling
+workflow passes `mps: true`, an `mps` job on `macos-latest` installs the package on Racket 9.3, fails unless
 `(mps-available?)`, and runs the installed device, `to`, audio-device and
 MPS-pressure suites. Each of them asserts on MPS when it is there and skips
 without it. What the runner cannot show is a physical Apple-silicon Mac, so
@@ -552,7 +553,8 @@ installs, so the platform packages have lanes of their own:
   cannot. The job then runs `scripts/build-docs` and uploads the manual as
   `torch-manual`. The lane runs on pull requests that touch the paths listed
   in the workflow, on every push to master, weekly, and on demand.
-- **`platform-macos.yml`.** Its `build` job, on `macos-latest`, builds,
+- **`platform-macos.yml`.** Its `build` job, the reusable
+  `platform-macos-build.yml`, on `macos-latest`, builds,
   audits (with the negative control) and gtests `torch-aarch64-macosx`, then
   assembles and budgets the zip and runs the full smoke at Racket 9.1.
   `install`, on `macos-14`, runs only the CPU suites at Racket 9.1 and 9.3,
@@ -567,9 +569,12 @@ installs, so the platform packages have lanes of their own:
   A pull request that triggers both it and `platform-linux.yml` builds the
   Linux zip twice, once in each.
 
-Both platform lanes take `workflow_call`, so a release workflow runs the same
-jobs. Linux jobs substitute from a tailnet-only binary cache; the details and
-the failure modes are in [`AGENTS.md`](../AGENTS.md), which is also the
+Both platform lanes take `workflow_call`, so `release.yml` runs the same jobs
+before it drafts a release ([`releasing.md`](releasing.md)).
+`pkg-build.yml`, dispatched with `release_tag`, checks out that tag, skips
+the build and gives the catalog the zip its release's manifest names, by its
+https URL. Linux jobs substitute from a tailnet-only binary cache; the
+details and the failure modes are in [`AGENTS.md`](../AGENTS.md), which is also the
 canonical guide to the repository's layout and conventions.
 
 ## Further reading
