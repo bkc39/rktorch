@@ -157,15 +157,17 @@ median, quartiles and IQR, and the load average before and after.
   64-wide matmul, a relu and a sum) on 1, 2, 4 and 8 `(thread thunk #:pool
   'own)` threads, for `--scale` × 2 s a round, while the main thread is
   `idle` (blocked in `sync`) or `train`s a small MLP (784-256-10, SGD,
-  batch 64), whose steps per second are kept as `main_steps_per_s`. Each
-  worker counts every mix it finishes, and the ops are those counted when
-  the main loop ends. The workers stop at a flag, set even when the main
+  batch 64), whose steps per second are kept as `main_steps_per_s`. The
+  workers start, wait at a flag, and the clock starts as it releases them.
+  Each worker counts every mix it finishes, and the ops are those counted
+  when the main loop ends. A round is at least 0.5 s and the scaling suites
+  always run at least one warmup round, a smoke run included. The workers stop at a flag, set even when the main
   loop raises, and are killed after a grace period, never shut down with
   their custodian (racket/racket#5614); `stopped` counts those that
   stopped in time. Warmup runs are not kept.
 - **pytorch-threads** — the same mix and main loop in PyTorch, on
   `threading.Thread`s, with `torch.set_num_threads` at rktorch's thread
-  count.
+  count, released and counted the same way.
 - **calls** — native crossings per training step of 05 and 09 by phase
   (`data`, `zero-grads`, `forward`, `backward`, `optimizer`, and 09's
   `loss-item`) and in all (`step`, counted whole), on synthetic
@@ -199,6 +201,10 @@ median, quartiles and IQR, and the load average before and after.
   batch, so the same ops and the same per-image crops, with almost no
   device work. Its step time is the host's time at the real op count; the
   `item` mode's `loss-item` wait is the device's excess over the host.
+  Every step record also keeps `gc_ms`, the `current-gc-milliseconds`
+  spent in its steps, per step: the proxy's smaller activations trigger
+  fewer byte-driven collections than the real step, so the step less the
+  proxy is device time only net of GC.
   CUDA events or `nsys` would separate the two directly; neither is bound
   or in `.#cuda`.
 
@@ -240,9 +246,15 @@ faster) with a sign-test interval, which needs 6 rounds to reach 95%.
 - **A. Per op against PyTorch** — `ops` facade and raw beside
   `pytorch-ops`, in µs per call, and their ratios, one table per device and
   thread count.
-- **B. Thread scaling** — ops per second at each thread count, the speedup
-  over one thread, rktorch over PyTorch, and the main thread's steps per
-  second.
+- **B. Thread scaling** — ops per second at each thread count, each
+  implementation's ops over its own idle-main one-thread ops, rktorch over
+  PyTorch, and the main thread's steps per second. An idle row's ratio is
+  the speedup over one thread. A train row measures how far a training
+  main starves the workers, not scaling: rktorch's workers wait on main's
+  non-yielding foreign calls (accounting every tensor enters
+  `call-as-atomic` in `torch/foreign/raw/pressure.rkt`, which needs main's
+  scheduler, #262), PyTorch's on the GIL. rktorch train rows near 0 ops/s
+  are that starvation in the runtime (#262, #296), not a harness bug.
 - **C. Loader end to end against PyTorch** — `17-workers` beside
   `py-17-workers` and `py-17-workers-per-param`, per variant, as D.
 - **D. Training against PyTorch** — `05-mnist` and `09-resnet` beside their
@@ -254,8 +266,10 @@ faster) with a sign-test interval, which needs 6 rounds to reach 95%.
   accounted tensors and op calls.
 - **F. Host and device time per step** — the `host-gpu` records: each
   phase's unsynced and synced time, their sum without `loss-item`, the
-  synced step, the host proxy and its share of the step, and the
-  `loss-item` wait. Times are the host's wall clock.
+  synced step, the GC time in each step and the step net of it, the host
+  proxy raw and net of GC and its share of the step either way, and the
+  `loss-item` wait. Times are the host's wall clock; GC counts whole
+  milliseconds a round.
 - **G. GC per epoch** — every rktorch e2e summary's median `epoch_gc_ms`,
   steps per second, and GC's share of the epoch.
 
@@ -313,7 +327,9 @@ with the child's `impl`, `python`, `libtorch` (the torch version),
 `optimizer`, `foreach` and `set_to_none` over it; torch's name for the GPU
 goes to `torch_gpu`, so `gpu` stays the parent's and a twin pairs with the
 rktorch records of its device. `scaling` records add `threads_run`,
-`main_steps_per_s` and `stopped` (one per round); `calls` records count
+`main_steps_per_s` and `stopped` (one per round) and `settings` (`seconds`
+per round, `warmup` rounds); `host-gpu` step records add `gc_ms` per step,
+one per round; `calls` records count
 crossings in `samples`, frees in `frees` and `free_stats`, accounted
 tensors in `tensors` and `tensor_stats`, and op calls in `op_calls` and
 `op_call_stats`. An

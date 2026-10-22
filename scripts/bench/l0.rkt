@@ -24,7 +24,7 @@
 
 (define proxy-base 4)
 
-(define (scaling-records results runs meta)
+(define (scaling-records results runs meta settings)
   (for/list ([r (in-list results)])
     (define-values (state n) (name->case (result-name r)))
     (define timed
@@ -33,7 +33,7 @@
     (result->record r #:suite "scaling" #:group "threads" #:unit "ops/s" #:meta meta #:scale 1
                     #:extra (hasheq 'impl "rktorch" 'case (~a state) 'variant (~a n)
                                     'threads_run n 'main_steps_per_s (of 'main_steps_per_s)
-                                    'stopped (of 'stopped)))))
+                                    'stopped (of 'stopped) 'settings settings))))
 
 (define (comma-list xs)
   (string-join (map ~a xs) ","))
@@ -50,10 +50,12 @@
                       #:rounds rounds
                       #:warmup warmup
                       #:libtorch libtorch
-                      #:seconds [seconds (* 2.0 scale)]
+                      #:seconds [seconds (max 0.5 (* 2.0 scale))]
                       #:threads [threads thread-counts]
                       #:phases [phases (hasheq)])
   (define (meta-on d) (host-meta #:device d #:libtorch libtorch #:threads (aten-threads)))
+  (define scaling-warmup (max 1 warmup))
+  (define scaling-settings (hasheq 'seconds seconds 'warmup scaling-warmup))
   (define (mnist) (mnist-phases device #:batch (hash-ref phases 'batch 128)
                                 #:samples (hash-ref phases 'samples 1024)))
   (define (resnet #:base [base (hash-ref phases 'base 64)])
@@ -78,19 +80,20 @@
         scaling-deadline
         (lambda ()
           (measure (scaling-cases #:seconds seconds #:threads threads #:on-run on-run)
-                   #:warmup warmup #:rounds (or rounds 5)))))
-     (for-each emit (scaling-records results runs (meta-on 'cpu)))]
+                   #:warmup scaling-warmup #:rounds (or rounds 5)))))
+     (for-each emit (scaling-records results runs (meta-on 'cpu) scaling-settings))]
     [(pytorch-threads)
      (require-pytorch 'pytorch-threads)
      (define load (load-average))
      (for ([child (in-list (twin-records "threads.py"
                                          (list "--seconds" seconds "--rounds" (or rounds 5)
-                                               "--warmup" warmup
+                                               "--warmup" scaling-warmup
                                                "--threads" (comma-list threads)
                                                "--states" (comma-list main-states)
                                                "--intra-op" (aten-threads))
                                          #:log log))])
-       (emit (twin-record child #:suite "scaling" #:meta (meta-on 'cpu) #:load load)))]
+       (emit (~> (twin-record child #:suite "scaling" #:meta (meta-on 'cpu) #:load load)
+                 (hash-set 'settings scaling-settings))))]
     [(calls)
      (define meta (meta-on device))
      (for* ([p (in-list (list (mnist) (resnet)))]
@@ -123,14 +126,17 @@
   (define (cases-of records)
     (map (lambda (r) (list (hash-ref r 'case) (hash-ref r 'variant))) records))
 
+  (define scaling-floor (hasheq 'seconds 0.5 'warmup 1))
+
   (test-case "threads records ops per second per main state and thread count"
-    (define records (records-of 'threads #:warmup 1))
+    (define records (records-of 'threads))
     (check-equal? (cases-of records) '(("idle" "1") ("idle" "2") ("train" "1") ("train" "2")))
     (for ([r (in-list records)])
       (check-equal? (shape-of r) '("scaling" "threads" "rktorch"))
       (check-equal? (hash-ref r 'unit) "ops/s")
       (check-equal? (length (hash-ref r 'main_steps_per_s)) 1 "the warmup run is not kept")
       (check-equal? (hash-ref r 'stopped) (list (hash-ref r 'threads_run)))
+      (check-equal? (hash-ref r 'settings) scaling-floor "a smoke run still times whole seconds")
       (check-true (>= (hash-ref (hash-ref r 'stats) 'median) 0))))
 
   (test-case "calls and host-gpu record every phase of 05 and 09"
@@ -166,8 +172,17 @@
          (check-true (positive? (hash-ref (hash-ref r 'stats) 'median)))))
 
      (test-case "pytorch-threads records the cases threads does"
-       (define records (records-of 'pytorch-threads #:scale 0.05))
+       (define records (records-of 'pytorch-threads))
        (check-equal? (cases-of records) '(("idle" "1") ("idle" "2") ("train" "1") ("train" "2")))
        (for ([r (in-list records)])
          (check-equal? (shape-of r) '("scaling" "threads" "pytorch"))
-         (check-true (positive? (hash-ref (hash-ref r 'stats) 'median)))))]))
+         (check-equal? (hash-ref r 'settings) scaling-floor)
+         (check-true (positive? (hash-ref (hash-ref r 'stats) 'median)))))
+
+     (test-case "pytorch-threads counts the mixes done when main ends, from when the workers go"
+       (match (twin-records "threads_probe.py" '() #:log (open-output-nowhere) #:time-limit 120)
+         [(list slow stamped)
+          (check-equal? (hash-ref slow 'ops_per_s) 0.0 "a mix finished after the run is not counted")
+          (check-equal? (hash-ref slow 'stopped) 1)
+          (check-equal? (hash-ref stamped 'workers) 4)
+          (check-equal? (hash-ref stamped 'before_start) 0)]))]))

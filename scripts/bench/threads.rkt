@@ -47,7 +47,7 @@
          [(>= (clock-ms) deadline) steps]
          [else (step!) (loop (add1 steps))]))]))
 
-(define (start-workers n stop? counts make-mix)
+(define (start-workers n go? stop? counts make-mix)
   (define mixes (for/list ([_ (in-range n)]) (make-mix)))
   (define custodian (make-custodian-at-root))
   (values custodian
@@ -55,10 +55,13 @@
             (for/list ([mix (in-list mixes)] [i (in-naturals)])
               (thread (lambda ()
                         (let loop ([k 0])
-                          (unless (unbox stop?)
-                            (mix)
-                            (vector-set! counts i (add1 k))
-                            (loop (add1 k)))))
+                          (cond
+                            [(unbox stop?) (void)]
+                            [(not (unbox go?)) (loop k)]
+                            [else
+                             (mix)
+                             (vector-set! counts i (add1 k))
+                             (loop (add1 k))])))
                       #:pool 'own)))))
 
 (define (reap! custodian workers grace)
@@ -68,11 +71,13 @@
       [else (parameterize ([current-custodian custodian]) (kill-thread w)) 0])))
 
 (define (scaling-run n state #:seconds seconds #:grace [grace 30] #:mix [make-mix op-mix])
+  (define go? (box #f))
   (define stop? (box #f))
   (define counts (make-vector n 0))
-  (define-values (custodian workers) (start-workers n stop? counts make-mix))
+  (define-values (custodian workers) (start-workers n go? stop? counts make-mix))
   (define stopped #f)
   (define t0 (clock-ms))
+  (set-box! go? #t)
   (define-values (main-steps elapsed-s ops)
     (dynamic-wind
      void
@@ -86,6 +91,7 @@
        (set! stopped (reap! custodian workers grace)))))
   (hasheq 'ops_per_s (/ (* ops-per-iteration ops) elapsed-s)
           'main_steps_per_s (/ main-steps elapsed-s)
+          'started_ms t0
           'stopped stopped))
 
 (define (scaling-cases #:seconds seconds
@@ -117,26 +123,42 @@
                                             (set! runs (cons (list state n run) runs))))
                   #:warmup 0 #:rounds 1 #:load void))
        (check-equal? (map result-name results) '(idle/1 idle/2 train/1 train/2))
-       (for ([r (in-list results)])
+       (for ([r (in-list results)] #:when (memq (result-name r) '(idle/1 idle/2)))
          (match-define (list ops) (result-per-call r))
-         (check-true (if (memq (result-name r) '(idle/1 idle/2)) (positive? ops) (>= ops 0))
-                     (format "~a" (result-name r))))
+         (check-true (positive? ops) (format "~a" (result-name r))))
        (for ([entry (in-list runs)])
          (match-define (list state n run) entry)
          (check-equal? (hash-ref run 'stopped) n)
          (check-equal? (zero? (hash-ref run 'main_steps_per_s)) (eq? state 'idle)))
        (check-equal? (length runs) 4))))
 
-  (define (busy)
-    (lambda () (for/fold ([x 0]) ([i (in-range 2000000)]) (+ x i))))
+  (define (stalling)
+    (define calls (box 0))
+    (lambda ()
+      (set-box! calls (add1 (unbox calls)))
+      (define until (+ (clock-ms) (if (= (unbox calls) 1) 0.0 10000.0)))
+      (let loop () (when (< (clock-ms) until) (loop)))))
 
   (test-case "a worker killed after the grace period keeps the ops it counted"
     (call-with-process-deadline
      120
      (lambda ()
-       (define run (scaling-run 1 'idle #:seconds 0.3 #:grace 0 #:mix busy))
+       (define run (scaling-run 1 'idle #:seconds 0.3 #:grace 0.1 #:mix stalling))
        (check-true (positive? (hash-ref run 'ops_per_s)))
-       (check-true (<= 0 (hash-ref run 'stopped) 1)))))
+       (check-equal? (hash-ref run 'stopped) 0))))
+
+  (test-case "no worker runs a mix before the clock starts"
+    (call-with-process-deadline
+     120
+     (lambda ()
+       (define stamps '())
+       (define (stamping)
+         (define first-call (box #f))
+         (set! stamps (cons first-call stamps))
+         (lambda () (unless (unbox first-call) (set-box! first-call (clock-ms)))))
+       (define run (scaling-run 4 'idle #:seconds 0.1 #:mix stamping))
+       (for ([b (in-list stamps)])
+         (check-true (>= (unbox b) (hash-ref run 'started_ms)))))))
 
   (test-case "workers stop when the main loop raises"
     (call-with-process-deadline

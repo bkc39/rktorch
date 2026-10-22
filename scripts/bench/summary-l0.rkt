@@ -49,13 +49,13 @@
     (~> (map (lambda (r) (string->number (ref r 'variant))) records) remove-duplicates (sort <)))
   (define (at state n impl)
     (find records #:case state #:impl impl #:variant (number->string n)))
-  (table '("main" "threads" "rktorch ops/s" "rktorch ×1" "PyTorch ops/s" "PyTorch ×1"
+  (table '("main" "threads" "rktorch ops/s" "rktorch ÷ idle×1" "PyTorch ops/s" "PyTorch ÷ idle×1"
            "rktorch/PyTorch" "main steps/s rktorch" "main steps/s PyTorch")
          (for*/list ([state (in-list (cases records))] [n (in-list counts)])
            (define rk (at state n "rktorch"))
            (define py (at state n "pytorch"))
            (define (speedup impl)
-             (ratio (median-of (at state n impl)) (median-of (at state (car counts) impl))))
+             (ratio (median-of (at state n impl)) (median-of (at "idle" (car counts) impl))))
            (define (mains r) (~> (ref r 'main_steps_per_s) list-median (num 1)))
            (list state n (whole (median-of rk)) (speedup "rktorch") (whole (median-of py))
                  (speedup "pytorch") (ratio (median-of rk) (median-of py)) (mains rk) (mains py)))))
@@ -128,6 +128,13 @@
     (for/sum ([name (in-list phases)] #:unless (equal? name "loss-item"))
       (or (phase mode name) 0)))
   (define (ms x) (num x 2))
+  (define (gc variant) (list-median (ref (record-at "step" variant) 'gc_ms)))
+  (define (net variant)
+    (define r (record-at "step" variant))
+    (define samples (ref r 'samples))
+    (define gcs (ref r 'gc_ms))
+    (and (list? samples) (list? gcs) (= (length samples) (length gcs))
+         (list-median (map - samples gcs))))
   (define proxy (at "step" "proxy"))
   (define proxy-base (ref (record-at "step" "proxy") 'settings 'base))
   (table '("phase" "host ms, item every step" "host ms, no item" "ms, synced per phase")
@@ -139,9 +146,15 @@
                       (ms (enqueue 'phase-sync)))
                 (list "step" (ms (at "step" "item")) (ms (at "step" "no-item"))
                       (ms (at "step" "phase-sync")))
+                (list "GC in the step" (ms (gc "item")) (ms (gc "no-item")) (ms (gc "phase-sync")))
+                (list "step net of GC" (ms (net "item")) (ms (net "no-item"))
+                      (ms (net "phase-sync")))
                 (list (format "host proxy: the step at base ~a" (or proxy-base "?"))
                       (ms proxy) "-" "-")
+                (list "GC in the host proxy" (ms (gc "proxy")) "-" "-")
+                (list "host proxy net of GC" (ms (net "proxy")) "-" "-")
                 (list "host proxy / step" (ratio proxy (at "step" "item")) "-" "-")
+                (list "host proxy / step, net of GC" (ratio (net "proxy") (net "item")) "-" "-")
                 (list "device excess: the loss-item wait" (ms (phase 'item "loss-item")) "-" "-")))))
 
 (define (gc-section records)
@@ -197,14 +210,18 @@
     (check-equal? (length groups) 1 "one table for the device, not one per implementation")
     (check-regexp-match #rx"\\| 7\\.00 \\| 4\\.50 \\|" (render 0 (cdr (car groups)))))
 
-  (test-case "B gives each implementation's speedup over one thread, and their ratio"
+  (test-case "B scales each implementation against its own idle main on one thread"
     (define (row impl state n ops)
       (hasheq 'case state 'variant (number->string n) 'impl impl 'meta meta
               'stats (hasheq 'median ops) 'main_steps_per_s '(10.0 12.0)))
     (define md (render 1 (list (row "rktorch" "idle" 1 100.0) (row "rktorch" "idle" 2 185.0)
-                               (row "pytorch" "idle" 1 200.0) (row "pytorch" "idle" 2 400.0))))
+                               (row "pytorch" "idle" 1 200.0) (row "pytorch" "idle" 2 400.0)
+                               (row "rktorch" "train" 1 1.0) (row "rktorch" "train" 2 50.0)
+                               (row "pytorch" "train" 1 2.0) (row "pytorch" "train" 2 100.0))))
     (check-regexp-match #rx"\\| idle \\| 1 \\| 100 \\| 1\\.00 \\| 200 \\| 1\\.00 \\| 0\\.50 \\| 11\\.0 \\| 11\\.0 \\|" md)
-    (check-regexp-match #rx"\\| idle \\| 2 \\| 185 \\| 1\\.85 \\| 400 \\| 2\\.00 \\| 0\\.46 \\|" md))
+    (check-regexp-match #rx"\\| idle \\| 2 \\| 185 \\| 1\\.85 \\| 400 \\| 2\\.00 \\| 0\\.46 \\|" md)
+    (check-regexp-match #rx"\\| train \\| 1 \\| 1 \\| 0\\.01 \\| 2 \\| 0\\.01 \\| 0\\.50 \\|" md)
+    (check-regexp-match #rx"\\| train \\| 2 \\| 50 \\| 0\\.50 \\| 100 \\| 0\\.50 \\| 0\\.50 \\|" md))
 
   (define (e2e c impl variant s step #:gc [gc '()] #:settings [settings (hasheq)]
                #:reads [reads #f])
@@ -248,19 +265,26 @@
                              'meta meta)))))
 
   (test-case "F sets the host proxy and the loss-item wait beside the synced step"
-    (define (r group variant ms #:settings [settings (hasheq)])
-      (hasheq 'group group 'variant variant 'stats (hasheq 'median ms) 'meta meta
-              'settings settings))
+    (define (r group variant ms #:settings [settings (hasheq)] #:gc [gc #f])
+      (define record (hasheq 'group group 'variant variant 'stats (hasheq 'median ms) 'meta meta
+                             'settings settings 'samples (list ms (+ ms 1.0))))
+      (if gc (hash-set record 'gc_ms gc) record))
     (define md
       (render 5 (list (r "phase" "item/forward" 4.0) (r "phase" "item/loss-item" 6.0)
                       (r "phase" "no-item/forward" 4.0) (r "phase" "phase-sync/forward" 9.0)
-                      (r "step" "item" 10.0) (r "step" "no-item" 8.0) (r "step" "phase-sync" 12.0)
-                      (r "step" "proxy" 7.5 #:settings (hasheq 'base 4)))))
+                      (r "step" "item" 10.0 #:gc '(2.0 3.0)) (r "step" "no-item" 8.0 #:gc '(0.0 0.0))
+                      (r "step" "phase-sync" 12.0 #:gc '(1.0 1.0))
+                      (r "step" "proxy" 7.5 #:settings (hasheq 'base 4) #:gc '(0.0 0.0)))))
     (check-regexp-match #rx"\\| forward \\| 4\\.00 \\| 4\\.00 \\| 9\\.00 \\|" md)
     (check-regexp-match #rx"\\| loss-item \\| 6\\.00 \\| - \\| - \\|" md)
     (check-regexp-match #rx"\\| step \\| 10\\.00 \\| 8\\.00 \\| 12\\.00 \\|" md)
     (check-regexp-match #rx"\\| host proxy: the step at base 4 \\| 7\\.50 \\| - \\| - \\|" md)
     (check-regexp-match #rx"\\| host proxy / step \\| 0\\.75 \\| - \\| - \\|" md)
+    (check-regexp-match #rx"\\| GC in the step \\| 2\\.50 \\| 0\\.00 \\| 1\\.00 \\|" md)
+    (check-regexp-match #rx"\\| step net of GC \\| 8\\.00 \\| 8\\.50 \\| 11\\.50 \\|" md)
+    (check-regexp-match #rx"\\| GC in the host proxy \\| 0\\.00 \\| - \\| - \\|" md)
+    (check-regexp-match #rx"\\| host proxy net of GC \\| 8\\.00 \\| - \\| - \\|" md)
+    (check-regexp-match #rx"\\| host proxy / step, net of GC \\| 1\\.00 \\| - \\| - \\|" md)
     (check-regexp-match #rx"\\| device excess: the loss-item wait \\| 6\\.00 \\| - \\| - \\|" md))
 
   (test-case "G gives GC per epoch and its share of the epoch"

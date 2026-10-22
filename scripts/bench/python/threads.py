@@ -55,29 +55,34 @@ def run_main(state, deadline):
     return steps
 
 
-def scaling_run(n, state, seconds):
+def scaling_run(n, state, seconds, make_mix=op_mix):
+    go = threading.Event()
     stop = threading.Event()
     counts = [0] * n
 
     def work(i, mix):
+        go.wait()
         k = 0
         while not stop.is_set():
             mix()
             k += 1
-        counts[i] = k
+            counts[i] = k
 
-    workers = [threading.Thread(target=work, args=(i, op_mix()), daemon=True)
+    workers = [threading.Thread(target=work, args=(i, make_mix()), daemon=True)
                for i in range(n)]
-    t0 = time.perf_counter()
     for w in workers:
         w.start()
+    t0 = time.perf_counter()
+    go.set()
     main_steps = run_main(state, t0 + seconds)
     elapsed = time.perf_counter() - t0
+    ops = sum(counts)
     stop.set()
     for w in workers:
         w.join(30)
-    return {"ops_per_s": OPS_PER_ITERATION * sum(counts) / elapsed,
+    return {"ops_per_s": OPS_PER_ITERATION * ops / elapsed,
             "main_steps_per_s": main_steps / elapsed,
+            "started_s": t0,
             "stopped": sum(not w.is_alive() for w in workers)}
 
 
