@@ -8,7 +8,8 @@
          (only-in "device-type.rkt" cpu-device cuda-device device? mps-device)
          (only-in "error.rkt" exn:fail:rktorch:oom?)
          (only-in "ops.rkt" cuda-available? mps-available? to-device)
-         (only-in "raw/fault.rkt" native-fault?))
+         (only-in "raw/fault.rkt" native-fault?)
+         (only-in "raw/race-points.rkt" race-point))
 
 (struct mps-probe (run [state #:mutable]))
 (struct claim (holder done))
@@ -48,7 +49,9 @@
           mine]))))
 
 (define (settle! probe done)
+  (race-point mps-probe-claimed probe)
   (set-mps-probe-state! probe (probe-outcome (mps-probe-run probe)))
+  (race-point mps-probe-settled probe)
   (semaphore-post done)
   (mps-usable? probe))
 
@@ -60,6 +63,7 @@
       [(faulted fault) (raise fault)]
       [(claim (== (current-thread)) done) (settle! probe done)]
       [(claim holder done)
+       (race-point mps-probe-waiting probe)
        (sync/enable-break (semaphore-peek-evt done) (thread-dead-evt holder))
        (mps-usable? probe)])))
 
