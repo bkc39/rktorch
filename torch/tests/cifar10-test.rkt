@@ -2,7 +2,9 @@
 
 (module+ test
   (require (only-in racket/file delete-directory/files make-temporary-file)
-           (only-in racket/list take)
+           (only-in racket/list argmin group-by range remove-duplicates)
+           (only-in racket/match match-define)
+           (only-in racket/sequence in-slice)
            rackunit
            (only-in "../data/loader.rkt" dataset-ref)
            (only-in "../main.rkt"
@@ -15,29 +17,67 @@
                     cifar10-label-names
                     cifar10-records->tensors
                     load-cifar10-fixture
-                    tar-entries))
+                    tar-entries)
+           "private/class-means.rkt")
+
+  (define-values (imgs lbls) (load-cifar10-fixture))
+  (define labels (tensor->list lbls))
+  (define records
+    (for/list ([record (in-slice 3072 (tensor->list imgs))])
+      (list->vector record)))
 
   (test-case "the committed fixture parses to NCHW in [-1, 1] and int64 labels"
-    (define-values (imgs lbls) (load-cifar10-fixture))
     (check-equal? (shape imgs) '(256 3 32 32))
     (check-equal? (shape lbls) '(256))
     (check-equal? (dtype lbls) 'int64)
-    ;; the canonical first ten labels of data_batch_1
-    (check-equal? (take (tensor->list lbls) 10) '(6 9 9 4 1 1 2 7 8 3))
-    (check-equal? (map (lambda (l) (list-ref cifar10-label-names l))
-                       (take (tensor->list lbls) 3))
-                  '("frog" "truck" "truck"))
-    ;; record 0 opens with red bytes 59 43 50, green 62 and blue 63 at pixel 0
-    (define (px c h w) (ref imgs 0 c h w))
-    (check-= (px 0 0 0) (- (/ 59 127.5) 1.0) 1e-6)
-    (check-= (px 0 0 1) (- (/ 43 127.5) 1.0) 1e-6)
-    (check-= (px 0 0 2) (- (/ 50 127.5) 1.0) 1e-6)
-    (check-= (px 1 0 0) (- (/ 62 127.5) 1.0) 1e-6)
-    (check-= (px 2 0 0) (- (/ 63 127.5) 1.0) 1e-6)
     (define all (tensor->list imgs))
     (check-true (>= (apply min all) -1.0) "pixel below -1")
     (check-true (<= (apply max all) 1.0) "pixel above 1")
     (check-true (< (apply min all) 0.0) "no dark pixel"))
+
+  (test-case "every one of the ten classes is drawn, and only those"
+    (check-equal? (sort (remove-duplicates labels) <) (range 10)))
+
+  (define (channel-means record)
+    (for/list ([c (in-range 3)])
+      (/ (for/sum ([k (in-range (* c 1024) (* (add1 c) 1024))])
+           (vector-ref record k))
+         1024)))
+
+  (test-case "each class is a colour: a record's mean colour is nearest its own class's"
+    (define colours (map channel-means records))
+    (define means (class-means colours labels))
+    (for ([colour (in-list colours)] [label (in-list labels)] [i (in-naturals)])
+      (check-equal? (nearest-class means colour squared-distance) label
+                    (format "record ~a" i))))
+
+  (define shifts
+    (for*/list ([dy (in-range 4)]
+                [dx (in-range -3 4)]
+                #:when (or (positive? dy) (positive? dx))
+                #:when (= 1 (gcd dx dy)))
+      (cons dx dy)))
+
+  (define (shift-difference record shift)
+    (match-define (cons dx dy) shift)
+    (define pairs
+      (for*/list ([c (in-range 3)]
+                  [y (in-range (- 32 dy))]
+                  [x (in-range (max 0 (- dx)) (min 32 (- 32 dx)))])
+        (define (px y x) (vector-ref record (+ (* c 1024) (* y 32) x)))
+        (abs (- (px y x) (px (+ y dy) (+ x dx))))))
+    (/ (apply + pairs) (length pairs)))
+
+  (define (stripe-shift record)
+    (argmin (lambda (shift) (shift-difference record shift)) shifts))
+
+  (test-case "each class is a stripe direction: one per class, a different one for each"
+    (define by-class
+      (group-by car (map cons labels (map stripe-shift records))))
+    (define per-class (map (lambda (g) (remove-duplicates (map cdr g))) by-class))
+    (for ([g (in-list per-class)])
+      (check-equal? (length g) 1 (format "a class with stripes along ~a" g)))
+    (check-equal? (length (remove-duplicates (map car per-class))) 10))
 
   (test-case "records land on the requested device"
     (for ([dev (in-list (list (and (cuda-available?) (cuda-device))
@@ -95,7 +135,6 @@
                  (lambda () (cifar10-archive-files))))
     (delete-directory/files dir))
 
-  ;; the archive itself, only when the cache already has it: never a fetch
   (define files (and (cifar10-cached?) (cifar10-archive-files)))
   (cond
     [files

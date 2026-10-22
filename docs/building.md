@@ -88,6 +88,10 @@ racket scripts/coverage.rkt       # expression coverage, with a floor
 racket scripts/bench/run.rkt micro   # benchmarks, docs/benchmarks/README.md
 ```
 
+In a source checkout, `dataset-fixtures-parity-test` needs a `python3`, any
+version and no packages, to regenerate the fixtures. Every Nix shell
+provides one.
+
 The first entry into a shell installs the Racket dependencies into a
 per-checkout `.racket-user` directory and stages `libtorchrkt` under
 `torch/native-libs/`. Resyntax, racket-review and `cover` come pinned and
@@ -153,11 +157,12 @@ separate shared libraries, and finds them all beside itself.
 
 Their skeletons live in `pkgs/`: the `info.rkt`, a `THIRD-PARTY-NOTICES`,
 and the licences only that platform bundles. The licences both packages carry
-(PyTorch's, stb's and the codecs') live once, in
-`scripts/platform/licenses/`, and `scripts/platform/assemble.sh` adds them
-when it builds a package. The Nix build and the shells install the host's
-skeleton, with no libraries in it, so `torch`'s dependency is met without a
-download; the staged `torch/native-libs/` still supplies the shim.
+(PyTorch's and its third-party code's, stb's and the codecs') live once, in
+`scripts/platform/licenses/`, and `scripts/platform/assemble.sh` adds them,
+with `torch/LICENSE`, when it builds a package. The Nix build and the
+shells install the host's skeleton, with no libraries in it, so `torch`'s
+dependency is met without a download; the staged `torch/native-libs/`
+still supplies the shim.
 
 `(system-library-subpath #f)` decides which dep applies. racket-lang.org's
 Racket for macOS reports `aarch64-macosx`, but Nix's Racket on the same Mac

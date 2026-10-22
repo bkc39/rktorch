@@ -11,7 +11,9 @@
 @defmodule[torch/text/data]
 
 Character-level text: a corpus as one string, a vocabulary of its
-characters, and the int64 token tensors a language model consumes.
+characters, and the int64 token tensors a language model consumes. The
+corpus is downloaded on demand, not distributed by rktorch: check its
+license before use.
 
 @defproc[(load-heart-of-darkness) string?]{
 Conrad's novella from Project Gutenberg, fetched once into the cache
@@ -65,7 +67,8 @@ the tutorial prepares them: each sentence lower-cased and reduced to ASCII
 words, the pairs filtered to short sentences that open with a pronoun and a
 form of @italic{to be}, a word-level vocabulary for each language. Of the
 file's 135,842 lines 11,445 pairs survive, over 4,599 French and 2,989
-English words, the tutorial's own counts.
+English words, the tutorial's own counts. Downloaded on demand, not
+distributed by rktorch: check its license before use.
 
 A pair is @racket[(cons source target)], both normalized strings. The source
 language is French unless @racket[#:source] says otherwise, so the default

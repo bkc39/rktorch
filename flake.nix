@@ -656,6 +656,7 @@
               nativeBuildInputs = [
                 toolchain
                 pkgs.makeWrapper
+                pkgs.python3Minimal
                 racket-deps.tests.racket-deps-current
               ];
               buildInputs = [ shim ];
@@ -746,7 +747,8 @@
           };
           cudaCell = pkgs.writeShellApplication {
             name = "torch-matrix-cuda-cell";
-            runtimeInputs = [ racketReleases."9.3" ] ++ pkgs.stdenv.initialPath;
+            runtimeInputs = [ racketReleases."9.3" pkgs.python3Minimal ]
+              ++ pkgs.stdenv.initialPath;
             inheritPath = false;
             runtimeEnv = {
               CELL_SRC = "${./.}";
@@ -1140,7 +1142,7 @@
           # Lean shell without Python torch, used by the Resyntax CI lint job so
           # it doesn't pull torch's closure just to run the linter.
           ci = pkgs.mkShell {
-            buildInputs = baseInputs;
+            buildInputs = baseInputs ++ [ pkgs.python3Minimal ];
             shellHook = provisionRacketFor cpp;
           };
         }
