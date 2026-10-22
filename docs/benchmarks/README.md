@@ -147,7 +147,9 @@ median, quartiles and IQR, and the load average before and after.
   to them, so a variant can sweep the GC policy. The budget is read only
   at troughs, so a budget with `RKTORCH_BENCH_COLLECT_AT_TROUGHS=0` is
   refused. A child sees these two only as its variant sets them, never from
-  the caller's environment.
+  the caller's environment. A `torch` without
+  `foreign/raw/pressure-settings.rkt` runs with its own collection
+  defaults, and a variant that sets either variable against it is refused.
 - **pytorch-ops** — `ops`'s cases in PyTorch (`scripts/bench/python/ops.py`),
   same shapes and repetitions, eager, `variant` `pytorch`, with
   `torch.set_num_threads` set to rktorch's `at::get_num_threads`. On CUDA
@@ -160,7 +162,9 @@ median, quartiles and IQR, and the load average before and after.
   batch 64), whose steps per second are kept as `main_steps_per_s`. The
   workers start, wait at a flag, and the clock starts as it releases them.
   Each worker counts every mix it finishes, and the ops are those counted
-  when the main loop ends. A round is at least 0.5 s and the scaling suites
+  when the main loop ends. Every worker runs its mix at least once, even
+  when the run ends before it is first scheduled, so a mix that raises
+  always fails the run. A round is at least 0.5 s and the scaling suites
   always run at least one warmup round, a smoke run included. The workers stop at a flag, set even when the main
   loop raises, and are killed after a grace period, never shut down with
   their custodian (racket/racket#5614); `stopped` counts those that
@@ -169,7 +173,9 @@ median, quartiles and IQR, and the load average before and after.
   runs are not kept.
 - **pytorch-threads** — the same mix and main loop in PyTorch, on
   `threading.Thread`s, with `torch.set_num_threads` at rktorch's thread
-  count, released and counted the same way, and failing the same way.
+  count, released and counted the same way, and failing the same way. Its
+  main loop zeroes the gradients in place (`zero_grad(set_to_none=False)`),
+  as `zero-grads!` does.
 - **calls** — native crossings per training step of 05 and 09 by phase
   (`data`, `zero-grads`, `forward`, `backward`, `optimizer`, and 09's
   `loss-item`) and in all (`step`, counted whole), on synthetic
@@ -225,7 +231,9 @@ median, quartiles and IQR, and the load average before and after.
 
 An A/B run alternates its variants every round, and each variant is a set
 of environment variables; `PLTUSERHOME=<checkout>/.racket-user` runs the
-other checkout's `torch`. A checkout older than the `rktorch-step` event
+other checkout's `torch`. The recorder loads only what that `torch` has: a
+checkout without `foreign/raw/native-location.rkt` has its shim read from
+its `native-libs/`. A checkout older than the `rktorch-step` event
 (its `torch` has neither `private/step-log.rkt` nor its compiled `.zo`) logs no steps, so a child of
 such a checkout that completes is timed whole, from the end of its compile
 to its exit (`timing` `wall`, no `error`). A child whose `torch` has the
@@ -250,7 +258,8 @@ faster) with a sign-test interval, which needs 6 rounds to reach 95%.
   thread count and invocation (`run_id`).
 - **B. Thread scaling** — ops per second at each thread count, each
   implementation's ops over its own idle-main one-thread ops, rktorch over
-  PyTorch, and the main thread's steps per second. An idle row's ratio is
+  PyTorch, and the main thread's steps per second, one table per thread
+  count and invocation (`run_id`). An idle row's ratio is
   the speedup over one thread. A train row measures how far a training
   main starves the workers, not scaling: rktorch's workers wait on main's
   non-yielding foreign calls (accounting every tensor enters

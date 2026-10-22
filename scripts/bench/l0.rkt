@@ -192,9 +192,14 @@
 
      (test-case "pytorch-threads counts the mixes done when main ends, from when the workers go"
        (match (twin-records "threads_probe.py" '() #:log (open-output-nowhere) #:time-limit 120)
-         [(list slow stamped failing)
+         [(list slow stamped failing zero-grad)
           (check-equal? (hash-ref slow 'ops_per_s) 0.0 "a mix finished after the run is not counted")
           (check-equal? (hash-ref slow 'stopped) 1)
-          (check-equal? (hash-ref stamped 'workers) 4)
-          (check-equal? (hash-ref stamped 'before_start) 0)
-          (check-equal? (hash-ref failing 'raised) "unsupported" "a worker's raise fails the run")]))]))
+          (for ([run (in-list (hash-ref stamped 'runs))])
+            (check-equal? (hash-ref run 'workers) 4)
+            (check-equal? (hash-ref run 'ran) 4 "every worker runs its mix once")
+            (check-equal? (hash-ref run 'before_start) 0))
+          (check-equal? (hash-ref failing 'raised) '("unsupported" "unsupported")
+                        "a worker's raise fails the run")
+          (check-equal? (hash-ref zero-grad 'set_to_none) '(#f #f)
+                        "main zeroes its gradients in place, as zero-grads! does")]))]))

@@ -51,7 +51,7 @@
   (define mixes (for/list ([_ (in-range n)]) (make-mix)))
   (define custodian (make-custodian-at-root))
   (define (fail! e)
-    (box-cas! failure #f e)
+    (let retry () (unless (or (unbox failure) (box-cas! failure #f e)) (retry)))
     (set-box! stop? #t))
   (values custodian
           (parameterize ([current-custodian custodian])
@@ -60,8 +60,8 @@
                         (with-handlers ([(lambda (_e) #t) fail!])
                           (let loop ([k 0])
                             (cond
-                              [(unbox stop?) (void)]
                               [(not (unbox go?)) (loop k)]
+                              [(and (positive? k) (unbox stop?)) (void)]
                               [else
                                (mix)
                                (vector-set! counts i (add1 k))
@@ -163,9 +163,13 @@
          (define first-call (box #f))
          (set! stamps (cons first-call stamps))
          (lambda () (unless (unbox first-call) (set-box! first-call (clock-ms)))))
-       (define run (scaling-run 4 'idle #:seconds 0.1 #:mix stamping))
-       (for ([b (in-list stamps)])
-         (check-true (>= (unbox b) (hash-ref run 'started_ms)))))))
+       (for ([seconds (in-list '(0 0.1))])
+         (set! stamps '())
+         (define run (scaling-run 4 'idle #:seconds seconds #:mix stamping))
+         (check-equal? (length stamps) 4)
+         (for ([b (in-list stamps)])
+           (check-pred real? (unbox b) "every worker ran its mix once")
+           (check-true (>= (unbox b) (hash-ref run 'started_ms))))))))
 
   (test-case "a worker's raise stops the others and fails the run"
     (call-with-process-deadline
@@ -178,11 +182,13 @@
        (define (failing-first)
          (set-box! made (add1 (unbox made)))
          (if (= (unbox made) 1) (lambda () (raise-user-error 'mix "unsupported")) tick!))
-       (check-exn #rx"mix: unsupported"
-                  (lambda () (scaling-run 2 'idle #:seconds 0.2 #:mix failing-first)))
-       (define seen (unbox ticks))
-       (sync (alarm-evt (+ (clock-ms) 300) #t))
-       (check-equal? (unbox ticks) seen "no worker ran after the raise"))))
+       (for ([seconds (in-list '(0 0.2))])
+         (set-box! made 0)
+         (check-exn #rx"mix: unsupported"
+                    (lambda () (scaling-run 2 'idle #:seconds seconds #:mix failing-first)))
+         (define seen (unbox ticks))
+         (sync (alarm-evt (+ (clock-ms) 300) #t))
+         (check-equal? (unbox ticks) seen "no worker ran after the raise")))))
 
   (test-case "workers stop when the main loop raises"
     (call-with-process-deadline
@@ -193,5 +199,6 @@
          (lambda () (let loop () (unless (box-cas! ticks (unbox ticks) (add1 (unbox ticks))) (loop)))))
        (check-exn exn:misc:match? (lambda () (scaling-run 2 'bogus #:seconds 0.1 #:mix ticking)))
        (define seen (unbox ticks))
+       (check-true (>= seen 2) "each worker ran its mix once")
        (sync (alarm-evt (+ (clock-ms) 300) #t))
        (check-equal? (unbox ticks) seen "no worker ran after the raise")))))

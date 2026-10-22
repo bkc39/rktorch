@@ -5,11 +5,11 @@
          (only-in racket/file call-with-atomic-output-file)
          (only-in racket/list drop last remove-duplicates)
          (only-in racket/match match)
-         (only-in torch/foreign/raw/pressure-settings native-collect-at-troughs native-collect-budget)
          (only-in "harness.rkt" host-meta summarize)
-         (only-in "shim.rkt" aten-threads torch-dir))
+         (only-in "shim.rkt" aten-threads checkout-module torch-dir))
 
 (provide (struct-out recorded-run)
+         collection-policy
          collect-settings
          record-steps!
          read-steps
@@ -31,17 +31,39 @@
   (define x (string->number text 10 'number-or-false 'decimal-as-exact))
   (and (real? x) (< 0 x) (<= x 1) x))
 
-(define (collect-settings env)
+(define (collection-policy #:torch [dir torch-dir])
+  (match (checkout-module #:torch dir "foreign" "raw" "pressure-settings.rkt")
+    [#f #f]
+    [m (list (dynamic-require m 'native-collect-at-troughs)
+             (dynamic-require m 'native-collect-budget))]))
+
+(define collect-variables '("RKTORCH_BENCH_COLLECT_AT_TROUGHS" "RKTORCH_BENCH_COLLECT_BUDGET"))
+
+(define (call-with-collection-policy env policy thunk)
+  (match policy
+    [#f
+     (match (filter env collect-variables)
+       ['() (thunk)]
+       [(cons name _)
+        (raise-user-error 'record-steps "~a needs a torch with foreign/raw/pressure-settings.rkt"
+                          name)])]
+    [(list at-troughs budget)
+     (define collect (collect-settings env (at-troughs) (budget)))
+     (parameterize ([at-troughs (hash-ref collect 'at-troughs)]
+                    [budget (hash-ref collect 'budget)])
+       (thunk))]))
+
+(define (collect-settings env default-at-troughs default-budget)
   (define at-troughs
     (match (env "RKTORCH_BENCH_COLLECT_AT_TROUGHS")
-      [#f (native-collect-at-troughs)]
+      [#f default-at-troughs]
       ["0" #f]
       ["1" #t]
       [text (raise-user-error 'record-steps "RKTORCH_BENCH_COLLECT_AT_TROUGHS is 0 or 1, got ~s"
                               text)]))
   (define budget
     (match (env "RKTORCH_BENCH_COLLECT_BUDGET")
-      [#f (native-collect-budget)]
+      [#f default-budget]
       [_ #:when (not at-troughs)
          (raise-user-error 'record-steps
                            "RKTORCH_BENCH_COLLECT_BUDGET is read only at troughs, which are off")]
@@ -61,11 +83,10 @@
   (write-steps out (hasheq 'meta meta 'torch_dir torch-dir-string))
   (managed-compile-zo runner)
   (define receiver (make-log-receiver (current-logger) 'debug 'rktorch-step))
-  (define collect (collect-settings getenv))
+  (define policy (collection-policy))
   (define t0 (current-inexact-monotonic-milliseconds))
-  (parameterize ([native-collect-at-troughs (hash-ref collect 'at-troughs)]
-                 [native-collect-budget (hash-ref collect 'budget)])
-    (dynamic-require `(submod (file ,runner) main) #f))
+  (call-with-collection-policy getenv policy
+                               (lambda () (dynamic-require `(submod (file ,runner) main) #f)))
   (define wall (- (current-inexact-monotonic-milliseconds) t0))
   (define steps (map vector->list (drain receiver)))
   (write-steps out (hasheq 'wall_ms wall 'steps steps 'meta meta 'torch_dir torch-dir-string)))
@@ -126,7 +147,8 @@
              'gc_ms (- (last gc) (car gc)))]))
 
 (module+ test
-  (require (only-in racket/file make-temporary-file)
+  (require (only-in racket/file make-temporary-directory make-temporary-file)
+           (only-in racket/match match-define)
            rackunit
            (only-in "harness.rkt" with-temporary-path))
 
@@ -195,9 +217,12 @@
         (read-steps path)))
     (check-equal? run (recorded-run '() #f (hasheq 'git_sha "abc") "/t/torch/")))
 
+  (define ((env-of kvs) name) (cond [(assoc name kvs) => cdr] [else #f]))
+
   (test-case "the collection policy comes from the variant's settings"
+    (match-define (list at-troughs budget) (collection-policy))
     (define (settings . kvs)
-      (collect-settings (lambda (name) (cond [(assoc name kvs) => cdr] [else #f]))))
+      (collect-settings (env-of kvs) (at-troughs) (budget)))
     (check-equal? (settings) (hasheq 'at-troughs #t 'budget 1/20))
     (check-equal? (settings '("RKTORCH_BENCH_COLLECT_AT_TROUGHS" . "1")
                             '("RKTORCH_BENCH_COLLECT_BUDGET" . "0.2"))
@@ -212,6 +237,15 @@
     (for ([bad (in-list '("0" "1.5" "x"))])
       (check-exn #rx"BUDGET is a share in [(]0, 1[]]"
                  (lambda () (settings (cons "RKTORCH_BENCH_COLLECT_BUDGET" bad))))))
+
+  (test-case "a torch without the collection policy runs with its defaults and refuses settings"
+    (with-temporary-path (old (make-temporary-directory "torch-~a"))
+      (check-false (collection-policy #:torch old))
+      (check-equal? (call-with-collection-policy (env-of '()) #f (lambda () 'ran)) 'ran)
+      (check-exn #rx"RKTORCH_BENCH_COLLECT_BUDGET needs a torch with"
+                 (lambda ()
+                   (call-with-collection-policy (env-of '(("RKTORCH_BENCH_COLLECT_BUDGET" . "0.2")))
+                                                #f void)))))
 
   (test-case "a write that fails leaves the last complete record"
     (with-temporary-path (path (make-temporary-file "steps-~a.json"))

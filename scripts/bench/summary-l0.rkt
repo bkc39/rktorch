@@ -185,7 +185,8 @@
 (define l0-sections
   (list (make-section "micro" "ops" "A. Per op against PyTorch" twin-op-section
                       paired-placement)
-        (make-section "scaling" "threads" "B. Thread scaling" scaling-section host)
+        (make-section "scaling" "threads" "B. Thread scaling" scaling-section
+                      paired-placement)
         (make-section "e2e" "summary" "C. Loader end to end against PyTorch"
                       (twin-e2e-section loader-example?) paired-placement)
         (make-section "e2e" "summary" "D. Training against PyTorch"
@@ -237,6 +238,22 @@
     (check-regexp-match #rx"\\| idle \\| 2 \\| 185 \\| 1\\.85 \\| 400 \\| 2\\.00 \\| 0\\.46 \\|" md)
     (check-regexp-match #rx"\\| train \\| 1 \\| 1 \\| 0\\.01 \\| 2 \\| 0\\.01 \\| 0\\.50 \\|" md)
     (check-regexp-match #rx"\\| train \\| 2 \\| 50 \\| 0\\.50 \\| 100 \\| 0\\.50 \\| 0\\.50 \\|" md))
+
+  (test-case "B pairs a run only with the twins of its own invocation and thread setting"
+    (define (row run threads impl ops)
+      (hasheq 'case "idle" 'variant "1" 'impl impl 'run_id run 'stats (hasheq 'median ops)
+              'meta (hasheq 'host "lab" 'device "cpu" 'threads threads)
+              'main_steps_per_s '(0.0)))
+    (match-define (list (cons c1 r1) (cons c2 r2))
+      (by-context (list (row "r1" 1 "rktorch" 100.0) (row "r1" 1 "pytorch" 200.0)
+                        (row "r2" 8 "rktorch" 300.0))
+                  (section-context (list-ref l0-sections 1))))
+    (check-regexp-match #rx"; cpu, 1 threads; run r1$" c1)
+    (check-regexp-match #rx"; cpu, 8 threads; run r2$" c2)
+    (check-regexp-match #rx"\\| idle \\| 1 \\| 100 \\| 1\\.00 \\| 200 \\| 1\\.00 \\| 0\\.50 \\|"
+                        (render 1 r1))
+    (check-regexp-match #rx"\\| idle \\| 1 \\| 300 \\| 1\\.00 \\| - \\| - \\| - \\|"
+                        (render 1 r2)))
 
   (define (e2e c impl variant s step #:gc [gc '()] #:settings [settings (hasheq)]
                #:reads [reads #f] #:timing [timing "steps"] #:unit [unit "s/epoch"]

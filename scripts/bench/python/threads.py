@@ -36,7 +36,7 @@ def training_step():
     ys = torch.tensor([i % 10 for i in range(64)])
 
     def step():
-        opt.zero_grad()
+        opt.zero_grad(set_to_none=False)
         F.cross_entropy(net(xs), ys).backward()
         opt.step()
 
@@ -65,7 +65,7 @@ def scaling_run(n, state, seconds, make_mix=op_mix):
         go.wait()
         k = 0
         try:
-            while not stop.is_set():
+            while k == 0 or not stop.is_set():
                 mix()
                 k += 1
                 counts[i] = k
