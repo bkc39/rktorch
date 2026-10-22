@@ -517,9 +517,10 @@ with a GPU.
 ## Accelerators
 
 `#:device 'cuda` works on Linux and `#:device 'mps` on Apple Silicon;
-`(accelerator-if-available)` picks whichever is present. MPS works from the
-default shell on darwin. CUDA needs `nix develop .#cuda`, which links the shim
-against the CUDA libtorch and stages the host's NVIDIA driver libraries.
+`(accelerator-if-available)` picks CUDA when present, else MPS when it can
+allocate, else the CPU. MPS works from the default shell on darwin. CUDA needs
+`nix develop .#cuda`, which links the shim against the CUDA libtorch and stages
+the host's NVIDIA driver libraries.
 
 ## The OCaml reference shell
 

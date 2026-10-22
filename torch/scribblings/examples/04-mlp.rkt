@@ -29,11 +29,10 @@ are callable in @racket[#:forward] like @tt{self.fc1(x)} —
   #:forward (x)
   (~> x fc1 relu fc2))]
 
-@bold{The device.} Pick the accelerator the way PyTorch does
-(@tt{torch.accelerator.current_accelerator()}): set it as the
-process default and every tensor built afterwards — the model's parameters and
-the batch alike — is allocated there, so the whole loop runs on the GPU when one
-is present and on the CPU otherwise. @racket[run-example] returns the device it
+@bold{The device.} Pick CUDA when it is present, else Metal when it can
+allocate, else the CPU: set it as the process default and every tensor built
+afterwards — the model's parameters and the batch alike — is allocated there,
+so the whole loop runs on the GPU when one is usable and on the CPU otherwise. @racket[run-example] returns the device it
 chose so callers can report it.
 
 @chunk[<r04-device>
