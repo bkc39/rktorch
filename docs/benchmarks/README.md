@@ -164,10 +164,12 @@ median, quartiles and IQR, and the load average before and after.
   always run at least one warmup round, a smoke run included. The workers stop at a flag, set even when the main
   loop raises, and are killed after a grace period, never shut down with
   their custodian (racket/racket#5614); `stopped` counts those that
-  stopped in time. Warmup runs are not kept.
+  stopped in time. A worker that raises stops the others, and the run
+  raises it, so the case fails rather than reporting fewer ops. Warmup
+  runs are not kept.
 - **pytorch-threads** — the same mix and main loop in PyTorch, on
   `threading.Thread`s, with `torch.set_num_threads` at rktorch's thread
-  count, released and counted the same way.
+  count, released and counted the same way, and failing the same way.
 - **calls** — native crossings per training step of 05 and 09 by phase
   (`data`, `zero-grads`, `forward`, `backward`, `optimizer`, and 09's
   `loss-item`) and in all (`step`, counted whole), on synthetic
@@ -245,7 +247,7 @@ faster) with a sign-test interval, which needs 6 rounds to reach 95%.
 
 - **A. Per op against PyTorch** — `ops` facade and raw beside
   `pytorch-ops`, in µs per call, and their ratios, one table per device and
-  thread count.
+  thread count and invocation (`run_id`).
 - **B. Thread scaling** — ops per second at each thread count, each
   implementation's ops over its own idle-main one-thread ops, rktorch over
   PyTorch, and the main thread's steps per second. An idle row's ratio is
@@ -261,7 +263,10 @@ faster) with a sign-test interval, which needs 6 rounds to reach 95%.
   twins: the e2e median and the median step interval (`step_ms`) of each,
   rktorch over PyTorch's default optimizer and over its per-parameter one.
   A pair given a setting that one side reads and the other does not (the
-  records' `reads`) gets no ratios, and the row names those settings.
+  records' `reads`) gets no ratios, and the row names those settings; so
+  does a twin timed in another `timing` or `unit` (a whole-run `s/run`
+  against `s/epoch`), named as `PyTorch-unit=` or `per-param-unit=`. C and D
+  pair only within one invocation (`run_id`).
 - **E. Native calls per step** — the `calls` records: crossings, frees,
   accounted tensors and op calls.
 - **F. Host and device time per step** — the `host-gpu` records: each
@@ -342,9 +347,9 @@ A child sees none of the caller's example variables (`EPOCHS`, `STEPS`,
 give. A failed example writes an `error` record (`case`, `variant`,
 `exit_code`, `error`, and `meta_from`: `child`, or `parent` when the child
 died before recording its own), listed under Failures in the summary with
-its commit and execution. A failure ends the rounds of that example's
-group (the example and its twins); the completed runs still get their
-summaries.
+its commit and execution. A failed child is not run again; the rest of
+its group (the example's other variants and its twins) runs every round,
+and the completed runs still get their summaries.
 
 ## Baseline
 

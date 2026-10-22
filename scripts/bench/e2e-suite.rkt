@@ -268,7 +268,7 @@
     (for ([r (in-list records)])
       (check-regexp-match #rx"no exit within 5 s" (hash-ref r 'error))))
 
-  (test-case "a failed variant keeps the summaries of the runs that completed"
+  (test-case "a failed variant is not run again, and the others run every round"
     (define fixture (example "stepper" '(("EPOCHS" . 3)) '(("EPOCHS" . 4)) "EPOCHS" 0 'first))
     (define records
       (records-of (lambda (out)
@@ -277,11 +277,12 @@
                              #:max-load #f #:libtorch "x" #:out out #:log quiet
                              #:runner-for (lambda (_ex) stepper)))))
     (check-equal? (map (lambda (r) (list (hash-ref r 'group) (hash-ref r 'variant))) records)
-                  '(("run" "a") ("run" "b") ("error" "b") ("summary" "a")))
-    (match-define (list a-run _ _ a-summary) records)
-    (check-equal? (hash-ref (hash-ref a-summary 'stats) 'n) 1)
-    (check-equal? (hash-ref (hash-ref a-summary 'steps_per_s) 'median)
-                  (exact->inexact (hash-ref a-run 'steps_per_s)))
+                  '(("run" "a") ("run" "b") ("error" "b") ("run" "a") ("summary" "a")))
+    (match-define (list a-run _ _ a-again a-summary) records)
+    (check-equal? (hash-ref (hash-ref a-summary 'stats) 'n) 2)
+    (check-= (hash-ref (hash-ref a-summary 'steps_per_s) 'median)
+             (/ (+ (hash-ref a-run 'steps_per_s) (hash-ref a-again 'steps_per_s)) 2.0)
+             1e-9)
     (define md (summary-markdown records))
     (check-regexp-match #rx"## End to end[^#]*\\| stepper \\| a \\|[^#]*## Failures" md)
     (check-regexp-match #rx"\\| stepper \\| b \\| `[^`]*`[^|]* \\| [a-z]+, [0-9]+ threads " md))

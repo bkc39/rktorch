@@ -47,21 +47,25 @@
          [(>= (clock-ms) deadline) steps]
          [else (step!) (loop (add1 steps))]))]))
 
-(define (start-workers n go? stop? counts make-mix)
+(define (start-workers n go? stop? counts failure make-mix)
   (define mixes (for/list ([_ (in-range n)]) (make-mix)))
   (define custodian (make-custodian-at-root))
+  (define (fail! e)
+    (box-cas! failure #f e)
+    (set-box! stop? #t))
   (values custodian
           (parameterize ([current-custodian custodian])
             (for/list ([mix (in-list mixes)] [i (in-naturals)])
               (thread (lambda ()
-                        (let loop ([k 0])
-                          (cond
-                            [(unbox stop?) (void)]
-                            [(not (unbox go?)) (loop k)]
-                            [else
-                             (mix)
-                             (vector-set! counts i (add1 k))
-                             (loop (add1 k))])))
+                        (with-handlers ([(lambda (_e) #t) fail!])
+                          (let loop ([k 0])
+                            (cond
+                              [(unbox stop?) (void)]
+                              [(not (unbox go?)) (loop k)]
+                              [else
+                               (mix)
+                               (vector-set! counts i (add1 k))
+                               (loop (add1 k))]))))
                       #:pool 'own)))))
 
 (define (reap! custodian workers grace)
@@ -74,7 +78,8 @@
   (define go? (box #f))
   (define stop? (box #f))
   (define counts (make-vector n 0))
-  (define-values (custodian workers) (start-workers n go? stop? counts make-mix))
+  (define failure (box #f))
+  (define-values (custodian workers) (start-workers n go? stop? counts failure make-mix))
   (define stopped #f)
   (define t0 (clock-ms))
   (set-box! go? #t)
@@ -89,10 +94,12 @@
      (lambda ()
        (set-box! stop? #t)
        (set! stopped (reap! custodian workers grace)))))
-  (hasheq 'ops_per_s (/ (* ops-per-iteration ops) elapsed-s)
-          'main_steps_per_s (/ main-steps elapsed-s)
-          'started_ms t0
-          'stopped stopped))
+  (match (unbox failure)
+    [#f (hasheq 'ops_per_s (/ (* ops-per-iteration ops) elapsed-s)
+                'main_steps_per_s (/ main-steps elapsed-s)
+                'started_ms t0
+                'stopped stopped)]
+    [e (raise e)]))
 
 (define (scaling-cases #:seconds seconds
                        #:threads [threads thread-counts]
@@ -159,6 +166,23 @@
        (define run (scaling-run 4 'idle #:seconds 0.1 #:mix stamping))
        (for ([b (in-list stamps)])
          (check-true (>= (unbox b) (hash-ref run 'started_ms)))))))
+
+  (test-case "a worker's raise stops the others and fails the run"
+    (call-with-process-deadline
+     120
+     (lambda ()
+       (define ticks (box 0))
+       (define made (box 0))
+       (define (tick!)
+         (let loop () (unless (box-cas! ticks (unbox ticks) (add1 (unbox ticks))) (loop))))
+       (define (failing-first)
+         (set-box! made (add1 (unbox made)))
+         (if (= (unbox made) 1) (lambda () (raise-user-error 'mix "unsupported")) tick!))
+       (check-exn #rx"mix: unsupported"
+                  (lambda () (scaling-run 2 'idle #:seconds 0.2 #:mix failing-first)))
+       (define seen (unbox ticks))
+       (sync (alarm-evt (+ (clock-ms) 300) #t))
+       (check-equal? (unbox ticks) seen "no worker ran after the raise"))))
 
   (test-case "workers stop when the main loop raises"
     (call-with-process-deadline

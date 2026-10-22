@@ -59,14 +59,19 @@ def scaling_run(n, state, seconds, make_mix=op_mix):
     go = threading.Event()
     stop = threading.Event()
     counts = [0] * n
+    failures = []
 
     def work(i, mix):
         go.wait()
         k = 0
-        while not stop.is_set():
-            mix()
-            k += 1
-            counts[i] = k
+        try:
+            while not stop.is_set():
+                mix()
+                k += 1
+                counts[i] = k
+        except Exception as e:  # noqa: BLE001
+            failures.append(e)
+            stop.set()
 
     workers = [threading.Thread(target=work, args=(i, make_mix()), daemon=True)
                for i in range(n)]
@@ -80,6 +85,8 @@ def scaling_run(n, state, seconds, make_mix=op_mix):
     stop.set()
     for w in workers:
         w.join(30)
+    if failures:
+        raise failures[0]
     return {"ops_per_s": OPS_PER_ITERATION * ops / elapsed,
             "main_steps_per_s": main_steps / elapsed,
             "started_s": t0,

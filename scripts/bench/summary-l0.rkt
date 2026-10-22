@@ -32,6 +32,9 @@
   (format "~a; ~a, ~a threads~a" (host r) (ref r 'meta 'device) (ref r 'meta 'threads)
           (if (string? (ref r 'meta 'gpu)) (format ", ~a" (ref r 'meta 'gpu)) "")))
 
+(define (paired-placement r)
+  (format "~a; run ~a" (placement r) (ref r 'run_id)))
+
 (define (us r) (if r (~> (median r) (/ 1000.0) (num 2)) "-"))
 
 (define (twin-op-section records)
@@ -92,14 +95,24 @@
               (for/list ([p (in-list pairs)])
                 (match-define (list rk py pp) p)
                 (define unmatched (unmatched-settings rk py))
+                (define (timed-alike? r)
+                  (and r (equal? (ref rk 'timing) (ref r 'timing))
+                       (equal? (ref rk 'unit) (ref r 'unit))))
+                (define (unlike label r)
+                  (and r (not (timed-alike? r))
+                       (format "~a-unit=~a,~a" label (ref r 'unit) (ref r 'timing))))
+                (define marks
+                  (append unmatched (filter values (list (unlike "PyTorch" py)
+                                                         (unlike "per-param" pp)))))
                 (define (step r) (and r (list-median (ref r 'step_ms))))
-                (define (vs a b) (if (null? unmatched) (ratio a b) "-"))
+                (define (vs twin a b)
+                  (if (and (null? unmatched) (timed-alike? twin)) (ratio a b) "-"))
                 (list (ref rk 'case) (or (ref rk 'variant) "-") (ref rk 'unit)
-                      (num (median rk) 2) (num (median py) 2) (vs (median rk) (median py))
-                      (num (median-of pp) 2) (vs (median rk) (median-of pp))
-                      (num (step rk) 2) (num (step py) 2) (vs (step rk) (step py))
-                      (num (step pp) 2) (vs (step rk) (step pp))
-                      (if (null? unmatched) "-" (string-join unmatched " ")))))))
+                      (num (median rk) 2) (num (median py) 2) (vs py (median rk) (median py))
+                      (num (median-of pp) 2) (vs pp (median rk) (median-of pp))
+                      (num (step rk) 2) (num (step py) 2) (vs py (step rk) (step py))
+                      (num (step pp) 2) (vs pp (step rk) (step pp))
+                      (if (null? marks) "-" (string-join marks " ")))))))
 
 (define (loader-example? c) (equal? c "17-workers"))
 
@@ -170,12 +183,14 @@
               rows)))
 
 (define l0-sections
-  (list (make-section "micro" "ops" "A. Per op against PyTorch" twin-op-section placement)
+  (list (make-section "micro" "ops" "A. Per op against PyTorch" twin-op-section
+                      paired-placement)
         (make-section "scaling" "threads" "B. Thread scaling" scaling-section host)
         (make-section "e2e" "summary" "C. Loader end to end against PyTorch"
-                      (twin-e2e-section loader-example?) placement)
+                      (twin-e2e-section loader-example?) paired-placement)
         (make-section "e2e" "summary" "D. Training against PyTorch"
-                      (twin-e2e-section (lambda (c) (not (loader-example? c)))) placement)
+                      (twin-e2e-section (lambda (c) (not (loader-example? c))))
+                      paired-placement)
         (make-section "calls" "phase" "E. Native calls per step" calls-section placement)
         (make-section "host-gpu" #f "F. Host and device time per step" host-gpu-section placement)
         (make-section "e2e" "summary" "G. GC per epoch" gc-section host #:keep rktorch?)))
@@ -224,9 +239,11 @@
     (check-regexp-match #rx"\\| train \\| 2 \\| 50 \\| 0\\.50 \\| 100 \\| 0\\.50 \\| 0\\.50 \\|" md))
 
   (define (e2e c impl variant s step #:gc [gc '()] #:settings [settings (hasheq)]
-               #:reads [reads #f])
+               #:reads [reads #f] #:timing [timing "steps"] #:unit [unit "s/epoch"]
+               #:run [run "r1"])
     (define r (hasheq 'suite "e2e" 'group "summary" 'case c 'impl impl 'variant variant
-                      'unit "s/epoch" 'stats (hasheq 'median s) 'step_ms (list step)
+                      'run_id run 'timing timing
+                      'unit unit 'stats (hasheq 'median s) 'step_ms (list step)
                       'epoch_gc_ms gc 'settings settings 'steps_per_s (hasheq 'median 100.0)
                       'meta meta))
     (if reads (hash-set r 'reads reads) r))
@@ -270,6 +287,37 @@
                            #:reads '("EPOCHS" "BATCH" "BASE" "DATASET" "OPTIMIZER")))))
     (check-regexp-match #rx"\\| 09-resnet \\| - \\| s/epoch \\| 14\\.00 \\| 7\\.00 \\| - \\|" d)
     (check-regexp-match #rx"\\| BASE DATASET \\|$" d))
+
+  (test-case "A, C and D pair a run only with the twins of its own invocation"
+    (define (op run impl variant ns)
+      (hasheq 'case "add-8x8" 'variant variant 'impl impl 'stats (hasheq 'median ns) 'meta meta
+              'run_id run))
+    (define ops (list (op "r1" "rktorch" "facade" 8000.0) (op "r1" "pytorch" "pytorch" 2000.0)
+                      (op "r2" "rktorch" "facade" 9000.0) (op "r2" "pytorch" "pytorch" 3000.0)))
+    (define op-groups (by-context ops (section-context (car l0-sections))))
+    (check-equal? (length op-groups) 2)
+    (check-regexp-match #rx"; run r1$" (car (car op-groups)))
+    (check-regexp-match #rx"\\| add-8x8 \\| 8\\.00 \\| - \\| 2\\.00 \\| 4\\.00 \\|"
+                        (render 0 (cdr (car op-groups))))
+    (define runs (list (e2e "05-mnist" "rktorch" #f 2.0 4.0 #:run "r1")
+                       (e2e "py-05-mnist" "pytorch" #f 1.0 2.0 #:run "r1")
+                       (e2e "05-mnist" "rktorch" #f 3.0 6.0 #:run "r2")
+                       (e2e "py-05-mnist" "pytorch" #f 6.0 12.0 #:run "r2")))
+    (match-define (list r1 r2)
+      (map (lambda (g) (render 3 (cdr g)))
+           (by-context runs (section-context (list-ref l0-sections 3)))))
+    (check-regexp-match #rx"\\| 05-mnist \\| - \\| s/epoch \\| 2\\.00 \\| 1\\.00 \\| 2\\.00 \\|" r1)
+    (check-regexp-match #rx"\\| 05-mnist \\| - \\| s/epoch \\| 3\\.00 \\| 6\\.00 \\| 0\\.50 \\|" r2))
+
+  (test-case "C and D set no ratio between a whole-run time and a twin's step time"
+    (define d
+      (render 3 (list (e2e "05-mnist" "rktorch" #f 20.0 4.0 #:timing "wall" #:unit "s/run")
+                      (e2e "py-05-mnist" "pytorch" #f 1.0 2.0)
+                      (e2e "py-05-mnist-per-param" "pytorch" #f 1.5 2.0))))
+    (check-regexp-match
+     #rx"\\| 05-mnist \\| - \\| s/run \\| 20\\.00 \\| 1\\.00 \\| - \\| 1\\.50 \\| - \\| 4\\.00 \\| 2\\.00 \\| - \\| 2\\.00 \\| - \\|"
+     d)
+    (check-regexp-match #rx"\\| PyTorch-unit=s/epoch,steps per-param-unit=s/epoch,steps \\|$" d))
 
   (test-case "E lists crossings, frees, tensors and op calls per phase"
     (check-regexp-match

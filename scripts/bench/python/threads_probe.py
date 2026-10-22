@@ -1,5 +1,6 @@
 """Fixture for the twin test of threads.py: scaling_run with a mix slower
-than the run, and with mixes that stamp their first call."""
+than the run, with mixes that stamp their first call, and with a mix that
+raises."""
 
 import time
 
@@ -34,6 +35,22 @@ def main():
     emit({"case": "stamped", "workers": len(stamps),
           "before_start": sum(1 for first in stamps
                               if first and first[0] < stamped["started_s"])})
+    made = []
+
+    def failing_first():
+        made.append(None)
+
+        def fail():
+            raise RuntimeError("unsupported")
+
+        return fail if len(made) == 1 else (lambda: None)
+
+    try:
+        scaling_run(2, "idle", 0.1, make_mix=failing_first)
+        raised = None
+    except RuntimeError as e:
+        raised = str(e)
+    emit({"case": "failing", "raised": raised})
 
 
 if __name__ == "__main__":
