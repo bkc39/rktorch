@@ -38,7 +38,7 @@ reports. torch's own platform packages, such as `torch-x86_64-linux`, are left
 out of the fetch: the build and the shells install their library-less
 skeleton from `pkgs/` instead (see [The platform package](#the-platform-package)),
 after checking that the skeleton's version and the dep's `#:version` both
-equal torch's. Any other `#:platform` dep is refused, whether `torch/info.rkt`
+equal torch's `native-version`. Any other `#:platform` dep is refused, whether `torch/info.rkt`
 or a fetched package declares it: one hash cannot hold a per-system fetch. A
 package source (a URL or path) is refused too: racket-deps fetches catalog
 packages by name.
@@ -144,7 +144,8 @@ and the `abi-stamp-current` flake check fails until it is committed.
 ## The platform package
 
 `torch` depends on one platform package per supported host, each providing
-the collection `torch-native` at torch's own version: `torch-x86_64-linux`
+the collection `torch-native` at torch's `native-version` (which moves only
+when the compiled bytes do; [`releasing.md`](releasing.md#versions)): `torch-x86_64-linux`
 and `torch-aarch64-macosx`, each declared once for every platform string
 that names its host (below). Each holds `libtorchrkt`, libtorch 2.14.0's
 libraries from PyTorch's official zip, and libsndfile with its codecs as
@@ -262,7 +263,7 @@ library is re-signed ad hoc (`codesign --force --sign -`), since arm64 macOS
 refuses to load code whose signature no longer matches.
 
 A Linux host can neither build nor load any of this, so
-`.github/workflows/platform-macos.yml` builds it on `macos-latest`
+`.github/workflows/platform-macos-build.yml` builds it on `macos-latest`
 ([below](#continuous-integration-and-the-binary-cache) has when). Each step is
 one call on a Mac:
 
@@ -311,7 +312,8 @@ target an error in the codecs and the shim.
 The build job then puts the zip in a directory catalog and runs the full
 smoke on its Racket 9.1. `macos-latest` exposes a working GPU to its VM, so
 the smoke prints `mps-available? #t` there and trains `04-mlp` on `'mps` and
-on the CPU. Its `SMOKE_TESTS` adds the accelerator suite to the smoke with
+on the CPU. Its `SMOKE_TESTS`, set in `platform-macos-build.yml`, adds the
+accelerator suite to the smoke with
 `RKTORCH_EXPECT_ACCELERATOR=mps`, so every pull request fails if the probe
 rejects a working MPS. The job uploads the zip, its `CHECKSUM`, the audit, the build logs
 and the smoke's log as the run's `torch-aarch64-macosx` artifact. A second
@@ -327,8 +329,8 @@ CPU there and that the real probe's failure is logged once (#353). After the
 Racket 9.1 suites it fails unless `(mps-available?)`, so a runner that stops
 advertising MPS cannot pass the `cpu` expectation by skipping the probe.
 
-Weekly, on demand, or when a calling workflow passes `mps: true`, an `mps` job
-on `macos-latest` installs the package on Racket 9.3, fails unless
+Weekly or on a manual run of `platform-macos.yml` itself, or when a calling
+workflow passes `mps: true`, an `mps` job on `macos-latest` installs the package on Racket 9.3, fails unless
 `(mps-available?)`, and runs the installed device, `to`, audio-device and
 MPS-pressure suites. Each of them asserts on MPS when it is there and skips
 without it. It also runs the accelerator suite with
@@ -561,7 +563,8 @@ installs, so the platform packages have lanes of their own:
   cannot. The job then runs `scripts/build-docs` and uploads the manual as
   `torch-manual`. The lane runs on pull requests that touch the paths listed
   in the workflow, on every push to master, weekly, and on demand.
-- **`platform-macos.yml`.** Its `build` job, on `macos-latest`, builds,
+- **`platform-macos.yml`.** Its `build` job, the reusable
+  `platform-macos-build.yml`, on `macos-latest`, builds,
   audits (with the negative control) and gtests `torch-aarch64-macosx`, then
   assembles and budgets the zip and runs the full smoke at Racket 9.1.
   `install`, on `macos-14`, runs the CPU suites and the accelerator suite at
@@ -577,9 +580,12 @@ installs, so the platform packages have lanes of their own:
   A pull request that triggers both it and `platform-linux.yml` builds the
   Linux zip twice, once in each.
 
-Both platform lanes take `workflow_call`, so a release workflow runs the same
-jobs. Linux jobs substitute from a tailnet-only binary cache; the details and
-the failure modes are in [`AGENTS.md`](../AGENTS.md), which is also the
+Both platform lanes take `workflow_call`, so `release.yml` runs the same jobs
+before it drafts a release ([`releasing.md`](releasing.md)).
+`pkg-build.yml`, dispatched with `release_tag`, checks out that tag, skips
+the build and gives the catalog the zip its release's manifest names, by its
+https URL. Linux jobs substitute from a tailnet-only binary cache; the
+details and the failure modes are in [`AGENTS.md`](../AGENTS.md), which is also the
 canonical guide to the repository's layout and conventions.
 
 ## Further reading

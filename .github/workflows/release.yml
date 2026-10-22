@@ -1,0 +1,307 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Check as if this tag were pushed (empty: v<torch/info.rkt's version>); a dispatch never drafts a release"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    name: Versions, ABI stamp, natives' inputs and the previous release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    outputs:
+      tag: ${{ steps.plan.outputs.tag }}
+      version: ${{ steps.plan.outputs.version }}
+      native-version: ${{ steps.plan.outputs.native-version }}
+      build-natives: ${{ steps.plan.outputs.build-natives }}
+      natives-tag: ${{ steps.plan.outputs.natives-tag }}
+      previous: ${{ steps.previous.outputs.previous }}
+    env:
+      TAG: ${{ github.ref_type == 'tag' && github.ref_name || inputs.tag }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: Bogdanp/setup-racket@2466913449df77df2bad149d1f2fc4e1ea4795dd # v1.15
+        with:
+          version: "9.3"
+          variant: CS
+          architecture: x64
+
+      - name: A release is a tag on master whose required checks passed
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/master; then
+            echo "::error::$TAG is $GITHUB_SHA, which is not on master."
+            exit 1
+          fi
+          gh api "repos/$GITHUB_REPOSITORY/rules/branches/master" >"$RUNNER_TEMP/rules.json"
+          gh api --paginate "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/check-runs?per_page=100" \
+            >"$RUNNER_TEMP/check-runs.json"
+          racket scripts/release/release.rkt required-checks "$RUNNER_TEMP/rules.json" "$RUNNER_TEMP/check-runs.json"
+
+      - name: The previous release
+        id: previous
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          except=()
+          if [ -n "$TAG" ]; then except=(--except "$TAG"); fi
+          gh api --paginate "repos/$GITHUB_REPOSITORY/releases" >"$RUNNER_TEMP/releases.json"
+          out=$(racket scripts/release/release.rkt published "${except[@]}" "$RUNNER_TEMP/releases.json")
+          published=()
+          if [ -n "$out" ]; then mapfile -t published <<<"$out"; fi
+          for tag in "${published[@]}"; do
+            gh release download "$tag" --repo "$GITHUB_REPOSITORY" \
+              --pattern manifest.json --dir "$RUNNER_TEMP/manifests/$tag"
+          done
+          line=$(racket scripts/release/release.rkt previous "${except[@]}" \
+            "$RUNNER_TEMP/releases.json" "$RUNNER_TEMP/manifests")
+          echo "$line" | tee -a "$GITHUB_OUTPUT"
+          previous=${line#previous=}
+          mkdir -p "$RUNNER_TEMP/previous"
+          if [ -n "$previous" ]; then
+            gh release download "$previous" --repo "$GITHUB_REPOSITORY" \
+              --pattern manifest.json --pattern catalog-entry.rktd --dir "$RUNNER_TEMP/previous"
+          fi
+
+      - name: Check the versions and decide whether the natives build
+        id: plan
+        run: |
+          set -euo pipefail
+          args=()
+          if [ -n "$TAG" ]; then args+=(--tag "$TAG"); fi
+          if [ -f "$RUNNER_TEMP/previous/manifest.json" ]; then
+            args+=(--previous "$RUNNER_TEMP/previous/manifest.json")
+          fi
+          racket scripts/release/release.rkt plan "${args[@]}" | tee -a "$GITHUB_OUTPUT"
+
+      - name: Keep the previous release's manifest and entries
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release-previous
+          path: ${{ runner.temp }}/previous/
+          if-no-files-found: ignore
+
+  linux:
+    needs: plan
+    if: needs.plan.outputs.build-natives == 'true'
+    uses: ./.github/workflows/platform-linux.yml
+
+  macos:
+    needs: plan
+    if: needs.plan.outputs.build-natives == 'true'
+    uses: ./.github/workflows/platform-macos.yml
+
+  carried:
+    name: install the carried ${{ matrix.package }} by its https URL
+    needs: plan
+    if: needs.plan.outputs.build-natives == 'false'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            package: torch-x86_64-linux
+          - os: macos-14
+            package: torch-aarch64-macosx
+    defaults:
+      run:
+        shell: bash
+    env:
+      PACKAGE: ${{ matrix.package }}
+      NATIVES_TAG: ${{ needs.plan.outputs.natives-tag }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - uses: Bogdanp/setup-racket@2466913449df77df2bad149d1f2fc4e1ea4795dd # v1.15
+        with:
+          version: "9.3"
+          variant: CS
+          architecture: ${{ runner.arch == 'ARM64' && 'arm64' || 'x64' }}
+
+      - name: Download the previous release's manifest and entries
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: release-previous
+          path: ${{ runner.temp }}/previous
+
+      - name: Catalog the carried zip by its https URL
+        run: |
+          set -euo pipefail
+          root=https://github.com/$GITHUB_REPOSITORY/releases/download/$NATIVES_TAG
+          mkdir -p "$RUNNER_TEMP/pkg"
+          for file in "$PACKAGE.zip" "$PACKAGE.zip.CHECKSUM"; do
+            curl -fsSL --retry 3 -o "$RUNNER_TEMP/pkg/$file" "$root/$file"
+          done
+          racket scripts/release/release.rkt check-carried "$RUNNER_TEMP/previous" "$PACKAGE" \
+            "$RUNNER_TEMP/pkg/$PACKAGE.zip"
+          scripts/platform/catalog.sh "$RUNNER_TEMP/pkg/$PACKAGE.zip" "$RUNNER_TEMP/catalog" \
+            "$RUNNER_TEMP/catalog" "$root"
+
+      - name: The carried LGPL sources are still attached
+        run: |
+          set -euo pipefail
+          out=$(racket scripts/release/release.rkt carried-sources \
+            "$RUNNER_TEMP/previous/manifest.json" "$GITHUB_REPOSITORY")
+          urls=()
+          if [ -n "$out" ]; then mapfile -t urls <<<"$out"; fi
+          for url in "${urls[@]}"; do
+            curl -fsSIL --retry 3 -o /dev/null "$url"
+          done
+
+      - name: Install, smoke and check package deps
+        run: scripts/platform/smoke-install.sh "$RUNNER_TEMP/catalog" "$RUNNER_OS $(uname -m)"
+
+  assemble:
+    name: Assemble the assets
+    needs: [plan, linux, macos, carried]
+    if: >-
+      !cancelled() && needs.plan.result == 'success'
+      && ((needs.plan.outputs.build-natives == 'false' && needs.carried.result == 'success')
+          || (needs.linux.result == 'success' && needs.macos.result == 'success'))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    env:
+      TAG: ${{ needs.plan.outputs.tag }}
+      BUILD_NATIVES: ${{ needs.plan.outputs.build-natives }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - uses: Bogdanp/setup-racket@2466913449df77df2bad149d1f2fc4e1ea4795dd # v1.15
+        with:
+          version: "9.3"
+          variant: CS
+          architecture: x64
+
+      - name: Download the platform packages
+        if: needs.plan.outputs.build-natives == 'true'
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: torch-*
+          path: ${{ runner.temp }}/artifacts
+
+      - name: Download the previous release's manifest and entries
+        if: needs.plan.outputs.build-natives == 'false'
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: release-previous
+          path: ${{ runner.temp }}/previous
+
+      - name: Fetch the LGPL sources
+        if: needs.plan.outputs.build-natives == 'true'
+        run: |
+          set -euo pipefail
+          out=$(racket scripts/release/release.rkt lgpl-sources)
+          files=()
+          if [ -n "$out" ]; then mapfile -t files <<<"$out"; fi
+          scripts/platform/fetch.sh "$RUNNER_TEMP/sources" "${files[@]}"
+
+      - name: Assemble
+        run: |
+          set -euo pipefail
+          natives=(--previous "$RUNNER_TEMP/previous")
+          if [ "$BUILD_NATIVES" = true ]; then natives=(--artifacts "$RUNNER_TEMP/artifacts"); fi
+          mkdir -p "$RUNNER_TEMP/sources"
+          racket scripts/release/release.rkt assemble --tag "$TAG" \
+            --repository "$GITHUB_REPOSITORY" --commit "$GITHUB_SHA" \
+            "${natives[@]}" --sources "$RUNNER_TEMP/sources" \
+            --notes "$RUNNER_TEMP/release/notes.md" "$RUNNER_TEMP/release/dist"
+          ls -l "$RUNNER_TEMP/release/dist"
+          cat "$RUNNER_TEMP/release/dist/manifest.json"
+          (cd "$RUNNER_TEMP/release/dist" && sha256sum --check SHA256SUMS)
+
+      - name: Upload the assets
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release-assets
+          if-no-files-found: warn
+          path: ${{ runner.temp }}/release/
+
+  draft:
+    name: Attest the assets and draft the release
+    needs: [plan, assemble]
+    if: >-
+      ${{ !cancelled() && github.event_name == 'push' && github.ref_type == 'tag'
+      && needs.plan.result == 'success' && needs.assemble.result == 'success' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    env:
+      TAG: ${{ needs.plan.outputs.tag }}
+    steps:
+      - name: Download the assets
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: release-assets
+          path: ${{ runner.temp }}/release
+
+      - name: Attest the build provenance
+        id: attest
+        uses: actions/attest-build-provenance@96278af6caaf10aea03fd8d33a09a777ca52d62f # v3.2.0
+        with:
+          subject-path: ${{ runner.temp }}/release/dist/*
+
+      - name: Add the provenance bundle
+        env:
+          BUNDLE: ${{ steps.attest.outputs.bundle-path }}
+        run: cp "$BUNDLE" "$RUNNER_TEMP/release/dist/provenance.sigstore.json"
+
+      - name: Draft the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "::error::A release for $TAG exists already. Delete the draft to rebuild it; a published release is never replaced."
+            exit 1
+          fi
+          prerelease=()
+          case $TAG in *-*) prerelease=(--prerelease) ;; esac
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --draft --verify-tag \
+            "${prerelease[@]}" --title "$TAG" --notes-file "$RUNNER_TEMP/release/notes.md" "$RUNNER_TEMP"/release/dist/*
+
+      - name: The draft carries exactly the assembled assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          expected=$(cd "$RUNNER_TEMP/release/dist" && for f in *; do printf '%s %s\n' "$f" "$(stat -c %s "$f")"; done | sort)
+          actual=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets \
+            --jq '.assets[] | "\(.name) \(.size)"' | sort)
+          if [ "$expected" != "$actual" ]; then
+            diff <(echo "$expected") <(echo "$actual") || true
+            echo "::error::The draft's assets (right) differ from the assembled ones (left)."
+            exit 1
+          fi

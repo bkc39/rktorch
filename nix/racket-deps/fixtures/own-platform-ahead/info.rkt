@@ -1,5 +1,6 @@
 #lang info
 (define version "0.2")
+(define native-version "0.2")
 (define deps '("base" "threading-lib"
                ("torch-x86_64-linux" #:platform "x86_64-linux" #:version "0.2")
                ("torch-x86_64-linux" #:platform "x86_64-linux-natipkg" #:version "0.2")

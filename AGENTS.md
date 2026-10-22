@@ -426,7 +426,7 @@ nix build .#cpp        # CMake build + gtest only
 nix flake check        # the Nix checks: cpp, format, tidy, line-count, racket,
                        # racket91, racket-floor, matrix-runner-test,
                        # platform-audit-test (Linux), the
-                       # racket-deps-* and abi-stamp-* checks
+                       # racket-deps-*, abi-stamp-* and release-* checks
                        # (CI also runs the Resyntax gate and codegen-drift)
 nix develop            # dev shell (includes a Python with `torch`)
 nix develop .#ci       # lean shell without Python torch (used by the lint job)
@@ -493,7 +493,7 @@ Instead, the library-less skeleton under `pkgs/` is installed beside `torch`,
 and the staged shim wins over it. `racket-deps.rkt platform-packages
 <info-dir> <pkgs-dir> [<platform>]` names the skeletons that apply to the
 host (or to `<platform>`), and fails unless each dep's `#:version` and each
-skeleton's `version` equal torch's; `install-platform <info-dir> <pkgs-dir>
+skeleton's `version` equal torch's `native-version`; `install-platform <info-dir> <pkgs-dir>
 --copy|--link` installs them with `--deps fail`.
 Any other `#:platform` dep is refused, whether `torch/info.rkt` or a fetched
 package declares it: one hash cannot hold a per-system fetch. So is a
@@ -513,7 +513,8 @@ provisioning install the host's skeleton first with `install-platform`, so
 
 `pkgs/torch-x86_64-linux/` and `pkgs/torch-aarch64-macosx/` are the
 skeletons of the platform packages: each `info.rkt` (collection
-`torch-native`, version equal to torch's), a `THIRD-PARTY-NOTICES` and the
+`torch-native`, version equal to torch's `native-version`, which moves only
+when the compiled bytes do, apart from torch's `version`), a `THIRD-PARTY-NOTICES` and the
 licences only that platform bundles. The licences both carry (PyTorch's, stb's,
 the codecs') live once, in `scripts/platform/licenses/`, and `assemble.sh`
 adds them to the built package. `scripts/platform/linux/` builds the Linux
@@ -544,8 +545,8 @@ follows NEEDED entries only, so a dlopened library slips past it. The
 fail it. Every fetched source is pinned by sha256 in `sources.txt`, and the
 build's caches are keyed on those sums. The scripts never commit a library.
 
-The macOS package is built only by `.github/workflows/platform-macos.yml`,
-one `macos/build.sh <work> <step>` per step, for the deployment target in
+The macOS package is built only by `.github/workflows/platform-macos-build.yml`,
+which `platform-macos.yml` calls, one `macos/build.sh <work> <step>` per step, for the deployment target in
 `macos/deployment-target`; [`docs/building.md`](docs/building.md#arm64-macos)
 has the triggers, what `macos/audit-bundle.sh` fails on and its negative
 control.
@@ -985,12 +986,17 @@ uncontracted copy of the pipeline, which has not been built.
 `platform-linux-build.yml` proves the Linux zip builds, audits, passes its
 gtests and does not exceed its size budget. `platform-linux.yml` proves it
 installs and passes the smoke on ubuntu-24.04 and `rockylinux:8`, and that the
-manual renders with all its deps declared. `platform-macos.yml` proves
+manual renders with all its deps declared. `platform-macos-build.yml` proves
 `torch-aarch64-macosx` builds, audits, installs and passes the smoke on
-`macos-latest`, passes the CPU suites on `macos-14` (whose runners advertise
-MPS but cannot allocate on it), and, weekly or when asked, that its MPS tests
-pass. `pkg-build.yml` proves the package build server's own tool accepts the
-Linux zip (see [The package build server](#the-package-build-server)). The
+`macos-latest`; `platform-macos.yml` calls it and proves the zip passes the
+CPU suites on `macos-14` (whose runners advertise MPS but cannot allocate on
+it), and, weekly or when asked, that its MPS tests pass. `pkg-build.yml` proves the package build server's own tool accepts the
+Linux zip (see [The package build server](#the-package-build-server)).
+`release.yml`, on a `v*` tag, checks the versions and the ABI stamp
+(`scripts/release/`, tested by the `release-test` and `release-current`
+checks), calls both platform lanes when the natives changed, and drafts the
+GitHub release; `release-canary.yml` installs `torch` from the catalog
+weekly. [`docs/releasing.md`](docs/releasing.md) is the runbook. The
 job-by-job detail is in
 [`docs/building.md`](docs/building.md#continuous-integration-and-the-binary-cache).
 

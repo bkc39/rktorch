@@ -17,6 +17,7 @@ on:
       - "torch/foreign/accelerator.rkt"
       - "torch/tests/accelerator-test.rkt"
       - ".github/workflows/platform-macos.yml"
+      - ".github/workflows/platform-macos-build.yml"
       - "!scripts/platform/linux/**"
       - "!pkgs/torch-x86_64-linux/**"
   schedule:
@@ -37,106 +38,7 @@ concurrency:
 
 jobs:
   build:
-    name: torch-aarch64-macosx
-    runs-on: macos-latest
-    timeout-minutes: 90
-    defaults:
-      run:
-        shell: bash
-    env:
-      HOMEBREW_NO_AUTO_UPDATE: "1"
-      HOMEBREW_NO_INSTALL_CLEANUP: "1"
-      WORK: ${{ github.workspace }}/.scratch/macos/work
-      OUT: ${{ github.workspace }}/.scratch/macos/out
-      RACKETS: ${{ github.workspace }}/.scratch/macos/racket
-      SMOKE_TESTS: torch/pkg-build/smoke torch/tests/accelerator-test
-      RKTORCH_EXPECT_ACCELERATOR: mps
-    steps:
-      - uses: actions/checkout@v5
-
-      - name: Toolchain
-        run: |
-          set -euo pipefail
-          command -v pkg-config >/dev/null || brew install pkgconf
-          [ "$(bash -c 'echo "${BASH_VERSINFO[0]}"')" -ge 4 ] || brew install bash
-          mkdir -p "$WORK" "$OUT/logs" "$RACKETS"
-          sw_vers
-          uname -m
-          sysctl -n hw.ncpu hw.memsize
-          xcodebuild -version || true
-          clang --version | head -1
-          cmake --version | head -1
-          pkg-config --version
-          bash --version | head -1
-          command -v bash
-
-      - name: Cache downloads
-        uses: actions/cache@v4
-        with:
-          path: |
-            .scratch/macos/work/dl
-            .scratch/macos/racket/dl
-          key: platform-macos-dl-${{ hashFiles('scripts/platform/sources.txt') }}
-
-      - name: Codecs and libsndfile
-        run: scripts/platform/macos/build.sh "$WORK" codecs
-
-      - name: GoogleTest
-        run: scripts/platform/macos/build.sh "$WORK" gtest
-
-      - name: The shim
-        run: scripts/platform/macos/build.sh "$WORK" shim
-
-      - name: Bundle
-        run: scripts/platform/macos/build.sh "$WORK" bundle
-
-      - name: Audit
-        run: scripts/platform/macos/build.sh "$WORK" audit
-
-      - name: Audit negative control
-        run: scripts/platform/macos/audit-test.sh "$WORK/bundle" "$WORK/libtorch/libtorch/lib"
-
-      - name: GoogleTest against the bundle
-        run: scripts/platform/macos/build.sh "$WORK" gtests
-
-      - name: Racket 9.1
-        run: scripts/platform/macos/install-racket.sh 9.1 "$RACKETS/9.1" "$RACKETS/dl"
-
-      - name: Assemble
-        run: |
-          set -euo pipefail
-          export PATH="$RACKETS/9.1/bin:$PATH"
-          scripts/platform/assemble.sh torch-aarch64-macosx "$WORK/bundle" "$OUT/pkg"
-          cat "$OUT/pkg/torch-aarch64-macosx.zip.CHECKSUM"
-          echo
-
-      - name: Size budget
-        run: scripts/platform/size-budget.sh "$OUT/pkg/torch-aarch64-macosx.zip"
-
-      - name: Catalog
-        run: |
-          set -euo pipefail
-          export PATH="$RACKETS/9.1/bin:$PATH"
-          scripts/platform/catalog.sh "$OUT/pkg/torch-aarch64-macosx.zip" "$OUT/catalog" "$OUT/catalog"
-
-      - name: Install and smoke, Racket 9.1
-        run: |
-          set -euo pipefail
-          export PATH="$RACKETS/9.1/bin:$PATH" SMOKE_HOME="$RACKETS/home-9.1"
-          scripts/platform/smoke-install.sh "$OUT/catalog" "macOS $(sw_vers -productVersion)" 2>&1 |
-            tee "$OUT/logs/smoke-macos-latest-9.1.log"
-
-      - name: Upload the package and logs
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: torch-aarch64-macosx
-          if-no-files-found: warn
-          path: |
-            .scratch/macos/out/pkg/torch-aarch64-macosx.zip
-            .scratch/macos/out/pkg/torch-aarch64-macosx.zip.CHECKSUM
-            .scratch/macos/out/logs/
-            .scratch/macos/work/log/
+    uses: ./.github/workflows/platform-macos-build.yml
 
   install:
     name: install (macOS 14, Racket 9.1 and 9.3)
@@ -215,7 +117,9 @@ jobs:
   mps:
     name: MPS tests (Racket 9.3)
     needs: build
-    if: inputs.mps || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    if: >-
+      inputs.mps || (github.workflow == 'macOS platform package'
+      && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'))
     runs-on: macos-latest
     timeout-minutes: 60
     defaults:
