@@ -41,8 +41,10 @@ introduction, from a first tensor through to a training loop; the
 Every example in this manual is evaluated when it is built, so the printed
 results are the ones the library produces.
 
-@bold{License.} Apache 2.0, except some bundled data fixtures, whose
-terms are recorded in @filepath{NOTICE} files beside them where known.
+@bold{License.} Apache 2.0; the bundled fixtures and data are under the
+terms in the @filepath{NOTICE} files beside them. The dataset loaders
+download datasets that rktorch does not host or distribute: check each
+one's license before you use it.
 
 @bold{Acknowledgements.} Many thanks to
 @hyperlink["https://pytorch.org/"]{PyTorch} and its developers, and to

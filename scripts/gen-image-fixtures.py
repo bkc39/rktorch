@@ -1,7 +1,8 @@
 """Regenerates torch/vision/fixtures/images deterministically.
 
-Every image is drawn from a formula, so the fixtures carry no licence and
-the lossless ones can be checked pixel for pixel without a decoder:
+Every image is drawn from a formula: the fixtures are the repository's
+own work, under its Apache-2.0 license, and the lossless ones can be
+checked pixel for pixel without a decoder:
 
     nix develop --command python3 scripts/gen-image-fixtures.py
 
