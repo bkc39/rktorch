@@ -19,6 +19,8 @@ jobs:
       WORK: ${{ github.workspace }}/.scratch/macos/work
       OUT: ${{ github.workspace }}/.scratch/macos/out
       RACKETS: ${{ github.workspace }}/.scratch/macos/racket
+      SMOKE_TESTS: torch/pkg-build/smoke torch/tests/accelerator-test
+      RKTORCH_EXPECT_ACCELERATOR: mps
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
 

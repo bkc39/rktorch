@@ -433,6 +433,9 @@ gets the point's name and a subject (a handle, a device, a thread).
 | `oom-kind-reading` | a failed call under the OOM retry, before its error kind is read | the raw procedure |
 | `workers-started` | a loader's workers are running, before their reaper starts | the worker threads |
 | `batch-requested` | a loader has sent a batch request to its worker | the batch index |
+| `mps-probe-claimed` | the MPS probe's claim is published, before the probe runs | the probe |
+| `mps-probe-settled` | the probe's outcome is stored, before its waiters are woken | the probe |
+| `mps-probe-waiting` | a caller found another thread's claim, before it waits | the probe |
 
 **Tests** (`torch/tests/race-*.rkt`, helpers in `tests/private/race-harness.rkt`):
 

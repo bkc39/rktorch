@@ -47,8 +47,7 @@ are named by step, as @racket["0.conv.weight"]. The spatial arithmetic is the us
   (Sequential (conv-block 1 16) (conv-block 16 32) (Flatten)
               (Linear 800 128) relu (Linear 128 10)))]
 
-@bold{The device.} Pick the accelerator the way PyTorch does
-(@tt{torch.accelerator.current_accelerator()}); setting it as
+@bold{The device.} Pick the accelerator as the MLP example does; setting it as
 the process default means every tensor built afterwards --- the model's
 parameters and each batch alike --- lands there, so the whole loop follows.
 

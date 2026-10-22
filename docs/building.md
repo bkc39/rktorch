@@ -317,20 +317,30 @@ target an error in the codecs and the shim.
 The build job then puts the zip in a directory catalog and runs the full
 smoke on its Racket 9.1. `macos-latest` exposes a working GPU to its VM, so
 the smoke prints `mps-available? #t` there and trains `04-mlp` on `'mps` and
-on the CPU. The job uploads the zip, its `CHECKSUM`, the audit, the build logs
+on the CPU. Its `SMOKE_TESTS`, set in `platform-macos-build.yml`, adds the
+accelerator suite to the smoke with
+`RKTORCH_EXPECT_ACCELERATOR=mps`, so every pull request fails if the probe
+rejects a working MPS. The job uploads the zip, its `CHECKSUM`, the audit, the build logs
 and the smoke's log as the run's `torch-aarch64-macosx` artifact. A second
 job, on `macos-14`, the package's floor, installs racket-lang.org's notarized
 Racket 9.1 and 9.3 from their `.dmg` and runs `smoke-install.sh` with each,
 with `SMOKE_TESTS` (a space-separated list of modules in place of
-`torch/pkg-build/smoke`) naming only the CPU suites for the native library,
-tensor ops and autograd: GitHub's `macos-14` runners advertise MPS but cannot
-allocate on it, and those suites prove the dylibs load and compute there.
+`torch/pkg-build/smoke`) naming the CPU suites for the native library,
+tensor ops and autograd, and the accelerator suite: GitHub's `macos-14`
+runners advertise MPS but cannot allocate on it, so the device suites' MPS
+cases fail there. The job sets `RKTORCH_EXPECT_ACCELERATOR=cpu`, so the
+accelerator suite asserts that `accelerator-if-available` falls back to the
+CPU there and that the real probe's failure is logged once (#353). After the
+Racket 9.1 suites it fails unless `(mps-available?)`, so a runner that stops
+advertising MPS cannot pass the `cpu` expectation by skipping the probe.
 
 Weekly or on a manual run of `platform-macos.yml` itself, or when a calling
 workflow passes `mps: true`, an `mps` job on `macos-latest` installs the package on Racket 9.3, fails unless
 `(mps-available?)`, and runs the installed device, `to`, audio-device and
 MPS-pressure suites. Each of them asserts on MPS when it is there and skips
-without it. What the runner cannot show is a physical Apple-silicon Mac, so
+without it. It also runs the accelerator suite with
+`RKTORCH_EXPECT_ACCELERATOR=mps`, so a probe that wrongly rejects a working
+MPS fails there. What the runner cannot show is a physical Apple-silicon Mac, so
 the one check left by hand is the same smoke on one, with the artifact's zip
 in a directory catalog as above. It must print `mps-available? #t` and pass.
 To try more against that install, run Racket with `PLTUSERHOME` set to the
@@ -512,9 +522,10 @@ with a GPU.
 ## Accelerators
 
 `#:device 'cuda` works on Linux and `#:device 'mps` on Apple Silicon;
-`(accelerator-if-available)` picks whichever is present. MPS works from the
-default shell on darwin. CUDA needs `nix develop .#cuda`, which links the shim
-against the CUDA libtorch and stages the host's NVIDIA driver libraries.
+`(accelerator-if-available)` picks CUDA when present, else MPS when it can
+allocate, else the CPU. MPS works from the default shell on darwin. CUDA needs
+`nix develop .#cuda`, which links the shim against the CUDA libtorch and stages
+the host's NVIDIA driver libraries.
 
 ## The OCaml reference shell
 
@@ -562,8 +573,9 @@ installs, so the platform packages have lanes of their own:
   `platform-macos-build.yml`, on `macos-latest`, builds,
   audits (with the negative control) and gtests `torch-aarch64-macosx`, then
   assembles and budgets the zip and runs the full smoke at Racket 9.1.
-  `install`, on `macos-14`, runs only the CPU suites at Racket 9.1 and 9.3,
-  since GitHub's `macos-14` runners advertise MPS but cannot allocate on it;
+  `install`, on `macos-14`, runs the CPU suites and the accelerator suite at
+  Racket 9.1 and 9.3, since GitHub's `macos-14` runners advertise MPS but
+  cannot allocate on it;
   `mps` runs the MPS suites ([above](#arm64-macos))
   weekly, on demand, or when a calling workflow passes `mps: true`. The lane
   runs on pull requests that touch the paths listed in the workflow, weekly,

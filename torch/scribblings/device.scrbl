@@ -220,9 +220,19 @@ only on CUDA asks this of the batch's device.
 
 @torch-examples[(device-type (device (zeros 1)))]}
 
+@deftogether[(@defproc[(cuda-available?) boolean?]
+              @defproc[(mps-available?) boolean?])]{
+Whether libtorch sees a CUDA device, and a Metal device, as Python's
+@tt{torch.cuda.is_available()} and @tt{torch.backends.mps.is_available()}.
+Neither allocates, and a virtual machine may advertise MPS it can't use.}
+
 @defproc[(cuda-if-available) device?]{
 The first CUDA device when one is present, else the CPU;
 @racket[accelerator-if-available] also considers Metal.}
+
+@defproc[(mps-if-available) device?]{
+The Metal device when it is available and can allocate, else the CPU. It
+shares @racket[accelerator-if-available]'s check.}
 
 @deftogether[(@defproc[(default-device) device?]
               @defproc[(set-default-device! [dev device/c]) void?])]{
@@ -234,9 +244,13 @@ the setter is for a script that picks a device once at the top.
 @torch-examples[(default-device)]}
 
 @defproc[(accelerator-if-available) device?]{
-The accelerator this process can use --- CUDA on a Linux machine with an
-NVIDIA GPU, Metal on Apple Silicon --- or the CPU device when there is
-none, mirroring @tt{torch.accelerator.current_accelerator()}.}
+CUDA when it is present, else Metal when it can allocate, else the CPU. The
+first time it would answer @racket[(mps-device)] it allocates one element
+there, once per instance of the library; if that fails it answers
+@racket[(cpu-device)] and logs why on the topic @racket['rktorch-device], at
+@racket['warning] for an out-of-memory error and @racket['error] otherwise.
+An invalid memory reference there is raised instead, by this call and by
+every later one.}
 
 @defform[(with-default-device dev body ...+)]{
 Evaluates @racket[body] with @racket[dev] as the process default device, so
