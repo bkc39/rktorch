@@ -15,6 +15,7 @@
 
 (provide bench-case
          bench-case?
+         bench-case-before
          bench-case-name
          (struct-out result)
          measure

@@ -59,6 +59,17 @@ def run_once(call, reps, device, clock):
     return elapsed * 1e9 / reps, clock.ms() - gc0
 
 
+def case_record(name, reps, call, device, clock, *, warmup, rounds):
+    gc.collect()
+    for _ in range(warmup):
+        run_once(call, reps, device, clock)
+    rows = [run_once(call, reps, device, clock) for _ in range(rounds)]
+    return {"group": "ops", "case": name, "variant": "pytorch",
+            "unit": "ns", "reps": reps,
+            "samples": [ns for ns, _ in rows],
+            "gc_ms": [ms for _, ms in rows], "meta": meta(device)}
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--device", default="cpu")
@@ -72,15 +83,8 @@ def main():
     device = torch.device(args.device)
     clock = GcClock()
     for name, reps, call in op_cases(device, args.scale):
-        gc.collect()
-        for _ in range(args.warmup):
-            run_once(call, reps, device, clock)
-        rows = [run_once(call, reps, device, clock)
-                for _ in range(args.rounds)]
-        emit({"group": "ops", "case": name, "variant": "pytorch",
-              "unit": "ns", "reps": reps,
-              "samples": [ns for ns, _ in rows],
-              "gc_ms": [ms for _, ms in rows], "meta": meta(device)})
+        emit(case_record(name, reps, call, device, clock,
+                         warmup=args.warmup, rounds=args.rounds))
 
 
 if __name__ == "__main__":

@@ -104,7 +104,7 @@
      (define meta (meta-on device))
      (for ([r (in-list (host-gpu-records (resnet) #:proxy (resnet #:base proxy-base)
                                          #:steps (~> scale (* 20) round inexact->exact (max 2))
-                                         #:rounds (or rounds 5) #:warmup (max 1 warm)))])
+                                         #:rounds (or rounds 5) #:warmup warm))])
        (emit (hash-set* r 'meta meta 'load (load-average))))]))
 
 (module+ test
@@ -141,14 +141,15 @@
       (check-equal? (hash-ref r 'settings) scaling-floor "a smoke run still times whole seconds")
       (check-true (>= (hash-ref (hash-ref r 'stats) 'median) 0))))
 
-  (test-case "calls runs the warmup steps it is given"
-    (define (tensors-made warmup)
+  (test-case "calls and host-gpu run the warmup steps they are given, none included"
+    (define (tensors-made suite warmup)
       (define n 0)
       (with-race-hook (lambda (name _subject)
                         (when (eq? name 'ledger-entry-added) (set! n (add1 n))))
-        (records-of 'calls #:warmup warmup))
+        (records-of suite #:warmup warmup))
       n)
-    (check-true (< (tensors-made 0) (tensors-made 1))))
+    (for ([suite (in-list '(calls host-gpu))])
+      (check-true (< (tensors-made suite 0) (tensors-made suite 1)) (~a suite))))
 
   (test-case "calls and host-gpu record every phase of 05 and 09"
     (define calls (records-of 'calls))
@@ -202,4 +203,8 @@
           (check-equal? (hash-ref failing 'raised) '("unsupported" "unsupported")
                         "a worker's raise fails the run")
           (check-equal? (hash-ref zero-grad 'set_to_none) '(#f #f)
-                        "main zeroes its gradients in place, as zero-grads! does")]))]))
+                        "main zeroes its gradients in place, as zero-grads! does")]))
+
+     (test-case "pytorch-ops rounds leave the caching allocator warm, as ops's do"
+       (match (twin-records "ops_probe.py" '() #:log (open-output-nowhere) #:time-limit 120)
+         [(list probe) (check-equal? (hash-ref probe 'calls) 0)]))]))

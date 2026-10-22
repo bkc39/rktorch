@@ -5,13 +5,14 @@
          (only-in racket/match match-define)
          (only-in torch
                   [add facade-add] [conv2d facade-conv2d] [matmul facade-matmul]
-                  [sum facade-sum] backward! item randn reclaim-native-memory! to)
+                  [sum facade-sum] backward! item native-memory-use randn to)
          (only-in torch/foreign/error check-ok)
          (only-in torch/foreign/raw/autograd tr-tensor-backward/raw)
+         (only-in torch/foreign/raw/collector collect-and-wait!)
          (only-in torch/foreign/raw/elementwise tr-add/raw)
          (only-in torch/foreign/raw/linalg tr-matmul/raw)
          (only-in torch/foreign/raw/memory tensor-allocator)
-         (only-in torch/foreign/raw/pressure collect-at-trough!)
+         (only-in torch/foreign/raw/pressure collect-at-trough! refresh-shadows!)
          (only-in torch/foreign/raw/pressure-settings native-collect-at-troughs)
          (only-in torch/foreign/raw/reduce tr-sum/raw)
          (only-in torch/foreign/raw/syntax _Tensor _Tensor/null define-torch)
@@ -36,6 +37,18 @@
   (_fun _Tensor _Tensor _Tensor/null -> _Tensor/null)
   #:c-id tr_gen_linear
   #:wrap tensor-allocator)
+
+(define (ledger-bytes)
+  (for/sum ([entry (in-list (native-memory-use))])
+    (cdr entry)))
+
+(define (settle-native-memory!)
+  (let loop ([prev (ledger-bytes)] [rounds 4])
+    (define-values (_observed drained?) (collect-and-wait!))
+    (define now (ledger-bytes))
+    (cond
+      [(and (> rounds 1) (or (< now prev) (not drained?))) (loop now (sub1 rounds))]
+      [else (refresh-shadows!)])))
 
 (define ones-2d (list->s64vector '(1 1)))
 
@@ -115,4 +128,33 @@
                           (define final (for/last ([_ (in-range reps)]) (call)))
                           (sync! ((variant-as-tensor v) final)))
                         #:reps (op-reps o)
-                        #:before reclaim-native-memory!)))))
+                        #:before settle-native-memory!)))))
+
+(module+ test
+  (require rackunit
+           (only-in torch cuda-available? cuda-memory-stats)
+           (only-in torch/foreign/raw/fault with-crossing-hook)
+           (only-in "harness.rkt" bench-case-before measure))
+
+  (define (crossings thunk)
+    (define n 0)
+    (with-crossing-hook (lambda () (set! n (add1 n)))
+      (thunk))
+    n)
+
+  (test-case "an op case settles native memory before each run without a native call"
+    (define befores
+      (for*/list ([o (in-list (op-cases #:scale 0.001))] [c (in-list (cdr o))])
+        (bench-case-before c)))
+    ((car befores))
+    (for ([before! (in-list befores)])
+      (check-equal? (crossings before!) 0 "nothing left to free, and no allocator cache emptied")))
+
+  (when (cuda-available?)
+    (test-case "on CUDA an op case's runs start from a warm caching allocator"
+      (define (reserved) (cdr (assq 'reserved (cuda-memory-stats))))
+      (define cases (cdr (assq 'matmul-2048 (op-cases #:device 'cuda #:scale 0.001))))
+      (measure cases #:warmup 0 #:rounds 1 #:load void)
+      (define held (reserved))
+      ((bench-case-before (car cases)))
+      (check-equal? (reserved) held))))

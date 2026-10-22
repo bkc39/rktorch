@@ -25,7 +25,7 @@ line per case goes to standard error.
 | option | |
 |---|---|
 | `--rounds N` | timed rounds; 5 by default for the micro suites, 1 for `e2e` |
-| `--warmup N` | untimed rounds first, 1 by default and 2 for `calls`; ignored by `e2e`, which runs none |
+| `--warmup N` | untimed rounds first, 1 by default and 2 for `calls`; `0` runs none, except in the scaling suites (`threads`, `pytorch-threads`), which always run one; ignored by `e2e`, which runs none |
 | `--scale X` | multiplies the micro suites' repetitions |
 | `--device cuda` | where `ops`, `pytorch-ops`, `calls` and `host-gpu` run (`cpu`, `cuda` or `mps`); the others run on the CPU |
 | `--only 05,09` | examples for `e2e`, by prefix; `py-05` is a PyTorch twin |
@@ -53,7 +53,10 @@ child that writes to it.
 Each round runs every case of a group once, rotating their order, so two
 variants alternate. A case is timed with
 `current-inexact-monotonic-milliseconds` over its repetitions, after its
-untimed setup (`reclaim-native-memory!` for tensor cases). The record keeps
+untimed setup: for `ops`, a collection that waits for the finalizers to
+free the previous run's tensors and leaves the device's caching allocator
+warm; for the other tensor cases, `reclaim-native-memory!`, which also
+empties it. The record keeps
 every round's per-call time and `current-gc-milliseconds` delta, their
 median, quartiles and IQR, and the load average before and after.
 
@@ -154,7 +157,13 @@ median, quartiles and IQR, and the load average before and after.
   same shapes and repetitions, eager, `variant` `pytorch`, with
   `torch.set_num_threads` set to rktorch's `at::get_num_threads`. On CUDA
   each round ends with `torch.cuda.synchronize()`. `ops` and `pytorch-ops`
-  both include `matmul-2048` and a batch-128 `conv2d`.
+  both include `matmul-2048` and a batch-128 `conv2d`. Neither side empties
+  the caching allocator between runs, so both time an op on a warm cache,
+  as a training loop runs it: PyTorch frees a result when its last
+  reference goes, and `ops` collects and drains before every run, so each
+  run starts with the previous run's blocks back in the cache. Emptying it
+  instead (what `reclaim-native-memory!` does) would make every rktorch run
+  pay fresh device allocations the twin's does not.
 - **threads** — the ops per second of a fixed CPU op mix (an 8x8 add, a
   64-wide matmul, a relu and a sum) on 1, 2, 4 and 8 `(thread thunk #:pool
   'own)` threads, for `--scale` × 2 s a round, while the main thread is
@@ -214,7 +223,10 @@ median, quartiles and IQR, and the load average before and after.
   fewer byte-driven collections than the real step, so the step less the
   proxy is device time only net of GC.
   CUDA events or `nsys` would separate the two directly; neither is bound
-  or in `.#cuda`.
+  or in `.#cuda`. Each warmup round runs the step and the proxy once,
+  untimed; with `--warmup 0`, as in a smoke run, none runs, so the first
+  round's first mode pays the first-call costs (cuDNN, the caching
+  allocator's growth).
 
 | example | short | full | timed |
 |---|---|---|---|
