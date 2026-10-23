@@ -32,7 +32,7 @@ def env_text(name, default):
 def mps_usable():
     try:
         torch.zeros(1, device="mps").to("cpu")
-    except Exception as e:
+    except RuntimeError as e:
         sys.stderr.write(f"pick_device: MPS cannot allocate, so the CPU stands in: {e}\n")
         return False
     return True
