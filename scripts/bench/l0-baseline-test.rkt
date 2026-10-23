@@ -14,15 +14,17 @@
   (define-runtime-path fake-bin "fixtures/fake-bin")
   (define bash (find-executable-path "bash"))
 
-  (define (run-baseline dir stage #:rounds [rounds #f])
+  (define (run-baseline dir stage #:rounds [rounds #f] #:out [stem "l0"] #:smoke [smoke #f])
     (define env (environment-variables-copy (current-environment-variables)))
     (define (set-var! name value)
       (environment-variables-set! env (string->bytes/utf-8 name)
                                   (and value (string->bytes/utf-8 value))))
     (set-var! "PATH" (string-append (path->string fake-bin) ":" (or (getenv "PATH") "")))
     (set-var! "FAKE_LOG" (path->string (build-path dir "calls.log")))
-    (set-var! "BASELINE_OUT" (path->string (build-path dir "l0")))
-    (set-var! "BASELINE_SMOKE" #f)
+    (set-var! "BASELINE_OUT" (and stem (path->string (build-path dir stem))))
+    (set-var! "BASELINE_DIR" (path->string (build-path dir "data")))
+    (set-var! "BASELINE_DATE" "2026-01-02")
+    (set-var! "BASELINE_SMOKE" (and smoke "1"))
     (set-var! "BASELINE_ROUNDS" rounds)
     (define-values (sp out in err)
       (parameterize ([current-environment-variables env])
@@ -71,6 +73,14 @@
              (call-with-output-file (build-path dir "l0.jsonl") (lambda (o) (displayln "kept" o)))
              (check-equal? (run-baseline dir "cpu") 0)
              (check-equal? (car (jsonl dir)) "kept"))))
+
+        (test-case "unset, BASELINE_OUT puts the records in BASELINE_DIR, outside the repository"
+          (in-fresh-dir
+           (lambda (dir)
+             (check-equal? (run-baseline dir "cpu" #:out #f) 0)
+             (check-true (file-exists? (build-path dir "data" "baseline-2026-01-02.jsonl")))
+             (check-equal? (run-baseline dir "cpu" #:out #f #:smoke #t) 0)
+             (check-true (file-exists? (build-path dir "data" "smoke-2026-01-02.jsonl"))))))
 
         (test-case "BASELINE_ROUNDS reaches every suite"
           (in-fresh-dir

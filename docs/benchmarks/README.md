@@ -308,22 +308,23 @@ in `env -u LD_LIBRARY_PATH nix develop .#cuda`, A, E and F on CUDA, C over
 default), 0.2 and 1. An example and its twins run as one group, whose
 order rotates every round as the micro suites' cases do, so drift reaches
 both sides of a ratio alike. Each group waits for a load below 4; the
-records go to `docs/benchmarks/baseline-<date>.jsonl` and the summary
-beside it.
+records go to `baseline-<date>.jsonl` in `BASELINE_DIR`
+(`${XDG_DATA_HOME:-~/.local/share}/rktorch/bench`, outside the repository)
+and the summary beside it.
 
 ```bash
 scripts/bench/l0-baseline.sh         # all: cpu, cuda, summary
 scripts/bench/l0-baseline.sh cpu     # one stage: cpu, cuda or summary
-BASELINE_SMOKE=1 BASELINE_OUT=/tmp/x/l0 scripts/bench/l0-baseline.sh
+BASELINE_SMOKE=1 scripts/bench/l0-baseline.sh
 ```
 
 `BASELINE_ROUNDS` sets every suite's rounds (unset, e2e runs 3 and the
 others their own defaults); `BASELINE_MAX_LOAD` (4), `BASELINE_CACHE`
-(`~/.racket/rktorch`), `BASELINE_DATE` and `BASELINE_OUT` change the
-defaults. The full run starts the JSONL afresh; a single stage appends to
-it. `BASELINE_SMOKE=1`, which needs `BASELINE_OUT` outside `docs/`,
-runs every step at the smallest settings both sides of a pair read: the
-loader on the MNIST fixture, 05 and 09 on the cached datasets at
+(`~/.racket/rktorch`), `BASELINE_DATE`, `BASELINE_DIR` and `BASELINE_OUT`
+(the path without its extension) change the defaults. The full run starts
+the JSONL afresh; a single stage appends to it. `BASELINE_SMOKE=1` writes
+`smoke-<date>` and runs every step at the smallest settings both sides of
+a pair read: the loader on the MNIST fixture, 05 and 09 on the cached datasets at
 `EPOCHS=2` (their rktorch runners read nothing else), and G at one budget.
 
 ## Records
@@ -374,7 +375,7 @@ and the completed runs still get their summaries.
 
 ## Baseline
 
-`baseline-2026-10-13.jsonl` and its summary `baseline-2026-10-13.md`, taken at
-`f8b9014` on the lab host (i9-9900K, RTX 3090 Ti, 8 ATen threads): `micro`,
-`ops --device cuda` and the short `e2e`, each started once the 1-minute load
-was below 4.
+Results are not committed. A leg's review packet carries its tables, and
+it compares against its base by running both checkouts in one run (see
+`PLTUSERHOME` above) rather than against stored records. The L0 tables are
+on #380.

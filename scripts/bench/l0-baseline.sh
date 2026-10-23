@@ -6,11 +6,9 @@ root=$(cd "$(dirname "$0")/../.." && pwd)
 self=$root/scripts/bench/l0-baseline.sh
 date=${BASELINE_DATE:-$(date +%F)}
 smoke=${BASELINE_SMOKE:-0}
-if [ "$smoke" = 1 ] && [ -z "${BASELINE_OUT:-}" ]; then
-  echo "l0-baseline: a smoke run needs BASELINE_OUT outside docs/" >&2
-  exit 2
-fi
-out=${BASELINE_OUT:-$root/docs/benchmarks/baseline-$date}
+dir=${BASELINE_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/rktorch/bench}
+if [ "$smoke" = 1 ]; then kind=smoke; else kind=baseline; fi
+out=${BASELINE_OUT:-$dir/$kind-$date}
 export BASELINE_DATE=$date BASELINE_OUT=$out
 cache=${BASELINE_CACHE:-$HOME/.racket/rktorch}
 rounds=${BASELINE_ROUNDS:-}
