@@ -115,10 +115,10 @@ success pays one NULL-check branch (then scripts/bench-oom-overhead.rkt,
 now the `ops` and `e2e` suites of scripts/bench/run.rkt).
 
 Refactor note (from PR #43 review): DONE in PR C — extracted as
-`raw/memory.rkt` (frees, the finalizer guard (now
+`torch/foreign/raw/memory.rkt` (frees, the finalizer guard (now
 `swallow-and-count-failure`), ledger, probes,
 tensor-allocator + /rng, op-definer macros; named for its contents
-rather than the note's provisional `probes.rkt`), so `syntax.rkt` is
+rather than the note's provisional `probes.rkt`), so `torch/foreign/raw/syntax.rkt` is
 again the pure FFI-definer layer.
 
 Failing *cleanly* (leg 0) is table stakes; failing *gracefully* needs

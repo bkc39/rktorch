@@ -109,14 +109,14 @@ rktorch/
 - `cpp/tests/.../random_test.cpp`: gtest asserting seed-0 `randn(2,2)` equals a captured golden.
 
 **Racket FFI** (`torchrkt/`, mirrors `xgboost-rkt/xgboost/foreign/*`):
-- `foreign/raw/library.rkt`: `(define-runtime-path native-libs-dir "../../native-libs")` +
+- `torch/foreign/raw/native-library.rkt`: `(define-runtime-path native-libs-dir "../../native-libs")` +
   `(ffi-lib (build-path native-libs-dir "libtorchrkt"))` — identical loader pattern.
 - raw bindings for the three C fns; `check-ok` error helper reading `tr_last_error`.
-- `foreign.rkt` / `main.rkt`: contracted facade exposing `manual-seed!`, `randn`, tensor print.
+- `torch/foreign.rkt` / `torch/main.rkt`: contracted facade exposing `manual-seed!`, `randn`, tensor print.
 - (Tensor wrapper struct with `prop:cpointer 0` + `#:wrap (allocator … (deallocator))` finalizer
   comes online when we introduce the opaque handle — sketch it, wire it when randn returns a handle.)
 
-**Parity** (`torchrkt/tests/python-cross-test.rkt`, mirrors `scs`):
+**Parity** (`torch/tests/python-cross-test.rkt`, mirrors `scs`):
 - seed 0 → `randn(2,2)`; run `examples/python/00_randn.py`, read its JSON, compare elementwise
   with tolerance; **SKIP with a printed notice when `python3 -c "import torch"` fails** so plain
   `raco test` / `nix build` stay green outside `nix develop`.

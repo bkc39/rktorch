@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+#
+# The Resyntax lane CI runs: red when Resyntax does not finish or suggests
+# anything, since `resyntax analyze` exits 0 with suggestions. Without a ref,
+# scripts/resyntax lints the changes since the pull request's base.
+#
+#   nix develop --command scripts/resyntax-gate [BASE_REF]
+set -euo pipefail
+
+cd "$(git rev-parse --show-toplevel)"
+
+ref=("$@")
+rc=0
+out=$(scripts/resyntax analyze --local-git-repository . "${ref[@]}" \
+        --analyzer-timeout 30000 2>&1) || rc=$?
+echo "$out"
+if [ "$rc" -ne 0 ]; then
+  echo "::error::Resyntax exited $rc without completing the analysis."
+  echo "resyntax: scripts/resyntax-gate.rkt:0:0 [gate] Resyntax exited $rc"
+  exit 1
+fi
+if grep -qE "resyntax: .*\.rkt:[0-9]+:[0-9]+ \[" <<<"$out"; then
+  echo "::error::Resyntax found refactoring suggestions. Run: scripts/resyntax fix --local-git-repository . ${ref[*]}"
+  exit 1
+fi
+timeouts=$(grep -c "timed out" <<<"$out" || true)
+if [ "$timeouts" -gt 0 ]; then
+  echo "::warning::Resyntax analyzer timed out on $timeouts file(s); that part of the analysis was partial."
+fi
+echo "Resyntax: no suggestions."

@@ -53,13 +53,19 @@ The package supports Racket 9.1 and later. `nix run .#matrix` builds and tests
 every supported Racket against the pinned libtorch on the host's system.
 
 CI runs two more jobs that `nix flake check` does not cover. The Resyntax gate
-is the `scripts/resyntax analyze` command below, Resyntax's default rules plus
+is `scripts/resyntax-gate`, which runs the `scripts/resyntax analyze` command
+below and turns any suggestion into a failure: Resyntax's default rules plus
 the repository's own in `scripts/resyntax-rules.rkt`, and it fails on any
 suggestion. It lints the changes since the merge base with an optional `REF`
 after the directory, which defaults to the open pull request's base from `gh`
 (found by head commit on a detached HEAD) when origin has that branch, else
 `origin/master`. Resyntax skips `#lang scribble/lp2`, so the wrapper lints the
-literate examples' code chunks through `scripts/resyntax-lp2.rkt`. The
+literate examples' code chunks through `scripts/resyntax-lp2.rkt`. The same
+job runs `racket scripts/check-paths.rkt`, which fails when a path named in
+`@filepath{…}`, or a backticked `.rkt` or `.py` file, in a `.rkt`, `.scrbl` or
+`.md` file resolves from neither the repository root nor that file's
+directory; a file outside the repository is listed in
+`scripts/check-paths-allow.rktd`. The
 code-generation drift check regenerates the ATen bindings and fails if the
 committed output differs:
 
@@ -84,6 +90,7 @@ raco test torch/                  # unit tests; the PyTorch parity tests self-sk
 raco test examples/test/          # the literate examples
 racket -ie "(require torch)"      # a REPL with the package loaded
 scripts/resyntax analyze --local-git-repository .   # the lint gate
+racket scripts/check-paths.rkt    # the paths the prose names exist
 racket scripts/coverage.rkt       # expression coverage, with a floor
 racket scripts/bench/run.rkt micro   # benchmarks, docs/benchmarks/README.md
 ```
@@ -98,6 +105,11 @@ per-checkout `.racket-user` directory and stages `libtorchrkt` under
 precompiled from `nix/racket-linters.nix`, which says how to bump them, so
 that step needs no network. After changing C++, re-stage the library with
 `nix run .#copy-native-libs` before running `raco test`.
+
+`.racket-dev.rktd` declares these gates for the racket-dev plugin: its
+runner, `racket <plugin>/hooks/gate.rkt . all`, runs each in the default
+shell and fails if any does, and its pre-push hook runs the `push-gates`
+subset.
 
 ## The native library
 
@@ -155,7 +167,7 @@ that names its host (below). Each holds `libtorchrkt`, libtorch 2.14.0's
 libraries from PyTorch's official zip, and libsndfile with its codecs as
 separate shared libraries, and finds them all beside itself.
 
-Their skeletons live in `pkgs/`: the `info.rkt`, a `THIRD-PARTY-NOTICES`,
+Their skeletons live in `pkgs/`: the `pkgs/*/info.rkt`, a `THIRD-PARTY-NOTICES`,
 and the licences only that platform bundles. The licences both packages carry
 (PyTorch's and its third-party code's, stb's and the codecs') live once, in
 `scripts/platform/licenses/`, and `scripts/platform/assemble.sh` adds them,
@@ -377,17 +389,17 @@ What it runs on, and what that asks of torch:
   and 90 s per file unless `test-timeouts` says otherwise;
 - ten minutes for the whole test run, a limit nothing raises;
 - `PLT_PKG_BUILD_SERVICE` set while it builds and tests (with
-  `PLT_INFO_ALLOW_VARS` letting `info.rkt` read it).
+  `PLT_INFO_ALLOW_VARS` letting `torch/info.rkt` read it).
 
 Every file loads libtorch, so the full suite there is hundreds of processes
 mapping 445 MB each in one 1 GB VM. With `PLT_PKG_BUILD_SERVICE` set,
 `torch/info.rkt` therefore omits every top-level entry of the collection but
-`pkg-build/`, whose one test module, `smoke.rkt`, requires the `test`
+`pkg-build/`, whose one test module, `torch/pkg-build/smoke.rkt`, requires the `test`
 submodules of `native-library-test`, `tensor-ops-test`, `autograd-test` and
 `nn-test`, trains `04-mlp` and round-trips a FLAC file, in one process. It
-also runs in the normal suite. `tests/server-test-set-test.rkt` asks
+also runs in the normal suite. `torch/tests/server-test-set-test.rkt` asks
 `raco test` which files it would run with the variable set and fails unless
-the answer is `pkg-build/smoke.rkt` alone, so a new top-level directory has to
+the answer is `torch/pkg-build/smoke.rkt` alone, so a new top-level directory has to
 be added to the omit list (or to the smoke) on purpose. In a checkout the
 smoke takes about a second and peaks at about 320 MB.
 
@@ -413,7 +425,7 @@ dependencies; `PKG_BUILD_RACKET` picks the release (9.3);
 reused incrementally); `PKG_BUILD_JOBS` the `--jobs` for `raco setup`, `raco
 pkg install` and `raco test`, which otherwise follow the processor count.
 pkg-build has no CPU cap for its containers, and the harness gives every step
-40 minutes, as pkg-build's own Docker example does. `report.rkt` prints the
+40 minutes, as pkg-build's own Docker example does. `scripts/pkg-build/report.rkt` prints the
 transcripts and the server's columns from `summary.rktd`, and fails if any is
 red: build; dependencies (a clean build and no dependency failures);
 conflicts; docs (every manual rendered by this build, not salvaged or kept
