@@ -80,7 +80,8 @@
               #:combine/key (lambda (_k _record from-child) from-child)))
 
 (module+ test
-  (require rackunit)
+  (require (only-in racket/port open-output-nowhere)
+           rackunit)
 
   (test-case "a twin's meta keeps the parent's GPU, and names torch's beside it"
     (define parent (hasheq 'host "lab" 'device "cuda" 'gpu #f 'git_sha "abc"))
@@ -94,4 +95,15 @@
     (check-equal? (hash-ref r 'case) "add")
     (check-equal? (hash-ref (hash-ref r 'stats) 'median) 2.0)
     (check-false (hash-ref (hash-ref r 'meta) 'gpu))
-    (check-equal? (hash-ref r 'load) '(0.5))))
+    (check-equal? (hash-ref r 'load) '(0.5)))
+
+  (cond
+    [(not (pytorch-available?))
+     (displayln "[pytorch] twin device probe skipped: python3 `torch` not available")]
+    [else
+     (test-case "the twins pick MPS only once an allocation and a transfer back succeed there"
+       (match (twin-records "device_probe.py" '() #:log (open-output-nowhere) #:time-limit 120)
+         [(list picked)
+          (check-equal? (hash-ref picked 'allocation_raises) "cpu")
+          (check-equal? (hash-ref picked 'transfer_raises) "cpu")
+          (check-equal? (hash-ref picked 'probe_succeeds) "mps")]))]))

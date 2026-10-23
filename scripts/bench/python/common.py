@@ -29,10 +29,19 @@ def env_text(name, default):
     return os.environ.get(name) or default
 
 
+def mps_usable():
+    try:
+        torch.zeros(1, device="mps").to("cpu")
+    except Exception as e:
+        sys.stderr.write(f"pick_device: MPS cannot allocate, so the CPU stands in: {e}\n")
+        return False
+    return True
+
+
 def pick_device():
     if torch.cuda.is_available():
         return torch.device("cuda")
-    if torch.backends.mps.is_available():
+    if torch.backends.mps.is_available() and mps_usable():
         return torch.device("mps")
     return torch.device("cpu")
 
