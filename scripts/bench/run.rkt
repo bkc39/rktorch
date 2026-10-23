@@ -8,9 +8,10 @@
          (only-in torch torch-version)
          (only-in "contracts.rkt" contract-workloads getter-cases pipeline-case)
          (only-in "crossings.rkt" crossing-cases)
-         (only-in "e2e.rkt" examples find-examples)
          (only-in "e2e-suite.rkt" run-e2e)
+         (only-in "e2e.rkt" examples find-examples)
          (only-in "harness.rkt" format-result host-meta measure result->record result-name)
+         (only-in "l0.rkt" l0-suites run-l0-suite)
          (only-in "layers.rkt" layer-cases)
          (only-in "ops.rkt" op-cases)
          (only-in "session.rkt" fresh-run-id record-writer wait-for-load)
@@ -22,7 +23,7 @@
          micro-suites)
 
 (define micro-suites '(crossings layers ops contracts))
-(define known-suites (append micro-suites '(e2e)))
+(define known-suites (append micro-suites '(e2e) l0-suites))
 
 (define (check-suites suites)
   (define unknown (for/first ([s (in-list suites)] #:unless (memq s known-suites)) s))
@@ -50,7 +51,7 @@
 
 (define (run-suites suites
                     #:rounds [rounds #f]
-                    #:warmup [warmup 1]
+                    #:warmup [warmup #f]
                     #:scale [scale 1]
                     #:device [device 'cpu]
                     #:full? [full? #f]
@@ -74,14 +75,15 @@
     (wait-for-load max-load log)
     (define meta (host-meta #:device on-device #:libtorch libtorch #:threads (aten-threads)))
     (fprintf log "~a~a\n" group (if case-name (format " ~a" case-name) ""))
-    (for ([r (in-list (measure cases #:warmup warmup #:rounds (or rounds 5)))])
+    (for ([r (in-list (measure cases #:warmup (or warmup 1) #:rounds (or rounds 5)))])
       (fprintf log "  ~a\n" (format-result r #:unit unit #:scale unit-scale))
       (emit
        (result->record r #:suite "micro" #:group (~a group) #:unit unit #:meta meta
                        #:scale unit-scale
                        #:extra (if case-name
-                                   (hasheq 'case (~a case-name) 'variant (~a (result-name r)))
-                                   (hasheq))))))
+                                   (hasheq 'impl "rktorch" 'case (~a case-name)
+                                           'variant (~a (result-name r)))
+                                   (hasheq 'impl "rktorch"))))))
   (for ([suite (in-list suites)])
     (case suite
       [(crossings) (measure-group 'crossings (crossing-cases #:reps (n 200000)))]
@@ -94,6 +96,11 @@
          (measure-group 'contracts (cdr w) #:case-name (car w)))
        (measure-group 'getters (getter-cases #:reps (n 200000)))
        (measure-group 'pipeline (list (pipeline-case #:reps (n 1))) #:unit "ms" #:scale 1)]
+      [(pytorch-ops threads pytorch-threads calls host-gpu)
+       (wait-for-load max-load log)
+       (fprintf log "~a\n" suite)
+       (run-l0-suite suite #:emit emit #:log log #:device device #:scale scale
+                     #:rounds rounds #:warmup warmup #:libtorch libtorch)]
       [(e2e)
        (run-e2e (if only (find-examples only) examples)
                 #:rounds (or rounds 1) #:full? full? #:variants variants #:cache cache
@@ -108,14 +115,15 @@
       (command-line
        #:program "run.rkt"
        #:argv argv
-       #:usage-help "Suites: micro crossings layers ops contracts e2e."
+       #:usage-help "Suites: micro crossings layers ops contracts e2e,"
+                    "and pytorch-ops threads pytorch-threads calls host-gpu."
                     "Options go before or after the suites."
        #:once-each
        [("--rounds") n "Timed rounds (default 5; e2e 1)"
                      (option! 'rounds
                               (flag-value "--rounds" string->number exact-positive-integer?
                                           "a positive integer" n))]
-       [("--warmup") n "Untimed rounds before them (default 1; e2e runs none)"
+       [("--warmup") n "Untimed rounds before them (default 1; calls 2; e2e runs none)"
                      (option! 'warmup
                               (flag-value "--warmup" string->number exact-nonnegative-integer?
                                           "a non-negative integer" n))]
@@ -123,7 +131,7 @@
                     (option! 'scale
                              (flag-value "--scale" string->number finite-positive-real?
                                          "a finite positive number" x))]
-       [("--device") d "Device for the ops suite: cpu, cuda or mps"
+       [("--device") d "Device for ops, pytorch-ops, calls and host-gpu: cpu, cuda or mps"
                      (option! 'device
                               (flag-value "--device" string->symbol ops-device? "cpu, cuda or mps"
                                           d))]
@@ -163,7 +171,7 @@
   (define (go out)
     (run-suites suites
                 #:rounds (option 'rounds)
-                #:warmup (option 'warmup 1) #:scale (option 'scale 1)
+                #:warmup (option 'warmup #f) #:scale (option 'scale 1)
                 #:device (option 'device 'cpu) #:full? (option 'full?) #:only (option 'only)
                 #:variants (option 'variants '((#f)))
                 #:cache (option 'cache) #:max-load (option 'max-load)

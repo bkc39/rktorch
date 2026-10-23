@@ -1,0 +1,10 @@
+#!/bin/sh
+# Stands in for racket in l0-baseline-test: logs the call, appends a record to --out.
+echo "racket $*" >> "$FAKE_LOG"
+out=
+prev=
+for arg in "$@"; do
+  if [ "$prev" = --out ]; then out=$arg; fi
+  prev=$arg
+done
+if [ -n "$out" ]; then echo "{\"fresh\":true}" >> "$out"; fi

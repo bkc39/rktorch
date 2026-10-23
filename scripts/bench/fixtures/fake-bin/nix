@@ -1,0 +1,6 @@
+#!/bin/sh
+# Stands in for nix in l0-baseline-test: runs the command after -c.
+echo "nix $*" >> "$FAKE_LOG"
+while [ "$#" -gt 0 ] && [ "$1" != -c ]; do shift; done
+shift
+exec bash "$@"

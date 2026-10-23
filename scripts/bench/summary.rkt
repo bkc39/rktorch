@@ -4,9 +4,14 @@
          (only-in racket/format ~a ~r)
          (only-in racket/list append* append-map remove-duplicates)
          (only-in racket/match match-define)
-         (only-in racket/string string-join string-trim)
+         (only-in racket/string string-join)
          (only-in "harness.rkt" paired-ratio)
-         (only-in "layers.rkt" layer-order))
+         (only-in "layers.rkt" layer-order)
+         (only-in "markdown.rkt"
+                  by-context commit execution host invocation iqr load-text make-section median
+                  meta-text num one-line ref rktorch? section-context section-group section-keep
+                  section-render section-suite section-title select settings-text table)
+         (only-in "summary-l0.rkt" l0-sections))
 
 (provide read-records
          summary-markdown)
@@ -17,68 +22,6 @@
 
 (define (read-records paths)
   (append-map (lambda (p) (call-with-input-file p records-in)) paths))
-
-(define (ref r . keys)
-  (for/fold ([v r]) ([k (in-list keys)])
-    (and (hash? v) (hash-ref v k #f))))
-
-(define (num x [digits 1])
-  (if (real? x) (~r x #:precision (list '= digits)) "-"))
-
-(define (load-text r)
-  (define l (ref r 'load))
-  (if (pair? l) (num (car l)) "-"))
-
-(define (commit r)
-  (define sha (ref r 'meta 'git_sha))
-  (format "`~a`~a"
-          (if (string? sha) (substring sha 0 (min 7 (string-length sha))) "?")
-          (if (ref r 'meta 'git_dirty) " (dirty)" "")))
-
-(define (meta-text r key)
-  (or (ref r 'meta key) "?"))
-
-(define (host r)
-  (format "~a (~a, ~a, cpus ~a)" (meta-text r 'host) (meta-text r 'cpu) (meta-text r 'os)
-          (meta-text r 'affinity)))
-
-(define (execution r)
-  (define m (ref r 'meta))
-  (format "~a, ~a threads (~a)~a"
-          (ref m 'device) (ref m 'threads) (ref m 'threads_source)
-          (if (string? (ref m 'gpu)) (format ", ~a" (ref m 'gpu)) "")))
-
-(define (invocation r)
-  (format "~a, ~a, ~a, run ~a" (commit r) (host r) (execution r) (ref r 'run_id)))
-
-(define (one-line text)
-  (regexp-replace* #rx"[ \t]*[\r\n]+[ \t]*" (string-trim (~a text)) " / "))
-
-(define (cell text)
-  (regexp-replace* #rx"\\|" (one-line text) "\\\\|"))
-
-(define (table header rows)
-  (string-join
-   (append (list (string-join header " | " #:before-first "| " #:after-last " |")
-                 (string-join (map (lambda (_) "---") header)
-                              "|"
-                              #:before-first "|"
-                              #:after-last "|"))
-           (for/list ([row (in-list rows)])
-             (string-join (map cell row) " | " #:before-first "| " #:after-last " |")))
-   "\n"))
-
-(define (median r) (ref r 'stats 'median))
-(define (iqr r) (ref r 'stats 'iqr))
-
-(define (select records suite group)
-  (for/list ([r (in-list records)]
-             #:when (and (equal? (ref r 'suite) suite) (equal? (ref r 'group) group)))
-    r))
-
-(define (by-context records context)
-  (for/list ([c (in-list (remove-duplicates (map context records)))])
-    (cons c (filter (lambda (r) (equal? (context r) c)) records))))
 
 (define ((plain-section label) records)
   (table (list label (ref (car records) 'unit) "IQR" "load")
@@ -151,14 +94,6 @@
                 #:when (equal? (length (ref base 'samples)) (length (ref other 'samples))))
        (ratio-row example base other)))))
 
-(define (settings-text settings)
-  (if (hash? settings)
-      (string-join (for/list ([k (in-list (sort (hash-keys settings) symbol<?))]
-                              #:unless (regexp-match? #rx"^RKTORCH_.*_DIR$" (symbol->string k)))
-                     (format "~a=~a" k (hash-ref settings k)))
-                   " ")
-      "-"))
-
 (define (e2e-section records)
   (define runs
     (table '("example" "variant" "commit" "execution" "settings" "unit" "median" "IQR"
@@ -181,18 +116,19 @@
            (list (ref r 'case) (or (ref r 'variant) "-") (commit r) (execution r)
                  (or (ref r 'exit_code) "-") (or (ref r 'error) "-")))))
 
-(struct section (suite group title render context))
-
 (define sections
-  (list (section "micro" "crossings" "Native crossings by signature class"
-                 (plain-section "crossing") invocation)
-        (section "micro" "layers" "The op stack, layer by layer" layer-section invocation)
-        (section "micro" "ops" "Per op" op-section invocation)
-        (section "micro" "contracts" "Validation strategies" contract-section invocation)
-        (section "micro" "getters" "Short and long getters" (plain-section "getter") invocation)
-        (section "micro" "pipeline" "A real pipeline" (plain-section "pipeline") invocation)
-        (section "e2e" "summary" "End to end" e2e-section host)
-        (section "e2e" "error" "Failures" failure-section host)))
+  (append
+   (list (make-section "micro" "crossings" "Native crossings by signature class"
+                       (plain-section "crossing") invocation)
+         (make-section "micro" "layers" "The op stack, layer by layer" layer-section invocation)
+         (make-section "micro" "ops" "Per op" op-section invocation #:keep rktorch?)
+         (make-section "micro" "contracts" "Validation strategies" contract-section invocation)
+         (make-section "micro" "getters" "Short and long getters" (plain-section "getter")
+                       invocation)
+         (make-section "micro" "pipeline" "A real pipeline" (plain-section "pipeline") invocation)
+         (make-section "e2e" "summary" "End to end" e2e-section host)
+         (make-section "e2e" "error" "Failures" failure-section host))
+   l0-sections))
 
 (define (header records)
   (define (all key)
@@ -206,12 +142,13 @@
    (append
     (list (format "# ~a" title) "" (if (pair? records) (header records) "No records.") "")
     (for*/list ([s (in-list sections)]
-                [rs (in-value (select records (section-suite s) (section-group s)))]
+                [rs (in-value (filter (section-keep s)
+                                      (select records (section-suite s) (section-group s))))]
                 #:when (pair? rs)
-                [c (in-list (by-context rs (section-context s)))])
-      (string-append "## " (section-title s) " (" (one-line (car c)) ")\n\n"
-                     ((section-render s) (cdr c))
-                     "\n")))
+                [c (in-list (by-context rs (section-context s)))]
+                [body (in-value ((section-render s) (cdr c)))]
+                #:when body)
+      (string-append "## " (section-title s) " (" (one-line (car c)) ")\n\n" body "\n")))
    "\n"))
 
 (module+ main

@@ -15,11 +15,15 @@
 
 (provide bench-case
          bench-case?
+         bench-case-before
          bench-case-name
          (struct-out result)
          measure
+         clock-ms
          quantile
          summarize
+         mean
+         list-median
          paired-ratio
          rotate
          parse-load-average
@@ -71,14 +75,23 @@
                  #:rounds [rounds 5]
                  #:load [load load-average]
                  #:on-failure [on-failure #f])
+  (define failed (make-hasheq))
+  (define (attempt c)
+    (cond
+      [(hash-ref failed c #f) #f]
+      [on-failure
+       (with-handlers ([exn:fail? (lambda (e) (hash-set! failed c #t) (on-failure e) #f)])
+         (run-once c))]
+      [else (run-once c)]))
   (for* ([_ (in-range warmup)] [c (in-list cases)])
-    (run-once c))
+    (attempt c))
   (define samples (make-hasheq))
   (define start-load (load))
-  (with-handlers ([(lambda (e) (and on-failure (exn:fail? e))) on-failure])
-    (for* ([i (in-range rounds)] [c (in-list (rotate cases i))])
-      (define sample (run-once c))
-      (hash-update! samples c (lambda (acc) (cons sample acc)) '())))
+  (for* ([i (in-range rounds)]
+         [c (in-list (rotate cases i))]
+         [sample (in-value (attempt c))]
+         #:when sample)
+    (hash-update! samples c (lambda (acc) (cons sample acc)) '()))
   (define end-load (load))
   (for/list ([c (in-list cases)])
     (define rows (reverse (hash-ref samples c '())))
@@ -94,6 +107,13 @@
   (define hi (min (sub1 n) (add1 lo)))
   (define frac (- h lo))
   (+ (vector-ref v lo) (* frac (- (vector-ref v hi) (vector-ref v lo)))))
+
+(define (mean xs)
+  (and (pair? xs) (/ (apply + xs) (length xs) 1.0)))
+
+(define (list-median xs)
+  (define reals (if (list? xs) (filter real? xs) '()))
+  (and (pair? reals) (quantile reals 0.5)))
 
 (define (summarize xs)
   (define q1 (quantile xs 0.25))
@@ -322,6 +342,14 @@
     (check-equal? (hash-ref s 'iqr) 2.0)
     (check-equal? (hash-ref s 'n) 5))
 
+  (test-case "a list's mean and median skip what is not there"
+    (check-equal? (mean '(1 2 6)) 3.0)
+    (check-false (mean '()))
+    (check-equal? (list-median '(5 1 3)) 3.0)
+    (check-equal? (list-median '(10.0 12.0 x)) 11.0)
+    (check-false (list-median '()))
+    (check-false (list-median #f)))
+
   (test-case "rounds rotate the case order, so two variants alternate"
     (check-equal? (rotate '(a b c) 1) '(b c a))
     (check-equal? (rotate '(a b) 3) '(b a))
@@ -337,22 +365,23 @@
     (check-equal? (length (result-per-call (car results))) 4)
     (check-equal? (result-load (car results)) '((1.0 2.0 3.0) (1.0 2.0 3.0))))
 
-  (test-case "with on-failure, a failed sample ends the rounds and keeps the samples before it"
+  (test-case "with on-failure, a failed case keeps its earlier samples and the others run on"
     (define calls 0)
     (define (flaky _reps)
       (set! calls (add1 calls))
-      (when (= calls 3)
+      (when (= calls 2)
         (raise-user-error 'flaky "round two")))
     (define failures '())
     (define (failed! e) (set! failures (cons (exn-message e) failures)))
     (define results
-      (measure (list (bench-case 'a void) (bench-case 'b flaky)) #:warmup 0 #:rounds 3
-               #:load void #:on-failure failed!))
+      (measure (list (bench-case 'a void) (bench-case 'b flaky) (bench-case 'c void))
+               #:warmup 0 #:rounds 3 #:load void #:on-failure failed!))
     (check-equal? failures '("flaky: round two"))
-    (check-equal? (map (lambda (r) (length (result-per-call r))) results) '(3 2))
+    (check-equal? calls 2 "a failed case is not run again")
+    (check-equal? (map (lambda (r) (length (result-per-call r))) results) '(3 1 3))
     (check-exn #rx"round two"
                (lambda ()
-                 (set! calls 2)
+                 (set! calls 1)
                  (measure (list (bench-case 'b flaky)) #:warmup 0 #:rounds 1 #:load void))))
 
   (test-case "a case may time itself"

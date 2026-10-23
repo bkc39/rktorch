@@ -5,13 +5,14 @@
          (only-in racket/match match-define)
          (only-in torch
                   [add facade-add] [conv2d facade-conv2d] [matmul facade-matmul]
-                  [sum facade-sum] backward! item randn reclaim-native-memory! to)
+                  [sum facade-sum] backward! item native-memory-use randn to)
          (only-in torch/foreign/error check-ok)
          (only-in torch/foreign/raw/autograd tr-tensor-backward/raw)
+         (only-in torch/foreign/raw/collector collect-and-wait!)
          (only-in torch/foreign/raw/elementwise tr-add/raw)
          (only-in torch/foreign/raw/linalg tr-matmul/raw)
          (only-in torch/foreign/raw/memory tensor-allocator)
-         (only-in torch/foreign/raw/pressure collect-at-trough!)
+         (only-in torch/foreign/raw/pressure collect-at-trough! refresh-shadows!)
          (only-in torch/foreign/raw/pressure-settings native-collect-at-troughs)
          (only-in torch/foreign/raw/reduce tr-sum/raw)
          (only-in torch/foreign/raw/syntax _Tensor _Tensor/null define-torch)
@@ -37,6 +38,18 @@
   #:c-id tr_gen_linear
   #:wrap tensor-allocator)
 
+(define (ledger-bytes)
+  (for/sum ([entry (in-list (native-memory-use))])
+    (cdr entry)))
+
+(define (settle-native-memory!)
+  (let loop ([prev (ledger-bytes)] [rounds 4])
+    (define-values (_observed drained?) (collect-and-wait!))
+    (define now (ledger-bytes))
+    (cond
+      [(and (> rounds 1) (or (< now prev) (not drained?))) (loop now (sub1 rounds))]
+      [else (refresh-shadows!)])))
+
 (define ones-2d (list->s64vector '(1 1)))
 
 (define (backward/unchecked t)
@@ -59,11 +72,11 @@
             (variant 'unchecked (lambda () (f-unchecked x y)) values)
             (variant 'raw (lambda () (f-raw x y)) wrap-tensor))))
 
-(define (conv-op device reps)
-  (define x (randn 1 3 32 32 #:device device))
+(define (conv-op device batch reps)
+  (define x (randn batch 3 32 32 #:device device))
   (define w (randn 16 3 3 3 #:device device))
   (define b (randn 16 #:device device))
-  (op 'conv2d-1x3x32x32-k16 reps
+  (op (string->symbol (format "conv2d-~ax3x32x32-k16" batch)) reps
       (list (variant 'facade (lambda () (facade-conv2d x w #:bias b #:padding 1)) values)
             (variant 'unchecked (lambda () (g:conv2d x w b '(1 1) '(1 1) '(1 1) 1)) values)
             (variant 'raw
@@ -91,14 +104,18 @@
   (define-values (a8 b8) (pair 8 8))
   (define-values (a64 b64) (pair 64 64))
   (define-values (a512 b512) (pair 512 512))
+  (define-values (a2048 b2048) (pair 2048 2048))
   (list (binary-op 'add-8x8 (n 20000) a8 b8 facade-add unchecked-add tr-add/raw)
         (binary-op 'matmul-64 (n 5000) a64 b64 facade-matmul unchecked-matmul tr-matmul/raw)
         (binary-op 'matmul-512 (n 100) a512 b512 facade-matmul unchecked-matmul tr-matmul/raw)
-        (conv-op device (n 2000))
+        (binary-op 'matmul-2048 (n 5) a2048 b2048 facade-matmul unchecked-matmul tr-matmul/raw)
+        (conv-op device 1 (n 2000))
+        (conv-op device 128 (n 100))
         (linear-op device (n 2000))))
 
 (define op-names
-  '(add-8x8 matmul-64 matmul-512 conv2d-1x3x32x32-k16 linear-64-fwd-bwd))
+  '(add-8x8 matmul-64 matmul-512 matmul-2048 conv2d-1x3x32x32-k16 conv2d-128x3x32x32-k16
+    linear-64-fwd-bwd))
 
 (define (op-cases #:device [device 'cpu] #:scale [scale 1])
   (define sync! (synchronizer device))
@@ -111,4 +128,33 @@
                           (define final (for/last ([_ (in-range reps)]) (call)))
                           (sync! ((variant-as-tensor v) final)))
                         #:reps (op-reps o)
-                        #:before reclaim-native-memory!)))))
+                        #:before settle-native-memory!)))))
+
+(module+ test
+  (require rackunit
+           (only-in torch cuda-available? cuda-memory-stats)
+           (only-in torch/foreign/raw/fault with-crossing-hook)
+           (only-in "harness.rkt" bench-case-before measure))
+
+  (define (crossings thunk)
+    (define n 0)
+    (with-crossing-hook (lambda () (set! n (add1 n)))
+      (thunk))
+    n)
+
+  (test-case "an op case settles native memory before each run without a native call"
+    (define befores
+      (for*/list ([o (in-list (op-cases #:scale 0.001))] [c (in-list (cdr o))])
+        (bench-case-before c)))
+    ((car befores))
+    (for ([before! (in-list befores)])
+      (check-equal? (crossings before!) 0 "nothing left to free, and no allocator cache emptied")))
+
+  (when (cuda-available?)
+    (test-case "on CUDA an op case's runs start from a warm caching allocator"
+      (define (reserved) (cdr (assq 'reserved (cuda-memory-stats))))
+      (define cases (cdr (assq 'matmul-2048 (op-cases #:device 'cuda #:scale 0.001))))
+      (measure cases #:warmup 0 #:rounds 1 #:load void)
+      (define held (reserved))
+      ((bench-case-before (car cases)))
+      (check-equal? (reserved) held))))
