@@ -27,8 +27,10 @@ def packed(t):
             "hex": t.contiguous().numpy().tobytes().hex()}
 
 
+images = sorted(name for name in os.listdir(FIXTURES)
+                if name.endswith((".jpg", ".png")))
 decoded = {}
-for name in sorted(os.listdir(FIXTURES)):
+for name in images:
     data = fixture(name)
     decoded[name] = {
         "unchanged": packed(decode_image(data, ImageReadMode.UNCHANGED)),
