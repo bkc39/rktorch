@@ -22,7 +22,7 @@
            (only-in "../nn.rkt" Linear Parameter Sequential adam
                     clip-grad-norm! parameters rmsprop sgd step! step-lr
                     zero-grads!)
-           (only-in "../foreign/structs.rkt" tensor-handle tensor-impl)
+           (only-in "../foreign/structs.rkt" tensor-handle tensor-impl wrap-tensor)
            (only-in "private/race-harness.rkt" hooks settle! with-race-hook)
            (only-in "private/within.rkt" bounded-test))
 
@@ -225,7 +225,7 @@
         (thunk w g)))
     (settle!))
 
-  (bounded-test "a reset forgets the adoptions in the atomic section of the native reset"
+  (bounded-test "a reset forgets the adoptions in atomic mode, after the native reset succeeded"
     (adopting-gradient
      (lambda (w g)
        (define at-forget #f)
@@ -235,9 +235,30 @@
        (with-race-hook observe!
          (zero-grads! (sgd (list w) #:lr 0.1)))
        (check-equal? at-forget (list #t #f (* 4 mib))
-                     "inside the reset's section, the gradient gone, the adoption still held")
+                     "in atomic mode, after the native reset succeeded, the adoption still held")
        (check-equal? (adopted g) 0 "the reset forgot the adoption")
        (tensor-free! g))))
+
+  (bounded-test "a raise while adopting a gradient propagates, and the handle is released once"
+    (settle!)
+    (define w (zeros 1024 1024 #:requires-grad? #t))
+    (backward! (sum w))
+    (settle!)
+    (define before (cpu-bytes))
+    (define taken #f)
+    (define (raise-adopting name t)
+      (when (eq? name 'gradient-adopting)
+        (set! taken t)
+        (raise (exn:fail "injected adoption failure" (current-continuation-marks)))))
+    (check-exn #rx"injected adoption failure"
+               (lambda () (with-race-hook raise-adopting (grad w))))
+    (check-false (in-atomic-mode?) "the raise left atomic mode")
+    (check-equal? (cpu-bytes) (+ before (* 4 mib)) "the handle is on the ledger")
+    (check-equal? (released-during (lambda () (tensor-free! (wrap-tensor taken)))) 1)
+    (check-equal? (cpu-bytes) before "the release took the handle off the ledger")
+    (settle!)
+    (check-equal? (cpu-bytes) before "no finalizer released it again")
+    (check-true (has-grad? w)))
 
   (define null-tensor
     (let ([h (ptr-add #f 0)])

@@ -144,18 +144,24 @@
         -> (values rc type index))
   #:c-id tr_tensor_device)
 
-(define (account! t #:adopt [adopt void])
+(define (native-placement t)
   (with-handlers ([exn:fail? (lambda (e)
                                (when (native-fault? e)
                                  (note-native-fault! "accounting a tensor"))
-                               #f)])
+                               (values #f #f))])
     (define-values (nb-rc nbytes) (tr-tensor-nbytes/raw t))
     (define-values (dev-rc type index) (tr-tensor-device/raw t))
-    (and (zero? nb-rc)
-         (zero? dev-rc)
-         (let ([dev (device type (if (eq? type 'cpu) 0 index))])
-           (record-allocation! t nbytes dev #:adopt adopt)
-           dev))))
+    (cond
+      [(and (zero? nb-rc) (zero? dev-rc))
+       (values nbytes (device type (if (eq? type 'cpu) 0 index)))]
+      [else (values #f #f)])))
+
+(define (account! t #:adopt [adopt void])
+  (define-values (nbytes dev) (native-placement t))
+  (cond
+    [dev (record-allocation! t nbytes dev #:adopt adopt)
+         dev]
+    [else #f]))
 
 (define (record-allocation! t nbytes dev #:adopt [adopt void])
   (define entry (allocation (make-phantom-bytes nbytes) nbytes dev 0 #f))
@@ -318,6 +324,7 @@
   (define param (car args))
   (call-with-ledger
    (lambda ()
+     (race-point gradient-adopting t)
      (define now (shadow-generation))
      (define entry (hash-ref allocations t #f))
      (define held (hash-ref adopted-at param no-adoption))
