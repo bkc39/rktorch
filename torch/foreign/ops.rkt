@@ -47,11 +47,13 @@
                   collect-and-drain!
                   [finalizer-diagnostics raw:finalizer-diagnostics]
                   [finalizer-failures raw:finalizer-failures]
+                  forget-gradient-adoptions!
                   [native-memory-unaccounted raw:native-memory-unaccounted]
                   [native-memory-use raw:native-memory-use]
                   oom-retry/status
                   reaccount!)
          (only-in "raw/pressure.rkt"
+                  call-with-ledger
                   [native-collect-at-troughs raw:native-collect-at-troughs]
                   [native-collect-budget raw:native-collect-budget]
                   [native-collect-margin raw:native-collect-margin]
@@ -59,6 +61,7 @@
                   [native-memory-limit raw:native-memory-limit]
                   lower-shadows!
                   refresh-shadows!)
+         (only-in "raw/race-points.rkt" race-point)
          (only-in "raw/random.rkt" tr-tensor-uniform!/raw)
          (only-in "raw/tensor.rkt"
                   dtype-code->symbol
@@ -83,7 +86,6 @@
          dtype-symbols
          float-dtype-max
          float-dtype/c
-         move-generation
          placement
          with-default-device)
 
@@ -387,7 +389,7 @@
 
 (define moves (box 0))
 
-(define (move-generation)
+(define/contract-out (move-generation) (-> exact-nonnegative-integer?) ;; noqa
   (unbox moves))
 
 (define (note-move!)
@@ -406,10 +408,14 @@
   (unless (already-there? t type index dt)
     (parameterize-break #f
       (define rc (tensor-to!/retrying t type index dt))
+      (race-point move-returned t)
       (dynamic-wind void
                     (lambda () (check-ok rc 'to!))
                     (lambda ()
                       (note-move!)
+                      (when (zero? rc)
+                        (call-with-ledger
+                         (lambda () (forget-gradient-adoptions! (list t)))))
                       (reaccount! (tensor-handle t))))))
   t)
 

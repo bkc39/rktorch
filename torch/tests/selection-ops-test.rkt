@@ -2,6 +2,7 @@
 
 (module+ test
   (require rackunit
+           (only-in "../generated.rkt" index-tensor)
            "../main.rkt")
 
   (test-case "selection family: take/gather/take-along-dim/where (#73)"
@@ -214,6 +215,19 @@
                   #:alpha 2)
       (check-equal? (tensor->list it) '(7 2)))
     (let ([t (tensor '(1.0 1.0))])
-      (ref! t (gt t 0.5) (tensor '(-0.0)))
+      (ref! t (> t 0.5) (tensor '(-0.0)))
       (check-equal? (tensor->list t) '(-0.0 -0.0))))
-)
+
+  (test-case "index-tensor broadcasts its index tensors and refuses a float one"
+    (define t (~> 12 arange (reshape 3 4)))
+    (define rows (to-dtype (tensor '((0) (2))) 'int64))
+    (define cols (to-dtype (tensor '(1 3 0)) 'int64))
+    (define picked (index-tensor t (list rows cols)))
+    (check-equal? (shape picked) '(2 3))
+    (check-equal? (tensor->list picked) '(1.0 3.0 0.0 9.0 11.0 8.0))
+    (check-equal? (~> t (index-tensor (list #f cols)) shape) '(3 3))
+    (check-exn (lambda (e)
+                 (and (exn:fail? e)
+                      (regexp-match? #rx"indices must be long" (exn-message e))))
+               (lambda () (index-tensor t (list (tensor '(0.0 1.0))))))))
+
