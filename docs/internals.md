@@ -343,10 +343,11 @@ the CPU, whose allocator keeps no count.
   at it, so the trough's refresh can already charge it. The first `grad`
   taken on a parameter since the last refresh takes the bytes it puts on
   the ledger off the shadow, so wrapping it moves the charge instead of
-  doubling it. `tensor-allocator/gradient` does this between accounting
-  the handle and the pressure check (`adopt-gradient!`, keyed by the
-  parameter and a generation every refresh bumps), and takes at most what
-  the shadow holds. The invariant is that at most one handle per
+  doubling it. `tensor-allocator/gradient` does this in the ledger section
+  that accounts the handle, so no refresh reads the handle's charge before
+  the adoption moves it, and before the pressure check (`adopt-gradient!`,
+  keyed by the parameter and a generation every refresh bumps), and takes
+  at most what the shadow holds. The invariant is that at most one handle per
   parameter holds a positive adoption: a second `grad` taken while
   another handle still holds one moves nothing, even after a refresh,
   and the ledger charges that handle again, as it does any second handle
@@ -361,8 +362,13 @@ the CPU, whose allocator keeps no count.
   (`forget-gradient-adoptions!`, from a weak table per parameter) in the
   same atomic section as the native reset, and only once the reset
   succeeded: a handle taken before the reset frees storage nothing else
-  holds, and gives the shadow nothing. Since no adoption is zeroed twice
-  or left behind, the ledger never falls below what native code holds.
+  holds, and gives the shadow nothing. No adoption is zeroed twice or
+  left behind, yet the ledger can fall below what native code holds: a
+  refresh while k handles to one gradient live sees it charged k times
+  on the ledger and leaves it off the shadow, so once they are released,
+  reset or not, the ledger is under by up to (k−1) gradients, and by one
+  more when the first handle's adoption took less than the whole
+  gradient, until the next refresh restores it (#400).
   It is over by each extra live handle's charge while that handle lives,
   and by the dropped gradients, which the shadow keeps charging until the
   next refresh, so one gradient set for one iteration. The optimizers

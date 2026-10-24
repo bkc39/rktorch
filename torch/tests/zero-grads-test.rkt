@@ -5,6 +5,7 @@
            (only-in ffi/unsafe ptr-add set-cpointer-tag!)
            (only-in ffi/unsafe/atomic in-atomic-mode?)
            (only-in racket/contract exn:fail:contract:blame?)
+           (only-in racket/list make-list)
            (only-in "../foreign.rkt" cpu-device cuda-available? cuda-device
                     native-collect-at-troughs native-memory-unaccounted
                     native-memory-use)
@@ -227,14 +228,14 @@
   (bounded-test "a reset forgets the adoptions in the atomic section of the native reset"
     (adopting-gradient
      (lambda (w g)
-       (define at-reset #f)
+       (define at-forget #f)
        (define (observe! name _ts)
-         (when (eq? name 'gradients-reset)
-           (set! at-reset (list (in-atomic-mode?) (adopted g)))))
+         (when (eq? name 'adoptions-forgotten)
+           (set! at-forget (list (in-atomic-mode?) (has-grad? w) (adopted g)))))
        (with-race-hook observe!
          (zero-grads! (sgd (list w) #:lr 0.1)))
-       (check-equal? at-reset (list #t (* 4 mib))
-                     "the native reset ran, the adoption is still held")
+       (check-equal? at-forget (list #t #f (* 4 mib))
+                     "inside the reset's section, the gradient gone, the adoption still held")
        (check-equal? (adopted g) 0 "the reset forgot the adoption")
        (tensor-free! g))))
 
@@ -252,35 +253,63 @@
        (tensor-free! g)
        (check-equal? (cpu-unaccounted) (* 4 mib) "the release gave the adoption back"))))
 
-  (define (two-adopters-across-a-refresh release-order)
+  (define (handles-across-a-refresh k reset?)
     (settle!)
     (define w (zeros 1024 1024 #:requires-grad? #t))
     (define opt (sgd (list w) #:lr 0.1))
+    (define gradient (* 4 mib))
+    (define other (* 8 mib))
+    (define unseen (box (+ other gradient)))
+    (with-unseen-gradient unseen
+      (lambda ()
+        (backward! (sum w))
+        (define handles
+          (for/list ([i (in-range k)])
+            (refresh-shadows!)
+            (define h (grad w))
+            (set-box! unseen (- other (* i gradient)))
+            h))
+        (check-equal? (map adopted handles) (cons gradient (make-list (sub1 k) 0))
+                      "only the first handle adopts, even after a refresh")
+        (refresh-shadows!)
+        (define expected
+          (cond
+            [reset? (zero-grads! opt) other]
+            [else (+ other gradient)]))
+        (for-each tensor-free! handles)
+        (set-box! unseen expected)
+        (check-equal? (cpu-unaccounted) (- expected (* (sub1 k) gradient))
+                      "the releases leave the ledger under by the extra handles' charges")
+        (refresh-shadows!)
+        (check-equal? (cpu-unaccounted) expected "the next refresh restores it")))
+    (settle!))
+
+  (bounded-test "two handles across a refresh, then a reset: one gradient under until a refresh"
+    (handles-across-a-refresh 2 #t))
+
+  (bounded-test "two handles across a refresh, no reset: one gradient under until a refresh"
+    (handles-across-a-refresh 2 #f))
+
+  (bounded-test "three handles across a refresh: two gradients under until a refresh"
+    (handles-across-a-refresh 3 #f))
+
+  (bounded-test "a refresh right after a gradient handle is accounted finds it adopted"
+    (settle!)
+    (define w (zeros 1024 1024 #:requires-grad? #t))
     (define other (* 8 mib))
     (define unseen (box (+ other (* 4 mib))))
     (with-unseen-gradient unseen
       (lambda ()
         (backward! (sum w))
-        (refresh-shadows!)
-        (define h1 (grad w))
-        (set-box! unseen other)
-        (backward! (sum w))
-        (refresh-shadows!)
-        (define h2 (grad w))
-        (check-equal? (adopted h2) 0 "the first handle still holds the adoption")
-        (zero-grads! opt)
-        (for-each tensor-free! (release-order h1 h2))
-        (define released (cpu-unaccounted))
-        (refresh-shadows!)
-        (check-equal? released (cpu-unaccounted)
-                      "the releases left the ledger where a refresh puts it")))
+        (define (refresh-in-the-gap!)
+          (set-box! unseen other)
+          (refresh-shadows!))
+        (define g
+          (with-race-hook (on-nth 'tensor-accounted 1 refresh-in-the-gap!)
+            (grad w)))
+        (check-equal? (cpu-unaccounted) other "the gradient is charged once, on the ledger")
+        (tensor-free! g)))
     (settle!))
-
-  (bounded-test "two handles across a refresh, reset, then released oldest first"
-    (two-adopters-across-a-refresh list))
-
-  (bounded-test "two handles across a refresh, reset, then released newest first"
-    (two-adopters-across-a-refresh (lambda (h1 h2) (list h2 h1))))
 
   (bounded-test "after clipping, a step's gradient handle is charged once"
     (settle!)

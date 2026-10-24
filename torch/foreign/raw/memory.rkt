@@ -144,7 +144,7 @@
         -> (values rc type index))
   #:c-id tr_tensor_device)
 
-(define (account! t)
+(define (account! t #:adopt [adopt void])
   (with-handlers ([exn:fail? (lambda (e)
                                (when (native-fault? e)
                                  (note-native-fault! "accounting a tensor"))
@@ -154,16 +154,17 @@
     (and (zero? nb-rc)
          (zero? dev-rc)
          (let ([dev (device type (if (eq? type 'cpu) 0 index))])
-           (record-allocation! t nbytes dev)
+           (record-allocation! t nbytes dev #:adopt adopt)
            dev))))
 
-(define (record-allocation! t nbytes dev)
+(define (record-allocation! t nbytes dev #:adopt [adopt void])
   (define entry (allocation (make-phantom-bytes nbytes) nbytes dev 0 #f))
   (call-with-ledger
    (lambda ()
      (hash-set! allocations t entry)
      (race-point ledger-entry-added t)
-     (note-accounted! dev nbytes))))
+     (note-accounted! dev nbytes)
+     (adopt))))
 
 (define (unaccount! t)
   (with-handlers ([exn:fail? void])
@@ -277,15 +278,16 @@
                           #:collect! [collect! collect-and-drain!])
   (retry-on-oom (lambda (rc) (= rc 1)) oom? collect!))
 
-;; `adopt` runs after the accounting and before the pressure check, so the
-;; check sees the charge where it will stay.
+;; `adopt` runs in the accounting's ledger section, so no refresh reads the
+;; handle's charge before the adoption moves it, and before the pressure
+;; check, so the check sees the charge where it will stay.
 (define (((accounted adopt) wrapped) . args)
   (define t (apply wrapped args))
   (race-point op-returned t)
   (when t
-    (define dev (account! t))
+    (define dev (account! t #:adopt (lambda () (adopt args t))))
+    (race-point tensor-accounted t)
     (when dev
-      (adopt args t)
       (collect-under-pressure! dev)))
   t)
 
@@ -340,15 +342,16 @@
 (define (adopted-bytes t)
   (call-with-ledger (lambda () (allocation-adopted (hash-ref allocations t)))))
 
+;; The caller holds the ledger: the forgetting must share the atomic section
+;; of the native reset that dropped the gradients.
 (define (forget-gradient-adoptions! params)
-  (call-with-ledger
-   (lambda ()
-     (for ([param (in-list params)])
-       (for ([held (in-list (live-entries (hash-ref adopted-at param no-adoption)))])
-         (define entry (weak-box-value held))
-         (when entry
-           (set-allocation-adopted! entry 0)))
-       (hash-remove! adopted-at param)))))
+  (race-point adoptions-forgotten params)
+  (for ([param (in-list params)])
+    (for ([held (in-list (live-entries (hash-ref adopted-at param no-adoption)))])
+      (define entry (weak-box-value held))
+      (when entry
+        (set-allocation-adopted! entry 0)))
+    (hash-remove! adopted-at param)))
 
 ;; The retry composes OUTSIDE the allocator wrap: ffi/unsafe/alloc runs
 ;; the wrapped call in atomic mode, where the drain's blocking wait is an

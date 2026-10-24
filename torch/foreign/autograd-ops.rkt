@@ -25,7 +25,6 @@
          (only-in "raw/pressure.rkt"
                   call-with-ledger collect-at-trough! native-collect-at-troughs
                   refresh-shadows!)
-         (only-in "raw/race-points.rkt" race-point)
          (only-in "structs.rkt" tensor? tensor-free! wrap-tensor))
 
 (provide collect-at-forward-trough!
@@ -122,7 +121,6 @@
   (check-ok (call-with-ledger
              (lambda ()
                (define rc (tr-tensors-reset-grad/raw ts (length ts)))
-               (race-point gradients-reset ts)
                (when (zero? rc)
                  (forget-gradient-adoptions! ts))
                rc))
