@@ -7,10 +7,11 @@
            (only-in "../foreign/raw/pressure-settings.rkt"
                     native-collect-at-troughs)
            (only-in "../main.rkt"
-                    > ~> arange cuda-available? cuda-device cuda-memory-stats
+                    + > ~> arange cuda-available? cuda-device cuda-memory-stats
                     cuda-reset-peak-stats! current-generator device dtype
                     make-generator mps-available? mps-device native-memory-use
-                    randn reshape tensor->list tensor-shape to to-dtype zeros)
+                    randn reclaim-native-memory! reshape tensor tensor->list
+                    tensor-shape to to-dtype transpose zeros)
            (only-in "../vision/transforms.rkt" random-crop)
            (only-in "private/race-harness.rkt" with-race-hook)
            (only-in "private/reference-crop.rkt" reference-crop)
@@ -32,7 +33,11 @@
             (~> (randn 4 3 6 5) (to-dtype 'float16) (to on))
             (~> (randn 4 3 6 5) (to-dtype 'bfloat16) (to on))
             (to (randn 9 1 6 4 #:dtype 'float64) on)
-            (to (randn 128 3 32 32) on)))
+            (to (randn 128 3 32 32) on)
+            (~> (for/list ([k (in-range (* 2 2 3 4))])
+                  (vector-ref (vector +nan.0 +inf.0 -inf.0 -0.0 1.5) (modulo k 5)))
+                tensor (reshape 2 2 3 4) (to on))
+            (~> (randn 3 2 5 7) (to on) (transpose 2 3))))
     (if (mps? on)
         (filter (lambda (x) (~> x dtype (eq? 'float64) not)) all)
         all))
@@ -110,6 +115,7 @@
     (define indices (* 8 (+ (* 16 n) (* 2 c) (* 4 h) (* 4 w) (* 4 n h) (* 4 n w))))
     (define budget (+ out indices))
     (random-crop x #:padding padding #:generator (make-generator 1))
+    (reclaim-native-memory!)
     (define before (bytes-on on))
     (define kept (random-crop x #:padding padding
                               #:generator (make-generator 1)))
@@ -134,8 +140,26 @@
       (check-true (<= peak (* 5/2 out))
                   (format "~a bytes at the peak for a ~a-byte crop" peak out))))
 
+  (bounded-test "random-crop keeps master's draws for a seed"
+    (define x (~> 36 arange (+ 1) (reshape 4 1 3 3) (to-dtype 'int64)))
+    (define golden
+      '(0 0 0 2 3 0 5 6 0 14 15 0 17 18 0 0 0 0
+        23 24 0 26 27 0 0 0 0 0 0 0 29 30 0 32 33 0))
+    (for ([crop (in-list (list random-crop reference-crop))])
+      (check-equal? (tensor->list
+                     (crop x #:padding 1 #:generator (make-generator 0)))
+                    golden)))
+
+  (bounded-test "random-crop takes a batch without images or channels"
+    (for ([on (in-list devices)])
+      (define empty (to (zeros 0 0 4 4) on))
+      (check-eq? (random-crop empty) empty (format "~a" on))
+      (check-equal? (~> (zeros 2 0 4 4) (to on) random-crop tensor-shape)
+                    '(2 0 4 4)
+                    (format "~a" on))))
+
   (bounded-test "random-crop blames its caller for a batch without pixels"
-    (for ([x (in-list (list (zeros 2 3 0 4) (zeros 2 3 4 0) (zeros 2 0 4 4)))])
+    (for ([x (in-list (list (zeros 2 3 0 4) (zeros 2 3 4 0) (zeros 0 3 0 4)))])
       (check-exn (lambda (e)
                    (and (exn:fail:contract:blame? e)
                         (regexp-match? #rx"blaming: [^\n]*random-crop-test"

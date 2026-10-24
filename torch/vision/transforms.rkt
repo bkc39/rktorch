@@ -50,8 +50,8 @@
    'image-batch-with-pixels
    (and/c image-batch/c
           (lambda (x)
-            (match-define (list _ c h w) (tensor-shape x))
-            (and (positive? c) (positive? h) (positive? w))))))
+            (match-define (list _ _ h w) (tensor-shape x))
+            (and (positive? h) (positive? w))))))
 
 (define/contract-out (random-crop x ;; noqa
                                   #:padding [padding 4]
