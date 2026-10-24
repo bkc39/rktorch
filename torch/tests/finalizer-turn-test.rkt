@@ -1,7 +1,8 @@
 #lang racket/base
 
 (module+ test
-  (require (only-in racket/list count)
+  (require (only-in ffi/unsafe/atomic call-as-atomic)
+           (only-in racket/list count)
            (only-in racket/match match struct*)
            rackunit
            (only-in "../foreign.rkt" conv2d cpu-device cuda-device native-memory-use randn zeros)
@@ -116,4 +117,15 @@
               (check-false (exn:break? (unbox raised))
                            "the break replaced the failed move's error")
               (check-pred exn:fail? (unbox raised)
-                          "the move to a missing device did not fail")))))
+                          "the move to a missing device did not fail"))))
+
+  (test-case "an op inside an atomic section after a collection does not yield"
+    (within 60
+            (lambda ()
+              (check-not-exn
+               (lambda ()
+                 (call-as-atomic
+                  (lambda ()
+                    (collect-garbage 'minor)
+                    (zeros 1))))
+               "the op slept inside an atomic section")))))
