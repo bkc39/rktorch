@@ -47,6 +47,11 @@
   (define acc (accuracy net xs ys))
   (check-true (<= 0.0 acc 1.0))
   (check-true (layer-training? net) "accuracy left the net in eval mode")
+  (define step-loss
+    (train-step net (sgd (parameters net) #:lr 0.01)
+                (narrow xs 0 0 8) (narrow ys 0 0 8)))
+  (check-true (tensor? step-loss) "train-step hands back the loss unread")
+  (check-true (rational? (item step-loss)))
   ;; Device RNG streams differ from the CPU's for the init, so the on-device
   ;; arm checks convergence, never equality with the CPU losses above.
   (define accel (accelerator-if-available))
