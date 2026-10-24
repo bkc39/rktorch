@@ -1,23 +1,15 @@
 #lang racket/base
 
-(require (only-in "../../foreign.rkt"
-                  copy! device draw-seed dtype narrow select stack tensor-shape
-                  zeros))
+(require (only-in racket/match match-define)
+         (only-in "../../foreign.rkt"
+                  copy! device dtype narrow select stack tensor-shape zeros)
+         (only-in (submod "../../vision/transforms.rkt" private) batch-rng))
 
 (provide reference-crop)
 
-(define (batch-rng generator)
-  (define rng (make-pseudo-random-generator))
-  (parameterize ([current-pseudo-random-generator rng])
-    (random-seed (bitwise-and (draw-seed #:generator generator) #x7FFFFFFF)))
-  rng)
-
 (define (reference-crop x #:padding [padding 4] #:generator [generator #f])
-  (define dims (tensor-shape x))
-  (define n (car dims))
-  (define h (caddr dims))
-  (define w (cadddr dims))
-  (define padded (zeros n (cadr dims) (+ h (* 2 padding)) (+ w (* 2 padding))
+  (match-define (list n c h w) (tensor-shape x))
+  (define padded (zeros n c (+ h (* 2 padding)) (+ w (* 2 padding))
                         #:device (device x)
                         #:dtype (dtype x)))
   (copy! (narrow (narrow padded 2 padding h) 3 padding w) x)

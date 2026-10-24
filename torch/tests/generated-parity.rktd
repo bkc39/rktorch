@@ -47,6 +47,7 @@
  (index-fill-int-scalar! "index_fill_.int_Scalar" (tensor int64 tensor scalar) #t 1)
  (index-fill-int-tensor! "index_fill_.int_Tensor" (tensor int64 tensor tensor) #t 1)
  (index-select "index_select" (tensor int64 tensor) #f 1)
+ (index-tensor "index.Tensor" (tensor optional-tensor-list) #f 1)
  (l1-loss "l1_loss" (tensor tensor int64) #f 1)
  (layer-norm "layer_norm" (tensor int-array optional-tensor optional-tensor double bool) #f 1)
  (le-scalar "le.Scalar" (tensor scalar) #f 1)

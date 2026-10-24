@@ -400,9 +400,10 @@ With @racket[generator] @racket[#f], the batch seed comes from
                       [#:padding padding exact-nonnegative-integer? 4]
                       [#:generator generator (or/c generator? #f) #f])
          tensor?]{
-Pads every image of the rank-4 batch @racket[x] with @racket[padding] zero
-pixels on each side and cuts a window of the original size at a per-image
-offset, torchvision's @tt{RandomCrop(32, padding=4)} for CIFAR-10. With
+Pads every image of the rank-4 batch @racket[x], whose channels, height and
+width are positive, with @racket[padding] zero pixels on each side and cuts a
+window of the original size at a per-image offset in a number of native
+calls independent of the batch size, torchvision's @tt{RandomCrop(32, padding=4)} for CIFAR-10. With
 @racket[padding] 0 it is the identity.
 With @racket[generator] @racket[#f], the batch seed comes from
 @racket[(current-generator)].
