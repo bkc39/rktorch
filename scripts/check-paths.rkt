@@ -116,14 +116,17 @@
                #:when (or (file-exists? (build-path root file))
                           (link-exists? (build-path root file))))
       file))
-  (cond
-    [(not git) (raise-user-error 'check-paths "git is not on PATH")]
-    [(not listed?)
-     (raise-user-error 'check-paths "git ls-files failed in ~a: ~a"
-                       root (string-trim (get-output-string err)))]
-    [(null? files)
-     (raise-user-error 'check-paths "git ls-files lists no file in ~a" root)]
-    [else files]))
+  (define problem
+    (cond
+      [(not git) "git is not on PATH"]
+      [(not listed?)
+       (format "git ls-files failed in ~a: ~a"
+               root (string-trim (get-output-string err)))]
+      [(null? files) (format "git ls-files lists no file in ~a" root)]
+      [else #f]))
+  (when problem
+    (raise-user-error 'check-paths "~a" problem))
+  files)
 
 (module+ main
   (define tracked (tracked-files repository))
