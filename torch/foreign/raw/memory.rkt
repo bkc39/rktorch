@@ -7,7 +7,6 @@
          (only-in ffi/unsafe/alloc allocator deallocator)
          (only-in ffi/unsafe/atomic call-as-atomic)
          (only-in racket/list remove-duplicates)
-         (only-in racket/match match)
          (only-in "../device-type.rkt" device device-index device-type)
          (only-in "collector.rkt"
                   collect-and-wait!
@@ -29,7 +28,8 @@
          (only-in "race-points.rkt" race-point)
          (only-in "syntax.rkt" _Tensor _Tensor/null define-torch))
 
-(provide tr-tensor-free/finalizer
+(provide adopted-bytes
+         tr-tensor-free/finalizer
          tr-tensor-free/checked
          collect-and-drain!
          swallow-and-count-failure
@@ -295,8 +295,9 @@
 ;; A gradient is storage the backward pass wrote before any handle pointed
 ;; at it, so the shadow's last refresh may charge it. The first handle taken
 ;; on a parameter's gradient since that refresh moves those bytes to the
-;; ledger; a later one taken while that handle lives, which the ledger
-;; charges again as it does any second handle, moves nothing.
+;; ledger; a later one taken while any handle still holds an adoption, which
+;; the ledger charges again as it does any second handle, moves nothing, even
+;; across a refresh. At most one handle per parameter holds an adoption.
 (struct adoption (generation entries))
 
 (define no-adoption (adoption #f '()))
@@ -306,6 +307,11 @@
 (define (live-entries held)
   (filter weak-box-value (adoption-entries held)))
 
+(define (held-by-a-live-adopter? held)
+  (for/or ([b (in-list (adoption-entries held))])
+    (define e (weak-box-value b))
+    (and e (positive? (allocation-adopted e)))))
+
 (define (adopt-gradient! args t)
   (define param (car args))
   (call-with-ledger
@@ -313,7 +319,9 @@
      (define now (shadow-generation))
      (define entry (hash-ref allocations t #f))
      (define held (hash-ref adopted-at param no-adoption))
-     (when (and entry (not (eqv? (adoption-generation held) now)))
+     (when (and entry
+                (not (eqv? (adoption-generation held) now))
+                (not (held-by-a-live-adopter? held)))
        (set-allocation-adopted!
         entry
         (note-adopted! (allocation-device entry) (allocation-nbytes entry)))
@@ -321,16 +329,16 @@
        (hash-set! adopted-at param
                   (adoption now (cons (make-weak-box entry) (live-entries held))))))))
 
-(define (newest-adopter? held a)
-  (match (adoption-entries held)
-    [(cons newest _) (eq? (weak-box-value newest) a)]))
-
 (define (unadopt! a)
   (note-unadopted! (allocation-device a) (allocation-adopted a))
+  (set-allocation-adopted! a 0)
   (define param (weak-box-value (allocation-adopter a)))
   (define held (and param (hash-ref adopted-at param #f)))
-  (when (and held (newest-adopter? held a))
+  (when held
     (hash-set! adopted-at param (adoption #f (live-entries held)))))
+
+(define (adopted-bytes t)
+  (call-with-ledger (lambda () (allocation-adopted (hash-ref allocations t)))))
 
 (define (forget-gradient-adoptions! params)
   (call-with-ledger

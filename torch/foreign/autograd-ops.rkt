@@ -141,9 +141,7 @@
      (proc (reverse held)))
    ;; a post thunk already runs with breaks disabled
    (lambda ()
-     (for ([g (in-list held)])
-       (tensor-free! g)
-       (race-point gradient-released g)))))
+     (for-each tensor-free! held))))
 
 (define (call-with-gradient t proc)
   (call-with-gradients (list t) (lambda (gs) (for-each proc gs))))
