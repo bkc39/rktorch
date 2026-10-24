@@ -12,5 +12,5 @@ After the fence: outside/gone.rkt.
 A span that wraps across lines: `raco test
 --flag` and then (`wrapped/gone.rkt`).
 ```bash
-racket --file=../check-paths.rkt --out=flag/gone.rkt github.com/someone/repo/gone.rkt
+racket --file=../check-paths.rkt --out=flag/gone.rkt github.com/someone/repo/gone.rkt --repo=github.com/a/gone.rkt
 ```

@@ -40,9 +40,10 @@
 
 (define (source-paths text #:lone [lone? #f])
   (define tokens
-    (for/list ([token (in-list (string-split text))]
-               #:unless (regexp-match? host-rx token))
-      (regexp-replace option-rx token "")))
+    (for*/list ([raw (in-list (string-split text))]
+                [token (in-value (regexp-replace option-rx raw ""))]
+                #:unless (regexp-match? host-rx token))
+      token))
   (define single? (and lone? (= (length tokens) 1)))
   (filter (lambda (token)
             (and (regexp-match? source-rx token)

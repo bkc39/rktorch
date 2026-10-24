@@ -77,9 +77,11 @@ holding one `.rkt` or `.py` name, and any word containing `/` and ending in
 `.rkt` or `.py` inside a backtick span or a fenced code block, after
 dropping a leading `--name=` and skipping URLs. A tree diagram or other
 listing inside a fence names each file by its full path, since a name relative
-to the listing's own context resolves to nothing. A path outside the
-repository goes in `scripts/check-paths-allow.rktd`, which fails in turn when
-an entry no longer names a missing path.
+to the listing's own context resolves to nothing. A backtick span that wraps
+onto the next line hides the paths inside it, and any multi-word span after it
+on the closing line, so keep a span holding a path on one line. A path outside
+the repository goes in `scripts/check-paths-allow.rktd`, which fails in turn
+when an entry no longer names a missing path.
 
 ## Development shells
 
