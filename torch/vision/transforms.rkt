@@ -1,15 +1,16 @@
 #lang racket/base
 
 (require (only-in ffi/vector
-                  f32vector-set! f64vector-set! make-f32vector make-f64vector)
+                  f32vector-set! f64vector-set! make-f32vector make-f64vector
+                  make-s64vector s64vector-set!)
          (only-in racket/contract/base
                   -> ->* ->i and/c flat-named-contract list/c listof or/c
                   real-in)
          (only-in racket/math exact-floor exact-round exact-truncate)
          (only-in "../foreign.rkt"
-                  @ copy! device div draw-seed dtype flip generator? mul narrow
-                  ne reshape select stack sub tensor tensor-shape tensor?
-                  to-dtype transpose where zeros)
+                  @ add arange copy! device div draw-seed dtype flip generator?
+                  mul narrow ne reshape select stack sub take-along-dim tensor
+                  tensor-shape tensor? to-dtype transpose where zeros)
          (only-in "../foreign/contracts.rkt" image-batch/c)
          (only-in "../private/contract.rkt" define/contract-out))
 
@@ -53,17 +54,24 @@
 (define (cropped x dims n padding generator)
   (define h (caddr dims))
   (define w (cadddr dims))
+  (define dev (device x))
   (define padded (zeros n (cadr dims) (+ h (* 2 padding)) (+ w (* 2 padding))
-                        #:device (device x)
+                        #:device dev
                         #:dtype (dtype x)))
   (copy! (narrow (narrow padded 2 padding h) 3 padding w) x)
   (define rng (batch-rng generator))
   (define span (add1 (* 2 padding)))
-  (stack (for/list ([i (in-range n)])
-           (define top (random span rng))
-           (define left (random span rng))
-           (narrow (narrow (select padded 0 i) 1 top h) 2 left w))
-         0))
+  (define tops (make-s64vector n))
+  (define lefts (make-s64vector n))
+  (for ([i (in-range n)])
+    (s64vector-set! tops i (random span rng))
+    (s64vector-set! lefts i (random span rng)))
+  (define (window offsets extent shape)
+    (add (reshape (tensor offsets #:device dev) n 1 1 1)
+         (apply reshape (arange extent #:device dev #:dtype 'int64) shape)))
+  (take-along-dim (take-along-dim padded (window tops h (list 1 1 h 1)) 2)
+                  (window lefts w (list 1 1 1 w))
+                  3))
 
 (define image-dtypes '(uint8 float16 bfloat16 float32 float64))
 (define float-dtypes '(float16 bfloat16 float32 float64))
