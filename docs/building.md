@@ -74,9 +74,12 @@ git-tracked `.rkt`, `.scrbl` and `.md` file and fails when a path it names is
 not a tracked file or directory, from the repository root or from that file's
 directory. It takes as paths the contents of `@filepath{…}`, a backtick span
 holding one `.rkt` or `.py` name, and any word containing `/` and ending in
-`.rkt` or `.py` inside a backtick span or a fenced code block. A path outside
-the repository goes in `scripts/check-paths-allow.rktd`, which fails in turn
-when an entry no longer names a missing path.
+`.rkt` or `.py` inside a backtick span or a fenced code block, after
+dropping a leading `--name=` and skipping URLs. A tree diagram or other
+listing inside a fence names each file by its full path, since a name relative
+to the listing's own context resolves to nothing. A path outside the
+repository goes in `scripts/check-paths-allow.rktd`, which fails in turn when
+an entry no longer names a missing path.
 
 ## Development shells
 

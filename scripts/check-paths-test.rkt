@@ -20,6 +20,8 @@
         (mention doc 4 "inner/gone.txt")
         (mention doc 7 "span/gone.py")
         (mention doc 9 "fenced/gone.rkt")
+        (mention doc 13 "wrapped/gone.rkt")
+        (mention doc 15 "flag/gone.rkt")
         (mention note 2 "test/gone.py")))
 
 (test-case "a path resolves from the root or from its file's directory"
@@ -27,7 +29,29 @@
 
 (test-case "a file on disk that git does not track does not resolve"
   (check-equal? (stale-mentions scripts (remove "check-paths.rkt" tracked) files)
-                (cons (mention doc 1 "check-paths.rkt") stale)))
+                (list (mention doc 1 "check-paths.rkt")
+                      (mention doc 3 "gone.rkt")
+                      (mention doc 4 "inner/gone.txt")
+                      (mention doc 7 "span/gone.py")
+                      (mention doc 9 "fenced/gone.rkt")
+                      (mention doc 13 "wrapped/gone.rkt")
+                      (mention doc 15 "../check-paths.rkt")
+                      (mention doc 15 "flag/gone.rkt")
+                      (mention note 2 "test/gone.py"))))
+
+(test-case "a path resolved through its file's directory was extracted, not missed"
+  (check-equal? (stale-mentions scripts (remove "check-paths-test.rkt" tracked) files)
+                (list (mention doc 3 "gone.rkt")
+                      (mention doc 3 "check-paths-test.rkt")
+                      (mention doc 4 "inner/gone.txt")
+                      (mention doc 7 "span/gone.py")
+                      (mention doc 7 "../check-paths-test.rkt")
+                      (mention doc 9 "fenced/gone.rkt")
+                      (mention doc 9 "../check-paths-test.rkt")
+                      (mention doc 13 "wrapped/gone.rkt")
+                      (mention doc 15 "flag/gone.rkt")
+                      (mention note 1 "../../check-paths-test.rkt")
+                      (mention note 2 "test/gone.py"))))
 
 (test-case "an allowance hides its mention, and one that hides nothing is reported"
   (define-values (left unused)

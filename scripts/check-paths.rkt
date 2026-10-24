@@ -30,13 +30,19 @@
 
 (define filepath-rx #px"@filepath\\{([^{}]+)\\}")
 (define span-rx #px"`([^`]+)`")
+(define word-span-rx #px"`([^`\\s]+)`")
+(define option-rx #px"^--[^=]+=")
+(define host-rx #px"^(?:[A-Za-z0-9-]+\\.)+[A-Za-z]{2,}/")
 (define fence-rx #px"^\\s*```")
 (define source-rx #px"[^/]\\.(?:rkt|py)$")
 (define pattern-rx #px"[*?{}<>\\[\\]$~…]|^/|://|\\.\\.\\.")
 (define scanned-rx #px"\\.(?:rkt|scrbl|md)$")
 
 (define (source-paths text #:lone [lone? #f])
-  (define tokens (string-split text))
+  (define tokens
+    (for/list ([token (in-list (string-split text))]
+               #:unless (regexp-match? host-rx token))
+      (regexp-replace option-rx token "")))
   (define single? (and lone? (= (length tokens) 1)))
   (filter (lambda (token)
             (and (regexp-match? source-rx token)
@@ -50,8 +56,11 @@
       [else
        (append (regexp-match* filepath-rx line #:match-select cadr)
                (append-map (lambda (span) (source-paths span #:lone #t))
-                           (regexp-match* span-rx line #:match-select cadr)))]))
-  (filter-not (lambda (path) (regexp-match? pattern-rx path)) candidates))
+                           (append (regexp-match* span-rx line #:match-select cadr)
+                                   (regexp-match* word-span-rx line
+                                                  #:match-select cadr))))]))
+  (remove-duplicates
+   (filter-not (lambda (path) (regexp-match? pattern-rx path)) candidates)))
 
 (define (fenced-flags lines)
   (for/fold ([inside? #f] [flags '()] #:result (reverse flags))
