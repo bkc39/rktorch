@@ -47,7 +47,8 @@ so the batch-norm layers normalise with their running statistics, and
 autocast extent as PyTorch recommends, then the optimizer and, when there
 is one, the schedule. Autocast is asked for only on CUDA, judged from the
 batch's own device: the CPU arm of the tests and the parity twin train in
-float32.
+float32. The loss comes back unread, on the device: an @racket[item] every
+step would make the host wait for the GPU at every batch.
 
 @chunk[<r09-step>
 (define (train-step net opt xs ys #:schedule [schedule #f])
@@ -60,7 +61,7 @@ float32.
   (backward! loss)
   (step! opt)
   (when schedule (step! schedule))
-  (item loss))]
+  loss)]
 
 @bold{The deterministic core.} @racket[run-example] is the seeded, offline
 entry the test harness and the parity twin drive: a narrow ResNet, base
