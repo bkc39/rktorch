@@ -73,6 +73,24 @@ tr_tensor* tr_gen_index_select(const tr_tensor* self, int64_t dim,
   });
 }
 
+tr_tensor* tr_gen_index_tensor(const tr_tensor* self,
+                               const tr_tensor* const* indices,
+                               int64_t indices_len) {
+  if (!self || !indices || indices_len < 0) {
+    return torchrkt::null_arg("tr_gen_index_tensor");
+  }
+  return torchrkt::alloc_result("tr_gen_index_tensor", [&] {
+    c10::List<std::optional<at::Tensor>> indices_list;
+    indices_list.reserve(static_cast<size_t>(indices_len));
+    for (int64_t i = 0; i < indices_len; ++i) {
+      indices_list.push_back(indices[i]
+                                 ? std::optional<at::Tensor>(indices[i]->value)
+                                 : std::optional<at::Tensor>());
+    }
+    return at::index(self->value, indices_list);
+  });
+}
+
 tr_tensor* tr_gen_masked_select(const tr_tensor* self, const tr_tensor* mask) {
   if (!self || !mask) {
     return torchrkt::null_arg("tr_gen_masked_select");

@@ -43,6 +43,9 @@
     [(tensor-list)
      (values (list #`(#,arg : (_list i _Tensor)) #`(#,len-arg : _int64))
              (list arg #`(length #,arg)))]
+    [(optional-tensor-list)
+     (values (list #`(#,arg : (_list i _Tensor/null)) #`(#,len-arg : _int64))
+             (list arg #`(length #,arg)))]
     [(optional-int64)
      (values (list #`(#,arg : _int64) #`(#,has-arg : _stdbool))
              (list #`(or #,arg 0) #`(and #,arg #t)))]

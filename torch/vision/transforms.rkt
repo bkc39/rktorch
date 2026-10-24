@@ -1,17 +1,24 @@
 #lang racket/base
 
 (require (only-in ffi/vector
-                  f32vector-set! f64vector-set! make-f32vector make-f64vector)
+                  f32vector-set! f64vector-set! make-f32vector make-f64vector
+                  make-s64vector s64vector-set!)
          (only-in racket/contract/base
                   -> ->* ->i and/c flat-named-contract list/c listof or/c
                   real-in)
+         (only-in racket/match match-define)
          (only-in racket/math exact-floor exact-round exact-truncate)
+         (only-in threading ~>)
          (only-in "../foreign.rkt"
-                  @ copy! device div draw-seed dtype flip generator? mul narrow
-                  ne reshape select stack sub tensor tensor-shape tensor?
-                  to-dtype transpose where zeros)
+                  @ add arange clamp device device-type div draw-seed dtype
+                  flip generator? masked-fill! mul narrow ne reshape select stack
+                  sub tensor tensor-shape tensor? to-dtype transpose where)
          (only-in "../foreign/contracts.rkt" image-batch/c)
+         (only-in "../generated.rkt" index-tensor)
          (only-in "../private/contract.rkt" define/contract-out))
+
+(module+ private
+  (provide batch-rng))
 
 ;; One draw from the torch generator seeds a Racket generator for the batch,
 ;; so a seeded loader replays its augmentation while the images stay on the
@@ -38,32 +45,64 @@
                            n 1 1 1))
      (where mask (flip x 3) x)]))
 
+(define croppable-batch/c
+  (flat-named-contract
+   'image-batch-with-pixels
+   (and/c image-batch/c
+          (lambda (x)
+            (match-define (list _ _ h w) (tensor-shape x))
+            (and (positive? h) (positive? w))))))
+
 (define/contract-out (random-crop x ;; noqa
                                   #:padding [padding 4]
                                   #:generator [generator #f])
-  (->* [image-batch/c]
+  (->* [croppable-batch/c]
        [#:padding exact-nonnegative-integer? #:generator (or/c generator? #f)]
        tensor?)
-  (define dims (tensor-shape x))
-  (define n (car dims))
   (cond
-    [(zero? n) x]
-    [else (cropped x dims n padding generator)]))
+    [(~> x tensor-shape car zero?) x]
+    [else (cropped x padding generator)]))
 
-(define (cropped x dims n padding generator)
-  (define h (caddr dims))
-  (define w (cadddr dims))
-  (define padded (zeros n (cadr dims) (+ h (* 2 padding)) (+ w (* 2 padding))
-                        #:device (device x)
-                        #:dtype (dtype x)))
-  (copy! (narrow (narrow padded 2 padding h) 3 padding w) x)
+(define (cropped x padding generator)
+  (match-define (list n c h w) (tensor-shape x))
+  (define dev (device x))
   (define rng (batch-rng generator))
   (define span (add1 (* 2 padding)))
-  (stack (for/list ([i (in-range n)])
-           (define top (random span rng))
-           (define left (random span rng))
-           (narrow (narrow (select padded 0 i) 1 top h) 2 left w))
-         0))
+  (define offsets (make-s64vector (* 2 n)))
+  (for ([k (in-range (* 2 n))])
+    (s64vector-set! offsets k (- (random span rng) padding)))
+  (define corners (reshape (tensor offsets #:device dev) n 2))
+  (define (positions extent)
+    (arange extent #:device dev #:dtype 'int64))
+  (define (starts axis)
+    (~> corners (select 1 axis) (reshape n 1)))
+  (define rows (add (starts 0) (reshape (positions h) 1 h)))
+  (define cols (add (starts 1) (reshape (positions w) 1 w)))
+  (define (inside raw extent)
+    (~> raw (clamp #:min 0 #:max (sub1 extent)) (to-dtype 'int64)))
+  (define rows* (inside rows h))
+  (define cols* (inside cols w))
+  (define batch (positions n))
+  (define channel (positions c))
+  ;; CUDA and MPS make every index contiguous at the broadcast shape when
+  ;; their strides differ, so off the CPU each gather indexes two small dims
+  (define out
+    (cond
+      [(eq? (device-type dev) 'cpu)
+       (index-tensor x (list (reshape batch n 1 1 1)
+                             (reshape channel 1 c 1 1)
+                             (reshape rows* n 1 h 1)
+                             (reshape cols* n 1 1 w)))]
+      [else
+       (~> x
+           (index-tensor (list (reshape batch n 1) #f #f cols*))
+           (index-tensor (list (reshape batch n 1 1)
+                               #f
+                               (reshape channel 1 c 1)
+                               (reshape rows* n 1 h))))]))
+  (masked-fill! out (reshape (ne rows rows*) n 1 h 1) 0)
+  (masked-fill! out (reshape (ne cols cols*) n 1 1 w) 0)
+  out)
 
 (define image-dtypes '(uint8 float16 bfloat16 float32 float64))
 (define float-dtypes '(float16 bfloat16 float32 float64))
