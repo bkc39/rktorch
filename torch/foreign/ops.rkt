@@ -400,8 +400,7 @@
 ;; touches neither the native side nor the ledger; otherwise the status is
 ;; judged first, while the native error is fresh, and the handle is
 ;; re-accounted whichever way that goes: the ledger entry describes the
-;; handle as it now is. A break waits until the move is counted, so no
-;; optimizer misses it.
+;; handle as it now is
 (define (to! t target [dtype #f])
   (define-values (type index dt) (parse-target 'to! target dtype))
   (unless (already-there? t type index dt)
