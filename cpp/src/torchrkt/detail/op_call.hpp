@@ -180,6 +180,24 @@ inline int null_arg_status(const char* who) {
   return 1;
 }
 
+inline int negative_length_status(const char* who) {
+  set_error(std::string(who) + ": negative length");
+  return 1;
+}
+
+// Checked before any element is used, so a refused list changes nothing.
+inline bool any_null(const tr_tensor* const* tensors, int64_t n) noexcept {
+  if (n > 0 && !tensors) {
+    return true;
+  }
+  for (int64_t i = 0; i < n; ++i) {
+    if (!tensors[i]) {
+      return true;
+    }
+  }
+  return false;
+}
+
 // A refused call still owes the caller NULL in every out slot it can reach.
 template <std::size_t N>
 int null_arg_outputs(const char* who, tr_tensor** const (&outs)[N]) {

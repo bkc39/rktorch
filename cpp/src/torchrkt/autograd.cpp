@@ -103,13 +103,11 @@ int tr_tensor_mul_(tr_tensor* t, double value) {
 }
 
 int tr_tensors_reset_grad(tr_tensor* const* tensors, int64_t n) {
-  if (n < 0 || (n > 0 && !tensors)) {
-    return torchrkt::null_arg_status("tr_tensors_reset_grad");
+  if (n < 0) {
+    return torchrkt::negative_length_status("tr_tensors_reset_grad");
   }
-  for (int64_t i = 0; i < n; ++i) {
-    if (!tensors[i]) {
-      return torchrkt::null_arg_status("tr_tensors_reset_grad");
-    }
+  if (torchrkt::any_null(tensors, n)) {
+    return torchrkt::null_arg_status("tr_tensors_reset_grad");
   }
   return torchrkt::status_call("tr_tensors_reset_grad", [&] {
     for (int64_t i = 0; i < n; ++i) {

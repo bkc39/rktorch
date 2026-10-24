@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <string>
 #include <vector>
 
 #include "torchrkt/c_api.h"
@@ -155,10 +156,23 @@ TEST(TorchrktAutograd, ResetGradDropsEveryGradientInOneCall) {
 
 TEST(TorchrktAutograd, ResetGradRejectsNullArguments) {
   Handle x = make({1.0F}, {1});
+  ASSERT_EQ(tr_tensor_requires_grad_(x.t, 1), 0) << tr_last_error();
+  const Handle y(tr_sum(x.t));
+  ASSERT_EQ(tr_tensor_backward(y.t), 0) << tr_last_error();
   std::vector<tr_tensor*> with_null{x.t, nullptr};
+  const std::string null_argument = "tr_tensors_reset_grad: null argument";
+
   EXPECT_EQ(tr_tensors_reset_grad(nullptr, 1), 1);
+  EXPECT_EQ(tr_last_error(), null_argument);
   EXPECT_EQ(tr_tensors_reset_grad(with_null.data(), 2), 1);
+  EXPECT_EQ(tr_last_error(), null_argument);
+  int has = -1;
+  ASSERT_EQ(tr_tensor_has_grad(x.t, &has), 0) << tr_last_error();
+  EXPECT_EQ(has, 1) << "a refused list reset an element before its NULL";
+
   EXPECT_EQ(tr_tensors_reset_grad(with_null.data(), -1), 1);
+  EXPECT_EQ(std::string(tr_last_error()),
+            "tr_tensors_reset_grad: negative length");
 }
 
 }  // namespace
