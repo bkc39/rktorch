@@ -83,6 +83,7 @@
          dtype-symbols
          float-dtype-max
          float-dtype/c
+         move-generation
          placement
          with-default-device)
 
@@ -384,6 +385,16 @@
 
 (define tensor-to!/retrying ((oom-retry/status) tr-tensor-to!/raw))
 
+(define moves (box 0))
+
+(define (move-generation)
+  (unbox moves))
+
+(define (note-move!)
+  (define n (unbox moves))
+  (unless (box-cas! moves n (add1 n))
+    (note-move!)))
+
 ;; a no-op when nothing would change, as `to`, so a repeated layer move
 ;; touches neither the native side nor the ledger; otherwise the status is
 ;; judged first, while the native error is fresh, and the handle is
@@ -392,6 +403,7 @@
 (define (to! t target [dtype #f])
   (define-values (type index dt) (parse-target 'to! target dtype))
   (unless (already-there? t type index dt)
+    (note-move!)
     (define rc (tensor-to!/retrying t type index dt))
     (dynamic-wind void
                   (lambda () (check-ok rc 'to!))
