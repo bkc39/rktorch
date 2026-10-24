@@ -3,7 +3,8 @@
 (require (only-in ffi/unsafe/atomic call-as-atomic in-atomic-mode?)
          (only-in "../device-type.rkt" device-type)
          (only-in "collector.rkt"
-                  call-as-the-collector collect-and-wait! drain-finalizers!)
+                  call-as-the-collector collect-and-wait! drain-finalizers!
+                  yield-to-finalizers!)
          (only-in "device-queries.rkt"
                   allocator-reading queried-capacity release-query)
          (only-in "pressure-settings.rkt"
@@ -299,7 +300,8 @@
      (call-as-the-collector (lambda () (pressure-collect! dev mark base)))]
     [(and gate-open? sample-due?)
      (call-with-ledger (lambda () (end-trial! (account-of dev) base)))]
-    [else (void)]))
+    [else (void)])
+  (yield-to-finalizers!))
 
 ;; whether the backstop looks at all, and whether that look samples
 (define (gate-state dev mark base)

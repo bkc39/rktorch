@@ -367,6 +367,10 @@ nothing: a mark that @racket['pressure-collections] in
 @racket[finalizer-diagnostics] shows firing step after step is better
 raised.
 
+Finalizers run on a Racket thread of their own, so a thread's first tensor
+operation that allocates or moves after each collection yields once,
+outside an atomic section, and other threads can run there as at any yield.
+
 The ledger also charges Racket's collector for what it cannot see. At every
 trough, before collecting, it reads each device's allocator and charges the
 bytes allocated there beyond the ledger's own total as one more phantom

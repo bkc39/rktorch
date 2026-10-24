@@ -1,7 +1,7 @@
 #lang racket/base
 
 (require (only-in ffi/unsafe register-finalizer)
-         (only-in ffi/unsafe/atomic call-as-atomic)
+         (only-in ffi/unsafe/atomic call-as-atomic in-atomic-mode?)
          (only-in "race-points.rkt" race-point))
 
 (provide call-as-the-collector
@@ -9,7 +9,8 @@
          drain-deadline
          drain-finalizers!
          finalizer-runs
-         note-finalizer-run!)
+         note-finalizer-run!
+         yield-to-finalizers!)
 
 ;; Bumped by every release, inside the ledger's atomic section.
 (define runs 0)
@@ -51,6 +52,18 @@
   (register-finalizer (box 0) void))
 
 (start-finalizer-thread!)
+
+;; A thread's latch dies in the first collection after it last yielded.
+(define collection-latch (make-thread-cell (make-weak-box (box 0))))
+
+(define (yield-to-finalizers!)
+  (cond
+    [(weak-box-value (thread-cell-ref collection-latch)) (void)]
+    ;; sleeping inside an atomic section is an error
+    [(in-atomic-mode?) (void)]
+    [else
+     (thread-cell-set! collection-latch (make-weak-box (box 0)))
+     (sleep 0)]))
 
 ;; The canary shows the finalizer thread has started on this collection's
 ;; batch, not that it has finished: finalization order is unspecified and
