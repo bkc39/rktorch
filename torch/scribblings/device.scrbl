@@ -309,7 +309,10 @@ however the parameter got there.
 Every tensor's native storage is released by a finalizer when Racket's
 collector finds its handle unreachable. The ledger charges each allocation
 to the collector as phantom bytes, so ordinary programs never call the
-collector by hand. A training loop is the exception. Handles that survive
+collector by hand. Finalizers run on a Racket thread of their own, so a
+thread's first allocating tensor operation after each collection yields
+once, outside an atomic section, and other threads can run there as at any
+yield. A training loop is the exception. Handles that survive
 the collections of a step wait for a full one, and when Racket happens to
 run a full collection in the middle of a forward pass, that pass's
 intermediates are promoted to the oldest generation. Racket does not look
