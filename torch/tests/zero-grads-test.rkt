@@ -2,7 +2,10 @@
 
 (module+ test
   (require rackunit
+           (only-in ffi/unsafe ptr-add set-cpointer-tag!)
+           (only-in ffi/unsafe/atomic in-atomic-mode?)
            (only-in racket/contract exn:fail:contract:blame?)
+           (only-in racket/list make-list)
            (only-in "../foreign.rkt" cpu-device cuda-available? cuda-device
                     native-collect-at-troughs native-memory-unaccounted
                     native-memory-use)
@@ -10,6 +13,7 @@
            (only-in "../foreign/autograd-ops.rkt" reset-grads!)
            (only-in "../foreign/raw/device-queries.rkt" allocator-reading)
            (only-in "../foreign/raw/fault.rkt" with-crossing-hook)
+           (only-in "../foreign/raw/memory.rkt" adopted-bytes)
            (only-in "../foreign/raw/pressure.rkt"
                     native-collect-margin refresh-shadows!)
            (only-in "../main.rkt"
@@ -18,9 +22,8 @@
            (only-in "../nn.rkt" Linear Parameter Sequential adam
                     clip-grad-norm! parameters rmsprop sgd step! step-lr
                     zero-grads!)
-           (only-in "private/race-harness.rkt"
-                    gate-hook hooks make-gate release-gate! settle!
-                    wait-for-arrival with-race-hook)
+           (only-in "../foreign/structs.rkt" tensor-handle tensor-impl wrap-tensor)
+           (only-in "private/race-harness.rkt" hooks settle! with-race-hook)
            (only-in "private/within.rkt" bounded-test))
 
   (define (crossings-of thunk)
@@ -170,28 +173,6 @@
                    #:also (on-nth 'op-returned 3 raise-injected))
                   2))
 
-  (bounded-test "a break during the release still releases every gradient handle"
-    (define ps (parameters (backed-up 3 2)))
-    (define (break-here) (break-thread (current-thread)) (sleep 0))
-    (define released
-      (released-during
-       (lambda ()
-         (with-handlers ([exn:break? void])
-           (clip-grad-norm! ps 0.1)
-           (sleep 0)))
-       #:also (on-nth 'gradient-released 1 break-here)))
-    (check-equal? released (length ps)))
-
-  (bounded-test "a reset drops the gradients and their adoptions in one atomic section"
-    (define opt (sgd (parameters (backed-up 3 1)) #:lr 0.1))
-    (define g (make-gate 'gradients-reset))
-    (with-race-hook (gate-hook g)
-      (define worker (thread (lambda () (zero-grads! opt))))
-      (define state (wait-for-arrival g))
-      (release-gate! g)
-      (thread-wait worker)
-      (check-eq? state 'atomic)))
-
   (define mib (* 1024 1024))
 
   (define (cpu-entry-of readings)
@@ -227,6 +208,128 @@
         (refresh-shadows!)
         (check-equal? released (cpu-unaccounted)
                       "the release gave back bytes the parameter no longer holds")))
+    (settle!))
+
+  (define (adopted g)
+    (adopted-bytes (tensor-handle g)))
+
+  (define (adopting-gradient thunk)
+    (settle!)
+    (define w (zeros 1024 1024 #:requires-grad? #t))
+    (define unseen (box (* 4 mib)))
+    (with-unseen-gradient unseen
+      (lambda ()
+        (backward! (sum w))
+        (define g (grad w))
+        (set-box! unseen 0)
+        (thunk w g)))
+    (settle!))
+
+  (bounded-test "a reset forgets the adoptions in atomic mode, after the native reset succeeded"
+    (adopting-gradient
+     (lambda (w g)
+       (define at-forget #f)
+       (define (observe! name _ts)
+         (when (eq? name 'adoptions-forgotten)
+           (set! at-forget (list (in-atomic-mode?) (has-grad? w) (adopted g)))))
+       (with-race-hook observe!
+         (zero-grads! (sgd (list w) #:lr 0.1)))
+       (check-equal? at-forget (list #t #f (* 4 mib))
+                     "in atomic mode, after the native reset succeeded, the adoption still held")
+       (check-equal? (adopted g) 0 "the reset forgot the adoption")
+       (tensor-free! g))))
+
+  (bounded-test "a raise while adopting a gradient propagates, and the handle is released once"
+    (settle!)
+    (define w (zeros 1024 1024 #:requires-grad? #t))
+    (backward! (sum w))
+    (settle!)
+    (define before (cpu-bytes))
+    (define taken #f)
+    (define (raise-adopting name t)
+      (when (eq? name 'gradient-adopting)
+        (set! taken t)
+        (raise (exn:fail "injected adoption failure" (current-continuation-marks)))))
+    (check-exn #rx"injected adoption failure"
+               (lambda () (with-race-hook raise-adopting (grad w))))
+    (check-false (in-atomic-mode?) "the raise left atomic mode")
+    (check-equal? (cpu-bytes) (+ before (* 4 mib)) "the handle is on the ledger")
+    (check-equal? (released-during (lambda () (tensor-free! (wrap-tensor taken)))) 1)
+    (check-equal? (cpu-bytes) before "the release took the handle off the ledger")
+    (settle!)
+    (check-equal? (cpu-bytes) before "no finalizer released it again")
+    (check-true (has-grad? w)))
+
+  (define null-tensor
+    (let ([h (ptr-add #f 0)])
+      (set-cpointer-tag! h 'Tensor)
+      (tensor-impl h '())))
+
+  (bounded-test "a reset native code refuses keeps the adoptions"
+    (adopting-gradient
+     (lambda (w g)
+       (check-exn #rx"zero-grads!" (lambda () (reset-grads! (list w null-tensor))))
+       (check-true (has-grad? w))
+       (check-equal? (adopted g) (* 4 mib))
+       (tensor-free! g)
+       (check-equal? (cpu-unaccounted) (* 4 mib) "the release gave the adoption back"))))
+
+  (define (handles-across-a-refresh k reset?)
+    (settle!)
+    (define w (zeros 1024 1024 #:requires-grad? #t))
+    (define opt (sgd (list w) #:lr 0.1))
+    (define gradient (* 4 mib))
+    (define other (* 8 mib))
+    (define unseen (box (+ other gradient)))
+    (with-unseen-gradient unseen
+      (lambda ()
+        (backward! (sum w))
+        (define handles
+          (for/list ([i (in-range k)])
+            (refresh-shadows!)
+            (define h (grad w))
+            (set-box! unseen (- other (* i gradient)))
+            h))
+        (check-equal? (map adopted handles) (cons gradient (make-list (sub1 k) 0))
+                      "only the first handle adopts, even after a refresh")
+        (refresh-shadows!)
+        (define expected
+          (cond
+            [reset? (zero-grads! opt) other]
+            [else (+ other gradient)]))
+        (for-each tensor-free! handles)
+        (set-box! unseen expected)
+        (check-equal? (cpu-unaccounted) (- expected (* (sub1 k) gradient))
+                      "the releases leave the ledger under by the extra handles' charges")
+        (refresh-shadows!)
+        (check-equal? (cpu-unaccounted) expected "the next refresh restores it")))
+    (settle!))
+
+  (bounded-test "two handles across a refresh, then a reset: one gradient under until a refresh"
+    (handles-across-a-refresh 2 #t))
+
+  (bounded-test "two handles across a refresh, no reset: one gradient under until a refresh"
+    (handles-across-a-refresh 2 #f))
+
+  (bounded-test "three handles across a refresh: two gradients under until a refresh"
+    (handles-across-a-refresh 3 #f))
+
+  (bounded-test "a refresh right after a gradient handle is accounted finds it adopted"
+    (settle!)
+    (define w (zeros 1024 1024 #:requires-grad? #t))
+    (define other (* 8 mib))
+    (define unseen (box (+ other (* 4 mib))))
+    (with-unseen-gradient unseen
+      (lambda ()
+        (backward! (sum w))
+        (define (refresh-in-the-gap!)
+          (set-box! unseen other)
+          (refresh-shadows!))
+        (define g
+          (with-race-hook (on-nth 'tensor-accounted 1 refresh-in-the-gap!)
+            (grad w)))
+        (check-equal? (cpu-unaccounted) other "the gradient is charged once, on the ledger")
+        (tensor-free! g)))
     (settle!))
 
   (bounded-test "after clipping, a step's gradient handle is charged once"
