@@ -4,15 +4,17 @@
          (only-in ffi/unsafe/custodian
                   make-custodian-at-root register-custodian-shutdown
                   unregister-custodian-shutdown)
-         (only-in racket/contract/base -> or/c)
+         (only-in racket/contract/base -> any any/c or/c)
          (only-in racket/match match match-define)
+         (only-in racket/vector vector-append)
          (only-in "../foreign.rkt"
                   current-generator device device-type make-generator tensor?)
          (only-in "../foreign/raw/race-points.rkt" race-point)
          (only-in "../private/contract.rkt" define/contract-out)
          (only-in "dataset.rkt" collate/c dataset-batch dataset? indices/c)
          (only-in "results-queue.rkt"
-                  batch-index/c results-queue results-queue-put! results-queue-take!))
+                  batch-index/c results-queue results-queue-close! results-queue-put!
+                  results-queue-take!))
 
 (provide (struct-out built)
          (struct-out raised))
@@ -28,7 +30,7 @@
 (define batch-result/c (or/c built? raised?))
 
 ;; Workers never reach the pool, so its finalizer can stop them.
-(struct worker-pool (guard [results #:mutable]))
+(struct worker-pool (guard results))
 
 ;; The guard's shutdown callback runs under the custodian lock, so it only posts.
 (struct pool-guard ([threads #:mutable] stop kill))
@@ -80,9 +82,7 @@
       [(request index indices)
        (define result (build ds collate index indices))
        (results-queue-put! results index result)
-       (match result
-         [(built _) (loop)]
-         [(raised _) (void)])]
+       (when (built? result) (loop))]
       [_ (void)])))
 
 (define (reap guard registration)
@@ -118,22 +118,25 @@
                  (serve ds collate results stop)))))
           #:pool 'own))
 
-(define (start-threads guard registration ds collate n base-seed results breaks)
+(define/contract-out (call-with-abort abort! thunk) ;; noqa
+  (-> (-> any/c any) (-> any) any)
+  (with-handlers ([(lambda (_v) #t)
+                   (lambda (v)
+                     (abort! v)
+                     (raise v))])
+    (thunk)))
+
+(define (start-threads! guard ds collate n base-seed results breaks)
   (define caller (current-custodian))
   (define stop (pool-guard-stop guard))
-  (define made '())
   (parameterize ([current-custodian worker-custodian])
-    (with-handlers ([(lambda (_v) #t)
-                     (lambda (v)
-                       (set-pool-guard-threads! guard (list->vector made))
-                       (semaphore-post stop)
-                       (reap guard registration)
-                       (raise v))])
-      (for ([k (in-range n)])
-        (race-point worker-starting made)
-        (set! made (cons (start-thread ds collate (+ base-seed k) results stop breaks caller)
-                         made)))))
-  (list->vector (reverse made)))
+    (for/fold ([made (vector)]) ([k (in-range n)])
+      (race-point worker-starting (vector->list made))
+      (define threads
+        (vector-append made (vector (start-thread ds collate (+ base-seed k) results stop
+                                                  breaks caller))))
+      (set-pool-guard-threads! guard threads)
+      threads)))
 
 (define/contract-out (start-workers ds collate n base-seed) ;; noqa
   (-> dataset? collate/c exact-positive-integer? exact-nonnegative-integer?
@@ -147,10 +150,14 @@
     (define pool (worker-pool guard results))
     (register-finalizer pool (lambda (_pool) (semaphore-post stop)))
     (define registration (guard-with! (current-custodian) guard))
-    (define threads (start-threads guard registration ds collate n base-seed results breaks))
-    (set-pool-guard-threads! guard threads)
-    (race-point workers-started threads)
-    (start-reaper! guard registration)
+    (call-with-abort (lambda (_v)
+                       (semaphore-post stop)
+                       (reap guard registration))
+                     (lambda ()
+                       (define threads
+                         (start-threads! guard ds collate n base-seed results breaks))
+                       (race-point workers-started threads)
+                       (start-reaper! guard registration)))
     pool))
 
 (define (worker-pool-threads pool)
@@ -182,4 +189,4 @@
 
 (define/contract-out (abort-workers! pool) (-> worker-pool? void?) ;; noqa
   (stop-workers! pool)
-  (set-worker-pool-results! pool #f))
+  (results-queue-close! (worker-pool-results pool)))

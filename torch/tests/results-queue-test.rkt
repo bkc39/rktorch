@@ -56,6 +56,23 @@
     (check-equal? (take q 0) 'zero)
     (check-false (take q 0 always-evt)))
 
+  (test-case "a closed queue lets go of its results and of any put after the close"
+    (define q (results-queue))
+    (define executor (make-will-executor))
+    (define (registered v)
+      (will-register executor v (lambda (_v) 'collected))
+      v)
+    (results-queue-put! q 0 (registered (list 'zero)))
+    (results-queue-close! q)
+    (results-queue-put! q 1 (registered (list 'one)))
+    (results-queue-close! q)
+    (check-equal? (for/fold ([run 0]) ([_ (in-range 20)] #:break (= run 2))
+                    (collect-garbage 'major)
+                    (+ run (for/sum ([_ (in-producer (lambda () (will-try-execute executor)) #f)])
+                             1)))
+                  2)
+    (check-exn #rx"open[?]" (lambda () (take q 1 always-evt))))
+
   (test-case "a breakable take can be broken while it waits"
     (define q (results-queue))
     (define outcome #f)

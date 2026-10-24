@@ -16,8 +16,8 @@
                   dataset-ref dataset? default-collate default-collate?
                   define-dataset gen:dataset indices->list indices/c)
          (only-in "workers.rkt"
-                  abort-workers! built raised receive-batch request-batch!
-                  start-workers stop-workers!))
+                  abort-workers! built call-with-abort raised raised? receive-batch
+                  request-batch! start-workers stop-workers!))
 
 (provide (all-from-out "dataset.rkt"))
 
@@ -235,11 +235,9 @@
   (define (abort! v)
     (set! failure (raised v))
     (set! taken #f)
-    (abort-workers! pool)
-    (raise v))
+    (abort-workers! pool))
   (define (set-up thunk)
-    (with-handlers ([(lambda (_v) #t) abort!])
-      (call-with-break-parameterization breaks thunk)))
+    (call-with-abort abort! (lambda () (call-with-break-parameterization breaks thunk))))
   (define-values (indices finish! count exhausting)
     (set-up (lambda ()
               (define-values (indices finish!) (sampler-draws loader))
@@ -256,27 +254,28 @@
       [(= r exhausting) (finish!)]
       [else (void)]))
   (define (received! k result)
-    (match result
-      [(raised _) (void)]
-      [(built _)
+    (cond
+      [(raised? result) (void)]
+      [(= k (sub1 count))
        (refill! (+ k ahead))
-       (when (= k (sub1 count))
-         (stop-workers! pool))]))
+       (stop-workers! pool)]
+      [else (refill! (+ k ahead))]))
   (define (receive-once! k breakable?)
     (match taken
       [(cons (== k) result) result]
       [_ (set! taken #f)
          (define result (receive-batch pool k breakable?))
          (set! taken (cons k result))
-         (with-handlers ([(lambda (_v) #t) abort!])
-           (received! k result))
+         (call-with-abort abort! (lambda () (received! k result)))
          result]))
   (define (batch k)
     (define breakable? (break-enabled))
     (parameterize-break #f
       (match (or failure (receive-once! k breakable?))
         [(built values-list) (apply values values-list)]
-        [(raised v) (abort! v)])))
+        [(raised v)
+         (abort! v)
+         (raise v)])))
   (define (exhausted!)
     (set! taken #f)
     (finish!)
