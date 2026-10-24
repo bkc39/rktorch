@@ -87,16 +87,22 @@ tr_tensor* tr_unsqueeze(const tr_tensor* t, int64_t dim) {
 }
 
 tr_tensor* tr_cat(const tr_tensor* const* tensors, int64_t n, int64_t dim) {
-  if (n <= 0 || torchrkt::any_null(tensors, n)) {
+  if (n == 0) {
     return torchrkt::null_arg("tr_cat");
+  }
+  if (torchrkt::tensors_arg_status("tr_cat", tensors, n) != 0) {
+    return nullptr;
   }
   return torchrkt::alloc_result(
       "tr_cat", [&] { return torch::cat(collect(tensors, n), dim); });
 }
 
 tr_tensor* tr_stack(const tr_tensor* const* tensors, int64_t n, int64_t dim) {
-  if (n <= 0 || torchrkt::any_null(tensors, n)) {
+  if (n == 0) {
     return torchrkt::null_arg("tr_stack");
+  }
+  if (torchrkt::tensors_arg_status("tr_stack", tensors, n) != 0) {
+    return nullptr;
   }
   return torchrkt::alloc_result(
       "tr_stack", [&] { return torch::stack(collect(tensors, n), dim); });
