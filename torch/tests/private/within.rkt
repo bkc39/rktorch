@@ -22,5 +22,5 @@
      (kill-thread t)
      (fail (format "no result within ~a s" seconds))]))
 
-(define-syntax-parse-rule (bounded-test name:str body:expr ...+)
+(define-syntax-parse-rule (bounded-test name:expr body:expr ...+)
   (test-case name (within 60 (lambda () body ...))))

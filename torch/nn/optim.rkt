@@ -5,9 +5,10 @@
                   unsupplied-arg?)
          (only-in racket/generic define-generics)
          (only-in "../foreign.rkt"
-                  add addcdiv! addcmul! copy! device dtype full mul
+                  add addcdiv! addcmul! copy! cpu-device device dtype full mul
                   mul! sqrt sub! tensor? to with-no-grad zero-grad! zeros-like)
          (only-in "../foreign/autograd-ops.rkt" reset-grads! with-gradient)
+         (only-in "../foreign/ops.rkt" move-generation)
          (only-in "../private/contract.rkt" define/contract-out)
          (only-in "../private/step-log.rkt" log-optimizer-step!))
 
@@ -25,41 +26,45 @@
 (module+ checked
   (provide (contract-out [optimizer? (-> any/c boolean?)])))
 
+(module+ private
+  (provide optimizer-state))
+
 (define-generics optimizer
   (optimizer-step! optimizer)
   (optimizer-parameters optimizer)
   (optimizer-lr optimizer)
   (optimizer-set-lr! optimizer lr))
 
-;; a moment or momentum buffer lives where its parameter does, and follows
-;; it after a move
-(define (moment-on table p)
-  (define m (hash-ref! table p (lambda () (zeros-like p))))
-  (define dev (device p))
-  (define dt (dtype p))
-  (cond
-    [(and (equal? (device m) dev) (eq? (dtype m) dt)) m]
-    [else
-     (define moved (to m dev dt))
-     (hash-set! table p moved)
-     moved]))
+(struct tracked (tables [generation #:mutable]))
 
-(define (scalar-on table value p)
+(define (optimizer-state opt)
+  (for*/list ([table (in-list (tracked-tables opt))]
+              [s (in-hash-values table)])
+    s))
+
+(define (placed-as s p)
   (define dev (device p))
   (define dt (dtype p))
-  (define (fresh) (full value #:device dev #:dtype dt))
-  (define s (hash-ref! table p fresh))
+  (if (and (equal? (device s) dev) (eq? (dtype s) dt)) s (to s dev dt)))
+
+(define (follow-moves! opt)
+  (define now (move-generation))
   (cond
-    [(and (equal? (device s) dev) (eq? (dtype s) dt)) s]
+    [(eqv? (tracked-generation opt) now) (void)]
     [else
-     (define moved (fresh))
-     (hash-set! table p moved)
-     moved]))
+     (for* ([table (in-list (tracked-tables opt))]
+            [p (in-list (hash-keys table))])
+       (hash-update! table p (lambda (s) (placed-as s p))))
+     (set-tracked-generation! opt now)]))
+
+(define (unit-scalar)
+  (full 1.0 #:device (cpu-device) #:dtype 'float32))
 
 (define (decayed g p weight-decay)
   (if (zero? weight-decay) g (add g (mul p weight-decay))))
 
-(struct sgd (params [lr #:mutable] momentum nesterov? weight-decay bufs)
+(struct sgd tracked (params [lr #:mutable] momentum nesterov? weight-decay
+                            bufs)
   #:constructor-name make-sgd
   #:name sgd-optimizer ;; noqa
   #:methods gen:optimizer
@@ -83,16 +88,17 @@
            (not nesterov?)
            (and (not (unsupplied-arg? momentum)) (> momentum 0)))
        [result sgd?])
-  (make-sgd params lr momentum nesterov? weight-decay (make-hasheq)))
+  (define bufs (make-hasheq))
+  (make-sgd (list bufs) #f params lr momentum nesterov? weight-decay bufs))
 
 (define (momentum-buffer! opt p d)
   (define table (sgd-bufs opt))
   (cond
     [(hash-ref table p #f)
-     (define buf (moment-on table p))
-     (mul! buf (sgd-momentum opt))
-     (sub! buf d -1.0)
-     buf]
+     => (lambda (buf)
+          (mul! buf (sgd-momentum opt))
+          (sub! buf d -1.0)
+          buf)]
     [else
      (define fresh (zeros-like p))
      (copy! fresh d)
@@ -102,6 +108,7 @@
 (define (sgd-do-step! opt)
   (with-no-grad
     (define mu (sgd-momentum opt))
+    (follow-moves! opt)
     (for ([p (in-list (sgd-params opt))])
       (with-gradient (g p)
         (define d (decayed g p (sgd-weight-decay opt)))
@@ -113,8 +120,8 @@
              (if (sgd-nesterov? opt) (add d (mul buf mu)) buf)]))
         (sub! p step (sgd-lr opt))))))
 
-(struct adam (params [lr #:mutable] beta1 beta2 eps weight-decay steps
-                     m v scalars)
+(struct adam tracked (params [lr #:mutable] beta1 beta2 eps weight-decay
+                             steps m v one)
   #:constructor-name make-adam
   #:name adam-optimizer ;; noqa
   #:methods gen:optimizer
@@ -133,8 +140,10 @@
        [#:lr (>=/c 0) #:beta1 real? #:beta2 real? #:eps real?
         #:weight-decay (>=/c 0)]
        adam?)
-  (make-adam params lr beta1 beta2 eps weight-decay (make-hasheq)
-             (make-hasheq) (make-hasheq) (make-hasheq)))
+  (define m (make-hasheq))
+  (define v (make-hasheq))
+  (make-adam (list m v) #f params lr beta1 beta2 eps weight-decay
+             (make-hasheq) m v (unit-scalar)))
 
 (define (adam-do-step! opt)
   (with-no-grad
@@ -142,6 +151,7 @@
     (define b2 (adam-beta2 opt))
     (define lr (adam-lr opt))
     (define eps (adam-eps opt))
+    (follow-moves! opt)
     (for ([p (in-list (adam-params opt))])
       (with-gradient (g p)
         (define t (add1 (hash-ref (adam-steps opt) p 0)))
@@ -149,19 +159,19 @@
         (define bc1 (- 1.0 (expt b1 t)))
         (define bc2 (- 1.0 (expt b2 t)))
         (define d (decayed g p (adam-weight-decay opt)))
-        (define m (moment-on (adam-m opt) p))
-        (define v (moment-on (adam-v opt) p))
+        (define m (hash-ref! (adam-m opt) p (lambda () (zeros-like p))))
+        (define v (hash-ref! (adam-v opt) p (lambda () (zeros-like p))))
         (mul! m b1)
         (sub! m d (- b1 1.0))
         (mul! v b2)
         (addcmul! v d d (- 1.0 b2))
         (define denom (sqrt v))
         (mul! denom (/ 1.0 (expt bc2 0.5)))
-        (sub! denom (scalar-on (adam-scalars opt) eps p) -1.0)
+        (sub! denom (adam-one opt) (- eps))
         (addcdiv! p m denom (- (/ lr bc1)))))))
 
-(struct rmsprop (params [lr #:mutable] alpha eps weight-decay momentum
-                        sq bufs scalars)
+(struct rmsprop tracked (params [lr #:mutable] alpha eps weight-decay
+                                momentum sq bufs one)
   #:constructor-name make-rmsprop
   #:name rmsprop-optimizer ;; noqa
   #:methods gen:optimizer
@@ -181,26 +191,30 @@
         #:weight-decay (>=/c 0)
         #:momentum (>=/c 0)]
        rmsprop?)
-  (make-rmsprop params lr alpha eps weight-decay momentum
-                (make-hasheq) (make-hasheq) (make-hasheq)))
+  (define sq (make-hasheq))
+  (define bufs (make-hasheq))
+  (make-rmsprop (list sq bufs) #f params lr alpha eps weight-decay momentum
+                sq bufs (unit-scalar)))
 
 (define (rmsprop-do-step! opt)
   (with-no-grad
     (define alpha (rmsprop-alpha opt))
     (define mu (rmsprop-momentum opt))
     (define lr (rmsprop-lr opt))
+    (follow-moves! opt)
     (for ([p (in-list (rmsprop-params opt))])
       (with-gradient (g p)
         (define d (decayed g p (rmsprop-weight-decay opt)))
-        (define v (moment-on (rmsprop-sq opt) p))
+        (define v (hash-ref! (rmsprop-sq opt) p (lambda () (zeros-like p))))
         (mul! v alpha)
         (addcmul! v d d (- 1.0 alpha))
         (define avg (sqrt v))
-        (sub! avg (scalar-on (rmsprop-scalars opt) (rmsprop-eps opt) p) -1.0)
+        (sub! avg (rmsprop-one opt) (- (rmsprop-eps opt)))
         (cond
           [(zero? mu) (addcdiv! p d avg (- lr))]
           [else
-           (define buf (moment-on (rmsprop-bufs opt) p))
+           (define buf
+             (hash-ref! (rmsprop-bufs opt) p (lambda () (zeros-like p))))
            (mul! buf mu)
            (addcdiv! buf d avg 1.0)
            (sub! p buf lr)])))))

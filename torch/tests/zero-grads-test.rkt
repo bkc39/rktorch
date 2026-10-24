@@ -9,7 +9,7 @@
            (only-in "../foreign.rkt" cpu-device cuda-available? cuda-device
                     native-collect-at-troughs native-memory-unaccounted
                     native-memory-use)
-           (only-in (submod "../foreign.rkt" unsafe) tensor-free!)
+           (only-in (submod "../foreign.rkt" unsafe) tensor-free! to!)
            (only-in "../foreign/autograd-ops.rkt" reset-grads!)
            (only-in "../foreign/raw/device-queries.rkt" allocator-reading)
            (only-in "../foreign/raw/fault.rkt" with-crossing-hook)
@@ -273,6 +273,33 @@
        (check-equal? (adopted g) (* 4 mib))
        (tensor-free! g)
        (check-equal? (cpu-unaccounted) (* 4 mib) "the release gave the adoption back"))))
+
+  (bounded-test "a move forgets the adoptions of the gradient it moves"
+    (settle!)
+    (define w (zeros 1024 1024 #:requires-grad? #t))
+    (define unseen (box (* 4 mib)))
+    (with-unseen-gradient unseen
+      (lambda ()
+        (backward! (sum w))
+        (define g (grad w))
+        (set-box! unseen 0)
+        (to! w 'float64)
+        (check-equal? (adopted g) 0 "the move forgot the adoption")
+        (set-box! unseen (* 8 mib))
+        (refresh-shadows!)
+        (define h (grad w))
+        (set-box! unseen 0)
+        (check-equal? (adopted h) (* 8 mib) "the moved gradient's handle adopted it")
+        (check-equal? (cpu-unaccounted) 0 "the moved gradient is charged once")
+        (tensor-free! g)
+        (check-equal? (cpu-unaccounted) 0 "the first handle's release gave back nothing")
+        (tensor-free! h)
+        (define released (cpu-unaccounted))
+        (set-box! unseen (* 8 mib))
+        (refresh-shadows!)
+        (check-equal? released (cpu-unaccounted)
+                      "the releases leave the ledger as a refresh finds it")))
+    (settle!))
 
   (define (handles-across-a-refresh k reset?)
     (settle!)
