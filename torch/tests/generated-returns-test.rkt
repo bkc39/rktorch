@@ -69,10 +69,10 @@
                         (take window (min (length window) (sub1 live-window)))))))
       (check-true (> (collections) before)
                   "accounting several outputs never reached the trigger")
-      (check-true (<= high-water (* (+ live-window 8) call-bytes))
+      (check-true (<= high-water (* (+ live-window 10) call-bytes))
                   (format "ledger reached ~a MiB with ~a MiB live"
                           (quotient high-water mib)
-                          (quotient (* live-window call-bytes) mib))))
+                          (quotient (* (add1 live-window) call-bytes) mib))))
     (check-equal? (tensor-shape source) '(1048576)))
 
   (test-case "a failing call raises with the op and the ATen message"

@@ -140,9 +140,15 @@ majors per hundred calls, about 1 ms a call on any device (#377). So the
 backstop, `collect-under-pressure!`, ends with `yield-to-finalizers!`
 (`raw/collector.rkt`): a thread's first accounting after a collection
 sleeps once. The latch is per thread, a weak box in a thread cell that
-the collection clears, so a parallel thread's sleep, which never
-schedules the main pool's finalizer thread, leaves the main thread its
-own turn. Inside an atomic section, where sleeping is an error, it skips.
+the collection clears, so a parallel thread's sleep leaves the main
+thread its own turn. That sleep migrates through the `start-atomic`
+future barrier to the parallel thread's Racket-thread half in the main
+pool, `engine-block`s there and migrates back, so it runs in the main
+pool only once the main thread is switched out and can never stand in
+for the main thread's own turn. Every parallel worker now pays that
+migrate-and-wait once per collection, which compounds the stall
+#168/#370 already document. Inside an atomic section, where sleeping is
+an error, it skips.
 That makes an allocating tensor op a green-thread switch point once per
 collection (`finalizer-turn-test.rkt` pins both).
 

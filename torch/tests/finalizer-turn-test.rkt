@@ -1,14 +1,14 @@
 #lang racket/base
 
 (module+ test
-  (require (only-in ffi/unsafe/atomic call-as-atomic)
-           (only-in racket/list count)
+  (require (only-in racket/list count)
            (only-in racket/match match struct*)
            rackunit
            (only-in "../foreign.rkt" conv2d cpu-device cuda-device native-memory-use randn zeros)
            (only-in (submod "../foreign.rkt" unsafe) to!)
            (only-in "../foreign/raw/collector.rkt" collect-and-wait! finalizer-runs)
            (only-in "private/race-harness.rkt" with-race-hook)
+           (only-in "private/wedge.rkt" exit-status-of)
            (only-in "private/within.rkt" within))
 
   (struct gc-info (mode pre-amount pre-admin-amount code-amount
@@ -120,12 +120,18 @@
                           "the move to a missing device did not fail"))))
 
   (test-case "an op inside an atomic section after a collection does not yield"
-    (within 60
-            (lambda ()
-              (check-not-exn
-               (lambda ()
-                 (call-as-atomic
-                  (lambda ()
-                    (collect-garbage 'minor)
-                    (zeros 1))))
-               "the op slept inside an atomic section")))))
+    (check-equal? (exit-status-of
+                   '(begin
+                      (require (only-in ffi/unsafe/atomic call-as-atomic)
+                               (only-in torch zeros)
+                               (only-in torch/tests/private/wedge call-with-process-deadline))
+                      (call-with-process-deadline
+                       30
+                       (lambda ()
+                         (call-as-atomic
+                          (lambda ()
+                            (collect-garbage 'minor)
+                            (zeros 1))))))
+                   #:within 60)
+                  0
+                  "the op slept inside an atomic section")))
