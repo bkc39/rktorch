@@ -351,8 +351,15 @@ the CPU, whose allocator keeps no count.
   again, as it does any second handle on shared storage, but the shadow
   keeps covering the rest of what the graph and libtorch hold. The ledger
   entry records what its adoption took, and releasing the handle gives
-  exactly that back to the shadow, since the parameter still holds the
-  gradient (`zero-grad!` zeroes it in place).
+  exactly that back to the shadow while the parameter still holds the
+  gradient. `zero-grads!` drops the gradients, so `reset-grads!` first
+  zeroes what each entry that adopted one would give back
+  (`forget-gradient-adoptions!`, from a weak table per parameter): a
+  handle taken before the reset frees storage nothing else holds, and
+  gives the shadow nothing. The optimizers and `clip-grad-norm!` release
+  each gradient handle as its block ends (`with-gradient`,
+  `with-gradients`), so after a step only the parameter holds a gradient
+  and a reset frees it before the next backward writes another.
   `reclaim-native-memory!` refreshes it too, once the caches are
   emptied, so memory a dropped graph held stops being charged at once.
   An allocator that cannot answer at a refresh leaves its device's charge

@@ -34,6 +34,7 @@
          swallow-and-count-failure
          finalizer-failures
          finalizer-diagnostics
+         forget-gradient-adoptions!
          tensor-allocator
          tensor-allocator/gradient
          tensor-allocator/no-retry
@@ -173,7 +174,8 @@
          (set-phantom-bytes! (allocation-phantom a) 0)
          (hash-remove! allocations t)
          (note-unaccounted! (allocation-device a) (allocation-nbytes a))
-         ;; the parameter still holds the gradient this handle took over
+         ;; a positive adoption means the parameter still holds the gradient
+         ;; this handle took over: a reset zeroes it first
          (when (positive? (allocation-adopted a))
            (note-unadopted! (allocation-device a) (allocation-adopted a))))))))
 
@@ -293,8 +295,11 @@
 ;; at it, so the shadow's last refresh may charge it. The first handle taken
 ;; on a parameter's gradient since that refresh moves those bytes to the
 ;; ledger; a later one, which the ledger charges again as it does any second
-;; handle, moves nothing.
+;; handle, moves nothing. Each parameter keeps the entries that adopted its
+;; gradient, weakly, so a reset that drops the gradient can cancel what their
+;; release would give back.
 (define adopted-at (make-weak-hasheq))
+(define adopters (make-weak-hasheq))
 
 (define (adopt-gradient! args t)
   (define param (car args))
@@ -306,7 +311,20 @@
        (hash-set! adopted-at param now)
        (set-allocation-adopted!
         entry
-        (note-adopted! (allocation-device entry) (allocation-nbytes entry)))))))
+        (note-adopted! (allocation-device entry) (allocation-nbytes entry)))
+       (hash-set! adopters param
+                  (cons (make-weak-box entry)
+                        (filter weak-box-value (hash-ref adopters param '()))))))))
+
+(define (forget-gradient-adoptions! params)
+  (call-with-ledger
+   (lambda ()
+     (for ([param (in-list params)])
+       (for ([held (in-list (hash-ref adopters param '()))])
+         (define entry (weak-box-value held))
+         (when entry
+           (set-allocation-adopted! entry 0)))
+       (hash-remove! adopters param)))))
 
 ;; The retry composes OUTSIDE the allocator wrap: ffi/unsafe/alloc runs
 ;; the wrapped call in atomic mode, where the drain's blocking wait is an

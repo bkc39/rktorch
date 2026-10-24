@@ -1,10 +1,10 @@
 #lang racket/base
 
 (require (only-in racket/contract/base -> and/c listof >=/c)
-         (only-in racket/list filter-map)
          (only-in "../foreign.rkt"
-                  * + clamp device div maybe-grad sqrt sum tensor? to-device
-                  with-no-grad zeros)
+                  * + clamp device div sqrt sum tensor? to-device with-no-grad
+                  zeros)
+         (only-in "../foreign/autograd-ops.rkt" with-gradients)
          (only-in "../generated.rkt" [mul-tensor! g:mul-tensor!])
          (only-in "../private/contract.rkt" define/contract-out))
 
@@ -13,16 +13,16 @@
 (define/contract-out (clip-grad-norm! params max-norm) ;; noqa
   (-> (listof tensor?) (and/c real? (>=/c 0)) tensor?)
   (with-no-grad
-    (define grads (filter-map maybe-grad params))
-    (cond
-      [(null? grads) (zeros)]
-      [else
-       (define home (device (car grads)))
-       (define total
-         (sqrt (for/fold ([acc (sum (* (car grads) (car grads)))])
-                         ([g (in-list (cdr grads))])
-                 (+ acc (to-device (sum (* g g)) home)))))
-       (define scale (clamp (div max-norm (+ total 1e-6)) #:max 1.0))
-       (for ([g (in-list grads)])
-         (g:mul-tensor! g (to-device scale (device g))))
-       total])))
+    (with-gradients (grads params)
+      (cond
+        [(null? grads) (zeros)]
+        [else
+         (define home (device (car grads)))
+         (define total
+           (sqrt (for/fold ([acc (sum (* (car grads) (car grads)))])
+                           ([g (in-list (cdr grads))])
+                   (+ acc (to-device (sum (* g g)) home)))))
+         (define scale (clamp (div max-norm (+ total 1e-6)) #:max 1.0))
+         (for ([g (in-list grads)])
+           (g:mul-tensor! g (to-device scale (device g))))
+         total]))))

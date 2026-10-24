@@ -1,6 +1,8 @@
 #lang racket/base
 
-(require (only-in racket/contract/base -> ->* any or/c)
+(require (only-in racket/contract/base -> ->* any listof or/c)
+         (only-in racket/list filter-map)
+         (only-in racket/match match)
          syntax/parse/define
          (prefix-in g: (only-in "../generated.rkt"
                                 addcdiv! addcmul! copy! lerp-tensor!))
@@ -20,13 +22,15 @@
                   tr-tensor-sub!/raw
                   tr-tensor-zero!/raw
                   tr-tensors-reset-grad/raw)
+         (only-in "raw/memory.rkt" forget-gradient-adoptions!)
          (only-in "raw/pressure.rkt"
                   collect-at-trough! native-collect-at-troughs
                   refresh-shadows!)
-         (only-in "structs.rkt" tensor? wrap-tensor))
+         (only-in "structs.rkt" tensor? tensor-free! wrap-tensor))
 
 (provide collect-at-forward-trough!
-         reset-grads!
+         with-gradient
+         with-gradients
          with-no-grad)
 
 (define/checked-out (requires-grad! t [on? #t])
@@ -114,9 +118,28 @@
 (define/contract-out (lerp! t end weight) (-> tensor? tensor? tensor? void?) ;; noqa
   (void (g:lerp-tensor! t end weight)))
 
-(define (reset-grads! ts)
-  (check-ok (tr-tensors-reset-grad/raw ts (length ts)) 'zero-grads!))
+(define/contract-out (reset-grads! ts) (-> (listof tensor?) void?) ;; noqa
+  (check-ok (tr-tensors-reset-grad/raw ts (length ts)) 'reset-grads!)
+  (forget-gradient-adoptions! ts))
+
+;; A gradient's handle may be the last owner of storage a reset dropped, so
+;; it is released when its block ends rather than at a collection.
+(define (call-with-gradients ts proc)
+  (define gs (filter-map maybe-grad ts))
+  (dynamic-wind void
+                (lambda () (proc gs))
+                (lambda () (for-each tensor-free! gs))))
+
+(define-syntax-parse-rule (with-gradients (gs:id ts:expr) body:expr ...+)
+  (call-with-gradients ts (lambda (gs) body ...)))
+
+(define-syntax-parse-rule (with-gradient (g:id t:expr) body:expr ...+)
+  (with-gradients (gs (list t))
+    (match gs
+      [(list g) body ...]
+      ['() (let ([g #f]) body ...)])))
 
 (define/contract-out (zero-grad! t) (-> tensor? void?) ;; noqa
-  (when (has-grad? t)
-    (zero! (grad t))))
+  (with-gradient (g t)
+    (when g
+      (zero! g))))
