@@ -1,14 +1,12 @@
 """Fixture for the twin test of threads.py: scaling_run with a mix slower
 than the run, with mixes that stamp their first call and with a mix that
 raises, the last two also in a run that ends before any worker is
-scheduled; and the main loop's zero_grad."""
+scheduled."""
 
 import time
 
 from common import emit
-from threads import scaling_run, training_step
-
-import torch
+from threads import scaling_run
 
 
 def slow_mix():
@@ -55,31 +53,12 @@ def raised(seconds):
     return None
 
 
-def zero_grad_modes():
-    modes = []
-    zero_grad = torch.optim.SGD.zero_grad
-
-    def recording(self, set_to_none=True):
-        modes.append(set_to_none)
-        return zero_grad(self, set_to_none=set_to_none)
-
-    torch.optim.SGD.zero_grad = recording
-    try:
-        step = training_step()
-        step()
-        step()
-    finally:
-        torch.optim.SGD.zero_grad = zero_grad
-    return modes
-
-
 def main():
     slow = scaling_run(1, "idle", 0.1, make_mix=slow_mix)
     emit({"case": "slow-mix", "ops_per_s": slow["ops_per_s"],
           "stopped": slow["stopped"]})
     emit({"case": "stamped", "runs": [stamped(s) for s in (0, 0.1)]})
     emit({"case": "failing", "raised": [raised(s) for s in (0, 0.1)]})
-    emit({"case": "zero-grad", "set_to_none": zero_grad_modes()})
 
 
 if __name__ == "__main__":

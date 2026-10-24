@@ -957,10 +957,13 @@
            (backward! (if uses-b? (+ loss (sum (* b b))) loss))
            (step! opt))
          (append (tensor->list a) (tensor->list b)))
-       (for* ([(mode set-to-none?) (in-hash (hasheq 'none #t 'zero #f))]
-              [(r p i) (in-parallel (trained set-to-none?) (hash-ref j mode)
-                                    (in-naturals))])
-         (check-= r p tol (format "zero-grads! ~a: parameter ~a parity" mode i))))
+       (define (check-mode mode set-to-none?)
+         (for ([r (in-list (trained set-to-none?))]
+               [p (in-list (hash-ref j mode))]
+               [i (in-naturals)])
+           (check-= r p tol (format "zero-grads! ~a: parameter ~a parity" mode i))))
+       (check-mode 'none #t)
+       (check-mode 'zero #f))
      (let ()
        (define j (python-check "pool_default_stride.py"))
        (manual-seed! 0)

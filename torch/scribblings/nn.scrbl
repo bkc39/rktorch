@@ -767,12 +767,10 @@ parameters to finish it. A schedule's step logs nothing.
 @defproc[(zero-grads! [opt optimizer?]
                       [#:set-to-none? set-to-none? boolean? #t])
          void?]{
-Drops the gradient of every parameter in one native call,
-@tt{optimizer.zero_grad()}. Until the next @racket[backward!], a dropped
-gradient is absent rather than zero: @racket[has-grad?] is @racket[#f],
-@racket[grad] raises, and an optimizer's @racket[step!] leaves the
-parameter alone. With @racket[#:set-to-none? #f], zeroes each gradient in
-place, @tt{optimizer.zero_grad(set_to_none=False)}.
+Drops the gradient of every parameter, @tt{optimizer.zero_grad()}: until
+the next @racket[backward!] a parameter has no gradient, and
+@racket[has-grad?] is @racket[#f]. With @racket[#:set-to-none? #f], zeroes
+each gradient in place, @tt{optimizer.zero_grad(set_to_none=False)}.
 }
 
 @deftogether[(@defproc[(learning-rate [opt optimizer?]) real?]

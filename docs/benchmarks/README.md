@@ -135,8 +135,8 @@ median, quartiles and IQR, and the load average before and after.
   `zero_grad()` drops the gradients (`set_to_none=True`), as `zero-grads!`
   does. rktorch's optimizers step each parameter alone, so each twin has a
   `-per-param` form (`py-05-mnist-per-param`, ...) that runs with
-  `OPTIMIZER=per-param`: `foreach=False`. Both record `optimizer`, `foreach` (as
-  PyTorch resolved it) and `set_to_none` in their `meta`.
+  `OPTIMIZER=per-param`: `foreach=False`. Both record `optimizer` and
+  `foreach` (as PyTorch resolved it) in their `meta`.
   Every step is settled before it is logged. A twin calls
   `torch.cuda.synchronize()`, one call; rktorch's `settle!` reads one
   element of a parameter (`flatten`, `select`, `item`: three accounted ops
@@ -351,7 +351,7 @@ record adds each run's mean `epoch_gc_ms` and median `step_ms`, and
 `reads`, the settings its runner reads. A twin's `meta` is the parent's
 with the child's `impl`, `python`, `libtorch` (the torch version),
 `device`, `threads` (`torch.get_num_threads`) and, for the e2e twins,
-`optimizer`, `foreach` and `set_to_none` over it; torch's name for the GPU
+`optimizer` and `foreach` over it; torch's name for the GPU
 goes to `torch_gpu`, so `gpu` stays the parent's and a twin pairs with the
 rktorch records of its device. `scaling` records add `threads_run`,
 `main_steps_per_s` and `stopped` (one per round) and `settings` (`seconds`
