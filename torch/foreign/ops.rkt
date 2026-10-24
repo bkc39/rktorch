@@ -86,7 +86,6 @@
          dtype-symbols
          float-dtype-max
          float-dtype/c
-         move-generation
          placement
          with-default-device)
 
@@ -390,7 +389,7 @@
 
 (define moves (box 0))
 
-(define (move-generation)
+(define/contract-out (move-generation) (-> exact-nonnegative-integer?) ;; noqa
   (unbox moves))
 
 (define (note-move!)

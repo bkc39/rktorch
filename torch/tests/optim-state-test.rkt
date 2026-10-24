@@ -2,11 +2,14 @@
 
 (module+ test
   (require (for-syntax racket/base)
+           (only-in racket/contract/base contract-name value-contract)
            (only-in racket/match match-define)
            (only-in racket/runtime-path #%datum define-runtime-path)
            rackunit
+           (only-in threading ~>)
            (only-in "../foreign.rkt"
-                    accelerator-if-available copy! device-type zeros-like)
+                    accelerator-if-available copy! device-type relu
+                    zeros-like)
            (only-in (submod "../foreign.rkt" unsafe) to!)
            (only-in "../foreign/ops.rkt" move-generation)
            (only-in "../foreign/raw/autograd.rkt" tr-set-grad-enabled/raw)
@@ -17,10 +20,9 @@
                     backward! dtype grad manual-seed! ones randn sum
                     tensor->list to)
            (only-in "../nn.rkt"
-                    Linear Sequential adam parameters rmsprop sgd step!
-                    zero-grads!)
+                    Conv2d Flatten Linear MaxPool2d Sequential adam
+                    define-layer parameters rmsprop sgd step! zero-grads!)
            (only-in (submod "../nn/optim.rkt" private) optimizer-state)
-           (only-in "../scribblings/examples/05-mnist.rkt" convnet)
            (only-in "../vision/resnet.rkt" ResNet)
            (only-in "private/race-harness.rkt" with-race-hook)
            (only-in "private/reference-optim.rkt"
@@ -46,7 +48,7 @@
     (define ps (parameters net))
     (define opt (make-opt ps))
     (define (step-and-check qs x n)
-      (backward! (sum (net x)))
+      (~> x net sum backward!)
       (define gs (map grad ps))
       (step! opt)
       (reference qs gs)
@@ -92,8 +94,19 @@
   (define (mlp)
     (Sequential (Linear 4 8) (Linear 8 3)))
 
+  (define-layer conv-block (conv pool)
+    #:init (in-channels out-channels)
+    (set! conv (Conv2d in-channels out-channels 3))
+    (set! pool (MaxPool2d 2))
+    #:forward (x)
+    (~> x conv relu pool))
+
+  (define (convnet-05)
+    (Sequential (conv-block 1 16) (conv-block 16 32) (Flatten)
+                (Linear 800 128) relu (Linear 128 10)))
+
   (define models
-    (list (list "05's convnet" convnet '(2 1 28 28))
+    (list (list "05's convnet" convnet-05 '(2 1 28 28))
           (list "09's ResNet" (lambda () (ResNet #:base 4)) '(2 3 32 32))))
 
   (for* ([model (in-list models)]
@@ -123,7 +136,7 @@
 
   (define (stepped-linear)
     (define net (Linear 4 3))
-    (backward! (sum (net (randn 2 4))))
+    (~> (randn 2 4) net sum backward!)
     net)
 
   (define (faulted-at? k make-opt step)
@@ -144,7 +157,7 @@
       (define-values (make-opt step) (fresh-optimizer name))
       (define faulted? (faulted-at? k make-opt step))
       (void (tr-set-grad-enabled/raw #t))
-      (step (make-opt (parameters (stepped-linear))))
+      (~> (stepped-linear) parameters make-opt step)
       (if faulted? (loop (add1 k)) (sub1 k))))
 
   (for ([name (in-list '(adam rmsprop))])
@@ -152,6 +165,10 @@
      (format "a fault at any crossing of a first ~a step spares later ones"
              name)
      (check-true (positive? (crossings-survived name)))))
+
+  (bounded-test "move-generation carries its contract to optim.rkt"
+    (check-equal? (contract-name (value-contract move-generation))
+                  '(-> natural?)))
 
   (bounded-test "a break as a move's native call returns waits for its generation"
     (define t (randn 2 2))
@@ -243,7 +260,7 @@
     (- crossings frees (* 2 tensors)))
 
   (define (step-op-calls net opt target)
-    (backward! (sum (net ((placed-on target) (ones 2 3)))))
+    (~> (ones 2 3) ((placed-on target)) net sum backward!)
     (begin0 (op-calls-of (lambda () (step! opt)))
       (zero-grads! opt)))
 
