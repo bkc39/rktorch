@@ -13,6 +13,7 @@
          (only-in syntax/parse/define define-syntax-parse-rule))
 
 (define-runtime-path wrapper "resyntax")
+(define-runtime-path gate-script "resyntax-gate")
 
 (define local-args '("analyze" "--local-git-repository" "."))
 (define ci-finding #px"resyntax: .*\\.rkt:[0-9]+:[0-9]+ \\[")
@@ -139,6 +140,19 @@
                '("resyntax.args" "racket.args"))
           (lines-of (build-path stubs "gh.args"))))
 
+(define resyntax-stub "resyntax---refactoring-suite")
+
+(define (gate fx #:out [out ""] #:rc [rc 0])
+  (match-define (fixture _ env repo stubs _ _) fx)
+  (git env repo "checkout" "-q" "feature")
+  (for ([(name content)
+         (in-dict `(("gh-view.out" . "")
+                    ("gh-view.rc" . "0")
+                    (,(string-append resyntax-stub ".out") . ,out)
+                    (,(string-append resyntax-stub ".rc") . ,(number->string rc))))])
+    (stage! (build-path stubs name) content))
+  (run env repo "bash" (path->string gate-script)))
+
 (define (expected fx base #:dir [dir "."] . flags)
   (match-define (fixture _ _ _ _ top shas) fx)
   (define tail
@@ -232,4 +246,22 @@
                             (format "resyntax: ~a\n" message)
                             (list #f #f)
                             #f))
-      (check-false (regexp-match? ci-finding (linted-err failed))))))
+      (check-false (regexp-match? ci-finding (linted-err failed)))))
+
+  (test-case "the gate is red on a suggestion, though resyntax exits 0"
+    (check-match (gate fx #:out "resyntax: a.rkt:1:1 [r]\n")
+                 (outcome 1 (regexp #rx"::error::Resyntax found") _)))
+
+  (test-case "a resyntax crash prints a line the plugin counts as a suggestion"
+    (check-match (gate fx #:rc 2) (outcome 1 (regexp ci-finding) _)))
+
+  (test-case "a clean run is green"
+    (check-match (gate fx)
+                 (outcome 0 (regexp #rx"Resyntax: no suggestions[.]") _)))
+
+  (test-case "an analyzer timeout warns and stays green"
+    (check-match
+     (gate fx #:out "resyntax: x.rkt: analysis timed out\n")
+     (outcome 0
+              (regexp #rx"::warning::Resyntax analyzer timed out on 1 file")
+              _))))

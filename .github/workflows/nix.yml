@@ -94,6 +94,7 @@ jobs:
       - name: Every path the prose names resolves
         run: nix develop .#ci --command racket scripts/check-paths.rkt
       - name: Resyntax lint
+        if: success() || failure()
         env:
           # on a master push the empty diff against origin/master reports
           # quickly; a skipped required check never reports and stalls merges

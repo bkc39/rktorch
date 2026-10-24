@@ -420,8 +420,8 @@ broader ATen surface, and the portable raco-catalog candidate story.
 a change to a build target or a shell belongs in both. The ordered local loop
 for a change, and the gates it has to pass before it is done, are the
 `cpp-dev` and `racket-dev` skills under `.claude/skills/`; `.racket-dev.rktd`
-declares the Racket gates for the racket-dev plugin's runner
-(`racket <plugin>/hooks/gate.rkt . all`) and its pre-push hook.
+declares the Racket gates for the racket-dev plugin (`docs/building.md`,
+"Development shells").
 
 ```bash
 nix build              # builds cpp, installs the pkg, runs raco test + examples
@@ -465,11 +465,11 @@ scripts/resyntax analyze --local-git-repository . [REF]   # lint gate
                                      #  scripts/resyntax-lp2.rkt)
 scripts/resyntax fix --directory torch
 scripts/resyntax-gate [REF]           # CI's lane: red on any suggestion
-racket scripts/check-paths.rkt        # every path in @filepath{…} or a
-                                      # backticked .rkt/.py name resolves
-                                      # from the root or its file's directory
+racket scripts/check-paths.rkt        # named paths are tracked: "Named
+                                      # paths" in docs/building.md
 raco test --timeout 600 scripts/resyntax-rules-test.rkt \
-  scripts/resyntax-lp2.rkt scripts/resyntax-wrapper-test.rkt   # lint suite tests
+  scripts/resyntax-lp2.rkt scripts/resyntax-wrapper-test.rkt \
+  scripts/check-paths-test.rkt                                 # lint suite tests
 raco review torch/**/*.rkt
 ```
 

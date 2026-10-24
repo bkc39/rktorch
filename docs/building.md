@@ -54,24 +54,29 @@ every supported Racket against the pinned libtorch on the host's system.
 
 CI runs two more jobs that `nix flake check` does not cover. The Resyntax gate
 is `scripts/resyntax-gate`, which runs the `scripts/resyntax analyze` command
-below and turns any suggestion into a failure: Resyntax's default rules plus
-the repository's own in `scripts/resyntax-rules.rkt`, and it fails on any
-suggestion. It lints the changes since the merge base with an optional `REF`
-after the directory, which defaults to the open pull request's base from `gh`
-(found by head commit on a detached HEAD) when origin has that branch, else
-`origin/master`. Resyntax skips `#lang scribble/lp2`, so the wrapper lints the
-literate examples' code chunks through `scripts/resyntax-lp2.rkt`. The same
-job runs `racket scripts/check-paths.rkt`, which fails when a path named in
-`@filepath{…}`, or a backticked `.rkt` or `.py` file, in a `.rkt`, `.scrbl` or
-`.md` file resolves from neither the repository root nor that file's
-directory; a file outside the repository is listed in
-`scripts/check-paths-allow.rktd`. The
-code-generation drift check regenerates the ATen bindings and fails if the
-committed output differs:
+below, Resyntax's default rules plus the repository's own in
+`scripts/resyntax-rules.rkt`, and fails on any suggestion. It lints the
+changes since the merge base with an optional `REF` after the directory, which
+defaults to the open pull request's base from `gh` (found by head commit on a
+detached HEAD) when origin has that branch, else `origin/master`. Resyntax
+skips `#lang scribble/lp2`, so the wrapper lints the literate examples' code
+chunks through `scripts/resyntax-lp2.rkt`. The code-generation drift check
+regenerates the ATen bindings and fails if the committed output differs:
 
 ```bash
 nix run .#codegen && git status --porcelain   # must print nothing
 ```
+
+### Named paths
+
+The Resyntax job also runs `racket scripts/check-paths.rkt`. It reads every
+git-tracked `.rkt`, `.scrbl` and `.md` file and fails when a path it names is
+not a tracked file or directory, from the repository root or from that file's
+directory. It takes as paths the contents of `@filepath{…}`, a backtick span
+holding one `.rkt` or `.py` name, and any word containing `/` and ending in
+`.rkt` or `.py` inside a backtick span or a fenced code block. A path outside
+the repository goes in `scripts/check-paths-allow.rktd`, which fails in turn
+when an entry no longer names a missing path.
 
 ## Development shells
 

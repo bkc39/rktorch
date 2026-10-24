@@ -2,5 +2,4 @@
  ("plans/v0-scaffold.md" "scs/scs/tests/python-cross-test.rkt")
  ("torch/scribblings/text.scrbl" "data/eng-fra.txt")
  ("torch/scribblings/torch.scrbl" "NOTICE")
- ("torch/scribblings/vision.scrbl" ".txt")
  ("torch/scribblings/vision.scrbl" "hymenoptera_data"))

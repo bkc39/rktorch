@@ -82,18 +82,17 @@ rktorch/
     include/torchrkt/c_api/{global,random,tensor}.h   # extern "C", size-then-fill, last_error
     src/torchrkt/{global,random,tensor,detail/error}.cpp
     tests/torchrkt/random_test.cpp                    # gtest: seed 0 -> randn 2x2 golden
-  torchrkt/
+  torch/
     info.rkt                      # pkg metadata + native-lib pre-install hook
     main.rkt                      # high-level facade (re-export) — #|review: ignore|#
     foreign.rkt                   # safe contracted facade — #|review: ignore|#
     foreign/{error,structs}.rkt   # tensor wrapper struct: prop:cpointer + allocator/deallocator finalizer
     foreign/raw/{library,random,tensor}.rkt           # define-runtime-path "../../native-libs"
     native-libs/                  # Nix stages libtorchrkt.{so,dylib} here (gitignored)
-  examples/
-    python/00_randn.py            # torch.manual_seed(0); print(json) of randn(2,2)
-    racket/00-randn.rkt           # Racket equivalent via (require rktorch)
-    test/00-randn.rkt             # runner + RackUnit, mirrors examples/test pattern
-  torchrkt/tests/python-cross-test.rkt   # tolerant compare vs 00_randn.py; SKIP if `import torch` fails
+  examples/python/00_randn.py     # torch.manual_seed(0); print(json) of randn(2,2)
+  torch/scribblings/examples/00-randn.rkt   # Racket equivalent via (require rktorch)
+  examples/test/00-randn.rkt      # runner + RackUnit, mirrors examples/test pattern
+  torch/tests/python-cross-test.rkt   # tolerant compare vs 00_randn.py; SKIP if `import torch` fails
   .github/workflows/{nix,raco-catalog,docs,pkg-build-harness}.yml
 ```
 
@@ -108,8 +107,8 @@ rktorch/
   the 4 floats directly and defer the opaque-handle struct to the next slice. **Iteration point.**
 - `cpp/tests/.../random_test.cpp`: gtest asserting seed-0 `randn(2,2)` equals a captured golden.
 
-**Racket FFI** (`torchrkt/`, mirrors `xgboost-rkt/xgboost/foreign/*`):
-- `torch/foreign/raw/native-library.rkt`: `(define-runtime-path native-libs-dir "../../native-libs")` +
+**Racket FFI** (`torch/`, mirrors `xgboost-rkt/xgboost/foreign/*`):
+- `torch/foreign/raw/native-location.rkt`: `(define-runtime-path native-libs-dir "../../native-libs")` +
   `(ffi-lib (build-path native-libs-dir "libtorchrkt"))` — identical loader pattern.
 - raw bindings for the three C fns; `check-ok` error helper reading `tr_last_error`.
 - `torch/foreign.rkt` / `torch/main.rkt`: contracted facade exposing `manual-seed!`, `randn`, tensor print.
@@ -125,7 +124,7 @@ rktorch/
 
 - **`flake.nix` outputs**: `cpp` (CMake build + `ctest` via `doCheck`), `cpp-format`, `cpp-tidy`,
   `cpp-line-count` (500-line/file gate), `racket` (installs pkg, stages `native-libs/`, runs
-  `raco test torchrkt/` + `raco test examples/test/`), `copy-native-libs` app, and a `default`
+  `raco test torch/` + `raco test examples/test/`), `copy-native-libs` app, and a `default`
   dev shell that provisions **Resyntax + racket-review** into user scope. Add the
   `torchSource` knob selecting `buildInputs = [ libtorch-bin ]` vs `[ python3Packages.torch{,.dev} ]`
   with the matching `Torch_DIR`. Drop the glibc-polyfill / aarch64-cross / CUDA branches for v0.
@@ -143,12 +142,12 @@ cd rktorch
 nix build .#cpp                       # CMake + gtest golden (seed-0 randn 2x2)
 nix build                             # builds shim, installs pkg, runs raco test + examples
 nix develop --command bash -c '
-  raco test torchrkt/                 # FFI unit tests
+  raco test torch/                    # FFI unit tests
   raco test examples/test/            # 00-randn runner
-  raco test torchrkt/tests/python-cross-test.rkt   # real parity vs python torch (in-shell)
-  resyntax analyze --directory torchrkt            # lint gate (must report no suggestions)
+  raco test torch/tests/python-cross-test.rkt      # real parity vs python torch (in-shell)
+  resyntax analyze --directory torch               # lint gate (must report no suggestions)
 '
-racket examples/racket/00-randn.rkt   # prints the 2x2 tensor
+racket torch/scribblings/examples/00-randn.rkt   # prints the 2x2 tensor
 ```
 Done when: `nix flake check` is green on both `aarch64-darwin` and `x86_64-linux`, the parity
 test passes in-shell and SKIPs cleanly out-of-shell, and Resyntax is clean.

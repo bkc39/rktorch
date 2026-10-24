@@ -45,6 +45,12 @@
     [else
      (define j (python-check "image_parity.py"))
 
+     (check-equal? (sort (map symbol->string (hash-keys (hash-ref j 'decoded)))
+                         string<?)
+                   (sort (remove "NOTICE" (map path->string (directory-list fixtures)))
+                         string<?)
+                   "image_parity.py decodes every image fixture")
+
      (for* ([(key modes) (in-hash (hash-ref j 'decoded))]
             [mode (in-list '(unchanged rgb))]
             ;; torchvision 0.27 answers a palette PNG's unchanged mode with

@@ -15,8 +15,8 @@ library code that the suite never executes.
 
 ## The loop
 
-`.racket-dev.rktd` declares every gate below for the racket-dev plugin;
-`racket <plugin>/hooks/gate.rkt . all` runs them in order.
+`.racket-dev.rktd` declares every gate below for the racket-dev plugin
+([Development shells](../../../docs/building.md#development-shells)).
 
 ### 0. Stage before any nix command
 
@@ -106,16 +106,15 @@ the input, a dead guard to delete — see `torch/foreign/ops.rkt`'s
 
 ```bash
 nix develop .#ci --command raco test --timeout 600 \
-  scripts/resyntax-rules-test.rkt scripts/resyntax-lp2.rkt scripts/resyntax-wrapper-test.rkt
+  scripts/resyntax-rules-test.rkt scripts/resyntax-lp2.rkt scripts/resyntax-wrapper-test.rkt \
+  scripts/check-paths-test.rkt
 nix develop .#ci --command \
   scripts/resyntax analyze --local-git-repository . --analyzer-timeout 30000
 ```
 
 `scripts/resyntax-gate [REF]` is that command as CI runs it, red on any
-suggestion. The same lane runs `racket scripts/check-paths.rkt`: every path
-in `@filepath{…}` or a backticked `.rkt`/`.py` name must resolve from the
-repository root or its file's directory, and a file outside the repository
-goes in `scripts/check-paths-allow.rktd`.
+suggestion. The same lane runs `racket scripts/check-paths.rkt`, described in
+[Named paths](../../../docs/building.md#named-paths).
 
 `scripts/resyntax` runs Resyntax's default rules plus the repository's own
 in `scripts/resyntax-rules.rkt`, such as `(mul a b)` → `(* a b)`,
