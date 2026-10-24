@@ -6,7 +6,7 @@
                   unregister-custodian-shutdown)
          (only-in racket/contract/base -> any any/c or/c)
          (only-in racket/match match match-define)
-         (only-in racket/vector vector-append)
+         (only-in racket/vector vector-extend)
          (only-in "../foreign.rkt"
                   current-generator device device-type make-generator tensor?)
          (only-in "../foreign/raw/race-points.rkt" race-point)
@@ -132,9 +132,8 @@
   (parameterize ([current-custodian worker-custodian])
     (for/fold ([made (vector)]) ([k (in-range n)])
       (race-point worker-starting (vector->list made))
-      (define threads
-        (vector-append made (vector (start-thread ds collate (+ base-seed k) results stop
-                                                  breaks caller))))
+      (define threads (vector-extend made (add1 k) #f))
+      (vector-set! threads k (start-thread ds collate (+ base-seed k) results stop breaks caller))
       (set-pool-guard-threads! guard threads)
       threads)))
 

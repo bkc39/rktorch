@@ -2,6 +2,7 @@
 
 (require (only-in racket/contract/base -> and/c any/c not/c)
          (only-in racket/function const)
+         (only-in "../foreign/raw/race-points.rkt" race-point)
          (only-in "../private/contract.rkt" define/contract-out))
 
 ;; A worker's put never waits for the main thread. Closing detaches the
@@ -24,6 +25,7 @@
 (define/contract-out (results-queue-put! q index result) ;; noqa
   (-> results-queue? batch-index/c (not/c not) void?)
   (define table (results-queue-table q))
+  (race-point results-table-read table)
   (when table
     (hash-set! table index result))
   (semaphore-post (results-queue-ready q)))

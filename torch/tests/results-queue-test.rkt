@@ -5,6 +5,8 @@
            (only-in racket/list range)
            rackunit
            "../data/results-queue.rkt"
+           (only-in "private/race-harness.rkt"
+                    gate-hook make-gate release-gate! wait-for-arrival with-race-hook)
            (only-in "private/within.rkt" within))
 
   (define (take q index [abandon never-evt])
@@ -72,6 +74,29 @@
                              1)))
                   2)
     (check-exn #rx"open[?]" (lambda () (take q 1 always-evt))))
+
+  (test-case "a put that read the table before a close is let go once it writes"
+    (define q (results-queue))
+    (define executor (make-will-executor))
+    (define handoff (box (list 'zero)))
+    (will-register executor (unbox handoff) (lambda (_v) 'collected))
+    (define g (make-gate 'results-table-read))
+    (with-race-hook (gate-hook g)
+      (define putter
+        (thread (lambda ()
+                  (define v (unbox handoff))
+                  (set-box! handoff #f)
+                  (results-queue-put! q 0 v))
+                #:pool 'own))
+      (check-equal? (wait-for-arrival g #:seconds 10) 'parked)
+      (results-queue-close! q)
+      (release-gate! g)
+      (check-not-false (sync/timeout 10 putter)))
+    (check-equal? (for/or ([_ (in-range 20)])
+                    (collect-garbage 'major)
+                    (will-try-execute executor))
+                  'collected)
+    (check-exn #rx"open[?]" (lambda () (take q 0 always-evt))))
 
   (test-case "a breakable take can be broken while it waits"
     (define q (results-queue))
