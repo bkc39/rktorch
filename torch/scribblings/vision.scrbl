@@ -703,7 +703,7 @@ pinned to one commit; @filepath{scripts/check-weights.py} confirms they
 hold torchvision's tensors, bit for bit. A checkpoint is fetched the first
 time it is asked for, checked against the size and SHA-256 recorded in
 the module before it reaches the cache, and read from the cache after
-that. A @filepath{.txt} file beside it records where the weights came
+that. A text file beside it records where the weights came
 from and their licence, torchvision's BSD-3-Clause.
 @envvar{RKTORCH_WEIGHTS_DIR} moves the cache and
 @envvar{RKTORCH_WEIGHTS_URL} points at a Hugging Face mirror, which keeps

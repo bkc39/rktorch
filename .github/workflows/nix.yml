@@ -90,32 +90,13 @@ jobs:
         run: >-
           nix develop .#ci --command raco test --timeout 600
           scripts/resyntax-rules-test.rkt scripts/resyntax-lp2.rkt
-          scripts/resyntax-wrapper-test.rkt
+          scripts/resyntax-wrapper-test.rkt scripts/check-paths-test.rkt
+      - name: Every path the prose names resolves
+        run: nix develop .#ci --command racket scripts/check-paths.rkt
       - name: Resyntax lint
+        if: success() || failure()
         env:
           # on a master push the empty diff against origin/master reports
           # quickly; a skipped required check never reports and stalls merges
           BASE_REF: ${{ github.event.pull_request.base.sha || 'origin/master' }}
-        run: |
-          nix develop .#ci --command bash -c '
-            set -euo pipefail
-            # set -e would abort at the substitution, losing $out and the
-            # ::error:: below
-            rc=0
-            out=$(scripts/resyntax analyze --local-git-repository . "$BASE_REF" \
-                    --analyzer-timeout 30000 2>&1) || rc=$?
-            echo "$out"
-            if [ "$rc" -ne 0 ]; then
-              echo "::error::Resyntax exited $rc without completing the analysis."
-              exit 1
-            fi
-            if echo "$out" | grep -qE "resyntax: .*\.rkt:[0-9]+:[0-9]+ \["; then
-              echo "::error::Resyntax found refactoring suggestions. Run: scripts/resyntax fix --local-git-repository . $BASE_REF"
-              exit 1
-            fi
-            timeouts=$(echo "$out" | grep -c "timed out" || true)
-            if [ "$timeouts" -gt 0 ]; then
-              echo "::warning::Resyntax analyzer timed out on $timeouts file(s); that part of the analysis was partial."
-            fi
-            echo "Resyntax: no suggestions."
-          '
+        run: nix develop .#ci --command scripts/resyntax-gate "$BASE_REF"

@@ -32,8 +32,8 @@ under `TORCHRKT_WITH_CUDA_ALLOCATOR`, the same guard and status shape as
 `tr_cuda_memory_stats`. MPS: `recommendedMaxWorkingSetSize` only if the
 hooks expose it cheaply, else the entry reports "not available" and the
 parameter below covers it. Pinned in `c_api_compile_test.c` and a gtest in
-`device_test.cpp`. Raw binding in `raw/device.rkt`; promoted as
-`cuda-memory-info` beside `cuda-memory-stats` in `ops.rkt` (`promoted.rkt`
+`device_test.cpp`. Raw binding in `torch/foreign/raw/device.rkt`; promoted as
+`cuda-memory-info` beside `cuda-memory-stats` in `torch/foreign/ops.rkt` (`torch/foreign/promoted.rkt`
 is at 497 lines). The high-water mark uses *total*, not *free*: free
 includes other tenants and the caching allocator's own reserve, and would
 make the trigger chase the neighbour's jobs.
@@ -106,8 +106,8 @@ Step-level retry in the trainer (#142), allocation-lean schedulers (#144),
 
 Acceptance (from the issue): probe flat within 10% of the 14 GB working
 set; under 10% per-step overhead at that size; `raco test examples/test/`
-timings unchanged; `native-memory-test.rkt`, `oom-error-test.rkt`,
-`finalizer-guard-test.rkt`, `native-staging-test.rkt` green; a new CPU
+timings unchanged; `torch/tests/native-memory-test.rkt`, `torch/tests/oom-error-test.rkt`,
+`torch/tests/finalizer-guard-test.rkt`, `torch/tests/native-staging-test.rkt` green; a new CPU
 test asserts the ledger stays bounded and the trigger count grows under a
 low limit.
 
@@ -130,7 +130,7 @@ LIMIT=256` (the ledger's own trigger, nothing by hand):
 | `(collect-garbage)` + yield | 0 | 16 | 55 |
 | the trigger, 256 MiB limit | 248 | 5 | 35 |
 
-`native-pressure-test.rkt` pins: counters agree with the fold; no limit and
+`torch/tests/native-pressure-test.rkt` pins: counters agree with the fold; no limit and
 no capacity never fires; a 64 MiB limit bounds a 32 MiB/step churn under
 128 MiB; a working set above the mark backs off (at most 5 collections for
 120 MiB of live growth).
@@ -269,8 +269,8 @@ is left alone.
 ## Review fixes (2026-09-17)
 
 From the automated review of #147: the pressure engine moved to
-`raw/pressure.rkt` (`raw/memory.rkt` back to 279 lines, the two CUDA queries
-back in `raw/device.rkt` and handed down by `install-cuda-queries!`); a failed
+`torch/foreign/raw/pressure.rkt` (`torch/foreign/raw/memory.rkt` back to 279 lines, the two CUDA queries
+back in `torch/foreign/raw/device.rkt` and handed down by `install-cuda-queries!`); a failed
 capacity query is retried; one collection at a time; counters updated inside
 the atomic section; a timed-out drain no longer doubles the backstop
 interval; both triggers reset every device's accounted-since; one shared CUDA
@@ -310,7 +310,7 @@ The UNet at batch 224, 150 steps, showing the trade the knobs buy:
 
 MPS now has a capacity too. `tr_mps_memory_info` reports the allocator's
 allocated and driver bytes and Metal's recommended working-set maximum,
-promoted as `mps-memory-info`; `raw/device.rkt` installs one pair of readings
+promoted as `mps-memory-info`; `torch/foreign/raw/device.rkt` installs one pair of readings
 that dispatches on device type, so the backstop works on MPS exactly as on
 CUDA instead of needing `native-memory-limit` by hand. Only the compile and
 absent-backend paths are exercised here, on Linux; the macOS CI job builds it

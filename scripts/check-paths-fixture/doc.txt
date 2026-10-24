@@ -1,0 +1,16 @@
+Root-relative: `check-paths.rkt` and @filepath{check-paths-fixture/inner/note.txt}.
+Own directory: @filepath{inner/note.txt} and @filepath{inner/}.
+Stale: `gone.rkt` beside `check-paths-test.rkt`.
+Stale filepath: @filepath{inner/gone.txt}.
+Patterns: `*.rkt`, `torch/{a,b}.rkt`, `<name>.py`, `~/gone.rkt`, `/abs/gone.rkt`, `a/.../gone.rkt`.
+Not a lone path: `raco test gone.rkt`, `gone.txt`, gone.rkt, `.rkt`, `.rkt/.py`.
+Multi-word span: `raco test span/gone.py --flag`, `raco test ../check-paths-test.rkt`.
+```bash
+racket fenced/gone.rkt ../check-paths-test.rkt
+```
+After the fence: outside/gone.rkt.
+A span that wraps across lines: `raco test
+--flag` and then (`wrapped/gone.rkt`).
+```bash
+racket --file=../check-paths.rkt --out=flag/gone.rkt github.com/someone/repo/gone.rkt --repo=github.com/a/gone.rkt
+```

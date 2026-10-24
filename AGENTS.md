@@ -154,7 +154,7 @@ with `backward!` outside the form as PyTorch recommends). From
   rename: `downsample` is `shortcut`, `_` is `-`); `imagenet-classes`
   (`torch/vision/imagenet.rkt`, label order) and `imagenet-preprocess`;
   the predict example is `torch/scribblings/examples/14-imagenet.rkt`,
-  parity against torchvision in `imagenet-parity-test.rkt` (default shell,
+  parity against torchvision in `torch/tests/imagenet-parity-test.rkt` (default shell,
   cached weights)
 - VGG (`torch/vision/vgg.rkt`, #202): `vgg16-features #:pretrained?`, the
   convolutional half of VGG-16 as one `features` child, a `Sequential` of
@@ -199,12 +199,12 @@ with `backward!` outside the form as PyTorch recommends). From
   `stb` found by pkg-config like libsndfile and compiled once in
   `src/torchrkt/detail/stb_image.c`; PNGs match
   torchvision.io exactly, JPEGs within a count or two
-  (`image-parity-test.rkt`, against torchvision in both shells)
+  (`torch/tests/image-parity-test.rkt`, against torchvision in both shells)
 - generative examples on MNIST (#152):
   `torch/scribblings/examples/10-dcgan.rkt` (a DCGAN shrunk to 28x28,
   `ConvTranspose2d` and `BatchNorm2d` in the generator, `leaky-relu` in the
   discriminator, two `adam`s at 2e-4 with
-  `#:beta1 0.5`) and `11-vae.rkt` (the linear VAE, the reparameterization
+  `#:beta1 0.5`) and `torch/scribblings/examples/11-vae.rkt` (the linear VAE, the reparameterization
   with the caller's noise, the reference loss over the batch); both write a
   10x10 sample grid per epoch through `image-grid` and `write-ppm`
 - images (`torch/vision/ppm.rkt`, #155): `image-grid #:columns #:padding
@@ -267,7 +267,7 @@ module stays disjoint from `racket` (L4), except `torch/generated`, whose
 Dispatching named ops carry dependent (`->i`) contracts so the wrong shape
 gets contract blame, not a runtime error; the `+ - * / < <= > >= @` operators are
 provided as plain renames (no contract overhead on the numeric fast path),
-per `foreign/operators.rkt`.
+per `torch/foreign/operators.rkt`.
 
 From `torch/nn`: `define-layer procedure->Layer gen:layer layer? Parameter Buffer LayerList LayerHash parameters
 named-parameters in-named-parameters buffers children Linear Conv2d MaxPool2d Flatten Dropout
@@ -306,7 +306,7 @@ models are plain struct trees owned by the GC (no global parameter store),
 and a layer is called by applying it, `(net x)`, the analog of `__call__`:
 `gen:layer` derives `prop:procedure`, so every layer, hand-written ones
 included, is applicable, and there is no separate `forward` or callable
-`layer-forward` (#235). `LSTM` and `GRU` (`nn/recurrent.rkt`, #153) are
+`layer-forward` (#235). `LSTM` and `GRU` (`torch/nn/recurrent.rkt`, #153) are
 `define-layer` forms whose parameter set depends on `#:num-layers` and
 `#:bidirectional?`: `parameters-by-key` registers them under PyTorch's own
 names (`weight_ih_l0` .. `bias_hh_l1_reverse`) the way `children-by-key`
@@ -318,7 +318,7 @@ the parameters keep their identity) whenever their storage addresses
 storage start) differ from those the last flattening left, which catches a
 device round trip and a replaced parameter with no move hook, costs `to`'s
 identity case nothing, and retries a transient OOM rather than latching it.
-Every call checks under a per-layer lock (`private/lock.rkt`: not reentrant,
+Every call checks under a per-layer lock (`torch/private/lock.rkt`: not reentrant,
 breakable while waiting, and a waiter takes it over from a killed holder),
 never reading the addresses outside it, since a flattening on another thread
 rebinds the weights' storage; and a packing, or a refusal, is recorded only
@@ -330,9 +330,9 @@ A `#:forward` may declare keyword inputs (`#:kw id` or `#:kw [id
 default]`, the default seeing the fields); `gen:layer`'s `prop:procedure`
 is a keyword procedure that hands them to a `define-layer` or
 `procedure->Layer` forward, while a hand-written `layer-forward`, a generic
-method, refuses them. `MultiheadAttention` (`nn/attention.rkt`, #210 L1)
+method, refuses them. `MultiheadAttention` (`torch/nn/attention.rkt`, #210 L1)
 is the first such layer: four `Linear` children `query` `key` `value`
-`out` (not PyTorch's fused `in_proj`; `linear.rkt`'s `private` submodule
+`out` (not PyTorch's fused `in_proj`; `torch/nn/linear.rkt`'s `private` submodule
 builds a `Linear` from given tensors so the xavier `[3E, E]` draw splits
 without extra RNG use), `#:heads #:dropout #:bias? #:batch-first?
 #:key-dim #:value-dim`, applied as `(mha q k v #:key-padding-mask
@@ -343,8 +343,8 @@ causal mask rather than PyTorch's hint, and only `#:need-weights? #t`
 leaves the fused kernel, answering `(values output weights)`. Its
 application shapes are a per-instance `->i` contract built in `#:init` and
 applied with `caller` blame (the shape checks are shared through
-`attention.rkt`'s `private` submodule). `TransformerEncoderLayer` and
-`TransformerDecoderLayer` (`nn/transformer.rkt`, #210 L2) mirror PyTorch's
+`torch/nn/attention.rkt`'s `private` submodule). `TransformerEncoderLayer` and
+`TransformerDecoderLayer` (`torch/nn/transformer.rkt`, #210 L2) mirror PyTorch's
 children (`self-attn` `multihead-attn` `linear1` `dropout` `linear2`
 `norm1..3` `dropout1..3`, `_` spelled `-`) and draw order; `#:heads
 #:ffn-width #:dropout #:activation ('relu 'gelu 'gelu-tanh or a procedure)
@@ -361,7 +361,7 @@ nn.TransformerEncoderLayer(...), n)`, seeded parity and stream position
 included), a layer (`n` copies of it, the layer itself left out, as
 PyTorch's deep copies), or a thunk (called `n` times, each layer drawing
 its own values); the stack contract rejects layer keywords or `#:norm #t`
-beside a layer or thunk. `layer-copy` (`nn/copy.rkt`) is a deep copy
+beside a layer or thunk. `layer-copy` (`torch/nn/copy.rkt`) is a deep copy
 with no RNG draws: fresh tensors with the same values, device, dtype and
 requires-grad (no gradients), children copied recursively, modes kept,
 shared layers and tensors kept shared through a memo. It runs on the
@@ -376,7 +376,7 @@ and a hand-written `gen:layer` without the method refuses, naming
 `transformer/c` macro.
 `sinusoidal-positions` (`#:layout 'interleaved | 'halves`, a length or a
 position tensor) and `causal-mask` (`#t` above the diagonal, or the float
-`-inf` form) live in `nn/positions.rkt`. `clip-grad-norm!` (`nn/clip.rkt`) keeps its scale on the
+`-inf` form) live in `torch/nn/positions.rkt`. `clip-grad-norm!` (`torch/nn/clip.rkt`) keeps its scale on the
 device. Layer init mirrors
 PyTorch RNG consumption (`nn.Linear.reset_parameters`), so a shared
 `manual-seed!` yields bit-comparable parameters — the MLP cross-test relies
@@ -384,13 +384,13 @@ on this.
 
 **REPL parity.** A tensor prints in the Racket REPL exactly as it does in the
 Python REPL — `tensor([[ 1.5410, -0.2934], [-2.1788, 0.5684]])` — via
-`prop:custom-write`, reproduced from the data + shape in `foreign/format.rkt`
+`prop:custom-write`, reproduced from the data + shape in `torch/foreign/format.rkt`
 (PyTorch's `tensor(...)` framing isn't in libtorch's C++ printer). Two
 accessors expose the two forms explicitly: `tensor->repr` is the PyTorch repr
 (what the REPL shows); `tensor->string` is ATen's C++ `operator<<` text. The
 repr reproducer covers the common case (CPU float32, fixed-point, precision 4)
 and falls back to the ATen form for scientific-notation values; see the TODO in
-`foreign/format.rkt`.
+`torch/foreign/format.rkt`.
 
 Deferred (see plan): `native_functions.yaml` codegen, `nn.Module` macros, the
 broader ATen surface, and the portable raco-catalog candidate story.
@@ -419,7 +419,9 @@ broader ATen surface, and the portable raco-catalog candidate story.
 [`docs/building.md`](docs/building.md) is the same guide written for people;
 a change to a build target or a shell belongs in both. The ordered local loop
 for a change, and the gates it has to pass before it is done, are the
-`cpp-dev` and `racket-dev` skills under `.claude/skills/`.
+`cpp-dev` and `racket-dev` skills under `.claude/skills/`; `.racket-dev.rktd`
+declares the Racket gates for the racket-dev plugin (`docs/building.md`,
+"Development shells").
 
 ```bash
 nix build              # builds cpp, installs the pkg, runs raco test + examples
@@ -462,14 +464,18 @@ scripts/resyntax analyze --local-git-repository . [REF]   # lint gate
                                      #  literate examples' chunks through
                                      #  scripts/resyntax-lp2.rkt)
 scripts/resyntax fix --directory torch
+scripts/resyntax-gate [REF]           # CI's lane: red on any suggestion
+racket scripts/check-paths.rkt        # named paths are tracked: "Named
+                                      # paths" in docs/building.md
 raco test --timeout 600 scripts/resyntax-rules-test.rkt \
-  scripts/resyntax-lp2.rkt scripts/resyntax-wrapper-test.rkt   # lint suite tests
+  scripts/resyntax-lp2.rkt scripts/resyntax-wrapper-test.rkt \
+  scripts/check-paths-test.rkt                                 # lint suite tests
 raco review torch/**/*.rkt
 ```
 
 `raco review` does not expand macros, so the pure re-export facades
-(`main.rkt`, `foreign.rkt`, `nn.rkt`, `safe.rkt`, `operators.rkt`,
-`scribblings/labels.rkt`) and `info.rkt` carry a `#|review: ignore|#` directive.
+(`torch/main.rkt`, `torch/foreign.rkt`, `torch/nn.rkt`, `torch/safe.rkt`, `torch/operators.rkt`,
+`torch/scribblings/labels.rkt`) and `torch/info.rkt` carry a `#|review: ignore|#` directive.
 
 Resyntax, racket-review and `cover` are pinned, one commit per package, in
 `nix/racket-linters.nix`, which also compiles them; shell entry copies them
@@ -487,7 +493,7 @@ or a fresh store reports a hash mismatch (upstream moved), set its
 `racket-deps-current` check says "info.rkt changed; bump racket-deps outputHash",
 and also fails on an unmet `#:version` minimum. torch's own platform packages
 (`torch-x86_64-linux`, `torch-aarch64-macosx`: `own-platform-packages` in
-`racket-deps.rkt`, which must name the same packages as `platform-packages`
+`nix/racket-deps/racket-deps.rkt`, which must name the same packages as `platform-packages`
 in `torch/foreign/raw/native-location.rkt`; `racket-deps-info-test` fails
 when they differ) are dropped from the fetch.
 Instead, the library-less skeleton under `pkgs/` is installed beside `torch`,
@@ -513,7 +519,7 @@ provisioning install the host's skeleton first with `install-platform`, so
 ### The platform package
 
 `pkgs/torch-x86_64-linux/` and `pkgs/torch-aarch64-macosx/` are the
-skeletons of the platform packages: each `info.rkt` (collection
+skeletons of the platform packages: each `pkgs/*/info.rkt` (collection
 `torch-native`, version equal to torch's `native-version`, which moves only
 when the compiled bytes do, apart from torch's `version`), a
 `THIRD-PARTY-NOTICES` and the licences only that platform bundles. The
@@ -673,43 +679,43 @@ Thin re-export facades over small modules (target ≤ 500 lines/file).
 **Import convention:** library modules use `(require (only-in ...))` with
 explicit, alphabetized name lists — never whole-module requires — so each
 file documents exactly what it pulls in. Exemptions, each marked with a
-comment at the require site: pure re-export facades (`main.rkt`,
-`foreign.rkt`, `nn.rkt`, `safe.rkt`, `operators.rkt`,
-`scribblings/labels.rkt`), and macro-heavy modules
+comment at the require site: pure re-export facades (`torch/main.rkt`,
+`torch/foreign.rkt`, `torch/nn.rkt`, `torch/safe.rkt`, `torch/operators.rkt`,
+`torch/scribblings/labels.rkt`), and macro-heavy modules
 whose expansions need the module's full export set (`syntax/parse/pre`).
 Runtime paths take `(only-in racket/runtime-path #%datum define-runtime-path)`.
 
-- `info.rkt` — package metadata + native-library pre-install hook.
-- `main.rkt` — high-level facade (re-exports `foreign.rkt`).
-- `safe.rkt` — `torch` minus `racket`'s names; `operators.rkt` — the rest
+- `torch/info.rkt` — package metadata + native-library pre-install hook.
+- `torch/main.rkt` — high-level facade (re-exports `torch/foreign.rkt`).
+- `torch/safe.rkt` — `torch` minus `racket`'s names; `torch/operators.rkt` — the rest
   (the import tiers, `scribblings/imports.scrbl`).
-- `private/exports.rkt` — `export-names`, a module's sorted export names,
+- `torch/private/exports.rkt` — `export-names`, a module's sorted export names,
   shared by the tiers test and the imports chapter.
-- `foreign.rkt` — the contracted layer + the `unsafe` submodule.
-- `data/dataset.rkt` — `define-dataset` and `gen:dataset`;
-  `private/definer.rkt` — the clause grammar it shares with `define-layer`.
-- `vision/cifar10.rkt` — CIFAR-10 loader and dataset, `vision/fixtures/`
+- `torch/foreign.rkt` — the contracted layer + the `unsafe` submodule.
+- `torch/data/dataset.rkt` — `define-dataset` and `gen:dataset`;
+  `torch/private/definer.rkt` — the clause grammar it shares with `define-layer`.
+- `torch/vision/cifar10.rkt` — CIFAR-10 loader and dataset, `vision/fixtures/`
   its 256-record synthetic fixture and MNIST's
   (`scripts/gen-dataset-fixtures.py`), and `vision/fixtures/images/` the
   reader's synthetic JPEGs and PNGs (`scripts/gen-image-fixtures.py`);
-  `vision/image.rkt` — the image reader; `vision/diffusion.rkt` — DDPM schedules, `q-sample`
-  and the UNet layers; `vision/mnist.rkt` — MNIST loader.
-- `text/data.rkt` — character corpora, vocabularies and token blocks;
-  `text/translation.rkt` — the seq2seq tutorial's eng-fra pairs;
+  `torch/vision/image.rkt` — the image reader; `torch/vision/diffusion.rkt` — DDPM schedules, `q-sample`
+  and the UNet layers; `torch/vision/mnist.rkt` — MNIST loader.
+- `torch/text/data.rkt` — character corpora, vocabularies and token blocks;
+  `torch/text/translation.rkt` — the seq2seq tutorial's eng-fra pairs;
   `text/fixtures/` their committed excerpts.
-- `data/loader.rkt` — `tensor-dataset`, `dataloader`, `in-dataloader`,
-  `in-epochs`, re-exporting `data/dataset.rkt`.
-- `foreign/ops.rkt` — version/seed + marshalling (`item`, `to-dtype`,
-  `uniform!`, `to`); `foreign/creation-ops.rkt` — the constructors
+- `torch/data/loader.rkt` — `tensor-dataset`, `dataloader`, `in-dataloader`,
+  `in-epochs`, re-exporting `torch/data/dataset.rkt`.
+- `torch/foreign/ops.rkt` — version/seed + marshalling (`item`, `to-dtype`,
+  `uniform!`, `to`); `torch/foreign/creation-ops.rkt` — the constructors
   (`zeros` .. `rand`, `tensor`, `arange`, `eye`, the `*-like` family, with
-  placement and `#:requires-grad?` handled once); `foreign/tensor-ops.rkt`
+  placement and `#:requires-grad?` handled once); `torch/foreign/tensor-ops.rkt`
   — the op tranche (and the
-  shadow-dispatch convention); `foreign/order-ops.rkt` — `topk` `sort`
-  `argsort` `multinomial`; `foreign/autograd-ops.rkt` — autograd +
-  `with-no-grad` + in-place ops; `foreign/structs.rkt` — the `tensor`
+  shadow-dispatch convention); `torch/foreign/order-ops.rkt` — `topk` `sort`
+  `argsort` `multinomial`; `torch/foreign/autograd-ops.rkt` — autograd +
+  `with-no-grad` + in-place ops; `torch/foreign/structs.rkt` — the `tensor`
   wrapper (`prop:cpointer`, shape cached at wrap time, allocator/deallocator
-  finalizer); `foreign/error.rkt` — `check-ok` / `check-handle`;
-  `foreign/format.rkt` — the PyTorch-repr reproducer.
+  finalizer); `torch/foreign/error.rkt` — `check-ok` / `check-handle`;
+  `torch/foreign/format.rkt` — the PyTorch-repr reproducer.
 - `foreign/raw/*.rkt` — direct FFI, one module per C translation unit:
   `syntax` (the FFI definer + `_Tensor` cpointer), `native-location` (the
   one resolver for the shim: the staged `torch/native-libs/` first, then
@@ -755,23 +761,23 @@ Runtime paths take `(only-in racket/runtime-path #%datum define-runtime-path)`.
   when `native-fault?` holds, so that fault latches the library; never bind
   native code with `define-ffi-definer` or `get-ffi-obj` directly, which
   bypasses the latch.
-- `nn.rkt` — pure re-export facade over `nn/` (`layer.rkt` = `gen:layer`, `LayerList` +
+- `torch/nn.rkt` — pure re-export facade over `nn/` (`torch/nn/layer.rkt` = `gen:layer`, `LayerList` +
   the `define-layer` macro, whose `#:forward` takes a rest argument and
   keyword inputs, whose
   fields admit `parameters-by-key` beside `children-by-key`, and whose
   `#:on-move` body runs after a `to` that rebound any tensor in its subtree,
   judged against placements read before anything moved, so a tensor tied
-  across siblings counts for both; `mode.rkt` = `train!`, `eval!`,
-  `call-with-mode` and `in-mode`; `parameter.rkt`, `buffer.rkt`, `linear.rkt`,
-  `init.rkt`, `optim.rkt`, `ema.rkt`, `loss.rkt`, `recurrent.rkt`,
-  `attention.rkt`, `transformer.rkt`, `positions.rkt`, `copy.rkt`, `clip.rkt`).
-- `private/download.rkt` — the one download path (#195): a temp file in the
+  across siblings counts for both; `torch/nn/mode.rkt` = `train!`, `eval!`,
+  `call-with-mode` and `in-mode`; `torch/nn/parameter.rkt`, `torch/nn/buffer.rkt`, `torch/nn/linear.rkt`,
+  `torch/nn/init.rkt`, `torch/nn/optim.rkt`, `torch/nn/ema.rkt`, `torch/nn/loss.rkt`, `torch/nn/recurrent.rkt`,
+  `torch/nn/attention.rkt`, `torch/nn/transformer.rkt`, `torch/nn/positions.rkt`, `torch/nn/copy.rkt`, `torch/nn/clip.rkt`).
+- `torch/private/download.rkt` — the one download path (#195): a temp file in the
   cache's directory, checked, then installed. `call-with-verified-download`
   checks an exact size and SHA-256 (pretrained weights, hymenoptera);
   `download-cached` hands the downloaded path to a `#:valid?` predicate and
   renames it into place (MNIST, text, translation, CIFAR-10, audio). Each
   loader keeps its own cache-directory function and override variable.
-- `private/install-torchrkt-native.rkt` — stages `libtorchrkt.*` into
+- `torch/private/install-torchrkt-native.rkt` — stages `libtorchrkt.*` into
   `native-libs/` from `TORCHRKT_NATIVE_LIB_PATH` (set by the Nix build/shell).
   Without the variable it prints nothing when `native-location` finds the
   shim, staged or in `torch-native`, and otherwise prints its not-found
@@ -789,8 +795,8 @@ Runtime paths take `(only-in racket/runtime-path #%datum define-runtime-path)`.
   `raco test`.
 - `scribblings/examples/` — the literate `scribble/lp2` programs woven into
   the guide; exempt from the import convention.
-- `pkg-build/smoke.rkt` — the only test the package build server runs (see
-  [The package build server](#the-package-build-server)); its `info.rkt`
+- `torch/pkg-build/smoke.rkt` — the only test the package build server runs (see
+  [The package build server](#the-package-build-server)); its `torch/pkg-build/info.rkt`
   gives it 300 s and omits itself.
 
 ### Codegen (`codegen/`)
@@ -812,7 +818,7 @@ headers:
   in Python string templates. Promotion into `torch/foreign.rkt` is
   hand-curated.
 - `torch/tests/generated-parity.rktd` — manifest driving the generated-op
-  battery in `generated-parity-test.rkt`; every new allowlist line needs an
+  battery in `torch/tests/generated-parity-test.rkt`; every new allowlist line needs an
   input recipe in that test (`'device-only` for an op with no CPU kernel,
   which then needs a device-guarded test of its own)
 
@@ -888,17 +894,17 @@ user passed.
 Inside `torch/foreign/` a name the library itself calls uses
 `define/checked-out` instead.  That exports the definition plainly and puts
 the contracted name in a `checked` submodule, so a sibling requiring the
-module reaches the definition while `foreign.rkt` requires
+module reaches the definition while `torch/foreign.rkt` requires
 `(submod ... checked)` and re-exports it.  Without the split, contracting
-`add` would contract `operators.rkt`'s `t+`, and contracting `tensor?`
-would make every contract in `contracts.rkt` cross a second boundary.
+`add` would contract `torch/foreign/operators.rkt`'s `t+`, and contracting `tensor?`
+would make every contract in `torch/foreign/contracts.rkt` cross a second boundary.
 
 Which form to use is decidable, not a judgement call: **does a module under
 `torch/foreign/` import this name?**  If yes `define/checked-out`, if no
 `define/contract-out`.  A test in `torch/tests/contract-out-test.rkt`
 asserts no module under `torch/foreign/` requires a `checked` submodule, so
 the fast path cannot be recontracted by a later edit.  The same rule and
-the same test cover `torch/nn/`, with `nn.rkt` as the facade.
+the same test cover `torch/nn/`, with `torch/nn.rkt` as the facade.
 
 A layer built with `define-layer` carries its constructor contract in a
 `#:contract` clause.  The clause is the export: it provides the constructor
@@ -916,7 +922,7 @@ contract arrow would shadow the one `_fun` matches).  A name promoted
 from either is contracted at the promotion site with the value form,
 `(define/contract-out narrow (-> ...) g:narrow)`.  A struct predicate has
 no definition to wrap; its `checked` provide is written by hand beside
-the `struct`.  `foreign.rkt` is a pure re-export module: it requires each
+the `struct`.  `torch/foreign.rkt` is a pure re-export module: it requires each
 module's `checked` submodule, excludes the plain names those replace, and
 provides the result.
 
@@ -971,7 +977,7 @@ predicate work it does (`or/c` dispatch, and re-testing `(tensor? a)` to
 select `b`'s contract), so that ratio is the cost of the whole
 contract, not of dependency as such.  Either way the carve-out providing
 `+ - * / @` as plain renames is well founded, and the richest contracts
-on the hot tensor surface are the expensive part of `foreign.rkt`.
+on the hot tensor surface are the expensive part of `torch/foreign.rkt`.
 
 **Cheap accessors are the other extreme.**  `tensor-shape` is a struct
 field read at ~7 ns, so a boundary contract on it is 19x and even a hand
@@ -1027,7 +1033,7 @@ silent on stderr; it runs in the normal suite as well. It requires torch by
 collection, never by relative path: `nix flake check` tests the source tree
 beside a `--copy` install, where `"../main.rkt"` is a second instance whose
 devices 04-mlp's contracts reject.
-`tests/server-test-set-test.rkt` asks `raco test` itself which files the
+`torch/tests/server-test-set-test.rkt` asks `raco test` itself which files the
 server would run and fails on anything but the smoke, so a new top-level
 entry in `torch/` must join the omit list. The docs column renders the manual
 with libtorch loaded, also within the 1 GB.
@@ -1116,7 +1122,7 @@ master's copy.
   (Architecture > Racket, `foreign/raw/*.rkt`); the `detail/op_call.hpp`
   helpers every C++ op body reduces to (Architecture > C++).
 - PyTorch parity: an allowlist op needs a recipe in
-  `generated-parity-test.rkt`, and a `'device-only` one its own
+  `torch/tests/generated-parity-test.rkt`, and a `'device-only` one its own
   device-guarded test; a hand-written op needs a python cross-test check
   beside its gtest golden; a new example comes with its runner
   (`examples/test/`), a row in `docs/epoch-check.md`, and a Python twin,
