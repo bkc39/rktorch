@@ -391,9 +391,10 @@
   (unbox moves))
 
 (define (note-move!)
-  (define n (unbox moves))
-  (unless (box-cas! moves n (add1 n))
-    (note-move!)))
+  (let retry ()
+    (define seen (unbox moves))
+    (unless (box-cas! moves seen (add1 seen))
+      (retry))))
 
 ;; a no-op when nothing would change, as `to`, so a repeated layer move
 ;; touches neither the native side nor the ledger; otherwise the status is
@@ -403,11 +404,12 @@
 (define (to! t target [dtype #f])
   (define-values (type index dt) (parse-target 'to! target dtype))
   (unless (already-there? t type index dt)
-    (note-move!)
     (define rc (tensor-to!/retrying t type index dt))
     (dynamic-wind void
                   (lambda () (check-ok rc 'to!))
-                  (lambda () (reaccount! (tensor-handle t)))))
+                  (lambda ()
+                    (note-move!)
+                    (reaccount! (tensor-handle t)))))
   t)
 
 (define/checked-out (tensor-device t) (-> tensor? device?)

@@ -1,7 +1,5 @@
 #lang racket/base
 
-;; e179ba7's optimizer steps, which read every buffer's placement at every
-;; step, over explicit gradients; a test runs one beside the library's
 (require (only-in "../../foreign.rkt"
                   add addcdiv! addcmul! copy! device dtype full mul mul! sqrt
                   sub! to with-no-grad zeros-like))
