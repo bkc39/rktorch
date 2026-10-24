@@ -1,12 +1,12 @@
 """Fixture for the twin test of threads.py: scaling_run with a mix slower
 than the run, with mixes that stamp their first call and with a mix that
 raises, the last two also in a run that ends before any worker is
-scheduled."""
+scheduled; and the main loop's training step."""
 
 import time
 
 from common import emit
-from threads import scaling_run
+from threads import scaling_run, training_step
 
 
 def slow_mix():
@@ -53,12 +53,22 @@ def raised(seconds):
     return None
 
 
+def trained_steps():
+    step = training_step()
+    steps = 0
+    for _ in range(2):
+        step()
+        steps += 1
+    return steps
+
+
 def main():
     slow = scaling_run(1, "idle", 0.1, make_mix=slow_mix)
     emit({"case": "slow-mix", "ops_per_s": slow["ops_per_s"],
           "stopped": slow["stopped"]})
     emit({"case": "stamped", "runs": [stamped(s) for s in (0, 0.1)]})
     emit({"case": "failing", "raised": [raised(s) for s in (0, 0.1)]})
+    emit({"case": "training-step", "steps": trained_steps()})
 
 
 if __name__ == "__main__":

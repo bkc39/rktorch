@@ -958,8 +958,11 @@
            (step! opt))
          (append (tensor->list a) (tensor->list b)))
        (define (check-mode mode set-to-none?)
-         (for ([r (in-list (trained set-to-none?))]
-               [p (in-list (hash-ref j mode))]
+         (define rs (trained set-to-none?))
+         (define ps (hash-ref j mode))
+         (check-equal? (length rs) (length ps) (format "zero-grads! ~a: parameter count" mode))
+         (for ([r (in-list rs)]
+               [p (in-list ps)]
                [i (in-naturals)])
            (check-= r p tol (format "zero-grads! ~a: parameter ~a parity" mode i))))
        (check-mode 'none #t)
