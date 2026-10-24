@@ -216,8 +216,11 @@ consumed, so the sampler draws as PyTorch's multi-process iterator does: the
 permutation when the traversal starts, the trailing one when its request is
 made. A batch whose construction raises raises again when the traversal
 reaches it, as does a batch whose worker exited without building it; the
-traversal then stops its workers and raises the same value for every later
-batch. A break while waiting for a batch leaves the batch to the next
+traversal then stops its workers, lets go of the batches they built ahead,
+and raises the same value for every later batch. A worker builds nothing after a batch it failed to build, and a
+failure in requesting the batches ahead, such as in drawing the trailing
+permutation, fails the traversal the same way at the batch just received.
+A break while waiting for a batch leaves the batch to the next
 request. The workers stop when the traversal is exhausted, when starting it
 raises after they have started, when the
 custodian current at the traversal's start shuts down, or once the loop that
