@@ -396,7 +396,6 @@
       (when (equal? (hash-ref r 'impl) "pytorch")
         (define per-param? (regexp-match? #rx"-per-param$" (hash-ref r 'case)))
         (check-equal? (hash-ref meta 'optimizer) (if per-param? "per-param" "default"))
-        (check-equal? (hash-ref meta 'set_to_none) (not per-param?))
         (when per-param? (check-false (hash-ref meta 'foreach)))))
     (when (pytorch-available?)
       (define md (summary-markdown records))

@@ -51,7 +51,7 @@ that tensor's gradient.
 
 Gradients @emph{accumulate} rather than replace, which is what makes
 gradient accumulation across several batches possible --- and is why a
-training loop clears them every step, with
+training loop drops them every step, with
 @racket[zero-grads!].
 
 The end of @racket[backward!] is the trough of a training step, so when

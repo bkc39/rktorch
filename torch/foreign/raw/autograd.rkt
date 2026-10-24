@@ -1,6 +1,6 @@
 #lang racket/base
 
-(require (only-in ffi/unsafe _bool _double _fun _int _ptr)
+(require (only-in ffi/unsafe _bool _double _fun _int _int64 _list _ptr)
          (only-in "memory.rkt" tensor-allocator tensor-allocator/gradient)
          (only-in "syntax.rkt" _Tensor _Tensor/null define-torch))
 
@@ -14,7 +14,8 @@
          tr-is-grad-enabled/raw
          tr-tensor-sub!/raw
          tr-tensor-zero!/raw
-         tr-tensor-mul!/raw)
+         tr-tensor-mul!/raw
+         tr-tensors-reset-grad/raw)
 
 (define-torch tr-tensor-requires-grad!/raw
   (_fun (t : _Tensor) (requires? : _bool) -> _int)
@@ -69,3 +70,7 @@
 (define-torch tr-tensor-mul!/raw
   (_fun (t : _Tensor) (value : _double) -> _int)
   #:c-id tr_tensor_mul_)
+
+(define-torch tr-tensors-reset-grad/raw
+  (_fun (ts : (_list i _Tensor)) (n : _int64) -> _int)
+  #:c-id tr_tensors_reset_grad)
