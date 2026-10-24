@@ -323,8 +323,7 @@
 
 (define (newest-adopter? held a)
   (match (adoption-entries held)
-    [(cons newest _) (eq? (weak-box-value newest) a)]
-    ['() #f]))
+    [(cons newest _) (eq? (weak-box-value newest) a)]))
 
 (define (unadopt! a)
   (note-unadopted! (allocation-device a) (allocation-adopted a))

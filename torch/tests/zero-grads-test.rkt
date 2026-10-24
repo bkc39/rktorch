@@ -263,4 +263,4 @@
   (bounded-test "on CUDA a step's gradients are gone before the next backward"
     (cond
       [(cuda-available?) (gradients-gone-on-cuda)]
-      [else (printf "[zero-grads-test] skipped: no CUDA device\n")])))
+      [else (displayln "[zero-grads-test] skipped: no CUDA device")])))
