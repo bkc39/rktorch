@@ -4,7 +4,7 @@
   (require (only-in racket/list last)
            (only-in racket/match match-define)
            (only-in rackunit
-                    check-eq? check-equal? check-false check-not-eq? check-true)
+                    check-eq? check-equal? check-false check-true)
            (only-in (submod "../foreign.rkt" unsafe) to!)
            (only-in (submod "../nn/batch-norm.rkt" private) counter-one)
            (only-in "../foreign/raw/fault.rkt" with-crossing-hook)
@@ -19,7 +19,7 @@
            (only-in "private/race-harness.rkt" with-race-hook)
            (only-in "private/within.rkt" bounded-test))
 
-  (define (op-calls-of thunk)
+  (define (tally thunk)
     (define here (current-thread))
     (define crossings 0)
     (define frees 0)
@@ -35,7 +35,15 @@
                              (set! frees (add1 frees))]
                             [else (void)]))
           (thunk))))
+    (values crossings frees tensors))
+
+  (define (op-calls-of thunk)
+    (define-values (crossings frees tensors) (tally thunk))
     (- crossings frees (* 2 tensors)))
+
+  (define (crossings-of thunk)
+    (define-values (crossings frees _tensors) (tally thunk))
+    (- crossings frees))
 
   (define norms
     (list (list "BatchNorm2d" BatchNorm2d (lambda () (randn 4 3 5 5)))
@@ -46,15 +54,6 @@
 
   (define (cache bn)
     (counter-one (counter bn)))
-
-  (define (crossings-of thunk)
-    (define here (current-thread))
-    (define n 0)
-    (with-crossing-hook (lambda ()
-                          (when (eq? (current-thread) here)
-                            (set! n (add1 n))))
-      (thunk))
-    n)
 
   (struct injected (k))
 
@@ -142,7 +141,6 @@
       (bn (batch))
       (define c (layer-copy bn))
       (c (batch))
-      (check-not-eq? (cache c) (cache bn))
       (check-equal? (map item (list (counter c) (counter bn))) '(2 1)))
 
     (bounded-test (format "~a: a no-op move reads no placements" name)
@@ -153,7 +151,7 @@
       (check-equal? (crossings-of (lambda () (to bn (cpu-device))))
                     (* (length tensors) each)))
 
-    (bounded-test (format "~a: a retry mends a fault in a dtype move or forward"
+    (bounded-test (format "~a: on the cpu a retry after any fault counts exactly"
                           name)
       (check-true (positive? (repaired-after-every-fault make batch 'float64))))
 

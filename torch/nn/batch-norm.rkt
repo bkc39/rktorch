@@ -40,6 +40,8 @@
   (define training (training? mode))
   (when training
     (define one (one-beside num-batches-tracked))
+    ;; int64 add_ refuses the floating alpha a generated scalar carries (#60);
+    ;; a scalar one would promote the counter to float32, stuck at 2^24
     (addcmul! num-batches-tracked one one))
   (batch-norm x
               #:running-mean running-mean
