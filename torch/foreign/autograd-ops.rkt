@@ -1,8 +1,7 @@
 #lang racket/base
 
-(require (only-in racket/contract/base -> ->* any listof or/c)
-         (only-in racket/list filter-map)
-         (only-in racket/match match)
+(require (for-syntax racket/base syntax/parse)
+         (only-in racket/contract/base -> ->* any listof or/c)
          syntax/parse/define
          (prefix-in g: (only-in "../generated.rkt"
                                 addcdiv! addcmul! copy! lerp-tensor!))
@@ -24,8 +23,9 @@
                   tr-tensors-reset-grad/raw)
          (only-in "raw/memory.rkt" forget-gradient-adoptions!)
          (only-in "raw/pressure.rkt"
-                  collect-at-trough! native-collect-at-troughs
+                  call-with-ledger collect-at-trough! native-collect-at-troughs
                   refresh-shadows!)
+         (only-in "raw/race-points.rkt" race-point)
          (only-in "structs.rkt" tensor? tensor-free! wrap-tensor))
 
 (provide collect-at-forward-trough!
@@ -119,27 +119,45 @@
   (void (g:lerp-tensor! t end weight)))
 
 (define/contract-out (reset-grads! ts) (-> (listof tensor?) void?) ;; noqa
-  (check-ok (tr-tensors-reset-grad/raw ts (length ts)) 'reset-grads!)
-  (forget-gradient-adoptions! ts))
+  (check-ok (call-with-ledger
+             (lambda ()
+               (define rc (tr-tensors-reset-grad/raw ts (length ts)))
+               (race-point gradients-reset ts)
+               (when (zero? rc)
+                 (forget-gradient-adoptions! ts))
+               rc))
+            'zero-grads!))
 
-;; A gradient's handle may be the last owner of storage a reset dropped, so
-;; it is released when its block ends rather than at a collection.
 (define (call-with-gradients ts proc)
-  (define gs (filter-map maybe-grad ts))
-  (dynamic-wind void
-                (lambda () (proc gs))
-                (lambda () (for-each tensor-free! gs))))
+  (define held '())
+  (dynamic-wind
+   void
+   (lambda ()
+     (for ([t (in-list ts)])
+       (parameterize-break #f
+         (define g (maybe-grad t))
+         (when g
+           (set! held (cons g held)))))
+     (proc (reverse held)))
+   ;; a post thunk already runs with breaks disabled
+   (lambda ()
+     (for ([g (in-list held)])
+       (tensor-free! g)
+       (race-point gradient-released g)))))
 
-(define-syntax-parse-rule (with-gradients (gs:id ts:expr) body:expr ...+)
-  (call-with-gradients ts (lambda (gs) body ...)))
+(define (call-with-gradient t proc)
+  (call-with-gradients (list t) (lambda (gs) (for-each proc gs))))
 
-(define-syntax-parse-rule (with-gradient (g:id t:expr) body:expr ...+)
-  (with-gradients (gs (list t))
-    (match gs
-      [(list g) body ...]
-      ['() (let ([g #f]) body ...)])))
+(begin-for-syntax
+  (define-syntax-class gradient-binder
+    (pattern (name:id source:expr))))
+
+(define-syntax-parse-rule (with-gradients b:gradient-binder body:expr ...+)
+  (call-with-gradients b.source (lambda (b.name) body ...)))
+
+(define-syntax-parse-rule (with-gradient b:gradient-binder body:expr ...+)
+  (call-with-gradient b.source (lambda (b.name) body ...)))
 
 (define/contract-out (zero-grad! t) (-> tensor? void?) ;; noqa
   (with-gradient (g t)
-    (when g
-      (zero! g))))
+    (zero! g)))

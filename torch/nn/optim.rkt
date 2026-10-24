@@ -104,15 +104,14 @@
     (define mu (sgd-momentum opt))
     (for ([p (in-list (sgd-params opt))])
       (with-gradient (g p)
-        (when g
-          (define d (decayed g p (sgd-weight-decay opt)))
-          (define step
-            (cond
-              [(zero? mu) d]
-              [else
-               (define buf (momentum-buffer! opt p d))
-               (if (sgd-nesterov? opt) (add d (mul buf mu)) buf)]))
-          (sub! p step (sgd-lr opt)))))))
+        (define d (decayed g p (sgd-weight-decay opt)))
+        (define step
+          (cond
+            [(zero? mu) d]
+            [else
+             (define buf (momentum-buffer! opt p d))
+             (if (sgd-nesterov? opt) (add d (mul buf mu)) buf)]))
+        (sub! p step (sgd-lr opt))))))
 
 (struct adam (params [lr #:mutable] beta1 beta2 eps weight-decay steps
                      m v scalars)
@@ -144,23 +143,22 @@
     (define lr (adam-lr opt))
     (define eps (adam-eps opt))
     (for ([p (in-list (adam-params opt))])
-      (with-gradient (g0 p)
-        (when g0
-          (define t (add1 (hash-ref (adam-steps opt) p 0)))
-          (hash-set! (adam-steps opt) p t)
-          (define bc1 (- 1.0 (expt b1 t)))
-          (define bc2 (- 1.0 (expt b2 t)))
-          (define g (decayed g0 p (adam-weight-decay opt)))
-          (define m (moment-on (adam-m opt) p))
-          (define v (moment-on (adam-v opt) p))
-          (mul! m b1)
-          (sub! m g (- b1 1.0))
-          (mul! v b2)
-          (addcmul! v g g (- 1.0 b2))
-          (define denom (sqrt v))
-          (mul! denom (/ 1.0 (expt bc2 0.5)))
-          (sub! denom (scalar-on (adam-scalars opt) eps p) -1.0)
-          (addcdiv! p m denom (- (/ lr bc1))))))))
+      (with-gradient (g p)
+        (define t (add1 (hash-ref (adam-steps opt) p 0)))
+        (hash-set! (adam-steps opt) p t)
+        (define bc1 (- 1.0 (expt b1 t)))
+        (define bc2 (- 1.0 (expt b2 t)))
+        (define d (decayed g p (adam-weight-decay opt)))
+        (define m (moment-on (adam-m opt) p))
+        (define v (moment-on (adam-v opt) p))
+        (mul! m b1)
+        (sub! m d (- b1 1.0))
+        (mul! v b2)
+        (addcmul! v d d (- 1.0 b2))
+        (define denom (sqrt v))
+        (mul! denom (/ 1.0 (expt bc2 0.5)))
+        (sub! denom (scalar-on (adam-scalars opt) eps p) -1.0)
+        (addcdiv! p m denom (- (/ lr bc1)))))))
 
 (struct rmsprop (params [lr #:mutable] alpha eps weight-decay momentum
                         sq bufs scalars)
@@ -192,21 +190,20 @@
     (define mu (rmsprop-momentum opt))
     (define lr (rmsprop-lr opt))
     (for ([p (in-list (rmsprop-params opt))])
-      (with-gradient (g0 p)
-        (when g0
-          (define g (decayed g0 p (rmsprop-weight-decay opt)))
-          (define v (moment-on (rmsprop-sq opt) p))
-          (mul! v alpha)
-          (addcmul! v g g (- 1.0 alpha))
-          (define avg (sqrt v))
-          (sub! avg (scalar-on (rmsprop-scalars opt) (rmsprop-eps opt) p) -1.0)
-          (cond
-            [(zero? mu) (addcdiv! p g avg (- lr))]
-            [else
-             (define buf (moment-on (rmsprop-bufs opt) p))
-             (mul! buf mu)
-             (addcdiv! buf g avg 1.0)
-             (sub! p buf lr)]))))))
+      (with-gradient (g p)
+        (define d (decayed g p (rmsprop-weight-decay opt)))
+        (define v (moment-on (rmsprop-sq opt) p))
+        (mul! v alpha)
+        (addcmul! v d d (- 1.0 alpha))
+        (define avg (sqrt v))
+        (sub! avg (scalar-on (rmsprop-scalars opt) (rmsprop-eps opt) p) -1.0)
+        (cond
+          [(zero? mu) (addcdiv! p d avg (- lr))]
+          [else
+           (define buf (moment-on (rmsprop-bufs opt) p))
+           (mul! buf mu)
+           (addcdiv! buf d avg 1.0)
+           (sub! p buf lr)])))))
 
 (define/contract-out (step! opt) ;; noqa
   (-> optimizer? void?)

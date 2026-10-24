@@ -1,10 +1,8 @@
 #lang racket/base
 
 (module+ test
-  (require (for-syntax racket/base syntax/parse)
-           rackunit
+  (require rackunit
            (only-in racket/contract exn:fail:contract:blame?)
-           (only-in syntax/parse/define define-syntax-parse-rule)
            (only-in "../foreign.rkt" cpu-device cuda-available? cuda-device
                     native-collect-at-troughs native-memory-unaccounted
                     native-memory-use)
@@ -13,18 +11,17 @@
            (only-in "../foreign/raw/device-queries.rkt" allocator-reading)
            (only-in "../foreign/raw/fault.rkt" with-crossing-hook)
            (only-in "../foreign/raw/pressure.rkt"
-                    native-collect-margin refresh-shadows! reset-pressure-state!)
-           (only-in "../foreign/raw/race-points.rkt" race-hook)
+                    native-collect-margin refresh-shadows!)
            (only-in "../main.rkt"
-                    * + backward! grad has-grad? ones reclaim-native-memory! sum
-                    tensor tensor->list zeros)
+                    * + backward! grad has-grad? ones sum tensor tensor->list
+                    zeros)
            (only-in "../nn.rkt" Linear Parameter Sequential adam
                     clip-grad-norm! parameters rmsprop sgd step! step-lr
                     zero-grads!)
-           (only-in "private/within.rkt" within))
-
-  (define-syntax-parse-rule (bounded-test name:str body:expr ...+)
-    (test-case name (within 60 (lambda () body ...))))
+           (only-in "private/race-harness.rkt"
+                    gate-hook hooks make-gate release-gate! settle!
+                    wait-for-arrival with-race-hook)
+           (only-in "private/within.rkt" bounded-test))
 
   (define (crossings-of thunk)
     (define here (current-thread))
@@ -33,19 +30,24 @@
       (thunk))
     n)
 
-  (define (released-during thunk)
+  (define (no-hook _name _subject)
+    (void))
+
+  (define (released-during thunk #:also [also no-hook])
     (define here (current-thread))
     (define n 0)
-    (define previous (unbox race-hook))
-    (dynamic-wind
-     (lambda ()
-       (set-box! race-hook
-                 (lambda (name _subject)
-                   (when (and (eq? name 'free-released) (eq? (current-thread) here))
-                     (set! n (add1 n))))))
-     thunk
-     (lambda () (set-box! race-hook previous)))
+    (define (count! name _subject)
+      (when (and (eq? name 'free-released) (eq? (current-thread) here))
+        (set! n (add1 n))))
+    (with-race-hook (hooks count! also)
+      (thunk))
     n)
+
+  (define ((on-nth point n action) name _subject)
+    (when (eq? name point)
+      (set! n (sub1 n))
+      (when (zero? n)
+        (action))))
 
   (define (backed-up width depth)
     (define net (apply Sequential (for/list ([_ (in-range depth)]) (Linear width width))))
@@ -133,11 +135,17 @@
     (zero-grads! s)
     (check-false (has-grad? w)))
 
+  (define (sgd-with-momentum ps)
+    (sgd ps #:lr 0.1 #:momentum 0.9 #:weight-decay 0.1))
+
+  (define (plain-adam ps)
+    (adam ps #:lr 0.1))
+
+  (define (rmsprop-with-momentum ps)
+    (rmsprop ps #:lr 0.1 #:momentum 0.5))
+
   (bounded-test "a step releases every gradient handle it takes"
-    (for ([make-optimizer
-           (in-list (list (lambda (ps) (sgd ps #:lr 0.1 #:momentum 0.9 #:weight-decay 0.1))
-                          (lambda (ps) (adam ps #:lr 0.1))
-                          (lambda (ps) (rmsprop ps #:lr 0.1 #:momentum 0.5))))])
+    (for ([make-optimizer (in-list (list sgd-with-momentum plain-adam rmsprop-with-momentum))])
       (define ps (parameters (backed-up 3 2)))
       (define opt (make-optimizer ps))
       (check-equal? (released-during (lambda () (step! opt))) (length ps))))
@@ -152,56 +160,107 @@
     (check-equal? (released-during (lambda () (zero-grads! opt #:set-to-none? #f)))
                   (length (parameters net))))
 
+  (bounded-test "a raise on the third gradient fetch releases the two already taken"
+    (define ps (parameters (backed-up 3 2)))
+    (define (raise-injected) (raise 'injected))
+    (check-equal? (released-during
+                   (lambda ()
+                     (with-handlers ([(lambda (e) (eq? e 'injected)) void])
+                       (clip-grad-norm! ps 0.1)))
+                   #:also (on-nth 'op-returned 3 raise-injected))
+                  2))
+
+  (bounded-test "a break during the release still releases every gradient handle"
+    (define ps (parameters (backed-up 3 2)))
+    (define (break-here) (break-thread (current-thread)) (sleep 0))
+    (define released
+      (released-during
+       (lambda ()
+         (with-handlers ([exn:break? void])
+           (clip-grad-norm! ps 0.1)
+           (sleep 0)))
+       #:also (on-nth 'gradient-released 1 break-here)))
+    (check-equal? released (length ps)))
+
+  (bounded-test "a reset drops the gradients and their adoptions in one atomic section"
+    (define opt (sgd (parameters (backed-up 3 1)) #:lr 0.1))
+    (define g (make-gate 'gradients-reset))
+    (with-race-hook (gate-hook g)
+      (define worker (thread (lambda () (zero-grads! opt))))
+      (define state (wait-for-arrival g))
+      (release-gate! g)
+      (thread-wait worker)
+      (check-eq? state 'atomic)))
+
   (define mib (* 1024 1024))
 
-  (define (cpu-bytes)
-    (cond [(assoc (cpu-device) (native-memory-use)) => cdr]
+  (define (cpu-entry-of readings)
+    (cond [(assoc (cpu-device) readings) => cdr]
           [else 0]))
+
+  (define (cpu-bytes)
+    (cpu-entry-of (native-memory-use)))
 
   (define (cpu-unaccounted)
-    (cond [(assoc (cpu-device) (native-memory-unaccounted)) => cdr]
-          [else 0]))
+    (cpu-entry-of (native-memory-unaccounted)))
 
-  (define (settle!)
-    (for ([_ (in-range 3)])
-      (reclaim-native-memory!))
-    (reset-pressure-state!))
+  (define (with-unseen-gradient unseen thunk)
+    (parameterize ([allocator-reading (lambda (_dev) (+ (cpu-bytes) (unbox unseen)))]
+                   [native-collect-margin (* 1024 1024 mib)])
+      (thunk)))
 
-  ;; the stand-in allocator charges the gradient's 4 MiB beyond the ledger
-  ;; while only the parameter holds it
   (bounded-test "a gradient handle released after a reset leaves the ledger exact"
     (settle!)
     (define w (zeros 1024 1024 #:requires-grad? #t))
     (define opt (sgd (list w) #:lr 0.1))
     (define unseen (box (* 4 mib)))
-    (parameterize ([allocator-reading (lambda (_dev) (+ (cpu-bytes) (unbox unseen)))]
-                   [native-collect-margin (* 1024 1024 mib)])
-      (backward! (sum w))
-      (check-equal? (cpu-unaccounted) (* 4 mib) "the trough charged the gradient")
-      (define g (grad w))
-      (set-box! unseen 0)
-      (check-equal? (cpu-unaccounted) 0 "the handle adopted the gradient")
-      (zero-grads! opt)
-      (tensor-free! g)
-      (define released (cpu-unaccounted))
-      (refresh-shadows!)
-      (check-equal? released (cpu-unaccounted)
-                    "the release gave back bytes the parameter no longer holds"))
+    (with-unseen-gradient unseen
+      (lambda ()
+        (backward! (sum w))
+        (check-equal? (cpu-unaccounted) (* 4 mib) "the trough charged the gradient")
+        (define g (grad w))
+        (set-box! unseen 0)
+        (check-equal? (cpu-unaccounted) 0 "the handle adopted the gradient")
+        (zero-grads! opt)
+        (tensor-free! g)
+        (define released (cpu-unaccounted))
+        (refresh-shadows!)
+        (check-equal? released (cpu-unaccounted)
+                      "the release gave back bytes the parameter no longer holds")))
     (settle!))
 
-  (when (cuda-available?)
-    (bounded-test "on CUDA a step's gradients are gone before the next backward"
-      (define cuda (cuda-device))
-      (define numel (* 4 mib))
-      (define nbytes (* 4 numel))
-      (parameterize ([native-collect-at-troughs #f])
-        (define w (Parameter (zeros numel #:device cuda)))
-        (define opt (sgd (list w) #:lr 0.1))
-        (define (gradients-held)
-          (round (/ (- ((allocator-reading) cuda) base) nbytes)))
-        (define base ((allocator-reading) cuda))
+  (bounded-test "after clipping, a step's gradient handle is charged once"
+    (settle!)
+    (define w (zeros 1024 1024 #:requires-grad? #t))
+    (define unseen (box (* 4 mib)))
+    (with-unseen-gradient unseen
+      (lambda ()
         (backward! (sum w))
-        (step! opt)
-        (zero-grads! opt)
-        (backward! (sum w))
-        (check-equal? (gradients-held) 1)))))
+        (clip-grad-norm! (list w) 1e9)
+        (check-equal? (cpu-unaccounted) (* 4 mib) "the clip's release gave the charge back")
+        (define g (grad w))
+        (set-box! unseen 0)
+        (check-equal? (cpu-unaccounted) 0 "the step's handle took the charge over")
+        (tensor-free! g)))
+    (settle!))
+
+  (define (gradients-gone-on-cuda)
+    (define cuda (cuda-device))
+    (define numel (* 4 mib))
+    (define nbytes (* 4 numel))
+    (parameterize ([native-collect-at-troughs #f])
+      (define w (Parameter (zeros numel #:device cuda)))
+      (define opt (sgd (list w) #:lr 0.1))
+      (define base ((allocator-reading) cuda))
+      (define (gradients-held)
+        (round (/ (- ((allocator-reading) cuda) base) nbytes)))
+      (backward! (sum w))
+      (step! opt)
+      (zero-grads! opt)
+      (backward! (sum w))
+      (check-equal? (gradients-held) 1)))
+
+  (bounded-test "on CUDA a step's gradients are gone before the next backward"
+    (cond
+      [(cuda-available?) (gradients-gone-on-cuda)]
+      [else (printf "[zero-grads-test] skipped: no CUDA device\n")])))

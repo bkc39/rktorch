@@ -1,6 +1,7 @@
 #lang racket/base
 
 (require (only-in racket/contract/base -> and/c listof >=/c)
+         (only-in racket/match match)
          (only-in "../foreign.rkt"
                   * + clamp device div sqrt sum tensor? to-device with-no-grad
                   zeros)
@@ -14,13 +15,13 @@
   (-> (listof tensor?) (and/c real? (>=/c 0)) tensor?)
   (with-no-grad
     (with-gradients (grads params)
-      (cond
-        [(null? grads) (zeros)]
-        [else
-         (define home (device (car grads)))
+      (match grads
+        ['() (zeros)]
+        [(cons leading others)
+         (define home (device leading))
          (define total
-           (sqrt (for/fold ([acc (sum (* (car grads) (car grads)))])
-                           ([g (in-list (cdr grads))])
+           (sqrt (for/fold ([acc (sum (* leading leading))])
+                           ([g (in-list others)])
                    (+ acc (to-device (sum (* g g)) home)))))
          (define scale (clamp (div max-norm (+ total 1e-6)) #:max 1.0))
          (for ([g (in-list grads)])

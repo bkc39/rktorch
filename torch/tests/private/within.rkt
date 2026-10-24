@@ -1,9 +1,12 @@
 #lang racket/base
 
-(require (only-in racket/function const)
-         (only-in rackunit fail))
+(require (for-syntax racket/base syntax/parse)
+         (only-in racket/function const)
+         (only-in rackunit fail test-case)
+         (only-in syntax/parse/define define-syntax-parse-rule))
 
-(provide within)
+(provide bounded-test
+         within)
 
 (define (within seconds thunk)
   (define outcome #f)
@@ -18,3 +21,6 @@
     [else
      (kill-thread t)
      (fail (format "no result within ~a s" seconds))]))
+
+(define-syntax-parse-rule (bounded-test name:str body:expr ...+)
+  (test-case name (within 60 (lambda () body ...))))

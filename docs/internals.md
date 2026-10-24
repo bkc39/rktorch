@@ -346,20 +346,25 @@ the CPU, whose allocator keeps no count.
   doubling it. `tensor-allocator/gradient` does this between accounting
   the handle and the pressure check (`adopt-gradient!`, keyed by the
   parameter and a generation every refresh bumps), and takes at most what
-  the shadow holds. A second `grad` in the same step, from clipping and
-  then the optimizer say, moves nothing: the ledger charges that handle
-  again, as it does any second handle on shared storage, but the shadow
-  keeps covering the rest of what the graph and libtorch hold. The ledger
-  entry records what its adoption took, and releasing the handle gives
-  exactly that back to the shadow while the parameter still holds the
-  gradient. `zero-grads!` drops the gradients, so `reset-grads!` first
-  zeroes what each entry that adopted one would give back
-  (`forget-gradient-adoptions!`, from a weak table per parameter): a
-  handle taken before the reset frees storage nothing else holds, and
-  gives the shadow nothing. The optimizers and `clip-grad-norm!` release
-  each gradient handle as its block ends (`with-gradient`,
-  `with-gradients`), so after a step only the parameter holds a gradient
-  and a reset frees it before the next backward writes another.
+  the shadow holds. A second `grad` taken while the first handle lives
+  moves nothing: the ledger charges that handle again, as it does any
+  second handle on shared storage, but the shadow keeps covering the rest
+  of what the graph and libtorch hold. The ledger entry records what its
+  adoption took, and releasing the handle gives exactly that back to the
+  shadow while the parameter still holds the gradient; the release also
+  lets the next handle adopt again (the entry points back at its
+  parameter, weakly), so clipping and then a step charge each gradient
+  once. `zero-grads!` drops the gradients, so `reset-grads!` zeroes what
+  each entry that adopted one would give back
+  (`forget-gradient-adoptions!`, from a weak table per parameter) in the
+  same atomic section as the native reset: a handle taken before the
+  reset frees storage nothing else holds, and gives the shadow nothing.
+  The shadow itself keeps charging the dropped gradients until the next
+  refresh, so the over-count is bounded by one gradient set for one
+  iteration. The optimizers and `clip-grad-norm!` release each gradient
+  handle as its block ends (`with-gradient`, `with-gradients`), so after
+  a step only the parameter holds a gradient and a reset frees it before
+  the next backward writes another.
   `reclaim-native-memory!` refreshes it too, once the caches are
   emptied, so memory a dropped graph held stops being charged at once.
   An allocator that cannot answer at a refresh leaves its device's charge

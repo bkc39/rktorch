@@ -7,6 +7,7 @@
          (only-in ffi/unsafe/alloc allocator deallocator)
          (only-in ffi/unsafe/atomic call-as-atomic)
          (only-in racket/list remove-duplicates)
+         (only-in racket/match match)
          (only-in "../device-type.rkt" device device-index device-type)
          (only-in "collector.rkt"
                   collect-and-wait!
@@ -124,7 +125,7 @@
     (call-with-ledger note-finalizer-run!)
     (release t)))
 
-(struct allocation (phantom nbytes device [adopted #:mutable]))
+(struct allocation (phantom nbytes device [adopted #:mutable] [adopter #:mutable]))
 
 (define allocations (make-weak-hasheq))
 
@@ -157,7 +158,7 @@
            dev))))
 
 (define (record-allocation! t nbytes dev)
-  (define entry (allocation (make-phantom-bytes nbytes) nbytes dev 0))
+  (define entry (allocation (make-phantom-bytes nbytes) nbytes dev 0 #f))
   (call-with-ledger
    (lambda ()
      (hash-set! allocations t entry)
@@ -177,7 +178,7 @@
          ;; a positive adoption means the parameter still holds the gradient
          ;; this handle took over: a reset zeroes it first
          (when (positive? (allocation-adopted a))
-           (note-unadopted! (allocation-device a) (allocation-adopted a))))))))
+           (unadopt! a)))))))
 
 ;; An in-place move (tr_tensor_to_) changes the device and byte count under
 ;; the same handle, so its ledger entry is replaced rather than added to. When
@@ -294,12 +295,16 @@
 ;; A gradient is storage the backward pass wrote before any handle pointed
 ;; at it, so the shadow's last refresh may charge it. The first handle taken
 ;; on a parameter's gradient since that refresh moves those bytes to the
-;; ledger; a later one, which the ledger charges again as it does any second
-;; handle, moves nothing. Each parameter keeps the entries that adopted its
-;; gradient, weakly, so a reset that drops the gradient can cancel what their
-;; release would give back.
+;; ledger; a later one taken while that handle lives, which the ledger
+;; charges again as it does any second handle, moves nothing.
+(struct adoption (generation entries))
+
+(define no-adoption (adoption #f '()))
+
 (define adopted-at (make-weak-hasheq))
-(define adopters (make-weak-hasheq))
+
+(define (live-entries held)
+  (filter weak-box-value (adoption-entries held)))
 
 (define (adopt-gradient! args t)
   (define param (car args))
@@ -307,24 +312,36 @@
    (lambda ()
      (define now (shadow-generation))
      (define entry (hash-ref allocations t #f))
-     (when (and entry (not (eqv? (hash-ref adopted-at param #f) now)))
-       (hash-set! adopted-at param now)
+     (define held (hash-ref adopted-at param no-adoption))
+     (when (and entry (not (eqv? (adoption-generation held) now)))
        (set-allocation-adopted!
         entry
         (note-adopted! (allocation-device entry) (allocation-nbytes entry)))
-       (hash-set! adopters param
-                  (cons (make-weak-box entry)
-                        (filter weak-box-value (hash-ref adopters param '()))))))))
+       (set-allocation-adopter! entry (make-weak-box param))
+       (hash-set! adopted-at param
+                  (adoption now (cons (make-weak-box entry) (live-entries held))))))))
+
+(define (newest-adopter? held a)
+  (match (adoption-entries held)
+    [(cons newest _) (eq? (weak-box-value newest) a)]
+    ['() #f]))
+
+(define (unadopt! a)
+  (note-unadopted! (allocation-device a) (allocation-adopted a))
+  (define param (weak-box-value (allocation-adopter a)))
+  (define held (and param (hash-ref adopted-at param #f)))
+  (when (and held (newest-adopter? held a))
+    (hash-set! adopted-at param (adoption #f (live-entries held)))))
 
 (define (forget-gradient-adoptions! params)
   (call-with-ledger
    (lambda ()
      (for ([param (in-list params)])
-       (for ([held (in-list (hash-ref adopters param '()))])
+       (for ([held (in-list (live-entries (hash-ref adopted-at param no-adoption)))])
          (define entry (weak-box-value held))
          (when entry
            (set-allocation-adopted! entry 0)))
-       (hash-remove! adopters param)))))
+       (hash-remove! adopted-at param)))))
 
 ;; The retry composes OUTSIDE the allocator wrap: ffi/unsafe/alloc runs
 ;; the wrapped call in atomic mode, where the drain's blocking wait is an
