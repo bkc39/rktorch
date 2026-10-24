@@ -569,7 +569,7 @@
                      in-dataloader
                      sequence-generate))))
     (within 60 (lambda () (for ([_ (in-range 3)]) (next))))
-    (define threads (live c))
+    (define threads (workers-of c))
     (check-equal? (length threads) 2)
     (check-eq? (within 60 (lambda () (caught next))) raised)
     (check-true (dead-within? threads 5))
@@ -577,8 +577,8 @@
     (void more?)
     (custodian-shutdown-all c))
 
-  (define-dataset failing-first (failure later-built later)
-    #:length 2
+  (define-dataset failing-first (n failure later-built later)
+    #:length n
     #:ref (i)
     (cond
       [(zero? i) (raise failure)]
@@ -601,7 +601,7 @@
     (with-race-hook hook
       (define-values (more? next)
         (under c (lambda ()
-                   (~> (failing-first raised later-built later)
+                   (~> (failing-first 2 raised later-built later)
                        (dataloader #:workers 1 #:prefetch 1)
                        in-dataloader
                        sequence-generate))))
@@ -611,6 +611,110 @@
       (check-equal? (unbox later) 0 "batch 1 was never built")
       (check-eq? (within 10 (lambda () (caught next))) raised)
       (void more?))
+    (custodian-shutdown-all c))
+
+  (define (started-noting hook)
+    (define started '())
+    (values (lambda () started)
+            (lambda (name subject)
+              (match name
+                ['workers-started (set! started (vector->list subject))]
+                [_ (hook name subject)]))))
+
+  (test-case "a worker that raised builds none of the batches queued behind it"
+    (define raised (exn:fail:test "batch 0 failed" (current-continuation-marks)))
+    (define later (box 0))
+    (define-values (started hook) (started-noting void))
+    (define c (make-custodian))
+    (with-race-hook hook
+      (define-values (_count batch _finish!)
+        (under c (lambda ()
+                   (~> (failing-first 4 raised (make-semaphore 0) later)
+                       (dataloader #:workers 1 #:prefetch 3)
+                       traversal))))
+      (check-equal? (length (started)) 1)
+      (define exited? (dead-within? (started) 10))
+      (check-equal? (unbox later) 0 "batches 1 and 2 were requested and never built")
+      (check-true exited? "the worker exits on its failure")
+      (check-eq? (within 10 (lambda () (caught (lambda () (batch 0))))) raised))
+    (custodian-shutdown-all c))
+
+  (test-case "a refill that raises fails the traversal, and a retry raises again"
+    (define injected (exn:fail:test "refill failed" (current-continuation-marks)))
+    (define-values (started hook)
+      (started-noting (lambda (name subject)
+                        (match* (name subject)
+                          [('batch-requested 2) (raise injected)]
+                          [(_ _) (void)]))))
+    (define c (make-custodian))
+    (with-race-hook hook
+      (define-values (_count batch _finish!)
+        (under c (lambda ()
+                   (traversal (dataloader pairs #:batch-size 2 #:workers 1 #:prefetch 2)))))
+      (check-eq? (within 10 (lambda () (caught (lambda () (batch 0))))) injected)
+      (check-eq? (within 10 (lambda () (caught (lambda () (batch 0))))) injected
+                 "the retry does not wait for the batch the failed refill took")
+      (check-true (dead-within? (started) 10)))
+    (custodian-shutdown-all c))
+
+  (define-dataset failing-behind (failure ahead-built)
+    #:length 4
+    #:ref (i)
+    (cond
+      [(zero? i)
+       (sync/timeout 10 ahead-built)
+       (raise failure)]
+      [else i]))
+
+  (test-case "a failed traversal lets go of the batches built ahead of it"
+    (define raised (exn:fail:test "batch 0 failed" (current-continuation-marks)))
+    (define ahead-built (make-semaphore 0))
+    (define executor (make-will-executor))
+    (define (registering items)
+      (define batch (map car items))
+      (match batch
+        [(list 1)
+         (will-register executor batch (lambda (_batch) 'collected))
+         (semaphore-post ahead-built)]
+        [_ (void)])
+      batch)
+    (define-values (started hook) (started-noting void))
+    (define c (make-custodian))
+    (with-race-hook hook
+      (define-values (_count batch _finish!)
+        (under c (lambda ()
+                   (~> (failing-behind raised ahead-built)
+                       (dataloader #:collate registering #:workers 2 #:prefetch 2)
+                       traversal))))
+      (check-eq? (within 10 (lambda () (caught (lambda () (batch 0))))) raised)
+      (check-true (dead-within? (started) 10))
+      (check-equal? (for/or ([_ (in-range 20)])
+                      (collect-garbage 'major)
+                      (will-try-execute executor))
+                    'collected
+                    "batch 1 is unreachable from the traversal")
+      (check-eq? (within 10 (lambda () (caught (lambda () (batch 0))))) raised))
+    (custodian-shutdown-all c))
+
+  (test-case "a worker that fails to start stops the ones started before it"
+    (define injected (exn:fail:test "no second worker" (current-continuation-marks)))
+    (define first-worker #f)
+    (define (hook name subject)
+      (match* (name subject)
+        [('worker-starting (list t))
+         (set! first-worker t)
+         (raise injected)]
+        [(_ _) (void)]))
+    (define c (make-custodian))
+    (define outcome
+      (with-race-hook hook
+        (within 10 (lambda ()
+                     (caught (lambda ()
+                               (under c (lambda () (traversal (dataloader pairs #:workers 2))))))))))
+    (check-eq? outcome injected)
+    (check-pred thread? first-worker)
+    (check-true (thread-dead? first-worker) "the started worker is reaped before the raise")
+    (check-equal? (guards-of c) '() "nothing stays registered with the custodian")
     (custodian-shutdown-all c))
 
   (define-dataset relocating (moved?)

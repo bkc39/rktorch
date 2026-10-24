@@ -16,8 +16,8 @@
                   dataset-ref dataset? default-collate default-collate?
                   define-dataset gen:dataset indices->list indices/c)
          (only-in "workers.rkt"
-                  built raised receive-batch request-batch! start-workers
-                  stop-workers!))
+                  abort-workers! built raised receive-batch request-batch!
+                  start-workers stop-workers!))
 
 (provide (all-from-out "dataset.rkt"))
 
@@ -225,18 +225,27 @@
   (parameterize-break #f
     (define pool (start-workers (dataloader-dataset loader) (dataloader-collate loader)
                                 workers base))
-    (with-handlers ([(lambda (_v) #t)
-                     (lambda (v)
-                       (stop-workers! pool)
-                       (raise v))])
-      (call-with-break-parameterization
-       breaks
-       (lambda () (pool-batches loader pool (* workers (dataloader-prefetch loader))))))))
+    (pool-batches loader pool (* workers (dataloader-prefetch loader)) breaks)))
 
-(define (pool-batches loader pool ahead)
-  (define-values (indices finish!) (sampler-draws loader))
-  (define count (batch-count loader))
-  (define exhausting (if (short-last-batch? loader) (sub1 count) count))
+(define (pool-batches loader pool ahead breaks)
+  (define failure #f)
+  ;; a break between batch's return and the sequence recording its values
+  ;; asks for the same k again
+  (define taken #f)
+  (define (abort! v)
+    (set! failure (raised v))
+    (set! taken #f)
+    (abort-workers! pool)
+    (raise v))
+  (define (set-up thunk)
+    (with-handlers ([(lambda (_v) #t) abort!])
+      (call-with-break-parameterization breaks thunk)))
+  (define-values (indices finish! count exhausting)
+    (set-up (lambda ()
+              (define-values (indices finish!) (sampler-draws loader))
+              (define count (batch-count loader))
+              (values indices finish! count
+                      (if (short-last-batch? loader) (sub1 count) count)))))
   (define (refill! r)
     (define batch-indices (and (< r count) (indices r)))
     (cond
@@ -246,41 +255,35 @@
       [batch-indices (request-batch! pool r batch-indices)]
       [(= r exhausting) (finish!)]
       [else (void)]))
-  (for ([r (in-range ahead)])
-    (refill! r))
-  (define failure #f)
-  (define (receive-and-refill! k breakable?)
-    (define result (receive-batch pool k breakable?))
+  (define (received! k result)
     (match result
       [(raised _) (void)]
       [(built _)
        (refill! (+ k ahead))
        (when (= k (sub1 count))
-         (stop-workers! pool))])
-    result)
-  ;; a break between batch's return and the sequence recording its values
-  ;; asks for the same k again
-  (define taken #f)
+         (stop-workers! pool))]))
   (define (receive-once! k breakable?)
     (match taken
       [(cons (== k) result) result]
       [_ (set! taken #f)
-         (define result (receive-and-refill! k breakable?))
+         (define result (receive-batch pool k breakable?))
          (set! taken (cons k result))
+         (with-handlers ([(lambda (_v) #t) abort!])
+           (received! k result))
          result]))
   (define (batch k)
     (define breakable? (break-enabled))
     (parameterize-break #f
       (match (or failure (receive-once! k breakable?))
         [(built values-list) (apply values values-list)]
-        [(and (raised v) failed)
-         (set! failure failed)
-         (stop-workers! pool)
-         (raise v)])))
+        [(raised v) (abort! v)])))
   (define (exhausted!)
     (set! taken #f)
     (finish!)
     (stop-workers! pool))
+  (set-up (lambda ()
+            (for ([r (in-range ahead)])
+              (refill! r))))
   (values count batch exhausted!))
 
 (define (traversal loader)

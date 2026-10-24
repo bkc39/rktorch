@@ -28,7 +28,7 @@
 (define batch-result/c (or/c built? raised?))
 
 ;; Workers never reach the pool, so its finalizer can stop them.
-(struct worker-pool (guard results))
+(struct worker-pool (guard [results #:mutable]))
 
 ;; The guard's shutdown callback runs under the custodian lock, so it only posts.
 (struct pool-guard ([threads #:mutable] stop kill))
@@ -78,8 +78,11 @@
   (let loop ()
     (match (and (not (sync/timeout 0 stopped)) (sync stopped received))
       [(request index indices)
-       (results-queue-put! results index (build ds collate index indices))
-       (loop)]
+       (define result (build ds collate index indices))
+       (results-queue-put! results index result)
+       (match result
+         [(built _) (loop)]
+         [(raised _) (void)])]
       [_ (void)])))
 
 (define (reap guard registration)
@@ -104,20 +107,33 @@
   (parameterize ([current-custodian worker-custodian])
     (void (thread (lambda () (reap guard registration))))))
 
-(define (start-threads ds collate n base-seed results stop breaks)
+(define (start-thread ds collate seed results stop breaks caller)
+  (thread (lambda ()
+            (call-with-break-parameterization
+             breaks
+             (lambda ()
+               (parameterize ([current-custodian caller]
+                              [current-generator (make-generator seed)]
+                              [current-pseudo-random-generator (worker-prng seed)])
+                 (serve ds collate results stop)))))
+          #:pool 'own))
+
+(define (start-threads guard registration ds collate n base-seed results breaks)
   (define caller (current-custodian))
+  (define stop (pool-guard-stop guard))
+  (define made '())
   (parameterize ([current-custodian worker-custodian])
-    (for/vector #:length n ([k (in-range n)])
-      (define seed (+ base-seed k))
-      (thread (lambda ()
-                (call-with-break-parameterization
-                 breaks
-                 (lambda ()
-                   (parameterize ([current-custodian caller]
-                                  [current-generator (make-generator seed)]
-                                  [current-pseudo-random-generator (worker-prng seed)])
-                     (serve ds collate results stop)))))
-              #:pool 'own))))
+    (with-handlers ([(lambda (_v) #t)
+                     (lambda (v)
+                       (set-pool-guard-threads! guard (list->vector made))
+                       (semaphore-post stop)
+                       (reap guard registration)
+                       (raise v))])
+      (for ([k (in-range n)])
+        (race-point worker-starting made)
+        (set! made (cons (start-thread ds collate (+ base-seed k) results stop breaks caller)
+                         made)))))
+  (list->vector (reverse made)))
 
 (define/contract-out (start-workers ds collate n base-seed) ;; noqa
   (-> dataset? collate/c exact-positive-integer? exact-nonnegative-integer?
@@ -131,7 +147,7 @@
     (define pool (worker-pool guard results))
     (register-finalizer pool (lambda (_pool) (semaphore-post stop)))
     (define registration (guard-with! (current-custodian) guard))
-    (define threads (start-threads ds collate n base-seed results stop breaks))
+    (define threads (start-threads guard registration ds collate n base-seed results breaks))
     (set-pool-guard-threads! guard threads)
     (race-point workers-started threads)
     (start-reaper! guard registration)
@@ -163,3 +179,7 @@
 
 (define/contract-out (stop-workers! pool) (-> worker-pool? void?) ;; noqa
   (semaphore-post (pool-guard-stop (worker-pool-guard pool))))
+
+(define/contract-out (abort-workers! pool) (-> worker-pool? void?) ;; noqa
+  (stop-workers! pool)
+  (set-worker-pool-results! pool #f))
