@@ -362,7 +362,11 @@ the CPU, whose allocator keeps no count.
   (`forget-gradient-adoptions!`, from a weak table per parameter) in the
   same atomic section as the native reset, and only once the reset
   succeeded: a handle taken before the reset frees storage nothing else
-  holds, and gives the shadow nothing. No adoption is zeroed twice or
+  holds, and gives the shadow nothing. An in-place move (`to!`) rebinds
+  the gradient onto new storage along with the parameter, so it forgets
+  the parameter's adoptions the same way once the native move succeeded:
+  the storage they covered is gone, and the first `grad` after the next
+  refresh adopts the moved gradient. No adoption is zeroed twice or
   left behind, yet the ledger can fall below what native code holds: a
   refresh while k handles to one gradient live sees it charged k times
   on the ledger and leaves it off the shadow, so once they are released,
