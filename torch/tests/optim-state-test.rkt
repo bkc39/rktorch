@@ -153,34 +153,26 @@
              name)
      (check-true (positive? (crossings-survived name)))))
 
-  (define (crossings-of thunk)
-    (define here (current-thread))
-    (define n 0)
-    (with-crossing-hook (lambda ()
-                          (when (eq? (current-thread) here)
-                            (set! n (add1 n))))
-      (thunk))
-    n)
-
-  (bounded-test "a break at a move's native crossing waits for its generation"
-    (define placed (to (randn 2 2) 'float64))
-    (define reads (crossings-of (lambda () (to! placed 'float64))))
+  (bounded-test "a break as a move's native call returns waits for its generation"
     (define t (randn 2 2))
     (define before (move-generation))
     (define here (current-thread))
-    (define n 0)
     (define broke?
       (with-handlers ([exn:break? (lambda (_) #t)])
-        (with-crossing-hook (lambda ()
-                              (when (eq? (current-thread) here)
-                                (set! n (add1 n))
-                                (when (= n (add1 reads))
-                                  (break-thread here))))
+        (with-race-hook (lambda (name _subject)
+                          (when (and (eq? name 'move-returned)
+                                     (eq? (current-thread) here))
+                            (break-thread here)))
           (to! t 'float64))
         #f))
     (check-true broke?)
     (check-eq? (dtype t) 'float64)
     (check-equal? (move-generation) (add1 before)))
+
+  (define (check-kept before after)
+    (check-equal? (length after) (length before))
+    (check-true (andmap (lambda (s) (and (memq s after) #t)) before)
+                "every state object is the one the move found"))
 
   (define (step-in-the-last-move! net opt target)
     (define here (current-thread))
@@ -217,10 +209,14 @@
                           (check-true
                            (step-in-the-last-move! net opt '(float64))))))
     (bounded-test
-     (format "~a: another layer's move leaves this optimizer's steps alone"
-             name)
-     (twin-steps mlp (randn 2 4) make-opt (make-reference)
-                 #:move (lambda (_net _opt) (to (Linear 2 2) 'float64))))
+     (format "~a: another layer's move keeps this optimizer's state" name)
+     (define before #f)
+     (define opt
+       (twin-steps mlp (randn 2 4) make-opt (make-reference)
+                   #:move (lambda (_net optimizer)
+                            (set! before (optimizer-state optimizer))
+                            (to (Linear 2 2) 'float64))))
+     (check-kept before (optimizer-state opt)))
     (bounded-test
      (format "~a: a move to ~a after the first step moves the state along"
              name (map (lambda (x) (if (symbol? x) x (device-type x)))
@@ -262,8 +258,10 @@
       (to net 'float64)
       (define moving (step-op-calls net opt '(float64)))
       (define after (step-op-calls net opt '(float64)))
+      (define before (optimizer-state opt))
       (to (Linear 2 2) 'float64)
       (define unrelated (step-op-calls net opt '(float64)))
+      (check-kept before (optimizer-state opt))
       (list steady moving after unrelated (length (optimizer-state opt))))
     (map (lambda (one two) (/ (- two one) 2)) (costs 1) (costs 2)))
 
