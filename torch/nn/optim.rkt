@@ -4,7 +4,6 @@
                   -> ->* ->i >=/c any/c contract-out listof
                   unsupplied-arg?)
          (only-in racket/generic define-generics)
-         (only-in racket/promise delay/sync force)
          (only-in "../foreign.rkt"
                   add addcdiv! addcmul! copy! cpu-device device dtype full mul
                   mul! sqrt sub! tensor? to with-no-grad zero-grad! zeros-like)
@@ -58,8 +57,8 @@
        (hash-update! table p (lambda (s) (placed-as s p))))
      (set-tracked-generation! opt now)]))
 
-(define one
-  (delay/sync (full 1.0 #:device (cpu-device) #:dtype 'float32)))
+(define (unit-scalar)
+  (full 1.0 #:device (cpu-device) #:dtype 'float32))
 
 (define (decayed g p weight-decay)
   (if (zero? weight-decay) g (add g (mul p weight-decay))))
@@ -122,7 +121,7 @@
         (sub! p step (sgd-lr opt))))))
 
 (struct adam tracked (params [lr #:mutable] beta1 beta2 eps weight-decay
-                             steps m v)
+                             steps m v one)
   #:constructor-name make-adam
   #:name adam-optimizer ;; noqa
   #:methods gen:optimizer
@@ -144,7 +143,7 @@
   (define m (make-hasheq))
   (define v (make-hasheq))
   (make-adam (list m v) #f params lr beta1 beta2 eps weight-decay
-             (make-hasheq) m v))
+             (make-hasheq) m v (unit-scalar)))
 
 (define (adam-do-step! opt)
   (with-no-grad
@@ -168,11 +167,11 @@
         (addcmul! v d d (- 1.0 b2))
         (define denom (sqrt v))
         (mul! denom (/ 1.0 (expt bc2 0.5)))
-        (sub! denom (force one) (- eps))
+        (sub! denom (adam-one opt) (- eps))
         (addcdiv! p m denom (- (/ lr bc1)))))))
 
 (struct rmsprop tracked (params [lr #:mutable] alpha eps weight-decay
-                                momentum sq bufs)
+                                momentum sq bufs one)
   #:constructor-name make-rmsprop
   #:name rmsprop-optimizer ;; noqa
   #:methods gen:optimizer
@@ -195,7 +194,7 @@
   (define sq (make-hasheq))
   (define bufs (make-hasheq))
   (make-rmsprop (list sq bufs) #f params lr alpha eps weight-decay momentum
-                sq bufs))
+                sq bufs (unit-scalar)))
 
 (define (rmsprop-do-step! opt)
   (with-no-grad
@@ -210,7 +209,7 @@
         (mul! v alpha)
         (addcmul! v d d (- 1.0 alpha))
         (define avg (sqrt v))
-        (sub! avg (force one) (- (rmsprop-eps opt)))
+        (sub! avg (rmsprop-one opt) (- (rmsprop-eps opt)))
         (cond
           [(zero? mu) (addcdiv! p d avg (- lr))]
           [else

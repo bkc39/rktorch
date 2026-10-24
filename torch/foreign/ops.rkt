@@ -400,16 +400,18 @@
 ;; touches neither the native side nor the ledger; otherwise the status is
 ;; judged first, while the native error is fresh, and the handle is
 ;; re-accounted whichever way that goes: the ledger entry describes the
-;; handle as it now is
+;; handle as it now is. A break waits until the move is counted, so no
+;; optimizer misses it.
 (define (to! t target [dtype #f])
   (define-values (type index dt) (parse-target 'to! target dtype))
   (unless (already-there? t type index dt)
-    (define rc (tensor-to!/retrying t type index dt))
-    (dynamic-wind void
-                  (lambda () (check-ok rc 'to!))
-                  (lambda ()
-                    (note-move!)
-                    (reaccount! (tensor-handle t)))))
+    (parameterize-break #f
+      (define rc (tensor-to!/retrying t type index dt))
+      (dynamic-wind void
+                    (lambda () (check-ok rc 'to!))
+                    (lambda ()
+                      (note-move!)
+                      (reaccount! (tensor-handle t))))))
   t)
 
 (define/checked-out (tensor-device t) (-> tensor? device?)
