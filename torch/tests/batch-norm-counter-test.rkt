@@ -3,16 +3,19 @@
 (module+ test
   (require (only-in racket/list last)
            (only-in racket/match match-define)
-           (only-in rackunit check-eq? check-equal? check-false check-not-eq?)
+           (only-in rackunit
+                    check-eq? check-equal? check-false check-not-eq? check-true)
+           (only-in (submod "../foreign.rkt" unsafe) to!)
+           (only-in (submod "../nn/batch-norm.rkt" private) counter-one)
            (only-in "../foreign/raw/fault.rkt" with-crossing-hook)
            (only-in "../foreign/raw/pressure-settings.rkt"
                     native-collect-at-troughs)
            (only-in "../main.rkt"
-                    accelerator-if-available copy! device device-type dtype
-                    item randn tensor to with-default-device)
+                    accelerator-if-available copy! cpu-device device
+                    device-type dtype item randn tensor to with-default-device)
            (only-in "../nn.rkt"
-                    BatchNorm1d BatchNorm2d Buffer? Parameter? buffers
-                    in-eval-mode layer-copy layer-rebuild state-dict)
+                    BatchNorm1d BatchNorm2d buffers in-eval-mode layer-copy
+                    parameters state-dict)
            (only-in "private/race-harness.rkt" with-race-hook)
            (only-in "private/within.rkt" bounded-test))
 
@@ -42,15 +45,45 @@
     (last (buffers bn)))
 
   (define (cache bn)
-    (define seen '())
-    (layer-rebuild bn
-                   (lambda (_name child) child)
-                   (lambda (t)
-                     (set! seen (cons t seen))
-                     t))
-    (for/first ([t (in-list seen)]
-                #:unless (or (Buffer? t) (Parameter? t)))
-      t))
+    (counter-one (counter bn)))
+
+  (define (crossings-of thunk)
+    (define here (current-thread))
+    (define n 0)
+    (with-crossing-hook (lambda ()
+                          (when (eq? (current-thread) here)
+                            (set! n (add1 n))))
+      (thunk))
+    n)
+
+  (struct injected (k))
+
+  (define (faulted-at? k thunk)
+    (define here (current-thread))
+    (define n 0)
+    (with-handlers ([injected? (lambda (_) #t)])
+      (with-crossing-hook (lambda ()
+                            (when (eq? (current-thread) here)
+                              (set! n (add1 n))
+                              (when (= n k)
+                                (raise (injected k)))))
+        (thunk))
+      #f))
+
+  (define (repaired-after-every-fault make batch target)
+    (let loop ([k 1])
+      (define bn (make 3))
+      (define x (to (batch) target))
+      (bn (batch))
+      (cond
+        [(faulted-at? k (lambda () (to bn target) (bn x)))
+         (to bn target)
+         (define before (item (counter bn)))
+         (bn x)
+         (check-equal? (item (counter bn)) (add1 before)
+                       (format "a fault at crossing ~a" k))
+         (loop (add1 k))]
+        [else (sub1 k)])))
 
   (define (placed t)
     (list (device-type (device t)) (dtype t)))
@@ -69,11 +102,12 @@
     (bounded-test (format "~a: the counter stays int64 past 2^24" name)
       (define bn (make 3))
       (define x (batch))
-      (copy! (counter bn) (tensor (expt 2 24)))
-      (for ([_ (in-range 3)])
-        (bn x))
-      (check-equal? (dtype (counter bn)) 'int64)
-      (check-equal? (item (counter bn)) (+ (expt 2 24) 3))
+      (for ([start (list (expt 2 24) (expt 2 53))])
+        (copy! (counter bn) (tensor start))
+        (for ([_ (in-range 3)])
+          (bn x))
+        (check-equal? (dtype (counter bn)) 'int64)
+        (check-equal? (item (counter bn)) (+ start 3)))
       (check-equal? (item (cache bn)) 1))
 
     (bounded-test (format "~a: eval forwards leave the counter" name)
@@ -96,6 +130,7 @@
     (bounded-test (format "~a: the state dict holds the counter, not its one"
                           name)
       (define bn (make 3))
+      (bn (batch))
       (check-equal? (map car (state-dict bn))
                     '("weight" "bias" "running-mean" "running-var"
                       "num-batches-tracked"))
@@ -104,10 +139,23 @@
 
     (bounded-test (format "~a: a copy counts with its own one" name)
       (define bn (make 3))
+      (bn (batch))
       (define c (layer-copy bn))
-      (check-not-eq? (cache c) (cache bn))
       (c (batch))
-      (check-equal? (map item (list (counter c) (counter bn))) '(1 0)))
+      (check-not-eq? (cache c) (cache bn))
+      (check-equal? (map item (list (counter c) (counter bn))) '(2 1)))
+
+    (bounded-test (format "~a: a no-op move reads no placements" name)
+      (define bn (make 3))
+      (bn (batch))
+      (define tensors (append (parameters bn) (buffers bn)))
+      (define each (crossings-of (lambda () (to! (car tensors) (cpu-device)))))
+      (check-equal? (crossings-of (lambda () (to bn (cpu-device))))
+                    (* (length tensors) each)))
+
+    (bounded-test (format "~a: a retry mends a fault in a dtype move or forward"
+                          name)
+      (check-true (positive? (repaired-after-every-fault make batch 'float64))))
 
     (bounded-test (format "~a: a dtype move leaves the counter and its one int64"
                           name)
@@ -126,18 +174,34 @@
         (define bn (make 3))
         (define x (batch))
         (to bn accel)
-        (check-equal? (placed (cache bn)) (list there 'int64))
         (bn (to x accel))
+        (check-equal? (placed (cache bn)) (list there 'int64))
         (to bn 'cpu)
-        (check-equal? (placed (cache bn)) '(cpu int64))
         (bn x)
+        (check-equal? (placed (cache bn)) '(cpu int64))
         (check-equal? (item (counter bn)) 2))
+
+      (bounded-test (format "~a: a retry mends a fault moving to ~a or forward"
+                            name there)
+        (check-true (positive? (repaired-after-every-fault make batch accel))))
+
+      (bounded-test (format "~a: on ~a the counter is exact past 2^24 and 2^53"
+                            name there)
+        (define bn (to (make 3) accel))
+        (define x (to (batch) accel))
+        (for ([start (list (expt 2 24) (expt 2 53))])
+          (copy! (counter bn) (tensor start))
+          (for ([_ (in-range 3)])
+            (bn x))
+          (check-equal? (placed (counter bn)) (list there 'int64))
+          (check-equal? (item (counter bn)) (+ start 3))))
 
       (bounded-test (format "~a: one built on ~a follows a move to the cpu"
                             name there)
         (define bn (with-default-device accel (make 3)))
+        (bn (to (batch) accel))
         (check-equal? (placed (cache bn)) (list there 'int64))
         (check-eq? (to bn 'cpu) bn)
         (bn (batch))
         (check-equal? (placed (cache bn)) '(cpu int64))
-        (check-equal? (item (counter bn)) 1)))))
+        (check-equal? (item (counter bn)) 2)))))

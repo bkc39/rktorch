@@ -3,6 +3,7 @@
 (module+ test
   (require (only-in json bytes->jsexpr)
            (only-in racket/file file->bytes make-temporary-file)
+           (only-in racket/match match-define)
            (only-in racket/string string-replace)
            (only-in rackunit check-equal?)
            (only-in "../main.rkt" dtype item randn)
@@ -21,12 +22,10 @@
     (define header-len (integer-bytes->integer raw #f #f 0 8))
     (define header (bytes->jsexpr (subbytes raw 8 (+ 8 header-len))))
     (define meta (hash-ref header (string->symbol key)))
-    (define offsets (hash-ref meta 'data_offsets))
+    (match-define (list start end) (hash-ref meta 'data_offsets))
     (values (hash-ref meta 'dtype)
             (hash-ref meta 'shape)
-            (bytes->list (subbytes raw
-                                   (+ 8 header-len (car offsets))
-                                   (+ 8 header-len (cadr offsets))))))
+            (bytes->list (subbytes raw (+ 8 header-len start) (+ 8 header-len end)))))
 
   (cond
     [(not (python-torch-available?))
@@ -44,7 +43,7 @@
        (check-equal? (for/list ([e (in-list (state-dict bn))])
                        (format "torch.~a" (dtype (cdr e))))
                      (hash-ref j 'dtypes))
-       (define counter (caddr (buffers bn)))
+       (match-define (list _ _ counter) (buffers bn))
        (check-equal? (item counter) (hash-ref j 'saved_counter))
        (define x (randn 2 3 4 4))
        (bn x)

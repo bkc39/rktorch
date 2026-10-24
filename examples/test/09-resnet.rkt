@@ -50,8 +50,8 @@
   (define step-loss
     (train-step net (sgd (parameters net) #:lr 0.01)
                 (narrow xs 0 0 8) (narrow ys 0 0 8)))
-  (check-true (tensor? step-loss) "train-step hands back the loss unread")
-  (check-true (rational? (item step-loss)))
+  (check-true (and (tensor? step-loss) (rational? (item step-loss)))
+              "train-step hands back the loss unread")
   ;; Device RNG streams differ from the CPU's for the init, so the on-device
   ;; arm checks convergence, never equality with the CPU losses above.
   (define accel (accelerator-if-available))
