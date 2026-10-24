@@ -14,9 +14,6 @@
               #:when (~> entry car device-type (eq? 'cpu)))
       (cdr entry)))
 
-  (define (take-up-to xs n)
-    (for/list ([x (in-list xs)] [_ (in-range n)]) x))
-
   (test-case "topk answers values and indices as two values"
     (define-values (values-t indices-t)
       (g:topk (tensor '((1.0 5.0 3.0) (4.0 2.0 6.0))) 2 -1 #t #t))
@@ -51,12 +48,13 @@
     (check-equal? (tensor-shape input) '(64)))
 
   ;; Only the two outputs are allocated inside the loop, so the trigger can
-  ;; only come from the multi-output wrap. The last 12 calls' outputs, 36 MiB,
-  ;; stay live: dead ones are released within a collection and never add up.
+  ;; only come from the multi-output wrap.
   (test-case "a multi-output call presses on the collector like any other"
     (define mib (* 1024 1024))
     (define (collections)
       (cdr (assq 'pressure-collections (finalizer-diagnostics))))
+    (define live-window 12)
+    (define call-bytes (* 262144 (+ 4 8)))
     (define source (randn 1048576))
     (for ([_ (in-range 3)]) (reclaim-native-memory!))
     (reset-pressure-state!)
@@ -67,12 +65,14 @@
         (for/fold ([hw 0] [window '()] #:result hw) ([_ (in-range 40)])
           (define-values (top indices) (g:topk source 262144 0 #t #t))
           (values (max hw (- (cpu-bytes) base))
-                  (cons (cons top indices) (take-up-to window 11)))))
+                  (cons (cons top indices)
+                        (take window (min (length window) (sub1 live-window)))))))
       (check-true (> (collections) before)
                   "accounting several outputs never reached the trigger")
-      (check-true (< high-water (* 64 mib))
-                  (format "ledger reached ~a MiB under a 32 MiB limit"
-                          (quotient high-water mib))))
+      (check-true (<= high-water (* (+ live-window 8) call-bytes))
+                  (format "ledger reached ~a MiB with ~a MiB live"
+                          (quotient high-water mib)
+                          (quotient (* live-window call-bytes) mib))))
     (check-equal? (tensor-shape source) '(1048576)))
 
   (test-case "a failing call raises with the op and the ATen message"
