@@ -7,6 +7,7 @@
          (only-in "../foreign.rkt"
                   add addcdiv! addcmul! copy! device dtype full maybe-grad mul
                   mul! sqrt sub! tensor? to with-no-grad zero-grad! zeros-like)
+         (only-in "../foreign/autograd-ops.rkt" reset-grads!)
          (only-in "../private/contract.rkt" define/contract-out)
          (only-in "../private/step-log.rkt" log-optimizer-step!))
 
@@ -113,7 +114,7 @@
              (if (sgd-nesterov? opt) (add d (mul buf mu)) buf)]))
         (sub! p step (sgd-lr opt))))))
 
-(struct adam (params [lr #:mutable] beta1 beta2 eps weight-decay step-box
+(struct adam (params [lr #:mutable] beta1 beta2 eps weight-decay steps
                      m v scalars)
   #:constructor-name make-adam
   #:name adam-optimizer ;; noqa
@@ -133,22 +134,22 @@
        [#:lr (>=/c 0) #:beta1 real? #:beta2 real? #:eps real?
         #:weight-decay (>=/c 0)]
        adam?)
-  (make-adam params lr beta1 beta2 eps weight-decay (box 0)
+  (make-adam params lr beta1 beta2 eps weight-decay (make-hasheq)
              (make-hasheq) (make-hasheq) (make-hasheq)))
 
 (define (adam-do-step! opt)
   (with-no-grad
-    (set-box! (adam-step-box opt) (add1 (unbox (adam-step-box opt))))
-    (define t (unbox (adam-step-box opt)))
     (define b1 (adam-beta1 opt))
     (define b2 (adam-beta2 opt))
     (define lr (adam-lr opt))
     (define eps (adam-eps opt))
-    (define bc1 (- 1.0 (expt b1 t)))
-    (define bc2 (- 1.0 (expt b2 t)))
     (for ([p (in-list (adam-params opt))])
       (define g0 (maybe-grad p))
       (when g0
+        (define t (add1 (hash-ref (adam-steps opt) p 0)))
+        (hash-set! (adam-steps opt) p t)
+        (define bc1 (- 1.0 (expt b1 t)))
+        (define bc2 (- 1.0 (expt b2 t)))
         (define g (decayed g0 p (adam-weight-decay opt)))
         (define m (moment-on (adam-m opt) p))
         (define v (moment-on (adam-v opt) p))
@@ -213,9 +214,12 @@
   (when (or (sgd? opt) (adam? opt) (rmsprop? opt))
     (log-optimizer-step! opt (optimizer-parameters opt))))
 
-(define/contract-out (zero-grads! opt) ;; noqa
-  (-> optimizer? void?)
-  (for-each zero-grad! (optimizer-parameters opt)))
+(define/contract-out (zero-grads! opt #:set-to-none? [set-to-none? #t]) ;; noqa
+  (->* [optimizer?] [#:set-to-none? boolean?] void?)
+  (define params (optimizer-parameters opt))
+  (if set-to-none?
+      (reset-grads! params)
+      (for-each zero-grad! params)))
 
 (define/contract-out (learning-rate opt) ;; noqa
   (-> optimizer? real?)

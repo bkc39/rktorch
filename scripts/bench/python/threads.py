@@ -36,7 +36,7 @@ def training_step():
     ys = torch.tensor([i % 10 for i in range(64)])
 
     def step():
-        opt.zero_grad(set_to_none=False)
+        opt.zero_grad()
         F.cross_entropy(net(xs), ys).backward()
         opt.step()
 

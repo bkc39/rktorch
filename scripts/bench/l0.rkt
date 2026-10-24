@@ -202,8 +202,8 @@
             (check-equal? (hash-ref run 'before_start) 0))
           (check-equal? (hash-ref failing 'raised) '("unsupported" "unsupported")
                         "a worker's raise fails the run")
-          (check-equal? (hash-ref zero-grad 'set_to_none) '(#f #f)
-                        "main zeroes its gradients in place, as zero-grads! does")]))
+          (check-equal? (hash-ref zero-grad 'set_to_none) '(#t #t)
+                        "main drops its gradients, as zero-grads! does")]))
 
      (test-case "pytorch-ops rounds leave the caching allocator warm, as ops's do"
        (match (twin-records "ops_probe.py" '() #:log (open-output-nowhere) #:time-limit 120)

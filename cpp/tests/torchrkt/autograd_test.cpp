@@ -121,4 +121,44 @@ TEST(TorchrktAutograd, GradSharesStorageAndInplaceOpsWork) {
   EXPECT_EQ(data_of(x.t), (std::vector<float>{0.5F, 1.5F}));
 }
 
+TEST(TorchrktAutograd, ResetGradDropsEveryGradientInOneCall) {
+  Handle x = make({1.0F, 2.0F}, {2});
+  Handle w = make({3.0F}, {1});
+  ASSERT_EQ(tr_tensor_requires_grad_(x.t, 1), 0) << tr_last_error();
+  ASSERT_EQ(tr_tensor_requires_grad_(w.t, 1), 0) << tr_last_error();
+  auto backward = [&] {
+    const Handle sq(tr_mul(x.t, x.t));
+    const Handle wx(tr_mul(sq.t, w.t));
+    Handle y(tr_sum(wx.t));
+    ASSERT_EQ(tr_tensor_backward(y.t), 0) << tr_last_error();
+  };
+  backward();
+  const Handle before(tr_tensor_grad(x.t));
+
+  std::vector<tr_tensor*> both{x.t, w.t};
+  ASSERT_EQ(tr_tensors_reset_grad(both.data(), 2), 0) << tr_last_error();
+  int has = -1;
+  for (tr_tensor* t : both) {
+    ASSERT_EQ(tr_tensor_has_grad(t, &has), 0) << tr_last_error();
+    EXPECT_EQ(has, 0);
+  }
+
+  backward();
+  const Handle after(tr_tensor_grad(x.t));
+  EXPECT_EQ(data_of(after.t), (std::vector<float>{6.0F, 12.0F}));
+  EXPECT_EQ(data_of(before.t), (std::vector<float>{6.0F, 12.0F}));
+
+  ASSERT_EQ(tr_tensors_reset_grad(both.data(), 2), 0) << tr_last_error();
+  ASSERT_EQ(tr_tensors_reset_grad(both.data(), 2), 0) << tr_last_error();
+  EXPECT_EQ(tr_tensors_reset_grad(nullptr, 0), 0) << tr_last_error();
+}
+
+TEST(TorchrktAutograd, ResetGradRejectsNullArguments) {
+  Handle x = make({1.0F}, {1});
+  std::vector<tr_tensor*> with_null{x.t, nullptr};
+  EXPECT_EQ(tr_tensors_reset_grad(nullptr, 1), 1);
+  EXPECT_EQ(tr_tensors_reset_grad(with_null.data(), 2), 1);
+  EXPECT_EQ(tr_tensors_reset_grad(with_null.data(), -1), 1);
+}
+
 }  // namespace

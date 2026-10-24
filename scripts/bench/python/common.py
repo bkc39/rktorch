@@ -92,15 +92,15 @@ def clock_ms():
 
 OPTIMIZER_STYLES = {
     "default": ({"foreach": None}, True),
-    "per-param": ({"foreach": False}, False),
+    "per-param": ({"foreach": False}, True),
 }
 
 
 def optimizer_options(style):
     """The optimizer keywords and zero_grad's set_to_none for OPTIMIZER:
     "default" is PyTorch's (foreach kernels where it picks them, gradients
-    dropped), "per-param" steps each parameter alone and zeroes its gradient
-    in place, as rktorch's optimizers do."""
+    dropped), "per-param" steps each parameter alone, as rktorch's
+    optimizers do, and drops the gradients as zero-grads! does."""
     if style not in OPTIMIZER_STYLES:
         sys.exit(f"OPTIMIZER is one of {sorted(OPTIMIZER_STYLES)}: {style!r}")
     return OPTIMIZER_STYLES[style]

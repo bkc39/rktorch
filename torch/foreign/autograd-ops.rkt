@@ -18,13 +18,15 @@
                   tr-tensor-requires-grad!/raw
                   tr-tensor-requires-grad/raw
                   tr-tensor-sub!/raw
-                  tr-tensor-zero!/raw)
+                  tr-tensor-zero!/raw
+                  tr-tensors-reset-grad/raw)
          (only-in "raw/pressure.rkt"
                   collect-at-trough! native-collect-at-troughs
                   refresh-shadows!)
          (only-in "structs.rkt" tensor? wrap-tensor))
 
 (provide collect-at-forward-trough!
+         reset-grads!
          with-no-grad)
 
 (define/checked-out (requires-grad! t [on? #t])
@@ -111,6 +113,9 @@
 
 (define/contract-out (lerp! t end weight) (-> tensor? tensor? tensor? void?) ;; noqa
   (void (g:lerp-tensor! t end weight)))
+
+(define (reset-grads! ts)
+  (check-ok (tr-tensors-reset-grad/raw ts (length ts)) 'zero-grads!))
 
 (define/contract-out (zero-grad! t) (-> tensor? void?) ;; noqa
   (when (has-grad? t)

@@ -132,11 +132,10 @@ median, quartiles and IQR, and the load average before and after.
   datasets, its PGM decode and jitter in pure Python.
   The twins' optimizers are PyTorch's defaults: on CUDA `Adam` and `SGD`
   pick the `foreach` kernels, one launch per op over every parameter, and
-  `zero_grad()` drops the gradients (`set_to_none=True`). rktorch's
-  optimizers step each parameter alone and zero its gradient in place, so
-  each twin has a `-per-param` form (`py-05-mnist-per-param`, ...) that runs
-  with `OPTIMIZER=per-param`: `foreach=False` and
-  `zero_grad(set_to_none=False)`. Both record `optimizer`, `foreach` (as
+  `zero_grad()` drops the gradients (`set_to_none=True`), as `zero-grads!`
+  does. rktorch's optimizers step each parameter alone, so each twin has a
+  `-per-param` form (`py-05-mnist-per-param`, ...) that runs with
+  `OPTIMIZER=per-param`: `foreach=False`. Both record `optimizer`, `foreach` (as
   PyTorch resolved it) and `set_to_none` in their `meta`.
   Every step is settled before it is logged. A twin calls
   `torch.cuda.synchronize()`, one call; rktorch's `settle!` reads one
@@ -183,8 +182,7 @@ median, quartiles and IQR, and the load average before and after.
 - **pytorch-threads** — the same mix and main loop in PyTorch, on
   `threading.Thread`s, with `torch.set_num_threads` at rktorch's thread
   count, released and counted the same way, and failing the same way. Its
-  main loop zeroes the gradients in place (`zero_grad(set_to_none=False)`),
-  as `zero-grads!` does.
+  main loop drops the gradients (`zero_grad()`), as `zero-grads!` does.
 - **calls** — native crossings per training step of 05 and 09 by phase
   (`data`, `zero-grads`, `forward`, `backward`, `optimizer`, and 09's
   `loss-item`) and in all (`step`, counted whole), on synthetic
