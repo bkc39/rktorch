@@ -11,8 +11,11 @@
 
   (define (cpu-bytes)
     (for/sum ([entry (in-list (native-memory-use))]
-              #:when (eq? (device-type (car entry)) 'cpu))
+              #:when (~> entry car device-type (eq? 'cpu)))
       (cdr entry)))
+
+  (define (take-up-to xs n)
+    (for/list ([x (in-list xs)] [_ (in-range n)]) x))
 
   (test-case "topk answers values and indices as two values"
     (define-values (values-t indices-t)
@@ -48,7 +51,8 @@
     (check-equal? (tensor-shape input) '(64)))
 
   ;; Only the two outputs are allocated inside the loop, so the trigger can
-  ;; only come from the multi-output wrap.
+  ;; only come from the multi-output wrap. The last 12 calls' outputs, 36 MiB,
+  ;; stay live: dead ones are released within a collection and never add up.
   (test-case "a multi-output call presses on the collector like any other"
     (define mib (* 1024 1024))
     (define (collections)
@@ -60,10 +64,10 @@
     (define before (collections))
     (parameterize ([native-memory-limit (* 32 mib)])
       (define high-water
-        (for/fold ([hw 0]) ([_ (in-range 40)])
+        (for/fold ([hw 0] [window '()] #:result hw) ([_ (in-range 40)])
           (define-values (top indices) (g:topk source 262144 0 #t #t))
-          (void top indices)
-          (max hw (- (cpu-bytes) base))))
+          (values (max hw (- (cpu-bytes) base))
+                  (cons (cons top indices) (take-up-to window 11)))))
       (check-true (> (collections) before)
                   "accounting several outputs never reached the trigger")
       (check-true (< high-water (* 64 mib))

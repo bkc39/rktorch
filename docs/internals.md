@@ -130,7 +130,17 @@ skips. The claim names its thread, so one killed mid-collection, whose
 
 Phantom pressure keeps Racket's generational collections running, and
 on a GPU training loop they free most of a step's intermediates within
-the step. Two things escape them (#145, measured with
+the step, provided the finalizer thread gets its turn. A collection only
+finds a dead handle; its storage and its phantom stay until the
+finalizer runs, and that thread runs only while the main thread yields,
+which a loop of native calls seldom does. Without a turn the charge of
+every dead result piles up until Racket's next major, which reclaims
+nothing but that backlog: 8 MiB results ran three majors per hundred
+calls, about 1 ms a call on any device (#377). So every accounting ends
+with `yield-to-finalizers!` (`raw/collector.rkt`), which sleeps once per
+collection, keyed to a weak-box canary that the collection clears.
+
+Two things escape them (#145, measured with
 `scripts/bench-memory-pressure.rkt`):
 
 - a slow residue of handles promoted past the young generations, about

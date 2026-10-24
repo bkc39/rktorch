@@ -11,7 +11,8 @@
          (only-in "collector.rkt"
                   collect-and-wait!
                   finalizer-runs
-                  note-finalizer-run!)
+                  note-finalizer-run!
+                  yield-to-finalizers!)
          (only-in "fault.rkt" native-fault? note-native-fault!)
          (only-in "pressure.rkt"
                   call-with-ledger
@@ -177,6 +178,10 @@
          (when (positive? (allocation-adopted a))
            (note-unadopted! (allocation-device a) (allocation-adopted a))))))))
 
+(define (after-accounting! dev)
+  (collect-under-pressure! dev)
+  (yield-to-finalizers!))
+
 ;; An in-place move (tr_tensor_to_) changes the device and byte count under
 ;; the same handle, so its ledger entry is replaced rather than added to. When
 ;; the new size cannot be read the old charge goes back: a stale entry still
@@ -186,7 +191,7 @@
   (unaccount! t)
   (define dev (account! t))
   (cond
-    [dev (collect-under-pressure! dev)]
+    [dev (after-accounting! dev)]
     [old (record-allocation! t (allocation-nbytes old) (allocation-device old))]
     [else (void)]))
 
@@ -283,7 +288,7 @@
     (define dev (account! t))
     (when dev
       (adopt args t)
-      (collect-under-pressure! dev)))
+      (after-accounting! dev)))
   t)
 
 (define (adopt-nothing _args _t)
@@ -343,7 +348,7 @@
     ;; every output is on the ledger before any collection measures it
     (for ([dev (in-list (remove-duplicates (filter values
                                                    (map account! handles))))])
-      (collect-under-pressure! dev)))
+      (after-accounting! dev)))
   handles)
 
 ;; For raw calls answering a list of handles, or #f on failure.

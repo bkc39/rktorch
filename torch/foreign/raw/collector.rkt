@@ -1,7 +1,7 @@
 #lang racket/base
 
 (require (only-in ffi/unsafe register-finalizer)
-         (only-in ffi/unsafe/atomic call-as-atomic)
+         (only-in ffi/unsafe/atomic call-as-atomic in-atomic-mode?)
          (only-in "race-points.rkt" race-point))
 
 (provide call-as-the-collector
@@ -9,7 +9,8 @@
          drain-deadline
          drain-finalizers!
          finalizer-runs
-         note-finalizer-run!)
+         note-finalizer-run!
+         yield-to-finalizers!)
 
 ;; Bumped by every release, inside the ledger's atomic section.
 (define runs 0)
@@ -51,6 +52,17 @@
   (register-finalizer (box 0) void))
 
 (start-finalizer-thread!)
+
+;; The finalizer thread runs only while this one yields, and a loop of native
+;; calls seldom does: the handles a collection found dead would keep their
+;; storage, and the phantom bytes charging it, until Racket's next major.
+;; The canary's box dies in the first collection after it is made.
+(define canary (make-weak-box (box 0)))
+
+(define (yield-to-finalizers!)
+  (unless (or (weak-box-value canary) (in-atomic-mode?))
+    (set! canary (make-weak-box (box 0)))
+    (sleep 0)))
 
 ;; The canary shows the finalizer thread has started on this collection's
 ;; batch, not that it has finished: finalization order is unspecified and
