@@ -6,11 +6,11 @@
            (only-in "../data/loader.rkt" dataloader tensor-dataset)
            (only-in (submod "../data/workers.rkt" private) live-worker-count)
            (only-in "../foreign/raw/collector.rkt" collect-and-wait!)
-           (only-in "../foreign.rkt" cpu-device detach native-memory-use)
+           (only-in "../foreign.rkt" cpu-device detach native-memory-use requires-grad?)
            (only-in "../main.rkt" ones sum)
            (only-in "../nn.rkt" Linear mse-loss parameters sgd)
            "../train.rkt"
-           (only-in (submod "../train/logging.rkt" private) host-reads))
+           (only-in (submod "../train/logging.rkt" private) epoch-accumulators host-reads))
 
   (define (collect!)
     (define-values (seen? drained?) (collect-and-wait!))
@@ -55,41 +55,51 @@
                     (format "~a keys, every ~a" (length keys) every))))
 
   (define-trainer Wide (net mode weak kept)
-    (define-init (m w k)
+    (define-init (m w)
       (set! net (Linear 1024 1024))
       (set! mode m)
       (set! weak w)
-      (set! kept k))
+      (set! kept '()))
     (define-optimizers (sgd (parameters net) #:lr 0.01))
     (define-training-step (x y)
       (define out (net x))
       (define loss (mse-loss out x))
       (define logged (detach loss))
       (log! 'loss logged #:on-step? #t #:on-epoch? #t)
+      (log! 'raw loss #:on-step? #t #:on-epoch? #t)
       (set-box! weak (cons (list (make-weak-box loss) (make-weak-box logged)) (unbox weak)))
       (case mode
-        [(retain) (set-box! kept (list* out loss logged (unbox kept)))]
+        [(retain) (set! kept (list* out loss logged kept))]
         [(drop) (ones 512 1024)]
         [else (void)])
       loss))
 
-  (define (wide-fit mode #:callbacks [callbacks '()])
-    (define weak (box '()))
-    (define kept (box '()))
-    (fit (Wide mode weak kept) (loader 640 #:width 1024 #:batch-size 64) #:max-steps 60
-         #:logger #f #:callbacks callbacks)
-    (values weak kept))
+  (define (wide-fit mode #:weak [weak (box '())] #:callbacks [callbacks '()])
+    (fit (Wide mode weak) (loader 640 #:width 1024 #:batch-size 64) #:max-steps 60
+         #:logger #f #:callbacks callbacks))
+
+  (define (mid-epoch-callback f)
+    (lambda-callback
+     #:on-train-batch-end
+     (lambda (r loss extra . batch)
+       (case (run-global-step r)
+         [(55) (f r)]
+         [else (void)]))))
 
   (define (earlier-survivors mode)
-    (define-values (weak kept) (wide-fit mode))
-    (collect!)
-    (match-define (cons _ earlier) (unbox weak))
-    (define alive
-      (for*/sum ([step (in-list earlier)]
-                 [wb (in-list step)]
-                 #:when (weak-box-value wb))
-        1))
-    (check-equal? (length (unbox kept)) (if (eq? mode 'retain) (* 3 60) 0))
+    (define weak (box '()))
+    (define alive #f)
+    (define census
+      (mid-epoch-callback
+       (lambda (r)
+         (collect!)
+         (match-define (cons _ earlier) (unbox weak))
+         (set! alive
+               (for*/sum ([step (in-list earlier)]
+                          [wb (in-list step)]
+                          #:when (weak-box-value wb))
+                 1)))))
+    (wide-fit mode #:weak weak #:callbacks (list census))
     alive)
 
   (define (ledger-growth mode)
@@ -112,7 +122,18 @@
     (check-equal? (earlier-survivors #f) 0))
 
   (test-case "L-R2's weak boxes see a trainer that keeps every step's loss"
-    (check-equal? (earlier-survivors 'retain) (* 2 59)))
+    (check-equal? (earlier-survivors 'retain) (* 2 54)))
+
+  (test-case "L-R2: log! accumulates a detached value when given the loss itself"
+    (define grads #f)
+    (define probe
+      (mid-epoch-callback
+       (lambda (r)
+         (set! grads
+               (for/list ([(key acc) (in-hash (epoch-accumulators r))])
+                 (cons key (requires-grad? acc)))))))
+    (wide-fit #f #:callbacks (list probe))
+    (check-equal? (sort grads symbol<? #:key car) '((loss . #f) (raw . #f))))
 
   (test-case "L-R2: the ledger after many steps stays near the ledger after one"
     (check-= (ledger-growth #f) 0 growth-tolerance))

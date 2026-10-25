@@ -273,7 +273,8 @@ Lightning's @tt{self.log}. The values allowed for @racket[#:on-step?] and
 @racket[#:on-epoch?], and their defaults, are the hook's, from
 @secref["train-hooks"]; @racket[#:on-step? #t] or @racket[#:on-epoch? #f]
 in a hook that logs only per epoch is a contract violation. An epoch
-@racket['mean] is weighted by @racket[#:batch-size].}
+@racket['mean] is weighted by @racket[#:batch-size]. The value is detached
+before it is accumulated, so a logged loss keeps no graph alive.}
 
 @defthing[gen:logger any/c]{
 The generic interface of a logger, with the methods below.}

@@ -37,9 +37,11 @@
 (define-named-contract logger-spec/c (or/c #f logger? (listof logger?)))
 
 (module+ private
-  (provide host-reads))
+  (provide epoch-accumulators host-reads))
 
 (define (host-reads) (not-implemented 'host-reads 'T1))
+
+(define (epoch-accumulators r) (not-implemented 'epoch-accumulators 'T1))
 
 (define (hook-log-rule r) (not-implemented 'run-log! 'T1))
 
