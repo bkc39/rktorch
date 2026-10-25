@@ -1,18 +1,23 @@
 #lang racket/base
 
 (module+ test
-  (require rackunit
+  (require (only-in racket/match match-define)
+           rackunit
            (only-in "../data/loader.rkt" dataloader tensor-dataset)
            (only-in (submod "../data/workers.rkt" private) live-worker-count)
            (only-in "../foreign/raw/collector.rkt" collect-and-wait!)
-           (only-in "../foreign.rkt" cpu-device native-memory-use)
+           (only-in "../foreign.rkt" cpu-device detach native-memory-use)
            (only-in "../main.rkt" ones sum)
            (only-in "../nn.rkt" Linear mse-loss parameters sgd)
            "../train.rkt"
            (only-in (submod "../train/logging.rkt" private) host-reads))
 
+  (define (collect!)
+    (define-values (seen? drained?) (collect-and-wait!))
+    (check-true (and seen? drained?) "collection drained"))
+
   (define (cpu-bytes)
-    (collect-and-wait!)
+    (collect!)
     (cond [(assoc (cpu-device) (native-memory-use)) => cdr]
           [else 0]))
 
@@ -49,20 +54,43 @@
                     (+ (quotient (* 2 7) every) 2)
                     (format "~a keys, every ~a" (length keys) every))))
 
-  (define-trainer Wide (net mode kept)
-    (define-init (m)
+  (define-trainer Wide (net mode weak kept)
+    (define-init (m w k)
       (set! net (Linear 1024 1024))
       (set! mode m)
-      (set! kept (box '())))
+      (set! weak w)
+      (set! kept k))
     (define-optimizers (sgd (parameters net) #:lr 0.01))
     (define-training-step (x y)
-      (define loss (mse-loss (net x) x))
-      (log! 'loss loss #:on-step? #t #:on-epoch? #t)
+      (define out (net x))
+      (define loss (mse-loss out x))
+      (define logged (detach loss))
+      (log! 'loss logged #:on-step? #t #:on-epoch? #t)
+      (set-box! weak (cons (list (make-weak-box loss) (make-weak-box logged)) (unbox weak)))
       (case mode
-        [(retain) (set-box! kept (cons loss (unbox kept)))]
+        [(retain) (set-box! kept (list* out loss logged (unbox kept)))]
         [(drop) (ones 512 1024)]
         [else (void)])
       loss))
+
+  (define (wide-fit mode #:callbacks [callbacks '()])
+    (define weak (box '()))
+    (define kept (box '()))
+    (fit (Wide mode weak kept) (loader 640 #:width 1024 #:batch-size 64) #:max-steps 60
+         #:logger #f #:callbacks callbacks)
+    (values weak kept))
+
+  (define (earlier-survivors mode)
+    (define-values (weak kept) (wide-fit mode))
+    (collect!)
+    (match-define (cons _ earlier) (unbox weak))
+    (define alive
+      (for*/sum ([step (in-list earlier)]
+                 [wb (in-list step)]
+                 #:when (weak-box-value wb))
+        1))
+    (check-equal? (length (unbox kept)) (if (eq? mode 'retain) (* 3 60) 0))
+    alive)
 
   (define (ledger-growth mode)
     (define after-one #f)
@@ -75,11 +103,16 @@
            [(1) (set! after-one (cpu-bytes))]
            [(60) (set! after-many (cpu-bytes))]
            [else (void)]))))
-    (fit (Wide mode) (loader 640 #:width 1024 #:batch-size 64) #:max-steps 60
-         #:logger #f #:callbacks (list gauge))
+    (wide-fit mode #:callbacks (list gauge))
     (- after-many after-one))
 
   (define growth-tolerance (* 1024 1024))
+
+  (test-case "L-R2: no step's loss or logged value outlives its step"
+    (check-equal? (earlier-survivors #f) 0))
+
+  (test-case "L-R2's weak boxes see a trainer that keeps every step's loss"
+    (check-equal? (earlier-survivors 'retain) (* 2 59)))
 
   (test-case "L-R2: the ledger after many steps stays near the ledger after one"
     (check-= (ledger-growth #f) 0 growth-tolerance))
@@ -87,7 +120,7 @@
   (test-case "L-R2's gauge collects a 2 MiB tensor dropped at every step"
     (check-= (ledger-growth 'drop) 0 growth-tolerance))
 
-  (test-case "L-R2's tolerance catches a trainer that keeps every step's graph"
+  (test-case "L-R2's tolerance catches a trainer that keeps every step's output"
     (check-true (> (ledger-growth 'retain) growth-tolerance)))
 
   (test-case "L-R3: two fresh fits leave the ledger at the same baseline"

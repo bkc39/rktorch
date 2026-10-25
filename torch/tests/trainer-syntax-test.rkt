@@ -16,7 +16,8 @@
            (only-in syntax/parse/define define-syntax-parse-rule)
            (submod ".." trainers)
            (submod "../train/trainer.rkt" private)
-           "../train.rkt")
+           "../train.rkt"
+           (only-in "../train.rkt" [define-hook hk] [define-hparams hp] [define-optimizers opt]))
 
   (define ((message-matching pattern) e)
     (and (exn:fail:syntax? e)
@@ -136,6 +137,38 @@
      (let ()
        (define-trainer Classifier (net momentum)
          (define-hparams momentum lr))
+       Classifier)))
+
+  (test-case "body forms are recognised through renamed imports"
+    (check-syntax-error
+     #rx"define-trainer: define-optimizers appears twice"
+     (let ()
+       (define-trainer Twice ()
+         (opt 1)
+         (define-optimizers 2))
+       Twice))
+    (check-syntax-error
+     #rx"define-callback: define-optimizers is a define-trainer form"
+     (let ()
+       (define-callback optimizing () (opt 1))
+       optimizing))
+    (check-syntax-error
+     #rx"define-hook: unknown hook on-batch-end; closest: on-train-batch-end"
+     (let ()
+       (define-trainer Typo () (hk (on-batch-end) 1))
+       Typo))
+    (check-syntax-error
+     #rx"define-hook: on-fit-start is defined twice"
+     (let ()
+       (define-callback twice ()
+         (hk (on-fit-start) 1)
+         (hk (on-fit-start) 2))
+       twice))
+    (check-syntax-error
+     #rx"define-hparams: lr is not a field of Classifier"
+     (let ()
+       (define-trainer Classifier (net)
+         (hp lr))
        Classifier)))
 
   (test-case "E9: a body form outside a definer"
