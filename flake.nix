@@ -991,9 +991,15 @@
                + " but the shim links libtorch " + libtorchVersion
                + "; move the wheels with it");
             python.withPackages
-              (ps: [ ps.soundfile ps.torch ps.torchaudio ps.torchvision ]);
+              (ps: [
+              ps.lightning ps.scikit-learn ps.soundfile ps.torch ps.torchaudio
+              ps.torchvision
+            ]);
           pythonFromNixpkgs = p: p.python314.withPackages
-            (ps: [ ps.soundfile ps.torch ps.torchaudio ps.torchvision ]);
+            (ps: [
+              ps.lightning ps.scikit-learn ps.soundfile ps.torch ps.torchaudio
+              ps.torchvision
+            ]);
           pythonEnv =
             if system == "x86_64-linux" && torchSource == "bin"
             then pythonWheels null
