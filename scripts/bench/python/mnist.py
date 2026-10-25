@@ -51,7 +51,7 @@ def main():
     batch = env_number("BATCH", 128)
     dataset = env_text("DATASET", "full")
     style = env_text("OPTIMIZER", "default")
-    options, set_to_none = optimizer_options(style)
+    options = optimizer_options(style)
     torch.backends.cudnn.benchmark = False
     device = pick_device()
     log = StepLog(out, device)
@@ -61,13 +61,13 @@ def main():
     with torch.device(device):
         net = convnet()
     opt = torch.optim.Adam(net.parameters(), lr=0.001, **options)
-    log.note_optimizer(style, opt, set_to_none)
+    log.note_optimizer(style, opt)
     generator = torch.Generator().manual_seed(0)
     for _ in range(epochs):
         for index in batches(len(train_x), batch, generator, device):
             xb = train_x.index_select(0, index)
             yb = train_y.index_select(0, index)
-            opt.zero_grad(set_to_none=set_to_none)
+            opt.zero_grad()
             loss = F.cross_entropy(net(xb), yb)
             loss.backward()
             opt.step()

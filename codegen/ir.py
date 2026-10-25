@@ -8,8 +8,9 @@ pointers beside an integer status). The tranche-2 (#3) additions widen this to
 optional Tensor/int/IntArrayRef/ScalarType (marshalled as a NULL pointer
 or a sentinel), tranche 4 (#84) to optional Scalar (a double plus a
 presence flag), tranche 8 (#210) to optional float (the same encoding),
-and in-place ops (a mutable receiver + integer status, the
-tr_tensor_sub_ shape). Everything else is skipped with a reason --
+in-place ops (a mutable receiver + integer status, the
+tr_tensor_sub_ shape), and #365 to a list of optional Tensors (Tensor?[],
+the TensorList encoding with NULL entries). Everything else is skipped with a reason --
 the generator reports skips instead of guessing.
 """
 
@@ -45,6 +46,8 @@ OPTIONAL_SCALAR = "optional-scalar"
 OPTIONAL_DOUBLE = "optional-double"
 # Tranche 7 (#153): a tr_generator handle, NULL for the global stream.
 OPTIONAL_GENERATOR = "optional-generator"
+# #365: Tensor?[] -> (ptr*, len) whose NULL entries are c10::nullopt.
+OPTIONAL_TENSOR_LIST = "optional-tensor-list"
 
 
 @dataclass(frozen=True)
@@ -118,6 +121,10 @@ def _param_kind(ty) -> str | None:
             return INT_ARRAY
         if ty.elem.name is BaseTy.Tensor:
             return TENSOR_LIST
+    if (isinstance(ty, ListType) and isinstance(ty.elem, OptionalType)
+            and isinstance(ty.elem.elem, BaseType)
+            and ty.elem.elem.name is BaseTy.Tensor):
+        return OPTIONAL_TENSOR_LIST
     if isinstance(ty, OptionalType):
         elem = ty.elem
         if isinstance(elem, BaseType):

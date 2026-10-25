@@ -27,6 +27,9 @@ tr_tensor* tr_gen_gather(const tr_tensor* self, int64_t dim,
                          const tr_tensor* index, bool sparse_grad);
 tr_tensor* tr_gen_index_select(const tr_tensor* self, int64_t dim,
                                const tr_tensor* index);
+tr_tensor* tr_gen_index_tensor(
+    const tr_tensor* self, const tr_tensor* const* indices,
+    int64_t indices_len /* nullable entries: NULL == no value */);
 tr_tensor* tr_gen_masked_select(const tr_tensor* self, const tr_tensor* mask);
 tr_tensor* tr_gen_narrow(const tr_tensor* self, int64_t dim, int64_t start,
                          int64_t length);

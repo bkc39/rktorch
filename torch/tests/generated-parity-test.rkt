@@ -18,7 +18,8 @@
 
   ;; Every op in the codegen manifest needs an input recipe here (a missing
   ;; one fails loudly). Spec -> input: (tensor dim ...) = seeded randn,
-  ;; (tensors ...) a list of them, (bool-tensor ...) a genuine bool handle
+  ;; (tensors ...) a list of them, (index-tensors (i ...) #f ...) int64 index
+  ;; tensors or None, (bool-tensor ...) a genuine bool handle
   ;; via `ne 0`, (kwarg "name" v) a scalar (or none) passed as name=v to a kwarg-only
   ;; aten arg, (optional-scalar v) a Scalar? bound, (uniform-tensor dim ...)
   ;; a seeded rand (non-negative, for probabilities), other heads are
@@ -44,6 +45,7 @@
                     (kwarg "sparse_grad" #f))
           'take-along-dim '((tensor 2 3) (int-tensor-2d ((0) (2)))
                             (optional-int64 1))
+          'index-tensor '((tensor 3 4) (index-tensors #f (3 1 3)))
           'where-self '((bool-tensor (0 1 1 0 1 0)) (tensor 6) (tensor 6))
           'where-scalarother '((bool-tensor (0 1 1 0 1 0)) (tensor 6)
                                (double -1.0))
@@ -180,9 +182,12 @@
       [(optional-tensor)
        (if (equal? (cdr spec) '(#f)) #f (apply randn (cdr spec)))]
       [(optional-tensor-ones) (apply ones (cdr spec))]
-      [(int-tensor int-tensor-2d) (to-dtype (tensor (cadr spec)) 'int64)]
+      [(int-tensor int-tensor-2d) (~> (cadr spec) tensor (to-dtype 'int64))]
+      [(index-tensors)
+       (for/list ([positions (in-list (cdr spec))])
+         (and positions (to-dtype (tensor positions) 'int64)))]
       [(scalar-tensor) (tensor (cadr spec))]
-      [(bool-tensor) (ne (tensor (cadr spec)) 0)]
+      [(bool-tensor) (~> (cadr spec) tensor (ne 0))]
       [(int64 double bool int-array optional-int64 optional-int-array
         optional-scalar dtype)
        (cadr spec)]
@@ -211,6 +216,15 @@
                (string-join (for/list ([row (in-list (cadr spec))])
                               (format "[~a]" (csv row)))
                             ", "))]
+      [(index-tensors)
+       (format "[~a]"
+               (string-join
+                (for/list ([positions (in-list (cdr spec))])
+                  (if positions
+                      (format "torch.tensor([~a], dtype=torch.int64)"
+                              (csv positions))
+                      "None"))
+                ", "))]
       [(scalar-tensor) (format "torch.tensor(~a)" (cadr spec))]
       [(bool-tensor)
        (format "torch.tensor([~a], dtype=torch.bool)" (csv (cadr spec)))]
