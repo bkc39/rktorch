@@ -3,6 +3,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <string>
 #include <vector>
 
 #include "torchrkt/c_api.h"
@@ -353,6 +354,12 @@ TEST(TorchrktOps, ShapeOps) {
   EXPECT_EQ(shape_of(c.t), (std::vector<int64_t>{4, 3}));
   const Handle st(tr_stack(pair, 2, 0));
   EXPECT_EQ(shape_of(st.t), (std::vector<int64_t>{2, 2, 3}));
+
+  const tr_tensor* with_null[] = {t.t, nullptr};
+  EXPECT_EQ(tr_cat(with_null, 2, 0), nullptr);
+  EXPECT_EQ(std::string(tr_last_error()), "tr_cat: null argument");
+  EXPECT_EQ(tr_stack(with_null, 2, 0), nullptr);
+  EXPECT_EQ(std::string(tr_last_error()), "tr_stack: null argument");
 }
 
 TEST(TorchrktOps, Elementwise) {

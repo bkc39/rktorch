@@ -725,8 +725,9 @@ multiple of the parameter to the gradient before either, torch's L2 form.
                [#:eps eps real? 1e-8]
                [#:weight-decay weight-decay (>=/c 0) 0])
          adam?]{
-@tt{torch.optim.Adam} with bias correction; @racket[weight-decay] is the
-L2 form applied to the gradient, as there, not AdamW's decoupled one.
+@tt{torch.optim.Adam} with bias correction, counted per parameter over the
+steps it had a gradient for; @racket[weight-decay] is the L2 form applied
+to the gradient, as there, not AdamW's decoupled one.
 }
 
 @defproc[(rmsprop [params (listof tensor?)]
@@ -763,8 +764,13 @@ listens, the step first waits for every accelerator holding one of its
 parameters to finish it. A schedule's step logs nothing.
 }
 
-@defproc[(zero-grads! [opt optimizer?]) void?]{
-Zeroes the gradient of every parameter, @tt{optimizer.zero_grad()}.
+@defproc[(zero-grads! [opt optimizer?]
+                      [#:set-to-none? set-to-none? boolean? #t])
+         void?]{
+Drops the gradient of every parameter, @tt{optimizer.zero_grad()}: until
+the next @racket[backward!] a parameter has no gradient, and
+@racket[has-grad?] is @racket[#f]. With @racket[#:set-to-none? #f], zeroes
+each gradient in place, @tt{optimizer.zero_grad(set_to_none=False)}.
 }
 
 @deftogether[(@defproc[(learning-rate [opt optimizer?]) real?]

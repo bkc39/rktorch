@@ -5,8 +5,9 @@
                   unsupplied-arg?)
          (only-in racket/generic define-generics)
          (only-in "../foreign.rkt"
-                  add addcdiv! addcmul! copy! device dtype full maybe-grad mul
+                  add addcdiv! addcmul! copy! device dtype full mul
                   mul! sqrt sub! tensor? to with-no-grad zero-grad! zeros-like)
+         (only-in "../foreign/autograd-ops.rkt" reset-grads! with-gradient)
          (only-in "../private/contract.rkt" define/contract-out)
          (only-in "../private/step-log.rkt" log-optimizer-step!))
 
@@ -102,8 +103,7 @@
   (with-no-grad
     (define mu (sgd-momentum opt))
     (for ([p (in-list (sgd-params opt))])
-      (define g (maybe-grad p))
-      (when g
+      (with-gradient (g p)
         (define d (decayed g p (sgd-weight-decay opt)))
         (define step
           (cond
@@ -113,7 +113,7 @@
              (if (sgd-nesterov? opt) (add d (mul buf mu)) buf)]))
         (sub! p step (sgd-lr opt))))))
 
-(struct adam (params [lr #:mutable] beta1 beta2 eps weight-decay step-box
+(struct adam (params [lr #:mutable] beta1 beta2 eps weight-decay steps
                      m v scalars)
   #:constructor-name make-adam
   #:name adam-optimizer ;; noqa
@@ -133,29 +133,28 @@
        [#:lr (>=/c 0) #:beta1 real? #:beta2 real? #:eps real?
         #:weight-decay (>=/c 0)]
        adam?)
-  (make-adam params lr beta1 beta2 eps weight-decay (box 0)
+  (make-adam params lr beta1 beta2 eps weight-decay (make-hasheq)
              (make-hasheq) (make-hasheq) (make-hasheq)))
 
 (define (adam-do-step! opt)
   (with-no-grad
-    (set-box! (adam-step-box opt) (add1 (unbox (adam-step-box opt))))
-    (define t (unbox (adam-step-box opt)))
     (define b1 (adam-beta1 opt))
     (define b2 (adam-beta2 opt))
     (define lr (adam-lr opt))
     (define eps (adam-eps opt))
-    (define bc1 (- 1.0 (expt b1 t)))
-    (define bc2 (- 1.0 (expt b2 t)))
     (for ([p (in-list (adam-params opt))])
-      (define g0 (maybe-grad p))
-      (when g0
-        (define g (decayed g0 p (adam-weight-decay opt)))
+      (with-gradient (g p)
+        (define t (add1 (hash-ref (adam-steps opt) p 0)))
+        (hash-set! (adam-steps opt) p t)
+        (define bc1 (- 1.0 (expt b1 t)))
+        (define bc2 (- 1.0 (expt b2 t)))
+        (define d (decayed g p (adam-weight-decay opt)))
         (define m (moment-on (adam-m opt) p))
         (define v (moment-on (adam-v opt) p))
         (mul! m b1)
-        (sub! m g (- b1 1.0))
+        (sub! m d (- b1 1.0))
         (mul! v b2)
-        (addcmul! v g g (- 1.0 b2))
+        (addcmul! v d d (- 1.0 b2))
         (define denom (sqrt v))
         (mul! denom (/ 1.0 (expt bc2 0.5)))
         (sub! denom (scalar-on (adam-scalars opt) eps p) -1.0)
@@ -191,20 +190,19 @@
     (define mu (rmsprop-momentum opt))
     (define lr (rmsprop-lr opt))
     (for ([p (in-list (rmsprop-params opt))])
-      (define g0 (maybe-grad p))
-      (when g0
-        (define g (decayed g0 p (rmsprop-weight-decay opt)))
+      (with-gradient (g p)
+        (define d (decayed g p (rmsprop-weight-decay opt)))
         (define v (moment-on (rmsprop-sq opt) p))
         (mul! v alpha)
-        (addcmul! v g g (- 1.0 alpha))
+        (addcmul! v d d (- 1.0 alpha))
         (define avg (sqrt v))
         (sub! avg (scalar-on (rmsprop-scalars opt) (rmsprop-eps opt) p) -1.0)
         (cond
-          [(zero? mu) (addcdiv! p g avg (- lr))]
+          [(zero? mu) (addcdiv! p d avg (- lr))]
           [else
            (define buf (moment-on (rmsprop-bufs opt) p))
            (mul! buf mu)
-           (addcdiv! buf g avg 1.0)
+           (addcdiv! buf d avg 1.0)
            (sub! p buf lr)])))))
 
 (define/contract-out (step! opt) ;; noqa
@@ -213,9 +211,12 @@
   (when (or (sgd? opt) (adam? opt) (rmsprop? opt))
     (log-optimizer-step! opt (optimizer-parameters opt))))
 
-(define/contract-out (zero-grads! opt) ;; noqa
-  (-> optimizer? void?)
-  (for-each zero-grad! (optimizer-parameters opt)))
+(define/contract-out (zero-grads! opt #:set-to-none? [set-to-none? #t]) ;; noqa
+  (->* [optimizer?] [#:set-to-none? boolean?] void?)
+  (define params (optimizer-parameters opt))
+  (if set-to-none?
+      (reset-grads! params)
+      (for-each zero-grad! params)))
 
 (define/contract-out (learning-rate opt) ;; noqa
   (-> optimizer? real?)

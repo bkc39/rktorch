@@ -58,7 +58,8 @@ update.
 
 @racket[zero-grads!] is the one that catches people out. Gradients
 accumulate, so without clearing them each step you would descend using the
-sum of every gradient computed so far. Note that it takes the
+sum of every gradient computed so far; how it clears them is in
+@racket[zero-grads!]. Note that it takes the
 @emph{optimizer}, not the parameter list.
 
 @section[#:tag "training-loop"]{The loop}

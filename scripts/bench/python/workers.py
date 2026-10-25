@@ -115,7 +115,7 @@ def main():
     variant = env_text("VARIANT", "pgm")
     dataset = env_text("DATASET", "full")
     style = env_text("OPTIMIZER", "default")
-    options, set_to_none = optimizer_options(style)
+    options = optimizer_options(style)
     torch.backends.cudnn.benchmark = False
     device = pick_device()
     log = StepLog(out, device)
@@ -129,14 +129,14 @@ def main():
     with torch.device(device):
         net = convnet()
     opt = torch.optim.Adam(net.parameters(), lr=0.001, **options)
-    log.note_optimizer(style, opt, set_to_none)
+    log.note_optimizer(style, opt)
     xs, ys = test_x.to(device), test_y.to(device)
     loader = DataLoader(ds, batch_size=batch, shuffle=True,
                         num_workers=workers, worker_init_fn=seed_worker,
                         generator=torch.Generator().manual_seed(0))
     for _ in range(epochs):
         for xb, yb in loader:
-            opt.zero_grad(set_to_none=set_to_none)
+            opt.zero_grad()
             loss = F.cross_entropy(net(xb.to(device)), yb.to(device))
             loss.backward()
             opt.step()
