@@ -15,6 +15,9 @@ library code that the suite never executes.
 
 ## The loop
 
+`.racket-dev.rktd` declares every gate below for the racket-dev plugin
+([Development shells](../../../docs/building.md#development-shells)).
+
 ### 0. Stage before any nix command
 
 The flake builds from the **git-tracked tree**, so untracked files are
@@ -103,10 +106,15 @@ the input, a dead guard to delete — see `torch/foreign/ops.rkt`'s
 
 ```bash
 nix develop .#ci --command raco test --timeout 600 \
-  scripts/resyntax-rules-test.rkt scripts/resyntax-lp2.rkt scripts/resyntax-wrapper-test.rkt
+  scripts/resyntax-rules-test.rkt scripts/resyntax-lp2.rkt scripts/resyntax-wrapper-test.rkt \
+  scripts/check-paths-test.rkt
 nix develop .#ci --command \
   scripts/resyntax analyze --local-git-repository . --analyzer-timeout 30000
 ```
+
+`scripts/resyntax-gate [REF]` is that command as CI runs it, red on any
+suggestion. The same lane runs `racket scripts/check-paths.rkt`, described in
+[Named paths](../../../docs/building.md#named-paths).
 
 `scripts/resyntax` runs Resyntax's default rules plus the repository's own
 in `scripts/resyntax-rules.rkt`, such as `(mul a b)` → `(* a b)`,
@@ -133,7 +141,7 @@ Known false positives: a template `(define pattern-var ...)` inside a
 `begin-for-syntax` helper reads as "already defined", and a curried
 `(define ((f self) stx))` header reads as binding `self`. Mark the first
 `;; noqa`; name the parameter `self-id` for the second. Pure re-export
-facades (`main.rkt`, `foreign.rkt`, `nn.rkt`) and `info.rkt` carry
+facades (`torch/main.rkt`, `torch/foreign.rkt`, `torch/nn.rkt`) and `torch/info.rkt` carry
 `#|review: ignore|#`.
 
 ### 7. Docs build

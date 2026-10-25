@@ -150,7 +150,7 @@ median, quartiles and IQR, and the load average before and after.
   at troughs, so a budget with `RKTORCH_BENCH_COLLECT_AT_TROUGHS=0` is
   refused. A child sees these two only as its variant sets them, never from
   the caller's environment. A `torch` without
-  `foreign/raw/pressure-settings.rkt` runs with its own collection
+  `torch/foreign/raw/pressure-settings.rkt` runs with its own collection
   defaults, and a variant that sets either variable against it is refused.
 - **pytorch-ops** — `ops`'s cases in PyTorch (`scripts/bench/python/ops.py`),
   same shapes and repetitions, eager, `variant` `pytorch`, with
@@ -242,9 +242,9 @@ median, quartiles and IQR, and the load average before and after.
 An A/B run alternates its variants every round, and each variant is a set
 of environment variables; `PLTUSERHOME=<checkout>/.racket-user` runs the
 other checkout's `torch`. The recorder loads only what that `torch` has: a
-checkout without `foreign/raw/native-location.rkt` has its shim read from
+checkout without `torch/foreign/raw/native-location.rkt` has its shim read from
 its `native-libs/`. A checkout older than the `rktorch-step` event
-(its `torch` has neither `private/step-log.rkt` nor its compiled `.zo`) logs no steps, so a child of
+(its `torch` has neither `torch/private/step-log.rkt` nor its compiled `.zo`) logs no steps, so a child of
 such a checkout that completes is timed whole, from the end of its compile
 to its exit (`timing` `wall`, no `error`). A child whose `torch` has the
 hook, or that does not name its `torch`, and logs no steps is an `error`,
@@ -261,7 +261,7 @@ faster) with a sign-test interval, which needs 6 rounds to reach 95%.
 
 ## L0 tables
 
-`summary.rkt` adds a table for each L0 measurement it finds:
+`scripts/bench/summary.rkt` adds a table for each L0 measurement it finds:
 
 - **A. Per op against PyTorch** — `ops` facade and raw beside
   `pytorch-ops`, in µs per call, and their ratios, one table per device and
@@ -338,7 +338,7 @@ and 15-minute averages), and `meta`: `git_sha`, `git_dirty`, `racket`,
 and where that came from (`at::get_num_threads`, else `MKL_NUM_THREADS`,
 `OMP_NUM_THREADS` or the core count), `omp_num_threads` and
 `mkl_num_threads` as set, `cores`, `cpu`, `affinity`, `host`, `os`; `run_id` is shared by every record one
-`run.rkt` invocation writes, and the summary pairs A/B ratios only within
+`scripts/bench/run.rkt` invocation writes, and the summary pairs A/B ratios only within
 one. The summary gives each micro invocation its own section, headed by its
 commit, host, execution (device, threads and their source, GPU) and run id,
 so appended runs never merge. `e2e` sections are per host (name, CPU, OS,

@@ -1,0 +1,2 @@
+Own directory: `../../check-paths-test.rkt`.
+Moved: `test/gone.py`.

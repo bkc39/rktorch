@@ -67,7 +67,7 @@ namespace (each instance of `ffi/unsafe`'s finalizer module, so each
 module registry and each place), and parallel threads that race that
 registration can each start one: a drain's canary registers outside an
 atomic section, so several workers whose first registration is a drain
-do race it (`finalizer-thread-test.rkt`). `collector.rkt` therefore
+do race it (`torch/tests/finalizer-thread-test.rkt`). `torch/foreign/raw/collector.rkt` therefore
 registers a finalizer as `torch/foreign` is instantiated. Every
 finalizer then runs on one thread, provided `torch` is required before
 any parallel thread registers a finalizer in that namespace; a program
@@ -80,7 +80,7 @@ arriving at that guard means native memory may already be corrupt: every later
 free can fault too, and in #76 and #82 that became a cascade that ignored
 SIGTERM.
 
-So the first fault latches the library. `note-native-fault!` in `raw/fault.rkt`
+So the first fault latches the library. `note-native-fault!` in `torch/foreign/raw/fault.rkt`
 writes one line with write(2) and sets the latch. `define-torch` wraps every
 binding in `latched`, so from then on each native call raises without entering
 native code. That is one `unbox` per call, and it sits beneath each binding's
@@ -116,13 +116,13 @@ host ones — user code never calls the collector by hand.
 ### Pressure-driven collection
 
 The policy lives in `torch/foreign/raw/pressure.rkt`, under the ledger:
-`raw/memory.rkt` tells it of every accounting and release
+`torch/foreign/raw/memory.rkt` tells it of every accounting and release
 (`note-accounted!`, `note-unaccounted!`, inside the ledger's atomic
 section) and asks it to act. It binds no C itself. Its two readings, a
 device's capacity and its allocator's allocated bytes, are bound in
-`raw/device.rkt` with the rest of `device.cpp` and handed down by
+`torch/foreign/raw/device.rkt` with the rest of `device.cpp` and handed down by
 `install-device-queries!` when that module is instantiated, because
-`raw/device.rkt` sits above the ledger and requiring it from below would
+`torch/foreign/raw/device.rkt` sits above the ledger and requiring it from below would
 be a cycle. One collection runs at a time (`call-as-the-collector`): a
 second thread that finds a trigger due while the first is collecting
 skips. The claim names its thread, so one killed mid-collection, whose
@@ -197,7 +197,7 @@ and only the outermost return reaches `collect-at-forward-trough!`,
 which checks the grad mode and calls `collect-at-trough! #:young? #t`.
 `gen:layer` derives `prop:procedure` from `call-layer`, so applying any
 layer, hand-written ones included, goes through it, and the generic's own
-dispatch never leaves `layer.rkt`: a hand-written `gen:layer` defines the
+dispatch never leaves `torch/nn/layer.rkt`: a hand-written `gen:layer` defines the
 method and gets the trough without knowing it (#176). Applying a layer is
 the only way to call one; a structure that also sets `prop:procedure`
 itself is rejected as a duplicate property. `native-collect-at-troughs #f`
@@ -226,8 +226,8 @@ the last defence when a trough collection is not yet due:
   check is one table lookup and field reads. The counters are a `stats`
   record, the two next-collection times and the thread inside a
   collection a `schedule` record, and the three device queries handed
-  down from `raw/device.rkt` (capacity, allocated, release) a `queries`
-  record in `raw/device-queries.rkt`. Every field is written inside `call-with-ledger`.
+  down from `torch/foreign/raw/device.rkt` (capacity, allocated, release) a `queries`
+  record in `torch/foreign/raw/device-queries.rkt`. Every field is written inside `call-with-ledger`.
 - `accounted`, which runs outside the allocator's atomic wrap, checks
   after each accounting: accounted-since past the current interval and
   live bytes above the device's high-water mark means
@@ -243,13 +243,13 @@ the last defence when a trough collection is not yet due:
   because on unified memory the cache is host RAM (#175: an M2 Pro run
   read 2.4 GB allocated against 8.5 GB taken from the driver and a
   9.7 GB mark, and went 5.7 GB into swap while the backstop never
-  fired). `raw/device.rkt` installs the readings with
+  fired). `torch/foreign/raw/device.rkt` installs the readings with
   `install-device-queries!`; each takes a device and dispatches on its
   type, so CUDA and MPS share one path and the CPU answers `#f`.
 - On MPS a collection frees tensors into that cache without moving
   `driver-allocated`, so the backstop would fire, reclaim nothing
   measurable and back off. After a collection whose drain finished, it
-  therefore also calls the `#:release` query, which `raw/device.rkt`
+  therefore also calls the `#:release` query, which `torch/foreign/raw/device.rkt`
   answers for MPS alone by emptying the cache. Releases are spaced in
   time, at least `release-spacing` (5 s) apart per device, not by the
   byte hysteresis: emptying is quick, but the blocks the next steps need
@@ -316,7 +316,7 @@ the last defence when a trough collection is not yet due:
   the cache, so a program may change it mid-run; `native-memory-limit` overrides it for every
   device and is how the CPU tests exercise the path. No capacity and no
   limit means the check is off. Both parameters, with the trough's margin
-  and budget, live in `raw/pressure-settings.rkt`, which reads
+  and budget, live in `torch/foreign/raw/pressure-settings.rkt`, which reads
   `RKTORCH_MEMORY_FRACTION` and `RKTORCH_MEMORY_LIMIT` (MiB) once, at
   instantiation, as their initial values, and raises a user error naming
   the variable for a value that does not parse or is out of range.
@@ -459,7 +459,7 @@ than a second wrapper over the same storage.
 The tests that later legs of #168 (#255, #194) must keep green. They run
 against today's code, so every result below is the baseline.
 
-**Race points.** `race-point` (`raw/race-points.rkt`) names a place between
+**Race points.** `race-point` (`torch/foreign/raw/race-points.rkt`) names a place between
 the steps of a critical section. In production it is one `unbox` of the
 `race-hook` box and a branch: about 1.5 ns on a loaded host, below the fault
 latch's cost measured the same way. A test puts a procedure in the box; it
@@ -486,7 +486,7 @@ gets the point's name and a subject (a handle, a device, a thread).
 | `mps-probe-settled` | the probe's outcome is stored, before its waiters are woken | the probe |
 | `mps-probe-waiting` | a caller found another thread's claim, before it waits | the probe |
 
-**Tests** (`torch/tests/race-*.rkt`, helpers in `tests/private/race-harness.rkt`):
+**Tests** (`torch/tests/race-*.rkt`, helpers in `torch/tests/private/race-harness.rkt`):
 
 - Deterministic interleavings: a gate parks thread A at a point and thread
   B runs. A point inside an atomic section cannot park, and the gate says
@@ -499,12 +499,12 @@ gets the point's name and a subject (a handle, a device, a thread).
   points; an entry added again under its handle, as an in-place move
   does, starts a fresh count); the ledger back to its baseline after the drop; no finalizer
   failures; the fault latch clear.
-- Seeded fuzzing (`race-fuzz-test.rkt`): every point outside atomic mode
+- Seeded fuzzing (`torch/tests/race-fuzz-test.rkt`): every point outside atomic mode
   yields or sleeps by a per-thread generator seeded from the run's seed and
   the thread's label. A failure prints the seed;
   `RKTORCH_RACE_SEED=n` replays that seed's decisions (the OS still
   schedules parallel threads), `RKTORCH_RACE_SEEDS=n` runs seeds 1 to n.
-- Stress (`race-stress-test.rkt`): 2, 4, 8 and 16 parallel threads churn
+- Stress (`torch/tests/race-stress-test.rkt`): 2, 4, 8 and 16 parallel threads churn
   tensors, half freed explicitly, under a 256 KiB `native-memory-limit`,
   beside a trainer calling `backward!` and an adversary looping
   collections. `RKTORCH_STRESS_SECONDS` sets each phase (0.5 s by
@@ -559,7 +559,7 @@ an ordinary check:
 runs on the runtime thread when the future is touched. A tensor sent
 through a place channel arrives as a bare `cpointer` to the same handle,
 with no finalizer and no ledger entry, while the sender's finalizer still
-frees it; the manual says not to. `race-place-test.rkt` runs an op in a
+frees it; the manual says not to. `torch/tests/race-place-test.rkt` runs an op in a
 future and sends a tensor through a place.
 
 ## Allocation failure

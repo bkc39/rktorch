@@ -17,7 +17,7 @@ Companion: `plans/v0-scaffold.md` (what shipped).
 v0 ("rktorch v0 scaffold") shipped the **spinal cord, not the API**: the full
 dev-ops suite ported from the sibling FFI repos (`xgboost-rkt`, `scs`, `glmnet`)
 — Nix flake with a `torchSource = bin | python` knob, CI matrix on linux +
-darwin, resyntax + clang-tidy + line gates, and a `python-cross-test.rkt` parity
+darwin, resyntax + clang-tidy + line gates, and a `torch/tests/python-cross-test.rkt` parity
 harness that **SKIPs cleanly when `import torch` fails** — proven by a single
 vertical slice: `manual-seed!` + `randn` (fixed 2×2) + tensor print.
 
@@ -26,7 +26,7 @@ The substrate that matters is already in place:
 - opaque **`Tensor*` handle** with a **GC finalizer** (`at_free`-style),
 - the **`tr_last_error`** exception-to-status contract,
 - a CMake-built `libtorchrkt.{dylib,so}` **staged into the Racket runtime** by
-  `torchrkt/private/install-torchrkt-native.rkt`.
+  `torch/private/install-torchrkt-native.rkt`.
 
 v0 **explicitly deferred** to v1: a usable ATen surface, **autograd**, the
 `nn.Module` system, and any binding **codegen**. This document settles two of the
@@ -282,12 +282,12 @@ every op/feature lands with an `examples/python/NN_*.py` +
    `detach`, a `with-no-grad` scope, and in-place `sub_`/`zero_`/`mul_`. SGD can
    be pure Racket (under `with-no-grad`: `p.sub_(lr * p.grad)`; zero grads).
    Parity: `y = x²` → `grad == 2x`.
-3. **nn.Module system** (architecture per §3 gate) in `torchrkt/nn/`
-   (`module/linear/init/optim.rkt`): recursive `parameters`,
+3. **nn.Module system** (architecture per §3 gate) in `torch/nn/`
+   (`torch/nn/{layer,linear,init,optim}.rkt`): recursive `parameters`,
    `forward`/`prop:procedure`, init (`kaiming-uniform`, `zeros`), `sgd`
    (`step`, `zero-grad`); first layer `linear`, first model `mlp`, loss
    `mse-loss` (and/or `cross-entropy`).
-4. **End-to-end proof + parity:** matching `NN_mlp.py` / `NN-mlp.rkt` — same
+4. **End-to-end proof + parity:** matching `examples/python/04_mlp.py` / `torch/scribblings/examples/04-mlp.rkt` — same
    model/seed, one optimizer step, compare initial + post-step params + loss
    within tolerance via the v0 cross-test harness (SKIP out-of-shell). Stretch:
    a few steps and assert loss decreases.
@@ -310,7 +310,7 @@ management. The module tree *is* the store; drop the model and the v0
 finalizers reclaim every native handle.
 
 Implementation: `torch/nn/layer.rkt` (interface + macro),
-`nn/{init,linear,optim,loss}.rkt`, facade `torchrkt/nn.rkt`. Registration is
+`torch/nn/{init,linear,optim,loss}.rkt`, facade `torch/nn.rkt`. Registration is
 compile-time (the macro knows the field list), so there is no runtime
 reflection at all — strictly less machinery than Python's `__setattr__` hook.
 
