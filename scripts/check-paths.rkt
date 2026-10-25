@@ -8,18 +8,13 @@
          (only-in racket/runtime-path #%datum define-runtime-path)
          (only-in racket/set for*/set set-member?)
          (only-in racket/string string-join string-split string-trim)
-         (only-in racket/system system*))
+         (only-in racket/system system*)
+         (only-in "../torch/private/contract.rkt" define/contract-out))
 
 (provide (contract-out
           [struct mention ([file string?]
                            [line exact-positive-integer?]
-                           [path string?])]
-          [tracked-files (-> path-string? (listof string?))]
-          [stale-mentions
-           (-> path-string? (listof string?) (listof string?) (listof mention?))]
-          [check-paths
-           (-> path-string? (listof string?) (listof string?) (listof allowance/c)
-               (values (listof mention?) (listof allowance/c)))]))
+                           [path string?])]))
 
 (define-runtime-path repository "..")
 (define-runtime-path allowances "check-paths-allow.rktd")
@@ -92,7 +87,8 @@
   (for/or ([base (in-list (list "." dir))])
     (set-member? known (normalize base (mention-path m)))))
 
-(define (stale-mentions root tracked files)
+(define/contract-out (stale-mentions root tracked files)
+  (-> path-string? (listof string?) (listof string?) (listof mention?))
   (define known
     (for*/set ([file (in-list tracked)]
                [prefix (in-list (prefixes file))])
@@ -105,13 +101,16 @@
 (define (mention-key m)
   (list (mention-file m) (mention-path m)))
 
-(define (check-paths root tracked files allowed)
+(define/contract-out (check-paths root tracked files allowed)
+  (-> path-string? (listof string?) (listof string?) (listof allowance/c)
+      (values (listof mention?) (listof allowance/c)))
   (define stale (stale-mentions root tracked files))
   (define keys (remove-duplicates (map mention-key stale)))
   (values (filter-not (lambda (m) (member (mention-key m) allowed)) stale)
           (filter-not (lambda (entry) (member entry keys)) allowed)))
 
-(define (tracked-files root)
+(define/contract-out (tracked-files root)
+  (-> path-string? (listof string?))
   (define git (find-executable-path "git"))
   (define out (open-output-string))
   (define err (open-output-string))
