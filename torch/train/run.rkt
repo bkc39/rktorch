@@ -1,64 +1,48 @@
 #lang racket/base
 
-(require (only-in racket/contract/base
-                  -> ->* <=/c >/c and/c any any/c contract? contract-out
-                  flat-named-contract hash/c listof not/c or/c real-in)
+(require (for-syntax racket/base (only-in syntax/parse/pre id))
+         (only-in racket/contract/base
+                  -> ->* <=/c >/c and/c any any/c contract-out hash/c listof
+                  not/c or/c real-in)
+         (only-in syntax/parse/define define-syntax-parse-rule)
          (only-in "../foreign.rkt" device?)
          (only-in "../nn/optim.rkt" optimizer?)
          (only-in "../private/contract.rkt" define/contract-out)
          (only-in "private/types.rkt"
-                  not-implemented scheduler-config? trainer?))
+                  define-named-contract not-implemented scheduler-config?
+                  trainer?))
 
 (provide (contract-out [run? (-> any/c boolean?)]))
 
-(struct run () #:name run-struct #:constructor-name new-run)
+(struct run ())
 
-(define/contract-out stage/c contract?
-  (flat-named-contract 'stage/c (or/c 'fit 'test 'predict)))
+(define-syntax-parse-rule (define-run-contracts name:id ...)
+  (begin (define-named-contract name run?) ...))
 
-(define/contract-out run-stage/c contract?
-  (flat-named-contract 'run-stage/c
-                       (or/c 'train 'sanity-check 'validate 'test 'predict)))
+(define-named-contract stage/c (or/c 'fit 'test 'predict))
 
-(define/contract-out limit/c contract?
-  (flat-named-contract
-   'limit/c
-   (or/c exact-nonnegative-integer? (and/c inexact-real? (real-in 0.0 1.0)))))
+(define-named-contract run-stage/c
+  (or/c 'train 'sanity-check 'validate 'test 'predict))
 
-(define/contract-out val-check-interval/c contract?
-  (flat-named-contract
-   'val-check-interval/c
-   (or/c #f exact-positive-integer? (and/c inexact-real? (>/c 0.0) (<=/c 1.0)))))
+(define-named-contract limit/c
+  (or/c exact-nonnegative-integer? (and/c inexact-real? (real-in 0.0 1.0))))
 
-(define/contract-out precision/c contract?
-  (flat-named-contract 'precision/c (or/c '32-true '16-mixed 'bf16-mixed)))
+(define-named-contract val-check-interval/c
+  (or/c #f exact-positive-integer? (and/c inexact-real? (>/c 0.0) (<=/c 1.0))))
 
-(define/contract-out clip-algorithm/c contract?
-  (flat-named-contract 'clip-algorithm/c (or/c 'norm 'value)))
+(define-named-contract precision/c (or/c '32-true '16-mixed 'bf16-mixed))
 
-(define/contract-out fast-dev-run/c contract?
-  (flat-named-contract 'fast-dev-run/c (or/c boolean? exact-positive-integer?)))
+(define-named-contract clip-algorithm/c (or/c 'norm 'value))
 
-(define/contract-out interval/c contract?
-  (flat-named-contract 'interval/c (or/c 'step 'epoch)))
+(define-named-contract fast-dev-run/c (or/c boolean? exact-positive-integer?))
 
-(define/contract-out state-key/c contract?
-  (flat-named-contract 'state-key/c (and/c string? (not/c ""))))
+(define-named-contract interval/c (or/c 'step 'epoch))
 
-(define/contract-out fitting-run/c contract?
-  (flat-named-contract 'fitting-run/c run?))
+(define-named-contract state-key/c (and/c string? (not/c "")))
 
-(define/contract-out batch-start-run/c contract?
-  (flat-named-contract 'batch-start-run/c run?))
-
-(define/contract-out step-pending-run/c contract?
-  (flat-named-contract 'step-pending-run/c run?))
-
-(define/contract-out logging-run/c contract?
-  (flat-named-contract 'logging-run/c run?))
-
-(define/contract-out manual-run/c contract?
-  (flat-named-contract 'manual-run/c run?))
+(define-run-contracts
+  fitting-run/c batch-start-run/c step-pending-run/c logging-run/c
+  manual-run/c)
 
 (define/contract-out (run-trainer r)
   (-> run? trainer?)

@@ -1,75 +1,60 @@
 #lang racket/base
 
-(require (for-syntax racket/base)
-         (only-in racket/contract/base
-                  -> ->* ->i and/c any/c contract? contract-out
-                  flat-named-contract listof or/c unsupplied-arg?)
+(require (only-in racket/contract/base
+                  -> ->* ->i and/c any/c contract-out listof or/c property/c
+                  unsupplied-arg?)
          (only-in racket/generic define-generics)
-         (only-in racket/stxparam define-syntax-parameter)
          (only-in "../foreign.rkt" dtype numel tensor?)
          (only-in "../private/contract.rkt" define/contract-out)
-         (only-in "private/types.rkt" not-implemented)
+         (only-in "private/hooks.rkt"
+                  log-rule-default-on-epoch? log-rule-default-on-step?
+                  log-rule-on-epoch log-rule-on-step)
+         (only-in "private/types.rkt" define-named-contract not-implemented)
          (only-in "run.rkt" logging-run/c))
 
 (provide gen:logger
-         log!
          logger-finalize!
          logger-log-hyperparams!
          logger-log-metrics!
-         run
          (contract-out [logger? (-> any/c boolean?)]))
-
-(define-syntax-parameter log!
-  (lambda (stx)
-    (raise-syntax-error #f "only allowed inside a trainer or callback hook body"
-                        stx)))
-
-(define-syntax-parameter run
-  (lambda (stx)
-    (raise-syntax-error #f "only allowed inside a trainer or callback hook body"
-                        stx)))
 
 (define-generics logger
   (logger-log-hyperparams! logger params)
   (logger-log-metrics! logger metrics step)
   (logger-finalize! logger status))
 
-(define/contract-out reduce/c contract?
-  (flat-named-contract 'reduce/c (or/c 'mean 'sum 'max 'min)))
+(define-named-contract reduce/c (or/c 'mean 'sum 'max 'min))
 
-(define/contract-out scalar-tensor/c contract?
-  (flat-named-contract 'scalar-tensor/c
-                       (and/c tensor? (lambda (t) (= 1 (numel t))))))
+(define-named-contract scalar-tensor/c
+  (and/c tensor? (property/c numel 1)))
 
-(define/contract-out metric-value/c contract?
-  (flat-named-contract 'metric-value/c (or/c real? scalar-tensor/c)))
+(define-named-contract metric-value/c (or/c real? scalar-tensor/c))
 
-(define/contract-out loss/c contract?
-  (flat-named-contract
-   'loss/c
-   (and/c scalar-tensor/c
-          (lambda (t) (and (memq (dtype t) '(float32 float64 float16 bfloat16))
-                           #t)))))
+(define-named-contract loss/c
+  (and/c scalar-tensor/c
+         (property/c dtype (or/c 'float32 'float64 'float16 'bfloat16))))
 
-(define/contract-out logger-spec/c contract?
-  (flat-named-contract 'logger-spec/c (or/c #f logger? (listof logger?))))
+(define-named-contract logger-spec/c (or/c #f logger? (listof logger?)))
 
 (module+ private
   (provide host-reads))
 
 (define (host-reads) (not-implemented 'host-reads 'T1))
 
-(define (hook-default-on-step r) (not-implemented 'run-log! 'T1))
-(define (hook-default-on-epoch r) (not-implemented 'run-log! 'T1))
-(define (hook-logs-per? r interval) (not-implemented 'run-log! 'T1))
+(define (hook-log-rule r) (not-implemented 'run-log! 'T1))
 
-(define (allowed? r flag interval)
-  (or (unsupplied-arg? flag) (not flag) (hook-logs-per? r interval)))
+(define ((allowed? allowed-of) r flag)
+  (or (unsupplied-arg? flag) (and (memq flag (allowed-of (hook-log-rule r))) #t)))
+
+(define allowed-on-step? (allowed? log-rule-on-step))
+(define allowed-on-epoch? (allowed? log-rule-on-epoch))
 
 (define/contract-out (run-log! r key value
                                #:progress? [progress? #f]
-                               #:on-step? [on-step? (hook-default-on-step r)]
-                               #:on-epoch? [on-epoch? (hook-default-on-epoch r)]
+                               #:on-step? [on-step? (log-rule-default-on-step?
+                                                     (hook-log-rule r))]
+                               #:on-epoch? [on-epoch? (log-rule-default-on-epoch?
+                                                       (hook-log-rule r))]
                                #:reduce [reduce 'mean]
                                #:batch-size [batch-size #f]
                                #:logger? [logger? #t])
@@ -81,9 +66,9 @@
         #:batch-size [batch-size (or/c #f exact-positive-integer?)]
         #:logger? [logger? boolean?])
        #:pre/name (r on-step?) "this hook logs only per epoch"
-       (allowed? r on-step? 'step)
-       #:pre/name (r on-epoch?) "this hook logs only per step"
-       (allowed? r on-epoch? 'epoch)
+       (allowed-on-step? r on-step?)
+       #:pre/name (r on-epoch?) "this hook logs only per epoch"
+       (allowed-on-epoch? r on-epoch?)
        [result void?])
   (not-implemented 'run-log! 'T1))
 

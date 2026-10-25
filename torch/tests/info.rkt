@@ -2,7 +2,6 @@
 
 #|review: ignore|#
 
-;; the trainer's law tests run once T1 (#384) implements fit
 (define test-omit-paths
   '("trainer-contract-test.rkt"
     "trainer-hook-order-test.rkt"

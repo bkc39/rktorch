@@ -1,13 +1,19 @@
 #lang scribble/manual
 
-@(require (only-in racket/string string-join)
+@(require (for-syntax racket/base
+                      (only-in syntax/parse/pre id this-syntax)
+                      (only-in torch/train/private/hooks
+                               callback-hook? definable-hooks hook-batch?
+                               hook-formals hook-name))
+          (only-in racket/string string-join)
+          (only-in syntax/parse/define define-syntax-parse-rule)
           "common.rkt"
           torch/scribblings/labels
           (for-label (only-in torch/data/loader dataloader dataloader?
                               tensor-dataset))
           (only-in torch/train/private/hooks
-                   hook-batch? hook-form hook-formals hook-log hook-name
-                   hook-order hook-sides hooks))
+                   epoch-log epoch-only-log hook-batch? hook-form hook-formals
+                   hook-log hook-name hook-order hook-sides hooks step-log))
 
 @title[#:tag "train"]{Training}
 
@@ -15,15 +21,13 @@
 
 A trainer is a layer whose body forms are a method's steps and hooks, and
 @racket[fit] runs it in Lightning 2.6.5's loop order. This chapter is the
-specification: until legs T1 (#384), T2 (#385) and T3 (#386) land, the
-definers check their syntax and the procedures raise
-@racket[exn:fail:unsupported] naming the leg that implements them.
+specification: the definers check their syntax, and a procedure that is not
+implemented yet raises @racket[exn:fail:unsupported].
 
 @defform[(define-trainer name (field ...) option ... body-form ...)
          #:grammar
          ([option (code:line #:contract contract-expr)
                   (code:line #:predicate id)
-                  (code:line #:reflection-name expr)
                   (code:line #:automatic-optimization? boolean)]
           [body-form (define-init init-formals init-body ...+)
                      (define-forward forward-formals body ...+)
@@ -68,7 +72,6 @@ checks a forward input.
          #:grammar
          ([option (code:line #:contract contract-expr)
                   (code:line #:predicate id)
-                  (code:line #:reflection-name expr)
                   (code:line #:kind plain)
                   (code:line #:kind monitor)
                   (code:line #:kind checkpoint)]
@@ -82,9 +85,7 @@ callback runs after every other callback. @racket[monitor] and
 @racket[checkpoint] callbacks run after the trainer's
 @racket[on-train-epoch-end], so they see what it logged. Nothing is saved
 unless the callback defines the @racket[state-dict] and @racket[load-state!]
-hooks.
-@examples[#:eval train-eval
-(eval:error (define-callback typo () (define-hook (on-batch-end) (void))))]}
+hooks.}
 
 @defform[(define-init init-formals init-body ...+)]{
 The constructor body, as @racket[define-layer]'s @racket[#:init];
@@ -104,7 +105,7 @@ Automatic optimization takes exactly one optimizer.}
 Lightning's @tt{configure_callbacks}: the callbacks the method cannot work
 without, as values or lists. They run before @racket[fit]'s
 @racket[#:callbacks], and they replace any of those callbacks of the same
-kind.}
+type.}
 
 @defform[(define-hparams field-id ...+)]{
 Names the fields that hold schedulable real hyperparameters.
@@ -126,7 +127,9 @@ their batch-end hook. The predict step's values are collected by
 Defines the hook @racket[hook-id] from @secref["train-hooks"]. The name, the
 side and the arity are checked at compile time. @racket[state-dict] and
 @racket[load-state!] name hooks here; in the body those identifiers keep
-their @racketmodname[torch/nn] meaning.}
+their @racketmodname[torch/nn] meaning.
+@examples[#:eval train-eval
+(eval:error (define-callback typo () (define-hook (on-batch-end) (void))))]}
 
 @defform[(define-state-key expr)]{
 The callback's key in a checkpoint (a @racket[state-key/c]). The default is
@@ -166,18 +169,22 @@ Trains @racket[trainer] in the order of @secref["train-hooks"] and answers
 the finished run. Keywords follow Lightning's @tt{Trainer}. A
 @racket[#:device] of @racket[#f] leaves the trainer where it is and sends
 each batch to the trainer's device. @racket[log!] reduces on the device and
-reads to the host once every @racket[#:log-every-n-steps] steps and once at
-each epoch end, in one transfer for all keys. If an @racket[exn:fail] or
-@racket[exn:break] is raised, @racket[fit] runs each callback's
+reads to the host at every @racket[#:log-every-n-steps]-th optimizer step of
+the fit, counted across epochs, and at each epoch end, in one transfer for
+all keys. @racket[#:fast-dev-run] runs that many batches (one for
+@racket[#t]) of one epoch, with no sanity check, no loggers and no
+@racket[monitor] or @racket[checkpoint] callbacks. If an @racket[exn:fail]
+or @racket[exn:break] is raised, @racket[fit] runs each callback's
 @racket[on-exception] and then @racket[teardown] with breaks disabled, and
-re-raises the exception.
+re-raises the exception; a break issued meanwhile is absorbed.
 
 The contract also requires @racket[#:max-epochs], @racket[#:max-steps] or
 @racket[#:fast-dev-run]; a @racket[define-training-step]; a
 @racket[define-optimizers] under automatic optimization; a
 @racket[define-validation-step] with @racket[#:val]; limits that select at
 least one batch; an integer @racket[#:val-check-interval] no larger than the
-loader's batch count; and, under manual optimization, no
+number of training batches @racket[#:limit-train-batches] selects; and, under
+manual optimization, no
 @racket[#:accumulate-grad-batches] above 1 and no
 @racket[#:gradient-clip-val].}
 
@@ -263,11 +270,11 @@ epoch is skipped, its validation loop included.}
                    [#:batch-size batch-size (or/c #f exact-positive-integer?) #f]
                    [#:logger? logger? boolean? #t])
          void?]{
-Lightning's @tt{self.log}. The defaults for @racket[#:on-step?] and
-@racket[#:on-epoch?] are the hook's, from @secref["train-hooks"];
-@racket[#:on-step? #t] in a hook that logs only per epoch, or
-@racket[#:on-epoch? #t] in one that logs only per step, is a contract
-violation. An epoch @racket['mean] is weighted by @racket[#:batch-size].}
+Lightning's @tt{self.log}. The values allowed for @racket[#:on-step?] and
+@racket[#:on-epoch?], and their defaults, are the hook's, from
+@secref["train-hooks"]; @racket[#:on-step? #t] or @racket[#:on-epoch? #f]
+in a hook that logs only per epoch is a contract violation. An epoch
+@racket['mean] is weighted by @racket[#:batch-size].}
 
 @defthing[gen:logger any/c]{
 The generic interface of a logger, with the methods below.}
@@ -302,48 +309,24 @@ Write @tt{metrics.jsonl} or @tt{metrics.csv} and
 
 @section{Callbacks}
 
-@defproc[(lambda-callback
-          [#:state-key state-key state-key/c "lambda-callback"]
-                         [#:setup setup (or/c #f (procedure-arity-includes/c 2)) #f]
-                         [#:on-fit-start on-fit-start (or/c #f (procedure-arity-includes/c 1)) #f]
-                         [#:on-sanity-check-start on-sanity-check-start (or/c #f (procedure-arity-includes/c 1)) #f]
-                         [#:on-sanity-check-end on-sanity-check-end (or/c #f (procedure-arity-includes/c 1)) #f]
-                         [#:on-train-start on-train-start (or/c #f (procedure-arity-includes/c 1)) #f]
-                         [#:on-train-epoch-start on-train-epoch-start (or/c #f (procedure-arity-includes/c 1)) #f]
-                         [#:on-train-batch-start on-train-batch-start (or/c #f procedure?) #f]
-                         [#:on-before-zero-grad on-before-zero-grad (or/c #f (procedure-arity-includes/c 2)) #f]
-                         [#:on-before-backward on-before-backward (or/c #f (procedure-arity-includes/c 2)) #f]
-                         [#:on-after-backward on-after-backward (or/c #f (procedure-arity-includes/c 1)) #f]
-                         [#:on-before-optimizer-step on-before-optimizer-step (or/c #f (procedure-arity-includes/c 2)) #f]
-                         [#:on-train-batch-end on-train-batch-end (or/c #f procedure?) #f]
-                         [#:on-train-epoch-end on-train-epoch-end (or/c #f (procedure-arity-includes/c 1)) #f]
-                         [#:on-train-end on-train-end (or/c #f (procedure-arity-includes/c 1)) #f]
-                         [#:on-fit-end on-fit-end (or/c #f (procedure-arity-includes/c 1)) #f]
-                         [#:teardown teardown (or/c #f (procedure-arity-includes/c 2)) #f]
-                         [#:on-validation-start on-validation-start (or/c #f (procedure-arity-includes/c 1)) #f]
-                         [#:on-validation-epoch-start on-validation-epoch-start (or/c #f (procedure-arity-includes/c 1)) #f]
-                         [#:on-validation-batch-start on-validation-batch-start (or/c #f procedure?) #f]
-                         [#:on-validation-batch-end on-validation-batch-end (or/c #f procedure?) #f]
-                         [#:on-validation-epoch-end on-validation-epoch-end (or/c #f (procedure-arity-includes/c 1)) #f]
-                         [#:on-validation-end on-validation-end (or/c #f (procedure-arity-includes/c 1)) #f]
-                         [#:on-test-start on-test-start (or/c #f (procedure-arity-includes/c 1)) #f]
-                         [#:on-test-epoch-start on-test-epoch-start (or/c #f (procedure-arity-includes/c 1)) #f]
-                         [#:on-test-batch-start on-test-batch-start (or/c #f procedure?) #f]
-                         [#:on-test-batch-end on-test-batch-end (or/c #f procedure?) #f]
-                         [#:on-test-epoch-end on-test-epoch-end (or/c #f (procedure-arity-includes/c 1)) #f]
-                         [#:on-test-end on-test-end (or/c #f (procedure-arity-includes/c 1)) #f]
-                         [#:on-predict-start on-predict-start (or/c #f (procedure-arity-includes/c 1)) #f]
-                         [#:on-predict-epoch-start on-predict-epoch-start (or/c #f (procedure-arity-includes/c 1)) #f]
-                         [#:on-predict-batch-start on-predict-batch-start (or/c #f procedure?) #f]
-                         [#:on-predict-batch-end on-predict-batch-end (or/c #f procedure?) #f]
-                         [#:on-predict-epoch-end on-predict-epoch-end (or/c #f (procedure-arity-includes/c 1)) #f]
-                         [#:on-predict-end on-predict-end (or/c #f (procedure-arity-includes/c 1)) #f]
-                         [#:on-exception on-exception (or/c #f (procedure-arity-includes/c 2)) #f]
-                         [#:state-dict state-dict (or/c #f (procedure-arity-includes/c 1)) #f]
-                         [#:load-state! load-state! (or/c #f (procedure-arity-includes/c 2)) #f]
-                         [#:on-save-checkpoint on-save-checkpoint (or/c #f (procedure-arity-includes/c 2)) #f]
-                         [#:on-load-checkpoint on-load-checkpoint (or/c #f (procedure-arity-includes/c 2)) #f])
-         callback?]{
+@(define-syntax-parse-rule (defproc-lambda-callback body ...)
+   #:with (argument ...)
+   (for/list ([h (in-list (filter callback-hook? definable-hooks))])
+     (define name (hook-name h))
+     (define procedure/c
+       (if (hook-batch? h)
+           'procedure?
+           `(procedure-arity-includes/c ,(add1 (length (hook-formals h))))))
+     (datum->syntax this-syntax
+                    `[,(string->keyword (symbol->string name)) ,name
+                      (or/c #f ,procedure/c) #f]))
+   (defproc (lambda-callback
+             [#:state-key state-key state-key/c "lambda-callback"]
+             argument ...)
+     callback?
+     body ...))
+
+@defproc-lambda-callback{
 Lightning's @tt{LambdaCallback}: one keyword per callback hook of
 @secref["train-hooks"]. Each procedure takes the run first, then the hook's
 arguments.}
@@ -434,23 +417,25 @@ epoch.
    (define names (map symbol->string (hook-formals h)))
    (string-join (if (hook-batch? h) (append names (list "batch…")) names)))
 @(define (log-cell h)
-   (case (hook-log h)
-     [(step) "step"]
-     [(epoch) "epoch"]
-     [(epoch-only) "epoch only"]
+   (define rule (hook-log h))
+   (cond
+     [(equal? rule step-log) "step"]
+     [(equal? rule epoch-log) "epoch"]
+     [(equal? rule epoch-only-log) "epoch only"]
      [else "no"]))
 @(define (defined-by h)
    (if (hook-form h)
        (racketidfont (symbol->string (hook-form h)))
        (tt "define-hook")))
+@(define (hook-row h)
+   (list (tt (symbol->string (hook-name h))) (defined-by h) (who h)
+         (arguments h) (log-cell h)))
 
 @tabular[#:sep @hspace[2]
          #:style 'boxed
          (cons (list @bold{hook} @bold{defined by} @bold{who}
                      @bold{arguments} @bold{@racket[log!]})
-               (for/list ([h (in-list hooks)])
-                 (list (tt (symbol->string (hook-name h))) (defined-by h)
-                       (who h) (arguments h) (log-cell h))))]
+               (map hook-row hooks))]
 
 The order of one @racket[fit], after Lightning 2.6.5, with
 @italic{A} the @racket[#:accumulate-grad-batches]:

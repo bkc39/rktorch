@@ -1,8 +1,12 @@
 #lang racket/base
 
 (module+ test
-  (require (only-in racket/math exact-ceiling exact-floor)
+  (require (for-syntax racket/base (only-in syntax/parse/pre ~optional ~seq expr id))
+           (only-in racket/list drop-right make-list)
+           (only-in racket/match match-define)
+           (only-in racket/math exact-ceiling)
            rackunit
+           (only-in syntax/parse/define define-syntax-parse-rule)
            (only-in "../data/loader.rkt" dataloader tensor-dataset)
            (only-in "../foreign/ops.rkt" move-generation)
            (only-in "../main.rkt"
@@ -11,7 +15,9 @@
            (only-in "../nn.rkt"
                     Dropout Linear eval! in-layers layer-copy layer-training?
                     mse-loss parameters sgd state-dict train!)
-           "../train.rkt")
+           "../train.rkt"
+           (only-in "private/trainer-kit.rkt"
+                    collecting-finalized collecting-logger collecting-metrics))
 
   (struct tally (notes skip-at false-at))
 
@@ -64,20 +70,23 @@
   (define (ones-loader n #:batch-size [b 1])
     (dataloader (tensor-dataset (ones n 1) (ones n 1)) #:batch-size b))
 
-  (define (selected b limit)
-    (if (exact-integer? limit) (min limit b) (exact-floor (* b limit))))
+  (define (expected-batches b limit)
+    (case limit
+      [(1.0) b]
+      [(0.5) (quotient b 2)]
+      [(2) (min 2 b)]))
 
   (test-case "L-C1, L-C2: steps and training steps per window and epoch"
     (for* ([a (in-range 1 5)]
            [b (in-range 1 8)]
            [epochs (in-range 1 4)]
            [limit (in-list '(1.0 0.5 2))]
-           #:when (positive? (selected b limit)))
+           #:when (positive? (expected-batches b limit)))
       (define t (new-tally))
       (define r (fit (Counted t) (ones-loader b)
                      #:max-epochs epochs #:accumulate-grad-batches a
                      #:limit-train-batches limit #:logger #f))
-      (define be (selected b limit))
+      (define be (expected-batches b limit))
       (define steps (* epochs (exact-ceiling (/ be a))))
       (define label (format "A=~a b=~a E=~a limit=~a" a b epochs limit))
       (check-equal? (length (notes t 'optimizer-step)) steps label)
@@ -95,11 +104,17 @@
     (define t (new-tally))
     (fit (Counted t) (ones-loader 2) #:val (ones-loader 2) #:max-epochs 4
          #:check-val-every-n-epoch 2 #:num-sanity-val-steps 0 #:logger #f)
-    (check-equal? (map car (notes t 'validation)) '(1 3))
+    (check-equal? (for/list ([v (in-list (notes t 'validation))])
+                    (match-define (list epoch _ _) v)
+                    epoch)
+                  '(1 3))
     (define u (new-tally))
     (fit (Counted u) (ones-loader 5) #:val (ones-loader 2) #:max-epochs 2
          #:val-check-interval 2 #:num-sanity-val-steps 0 #:logger #f)
-    (check-equal? (map cadr (notes u 'validation)) '(2 4 7 9)))
+    (check-equal? (for/list ([v (in-list (notes u 'validation))])
+                    (match-define (list _ step _) v)
+                    step)
+                  '(2 4 7 9)))
 
   (test-case "L-C5: skip-step! and a #f loss drop the window's step"
     (for ([t (list (new-tally #:skip-at '(0 0)) (new-tally #:false-at '(0 0)))])
@@ -114,14 +129,16 @@
     (define t (new-tally))
     (fit (Counted t) (ones-loader 4) #:max-epochs 2 #:accumulate-grad-batches 2
          #:logger #f)
-    (define zeroed (notes t 'zero-grad))
-    (check-equal? (car zeroed) '(#f #f))
-    (check-equal? (cdr zeroed) (reverse (cdr (reverse (notes t 'optimizer-step))))))
+    (match-define (cons first-zeroed later-zeroed) (notes t 'zero-grad))
+    (check-equal? first-zeroed '(#f #f))
+    (check-equal? later-zeroed (drop-right (notes t 'optimizer-step) 1)))
 
   (test-case "L-C7: on-before-backward gets the loss divided by A"
     (define t (new-tally))
     (fit (Counted t) (ones-loader 7) #:max-epochs 1 #:accumulate-grad-batches 3
          #:logger #f)
+    (check-equal? (length (notes t 'step-loss)) 7)
+    (check-equal? (length (notes t 'backward-loss)) 7)
     (for ([step (in-list (notes t 'step-loss))]
           [divided (in-list (notes t 'backward-loss))])
       (check-= divided (/ step 3) (* 1e-6 (max 1.0 (abs step))))))
@@ -132,12 +149,6 @@
          #:logger #f)
     (check-equal? (length (notes t 'training-step)) 3))
 
-  (struct noting-logger (t)
-    #:methods gen:logger
-    [(define (logger-log-hyperparams! l params) (note! (noting-logger-t l) 'hparams params))
-     (define (logger-log-metrics! l metrics step) (note! (noting-logger-t l) 'metrics step))
-     (define (logger-finalize! l status) (note! (noting-logger-t l) 'finalize status))])
-
   (define-callback sanity-watch (t)
     (define-hook (on-sanity-check-start) (note! t 'sanity #t)))
 
@@ -145,17 +156,23 @@
     #:kind checkpoint
     (define-hook (on-train-epoch-end) (note! t 'saver #t)))
 
-  (test-case "L-C9: #:fast-dev-run runs n batches once, with no sanity, logger or checkpoint"
+  (define-callback stopper (t)
+    #:kind monitor
+    (define-hook (on-train-epoch-end) (note! t 'stopper #t)))
+
+  (test-case "L-C9: #:fast-dev-run runs n batches once, with no sanity, logger, monitor or checkpoint"
     (define t (new-tally))
+    (define l (collecting-logger))
     (fit (Counted t) (ones-loader 5) #:val (ones-loader 5) #:max-epochs 3
-         #:fast-dev-run 2 #:logger (noting-logger t)
-         #:callbacks (list (sanity-watch t) (saver t)))
+         #:fast-dev-run 2 #:logger l
+         #:callbacks (list (sanity-watch t) (saver t) (stopper t)))
     (check-equal? (length (notes t 'training-step)) 2)
     (check-equal? (length (notes t 'validation-step)) 2)
     (check-equal? (notes t 'epoch) '(0))
     (check-equal? (notes t 'sanity) '())
     (check-equal? (notes t 'saver) '())
-    (check-equal? (notes t 'metrics) '()))
+    (check-equal? (notes t 'stopper) '())
+    (check-equal? (collecting-metrics l) '()))
 
   (test-case "L-M1, L-M3: evaluation runs without grad, in eval mode, from released grads"
     (define t (new-tally))
@@ -163,10 +180,12 @@
     (define before (modes tr))
     (define r (fit tr (ones-loader 4) #:val (ones-loader 2) #:max-epochs 2
                    #:logger #f))
-    (check-true (andmap (lambda (v) (equal? v '(#f #f))) (notes t 'validation-step)))
+    (check-equal? (notes t 'validation-step) (make-list 6 '(#f #f)))
     (check-equal? (modes (run-trainer r)) before)
+    (check-equal? (length (notes t 'validation)) 3)
     (for ([v (in-list (notes t 'validation))])
-      (check-true (andmap not (caddr v)))))
+      (match-define (list _ _ grads) v)
+      (check-true (andmap not grads))))
 
   (define-trainer Moded (net drop t)
     (define-init (d tl) (set! net (Linear 1 1)) (set! drop d) (set! t tl))
@@ -266,23 +285,16 @@
     (check-not-equal? (map tensor->list (parameters tr))
                       (map tensor->list (parameters copy))))
 
-  (define-callback tag (label t)
-    (define-hook (on-fit-start) (note! t 'order (list 'fit-start label)))
-    (define-hook (on-train-epoch-end) (note! t 'order (list 'epoch-end label))))
+  (define-syntax-parse-rule (define-order-callback name:id (~optional (~seq #:kind kind:id)))
+    (define-callback name (label t)
+      (~? (~@ #:kind kind))
+      (define-hook (on-fit-start) (note! t 'order (list 'fit-start label)))
+      (define-hook (on-train-epoch-end) (note! t 'order (list 'epoch-end label)))))
 
-  (define-callback watch (label t)
-    #:kind monitor
-    (define-hook (on-fit-start) (note! t 'order (list 'fit-start label)))
-    (define-hook (on-train-epoch-end) (note! t 'order (list 'epoch-end label))))
-
-  (define-callback keep (label t)
-    #:kind checkpoint
-    (define-hook (on-fit-start) (note! t 'order (list 'fit-start label)))
-    (define-hook (on-train-epoch-end) (note! t 'order (list 'epoch-end label))))
-
-  (define-callback other (label t)
-    (define-hook (on-fit-start) (note! t 'order (list 'fit-start label)))
-    (define-hook (on-train-epoch-end) (note! t 'order (list 'epoch-end label))))
+  (define-order-callback tag)
+  (define-order-callback watch #:kind monitor)
+  (define-order-callback keep #:kind checkpoint)
+  (define-order-callback other)
 
   (define-trainer Ordered (net t)
     (define-init (tl) (set! net (Linear 1 1)) (set! t tl))
@@ -320,13 +332,14 @@
 
   (test-case "exceptions: re-raised eq?, every on-exception and teardown run once"
     (define t (new-tally))
+    (define l (collecting-logger))
     (define receiver (make-log-receiver (current-logger) 'debug 'rktorch-train))
     (define raised
-      (with-handlers ([(lambda (e) #t) values])
-        (fit (Failing t) (ones-loader 2) #:max-epochs 1 #:logger (noting-logger t)
+      (with-handlers ([values values])
+        (fit (Failing t) (ones-loader 2) #:max-epochs 1 #:logger l
              #:callbacks (list (breaking t) (catching t)))))
     (check-eq? raised planned)
     (check-equal? (notes t 'caught) (list planned))
     (check-equal? (notes t 'teardown) '(fit fit))
-    (check-equal? (notes t 'finalize) '(failed))
-    (check-true (and (sync/timeout 0 receiver) #t))))
+    (check-equal? (collecting-finalized l) '(failed))
+    (check-not-false (sync/timeout 0 receiver))))

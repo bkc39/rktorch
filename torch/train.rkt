@@ -1,7 +1,5 @@
 #lang racket/base
 
-;; raco review lints unexpanded and reads a re-export facade's requires as
-;; unused
 #|review: ignore|#
 
 (require "train/callbacks.rkt"

@@ -7,7 +7,7 @@
            "../train.rkt"
            (only-in "private/lightning-names.rkt" expected-events)
            (only-in "private/trainer-kit.rkt"
-                    recorder Recorded scenario scenario-events toy-loader))
+                    recorder Recorded scenario scenario-events scenario-exn toy-loader))
 
   (define (same-event? a e)
     (match* (a e)
@@ -22,11 +22,8 @@
     (define mismatch
       (for/first ([a (in-list actual)] [e (in-list expected)] [i (in-naturals)]
                   #:unless (same-event? a e))
-        i))
-    (check-false mismatch
-                 (format "~a: event ~a is ~s, Lightning's is ~s" name mismatch
-                         (and mismatch (list-ref actual mismatch))
-                         (and mismatch (list-ref expected mismatch))))
+        (format "~a: event ~a is ~s, Lightning's is ~s" name i a e)))
+    (check-false mismatch (or mismatch ""))
     (check-equal? (length actual) (length expected)
                   (format "~a: event count; the shorter list ends ~s" name
                           (take (if (< (length actual) (length expected)) actual expected)
@@ -85,7 +82,15 @@
     (predict (Recorded sc) (toy-loader 4) #:callbacks (list (recorder sc)))
     (check-events 'predict sc))
 
-  (test-case "LO-9: an exn:break runs LO-4's hooks, a second break included"
+  (test-case "LO-9: an exn:break runs LO-4's hooks, and a second break is absorbed"
     (define sc (scenario #:fail-at '(0 1) #:break-twice? #t))
-    (check-exn exn:break? (lambda () (fit-scenario sc)))
+    (define caught #f)
+    (define late
+      (with-handlers ([exn:break? values])
+        (set! caught (with-handlers ([exn:break? values]) (fit-scenario sc)))
+        (sleep 0)
+        #f))
+    (check-pred exn:break? caught)
+    (check-eq? caught (scenario-exn sc) "fit re-raises the break on-exception received")
+    (check-false late "the break issued inside on-exception reached the caller")
     (check-events 'exception sc)))

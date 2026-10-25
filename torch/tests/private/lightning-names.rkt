@@ -4,25 +4,26 @@
          (only-in racket/list filter-map last)
          (only-in racket/match match)
          (only-in racket/runtime-path #%datum define-runtime-path)
-         (only-in racket/string string-replace))
+         (only-in racket/string string-replace)
+         (only-in "../../train/private/hooks.rkt" log-rule))
 
-(provide d2-teardown-after-exception
-         expected-events
+(provide expected-events
          fixture
          lightning->rktorch
-         log-permissions)
+         log-permissions
+         teardown-after-exception)
 
 (define-runtime-path fixture-path "../lightning-hooks.rktd")
 
 (define fixture (file->value fixture-path))
 
-(define d10
+(define unsupported-hooks
   '(transfer_batch_to_device configure_model configure_sharded_model
     prepare_data optimizer_step optimizer_zero_grad backward
     configure_gradient_clipping clip_gradients lr_scheduler_step forward))
 
-(define (d10? name)
-  (or (memq name d10)
+(define (unsupported-hook? name)
+  (or (memq name unsupported-hooks)
       (regexp-match? #rx"^on_(validation|test|predict)_model_|_dataloader$"
                      (symbol->string name))))
 
@@ -33,11 +34,11 @@
 
 (define (lightning->rktorch name)
   (match (regexp-match #rx"^Callback[.](.*)$" (symbol->string name))
-    [(list _ hook) (and (not (d10? (string->symbol hook)))
+    [(list _ hook) (and (not (unsupported-hook? (string->symbol hook)))
                         (list 'callback (hyphenated (string->symbol hook))))]
-    [#f (and (not (d10? name)) (list 'trainer (hyphenated name)))]))
+    [#f (and (not (unsupported-hook? name)) (list 'trainer (hyphenated name)))]))
 
-(define (d2-teardown-after-exception events)
+(define (teardown-after-exception events)
   (match (last events)
     [(list 'callback 'on-exception epoch step _ lr)
      (append events
@@ -46,7 +47,7 @@
     [_ events]))
 
 (define deviations
-  (hasheq 'exception d2-teardown-after-exception))
+  (hasheq 'exception teardown-after-exception))
 
 (define (expected-events scenario)
   (define events
@@ -60,10 +61,6 @@
 
 (define (log-permissions)
   (for/hasheq ([(name opts) (in-hash (hash-ref fixture 'log-permissions))]
-               #:unless (d10? name))
-    (values (cadr (lightning->rktorch name))
-            (match opts
-              [#f #f]
-              [(list '(#f #t) '(#f #t) #t #f) 'step]
-              [(list '(#f #t) '(#f #t) #f #t) 'epoch]
-              [(list '(#f) '(#t) #f #t) 'epoch-only]))))
+               #:unless (unsupported-hook? name))
+    (match (lightning->rktorch name)
+      [(list _ hook) (values hook (and opts (apply log-rule opts)))])))

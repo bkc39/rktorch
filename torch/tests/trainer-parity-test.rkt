@@ -1,14 +1,25 @@
 #lang racket/base
 
 (module+ test
-  (require rackunit
+  (require (only-in racket/runtime-path #%datum define-runtime-path)
+           rackunit
            (only-in "../data/loader.rkt"
                     dataloader dataloader-length in-dataloader tensor-dataset)
-           "../main.rkt"
-           "../nn.rkt"
-           "../train.rkt"
+           (only-in "../main.rkt"
+                    / ~> backward! cat cpu-device cuda-available? cuda-device
+                    flatten item manual-seed! max-pool2d relu reshape tensor->list
+                    with-default-device)
+           (only-in "../nn.rkt"
+                    Conv2d Linear cosine-annealing-lr cross-entropy define-layer
+                    parameters sgd step! zero-grads!)
+           (only-in "../train.rkt" define-init define-optimizers define-trainer
+                    define-training-step fit)
            (only-in "../vision/mnist.rkt" load-mnist-fixture)
-           "private/python-env.rkt")
+           (only-in "private/python-env.rkt"
+                    check-training-twin python-cuda-available? python-torch-available?
+                    tol))
+
+  (define-runtime-path twin "python/trainer_twin.py")
 
   (define-layer convnet (c1 c2 f1 f2)
     #:init ()
@@ -43,13 +54,18 @@
       (set-box! losses (cons (item loss) (unbox losses)))
       loss))
 
+  (define (device-named name)
+    (case name
+      [(cpu) (cpu-device)]
+      [(cuda) (cuda-device)]))
+
   (define (fit-on device)
     (with-default-device device
       (manual-seed! 0)
       (define net (convnet))
       (define losses (box '()))
       (fit (Mnist net losses) (mnist-loader) #:max-epochs epochs
-           #:accumulate-grad-batches accumulate #:device device #:logger #f)
+           #:accumulate-grad-batches accumulate #:device (device-named device) #:logger #f)
       (values (reverse (unbox losses)) (flat-parameters net))))
 
   (define (hand-loop device)
@@ -59,15 +75,15 @@
       (define opt (sgd (parameters net) #:lr 0.05 #:momentum 0.9))
       (define schedule (cosine-annealing-lr opt #:t-max epochs))
       (define loader (mnist-loader))
-      (define last (sub1 (dataloader-length loader)))
+      (define final-batch (sub1 (dataloader-length loader)))
       (define losses
         (for*/list ([_ (in-range epochs)]
                     [(x y i) (in-parallel (in-dataloader loader) (in-naturals))])
           (define loss (cross-entropy (net x) y))
           (when (zero? (modulo i accumulate)) (zero-grads! opt))
           (backward! (/ loss accumulate))
-          (when (or (~> i add1 (modulo accumulate) zero?) (= i last)) (step! opt))
-          (when (= i last) (step! schedule))
+          (when (or (~> i add1 (modulo accumulate) zero?) (= i final-batch)) (step! opt))
+          (when (= i final-batch) (step! schedule))
           (item loss)))
       (values losses (flat-parameters net))))
 
@@ -82,7 +98,6 @@
       [(not (python-torch-available?))
        (displayln "[trainer-parity-test] L-P2 skipped: python3 `torch` not available")]
       [else
-       (check-training-twin "trainer" "../torch/tests/python/trainer_twin.py" fit-on 'cpu tol)
+       (check-training-twin "trainer" twin fit-on 'cpu tol)
        (when (and (cuda-available?) (python-cuda-available?))
-         (check-training-twin "trainer" "../torch/tests/python/trainer_twin.py" fit-on
-                              'cuda 5e-3))])))
+         (check-training-twin "trainer" twin fit-on 'cuda 5e-3))])))

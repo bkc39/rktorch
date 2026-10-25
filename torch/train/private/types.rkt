@@ -1,7 +1,12 @@
 #lang racket/base
 
+(require (for-syntax racket/base (only-in syntax/parse/pre expr id))
+         (only-in racket/contract/base contract? flat-named-contract)
+         (only-in syntax/parse/define define-syntax-parse-rule)
+         (only-in "../../private/contract.rkt" define/contract-out))
+
 (provide callback?
-         leg-message
+         define-named-contract
          not-implemented
          prop:callback
          prop:trainer
@@ -11,6 +16,9 @@
          trainer-hparam-names
          trainer?
          (struct-out trainer-info))
+
+(define-syntax-parse-rule (define-named-contract name:id contract:expr)
+  (define/contract-out name contract? (flat-named-contract 'name contract)))
 
 (struct trainer-info (forms automatic? hparams))
 
@@ -33,9 +41,7 @@
 
 (define legs #hasheq((T1 . "T1 (#384)") (T2 . "T2 (#385)") (T3 . "T3 (#386)")))
 
-(define (leg-message leg)
-  (format "not implemented until ~a" (hash-ref legs leg)))
-
 (define (not-implemented who leg)
-  (raise (exn:fail:unsupported (format "~a: ~a" who (leg-message leg))
-                               (current-continuation-marks))))
+  (raise (exn:fail:unsupported
+          (format "~a: not implemented until ~a" who (hash-ref legs leg))
+          (current-continuation-marks))))

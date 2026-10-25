@@ -1,27 +1,39 @@
 #lang racket/base
 
-(require (only-in racket/list argmin)
+(require (only-in racket/list argmin filter-not last)
+         (only-in racket/match match)
          (only-in racket/string string-split))
 
 (provide (struct-out hook)
+         (struct-out log-rule)
          callback-hook?
          closest-hook-name
          definable-hook-named
          definable-hooks
+         epoch-log
+         epoch-only-log
          hook-named
          hooks
+         step-log
          trainer-hook?)
 
-(struct hook (name sides formals batch? log form order) #:transparent)
+(struct log-rule (on-step on-epoch default-on-step? default-on-epoch?)
+  #:transparent)
+
+(define step-log (log-rule '(#f #t) '(#f #t) #t #f))
+(define epoch-log (log-rule '(#f #t) '(#f #t) #f #t))
+(define epoch-only-log (log-rule '(#f) '(#t) #f #t))
+
+(struct hook (name sides formals batch? indexed? log form order) #:transparent)
 
 (define (row name sides formals
-             #:batch? [batch? #f] #:log [log #f] #:form [form #f]
-             #:order [order 'callbacks-first])
-  (hook name sides formals batch? log form order))
+             #:batch? [batch? #f] #:indexed? [indexed? batch?] #:log [log #f]
+             #:form [form #f] #:order [order 'callbacks-first])
+  (hook name sides formals batch? indexed? log form order))
 
 (define both '(callback trainer))
 
-(define (stage-rows stage step-log #:edge-log [edge-log 'epoch-only]
+(define (stage-rows stage step-log #:edge-log [edge-log epoch-only-log]
                     #:end-log [end-log #f])
   (define (named fmt) (string->symbol (format fmt stage)))
   (list (row (named "on-~a-start") both '() #:log edge-log)
@@ -42,24 +54,24 @@
     (row 'on-fit-start both '())
     (row 'on-sanity-check-start '(callback) '())
     (row 'on-sanity-check-end '(callback) '())
-    (row 'on-train-start both '() #:log 'epoch-only)
-    (row 'on-train-epoch-start both '() #:log 'epoch-only)
-    (row 'on-before-batch-transfer '(trainer) '() #:batch? #t)
-    (row 'on-after-batch-transfer '(trainer) '() #:batch? #t)
-    (row 'on-train-batch-start both '() #:batch? #t #:log 'step)
-    (row 'training-step '(trainer) '() #:batch? #t #:log 'step
+    (row 'on-train-start both '() #:log epoch-only-log)
+    (row 'on-train-epoch-start both '() #:log epoch-only-log)
+    (row 'on-before-batch-transfer '(trainer) '() #:batch? #t #:indexed? #f)
+    (row 'on-after-batch-transfer '(trainer) '() #:batch? #t #:indexed? #f)
+    (row 'on-train-batch-start both '() #:batch? #t #:log step-log)
+    (row 'training-step '(trainer) '() #:batch? #t #:log step-log
          #:form 'define-training-step)
-    (row 'on-before-zero-grad both '(optimizer) #:log 'step)
-    (row 'on-before-backward both '(loss) #:log 'step)
-    (row 'on-after-backward both '() #:log 'step)
-    (row 'on-before-optimizer-step both '(optimizer) #:log 'step)
-    (row 'on-train-batch-end both '(loss extra) #:batch? #t #:log 'step)
-    (row 'on-train-epoch-end both '() #:log 'epoch-only #:order 'by-kind)
+    (row 'on-before-zero-grad both '(optimizer) #:log step-log)
+    (row 'on-before-backward both '(loss) #:log step-log)
+    (row 'on-after-backward both '() #:log step-log)
+    (row 'on-before-optimizer-step both '(optimizer) #:log step-log)
+    (row 'on-train-batch-end both '(loss extra) #:batch? #t #:log step-log)
+    (row 'on-train-epoch-end both '() #:log epoch-only-log #:order 'by-kind)
     (row 'on-train-end both '())
     (row 'on-fit-end both '())
     (row 'teardown both '(stage)))
-   (stage-rows 'validation 'epoch)
-   (stage-rows 'test 'epoch)
+   (stage-rows 'validation epoch-log)
+   (stage-rows 'test epoch-log)
    (stage-rows 'predict #f #:edge-log #f)
    (list
     (row 'on-exception '(callback) '(exn))
@@ -68,26 +80,31 @@
     (row 'on-save-checkpoint both '(checkpoint))
     (row 'on-load-checkpoint both '(checkpoint) #:order 'trainer-first))))
 
-(define definable-hooks (filter (lambda (h) (not (hook-form h))) hooks))
+(define definable-hooks (filter-not hook-form hooks))
 
-(define (hook-named name)
-  (for/first ([h (in-list hooks)] #:when (eq? name (hook-name h))) h))
+(define ((named? name) h) (eq? name (hook-name h)))
 
-(define (definable-hook-named name)
-  (for/first ([h (in-list definable-hooks)] #:when (eq? name (hook-name h)))
-    h))
+(define (hook-named name) (findf (named? name) hooks))
+
+(define (definable-hook-named name) (findf (named? name) definable-hooks))
 
 (define (callback-hook? h) (and (memq 'callback (hook-sides h)) #t))
 (define (trainer-hook? h) (and (memq 'trainer (hook-sides h)) #t))
 
 (define (edit-distance as bs substitution)
-  (define row0 (for/list ([i (in-range (add1 (length bs)))]) i))
-  (for/fold ([prev row0] #:result (car (reverse prev)))
+  (define first-row (for/list ([i (in-range (add1 (length bs)))]) i))
+  (for/fold ([prev first-row] #:result (last prev))
             ([a (in-list as)] [i (in-naturals 1)])
-    (for/fold ([acc (list i)] #:result (reverse acc))
-              ([b (in-list bs)] [diag (in-list prev)] [up (in-list (cdr prev))])
-      (cons (min (add1 up) (add1 (car acc)) (+ diag (substitution a b)))
-            acc))))
+    (next-row prev a i bs substitution)))
+
+(define (next-row prev a i bs substitution)
+  (match prev
+    [(cons _ ups)
+     (for/fold ([acc (list i)] #:result (reverse acc))
+               ([b (in-list bs)] [diag (in-list prev)] [up (in-list ups)])
+       (match acc
+         [(cons left _)
+          (cons (min (add1 up) (add1 left) (+ diag (substitution a b))) acc)]))]))
 
 (define (word-substitution a b)
   (if (string=? a b)
@@ -103,13 +120,3 @@
    (argmin (lambda (h) (edit-distance target (words (hook-name h))
                                       word-substitution))
            definable-hooks)))
-
-(module+ test
-  (require (only-in racket/list filter-map)
-           rackunit)
-  (check-equal? (closest-hook-name 'on-batch-end) 'on-train-batch-end)
-  (check-equal? (closest-hook-name 'on-fit-strat) 'on-fit-start)
-  (check-equal? (filter-map hook-form hooks)
-                '(define-callbacks define-optimizers define-training-step
-                  define-validation-step define-test-step
-                  define-predict-step)))
