@@ -20,7 +20,7 @@
          (struct-out raised))
 
 (module+ private
-  (provide (struct-out pool-guard) worker-custodian))
+  (provide (struct-out pool-guard) live-worker-count worker-custodian))
 
 (struct built (values-list))
 (struct raised (value))
@@ -36,6 +36,14 @@
 (struct pool-guard ([threads #:mutable] stop kill))
 
 (define worker-custodian (make-custodian-at-root))
+
+(define worker-threads (make-weak-hasheq))
+
+(define (live-worker-count #:wait [seconds 0])
+  (define deadline (+ (current-inexact-milliseconds) (* 1000 seconds)))
+  (for/sum ([t (in-list (hash-keys worker-threads))])
+    (define left (max 0 (/ (- deadline (current-inexact-milliseconds)) 1000)))
+    (if (sync/timeout left (thread-dead-evt t)) 0 1)))
 
 (define (parts v)
   (match v
@@ -108,15 +116,18 @@
     (void (thread (lambda () (reap guard registration))))))
 
 (define (start-thread ds collate seed results stop breaks caller)
-  (thread (lambda ()
-            (call-with-break-parameterization
-             breaks
-             (lambda ()
-               (parameterize ([current-custodian caller]
-                              [current-generator (make-generator seed)]
-                              [current-pseudo-random-generator (worker-prng seed)])
-                 (serve ds collate results stop)))))
-          #:pool 'own))
+  (define t
+    (thread (lambda ()
+              (call-with-break-parameterization
+               breaks
+               (lambda ()
+                 (parameterize ([current-custodian caller]
+                                [current-generator (make-generator seed)]
+                                [current-pseudo-random-generator (worker-prng seed)])
+                   (serve ds collate results stop)))))
+            #:pool 'own))
+  (hash-set! worker-threads t #t)
+  t)
 
 (define/contract-out (call-with-abort abort! thunk) ;; noqa
   (-> (-> any/c any) (-> any) any)
