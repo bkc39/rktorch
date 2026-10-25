@@ -18,9 +18,13 @@
          (all-from-out scribble/manual)
          photo
          torch-eval
-         torch-examples)
+         torch-examples
+         train-eval)
 
 (define torch-eval (make-base-eval '(require torch torch/nn)))
+
+(define train-eval
+  (make-base-eval '(require torch torch/data/loader torch/nn torch/train)))
 
 (define-syntax-rule (torch-examples body ...)
   (examples #:eval torch-eval body ...))

@@ -54,11 +54,12 @@
           (filter-map public-module _)
           (sort symbol<?))))
 
-  (test-case "the label helper exports racket, torch and torch/nn"
+  (test-case "the label helper exports racket, torch, torch/nn and torch/train"
     (check-equal? (export-set 'torch/scribblings/labels not)
                   (set-union (export-set 'racket)
                              (export-set 'torch run-time)
-                             (export-set 'torch/nn run-time))))
+                             (export-set 'torch/nn run-time)
+                             (export-set 'torch/train run-time))))
 
   (test-case "the label helper exports nothing outside the label phase"
     (check-true (set-empty? (export-set 'torch/scribblings/labels values))))
@@ -181,11 +182,15 @@
                       (symbol->string language)))))
 
   (define shadowing-modules
-    '(torch/foreign torch/generated torch/main torch/operators))
+    '(torch/foreign torch/generated torch/main torch/operators torch/train))
 
   (test-case "L4: torch/generated shares only take with racket"
     (check-equal? (set-intersect (export-set 'torch/generated) racket-exports)
                   (seteq 'take)))
+
+  (test-case "L4: torch/train shares only logger? with racket"
+    (check-equal? (set-intersect (export-set 'torch/train) racket-exports)
+                  (seteq 'logger?)))
 
   (test-case "L4: every other public module requires beside racket"
     (check-true (subset? (seteq 'torch/nn 'torch/safe)
