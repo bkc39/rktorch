@@ -276,34 +276,34 @@ in a hook that logs only per epoch is a contract violation. An epoch
 @racket['mean] is weighted by @racket[#:batch-size]. The value is detached
 before it is accumulated, so a logged loss keeps no graph alive.}
 
-@defthing[gen:logger any/c]{
+@defthing[gen:training-logger any/c]{
 The generic interface of a logger, with the methods below.}
 
-@deftogether[(@defproc[(logger? [v any/c]) boolean?]
-              @defproc[(logger-log-hyperparams! [logger logger?]
+@deftogether[(@defproc[(training-logger? [v any/c]) boolean?]
+              @defproc[(logger-log-hyperparams! [logger training-logger?]
                                                 [params (hash/c symbol? any/c)])
                        any]
-              @defproc[(logger-log-metrics! [logger logger?]
+              @defproc[(logger-log-metrics! [logger training-logger?]
                                             [metrics (hash/c symbol? real?)]
                                             [step exact-nonnegative-integer?])
                        any]
-              @defproc[(logger-finalize! [logger logger?]
+              @defproc[(logger-finalize! [logger training-logger?]
                                          [status (or/c 'success 'failed)])
                        any])]{
 A logger receives the hyperparameters once at fit start, the host metrics at
 each read, and @racket['failed] when the entry point raises.}
 
 @defproc[(stdout-logger [#:out out output-port? (current-output-port)])
-         logger?]{Prints each metrics read as one line.}
+         training-logger?]{Prints each metrics read as one line.}
 
 @deftogether[(@defproc[(jsonl-logger [dir path-string?]
                                      [#:exists exists
                                       (or/c 'error 'append 'replace) 'error])
-                       logger?]
+                       training-logger?]
               @defproc[(csv-logger [dir path-string?]
                                    [#:exists exists
                                     (or/c 'error 'append 'replace) 'error])
-                       logger?])]{
+                       training-logger?])]{
 Write @tt{metrics.jsonl} or @tt{metrics.csv} and
 @tt{hparams.rktd} under @racket[dir].}
 

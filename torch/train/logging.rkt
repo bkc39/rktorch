@@ -12,16 +12,16 @@
          (only-in "private/types.rkt" define-named-contract not-implemented)
          (only-in "run.rkt" logging-run/c))
 
-(provide gen:logger
+(provide gen:training-logger
          logger-finalize!
          logger-log-hyperparams!
          logger-log-metrics!
-         (contract-out [logger? (-> any/c boolean?)]))
+         (contract-out [training-logger? (-> any/c boolean?)]))
 
-(define-generics logger
-  (logger-log-hyperparams! logger params)
-  (logger-log-metrics! logger metrics step)
-  (logger-finalize! logger status))
+(define-generics training-logger
+  (logger-log-hyperparams! training-logger params)
+  (logger-log-metrics! training-logger metrics step)
+  (logger-finalize! training-logger status))
 
 (define-named-contract reduce/c (or/c 'mean 'sum 'max 'min))
 
@@ -34,7 +34,8 @@
   (and/c scalar-tensor/c
          (property/c dtype (or/c 'float32 'float64 'float16 'bfloat16))))
 
-(define-named-contract logger-spec/c (or/c #f logger? (listof logger?)))
+(define-named-contract logger-spec/c
+  (or/c #f training-logger? (listof training-logger?)))
 
 (module+ private
   (provide epoch-accumulators host-reads))
@@ -69,13 +70,13 @@
   (not-implemented 'run-log! 'T1))
 
 (define/contract-out (stdout-logger #:out [out (current-output-port)])
-  (->* () (#:out output-port?) logger?)
+  (->* () (#:out output-port?) training-logger?)
   (not-implemented 'stdout-logger 'T1))
 
 (define/contract-out (jsonl-logger dir #:exists [exists 'error])
-  (->* (path-string?) (#:exists (or/c 'error 'append 'replace)) logger?)
+  (->* (path-string?) (#:exists (or/c 'error 'append 'replace)) training-logger?)
   (not-implemented 'jsonl-logger 'T1))
 
 (define/contract-out (csv-logger dir #:exists [exists 'error])
-  (->* (path-string?) (#:exists (or/c 'error 'append 'replace)) logger?)
+  (->* (path-string?) (#:exists (or/c 'error 'append 'replace)) training-logger?)
   (not-implemented 'csv-logger 'T1))

@@ -182,15 +182,11 @@
                       (symbol->string language)))))
 
   (define shadowing-modules
-    '(torch/foreign torch/generated torch/main torch/operators torch/train))
+    '(torch/foreign torch/generated torch/main torch/operators))
 
   (test-case "L4: torch/generated shares only take with racket"
     (check-equal? (set-intersect (export-set 'torch/generated) racket-exports)
                   (seteq 'take)))
-
-  (test-case "L4: torch/train shares only logger? with racket"
-    (check-equal? (set-intersect (export-set 'torch/train) racket-exports)
-                  (seteq 'logger?)))
 
   (test-case "L4: every other public module requires beside racket"
     (check-true (subset? (seteq 'torch/nn 'torch/safe)

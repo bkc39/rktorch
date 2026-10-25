@@ -31,7 +31,7 @@
 (struct collecting-logger ([metrics #:auto] [hparams #:auto] [finalized #:auto])
   #:auto-value '()
   #:mutable
-  #:methods gen:logger
+  #:methods gen:training-logger
   [(define (logger-log-hyperparams! l params)
      (set-collecting-logger-hparams! l (cons params (collecting-logger-hparams l))))
    (define (logger-log-metrics! l metrics step)
