@@ -240,7 +240,8 @@ made inside a worker are serialized through the main thread: Racket code in a
 dataset runs in parallel, but a dataset whose per-item work is torch calls
 can be slower with workers than without. While the main thread is in a long
 run of foreign calls, as in a training step, a worker's torch call can stall
-the loader until the main thread blocks or yields. A native error from a
+the loader until the main thread blocks or yields; its first allocating
+tensor operation after each collection yields once. A native error from a
 worker's torch call carries the main thread's last error message, which can
 belong to another call. Until
 @hyperlink["https://github.com/bkc39/rktorch/issues/194"]{#194} is fixed,

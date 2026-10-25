@@ -11,7 +11,7 @@
 
   (define (cpu-bytes)
     (for/sum ([entry (in-list (native-memory-use))]
-              #:when (eq? (device-type (car entry)) 'cpu))
+              #:when (~> entry car device-type (eq? 'cpu)))
       (cdr entry)))
 
   (test-case "topk answers values and indices as two values"
@@ -53,6 +53,8 @@
     (define mib (* 1024 1024))
     (define (collections)
       (cdr (assq 'pressure-collections (finalizer-diagnostics))))
+    (define live-window 12)
+    (define call-bytes (* 262144 (+ 4 8)))
     (define source (randn 1048576))
     (for ([_ (in-range 3)]) (reclaim-native-memory!))
     (reset-pressure-state!)
@@ -60,15 +62,17 @@
     (define before (collections))
     (parameterize ([native-memory-limit (* 32 mib)])
       (define high-water
-        (for/fold ([hw 0]) ([_ (in-range 40)])
+        (for/fold ([hw 0] [window '()] #:result hw) ([_ (in-range 40)])
           (define-values (top indices) (g:topk source 262144 0 #t #t))
-          (void top indices)
-          (max hw (- (cpu-bytes) base))))
+          (values (max hw (- (cpu-bytes) base))
+                  (cons (cons top indices)
+                        (take window (min (length window) (sub1 live-window)))))))
       (check-true (> (collections) before)
                   "accounting several outputs never reached the trigger")
-      (check-true (< high-water (* 64 mib))
-                  (format "ledger reached ~a MiB under a 32 MiB limit"
-                          (quotient high-water mib))))
+      (check-true (<= high-water (* (+ live-window 10) call-bytes))
+                  (format "ledger reached ~a MiB with ~a MiB live"
+                          (quotient high-water mib)
+                          (quotient (* (add1 live-window) call-bytes) mib))))
     (check-equal? (tensor-shape source) '(1048576)))
 
   (test-case "a failing call raises with the op and the ATen message"

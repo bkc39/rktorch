@@ -130,7 +130,29 @@ skips. The claim names its thread, so one killed mid-collection, whose
 
 Phantom pressure keeps Racket's generational collections running, and
 on a GPU training loop they free most of a step's intermediates within
-the step. Two things escape them (#145, measured with
+the step, provided the finalizer thread gets its turn. A collection only
+finds a dead handle; its storage and its phantom stay until the
+finalizer runs, and that thread runs only when the main thread yields or
+its quantum expires, which a loop of native calls seldom reaches. Without
+a turn the charge of every dead result piles up until Racket's next
+major, which reclaims nothing but that backlog: 8 MiB results ran three
+majors per hundred calls, about 1 ms a call on any device (#377). So the
+backstop, `collect-under-pressure!`, ends with `yield-to-finalizers!`
+(`raw/collector.rkt`): a thread's first accounting after a collection
+sleeps once. The latch is per thread, a weak box in a thread cell that
+the collection clears, so a parallel thread's sleep leaves the main
+thread its own turn. That sleep migrates through the `start-atomic`
+future barrier to the parallel thread's Racket-thread half in the main
+pool, `engine-block`s there and migrates back, so it runs in the main
+pool only once the main thread is switched out and can never stand in
+for the main thread's own turn. Every parallel worker now pays that
+migrate-and-wait once per collection, which compounds the stall
+#168/#370 already document. Inside an atomic section, where sleeping is
+an error, it skips.
+That makes an allocating tensor op a green-thread switch point once per
+collection (`finalizer-turn-test.rkt` pins both).
+
+Two things escape them (#145, measured with
 `scripts/bench-memory-pressure.rkt`):
 
 - a slow residue of handles promoted past the young generations, about
@@ -517,6 +539,9 @@ an ordinary check:
   `with-autocast`) run on its own. So an ordinary thread's modes reach
   every thread, the trainer's modes reach a parallel worker's ops, and a
   parallel worker's own modes miss its ops.
+  Since #377 an op yields once after each collection, so another green
+  thread's ops run under a thread's modes far more often than at quantum
+  ends.
 - #194: `tr_last_error` is per OS thread, and `last-failure` reads it in
   an atomic section, on the main OS thread. A failure parked before that
   read gets another thread's message, and a failing plain call on a
