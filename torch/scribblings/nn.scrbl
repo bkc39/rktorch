@@ -281,8 +281,8 @@ updates them, in @racket['train] mode only, and @racket[eval!] switches
 the normalization onto them.  @racket[BatchNorm2d] takes an
 @tt{[N C H W]} batch and @racket[BatchNorm1d] takes @tt{[N C]} or
 @tt{[N C L]}; another rank is a contract violation naming the layer.
-The @tt{num-batches-tracked} buffer counts the batches normalized, in
-int64 as torch does.
+The @tt{num-batches-tracked} buffer counts the @racket['train]-mode
+forwards, whatever the momentum, in int64 as torch does.
 }
 
 @defproc[(Parameter [t tensor?]) Parameter?]{

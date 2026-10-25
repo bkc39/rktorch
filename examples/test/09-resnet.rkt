@@ -7,6 +7,7 @@
          torch
          torch/nn
          torch/scribblings/examples/09-resnet
+         (only-in torch/foreign/raw/fault with-crossing-hook)
          (only-in torch/vision/cifar10 load-cifar10-fixture))
 
 (module+ main
@@ -22,6 +23,22 @@
 
 (module+ test
   (require rackunit)
+
+  (define (reads-of thunk)
+    (define here (current-thread))
+    (define reads 0)
+    (define (inside-item?)
+      (memq 'item
+            (map car (continuation-mark-set->context
+                      (current-continuation-marks)))))
+    (define result
+      (with-crossing-hook (lambda ()
+                            (when (and (eq? (current-thread) here)
+                                       (inside-item?))
+                              (set! reads (add1 reads))))
+        (thunk)))
+    (values result reads))
+
   ;; Deterministic, offline: two steps on eight fixture images.
   (define-values (losses net trained-on)
     (run-example #:device 'cpu #:batch 8 #:steps 2))
@@ -47,6 +64,16 @@
   (define acc (accuracy net xs ys))
   (check-true (<= 0.0 acc 1.0))
   (check-true (layer-training? net) "accuracy left the net in eval mode")
+  (define-values (step-loss step-reads)
+    (reads-of (lambda ()
+                (train-step net (sgd (parameters net) #:lr 0.01)
+                            (narrow xs 0 0 8) (narrow ys 0 0 8)))))
+  (define-values (control control-reads)
+    (reads-of (lambda () (item (tensor 1.0)))))
+  (check-true (positive? control-reads) "reads-of sees an item")
+  (check-equal? step-reads 0 "train-step reads a value back")
+  (check-true (and (tensor? step-loss) (rational? (item step-loss)))
+              "train-step hands back the loss")
   ;; Device RNG streams differ from the CPU's for the init, so the on-device
   ;; arm checks convergence, never equality with the CPU losses above.
   (define accel (accelerator-if-available))
