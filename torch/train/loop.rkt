@@ -27,18 +27,6 @@
 (define (selects-a-batch? loader limit)
   (positive? (limited-batches loader limit)))
 
-(define (stops? max-epochs max-steps fast-dev-run)
-  (and (or (given max-epochs) (given max-steps) (given fast-dev-run)) #t))
-
-(define (interval-fits? train limit interval)
-  (match (given interval)
-    [(? exact-integer? k) (<= k (limited-batches train limit))]
-    [_ #t]))
-
-(define (manual-compatible? trainer accumulate clip-val)
-  (or (trainer-automatic? trainer)
-      (and (= 1 (given accumulate 1)) (not (given clip-val)))))
-
 (define/contract-out (fit trainer train
                           #:val [val #f]
                           #:max-epochs [max-epochs #f]
@@ -79,7 +67,7 @@
         #:ckpt-path [ckpt-path (or/c #f path-string?)])
        #:pre/name (max-epochs max-steps fast-dev-run)
        "fit needs #:max-epochs or #:max-steps"
-       (stops? max-epochs max-steps fast-dev-run)
+       (or (given max-epochs) (given max-steps) (given fast-dev-run))
        #:pre/name (trainer) "the trainer has no define-training-step"
        (trainer-defines? trainer 'define-training-step)
        #:pre/name (trainer) "automatic optimization needs define-optimizers"
@@ -95,10 +83,13 @@
        (or (not (given val)) (selects-a-batch? val limit-val))
        #:pre/name (train limit-train val-interval)
        "an integer #:val-check-interval exceeds the training batches #:limit-train-batches selects"
-       (interval-fits? train limit-train val-interval)
+       (match (given val-interval)
+         [(? exact-integer? k) (<= k (limited-batches train limit-train))]
+         [_ #t])
        #:pre/name (trainer accumulate clip-val)
        "manual optimization takes no #:accumulate-grad-batches above 1 and no #:gradient-clip-val"
-       (manual-compatible? trainer accumulate clip-val)
+       (or (trainer-automatic? trainer)
+           (and (= 1 (given accumulate 1)) (not (given clip-val))))
        [result run?])
   (not-implemented 'fit 'T1))
 

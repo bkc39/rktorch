@@ -70,7 +70,7 @@
            (only-in "../nn.rkt" Linear mse-loss parameters sgd)
            "../train.rkt"
            (submod ".." misbehaving)
-           (only-in "private/trainer-kit.rkt" apply-keywords))
+           (only-in "private/trainer-kit.rkt" apply-keywords interval-message))
 
   (define ((blaming pattern) e)
     (and (exn:fail:contract? e)
@@ -210,12 +210,9 @@
                         '((#:limit-train-batches . 0)))
                   (list "#:limit-val-batches selects no batch from this loader" Good
                         `((#:val . ,(ones-loader 2)) (#:limit-val-batches . 0.1)))
-                  (list (string-append "an integer #:val-check-interval exceeds the training"
-                                       " batches #:limit-train-batches selects")
-                        Good '((#:val-check-interval . 3)))
-                  (list (string-append "an integer #:val-check-interval exceeds the training"
-                                       " batches #:limit-train-batches selects")
-                        Good '((#:val-check-interval . 2) (#:limit-train-batches . 1)))
+                  (list interval-message Good '((#:val-check-interval . 3)))
+                  (list interval-message Good
+                        '((#:val-check-interval . 2) (#:limit-train-batches . 1)))
                   (list (string-append "manual optimization takes no #:accumulate-grad-batches"
                                        " above 1 and no #:gradient-clip-val")
                         Manual '((#:accumulate-grad-batches . 2)))))])

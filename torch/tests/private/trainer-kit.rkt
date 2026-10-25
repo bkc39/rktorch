@@ -20,6 +20,7 @@
          collecting-hparams
          collecting-logger
          collecting-metrics
+         interval-message
          recorder
          Recorded
          scenario
@@ -43,8 +44,12 @@
 (define (collecting-finalized l) (reverse (collecting-logger-finalized l)))
 
 (define (apply-keywords proc keyword-values . positional)
-  (define sorted (sort keyword-values keyword<? #:key car))
-  (keyword-apply proc (map car sorted) (map cdr sorted) positional))
+  (match (sort keyword-values keyword<? #:key car)
+    [(list (cons kws vals) ...) (keyword-apply proc kws vals positional)]))
+
+(define interval-message
+  (string-append "an integer #:val-check-interval exceeds the training batches"
+                 " #:limit-train-batches selects"))
 
 (struct scenario (skip-epoch fail-at stop-at break-twice? step-scheduler?
                   event-box [exn #:mutable])

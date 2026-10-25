@@ -5,7 +5,8 @@
            (only-in "../data/loader.rkt" dataloader tensor-dataset)
            (only-in "../main.rkt" ones)
            (only-in "../train/private/types.rkt" prop:trainer trainer-info)
-           (only-in "../train.rkt" fit))
+           (only-in "../train.rkt" fit)
+           (only-in "private/trainer-kit.rkt" interval-message))
 
   (struct stand-in ()
     #:property prop:trainer
@@ -21,8 +22,7 @@
   (test-case "an integer #:val-check-interval is checked against the limited batches"
     (check-exn (lambda (e)
                  (and (exn:fail:contract? e)
-                      (regexp-match? #rx"an integer #:val-check-interval exceeds the training batches #:limit-train-batches selects"
-                                     (exn-message e))))
+                      (regexp-match? (regexp-quote interval-message) (exn-message e))))
                (lambda () (fit-with-interval 5 2)))
     (check-exn exn:fail:unsupported? (lambda () (fit-with-interval 2 2)))
     (check-exn exn:fail:unsupported? (lambda () (fit-with-interval 5 0.5)))))

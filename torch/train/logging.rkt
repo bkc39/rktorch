@@ -43,12 +43,6 @@
 
 (define (hook-log-rule r) (not-implemented 'run-log! 'T1))
 
-(define ((allowed? allowed-of) r flag)
-  (or (unsupplied-arg? flag) (and (memq flag (allowed-of (hook-log-rule r))) #t)))
-
-(define allowed-on-step? (allowed? log-rule-on-step))
-(define allowed-on-epoch? (allowed? log-rule-on-epoch))
-
 (define/contract-out (run-log! r key value
                                #:progress? [progress? #f]
                                #:on-step? [on-step? (log-rule-default-on-step?
@@ -66,9 +60,9 @@
         #:batch-size [batch-size (or/c #f exact-positive-integer?)]
         #:logger? [logger? boolean?])
        #:pre/name (r on-step?) "this hook logs only per epoch"
-       (allowed-on-step? r on-step?)
+       (or (unsupplied-arg? on-step?) (memq on-step? (log-rule-on-step (hook-log-rule r))))
        #:pre/name (r on-epoch?) "this hook logs only per epoch"
-       (allowed-on-epoch? r on-epoch?)
+       (or (unsupplied-arg? on-epoch?) (memq on-epoch? (log-rule-on-epoch (hook-log-rule r))))
        [result void?])
   (not-implemented 'run-log! 'T1))
 

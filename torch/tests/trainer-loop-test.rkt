@@ -80,19 +80,25 @@
     (for* ([a (in-range 1 5)]
            [b (in-range 1 8)]
            [epochs (in-range 1 4)]
-           [limit (in-list '(1.0 0.5 2))]
-           #:when (positive? (expected-batches b limit)))
+           [limit (in-list '(1.0 0.5 2))])
       (define t (new-tally))
-      (define r (fit (Counted t) (ones-loader b)
-                     #:max-epochs epochs #:accumulate-grad-batches a
-                     #:limit-train-batches limit #:logger #f))
+      (define (fit-counted)
+        (fit (Counted t) (ones-loader b)
+             #:max-epochs epochs #:accumulate-grad-batches a
+             #:limit-train-batches limit #:logger #f))
       (define be (expected-batches b limit))
-      (define steps (* epochs (exact-ceiling (/ be a))))
       (define label (format "A=~a b=~a E=~a limit=~a" a b epochs limit))
-      (check-equal? (length (notes t 'optimizer-step)) steps label)
-      (check-equal? (length (notes t 'zero-grad)) steps label)
-      (check-equal? (run-global-step r) steps label)
-      (check-equal? (length (notes t 'training-step)) (* epochs be) label)))
+      (cond
+        [(zero? be)
+         (check-exn #rx"#:limit-train-batches selects no batch from this loader"
+                    fit-counted label)]
+        [else
+         (define r (fit-counted))
+         (define steps (* epochs (exact-ceiling (/ be a))))
+         (check-equal? (length (notes t 'optimizer-step)) steps label)
+         (check-equal? (length (notes t 'zero-grad)) steps label)
+         (check-equal? (run-global-step r) steps label)
+         (check-equal? (length (notes t 'training-step)) (* epochs be) label)])))
 
   (test-case "L-C3: #:max-steps stops after exactly that many steps"
     (define t (new-tally))

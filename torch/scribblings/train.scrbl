@@ -139,8 +139,7 @@ the callback's name.}
 
 @defform[(log! key value option ...)]{
 @racket[(run-log! run key value option ...)]; a bare @racket[log!] is that
-procedure. A hook that cannot log (@secref["train-hooks"]) rejects it at
-compile time.}
+procedure.}
 
 @section{Running}
 

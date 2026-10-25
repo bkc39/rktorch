@@ -8,10 +8,11 @@
          (struct-out log-rule)
          callback-hook?
          closest-hook-name
-         definable-hook-named
          definable-hooks
          epoch-log
          epoch-only-log
+         hook-arity-problem
+         hook-for-side
          hook-named
          hooks
          step-log
@@ -90,6 +91,38 @@
 
 (define (callback-hook? h) (and (memq 'callback (hook-sides h)) #t))
 (define (trainer-hook? h) (and (memq 'trainer (hook-sides h)) #t))
+
+(define (other-side side)
+  (match side
+    ['callback 'trainer]
+    ['trainer 'callback]))
+
+(define (hook-for-side name side)
+  (define h (definable-hook-named name))
+  (cond
+    [(not h)
+     (values #f (format "unknown hook ~a; closest: ~a" name (closest-hook-name name)))]
+    [(memq side (hook-sides h)) (values h #f)]
+    [else
+     (values h (format "~a is a ~a hook; define-~a cannot define it"
+                       name (other-side side) side))]))
+
+(define (arguments formals)
+  (match formals
+    ['() "no arguments"]
+    [(list _) (format "1 argument ~a" formals)]
+    [_ (format "~a arguments ~a" (length formals) formals)]))
+
+(define (hook-arity-problem h count rest?)
+  (define expected (hook-formals h))
+  (define n (length expected))
+  (cond
+    [(and (hook-batch? h) (< count n))
+     (format "~a takes ~a then the batch values" (hook-name h) (arguments expected))]
+    [(hook-batch? h) #f]
+    [(or rest? (not (= count n)))
+     (format "~a takes ~a" (hook-name h) (arguments expected))]
+    [else #f]))
 
 (define (edit-distance as bs substitution)
   (define first-row (for/list ([i (in-range (add1 (length bs)))]) i))

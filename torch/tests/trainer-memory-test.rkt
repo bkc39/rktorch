@@ -4,6 +4,7 @@
   (require rackunit
            (only-in "../data/loader.rkt" dataloader tensor-dataset)
            (only-in (submod "../data/workers.rkt" private) live-worker-count)
+           (only-in "../foreign/raw/collector.rkt" collect-and-wait!)
            (only-in "../foreign.rkt" cpu-device native-memory-use)
            (only-in "../main.rkt" ones sum)
            (only-in "../nn.rkt" Linear mse-loss parameters sgd)
@@ -11,8 +12,7 @@
            (only-in (submod "../train/logging.rkt" private) host-reads))
 
   (define (cpu-bytes)
-    (collect-garbage)
-    (collect-garbage)
+    (collect-and-wait!)
     (cond [(assoc (cpu-device) (native-memory-use)) => cdr]
           [else 0]))
 
@@ -49,18 +49,22 @@
                     (+ (quotient (* 2 7) every) 2)
                     (format "~a keys, every ~a" (length keys) every))))
 
-  (define-trainer Wide (net retained)
-    (define-init (retain?)
+  (define-trainer Wide (net mode kept)
+    (define-init (m)
       (set! net (Linear 1024 1024))
-      (set! retained (and retain? (box '()))))
+      (set! mode m)
+      (set! kept (box '())))
     (define-optimizers (sgd (parameters net) #:lr 0.01))
     (define-training-step (x y)
       (define loss (mse-loss (net x) x))
       (log! 'loss loss #:on-step? #t #:on-epoch? #t)
-      (when retained (set-box! retained (cons loss (unbox retained))))
+      (case mode
+        [(retain) (set-box! kept (cons loss (unbox kept)))]
+        [(drop) (ones 512 1024)]
+        [else (void)])
       loss))
 
-  (define (ledger-growth retain?)
+  (define (ledger-growth mode)
     (define after-one #f)
     (define after-many #f)
     (define gauge
@@ -71,7 +75,7 @@
            [(1) (set! after-one (cpu-bytes))]
            [(60) (set! after-many (cpu-bytes))]
            [else (void)]))))
-    (fit (Wide retain?) (loader 640 #:width 1024 #:batch-size 64) #:max-steps 60
+    (fit (Wide mode) (loader 640 #:width 1024 #:batch-size 64) #:max-steps 60
          #:logger #f #:callbacks (list gauge))
     (- after-many after-one))
 
@@ -80,8 +84,11 @@
   (test-case "L-R2: the ledger after many steps stays near the ledger after one"
     (check-= (ledger-growth #f) 0 growth-tolerance))
 
+  (test-case "L-R2's gauge collects a 2 MiB tensor dropped at every step"
+    (check-= (ledger-growth 'drop) 0 growth-tolerance))
+
   (test-case "L-R2's tolerance catches a trainer that keeps every step's graph"
-    (check-true (> (ledger-growth #t) growth-tolerance)))
+    (check-true (> (ledger-growth 'retain) growth-tolerance)))
 
   (test-case "L-R3: two fresh fits leave the ledger at the same baseline"
     (define (one-fit)
@@ -94,7 +101,10 @@
 
   (test-case "L-R4: an early exit finishes the traversal and its workers"
     (for ([fault (in-list '(skip stop fail #f))])
-      (with-handlers ([exn:fail? void])
+      (define (run-fit)
         (fit (Keyed '(loss) fault) (loader 12 #:workers 2) #:max-epochs 1 #:logger #f
              #:limit-train-batches (if fault 1.0 2)))
+      (cond
+        [(eq? fault 'fail) (check-exn #rx"planned failure" run-fit)]
+        [else (run-fit)])
       (check-equal? (live-worker-count #:wait 5) 0 (format "~a" (or fault 'limit))))))
