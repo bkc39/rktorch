@@ -55,7 +55,7 @@
     (check-equal? (map tensor-shape (buffers m)) '((2)))
     (check-equal? (tensor->list (m (tensor '(1 2)))) '(4.0 7.0)))
 
-  (test-case "sgd step applies p -= lr * grad and zero-grads! resets"
+  (test-case "sgd step applies p -= lr * grad; #:set-to-none? #f zeroes"
     (manual-seed! 0)
     (define l (Linear 2 1))
     (define opt (sgd (parameters l) #:lr 0.5))
@@ -73,7 +73,7 @@
             [bv (in-list b)]
             [gv (in-list g)])
         (check-= pv (- bv (* 0.5 gv)) 1e-6)))
-    (zero-grads! opt)
+    (zero-grads! opt #:set-to-none? #f)
     (for ([p (in-list (parameters l))])
       (check-equal? (tensor->list (grad p))
                     (map (lambda (_) 0.0) (tensor->list p)))))

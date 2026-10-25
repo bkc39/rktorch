@@ -102,4 +102,15 @@ int tr_tensor_mul_(tr_tensor* t, double value) {
   return torchrkt::status_call("tr_tensor_mul_", [&] { t->value.mul_(value); });
 }
 
+int tr_tensors_reset_grad(tr_tensor* const* tensors, int64_t n) {
+  if (torchrkt::tensors_arg_status("tr_tensors_reset_grad", tensors, n) != 0) {
+    return 1;
+  }
+  return torchrkt::status_call("tr_tensors_reset_grad", [&] {
+    for (int64_t i = 0; i < n; ++i) {
+      tensors[i]->value.mutable_grad().reset();
+    }
+  });
+}
+
 }  // extern "C"

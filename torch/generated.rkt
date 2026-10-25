@@ -58,6 +58,7 @@
          index-fill-int-scalar!
          index-fill-int-tensor!
          index-select
+         index-tensor
          l1-loss
          layer-norm
          le-scalar
@@ -226,6 +227,9 @@
 
 (define-generated-op index-select tr_gen_index_select
   ([self tensor] [dim int64] [index tensor]))
+
+(define-generated-op index-tensor tr_gen_index_tensor
+  ([self tensor] [indices optional-tensor-list]))
 
 (define-generated-op l1-loss tr_gen_l1_loss
   ([self tensor] [target tensor] [reduction int64]))

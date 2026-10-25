@@ -8,8 +8,9 @@
                     native-memory-unaccounted native-memory-use
                     mps-empty-cache! reclaim-native-memory! sum with-no-grad
                     zeros)
+           (only-in (submod "../foreign.rkt" unsafe) tensor-free!)
            (only-in "../foreign/raw/memory.rkt"
-                    collect-and-drain! native-memory-use/fold)
+                    adopted-bytes collect-and-drain! native-memory-use/fold)
            (only-in "../foreign/raw/collector.rkt"
                     call-as-the-collector collect-and-wait! drain-deadline)
            (only-in "../foreign/raw/device-queries.rkt"
@@ -19,6 +20,7 @@
                     native-collect-budget native-collect-margin
                     native-memory-fraction release-spacing
                     reset-pressure-state! shadow-refresh lower-shadows!)
+           (only-in "../foreign/structs.rkt" tensor-handle)
            (only-in "../nn.rkt"
                     Linear MultiheadAttention Sequential gen:layer))
 
@@ -208,13 +210,17 @@
       (define g-again (grad w))
       (check-equal? (- charged (cpu-unaccounted)) (* 4 mib)
                     "a second handle on the same gradient moved its bytes again")
+      (backward! (sum (matmul w w)))
+      (define held-across (grad w))
+      (check-equal? (adopted-bytes (tensor-handle held-across)) 0
+                    "a handle adopted while an earlier one still holds the adoption")
+      (for-each tensor-free! (list g g-again held-across))
       ;; the next step's refresh charges the gradient anew
       (backward! (sum (matmul w w)))
       (define recharged (cpu-unaccounted))
       (define g-next (grad w))
       (check-equal? (- recharged (cpu-unaccounted)) (* 4 mib)
-                    "after a new refresh the gradient's bytes did not move")
-      (check-true (and g g-again g-next #t)))
+                    "after a new refresh the gradient's bytes did not move"))
     (settle!))
 
   ;; the optimizer's handle on a gradient dies after the step; the parameter

@@ -1,6 +1,7 @@
 #lang racket/base
 
-(require (only-in racket/contract/base -> ->* any or/c)
+(require (for-syntax racket/base syntax/parse)
+         (only-in racket/contract/base -> ->* any listof or/c)
          syntax/parse/define
          (prefix-in g: (only-in "../generated.rkt"
                                 addcdiv! addcmul! copy! lerp-tensor!))
@@ -18,13 +19,17 @@
                   tr-tensor-requires-grad!/raw
                   tr-tensor-requires-grad/raw
                   tr-tensor-sub!/raw
-                  tr-tensor-zero!/raw)
+                  tr-tensor-zero!/raw
+                  tr-tensors-reset-grad/raw)
+         (only-in "raw/memory.rkt" forget-gradient-adoptions!)
          (only-in "raw/pressure.rkt"
-                  collect-at-trough! native-collect-at-troughs
+                  call-with-ledger collect-at-trough! native-collect-at-troughs
                   refresh-shadows!)
-         (only-in "structs.rkt" tensor? wrap-tensor))
+         (only-in "structs.rkt" tensor? tensor-free! wrap-tensor))
 
 (provide collect-at-forward-trough!
+         with-gradient
+         with-gradients
          with-no-grad)
 
 (define/checked-out (requires-grad! t [on? #t])
@@ -112,6 +117,43 @@
 (define/contract-out (lerp! t end weight) (-> tensor? tensor? tensor? void?) ;; noqa
   (void (g:lerp-tensor! t end weight)))
 
+(define/contract-out (reset-grads! ts) (-> (listof tensor?) void?) ;; noqa
+  (check-ok (call-with-ledger
+             (lambda ()
+               (define rc (tr-tensors-reset-grad/raw ts (length ts)))
+               (when (zero? rc)
+                 (forget-gradient-adoptions! ts))
+               rc))
+            'zero-grads!))
+
+(define (call-with-gradients ts proc)
+  (define held '())
+  (dynamic-wind
+   void
+   (lambda ()
+     (for ([t (in-list ts)])
+       (parameterize-break #f
+         (define g (maybe-grad t))
+         (when g
+           (set! held (cons g held)))))
+     (proc (reverse held)))
+   ;; a post thunk already runs with breaks disabled
+   (lambda ()
+     (for-each tensor-free! held))))
+
+(define (call-with-gradient t proc)
+  (call-with-gradients (list t) (lambda (gs) (for-each proc gs))))
+
+(begin-for-syntax
+  (define-syntax-class gradient-binder
+    (pattern (name:id source:expr))))
+
+(define-syntax-parse-rule (with-gradients b:gradient-binder body:expr ...+)
+  (call-with-gradients b.source (lambda (b.name) body ...)))
+
+(define-syntax-parse-rule (with-gradient b:gradient-binder body:expr ...+)
+  (call-with-gradient b.source (lambda (b.name) body ...)))
+
 (define/contract-out (zero-grad! t) (-> tensor? void?) ;; noqa
-  (when (has-grad? t)
-    (zero! (grad t))))
+  (with-gradient (g t)
+    (zero! g)))
