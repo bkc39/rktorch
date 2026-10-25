@@ -1,21 +1,48 @@
 #lang racket/base
 
 (require (only-in racket/contract/base ->*)
+         (only-in racket/match == match)
          (only-in "../foreign.rkt"
-                  add batch-norm copy! ones ones-like tensor zeros)
+                  addcmul! batch-norm device ones ones-like tensor zeros)
          (only-in "../foreign/contracts.rkt" feature-batch/c image-batch/c)
+         (only-in "../foreign/ops.rkt" move-generation)
          (only-in "buffer.rkt" Buffer)
          (only-in "layer.rkt" define-layer training? with-mode)
          (only-in "parameter.rkt" Parameter))
+
+(module+ private
+  (provide counter-one))
+
+(struct placed (generation one))
+
+(define ones-beside (make-weak-hasheq))
+
+(define (counter-one counter)
+  (define cached (hash-ref ones-beside counter #f))
+  (and cached (placed-one cached)))
+
+(define (beside one counter)
+  (if (and one (equal? (device one) (device counter)))
+      one
+      (ones-like counter)))
+
+(define (one-beside counter)
+  (define now (move-generation))
+  (match (hash-ref ones-beside counter #f)
+    [(placed (== now eqv?) one) one]
+    [_
+     (define one (beside (counter-one counter) counter))
+     (hash-set! ones-beside counter (placed now one))
+     one]))
 
 (define (normalize x mode momentum eps weight bias
                    running-mean running-var num-batches-tracked)
   (define training (training? mode))
   (when training
-    ;; the one is a tensor, not the scalar 1: a scalar promotes the counter to
-    ;; float32, which stops advancing it once it reaches 2^24
-    (copy! num-batches-tracked
-           (add num-batches-tracked (ones-like num-batches-tracked))))
+    (define one (one-beside num-batches-tracked))
+    ;; int64 add_ refuses the floating alpha a generated scalar carries (#60);
+    ;; a scalar one would promote the counter to float32, stuck at 2^24
+    (addcmul! num-batches-tracked one one))
   (batch-norm x
               #:running-mean running-mean
               #:running-var running-var

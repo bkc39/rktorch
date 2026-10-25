@@ -343,16 +343,43 @@ the CPU, whose allocator keeps no count.
   at it, so the trough's refresh can already charge it. The first `grad`
   taken on a parameter since the last refresh takes the bytes it puts on
   the ledger off the shadow, so wrapping it moves the charge instead of
-  doubling it. `tensor-allocator/gradient` does this between accounting
-  the handle and the pressure check (`adopt-gradient!`, keyed by the
-  parameter and a generation every refresh bumps), and takes at most what
-  the shadow holds. A second `grad` in the same step, from clipping and
-  then the optimizer say, moves nothing: the ledger charges that handle
-  again, as it does any second handle on shared storage, but the shadow
-  keeps covering the rest of what the graph and libtorch hold. The ledger
-  entry records what its adoption took, and releasing the handle gives
-  exactly that back to the shadow, since the parameter still holds the
-  gradient (`zero-grad!` zeroes it in place).
+  doubling it. `tensor-allocator/gradient` does this in the ledger section
+  that accounts the handle, so no refresh reads the handle's charge before
+  the adoption moves it, and before the pressure check (`adopt-gradient!`,
+  keyed by the parameter and a generation every refresh bumps), and takes
+  at most what the shadow holds. The invariant is that at most one handle per
+  parameter holds a positive adoption: a second `grad` taken while
+  another handle still holds one moves nothing, even after a refresh,
+  and the ledger charges that handle again, as it does any second handle
+  on shared storage, while the shadow keeps covering the rest of what the
+  graph and libtorch hold. The ledger entry records what its adoption
+  took, and releasing the handle gives exactly that back to the shadow
+  while the parameter still holds the gradient, then zeroes it; the
+  release also lets the next handle adopt again (the entry points back
+  at its parameter, weakly), so clipping and then a step charge each
+  gradient once. `zero-grads!` drops the gradients, so `reset-grads!`
+  zeroes what the adopting entry would give back
+  (`forget-gradient-adoptions!`, from a weak table per parameter) in the
+  same atomic section as the native reset, and only once the reset
+  succeeded: a handle taken before the reset frees storage nothing else
+  holds, and gives the shadow nothing. An in-place move (`to!`) rebinds
+  the gradient onto new storage along with the parameter, so it forgets
+  the parameter's adoptions the same way once the native move succeeded:
+  the storage they covered is gone, and the first `grad` after the next
+  refresh adopts the moved gradient. No adoption is zeroed twice or
+  left behind, yet the ledger can fall below what native code holds: a
+  refresh while k handles to one gradient live sees it charged k times
+  on the ledger and leaves it off the shadow, so once they are released,
+  reset or not, the ledger is under by up to (k−1) gradients, and by one
+  more when the first handle's adoption took less than the whole
+  gradient, until the next refresh restores it (#400).
+  It is over by each extra live handle's charge while that handle lives,
+  and by the dropped gradients, which the shadow keeps charging until the
+  next refresh, so one gradient set for one iteration. The optimizers
+  and `clip-grad-norm!` release each gradient
+  handle as its block ends (`with-gradient`, `with-gradients`), so after
+  a step only the parameter holds a gradient and a reset frees it before
+  the next backward writes another.
   `reclaim-native-memory!` refreshes it too, once the caches are
   emptied, so memory a dropped graph held stops being charged at once.
   An allocator that cannot answer at a refresh leaves its device's charge

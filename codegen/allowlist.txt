@@ -34,6 +34,7 @@ shape nonzero
 shape take
 shape gather
 shape take_along_dim
+shape index.Tensor
 shape where.self
 shape where.ScalarOther
 shape where.ScalarSelf

@@ -31,6 +31,8 @@ int tr_tensor_zero_(tr_tensor* t);
 
 int tr_tensor_mul_(tr_tensor* t, double value);
 
+int tr_tensors_reset_grad(tr_tensor* const* tensors, int64_t n);
+
 #ifdef __cplusplus
 }
 #endif

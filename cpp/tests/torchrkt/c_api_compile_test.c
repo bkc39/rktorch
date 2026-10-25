@@ -108,6 +108,7 @@ void torchrkt_c_api_compile_check(void) {
   tr_tensor* (*grad)(const tr_tensor*) = tr_tensor_grad;
   int (*set_grad_enabled)(int) = tr_set_grad_enabled;
   int (*sub_inplace)(tr_tensor*, const tr_tensor*, double) = tr_tensor_sub_;
+  int (*reset_grads)(tr_tensor* const*, int64_t) = tr_tensors_reset_grad;
   /* Generated surface: one pin per generated signature shape. */
   tr_tensor* (*gen_matmul)(const tr_tensor*, const tr_tensor*) = tr_gen_matmul;
   tr_tensor* (*gen_reshape)(const tr_tensor*, const int64_t*, int64_t) =
@@ -341,6 +342,7 @@ void torchrkt_c_api_compile_check(void) {
   (void)grad;
   (void)set_grad_enabled;
   (void)sub_inplace;
+  (void)reset_grads;
   (void)gen_matmul;
   (void)gen_reshape;
   (void)gen_cat;

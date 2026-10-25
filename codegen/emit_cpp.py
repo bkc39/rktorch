@@ -14,6 +14,7 @@ from .ir import (
     OPTIONAL_INT_ARRAY,
     OPTIONAL_SCALAR,
     OPTIONAL_TENSOR,
+    OPTIONAL_TENSOR_LIST,
     SCALAR,
     TENSOR,
     TENSOR_LIST,
@@ -35,6 +36,7 @@ _C_DECLS = {
     BOOL: "bool {n}",
     INT_ARRAY: "const int64_t* {n}, int64_t {n}_len",
     TENSOR_LIST: "const tr_tensor* const* {n}, int64_t {n}_len",
+    OPTIONAL_TENSOR_LIST: "const tr_tensor* const* {n}, int64_t {n}_len",
     # Optionals carry a presence flag (or a -1 sentinel for dtype) so the
     # Racket side never has to pass a NULL pointer for a value type.
     OPTIONAL_INT64: "int64_t {n}, bool {n}_has",
@@ -61,6 +63,8 @@ def _c_decl(p: Param, *, receiver: bool, header: bool = False) -> str:
     # required handle (the body keeps the bare decl for clang-format).
     if header and p.kind == OPTIONAL_TENSOR:
         decl += " /* nullable: NULL == no value */"
+    if header and p.kind == OPTIONAL_TENSOR_LIST:
+        decl += " /* nullable entries: NULL == no value */"
     if header and p.kind == OPTIONAL_GENERATOR:
         decl += " /* nullable: NULL == the global stream */"
     return decl
@@ -94,6 +98,8 @@ def _arg_expr(p: Param) -> str:
                 f"static_cast<size_t>({p.name}_len))")
     if p.kind == TENSOR_LIST:
         return f"{p.name}_vec"
+    if p.kind == OPTIONAL_TENSOR_LIST:
+        return f"{p.name}_list"
     if p.kind == OPTIONAL_INT64:
         return (f"{p.name}_has ? c10::optional<int64_t>({p.name}) "
                 f": c10::optional<int64_t>()")
@@ -160,9 +166,9 @@ def _emit_body(op: Op) -> list[str]:
     # c10::nullopt encoding, so it is not null-guarded.
     guards = []
     for p in op.params:
-        if p.kind in (TENSOR, INT_ARRAY, TENSOR_LIST):
+        if p.kind in (TENSOR, INT_ARRAY, TENSOR_LIST, OPTIONAL_TENSOR_LIST):
             guards.append(f"!{p.name}")
-        if p.kind in (INT_ARRAY, TENSOR_LIST):
+        if p.kind in (INT_ARRAY, TENSOR_LIST, OPTIONAL_TENSOR_LIST):
             guards.append(f"{p.name}_len < 0")
         # When present, an optional int-array's pointer is dereferenced by
         # IntArrayRef, so a true `_has` with a null buffer is UB. A present
@@ -201,6 +207,17 @@ def _emit_body(op: Op) -> list[str]:
                 f'"null tensor in {p.name}");',
                 "      }",
                 f"      {p.name}_vec.push_back({p.name}[i]->value);",
+                "    }",
+            ]
+        if p.kind == OPTIONAL_TENSOR_LIST:
+            preamble += [
+                f"    c10::List<std::optional<at::Tensor>> {p.name}_list;",
+                f"    {p.name}_list.reserve("
+                f"static_cast<size_t>({p.name}_len));",
+                f"    for (int64_t i = 0; i < {p.name}_len; ++i) {{",
+                f"      {p.name}_list.push_back("
+                f"{p.name}[i] ? std::optional<at::Tensor>({p.name}[i]->value)"
+                " : std::optional<at::Tensor>());",
                 "    }",
             ]
     if op.inplace:

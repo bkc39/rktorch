@@ -832,7 +832,8 @@ Conventions:
   `Scalar?` and `float?` carry a presence flag, `int[]?` a length plus flag, and
   `ScalarType?` a -1 sentinel, and `Generator?` a `tr_generator` handle
   (NULL for the global stream; an op that draws still needs the allowlist
-  `no-retry` flag). In-place ops (`add_`) emit a mutable receiver
+  `no-retry` flag); `Tensor?[]` (#365, `index.Tensor`) is the TensorList
+  encoding whose NULL entries are `None`. In-place ops (`add_`) emit a mutable receiver
   plus an integer status. An op with several Tensor returns (`topk`,
   `sort`, #154) emits an integer status plus trailing out pointers in C
   and a `#:returns N` clause in Racket, where it answers multiple values
