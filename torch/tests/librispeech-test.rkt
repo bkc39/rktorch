@@ -127,7 +127,10 @@
     (define u (librispeech-fixture-utterance))
     (define-values (samples rate transcript) (load-librispeech-fixture))
     (check-equal? (utterance-id u) "1272-128104-0000")
-    (check-equal? (utterance-transcript u) transcript)
+    (check-equal? (utterance-transcript u)
+                  (string-append "MISTER QUILTER IS THE APOSTLE OF THE MIDDLE CLASSES"
+                                 " AND WE ARE GLAD TO WELCOME HIS GOSPEL"))
+    (check-equal? transcript (utterance-transcript u))
     (define-values (loaded loaded-rate) (load-utterance u))
     (check-equal? loaded-rate 16000)
     (check-equal? (tensor-shape loaded) (tensor-shape samples))

@@ -3,7 +3,8 @@
 ;; Run (GPU):  nix develop .#cuda --command racket scripts/train-asr.rkt
 ;; Run (CPU):  nix develop --command racket scripts/train-asr.rkt
 
-(require (only-in racket/file make-directory*)
+(require (only-in racket/contract contract)
+         (only-in racket/file make-directory*)
          (only-in racket/format ~r)
          (only-in racket/path path-only)
          torch
@@ -14,21 +15,18 @@
                   evaluate greedy-decode pick-device train-librispeech
                   transcribe utterance-features))
 
-(define (env-number name default #:accept [accept? exact-positive-integer?])
+(define (env-number name default [accept/c exact-positive-integer?])
   (define v (getenv name))
   (cond [(not v) default]
         [(string->number v)
-         => (lambda (n)
-              (unless (accept? n)
-                (error 'train-asr "~a must be ~a: ~a" name (object-name accept?) v))
-              n)]
+         => (lambda (n) (contract accept/c n name 'train-asr (string->symbol name) #f))]
         [else (error 'train-asr "~a is not a number: ~a" name v)]))
 
 (define epochs (env-number "EPOCHS" 20))
 (define limit (env-number "LIMIT" #f))
 (define batch (env-number "BATCH" 16))
 (define n-embd (env-number "EMBD" 256))
-(define workers (env-number "WORKERS" 0 #:accept exact-nonnegative-integer?))
+(define workers (env-number "WORKERS" 0 exact-nonnegative-integer?))
 (define checkpoint (or (getenv "CHECKPOINT") "checkpoints/asr-dev-clean"))
 (define held-out 3)
 

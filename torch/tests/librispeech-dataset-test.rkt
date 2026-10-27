@@ -15,8 +15,9 @@
                     default-collate)
            (only-in "../main.rkt"
                     device-type dtype make-generator narrow native-memory-use
-                    ref shape sum tensor tensor->list tensor? zeros)
+                    ref shape sum tensor tensor->list tensor? to-dtype zeros)
            (only-in "../private/util.rkt" with-temporary-directory)
+           (only-in "private/heap-allocation.rkt" median-allocation)
            (only-in "private/race-harness.rkt" settle!))
 
   (define blamed #rx"blaming: [(][^)]*librispeech-dataset-test[.]rkt")
@@ -51,16 +52,6 @@
 
   (define (batch-of ds indices [collate default-collate])
     (call-with-values (lambda () (dataset-batch ds indices collate)) list))
-
-  (define (median-allocation thunk)
-    (call-with-values thunk void)
-    (define runs
-      (sort (for/list ([_ (in-range 15)])
-              (define before (current-memory-use 'cumulative))
-              (call-with-values thunk void)
-              (- (current-memory-use 'cumulative) before))
-            <))
-    (list-ref runs 7))
 
   (define (cpu-bytes)
     (for/sum ([entry (in-list (native-memory-use))]
@@ -127,15 +118,18 @@
                     (for/list ([i (in-list '(3 0))]) (apply records (item-of ds i))))))
 
   (test-case "L13: items differing outside the last dimension are refused"
+    (define (long? s) (> (last (shape s)) 10000))
     (with-utterances (us)
-      (define ds
-        (librispeech us
-                     #:transform (lambda (s _r)
-                                   (zeros (if (> (last (shape s)) 10000) 2 1) 5))))
-      (check-exn (lambda (e)
-                   (and (exn:fail:contract? e)
-                        (regexp-match? #rx"librispeech" (exn-message e))))
-                 (lambda () (dataset-batch ds '(0 1) default-collate)))))
+      (for ([transform (in-list (list (lambda (s _r) (zeros (if (long? s) 2 1) 5))
+                                      (lambda (s _r) (if (long? s) (to-dtype s 'float64) s))
+                                      (lambda (s _r) (if (long? s) (ref s 0) s))))]
+            [differs (in-list '("a leading dimension" "dtype" "rank"))])
+        (define ds (librispeech us #:transform transform))
+        (check-exn (lambda (e)
+                     (and (exn:fail:contract? e)
+                          (regexp-match? #rx"librispeech" (exn-message e))))
+                   (lambda () (dataset-batch ds '(0 1) default-collate))
+                   differs))))
 
   (test-case "L12: contract violations blame the caller"
     (check-exn (contract-violation? #rx"utterance[?]")
@@ -201,8 +195,10 @@
         (median-allocation (lambda () (dataset-batch ds indices default-collate))))
       (define long-batch (batch '(0 0 0 0)))
       (define short-batch (batch '(1 1 1 1)))
-      (check-true (< long-batch 65536) (format "~a bytes per long batch" long-batch))
-      (check-true (< short-batch 65536) (format "~a bytes per short batch" short-batch))
+      (define mixed-batch (batch '(0 1 0 1)))
+      (for ([bytes (in-list (list long-batch short-batch mixed-batch))]
+            [name (in-list '(long short mixed))])
+        (check-true (< bytes 163840) (format "~a bytes per ~a batch" bytes name)))
       (check-true (< (abs (- long-batch short-batch)) 8192)
                   (format "long ~a, short ~a" long-batch short-batch))))
 

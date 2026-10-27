@@ -144,17 +144,23 @@
     (tensor rows #:device filter-device #:dtype (and buildable? filter-dtype)))
   (if buildable? built (to-dtype built filter-dtype)))
 
+(define default-n-fft 400)
+(define default-n-mels 80)
+
+(define (given v default)
+  (if (unsupplied-arg? v) default v))
+
 (define (filterbank-fits? filterbank samples n-fft n-mels)
-  (and (tensor? samples)
-       (equal? (shape filterbank) (list (add1 (quotient n-fft 2)) n-mels))
-       (eq? (dtype filterbank) (dtype samples))
-       (equal? (device filterbank) (device samples))))
+  (or (not filterbank)
+      (and (equal? (shape filterbank) (list (add1 (quotient n-fft 2)) n-mels))
+           (eq? (dtype filterbank) (dtype samples))
+           (equal? (device filterbank) (device samples)))))
 
 (define/contract-out (log-mel-spectrogram samples ;; noqa
                                       #:sample-rate sample-rate
-                                      #:n-fft [n-fft 400]
+                                      #:n-fft [n-fft default-n-fft]
                                       #:hop-length [hop-length 160]
-                                      #:n-mels [n-mels 80]
+                                      #:n-mels [n-mels default-n-mels]
                                       #:eps [eps 1e-6]
                                       #:filterbank [filterbank #f])
   (->i ([samples tensor?] #:sample-rate [sample-rate exact-positive-integer?])
@@ -165,10 +171,8 @@
         #:filterbank [filterbank (or/c #f tensor?)])
        #:pre/name (samples n-fft n-mels filterbank)
        "filterbank is [n-fft/2+1, n-mels] in samples' dtype, on samples' device"
-       (or (unsupplied-arg? filterbank) (not filterbank)
-           (filterbank-fits? filterbank samples
-                             (if (unsupplied-arg? n-fft) 400 n-fft)
-                             (if (unsupplied-arg? n-mels) 80 n-mels)))
+       (filterbank-fits? (given filterbank #f) samples
+                         (given n-fft default-n-fft) (given n-mels default-n-mels))
        [result tensor?])
   (define samples-device (device samples))
   (define spec

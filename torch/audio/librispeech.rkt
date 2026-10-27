@@ -172,8 +172,8 @@
 
 (define (padded-batch features transcripts)
   (match-define (cons head tail) features)
-  (define head-placement (placement head))
-  (match-define (list lead head-dtype head-device) head-placement)
+  (match-define (and head-placement (list lead head-dtype head-device))
+    (placement head))
   (for ([f (in-list tail)]
         #:unless (equal? (placement f) head-placement))
     (raise-arguments-error 'librispeech "items differ outside the last dimension"
@@ -193,7 +193,8 @@
 (define audio-transform/c
   (-> tensor? exact-positive-integer? features/c))
 
-(define (decoded u transform)
+(define (decoded utterances i transform)
+  (define u (vector-ref utterances i))
   (define-values (samples rate) (load-audio (utterance-path u)))
   (values (transform samples rate) (utterance-transcript u)))
 
@@ -205,12 +206,11 @@
   (set! utterances (vector->immutable-vector (list->vector utts)))
   #:length (vector-length utterances)
   #:ref (i)
-  (decoded (vector-ref utterances i) transform)
+  (decoded utterances i transform)
   #:batch (indices collate)
-  (define items
-    (for/list ([i (in-list (indices->list indices))])
-      (call-with-values (lambda () (decoded (vector-ref utterances i) transform))
-                        list)))
+  (define-values (features transcripts)
+    (for/lists (features transcripts) ([i (in-list (indices->list indices))])
+      (decoded utterances i transform)))
   (if (default-collate? collate)
-      (padded-batch (map car items) (map cadr items))
-      (collate items)))
+      (padded-batch features transcripts)
+      (collate (map list features transcripts))))

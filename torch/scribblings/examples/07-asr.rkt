@@ -24,8 +24,11 @@ pressure keeps the encoder honest while attention learns to spell:
 CTC aligns, attention spells.
 
 @chunk[<r07-require>
-(require (only-in racket/list make-list)
-         (only-in racket/match match-define)
+(require (only-in racket/contract
+                  ->* ->i </c >=/c and/c any/c contract-out listof
+                  non-empty-listof or/c)
+         (only-in racket/list make-list)
+         (only-in racket/sequence sequence-ref)
          (only-in racket/string string-split)
          torch torch/nn
          (only-in torch/audio/data audio-info)
@@ -41,8 +44,29 @@ CTC aligns, attention spells.
 
 @chunk[<r07-provide>
 (provide asr asr-loader pick-device run-example greedy-decode transcribe
-         mel-frames utterance-features hybrid-batch-loss train-librispeech
-         evaluate)]
+         mel-frames utterance-features evaluate
+         (contract-out
+          [hybrid-batch-loss
+           (->i ([net any/c]
+                 [vocab vector?]
+                 [x (and/c tensor? (lambda (x) (= 3 (length (shape x)))))]
+                 [frame-lengths (non-empty-listof exact-positive-integer?)]
+                 [transcripts (listof string?)])
+                #:pre/name (x frame-lengths transcripts)
+                "one frame length and one transcript per row of x"
+                (= (car (shape x)) (length frame-lengths) (length transcripts))
+                [loss tensor?])]
+          [train-librispeech
+           (->* ()
+                (#:epochs exact-positive-integer?
+                 #:limit (or/c #f exact-positive-integer?)
+                 #:batch exact-positive-integer?
+                 #:n-embd exact-positive-integer?
+                 #:dropout (and/c real? (>=/c 0) (</c 1))
+                 #:device device/c
+                 #:workers exact-nonnegative-integer?
+                 #:log-every exact-positive-integer?)
+                (values any/c vector?))]))]
 
 The transformer half of the model is the library's: the encoder and
 decoder blocks are @racket[TransformerEncoderLayer] and
@@ -282,11 +306,12 @@ bug (@hyperlink["https://github.com/bkc39/rktorch/issues/258"]{#258}).
 
 @bold{Features and teacher forcing.} One utterance becomes an
 @tt{[80, T]} matrix of mel frames, and a @tt{[1, 80, T]} batch on its
-own. The mel filters depend only on the sample rate, so the 16 kHz bank
-LibriSpeech needs is built once, as a module-level tensor, and handed to
-@racket[log-mel-spectrogram] with @racket[#:filterbank]; any other rate
-builds its own. For training, the transcript becomes two shifted
-id sequences: the decoder @emph{reads} @tt{[sos, chars]} and must
+own. The mel filters depend only on the sample rate, so the 16 kHz
+float32 CPU bank LibriSpeech needs is built once, as a module-level
+tensor, and handed to @racket[log-mel-spectrogram] with
+@racket[#:filterbank]; samples at any other rate, in another dtype or on
+another device get a bank built to match them. For training, the
+transcript becomes two shifted id sequences: the decoder @emph{reads} @tt{[sos, chars]} and must
 @emph{predict} @tt{[chars, eos]}. The strided front end downsamples 4x,
 so a length @racket[t] signal yields @racket[(downsampled-length t)]
 encoder frames --- the per-utterance CTC input lengths.
@@ -299,10 +324,10 @@ encoder frames --- the per-utterance CTC input lengths.
   (log-mel-spectrogram
    (ref samples 0)
    #:sample-rate rate
-   #:filterbank (if (= rate 16000)
-                    bank-16k
-                    (mel-filterbank #:n-freqs 201 #:n-mels 80 #:sample-rate rate
-                                    #:device (device samples)))))
+   #:filterbank (and (= rate 16000)
+                     (eq? (dtype samples) (dtype bank-16k))
+                     (equal? (device samples) (device bank-16k))
+                     bank-16k)))
 
 (define (utterance-features samples rate)
   (unsqueeze (mel-frames samples rate) 0))
@@ -338,11 +363,6 @@ it outside whatever extent built the net; it runs on the mels' device.
   (append ids (make-list (- s-max (length ids)) fill)))
 
 (define (hybrid-batch-loss net vocab x frame-lengths transcripts)
-  (when (null? frame-lengths)
-    (error 'hybrid-batch-loss "no frame lengths in the batch"))
-  (unless (= (car (shape x)) (length frame-lengths) (length transcripts))
-    (error 'hybrid-batch-loss "~a rows, ~a frame lengths and ~a transcripts"
-           (car (shape x)) (length frame-lengths) (length transcripts)))
   (with-default-device (device x)
     (define v-size (vector-length vocab))
     (define eos v-size)
@@ -392,10 +412,9 @@ unshuffled; @racket[w] worker threads build them ahead of the loop.
   frames)
 
 (define (asr-loader utterances #:batch-size [b 16] #:workers [w 0])
-  (define sorted (sort utterances < #:key utterance-frames #:cache-keys? #t))
-  (dataloader (librispeech sorted #:transform mel-frames)
-              #:batch-size b
-              #:workers w))]
+  (~> (sort utterances < #:key utterance-frames #:cache-keys? #t)
+      (librispeech #:transform mel-frames)
+      (dataloader #:batch-size b #:workers w)))]
 
 @bold{The deterministic core.} @racket[run-example] is the seeded,
 offline entry the test harness and the PyTorch parity twin both drive:
@@ -405,20 +424,21 @@ padding mask, moved to the device once --- at the fixture-scale
 defaults. The twin builds its stacks as
 @tt{nn.TransformerEncoder} and @tt{nn.TransformerDecoder} with the same
 settings, and under one seed both sides draw the same initial values,
-declaration order being draw order.
+declaration order being draw order. The net is therefore built before the
+loader is first traversed, since a traversal draws its worker seed from
+the same generator.
 
 @chunk[<r07-run>
 (define (run-example #:steps [steps 5] #:device [device (pick-device)])
   (with-default-device device
     (manual-seed! 0)
-    (match-define (list x lengths transcripts)
-      (for/first ([(x lengths transcripts)
-                   (asr-loader (list (librispeech-fixture-utterance))
-                               #:batch-size 1)])
-        (list (to-device x device) lengths transcripts)))
-    (define vocab (text->vocab (car transcripts)))
+    (define fixture (librispeech-fixture-utterance))
+    (define vocab (text->vocab (utterance-transcript fixture)))
     (define net (asr 80 (vector-length vocab)))
     (define opt (adam (parameters net) #:lr 0.001))
+    (define-values (batch lengths transcripts)
+      (sequence-ref (asr-loader (list fixture) #:batch-size 1) 0))
+    (define x (to-device batch device))
     (define losses
       (for/list ([_ (in-range steps)])
         (zero-grads! opt)
@@ -532,18 +552,6 @@ decode, scored the same way, reaches 0.51 CER.
                            #:device [device (pick-device)]
                            #:workers [workers 0]
                            #:log-every [log-every 1])
-  (when (and limit (not (exact-positive-integer? limit)))
-    (error 'train-librispeech "limit must be a positive integer: ~a" limit))
-  (unless (exact-positive-integer? epochs)
-    (error 'train-librispeech "epochs must be a positive integer: ~a" epochs))
-  (unless (exact-positive-integer? batch)
-    (error 'train-librispeech "batch must be a positive integer: ~a" batch))
-  (unless (exact-positive-integer? log-every)
-    (error 'train-librispeech "log-every must be a positive integer: ~a"
-           log-every))
-  (unless (exact-nonnegative-integer? workers)
-    (error 'train-librispeech "workers must be a non-negative integer: ~a"
-           workers))
   (with-default-device device
     (manual-seed! 0)
     (define all (librispeech-utterances "dev-clean"))

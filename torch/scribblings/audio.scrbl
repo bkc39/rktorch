@@ -5,7 +5,8 @@
           (for-label torch/audio/data
                      torch/audio/functional
                      torch/audio/librispeech
-                     torch/audio/metrics))
+                     torch/audio/metrics
+                     torch/data/loader))
 
 @title{Audio}
 
@@ -128,7 +129,8 @@ extracting the split's archive the first time.}
 @defproc[(librispeech [utterances (listof utterance?)]
                       [#:transform transform
                                    (-> tensor? exact-positive-integer?
-                                       tensor?)
+                                       (and/c tensor?
+                                              (lambda (t) (pair? (shape t)))))
                                    (lambda (samples rate) samples)])
          librispeech?]{
 A dataset over @racket[utterances], in their order. Item @racket[i] is

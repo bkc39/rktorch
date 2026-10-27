@@ -4,7 +4,8 @@
   (require rackunit
            (only-in "../audio/functional.rkt" log-mel-spectrogram mel-filterbank)
            (only-in "../audio/librispeech.rkt" load-librispeech-fixture)
-           (only-in "../main.rkt" ref tensor->list to-dtype))
+           (only-in "../main.rkt" ref tensor->list to-dtype)
+           (only-in "private/heap-allocation.rkt" median-allocation))
 
   (define blamed #rx"blaming: [(][^)]*log-mel-filterbank-test[.]rkt")
 
@@ -16,16 +17,6 @@
   (define-values (samples rate _transcript) (load-librispeech-fixture))
   (define wave (ref samples 0))
   (define bank (mel-filterbank #:n-freqs 201 #:n-mels 80 #:sample-rate rate))
-
-  (define (median-allocation thunk)
-    (thunk)
-    (define runs
-      (sort (for/list ([_ (in-range 15)])
-              (define before (current-memory-use 'cumulative))
-              (thunk)
-              (- (current-memory-use 'cumulative) before))
-            <))
-    (list-ref runs 7))
 
   (test-case "L15: a given bank is the one the call would build"
     (check-equal?
@@ -47,7 +38,11 @@
                                       #:filterbank (to-dtype bank 'float64)))))
 
   (test-case "L15: a call with the bank keeps the filters off the Racket heap"
-    (define bytes
+    (define with-bank
       (median-allocation
        (lambda () (log-mel-spectrogram wave #:sample-rate rate #:filterbank bank))))
-    (check-true (< bytes 65536) (format "~a bytes per call" bytes))))
+    (define without-bank
+      (median-allocation (lambda () (log-mel-spectrogram wave #:sample-rate rate))))
+    (check-true (< with-bank 262144) (format "~a bytes per call" with-bank))
+    (check-true (<= (* 10 with-bank) without-bank)
+                (format "~a bytes with the bank, ~a without" with-bank without-bank))))
