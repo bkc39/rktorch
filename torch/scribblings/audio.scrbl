@@ -117,7 +117,7 @@ One committed utterance --- samples, sample rate and transcript --- for
 the tests and the offline example, so neither fetches the corpus.}
 
 @defproc[(librispeech-fixture-utterance) utterance?]{
-The committed utterance as an @racket[utterance]: id
+The committed utterance as an @racket[utterance?] value: id
 @tt{1272-128104-0000}, its FLAC file and its transcript.}
 
 @defproc[(librispeech-root [split (or/c "dev-clean" "test-clean")]) path?]{
