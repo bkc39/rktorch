@@ -3,7 +3,7 @@
 (require (only-in racket/contract/base ->* any/c or/c)
          (only-in racket/match match)
          (only-in racket/string string-prefix?)
-         (only-in torch cpu-device select unsqueeze ~>)
+         (only-in torch cpu-device flatten item select unsqueeze with-no-grad ~>)
          (only-in torch/data/loader dataloader default-collate)
          (only-in torch/vision/image-folder image-folder)
          (only-in torch/vision/transforms
@@ -12,7 +12,8 @@
          (only-in "../../../torch/private/contract.rkt" define/contract-out)
          (only-in "../cifar-folder.rkt" cifar10-folder cifar10-folder-digest))
 
-(provide cifar-settings)
+(provide cifar-settings
+         log-batch!)
 
 (define cifar-mean '(0.4914 0.4822 0.4465))
 (define cifar-std '(0.2470 0.2435 0.2616))
@@ -53,6 +54,17 @@
                          augmented-batch)]))
   (dataloader ds #:batch-size batch #:shuffle? #t #:drop-last? drop-last? #:collate collate
               #:generator generator #:workers workers))
+
+(define-logger rktorch-step)
+
+(define (log-batch! x)
+  (when (log-level? rktorch-step-logger 'debug 'rktorch-step)
+    (define host-done (current-inexact-monotonic-milliseconds))
+    (with-no-grad (~> x flatten (select 0 0) item))
+    (log-message rktorch-step-logger 'debug 'rktorch-step "step"
+                 (vector 0 (current-inexact-monotonic-milliseconds) (current-gc-milliseconds)
+                         host-done)
+                 #f)))
 
 (define (cifar-settings)
   (values (env-number "EPOCHS" 2)

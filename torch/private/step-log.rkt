@@ -4,7 +4,7 @@
          (only-in "../foreign.rkt"
                   device device-type flatten item numel select with-no-grad))
 
-(provide log-step!
+(provide log-optimizer-step!
          settle!)
 
 (define-logger rktorch-step)
@@ -25,12 +25,12 @@
     (with-no-grad (item (select (flatten p) 0 0))))
   synced)
 
-(define (log-step! who params)
+(define (log-optimizer-step! opt params)
   (when (log-level? rktorch-step-logger 'debug 'rktorch-step)
     (define host-done (current-inexact-monotonic-milliseconds))
     (settle! params)
     (log-message rktorch-step-logger 'debug 'rktorch-step "step"
-                 (vector (eq-hash-code who)
+                 (vector (eq-hash-code opt)
                          (current-inexact-monotonic-milliseconds)
                          (current-gc-milliseconds)
                          host-done)

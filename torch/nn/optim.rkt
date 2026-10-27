@@ -10,7 +10,7 @@
          (only-in "../foreign/autograd-ops.rkt" reset-grads! with-gradient)
          (only-in "../foreign/ops.rkt" move-generation)
          (only-in "../private/contract.rkt" define/contract-out)
-         (only-in "../private/step-log.rkt" log-step!))
+         (only-in "../private/step-log.rkt" log-optimizer-step!))
 
 (provide gen:optimizer
          optimizer?
@@ -223,7 +223,7 @@
   (-> optimizer? void?)
   (optimizer-step! opt)
   (when (or (sgd? opt) (adam? opt) (rmsprop? opt))
-    (log-step! opt (optimizer-parameters opt))))
+    (log-optimizer-step! opt (optimizer-parameters opt))))
 
 (define/contract-out (zero-grads! opt #:set-to-none? [set-to-none? #t]) ;; noqa
   (->* [optimizer?] [#:set-to-none? boolean?] void?)
