@@ -474,8 +474,9 @@ raco review torch/**/*.rkt
 ```
 
 `raco review` does not expand macros, so the pure re-export facades
-(`torch/main.rkt`, `torch/foreign.rkt`, `torch/nn.rkt`, `torch/safe.rkt`, `torch/operators.rkt`,
-`torch/scribblings/labels.rkt`) and `torch/info.rkt` carry a `#|review: ignore|#` directive.
+(`torch/main.rkt`, `torch/foreign.rkt`, `torch/nn.rkt`, `torch/train.rkt`, `torch/safe.rkt`,
+`torch/operators.rkt`, `torch/scribblings/labels.rkt`) and `torch/info.rkt` carry a
+`#|review: ignore|#` directive.
 
 Resyntax, racket-review and `cover` are pinned, one commit per package, in
 `nix/racket-linters.nix`, which also compiles them; shell entry copies them
@@ -680,8 +681,8 @@ Thin re-export facades over small modules (target ≤ 500 lines/file).
 explicit, alphabetized name lists — never whole-module requires — so each
 file documents exactly what it pulls in. Exemptions, each marked with a
 comment at the require site: pure re-export facades (`torch/main.rkt`,
-`torch/foreign.rkt`, `torch/nn.rkt`, `torch/safe.rkt`, `torch/operators.rkt`,
-`torch/scribblings/labels.rkt`), and macro-heavy modules
+`torch/foreign.rkt`, `torch/nn.rkt`, `torch/train.rkt`, `torch/safe.rkt`,
+`torch/operators.rkt`, `torch/scribblings/labels.rkt`), and macro-heavy modules
 whose expansions need the module's full export set (`syntax/parse/pre`).
 Runtime paths take `(only-in racket/runtime-path #%datum define-runtime-path)`.
 
@@ -771,6 +772,13 @@ Runtime paths take `(only-in racket/runtime-path #%datum define-runtime-path)`.
   `call-with-mode` and `in-mode`; `torch/nn/parameter.rkt`, `torch/nn/buffer.rkt`, `torch/nn/linear.rkt`,
   `torch/nn/init.rkt`, `torch/nn/optim.rkt`, `torch/nn/ema.rkt`, `torch/nn/loss.rkt`, `torch/nn/recurrent.rkt`,
   `torch/nn/attention.rkt`, `torch/nn/transformer.rkt`, `torch/nn/positions.rkt`, `torch/nn/copy.rkt`, `torch/nn/clip.rkt`).
+- `torch/train.rkt` — pure re-export facade over `torch/train/trainer.rkt`
+  (`define-trainer`, `define-callback` and their body forms),
+  `torch/train/run.rkt`, `torch/train/loop.rkt` (`fit`, `test`, `predict`),
+  `torch/train/logging.rkt`, `torch/train/callbacks.rkt` and
+  `torch/train/optimization.rkt`; `torch/train/private/hooks.rkt` is the one
+  hook table, read at phase 0 and for-syntax. Specified by T0 (#383); the
+  bodies land in T1-T3 (#384-#386) and raise `exn:fail:unsupported` until then.
 - `torch/private/download.rkt` — the one download path (#195): a temp file in the
   cache's directory, checked, then installed. `call-with-verified-download`
   checks an exact size and SHA-256 (pretrained weights, hymenoptera);

@@ -16,6 +16,7 @@ same material in the order you meet it.
 @include-section["audio.scrbl"]
 @include-section["vision.scrbl"]
 @include-section["nn.scrbl"]
+@include-section["train.scrbl"]
 @include-section["layers-builtin.scrbl"]
 @include-section["recurrent.scrbl"]
 @include-section["attention.scrbl"]

@@ -109,7 +109,7 @@
 
 ;; Runs a Python reference file relative to examples/.
 (define (python-result rel-path)
-  (define py (build-path examples-dir rel-path))
+  (define py (path->complete-path rel-path examples-dir))
   (define out (open-output-string))
   (define ok?
     (with-python-env
