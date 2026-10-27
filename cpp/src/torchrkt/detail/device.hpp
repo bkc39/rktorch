@@ -13,6 +13,8 @@ torch::Device to_torch_device(tr_device_type type, int64_t index);
 
 torch::Device current_default_device();
 
+tr_device_type type_of(const torch::Device& d);
+
 void set_default_device(tr_device_type type, int64_t index);
 
 // Tensor::to over optional device/dtype: the KEEP sentinels leave an axis

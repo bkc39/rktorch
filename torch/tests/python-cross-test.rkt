@@ -7,6 +7,7 @@
   (require (only-in json string->jsexpr)
            (only-in racket/file file->bytes make-temporary-file)
            (only-in racket/list append* append-map make-list range split-at)
+           (only-in racket/match match-define)
            rackunit
            "../data/loader.rkt"
            "../main.rkt"
@@ -854,11 +855,14 @@
          (set! fc2 (Linear 8 2))
          #:forward (x)
          (fc2 (relu (fc1 x))))
-       (define (run make-opt)
+       (define (run make-opt #:device [device #f])
          (manual-seed! 0)
          (define net (mlp-twin))
-         (define xs (randn 16 4))
-         (define ys (randn 16 2))
+         (define-values (xs ys)
+           (let ([xs (randn 16 4)] [ys (randn 16 2)])
+             (cond
+               [device (to net device) (values (to xs device) (to ys device))]
+               [else (values xs ys)])))
          (define opt (make-opt (parameters net)))
          (define losses
            (for/list ([_ (in-range 5)])
@@ -892,7 +896,52 @@
        (check-config "rmsprop" (lambda (ps) (rmsprop ps #:lr 0.01)))
        (check-config "rmsprop_momentum"
                      (lambda (ps) (rmsprop ps #:lr 0.01 #:momentum 0.9
-                                           #:weight-decay 1e-3))))
+                                           #:weight-decay 1e-3)))
+       (define jm (python-check "optim_multi_tensor.py"))
+       (define multi-tensor-configs
+         (list (list 'sgd #t
+                     (lambda (ps #:foreach? f #:fused? u)
+                       (sgd ps #:lr 0.1 #:foreach? f #:fused? u)))
+               (list 'sgd_nesterov_wd #t
+                     (lambda (ps #:foreach? f #:fused? u)
+                       (sgd ps #:lr 0.1 #:momentum 0.9 #:nesterov? #t
+                            #:weight-decay 5e-4 #:foreach? f #:fused? u)))
+               (list 'adam #t
+                     (lambda (ps #:foreach? f #:fused? u)
+                       (adam ps #:lr 0.05 #:foreach? f #:fused? u)))
+               (list 'adam_wd #t
+                     (lambda (ps #:foreach? f #:fused? u)
+                       (adam ps #:lr 0.05 #:weight-decay 1e-2 #:foreach? f
+                             #:fused? u)))
+               (list 'adamw #t
+                     (lambda (ps #:foreach? f #:fused? u)
+                       (adamw ps #:lr 0.05 #:foreach? f #:fused? u)))
+               (list 'rmsprop #f
+                     (lambda (ps #:foreach? f #:fused? _u)
+                       (rmsprop ps #:lr 0.01 #:foreach? f)))
+               (list 'rmsprop_momentum_wd #f
+                     (lambda (ps #:foreach? f #:fused? _u)
+                       (rmsprop ps #:lr 0.01 #:momentum 0.9
+                                #:weight-decay 1e-3 #:foreach? f)))))
+       (define multi-tensor-modes '((loop #f #f) (foreach #t #f) (fused #f #t)))
+       (define (check-multi-tensor on device)
+         (for* ([c (in-list multi-tensor-configs)]
+                [m (in-list multi-tensor-modes)])
+           (match-define (list name fusable? make) c)
+           (match-define (list mode foreach? fused?) m)
+           (when (or fusable? (not fused?))
+             (define expected (hash-ref (hash-ref (hash-ref jm on) name) mode))
+             (define-values (_losses params)
+               (run (lambda (ps) (make ps #:foreach? foreach? #:fused? fused?))
+                    #:device device))
+             (for ([r (in-list params)] [p (in-list expected)] [i (in-naturals)])
+               (check-= r p tol
+                        (format "~a, ~a, ~a: parameter ~a" on name mode i))))))
+       (check-multi-tensor 'cpu #f)
+       (when (and (cuda-available?)
+                  (python-cuda-available?)
+                  (hash? (hash-ref jm 'cuda)))
+         (check-multi-tensor 'cuda 'cuda)))
      (let ()
        (define j (python-check "schedulers.py"))
        (define (rates make)

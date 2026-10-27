@@ -1,7 +1,7 @@
 #lang racket/base
 
 (require (only-in racket/contract/base
-                  -> ->* ->i >=/c any/c contract-out listof
+                  -> ->* ->i >=/c any/c contract-out flat-named-contract listof
                   unsupplied-arg?)
          (only-in racket/generic define-generics)
          (only-in "../foreign.rkt"
@@ -21,6 +21,7 @@
          sgd-lr
          (contract-out [sgd? (-> any/c boolean?)]
                        [adam? (-> any/c boolean?)]
+                       [adamw? (-> any/c boolean?)]
                        [rmsprop? (-> any/c boolean?)]))
 
 (module+ checked
@@ -63,8 +64,17 @@
 (define (decayed g p weight-decay)
   (if (zero? weight-decay) g (add g (mul p weight-decay))))
 
+(define floating-tensor/c
+  (flat-named-contract 'floating-tensor/c
+                       (lambda (v) (and (tensor? v)
+                                        (memq (dtype v) '(float16 bfloat16 float32 float64))
+                                        #t))))
+
+(define (fused-parameters/c fused?)
+  (if (eq? fused? #t) (listof floating-tensor/c) (listof tensor?)))
+
 (struct sgd tracked (params [lr #:mutable] momentum nesterov? weight-decay
-                            bufs)
+                            foreach? fused? bufs)
   #:constructor-name make-sgd
   #:name sgd-optimizer ;; noqa
   #:methods gen:optimizer
@@ -77,19 +87,27 @@
                           #:lr lr
                           #:momentum [momentum 0.0]
                           #:nesterov? [nesterov? #f]
-                          #:weight-decay [weight-decay 0.0])
-  (->i ([params (listof tensor?)] #:lr [lr (>=/c 0)])
+                          #:weight-decay [weight-decay 0.0]
+                          #:foreach? [foreach? #t]
+                          #:fused? [fused? #f])
+  (->i ([params (fused?) (fused-parameters/c fused?)] #:lr [lr (>=/c 0)])
        (#:momentum [momentum (>=/c 0)]
         #:nesterov? [nesterov? boolean?]
-        #:weight-decay [weight-decay (>=/c 0)])
+        #:weight-decay [weight-decay (>=/c 0)]
+        #:foreach? [foreach? boolean?]
+        #:fused? [fused? boolean?])
        #:pre/name (momentum nesterov?)
        "Nesterov momentum requires a momentum"
        (or (unsupplied-arg? nesterov?)
            (not nesterov?)
            (and (not (unsupplied-arg? momentum)) (> momentum 0)))
+       #:pre/name (foreach? fused?)
+       "fused and foreach cannot both be requested"
+       (not (and (eq? foreach? #t) (eq? fused? #t)))
        [result sgd?])
   (define bufs (make-hasheq))
-  (make-sgd (list bufs) #f params lr momentum nesterov? weight-decay bufs))
+  (make-sgd (list bufs) #f params lr momentum nesterov? weight-decay
+            foreach? fused? bufs))
 
 (define (momentum-buffer! opt p d)
   (define table (sgd-bufs opt))
@@ -121,7 +139,7 @@
         (sub! p step (sgd-lr opt))))))
 
 (struct adam tracked (params [lr #:mutable] beta1 beta2 eps weight-decay
-                             steps m v one)
+                             foreach? fused? steps m v one)
   #:constructor-name make-adam
   #:name adam-optimizer ;; noqa
   #:methods gen:optimizer
@@ -135,15 +153,44 @@
                            #:beta1 [beta1 0.9]
                            #:beta2 [beta2 0.999]
                            #:eps [eps 1e-8]
-                           #:weight-decay [weight-decay 0.0])
-  (->* [(listof tensor?)]
-       [#:lr (>=/c 0) #:beta1 real? #:beta2 real? #:eps real?
-        #:weight-decay (>=/c 0)]
-       adam?)
+                           #:weight-decay [weight-decay 0.0]
+                           #:foreach? [foreach? #t]
+                           #:fused? [fused? #f])
+  (->i ([params (fused?) (fused-parameters/c fused?)])
+       (#:lr [lr (>=/c 0)] #:beta1 [beta1 real?] #:beta2 [beta2 real?]
+        #:eps [eps real?] #:weight-decay [weight-decay (>=/c 0)]
+        #:foreach? [foreach? boolean?] #:fused? [fused? boolean?])
+       #:pre/name (foreach? fused?)
+       "fused and foreach cannot both be requested"
+       (not (and (eq? foreach? #t) (eq? fused? #t)))
+       [result adam?])
   (define m (make-hasheq))
   (define v (make-hasheq))
   (make-adam (list m v) #f params lr beta1 beta2 eps weight-decay
-             (make-hasheq) m v (unit-scalar)))
+             foreach? fused? (make-hasheq) m v (unit-scalar)))
+
+(struct adamw adam-optimizer ()
+  #:constructor-name make-adamw
+  #:name adamw-optimizer ;; noqa
+  #:omit-define-syntaxes)
+
+(define/contract-out (adamw params ;; noqa
+                            #:lr [lr 1e-3]
+                            #:beta1 [beta1 0.9]
+                            #:beta2 [beta2 0.999]
+                            #:eps [eps 1e-8]
+                            #:weight-decay [weight-decay 1e-2]
+                            #:foreach? [foreach? #t]
+                            #:fused? [fused? #f])
+  (->i ([params (fused?) (fused-parameters/c fused?)])
+       (#:lr [lr (>=/c 0)] #:beta1 [beta1 real?] #:beta2 [beta2 real?]
+        #:eps [eps real?] #:weight-decay [weight-decay (>=/c 0)]
+        #:foreach? [foreach? boolean?] #:fused? [fused? boolean?])
+       #:pre/name (foreach? fused?)
+       "fused and foreach cannot both be requested"
+       (not (and (eq? foreach? #t) (eq? fused? #t)))
+       [result adamw?])
+  (error 'unimplemented))
 
 (define (adam-do-step! opt)
   (with-no-grad
@@ -171,7 +218,7 @@
         (addcdiv! p m denom (- (/ lr bc1)))))))
 
 (struct rmsprop tracked (params [lr #:mutable] alpha eps weight-decay
-                                momentum sq bufs one)
+                                momentum foreach? sq bufs one)
   #:constructor-name make-rmsprop
   #:name rmsprop-optimizer ;; noqa
   #:methods gen:optimizer
@@ -185,16 +232,17 @@
                               #:alpha [alpha 0.99]
                               #:eps [eps 1e-8]
                               #:weight-decay [weight-decay 0.0]
-                              #:momentum [momentum 0.0])
+                              #:momentum [momentum 0.0]
+                              #:foreach? [foreach? #t])
   (->* [(listof tensor?)]
        [#:lr (>=/c 0) #:alpha (>=/c 0) #:eps (>=/c 0)
         #:weight-decay (>=/c 0)
-        #:momentum (>=/c 0)]
+        #:momentum (>=/c 0) #:foreach? boolean?]
        rmsprop?)
   (define sq (make-hasheq))
   (define bufs (make-hasheq))
   (make-rmsprop (list sq bufs) #f params lr alpha eps weight-decay momentum
-                sq bufs (unit-scalar)))
+                foreach? sq bufs (unit-scalar)))
 
 (define (rmsprop-do-step! opt)
   (with-no-grad

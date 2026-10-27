@@ -34,6 +34,8 @@ int64_t pack_device(tr_device_type type, int64_t index) {
   return (index << 2) | static_cast<int64_t>(type);
 }
 
+}  // namespace
+
 tr_device_type type_of(const torch::Device& d) {
   if (d.is_cuda()) {
     return TR_DEVICE_CUDA;
@@ -43,8 +45,6 @@ tr_device_type type_of(const torch::Device& d) {
   }
   return TR_DEVICE_CPU;
 }
-
-}  // namespace
 
 torch::Device to_torch_device(tr_device_type type, int64_t index) {
   switch (type) {

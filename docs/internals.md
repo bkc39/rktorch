@@ -401,7 +401,10 @@ the CPU, whose allocator keeps no count.
   and `clip-grad-norm!` release each gradient
   handle as its block ends (`with-gradient`, `with-gradients`), so after
   a step only the parameter holds a gradient and a reset frees it before
-  the next backward writes another.
+  the next backward writes another. `with-gradients` fetches every
+  gradient in one native call that also reports each one's size and
+  device, so its handles are accounted, and adopted, from those figures
+  without reading them again.
   `reclaim-native-memory!` refreshes it too, once the caches are
   emptied, so memory a dropped graph held stops being charged at once.
   An allocator that cannot answer at a refresh leaves its device's charge

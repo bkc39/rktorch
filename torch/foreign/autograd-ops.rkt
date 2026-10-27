@@ -127,29 +127,31 @@
             'zero-grads!))
 
 (define (call-with-gradients ts proc)
-  (define held '())
+  (error 'unimplemented))
+
+(define (call-with-gradient t proc)
+  (define g #f)
   (dynamic-wind
    void
    (lambda ()
-     (for ([t (in-list ts)])
-       (parameterize-break #f
-         (define g (maybe-grad t))
-         (when g
-           (set! held (cons g held)))))
-     (proc (reverse held)))
-   ;; a post thunk already runs with breaks disabled
+     (parameterize-break #f
+       (set! g (maybe-grad t)))
+     (when g
+       (proc g)))
    (lambda ()
-     (for-each tensor-free! held))))
-
-(define (call-with-gradient t proc)
-  (call-with-gradients (list t) (lambda (gs) (for-each proc gs))))
+     (when g
+       (tensor-free! g)))))
 
 (begin-for-syntax
   (define-syntax-class gradient-binder
-    (pattern (name:id source:expr))))
+    (pattern (name:id source:expr)))
+  (define-syntax-class gradients-binder
+    (pattern ([params:id grads:id] source:expr))
+    (pattern (grads:id source:expr)
+             #:with (params) (generate-temporaries '(params)))))
 
-(define-syntax-parse-rule (with-gradients b:gradient-binder body:expr ...+)
-  (call-with-gradients b.source (lambda (b.name) body ...)))
+(define-syntax-parse-rule (with-gradients b:gradients-binder body:expr ...+)
+  (call-with-gradients b.source (lambda (b.params b.grads) body ...)))
 
 (define-syntax-parse-rule (with-gradient b:gradient-binder body:expr ...+)
   (call-with-gradient b.source (lambda (b.name) body ...)))

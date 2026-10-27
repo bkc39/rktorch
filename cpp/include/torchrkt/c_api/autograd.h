@@ -33,6 +33,16 @@ int tr_tensor_mul_(tr_tensor* t, double value);
 
 int tr_tensors_reset_grad(tr_tensor* const* tensors, int64_t n);
 
+/* One handle per tensor in grads[i] (as tr_tensor_grad), NULL where tensors[i]
+ * has no gradient, with that gradient's tr_tensor_nbytes and tr_tensor_device
+ * in nbytes[i], device_type[i] and device_index[i]. On failure the status is
+ * 1 and every grads[i] is NULL. */
+int tr_tensors_grad(tr_tensor* const* tensors, int64_t n, tr_tensor** grads,
+                    int64_t* nbytes, int* device_type, int64_t* device_index);
+
+/* tr_tensor_free over a list; NULL entries are skipped. */
+void tr_tensors_free(tr_tensor* const* tensors, int64_t n);
+
 #ifdef __cplusplus
 }
 #endif

@@ -2,8 +2,12 @@
 
 #include <torch/torch.h>
 
+#include <algorithm>
+#include <memory>
 #include <stdexcept>
+#include <vector>
 
+#include "torchrkt/detail/device.hpp"
 #include "torchrkt/detail/op_call.hpp"
 #include "torchrkt/detail/tensor_handle.hpp"
 
@@ -111,6 +115,51 @@ int tr_tensors_reset_grad(tr_tensor* const* tensors, int64_t n) {
       tensors[i]->value.mutable_grad().reset();
     }
   });
+}
+
+int tr_tensors_grad(tr_tensor* const* tensors, int64_t n, tr_tensor** grads,
+                    int64_t* nbytes, int* device_type, int64_t* device_index) {
+  if (n > 0 && grads) {
+    std::fill(grads, grads + n, nullptr);
+  }
+  if (n > 0 && (!grads || !nbytes || !device_type || !device_index)) {
+    return torchrkt::null_arg_status("tr_tensors_grad");
+  }
+  if (torchrkt::tensors_arg_status("tr_tensors_grad", tensors, n) != 0) {
+    return 1;
+  }
+  std::vector<std::unique_ptr<tr_tensor>> held(static_cast<size_t>(n));
+  const int rc = torchrkt::status_call("tr_tensors_grad", [&] {
+    for (int64_t i = 0; i < n; ++i) {
+      const torch::Tensor& g = tensors[i]->value.grad();
+      if (!g.defined()) {
+        continue;
+      }
+      const torch::Device d = g.device();
+      if (!d.is_cpu() && !d.is_cuda() && !d.is_mps()) {
+        throw std::invalid_argument("gradient is on an unsupported device kind");
+      }
+      nbytes[i] = static_cast<int64_t>(g.nbytes());
+      device_type[i] = static_cast<int>(torchrkt::type_of(d));
+      device_index[i] = d.has_index() ? static_cast<int64_t>(d.index()) : 0;
+      held[static_cast<size_t>(i)] = std::make_unique<tr_tensor>(tr_tensor{g});
+    }
+  });
+  if (rc == 0) {
+    for (int64_t i = 0; i < n; ++i) {
+      grads[i] = held[static_cast<size_t>(i)].release();
+    }
+  }
+  return rc;
+}
+
+void tr_tensors_free(tr_tensor* const* tensors, int64_t n) {
+  if (!tensors) {
+    return;
+  }
+  for (int64_t i = 0; i < n; ++i) {
+    delete tensors[i];
+  }
 }
 
 }  // extern "C"

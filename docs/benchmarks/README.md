@@ -195,7 +195,9 @@ median, quartiles and IQR, and the load average before and after.
   tensor reads its size and device (two crossings), so a phase's op calls
   are its crossings less its frees and twice its accounted tensors; a
   tensor whose size or device cannot be read costs its two crossings
-  uncounted. Counting runs with `native-collect-at-troughs` off, so no
+  uncounted. A batched gradient fetch or free is one crossing for N
+  handles, so the `optimizer` phase of the default foreach and fused
+  steps is read in raw crossings, not op calls. Counting runs with `native-collect-at-troughs` off, so no
   trough collection lands in `backward`; each counted step follows
   `reclaim-native-memory!`, so frees of an earlier step's tensors land
   outside it, and a free the finalizer thread makes lands in whichever

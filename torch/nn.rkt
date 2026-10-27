@@ -36,7 +36,7 @@
          "nn/loss.rkt"
          "nn/mode.rkt"
          (only-in "nn/optim.rkt"
-                  adam adam? learning-rate rmsprop rmsprop?
+                  adam adam? adamw adamw? learning-rate rmsprop rmsprop?
                   set-learning-rate! sgd sgd? step! zero-grads!)
          (submod "nn/optim.rkt" checked)
          "nn/scheduler.rkt"
@@ -156,6 +156,8 @@
          sgd?
          adam
          adam?
+         adamw
+         adamw?
          rmsprop
          rmsprop?
          optimizer?

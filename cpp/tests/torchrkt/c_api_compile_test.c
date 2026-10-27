@@ -109,6 +109,19 @@ void torchrkt_c_api_compile_check(void) {
   int (*set_grad_enabled)(int) = tr_set_grad_enabled;
   int (*sub_inplace)(tr_tensor*, const tr_tensor*, double) = tr_tensor_sub_;
   int (*reset_grads)(tr_tensor* const*, int64_t) = tr_tensors_reset_grad;
+  int (*grads_fetch)(tr_tensor* const*, int64_t, tr_tensor**, int64_t*, int*,
+                     int64_t*) = tr_tensors_grad;
+  void (*tensors_free)(tr_tensor* const*, int64_t) = tr_tensors_free;
+  int (*gen_foreach_add_)(tr_tensor* const*, int64_t, double) =
+      tr_gen__foreach_add__scalar;
+  int (*gen_foreach_div_)(tr_tensor* const*, int64_t, const double*, int64_t) =
+      tr_gen__foreach_div__scalarlist;
+  int (*gen_fused_adam_)(tr_tensor* const*, int64_t, tr_tensor* const*, int64_t,
+                         tr_tensor* const*, int64_t, tr_tensor* const*, int64_t,
+                         tr_tensor* const*, int64_t, const tr_tensor* const*,
+                         int64_t, double, double, double, double, double, bool,
+                         bool, const tr_tensor*, const tr_tensor*) =
+      tr_gen__fused_adam_;
   /* Generated surface: one pin per generated signature shape. */
   tr_tensor* (*gen_matmul)(const tr_tensor*, const tr_tensor*) = tr_gen_matmul;
   tr_tensor* (*gen_reshape)(const tr_tensor*, const int64_t*, int64_t) =
@@ -343,6 +356,11 @@ void torchrkt_c_api_compile_check(void) {
   (void)set_grad_enabled;
   (void)sub_inplace;
   (void)reset_grads;
+  (void)grads_fetch;
+  (void)tensors_free;
+  (void)gen_foreach_add_;
+  (void)gen_foreach_div_;
+  (void)gen_fused_adam_;
   (void)gen_matmul;
   (void)gen_reshape;
   (void)gen_cat;

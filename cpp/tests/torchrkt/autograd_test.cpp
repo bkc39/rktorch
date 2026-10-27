@@ -175,4 +175,77 @@ TEST(TorchrktAutograd, ResetGradRejectsNullArguments) {
             "tr_tensors_reset_grad: negative length");
 }
 
+TEST(TorchrktAutograd, TensorsGradMatchesTheOneAtATimeQueries) {
+  Handle x = make({1.0F, 2.0F}, {2});
+  Handle w = make({3.0F}, {1});
+  Handle idle = make({5.0F}, {1});
+  for (tr_tensor* t : {x.t, w.t, idle.t}) {
+    ASSERT_EQ(tr_tensor_requires_grad_(t, 1), 0) << tr_last_error();
+  }
+  {
+    const Handle sq(tr_mul(x.t, x.t));
+    const Handle wx(tr_mul(sq.t, w.t));
+    Handle y(tr_sum(wx.t));
+    ASSERT_EQ(tr_tensor_backward(y.t), 0) << tr_last_error();
+  }
+  std::vector<tr_tensor*> ts{x.t, idle.t, w.t};
+  std::vector<tr_tensor*> grads(3, nullptr);
+  std::vector<int64_t> nbytes(3, -1);
+  std::vector<int> types(3, -1);
+  std::vector<int64_t> indices(3, -1);
+  ASSERT_EQ(tr_tensors_grad(ts.data(), 3, grads.data(), nbytes.data(),
+                            types.data(), indices.data()),
+            0)
+      << tr_last_error();
+  EXPECT_EQ(grads[1], nullptr);
+  for (size_t i : {size_t{0}, size_t{2}}) {
+    ASSERT_NE(grads[i], nullptr);
+    const Handle one(tr_tensor_grad(ts[i]));
+    EXPECT_EQ(data_of(grads[i]), data_of(one.t));
+    int64_t want_nbytes = -1;
+    ASSERT_EQ(tr_tensor_nbytes(one.t, &want_nbytes), 0) << tr_last_error();
+    EXPECT_EQ(nbytes[i], want_nbytes);
+    tr_device_type type = TR_DEVICE_KEEP;
+    int64_t index = -1;
+    ASSERT_EQ(tr_tensor_device(one.t, &type, &index), 0) << tr_last_error();
+    EXPECT_EQ(types[i], static_cast<int>(type));
+    EXPECT_EQ(indices[i], index);
+  }
+  ASSERT_EQ(tr_tensor_zero_(grads[0]), 0) << tr_last_error();
+  const Handle live(tr_tensor_grad(x.t));
+  EXPECT_EQ(data_of(live.t), (std::vector<float>{0.0F, 0.0F}))
+      << "a fetched handle aliases the live gradient";
+  tr_tensors_free(grads.data(), 3);
+  tr_tensors_free(nullptr, 2);
+}
+
+TEST(TorchrktAutograd, TensorsGradRefusesANullListWithEveryOutputNull) {
+  Handle x = make({1.0F}, {1});
+  ASSERT_EQ(tr_tensor_requires_grad_(x.t, 1), 0) << tr_last_error();
+  const Handle y(tr_sum(x.t));
+  ASSERT_EQ(tr_tensor_backward(y.t), 0) << tr_last_error();
+  tr_tensor* stale = x.t;
+  std::vector<tr_tensor*> grads{stale, stale};
+  std::vector<int64_t> nbytes(2);
+  std::vector<int> types(2);
+  std::vector<int64_t> indices(2);
+  const std::string null_argument = "tr_tensors_grad: null argument";
+
+  EXPECT_EQ(tr_tensors_grad(nullptr, 2, grads.data(), nbytes.data(),
+                            types.data(), indices.data()),
+            1);
+  EXPECT_EQ(tr_last_error(), null_argument);
+  EXPECT_EQ(grads, (std::vector<tr_tensor*>{nullptr, nullptr}));
+
+  grads = {stale, stale};
+  std::vector<tr_tensor*> with_null{x.t, nullptr};
+  EXPECT_EQ(tr_tensors_grad(with_null.data(), 2, grads.data(), nbytes.data(),
+                            types.data(), indices.data()),
+            1);
+  EXPECT_EQ(grads, (std::vector<tr_tensor*>{nullptr, nullptr}));
+
+  EXPECT_EQ(tr_tensors_grad(nullptr, 0, nullptr, nullptr, nullptr, nullptr), 0)
+      << tr_last_error();
+}
+
 }  // namespace

@@ -1,8 +1,11 @@
 #lang racket/base
 
-(require (only-in "../../foreign.rkt"
-                  add addcdiv! addcmul! copy! device dtype full mul mul! sqrt
-                  sub! to with-no-grad zeros-like))
+(require (only-in racket/flonum flexpt)
+         (only-in "../../foreign.rkt"
+                  addcdiv! addcmul! copy! device dtype full mul! sqrt sub! to
+                  with-no-grad zeros-like)
+         (prefix-in g: (only-in "../../generated.rkt"
+                                add-tensor add-tensor! div-scalar! lerp-scalar!)))
 
 (provide reference-adam
          reference-rmsprop
@@ -21,7 +24,7 @@
   (full value #:device (device p) #:dtype (dtype p)))
 
 (define (decayed g p weight-decay)
-  (if (zero? weight-decay) g (add g (mul p weight-decay))))
+  (if (zero? weight-decay) g (g:add-tensor g p (exact->inexact weight-decay))))
 
 (define (reference-sgd #:lr lr
                        #:momentum [mu 0.0]
@@ -33,7 +36,7 @@
       [(hash-ref bufs i #f)
        (define buf (moment-on bufs i p))
        (mul! buf mu)
-       (sub! buf d -1.0)
+       (g:add-tensor! buf d 1.0)
        buf]
       [else
        (define fresh (zeros-like p))
@@ -49,32 +52,34 @@
             [(zero? mu) d]
             [else
              (define buf (momentum-buffer! i p d))
-             (if nesterov? (add d (mul buf mu)) buf)]))
-        (sub! p step lr)))))
+             (if nesterov? (g:add-tensor d buf mu) buf)]))
+        (g:add-tensor! p step (- lr))))))
 
 (define (reference-adam #:lr [lr 1e-3]
                         #:beta1 [b1 0.9]
                         #:beta2 [b2 0.999]
                         #:eps [eps 1e-8]
-                        #:weight-decay [weight-decay 0.0])
+                        #:weight-decay [weight-decay 0.0]
+                        #:decoupled? [decoupled? #f])
   (define ms (make-hasheqv))
   (define vs (make-hasheqv))
   (define t 0)
   (lambda (ps gs)
     (set! t (add1 t))
-    (define bc1 (- 1.0 (expt b1 t)))
-    (define bc2 (- 1.0 (expt b2 t)))
+    (define bc1 (- 1.0 (flexpt b1 (exact->inexact t))))
+    (define bc2 (- 1.0 (flexpt b2 (exact->inexact t))))
     (with-no-grad
       (for ([p (in-list ps)] [g (in-list gs)] [i (in-naturals)])
-        (define d (decayed g p weight-decay))
+        (when decoupled?
+          (mul! p (- 1.0 (* lr weight-decay))))
+        (define d (if decoupled? g (decayed g p weight-decay)))
         (define m (moment-on ms i p))
         (define v (moment-on vs i p))
-        (mul! m b1)
-        (sub! m d (- b1 1.0))
+        (g:lerp-scalar! m d (- 1.0 b1))
         (mul! v b2)
         (addcmul! v d d (- 1.0 b2))
         (define denom (sqrt v))
-        (mul! denom (/ 1.0 (expt bc2 0.5)))
+        (g:div-scalar! denom (flexpt bc2 0.5))
         (sub! denom (eps-on eps p) -1.0)
         (addcdiv! p m denom (- (/ lr bc1)))))))
 
@@ -100,4 +105,4 @@
            (define buf (moment-on bufs i p))
            (mul! buf mu)
            (addcdiv! buf d avg 1.0)
-           (sub! p buf lr)])))))
+           (g:add-tensor! p buf (- lr))])))))

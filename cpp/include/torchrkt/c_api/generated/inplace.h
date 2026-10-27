@@ -15,7 +15,10 @@ extern "C" {
  * handle (NULL on error); an in-place op mutates its first handle
  * and returns an int status (0 ok, 1 with tr_last_error set). An op
  * with several Tensor returns also reports a status and writes one
- * new handle per trailing out pointer, every one NULL on error. */
+ * new handle per trailing out pointer, every one NULL on error. An
+ * op with no return updates the tensors of its non-const lists and
+ * reports a status; a failure partway may leave them partly
+ * updated. */
 
 int tr_gen_add__tensor(tr_tensor* self, const tr_tensor* other, double alpha);
 int tr_gen_addcdiv_(tr_tensor* self, const tr_tensor* tensor1,
@@ -23,6 +26,7 @@ int tr_gen_addcdiv_(tr_tensor* self, const tr_tensor* tensor1,
 int tr_gen_addcmul_(tr_tensor* self, const tr_tensor* tensor1,
                     const tr_tensor* tensor2, double value);
 int tr_gen_copy_(tr_tensor* self, const tr_tensor* src, bool non_blocking);
+int tr_gen_div__scalar(tr_tensor* self, double other);
 int tr_gen_fill__scalar(tr_tensor* self, double value);
 int tr_gen_index_add_(tr_tensor* self, int64_t dim, const tr_tensor* index,
                       const tr_tensor* source, double alpha);
@@ -33,6 +37,7 @@ int tr_gen_index_fill__int_scalar(tr_tensor* self, int64_t dim,
 int tr_gen_index_fill__int_tensor(tr_tensor* self, int64_t dim,
                                   const tr_tensor* index,
                                   const tr_tensor* value);
+int tr_gen_lerp__scalar(tr_tensor* self, const tr_tensor* end, double weight);
 int tr_gen_lerp__tensor(tr_tensor* self, const tr_tensor* end,
                         const tr_tensor* weight);
 int tr_gen_masked_fill__scalar(tr_tensor* self, const tr_tensor* mask,

@@ -192,3 +192,24 @@ rnn _cudnn_rnn_flatten_weight
 # kind (float? -> double + presence flag, like Scalar?). A positive
 # dropout_p draws its mask from the global stream, hence the no-retry flag.
 attention scaled_dot_product_attention no-retry
+
+# #305: torch.optim's multi-tensor and fused steps. Tensor(a!)[] with a ()
+# return (mutable-tensor-list, returns 0) and Scalar[] (scalar-list); the
+# .tensor_lr overloads are left out because the rate is a real. The last
+# three are the single-tensor ops of the realigned per-parameter loop.
+optim _foreach_add_.Scalar
+optim _foreach_add_.List
+optim _foreach_mul_.Scalar
+optim _foreach_div_.ScalarList
+optim _foreach_lerp_.Scalar
+optim _foreach_addcmul_.Scalar
+optim _foreach_addcdiv_.Scalar
+optim _foreach_addcdiv_.ScalarList
+optim _foreach_sqrt_
+optim _foreach_copy_
+optim _fused_adam_
+optim _fused_adamw_
+optim _fused_sgd_
+inplace lerp_.Scalar
+inplace div_.Scalar
+math add.Tensor
