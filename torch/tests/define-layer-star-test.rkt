@@ -1,7 +1,10 @@
 #lang racket/base
 
 (module+ test
-  (require rackunit
+  (require (for-syntax racket/base
+                       (only-in syntax/parse/pre ~var attribute syntax-parse)
+                       (only-in "../private/definer.rkt" field-of layer-fields))
+           rackunit
            (only-in syntax/macro-testing convert-compile-time-error)
            "../main.rkt"
            "../nn.rkt"
@@ -45,6 +48,22 @@
     #:method (hold! m) (set! slot m)
     #:method (held) slot)
 
+  (define-layer* Teacher (student)
+    #:init ()
+    (set! student #f)
+    #:method (attach! s) (set! student s))
+
+  (define-layer* Student (net teacher)
+    #:init ()
+    (set! net (Linear 2 2))
+    (set! teacher (Teacher)))
+
+  (define-layer* Stepper (calls)
+    #:init ()
+    (set! calls 0)
+    #:method #:hidden-arguments 1 (step run x y) (list run x y)
+    #:method #:hidden-arguments 1 (step* run x . more) (list* run x more))
+
   (define-layer* Hooks (n)
     #:method (get) n
     #:method (mode-of) (with-mode mode))
@@ -56,6 +75,12 @@
     #:on-move (set! moves (add1 moves))
     #:method (moves-of) moves
     #:forward (x) (* x w))
+
+  (define-syntax (fields-of stx)
+    (syntax-parse stx
+      [(_ init? fields (~var h (field-of '(a b) 'Thing)) ...)
+       #:with (~var f (layer-fields (and (syntax-e #'init?) "define-init"))) #'fields
+       #''(f.id ...)]))
 
   (define (call m name . args)
     (apply (layer-method m name) m args))
@@ -98,23 +123,41 @@
                (lambda () (call r 'set-w!)))
     (check-exn (message-matching #rx"^Registered: .*\n  field: 'shift")
                (lambda () (call r 'set-shift!)))
-    (call r 'set-k! (Linear 1 1))
     (call r 'set-k! 3)
-    (check-equal? (call r 'k-of) 3 "a plain field stays plain whatever it held"))
+    (check-equal? (call r 'k-of) 3 "a plain field takes plain values"))
 
-  (test-case "a plain field set! to a layer after construction is not registered"
+  (test-case "set! of a layer, parameter or buffer into a plain field raises"
     (define h (Holder))
-    (define inner (Linear 2 2))
+    (for ([v (list (Linear 2 2) (Parameter (ones 2)) (Buffer (zeros 2)))])
+      (check-exn (message-matching
+                  #rx"^Holder: set! cannot put a layer, parameter or buffer .*\n  field: 'slot")
+                 (lambda () (call h 'hold! v))))
+    (check-false (call h 'held) "the slot keeps its value")
+    (check-equal? (children h) '()))
+
+  (test-case "layer-copy passes a plain field's value through"
+    (define h (Holder))
+    (define inner (list (Linear 2 2)))
     (call h 'hold! inner)
-    (check-eq? (call h 'held) inner)
-    (check-equal? (parameters h) '())
-    (check-equal? (children h) '())
-    (check-equal? (state-dict h) '())
     (define copy (layer-copy h))
-    (check-false (eq? (call copy 'held) inner) "layer-copy copies what the field holds")
-    (check-equal? (children copy) '() "and still does not register it")
+    (check-eq? (call copy 'held) inner)
+    (check-equal? (children copy) '())
     (call copy 'hold! 5)
     (check-eq? (call h 'held) inner "the copy's slot is its own"))
+
+  (test-case "a layer cannot be set! into a field of its own child, so layer-copy ends"
+    (define s (Student))
+    (define t (car (filter (lambda (c) (layer-method c 'attach!)) (children s))))
+    (check-exn (message-matching #rx"^Teacher: set! cannot put .*\n  field: 'student")
+               (lambda () (call t 'attach! s)))
+    (define c (make-custodian))
+    (custodian-limit-memory c (* 256 1024 1024) c)
+    (define done
+      (parameterize ([current-custodian c])
+        (thread (lambda () (layer-copy s)))))
+    (define finished (sync/timeout 30 done))
+    (custodian-shutdown-all c)
+    (check-not-false finished "layer-copy returned"))
 
   (test-case "layer-copy keeps which fields were registered at construction"
     (define c (Counter 2))
@@ -159,6 +202,16 @@
     (check-exn (message-matching #rx"^bump!: arity mismatch")
                (lambda () (call c 'bump! 1 2))))
 
+  (test-case "hidden leading inputs are left out of an arity message"
+    (define st (Stepper))
+    (check-equal? (call st 'step 'run 1 2) '(run 1 2))
+    (check-exn (message-matching #rx"^step: arity mismatch.*\n  expected: 2\n  given: 1\n  arguments...:\n   1$")
+               (lambda () (call st 'step 'run 1)))
+    (check-exn (message-matching #rx"expected: at least 1\n  given: 0$")
+               (lambda () (call st 'step* 'run)))
+    (check-exn (message-matching #rx"expected: 2\n  given: 0$")
+               (lambda () (call st 'step))))
+
   (test-case "on-move and with-mode see the instance"
     (define m (Moved))
     (to m 'float64)
@@ -186,4 +239,25 @@
                     (define-layer* Defaulted ([n 1])
                       #:init ()
                       (set! n 2))
-                    (Defaulted)))))))
+                    (Defaulted)))))
+    (check-exn #rx"#:hidden-arguments counts more inputs than the positional formals"
+               (lambda ()
+                 (convert-compile-time-error
+                  (let ()
+                    (define-layer* Hidden ()
+                      #:method #:hidden-arguments 2 (get x) x)
+                    (Hidden))))))
+
+  (test-case "with-mode outside a body names every form that binds it"
+    (check-exn #rx"only allowed inside a define-layer #:forward body or a define-trainer or define-callback hook"
+               (lambda () (convert-compile-time-error (with-mode 1)))))
+
+  (test-case "the shared field checks take the definer's init clause and type"
+    (check-equal? (fields-of #f ([a 1] #:k b) a b) '(a b))
+    (check-equal? (fields-of #t (a b)) '(a b))
+    (check-exn #rx"with define-init, a field is a bare identifier; defaults and keywords belong to the define-init formals"
+               (lambda () (convert-compile-time-error (fields-of #t (a [b 1])))))
+    (check-exn #rx"c is not a field of Thing"
+               (lambda () (convert-compile-time-error (fields-of #f (a) c))))
+    (check-exn #rx"a field name may not contain a dot"
+               (lambda () (convert-compile-time-error (fields-of #f (a.b)))))))

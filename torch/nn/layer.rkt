@@ -4,12 +4,13 @@
                      (only-in racket/list check-duplicates)
                      (only-in racket/match match)
                      (only-in racket/syntax format-id generate-temporary)
+                     (only-in syntax/parse/experimental/eh ~eh-var)
                      ;; whole-module on purpose: the expansion needs bindings
                      ;; only-in would strip
                      syntax/parse/pre
                      (only-in "../private/definer.rkt"
-                              contract-export ctor-formal forward-formal
-                              forward-keyword init-formals))
+                              contract-export entry-formals layer-fields
+                              layer-options))
          (only-in racket/contract/base
                   -> ->* ->i and/c any any/c cons/c contract contract-out
                   contract? flat-named-contract listof not/c or/c
@@ -222,7 +223,9 @@
 (define-syntax-parameter with-mode
   (lambda (stx)
     (raise-syntax-error
-     #f "only allowed inside a define-layer #:forward body" stx)))
+     #f (string-append "only allowed inside a define-layer #:forward body"
+                       " or a define-trainer or define-callback hook")
+     stx)))
 
 (begin-for-syntax
   (define ((with-mode-transformer self-id) stx) ;; noqa
@@ -446,8 +449,6 @@
                            "name" entry-clash))
   m)
 
-(struct registry* registry (fixed))
-
 (define-values (prop:layer-methods layer-methods? layer-methods-of)
   (make-struct-type-property 'layer-methods))
 
@@ -464,247 +465,176 @@
             [layer-methods (-> layer? (or/c hash? #f))])))
 
 (define (registered? v)
-  (or (Parameter? v) (Parameters? v) (Buffer? v) (Children? v) (layer? v)))
+  (or (Parameter? v) (Parameters%? v) (Buffer? v) (Children%? v) (layer? v)))
 
-(define (registered-names names vals) ;; noqa
-  (for/list ([name (in-list names)] [v (in-list vals)] #:when (registered? v))
-    name))
+(define (rebuilt-registered name v child tensor)
+  (if (registered? v) (rebuilt-value name v child tensor) v))
 
-(define (classify-kept kept names vals) ;; noqa
-  (define entries
-    (for/list ([name (in-list names)] [v (in-list vals)] #:when (member name kept))
-      (cons name v)))
-  (classify (map car entries) (map cdr entries)))
+(define (assemble who make forward mode names vals)
+  (define-values (params buffers children) (classify names vals))
+  (check-names who (apply make forward params buffers children mode vals)))
 
-(define (write-field! who self field set v) ;; noqa
-  (when (member field (registry*-fixed self))
-    (raise-arguments-error
-     who
-     "set! cannot replace a field that held a layer, parameter or buffer at construction"
-     "field" (string->symbol field)))
-  (set self v))
+(define (write-field! who self field read write v)
+  (define problem
+    (cond
+      [(registered? (read self))
+       "set! cannot replace a field that held a layer, parameter or buffer at construction"]
+      [(registered? v)
+       "set! cannot put a layer, parameter or buffer in a field that held none at construction"]
+      [else #f]))
+  (when problem
+    (raise-arguments-error who problem "field" field))
+  (write self v))
 
-(define (check-entry-arity who enough? n expected inputs) ;; noqa
-  (unless (enough? (length inputs) n)
-    (apply raise-arity-error who expected inputs)))
+(define (check-entry-arity who n rest? hidden inputs)
+  (define given (length inputs))
+  (unless (if rest? (>= given n) (= given n))
+    (define expected (- n hidden))
+    (apply raise-arity-error who (if rest? (arity-at-least expected) expected)
+           (list-tail inputs (min hidden given)))))
 
-(define (entry-procedure run) ;; noqa
+(define (entry-procedure run)
   (make-keyword-procedure
    (lambda (kws kw-args self . inputs) (run self kws kw-args inputs))
    (lambda (self . inputs) (run self '() '() inputs))))
 
-(define (no-forward who) ;; noqa
+(define (no-forward who)
   (entry-procedure
    (lambda (self _kws _kw-args _inputs)
      (raise-arguments-error who "this layer has no forward, so it cannot be applied"
                             "layer" self))))
 
 (begin-for-syntax
-  (define-splicing-syntax-class layer-field
-    #:description "a layer field"
-    #:attributes (id bare? (decl 1))
-    (pattern f:ctor-formal
-      #:fail-when
-      (and (regexp-match? #rx"[.]" (symbol->string (syntax-e #'f.id))) #'f.id)
-      "a field name may not contain a dot; it is one state-dict segment"
-      #:with id #'f.id
-      #:attr bare? (attribute f.bare?)
-      #:with (decl ...) #'(f.decl ...)))
-
-  (define-syntax-class entry-formals
-    #:attributes ((id 1) (ctc 1) (kw-decl 1) restarg)
-    (pattern ((~alt input:forward-formal kw-input:forward-keyword) ...
-              . (~or* () restarg:id))
-      #:with (id ...) #'(input.id ...)
-      #:attr (ctc 1) (attribute input.ctc)
-      #:with (kw-decl ...) #'((~@ kw-input.decl ...) ...)))
-
-  (define-syntax-class (entry bind)
+  (define-syntax-class (entry scope)
     #:attributes ((checker-def 1) who proc)
-    (pattern (who:id f:entry-formals body:expr ...+)
-      #:do [(define ctcs (attribute f.ctc))
-            (define checkers
-              (for/list ([c (in-list ctcs)]) (and c (generate-temporary #'check))))
-            (define n (length (attribute f.id)))
-            (define rest? (and (attribute f.restarg) #t))]
+    (pattern (hidden:nat who:id f:entry-formals body:expr ...+)
+      #:do [(define n (length (attribute f.id)))]
+      #:fail-when (and (> (syntax-e #'hidden) n) #'hidden)
+      "#:hidden-arguments counts more inputs than the positional formals"
+      #:with ([checked ctc] ...)
+      (for/list ([i (in-list (attribute f.id))] [c (in-list (attribute f.ctc))] #:when c)
+        (list i c))
+      #:with (checker ...) (generate-temporaries #'(checked ...))
       #:with (checker-def ...)
-      (for/list ([c (in-list ctcs)] [cid (in-list checkers)] #:when c)
-        #`(define #,cid
-            (contract (-> #,c any) values 'who 'caller 'who (quote-syntax who))))
-      #:with (checked-binding ...)
-      (for/list ([c (in-list ctcs)]
-                 [cid (in-list checkers)]
-                 [i (in-list (attribute f.id))]
-                 #:when c)
-        #`[#,i (#,cid #,i)])
+      #'((define checker
+           (contract (-> ctc any) values 'who 'caller 'who (quote-syntax who)))
+         ...)
+      #:with (binder bindings) scope
       #:with lam
       (syntax-property
-       (if rest?
-           #'(lambda (f.id ... f.kw-decl ... . f.restarg)
-               (let (checked-binding ...) body ...))
-           #'(lambda (f.id ... f.kw-decl ...)
-               (let (checked-binding ...) body ...)))
+       #'(lambda (f.id ... f.kw-decl ... . (~? f.restarg ()))
+           (let ([checked (checker checked)] ...) body ...))
        'inferred-name (syntax-e #'who))
       #:with proc
       #`(entry-procedure
          (lambda (self kws kw-args inputs)
-           (check-entry-arity 'who #,(if rest? #'>= #'=) #,n
-                              #,(if rest? #`(arity-at-least #,n) n) inputs)
-           #,(bind #'(syntax-parameterize ([with-mode (with-mode-transformer #'self)])
-                       (keyword-apply lam kws kw-args inputs)))))))
+           (check-entry-arity 'who #,n #,(and (attribute f.restarg) #t) hidden inputs)
+           (binder bindings
+             (syntax-parameterize ([with-mode (with-mode-transformer #'self)])
+               (keyword-apply lam kws kw-args inputs)))))))
 
-  (define ((field-transformer read write) stx) ;; noqa
+  (define ((field-transformer self acc mut who field) stx)
     (syntax-parse stx
       #:literals (set!)
-      [(set! _ v:expr) #`(#,@(syntax->list write) v)]
-      [(_ arg ...) #`(#,read arg ...)]
-      [_:id read]))
+      [(set! _ v:expr) #`(write-field! '#,who #,self '#,field #,acc #,mut v)]
+      [(_ arg ...) #`((#,acc #,self) arg ...)]
+      [_:id #`(#,acc #,self)]))
 
-  (define (unbare-field init? fields bares)
-    (and init?
-         (for/or ([f (in-list fields)] [bare? (in-list bares)])
-           (and (not bare?) f))))
+  (struct field-access (binder binding spec rebuild))
 
-  (define unbare-message
-    (string-append "with #:init, a field is a bare identifier;"
-                   " defaults and keywords belong to the #:init formals"))
+  (define immutable-fields
+    (field-access #'let
+                  (lambda (_who field acc _mut) #`[#,field (#,acc self)])
+                  values
+                  #'rebuilt-value))
 
-  (define (init-parts fields decls init-formals init-ids)
-    (if init-formals
-        (list init-formals
-              (filter (lambda (f) (not (member f init-ids bound-identifier=?))) fields))
-        (list (apply append decls) '())))
+  ;; set! cannot register anything, so only the fields registered at
+  ;; construction hold anything layer-copy must copy
+  (define mutable-fields
+    (field-access #'let-syntax
+                  (lambda (who field acc mut)
+                    #`[#,field (make-set!-transformer
+                                (field-transformer (quote-syntax self)
+                                                   (quote-syntax #,acc)
+                                                   (quote-syntax #,mut)
+                                                   '#,who '#,field))])
+                  (lambda (field) #`[#,field #:mutable])
+                  #'rebuilt-registered))
 
   (define (field-ids struct-id fields pattern)
-    (for/list ([f (in-list fields)]) (format-id struct-id pattern struct-id f)))
+    (map (lambda (f) (format-id struct-id pattern struct-id f)) fields))
 
-  (define (layer-expansion stx star? ctc pred parts)
-    (syntax-parse parts
-      [(name formals (field ...) (assign ...) (absent ...) reflect-name
-        (moved-body ...) (fwd ...) (method ...) ((prop prop-val) ...))
-       #:do [(define fields (syntax->list #'(field ...)))
-             (define struct-id (generate-temporary #'name))
-             (define accs (field-ids struct-id fields "~a-~a"))
-             (define names
-               (for/list ([f (in-list fields)]) (symbol->string (syntax-e f))))
-             (define bindings
-               (for/list ([f (in-list fields)]
-                          [acc (in-list accs)]
-                          [mut (in-list (field-ids struct-id fields "set-~a-~a!"))]
-                          [s (in-list names)])
-                 (if star?
-                     #`[#,f (make-set!-transformer
-                             (field-transformer
-                              (quote-syntax (#,acc self))
-                              (quote-syntax (write-field! 'name self #,s #,mut))))]
-                     #`[#,f (#,acc self)])))
-             (define (bind e)
-               #`(#,(if star? #'let-syntax #'let) #,bindings #,e))]
-       #:with ((~var fe (entry bind)) ...) #'((name . fwd) ...)
-       #:with ((~var me (entry bind)) ...) #'(method ...)
+  (define (layer-expansion stx access)
+    (syntax-parse stx
+      [(_ name:id fields
+          (~alt (~eh-var o layer-options)
+                (~optional (~seq #:forward fwd:entry-formals fwd-body:expr ...+))
+                (~seq #:method (~optional (~seq #:hidden-arguments hidden:nat))
+                      (m-name:id . m-formals:entry-formals) m-body:expr ...+)
+                (~seq #:property prop:expr prop-val:expr)) ...)
+       #:with (~var f (layer-fields (and (attribute o.init) "#:init"))) #'fields
+       #:with sid (generate-temporary #'name)
+       #:with sid? (format-id #'sid "~a?" #'sid)
+       #:with (acc ...) (field-ids #'sid (attribute f.id) "~a-~a")
+       #:with (mut ...) (field-ids #'sid (attribute f.id) "set-~a-~a!")
+       #:with (field-name ...) (map (lambda (f) (symbol->string (syntax-e f))) (attribute f.id))
+       #:with (field-spec ...) (map (field-access-spec access) (attribute f.id))
+       #:with rebuild-field (field-access-rebuild access)
+       #:with binder (field-access-binder access)
+       #:with (binding ...)
+       (for/list ([fid (in-list (attribute f.id))]
+                  [a (in-list (attribute acc))]
+                  [m (in-list (attribute mut))])
+         ((field-access-binding access) #'name fid a m))
+       #:with formals #'(~? o.init.formals ((~@ f.decl ...) ...))
+       #:with (absent ...)
+       (if (attribute o.init)
+           (remove* (attribute o.init.id) (attribute f.id) bound-identifier=?)
+           '())
+       #:with ((~var fe (entry #'(binder (binding ...)))) ...)
+       #'(~? ((0 name fwd fwd-body ...)) ())
+       #:with ((~var me (entry #'(binder (binding ...)))) ...)
+       #'(((~? hidden 0) m-name m-formals m-body ...) ...)
        #:fail-when (check-duplicates (attribute me.who) eq? #:key syntax-e)
        "a method is defined twice"
-       #:with sid struct-id
-       #:with sid? (format-id struct-id "~a?" struct-id)
-       #:with name? (format-id #'name "~a?" #'name)
-       #:with (field-name ...) names
-       #:with (field-acc ...) accs
        #:with forward-expr (match (attribute fe.proc)
                              [(list p) p]
                              ['() #'(no-forward 'name)])
-       #:with (field-spec ...) (if star? #'([field #:mutable] ...) #'(field ...))
-       #:with parent (if star? #'registry* #'registry)
-       #:with (method-def ...)
-       (if star? #'((define methods (hasheq (~@ 'me.who me.proc) ...))) #'())
-       #:with (prop-clause ...)
-       (if star?
-           #'(#:property prop:layer-methods methods
-              (~@ #:property prop prop-val) ...)
-           #'())
-       #:with (moved-clause ...)
-       (if (null? (attribute moved-body))
+       #:with (methods-property ...)
+       (if (null? (attribute me.who))
            #'()
-           #`(#:property prop:on-move
-              (lambda (self) #,(bind #'(let () moved-body ...)))))
-       #:with (ctor-extra ...)
-       (if star? #'((registered-names '(field-name ...) (list field ...))) #'())
-       #:with (rebuild-extra ...) (if star? #'((registry*-fixed self)) #'())
-       #:with rebuild-classify
-       (if star?
-           #'(classify-kept (registry*-fixed self) '(field-name ...) (list field ...))
-           #'(classify '(field-name ...) (list field ...)))
-       #:with export (contract-export stx #'name #'name? ctc pred)
+           #'(#:property prop:layer-methods (hasheq (~@ 'me.who me.proc) ...)))
+       #:with (moved-property ...)
+       #'(~? (#:property prop:on-move
+              (lambda (self) (binder (binding ...) (let () o.moved-body ...))))
+             ())
+       #:with name? (format-id #'name "~a?" #'name)
+       #:with export (contract-export stx #'name #'name? (attribute o.ctc) (attribute o.pred))
        #'(begin
            fe.checker-def ... ...
            me.checker-def ... ...
-           method-def ...
-           (struct sid parent (field-spec ...)
-             #:reflection-name reflect-name
+           (struct sid registry (field-spec ...)
+             #:reflection-name (~? o.reflect 'name)
              #:property prop:rebuilder
              (lambda (self child tensor) (rebuild self child tensor))
-             moved-clause ...
-             prop-clause ...)
+             moved-property ...
+             methods-property ...
+             (~@ #:property prop prop-val) ...)
            (define name? sid?)
            (define (rebuild self child tensor)
-             (let ([field (rebuilt-value 'field-name (field-acc self) child tensor)]
-                   ...)
-               (let-values ([(params buffers children) rebuild-classify])
-                 (check-names
-                  'name
-                  (sid forward-proc params buffers children (registry-mode self)
-                       rebuild-extra ... field ...)))))
+             (assemble 'name sid forward-proc (registry-mode self) '(field-name ...)
+                       (list (rebuild-field 'field-name (acc self) child tensor) ...)))
            (define forward-proc forward-expr)
            (define (name . formals)
              (let ([absent #f] ...)
-               assign ...
-               (let-values ([(params buffers children)
-                             (classify '(field-name ...) (list field ...))])
-                 (check-names
-                  'name
-                  (sid forward-proc params buffers children 'train
-                       ctor-extra ... field ...)))))
+               (~? (~@ o.init-body ...))
+               (assemble 'name sid forward-proc 'train '(field-name ...) (list f.id ...))))
            export)])))
 
 (define-syntax (define-layer stx)
   (syntax-parse stx
-    [(_ name:id (field:layer-field ...)
-        (~alt (~optional (~seq #:init init:init-formals init-body:expr ...))
-              (~optional (~seq #:reflection-name reflect:expr))
-              (~optional (~seq #:contract ctc:expr))
-              (~optional (~seq #:predicate pred:id))
-              (~optional (~seq #:on-move moved-body:expr ...+))) ...
-        #:forward fwd:entry-formals body:expr ...+)
-     #:fail-when
-     (unbare-field (attribute init) (attribute field.id) (attribute field.bare?))
-     unbare-message
-     #:with (formals (absent ...))
-     (init-parts (attribute field.id) (attribute field.decl)
-                 (attribute init.formals) (attribute init.id))
-     (layer-expansion
-      stx #f (attribute ctc) (attribute pred)
-      #'(name formals (field.id ...) (~? (init-body ...) ()) (absent ...)
-              (~? reflect 'name) (~? (moved-body ...) ()) ((fwd body ...)) () ()))]))
+    [(_ _:id _ (~alt (~eh-var o layer-options)) ... #:forward _:entry-formals _:expr ...+)
+     (layer-expansion stx immutable-fields)]))
 
 (define-syntax (define-layer* stx)
-  (syntax-parse stx
-    [(_ name:id (field:layer-field ...)
-        (~alt (~optional (~seq #:init init:init-formals init-body:expr ...))
-              (~optional (~seq #:reflection-name reflect:expr))
-              (~optional (~seq #:contract ctc:expr))
-              (~optional (~seq #:predicate pred:id))
-              (~optional (~seq #:on-move moved-body:expr ...+))
-              (~optional (~seq #:forward fwd:entry-formals fwd-body:expr ...+))
-              (~seq #:method (m-name:id . m-formals:entry-formals) m-body:expr ...+)
-              (~seq #:property prop:expr prop-val:expr)) ...)
-     #:fail-when
-     (unbare-field (attribute init) (attribute field.id) (attribute field.bare?))
-     unbare-message
-     #:with (formals (absent ...))
-     (init-parts (attribute field.id) (attribute field.decl)
-                 (attribute init.formals) (attribute init.id))
-     (layer-expansion
-      stx #t (attribute ctc) (attribute pred)
-      #'(name formals (field.id ...) (~? (init-body ...) ()) (absent ...)
-              (~? reflect 'name) (~? (moved-body ...) ())
-              (~? ((fwd fwd-body ...)) ())
-              ((m-name m-formals m-body ...) ...) ((prop prop-val) ...)))]))
+  (layer-expansion stx mutable-fields))

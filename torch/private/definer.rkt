@@ -3,15 +3,21 @@
 (require (for-template racket/base
                        (only-in racket/contract/base -> any/c contract-out))
          (only-in racket/syntax format-id)
+         (only-in syntax/parse/experimental/eh define-eh-alternative-set)
          ;; whole-module on purpose: the syntax classes need bindings only-in
          ;; would strip
          syntax/parse/pre)
 
 (provide contract-export
          ctor-formal
+         entry-formals
+         field-of
          forward-formal
          forward-keyword
-         init-formals)
+         init-formals
+         layer-field
+         layer-fields
+         layer-options)
 
 (define (predicate-name name)
   (define downcased
@@ -91,3 +97,48 @@
   (pattern (f:ctor-formal ...)
     #:with (id ...) #'(f.id ...)
     #:with formals #'((~@ f.decl ...) ...)))
+
+(define-splicing-syntax-class layer-field
+  #:description "a layer field"
+  #:attributes (id bare? (decl 1))
+  (pattern f:ctor-formal
+    #:fail-when
+    (and (regexp-match? #rx"[.]" (symbol->string (syntax-e #'f.id))) #'f.id)
+    "a field name may not contain a dot; it is one state-dict segment"
+    #:with id #'f.id
+    #:attr bare? (attribute f.bare?)
+    #:with (decl ...) #'(f.decl ...)))
+
+(define-syntax-class (layer-fields init-clause)
+  #:description "a field list"
+  #:attributes ((id 1) (decl 2))
+  (pattern (f:layer-field ...)
+    #:fail-when
+    (and init-clause
+         (for/or ([id (in-list (attribute f.id))] [bare? (in-list (attribute f.bare?))])
+           (and (not bare?) id)))
+    (format "with ~a, a field is a bare identifier; defaults and keywords belong to the ~a formals"
+            init-clause init-clause)
+    #:with (id ...) #'(f.id ...)
+    #:with ((decl ...) ...) #'((f.decl ...) ...)))
+
+(define-syntax-class (field-of fields type-name)
+  #:description "a field name"
+  (pattern h:id
+    #:fail-unless (memq (syntax-e #'h) fields)
+    (format "~a is not a field of ~a" (syntax-e #'h) type-name)))
+
+(define-eh-alternative-set layer-options
+  (pattern (~optional (~seq #:init init:init-formals init-body:expr ...)))
+  (pattern (~optional (~seq #:reflection-name reflect:expr)))
+  (pattern (~optional (~seq #:contract ctc:expr)))
+  (pattern (~optional (~seq #:predicate pred:id)))
+  (pattern (~optional (~seq #:on-move moved-body:expr ...+))))
+
+(define-syntax-class entry-formals
+  #:attributes ((id 1) (ctc 1) (kw-decl 1) restarg)
+  (pattern ((~alt input:forward-formal kw-input:forward-keyword) ...
+            . (~or* () restarg:id))
+    #:with (id ...) #'(input.id ...)
+    #:attr (ctc 1) (attribute input.ctc)
+    #:with (kw-decl ...) #'((~@ kw-input.decl ...) ...)))
