@@ -170,7 +170,8 @@ described with @racket[zeros]. The @racket[value] given to
 @racket[full-like] must satisfy @racket[fill-value/c] at the dtype it
 builds, so @racket[(full-like (zeros 2) 1e300)] is refused.
 @racket[randn-like] and @racket[rand-like] draw from @racket[generator]
-or else from @racket[(current-generator)]. The noise a
+or else from @racket[(current-generator)], which must live on the device
+of the tensor they build, as for @racket[rand]. The noise a
 diffusion step adds is @racket[(randn-like x0)], so it lands where the
 images live.
 

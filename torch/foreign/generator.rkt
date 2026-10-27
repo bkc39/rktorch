@@ -2,11 +2,9 @@
 
 (require (only-in ffi/unsafe prop:cpointer)
          (only-in racket/contract/base
-                  -> ->* any/c flat-contract? flat-named-contract integer-in
+                  -> ->* flat-contract? flat-named-contract integer-in
                   or/c parameter/c)
-         (only-in "../private/contract.rkt"
-                  define/checked-out
-                  define/contract-out)
+         (only-in "../private/contract.rkt" define/contract-out)
          (only-in "device-type.rkt" device-type device/c device?)
          (only-in "error.rkt" check-handle check-ok)
          (only-in "ops.rkt"
@@ -14,15 +12,14 @@
                   device->type+index
                   type+index->device)
          (only-in "raw/random.rkt"
-                  Generator?
                   current-generator/raw
                   tr-generator-device/raw
                   tr-generator-new-on/raw))
 
-(provide generator-on?)
+(provide generator?
+         generator-on?)
 
-(struct generator-impl (handle)
-  #:reflection-name 'generator
+(struct generator (handle)
   #:property prop:cpointer 0
   #:property prop:custom-write
   (lambda (_g port _mode) (write-string "#<generator>" port)))
@@ -33,11 +30,8 @@
 (define/contract-out (make-generator seed #:device [device 'cpu]) ;; noqa
   (->* [seed/c] [#:device device/c] generator?)
   (define-values (type index) (device->type+index device))
-  (generator-impl
+  (generator
    (check-handle 'make-generator (tr-generator-new-on/raw seed type index))))
-
-(define/checked-out (generator? v) (-> any/c boolean?) ;; noqa
-  (and (generator-impl? v) (Generator? (generator-impl-handle v))))
 
 (define/contract-out (generator-device g) (-> generator? device?) ;; noqa
   (define-values (rc type index) (tr-generator-device/raw g))
@@ -56,6 +50,10 @@
 
 (define (generator-on? generator target)
   (define effective (or generator (current-generator/raw)))
-  (define-values (type index) (device->type+index (or target (default-device))))
-  (or (not effective)
-      (equal? (generator-device effective) (type+index->device type index))))
+  (cond
+    [(not effective) #t]
+    [else
+     (define-values (type index)
+       (device->type+index (or target (default-device))))
+     (equal? (generator-device effective)
+             (type+index->device type index))]))

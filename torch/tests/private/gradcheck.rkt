@@ -15,7 +15,8 @@
 (define (shaped-like x values)
   (apply reshape (tensor (list->f64vector values)) (tensor-shape x)))
 
-(define (gradcheck f inputs #:eps [eps 1e-6] #:atol [atol 1e-5] #:rtol [rtol 1e-3])
+(define (gradcheck f inputs
+                   #:eps [eps 1e-6] #:atol [atol 1e-5] #:rtol [rtol 1e-3])
   (define xs (map (lambda (x) (~> x detach (to-dtype 'float64))) inputs))
   (define w (randn (tensor-shape (apply f xs)) #:dtype 'float64
                    #:generator (make-generator 0)))
@@ -25,11 +26,12 @@
   (backward! (loss leaves))
   (for/and ([x (in-list xs)] [leaf (in-list leaves)] [k (in-naturals)])
     (define entries (flat x))
-    (for/and ([analytic (in-list (flat (grad leaf)))] [i (in-naturals)])
+    (for/and ([analytic (in-list (flat (grad leaf)))]
+              [entry (in-list entries)]
+              [i (in-naturals)])
       (define (moved delta)
-        (define entry (+ (list-ref entries i) delta))
         (~> xs
-            (list-set k (shaped-like x (list-set entries i entry)))
+            (list-set k (shaped-like x (list-set entries i (+ entry delta))))
             loss
             item))
       (define numeric (/ (- (moved eps) (moved (- eps))) (* 2 eps)))

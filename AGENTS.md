@@ -89,15 +89,16 @@ with `backward!` outside the form as PyTorch recommends). From
   `ones-like` / `full-like` / `randn-like` / `rand-like` inherit the
   reference's shape, device, dtype unless overridden (#56); `arange` stays
   float32 by default (its int64 inference is the open remainder of #56);
-  `make-generator` / `generator?` / `randperm` / `draw-seed` — a CPU
+  `make-generator` / `generator?` / `randperm` / `draw-seed` — a
   `torch.Generator` with its own stream, the permutation and the int64
   seed word drawn from it (or the global stream), for loaders (#87)
 - device generators (`torch/foreign/generator.rkt`, #389):
   `make-generator #:device` is `torch.Generator(device)`, `generator-device`
   names its device and `cpu-generator/c` holds for one on the CPU; `rand`,
-  `randn` and `multinomial` blame a caller whose effective generator (the
+  `randn`, `rand-like`, `randn-like`, `multinomial` and `randperm` (whose
+  tensor is on the CPU) blame a caller whose effective generator (the
   argument, else `current-generator`) is on another device than the
-  tensor; `randperm`, `dataloader` and the augmentations of
+  tensor; `dataloader` and the augmentations of
   `torch/vision/transforms.rkt` take only a CPU generator
   (`tr_generator_new_on`, `tr_generator_device`)
 - iteration (`torch/foreign/sequences.rkt`, #199): `in-tensor` (the

@@ -1,7 +1,5 @@
 #lang racket/base
 
-;; Every draw stays in the order of the twin, torch/tests/python/grid_sample.py.
-
 (module+ test
   (require rackunit
            (only-in racket/match match-define)
@@ -88,7 +86,7 @@
     [(not (python-torch-available?))
      (printf "[grid-sample-parity-test] skipped: python3 `torch` ~a\n"
              "not available (run inside `nix develop`)")]
-    [else
+    [(and (cuda-available?) (python-cuda-available?))
      (check-twin 'cpu 1e-5)
-     (when (and (cuda-available?) (python-cuda-available?))
-       (check-twin 'cuda 1e-4))]))
+     (check-twin 'cuda 1e-4)]
+    [else (check-twin 'cpu 1e-5)]))

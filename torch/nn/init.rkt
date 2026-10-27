@@ -1,12 +1,13 @@
 #lang racket/base
 
-(require (only-in racket/contract/base
-                  -> ->* ->i and/c listof unsupplied-arg?)
-         (only-in racket/math pi)
+(require (only-in racket/contract/base -> ->* ->i and/c listof)
+         (only-in racket/match match-define)
+         (only-in racket/math pi sqr)
          (only-in threading ~>)
-         (only-in "../foreign.rkt" * + clamp randn tensor? uniform! zeros)
-         (only-in "../generated.rkt" erfinv)
-         (only-in "../private/contract.rkt" define/checked-out))
+         (only-in "../foreign.rkt"
+                  * + - / > clamp item log ne randn sum tensor? uniform! where
+                  zeros)
+         (only-in "../private/contract.rkt" define/checked-out supplied-or))
 
 (provide uniform-bias)
 
@@ -42,10 +43,10 @@
 
 (define (erf-series x)
   (define x² (* x x))
-  (let loop ([n 0] [term x] [sum 0.0])
-    (define next (+ sum (/ term (+ (* 2 n) 1))))
-    (if (= next sum)
-        (* (/ 2.0 (sqrt pi)) sum)
+  (let loop ([n 0] [term x] [acc 0.0])
+    (define next (+ acc (/ term (+ (* 2 n) 1))))
+    (if (= next acc)
+        (* (/ 2.0 (sqrt pi)) acc)
         (loop (add1 n) (/ (* term (- x²)) (add1 n)) next))))
 
 (define (erfc-fraction x)
@@ -60,8 +61,33 @@
     [(<= x 2.0) (erf-series x)]
     [else (- 1.0 (erfc-fraction x))]))
 
-(define (supplied-or v default)
-  (if (unsupplied-arg? v) default v))
+(define (any? mask)
+  (~> mask sum item positive?))
+
+(define (normal-draw dims mean std)
+  (~> (apply randn dims) (* std) (+ mean)))
+
+(define (redrawn-normal dims mean std a b)
+  (let loop ([result (normal-draw dims mean std)])
+    (define outside (ne result (clamp result #:min a #:max b)))
+    (cond
+      [(any? outside) (loop (where outside (normal-draw dims mean std) result))]
+      [else result])))
+
+(define (accepted-uniform dims mean std a b)
+  (define log-peak (~> (min mean b) (max a) (- mean) (/ std) sqr (* -0.5)))
+  (define (rejected candidates)
+    (define z (/ (- candidates mean) std))
+    (define log-density (- (* z z -0.5) log-peak))
+    (~> (uniform-init dims 0.0 1.0) log (> log-density)))
+  (define drawn (uniform-init dims a b))
+  (let loop ([result drawn] [pending (rejected drawn)])
+    (cond
+      [(any? pending)
+       (define candidates (uniform-init dims a b))
+       (loop (where pending candidates result)
+             (where pending (rejected candidates) pending))]
+      [else result])))
 
 (define/checked-out (trunc-normal-init dims ;; noqa
                                        #:mean [mean 0.0]
@@ -78,8 +104,7 @@
        [result tensor?])
   (define (cdf v)
     (/ (+ 1.0 (erf (/ (- v mean) std (sqrt 2.0)))) 2.0))
-  (~> (uniform-init dims (- (* 2.0 (cdf a)) 1.0) (- (* 2.0 (cdf b)) 1.0))
-      erfinv
-      (* (* std (sqrt 2.0)))
-      (+ (exact->inexact mean))
-      (clamp #:min a #:max b)))
+  (match-define (list μ σ lo hi) (map exact->inexact (list mean std a b)))
+  (cond
+    [(> (- (cdf b) (cdf a)) 0.3) (redrawn-normal dims μ σ lo hi)]
+    [else (accepted-uniform dims μ σ lo hi)]))

@@ -326,10 +326,11 @@ A natural number below @racket[(expt 2 63)], the native size range.
 }
 
 @defproc[(randperm [n size/c]
-                   [#:generator generator (or/c cpu-generator/c #f) #f])
+                   [#:generator generator (or/c generator? #f) #f])
          tensor?]{
 An int64 permutation of @racket[0] to @racket[n-1] on the CPU, drawn from
-@racket[generator] or else from @racket[(current-generator)], as @tt{torch.randperm}. Drawn
+@racket[generator] or else from @racket[(current-generator)], as
+@tt{torch.randperm}; that generator must live on the CPU. Drawn
 on the CPU whatever the default device, as PyTorch's sampler does, so a
 permutation replays across devices.
 }

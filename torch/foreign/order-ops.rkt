@@ -6,14 +6,11 @@
                   unsupplied-arg?)
          (prefix-in g: (only-in "../generated.rkt"
                                 argsort multinomial sort-tensor topk))
-         (only-in "../private/contract.rkt" define/contract-out)
+         (only-in "../private/contract.rkt" define/contract-out supplied-or)
          (only-in "contracts.rkt" index/c)
          (only-in "generator.rkt" generator-on? generator?)
          (only-in "ops.rkt" tensor-device tensor-shape)
          (only-in "structs.rkt" tensor?))
-
-(define (supplied v default)
-  (if (unsupplied-arg? v) default v))
 
 (define sort/c
   (->i ([v (or/c tensor? list?)])
@@ -57,7 +54,7 @@
         #:largest? [largest? boolean?]
         #:sorted? [sorted? boolean?])
        #:pre/name (t k dim) "k is at most the length of dim"
-       (let ([n (dim-length t (supplied dim -1))])
+       (let ([n (dim-length t (supplied-or dim -1))])
          (or (not n) (<= k n)))
        (values [top tensor?] [indices tensor?])))
 
@@ -81,6 +78,6 @@
         #:generator [generator (or/c generator? #f)])
        #:pre/name (probabilities generator)
        "the generator lives on the input's device"
-       (generator-on? (supplied generator #f) (tensor-device probabilities))
+       (generator-on? (supplied-or generator) (tensor-device probabilities))
        [result tensor?])
   (g:multinomial probabilities num-samples replacement? generator))

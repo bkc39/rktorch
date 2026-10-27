@@ -2,13 +2,14 @@
 
 (module+ test
   (require rackunit
-           (only-in racket/contract exn:fail:contract:blame?)
            (only-in racket/match match-define)
            (only-in threading ~>)
            (only-in "../main.rkt"
-                    * - affine-grid cuda-available? cuda-device flip grid-sample
+                    * - affine-grid cuda-available? cuda-device detach flip
+                    grid-sample
                     make-generator rand randn reshape tensor tensor->list
                     tensor-shape to to-dtype upsample-bicubic2d)
+           (only-in "private/blame.rkt" blames-caller?)
            (only-in "private/gradcheck.rkt" gradcheck)
            (only-in "private/within.rkt" bounded-test))
 
@@ -36,7 +37,8 @@
                     [v (in-list (list x y))])
           v))
       (check-equal? (tensor-shape grid) '(2 3 5 2))
-      (check-equal? (tensor->list grid) (append mesh mesh) (format "~a" dtype))))
+      (check-equal? (tensor->list grid) (append mesh mesh)
+                    (format "~a" dtype))))
 
   (bounded-test "G2: nearest sampling of the identity and the mirror is exact"
     (for ([dtype (in-list '(float32 float64))])
@@ -64,7 +66,11 @@
                   (list (randn 1 2 4 5 #:dtype 'float64) (inner-grid 1 3 3 2)))
        (format "~a ~a" mode padding))))
 
-  (bounded-test "G3: affine-grid's and upsample-bicubic2d's gradients match finite differences"
+  (bounded-test "gradcheck refuses a gradient that misses a path"
+    (check-false (gradcheck (lambda (x) (* (detach x) x))
+                            (list (randn 3 #:dtype 'float64)))))
+
+  (bounded-test "G3: affine-grid and upsample-bicubic2d pass gradcheck"
     (check-true (gradcheck (lambda (theta) (affine-grid theta '(2 1 3 4)))
                            (list (randn 2 2 3 #:dtype 'float64)))
                 "affine-grid")
@@ -79,33 +85,38 @@
                     (tensor->list x)
                     (format "~a" dtype))))
 
-  (define (blames-caller? e)
-    (and (exn:fail:contract:blame? e)
-         (regexp-match? #rx"blaming: [^\n]*grid-sample-test" (exn-message e))))
-
   (define x (randn 2 3 4 5))
   (define grid (randn 2 6 7 2))
   (define theta (randn 2 2 3))
 
   (define blamed
-    (list (list "input of rank 3" (lambda () (grid-sample (randn 3 4 5) grid)))
-          (list "grid ending in 3" (lambda () (grid-sample x (randn 2 6 7 3))))
-          (list "grid batch differs" (lambda () (grid-sample x (randn 3 6 7 2))))
+    (list (list "input of rank 3"
+                (lambda () (grid-sample (randn 3 4 5) grid)))
+          (list "grid ending in 3"
+                (lambda () (grid-sample x (randn 2 6 7 3))))
+          (list "grid batch differs"
+                (lambda () (grid-sample x (randn 3 6 7 2))))
           (list "float64 grid, float32 input"
                 (lambda () (grid-sample x (to-dtype grid 'float64))))
           (list "mode 'linear" (lambda () (grid-sample x grid #:mode 'linear)))
           (list "uint8 input"
                 (lambda () (grid-sample (to-dtype x 'uint8) grid)))
-          (list "theta of 3 x 3" (lambda () (affine-grid (randn 2 3 3) '(2 3 4 5))))
+          (list "theta of 3 x 3"
+                (lambda () (affine-grid (randn 2 3 3) '(2 3 4 5))))
           (list "size of length 3" (lambda () (affine-grid theta '(2 4 5))))
-          (list "size batch differs" (lambda () (affine-grid theta '(3 3 4 5))))))
+          (list "size batch differs"
+                (lambda () (affine-grid theta '(3 3 4 5))))
+          (list "upsample-bicubic2d size of length 3"
+                (lambda () (upsample-bicubic2d x '(4 5 6))))
+          (list "upsample-bicubic2d uint8 input"
+                (lambda () (upsample-bicubic2d (to-dtype x 'uint8) '(4 5))))))
 
   (bounded-test "G5: malformed arguments blame the caller"
     (for ([row (in-list blamed)])
       (match-define (list label thunk) row)
-      (check-exn blames-caller? thunk label)))
+      (check-exn (blames-caller? "grid-sample-test") thunk label)))
 
   (when (cuda-available?)
     (bounded-test "G5: input and grid on different devices blame the caller"
-      (check-exn blames-caller?
+      (check-exn (blames-caller? "grid-sample-test")
                  (lambda () (grid-sample x (to grid (cuda-device))))))))
