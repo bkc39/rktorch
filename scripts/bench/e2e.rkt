@@ -5,96 +5,27 @@
          (only-in racket/format ~a)
          (only-in racket/list remove-duplicates)
          (only-in racket/match match match-define)
+         (only-in racket/path path-only)
          (only-in racket/runtime-path #%datum define-runtime-path)
          (only-in racket/string string-join)
          (only-in threading ~>)
          (only-in "child.rkt" python-runner? run-child)
+         (only-in "e2e-examples.rkt"
+                  example-env example-epochs-var example-full example-name example-optimizer
+                  example-runner example-short example-warmup)
          (only-in "harness.rkt" bench-case with-temporary-path)
          (only-in "training.rkt" analyze-steps read-steps recorded-run))
 
-(provide (struct-out example)
-         (struct-out exn:fail:user:e2e)
-         examples
-         twins
-         find-examples
-         example-env
+(provide (struct-out exn:fail:user:e2e)
          control-variables
          runner-reads
          merged-settings
          settings->jsexpr
          cache-env
-         example-runner
          run-example
          e2e-cases)
 
-(define-runtime-path examples-dir "../../examples/test")
-(define-runtime-path workloads-dir "workloads")
-(define-runtime-path python-dir "python")
-
-(struct example (name short full epochs-var warmup optimizer) #:transparent)
-
 (struct exn:fail:user:e2e exn:fail:user (example variant exit-code meta))
-
-(define examples
-  (list (example "05-mnist" '(("EPOCHS" . 3)) '(("EPOCHS" . 3)) "EPOCHS" 0 'first)
-        (example "06-gpt" '(("STEPS" . 300)) '(("STEPS" . 2000)) #f 50 'first)
-        (example "08-diffusion" '(("EPOCHS" . 2)) '(("EPOCHS" . 10)) "EPOCHS" 0 'first)
-        (example "09-resnet" '(("EPOCHS" . 3)) '(("EPOCHS" . 30)) "EPOCHS" 0 'first)
-        (example "10-dcgan" '(("EPOCHS" . 3)) '(("EPOCHS" . 5)) "EPOCHS" 0 'first)
-        (example "11-vae" '(("EPOCHS" . 3)) '(("EPOCHS" . 10)) "EPOCHS" 0 'first)
-        (example "12-char-rnn" '(("EPOCHS" . 3)) '(("EPOCHS" . 30)) "EPOCHS" 0 'first)
-        (example "13-translation" '(("EPOCHS" . 3)) '(("EPOCHS" . 30)) "EPOCHS" 0 'first)
-        (example "15-finetune"
-                 '(("FEATURE_EPOCHS" . 0) ("FINETUNE_EPOCHS" . 3))
-                 '(("FEATURE_EPOCHS" . 0) ("FINETUNE_EPOCHS" . 15))
-                 "FINETUNE_EPOCHS" 0 'last)
-        (example "16-style-transfer" '(("STEPS" . 100)) '(("STEPS" . 1000)) #f 20 'first)
-        (example "loader" '(("EPOCHS" . 2)) '(("EPOCHS" . 5)) "EPOCHS" 0 'first)
-        (example "17-workers" '(("EPOCHS" . 2)) '(("EPOCHS" . 3)) "EPOCHS" 0 'first)
-        (example "cifar-loader" '(("EPOCHS" . 2) ("BATCH" . 128)) '(("EPOCHS" . 2) ("BATCH" . 128))
-                 "EPOCHS" 0 'first)
-        (example "cifar-resnet" '(("EPOCHS" . 2) ("BATCH" . 128)) '(("EPOCHS" . 3) ("BATCH" . 128))
-                 "EPOCHS" 0 'first)))
-
-(define (twin name-of-example script)
-  (define ex (for/first ([ex (in-list examples)] #:when (equal? (example-name ex) name-of-example))
-               ex))
-  (define per-param '(("OPTIMIZER" . "per-param")))
-  (define name (string-append "py-" (example-name ex)))
-  (list (cons (struct-copy example ex [name name]) script)
-        (cons (struct-copy example ex
-                           [name (string-append name "-per-param")]
-                           [short (append (example-short ex) per-param)]
-                           [full (append (example-full ex) per-param)])
-              script)))
-
-(define twin-runners
-  (append (twin "05-mnist" "mnist.py")
-          (twin "09-resnet" "resnet.py")
-          (twin "17-workers" "workers.py")
-          (map car (list (twin "cifar-loader" "cifar_loader.py")
-                         (twin "cifar-resnet" "cifar_resnet.py")))))
-
-(define twins (map car twin-runners))
-
-(define runners
-  (for/fold ([h (hash "loader" (build-path workloads-dir "loader.rkt")
-                      "17-workers" (build-path workloads-dir "workers.rkt")
-                      "cifar-loader" (build-path workloads-dir "cifar-loader.rkt")
-                      "cifar-resnet" (build-path workloads-dir "cifar-resnet.rkt"))])
-            ([t (in-list twin-runners)])
-    (hash-set h (example-name (car t)) (build-path python-dir (cdr t)))))
-
-(define (find-examples names)
-  (for/list ([n (in-list names)])
-    (or (for/first ([ex (in-sequences (in-list examples) (in-list twins))]
-                    #:when (regexp-match? (regexp (string-append "^" (regexp-quote n)))
-                                          (example-name ex)))
-          ex)
-        (raise-user-error 'e2e "no example named ~a" n))))
-
-(define (example-env ex scale)
-  (if (eq? scale 'full) (example-full ex) (example-short ex)))
 
 (define cache-variables
   '(("RKTORCH_MNIST_DIR" . "mnist") ("RKTORCH_CIFAR10_DIR" . "cifar10")
@@ -133,14 +64,27 @@
 (define recorder-variables
   '("RKTORCH_BENCH_COLLECT_AT_TROUGHS" "RKTORCH_BENCH_COLLECT_BUDGET"))
 
+(define (runner-sources runner)
+  (define text (file->string runner))
+  (define siblings
+    (for*/list ([name (in-list (regexp-match* #px"\\(only-in \"([a-z0-9-]+[.]rkt)\"" text
+                                              #:match-select cadr))]
+                [path (in-value (~> runner path->complete-path path-only (build-path name)))]
+                #:when (and (not (python-runner? runner)) (file-exists? path)))
+      (file->string path)))
+  (cons text siblings))
+
 (define (control-variables ex runner)
   (remove-duplicates
    (append (map car (example-short ex))
            (map car (example-full ex))
            recorder-variables
-           (regexp-match* #px"(?:\\((?:env-number|getenv) |env_(?:number|text)\\()\"([^\"]+)\""
-                          (file->string runner)
-                          #:match-select cadr))))
+           (for*/list ([text (in-list (runner-sources runner))]
+                       [name (in-list (regexp-match*
+                                       #px"(?:\\((?:env-number|getenv) |env_(?:number|text)\\()\"([^\"]+)\""
+                                       text
+                                       #:match-select cadr))])
+             name))))
 
 (define (runner-reads ex runner)
   (for/list ([name (in-list (control-variables ex runner))]
@@ -148,10 +92,6 @@
     name))
 
 (define time-limits (hasheq 'short 3600 'full 43200))
-
-(define (example-runner ex)
-  (hash-ref runners (example-name ex)
-            (lambda () (build-path examples-dir (string-append (example-name ex) ".rkt")))))
 
 (define (step-hook? torch-dir)
   (or (file-exists? (build-path torch-dir "private" "step-log.rkt"))
@@ -252,6 +192,7 @@
            (only-in racket/port open-output-nowhere)
            (only-in racket/system system*)
            rackunit
+           (only-in "e2e-examples.rkt" example examples find-examples)
            (only-in "fixtures/pre-hook-torch.rkt" call-with-pre-hook-torch)
            (only-in "harness.rkt" measure result-name result-per-call)
            (only-in "shim.rkt" torch-dir))
@@ -298,19 +239,6 @@
     (match-define (list _child pid) (call-with-input-file pid-file read))
     pid)
 
-  (test-case "examples are found by their number"
-    (check-equal? (map example-name (find-examples '("05" "16")))
-                  '("05-mnist" "16-style-transfer"))
-    (check-exn #rx"no example named 99" (lambda () (find-examples '("99"))))
-    (check-true (file-exists? (example-runner (car (find-examples '("loader")))))
-                "a workload's runner is found in its own directory")
-    (check-equal? (example-env (car examples) 'full) '(("EPOCHS" . 3)))
-    (check-equal? (cdr (assoc "STEPS" (example-env (cadr examples) 'short))) 300)
-    (check-equal? (map example-name (find-examples '("py-05" "17")))
-                  '("py-05-mnist" "17-workers"))
-    (for ([ex (in-list (append examples twins))])
-      (check-true (file-exists? (example-runner ex)) (example-name ex))))
-
   (test-case "a PyTorch twin's settings are the ones its script reads"
     (define twin (car (find-examples '("py-17"))))
     (check-equal? (control-variables twin (example-runner twin))
@@ -322,6 +250,15 @@
     (check-equal? (example-name per-param) "py-17-workers-per-param")
     (check-equal? (cdr (assoc "OPTIMIZER" (example-env per-param 'short))) "per-param")
     (check-equal? (example-runner per-param) (example-runner twin)))
+
+  (test-case "a workload's settings include those its sibling modules read for it"
+    (define loader (car (find-examples '("cifar-loader"))))
+    (check-equal? (control-variables loader (example-runner loader))
+                  (append '("EPOCHS" "BATCH") recorder-variables
+                          '("WORKERS" "PIPELINE" "DATASET" "PNG_DIGEST")))
+    (define twin (car (find-examples '("py-cifar-loader"))))
+    (check-equal? (runner-reads twin (example-runner twin))
+                  '("EPOCHS" "BATCH" "WORKERS" "PIPELINE" "DATASET" "PNG_DIGEST")))
 
   (test-case "a cache root sets every cache variable, inherited or not"
     (check-equal? (cache-env #f) '())

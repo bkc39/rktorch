@@ -107,8 +107,10 @@ stage_loader() {
         < <(variant "$p-$w" "PIPELINE=$p,WORKERS=$w${tree:+,$tree}" "$png_resnet_smoke")
     done
   done
-  bench e2e "${e2e[@]}" --cache "$cache" --only cifar-loader,py-cifar-loader "${loader[@]}"
-  bench e2e "${e2e[@]}" --cache "$cache" --only cifar-resnet,py-cifar-resnet "${resnet[@]}"
+  bench e2e "${e2e[@]}" --cache "$cache" --device cuda \
+    --only cifar-loader,py-cifar-loader "${loader[@]}"
+  bench e2e "${e2e[@]}" --cache "$cache" --device cuda \
+    --only cifar-resnet,py-cifar-resnet "${resnet[@]}"
 }
 
 stage_summary() {

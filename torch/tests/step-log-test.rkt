@@ -32,8 +32,11 @@
     (check-equal? (map (lambda (e) (vector-ref e 0)) events)
                   (map eq-hash-code opts))
     (for ([e (in-list events)])
+      (check-equal? (vector-length e) 4)
       (check-true (flonum? (vector-ref e 1)))
-      (check-true (exact-nonnegative-integer? (vector-ref e 2))))
+      (check-true (exact-nonnegative-integer? (vector-ref e 2)))
+      (check-true (flonum? (vector-ref e 3)))
+      (check-true (<= (vector-ref e 3) (vector-ref e 1)) "the host is done before the step ends"))
     (check-true (apply <= (map (lambda (e) (vector-ref e 1)) events))))
 
   (test-case "an empty first parameter neither breaks a logged step nor the device sync"

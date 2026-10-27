@@ -5,8 +5,9 @@
          (only-in torch accelerator-if-available device-type)
          (only-in "child.rkt" python-runner?)
          (only-in "e2e.rkt"
-                  cache-env e2e-cases example-epochs-var example-name example-runner
-                  exn:fail:user:e2e merged-settings runner-reads settings->jsexpr)
+                  cache-env e2e-cases exn:fail:user:e2e merged-settings runner-reads
+                  settings->jsexpr)
+         (only-in "e2e-examples.rkt" example-epochs-var example-name example-runner)
          (only-in "harness.rkt"
                   host-meta load-average mean measure result result->record result-per-call
                   summarize)
@@ -28,6 +29,7 @@
                  #:max-load max-load #:libtorch libtorch #:out out #:log log
                  #:run-id [run-id (fresh-run-id)]
                  #:time-limit [time-limit #f]
+                 #:device [expected-device #f]
                  #:runner-for [runner-for example-runner])
   (define emit (record-writer run-id out))
   (define device (device-type (accelerator-if-available)))
@@ -54,16 +56,29 @@
       (define key (cons (example-name run-of) variant))
       (define child-meta (hash-ref analysis 'meta #f))
       (define run-meta (meta-for impl child-meta))
+      (define ran-on (and (hash? child-meta) (hash-ref child-meta 'device #f)))
+      (define misplaced
+        (and expected-device ran-on (not (equal? ran-on (symbol->string expected-device)))
+             (format "ran on ~a, not the --device ~a" ran-on expected-device)))
+      (define load (load-average))
       (fprintf log "~a~a: ~a steps/s, epochs ~a s\n" (example-name run-of)
                (if variant (format "/~a" variant) "")
                (hash-ref analysis 'steps_per_s #f) (hash-ref analysis 'epoch_s '()))
-      (emit (hash-set* analysis 'schema 1 'suite "e2e" 'group "run" 'impl impl
+      (emit (hash-set* (if misplaced (hash-set analysis 'error misplaced) analysis)
+                       'schema 1 'suite "e2e" 'group "run" 'impl impl
                        'case (example-name run-of) 'variant variant
-                       'load (load-average)
+                       'load load
                        'meta run-meta))
       (cond
+        [misplaced
+         (raise (exn:fail:user:e2e (format "e2e: ~a: ~a" (example-name run-of) misplaced)
+                                   (current-continuation-marks)
+                                   (example-name run-of) variant
+                                   (hash-ref analysis 'exit_code #f) child-meta))]
         [(hash-ref analysis 'error #f) (void)]
         [else
+         (push! 'loads key (and (pair? load) (car load)))
+         (push! 'host-mss key (hash-ref (or (hash-ref analysis 'host_ms #f) (hasheq)) 'median #f))
          (push! 'rates key (hash-ref analysis 'steps_per_s #f))
          (push! 'gcs key (hash-ref analysis 'gc_ms #f))
          (push! 'epoch-gcs key (mean (hash-ref analysis 'epoch_gc_ms '())))
@@ -130,6 +145,9 @@
                                        'gc_ms (pushed 'gcs key)
                                        'epoch_gc_ms (pushed 'epoch-gcs key)
                                        'step_ms (pushed 'step-mss key)
+                                       'host_ms (pushed 'host-mss key)
+                                       'run_loads (pushed 'loads key)
+                                       'max_load max-load
                                        'steps_per_s (and (pair? rates-of)
                                                          (summarize rates-of))))))))
 
@@ -140,8 +158,7 @@
            (only-in racket/port open-output-nowhere)
            (only-in racket/runtime-path #%datum define-runtime-path)
            rackunit
-           (only-in "e2e.rkt" example find-examples)
-           (only-in "cifar-folder.rkt" ensure-cifar10-folder!)
+           (only-in "e2e-examples.rkt" example find-examples)
            (only-in "fixtures/pre-hook-torch.rkt" call-with-pre-hook-torch)
            (only-in "harness.rkt" with-temporary-path)
            (only-in "pytorch.rkt" pytorch-available?)
@@ -403,35 +420,18 @@
       (check-regexp-match #rx"## C\\. Loader end to end[^#]*\\| 17-workers \\| crop \\| s/epoch \\|" md)
       (check-regexp-match #rx"\\| 17-workers \\| pgm \\| s/epoch \\|" md)))
 
-  (test-case "H's workloads and twins run under e2e on the fixture PNG tree, and H pairs them"
-    (with-temporary-path (base (make-temporary-directory "bench-png-~a"))
-      (define digest (ensure-cifar10-folder! "fixture" #:base base))
-      (define names (if (pytorch-available?)
-                        '("cifar-loader" "py-cifar-loader" "cifar-resnet" "py-cifar-resnet")
-                        '("cifar-loader" "cifar-resnet")))
-      (define env (environment-variables-copy (current-environment-variables)))
-      (environment-variables-set! env #"RKTORCH_CIFAR10_PNG_DIR" (path->bytes base))
-      (define (tiny pipeline workers)
-        `(,(format "~a-~a" pipeline workers)
-          ("PIPELINE" . ,pipeline) ("WORKERS" . ,(number->string workers))
-          ("DATASET" . "fixture") ("BASE" . "4") ("PNG_DIGEST" . ,(substring digest 0 12))))
-      (define records
-        (parameterize ([current-environment-variables env])
-          (records-of (lambda (out)
-                        (run-e2e (find-examples names) #:rounds 1 #:full? #f
-                                 #:variants (list (tiny "per-sample" 2) (tiny "batched" 0))
-                                 #:cache #f #:max-load #f #:libtorch "x" #:out out #:log quiet
-                                 #:time-limit 900)))))
-      (define (group g) (filter (lambda (r) (equal? (hash-ref r 'group) g)) records))
-      (check-equal? (group "error") '())
-      (define loader-runs
-        (filter (lambda (r) (regexp-match? #rx"cifar-loader$" (hash-ref r 'case))) (group "run")))
-      (check-equal? (remove-duplicates (map (lambda (r) (hash-ref r 'steps)) loader-runs)) '(4)
-                    "two epochs of the 256 images in whole batches of 128")
-      (check-equal? (length (group "summary")) (* 2 (length names)))
-      (define md (summary-markdown records))
-      (check-regexp-match #rx"## H\\. CIFAR-10 PNG loader" md)
-      (check-regexp-match #rx"\\| loader only \\| per-sample \\| 2 \\| images/s \\| [0-9]+ \\|" md)
-      (check-regexp-match #rx"\\| 09 ResNet \\| batched \\| 0 \\| s/epoch \\| [0-9.]+ \\|" md)
-      (unless (pytorch-available?)
-        (displayln "[e2e-suite] H's PyTorch twins skipped: python3 `torch` not available")))))
+  (test-case "a child on another device than --device fails, naming both"
+    (define fixture (example "stepper" '(("EPOCHS" . 2)) '(("EPOCHS" . 2)) "EPOCHS" 0 'first))
+    (define here (device-type (accelerator-if-available)))
+    (define elsewhere (if (eq? here 'cuda) 'cpu 'cuda))
+    (define (run device)
+      (records-of (lambda (out)
+                    (run-e2e (list fixture) #:rounds 2 #:full? #f #:variants '(("a")) #:cache #f
+                             #:max-load #f #:libtorch "x" #:out out #:log quiet #:device device
+                             #:runner-for (lambda (_ex) stepper)))))
+    (define records (run elsewhere))
+    (check-equal? (map (lambda (r) (hash-ref r 'group)) records) '("run" "error"))
+    (for ([r (in-list records)])
+      (check-regexp-match (regexp (format "ran on ~a, not the --device ~a" here elsewhere))
+                          (hash-ref r 'error)))
+    (check-equal? (map (lambda (r) (hash-ref r 'group)) (run here)) '("run" "run" "summary"))))

@@ -1,12 +1,3 @@
-"""Shared by the PyTorch twins of scripts/bench/workloads/cifar-loader.rkt
-and cifar-resnet.rkt: the CIFAR-10 PNG tree scripts/bench/cifar-folder.rkt
-writes, read by torchvision's ImageFolder through a DataLoader with
-NUM_WORKERS workers and pin_memory on CUDA. PIPELINE=per-sample is
-torchvision's RandomCrop(32, padding=4), RandomHorizontalFlip, ToTensor,
-Normalize per image in the workers; PIPELINE=batched collates the
-ToTensor'd images first and crops and flips the batch in the collate, by
-the per-image algorithm of resnet.py's random_crop, then normalizes it."""
-
 import os
 import sys
 

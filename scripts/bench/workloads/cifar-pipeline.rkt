@@ -1,16 +1,18 @@
 #lang racket/base
 
-(require (only-in racket/string string-prefix?)
-         (only-in torch cpu-device flatten item select unsqueeze with-no-grad ~>)
+(require (only-in racket/contract/base ->* any/c or/c)
+         (only-in racket/match match)
+         (only-in racket/string string-prefix?)
+         (only-in torch cpu-device select unsqueeze ~>)
          (only-in torch/data/loader dataloader default-collate)
          (only-in torch/vision/image-folder image-folder)
          (only-in torch/vision/transforms
                   convert-image-dtype normalize random-crop random-horizontal-flip)
+         (only-in "../../../examples/test/private/env.rkt" env-number)
+         (only-in "../../../torch/private/contract.rkt" define/contract-out)
          (only-in "../cifar-folder.rkt" cifar10-folder cifar10-folder-digest))
 
-(provide cifar-folder-root
-         cifar-folder-loader
-         log-batch!)
+(provide cifar-settings)
 
 (define cifar-mean '(0.4914 0.4822 0.4465))
 (define cifar-std '(0.2470 0.2435 0.2616))
@@ -35,29 +37,29 @@
   (values (~> xs (random-crop #:padding 4) random-horizontal-flip (normalize cifar-mean cifar-std))
           ys))
 
-(define (cifar-folder-loader root pipeline generator
-                             #:batch batch #:workers workers #:drop-last? [drop-last? #f])
+(define/contract-out (cifar-folder-loader root pipeline generator
+                                         #:batch batch #:workers workers
+                                         #:drop-last? [drop-last? #f])
+  (->* (path-string? (or/c "per-sample" "batched") any/c
+                     #:batch exact-positive-integer? #:workers exact-nonnegative-integer?)
+       (#:drop-last? boolean?)
+       any/c)
   (define train (build-path root "train"))
   (define-values (ds collate)
-    (case pipeline
-      [("per-sample") (values (image-folder train #:transform per-sample #:device (cpu-device))
-                              default-collate)]
-      [("batched") (values (image-folder train #:transform convert-image-dtype
-                                        #:device (cpu-device))
-                           augmented-batch)]
-      [else (raise-user-error 'cifar-folder "PIPELINE is per-sample or batched, got ~s"
-                              pipeline)]))
+    (match pipeline
+      ["per-sample" (values (image-folder train #:transform per-sample #:device (cpu-device))
+                            default-collate)]
+      ["batched" (values (image-folder train #:transform convert-image-dtype #:device (cpu-device))
+                         augmented-batch)]))
   (dataloader ds #:batch-size batch #:shuffle? #t #:drop-last? drop-last? #:collate collate
               #:generator generator #:workers workers))
 
-(define-logger rktorch-step)
-
-(define (log-batch! x)
-  (when (log-level? rktorch-step-logger 'debug 'rktorch-step)
-    (with-no-grad (~> x flatten (select 0 0) item))
-    (log-message rktorch-step-logger 'debug 'rktorch-step "step"
-                 (vector 0 (current-inexact-monotonic-milliseconds) (current-gc-milliseconds))
-                 #f)))
+(define (cifar-settings)
+  (values (env-number "EPOCHS" 2)
+          (env-number "WORKERS" 0)
+          (env-number "BATCH" 128)
+          (or (getenv "PIPELINE") "per-sample")
+          (cifar-folder-root (or (getenv "DATASET") "full") (getenv "PNG_DIGEST"))))
 
 (module+ test
   (require (only-in racket/file make-temporary-directory)

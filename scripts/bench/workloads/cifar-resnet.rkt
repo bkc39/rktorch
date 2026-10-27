@@ -7,14 +7,10 @@
            (only-in torch/scribblings/examples/09-resnet pick-device train-step)
            (only-in torch/vision/resnet ResNet)
            (only-in "../../../examples/test/private/env.rkt" env-number)
-           (only-in "cifar-pipeline.rkt" cifar-folder-loader cifar-folder-root))
+           (only-in "cifar-pipeline.rkt" cifar-folder-loader cifar-settings))
 
-  (define epochs (env-number "EPOCHS" 2))
-  (define workers (env-number "WORKERS" 0))
-  (define batch (env-number "BATCH" 128))
+  (define-values (epochs workers batch pipeline root) (cifar-settings))
   (define base (env-number "BASE" 64))
-  (define pipeline (or (getenv "PIPELINE") "per-sample"))
-  (define root (cifar-folder-root (or (getenv "DATASET") "full") (getenv "PNG_DIGEST")))
   (define device (pick-device))
   (define max-lr 0.1)
 

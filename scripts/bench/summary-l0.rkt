@@ -3,31 +3,17 @@
 (require (only-in racket/list remove-duplicates)
          (only-in racket/match match match-define)
          (only-in racket/string string-join)
-         (only-in racket/math exact-round)
          (only-in threading ~>)
          (only-in "harness.rkt" list-median)
          (only-in "markdown.rkt"
-                  host impl-of make-section median num ref rktorch? settings-text table)
-         (only-in "summary-h.rkt" h-case? h-section))
+                  find-record host make-section median median-at median-of num ratio ref rktorch?
+                  settings-text share table whole)
+         (only-in "summary-h.rkt" h-case? h-context h-section))
 
 (provide l0-sections)
 
 (define (cases records)
   (remove-duplicates (map (lambda (r) (ref r 'case)) records)))
-
-(define (find records #:case c #:impl impl #:variant [variant #f])
-  (for/last ([r (in-list records)]
-             #:when (and (equal? (ref r 'case) c)
-                         (equal? (impl-of r) impl)
-                         (or (not variant) (equal? (ref r 'variant) variant))))
-    r))
-
-(define (ratio a b [digits 2])
-  (if (and (real? a) (real? b) (positive? b)) (num (/ a b) digits) "-"))
-
-(define (median-of r) (and r (median r)))
-
-(define (whole x) (if (real? x) (number->string (exact-round x)) "-"))
 
 (define (placement r)
   (format "~a; ~a, ~a threads~a" (host r) (ref r 'meta 'device) (ref r 'meta 'threads)
@@ -41,9 +27,9 @@
 (define (twin-op-section records)
   (table '("op" "rktorch facade µs" "rktorch raw µs" "PyTorch µs" "facade/PyTorch" "raw/PyTorch")
          (for/list ([op (in-list (cases records))])
-           (define facade (find records #:case op #:impl "rktorch" #:variant "facade"))
-           (define raw (find records #:case op #:impl "rktorch" #:variant "raw"))
-           (define py (find records #:case op #:impl "pytorch"))
+           (define facade (find-record records #:case op #:impl "rktorch" #:variant "facade"))
+           (define raw (find-record records #:case op #:impl "rktorch" #:variant "raw"))
+           (define py (find-record records #:case op #:impl "pytorch"))
            (list op (us facade) (us raw) (us py)
                  (ratio (median-of facade) (median-of py))
                  (ratio (median-of raw) (median-of py))))))
@@ -52,7 +38,7 @@
   (define counts
     (~> (map (lambda (r) (string->number (ref r 'variant))) records) remove-duplicates (sort <)))
   (define (at state n impl)
-    (find records #:case state #:impl impl #:variant (number->string n)))
+    (find-record records #:case state #:impl impl #:variant (number->string n)))
   (table '("main" "threads" "rktorch ops/s" "rktorch ÷ idle×1" "PyTorch ops/s" "PyTorch ÷ idle×1"
            "rktorch/PyTorch" "main steps/s rktorch" "main steps/s PyTorch")
          (for*/list ([state (in-list (cases records))] [n (in-list counts)])
@@ -69,10 +55,10 @@
 (define (paired-e2e records keep?)
   (for*/list ([r (in-list records)]
               #:when (and (rktorch? r) (keep? (ref r 'case)))
-              [py (in-value (find records #:case (twin-name (ref r 'case)) #:impl "pytorch"
+              [py (in-value (find-record records #:case (twin-name (ref r 'case)) #:impl "pytorch"
                                   #:variant (ref r 'variant)))]
               #:when py)
-    (list r py (find records #:case (twin-name (ref r 'case) "-per-param") #:impl "pytorch"
+    (list r py (find-record records #:case (twin-name (ref r 'case) "-per-param") #:impl "pytorch"
                      #:variant (ref r 'variant)))))
 
 (define (unmatched-settings rk py)
@@ -105,7 +91,7 @@
                 (define marks
                   (append unmatched (filter values (list (unlike "PyTorch" py)
                                                          (unlike "per-param" pp)))))
-                (define (step r) (and r (list-median (ref r 'step_ms))))
+                (define (step r) (median-at r 'step_ms))
                 (define (vs twin a b)
                   (if (and (null? unmatched) (timed-alike? twin)) (ratio a b) "-"))
                 (list (ref rk 'case) (or (ref rk 'variant) "-") (ref rk 'unit)
@@ -176,11 +162,10 @@
 (define (gc-section records)
   (define rows
     (for/list ([r (in-list records)] #:when (pair? (ref r 'epoch_gc_ms)))
-      (define gc (list-median (ref r 'epoch_gc_ms)))
+      (define gc (median-at r 'epoch_gc_ms))
       (define epoch-ms (and (equal? (ref r 'unit) "s/epoch") (* 1000.0 (median r))))
       (list (ref r 'case) (or (ref r 'variant) "-") (settings-text (ref r 'settings)) (ref r 'unit)
-            (num (median r) 2) (num (ref r 'steps_per_s 'median) 2) (whole gc)
-            (if (and gc epoch-ms) (format "~a%" (~> (/ gc epoch-ms) (* 100) (num 1))) "-"))))
+            (num (median r) 2) (num (ref r 'steps_per_s 'median) 2) (whole gc) (share gc epoch-ms))))
   (and (pair? rows)
        (table '("example" "variant" "settings" "unit" "median" "steps/s" "GC ms/epoch" "GC share")
               rows)))
@@ -200,7 +185,7 @@
         (make-section "e2e" "summary" "G. GC per epoch" gc-section host
                       #:keep (lambda (r) (and (rktorch? r) (not (h-record? r)))))
         (make-section "e2e" "summary" "H. CIFAR-10 PNG loader against PyTorch's DataLoader"
-                      h-section paired-placement #:keep h-record?)))
+                      h-section h-context #:keep h-record?)))
 
 (module+ test
   (require rackunit
@@ -378,7 +363,7 @@
                           (e2e "py-cifar-resnet" "pytorch" "per-sample-0" 10.0 25.0)))
     (check-false (render 3 records))
     (check-equal? (filter (section-keep (list-ref l0-sections 6)) records) '())
-    (check-regexp-match #rx"\\| 09 ResNet \\| - \\| - \\| s/epoch \\| 30\\.00 \\| 10\\.00 \\| 3\\.00 \\|"
+    (check-regexp-match #rx"\\| 09 ResNet \\| - \\| - \\| cpu \\| s/epoch \\| 30\\.00 \\| 10\\.00 \\| 3\\.00 \\|"
                         (render 7 records)))
 
   (test-case "G gives GC per epoch and its share of the epoch"

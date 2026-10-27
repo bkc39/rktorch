@@ -51,7 +51,7 @@
   (define (bench-calls dir) (calls-of dir "racket scripts/bench/run.rkt"))
 
   (define (variants-of call)
-    (map cadr (regexp-match* #px"--variant (\\S+)" call #:match-select values)))
+    (regexp-match* #px"--variant (\\S+)" call #:match-select cadr))
 
   (define (jsonl dir) (file->lines (build-path dir "l0.jsonl")))
 
@@ -117,6 +117,8 @@
              (check-equal? (calls-of dir "racket scripts/bench/cifar-folder.rkt")
                            '("racket scripts/bench/cifar-folder.rkt full"))
              (match-define (list loader resnet) (bench-calls dir))
+             (for ([call (in-list (list loader resnet))])
+               (check-true (string-contains? call " --device cuda ") call))
              (check-true (string-contains? loader " --only cifar-loader,py-cifar-loader ") loader)
              (check-true (string-contains? resnet " --only cifar-resnet,py-cifar-resnet ") resnet)
              (define (expected workers)
@@ -131,6 +133,8 @@
              (check-equal? (run-baseline dir "loader" #:smoke #t) 0)
              (check-equal? (calls-of dir "racket scripts/bench/cifar-folder.rkt")
                            '("racket scripts/bench/cifar-folder.rkt fixture"))
+             (for ([call (in-list (bench-calls dir))])
+               (check-true (string-contains? call " --device cuda ") call))
              (match-define (list loader resnet) (map variants-of (bench-calls dir)))
              (check-equal? (length loader) 4)
              (check-equal? (length resnet) 4)
