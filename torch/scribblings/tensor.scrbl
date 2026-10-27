@@ -71,7 +71,9 @@ Draws each element independently from the standard normal distribution,
 from @racket[generator] or else from @racket[(current-generator)], as
 @tt{torch.randn(..., generator=g)}. The dtype must be a floating-point
 one. Seed the global generator with @racket[manual-seed!] to repeat a
-draw. A generator is a CPU one, so it draws only a CPU tensor.
+draw. A generator draws on its own device: @racket[rand] and
+@racket[randn] refuse a generator on another device than the tensor they
+build.
 
 @torch-examples[
 (manual-seed! 0)

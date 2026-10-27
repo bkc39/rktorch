@@ -43,6 +43,17 @@ tr_tensor* tr_rand_gen_on(const int64_t* dims, int64_t ndim,
 
 tr_generator* tr_generator_new(uint64_t seed);
 
+/* torch.Generator(device).manual_seed(seed): a generator with its own stream
+ * on the given device, drawing as that device's default generator does.
+ * NULL on error (unknown device, an index out of range, or a backend that is
+ * not built in). */
+tr_generator* tr_generator_new_on(uint64_t seed, tr_device_type type,
+                                  int64_t index);
+
+/* The device a generator draws on. 0 success, 1 error. */
+int tr_generator_device(const tr_generator* g, tr_device_type* out_type,
+                        int64_t* out_index);
+
 void tr_generator_free(tr_generator* g);
 
 /* torch.randperm(n, generator=g): an int64 permutation of 0..n-1 on the CPU
@@ -50,9 +61,9 @@ void tr_generator_free(tr_generator* g);
 tr_tensor* tr_randperm(int64_t n, tr_generator* g);
 
 /* torch.empty((), dtype=torch.int64).random_(generator=g).item(): one int64
- * drawn from g, or from the global CPU generator when g is NULL. A
- * DataLoader draws one per epoch before its permutation, so a loader that
- * replays its batch order needs the same draw. 0 success, 1 error. */
+ * drawn from g on g's device, or from the global CPU generator when g is
+ * NULL. A DataLoader draws one per epoch before its permutation, so a loader
+ * that replays its batch order needs the same draw. 0 success, 1 error. */
 int tr_generator_draw_seed(tr_generator* g, int64_t* out);
 
 #ifdef __cplusplus

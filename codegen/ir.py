@@ -90,10 +90,10 @@ class Skip:
 # (skip); _BASE_SHADOWED generate as <name>-tensor, promoted by hand.
 _RACKET_COLLISIONS = frozenset({
     "exp", "log", "sqrt", "tanh", "max", "min", "argmax", "flatten",
-    "round", "floor", "ceiling", "truncate",
+    "round", "ceiling", "truncate",
 })
 
-_BASE_SHADOWED = frozenset({"abs", "cos", "sin", "sort"})
+_BASE_SHADOWED = frozenset({"abs", "cos", "floor", "sin", "sort"})
 
 _BASE_KINDS = {
     BaseTy.Tensor: TENSOR,

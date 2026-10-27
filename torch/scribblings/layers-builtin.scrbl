@@ -277,3 +277,19 @@ Uniform on @tt{[low, high)}.}
 Kaiming's uniform initialization with the bound PyTorch's
 @tt{nn.Linear} and @tt{nn.Conv2d} use by default, the fan-in read from
 @racket[dims].}
+
+@defproc[(trunc-normal-init [dims (listof exact-nonnegative-integer?)]
+                            [#:mean mean real? 0.0]
+                            [#:std std (and/c real? positive?) 1.0]
+                            [#:a a real? -2.0]
+                            [#:b b real? 2.0])
+         tensor?]{
+@tt{nn.init.trunc_normal_}: a normal of @racket[mean] and @racket[std]
+truncated to @tt{[a, b]}, which are absolute bounds, not multiples of
+@racket[std]. @racket[a] must be below @racket[b]. It draws by the inverse
+CDF, as timm and PyTorch before 2.14 do, so a seed gives their values;
+PyTorch 2.14 draws by rejection sampling instead.
+
+@torch-examples[
+(manual-seed! 0)
+(trunc-normal-init '(2 3) #:std 0.02 #:a -0.01 #:b 0.01)]}

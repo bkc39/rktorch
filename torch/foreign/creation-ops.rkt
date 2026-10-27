@@ -1,6 +1,8 @@
 #lang racket/base
 
-(require (only-in ffi/unsafe prop:cpointer)
+(require ;; whole-module: the pattern's syntax classes live at phase 1 and
+         ;; only-in would strip them
+         syntax/parse/define
          (only-in ffi/vector
                   f32vector->list
                   f32vector-length
@@ -24,7 +26,6 @@
                   integer-in
                   list/c
                   or/c
-                  parameter/c
                   unsupplied-arg?)
          (only-in racket/list append-map)
          (only-in racket/match match)
@@ -35,6 +36,7 @@
          (only-in "autograd-ops.rkt" requires-grad!)
          (only-in "device-type.rkt" device/c)
          (only-in "error.rkt" check-handle check-ok)
+         (only-in "generator.rkt" cpu-generator/c generator-on? generator?)
          (only-in "ops.rkt"
                   any-float-dtype/c
                   default-device
@@ -66,10 +68,7 @@
                   tr-ones-on/raw
                   tr-zeros-on/raw)
          (only-in "raw/random.rkt"
-                  Generator?
-                  current-generator/raw
                   tr-generator-draw-seed/raw
-                  tr-generator-new/raw
                   tr-rand-gen-on/raw
                   tr-randn-gen-on/raw
                   tr-randperm/raw)
@@ -151,28 +150,8 @@
     [_ (shaped 'full tr-full-on/raw dims device dtype requires-grad?
                (exact->inexact value))]))
 
-(struct generator-impl (handle)
-  #:reflection-name 'generator
-  #:property prop:cpointer 0
-  #:property prop:custom-write
-  (lambda (_g port _mode) (write-string "#<generator>" port)))
-
-(define/contract-out seed/c flat-contract? ;; noqa
-  (flat-named-contract 'seed (integer-in 0 (sub1 (expt 2 64)))))
-
 (define/contract-out size/c flat-contract? ;; noqa
   (flat-named-contract 'size (integer-in 0 (sub1 (expt 2 63)))))
-
-(define/contract-out (make-generator seed) ;; noqa
-  (-> seed/c generator?)
-  (generator-impl (check-handle 'make-generator (tr-generator-new/raw seed))))
-
-(define/checked-out (generator? v) (-> any/c boolean?) ;; noqa
-  (and (generator-impl? v) (Generator? (generator-impl-handle v))))
-
-(define/contract-out current-generator ;; noqa
-  (parameter/c (or/c generator? #f))
-  current-generator/raw)
 
 (define (drawn who raw dims device dtype requires-grad? generator)
   (define shape (shape-of dims))
@@ -181,32 +160,31 @@
                          generator))
           requires-grad?))
 
-(define/contract-out (randn #:device [device #f] #:dtype [dtype #f]
-                            #:requires-grad? [requires-grad? #f]
-                            #:generator [generator #f]
-                            . dims)
-  (->* []
-       [#:device device/c
-        #:dtype any-float-dtype/c
-        #:requires-grad? boolean?
-        #:generator (or/c generator? #f)]
-       #:rest shape-rest/c tensor?)
-  (drawn 'randn tr-randn-gen-on/raw dims device dtype requires-grad? generator))
+(define (supplied-or v default)
+  (if (unsupplied-arg? v) default v))
 
-(define/contract-out (rand #:device [device #f] #:dtype [dtype #f]
-                           #:requires-grad? [requires-grad? #f]
-                           #:generator [generator #f]
-                           . dims)
-  (->* []
-       [#:device device/c
-        #:dtype any-float-dtype/c
-        #:requires-grad? boolean?
-        #:generator (or/c generator? #f)]
-       #:rest shape-rest/c tensor?)
-  (drawn 'rand tr-rand-gen-on/raw dims device dtype requires-grad? generator))
+(define-syntax-parse-rule (define-draw name:id raw:id)
+  (define/contract-out (name #:device [device #f] #:dtype [dtype #f] ;; noqa
+                             #:requires-grad? [requires-grad? #f]
+                             #:generator [generator #f]
+                             . dims)
+    (->i ()
+         (#:device [device device/c]
+          #:dtype [dtype any-float-dtype/c]
+          #:requires-grad? [requires-grad? boolean?]
+          #:generator [generator (or/c generator? #f)])
+         #:rest [dims shape-rest/c]
+         #:pre/name (device generator)
+         "the generator lives on the target device"
+         (generator-on? (supplied-or generator #f) (supplied-or device #f))
+         [result tensor?])
+    (drawn 'name raw dims device dtype requires-grad? generator)))
+
+(define-draw randn tr-randn-gen-on/raw)
+(define-draw rand tr-rand-gen-on/raw)
 
 (define/contract-out (randperm n #:generator [generator #f]) ;; noqa
-  (->* [size/c] [#:generator (or/c generator? #f)] tensor?)
+  (->* [size/c] [#:generator (or/c cpu-generator/c #f)] tensor?)
   (wrap 'randperm (tr-randperm/raw n generator)))
 
 (define/contract-out (draw-seed #:generator [generator #f]) ;; noqa

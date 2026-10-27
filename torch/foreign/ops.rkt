@@ -87,6 +87,7 @@
          float-dtype-max
          float-dtype/c
          placement
+         type+index->device
          with-default-device)
 
 (module+ unsafe

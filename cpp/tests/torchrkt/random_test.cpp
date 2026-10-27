@@ -285,4 +285,64 @@ TEST(TorchrktRandom, RandGenOnRejectsCpuGeneratorOffCpu) {
   tr_generator_free(g);
 }
 
+TEST(TorchrktRandom, GeneratorOnTheCpuReportsItsDeviceAndReplays) {
+  tr_generator* a = tr_generator_new_on(7, TR_DEVICE_CPU, 0);
+  tr_generator* b = tr_generator_new(7);
+  ASSERT_NE(a, nullptr) << tr_last_error();
+  ASSERT_NE(b, nullptr) << tr_last_error();
+  tr_device_type type = TR_DEVICE_KEEP;
+  int64_t index = -1;
+  ASSERT_EQ(tr_generator_device(a, &type, &index), 0) << tr_last_error();
+  EXPECT_EQ(type, TR_DEVICE_CPU);
+  EXPECT_EQ(index, 0);
+  EXPECT_EQ(randperm_of(16, a), randperm_of(16, b));
+  EXPECT_EQ(tr_generator_device(nullptr, &type, &index), 1);
+  EXPECT_EQ(tr_generator_device(a, nullptr, &index), 1);
+  tr_generator_free(a);
+  tr_generator_free(b);
+}
+
+TEST(TorchrktRandom, GeneratorOnAMissingDeviceFailsCleanly) {
+  EXPECT_EQ(tr_generator_new_on(1, TR_DEVICE_CPU, 1), nullptr);
+  EXPECT_NE(std::string(tr_last_error()), "");
+  EXPECT_EQ(tr_generator_new_on(1, TR_DEVICE_KEEP, 0), nullptr);
+  EXPECT_NE(std::string(tr_last_error()), "");
+  if (tr_cuda_is_available() == 0) {
+    EXPECT_EQ(tr_generator_new_on(1, TR_DEVICE_CUDA, 0), nullptr);
+    EXPECT_NE(std::string(tr_last_error()), "");
+  }
+}
+
+TEST(TorchrktRandom, GeneratorOnCudaDrawsThere) {
+  if (tr_cuda_is_available() == 0) {
+    GTEST_SKIP() << "no CUDA device";
+  }
+  tr_generator* a = tr_generator_new_on(7, TR_DEVICE_CUDA, 0);
+  tr_generator* b = tr_generator_new_on(7, TR_DEVICE_CUDA, 0);
+  ASSERT_NE(a, nullptr) << tr_last_error();
+  ASSERT_NE(b, nullptr) << tr_last_error();
+  tr_device_type type = TR_DEVICE_KEEP;
+  int64_t index = -1;
+  ASSERT_EQ(tr_generator_device(a, &type, &index), 0) << tr_last_error();
+  EXPECT_EQ(type, TR_DEVICE_CUDA);
+  EXPECT_EQ(index, 0);
+  const std::vector<int64_t> dims = {5};
+  tr_tensor* x =
+      tr_rand_gen_on(dims.data(), 1, TR_DEVICE_CUDA, 0, TR_DTYPE_KEEP, a);
+  tr_tensor* y =
+      tr_rand_gen_on(dims.data(), 1, TR_DEVICE_CUDA, 0, TR_DTYPE_KEEP, b);
+  ASSERT_NE(x, nullptr) << tr_last_error();
+  ASSERT_NE(y, nullptr) << tr_last_error();
+  tr_tensor* hx = tr_tensor_to_device(x, TR_DEVICE_CPU, 0);
+  tr_tensor* hy = tr_tensor_to_device(y, TR_DEVICE_CPU, 0);
+  EXPECT_EQ(data_of(hx), data_of(hy));
+  EXPECT_EQ(tr_rand_gen_on(dims.data(), 1, TR_DEVICE_CPU, 0, TR_DTYPE_KEEP, a),
+            nullptr);
+  for (tr_tensor* t : {x, y, hx, hy}) {
+    tr_tensor_free(t);
+  }
+  tr_generator_free(a);
+  tr_generator_free(b);
+}
+
 }  // namespace

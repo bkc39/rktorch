@@ -1,7 +1,11 @@
 #lang racket/base
 
-(require (only-in racket/contract/base -> ->* listof)
-         (only-in "../foreign.rkt" randn tensor? uniform! zeros)
+(require (only-in racket/contract/base
+                  -> ->* ->i and/c listof unsupplied-arg?)
+         (only-in racket/math pi)
+         (only-in threading ~>)
+         (only-in "../foreign.rkt" * + clamp randn tensor? uniform! zeros)
+         (only-in "../generated.rkt" erfinv)
          (only-in "../private/contract.rkt" define/checked-out))
 
 (provide uniform-bias)
@@ -35,3 +39,41 @@
 (define (uniform-bias n fan)
   (define bound (/ 1.0 (sqrt fan)))
   (uniform-init (list n) (- bound) bound))
+
+(define (erf-series x)
+  (define x² (* x x))
+  (let loop ([n 0] [term x] [sum 0.0])
+    (define next (+ sum (/ term (+ (* 2 n) 1))))
+    (if (= next sum)
+        (* (/ 2.0 (sqrt pi)) sum)
+        (loop (add1 n) (/ (* term (- x²)) (add1 n)) next))))
+
+(define (erfc-fraction x)
+  (define k
+    (for/fold ([k x]) ([n (in-range 80 0 -1)])
+      (+ x (/ (/ n 2.0) k))))
+  (/ (exp (- (* x x))) (* (sqrt pi) k)))
+
+(define (erf x)
+  (cond
+    [(< x 0) (- (erf (- x)))]
+    [(<= x 2.0) (erf-series x)]
+    [else (- 1.0 (erfc-fraction x))]))
+
+(define (supplied-or v default)
+  (if (unsupplied-arg? v) default v))
+
+(define/checked-out (trunc-normal-init dims ;; noqa
+                                       #:mean [mean 0.0]
+                                       #:std [std 1.0]
+                                       #:a [a -2.0]
+                                       #:b [b 2.0])
+  (->i ([dims dims/c])
+       (#:mean [mean real?]
+        #:std [std (and/c real? positive?)]
+        #:a [a real?]
+        #:b [b real?])
+       #:pre/name (a b) "#:a is below #:b"
+       (< (supplied-or a -2.0) (supplied-or b 2.0))
+       [result tensor?])
+  (error 'trunc-normal-init "not implemented"))

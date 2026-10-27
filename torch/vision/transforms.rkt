@@ -10,9 +10,9 @@
          (only-in racket/math exact-floor exact-round exact-truncate)
          (only-in threading ~>)
          (only-in "../foreign.rkt"
-                  @ add arange clamp device device-type div draw-seed dtype
-                  flip generator? masked-fill! mul narrow ne reshape select stack
-                  sub tensor tensor-shape tensor? to-dtype transpose where)
+                  @ add arange clamp cpu-generator/c device device-type div
+                  draw-seed dtype flip masked-fill! mul narrow ne reshape select
+                  stack sub tensor tensor-shape tensor? to-dtype transpose where)
          (only-in "../foreign/contracts.rkt" image-batch/c)
          (only-in "../generated.rkt" index-tensor)
          (only-in "../private/contract.rkt" define/contract-out))
@@ -32,7 +32,8 @@
 (define/contract-out (random-horizontal-flip x ;; noqa
                                              #:p [p 0.5]
                                              #:generator [generator #f])
-  (->* [image-batch/c] [#:p (real-in 0 1) #:generator (or/c generator? #f)]
+  (->* [image-batch/c]
+       [#:p (real-in 0 1) #:generator (or/c cpu-generator/c #f)]
        tensor?)
   (define n (car (tensor-shape x)))
   (cond
@@ -57,7 +58,8 @@
                                   #:padding [padding 4]
                                   #:generator [generator #f])
   (->* [croppable-batch/c]
-       [#:padding exact-nonnegative-integer? #:generator (or/c generator? #f)]
+       [#:padding exact-nonnegative-integer?
+        #:generator (or/c cpu-generator/c #f)]
        tensor?)
   (cond
     [(~> x tensor-shape car zero?) x]
@@ -332,7 +334,7 @@
   (->* [float-image/c exact-positive-integer?]
        [#:scale (ordered-pair/c (and/c (real-in 0 1) positive?))
         #:ratio (ordered-pair/c (and/c real? positive?))
-        #:generator (or/c generator? #f)]
+        #:generator (or/c cpu-generator/c #f)]
        tensor?)
   (define rng (batch-rng generator))
   (define-values (h w) (spatial-size x))

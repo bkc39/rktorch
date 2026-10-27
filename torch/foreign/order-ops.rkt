@@ -8,8 +8,8 @@
                                 argsort multinomial sort-tensor topk))
          (only-in "../private/contract.rkt" define/contract-out)
          (only-in "contracts.rkt" index/c)
-         (only-in "creation-ops.rkt" generator?)
-         (only-in "ops.rkt" tensor-shape)
+         (only-in "generator.rkt" generator-on? generator?)
+         (only-in "ops.rkt" tensor-device tensor-shape)
          (only-in "structs.rkt" tensor?))
 
 (define (supplied v default)
@@ -76,7 +76,11 @@
 (define/contract-out (multinomial probabilities num-samples ;; noqa
                                   #:replacement? [replacement? #f]
                                   #:generator [generator #f])
-  (->* [probabilities/c exact-positive-integer?]
-       [#:replacement? boolean? #:generator (or/c generator? #f)]
-       tensor?)
+  (->i ([probabilities probabilities/c] [num-samples exact-positive-integer?])
+       (#:replacement? [replacement? boolean?]
+        #:generator [generator (or/c generator? #f)])
+       #:pre/name (probabilities generator)
+       "the generator lives on the input's device"
+       (generator-on? (supplied generator #f) (tensor-device probabilities))
+       [result tensor?])
   (g:multinomial probabilities num-samples replacement? generator))

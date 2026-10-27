@@ -7,7 +7,7 @@
          (only-in racket/match == match)
          (only-in threading ~>)
          (only-in "../foreign.rkt"
-                  device device-type draw-seed generator? index-select
+                  cpu-generator/c device device-type draw-seed index-select
                   make-generator narrow gen:sized length randperm select shape
                   tensor tensor? to)
          (only-in "../private/contract.rkt" define/contract-out)
@@ -102,7 +102,7 @@
         #:shuffle? [shuffle? boolean?]
         #:drop-last? [drop-last? boolean?]
         #:collate [collate collate/c]
-        #:generator [generator (or/c generator? #f)]
+        #:generator [generator (or/c cpu-generator/c #f)]
         #:workers [workers exact-nonnegative-integer?]
         #:prefetch [prefetch exact-positive-integer?])
        #:pre/name (ds shuffle?)

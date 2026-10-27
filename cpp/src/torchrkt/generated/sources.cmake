@@ -14,4 +14,5 @@ target_sources(torchrkt
     ${CMAKE_CURRENT_SOURCE_DIR}/src/torchrkt/generated/rnn.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/torchrkt/generated/shape.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/torchrkt/generated/sort.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/torchrkt/generated/vision.cpp
 )

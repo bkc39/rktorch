@@ -92,6 +92,13 @@ with `backward!` outside the form as PyTorch recommends). From
   `make-generator` / `generator?` / `randperm` / `draw-seed` — a CPU
   `torch.Generator` with its own stream, the permutation and the int64
   seed word drawn from it (or the global stream), for loaders (#87)
+- device generators (`torch/foreign/generator.rkt`, #389):
+  `make-generator #:device` is `torch.Generator(device)`, `generator-device`
+  names its device and `cpu-generator/c` holds for one on the CPU; `rand`,
+  `randn` and `multinomial` blame a caller whose effective generator (the
+  argument, else `current-generator`) is on another device than the
+  tensor; `randperm`, `dataloader` and the `transforms.rkt` augmentations
+  take only a CPU generator (`tr_generator_new_on`, `tr_generator_device`)
 - iteration (`torch/foreign/sequences.rkt`, #199): `in-tensor` (the
   slices along the first dimension as views, Python's `for row in t`) and
   `in-flattened-tensor` (the elements as Racket numbers, row-major, copied
@@ -279,7 +286,7 @@ sgd adam rmsprop step! zero-grads! clip-grad-norm! learning-rate
 set-learning-rate! step-lr multi-step-lr exponential-lr cosine-annealing-lr
 linear-lr one-cycle-lr lambda-lr ema ema-update! ema-average cross-entropy
 nll-loss mse-loss binary-cross-entropy-with-logits huber-loss l1-loss
-kaiming-uniform uniform-init normal-init fan-in`. The functional
+kaiming-uniform uniform-init normal-init trunc-normal-init fan-in`. The functional
 transformer primitives (`gelu tril triu masked-fill embedding layer-norm`,
 tranche 3, #22), the UNet ones (`conv-transpose2d group-norm silu
 clamp`, tranche 4, #84; `upsample-nearest2d` over `repeat_interleave`, tranche
@@ -290,7 +297,12 @@ map; `BatchNorm2d`/`BatchNorm1d` keep `running-mean`, `running-var` and
 mode) and attention (`scaled-dot-product-attention #:mask #:causal?
 #:dropout #:scale`, tranche 8, #210, the fused kernel behind
 `F.scaled_dot_product_attention`; `gelu #:approximate 'tanh`, GPT-2's form,
-on the hand-written shim) live on `torch` beside the other functional ops;
+on the hand-written shim) and the sampling grids (`affine-grid grid-sample
+#:mode #:padding-mode #:align-corners? upsample-bicubic2d`, tranche 9, #389:
+`F.affine_grid`, `F.grid_sample` on a float `[N C H W]` batch with the grid
+on its N, dtype and device, bicubic `F.interpolate(size=)`; `erfinv`,
+`floor-tensor` and `fmod-scalar` stay on `torch/generated`) live on
+`torch` beside the other functional ops;
 a causal mask built by hand is `(masked-fill scores (eq (tril (ones T T)) 0)
 -inf.0)`, whose mask is `#t` = hidden, while the fused kernel's boolean
 `#:mask` is `#t` = attend, as PyTorch's function is (the layers'

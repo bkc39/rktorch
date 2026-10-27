@@ -175,7 +175,7 @@ to any other collate.
                      [#:drop-last? drop-last? boolean? #f]
                      [#:collate collate (-> (non-empty-listof list?) any)
                       default-collate]
-                     [#:generator generator (or/c generator? #f) #f]
+                     [#:generator generator (or/c cpu-generator/c #f) #f]
                      [#:workers workers exact-nonnegative-integer? 0]
                      [#:prefetch prefetch exact-positive-integer? 2])
          dataloader?]{
@@ -292,8 +292,10 @@ epochs.
 
 @defmodule[torch #:link-target? #f]
 
-@defproc[(make-generator [seed seed/c]) generator?]{
-A CPU random generator with its own stream, @tt{torch.Generator().manual_seed(seed)}.
+@defproc[(make-generator [seed seed/c] [#:device device device/c 'cpu])
+         generator?]{
+A random generator with its own stream on @racket[device],
+@tt{torch.Generator(device).manual_seed(seed)}.
 The seed is a natural number below @racket[(expt 2 64)], the range the
 native generator takes.
 Draws from it leave the global stream that @racket[randn] and model
@@ -305,6 +307,16 @@ parity elsewhere.
 Recognises the result of @racket[make-generator].
 }
 
+@defproc[(generator-device [g generator?]) device?]{
+The device @racket[g] draws on.
+
+@torch-examples[(generator-device (make-generator 1))]}
+
+@defthing[cpu-generator/c flat-contract?]{
+A generator on the CPU, as @racket[randperm] and @racket[dataloader]
+require.
+}
+
 @defthing[seed/c flat-contract?]{
 A natural number below @racket[(expt 2 64)].
 }
@@ -314,7 +326,7 @@ A natural number below @racket[(expt 2 63)], the native size range.
 }
 
 @defproc[(randperm [n size/c]
-                   [#:generator generator (or/c generator? #f) #f])
+                   [#:generator generator (or/c cpu-generator/c #f) #f])
          tensor?]{
 An int64 permutation of @racket[0] to @racket[n-1] on the CPU, drawn from
 @racket[generator] or else from @racket[(current-generator)], as @tt{torch.randperm}. Drawn

@@ -1,10 +1,13 @@
 #lang racket/base
 
 (require (only-in racket/contract/base
-                  -> ->* ->i </c >=/c and/c non-empty-listof or/c
-                  unsupplied-arg?)
+                  -> ->* ->i </c >=/c and/c flat-named-contract list/c
+                  non-empty-listof or/c unsupplied-arg?)
+         (only-in racket/list index-of)
+         (only-in racket/match match)
          (prefix-in g: (only-in "../generated.rkt"
                                 adaptive-avg-pool2d
+                                affine-grid-generator
                                 avg-pool2d
                                 batch-norm
                                 clamp
@@ -13,6 +16,7 @@
                                 conv2d
                                 embedding
                                 flip
+                                grid-sampler-2d
                                 group-norm
                                 layer-norm
                                 leaky-relu
@@ -23,12 +27,13 @@
                                 scaled-dot-product-attention
                                 silu
                                 tril
-                                triu))
+                                triu
+                                upsample-bicubic2d))
          (only-in "../private/contract.rkt" define/contract-out)
          (only-in "contracts.rkt"
                   attention-input/c image-batch/c index/c nonneg-size-1d/c
                   nonneg-size/c pool-size/c pos-size-1d/c pos-size/c)
-         (only-in "ops.rkt" tensor-shape)
+         (only-in "ops.rkt" tensor-device tensor-dtype tensor-shape)
          (only-in "size.rkt" ->1d ->2d)
          (only-in "structs.rkt" tensor?))
 
@@ -236,3 +241,75 @@
 (define/contract-out (flip self dims) ;; noqa
   (-> tensor? (or/c index/c (non-empty-listof index/c)) tensor?)
   (g:flip self (if (list? dims) dims (list dims))))
+
+(define float-dtypes '(float16 bfloat16 float32 float64))
+
+(define (float-tensor-of-rank? x rank)
+  (and (tensor? x)
+       (= rank (length (tensor-shape x)))
+       (memq (tensor-dtype x) float-dtypes)
+       #t))
+
+(define float-batch/c
+  (flat-named-contract 'float-image-batch
+                       (lambda (x) (float-tensor-of-rank? x 4))))
+
+(define affine-matrices/c
+  (flat-named-contract
+   'affine-matrices
+   (lambda (x)
+     (and (float-tensor-of-rank? x 3)
+          (match (tensor-shape x)
+            [(list n 2 3) (positive? n)]
+            [_ #f])))))
+
+(define (grid-size/c theta)
+  (flat-named-contract
+   'grid-size
+   (lambda (size)
+     (match size
+       [(list (? exact-positive-integer? n)
+              (? exact-positive-integer?)
+              (? exact-positive-integer?)
+              (? exact-positive-integer?))
+        (= n (car (tensor-shape theta)))]
+       [_ #f]))))
+
+(define (sampling-grid/c input)
+  (flat-named-contract
+   'sampling-grid
+   (lambda (grid)
+     (and (tensor? grid)
+          (match (tensor-shape grid)
+            [(list n _ _ 2) (= n (car (tensor-shape input)))]
+            [_ #f])
+          (eq? (tensor-dtype grid) (tensor-dtype input))
+          (equal? (tensor-device grid) (tensor-device input))))))
+
+(define/contract-out (affine-grid theta size #:align-corners? [align-corners? #f]) ;; noqa
+  (->i ([theta affine-matrices/c]
+        [size (theta) (grid-size/c theta)])
+       (#:align-corners? [align-corners? boolean?])
+       [result tensor?])
+  (error 'affine-grid "not implemented"))
+
+(define interpolation-modes '(bilinear nearest bicubic))
+(define padding-modes '(zeros border reflection))
+
+(define/contract-out (grid-sample input grid ;; noqa
+                                  #:mode [mode 'bilinear]
+                                  #:padding-mode [padding-mode 'zeros]
+                                  #:align-corners? [align-corners? #f])
+  (->i ([input float-batch/c]
+        [grid (input) (sampling-grid/c input)])
+       (#:mode [mode (or/c 'bilinear 'nearest 'bicubic)]
+        #:padding-mode [padding-mode (or/c 'zeros 'border 'reflection)]
+        #:align-corners? [align-corners? boolean?])
+       [result tensor?])
+  (error 'grid-sample "not implemented"))
+
+(define/contract-out (upsample-bicubic2d input size #:align-corners? [align-corners? #f]) ;; noqa
+  (->* [float-batch/c (list/c exact-positive-integer? exact-positive-integer?)]
+       [#:align-corners? boolean?]
+       tensor?)
+  (error 'upsample-bicubic2d "not implemented"))
