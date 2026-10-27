@@ -57,6 +57,17 @@ would build, and must be that tensor: @tt{[n-fft/2+1, n-mels]}, in the
 dtype of @racket[samples] and on its device. A caller featurizing many
 waveforms at one rate builds it once.}
 
+@defproc[(filterbank-fits? [filterbank tensor?]
+                           [samples tensor?]
+                           [#:n-fft n-fft exact-positive-integer? 400]
+                           [#:n-mels n-mels exact-positive-integer? 80])
+         boolean?]{
+Whether @racket[log-mel-spectrogram] accepts @racket[filterbank] for
+@racket[samples] at these @racket[n-fft] and @racket[n-mels]:
+@tt{[n-fft/2+1, n-mels]}, in the dtype of @racket[samples] and on its
+device. The sample rate is not in a bank's shape, so a caller holding a
+bank for one rate checks the rate itself.}
+
 @defproc[(mel-filterbank [#:n-freqs n-freqs exact-positive-integer?]
                          [#:n-mels n-mels exact-positive-integer?]
                          [#:sample-rate sample-rate exact-positive-integer?]

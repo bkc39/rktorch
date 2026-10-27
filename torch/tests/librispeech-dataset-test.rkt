@@ -17,15 +17,11 @@
                     device-type dtype make-generator narrow native-memory-use
                     ref shape sum tensor tensor->list tensor? to-dtype zeros)
            (only-in "../private/util.rkt" with-temporary-directory)
+           (only-in "private/blame.rkt" blamed contract-violation?)
            (only-in "private/heap-allocation.rkt" median-allocation)
            (only-in "private/race-harness.rkt" settle!))
 
-  (define blamed #rx"blaming: [(][^)]*librispeech-dataset-test[.]rkt")
-
-  (define ((contract-violation? rx) e)
-    (and (exn:fail:contract? e)
-         (regexp-match? blamed (exn-message e))
-         (regexp-match? rx (exn-message e))))
+  (define caller (blamed "librispeech-dataset-test.rkt"))
 
   (define frame-counts '(8000 21000 12000 16000 30000))
 
@@ -132,13 +128,13 @@
                    differs))))
 
   (test-case "L12: contract violations blame the caller"
-    (check-exn (contract-violation? #rx"utterance[?]")
+    (check-exn (contract-violation? caller #rx"utterance[?]")
                (lambda () (librispeech '("x"))))
     (with-utterances (us)
-      (check-exn (contract-violation? #rx"librispeech")
+      (check-exn (contract-violation? caller #rx"librispeech")
                  (lambda () (librispeech us #:transform (lambda (s) s))))
       (define ds (librispeech us #:transform (lambda (s _r) (sum s))))
-      (check-exn (contract-violation? #rx"tensor-with-a-time-dimension")
+      (check-exn (contract-violation? caller #rx"tensor-with-a-time-dimension")
                  (lambda () (dataset-ref ds 0)))))
 
   (test-case "L8: concurrent refs and batches equal the sequential ones"

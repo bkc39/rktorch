@@ -25,37 +25,42 @@ CTC aligns, attention spells.
 
 @chunk[<r07-require>
 (require (only-in racket/contract
-                  ->* ->i </c >=/c and/c any/c contract-out listof
-                  non-empty-listof or/c)
-         (only-in racket/list make-list)
+                  ->* ->i </c >=/c and/c contract-out flat-named-contract
+                  listof non-empty-listof or/c)
+         (only-in racket/list last make-list)
          (only-in racket/sequence sequence-ref)
          (only-in racket/string string-split)
          torch torch/nn
          (only-in torch/audio/data audio-info)
          (only-in torch/audio/functional
-                  edit-distance log-mel-spectrogram mel-filterbank)
+                  edit-distance filterbank-fits? log-mel-spectrogram
+                  mel-filterbank)
          (only-in torch/audio/librispeech
                   librispeech librispeech-fixture-utterance
                   librispeech-utterances load-utterance utterance-path
                   utterance-transcript)
          (only-in torch/data/loader dataloader)
          (only-in torch/audio/metrics cer wer)
-         (only-in torch/text/data decode encode text->vocab))]
+         (only-in torch/text/data decode encode text->vocab)
+         (only-in torch/train loss/c))]
 
 @chunk[<r07-provide>
 (provide asr asr-loader pick-device run-example greedy-decode transcribe
          mel-frames utterance-features evaluate
          (contract-out
           [hybrid-batch-loss
-           (->i ([net any/c]
+           (->i ([net layer?]
                  [vocab vector?]
-                 [x (and/c tensor? (lambda (x) (= 3 (length (shape x)))))]
+                 [x rank-3-tensor/c]
                  [frame-lengths (non-empty-listof exact-positive-integer?)]
                  [transcripts (listof string?)])
                 #:pre/name (x frame-lengths transcripts)
                 "one frame length and one transcript per row of x"
                 (= (car (shape x)) (length frame-lengths) (length transcripts))
-                [loss tensor?])]
+                #:pre/name (x frame-lengths)
+                "no frame length past the last dimension of x"
+                (for/and ([t (in-list frame-lengths)]) (<= t (last (shape x))))
+                [loss loss/c])]
           [train-librispeech
            (->* ()
                 (#:epochs exact-positive-integer?
@@ -66,7 +71,7 @@ CTC aligns, attention spells.
                  #:device device/c
                  #:workers exact-nonnegative-integer?
                  #:log-every exact-positive-integer?)
-                (values any/c vector?))]))]
+                (values layer? vector?))]))]
 
 The transformer half of the model is the library's: the encoder and
 decoder blocks are @racket[TransformerEncoderLayer] and
@@ -325,8 +330,7 @@ encoder frames --- the per-utterance CTC input lengths.
    (ref samples 0)
    #:sample-rate rate
    #:filterbank (and (= rate 16000)
-                     (eq? (dtype samples) (dtype bank-16k))
-                     (equal? (device samples) (device bank-16k))
+                     (filterbank-fits? bank-16k samples)
                      bank-16k)))
 
 (define (utterance-features samples rate)
@@ -358,6 +362,10 @@ it outside whatever extent built the net; it runs on the mels' device.
 
 @chunk[<r07-loss>
 (define ctc-weight 0.3)
+
+(define rank-3-tensor/c
+  (flat-named-contract 'rank-3-tensor/c
+                       (lambda (x) (and (tensor? x) (= 3 (length (shape x)))))))
 
 (define (pad-row ids fill s-max)
   (append ids (make-list (- s-max (length ids)) fill)))

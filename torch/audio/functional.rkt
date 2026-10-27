@@ -145,23 +145,26 @@
   (if buildable? built (to-dtype built filter-dtype)))
 
 (define default-n-fft 400)
+(define default-hop-length 160)
 (define default-n-mels 80)
+(define default-eps 1e-6)
 
-(define (given v default)
-  (if (unsupplied-arg? v) default v))
-
-(define (filterbank-fits? filterbank samples n-fft n-mels)
-  (or (not filterbank)
-      (and (equal? (shape filterbank) (list (add1 (quotient n-fft 2)) n-mels))
-           (eq? (dtype filterbank) (dtype samples))
-           (equal? (device filterbank) (device samples)))))
+(define/contract-out (filterbank-fits? filterbank samples
+                                       #:n-fft [n-fft default-n-fft]
+                                       #:n-mels [n-mels default-n-mels])
+  (->* (tensor? tensor?)
+       (#:n-fft exact-positive-integer? #:n-mels exact-positive-integer?)
+       boolean?)
+  (and (equal? (shape filterbank) (list (add1 (quotient n-fft 2)) n-mels))
+       (eq? (dtype filterbank) (dtype samples))
+       (equal? (device filterbank) (device samples))))
 
 (define/contract-out (log-mel-spectrogram samples ;; noqa
                                       #:sample-rate sample-rate
                                       #:n-fft [n-fft default-n-fft]
-                                      #:hop-length [hop-length 160]
+                                      #:hop-length [hop-length default-hop-length]
                                       #:n-mels [n-mels default-n-mels]
-                                      #:eps [eps 1e-6]
+                                      #:eps [eps default-eps]
                                       #:filterbank [filterbank #f])
   (->i ([samples tensor?] #:sample-rate [sample-rate exact-positive-integer?])
        (#:n-fft [n-fft exact-positive-integer?]
@@ -171,8 +174,11 @@
         #:filterbank [filterbank (or/c #f tensor?)])
        #:pre/name (samples n-fft n-mels filterbank)
        "filterbank is [n-fft/2+1, n-mels] in samples' dtype, on samples' device"
-       (filterbank-fits? (given filterbank #f) samples
-                         (given n-fft default-n-fft) (given n-mels default-n-mels))
+       (or (unsupplied-arg? filterbank)
+           (not filterbank)
+           (filterbank-fits? filterbank samples
+                             #:n-fft (if (unsupplied-arg? n-fft) default-n-fft n-fft)
+                             #:n-mels (if (unsupplied-arg? n-mels) default-n-mels n-mels)))
        [result tensor?])
   (define samples-device (device samples))
   (define spec

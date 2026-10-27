@@ -3,70 +3,87 @@
 ;; Run (GPU):  nix develop .#cuda --command racket scripts/train-asr.rkt
 ;; Run (CPU):  nix develop --command racket scripts/train-asr.rkt
 
-(require (only-in racket/contract contract)
-         (only-in racket/file make-directory*)
-         (only-in racket/format ~r)
-         (only-in racket/path path-only)
-         torch
-         (only-in torch/audio/librispeech
-                  librispeech-utterances load-utterance utterance-transcript)
-         torch/nn
-         (only-in torch/scribblings/examples/07-asr
-                  evaluate greedy-decode pick-device train-librispeech
-                  transcribe utterance-features))
+(require (only-in racket/contract/base
+                  ->i any/c contract-name contract? or/c rename-contract
+                  unsupplied-arg?)
+         (only-in racket/contract/region define/contract))
 
-(define (env-number name default [accept/c exact-positive-integer?])
-  (define v (getenv name))
-  (cond [(not v) default]
-        [(string->number v)
-         => (lambda (n) (contract accept/c n name 'train-asr (string->symbol name) #f))]
-        [else (error 'train-asr "~a is not a number: ~a" name v)]))
+(provide env-number)
 
-(define epochs (env-number "EPOCHS" 20))
-(define limit (env-number "LIMIT" #f))
-(define batch (env-number "BATCH" 16))
-(define n-embd (env-number "EMBD" 256))
-(define workers (env-number "WORKERS" 0 exact-nonnegative-integer?))
-(define checkpoint (or (getenv "CHECKPOINT") "checkpoints/asr-dev-clean"))
-(define held-out 3)
+(define (env-value/c name accept/c)
+  (rename-contract (or/c #f accept/c)
+                   (string->symbol (format "~a:~a" name (contract-name accept/c)))))
 
-(define device (pick-device))
-(printf "device: ~a\n" device)
+(define/contract (env-number name default [accept/c exact-positive-integer?])
+  (->i ([name string?] [default any/c])
+       ([accept/c contract?])
+       [result (name accept/c)
+               (env-value/c name (if (unsupplied-arg? accept/c)
+                                     exact-positive-integer?
+                                     accept/c))])
+  (define supplied (getenv name))
+  (define n (and supplied (string->number supplied)))
+  (cond [(not supplied) default]
+        [n n]
+        [else (error 'train-asr "~a is not a number: ~a" name supplied)]))
 
-(define all (librispeech-utterances "dev-clean"))
-(define train-limit
-  (min (or limit (- (length all) held-out)) (- (length all) held-out)))
-(define-values (net vocab)
-  (train-librispeech #:epochs epochs #:limit train-limit #:batch batch
-                     #:n-embd n-embd #:device device #:workers workers))
-(reclaim-native-memory!)
-(let ([dir (path-only (string->path checkpoint))])
-  (when dir (make-directory* dir)))
-(save-state! net (string-append checkpoint ".safetensors"))
-(call-with-output-file (string-append checkpoint ".rktd") #:exists 'replace
-  (lambda (out)
-    (write (list (cons 'vocab (list->string (vector->list vocab)))
-                 (cons 'n-mels 80)
-                 (cons 'n-embd n-embd)
-                 (cons 'n-head 4)
-                 (cons 'epochs epochs)
-                 (cons 'batch batch)
-                 (cons 'limit train-limit))
-           out)))
-(printf "\ncheckpoint: ~a.safetensors (+ .rktd sidecar)\n" checkpoint)
+(module+ main
+  (require (only-in racket/file make-directory*)
+           (only-in racket/format ~r)
+           (only-in racket/path path-only)
+           torch
+           (only-in torch/audio/librispeech
+                    librispeech-utterances load-utterance utterance-transcript)
+           torch/nn
+           (only-in torch/scribblings/examples/07-asr
+                    evaluate greedy-decode pick-device train-librispeech
+                    transcribe utterance-features))
 
-(define held (list-tail all (- (length all) held-out)))
+  (define epochs (env-number "EPOCHS" 20))
+  (define limit (env-number "LIMIT" #f))
+  (define batch (env-number "BATCH" 16))
+  (define n-embd (env-number "EMBD" 256))
+  (define workers (env-number "WORKERS" 0 exact-nonnegative-integer?))
+  (define checkpoint (or (getenv "CHECKPOINT") "checkpoints/asr-dev-clean"))
+  (define held-out 3)
 
-(for ([u (in-list held)])
-  (define-values (samples rate) (load-utterance u))
-  (define features (utterance-features samples rate))
-  (printf "\nref:     ~a\nctc:     ~a\nattend:  ~a\n"
-          (utterance-transcript u)
-          (greedy-decode net vocab features)
-          (transcribe net vocab features)))
+  (define device (pick-device))
+  (printf "device: ~a\n" device)
 
-(define-values (corpus-wer corpus-cer) (evaluate net vocab held))
-(printf "\nheld-out (~a utterances): wer ~a  cer ~a\n"
-        held-out
-        (~r (exact->inexact corpus-wer) #:precision '(= 4))
-        (~r (exact->inexact corpus-cer) #:precision '(= 4)))
+  (define all (librispeech-utterances "dev-clean"))
+  (define train-limit
+    (min (or limit (- (length all) held-out)) (- (length all) held-out)))
+  (define-values (net vocab)
+    (train-librispeech #:epochs epochs #:limit train-limit #:batch batch
+                       #:n-embd n-embd #:device device #:workers workers))
+  (reclaim-native-memory!)
+  (let ([dir (path-only (string->path checkpoint))])
+    (when dir (make-directory* dir)))
+  (save-state! net (string-append checkpoint ".safetensors"))
+  (call-with-output-file (string-append checkpoint ".rktd") #:exists 'replace
+    (lambda (out)
+      (write (list (cons 'vocab (list->string (vector->list vocab)))
+                   (cons 'n-mels 80)
+                   (cons 'n-embd n-embd)
+                   (cons 'n-head 4)
+                   (cons 'epochs epochs)
+                   (cons 'batch batch)
+                   (cons 'limit train-limit))
+             out)))
+  (printf "\ncheckpoint: ~a.safetensors (+ .rktd sidecar)\n" checkpoint)
+
+  (define held (list-tail all (- (length all) held-out)))
+
+  (for ([u (in-list held)])
+    (define-values (samples rate) (load-utterance u))
+    (define features (utterance-features samples rate))
+    (printf "\nref:     ~a\nctc:     ~a\nattend:  ~a\n"
+            (utterance-transcript u)
+            (greedy-decode net vocab features)
+            (transcribe net vocab features)))
+
+  (define-values (corpus-wer corpus-cer) (evaluate net vocab held))
+  (printf "\nheld-out (~a utterances): wer ~a  cer ~a\n"
+          held-out
+          (~r (exact->inexact corpus-wer) #:precision '(= 4))
+          (~r (exact->inexact corpus-cer) #:precision '(= 4))))

@@ -193,8 +193,7 @@
 (define audio-transform/c
   (-> tensor? exact-positive-integer? features/c))
 
-(define (decoded utterances i transform)
-  (define u (vector-ref utterances i))
+(define (decoded u transform)
   (define-values (samples rate) (load-audio (utterance-path u)))
   (values (transform samples rate) (utterance-transcript u)))
 
@@ -206,11 +205,11 @@
   (set! utterances (vector->immutable-vector (list->vector utts)))
   #:length (vector-length utterances)
   #:ref (i)
-  (decoded utterances i transform)
+  (decoded (vector-ref utterances i) transform)
   #:batch (indices collate)
   (define-values (features transcripts)
     (for/lists (features transcripts) ([i (in-list (indices->list indices))])
-      (decoded utterances i transform)))
+      (decoded (vector-ref utterances i) transform)))
   (if (default-collate? collate)
       (padded-batch features transcripts)
       (collate (map list features transcripts))))
