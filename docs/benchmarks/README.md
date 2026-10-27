@@ -279,7 +279,9 @@ checkout without `torch/foreign/raw/native-location.rkt` has its shim read from
 its `native-libs/`. A checkout older than the `rktorch-step` event
 (its `torch` has neither `torch/private/step-log.rkt` nor its compiled `.zo`) logs no steps, so a child of
 such a checkout that completes is timed whole, from the end of its compile
-to its exit (`timing` `wall`, no `error`). A child whose `torch` has the
+to its exit (`timing` `wall`, no `error`). A workload that logs its own
+`rktorch-step` events (`cifar-loader`, via `log-batch!` in
+`scripts/bench/workloads/cifar-pipeline.rkt`) is timed by those steps on any checkout. A child whose `torch` has the
 hook, or that does not name its `torch`, and logs no steps is an `error`,
 never a whole-run time. So is a child that exits non-zero, even after
 logging every step, and one still running after its time limit, which is

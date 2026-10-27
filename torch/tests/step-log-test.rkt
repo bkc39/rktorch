@@ -42,10 +42,10 @@
     (check-true (apply <= (map (lambda (e) (vector-ref e 1)) events))))
 
   (test-case "the host stamp is taken before a slow settle, not after it"
-    (define p (fresh-parameter))
+    (define params (make-list 10000 (fresh-parameter)))
     (define called (current-inexact-monotonic-milliseconds))
     (match-define (list (vector _ ended _ host-done))
-      (logged-steps (lambda () (log-optimizer-step! 'slow (make-list 100000 p)))))
+      (logged-steps (lambda () (log-optimizer-step! 'slow params))))
     (check-true (< (- host-done called) (- ended host-done))
                 "the stamp sits nearer the call than the step's end"))
 
