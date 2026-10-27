@@ -163,15 +163,15 @@
     (check-equal? (released-during (lambda () (zero-grads! opt #:set-to-none? #f)))
                   (length (parameters net))))
 
-  (bounded-test "a raise on the third gradient fetch releases the two already taken"
+  (bounded-test "a raise on the first op after the batched fetch releases every handle it took"
     (define ps (parameters (backed-up 3 2)))
     (define (raise-injected) (raise 'injected))
     (check-equal? (released-during
                    (lambda ()
                      (with-handlers ([(lambda (e) (eq? e 'injected)) void])
                        (clip-grad-norm! ps 0.1)))
-                   #:also (on-nth 'op-returned 3 raise-injected))
-                  2))
+                   #:also (on-nth 'op-returned 1 raise-injected))
+                  (length ps)))
 
   (define mib (* 1024 1024))
 

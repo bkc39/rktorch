@@ -6,6 +6,7 @@
            (only-in "../foreign/autograd-ops.rkt" with-gradient with-gradients)
            (only-in "../foreign/raw/fault.rkt" with-crossing-hook)
            (only-in "../foreign/raw/memory.rkt" adopted-bytes)
+           (only-in "../foreign/structs.rkt" tensor-handle)
            (only-in "../foreign/raw/pressure-settings.rkt"
                     native-collect-at-troughs)
            (only-in "../main.rkt"
@@ -63,11 +64,11 @@
 
   (bounded-test "adopts what the one-at-a-time path adopts"
     (define batched
-      (with-gradients ([qs gs] (params-of (layers 2))) (map adopted-bytes gs)))
+      (with-gradients ([qs gs] (params-of (layers 2))) (map (lambda (g) (adopted-bytes (tensor-handle g))) gs)))
     (define one-by-one
       (for/list ([p (in-list (params-of (layers 2)))])
         (define seen #f)
-        (with-gradient (g p) (set! seen (adopted-bytes g)))
+        (with-gradient (g p) (set! seen (adopted-bytes (tensor-handle g))))
         seen))
     (check-equal? batched one-by-one))
 

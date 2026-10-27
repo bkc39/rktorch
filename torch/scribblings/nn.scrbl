@@ -718,7 +718,8 @@ bits. @racket[#:fused? #t], for @racket[sgd], @racket[adam] and
 rounds differently within float tolerance. The foreach update of
 @racket[adam], @racket[adamw], @racket[rmsprop], and of @racket[sgd] with
 Nesterov momentum or weight decay, keeps one scratch tensor per parameter
-beside its state. No step writes a gradient.
+beside its state, and that of @racket[rmsprop] with weight decay a second.
+No step writes a gradient.
 
 @torch-examples[
 (manual-seed! 0)

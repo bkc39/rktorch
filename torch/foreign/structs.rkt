@@ -17,7 +17,8 @@
                   tensor->pytorch-repr
                   tensor-tree->pytorch-repr)
          (only-in "raw/fault.rkt" native-fault? note-native-fault!)
-         (only-in "raw/memory.rkt" tr-tensor-free/checked)
+         (only-in "raw/memory.rkt"
+                  tr-tensor-free/checked tr-tensors-free/checked)
          (only-in "raw/syntax.rkt" Tensor?)
          (only-in "raw/tensor.rkt"
                   dtype-code->symbol
@@ -35,7 +36,8 @@
          handle->string
          handle->repr
          wrap-tensor
-         tensor-free!)
+         tensor-free!
+         tensors-free!)
 
 (define (shape->string dims)
   (if (null? dims) "scalar" (string-join (map number->string dims) "x")))
@@ -220,3 +222,17 @@
   (define h (tensor-handle t))
   (when (cpointer-has-tag? h 'Tensor)
     (free-handle! h)))
+
+(define (tensors-free! ts)
+  (define hs
+    (for*/list ([t (in-list ts)]
+                [h (in-value (tensor-handle t))]
+                #:when (cpointer-has-tag? h 'Tensor))
+      h))
+  (unless (null? hs)
+    (dynamic-wind
+     void
+     (lambda () (parameterize-break #f (tr-tensors-free/checked hs)))
+     (lambda ()
+       (for ([h (in-list hs)])
+         (set-cpointer-tag! h 'Tensor-freed))))))

@@ -198,6 +198,9 @@ TEST(TorchrktAutograd, TensorsGradMatchesTheOneAtATimeQueries) {
             0)
       << tr_last_error();
   EXPECT_EQ(grads[1], nullptr);
+  EXPECT_EQ(nbytes[1], 0) << "a missing gradient's outputs are defined";
+  EXPECT_EQ(types[1], static_cast<int>(TR_DEVICE_CPU));
+  EXPECT_EQ(indices[1], 0);
   for (size_t i : {size_t{0}, size_t{2}}) {
     ASSERT_NE(grads[i], nullptr);
     const Handle one(tr_tensor_grad(ts[i]));

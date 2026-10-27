@@ -62,7 +62,7 @@
     (~> t (reshape -1) tensor->list))
 
   (define (close? a b)
-    (<= (abs (- a b)) (+ 1e-6 (* 1e-5 (abs b)))))
+    (<= (abs (- a b)) (~> (abs b) (* 1e-5) (+ 1e-6))))
 
   (define (check-close xss yss what)
     (check-equal? (map length xss) (map length yss) what)
@@ -209,8 +209,9 @@
 
   (bounded-test "asking for fused and foreach together is the caller's violation"
     (define m (violation (lambda ()
-                           (adam (parameters (Linear 2 2))
-                                 #:foreach? #t #:fused? #t))))
+                           (~> (Linear 2 2)
+                               parameters
+                               (adam #:foreach? #t #:fused? #t)))))
     (check-regexp-match #rx"fused and foreach cannot both be requested" m)
     (check-regexp-match #rx"blaming: [^\n]*optim-multi-tensor-test" m))
 

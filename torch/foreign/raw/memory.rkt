@@ -3,10 +3,11 @@
 (require (for-syntax racket/base
                      ;; whole-module require on purpose
                      syntax/parse/pre)
-         (only-in ffi/unsafe _double _enum _fun _int _int64 _ptr _void)
+         (only-in ffi/unsafe _double _enum _fun _int _int64 _list _ptr _void)
          (only-in ffi/unsafe/alloc allocator deallocator)
          (only-in ffi/unsafe/atomic call-as-atomic)
          (only-in racket/list remove-duplicates)
+         (only-in racket/match match)
          (only-in "../device-type.rkt" device device-index device-type)
          (only-in "collector.rkt"
                   collect-and-wait!
@@ -31,11 +32,13 @@
 (provide adopted-bytes
          tr-tensor-free/finalizer
          tr-tensor-free/checked
+         tr-tensors-free/checked
          collect-and-drain!
          swallow-and-count-failure
          finalizer-failures
          finalizer-diagnostics
          forget-gradient-adoptions!
+         gradients-allocator
          tensor-allocator
          tensor-allocator/gradient
          tensor-allocator/no-retry
@@ -70,6 +73,21 @@
       (race-point free-unaccounted t)
       (release t)
       (race-point free-released t))))
+
+(define-torch tr-tensors-free/unwrapped
+  (_fun (hs : (_list i _Tensor)) (_int64 = (length hs)) -> _void)
+  #:c-id tr_tensors_free)
+
+(define forget-finalizer! ((deallocator) void))
+
+(define (tr-tensors-free/checked hs)
+  (for ([h (in-list hs)])
+    (unaccount! h)
+    (race-point free-unaccounted h))
+  (for-each forget-finalizer! hs)
+  (tr-tensors-free/unwrapped hs)
+  (for ([h (in-list hs)])
+    (race-point free-released h)))
 
 (define finalizer-failure-count (box 0))
 (define captured-failures (box '()))
@@ -388,6 +406,31 @@
    (lambda ()
      (define handles (apply raw-fn args))
      (and handles (map adopt-handle handles)))))
+
+(define (adopt-rows rows)
+  (and rows
+       (for/list ([row (in-list rows)])
+         (match row
+           [(cons #f _) row]
+           [(cons h placement) (cons (adopt-handle h) placement)]))))
+
+(define (account-gradients! params rows)
+  (define devs
+    (for/list ([p (in-list params)] [row (in-list rows)])
+      (match row
+        [(cons #f _) #f]
+        [(list h nbytes type index)
+         (define dev (device type (if (eq? type 'cpu) 0 index)))
+         (record-allocation! h nbytes dev
+                             #:adopt (lambda () (adopt-gradient! (list p) h)))
+         dev])))
+  (for ([dev (in-list (remove-duplicates (filter values devs)))])
+    (collect-under-pressure! dev))
+  (map car rows))
+
+(define ((gradients-allocator raw-fn) params)
+  (define rows (call-as-atomic (lambda () (adopt-rows (raw-fn params)))))
+  (and rows (account-gradients! params rows)))
 
 (define ((accounted-outputs wrapped) . args)
   (define handles (apply wrapped args))

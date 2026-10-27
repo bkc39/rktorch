@@ -125,6 +125,9 @@ int tr_tensors_grad(tr_tensor* const* tensors, int64_t n, tr_tensor** grads,
   if (n > 0 && (!grads || !nbytes || !device_type || !device_index)) {
     return torchrkt::null_arg_status("tr_tensors_grad");
   }
+  std::fill(nbytes, nbytes + n, 0);
+  std::fill(device_type, device_type + n, static_cast<int>(TR_DEVICE_CPU));
+  std::fill(device_index, device_index + n, 0);
   if (torchrkt::tensors_arg_status("tr_tensors_grad", tensors, n) != 0) {
     return 1;
   }

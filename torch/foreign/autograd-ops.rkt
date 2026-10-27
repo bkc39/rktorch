@@ -7,7 +7,7 @@
                                 addcdiv! addcmul! copy! lerp-tensor!))
          (only-in "../private/contract.rkt"
                   define/checked-out define/contract-out)
-         (only-in "error.rkt" check-handle check-ok)
+         (only-in "error.rkt" check-handle check-ok check-outputs)
          (only-in "raw/autograd.rkt"
                   tr-is-grad-enabled/raw
                   tr-set-grad-enabled/raw
@@ -20,12 +20,15 @@
                   tr-tensor-requires-grad/raw
                   tr-tensor-sub!/raw
                   tr-tensor-zero!/raw
+                  tr-tensors-grad/raw
                   tr-tensors-reset-grad/raw)
          (only-in "raw/memory.rkt" forget-gradient-adoptions!)
          (only-in "raw/pressure.rkt"
                   call-with-ledger collect-at-trough! native-collect-at-troughs
                   refresh-shadows!)
-         (only-in "structs.rkt" tensor? tensor-free! wrap-tensor))
+         (only-in "structs.rkt"
+                  tensor-impl tensor-impl-shape tensor? tensor-free! tensors-free!
+                  wrap-tensor))
 
 (provide collect-at-forward-trough!
          with-gradient
@@ -126,8 +129,22 @@
                rc))
             'zero-grads!))
 
+(define (fetch-gradients ts)
+  (for/list ([t (in-list ts)]
+             [h (in-list (check-outputs 'grad (tr-tensors-grad/raw ts)))]
+             #:when h)
+    (cons t (tensor-impl h (tensor-impl-shape t)))))
+
 (define (call-with-gradients ts proc)
-  (error 'unimplemented))
+  (define pairs '())
+  (dynamic-wind
+   void
+   (lambda ()
+     (parameterize-break #f
+       (set! pairs (fetch-gradients ts)))
+     (proc (map car pairs) (map cdr pairs)))
+   (lambda ()
+     (tensors-free! (map cdr pairs)))))
 
 (define (call-with-gradient t proc)
   (define g #f)
