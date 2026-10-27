@@ -144,18 +144,29 @@
     (tensor rows #:device filter-device #:dtype (and buildable? filter-dtype)))
   (if buildable? built (to-dtype built filter-dtype)))
 
+(define (filterbank-fits? filterbank samples n-fft n-mels)
+  (error 'unimplemented))
+
 (define/contract-out (log-mel-spectrogram samples ;; noqa
                                       #:sample-rate sample-rate
                                       #:n-fft [n-fft 400]
                                       #:hop-length [hop-length 160]
                                       #:n-mels [n-mels 80]
-                                      #:eps [eps 1e-6])
-  (->* (tensor? #:sample-rate exact-positive-integer?)
-       (#:n-fft exact-positive-integer?
-        #:hop-length exact-positive-integer?
-        #:n-mels exact-positive-integer?
-        #:eps (and/c rational? (>=/c 0)))
-       tensor?)
+                                      #:eps [eps 1e-6]
+                                      #:filterbank [filterbank #f])
+  (->i ([samples tensor?] #:sample-rate [sample-rate exact-positive-integer?])
+       (#:n-fft [n-fft exact-positive-integer?]
+        #:hop-length [hop-length exact-positive-integer?]
+        #:n-mels [n-mels exact-positive-integer?]
+        #:eps [eps (and/c rational? (>=/c 0))]
+        #:filterbank [filterbank (or/c #f tensor?)])
+       #:pre/name (samples n-fft n-mels filterbank)
+       "filterbank is [n-fft/2+1, n-mels] in samples' dtype, on samples' device"
+       (or (unsupplied-arg? filterbank) (not filterbank)
+           (filterbank-fits? filterbank samples
+                             (if (unsupplied-arg? n-fft) 400 n-fft)
+                             (if (unsupplied-arg? n-mels) 80 n-mels)))
+       [result tensor?])
   (define samples-device (device samples))
   (define spec
     (spectrogram samples #:n-fft n-fft #:hop-length hop-length

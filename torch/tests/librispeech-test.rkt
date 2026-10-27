@@ -5,12 +5,14 @@
            (only-in file/tar tar-gzip)
            (only-in racket/file delete-directory/files make-directory*)
            (only-in racket/runtime-path #%datum define-runtime-path)
+           (only-in racket/string string-prefix?)
            (only-in "../private/util.rkt" with-temporary-directory)
            (only-in "../audio/librispeech.rkt"
+                    librispeech-fixture-utterance librispeech-root
                     librispeech-utterances load-librispeech-fixture
                     load-utterance parse-trans-line utterance-id
                     utterance-path utterance-transcript)
-           (only-in "../main.rkt" tensor-shape))
+           (only-in "../main.rkt" tensor->list tensor-shape))
 
   (define-runtime-path fixture-flac
     "../audio/fixtures/librispeech-1272-128104-0000.flac")
@@ -93,6 +95,43 @@
             (not (regexp-match? #rx"librispeech-extract"
                                 (path->string p))))
           "failed staging directories are cleaned up"))))
+
+  (test-case "L14: the root holds LibriSpeech/<split>, ids sort as strings"
+    (with-temporary-directory (scratch)
+      (parameterize ([current-environment-variables
+                      (environment-variables-copy
+                       (current-environment-variables))])
+        (putenv "RKTORCH_AUDIO_DIR" (path->string scratch))
+        (define build (build-path scratch "build"))
+        (for ([speaker (in-list '("9" "10"))] [chapter (in-list '("9" "1"))])
+          (define dir (build-path build "LibriSpeech" "dev-clean" speaker chapter))
+          (make-directory* dir)
+          (define id (format "~a-~a-0000" speaker chapter))
+          (copy-file fixture-flac (build-path dir (format "~a.flac" id)))
+          (call-with-output-file (build-path dir (format "~a-~a.trans.txt" speaker chapter))
+            (lambda (out) (fprintf out "~a SPEAKER ~a\n" id speaker))))
+        (define cache-dir (build-path scratch "librispeech"))
+        (make-directory* cache-dir)
+        (parameterize ([current-directory build])
+          (tar-gzip (build-path cache-dir "dev-clean.tar.gz") "LibriSpeech"))
+        (define root (librispeech-root "dev-clean"))
+        (check-true (directory-exists? (build-path root "LibriSpeech" "dev-clean")))
+        (define us (librispeech-utterances "dev-clean"))
+        (for ([u (in-list us)])
+          (check-true (string-prefix? (path->string (simplify-path (utterance-path u)))
+                                      (path->string (simplify-path root)))
+                      (format "~a is outside ~a" (utterance-path u) root)))
+        (check-equal? (map utterance-id us) '("10-1-0000" "9-9-0000")))))
+
+  (test-case "the committed fixture as an utterance"
+    (define u (librispeech-fixture-utterance))
+    (define-values (samples rate transcript) (load-librispeech-fixture))
+    (check-equal? (utterance-id u) "1272-128104-0000")
+    (check-equal? (utterance-transcript u) transcript)
+    (define-values (loaded loaded-rate) (load-utterance u))
+    (check-equal? loaded-rate 16000)
+    (check-equal? (tensor-shape loaded) (tensor-shape samples))
+    (check-equal? (tensor->list loaded) (tensor->list samples)))
 
   (when (getenv "RKTORCH_LIBRISPEECH_LIVE")
     (test-case "dev-clean enumerates and loads (live)"

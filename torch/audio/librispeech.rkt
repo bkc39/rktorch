@@ -2,10 +2,14 @@
 
 (require (only-in file/gunzip gunzip-through-ports)
          (only-in file/untar untar)
-         (only-in racket/contract/base -> any cons/c listof or/c)
+         (only-in racket/contract/base
+                  -> ->* any cons/c flat-named-contract listof or/c)
          (only-in racket/list first)
          (only-in racket/runtime-path #%datum define-runtime-path)
          (only-in racket/string string-split string-trim)
+         (only-in "../data/dataset.rkt"
+                  define-dataset default-collate? indices->list)
+         (only-in "../foreign.rkt" cat device dtype shape stack tensor? zeros)
          (only-in "../private/contract.rkt" define/contract-out)
          (only-in "../private/util.rkt" with-temporary-directory)
          (only-in "data.rkt" download-audio-cached load-audio))
@@ -106,6 +110,10 @@
         (rename-file-or-directory staging dest))))
   (build-path dest "LibriSpeech" split))
 
+(define/contract-out (librispeech-root split) ;; noqa
+  (-> split/c path?)
+  (error 'unimplemented))
+
 (define/contract-out (librispeech-utterances split) ;; noqa
   (-> split/c (listof utterance?))
   (define root (extracted-root split))
@@ -147,3 +155,26 @@
           (cdr (parse-trans-line
                 (with-input-from-file fixture-trans
                   (lambda () (read-line (current-input-port) 'any)))))))
+
+(define/contract-out (librispeech-fixture-utterance) ;; noqa
+  (-> utterance?)
+  (error 'unimplemented))
+
+(define features/c
+  (flat-named-contract 'tensor-with-a-time-dimension
+                       (lambda (v) (and (tensor? v) (pair? (shape v))))))
+
+(define audio-transform/c
+  (-> tensor? exact-positive-integer? features/c))
+
+(define-dataset librispeech (utterances transform) ;; noqa
+  #:contract (->* [(listof utterance?)]
+                  [#:transform audio-transform/c]
+                  librispeech?)
+  #:init (utts #:transform [transform (lambda (samples _rate) samples)])
+  (set! utterances (vector->immutable-vector (list->vector utts)))
+  #:length (vector-length utterances)
+  #:ref (i)
+  (error 'unimplemented)
+  #:batch (indices collate)
+  (error 'unimplemented))

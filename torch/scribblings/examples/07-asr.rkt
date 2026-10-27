@@ -37,8 +37,9 @@ CTC aligns, attention spells.
          (only-in torch/text/data decode encode text->vocab))]
 
 @chunk[<r07-provide>
-(provide asr pick-device run-example greedy-decode transcribe
-         utterance-features hybrid-batch-loss train-librispeech evaluate)]
+(provide asr asr-loader pick-device run-example greedy-decode transcribe
+         mel-frames utterance-features hybrid-batch-loss train-librispeech
+         evaluate)]
 
 The transformer half of the model is the library's: the encoder and
 decoder blocks are @racket[TransformerEncoderLayer] and
@@ -284,6 +285,9 @@ so a length @racket[t] signal yields @racket[(downsampled-length t)]
 encoder frames --- the per-utterance CTC input lengths.
 
 @chunk[<r07-features>
+(define (mel-frames samples rate)
+  (error 'unimplemented))
+
 (define (utterance-features samples rate)
   (~> (ref samples 0) (log-mel-spectrogram #:sample-rate rate) (unsqueeze 0)))
 
@@ -366,6 +370,10 @@ it outside whatever extent built the net; it runs on the mels' device.
                      (reshape dec-out -1)))
     (+ (* ctc-weight loss-ctc)
        (* (- 1.0 ctc-weight) loss-ce))))]
+
+@chunk[<r07-loader>
+(define (asr-loader utterances #:batch-size [b 16] #:workers [w 0])
+  (error 'unimplemented))]
 
 @bold{The deterministic core.} @racket[run-example] is the seeded,
 offline entry the test harness and the PyTorch parity twin both drive:
@@ -600,6 +608,7 @@ reference:
 <r07-device>
 <r07-features>
 <r07-loss>
+<r07-loader>
 <r07-run>
 <r07-decode>
 <r07-transcribe>
