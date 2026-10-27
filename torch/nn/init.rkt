@@ -76,4 +76,10 @@
        #:pre/name (a b) "#:a is below #:b"
        (< (supplied-or a -2.0) (supplied-or b 2.0))
        [result tensor?])
-  (error 'trunc-normal-init "not implemented"))
+  (define (cdf v)
+    (/ (+ 1.0 (erf (/ (- v mean) std (sqrt 2.0)))) 2.0))
+  (~> (uniform-init dims (- (* 2.0 (cdf a)) 1.0) (- (* 2.0 (cdf b)) 1.0))
+      erfinv
+      (* (* std (sqrt 2.0)))
+      (+ (exact->inexact mean))
+      (clamp #:min a #:max b)))

@@ -291,7 +291,7 @@
         [size (theta) (grid-size/c theta)])
        (#:align-corners? [align-corners? boolean?])
        [result tensor?])
-  (error 'affine-grid "not implemented"))
+  (g:affine-grid-generator theta size align-corners?))
 
 (define interpolation-modes '(bilinear nearest bicubic))
 (define padding-modes '(zeros border reflection))
@@ -306,10 +306,13 @@
         #:padding-mode [padding-mode (or/c 'zeros 'border 'reflection)]
         #:align-corners? [align-corners? boolean?])
        [result tensor?])
-  (error 'grid-sample "not implemented"))
+  (g:grid-sampler-2d input grid
+                     (index-of interpolation-modes mode)
+                     (index-of padding-modes padding-mode)
+                     align-corners?))
 
 (define/contract-out (upsample-bicubic2d input size #:align-corners? [align-corners? #f]) ;; noqa
   (->* [float-batch/c (list/c exact-positive-integer? exact-positive-integer?)]
        [#:align-corners? boolean?]
        tensor?)
-  (error 'upsample-bicubic2d "not implemented"))
+  (g:upsample-bicubic2d input size align-corners? #f #f))
