@@ -14,14 +14,13 @@
                   evaluate greedy-decode pick-device train-librispeech
                   transcribe utterance-features))
 
-(define (env-number name default)
+(define (env-number name default #:accept [accept? exact-positive-integer?])
   (define v (getenv name))
   (cond [(not v) default]
         [(string->number v)
          => (lambda (n)
-              (unless (exact-positive-integer? n)
-                (error 'train-asr "~a must be a positive integer: ~a"
-                       name v))
+              (unless (accept? n)
+                (error 'train-asr "~a must be ~a: ~a" name (object-name accept?) v))
               n)]
         [else (error 'train-asr "~a is not a number: ~a" name v)]))
 
@@ -29,6 +28,7 @@
 (define limit (env-number "LIMIT" #f))
 (define batch (env-number "BATCH" 16))
 (define n-embd (env-number "EMBD" 256))
+(define workers (env-number "WORKERS" 0 #:accept exact-nonnegative-integer?))
 (define checkpoint (or (getenv "CHECKPOINT") "checkpoints/asr-dev-clean"))
 (define held-out 3)
 
@@ -40,7 +40,7 @@
   (min (or limit (- (length all) held-out)) (- (length all) held-out)))
 (define-values (net vocab)
   (train-librispeech #:epochs epochs #:limit train-limit #:batch batch
-                     #:n-embd n-embd #:device device))
+                     #:n-embd n-embd #:device device #:workers workers))
 (reclaim-native-memory!)
 (let ([dir (path-only (string->path checkpoint))])
   (when dir (make-directory* dir)))

@@ -4,7 +4,8 @@
          (only-in file/untar untar)
          (only-in racket/contract/base
                   -> ->* any cons/c flat-named-contract listof or/c)
-         (only-in racket/list first)
+         (only-in racket/list drop-right first last)
+         (only-in racket/match match-define)
          (only-in racket/runtime-path #%datum define-runtime-path)
          (only-in racket/string string-split string-trim)
          (only-in "../data/dataset.rkt"
@@ -91,7 +92,8 @@
 
 ;; extract into a private staging directory and publish by rename, so a
 ;; failed or concurrent extraction can never surface a partial corpus
-(define (extracted-root split)
+(define/contract-out (librispeech-root split) ;; noqa
+  (-> split/c path?)
   (define archive (split-archive split))
   (define-values (parent _name _dir?) (split-path archive))
   (define dest (build-path parent split))
@@ -108,15 +110,11 @@
                        (lambda (e)
                          (unless (directory-exists? dest) (raise e)))])
         (rename-file-or-directory staging dest))))
-  (build-path dest "LibriSpeech" split))
-
-(define/contract-out (librispeech-root split) ;; noqa
-  (-> split/c path?)
-  (error 'unimplemented))
+  dest)
 
 (define/contract-out (librispeech-utterances split) ;; noqa
   (-> split/c (listof utterance?))
-  (define root (extracted-root split))
+  (define root (build-path (librispeech-root split) "LibriSpeech" split))
   (sort
    (for*/list ([speaker (in-list (directory-list root))]
                #:when (directory-exists? (build-path root speaker))
@@ -148,21 +146,48 @@
 (define-runtime-path fixture-trans
   "fixtures/librispeech-1272-128104-0000.txt")
 
+(define (fixture-transcript)
+  (cdr (parse-trans-line
+        (with-input-from-file fixture-trans
+          (lambda () (read-line (current-input-port) 'any))))))
+
 (define/contract-out (load-librispeech-fixture) ;; noqa
   (-> any)
   (define-values (samples rate) (load-audio fixture-flac))
-  (values samples rate
-          (cdr (parse-trans-line
-                (with-input-from-file fixture-trans
-                  (lambda () (read-line (current-input-port) 'any)))))))
+  (values samples rate (fixture-transcript)))
 
 (define/contract-out (librispeech-fixture-utterance) ;; noqa
   (-> utterance?)
-  (error 'unimplemented))
+  (utterance "1272-128104-0000" fixture-flac (fixture-transcript)))
 
 (define features/c
   (flat-named-contract 'tensor-with-a-time-dimension
                        (lambda (v) (and (tensor? v) (pair? (shape v))))))
+
+(define (leading-dimensions features)
+  (drop-right (shape features) 1))
+
+(define (placement features)
+  (list (leading-dimensions features) (dtype features) (device features)))
+
+(define (padded-batch features transcripts)
+  (match-define (cons head tail) features)
+  (match-define (list lead head-dtype head-device) (placement head))
+  (for ([f (in-list tail)]
+        #:unless (equal? (placement f) (placement head)))
+    (raise-arguments-error 'librispeech "items differ outside the last dimension"
+                           "first item" (list (shape head) head-dtype head-device)
+                           "differing item" (list (shape f) (dtype f) (device f))))
+  (define lengths (map (lambda (f) (last (shape f))) features))
+  (define t-max (apply max lengths))
+  (define padded
+    (for/list ([f (in-list features)] [t (in-list lengths)])
+      (if (= t t-max)
+          f
+          (cat (list f (apply zeros #:dtype head-dtype #:device head-device
+                              (append lead (list (- t-max t)))))
+               (length lead)))))
+  (values (stack padded) lengths transcripts))
 
 (define audio-transform/c
   (-> tensor? exact-positive-integer? features/c))
@@ -175,6 +200,15 @@
   (set! utterances (vector->immutable-vector (list->vector utts)))
   #:length (vector-length utterances)
   #:ref (i)
-  (error 'unimplemented)
+  (define u (vector-ref utterances i))
+  (define-values (samples rate) (load-audio (utterance-path u)))
+  (values (transform samples rate) (utterance-transcript u))
   #:batch (indices collate)
-  (error 'unimplemented))
+  (define items
+    (for/list ([i (in-list (indices->list indices))])
+      (define u (vector-ref utterances i))
+      (define-values (samples rate) (load-audio (utterance-path u)))
+      (list (transform samples rate) (utterance-transcript u))))
+  (if (default-collate? collate)
+      (padded-batch (map car items) (map cadr items))
+      (collate items)))

@@ -109,8 +109,9 @@
           (define row (ref x j))
           (define time (sub1 (length (shape row))))
           (check-equal? (record (narrow row time 0 t)) (record (car it)))
-          (check-true (andmap zero? (flatten (tensor->list (narrow row time t (- t-max t)))))
-                      (format "row ~a has a non-zero tail" j))))))
+          (define tail
+            (if (< t t-max) (flatten (tensor->list (narrow row time t (- t-max t)))) '()))
+          (check-true (andmap zero? tail) (format "row ~a has a non-zero tail" j))))))
 
   (test-case "L6: an int64 index tensor batches like its list"
     (with-utterances (us)

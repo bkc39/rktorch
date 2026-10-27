@@ -6,7 +6,7 @@
 
 The speech capstone: a hybrid CTC/attention recognizer over LibriSpeech
 utterances, the whole arc composed --- FLAC decode
-(@racket[load-utterance]), the @racket[log-mel-spectrogram] front-end, a
+(@racket[librispeech]), the @racket[log-mel-spectrogram] front-end, a
 dilated-convolution encoder crowned with bidirectional self-attention, an
 autoregressive character decoder attending across into the audio, and
 @racket[wer]/@racket[cer] scoring.
@@ -25,14 +25,17 @@ CTC aligns, attention spells.
 
 @chunk[<r07-require>
 (require (only-in racket/list make-list)
-         (only-in racket/sequence in-slice)
+         (only-in racket/match match-define)
          (only-in racket/string string-split)
          torch torch/nn
          (only-in torch/audio/data audio-info)
-         (only-in torch/audio/functional edit-distance log-mel-spectrogram)
+         (only-in torch/audio/functional
+                  edit-distance log-mel-spectrogram mel-filterbank)
          (only-in torch/audio/librispeech
-                  librispeech-utterances load-librispeech-fixture
-                  load-utterance utterance-path utterance-transcript)
+                  librispeech librispeech-fixture-utterance
+                  librispeech-utterances load-utterance utterance-path
+                  utterance-transcript)
+         (only-in torch/data/loader dataloader)
          (only-in torch/audio/metrics cer wer)
          (only-in torch/text/data decode encode text->vocab))]
 
@@ -277,19 +280,32 @@ bug (@hyperlink["https://github.com/bkc39/rktorch/issues/258"]{#258}).
 (define (pick-device)
   (accelerator-if-available))]
 
-@bold{Features and teacher forcing.} One utterance becomes a
-@tt{[1, 80, T]} batch. For training, the transcript becomes two shifted
+@bold{Features and teacher forcing.} One utterance becomes an
+@tt{[80, T]} matrix of mel frames, and a @tt{[1, 80, T]} batch on its
+own. The mel filters depend only on the sample rate, so the 16 kHz bank
+LibriSpeech needs is built once, as a module-level tensor, and handed to
+@racket[log-mel-spectrogram] with @racket[#:filterbank]; any other rate
+builds its own. For training, the transcript becomes two shifted
 id sequences: the decoder @emph{reads} @tt{[sos, chars]} and must
 @emph{predict} @tt{[chars, eos]}. The strided front end downsamples 4x,
 so a length @racket[t] signal yields @racket[(downsampled-length t)]
 encoder frames --- the per-utterance CTC input lengths.
 
 @chunk[<r07-features>
+(define bank-16k
+  (mel-filterbank #:n-freqs 201 #:n-mels 80 #:sample-rate 16000 #:device 'cpu))
+
 (define (mel-frames samples rate)
-  (error 'unimplemented))
+  (log-mel-spectrogram
+   (ref samples 0)
+   #:sample-rate rate
+   #:filterbank (if (= rate 16000)
+                    bank-16k
+                    (mel-filterbank #:n-freqs 201 #:n-mels 80 #:sample-rate rate
+                                    #:device (device samples)))))
 
 (define (utterance-features samples rate)
-  (~> (ref samples 0) (log-mel-spectrogram #:sample-rate rate) (unsqueeze 0)))
+  (unsqueeze (mel-frames samples rate) 0))
 
 (define (downsampled-length t)
   (~> (add1 t) (quotient 2) add1 (quotient 2)))
@@ -297,9 +313,10 @@ encoder frames --- the per-utterance CTC input lengths.
 (define (transcript-ids vocab transcript)
   (map inexact->exact (tensor->list (encode vocab transcript))))]
 
-@bold{The hybrid loss over a padded batch.} Each utterance's mel matrix
-pads with zero frames to the widest in the batch and the batch stacks to
-@tt{[B, 80, T]}; the id sequences pad likewise --- the decoder input with
+@bold{The hybrid loss over a padded batch.} The batch arrives padded:
+each utterance's mel matrix padded with zero frames to the widest and
+stacked to @tt{[B, 80, T]}, beside the true frame count of every row.
+The id sequences pad here --- the decoder input with
 @tt{eos} (never attended by anything the loss reads), the decoder target
 with @tt{-100} (the @racket[cross-entropy] ignore index, so padded
 positions contribute nothing), the CTC targets with @tt{0} (only the
@@ -320,28 +337,17 @@ it outside whatever extent built the net; it runs on the mels' device.
 (define (pad-row ids fill s-max)
   (append ids (make-list (- s-max (length ids)) fill)))
 
-(define (hybrid-batch-loss net vocab mels transcripts)
-  (when (null? mels)
-    (error 'hybrid-batch-loss "no mels in the batch"))
-  (unless (= (length mels) (length transcripts))
-    (error 'hybrid-batch-loss "~a mels but ~a transcripts"
-           (length mels) (length transcripts)))
-  (with-default-device (device (car mels))
+(define (hybrid-batch-loss net vocab x frame-lengths transcripts)
+  (when (null? frame-lengths)
+    (error 'hybrid-batch-loss "no frame lengths in the batch"))
+  (unless (= (car (shape x)) (length frame-lengths) (length transcripts))
+    (error 'hybrid-batch-loss "~a rows, ~a frame lengths and ~a transcripts"
+           (car (shape x)) (length frame-lengths) (length transcripts)))
+  (with-default-device (device x)
     (define v-size (vector-length vocab))
     (define eos v-size)
     (define sos (add1 v-size))
-    (define frame-lengths
-      (for/list ([m (in-list mels)]) (cadr (shape m))))
-    (define t-max (apply max frame-lengths))
-    (define x
-      (stack (for/list ([m (in-list mels)]
-                        [t (in-list frame-lengths)])
-               (if (= t t-max)
-                   m
-                   (cat (list m (zeros (car (shape m)) (- t-max t)))
-                        1)))
-             0))
-    (define batched? (< 1 (length mels)))
+    (define batched? (< 1 (length frame-lengths)))
     (define ids-rows
       (for/list ([tr (in-list transcripts)]) (transcript-ids vocab tr)))
     (define target-lengths (map length ids-rows))
@@ -371,15 +377,32 @@ it outside whatever extent built the net; it runs on the mels' device.
     (+ (* ctc-weight loss-ctc)
        (* (- 1.0 ctc-weight) loss-ce))))]
 
+@bold{The loader.} @racket[asr-loader] sorts utterances by their frame
+counts --- read from FLAC headers via @racket[audio-info], no decode ---
+so each @racket[b]-sized batch pads its members to nearly-equal lengths
+and the rectangle wastes little. The @racket[librispeech] dataset over
+them decodes each utterance when its batch is asked for and featurizes
+it with @racket[mel-frames], and its default collate pads and stacks the
+mels and keeps their true lengths. The batches come in sorted order,
+unshuffled; @racket[w] worker threads build them ahead of the loop.
+
 @chunk[<r07-loader>
+(define (utterance-frames u)
+  (define-values (frames _rate _channels) (audio-info (utterance-path u)))
+  frames)
+
 (define (asr-loader utterances #:batch-size [b 16] #:workers [w 0])
-  (error 'unimplemented))]
+  (define sorted (sort utterances < #:key utterance-frames #:cache-keys? #t))
+  (dataloader (librispeech sorted #:transform mel-frames)
+              #:batch-size b
+              #:workers w))]
 
 @bold{The deterministic core.} @racket[run-example] is the seeded,
 offline entry the test harness and the PyTorch parity twin both drive:
 5 @racket[adam] steps of the hybrid loss on the committed MISTER QUILTER
-fixture --- a batch of one, so no padding and no padding mask --- at the
-fixture-scale defaults. The twin builds its stacks as
+fixture --- a batch of one from @racket[asr-loader], so no padding and no
+padding mask, moved to the device once --- at the fixture-scale
+defaults. The twin builds its stacks as
 @tt{nn.TransformerEncoder} and @tt{nn.TransformerDecoder} with the same
 settings, and under one seed both sides draw the same initial values,
 declaration order being draw order.
@@ -388,16 +411,18 @@ declaration order being draw order.
 (define (run-example #:steps [steps 5] #:device [device (pick-device)])
   (with-default-device device
     (manual-seed! 0)
-    (define-values (samples rate transcript) (load-librispeech-fixture))
-    (define vocab (text->vocab transcript))
-    (define mel (~> (utterance-features samples rate) (ref 0) (to-device device)))
+    (match-define (list x lengths transcripts)
+      (for/first ([(x lengths transcripts)
+                   (asr-loader (list (librispeech-fixture-utterance))
+                               #:batch-size 1)])
+        (list (to-device x device) lengths transcripts)))
+    (define vocab (text->vocab (car transcripts)))
     (define net (asr 80 (vector-length vocab)))
     (define opt (adam (parameters net) #:lr 0.001))
     (define losses
       (for/list ([_ (in-range steps)])
         (zero-grads! opt)
-        (define loss (hybrid-batch-loss net vocab (list mel)
-                                        (list transcript)))
+        (define loss (hybrid-batch-loss net vocab x lengths transcripts))
         (backward! loss)
         (step! opt)
         (item loss)))
@@ -465,16 +490,15 @@ phonetic stutter next to attention's spelling is the payoff.
 
 @bold{The real thing.} @racket[train-librispeech] downloads the dev-clean
 split (~337MB archive, cached under @envvar{RKTORCH_AUDIO_DIR} or the
-system cache dir) and by default trains on @emph{all} of it. Utterances
-sort by their frame counts --- read from FLAC headers via
-@racket[audio-info], no decode --- so each @racket[batch]-sized bucket
-pads its members to nearly-equal lengths and the rectangle wastes little.
-The spectral front end stays on the CPU, since an @tt{[80, T]} feature
-transfer per utterance is noise next to the model compute, and the mels
-move to the training device. Every utterance is decoded and featurized
-once, before the first epoch, and its mels stay cached there (~800MB for
-all of dev-clean), so each epoch is pure model compute. The model is built
-before that pass, so a bad width fails at once rather than after it.
+system cache dir) and by default trains on @emph{all} of it, in
+@racket[batch]-sized batches from @racket[asr-loader]. The spectral front
+end stays on the CPU, since an @tt{[80, T]} feature transfer per
+utterance is noise next to the model compute, and each padded batch
+moves to the training device as it arrives. Nothing is cached between
+epochs: every epoch decodes and featurizes the corpus again, which costs
+CPU time per epoch but holds no mels in memory, where caching them all
+of dev-clean took ~800MB. @racket[#:workers] moves that front end onto
+worker threads, ahead of the training loop.
 dev-clean is ~5.4 hours of speech --- small for
 character-level seq2seq --- so expect recognizable words and partial
 spellings, not a production recognizer; the 100-hour train-clean-100
@@ -483,8 +507,8 @@ split is the natural next scale.
 For calibration, @tt{EPOCHS=40 racket scripts/train-asr.rkt} in the CUDA
 shell trains at these defaults on all of dev-clean but the last three
 utterances, which the script holds out and scores. On an RTX 3090 Ti the
-40 epochs take about ten minutes, fifteen seconds each, and drive the
-mean hybrid loss from 2.60 in the first epoch to 0.16 in the last. The
+40 epochs took about ten minutes, fifteen seconds each, when the mels
+were cached before the first epoch, and drive the mean hybrid loss from 2.60 in the first epoch to 0.16 in the last. The
 CTC head spells phonetically (@tt{STUDFAS} for @emph{steadfast},
 @tt{LOWD OF} for @emph{load of}), while the attention decoder emits real
 words in roughly the right places (@tt{PRAYES OF MAIN PURAYES} for
@@ -505,6 +529,7 @@ decode, scored the same way, reaches 0.51 CER.
                            #:n-embd [n-embd 256]
                            #:dropout [p-drop 0.0]
                            #:device [device (pick-device)]
+                           #:workers [workers 0]
                            #:log-every [log-every 1])
   (when (and limit (not (exact-positive-integer? limit)))
     (error 'train-librispeech "limit must be a positive integer: ~a" limit))
@@ -515,6 +540,9 @@ decode, scored the same way, reaches 0.51 CER.
   (unless (exact-positive-integer? log-every)
     (error 'train-librispeech "log-every must be a positive integer: ~a"
            log-every))
+  (unless (exact-nonnegative-integer? workers)
+    (error 'train-librispeech "workers must be a non-negative integer: ~a"
+           workers))
   (with-default-device device
     (manual-seed! 0)
     (define all (librispeech-utterances "dev-clean"))
@@ -522,16 +550,7 @@ decode, scored the same way, reaches 0.51 CER.
       (if (and limit (< limit (length all)))
           (for/list ([u (in-list all)] [_ (in-range limit)]) u)
           all))
-    (define sorted
-      (sort utts <
-            #:key (lambda (u)
-                    (define-values (frames _rate _channels)
-                      (audio-info (utterance-path u)))
-                    frames)
-            #:cache-keys? #t))
-    (define buckets
-      (for/list ([b (in-slice batch (in-list sorted))]) b))
-    (when (null? buckets)
+    (when (null? utts)
       (error 'train-librispeech "no utterances to train on"))
     (define vocab
       (text->vocab (apply string-append
@@ -539,19 +558,15 @@ decode, scored the same way, reaches 0.51 CER.
     (define net (asr 80 (vector-length vocab) #:n-embd n-embd
                      #:dropout p-drop))
     (define opt (adam (parameters net) #:lr 0.0003))
-    (define bucket-data
-      (for/list ([bucket (in-list buckets)])
-        (cons (for/list ([u (in-list bucket)])
-                (define-values (samples rate) (load-utterance u))
-                (~> (utterance-features samples rate) (ref 0) (to-device device)))
-              (map utterance-transcript bucket))))
+    (define loader (asr-loader utts #:batch-size batch #:workers workers))
     (for ([epoch (in-range 1 (add1 epochs))])
       (define-values (total steps)
         (for/fold ([total 0.0] [steps 0])
-                  ([bd (in-list bucket-data)])
+                  ([(x lengths transcripts) loader])
           (zero-grads! opt)
           (define loss
-            (hybrid-batch-loss net vocab (car bd) (cdr bd)))
+            (hybrid-batch-loss net vocab (to-device x device) lengths
+                               transcripts))
           (backward! loss)
           (step! opt)
           (values (+ total (item loss)) (add1 steps))))

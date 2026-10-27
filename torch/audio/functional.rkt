@@ -10,8 +10,8 @@
                   tr-hann-window/raw tr-stft/raw)
          (only-in "../foreign/structs.rkt" wrap-tensor)
          (only-in "../main.rkt"
-                  * + @ device device/c dtype log ref sqrt t tensor tensor?
-                  to-dtype)
+                  * + @ device device/c dtype log ref shape sqrt t tensor
+                  tensor? to-dtype)
          (only-in "../private/contract.rkt" define/contract-out))
 
 (define maybe-length/c (or/c #f exact-positive-integer?))
@@ -145,7 +145,10 @@
   (if buildable? built (to-dtype built filter-dtype)))
 
 (define (filterbank-fits? filterbank samples n-fft n-mels)
-  (error 'unimplemented))
+  (and (tensor? samples)
+       (equal? (shape filterbank) (list (add1 (quotient n-fft 2)) n-mels))
+       (eq? (dtype filterbank) (dtype samples))
+       (equal? (device filterbank) (device samples))))
 
 (define/contract-out (log-mel-spectrogram samples ;; noqa
                                       #:sample-rate sample-rate
@@ -174,9 +177,10 @@
                                        #:device samples-device
                                        #:dtype (dtype samples))))
   (define fb
-    (mel-filterbank #:n-freqs (add1 (quotient n-fft 2))
-                    #:n-mels n-mels
-                    #:sample-rate sample-rate
-                    #:device samples-device
-                    #:dtype (dtype spec)))
+    (or filterbank
+        (mel-filterbank #:n-freqs (add1 (quotient n-fft 2))
+                        #:n-mels n-mels
+                        #:sample-rate sample-rate
+                        #:device samples-device
+                        #:dtype (dtype spec))))
   (~> (t fb 0 1) (@ spec) (+ eps) log))
