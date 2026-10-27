@@ -6,8 +6,8 @@
            rackunit
            "../data/loader.rkt"
            (only-in (submod "../data/loader.rkt" private) sampler-draws traversal)
-           (only-in (submod "../data/workers.rkt" private) pool-guard-threads pool-guard?
-                    worker-custodian)
+           (only-in (submod "../data/workers.rkt" private)
+                    live-worker-count pool-guard-threads pool-guard? worker-custodian)
            (only-in (submod "../foreign.rkt" unsafe) tensor-free!)
            "../main.rkt"
            (only-in "../vision/transforms.rkt" random-crop random-horizontal-flip)
@@ -176,6 +176,16 @@
     (void more? next)
     (custodian-shutdown-all c)
     (check-true (dead-within? workers 5)))
+
+  (test-case "live-worker-count counts a traversal's workers until they stop"
+    (define c (make-custodian))
+    (define before (live-worker-count #:wait 5))
+    (define loader (dataloader pairs #:batch-size 2 #:workers 3))
+    (define-values (more? next) (under c (lambda () (sequence-generate loader))))
+    (check-equal? (live-worker-count) (+ before 3))
+    (void more? next)
+    (custodian-shutdown-all c)
+    (check-equal? (live-worker-count #:wait 5) before))
 
   (test-case "a traversal under a shut-down custodian raises and starts no workers"
     (define c (make-custodian))

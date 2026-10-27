@@ -35,7 +35,7 @@
   (if (getenv "PLT_PKG_BUILD_SERVICE")
       '("audio" "data" "foreign" "foreign.rkt" "generated.rkt" "info.rkt" "main.rkt"
         "nn" "nn.rkt" "operators.rkt" "private" "safe.rkt" "scribblings" "tests"
-        "text" "vision")
+        "text" "train" "train.rkt" "vision")
       '()))
 
 ;; Enforced under `raco test --timeout` (the flake's check passes 300s as the

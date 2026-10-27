@@ -54,11 +54,12 @@
           (filter-map public-module _)
           (sort symbol<?))))
 
-  (test-case "the label helper exports racket, torch and torch/nn"
+  (test-case "the label helper exports racket, torch, torch/nn and torch/train"
     (check-equal? (export-set 'torch/scribblings/labels not)
                   (set-union (export-set 'racket)
                              (export-set 'torch run-time)
-                             (export-set 'torch/nn run-time))))
+                             (export-set 'torch/nn run-time)
+                             (export-set 'torch/train run-time))))
 
   (test-case "the label helper exports nothing outside the label phase"
     (check-true (set-empty? (export-set 'torch/scribblings/labels values))))
