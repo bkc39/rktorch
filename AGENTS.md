@@ -768,7 +768,13 @@ Runtime paths take `(only-in racket/runtime-path #%datum define-runtime-path)`.
   fields admit `parameters-by-key` beside `children-by-key`, and whose
   `#:on-move` body runs after a `to` that rebound any tensor in its subtree,
   judged against placements read before anything moved, so a tensor tied
-  across siblings counts for both; `torch/nn/mode.rkt` = `train!`, `eval!`,
+  across siblings counts for both; its `private` submodule has
+  `define-layer*`, the generator under `define-trainer`/`define-callback`
+  (#384): optional `#:forward`, `#:method` and `#:property` clauses, the
+  methods one `layer-method` table per type, and mutable fields that `set!`
+  writes through, except a field that held a layer, parameter or buffer at
+  construction, which raises (a later layer in a plain field is not
+  registered); `torch/nn/mode.rkt` = `train!`, `eval!`,
   `call-with-mode` and `in-mode`; `torch/nn/parameter.rkt`, `torch/nn/buffer.rkt`, `torch/nn/linear.rkt`,
   `torch/nn/init.rkt`, `torch/nn/optim.rkt`, `torch/nn/ema.rkt`, `torch/nn/loss.rkt`, `torch/nn/recurrent.rkt`,
   `torch/nn/attention.rkt`, `torch/nn/transformer.rkt`, `torch/nn/positions.rkt`, `torch/nn/copy.rkt`, `torch/nn/clip.rkt`).
