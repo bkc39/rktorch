@@ -508,7 +508,8 @@ For calibration, @tt{EPOCHS=40 racket scripts/train-asr.rkt} in the CUDA
 shell trains at these defaults on all of dev-clean but the last three
 utterances, which the script holds out and scores. On an RTX 3090 Ti the
 40 epochs took about ten minutes, fifteen seconds each, when the mels
-were cached before the first epoch, and drive the mean hybrid loss from 2.60 in the first epoch to 0.16 in the last. The
+were cached before the first epoch, and drove the mean hybrid loss from
+2.60 in the first epoch to 0.16 in the last. The
 CTC head spells phonetically (@tt{STUDFAS} for @emph{steadfast},
 @tt{LOWD OF} for @emph{load of}), while the attention decoder emits real
 words in roughly the right places (@tt{PRAYES OF MAIN PURAYES} for

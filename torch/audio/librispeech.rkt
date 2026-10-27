@@ -172,9 +172,10 @@
 
 (define (padded-batch features transcripts)
   (match-define (cons head tail) features)
-  (match-define (list lead head-dtype head-device) (placement head))
+  (define head-placement (placement head))
+  (match-define (list lead head-dtype head-device) head-placement)
   (for ([f (in-list tail)]
-        #:unless (equal? (placement f) (placement head)))
+        #:unless (equal? (placement f) head-placement))
     (raise-arguments-error 'librispeech "items differ outside the last dimension"
                            "first item" (list (shape head) head-dtype head-device)
                            "differing item" (list (shape f) (dtype f) (device f))))
@@ -192,6 +193,10 @@
 (define audio-transform/c
   (-> tensor? exact-positive-integer? features/c))
 
+(define (decoded u transform)
+  (define-values (samples rate) (load-audio (utterance-path u)))
+  (values (transform samples rate) (utterance-transcript u)))
+
 (define-dataset librispeech (utterances transform) ;; noqa
   #:contract (->* [(listof utterance?)]
                   [#:transform audio-transform/c]
@@ -200,15 +205,12 @@
   (set! utterances (vector->immutable-vector (list->vector utts)))
   #:length (vector-length utterances)
   #:ref (i)
-  (define u (vector-ref utterances i))
-  (define-values (samples rate) (load-audio (utterance-path u)))
-  (values (transform samples rate) (utterance-transcript u))
+  (decoded (vector-ref utterances i) transform)
   #:batch (indices collate)
   (define items
     (for/list ([i (in-list (indices->list indices))])
-      (define u (vector-ref utterances i))
-      (define-values (samples rate) (load-audio (utterance-path u)))
-      (list (transform samples rate) (utterance-transcript u))))
+      (call-with-values (lambda () (decoded (vector-ref utterances i) transform))
+                        list)))
   (if (default-collate? collate)
       (padded-batch (map car items) (map cadr items))
       (collate items)))

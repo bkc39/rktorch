@@ -121,7 +121,7 @@ The committed utterance as an @racket[utterance]: id
 @tt{1272-128104-0000}, its FLAC file and its transcript.}
 
 @defproc[(librispeech-root [split (or/c "dev-clean" "test-clean")]) path?]{
-The directory holding @filepath{LibriSpeech/}@racket[split], the
+The directory holding @filepath{LibriSpeech/<split>}, the
 @tt{root} @tt{torchaudio.datasets.LIBRISPEECH} takes, fetching and
 extracting the split's archive the first time.}
 
