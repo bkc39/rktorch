@@ -92,10 +92,10 @@
 
   (define (trained-resnet config mode)
     (manual-seed! 0)
-    (define net (ResNet #:base 2))
+    (define net (ResNet #:base 4))
     (define opt (build config mode (parameters net)))
-    (define x (randn 2 3 16 16))
-    (for ([_ (in-range 2)])
+    (define x (randn 2 3 32 32))
+    (for ([_ (in-range 3)])
       (zero-grads! opt)
       (~> x net sum backward!)
       (step! opt))
@@ -148,7 +148,7 @@
      (format "~a: the foreach step is the loop's, bit for bit, a gradient missing on step 2"
              name)
      (check-equal? (trained config 'foreach) (trained config 'loop)))
-    (bounded-test (format "~a: on a base-2 ResNet, two steps, the foreach step is the loop's" name)
+    (bounded-test (format "~a: on 09's ResNet the foreach step is the loop's" name)
       (check-equal? (trained-resnet config 'foreach)
                     (trained-resnet config 'loop)))
     (bounded-test (format "~a: a rate set between steps reaches the foreach step" name)
