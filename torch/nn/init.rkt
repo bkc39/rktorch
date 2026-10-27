@@ -52,11 +52,11 @@
   (define k
     (for/fold ([k x]) ([n (in-range 80 0 -1)])
       (+ x (/ (/ n 2.0) k))))
-  (/ (exp (- (* x x))) (* (sqrt pi) k)))
+  (/ (~> (* x x) - exp) (* (sqrt pi) k)))
 
 (define (erf x)
   (cond
-    [(< x 0) (- (erf (- x)))]
+    [(< x 0) (~> x - erf -)]
     [(<= x 2.0) (erf-series x)]
     [else (- 1.0 (erfc-fraction x))]))
 

@@ -20,7 +20,7 @@
   (define w (randn (tensor-shape (apply f xs)) #:dtype 'float64
                    #:generator (make-generator 0)))
   (define (loss args)
-    (sum (* (apply f args) w)))
+    (~> (apply f args) (* w) sum))
   (define leaves (map (lambda (x) (requires-grad! (detach x))) xs))
   (backward! (loss leaves))
   (for/and ([x (in-list xs)] [leaf (in-list leaves)] [k (in-naturals)])
@@ -28,6 +28,9 @@
     (for/and ([analytic (in-list (flat (grad leaf)))] [i (in-naturals)])
       (define (moved delta)
         (define entry (+ (list-ref entries i) delta))
-        (item (loss (list-set xs k (shaped-like x (list-set entries i entry))))))
+        (~> xs
+            (list-set k (shaped-like x (list-set entries i entry)))
+            loss
+            item))
       (define numeric (/ (- (moved eps) (moved (- eps))) (* 2 eps)))
       (<= (abs (- analytic numeric)) (+ atol (* rtol (abs numeric)))))))

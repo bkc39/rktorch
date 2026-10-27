@@ -18,8 +18,8 @@
     (requires-grad! (to-device t device)))
 
   (define (weighed out device)
-    (define w (to-device (randn (shape out)) device))
-    (backward! (sum (* out w))))
+    (define w (~> out shape randn (to-device device)))
+    (~> (* out w) sum backward!))
 
   (define (affine device align?)
     (define theta (leaf (randn 2 2 3) device))

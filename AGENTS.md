@@ -97,8 +97,9 @@ with `backward!` outside the form as PyTorch recommends). From
   names its device and `cpu-generator/c` holds for one on the CPU; `rand`,
   `randn` and `multinomial` blame a caller whose effective generator (the
   argument, else `current-generator`) is on another device than the
-  tensor; `randperm`, `dataloader` and the `transforms.rkt` augmentations
-  take only a CPU generator (`tr_generator_new_on`, `tr_generator_device`)
+  tensor; `randperm`, `dataloader` and the augmentations of
+  `torch/vision/transforms.rkt` take only a CPU generator
+  (`tr_generator_new_on`, `tr_generator_device`)
 - iteration (`torch/foreign/sequences.rkt`, #199): `in-tensor` (the
   slices along the first dimension as views, Python's `for row in t`) and
   `in-flattened-tensor` (the elements as Racket numbers, row-major, copied

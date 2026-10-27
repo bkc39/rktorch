@@ -74,7 +74,7 @@
   (define (blamed-on-cuda gpu)
     (define on-gpu (make-generator 1 #:device gpu))
     (define probabilities (to (tensor '(0.1 0.2 0.3 0.4)) gpu))
-    (define images (~> (arange (* 2 3 6 6)) (reshape 2 3 6 6)))
+    (define images (~> (* 2 3 6 6) arange (reshape 2 3 6 6)))
     (list (cons "rand on cuda, cpu generator"
                 (lambda () (rand 3 #:device gpu #:generator (make-generator 1))))
           (cons "randn on cpu, cuda generator"
@@ -87,8 +87,10 @@
                 (lambda () (randperm 4 #:generator on-gpu)))
           (cons "dataloader, cuda generator"
                 (lambda ()
-                  (dataloader (tensor-dataset (arange 4)) #:shuffle? #t
-                              #:generator on-gpu)))
+                  (~> 4
+                      arange
+                      tensor-dataset
+                      (dataloader #:shuffle? #t #:generator on-gpu))))
           (cons "random-crop, cuda generator"
                 (lambda () (random-crop images #:generator on-gpu)))
           (cons "random-horizontal-flip, cuda generator"

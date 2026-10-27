@@ -332,7 +332,7 @@
                                           #:ratio [ratio '(3/4 4/3)]
                                           #:generator [generator #f])
   (->* [float-image/c exact-positive-integer?]
-       [#:scale (ordered-pair/c (and/c (real-in 0 1) positive?))
+       [#:scale (~> (real-in 0 1) (and/c positive?) ordered-pair/c)
         #:ratio (ordered-pair/c (and/c real? positive?))
         #:generator (or/c cpu-generator/c #f)]
        tensor?)
