@@ -114,6 +114,25 @@ median, quartiles and IQR, and the load average before and after.
   random-crop dataset of commit `2b7ef04` (pad 2, a random 28x28 window).
   `DATASET=fixture` trains on the committed MNIST fixture instead of the
   cache.
+  `cifar-loader` and `cifar-resnet` read CIFAR-10 as PNG files: the
+  `ImageFolder` tree (`<split>/<class>/<n>.png`) that
+  `racket scripts/bench/cifar-folder.rkt [full|fixture]` writes once from
+  the archive `load-cifar10` caches (or the committed 256-image fixture)
+  under `RKTORCH_CIFAR10_PNG_DIR` (`~/.cache/rktorch/cifar10-png`, or
+  `DIR/cifar10-png` under `--cache`), with a `SHA256SUMS` of its files and
+  their `digest`. The script prints the digest and leaves a written tree
+  alone. Both runners read it through `image-folder` and the loader, with
+  `WORKERS` (0) workers, batches of `BATCH` (128), and `PIPELINE`:
+  `per-sample` is torchvision's CIFAR augmentation in the workers
+  (`random-crop` with padding 4, `random-horizontal-flip`, the float
+  conversion and `normalize`, one image at a time); `batched` converts each
+  image, collates, then crops, flips and normalizes the batch in the
+  collate. `cifar-loader` moves each batch to the device and logs it as one
+  step (the last partial batch dropped, so its images per second are its
+  steps per second times `BATCH`); `cifar-resnet` trains 09's ResNet,
+  optimizer and schedule from the loader (`BASE`, 64). `DATASET=fixture`
+  reads the fixture tree; `PNG_DIGEST` refuses a tree whose digest does not
+  start with it.
   `py-05-mnist`, `py-09-resnet` and `py-17-workers` are PyTorch twins in
   `scripts/bench/python/`, run by `python3` in place of `racket` and timed
   the same way: they write the steps file the `rktorch-step` listener
@@ -130,6 +149,12 @@ median, quartiles and IQR, and the load average before and after.
   under `--cache`), and take `DATASET=fixture`, `BATCH` and (09) `BASE`.
   `py-17-workers` is `DataLoader(num_workers=WORKERS)` over the same two
   datasets, its PGM decode and jitter in pure Python.
+  `py-cifar-loader` and `py-cifar-resnet` are
+  `DataLoader(num_workers=WORKERS, pin_memory=True)` over torchvision's
+  `ImageFolder` on the same tree (pinned only on CUDA, with
+  `non_blocking` copies; their `meta` records `pin_memory` and the tree's
+  `fixture_digest`), `PIPELINE=batched` cropping and flipping the batch by
+  09's twin's per-image algorithm. They have no `-per-param` form.
   The twins' optimizers are PyTorch's defaults: on CUDA `Adam` and `SGD`
   pick the `foreach` kernels, one launch per op over every parameter, and
   `zero_grad()` drops the gradients (`set_to_none=True`), as `zero-grads!`
@@ -295,7 +320,16 @@ faster) with a sign-test interval, which needs 6 rounds to reach 95%.
   `loss-item` wait. Times are the host's wall clock; GC counts whole
   milliseconds a round.
 - **G. GC per epoch** — every rktorch e2e summary's median `epoch_gc_ms`,
-  steps per second, and GC's share of the epoch.
+  steps per second, and GC's share of the epoch, H's rows left out.
+- **H. CIFAR-10 PNG loader against PyTorch's DataLoader** — `cifar-loader`
+  (images per second) and `cifar-resnet` (seconds per epoch) beside their
+  twins, per pipeline and worker count: rktorch over PyTorch in time, each
+  side's steps per second, median step interval on the host clock (`host
+  ms/step`), GC per epoch and its share, and the spread (IQR over median)
+  of its rounds. A twin that pinned its batches marks the row
+  `pin_memory (PyTorch only)`: rktorch has no pinned memory (#307). Under
+  the table, the noise floor is the widest spread of its rows. One table
+  per invocation, so the loader rows and the ResNet rows are two.
 
 `scripts/bench/l0-baseline.sh` takes the baseline from the host shell,
 entering one dev shell at a time: in `nix develop`, A on the CPU at the
@@ -303,7 +337,11 @@ default thread count and at `OMP_NUM_THREADS=1`, and B at one ATen thread;
 in `env -u LD_LIBRARY_PATH nix develop .#cuda`, A, E and F on CUDA, C over
 `VARIANT` `pgm`/`crop` × `WORKERS` 0/2/4, D at the short settings, and G
 (05 and 09) with troughs off, then on at collect budgets 0.01, 0.05 (the
-default), 0.2 and 1. An example and its twins run as one group, whose
+default), 0.2 and 1; then, in the same shell, the `loader` stage writes
+the CIFAR-10 PNG tree under `BASELINE_CACHE` and runs H: `cifar-loader`
+at `WORKERS` 0, 1, 2, 4 and 8 and `cifar-resnet` at 0, 2 and 4, each
+`PIPELINE` `per-sample` and `batched`, beside their twins, with
+`PNG_DIGEST` set to the tree's. An example and its twins run as one group, whose
 order rotates every round as the micro suites' cases do, so drift reaches
 both sides of a ratio alike. Each group waits for a load below 4; the
 records go to `baseline-<date>.jsonl` in `BASELINE_DIR`
@@ -312,7 +350,7 @@ and the summary beside it.
 
 ```bash
 scripts/bench/l0-baseline.sh         # all: cpu, cuda, summary
-scripts/bench/l0-baseline.sh cpu     # one stage: cpu, cuda or summary
+scripts/bench/l0-baseline.sh cpu     # one stage: cpu, cuda, loader or summary
 BASELINE_SMOKE=1 scripts/bench/l0-baseline.sh
 ```
 
@@ -323,7 +361,9 @@ others their own defaults); `BASELINE_MAX_LOAD` (4), `BASELINE_CACHE`
 the JSONL afresh; a single stage appends to it. `BASELINE_SMOKE=1` writes
 `smoke-<date>` and runs every step at the smallest settings both sides of
 a pair read: the loader on the MNIST fixture, 05 and 09 on the cached datasets at
-`EPOCHS=2` (their rktorch runners read nothing else), and G at one budget.
+`EPOCHS=2` (their rktorch runners read nothing else), G at one budget, and
+H on the fixture's PNG tree at `WORKERS` 0 and 2, `cifar-resnet` at
+`BASE=4`.
 
 ## Records
 

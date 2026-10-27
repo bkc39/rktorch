@@ -7,7 +7,8 @@
          (only-in threading ~>)
          (only-in "harness.rkt" list-median)
          (only-in "markdown.rkt"
-                  host impl-of make-section median num ref rktorch? settings-text table))
+                  host impl-of make-section median num ref rktorch? settings-text table)
+         (only-in "summary-h.rkt" h-case? h-section))
 
 (provide l0-sections)
 
@@ -116,6 +117,8 @@
 
 (define (loader-example? c) (equal? c "17-workers"))
 
+(define (h-record? r) (h-case? (ref r 'case)))
+
 (define (calls-section records)
   (table '("example" "phase" "native crossings" "frees" "accounted tensors" "op calls" "settings")
          (for/list ([r (in-list records)])
@@ -190,15 +193,18 @@
         (make-section "e2e" "summary" "C. Loader end to end against PyTorch"
                       (twin-e2e-section loader-example?) paired-placement)
         (make-section "e2e" "summary" "D. Training against PyTorch"
-                      (twin-e2e-section (lambda (c) (not (loader-example? c))))
+                      (twin-e2e-section (lambda (c) (not (or (loader-example? c) (h-case? c)))))
                       paired-placement)
         (make-section "calls" "phase" "E. Native calls per step" calls-section placement)
         (make-section "host-gpu" #f "F. Host and device time per step" host-gpu-section placement)
-        (make-section "e2e" "summary" "G. GC per epoch" gc-section host #:keep rktorch?)))
+        (make-section "e2e" "summary" "G. GC per epoch" gc-section host
+                      #:keep (lambda (r) (and (rktorch? r) (not (h-record? r)))))
+        (make-section "e2e" "summary" "H. CIFAR-10 PNG loader against PyTorch's DataLoader"
+                      h-section paired-placement #:keep h-record?)))
 
 (module+ test
   (require rackunit
-           (only-in "markdown.rkt" by-context section-context section-render)
+           (only-in "markdown.rkt" by-context section-context section-keep section-render)
            (only-in "pytorch.rkt" twin-record))
   (define (render n records)
     ((section-render (list-ref l0-sections n)) records))
@@ -366,6 +372,14 @@
     (check-regexp-match #rx"\\| host proxy net of GC \\| 8\\.00 \\| - \\| - \\|" md)
     (check-regexp-match #rx"\\| host proxy / step, net of GC \\| 1\\.00 \\| - \\| - \\|" md)
     (check-regexp-match #rx"\\| device excess: the loss-item wait \\| 6\\.00 \\| - \\| - \\|" md))
+
+  (test-case "H's cases reach H alone, not D or G"
+    (define records (list (e2e "cifar-resnet" "rktorch" "per-sample-0" 30.0 70.0 #:gc '(900))
+                          (e2e "py-cifar-resnet" "pytorch" "per-sample-0" 10.0 25.0)))
+    (check-false (render 3 records))
+    (check-equal? (filter (section-keep (list-ref l0-sections 6)) records) '())
+    (check-regexp-match #rx"\\| 09 ResNet \\| - \\| - \\| s/epoch \\| 30\\.00 \\| 10\\.00 \\| 3\\.00 \\|"
+                        (render 7 records)))
 
   (test-case "G gives GC per epoch and its share of the epoch"
     (define md (render 6 (list (e2e "05-mnist" "rktorch" "no-troughs" 1.25 2.0 #:gc '(100 150)

@@ -141,6 +141,7 @@
            (only-in racket/runtime-path #%datum define-runtime-path)
            rackunit
            (only-in "e2e.rkt" example find-examples)
+           (only-in "cifar-folder.rkt" ensure-cifar10-folder!)
            (only-in "fixtures/pre-hook-torch.rkt" call-with-pre-hook-torch)
            (only-in "harness.rkt" with-temporary-path)
            (only-in "pytorch.rkt" pytorch-available?)
@@ -400,4 +401,37 @@
     (when (pytorch-available?)
       (define md (summary-markdown records))
       (check-regexp-match #rx"## C\\. Loader end to end[^#]*\\| 17-workers \\| crop \\| s/epoch \\|" md)
-      (check-regexp-match #rx"\\| 17-workers \\| pgm \\| s/epoch \\|" md))))
+      (check-regexp-match #rx"\\| 17-workers \\| pgm \\| s/epoch \\|" md)))
+
+  (test-case "H's workloads and twins run under e2e on the fixture PNG tree, and H pairs them"
+    (with-temporary-path (base (make-temporary-directory "bench-png-~a"))
+      (define digest (ensure-cifar10-folder! "fixture" #:base base))
+      (define names (if (pytorch-available?)
+                        '("cifar-loader" "py-cifar-loader" "cifar-resnet" "py-cifar-resnet")
+                        '("cifar-loader" "cifar-resnet")))
+      (define env (environment-variables-copy (current-environment-variables)))
+      (environment-variables-set! env #"RKTORCH_CIFAR10_PNG_DIR" (path->bytes base))
+      (define (tiny pipeline workers)
+        `(,(format "~a-~a" pipeline workers)
+          ("PIPELINE" . ,pipeline) ("WORKERS" . ,(number->string workers))
+          ("DATASET" . "fixture") ("BASE" . "4") ("PNG_DIGEST" . ,(substring digest 0 12))))
+      (define records
+        (parameterize ([current-environment-variables env])
+          (records-of (lambda (out)
+                        (run-e2e (find-examples names) #:rounds 1 #:full? #f
+                                 #:variants (list (tiny "per-sample" 2) (tiny "batched" 0))
+                                 #:cache #f #:max-load #f #:libtorch "x" #:out out #:log quiet
+                                 #:time-limit 900)))))
+      (define (group g) (filter (lambda (r) (equal? (hash-ref r 'group) g)) records))
+      (check-equal? (group "error") '())
+      (define loader-runs
+        (filter (lambda (r) (regexp-match? #rx"cifar-loader$" (hash-ref r 'case))) (group "run")))
+      (check-equal? (remove-duplicates (map (lambda (r) (hash-ref r 'steps)) loader-runs)) '(4)
+                    "two epochs of the 256 images in whole batches of 128")
+      (check-equal? (length (group "summary")) (* 2 (length names)))
+      (define md (summary-markdown records))
+      (check-regexp-match #rx"## H\\. CIFAR-10 PNG loader" md)
+      (check-regexp-match #rx"\\| loader only \\| per-sample \\| 2 \\| images/s \\| [0-9]+ \\|" md)
+      (check-regexp-match #rx"\\| 09 ResNet \\| batched \\| 0 \\| s/epoch \\| [0-9.]+ \\|" md)
+      (unless (pytorch-available?)
+        (displayln "[e2e-suite] H's PyTorch twins skipped: python3 `torch` not available")))))

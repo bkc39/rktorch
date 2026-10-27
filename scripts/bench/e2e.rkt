@@ -50,7 +50,11 @@
                  "FINETUNE_EPOCHS" 0 'last)
         (example "16-style-transfer" '(("STEPS" . 100)) '(("STEPS" . 1000)) #f 20 'first)
         (example "loader" '(("EPOCHS" . 2)) '(("EPOCHS" . 5)) "EPOCHS" 0 'first)
-        (example "17-workers" '(("EPOCHS" . 2)) '(("EPOCHS" . 3)) "EPOCHS" 0 'first)))
+        (example "17-workers" '(("EPOCHS" . 2)) '(("EPOCHS" . 3)) "EPOCHS" 0 'first)
+        (example "cifar-loader" '(("EPOCHS" . 2) ("BATCH" . 128)) '(("EPOCHS" . 2) ("BATCH" . 128))
+                 "EPOCHS" 0 'first)
+        (example "cifar-resnet" '(("EPOCHS" . 2) ("BATCH" . 128)) '(("EPOCHS" . 3) ("BATCH" . 128))
+                 "EPOCHS" 0 'first)))
 
 (define (twin name-of-example script)
   (define ex (for/first ([ex (in-list examples)] #:when (equal? (example-name ex) name-of-example))
@@ -67,13 +71,17 @@
 (define twin-runners
   (append (twin "05-mnist" "mnist.py")
           (twin "09-resnet" "resnet.py")
-          (twin "17-workers" "workers.py")))
+          (twin "17-workers" "workers.py")
+          (map car (list (twin "cifar-loader" "cifar_loader.py")
+                         (twin "cifar-resnet" "cifar_resnet.py")))))
 
 (define twins (map car twin-runners))
 
 (define runners
   (for/fold ([h (hash "loader" (build-path workloads-dir "loader.rkt")
-                      "17-workers" (build-path workloads-dir "workers.rkt"))])
+                      "17-workers" (build-path workloads-dir "workers.rkt")
+                      "cifar-loader" (build-path workloads-dir "cifar-loader.rkt")
+                      "cifar-resnet" (build-path workloads-dir "cifar-resnet.rkt"))])
             ([t (in-list twin-runners)])
     (hash-set h (example-name (car t)) (build-path python-dir (cdr t)))))
 
@@ -91,7 +99,8 @@
 (define cache-variables
   '(("RKTORCH_MNIST_DIR" . "mnist") ("RKTORCH_CIFAR10_DIR" . "cifar10")
     ("RKTORCH_TEXT_DIR" . "text") ("RKTORCH_TRANSLATION_DIR" . "translation")
-    ("RKTORCH_HYMENOPTERA_DIR" . "hymenoptera") ("RKTORCH_WEIGHTS_DIR" . "weights")))
+    ("RKTORCH_HYMENOPTERA_DIR" . "hymenoptera") ("RKTORCH_WEIGHTS_DIR" . "weights")
+    ("RKTORCH_CIFAR10_PNG_DIR" . "cifar10-png")))
 
 (define (cache-env root)
   (if root
@@ -319,7 +328,7 @@
     (parameterize ([current-environment-variables (make-environment-variables
                                                    #"RKTORCH_MNIST_DIR" #"/m")])
       (define env (cache-env "/c"))
-      (check-equal? (length env) 6)
+      (check-equal? (length env) 7)
       (check-equal? (cdr (assoc "RKTORCH_MNIST_DIR" env)) "/c/mnist")
       (check-equal? (cdr (assoc "RKTORCH_CIFAR10_DIR" env)) "/c/cifar10")
       (check-true (absolute-path? (cdr (assoc "RKTORCH_TEXT_DIR" (cache-env "rel")))))))
