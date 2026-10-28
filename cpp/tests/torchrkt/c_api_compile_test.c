@@ -97,8 +97,9 @@ void torchrkt_c_api_compile_check(void) {
                           tr_dtype) = tr_arange_on;
   tr_tensor* (*eye_on)(int64_t, int64_t, tr_device_type, int64_t, tr_dtype) =
       tr_eye_on;
-  int (*uniform_fn)(tr_tensor*, double, double, tr_generator*) =
-      tr_tensor_uniform_;
+  int (*uniform_fn)(tr_tensor*, double, double) = tr_tensor_uniform_;
+  int (*uniform_gen_fn)(tr_tensor*, double, double, tr_generator*) =
+      tr_tensor_uniform_gen_;
   int (*normal_fn)(tr_tensor*, double, double, tr_generator*) =
       tr_tensor_normal_;
   tr_generator* (*generator_new)(uint64_t) = tr_generator_new;
@@ -265,6 +266,11 @@ void torchrkt_c_api_compile_check(void) {
   tr_tensor* (*gen_sdpa)(const tr_tensor*, const tr_tensor*, const tr_tensor*,
                          const tr_tensor*, double, bool, double, bool, bool) =
       tr_gen_scaled_dot_product_attention;
+  tr_tensor* (*gen_affine_grid)(const tr_tensor*, const int64_t*, int64_t,
+                                bool) = tr_gen_affine_grid_generator;
+  tr_tensor* (*gen_bicubic)(const tr_tensor*, const int64_t*, int64_t, bool,
+                            double, bool, double, bool) =
+      tr_gen_upsample_bicubic2d;
   int (*cuda_available)(void) = tr_cuda_is_available;
   int (*cuda_count)(void) = tr_cuda_device_count;
   int (*cuda_stats)(int64_t, int64_t*, int64_t*, int64_t*) =
@@ -339,6 +345,7 @@ void torchrkt_c_api_compile_check(void) {
   (void)arange_on;
   (void)eye_on;
   (void)uniform_fn;
+  (void)uniform_gen_fn;
   (void)normal_fn;
   (void)generator_new;
   (void)generator_new_on;
@@ -421,6 +428,8 @@ void torchrkt_c_api_compile_check(void) {
   (void)gen_gru;
   (void)gen_flatten_weight;
   (void)gen_sdpa;
+  (void)gen_affine_grid;
+  (void)gen_bicubic;
   (void)cuda_available;
   (void)cuda_count;
   (void)cuda_stats;

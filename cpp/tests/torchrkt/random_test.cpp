@@ -252,7 +252,7 @@ std::vector<float> filled_in_place(bool normal, tr_generator* g) {
   tr_tensor* t = tr_zeros(dims.data(), 1);
   EXPECT_NE(t, nullptr) << tr_last_error();
   EXPECT_EQ(normal ? tr_tensor_normal_(t, 1.0, 2.0, g)
-                   : tr_tensor_uniform_(t, -1.0, 3.0, g),
+                   : tr_tensor_uniform_gen_(t, -1.0, 3.0, g),
             0)
       << tr_last_error();
   std::vector<float> out = data_of(t);
@@ -278,7 +278,27 @@ TEST(TorchrktRandom, InPlaceDrawsFromItsGenerator) {
     tr_generator_free(b);
   }
   EXPECT_EQ(tr_tensor_normal_(nullptr, 0.0, 1.0, nullptr), 1);
-  EXPECT_EQ(tr_tensor_uniform_(nullptr, 0.0, 1.0, nullptr), 1);
+  EXPECT_EQ(tr_tensor_uniform_gen_(nullptr, 0.0, 1.0, nullptr), 1);
+}
+
+TEST(TorchrktRandom, UniformWithoutGeneratorKeepsItsSymbol) {
+  const std::vector<int64_t> dims = {5};
+  tr_tensor* t = tr_zeros(dims.data(), 1);
+  ASSERT_NE(t, nullptr) << tr_last_error();
+  ASSERT_EQ(tr_manual_seed(9), 0) << tr_last_error();
+  ASSERT_EQ(tr_tensor_uniform_(t, -1.0, 3.0), 0) << tr_last_error();
+  const std::vector<float> old_symbol = data_of(t);
+  tr_tensor_free(t);
+  ASSERT_EQ(tr_manual_seed(9), 0) << tr_last_error();
+  EXPECT_EQ(filled_in_place(false, nullptr), old_symbol)
+      << "the original arity draws the default stream";
+  tr_generator* g = tr_generator_new(4);
+  ASSERT_NE(g, nullptr) << tr_last_error();
+  ASSERT_EQ(tr_manual_seed(9), 0) << tr_last_error();
+  EXPECT_NE(filled_in_place(false, g), old_symbol)
+      << "the generator-aware symbol draws from g";
+  tr_generator_free(g);
+  EXPECT_EQ(tr_tensor_uniform_(nullptr, 0.0, 1.0), 1);
 }
 
 std::vector<float> drawn_without_generator(bool normal) {

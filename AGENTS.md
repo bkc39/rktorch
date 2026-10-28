@@ -680,7 +680,7 @@ its regression test, once a pinned libtorch fixes the kernel.
   an int status plus one `tr_tensor**` out pointer per return, every one
   NULL unless the whole call succeeded) every op body reduces to — new ops must use them rather
   than hand-rolling try/catch.
-- `tests/torchrkt/{random,ops,autograd,generated_golden,generated_tranche2..8}_test.cpp`
+- `tests/torchrkt/{random,ops,autograd,generated_golden,generated_tranche2..9}_test.cpp`
   — GoogleTest goldens per family (generated families get a C-boundary
   golden: a correctness case + a null/length-guard case).
   `c_api_compile_test.c` proves the headers are valid C (add a
