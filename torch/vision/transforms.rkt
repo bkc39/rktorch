@@ -15,7 +15,8 @@
                   stack sub tensor tensor-shape tensor? to-dtype transpose where)
          (only-in "../foreign/contracts.rkt" image-batch/c)
          (only-in "../generated.rkt" index-tensor)
-         (only-in "../private/contract.rkt" define/contract-out))
+         (only-in "../private/contract.rkt" define/contract-out)
+         (only-in "private/contracts.rkt" ordered-pair/c))
 
 (module+ private
   (provide batch-rng))
@@ -289,12 +290,6 @@
   (-> rgb-image/c tensor?)
   (imagenet-normalize
    (center-crop (resize (convert-image-dtype x 'float32) 256) 224)))
-
-(define (ordered-pair/c element/c)
-  (flat-named-contract
-   'ascending-pair
-   (and/c (list/c element/c element/c)
-          (lambda (pair) (<= (car pair) (cadr pair))))))
 
 (define (crop-window rng h w scale ratio)
   (define (uniform lo hi) (+ lo (* (- hi lo) (random rng))))

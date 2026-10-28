@@ -114,7 +114,7 @@ def load_cifar10(root):
 
 
 def gray(x):
-    return (0.299 * x[:, 0] + 0.587 * x[:, 1] + 0.114 * x[:, 2]).unsqueeze(1)
+    return (0.2989 * x[:, 0] + 0.587 * x[:, 1] + 0.114 * x[:, 2]).unsqueeze(1)
 
 
 def rgb_to_hsv(x):

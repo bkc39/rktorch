@@ -3,6 +3,7 @@
 @(require "common.rkt"
           torch/scribblings/labels
           (for-label torch/data/loader
+                     torch/vision/augment
                      torch/vision/cifar10
                      torch/vision/hymenoptera
                      torch/vision/image
@@ -686,6 +687,200 @@ pooler is dropped, and a key it does not know comes back unchanged, so
 (require torch/vision/vit)
 (huggingface-vit-key "vit.encoder.layer.0.attention.attention.query.weight")
 (huggingface-vit-key "pooler.dense.bias")
+]}
+
+@section{Augmentation on the device}
+
+@defmodule[torch/vision/augment]
+
+Augmentations of a whole image batch where it lives, in a number of native
+calls independent of the batch size, for a trainer's
+@tt{on-after-batch-transfer}. Each image gets its own parameters, drawn
+on the batch's device from @racket[#:generator], else from
+@racket[(current-generator)], else from the device's default stream; a
+generator on another device is the caller's error. A tensor argument is
+checked for its shape, dtype and device only, never read on the host.
+Images are @tt{[N C H W]} with values in @racket[0] to @racket[1].
+
+@defproc[(resized-crop [x tensor?]
+                       [boxes tensor?]
+                       [size (or/c exact-positive-integer?
+                                   (list/c exact-positive-integer?
+                                           exact-positive-integer?))]
+                       [#:flip flip (or/c #f tensor?) #f]
+                       [#:padding-mode padding-mode
+                                       (or/c 'zeros 'border 'reflection)
+                                       'reflection])
+         tensor?]{
+Cuts each image's box from the float batch @racket[x] and resamples it
+bilinearly to @racket[size], a side or a height and a width: one
+@racket[affine-grid] and one @racket[grid-sample]. @racket[boxes] is
+@tt{[N 4]}, a float row @tt{(top left height width)} in pixels per image,
+on @racket[x]'s device; a box need not fall on pixel edges, nor inside the
+image, whose outside @racket[padding-mode] supplies. @racket[flip], a bool
+@tt{[N]}, mirrors the images it marks.
+
+torchvision's @tt{resized_crop} with @tt{antialias=False} gives the same
+pixels on a downscale; on an upscale, the rows and columns at a box's edge
+read the neighbouring image pixels where torchvision repeats the box's own.
+
+@torch-examples[
+(require torch/vision/augment)
+(define x (rand 2 3 32 32))
+(shape (resized-crop x (tensor '((4.0 4.0 24.0 24.0) (0.0 8.0 32.0 16.0))) 16))
+]}
+
+@deftogether[(@defproc[(adjust-brightness [x tensor?] [factor (or/c real? tensor?)])
+                       tensor?]
+              @defproc[(adjust-contrast [x tensor?] [factor (or/c real? tensor?)])
+                       tensor?]
+              @defproc[(adjust-saturation [x tensor?] [factor (or/c real? tensor?)])
+                       tensor?]
+              @defproc[(adjust-hue [x tensor?]
+                                   [factor (or/c (real-in -0.5 0.5) tensor?)])
+                       tensor?])]{
+torchvision v2's @tt{transforms.v2.functional} of the same names on a float
+batch, three channels except for brightness. @racket[factor] is one real
+for every image or a float @tt{[N]} on @racket[x]'s device, one per image.
+A factor of 1 (0 for the hue) leaves the image as it is; the hue turns by
+@racket[factor] of a full turn.
+}
+
+@defproc[(rgb->grayscale [x tensor?] [#:channels channels (or/c 1 3) 1])
+         tensor?]{
+The luma @racket[(+ (* 0.2989 r) (* 0.587 g) (* 0.114 b))] of each pixel of
+a three-channel float batch, in one channel or repeated in three,
+torchvision's @tt{rgb_to_grayscale}.
+}
+
+@defproc[(solarize [x tensor?] [threshold (or/c real? tensor?)]) tensor?]{
+Pixels at or above @racket[threshold], one real or a float @tt{[N]} per
+image, become @racket[(- 1 x)].
+}
+
+@defproc[(random-affine-crop [x tensor?]
+                             [size (or/c exact-positive-integer?
+                                         (list/c exact-positive-integer?
+                                                 exact-positive-integer?))]
+                             [#:scale scale (list/c (and/c (real-in 0 1) positive?)
+                                                    (and/c (real-in 0 1) positive?))
+                                      '(0.08 1.0)]
+                             [#:ratio ratio (list/c (and/c real? positive?)
+                                                    (and/c real? positive?))
+                                      '(3/4 4/3)]
+                             [#:flip-p flip-p (real-in 0 1) 0.0]
+                             [#:padding-mode padding-mode
+                                             (or/c 'zeros 'border 'reflection)
+                                             'reflection]
+                             [#:generator generator (or/c generator? #f) #f])
+         tensor?]{
+A random resized crop of each image of the float batch @racket[x] to
+@racket[size]: a window covering a share of the area drawn from
+@racket[scale], at an aspect ratio drawn log-uniformly from
+@racket[ratio], each side clipped to the image's, at a uniform position,
+mirrored with probability @racket[flip-p]. Both pairs are ascending.
+Unlike @racket[random-resized-crop] there are no ten retries, no
+antialias, and the window does not snap to pixels. Draws four
+@racket[rand]s of @tt{N}, and a fifth for the flip when @racket[flip-p] is
+positive.
+}
+
+@defproc[(random-color-jitter [x tensor?]
+                              [#:brightness brightness (and/c real? (>=/c 0)) 0]
+                              [#:contrast contrast (and/c real? (>=/c 0)) 0]
+                              [#:saturation saturation (and/c real? (>=/c 0)) 0]
+                              [#:hue hue (real-in 0 0.5) 0]
+                              [#:p p (real-in 0 1) 1.0]
+                              [#:generator generator (or/c generator? #f) #f])
+         tensor?]{
+torchvision's @tt{RandomApply([ColorJitter(brightness, contrast,
+saturation, hue)], p)} per image of a three-channel float batch, always in
+the order brightness, contrast, saturation, hue: a factor drawn uniformly
+from @racket[(list (- 1 s) (+ 1 s))] for a strength @racket[s], the hue
+from @racket[(list (- hue) hue)]. Images not selected go through with
+neutral factors. Draws five @racket[rand]s of @tt{N}, none when @racket[p]
+is 0, which returns @racket[x].
+}
+
+@defproc[(random-grayscale [x tensor?]
+                           [#:p p (real-in 0 1) 0.1]
+                           [#:generator generator (or/c generator? #f) #f])
+         tensor?]{
+@racket[rgb->grayscale] in three channels with probability @racket[p] per
+image. Draws one @racket[rand] of @tt{N}, none when @racket[p] is 0.
+}
+
+@defproc[(random-solarize [x tensor?]
+                          [threshold real?]
+                          [#:p p (real-in 0 1) 0.5]
+                          [#:generator generator (or/c generator? #f) #f])
+         tensor?]{
+@racket[solarize] at @racket[threshold] with probability @racket[p] per
+image. Draws one @racket[rand] of @tt{N}, none when @racket[p] is 0.
+}
+
+@defproc[(crop-view [#:size size (or/c exact-positive-integer?
+                                       (list/c exact-positive-integer?
+                                               exact-positive-integer?))]
+                    [#:scale scale (list/c (and/c (real-in 0 1) positive?)
+                                           (and/c (real-in 0 1) positive?))
+                             '(0.08 1.0)]
+                    [#:ratio ratio (list/c (and/c real? positive?)
+                                           (and/c real? positive?))
+                             '(3/4 4/3)]
+                    [#:flip-p flip-p (real-in 0 1) 0.5]
+                    [#:jitter jitter (list/c (and/c real? (>=/c 0))
+                                             (and/c real? (>=/c 0))
+                                             (and/c real? (>=/c 0))
+                                             (real-in 0 0.5))
+                              '(0.4 0.4 0.2 0.1)]
+                    [#:jitter-p jitter-p (real-in 0 1) 0.8]
+                    [#:gray-p gray-p (real-in 0 1) 0.2]
+                    [#:solarize-p solarize-p (real-in 0 1) 0.0]
+                    [#:mean mean (or/c #f (list/c real? real? real?)) #f]
+                    [#:std std (or/c #f (list/c (and/c real? positive?)
+                                                (and/c real? positive?)
+                                                (and/c real? positive?)))
+                           #f])
+         crop-view?]{
+One view of a self-supervised multi-crop, applied as
+@racket[(view images #:generator generator)] to a three-channel uint8 or
+float batch: a uint8 batch is scaled to @racket[0] to @racket[1], then
+@racket[random-affine-crop] to @racket[size] with @racket[scale],
+@racket[ratio] and @racket[flip-p], @racket[random-color-jitter] with the
+@racket[jitter] strengths (brightness, contrast, saturation, hue) at
+@racket[jitter-p], @racket[random-grayscale] at @racket[gray-p],
+@racket[random-solarize] at 0.5 with @racket[solarize-p], and last the
+normalisation by @racket[mean] and @racket[std] when given. A step of
+probability 0 is skipped and draws nothing.
+}
+
+@defproc[(crop-view? [v any/c]) boolean?]{
+Recognises a @racket[crop-view].
+}
+
+@defproc[(multi-crop [images tensor?]
+                     [globals (non-empty-listof crop-view?)]
+                     [locals (listof crop-view?)]
+                     [#:generator generator (or/c generator? #f) #f])
+         (values tensor? (or/c #f tensor?))]{
+DINO's multi-crop of a three-channel uint8 or float batch of @tt{N}
+images: each view of @racket[globals], then each of @racket[locals],
+applied in turn, and each group concatenated view by view into a
+@tt{[V·N 3 S S]} batch, @racket[#f] for no @racket[locals]. The views of a
+group share one size.
+
+@torch-examples[
+(require torch/vision/augment)
+(define images (to-dtype (* (rand 8 3 32 32) 255) 'uint8))
+(define-values (big small)
+  (multi-crop images
+              (list (crop-view #:size 32 #:scale '(0.4 1.0))
+                    (crop-view #:size 32 #:scale '(0.4 1.0) #:solarize-p 0.2))
+              (for/list ([_ (in-range 6)])
+                (crop-view #:size 16 #:scale '(0.05 0.4)))
+              #:generator (make-generator 0)))
+(list (shape big) (shape small))
 ]}
 
 @section{Reading images}
