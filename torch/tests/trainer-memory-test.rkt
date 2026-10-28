@@ -192,4 +192,34 @@
       (cond
         [(eq? fault 'fail) (check-exn #rx"planned failure" run-fit)]
         [else (run-fit)])
-      (check-equal? (live-worker-count #:wait 5) 0 (format "~a" (or fault 'limit))))))
+      (check-equal? (live-worker-count #:wait 5) 0 (format "~a" (or fault 'limit)))))
+
+  (define-trainer Evaluated (net)
+    (define-init () (set! net (Linear 4 1)))
+    (define-optimizers (sgd (parameters net) #:lr 0.01))
+    (define-training-step (x y) (mse-loss (net x) y))
+    (define-validation-step (x y) (zeros 256 1024))
+    (define-test-step (x y) (zeros 256 1024)))
+
+  (define (evaluation-survivors run-evaluation)
+    (define weak '())
+    (define alive #f)
+    (define (census r out . batch)
+      (set! weak (cons (make-weak-box out) weak))
+      (when (= (run-batch-index r) 7)
+        (collect!)
+        (match-define (cons _ earlier) weak)
+        (set! alive (for/sum ([wb (in-list earlier)] #:when (weak-box-value wb)) 1))))
+    (run-evaluation (lambda-callback #:on-validation-batch-end census
+                                     #:on-test-batch-end census))
+    alive)
+
+  (test-case "a validation or test step's output does not outlive its batch"
+    (check-equal? (evaluation-survivors
+                   (lambda (cb)
+                     (fit (Evaluated) (loader 2) #:val (loader 16) #:max-epochs 1
+                          #:num-sanity-val-steps 0 #:logger #f #:callbacks (list cb))))
+                  0)
+    (check-equal? (evaluation-survivors
+                   (lambda (cb) (test (Evaluated) (loader 16) #:logger #f #:callbacks (list cb))))
+                  0)))

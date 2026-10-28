@@ -9,7 +9,7 @@
          (only-in "private/dispatch.rkt" finish! tear-down! trainer-device with-failure-protocol)
          (only-in "private/evaluate.rkt" evaluate)
          (only-in "private/fit.rkt" fit-plan given limited-batches run-fit start-entry!)
-         (only-in "private/state.rkt" fresh-run)
+         (only-in "private/state.rkt" fresh-run set-run-current-stage!)
          (only-in "private/types.rkt"
                   callback? not-implemented trainer-automatic?
                   trainer-defines? trainer?)
@@ -40,6 +40,7 @@
   (define r (fresh-run trainer entry (or device (trainer-device trainer))))
   (define outputs
     (with-failure-protocol r entry
+      (set-run-current-stage! r entry)
       (start-entry! r entry callbacks loggers device)
       (begin0 (evaluate r loader (limited-batches loader limit) entry)
               (tear-down! r entry))))

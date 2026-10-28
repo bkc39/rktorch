@@ -158,8 +158,9 @@
   (when (last-batch? p i)
     (step-schedulers! r 'epoch (run-epoch r)))
   (apply call-hooks r 'on-train-batch-end (and scaled (detach scaled)) extra batch)
-  (when (and (run-stepped? r) (zero? (modulo (run-global-step r) (plan-log-every p))))
-    (publish-steps! r 'train (run-global-step r)))
+  (when (and (run-stepped? r)
+             (or (run-stop? r) (zero? (modulo (run-global-step r) (plan-log-every p)))))
+    (publish-steps! r 'train (sub1 (run-global-step r))))
   (define validate? (val-due? r p i))
   (when (and validate? (window-end? p i))
     (reset-grads! (parameters (run-trainer r))))
@@ -181,17 +182,7 @@
      (step-schedulers! r 'epoch (run-epoch r))]
     [else (train-step! r p i batch)]))
 
-(define (check-progress! r p steps-before)
-  (when (and (not (plan-max-epochs p))
-             (not (run-stop? r))
-             (= steps-before (run-global-step r)))
-    (error 'fit
-           (string-append "an epoch took no optimizer step, so #:max-steps ~a is never"
-                          " reached; bound the fit with #:max-epochs")
-           (plan-max-steps p))))
-
 (define (train-epoch! r p)
-  (define steps-before (run-global-step r))
   (set-run-current-stage! r 'train)
   (call-hooks r 'on-train-epoch-start)
   (with-traversal ([_ batch] (plan-train p))
@@ -202,9 +193,8 @@
   (set-run-skip-epoch?! r #f)
   (epoch-end-reached! (run-book r) 'train)
   (call-hooks r 'on-train-epoch-end)
-  (publish-epoch! r 'train)
-  (set-run-epoch! r (add1 (run-epoch r)))
-  (check-progress! r p steps-before))
+  (publish-epoch! r 'train (sub1 (run-global-step r)))
+  (set-run-epoch! r (add1 (run-epoch r))))
 
 (define (configure-optimizers! r)
   (define-values (optimizers schedulers)

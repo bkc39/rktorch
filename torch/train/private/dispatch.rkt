@@ -10,7 +10,7 @@
          (only-in "book.rkt" read-epoch! read-steps!)
          (only-in "hooks.rkt" hook-named hook-order hook-sides)
          (only-in "state.rkt"
-                  run-book run-callbacks run-global-step run-hook run-loggers
+                  run-book run-callbacks run-hook run-loggers
                   run-set-up? run-torn-down? run-trainer set-run-batch-size!
                   set-run-callbacks! set-run-finished?! set-run-hook! set-run-set-up?!
                   set-run-torn-down?!)
@@ -136,8 +136,8 @@
 (define (publish-steps! r loop step)
   (publish! r (read-steps! (run-book r) loop) step))
 
-(define (publish-epoch! r loop)
-  (publish! r (read-epoch! (run-book r) loop) (run-global-step r)))
+(define (publish-epoch! r loop step)
+  (publish! r (read-epoch! (run-book r) loop) step))
 
 (define (finish! r status)
   (set-run-finished?! r #t)

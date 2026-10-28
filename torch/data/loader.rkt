@@ -220,10 +220,9 @@
         (for/list ([i (in-range start (+ start len))]) i)))
   (values indices finish!))
 
-(define (worker-epoch-batches loader)
+(define (worker-epoch-batches loader breaks)
   (define workers (dataloader-workers loader))
   (define base (draw-seed #:generator (dataloader-generator loader)))
-  (define breaks (current-break-parameterization))
   (parameterize-break #f
     (define pool (start-workers (dataloader-dataset loader) (dataloader-collate loader)
                                 workers base))
@@ -290,24 +289,28 @@
               (refill! r))))
   (values count batch exhausted! abandoned!))
 
-(define (abandonable-traversal loader)
+(define (abandonable-traversal loader [breaks (current-break-parameterization)])
   (if (zero? (dataloader-workers loader))
-      (epoch-batches loader)
-      (worker-epoch-batches loader)))
+      (call-with-break-parameterization breaks (lambda () (epoch-batches loader)))
+      (worker-epoch-batches loader breaks)))
 
 (define (traversal loader)
   (define-values (count batch finish! _abandon!) (abandonable-traversal loader))
   (values count batch finish!))
 
 (define (call-with-traversal loader proc)
-  (define-values (count batch finish! abandon!) (abandonable-traversal loader))
-  (define taken 0)
-  (define (counted-batch k)
-    (set! taken (max taken (add1 k)))
-    (call-with-values (lambda () (batch k)) list))
-  (dynamic-wind void
-                (lambda () (proc count counted-batch))
-                (lambda () (if (= taken count) (finish!) (abandon!)))))
+  (define breaks (current-break-parameterization))
+  (parameterize-break #f
+    (define-values (count batch finish! abandon!) (abandonable-traversal loader breaks))
+    (define taken 0)
+    (define (counted-batch k)
+      (set! taken (max taken (add1 k)))
+      (call-with-values (lambda () (batch k)) list))
+    (dynamic-wind void
+                  (lambda ()
+                    (call-with-break-parameterization breaks
+                                                      (lambda () (proc count counted-batch))))
+                  (lambda () (if (= taken count) (finish!) (abandon!))))))
 
 (define-syntax-parse-rule (with-traversal ([count:id batch:id] loader:expr) body:expr ...+)
   (call-with-traversal loader (lambda (count batch) body ...)))

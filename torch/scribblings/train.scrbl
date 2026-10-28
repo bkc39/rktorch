@@ -172,13 +172,17 @@ the finished run. Keywords follow Lightning's @tt{Trainer}. A
 @racket[#:device] of @racket[#f] leaves the trainer where it is and sends
 each batch to the trainer's device. @racket[log!] reduces on the device and
 reads to the host at every @racket[#:log-every-n-steps]-th optimizer step of
-the fit, counted across epochs, and at each epoch end, in one transfer for
-all keys. A per-step value logged in a validation loop reaches the logger at
-each validation batch, at step 1, 2, … of that loop, apart from the training
-values. With @racket[#:max-epochs] @racket[#f], an epoch that takes no
-optimizer step raises @racket[exn:fail], since @racket[#:max-steps] would
-never be reached. @racket[#:fast-dev-run] runs that many batches (one for
-@racket[#t]) of one epoch, with no sanity check, no loggers and no
+the fit, counted across epochs, at the step of a @racket[request-stop!], and
+at each epoch end, in one transfer for all keys. As in Lightning, the logger
+gets a training row, and a validation epoch's row, labelled with the optimizer
+steps taken before the current batch's step; the first step's row is at
+step 0. A per-step value logged in a validation loop reaches the logger at each
+validation batch, apart from the training values, labelled 0, 1, … with the
+validation batches the fit has run outside the sanity check; in
+@racket[test], with the batches of that call. With @racket[#:max-epochs]
+@racket[#f], epochs continue until @racket[#:max-steps] steps are taken,
+also past epochs whose steps were skipped. @racket[#:fast-dev-run] runs that
+many batches (one for @racket[#t]) of one epoch, with no sanity check, no loggers and no
 @racket[monitor] or @racket[checkpoint] callbacks. If an @racket[exn:fail]
 or @racket[exn:break] is raised, @racket[fit] runs each callback's
 @racket[on-exception] and then @racket[teardown] with breaks disabled, and
@@ -240,7 +244,8 @@ Recognize the instances of @racket[define-trainer] and
                        any]
               @defproc[(run-metrics [r run?])
                        (hash/c symbol? real? #:immutable #t)])]{
-The loop state. @racket[run-stage] is @racket[#f] once the run has finished.
+The loop state. @racket[run-stage] is the entry's stage from @racket[setup]
+to @racket[teardown], and @racket[#f] once the run has finished.
 @racket[run-epoch] is Lightning's @tt{current_epoch}.
 @racket[run-global-step] counts optimizer steps taken.
 @racket[run-stepped?] is whether the current training batch took one.
@@ -358,9 +363,12 @@ arguments.
                            [#:interval interval interval/c 'epoch]
                            [#:frequency frequency exact-positive-integer? 1])
          scheduler-config?]{
-Lightning's @tt{lr_scheduler} dictionary: steps @racket[s] every
-@racket[frequency] steps or epochs. Return it from
-@racket[define-optimizers].}
+Lightning's @tt{lr_scheduler} dictionary. An @racket['epoch] scheduler
+steps at the end of every @racket[frequency]-th epoch; a @racket['step]
+scheduler steps after an optimizer step whose batch is a multiple of
+@racket[frequency] batches into the epoch, so with
+@racket[#:accumulate-grad-batches] 2 and @racket[frequency] 2 it steps after
+every optimizer step. Return it from @racket[define-optimizers].}
 
 @defproc[(scheduler-config? [v any/c]) boolean?]{
 Recognizes @racket[scheduler-config] values.}

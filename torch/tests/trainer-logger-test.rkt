@@ -35,8 +35,8 @@
     (fit-logged (stdout-logger #:out out))
     (define lines (regexp-split #rx"\n" (get-output-string out)))
     (check-equal? (car lines) "hparams r=0.5 rate=0.5")
-    (check-regexp-match #rx"^step 1 loss=[0-9.e-]+$" (cadr lines))
-    (check-regexp-match #rx"^step 2 loss=[0-9.e-]+$" (caddr lines))
+    (check-regexp-match #rx"^step 0 loss=[0-9.e-]+$" (cadr lines))
+    (check-regexp-match #rx"^step 1 loss=[0-9.e-]+$" (caddr lines))
     (check-equal? (cdddr lines) '("success" "")))
 
   (test-case "jsonl-logger writes a JSON line per read and the hparams file"
@@ -46,15 +46,15 @@
        (define (steps) (map (lambda (line) (hash-ref (string->jsexpr line) 'step))
                             (file->lines metrics)))
        (fit-logged (jsonl-logger dir))
-       (check-equal? (steps) '(1 2))
+       (check-equal? (steps) '(0 1))
        (check-true (andmap (lambda (line) (real? (hash-ref (string->jsexpr line) 'loss)))
                            (file->lines metrics)))
        (check-equal? (file->value (build-path dir "hparams.rktd")) hparams)
        (check-exn exn:fail:filesystem:exists? (lambda () (jsonl-logger dir)))
        (fit-logged (jsonl-logger dir #:exists 'append))
-       (check-equal? (steps) '(1 2 1 2))
+       (check-equal? (steps) '(0 1 0 1))
        (fit-logged (jsonl-logger dir #:exists 'replace))
-       (check-equal? (steps) '(1 2)))))
+       (check-equal? (steps) '(0 1)))))
 
   (test-case "jsonl-logger writes NaN and infinities as strings"
     (call-with-scratch
