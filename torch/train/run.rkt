@@ -1,23 +1,36 @@
 #lang racket/base
 
-(require (for-syntax racket/base (only-in syntax/parse/pre id))
-         (only-in racket/contract/base
+(require (only-in racket/contract/base
                   -> ->* <=/c >/c and/c any any/c contract-out hash/c listof
                   not/c or/c real-in)
-         (only-in syntax/parse/define define-syntax-parse-rule)
          (only-in "../foreign.rkt" device?)
          (only-in "../nn/optim.rkt" optimizer?)
          (only-in "../private/contract.rkt" define/contract-out)
+         (only-in "private/book.rkt" book-metric book-metrics)
+         (only-in "private/hooks.rkt" hook-log hook-named)
+         (only-in "private/state.rkt"
+                  live? run-active? run-batch-index run-book run-device run-entry
+                  run-epoch run-global-step run-hook run-optimizers [run-stage run-stage-of]
+                  run-step-pending? run-stepped? run-trainer run?
+                  set-run-skip-epoch?! set-run-skip-window?! set-run-stop?!)
          (only-in "private/types.rkt"
                   define-named-contract not-implemented scheduler-config?
-                  trainer?))
+                  trainer-automatic? trainer?))
 
-(provide (contract-out [run? (-> any/c boolean?)]))
+(provide hook-log-rule
+         (contract-out
+          [run? (-> any/c boolean?)]
+          [run-trainer (-> run? trainer?)]
+          [run-epoch (-> run? exact-nonnegative-integer?)]
+          [run-global-step (-> run? exact-nonnegative-integer?)]
+          [run-batch-index (-> run? (or/c #f exact-nonnegative-integer?))]
+          [run-optimizers (-> run? (listof optimizer?))]
+          [run-device (-> run? device?)]
+          [run-stepped? (-> run? boolean?)]))
 
-(struct run ())
-
-(define-syntax-parse-rule (define-run-contracts name:id ...)
-  (begin (define-named-contract name run?) ...))
+(define (hook-log-rule r)
+  (define name (and (live? r) (run-hook r)))
+  (and name (hook-log (hook-named name))))
 
 (define-named-contract stage/c (or/c 'fit 'test 'predict))
 
@@ -40,61 +53,47 @@
 
 (define-named-contract state-key/c (and/c string? (not/c "")))
 
-(define-run-contracts
-  fitting-run/c batch-start-run/c step-pending-run/c logging-run/c
-  manual-run/c)
+(define-named-contract fitting-run/c
+  (lambda (r) (and (live? r) (eq? (run-entry r) 'fit))))
 
-(define/contract-out (run-trainer r)
-  (-> run? trainer?)
-  (not-implemented 'run-trainer 'T1))
+(define-named-contract batch-start-run/c
+  (lambda (r) (and (live? r) (eq? (run-hook r) 'on-train-batch-start))))
+
+(define-named-contract step-pending-run/c
+  (lambda (r) (and (live? r) (run-step-pending? r))))
+
+(define-named-contract logging-run/c
+  (lambda (r) (and (hook-log-rule r) #t)))
+
+(define-named-contract manual-run/c
+  (lambda (r)
+    (and (live? r)
+         (eq? (run-hook r) 'training-step)
+         (not (trainer-automatic? (run-trainer r))))))
 
 (define/contract-out (run-stage r)
   (-> run? (or/c #f run-stage/c))
-  (not-implemented 'run-stage 'T1))
-
-(define/contract-out (run-epoch r)
-  (-> run? exact-nonnegative-integer?)
-  (not-implemented 'run-epoch 'T1))
-
-(define/contract-out (run-global-step r)
-  (-> run? exact-nonnegative-integer?)
-  (not-implemented 'run-global-step 'T1))
-
-(define/contract-out (run-batch-index r)
-  (-> run? (or/c #f exact-nonnegative-integer?))
-  (not-implemented 'run-batch-index 'T1))
-
-(define/contract-out (run-optimizers r)
-  (-> run? (listof optimizer?))
-  (not-implemented 'run-optimizers 'T1))
-
-(define/contract-out (run-device r)
-  (-> run? device?)
-  (not-implemented 'run-device 'T1))
-
-(define/contract-out (run-stepped? r)
-  (-> run? boolean?)
-  (not-implemented 'run-stepped? 'T1))
+  (and (run-active? r) (run-stage-of r)))
 
 (define/contract-out (run-metric r key #:default [default #f])
   (->* (run? symbol?) (#:default any/c) any)
-  (not-implemented 'run-metric 'T1))
+  (book-metric (run-book r) key default))
 
 (define/contract-out (run-metrics r)
   (-> run? (hash/c symbol? real? #:immutable #t))
-  (not-implemented 'run-metrics 'T1))
+  (book-metrics (run-book r)))
 
 (define/contract-out (request-stop! r)
   (-> fitting-run/c void?)
-  (not-implemented 'request-stop! 'T1))
+  (set-run-stop?! r #t))
 
 (define/contract-out (skip-step! r)
   (-> step-pending-run/c void?)
-  (not-implemented 'skip-step! 'T1))
+  (set-run-skip-window?! r #t))
 
 (define/contract-out (skip-epoch! r)
   (-> batch-start-run/c void?)
-  (not-implemented 'skip-epoch! 'T1))
+  (set-run-skip-epoch?! r #t))
 
 (define/contract-out (run-schedulers r)
   (-> run? (listof scheduler-config?))

@@ -20,9 +20,11 @@
 @defmodule[torch/train]
 
 A trainer is a layer whose body forms are a method's steps and hooks, and
-@racket[fit] runs it in Lightning 2.6.5's loop order. This chapter is the
-specification: the definers check their syntax, and a procedure that is not
-implemented yet raises @racket[exn:fail:unsupported].
+@racket[fit] runs it in Lightning 2.6.5's loop order. Mixed precision,
+gradient clipping, manual optimization, the hyperparameter procedures,
+@racket[run-schedulers], @racket[run-estimated-stepping-batches] and
+@racket[#:ckpt-path] are not implemented yet and raise
+@racket[exn:fail:unsupported].
 
 @defform[(define-trainer name (field ...) option ... body-form ...)
          #:grammar
@@ -53,7 +55,7 @@ mutated in place instead. A @racket[step-formals] input written
 @racket[[id : input-contract-expr]] is checked as @racket[define-layer]
 checks a forward input.
 
-@racketblock[
+@examples[#:eval train-eval
 (define-trainer Line (net)
   (define-init () (set! net (Linear 1 1)))
   (define-optimizers (sgd (parameters net) #:lr 0.05))
@@ -65,8 +67,7 @@ checks a forward input.
 (define r (fit (Line) (dataloader (tensor-dataset xs (* 2 xs)) #:batch-size 2)
                #:max-epochs 3 #:logger #f))
 (run-global-step r)
-(real? (run-metric r 'train/loss))
-]}
+(real? (run-metric r 'train/loss))]}
 
 @defform[(define-callback name (field ...) option ... cb-form ...)
          #:grammar
@@ -175,7 +176,9 @@ all keys. @racket[#:fast-dev-run] runs that many batches (one for
 @racket[monitor] or @racket[checkpoint] callbacks. If an @racket[exn:fail]
 or @racket[exn:break] is raised, @racket[fit] runs each callback's
 @racket[on-exception] and then @racket[teardown] with breaks disabled, and
-re-raises the exception; a break issued meanwhile is absorbed.
+re-raises the exception; a break issued meanwhile is absorbed. A loop that
+leaves a loader early stops its @racket[#:workers] threads; training from a
+loader with workers awaits issue #194.
 
 The contract also requires @racket[#:max-epochs], @racket[#:max-steps] or
 @racket[#:fast-dev-run]; a @racket[define-training-step]; a
@@ -329,7 +332,15 @@ Write @tt{metrics.jsonl} or @tt{metrics.csv} and
 @defproc-lambda-callback{
 Lightning's @tt{LambdaCallback}: one keyword per callback hook of
 @secref["train-hooks"]. Each procedure takes the run first, then the hook's
-arguments.}
+arguments.
+@examples[#:eval train-eval
+(define ends '())
+(define count-epochs
+  (lambda-callback #:on-train-epoch-end
+                   (lambda (r) (set! ends (cons (run-epoch r) ends)))))
+(void (fit (Line) (dataloader (tensor-dataset xs xs) #:batch-size 2)
+           #:max-epochs 2 #:logger #f #:callbacks (list count-epochs)))
+ends]}
 
 @section{Optimization}
 

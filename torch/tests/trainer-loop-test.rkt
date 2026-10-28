@@ -348,4 +348,21 @@
     (check-equal? (notes t 'caught) (list planned))
     (check-equal? (notes t 'teardown) '(fit fit))
     (check-equal? (collecting-finalized l) '(failed))
-    (check-not-false (sync/timeout 0 receiver))))
+    (check-not-false (sync/timeout 0 receiver)))
+
+  (define-callback interrupting (t)
+    (define-hook (on-exception e)
+      (note! t 'caught e)
+      (break-thread (current-thread))))
+
+  (test-case "exceptions: a break inside on-exception is absorbed after an exn:fail"
+    (define t (new-tally))
+    (define raised
+      (with-handlers ([exn:break? values])
+        (begin0 (with-handlers ([exn:fail? values])
+                  (fit (Failing t) (ones-loader 2) #:max-epochs 1 #:logger #f
+                       #:callbacks (list (interrupting t))))
+                (sleep 0))))
+    (check-eq? raised planned)
+    (check-equal? (notes t 'caught) (list planned))
+    (check-equal? (notes t 'teardown) '(fit))))

@@ -2,12 +2,16 @@
 
 (require (only-in racket/contract/base
                   ->i >/c listof or/c unsupplied-arg?)
-         (only-in racket/match match)
+         (only-in racket/match match match*)
          (only-in racket/math exact-floor)
          (only-in "../data/loader.rkt" dataloader-length dataloader?)
          (only-in "../foreign.rkt" device?)
          (only-in "../private/contract.rkt" define/contract-out)
          (only-in "logging.rkt" logger-spec/c stdout-logger)
+         (only-in "private/dispatch.rkt" finish! tear-down! trainer-device with-failure-protocol)
+         (only-in "private/evaluate.rkt" evaluate)
+         (only-in "private/fit.rkt" plan run-fit start-entry!)
+         (only-in "private/state.rkt" fresh-run)
          (only-in "private/types.rkt"
                   callback? not-implemented trainer-automatic?
                   trainer-defines? trainer?)
@@ -26,6 +30,31 @@
 
 (define (selects-a-batch? loader limit)
   (positive? (limited-batches loader limit)))
+
+(define (logger-list spec)
+  (match spec
+    [#f '()]
+    [(? list?) spec]
+    [l (list l)]))
+
+(define (check-supported! #:precision [precision '32-true] #:clip-val [clip-val #f]
+                          #:ckpt-path [ckpt-path #f] #:automatic? [automatic? #t])
+  (match* (precision clip-val ckpt-path automatic?)
+    [(_ _ (? values) _) (not-implemented '#:ckpt-path 'T3)]
+    [((not '32-true) _ _ _) (not-implemented '#:precision 'T2)]
+    [(_ (? values) _ _) (not-implemented '#:gradient-clip-val 'T2)]
+    [(_ _ _ #f) (not-implemented "manual optimization" 'T2)]
+    [(_ _ _ _) (void)]))
+
+(define (evaluation trainer loader stage part who device logger callbacks limit)
+  (define r (fresh-run trainer who (or device (trainer-device trainer))))
+  (define outputs
+    (with-failure-protocol r who
+      (start-entry! r who callbacks (logger-list logger) device)
+      (begin0 (evaluate r loader (limited-batches loader limit) stage part)
+              (tear-down! r who)
+              (finish! r 'success))))
+  (values r outputs))
 
 (define/contract-out (fit trainer train
                           #:val [val #f]
@@ -91,7 +120,26 @@
        (or (trainer-automatic? trainer)
            (and (= 1 (given accumulate 1)) (not (given clip-val))))
        [result run?])
-  (not-implemented 'fit 'T1))
+  (check-supported! #:precision precision #:clip-val clip-val #:ckpt-path ckpt-path
+                    #:automatic? (trainer-automatic? trainer))
+  (define fast (match fast-dev-run [#f #f] [#t 1] [k k]))
+  (define r (fresh-run trainer 'fit (or device (trainer-device trainer))))
+  (run-fit r
+           (plan device
+                 val
+                 (if fast 1 max-epochs)
+                 (or fast max-steps)
+                 accumulate
+                 (if fast 1 val-every)
+                 (and (not fast) val-interval)
+                 (if fast 0 sanity)
+                 (limited-batches train (or fast limit-train))
+                 (and val (limited-batches val (or fast limit-val)))
+                 log-every
+                 (and fast #t))
+           train
+           callbacks
+           (if fast '() (logger-list logger))))
 
 (define/contract-out (test trainer loader
                            #:device [device #f]
@@ -111,7 +159,10 @@
        "#:limit-test-batches selects no batch from this loader"
        (selects-a-batch? loader limit)
        [result run?])
-  (not-implemented 'test 'T1))
+  (check-supported! #:ckpt-path ckpt-path)
+  (define-values (r _outputs)
+    (evaluation trainer loader 'test 'test 'test device logger callbacks limit))
+  r)
 
 (define/contract-out (predict trainer loader
                               #:device [device #f]
@@ -126,4 +177,7 @@
        #:pre/name (trainer) "the trainer has no define-predict-step"
        (trainer-defines? trainer 'define-predict-step)
        [result list?])
-  (not-implemented 'predict 'T1))
+  (check-supported! #:ckpt-path ckpt-path)
+  (define-values (_r outputs)
+    (evaluation trainer loader 'predict 'predict 'predict device #f callbacks limit))
+  outputs)
