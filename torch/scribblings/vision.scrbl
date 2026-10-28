@@ -621,7 +621,7 @@ feed-forward @racket[ffn-width] wide; @racket[heads] divides
 @racket[width]. With @racket[classes], a @racket[Linear] head reads the
 class token. Every @racket[Linear] starts from @racket[trunc-normal-init]
 at a standard deviation of 0.02 with zero biases, and so do the class token
-and the positions.
+and the positions; the patch projection keeps @racket[Conv2d]'s.
 
 Applied as @racket[(vit x #:output output)] to a floating-point
 @tt{[N in-channels H W]} batch whose sides are multiples of

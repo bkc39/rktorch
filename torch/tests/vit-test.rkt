@@ -8,7 +8,7 @@
            (only-in racket/string string-prefix?)
            (only-in threading ~>)
            (only-in "../main.rkt"
-                    * + cat cuda-available? cuda-device
+                    * + cat cuda-available? cuda-device in-flattened-tensor
                     item manual-seed! mps-available? mps-device narrow
                     native-memory-use numel permute randn
                     reclaim-native-memory! reshape shape sum tensor->list to
@@ -234,9 +234,9 @@
     (check-equal? (length linears) 54)
     (for ([l (in-list linears)])
       (check-true (linear? l))
-      (check-true (for/and ([w (in-list (tensor->list (parameter l "weight")))])
-                    (for/and ([v (in-list w)]) (<= -2.0 v 2.0))))
-      (check-true (for/and ([v (in-list (tensor->list (parameter l "bias")))])
+      (check-true (for/and ([v (in-flattened-tensor (parameter l "weight"))])
+                    (<= -2.0 v 2.0)))
+      (check-true (for/and ([v (in-flattened-tensor (parameter l "bias"))])
                     (zero? v))))
     (for* ([block (in-layers (child-ref vit "blocks"))]
            [norm (in-list (list (child-ref block "norm1")
@@ -287,4 +287,5 @@
       (define before (bytes-on on))
       (vit x)
       (reclaim-native-memory!)
-      (check-equal? (bytes-on on) before (format "~a" on)))))
+      (check-equal? (bytes-on on) before (format "~a" on))
+      (check-equal? (shape (vit x #:output 'cls)) '(16 24)))))
