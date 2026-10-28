@@ -181,11 +181,11 @@ with `backward!` outside the form as PyTorch recommends). From
   another grid resizing the patch positions with `upsample-bicubic2d`;
   `PatchEmbed`, `vision-transformer?`, `patch-embed?`; `huggingface-vit-key`
   renames `ViTModel`/`ViTForImageClassification` keys (pooler dropped),
-  proven against `vision/fixtures/vit-keys.rktd`
+  proven against `torch/vision/fixtures/vit-keys.rktd`
   (`scripts/record-vit-keys.py`); `torch/tests/vit-parity-test.rkt` holds
-  it to `18_dino.py`'s ViT and torchvision's. `TransformerEncoderLayer`
-  takes `#:need-weights? #:average-attn-weights?` and then answers
-  `(values output weights)`.
+  it to `examples/python/18_dino.py`'s ViT and torchvision's.
+  `TransformerEncoderLayer` takes `#:need-weights? #:average-attn-weights?`
+  and then answers `(values output weights)`.
 - resnet (`torch/vision/resnet.rkt`, #152): `BasicBlock` and `ResNet`
   (`#:classes #:base #:blocks`, ResNet-18 for 32x32 images by default,
   bias-free convolutions under `BatchNorm2d`); the training loop with

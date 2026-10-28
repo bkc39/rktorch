@@ -39,7 +39,7 @@
 (define (image-fits x in-channels patch)
   (match-define (list _ channels h w) (shape x))
   (cond
-    [(not (float-dtype? (dtype x)))
+    [(~> (dtype x) float-dtype? not)
      (format "x is a floating-point batch, not ~a" (dtype x))]
     [(not (= channels in-channels))
      (format "x has ~a channels where the model reads ~a" channels in-channels)]

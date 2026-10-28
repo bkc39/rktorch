@@ -247,7 +247,7 @@
     (define-values (squares count)
       (for/fold ([squares 0.0] [count 0]) ([l (in-list linears)])
         (define w (parameter l "weight"))
-        (values (+ squares (item (sum (* w w)))) (+ count (numel w)))))
+        (values (+ squares (~> (* w w) sum item)) (+ count (numel w)))))
     (check-= (sqrt (/ squares count)) 0.02 0.0005))
 
   (bounded-test "V9: malformed arguments are contract violations, blamed on the caller"
@@ -259,7 +259,7 @@
                   (list (lambda () (vit (randn 2 32 32)))
                         (lambda () (vit (randn 2 1 32 32)))
                         (lambda () (vit (randn 2 3 30 32)))
-                        (lambda () (vit (to-dtype (randn 2 3 32 32) 'uint8)))
+                        (lambda () (~> (randn 2 3 32 32) (to-dtype 'uint8) vit))
                         (lambda () (vit (randn 2 3 32 32) #:output 'logits))))])
       (check-exn blames-caller thunk))
     (check-exn (message-matching #rx"#:heads divides #:width")
