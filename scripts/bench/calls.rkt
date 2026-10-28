@@ -157,7 +157,7 @@
        (check-equal? (field free-phase 'op_calls) (field alloc-phase 'op_calls))
        (check-equal? (field topk-phase 'tensors) '(2)))
 
-     (test-case "a batched gradient fetch is one op call, and clipping counts none below zero"
+     (test-case "a batched gradient fetch is one op call, and clipping makes the calls its code path does"
        (define net (Sequential (Linear 4 4) (Linear 4 4) (Linear 4 4)))
        (define ps (parameters net))
        (define p (phased "probe" 'cpu (hasheq)
@@ -171,7 +171,20 @@
        (check-equal? (field fetch 'frees) '(1))
        (check-equal? (field fetch 'tensors) '(0))
        (check-equal? (field fetch 'op_calls) '(1))
-       (check-true (andmap (lambda (n) (>= n 0)) (field clip 'op_calls))))
+       (define n (length ps))
+       (define outputs (+ (* 3 n) 4))
+       (define fetches 1)
+       (define in-place-multiplies n)
+       ;; a shape read is one crossing for a scalar, two otherwise: the n squares
+       (define shape-reads (+ outputs n))
+       (define device-reads (+ n 1))
+       (define to-device-checks (+ (- n 1) n))
+       (define grad-mode-calls 3)
+       (check-equal? (field clip 'frees) '(1))
+       (check-equal? (field clip 'tensors) (list outputs))
+       (check-equal? (field clip 'op_calls)
+                     (list (+ fetches outputs in-place-multiplies shape-reads device-reads
+                              to-device-checks grad-mode-calls))))
 
      (test-case "a free off the measuring thread is no op call, wherever its crossing lands"
        (define requests (make-channel))

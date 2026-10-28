@@ -13,7 +13,7 @@
            (only-in "../foreign/autograd-ops.rkt" reset-grads!)
            (only-in "../foreign/raw/device-queries.rkt" allocator-reading)
            (only-in "../foreign/raw/fault.rkt" with-crossing-hook)
-           (only-in "../foreign/raw/memory.rkt" adopted-bytes)
+           (only-in "../foreign/raw/memory.rkt" adopted-bytes native-memory-use/fold)
            (only-in "../foreign/raw/pressure.rkt" refresh-shadows!)
            (only-in "../main.rkt"
                     * + backward! grad has-grad? ones sum tensor tensor->list
@@ -166,12 +166,20 @@
   (bounded-test "a raise accounting the second fetched gradient releases every handle fetched"
     (define ps (parameters (backed-up 3 2)))
     (define (raise-injected) (raise 'injected))
-    (check-equal? (released-during
-                   (lambda ()
-                     (with-handlers ([(lambda (e) (eq? e 'injected)) void])
-                       (clip-grad-norm! ps 0.1)))
-                   #:also (on-nth 'ledger-entry-added 2 raise-injected))
-                  (length ps)))
+    (settle!)
+    (define before (native-memory-use))
+    (define released
+      (released-during
+       (lambda ()
+         (with-handlers ([(lambda (e) (eq? e 'injected)) void])
+           (clip-grad-norm! ps 0.1)))
+       #:also (on-nth 'ledger-entry-added/batched 2 raise-injected)))
+    (settle!)
+    (check-equal? (native-memory-use) before "the ledger is back where it was")
+    (check-equal? (native-memory-use)
+                  (filter (lambda (entry) (positive? (cdr entry))) (native-memory-use/fold))
+                  "the running totals agree with the entries")
+    (check-equal? released (length ps)))
 
   (bounded-test "a raise on the first op after the batched fetch releases every handle it took"
     (define ps (parameters (backed-up 3 2)))
