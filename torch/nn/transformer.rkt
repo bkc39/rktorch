@@ -61,7 +61,9 @@
   (->i ([src attention-sequence/c]
         [mask (or/c #f attention-mask/c)]
         [key-padding-mask (or/c #f attention-mask/c)]
-        [causal? boolean?])
+        [causal? boolean?]
+        [need-weights? boolean?]
+        [average-attn-weights? boolean?])
        #:pre/desc (src) (wide "src" src d-model)
        #:pre/desc (src mask)
        (attn-mask-shaped "mask" mask src src heads batch-first?)
@@ -135,18 +137,29 @@
   #:forward (src
              #:mask [mask #f]
              #:key-padding-mask [padding #f]
-             #:causal? [causal? #f])
-  (check src mask padding causal?)
-  (~> src
-      (residual norm-first? norm1
-                (lambda (x)
-                  (dropout1 (self-attn x x x
-                                       #:attn-mask mask
-                                       #:key-padding-mask padding
-                                       #:causal? causal?))))
-      (residual norm-first? norm2
-                (lambda (x)
-                  (~> x linear1 activation dropout linear2 dropout2)))))
+             #:causal? [causal? #f]
+             #:need-weights? [need-weights? #f]
+             #:average-attn-weights? [average? #t])
+  (check src mask padding causal? need-weights? average?)
+  (define attention-input (if norm-first? (norm1 src) src))
+  (define-values (attended weights)
+    (call-with-values
+     (lambda ()
+       (self-attn attention-input attention-input attention-input
+                  #:attn-mask mask
+                  #:key-padding-mask padding
+                  #:causal? causal?
+                  #:need-weights? need-weights?
+                  #:average-attn-weights? average?))
+     (case-lambda
+       [(output) (values output #f)]
+       [(output weights) (values output weights)])))
+  (define summed (add src (dropout1 attended)))
+  (define output
+    (residual (if norm-first? summed (norm1 summed)) norm-first? norm2
+              (lambda (x)
+                (~> x linear1 activation dropout linear2 dropout2))))
+  (if need-weights? (values output weights) output))
 
 (define-layer TransformerDecoderLayer ;; noqa
   (self-attn multihead-attn linear1 dropout linear2 norm1 norm2 norm3
