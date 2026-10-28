@@ -4,6 +4,7 @@
   (require (for-syntax racket/base
                        (only-in syntax/parse/pre ~var attribute syntax-parse)
                        (only-in "../private/definer.rkt" field-of layer-fields))
+           (only-in racket/contract/base or/c)
            rackunit
            (only-in syntax/macro-testing convert-compile-time-error)
            "../main.rkt"
@@ -51,12 +52,22 @@
   (define-layer* Teacher (student)
     #:init ()
     (set! student #f)
-    #:method (attach! s) (set! student s))
+    #:method (attach! s) (set! student s)
+    #:method (attach-in-list! s) (set! student (list s)))
 
   (define-layer* Student (net teacher)
     #:init ()
     (set! net (Linear 2 2))
     (set! teacher (Teacher)))
+
+  (define-layer* Scratch (net ps scratch)
+    #:init ()
+    (set! net (Linear 2 2))
+    (set! ps (parameters net))
+    (set! scratch (zeros 2))
+    #:method (net-of) net
+    #:method (ps-of) ps
+    #:method (scratch-of) scratch)
 
   (define-layer* Stepper (calls)
     #:init ()
@@ -135,29 +146,59 @@
     (check-false (call h 'held) "the slot keeps its value")
     (check-equal? (children h) '()))
 
-  (test-case "layer-copy passes a plain field's value through"
+  (test-case "set! of a layer, parameter or buffer inside a container into a plain field raises"
     (define h (Holder))
-    (define inner (list (Linear 2 2)))
-    (call h 'hold! inner)
-    (define copy (layer-copy h))
-    (check-eq? (call copy 'held) inner)
-    (check-equal? (children copy) '())
-    (call copy 'hold! 5)
-    (check-eq? (call h 'held) inner "the copy's slot is its own"))
+    (for ([v (list (list (Linear 2 2))
+                   (vector (Parameter (ones 2)))
+                   (hash 'a (Linear 2 2))
+                   (hash (Linear 2 2) 'a)
+                   (~> (zeros 2) Buffer box)
+                   (list 1 (vector 2 (box (parameters-by-key (list (cons "p" (Parameter (ones 1))))))))
+                   (cons 'a (children-by-key (list (cons "k" (Linear 1 1))))))])
+      (check-exn (message-matching
+                  #rx"^Holder: set! cannot put a layer, parameter or buffer .*\n  field: 'slot")
+                 (lambda () (call h 'hold! v))))
+    (check-false (call h 'held) "the slot keeps its value"))
 
-  (test-case "a layer cannot be set! into a field of its own child, so layer-copy ends"
+  (test-case "set! takes plain containers, tensors and cycles into a plain field"
+    (define h (Holder))
+    (define t (zeros 2))
+    (call h 'hold! (list t (vector 1) (hash 'k t)))
+    (check-eq? (car (call h 'held)) t)
+    (define cyclic (box #f))
+    (set-box! cyclic (vector cyclic))
+    (define done (thread (lambda () (call h 'hold! cyclic))))
+    (check-not-false (sync/timeout 30 done) "the walk ends on a cycle")
+    (check-eq? (call h 'held) cyclic))
+
+  (test-case "layer-copy rebuilds plain fields as define-layer does"
+    (define s (Scratch))
+    (define copy (layer-copy s))
+    (define copy-ps (call copy 'ps-of))
+    (check-equal? (length copy-ps) 2)
+    (check-true (andmap eq? copy-ps (parameters (call copy 'net-of)))
+                "the copy's plain list holds the copy's own parameters")
+    (check-true (andmap eq? copy-ps (parameters copy)))
+    (check-false (ormap (lambda (p) (memq p (parameters s))) copy-ps))
+    (check-false (eq? (call copy 'scratch-of) (call s 'scratch-of)) "a plain tensor is copied")
+    (check-equal? (tensor->list (call copy 'scratch-of)) '(0.0 0.0)))
+
+  (test-case "a layer cannot be set! into a field of its own child, bare or inside a container"
     (define s (Student))
     (define t (car (filter (lambda (c) (layer-method c 'attach!)) (children s))))
     (check-exn (message-matching #rx"^Teacher: set! cannot put .*\n  field: 'student")
                (lambda () (call t 'attach! s)))
-    (define c (make-custodian))
-    (custodian-limit-memory c (* 256 1024 1024) c)
-    (define done
-      (parameterize ([current-custodian c])
-        (thread (lambda () (layer-copy s)))))
-    (define finished (sync/timeout 30 done))
-    (custodian-shutdown-all c)
-    (check-not-false finished "layer-copy returned"))
+    (check-exn (message-matching #rx"^Teacher: set! cannot put .*\n  field: 'student")
+               (lambda () (call t 'attach-in-list! s))))
+
+  (test-case "a forward or method input contract may name the layer's own predicate"
+    (define-layer* Selfie (a)
+      #:method (same? [o : Selfie?]) (eq? o o)
+      #:forward ([o : (or/c #f Selfie?)]) a)
+    (define m (Selfie 1))
+    (check-equal? (m #f) 1)
+    (check-true (call m 'same? m))
+    (check-exn (message-matching #rx"^Selfie: contract violation") (lambda () (m 2))))
 
   (test-case "layer-copy keeps which fields were registered at construction"
     (define c (Counter 2))

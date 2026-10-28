@@ -135,7 +135,8 @@
   (pattern (~optional (~seq #:predicate pred:id)))
   (pattern (~optional (~seq #:on-move moved-body:expr ...+))))
 
-(define-syntax-class entry-formals
+(define-syntax-class (entry-formals what)
+  #:description (format "~a formals" what)
   #:attributes ((id 1) (ctc 1) (kw-decl 1) restarg)
   (pattern ((~alt input:forward-formal kw-input:forward-keyword) ...
             . (~or* () restarg:id))

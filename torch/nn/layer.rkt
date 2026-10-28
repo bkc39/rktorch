@@ -9,7 +9,7 @@
                      ;; only-in would strip
                      syntax/parse/pre
                      (only-in "../private/definer.rkt"
-                              contract-export entry-formals layer-fields
+                              contract-export entry-formals layer-field layer-fields
                               layer-options))
          (only-in racket/contract/base
                   -> ->* ->i and/c any any/c cons/c contract contract-out
@@ -467,8 +467,19 @@
 (define (registered? v)
   (or (Parameter? v) (Parameters%? v) (Buffer? v) (Children%? v) (layer? v)))
 
-(define (rebuilt-registered name v child tensor)
-  (if (registered? v) (rebuilt-value name v child tensor) v))
+(define (holds-registered? v)
+  (define seen (make-hasheq))
+  (let walk ([v v])
+    (cond
+      [(registered? v) #t]
+      [(hash-ref seen v #f) #f]
+      [(pair? v) (hash-set! seen v #t) (or (walk (car v)) (walk (cdr v)))]
+      [(vector? v) (hash-set! seen v #t) (for/or ([x (in-vector v)]) (walk x))]
+      [(box? v) (hash-set! seen v #t) (walk (unbox v))]
+      [(hash? v)
+       (hash-set! seen v #t)
+       (for/or ([(k x) (in-hash v)]) (or (walk k) (walk x)))]
+      [else #f])))
 
 (define (assemble who make forward mode names vals)
   (define-values (params buffers children) (classify names vals))
@@ -479,7 +490,7 @@
     (cond
       [(registered? (read self))
        "set! cannot replace a field that held a layer, parameter or buffer at construction"]
-      [(registered? v)
+      [(holds-registered? v)
        "set! cannot put a layer, parameter or buffer in a field that held none at construction"]
       [else #f]))
   (when problem
@@ -507,7 +518,7 @@
 (begin-for-syntax
   (define-syntax-class (entry scope)
     #:attributes ((checker-def 1) who proc)
-    (pattern (hidden:nat who:id f:entry-formals body:expr ...+)
+    (pattern (hidden:nat who:id (~var f (entry-formals "entry")) body:expr ...+)
       #:do [(define n (length (attribute f.id)))]
       #:fail-when (and (> (syntax-e #'hidden) n) #'hidden)
       "#:hidden-arguments counts more inputs than the positional formals"
@@ -540,16 +551,13 @@
       [(_ arg ...) #`((#,acc #,self) arg ...)]
       [_:id #`(#,acc #,self)]))
 
-  (struct field-access (binder binding spec rebuild))
+  (struct field-access (binder binding spec))
 
   (define immutable-fields
     (field-access #'let
                   (lambda (_who field acc _mut) #`[#,field (#,acc self)])
-                  values
-                  #'rebuilt-value))
+                  values))
 
-  ;; set! cannot register anything, so only the fields registered at
-  ;; construction hold anything layer-copy must copy
   (define mutable-fields
     (field-access #'let-syntax
                   (lambda (who field acc mut)
@@ -558,8 +566,7 @@
                                                    (quote-syntax #,acc)
                                                    (quote-syntax #,mut)
                                                    '#,who '#,field))])
-                  (lambda (field) #`[#,field #:mutable])
-                  #'rebuilt-registered))
+                  (lambda (field) #`[#,field #:mutable])))
 
   (define (field-ids struct-id fields pattern)
     (map (lambda (f) (format-id struct-id pattern struct-id f)) fields))
@@ -568,9 +575,9 @@
     (syntax-parse stx
       [(_ name:id fields
           (~alt (~eh-var o layer-options)
-                (~optional (~seq #:forward fwd:entry-formals fwd-body:expr ...+))
+                (~optional (~seq #:forward (~var fwd (entry-formals "forward")) fwd-body:expr ...+))
                 (~seq #:method (~optional (~seq #:hidden-arguments hidden:nat))
-                      (m-name:id . m-formals:entry-formals) m-body:expr ...+)
+                      (m-name:id . (~var m-formals (entry-formals "method"))) m-body:expr ...+)
                 (~seq #:property prop:expr prop-val:expr)) ...)
        #:with (~var f (layer-fields (and (attribute o.init) "#:init"))) #'fields
        #:with sid (generate-temporary #'name)
@@ -579,7 +586,6 @@
        #:with (mut ...) (field-ids #'sid (attribute f.id) "set-~a-~a!")
        #:with (field-name ...) (map (lambda (f) (symbol->string (syntax-e f))) (attribute f.id))
        #:with (field-spec ...) (map (field-access-spec access) (attribute f.id))
-       #:with rebuild-field (field-access-rebuild access)
        #:with binder (field-access-binder access)
        #:with (binding ...)
        (for/list ([fid (in-list (attribute f.id))]
@@ -611,8 +617,6 @@
        #:with name? (format-id #'name "~a?" #'name)
        #:with export (contract-export stx #'name #'name? (attribute o.ctc) (attribute o.pred))
        #'(begin
-           fe.checker-def ... ...
-           me.checker-def ... ...
            (struct sid registry (field-spec ...)
              #:reflection-name (~? o.reflect 'name)
              #:property prop:rebuilder
@@ -621,9 +625,11 @@
              methods-property ...
              (~@ #:property prop prop-val) ...)
            (define name? sid?)
+           fe.checker-def ... ...
+           me.checker-def ... ...
            (define (rebuild self child tensor)
              (assemble 'name sid forward-proc (registry-mode self) '(field-name ...)
-                       (list (rebuild-field 'field-name (acc self) child tensor) ...)))
+                       (list (rebuilt-value 'field-name (acc self) child tensor) ...)))
            (define forward-proc forward-expr)
            (define (name . formals)
              (let ([absent #f] ...)
@@ -633,7 +639,8 @@
 
 (define-syntax (define-layer stx)
   (syntax-parse stx
-    [(_ _:id _ (~alt (~eh-var o layer-options)) ... #:forward _:entry-formals _:expr ...+)
+    [(_ _:id (_:layer-field ...) (~alt (~eh-var o layer-options)) ...
+        #:forward (~var _ (entry-formals "forward")) body:expr ...+)
      (layer-expansion stx immutable-fields)]))
 
 (define-syntax (define-layer* stx)
