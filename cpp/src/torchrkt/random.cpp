@@ -84,8 +84,7 @@ tr_tensor* tr_rand_gen_on(const int64_t* dims, int64_t ndim,
   return drawn_on("tr_rand_gen_on", false, dims, ndim, type, index, dtype, g);
 }
 
-int tr_tensor_uniform_(tr_tensor* t, double low, double high,
-                       tr_generator* g) {
+int tr_tensor_uniform_(tr_tensor* t, double low, double high, tr_generator* g) {
   if (!t) {
     return torchrkt::null_arg_status("tr_tensor_uniform_");
   }

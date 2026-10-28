@@ -44,8 +44,7 @@ tr_generator* tr_generator_new(uint64_t seed);
 /* t.uniform_(low, high, generator=g) / t.normal_(mean, std, generator=g): in
  * place, from g, or from t's device's default generator when g is NULL. A g
  * on another device than t fails cleanly. 0 success, 1 error. */
-int tr_tensor_uniform_(tr_tensor* t, double low, double high,
-                       tr_generator* g);
+int tr_tensor_uniform_(tr_tensor* t, double low, double high, tr_generator* g);
 
 int tr_tensor_normal_(tr_tensor* t, double mean, double std, tr_generator* g);
 
