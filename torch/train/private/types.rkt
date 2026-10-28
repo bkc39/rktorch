@@ -9,12 +9,11 @@
 
 (provide callback-hook
          callback-kind
+         callback-property
          callback-state-key
          callback-type
          callback?
          define-named-contract
-         method-hook
-         method-state-key
          not-implemented
          prop:callback
          prop:trainer
@@ -24,7 +23,6 @@
          trainer-hook
          trainer-hparam-names
          trainer?
-         (struct-out callback-info)
          (struct-out trainer-info))
 
 (define-syntax-parse-rule (define-named-contract name:id contract:expr)
@@ -40,7 +38,8 @@
 (define-values (prop:callback callback? callback-info-of)
   (make-struct-type-property 'callback))
 
-(struct scheduler-config (scheduler interval frequency))
+(struct scheduler-config (scheduler interval frequency)
+  #:constructor-name make-scheduler-config)
 
 (define (trainer-defines? tr form)
   (and (memq form (trainer-info-forms (trainer-info-of tr))) #t))
@@ -59,6 +58,11 @@
 
 (define (method-state-key cb)
   ((layer-method cb 'state-key) cb))
+
+(define (callback-property kind type
+                           #:hook-ref [hook-ref method-hook]
+                           #:state-key [state-key method-state-key])
+  (callback-info kind type hook-ref state-key))
 
 (define (callback-hook cb name)
   ((callback-info-hook-ref (callback-info-of cb)) cb name))

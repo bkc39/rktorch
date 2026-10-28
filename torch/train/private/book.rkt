@@ -1,14 +1,13 @@
 #lang racket/base
 
-(require (only-in racket/list partition)
-         (only-in racket/match match match-define)
+(require (only-in racket/match match match-define)
          (only-in "../../foreign.rkt"
-                  * + cat detach device dtype item max min reshape tensor->list
-                  tensor? to))
+                  * + cat detach device dtype max min reshape tensor->list tensor? to))
 
 (provide accumulators
          book-metric
          book-metrics
+         epoch-end-reached!
          host-reads
          make-book
          note-epoch!
@@ -16,34 +15,43 @@
          read-epoch!
          read-steps!)
 
-(struct entry (value weight reduce logger? both?) #:mutable)
+(struct logged (logger? both?))
 
-(struct pending (value logger? both?))
+(struct pending logged (value))
 
-(struct book (steps train eval host [newer-step #:mutable]))
+(struct entry logged (value weight reduce [cached #:auto]) #:auto-value #f #:mutable)
 
-(define (make-book) (book (make-hasheq) (make-hasheq) (make-hasheq) (make-hasheq) (make-hasheq)))
+(struct ledger (steps epoch stepped))
+
+(struct book (train eval host))
+
+(define (fresh-ledger) (ledger (make-hasheq) (make-hasheq) (make-hasheq)))
+
+(define (make-book) (book (fresh-ledger) (fresh-ledger) (make-hasheq)))
 
 (define reads (box 0))
 
 (define (host-reads) (unbox reads))
 
+(define (loop-ledger b loop)
+  (if (eq? loop 'train) (book-train b) (book-eval b)))
+
 (define (scalar v)
   (if (tensor? v) (detach v) v))
 
-(define (note-step! b key v logger? both?)
-  (hash-set! (book-steps b) key (pending (scalar v) logger? both?))
-  (hash-set! (book-newer-step b) key #t))
-
-(define (larger reduce a b)
-  (cond
-    [(and (real? a) (real? b)) ((if (eq? reduce 'max) max min) a b)]
-    [else
-     ((if (eq? reduce 'max) max min)
-      (cat (list (reshape (as-tensor a b) 1) (reshape (as-tensor b a) 1))))]))
+(define (note-step! b loop key v logger? both?)
+  (define l (loop-ledger b loop))
+  (hash-set! (ledger-steps l) key (pending logger? both? (scalar v)))
+  (hash-set! (ledger-stepped l) key #t))
 
 (define (as-tensor v like)
   (if (tensor? v) v (+ (* (detach like) 0) v)))
+
+(define (larger reduce a b)
+  (define pick (if (eq? reduce 'max) max min))
+  (if (and (real? a) (real? b))
+      (pick a b)
+      (pick (cat (list (reshape (as-tensor a b) 1) (reshape (as-tensor b a) 1))))))
 
 (define (combine reduce acc v w)
   (match reduce
@@ -52,35 +60,30 @@
     [_ (larger reduce acc v)]))
 
 (define (start reduce v w)
-  (match reduce
-    ['mean (* v w)]
-    ['sum (* v 1)]
-    [_ (* v 1)]))
-
-(define (table b loop)
-  (if (eq? loop 'train) (book-train b) (book-eval b)))
+  (if (eq? reduce 'mean) (* v w) (* v 1)))
 
 (define (note-epoch! b loop key v w reduce logger? both?)
-  (define t (table b loop))
+  (define t (ledger-epoch (loop-ledger b loop)))
   (define value (scalar v))
   (match (hash-ref t key #f)
-    [#f (hash-set! t key (entry (start reduce value w) w reduce logger? both?))]
+    [#f (hash-set! t key (entry logger? both? (start reduce value w) w reduce))]
     [e
      (set-entry-value! e (combine reduce (entry-value e) value w))
-     (set-entry-weight! e (+ (entry-weight e) w))]))
+     (set-entry-weight! e (+ (entry-weight e) w))
+     (set-entry-cached! e #f)]))
 
 (define (accumulators b loop)
-  (for/hasheq ([(key e) (in-hash (table b loop))])
+  (for/hasheq ([(key e) (in-hash (ledger-epoch (loop-ledger b loop)))])
     (values key (entry-value e))))
 
 (define (host-values vs)
-  (define-values (ts rs) (partition tensor? vs))
+  (define ts (filter tensor? vs))
   (define read
-    (cond
-      [(null? ts) (hasheq)]
-      [else
+    (match ts
+      ['() (hasheq)]
+      [(cons t _)
        (set-box! reads (add1 (unbox reads)))
-       (define dev (device (car ts)))
+       (define dev (device t))
        (define dt (if (memq 'float64 (map dtype ts)) 'float64 'float32))
        (for/hasheq ([t (in-list ts)]
                     [x (in-list (tensor->list
@@ -90,6 +93,14 @@
   (for/list ([v (in-list vs)])
     (if (tensor? v) (hash-ref read v) v)))
 
+(define (reduced e x)
+  (if (eq? (entry-reduce e) 'mean) (exact->inexact (/ x (entry-weight e))) x))
+
+(define (cache! es)
+  (define stale (filter (lambda (e) (not (entry-cached e))) es))
+  (for ([e (in-list stale)] [x (in-list (host-values (map entry-value stale)))])
+    (set-entry-cached! e (reduced e x))))
+
 (define (suffixed key both? suffix)
   (if both? (string->symbol (format "~a-~a" key suffix)) key))
 
@@ -98,44 +109,51 @@
   (hash-set! host key value)
   (when both? (hash-set! host (suffixed key both? suffix) value)))
 
-(define (read-steps! b)
-  (define steps (book-steps b))
-  (define keys (hash-keys steps))
-  (define values-read (host-values (for/list ([k (in-list keys)]) (pending-value (hash-ref steps k)))))
-  (define logged
-    (for/fold ([logged (hasheq)]) ([k (in-list keys)] [x (in-list values-read)])
-      (match-define (pending _ logger? both?) (hash-ref steps k))
-      (record! b k x both? "step")
-      (hash-remove! (book-newer-step b) k)
-      (if logger? (hash-set logged (suffixed k both? "step") x) logged)))
-  (hash-clear! steps)
-  logged)
+(define (drain! b table host-of suffix)
+  (define-values (keys records)
+    (for/lists (keys records) ([(k r) (in-hash table)]) (values k r)))
+  (hash-clear! table)
+  (for/fold ([out (hasheq)]) ([k (in-list keys)] [r (in-list records)] [x (in-list (host-of records))])
+    (match-define (logged logger? both?) r)
+    (record! b k x both? suffix)
+    (if logger? (hash-set out (suffixed k both? suffix) x) out)))
 
-(define (reduced e x)
-  (if (eq? (entry-reduce e) 'mean) (exact->inexact (/ x (entry-weight e))) x))
+(define (read-steps! b loop)
+  (drain! b (ledger-steps (loop-ledger b loop))
+          (lambda (ps) (host-values (map pending-value ps)))
+          "step"))
 
 (define (read-epoch! b loop)
-  (define t (table b loop))
-  (define keys (hash-keys t))
-  (define values-read (host-values (for/list ([k (in-list keys)]) (entry-value (hash-ref t k)))))
-  (define logged
-    (for/fold ([logged (hasheq)]) ([k (in-list keys)] [x (in-list values-read)])
-      (define e (hash-ref t k))
-      (define value (reduced e x))
-      (record! b k value (entry-both? e) "epoch")
-      (hash-remove! (book-newer-step b) k)
-      (if (entry-logger? e) (hash-set logged (suffixed k (entry-both? e) "epoch") value) logged)))
-  (hash-clear! t)
-  logged)
+  (drain! b (ledger-epoch (loop-ledger b loop))
+          (lambda (es) (cache! es) (map entry-cached es))
+          "epoch"))
 
-(define (book-metric b key default)
-  (match (and (hash-ref (book-newer-step b) key #f) (hash-ref (book-steps b) key #f))
-    [(pending v _ both?)
-     (define x (if (tensor? v) (item v) v))
+(define (epoch-end-reached! b loop)
+  (define l (loop-ledger b loop))
+  (for ([key (in-list (hash-keys (ledger-epoch l)))])
+    (hash-remove! (ledger-stepped l) key)))
+
+(define (step-metric b l key)
+  (match (hash-ref (ledger-steps l) key #f)
+    [#f (hash-ref (book-host b) key #f)]
+    [(pending logger? both? v)
+     (match-define (list x) (host-values (list v)))
+     (hash-set! (ledger-steps l) key (pending logger? both? x))
      (record! b key x both? "step")
-     (hash-remove! (book-newer-step b) key)
-     x]
-    [#f (hash-ref (book-host b) key default)]))
+     x]))
+
+(define (live-metric b l key)
+  (define e (hash-ref (ledger-epoch l) key #f))
+  (cond
+    [(hash-ref (ledger-stepped l) key #f) (step-metric b l key)]
+    [e (cache! (list e)) (entry-cached e)]
+    [else #f]))
+
+(define (book-metric b loop key default)
+  (define other (if (eq? loop 'train) 'eval 'train))
+  (or (live-metric b (loop-ledger b loop) key)
+      (live-metric b (loop-ledger b other) key)
+      (hash-ref (book-host b) key default)))
 
 (define (book-metrics b)
   (for/hasheq ([(k v) (in-hash (book-host b))]) (values k v)))

@@ -20,10 +20,10 @@
          (only-in "logging.rkt" run-log!)
          (only-in "private/checks.rkt"
                   checked-state-key configured-callbacks configured-optimizers
-                  training-step-result)
+                  readable-arguments training-step-result)
          (only-in "private/types.rkt"
-                  callback-info callback? method-hook method-state-key prop:callback
-                  prop:trainer trainer-info trainer?))
+                  callback-property callback? prop:callback prop:trainer trainer-info
+                  trainer?))
 
 (provide define-callback
          define-trainer
@@ -66,7 +66,7 @@
 
 (define-hook-parameters log! run)
 
-(define-syntax (in-hook stx)
+(define-syntax (with-hook-context stx)
   (syntax-parse stx
     [(_ hook:id r:id body:expr ...+)
      #:with log-transformer
@@ -111,37 +111,78 @@
       #:fail-when (and (eq? side 'trainer) (attribute kind-kw))
       "#:kind is a define-callback option"))
 
-  (define-syntax-class any-body-form
+  (define (method r name formals body)
+    #`(#:method #:hidden-arguments 1 (#,name #,r . #,formals)
+       (with-hook-context #,name #,r #,@body)))
+
+  (define-syntax-class (any-body-form automatic?)
     #:description "a define-trainer or define-callback body form"
-    #:attributes (owner)
+    #:attributes (kind owner (clause 1))
     (pattern ((~literal define-init) :init-formals _:expr ...+)
-      #:attr owner 'both)
-    (pattern ((~literal define-forward) :forward-formals _:expr ...+)
-      #:attr owner 'trainer)
-    (pattern ((~or* (~literal define-optimizers) (~literal define-callbacks)) _:expr ...+)
-      #:attr owner 'trainer)
+      #:attr kind 'define-init
+      #:attr owner 'both
+      #:with (clause ...) #'())
+    (pattern ((~literal define-forward) formals:forward-formals body:expr ...+)
+      #:attr kind 'define-forward
+      #:attr owner 'trainer
+      #:with (clause ...) #'(#:forward formals body ...))
+    (pattern ((~literal define-optimizers) body:expr ...+)
+      #:attr kind 'define-optimizers
+      #:attr owner 'trainer
+      #:with (clause ...)
+      (method (generate-temporary 'run) #'configure-optimizers #'()
+              #`((configured-optimizers #,automatic?
+                                        (call-with-values (lambda () body ...) list)))))
+    (pattern ((~literal define-callbacks) body:expr ...+)
+      #:attr kind 'define-callbacks
+      #:attr owner 'trainer
+      #:with (clause ...)
+      (method (generate-temporary 'run) #'configure-callbacks #'()
+              #'((configured-callbacks (call-with-values (lambda () body ...) list)))))
     (pattern ((~literal define-hparams) _:id ...+)
-      #:attr owner 'trainer)
-    (pattern ((~or* (~literal define-training-step) (~literal define-validation-step)
-                    (~literal define-test-step) (~literal define-predict-step))
-              :step-formals _:expr ...+)
-      #:attr owner 'trainer)
-    (pattern ((~literal define-hook) (_:id . _:hook-params) _:expr ...+)
-      #:attr owner 'both)
-    (pattern ((~literal define-state-key) _:expr)
-      #:attr owner 'callback))
+      #:attr kind 'define-hparams
+      #:attr owner 'trainer
+      #:with (clause ...) #'())
+    (pattern ((~literal define-training-step) formals:step-formals body:expr ...+)
+      #:attr kind 'define-training-step
+      #:attr owner 'trainer
+      #:with (clause ...)
+      (method (generate-temporary 'run) #'training-step #'formals
+              #'((call-with-values (lambda () body ...)
+                                   (lambda results (training-step-result results))))))
+    (pattern ((~literal define-validation-step) formals:step-formals body:expr ...+)
+      #:attr kind 'define-validation-step
+      #:attr owner 'trainer
+      #:with (clause ...)
+      (method (generate-temporary 'run) #'validation-step #'formals #'(body ...)))
+    (pattern ((~literal define-test-step) formals:step-formals body:expr ...+)
+      #:attr kind 'define-test-step
+      #:attr owner 'trainer
+      #:with (clause ...) (method (generate-temporary 'run) #'test-step #'formals #'(body ...)))
+    (pattern ((~literal define-predict-step) formals:step-formals body:expr ...+)
+      #:attr kind 'define-predict-step
+      #:attr owner 'trainer
+      #:with (clause ...)
+      (method (generate-temporary 'run) #'predict-step #'formals #'(body ...)))
+    (pattern ((~literal define-hook) (hook:id . formals:hook-params) body:expr ...+)
+      #:attr kind 'define-hook
+      #:attr owner 'both
+      #:with (clause ...) (method (generate-temporary 'run) #'hook #'formals #'(body ...)))
+    (pattern ((~literal define-state-key) key:expr)
+      #:attr kind 'define-state-key
+      #:attr owner 'callback
+      #:with (clause ...) #'(#:method (state-key) (checked-state-key key))))
 
-  (define (form-kind form)
-    (match (syntax-e form)
-      [(cons head _) (match (identifier-binding head) [(list* _ name _) name])]))
+  (define (forms-of kind forms kinds)
+    (for/list ([f (in-list forms)] [k (in-list kinds)] #:when (eq? k kind)) f))
 
-  (define (forms-of kind forms)
-    (filter (lambda (f) (eq? (form-kind f) kind)) forms))
-
-  (define-syntax-class (body-form side)
-    (pattern form:any-body-form
+  (define-syntax-class (body-form side automatic?)
+    #:attributes (kind (clause 1))
+    (pattern (~var form (any-body-form automatic?))
       #:fail-unless (memq (attribute form.owner) (list side 'both))
-      (format "~a is a define-~a form" (form-kind #'form) (attribute form.owner))))
+      (format "~a is a define-~a form" (attribute form.kind) (attribute form.owner))
+      #:attr kind (attribute form.kind)
+      #:with (clause ...) #'(form.clause ...)))
 
   (define-syntax-class (hook-name side)
     #:attributes (hook)
@@ -158,66 +199,33 @@
                                                 (attribute formals.rest?)))]
       #:fail-when (and problem #'id) problem))
 
-  (define step-methods
-    #hasheq((define-training-step . training-step)
-            (define-validation-step . validation-step)
-            (define-test-step . test-step)
-            (define-predict-step . predict-step)))
-
-  (define (method r name formals body)
-    #`(#:method #:hidden-arguments 1 (#,name #,r . #,formals) (in-hook #,name #,r #,@body)))
-
-  (define (form-clauses form automatic?)
-    (define r (generate-temporary 'run))
-    (define kind (form-kind form))
-    (syntax-parse form
-      [_ #:when (memq kind '(define-init define-hparams)) '()]
-      [(_ formals body ...) #:when (eq? kind 'define-forward) #'(#:forward formals body ...)]
-      [(_ body ...)
-       #:when (eq? kind 'define-optimizers)
-       (method r #'configure-optimizers #'()
-               #`((configured-optimizers #,automatic?
-                                         (call-with-values (lambda () body ...) list))))]
-      [(_ body ...)
-       #:when (eq? kind 'define-callbacks)
-       (method r #'configure-callbacks #'()
-               #'((configured-callbacks (call-with-values (lambda () body ...) list))))]
-      [(_ formals body ...)
-       #:when (eq? kind 'define-training-step)
-       (method r #'training-step #'formals
-               #'((call-with-values (lambda () body ...)
-                                    (lambda results (training-step-result results)))))]
-      [(_ formals body ...)
-       #:when (hash-ref step-methods kind #f)
-       (method r (datum->syntax #f (hash-ref step-methods kind)) #'formals #'(body ...))]
-      [(_ (hook . formals) body ...)
-       #:when (eq? kind 'define-hook)
-       (method r #'hook #'formals #'(body ...))]
-      [(_ key) #'(#:method (state-key) (checked-state-key key))]))
-
   (define (capture args ids)
-    #`(set! #,args (let ([given (list #,@(for/list ([i (in-list ids)]) #`(cons '#,i #,i)))])
+    #`(set! #,args (let ([given (readable-arguments '#,ids (list #,@ids))])
                      (lambda () given))))
 
   (define (init-clauses init-form args field-decls)
-    (match init-form
-      [#f
-       (syntax-parse field-decls
-         [(formals:init-formals) #`(#:init formals #,(capture args (attribute formals.id)))])]
-      [_
-       (syntax-parse init-form
-         [(_ formals:init-formals body ...)
-          #`(#:init formals #,(capture args (attribute formals.id)) body ...)])]))
+    (syntax-parse (or init-form #`(define-init #,@field-decls))
+      [(_ formals:init-formals body ...)
+       #`(#:init formals #,(capture args (attribute formals.id)) body ...)]))
+
+  (define (callback-init-clauses init-form)
+    (syntax-parse (or init-form #'(_))
+      [(_ formals body ...) #'(#:init formals body ...)]
+      [(_) #'()]))
 
   (define ((definer who side) stx)
     (syntax-parse stx
-      [(_ name:id fields (~var opt (definer-options side)) (~var form (body-form side)) ...)
+      [(_ name:id fields (~var opt (definer-options side))
+          (~var form (body-form side (if (attribute opt.automatic)
+                                         (syntax-e #'opt.automatic)
+                                         #t)))
+          ...)
        #:do [(define forms (attribute form))
-             (define kinds (map form-kind forms))
+             (define kinds (attribute form.kind))
              (define repeated (check-duplicates (remq* '(define-hook) kinds)))]
        #:fail-when repeated (format "~a appears twice" repeated)
        #:with (~var f (layer-fields (and (memq 'define-init kinds) "define-init"))) #'fields
-       #:do [(syntax-parse #`(#,@(forms-of 'define-hook forms))
+       #:do [(syntax-parse #`(#,@(forms-of 'define-hook forms kinds))
                #:context (list 'define-hook stx)
                [((_ (~var header (hook-header side)) . _) ...)
                 #:do [(define twice
@@ -226,15 +234,13 @@
                 (void)])
              (define field-names (map syntax-e (attribute f.id)))
              (define hparams
-               (syntax-parse #`(#,@(forms-of 'define-hparams forms))
+               (syntax-parse #`(#,@(forms-of 'define-hparams forms kinds))
                  #:context (list 'define-hparams stx)
                  [((_ (~var h (field-of field-names (syntax-e #'name))) ...) ...)
                   (apply append (attribute h))]))
-             (define init-form (findf (lambda (fm) (eq? (form-kind fm) 'define-init)) forms))
+             (define init-form (findf values (forms-of 'define-init forms kinds)))
              (define automatic? (if (attribute opt.automatic) (syntax-e #'opt.automatic) #t))]
-       #:with ((clause ...) ...) (map (lambda (fm) (form-clauses fm automatic?)) forms)
        #:with (hparam ...) hparams
-       #:with expansion
        (match side
          ['trainer
           (define args (generate-temporary 'arguments))
@@ -244,24 +250,20 @@
               (~? (~@ #:predicate opt.pred))
               #:property prop:trainer (trainer-info '#,kinds #,automatic? '(hparam ...))
               #:method (hyperparameters)
-              (hash-set* (make-immutable-hasheq (#,args)) (~@ 'hparam hparam) ...)
-              clause ... ...)]
+              (hash-set* (#,args) (~@ 'hparam hparam) ...)
+              form.clause ... ...)]
          ['callback
           #`(define-layer* name fields
-              #,@(match init-form
-                   [#f #'()]
-                   [_ (syntax-parse init-form
-                        [(_ formals body ...) #'(#:init formals body ...)])])
+              #,@(callback-init-clauses init-form)
               (~? (~@ #:contract opt.ctc))
               (~? (~@ #:predicate opt.pred))
               #:property prop:callback
-              (callback-info '#,(if (attribute opt.kind) (syntax-e #'opt.kind) 'plain)
-                             (gensym 'name) method-hook method-state-key)
+              (callback-property '#,(if (attribute opt.kind) (syntax-e #'opt.kind) 'plain)
+                                 (gensym 'name))
               #,@(if (memq 'define-state-key kinds)
                      #'()
                      #'(#:method (state-key) (symbol->string 'name)))
-              clause ... ...)])
-       #'expansion])))
+              form.clause ... ...)])])))
 
 (define-syntax define-trainer (definer 'define-trainer 'trainer))
 (define-syntax define-callback (definer 'define-callback 'callback))

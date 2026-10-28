@@ -10,7 +10,7 @@
          (only-in racket/match match)
          (only-in syntax/parse/define define-syntax-parse-rule)
          (only-in "../private/contract.rkt" define/contract-out)
-         (only-in "private/types.rkt" callback-info callback? prop:callback)
+         (only-in "private/types.rkt" callback-property callback? prop:callback)
          (only-in "run.rkt" state-key/c))
 
 (begin-for-syntax
@@ -23,15 +23,16 @@
         #'procedure?
         #`(procedure-arity-includes/c #,(add1 (length (hook-formals h)))))))
 
+(define (lambda-hook cb name)
+  (match (hash-ref (lambda-hooks-procs cb) name #f)
+    [#f #f]
+    [p (lambda (_cb r . args) (apply p r args))]))
+
 (struct lambda-hooks (procs key)
   #:property prop:callback
-  (callback-info 'plain
-                 'lambda-callback
-                 (lambda (cb name)
-                   (match (hash-ref (lambda-hooks-procs cb) name #f)
-                     [#f #f]
-                     [p (lambda (_cb r . args) (apply p r args))]))
-                 (lambda (cb) (lambda-hooks-key cb))))
+  (callback-property 'plain 'lambda-callback
+                     #:hook-ref lambda-hook
+                     #:state-key (lambda (cb) (lambda-hooks-key cb))))
 
 (define (hooks-table pairs)
   (for/hasheq ([pair (in-list pairs)] #:when (cdr pair))

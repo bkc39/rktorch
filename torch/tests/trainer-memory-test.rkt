@@ -7,9 +7,11 @@
            (only-in (submod "../data/workers.rkt" private) live-worker-count)
            (only-in "../foreign/raw/collector.rkt" collect-and-wait!)
            (only-in "../foreign.rkt" cpu-device detach native-memory-use requires-grad?)
-           (only-in "../main.rkt" ones sum)
+           (only-in "../main.rkt" ones sum zeros)
            (only-in "../nn.rkt" Linear mse-loss parameters sgd)
            "../train.rkt"
+           (only-in "private/trainer-kit.rkt"
+                    collecting-hparams collecting-logger collecting-metrics)
            (only-in (submod "../train/logging.rkt" private) epoch-accumulators host-reads))
 
   (define (collect!)
@@ -53,6 +55,35 @@
       (check-equal? (reads-per-fit keys #:epochs 2 #:batches 7 #:every every)
                     (+ (quotient (* 2 7) every) 2)
                     (format "~a keys, every ~a" (length keys) every))))
+
+  (define-callback late-logger ()
+    #:kind monitor
+    (define-hook (on-train-epoch-end) (log! 'late (sum (ones 2)))))
+
+  (test-case "L-R1: a late callback's epoch-end log! shares the epoch's one read"
+    (define before (host-reads))
+    (define l (collecting-logger))
+    (fit (Keyed '(loss)) (loader 14) #:max-epochs 2 #:log-every-n-steps 3 #:logger l
+         #:callbacks (list (late-logger)))
+    (check-equal? (- (host-reads) before) (+ (quotient 14 3) 2))
+    (check-equal? (for/list ([m (in-list (collecting-metrics l))]
+                             #:when (hash-has-key? m 'late))
+                    (hash-ref m 'late))
+                  '(2.0 2.0)))
+
+  (define-trainer Holding (net)
+    (define-init (data label) (set! net (Linear 1 1)))
+    (define-optimizers (sgd (parameters net) #:lr 0.01))
+    (define-training-step (x y) (mse-loss (net x) y)))
+
+  (test-case "a trainer keeps no init argument that is not readable"
+    (define held (make-weak-box (zeros 1000 1000)))
+    (define tr (Holding (weak-box-value held) "kept"))
+    (collect!)
+    (check-false (weak-box-value held))
+    (define l (collecting-logger))
+    (fit tr (loader 2 #:width 1) #:max-epochs 1 #:logger l)
+    (check-equal? (collecting-hparams l) (list (hasheq 'label "kept"))))
 
   (define-trainer Wide (net mode weak kept)
     (define-init (m w)

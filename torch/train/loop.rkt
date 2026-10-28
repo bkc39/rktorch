@@ -1,16 +1,14 @@
 #lang racket/base
 
-(require (only-in racket/contract/base
-                  ->i >/c listof or/c unsupplied-arg?)
+(require (only-in racket/contract/base ->i >/c listof or/c)
          (only-in racket/match match match*)
-         (only-in racket/math exact-floor)
-         (only-in "../data/loader.rkt" dataloader-length dataloader?)
+         (only-in "../data/loader.rkt" dataloader?)
          (only-in "../foreign.rkt" device?)
          (only-in "../private/contract.rkt" define/contract-out)
          (only-in "logging.rkt" logger-spec/c stdout-logger)
          (only-in "private/dispatch.rkt" finish! tear-down! trainer-device with-failure-protocol)
          (only-in "private/evaluate.rkt" evaluate)
-         (only-in "private/fit.rkt" plan run-fit start-entry!)
+         (only-in "private/fit.rkt" fit-plan given limited-batches run-fit start-entry!)
          (only-in "private/state.rkt" fresh-run)
          (only-in "private/types.rkt"
                   callback? not-implemented trainer-automatic?
@@ -18,15 +16,6 @@
          (only-in "run.rkt"
                   clip-algorithm/c fast-dev-run/c limit/c precision/c run?
                   val-check-interval/c))
-
-(define (given v [default #f])
-  (if (unsupplied-arg? v) default v))
-
-(define (limited-batches loader limit)
-  (define n (dataloader-length loader))
-  (match (given limit 1.0)
-    [(? exact-integer? k) (min k n)]
-    [share (exact-floor (* n share))]))
 
 (define (selects-a-batch? loader limit)
   (positive? (limited-batches loader limit)))
@@ -46,14 +35,15 @@
     [(_ _ _ #f) (not-implemented "manual optimization" 'T2)]
     [(_ _ _ _) (void)]))
 
-(define (evaluation trainer loader stage part who device logger callbacks limit)
-  (define r (fresh-run trainer who (or device (trainer-device trainer))))
+(define (evaluation entry trainer loader
+                    #:device device #:loggers loggers #:callbacks callbacks #:limit limit)
+  (define r (fresh-run trainer entry (or device (trainer-device trainer))))
   (define outputs
-    (with-failure-protocol r who
-      (start-entry! r who callbacks (logger-list logger) device)
-      (begin0 (evaluate r loader (limited-batches loader limit) stage part)
-              (tear-down! r who)
-              (finish! r 'success))))
+    (with-failure-protocol r entry
+      (start-entry! r entry callbacks loggers device)
+      (begin0 (evaluate r loader (limited-batches loader limit) entry)
+              (tear-down! r entry))))
+  (finish! r 'success)
   (values r outputs))
 
 (define/contract-out (fit trainer train
@@ -122,24 +112,22 @@
        [result run?])
   (check-supported! #:precision precision #:clip-val clip-val #:ckpt-path ckpt-path
                     #:automatic? (trainer-automatic? trainer))
-  (define fast (match fast-dev-run [#f #f] [#t 1] [k k]))
-  (define r (fresh-run trainer 'fit (or device (trainer-device trainer))))
-  (run-fit r
-           (plan device
-                 val
-                 (if fast 1 max-epochs)
-                 (or fast max-steps)
-                 accumulate
-                 (if fast 1 val-every)
-                 (and (not fast) val-interval)
-                 (if fast 0 sanity)
-                 (limited-batches train (or fast limit-train))
-                 (and val (limited-batches val (or fast limit-val)))
-                 log-every
-                 (and fast #t))
-           train
-           callbacks
-           (if fast '() (logger-list logger))))
+  (run-fit (fresh-run trainer 'fit (or device (trainer-device trainer)))
+           (fit-plan train
+                     #:val val
+                     #:device device
+                     #:callbacks callbacks
+                     #:loggers (logger-list logger)
+                     #:max-epochs max-epochs
+                     #:max-steps max-steps
+                     #:accumulate accumulate
+                     #:val-every val-every
+                     #:val-interval val-interval
+                     #:sanity sanity
+                     #:limit-train limit-train
+                     #:limit-val limit-val
+                     #:log-every log-every
+                     #:fast-dev-run fast-dev-run)))
 
 (define/contract-out (test trainer loader
                            #:device [device #f]
@@ -161,7 +149,9 @@
        [result run?])
   (check-supported! #:ckpt-path ckpt-path)
   (define-values (r _outputs)
-    (evaluation trainer loader 'test 'test 'test device logger callbacks limit))
+    (evaluation 'test trainer loader
+                #:device device #:loggers (logger-list logger) #:callbacks callbacks
+                #:limit limit))
   r)
 
 (define/contract-out (predict trainer loader
@@ -179,5 +169,6 @@
        [result list?])
   (check-supported! #:ckpt-path ckpt-path)
   (define-values (_r outputs)
-    (evaluation trainer loader 'predict 'predict 'predict device #f callbacks limit))
+    (evaluation 'predict trainer loader
+                #:device device #:loggers '() #:callbacks callbacks #:limit limit))
   outputs)

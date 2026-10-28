@@ -20,6 +20,7 @@
          collecting-hparams
          collecting-logger
          collecting-metrics
+         collecting-steps
          interval-message
          recorder
          Recorded
@@ -35,11 +36,12 @@
   [(define (logger-log-hyperparams! l params)
      (set-collecting-logger-hparams! l (cons params (collecting-logger-hparams l))))
    (define (logger-log-metrics! l metrics step)
-     (set-collecting-logger-metrics! l (cons metrics (collecting-logger-metrics l))))
+     (set-collecting-logger-metrics! l (cons (cons step metrics) (collecting-logger-metrics l))))
    (define (logger-finalize! l status)
      (set-collecting-logger-finalized! l (cons status (collecting-logger-finalized l))))])
 
-(define (collecting-metrics l) (reverse (collecting-logger-metrics l)))
+(define (collecting-metrics l) (map cdr (collecting-steps l)))
+(define (collecting-steps l) (reverse (collecting-logger-metrics l)))
 (define (collecting-hparams l) (reverse (collecting-logger-hparams l)))
 (define (collecting-finalized l) (reverse (collecting-logger-finalized l)))
 

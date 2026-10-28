@@ -304,7 +304,7 @@
   (define taken 0)
   (define (counted-batch k)
     (set! taken (max taken (add1 k)))
-    (batch k))
+    (call-with-values (lambda () (batch k)) list))
   (dynamic-wind void
                 (lambda () (proc count counted-batch))
                 (lambda () (if (= taken count) (finish!) (abandon!)))))

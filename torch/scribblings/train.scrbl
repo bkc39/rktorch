@@ -90,7 +90,9 @@ hooks.}
 
 @defform[(define-init init-formals init-body ...+)]{
 The constructor body, as @racket[define-layer]'s @racket[#:init];
-@racket[run] is not bound.}
+@racket[run] is not bound. The logger receives each argument that is a real,
+string, symbol, boolean or list of those; the trainer keeps no other
+argument.}
 
 @defform[(define-forward forward-formals body ...+)]{
 The trainer's forward, as @racket[define-layer]'s @racket[#:forward]. Without
@@ -171,14 +173,19 @@ the finished run. Keywords follow Lightning's @tt{Trainer}. A
 each batch to the trainer's device. @racket[log!] reduces on the device and
 reads to the host at every @racket[#:log-every-n-steps]-th optimizer step of
 the fit, counted across epochs, and at each epoch end, in one transfer for
-all keys. @racket[#:fast-dev-run] runs that many batches (one for
+all keys. A per-step value logged in a validation loop reaches the logger at
+each validation batch, at step 1, 2, … of that loop, apart from the training
+values. With @racket[#:max-epochs] @racket[#f], an epoch that takes no
+optimizer step raises @racket[exn:fail], since @racket[#:max-steps] would
+never be reached. @racket[#:fast-dev-run] runs that many batches (one for
 @racket[#t]) of one epoch, with no sanity check, no loggers and no
 @racket[monitor] or @racket[checkpoint] callbacks. If an @racket[exn:fail]
 or @racket[exn:break] is raised, @racket[fit] runs each callback's
 @racket[on-exception] and then @racket[teardown] with breaks disabled, and
-re-raises the exception; a break issued meanwhile is absorbed. A loop that
-leaves a loader early stops its @racket[#:workers] threads; training from a
-loader with workers awaits issue #194.
+re-raises the exception; a break issued meanwhile is absorbed if breaks were
+enabled when @racket[fit] was called, and stays pending otherwise. A loop that
+leaves a loader early stops its @racket[#:workers] threads. The trainer does
+not yet support training from a loader with @racket[#:workers].
 
 The contract also requires @racket[#:max-epochs], @racket[#:max-steps] or
 @racket[#:fast-dev-run]; a @racket[define-training-step]; a
@@ -238,8 +245,10 @@ The loop state. @racket[run-stage] is @racket[#f] once the run has finished.
 @racket[run-global-step] counts optimizer steps taken.
 @racket[run-stepped?] is whether the current training batch took one.
 @racket[run-metric] reads one key to the host: inside an epoch the latest
-step value, after an epoch its reduction, and for a key logged both per step
-and per epoch the newer of the two.}
+step value, in an epoch-end hook and after the epoch its reduction, and for a
+key logged both per step and per epoch the newer of the two. A key logged
+only per epoch answers the running reduction of the current epoch, read once
+until the next @racket[log!] of that key.}
 
 @deftogether[(@defproc[(run-schedulers [r run?]) (listof scheduler-config?)]
               @defproc[(run-estimated-stepping-batches [r run?])
@@ -249,11 +258,13 @@ The schedulers @racket[define-optimizers] returned, and Lightning's
 
 @defproc[(request-stop! [r fitting-run/c]) void?]{
 Lightning's @tt{should_stop}: the current batch finishes, then the
-validation loop and the epoch-end and fit-end hooks run.}
+validation loop and the epoch-end and fit-end hooks run. Requested before an
+epoch's first batch, the epoch runs no batch.}
 
 @defproc[(skip-step! [r step-pending-run/c]) void?]{
 Drops the pending optimizer step. The window's remaining backward passes do
-not run, no step is taken, and @racket[run-global-step] does not advance.}
+not run, no step is taken, and @racket[run-global-step] does not advance,
+also when called from @racket[on-before-optimizer-step].}
 
 @defproc[(skip-epoch! [r batch-start-run/c]) void?]{
 Lightning's @racket[-1] from @tt{on_train_batch_start}. Once every
@@ -334,13 +345,12 @@ Lightning's @tt{LambdaCallback}: one keyword per callback hook of
 @secref["train-hooks"]. Each procedure takes the run first, then the hook's
 arguments.
 @examples[#:eval train-eval
-(define ends '())
-(define count-epochs
+(define report
   (lambda-callback #:on-train-epoch-end
-                   (lambda (r) (set! ends (cons (run-epoch r) ends)))))
-(void (fit (Line) (dataloader (tensor-dataset xs xs) #:batch-size 2)
-           #:max-epochs 2 #:logger #f #:callbacks (list count-epochs)))
-ends]}
+                   (lambda (r)
+                     (printf "epoch ~a: ~a\n" (run-epoch r) (run-metric r 'train/loss)))))
+(void (fit (Line) (dataloader (tensor-dataset xs (* 2 xs)) #:batch-size 2)
+           #:max-epochs 2 #:logger #f #:callbacks (list report)))]}
 
 @section{Optimization}
 

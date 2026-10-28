@@ -9,15 +9,17 @@
          (only-in racket/match match match*)
          (only-in racket/math infinite? nan?)
          (only-in racket/string string-join)
+         (only-in threading ~>)
          (only-in "../foreign.rkt" dtype numel tensor?)
          (only-in "../private/contract.rkt" define/contract-out)
          (only-in "private/book.rkt" accumulators host-reads note-epoch! note-step!)
          (only-in "private/hooks.rkt"
                   log-rule-default-on-epoch? log-rule-default-on-step?
                   log-rule-on-epoch log-rule-on-step)
-         (only-in "private/state.rkt" run-batch-size run-book run-stage)
+         (only-in "private/state.rkt" run-batch-size run-book run-current-stage run-loop)
          (only-in "private/types.rkt" define-named-contract)
-         (only-in "run.rkt" hook-log-rule logging-run/c))
+         (only-in "run.rkt" logging-run/c)
+         (only-in (submod "run.rkt" private) hook-log-rule))
 
 (provide gen:training-logger
          logger-finalize!
@@ -78,12 +80,12 @@
        [result void?])
   (define b (run-book r))
   (define both? (and on-step? on-epoch?))
-  (define loop (if (eq? (run-stage r) 'train) 'train 'eval))
+  (define loop (run-loop r))
   (define weight (or batch-size (run-batch-size r)))
   (cond
-    [(eq? (run-stage r) 'sanity-check) (void)]
+    [(eq? (run-current-stage r) 'sanity-check) (void)]
     [else
-     (when on-step? (note-step! b key value logger? both?))
+     (when on-step? (note-step! b loop key value logger? both?))
      (when on-epoch? (note-epoch! b loop key value weight reduce logger? both?))]))
 
 (define (metric-text metrics)
@@ -140,10 +142,11 @@
   (file-sink metrics hparams write-metrics))
 
 (define (jsonl-line path metrics step)
-  (append-line path
-               (jsexpr->string
-                (for/fold ([h (hasheq 'step step)]) ([(k v) (in-hash metrics)])
-                  (hash-set h k (json-value v))))))
+  (define line
+    (~> (for/hasheq ([(k v) (in-hash metrics)]) (values k (json-value v)))
+        (hash-set 'step step)
+        jsexpr->string))
+  (append-line path line))
 
 (define (csv-rows path metrics step)
   (with-output-to-file path #:exists 'append
