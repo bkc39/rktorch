@@ -774,7 +774,7 @@ Runtime paths take `(only-in racket/runtime-path #%datum define-runtime-path)`.
   `set!` raises when the field held a layer, `Parameter`, `Buffer`,
   `children-by-key` or `parameters-by-key` at construction, or when the new
   value is one or holds one in its pairs, vectors, boxes or hash keys and
-  values; `torch/nn/mode.rkt` = `train!`, `eval!`,
+  values (structs and mpairs are not looked inside); `torch/nn/mode.rkt` = `train!`, `eval!`,
   `call-with-mode` and `in-mode`; `torch/nn/parameter.rkt`, `torch/nn/buffer.rkt`, `torch/nn/linear.rkt`,
   `torch/nn/init.rkt`, `torch/nn/optim.rkt`, `torch/nn/ema.rkt`, `torch/nn/loss.rkt`, `torch/nn/recurrent.rkt`,
   `torch/nn/attention.rkt`, `torch/nn/transformer.rkt`, `torch/nn/positions.rkt`, `torch/nn/copy.rkt`, `torch/nn/clip.rkt`).

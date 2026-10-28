@@ -452,34 +452,59 @@
 (define-values (prop:layer-methods layer-methods? layer-methods-of)
   (make-struct-type-property 'layer-methods))
 
-(define (layer-methods m)
-  (and (layer-methods? m) (layer-methods-of m)))
-
-(define (layer-method m name)
-  (and (layer-methods? m) (hash-ref (layer-methods-of m) name #f)))
-
 (module+ private
-  (provide define-layer*
-           (contract-out
-            [layer-method (-> layer? symbol? (or/c procedure? #f))]
-            [layer-methods (-> layer? (or/c hash? #f))])))
+  (provide define-layer*)
+
+  (define/contract-out (layer-method m name) ;; noqa
+    (-> layer? symbol? (or/c procedure? #f))
+    (and (layer-methods? m) (hash-ref (layer-methods-of m) name #f)))
+
+  (define/contract-out (layer-methods m) ;; noqa
+    (-> layer? (or/c hash? #f))
+    (and (layer-methods? m) (layer-methods-of m))))
 
 (define (registered? v)
   (or (Parameter? v) (Parameters%? v) (Buffer? v) (Children%? v) (layer? v)))
 
+;; immutable containers found to reach nothing registered; their contents
+;; cannot change, so neither can the verdict
+(define clean (make-weak-hasheq))
+
+;; the walk answers #t (reaches a registered value), 'clean (never can), or #f
+;; (reaches none now, through a mutable container or a cycle)
 (define (holds-registered? v)
-  (define seen (make-hasheq))
-  (let walk ([v v])
+  (define seen #f)
+  (define (join acc x)
+    (cond
+      [(eq? acc #t) #t]
+      [(eq? acc 'clean) (walk x)]
+      [else (eq? (walk x) #t)]))
+  (define (walk v)
     (cond
       [(registered? v) #t]
-      [(hash-ref seen v #f) #f]
-      [(pair? v) (hash-set! seen v #t) (or (walk (car v)) (walk (cdr v)))]
-      [(vector? v) (hash-set! seen v #t) (for/or ([x (in-vector v)]) (walk x))]
-      [(box? v) (hash-set! seen v #t) (walk (unbox v))]
-      [(hash? v)
+      [(not (or (pair? v) (vector? v) (box? v) (hash? v))) 'clean]
+      [(hash-ref clean v #f) 'clean]
+      [(and seen (hash-ref seen v #f)) #f]
+      [else
+       (set! seen (or seen (make-hasheq)))
        (hash-set! seen v #t)
-       (for/or ([(k x) (in-hash v)]) (or (walk k) (walk x)))]
-      [else #f])))
+       (settle v (walk-in v))]))
+  (define (walk-in v)
+    (cond
+      [(pair? v) (join (walk (car v)) (cdr v))]
+      [(vector? v)
+       (for/fold ([acc 'clean]) ([x (in-vector v)] #:break (eq? acc #t))
+         (join acc x))]
+      [(box? v) (walk (unbox v))]
+      [else
+       (for/fold ([acc 'clean]) ([(k x) (in-hash v)] #:break (eq? acc #t))
+         (join (join acc k) x))]))
+  (define (settle v verdict)
+    (cond
+      [(not (eq? verdict 'clean)) verdict]
+      [(or (pair? v) (immutable? v)) (hash-set! clean v #t) 'clean]
+      [else #f]))
+  (eq? (walk v) #t))
 
 (define (assemble who make forward mode names vals)
   (define-values (params buffers children) (classify names vals))

@@ -5,6 +5,7 @@
                        (only-in syntax/parse/pre ~var attribute syntax-parse)
                        (only-in "../private/definer.rkt" field-of layer-fields))
            (only-in racket/contract/base or/c)
+           (only-in racket/match match-define)
            rackunit
            (only-in syntax/macro-testing convert-compile-time-error)
            "../main.rkt"
@@ -170,6 +171,43 @@
     (define done (thread (lambda () (call h 'hold! cyclic))))
     (check-not-false (sync/timeout 30 done) "the walk ends on a cycle")
     (check-eq? (call h 'held) cyclic))
+
+  (test-case "set! of a list grown one cons per call walks the new head, not the list"
+    (define h (Holder))
+    (call h 'hold! '())
+    (define steps 100000)
+    (define done
+      (thread (lambda ()
+                (for ([i (in-range steps)])
+                  (call h 'hold! (cons i (call h 'held)))))))
+    (check-not-false (sync/timeout 30 done) "a quadratic walk takes minutes here")
+    (kill-thread done)
+    (check-equal? (length (call h 'held)) steps))
+
+  (test-case "a list walked clean before still raises once it reaches a layer"
+    (define h (Holder))
+    (define seen-clean (list 1 2))
+    (call h 'hold! seen-clean)
+    (check-exn (message-matching #rx"^Holder: set! cannot put")
+               (lambda () (call h 'hold! (cons (Linear 2 2) seen-clean))))
+    (define b (box 1))
+    (define through-box (list 1 b))
+    (call h 'hold! through-box)
+    (set-box! b (Linear 2 2))
+    (check-exn (message-matching #rx"^Holder: set! cannot put")
+               (lambda () (call h 'hold! through-box))
+               "a mutable container is walked again")
+    (define ph (make-placeholder #f))
+    (define cyclic (make-reader-graph
+                    (let ([p (cons (cons ph 1) (Linear 2 2))])
+                      (placeholder-set! ph p)
+                      p)))
+    (match-define (cons back _) cyclic)
+    (check-exn (message-matching #rx"^Holder: set! cannot put")
+               (lambda () (call h 'hold! cyclic)))
+    (check-exn (message-matching #rx"^Holder: set! cannot put")
+               (lambda () (call h 'hold! back))
+               "a pair inside a cycle is not vouched for before the cycle is done"))
 
   (test-case "layer-copy rebuilds plain fields as define-layer does"
     (define s (Scratch))
