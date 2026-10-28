@@ -11,6 +11,7 @@
                   s64vector-ref)
          (only-in racket/contract/base -> any/c)
          (only-in racket/string string-join)
+         (only-in racket/unsafe/ops unsafe-struct*-cas!)
          (only-in "../private/contract.rkt" define/checked-out)
          (only-in "error.rkt" check-handle check-ok)
          (only-in "format.rkt"
@@ -18,6 +19,7 @@
                   tensor-tree->pytorch-repr)
          (only-in "raw/fault.rkt" native-fault? note-native-fault!)
          (only-in "raw/memory.rkt" tr-tensor-free/checked)
+         (only-in "raw/race-points.rkt" race-point)
          (only-in "raw/syntax.rkt" Tensor?)
          (only-in "raw/tensor.rkt"
                   dtype-code->symbol
@@ -175,7 +177,8 @@
      (tensor->pytorch-repr (handle->floats h dims) dims
                            #:suffix (dtype-suffix dtype))]))
 
-(struct tensor-impl (handle shape)
+(struct tensor-impl (handle shape [state #:auto #:mutable])
+  #:auto-value 'live
   #:reflection-name 'tensor
   #:property prop:cpointer 0
   #:property prop:custom-write
@@ -216,7 +219,26 @@
 (define (wrap-tensor h)
   (tensor-impl h (handle-shape h)))
 
+;; The swap decides which free releases the handle, so no atomic section is
+;; needed around it. Index 2 is `state`; tensors are never impersonated,
+;; which the unsafe swap requires. Only the winner flips the tag: the release
+;; checks it. As in free-handle!, the dynamic-wind delivers a deferred break.
+(define (take-handle! t)
+  (unsafe-struct*-cas! t 2 'live 'freeing))
+
 (define (tensor-free! t)
   (define h (tensor-handle t))
-  (when (cpointer-has-tag? h 'Tensor)
-    (free-handle! h)))
+  (define taken? #f)
+  (dynamic-wind
+   void
+   (lambda ()
+     (parameterize-break #f
+       (set! taken? (take-handle! t))
+       (unless taken?
+         (raise-arguments-error 'tensor-free!
+                                "the tensor is freed, or another thread is freeing it"))
+       (race-point free-taken h)
+       (tr-tensor-free/checked h)))
+   (lambda ()
+     (when taken?
+       (set-cpointer-tag! h 'Tensor-freed)))))

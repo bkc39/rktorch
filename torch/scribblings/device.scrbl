@@ -564,9 +564,10 @@ one collector. That sharing covers reading a tensor from several threads at
 once, not writing it. An in-place mutation, @racket[copy!] or an optimizer's
 @racket[step!], writes the native storage the other threads read, and
 nothing in the library orders those writes, so a program that mutates a
-shared tensor must synchronise its threads itself. Two further limits
-remain. Grad mode, autocast and the message of a failed call are not yet
-kept per thread, and a tensor should be freed explicitly by one thread only.
+shared tensor must synchronise its threads itself. Grad mode, autocast and
+the message of a failed call are not yet kept per thread. Two threads may
+free one tensor explicitly: the native storage is released once, and the
+other free raises @racket[exn:fail:contract], as a second free does.
 
 A tensor must not be sent to another place. It is accepted as a place
 message but arrives as a bare pointer to the same native storage, with no

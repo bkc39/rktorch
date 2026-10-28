@@ -56,24 +56,33 @@
       (tensor-free! t))
     (check-ledger base w))
 
-  (define (racing-frees pool)
+  (define (racing-frees point pool)
     (settle!)
+    (define base (ledger-snapshot))
     (define w (make-watch))
-    (define t (zeros 256 256))
-    (define h (tensor-handle t))
-    (define g (handle-gate 'free-unaccounted h))
-    (with-parked [a (spawn (lambda () (tensor-free! t)) #:pool pool #:label 'a)
-                  #:at g #:watch w]
-      (check-eq? (wait-for-arrival g) 'parked)
-      (join (spawn (lambda () (tensor-free! t)) #:pool pool #:label 'b))
-      (watch-release-count w h)))
+    (with-race-hook (watch-hook w)
+      (define t (zeros 256 256))
+      (define h (tensor-handle t))
+      (define g (handle-gate point h))
+      (define (free-by label)
+        (spawn (lambda () (tensor-free! t)) #:pool pool #:label label))
+      (with-parked [a (free-by 'a) #:at g #:watch w]
+        (check-eq? (wait-for-arrival g) 'parked)
+        (check-exn exn:fail:contract? (lambda () (join (free-by 'b))))
+        (settle!)
+        (release-gate! g)
+        (join a))
+      (settle!)
+      (check-equal? (watch-release-count w h) 1
+                    (format "releases of a handle two ~a threads freed, one parked at ~a"
+                            (or pool 'ordinary) point))
+      (check-equal? (watch-freed-count w h) 1))
+    (check-ledger base w))
 
   (test-case "two threads freeing one tensor reach the native release once (I3)"
-    (for ([pool (in-list pools)])
-      (check-known-failure
-       "#266"
-       (format "one release with ~a threads" (or pool 'ordinary))
-       (= 1 (racing-frees pool)))))
+    (for* ([point (in-list '(free-unaccounted free-taken))]
+           [pool (in-list pools)])
+      (racing-frees point pool)))
 
   (define (double-unaccount pool)
     (define w (make-watch))

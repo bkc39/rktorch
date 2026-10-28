@@ -753,7 +753,9 @@ Runtime paths take `(only-in racket/runtime-path #%datum define-runtime-path)`.
   which registers and
   accounts every handle inside one atomic section; never a bare
   `(allocator ...)` wrap (skips the ledger).
-  Explicit synchronous release goes through the raising,
+  Explicit synchronous release first takes the handle with one CAS on the
+  wrapper's `state` (`'live` -> `'freeing`; a loser raises
+  `exn:fail:contract`, #266), then goes through the raising,
   finalizer-cancelling `tr-tensor-free/checked`; OOM reaches users as
   `exn:fail:rktorch:oom` (catch by type, not message). A handler broad
   enough to catch an `invalid memory reference` either lets it through to
