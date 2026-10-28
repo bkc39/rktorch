@@ -44,7 +44,6 @@
          embedding
          eq-scalar
          eq-tensor
-         erfinv
          fill-scalar!
          flip
          floor-tensor
@@ -191,9 +190,6 @@
 
 (define-generated-op eq-tensor tr_gen_eq_tensor
   ([self tensor] [other tensor]))
-
-(define-generated-op erfinv tr_gen_erfinv
-  ([self tensor]))
 
 (define-generated-op fill-scalar! tr_gen_fill__scalar #:inplace
   ([self tensor] [value scalar]))

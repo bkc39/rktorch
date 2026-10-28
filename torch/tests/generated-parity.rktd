@@ -33,7 +33,6 @@
  (embedding "embedding" (tensor tensor int64 bool bool) #f 1)
  (eq-scalar "eq.Scalar" (tensor scalar) #f 1)
  (eq-tensor "eq.Tensor" (tensor tensor) #f 1)
- (erfinv "erfinv" (tensor) #f 1)
  (fill-scalar! "fill_.Scalar" (tensor scalar) #t 1)
  (flip "flip" (tensor int-array) #f 1)
  (floor-tensor "floor" (tensor) #f 1)

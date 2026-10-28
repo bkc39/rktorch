@@ -201,8 +201,7 @@ vision affine_grid_generator
 vision grid_sampler_2d
 vision upsample_bicubic2d
 
-# erfinv is trunc_normal_'s inverse CDF; floor and fmod are the device-side
-# arithmetic of per-sample augmentation parameters.
-math erfinv
+# floor and fmod are the device-side arithmetic of per-sample augmentation
+# parameters.
 math floor
 math fmod.Scalar

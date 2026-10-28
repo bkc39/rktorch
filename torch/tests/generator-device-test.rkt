@@ -11,7 +11,8 @@
                     cuda-device current-generator device draw-seed
                     generator-device in-flattened-tensor make-generator
                     mps-available? mps-device multinomial rand rand-like randn
-                    randn-like randperm reshape tensor to zeros)
+                    randn-like randperm reshape tensor to uniform! zeros)
+           (only-in "../nn.rkt" kaiming-uniform trunc-normal-init uniform-init)
            (only-in "../vision/transforms.rkt"
                     random-crop random-horizontal-flip random-resized-crop)
            (only-in "private/blame.rkt" blames-caller?)
@@ -91,6 +92,34 @@
                              #:generator (make-generator 1))))
           (cons "randn-like on cpu, accelerator generator"
                 (lambda () (randn-like (zeros 3) #:generator elsewhere)))
+          (cons "rand-like moved to the accelerator, cpu generator"
+                (lambda ()
+                  (rand-like (zeros 3) #:device accelerator
+                             #:generator (make-generator 1))))
+          (cons "rand-like through current-generator"
+                (lambda ()
+                  (parameterize ([current-generator elsewhere])
+                    (rand-like (zeros 3)))))
+          (cons "uniform! through current-generator"
+                (lambda ()
+                  (parameterize ([current-generator elsewhere])
+                    (uniform! (zeros 3) 0.0 1.0))))
+          (cons "uniform-init through current-generator"
+                (lambda ()
+                  (parameterize ([current-generator elsewhere])
+                    (uniform-init '(3) 0.0 1.0))))
+          (cons "kaiming-uniform through current-generator"
+                (lambda ()
+                  (parameterize ([current-generator elsewhere])
+                    (kaiming-uniform '(3 2)))))
+          (cons "trunc-normal-init through current-generator"
+                (lambda ()
+                  (parameterize ([current-generator elsewhere])
+                    (trunc-normal-init '(3)))))
+          (cons "trunc-normal-init's uniform branch through current-generator"
+                (lambda ()
+                  (parameterize ([current-generator elsewhere])
+                    (trunc-normal-init '(3) #:a 1.0 #:b 1.5))))
           (cons "randperm, accelerator generator"
                 (lambda () (randperm 4 #:generator elsewhere)))
           (cons "randperm through current-generator"
@@ -116,12 +145,34 @@
                   (multinomial probabilities 2
                                #:generator (make-generator 1))))))
 
-  (bounded-test "R4: a generator on another device blames the caller"
-    (for* ([accelerator (in-list accelerators)]
-           [row (in-list (blamed-on accelerator))])
-      (match-define (cons label thunk) row)
-      (check-exn (blames-caller? "generator-device-test") thunk
-                 (format "~a: ~a" accelerator label))))
+  (bounded-test "R4: a CPU generator drawing for CUDA blames the caller, CUDA or not"
+    (for ([thunk (in-list
+                  (list (lambda ()
+                          (rand 3 #:device 'cuda #:generator (make-generator 1)))
+                        (lambda ()
+                          (rand-like (zeros 3) #:device 'cuda
+                                     #:generator (make-generator 1)))))])
+      (check-exn (blames-caller? "generator-device-test") thunk)))
+
+  (cond
+    [(pair? accelerators)
+     (bounded-test "R4: a generator on another device blames the caller"
+       (for* ([accelerator (in-list accelerators)]
+              [row (in-list (blamed-on accelerator))])
+         (match-define (cons label thunk) row)
+         (check-exn (blames-caller? "generator-device-test") thunk
+                    (format "~a: ~a" accelerator label))))
+     (bounded-test "R4: rand-like moved to the CPU takes a CPU generator"
+       (for ([accelerator (in-list accelerators)])
+         (check-equal? (~> (zeros 3)
+                           (to accelerator)
+                           (rand-like #:device 'cpu
+                                      #:generator (make-generator 1))
+                           device)
+                       (cpu-device))))]
+    [else
+     (printf "[generator-device-test] skipped R4 rows: needs an ~a\n"
+             "accelerator (CUDA or MPS) for a generator on another device")])
 
   (cond
     [(and (cuda-available?)

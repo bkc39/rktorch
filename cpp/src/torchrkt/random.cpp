@@ -84,12 +84,23 @@ tr_tensor* tr_rand_gen_on(const int64_t* dims, int64_t ndim,
   return drawn_on("tr_rand_gen_on", false, dims, ndim, type, index, dtype, g);
 }
 
-int tr_tensor_uniform_(tr_tensor* t, double low, double high) {
+int tr_tensor_uniform_(tr_tensor* t, double low, double high,
+                       tr_generator* g) {
   if (!t) {
     return torchrkt::null_arg_status("tr_tensor_uniform_");
   }
-  return torchrkt::status_call("tr_tensor_uniform_",
-                               [&] { t->value.uniform_(low, high); });
+  return torchrkt::status_call("tr_tensor_uniform_", [&] {
+    t->value.uniform_(low, high, generator_of(g));
+  });
+}
+
+int tr_tensor_normal_(tr_tensor* t, double mean, double std, tr_generator* g) {
+  if (!t) {
+    return torchrkt::null_arg_status("tr_tensor_normal_");
+  }
+  return torchrkt::status_call("tr_tensor_normal_", [&] {
+    t->value.normal_(mean, std, generator_of(g));
+  });
 }
 
 tr_generator* tr_generator_new(uint64_t seed) {

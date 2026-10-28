@@ -247,6 +247,40 @@ TEST(TorchrktRandom, RandOnDrawsFromItsGenerator) {
   }
 }
 
+std::vector<float> filled_in_place(bool normal, tr_generator* g) {
+  const std::vector<int64_t> dims = {5};
+  tr_tensor* t = tr_zeros(dims.data(), 1);
+  EXPECT_NE(t, nullptr) << tr_last_error();
+  EXPECT_EQ(normal ? tr_tensor_normal_(t, 1.0, 2.0, g)
+                   : tr_tensor_uniform_(t, -1.0, 3.0, g),
+            0)
+      << tr_last_error();
+  std::vector<float> out = data_of(t);
+  tr_tensor_free(t);
+  return out;
+}
+
+TEST(TorchrktRandom, InPlaceDrawsFromItsGenerator) {
+  for (const bool normal : {false, true}) {
+    ASSERT_EQ(tr_manual_seed(9), 0) << tr_last_error();
+    const std::vector<float> global = filled_in_place(normal, nullptr);
+    tr_generator* a = tr_generator_new(4);
+    tr_generator* b = tr_generator_new(4);
+    ASSERT_NE(a, nullptr) << tr_last_error();
+    ASSERT_NE(b, nullptr) << tr_last_error();
+    ASSERT_EQ(tr_manual_seed(9), 0) << tr_last_error();
+    const std::vector<float> from_a = filled_in_place(normal, a);
+    EXPECT_NE(from_a, global) << "g's stream, not the global one";
+    EXPECT_EQ(filled_in_place(normal, nullptr), global)
+        << "a generator's draw leaves the global stream alone";
+    EXPECT_EQ(filled_in_place(normal, b), from_a) << "same seed, same draw";
+    tr_generator_free(a);
+    tr_generator_free(b);
+  }
+  EXPECT_EQ(tr_tensor_normal_(nullptr, 0.0, 1.0, nullptr), 1);
+  EXPECT_EQ(tr_tensor_uniform_(nullptr, 0.0, 1.0, nullptr), 1);
+}
+
 std::vector<float> drawn_without_generator(bool normal) {
   const std::vector<int64_t> dims = {5};
   tr_tensor* t =

@@ -22,8 +22,6 @@ tr_tensor* tr_randn_on(const int64_t* dims, int64_t ndim, tr_device_type type,
 tr_tensor* tr_rand_on(const int64_t* dims, int64_t ndim, tr_device_type type,
                       int64_t index, tr_dtype dtype);
 
-int tr_tensor_uniform_(tr_tensor* t, double low, double high);
-
 /* A CPU random generator with its own stream (torch.Generator). A data
  * loader's shuffle draws from one so a seeded permutation replays
  * independently of the global stream. Release with tr_generator_free (safe
@@ -42,6 +40,14 @@ tr_tensor* tr_rand_gen_on(const int64_t* dims, int64_t ndim,
                           tr_generator* g);
 
 tr_generator* tr_generator_new(uint64_t seed);
+
+/* t.uniform_(low, high, generator=g) / t.normal_(mean, std, generator=g): in
+ * place, from g, or from t's device's default generator when g is NULL. A g
+ * on another device than t fails cleanly. 0 success, 1 error. */
+int tr_tensor_uniform_(tr_tensor* t, double low, double high,
+                       tr_generator* g);
+
+int tr_tensor_normal_(tr_tensor* t, double mean, double std, tr_generator* g);
 
 /* torch.Generator(device).manual_seed(seed): a generator with its own stream
  * on the given device, drawing as that device's default generator does.

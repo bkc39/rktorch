@@ -25,6 +25,7 @@
          tr-rand/raw
          tr-rand-gen-on/raw
          tr-randperm/raw
+         tr-tensor-normal!/raw
          tr-tensor-uniform!/raw)
 
 (define-cpointer-type _Generator)
@@ -103,5 +104,13 @@
   #:wrap tensor-allocator/no-retry)
 
 (define-torch tr-tensor-uniform!/raw
-  (_fun (t : _Tensor) (low : _double) (high : _double) -> _int)
+  (_fun (t : _Tensor) (low : _double) (high : _double)
+        (generator : _Generator/current)
+        -> _int)
   #:c-id tr_tensor_uniform_)
+
+(define-torch tr-tensor-normal!/raw
+  (_fun (t : _Tensor) (mean : _double) (std : _double)
+        (generator : _Generator/current)
+        -> _int)
+  #:c-id tr_tensor_normal_)

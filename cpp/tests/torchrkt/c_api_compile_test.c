@@ -97,7 +97,10 @@ void torchrkt_c_api_compile_check(void) {
                           tr_dtype) = tr_arange_on;
   tr_tensor* (*eye_on)(int64_t, int64_t, tr_device_type, int64_t, tr_dtype) =
       tr_eye_on;
-  int (*uniform_fn)(tr_tensor*, double, double) = tr_tensor_uniform_;
+  int (*uniform_fn)(tr_tensor*, double, double, tr_generator*) =
+      tr_tensor_uniform_;
+  int (*normal_fn)(tr_tensor*, double, double, tr_generator*) =
+      tr_tensor_normal_;
   tr_generator* (*generator_new)(uint64_t) = tr_generator_new;
   tr_generator* (*generator_new_on)(uint64_t, tr_device_type, int64_t) =
       tr_generator_new_on;
@@ -336,6 +339,7 @@ void torchrkt_c_api_compile_check(void) {
   (void)arange_on;
   (void)eye_on;
   (void)uniform_fn;
+  (void)normal_fn;
   (void)generator_new;
   (void)generator_new_on;
   (void)generator_device;

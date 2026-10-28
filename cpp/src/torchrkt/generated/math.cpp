@@ -39,14 +39,6 @@ tr_tensor* tr_gen_cos(const tr_tensor* self) {
                                 [&] { return at::cos(self->value); });
 }
 
-tr_tensor* tr_gen_erfinv(const tr_tensor* self) {
-  if (!self) {
-    return torchrkt::null_arg("tr_gen_erfinv");
-  }
-  return torchrkt::alloc_result("tr_gen_erfinv",
-                                [&] { return at::erfinv(self->value); });
-}
-
 tr_tensor* tr_gen_floor(const tr_tensor* self) {
   if (!self) {
     return torchrkt::null_arg("tr_gen_floor");

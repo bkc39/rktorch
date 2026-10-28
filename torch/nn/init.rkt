@@ -1,13 +1,15 @@
 #lang racket/base
 
-(require (only-in racket/contract/base -> ->* ->i and/c listof)
+(require (only-in racket/contract/base -> ->i and/c listof)
          (only-in racket/match match-define)
-         (only-in racket/math pi sqr)
+         (only-in racket/math infinite? sqr)
          (only-in threading ~>)
          (only-in "../foreign.rkt"
                   * + - / > clamp item log ne randn sum tensor? uniform! where
                   zeros)
-         (only-in "../private/contract.rkt" define/checked-out supplied-or))
+         (only-in "../foreign/generator.rkt" generator-on? normal!)
+         (only-in "../private/contract.rkt" define/checked-out supplied-or)
+         (only-in "../private/erf.rkt" erf))
 
 (provide uniform-bias)
 
@@ -15,7 +17,10 @@
 
 ;; zeros + uniform! consumes the RNG exactly as torch's empty().uniform_().
 (define/checked-out (uniform-init dims low high)
-  (-> dims/c real? real? tensor?)
+  (->i ([dims dims/c] [low real?] [high real?])
+       #:pre/name () "the generator lives on the target device"
+       (generator-on? #f #f)
+       [result tensor?])
   (define t (apply zeros dims))
   (uniform! t low high)
   t)
@@ -31,7 +36,11 @@
 
 ;; the default #:a (sqrt 5) is what nn.Linear.reset_parameters passes
 (define/checked-out (kaiming-uniform dims #:a [a (sqrt 5.0)]) ;; noqa
-  (->* [dims/c] [#:a real?] tensor?)
+  (->i ([dims dims/c])
+       (#:a [a real?])
+       #:pre/name () "the generator lives on the target device"
+       (generator-on? #f #f)
+       [result tensor?])
   (define gain (sqrt (/ 2.0 (+ 1.0 (* a a)))))
   (define bound (* (sqrt 3.0) (/ gain (sqrt (fan-in dims)))))
   (uniform-init dims (- bound) bound))
@@ -41,31 +50,13 @@
   (define bound (/ 1.0 (sqrt fan)))
   (uniform-init (list n) (- bound) bound))
 
-(define (erf-series x)
-  (define x² (* x x))
-  (let loop ([n 0] [term x] [acc 0.0])
-    (define next (+ acc (/ term (+ (* 2 n) 1))))
-    (if (= next acc)
-        (* (/ 2.0 (sqrt pi)) acc)
-        (loop (add1 n) (/ (* term (- x²)) (add1 n)) next))))
-
-(define (erfc-fraction x)
-  (define k
-    (for/fold ([k x]) ([n (in-range 80 0 -1)])
-      (+ x (/ (/ n 2.0) k))))
-  (/ (~> (* x x) - exp) (* (sqrt pi) k)))
-
-(define (erf x)
-  (cond
-    [(< x 0) (~> x - erf -)]
-    [(<= x 2.0) (erf-series x)]
-    [else (- 1.0 (erfc-fraction x))]))
-
 (define (any? mask)
   (~> mask sum item positive?))
 
 (define (normal-draw dims mean std)
-  (~> (apply randn dims) (* std) (+ mean)))
+  (define t (apply zeros dims))
+  (normal! t mean std)
+  t)
 
 (define (redrawn-normal dims mean std a b)
   (let loop ([result (normal-draw dims mean std)])
@@ -89,6 +80,14 @@
              (where pending (rejected candidates) pending))]
       [else result])))
 
+(define (normal-mass mean std a b)
+  (define (cdf v)
+    (~> (- v mean) (/ std) exact->inexact (/ (sqrt 2.0)) erf (+ 1.0) (/ 2.0)))
+  (- (cdf b) (cdf a)))
+
+(define (uniform-branch? mean std a b)
+  (~> (normal-mass mean std a b) (> 0.3) not))
+
 (define/checked-out (trunc-normal-init dims ;; noqa
                                        #:mean [mean 0.0]
                                        #:std [std 1.0]
@@ -101,10 +100,16 @@
         #:b [b real?])
        #:pre/name (a b) "#:a is below #:b"
        (< (supplied-or a -2.0) (supplied-or b 2.0))
+       #:pre/name (mean std a b)
+       "#:a and #:b are finite when [a, b] holds at most 0.3 of the mass"
+       (let ([a (supplied-or a -2.0)] [b (supplied-or b 2.0)])
+         (not (and (uniform-branch? (supplied-or mean 0.0) (supplied-or std 1.0)
+                                    a b)
+                   (or (infinite? a) (infinite? b)))))
+       #:pre/name () "the generator lives on the target device"
+       (generator-on? #f #f)
        [result tensor?])
-  (define (cdf v)
-    (/ (+ 1.0 (erf (/ (- v mean) std (sqrt 2.0)))) 2.0))
   (match-define (list μ σ lo hi) (map exact->inexact (list mean std a b)))
   (cond
-    [(> (- (cdf b) (cdf a)) 0.3) (redrawn-normal dims μ σ lo hi)]
-    [else (accepted-uniform dims μ σ lo hi)]))
+    [(uniform-branch? mean std a b) (accepted-uniform dims μ σ lo hi)]
+    [else (redrawn-normal dims μ σ lo hi)]))

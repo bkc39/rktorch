@@ -174,7 +174,6 @@
                              (int64 0) (bool #f))
           'upsample-bicubic2d '((tensor 1 2 3 3) (int-array (5 4)) (bool #f)
                                 (kwarg "scales_h" none) (kwarg "scales_w" none))
-          'erfinv '((uniform-tensor 2 3))
           'floor-tensor '((tensor 2 3))
           'fmod-scalar '((tensor 2 3) (double 1.0))))
 
