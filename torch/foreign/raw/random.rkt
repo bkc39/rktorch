@@ -107,7 +107,7 @@
   (_fun (t : _Tensor) (low : _double) (high : _double)
         (generator : _Generator/current)
         -> _int)
-  #:c-id tr_tensor_uniform_)
+  #:c-id tr_tensor_uniform_gen_)
 
 (define-torch tr-tensor-normal!/raw
   (_fun (t : _Tensor) (mean : _double) (std : _double)

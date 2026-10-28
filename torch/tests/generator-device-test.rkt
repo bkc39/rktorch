@@ -32,7 +32,7 @@
   (define (three-draws on g)
     (list (host (rand 5 #:device on #:generator g))
           (host (randn 3 2 #:device on #:generator g))
-          (host (rand 4 #:device on #:dtype 'float64 #:generator g))))
+          (host (rand 4 #:device on #:dtype 'float16 #:generator g))))
 
   (bounded-test "R1: a generator is on the CPU unless placed"
     (check-equal? (generator-device (make-generator 1)) (cpu-device))
@@ -187,7 +187,7 @@
                                   (make-generator 7 #:device (cuda-device)))
                      (list (hash-ref j 'rand)
                            (hash-ref j 'randn)
-                           (hash-ref j 'rand64))))]
+                           (hash-ref j 'rand16))))]
     [else
      (printf "[generator-device-test] skipped R2: needs CUDA and python3 ~a\n"
              "`torch` with CUDA (run inside `nix develop .#cuda`)")]))

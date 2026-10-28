@@ -462,7 +462,7 @@ TEST(TorchrktOps, ToDtypeAndUniform) {
   }
 
   Handle w(tr_zeros(dims.data(), 1));
-  ASSERT_EQ(tr_tensor_uniform_(w.t, -2.0, -1.0, nullptr), 0) << tr_last_error();
+  ASSERT_EQ(tr_tensor_uniform_(w.t, -2.0, -1.0), 0) << tr_last_error();
   for (const float x : data_of(w.t)) {
     EXPECT_GE(x, -2.0F);
     EXPECT_LT(x, -1.0F);

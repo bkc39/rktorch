@@ -19,6 +19,6 @@ g = torch.Generator(device).manual_seed(7)
 print(json.dumps({
     "rand": flat(torch.rand(5, device=device, generator=g)),
     "randn": flat(torch.randn(3, 2, device=device, generator=g)),
-    "rand64": flat(torch.rand(4, device=device, dtype=torch.float64,
+    "rand16": flat(torch.rand(4, device=device, dtype=torch.float16,
                               generator=g)),
 }))
