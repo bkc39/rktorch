@@ -176,10 +176,12 @@ the fit, counted across epochs, at the step of a @racket[request-stop!], and
 at each epoch end, in one transfer for all keys. As in Lightning, the logger
 gets a training row, and a validation epoch's row, labelled with the optimizer
 steps taken before the current batch's step; the first step's row is at
-step 0. A per-step value logged in a validation loop reaches the logger at each
-validation batch, apart from the training values, labelled 0, 1, … with the
-validation batches the fit has run outside the sanity check; in
-@racket[test], with the batches of that call. With @racket[#:max-epochs]
+step 0, and so is an epoch's training row before any step. Each row carries
+the key @racket['epoch], @racket[run-epoch], unless one was logged. A
+per-step value logged in a validation loop reaches the logger at each
+validation batch, apart from the training values and without
+@racket['epoch], labelled 0, 1, … with the validation batches the fit has run
+outside the sanity check; in @racket[test], with the batches of that call. With @racket[#:max-epochs]
 @racket[#f], epochs continue until @racket[#:max-steps] steps are taken,
 also past epochs whose steps were skipped. @racket[#:fast-dev-run] runs that
 many batches (one for @racket[#t]) of one epoch, with no sanity check, no loggers and no

@@ -10,7 +10,7 @@
          (only-in "book.rkt" read-epoch! read-steps!)
          (only-in "hooks.rkt" hook-named hook-order hook-sides)
          (only-in "state.rkt"
-                  run-book run-callbacks run-hook run-loggers
+                  run-book run-callbacks run-epoch run-hook run-loggers
                   run-set-up? run-torn-down? run-trainer set-run-batch-size!
                   set-run-callbacks! set-run-finished?! set-run-hook! set-run-set-up?!
                   set-run-torn-down?!)
@@ -128,16 +128,20 @@
   (set-run-torn-down?! r #t)
   (call-hooks r 'teardown stage))
 
-(define (publish! r metrics step)
+(define (publish! r metrics step #:epoch? epoch?)
+  (define row
+    (if (and epoch? (not (hash-has-key? metrics 'epoch)))
+        (hash-set metrics 'epoch (run-epoch r))
+        metrics))
   (unless (hash-empty? metrics)
     (for ([l (in-list (run-loggers r))])
-      (logger-log-metrics! l metrics step))))
+      (logger-log-metrics! l row step))))
 
 (define (publish-steps! r loop step)
-  (publish! r (read-steps! (run-book r) loop) step))
+  (publish! r (read-steps! (run-book r) loop) step #:epoch? (eq? loop 'train)))
 
 (define (publish-epoch! r loop step)
-  (publish! r (read-epoch! (run-book r) loop) step))
+  (publish! r (read-epoch! (run-book r) loop) step #:epoch? #t))
 
 (define (finish! r status)
   (set-run-finished?! r #t)

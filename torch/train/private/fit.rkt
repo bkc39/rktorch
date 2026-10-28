@@ -193,7 +193,7 @@
   (set-run-skip-epoch?! r #f)
   (epoch-end-reached! (run-book r) 'train)
   (call-hooks r 'on-train-epoch-end)
-  (publish-epoch! r 'train (sub1 (run-global-step r)))
+  (publish-epoch! r 'train (max 0 (sub1 (run-global-step r))))
   (set-run-epoch! r (add1 (run-epoch r))))
 
 (define (configure-optimizers! r)

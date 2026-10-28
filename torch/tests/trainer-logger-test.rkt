@@ -35,8 +35,8 @@
     (fit-logged (stdout-logger #:out out))
     (define lines (regexp-split #rx"\n" (get-output-string out)))
     (check-equal? (car lines) "hparams r=0.5 rate=0.5")
-    (check-regexp-match #rx"^step 0 loss=[0-9.e-]+$" (cadr lines))
-    (check-regexp-match #rx"^step 1 loss=[0-9.e-]+$" (caddr lines))
+    (check-regexp-match #rx"^step 0 epoch=0 loss=[0-9.e-]+$" (cadr lines))
+    (check-regexp-match #rx"^step 1 epoch=0 loss=[0-9.e-]+$" (caddr lines))
     (check-equal? (cdddr lines) '("success" "")))
 
   (test-case "jsonl-logger writes a JSON line per read and the hparams file"
@@ -71,12 +71,12 @@
        (fit-logged (csv-logger dir #:exists 'append))
        (define lines (file->lines metrics))
        (check-equal? (car lines) "step,key,value")
-       (check-equal? (length lines) 5)
+       (check-equal? (length lines) 9)
        (check-equal? (length (filter (lambda (l) (string-prefix? l "step,")) lines)) 1)
        (check-equal? (file->value (build-path dir "hparams.rktd")) hparams)
        (check-exn exn:fail:filesystem:exists? (lambda () (csv-logger dir)))
        (fit-logged (csv-logger dir #:exists 'replace))
-       (check-equal? (length (file->lines metrics)) 3))))
+       (check-equal? (length (file->lines metrics)) 5))))
 
   (struct unprintable ()
     #:property prop:custom-write (lambda (v out mode) (error 'unprintable "cannot print")))
