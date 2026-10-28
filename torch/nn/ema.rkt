@@ -27,14 +27,14 @@
               (equal? (device p) (device q))
               (eq? (dtype p) (dtype q))))))
 
-(define (copy-parameters! e)
+(define (update-average! e update!)
   (define qs (parameters (ema-average e)))
   (cond
     [(null? qs) (void)]
-    [else
-     (with-no-grad
-       (g:foreach-copy! qs (parameters (ema-model e)) #f))
-     (void)]))
+    [else (void (with-no-grad (update! qs (parameters (ema-model e)))))]))
+
+(define (copy-parameters! e)
+  (update-average! e (lambda (qs ps) (g:foreach-copy! qs ps #f))))
 
 (define/contract-out (ema model average #:decay [decay 0.9999]) ;; noqa
   (->i ([model layer?] [average layer?])
@@ -51,12 +51,8 @@
   (-> ema? void?)
   (define n (unbox (ema-count e)))
   (set-box! (ema-count e) (add1 n))
-  (define qs (parameters (ema-average e)))
   (cond
-    [(null? qs) (void)]
     [(zero? n) (copy-parameters! e)]
     [else
-     (with-no-grad
-       (g:foreach-lerp-scalar! qs (parameters (ema-model e))
-                               (real->double-flonum (- 1.0 (ema-decay e)))))
-     (void)]))
+     (define weight (real->double-flonum (- 1.0 (ema-decay e))))
+     (update-average! e (lambda (qs ps) (g:foreach-lerp-scalar! qs ps weight)))]))

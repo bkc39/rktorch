@@ -2,8 +2,8 @@
 
 (require (only-in ffi/unsafe _bool _double _fun _int _int64 _list _ptr)
          (only-in "memory.rkt"
-                  _tr-device-type gradients-allocator tensor-allocator
-                  tensor-allocator/gradient)
+                  _tr-device-type fetched-gradient gradients-allocator
+                  tensor-allocator tensor-allocator/gradient)
          (only-in "syntax.rkt" _Tensor _Tensor/null define-torch))
 
 (provide tr-tensor-requires-grad!/raw
@@ -55,7 +55,7 @@
         (types : (_list o _tr-device-type n))
         (indices : (_list o _int64 n))
         -> (rc : _int)
-        -> (and (zero? rc) (map list grads nbytes types indices)))
+        -> (and (zero? rc) (map fetched-gradient grads nbytes types indices)))
   #:c-id tr_tensors_grad
   #:wrap gradients-allocator)
 

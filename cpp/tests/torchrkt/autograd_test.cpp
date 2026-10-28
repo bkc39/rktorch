@@ -251,4 +251,21 @@ TEST(TorchrktAutograd, TensorsGradRefusesANullListWithEveryOutputNull) {
       << tr_last_error();
 }
 
+TEST(TorchrktAutograd, TensorsGradRefusesANegativeLengthWritingNothing) {
+  const Handle x = make({1.0F}, {1});
+  std::vector<tr_tensor*> grads{x.t};
+  std::vector<int64_t> nbytes{7};
+  std::vector<int> types{7};
+  std::vector<int64_t> indices{7};
+
+  EXPECT_EQ(tr_tensors_grad(nullptr, -1, grads.data(), nbytes.data(),
+                            types.data(), indices.data()),
+            1);
+  EXPECT_EQ(std::string(tr_last_error()), "tr_tensors_grad: negative length");
+  EXPECT_EQ(grads, (std::vector<tr_tensor*>{x.t}));
+  EXPECT_EQ(nbytes, (std::vector<int64_t>{7}));
+  EXPECT_EQ(types, (std::vector<int>{7}));
+  EXPECT_EQ(indices, (std::vector<int64_t>{7}));
+}
+
 }  // namespace

@@ -119,6 +119,9 @@ int tr_tensors_reset_grad(tr_tensor* const* tensors, int64_t n) {
 
 int tr_tensors_grad(tr_tensor* const* tensors, int64_t n, tr_tensor** grads,
                     int64_t* nbytes, int* device_type, int64_t* device_index) {
+  if (n < 0) {
+    return torchrkt::tensors_arg_status("tr_tensors_grad", tensors, n);
+  }
   if (n > 0 && grads) {
     std::fill(grads, grads + n, nullptr);
   }
@@ -140,7 +143,8 @@ int tr_tensors_grad(tr_tensor* const* tensors, int64_t n, tr_tensor** grads,
       }
       const torch::Device d = g.device();
       if (!d.is_cpu() && !d.is_cuda() && !d.is_mps()) {
-        throw std::invalid_argument("gradient is on an unsupported device kind");
+        throw std::invalid_argument(
+            "gradient is on an unsupported device kind");
       }
       nbytes[i] = static_cast<int64_t>(g.nbytes());
       device_type[i] = static_cast<int>(torchrkt::type_of(d));

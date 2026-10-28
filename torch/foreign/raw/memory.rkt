@@ -3,7 +3,8 @@
 (require (for-syntax racket/base
                      ;; whole-module require on purpose
                      syntax/parse/pre)
-         (only-in ffi/unsafe _double _enum _fun _int _int64 _list _ptr _void)
+         (only-in ffi/unsafe
+                  _double _enum _fun _int _int64 _list _ptr _void set-cpointer-tag!)
          (only-in ffi/unsafe/alloc allocator deallocator)
          (only-in ffi/unsafe/atomic call-as-atomic)
          (only-in racket/list remove-duplicates)
@@ -32,7 +33,8 @@
 (provide adopted-bytes
          tr-tensor-free/finalizer
          tr-tensor-free/checked
-         tr-tensors-free/checked
+         free-handles!
+         (struct-out fetched-gradient)
          collect-and-drain!
          swallow-and-count-failure
          finalizer-failures
@@ -65,29 +67,42 @@
   (_fun _Tensor -> _void)
   #:c-id tr_tensor_free)
 
+(define (unaccount-for-free! t)
+  (unaccount! t)
+  (race-point free-unaccounted t))
+
+(define (note-released! t)
+  (race-point free-released t))
+
 ;; The (deallocator) wrap cancels the pending GC finalizer.
 (define tr-tensor-free/checked
   (let ([release ((deallocator) tr-tensor-free/unwrapped)])
     (lambda (t)
-      (unaccount! t)
-      (race-point free-unaccounted t)
+      (unaccount-for-free! t)
       (release t)
-      (race-point free-released t))))
+      (note-released! t))))
 
 (define-torch tr-tensors-free/unwrapped
   (_fun (hs : (_list i _Tensor)) (_int64 = (length hs)) -> _void)
   #:c-id tr_tensors_free)
 
-(define forget-finalizer! ((deallocator) void))
+(define cancel-finalizer! ((deallocator) void))
+
+(define (mark-freed! h)
+  (set-cpointer-tag! h 'Tensor-freed))
 
 (define (tr-tensors-free/checked hs)
-  (for ([h (in-list hs)])
-    (unaccount! h)
-    (race-point free-unaccounted h))
-  (for-each forget-finalizer! hs)
+  (for-each unaccount-for-free! hs)
+  (for-each cancel-finalizer! hs)
   (tr-tensors-free/unwrapped hs)
-  (for ([h (in-list hs)])
-    (race-point free-released h)))
+  (for-each note-released! hs)
+  (race-point frees-released/batched hs))
+
+(define (free-handles! hs)
+  (dynamic-wind
+   void
+   (lambda () (parameterize-break #f (tr-tensors-free/checked hs)))
+   (lambda () (for-each mark-freed! hs))))
 
 (define finalizer-failure-count (box 0))
 (define captured-failures (box '()))
@@ -407,29 +422,44 @@
      (define handles (apply raw-fn args))
      (and handles (map adopt-handle handles)))))
 
-(define (adopt-rows rows)
-  (and rows
-       (for/list ([row (in-list rows)])
-         (match row
-           [(cons #f _) row]
-           [(cons h placement) (cons (adopt-handle h) placement)]))))
+(struct fetched-gradient (handle nbytes type index))
 
+(define (adopt-fetched! rows)
+  (for ([row (in-list rows)])
+    (define h (fetched-gradient-handle row))
+    (when h
+      (adopt-handle h))))
+
+;; Nothing returns the handles until every one is accounted, so a raise here
+;; frees them all before it propagates.
 (define (account-gradients! params rows)
-  (define devs
-    (for/list ([p (in-list params)] [row (in-list rows)])
-      (match row
-        [(cons #f _) #f]
-        [(list h nbytes type index)
-         (define dev (device type (if (eq? type 'cpu) 0 index)))
-         (record-allocation! h nbytes dev
-                             #:adopt (lambda () (adopt-gradient! (list p) h)))
-         dev])))
-  (for ([dev (in-list (remove-duplicates (filter values devs)))])
-    (collect-under-pressure! dev))
-  (map car rows))
+  (define handles (map fetched-gradient-handle rows))
+  (with-handlers ([(lambda (_) #t)
+                   (lambda (e)
+                     (free-handles! (filter values handles))
+                     (raise e))])
+    (define devs
+      (for/list ([p (in-list params)] [row (in-list rows)])
+        (match row
+          [(fetched-gradient #f _ _ _) #f]
+          [(fetched-gradient h nbytes type index)
+           (define dev (device type (if (eq? type 'cpu) 0 index)))
+           (record-allocation! h nbytes dev
+                               #:adopt (lambda () (adopt-gradient! (list p) h)))
+           (race-point ledger-entry-added/batched h)
+           dev])))
+    (for ([dev (in-list (remove-duplicates (filter values devs)))])
+      (collect-under-pressure! dev)))
+  handles)
 
 (define ((gradients-allocator raw-fn) params)
-  (define rows (call-as-atomic (lambda () (adopt-rows (raw-fn params)))))
+  (define rows
+    (call-as-atomic
+     (lambda ()
+       (define fetched (raw-fn params))
+       (when fetched
+         (adopt-fetched! fetched))
+       fetched)))
   (and rows (account-gradients! params rows)))
 
 (define ((accounted-outputs wrapped) . args)

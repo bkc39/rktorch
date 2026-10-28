@@ -26,6 +26,17 @@ reference; the buffer is released when the last reference goes. On
 CUDA and MPS the caching allocators usually just return the block to
 their pools.
 
+## Generated ops in library code
+
+Library modules call an op through its `foreign.rkt` name (`mul!`,
+`sub!`, `copy!`, `addcmul!`, `addcdiv!`) wherever one exists, and
+through `torch/generated.rkt` under a `g:` prefix only for the ATen
+overloads `foreign.rkt` does not bind: `add-tensor` and `add-tensor!`
+with an `alpha`, `div-scalar!`, `lerp-scalar!` (`lerp!` takes a tensor
+weight), and the `_foreach_*` and `_fused_*` kernels. The prefix keeps
+a generated name from shadowing the public one, and shows at the call
+site that the binding is uncontracted.
+
 ## Tensor lifetime
 
 Every tensor-returning binding carries the `tensor-allocator` wrap

@@ -52,9 +52,8 @@ TEST(TorchrktGeneratedOptim, ForeachLerpIsPerTensorLerpBitForBit) {
 
   std::vector<tr_tensor*> selves{a.t, b.t};
   std::vector<const tr_tensor*> ends{a_end.t, b_end.t};
-  ASSERT_EQ(tr_gen__foreach_lerp__scalar(selves.data(), 2, ends.data(), 2,
-                                         weight),
-            0)
+  ASSERT_EQ(
+      tr_gen__foreach_lerp__scalar(selves.data(), 2, ends.data(), 2, weight), 0)
       << tr_last_error();
   ASSERT_EQ(tr_gen_lerp__scalar(a_twin.t, a_end.t, weight), 0)
       << tr_last_error();

@@ -1,11 +1,16 @@
 #lang racket/base
 
-(require (only-in racket/contract/base
-                  -> ->* ->i >=/c any/c contract-out flat-named-contract listof
-                  unsupplied-arg?)
-         (only-in racket/generic define-generics)
+(require (for-syntax racket/base
+                     ;; whole-module require on purpose
+                     syntax/parse/pre)
+         (only-in racket/contract/base
+                  -> ->* ->i >=/c and/c any/c contract-out listof or/c
+                  property/c rename-contract unsupplied-arg?)
          (only-in racket/flonum flexpt)
+         (only-in racket/generic define-generics)
          (only-in racket/list group-by)
+         (only-in racket/match match match-define)
+         (only-in syntax/parse/define define-syntax-parse-rule)
          (only-in "../foreign.rkt"
                   addcdiv! addcmul! copy! cpu-device device dtype full mul!
                   sqrt sub! tensor? to with-no-grad zero-grad!)
@@ -72,31 +77,42 @@
      (hash-clear! (tracked-keys opt))
      (set-tracked-generation! opt now)]))
 
-(define (bucketed opt qs gs)
+(define (placement q)
+  (cons (device q) (dtype q)))
+
+(define (update-buckets! opt qs gs update!)
   (define keys (tracked-keys opt))
   (define (key-of qg)
-    (hash-ref! keys (car qg) (lambda () (cons (device (car qg)) (dtype (car qg))))))
-  (for/list ([bucket (in-list (group-by key-of (map cons qs gs)))])
-    (cons (map car bucket) (map cdr bucket))))
+    (match-define (cons q _) qg)
+    (hash-ref! keys q (lambda () (placement q))))
+  (for ([bucket (in-list (group-by key-of (map cons qs gs)))])
+    (define-values (bqs bgs)
+      (for/lists (bqs bgs) ([qg (in-list bucket)])
+        (match-define (cons q g) qg)
+        (values q g)))
+    (update! bqs bgs)))
 
-(define (multi-body foreach? fused? foreach-body fused-body)
+(define (update-mode foreach? fused?)
   (cond
-    [fused? fused-body]
-    [foreach? foreach-body]
-    [else #f]))
+    [fused? 'fused]
+    [foreach? 'foreach]
+    [else 'loop]))
 
-(define (step-by! opt params one! many!)
+(define (step-by! opt params mode #:loop loop! #:foreach foreach!
+                  #:fused [fused! #f])
   (with-no-grad
     (follow-moves! opt)
-    (cond
-      [many!
-       (with-gradients ([qs gs] params)
-         (for ([bucket (in-list (bucketed opt qs gs))])
-           (many! (car bucket) (cdr bucket))))]
-      [else
+    (match mode
+      ['loop
        (for ([p (in-list params)])
          (with-gradient (g p)
-           (one! p g)))])))
+           (loop! p g)))]
+      ['foreach
+       (with-gradients ([qs gs] params)
+         (update-buckets! opt qs gs foreach!))]
+      ['fused
+       (with-gradients ([qs gs] params)
+         (update-buckets! opt qs gs fused!))])))
 
 (define (unit-scalar)
   (full 1.0 #:device (cpu-device) #:dtype 'float32))
@@ -104,49 +120,74 @@
 (define (decayed g p weight-decay)
   (if (zero? weight-decay) g (g:add-tensor g p weight-decay)))
 
+(define (hyper x)
+  (real->double-flonum x))
+
 (define floating-tensor/c
-  (flat-named-contract 'floating-tensor/c
-                       (lambda (v) (and (tensor? v)
-                                        (memq (dtype v) '(float16 bfloat16 float32 float64))
-                                        #t))))
+  (rename-contract
+   (and/c tensor? (property/c dtype (or/c 'float16 'bfloat16 'float32 'float64)))
+   'floating-tensor/c))
+
+(define (explicit? v)
+  (and (not (unsupplied-arg? v)) v))
 
 (define (fused-parameters/c fused?)
-  (if (eq? fused? #t) (listof floating-tensor/c) (listof tensor?)))
+  (if (explicit? fused?) (listof floating-tensor/c) (listof tensor?)))
+
+(begin-for-syntax
+  (define-syntax-class hyperparameter
+    #:attributes ([formal 1] [required 1] [optional 1])
+    (pattern [kw:keyword name:id ctc:expr]
+             #:with (formal ...) #'(kw name)
+             #:with (required ...) #'(kw [name ctc])
+             #:with (optional ...) #'())
+    (pattern [kw:keyword name:id ctc:expr default:expr]
+             #:with (formal ...) #'(kw [name default])
+             #:with (required ...) #'()
+             #:with (optional ...) #'(kw [name ctc]))))
+
+(define-syntax-parse-rule
+  (define-fusable-optimizer (name:id params:id h:hyperparameter ...)
+    (~seq #:pre/name pre-ids:expr pre-message:expr pre-test:expr) ...
+    #:mode mode:id
+    #:result result?:expr
+    body:expr ...+)
+  (define/contract-out (name params (~@ h.formal ...) ...
+                             #:foreach? [foreach? #t] #:fused? [fused? #f])
+    (->i ([params (fused?) (fused-parameters/c fused?)] (~@ h.required ...) ...)
+         ((~@ h.optional ...) ...
+          #:foreach? [foreach? boolean?] #:fused? [fused? boolean?])
+         (~@ #:pre/name pre-ids pre-message pre-test) ...
+         #:pre/name (foreach? fused?)
+         "fused and foreach cannot both be requested"
+         (not (and (explicit? foreach?) (explicit? fused?)))
+         [result result?])
+    (define mode (update-mode foreach? fused?))
+    body ...))
 
 (struct sgd tracked (params [lr #:mutable] momentum nesterov? weight-decay
-                            foreach? fused?)
+                            mode)
   #:constructor-name make-sgd
-  #:name sgd-optimizer ;; noqa
+  #:name sgd-optimizer
   #:methods gen:optimizer
   [(define (optimizer-parameters opt) (sgd-params opt))
    (define (optimizer-lr opt) (sgd-lr opt))
-   (define (optimizer-set-lr! opt lr) (set-sgd-lr! opt lr))
+   (define (optimizer-set-lr! opt lr) (set-sgd-lr! opt (hyper lr)))
    (define (optimizer-step! opt) (sgd-do-step! opt))])
 
-(define/contract-out (sgd params ;; noqa
-                          #:lr lr
-                          #:momentum [momentum 0.0]
-                          #:nesterov? [nesterov? #f]
-                          #:weight-decay [weight-decay 0.0]
-                          #:foreach? [foreach? #t]
-                          #:fused? [fused? #f])
-  (->i ([params (fused?) (fused-parameters/c fused?)] #:lr [lr (>=/c 0)])
-       (#:momentum [momentum (>=/c 0)]
-        #:nesterov? [nesterov? boolean?]
-        #:weight-decay [weight-decay (>=/c 0)]
-        #:foreach? [foreach? boolean?]
-        #:fused? [fused? boolean?])
-       #:pre/name (momentum nesterov?)
-       "Nesterov momentum requires a momentum"
-       (or (unsupplied-arg? nesterov?)
-           (not nesterov?)
-           (and (not (unsupplied-arg? momentum)) (> momentum 0)))
-       #:pre/name (foreach? fused?)
-       "fused and foreach cannot both be requested"
-       (not (and (eq? foreach? #t) (eq? fused? #t)))
-       [result sgd?])
-  (make-sgd (make-hasheq) (make-hasheq) #f params lr momentum nesterov?
-            weight-decay foreach? fused?))
+(define-fusable-optimizer (sgd params
+                               [#:lr lr (>=/c 0)]
+                               [#:momentum momentum (>=/c 0) 0.0]
+                               [#:nesterov? nesterov? boolean? #f]
+                               [#:weight-decay weight-decay (>=/c 0) 0.0])
+  #:pre/name (momentum nesterov?)
+  "Nesterov momentum requires a momentum"
+  (or (not (explicit? nesterov?))
+      (and (not (unsupplied-arg? momentum)) (> momentum 0)))
+  #:mode mode
+  #:result sgd?
+  (make-sgd (make-hasheq) (make-hasheq) #f params (hyper lr) (hyper momentum)
+            nesterov? (hyper weight-decay) mode))
 
 (define (momentum-buffer! state p d momentum)
   (cond
@@ -171,77 +212,49 @@
   (g:add-tensor! p step (- lr)))
 
 (define (sgd-do-step! opt)
-  (define state (tracked-state opt))
-  (define lr (real->double-flonum (sgd-lr opt)))
-  (define momentum (real->double-flonum (sgd-momentum opt)))
-  (define weight-decay (real->double-flonum (sgd-weight-decay opt)))
-  (define nesterov? (sgd-nesterov? opt))
-  (define many (multi-body (sgd-foreach? opt) (sgd-fused? opt)
-                           sgd-foreach! sgd-fused!))
-  (step-by! opt (sgd-params opt)
-            (lambda (p g)
-              (sgd-loop! state p g #:lr lr #:momentum momentum
-                         #:nesterov? nesterov? #:weight-decay weight-decay))
-            (and many
-                 (lambda (ps gs)
-                   (many state ps gs #:lr lr #:momentum momentum
-                         #:nesterov? nesterov? #:weight-decay weight-decay)))))
+  (define ((with-hyperparameters update!) ps gs)
+    (update! (tracked-state opt) ps gs #:lr (sgd-lr opt)
+             #:momentum (sgd-momentum opt) #:nesterov? (sgd-nesterov? opt)
+             #:weight-decay (sgd-weight-decay opt)))
+  (step-by! opt (sgd-params opt) (sgd-mode opt)
+            #:loop (with-hyperparameters sgd-loop!)
+            #:foreach (with-hyperparameters sgd-foreach!)
+            #:fused (with-hyperparameters sgd-fused!)))
 
 (struct adam tracked (params [lr #:mutable] beta1 beta2 eps weight-decay
-                             foreach? fused? one)
+                             mode one)
   #:constructor-name make-adam
-  #:name adam-optimizer ;; noqa
+  #:name adam-optimizer
   #:methods gen:optimizer
   [(define (optimizer-parameters opt) (adam-params opt))
    (define (optimizer-lr opt) (adam-lr opt))
-   (define (optimizer-set-lr! opt lr) (set-adam-lr! opt lr))
+   (define (optimizer-set-lr! opt lr) (set-adam-lr! opt (hyper lr)))
    (define (optimizer-step! opt) (adam-do-step! opt))])
-
-(define/contract-out (adam params ;; noqa
-                           #:lr [lr 1e-3]
-                           #:beta1 [beta1 0.9]
-                           #:beta2 [beta2 0.999]
-                           #:eps [eps 1e-8]
-                           #:weight-decay [weight-decay 0.0]
-                           #:foreach? [foreach? #t]
-                           #:fused? [fused? #f])
-  (->i ([params (fused?) (fused-parameters/c fused?)])
-       (#:lr [lr (>=/c 0)] #:beta1 [beta1 real?] #:beta2 [beta2 real?]
-        #:eps [eps real?] #:weight-decay [weight-decay (>=/c 0)]
-        #:foreach? [foreach? boolean?] #:fused? [fused? boolean?])
-       #:pre/name (foreach? fused?)
-       "fused and foreach cannot both be requested"
-       (not (and (eq? foreach? #t) (eq? fused? #t)))
-       [result adam?])
-  (make-adam (make-hasheq) (make-hasheq) #f params lr beta1 beta2 eps
-             weight-decay foreach? fused? (unit-scalar)))
 
 (struct adamw adam-optimizer ()
   #:constructor-name make-adamw
-  #:name adamw-optimizer ;; noqa
   #:omit-define-syntaxes)
 
-(define/contract-out (adamw params ;; noqa
-                            #:lr [lr 1e-3]
-                            #:beta1 [beta1 0.9]
-                            #:beta2 [beta2 0.999]
-                            #:eps [eps 1e-8]
-                            #:weight-decay [weight-decay 1e-2]
-                            #:foreach? [foreach? #t]
-                            #:fused? [fused? #f])
-  (->i ([params (fused?) (fused-parameters/c fused?)])
-       (#:lr [lr (>=/c 0)] #:beta1 [beta1 real?] #:beta2 [beta2 real?]
-        #:eps [eps real?] #:weight-decay [weight-decay (>=/c 0)]
-        #:foreach? [foreach? boolean?] #:fused? [fused? boolean?])
-       #:pre/name (foreach? fused?)
-       "fused and foreach cannot both be requested"
-       (not (and (eq? foreach? #t) (eq? fused? #t)))
-       [result adamw?])
-  (make-adamw (make-hasheq) (make-hasheq) #f params lr beta1 beta2 eps
-              weight-decay foreach? fused? (unit-scalar)))
+(define-syntax-parse-rule (define-adam name:id make:id result?:id
+                            default-decay:expr)
+  (define-fusable-optimizer (name params
+                                  [#:lr lr (>=/c 0) 1e-3]
+                                  [#:beta1 beta1 real? 0.9]
+                                  [#:beta2 beta2 real? 0.999]
+                                  [#:eps eps real? 1e-8]
+                                  [#:weight-decay weight-decay (>=/c 0)
+                                   default-decay])
+    #:mode mode
+    #:result result?
+    (make (make-hasheq) (make-hasheq) #f params (hyper lr) (hyper beta1)
+          (hyper beta2) (hyper eps) (hyper weight-decay) mode (unit-scalar))))
 
-(define (adam-loop! state p g one #:lr lr #:beta1 beta1 #:beta2 beta2 #:eps eps
-                    #:weight-decay weight-decay #:decoupled? decoupled?)
+(define-adam adam make-adam adam? 0.0)
+(define-adam adamw make-adamw adamw? 1e-2)
+
+(define ((adam-loop! one) state p g #:lr lr #:beta1 beta1 #:beta2 beta2
+                          #:eps eps #:weight-decay weight-decay
+                          #:decoupled? decoupled?)
   (define t (step-count! state p))
   (define d
     (cond
@@ -260,34 +273,24 @@
   (addcdiv! p m denom (* (/ lr (bias-correction beta1 t)) -1.0)))
 
 (define (adam-do-step! opt)
-  (define state (tracked-state opt))
-  (define lr (real->double-flonum (adam-lr opt)))
-  (define beta1 (real->double-flonum (adam-beta1 opt)))
-  (define beta2 (real->double-flonum (adam-beta2 opt)))
-  (define eps (real->double-flonum (adam-eps opt)))
-  (define weight-decay (real->double-flonum (adam-weight-decay opt)))
-  (define decoupled? (adamw? opt))
-  (define many (multi-body (adam-foreach? opt) (adam-fused? opt)
-                           adam-foreach! adam-fused!))
-  (step-by! opt (adam-params opt)
-            (lambda (p g)
-              (adam-loop! state p g (adam-one opt) #:lr lr #:beta1 beta1
-                          #:beta2 beta2 #:eps eps #:weight-decay weight-decay
-                          #:decoupled? decoupled?))
-            (and many
-                 (lambda (ps gs)
-                   (many state ps gs #:lr lr #:beta1 beta1 #:beta2 beta2
-                         #:eps eps #:weight-decay weight-decay
-                         #:decoupled? decoupled?)))))
+  (define ((with-hyperparameters update!) ps gs)
+    (update! (tracked-state opt) ps gs #:lr (adam-lr opt)
+             #:beta1 (adam-beta1 opt) #:beta2 (adam-beta2 opt)
+             #:eps (adam-eps opt) #:weight-decay (adam-weight-decay opt)
+             #:decoupled? (adamw? opt)))
+  (step-by! opt (adam-params opt) (adam-mode opt)
+            #:loop (with-hyperparameters (adam-loop! (adam-one opt)))
+            #:foreach (with-hyperparameters adam-foreach!)
+            #:fused (with-hyperparameters adam-fused!)))
 
 (struct rmsprop tracked (params [lr #:mutable] alpha eps weight-decay
-                                momentum foreach? one)
+                                momentum mode one)
   #:constructor-name make-rmsprop
   #:name rmsprop-optimizer ;; noqa
   #:methods gen:optimizer
   [(define (optimizer-parameters opt) (rmsprop-params opt))
    (define (optimizer-lr opt) (rmsprop-lr opt))
-   (define (optimizer-set-lr! opt lr) (set-rmsprop-lr! opt lr))
+   (define (optimizer-set-lr! opt lr) (set-rmsprop-lr! opt (hyper lr)))
    (define (optimizer-step! opt) (rmsprop-do-step! opt))])
 
 (define/contract-out (rmsprop params ;; noqa
@@ -302,11 +305,12 @@
         #:weight-decay (>=/c 0)
         #:momentum (>=/c 0) #:foreach? boolean?]
        rmsprop?)
-  (make-rmsprop (make-hasheq) (make-hasheq) #f params lr alpha eps
-                weight-decay momentum foreach? (unit-scalar)))
+  (make-rmsprop (make-hasheq) (make-hasheq) #f params (hyper lr) (hyper alpha)
+                (hyper eps) (hyper weight-decay) (hyper momentum)
+                (update-mode foreach? #f) (unit-scalar)))
 
-(define (rmsprop-loop! state p g one #:lr lr #:alpha alpha #:eps eps
-                       #:weight-decay weight-decay #:momentum momentum)
+(define ((rmsprop-loop! one) state p g #:lr lr #:alpha alpha #:eps eps
+                             #:weight-decay weight-decay #:momentum momentum)
   (define d (decayed g p weight-decay))
   (define v (slot! state 'square-avg p))
   (mul! v alpha)
@@ -322,22 +326,14 @@
      (g:add-tensor! p buf (- lr))]))
 
 (define (rmsprop-do-step! opt)
-  (define state (tracked-state opt))
-  (define lr (real->double-flonum (rmsprop-lr opt)))
-  (define alpha (real->double-flonum (rmsprop-alpha opt)))
-  (define eps (real->double-flonum (rmsprop-eps opt)))
-  (define weight-decay (real->double-flonum (rmsprop-weight-decay opt)))
-  (define momentum (real->double-flonum (rmsprop-momentum opt)))
-  (step-by! opt (rmsprop-params opt)
-            (lambda (p g)
-              (rmsprop-loop! state p g (rmsprop-one opt) #:lr lr #:alpha alpha
-                             #:eps eps #:weight-decay weight-decay
-                             #:momentum momentum))
-            (and (rmsprop-foreach? opt)
-                 (lambda (ps gs)
-                   (rmsprop-foreach! state ps gs #:lr lr #:alpha alpha #:eps eps
-                                     #:weight-decay weight-decay
-                                     #:momentum momentum)))))
+  (define ((with-hyperparameters update!) ps gs)
+    (update! (tracked-state opt) ps gs #:lr (rmsprop-lr opt)
+             #:alpha (rmsprop-alpha opt) #:eps (rmsprop-eps opt)
+             #:weight-decay (rmsprop-weight-decay opt)
+             #:momentum (rmsprop-momentum opt)))
+  (step-by! opt (rmsprop-params opt) (rmsprop-mode opt)
+            #:loop (with-hyperparameters (rmsprop-loop! (rmsprop-one opt)))
+            #:foreach (with-hyperparameters rmsprop-foreach!)))
 
 (define/contract-out (step! opt) ;; noqa
   (-> optimizer? void?)

@@ -708,10 +708,12 @@ training, so every optimizer exposes it through @racket[learning-rate] and
 @racket[set-learning-rate!], which is what a schedule writes.
 
 Each built-in optimizer has up to three implementations of one update. By
-default, @racket[#:foreach? #t], a step makes a fixed number of native calls
-whatever the number of parameters: torch's @tt{_foreach_*} kernels, one call
-per stage of the update over the parameters grouped by device and dtype, as
-@tt{foreach=True}. @racket[#:foreach? #f] applies the same operations one
+default, @racket[#:foreach? #t], a steady step makes a fixed number of native
+calls whatever the number of parameters: torch's @tt{_foreach_*} kernels, one
+call per stage of the update over the parameters grouped by device and dtype,
+as @tt{foreach=True}. The first step, the step that first sees a parameter's
+gradient, and the first step after a move make calls per parameter, to create
+or move its state. @racket[#:foreach? #f] applies the same operations one
 parameter at a time, @tt{foreach=False}; on the CPU the two give the same
 bits. @racket[#:fused? #t], for @racket[sgd], @racket[adam] and
 @racket[adamw], makes the update one kernel per group, @tt{fused=True}, and

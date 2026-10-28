@@ -2,6 +2,7 @@
 
 (require (for-syntax racket/base syntax/parse)
          (only-in racket/contract/base -> ->* any listof or/c)
+         (only-in racket/match match-lambda)
          syntax/parse/define
          (prefix-in g: (only-in "../generated.rkt"
                                 addcdiv! addcmul! copy! lerp-tensor!))
@@ -130,34 +131,34 @@
             'zero-grads!))
 
 (define (fetch-gradients ts)
-  (for/list ([t (in-list ts)]
-             [h (in-list (check-outputs 'grad (tr-tensors-grad/raw ts)))]
-             #:when h)
-    (cons t (tensor-impl h (tensor-impl-shape t)))))
+  (define-values (qs gs)
+    (for/lists (qs gs)
+               ([t (in-list ts)]
+                [h (in-list (check-outputs 'grad (tr-tensors-grad/raw ts)))]
+                #:when h)
+      (values t (tensor-impl h (tensor-impl-shape t)))))
+  (list qs gs))
+
+(define (call-holding fetch release proc)
+  (define held #f)
+  (dynamic-wind
+   void
+   (lambda ()
+     (parameterize-break #f
+       (set! held (fetch)))
+     (when held
+       (proc held)))
+   (lambda ()
+     (when held
+       (release held)))))
 
 (define (call-with-gradients ts proc)
-  (define pairs '())
-  (dynamic-wind
-   void
-   (lambda ()
-     (parameterize-break #f
-       (set! pairs (fetch-gradients ts)))
-     (proc (map car pairs) (map cdr pairs)))
-   (lambda ()
-     (tensors-free! (map cdr pairs)))))
+  (call-holding (lambda () (fetch-gradients ts))
+                (match-lambda [(list _ gs) (tensors-free! gs)])
+                (match-lambda [(list qs gs) (proc qs gs)])))
 
 (define (call-with-gradient t proc)
-  (define g #f)
-  (dynamic-wind
-   void
-   (lambda ()
-     (parameterize-break #f
-       (set! g (maybe-grad t)))
-     (when g
-       (proc g)))
-   (lambda ()
-     (when g
-       (tensor-free! g)))))
+  (call-holding (lambda () (maybe-grad t)) tensor-free! proc))
 
 (begin-for-syntax
   (define-syntax-class gradient-binder

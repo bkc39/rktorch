@@ -17,8 +17,7 @@
                   tensor->pytorch-repr
                   tensor-tree->pytorch-repr)
          (only-in "raw/fault.rkt" native-fault? note-native-fault!)
-         (only-in "raw/memory.rkt"
-                  tr-tensor-free/checked tr-tensors-free/checked)
+         (only-in "raw/memory.rkt" free-handles! tr-tensor-free/checked)
          (only-in "raw/syntax.rkt" Tensor?)
          (only-in "raw/tensor.rkt"
                   dtype-code->symbol
@@ -230,9 +229,4 @@
                 #:when (cpointer-has-tag? h 'Tensor))
       h))
   (unless (null? hs)
-    (dynamic-wind
-     void
-     (lambda () (parameterize-break #f (tr-tensors-free/checked hs)))
-     (lambda ()
-       (for ([h (in-list hs)])
-         (set-cpointer-tag! h 'Tensor-freed))))))
+    (free-handles! hs)))

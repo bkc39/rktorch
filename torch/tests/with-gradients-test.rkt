@@ -1,7 +1,8 @@
 #lang racket/base
 
 (module+ test
-  (require rackunit
+  (require (only-in racket/match match-define)
+           rackunit
            (only-in threading ~>)
            (only-in "../foreign/autograd-ops.rkt" with-gradient with-gradients)
            (only-in "../foreign/raw/fault.rkt" with-crossing-hook)
@@ -13,6 +14,7 @@
                     backward! grad manual-seed! randn reshape sum tensor->list)
            (only-in "../nn.rkt" Linear parameters)
            (only-in "private/race-harness.rkt" with-race-hook)
+           (only-in "private/unseen-gradient.rkt" with-unseen-gradient)
            (only-in "private/within.rkt" bounded-test))
 
   (define (flat t) (~> t (reshape -1) tensor->list))
@@ -57,19 +59,30 @@
 
   (bounded-test "pairs each parameter that has a gradient with it, in order"
     (define ls (layers 3 #:through 2))
+    (match-define (list front middle _) ls)
     (define ps (params-of ls))
     (with-gradients ([qs gs] ps)
-      (check-equal? qs (params-of (list (car ls) (cadr ls))))
+      (check-equal? qs (params-of (list front middle)))
       (check-equal? (map flat gs) (map (lambda (q) (flat (grad q))) qs))))
+
+  (define (adopted g)
+    (adopted-bytes (tensor-handle g)))
+
+  (define (with-gradients-unseen thunk)
+    (with-unseen-gradient (box (* 1024 1024)) thunk))
 
   (bounded-test "adopts what the one-at-a-time path adopts"
     (define batched
-      (with-gradients ([qs gs] (params-of (layers 2))) (map (lambda (g) (adopted-bytes (tensor-handle g))) gs)))
+      (with-gradients-unseen
+       (lambda ()
+         (with-gradients (gs (params-of (layers 2)))
+           (map adopted gs)))))
     (define one-by-one
-      (for/list ([p (in-list (params-of (layers 2)))])
-        (define seen #f)
-        (with-gradient (g p) (set! seen (adopted-bytes (tensor-handle g))))
-        seen))
+      (with-gradients-unseen
+       (lambda ()
+         (for/list ([p (in-list (params-of (layers 2)))])
+           (with-gradient (g p) (adopted g))))))
+    (check-true (ormap positive? batched) "the shadow charged the gradients")
     (check-equal? batched one-by-one))
 
   (bounded-test "frees every handle it accounts, also when the body raises"
