@@ -29,9 +29,8 @@
 
 (define (update-average! e update!)
   (define qs (parameters (ema-average e)))
-  (cond
-    [(null? qs) (void)]
-    [else (void (with-no-grad (update! qs (parameters (ema-model e)))))]))
+  (unless (null? qs)
+    (void (with-no-grad (update! qs (parameters (ema-model e)))))))
 
 (define (copy-parameters! e)
   (update-average! e (lambda (qs ps) (g:foreach-copy! qs ps #f))))

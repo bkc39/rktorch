@@ -28,10 +28,10 @@ their pools.
 
 ## Generated ops in library code
 
-Library modules call an op through its `foreign.rkt` name (`mul!`,
+Library modules call an op through its `torch/foreign.rkt` name (`mul!`,
 `sub!`, `copy!`, `addcmul!`, `addcdiv!`) wherever one exists, and
 through `torch/generated.rkt` under a `g:` prefix only for the ATen
-overloads `foreign.rkt` does not bind: `add-tensor` and `add-tensor!`
+overloads `torch/foreign.rkt` does not bind: `add-tensor` and `add-tensor!`
 with an `alpha`, `div-scalar!`, `lerp-scalar!` (`lerp!` takes a tensor
 weight), and the `_foreach_*` and `_fused_*` kernels. The prefix keeps
 a generated name from shadowing the public one, and shows at the call
