@@ -99,7 +99,7 @@
     (pattern (~or* (~datum plain) (~datum monitor) (~datum checkpoint))))
 
   (define-splicing-syntax-class (definer-options side)
-    #:attributes (ctc pred automatic kind)
+    #:attributes (ctc pred automatic? kind)
     (pattern (~seq (~alt (~optional (~seq #:contract ctc:expr))
                          (~optional (~seq #:predicate pred:id))
                          (~optional (~seq (~and auto #:automatic-optimization?)
@@ -109,7 +109,8 @@
       #:fail-when (and (eq? side 'callback) (attribute auto))
       "#:automatic-optimization? is a define-trainer option"
       #:fail-when (and (eq? side 'trainer) (attribute kind-kw))
-      "#:kind is a define-callback option"))
+      "#:kind is a define-callback option"
+      #:attr automatic? (if (attribute automatic) (syntax-e #'automatic) #t)))
 
   (define (method r name formals body)
     #`(#:method #:hidden-arguments 1 (#,name #,r . #,formals)
@@ -216,10 +217,7 @@
   (define ((definer who side) stx)
     (syntax-parse stx
       [(_ name:id fields (~var opt (definer-options side))
-          (~var form (body-form side (if (attribute opt.automatic)
-                                         (syntax-e #'opt.automatic)
-                                         #t)))
-          ...)
+          (~var form (body-form side (attribute opt.automatic?))) ...)
        #:do [(define forms (attribute form))
              (define kinds (attribute form.kind))
              (define repeated (check-duplicates (remq* '(define-hook) kinds)))]
@@ -239,7 +237,7 @@
                  [((_ (~var h (field-of field-names (syntax-e #'name))) ...) ...)
                   (apply append (attribute h))]))
              (define init-form (findf values (forms-of 'define-init forms kinds)))
-             (define automatic? (if (attribute opt.automatic) (syntax-e #'opt.automatic) #t))]
+             (define automatic? (attribute opt.automatic?))]
        #:with (hparam ...) hparams
        (match side
          ['trainer
