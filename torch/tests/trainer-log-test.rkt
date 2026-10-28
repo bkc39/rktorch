@@ -184,8 +184,8 @@
 
   (test-case "run-metric in an epoch-end hook answers the epoch being closed"
     (define seen '())
-    (define (watch name key)
-      (lambda (r) (set! seen (cons (list name (run-epoch r) (run-metric r key)) seen))))
+    (define ((watch name key) r)
+      (set! seen (cons (list name (run-epoch r) (run-metric r key)) seen)))
     (define cb (lambda-callback #:on-validation-epoch-end (watch 'validation 'v)
                                 #:on-train-epoch-end (watch 'train 'e)))
     (fit (EpochTagged) (label-loader) #:val (label-loader) #:max-epochs 2
