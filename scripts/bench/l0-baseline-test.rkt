@@ -3,6 +3,7 @@
 (module+ test
   (require (for-syntax racket/base)
            (only-in racket/file file->lines make-temporary-directory)
+           (only-in racket/match match)
            (only-in racket/port port->string)
            (only-in racket/runtime-path #%datum define-runtime-path)
            (only-in racket/string string-contains? string-prefix?)
@@ -14,7 +15,8 @@
   (define-runtime-path fake-bin "fixtures/fake-bin")
   (define bash (find-executable-path "bash"))
 
-  (define (run-baseline dir stage #:rounds [rounds #f] #:out [stem "l0"] #:smoke [smoke #f])
+  (define (run-baseline dir stage #:rounds [rounds #f] #:out [stem "l0"] #:smoke [smoke #f]
+                        #:threads [threads #f])
     (define env (environment-variables-copy (current-environment-variables)))
     (define (set-var! name value)
       (environment-variables-set! env (string->bytes/utf-8 name)
@@ -26,6 +28,8 @@
     (set-var! "BASELINE_DATE" "2026-01-02")
     (set-var! "BASELINE_SMOKE" (and smoke "1"))
     (set-var! "BASELINE_ROUNDS" rounds)
+    (set-var! "OMP_NUM_THREADS" threads)
+    (set-var! "MKL_NUM_THREADS" threads)
     (define-values (sp out in err)
       (parameterize ([current-environment-variables env])
         (subprocess #f #f #f bash (path->string script) stage)))
@@ -66,6 +70,15 @@
              (check-false (member "stale" records))
              (check-equal? (length records) (length (bench-calls dir)))
              (check-true (> (length records) 1)))))
+
+        (test-case "the default-thread pass drops the caller's thread counts; the others set one"
+          (in-fresh-dir
+           (lambda (dir)
+             (check-equal? (run-baseline dir "cpu" #:threads "8") 0)
+             (check-equal? (for/list ([call (in-list (bench-calls dir))])
+                             (match call
+                               [(regexp #rx" threads=([^ ]*)$" (list _ setting)) setting]))
+                           '("unset/unset" "1/1" "1/1")))))
 
         (test-case "a single stage appends to the JSONL"
           (in-fresh-dir

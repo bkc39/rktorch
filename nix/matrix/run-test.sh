@@ -7,6 +7,7 @@ runner=$t/run.sh
 cell=$t/cuda-cell.sh
 cat "$1/drain.sh" "$1/run.sh" >"$runner"
 cat "$1/drain.sh" "$1/cuda-cell.sh" >"$cell"
+racket_cell=$1/racket-cell.sh
 shift
 bash=$(command -v bash)
 set -m
@@ -523,10 +524,32 @@ EOF
   [ -z "$(ls -A "$t/farm")" ] || { echo "run-test: $case: links without a driver" >&2; exit 1; }
 }
 
+cell_threads() {
+  : >"$t/omp"
+  PATH="$t/cellbin:$PATH" timeout -k 5 30 env "$@" bash "$racket_cell" test >/dev/null
+  [ "$(wc -l <"$t/omp")" -eq 3 ] && [ "$(sort -u "$t/omp")" = "$want" ] || {
+    echo "run-test: $case: env $*: raco saw OMP_NUM_THREADS '$(sort -u "$t/omp")', not $want" >&2
+    exit 1
+  }
+}
+
+case_racket_cell_threads() {
+  mkdir -p "$t/cellbin"
+  cat >"$t/cellbin/raco" <<EOF
+#!$bash
+echo "\${OMP_NUM_THREADS-unset}" >>"$t/omp"
+EOF
+  chmod +x "$t/cellbin/raco"
+  want=1 cell_threads -u OMP_NUM_THREADS
+  want=1 cell_threads OMP_NUM_THREADS=
+  want=4 cell_threads OMP_NUM_THREADS=4
+}
+
 cases=("$@")
 [ "${#cases[@]}" -gt 0 ] || cases=(rows no_match failure_line interrupt interrupt_deaf terminate deadline linger
     kill_after durations killed guard
-    cuda_cell cuda_cell_deaf cuda_cell_linger cuda_cell_load zombie driver_farm)
+    cuda_cell cuda_cell_deaf cuda_cell_linger cuda_cell_load zombie driver_farm
+    racket_cell_threads)
 for case in "${cases[@]}"; do
   "case_$case"
   echo "run-test: $case ok"

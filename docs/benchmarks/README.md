@@ -299,7 +299,8 @@ faster) with a sign-test interval, which needs 6 rounds to reach 95%.
 
 `scripts/bench/l0-baseline.sh` takes the baseline from the host shell,
 entering one dev shell at a time: in `nix develop`, A on the CPU at the
-default thread count and at `OMP_NUM_THREADS=1`, and B at one ATen thread;
+default thread count (it unsets any `OMP_NUM_THREADS` or `MKL_NUM_THREADS`
+it inherits) and at `OMP_NUM_THREADS=1`, and B at one ATen thread;
 in `env -u LD_LIBRARY_PATH nix develop .#cuda`, A, E and F on CUDA, C over
 `VARIANT` `pgm`/`crop` × `WORKERS` 0/2/4, D at the short settings, and G
 (05 and 09) with troughs off, then on at collect budgets 0.01, 0.05 (the
