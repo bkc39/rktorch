@@ -1,7 +1,8 @@
 #lang racket/base
 
 (module+ test
-  (require (only-in racket/runtime-path #%datum define-runtime-path)
+  (require (only-in racket/list append*)
+           (only-in racket/runtime-path #%datum define-runtime-path)
            rackunit
            (only-in "../data/loader.rkt"
                     dataloader dataloader-length in-dataloader tensor-dataset)
@@ -77,14 +78,15 @@
       (define loader (mnist-loader))
       (define final-batch (sub1 (dataloader-length loader)))
       (define losses
-        (for*/list ([_ (in-range epochs)]
-                    [(x y i) (in-parallel (in-dataloader loader) (in-naturals))])
-          (define loss (cross-entropy (net x) y))
-          (when (zero? (modulo i accumulate)) (zero-grads! opt))
-          (backward! (/ loss accumulate))
-          (when (or (~> i add1 (modulo accumulate) zero?) (= i final-batch)) (step! opt))
-          (when (= i final-batch) (step! schedule))
-          (item loss)))
+        (append*
+         (for/list ([_ (in-range epochs)])
+           (for/list ([(x y) (in-dataloader loader)] [i (in-naturals)])
+             (define loss (cross-entropy (net x) y))
+             (when (zero? (modulo i accumulate)) (zero-grads! opt))
+             (backward! (/ loss accumulate))
+             (when (or (~> i add1 (modulo accumulate) zero?) (= i final-batch)) (step! opt))
+             (when (= i final-batch) (step! schedule))
+             (item loss)))))
       (values losses (flat-parameters net))))
 
   (test-case "L-P1: fit leaves the parameters a hand-written loop leaves, bit for bit"
