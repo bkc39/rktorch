@@ -5,8 +5,10 @@
 (require (except-in racket/list argmax flatten take)
          (only-in racket/math nan?)
          torch
+         torch/data/loader
          torch/nn
          torch/scribblings/examples/05-mnist
+         (only-in torch/train fit run-metric)
          (only-in torch/vision/mnist load-mnist-fixture))
 
 (module+ main
@@ -15,42 +17,48 @@
   ;; EPOCHS to override. Use run-example for the quick offline smoke instead.
   (define epochs (env-number "EPOCHS" 3))
   (printf "device: ~a\n" (pick-device))
-  (for ([acc (in-list (train-mnist #:epochs epochs))]
-        [epoch (in-naturals 1)])
-    (printf "epoch ~a: test acc ~a\n" epoch acc)))
+  (printf "test acc ~a\n" (train-mnist #:epochs epochs)))
 
 (module+ test
   (require rackunit)
   ;; Deterministic, offline: 5 full-batch steps on the committed fixture.
-  (define-values (losses net trained-on) (run-example #:device 'cpu))
+  (define-values (losses classifier trained-on) (run-example #:device 'cpu))
   (check-equal? trained-on 'cpu)
   (check-equal? (length losses) 5)
   (check-true (andmap (lambda (l) (and (rational? l) (not (nan? l)))) losses)
               (format "non-finite loss: ~a" losses))
   (check-true (< (last losses) (first losses))
               (format "losses did not decrease: ~a" losses))
-  ;; the convnet's parameter tree: the Sequential's steps by index, each
-  ;; conv-block's Conv2d under it, weights before biases.
-  (check-equal? (map car (named-parameters net))
-                '("0.conv.weight" "0.conv.bias" "1.conv.weight" "1.conv.bias"
-                  "3.weight" "3.bias" "5.weight" "5.bias"))
-  (check-equal? (map tensor-shape (parameters net))
+  ;; the trainer's net field, then the convnet's parameter tree: the
+  ;; Sequential's steps by index, each conv-block's Conv2d under it, weights
+  ;; before biases.
+  (check-equal? (map car (named-parameters classifier))
+                '("net.0.conv.weight" "net.0.conv.bias"
+                  "net.1.conv.weight" "net.1.conv.bias"
+                  "net.3.weight" "net.3.bias" "net.5.weight" "net.5.bias"))
+  (check-equal? (map tensor-shape (parameters classifier))
                 '((16 1 3 3) (16) (32 16 3 3) (32)
                   (128 800) (128) (10 128) (10)))
   ;; smoke-test accuracy (the only exerciser of in-eval-mode at the example
-  ;; level): the loss-decreasing net should beat the 0.1 random-chance floor for
-  ;; 10 classes, and accuracy must leave the net back in train mode.
+  ;; level): the loss-decreasing classifier should beat the 0.1 random-chance
+  ;; floor for 10 classes, and accuracy must leave it back in train mode.
   (define-values (xs ys) (load-mnist-fixture))
-  (define acc (accuracy net xs ys))
+  (define acc (accuracy classifier xs ys))
   (check-true (and (> acc 0.1) (<= acc 1.0))
               (format "accuracy out of expected range: ~a" acc))
-  (check-true (layer-training? net) "accuracy left the net in eval mode")
+  (check-true (layer-training? classifier) "accuracy left the classifier in eval mode")
+  ;; the validation step's epoch mean over equal batches is the accuracy of
+  ;; the whole set
+  (define fixture (dataloader (tensor-dataset xs ys) #:batch-size 64))
+  (define r (fit classifier fixture #:val fixture #:max-epochs 1 #:logger #f
+                 #:num-sanity-val-steps 0))
+  (check-= (run-metric r 'val/acc) (accuracy classifier xs ys) 1e-6)
   ;; Device RNG streams differ from the CPU's, so the on-device arm checks
   ;; convergence, never equality with the CPU losses above.
   (define accel (accelerator-if-available))
   (unless (eq? (device-type accel) 'cpu)
-    (define-values (a-losses a-net _a-dev) (run-example #:device accel))
-    (check-equal? (device (car (parameters a-net))) accel)
+    (define-values (a-losses a-classifier _a-dev) (run-example #:device accel))
+    (check-equal? (device (car (parameters a-classifier))) accel)
     (check-true (andmap (lambda (l) (and (rational? l) (not (nan? l)))) a-losses)
                 (format "non-finite loss on ~a: ~a" accel a-losses))
     (check-true (< (last a-losses) (first a-losses))
