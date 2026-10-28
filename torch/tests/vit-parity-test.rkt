@@ -32,29 +32,39 @@
     (define reference (VisionTransformer #:image-size 32 #:patch 4
                                          #:width 192 #:depth 2 #:heads 3
                                          #:classes 10))
+    (define wide (VisionTransformer #:image-size '(32 48) #:patch 4
+                                    #:width 192 #:depth 9 #:heads 3))
     (define twin-path (saved twin))
     (define reference-path (saved reference))
+    (define wide-path (saved wide))
     (define j
       (call-with-python-env
        #:env (list (cons "RKTORCH_PARITY_DEVICE" (format "~a" device))
                    (cons "RKTORCH_VIT_TWIN" (path->string twin-path))
                    (cons "RKTORCH_VIT_TORCHVISION"
-                         (path->string reference-path)))
+                         (path->string reference-path))
+                   (cons "RKTORCH_VIT_WIDE" (path->string wide-path)))
        (lambda () (python-check "vit_forward.py"))))
     (delete-file twin-path)
     (delete-file reference-path)
+    (delete-file wide-path)
     (define (input key) (to (unpack (hash-ref j key) 'float32) device))
     (define (expected key) (unpack (hash-ref j key) 'float32))
     (to twin device)
     (to reference device)
+    (to wide device)
     (eval! twin)
     (eval! reference)
+    (eval! wide)
     (with-no-grad
       (check-close (format "V11 twin at 32 px [~a]" device)
                    (twin (input 'x32) #:output 'cls) (expected 'twin32)
                    tolerance)
       (check-close (format "V11 twin at 16 px [~a]" device)
                    (twin (input 'x16) #:output 'cls) (expected 'twin16)
+                   tolerance)
+      (check-close (format "V11 32 by 48 at 16 by 24 px [~a]" device)
+                   (wide (input 'x_wide) #:output 'cls) (expected 'wide)
                    tolerance)
       (check-close (format "V12 torchvision [~a]" device)
                    (reference (input 'x32)) (expected 'torchvision)

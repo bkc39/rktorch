@@ -12,7 +12,7 @@
                     item manual-seed! mps-available? mps-device narrow
                     native-memory-use numel permute randn
                     reclaim-native-memory! reshape shape sum tensor->list to
-                    to-dtype upsample-bicubic2d)
+                    to-dtype)
            (only-in "../generated.rkt" broadcast-to)
            (only-in "../nn.rkt"
                     child-ref eval! in-layers layer-copy layer-mode
@@ -137,25 +137,47 @@
     (check-false (huggingface-vit-key "pooler.dense.bias"))
     (check-equal? (huggingface-vit-key "vit.mystery") "vit.mystery"))
 
-  (define (reference-tokens vit x)
+  (define (reference-embedded vit x)
     (define tokens ((child-ref vit "patch-embed") x))
     (match-define (list n _ width) (shape tokens))
     (define cls (broadcast-to (parameter vit "cls-token") (list n 1 width)))
-    (define z (+ (cat (list cls tokens) 1) (parameter vit "pos-embed")))
+    (+ (cat (list cls tokens) 1) (parameter vit "pos-embed")))
+
+  (define (reference-tokens vit x)
     ((child-ref vit "norm")
-     (for/fold ([z z]) ([block (in-layers (child-ref vit "blocks"))])
+     (for/fold ([z (reference-embedded vit x)])
+               ([block (in-layers (child-ref vit "blocks"))])
        (block z))))
 
-  (define (twin-positions pos gh gw target)
+  (bounded-test "V1: 'attention is the last block's per-head weights"
+    (define vit (small))
+    (define x (randn 2 3 32 32))
+    (define blocks (child-ref vit "blocks"))
+    (define first-block (child-ref blocks "0"))
+    (define last-block (child-ref blocks "1"))
+    (define z (reference-embedded vit x))
+    (define (weights-of block z)
+      (define-values (_ weights)
+        (block z #:need-weights? #t #:average-attn-weights? #f))
+      weights)
+    (define attention (vit x #:output 'attention))
+    (check-true (same? attention (weights-of last-block (first-block z))))
+    (check-false (same? attention (weights-of first-block z))))
+
+  (define (transposed-grid pos gh gw)
     (define width (last (shape pos)))
     (cat (list (narrow pos 1 0 1)
                (~> (narrow pos 1 1 (* gh gw))
                    (reshape 1 gh gw width)
-                   (permute 0 3 1 2)
-                   (upsample-bicubic2d target)
-                   (permute 0 2 3 1)
+                   (permute 0 2 1 3)
                    (reshape 1 -1 width)))
          1))
+
+  (define (close? a b [eps 1e-6])
+    (and (equal? (shape a) (shape b))
+         (for/and ([x (in-flattened-tensor (to a 'cpu))]
+                   [y (in-flattened-tensor (to b 'cpu))])
+           (< (abs (- x y)) eps))))
 
   (bounded-test "V5: the native grid adds pos-embed as it is"
     (for ([on (in-list devices)])
@@ -173,9 +195,14 @@
       (check-equal? (calls (lambda () (positions pos '(8 8) '(8 8)))) 0)
       (check-equal? (- resized native) interpolation
                     (format "~a: ~a native, ~a at 16 px" on native resized))
-      (check-true (same? (positions pos '(8 8) '(4 4))
-                         (twin-positions pos 8 8 '(4 4)))
-                  (format "~a" on))))
+      (define wide (to (randn 1 (+ 1 (* 4 6)) 5) on))
+      (for ([target (in-list '((3 5) (6 9) (4 4)))])
+        (match-define (list a b) target)
+        (check-true (close? (transposed-grid (positions wide '(4 6) target) a b)
+                            (positions (transposed-grid wide 4 6) '(6 4)
+                                       (list b a)))
+                    (format "~a: resizing commutes with transposing, ~a" on
+                            target)))))
 
   (bounded-test "V6: gradients reach pos-embed and cls-token, through the interpolation"
     (define vit (to (VisionTransformer #:image-size 4 #:patch 2 #:width 8
@@ -228,8 +255,10 @@
       (for/fold ([m block]) ([name (in-list path)]) (child-ref m name))))
 
   (bounded-test "V8: block initialisation"
+    (manual-seed! 0)
     (define vit (VisionTransformer #:image-size 32 #:patch 4 #:width 192
-                                   #:depth 9 #:heads 3))
+                                   #:depth 9 #:heads 3 #:classes 100))
+    (define head (child-ref vit "head"))
     (define linears (block-linears vit))
     (check-equal? (length linears) 54)
     (for ([l (in-list linears)])
@@ -244,11 +273,15 @@
       (check-true (andmap (lambda (v) (= v 1.0))
                           (tensor->list (parameter norm "weight"))))
       (check-true (andmap zero? (tensor->list (parameter norm "bias")))))
+    (check-true (andmap zero? (tensor->list (parameter head "bias"))))
+    (define drawn
+      (list* (parameter head "weight") (parameter vit "cls-token")
+             (parameter vit "pos-embed")
+             (map (lambda (l) (parameter l "weight")) linears)))
     (define-values (squares count)
-      (for/fold ([squares 0.0] [count 0]) ([l (in-list linears)])
-        (define w (parameter l "weight"))
+      (for/fold ([squares 0.0] [count 0]) ([w (in-list drawn)])
         (values (+ squares (~> (* w w) sum item)) (+ count (numel w)))))
-    (check-= (sqrt (/ squares count)) 0.02 0.0005))
+    (check-= (sqrt (/ squares count)) 0.02 3e-5))
 
   (bounded-test "V9: malformed arguments are contract violations, blamed on the caller"
     (define vit (small))
@@ -270,6 +303,8 @@
                (lambda () (VisionTransformer #:image-size 30 #:patch 4)))
     (check-exn blames-this-test
                (lambda () (VisionTransformer #:image-size 30 #:patch 4)))
+    (check-exn (message-matching #rx"PatchEmbed.*blaming: caller")
+               (lambda () ((PatchEmbed 3 24 4) (randn 1 1 32 32))))
     (check-exn blames-this-test (lambda () (PatchEmbed 3 0 4)))
     (check-exn blames-this-test (lambda () (huggingface-vit-key 'cls))))
 

@@ -4,7 +4,7 @@
                   -> ->i </c >=/c and/c any contract flat-contract-predicate
                   flat-named-contract list/c or/c)
          (only-in racket/list append-map drop-right last)
-         (only-in racket/match match match-define)
+         (only-in racket/match match match* match-define)
          (only-in threading ~>)
          (only-in "../foreign.rkt"
                   + cat copy! dtype flatten narrow permute reshape select shape
@@ -87,7 +87,8 @@
   (if (linear? m) (list m) (append-map linears (children m))))
 
 (define (reinitialise! linear)
-  (match-define (list (cons _ weight) (cons _ bias)) (named-parameters linear))
+  (match-define (list-no-order (cons "weight" weight) (cons "bias" bias))
+    (named-parameters linear))
   (with-no-grad
     (copy! weight (trunc-normal-init (shape weight) #:std 0.02))
     (zero! bias)))
@@ -115,11 +116,10 @@
   weights)
 
 (define (read-out output normed head)
-  (define cls (select normed 1 0))
-  (match output
-    ['tokens normed]
-    ['cls cls]
-    ['head (if head (head cls) cls)]))
+  (match* (output head)
+    [('tokens _) normed]
+    [('head (? values)) (head (select normed 1 0))]
+    [(_ _) (select normed 1 0)]))
 
 (define-layer VisionTransformer ;; noqa
   (patch-embed cls-token pos-embed blocks norm head patch grid check)
@@ -182,31 +182,35 @@
       (last-attention z layers)
       (read-out output (norm (encoded z layers)) head)))
 
-(define huggingface-renames
-  '((#rx"^embeddings[.]cls_token$" . "cls-token")
-    (#rx"^embeddings[.]position_embeddings$" . "pos-embed")
-    (#rx"^embeddings[.]patch_embeddings[.]projection[.]" . "patch-embed.proj.")
-    (#rx"^encoder[.]layer[.]([0-9]+)[.]layernorm_before[.]"
-     . "blocks.\\1.norm1.")
-    (#rx"^encoder[.]layer[.]([0-9]+)[.]attention[.]attention[.](query|key|value)[.]"
-     . "blocks.\\1.self-attn.\\2.")
-    (#rx"^encoder[.]layer[.]([0-9]+)[.]attention[.]output[.]dense[.]"
-     . "blocks.\\1.self-attn.out.")
-    (#rx"^encoder[.]layer[.]([0-9]+)[.]layernorm_after[.]"
-     . "blocks.\\1.norm2.")
-    (#rx"^encoder[.]layer[.]([0-9]+)[.]intermediate[.]dense[.]"
-     . "blocks.\\1.linear1.")
-    (#rx"^encoder[.]layer[.]([0-9]+)[.]output[.]dense[.]"
-     . "blocks.\\1.linear2.")
-    (#rx"^layernorm[.]" . "norm.")
-    (#rx"^classifier[.]" . "head.")))
-
 (define/contract-out (huggingface-vit-key key) ;; noqa
   (-> string? (or/c string? #f))
-  (define bare (regexp-replace #rx"^vit[.]" key ""))
-  (define rename
-    (findf (lambda (r) (regexp-match? (car r) bare)) huggingface-renames))
-  (cond
-    [(regexp-match? #rx"^pooler[.]" bare) #f]
-    [rename (regexp-replace (car rename) bare (cdr rename))]
-    [else key]))
+  (define (block i part rest)
+    (format "blocks.~a.~a.~a" i part rest))
+  (match (regexp-replace #rx"^vit[.]" key "")
+    [(regexp #rx"^pooler[.]") #f]
+    ["embeddings.cls_token" "cls-token"]
+    ["embeddings.position_embeddings" "pos-embed"]
+    [(regexp #rx"^embeddings[.]patch_embeddings[.]projection[.](.*)$"
+             (list _ rest))
+     (string-append "patch-embed.proj." rest)]
+    [(regexp #rx"^encoder[.]layer[.]([0-9]+)[.]layernorm_before[.](.*)$"
+             (list _ i rest))
+     (block i "norm1" rest)]
+    [(regexp #rx"^encoder[.]layer[.]([0-9]+)[.]attention[.]attention[.](query|key|value)[.](.*)$"
+             (list _ i projection rest))
+     (block i (string-append "self-attn." projection) rest)]
+    [(regexp #rx"^encoder[.]layer[.]([0-9]+)[.]attention[.]output[.]dense[.](.*)$"
+             (list _ i rest))
+     (block i "self-attn.out" rest)]
+    [(regexp #rx"^encoder[.]layer[.]([0-9]+)[.]layernorm_after[.](.*)$"
+             (list _ i rest))
+     (block i "norm2" rest)]
+    [(regexp #rx"^encoder[.]layer[.]([0-9]+)[.]intermediate[.]dense[.](.*)$"
+             (list _ i rest))
+     (block i "linear1" rest)]
+    [(regexp #rx"^encoder[.]layer[.]([0-9]+)[.]output[.]dense[.](.*)$"
+             (list _ i rest))
+     (block i "linear2" rest)]
+    [(regexp #rx"^layernorm[.](.*)$" (list _ rest)) (string-append "norm." rest)]
+    [(regexp #rx"^classifier[.](.*)$" (list _ rest)) (string-append "head." rest)]
+    [_ key]))

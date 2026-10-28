@@ -7,7 +7,7 @@
                   procedure-arity-includes/c unsupplied-arg?)
          (only-in syntax/parse/define define-syntax-parse-rule)
          (only-in threading ~>)
-         (only-in "../foreign.rkt" add gelu relu)
+         (only-in "../foreign.rkt" + gelu relu)
          (only-in "attention.rkt" MultiheadAttention)
          (only-in (submod "attention.rkt" private)
                   attention-mask/c attention-sequence/c attn-mask-shaped
@@ -101,10 +101,16 @@
                        memory batch-first?)
        any))
 
+(define (residual/weights x norm-first? norm sublayer)
+  (define-values (y weights) (sublayer (if norm-first? (norm x) x)))
+  (define sum (+ x y))
+  (values (if norm-first? sum (norm sum)) weights))
+
 (define (residual x norm-first? norm sublayer)
-  (if norm-first?
-      (add x (sublayer (norm x)))
-      (norm (add x (sublayer x)))))
+  (define-values (out _)
+    (residual/weights x norm-first? norm
+                      (lambda (x) (values (sublayer x) #f))))
+  out)
 
 (define (normed norm x)
   (if norm (norm x) x))
@@ -141,25 +147,27 @@
              #:need-weights? [need-weights? #f]
              #:average-attn-weights? [average? #t])
   (check src mask padding causal? need-weights? average?)
-  (define attention-input (if norm-first? (norm1 src) src))
-  (define-values (attended weights)
-    (call-with-values
-     (lambda ()
-       (self-attn attention-input attention-input attention-input
-                  #:attn-mask mask
-                  #:key-padding-mask padding
-                  #:causal? causal?
-                  #:need-weights? need-weights?
-                  #:average-attn-weights? average?))
-     (case-lambda
-       [(output) (values output #f)]
-       [(output weights) (values output weights)])))
-  (define summed (add src (dropout1 attended)))
-  (define output
-    (residual (if norm-first? summed (norm1 summed)) norm-first? norm2
-              (lambda (x)
-                (~> x linear1 activation dropout linear2 dropout2))))
-  (if need-weights? (values output weights) output))
+  (define (attend x weights?)
+    (self-attn x x x
+               #:attn-mask mask
+               #:key-padding-mask padding
+               #:causal? causal?
+               #:need-weights? weights?
+               #:average-attn-weights? average?))
+  (define (feed-forward x)
+    (~> x linear1 activation dropout linear2 dropout2))
+  (cond
+    [need-weights?
+     (define-values (attended weights)
+       (residual/weights src norm-first? norm1
+                         (lambda (x)
+                           (define-values (y weights) (attend x #t))
+                           (values (dropout1 y) weights))))
+     (values (residual attended norm-first? norm2 feed-forward) weights)]
+    [else
+     (~> src
+         (residual norm-first? norm1 (lambda (x) (dropout1 (attend x #f))))
+         (residual norm-first? norm2 feed-forward))]))
 
 (define-layer TransformerDecoderLayer ;; noqa
   (self-attn multihead-attn linear1 dropout linear2 norm1 norm2 norm3
