@@ -177,7 +177,7 @@
     (and (equal? (shape a) (shape b))
          (for/and ([x (in-flattened-tensor (to a 'cpu))]
                    [y (in-flattened-tensor (to b 'cpu))])
-           (< (abs (- x y)) eps))))
+           (~> (- x y) abs (< eps)))))
 
   (bounded-test "V5: the native grid adds pos-embed as it is"
     (for ([on (in-list devices)])
