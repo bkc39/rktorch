@@ -444,7 +444,9 @@
         [(finalizer-releasing)
          (when (and (ours? subject) (not (unbox finalizing)))
            (set-box! finalizing #t)
-           (spin-until held 10000))]
+           (spin-until held 10000)
+           (unless (unbox held)
+             (note! 'holder-never-entered)))]
         [(adoption-returning)
          (when (and (ours? subject) (unbox finalizing) (not (unbox returned)))
            (set-box! returned #t)
@@ -459,11 +461,14 @@
       (refresh-shadows!)
       (with-race-hook stage
         (void (grad p))
+        ;; Main spins uninterruptibly from `finalizing` to `held`, so the holder
+        ;; runs nothing in between that waits for main's scheduler; a rackunit
+        ;; check does under raco cover, and the finalizer would give up.
         (define holder
           (spawn (lambda ()
                    (spin-until finalizing 20000)
-                   (check-true (unbox finalizing) "the gradient's finalizer never ran")
-                   (void (grad y)))
+                   (void (grad y))
+                   (unbox finalizing))
                  #:pool 'own #:label 'holder))
         (define give-up (+ (current-inexact-milliseconds) 15000))
         (let collect ()
@@ -471,8 +476,9 @@
             (collect-garbage)
             (sleep 0.01)
             (collect)))
-        (join holder)
-        (settle!))
+        (define saw-finalizer? (join holder))
+        (settle!)
+        (check-true saw-finalizer? "the gradient's finalizer never ran"))
       (check-not-false (unbox gradient) "the parameter's gradient was never taken")
       (check-equal? (reverse (unbox events)) '(holder-leaving adoption-returning)
                     "the finalizer gave the adoption back while another thread held the ledger")
