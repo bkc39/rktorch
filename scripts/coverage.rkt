@@ -55,9 +55,23 @@
 
 ;;; Running
 
+;; 0 and 1 are cover's own answers; anything else ended it before it wrote a
+;; report, and a report left from an earlier run must not stand in for one.
+(define (cover-outcome code)
+  (case code
+    [(0) 'passed]
+    [(1) 'failed]
+    [(142) "raco cover was ended by SIGALRM: a test's process deadline fired (its notice is above)"]
+    [else (if (> code 128)
+              (format "raco cover was ended by signal ~a" (- code 128))
+              (format "raco cover exited with status ~a" code))]))
+
 (define (run-cover!)
   (displayln "running raco cover over torch/ (instrumented; runs the suite)")
-  (zero? (system*/exit-code (raco) "cover" "-b" "-d" (report-dir) "torch/")))
+  (define outcome (cover-outcome (system*/exit-code (raco) "cover" "-b" "-d" (report-dir) "torch/")))
+  (when (string? outcome)
+    (die "coverage: ~a\n" outcome))
+  (eq? outcome 'passed))
 
 ;;; Reading the report
 
@@ -249,7 +263,7 @@
 ;; run with `raco test scripts/coverage.rkt`.
 
 (module+ test
-  (require (only-in rackunit check-equal? test-case))
+  (require (only-in rackunit check-equal? check-regexp-match test-case))
 
   (define (row name percent cov unc total)
     (string-append
@@ -307,6 +321,12 @@
     (check-equal? (length (parse-entries html)) 1)
     (check-equal? (count-rows html) 2
                   "the discrepancy is what read-entries refuses to average over"))
+
+  (test-case "a cover run ended by a signal is an error, not a report"
+    (check-equal? (map cover-outcome '(0 1)) '(passed failed))
+    (check-regexp-match #rx"SIGALRM: a test's process deadline fired" (cover-outcome 142))
+    (check-regexp-match #rx"ended by signal 9" (cover-outcome 137))
+    (check-regexp-match #rx"exited with status 2" (cover-outcome 2)))
 
   (test-case "a file's area is its directory, with raw/ kept apart"
     (check-equal? (map area '("torch/main.rkt"

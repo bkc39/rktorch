@@ -175,7 +175,8 @@ backstop, `collect-under-pressure!`, ends with `yield-to-finalizers!`
 (`torch/foreign/raw/collector.rkt`): a thread's first accounting after a collection
 sleeps once. The latch is per thread, a weak box in a thread cell that
 the collection clears. Off the place's main OS thread (`on-main-os-thread?`,
-the OS thread that instantiated `torch/foreign/raw/collector.rkt`) it skips: a parallel
+the OS thread a green thread runs on, read when `torch/foreign/raw/collector.rkt`
+is instantiated, even from a parallel thread) it skips: a parallel
 thread's sleep would migrate to the
 main pool and wait there for the main thread to switch out, which gives the
 finalizer thread nothing it would not get anyway. Inside an atomic section

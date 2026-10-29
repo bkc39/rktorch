@@ -100,18 +100,21 @@
                            (default-memory-fraction (device-type dev)))
                        capacity))))))
 
-;; The take comes before the reading, so two samples at once never take the
-;; same bytes, and bytes accounted during the reading wait for the next one.
+;; The take and the trial it shortens share a section before the reading, so
+;; two samples at once never take the same bytes, a trial set during the
+;; reading keeps its full length, and bytes accounted during the reading wait
+;; for the next sample.
 (define (sample-allocator! dev)
   (define a (account-of dev))
-  (define seen (take-since-sample! a))
+  (with-ledger
+    (define seen (take-since-sample! a))
+    (define trial (account-trial a))
+    (when trial
+      (set-account-trial! a (- trial seen))))
   (define live (live-bytes a))
   (define known ((allocator-reading) dev))
   (define reading (or known 0))
   (with-ledger
-    (define trial (account-trial a))
-    (when trial
-      (set-account-trial! a (- trial seen)))
     (set-account-sample! a reading)
     (when known
       (if (eq? (shadow-refresh) 'samples)

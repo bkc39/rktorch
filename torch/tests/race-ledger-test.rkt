@@ -427,6 +427,9 @@
     (define held (box #f))
     (define events (box '()))
     (define (note! event) (cas-update! events (lambda (seen) (cons event seen))))
+    (define returned (box #f))
+    ;; A handle freed after ours may reuse its address, so only the first
+    ;; release and the first return at that address after it are ours.
     (define (ours? h) (eqv? (address h) (unbox gradient)))
     (define (stage name subject)
       (case name
@@ -436,13 +439,16 @@
             (set-box! held #t)
             (spin-for 50)
             (note! 'holder-leaving)]
+           [(unbox gradient) (void)]
            [else (set-box! gradient (address subject))])]
         [(finalizer-releasing)
-         (when (ours? subject)
+         (when (and (ours? subject) (not (unbox finalizing)))
            (set-box! finalizing #t)
            (spin-until held 10000))]
         [(adoption-returning)
-         (when (ours? subject) (note! 'adoption-returning))]
+         (when (and (ours? subject) (unbox finalizing) (not (unbox returned)))
+           (set-box! returned #t)
+           (note! 'adoption-returning))]
         [else (void)]))
     (define y (zeros 4 4 #:requires-grad? #t))
     (backward! (sum y))
@@ -455,14 +461,16 @@
         (void (grad p))
         (define holder
           (spawn (lambda ()
-                   (check-true (await-box finalizing) "the gradient's finalizer never ran")
+                   (spin-until finalizing 20000)
+                   (check-true (unbox finalizing) "the gradient's finalizer never ran")
                    (void (grad y)))
                  #:pool 'own #:label 'holder))
-        (let collect ([n 0])
-          (unless (or (unbox finalizing) (> n 100))
+        (define give-up (+ (current-inexact-milliseconds) 15000))
+        (let collect ()
+          (unless (or (unbox finalizing) (> (current-inexact-milliseconds) give-up))
             (collect-garbage)
             (sleep 0.01)
-            (collect (add1 n))))
+            (collect)))
         (join holder)
         (settle!))
       (check-not-false (unbox gradient) "the parameter's gradient was never taken")
@@ -472,7 +480,8 @@
       p))
 
   (test-case "a finalizer waits out a parallel thread holding the ledger"
-    (void (call-with-process-deadline 30 finalizer-against-lock-holder)))
+    (for ([_ (in-range 20)])
+      (void (call-with-process-deadline 30 finalizer-against-lock-holder))))
 
   (define (killed-mid-release pool)
     (settle!)

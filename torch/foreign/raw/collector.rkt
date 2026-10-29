@@ -24,9 +24,13 @@
 (define (finalizer-runs)
   (unbox runs))
 
-;; a place instantiates this module on its own main OS thread
+;; Green threads run on the place's main OS thread, whichever thread
+;; instantiates this module.
 (define os-thread-id (vm-eval 'get-thread-id))
-(define main-os-thread (os-thread-id))
+(define main-os-thread
+  (let ([id (box #f)])
+    (thread-wait (thread (lambda () (set-box! id (os-thread-id)))))
+    (unbox id)))
 
 (define (on-main-os-thread?)
   (eqv? (os-thread-id) main-os-thread))

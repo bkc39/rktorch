@@ -238,18 +238,25 @@
          dev]
     [else #f]))
 
-;; An `adopt` reads and writes the shadow, which lives under the ledger.
+;; An `adopt` reads and writes the shadow, which lives under the ledger. The
+;; count goes up before the entry is published, so an unaccount racing the
+;; publication never takes it below zero; a handle already charged keeps its
+;; charge.
 (define (record-allocation! key nbytes dev #:adopt [adopt #f])
   (define lt (lifetime-of! key))
   (define a (account-of dev))
   (define entry (allocation (make-phantom-bytes nbytes) nbytes dev a 0 #f))
   (define (charge!)
     (with-uninterruptible
-      (set-box! (lifetime-charge lt) entry)
       (cas-add! entries 1)
-      (race-point ledger-entry-added key)
-      (note-accounted! a nbytes)
-      (when adopt (adopt entry))))
+      (cond
+        [(cas-claim! (lifetime-charge lt) #f entry)
+         (race-point ledger-entry-added key)
+         (note-accounted! a nbytes)
+         (when adopt (adopt entry))]
+        [else
+         (cas-add! entries -1)
+         (set-phantom-bytes! (allocation-phantom entry) 0)])))
   (if adopt (with-ledger (charge!)) (charge!)))
 
 (define (unaccount! key)

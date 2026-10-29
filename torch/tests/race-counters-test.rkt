@@ -4,7 +4,8 @@
   (require rackunit
            (only-in "../foreign/device-type.rkt" device)
            (only-in "../foreign/raw/accounts.rkt"
-                    account-of note-accounted! note-unaccounted! since-sample-bytes)
+                    account-of account-trial live-bytes note-accounted! note-unaccounted!
+                    set-account-trial! since-sample-bytes with-ledger)
            (only-in (submod "../foreign/raw/accounts.rkt" private) accounts)
            (only-in "../foreign/raw/cas.rkt" cas-add! cas-update!)
            (only-in "../foreign/raw/collector.rkt" finalizer-runs)
@@ -77,6 +78,30 @@
                           (format "~a bytes left toward the next sample, of ~a accounted after both took"
                                   since-sample mib)))))
 
+  (define (trial-set-during-a-sample dev)
+    (define a (account-of dev))
+    (define mark (* 64 mib))
+    (define (reading-while-a-release-starts-a-trial d)
+      (cond
+        [(eq? d dev)
+         (join (spawn (lambda () (with-ledger (set-account-trial! a mark)))))
+         (* 16 mib)]
+        [else #f]))
+    (note-accounted! a (* 8 mib))
+    (parameterize ([native-memory-limit mark]
+                   [allocator-reading reading-while-a-release-starts-a-trial])
+      (join (spawn (lambda () (collect-under-pressure! dev)) #:pool 'own)))
+    (begin0
+      (account-trial a)
+      (note-unaccounted! a (* 8 mib))
+      (forget-account! dev)))
+
+  (test-case "a trial a release starts during a sample keeps its full length"
+    (within 60
+            (lambda ()
+              (check-equal? (trial-set-during-a-sample (device 'cuda 20)) (* 64 mib)
+                            "the sample shortened a trial set after its take"))))
+
   (test-case "a drain polling from a parallel thread never counts a run before its release"
     (within 60
             (lambda ()
@@ -84,9 +109,10 @@
               (define polled (box #f))
               (define poller
                 (spawn (lambda ()
-                         (wait-until (lambda () (unbox holding)) 10)
+                         (spin-until (lambda () (unbox holding)) 10)
                          (set-box! polled (finalizer-runs)))
                        #:pool 'own))
+              (sleep 0.02)
               (define release-held
                 (swallow-and-count-failure
                  (lambda (_h)
@@ -130,4 +156,19 @@
               (check-equal? (- held start) n)
               (check-equal? after start)
               (check-true (< real 100)
-                          (format "100 diagnostics over ~a entries took ~a ms" n real))))))
+                          (format "100 diagnostics over ~a entries took ~a ms" n real)))))
+
+  (test-case "a second accounting of one handle keeps its first charge"
+    (settle!)
+    (define dev (device 'cuda 21))
+    (define key (box 'twice))
+    (define start (ledger-entries))
+    (record-allocation! key 64 dev)
+    (record-allocation! key 64 dev)
+    (define entries (- (ledger-entries) start))
+    (define live (live-bytes (account-of dev)))
+    (unaccount! key)
+    (define left (- (ledger-entries) start))
+    (forget-account! dev)
+    (check-equal? (list entries live left) '(1 64 0)
+                  "(entries, live bytes, entries after one unaccount)")))

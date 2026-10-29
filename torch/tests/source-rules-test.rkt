@@ -50,18 +50,33 @@
      foreign-modules
      "enters atomic mode, or names a form that does"))
 
+  (define cas-primitive #px"(box|box[*]|struct|struct[*]|vector|vector[*])-cas!$")
+
+  (test-case "the CAS ban names every CAS primitive"
+    (for ([name (in-list '("box-cas!" "unsafe-box*-cas!" "unsafe-struct*-cas!" "vector-cas!"
+                           "unsafe-vector*-cas!" "unsafe-vector-cas!"))])
+      (check-true (regexp-match? cas-primitive name) name)))
+
   (test-case "only raw/cas.rkt calls a CAS primitive"
     (check-no-symbols
-     #px"(box-cas!|box[*]-cas!|struct-cas!|struct[*]-cas!)$"
+     cas-primitive
      (for/list ([p (in-list (modules-under torch-dir))]
                 #:unless (same-file? p cas-module))
        p)
      "calls a CAS primitive instead of raw/cas.rkt's loops"))
 
+  (define (cites-an-issue? line)
+    (regexp-match? #px";.*#[0-9]+"
+                   (regexp-replace* #px"\"(?:[^\"\\\\]|\\\\.)*\"" line "")))
+
   (define (issue-comments path)
-    (for/list ([line (in-list (file->lines path))]
-               #:when (regexp-match? #px";[^\"]*#[0-9]+" line))
-      line))
+    (filter cites-an-issue? (file->lines path)))
+
+  (test-case "the issue scan reads comments, not strings"
+    (check-true (cites-an-issue? "(f x) ;; see #12"))
+    (check-true (cites-an-issue? "(g \"a\") ; #7"))
+    (check-false (cites-an-issue? "(error 'f \"step; see #12\")"))
+    (check-false (cites-an-issue? "(f \"a \\\"q\\\"; #3\")")))
 
   (test-case "comments under torch/foreign cite no issue numbers"
     (check-equal? (append-map issue-comments foreign-modules) '())))
