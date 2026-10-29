@@ -211,8 +211,8 @@
 
   (define (epoch-tags l)
     (for/list ([row (in-list (collecting-steps l))])
-      (match row
-        [(cons step metrics) (list step (hash-ref metrics 'epoch #f))])))
+      (match-define (cons step metrics) row)
+      (list step (hash-ref metrics 'epoch #f))))
 
   (test-case "every row but a validation or test step's carries Lightning's epoch key"
     (define l (collecting-logger))
