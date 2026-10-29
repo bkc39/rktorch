@@ -730,7 +730,9 @@ Runtime paths take `(only-in racket/runtime-path #%datum define-runtime-path)`.
   and the capacity backstop, #145), `accounts` (no FFI: the per-device
   accounts, CAS-updated byte counts and `call-with-ledger`, the re-entrant
   uninterruptible lock for the rest, #296), `cas` (`cas-update!`,
-  `cas-add!`, `cas-claim!`: `box-cas!` retry loops), `pressure-settings` (its parameters;
+  `cas-add!`, `cas-claim!`: `box-cas!` retry loops), `oom` (the one
+  retry after a collection when a raw call failed with an OOM, re-exported
+  by `memory`), `pressure-settings` (its parameters;
   `RKTORCH_MEMORY_FRACTION` and `RKTORCH_MEMORY_LIMIT` in MiB set the
   mark's initial values, #236), `device-queries` (the capacity, allocator
   and release queries `device` hands down to it), `race-points` (no FFI:
