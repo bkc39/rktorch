@@ -253,7 +253,9 @@ to @racket[teardown], and @racket[#f] once the run has finished.
 @racket[run-stepped?] is whether the current training batch took one.
 @racket[run-metric] reads one key to the host: inside an epoch the latest
 step value, in an epoch-end hook and after the epoch its reduction, and for a
-key logged both per step and per epoch the newer of the two. A key logged
+key logged both per step and per epoch the newer of the two. Inside the
+training loop a per-step key answers the training loop's latest value, also
+when a validation loop logs the same key. A key logged
 only per epoch answers the running reduction of the current epoch, read once
 until the next @racket[log!] of that key.}
 
@@ -295,7 +297,9 @@ Lightning's @tt{self.log}. The values allowed for @racket[#:on-step?] and
 @secref["train-hooks"]; @racket[#:on-step? #t] or @racket[#:on-epoch? #f]
 in a hook that logs only per epoch is a contract violation. An epoch
 @racket['mean] is weighted by @racket[#:batch-size]. The value is detached
-before it is accumulated, so a logged loss keeps no graph alive.}
+before it is accumulated, so a logged loss keeps no graph alive, and, as in
+Lightning, a tensor that is not @racket['float32] or @racket['float64] is
+converted to @racket['float32] first.}
 
 @defthing[gen:training-logger any/c]{
 The generic interface of a logger, with the methods below.}
@@ -477,6 +481,9 @@ The order of one @racket[fit], after Lightning 2.6.5, with
  @item{With @racket[#:val] and sanity steps: @tt{on-sanity-check-start},
        a validation loop whose metrics are discarded,
        @tt{on-sanity-check-end}.}
+ @item{As in Lightning, @racket[fit] leaves each layer's mode as the caller
+       set it, and a trainer with a layer in eval mode logs a warning to the
+       @racket['rktorch-train] topic before @tt{on-train-start}.}
  @item{@tt{on-train-start}, then per epoch @tt{on-train-epoch-start} and per
        batch: the transfer hooks, @tt{on-train-batch-start}, the training
        step, @tt{on-before-zero-grad} on a window's first batch,
@@ -490,4 +497,5 @@ The order of one @racket[fit], after Lightning 2.6.5, with
        @tt{on-validation-start}, @tt{on-validation-epoch-start}, per batch
        the transfer hooks, @tt{on-validation-batch-start}, the validation
        step and @tt{on-validation-batch-end}, then
-       @tt{on-validation-epoch-end} and @tt{on-validation-end}.}]
+       @tt{on-validation-epoch-end} and @tt{on-validation-end}; each layer
+       then returns to the mode it had before the loop.}]

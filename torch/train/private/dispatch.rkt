@@ -5,7 +5,8 @@
          (only-in racket/match match)
          (only-in syntax/parse/define define-syntax-parse-rule)
          (only-in "../../foreign.rkt" cpu-device device shape tensor? to)
-         (only-in "../../nn/layer.rkt" buffers parameters)
+         (only-in "../../nn/layer.rkt" buffers layer? parameters)
+         (only-in (submod "../../nn/mode.rkt" private) eval-layer-count)
          (only-in "../logging.rkt" logger-finalize! logger-log-metrics!)
          (only-in "book.rkt" read-epoch! read-steps!)
          (only-in "hooks.rkt" hook-named hook-order hook-sides)
@@ -31,6 +32,7 @@
          tear-down!
          trainer-device
          transfer
+         warn-eval-layers!
          with-failure-protocol)
 
 (define-logger rktorch-train)
@@ -147,6 +149,12 @@
   (set-run-finished?! r #t)
   (for ([l (in-list (run-loggers r))])
     (logger-finalize! l status)))
+
+(define (warn-eval-layers! r)
+  (define n (match (run-trainer r) [(? layer? tr) (eval-layer-count tr)] [_ 0]))
+  (when (positive? n)
+    (log-rktorch-train-warning
+     "fit: ~a layer(s) in eval mode at the start of training; they stay in eval mode" n)))
 
 (define (logged-attempt what thunk)
   (with-handlers ([exn:fail? (lambda (e)
