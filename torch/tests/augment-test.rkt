@@ -69,7 +69,7 @@
     n)
 
   (define (boxes-for x [box '(1.0 2.0 7.5 6.0)])
-    (~> (make-list (batch-size x) box) tensor (to (device x))))
+    (~> (batch-size x) (make-list box) tensor (to (device x))))
 
   (define (factors-for x lo hi)
     (+ lo (* (- hi lo) (rand (batch-size x) #:device (device x)))))

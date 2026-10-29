@@ -44,7 +44,9 @@
   (where (<= a b) a b))
 
 (define (rgb->hsv x)
-  (define-values (r g b) (values (channel x 0) (channel x 1) (channel x 2)))
+  (define r (channel x 0))
+  (define g (channel x 1))
+  (define b (channel x 2))
   (define maxc (larger (larger r g) b))
   (define minc (smaller (smaller r g) b))
   (define flat (eq maxc minc))

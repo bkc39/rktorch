@@ -848,7 +848,7 @@ image. Draws one @racket[rand] of @tt{N}, none when @racket[p] is 0.
                            #f])
          crop-view?]{
 One view of a self-supervised multi-crop, applied as
-@racket[(view images #:generator generator)] to a three-channel uint8 or
+@racket[(_view images #:generator generator)] to a three-channel uint8 or
 float batch: a uint8 batch is scaled to @racket[0] to @racket[1], then
 @racket[random-affine-crop] to @racket[size] with @racket[scale],
 @racket[ratio] and @racket[flip-p], @racket[random-color-jitter] with the
