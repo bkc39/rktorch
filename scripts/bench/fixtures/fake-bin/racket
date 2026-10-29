@@ -1,5 +1,5 @@
 #!/bin/sh
-# Stands in for racket in l0-baseline-test: logs the call and its thread settings, appends a record to --out.
+# Stands in for racket in l0-baseline-test: logs the call, appends a record to --out.
 echo "racket $* threads=${OMP_NUM_THREADS-unset}/${MKL_NUM_THREADS-unset}" >> "$FAKE_LOG"
 out=
 prev=

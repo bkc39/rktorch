@@ -3,7 +3,8 @@
 (module+ test
   (require (for-syntax racket/base)
            (only-in racket/file file->lines make-temporary-directory)
-           (only-in racket/match match)
+           (only-in racket/list remove-duplicates second)
+           (only-in racket/match match match-lambda)
            (only-in racket/port port->string)
            (only-in racket/runtime-path #%datum define-runtime-path)
            (only-in racket/string string-contains? string-prefix?)
@@ -28,8 +29,8 @@
     (set-var! "BASELINE_DATE" "2026-01-02")
     (set-var! "BASELINE_SMOKE" (and smoke "1"))
     (set-var! "BASELINE_ROUNDS" rounds)
-    (set-var! "OMP_NUM_THREADS" threads)
-    (set-var! "MKL_NUM_THREADS" threads)
+    (for ([name (in-list '("OMP_NUM_THREADS" "MKL_NUM_THREADS"))])
+      (set-var! name threads))
     (define-values (sp out in err)
       (parameterize ([current-environment-variables env])
         (subprocess #f #f #f bash (path->string script) stage)))
@@ -48,6 +49,16 @@
     (for/list ([line (in-list (file->lines (build-path dir "calls.log")))]
                #:when (string-prefix? line "racket scripts/bench/run.rkt"))
       line))
+
+  (define call-thread-setting
+    (match-lambda
+      [(regexp #rx"--out [^ ]+ (--device [^ ]+ )?([^ ]+) .*threads=([^ ]*)$"
+               (list _ _ suite setting))
+       (list suite setting)]
+      [call (list call #f)]))
+
+  (define (thread-settings dir)
+    (map call-thread-setting (bench-calls dir)))
 
   (define (jsonl dir) (file->lines (build-path dir "l0.jsonl")))
 
@@ -71,14 +82,32 @@
              (check-equal? (length records) (length (bench-calls dir)))
              (check-true (> (length records) 1)))))
 
-        (test-case "the default-thread pass drops the caller's thread counts; the others set one"
+        (test-case "a call logged without its thread settings parses to none"
+          (check-equal? (call-thread-setting "racket scripts/bench/run.rkt --out l0.jsonl ops")
+                        '("racket scripts/bench/run.rkt --out l0.jsonl ops" #f)))
+
+        (test-case "the default passes drop the caller's thread counts"
+          (for ([stage (in-list '("cpu" "cuda"))])
+            (in-fresh-dir
+             (lambda (dir)
+               (check-equal? (run-baseline dir stage #:threads "8") 0)
+               (define settings (thread-settings dir))
+               (with-check-info (['stage stage] ['settings settings])
+                 (match stage
+                   ["cpu" (check-not-false (member '("ops" "unset/unset") settings))]
+                   ["cuda"
+                    (check-true (> (length settings) 1))
+                    (check-equal? (remove-duplicates (map second settings)) (list "unset/unset"))])
+                 (check-false (member "8/8" (map second settings))))))))
+
+        (test-case "the one-thread passes set one thread"
           (in-fresh-dir
            (lambda (dir)
              (check-equal? (run-baseline dir "cpu" #:threads "8") 0)
-             (check-equal? (for/list ([call (in-list (bench-calls dir))])
-                             (match call
-                               [(regexp #rx" threads=([^ ]*)$" (list _ setting)) setting]))
-                           '("unset/unset" "1/1" "1/1")))))
+             (define settings (thread-settings dir))
+             (with-check-info (['settings settings])
+               (check-not-false (member '("ops" "1/1") settings))
+               (check-not-false (member '("threads" "1/1") settings))))))
 
         (test-case "a single stage appends to the JSONL"
           (in-fresh-dir
