@@ -48,29 +48,29 @@ Death has two paths:
 | finalizer | loses the lifetime's claim | is the finalizer |
 | when | deterministic release | the default |
 
-The explicit path first takes the handle: one compare-and-swap moves the
-wrapper's `state` field from `'live` to `'freeing`, with breaks
-disabled. Only the thread whose swap succeeds goes on; any other free of
-that wrapper, concurrent or later, raises `exn:fail:contract`, as the
-contract on a freed tensor does. The swap needs no atomic section around
-it. The winner then claims the handle's *lifetime* (`torch/foreign/raw/memory.rkt`): a
-second CAS, `'live` -> `'freeing`, on the state box the finalizer claims
-too. It unaccounts the handle and releases it, and the native release, the
-`'Tensor-freed` cpointer tag and the lifetime's `'freed` share one
-uninterruptible region, so no kill leaves a released handle tagged live
-(#423). The tag flips even when the free raises, since an attempted free
-consumes the finalizer backstop and a live-looking tag would invite
-use-after-free. A kill between the claims and the release leaks that one
-handle.
+The explicit path first takes the handle: with breaks disabled, one
+compare-and-swap moves the wrapper's `state` from `'live` to `'freeing`.
+Only the thread whose swap succeeds goes on; every other free of that
+wrapper raises `exn:fail:contract`. The winner then claims the handle's
+*lifetime* (`torch/foreign/raw/memory.rkt`): a second CAS on the state box
+the finalizer claims too, from `'live` to the freeing thread. It unaccounts
+the handle and releases it, and the native release, the `'Tensor-freed`
+cpointer tag and the lifetime's `'freed` share one uninterruptible region,
+so no kill leaves a released handle tagged live (#423). The tag flips even
+when the free raises, since an attempted free consumes the finalizer
+backstop and a live-looking tag would invite use-after-free. A thread
+killed mid-free, before that region, leaves the wrapper `'freeing` and the
+handle to the finalizer, which may claim a lifetime its dead claimant
+holds.
 
 The finalizer does not read the wrapper's state, and cannot: it is
 registered on the handle inside the raw call's region, before any wrapper
 exists, and some handles never get one (the printer's slices). It closes
 over the handle's lifetime instead, `(struct lifetime (state charge))`, and
-makes the same claim. A handle an explicit free took is not its to release,
-and it neither releases it nor counts the run. The finalizer can run only
-once no thread can still call `tensor-free!` on a wrapper holding the
-handle, so the wrapper's claim and the lifetime's never disagree.
+makes the same claim. A handle a live explicit free took is not its to
+release, and it neither releases it nor counts the run. The finalizer can
+run only once no thread can still call `tensor-free!` on a wrapper holding
+the handle, so the wrapper's claim and the lifetime's never disagree.
 
 The finalizer path is wrapped in `swallow-and-count-failure`, whose
 catch is total: it runs each finalizer in an **uninterruptible region**

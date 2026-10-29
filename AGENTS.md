@@ -765,11 +765,12 @@ Runtime paths take `(only-in racket/runtime-path #%datum define-runtime-path)`.
   the rarely touched fields are written only under `call-with-ledger`,
   inside which nothing blocks, sleeps or posts.
   Explicit synchronous release first takes the handle with one CAS on the
-  wrapper's `state` (`'live` -> `'freeing`; a loser raises
-  `exn:fail:contract`, #266), then goes through the raising
-  `tr-tensor-free/checked`, which claims the handle's lifetime with the
-  same CAS the finalizer makes and releases, tags and marks it in one
-  region (#423); OOM reaches users as
+  wrapper's `state`, from `'live` to `'freeing`. A loser raises
+  `exn:fail:contract`. The winner goes through the raising
+  `tr-tensor-free/checked`, which claims the handle's lifetime for its
+  thread with the CAS the finalizer makes, and releases, tags and marks it
+  in one region (#423); a free killed before that region leaves the handle
+  to the finalizer. OOM reaches users as
   `exn:fail:rktorch:oom` (catch by type, not message). A handler broad
   enough to catch an `invalid memory reference` either lets it through to
   the caller, which latches nothing, or, where no caller is waiting (a

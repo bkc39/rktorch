@@ -1,6 +1,6 @@
 #lang racket/base
 
-(require (only-in ffi/unsafe cpointer-has-tag? prop:cpointer set-cpointer-tag!)
+(require (only-in ffi/unsafe cpointer-has-tag? prop:cpointer)
          (only-in ffi/vector
                   f32vector->list
                   f64vector->list
@@ -31,12 +31,13 @@
                   tr-tensor-print/raw
                   tr-tensor-shape/raw))
 
-(provide (struct-out tensor-impl)
+(provide (except-out (struct-out tensor-impl) set-tensor-impl-state!)
          tensor-handle
          tensor-impl-shape
          handle->string
          handle->repr
          wrap-tensor
+         tensor-state-index
          tensor-free!)
 
 (define (shape->string dims)
@@ -101,14 +102,17 @@
 (define summarize-threshold 1000)
 (define edgeitems 3)
 
-;; The tag flips even when the free raises — an attempted free consumes the
-;; finalizer backstop, so a live-looking tag would invite use-after-free.
-;; Breaks stay deferred: one landing mid-free strands the handle forever.
-(define (free-handle! h)
+;; The release flips the tag in its own region (#423). Breaks stay deferred
+;; from the take through the release: one landing mid-free strands the
+;; handle forever. Only the wind's exit delivers it.
+(define (free-handle! h #:take [take! void])
   (dynamic-wind
    void
-   (lambda () (parameterize-break #f (tr-tensor-free/checked h)))
-   (lambda () (set-cpointer-tag! h 'Tensor-freed))))
+   (lambda ()
+     (parameterize-break #f
+       (take!)
+       (tr-tensor-free/checked h)))
+   void))
 
 (define (call-with-slice h d start len proc)
   (define s (check-handle 'tensor->repr (tr-tensor-narrow/raw h d start len)))
@@ -177,10 +181,15 @@
      (tensor->pytorch-repr (handle->floats h dims) dims
                            #:suffix (dtype-suffix dtype))]))
 
+(define-values (prop:cas-field cas-field? cas-field-index) ;; noqa
+  (make-struct-type-property 'cas-field))
+
 (struct tensor-impl (handle shape [state #:auto #:mutable])
   #:auto-value 'live
+  #:authentic
   #:reflection-name 'tensor
-  #:property prop:cpointer 0
+  #:property prop:cpointer (struct-field-index handle)
+  #:property prop:cas-field (struct-field-index state)
   #:property prop:custom-write
   (lambda (t port _mode)
     (define h (tensor-impl-handle t))
@@ -219,26 +228,13 @@
 (define (wrap-tensor h)
   (tensor-impl h (handle-shape h)))
 
-;; The swap decides which free releases the handle, so no atomic section is
-;; needed around it. Index 2 is `state`; tensors are never impersonated,
-;; which the unsafe swap requires. Only the winner flips the tag: the release
-;; checks it. As in free-handle!, the dynamic-wind delivers a deferred break.
-(define (take-handle! t)
-  (unsafe-struct*-cas! t 2 'live 'freeing))
+(define tensor-state-index (cas-field-index struct:tensor-impl))
 
 (define (tensor-free! t)
   (define h (tensor-handle t))
-  (define taken? #f)
-  (dynamic-wind
-   void
-   (lambda ()
-     (parameterize-break #f
-       (set! taken? (take-handle! t))
-       (unless taken?
-         (raise-arguments-error 'tensor-free!
-                                "the tensor is freed, or another thread is freeing it"))
-       (race-point free-taken h)
-       (tr-tensor-free/checked h)))
-   (lambda ()
-     (when taken?
-       (set-cpointer-tag! h 'Tensor-freed)))))
+  (define (take!)
+    (unless (unsafe-struct*-cas! t tensor-state-index 'live 'freeing)
+      (raise-arguments-error 'tensor-free!
+                             "the tensor is being freed or was freed"))
+    (race-point free-taken h))
+  (free-handle! h #:take take!))

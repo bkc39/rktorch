@@ -72,7 +72,7 @@
   #:c-id tr_tensor_free)
 
 ;; A handle's lifetime: `state` decides which of an explicit free and the
-;; finalizer releases it ('live -> 'freeing by CAS, then 'freed), and
+;; finalizer releases it ('live -> the claimant by CAS, then 'freed), and
 ;; `charge` holds its ledger entry, which an unaccounting takes by CAS to #f
 ;; so that only one subtracts it. The finalizer closes over the lifetime, so
 ;; it never needs the weak table's entry.
@@ -88,13 +88,31 @@
 
 ;; One region holds the native release, the 'Tensor-freed tag and the
 ;; 'freed state, so a kill cannot leave a released handle tagged live (#423).
+;; The tag flips even when the release raises: an attempted free consumes
+;; the finalizer backstop, so a live-looking tag would invite use-after-free.
 (define (release! h lt)
   (call-as-uninterruptible
    (lambda ()
-     (tr-tensor-free/unwrapped h)
-     (race-point handle-released h)
-     (set-cpointer-tag! h 'Tensor-freed)
-     (when lt (set-box! (lifetime-state lt) 'freed)))))
+     (dynamic-wind
+      void
+      (lambda ()
+        (tr-tensor-free/unwrapped h)
+        (race-point handle-released h))
+      (lambda ()
+        (set-cpointer-tag! h 'Tensor-freed)
+        (when lt (set-box! (lifetime-state lt) 'freed)))))))
+
+;; A claim names its claimant. A free killed before its release region
+;; holds the claim with a dead thread, and the finalizer may take it over:
+;; the dead free will neither release the handle nor unaccount it.
+(define (claim-lifetime! lt by)
+  (define state (lifetime-state lt))
+  (let retry ()
+    (define held (unbox state))
+    (cond
+      [(not (or (eq? held 'live) (and (thread? held) (thread-dead? held)))) #f]
+      [(box-cas! state held by) #t]
+      [else (retry)])))
 
 ;; The explicit free: the claim decides it against the finalizer and any
 ;; other free of the handle, and the loser returns. A handle no allocator
@@ -102,7 +120,7 @@
 (define (tr-tensor-free/checked h)
   (parameterize-break #f
     (define lt (hash-ref lifetimes h #f))
-    (when (or (not lt) (cas-claim! (lifetime-state lt) 'live 'freeing))
+    (when (or (not lt) (claim-lifetime! lt (current-thread)))
       (when lt (unaccount-lifetime! h lt))
       (race-point free-unaccounted h)
       (release! h lt)
@@ -175,7 +193,7 @@
   (lambda (h)
     (call-as-uninterruptible
      (lambda ()
-       (when (cas-claim! (lifetime-state lt) 'live 'freeing)
+       (when (claim-lifetime! lt 'finalizing)
          (release-claimed h))))))
 
 (define (register-tensor! h)

@@ -573,8 +573,8 @@ shared tensor must synchronise its threads itself. Grad mode, autocast and
 the message of a failed call are kept per OS thread: a parallel thread has
 its own, while coroutine threads share the main thread's
 (@hyperlink["https://github.com/bkc39/rktorch/issues/194"]{#194}). Two threads may
-free one tensor explicitly: the native storage is released once, and the
-other free raises @racket[exn:fail:contract], as a second free does.
+free one tensor explicitly: the handle is released once, and the other
+free raises @racket[exn:fail:contract].
 
 A tensor must not be sent to another place. It is accepted as a place
 message but arrives as a bare pointer to the same native storage, with no
