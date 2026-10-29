@@ -6,7 +6,7 @@
            rackunit
            (only-in syntax/macro-testing convert-compile-time-error)
            (only-in "../data/loader.rkt" dataloader tensor-dataset)
-           (only-in "../main.rkt" mean ones shape sum tensor to)
+           (only-in "../main.rkt" mean ones shape sum tensor to zero!)
            (only-in "../nn.rkt" Linear mse-loss parameters sgd)
            (only-in "../train/private/hooks.rkt"
                     callback-hook? definable-hooks hook-log hook-name)
@@ -277,6 +277,34 @@
     (for ([dt (in-list '(float16 bfloat16))])
       (define r (fit (HalfLogged dt) (label-loader) #:max-epochs 1 #:logger #f))
       (check-equal? (run-metric r 'big) 1000.0 (format "~a" dt))))
+
+  (define-trainer Reusing (net buffer)
+    (define-init () (set! net (Linear 1 1)) (set! buffer (tensor 5.0)))
+    (define-optimizers (sgd (parameters net) #:lr 0.01))
+    (define-training-step (x y)
+      (log! 'reused buffer #:on-step? #t #:on-epoch? #f)
+      (zero! buffer)
+      (mse-loss (net x) y)))
+
+  (test-case "a step value is recorded as it was at log!, not after a later in-place write"
+    (define l (collecting-logger))
+    (fit (Reusing) (label-loader #:batch-size 5) #:max-epochs 1 #:log-every-n-steps 1 #:logger l)
+    (check-equal? (collecting-metrics l) (list (hasheq 'reused 5.0 'epoch 0))))
+
+  (define-trainer Unbounded (net)
+    (define-init () (set! net (Linear 1 1)))
+    (define-optimizers (sgd (parameters net) #:lr 0.01))
+    (define-training-step (x y)
+      (log! 'peak (tensor +inf.0) #:on-epoch? #t #:reduce 'max)
+      (log! 'peak 1.0 #:on-epoch? #t #:reduce 'max)
+      (log! 'trough -1.0 #:on-epoch? #t #:reduce 'min)
+      (log! 'trough (tensor -inf.0) #:on-epoch? #t #:reduce 'min)
+      (mse-loss (net x) y)))
+
+  (test-case "an infinite tensor and a real reduce by max and min to the infinity"
+    (define r (fit (Unbounded) (label-loader) #:max-epochs 1 #:logger #f))
+    (check-equal? (run-metric r 'peak) +inf.0)
+    (check-equal? (run-metric r 'trough) -inf.0))
 
   (define-trainer EpochTagged (net)
     (define-init () (set! net (Linear 1 1)))
