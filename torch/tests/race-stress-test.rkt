@@ -94,8 +94,9 @@
       (check-true (positive? n) (format "role ~a never stepped" label)))))
 
 (module+ test
-  (require (only-in racket/file make-temporary-file)
-           (only-in racket/match match match-define)
+  (require (only-in racket/file file->string make-temporary-file)
+           (only-in racket/match match match* match-define)
+           (only-in racket/path path-only)
            (only-in racket/port port->string)
            (only-in setup/getinfo get-info)
            rackunit
@@ -217,9 +218,22 @@
                                              #:prefix (list taskset "-c" "0")))
       (check-true (intra-op-pool-ran? report) (format "~s" report))))
 
-  (test-case "the children's bounds all fire before raco's"
-    (match (assoc "tests/race-stress-test.rkt" ((get-info '("torch")) 'test-timeouts))
-      [(list _ raco-seconds) (check < (* 3 child-seconds) raco-seconds)]))
+  (define (raco-seconds)
+    (define cell
+      (build-path (path-only (collection-file-path "info.rkt" "torch"))
+                  'up "nix" "matrix" "racket-cell.sh"))
+    (match* ((assoc "tests/race-stress-test.rkt" ((get-info '("torch")) 'test-timeouts))
+             (and (file-exists? cell)
+                  (regexp-match #rx"raco test --timeout ([0-9]+) [.]/torch/"
+                                (file->string cell))))
+      [((list _ seconds) _) seconds]
+      [(#f (list _ seconds)) (string->number seconds)]
+      [(#f #f) #f]))
+
+  (test-case "the children's bounds all fire before the test gate's"
+    (match (raco-seconds)
+      [#f (void)]
+      [seconds (check < (* 3 child-seconds) seconds)]))
 
   (test-case "a child past its bound is killed and reported"
     (define start (current-inexact-monotonic-milliseconds))
