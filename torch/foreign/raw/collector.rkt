@@ -3,7 +3,7 @@
 (require (only-in ffi/unsafe register-finalizer)
          (only-in ffi/unsafe/atomic in-atomic-mode?)
          (only-in ffi/unsafe/vm vm-eval)
-         (only-in "cas.rkt" cas! cas-add!)
+         (only-in "cas.rkt" cas-add! cas-claim-when!)
          (only-in "race-points.rkt" race-point))
 
 (provide call-as-the-collector
@@ -24,11 +24,12 @@
 (define (finalizer-runs)
   (unbox runs))
 
-;; Racket CS numbers main's OS thread 0, and coroutine threads share it.
+;; a place instantiates this module on its own main OS thread
 (define os-thread-id (vm-eval 'get-thread-id))
+(define main-os-thread (os-thread-id))
 
 (define (on-main-os-thread?)
-  (zero? (os-thread-id)))
+  (eqv? (os-thread-id) main-os-thread))
 
 ;; --- one collection at a time ---
 
@@ -38,15 +39,13 @@
 ;; holds nothing.
 (define holder (box #f))
 
-(define (claim-collector!)
-  (define held (unbox holder))
+(define (unclaimed? held)
   (define free? (or (not held) (thread-dead? held)))
   (race-point collector-claiming free?)
-  (cond
-    [(not free?) #f]
-    [(cas! 'collector holder held (current-thread)) #t]
-    [(eq? (unbox holder) held) (claim-collector!)]
-    [else #f]))
+  free?)
+
+(define (claim-collector!)
+  (cas-claim-when! holder unclaimed? (current-thread) #:site 'collector))
 
 (define (call-as-the-collector thunk)
   (when (claim-collector!)
@@ -64,15 +63,11 @@
 
 (start-finalizer-thread!)
 
-;; A thread's latch dies in the first collection after it last yielded. Off
-;; main's OS thread a `(sleep 0)` hops to main and gives the finalizer
-;; thread nothing it would not get anyway.
 (define collection-latch (make-thread-cell (make-weak-box (box 0))))
 
 (define (yield-to-finalizers!)
   (cond
     [(weak-box-value (thread-cell-ref collection-latch)) (void)]
-    ;; sleeping inside an atomic section is an error
     [(in-atomic-mode?) (void)]
     [(not (on-main-os-thread?)) (void)]
     [else

@@ -7,7 +7,7 @@
          (only-in "device-type.rkt" cpu-device cuda-device device? mps-device)
          (only-in "error.rkt" exn:fail:rktorch:oom?)
          (only-in "ops.rkt" cuda-available? mps-available? to-device)
-         (only-in "raw/cas.rkt" cas!)
+         (only-in "raw/cas.rkt" cas-claim-when!)
          (only-in "raw/fault.rkt" native-fault?)
          (only-in "raw/race-points.rkt" race-point))
 
@@ -37,19 +37,18 @@
     (run)
     #t))
 
-;; A CAS, not an atomic section, so a parallel thread decides it on its own
-;; OS thread; losing it means another thread changed the state, so read again.
+(define (unclaimed? seen)
+  (match seen
+    ['unprobed #t]
+    [(claim holder _) (thread-dead? holder)]
+    [_ #f]))
+
 (define (claim-or-read probe)
   (define state (mps-probe-state probe))
-  (define seen (unbox state))
-  (match seen
-    [(claim holder _) #:when (not (thread-dead? holder)) seen]
-    [(? boolean? answer) answer]
-    [(? faulted? fault) fault]
-    [_ (define mine (claim (current-thread) (make-semaphore 0)))
-       (if (cas! 'probe state seen mine)
-           mine
-           (claim-or-read probe))]))
+  (define mine (claim (current-thread) (make-semaphore 0)))
+  (if (cas-claim-when! state unclaimed? mine #:site 'probe)
+      mine
+      (unbox state)))
 
 (define (settle! probe done)
   (race-point mps-probe-claimed probe)

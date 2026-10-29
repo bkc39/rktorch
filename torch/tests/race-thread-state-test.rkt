@@ -11,7 +11,7 @@
                     with-no-grad zeros)
            (only-in "../foreign/error.rkt" check-handle)
            (only-in "../foreign/raw/linalg.rkt" tr-mm/raw)
-           (only-in "../foreign/raw/memory.rkt" oom-retry)
+           (only-in "../foreign/raw/memory.rkt" oom-retry registering)
            (only-in "../foreign/raw/syntax.rkt" _Tensor _Tensor/null define-torch)
            (only-in "private/race-harness.rkt"
                     check-known-failure join labelled make-gate release-gate!
@@ -72,8 +72,6 @@
           (check-true holds? description)
           (check-known-failure "#194" description holds?))))
 
-  ;; Bare bindings: the library's own wraps would retry inside, at the same
-  ;; race point. The kind is the shim's, which it keeps per OS thread.
   (define-torch zeros/bare
     (_fun (dims : (_s64vector i)) (ndim : _int64) -> _Tensor/null)
     #:c-id tr_zeros)
@@ -83,7 +81,9 @@
     #:c-id tr_mm)
 
   (define (out-of-memory)
-    (zeros/bare (s64vector (expt 2 22) (expt 2 22)) 2))
+    (zeros/bare (s64vector (expt 2 24) (expt 2 24)) 2))
+
+  (define out-of-memory/registered (registering out-of-memory))
 
   (define ((mismatched-mm a b))
     (mm/bare a b))
@@ -103,13 +103,14 @@
     (define a-right (zeros 5 2))
     (define (retrying fail)
       ((oom-retry #:collect! (lambda () (set-box! retried? #t))) fail))
-    (define oom-call (retrying out-of-memory))
+    (define oom-call (retrying out-of-memory/registered))
     (define g
       (make-gate 'oom-kind-reading
-                 #:when (lambda (subject) (eq? subject out-of-memory))))
+                 #:when (lambda (subject) (eq? subject out-of-memory/registered))))
     (with-parked [a (spawn oom-call #:pool pool #:label 'a) #:at g]
       (wait-for-arrival g)
-      (join (spawn (retrying (mismatched-mm a-left a-right)) #:pool pool #:label 'b))
+      (join (spawn (retrying (registering (mismatched-mm a-left a-right)))
+                   #:pool pool #:label 'b))
       (release-gate! g)
       (join a)
       (unbox retried?)))
@@ -184,4 +185,13 @@
         [known-failure? (check-known-failure "#194" description holds?)]
         [else (check-true holds? description)]))
     (check-true (grad-tracked?) "a case left grad mode off")
-    (check-eq? (matmul-dtype) 'float32 "a case left autocast on")))
+    (check-eq? (matmul-dtype) 'float32 "a case left autocast on"))
+
+  (test-case "threads of a one-thread parallel pool share its grad mode"
+    (define pool (make-parallel-thread-pool 1))
+    (define (other-sees)
+      (join (spawn grad-tracked? #:pool pool) #:seconds 30))
+    (define seen (while-inside no-grad (lambda (_w) (other-sees)) #:pool pool))
+    (parallel-thread-pool-close pool)
+    (check-false seen "a pool thread's no-grad stayed with the Racket thread that set it")
+    (check-true (grad-tracked?))))

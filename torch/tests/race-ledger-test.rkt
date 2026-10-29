@@ -1,17 +1,16 @@
 #lang racket/base
 
 (module+ test
-  (require (only-in ffi/unsafe _fun cpointer-has-tag?)
+  (require (only-in ffi/unsafe _fun _intptr _pointer cast cpointer-has-tag?)
            (only-in ffi/unsafe/atomic in-atomic-mode?)
            (only-in racket/dict dict-ref)
-           (only-in racket/unsafe/ops unsafe-struct*-cas!)
            rackunit
            (only-in "../foreign.rkt"
                     backward! grad native-memory-limit native-memory-use sum tensor?
                     zeros)
            (only-in (submod "../foreign.rkt" unsafe) tensor-free! to!)
            (only-in "../foreign/device-type.rkt" device)
-           (only-in "../foreign/raw/cas.rkt" cas-add!)
+           (only-in "../foreign/raw/cas.rkt" cas-add! cas-update!)
            (only-in "../foreign/raw/collector.rkt" call-as-the-collector)
            (only-in "../foreign/raw/device-queries.rkt" allocator-reading)
            (only-in "../foreign/raw/memory.rkt"
@@ -21,7 +20,6 @@
                     since-check-of)
            (only-in "../foreign/raw/syntax.rkt" _Tensor _Tensor/null define-torch)
            (only-in "../foreign/structs.rkt" tensor-handle)
-           (only-in (submod "../foreign/structs.rkt" private) state-cas)
            (only-in "private/race-harness.rkt"
                     check-ledger hooks join join-all labelled
                     ledger-snapshot ledger-violations make-gate make-watch
@@ -29,6 +27,7 @@
                     watch-finalized watch-freed-count watch-hook
                     watch-max-holders watch-registered watch-release-count watch-released
                     while-inside with-parked with-race-hook worker-thread)
+           (only-in "private/spurious-cas.rkt" call-with-spurious-cas-failures)
            (only-in "private/wedge.rkt" call-with-process-deadline))
 
   (define mib (* 1024 1024))
@@ -69,24 +68,17 @@
       (tensor-free! t))
     (check-ledger base w))
 
-  (define ((spurious-once calls) t i old new)
-    (set-box! calls (add1 (unbox calls)))
-    (and (> (unbox calls) 1) (unsafe-struct*-cas! t i old new)))
-
   (test-case "a spurious CAS failure retries the take, and the free releases once"
     (settle!)
     (define base (ledger-snapshot))
     (define w (make-watch))
-    (define calls (box 0))
-    (define saved (unbox state-cas))
     (with-race-hook (watch-hook w)
       (define t (zeros 256 256))
       (define h (tensor-handle t))
-      (dynamic-wind
-       (lambda () (set-box! state-cas (spurious-once calls)))
-       (lambda () (check-not-exn (lambda () (tensor-free! t))))
-       (lambda () (set-box! state-cas saved)))
-      (check-equal? (unbox calls) 2 "the take did not retry the failed swap")
+      (check-not-exn
+       (lambda ()
+         (call-with-spurious-cas-failures '(tensor-state) (lambda () (tensor-free! t))))
+       "the take read a spurious failure as a loss")
       (check-equal? (watch-release-count w h) 1)
       (check-true (cpointer-has-tag? h 'Tensor-freed))
       (settle!))
@@ -361,10 +353,6 @@
         [(> (current-inexact-milliseconds) deadline) #f]
         [else (sleep 0.001) (poll)])))
 
-  ;; The count is bumped inside the raw call, so the registration region
-  ;; covers it: a handle the native call made but no finalizer guards shows
-  ;; as a count above the registrations. The spin widens the window a kill
-  ;; must miss.
   (define-torch neg/bare (_fun _Tensor -> _Tensor/null) #:c-id tr_neg)
 
   (define trials 200)
@@ -424,43 +412,68 @@
     (check-equal? (dict-ref (native-memory-use/fold) dev 0) 0)
     (check-ledger #f #f))
 
-  ;; The finalizer takes the ledger only to give an adoption back, so the
-  ;; dropped gradient must hold one: the shadow charges the gradient first.
-  (define (adopted-gradient-dropped!)
-    (define p (zeros 256 256 #:requires-grad? #t))
-    (backward! (sum p))
-    (refresh-shadows!)
-    (void (grad p))
-    p)
+  (define (address h) (cast h _pointer _intptr))
+
+  (define (spin-until b ms)
+    (define until (+ (current-inexact-milliseconds) ms))
+    (let spin ()
+      (unless (or (unbox b) (> (current-inexact-milliseconds) until))
+        (spin))))
 
   (define (finalizer-against-lock-holder)
     (settle!)
-    (define w (make-watch))
+    (define gradient (box #f))
+    (define finalizing (box #f))
     (define held (box #f))
+    (define events (box '()))
+    (define (note! event) (cas-update! events (lambda (seen) (cons event seen))))
+    (define (ours? h) (eqv? (address h) (unbox gradient)))
+    (define (stage name subject)
+      (case name
+        [(gradient-adopting)
+         (cond
+           [((labelled 'holder) #f)
+            (set-box! held #t)
+            (spin-for 50)
+            (note! 'holder-leaving)]
+           [else (set-box! gradient (address subject))])]
+        [(finalizer-releasing)
+         (when (ours? subject)
+           (set-box! finalizing #t)
+           (spin-until held 10000))]
+        [(adoption-returning)
+         (when (ours? subject) (note! 'adoption-returning))]
+        [else (void)]))
     (define y (zeros 4 4 #:requires-grad? #t))
     (backward! (sum y))
-    (define (hold-the-ledger name _subject)
-      (when (and (eq? name 'gradient-adopting) ((labelled 'holder) #f))
-        (set-box! held #t)
-        (spin-for 50)))
     (parameterize ([allocator-reading (lambda (_dev) (* 64 mib))]
                    [native-collect-margin (* 1024 1024 mib)])
-      (define p (adopted-gradient-dropped!))
-      (with-race-hook (hooks (watch-hook w) hold-the-ledger)
-        (define holder (spawn (lambda () (void (grad y))) #:pool 'own #:label 'holder))
-        (check-true (await-box held) "the holder never reached the ledger")
-        (collect-garbage)
-        (sleep 0)
+      (define p (zeros 256 256 #:requires-grad? #t))
+      (backward! (sum p))
+      (refresh-shadows!)
+      (with-race-hook stage
+        (void (grad p))
+        (define holder
+          (spawn (lambda ()
+                   (check-true (await-box finalizing) "the gradient's finalizer never ran")
+                   (void (grad y)))
+                 #:pool 'own #:label 'holder))
+        (let collect ([n 0])
+          (unless (or (unbox finalizing) (> n 100))
+            (collect-garbage)
+            (sleep 0.01)
+            (collect (add1 n))))
         (join holder)
         (settle!))
-      (check-true (positive? (watch-finalized w)) "no finalizer ran against the holder")
-      (check-ledger #f w)
+      (check-not-false (unbox gradient) "the parameter's gradient was never taken")
+      (check-equal? (reverse (unbox events)) '(holder-leaving adoption-returning)
+                    "the finalizer gave the adoption back while another thread held the ledger")
+      (check-ledger #f #f)
       p))
 
   (test-case "a finalizer waits out a parallel thread holding the ledger"
     (void (call-with-process-deadline 30 finalizer-against-lock-holder)))
 
-  ;; #423: no kill separates the native release from the tag flip.
   (define (killed-mid-release pool)
     (settle!)
     (define base (ledger-snapshot))

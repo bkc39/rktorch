@@ -1,9 +1,9 @@
 #lang racket/base
 
-(require (only-in ffi/unsafe/atomic call-as-uninterruptible)
-         (only-in racket/contract/base -> any/c contract-out)
+(require (only-in racket/contract/base -> any/c contract-out)
          (only-in "raw/global.rkt" tr-last-error-kind/raw tr-last-error/raw)
-         (only-in "raw/race-points.rkt" race-point))
+         (only-in "raw/race-points.rkt" race-point)
+         (only-in "raw/regions.rkt" with-uninterruptible))
 
 (provide check-ok
          check-handle
@@ -15,11 +15,9 @@
 (module+ checked
   (provide (contract-out [exn:fail:rktorch:oom? (-> any/c boolean?)])))
 
-;; Uninterruptible so the (message, kind) pair comes from ONE failure, read
-;; on the calling thread's own OS thread, where the shim keeps it.
 (define (last-failure)
-  (call-as-uninterruptible
-   (lambda () (values (tr-last-error/raw) (tr-last-error-kind/raw)))))
+  (with-uninterruptible
+    (values (tr-last-error/raw) (tr-last-error-kind/raw))))
 
 (define (raise-torch-failure who describe)
   (race-point failure-reading who)

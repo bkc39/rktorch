@@ -1,37 +1,96 @@
 #lang racket/base
 
-(provide cas!
-         cas-add!
+(require (for-syntax racket/base syntax/parse)
+         (only-in racket/unsafe/ops unsafe-struct*-cas! unsafe-struct*-ref)
+         (only-in syntax/parse/define define-syntax-parse-rule))
+
+(provide cas-add!
          cas-claim!
+         cas-claim-when!
+         cas-field-claim!
+         cas-sites
+         cas-take!
          cas-update!)
 
-;; The test seam, as structs.rkt's `state-cas`: the primitive every site
-;; calls, which a test swaps for one that fails as a spurious `box-cas!`
-;; may, with the box unchanged.
 (module+ private
   (provide site-cas))
 
-(define site-cas (box (lambda (_site b old new) (box-cas! b old new))))
+(begin-for-syntax
+  (define known-sites
+    '(update claim collector lifetime probe gate lock tensor-state))
 
-(define (cas! site b old new)
-  ((unbox site-cas) site b old new))
+  (define-syntax-class site
+    #:description "a CAS site named in raw/cas.rkt"
+    (pattern ((~literal quote) name:id)
+             #:fail-unless (memq (syntax-e #'name) known-sites)
+             (format "not one of ~s" known-sites))))
 
-;; A failed CAS may be spurious, so each loop retries until the update lands
-;; or, for a claim, until the box no longer holds `from`.
-(define (cas-update! b f)
+(define-syntax (site-list _stx)
+  #`'#,known-sites)
+
+(define cas-sites (site-list))
+
+(struct slot (owner index))
+
+(define (primitive-cas _site target old new)
+  (if (box? target)
+      (box-cas! target old new)
+      (unsafe-struct*-cas! (slot-owner target) (slot-index target) old new)))
+
+(define site-cas (box primitive-cas))
+
+(define (cas! site target old new)
+  ((unbox site-cas) site target old new))
+
+(define (update-loop site b f)
   (let retry ()
     (define old (unbox b))
     (define new (f old))
-    (if (cas! 'update b old new)
+    (if (cas! site b old new)
         new
         (retry))))
 
-(define (cas-add! b n)
-  (cas-update! b (lambda (old) (+ old n))))
-
-(define (cas-claim! b from to)
+(define (take-loop site b)
   (let retry ()
+    (define old (unbox b))
+    (if (cas! site b old 0)
+        old
+        (retry))))
+
+(define (claim-loop site target read claimable? to)
+  (let retry ()
+    (define held (read target))
     (cond
-      [(cas! 'claim b from to) #t]
-      [(eq? (unbox b) from) (retry)]
-      [else #f])))
+      [(not (claimable? held)) #f]
+      [(cas! site target held to) #t]
+      [else (retry)])))
+
+(define (slot-ref s)
+  (unsafe-struct*-ref (slot-owner s) (slot-index s)))
+
+(define ((holding from) v)
+  (eq? v from))
+
+(define-syntax-parse-rule (cas-update! b:expr f:expr
+                                       (~optional (~seq #:site s:site)
+                                                  #:defaults ([s #''update])))
+  (update-loop s b f))
+
+(define-syntax-parse-rule (cas-add! b:expr n:expr)
+  (let ([by n])
+    (update-loop 'update b (lambda (old) (+ old by)))))
+
+(define-syntax-parse-rule (cas-take! b:expr)
+  (take-loop 'update b))
+
+(define-syntax-parse-rule (cas-claim! b:expr from:expr to:expr
+                                      (~optional (~seq #:site s:site)
+                                                 #:defaults ([s #''claim])))
+  (claim-loop s b unbox (holding from) to))
+
+(define-syntax-parse-rule (cas-claim-when! b:expr claimable?:expr to:expr #:site s:site)
+  (claim-loop s b unbox claimable? to))
+
+(define-syntax-parse-rule (cas-field-claim! owner:expr index:expr from:expr to:expr
+                                            #:site s:site)
+  (claim-loop s (slot owner index) slot-ref (holding from) to))

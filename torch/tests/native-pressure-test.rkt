@@ -53,9 +53,7 @@
   (define (step! k)
     (length (for/list ([_ (in-range k)]) (zeros 1024 1024))))
 
-  ;; the same, but the batch outlives a minor collection first, so only a
-  ;; major one reclaims it, as a step's graph does (#296: a minor collection
-  ;; reclaims a younger batch before the trigger has anything to do)
+  ;; a batch that outlives a minor collection, so only a major one reclaims it
   (define (aged-step! k)
     (define batch (for/list ([_ (in-range k)]) (zeros 1024 1024)))
     (collect-garbage 'minor)
@@ -78,19 +76,27 @@
       (step! 8))
     (check-equal? (collections) before))
 
-  (test-case "under a limit the ledger stays bounded and the trigger counts"
-    (settle!)
+  (define (high-water-under-limit step!)
     (define base (cpu-bytes))
-    (define before (collections))
     (parameterize ([native-memory-limit (* 64 mib)])
-      (define high-water
-        (for/fold ([hw 0]) ([_ (in-range 20)])
-          (aged-step! 8)
-          (max hw (- (cpu-bytes) base))))
-      (check-true (> (collections) before) "the trigger never fired")
-      (check-true (< high-water (* 128 mib))
-                  (format "ledger reached ~a MiB under a 64 MiB limit"
-                          (quotient high-water mib)))))
+      (for/fold ([hw 0]) ([_ (in-range 20)])
+        (step! 8)
+        (max hw (- (cpu-bytes) base)))))
+
+  (define (check-bounded high-water)
+    (check-true (< high-water (* 128 mib))
+                (format "ledger reached ~a MiB under a 64 MiB limit"
+                        (quotient high-water mib))))
+
+  (test-case "under a limit the ledger stays bounded"
+    (settle!)
+    (check-bounded (high-water-under-limit step!)))
+
+  (test-case "under a limit the trigger reclaims batches only a major collection reaches"
+    (settle!)
+    (define before (collections))
+    (check-bounded (high-water-under-limit aged-step!))
+    (check-true (> (collections) before) "the trigger never fired"))
 
   (test-case "a working set above the mark backs off instead of thrashing"
     (settle!)

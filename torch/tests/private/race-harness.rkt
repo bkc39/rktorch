@@ -15,12 +15,13 @@
                   + @ finalizer-failures native-memory-use
                   reclaim-native-memory! sum zeros)
          (only-in (submod "../../foreign.rkt" unsafe) tensor-free!)
-         (only-in "../../foreign/raw/cas.rkt" cas!)
+         (only-in "../../foreign/raw/cas.rkt" cas-claim! cas-update!)
          (only-in "../../foreign/raw/fault.rkt" native-faulted)
          (only-in "../../foreign/raw/memory.rkt" native-memory-use/fold)
          (only-in "../../foreign/raw/pressure.rkt"
                   live-bytes-by-device reset-pressure-state!)
-         (only-in "../../foreign/raw/race-points.rkt" race-hook))
+         (only-in "../../foreign/raw/race-points.rkt" race-hook)
+         (only-in "../../foreign/raw/regions.rkt" with-cleanup))
 
 (provide with-race-hook
          with-parked
@@ -82,20 +83,13 @@
 (define ((labelled label) _subject)
   (eq? (current-label) label))
 
-;; Hooks run inside uninterruptible regions on parallel threads, where a
-;; thread may neither enter atomic mode nor post a semaphore another thread
-;; waits on, so the state is a box and an arrival is polled.
 (struct gate (point admits? resume state))
 
 (define (make-gate point #:when [admits? (lambda (_subject) #t)])
   (gate point admits? (make-semaphore 0) (box 'waiting)))
 
 (define (take-gate! g)
-  (let retry ()
-    (cond
-      [(cas! 'gate (gate-state g) 'waiting 'taken) #t]
-      [(~> g gate-state unbox (eq? 'waiting)) (retry)]
-      [else #f])))
+  (cas-claim! (gate-state g) 'waiting 'taken #:site 'gate))
 
 (define ((gate-hook g) name subject)
   (define taken?
@@ -246,9 +240,7 @@
   (roster (box '()) (box #f)))
 
 (define (note-started! started label)
-  (define seen (unbox started))
-  (unless (box-cas! started seen (cons label seen))
-    (note-started! started label)))
+  (cas-update! started (lambda (seen) (cons label seen))))
 
 (define ((until-stopped r label step!))
   (step!)
@@ -286,9 +278,7 @@
   (let ([the-gate g])
     (with-race-hook (parking-hook the-gate w)
       (let ([worker spawned])
-        (dynamic-wind void
-                      (lambda () body ...)
-                      (lambda () (stop! worker)))))))
+        (with-cleanup body ... #:finally (stop! worker))))))
 
 (define (while-inside enter observe #:pool [pool #f])
   (define inside (make-semaphore 0))
@@ -303,13 +293,12 @@
     (cond
       [(sync/timeout 30 inside) (observe w)]
       [else (error 'while-inside "the worker never got inside")]))
-  (dynamic-wind void
-                (lambda ()
-                  (define seen (observed))
-                  (cond
-                    [(thread-dead? (worker-thread w)) seen]
-                    [else (semaphore-post leave) (join w) seen]))
-                (lambda () (stop! w))))
+  (with-cleanup
+    (define seen (observed))
+    (cond
+      [(thread-dead? (worker-thread w)) seen]
+      [else (semaphore-post leave) (join w) seen])
+    #:finally (stop! w)))
 
 (define (churn-once! rng)
   (define a (zeros 64 64))

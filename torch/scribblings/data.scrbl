@@ -234,10 +234,9 @@ inside the pairs, vectors, boxes, hash tables, and transparent or prefab
 structures a collate returns. @racket[#:prefetch]
 needs @racket[workers] above 0. A dataset's @racket[#:ref] and
 @racket[#:batch], and @racket[collate], run in several threads at once, so
-any state they share must be synchronized. Each worker is a parallel thread,
-and its torch calls run on that thread's own OS thread, beside the main
-thread's (@hyperlink["https://github.com/bkc39/rktorch/issues/296"]{#296}):
-a native error from one is that call's own, and the consumer's
+any state they share must be synchronized. Each worker is a thread made
+with @racket[#:pool 'own]: a native error from one is that call's own, and
+the consumer's
 @racket[with-autocast] and @racket[with-no-grad] do not reach the batches
 workers build. The default device is one for the whole process, so until
 @hyperlink["https://github.com/bkc39/rktorch/issues/194"]{#194} is fixed

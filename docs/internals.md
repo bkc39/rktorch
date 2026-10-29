@@ -36,7 +36,7 @@ charges the pressure ledger below. The region stays on the caller's OS
 thread, and a break or a `kill-thread` waits for it, so no handle escapes
 without its finalizer. Nothing in `torch/foreign` uses `ffi/unsafe/alloc`
 or enters atomic mode: a parallel thread's atomic section runs on the main
-OS thread and waits for it (#296). A bare `register-finalizer` on a tensor
+OS thread and waits for it. A bare `register-finalizer` on a tensor
 is never written — it would skip the ledger.
 
 Death has two paths:
@@ -57,7 +57,7 @@ failure and loses only when the state is no longer `'live`. The winner then clai
 the finalizer claims too, from `'live` to the freeing thread. It unaccounts
 the handle and releases it, and the native release, the `'Tensor-freed`
 cpointer tag and the lifetime's `'freed` share one uninterruptible region,
-so no kill leaves a released handle tagged live (#423). The tag flips even
+so no kill leaves a released handle tagged live. The tag flips even
 when the free raises, since an attempted free consumes the finalizer
 backstop and a live-looking tag would invite use-after-free. A thread
 killed mid-free, before that region, leaves the wrapper `'freeing` and the
@@ -174,8 +174,9 @@ majors per hundred calls, about 1 ms a call on any device (#377). So the
 backstop, `collect-under-pressure!`, ends with `yield-to-finalizers!`
 (`torch/foreign/raw/collector.rkt`): a thread's first accounting after a collection
 sleeps once. The latch is per thread, a weak box in a thread cell that
-the collection clears. Off the main OS thread (`on-main-os-thread?`, Racket
-CS's thread id 0) it skips: a parallel thread's sleep would migrate to the
+the collection clears. Off the place's main OS thread (`on-main-os-thread?`,
+the OS thread that instantiated `torch/foreign/raw/collector.rkt`) it skips: a parallel
+thread's sleep would migrate to the
 main pool and wait there for the main thread to switch out, which gives the
 finalizer thread nothing it would not get anyway. Inside an atomic section
 or an uninterruptible region, where sleeping is an error, it skips too.
@@ -259,7 +260,7 @@ the last defence when a trough collection is not yet due:
   down from `torch/foreign/raw/device.rkt` (capacity, allocated, release) a `queries`
   record in `torch/foreign/raw/device-queries.rkt`. The three byte counts are
   boxes updated by CAS; every other field is written inside
-  `call-with-ledger`.
+  `with-ledger`.
 - `accounted`, which runs outside the registration region, checks
   after each accounting: accounted-since past the current interval and
   live bytes above the device's high-water mark means
@@ -473,31 +474,35 @@ than a second wrapper over the same storage.
 - The native side is safe by construction: `at::Tensor` refcounts are
   atomic, each handle owns an independent reference, and handles
   sharing storage may be freed in either order from any thread.
-- Every per-op ledger update is a `box-cas!` (`torch/foreign/raw/cas.rkt`):
-  the lifetime's state and charge, the device's three byte counts, the
-  accounts table (a box holding an immutable hash), the collector's claim
-  and the finalizer counts. A reset subtracts the bytes its collection
-  saw, so bytes accounted during the collection survive it. The
-  entry-by-entry fold survives as `native-memory-use/fold`, the
-  cross-check the tests run.
-- A `box-cas!` may fail spuriously, leaving the box unchanged (seen on
-  arm64 macOS), so no site reads one failure as a loss: each re-reads and
-  retries while the value it expects is still there. Every site goes
-  through `cas!`, which calls the primitive in `site-cas`, a test seam in
-  `torch/foreign/raw/cas.rkt`'s `private` submodule as `state-cas` is in `torch/foreign/structs.rkt`'s;
-  `torch/tests/cas-retry-test.rkt` swaps in one that fails the first
-  attempt at named sites.
+- Every per-op ledger update is a CAS through `torch/foreign/raw/cas.rkt`'s
+  retry loops: the wrapper's state, the lifetime's state and charge, the
+  device's three byte counts, the ledger's entry count, the accounts table
+  (a box holding an immutable hash), the collector's claim and the
+  finalizer counts. A reset subtracts the bytes its collection saw, so
+  bytes accounted during the collection survive it; a sample takes its
+  bytes before it reads the allocator, so two samples at once never take
+  the same bytes. The entry-by-entry fold survives as
+  `native-memory-use/fold`, the cross-check the tests run.
+- A CAS may fail spuriously, leaving its target unchanged (seen on arm64
+  macOS), so no loop reads one failure as a loss: each re-reads and
+  retries while the value it expects is still there. Every loop calls the
+  primitive in `site-cas`, the test seam in `torch/foreign/raw/cas.rkt`'s
+  `private` submodule, with a site from an enumeration the loops' `#:site`
+  is checked against at expansion; `call-with-spurious-cas-failures`
+  (`torch/tests/private/spurious-cas.rkt`) fails the first attempt at
+  named sites.
 - The rarely touched fields (sample, interval, capacity, floor, the
   shadow, release-after, trial, stats, schedule, generation, adoptions)
-  are written under `call-with-ledger`, a re-entrant uninterruptible lock
+  are written under `with-ledger`, a re-entrant uninterruptible lock
   (`make-uninterruptible-lock`), not a semaphore: finalizers take it in
   an uninterruptible region, where blocking is an internal error, and only to give an
   adoption back. Nothing inside it blocks, sleeps or posts; the one
   foreign call inside is `tr_tensors_reset_grad`.
 - Finalizers run on the main OS thread, each in one uninterruptible
-  region, so no green thread runs inside one and a drain never counts a
-  run that has not released; the finalizer path uses only CAS, `eq?`
-  tables and the ledger lock.
+  region, so no green thread runs inside one. A run is counted after its
+  release, so a drain polling from any thread never counts a run that has
+  not released; the finalizer path uses only CAS, `eq?` tables and the
+  ledger lock.
 - A finalizer closes over its handle's lifetime, and the fold reads the
   same lifetimes through `lifetimes`, an ordinary weak table: Chez keeps a
   weak key whose object still has a pending finalizer, so the fold and the
@@ -529,6 +534,7 @@ gets the point's name and a subject (a handle, a device, a thread).
 | `handle-released` | inside the release region, between the native release and the tag flip | handle |
 | `free-released` | an explicit free's native release has returned | handle |
 | `finalizer-releasing` | a finalizer's release, before it unaccounts | handle |
+| `adoption-returning` | an unaccounting holds the ledger, before it gives a gradient's adoption back | handle |
 | `collector-claiming` | the claim read, before the CAS that takes it | whether free |
 | `collector-claimed`, `collector-releasing` | the claim is held, or about to be dropped | thread |
 | `failure-reading` | a failed call, before its error is read | who |
@@ -592,16 +598,19 @@ fails and fails once it holds, so the leg that fixes it must turn it into
 an ordinary check:
 
 - #194: grad mode, autocast and `tr_last_error` follow the OS thread an
-  op runs on. Since #296 a parallel thread's ops run on its own, so its
-  modes and errors are its own; coroutine threads share the main OS
-  thread, so an ordinary thread's modes reach every ordinary thread, and a
-  failure parked before `last-failure` reads its error gets another
-  ordinary thread's message or OOM kind. Since #377 an op yields once
-  after each collection, so another green thread's ops run under a
-  thread's modes far more often than at quantum ends.
+  op runs on. A `#:pool 'own` thread's ops run on its own, so its modes
+  and errors are its own; threads of a shared parallel pool share their
+  pool thread's; coroutine threads share the main OS thread, so an
+  ordinary thread's modes reach every ordinary thread, and a failure
+  parked before `last-failure` reads its error gets another ordinary
+  thread's message or OOM kind. An op yields once after each collection,
+  so another green thread's ops run under a thread's modes far more often
+  than at quantum ends.
 
-**Futures and places.** A tensor op inside a future blocks it, and the op
-runs on the runtime thread when the future is touched. A tensor sent
+**Futures and places.** A tensor op inside a future runs its raw call and
+registers the handle's finalizer in the future, before the future is
+touched; the future then blocks before the ledger charge, which runs when
+the future is touched. A tensor sent
 through a place channel arrives as a bare `cpointer` to the same handle,
 with no finalizer and no ledger entry, while the sender's finalizer still
 frees it; the manual says not to. `torch/tests/race-place-test.rkt` runs an op in a

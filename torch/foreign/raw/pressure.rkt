@@ -7,7 +7,7 @@
                   account-release-after account-trial backstop-interval
                   call-with-ledger checks-seen count-backstop-collection!
                   devices-over-floor ledger-total live-bytes
-                  live-bytes-by-device live-of lower-floors! lower-shadow!
+                  live-bytes-by-device lower-floors! lower-shadow!
                   next-shadow-generation! note-accounted! note-adopted!
                   note-reclaimed! note-unaccounted! note-unadopted!
                   pressure-diagnostics pressure-reading reset-accounts!
@@ -16,8 +16,9 @@
                   set-account-trial! set-shadow! set-stats-trough-collections!
                   set-stats-trough-minors! settle-floors! shadow-generation
                   since-check-bytes since-check-of since-sample-bytes
-                  stats-trough-collections stats-trough-minors the-stats
-                  unaccounted-bytes-by-device unaccounted-total unsample!)
+                  stats-trough-collections stats-trough-minors
+                  take-since-sample! the-stats unaccounted-bytes-by-device
+                  unaccounted-total with-ledger)
          (only-in "collector.rkt"
                   call-as-the-collector collect-and-wait! drain-finalizers!
                   yield-to-finalizers!)
@@ -31,6 +32,7 @@
          (only-in "race-points.rkt" race-point))
 
 (provide call-with-ledger
+         with-ledger
          account-of
          note-accounted!
          note-adopted!
@@ -61,10 +63,9 @@
 
 (define (reset-pressure-state!)
   (reset-accounts!)
-  (call-with-ledger
-   (lambda ()
-     (set-box! next-full-ms 0.0)
-     (set-box! next-minor-ms 0.0))))
+  (with-ledger
+    (set-box! next-full-ms 0.0)
+    (set-box! next-minor-ms 0.0)))
 
 ;; --- the device's capacity and allocator, from raw/device.rkt ---
 
@@ -78,14 +79,13 @@
   (cond
     [(or (eq? cached 'unknown) (and (pair? cached) (>= now (cdr cached))))
      (define total (queried-capacity dev))
-     (call-with-ledger
-      (lambda ()
-        (set-account-capacity! a
-                               (cond
-                                 [total total]
-                                 [(memq (device-type dev) '(cuda mps))
-                                  (cons 'retry-at (+ now capacity-retry-ms))]
-                                 [else #f]))))
+     (with-ledger
+       (set-account-capacity! a
+                              (cond
+                                [total total]
+                                [(memq (device-type dev) '(cuda mps))
+                                 (cons 'retry-at (+ now capacity-retry-ms))]
+                                [else #f])))
      total]
     [(pair? cached) #f]
     [else cached]))
@@ -100,24 +100,23 @@
                            (default-memory-fraction (device-type dev)))
                        capacity))))))
 
-;; The sample takes back only the bytes it saw, as a reset does.
+;; The take comes before the reading, so two samples at once never take the
+;; same bytes, and bytes accounted during the reading wait for the next one.
 (define (sample-allocator! dev)
   (define a (account-of dev))
-  (define seen (since-sample-bytes a))
+  (define seen (take-since-sample! a))
   (define live (live-bytes a))
   (define known ((allocator-reading) dev))
   (define reading (or known 0))
-  (call-with-ledger
-   (lambda ()
-     (define trial (account-trial a))
-     (when trial
-       (set-account-trial! a (- trial seen)))
-     (set-account-sample! a reading)
-     (unsample! a seen)
-     (when known
-       (if (eq? (shadow-refresh) 'samples)
-           (set-shadow! a reading)
-           (lower-shadow! a reading live))))))
+  (with-ledger
+    (define trial (account-trial a))
+    (when trial
+      (set-account-trial! a (- trial seen)))
+    (set-account-sample! a reading)
+    (when known
+      (if (eq? (shadow-refresh) 'samples)
+          (set-shadow! a reading)
+          (lower-shadow! a reading live)))))
 
 ;; --- the shadow: what the allocator holds that the ledger cannot see ---
 
@@ -140,7 +139,7 @@
     (define live (live-bytes a))
     (define reading ((allocator-reading) dev))
     (when reading
-      (call-with-ledger (lambda () (lower-shadow! a reading live))))))
+      (with-ledger (lower-shadow! a reading live)))))
 
 ;; An allocator that cannot answer right now leaves its device's charge as
 ;; it was; with charging off every charge goes to zero.
@@ -149,9 +148,8 @@
   (for ([dev (in-list (devices))])
     (define reading (and charging? ((allocator-reading) dev)))
     (when (or reading (not charging?))
-      (call-with-ledger
-       (lambda () (set-shadow! (account-of dev) (or reading 0))))))
-  (call-with-ledger next-shadow-generation!)
+      (with-ledger (set-shadow! (account-of dev) (or reading 0)))))
+  (with-ledger (next-shadow-generation!))
   (end-trials-at-trough!))
 
 ;; --- the backstop, from every accounting ---
@@ -168,7 +166,7 @@
     [(and gate-open? (> (pressure-reading dev) mark))
      (call-as-the-collector (lambda () (pressure-collect! dev mark base)))]
     [(and gate-open? sample-due?)
-     (call-with-ledger (lambda () (end-trial! (account-of dev) base)))]
+     (with-ledger (end-trial! (account-of dev) base))]
     [else (void)])
   (yield-to-finalizers!))
 
@@ -198,10 +196,9 @@
         #:when (account-trial (account-of dev)))
     (define mark (device-high-water dev))
     (define reading ((allocator-reading) dev))
-    (when (and mark reading (<= (max reading (live-of dev)) mark))
-      (call-with-ledger
-       (lambda ()
-         (end-trial! (account-of dev) (quotient mark interval-divisor)))))))
+    (when (and mark reading (<= (max reading (live-bytes (account-of dev))) mark))
+      (with-ledger
+        (end-trial! (account-of dev) (quotient mark interval-divisor))))))
 
 ;; Reclaiming little means the working set itself sits above the mark, so
 ;; the interval to the next collection doubles instead of thrashing. A drain
@@ -216,32 +213,31 @@
   (sample-allocator! dev)
   (define after (pressure-reading dev))
   (race-point checks-resetting dev)
-  (call-with-ledger
-   (lambda ()
-     (define a (account-of dev))
-     (define reclaimed (max 0 (- before after)))
-     (define interval (or (account-interval a) base))
-     (define backed-off (min (* 2 interval) (* 2 mark)))
-     (define reclaimed-little? (< reclaimed (* reclaim-fraction mark)))
-     ;; A drain that ran out of time measured nothing, so it neither backs
-     ;; the interval off nor counts as this device's check: the next
-     ;; allocation looks again. Looking is cheap, and the mark still guards
-     ;; the collection itself. A release the spacing held back left the
-     ;; cache in the reading, which says nothing of the working set, so the
-     ;; interval stays where it was, unless the last release is on trial.
-     (when drained?
-       (set-account-interval! a
-                              (cond
-                                [(account-trial a) backed-off]
-                                [(eq? released 'spaced) interval]
-                                [reclaimed-little? backed-off]
-                                [(eq? released 'released) interval]
-                                [else base]))
-       (when (and (eq? released 'released) (not reclaimed-little?))
-         (set-account-trial! a mark))
-       (reset-checks! seen))
-     (count-backstop-collection!)
-     (note-reclaimed! reclaimed))))
+  (with-ledger
+    (define a (account-of dev))
+    (define reclaimed (max 0 (- before after)))
+    (define interval (or (account-interval a) base))
+    (define backed-off (min (* 2 interval) (* 2 mark)))
+    (define reclaimed-little? (< reclaimed (* reclaim-fraction mark)))
+    ;; A drain that ran out of time measured nothing, so it neither backs
+    ;; the interval off nor counts as this device's check: the next
+    ;; allocation looks again. Looking is cheap, and the mark still guards
+    ;; the collection itself. A release the spacing held back left the
+    ;; cache in the reading, which says nothing of the working set, so the
+    ;; interval stays where it was, unless the last release is on trial.
+    (when drained?
+      (set-account-interval! a
+                             (cond
+                               [(account-trial a) backed-off]
+                               [(eq? released 'spaced) interval]
+                               [reclaimed-little? backed-off]
+                               [(eq? released 'released) interval]
+                               [else base]))
+      (when (and (eq? released 'released) (not reclaimed-little?))
+        (set-account-trial! a mark))
+      (reset-checks! seen))
+    (count-backstop-collection!)
+    (note-reclaimed! reclaimed)))
 
 ;; Where the allocator's reading counts its cache, as on unified memory, a
 ;; collection frees tensors into that cache and the reading does not move,
@@ -257,7 +253,7 @@
      'spaced]
     [(release dev)
      (define next (+ (current-inexact-milliseconds) (release-spacing)))
-     (call-with-ledger (lambda () (set-account-release-after! a next)))
+     (with-ledger (set-account-release-after! a next))
      'released]
     [else #f]))
 
@@ -295,13 +291,12 @@
      (define drained? (collect!))
      (define finished (current-inexact-milliseconds))
      (define after (ledger-total))
-     (call-with-ledger
-      (lambda ()
-        (when drained?
-          (on-drained! seen))
-        (set-box! next (+ finished (/ (- finished started) budget)))
-        (bump! the-stats)
-        (note-reclaimed! (- before after))))
+     (with-ledger
+       (when drained?
+         (on-drained! seen))
+       (set-box! next (+ finished (/ (- finished started) budget)))
+       (bump! the-stats)
+       (note-reclaimed! (- before after)))
      drained?]
     [else 'skipped]))
 
@@ -343,5 +338,4 @@
        (when (eq? #t (if (eq? old 'skipped) young old))
          (define before (unaccounted-total))
          (refresh-shadows!)
-         (call-with-ledger
-          (lambda () (note-reclaimed! (- before (unaccounted-total))))))))))
+         (with-ledger (note-reclaimed! (- before (unaccounted-total)))))))))
