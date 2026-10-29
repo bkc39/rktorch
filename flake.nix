@@ -912,7 +912,7 @@
             text = cudaCellText;
           };
           matrix-runner-test = pkgs.runCommand "torch-matrix-runner-test" { } ''
-            DRIVER_FARM=${cudaDriverFarm} RACKET_DEV_CONFIG=${./.racket-dev.rktd} timeout -k 10 600 bash ${./nix/matrix/run-test.sh} ${./nix/matrix}
+            DRIVER_FARM=${cudaDriverFarm} RACKET_DEV_CONFIG=${./.racket-dev.rktd} BUILD_DOCS=${./scripts/build-docs} timeout -k 10 600 bash ${./nix/matrix/run-test.sh} ${./nix/matrix}
             mkdir $out
           '';
         } // self.packages.${system}.racket-deps.tests

@@ -122,10 +122,11 @@ shell and fails if any does, and its pre-push hook runs the `push-gates`
 subset. Its `test` gate is `nix/matrix/racket-cell.sh test`, the stage that
 `nix build`, `nix flake check` and CI run too.
 
-`racket-cell.sh`, the `coverage` and `docs` gates, the CUDA cell and the
-C++ tests set `OMP_NUM_THREADS=1` unless the caller sets it or
-`MKL_NUM_THREADS`. A test that needs intra-op threads runs its subject in a
-subprocess with both unset.
+In `racket-cell.sh`, `scripts/build-docs`, the `coverage` gate, the CUDA
+cell and the flake's `ctest`, `OMP_NUM_THREADS` defaults to 1; on MKL
+builds `MKL_NUM_THREADS` takes precedence. `scripts/platform/build-common.sh`
+runs `torchrkt_tests` at libtorch's default. A test that needs intra-op
+threads runs its subject in a subprocess with both unset.
 
 ## The native library
 

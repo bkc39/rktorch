@@ -46,4 +46,5 @@
     ("tests/foreign-test.rkt" 300)
     ("tests/generated-parity-test.rkt" 900)
     ("tests/loader-workers-test.rkt" 600)
-    ("tests/python-cross-test.rkt" 1200)))
+    ("tests/python-cross-test.rkt" 1200)
+    ("tests/race-stress-test.rkt" 300)))

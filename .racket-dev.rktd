@@ -8,6 +8,6 @@
   (natives-inputs "racket scripts/release/release.rkt natives-inputs")
   (resyntax       "scripts/resyntax-gate")
   (coverage       "env OMP_NUM_THREADS=${OMP_NUM_THREADS:-1} racket scripts/coverage.rkt --changed")
-  (docs           "env OMP_NUM_THREADS=${OMP_NUM_THREADS:-1} scripts/build-docs")
+  (docs           "scripts/build-docs")
   (check          "nix flake check"))
  (push-gates (compile paths resyntax test)))

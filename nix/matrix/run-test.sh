@@ -9,6 +9,7 @@ cat "$1/drain.sh" "$1/run.sh" >"$runner"
 cat "$1/drain.sh" "$1/cuda-cell.sh" >"$cell"
 racket_cell=$1/racket-cell.sh
 racket_dev=${RACKET_DEV_CONFIG:-$1/../../.racket-dev.rktd}
+build_docs=${BUILD_DOCS:-$1/../../scripts/build-docs}
 shift
 bash=$(command -v bash)
 set -m
@@ -546,7 +547,13 @@ echo "\${OMP_NUM_THREADS-unset}/\${MKL_NUM_THREADS-unset} \${0##*/} \$*" >>"$t/t
 EOF
   chmod +x "$t/cellbin/raco"
   cp "$t/cellbin/raco" "$t/cellbin/racket"
-  cp "$t/cellbin/raco" "$t/cellwork/scripts/build-docs"
+  cat >"$t/cellbin/git" <<EOF
+#!$bash
+echo "$t/cellwork"
+EOF
+  chmod +x "$t/cellbin/git"
+  { echo "#!$bash"; tail -n +2 "$build_docs"; } >"$t/cellwork/scripts/build-docs"
+  chmod +x "$t/cellwork/scripts/build-docs"
 }
 
 cell_stage_threads() {
@@ -573,8 +580,8 @@ gate_threads() {
   command=$(sed -n "s/^ *($gate  *\"\(.*\)\")\$/\1/p" "$racket_dev")
   [ -n "$command" ] || { echo "run-test: $case: no $gate gate in $racket_dev" >&2; exit 1; }
   : >"$t/threads"
-  (cd "$t/cellwork" && PATH="$t/cellbin:$PATH" timeout -k 5 30 env "$@" sh -c "$command" >/dev/null) \
-    || { echo "run-test: $case: the $gate gate exited $?" >&2; exit 1; }
+  (cd "$t/cellwork" && PATH="$t/cellbin:$PATH" timeout -k 5 30 env "$@" sh -c "$command" >/dev/null 2>"$t/err") \
+    || { echo "run-test: $case: the $gate gate exited $?" >&2; cat "$t/err" >&2; exit 1; }
   threads_seen "$want" "env $* $gate gate" 1
 }
 
