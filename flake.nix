@@ -559,7 +559,7 @@
                 # surface the dyld/runtime error that gtest discovery swallows.
                 ./torchrkt_tests --gtest_list_tests \
                   || echo "torchrkt_tests cannot run here (exit $?)"
-                ctest --output-on-failure
+                OMP_NUM_THREADS=''${OMP_NUM_THREADS:-1} ctest --output-on-failure
                 runHook postCheck
               '';
             } // p.lib.optionalAttrs installTests {
@@ -912,7 +912,7 @@
             text = cudaCellText;
           };
           matrix-runner-test = pkgs.runCommand "torch-matrix-runner-test" { } ''
-            DRIVER_FARM=${cudaDriverFarm} timeout -k 10 600 bash ${./nix/matrix/run-test.sh} ${./nix/matrix}
+            DRIVER_FARM=${cudaDriverFarm} RACKET_DEV_CONFIG=${./.racket-dev.rktd} timeout -k 10 600 bash ${./nix/matrix/run-test.sh} ${./nix/matrix}
             mkdir $out
           '';
         } // self.packages.${system}.racket-deps.tests

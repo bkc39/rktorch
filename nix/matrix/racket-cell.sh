@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+export OMP_NUM_THREADS=${OMP_NUM_THREADS:-1}
 
 stage() { echo "matrix-stage: $1"; }
 
@@ -27,7 +28,6 @@ case "$1" in
     ;;
   test)
     stage test
-    export OMP_NUM_THREADS=${OMP_NUM_THREADS:-1}
     raco test --timeout 300 ./torch/
     raco test examples/test/
     raco test --timeout 1200 scripts/bench/

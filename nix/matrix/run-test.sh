@@ -8,6 +8,7 @@ cell=$t/cuda-cell.sh
 cat "$1/drain.sh" "$1/run.sh" >"$runner"
 cat "$1/drain.sh" "$1/cuda-cell.sh" >"$cell"
 racket_cell=$1/racket-cell.sh
+racket_dev=${RACKET_DEV_CONFIG:-$1/../../.racket-dev.rktd}
 shift
 bash=$(command -v bash)
 set -m
@@ -524,32 +525,101 @@ EOF
   [ -z "$(ls -A "$t/farm")" ] || { echo "run-test: $case: links without a driver" >&2; exit 1; }
 }
 
-cell_threads() {
-  : >"$t/omp"
-  PATH="$t/cellbin:$PATH" timeout -k 5 30 env "$@" bash "$racket_cell" test >/dev/null
-  [ "$(wc -l <"$t/omp")" -eq 3 ] && [ "$(sort -u "$t/omp")" = "$want" ] || {
-    echo "run-test: $case: env $*: raco saw OMP_NUM_THREADS '$(sort -u "$t/omp")', not $want" >&2
+threads_seen() {
+  local seen calls
+  seen=$(cut -d' ' -f1 "$t/threads" | sort -u)
+  calls=$(wc -l <"$t/threads")
+  [ "$calls" -eq "$3" ] && [ "$seen" = "$1" ] || {
+    echo "run-test: $case: $2: $calls calls saw OMP/MKL '$seen', not $3 at $1" >&2
+    cat "$t/threads" >&2
     exit 1
   }
 }
 
-case_racket_cell_threads() {
-  mkdir -p "$t/cellbin"
+thread_logger() {
+  rm -rf "$t/cellbin" "$t/cellwork"
+  mkdir -p "$t/cellbin" "$t/cellwork/shim/lib" "$t/cellwork/scripts"
+  : >"$t/cellwork/shim/lib/libtorchrkt.so"
   cat >"$t/cellbin/raco" <<EOF
 #!$bash
-echo "\${OMP_NUM_THREADS-unset}" >>"$t/omp"
+echo "\${OMP_NUM_THREADS-unset}/\${MKL_NUM_THREADS-unset} \${0##*/} \$*" >>"$t/threads"
 EOF
   chmod +x "$t/cellbin/raco"
-  want=1 cell_threads -u OMP_NUM_THREADS
-  want=1 cell_threads OMP_NUM_THREADS=
-  want=4 cell_threads OMP_NUM_THREADS=4
+  cp "$t/cellbin/raco" "$t/cellbin/racket"
+  cp "$t/cellbin/raco" "$t/cellwork/scripts/build-docs"
+}
+
+cell_stage_threads() {
+  local want=$1 calls=$2 stage=$3 args=(test)
+  shift 3
+  [ "$stage" = test ] || args=(install "$t/cellwork/shim" /nonexistent docs)
+  : >"$t/threads"
+  (cd "$t/cellwork" && PATH="$t/cellbin:$PATH" PLTUSERHOME="$t/cellwork/plt" \
+    timeout -k 5 30 env "$@" bash "$racket_cell" "${args[@]}" >/dev/null) \
+    || { echo "run-test: $case: racket-cell $stage exited $?" >&2; exit 1; }
+  threads_seen "$want" "env $* racket-cell $stage" "$calls"
+}
+
+cell_threads() {
+  local want=$1
+  shift
+  cell_stage_threads "$want" 4 install "$@"
+  cell_stage_threads "$want" 3 test "$@"
+}
+
+gate_threads() {
+  local want=$1 gate=$2 command
+  shift 2
+  command=$(sed -n "s/^ *($gate  *\"\(.*\)\")\$/\1/p" "$racket_dev")
+  [ -n "$command" ] || { echo "run-test: $case: no $gate gate in $racket_dev" >&2; exit 1; }
+  : >"$t/threads"
+  (cd "$t/cellwork" && PATH="$t/cellbin:$PATH" timeout -k 5 30 env "$@" sh -c "$command" >/dev/null) \
+    || { echo "run-test: $case: the $gate gate exited $?" >&2; exit 1; }
+  threads_seen "$want" "env $* $gate gate" 1
+}
+
+case_racket_cell_threads() {
+  thread_logger
+  cell_threads 1/unset -u OMP_NUM_THREADS -u MKL_NUM_THREADS
+  cell_threads 1/unset -u MKL_NUM_THREADS OMP_NUM_THREADS=
+  cell_threads 4/unset -u MKL_NUM_THREADS OMP_NUM_THREADS=4
+  cell_threads 1/4 -u OMP_NUM_THREADS MKL_NUM_THREADS=4
+}
+
+case_gate_threads() {
+  local gate
+  thread_logger
+  for gate in coverage docs; do
+    gate_threads 1/unset "$gate" -u OMP_NUM_THREADS -u MKL_NUM_THREADS
+    gate_threads 4/unset "$gate" -u MKL_NUM_THREADS OMP_NUM_THREADS=4
+  done
+}
+
+cuda_cell_threads() {
+  local seen
+  cuda_stubs "echo \${OMP_NUM_THREADS-unset}/\${MKL_NUM_THREADS-unset} >\"$t/cuda/gtests.threads\"; exit 1"
+  status=0
+  (
+    unset OMP_NUM_THREADS MKL_NUM_THREADS
+    [ "$#" -lt 2 ] || export "$2"
+    run_cell
+  ) || status=$?
+  status_is 1
+  seen=$(cat "$t/cuda/gtests.threads" 2>/dev/null || echo none)
+  [ "$seen" = "$1" ] || { echo "run-test: $case: ${2:-unset}: the gtests saw '$seen', not $1" >&2; exit 1; }
+}
+
+case_cuda_cell_threads() {
+  [ -r /proc/loadavg ] || return 0
+  cuda_cell_threads 1/unset
+  cuda_cell_threads 4/unset OMP_NUM_THREADS=4
 }
 
 cases=("$@")
 [ "${#cases[@]}" -gt 0 ] || cases=(rows no_match failure_line interrupt interrupt_deaf terminate deadline linger
     kill_after durations killed guard
     cuda_cell cuda_cell_deaf cuda_cell_linger cuda_cell_load zombie driver_farm
-    racket_cell_threads)
+    racket_cell_threads gate_threads cuda_cell_threads)
 for case in "${cases[@]}"; do
   "case_$case"
   echo "run-test: $case ok"
