@@ -10,9 +10,9 @@
                     * + - < cuda-available? cuda-device cuda-memory-stats
                     cuda-reset-peak-stats! current-generator device dtype flip
                     make-generator mps-available? mps-device narrow
-                    native-memory-use numel rand reclaim-native-memory! reshape
-                    select shape stack tensor tensor->list to to-dtype where
-                    zeros-like)
+                    native-memory-limit native-memory-use numel rand
+                    reclaim-native-memory! reshape select shape stack tensor
+                    tensor->list to to-dtype where zeros-like)
            (only-in "../vision/augment.rkt"
                     adjust-brightness adjust-contrast adjust-hue
                     adjust-saturation crop-view crop-view? multi-crop
@@ -430,10 +430,10 @@
     (reclaim-native-memory!)
     (define before (stat 'allocated))
     (cuda-reset-peak-stats! on)
-    (define out (thunk))
+    (define out (parameterize ([native-memory-limit (+ before (expt 2 20))]) (thunk)))
     (- (stat 'peak-allocated) before (* 4 (numel out))))
 
-  (bounded-test "A9: multi-crop leaves no native memory behind and runs its views in turn"
+  (bounded-test "A9: multi-crop leaves no native memory behind"
     (for ([on (in-list devices)])
       (define x (bytes-images 256 on))
       (dino-crop x (make-generator 4 #:device on))
@@ -441,8 +441,10 @@
       (define before (bytes-on (device x)))
       (dino-crop x (make-generator 4 #:device on))
       (reclaim-native-memory!)
-      (check-equal? (bytes-on (device x)) before (format "~a" on)))
-    (when (cuda-available?)
+      (check-equal? (bytes-on (device x)) before (format "~a" on))))
+
+  (when (cuda-available?)
+    (bounded-test "A9: multi-crop runs its views in turn"
       (define on (cuda-device))
       (define x (bytes-images 256 on))
       (define (seeded) (make-generator 4 #:device on))
