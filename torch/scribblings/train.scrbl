@@ -255,7 +255,8 @@ to @racket[teardown], and @racket[#f] once the run has finished.
 step value, in an epoch-end hook and after the epoch its reduction, and for a
 key logged both per step and per epoch the newer of the two. Inside the
 training loop a per-step key answers the training loop's latest value, also
-when a validation loop logs the same key. A key logged
+when a validation loop logs the same key, and after a loop's epoch closes its
+reduction answers in that loop's hooks over the other loop's values. A key logged
 only per epoch answers the running reduction of the current epoch, read once
 until the next @racket[log!] of that key.}
 
@@ -296,7 +297,9 @@ Lightning's @tt{self.log}. The values allowed for @racket[#:on-step?] and
 @racket[#:on-epoch?], and their defaults, are the hook's, from
 @secref["train-hooks"]; @racket[#:on-step? #t] or @racket[#:on-epoch? #f]
 in a hook that logs only per epoch is a contract violation. An epoch
-@racket['mean] is weighted by @racket[#:batch-size]. The value is detached
+@racket['mean] is weighted by @racket[#:batch-size], by default the leading
+dimension of the first tensor in the batch, searched through nested lists, or 1
+without one. The value is detached
 before it is accumulated, so a logged loss keeps no graph alive, and, as in
 Lightning, a tensor that is not @racket['float32] or @racket['float64] is
 converted to @racket['float32] first.}
@@ -330,7 +333,9 @@ each read, and @racket['failed] when the entry point raises.}
                                     (or/c 'error 'append 'replace) 'error])
                        training-logger?])]{
 Write @tt{metrics.jsonl} or @tt{metrics.csv} and
-@tt{hparams.rktd} under @racket[dir].}
+@tt{hparams.rktd} under @racket[dir]. A @tt{metrics.csv} row is
+@tt{step,key,value}, its key quoted as RFC 4180 has it when it holds a comma,
+a quote or a newline.}
 
 @section{Callbacks}
 

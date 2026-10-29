@@ -91,10 +91,16 @@
   (define arrived (moved before dev))
   (or (call-trainer/values r 'on-after-batch-transfer arrived) arrived))
 
+(define (leading-tensor v)
+  (match v
+    [(? tensor?) v]
+    [(cons a d) (or (leading-tensor a) (leading-tensor d))]
+    [_ #f]))
+
 (define (note-batch-size! r batch)
   (set-run-batch-size!
    r
-   (match (findf tensor? batch)
+   (match (leading-tensor batch)
      [#f 1]
      [t (match (shape t)
           ['() 1]

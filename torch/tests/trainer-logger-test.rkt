@@ -3,7 +3,8 @@
 (module+ test
   (require (only-in json string->jsexpr)
            (only-in racket/file
-                    delete-directory/files file->lines file->value make-temporary-directory)
+                    delete-directory/files file->lines file->string file->value
+                    make-temporary-directory)
            (only-in racket/string string-prefix?)
            rackunit
            (only-in "../data/loader.rkt" dataloader tensor-dataset)
@@ -77,6 +78,18 @@
        (check-exn exn:fail:filesystem:exists? (lambda () (csv-logger dir)))
        (fit-logged (csv-logger dir #:exists 'replace))
        (check-equal? (length (file->lines metrics)) 5))))
+
+  (test-case "csv-logger quotes a key holding a delimiter, a quote or a newline"
+    (call-with-scratch
+     (lambda (dir)
+       (logger-log-metrics! (csv-logger dir)
+                            (hasheq '|acc,top-5| 0.9 '|say "hi"| 1.0 (string->symbol "a\nb") 2.0)
+                            3)
+       (check-equal? (file->string (build-path dir "metrics.csv"))
+                     (string-append "step,key,value\n"
+                                    "3,\"a\nb\",2.0\n"
+                                    "3,\"acc,top-5\",0.9\n"
+                                    "3,\"say \"\"hi\"\"\",1.0\n")))))
 
   (struct unprintable ()
     #:property prop:custom-write (lambda (v out mode) (error 'unprintable "cannot print")))

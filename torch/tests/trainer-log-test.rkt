@@ -1,12 +1,12 @@
 #lang racket/base
 
 (module+ test
-  (require (only-in racket/list append-map make-list partition remove-duplicates)
-           (only-in racket/match match)
+  (require (only-in racket/list append-map first make-list partition remove-duplicates second)
+           (only-in racket/match match match-define)
            rackunit
            (only-in syntax/macro-testing convert-compile-time-error)
            (only-in "../data/loader.rkt" dataloader tensor-dataset)
-           (only-in "../main.rkt" mean ones shape sum tensor to zero!)
+           (only-in "../main.rkt" mean ones shape stack sum tensor to zero!)
            (only-in "../nn.rkt" Linear mse-loss parameters sgd)
            (only-in "../train/private/hooks.rkt"
                     callback-hook? definable-hooks hook-log hook-name)
@@ -43,6 +43,22 @@
 
   (test-case "L-L1: an epoch mean is weighted by batch size"
     (define r (fit (Logging 'mean) (label-loader) #:max-epochs 1 #:logger #f))
+    (check-= (run-metric r 'acc) 0.6 1e-6))
+
+  (define-trainer Bundled (net)
+    (define-init () (set! net (Linear 1 1)))
+    (define-optimizers (sgd (parameters net) #:lr 0.01))
+    (define-training-step (batch)
+      (match-define (list x y) batch)
+      (log! 'acc (mean y) #:on-step? #f #:on-epoch? #t)
+      (mse-loss (net x) y)))
+
+  (test-case "an epoch mean is weighted by the leading tensor nested in one batch value"
+    (define (bundle items)
+      (list (stack (map first items)) (stack (map second items))))
+    (define loader
+      (dataloader (tensor-dataset (ones 5 1) labels) #:batch-size 2 #:collate bundle))
+    (define r (fit (Bundled) loader #:max-epochs 1 #:logger #f))
     (check-= (run-metric r 'acc) 0.6 1e-6))
 
   (test-case "L-L2: sum, max and min reduce exactly"
@@ -195,8 +211,8 @@
 
   (define (epoch-tags l)
     (for/list ([row (in-list (collecting-steps l))])
-      (match row
-        [(cons step metrics) (list step (hash-ref metrics 'epoch #f))])))
+      (match-define (cons step metrics) row)
+      (list step (hash-ref metrics 'epoch #f))))
 
   (test-case "every row but a validation or test step's carries Lightning's epoch key"
     (define l (collecting-logger))
@@ -326,6 +342,26 @@
          #:num-sanity-val-steps 0 #:logger #f #:callbacks (list cb))
     (check-equal? (reverse seen)
                   '((validation 0 0.0) (train 0 0.0) (validation 1 1.0) (train 1 1.0))))
+
+  (define-trainer Shadowed (net)
+    (define-init () (set! net (Linear 1 1)))
+    (define-optimizers (sgd (parameters net) #:lr 0.01))
+    (define-training-step (x y)
+      (log! 'loss 1.0 #:on-step? #t #:on-epoch? #f)
+      (mse-loss (net x) y))
+    (define-validation-step (x y)
+      (log! 'loss 100.0)
+      (mse-loss (net x) y)))
+
+  (test-case "run-metric after validation answers validation's epoch, not training's step"
+    (define seen '())
+    (define ((watch name) r) (set! seen (cons (list name (run-metric r 'loss)) seen)))
+    (define cb (lambda-callback #:on-validation-epoch-end (watch 'epoch-end)
+                                #:on-validation-end (watch 'end)))
+    (fit (Shadowed) (label-loader) #:val (label-loader) #:max-epochs 2
+         #:num-sanity-val-steps 0 #:logger #f #:callbacks (list cb))
+    (check-equal? (reverse seen)
+                  '((epoch-end 100.0) (end 100.0) (epoch-end 100.0) (end 100.0))))
 
   (test-case "E7: a lexical log! in a hook that cannot log"
     (check-exn #rx"log!: on-fit-start cannot log"

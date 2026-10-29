@@ -22,11 +22,12 @@
 
 (struct entry logged (value weight reduce [cached #:auto]) #:auto-value #f #:mutable)
 
-(struct ledger (steps epoch stepped latest))
+(struct ledger (steps epoch stepped latest closed))
 
 (struct book (train eval host))
 
-(define (fresh-ledger) (ledger (make-hasheq) (make-hasheq) (make-hasheq) (make-hasheq)))
+(define (fresh-ledger)
+  (ledger (make-hasheq) (make-hasheq) (make-hasheq) (make-hasheq) (make-hasheq)))
 
 (define (make-book) (book (fresh-ledger) (fresh-ledger) (make-hasheq)))
 
@@ -131,9 +132,11 @@
           (ledger-latest l)))
 
 (define (read-epoch! b loop)
-  (drain! b (ledger-epoch (loop-ledger b loop))
+  (define l (loop-ledger b loop))
+  (drain! b (ledger-epoch l)
           (lambda (es) (cache! es) (map entry-cached es))
-          "epoch"))
+          "epoch"
+          (ledger-closed l)))
 
 (define (epoch-end-reached! b loop)
   (define l (loop-ledger b loop))
@@ -154,7 +157,7 @@
   (cond
     [(hash-ref (ledger-stepped l) key #f) (step-metric b l key)]
     [e (cache! (list e)) (entry-cached e)]
-    [else #f]))
+    [else (hash-ref (ledger-closed l) key #f)]))
 
 (define (book-metric b loop key default)
   (define other (if (eq? loop 'train) 'eval 'train))
