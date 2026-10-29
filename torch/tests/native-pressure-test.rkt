@@ -53,6 +53,14 @@
   (define (step! k)
     (length (for/list ([_ (in-range k)]) (zeros 1024 1024))))
 
+  ;; the same, but the batch outlives a minor collection first, so only a
+  ;; major one reclaims it, as a step's graph does (#296: a minor collection
+  ;; reclaims a younger batch before the trigger has anything to do)
+  (define (aged-step! k)
+    (define batch (for/list ([_ (in-range k)]) (zeros 1024 1024)))
+    (collect-garbage 'minor)
+    (length batch))
+
   (define (positive-entries totals)
     (filter (lambda (entry) (positive? (cdr entry))) totals))
 
@@ -77,7 +85,7 @@
     (parameterize ([native-memory-limit (* 64 mib)])
       (define high-water
         (for/fold ([hw 0]) ([_ (in-range 20)])
-          (step! 8)
+          (aged-step! 8)
           (max hw (- (cpu-bytes) base))))
       (check-true (> (collections) before) "the trigger never fired")
       (check-true (< high-water (* 128 mib))

@@ -26,11 +26,25 @@
       (when (and (eqv? label 0) (zero? (modulo i 4)))
         (collect-at-trough!))))
 
+  ;; points the fuzz must reach, the stage-2 steps (#296) among them
+  (define expected-points
+    '(handle-registered entry-unaccounted handle-released unaccount-entry-read
+      collector-claiming finalizer-releasing free-unaccounted))
+
+  (define reached (box (hasheq)))
+
+  (define (note-point! name _subject)
+    (let retry ()
+      (define seen (unbox reached))
+      (unless (or (hash-ref seen name #f)
+                  (box-cas! reached seen (hash-set seen name #t)))
+        (retry))))
+
   (define (scenario seed)
     (settle!)
     (define base (ledger-snapshot))
     (define w (make-watch))
-    (with-race-hook (hooks (watch-hook w) (fuzz-hook seed))
+    (with-race-hook (hooks (watch-hook w) (fuzz-hook seed) note-point!)
       (parameterize ([native-memory-limit (* 4 mib)])
         (join-all
          (for/list ([k (in-range threads)])
@@ -45,4 +59,7 @@
 
   (test-case "seeded yields at every race point keep the ledger invariants"
     (for ([seed (in-list seeds)])
-      (scenario seed))))
+      (scenario seed))
+    (for ([point (in-list expected-points)])
+      (check-true (hash-ref (unbox reached) point #f)
+                  (format "no scenario reached ~a" point)))))

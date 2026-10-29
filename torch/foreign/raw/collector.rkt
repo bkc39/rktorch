@@ -1,7 +1,9 @@
 #lang racket/base
 
 (require (only-in ffi/unsafe register-finalizer)
-         (only-in ffi/unsafe/atomic call-as-atomic in-atomic-mode?)
+         (only-in ffi/unsafe/atomic in-atomic-mode?)
+         (only-in ffi/unsafe/vm vm-eval)
+         (only-in "cas.rkt" cas-add!)
          (only-in "race-points.rkt" race-point))
 
 (provide call-as-the-collector
@@ -10,16 +12,23 @@
          drain-finalizers!
          finalizer-runs
          note-finalizer-run!
+         on-main-os-thread?
          yield-to-finalizers!)
 
-;; Bumped by every release, inside the ledger's atomic section.
-(define runs 0)
+;; Bumped by every finalizer that releases a handle.
+(define runs (box 0))
 
 (define (note-finalizer-run!)
-  (set! runs (add1 runs)))
+  (cas-add! runs 1))
 
 (define (finalizer-runs)
-  runs)
+  (unbox runs))
+
+;; Racket CS numbers main's OS thread 0, and coroutine threads share it.
+(define os-thread-id (vm-eval 'get-thread-id))
+
+(define (on-main-os-thread?)
+  (zero? (os-thread-id)))
 
 ;; --- one collection at a time ---
 
@@ -27,24 +36,26 @@
 ;; collection skips instead of collecting again. The claim names its thread,
 ;; because kill-thread runs no dynamic-wind exit: a claimant that has died
 ;; holds nothing.
-(define holder #f)
+(define holder (box #f))
+
+(define (claim-collector!)
+  (define held (unbox holder))
+  (define free? (or (not held) (thread-dead? held)))
+  (race-point collector-claiming free?)
+  (cond
+    [(not free?) #f]
+    [(box-cas! holder held (current-thread)) #t]
+    [(eq? (unbox holder) held) (claim-collector!)]
+    [else #f]))
 
 (define (call-as-the-collector thunk)
-  (define claimed?
-    (call-as-atomic
-     (lambda ()
-       (define free? (or (not holder) (thread-dead? holder)))
-       (race-point collector-claiming free?)
-       (and free?
-            (set! holder (current-thread))
-            #t))))
-  (when claimed?
+  (when (claim-collector!)
     (race-point collector-claimed (current-thread))
     (dynamic-wind void
                   thunk
                   (lambda ()
                     (race-point collector-releasing (current-thread))
-                    (set! holder #f)))))
+                    (set-box! holder #f)))))
 
 ;; --- a collection that has really finished ---
 
@@ -53,7 +64,9 @@
 
 (start-finalizer-thread!)
 
-;; A thread's latch dies in the first collection after it last yielded.
+;; A thread's latch dies in the first collection after it last yielded. Off
+;; main's OS thread a `(sleep 0)` hops to main and gives the finalizer
+;; thread nothing it would not get anyway.
 (define collection-latch (make-thread-cell (make-weak-box (box 0))))
 
 (define (yield-to-finalizers!)
@@ -61,6 +74,7 @@
     [(weak-box-value (thread-cell-ref collection-latch)) (void)]
     ;; sleeping inside an atomic section is an error
     [(in-atomic-mode?) (void)]
+    [(not (on-main-os-thread?)) (void)]
     [else
      (thread-cell-set! collection-latch (make-weak-box (box 0)))
      (sleep 0)]))

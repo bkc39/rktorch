@@ -1,7 +1,6 @@
 #lang racket/base
 
-(require (only-in ffi/unsafe/atomic call-as-atomic)
-         (only-in racket/contract/base -> ->* any)
+(require (only-in racket/contract/base -> ->* any)
          (only-in racket/match == match)
          (only-in "../private/contract.rkt" define/contract-out)
          (only-in "creation-ops.rkt" zeros)
@@ -11,7 +10,7 @@
          (only-in "raw/fault.rkt" native-fault?)
          (only-in "raw/race-points.rkt" race-point))
 
-(struct mps-probe (run [state #:mutable]))
+(struct mps-probe (run state))
 (struct claim (holder done))
 (struct faulted (fault))
 
@@ -20,7 +19,7 @@
 
 (define/contract-out (make-mps-probe [run allocate-on-mps])
   (->* [] [(-> any)] mps-probe?)
-  (mps-probe run 'unprobed))
+  (mps-probe run (box 'unprobed)))
 
 (define ((cpu-stands-in level why) raised)
   (define detail (if (exn? raised) (exn-message raised) "a non-exn value was raised"))
@@ -37,20 +36,23 @@
     (run)
     #t))
 
+;; A CAS, not an atomic section, so a parallel thread decides it on its own
+;; OS thread; losing it means another thread changed the state, so read again.
 (define (claim-or-read probe)
-  (call-as-atomic
-   (λ ()
-     (match (mps-probe-state probe)
-       [(and (claim holder _) held) #:when (not (thread-dead? holder)) held]
-       [(? boolean? answer) answer]
-       [(? faulted? fault) fault]
-       [_ (define mine (claim (current-thread) (make-semaphore 0)))
-          (set-mps-probe-state! probe mine)
-          mine]))))
+  (define state (mps-probe-state probe))
+  (define seen (unbox state))
+  (match seen
+    [(claim holder _) #:when (not (thread-dead? holder)) seen]
+    [(? boolean? answer) answer]
+    [(? faulted? fault) fault]
+    [_ (define mine (claim (current-thread) (make-semaphore 0)))
+       (if (box-cas! state seen mine)
+           mine
+           (claim-or-read probe))]))
 
 (define (settle! probe done)
   (race-point mps-probe-claimed probe)
-  (set-mps-probe-state! probe (probe-outcome (mps-probe-run probe)))
+  (set-box! (mps-probe-state probe) (probe-outcome (mps-probe-run probe)))
   (race-point mps-probe-settled probe)
   (semaphore-post done)
   (mps-usable? probe))

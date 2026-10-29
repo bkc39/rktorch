@@ -3,17 +3,20 @@
 (require (for-syntax racket/base
                      ;; whole-module require on purpose
                      syntax/parse/pre)
-         (only-in ffi/unsafe _double _enum _fun _int _int64 _ptr _void)
-         (only-in ffi/unsafe/alloc allocator deallocator)
-         (only-in ffi/unsafe/atomic call-as-atomic)
+         (only-in ffi/unsafe
+                  _double _enum _fun _int _int64 _ptr _void register-finalizer
+                  set-cpointer-tag!)
+         (only-in ffi/unsafe/atomic call-as-uninterruptible)
          (only-in racket/list remove-duplicates)
          (only-in "../device-type.rkt" device device-index device-type)
+         (only-in "cas.rkt" cas-claim! cas-update!)
          (only-in "collector.rkt"
                   collect-and-wait!
                   finalizer-runs
                   note-finalizer-run!)
          (only-in "fault.rkt" native-fault? note-native-fault!)
          (only-in "pressure.rkt"
+                  account-of
                   call-with-ledger
                   collect-under-pressure!
                   live-bytes-by-device
@@ -29,13 +32,14 @@
          (only-in "syntax.rkt" _Tensor _Tensor/null define-torch))
 
 (provide adopted-bytes
-         tr-tensor-free/finalizer
          tr-tensor-free/checked
          collect-and-drain!
          swallow-and-count-failure
          finalizer-failures
          finalizer-diagnostics
          forget-gradient-adoptions!
+         handle-allocator
+         registering
          tensor-allocator
          tensor-allocator/gradient
          tensor-allocator/no-retry
@@ -62,30 +66,63 @@
   (_fun _Tensor -> _void)
   #:c-id tr_tensor_free)
 
-;; The (deallocator) wrap cancels the pending GC finalizer.
-(define tr-tensor-free/checked
-  (let ([release ((deallocator) tr-tensor-free/unwrapped)])
-    (lambda (t)
-      (unaccount! t)
-      (race-point free-unaccounted t)
-      (release t)
-      (race-point free-released t))))
+;; A handle's lifetime: `state` decides which of an explicit free and the
+;; finalizer releases it ('live -> 'freeing by CAS, then 'freed), and
+;; `charge` holds its ledger entry, which an unaccounting takes by CAS to #f
+;; so that only one subtracts it. The finalizer closes over the lifetime, so
+;; it never needs the weak table's entry.
+(struct lifetime (state charge))
 
-(define finalizer-failure-count (box 0))
-(define captured-failures (box '()))
+(define (fresh-lifetime)
+  (lifetime (box 'live) (box #f)))
+
+(define lifetimes (make-weak-hasheq))
+
+(define (lifetime-of! key)
+  (or (hash-ref lifetimes key #f)
+      (let ([lt (fresh-lifetime)])
+        (hash-set! lifetimes key lt)
+        lt)))
+
+;; One region holds the native release, the 'Tensor-freed tag and the
+;; 'freed state, so a kill cannot leave a released handle tagged live (#423).
+(define (release! h lt)
+  (call-as-uninterruptible
+   (lambda ()
+     (tr-tensor-free/unwrapped h)
+     (race-point handle-released h)
+     (set-cpointer-tag! h 'Tensor-freed)
+     (when lt (set-box! (lifetime-state lt) 'freed)))))
+
+;; The explicit free: the claim decides it against the finalizer and any
+;; other free of the handle, and the loser returns. A handle no allocator
+;; registered has no lifetime and nothing to race.
+(define (tr-tensor-free/checked h)
+  (parameterize-break #f
+    (define lt (hash-ref lifetimes h #f))
+    (when (or (not lt) (cas-claim! (lifetime-state lt) 'live 'freeing))
+      (when lt (unaccount-lifetime! h lt))
+      (race-point free-unaccounted h)
+      (release! h lt)
+      (race-point free-released h))))
+
+(define failures (box (cons 0 '())))
 (define capture-limit 8)
 
 (define (finalizer-failures)
-  (unbox finalizer-failure-count))
+  (car (unbox failures)))
+
+(define (ledger-entries)
+  (for/sum ([lt (in-list (hash-values lifetimes))])
+    (if (unbox (lifetime-charge lt)) 1 0)))
 
 (define (finalizer-diagnostics)
-  (call-with-ledger
-   (lambda ()
-     (append (list (cons 'runs (finalizer-runs))
-                   (cons 'failures (unbox finalizer-failure-count))
-                   (cons 'messages (reverse (unbox captured-failures)))
-                   (cons 'ledger-entries (hash-count allocations)))
-             (pressure-diagnostics)))))
+  (define seen (unbox failures))
+  (append (list (cons 'runs (finalizer-runs))
+                (cons 'failures (car seen))
+                (cons 'messages (reverse (cdr seen)))
+                (cons 'ledger-entries (ledger-entries)))
+          (pressure-diagnostics)))
 
 ;; No printer: a prop:custom-write that raises or blocks would be fatal here.
 (define (describe-raised e)
@@ -105,29 +142,76 @@
   (with-handlers ([(lambda (_) #t) void])
     (when (native-fault? e)
       (note-native-fault! "running a finalizer"))
-    (record-failure!/unguarded e)))
-
-(define (record-failure!/unguarded e)
-  (call-with-ledger
-   (lambda ()
-     (set-box! finalizer-failure-count (add1 (unbox finalizer-failure-count)))
-     (set-box! captured-failures
-               (take-at-most capture-limit
-                             (cons (describe-raised e)
-                                   (unbox captured-failures)))))))
+    (define message (describe-raised e))
+    (void
+     (cas-update! failures
+                  (lambda (seen)
+                    (cons (add1 (car seen))
+                          (take-at-most capture-limit (cons message (cdr seen)))))))))
 
 ;; Total catch on purpose, not exn:fail?: any value escaping GC
 ;; finalization re-enters the error machinery and cascades (#38).
+;; A plain `register-finalizer` runs its finalizer outside atomic mode, so
+;; the region keeps another green thread from running in the middle of one,
+;; and keeps a drain from seeing a counted run that has not released yet.
 (define ((swallow-and-count-failure release) t)
-  ;; Nothing outside the guard: alloc.rkt's finalizer holds raw atomic mode
-  ;; with no dynamic-wind, so an escape kills the process rather than raising.
-  (with-handlers ([(lambda (_) #t) record-failure!])
-    (call-with-ledger note-finalizer-run!)
-    (release t)))
+  (call-as-uninterruptible
+   (lambda ()
+     (with-handlers ([(lambda (_) #t) record-failure!])
+       (note-finalizer-run!)
+       (release t)))))
 
-(struct allocation (phantom nbytes device [adopted #:mutable] [adopter #:mutable]))
+;; The finalizer counts a run only when its claim wins: a handle an explicit
+;; free took is not its to release.
+(define (finalizer-for lt)
+  (define release-claimed
+    (swallow-and-count-failure
+     (lambda (h)
+       (race-point finalizer-releasing h)
+       (unaccount-lifetime! h lt)
+       (release! h lt))))
+  (lambda (h)
+    (call-as-uninterruptible
+     (lambda ()
+       (when (cas-claim! (lifetime-state lt) 'live 'freeing)
+         (release-claimed h))))))
 
-(define allocations (make-weak-hasheq))
+(define (register-tensor! h)
+  (define lt (fresh-lifetime))
+  (hash-set! lifetimes h lt)
+  (register-finalizer h (finalizer-for lt))
+  (race-point handle-registered h))
+
+;; The raw call and the registration of each handle it answers share one
+;; uninterruptible region: it stays on the caller's OS thread, and a kill or
+;; a break waits for it, so no handle escapes without its finalizer.
+(define ((registering raw-fn) . args)
+  (call-as-uninterruptible
+   (lambda ()
+     (define h (apply raw-fn args))
+     (when h (register-tensor! h))
+     h)))
+
+(define ((registering/outputs raw-fn) . args)
+  (call-as-uninterruptible
+   (lambda ()
+     (define handles (apply raw-fn args))
+     (when handles
+       (for ([h (in-list handles)] #:when h)
+         (register-tensor! h)))
+     handles)))
+
+;; For handles with no bytes to charge, a generator: the guarded finalizer
+;; alone releases it.
+(define (((handle-allocator release) raw-fn) . args)
+  (define finalize (swallow-and-count-failure release))
+  (call-as-uninterruptible
+   (lambda ()
+     (define h (apply raw-fn args))
+     (when h (register-finalizer h finalize))
+     h)))
+
+(struct allocation (phantom nbytes device account [adopted #:mutable] [adopter #:mutable]))
 
 (define-torch tr-tensor-nbytes/raw
   (_fun _Tensor (out : (_ptr o _int64)) -> (rc : _int) -> (values rc out))
@@ -156,43 +240,63 @@
        (values nbytes (device type (if (eq? type 'cpu) 0 index)))]
       [else (values #f #f)])))
 
-(define (account! t #:adopt [adopt void])
+(define (account! t #:adopt [adopt #f])
   (define-values (nbytes dev) (native-placement t))
   (cond
     [dev (record-allocation! t nbytes dev #:adopt adopt)
          dev]
     [else #f]))
 
-(define (record-allocation! t nbytes dev #:adopt [adopt void])
-  (define entry (allocation (make-phantom-bytes nbytes) nbytes dev 0 #f))
-  (call-with-ledger
-   (lambda ()
-     (hash-set! allocations t entry)
-     (race-point ledger-entry-added t)
-     (note-accounted! dev nbytes)
-     (adopt))))
-
-(define (unaccount! t)
-  (with-handlers ([exn:fail? void])
-    (call-with-ledger
+;; The charge and the counters move in one uninterruptible region, so no kill
+;; separates them. An `adopt` takes the ledger first: it reads and writes the
+;; shadow, which lives under the ledger.
+(define (record-allocation! key nbytes dev #:adopt [adopt #f])
+  (define lt (lifetime-of! key))
+  (define a (account-of dev))
+  (define entry (allocation (make-phantom-bytes nbytes) nbytes dev a 0 #f))
+  (define (charge!)
+    (call-as-uninterruptible
      (lambda ()
-       (define a (hash-ref allocations t #f))
-       (when a
-         (race-point unaccount-entry-read t)
-         (set-phantom-bytes! (allocation-phantom a) 0)
-         (hash-remove! allocations t)
-         (note-unaccounted! (allocation-device a) (allocation-nbytes a))
-         ;; a positive adoption means the parameter still holds the gradient
-         ;; this handle took over: a reset zeroes it first
-         (when (positive? (allocation-adopted a))
-           (unadopt! a)))))))
+       (set-box! (lifetime-charge lt) entry)
+       (race-point ledger-entry-added key)
+       (note-accounted! a nbytes)
+       (when adopt (adopt entry)))))
+  (if adopt (call-with-ledger charge!) (charge!)))
+
+(define (unaccount! key)
+  (define lt (hash-ref lifetimes key #f))
+  (when lt (unaccount-lifetime! key lt)))
+
+(define (unaccount-lifetime! key lt)
+  (with-handlers ([exn:fail? void])
+    (define charge (lifetime-charge lt))
+    (define a (unbox charge))
+    (when a
+      (race-point unaccount-entry-read key)
+      (call-as-uninterruptible
+       (lambda ()
+         (when (cas-claim! charge a #f)
+           (race-point entry-unaccounted key)
+           (set-phantom-bytes! (allocation-phantom a) 0)
+           (note-unaccounted! (allocation-account a) (allocation-nbytes a))
+           ;; a positive adoption means the parameter still holds the gradient
+           ;; this handle took over: a reset zeroes it first, under the ledger
+           (when (positive? (allocation-adopted a))
+             (call-with-ledger
+              (lambda ()
+                (when (positive? (allocation-adopted a))
+                  (unadopt! a)))))))))))
+
+(define (charge-of key)
+  (define lt (hash-ref lifetimes key #f))
+  (and lt (unbox (lifetime-charge lt))))
 
 ;; An in-place move (tr_tensor_to_) changes the device and byte count under
 ;; the same handle, so its ledger entry is replaced rather than added to. When
 ;; the new size cannot be read the old charge goes back: a stale entry still
 ;; presses on the collector, a missing one would not.
 (define (reaccount! t)
-  (define old (call-with-ledger (lambda () (hash-ref allocations t #f))))
+  (define old (charge-of t))
   (unaccount! t)
   (define dev (account! t))
   (cond
@@ -221,22 +325,14 @@
 
 ;; The entry-by-entry fold; the counters above must agree with it.
 (define (native-memory-use/fold)
-  (define entries (call-with-ledger (lambda () (hash-values allocations))))
   (define totals (make-hash))
-  (for ([a (in-list entries)])
-    (hash-update! totals (allocation-device a)
-                  (lambda (n) (+ n (allocation-nbytes a)))
-                  0))
+  (for ([lt (in-list (hash-values lifetimes))])
+    (define a (unbox (lifetime-charge lt)))
+    (when a
+      (hash-update! totals (allocation-device a)
+                    (lambda (n) (+ n (allocation-nbytes a)))
+                    0)))
   (sort-by-device (hash->list totals)))
-
-;; Unwrapped release on purpose: the (deallocator) wrap would cancel the
-;; very registration this finalizer runs from.
-(define tr-tensor-free/finalizer
-  (swallow-and-count-failure
-   (lambda (t)
-     (race-point finalizer-releasing t)
-     (unaccount! t)
-     (tr-tensor-free/unwrapped t))))
 
 (define-torch tr-last-error-kind/raw
   (_fun -> _int)
@@ -284,21 +380,18 @@
                           #:collect! [collect! collect-and-drain!])
   (retry-on-oom (lambda (rc) (= rc 1)) oom? collect!))
 
-;; `adopt` runs in the accounting's ledger section, so no refresh reads the
+;; `adopt` runs in the accounting's charge region, so no refresh reads the
 ;; handle's charge before the adoption moves it, and before the pressure
 ;; check, so the check sees the charge where it will stay.
 (define (((accounted adopt) wrapped) . args)
   (define t (apply wrapped args))
   (race-point op-returned t)
   (when t
-    (define dev (account! t #:adopt (lambda () (adopt args t))))
+    (define dev (account! t #:adopt (and adopt (lambda (entry) (adopt args t entry)))))
     (race-point tensor-accounted t)
     (when dev
       (collect-under-pressure! dev)))
   t)
-
-(define (adopt-nothing _args _t)
-  (void))
 
 ;; A gradient is storage the backward pass wrote before any handle pointed
 ;; at it, so the shadow's last refresh may charge it. The first handle taken
@@ -320,26 +413,23 @@
     (define e (weak-box-value b))
     (and e (positive? (allocation-adopted e)))))
 
-(define (adopt-gradient! args t)
+;; The caller holds the ledger.
+(define (adopt-gradient! args t entry)
   (define param (car args))
-  (call-with-ledger
-   (lambda ()
-     (race-point gradient-adopting t)
-     (define now (shadow-generation))
-     (define entry (hash-ref allocations t #f))
-     (define held (hash-ref adopted-at param no-adoption))
-     (when (and entry
-                (not (eqv? (adoption-generation held) now))
-                (not (held-by-a-live-adopter? held)))
-       (set-allocation-adopted!
-        entry
-        (note-adopted! (allocation-device entry) (allocation-nbytes entry)))
-       (set-allocation-adopter! entry (make-weak-box param))
-       (hash-set! adopted-at param
-                  (adoption now (cons (make-weak-box entry) (live-entries held))))))))
+  (race-point gradient-adopting t)
+  (define now (shadow-generation))
+  (define held (hash-ref adopted-at param no-adoption))
+  (when (and (not (eqv? (adoption-generation held) now))
+             (not (held-by-a-live-adopter? held)))
+    (set-allocation-adopted!
+     entry
+     (note-adopted! (allocation-account entry) (allocation-nbytes entry)))
+    (set-allocation-adopter! entry (make-weak-box param))
+    (hash-set! adopted-at param
+               (adoption now (cons (make-weak-box entry) (live-entries held))))))
 
 (define (unadopt! a)
-  (note-unadopted! (allocation-device a) (allocation-adopted a))
+  (note-unadopted! (allocation-account a) (allocation-adopted a))
   (set-allocation-adopted! a 0)
   (define param (weak-box-value (allocation-adopter a)))
   (define held (and param (hash-ref adopted-at param #f)))
@@ -347,10 +437,10 @@
     (hash-set! adopted-at param (adoption #f (live-entries held)))))
 
 (define (adopted-bytes t)
-  (call-with-ledger (lambda () (allocation-adopted (hash-ref allocations t)))))
+  (call-with-ledger (lambda () (allocation-adopted (charge-of t)))))
 
-;; The caller holds the ledger: the forgetting must share the atomic section
-;; of the native reset that dropped the gradients.
+;; The caller holds the ledger: the forgetting must share the lock with the
+;; native reset that dropped the gradients.
 (define (forget-gradient-adoptions! params)
   (race-point adoptions-forgotten params)
   (for ([param (in-list params)])
@@ -360,34 +450,21 @@
         (set-allocation-adopted! entry 0)))
     (hash-remove! adopted-at param)))
 
-;; The retry composes OUTSIDE the allocator wrap: ffi/unsafe/alloc runs
-;; the wrapped call in atomic mode, where the drain's blocking wait is an
-;; internal error.
+;; The retry composes OUTSIDE the registration region: its collection waits
+;; on the finalizer thread, which an uninterruptible region on main would
+;; never let run.
 (define (tensor-allocator raw-fn)
-  ((accounted adopt-nothing)
-   ((oom-retry) ((allocator tr-tensor-free/finalizer) raw-fn))))
+  ((accounted #f) ((oom-retry) (registering raw-fn))))
 
 ;; for tr_tensor_grad, whose first argument is the parameter
 (define (tensor-allocator/gradient raw-fn)
-  ((accounted adopt-gradient!)
-   ((oom-retry) ((allocator tr-tensor-free/finalizer) raw-fn))))
+  ((accounted adopt-gradient!) ((oom-retry) (registering raw-fn))))
 
 ;; No retry: re-running these after an OOM would repeat something the
 ;; first call already did — a draw from the global RNG stream, or an
 ;; in-place update of a tensor the caller handed in.
 (define (tensor-allocator/no-retry raw-fn)
-  ((accounted adopt-nothing) ((allocator tr-tensor-free/finalizer) raw-fn)))
-
-(define adopt-handle ((allocator tr-tensor-free/finalizer) values))
-
-;; One atomic section spans the call and every registration, as (allocator)
-;; does for a single result, so no break lands between a handle and its
-;; finalizer.
-(define ((adopting-outputs raw-fn) . args)
-  (call-as-atomic
-   (lambda ()
-     (define handles (apply raw-fn args))
-     (and handles (map adopt-handle handles)))))
+  ((accounted #f) (registering raw-fn)))
 
 (define ((accounted-outputs wrapped) . args)
   (define handles (apply wrapped args))
@@ -400,10 +477,10 @@
 
 ;; For raw calls answering a list of handles, or #f on failure.
 (define (tensor-allocator/outputs raw-fn)
-  (accounted-outputs ((oom-retry) (adopting-outputs raw-fn))))
+  (accounted-outputs ((oom-retry) (registering/outputs raw-fn))))
 
 (define (tensor-allocator/outputs/no-retry raw-fn)
-  (accounted-outputs (adopting-outputs raw-fn)))
+  (accounted-outputs (registering/outputs raw-fn)))
 
 (define-syntax (define-unary/raw stx)
   (syntax-parse stx
@@ -429,8 +506,8 @@
          #:c-id c-id
          #:wrap tensor-allocator)]))
 
-;; No I/O from inside a finalizer -- that runs in atomic mode, where writing to
-;; a port can block and trip an internal error.  Accumulate, dump here.
+;; No I/O from inside a finalizer -- that runs uninterruptibly, where writing
+;; to a port can block and trip an internal error.  Accumulate, dump here.
 (define mem-trace-handle
   (and (getenv "RKTORCH_MEM_TRACE")
        (plumber-add-flush!

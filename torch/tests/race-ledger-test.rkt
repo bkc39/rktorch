@@ -1,22 +1,33 @@
 #lang racket/base
 
 (module+ test
-  (require (only-in racket/dict dict-ref)
+  (require (only-in ffi/unsafe _fun)
+           (only-in ffi/unsafe/atomic in-atomic-mode?)
+           (only-in racket/dict dict-ref)
            rackunit
-           (only-in "../foreign.rkt" native-memory-limit native-memory-use zeros)
+           (only-in "../foreign.rkt"
+                    backward! grad native-memory-limit native-memory-use sum tensor?
+                    zeros)
            (only-in (submod "../foreign.rkt" unsafe) tensor-free! to!)
            (only-in "../foreign/device-type.rkt" device)
+           (only-in "../foreign/raw/cas.rkt" cas-add!)
            (only-in "../foreign/raw/collector.rkt" call-as-the-collector)
-           (only-in "../foreign/raw/memory.rkt" record-allocation! unaccount!)
-           (only-in "../foreign/raw/pressure.rkt" since-check-of)
+           (only-in "../foreign/raw/device-queries.rkt" allocator-reading)
+           (only-in "../foreign/raw/memory.rkt"
+                    native-memory-use/fold record-allocation! tensor-allocator unaccount!)
+           (only-in "../foreign/raw/pressure.rkt"
+                    live-bytes-by-device native-collect-margin refresh-shadows!
+                    since-check-of)
+           (only-in "../foreign/raw/syntax.rkt" _Tensor _Tensor/null define-torch)
            (only-in "../foreign/structs.rkt" tensor-handle)
            (only-in "private/race-harness.rkt"
-                    check-known-failure check-ledger join labelled
+                    check-ledger hooks join join-all labelled
                     ledger-snapshot ledger-violations make-gate make-watch
-                    release-gate! settle! spawn stop! wait-for-arrival
+                    release-gate! seeded-generator settle! spawn stop! wait-for-arrival
                     watch-finalized watch-freed-count watch-hook
-                    watch-max-holders watch-release-count watch-released
-                    while-inside with-parked with-race-hook worker-thread))
+                    watch-max-holders watch-registered watch-release-count watch-released
+                    while-inside with-parked with-race-hook worker-thread)
+           (only-in "private/wedge.rkt" call-with-process-deadline))
 
   (define mib (* 1024 1024))
   (define cpu (device 'cpu 0))
@@ -104,7 +115,7 @@
       (define violations (ledger-violations #:watch w))
       (unaccount! witness)
       (check-equal? violations '())
-      (check-eq? read 'atomic "the entry is read and removed in one section")))
+      (check-eq? read 'parked "the entry is read before the CAS that takes it")))
 
   (test-case "two threads unaccounting one entry subtract it once (I3)"
     (for ([pool (in-list pools)])
@@ -183,7 +194,7 @@
       (join a)
       (check-ledger #f w)
       (check-equal? (watch-max-holders w) 1)
-      (check-eq? claimed 'atomic "the claim is decided in one atomic section")))
+      (check-eq? claimed 'parked "the claim is read before the CAS that takes it")))
 
   (test-case "two threads claiming the collector hold it one at a time (I2)"
     (for ([pool (in-list pools)])
@@ -213,11 +224,9 @@
       (release-gate! g)
       (join a)
       (check-equal? added (* 256 256 4))
-      (check-known-failure
-       "#168 stage 2"
-       (format "a reset keeps the bytes added during its collection (~a)"
-               (or pool 'ordinary))
-       (>= (since-check-of cpu) added))
+      (check-true (>= (since-check-of cpu) added)
+                  (format "a reset keeps the bytes added during its collection (~a)"
+                          (or pool 'ordinary)))
       (tensor-free! held)))
 
   (test-case "a counter reset racing an allocation"
@@ -244,8 +253,149 @@
       (unaccount! b-key)
       (check-equal? live 8192 "a racing creation lost a device's bytes")
       (check-ledger #f #f)
-      (check-eq? created 'atomic "the account is created inside the ledger")))
+      (check-eq? created 'parked "the account is made before the CAS that inserts it")))
 
   (test-case "two threads creating a device's first account lose no bytes"
     (first-account (device 'cuda 14) #f)
-    (first-account (device 'cuda 15) 'own)))
+    (first-account (device 'cuda 15) 'own))
+
+  (define (spin-for ms)
+    (define until (+ (current-inexact-milliseconds) ms))
+    (let spin ()
+      (when (< (current-inexact-milliseconds) until)
+        (spin))))
+
+  (define (await-box b #:seconds [seconds 30])
+    (define deadline (+ (current-inexact-milliseconds) (* 1000 seconds)))
+    (let poll ()
+      (cond
+        [(unbox b) (unbox b)]
+        [(> (current-inexact-milliseconds) deadline) #f]
+        [else (sleep 0.001) (poll)])))
+
+  ;; The count is bumped inside the raw call, so the registration region
+  ;; covers it: a handle the native call made but no finalizer guards shows
+  ;; as a count above the registrations. The spin widens the window a kill
+  ;; must miss.
+  (define-torch neg/bare (_fun _Tensor -> _Tensor/null) #:c-id tr_neg)
+
+  (define trials 200)
+
+  (define (stopped-mid-registration pool stop-by)
+    (settle!)
+    (define base (ledger-snapshot))
+    (define w (make-watch))
+    (define made (box 0))
+    (define x (zeros 4 4))
+    (define op
+      (tensor-allocator (lambda (t) (begin0 (neg/bare t) (cas-add! made 1) (spin-for 0.05)))))
+    (define rng (seeded-generator 296 (list pool stop-by)))
+    (with-race-hook (watch-hook w)
+      (for ([_ (in-range trials)])
+        (define started (box #f))
+        (define a
+          (spawn (lambda ()
+                   (let loop ()
+                     (void (op x))
+                     (set-box! started #t)
+                     (loop)))
+                 #:pool pool))
+        (await-box started)
+        (sleep (* 0.002 (random rng)))
+        (case stop-by
+          [(kill) (stop! a)]
+          [(break)
+           (break-thread (worker-thread a))
+           (check-not-false (sync/timeout 30 (thread-dead-evt (worker-thread a)))
+                            "a broken worker kept running")]))
+      (settle!))
+    (tensor-free! x)
+    (define where (format "~a, ~a" (or pool 'ordinary) stop-by))
+    (check-equal? (watch-registered w) (unbox made)
+                  (format "a handle escaped its registration (~a)" where))
+    (check-equal? (watch-finalized w) (watch-registered w)
+                  (format "a registered handle was not released once (~a)" where))
+    (check-ledger base w))
+
+  (test-case "a thread stopped mid-registration leaves no handle unguarded"
+    (for* ([stop-by (in-list '(kill break))]
+           [pool (in-list pools)])
+      (stopped-mid-registration pool stop-by)))
+
+  (test-case "eight parallel threads accounting and unaccounting keep the counter at the fold"
+    (define dev (device 'cuda 16))
+    (join-all
+     (for/list ([i (in-range 8)])
+       (spawn (lambda ()
+                (for ([_ (in-range 10000)])
+                  (define key (box i))
+                  (record-allocation! key 4096 dev)
+                  (unaccount! key)))
+              #:pool 'own)))
+    (check-equal? (dict-ref (live-bytes-by-device) dev #f) 0)
+    (check-equal? (dict-ref (native-memory-use/fold) dev 0) 0)
+    (check-ledger #f #f))
+
+  ;; The finalizer takes the ledger only to give an adoption back, so the
+  ;; dropped gradient must hold one: the shadow charges the gradient first.
+  (define (adopted-gradient-dropped!)
+    (define p (zeros 256 256 #:requires-grad? #t))
+    (backward! (sum p))
+    (refresh-shadows!)
+    (void (grad p))
+    p)
+
+  (define (finalizer-against-lock-holder)
+    (settle!)
+    (define w (make-watch))
+    (define held (box #f))
+    (define y (zeros 4 4 #:requires-grad? #t))
+    (backward! (sum y))
+    (define (hold-the-ledger name _subject)
+      (when (and (eq? name 'gradient-adopting) ((labelled 'holder) #f))
+        (set-box! held #t)
+        (spin-for 50)))
+    (parameterize ([allocator-reading (lambda (_dev) (* 64 mib))]
+                   [native-collect-margin (* 1024 1024 mib)])
+      (define p (adopted-gradient-dropped!))
+      (with-race-hook (hooks (watch-hook w) hold-the-ledger)
+        (define holder (spawn (lambda () (void (grad y))) #:pool 'own #:label 'holder))
+        (check-true (await-box held) "the holder never reached the ledger")
+        (collect-garbage)
+        (sleep 0)
+        (join holder)
+        (settle!))
+      (check-true (positive? (watch-finalized w)) "no finalizer ran against the holder")
+      (check-ledger #f w)
+      p))
+
+  (test-case "a finalizer waits out a parallel thread holding the ledger"
+    (void (call-with-process-deadline 30 finalizer-against-lock-holder)))
+
+  ;; #423: no kill separates the native release from the tag flip.
+  (define (killed-mid-release pool)
+    (settle!)
+    (define base (ledger-snapshot))
+    (define w (make-watch))
+    (define t (zeros 256 256))
+    (define h (tensor-handle t))
+    (define arrived (box #f))
+    (define (spin-at-release name subject)
+      (when (and (eq? name 'handle-released) (eq? subject h))
+        (set-box! arrived (if (in-atomic-mode?) 'in-region 'outside))
+        (spin-for 50)))
+    (with-race-hook (hooks (watch-hook w) spin-at-release)
+      (define a (spawn (lambda () (tensor-free! t)) #:pool pool))
+      (define where (await-box arrived))
+      (stop! a)
+      (check-false (tensor? t) "a kill left a released handle tagged live")
+      (check-eq? where 'in-region
+                 "the release and the tag flip share one uninterruptible region")
+      (check-equal? (watch-release-count w h) 1)
+      (settle!))
+    (check-equal? (watch-finalized w) 0 "the finalizer released a freed handle again")
+    (check-ledger base w))
+
+  (test-case "a thread killed between the release and the tag flip leaves the handle freed"
+    (for ([pool (in-list pools)])
+      (killed-mid-release pool))))

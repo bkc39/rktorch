@@ -1,7 +1,9 @@
 #lang racket/base
 
 (require (for-syntax racket/base syntax/parse)
-         (only-in ffi/unsafe/atomic call-as-atomic in-atomic-mode?)
+         (only-in ffi/unsafe/atomic
+                  call-as-atomic in-atomic-mode? make-uninterruptible-lock
+                  uninterruptible-lock-acquire uninterruptible-lock-release)
          (only-in racket/dict dict-ref)
          (only-in racket/list remove-duplicates)
          (only-in racket/match match)
@@ -36,6 +38,7 @@
          watch-released
          watch-freed-count
          watch-finalized
+         watch-registered
          fuzz-hook
          spawn
          join
@@ -78,17 +81,20 @@
 (define ((labelled label) _subject)
   (eq? (current-label) label))
 
-(struct gate (point admits? arrived resume [state #:mutable]))
+;; Hooks run inside uninterruptible regions on parallel threads, where a
+;; thread may neither enter atomic mode nor post a semaphore another thread
+;; waits on, so the state is a box and an arrival is polled.
+(struct gate (point admits? resume state))
 
 (define (make-gate point #:when [admits? (lambda (_subject) #t)])
-  (gate point admits? (make-semaphore 0) (make-semaphore 0) 'waiting))
+  (gate point admits? (make-semaphore 0) (box 'waiting)))
 
 (define (take-gate! g)
-  (call-as-atomic
-   (lambda ()
-     (and (eq? (gate-state g) 'waiting)
-          (set-gate-state! g 'taken)
-          #t))))
+  (let retry ()
+    (cond
+      [(box-cas! (gate-state g) 'waiting 'taken) #t]
+      [(eq? (unbox (gate-state g)) 'waiting) (retry)]
+      [else #f])))
 
 (define ((gate-hook g) name subject)
   (define taken?
@@ -97,17 +103,19 @@
          (take-gate! g)))
   (cond
     [(not taken?) (void)]
-    [(in-atomic-mode?)
-     (set-gate-state! g 'atomic)
-     (semaphore-post (gate-arrived g))]
+    [(in-atomic-mode?) (set-box! (gate-state g) 'atomic)]
     [else
-     (set-gate-state! g 'parked)
-     (semaphore-post (gate-arrived g))
+     (set-box! (gate-state g) 'parked)
      (semaphore-wait (gate-resume g))]))
 
 (define (wait-for-arrival g #:seconds [seconds 30])
-  (and (sync/timeout seconds (gate-arrived g))
-       (gate-state g)))
+  (define deadline (+ (current-inexact-milliseconds) (* 1000 seconds)))
+  (let poll ()
+    (define state (unbox (gate-state g)))
+    (cond
+      [(memq state '(parked atomic)) state]
+      [(> (current-inexact-milliseconds) deadline) #f]
+      [else (sleep 0.001) (poll)])))
 
 (define (release-gate! g)
   (semaphore-post (gate-resume g)))
@@ -123,11 +131,19 @@
                [doubled #:mutable]
                unaccounts
                [unaccounted-twice #:mutable]
-               freed))
+               freed
+               [registered #:mutable]))
 
 (define (make-watch)
   (watch (make-hasheq) 0 (make-weak-hasheq) 0 0 0 (make-weak-hasheq) 0
-         (make-weak-hasheq)))
+         (make-weak-hasheq) 0))
+
+(define watch-lock (make-uninterruptible-lock))
+
+(define (call-with-watch-lock thunk)
+  (dynamic-wind (lambda () (uninterruptible-lock-acquire watch-lock))
+                thunk
+                (lambda () (uninterruptible-lock-release watch-lock))))
 
 (define (note-unaccount! w key)
   (define unaccounts (watch-unaccounts w))
@@ -143,10 +159,10 @@
     (set-watch-doubled! w (add1 (watch-doubled w)))))
 
 (define (watch-release-count w handle)
-  (call-as-atomic (lambda () (hash-ref (watch-releases w) handle 0))))
+  (call-with-watch-lock (lambda () (hash-ref (watch-releases w) handle 0))))
 
 (define (watch-freed-count w handle)
-  (call-as-atomic (lambda () (hash-ref (watch-freed w) handle 0))))
+  (call-with-watch-lock (lambda () (hash-ref (watch-freed w) handle 0))))
 
 (define (note-holder! w holder)
   (define holders (watch-holders w))
@@ -156,14 +172,15 @@
   (set-watch-max-holders! w (max (watch-max-holders w) (hash-count holders))))
 
 (define ((watch-hook w) name subject)
-  (call-as-atomic
+  (call-with-watch-lock
    (lambda ()
      (case name
        [(collector-claimed) (note-holder! w subject)]
        [(collector-releasing) (hash-remove! (watch-holders w) subject)]
        [(free-unaccounted) (note-release! w subject)]
        [(free-released) (hash-update! (watch-freed w) subject add1 0)]
-       [(unaccount-entry-read) (note-unaccount! w subject)]
+       [(entry-unaccounted) (note-unaccount! w subject)]
+       [(handle-registered) (set-watch-registered! w (add1 (watch-registered w)))]
        [(ledger-entry-added) (hash-remove! (watch-unaccounts w) subject)]
        [(finalizer-releasing)
         (set-watch-finalized! w (add1 (watch-finalized w)))
