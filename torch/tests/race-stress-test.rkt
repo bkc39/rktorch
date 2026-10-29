@@ -138,14 +138,16 @@
                      threads-before
                      (proc-status-number "Threads")))))
 
-  ;; The phase's role threads outlive it; an OpenMP team adds intra-op - 1.
+  ;; The phase's role threads outlive it, give or take one, and an OpenMP
+  ;; team adds intra-op - 1: half a team past the roles tells them apart
+  ;; once the team has at least 3 threads to add.
   (define (intra-op-pool-ran? report)
     (match report
       [(list 1 _ _ _) #t]
       [(list _ intra #f #f) (> intra 1)]
+      [(list _ intra _ _) #:when (< intra 4) (> intra 1)]
       [(list _ intra before after)
-       (and (> intra 1)
-            (>= (- after before) (+ default-threads-width 2 intra -1)))]
+       (>= (- after before) (+ default-threads-width 2 (quotient intra 2)))]
       [_ #f]))
 
   (define (run-at-default-threads program #:within seconds #:prefix [prefix '()])
