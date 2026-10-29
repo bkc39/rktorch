@@ -249,6 +249,7 @@
   (define (charge!)
     (with-uninterruptible
       (cas-add! entries 1)
+      (race-point entry-counted key)
       (cond
         [(cas-claim! (lifetime-charge lt) #f entry)
          (race-point ledger-entry-added key)

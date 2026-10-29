@@ -158,6 +158,29 @@
               (check-true (< real 100)
                           (format "100 diagnostics over ~a entries took ~a ms" n real)))))
 
+  ;; the charge region cannot park, so the hook runs the rival unaccount
+  ;; itself, at the point a parallel thread's would land
+  (test-case "an unaccount racing a charge's publication never takes the count below its start"
+    (within 60
+            (lambda ()
+              (settle!)
+              (define dev (device 'cuda 22))
+              (define key (box 'racing))
+              (define start (ledger-entries))
+              (define mid-charge (box #f))
+              (define (unaccount-mid-charge name subject)
+                (when (and (eq? name 'entry-counted) (eq? subject key))
+                  (unaccount! key)
+                  (set-box! mid-charge (- (ledger-entries) start))))
+              (with-race-hook unaccount-mid-charge
+                (record-allocation! key 64 dev))
+              (define charged (- (ledger-entries) start))
+              (unaccount! key)
+              (define left (- (ledger-entries) start))
+              (forget-account! dev)
+              (check-equal? (list (unbox mid-charge) charged left) '(1 1 0)
+                            "(count after the rival unaccount, after the charge, after its own unaccount)"))))
+
   (test-case "a second accounting of one handle keeps its first charge"
     (settle!)
     (define dev (device 'cuda 21))

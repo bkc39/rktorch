@@ -524,6 +524,7 @@ gets the point's name and a subject (a handle, a device, a thread).
 |---|---|---|
 | `handle-registered` | inside the registration region, the finalizer just registered | handle |
 | `op-returned` | the op and its finalizer registration are done, nothing accounted | handle |
+| `entry-counted` | inside the charge region, the entry counted, before the CAS that publishes it | handle |
 | `ledger-entry-added` | inside the charge region, between the charge and the counters | handle |
 | `account-created` | a device's first account made, before the CAS that inserts it | device |
 | `gate-read` | the backstop has read its gate, before it acts | device |
