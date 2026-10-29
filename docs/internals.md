@@ -43,22 +43,15 @@ Death has two paths:
 | finalizer | cancelled | is the finalizer |
 | when | deterministic release | the default |
 
-The explicit path first takes the handle: one compare-and-swap moves the
-wrapper's `state` field from `'live` to `'freeing`, with breaks
-disabled. Only the thread whose swap succeeds goes on; any other free of
-that wrapper, concurrent or later, raises `exn:fail:contract`, as the
-contract on a freed tensor does. The swap needs no atomic section around
-it, so it stays correct when the ops and the ledger leave atomic mode
-(#296). The winner then drops this handle's reference *now*, cancels the
-pending finalizer, and flips the cpointer tag to `'Tensor-freed` — even
-when the free raises, since an attempted free consumes the finalizer
-backstop and a live-looking tag would invite use-after-free.
-
-The finalizer does not read the wrapper's state, and need not: it is
-registered on the handle, which the wrapper holds, so it can run only once
-no thread can still call `tensor-free!` on that wrapper. A free that took
-the handle cancels the finalizer through `ffi/unsafe/alloc`'s table before
-it lets the handle go.
+The explicit path first takes the handle: with breaks disabled, one
+compare-and-swap moves the wrapper's `state` from `'live` to `'freeing`.
+Only the thread whose swap succeeds goes on; every other free of that
+wrapper raises `exn:fail:contract`. The winner releases the handle and
+cancels its finalizer in one atomic section, then flips the cpointer tag
+to `'Tensor-freed` — even when the free raises, since an attempted free
+consumes the finalizer backstop and a live-looking tag would invite
+use-after-free. A thread killed mid-free leaves the wrapper `'freeing` and
+the handle to the finalizer.
 
 The finalizer path is wrapped in `swallow-and-count-failure`, whose
 catch is total: Racket finalizers run in **atomic mode**, where

@@ -8,6 +8,7 @@
                   define/checked-out define/contract-out))
 
 (struct Buffer% tensor-impl ()
+  #:authentic
   #:reflection-name 'Buffer)
 
 (define/checked-out Buffer? (-> any/c boolean?) Buffer%?)
