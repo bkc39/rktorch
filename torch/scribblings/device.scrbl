@@ -622,4 +622,7 @@ storage, device, and dtype. The tensor's ledger
 entry is re-accounted under the same handle, so @racket[native-memory-use]
 reports the new device and byte count; the old storage is released by
 libtorch at once when nothing else references it.
+Two concurrent @racket[to!] calls on one tensor are a data race: the
+ledger may go on reporting the earlier device until the tensor is next
+re-accounted or freed.
 }
