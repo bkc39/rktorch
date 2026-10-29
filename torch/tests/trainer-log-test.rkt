@@ -152,7 +152,86 @@
     (define l (collecting-logger))
     (test (Stepping) (label-loader) #:logger l)
     (check-equal? (collecting-steps l)
-                  (for/list ([step (in-range 1 4)]) (cons step (hasheq 'test-loss 3.0)))))
+                  (for/list ([step (in-range 3)]) (cons step (hasheq 'test-loss 3.0)))))
+
+  (define-trainer Labelled (net)
+    (define-init () (set! net (Linear 1 1)))
+    (define-optimizers (sgd (parameters net) #:lr 0.01))
+    (define-training-step (x y)
+      (log! 'tl 1.0 #:on-step? #t #:on-epoch? #t)
+      (mse-loss (net x) y))
+    (define-validation-step (x y)
+      (log! 'vl 2.0 #:on-step? #t #:on-epoch? #t)
+      (mse-loss (net x) y))
+    (define-test-step (x y)
+      (log! 'xl 3.0 #:on-step? #t #:on-epoch? #t)
+      (mse-loss (net x) y)))
+
+  (define (logged-steps l) (map car (collecting-steps l)))
+
+  (test-case "rows carry Lightning's step labels: the steps taken before the current one"
+    (define l (collecting-logger))
+    (fit (Labelled) (label-loader) #:val (label-loader #:batch-size 3) #:max-epochs 2
+         #:log-every-n-steps 1 #:num-sanity-val-steps 0 #:logger l)
+    (check-equal? (logged-steps l) '(0 1 2 0 1 2 2 3 4 5 2 3 5 5))
+    (define t (collecting-logger))
+    (test (Labelled) (label-loader) #:logger t)
+    (test (Labelled) (label-loader #:batch-size 3) #:logger t)
+    (check-equal? (logged-steps t) '(0 1 2 0 0 1 0)))
+
+  (test-case "a validation inside an accumulation window is labelled with the steps taken"
+    (define l (collecting-logger))
+    (fit (Labelled) (label-loader) #:val (label-loader #:batch-size 5) #:max-epochs 1
+         #:accumulate-grad-batches 2 #:val-check-interval 1
+         #:log-every-n-steps 1 #:num-sanity-val-steps 0 #:logger l)
+    (check-equal? (logged-steps l) '(0 0 0 1 0 1 2 1 1)))
+
+  (define-trainer OwnEpoch (net)
+    (define-init () (set! net (Linear 1 1)))
+    (define-optimizers (sgd (parameters net) #:lr 0.01))
+    (define-training-step (x y)
+      (log! 'epoch 7.0 #:on-step? #f #:on-epoch? #t)
+      (mse-loss (net x) y)))
+
+  (define (epoch-tags l)
+    (for/list ([row (in-list (collecting-steps l))])
+      (match row
+        [(cons step metrics) (list step (hash-ref metrics 'epoch #f))])))
+
+  (test-case "every row but a validation or test step's carries Lightning's epoch key"
+    (define l (collecting-logger))
+    (fit (Labelled) (label-loader) #:val (label-loader #:batch-size 3) #:max-epochs 2
+         #:log-every-n-steps 1 #:num-sanity-val-steps 0 #:logger l)
+    (check-equal? (epoch-tags l)
+                  '((0 0) (1 0) (2 0) (0 #f) (1 #f) (2 0) (2 0)
+                    (3 1) (4 1) (5 1) (2 #f) (3 #f) (5 1) (5 1)))
+    (define t (collecting-logger))
+    (test (Labelled) (label-loader) #:logger t)
+    (check-equal? (epoch-tags t) '((0 #f) (1 #f) (2 #f) (0 0)))
+    (define own (collecting-logger))
+    (fit (OwnEpoch) (label-loader) #:max-epochs 2 #:logger own)
+    (check-equal? (map (lambda (m) (hash-ref m 'epoch)) (collecting-metrics own)) '(7.0 7.0)))
+
+  (test-case "an epoch with no step yet labels its training row 0"
+    (define l (collecting-logger))
+    (define skip-first
+      (lambda-callback #:on-before-optimizer-step
+                       (lambda (r opt) (when (zero? (run-epoch r)) (skip-step! r)))))
+    (fit (Labelled) (label-loader) #:max-epochs 2 #:log-every-n-steps 1 #:logger l
+         #:callbacks (list skip-first))
+    (check-equal? (logged-steps l) '(0 0 1 2 2)))
+
+  (test-case "request-stop! publishes the step's row off the #:log-every-n-steps cadence"
+    (define l (collecting-logger))
+    (define stopper
+      (lambda-callback #:on-train-batch-end
+                       (lambda (r loss extra . batch)
+                         (when (= (run-global-step r) 3) (request-stop! r)))))
+    (fit (Labelled) (dataloader (tensor-dataset (ones 10 1) (ones 10 1)) #:batch-size 1)
+         #:max-epochs 5 #:log-every-n-steps 50
+         #:logger l #:callbacks (list stopper))
+    (check-equal? (collecting-steps l)
+                  (list (cons 2 (hasheq 'tl-step 1.0 'epoch 0)) (cons 2 (hasheq 'tl-epoch 1.0 'epoch 0)))))
 
   (test-case "a per-step log in validation-step stays out of the training reads"
     (define l (collecting-logger))
@@ -161,7 +240,9 @@
     (define-values (train-reads val-reads)
       (partition (lambda (m) (hash-has-key? m 'train-only)) (collecting-metrics l)))
     (check-equal? (length train-reads) 6)
-    (check-equal? (remove-duplicates train-reads) (list (hasheq 'loss 1.0 'train-only 1.0)))
+    (check-equal? (remove-duplicates train-reads)
+                  (list (hasheq 'loss 1.0 'train-only 1.0 'epoch 0)
+                        (hasheq 'loss 1.0 'train-only 1.0 'epoch 1)))
     (check-equal? val-reads (make-list 6 (hasheq 'loss 100.0 'val-only 2.0))))
 
   (test-case "run-metric inside an epoch answers the latest step value"

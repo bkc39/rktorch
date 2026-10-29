@@ -14,7 +14,7 @@
                     grad-enabled? item maybe-grad ones tensor->list)
            (only-in "../nn.rkt"
                     Dropout Linear eval! in-layers layer-copy layer-training?
-                    mse-loss parameters sgd state-dict train!)
+                    learning-rate mse-loss parameters sgd state-dict step-lr train!)
            "../train.rkt"
            (only-in "private/trainer-kit.rkt"
                     collecting-finalized collecting-logger collecting-metrics))
@@ -173,18 +173,39 @@
     (unless (sync/timeout seconds worker) (kill-thread worker))
     (unbox result))
 
-  (test-case "an epoch that takes no step under #:max-steps alone raises"
-    (define skip-all
-      (lambda-callback #:on-before-backward (lambda (r loss) (skip-step! r))))
+  (test-case "a skipped epoch under #:max-steps alone continues to the next epoch"
+    (define skip-first
+      (lambda-callback #:on-train-batch-start
+                       (lambda (r . batch) (when (zero? (run-epoch r)) (skip-epoch! r)))))
+    (define finished
+      (within 60 (lambda ()
+                   (fit (Counted (new-tally)) (ones-loader 3) #:max-steps 4 #:logger #f
+                        #:callbacks (list skip-first)))))
+    (check-pred run? finished)
+    (check-equal? (run-global-step finished) 4)
+    (check-equal? (run-epoch finished) 3)
     (define raised
       (within 60 (lambda ()
-                   (fit (Counted (new-tally)) (ones-loader 2) #:max-steps 3 #:logger #f
-                        #:callbacks (list skip-all)))))
-    (check-pred exn:fail? raised)
-    (check-regexp-match #rx"took no optimizer step" (exn-message raised))
-    (define r (fit (Counted (new-tally)) (ones-loader 2) #:max-epochs 2 #:logger #f
-                   #:callbacks (list skip-all)))
-    (check-equal? (run-global-step r) 0))
+                   (fit (Counted (new-tally)) (ones-loader 3) #:max-steps 4 #:logger #f
+                        #:limit-train-batches 0))))
+    (check-pred exn:fail:contract? raised)
+    (check-regexp-match #rx"selects no batch" (exn-message raised)))
+
+  (define-trainer Scheduled (net)
+    (define-init () (set! net (Linear 1 1)))
+    (define-optimizers
+      (define opt (sgd (parameters net) #:lr 1.0))
+      (values opt (scheduler-config (step-lr opt #:step-size 1 #:gamma 0.5)
+                                    #:interval 'step #:frequency 2)))
+    (define-training-step (x y) (mse-loss (net x) y)))
+
+  (test-case "a #:frequency f step scheduler steps at window ends whose batch count is a multiple of f"
+    (for ([a (in-list '(1 2 3))]
+          [expected (in-list '(4 4 2))])
+      (define r (fit (Scheduled) (ones-loader 8) #:max-epochs 1 #:accumulate-grad-batches a
+                     #:logger #f))
+      (match-define (list opt) (run-optimizers r))
+      (check-= (learning-rate opt) (expt 0.5 expected) 1e-12 (format "A=~a" a))))
 
   (test-case "L-C6: on-before-zero-grad sees the last step's gradients"
     (define t (new-tally))
