@@ -46,7 +46,8 @@ Death has two paths:
 The explicit path first takes the handle: with breaks disabled, one
 compare-and-swap moves the wrapper's `state` from `'live` to `'freeing`.
 Only the thread whose swap succeeds goes on; every other free of that
-wrapper raises `exn:fail:contract`. The winner releases the handle and
+wrapper raises `exn:fail:contract`. The take retries a spurious CAS
+failure and loses only when the state is no longer `'live`. The winner releases the handle and
 cancels its finalizer in one atomic section, then flips the cpointer tag
 to `'Tensor-freed` — even when the free raises, since an attempted free
 consumes the finalizer backstop and a live-looking tag would invite
