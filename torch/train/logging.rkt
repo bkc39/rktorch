@@ -148,12 +148,18 @@
         jsexpr->string))
   (append-line path line))
 
+(define (csv-field v)
+  (define s (format "~a" v))
+  (if (regexp-match? #rx"[,\"\r\n]" s)
+      (string-append "\"" (regexp-replace* #rx"\"" s "\"\"") "\"")
+      s))
+
 (define (csv-rows path metrics step)
   (with-output-to-file path #:exists 'append
     (lambda ()
       (when (zero? (file-size path)) (displayln "step,key,value"))
       (for ([k (in-list (sort (hash-keys metrics) symbol<?))])
-        (printf "~a,~a,~a\n" step k (hash-ref metrics k))))))
+        (printf "~a,~a,~a\n" step (csv-field k) (hash-ref metrics k))))))
 
 (define/contract-out (jsonl-logger dir #:exists [exists 'error])
   (->* (path-string?) (#:exists (or/c 'error 'append 'replace)) training-logger?)
