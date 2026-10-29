@@ -1,11 +1,12 @@
 #lang racket/base
 
 (module+ test
-  (require rackunit
+  (require (only-in racket/match match)
+           rackunit
            (only-in (submod "../data/loader.rkt" private) with-traversal)
            (only-in "../data/loader.rkt" dataloader tensor-dataset)
            (only-in "../main.rkt" ones)
-           (only-in "../nn.rkt" Linear mse-loss parameters sgd)
+           (only-in "../nn.rkt" Dropout Linear eval! layer-training? mse-loss parameters sgd)
            "../train.rkt")
 
   (define (ones-loader n)
@@ -75,4 +76,33 @@
           (with-traversal ([count batch] loader)
             (batch 0)
             (list count (break-enabled)))))
-      (check-equal? seen (list 4 enabled?) (format "workers=~a" workers)))))
+      (check-equal? seen (list 4 enabled?) (format "workers=~a" workers))))
+
+  (define-trainer Moded (net drop seen)
+    (define-init (s) (set! net (Linear 1 1)) (set! drop (Dropout #:p 0.5)) (set! seen s))
+    (define-optimizers (sgd (parameters net) #:lr 0.01))
+    (define-training-step (x y)
+      (set-box! seen (cons (list 'train (layer-training? drop)) (unbox seen)))
+      (mse-loss (net (drop x)) y))
+    (define-validation-step (x y)
+      (set-box! seen (cons (list 'validate (layer-training? drop)) (unbox seen)))
+      (mse-loss (net x) y)))
+
+  (define (fit-moded tr)
+    (define receiver (make-log-receiver (current-logger) 'warning 'rktorch-train))
+    (fit tr (ones-loader 2) #:val (ones-loader 1) #:max-epochs 1 #:logger #f)
+    (match (sync/timeout 0 receiver)
+      [(vector _ message _ _) message]
+      [#f #f]))
+
+  (test-case "fit keeps the caller's modes and warns, as Lightning, when a layer is in eval mode"
+    (define seen (box '()))
+    (check-false (fit-moded (Moded seen)))
+    (check-equal? (reverse (unbox seen))
+                  '((validate #f) (train #t) (train #t) (validate #f)))
+    (define eval-seen (box '()))
+    (define tr (eval! (Moded eval-seen)))
+    (check-regexp-match #rx"^rktorch-train: fit: [0-9]+ layer\\(s\\) in eval mode" (fit-moded tr))
+    (check-equal? (reverse (unbox eval-seen))
+                  '((validate #f) (train #f) (train #f) (validate #f)))
+    (check-false (layer-training? tr))))

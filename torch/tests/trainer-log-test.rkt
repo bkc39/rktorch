@@ -6,7 +6,7 @@
            rackunit
            (only-in syntax/macro-testing convert-compile-time-error)
            (only-in "../data/loader.rkt" dataloader tensor-dataset)
-           (only-in "../main.rkt" mean ones shape sum tensor)
+           (only-in "../main.rkt" mean ones shape sum tensor to)
            (only-in "../nn.rkt" Linear mse-loss parameters sgd)
            (only-in "../train/private/hooks.rkt"
                     callback-hook? definable-hooks hook-log hook-name)
@@ -252,6 +252,31 @@
          #:callbacks (list (lambda-callback #:on-train-batch-start watch
                                             #:on-train-batch-end watch)))
     (check-equal? (reverse seen) '(#f 1.0 1.0 1.0 1.0 1.0)))
+
+  (test-case "run-metric in training answers training's value of a key validation also logs"
+    (define (batch-start-reads cadence)
+      (define seen '())
+      (fit (Stepping) (label-loader) #:val (label-loader) #:max-epochs 1
+           #:val-check-interval 1 #:log-every-n-steps cadence
+           #:num-sanity-val-steps 0 #:logger #f
+           #:callbacks (list (lambda-callback
+                              #:on-train-batch-start
+                              (lambda (r . _) (set! seen (cons (run-metric r 'loss) seen))))))
+      (reverse seen))
+    (check-equal? (batch-start-reads 1) '(#f 1.0 1.0))
+    (check-equal? (batch-start-reads 50) '(#f 1.0 1.0)))
+
+  (define-trainer HalfLogged (net dt)
+    (define-init (d) (set! net (Linear 1 1)) (set! dt d))
+    (define-optimizers (sgd (parameters net) #:lr 0.01))
+    (define-training-step (x y)
+      (log! 'big (to (tensor 1000.0) dt) #:on-step? #f #:on-epoch? #t #:batch-size 128)
+      (mse-loss (net x) y)))
+
+  (test-case "a half-precision value is weighted and reduced in float32"
+    (for ([dt (in-list '(float16 bfloat16))])
+      (define r (fit (HalfLogged dt) (label-loader) #:max-epochs 1 #:logger #f))
+      (check-equal? (run-metric r 'big) 1000.0 (format "~a" dt))))
 
   (define-trainer EpochTagged (net)
     (define-init () (set! net (Linear 1 1)))

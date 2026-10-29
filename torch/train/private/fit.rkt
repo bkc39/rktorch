@@ -14,7 +14,7 @@
          (only-in "dispatch.rkt"
                   call-callbacks call-hooks call-trainer/values finish! install-callbacks!
                   note-batch-size! publish-epoch! publish-steps! set-up! tear-down! transfer
-                  with-failure-protocol)
+                  warn-eval-layers! with-failure-protocol)
          (only-in "evaluate.rkt" evaluate)
          (only-in "state.rkt"
                   run-book run-callbacks run-device run-epoch run-global-step run-loggers
@@ -222,6 +222,7 @@
       (call-callbacks r 'on-sanity-check-start (run-callbacks r))
       (validate! r p 'sanity-check (min (plan-sanity p) (plan-val-count p)))
       (call-callbacks r 'on-sanity-check-end (run-callbacks r)))
+    (warn-eval-layers! r)
     (call-hooks r 'on-train-start)
     (for ([_ (in-naturals)]
           #:break (done? r p))
