@@ -484,7 +484,7 @@ than a second wrapper over the same storage.
   arm64 macOS), so no site reads one failure as a loss: each re-reads and
   retries while the value it expects is still there. Every site goes
   through `cas!`, which calls the primitive in `site-cas`, a test seam in
-  `cas.rkt`'s `private` submodule as `state-cas` is in `structs.rkt`'s;
+  `torch/foreign/raw/cas.rkt`'s `private` submodule as `state-cas` is in `torch/foreign/structs.rkt`'s;
   `torch/tests/cas-retry-test.rkt` swaps in one that fails the first
   attempt at named sites.
 - The rarely touched fields (sample, interval, capacity, floor, the
