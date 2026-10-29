@@ -93,7 +93,7 @@
   (let retry ()
     (cond
       [(box-cas! (gate-state g) 'waiting 'taken) #t]
-      [(eq? (unbox (gate-state g)) 'waiting) (retry)]
+      [(~> g gate-state unbox (eq? 'waiting)) (retry)]
       [else #f])))
 
 (define ((gate-hook g) name subject)

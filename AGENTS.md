@@ -761,7 +761,7 @@ Runtime paths take `(only-in racket/runtime-path #%datum define-runtime-path)`.
   (skips the ledger), and nothing under `torch/foreign/` requires
   `ffi/unsafe/alloc` or names `call-as-atomic` / `start-atomic`: a parallel
   thread's atomic section runs on the main OS thread (#296,
-  `foreign-atomic-ban-test.rkt`). Per-op ledger updates are `box-cas!`;
+  `torch/tests/foreign-atomic-ban-test.rkt`). Per-op ledger updates are `box-cas!`;
   the rarely touched fields are written only under `call-with-ledger`,
   inside which nothing blocks, sleeps or posts.
   Explicit synchronous release first takes the handle with one CAS on the

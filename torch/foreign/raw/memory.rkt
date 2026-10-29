@@ -84,10 +84,7 @@
 (define lifetimes (make-weak-hasheq))
 
 (define (lifetime-of! key)
-  (or (hash-ref lifetimes key #f)
-      (let ([lt (fresh-lifetime)])
-        (hash-set! lifetimes key lt)
-        lt)))
+  (hash-ref! lifetimes key fresh-lifetime))
 
 ;; One region holds the native release, the 'Tensor-freed tag and the
 ;; 'freed state, so a kill cannot leave a released handle tagged live (#423).

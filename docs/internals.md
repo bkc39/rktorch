@@ -53,7 +53,7 @@ wrapper's `state` field from `'live` to `'freeing`, with breaks
 disabled. Only the thread whose swap succeeds goes on; any other free of
 that wrapper, concurrent or later, raises `exn:fail:contract`, as the
 contract on a freed tensor does. The swap needs no atomic section around
-it. The winner then claims the handle's *lifetime* (`raw/memory.rkt`): a
+it. The winner then claims the handle's *lifetime* (`torch/foreign/raw/memory.rkt`): a
 second CAS, `'live` -> `'freeing`, on the state box the finalizer claims
 too. It unaccounts the handle and releases it, and the native release, the
 `'Tensor-freed` cpointer tag and the lifetime's `'freed` share one
