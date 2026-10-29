@@ -11,6 +11,8 @@
            "../data/loader.rkt"
            "../main.rkt"
            "../nn.rkt"
+           (only-in "../scribblings/examples/05-mnist.rkt"
+                    convnet [run-example mnist-run-example])
            (only-in "../text/data.rkt"
                     contiguous-blocks encode load-text-fixture text->vocab)
            (only-in "../text/translation.rkt"
@@ -283,43 +285,12 @@
              [i (in-naturals)])
          (check-= r p tol (format "04_mlp: parameter ~a parity" i))))
      (let ()
-       ;; Re-declared: MUST stay in sync with
-       ;; torch/scribblings/examples/05-mnist.rkt — model, seed, steps, lr,
-       ;; full-batch regime. The shape guard below catches structural drift;
-       ;; a forward/recipe edit surfaces as a loss-parity mismatch. Same
-       ;; contract for the 06 gpt twin below.
-       (define-layer convnet (c1 c2 f1 f2)
-         #:init ()
-         (set! c1 (Conv2d 1 16 3))
-         (set! c2 (Conv2d 16 32 3))
-         (set! f1 (Linear 800 128))
-         (set! f2 (Linear 128 10))
-         #:forward (x)
-         (~> x
-             c1 relu (max-pool2d 2)
-             c2 relu (max-pool2d 2)
-             (flatten 1) f1 relu
-             f2))
-       (check-equal? (map tensor-shape (parameters (convnet)))
-                     '((16 1 3 3) (16) (32 16 3 3) (32)
-                       (128 800) (128) (10 128) (10))
-                     "convnet shape must match torch/scribblings/examples/05-mnist.rkt")
        (define (train-on device)
-         (with-default-device device
-           (manual-seed! 0)
-           (define-values (xs ys) (load-mnist-fixture))
-           (define net (convnet))
-           (define opt (adam (parameters net) #:lr 0.001))
-           (define losses
-             (for/list ([_ (in-range 5)])
-               (zero-grads! opt)
-               (define loss (cross-entropy (net xs) ys))
-               (backward! loss)
-               (step! opt)
-               (item loss)))
-           (values losses
-                   (cat (for/list ([p (in-list (parameters net))])
-                          (reshape p -1))))))
+         (define-values (losses classifier _device)
+           (mnist-run-example #:device device))
+         (values losses
+                 (cat (for/list ([p (in-list (parameters classifier))])
+                        (reshape p -1)))))
        (check-training-twin "05_mnist" "python/05_mnist.py" train-on 'cpu tol)
        (when (and (cuda-available?)
                   (python-cuda-available?))

@@ -1,6 +1,7 @@
 #lang scribble/manual
 @(require torch/scribblings/common
-          torch/scribblings/labels)
+          torch/scribblings/labels
+          (for-label torch/data/loader))
 
 @title[#:tag "guide-training"]{A training loop}
 
@@ -115,8 +116,5 @@ of the loop --- the epochs, the four moves, evaluation and logging:
 (run-metric r 'train/loss)
 ]
 
-The training step answers the loss; @racket[fit] clears the gradients,
-differentiates and updates. @racket[log!] records a value, and the default
-@racket[stdout-logger] prints it. @secref["train"] has the rest: validation,
-callbacks, loggers and every hook; @secref["ex-mnist"] trains a convnet this
-way.
+@secref["train"] has validation, callbacks and loggers; @secref["ex-mnist"]
+trains a convnet this way.

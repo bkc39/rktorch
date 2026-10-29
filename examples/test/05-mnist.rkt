@@ -29,9 +29,19 @@
               (format "non-finite loss: ~a" losses))
   (check-true (< (last losses) (first losses))
               (format "losses did not decrease: ~a" losses))
-  ;; the trainer's net field, then the convnet's parameter tree: the
-  ;; Sequential's steps by index, each conv-block's Conv2d under it, weights
-  ;; before biases.
+  (define hand-losses
+    (with-default-device 'cpu
+      (manual-seed! 0)
+      (define-values (xs ys) (load-mnist-fixture))
+      (define net (convnet))
+      (define opt (adam (parameters net) #:lr 0.001))
+      (for/list ([_ (in-range 5)])
+        (zero-grads! opt)
+        (define loss (cross-entropy (net xs) ys))
+        (backward! loss)
+        (step! opt)
+        (item loss))))
+  (check-equal? losses hand-losses)
   (check-equal? (map car (named-parameters classifier))
                 '("net.0.conv.weight" "net.0.conv.bias"
                   "net.1.conv.weight" "net.1.conv.bias"
@@ -39,16 +49,12 @@
   (check-equal? (map tensor-shape (parameters classifier))
                 '((16 1 3 3) (16) (32 16 3 3) (32)
                   (128 800) (128) (10 128) (10)))
-  ;; smoke-test accuracy (the only exerciser of in-eval-mode at the example
-  ;; level): the loss-decreasing classifier should beat the 0.1 random-chance
-  ;; floor for 10 classes, and accuracy must leave it back in train mode.
   (define-values (xs ys) (load-mnist-fixture))
   (define acc (accuracy classifier xs ys))
   (check-true (and (> acc 0.1) (<= acc 1.0))
               (format "accuracy out of expected range: ~a" acc))
-  (check-true (layer-training? classifier) "accuracy left the classifier in eval mode")
-  ;; the validation step's epoch mean over equal batches is the accuracy of
-  ;; the whole set
+  (check-true (layer-training? classifier)
+              "accuracy left the classifier in eval mode")
   (define fixture (dataloader (tensor-dataset xs ys) #:batch-size 64))
   (define r (fit classifier fixture #:val fixture #:max-epochs 1 #:logger #f
                  #:num-sanity-val-steps 0))
@@ -57,7 +63,8 @@
   ;; convergence, never equality with the CPU losses above.
   (define accel (accelerator-if-available))
   (unless (eq? (device-type accel) 'cpu)
-    (define-values (a-losses a-classifier _a-dev) (run-example #:device accel))
+    (define-values (a-losses a-classifier _a-dev)
+      (run-example #:device accel))
     (check-equal? (device (car (parameters a-classifier))) accel)
     (check-true (andmap (lambda (l) (and (rational? l) (not (nan? l)))) a-losses)
                 (format "non-finite loss on ~a: ~a" accel a-losses))

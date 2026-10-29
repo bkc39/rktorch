@@ -85,24 +85,19 @@ batches of 1000, so the test set never has to live on the device all at once.
 (define (accuracy net xs ys)
   (in-eval-mode net
     (with-no-grad
-      (define n (car (tensor-shape xs)))
+      (define n (length xs))
       (define correct
         (for/sum ([start (in-range 0 n 1000)])
           (define len (min 1000 (- n start)))
-          (define preds (argmax (net (narrow xs 0 start len)) 1))
-          (item (sum (eq preds (narrow ys 0 start len))))))
+          (define preds (~> xs (narrow 0 start len) net (argmax 1)))
+          (~> ys (narrow 0 start len) (eq preds) sum item)))
       (exact->inexact (/ correct n)))))]
 
 @bold{The deterministic core.} @racket[run-example] is the seeded, offline entry
-the test harness drives: it fits a fresh @racket[MnistClassifier] for
-@racket[steps] full-batch steps on the committed 256-image fixture and returns
-the per-step losses, read by a @racket[lambda-callback], the trained classifier,
-and the device. Full-batch keeps it reproducible across languages: with the
-same seed the @racket[Conv2d] and @racket[Linear] inits draw value-for-value
-like @tt{nn.Conv2d}/@tt{nn.Linear}, and the identical updates track
-@tt{torch.optim.Adam}. @racket[with-default-device] sets the process default
-device for the dynamic extent of the run and restores the prior one, even if a
-step raises.
+the test harness and the PyTorch parity twin both drive: @racket[steps]
+full-batch steps on the committed 256-image fixture, answering the per-step
+losses (read by a @racket[lambda-callback]), the trained classifier and the
+device.
 
 @chunk[<r05-run>
 (define (run-example #:steps [steps 5] #:device [device (pick-device)])
@@ -111,22 +106,18 @@ step raises.
     (define-values (xs ys) (load-mnist-fixture))
     (define classifier (MnistClassifier))
     (define losses '())
-    (define (record! r loss extra . batch)
+    (define (record! _r loss _extra _xb _yb)
       (set! losses (cons (item loss) losses)))
     (fit classifier
-         (dataloader (tensor-dataset xs ys) #:batch-size (car (shape xs)))
+         (dataloader (tensor-dataset xs ys) #:batch-size (length xs))
          #:max-steps steps #:logger #f
          #:callbacks (list (lambda-callback #:on-train-batch-end record!)))
     (values (reverse losses) classifier device)))]
 
-@bold{The real thing.} @racket[train-mnist] is the headline run: it downloads the
-full dataset (cached under @envvar{RKTORCH_MNIST_DIR} or the system cache dir),
-fits for @racket[epochs] epochs of shuffled minibatches drawn by a
-@racket[dataloader] over the device-resident training set (a seeded
-@racket[make-generator], so the batch order replays), validates on the test
-set after each, and answers the last epoch's test accuracy. The default
-@racket[stdout-logger] prints the training loss every 50 steps and the
-accuracy at each epoch's end.
+@bold{The real thing.} @racket[train-mnist] fits the full dataset (cached under
+@envvar{RKTORCH_MNIST_DIR} or the system cache dir) in seeded, shuffled
+minibatches, validates on the test set each epoch, and answers the last test
+accuracy; the default @racket[stdout-logger] prints the progress.
 
 @chunk[<r05-train-mnist>
 (define (train-mnist #:epochs [epochs 3] #:batch [batch 128]
@@ -141,7 +132,7 @@ accuracy at each epoch's end.
                        #:batch-size batch #:shuffle? #t
                        #:generator (make-generator 0))
            #:val (dataloader (tensor-dataset test-x test-y) #:batch-size 1000)
-           #:max-epochs epochs))
+           #:max-epochs epochs #:num-sanity-val-steps 0))
     (run-metric r 'val/acc)))]
 
 @chunk[<*>
