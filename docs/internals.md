@@ -61,7 +61,10 @@ when the free raises, since an attempted free consumes the finalizer
 backstop and a live-looking tag would invite use-after-free. A thread
 killed mid-free, before that region, leaves the wrapper `'freeing` and the
 handle to the finalizer, which may claim a lifetime its dead claimant
-holds.
+holds. Killed at `free-unaccounted`, after the unaccounting, it leaves
+a live, usable tensor that is off the ledger, its phantom bytes zeroed,
+until the finalizer releases it. The `state` setter is not exported by
+name, though the struct info still carries it.
 
 The finalizer does not read the wrapper's state, and cannot: it is
 registered on the handle inside the raw call's region, before any wrapper

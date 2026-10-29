@@ -150,16 +150,20 @@
   (define (stop-mid-free! point pool stop-by)
     (define owner (make-custodian))
     (define t (zeros 256 256))
-    (define g (handle-gate point (tensor-handle t)))
+    (define h (tensor-handle t))
+    (define g (handle-gate point h))
+    (define parked (make-watch))
     (with-parked [a (parameterize ([current-custodian owner])
                       (spawn (lambda () (tensor-free! t)) #:pool pool #:label 'a))
-                  #:at g]
+                  #:at g #:watch parked]
       (check-eq? (wait-for-arrival g) 'parked)
       (case stop-by
         [(kill) (stop! a)]
         [(custodian) (custodian-shutdown-all owner)])
       (check-true (tensor? t) "a killed free flipped the tag")
-      (check-exn freeing-loser? (lambda () (tensor-free! t)))))
+      (check-exn freeing-loser? (lambda () (tensor-free! t)))
+      (check-equal? (watch-freed-count parked h) 0
+                    "a native release ran while the killed free was parked")))
 
   (define (killed-mid-free point pool stop-by)
     (settle!)
@@ -178,6 +182,30 @@
            [pool (in-list pools)]
            [stop-by (in-list '(kill custodian))])
       (killed-mid-free point pool stop-by)))
+
+  (define (killed-after-unaccounting pool)
+    (define t (zeros 256 256))
+    (define g (handle-gate 'free-unaccounted (tensor-handle t)))
+    (define (live) (dict-ref (native-memory-use) cpu 0))
+    (define held (live))
+    (with-parked [a (spawn (lambda () (tensor-free! t)) #:pool pool #:label 'a)
+                  #:at g]
+      (check-eq? (wait-for-arrival g) 'parked)
+      (stop! a))
+    (check-equal? (- held (live)) (* 256 256 4)
+                  "a free killed after it unaccounted left its bytes on the ledger")
+    (check-true (tensor? t) "a free killed before its release flipped the tag"))
+
+  (test-case "a free killed after it unaccounted leaves a live tensor off the ledger"
+    (for ([pool (in-list pools)])
+      (settle!)
+      (define base (ledger-snapshot))
+      (define w (make-watch))
+      (with-race-hook (watch-hook w)
+        (killed-after-unaccounting pool)
+        (settle!))
+      (check-equal? (watch-finalized w) 1)
+      (check-ledger base w)))
 
   (define (killed-at point pool stop-by)
     (settle!)
