@@ -2,7 +2,8 @@
 
 (require (only-in racket/match match match-define)
          (only-in "../../foreign.rkt"
-                  * + cat detach device dtype max min reshape tensor->list tensor? to))
+                  * + cat detach device dtype max min reshape tensor->list tensor? to
+                  zeros-like))
 
 (provide accumulators
          book-metric
@@ -39,7 +40,7 @@
 (define (scalar v)
   (cond
     [(not (tensor? v)) v]
-    [(memq (dtype v) '(float32 float64)) (detach v)]
+    [(memq (dtype v) '(float32 float64)) (* (detach v) 1)]
     [else (to (detach v) 'float32)]))
 
 (define (note-step! b loop key v logger? both?)
@@ -48,7 +49,7 @@
   (hash-set! (ledger-stepped l) key #t))
 
 (define (as-tensor v like)
-  (if (tensor? v) v (+ (* (detach like) 0) v)))
+  (if (tensor? v) v (+ (zeros-like like) v)))
 
 (define (larger reduce a b)
   (define pick (if (eq? reduce 'max) max min))
@@ -63,7 +64,7 @@
     [_ (larger reduce acc v)]))
 
 (define (start reduce v w)
-  (if (eq? reduce 'mean) (* v w) (* v 1)))
+  (if (eq? reduce 'mean) (* v w) v))
 
 (define (note-epoch! b loop key v w reduce logger? both?)
   (define t (ledger-epoch (loop-ledger b loop)))
