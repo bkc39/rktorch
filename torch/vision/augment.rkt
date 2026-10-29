@@ -3,9 +3,18 @@
 (require (only-in racket/contract/base
                   -> ->* ->i >=/c and/c any any/c contract non-empty-listof
                   listof or/c real-in)
-         (only-in "../foreign.rkt" device tensor?)
-         (only-in "../private/contract.rkt" define/contract-out supplied-or)
+         (only-in racket/match match-define)
+         (only-in threading ~>)
+         (only-in "../foreign.rkt"
+                  * + - / < affine-grid cat clamp device dtype exp grid-sample
+                  log rand reshape select shape sqrt stack tensor tensor?
+                  to-dtype where zeros-like)
          (only-in "../foreign/generator.rkt" generator-on?)
+         (only-in "../generated.rkt" broadcast-to)
+         (only-in "../private/contract.rkt" define/contract-out supplied-or)
+         (only-in "private/color.rkt"
+                  blend brightened column contrast-mean hue-turned luma
+                  solarized)
          (only-in "private/contracts.rkt"
                   crop-boxes/c float-batch/c generator-for/c image-size/c
                   jitter-strengths/c ordered-pair/c per-sample-mask/c
@@ -17,6 +26,38 @@
 (define ratio/c (ordered-pair/c (and/c real? positive?)))
 (define strength/c (and/c real? (>=/c 0)))
 
+(define (sides size)
+  (if (list? size) size (list size size)))
+
+(define (drawer x generator)
+  (define n (car (shape x)))
+  (define on (device x))
+  (case-lambda
+    [() (rand n #:device on #:generator generator)]
+    [(lo hi)
+     (define-values (lo* hi*) (values (exact->inexact lo) (exact->inexact hi)))
+     (+ lo* (* (- hi* lo*) (rand n #:device on #:generator generator)))]))
+
+(define (coin x generator p)
+  (reshape (< ((drawer x generator)) p) -1 1 1 1))
+
+(define (mirrored sx flips)
+  (if flips (* sx (where flips -1.0 1.0)) sx))
+
+(define (cropped x size sx sy cx cy padding-mode)
+  (match-define (list n c _ _) (shape x))
+  (match-define (list oh ow) (sides size))
+  (define zero (zeros-like sx))
+  (define theta
+    (~> (list (stack (list sx zero cx) 1) (stack (list zero sy cy) 1))
+        (stack 1)
+        (to-dtype (dtype x))))
+  (grid-sample x (affine-grid theta (list n c oh ow))
+               #:padding-mode padding-mode))
+
+(define (blend-with x other factor)
+  (blend x (other x) factor))
+
 (define/contract-out (resized-crop x boxes size ;; noqa
                                    #:flip [flip #f]
                                    #:padding-mode [padding-mode 'reflection])
@@ -24,32 +65,41 @@
        (#:flip [flip (x) (or/c #f (per-sample-mask/c x))]
         #:padding-mode [padding-mode padding-mode/c])
        [result tensor?])
-  (error 'unimplemented))
+  (match-define (list _ _ h w) (shape x))
+  (define (part k) (select boxes 1 k))
+  (define-values (top left height width) (values (part 0) (part 1) (part 2) (part 3)))
+  (define (centre start extent side)
+    (~> start (* 2.0) (+ extent) (/ side) (- 1.0)))
+  (cropped x size
+           (mirrored (/ width w) flip) (/ height h)
+           (centre left width w) (centre top height h)
+           padding-mode))
 
 (define/contract-out (adjust-brightness x factor) ;; noqa
   (->i ([x float-batch/c] [factor (x) (per-sample/c x)]) [result tensor?])
-  (error 'unimplemented))
+  (brightened x (column x factor)))
 
 (define/contract-out (adjust-contrast x factor) ;; noqa
   (->i ([x rgb-float-batch/c] [factor (x) (per-sample/c x)]) [result tensor?])
-  (error 'unimplemented))
+  (blend x (contrast-mean x) (column x factor)))
 
 (define/contract-out (adjust-saturation x factor) ;; noqa
   (->i ([x rgb-float-batch/c] [factor (x) (per-sample/c x)]) [result tensor?])
-  (error 'unimplemented))
+  (blend x (luma x) (column x factor)))
 
 (define/contract-out (adjust-hue x factor) ;; noqa
   (->i ([x rgb-float-batch/c] [factor (x) (per-sample/c x (real-in -0.5 0.5))])
        [result tensor?])
-  (error 'unimplemented))
+  (hue-turned x (column x factor)))
 
 (define/contract-out (rgb->grayscale x #:channels [channels 1]) ;; noqa
   (->* [rgb-float-batch/c] [#:channels (or/c 1 3)] tensor?)
-  (error 'unimplemented))
+  (define gray (luma x))
+  (if (= channels 3) (broadcast-to gray (shape x)) gray))
 
 (define/contract-out (solarize x threshold) ;; noqa
   (->i ([x float-batch/c] [threshold (x) (per-sample/c x)]) [result tensor?])
-  (error 'unimplemented))
+  (solarized x (column x threshold)))
 
 (define/contract-out (random-affine-crop x size ;; noqa
                                          #:scale [scale '(0.08 1.0)]
@@ -66,7 +116,18 @@
        #:pre/name (x generator) "the generator lives on the batch's device"
        (generator-on? (supplied-or generator) (device x))
        [result tensor?])
-  (error 'unimplemented))
+  (match-define (list _ _ h w) (shape x))
+  (define draw (drawer x generator))
+  (define area (draw (car scale) (cadr scale)))
+  (define ratio* (exp (draw (log (exact->inexact (car ratio)))
+                            (log (exact->inexact (cadr ratio))))))
+  (define (side a) (clamp (sqrt a) #:max 1.0))
+  (define sx (side (* area ratio* (/ (exact->inexact h) w))))
+  (define sy (side (* (/ area ratio*) (/ (exact->inexact w) h))))
+  (define cx (* (- 1.0 sx) (draw -1.0 1.0)))
+  (define cy (* (- 1.0 sy) (draw -1.0 1.0)))
+  (define flips (and (positive? flip-p) (< (draw) flip-p)))
+  (cropped x size (mirrored sx flips) sy cx cy padding-mode))
 
 (define/contract-out (random-color-jitter x ;; noqa
                                           #:brightness [b 0]
@@ -85,7 +146,22 @@
        #:pre/name (x generator) "the generator lives on the batch's device"
        (generator-on? (supplied-or generator) (device x))
        [result tensor?])
-  (error 'unimplemented))
+  (cond
+    [(zero? p) x]
+    [else
+     (define draw (drawer x generator))
+     (define on (< (draw) p))
+     (define (factor strength)
+       (where on (draw (- 1.0 strength) (+ 1.0 strength)) 1.0))
+     (define fb (factor b))
+     (define fc (factor c))
+     (define fs (factor s))
+     (define fh (where on (draw (- h) h) 0.0))
+     (~> x
+         (brightened (column x fb))
+         (blend-with contrast-mean (column x fc))
+         (blend-with luma (column x fs))
+         (hue-turned (column x fh)))]))
 
 (define/contract-out (random-grayscale x #:p [p 0.1] #:generator [generator #f]) ;; noqa
   (->i ([x rgb-float-batch/c])
@@ -94,7 +170,9 @@
        #:pre/name (x generator) "the generator lives on the batch's device"
        (generator-on? (supplied-or generator) (device x))
        [result tensor?])
-  (error 'unimplemented))
+  (cond
+    [(zero? p) x]
+    [else (where (coin x generator p) (luma x) x)]))
 
 (define/contract-out (random-solarize x threshold ;; noqa
                                       #:p [p 0.5]
@@ -105,14 +183,40 @@
        #:pre/name (x generator) "the generator lives on the batch's device"
        (generator-on? (supplied-or generator) (device x))
        [result tensor?])
-  (error 'unimplemented))
+  (cond
+    [(zero? p) x]
+    [else
+     (where (coin x generator p) (solarized x (column x threshold)) x)]))
 
 (struct crop-spec (size scale ratio flip-p jitter jitter-p gray-p solarize-p
                         mean std check)
   #:property prop:procedure
   (lambda (view images #:generator [generator #f])
     ((crop-spec-check view) images generator)
-    (error 'unimplemented)))
+    (viewed view images generator)))
+
+(define (normalized x vs op)
+  (cond
+    [vs (op x (reshape (tensor (map exact->inexact vs) #:dtype (dtype x)
+                               #:device (device x))
+                       1 3 1 1))]
+    [else x]))
+
+(define (viewed view images generator)
+  (match-define (crop-spec size scale ratio flip-p (list b c s h) jitter-p
+                           gray-p solarize-p mean std _)
+    view)
+  (define x
+    (if (eq? (dtype images) 'uint8) (/ (to-dtype images 'float32) 255.0) images))
+  (~> x
+      (random-affine-crop size #:scale scale #:ratio ratio #:flip-p flip-p
+                          #:generator generator)
+      (random-color-jitter #:brightness b #:contrast c #:saturation s #:hue h
+                           #:p jitter-p #:generator generator)
+      (random-grayscale #:p gray-p #:generator generator)
+      (random-solarize 0.5 #:p solarize-p #:generator generator)
+      (normalized mean -)
+      (normalized std /)))
 
 (define view-call/c
   (->i ([images rgb-image-batch-u8-or-float/c]
@@ -146,9 +250,6 @@
   (crop-spec size scale ratio flip-p jitter jitter-p gray-p solarize-p mean std
              (contract view-call/c void 'crop-view 'caller 'crop-view #f)))
 
-(define (sides size)
-  (if (list? size) size (list size size)))
-
 (define (one-size? views)
   (for/and ([v (in-list (cdr views))])
     (equal? (sides (crop-spec-size v)) (sides (crop-spec-size (car views))))))
@@ -164,4 +265,8 @@
        #:pre/name (locals) "local views share one #:size"
        (or (null? locals) (one-size? locals))
        (values [global-views tensor?] [local-views (or/c #f tensor?)]))
-  (error 'unimplemented))
+  (define (group views)
+    (for/list ([v (in-list views)])
+      (v images #:generator generator)))
+  (define big (cat (group globals) 0))
+  (values big (and (pair? locals) (cat (group locals) 0))))

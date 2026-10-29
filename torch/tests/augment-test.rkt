@@ -4,6 +4,7 @@
   (require rackunit
            (only-in racket/list make-list)
            (only-in racket/match match-define)
+           (only-in threading ~>)
            (only-in "../main.rkt"
                     * + - < cuda-available? cuda-device cuda-memory-stats
                     cuda-reset-peak-stats! device dtype make-generator
@@ -35,7 +36,7 @@
     (and (equal? (shape a) (shape b))
          (for/and ([u (in-list (flat (values-of a)))]
                    [v (in-list (flat (values-of b)))])
-           (<= (abs (- u v)) tolerance))))
+           (~> (- u v) abs (<= tolerance)))))
 
   (define (flat v)
     (if (list? v) (apply append (map flat v)) (list v)))
@@ -44,7 +45,7 @@
     (to (rand n 3 side side) on))
 
   (define (bytes-images n on #:side [side 32])
-    (to (to-dtype (* (rand n 3 side side) 255) 'uint8) on))
+    (~> (rand n 3 side side) (* 255) (to-dtype 'uint8) (to on)))
 
   (define (dino-global #:solarize-p [solarize-p 0.0])
     (crop-view #:size 32 #:scale '(0.4 1.0) #:solarize-p solarize-p
@@ -62,7 +63,7 @@
 
   (define (boxes-for x)
     (define n (car (shape x)))
-    (to (tensor (make-list n '(1.0 2.0 7.5 6.0))) (device x)))
+    (~> (make-list n '(1.0 2.0 7.5 6.0)) tensor (to (device x))))
 
   (define (factors-for x lo hi)
     (define n (car (shape x)))
@@ -72,64 +73,71 @@
     (define n (car (shape x)))
     (< (rand n #:device (device x)) 0.5))
 
+  (define ((staged op setup) x g)
+    (define args (setup x))
+    (lambda () (apply op x args)))
+
+  (define ((plain op) x g)
+    (lambda () (op x g)))
+
   (define cases
     (list
      (list "resized-crop" 'float
-           (lambda (x g) (resized-crop x (boxes-for x) 8 #:flip (flips-for x))))
+           (staged (lambda (x boxes flips) (resized-crop x boxes 8 #:flip flips))
+                   (lambda (x) (list (boxes-for x) (flips-for x)))))
      (list "adjust-brightness" 'float
-           (lambda (x g) (adjust-brightness x (factors-for x 0.5 1.5))))
+           (staged adjust-brightness (lambda (x) (list (factors-for x 0.5 1.5)))))
      (list "adjust-contrast" 'float
-           (lambda (x g) (adjust-contrast x (factors-for x 0.5 1.5))))
+           (staged adjust-contrast (lambda (x) (list (factors-for x 0.5 1.5)))))
      (list "adjust-saturation" 'float
-           (lambda (x g) (adjust-saturation x (factors-for x 0.5 1.5))))
+           (staged adjust-saturation (lambda (x) (list (factors-for x 0.5 1.5)))))
      (list "adjust-hue" 'float
-           (lambda (x g) (adjust-hue x (factors-for x -0.3 0.3))))
+           (staged adjust-hue (lambda (x) (list (factors-for x -0.3 0.3)))))
      (list "rgb->grayscale" 'float
-           (lambda (x g) (rgb->grayscale x #:channels 3)))
+           (plain (lambda (x g) (rgb->grayscale x #:channels 3))))
      (list "solarize" 'float
-           (lambda (x g) (solarize x (factors-for x 0.3 0.7))))
+           (staged solarize (lambda (x) (list (factors-for x 0.3 0.7)))))
      (list "random-affine-crop" 'float
-           (lambda (x g) (random-affine-crop x 8 #:flip-p 0.5 #:generator g)))
+           (plain (lambda (x g) (random-affine-crop x 8 #:flip-p 0.5 #:generator g))))
      (list "random-color-jitter" 'float
-           (lambda (x g)
-             (random-color-jitter x #:brightness 0.4 #:contrast 0.4
-                                  #:saturation 0.2 #:hue 0.1 #:p 0.8
-                                  #:generator g)))
+           (plain (lambda (x g)
+                    (random-color-jitter x #:brightness 0.4 #:contrast 0.4
+                                         #:saturation 0.2 #:hue 0.1 #:p 0.8
+                                         #:generator g))))
      (list "random-grayscale" 'float
-           (lambda (x g) (random-grayscale x #:p 0.2 #:generator g)))
+           (plain (lambda (x g) (random-grayscale x #:p 0.2 #:generator g))))
      (list "random-solarize" 'float
-           (lambda (x g) (random-solarize x 0.5 #:p 0.2 #:generator g)))
+           (plain (lambda (x g) (random-solarize x 0.5 #:p 0.2 #:generator g))))
      (list "crop-view global" 'uint8
-           (lambda (x g) ((dino-global #:solarize-p 0.2) x #:generator g)))
+           (plain (lambda (x g) ((dino-global #:solarize-p 0.2) x #:generator g))))
      (list "crop-view local" 'uint8
-           (lambda (x g) ((dino-local) x #:generator g)))
+           (plain (lambda (x g) ((dino-local) x #:generator g))))
      (list "multi-crop 2+6" 'uint8
-           (lambda (x g)
-             (define-values (big small) (dino-crop x g))
-             (list big small)))))
+           (plain (lambda (x g)
+                    (define-values (big small) (dino-crop x g))
+                    (list big small))))))
 
   (define golden-op-calls
-    '(("resized-crop" . 0)
-      ("adjust-brightness" . 0)
-      ("adjust-contrast" . 0)
-      ("adjust-saturation" . 0)
-      ("adjust-hue" . 0)
-      ("rgb->grayscale" . 0)
-      ("solarize" . 0)
-      ("random-affine-crop" . 0)
-      ("random-color-jitter" . 0)
-      ("random-grayscale" . 0)
-      ("random-solarize" . 0)
-      ("crop-view global" . 0)
-      ("crop-view local" . 0)
-      ("multi-crop 2+6" . 0)))
+    '(("resized-crop" . 87)
+      ("adjust-brightness" . 16)
+      ("adjust-contrast" . 55)
+      ("adjust-saturation" . 52)
+      ("adjust-hue" . 297)
+      ("rgb->grayscale" . 28)
+      ("solarize" . 23)
+      ("random-affine-crop" . 136)
+      ("random-color-jitter" . 470)
+      ("random-grayscale" . 45)
+      ("random-solarize" . 39)
+      ("crop-view global" . 700)
+      ("crop-view local" . 667)
+      ("multi-crop 2+6" . 5381)))
 
   (define (input kind n on)
     (if (eq? kind 'uint8) (bytes-images n on) (images n on)))
 
   (define (op-calls kind run n on)
-    (define x (input kind n on))
-    (define (once) (run x (make-generator 1 #:device on)))
+    (define once (run (input kind n on) (make-generator 1 #:device on)))
     (once)
     (op-calls-of once))
 
@@ -200,7 +208,7 @@
            [c (in-list (list-tail cases 7))])
       (match-define (list name kind run) c)
       (define x (input kind 6 on))
-      (define (with-seed s) (run x (make-generator s #:device on)))
+      (define (with-seed s) ((run x (make-generator s #:device on))))
       (define (flat-out v) (if (list? v) (map values-of v) (values-of v)))
       (check-equal? (flat-out (with-seed 0)) (flat-out (with-seed 0))
                     (format "~a [~a]" name on))
@@ -254,7 +262,7 @@
 
   (define (per-image op x factors)
     (stack (for/list ([i (in-naturals)] [f (in-list factors)])
-             (select (op (to (stack (list (select x 0 i)) 0) (device x)) f) 0 0))
+             (~> (list (select x 0 i)) (stack 0) (op f) (select 0 0)))
            0))
 
   (bounded-test "A5: a factor per image equals the images adjusted one at a time"
@@ -282,7 +290,7 @@
            [c (in-list cases)])
       (match-define (list name kind run) c)
       (define x (input kind 3 on))
-      (define out (run x (make-generator 2 #:device on)))
+      (define out ((run x (make-generator 2 #:device on))))
       (for ([t (in-list (if (list? out) out (list out)))])
         (check-equal? (device t) (device x) name)
         (check-eq? (dtype t) 'float32 name))))

@@ -312,7 +312,7 @@
       [(< (/ w h) (car ratio))
        (values (max 1 (exact-round (/ w (car ratio)))) w)]
       [(> (/ w h) (cadr ratio))
-       (values h (max 1 (exact-round (* h (cadr ratio)))))]
+       (values h (max 1 (~> (cadr ratio) (* h) exact-round)))]
       [else (values h w)]))
   (list (quotient (- h ch) 2) (quotient (- w cw) 2) ch cw))
 

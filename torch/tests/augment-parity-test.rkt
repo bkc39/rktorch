@@ -4,6 +4,7 @@
   (require rackunit
            (only-in racket/list make-list)
            (only-in racket/runtime-path #%datum define-runtime-path)
+           (only-in threading _ ~>)
            (only-in "../main.rkt"
                     bytes->tensor cuda-available? index-select make-generator
                     tensor tensor->list to)
@@ -47,7 +48,7 @@
 
   (define (check-v2 device tolerance)
     (define j (twin "augment_v2.py" device))
-    (define x (to (unpack (hash-ref j 'x) 'float32) device))
+    (define x (~> j (hash-ref 'x) (unpack 'float32) (to device)))
     (define (expected e) (unpack e 'float32))
     (define factors (hash-ref j 'factors))
     (for ([named (in-list functional)])
@@ -62,7 +63,7 @@
                    (rgb->grayscale x #:channels k) (expected e) tolerance))
     (for ([c (in-list (hash-ref j 'crops))])
       (define box (map exact->inexact (hash-ref c 'box)))
-      (define out (resized-crop x (to (tensor (make-list 2 box)) device)
+      (define out (resized-crop x (~> box (make-list 2 _) tensor (to device))
                                 (hash-ref c 'size)))
       (define rows (hash-ref c 'rows))
       (define cols (hash-ref c 'cols))
