@@ -2,6 +2,7 @@
 
 (module+ test
   (require rackunit
+           (only-in racket/dict in-dict)
            (only-in racket/list make-list)
            (only-in racket/runtime-path #%datum define-runtime-path)
            (only-in threading _ ~>)
@@ -51,15 +52,13 @@
     (define x (~> j (hash-ref 'x) (unpack 'float32) (to device)))
     (define (expected e) (unpack e 'float32))
     (define factors (hash-ref j 'factors))
-    (for ([named (in-list functional)])
-      (define name (car named))
-      (for ([f (in-list (hash-ref factors name))]
-            [e (in-list (hash-ref j name))])
-        (check-close (format "A10 ~a ~a [~a]" name f device)
-                     ((cdr named) x f) (expected e) tolerance)))
+    (for* ([(name op) (in-dict functional)]
+           [(f e) (in-parallel (hash-ref factors name) (hash-ref j name))])
+      (check-close (format "adjust ~a by ~a against torchvision v2 [~a]" name f device)
+                   (op x f) (expected e) tolerance))
     (for ([k (in-list '(1 3))]
           [e (in-list (hash-ref j 'gray))])
-      (check-close (format "A10 grayscale ~a [~a]" k device)
+      (check-close (format "grayscale in ~a channels against torchvision v2 [~a]" k device)
                    (rgb->grayscale x #:channels k) (expected e) tolerance))
     (for ([c (in-list (hash-ref j 'crops))])
       (define box (map exact->inexact (hash-ref c 'box)))
@@ -67,7 +66,7 @@
                                 (hash-ref c 'size)))
       (define rows (hash-ref c 'rows))
       (define cols (hash-ref c 'cols))
-      (check-close (format "A10 resized-crop ~a [~a]" box device)
+      (check-close (format "resized-crop of ~a against torchvision v2 [~a]" box device)
                    (interior out rows cols device)
                    (~> (hash-ref c 'out) expected (interior rows cols 'cpu))
                    tolerance)))
@@ -100,9 +99,9 @@
       (define-values (big small)
         (multi-crop images globals locals
                     #:generator (make-generator seed #:device device)))
-      (check-close (format "A11 globals seed ~a [~a]" seed device)
+      (check-close (format "multi-crop globals at seed ~a against 18_dino.py [~a]" seed device)
                    big (unpack (hash-ref e 'global) 'float32) tolerance)
-      (check-close (format "A11 locals seed ~a [~a]" seed device)
+      (check-close (format "multi-crop locals at seed ~a against 18_dino.py [~a]" seed device)
                    small (unpack (hash-ref e 'local) 'float32) tolerance)))
 
   (cond

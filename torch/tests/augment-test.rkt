@@ -2,15 +2,17 @@
 
 (module+ test
   (require rackunit
+           (only-in racket/dict dict-ref in-dict)
            (only-in racket/list make-list)
            (only-in racket/match match-define)
            (only-in threading ~>)
            (only-in "../main.rkt"
                     * + - < cuda-available? cuda-device cuda-memory-stats
-                    cuda-reset-peak-stats! device dtype make-generator
-                    mps-available? mps-device native-memory-use numel rand
-                    reclaim-native-memory! select shape stack tensor
-                    tensor->list to to-dtype)
+                    cuda-reset-peak-stats! current-generator device dtype flip
+                    make-generator mps-available? mps-device narrow
+                    native-memory-use numel rand reclaim-native-memory! reshape
+                    select shape stack tensor tensor->list to to-dtype where
+                    zeros-like)
            (only-in "../vision/augment.rkt"
                     adjust-brightness adjust-contrast adjust-hue
                     adjust-saturation crop-view crop-view? multi-crop
@@ -61,17 +63,18 @@
                 (make-list 6 (dino-local))
                 #:generator g))
 
-  (define (boxes-for x)
-    (define n (car (shape x)))
-    (~> (make-list n '(1.0 2.0 7.5 6.0)) tensor (to (device x))))
+  (define (batch-size x)
+    (match-define (cons n _) (shape x))
+    n)
+
+  (define (boxes-for x [box '(1.0 2.0 7.5 6.0)])
+    (~> (make-list (batch-size x) box) tensor (to (device x))))
 
   (define (factors-for x lo hi)
-    (define n (car (shape x)))
-    (+ lo (* (- hi lo) (rand n #:device (device x)))))
+    (+ lo (* (- hi lo) (rand (batch-size x) #:device (device x)))))
 
   (define (flips-for x)
-    (define n (car (shape x)))
-    (< (rand n #:device (device x)) 0.5))
+    (< (rand (batch-size x) #:device (device x)) 0.5))
 
   (define ((staged op setup) x g)
     (define args (setup x))
@@ -118,20 +121,20 @@
                     (list big small))))))
 
   (define golden-op-calls
-    '(("resized-crop" . 87)
-      ("adjust-brightness" . 16)
-      ("adjust-contrast" . 55)
-      ("adjust-saturation" . 52)
-      ("adjust-hue" . 297)
-      ("rgb->grayscale" . 28)
-      ("solarize" . 23)
-      ("random-affine-crop" . 136)
-      ("random-color-jitter" . 470)
-      ("random-grayscale" . 45)
-      ("random-solarize" . 39)
-      ("crop-view global" . 700)
-      ("crop-view local" . 667)
-      ("multi-crop 2+6" . 5381)))
+    (hash "resized-crop" 87
+          "adjust-brightness" 16
+          "adjust-contrast" 55
+          "adjust-saturation" 52
+          "adjust-hue" 297
+          "rgb->grayscale" 28
+          "solarize" 23
+          "random-affine-crop" 136
+          "random-color-jitter" 470
+          "random-grayscale" 45
+          "random-solarize" 39
+          "crop-view global" 700
+          "crop-view local" 667
+          "multi-crop 2+6" 5381))
 
   (define (input kind n on)
     (if (eq? kind 'uint8) (bytes-images n on) (images n on)))
@@ -149,7 +152,7 @@
       (define large (op-calls kind run 128 on))
       (check-equal? large small (format "~a [~a]: ~a at 2, ~a at 128"
                                         name on small large))
-      (check-true (<= small (cdr (assoc name golden-op-calls)))
+      (check-true (<= small (hash-ref golden-op-calls name))
                   (format "~a [~a]: ~a calls" name on small))))
 
   (define (draws-after run n on)
@@ -285,6 +288,68 @@
                     (format "~a [~a]" h on)))
       (check-true (close? (adjust-hue (adjust-hue x 0.5) 0.5) x 1e-5))))
 
+  (define (pixel-pairs n)
+    (tensor (make-list n '(((0.2 0.8)) ((0.2 0.8)) ((0.2 0.8))))))
+
+  (bounded-test "A4: a contrast strength above 1 never reverses two pixels' order"
+    (for ([on (in-list devices)])
+      (define out (random-color-jitter (to (pixel-pairs 256) on) #:contrast 1.5 #:p 1
+                                       #:generator (make-generator 6 #:device on)))
+      (check-true (for/and ([dark (in-list (flat (values-of (narrow out 3 0 1))))]
+                            [light (in-list (flat (values-of (narrow out 3 1 1))))])
+                    (<= dark light))
+                  (format "~a" on))))
+
+  (bounded-test "A6: a hue factor tensor below -1 turns by its fractional part"
+    (for ([on (in-list devices)])
+      (define x (images 4 on))
+      (check-true (close? (adjust-hue x (to (tensor '(-1.2 -1.2 -1.2 -1.2)) on))
+                          (adjust-hue x -0.2)
+                          1e-5)
+                  (format "~a" on))))
+
+  (define (index-image rows cols)
+    (define (grid value)
+      (for/list ([i (in-range rows)])
+        (for/list ([j (in-range cols)])
+          (exact->inexact (value i j)))))
+    (tensor (list (list (grid (lambda (i j) j))
+                        (grid (lambda (i j) i))
+                        (grid (lambda (i j) 0))))))
+
+  (define (interior-steps out channel axis)
+    (define across (- 5 axis))
+    (~> (- (narrow out axis 1 7) (narrow out axis 0 7))
+        (narrow 1 channel 1)
+        (narrow axis 2 3)
+        (narrow across 2 4)
+        values-of
+        flat))
+
+  (bounded-test "A4: random-affine-crop of a non-square image keeps the drawn area and ratio"
+    (for ([on (in-list devices)])
+      (define out (random-affine-crop (to (index-image 8 16) on) 8
+                                      #:scale '(1/4 1/4) #:ratio '(2 2)
+                                      #:generator (make-generator 5 #:device on)))
+      (for ([column-step (in-list (interior-steps out 0 3))])
+        (check-= column-step 1.0 1e-4 (format "8 columns over 8 samples [~a]" on)))
+      (for ([row-step (in-list (interior-steps out 1 2))])
+        (check-= row-step 0.5 1e-4 (format "4 rows over 8 samples [~a]" on)))))
+
+  (bounded-test "A4: resized-crop mirrors the images #:flip marks; 'zeros pads outside"
+    (for ([on (in-list devices)])
+      (define x (images 6 on))
+      (define boxes (boxes-for x))
+      (define marks (flips-for x))
+      (define plain (resized-crop x boxes 8))
+      (check-true (close? (resized-crop x boxes 8 #:flip marks)
+                          (where (reshape marks -1 1 1 1) (flip plain 3) plain)
+                          1e-6)
+                  (format "flip [~a]" on))
+      (define outside (resized-crop x (boxes-for x '(20.0 20.0 4.0 4.0)) 4
+                                    #:padding-mode 'zeros))
+      (check-true (same? outside (zeros-like outside)) (format "zeros [~a]" on))))
+
   (bounded-test "A7: results stay on the input's device as float32"
     (for* ([on (in-list devices)]
            [c (in-list cases)])
@@ -325,6 +390,9 @@
                                             (crop-view #:size '(4 6))))))
     (check-exn blames-this-test (lambda () (multi-crop (rand 3 8 8) (list (dino-local)) '())))
     (check-exn blames-this-test (lambda () (crop-view #:size 0)))
+    (check-exn blames-this-test (lambda () (adjust-brightness x -0.1)))
+    (check-exn blames-this-test (lambda () (adjust-contrast x -0.1)))
+    (check-exn blames-this-test (lambda () (adjust-saturation x -0.1)))
     (check-exn (blames-caller? "caller")
                (lambda () ((dino-local) (rand 3 8 8))))
     (for ([on (in-list (cdr devices))])
@@ -339,21 +407,30 @@
                  (lambda () (adjust-brightness there (tensor '(1.0 1.0)))))
       (check-exn blames-this-test
                  (lambda () (multi-crop (to u8 on) (list (dino-local)) '()
-                                        #:generator (make-generator 1))))))
+                                        #:generator (make-generator 1))))
+      (check-exn (blames-caller? "caller")
+                 (lambda () ((dino-local) (to u8 on) #:generator (make-generator 1))))
+      (parameterize ([current-generator (make-generator 1)])
+        (check-exn blames-this-test (lambda () (random-affine-crop there 4)))
+        (check-exn blames-this-test (lambda () (random-color-jitter there)))
+        (check-exn blames-this-test (lambda () (random-grayscale there)))
+        (check-exn blames-this-test (lambda () (random-solarize there 0.5)))
+        (check-exn blames-this-test
+                   (lambda () (multi-crop (to u8 on) (list (dino-local)) '())))
+        (check-exn (blames-caller? "caller") (lambda () ((dino-local) (to u8 on)))))))
 
   (define (bytes-on on)
-    (for/sum ([entry (in-list (native-memory-use))]
-              #:when (equal? (car entry) on))
-      (cdr entry)))
+    (for/sum ([(place bytes) (in-dict (native-memory-use))]
+              #:when (equal? place on))
+      bytes))
 
   (define (peak-above on thunk)
+    (define (stat key) (dict-ref (cuda-memory-stats on) key))
     (reclaim-native-memory!)
-    (define before (cdr (assq 'allocated (cuda-memory-stats on))))
+    (define before (stat 'allocated))
     (cuda-reset-peak-stats! on)
     (define out (thunk))
-    (define peak (cdr (assq 'peak-allocated (cuda-memory-stats on))))
-    (define kept (for/sum ([t (in-list out)]) (* 4 (numel t))))
-    (- peak before kept))
+    (- (stat 'peak-allocated) before (* 4 (numel out))))
 
   (bounded-test "A9: multi-crop leaves no native memory behind and runs its views in turn"
     (for ([on (in-list devices)])
@@ -367,16 +444,17 @@
     (when (cuda-available?)
       (define on (cuda-device))
       (define x (bytes-images 256 on))
-      (dino-crop x (make-generator 4 #:device on))
-      (define all
-        (peak-above on (lambda ()
-                         (define-values (big small)
-                           (dino-crop x (make-generator 4 #:device on)))
-                         (list big small))))
-      (define one
-        (peak-above on (lambda ()
-                         (list ((dino-global) x
-                                              #:generator (make-generator 4 #:device on))))))
-      (check-true (<= all (+ one (expt 2 20)))
-                  (format "multi-crop ~a bytes above its outputs, one view ~a"
-                          all one)))))
+      (define (seeded) (make-generator 4 #:device on))
+      (dino-crop x (seeded))
+      (for ([name (in-list '("globals" "locals"))]
+            [views (in-list (list (list (dino-global) (dino-global #:solarize-p 0.2))
+                                  (make-list 6 (dino-local))))])
+        (match-define (cons first-view _) views)
+        (define group
+          (peak-above on (lambda ()
+                           (define-values (out _) (multi-crop x views '() #:generator (seeded)))
+                           out)))
+        (define one (peak-above on (lambda () (first-view x #:generator (seeded)))))
+        (check-true (<= group (+ one (expt 2 20)))
+                    (format "~a: ~a bytes above their output, one view ~a"
+                            name group one))))))

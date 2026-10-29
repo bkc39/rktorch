@@ -75,9 +75,12 @@
       (where (eq sector (exact->inexact k)) plane acc)))
   (cat (list (pick v q p p t v) (pick t v v q p p) (pick p p t v v q)) 1))
 
+(define (turns t)
+  (- t (floor-tensor t)))
+
 (define (hue-turned x factor)
   (define-values (h s v) (rgb->hsv x))
-  (~> (+ h factor) (+ 1.0) (fmod-scalar 1.0) (hsv->rgb s v)))
+  (~> (+ h factor) turns (hsv->rgb s v)))
 
 (define (contrast-mean x)
   (mean-dim (luma x) '(1 2 3) #t #f))

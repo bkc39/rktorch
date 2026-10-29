@@ -16,7 +16,8 @@
          (only-in "../foreign/contracts.rkt" image-batch/c)
          (only-in "../generated.rkt" index-tensor)
          (only-in "../private/contract.rkt" define/contract-out)
-         (only-in "private/contracts.rkt" ordered-pair/c))
+         (only-in "private/contracts.rkt"
+                  default-ratio default-scale ratio/c scale/c))
 
 (module+ private
   (provide batch-rng))
@@ -324,12 +325,12 @@
           (list size size)))
 
 (define/contract-out (random-resized-crop x size ;; noqa
-                                          #:scale [scale '(0.08 1.0)]
-                                          #:ratio [ratio '(3/4 4/3)]
+                                          #:scale [scale default-scale]
+                                          #:ratio [ratio default-ratio]
                                           #:generator [generator #f])
   (->* [float-image/c exact-positive-integer?]
-       [#:scale (~> (real-in 0 1) (and/c positive?) ordered-pair/c)
-        #:ratio (ordered-pair/c (and/c real? positive?))
+       [#:scale scale/c
+        #:ratio ratio/c
         #:generator (or/c cpu-generator/c #f)]
        tensor?)
   (define rng (batch-rng generator))

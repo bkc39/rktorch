@@ -1,36 +1,33 @@
 #lang racket/base
 
 (require (only-in racket/contract/base
-                  -> ->* ->i >=/c and/c any any/c contract non-empty-listof
-                  listof or/c real-in)
+                  -> ->* ->i and/c any/c contract non-empty-listof listof or/c
+                  real-in)
          (only-in racket/match match-define)
          (only-in threading ~>)
          (only-in "../foreign.rkt"
                   * + - / < affine-grid cat clamp device dtype exp grid-sample
                   log rand reshape select shape sqrt stack tensor tensor?
                   to-dtype where zeros-like)
-         (only-in "../foreign/generator.rkt" generator-on?)
          (only-in "../generated.rkt" broadcast-to)
-         (only-in "../private/contract.rkt" define/contract-out supplied-or)
+         (only-in "../private/contract.rkt" define/contract-out)
          (only-in "private/color.rkt"
                   blend brightened column contrast-mean hue-turned luma
                   solarized)
          (only-in "private/contracts.rkt"
-                  crop-boxes/c float-batch/c generator-for/c image-size/c
-                  jitter-strengths/c ordered-pair/c per-sample-mask/c
-                  per-sample/c rgb-float-batch/c rgb-image-batch-u8-or-float/c
-                  rgb-triple/c))
+                  batch-for/c crop-boxes/c default-ratio default-scale
+                  float-batch/c generator/c image-size/c jitter-strengths/c
+                  nonnegative/c per-sample-mask/c per-sample/c ratio/c
+                  rgb-float-batch/c rgb-image-batch-u8-or-float/c rgb-triple/c
+                  scale/c))
 
 (define padding-mode/c (or/c 'zeros 'border 'reflection))
-(define scale/c (~> (real-in 0 1) (and/c positive?) ordered-pair/c))
-(define ratio/c (ordered-pair/c (and/c real? positive?)))
-(define strength/c (and/c real? (>=/c 0)))
 
 (define (sides size)
   (if (list? size) size (list size size)))
 
 (define (drawer x generator)
-  (define n (car (shape x)))
+  (match-define (cons n _) (shape x))
   (define on (device x))
   (case-lambda
     [() (rand n #:device on #:generator generator)]
@@ -56,6 +53,9 @@
   (grid-sample x (affine-grid theta (list n c oh ow))
                #:padding-mode padding-mode))
 
+(define (log-of r)
+  (log (exact->inexact r)))
+
 (define (blend-with x other factor)
   (blend x (other x) factor))
 
@@ -77,15 +77,18 @@
            padding-mode))
 
 (define/contract-out (adjust-brightness x factor) ;; noqa
-  (->i ([x float-batch/c] [factor (x) (per-sample/c x)]) [result tensor?])
+  (->i ([x float-batch/c] [factor (x) (per-sample/c x nonnegative/c)])
+       [result tensor?])
   (brightened x (column x factor)))
 
 (define/contract-out (adjust-contrast x factor) ;; noqa
-  (->i ([x rgb-float-batch/c] [factor (x) (per-sample/c x)]) [result tensor?])
+  (->i ([x rgb-float-batch/c] [factor (x) (per-sample/c x nonnegative/c)])
+       [result tensor?])
   (blend x (contrast-mean x) (column x factor)))
 
 (define/contract-out (adjust-saturation x factor) ;; noqa
-  (->i ([x rgb-float-batch/c] [factor (x) (per-sample/c x)]) [result tensor?])
+  (->i ([x rgb-float-batch/c] [factor (x) (per-sample/c x nonnegative/c)])
+       [result tensor?])
   (blend x (luma x) (column x factor)))
 
 (define/contract-out (adjust-hue x factor) ;; noqa
@@ -103,25 +106,25 @@
   (solarized x (column x threshold)))
 
 (define/contract-out (random-affine-crop x size ;; noqa
-                                         #:scale [scale '(0.08 1.0)]
-                                         #:ratio [ratio '(3/4 4/3)]
+                                         #:scale [scale default-scale]
+                                         #:ratio [ratio default-ratio]
                                          #:flip-p [flip-p 0.0]
                                          #:padding-mode [padding-mode 'reflection]
                                          #:generator [generator #f])
-  (->i ([x float-batch/c] [size image-size/c])
+  (->i ([x (generator) (batch-for/c float-batch/c generator)]
+        [size image-size/c])
        (#:scale [scale scale/c]
         #:ratio [ratio ratio/c]
         #:flip-p [flip-p (real-in 0 1)]
         #:padding-mode [padding-mode padding-mode/c]
-        #:generator [generator (x) (generator-for/c x)])
-       #:pre/name (x generator) "the generator lives on the batch's device"
-       (generator-on? (supplied-or generator) (device x))
+        #:generator [generator generator/c])
        [result tensor?])
   (match-define (list _ _ h w) (shape x))
+  (match-define (list min-area max-area) scale)
+  (match-define (list min-ratio max-ratio) (map log-of ratio))
   (define draw (drawer x generator))
-  (define area (draw (car scale) (cadr scale)))
-  (define ratio* (exp (draw (~> (car ratio) exact->inexact log)
-                            (~> (cadr ratio) exact->inexact log))))
+  (define area (draw min-area max-area))
+  (define ratio* (exp (draw min-ratio max-ratio)))
   (define (side a) (clamp (sqrt a) #:max 1.0))
   (define sx (side (* area ratio* (/ (exact->inexact h) w))))
   (define sy (side (* (/ area ratio*) (/ (exact->inexact w) h))))
@@ -137,15 +140,13 @@
                                           #:hue [h 0]
                                           #:p [p 1.0]
                                           #:generator [generator #f])
-  (->i ([x rgb-float-batch/c])
-       (#:brightness [b strength/c]
-        #:contrast [c strength/c]
-        #:saturation [s strength/c]
+  (->i ([x (generator) (batch-for/c rgb-float-batch/c generator)])
+       (#:brightness [b nonnegative/c]
+        #:contrast [c nonnegative/c]
+        #:saturation [s nonnegative/c]
         #:hue [h (real-in 0 0.5)]
         #:p [p (real-in 0 1)]
-        #:generator [generator (x) (generator-for/c x)])
-       #:pre/name (x generator) "the generator lives on the batch's device"
-       (generator-on? (supplied-or generator) (device x))
+        #:generator [generator generator/c])
        [result tensor?])
   (cond
     [(zero? p) x]
@@ -153,7 +154,7 @@
      (define draw (drawer x generator))
      (define on (< (draw) p))
      (define (factor strength)
-       (where on (draw (- 1.0 strength) (+ 1.0 strength)) 1.0))
+       (where on (draw (max 0.0 (- 1.0 strength)) (+ 1.0 strength)) 1.0))
      (define fb (factor b))
      (define fc (factor c))
      (define fs (factor s))
@@ -165,11 +166,8 @@
          (hue-turned (column x fh)))]))
 
 (define/contract-out (random-grayscale x #:p [p 0.1] #:generator [generator #f]) ;; noqa
-  (->i ([x rgb-float-batch/c])
-       (#:p [p (real-in 0 1)]
-        #:generator [generator (x) (generator-for/c x)])
-       #:pre/name (x generator) "the generator lives on the batch's device"
-       (generator-on? (supplied-or generator) (device x))
+  (->i ([x (generator) (batch-for/c rgb-float-batch/c generator)])
+       (#:p [p (real-in 0 1)] #:generator [generator generator/c])
        [result tensor?])
   (cond
     [(zero? p) x]
@@ -178,23 +176,28 @@
 (define/contract-out (random-solarize x threshold ;; noqa
                                       #:p [p 0.5]
                                       #:generator [generator #f])
-  (->i ([x float-batch/c] [threshold real?])
-       (#:p [p (real-in 0 1)]
-        #:generator [generator (x) (generator-for/c x)])
-       #:pre/name (x generator) "the generator lives on the batch's device"
-       (generator-on? (supplied-or generator) (device x))
+  (->i ([x (generator) (batch-for/c float-batch/c generator)]
+        [threshold real?])
+       (#:p [p (real-in 0 1)] #:generator [generator generator/c])
        [result tensor?])
   (cond
     [(zero? p) x]
     [else
      (where (coin x generator p) (solarized x (column x threshold)) x)]))
 
-(struct crop-spec (size scale ratio flip-p jitter jitter-p gray-p solarize-p
-                        mean std check)
+(define view-call/c
+  (->i ([view any/c]
+        [images (generator)
+                (batch-for/c rgb-image-batch-u8-or-float/c generator)])
+       (#:generator [generator generator/c])
+       [result tensor?]))
+
+(struct crop-spec (size run)
   #:property prop:procedure
-  (lambda (view images #:generator [generator #f])
-    ((crop-spec-check view) images generator)
-    (viewed view images generator)))
+  (contract view-call/c
+            (lambda (view images #:generator [generator #f])
+              ((crop-spec-run view) images generator))
+            'crop-view 'caller 'crop-view #f))
 
 (define (normalized x vs op)
   (cond
@@ -203,33 +206,15 @@
                        1 3 1 1))]
     [else x]))
 
-(define (viewed view images generator)
-  (match-define (crop-spec size scale ratio flip-p (list b c s h) jitter-p
-                           gray-p solarize-p mean std _)
-    view)
-  (define x
-    (if (eq? (dtype images) 'uint8) (/ (to-dtype images 'float32) 255.0) images))
-  (~> x
-      (random-affine-crop size #:scale scale #:ratio ratio #:flip-p flip-p
-                          #:generator generator)
-      (random-color-jitter #:brightness b #:contrast c #:saturation s #:hue h
-                           #:p jitter-p #:generator generator)
-      (random-grayscale #:p gray-p #:generator generator)
-      (random-solarize 0.5 #:p solarize-p #:generator generator)
-      (normalized mean -)
-      (normalized std /)))
-
-(define view-call/c
-  (->i ([images rgb-image-batch-u8-or-float/c]
-        [generator (images) (generator-for/c images)])
-       any))
+(define (as-float images)
+  (if (eq? (dtype images) 'uint8) (/ (to-dtype images 'float32) 255.0) images))
 
 (define/contract-out (crop-view? v) (-> any/c boolean?) ;; noqa
   (crop-spec? v))
 
 (define/contract-out (crop-view #:size size ;; noqa
-                                #:scale [scale '(0.08 1.0)]
-                                #:ratio [ratio '(3/4 4/3)]
+                                #:scale [scale default-scale]
+                                #:ratio [ratio default-ratio]
                                 #:flip-p [flip-p 0.5]
                                 #:jitter [jitter '(0.4 0.4 0.2 0.1)]
                                 #:jitter-p [jitter-p 0.8]
@@ -248,20 +233,32 @@
         #:mean (or/c #f (rgb-triple/c))
         #:std (or/c #f (rgb-triple/c (and/c real? positive?)))]
        crop-view?)
-  (crop-spec size scale ratio flip-p jitter jitter-p gray-p solarize-p mean std
-             (contract view-call/c void 'crop-view 'caller 'crop-view #f)))
+  (match-define (list b c s h) jitter)
+  (crop-spec
+   size
+   (lambda (images generator)
+     (~> (as-float images)
+         (random-affine-crop size #:scale scale #:ratio ratio #:flip-p flip-p
+                             #:generator generator)
+         (random-color-jitter #:brightness b #:contrast c #:saturation s #:hue h
+                              #:p jitter-p #:generator generator)
+         (random-grayscale #:p gray-p #:generator generator)
+         (random-solarize 0.5 #:p solarize-p #:generator generator)
+         (normalized mean -)
+         (normalized std /)))))
 
 (define (one-size? views)
-  (for/and ([v (in-list (cdr views))])
-    (equal? (sides (crop-spec-size v)) (~> (car views) crop-spec-size sides))))
+  (match-define (cons first others)
+    (map (lambda (v) (sides (crop-spec-size v))) views))
+  (for/and ([size (in-list others)])
+    (equal? size first)))
 
 (define/contract-out (multi-crop images globals locals #:generator [generator #f]) ;; noqa
-  (->i ([images rgb-image-batch-u8-or-float/c]
+  (->i ([images (generator)
+                (batch-for/c rgb-image-batch-u8-or-float/c generator)]
         [globals (non-empty-listof crop-view?)]
         [locals (listof crop-view?)])
-       (#:generator [generator (images) (generator-for/c images)])
-       #:pre/name (images generator) "the generator lives on the batch's device"
-       (generator-on? (supplied-or generator) (device images))
+       (#:generator [generator generator/c])
        #:pre/name (globals) "global views share one #:size" (one-size? globals)
        #:pre/name (locals) "local views share one #:size"
        (or (null? locals) (one-size? locals))

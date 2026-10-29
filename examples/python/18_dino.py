@@ -175,7 +175,7 @@ def colour_jitter(x, gen):
     on = coin(n, JITTER_P, gen, device)
 
     def factor(spread):
-        f = uniform(n, 1 - spread, 1 + spread, gen, device)
+        f = uniform(n, max(0.0, 1 - spread), 1 + spread, gen, device)
         return torch.where(on, f, torch.ones_like(f)).view(n, 1, 1, 1)
 
     b, c, s = factor(JITTER[0]), factor(JITTER[1]), factor(JITTER[2])

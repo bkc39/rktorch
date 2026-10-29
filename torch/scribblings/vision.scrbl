@@ -730,11 +730,14 @@ read the neighbouring image pixels where torchvision repeats the box's own.
 (shape (resized-crop x (tensor '((4.0 4.0 24.0 24.0) (0.0 8.0 32.0 16.0))) 16))
 ]}
 
-@deftogether[(@defproc[(adjust-brightness [x tensor?] [factor (or/c real? tensor?)])
+@deftogether[(@defproc[(adjust-brightness [x tensor?]
+                                           [factor (or/c (and/c real? (>=/c 0)) tensor?)])
                        tensor?]
-              @defproc[(adjust-contrast [x tensor?] [factor (or/c real? tensor?)])
+              @defproc[(adjust-contrast [x tensor?]
+                                         [factor (or/c (and/c real? (>=/c 0)) tensor?)])
                        tensor?]
-              @defproc[(adjust-saturation [x tensor?] [factor (or/c real? tensor?)])
+              @defproc[(adjust-saturation [x tensor?]
+                                           [factor (or/c (and/c real? (>=/c 0)) tensor?)])
                        tensor?]
               @defproc[(adjust-hue [x tensor?]
                                    [factor (or/c (real-in -0.5 0.5) tensor?)])
@@ -743,7 +746,8 @@ torchvision v2's @tt{transforms.v2.functional} of the same names on a float
 batch, three channels except for brightness. @racket[factor] is one real
 for every image or a float @tt{[N]} on @racket[x]'s device, one per image.
 A factor of 1 (0 for the hue) leaves the image as it is; the hue turns by
-@racket[factor] of a full turn.
+@racket[factor] of a full turn, so a factor tensor's entries may lie
+outside @racket[-0.5] to @racket[0.5].
 }
 
 @defproc[(rgb->grayscale [x tensor?] [#:channels channels (or/c 1 3) 1])
@@ -796,7 +800,7 @@ positive.
 torchvision's @tt{RandomApply([ColorJitter(brightness, contrast,
 saturation, hue)], p)} per image of a three-channel float batch, always in
 the order brightness, contrast, saturation, hue: a factor drawn uniformly
-from @racket[(list (- 1 s) (+ 1 s))] for a strength @racket[s], the hue
+from @racket[(list (max 0 (- 1 s)) (+ 1 s))] for a strength @racket[s], the hue
 from @racket[(list (- hue) hue)]. Images not selected go through with
 neutral factors. Draws five @racket[rand]s of @tt{N}, none when @racket[p]
 is 0, which returns @racket[x].
