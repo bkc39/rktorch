@@ -51,7 +51,10 @@ cancels its finalizer in one atomic section, then flips the cpointer tag
 to `'Tensor-freed` — even when the free raises, since an attempted free
 consumes the finalizer backstop and a live-looking tag would invite
 use-after-free. A thread killed mid-free leaves the wrapper `'freeing` and
-the handle to the finalizer.
+the handle to the finalizer. Killed at `free-unaccounted`, after
+`unaccount!`, it leaves a live, usable tensor that is off the ledger, its
+phantom bytes zeroed, until the finalizer releases it. The `state` setter
+is not exported by name, though the struct info still carries it.
 
 The finalizer path is wrapped in `swallow-and-count-failure`, whose
 catch is total: Racket finalizers run in **atomic mode**, where

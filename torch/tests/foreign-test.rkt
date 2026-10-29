@@ -62,7 +62,7 @@
     (tensor-free! t)
     (check-exn exn:fail:contract? (lambda () (tensor-free! t))))
 
-  (test-case "a fresh tensor's state field, found by its derived index, is live"
+  (test-case "the derived state index is right only while tensor-impl has no supertype"
     (check-eq? (unsafe-struct*-ref (zeros 2 2) tensor-state-index) 'live))
 
   (test-case "a tensor cannot be chaperoned"
@@ -71,7 +71,7 @@
                  (chaperone-struct (zeros 2 2) tensor-impl-shape
                                    (lambda (_ v) v)))))
 
-  (test-case "the wrapper's state has no exported setter"
+  (test-case "the wrapper's state setter is not exported by name"
     (define-values (variables _syntax) (module->exports structs-module))
     (define names (for*/list ([phase+names (in-list variables)]
                               [entry (in-list (cdr phase+names))])
