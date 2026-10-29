@@ -6,6 +6,8 @@
            (only-in racket/list make-list)
            (only-in racket/match match-define)
            (only-in threading ~>)
+           (only-in "../foreign/raw/device-queries.rkt" allocator-reading)
+           (only-in "../foreign/raw/device.rkt" tr-cuda-is-available/raw)
            (only-in "../main.rkt"
                     * + - < cuda-available? cuda-device cuda-memory-stats
                     cuda-reset-peak-stats! current-generator device dtype flip
@@ -155,6 +157,20 @@
                                         name on small large))
       (check-true (<= small (hash-ref golden-op-calls name))
                   (format "~a [~a]: ~a calls" name on small))))
+
+  (define ((crossing reading) dev)
+    (tr-cuda-is-available/raw)
+    (reading dev))
+
+  (bounded-test "A1: the backstop's allocator samples are not the op's native calls"
+    (match-define (list _ kind run) (assoc "multi-crop 2+6" cases))
+    (parameterize ([native-memory-limit (* 8 1024 1024)]
+                   [allocator-reading (crossing (allocator-reading))])
+      (for ([on (in-list devices)])
+        (define small (op-calls kind run 2 on))
+        (define large (op-calls kind run 128 on))
+        (check-equal? large small (format "[~a]: ~a at 2, ~a at 128"
+                                          on small large)))))
 
   (define (draws-after run n on)
     (define g (make-generator 9 #:device on))
