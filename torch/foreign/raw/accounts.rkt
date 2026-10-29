@@ -87,6 +87,10 @@
 (struct stats (backstop-collections reclaimed trough-collections trough-minors)
   #:mutable)
 
+;; a test that makes an account for a device it invents takes it back out
+(module+ private
+  (provide accounts))
+
 (define accounts (box (hash)))
 (define the-stats (stats 0 0 0 0))
 

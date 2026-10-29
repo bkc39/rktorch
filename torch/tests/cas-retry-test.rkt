@@ -13,6 +13,7 @@
            (only-in "../foreign/raw/collector.rkt" call-as-the-collector)
            (only-in "../foreign/raw/memory.rkt" finalizer-diagnostics)
            (only-in "../foreign/raw/pressure.rkt" account-of)
+           (only-in (submod "../foreign/raw/accounts.rkt" private) accounts)
            (only-in "private/race-harness.rkt"
                     check-ledger gate-hook ledger-snapshot make-gate
                     release-gate! settle! wait-for-arrival))
@@ -74,7 +75,8 @@
   (test-case "a device's first account retries its insert"
     (define dev (device 'cuda 13))
     (define a (call-with-spurious-cas-failures '(update) (lambda () (account-of dev))))
-    (check-eq? (account-of dev) a))
+    (check-eq? (account-of dev) a)
+    (cas-update! accounts (lambda (all) (hash-remove all dev))))
 
   (test-case "the MPS probe's claim retries"
     (check-equal? (call-with-spurious-cas-failures
