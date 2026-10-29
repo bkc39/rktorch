@@ -479,6 +479,11 @@ than a second wrapper over the same storage.
   saw, so bytes accounted during the collection survive it. The
   entry-by-entry fold survives as `native-memory-use/fold`, the
   cross-check the tests run.
+- A `box-cas!` may fail spuriously, leaving the box unchanged (seen on
+  arm64 macOS), so no site reads one failure as a loss: each re-reads and
+  retries while the value it expects is still there. Every site goes
+  through `cas!`, whose test seam `call-with-spurious-cas-failures` fails
+  the first attempt at named sites (`torch/tests/cas-retry-test.rkt`).
 - The rarely touched fields (sample, interval, capacity, floor, the
   shadow, release-after, trial, stats, schedule, generation, adoptions)
   are written under `call-with-ledger`, a re-entrant uninterruptible lock

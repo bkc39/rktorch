@@ -7,6 +7,7 @@
          (only-in "device-type.rkt" cpu-device cuda-device device? mps-device)
          (only-in "error.rkt" exn:fail:rktorch:oom?)
          (only-in "ops.rkt" cuda-available? mps-available? to-device)
+         (only-in "raw/cas.rkt" cas!)
          (only-in "raw/fault.rkt" native-fault?)
          (only-in "raw/race-points.rkt" race-point))
 
@@ -46,7 +47,7 @@
     [(? boolean? answer) answer]
     [(? faulted? fault) fault]
     [_ (define mine (claim (current-thread) (make-semaphore 0)))
-       (if (box-cas! state seen mine)
+       (if (cas! 'probe state seen mine)
            mine
            (claim-or-read probe))]))
 

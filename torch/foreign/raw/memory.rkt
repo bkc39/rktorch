@@ -9,7 +9,7 @@
          (only-in ffi/unsafe/atomic call-as-uninterruptible)
          (only-in racket/list remove-duplicates)
          (only-in "../device-type.rkt" device device-index device-type)
-         (only-in "cas.rkt" cas-claim! cas-update!)
+         (only-in "cas.rkt" cas! cas-claim! cas-update!)
          (only-in "collector.rkt"
                   finalizer-runs
                   note-finalizer-run!)
@@ -111,7 +111,7 @@
     (define held (unbox state))
     (cond
       [(not (or (eq? held 'live) (and (thread? held) (thread-dead? held)))) #f]
-      [(box-cas! state held by) #t]
+      [(cas! 'lifetime state held by) #t]
       [else (retry)])))
 
 ;; The explicit free: the claim decides it against the finalizer and any

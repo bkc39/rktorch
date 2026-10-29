@@ -15,6 +15,7 @@
                   + @ finalizer-failures native-memory-use
                   reclaim-native-memory! sum zeros)
          (only-in (submod "../../foreign.rkt" unsafe) tensor-free!)
+         (only-in "../../foreign/raw/cas.rkt" cas!)
          (only-in "../../foreign/raw/fault.rkt" native-faulted)
          (only-in "../../foreign/raw/memory.rkt" native-memory-use/fold)
          (only-in "../../foreign/raw/pressure.rkt"
@@ -92,7 +93,7 @@
 (define (take-gate! g)
   (let retry ()
     (cond
-      [(box-cas! (gate-state g) 'waiting 'taken) #t]
+      [(cas! 'gate (gate-state g) 'waiting 'taken) #t]
       [(~> g gate-state unbox (eq? 'waiting)) (retry)]
       [else #f])))
 

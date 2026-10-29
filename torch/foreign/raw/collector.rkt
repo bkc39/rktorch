@@ -3,7 +3,7 @@
 (require (only-in ffi/unsafe register-finalizer)
          (only-in ffi/unsafe/atomic in-atomic-mode?)
          (only-in ffi/unsafe/vm vm-eval)
-         (only-in "cas.rkt" cas-add!)
+         (only-in "cas.rkt" cas! cas-add!)
          (only-in "race-points.rkt" race-point))
 
 (provide call-as-the-collector
@@ -44,7 +44,7 @@
   (race-point collector-claiming free?)
   (cond
     [(not free?) #f]
-    [(box-cas! holder held (current-thread)) #t]
+    [(cas! 'collector holder held (current-thread)) #t]
     [(eq? (unbox holder) held) (claim-collector!)]
     [else #f]))
 
