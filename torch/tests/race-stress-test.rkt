@@ -13,20 +13,25 @@
                     settle! spawn stop-roles! until-stopped watch-hook
                     with-race-hook))
 
-  (provide mib phase proc-status-number)
+  (provide mib phase proc-status-field proc-status-number)
 
   (define mib (* 1024 1024))
 
-  (define (proc-status-number field)
+  (define (proc-status-field field)
     (define status "/proc/self/status")
-    (define rx (pregexp (format "^~a:\\s+([0-9]+)" field)))
+    (define rx (pregexp (format "^~a:\\s+(.*)$" field)))
     (and (file-exists? status)
          (call-with-input-file status
            (lambda (in)
              (for/or ([line (in-lines in)])
                (match (regexp-match rx line)
-                 [(list _ n) (string->number n)]
+                 [(list _ value) value]
                  [#f #f]))))))
+
+  (define (proc-status-number field)
+    (match (proc-status-field field)
+      [(pregexp #px"^([0-9]+)" (list _ n)) (string->number n)]
+      [_ #f]))
 
   (define seconds-per-phase (env-number "RKTORCH_STRESS_SECONDS" 0.5))
 
@@ -140,14 +145,27 @@
 
   ;; The phase's role threads outlive it, give or take one, and an OpenMP
   ;; team adds intra-op - 1: half a team past the roles tells them apart
-  ;; once the team has at least 3 threads to add.
-  (define (intra-op-pool-ran? report)
+  ;; once the team has at least 3 threads to add. A smaller pool, or a host
+  ;; without /proc, is unverifiable.
+  (define (pool-verdict report)
     (match report
-      [(list 1 _ _ _) #t]
-      [(list _ intra #f #f) (> intra 1)]
-      [(list _ intra _ _) #:when (< intra 4) (> intra 1)]
+      [(list 1 _ _ _) 'one-cpu]
+      [(list _ 1 _ _) 'idle]
+      [(list _ _ #f _) 'unverifiable]
+      [(list _ intra _ _) #:when (< intra 4) 'unverifiable]
       [(list _ intra before after)
-       (>= (- after before) (+ default-threads-width 2 (quotient intra 2)))]
+       #:when (>= (- after before) (+ default-threads-width 2 (quotient intra 2)))
+       'ran]
+      [_ 'idle]))
+
+  (define (check-idle-without-phase report)
+    (match (pool-verdict report)
+      [(or 'one-cpu 'unverifiable) (void)]
+      [verdict (check-eq? verdict 'idle (format "~s" report))]))
+
+  (define (first-allowed-cpu cpus)
+    (match cpus
+      [(pregexp #px"^([0-9]+)" (list _ cpu)) cpu]
       [_ #f]))
 
   (define (run-at-default-threads program #:within seconds #:prefix [prefix '()])
@@ -203,22 +221,35 @@
 
   (test-case "a phase at libtorch's default thread count runs its intra-op pool"
     (define report (default-threads-report (default-threads-program)))
-    (check-true (intra-op-pool-ran? report) (format "procs, intra-op, threads before, after: ~s" report)))
+    (check-not-eq? (pool-verdict report) 'idle
+                   (format "procs, intra-op, threads before, after: ~s" report)))
 
   (test-case "the pool check fails when no phase ran"
-    (define report (default-threads-report (default-threads-program #:phase? #f)))
-    (match report
-      [(list procs _ (? number?) _)
-       #:when (> procs 1)
-       (check-false (intra-op-pool-ran? report) (format "~s" report))]
-      [_ (void)]))
+    (check-idle-without-phase (default-threads-report (default-threads-program #:phase? #f))))
+
+  (test-case "pools under 4 threads are unverifiable, and the no-phase check skips them"
+    (for ([report (in-list '((2 2 1 1) (3 3 1 1) (16 8 #f #f)))])
+      (check-eq? (pool-verdict report) 'unverifiable (format "~s" report))
+      (check-idle-without-phase report))
+    (check-eq? (pool-verdict '(16 8 1 1)) 'idle)
+    (check-eq? (pool-verdict '(16 1 1 20)) 'idle)
+    (check-eq? (pool-verdict '(16 8 1 14)) 'ran)
+    (check-eq? (pool-verdict '(1 1 1 1)) 'one-cpu))
+
+  (test-case "the affinity test pins the child to a CPU this process may use"
+    (check-equal? (first-allowed-cpu "2-5,8") "2")
+    (check-equal? (first-allowed-cpu "8") "8")
+    (check-equal? (first-allowed-cpu "0-15") "0")
+    (check-false (first-allowed-cpu ""))
+    (check-false (first-allowed-cpu #f)))
 
   (test-case "the pool check passes under a one-CPU affinity mask"
     (define taskset (find-executable-path "taskset"))
-    (when taskset
+    (define cpu (first-allowed-cpu (proc-status-field "Cpus_allowed_list")))
+    (when (and taskset cpu)
       (define report (default-threads-report (default-threads-program)
-                                             #:prefix (list taskset "-c" "0")))
-      (check-true (intra-op-pool-ran? report) (format "~s" report))))
+                                             #:prefix (list taskset "-c" cpu)))
+      (check-eq? (pool-verdict report) 'one-cpu (format "~s" report))))
 
   (define (raco-seconds)
     (define cell
