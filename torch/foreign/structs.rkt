@@ -40,6 +40,9 @@
          tensor-state-index
          tensor-free!)
 
+(module+ private
+  (provide state-cas))
+
 (define (shape->string dims)
   (if (null? dims) "scalar" (string-join (map number->string dims) "x")))
 
@@ -230,10 +233,20 @@
 
 (define tensor-state-index (cas-field-index struct:tensor-impl))
 
+(define state-cas (box unsafe-struct*-cas!))
+
+(define (take-state! t)
+  (define cas! (unbox state-cas))
+  (let retry ()
+    (cond
+      [(cas! t tensor-state-index 'live 'freeing) #t]
+      [(eq? (tensor-impl-state t) 'live) (retry)]
+      [else #f])))
+
 (define (tensor-free! t)
   (define h (tensor-handle t))
   (define (take!)
-    (unless (unsafe-struct*-cas! t tensor-state-index 'live 'freeing)
+    (unless (take-state! t)
       (raise-arguments-error 'tensor-free!
                              "the tensor is being freed or was freed"))
     (race-point free-taken h))

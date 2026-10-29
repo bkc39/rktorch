@@ -1,32 +1,20 @@
 #lang racket/base
 
-(provide call-with-spurious-cas-failures
-         cas!
+(provide cas!
          cas-add!
          cas-claim!
          cas-update!)
 
-;; The test seam: while a test injects, the first attempt at each named site
-;; fails as a spurious `box-cas!` failure may, with the box unchanged.
-(define injector (box #f))
+;; The test seam, as structs.rkt's `state-cas`: the primitive every site
+;; calls, which a test swaps for one that fails as a spurious `box-cas!`
+;; may, with the box unchanged.
+(module+ private
+  (provide site-cas))
+
+(define site-cas (box (lambda (_site b old new) (box-cas! b old new))))
 
 (define (cas! site b old new)
-  (define inject (unbox injector))
-  (and (not (and inject (inject site)))
-       (box-cas! b old new)))
-
-(define (call-with-spurious-cas-failures sites thunk)
-  (define failed (box '()))
-  (define (inject site)
-    (let retry ()
-      (define seen (unbox failed))
-      (cond
-        [(or (not (memq site sites)) (memq site seen)) #f]
-        [(box-cas! failed seen (cons site seen)) #t]
-        [else (retry)])))
-  (dynamic-wind (lambda () (set-box! injector inject))
-                thunk
-                (lambda () (set-box! injector #f))))
+  ((unbox site-cas) site b old new))
 
 ;; A failed CAS may be spurious, so each loop retries until the update lands
 ;; or, for a claim, until the box no longer holds `from`.

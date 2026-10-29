@@ -51,7 +51,8 @@ Death has two paths:
 The explicit path first takes the handle: with breaks disabled, one
 compare-and-swap moves the wrapper's `state` from `'live` to `'freeing`.
 Only the thread whose swap succeeds goes on; every other free of that
-wrapper raises `exn:fail:contract`. The winner then claims the handle's
+wrapper raises `exn:fail:contract`. The take retries a spurious CAS
+failure and loses only when the state is no longer `'live`. The winner then claims the handle's
 *lifetime* (`torch/foreign/raw/memory.rkt`): a second CAS on the state box
 the finalizer claims too, from `'live` to the freeing thread. It unaccounts
 the handle and releases it, and the native release, the `'Tensor-freed`
@@ -482,8 +483,10 @@ than a second wrapper over the same storage.
 - A `box-cas!` may fail spuriously, leaving the box unchanged (seen on
   arm64 macOS), so no site reads one failure as a loss: each re-reads and
   retries while the value it expects is still there. Every site goes
-  through `cas!`, whose test seam `call-with-spurious-cas-failures` fails
-  the first attempt at named sites (`torch/tests/cas-retry-test.rkt`).
+  through `cas!`, which calls the primitive in `site-cas`, a test seam in
+  `cas.rkt`'s `private` submodule as `state-cas` is in `structs.rkt`'s;
+  `torch/tests/cas-retry-test.rkt` swaps in one that fails the first
+  attempt at named sites.
 - The rarely touched fields (sample, interval, capacity, floor, the
   shadow, release-after, trial, stats, schedule, generation, adoptions)
   are written under `call-with-ledger`, a re-entrant uninterruptible lock

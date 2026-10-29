@@ -8,8 +8,8 @@
            (only-in (submod "../foreign.rkt" unsafe) tensor-free!)
            (only-in "../foreign/accelerator.rkt" make-mps-probe mps-usable?)
            (only-in "../foreign/device-type.rkt" device)
-           (only-in "../foreign/raw/cas.rkt"
-                    call-with-spurious-cas-failures cas-claim! cas-update!)
+           (only-in "../foreign/raw/cas.rkt" cas-claim! cas-update!)
+           (only-in (submod "../foreign/raw/cas.rkt" private) site-cas)
            (only-in "../foreign/raw/collector.rkt" call-as-the-collector)
            (only-in "../foreign/raw/memory.rkt" finalizer-diagnostics)
            (only-in "../foreign/raw/pressure.rkt" account-of)
@@ -18,6 +18,23 @@
                     release-gate! settle! wait-for-arrival))
 
   (define (runs) (cdr (assq 'runs (finalizer-diagnostics))))
+
+  ;; the first attempt at each named site fails, the box unchanged
+  (define (call-with-spurious-cas-failures sites thunk)
+    (define saved (unbox site-cas))
+    (define failed (box '()))
+    (define (first-at? site)
+      (let retry ()
+        (define seen (unbox failed))
+        (cond
+          [(or (not (memq site sites)) (memq site seen)) #f]
+          [(box-cas! failed seen (cons site seen)) #t]
+          [else (retry)])))
+    (define (spurious site b old new)
+      (and (not (first-at? site)) (saved site b old new)))
+    (dynamic-wind (lambda () (set-box! site-cas spurious))
+                  thunk
+                  (lambda () (set-box! site-cas saved))))
 
   (test-case "the CAS loops retry a spurious failure"
     (define b (box 0))

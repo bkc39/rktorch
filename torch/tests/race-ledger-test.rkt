@@ -1,9 +1,10 @@
 #lang racket/base
 
 (module+ test
-  (require (only-in ffi/unsafe _fun)
+  (require (only-in ffi/unsafe _fun cpointer-has-tag?)
            (only-in ffi/unsafe/atomic in-atomic-mode?)
            (only-in racket/dict dict-ref)
+           (only-in racket/unsafe/ops unsafe-struct*-cas!)
            rackunit
            (only-in "../foreign.rkt"
                     backward! grad native-memory-limit native-memory-use sum tensor?
@@ -20,6 +21,7 @@
                     since-check-of)
            (only-in "../foreign/raw/syntax.rkt" _Tensor _Tensor/null define-torch)
            (only-in "../foreign/structs.rkt" tensor-handle)
+           (only-in (submod "../foreign/structs.rkt" private) state-cas)
            (only-in "private/race-harness.rkt"
                     check-ledger hooks join join-all labelled
                     ledger-snapshot ledger-violations make-gate make-watch
@@ -65,6 +67,29 @@
       (define t (zeros 4 4))
       (to! t 'cpu 'float64)
       (tensor-free! t))
+    (check-ledger base w))
+
+  (define ((spurious-once calls) t i old new)
+    (set-box! calls (add1 (unbox calls)))
+    (and (> (unbox calls) 1) (unsafe-struct*-cas! t i old new)))
+
+  (test-case "a spurious CAS failure retries the take, and the free releases once"
+    (settle!)
+    (define base (ledger-snapshot))
+    (define w (make-watch))
+    (define calls (box 0))
+    (define saved (unbox state-cas))
+    (with-race-hook (watch-hook w)
+      (define t (zeros 256 256))
+      (define h (tensor-handle t))
+      (dynamic-wind
+       (lambda () (set-box! state-cas (spurious-once calls)))
+       (lambda () (check-not-exn (lambda () (tensor-free! t))))
+       (lambda () (set-box! state-cas saved)))
+      (check-equal? (unbox calls) 2 "the take did not retry the failed swap")
+      (check-equal? (watch-release-count w h) 1)
+      (check-true (cpointer-has-tag? h 'Tensor-freed))
+      (settle!))
     (check-ledger base w))
 
   (define freeing-loser? #rx"tensor-free!: the tensor is being freed or was freed")
