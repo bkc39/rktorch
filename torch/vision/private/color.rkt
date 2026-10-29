@@ -52,12 +52,14 @@
   (define s (/ span (where flat 1.0 maxc)))
   (define divisor (where flat 1.0 span))
   (define (from c) (/ (- maxc c) divisor))
-  (define-values (rc gc bc) (values (from r) (from g) (from b)))
+  (define rc (from r))
+  (define gc (from g))
+  (define bc (from b))
   (define h
     (where (eq maxc r)
            (- bc gc)
            (where (eq maxc g) (- (+ 2.0 rc) bc) (- (+ 4.0 gc) rc))))
-  (values (fmod-scalar (+ (/ h 6.0) 1.0) 1.0) s maxc))
+  (values (~> (/ h 6.0) (+ 1.0) (fmod-scalar 1.0)) s maxc))
 
 (define (hsv->rgb h s v)
   (define h6 (* h 6.0))
@@ -75,7 +77,7 @@
 
 (define (hue-turned x factor)
   (define-values (h s v) (rgb->hsv x))
-  (hsv->rgb (fmod-scalar (+ (+ h factor) 1.0) 1.0) s v))
+  (~> (+ h factor) (+ 1.0) (fmod-scalar 1.0) (hsv->rgb s v)))
 
 (define (contrast-mean x)
   (mean-dim (luma x) '(1 2 3) #t #f))

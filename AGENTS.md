@@ -196,8 +196,9 @@ with `backward!` outside the form as PyTorch recommends). From
   Scribble entry states (a probability-0 step draws nothing); `crop-view`
   (applied as `(v images #:generator g)`) and `multi-crop` are DINO's
   multi-crop; native calls independent of the batch size. Colour math is
-  `torch/vision/private/color.rkt`; `augment-parity-test.rkt` holds it to
-  torchvision v2 and to `examples/python/18_dino.py`'s `multi_crop`.
+  `torch/vision/private/color.rkt`; `torch/tests/augment-parity-test.rkt`
+  holds it to torchvision v2 and to `examples/python/18_dino.py`'s
+  `multi_crop`.
 - resnet (`torch/vision/resnet.rkt`, #152): `BasicBlock` and `ResNet`
   (`#:classes #:base #:blocks`, ResNet-18 for 32x32 images by default,
   bias-free convolutions under `BatchNorm2d`); the training loop with

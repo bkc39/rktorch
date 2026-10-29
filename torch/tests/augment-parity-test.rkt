@@ -22,8 +22,8 @@
     (if (list? v) (apply append (map flat v)) (list v)))
 
   (define (check-close label got expected tolerance)
-    (define a (flat (tensor->list (to got 'cpu))))
-    (define b (flat (tensor->list (to expected 'cpu))))
+    (define a (~> (to got 'cpu) tensor->list flat))
+    (define b (~> (to expected 'cpu) tensor->list flat))
     (check-equal? (length a) (length b) label)
     (define worst
       (for/fold ([worst 0.0]) ([u (in-list a)] [v (in-list b)])
@@ -69,7 +69,7 @@
       (define cols (hash-ref c 'cols))
       (check-close (format "A10 resized-crop ~a [~a]" box device)
                    (interior out rows cols device)
-                   (interior (expected (hash-ref c 'out)) rows cols 'cpu)
+                   (~> (hash-ref c 'out) expected (interior rows cols 'cpu))
                    tolerance)))
 
   (define (fixture-images n device)

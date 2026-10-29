@@ -307,12 +307,13 @@
       (central-window h w ratio)))
 
 (define (central-window h w ratio)
+  (match-define (list lower upper) ratio)
   (define-values (ch cw)
     (cond
-      [(< (/ w h) (car ratio))
-       (values (max 1 (exact-round (/ w (car ratio)))) w)]
-      [(> (/ w h) (cadr ratio))
-       (values h (max 1 (~> (cadr ratio) (* h) exact-round)))]
+      [(< (/ w h) lower)
+       (values (max 1 (exact-round (/ w lower))) w)]
+      [(> (/ w h) upper)
+       (values h (max 1 (exact-round (* h upper))))]
       [else (values h w)]))
   (list (quotient (- h ch) 2) (quotient (- w cw) 2) ch cw))
 

@@ -22,7 +22,7 @@
                   rgb-triple/c))
 
 (define padding-mode/c (or/c 'zeros 'border 'reflection))
-(define scale/c (ordered-pair/c (and/c (real-in 0 1) positive?)))
+(define scale/c (~> (real-in 0 1) (and/c positive?) ordered-pair/c))
 (define ratio/c (ordered-pair/c (and/c real? positive?)))
 (define strength/c (and/c real? (>=/c 0)))
 
@@ -35,7 +35,8 @@
   (case-lambda
     [() (rand n #:device on #:generator generator)]
     [(lo hi)
-     (define-values (lo* hi*) (values (exact->inexact lo) (exact->inexact hi)))
+     (define lo* (exact->inexact lo))
+     (define hi* (exact->inexact hi))
      (+ lo* (* (- hi* lo*) (rand n #:device on #:generator generator)))]))
 
 (define (coin x generator p)
@@ -119,8 +120,8 @@
   (match-define (list _ _ h w) (shape x))
   (define draw (drawer x generator))
   (define area (draw (car scale) (cadr scale)))
-  (define ratio* (exp (draw (log (exact->inexact (car ratio)))
-                            (log (exact->inexact (cadr ratio))))))
+  (define ratio* (exp (draw (~> (car ratio) exact->inexact log)
+                            (~> (cadr ratio) exact->inexact log))))
   (define (side a) (clamp (sqrt a) #:max 1.0))
   (define sx (side (* area ratio* (/ (exact->inexact h) w))))
   (define sy (side (* (/ area ratio*) (/ (exact->inexact w) h))))
@@ -252,7 +253,7 @@
 
 (define (one-size? views)
   (for/and ([v (in-list (cdr views))])
-    (equal? (sides (crop-spec-size v)) (sides (crop-spec-size (car views))))))
+    (equal? (sides (crop-spec-size v)) (~> (car views) crop-spec-size sides))))
 
 (define/contract-out (multi-crop images globals locals #:generator [generator #f]) ;; noqa
   (->i ([images rgb-image-batch-u8-or-float/c]
