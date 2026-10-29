@@ -69,9 +69,9 @@
   (define p (unit (* v (- 1.0 s))))
   (define q (unit (* v (- 1.0 (* s f)))))
   (define t (unit (* v (- 1.0 (* s (- 1.0 f))))))
-  (define (pick . planes)
-    (for/fold ([acc (car planes)])
-              ([plane (in-list (cdr planes))] [k (in-naturals 1)])
+  (define (pick sector-0 . sectors)
+    (for/fold ([acc sector-0])
+              ([plane (in-list sectors)] [k (in-naturals 1)])
       (where (eq sector (exact->inexact k)) plane acc)))
   (cat (list (pick v q p p t v) (pick t v v q p p) (pick p p t v v q)) 1))
 

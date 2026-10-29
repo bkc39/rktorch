@@ -22,10 +22,11 @@
            (only-in "private/op-calls.rkt" op-calls-of)
            (only-in "private/within.rkt" bounded-test))
 
-  (define devices
-    (append (list 'cpu)
-            (if (cuda-available?) (list (cuda-device)) '())
+  (define accelerators
+    (append (if (cuda-available?) (list (cuda-device)) '())
             (if (mps-available?) (list (mps-device)) '())))
+
+  (define devices (cons 'cpu accelerators))
 
   (define (values-of t)
     (tensor->list (to t 'cpu)))
@@ -395,7 +396,7 @@
     (check-exn blames-this-test (lambda () (adjust-saturation x -0.1)))
     (check-exn (blames-caller? "caller")
                (lambda () ((dino-local) (rand 3 8 8))))
-    (for ([on (in-list (cdr devices))])
+    (for ([on (in-list accelerators)])
       (define there (images 2 on))
       (check-exn blames-this-test
                  (lambda () (random-grayscale there #:generator (make-generator 1))))
@@ -446,15 +447,19 @@
       (define x (bytes-images 256 on))
       (define (seeded) (make-generator 4 #:device on))
       (dino-crop x (seeded))
-      (for ([name (in-list '("globals" "locals"))]
-            [views (in-list (list (list (dino-global) (dino-global #:solarize-p 0.2))
-                                  (make-list 6 (dino-local))))])
-        (match-define (cons first-view _) views)
+      (define (over-budget name views)
         (define group
           (peak-above on (lambda ()
                            (define-values (out _) (multi-crop x views '() #:generator (seeded)))
                            out)))
-        (define one (peak-above on (lambda () (first-view x #:generator (seeded)))))
-        (check-true (<= group (+ one (expt 2 20)))
-                    (format "~a: ~a bytes above their output, one view ~a"
-                            name group one))))))
+        (define one
+          (for/fold ([most 0]) ([view (in-list views)])
+            (max most (peak-above on (lambda () (view x #:generator (seeded)))))))
+        (and (> group (+ one (expt 2 20)))
+             (format "~a: ~a bytes above their output, the largest view ~a"
+                     name group one)))
+      (check-equal?
+       (filter values
+               (list (over-budget "globals" (list (dino-global) (dino-global #:solarize-p 0.2)))
+                     (over-budget "locals" (make-list 6 (dino-local)))))
+       '()))))
