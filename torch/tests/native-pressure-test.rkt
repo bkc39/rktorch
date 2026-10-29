@@ -9,8 +9,10 @@
                     mps-empty-cache! reclaim-native-memory! sum with-no-grad
                     zeros)
            (only-in (submod "../foreign.rkt" unsafe) tensor-free!)
+           (only-in "../foreign/device-type.rkt" device)
            (only-in "../foreign/raw/memory.rkt"
-                    adopted-bytes collect-and-drain! native-memory-use/fold)
+                    adopted-bytes collect-and-drain! native-memory-use/fold
+                    record-allocation! unaccount!)
            (only-in "../foreign/raw/collector.rkt"
                     call-as-the-collector collect-and-wait! drain-deadline)
            (only-in "../foreign/raw/device-queries.rkt"
@@ -717,15 +719,23 @@
   ;; accounted before the ledger is read again, as another thread's could be
   (test-case "a lowering skips a reading the ledger moved under"
     (settle!)
+    ;; the lowering reads every account, and an earlier test in the same
+    ;; process can leave another device's open
+    (define elsewhere (box 'elsewhere))
+    (record-allocation! elsewhere 4096 (device 'cuda 13))
+    (unaccount! elsewhere)
     (parameterize ([allocator-reading (lambda (_dev) (+ (cpu-bytes) (* 256 mib)))]
                    [native-collect-margin idle-margin])
       (collect-at-trough!))
     (define late '())
     (parameterize ([allocator-reading
-                    (lambda (_dev)
-                      (define reading (+ (cpu-bytes) (* 200 mib)))
-                      (set! late (cons (zeros 4096 4096) late))
-                      reading)])
+                    (lambda (dev)
+                      (cond
+                        [(equal? dev (cpu-device))
+                         (define reading (+ (cpu-bytes) (* 200 mib)))
+                         (set! late (cons (zeros 4096 4096) late))
+                         reading]
+                        [else #f]))])
       (lower-shadows!))
     (check-equal? (length late) 1)
     (check-true (>= (cpu-unaccounted) (* 255 mib))
