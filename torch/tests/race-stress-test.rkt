@@ -1,11 +1,14 @@
 #lang racket/base
 
 (module stress racket/base
-  (require (only-in racket/match match match-define)
+  (require (only-in ffi/unsafe -> _fun _int get-ffi-obj)
+           (only-in racket/match match match-define)
            rackunit
            (only-in "../foreign.rkt"
                     backward! finalizer-diagnostics native-memory-limit ones
                     sum)
+           (only-in "../foreign/raw/fault.rkt" latched)
+           (only-in "../foreign/raw/native-library.rkt" native-library)
            (only-in "../nn.rkt" Linear)
            (only-in "private/race-harness.rkt"
                     await-roles! check-ledger churn-once! env-number join-all
@@ -13,9 +16,14 @@
                     settle! spawn stop-roles! until-stopped watch-hook
                     with-race-hook))
 
-  (provide mib phase proc-status-field proc-status-number)
+  (provide mib native-count phase proc-status-field proc-status-number)
 
   (define mib (* 1024 1024))
+
+  (define (native-count name fallback)
+    (match (get-ffi-obj name native-library (_fun -> _int) (lambda () #f))
+      [#f fallback]
+      [query (latched query)]))
 
   (define (proc-status-field field)
     (define status "/proc/self/status")
@@ -105,6 +113,8 @@
            (only-in racket/port port->string)
            (only-in setup/getinfo get-info)
            rackunit
+           (only-in "../foreign/raw/fault.rkt"
+                    native-fault-policy note-native-fault! reset-native-fault-latch!)
            (submod ".." stress))
 
   (define widths '(2 4 8 16))
@@ -127,13 +137,9 @@
   ;; default, with a trainer batch past ATen's parallel grain.
   (define (default-threads-program #:phase? [phase? #t])
     `(begin
-       (require (only-in ffi/unsafe -> _fun _int get-ffi-obj)
-                (only-in racket/future processor-count)
+       (require (only-in racket/future processor-count)
                 (only-in rackunit current-check-handler)
-                (only-in torch/foreign/raw/native-library native-library)
                 (submod torch/tests/race-stress-test stress))
-       (define (native-count name fallback)
-         (get-ffi-obj name native-library (_fun -> _int) (lambda () fallback)))
        (define threads-before (proc-status-number "Threads"))
        (current-check-handler raise)
        ,@(if phase? `((phase ,default-threads-width #:batch 4096)) '())
@@ -209,6 +215,21 @@
     (define stat (format "/proc/~a/stat" pid))
     (and (file-exists? stat)
          (not (regexp-match? #rx"^[0-9]+ \\(.*\\) [ZX]" (call-with-input-file stat port->string)))))
+
+  (test-case "the child's thread queries cross the fault latch"
+    (when (eq? native-fault-policy 'raise)
+      (define queries
+        (for*/list ([name (in-list '("_ZN2at15get_num_threadsEv" "omp_get_num_procs"))]
+                    [query (in-value (native-count name #f))]
+                    #:when query)
+          query))
+      (check-false (null? queries) "the ATen query resolves")
+      (dynamic-wind
+       (lambda () (note-native-fault! "testing the thread queries' latch"))
+       (lambda ()
+         (for ([query (in-list queries)])
+           (check-exn #rx"^rktorch: native code faulted earlier" query)))
+       reset-native-fault-latch!)))
 
   (test-case "the child drops the gates' thread pins and the soak length"
     (define env (environment-variables-copy (current-environment-variables)))
