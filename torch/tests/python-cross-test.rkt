@@ -11,8 +11,6 @@
            "../data/loader.rkt"
            "../main.rkt"
            "../nn.rkt"
-           (only-in "../scribblings/examples/05-mnist.rkt"
-                    convnet [run-example mnist-run-example])
            (only-in "../text/data.rkt"
                     contiguous-blocks encode load-text-fixture text->vocab)
            (only-in "../text/translation.rkt"
@@ -284,44 +282,6 @@
              [p (in-list (hash-ref j 'values))]
              [i (in-naturals)])
          (check-= r p tol (format "04_mlp: parameter ~a parity" i))))
-     (let ()
-       (define (train-on device)
-         (define-values (losses classifier _device)
-           (mnist-run-example #:device device))
-         (values losses
-                 (cat (for/list ([p (in-list (parameters classifier))])
-                        (reshape p -1)))))
-       (check-training-twin "05_mnist" "python/05_mnist.py" train-on 'cpu tol)
-       (when (and (cuda-available?)
-                  (python-cuda-available?))
-         (check-training-twin "05_mnist" "python/05_mnist.py" train-on
-                              'cuda 5e-3))
-       ;; the same convnet on shuffled minibatches: the loader replays
-       ;; DataLoader(generator=g)'s batch order, so the losses match
-       (define js (python-check "mnist_shuffle.py"))
-       (with-default-device 'cpu
-         (manual-seed! 0)
-         (define-values (sxs sys) (load-mnist-fixture))
-         (define snet (convnet))
-         (define sopt (adam (parameters snet) #:lr 0.001))
-         (define sloader
-           (dataloader (tensor-dataset sxs sys) #:batch-size 64 #:shuffle? #t
-                       #:generator (make-generator 0)))
-         (define slosses
-           (for/list ([(_epoch xb yb) (in-epochs sloader 2)])
-             (zero-grads! sopt)
-             (define loss (cross-entropy (snet xb) yb))
-             (backward! loss)
-             (step! sopt)
-             (item loss)))
-         (check-equal? (length slosses) (length (hash-ref js 'losses)))
-         (for ([r (in-list slosses)] [p (in-list (hash-ref js 'losses))]
-               [i (in-naturals)])
-           (check-= r p tol (format "mnist shuffle twin: loss ~a" i)))
-         (for ([r (in-list (append-map tensor->list (parameters snet)))]
-               [p (in-list (hash-ref js 'params))]
-               [i (in-naturals)])
-           (check-= r p tol (format "mnist shuffle twin: parameter ~a" i)))))
      (let ()
        ;; MUST stay in sync with torch/scribblings/examples/06-gpt.rkt's gpt
        (define-layer gpt (tok-emb pos-emb transformer head)

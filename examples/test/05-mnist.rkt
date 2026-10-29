@@ -70,3 +70,49 @@
                 (format "non-finite loss on ~a: ~a" accel a-losses))
     (check-true (< (last a-losses) (first a-losses))
                 (format "~a losses did not decrease: ~a" accel a-losses))))
+
+(module+ test
+  (require (only-in torch/tests/private/python-env
+                    check-training-twin python-check python-cuda-available?
+                    python-torch-available? tol))
+
+  (define (train-on device)
+    (define-values (losses classifier _device) (run-example #:device device))
+    (values losses
+            (cat (for/list ([p (in-list (parameters classifier))])
+                   (reshape p -1)))))
+
+  (define (check-shuffle-twin)
+    (define js (python-check "mnist_shuffle.py"))
+    (with-default-device 'cpu
+      (manual-seed! 0)
+      (define-values (sxs sys) (load-mnist-fixture))
+      (define snet (convnet))
+      (define sopt (adam (parameters snet) #:lr 0.001))
+      (define sloader
+        (dataloader (tensor-dataset sxs sys) #:batch-size 64 #:shuffle? #t
+                    #:generator (make-generator 0)))
+      (define slosses
+        (for/list ([(_epoch xb yb) (in-epochs sloader 2)])
+          (zero-grads! sopt)
+          (define loss (cross-entropy (snet xb) yb))
+          (backward! loss)
+          (step! sopt)
+          (item loss)))
+      (check-equal? (length slosses) (length (hash-ref js 'losses)))
+      (for ([r (in-list slosses)] [p (in-list (hash-ref js 'losses))]
+            [i (in-naturals)])
+        (check-= r p tol (format "mnist shuffle twin: loss ~a" i)))
+      (for ([r (in-list (append-map tensor->list (parameters snet)))]
+            [p (in-list (hash-ref js 'params))]
+            [i (in-naturals)])
+        (check-= r p tol (format "mnist shuffle twin: parameter ~a" i)))))
+
+  (cond
+    [(not (python-torch-available?))
+     (displayln "[05-mnist] parity skipped: python3 `torch` not available")]
+    [else
+     (check-training-twin "05_mnist" "python/05_mnist.py" train-on 'cpu tol)
+     (when (and (cuda-available?) (python-cuda-available?))
+       (check-training-twin "05_mnist" "python/05_mnist.py" train-on 'cuda 5e-3))
+     (check-shuffle-twin)]))
