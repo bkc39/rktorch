@@ -297,14 +297,15 @@ faster) with a sign-test interval, which needs 6 rounds to reach 95%.
 - **G. GC per epoch** — every rktorch e2e summary's median `epoch_gc_ms`,
   steps per second, and GC's share of the epoch.
 
-`scripts/bench/l0-baseline.sh` takes the baseline from the host shell,
-entering one dev shell at a time: in `nix develop`, A on the CPU at the
-default thread count (it unsets any `OMP_NUM_THREADS` or `MKL_NUM_THREADS`
-it inherits) and at `OMP_NUM_THREADS=1`, and B at one ATen thread;
+`scripts/bench/l0-baseline.sh` (unsets `OMP_NUM_THREADS` and
+`MKL_NUM_THREADS`) takes the baseline from the host shell, entering one dev
+shell at a time: in `nix develop`, A on the CPU at the default thread count
+and at `OMP_NUM_THREADS=1`, and B at one ATen thread;
 in `env -u LD_LIBRARY_PATH nix develop .#cuda`, A, E and F on CUDA, C over
 `VARIANT` `pgm`/`crop` × `WORKERS` 0/2/4, D at the short settings, and G
 (05 and 09) with troughs off, then on at collect budgets 0.01, 0.05 (the
-default), 0.2 and 1. An example and its twins run as one group, whose
+default), 0.2 and 1. Every stage runs at libtorch's default thread count
+unless a pass or variant sets one. An example and its twins run as one group, whose
 order rotates every round as the micro suites' cases do, so drift reaches
 both sides of a ratio alike. Each group waits for a load below 4; the
 records go to `baseline-<date>.jsonl` in `BASELINE_DIR`

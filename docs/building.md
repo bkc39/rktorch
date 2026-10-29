@@ -120,9 +120,12 @@ that step needs no network. After changing C++, re-stage the library with
 runner, `racket <plugin>/hooks/gate.rkt . all`, runs each in the default
 shell and fails if any does, and its pre-push hook runs the `push-gates`
 subset. Its `test` gate is `nix/matrix/racket-cell.sh test`, the stage that
-`nix build`, `nix flake check` and CI run too; it sets `OMP_NUM_THREADS=1`
-when the caller leaves it unset or empty, so libtorch runs one intra-op
-thread, and a test that needs more sets its own.
+`nix build`, `nix flake check` and CI run too.
+
+`racket-cell.sh`, the `coverage` and `docs` gates, the CUDA cell and the
+C++ tests set `OMP_NUM_THREADS=1` unless the caller sets it or
+`MKL_NUM_THREADS`. A test that needs intra-op threads runs its subject in a
+subprocess with both unset.
 
 ## The native library
 
