@@ -524,8 +524,8 @@ gets the point's name and a subject (a handle, a device, a thread).
 |---|---|---|
 | `handle-registered` | inside the registration region, the finalizer just registered | handle |
 | `op-returned` | the op and its finalizer registration are done, nothing accounted | handle |
-| `entry-counted` | inside the charge region, the entry counted, before the CAS that publishes it | handle |
-| `ledger-entry-added` | inside the charge region, between the charge and the counters | handle |
+| `entry-counted` | inside the charge region, the entry and its live bytes counted, before the CAS that publishes it | handle |
+| `ledger-entry-added` | inside the charge region, between the charge and the check counters | handle |
 | `account-created` | a device's first account made, before the CAS that inserts it | device |
 | `gate-read` | the backstop has read its gate, before it acts | device |
 | `checks-resetting` | a backstop collection has measured, before it resets the checks | device |
@@ -536,6 +536,7 @@ gets the point's name and a subject (a handle, a device, a thread).
 | `handle-released` | inside the release region, between the native release and the tag flip | handle |
 | `free-released` | an explicit free's native release has returned | handle |
 | `finalizer-releasing` | a finalizer's release, before it unaccounts | handle |
+| `live-returned` | an unaccounting of an adopted gradient holds the ledger, its live bytes given back, before its adoption | handle |
 | `adoption-returning` | an unaccounting holds the ledger, before it gives a gradient's adoption back | handle |
 | `collector-claiming` | the claim read, before the CAS that takes it | whether free |
 | `collector-claimed`, `collector-releasing` | the claim is held, or about to be dropped | thread |

@@ -21,6 +21,8 @@
          account-trial set-account-trial!
          live-bytes since-check-bytes since-sample-bytes
          note-accounted!
+         note-checked!
+         note-live!
          note-unaccounted!
          checks-seen
          reset-checks!
@@ -104,10 +106,16 @@
 (define (since-check-bytes a) (unbox (account-since-check a)))
 (define (since-sample-bytes a) (unbox (account-since-sample a)))
 
-(define (note-accounted! a nbytes)
-  (cas-add! (account-live a) nbytes)
+(define (note-live! a nbytes)
+  (cas-add! (account-live a) nbytes))
+
+(define (note-checked! a nbytes)
   (cas-add! (account-since-check a) nbytes)
   (cas-add! (account-since-sample a) nbytes))
+
+(define (note-accounted! a nbytes)
+  (note-live! a nbytes)
+  (note-checked! a nbytes))
 
 (define (note-unaccounted! a nbytes)
   (cas-update! (account-live a) (lambda (live) (max 0 (- live nbytes)))))

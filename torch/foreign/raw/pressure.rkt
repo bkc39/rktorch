@@ -8,7 +8,7 @@
                   call-with-ledger checks-seen count-backstop-collection!
                   devices-over-floor ledger-total live-bytes
                   live-bytes-by-device lower-floors! lower-shadow!
-                  next-shadow-generation! note-accounted! note-adopted!
+                  next-shadow-generation! note-adopted! note-checked! note-live!
                   note-reclaimed! note-unaccounted! note-unadopted!
                   pressure-diagnostics pressure-reading reset-accounts!
                   reset-checks! set-account-capacity! set-account-interval!
@@ -34,8 +34,9 @@
 (provide call-with-ledger
          with-ledger
          account-of
-         note-accounted!
          note-adopted!
+         note-checked!
+         note-live!
          note-unadopted!
          shadow-generation
          note-unaccounted!

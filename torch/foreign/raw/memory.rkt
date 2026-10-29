@@ -26,8 +26,9 @@
                   account-of
                   collect-under-pressure!
                   live-bytes-by-device
-                  note-accounted!
                   note-adopted!
+                  note-checked!
+                  note-live!
                   note-unaccounted!
                   note-unadopted!
                   pressure-diagnostics
@@ -239,9 +240,9 @@
     [else #f]))
 
 ;; An `adopt` reads and writes the shadow, which lives under the ledger. The
-;; count goes up before the entry is published, so an unaccount racing the
-;; publication never takes it below zero; a handle already charged keeps its
-;; charge.
+;; count and the live bytes go up before the entry is published, so an
+;; unaccount racing the publication never takes either below what it added;
+;; a handle already charged keeps its charge, and the loser takes both back.
 (define (record-allocation! key nbytes dev #:adopt [adopt #f])
   (define lt (lifetime-of! key))
   (define a (account-of dev))
@@ -249,14 +250,16 @@
   (define (charge!)
     (with-uninterruptible
       (cas-add! entries 1)
+      (note-live! a nbytes)
       (race-point entry-counted key)
       (cond
         [(cas-claim! (lifetime-charge lt) #f entry)
          (race-point ledger-entry-added key)
-         (note-accounted! a nbytes)
+         (note-checked! a nbytes)
          (when adopt (adopt entry))]
         [else
          (cas-add! entries -1)
+         (note-unaccounted! a nbytes)
          (set-phantom-bytes! (allocation-phantom entry) 0)])))
   (if adopt (with-ledger (charge!)) (charge!)))
 
@@ -275,13 +278,19 @@
           (cas-add! entries -1)
           (race-point entry-unaccounted key)
           (set-phantom-bytes! (allocation-phantom a) 0)
-          (note-unaccounted! (allocation-account a) (allocation-nbytes a))
-          ;; a reset zeroes the adoption of a gradient it dropped, under the ledger
-          (when (positive? (allocation-adopted a))
-            (with-ledger
-              (race-point adoption-returning key)
-              (when (positive? (allocation-adopted a))
-                (unadopt! a)))))))))
+          ;; an adoption's bytes leave the ledger and return to the shadow in
+          ;; one section: a refresh between them would charge them twice. A
+          ;; reset zeroes the adoption of a gradient it dropped, under the ledger.
+          (cond
+            [(positive? (allocation-adopted a))
+             (with-ledger
+               (note-unaccounted! (allocation-account a) (allocation-nbytes a))
+               (race-point live-returned key)
+               (race-point adoption-returning key)
+               (when (positive? (allocation-adopted a))
+                 (unadopt! a)))]
+            [else
+             (note-unaccounted! (allocation-account a) (allocation-nbytes a))]))))))
 
 (define (charge-of key)
   (define lt (hash-ref lifetimes key #f))

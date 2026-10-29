@@ -2,6 +2,9 @@
 
 (module+ test
   (require rackunit
+           (only-in "../foreign.rkt"
+                    backward! cpu-device grad native-memory-unaccounted sum zeros)
+           (only-in (submod "../foreign.rkt" unsafe) tensor-free!)
            (only-in "../foreign/device-type.rkt" device)
            (only-in "../foreign/raw/accounts.rkt"
                     account-of account-trial live-bytes note-accounted! note-unaccounted!
@@ -11,10 +14,12 @@
            (only-in "../foreign/raw/collector.rkt" finalizer-runs)
            (only-in "../foreign/raw/device-queries.rkt" allocator-reading)
            (only-in "../foreign/raw/memory.rkt"
-                    finalizer-diagnostics finalizer-failures record-allocation!
-                    swallow-and-count-failure unaccount!)
-           (only-in "../foreign/raw/pressure.rkt" collect-under-pressure! native-memory-limit)
+                    adopted-bytes finalizer-diagnostics finalizer-failures
+                    record-allocation! swallow-and-count-failure unaccount!)
+           (only-in "../foreign/raw/pressure.rkt"
+                    collect-under-pressure! native-memory-limit refresh-shadows!)
            (only-in "../foreign/raw/regions.rkt" with-uninterruptible)
+           (only-in "../foreign/structs.rkt" tensor-handle)
            (only-in "private/race-harness.rkt" join settle! spawn with-race-hook)
            (only-in "private/within.rkt" within))
 
@@ -194,4 +199,65 @@
     (define left (- (ledger-entries) start))
     (forget-account! dev)
     (check-equal? (list entries live left) '(1 64 0)
-                  "(entries, live bytes, entries after one unaccount)")))
+                  "(entries, live bytes, entries after one unaccount)"))
+
+  (test-case "an unaccount racing a charge's publication takes back only the bytes it added"
+    (within 60
+            (lambda ()
+              (settle!)
+              (define dev (device 'cuda 23))
+              (define key (box 'published))
+              (define start (ledger-entries))
+              (define (unaccount-once-published name subject)
+                (when (and (eq? name 'ledger-entry-added) (eq? subject key))
+                  (unaccount! key)))
+              (with-race-hook unaccount-once-published
+                (record-allocation! key 64 dev))
+              (define live (live-bytes (account-of dev)))
+              (define left (- (ledger-entries) start))
+              (forget-account! dev)
+              (check-equal? (list live left) '(0 0)
+                            "(live bytes, entries) once the rival unaccount took the charge"))))
+
+  (define (cpu-unaccounted)
+    (cond [(assoc (cpu-device) (native-memory-unaccounted)) => cdr]
+          [else 0]))
+
+  ;; the freeing thread waits at the point between giving its live bytes back
+  ;; and its adoption, for a refresh that only a lock left open lets through
+  (define (refresh-against-adopted-free)
+    (settle!)
+    (define cpu (cpu-device))
+    (define p (zeros 256 256 #:requires-grad? #t))
+    (backward! (sum p))
+    (define reading (+ (live-bytes (account-of cpu)) (* 256 256 4)))
+    (define (refresh!)
+      (parameterize ([allocator-reading (lambda (dev) (and (equal? dev cpu) reading))])
+        (refresh-shadows!)))
+    (refresh!)
+    (define g (grad p))
+    (define h (tensor-handle g))
+    (define adopted (adopted-bytes h))
+    (define arrived (box #f))
+    (define refreshed (box #f))
+    (define (wait-in-the-gap name subject)
+      (when (and (eq? name 'live-returned) (eq? subject h))
+        (set-box! arrived #t)
+        (spin-until (lambda () (unbox refreshed)) 0.5)))
+    (with-race-hook wait-in-the-gap
+      (define freeing (spawn (lambda () (tensor-free! g)) #:pool 'own))
+      (wait-until (lambda () (unbox arrived)) 10)
+      (refresh!)
+      (set-box! refreshed #t)
+      (join freeing))
+    (begin0
+      (list (unbox arrived) adopted (cpu-unaccounted))
+      (void (sum p))
+      (settle!)))
+
+  (test-case "a refresh racing an adopted gradient's free charges its storage once"
+    (within 60
+            (lambda ()
+              (define n (* 256 256 4))
+              (check-equal? (refresh-against-adopted-free) (list #t n n)
+                            "(reached the gap, bytes adopted, charge after the free)")))))
