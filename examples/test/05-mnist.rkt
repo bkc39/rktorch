@@ -11,6 +11,11 @@
          (only-in torch/train fit run-metric)
          (only-in torch/vision/mnist load-mnist-fixture))
 
+(module twin racket/base
+  (require (only-in racket/runtime-path #%datum define-runtime-path))
+  (provide mnist-twin)
+  (define-runtime-path mnist-twin "../python/05_mnist.py"))
+
 (module+ main
   (require (only-in "private/env.rkt" env-number))
   ;; The headline run: full MNIST (downloads + caches), ~98% on a GPU. Pass
@@ -72,9 +77,28 @@
                 (format "~a losses did not decrease: ~a" accel a-losses))))
 
 (module+ test
-  (require (only-in torch/tests/private/python-env
+  (require (only-in racket/file make-parent-directory*)
+           (only-in racket/runtime-path #%datum define-runtime-path)
+           (only-in torch/private/util with-temporary-directory)
+           (only-in torch/tests/private/python-env
                     check-training-twin python-check python-cuda-available?
-                    python-torch-available? tol))
+                    python-torch-available? tol)
+           (only-in (submod ".." twin) mnist-twin))
+
+  (define-runtime-path examples-dir "..")
+
+  (test-case "the twin resolves beside a copied runner, not beside python-env"
+    (with-temporary-directory (root)
+      (for ([rel (in-list '("test/05-mnist.rkt" "test/private/env.rkt"
+                            "python/05_mnist.py"))])
+        (define copy (build-path root "examples" rel))
+        (make-parent-directory* copy)
+        (copy-file (build-path examples-dir rel) copy))
+      (define runner (build-path root "examples" "test" "05-mnist.rkt"))
+      (define twin (dynamic-require `(submod ,runner twin) 'mnist-twin))
+      (check-equal? (simplify-path twin)
+                    (build-path root "examples" "python" "05_mnist.py"))
+      (check-true (file-exists? twin))))
 
   (define (train-on device)
     (define-values (losses classifier _device) (run-example #:device device))
@@ -112,7 +136,7 @@
     [(not (python-torch-available?))
      (displayln "[05-mnist] parity skipped: python3 `torch` not available")]
     [else
-     (check-training-twin "05_mnist" "python/05_mnist.py" train-on 'cpu tol)
+     (check-training-twin "05_mnist" mnist-twin train-on 'cpu tol)
      (when (and (cuda-available?) (python-cuda-available?))
-       (check-training-twin "05_mnist" "python/05_mnist.py" train-on 'cuda 5e-3))
+       (check-training-twin "05_mnist" mnist-twin train-on 'cuda 5e-3))
      (check-shuffle-twin)]))
