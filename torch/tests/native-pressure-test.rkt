@@ -24,7 +24,9 @@
                     reset-pressure-state! shadow-refresh lower-shadows!)
            (only-in "../foreign/structs.rkt" tensor-handle)
            (only-in "../nn.rkt"
-                    Linear MultiheadAttention Sequential gen:layer))
+                    Linear MultiheadAttention Sequential gen:layer)
+           (only-in "private/race-harness.rkt" with-race-hook)
+           (only-in "private/within.rkt" within))
 
   (define mib (* 1024 1024))
 
@@ -209,6 +211,32 @@
     (check-true (>= (cpu-unaccounted) (* 255 mib))
                 "a stalled drain refreshed from finalizers still to run")
     (settle!))
+
+  ;; the refresh's charge can bring on a collection before the trough claims
+  ;; the collector; here one is forced there, and its finalizers given time
+  (test-case "a collection between a trough's refresh and its look leaves it due"
+    (settle!)
+    (define before (trough-collections))
+    (define trough-thread (box #f))
+    (define live-at-claim (box #f))
+    (define (collect-while-claiming name _subject)
+      (when (and (eq? name 'collector-claiming)
+                 (eq? (current-thread) (unbox trough-thread))
+                 (not (unbox live-at-claim)))
+        (collect-and-wait!)
+        (set-box! live-at-claim (cpu-bytes))))
+    (within 60
+            (lambda ()
+              (parameterize ([native-collect-margin (* 16 mib)]
+                             [native-collect-budget no-backoff])
+                (set-box! trough-thread (current-thread))
+                (step! 8)
+                (with-race-hook collect-while-claiming
+                  (collect-at-trough!)))))
+    (check-true (< (unbox live-at-claim) (* 16 mib))
+                "the forced collection did not free the step's residue")
+    (check-equal? (- (trough-collections) before) 1
+                  "a collection the refresh brought on cancelled the trough"))
 
   ;; a stand-in reading that holds steady, as the allocator's does when the
   ;; backward pass has written a gradient no handle points at yet

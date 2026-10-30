@@ -276,9 +276,11 @@
 ;; gradients off is the other case: its garbage is as young as garbage gets,
 ;; so that trough asks for a minor collection first and pays for a full one
 ;; only with what survives, the two stages splitting the budget.
-(define (due? next-ms)
-  (and (>= (current-inexact-milliseconds) next-ms)
-       (pair? (devices-over-floor))))
+(define (due? next-ms over?)
+  (and (>= (current-inexact-milliseconds) next-ms) over?))
+
+(define (over-floor?)
+  (pair? (devices-over-floor)))
 
 ;; runs one stage: collect, then record its cost, its yield and its next
 ;; time. `collect!` reports whether its drain finished, and `on-drained!`,
@@ -286,9 +288,9 @@
 ;; earns: a floor pinned to bytes still waiting to be freed would hide that
 ;; residue from the next trough. The next time is set either way, so a
 ;; stalled stage cannot spin.
-(define (trough-stage! next bump! collect! on-drained! budget)
+(define (trough-stage! next bump! collect! on-drained! budget over?)
   (cond
-    [(due? (unbox next))
+    [(due? (unbox next) over?)
      (define seen (checks-seen))
      (define started (current-inexact-milliseconds))
      (define before (ledger-total))
@@ -304,16 +306,17 @@
      drained?]
     [else 'skipped]))
 
-(define (collect-young-at-trough! budget)
+(define (collect-young-at-trough! budget over?)
   (trough-stage! next-minor-ms
                  (lambda (s) (set-stats-trough-minors! s (add1 (stats-trough-minors s))))
                  (lambda ()
                    (collect-garbage 'minor)
                    (drain-finalizers!))
                  void
-                 budget))
+                 budget
+                 over?))
 
-(define (collect-old-at-trough! budget)
+(define (collect-old-at-trough! budget over?)
   (trough-stage! next-full-ms
                  (lambda (s)
                    (set-stats-trough-collections! s (add1 (stats-trough-collections s))))
@@ -323,18 +326,23 @@
                  (lambda (seen)
                    (settle-floors!)
                    (reset-checks! seen))
-                 budget))
+                 budget
+                 over?))
 
 (define (collect-at-trough! #:young? [young? #f])
   (unless (in-atomic-mode?)
     (lower-floors!)
+    ;; read before the refresh: the charge it adds can bring on a collection
+    ;; whose finalizers free the residue before a later look (#296)
+    (define over? (over-floor?))
     (refresh-shadows!)
     (define budget
       (if young? (/ (native-collect-budget) 2) (native-collect-budget)))
     (call-as-the-collector
      (lambda ()
-       (define young (if young? (collect-young-at-trough! budget) 'skipped))
-       (define old (collect-old-at-trough! budget))
+       (define young (if young? (collect-young-at-trough! budget over?) 'skipped))
+       (define old
+         (collect-old-at-trough! budget (if (eq? young 'skipped) over? (over-floor?))))
        ;; what the last stage that ran freed may include storage only a
        ;; dropped graph held, and on MPS it moves finalized tensors into the
        ;; cache; the charge moves with it rather than adding to it, and only
