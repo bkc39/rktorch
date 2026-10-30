@@ -233,10 +233,49 @@
                 (step! 8)
                 (with-race-hook collect-while-claiming
                   (collect-at-trough!)))))
+    (check-not-false (unbox live-at-claim) "the hook never fired")
     (check-true (< (unbox live-at-claim) (* 16 mib))
                 "the forced collection did not free the step's residue")
     (check-equal? (- (trough-collections) before) 1
                   "a collection the refresh brought on cancelled the trough"))
+
+  ;; as in production, the refresh's own reading brings the collection on;
+  ;; answers what was live once that collection's finalizers had run
+  (define (trough-collecting-in-its-refresh! #:young? young?)
+    (define live-at-refresh (box #f))
+    (define (collect-once-then-read _dev)
+      (unless (unbox live-at-refresh)
+        (collect-and-wait!)
+        (set-box! live-at-refresh (cpu-bytes)))
+      (cpu-bytes))
+    (within 60
+            (lambda ()
+              (parameterize ([native-collect-margin (* 16 mib)]
+                             [native-collect-budget no-backoff])
+                (step! 8)
+                (parameterize ([allocator-reading collect-once-then-read])
+                  (collect-at-trough! #:young? young?)))))
+    (check-not-false (unbox live-at-refresh) "the refresh never read the allocator")
+    (check-true (< (unbox live-at-refresh) (* 16 mib))
+                "the refresh's collection did not free the step's residue"))
+
+  (test-case "a collection inside a trough's refresh leaves it due"
+    (settle!)
+    (define before (trough-collections))
+    (trough-collecting-in-its-refresh! #:young? #f)
+    (check-equal? (- (trough-collections) before) 1
+                  "a collection inside the refresh cancelled the trough"))
+
+  ;; the minor stage decides on the floor before the refresh; the full stage
+  ;; looks again, and by then the refresh's collection has freed the residue
+  (test-case "after a minor stage the full stage looks at the floor again"
+    (settle!)
+    (define minors-before (trough-minors))
+    (define before (trough-collections))
+    (trough-collecting-in-its-refresh! #:young? #t)
+    (check-equal? (- (trough-minors) minors-before) 1 "the trough's minor stage did not run")
+    (check-equal? (- (trough-collections) before) 0
+                  "the full stage ran on the floor as it stood before the minor one"))
 
   ;; a stand-in reading that holds steady, as the allocator's does when the
   ;; backward pass has written a gradient no handle points at yet
