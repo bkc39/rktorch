@@ -1,17 +1,17 @@
 #lang racket/base
 
-(require (only-in ffi/unsafe/atomic call-as-atomic)
-         (only-in racket/contract/base -> ->* any)
+(require (only-in racket/contract/base -> ->* any)
          (only-in racket/match == match)
          (only-in "../private/contract.rkt" define/contract-out)
          (only-in "creation-ops.rkt" zeros)
          (only-in "device-type.rkt" cpu-device cuda-device device? mps-device)
          (only-in "error.rkt" exn:fail:rktorch:oom?)
          (only-in "ops.rkt" cuda-available? mps-available? to-device)
+         (only-in "raw/cas.rkt" cas-claim-when!)
          (only-in "raw/fault.rkt" native-fault?)
          (only-in "raw/race-points.rkt" race-point))
 
-(struct mps-probe (run [state #:mutable]))
+(struct mps-probe (run state))
 (struct claim (holder done))
 (struct faulted (fault))
 
@@ -20,7 +20,7 @@
 
 (define/contract-out (make-mps-probe [run allocate-on-mps])
   (->* [] [(-> any)] mps-probe?)
-  (mps-probe run 'unprobed))
+  (mps-probe run (box 'unprobed)))
 
 (define ((cpu-stands-in level why) raised)
   (define detail (if (exn? raised) (exn-message raised) "a non-exn value was raised"))
@@ -37,20 +37,22 @@
     (run)
     #t))
 
+(define (unclaimed? seen)
+  (match seen
+    ['unprobed #t]
+    [(claim holder _) (thread-dead? holder)]
+    [_ #f]))
+
 (define (claim-or-read probe)
-  (call-as-atomic
-   (λ ()
-     (match (mps-probe-state probe)
-       [(and (claim holder _) held) #:when (not (thread-dead? holder)) held]
-       [(? boolean? answer) answer]
-       [(? faulted? fault) fault]
-       [_ (define mine (claim (current-thread) (make-semaphore 0)))
-          (set-mps-probe-state! probe mine)
-          mine]))))
+  (define state (mps-probe-state probe))
+  (define mine (claim (current-thread) (make-semaphore 0)))
+  (if (cas-claim-when! state unclaimed? mine #:site 'probe)
+      mine
+      (unbox state)))
 
 (define (settle! probe done)
   (race-point mps-probe-claimed probe)
-  (set-mps-probe-state! probe (probe-outcome (mps-probe-run probe)))
+  (set-box! (mps-probe-state probe) (probe-outcome (mps-probe-run probe)))
   (race-point mps-probe-settled probe)
   (semaphore-post done)
   (mps-usable? probe))

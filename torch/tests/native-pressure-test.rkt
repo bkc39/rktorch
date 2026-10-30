@@ -9,8 +9,10 @@
                     mps-empty-cache! reclaim-native-memory! sum with-no-grad
                     zeros)
            (only-in (submod "../foreign.rkt" unsafe) tensor-free!)
+           (only-in "../foreign/device-type.rkt" device)
            (only-in "../foreign/raw/memory.rkt"
-                    adopted-bytes collect-and-drain! native-memory-use/fold)
+                    adopted-bytes collect-and-drain! native-memory-use/fold
+                    record-allocation! unaccount!)
            (only-in "../foreign/raw/collector.rkt"
                     call-as-the-collector collect-and-wait! drain-deadline)
            (only-in "../foreign/raw/device-queries.rkt"
@@ -22,7 +24,9 @@
                     reset-pressure-state! shadow-refresh lower-shadows!)
            (only-in "../foreign/structs.rkt" tensor-handle)
            (only-in "../nn.rkt"
-                    Linear MultiheadAttention Sequential gen:layer))
+                    Linear MultiheadAttention Sequential gen:layer)
+           (only-in "private/race-harness.rkt" with-race-hook)
+           (only-in "private/within.rkt" within))
 
   (define mib (* 1024 1024))
 
@@ -53,6 +57,12 @@
   (define (step! k)
     (length (for/list ([_ (in-range k)]) (zeros 1024 1024))))
 
+  ;; a batch that outlives a minor collection, so only a major one reclaims it
+  (define (aged-step! k)
+    (define batch (for/list ([_ (in-range k)]) (zeros 1024 1024)))
+    (collect-garbage 'minor)
+    (length batch))
+
   (define (positive-entries totals)
     (filter (lambda (entry) (positive? (cdr entry))) totals))
 
@@ -70,19 +80,27 @@
       (step! 8))
     (check-equal? (collections) before))
 
-  (test-case "under a limit the ledger stays bounded and the trigger counts"
-    (settle!)
+  (define (high-water-under-limit step!)
     (define base (cpu-bytes))
-    (define before (collections))
     (parameterize ([native-memory-limit (* 64 mib)])
-      (define high-water
-        (for/fold ([hw 0]) ([_ (in-range 20)])
-          (step! 8)
-          (max hw (- (cpu-bytes) base))))
-      (check-true (> (collections) before) "the trigger never fired")
-      (check-true (< high-water (* 128 mib))
-                  (format "ledger reached ~a MiB under a 64 MiB limit"
-                          (quotient high-water mib)))))
+      (for/fold ([hw 0]) ([_ (in-range 20)])
+        (step! 8)
+        (max hw (- (cpu-bytes) base)))))
+
+  (define (check-bounded high-water)
+    (check-true (< high-water (* 128 mib))
+                (format "ledger reached ~a MiB under a 64 MiB limit"
+                        (quotient high-water mib))))
+
+  (test-case "under a limit the ledger stays bounded"
+    (settle!)
+    (check-bounded (high-water-under-limit step!)))
+
+  (test-case "under a limit the trigger reclaims batches only a major collection reaches"
+    (settle!)
+    (define before (collections))
+    (check-bounded (high-water-under-limit aged-step!))
+    (check-true (> (collections) before) "the trigger never fired"))
 
   (test-case "a working set above the mark backs off instead of thrashing"
     (settle!)
@@ -193,6 +211,71 @@
     (check-true (>= (cpu-unaccounted) (* 255 mib))
                 "a stalled drain refreshed from finalizers still to run")
     (settle!))
+
+  ;; the refresh's charge can bring on a collection before the trough claims
+  ;; the collector; here one is forced there, and its finalizers given time
+  (test-case "a collection between a trough's refresh and its look leaves it due"
+    (settle!)
+    (define before (trough-collections))
+    (define trough-thread (box #f))
+    (define live-at-claim (box #f))
+    (define (collect-while-claiming name _subject)
+      (when (and (eq? name 'collector-claiming)
+                 (eq? (current-thread) (unbox trough-thread))
+                 (not (unbox live-at-claim)))
+        (collect-and-wait!)
+        (set-box! live-at-claim (cpu-bytes))))
+    (within 60
+            (lambda ()
+              (parameterize ([native-collect-margin (* 16 mib)]
+                             [native-collect-budget no-backoff])
+                (set-box! trough-thread (current-thread))
+                (step! 8)
+                (with-race-hook collect-while-claiming
+                  (collect-at-trough!)))))
+    (check-not-false (unbox live-at-claim) "the hook never fired")
+    (check-true (< (unbox live-at-claim) (* 16 mib))
+                "the forced collection did not free the step's residue")
+    (check-equal? (- (trough-collections) before) 1
+                  "a collection the refresh brought on cancelled the trough"))
+
+  ;; as in production, the refresh's own reading brings the collection on;
+  ;; answers what was live once that collection's finalizers had run
+  (define (trough-collecting-in-its-refresh! #:young? young?)
+    (define live-at-refresh (box #f))
+    (define (collect-once-then-read _dev)
+      (unless (unbox live-at-refresh)
+        (collect-and-wait!)
+        (set-box! live-at-refresh (cpu-bytes)))
+      (cpu-bytes))
+    (within 60
+            (lambda ()
+              (parameterize ([native-collect-margin (* 16 mib)]
+                             [native-collect-budget no-backoff])
+                (step! 8)
+                (parameterize ([allocator-reading collect-once-then-read])
+                  (collect-at-trough! #:young? young?)))))
+    (check-not-false (unbox live-at-refresh) "the refresh never read the allocator")
+    (check-true (< (unbox live-at-refresh) (* 16 mib))
+                "the refresh's collection did not free the step's residue"))
+
+  (test-case "a collection inside a trough's refresh leaves it due"
+    (settle!)
+    (define before (trough-collections))
+    (trough-collecting-in-its-refresh! #:young? #f)
+    (check-equal? (- (trough-collections) before) 1
+                  "a collection inside the refresh cancelled the trough"))
+
+  ;; the minor stage decides on the floor before the refresh; the full stage
+  ;; looks again, and by then the refresh's collection has freed the residue
+  (test-case "after a minor stage the full stage looks at the floor again"
+    (settle!)
+    (define minors-before (trough-minors))
+    (define before (trough-collections))
+    (trough-collecting-in-its-refresh! #:young? #t)
+    (check-equal? (- (trough-minors) minors-before) 1 "the trough's minor stage did not run")
+    (check-equal? (- (trough-collections) before) 0
+                  "the full stage ran on the floor as it stood before the minor one"))
 
   ;; a stand-in reading that holds steady, as the allocator's does when the
   ;; backward pass has written a gradient no handle points at yet
@@ -703,15 +786,23 @@
   ;; accounted before the ledger is read again, as another thread's could be
   (test-case "a lowering skips a reading the ledger moved under"
     (settle!)
+    ;; the lowering reads every account, and an earlier test in the same
+    ;; process can leave another device's open
+    (define elsewhere (box 'elsewhere))
+    (record-allocation! elsewhere 4096 (device 'cuda 13))
+    (unaccount! elsewhere)
     (parameterize ([allocator-reading (lambda (_dev) (+ (cpu-bytes) (* 256 mib)))]
                    [native-collect-margin idle-margin])
       (collect-at-trough!))
     (define late '())
     (parameterize ([allocator-reading
-                    (lambda (_dev)
-                      (define reading (+ (cpu-bytes) (* 200 mib)))
-                      (set! late (cons (zeros 4096 4096) late))
-                      reading)])
+                    (lambda (dev)
+                      (cond
+                        [(equal? dev (cpu-device))
+                         (define reading (+ (cpu-bytes) (* 200 mib)))
+                         (set! late (cons (zeros 4096 4096) late))
+                         reading]
+                        [else #f]))])
       (lower-shadows!))
     (check-equal? (length late) 1)
     (check-true (>= (cpu-unaccounted) (* 255 mib))

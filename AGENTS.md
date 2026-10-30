@@ -110,8 +110,8 @@ with `backward!` outside the form as PyTorch recommends). From
   continuing), `in-epochs`; `#:workers 0` builds batches on the calling
   thread like `num_workers=0`, `#:workers n #:prefetch p` on n parallel
   threads (#168), batch j by worker j mod n, in order, at most n*p ahead,
-  each worker seeded like PyTorch's; torch calls inside a worker are
-  serialized through the main thread until #296; a seeded loader replays
+  each worker seeded like PyTorch's; a worker's torch calls run on its own
+  OS thread; a seeded loader replays
   `DataLoader(generator=g)`'s batch order for any worker count
 - translation (`torch/text/translation.rkt`, #153): the PyTorch seq2seq
   tutorial's eng-fra pairs, `load-translation-pairs` (zip cached, 11445
@@ -715,8 +715,8 @@ Runtime paths take `(only-in racket/runtime-path #%datum define-runtime-path)`.
   shadow-dispatch convention); `torch/foreign/order-ops.rkt` — `topk` `sort`
   `argsort` `multinomial`; `torch/foreign/autograd-ops.rkt` — autograd +
   `with-no-grad` + in-place ops; `torch/foreign/structs.rkt` — the `tensor`
-  wrapper (`prop:cpointer`, shape cached at wrap time, allocator/deallocator
-  finalizer); `torch/foreign/error.rkt` — `check-ok` / `check-handle`;
+  wrapper (`prop:cpointer`, shape cached at wrap time, the explicit free's
+  claim); `torch/foreign/error.rkt` — `check-ok` / `check-handle`;
   `torch/foreign/format.rkt` — the PyTorch-repr reproducer.
 - `foreign/raw/*.rkt` — direct FFI, one module per C translation unit:
   `syntax` (the FFI definer + `_Tensor` cpointer), `native-location` (the
@@ -728,7 +728,12 @@ Runtime paths take `(only-in racket/runtime-path #%datum define-runtime-path)`.
   native-fault latch `define-torch` puts under every binding, #76),
   `pressure` (no
   FFI of its own: the collection policy under the ledger, the two troughs
-  and the capacity backstop, #145), `pressure-settings` (its parameters;
+  and the capacity backstop, #145),
+  `accounts` (no FFI: the per-device accounts and `with-ledger`),
+  `cas` (every CAS retry loop),
+  `regions` (`with-uninterruptible`, `with-cleanup`),
+  `oom` (the OOM retry, re-exported by `memory`),
+  `pressure-settings` (its parameters;
   `RKTORCH_MEMORY_FRACTION` and `RKTORCH_MEMORY_LIMIT` in MiB set the
   mark's initial values, #236), `device-queries` (the capacity, allocator
   and release queries `device` hands down to it), `race-points` (no FFI:
@@ -750,14 +755,28 @@ Runtime paths take `(only-in racket/runtime-path #%datum define-runtime-path)`.
   retry can never double-draw and break seeded parity or apply an
   update twice; `tr_tensor_grad`
   carries `tensor-allocator/gradient`; a binding with several tensor
-  outputs carries `tensor-allocator/outputs` (or `/outputs/no-retry`),
-  which registers and
-  accounts every handle inside one atomic section; never a bare
-  `(allocator ...)` wrap (skips the ledger).
+  outputs carries `tensor-allocator/outputs` (or `/outputs/no-retry`).
+  Every wrap runs the raw call and registers each handle's finalizer in one
+  `call-as-uninterruptible` region (a kill or break waits for it), then
+  charges the ledger in a second region; never a bare `register-finalizer`
+  (skips the ledger). `torch/tests/source-rules-test.rkt` enforces three
+  rules: nothing under `torch/foreign/` enters atomic mode (a parallel
+  thread's atomic section runs on the main OS thread) or requires
+  `ffi/unsafe/alloc`; nothing under `torch/` but
+  `torch/foreign/raw/cas.rkt` calls `box-cas!` or `unsafe-struct*-cas!`, so
+  every CAS goes through its retry loops (`cas-update!`, `cas-add!`,
+  `cas-take!`, `cas-claim!`, `cas-claim-when!`, `cas-field-claim!`), whose
+  `#:site` must be one of `torch/foreign/raw/cas.rkt`'s enumerated sites or the call is a
+  syntax error; and no comment under `torch/foreign/` cites an issue
+  number. The rarely touched ledger fields are written only under
+  `with-ledger`, inside which nothing blocks, sleeps or posts.
   Explicit synchronous release first takes the handle with one CAS on the
   wrapper's `state`, from `'live` to `'freeing`. A loser raises
-  `exn:fail:contract`. The winner goes through the raising,
-  finalizer-cancelling `tr-tensor-free/checked`; OOM reaches users as
+  `exn:fail:contract`. The winner goes through the raising
+  `tr-tensor-free/checked`, which claims the handle's lifetime for its
+  thread with the CAS the finalizer makes, and releases, tags and marks it
+  in one region; a free killed before that region leaves the handle
+  to the finalizer. OOM reaches users as
   `exn:fail:rktorch:oom` (catch by type, not message). A handler broad
   enough to catch an `invalid memory reference` either lets it through to
   the caller, which latches nothing, or, where no caller is waiting (a
@@ -900,7 +919,9 @@ express, in one or two lines:
 
 Never keepers: narration of what the next line does, why a change was
 made (commit message's job), review-round archaeology, restated names, or
-issue-number tags on every mention of a mechanism. Exempt: the literate
+issue-number tags on every mention of a mechanism. Under `torch/foreign/` a
+comment cites no issue number at all (`torch/tests/source-rules-test.rkt`).
+Exempt: the literate
 examples (`torch/scribblings/examples/*.rkt`, prose-by-design) and the
 python parity twins (`examples/python/*.py`, whose docstrings identify the
 Racket twin they mirror).

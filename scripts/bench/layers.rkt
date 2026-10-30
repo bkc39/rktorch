@@ -1,16 +1,15 @@
 #lang racket/base
 
 (require (only-in ffi/unsafe _fun _void get-ffi-obj)
-         (only-in ffi/unsafe/alloc allocator)
          (only-in torch [add facade-add] randn reclaim-native-memory!)
          (only-in torch/foreign/error check-handle)
          (only-in torch/foreign/raw/collector finalizer-runs)
          (only-in torch/foreign/raw/fault latched)
          (only-in torch/foreign/raw/memory
                   collect-and-drain!
+                  registering
                   tensor-allocator
-                  tensor-allocator/no-retry
-                  tr-tensor-free/finalizer)
+                  tensor-allocator/no-retry)
          (only-in torch/foreign/raw/syntax _Tensor _Tensor/null)
          (only-in torch/foreign/structs wrap-tensor)
          (only-in torch/foreign/tensor-ops [add unchecked-add])
@@ -25,7 +24,7 @@
 
 (define tr-add/latched (latched tr-add))
 (define tr-free/latched (latched tr-free))
-(define tr-add/allocator ((allocator tr-tensor-free/finalizer) tr-add/latched))
+(define tr-add/allocator (registering tr-add/latched))
 (define tr-add/accounted (tensor-allocator/no-retry tr-add/latched))
 (define tr-add/retry (tensor-allocator tr-add/latched))
 

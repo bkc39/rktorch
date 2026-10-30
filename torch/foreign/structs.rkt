@@ -1,6 +1,6 @@
 #lang racket/base
 
-(require (only-in ffi/unsafe cpointer-has-tag? prop:cpointer set-cpointer-tag!)
+(require (only-in ffi/unsafe cpointer-has-tag? prop:cpointer)
          (only-in ffi/vector
                   f32vector->list
                   f64vector->list
@@ -11,12 +11,12 @@
                   s64vector-ref)
          (only-in racket/contract/base -> any/c)
          (only-in racket/string string-join)
-         (only-in racket/unsafe/ops unsafe-struct*-cas!)
          (only-in "../private/contract.rkt" define/checked-out)
          (only-in "error.rkt" check-handle check-ok)
          (only-in "format.rkt"
                   tensor->pytorch-repr
                   tensor-tree->pytorch-repr)
+         (only-in "raw/cas.rkt" cas-field-claim!)
          (only-in "raw/fault.rkt" native-fault? note-native-fault!)
          (only-in "raw/memory.rkt" tr-tensor-free/checked)
          (only-in "raw/race-points.rkt" race-point)
@@ -39,9 +39,6 @@
          wrap-tensor
          tensor-state-index
          tensor-free!)
-
-(module+ private
-  (provide state-cas))
 
 (define (shape->string dims)
   (if (null? dims) "scalar" (string-join (map number->string dims) "x")))
@@ -105,20 +102,14 @@
 (define summarize-threshold 1000)
 (define edgeitems 3)
 
-;; The tag flips even when the free raises — an attempted free consumes the
-;; finalizer backstop, so a live-looking tag would invite use-after-free.
-;; Breaks stay deferred from the take through the release: one landing
-;; mid-free strands the handle forever. Only the outer wind's exit delivers it.
+;; a break landing between the take and the release strands the handle
 (define (free-handle! h #:take [take! void])
   (dynamic-wind
    void
    (lambda ()
      (parameterize-break #f
        (take!)
-       (dynamic-wind
-        void
-        (lambda () (tr-tensor-free/checked h))
-        (lambda () (set-cpointer-tag! h 'Tensor-freed)))))
+       (tr-tensor-free/checked h)))
    void))
 
 (define (call-with-slice h d start len proc)
@@ -237,15 +228,8 @@
 
 (define tensor-state-index (cas-field-index struct:tensor-impl))
 
-(define state-cas (box unsafe-struct*-cas!))
-
 (define (take-state! t)
-  (define cas! (unbox state-cas))
-  (let retry ()
-    (cond
-      [(cas! t tensor-state-index 'live 'freeing) #t]
-      [(eq? (tensor-impl-state t) 'live) (retry)]
-      [else #f])))
+  (cas-field-claim! t tensor-state-index 'live 'freeing #:site 'tensor-state))
 
 (define (tensor-free! t)
   (define h (tensor-handle t))

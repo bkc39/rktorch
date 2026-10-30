@@ -6,10 +6,9 @@
 (require (only-in ffi/unsafe
                   _double _fun _int _int64 _ptr _uint64 _void
                   define-cpointer-type make-ctype)
-         (only-in ffi/unsafe/alloc allocator)
          (only-in ffi/vector _s64vector)
          (only-in "memory.rkt"
-                  _tr-device-type swallow-and-count-failure tensor-allocator/no-retry)
+                  _tr-device-type registering/release tensor-allocator/no-retry)
          (only-in "syntax.rkt" _Tensor _Tensor/null define-torch)
          (only-in "tensor.rkt" _tr-dtype))
 
@@ -42,7 +41,7 @@
 (define-torch tr-generator-new/raw
   (_fun (seed : _uint64) -> _Generator/null)
   #:c-id tr_generator_new
-  #:wrap (allocator (swallow-and-count-failure tr-generator-free/unwrapped)))
+  #:wrap (registering/release tr-generator-free/unwrapped))
 
 (define-torch tr-generator-draw-seed/raw
   (_fun (generator : _Generator/current) (out : (_ptr o _int64))

@@ -1,7 +1,8 @@
 #lang racket/base
 
 (require (for-syntax racket/base (only-in syntax/parse/pre ...+ expr))
-         (only-in syntax/parse/define define-syntax-parse-rule))
+         (only-in syntax/parse/define define-syntax-parse-rule)
+         (only-in "../foreign/raw/cas.rkt" cas-claim! cas-claim-when!))
 
 (provide call-with-lock
          make-lock
@@ -12,27 +13,29 @@
 (define (make-lock)
   (box #f))
 
+(define (free? held)
+  (or (not held) (thread-dead? (holder-thread held))))
+
 (define (acquire! lock breaks?)
   (define me (holder (current-thread) (make-semaphore 0)))
   (define wait (if breaks? sync/enable-break sync))
   (let retry ()
-    (define held (unbox lock))
-    (define free? (or (not held) (thread-dead? (holder-thread held))))
     (cond
-      [(and free? (box-cas! lock held me)) (memory-order-acquire) me]
-      [free? (retry)]
-      [(eq? (holder-thread held) (current-thread))
-       (error 'with-lock "the current thread already holds this lock")]
+      [(cas-claim-when! lock free? me #:site 'lock) (memory-order-acquire) me]
       [else
-       (wait (semaphore-peek-evt (holder-released held))
-             (thread-dead-evt (holder-thread held)))
-       (retry)])))
+       (define held (unbox lock))
+       (cond
+         [(free? held) (retry)]
+         [(eq? (holder-thread held) (current-thread))
+          (error 'with-lock "the current thread already holds this lock")]
+         [else
+          (wait (semaphore-peek-evt (holder-released held))
+                (thread-dead-evt (holder-thread held)))
+          (retry)])])))
 
 (define (release! lock me)
   (memory-order-release)
-  (let retry ()
-    (when (and (eq? (unbox lock) me) (not (box-cas! lock me #f)))
-      (retry)))
+  (cas-claim! lock me #f #:site 'lock)
   (semaphore-post (holder-released me)))
 
 ;; a killed holder never releases, so a waiter takes the lock over once it is dead

@@ -115,10 +115,11 @@ Runs the body with autocast on for @racket[device], which is a device type
 or a @racket[device?] value and defaults to the default device, in
 @racket[dtype], @racket['bfloat16] unless given @racket['float16]. Leaving
 the body puts back whatever was there before, so the form nests. The state
-is kept per device type but not per Racket thread: every thread in the
-place sees it, a parallel thread included, so while one of them is inside
-the form, tensor operations that another one runs are autocast too. Keep
-other threads that compute out of the extent. Run
+is kept per device type. A thread made with @racket[#:pool 'own] has its
+own. Coroutine threads share one, so while one of them is inside the form,
+tensor operations that another one runs are autocast too; keep them out of
+the extent. Threads of a shared parallel thread pool share that of the pool
+thread running them. Run
 @racket[backward!] outside the form, as PyTorch recommends: the gradients
 arrive in the parameters' own dtype either way.
 }
@@ -133,8 +134,9 @@ The procedure form of @racket[with-autocast].
 
 @defproc[(autocast-enabled? [device (or/c 'cpu 'cuda 'mps device?) (default-device)])
          boolean?]{
-Whether autocast is on for @racket[device], which every Racket thread in
-the place sees alike.
+Whether autocast is on for @racket[device] in the calling thread's state,
+which a thread made with @racket[#:pool 'own] keeps for itself and other
+threads share as @racket[with-autocast] describes.
 }
 
 @defproc[(autocast-dtype [device (or/c 'cpu 'cuda 'mps device?) (default-device)])
@@ -367,9 +369,10 @@ nothing: a mark that @racket['pressure-collections] in
 @racket[finalizer-diagnostics] shows firing step after step is better
 raised.
 
-Finalizers run on a Racket thread of their own, so a thread's first tensor
-operation that allocates or moves after each collection yields once,
-outside an atomic section, and other threads can run there as at any yield.
+Finalizers run on a Racket thread of their own, so a coroutine thread's
+first tensor operation that allocates or moves after each collection yields
+once, outside any uninterruptible region, and other threads can run there as
+at any yield. A parallel thread's operations do not yield.
 
 The ledger also charges Racket's collector for what it cannot see. At every
 trough, before collecting, it reads each device's allocator and charges the
@@ -565,7 +568,10 @@ once, not writing it. An in-place mutation, @racket[copy!] or an optimizer's
 @racket[step!], writes the native storage the other threads read, and
 nothing in the library orders those writes, so a program that mutates a
 shared tensor must synchronise its threads itself. Grad mode, autocast and
-the message of a failed call are not yet kept per thread. Two threads may
+the message of a failed call are kept per OS thread: a thread made with
+@racket[#:pool 'own] has its own, threads of a shared parallel pool share
+their pool thread's, and coroutine threads share the main thread's
+(@hyperlink["https://github.com/bkc39/rktorch/issues/194"]{#194}). Two threads may
 free one tensor explicitly: the handle is released once, and the other
 free raises @racket[exn:fail:contract].
 
@@ -616,4 +622,7 @@ storage, device, and dtype. The tensor's ledger
 entry is re-accounted under the same handle, so @racket[native-memory-use]
 reports the new device and byte count; the old storage is released by
 libtorch at once when nothing else references it.
+Two concurrent @racket[to!] calls on one tensor are a data race: the
+ledger may go on reporting the earlier device until the tensor is next
+re-accounted or freed.
 }

@@ -12,13 +12,12 @@
   (define prelude
     '((require torch
                (only-in ffi/unsafe cast _intptr)
-               (only-in ffi/unsafe/alloc allocator)
                (only-in torch/foreign/raw/fault native-faulted)
                (only-in torch/foreign/raw/syntax _Tensor)
                (only-in torch/foreign/structs tensor-impl)
                (only-in torch/foreign/raw/tensor tr-tensor-dtype/raw)
                (only-in torch/foreign/raw/memory
-                        tr-tensor-free/finalizer finalizer-failures))
+                        registering finalizer-failures))
       (define (bad) (cast 8 _intptr _Tensor))
       (define (then-probe)
         (with-handlers ([exn:fail? (lambda (e)
@@ -27,7 +26,7 @@
           (printf "then: usable\n")))))
 
   (define finalizer-fault
-    '((define adopt ((allocator tr-tensor-free/finalizer) values))
+    '((define adopt (registering values))
       (for ([_ (in-range 5)]) (void (adopt (bad))))
       (for ([_ (in-range 3)]) (collect-garbage))
       (sleep 1)

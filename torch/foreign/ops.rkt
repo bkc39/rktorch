@@ -26,6 +26,7 @@
                   cpu-device cuda-device device-index device-type device/c
                   device? mps-device)
          (only-in "error.rkt" check-handle check-ok)
+         (only-in "raw/cas.rkt" cas-add!)
          (only-in "raw/device.rkt"
                   tr-cuda-device-count/raw
                   tr-cuda-empty-cache/raw
@@ -393,10 +394,7 @@
   (unbox moves))
 
 (define (note-move!)
-  (let retry ()
-    (define seen (unbox moves))
-    (unless (box-cas! moves seen (add1 seen))
-      (retry))))
+  (void (cas-add! moves 1)))
 
 ;; a no-op when nothing would change, as `to`, so a repeated layer move
 ;; touches neither the native side nor the ledger; otherwise the status is

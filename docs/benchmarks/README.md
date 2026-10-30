@@ -271,11 +271,8 @@ faster) with a sign-test interval, which needs 6 rounds to reach 95%.
   PyTorch, and the main thread's steps per second, one table per thread
   count and invocation (`run_id`). An idle row's ratio is
   the speedup over one thread. A train row measures how far a training
-  main starves the workers, not scaling: rktorch's workers wait on main's
-  non-yielding foreign calls (accounting every tensor enters
-  `call-as-atomic` in `torch/foreign/raw/pressure.rkt`, which needs main's
-  scheduler, #262), PyTorch's on the GIL. rktorch train rows near 0 ops/s
-  are that starvation in the runtime (#262, #296), not a harness bug.
+  main slows the workers: rktorch's workers run their ops on their own OS
+  threads, sharing only the collector with main, PyTorch's wait on the GIL.
 - **C. Loader end to end against PyTorch** — `17-workers` beside
   `py-17-workers` and `py-17-workers-per-param`, per variant, as D.
 - **D. Training against PyTorch** — `05-mnist` and `09-resnet` beside their
