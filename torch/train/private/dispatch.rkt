@@ -160,8 +160,10 @@
 (define (warn-eval-layers! r)
   (define n (match (run-trainer r) [(? layer? tr) (eval-layer-count tr)] [_ 0]))
   (when (positive? n)
-    (log-rktorch-train-warning
-     "fit: ~a layer(s) in eval mode at the start of training; they stay in eval mode" n)))
+    (define message
+      (format "fit: ~a layer(s) in eval mode at the start of training; they stay in eval mode" n))
+    (log-rktorch-train-warning message)
+    (eprintf "rktorch-train: ~a\n" message)))
 
 (define (logged-attempt what thunk)
   (with-handlers ([exn:fail? (lambda (e)

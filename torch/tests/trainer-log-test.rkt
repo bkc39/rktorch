@@ -1,7 +1,8 @@
 #lang racket/base
 
 (module+ test
-  (require (only-in racket/list append-map first make-list partition remove-duplicates second)
+  (require (only-in racket/contract exn:fail:contract:blame?)
+           (only-in racket/list append-map first make-list partition remove-duplicates second)
            (only-in racket/match match match-define)
            rackunit
            (only-in syntax/macro-testing convert-compile-time-error)
@@ -228,14 +229,45 @@
     (fit (OwnEpoch) (label-loader) #:max-epochs 2 #:logger own)
     (check-equal? (map (lambda (m) (hash-ref m 'epoch)) (collecting-metrics own)) '(7.0 7.0)))
 
-  (test-case "an epoch with no step yet labels its training row 0"
+  (define skip-first
+    (lambda-callback #:on-before-optimizer-step
+                     (lambda (r opt) (when (zero? (run-epoch r)) (skip-step! r)))))
+
+  (test-case "an epoch with no step yet labels its training row -1, as Lightning"
     (define l (collecting-logger))
-    (define skip-first
-      (lambda-callback #:on-before-optimizer-step
-                       (lambda (r opt) (when (zero? (run-epoch r)) (skip-step! r)))))
     (fit (Labelled) (label-loader) #:max-epochs 2 #:log-every-n-steps 1 #:logger l
          #:callbacks (list skip-first))
-    (check-equal? (logged-steps l) '(0 0 1 2 2)))
+    (check-equal? (logged-steps l) '(-1 0 1 2 2)))
+
+  (define-trainer EpochStart (net)
+    (define-init () (set! net (Linear 1 1)))
+    (define-optimizers (sgd (parameters net) #:lr 0.01))
+    (define-training-step (x y)
+      (log! 'tl 1.0 #:on-step? #t #:on-epoch? #t)
+      (mse-loss (net x) y))
+    (define-hook (on-train-epoch-start) (log! 'a 1.0 #:on-step? #f #:on-epoch? #t))
+    (define-hook (on-train-batch-start . batch)
+      (when (zero? (run-epoch run)) (skip-epoch! run))))
+
+  (test-case "a skipped first epoch's row is at step -1 in the built-in loggers, as Lightning"
+    (define out (open-output-string))
+    (fit (EpochStart) (label-loader) #:max-epochs 2 #:log-every-n-steps 1
+         #:logger (stdout-logger #:out out))
+    (check-equal? (cdr (regexp-split #rx"\n" (get-output-string out)))
+                  '("step -1 a=1.0 epoch=0"
+                    "step 0 epoch=1 tl-step=1.0"
+                    "step 1 epoch=1 tl-step=1.0"
+                    "step 2 epoch=1 tl-step=1.0"
+                    "step 2 a=1.0 epoch=1 tl-epoch=1.0"
+                    "success"
+                    "")))
+
+  (test-case "a logger's step is -1 or a natural"
+    (define l (collecting-logger))
+    (logger-log-metrics! l (hasheq 'x 1.0) -1)
+    (check-equal? (collecting-steps l) (list (cons -1 (hasheq 'x 1.0))))
+    (check-exn exn:fail:contract:blame?
+               (lambda () (logger-log-metrics! l (hasheq 'x 1.0) -2))))
 
   (test-case "request-stop! publishes the step's row off the #:log-every-n-steps cadence"
     (define l (collecting-logger))
