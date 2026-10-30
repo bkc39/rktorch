@@ -3,18 +3,14 @@
 (module+ test
   (require (only-in ffi/vector f32vector s64vector)
            (only-in racket/contract/base contract-name)
-           (only-in racket/contract/combinator
-                    blame-positive
-                    exn:fail:contract:blame-object
-                    exn:fail:contract:blame?)
            (only-in racket/list drop)
            (only-in racket/math nan?)
-           (only-in syntax/location quote-module-name)
            rackunit
            (only-in "../foreign/ops.rkt" dtype-symbols)
            "../main.rkt"
            (prefix-in long:
-                      (only-in "../main.rkt" tensor-device tensor-dtype)))
+                      (only-in "../main.rkt" tensor-device tensor-dtype))
+           (only-in "private/blame.rkt" blames-caller?))
 
   (test-case "tensor-device and tensor-dtype answer as device and dtype"
     (define t (zeros 2 #:dtype 'int64))
@@ -31,9 +27,6 @@
     (check-exn exn:fail:contract:arity? (lambda () (device 'cuda 0 0))))
 
   (test-case "device blames its caller for each argument it rejects"
-    (define (blames-caller? e)
-      (and (exn:fail:contract:blame? e)
-           (equal? (blame-positive (exn:fail:contract:blame-object e)) (quote-module-name))))
     (for ([arguments (in-list (list (list (zeros 2) 0)
                                     (list 'cuda -1)
                                     (list 'metal)
@@ -41,7 +34,9 @@
                                     (list 'cpu 1)
                                     (list 'cpu 0.0)
                                     (list 'mps 0.0)))])
-      (check-exn blames-caller? (lambda () (apply device arguments)) (format "~s" arguments))))
+      (check-exn (blames-caller? "tensor-ops-test")
+                 (lambda () (apply device arguments))
+                 (format "~s" arguments))))
 
   (test-case "creation goldens"
     (check-equal? (tensor->list (zeros 2 2)) '(0.0 0.0 0.0 0.0))

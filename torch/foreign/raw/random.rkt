@@ -17,13 +17,15 @@
          _Generator/current
          _Generator/null
          current-generator/raw
+         tr-generator-device/raw
          tr-generator-draw-seed/raw
-         tr-generator-new/raw
+         tr-generator-new-on/raw
          tr-randn/raw
          tr-randn-gen-on/raw
          tr-rand/raw
          tr-rand-gen-on/raw
          tr-randperm/raw
+         tr-tensor-normal!/raw
          tr-tensor-uniform!/raw)
 
 (define-cpointer-type _Generator)
@@ -39,10 +41,19 @@
 
 ;; a generator is a handle but not a tensor: no bytes to charge, so the
 ;; guarded finalizer alone releases it
-(define-torch tr-generator-new/raw
-  (_fun (seed : _uint64) -> _Generator/null)
-  #:c-id tr_generator_new
+(define-torch tr-generator-new-on/raw
+  (_fun (seed : _uint64) (type : _tr-device-type) (index : _int64)
+        -> _Generator/null)
+  #:c-id tr_generator_new_on
   #:wrap (allocator (swallow-and-count-failure tr-generator-free/unwrapped)))
+
+(define-torch tr-generator-device/raw
+  (_fun (generator : _Generator)
+        (type : (_ptr o _tr-device-type))
+        (index : (_ptr o _int64))
+        -> (rc : _int)
+        -> (values rc type index))
+  #:c-id tr_generator_device)
 
 (define-torch tr-generator-draw-seed/raw
   (_fun (generator : _Generator/current) (out : (_ptr o _int64))
@@ -93,5 +104,13 @@
   #:wrap tensor-allocator/no-retry)
 
 (define-torch tr-tensor-uniform!/raw
-  (_fun (t : _Tensor) (low : _double) (high : _double) -> _int)
-  #:c-id tr_tensor_uniform_)
+  (_fun (t : _Tensor) (low : _double) (high : _double)
+        (generator : _Generator/current)
+        -> _int)
+  #:c-id tr_tensor_uniform_gen_)
+
+(define-torch tr-tensor-normal!/raw
+  (_fun (t : _Tensor) (mean : _double) (std : _double)
+        (generator : _Generator/current)
+        -> _int)
+  #:c-id tr_tensor_normal_)

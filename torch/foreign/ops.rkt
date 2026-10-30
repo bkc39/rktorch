@@ -62,7 +62,6 @@
                   lower-shadows!
                   refresh-shadows!)
          (only-in "raw/race-points.rkt" race-point)
-         (only-in "raw/random.rkt" tr-tensor-uniform!/raw)
          (only-in "raw/tensor.rkt"
                   dtype-code->symbol
                   tr-tensor-copy-bytes/raw
@@ -87,6 +86,7 @@
          float-dtype-max
          float-dtype/c
          placement
+         type+index->device
          with-default-device)
 
 (module+ unsafe
@@ -133,13 +133,6 @@
 
 (define/contract-out (manual-seed! seed) (-> exact-nonnegative-integer? void?)
   (check-ok (tr-manual-seed/raw seed) 'manual-seed!)
-  (void))
-
-(define/contract-out (uniform! t low high) (-> tensor? real? real? void?)
-  (check-ok (tr-tensor-uniform!/raw t
-                                    (exact->inexact low)
-                                    (exact->inexact high))
-            'uniform!)
   (void))
 
 (define/checked-out (item t) (-> tensor? real?)

@@ -1,10 +1,13 @@
 #lang racket/base
 
 (require (only-in racket/contract/base
-                  -> ->* ->i </c >=/c and/c non-empty-listof or/c
-                  unsupplied-arg?)
+                  -> ->* ->i </c >=/c and/c flat-contract-predicate
+                  flat-named-contract list/c non-empty-listof or/c)
+         (only-in racket/list index-of)
+         (only-in racket/match match match*)
          (prefix-in g: (only-in "../generated.rkt"
                                 adaptive-avg-pool2d
+                                affine-grid-generator
                                 avg-pool2d
                                 batch-norm
                                 clamp
@@ -13,6 +16,7 @@
                                 conv2d
                                 embedding
                                 flip
+                                grid-sampler-2d
                                 group-norm
                                 layer-norm
                                 leaky-relu
@@ -23,12 +27,14 @@
                                 scaled-dot-product-attention
                                 silu
                                 tril
-                                triu))
-         (only-in "../private/contract.rkt" define/contract-out)
+                                triu
+                                upsample-bicubic2d))
+         (only-in "../private/contract.rkt" define/contract-out supplied-or)
          (only-in "contracts.rkt"
                   attention-input/c image-batch/c index/c nonneg-size-1d/c
                   nonneg-size/c pool-size/c pos-size-1d/c pos-size/c)
-         (only-in "ops.rkt" tensor-shape)
+         (only-in "ops.rkt"
+                  any-float-dtype/c tensor-device tensor-dtype tensor-shape)
          (only-in "size.rkt" ->1d ->2d)
          (only-in "structs.rkt" tensor?))
 
@@ -159,8 +165,7 @@
        (#:min [min (or/c real? #f)] #:max [max (or/c real? #f)])
        #:pre/name (min max)
        "at least one bound"
-       (or (and (not (unsupplied-arg? min)) min)
-           (and (not (unsupplied-arg? max)) max))
+       (or (supplied-or min) (supplied-or max))
        [result tensor?])
   (g:clamp self (and min (exact->inexact min)) (and max (exact->inexact max))))
 
@@ -168,9 +173,6 @@
   (->* [image-batch/c] [#:scale exact-positive-integer?] tensor?)
   (g:repeat-interleave-self-int
    (g:repeat-interleave-self-int input scale 2 #f) scale 3 #f))
-
-(define (supplied v)
-  (and (not (unsupplied-arg? v)) v))
 
 (define/contract-out (batch-norm input ;; noqa
                                  #:running-mean [running-mean #f]
@@ -190,8 +192,8 @@
         #:eps [eps real?])
        #:pre/name (running-mean running-var training?)
        "running statistics as a pair, required unless training"
-       (let ([mean (supplied running-mean)] [var (supplied running-var)])
-         (if (supplied training?)
+       (let ([mean (supplied-or running-mean)] [var (supplied-or running-var)])
+         (if (supplied-or training?)
              (eq? (and mean #t) (and var #t))
              (and mean var #t)))
        [result tensor?])
@@ -223,7 +225,7 @@
        (= (size-from-end key 1) (size-from-end value 1))
        #:pre/name (mask causal?)
        "either #:mask or #:causal?, not both"
-       (not (and (supplied mask) (supplied causal?)))
+       (not (and (supplied-or mask) (supplied-or causal?)))
        [result tensor?])
   (g:scaled-dot-product-attention query key value mask
                                   (exact->inexact dropout) causal?
@@ -236,3 +238,77 @@
 (define/contract-out (flip self dims) ;; noqa
   (-> tensor? (or/c index/c (non-empty-listof index/c)) tensor?)
   (g:flip self (if (list? dims) dims (list dims))))
+
+(define float-dtype? (flat-contract-predicate any-float-dtype/c))
+
+(define float-batch/c
+  (flat-named-contract
+   'float-image-batch
+   (and/c image-batch/c (lambda (x) (float-dtype? (tensor-dtype x))))))
+
+(define affine-matrices/c
+  (flat-named-contract
+   'affine-matrices
+   (lambda (x)
+     (and (tensor? x)
+          (float-dtype? (tensor-dtype x))
+          (match (tensor-shape x)
+            [(list n 2 3) (positive? n)]
+            [_ #f])))))
+
+(define (grid-size/c theta)
+  (flat-named-contract
+   'grid-size
+   (lambda (size)
+     (match* (size (tensor-shape theta))
+       [((list n
+               (? exact-positive-integer?)
+               (? exact-positive-integer?)
+               (? exact-positive-integer?))
+         (list n _ _))
+        #t]
+       [(_ _) #f]))))
+
+(define (sampling-grid/c input)
+  (flat-named-contract
+   'sampling-grid
+   (lambda (grid)
+     (and (tensor? grid)
+          (match* ((tensor-shape grid) (tensor-shape input))
+            [((list n _ _ 2) (list n _ _ _)) #t]
+            [(_ _) #f])
+          (eq? (tensor-dtype grid) (tensor-dtype input))
+          (equal? (tensor-device grid) (tensor-device input))))))
+
+(define/contract-out (affine-grid theta size #:align-corners? [align-corners? #f]) ;; noqa
+  (->i ([theta affine-matrices/c]
+        [size (theta) (grid-size/c theta)])
+       (#:align-corners? [align-corners? boolean?])
+       [result tensor?])
+  (g:affine-grid-generator theta size align-corners?))
+
+(define interpolation-modes '(bilinear nearest bicubic))
+(define padding-modes '(zeros border reflection))
+(define interpolation-mode/c (apply or/c interpolation-modes))
+(define padding-mode/c (apply or/c padding-modes))
+
+(define/contract-out (grid-sample input grid ;; noqa
+                                  #:mode [mode 'bilinear]
+                                  #:padding-mode [padding-mode 'zeros]
+                                  #:align-corners? [align-corners? #f])
+  (->i ([input float-batch/c]
+        [grid (input) (sampling-grid/c input)])
+       (#:mode [mode interpolation-mode/c]
+        #:padding-mode [padding-mode padding-mode/c]
+        #:align-corners? [align-corners? boolean?])
+       [result tensor?])
+  (g:grid-sampler-2d input grid
+                     (index-of interpolation-modes mode)
+                     (index-of padding-modes padding-mode)
+                     align-corners?))
+
+(define/contract-out (upsample-bicubic2d input size #:align-corners? [align-corners? #f]) ;; noqa
+  (->* [float-batch/c (list/c exact-positive-integer? exact-positive-integer?)]
+       [#:align-corners? boolean?]
+       tensor?)
+  (g:upsample-bicubic2d input size align-corners? #f #f))

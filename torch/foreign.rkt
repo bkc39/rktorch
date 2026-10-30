@@ -17,8 +17,9 @@
          (submod "foreign/ops.rkt" checked)
          (only-in "foreign/accelerator.rkt"
                   accelerator-if-available mps-if-available)
-         (except-in "foreign/creation-ops.rkt" generator? tensor zeros)
+         (except-in "foreign/creation-ops.rkt" tensor zeros)
          (submod "foreign/creation-ops.rkt" checked)
+         (except-in "foreign/generator.rkt" generator-on?)
          (except-in "foreign/tensor-ops.rkt"
                     reshape unsqueeze sum matmul add sub mul div neg)
          (submod "foreign/tensor-ops.rkt" checked)
@@ -70,6 +71,8 @@
          rand-like
          make-generator
          generator?
+         generator-device
+         cpu-generator/c
          randperm
          draw-seed
          current-generator
@@ -168,7 +171,10 @@
          batch-norm
          linear
          scaled-dot-product-attention
-         upsample-nearest2d)
+         upsample-nearest2d
+         affine-grid
+         grid-sample
+         upsample-bicubic2d)
 
 (provide eq
          ne

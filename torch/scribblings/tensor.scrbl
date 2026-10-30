@@ -71,7 +71,9 @@ Draws each element independently from the standard normal distribution,
 from @racket[generator] or else from @racket[(current-generator)], as
 @tt{torch.randn(..., generator=g)}. The dtype must be a floating-point
 one. Seed the global generator with @racket[manual-seed!] to repeat a
-draw. A generator is a CPU one, so it draws only a CPU tensor.
+draw. A generator draws on its own device: @racket[rand] and
+@racket[randn] refuse a generator on another device than the tensor they
+build.
 
 @torch-examples[
 (manual-seed! 0)
@@ -168,7 +170,8 @@ described with @racket[zeros]. The @racket[value] given to
 @racket[full-like] must satisfy @racket[fill-value/c] at the dtype it
 builds, so @racket[(full-like (zeros 2) 1e300)] is refused.
 @racket[randn-like] and @racket[rand-like] draw from @racket[generator]
-or else from @racket[(current-generator)]. The noise a
+or else from @racket[(current-generator)], which must live on the device
+of the tensor they build, as for @racket[rand]. The noise a
 diffusion step adds is @racket[(randn-like x0)], so it lands where the
 images live.
 

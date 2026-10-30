@@ -16,3 +16,4 @@
 #include "torchrkt/c_api/generated/rnn.h"
 #include "torchrkt/c_api/generated/shape.h"
 #include "torchrkt/c_api/generated/sort.h"
+#include "torchrkt/c_api/generated/vision.h"

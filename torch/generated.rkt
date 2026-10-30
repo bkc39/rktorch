@@ -23,6 +23,7 @@
          add-tensor!
          addcdiv!
          addcmul!
+         affine-grid-generator
          argsort
          avg-pool2d
          batch-norm
@@ -45,9 +46,12 @@
          eq-tensor
          fill-scalar!
          flip
+         floor-tensor
+         fmod-scalar
          gather
          ge-scalar
          ge-tensor
+         grid-sampler-2d
          group-norm
          gru-input
          gt-scalar
@@ -103,6 +107,7 @@
          topk
          tril
          triu
+         upsample-bicubic2d
          where-scalar
          where-scalarother
          where-scalarself
@@ -122,6 +127,9 @@
 
 (define-generated-op addcmul! tr_gen_addcmul_ #:inplace
   ([self tensor] [tensor1 tensor] [tensor2 tensor] [value scalar]))
+
+(define-generated-op affine-grid-generator tr_gen_affine_grid_generator
+  ([theta tensor] [size int-array] [align-corners bool]))
 
 (define-generated-op argsort tr_gen_argsort
   ([self tensor] [dim int64] [descending bool]))
@@ -189,6 +197,12 @@
 (define-generated-op flip tr_gen_flip
   ([self tensor] [dims int-array]))
 
+(define-generated-op floor-tensor tr_gen_floor
+  ([self tensor]))
+
+(define-generated-op fmod-scalar tr_gen_fmod_scalar
+  ([self tensor] [other scalar]))
+
 (define-generated-op gather tr_gen_gather
   ([self tensor] [dim int64] [index tensor] [sparse-grad bool]))
 
@@ -197,6 +211,9 @@
 
 (define-generated-op ge-tensor tr_gen_ge_tensor
   ([self tensor] [other tensor]))
+
+(define-generated-op grid-sampler-2d tr_gen_grid_sampler_2d
+  ([input tensor] [grid tensor] [interpolation-mode int64] [padding-mode int64] [align-corners bool]))
 
 (define-generated-op group-norm tr_gen_group_norm
   ([input tensor] [num-groups int64] [weight optional-tensor] [bias optional-tensor] [eps double] [cudnn-enabled bool]))
@@ -362,6 +379,9 @@
 
 (define-generated-op triu tr_gen_triu
   ([self tensor] [diagonal int64]))
+
+(define-generated-op upsample-bicubic2d tr_gen_upsample_bicubic2d
+  ([self tensor] [output-size int-array] [align-corners bool] [scales-h optional-double] [scales-w optional-double]))
 
 (define-generated-op where-scalar tr_gen_where_scalar
   ([condition tensor] [self scalar] [other scalar]))

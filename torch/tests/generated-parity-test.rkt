@@ -168,7 +168,14 @@
                                           (tensor 2 5 6) (optional-tensor #f)
                                           (double 0.0) (bool #f)
                                           (kwarg "scale" none)
-                                          (kwarg "enable_gqa" #f))))
+                                          (kwarg "enable_gqa" #f))
+          'affine-grid-generator '((tensor 2 2 3) (int-array (2 3 4 5)) (bool #f))
+          'grid-sampler-2d '((tensor 2 3 4 5) (tensor 2 6 7 2) (int64 0)
+                             (int64 0) (bool #f))
+          'upsample-bicubic2d '((tensor 1 2 3 3) (int-array (5 4)) (bool #f)
+                                (kwarg "scales_h" none) (kwarg "scales_w" none))
+          'floor-tensor '((tensor 2 3))
+          'fmod-scalar '((tensor 2 3) (double 1.0))))
 
   ;; Tensor specs draw seeded randns left to right — both sides consume the
   ;; same RNG stream, so spec order and draw counts must match exactly.
@@ -541,4 +548,21 @@
       '((tensor 2 4 3 8) (tensor 2 2 5 8) (tensor 2 2 5 8)
         (optional-tensor #f) (double 0.0) (bool #f) (kwarg "scale" none)
         (kwarg "enable_gqa" #t))
-      "[grouped-query]")]))
+      "[grouped-query]")
+     (check-generated-parity
+      (assq 'grid-sampler-2d manifest)
+      '((tensor 2 3 4 5) (tensor 2 6 7 2) (int64 1) (int64 1) (bool #t))
+      "[nearest-border-aligned]")
+     (check-generated-parity
+      (assq 'grid-sampler-2d manifest)
+      '((tensor 2 3 4 5) (tensor 2 6 7 2) (int64 2) (int64 2) (bool #f))
+      "[bicubic-reflection]")
+     (check-generated-parity
+      (assq 'affine-grid-generator manifest)
+      '((tensor 2 2 3) (int-array (2 3 4 5)) (bool #t))
+      "[aligned]")
+     (check-generated-parity
+      (assq 'upsample-bicubic2d manifest)
+      '((tensor 1 2 8 8) (int-array (4 4)) (bool #t) (kwarg "scales_h" none)
+        (kwarg "scales_w" none))
+      "[downscale-aligned]")]))

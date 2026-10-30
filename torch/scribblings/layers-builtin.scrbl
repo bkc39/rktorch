@@ -263,8 +263,10 @@ PascalCase per PyTorch's.}
 
 The functions the constructors use to draw their initial parameters,
 exposed for a layer written with @racket[define-layer]. Each answers a
-fresh tensor on the default device, consuming the global random stream
-exactly as PyTorch's counterpart does, so seeded initialization matches.
+fresh tensor on the default device, consuming the random stream exactly as
+PyTorch's counterpart does, so seeded initialization matches. The stream is
+@racket[current-generator]'s when that is set, and it must then live on the
+default device; otherwise the global one.
 
 @defproc[(uniform-init [dims (listof exact-nonnegative-integer?)]
                        [low real?] [high real?])
@@ -277,3 +279,21 @@ Uniform on @tt{[low, high)}.}
 Kaiming's uniform initialization with the bound PyTorch's
 @tt{nn.Linear} and @tt{nn.Conv2d} use by default, the fan-in read from
 @racket[dims].}
+
+@defproc[(trunc-normal-init [dims (listof exact-nonnegative-integer?)]
+                            [#:mean mean real? 0.0]
+                            [#:std std (and/c real? positive?) 1.0]
+                            [#:a a real? -2.0]
+                            [#:b b real? 2.0])
+         tensor?]{
+@tt{nn.init.trunc_normal_}: a normal of @racket[mean] and @racket[std]
+truncated to @tt{[a, b]}, which are absolute bounds, not multiples of
+@racket[std]. @racket[a] must be below @racket[b]. It draws as PyTorch
+2.14 does, bit for bit, so a seed gives its values: a normal redrawn where
+it falls outside @tt{[a, b]} when that interval holds more than 0.3 of the
+mass, otherwise uniform candidates on @tt{[a, b]} accepted by the density,
+for which both bounds must be finite.
+
+@torch-examples[
+(manual-seed! 0)
+(trunc-normal-init '(2 3) #:std 0.02 #:a -0.01 #:b 0.01)]}
