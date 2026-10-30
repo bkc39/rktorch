@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # The L0 baseline (#254); its stages and variables are in docs/benchmarks/README.md.
 set -euo pipefail
+unset OMP_NUM_THREADS MKL_NUM_THREADS
 
 root=$(cd "$(dirname "$0")/../.." && pwd)
 self=$root/scripts/bench/l0-baseline.sh

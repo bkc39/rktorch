@@ -132,8 +132,9 @@ processes have the library mapped — they keep executing the old inode (restart
 them to pick up the new one). Never stage with a bare `cp`: an in-place write
 corrupts every live process that has the old file mapped (#72).
 
-Then `nix develop --command raco test torch/`. If Racket modules fail with
-"reference to a variable that is not exported" or stale-binding errors, clear
+Then `OMP_NUM_THREADS=${OMP_NUM_THREADS:-1} nix develop --command raco test
+torch/`. If Racket modules fail with "reference to a variable that is not
+exported" or stale-binding errors, clear
 the project's `compiled/` dirs (`find torch examples -type d -name
 compiled -exec rm -rf {} +`) and rerun.
 

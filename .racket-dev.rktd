@@ -7,7 +7,7 @@
   (lint-test      "raco test --timeout 600 scripts/resyntax-rules-test.rkt scripts/resyntax-lp2.rkt scripts/resyntax-wrapper-test.rkt scripts/check-paths-test.rkt")
   (natives-inputs "racket scripts/release/release.rkt natives-inputs")
   (resyntax       "scripts/resyntax-gate")
-  (coverage       "racket scripts/coverage.rkt --changed")
+  (coverage       "env OMP_NUM_THREADS=${OMP_NUM_THREADS:-1} racket scripts/coverage.rkt --changed")
   (docs           "scripts/build-docs")
   (check          "nix flake check"))
  (push-gates (compile paths resyntax test)))

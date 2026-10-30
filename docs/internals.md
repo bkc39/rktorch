@@ -511,8 +511,9 @@ gets the point's name and a subject (a handle, a device, a thread).
   default); a long soak is `RKTORCH_STRESS_SECONDS=300`. To force
   preemption, run it on fewer cores than threads:
   `taskset -c 0,1 raco test torch/tests/race-stress-test.rkt`. On a
-  loaded host set `OMP_NUM_THREADS=1`: libtorch's OpenMP teams spin
-  against the load and slow each op tenfold.
+  loaded host set `OMP_NUM_THREADS=1`, as the gates do
+  ([building](building.md#development-shells)); one phase runs in a
+  subprocess at libtorch's default thread count.
 - `cpp/tests/torchrkt/threads_test.cpp`: `std::thread`s through the C API.
   Under ThreadSanitizer the shim is instrumented and libtorch is not.
   The threads tests are clean; the rest of the suite reports races only

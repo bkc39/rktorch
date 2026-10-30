@@ -421,7 +421,8 @@ a change to a build target or a shell belongs in both. The ordered local loop
 for a change, and the gates it has to pass before it is done, are the
 `cpp-dev` and `racket-dev` skills under `.claude/skills/`; `.racket-dev.rktd`
 declares the Racket gates for the racket-dev plugin (`docs/building.md`,
-"Development shells").
+"Development shells"). The gates run libtorch on one intra-op thread
+([`docs/building.md`](docs/building.md#development-shells)).
 
 ```bash
 nix build              # builds cpp, installs the pkg, runs raco test + examples

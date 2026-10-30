@@ -1,11 +1,14 @@
 #lang racket/base
 
-(module+ test
-  (require (only-in racket/match match match-define)
+(module stress racket/base
+  (require (only-in ffi/unsafe -> _fun _int get-ffi-obj)
+           (only-in racket/match match match-define)
            rackunit
            (only-in "../foreign.rkt"
                     backward! finalizer-diagnostics native-memory-limit ones
                     sum)
+           (only-in "../foreign/raw/fault.rkt" latched)
+           (only-in "../foreign/raw/native-library.rkt" native-library)
            (only-in "../nn.rkt" Linear)
            (only-in "private/race-harness.rkt"
                     await-roles! check-ledger churn-once! env-number join-all
@@ -13,23 +16,34 @@
                     settle! spawn stop-roles! until-stopped watch-hook
                     with-race-hook))
 
+  (provide mib native-count phase proc-status-field proc-status-number)
+
   (define mib (* 1024 1024))
 
-  (define seconds-per-phase (env-number "RKTORCH_STRESS_SECONDS" 0.5))
+  (define (native-count name fallback)
+    (match (get-ffi-obj name native-library (_fun -> _int) (lambda () #f))
+      [#f fallback]
+      [query (latched query)]))
 
-  (define widths '(2 4 8 16))
-
-  (define start-deadline-seconds 60)
-
-  (define (rss-bytes)
+  (define (proc-status-field field)
     (define status "/proc/self/status")
+    (define rx (pregexp (format "^~a:\\s+(.*)$" field)))
     (and (file-exists? status)
          (call-with-input-file status
            (lambda (in)
-             (for/first ([line (in-lines in)]
-                         #:when (regexp-match? #rx"^VmRSS:" line))
-               (match-define (list _ kb) (regexp-match #rx"([0-9]+) kB" line))
-               (* 1024 (string->number kb)))))))
+             (for/or ([line (in-lines in)])
+               (match (regexp-match rx line)
+                 [(list _ value) value]
+                 [#f #f]))))))
+
+  (define (proc-status-number field)
+    (match (proc-status-field field)
+      [(pregexp #px"^([0-9]+)" (list _ n)) (string->number n)]
+      [_ #f]))
+
+  (define seconds-per-phase (env-number "RKTORCH_STRESS_SECONDS" 0.5))
+
+  (define start-deadline-seconds 60)
 
   (define (diagnostic key)
     (cdr (assq key (finalizer-diagnostics))))
@@ -41,9 +55,9 @@
     (define rng (seeded-generator 40 (list 'stress k)))
     (lambda () (churn-once! rng)))
 
-  (define (trainer-step)
+  (define (trainer-step batch)
     (define net (Linear 32 32))
-    (define x (ones 8 32))
+    (define x (ones batch 32))
     (lambda () (backward! (sum (net x)))))
 
   (define (adversary-step)
@@ -53,13 +67,13 @@
       (collect-garbage (if (zero? (modulo n 8)) 'major 'minor))
       (sleep 0.002)))
 
-  (define (role-step label)
+  (define (role-step label batch)
     (match label
-      ['trainer (trainer-step)]
+      ['trainer (trainer-step batch)]
       ['adversary (adversary-step)]
       [k (worker-step k)]))
 
-  (define (phase width)
+  (define (phase width #:batch [batch 8])
     (settle!)
     (define base (ledger-snapshot))
     (define entries (ledger-entries))
@@ -72,7 +86,7 @@
         (define workers
           (parameterize ([native-memory-limit (quotient mib 4)])
             (for/list ([label (in-list labels)])
-              (spawn (until-stopped r label (role-step label))
+              (spawn (until-stopped r label (role-step label batch))
                      #:pool 'own
                      #:label label))))
         (await-roles! r labels #:seconds start-deadline-seconds)
@@ -90,7 +104,224 @@
     (check-equal? (ledger-entries) entries "ledger entries left behind")
     (for ([label (in-list labels)]
           [n (in-list counts)])
-      (check-true (positive? n) (format "role ~a never stepped" label))))
+      (check-true (positive? n) (format "role ~a never stepped" label)))))
+
+(module+ test
+  (require (only-in racket/file file->string make-temporary-file)
+           (only-in racket/match match match* match-define)
+           (only-in racket/path path-only)
+           (only-in racket/port port->string)
+           (only-in setup/getinfo get-info)
+           rackunit
+           (only-in "../foreign/raw/fault.rkt"
+                    native-fault-policy note-native-fault! reset-native-fault-latch!)
+           (submod ".." stress))
+
+  (define widths '(2 4 8 16))
+
+  (define (rss-bytes)
+    (define kb (proc-status-number "VmRSS"))
+    (and kb (* 1024 kb)))
+
+  (define child-seconds 90)
+
+  (define default-threads-width 4)
+
+  (define (default-threads-environment)
+    (define env (environment-variables-copy (current-environment-variables)))
+    (for ([name (in-list '(#"OMP_NUM_THREADS" #"MKL_NUM_THREADS" #"RKTORCH_STRESS_SECONDS"))])
+      (environment-variables-set! env name #f))
+    env)
+
+  ;; The test gate pins OMP_NUM_THREADS=1; this child runs at libtorch's
+  ;; default, with a trainer batch past ATen's parallel grain.
+  (define (default-threads-program #:phase? [phase? #t])
+    `(begin
+       (require (only-in racket/future processor-count)
+                (only-in rackunit current-check-handler)
+                (submod torch/tests/race-stress-test stress))
+       (define threads-before (proc-status-number "Threads"))
+       (current-check-handler raise)
+       ,@(if phase? `((phase ,default-threads-width #:batch 4096)) '())
+       (printf "report: ~s\n"
+               (list ((native-count "omp_get_num_procs" processor-count))
+                     ((native-count "_ZN2at15get_num_threadsEv" (lambda () 1)))
+                     threads-before
+                     (proc-status-number "Threads")))))
+
+  ;; The phase's role threads outlive it, give or take one, and an OpenMP
+  ;; team adds intra-op - 1: half a team past the roles tells them apart
+  ;; once the team has at least 3 threads to add. A smaller pool, or a host
+  ;; without /proc, is unverifiable.
+  (define (pool-verdict report)
+    (match report
+      [(list 1 _ _ _) 'one-cpu]
+      [(list _ 1 _ _) 'idle]
+      [(list _ _ #f _) 'unverifiable]
+      [(list _ intra _ _) #:when (< intra 4) 'unverifiable]
+      [(list _ intra before after)
+       #:when (>= (- after before) (+ default-threads-width 2 (quotient intra 2)))
+       'ran]
+      [_ 'idle]))
+
+  (define (check-idle-without-phase report)
+    (match (pool-verdict report)
+      [(or 'one-cpu 'unverifiable) (void)]
+      [verdict (check-eq? verdict 'idle (format "~s" report))]))
+
+  (define (first-allowed-cpu cpus)
+    (match cpus
+      [(pregexp #px"^([0-9]+)" (list _ cpu)) cpu]
+      [_ #f]))
+
+  (define (run-at-default-threads program #:within seconds #:prefix [prefix '()])
+    (define custodian (make-custodian))
+    (match-define (cons command args)
+      (append prefix (list (find-system-path 'exec-file) "-e" (format "~s" program))))
+    (define-values (sp out in err)
+      (parameterize ([current-custodian custodian]
+                     [current-subprocess-custodian-mode 'kill]
+                     [current-environment-variables (default-threads-environment)])
+        (apply subprocess #f #f #f command args)))
+    (close-output-port in)
+    (define outputs (list (box "") (box "")))
+    (define drains
+      (parameterize ([current-custodian custodian])
+        (for/list ([p (list out err)]
+                   [b (in-list outputs)])
+          (thread (lambda () (set-box! b (port->string p)))))))
+    (define status
+      (cond
+        [(sync/timeout seconds sp) (subprocess-status sp)]
+        [else (subprocess-kill sp #t) 'timed-out]))
+    (for ([t (in-list drains)]) (sync/timeout 10 t))
+    (custodian-shutdown-all custodian)
+    (match-define (list stdout stderr) (map unbox outputs))
+    (values status stdout stderr))
+
+  (define (default-threads-report program #:prefix [prefix '()])
+    (define-values (status stdout stderr)
+      (run-at-default-threads program #:within child-seconds #:prefix prefix))
+    (define report
+      (match (regexp-match #rx"report: ([^\n]*)" stdout)
+        [(list _ text) (read (open-input-string text))]
+        [#f #f]))
+    (with-check-info (['stdout stdout] ['stderr stderr])
+      (check-equal? status 0)
+      (check-pred list? report))
+    report)
+
+  (define (alive? pid)
+    (define stat (format "/proc/~a/stat" pid))
+    (and (file-exists? stat)
+         (not (regexp-match? #rx"^[0-9]+ \\(.*\\) [ZX]" (call-with-input-file stat port->string)))))
+
+  (test-case "the child's thread queries cross the fault latch"
+    (when (eq? native-fault-policy 'raise)
+      (define queries
+        (for*/list ([name (in-list '("_ZN2at15get_num_threadsEv" "omp_get_num_procs"))]
+                    [query (in-value (native-count name #f))]
+                    #:when query)
+          query))
+      (check-false (null? queries) "the ATen query resolves")
+      (dynamic-wind
+       (lambda () (note-native-fault! "testing the thread queries' latch"))
+       (lambda ()
+         (for ([query (in-list queries)])
+           (check-exn #rx"^rktorch: native code faulted earlier" query)))
+       reset-native-fault-latch!)))
+
+  (test-case "the child drops the gates' thread pins and the soak length"
+    (define env (environment-variables-copy (current-environment-variables)))
+    (for ([name (in-list '(#"OMP_NUM_THREADS" #"MKL_NUM_THREADS" #"RKTORCH_STRESS_SECONDS"))])
+      (environment-variables-set! env name #"300"))
+    (define child (parameterize ([current-environment-variables env])
+                    (default-threads-environment)))
+    (for ([name (in-list '(#"OMP_NUM_THREADS" #"MKL_NUM_THREADS" #"RKTORCH_STRESS_SECONDS"))])
+      (check-false (environment-variables-ref child name) (format "~a" name))))
+
+  (test-case "a phase at libtorch's default thread count runs its intra-op pool"
+    (define report (default-threads-report (default-threads-program)))
+    (check-not-eq? (pool-verdict report) 'idle
+                   (format "procs, intra-op, threads before, after: ~s" report)))
+
+  (test-case "the pool check fails when no phase ran"
+    (check-idle-without-phase (default-threads-report (default-threads-program #:phase? #f))))
+
+  (test-case "pools under 4 threads are unverifiable, and the no-phase check skips them"
+    (for ([report (in-list '((2 2 1 1) (3 3 1 1) (16 8 #f #f)))])
+      (check-eq? (pool-verdict report) 'unverifiable (format "~s" report))
+      (check-idle-without-phase report))
+    (check-eq? (pool-verdict '(16 8 1 1)) 'idle)
+    (check-eq? (pool-verdict '(16 1 1 20)) 'idle)
+    (check-eq? (pool-verdict '(16 8 1 14)) 'ran)
+    (check-eq? (pool-verdict '(1 1 1 1)) 'one-cpu))
+
+  (test-case "the affinity test pins the child to a CPU this process may use"
+    (check-equal? (first-allowed-cpu "2-5,8") "2")
+    (check-equal? (first-allowed-cpu "8") "8")
+    (check-equal? (first-allowed-cpu "0-15") "0")
+    (check-false (first-allowed-cpu ""))
+    (check-false (first-allowed-cpu #f)))
+
+  (test-case "the pool check passes under a one-CPU affinity mask"
+    (define taskset (find-executable-path "taskset"))
+    (define cpu (first-allowed-cpu (proc-status-field "Cpus_allowed_list")))
+    (when (and taskset cpu)
+      (define report (default-threads-report (default-threads-program)
+                                             #:prefix (list taskset "-c" cpu)))
+      (check-eq? (pool-verdict report) 'one-cpu (format "~s" report))))
+
+  (define (raco-seconds)
+    (define cell
+      (build-path (path-only (collection-file-path "info.rkt" "torch"))
+                  'up "nix" "matrix" "racket-cell.sh"))
+    (match* ((assoc "tests/race-stress-test.rkt" ((get-info '("torch")) 'test-timeouts))
+             (and (file-exists? cell)
+                  (regexp-match #rx"raco test --timeout ([0-9]+) [.]/torch/"
+                                (file->string cell))))
+      [((list _ seconds) _) seconds]
+      [(#f (list _ seconds)) (string->number seconds)]
+      [(#f #f) #f]))
+
+  (test-case "the children's bounds all fire before the test gate's"
+    (match (raco-seconds)
+      [#f (void)]
+      [seconds (check < (* 3 child-seconds) seconds)]))
+
+  (test-case "a child past its bound is killed and reported"
+    (define start (current-inexact-monotonic-milliseconds))
+    (define-values (status _stdout _stderr) (run-at-default-threads '(sleep 30) #:within 2))
+    (check-equal? status 'timed-out)
+    (check < (- (current-inexact-monotonic-milliseconds) start) 15000.0))
+
+  (test-case "a child dies with the custodian that ran it"
+    (when (directory-exists? "/proc/self")
+      (define pid-file (make-temporary-file "race-stress-pid-~a"))
+      (define custodian (make-custodian))
+      (parameterize ([current-custodian custodian])
+        (thread
+         (lambda ()
+           (run-at-default-threads
+            `(begin
+               (require (only-in racket/os getpid))
+               (call-with-output-file ,(path->string pid-file) #:exists 'truncate
+                 (lambda (o) (write (getpid) o)))
+               (sleep 30))
+            #:within 60))))
+      (define pid
+        (for/or ([_ (in-range 300)])
+          (sleep 0.1)
+          (match (call-with-input-file pid-file read)
+            [(? number? n) n]
+            [_ #f])))
+      (custodian-shutdown-all custodian)
+      (delete-file pid-file)
+      (check-pred number? pid)
+      (check-false (for/and ([_ (in-range 100)])
+                     (sleep 0.1)
+                     (alive? pid))
+                   (format "child ~a outlived its custodian" pid))))
 
   (test-case "parallel threads churning tensors keep the ledger invariants"
     (define rss-before (rss-bytes))
