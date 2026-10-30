@@ -9,8 +9,11 @@ optional Tensor/int/IntArrayRef/ScalarType (marshalled as a NULL pointer
 or a sentinel), tranche 4 (#84) to optional Scalar (a double plus a
 presence flag), tranche 8 (#210) to optional float (the same encoding),
 in-place ops (a mutable receiver + integer status, the
-tr_tensor_sub_ shape), and #365 to a list of optional Tensors (Tensor?[],
-the TensorList encoding with NULL entries). Everything else is skipped with a reason --
+tr_tensor_sub_ shape), #365 to a list of optional Tensors (Tensor?[],
+the TensorList encoding with NULL entries), and #305 to ops that return
+nothing and mutate their Tensor lists (Tensor(a!)[], the _foreach_* and
+_fused_* families) and to Scalar[] (a double array). Everything else is
+skipped with a reason --
 the generator reports skips instead of guessing.
 """
 
@@ -48,6 +51,9 @@ OPTIONAL_DOUBLE = "optional-double"
 OPTIONAL_GENERATOR = "optional-generator"
 # #365: Tensor?[] -> (ptr*, len) whose NULL entries are c10::nullopt.
 OPTIONAL_TENSOR_LIST = "optional-tensor-list"
+# #305: Tensor(a!)[] -> (ptr*, len), updated in place; Scalar[] -> (double*, len).
+MUTABLE_TENSOR_LIST = "mutable-tensor-list"
+SCALAR_LIST = "scalar-list"
 
 
 @dataclass(frozen=True)
@@ -75,7 +81,8 @@ class Op:
     # collect-and-retry cannot run it twice (allowlist `no-retry` flag).
     no_retry: bool = False
     # Tensor return count. More than one switches the C ABI to an integer
-    # status plus one `tr_tensor**` out pointer per return.
+    # status plus one `tr_tensor**` out pointer per return; none (a `()`
+    # return) is an op that updates its mutable Tensor lists.
     returns: int = 1
 
 
@@ -121,6 +128,8 @@ def _param_kind(ty) -> str | None:
             return INT_ARRAY
         if ty.elem.name is BaseTy.Tensor:
             return TENSOR_LIST
+        if ty.elem.name is BaseTy.Scalar:
+            return SCALAR_LIST
     if (isinstance(ty, ListType) and isinstance(ty.elem, OptionalType)
             and isinstance(ty.elem.elem, BaseType)
             and ty.elem.elem.name is BaseTy.Tensor):
@@ -171,12 +180,14 @@ def classify(f: NativeFunction, shard: str) -> Op | Skip:
         return skip("out variant")
     inplace = func.name.name.inplace
     rets = func.returns
-    if not rets or not all(
+    if not all(
         isinstance(r.type, BaseType) and r.type.name is BaseTy.Tensor
         for r in rets
     ):
         return skip("return is not one or more Tensors")
-    if inplace and len(rets) != 1:
+    if not rets and not (inplace and Variant.function in f.variants):
+        return skip("returns nothing and is not an in-place free function")
+    if inplace and len(rets) > 1:
         return skip("in-place op with several returns")
 
     # Functional ops are emitted as at::<base> free-function calls, so they
@@ -192,11 +203,16 @@ def classify(f: NativeFunction, shard: str) -> Op | Skip:
         kind = _param_kind(a.type)
         if kind is None:
             return skip(f"unsupported arg type: {a.name}: {a.type}")
+        if (kind == TENSOR_LIST and a.annotation is not None
+                and a.annotation.is_write):
+            kind = MUTABLE_TENSOR_LIST
         params.append(Param(a.name, kind))
 
-    if inplace and not (params and params[0].kind == TENSOR):
-        return skip("in-place op without a Tensor receiver as the "
-                    "first argument")
+    receiver = MUTABLE_TENSOR_LIST if not rets else TENSOR
+    if inplace and not (params and params[0].kind == receiver):
+        return skip("in-place op without a receiver as the first argument")
+    if rets and any(p.kind == MUTABLE_TENSOR_LIST for p in params):
+        return skip("mutates a Tensor list and returns Tensors")
 
     rkt_name = _racket_name(func.name)
     if func.name.name.base in _RACKET_COLLISIONS:

@@ -26,6 +26,17 @@ reference; the buffer is released when the last reference goes. On
 CUDA and MPS the caching allocators usually just return the block to
 their pools.
 
+## Generated ops in library code
+
+Library modules call an op through its `torch/foreign.rkt` name (`mul!`,
+`sub!`, `copy!`, `addcmul!`, `addcdiv!`) wherever one exists, and
+through `torch/generated.rkt` under a `g:` prefix only for the ATen
+overloads `torch/foreign.rkt` does not bind: `add-tensor` and `add-tensor!`
+with an `alpha`, `div-scalar!`, `lerp-scalar!` (`lerp!` takes a tensor
+weight), and the `_foreach_*` and `_fused_*` kernels. The prefix keeps
+a generated name from shadowing the public one, and shows at the call
+site that the binding is uncontracted.
+
 ## Tensor lifetime
 
 Every tensor-returning binding carries the `tensor-allocator` wrap
@@ -401,7 +412,10 @@ the CPU, whose allocator keeps no count.
   and `clip-grad-norm!` release each gradient
   handle as its block ends (`with-gradient`, `with-gradients`), so after
   a step only the parameter holds a gradient and a reset frees it before
-  the next backward writes another.
+  the next backward writes another. `with-gradients` fetches every
+  gradient in one native call that also reports each one's size and
+  device, so its handles are accounted, and adopted, from those figures
+  without reading them again.
   `reclaim-native-memory!` refreshes it too, once the caches are
   emptied, so memory a dropped graph held stops being charged at once.
   An allocator that cannot answer at a refresh leaves its device's charge

@@ -1,7 +1,9 @@
 #lang racket/base
 
 (require (only-in ffi/unsafe _bool _double _fun _int _int64 _list _ptr)
-         (only-in "memory.rkt" tensor-allocator tensor-allocator/gradient)
+         (only-in "memory.rkt"
+                  _tr-device-type fetched-gradient gradients-allocator
+                  tensor-allocator tensor-allocator/gradient)
          (only-in "syntax.rkt" _Tensor _Tensor/null define-torch))
 
 (provide tr-tensor-requires-grad!/raw
@@ -9,6 +11,7 @@
          tr-tensor-has-grad/raw
          tr-tensor-backward/raw
          tr-tensor-grad/raw
+         tr-tensors-grad/raw
          tr-tensor-detach/raw
          tr-set-grad-enabled/raw
          tr-is-grad-enabled/raw
@@ -43,6 +46,18 @@
   (_fun (t : _Tensor) -> _Tensor/null)
   #:c-id tr_tensor_grad
   #:wrap tensor-allocator/gradient)
+
+(define-torch tr-tensors-grad/raw
+  (_fun (ts : (_list i _Tensor))
+        (n : _int64 = (length ts))
+        (grads : (_list o _Tensor/null n))
+        (nbytes : (_list o _int64 n))
+        (types : (_list o _tr-device-type n))
+        (indices : (_list o _int64 n))
+        -> (rc : _int)
+        -> (and (zero? rc) (map fetched-gradient grads nbytes types indices)))
+  #:c-id tr_tensors_grad
+  #:wrap gradients-allocator)
 
 (define-torch tr-tensor-detach/raw
   (_fun (t : _Tensor) -> _Tensor/null)

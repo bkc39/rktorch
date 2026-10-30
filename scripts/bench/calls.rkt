@@ -16,10 +16,10 @@
 
 (define (fresh-tally) (tally (box 0) (box 0) (box 0)))
 
-(define (bump! b)
+(define (bump! b [by 1])
   (let loop ()
     (define v (unbox b))
-    (unless (box-cas! b v (add1 v)) (loop))))
+    (unless (box-cas! b v (+ v by)) (loop))))
 
 (define (counts t)
   (list (unbox (tally-crossings t)) (unbox (tally-frees t)) (unbox (tally-tensors t))))
@@ -31,11 +31,11 @@
   (define whole (fresh-tally))
   (define current (box (fresh-tally)))
   (define rows '())
-  (define (count! . fields)
+  (define (count! #:by [by 1] . fields)
     (define phase (unbox current))
     (for ([field (in-list fields)])
-      (bump! (field whole))
-      (bump! (field phase))))
+      (bump! (field whole) by)
+      (bump! (field phase) by)))
   (reclaim-native-memory!)
   (call-in-phased-device
    p
@@ -46,12 +46,20 @@
        (with-crossing-hook (lambda () (when (measuring?) (count! tally-crossings)))
          ;; A free off the measuring thread (the finalizer's) counts with its
          ;; crossing as one event, so a phase boundary never splits the pair.
-         (with-race-hook (lambda (name _subject)
+         ;; A batched gradient reads no size or device, and a batched free of
+         ;; N handles is one free.
+         (with-race-hook (lambda (name subject)
                            (define here? (measuring?))
+                           (define (frees! by)
+                             (if here?
+                                 (count! #:by by tally-frees)
+                                 (count! #:by by tally-frees tally-crossings)))
                            (case name
                              [(ledger-entry-added) (when here? (count! tally-tensors))]
-                             [(free-released finalizer-releasing)
-                              (if here? (count! tally-frees) (count! tally-frees tally-crossings))]
+                             [(ledger-entry-added/batched)
+                              (when here? (count! #:by -1 tally-tensors))]
+                             [(free-released finalizer-releasing) (frees! 1)]
+                             [(frees-released/batched) (frees! (- 1 (length subject)))]
                              [else (void)]))
            (step-phases! p #:around (lambda (name thunk)
                                       (define phase (fresh-tally))
@@ -87,10 +95,13 @@
   (require (only-in racket/list last)
            (only-in racket/match match-define)
            rackunit
-           (only-in torch ones topk)
+           (only-in threading ~>)
+           (only-in torch backward! ones sum topk)
            (only-in (submod torch/foreign unsafe) tensor-free!)
+           (only-in torch/foreign/autograd-ops with-gradients)
            (only-in torch/foreign/raw/fault crossing-hook)
            (only-in torch/foreign/raw/race-points race-hook)
+           (only-in torch/nn Linear Sequential clip-grad-norm! parameters)
            (only-in torch/tests/private/wedge call-with-process-deadline)
            (only-in "workloads/phases.rkt" mnist-phases phased resnet-phases))
 
@@ -109,7 +120,8 @@
          (for ([r (in-list records)])
            (check-equal? (length (field r 'samples)) 2)
            (check-true (andmap positive? (field r 'samples)) (field r 'variant))
-           (check-true (andmap (lambda (n) (>= n 0)) (field r 'op_calls)) (field r 'variant)))))
+           (check-true (andmap (lambda (n) (>= n 0)) (field r 'op_calls))
+                       (field r 'variant)))))
 
      (test-case "the step, counted whole, makes the op calls its phases make"
        (for ([p (in-list (list (mnist-phases 'cpu #:batch 4 #:samples 16)
@@ -144,6 +156,35 @@
        (check-equal? (field free-phase 'tensors) '(1))
        (check-equal? (field free-phase 'op_calls) (field alloc-phase 'op_calls))
        (check-equal? (field topk-phase 'tensors) '(2)))
+
+     (test-case "a batched gradient fetch is one op call, and clipping makes the calls its code path does"
+       (define net (Sequential (Linear 4 4) (Linear 4 4) (Linear 4 4)))
+       (define ps (parameters net))
+       (define p (phased "probe" 'cpu (hasheq)
+                         (list (cons 'backward (lambda () (~> (ones 2 4) net sum backward!)))
+                               (cons 'fetch (lambda () (with-gradients (gs ps) (void))))
+                               (cons 'clip (lambda () (clip-grad-norm! ps 0.1))))
+                         void))
+       (match-define (list _backward fetch clip _step)
+         (call-records p #:warmup 0 #:rounds 1))
+       (check-equal? (field fetch 'samples) '(2))
+       (check-equal? (field fetch 'frees) '(1))
+       (check-equal? (field fetch 'tensors) '(0))
+       (check-equal? (field fetch 'op_calls) '(1))
+       (define n (length ps))
+       (define outputs (+ (* 3 n) 4))
+       (define fetches 1)
+       (define in-place-multiplies n)
+       ;; a shape read is one crossing for a scalar, two otherwise: the n squares
+       (define shape-reads (+ outputs n))
+       (define device-reads (+ n 1))
+       (define to-device-checks (+ (- n 1) n))
+       (define grad-mode-calls 3)
+       (check-equal? (field clip 'frees) '(1))
+       (check-equal? (field clip 'tensors) (list outputs))
+       (check-equal? (field clip 'op_calls)
+                     (list (+ fetches outputs in-place-multiplies shape-reads device-reads
+                              to-device-checks grad-mode-calls))))
 
      (test-case "a free off the measuring thread is no op call, wherever its crossing lands"
        (define requests (make-channel))

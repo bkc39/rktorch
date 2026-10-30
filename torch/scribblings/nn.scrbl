@@ -537,7 +537,9 @@ Moves every averaged parameter to @racket[decay] times itself plus
 @racket[(- 1 decay)] times the model's, under @racket[with-no-grad]. The
 first update copies instead of averaging, as PyTorch's
 @tt{AveragedModel} does, so an average built before training tracks the
-trained weights rather than the initial draw.
+trained weights rather than the initial draw. One native call updates
+every parameter, @tt{torch._foreach_lerp_}, as @tt{get_ema_multi_avg_fn}
+does.
 }
 
 @defproc[(ema-average [e ema?]) layer?]{
@@ -705,17 +707,49 @@ device and dtype, as the #138 Adam does, and follows a parameter moved with
 training, so every optimizer exposes it through @racket[learning-rate] and
 @racket[set-learning-rate!], which is what a schedule writes.
 
+Each built-in optimizer has up to three implementations of one update. By
+default, @racket[#:foreach? #t], a steady step makes a fixed number of native
+calls whatever the number of parameters: torch's @tt{_foreach_*} kernels, one
+call per stage of the update over the parameters grouped by device and dtype,
+as @tt{foreach=True}. The first step, the step that first sees a parameter's
+gradient, and the first step after a move make calls per parameter, to create
+or move its state. @racket[#:foreach? #f] applies the same operations one
+parameter at a time, @tt{foreach=False}; on the CPU the two give the same
+bits. @racket[#:fused? #t], for @racket[sgd], @racket[adam] and
+@racket[adamw], makes the update one kernel per group, @tt{fused=True}, and
+rounds differently within float tolerance. The foreach update of
+@racket[adam], @racket[adamw], @racket[rmsprop], and of @racket[sgd] with
+Nesterov momentum or weight decay, keeps one scratch tensor per parameter
+beside its state, and that of @racket[rmsprop] with weight decay a second.
+No step writes a gradient.
+
+@torch-examples[
+(manual-seed! 0)
+(define net (Linear 4 2))
+(define twin (layer-copy net))
+(define x (randn 8 4))
+(define (train! m opt) (zero-grads! opt) (backward! (sum (m x))) (step! opt))
+(train! net (adam (parameters net)))
+(train! twin (adam (parameters twin) #:foreach? #f))
+(equal? (map tensor->list (parameters net)) (map tensor->list (parameters twin)))
+]
+
 @defproc[(sgd [params (listof tensor?)]
               [#:lr lr (>=/c 0)]
               [#:momentum momentum (>=/c 0) 0]
               [#:nesterov? nesterov? boolean? #f]
-              [#:weight-decay weight-decay (>=/c 0) 0])
+              [#:weight-decay weight-decay (>=/c 0) 0]
+              [#:foreach? foreach? boolean? #t]
+              [#:fused? fused? boolean? #f])
          sgd?]{
 @tt{torch.optim.SGD}: with @racket[momentum] the update blends into a
 buffer, copied from the first gradient and thereafter @racket[momentum]
 times itself plus the gradient; with @racket[nesterov?] the update looks
 one blend ahead, which requires a momentum; @racket[weight-decay] adds that
 multiple of the parameter to the gradient before either, torch's L2 form.
+@racket[foreach?] and @racket[fused?] choose the implementation;
+@racket[fused?] requires floating-point parameters and excludes an explicit
+@racket[#:foreach? #t].
 }
 
 @defproc[(adam [params (listof tensor?)]
@@ -723,11 +757,29 @@ multiple of the parameter to the gradient before either, torch's L2 form.
                [#:beta1 beta1 real? 0.9]
                [#:beta2 beta2 real? 0.999]
                [#:eps eps real? 1e-8]
-               [#:weight-decay weight-decay (>=/c 0) 0])
+               [#:weight-decay weight-decay (>=/c 0) 0]
+               [#:foreach? foreach? boolean? #t]
+               [#:fused? fused? boolean? #f])
          adam?]{
 @tt{torch.optim.Adam} with bias correction, counted per parameter over the
 steps it had a gradient for; @racket[weight-decay] is the L2 form applied
 to the gradient, as there, not AdamW's decoupled one.
+@racket[foreach?] and @racket[fused?] choose the implementation;
+@racket[fused?] requires floating-point parameters and excludes an explicit
+@racket[#:foreach? #t].
+}
+
+@defproc[(adamw [params (listof tensor?)]
+                [#:lr lr (>=/c 0) 1e-3] [#:beta1 beta1 real? 0.9]
+                [#:beta2 beta2 real? 0.999] [#:eps eps real? 1e-8]
+                [#:weight-decay weight-decay (>=/c 0) 1e-2]
+                [#:foreach? foreach? boolean? #t] [#:fused? fused? boolean? #f])
+         adamw?]{
+@tt{torch.optim.AdamW}: @racket[adam]'s update with the decay decoupled, each
+parameter first scaled by @racket[(- 1 (* lr weight-decay))] and the moments
+taken of the gradient alone. The decay applies to every parameter in
+@racket[params]. An AdamW optimizer is also @racket[adam?], as
+@tt{torch.optim.AdamW} subclasses @tt{Adam}.
 }
 
 @defproc[(rmsprop [params (listof tensor?)]
@@ -735,16 +787,19 @@ to the gradient, as there, not AdamW's decoupled one.
                   [#:alpha alpha (>=/c 0) 0.99]
                   [#:eps eps (>=/c 0) 1e-8]
                   [#:weight-decay weight-decay (>=/c 0) 0]
-                  [#:momentum momentum (>=/c 0) 0])
+                  [#:momentum momentum (>=/c 0) 0]
+                  [#:foreach? foreach? boolean? #t])
          rmsprop?]{
 @tt{torch.optim.RMSprop}, uncentered: a running average of the squared
 gradient decayed by @racket[alpha], the parameter moved by the gradient over
 that average's root plus @racket[eps]; with @racket[momentum] the move
-accumulates into a buffer that starts at zero.
+accumulates into a buffer that starts at zero. ATen has no fused RMSprop
+kernel.
 }
 
 @deftogether[(@defproc[(sgd? [v any/c]) boolean?]
               @defproc[(adam? [v any/c]) boolean?]
+              @defproc[(adamw? [v any/c]) boolean?]
               @defproc[(rmsprop? [v any/c]) boolean?]
               @defproc[(optimizer? [v any/c]) boolean?])]{
 The optimizer predicates; @racket[optimizer?] holds of every optimizer and

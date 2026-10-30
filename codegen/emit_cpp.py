@@ -7,6 +7,7 @@ from .ir import (
     DOUBLE,
     INT64,
     INT_ARRAY,
+    MUTABLE_TENSOR_LIST,
     OPTIONAL_DOUBLE,
     OPTIONAL_DTYPE,
     OPTIONAL_GENERATOR,
@@ -16,6 +17,7 @@ from .ir import (
     OPTIONAL_TENSOR,
     OPTIONAL_TENSOR_LIST,
     SCALAR,
+    SCALAR_LIST,
     TENSOR,
     TENSOR_LIST,
     Op,
@@ -37,6 +39,8 @@ _C_DECLS = {
     INT_ARRAY: "const int64_t* {n}, int64_t {n}_len",
     TENSOR_LIST: "const tr_tensor* const* {n}, int64_t {n}_len",
     OPTIONAL_TENSOR_LIST: "const tr_tensor* const* {n}, int64_t {n}_len",
+    MUTABLE_TENSOR_LIST: "tr_tensor* const* {n}, int64_t {n}_len",
+    SCALAR_LIST: "const double* {n}, int64_t {n}_len",
     # Optionals carry a presence flag (or a -1 sentinel for dtype) so the
     # Racket side never has to pass a NULL pointer for a value type.
     OPTIONAL_INT64: "int64_t {n}, bool {n}_has",
@@ -55,7 +59,7 @@ _BOOL_DECL_KINDS = frozenset(
 
 def _c_decl(p: Param, *, receiver: bool, header: bool = False) -> str:
     # An in-place op's receiver is the mutable `self` handle.
-    if receiver:
+    if receiver and p.kind == TENSOR:
         return f"tr_tensor* {p.name}"
     decl = _C_DECLS[p.kind].format(n=p.name)
     # A NULL optional-tensor is the valid c10::nullopt encoding, not an error;
@@ -75,7 +79,12 @@ def _out_names(op: Op) -> list[str]:
 
 
 def _returns_status(op: Op) -> bool:
-    return op.inplace or op.returns > 1
+    return op.inplace or op.returns != 1
+
+
+# A list argument whose length may be 0 may also arrive as NULL; only a
+# NULL with a positive length is refused.
+_EMPTY_OK_LISTS = (MUTABLE_TENSOR_LIST, SCALAR_LIST)
 
 
 def _c_params(op: Op, *, header: bool = False) -> str:
@@ -96,7 +105,7 @@ def _arg_expr(p: Param) -> str:
     if p.kind == INT_ARRAY:
         return (f"at::IntArrayRef({p.name}, "
                 f"static_cast<size_t>({p.name}_len))")
-    if p.kind == TENSOR_LIST:
+    if p.kind in (TENSOR_LIST, MUTABLE_TENSOR_LIST, SCALAR_LIST):
         return f"{p.name}_vec"
     if p.kind == OPTIONAL_TENSOR_LIST:
         return f"{p.name}_list"
@@ -144,7 +153,10 @@ def emit_header(shard: str, ops: list[Op]) -> str:
         " * handle (NULL on error); an in-place op mutates its first handle",
         " * and returns an int status (0 ok, 1 with tr_last_error set). An op",
         " * with several Tensor returns also reports a status and writes one",
-        " * new handle per trailing out pointer, every one NULL on error. */",
+        " * new handle per trailing out pointer, every one NULL on error. An",
+        " * op with no return updates the tensors of its non-const lists and",
+        " * reports a status; a failure partway may leave them partly",
+        " * updated. */",
         "",
     ]
     for op in ops:
@@ -168,8 +180,11 @@ def _emit_body(op: Op) -> list[str]:
     for p in op.params:
         if p.kind in (TENSOR, INT_ARRAY, TENSOR_LIST, OPTIONAL_TENSOR_LIST):
             guards.append(f"!{p.name}")
-        if p.kind in (INT_ARRAY, TENSOR_LIST, OPTIONAL_TENSOR_LIST):
+        if p.kind in (INT_ARRAY, TENSOR_LIST, OPTIONAL_TENSOR_LIST,
+                      *_EMPTY_OK_LISTS):
             guards.append(f"{p.name}_len < 0")
+        if p.kind in _EMPTY_OK_LISTS:
+            guards.append(f"(!{p.name} && {p.name}_len > 0)")
         # When present, an optional int-array's pointer is dereferenced by
         # IntArrayRef, so a true `_has` with a null buffer is UB. A present
         # but empty (len 0) array is ambiguous — reject it too; a present
@@ -196,7 +211,12 @@ def _emit_body(op: Op) -> list[str]:
         ]
     preamble = []
     for p in op.params:
-        if p.kind == TENSOR_LIST:
+        if p.kind == SCALAR_LIST:
+            preamble += [
+                f"    const std::vector<at::Scalar> {p.name}_vec("
+                f"{p.name}, {p.name} + {p.name}_len);",
+            ]
+        if p.kind in (TENSOR_LIST, MUTABLE_TENSOR_LIST):
             preamble += [
                 f"    std::vector<at::Tensor> {p.name}_vec;",
                 f"    {p.name}_vec.reserve("
@@ -220,7 +240,13 @@ def _emit_body(op: Op) -> list[str]:
                 " : std::optional<at::Tensor>());",
                 "    }",
             ]
-    if op.inplace:
+    if op.returns == 0:
+        # at::<base>_(<lists> ...); these ops have no method variant.
+        args = ", ".join(_arg_expr(p) for p in op.params)
+        lines += [f'  return torchrkt::status_call("{op.c_name}", [&] {{']
+        lines += preamble
+        lines += [f"    at::{op.base}_({args});", "  });", "}"]
+    elif op.inplace:
         # self->value.<base>_(<rest>); mutates in place, returns status.
         recv = op.params[0].name
         method_args = ", ".join(_arg_expr(p) for p in op.params[1:])
@@ -243,7 +269,8 @@ def _emit_body(op: Op) -> list[str]:
 
 def emit_source(shard: str, ops: list[Op]) -> str:
     needs_vector = any(
-        p.kind == TENSOR_LIST for op in ops for p in op.params
+        p.kind in (TENSOR_LIST, MUTABLE_TENSOR_LIST, SCALAR_LIST)
+        for op in ops for p in op.params
     )
     lines = [BANNER, f'#include "torchrkt/c_api/generated/{shard}.h"', ""]
     lines += ["#include <torch/torch.h>", ""]

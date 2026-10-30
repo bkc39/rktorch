@@ -22,9 +22,19 @@
   ;; tensors or None, (bool-tensor ...) a genuine bool handle
   ;; via `ne 0`, (kwarg "name" v) a scalar (or none) passed as name=v to a kwarg-only
   ;; aten arg, (optional-scalar v) a Scalar? bound, (uniform-tensor dim ...)
-  ;; a seeded rand (non-negative, for probabilities), other heads are
+  ;; a seeded rand (non-negative, for probabilities), (uniform-tensors ...)
+  ;; a list of them, (step-tensors v ...) 0-dim float32 tensors holding each
+  ;; v, (scalar-list v ...) a list of reals, other heads are
   ;; literals with #f = None. A recipe of 'device-only marks an op with no CPU
   ;; kernel, which a device-guarded test drives instead.
+  (define fused-adam-recipe
+    '((tensors (3) (2 2)) (tensors (3) (2 2)) (tensors (3) (2 2))
+      (uniform-tensors (3) (2 2)) (tensors) (step-tensors 1.0 3.0)
+      (kwarg "lr" 0.01) (kwarg "beta1" 0.9) (kwarg "beta2" 0.999)
+      (kwarg "weight_decay" 0.01) (kwarg "eps" 1e-8)
+      (kwarg "amsgrad" #f) (kwarg "maximize" #f)
+      (kwarg "grad_scale" none) (kwarg "found_inf" none)))
+
   (define generated-recipes
     (hash 'matmul '((tensor 2 3) (tensor 3 2))
           'mm '((tensor 2 2) (tensor 2 2))
@@ -168,7 +178,34 @@
                                           (tensor 2 5 6) (optional-tensor #f)
                                           (double 0.0) (bool #f)
                                           (kwarg "scale" none)
-                                          (kwarg "enable_gqa" #f))))
+                                          (kwarg "enable_gqa" #f))
+          'add-tensor '((tensor 3) (tensor 3) (kwarg "alpha" 0.5))
+          'div-scalar! '((tensor 3) (double 0.7))
+          'lerp-scalar! '((tensor 3) (tensor 3) (double 0.1))
+          'foreach-add-scalar! '((tensors (3) (2 2)) (double 0.25))
+          'foreach-add-list! '((tensors (3) (2 2)) (tensors (3) (2 2))
+                               (kwarg "alpha" -0.5))
+          'foreach-mul-scalar! '((tensors (3) (2 2)) (double 0.9))
+          'foreach-div-scalarlist! '((tensors (3) (2 2)) (scalar-list 0.5 3.0))
+          'foreach-lerp-scalar! '((tensors (3) (2 2)) (tensors (3) (2 2))
+                                  (double 0.1))
+          'foreach-addcmul-scalar! '((tensors (3) (2 2)) (tensors (3) (2 2))
+                                     (tensors (3) (2 2)) (double 0.001))
+          'foreach-addcdiv-scalar! '((tensors (3) (2 2)) (tensors (3) (2 2))
+                                     (uniform-tensors (3) (2 2)) (double -0.01))
+          'foreach-addcdiv-scalarlist! '((tensors (3) (2 2)) (tensors (3) (2 2))
+                                         (uniform-tensors (3) (2 2))
+                                         (scalar-list -0.01 -0.02))
+          'foreach-sqrt! '((uniform-tensors (3) (2 2)))
+          'foreach-copy! '((tensors (3) (2 2)) (tensors (3) (2 2)) (bool #f))
+          'fused-adam! fused-adam-recipe
+          'fused-adamw! fused-adam-recipe
+          'fused-sgd! '((tensors (3) (2 2)) (tensors (3) (2 2)) (tensors (3) (2 2))
+                        (kwarg "weight_decay" 5e-4) (kwarg "momentum" 0.9)
+                        (kwarg "lr" 0.1) (kwarg "dampening" 0.0)
+                        (kwarg "nesterov" #t) (kwarg "maximize" #f)
+                        (kwarg "is_first_step" #f) (kwarg "grad_scale" none)
+                        (kwarg "found_inf" none))))
 
   ;; Tensor specs draw seeded randns left to right — both sides consume the
   ;; same RNG stream, so spec order and draw counts must match exactly.
@@ -179,6 +216,11 @@
       [(tensors)
        (for/list ([dims (in-list (cdr spec))])
          (apply randn dims))]
+      [(uniform-tensors)
+       (for/list ([dims (in-list (cdr spec))])
+         (apply rand dims))]
+      [(step-tensors) (map tensor (cdr spec))]
+      [(scalar-list) (cdr spec)]
       [(optional-tensor)
        (if (equal? (cdr spec) '(#f)) #f (apply randn (cdr spec)))]
       [(optional-tensor-ones) (apply ones (cdr spec))]
@@ -205,6 +247,17 @@
                (string-join (for/list ([dims (in-list (cdr spec))])
                               (format "torch.randn(~a)" (csv dims)))
                             ", "))]
+      [(uniform-tensors)
+       (format "[~a]"
+               (string-join (for/list ([dims (in-list (cdr spec))])
+                              (format "torch.rand(~a)" (csv dims)))
+                            ", "))]
+      [(step-tensors)
+       (format "[~a]"
+               (string-join (for/list ([v (in-list (cdr spec))])
+                              (format "torch.tensor(~a)" v))
+                            ", "))]
+      [(scalar-list) (format "[~a]" (csv (cdr spec)))]
       [(optional-tensor)
        (if (equal? (cdr spec) '(#f)) "None" (format "torch.randn(~a)"
                                                     (csv (cdr spec))))]
@@ -250,7 +303,12 @@
       [(dtype) (format "dtype=a~a" i)]
       [else (format "a~a" i)]))
 
-  (define (generated-python-result py-name specs inplace?)
+  (define (mutable-positions kinds)
+    (for/list ([k (in-list kinds)] [i (in-naturals)]
+               #:when (eq? k 'mutable-tensor-list))
+      i))
+
+  (define (generated-python-result py-name specs inplace? mutables)
     (define callee py-name)
     (define call-args
       (string-join (for/list ([s (in-list specs)] [i (in-naturals)])
@@ -265,10 +323,15 @@
               (for/list ([s (in-list specs)]
                          [i (in-naturals)])
                 (format "a~a = ~a\n" i (spec->python-expr s))))
-       (if inplace?
-           (format "~a\nr = a0\n" invoke)
-           (format "r = ~a\n" invoke))
-       "rs = r if isinstance(r, tuple) else (r,)\n"
+       (cond
+         [(pair? mutables)
+          (format "~a\nrs = [t for a in (~a) for t in a]\n" invoke
+                  (string-join (for/list ([i (in-list mutables)])
+                                 (format "a~a," i))
+                               " "))]
+         [inplace? (format "~a\nrs = (a0,)\n" invoke)]
+         [else (format "r = ~a\nrs = r if isinstance(r, tuple) else (r,)\n"
+                       invoke)])
        "print(json.dumps([{\"shape\": list(t.shape),"
        " \"values\": [float(v) for v in t.flatten().tolist()]}"
        " for t in rs]))"))
@@ -297,12 +360,19 @@
                              name "generated-parity-test.rkt")))))
     (check-equal? (length specs) (length kinds)
                   (format "~a~a: recipe arity matches manifest" name label))
-    (define expected (generated-python-result py-name specs inplace?))
+    (define mutables (mutable-positions kinds))
+    (define expected
+      (generated-python-result py-name specs inplace? mutables))
     (manual-seed! 0)
     (define args (map spec->racket-arg specs))
     (define op (dynamic-require generated-rkt name))
-    (define results (call-with-values (lambda () (apply op args)) list))
-    (check-equal? (length results) returns
+    (define answered (call-with-values (lambda () (apply op args)) list))
+    (define results
+      (if (zero? returns)
+          (apply append (map (lambda (i) (list-ref args i)) mutables))
+          answered))
+    (check-equal? (if (zero? returns) (length mutables) (length answered))
+                  (if (zero? returns) (length mutables) returns)
                   (format "~a~a: return count matches manifest" name label))
     (check-equal? (length results) (length expected)
                   (format "~a~a: return count parity" name label))

@@ -1,12 +1,13 @@
 #lang racket/base
 
 (require (only-in racket/contract/base -> ->i any/c contract-out real-in)
-         (only-in "../foreign.rkt"
-                  copy! device dtype full lerp! shape with-no-grad)
+         (only-in "../foreign.rkt" device dtype shape with-no-grad)
+         (prefix-in g: (only-in "../generated.rkt"
+                                foreach-copy! foreach-lerp-scalar!))
          (only-in "../private/contract.rkt" define/contract-out)
          (only-in "layer.rkt" layer? parameters))
 
-(struct ema (model average decay count weights) ;; noqa
+(struct ema (model average decay count) ;; noqa
   #:constructor-name make-ema
   #:omit-define-syntaxes)
 
@@ -26,11 +27,13 @@
               (equal? (device p) (device q))
               (eq? (dtype p) (dtype q))))))
 
+(define (update-average! e update!)
+  (define qs (parameters (ema-average e)))
+  (unless (null? qs)
+    (void (with-no-grad (update! qs (parameters (ema-model e)))))))
+
 (define (copy-parameters! e)
-  (with-no-grad
-    (for ([p (in-list (parameters (ema-model e)))]
-          [q (in-list (parameters (ema-average e)))])
-      (copy! q p))))
+  (update-average! e (lambda (qs ps) (g:foreach-copy! qs ps #f))))
 
 (define/contract-out (ema model average #:decay [decay 0.9999]) ;; noqa
   (->i ([model layer?] [average layer?])
@@ -39,7 +42,7 @@
        "the average must be a separate layer with the model's parameters, shape for shape, on its device and dtype"
        (separate-copy? model average)
        [result ema?])
-  (define e (make-ema model average decay (box 0) (make-hasheq)))
+  (define e (make-ema model average decay (box 0)))
   (copy-parameters! e)
   e)
 
@@ -50,19 +53,5 @@
   (cond
     [(zero? n) (copy-parameters! e)]
     [else
-     (with-no-grad
-       (for ([p (in-list (parameters (ema-model e)))]
-             [q (in-list (parameters (ema-average e)))])
-         (lerp! q p (weight-on e q))))]))
-
-(define (weight-on e q)
-  (define dev (device q))
-  (define dt (dtype q))
-  (define (fresh) (full (- 1.0 (ema-decay e)) #:device dev #:dtype dt))
-  (define w (hash-ref! (ema-weights e) q fresh))
-  (cond
-    [(and (equal? (device w) dev) (eq? (dtype w) dt)) w]
-    [else
-     (define moved (fresh))
-     (hash-set! (ema-weights e) q moved)
-     moved]))
+     (define weight (real->double-flonum (- 1.0 (ema-decay e))))
+     (update-average! e (lambda (qs ps) (g:foreach-lerp-scalar! qs ps weight)))]))

@@ -13,13 +13,16 @@
 ;; int-arrays); loss ops follow ATen (nll_loss wants log-probabilities,
 ;; cross_entropy_loss wants raw logits).
 ;; An op with several Tensor returns carries #:returns N and answers
-;; them as multiple values, in schema order.
+;; them as multiple values, in schema order. An op that returns
+;; nothing updates its mutable-tensor-list arguments and answers the
+;; first.
 
 (require (only-in "foreign/define-generated.rkt"
                   define-generated-op))
 
 (provide abs-tensor
          adaptive-avg-pool2d
+         add-tensor
          add-tensor!
          addcdiv!
          addcmul!
@@ -38,6 +41,7 @@
          cross-entropy-loss
          ctc-loss-intlist
          cudnn-rnn-flatten-weight
+         div-scalar!
          dot
          dropout
          embedding
@@ -45,6 +49,19 @@
          eq-tensor
          fill-scalar!
          flip
+         foreach-add-list!
+         foreach-add-scalar!
+         foreach-addcdiv-scalar!
+         foreach-addcdiv-scalarlist!
+         foreach-addcmul-scalar!
+         foreach-copy!
+         foreach-div-scalarlist!
+         foreach-lerp-scalar!
+         foreach-mul-scalar!
+         foreach-sqrt!
+         fused-adam!
+         fused-adamw!
+         fused-sgd!
          gather
          ge-scalar
          ge-tensor
@@ -64,6 +81,7 @@
          le-scalar
          le-tensor
          leaky-relu
+         lerp-scalar!
          lerp-tensor!
          linear
          lstm-input
@@ -113,6 +131,9 @@
 
 (define-generated-op adaptive-avg-pool2d tr_gen_adaptive_avg_pool2d
   ([self tensor] [output-size int-array]))
+
+(define-generated-op add-tensor tr_gen_add_tensor
+  ([self tensor] [other tensor] [alpha scalar]))
 
 (define-generated-op add-tensor! tr_gen_add__tensor #:inplace
   ([self tensor] [other tensor] [alpha scalar]))
@@ -168,6 +189,9 @@
 (define-generated-op cudnn-rnn-flatten-weight tr_gen__cudnn_rnn_flatten_weight
   ([weight-arr tensor-list] [weight-stride0 int64] [input-size int64] [mode int64] [hidden-size int64] [proj-size int64] [num-layers int64] [batch-first bool] [bidirectional bool]))
 
+(define-generated-op div-scalar! tr_gen_div__scalar #:inplace
+  ([self tensor] [other scalar]))
+
 (define-generated-op dot tr_gen_dot
   ([self tensor] [tensor-arg tensor]))
 
@@ -188,6 +212,45 @@
 
 (define-generated-op flip tr_gen_flip
   ([self tensor] [dims int-array]))
+
+(define-generated-op foreach-add-list! tr_gen__foreach_add__list #:inplace
+  ([self mutable-tensor-list] [other tensor-list] [alpha scalar]))
+
+(define-generated-op foreach-add-scalar! tr_gen__foreach_add__scalar #:inplace
+  ([self mutable-tensor-list] [scalar-arg scalar]))
+
+(define-generated-op foreach-addcdiv-scalar! tr_gen__foreach_addcdiv__scalar #:inplace
+  ([self mutable-tensor-list] [tensor1 tensor-list] [tensor2 tensor-list] [value scalar]))
+
+(define-generated-op foreach-addcdiv-scalarlist! tr_gen__foreach_addcdiv__scalarlist #:inplace
+  ([self mutable-tensor-list] [tensor1 tensor-list] [tensor2 tensor-list] [scalars scalar-list]))
+
+(define-generated-op foreach-addcmul-scalar! tr_gen__foreach_addcmul__scalar #:inplace
+  ([self mutable-tensor-list] [tensor1 tensor-list] [tensor2 tensor-list] [value scalar]))
+
+(define-generated-op foreach-copy! tr_gen__foreach_copy_ #:inplace
+  ([self mutable-tensor-list] [src tensor-list] [non-blocking bool]))
+
+(define-generated-op foreach-div-scalarlist! tr_gen__foreach_div__scalarlist #:inplace
+  ([self mutable-tensor-list] [scalars scalar-list]))
+
+(define-generated-op foreach-lerp-scalar! tr_gen__foreach_lerp__scalar #:inplace
+  ([self mutable-tensor-list] [tensors1 tensor-list] [weight scalar]))
+
+(define-generated-op foreach-mul-scalar! tr_gen__foreach_mul__scalar #:inplace
+  ([self mutable-tensor-list] [scalar-arg scalar]))
+
+(define-generated-op foreach-sqrt! tr_gen__foreach_sqrt_ #:inplace
+  ([self mutable-tensor-list]))
+
+(define-generated-op fused-adam! tr_gen__fused_adam_ #:inplace
+  ([self mutable-tensor-list] [grads mutable-tensor-list] [exp-avgs mutable-tensor-list] [exp-avg-sqs mutable-tensor-list] [max-exp-avg-sqs mutable-tensor-list] [state-steps tensor-list] [lr double] [beta1 double] [beta2 double] [weight-decay double] [eps double] [amsgrad bool] [maximize bool] [grad-scale optional-tensor] [found-inf optional-tensor]))
+
+(define-generated-op fused-adamw! tr_gen__fused_adamw_ #:inplace
+  ([self mutable-tensor-list] [grads mutable-tensor-list] [exp-avgs mutable-tensor-list] [exp-avg-sqs mutable-tensor-list] [max-exp-avg-sqs mutable-tensor-list] [state-steps tensor-list] [lr double] [beta1 double] [beta2 double] [weight-decay double] [eps double] [amsgrad bool] [maximize bool] [grad-scale optional-tensor] [found-inf optional-tensor]))
+
+(define-generated-op fused-sgd! tr_gen__fused_sgd_ #:inplace
+  ([self mutable-tensor-list] [grads mutable-tensor-list] [momentum-buffer-list mutable-tensor-list] [weight-decay double] [momentum double] [lr double] [dampening double] [nesterov bool] [maximize bool] [is-first-step bool] [grad-scale optional-tensor] [found-inf optional-tensor]))
 
 (define-generated-op gather tr_gen_gather
   ([self tensor] [dim int64] [index tensor] [sparse-grad bool]))
@@ -245,6 +308,9 @@
 
 (define-generated-op leaky-relu tr_gen_leaky_relu
   ([self tensor] [negative-slope scalar]))
+
+(define-generated-op lerp-scalar! tr_gen_lerp__scalar #:inplace
+  ([self tensor] [end tensor] [weight scalar]))
 
 (define-generated-op lerp-tensor! tr_gen_lerp__tensor #:inplace
   ([self tensor] [end tensor] [weight tensor]))

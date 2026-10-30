@@ -2,12 +2,13 @@
 
 (require (for-syntax racket/base syntax/parse)
          (only-in racket/contract/base -> ->* any listof or/c)
+         (only-in racket/match match-lambda)
          syntax/parse/define
          (prefix-in g: (only-in "../generated.rkt"
                                 addcdiv! addcmul! copy! lerp-tensor!))
          (only-in "../private/contract.rkt"
                   define/checked-out define/contract-out)
-         (only-in "error.rkt" check-handle check-ok)
+         (only-in "error.rkt" check-handle check-ok check-outputs)
          (only-in "raw/autograd.rkt"
                   tr-is-grad-enabled/raw
                   tr-set-grad-enabled/raw
@@ -20,12 +21,15 @@
                   tr-tensor-requires-grad/raw
                   tr-tensor-sub!/raw
                   tr-tensor-zero!/raw
+                  tr-tensors-grad/raw
                   tr-tensors-reset-grad/raw)
          (only-in "raw/memory.rkt" forget-gradient-adoptions!)
          (only-in "raw/pressure.rkt"
                   call-with-ledger collect-at-trough! native-collect-at-troughs
                   refresh-shadows!)
-         (only-in "structs.rkt" tensor? tensor-free! wrap-tensor))
+         (only-in "structs.rkt"
+                  tensor-impl tensor-impl-shape tensor? tensor-free! tensors-free!
+                  wrap-tensor))
 
 (provide collect-at-forward-trough!
          with-gradient
@@ -126,30 +130,46 @@
                rc))
             'zero-grads!))
 
-(define (call-with-gradients ts proc)
-  (define held '())
+(define (fetch-gradients ts)
+  (define-values (qs gs)
+    (for/lists (qs gs)
+               ([t (in-list ts)]
+                [h (in-list (check-outputs 'grad (tr-tensors-grad/raw ts)))]
+                #:when h)
+      (values t (tensor-impl h (tensor-impl-shape t)))))
+  (list qs gs))
+
+(define (call-holding fetch release proc)
+  (define held #f)
   (dynamic-wind
    void
    (lambda ()
-     (for ([t (in-list ts)])
-       (parameterize-break #f
-         (define g (maybe-grad t))
-         (when g
-           (set! held (cons g held)))))
-     (proc (reverse held)))
-   ;; a post thunk already runs with breaks disabled
+     (parameterize-break #f
+       (set! held (fetch)))
+     (when held
+       (proc held)))
    (lambda ()
-     (for-each tensor-free! held))))
+     (when held
+       (release held)))))
+
+(define (call-with-gradients ts proc)
+  (call-holding (lambda () (fetch-gradients ts))
+                (match-lambda [(list _ gs) (tensors-free! gs)])
+                (match-lambda [(list qs gs) (proc qs gs)])))
 
 (define (call-with-gradient t proc)
-  (call-with-gradients (list t) (lambda (gs) (for-each proc gs))))
+  (call-holding (lambda () (maybe-grad t)) tensor-free! proc))
 
 (begin-for-syntax
   (define-syntax-class gradient-binder
-    (pattern (name:id source:expr))))
+    (pattern (name:id source:expr)))
+  (define-syntax-class gradients-binder
+    (pattern ([params:id grads:id] source:expr))
+    (pattern (grads:id source:expr)
+             #:with (params) (generate-temporaries '(params)))))
 
-(define-syntax-parse-rule (with-gradients b:gradient-binder body:expr ...+)
-  (call-with-gradients b.source (lambda (b.name) body ...)))
+(define-syntax-parse-rule (with-gradients b:gradients-binder body:expr ...+)
+  (call-with-gradients b.source (lambda (b.params b.grads) body ...)))
 
 (define-syntax-parse-rule (with-gradient b:gradient-binder body:expr ...+)
   (call-with-gradient b.source (lambda (b.name) body ...)))

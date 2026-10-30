@@ -4,11 +4,13 @@
 ;; (racket-name python-attr (arg kinds ...) inplace? returns).
 ;; inplace? is #t for ops checked against torch.Tensor.<attr>_ on a
 ;; cloned receiver; returns counts the Tensor returns, compared
-;; elementwise against the Python tuple when above 1. Consumed by
-;; torch/tests/generated-parity-test.rkt.
+;; elementwise against the Python tuple when above 1. returns 0:
+;; every mutable-tensor-list argument is compared after the call.
+;; Consumed by torch/tests/generated-parity-test.rkt.
 (
  (abs-tensor "abs" (tensor) #f 1)
  (adaptive-avg-pool2d "adaptive_avg_pool2d" (tensor int-array) #f 1)
+ (add-tensor "add.Tensor" (tensor tensor scalar) #f 1)
  (add-tensor! "add_.Tensor" (tensor tensor scalar) #t 1)
  (addcdiv! "addcdiv_" (tensor tensor tensor scalar) #t 1)
  (addcmul! "addcmul_" (tensor tensor tensor scalar) #t 1)
@@ -27,6 +29,7 @@
  (cross-entropy-loss "cross_entropy_loss" (tensor tensor optional-tensor int64 int64 double) #f 1)
  (ctc-loss-intlist "ctc_loss.IntList" (tensor tensor int-array int-array int64 int64 bool) #f 1)
  (cudnn-rnn-flatten-weight "_cudnn_rnn_flatten_weight" (tensor-list int64 int64 int64 int64 int64 int64 bool bool) #f 1)
+ (div-scalar! "div_.Scalar" (tensor scalar) #t 1)
  (dot "dot" (tensor tensor) #f 1)
  (dropout "dropout" (tensor double bool) #f 1)
  (embedding "embedding" (tensor tensor int64 bool bool) #f 1)
@@ -34,6 +37,19 @@
  (eq-tensor "eq.Tensor" (tensor tensor) #f 1)
  (fill-scalar! "fill_.Scalar" (tensor scalar) #t 1)
  (flip "flip" (tensor int-array) #f 1)
+ (foreach-add-list! "_foreach_add_.List" (mutable-tensor-list tensor-list scalar) #t 0)
+ (foreach-add-scalar! "_foreach_add_.Scalar" (mutable-tensor-list scalar) #t 0)
+ (foreach-addcdiv-scalar! "_foreach_addcdiv_.Scalar" (mutable-tensor-list tensor-list tensor-list scalar) #t 0)
+ (foreach-addcdiv-scalarlist! "_foreach_addcdiv_.ScalarList" (mutable-tensor-list tensor-list tensor-list scalar-list) #t 0)
+ (foreach-addcmul-scalar! "_foreach_addcmul_.Scalar" (mutable-tensor-list tensor-list tensor-list scalar) #t 0)
+ (foreach-copy! "_foreach_copy_" (mutable-tensor-list tensor-list bool) #t 0)
+ (foreach-div-scalarlist! "_foreach_div_.ScalarList" (mutable-tensor-list scalar-list) #t 0)
+ (foreach-lerp-scalar! "_foreach_lerp_.Scalar" (mutable-tensor-list tensor-list scalar) #t 0)
+ (foreach-mul-scalar! "_foreach_mul_.Scalar" (mutable-tensor-list scalar) #t 0)
+ (foreach-sqrt! "_foreach_sqrt_" (mutable-tensor-list) #t 0)
+ (fused-adam! "_fused_adam_" (mutable-tensor-list mutable-tensor-list mutable-tensor-list mutable-tensor-list mutable-tensor-list tensor-list double double double double double bool bool optional-tensor optional-tensor) #t 0)
+ (fused-adamw! "_fused_adamw_" (mutable-tensor-list mutable-tensor-list mutable-tensor-list mutable-tensor-list mutable-tensor-list tensor-list double double double double double bool bool optional-tensor optional-tensor) #t 0)
+ (fused-sgd! "_fused_sgd_" (mutable-tensor-list mutable-tensor-list mutable-tensor-list double double double double bool bool bool optional-tensor optional-tensor) #t 0)
  (gather "gather" (tensor int64 tensor bool) #f 1)
  (ge-scalar "ge.Scalar" (tensor scalar) #f 1)
  (ge-tensor "ge.Tensor" (tensor tensor) #f 1)
@@ -53,6 +69,7 @@
  (le-scalar "le.Scalar" (tensor scalar) #f 1)
  (le-tensor "le.Tensor" (tensor tensor) #f 1)
  (leaky-relu "leaky_relu" (tensor scalar) #f 1)
+ (lerp-scalar! "lerp_.Scalar" (tensor tensor scalar) #t 1)
  (lerp-tensor! "lerp_.Tensor" (tensor tensor tensor) #t 1)
  (linear "linear" (tensor tensor optional-tensor) #f 1)
  (lstm-input "lstm.input" (tensor tensor-list tensor-list bool int64 double bool bool bool) #f 3)
