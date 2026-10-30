@@ -176,7 +176,7 @@ the fit, counted across epochs, at the step of a @racket[request-stop!], and
 at each epoch end, in one transfer for all keys. As in Lightning, the logger
 gets a training row, and a validation epoch's row, labelled with the optimizer
 steps taken before the current batch's step; the first step's row is at
-step 0, and so is an epoch's training row before any step. Each row carries
+step 0, and an epoch's training row before any step is at step -1. Each row carries
 the key @racket['epoch], @racket[run-epoch], unless one was logged. A
 per-step value logged in a validation loop reaches the logger at each
 validation batch, apart from the training values and without
@@ -313,7 +313,7 @@ The generic interface of a logger, with the methods below.}
                        any]
               @defproc[(logger-log-metrics! [logger training-logger?]
                                             [metrics (hash/c symbol? real?)]
-                                            [step exact-nonnegative-integer?])
+                                            [step (integer-in -1 #f)])
                        any]
               @defproc[(logger-finalize! [logger training-logger?]
                                          [status (or/c 'success 'failed)])
@@ -487,8 +487,9 @@ The order of one @racket[fit], after Lightning 2.6.5, with
        a validation loop whose metrics are discarded,
        @tt{on-sanity-check-end}.}
  @item{As in Lightning, @racket[fit] leaves each layer's mode as the caller
-       set it, and a trainer with a layer in eval mode logs a warning to the
-       @racket['rktorch-train] topic before @tt{on-train-start}.}
+       set it. A trainer with a layer in eval mode warns once, before
+       @tt{on-train-start}, on the @racket['rktorch-train] topic and on
+       @racket[(current-error-port)], where Lightning's warning is printed too.}
  @item{@tt{on-train-start}, then per epoch @tt{on-train-epoch-start} and per
        batch: the transfer hooks, @tt{on-train-batch-start}, the training
        step, @tt{on-before-zero-grad} on a window's first batch,

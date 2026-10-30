@@ -5,6 +5,7 @@
            (only-in racket/list drop-right make-list)
            (only-in racket/match match-define)
            (only-in racket/math exact-ceiling)
+           (only-in racket/port open-output-nowhere)
            rackunit
            (only-in syntax/parse/define define-syntax-parse-rule)
            (only-in "../data/loader.rkt" dataloader tensor-dataset)
@@ -292,7 +293,8 @@
     (define t (new-tally))
     (define d (Dropout))
     (eval! d)
-    (fit (Moded d t) (ones-loader 3) #:max-epochs 1 #:logger #f)
+    (parameterize ([current-error-port (open-output-nowhere)])
+      (fit (Moded d t) (ones-loader 3) #:max-epochs 1 #:logger #f))
     (check-equal? (notes t 'modes) '((#t #f) (#t #f) (#t #f))))
 
   (define-callback carrier (head t)

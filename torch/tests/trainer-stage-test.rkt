@@ -2,6 +2,7 @@
 
 (module+ test
   (require (only-in racket/match match)
+           (only-in racket/port open-output-nowhere)
            rackunit
            (only-in (submod "../data/loader.rkt" private) with-traversal)
            (only-in "../data/loader.rkt" dataloader tensor-dataset)
@@ -90,7 +91,8 @@
 
   (define (fit-moded tr)
     (define receiver (make-log-receiver (current-logger) 'warning 'rktorch-train))
-    (fit tr (ones-loader 2) #:val (ones-loader 1) #:max-epochs 1 #:logger #f)
+    (parameterize ([current-error-port (open-output-nowhere)])
+      (fit tr (ones-loader 2) #:val (ones-loader 1) #:max-epochs 1 #:logger #f))
     (match (sync/timeout 0 receiver)
       [(vector _ message _ _) message]
       [#f #f]))
@@ -105,4 +107,16 @@
     (check-regexp-match #rx"^rktorch-train: fit: [0-9]+ layer\\(s\\) in eval mode" (fit-moded tr))
     (check-equal? (reverse (unbox eval-seen))
                   '((validate #f) (train #f) (train #f) (validate #f)))
-    (check-false (layer-training? tr))))
+    (check-false (layer-training? tr)))
+
+  (define (fit-stderr tr)
+    (define err (open-output-string))
+    (parameterize ([current-error-port err])
+      (fit tr (ones-loader 2) #:val (ones-loader 1) #:max-epochs 2 #:logger #f))
+    (get-output-string err))
+
+  (test-case "the eval-mode warning is printed to stderr once per fit, as Lightning's"
+    (check-equal? (fit-stderr (Moded (box '()))) "")
+    (check-regexp-match
+     #rx"^rktorch-train: fit: [0-9]+ layer\\(s\\) in eval mode at the start of training;[^\n]*\n$"
+     (fit-stderr (eval! (Moded (box '())))))))

@@ -2,8 +2,8 @@
 
 (require (only-in json jsexpr->string)
          (only-in racket/contract/base
-                  -> ->* ->i and/c any/c contract-out listof or/c property/c
-                  unsupplied-arg?)
+                  -> ->* ->i and/c any any/c contract-out hash/c integer-in listof or/c
+                  property/c unsupplied-arg?)
          (only-in racket/file make-directory*)
          (only-in racket/generic define-generics)
          (only-in racket/match match match*)
@@ -24,8 +24,9 @@
 (provide gen:training-logger
          logger-finalize!
          logger-log-hyperparams!
-         logger-log-metrics!
-         (contract-out [training-logger? (-> any/c boolean?)]))
+         (contract-out [logger-log-metrics!
+                        (-> training-logger? (hash/c symbol? real?) (integer-in -1 #f) any)]
+                       [training-logger? (-> any/c boolean?)]))
 
 (define-generics training-logger
   (logger-log-hyperparams! training-logger params)
