@@ -64,6 +64,7 @@
 
 (module+ test
   (require (only-in racket/match match-define)
+           (only-in racket/runtime-path #%datum define-runtime-path)
            rackunit
            (only-in "../data/loader.rkt" dataloader tensor-dataset)
            (only-in "../main.rkt" ones)
@@ -262,4 +263,9 @@
                       (regexp-match? #rx"two stateful callbacks share the state key \"keeper\""
                                      (exn-message e))))
                (lambda () (fit-quiet (Good) (ones-loader 2)
-                                     `(#:callbacks . ,(list (keeper) (keeper))))))))
+                                     `(#:callbacks . ,(list (keeper) (keeper)))))))
+
+  (define-runtime-path train-facade "../train.rkt")
+
+  (test-case "torch/train exports no private helper"
+    (check-equal? (dynamic-require train-facade 'hook-log-rule (lambda () 'absent)) 'absent)))
