@@ -1,19 +1,20 @@
 #lang racket/base
 
 (module+ test
-  (require (only-in racket/list append-map)
-           (only-in racket/match match)
+  (require (only-in racket/contract exn:fail:contract:blame?)
+           (only-in racket/list append-map first make-list partition remove-duplicates second)
+           (only-in racket/match match match-define)
            rackunit
            (only-in syntax/macro-testing convert-compile-time-error)
            (only-in "../data/loader.rkt" dataloader tensor-dataset)
-           (only-in "../main.rkt" mean ones shape sum tensor)
+           (only-in "../main.rkt" mean ones shape stack sum tensor to zero!)
            (only-in "../nn.rkt" Linear mse-loss parameters sgd)
            (only-in "../train/private/hooks.rkt"
                     callback-hook? definable-hooks hook-log hook-name)
            "../train.rkt"
            (only-in "private/trainer-kit.rkt"
                     apply-keywords collecting-finalized collecting-hparams
-                    collecting-logger collecting-metrics))
+                    collecting-logger collecting-metrics collecting-steps))
 
   (define (logged-keys l)
     (append-map hash-keys (collecting-metrics l)))
@@ -37,10 +38,28 @@
       (log! 'val/seen (sum y))
       (mse-loss (net x) y))
     (define-test-step (x y)
-      (mse-loss (net x) y)))
+      (mse-loss (net x) y))
+    (define-predict-step (x y)
+      (net x)))
 
   (test-case "L-L1: an epoch mean is weighted by batch size"
     (define r (fit (Logging 'mean) (label-loader) #:max-epochs 1 #:logger #f))
+    (check-= (run-metric r 'acc) 0.6 1e-6))
+
+  (define-trainer Bundled (net)
+    (define-init () (set! net (Linear 1 1)))
+    (define-optimizers (sgd (parameters net) #:lr 0.01))
+    (define-training-step (batch)
+      (match-define (list x y) batch)
+      (log! 'acc (mean y) #:on-step? #f #:on-epoch? #t)
+      (mse-loss (net x) y)))
+
+  (test-case "an epoch mean is weighted by the leading tensor nested in one batch value"
+    (define (bundle items)
+      (list (stack (map first items)) (stack (map second items))))
+    (define loader
+      (dataloader (tensor-dataset (ones 5 1) labels) #:batch-size 2 #:collate bundle))
+    (define r (fit (Bundled) loader #:max-epochs 1 #:logger #f))
     (check-= (run-metric r 'acc) 0.6 1e-6))
 
   (test-case "L-L2: sum, max and min reduce exactly"
@@ -107,6 +126,8 @@
                       (cons (string->keyword (symbol->string (hook-name h)))
                             (logging-hook outcomes (hook-name h))))))
 
+  (define checkpoint-hooks '(state-dict load-state! on-save-checkpoint on-load-checkpoint))
+
   (test-case "L-L7: log! is allowed exactly in the hooks the table allows"
     (define outcomes (make-hasheq))
     (define cb (logging-callback outcomes))
@@ -114,10 +135,265 @@
     (fit tr (label-loader) #:val (label-loader) #:max-epochs 1 #:logger #f
          #:callbacks (list cb))
     (test tr (label-loader) #:logger #f #:callbacks (list cb))
+    (predict tr (label-loader) #:callbacks (list cb))
+    (define failing (lambda-callback #:on-train-end (lambda (r) (error 'on-train-end "planned"))))
+    (check-exn #rx"planned"
+               (lambda ()
+                 (fit tr (label-loader) #:max-epochs 1 #:logger #f
+                      #:callbacks (list cb failing))))
+    (check-equal? (for/list ([h (in-list callback-hooks)]
+                             #:unless (hash-has-key? outcomes (hook-name h)))
+                    (hook-name h))
+                  checkpoint-hooks)
     (for ([h (in-list callback-hooks)]
           #:when (hash-has-key? outcomes (hook-name h)))
       (check-equal? (hash-ref outcomes (hook-name h)) (and (hook-log h) #t)
                     (format "~a" (hook-name h)))))
+
+  (define-trainer Stepping (net)
+    (define-init () (set! net (Linear 1 1)))
+    (define-optimizers (sgd (parameters net) #:lr 0.01))
+    (define-training-step (x y)
+      (log! 'loss 1.0 #:on-step? #t #:on-epoch? #f)
+      (log! 'train-only 1.0 #:on-step? #t #:on-epoch? #f)
+      (mse-loss (net x) y))
+    (define-validation-step (x y)
+      (log! 'loss 100.0 #:on-step? #t #:on-epoch? #f)
+      (log! 'val-only 2.0 #:on-step? #t #:on-epoch? #f)
+      (mse-loss (net x) y))
+    (define-test-step (x y)
+      (log! 'test-loss 3.0 #:on-step? #t #:on-epoch? #f)
+      (mse-loss (net x) y)))
+
+  (test-case "a per-step log in test-step reaches the logger at each test batch"
+    (define l (collecting-logger))
+    (test (Stepping) (label-loader) #:logger l)
+    (check-equal? (collecting-steps l)
+                  (for/list ([step (in-range 3)]) (cons step (hasheq 'test-loss 3.0)))))
+
+  (define-trainer Labelled (net)
+    (define-init () (set! net (Linear 1 1)))
+    (define-optimizers (sgd (parameters net) #:lr 0.01))
+    (define-training-step (x y)
+      (log! 'tl 1.0 #:on-step? #t #:on-epoch? #t)
+      (mse-loss (net x) y))
+    (define-validation-step (x y)
+      (log! 'vl 2.0 #:on-step? #t #:on-epoch? #t)
+      (mse-loss (net x) y))
+    (define-test-step (x y)
+      (log! 'xl 3.0 #:on-step? #t #:on-epoch? #t)
+      (mse-loss (net x) y)))
+
+  (define (logged-steps l) (map car (collecting-steps l)))
+
+  (test-case "rows carry Lightning's step labels: the steps taken before the current one"
+    (define l (collecting-logger))
+    (fit (Labelled) (label-loader) #:val (label-loader #:batch-size 3) #:max-epochs 2
+         #:log-every-n-steps 1 #:num-sanity-val-steps 0 #:logger l)
+    (check-equal? (logged-steps l) '(0 1 2 0 1 2 2 3 4 5 2 3 5 5))
+    (define t (collecting-logger))
+    (test (Labelled) (label-loader) #:logger t)
+    (test (Labelled) (label-loader #:batch-size 3) #:logger t)
+    (check-equal? (logged-steps t) '(0 1 2 0 0 1 0)))
+
+  (test-case "a validation inside an accumulation window is labelled with the steps taken"
+    (define l (collecting-logger))
+    (fit (Labelled) (label-loader) #:val (label-loader #:batch-size 5) #:max-epochs 1
+         #:accumulate-grad-batches 2 #:val-check-interval 1
+         #:log-every-n-steps 1 #:num-sanity-val-steps 0 #:logger l)
+    (check-equal? (logged-steps l) '(0 0 0 1 0 1 2 1 1)))
+
+  (define-trainer OwnEpoch (net)
+    (define-init () (set! net (Linear 1 1)))
+    (define-optimizers (sgd (parameters net) #:lr 0.01))
+    (define-training-step (x y)
+      (log! 'epoch 7.0 #:on-step? #f #:on-epoch? #t)
+      (mse-loss (net x) y)))
+
+  (define (epoch-tags l)
+    (for/list ([row (in-list (collecting-steps l))])
+      (match-define (cons step metrics) row)
+      (list step (hash-ref metrics 'epoch #f))))
+
+  (test-case "every row but a validation or test step's carries Lightning's epoch key"
+    (define l (collecting-logger))
+    (fit (Labelled) (label-loader) #:val (label-loader #:batch-size 3) #:max-epochs 2
+         #:log-every-n-steps 1 #:num-sanity-val-steps 0 #:logger l)
+    (check-equal? (epoch-tags l)
+                  '((0 0) (1 0) (2 0) (0 #f) (1 #f) (2 0) (2 0)
+                    (3 1) (4 1) (5 1) (2 #f) (3 #f) (5 1) (5 1)))
+    (define t (collecting-logger))
+    (test (Labelled) (label-loader) #:logger t)
+    (check-equal? (epoch-tags t) '((0 #f) (1 #f) (2 #f) (0 0)))
+    (define own (collecting-logger))
+    (fit (OwnEpoch) (label-loader) #:max-epochs 2 #:logger own)
+    (check-equal? (map (lambda (m) (hash-ref m 'epoch)) (collecting-metrics own)) '(7.0 7.0)))
+
+  (define skip-first
+    (lambda-callback #:on-before-optimizer-step
+                     (lambda (r opt) (when (zero? (run-epoch r)) (skip-step! r)))))
+
+  (test-case "an epoch with no step yet labels its training row -1, as Lightning"
+    (define l (collecting-logger))
+    (fit (Labelled) (label-loader) #:max-epochs 2 #:log-every-n-steps 1 #:logger l
+         #:callbacks (list skip-first))
+    (check-equal? (logged-steps l) '(-1 0 1 2 2)))
+
+  (define-trainer EpochStart (net)
+    (define-init () (set! net (Linear 1 1)))
+    (define-optimizers (sgd (parameters net) #:lr 0.01))
+    (define-training-step (x y)
+      (log! 'tl 1.0 #:on-step? #t #:on-epoch? #t)
+      (mse-loss (net x) y))
+    (define-hook (on-train-epoch-start) (log! 'a 1.0 #:on-step? #f #:on-epoch? #t))
+    (define-hook (on-train-batch-start . batch)
+      (when (zero? (run-epoch run)) (skip-epoch! run))))
+
+  (test-case "a skipped first epoch's row is at step -1 in the built-in loggers, as Lightning"
+    (define out (open-output-string))
+    (fit (EpochStart) (label-loader) #:max-epochs 2 #:log-every-n-steps 1
+         #:logger (stdout-logger #:out out))
+    (check-equal? (cdr (regexp-split #rx"\n" (get-output-string out)))
+                  '("step -1 a=1.0 epoch=0"
+                    "step 0 epoch=1 tl-step=1.0"
+                    "step 1 epoch=1 tl-step=1.0"
+                    "step 2 epoch=1 tl-step=1.0"
+                    "step 2 a=1.0 epoch=1 tl-epoch=1.0"
+                    "success"
+                    "")))
+
+  (test-case "a logger's step is -1 or a natural"
+    (define l (collecting-logger))
+    (logger-log-metrics! l (hasheq 'x 1.0) -1)
+    (check-equal? (collecting-steps l) (list (cons -1 (hasheq 'x 1.0))))
+    (check-exn exn:fail:contract:blame?
+               (lambda () (logger-log-metrics! l (hasheq 'x 1.0) -2))))
+
+  (test-case "request-stop! publishes the step's row off the #:log-every-n-steps cadence"
+    (define l (collecting-logger))
+    (define stopper
+      (lambda-callback #:on-train-batch-end
+                       (lambda (r loss extra . batch)
+                         (when (= (run-global-step r) 3) (request-stop! r)))))
+    (fit (Labelled) (dataloader (tensor-dataset (ones 10 1) (ones 10 1)) #:batch-size 1)
+         #:max-epochs 5 #:log-every-n-steps 50
+         #:logger l #:callbacks (list stopper))
+    (check-equal? (collecting-steps l)
+                  (list (cons 2 (hasheq 'tl-step 1.0 'epoch 0)) (cons 2 (hasheq 'tl-epoch 1.0 'epoch 0)))))
+
+  (test-case "a per-step log in validation-step stays out of the training reads"
+    (define l (collecting-logger))
+    (fit (Stepping) (label-loader) #:val (label-loader) #:max-epochs 2
+         #:log-every-n-steps 1 #:num-sanity-val-steps 0 #:logger l)
+    (define-values (train-reads val-reads)
+      (partition (lambda (m) (hash-has-key? m 'train-only)) (collecting-metrics l)))
+    (check-equal? (length train-reads) 6)
+    (check-equal? (remove-duplicates train-reads)
+                  (list (hasheq 'loss 1.0 'train-only 1.0 'epoch 0)
+                        (hasheq 'loss 1.0 'train-only 1.0 'epoch 1)))
+    (check-equal? val-reads (make-list 6 (hasheq 'loss 100.0 'val-only 2.0))))
+
+  (test-case "run-metric inside an epoch answers the latest step value"
+    (define seen '())
+    (define (watch r . _) (set! seen (cons (run-metric r 'loss) seen)))
+    (fit (Stepping) (label-loader) #:max-epochs 1 #:log-every-n-steps 1 #:logger #f
+         #:callbacks (list (lambda-callback #:on-train-batch-start watch
+                                            #:on-train-batch-end watch)))
+    (check-equal? (reverse seen) '(#f 1.0 1.0 1.0 1.0 1.0)))
+
+  (test-case "run-metric in training answers training's value of a key validation also logs"
+    (define (batch-start-reads cadence)
+      (define seen '())
+      (fit (Stepping) (label-loader) #:val (label-loader) #:max-epochs 1
+           #:val-check-interval 1 #:log-every-n-steps cadence
+           #:num-sanity-val-steps 0 #:logger #f
+           #:callbacks (list (lambda-callback
+                              #:on-train-batch-start
+                              (lambda (r . _) (set! seen (cons (run-metric r 'loss) seen))))))
+      (reverse seen))
+    (check-equal? (batch-start-reads 1) '(#f 1.0 1.0))
+    (check-equal? (batch-start-reads 50) '(#f 1.0 1.0)))
+
+  (define-trainer HalfLogged (net dt)
+    (define-init (d) (set! net (Linear 1 1)) (set! dt d))
+    (define-optimizers (sgd (parameters net) #:lr 0.01))
+    (define-training-step (x y)
+      (log! 'big (to (tensor 1000.0) dt) #:on-step? #f #:on-epoch? #t #:batch-size 128)
+      (mse-loss (net x) y)))
+
+  (test-case "a half-precision value is weighted and reduced in float32"
+    (for ([dt (in-list '(float16 bfloat16))])
+      (define r (fit (HalfLogged dt) (label-loader) #:max-epochs 1 #:logger #f))
+      (check-equal? (run-metric r 'big) 1000.0 (format "~a" dt))))
+
+  (define-trainer Reusing (net buffer)
+    (define-init () (set! net (Linear 1 1)) (set! buffer (tensor 5.0)))
+    (define-optimizers (sgd (parameters net) #:lr 0.01))
+    (define-training-step (x y)
+      (log! 'reused buffer #:on-step? #t #:on-epoch? #f)
+      (zero! buffer)
+      (mse-loss (net x) y)))
+
+  (test-case "a step value is recorded as it was at log!, not after a later in-place write"
+    (define l (collecting-logger))
+    (fit (Reusing) (label-loader #:batch-size 5) #:max-epochs 1 #:log-every-n-steps 1 #:logger l)
+    (check-equal? (collecting-metrics l) (list (hasheq 'reused 5.0 'epoch 0))))
+
+  (define-trainer Unbounded (net)
+    (define-init () (set! net (Linear 1 1)))
+    (define-optimizers (sgd (parameters net) #:lr 0.01))
+    (define-training-step (x y)
+      (log! 'peak (tensor +inf.0) #:on-epoch? #t #:reduce 'max)
+      (log! 'peak 1.0 #:on-epoch? #t #:reduce 'max)
+      (log! 'trough -1.0 #:on-epoch? #t #:reduce 'min)
+      (log! 'trough (tensor -inf.0) #:on-epoch? #t #:reduce 'min)
+      (mse-loss (net x) y)))
+
+  (test-case "an infinite tensor and a real reduce by max and min to the infinity"
+    (define r (fit (Unbounded) (label-loader) #:max-epochs 1 #:logger #f))
+    (check-equal? (run-metric r 'peak) +inf.0)
+    (check-equal? (run-metric r 'trough) -inf.0))
+
+  (define-trainer EpochTagged (net)
+    (define-init () (set! net (Linear 1 1)))
+    (define-optimizers (sgd (parameters net) #:lr 0.01))
+    (define-training-step (x y)
+      (log! 'e (run-epoch run) #:on-epoch? #t)
+      (mse-loss (net x) y))
+    (define-validation-step (x y)
+      (log! 'v (run-epoch run))
+      (mse-loss (net x) y)))
+
+  (test-case "run-metric in an epoch-end hook answers the epoch being closed"
+    (define seen '())
+    (define ((watch name key) r)
+      (set! seen (cons (list name (run-epoch r) (run-metric r key)) seen)))
+    (define cb (lambda-callback #:on-validation-epoch-end (watch 'validation 'v)
+                                #:on-train-epoch-end (watch 'train 'e)))
+    (fit (EpochTagged) (label-loader) #:val (label-loader) #:max-epochs 2
+         #:num-sanity-val-steps 0 #:logger #f #:callbacks (list cb))
+    (check-equal? (reverse seen)
+                  '((validation 0 0.0) (train 0 0.0) (validation 1 1.0) (train 1 1.0))))
+
+  (define-trainer Shadowed (net)
+    (define-init () (set! net (Linear 1 1)))
+    (define-optimizers (sgd (parameters net) #:lr 0.01))
+    (define-training-step (x y)
+      (log! 'loss 1.0 #:on-step? #t #:on-epoch? #f)
+      (mse-loss (net x) y))
+    (define-validation-step (x y)
+      (log! 'loss 100.0)
+      (mse-loss (net x) y)))
+
+  (test-case "run-metric after validation answers validation's epoch, not training's step"
+    (define seen '())
+    (define ((watch name) r) (set! seen (cons (list name (run-metric r 'loss)) seen)))
+    (define cb (lambda-callback #:on-validation-epoch-end (watch 'epoch-end)
+                                #:on-validation-end (watch 'end)))
+    (fit (Shadowed) (label-loader) #:val (label-loader) #:max-epochs 2
+         #:num-sanity-val-steps 0 #:logger #f #:callbacks (list cb))
+    (check-equal? (reverse seen)
+                  '((epoch-end 100.0) (end 100.0) (epoch-end 100.0) (end 100.0))))
 
   (test-case "E7: a lexical log! in a hook that cannot log"
     (check-exn #rx"log!: on-fit-start cannot log"
