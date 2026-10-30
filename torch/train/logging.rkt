@@ -1,22 +1,32 @@
 #lang racket/base
 
-(require (only-in racket/contract/base
-                  -> ->* ->i and/c any/c contract-out listof or/c property/c
-                  unsupplied-arg?)
+(require (only-in json jsexpr->string)
+         (only-in racket/contract/base
+                  -> ->* ->i and/c any any/c contract-out hash/c integer-in listof or/c
+                  property/c unsupplied-arg?)
+         (only-in racket/file make-directory*)
          (only-in racket/generic define-generics)
+         (only-in racket/match match match*)
+         (only-in racket/math infinite? nan?)
+         (only-in racket/string string-join)
+         (only-in threading ~>)
          (only-in "../foreign.rkt" dtype numel tensor?)
          (only-in "../private/contract.rkt" define/contract-out)
+         (only-in "private/book.rkt" accumulators host-reads note-epoch! note-step!)
          (only-in "private/hooks.rkt"
                   log-rule-default-on-epoch? log-rule-default-on-step?
                   log-rule-on-epoch log-rule-on-step)
-         (only-in "private/types.rkt" define-named-contract not-implemented)
-         (only-in "run.rkt" logging-run/c))
+         (only-in "private/state.rkt" run-batch-size run-book run-current-stage run-loop)
+         (only-in "private/types.rkt" define-named-contract)
+         (only-in "run.rkt" logging-run/c)
+         (only-in (submod "run.rkt" private) hook-log-rule))
 
 (provide gen:training-logger
          logger-finalize!
          logger-log-hyperparams!
-         logger-log-metrics!
-         (contract-out [training-logger? (-> any/c boolean?)]))
+         (contract-out [logger-log-metrics!
+                        (-> training-logger? (hash/c symbol? real?) (integer-in -1 #f) any)]
+                       [training-logger? (-> any/c boolean?)]))
 
 (define-generics training-logger
   (logger-log-hyperparams! training-logger params)
@@ -40,11 +50,13 @@
 (module+ private
   (provide epoch-accumulators host-reads))
 
-(define (host-reads) (not-implemented 'host-reads 'T1))
+(define (epoch-accumulators r)
+  (accumulators (run-book r) 'train))
 
-(define (epoch-accumulators r) (not-implemented 'epoch-accumulators 'T1))
-
-(define (hook-log-rule r) (not-implemented 'run-log! 'T1))
+(define (allowed? flag rule-values r)
+  (or (unsupplied-arg? flag)
+      (not (hook-log-rule r))
+      (memq flag (rule-values (hook-log-rule r)))))
 
 (define/contract-out (run-log! r key value
                                #:progress? [progress? #f]
@@ -63,20 +75,97 @@
         #:batch-size [batch-size (or/c #f exact-positive-integer?)]
         #:logger? [logger? boolean?])
        #:pre/name (r on-step?) "this hook logs only per epoch"
-       (or (unsupplied-arg? on-step?) (memq on-step? (log-rule-on-step (hook-log-rule r))))
+       (allowed? on-step? log-rule-on-step r)
        #:pre/name (r on-epoch?) "this hook logs only per epoch"
-       (or (unsupplied-arg? on-epoch?) (memq on-epoch? (log-rule-on-epoch (hook-log-rule r))))
+       (allowed? on-epoch? log-rule-on-epoch r)
        [result void?])
-  (not-implemented 'run-log! 'T1))
+  (define b (run-book r))
+  (define both? (and on-step? on-epoch?))
+  (define loop (run-loop r))
+  (define weight (or batch-size (run-batch-size r)))
+  (cond
+    [(eq? (run-current-stage r) 'sanity-check) (void)]
+    [else
+     (when on-step? (note-step! b loop key value logger? both?))
+     (when on-epoch? (note-epoch! b loop key value weight reduce logger? both?))]))
+
+(define (metric-text metrics)
+  (string-join (for/list ([k (in-list (sort (hash-keys metrics) symbol<?))])
+                 (format "~a=~a" k (hash-ref metrics k)))
+               " "))
+
+(struct stdout-sink (out)
+  #:methods gen:training-logger
+  [(define (logger-log-hyperparams! l params)
+     (fprintf (stdout-sink-out l) "hparams ~a\n" (metric-text params)))
+   (define (logger-log-metrics! l metrics step)
+     (fprintf (stdout-sink-out l) "step ~a ~a\n" step (metric-text metrics)))
+   (define (logger-finalize! l status)
+     (fprintf (stdout-sink-out l) "~a\n" status))])
 
 (define/contract-out (stdout-logger #:out [out (current-output-port)])
   (->* () (#:out output-port?) training-logger?)
-  (not-implemented 'stdout-logger 'T1))
+  (stdout-sink out))
+
+(define (json-value v)
+  (cond
+    [(exact-integer? v) v]
+    [(or (nan? v) (infinite? v)) (format "~a" v)]
+    [else (exact->inexact v)]))
+
+(define (readable v)
+  (if (or (real? v) (string? v) (symbol? v) (boolean? v)) v (format "~a" v)))
+
+(define (append-line path line)
+  (with-output-to-file path #:exists 'append (lambda () (displayln line))))
+
+(struct file-sink (metrics hparams write-metrics)
+  #:methods gen:training-logger
+  [(define (logger-log-hyperparams! l params)
+     (with-output-to-file (file-sink-hparams l) #:exists 'truncate
+       (lambda () (writeln (for/hasheq ([(k v) (in-hash params)]) (values k (readable v)))))))
+   (define (logger-log-metrics! l metrics step)
+     ((file-sink-write-metrics l) (file-sink-metrics l) metrics step))
+   (define (logger-finalize! l status) (void))])
+
+(define (file-logger who dir name exists write-metrics)
+  (make-directory* dir)
+  (define metrics (build-path dir name))
+  (define hparams (build-path dir "hparams.rktd"))
+  (define present (filter file-exists? (list metrics hparams)))
+  (match* (exists present)
+    [('error (cons path _))
+     (raise (exn:fail:filesystem:exists
+             (format "~a: ~a already exists" who path)
+             (current-continuation-marks)))]
+    [('replace _) (for-each delete-file present)]
+    [(_ _) (void)])
+  (file-sink metrics hparams write-metrics))
+
+(define (jsonl-line path metrics step)
+  (define line
+    (~> (for/hasheq ([(k v) (in-hash metrics)]) (values k (json-value v)))
+        (hash-set 'step step)
+        jsexpr->string))
+  (append-line path line))
+
+(define (csv-field v)
+  (define s (format "~a" v))
+  (if (regexp-match? #rx"[,\"\r\n]" s)
+      (string-append "\"" (regexp-replace* #rx"\"" s "\"\"") "\"")
+      s))
+
+(define (csv-rows path metrics step)
+  (with-output-to-file path #:exists 'append
+    (lambda ()
+      (when (zero? (file-size path)) (displayln "step,key,value"))
+      (for ([k (in-list (sort (hash-keys metrics) symbol<?))])
+        (printf "~a,~a,~a\n" step (csv-field k) (hash-ref metrics k))))))
 
 (define/contract-out (jsonl-logger dir #:exists [exists 'error])
   (->* (path-string?) (#:exists (or/c 'error 'append 'replace)) training-logger?)
-  (not-implemented 'jsonl-logger 'T1))
+  (file-logger 'jsonl-logger dir "metrics.jsonl" exists jsonl-line))
 
 (define/contract-out (csv-logger dir #:exists [exists 'error])
   (->* (path-string?) (#:exists (or/c 'error 'append 'replace)) training-logger?)
-  (not-implemented 'csv-logger 'T1))
+  (file-logger 'csv-logger dir "metrics.csv" exists csv-rows))
