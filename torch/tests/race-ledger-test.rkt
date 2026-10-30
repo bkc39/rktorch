@@ -420,7 +420,7 @@
       (unless (or (unbox b) (> (current-inexact-milliseconds) until))
         (spin))))
 
-  (define (finalizer-against-lock-holder)
+  (define (finalizer-against-lock-holder deadline)
     (settle!)
     (define gradient (box #f))
     (define finalizing (box #f))
@@ -459,7 +459,7 @@
       (define p (zeros 256 256 #:requires-grad? #t))
       (backward! (sum p))
       (refresh-shadows!)
-      (with-race-hook stage
+      (define (gradient-finalized-against-holder)
         (void (grad p))
         ;; Main spins uninterruptibly from `finalizing` to `held`, so the holder
         ;; runs nothing in between that waits for main's scheduler; a rackunit
@@ -471,23 +471,35 @@
                    (unbox finalizing))
                  #:pool 'own #:label 'holder))
         (define give-up (+ (current-inexact-milliseconds) 15000))
-        (let collect ()
+        ;; The gradient dies young, so a minor collection finds it unless it
+        ;; was promoted first; a major one costs seconds in a cover run's heap.
+        (let collect ([minors 10])
           (unless (or (unbox finalizing) (> (current-inexact-milliseconds) give-up))
-            (collect-garbage)
+            (collect-garbage (if (positive? minors) 'minor 'major))
             (sleep 0.01)
-            (collect)))
-        (define saw-finalizer? (join holder))
-        (settle!)
-        (check-true saw-finalizer? "the gradient's finalizer never ran"))
+            (collect (sub1 minors))))
+        (join holder))
+      (define saw-finalizer?
+        (with-race-hook stage
+          (call-with-process-deadline deadline gradient-finalized-against-holder)))
+      (check-true saw-finalizer? "the gradient's finalizer never ran")
       (check-not-false (unbox gradient) "the parameter's gradient was never taken")
       (check-equal? (reverse (unbox events)) '(holder-leaving adoption-returning)
                     "the finalizer gave the adoption back while another thread held the ledger")
       (check-ledger #f #f)
       p))
 
+  (define (major-collection-seconds)
+    (define start (current-inexact-milliseconds))
+    (collect-garbage)
+    (/ (- (current-inexact-milliseconds) start) 1000.0))
+
+  ;; The race's own waits end by 25 s; the collect loop may start one major
+  ;; collection at its give-up and the runtime may add one of its own.
   (test-case "a finalizer waits out a parallel thread holding the ledger"
+    (define deadline (+ 30 (* 2 (major-collection-seconds))))
     (for ([_ (in-range 20)])
-      (void (call-with-process-deadline 30 finalizer-against-lock-holder))))
+      (void (finalizer-against-lock-holder deadline))))
 
   (define (killed-mid-release pool)
     (settle!)
