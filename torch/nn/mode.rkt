@@ -2,7 +2,8 @@
 
 (require (for-syntax racket/base (only-in syntax/parse/pre ...+ expr))
          (only-in racket/contract/base -> any)
-         (only-in racket/list append-map)
+         (only-in racket/list append-map count)
+         (only-in racket/match match-lambda)
          (only-in syntax/parse/define define-syntax-parse-rule)
          (only-in "../private/contract.rkt" define/contract-out)
          (only-in "layer.rkt"
@@ -11,6 +12,9 @@
 
 (provide in-mode
          in-eval-mode)
+
+(module+ private
+  (provide eval-layer-count))
 
 (define/contract-out (train! m) ;; noqa
   (-> layer? layer?)
@@ -41,6 +45,9 @@
        (cons (cons m (layer-mode m))
              (append-map (lambda (c) (walk (cdr c)))
                          (layer-named-children m)))])))
+
+(define (eval-layer-count m)
+  (count (match-lambda [(cons _ mode) (not (training? mode))]) (mode-snapshot m)))
 
 (define (restore-modes! before)
   (for ([e (in-list before)] #:unless (registry? (car e)))

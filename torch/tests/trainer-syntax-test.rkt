@@ -228,7 +228,7 @@
                  ((syntax-parameterize ([log! (hook-log! #'not-a-run)]) log!)
                   'loss 1.0 #:on-step? #t))))
 
-  (test-case "a definition that passes the checks is a stub"
+  (test-case "a definition that passes the checks constructs"
     (define-trainer Ender (net)
       #:automatic-optimization? #f
       (define-init (n) (set! net n))
@@ -241,5 +241,6 @@
       #:kind monitor
       (define-state-key "watcher")
       (define-hook (on-exception e) (set! seen e)))
-    (for ([make (in-list (list Ender watcher Classifier))])
-      (check-exn exn:fail:unsupported? (lambda () (make 1)) (format "~a" make)))))
+    (check-pred trainer? (Ender 1))
+    (check-pred callback? (watcher 1))
+    (check-pred classifier? (Classifier 1))))

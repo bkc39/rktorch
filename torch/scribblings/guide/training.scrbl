@@ -1,6 +1,7 @@
 #lang scribble/manual
 @(require torch/scribblings/common
-          torch/scribblings/labels)
+          torch/scribblings/labels
+          (for-label torch/data/loader))
 
 @title[#:tag "guide-training"]{A training loop}
 
@@ -93,3 +94,27 @@ loop runs on an accelerator without being rewritten:
 
 @racket[accelerator-if-available] answers CUDA when it is present, else Metal
 when it can allocate, else the CPU.
+
+@section[#:tag "training-trainer"]{Training with a trainer}
+
+A trainer, from @racketmodname[torch/train], is a layer that holds the method:
+the model, its optimizer, and what one batch does. @racket[fit] runs the rest
+of the loop --- the epochs, the four moves, evaluation and logging:
+
+@torch-examples[
+(require torch/data/loader torch/train)
+(define-trainer Regression (net)
+  (define-init () (set! net (mlp 4 16 1)))
+  (define-optimizers (sgd (parameters net) #:lr 0.05))
+  (define-training-step (x y)
+    (define loss (mse-loss (net x) y))
+    (log! 'train/loss loss #:on-epoch? #t)
+    loss))
+(define r
+  (fit (Regression) (dataloader (tensor-dataset xs ys) #:batch-size 16)
+       #:max-epochs 3))
+(run-metric r 'train/loss)
+]
+
+@secref["train"] has validation, callbacks and loggers; @secref["ex-mnist"]
+trains a convnet this way.
