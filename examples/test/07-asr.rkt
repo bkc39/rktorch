@@ -2,11 +2,18 @@
 
 (require (only-in racket/list first last)
          (only-in racket/math nan?)
+         (only-in racket/sequence in-slice)
          (only-in racket/string string-prefix?)
          torch
+         (only-in torch/audio/data audio-info load-audio save-audio)
+         (only-in torch/audio/functional log-mel-spectrogram)
          (only-in torch/audio/librispeech
-                  librispeech-utterances load-librispeech-fixture)
+                  librispeech-fixture-utterance librispeech-utterances
+                  load-librispeech-fixture utterance utterance-path
+                  utterance-transcript)
          (only-in torch/audio/metrics cer wer)
+         (only-in torch/private/util with-temporary-directory)
+         (only-in torch/text/data text->vocab)
          torch/nn
          torch/scribblings/examples/07-asr)
 
@@ -24,8 +31,30 @@
           (wer transcript hypothesis) (cer transcript hypothesis)))
 
 (module+ test
-  (require rackunit)
+  (require rackunit
+           (only-in torch/tests/private/blame blamed contract-violation?))
+  (define caller (blamed "test/07-asr.rkt"))
+  (define (padded m t-max)
+    (cat (list m (zeros 80 (- t-max (last (shape m))) #:device (device m))) 1))
+  (define (pre-loader-losses steps)
+    (with-default-device 'cpu
+      (manual-seed! 0)
+      (define-values (samples rate transcript) (load-librispeech-fixture))
+      (define vocab (text->vocab transcript))
+      (define mel (log-mel-spectrogram (ref samples 0) #:sample-rate rate))
+      (define net (asr 80 (vector-length vocab)))
+      (define opt (adam (parameters net) #:lr 0.001))
+      (for/list ([_ (in-range steps)])
+        (zero-grads! opt)
+        (define loss
+          (hybrid-batch-loss net vocab (unsqueeze mel 0) (list (last (shape mel)))
+                             (list transcript)))
+        (backward! loss)
+        (step! opt)
+        (item loss))))
   (define-values (losses net vocab trained-on) (run-example #:device 'cpu))
+  (check-equal? losses (pre-loader-losses 5)
+                "run-example's loader path changed the losses of the per-utterance path")
   (check-equal? trained-on 'cpu)
   (check-equal? (length losses) 5)
   (check-true (andmap (lambda (l) (and (rational? l) (not (nan? l)))) losses)
@@ -94,24 +123,96 @@
   (check-equal? (wer transcript "") 1)
   (check-equal? (cer transcript "") 1)
   (define mel (ref features 0))
+  (define t-max (last (shape mel)))
+  (define (two-rows m)
+    (stack (list m (padded (narrow m 1 0 200) t-max)) 0))
   (define batch-loss
-    (hybrid-batch-loss net vocab
-                       (list mel (narrow mel 1 0 200))
+    (hybrid-batch-loss net vocab (two-rows mel) (list t-max 200)
                        (list transcript "MISTER QUILTER")))
   (check-true (rational? (item batch-loss)))
   (check-false (nan? (item batch-loss)))
+  (check-exn (contract-violation? caller #rx"one frame length and one transcript per row")
+             (lambda ()
+               (hybrid-batch-loss net vocab (two-rows mel) (list t-max)
+                                  (list transcript "MISTER QUILTER"))))
+  (check-exn (contract-violation? caller #rx"non-empty-listof")
+             (lambda () (hybrid-batch-loss net vocab (two-rows mel) '() '())))
+  (check-exn (contract-violation? caller #rx"no frame length past the last dimension of x")
+             (lambda ()
+               (hybrid-batch-loss net vocab (two-rows mel) (list (* 2 t-max) 200)
+                                  (list transcript "MISTER QUILTER"))))
+  (check-exn (contract-violation? caller #rx"rank-3-tensor/c")
+             (lambda ()
+               (hybrid-batch-loss net vocab mel (list t-max) (list transcript))))
+  (check-exn (contract-violation? caller #rx"layer[?]")
+             (lambda ()
+               (hybrid-batch-loss 'net vocab (two-rows mel) (list t-max 200)
+                                  (list transcript "MISTER QUILTER"))))
+  (check-exn (contract-violation? caller #rx"#:workers")
+             (lambda () (train-librispeech #:workers -1)))
+  (check-exn (contract-violation? caller #rx"#:limit")
+             (lambda () (train-librispeech #:limit 0)))
+  (define wide (to-dtype samples 'float64))
+  (check-equal? (tensor->list (utterance-features wide rate))
+                (tensor->list
+                 (unsqueeze (log-mel-spectrogram (ref wide 0) #:sample-rate rate) 0))
+                "float64 samples get a float64 bank")
+  (define cut-frames '(12000 8000 20000 9000 16000))
+  (define cut-transcripts
+    '("MISTER" "QUILTER" "THE APOSTLE" "GOSPEL" "MIDDLE CLASSES"))
+  (define (padded-buckets utterances b)
+    (define sorted
+      (sort utterances <
+            #:key (lambda (u)
+                    (define-values (frames _rate _channels)
+                      (audio-info (utterance-path u)))
+                    frames)
+            #:cache-keys? #t))
+    (for/list ([bucket (in-slice b (in-list sorted))])
+      (define mels
+        (for/list ([u (in-list bucket)])
+          (define-values (s r) (load-audio (utterance-path u)))
+          (log-mel-spectrogram (ref s 0) #:sample-rate r)))
+      (define lengths (for/list ([m (in-list mels)]) (last (shape m))))
+      (define longest (apply max lengths))
+      (list (stack (for/list ([m (in-list mels)]) (padded m longest)) 0)
+            lengths
+            (map utterance-transcript bucket))))
+  (define (record batch)
+    (for/list ([v (in-list batch)])
+      (if (tensor? v) (list (tensor-shape v) (dtype v) (tensor->list v)) v)))
+  (let-values ([(fixture-samples fixture-rate)
+                (load-audio (utterance-path (librispeech-fixture-utterance)))])
+    (with-temporary-directory (dir)
+      (define cuts
+        (for/list ([frames (in-list cut-frames)]
+                   [text (in-list cut-transcripts)]
+                   [k (in-naturals)])
+          (define path (build-path dir (format "1272-128104-~a.flac" k)))
+          (save-audio path (narrow fixture-samples 1 0 frames) fixture-rate)
+          (utterance (format "1272-128104-~a" k) path text)))
+      (define expected (map record (padded-buckets cuts 2)))
+      (for ([workers (in-list '(0 2))])
+        (define batches
+          (for/list ([vs (in-values-sequence
+                          (asr-loader cuts #:batch-size 2 #:workers workers))])
+            vs))
+        (check-equal? (map record batches) expected
+                      (format "asr-loader at #:workers ~a" workers))
+        (for ([batch (in-list batches)])
+          (define loss (item (apply hybrid-batch-loss net vocab batch)))
+          (check-true (and (rational? loss) (not (nan? loss)))
+                      (format "batch loss ~a at #:workers ~a" loss workers))))))
   ;; the masking invariant the conv-stack fix restored: a row's encoder
   ;; output must not depend on how much padding its bucket neighbour forced
   (let ()
     (define short (narrow mel 1 0 200))
-    (define t-max (cadr (tensor-shape mel)))
+    (define t-max (last (shape mel)))
     (define sos-in
-      (unsqueeze (to-dtype (tensor (list (add1 (vector-length vocab))))
-                           'int64)
-                 0))
+      (~> (tensor (list (add1 (vector-length vocab)))) (to-dtype 'int64) (unsqueeze 0)))
     (define-values (alone _al) (net (unsqueeze short 0) sos-in #f))
     (define-values (batched _bl)
-      (net (stack (list (cat (list short (zeros 80 (- t-max 200))) 1) mel) 0)
+      (net (stack (list (padded short t-max) mel) 0)
            (cat (list sos-in sos-in) 0)
            (list 200 t-max)))
     (define frames (cadr (tensor-shape alone)))
@@ -149,9 +250,7 @@
     (manual-seed! 0)
     (define drop-net (asr 80 (vector-length vocab) #:dropout 0.5))
     (define sos-in
-      (unsqueeze (to-dtype (tensor (list (add1 (vector-length vocab))))
-                           'int64)
-                 0))
+      (~> (tensor (list (add1 (vector-length vocab)))) (to-dtype 'int64) (unsqueeze 0)))
     (define (logits)
       (define-values (_ctc l) (drop-net features sos-in #f))
       (tensor->list l))
@@ -177,11 +276,17 @@
     (check-true (string? (greedy-decode a-net a-vocab features)))
     (check-true (string? (transcribe a-net a-vocab features)))
     ;; a multi-row batch must come back on the accelerator
-    (define a-mel (to-device mel accel))
     (define a-batch-loss
-      (hybrid-batch-loss a-net a-vocab
-                         (list a-mel (narrow a-mel 1 0 200))
+      (hybrid-batch-loss a-net a-vocab (two-rows (to-device mel accel))
+                         (list t-max 200)
                          (list transcript "MISTER QUILTER")))
     (check-equal? (device a-batch-loss) accel)
     (check-true (rational? (item a-batch-loss)))
-    (check-false (nan? (item a-batch-loss)))))
+    (check-false (nan? (item a-batch-loss)))
+    (define a-samples (to-device samples accel))
+    (define a-features (utterance-features a-samples rate))
+    (check-equal? (device a-features) accel)
+    (check-equal? (tensor->list a-features)
+                  (tensor->list
+                   (unsqueeze (log-mel-spectrogram (ref a-samples 0) #:sample-rate rate) 0))
+                  "accelerator samples get a bank on their device")))

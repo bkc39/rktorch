@@ -11,17 +11,13 @@
            (only-in (submod "../foreign.rkt" unsafe) tensor-free!)
            "../main.rkt"
            (only-in "../vision/transforms.rkt" random-crop random-horizontal-flip)
+           (only-in "private/blame.rkt" blamed contract-violation?)
            (only-in "private/race-harness.rkt"
                     check-known-failure check-ledger hooks ledger-snapshot make-watch
                     settle! watch-hook with-race-hook)
            (only-in "private/within.rkt" within))
 
-  (define blamed #rx"blaming: [(][^)]*loader-workers-test[.]rkt")
-
-  (define ((contract-violation? rx) e)
-    (and (exn:fail:contract? e)
-         (regexp-match? blamed (exn-message e))
-         (regexp-match? rx (exn-message e))))
+  (define caller (blamed "loader-workers-test.rkt"))
 
   (define (record . vs)
     (for/list ([v (in-list vs)])
@@ -139,9 +135,9 @@
                               n p b shuffle? drop-last? explicit?)))))
 
   (test-case "#:workers and #:prefetch violations blame the caller"
-    (check-exn (contract-violation? #rx"workers") (lambda () (dataloader pairs #:workers -1)))
-    (check-exn (contract-violation? #rx"workers") (lambda () (dataloader pairs #:workers 1.5)))
-    (check-exn (contract-violation? #rx"prefetch")
+    (check-exn (contract-violation? caller #rx"workers") (lambda () (dataloader pairs #:workers -1)))
+    (check-exn (contract-violation? caller #rx"workers") (lambda () (dataloader pairs #:workers 1.5)))
+    (check-exn (contract-violation? caller #rx"prefetch")
                (lambda () (dataloader pairs #:workers 1 #:prefetch 0))))
 
   (define-dataset placed (dev)
@@ -153,14 +149,14 @@
 
   (test-case "workers are refused for a dataset on an accelerator"
     (for ([dev (list (cuda-device 0) (mps-device))])
-      (check-exn (contract-violation? #rx"workers build CPU tensors")
+      (check-exn (contract-violation? caller #rx"workers build CPU tensors")
                  (lambda () (dataloader (placed dev) #:workers 1)))
       (check-true (dataloader? (dataloader (placed dev) #:workers 0)))))
 
   (test-case "#:prefetch needs workers"
-    (check-exn (contract-violation? #rx"needs #:workers above 0")
+    (check-exn (contract-violation? caller #rx"needs #:workers above 0")
                (lambda () (dataloader pairs #:prefetch 3)))
-    (check-exn (contract-violation? #rx"needs #:workers above 0")
+    (check-exn (contract-violation? caller #rx"needs #:workers above 0")
                (lambda () (dataloader pairs #:workers 0 #:prefetch 3))))
 
   (test-case "workers 0 starts no threads; a traversal starts N outside its custodian"

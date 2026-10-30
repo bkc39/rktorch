@@ -10,8 +10,8 @@
                   tr-hann-window/raw tr-stft/raw)
          (only-in "../foreign/structs.rkt" wrap-tensor)
          (only-in "../main.rkt"
-                  * + @ device device/c dtype log ref sqrt t tensor tensor?
-                  to-dtype)
+                  * + @ device device/c dtype log ref shape sqrt t tensor
+                  tensor? to-dtype)
          (only-in "../private/contract.rkt" define/contract-out))
 
 (define maybe-length/c (or/c #f exact-positive-integer?))
@@ -144,18 +144,42 @@
     (tensor rows #:device filter-device #:dtype (and buildable? filter-dtype)))
   (if buildable? built (to-dtype built filter-dtype)))
 
+(define default-n-fft 400)
+(define default-hop-length 160)
+(define default-n-mels 80)
+(define default-eps 1e-6)
+
+(define/contract-out (filterbank-fits? filterbank samples
+                                       #:n-fft [n-fft default-n-fft]
+                                       #:n-mels [n-mels default-n-mels])
+  (->* (tensor? tensor?)
+       (#:n-fft exact-positive-integer? #:n-mels exact-positive-integer?)
+       boolean?)
+  (and (equal? (shape filterbank) (list (add1 (quotient n-fft 2)) n-mels))
+       (eq? (dtype filterbank) (dtype samples))
+       (equal? (device filterbank) (device samples))))
+
 (define/contract-out (log-mel-spectrogram samples ;; noqa
                                       #:sample-rate sample-rate
-                                      #:n-fft [n-fft 400]
-                                      #:hop-length [hop-length 160]
-                                      #:n-mels [n-mels 80]
-                                      #:eps [eps 1e-6])
-  (->* (tensor? #:sample-rate exact-positive-integer?)
-       (#:n-fft exact-positive-integer?
-        #:hop-length exact-positive-integer?
-        #:n-mels exact-positive-integer?
-        #:eps (and/c rational? (>=/c 0)))
-       tensor?)
+                                      #:n-fft [n-fft default-n-fft]
+                                      #:hop-length [hop-length default-hop-length]
+                                      #:n-mels [n-mels default-n-mels]
+                                      #:eps [eps default-eps]
+                                      #:filterbank [filterbank #f])
+  (->i ([samples tensor?] #:sample-rate [sample-rate exact-positive-integer?])
+       (#:n-fft [n-fft exact-positive-integer?]
+        #:hop-length [hop-length exact-positive-integer?]
+        #:n-mels [n-mels exact-positive-integer?]
+        #:eps [eps (and/c rational? (>=/c 0))]
+        #:filterbank [filterbank (or/c #f tensor?)])
+       #:pre/name (samples n-fft n-mels filterbank)
+       "filterbank is [n-fft/2+1, n-mels] in samples' dtype, on samples' device"
+       (or (unsupplied-arg? filterbank)
+           (not filterbank)
+           (filterbank-fits? filterbank samples
+                             #:n-fft (if (unsupplied-arg? n-fft) default-n-fft n-fft)
+                             #:n-mels (if (unsupplied-arg? n-mels) default-n-mels n-mels)))
+       [result tensor?])
   (define samples-device (device samples))
   (define spec
     (spectrogram samples #:n-fft n-fft #:hop-length hop-length
@@ -163,9 +187,10 @@
                                        #:device samples-device
                                        #:dtype (dtype samples))))
   (define fb
-    (mel-filterbank #:n-freqs (add1 (quotient n-fft 2))
-                    #:n-mels n-mels
-                    #:sample-rate sample-rate
-                    #:device samples-device
-                    #:dtype (dtype spec)))
+    (or filterbank
+        (mel-filterbank #:n-freqs (add1 (quotient n-fft 2))
+                        #:n-mels n-mels
+                        #:sample-rate sample-rate
+                        #:device samples-device
+                        #:dtype (dtype spec))))
   (~> (t fb 0 1) (@ spec) (+ eps) log))
