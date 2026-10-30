@@ -537,11 +537,19 @@ than @racket[d-model], a target and memory that disagree on the batch, and
 a mask of another shape are contract violations blaming the caller, the
 message naming the argument and the shapes.
 
+An encoder layer also takes @racket[#:need-weights?], @racket[#f] by
+default, and @racket[#:average-attn-weights?], @racket[#t] by default,
+for @racket["self-attn"]; with @racket[#:need-weights? #t] it answers
+@racket[(values output weights)], as @racket[MultiheadAttention] does.
+
 @torch-examples[
 (define src (randn 5 2 8))
 (shape (block src))
 (define short (eq (tensor '((0 0 0 0 0) (0 0 0 1 1))) 1))
 (shape (block src #:key-padding-mask short #:causal? #t))
+(define-values (out weights)
+  (block src #:need-weights? #t #:average-attn-weights? #f))
+(shape weights)
 (define tgt (randn 4 2 8))
 (shape (cross-block tgt src #:tgt-causal? #t
                     #:memory-key-padding-mask short))

@@ -202,6 +202,23 @@
                                 0 0 3))
                 "what sits under the padding changes no other position"))
 
+  (test-case "an encoder layer answers its self-attention's weights on request"
+    (for ([norm-first? (in-list '(#f #t))])
+      (define layer (encoder-layer #:norm-first? norm-first?))
+      (define attention (child layer "self-attn"))
+      (define attended (if norm-first? ((child layer "norm1") x) x))
+      (for ([average? (in-list '(#t #f))])
+        (define-values (out weights)
+          (layer x #:key-padding-mask padded #:need-weights? #t
+                 #:average-attn-weights? average?))
+        (define-values (_ expected)
+          (attention attended attended attended #:key-padding-mask padded
+                     #:need-weights? #t #:average-attn-weights? average?))
+        (check-true (close? out (layer x #:key-padding-mask padded))
+                    (format "output, norm-first? ~a" norm-first?))
+        (check-true (close? weights expected)
+                    (format "weights, average? ~a" average?)))))
+
   (test-case "a decoder hides its own future and the memory's padding"
     (define layer (decoder-layer #:norm-first? #t))
     (define tgt (randn 4 2 8))
