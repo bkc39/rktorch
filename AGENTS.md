@@ -694,7 +694,8 @@ Runtime paths take `(only-in racket/runtime-path #%datum define-runtime-path)`.
   shared by the tiers test and the imports chapter.
 - `torch/foreign.rkt` — the contracted layer + the `unsafe` submodule.
 - `torch/data/dataset.rkt` — `define-dataset` and `gen:dataset`;
-  `torch/private/definer.rkt` — the clause grammar it shares with `define-layer`.
+  `torch/private/definer.rkt` — the clause grammar and field checks it,
+  `define-layer` and the trainer definers share.
 - `torch/vision/cifar10.rkt` — CIFAR-10 loader and dataset, `vision/fixtures/`
   its 256-record synthetic fixture and MNIST's
   (`scripts/gen-dataset-fixtures.py`), and `vision/fixtures/images/` the
@@ -768,7 +769,12 @@ Runtime paths take `(only-in racket/runtime-path #%datum define-runtime-path)`.
   fields admit `parameters-by-key` beside `children-by-key`, and whose
   `#:on-move` body runs after a `to` that rebound any tensor in its subtree,
   judged against placements read before anything moved, so a tensor tied
-  across siblings counts for both; `torch/nn/mode.rkt` = `train!`, `eval!`,
+  across siblings counts for both; its `private` submodule's `define-layer*`
+  (under `define-trainer`/`define-callback`, #384) has `set!`-able fields; a
+  `set!` raises when the field held a layer, `Parameter`, `Buffer`,
+  `children-by-key` or `parameters-by-key` at construction, or when the new
+  value is one or holds one in its pairs, vectors, boxes or hash keys and
+  values (structs and mpairs are not looked inside); `torch/nn/mode.rkt` = `train!`, `eval!`,
   `call-with-mode` and `in-mode`; `torch/nn/parameter.rkt`, `torch/nn/buffer.rkt`, `torch/nn/linear.rkt`,
   `torch/nn/init.rkt`, `torch/nn/optim.rkt`, `torch/nn/ema.rkt`, `torch/nn/loss.rkt`, `torch/nn/recurrent.rkt`,
   `torch/nn/attention.rkt`, `torch/nn/transformer.rkt`, `torch/nn/positions.rkt`, `torch/nn/copy.rkt`, `torch/nn/clip.rkt`).
