@@ -783,8 +783,15 @@ Runtime paths take `(only-in racket/runtime-path #%datum define-runtime-path)`.
   `torch/train/run.rkt`, `torch/train/loop.rkt` (`fit`, `test`, `predict`),
   `torch/train/logging.rkt`, `torch/train/callbacks.rkt` and
   `torch/train/optimization.rkt`; `torch/train/private/hooks.rkt` is the one
-  hook table, read at phase 0 and for-syntax. Specified by T0 (#383); the
-  bodies land in T1-T3 (#384-#386) and raise `exn:fail:unsupported` until then.
+  hook table, read at phase 0 and for-syntax. The loop runs in
+  `torch/train/private/fit.rkt` and `torch/train/private/evaluate.rkt`;
+  `torch/train/private/dispatch.rkt` calls hooks and holds the failure
+  protocol, `torch/train/private/book.rkt` the on-device `log!`
+  accumulators, one ledger per loop, `torch/train/private/state.rkt` the run
+  struct. Precision, clipping, manual optimization, hparams and checkpoints
+  raise `exn:fail:unsupported` until their legs (#385, #386) land. The loops walk a loader with
+  `with-traversal` from `torch/data/loader.rkt`'s `private` submodule, which
+  stops `#:workers` threads on an early exit.
 - `torch/private/download.rkt` — the one download path (#195): a temp file in the
   cache's directory, checked, then installed. `call-with-verified-download`
   checks an exact size and SHA-256 (pretrained weights, hymenoptera);
