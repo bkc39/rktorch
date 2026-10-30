@@ -333,7 +333,7 @@
   (unless (in-atomic-mode?)
     (lower-floors!)
     ;; read before the refresh: the charge it adds can bring on a collection
-    ;; whose finalizers free the residue before a later look (#296)
+    ;; whose finalizers free the residue before a later look
     (define over? (over-floor?))
     (refresh-shadows!)
     (define budget
