@@ -1,19 +1,17 @@
 #lang racket/base
 
-(require (only-in racket/contract/base -> any contract-out listof or/c)
+(require (only-in racket/contract/base -> any listof or/c)
+         (only-in "../../private/contract.rkt" define/contract-out)
          (only-in "../../foreign/raw/cas.rkt" cas-sites)
          (only-in (submod "../../foreign/raw/cas.rkt" private) site-cas)
          (only-in "../../foreign/raw/regions.rkt" with-cleanup))
 
 (define cas-site/c (apply or/c cas-sites))
 
-(provide
- (contract-out
-  [call-with-spurious-cas-failures (-> (listof cas-site/c) (-> any) any)]))
-
 ;; The first attempt at each named site fails with the target unchanged. The
 ;; bookkeeping calls the real primitive: through the seam it would recurse.
-(define (call-with-spurious-cas-failures sites thunk)
+(define/contract-out (call-with-spurious-cas-failures sites thunk)
+  (-> (listof cas-site/c) (-> any) any)
   (define real (unbox site-cas))
   (define failed (box '()))
   (define (first-at? site)
