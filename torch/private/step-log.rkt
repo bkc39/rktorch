@@ -27,9 +27,11 @@
 
 (define (log-optimizer-step! opt params)
   (when (log-level? rktorch-step-logger 'debug 'rktorch-step)
+    (define host-done (current-inexact-monotonic-milliseconds))
     (settle! params)
     (log-message rktorch-step-logger 'debug 'rktorch-step "step"
                  (vector (eq-hash-code opt)
                          (current-inexact-monotonic-milliseconds)
-                         (current-gc-milliseconds))
+                         (current-gc-milliseconds)
+                         host-done)
                  #f)))

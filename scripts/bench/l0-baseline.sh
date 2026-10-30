@@ -21,6 +21,11 @@ if [ "$smoke" = 1 ]; then
   loader_smoke=DATASET=fixture,EPOCHS=2,BATCH=128
   training_smoke=EPOCHS=2
   budgets=(0.05)
+  png=fixture
+  png_loader_smoke=DATASET=fixture
+  png_resnet_smoke=DATASET=fixture,BASE=4
+  png_loader_workers=(0 2)
+  png_resnet_workers=(0 2)
 else
   micro=()
   if [ -n "$rounds" ]; then micro=(--rounds "$rounds"); fi
@@ -28,6 +33,11 @@ else
   loader_smoke=
   training_smoke=
   budgets=(0.01 0.05 0.2 1)
+  png=full
+  png_loader_smoke=
+  png_resnet_smoke=
+  png_loader_workers=(0 1 2 4 8)
+  png_resnet_workers=(0 2 4)
 fi
 
 variant() {
@@ -79,6 +89,30 @@ stage_cuda() {
   bench e2e "${e2e[@]}" --cache "$cache" --only 05,09 "${gc[@]}"
 }
 
+stage_loader() {
+  raco make -j 2 scripts/bench/run.rkt scripts/bench/summary.rkt scripts/bench/cifar-folder.rkt
+  local digest
+  digest=$(RKTORCH_CIFAR10_DIR=$cache/cifar10 RKTORCH_CIFAR10_PNG_DIR=$cache/cifar10-png \
+    racket scripts/bench/cifar-folder.rkt "$png") \
+    || { echo "l0-baseline: cifar-folder.rkt $png exited $?" >&2; failed=1; return; }
+  local tree=${digest:+PNG_DIGEST=${digest:0:12}}
+  local loader=() resnet=()
+  for p in per-sample batched; do
+    for w in "${png_loader_workers[@]}"; do
+      mapfile -t -O "${#loader[@]}" loader \
+        < <(variant "$p-$w" "PIPELINE=$p,WORKERS=$w${tree:+,$tree}" "$png_loader_smoke")
+    done
+    for w in "${png_resnet_workers[@]}"; do
+      mapfile -t -O "${#resnet[@]}" resnet \
+        < <(variant "$p-$w" "PIPELINE=$p,WORKERS=$w${tree:+,$tree}" "$png_resnet_smoke")
+    done
+  done
+  bench e2e "${e2e[@]}" --cache "$cache" --device cuda \
+    --only cifar-loader,py-cifar-loader "${loader[@]}"
+  bench e2e "${e2e[@]}" --cache "$cache" --device cuda \
+    --only cifar-resnet,py-cifar-resnet "${resnet[@]}"
+}
+
 stage_summary() {
   racket scripts/bench/summary.rkt --title "Baseline $date (L0, #254)" "$jsonl" > "$out.md"
 }
@@ -90,13 +124,15 @@ case ${1:-all} in
     : > "$jsonl"
     nix develop --max-jobs 1 --cores 4 -c "$self" cpu || failed=1
     env -u LD_LIBRARY_PATH nix develop --max-jobs 1 --cores 4 .#cuda -c "$self" cuda || failed=1
+    env -u LD_LIBRARY_PATH nix develop --max-jobs 1 --cores 4 .#cuda -c "$self" loader || failed=1
     nix develop --max-jobs 1 --cores 4 -c "$self" summary || failed=1
     ;;
   cpu) stage_cpu ;;
   cuda) stage_cuda ;;
+  loader) stage_loader ;;
   summary) stage_summary ;;
   *)
-    echo "l0-baseline: unknown stage $1 (all, cpu, cuda or summary)" >&2
+    echo "l0-baseline: unknown stage $1 (all, cpu, cuda, loader or summary)" >&2
     exit 2
     ;;
 esac

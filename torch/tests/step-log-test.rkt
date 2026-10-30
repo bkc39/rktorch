@@ -1,10 +1,12 @@
 #lang racket/base
 
 (module+ test
-  (require rackunit
+  (require (only-in racket/list make-list)
+           (only-in racket/match match-define)
+           rackunit
            "../main.rkt"
            "../nn.rkt"
-           (only-in "../private/step-log.rkt" settle!))
+           (only-in "../private/step-log.rkt" log-optimizer-step! settle!))
 
   (define (logged-steps thunk)
     (define receiver (make-log-receiver (current-logger) 'debug 'rktorch-step))
@@ -32,9 +34,20 @@
     (check-equal? (map (lambda (e) (vector-ref e 0)) events)
                   (map eq-hash-code opts))
     (for ([e (in-list events)])
+      (check-equal? (vector-length e) 4)
       (check-true (flonum? (vector-ref e 1)))
-      (check-true (exact-nonnegative-integer? (vector-ref e 2))))
+      (check-true (exact-nonnegative-integer? (vector-ref e 2)))
+      (check-true (flonum? (vector-ref e 3)))
+      (check-true (<= (vector-ref e 3) (vector-ref e 1)) "the host is done before the step ends"))
     (check-true (apply <= (map (lambda (e) (vector-ref e 1)) events))))
+
+  (test-case "the host stamp is taken before a slow settle, not after it"
+    (define params (make-list 10000 (fresh-parameter)))
+    (define called (current-inexact-monotonic-milliseconds))
+    (match-define (list (vector _ ended _ host-done))
+      (logged-steps (lambda () (log-optimizer-step! 'slow params))))
+    (check-true (< (- host-done called) (- ended host-done))
+                "the stamp sits nearer the call than the step's end"))
 
   (test-case "an empty first parameter neither breaks a logged step nor the device sync"
     (define vacant (Parameter (ones 0)))

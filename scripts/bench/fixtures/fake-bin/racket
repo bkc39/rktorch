@@ -1,6 +1,11 @@
 #!/bin/sh
 # Stands in for racket in l0-baseline-test: logs the call, appends a record to --out.
 echo "racket $*" >> "$FAKE_LOG"
+if [ "$1" = scripts/bench/cifar-folder.rkt ]; then
+  if [ -n "$FAKE_FOLDER_FAILS" ]; then exit 3; fi
+  echo 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+  exit 0
+fi
 out=
 prev=
 for arg in "$@"; do

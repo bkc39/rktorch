@@ -1,6 +1,7 @@
 #lang racket/base
 
-(require (only-in racket/file make-directory* make-temporary-directory)
+(require (only-in racket/dict in-dict)
+         (only-in racket/file make-directory* make-temporary-directory)
          (only-in (submod torch/foreign/raw/native-location checked) native-library-directory)
          (only-in "../harness.rkt" with-temporary-path)
          (only-in "../shim.rkt" torch-dir))
@@ -16,8 +17,8 @@
   (define real `(file ,(path->string (build-path torch-dir (format "~a.rkt" name)))))
   (write-module! fake name `((require ,real) (provide (all-from-out ,real)))))
 
-(define (write-absent! absent name)
-  (write-module! (build-path absent "torch" "foreign" "raw") name
+(define (write-absent! absent dir name)
+  (write-module! (build-path absent "torch" dir) name
                  `((error ',name "is not in a checkout this old"))))
 
 (define (call-with-pre-hook-torch proc)
@@ -26,7 +27,10 @@
     (define absent (build-path collects "absent"))
     (for-each (lambda (name) (write-reexport! fake name)) '(main nn))
     (make-file-or-directory-link (native-library-directory) (build-path fake "native-libs"))
-    (for-each (lambda (name) (write-absent! absent name)) '(native-location pressure-settings))
+    (for ([(dir name) (in-dict '(("foreign/raw" . native-location)
+                                 ("foreign/raw" . pressure-settings)
+                                 ("private" . step-log)))])
+      (write-absent! absent dir name))
     (proc (cons "PLTCOLLECTS"
                 (format "~a:~a:" (path->string (build-path collects "old"))
                         (path->string absent))))))

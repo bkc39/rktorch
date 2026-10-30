@@ -5,8 +5,9 @@
          (only-in torch accelerator-if-available device-type)
          (only-in "child.rkt" python-runner?)
          (only-in "e2e.rkt"
-                  cache-env e2e-cases example-epochs-var example-name example-runner
-                  exn:fail:user:e2e merged-settings runner-reads settings->jsexpr)
+                  cache-env e2e-cases exn:fail:user:e2e merged-settings runner-reads
+                  settings->jsexpr)
+         (only-in "e2e-examples.rkt" example-epochs-var example-name example-runner)
          (only-in "harness.rkt"
                   host-meta load-average mean measure result result->record result-per-call
                   summarize)
@@ -28,6 +29,7 @@
                  #:max-load max-load #:libtorch libtorch #:out out #:log log
                  #:run-id [run-id (fresh-run-id)]
                  #:time-limit [time-limit #f]
+                 #:device [expected-device #f]
                  #:runner-for [runner-for example-runner])
   (define emit (record-writer run-id out))
   (define device (device-type (accelerator-if-available)))
@@ -54,16 +56,29 @@
       (define key (cons (example-name run-of) variant))
       (define child-meta (hash-ref analysis 'meta #f))
       (define run-meta (meta-for impl child-meta))
+      (define ran-on (and (hash? child-meta) (hash-ref child-meta 'device #f)))
+      (define misplaced
+        (and expected-device ran-on (not (equal? ran-on (symbol->string expected-device)))
+             (format "ran on ~a, not the --device ~a" ran-on expected-device)))
+      (define load (load-average))
       (fprintf log "~a~a: ~a steps/s, epochs ~a s\n" (example-name run-of)
                (if variant (format "/~a" variant) "")
                (hash-ref analysis 'steps_per_s #f) (hash-ref analysis 'epoch_s '()))
-      (emit (hash-set* analysis 'schema 1 'suite "e2e" 'group "run" 'impl impl
+      (emit (hash-set* (if misplaced (hash-set analysis 'error misplaced) analysis)
+                       'schema 1 'suite "e2e" 'group "run" 'impl impl
                        'case (example-name run-of) 'variant variant
-                       'load (load-average)
+                       'load load
                        'meta run-meta))
       (cond
+        [misplaced
+         (raise (exn:fail:user:e2e (format "e2e: ~a: ~a" (example-name run-of) misplaced)
+                                   (current-continuation-marks)
+                                   (example-name run-of) variant
+                                   (hash-ref analysis 'exit_code #f) child-meta))]
         [(hash-ref analysis 'error #f) (void)]
         [else
+         (push! 'loads key (and (pair? load) (car load)))
+         (push! 'host-mss key (hash-ref (or (hash-ref analysis 'host_ms #f) (hasheq)) 'median #f))
          (push! 'rates key (hash-ref analysis 'steps_per_s #f))
          (push! 'gcs key (hash-ref analysis 'gc_ms #f))
          (push! 'epoch-gcs key (mean (hash-ref analysis 'epoch_gc_ms '())))
@@ -130,6 +145,9 @@
                                        'gc_ms (pushed 'gcs key)
                                        'epoch_gc_ms (pushed 'epoch-gcs key)
                                        'step_ms (pushed 'step-mss key)
+                                       'host_ms (pushed 'host-mss key)
+                                       'run_loads (pushed 'loads key)
+                                       'max_load max-load
                                        'steps_per_s (and (pair? rates-of)
                                                          (summarize rates-of))))))))
 
@@ -140,7 +158,7 @@
            (only-in racket/port open-output-nowhere)
            (only-in racket/runtime-path #%datum define-runtime-path)
            rackunit
-           (only-in "e2e.rkt" example find-examples)
+           (only-in "e2e-examples.rkt" example find-examples)
            (only-in "fixtures/pre-hook-torch.rkt" call-with-pre-hook-torch)
            (only-in "harness.rkt" with-temporary-path)
            (only-in "pytorch.rkt" pytorch-available?)
@@ -182,6 +200,10 @@
     (check-equal? (map (lambda (r) (hash-ref (hash-ref r 'stats) 'n)) summaries) '(2 2))
     (check-equal? (map (lambda (r) (list (hash-ref r 'timing) (hash-ref r 'unit))) summaries)
                   '(("steps" "s/epoch") ("steps" "s/epoch")))
+    (for ([s (in-list summaries)])
+      (check-equal? (map real? (hash-ref s 'host_ms)) '(#t #t))
+      (check-equal? (map real? (hash-ref s 'run_loads)) '(#t #t))
+      (check-false (hash-ref s 'max_load)))
     (define md (summary-markdown records))
     (check-regexp-match #rx"## End to end" md)
     (check-regexp-match #rx"\\| stepper \\| b vs a \\|" md)
@@ -400,4 +422,20 @@
     (when (pytorch-available?)
       (define md (summary-markdown records))
       (check-regexp-match #rx"## C\\. Loader end to end[^#]*\\| 17-workers \\| crop \\| s/epoch \\|" md)
-      (check-regexp-match #rx"\\| 17-workers \\| pgm \\| s/epoch \\|" md))))
+      (check-regexp-match #rx"\\| 17-workers \\| pgm \\| s/epoch \\|" md)))
+
+  (test-case "a child on another device than --device fails, naming both"
+    (define fixture (example "stepper" '(("EPOCHS" . 2)) '(("EPOCHS" . 2)) "EPOCHS" 0 'first))
+    (define here (device-type (accelerator-if-available)))
+    (define elsewhere (if (eq? here 'cuda) 'cpu 'cuda))
+    (define (run device)
+      (records-of (lambda (out)
+                    (run-e2e (list fixture) #:rounds 2 #:full? #f #:variants '(("a")) #:cache #f
+                             #:max-load #f #:libtorch "x" #:out out #:log quiet #:device device
+                             #:runner-for (lambda (_ex) stepper)))))
+    (define records (run elsewhere))
+    (check-equal? (map (lambda (r) (hash-ref r 'group)) records) '("run" "error"))
+    (for ([r (in-list records)])
+      (check-regexp-match (regexp (format "ran on ~a, not the --device ~a" here elsewhere))
+                          (hash-ref r 'error)))
+    (check-equal? (map (lambda (r) (hash-ref r 'group)) (run here)) '("run" "run" "summary"))))

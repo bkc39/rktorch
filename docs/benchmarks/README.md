@@ -27,7 +27,7 @@ line per case goes to standard error.
 | `--rounds N` | timed rounds; 5 by default for the micro suites, 1 for `e2e` |
 | `--warmup N` | untimed rounds first, 1 by default and 2 for `calls`; `0` runs none, except in the scaling suites (`threads`, `pytorch-threads`), which always run one; ignored by `e2e`, which runs none |
 | `--scale X` | multiplies the micro suites' repetitions |
-| `--device cuda` | where `ops`, `pytorch-ops`, `calls` and `host-gpu` run (`cpu`, `cuda` or `mps`); the others run on the CPU |
+| `--device cuda` | where `ops`, `pytorch-ops`, `calls` and `host-gpu` run (`cpu`, `cuda` or `mps`); the others run on the CPU. For `e2e`, the device every child must report: a child on another fails its variant with an `error` record naming both |
 | `--only 05,09` | examples for `e2e`, by prefix; `py-05` is a PyTorch twin |
 | `--full` | the examples' full settings instead of the short ones |
 | `--cache DIR` | one dataset cache for every example (`DIR/mnist`, ...) |
@@ -97,7 +97,9 @@ median, quartiles and IQR, and the load average before and after.
   The epochs after the first are timed from the last step of each, so
   start-up, downloads, the first epoch and the closing sampling are left
   out. Steps per second are the measured steps over their span, so GC
-  pauses and periodic syncs count; the median interval is kept beside it.
+  pauses and periodic syncs count; the median interval is kept beside it,
+  and so is the median host time: from the end of one step to the host
+  finishing the next, before it waits for the device.
   The first optimizer to step is the one timed, except in 15-finetune,
   where it is the last to start (the fine-tune phase).
   `loader` is a workload, not an example: `scripts/bench/workloads/loader.rkt`
@@ -114,6 +116,26 @@ median, quartiles and IQR, and the load average before and after.
   random-crop dataset of commit `2b7ef04` (pad 2, a random 28x28 window).
   `DATASET=fixture` trains on the committed MNIST fixture instead of the
   cache.
+  `cifar-loader` and `cifar-resnet` read CIFAR-10 as PNG files: the
+  `ImageFolder` tree (`<split>/<class>/<n>.png`) that
+  `racket scripts/bench/cifar-folder.rkt [full|fixture]` writes once from
+  the archive `load-cifar10` caches (or the committed 256-image fixture)
+  under `RKTORCH_CIFAR10_PNG_DIR` (`~/.cache/rktorch/cifar10-png`, or
+  `DIR/cifar10-png` under `--cache`), with a `SHA256SUMS` of its files and
+  their `digest`. The script prints the digest and leaves a written tree
+  alone; the partial directory of a write killed part way is removed by
+  the next write. Both runners read it through `image-folder` and the loader, with
+  `WORKERS` (0) workers, batches of `BATCH` (128), and `PIPELINE`:
+  `per-sample` is torchvision's CIFAR augmentation in the workers
+  (`random-crop` with padding 4, `random-horizontal-flip`, the float
+  conversion and `normalize`, one image at a time); `batched` converts each
+  image, collates, then crops, flips and normalizes the batch in the
+  collate. `cifar-loader` moves each batch to the device and logs it as one
+  `rktorch-step` step (the last partial batch dropped, so its images per second are its
+  steps per second times `BATCH`); `cifar-resnet` trains 09's ResNet,
+  optimizer and schedule from the loader (`BASE`, 64). `DATASET=fixture`
+  reads the fixture tree; `PNG_DIGEST` refuses a tree whose digest does not
+  start with it.
   `py-05-mnist`, `py-09-resnet` and `py-17-workers` are PyTorch twins in
   `scripts/bench/python/`, run by `python3` in place of `racket` and timed
   the same way: they write the steps file the `rktorch-step` listener
@@ -130,6 +152,17 @@ median, quartiles and IQR, and the load average before and after.
   under `--cache`), and take `DATASET=fixture`, `BATCH` and (09) `BASE`.
   `py-17-workers` is `DataLoader(num_workers=WORKERS)` over the same two
   datasets, its PGM decode and jitter in pure Python.
+  `py-cifar-loader` and `py-cifar-resnet` are
+  `DataLoader(num_workers=WORKERS, pin_memory=True)` over torchvision's
+  `ImageFolder` on the same tree (pinned only on CUDA, with
+  `non_blocking` copies; their `meta` records `pin_memory` and the tree's
+  `fixture_digest`). `PIPELINE=per-sample` is torchvision's
+  `RandomCrop(32, padding=4)`, `RandomHorizontalFlip`, `ToTensor` and
+  `Normalize` per image in the workers; `PIPELINE=batched` collates the
+  `ToTensor`'d images and crops and flips the batch in the collate, image
+  by image as 09's twin's `random_crop` does, where rktorch's `random-crop`
+  gathers the batch at once; then it normalizes the batch. They have no
+  `-per-param` form.
   The twins' optimizers are PyTorch's defaults: on CUDA `Adam` and `SGD`
   pick the `foreach` kernels, one launch per op over every parameter, and
   `zero_grad()` drops the gradients (`set_to_none=True`), as `zero-grads!`
@@ -246,7 +279,9 @@ checkout without `torch/foreign/raw/native-location.rkt` has its shim read from
 its `native-libs/`. A checkout older than the `rktorch-step` event
 (its `torch` has neither `torch/private/step-log.rkt` nor its compiled `.zo`) logs no steps, so a child of
 such a checkout that completes is timed whole, from the end of its compile
-to its exit (`timing` `wall`, no `error`). A child whose `torch` has the
+to its exit (`timing` `wall`, no `error`). A workload that logs its own
+`rktorch-step` events (`cifar-loader`, via `log-batch!` in
+`scripts/bench/workloads/cifar-pipeline.rkt`) is timed by those steps on any checkout. A child whose `torch` has the
 hook, or that does not name its `torch`, and logs no steps is an `error`,
 never a whole-run time. So is a child that exits non-zero, even after
 logging every step, and one still running after its time limit, which is
@@ -295,7 +330,25 @@ faster) with a sign-test interval, which needs 6 rounds to reach 95%.
   `loss-item` wait. Times are the host's wall clock; GC counts whole
   milliseconds a round.
 - **G. GC per epoch** — every rktorch e2e summary's median `epoch_gc_ms`,
-  steps per second, and GC's share of the epoch.
+  steps per second, and GC's share of the epoch, H's rows left out.
+- **H. CIFAR-10 PNG loader against PyTorch's DataLoader** — `cifar-loader`
+  (images per second) and `cifar-resnet` (seconds per epoch) beside their
+  twins, per pipeline and worker count, one row for every variant either
+  side ran: the device, rktorch over PyTorch in time, the row's noise
+  floor (the wider of its two spreads), each side's steps per second, its
+  median host time per step (`host ms/step`, before the device settles)
+  and its median settled step interval (`settled ms/step`), GC per epoch
+  and its share, and the spread (IQR over median) of each side's rounds;
+  a spread, and so a floor, needs 3 rounds. PyTorch's GC columns count
+  Python's cyclic collector in the main process only, not its workers and
+  not reference-count frees. The notes mark a row `no twin` when one side
+  has no summary, `device X≠Y` when the two ran on different devices
+  (neither gets a ratio), `pin_memory (PyTorch only)` when the twin pinned
+  its batches (rktorch has no pinned memory, #307), `twin crops per image`
+  on the `batched` rows, and `load L ≥ M` when a run of the pair ended
+  with the one-minute load at or above `--max-load`. Its heading is the
+  host and run, not the device, so a split pair stays in one table; the
+  loader rows and the ResNet rows are two invocations, so two tables.
 
 `scripts/bench/l0-baseline.sh` takes the baseline from the host shell,
 entering one dev shell at a time: in `nix develop`, A on the CPU at the
@@ -303,7 +356,11 @@ default thread count and at `OMP_NUM_THREADS=1`, and B at one ATen thread;
 in `env -u LD_LIBRARY_PATH nix develop .#cuda`, A, E and F on CUDA, C over
 `VARIANT` `pgm`/`crop` × `WORKERS` 0/2/4, D at the short settings, and G
 (05 and 09) with troughs off, then on at collect budgets 0.01, 0.05 (the
-default), 0.2 and 1. An example and its twins run as one group, whose
+default), 0.2 and 1; then, in the same shell, the `loader` stage writes
+the CIFAR-10 PNG tree under `BASELINE_CACHE` and runs H with
+`--device cuda`: `cifar-loader` at `WORKERS` 0, 1, 2, 4 and 8 and
+`cifar-resnet` at 0, 2 and 4, each `PIPELINE` `per-sample` and `batched`,
+beside their twins, with `PNG_DIGEST` set to the tree's. An example and its twins run as one group, whose
 order rotates every round as the micro suites' cases do, so drift reaches
 both sides of a ratio alike. Each group waits for a load below 4; the
 records go to `baseline-<date>.jsonl` in `BASELINE_DIR`
@@ -312,7 +369,7 @@ and the summary beside it.
 
 ```bash
 scripts/bench/l0-baseline.sh         # all: cpu, cuda, summary
-scripts/bench/l0-baseline.sh cpu     # one stage: cpu, cuda or summary
+scripts/bench/l0-baseline.sh cpu     # one stage: cpu, cuda, loader or summary
 BASELINE_SMOKE=1 scripts/bench/l0-baseline.sh
 ```
 
@@ -323,7 +380,9 @@ others their own defaults); `BASELINE_MAX_LOAD` (4), `BASELINE_CACHE`
 the JSONL afresh; a single stage appends to it. `BASELINE_SMOKE=1` writes
 `smoke-<date>` and runs every step at the smallest settings both sides of
 a pair read: the loader on the MNIST fixture, 05 and 09 on the cached datasets at
-`EPOCHS=2` (their rktorch runners read nothing else), and G at one budget.
+`EPOCHS=2` (their rktorch runners read nothing else), G at one budget, and
+H on the fixture's PNG tree at `WORKERS` 0 and 2, `cifar-resnet` at
+`BASE=4`.
 
 ## Records
 
@@ -345,10 +404,11 @@ so appended runs never merge. `e2e` sections are per host (name, CPU, OS,
 affinity) with the execution per row, so an A/B over `OMP_NUM_THREADS` or
 the device still yields its ratio. An `e2e` run also writes one `run` record
 per child: `steps`, `steps_per_epoch`, `epoch_s`, `epoch_gc_ms`, `step_ms`,
-`steps_per_s`, `steps_per_s_median`, `wall_s`, `timing`, `exit_code`, `settings`
+`host_ms` (absent for a child that logs no host stamp), `steps_per_s`, `steps_per_s_median`, `wall_s`, `timing`, `exit_code`, `settings`
 (the summary shows them without the `RKTORCH_*_DIR` caches); its `summary`
-record adds each run's mean `epoch_gc_ms` and median `step_ms`, and
-`reads`, the settings its runner reads. A twin's `meta` is the parent's
+record adds each run's mean `epoch_gc_ms`, median `step_ms` and
+`host_ms`, its one-minute load (`run_loads`), the `--max-load` it ran
+under (`max_load`), and `reads`, the settings its runner reads. A twin's `meta` is the parent's
 with the child's `impl`, `python`, `libtorch` (the torch version),
 `device`, `threads` (`torch.get_num_threads`) and, for the e2e twins,
 `optimizer` and `foreach` over it; torch's name for the GPU
