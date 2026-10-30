@@ -7,15 +7,15 @@
 ;;   nix develop .#cuda --command racket scripts/vit-results.rkt
 
 (require (only-in racket/date current-date date->string date-display-format)
-         (only-in racket/list last)
+         (only-in racket/list last third)
          (only-in racket/match match-lambda)
          (only-in racket/port with-output-to-string)
          (only-in racket/pretty pretty-write)
          (only-in racket/runtime-path #%datum define-runtime-path)
          (only-in racket/string string-trim)
          (only-in racket/system system*)
-         torch
-         torch/scribblings/examples/18-vit)
+         (only-in torch device-type torch-version)
+         (only-in torch/scribblings/examples/18-vit pick-device train-cifar10))
 
 (define-runtime-path out "../torch/scribblings/results/vit.rktd")
 (define-runtime-path root "..")
@@ -55,8 +55,8 @@
              'date (parameterize ([date-display-format 'iso-8601])
                      (date->string (current-date)))
              'seconds (rounded total 1)
-             'accuracy (rounded (list-ref (last rows) 2) 4)
-             'best (rounded (apply max (map (lambda (row) (list-ref row 2)) rows)) 4)
+             'accuracy (rounded (third (last rows)) 4)
+             'best (rounded (apply max (map third rows)) 4)
              'epochs
              (map (match-lambda
                     [(list epoch loss acc seconds)
@@ -64,6 +64,6 @@
                            (rounded seconds 1))])
                   rows))
      port)))
-(printf "test acc ~a\n" (list-ref (last rows) 2))
+(printf "test acc ~a\n" (third (last rows)))
 (printf "total ~a s\n" (rounded total 1))
 (printf "wrote ~a\n" out)

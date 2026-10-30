@@ -1,8 +1,17 @@
 #lang scribble/lp2
 
-@(require torch/scribblings/labels
+@(require (only-in racket/format ~a ~r)
+          (only-in racket/match match-define)
+          torch/scribblings/labels
           (for-label torch/data/loader torch/vision/augment
                      torch/vision/cifar10 torch/vision/vit))
+
+@(define results
+   (call-with-input-file
+     (collection-file-path "vit.rktd" "torch" "scribblings" "results")
+     read))
+
+@(define (percent x) (~r (* 100 x) #:precision '(= 1)))
 
 @title[#:tag "ex-vit"]{Training a Vision Transformer on CIFAR-10}
 
@@ -57,13 +66,13 @@ to 1, so @racket[augment-batch] shifts them in and the view's
 device's default stream, which @racket[manual-seed!] seeds.
 
 @chunk[<r18-augment>
-(define view
+(define cropped
   (crop-view #:size 32 #:scale '(0.5 1.0)
              #:jitter '(0.4 0.4 0.4 0.1) #:jitter-p 0.5 #:gray-p 0.1
              #:mean '(0.5 0.5 0.5) #:std '(0.5 0.5 0.5)))
 
 (define (augment-batch xb)
-  (~> xb (+ 1) (/ 2) view))]
+  (~> xb (+ 1) (/ 2) cropped))]
 
 @bold{The trainer.} @racket[adam] with a small weight decay, the L2 term in
 the gradient rather than AdamW's decoupled one. @racket[one-cycle-lr] is
@@ -160,6 +169,30 @@ the test accuracy and the seconds it took.
          #:max-epochs epochs #:num-sanity-val-steps 0
          #:callbacks (list (lambda-callback #:on-train-epoch-end record!)))
     (reverse rows)))]
+
+@bold{The result.} @filepath{scripts/vit-results.rkt} ran this program at
+commit @tt{@(hash-ref results 'commit)} on an @(hash-ref results 'gpu) on
+@(hash-ref results 'date): @(~a (length (hash-ref results 'epochs))) epochs
+in @(~r (/ (hash-ref results 'seconds) 60) #:precision 0) minutes, in
+float32, seed @(~a (hash-ref results 'seed)). Test accuracy after the last
+epoch is @(percent (hash-ref results 'accuracy)) percent; the best epoch
+reached @(percent (hash-ref results 'best)), but the test set picks no epoch
+here. The ResNet-18 of @secref["ex-resnet"] beats this, 93 to 94 percent in
+thirty epochs: its convolutions start with the prior this network has to
+learn.
+
+@(tabular
+  #:style 'boxed
+  #:sep (hspace 2)
+  (cons (list (bold "epoch") (bold "train loss") (bold "test accuracy")
+              (bold "seconds"))
+        (for/list ([row (in-list (hash-ref results 'epochs))]
+                   #:do [(match-define (list epoch loss acc seconds) row)]
+                   #:when (or (= 1 epoch) (zero? (modulo epoch 30))))
+          (list (~a epoch)
+                (~r loss #:precision '(= 4))
+                (string-append (percent acc) "%")
+                (~r seconds #:precision '(= 1))))))
 
 @chunk[<*>
   <r18-require>

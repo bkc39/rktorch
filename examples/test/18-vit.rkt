@@ -23,19 +23,19 @@
 
 (module+ test
   (require (only-in racket/list first last)
+           (only-in racket/match match-define match-lambda)
            (only-in racket/math nan?)
-           (only-in racket/match match-lambda)
            rackunit
            torch
            torch/data/loader
            torch/nn
-           torch/scribblings/examples/18-vit
-           (only-in torch/train fit lambda-callback run-metric)
-           (only-in torch/vision/cifar10 load-cifar10-fixture)
            (only-in torch/private/util with-temporary-directory)
+           torch/scribblings/examples/18-vit
            (only-in torch/tests/private/python-env
                     call-with-python-env check-training-twin
                     python-cuda-available? python-torch-available? tol)
+           (only-in torch/train fit)
+           (only-in torch/vision/cifar10 load-cifar10-fixture)
            (only-in (submod ".." twin) vit-twin))
 
   (define steps 20)
@@ -107,8 +107,7 @@
                                 #:train fixture #:test fixture))
     (check-equal? (map first rows) '(1 2))
     (for ([row (in-list rows)])
-      (define-values (loss acc seconds)
-        (apply values (cdr row)))
+      (match-define (list _ loss acc seconds) row)
       (check-true (rational? loss))
       (check-true (<= 0.0 acc 1.0))
       (check-true (positive? seconds))))
