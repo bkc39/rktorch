@@ -1,6 +1,8 @@
 #lang racket/base
 
-(require (only-in racket/match match match-define)
+(require (only-in racket/list remove-duplicates)
+         (only-in racket/match match match-define)
+         (only-in threading ~>)
          (only-in "../../foreign.rkt"
                   * + cat detach device dtype max min reshape tensor->list tensor? to
                   zeros-like))
@@ -14,6 +16,7 @@
          note-epoch!
          note-step!
          read-epoch!
+         read-groups
          read-steps!)
 
 (struct logged (logger? both?))
@@ -81,20 +84,21 @@
   (for/hasheq ([(key e) (in-hash (ledger-epoch (loop-ledger b loop)))])
     (values key (entry-value e))))
 
+(define (read-groups ts #:device [device-of device] #:dtype [dtype-of dtype])
+  (for/list ([dev (in-list (remove-duplicates (map device-of ts)))])
+    (define members (filter (lambda (t) (equal? (device-of t) dev)) ts))
+    (list dev (if (memq 'float64 (map dtype-of members)) 'float64 'float32) members)))
+
+(define (read-group dev dt members)
+  (set-box! reads (add1 (unbox reads)))
+  (~> (for/list ([t (in-list members)]) (reshape (to t dev dt) 1)) cat tensor->list))
+
 (define (host-values vs)
-  (define ts (filter tensor? vs))
   (define read
-    (match ts
-      ['() (hasheq)]
-      [(cons t _)
-       (set-box! reads (add1 (unbox reads)))
-       (define dev (device t))
-       (define dt (if (memq 'float64 (map dtype ts)) 'float64 'float32))
-       (for/hasheq ([t (in-list ts)]
-                    [x (in-list (tensor->list
-                                 (cat (for/list ([t (in-list ts)])
-                                        (reshape (to t dev dt) 1)))))])
-         (values t x))]))
+    (for/fold ([read (hasheq)]) ([g (in-list (read-groups (filter tensor? vs)))])
+      (match-define (list dev dt members) g)
+      (for/fold ([read read]) ([t (in-list members)] [x (in-list (read-group dev dt members))])
+        (hash-set read t x))))
   (for/list ([v (in-list vs)])
     (if (tensor? v) (hash-ref read v) v)))
 
