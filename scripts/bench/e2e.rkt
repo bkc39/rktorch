@@ -50,7 +50,8 @@
                  "FINETUNE_EPOCHS" 0 'last)
         (example "16-style-transfer" '(("STEPS" . 100)) '(("STEPS" . 1000)) #f 20 'first)
         (example "loader" '(("EPOCHS" . 2)) '(("EPOCHS" . 5)) "EPOCHS" 0 'first)
-        (example "17-workers" '(("EPOCHS" . 2)) '(("EPOCHS" . 3)) "EPOCHS" 0 'first)))
+        (example "17-workers" '(("EPOCHS" . 2)) '(("EPOCHS" . 3)) "EPOCHS" 0 'first)
+        (example "18-vit" '(("EPOCHS" . 3)) '(("EPOCHS" . 30)) "EPOCHS" 0 'first)))
 
 (define (twin name-of-example script)
   (define ex (for/first ([ex (in-list examples)] #:when (equal? (example-name ex) name-of-example))
