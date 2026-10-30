@@ -1,15 +1,19 @@
 #lang racket/base
 
 (module+ test
-  (require (only-in racket/dict dict-ref)
+  (require (only-in ffi/unsafe cpointer-has-tag?)
+           (only-in racket/dict dict-ref)
+           (only-in racket/unsafe/ops unsafe-struct*-cas!)
            rackunit
-           (only-in "../foreign.rkt" native-memory-limit native-memory-use zeros)
+           (only-in "../foreign.rkt"
+                    native-memory-limit native-memory-use tensor? zeros)
            (only-in (submod "../foreign.rkt" unsafe) tensor-free! to!)
            (only-in "../foreign/device-type.rkt" device)
            (only-in "../foreign/raw/collector.rkt" call-as-the-collector)
            (only-in "../foreign/raw/memory.rkt" record-allocation! unaccount!)
            (only-in "../foreign/raw/pressure.rkt" since-check-of)
            (only-in "../foreign/structs.rkt" tensor-handle)
+           (only-in (submod "../foreign/structs.rkt" private) state-cas)
            (only-in "private/race-harness.rkt"
                     check-known-failure check-ledger join labelled
                     ledger-snapshot ledger-violations make-gate make-watch
@@ -56,24 +60,58 @@
       (tensor-free! t))
     (check-ledger base w))
 
-  (define (racing-frees pool)
+  (define ((spurious-once calls) t i old new)
+    (set-box! calls (add1 (unbox calls)))
+    (and (> (unbox calls) 1) (unsafe-struct*-cas! t i old new)))
+
+  (test-case "a spurious CAS failure retries the take, and the free releases once"
     (settle!)
+    (define base (ledger-snapshot))
     (define w (make-watch))
-    (define t (zeros 256 256))
-    (define h (tensor-handle t))
-    (define g (handle-gate 'free-unaccounted h))
-    (with-parked [a (spawn (lambda () (tensor-free! t)) #:pool pool #:label 'a)
-                  #:at g #:watch w]
-      (check-eq? (wait-for-arrival g) 'parked)
-      (join (spawn (lambda () (tensor-free! t)) #:pool pool #:label 'b))
-      (watch-release-count w h)))
+    (define calls (box 0))
+    (define saved (unbox state-cas))
+    (with-race-hook (watch-hook w)
+      (define t (zeros 256 256))
+      (define h (tensor-handle t))
+      (dynamic-wind
+       (lambda () (set-box! state-cas (spurious-once calls)))
+       (lambda () (check-not-exn (lambda () (tensor-free! t))))
+       (lambda () (set-box! state-cas saved)))
+      (check-equal? (unbox calls) 2 "the take did not retry the failed swap")
+      (check-equal? (watch-release-count w h) 1)
+      (check-true (cpointer-has-tag? h 'Tensor-freed))
+      (settle!))
+    (check-ledger base w))
+
+  (define freeing-loser? #rx"tensor-free!: the tensor is being freed or was freed")
+
+  (define (racing-frees point pool)
+    (settle!)
+    (define base (ledger-snapshot))
+    (define w (make-watch))
+    (with-race-hook (watch-hook w)
+      (define t (zeros 256 256))
+      (define h (tensor-handle t))
+      (define g (handle-gate point h))
+      (define (free-by label)
+        (spawn (lambda () (tensor-free! t)) #:pool pool #:label label))
+      (with-parked [a (free-by 'a) #:at g #:watch w]
+        (check-eq? (wait-for-arrival g) 'parked)
+        (check-exn freeing-loser? (lambda () (join (free-by 'b))))
+        (settle!)
+        (release-gate! g)
+        (join a))
+      (settle!)
+      (check-equal? (watch-release-count w h) 1
+                    (format "releases of a handle two ~a threads freed, one parked at ~a"
+                            (or pool 'ordinary) point))
+      (check-equal? (watch-freed-count w h) 1))
+    (check-ledger base w))
 
   (test-case "two threads freeing one tensor reach the native release once (I3)"
-    (for ([pool (in-list pools)])
-      (check-known-failure
-       "#266"
-       (format "one release with ~a threads" (or pool 'ordinary))
-       (= 1 (racing-frees pool)))))
+    (for* ([point (in-list '(free-unaccounted free-taken))]
+           [pool (in-list pools)])
+      (racing-frees point pool)))
 
   (define (double-unaccount pool)
     (define w (make-watch))
@@ -101,13 +139,13 @@
     (for ([pool (in-list pools)])
       (double-unaccount pool)))
 
-  (define (break-mid-free pool)
+  (define (break-mid-free point pool)
     (settle!)
     (define w (make-watch))
     (with-race-hook (watch-hook w)
       (define t (zeros 256 256))
       (define h (tensor-handle t))
-      (define g (handle-gate 'free-unaccounted h))
+      (define g (handle-gate point h))
       (with-parked [a (spawn (lambda () (tensor-free! t)) #:pool pool #:label 'a)
                     #:at g #:watch w]
         (check-eq? (wait-for-arrival g) 'parked)
@@ -121,8 +159,69 @@
                   "a break abandoned the explicit free to the finalizer"))
 
   (test-case "a break during an explicit free waits until the release"
+    (for* ([point (in-list '(free-taken free-unaccounted))]
+           [pool (in-list pools)])
+      (break-mid-free point pool)))
+
+  (define (stop-mid-free! point pool stop-by)
+    (define owner (make-custodian))
+    (define t (zeros 256 256))
+    (define h (tensor-handle t))
+    (define g (handle-gate point h))
+    (define parked (make-watch))
+    (with-parked [a (parameterize ([current-custodian owner])
+                      (spawn (lambda () (tensor-free! t)) #:pool pool #:label 'a))
+                  #:at g #:watch parked]
+      (check-eq? (wait-for-arrival g) 'parked)
+      (case stop-by
+        [(kill) (stop! a)]
+        [(custodian) (custodian-shutdown-all owner)])
+      (check-true (tensor? t) "a killed free flipped the tag")
+      (check-exn freeing-loser? (lambda () (tensor-free! t)))
+      (check-equal? (watch-freed-count parked h) 0
+                    "a native release ran while the killed free was parked")))
+
+  (define (killed-mid-free point pool stop-by)
+    (settle!)
+    (define base (ledger-snapshot))
+    (define w (make-watch))
+    (with-race-hook (watch-hook w)
+      (stop-mid-free! point pool stop-by)
+      (settle!))
+    (check-equal? (watch-finalized w) 1
+                  (format "the finalizer of a free killed at ~a (~a, ~a)"
+                          point (or pool 'ordinary) stop-by))
+    (check-ledger base w))
+
+  (test-case "a free killed mid-way leaves the handle to the finalizer"
+    (for* ([point (in-list '(free-taken free-unaccounted))]
+           [pool (in-list pools)]
+           [stop-by (in-list '(kill custodian))])
+      (killed-mid-free point pool stop-by)))
+
+  (define (killed-after-unaccounting pool)
+    (define t (zeros 256 256))
+    (define g (handle-gate 'free-unaccounted (tensor-handle t)))
+    (define (live) (dict-ref (native-memory-use) cpu 0))
+    (define held (live))
+    (with-parked [a (spawn (lambda () (tensor-free! t)) #:pool pool #:label 'a)
+                  #:at g]
+      (check-eq? (wait-for-arrival g) 'parked)
+      (stop! a))
+    (check-equal? (- held (live)) (* 256 256 4)
+                  "a free killed after it unaccounted left its bytes on the ledger")
+    (check-true (tensor? t) "a free killed before its release flipped the tag"))
+
+  (test-case "a free killed after it unaccounted leaves a live tensor off the ledger"
     (for ([pool (in-list pools)])
-      (break-mid-free pool)))
+      (settle!)
+      (define base (ledger-snapshot))
+      (define w (make-watch))
+      (with-race-hook (watch-hook w)
+        (killed-after-unaccounting pool)
+        (settle!))
+      (check-equal? (watch-finalized w) 1)
+      (check-ledger base w)))
 
   (define (killed-at point pool stop-by)
     (settle!)

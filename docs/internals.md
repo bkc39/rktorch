@@ -43,10 +43,19 @@ Death has two paths:
 | finalizer | cancelled | is the finalizer |
 | when | deterministic release | the default |
 
-The explicit path drops this handle's reference *now*, cancels the pending
-finalizer, and flips the cpointer tag to `'Tensor-freed` — even when
-the free raises, since an attempted free consumes the finalizer
-backstop and a live-looking tag would invite use-after-free.
+The explicit path first takes the handle: with breaks disabled, one
+compare-and-swap moves the wrapper's `state` from `'live` to `'freeing`.
+Only the thread whose swap succeeds goes on; every other free of that
+wrapper raises `exn:fail:contract`. The take retries a spurious CAS
+failure and loses only when the state is no longer `'live`. The winner releases the handle and
+cancels its finalizer in one atomic section, then flips the cpointer tag
+to `'Tensor-freed` — even when the free raises, since an attempted free
+consumes the finalizer backstop and a live-looking tag would invite
+use-after-free. A thread killed mid-free leaves the wrapper `'freeing` and
+the handle to the finalizer. Killed at `free-unaccounted`, after
+`unaccount!`, it leaves a live, usable tensor that is off the ledger, its
+phantom bytes zeroed, until the finalizer releases it. The `state` setter
+is not exported by name, though the struct info still carries it.
 
 The finalizer path is wrapped in `swallow-and-count-failure`, whose
 catch is total: Racket finalizers run in **atomic mode**, where
@@ -473,6 +482,7 @@ gets the point's name and a subject (a handle, a device, a thread).
 | `gate-read` | the backstop has read its gate, before it acts | device |
 | `checks-resetting` | a backstop collection has measured, before it resets the checks | device |
 | `unaccount-entry-read` | inside the ledger section, an entry found but not removed | handle |
+| `free-taken` | an explicit free has taken the handle, before it unaccounts | handle |
 | `free-unaccounted` | an explicit free has unaccounted, before the native release | handle |
 | `free-released` | an explicit free's native release has returned | handle |
 | `finalizer-releasing` | a finalizer's release, before it unaccounts | handle |
@@ -549,8 +559,6 @@ an ordinary check:
   the error kind the same way, outside the call's atomic section, so a
   failure parked before that read can retry on another thread's OOM or
   miss its own.
-- #266: `tensor-free!` checks the handle's tag, then frees; two threads
-  freeing one tensor can both pass the check, so both release it.
 - #168 stage 2: a backstop collection resets `since-check` to zero, losing
   bytes accounted while it collected; the next check comes up to that
   many bytes late.
