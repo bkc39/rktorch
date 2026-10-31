@@ -1,7 +1,7 @@
 """VisionTransformer against its references, for vit-parity-test.rkt.
 
 RKTORCH_VIT_TWIN names the safetensors file of a VisionTransformer at the
-configuration of examples/python/18_dino.py; its ViT class, loaded from that
+configuration of examples/python/19_dino.py; its ViT class, loaded from that
 file, runs on a seeded [4 3 32 32] batch and on a [4 3 16 16] batch, the
 second through its bicubic position interpolation. RKTORCH_VIT_TORCHVISION
 names one at image 32, patch 4, width 192, depth 2, heads 3 and 10 classes,
@@ -29,7 +29,7 @@ EXAMPLES = os.path.join(os.path.dirname(os.path.abspath(__file__)),
 
 def dino():
     spec = importlib.util.spec_from_file_location(
-        "dino", os.path.join(EXAMPLES, "18_dino.py"))
+        "dino", os.path.join(EXAMPLES, "19_dino.py"))
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module

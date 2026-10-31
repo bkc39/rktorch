@@ -26,33 +26,38 @@ them, the shape of @secref["ex-mnist"]'s with an augmentation hook and a
 schedule.
 
 @chunk[<r18-require>
-(require racket/match
+(require (only-in racket/match match match-define)
          torch torch/nn torch/data/loader torch/train
          (only-in torch/vision/augment crop-view)
          (only-in torch/vision/cifar10 cifar10-dataset load-cifar10-fixture)
          (only-in torch/vision/vit VisionTransformer))]
 
 @chunk[<r18-provide>
-(provide CifarViT augment-batch cifar-vit pick-device run-example small-vit
-         train-cifar10)]
+(provide CifarViT augment-batch cifar-vit pick-device precision run-example
+         seed small-vit train-cifar10 vit-config)]
 
-@bold{The model.} A @racket[Conv2d] with a patch-wide kernel and stride cuts
-the image and projects each patch to a token in one call. The paper's 16
-pixels would leave four tokens of a 32x32 image; patches of 4 leave 64.
-Attention does not see order, so a learned position is added to each token.
-A learned class token goes in front, attends to the patches through six
-blocks, and is all the head reads. @racket[small-vit] is the network the
-tests and the parity twin train: narrower, shallower, and without dropout,
-whose draws the twin could not repeat.
+@bold{The model.} @racket[VisionTransformer] cuts the image into square
+patches and projects each to a token, adds a learned position to each token,
+since attention does not see order, and puts a learned class token in front,
+the only token the head reads; its reference entry has the rest. Patches of
+4 leave 64 tokens of a 32x32 image, where the paper's 16 would leave four.
+@racket[vit-config] is the network this chapter trains. @racket[small-vit]
+is the one the tests and the parity twin train: narrower, shallower, and
+without dropout, whose draws the twin could not repeat.
 
 @chunk[<r18-model>
-(define (cifar-vit #:width [width 256] #:depth [depth 6] #:heads [heads 8]
-                   #:dropout [dropout 0.1])
-  (VisionTransformer #:image-size 32 #:patch 4 #:width width #:depth depth
+(define vit-config
+  (hasheq 'patch 4 'width 256 'depth 6 'heads 8 'dropout 0.1))
+
+(define (cifar-vit [config vit-config])
+  (match-define (hash-table ('patch patch) ('width width) ('depth depth)
+                            ('heads heads) ('dropout dropout))
+    config)
+  (VisionTransformer #:image-size 32 #:patch patch #:width width #:depth depth
                      #:heads heads #:dropout dropout #:classes 10))
 
 (define (small-vit)
-  (cifar-vit #:width 64 #:depth 2 #:heads 4 #:dropout 0.0))]
+  (cifar-vit (hash-set* vit-config 'width 64 'depth 2 'heads 4 'dropout 0.0)))]
 
 @bold{Augmentation.} A convolution assumes neighbouring pixels matter and
 that a shape means the same thing anywhere in the image. A ViT assumes
@@ -83,13 +88,8 @@ per batch, so the trainer has to be told how many steps there are.
 stage keeps the test images as they are.
 
 @chunk[<r18-trainer>
-(define-trainer CifarViT (net augment max-lr total-steps)
-  (define-init (vit #:total-steps steps #:max-lr [lr 1e-3]
-                    #:augment [aug augment-batch])
-    (set! net vit)
-    (set! augment aug)
-    (set! max-lr lr)
-    (set! total-steps steps))
+(define-trainer CifarViT (net #:total-steps total-steps #:max-lr [max-lr 1e-3]
+                          #:augment [augment augment-batch])
   (define-forward (x) (net x))
   (define-optimizers
     (define opt (adam (parameters net) #:lr max-lr #:weight-decay 1e-4))
@@ -119,12 +119,12 @@ augmentation, and twenty full-batch steps on the committed 256-image
 fixture, enough for the schedule's one warmup step and its decay. It answers
 the per-step losses, the trained classifier and the device. The twin
 @filepath{examples/python/18_vit.py} starts from the weights this network
-saved; its losses and final weights agree within @tt{1e-4}.
+saved; the parity test holds its losses and final weights to this run's.
 
 @chunk[<r18-run>
 (define (run-example #:steps [steps 20] #:device [device (pick-device)])
   (with-default-device device
-    (manual-seed! 0)
+    (manual-seed! seed)
     (define-values (xs ys) (load-cifar10-fixture))
     (define classifier
       (CifarViT (small-vit) #:total-steps steps #:augment values))
@@ -140,18 +140,25 @@ saved; its losses and final weights agree within @tt{1e-4}.
 @bold{The headline run.} The full training set, device resident, in seeded
 shuffled batches of 256, and the test set after every epoch. A
 @racket[lambda-callback] keeps one row per epoch: the mean training loss,
-the test accuracy and the seconds it took.
+the test accuracy and the seconds it took. @racket[train-cifar10] answers
+the rows and the trained classifier.
 
 @chunk[<r18-train>
+(define seed 0)
+(define precision '32-true)
+
 (define (train-cifar10 #:epochs [epochs 300] #:batch [batch 256]
                        #:device [device (pick-device)]
-                       #:train [train-set (cifar10-dataset 'train #:device device)]
-                       #:test [test-set (cifar10-dataset 'test #:device device)])
+                       #:train [train-set
+                                (cifar10-dataset 'train #:device device)]
+                       #:test [test-set
+                               (cifar10-dataset 'test #:device device)]
+                       #:callbacks [callbacks '()])
   (with-default-device device
-    (manual-seed! 0)
+    (manual-seed! seed)
     (define loader
       (dataloader train-set #:batch-size batch #:shuffle? #t
-                  #:generator (make-generator 0)))
+                  #:generator (make-generator seed)))
     (define rows '())
     (define clock (current-inexact-milliseconds))
     (define (record! r)
@@ -162,24 +169,28 @@ the test accuracy and the seconds it took.
                              (/ (- now clock) 1000.0))
                        rows))
       (set! clock now))
-    (fit (CifarViT (cifar-vit)
-                   #:total-steps (* epochs (dataloader-length loader)))
+    (define classifier
+      (CifarViT (cifar-vit)
+                #:total-steps (* epochs (dataloader-length loader))))
+    (fit classifier
          loader
          #:val (dataloader test-set #:batch-size 500)
-         #:max-epochs epochs #:num-sanity-val-steps 0
-         #:callbacks (list (lambda-callback #:on-train-epoch-end record!)))
-    (reverse rows)))]
+         #:max-epochs epochs #:num-sanity-val-steps 0 #:precision precision
+         #:callbacks
+         (cons (lambda-callback #:on-train-epoch-end record!) callbacks))
+    (values (reverse rows) classifier)))]
 
 @bold{The result.} @filepath{scripts/vit-results.rkt} ran this program at
-commit @tt{@(hash-ref results 'commit)} on an @(hash-ref results 'gpu) on
-@(hash-ref results 'date): @(~a (length (hash-ref results 'epochs))) epochs
-in @(~r (/ (hash-ref results 'seconds) 60) #:precision 0) minutes, in
-float32, seed @(~a (hash-ref results 'seed)). Test accuracy after the last
-epoch is @(percent (hash-ref results 'accuracy)) percent; the best epoch
-reached @(percent (hash-ref results 'best)), but the test set picks no epoch
-here. The ResNet-18 of @secref["ex-resnet"] beats this, 93 to 94 percent in
-thirty epochs: its convolutions start with the prior this network has to
-learn.
+commit @tt{@(hash-ref results 'commit)} on @(hash-ref results 'hardware)
+on @(hash-ref results 'date): @(~a (length (hash-ref results 'epochs)))
+epochs in @(~r (/ (hash-ref results 'seconds) 60) #:precision 0) minutes,
+at precision @tt{@(hash-ref results 'precision)}, seed
+@(~a (hash-ref results 'seed)). Test accuracy after the last epoch is
+@(percent (hash-ref results 'accuracy)) percent; the best epoch reached
+@(percent (hash-ref results 'best)), but the test set picks no epoch here.
+The ResNet-18 of @secref["ex-resnet"] starts from the prior this network has
+to learn: its convolutions assume locality and translation from the first
+step.
 
 @(tabular
   #:style 'boxed

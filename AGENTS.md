@@ -183,7 +183,7 @@ with `backward!` outside the form as PyTorch recommends). From
   renames `ViTModel`/`ViTForImageClassification` keys (pooler dropped),
   proven against `torch/vision/fixtures/vit-keys.rktd`
   (`scripts/record-vit-keys.py`); `torch/tests/vit-parity-test.rkt` holds
-  it to `examples/python/18_dino.py`'s ViT and torchvision's.
+  it to `examples/python/19_dino.py`'s ViT and torchvision's.
   `TransformerEncoderLayer` takes `#:need-weights? #:average-attn-weights?`
   and then answers `(values output weights)`.
 - augmentation on the device (`torch/vision/augment.rkt`, #389): the
@@ -197,7 +197,7 @@ with `backward!` outside the form as PyTorch recommends). From
   (applied as `(v images #:generator g)`) and `multi-crop` are DINO's
   multi-crop; native calls independent of the batch size. Colour math is
   `torch/vision/private/color.rkt`; `torch/tests/augment-parity-test.rkt`
-  holds it to torchvision v2 and to `examples/python/18_dino.py`'s
+  holds it to torchvision v2 and to `examples/python/19_dino.py`'s
   `multi_crop`.
 - resnet (`torch/vision/resnet.rkt`, #152): `BasicBlock` and `ResNet`
   (`#:classes #:base #:blocks`, ResNet-18 for 32x32 images by default,

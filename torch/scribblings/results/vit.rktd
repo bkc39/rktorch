@@ -1,6 +1,8 @@
 #hasheq((accuracy . 0.8974)
         (best . 0.8986)
-        (command . "EPOCHS=300 racket scripts/vit-results.rkt")
+        (command
+         .
+         "EPOCHS=300 nix develop .#cuda --command racket scripts/vit-results.rkt")
         (commit . "aae9ab13d514")
         (data . "CIFAR-10: 50000 train, 10000 test")
         (date . "2026-10-30")
@@ -307,8 +309,11 @@
           (298 0.1193 0.8975 12.8)
           (299 0.1131 0.8974 12.8)
           (300 0.1174 0.8974 12.8)))
-        (gpu . "NVIDIA GeForce RTX 3090 Ti")
-        (model . "ViT, patch 4, width 256, depth 6, 8 heads, dropout 0.1")
+        (hardware . "NVIDIA GeForce RTX 3090 Ti")
+        (model
+         .
+         #hasheq((depth . 6) (dropout . 0.1) (heads . 8) (patch . 4) (width . 256)))
+        (precision . "32-true")
         (seconds . 3939.3)
         (seed . 0)
         (torch . "2.14.0"))

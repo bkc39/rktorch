@@ -99,9 +99,9 @@
       (define-values (big small)
         (multi-crop images globals locals
                     #:generator (make-generator seed #:device device)))
-      (check-close (format "multi-crop globals at seed ~a against 18_dino.py [~a]" seed device)
+      (check-close (format "multi-crop globals at seed ~a against 19_dino.py [~a]" seed device)
                    big (unpack (hash-ref e 'global) 'float32) tolerance)
-      (check-close (format "multi-crop locals at seed ~a against 18_dino.py [~a]" seed device)
+      (check-close (format "multi-crop locals at seed ~a against 19_dino.py [~a]" seed device)
                    small (unpack (hash-ref e 'local) 'float32) tolerance)))
 
   (cond
