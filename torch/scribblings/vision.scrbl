@@ -13,6 +13,7 @@
                      torch/vision/resnet
                      torch/vision/transforms
                      torch/vision/vgg
+                     torch/vision/vit
                      torch/vision/weights
                      torch/vision/diffusion))
 
@@ -581,6 +582,111 @@ was trained on images normalised by @racket[imagenet-normalize].
 @defproc[(vgg16-features? [v any/c]) boolean?]{
 Whether @racket[v] is a layer @racket[vgg16-features] built.
 }
+
+@section{Vision Transformer}
+
+@defmodule[torch/vision/vit]
+
+The Vision Transformer of Dosovitskiy et al. (@italic{An Image is Worth
+16x16 Words}, ICLR 2021) in its pre-norm form: the image cut into square
+patches, each projected to a token, a learned class token in front, learned
+positions added, a stack of @racket[TransformerEncoderLayer]s and a final
+@racket[LayerNorm]. Its parameters carry timm's names with an underscore
+spelled as a hyphen (@racket["cls-token"], @racket["pos-embed"],
+@racket["patch-embed.proj"], @racket["blocks"], @racket["norm"],
+@racket["head"]); inside a block they are
+@racket[TransformerEncoderLayer]'s, the attention's three input projections
+@racket["query"], @racket["key"] and @racket["value"], as Hugging Face's.
+
+@defproc[(VisionTransformer
+          [#:image-size image-size
+                        (or/c exact-positive-integer?
+                              (list/c exact-positive-integer?
+                                      exact-positive-integer?))
+                        224]
+          [#:patch patch exact-positive-integer? 16]
+          [#:in-channels in-channels exact-positive-integer? 3]
+          [#:width width exact-positive-integer? 768]
+          [#:depth depth exact-positive-integer? 12]
+          [#:heads heads exact-positive-integer? 12]
+          [#:ffn-width ffn-width exact-positive-integer? (* 4 width)]
+          [#:dropout dropout (and/c real? (>=/c 0) (</c 1)) 0.0]
+          [#:layer-norm-eps layer-norm-eps (and/c real? positive?) 1e-6]
+          [#:classes classes (or/c #f exact-positive-integer?) #f])
+         vision-transformer?]{
+A ViT for images of @racket[image-size] pixels, a side or a height and a
+width, each a multiple of @racket[patch]; the default is ViT-B/16 without
+a head. @racket[depth] blocks of @racket[heads] heads, each with a GELU
+feed-forward @racket[ffn-width] wide; @racket[heads] divides
+@racket[width]. With @racket[classes], a @racket[Linear] head reads the
+class token. Every @racket[Linear] starts from @racket[trunc-normal-init]
+at a standard deviation of 0.02 with zero biases, and so do the class token
+and the positions; the patch projection keeps @racket[Conv2d]'s.
+
+@racket[dropout] is each block's @racket[TransformerEncoderLayer]
+dropout: on the attention probabilities, after the attention, inside and
+after the feed-forward; none follows the position add. That differs from
+timm's @tt{drop_rate} and torchvision's @tt{dropout}, which drop after the
+position add and leave the attention probabilities to a separate rate.
+
+Applied as @racket[(vit x #:output output)] to a floating-point
+@tt{[N in-channels H W]} batch whose sides are multiples of
+@racket[patch], it answers by @racket[output]:
+
+@tabular[#:sep @hspace[2]
+         #:style 'boxed
+         (list (list @bold{@racket[output]} @bold{result})
+               (list @racket['head]
+                     @elem{the head's @tt{[N classes]}, or the class
+                           token's @tt{[N width]} without a head})
+               (list @racket['cls] @elem{the normalised class token,
+                                         @tt{[N width]}})
+               (list @racket['tokens] @elem{every normalised token,
+                                            @tt{[N 1+T width]}})
+               (list @racket['attention]
+                     @elem{the last block's attention weights per head,
+                           @tt{[N heads 1+T 1+T]}}))]
+
+An image of another size than @racket[image-size] gets the patch positions
+resized bicubically to its grid, the class token's position kept, as
+DINO and Hugging Face's @tt{interpolate_pos_encoding} do.
+
+@torch-examples[
+(require torch/vision/vit)
+(define vit (VisionTransformer #:image-size 32 #:patch 4 #:width 192
+                               #:depth 2 #:heads 3 #:classes 10))
+(shape (vit (randn 2 3 32 32)))
+(shape (vit (randn 2 3 16 16) #:output 'tokens))
+]}
+
+@defproc[(PatchEmbed [in-channels exact-positive-integer?]
+                     [width exact-positive-integer?]
+                     [patch exact-positive-integer?])
+         patch-embed?]{
+The patch projection, a @racket[Conv2d] from @racket[in-channels] to
+@racket[width] with a @racket[patch]-wide kernel and stride, child
+@racket["proj"]. Applied to a floating-point @tt{[N in-channels H W]}
+batch whose sides are multiples of @racket[patch], it answers the
+@tt{[N T width]} tokens, row by row.
+}
+
+@deftogether[(@defproc[(vision-transformer? [v any/c]) boolean?]
+              @defproc[(patch-embed? [v any/c]) boolean?])]{
+The predicates.
+}
+
+@defproc[(huggingface-vit-key [key string?]) (or/c string? #f)]{
+A Hugging Face @tt{ViTModel} or @tt{ViTForImageClassification} key as
+@racket[VisionTransformer] names it, for @racket[load-state!]'s
+@racket[#:rename]; their layer norms use an epsilon of @racket[1e-12]. The
+pooler is dropped, and a key it does not know comes back unchanged, so
+@racket[load-state!] reports it.
+
+@torch-examples[
+(require torch/vision/vit)
+(huggingface-vit-key "vit.encoder.layer.0.attention.attention.query.weight")
+(huggingface-vit-key "pooler.dense.bias")
+]}
 
 @section{Reading images}
 
