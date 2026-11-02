@@ -7,7 +7,7 @@
                   procedure-arity-includes/c unsupplied-arg?)
          (only-in syntax/parse/define define-syntax-parse-rule)
          (only-in threading ~>)
-         (only-in "../foreign.rkt" add gelu relu)
+         (only-in "../foreign.rkt" + gelu relu)
          (only-in "attention.rkt" MultiheadAttention)
          (only-in (submod "attention.rkt" private)
                   attention-mask/c attention-sequence/c attn-mask-shaped
@@ -61,7 +61,9 @@
   (->i ([src attention-sequence/c]
         [mask (or/c #f attention-mask/c)]
         [key-padding-mask (or/c #f attention-mask/c)]
-        [causal? boolean?])
+        [causal? boolean?]
+        [need-weights? boolean?]
+        [average-attn-weights? boolean?])
        #:pre/desc (src) (wide "src" src d-model)
        #:pre/desc (src mask)
        (attn-mask-shaped "mask" mask src src heads batch-first?)
@@ -99,10 +101,16 @@
                        memory batch-first?)
        any))
 
+(define (residual/weights x norm-first? norm sublayer)
+  (define-values (y weights) (sublayer (if norm-first? (norm x) x)))
+  (define sum (+ x y))
+  (values (if norm-first? sum (norm sum)) weights))
+
 (define (residual x norm-first? norm sublayer)
-  (if norm-first?
-      (add x (sublayer (norm x)))
-      (norm (add x (sublayer x)))))
+  (define-values (out _)
+    (residual/weights x norm-first? norm
+                      (lambda (x) (values (sublayer x) #f))))
+  out)
 
 (define (normed norm x)
   (if norm (norm x) x))
@@ -135,18 +143,31 @@
   #:forward (src
              #:mask [mask #f]
              #:key-padding-mask [padding #f]
-             #:causal? [causal? #f])
-  (check src mask padding causal?)
-  (~> src
-      (residual norm-first? norm1
-                (lambda (x)
-                  (dropout1 (self-attn x x x
-                                       #:attn-mask mask
-                                       #:key-padding-mask padding
-                                       #:causal? causal?))))
-      (residual norm-first? norm2
-                (lambda (x)
-                  (~> x linear1 activation dropout linear2 dropout2)))))
+             #:causal? [causal? #f]
+             #:need-weights? [need-weights? #f]
+             #:average-attn-weights? [average? #t])
+  (check src mask padding causal? need-weights? average?)
+  (define (attend x weights?)
+    (self-attn x x x
+               #:attn-mask mask
+               #:key-padding-mask padding
+               #:causal? causal?
+               #:need-weights? weights?
+               #:average-attn-weights? average?))
+  (define (feed-forward x)
+    (~> x linear1 activation dropout linear2 dropout2))
+  (cond
+    [need-weights?
+     (define-values (attended weights)
+       (residual/weights src norm-first? norm1
+                         (lambda (x)
+                           (define-values (y weights) (attend x #t))
+                           (values (dropout1 y) weights))))
+     (values (residual attended norm-first? norm2 feed-forward) weights)]
+    [else
+     (~> src
+         (residual norm-first? norm1 (lambda (x) (dropout1 (attend x #f))))
+         (residual norm-first? norm2 feed-forward))]))
 
 (define-layer TransformerDecoderLayer ;; noqa
   (self-attn multihead-attn linear1 dropout linear2 norm1 norm2 norm3
