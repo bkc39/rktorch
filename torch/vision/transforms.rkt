@@ -15,7 +15,9 @@
                   stack sub tensor tensor-shape tensor? to-dtype transpose where)
          (only-in "../foreign/contracts.rkt" image-batch/c)
          (only-in "../generated.rkt" index-tensor)
-         (only-in "../private/contract.rkt" define/contract-out))
+         (only-in "../private/contract.rkt" define/contract-out)
+         (only-in "private/contracts.rkt"
+                  default-ratio default-scale ratio/c scale/c))
 
 (module+ private
   (provide batch-rng))
@@ -290,12 +292,6 @@
   (imagenet-normalize
    (center-crop (resize (convert-image-dtype x 'float32) 256) 224)))
 
-(define (ordered-pair/c element/c)
-  (flat-named-contract
-   'ascending-pair
-   (and/c (list/c element/c element/c)
-          (lambda (pair) (<= (car pair) (cadr pair))))))
-
 (define (crop-window rng h w scale ratio)
   (define (uniform lo hi) (+ lo (* (- hi lo) (random rng))))
   (define log-lo (log (exact->inexact (car ratio))))
@@ -312,12 +308,13 @@
       (central-window h w ratio)))
 
 (define (central-window h w ratio)
+  (match-define (list lower upper) ratio)
   (define-values (ch cw)
     (cond
-      [(< (/ w h) (car ratio))
-       (values (max 1 (exact-round (/ w (car ratio)))) w)]
-      [(> (/ w h) (cadr ratio))
-       (values h (max 1 (exact-round (* h (cadr ratio)))))]
+      [(< (/ w h) lower)
+       (values (max 1 (exact-round (/ w lower))) w)]
+      [(> (/ w h) upper)
+       (values h (max 1 (exact-round (* h upper))))]
       [else (values h w)]))
   (list (quotient (- h ch) 2) (quotient (- w cw) 2) ch cw))
 
@@ -328,12 +325,12 @@
           (list size size)))
 
 (define/contract-out (random-resized-crop x size ;; noqa
-                                          #:scale [scale '(0.08 1.0)]
-                                          #:ratio [ratio '(3/4 4/3)]
+                                          #:scale [scale default-scale]
+                                          #:ratio [ratio default-ratio]
                                           #:generator [generator #f])
   (->* [float-image/c exact-positive-integer?]
-       [#:scale (~> (real-in 0 1) (and/c positive?) ordered-pair/c)
-        #:ratio (ordered-pair/c (and/c real? positive?))
+       [#:scale scale/c
+        #:ratio ratio/c
         #:generator (or/c cpu-generator/c #f)]
        tensor?)
   (define rng (batch-rng generator))

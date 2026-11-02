@@ -186,6 +186,19 @@ with `backward!` outside the form as PyTorch recommends). From
   it to `examples/python/18_dino.py`'s ViT and torchvision's.
   `TransformerEncoderLayer` takes `#:need-weights? #:average-attn-weights?`
   and then answers `(values output weights)`.
+- augmentation on the device (`torch/vision/augment.rkt`, #389): the
+  functional `resized-crop` (pixel boxes `[N 4]`, `#:flip`, one
+  `affine-grid` + `grid-sample`), `adjust-brightness|contrast|saturation|hue`
+  (a real or an `[N]` factor), `rgb->grayscale` (0.2989) and `solarize`,
+  torchvision v2's; the random `random-affine-crop`, `random-color-jitter`
+  (fixed order b c s h), `random-grayscale`, `random-solarize`, each drawing
+  `(rand n)`s on the batch's device from `#:generator` in the order the
+  Scribble entry states (a probability-0 step draws nothing); `crop-view`
+  (applied as `(v images #:generator g)`) and `multi-crop` are DINO's
+  multi-crop; native calls independent of the batch size. Colour math is
+  `torch/vision/private/color.rkt`; `torch/tests/augment-parity-test.rkt`
+  holds it to torchvision v2 and to `examples/python/18_dino.py`'s
+  `multi_crop`.
 - resnet (`torch/vision/resnet.rkt`, #152): `BasicBlock` and `ResNet`
   (`#:classes #:base #:blocks`, ResNet-18 for 32x32 images by default,
   bias-free convolutions under `BatchNorm2d`); the training loop with
