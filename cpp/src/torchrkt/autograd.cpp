@@ -147,7 +147,9 @@ int tr_tensors_grad(tr_tensor* const* tensors, int64_t n, tr_tensor** grads,
         throw std::invalid_argument(
             "gradient is on an unsupported device kind");
       }
-      nbytes[i] = static_cast<int64_t>(g.nbytes());
+      nbytes[i] = g.layout() == torch::kStrided
+                      ? static_cast<int64_t>(g.nbytes())
+                      : int64_t{-1};
       device_type[i] = static_cast<int>(torchrkt::type_of(d));
       device_index[i] = d.has_index() ? static_cast<int64_t>(d.index()) : 0;
       held[static_cast<size_t>(i)] = std::make_unique<tr_tensor>(tr_tensor{g});

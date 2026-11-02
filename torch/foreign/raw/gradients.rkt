@@ -6,6 +6,7 @@
          (only-in "memory.rkt"
                   adopt-gradient!
                   free-handles!
+                  oom-retry
                   record-allocation!
                   register-tensors!
                   registered)
@@ -32,6 +33,7 @@
       (for/list ([p (in-list params)] [row (in-list rows)])
         (match row
           [(fetched-gradient #f _ _ _) #f]
+          [(fetched-gradient _ (? negative?) _ _) #f]
           [(fetched-gradient h nbytes type index)
            (define dev (device type (if (eq? type 'cpu) 0 index)))
            (record-allocation! h nbytes dev
@@ -42,8 +44,10 @@
       (collect-under-pressure! dev)))
   handles)
 
+;; The fetch only reads, so an OOM can collect and run it again. The retry
+;; composes outside the registration region, as tensor-allocator's does.
 (define (gradients-allocator raw-fn)
-  (define fetch (registering/fetched raw-fn))
+  (define fetch ((oom-retry) (registering/fetched raw-fn)))
   (lambda (params)
     (define rows (fetch params))
     (and rows (account-gradients! params rows))))

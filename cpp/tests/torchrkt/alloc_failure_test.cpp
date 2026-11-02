@@ -47,8 +47,7 @@ struct Handle {
 };
 
 tr_tensor* armed_grads(tr_tensor* const* ts, int64_t n, tr_tensor** grads,
-                       int64_t* nbytes, int* types, int64_t* indices,
-                       int* rc) {
+                       int64_t* nbytes, int* types, int64_t* indices, int* rc) {
   fail_next_allocation = true;
   *rc = tr_tensors_grad(ts, n, grads, nbytes, types, indices);
   fail_next_allocation = false;

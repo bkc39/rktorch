@@ -1,18 +1,23 @@
 #lang racket/base
 
 (module+ test
-  (require (only-in racket/match match-define)
+  (require (only-in ffi/unsafe _fun _int _int64 _list)
+           (only-in racket/match match-define)
            rackunit
            (only-in threading ~>)
            (only-in "../foreign/autograd-ops.rkt" with-gradient with-gradients)
            (only-in "../foreign/raw/fault.rkt" with-crossing-hook)
-           (only-in "../foreign/raw/memory.rkt" adopted-bytes)
+           (only-in "../foreign/raw/gradients.rkt" fetched-gradient gradients-allocator)
+           (only-in "../foreign/raw/memory.rkt" _tr-device-type adopted-bytes free-handles!)
+           (only-in "../foreign/raw/syntax.rkt" _Tensor _Tensor/null define-torch)
            (only-in "../foreign/structs.rkt" tensor-handle)
+           (only-in "../generated.rkt" embedding)
            (only-in "../foreign/raw/pressure-settings.rkt"
                     native-collect-at-troughs)
            (only-in "../main.rkt"
-                    backward! grad manual-seed! randn reshape sum tensor->list)
-           (only-in "../nn.rkt" Linear parameters)
+                    backward! grad manual-seed! randn requires-grad! reshape sum tensor
+                    tensor->list)
+           (only-in "../nn.rkt" Linear parameters sgd step!)
            (only-in "private/race-harness.rkt" with-race-hook)
            (only-in "private/unseen-gradient.rkt" with-unseen-gradient)
            (only-in "private/within.rkt" bounded-test))
@@ -89,4 +94,43 @@
     (define ps (params-of (layers 3)))
     (check-equal? (balance-of (lambda () (with-gradients ([qs gs] ps) (void)))) 0)
     (check-equal? (balance-of (lambda () (with-gradients ([qs gs] ps) (error 'body))))
-                  0)))
+                  0))
+
+  (define-torch tensors-grad/unwrapped
+    (_fun (ts : (_list i _Tensor))
+          (n : _int64 = (length ts))
+          (grads : (_list o _Tensor/null n))
+          (nbytes : (_list o _int64 n))
+          (types : (_list o _tr-device-type n))
+          (indices : (_list o _int64 n))
+          -> (rc : _int)
+          -> (and (zero? rc) (map fetched-gradient grads nbytes types indices)))
+    #:c-id tr_tensors_grad)
+
+  ;; 2^60 floats: a deterministic host OOM, through the RNG's no-retry path
+  (define (fail-with-oom!)
+    (with-handlers ([exn:fail? void])
+      (randn 1152921504606846976))
+    #f)
+
+  (bounded-test "a fetch that fails with an OOM collects and runs again"
+    (define ps (params-of (layers 2)))
+    (define calls 0)
+    (define (fails-once ts)
+      (set! calls (add1 calls))
+      (if (= calls 1) (fail-with-oom!) (tensors-grad/unwrapped ts)))
+    (define handles ((gradients-allocator fails-once) ps))
+    (check-equal? calls 2)
+    (check-equal? (length handles) (length ps))
+    (free-handles! (filter values handles)))
+
+  (define (sparse-step foreach?)
+    (manual-seed! 0)
+    (define w (requires-grad! (randn 3 2)))
+    (~> (embedding w (tensor '(0 2) #:dtype 'int64) -1 #f #t) sum backward!)
+    (step! (sgd (list w) #:lr 0.5 #:foreach? foreach?))
+    (flat w))
+
+  (bounded-test "a step takes a sparse gradient as the one-at-a-time path does"
+    (check-equal? (sparse-step #t) (sparse-step #f))))
+
