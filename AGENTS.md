@@ -89,9 +89,18 @@ with `backward!` outside the form as PyTorch recommends). From
   `ones-like` / `full-like` / `randn-like` / `rand-like` inherit the
   reference's shape, device, dtype unless overridden (#56); `arange` stays
   float32 by default (its int64 inference is the open remainder of #56);
-  `make-generator` / `generator?` / `randperm` / `draw-seed` — a CPU
+  `make-generator` / `generator?` / `randperm` / `draw-seed` — a
   `torch.Generator` with its own stream, the permutation and the int64
   seed word drawn from it (or the global stream), for loaders (#87)
+- device generators (`torch/foreign/generator.rkt`, #389):
+  `make-generator #:device` is `torch.Generator(device)`, `generator-device`
+  names its device and `cpu-generator/c` holds for one on the CPU; `rand`,
+  `randn`, `rand-like`, `randn-like`, `multinomial` and `randperm` (whose
+  tensor is on the CPU) blame a caller whose effective generator (the
+  argument, else `current-generator`) is on another device than the
+  tensor; `dataloader` and the augmentations of
+  `torch/vision/transforms.rkt` take only a CPU generator
+  (`tr_generator_new_on`, `tr_generator_device`)
 - iteration (`torch/foreign/sequences.rkt`, #199): `in-tensor` (the
   slices along the first dimension as views, Python's `for row in t`) and
   `in-flattened-tensor` (the elements as Racket numbers, row-major, copied
@@ -279,7 +288,7 @@ sgd adam rmsprop step! zero-grads! clip-grad-norm! learning-rate
 set-learning-rate! step-lr multi-step-lr exponential-lr cosine-annealing-lr
 linear-lr one-cycle-lr lambda-lr ema ema-update! ema-average cross-entropy
 nll-loss mse-loss binary-cross-entropy-with-logits huber-loss l1-loss
-kaiming-uniform uniform-init normal-init fan-in`. The functional
+kaiming-uniform uniform-init normal-init trunc-normal-init fan-in`. The functional
 transformer primitives (`gelu tril triu masked-fill embedding layer-norm`,
 tranche 3, #22), the UNet ones (`conv-transpose2d group-norm silu
 clamp`, tranche 4, #84; `upsample-nearest2d` over `repeat_interleave`, tranche
@@ -290,7 +299,12 @@ map; `BatchNorm2d`/`BatchNorm1d` keep `running-mean`, `running-var` and
 mode) and attention (`scaled-dot-product-attention #:mask #:causal?
 #:dropout #:scale`, tranche 8, #210, the fused kernel behind
 `F.scaled_dot_product_attention`; `gelu #:approximate 'tanh`, GPT-2's form,
-on the hand-written shim) live on `torch` beside the other functional ops;
+on the hand-written shim) and the sampling grids (`affine-grid grid-sample
+#:mode #:padding-mode #:align-corners? upsample-bicubic2d`, tranche 9, #389:
+`F.affine_grid`, `F.grid_sample` on a float `[N C H W]` batch with the grid
+on its N, dtype and device, bicubic `F.interpolate(size=)`; `floor-tensor`
+and `fmod-scalar` stay on `torch/generated`) live on
+`torch` beside the other functional ops;
 a causal mask built by hand is `(masked-fill scores (eq (tril (ones T T)) 0)
 -inf.0)`, whose mask is `#t` = hidden, while the fused kernel's boolean
 `#:mask` is `#t` = attend, as PyTorch's function is (the layers'
@@ -653,7 +667,7 @@ its regression test, once a pinned libtorch fixes the kernel.
   an int status plus one `tr_tensor**` out pointer per return, every one
   NULL unless the whole call succeeded) every op body reduces to — new ops must use them rather
   than hand-rolling try/catch.
-- `tests/torchrkt/{random,ops,autograd,generated_golden,generated_tranche2..8}_test.cpp`
+- `tests/torchrkt/{random,ops,autograd,generated_golden,generated_tranche2..9}_test.cpp`
   — GoogleTest goldens per family (generated families get a C-boundary
   golden: a correctness case + a null/length-guard case).
   `c_api_compile_test.c` proves the headers are valid C (add a

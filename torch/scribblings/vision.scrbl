@@ -363,7 +363,7 @@ draws: a torchvision pipeline on the same seed picks different crops.
 
 @defproc[(random-horizontal-flip [x tensor?]
                                  [#:p p (real-in 0 1) 0.5]
-                                 [#:generator generator (or/c generator? #f) #f])
+                                 [#:generator generator (or/c cpu-generator/c #f) #f])
          tensor?]{
 Mirrors each image of the rank-4 batch @racket[x] along its width with
 probability @racket[p]; the rest pass through unchanged.
@@ -379,7 +379,7 @@ With @racket[generator] @racket[#f], the batch seed comes from
                               [#:ratio ratio (list/c (and/c real? positive?)
                                                      (and/c real? positive?))
                                        '(3/4 4/3)]
-                              [#:generator generator (or/c generator? #f) #f])
+                              [#:generator generator (or/c cpu-generator/c #f) #f])
          tensor?]{
 torchvision's @tt{RandomResizedCrop}, the ImageNet training augmentation:
 a window covering a random share of the image's area, drawn from
@@ -402,7 +402,7 @@ With @racket[generator] @racket[#f], the batch seed comes from
                                    [(list _ _ h w) (and (positive? h) (positive? w))]
                                    [_ #f])))]
                       [#:padding padding exact-nonnegative-integer? 4]
-                      [#:generator generator (or/c generator? #f) #f])
+                      [#:generator generator (or/c cpu-generator/c #f) #f])
          tensor?]{
 Pads every image of the rank-4 batch @racket[x], whose height and width are
 positive, with @racket[padding] zero pixels on each side and cuts a

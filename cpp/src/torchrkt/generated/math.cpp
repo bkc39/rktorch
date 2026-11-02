@@ -39,6 +39,22 @@ tr_tensor* tr_gen_cos(const tr_tensor* self) {
                                 [&] { return at::cos(self->value); });
 }
 
+tr_tensor* tr_gen_floor(const tr_tensor* self) {
+  if (!self) {
+    return torchrkt::null_arg("tr_gen_floor");
+  }
+  return torchrkt::alloc_result("tr_gen_floor",
+                                [&] { return at::floor(self->value); });
+}
+
+tr_tensor* tr_gen_fmod_scalar(const tr_tensor* self, double other) {
+  if (!self) {
+    return torchrkt::null_arg("tr_gen_fmod_scalar");
+  }
+  return torchrkt::alloc_result("tr_gen_fmod_scalar",
+                                [&] { return at::fmod(self->value, other); });
+}
+
 tr_tensor* tr_gen_sin(const tr_tensor* self) {
   if (!self) {
     return torchrkt::null_arg("tr_gen_sin");
