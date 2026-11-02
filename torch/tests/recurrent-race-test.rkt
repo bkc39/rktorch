@@ -3,6 +3,7 @@
 (module+ test
   (require (only-in racket/list make-list)
            (only-in racket/match == match-lambda)
+           (only-in "../foreign/raw/cas.rkt" cas-update!)
            rackunit
            "../main.rkt"
            "../nn.rkt"
@@ -33,10 +34,7 @@
     (to (LSTM 8 16 #:num-layers 2 #:bidirectional? #t) device-kind))
 
   (define (update! b f)
-    (let retry ()
-      (define seen (unbox b))
-      (unless (box-cas! b seen (f seen))
-        (retry))))
+    (void (cas-update! b f)))
 
   (define (bump! counter)
     (update! counter add1))

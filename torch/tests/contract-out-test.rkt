@@ -180,3 +180,50 @@
 
   (check-equal? (list->set crossings) (list->set known-crossings)
                 "sibling imports crossing a contract: use define/checked-out, or drop a fixed one"))
+
+(module+ test
+  (require (only-in racket/list append* filter-map)
+           (only-in racket/match match-lambda))
+
+  (define (defined-name form)
+    (match form
+      [`(define ,(? symbol? name) . ,_) name]
+      [`(define (,(? symbol? name) . ,_) . ,_) name]
+      [`(define ((,(? symbol? name) . ,_) . ,_) . ,_) name]
+      [_ #f]))
+
+  (define (contract-out-names form)
+    (for*/list ([spec (in-list (match form [`(provide . ,specs) specs] [_ '()]))]
+                [clause (in-list (match spec [`(contract-out . ,clauses) clauses] [_ '()]))]
+                [name (in-value (match clause [`(,(? symbol? name) . ,_) name] [_ #f]))]
+                #:when name)
+      name))
+
+  (define (split-contracts forms where outer)
+    (define defined (append (filter-map defined-name forms) outer))
+    (append
+     (for*/list ([form (in-list forms)]
+                 [name (in-list (contract-out-names form))]
+                 #:when (memq name defined))
+       (list where name))
+     (append*
+      (map (match-lambda
+             [`(module+ ,name . ,sub)
+              (split-contracts sub (format "~a ~a" where name) defined)]
+             [`(,(or 'module 'module*) ,name ,_ . ,sub)
+              (split-contracts sub (format "~a ~a" where name) '())]
+             [_ '()])
+           forms))))
+
+  (define split
+    (for*/list ([f (in-directory torch-dir)]
+                #:when (regexp-match? #rx"[.]rkt$" (path->string f))
+                #:do [(match-define `(module ,_ ,_ (#%module-begin ,forms ...))
+                        (parameterize ([read-accept-reader #t] [read-accept-lang #t])
+                          (call-with-input-file f read)))]
+                [hit (in-list (split-contracts
+                               forms (path->string (find-relative-path torch-dir f)) '()))])
+      hit))
+
+  (check-equal? split '(("foreign/ops.rkt unsafe" to!))
+                "a contract-out in a separate provide: use define/contract-out at the definition"))

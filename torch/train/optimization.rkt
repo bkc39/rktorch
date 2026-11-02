@@ -7,8 +7,8 @@
          (only-in "../private/contract.rkt" define/contract-out)
          (only-in "logging.rkt" loss/c)
          (only-in "private/types.rkt"
-                  not-implemented scheduler-config? trainer-hparam-names
-                  trainer?)
+                  make-scheduler-config not-implemented scheduler-config?
+                  trainer-hparam-names trainer?)
          (only-in "run.rkt" interval/c manual-run/c))
 
 (provide (contract-out [scheduler-config? (-> any/c boolean?)]))
@@ -22,7 +22,7 @@
                                        #:frequency [frequency 1])
   (->* (scheduler?) (#:interval interval/c #:frequency exact-positive-integer?)
        scheduler-config?)
-  (not-implemented 'scheduler-config 'T2))
+  (make-scheduler-config s interval frequency))
 
 (define/contract-out (hparam tr name)
   (->i ([tr trainer?] [name (tr) (hparam-name/c tr)]) [_ real?])
