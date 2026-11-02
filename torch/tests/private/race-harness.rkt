@@ -45,6 +45,7 @@
          spawn
          join
          stop!
+         await-flag
          worker-thread
          join-all
          make-roster
@@ -230,6 +231,18 @@
   (kill-thread t)
   (unless (sync/timeout seconds (thread-dead-evt t))
     (error 'stop! "a killed worker was still running after ~a s" seconds)))
+
+(define (await-flag w flag #:seconds [seconds 30])
+  (define deadline (+ (current-inexact-milliseconds) (* 1000 seconds)))
+  (let poll ()
+    (cond
+      [(unbox flag) (unbox flag)]
+      [(thread-dead? (worker-thread w))
+       (join w)
+       (error 'await-flag "a worker ended without setting its flag")]
+      [(> (current-inexact-milliseconds) deadline)
+       (error 'await-flag "a worker did not set its flag within ~a s" seconds)]
+      [else (sleep 0.001) (poll)])))
 
 (define (join-all workers #:seconds [seconds 120])
   (map (lambda (w) (join w #:seconds seconds)) workers))

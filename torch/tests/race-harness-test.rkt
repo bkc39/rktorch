@@ -4,7 +4,7 @@
   (require rackunit
            (only-in "../foreign/raw/race-points.rkt" race-point)
            (only-in "private/race-harness.rkt"
-                    await-roles! join join-all make-gate make-roster
+                    await-flag await-roles! join join-all make-gate make-roster
                     release-pending? spawn stop-roles! until-stopped
                     wait-for-arrival with-parked worker-thread))
 
@@ -20,6 +20,13 @@
         (check-eq? (wait-for-arrival g) 'parked)
         a))
     (list (thread-dead? (worker-thread a)) (unbox passed) (release-pending? g)))
+
+  (test-case "a worker that ends before its flag fails the wait at once with its error"
+    (for ([pool (in-list '(#f own))])
+      (define a (spawn (lambda () (error 'worker "died before its flag")) #:pool pool))
+      (define start (current-inexact-milliseconds))
+      (check-exn #rx"died before its flag" (lambda () (await-flag a (box #f) #:seconds 30)))
+      (check-true (< (- (current-inexact-milliseconds) start) 10000) (format "~a" pool))))
 
   (test-case "a worker left parked never passes its race point"
     (for ([pool (in-list '(#f own))])

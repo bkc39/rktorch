@@ -21,7 +21,7 @@
            (only-in "../foreign/raw/syntax.rkt" _Tensor _Tensor/null define-torch)
            (only-in "../foreign/structs.rkt" tensor-handle)
            (only-in "private/race-harness.rkt"
-                    check-ledger hooks join join-all labelled
+                    await-flag check-ledger hooks join join-all labelled
                     ledger-snapshot ledger-violations make-gate make-watch
                     release-gate! seeded-generator settle! spawn stop! wait-for-arrival
                     watch-finalized watch-freed-count watch-hook
@@ -345,14 +345,6 @@
       (when (< (current-inexact-milliseconds) until)
         (spin))))
 
-  (define (await-box b #:seconds [seconds 30])
-    (define deadline (+ (current-inexact-milliseconds) (* 1000 seconds)))
-    (let poll ()
-      (cond
-        [(unbox b) (unbox b)]
-        [(> (current-inexact-milliseconds) deadline) #f]
-        [else (sleep 0.001) (poll)])))
-
   (define-torch neg/bare (_fun _Tensor -> _Tensor/null) #:c-id tr_neg)
 
   (define trials 200)
@@ -376,7 +368,7 @@
                      (set-box! started #t)
                      (loop)))
                  #:pool pool))
-        (await-box started)
+        (await-flag a started)
         (sleep (* 0.002 (random rng)))
         (case stop-by
           [(kill) (stop! a)]
@@ -396,7 +388,7 @@
   (test-case "a thread stopped mid-registration leaves no handle unguarded"
     (for* ([stop-by (in-list '(kill break))]
            [pool (in-list pools)])
-      (stopped-mid-registration pool stop-by)))
+      (call-with-process-deadline 120 (lambda () (stopped-mid-registration pool stop-by)))))
 
   (test-case "eight parallel threads accounting and unaccounting keep the counter at the fold"
     (define dev (device 'cuda 16))
@@ -514,7 +506,7 @@
         (spin-for 50)))
     (with-race-hook (hooks (watch-hook w) spin-at-release)
       (define a (spawn (lambda () (tensor-free! t)) #:pool pool))
-      (define where (await-box arrived))
+      (define where (await-flag a arrived))
       (stop! a)
       (check-false (tensor? t) "a kill left a released handle tagged live")
       (check-eq? where 'in-region
