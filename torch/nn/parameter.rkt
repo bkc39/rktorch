@@ -7,6 +7,7 @@
          (only-in "../private/contract.rkt" define/checked-out))
 
 (struct Parameter% tensor-impl ()
+  #:authentic
   #:reflection-name 'Parameter)
 
 (define/checked-out Parameter? (-> any/c boolean?) Parameter%?)
