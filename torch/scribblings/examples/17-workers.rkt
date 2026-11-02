@@ -105,8 +105,7 @@ seeded from the loader's generator, and @racket[random-jitter] applies them.
 @bold{The dataset.} Item @racket[i] is the decoded, jittered image as 3136
 bytes of float32, and its label. The collate builds one tensor per field for
 the whole batch, so a worker makes two native calls per batch and does
-everything else in Racket, since torch calls inside a worker do not yet run
-in parallel (see @racket[dataloader]). It names the CPU because the step
+everything else in Racket. It names the CPU because the step
 below runs inside @racket[with-default-device].
 
 @chunk[<r17-dataset>

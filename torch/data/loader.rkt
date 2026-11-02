@@ -1,10 +1,12 @@
 #lang racket/base
 
-(require (only-in racket/contract/base
+(require (for-syntax racket/base (only-in syntax/parse/pre ...+ expr id))
+         (only-in racket/contract/base
                   -> ->i and/c any/c contract-out flat-named-contract listof
                   or/c unsupplied-arg?)
          (only-in racket/list first)
          (only-in racket/match == match)
+         (only-in syntax/parse/define define-syntax-parse-rule)
          (only-in threading ~>)
          (only-in "../foreign.rkt"
                   device device-type draw-seed generator? index-select
@@ -185,7 +187,7 @@
     (when (and partial-last? (= k (sub1 count)))
       (finish!))
     (dataset-batch ds indices (dataloader-collate loader)))
-  (values count batch finish!))
+  (values count batch finish! void))
 
 (define (sampler-draws loader)
   (define ds (dataloader-dataset loader))
@@ -218,10 +220,9 @@
         (for/list ([i (in-range start (+ start len))]) i)))
   (values indices finish!))
 
-(define (worker-epoch-batches loader)
+(define (worker-epoch-batches loader breaks)
   (define workers (dataloader-workers loader))
   (define base (draw-seed #:generator (dataloader-generator loader)))
-  (define breaks (current-break-parameterization))
   (parameterize-break #f
     (define pool (start-workers (dataloader-dataset loader) (dataloader-collate loader)
                                 workers base))
@@ -280,18 +281,42 @@
     (set! taken #f)
     (finish!)
     (stop-workers! pool))
+  (define (abandoned!)
+    (set! taken #f)
+    (stop-workers! pool))
   (set-up (lambda ()
             (for ([r (in-range ahead)])
               (refill! r))))
-  (values count batch exhausted!))
+  (values count batch exhausted! abandoned!))
+
+(define (abandonable-traversal loader [breaks (current-break-parameterization)])
+  (if (zero? (dataloader-workers loader))
+      (call-with-break-parameterization breaks (lambda () (epoch-batches loader)))
+      (worker-epoch-batches loader breaks)))
 
 (define (traversal loader)
-  (if (zero? (dataloader-workers loader))
-      (epoch-batches loader)
-      (worker-epoch-batches loader)))
+  (define-values (count batch finish! _abandon!) (abandonable-traversal loader))
+  (values count batch finish!))
+
+(define (call-with-traversal loader proc)
+  (define breaks (current-break-parameterization))
+  (parameterize-break #f
+    (define-values (count batch finish! abandon!) (abandonable-traversal loader breaks))
+    (define taken 0)
+    (define (counted-batch k)
+      (set! taken (max taken (add1 k)))
+      (call-with-values (lambda () (batch k)) list))
+    (dynamic-wind void
+                  (lambda ()
+                    (call-with-break-parameterization breaks
+                                                      (lambda () (proc count counted-batch))))
+                  (lambda () (if (= taken count) (finish!) (abandon!))))))
+
+(define-syntax-parse-rule (with-traversal ([count:id batch:id] loader:expr) body:expr ...+)
+  (call-with-traversal loader (lambda (count batch) body ...)))
 
 (module+ private
-  (provide sampler-draws traversal))
+  (provide sampler-draws traversal with-traversal))
 
 (define/contract-out (in-dataloader loader) ;; noqa
   (-> dataloader? sequence?)
