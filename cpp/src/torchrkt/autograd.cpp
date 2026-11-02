@@ -134,8 +134,9 @@ int tr_tensors_grad(tr_tensor* const* tensors, int64_t n, tr_tensor** grads,
   if (torchrkt::tensors_arg_status("tr_tensors_grad", tensors, n) != 0) {
     return 1;
   }
-  std::vector<std::unique_ptr<tr_tensor>> held(static_cast<size_t>(n));
+  std::vector<std::unique_ptr<tr_tensor>> held;
   const int rc = torchrkt::status_call("tr_tensors_grad", [&] {
+    held.resize(static_cast<size_t>(n));
     for (int64_t i = 0; i < n; ++i) {
       const torch::Tensor& g = tensors[i]->value.grad();
       if (!g.defined()) {

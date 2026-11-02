@@ -113,6 +113,7 @@ if(BUILD_TESTING)
   torchrkt_apply_nix_cflags(torchrkt_c_api_compile_test)
 
   add_executable(torchrkt_tests
+    tests/torchrkt/alloc_failure_test.cpp
     tests/torchrkt/audio_test.cpp
     tests/torchrkt/autocast_test.cpp
     tests/torchrkt/autograd_test.cpp
