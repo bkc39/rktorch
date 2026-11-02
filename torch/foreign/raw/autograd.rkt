@@ -1,9 +1,8 @@
 #lang racket/base
 
 (require (only-in ffi/unsafe _bool _double _fun _int _int64 _list _ptr)
-         (only-in "memory.rkt"
-                  _tr-device-type fetched-gradient gradients-allocator
-                  tensor-allocator tensor-allocator/gradient)
+         (only-in "gradients.rkt" fetched-gradient gradients-allocator)
+         (only-in "memory.rkt" _tr-device-type tensor-allocator tensor-allocator/gradient)
          (only-in "syntax.rkt" _Tensor _Tensor/null define-torch))
 
 (provide tr-tensor-requires-grad!/raw

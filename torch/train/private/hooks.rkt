@@ -15,6 +15,7 @@
          hook-for-side
          hook-named
          hooks
+         loop-hook-names
          step-log
          trainer-hook?)
 
@@ -82,6 +83,12 @@
     (row 'on-load-checkpoint both '(checkpoint) #:order 'trainer-first))))
 
 (define definable-hooks (filter-not hook-form hooks))
+
+(define loop-hooks
+  (for/hasheq ([part (in-list '(validation test predict))])
+    (values part (map hook-name (stage-rows part #f)))))
+
+(define (loop-hook-names part) (hash-ref loop-hooks part))
 
 (define ((named? name) h) (eq? name (hook-name h)))
 

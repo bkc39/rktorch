@@ -1,6 +1,6 @@
 #lang racket/base
 
-(require (only-in ffi/unsafe cpointer-has-tag? prop:cpointer set-cpointer-tag!)
+(require (only-in ffi/unsafe cpointer-has-tag? prop:cpointer)
          (only-in ffi/vector
                   f32vector->list
                   f64vector->list
@@ -16,8 +16,10 @@
          (only-in "format.rkt"
                   tensor->pytorch-repr
                   tensor-tree->pytorch-repr)
+         (only-in "raw/cas.rkt" cas-field-claim!)
          (only-in "raw/fault.rkt" native-fault? note-native-fault!)
          (only-in "raw/memory.rkt" free-handles! tr-tensor-free/checked)
+         (only-in "raw/race-points.rkt" race-point)
          (only-in "raw/syntax.rkt" Tensor?)
          (only-in "raw/tensor.rkt"
                   dtype-code->symbol
@@ -29,12 +31,13 @@
                   tr-tensor-print/raw
                   tr-tensor-shape/raw))
 
-(provide (struct-out tensor-impl)
+(provide (except-out (struct-out tensor-impl) set-tensor-impl-state!)
          tensor-handle
          tensor-impl-shape
          handle->string
          handle->repr
          wrap-tensor
+         tensor-state-index
          tensor-free!
          tensors-free!)
 
@@ -100,14 +103,15 @@
 (define summarize-threshold 1000)
 (define edgeitems 3)
 
-;; The tag flips even when the free raises — an attempted free consumes the
-;; finalizer backstop, so a live-looking tag would invite use-after-free.
-;; Breaks stay deferred: one landing mid-free strands the handle forever.
-(define (free-handle! h)
+;; a break landing between the take and the release strands the handle
+(define (free-handle! h #:take [take! void])
   (dynamic-wind
    void
-   (lambda () (parameterize-break #f (tr-tensor-free/checked h)))
-   (lambda () (set-cpointer-tag! h 'Tensor-freed))))
+   (lambda ()
+     (parameterize-break #f
+       (take!)
+       (tr-tensor-free/checked h)))
+   void))
 
 (define (call-with-slice h d start len proc)
   (define s (check-handle 'tensor->repr (tr-tensor-narrow/raw h d start len)))
@@ -176,9 +180,15 @@
      (tensor->pytorch-repr (handle->floats h dims) dims
                            #:suffix (dtype-suffix dtype))]))
 
-(struct tensor-impl (handle shape)
+(define-values (prop:cas-field cas-field? cas-field-index) ;; noqa
+  (make-struct-type-property 'cas-field))
+
+(struct tensor-impl (handle shape [state #:auto #:mutable])
+  #:auto-value 'live
+  #:authentic
   #:reflection-name 'tensor
-  #:property prop:cpointer 0
+  #:property prop:cpointer (struct-field-index handle)
+  #:property prop:cas-field (struct-field-index state)
   #:property prop:custom-write
   (lambda (t port _mode)
     (define h (tensor-impl-handle t))
@@ -217,16 +227,27 @@
 (define (wrap-tensor h)
   (tensor-impl h (handle-shape h)))
 
+(define tensor-state-index (cas-field-index struct:tensor-impl))
+
+(define (take-state! t)
+  (cas-field-claim! t tensor-state-index 'live 'freeing #:site 'tensor-state))
+
 (define (tensor-free! t)
   (define h (tensor-handle t))
-  (when (cpointer-has-tag? h 'Tensor)
-    (free-handle! h)))
+  (define (take!)
+    (unless (take-state! t)
+      (raise-arguments-error 'tensor-free!
+                             "the tensor is being freed or was freed"))
+    (race-point free-taken h))
+  (free-handle! h #:take take!))
 
+;; A tensor already freed, or being freed by another thread, is skipped.
 (define (tensors-free! ts)
-  (define hs
-    (for*/list ([t (in-list ts)]
-                [h (in-value (tensor-handle t))]
-                #:when (cpointer-has-tag? h 'Tensor))
-      h))
-  (unless (null? hs)
-    (free-handles! hs)))
+  (parameterize-break #f
+    (define hs
+      (for/list ([t (in-list ts)] #:when (take-state! t))
+        (define h (tensor-handle t))
+        (race-point free-taken h)
+        h))
+    (unless (null? hs)
+      (free-handles! hs))))

@@ -1,7 +1,8 @@
 #lang racket/base
 
 (module+ test
-  (require (only-in racket/file make-temporary-file)
+  (require (only-in racket/contract/base or/c)
+           (only-in racket/file make-temporary-file)
            rackunit
            (only-in syntax/macro-testing convert-compile-time-error)
            "../main.rkt"
@@ -451,6 +452,67 @@
                       (set! encoder.block (Linear 1 1))
                       #:forward (x) x)
                     (Dotted))))))
+
+  (test-case "a forward input contract may name the layer's own predicate"
+    (define-layer Selfie (a)
+      #:forward ([o : (or/c #f Selfie?)]) a)
+    (check-equal? ((Selfie 1) #f) 1)
+    (check-equal? ((Selfie 1) (Selfie 2)) 1)
+    (check-exn #rx"^Selfie: contract violation" (lambda () ((Selfie 1) 2))))
+
+  (test-case "define-layer rejects #:method and #:property, and needs #:forward last"
+    (define clause-rx
+      #rx"define-layer: expected one of these literals: #:init, #:reflection-name, #:contract, #:predicate, #:on-move, or #:forward")
+    (check-exn clause-rx
+               (lambda ()
+                 (convert-compile-time-error
+                  (let ()
+                    (define-layer M (a) #:method (m) 1 #:forward (x) x)
+                    (void)))))
+    (check-exn clause-rx
+               (lambda ()
+                 (convert-compile-time-error
+                  (let ()
+                    (define-layer P (a) #:property prop:procedure 1 #:forward (x) x)
+                    (void)))))
+    (check-exn #rx"define-layer: expected more terms starting with the literal #:init, .* or the literal #:forward"
+               (lambda ()
+                 (convert-compile-time-error
+                  (let ()
+                    (define-layer N (a) #:contract any/c)
+                    (void)))))
+    (check-exn #rx"define-layer: expected expression\n  at: #:contract"
+               (lambda ()
+                 (convert-compile-time-error
+                  (let ()
+                    (define-layer L (a) #:forward (x) x #:contract any/c)
+                    (void))))))
+
+  (test-case "define-layer's syntax errors name the first bad part"
+    (check-exn #rx"may not contain a dot; it is one state-dict segment\n  at: a[.]b\n"
+               (lambda ()
+                 (convert-compile-time-error
+                  (let ()
+                    (define-layer D (a.b) #:forwrd (x) x)
+                    (void)))))
+    (check-exn #rx"expected constructor formal .* or expected the literal \\(\\)\n  at: a\n"
+               (lambda ()
+                 (convert-compile-time-error
+                  (let ()
+                    (define-layer F a #:forward (x) x)
+                    (void)))))
+    (check-exn #rx"expected more terms starting with expression\n  at: \\(\\)"
+               (lambda ()
+                 (convert-compile-time-error
+                  (let ()
+                    (define-layer E (a) #:forward (x))
+                    (void)))))
+    (check-exn #rx"expected more terms starting with expression.*while parsing forward formals\n"
+               (lambda ()
+                 (convert-compile-time-error
+                  (let ()
+                    (define-layer B (a) #:forward ([x :]) x)
+                    (void))))))
 
   (test-case "training mode is per instance: leaves flip, parents keep their own"
     (define lin (Linear 1 1))
