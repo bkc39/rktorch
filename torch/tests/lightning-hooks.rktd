@@ -68,6 +68,48 @@
    (transfer_batch_to_device . #f)
    (val_dataloader . #f)
    (validation_step . ((#f #t) (#f #t) #f #t))))
+        (logged-steps
+         .
+         #hasheq(
+   (skip-loss
+    .
+    (
+     (0 (epoch tl_step))
+     (1 (epoch tl_step))
+     (2 (epoch tl_step))
+     (2 (epoch vl))
+     (2 (epoch tl_epoch))
+     (3 (epoch tl_step))
+     (4 (epoch tl_step))
+     (5 (epoch tl_step))
+     (5 (epoch vl))
+     (5 (epoch tl_epoch))))
+   (skip-loss-accumulate
+    .
+    (
+     (0 (epoch tl_step))
+     (1 (epoch tl_step))
+     (2 (epoch tl_step))
+     (2 (epoch vl))
+     (2 (epoch tl_epoch))
+     (3 (epoch tl_step))
+     (4 (epoch tl_step))
+     (5 (epoch tl_step))
+     (5 (epoch vl))
+     (5 (epoch tl_epoch))))
+   (skip-step
+    .
+    (
+     (0 (epoch tl_step))
+     (1 (epoch tl_step))
+     (2 (epoch tl_step))
+     (2 (epoch vl))
+     (2 (epoch tl_epoch))
+     (3 (epoch tl_step))
+     (4 (epoch tl_step))
+     (5 (epoch tl_step))
+     (5 (epoch vl))
+     (5 (epoch tl_epoch))))))
         (scenarios
          .
          #hasheq(

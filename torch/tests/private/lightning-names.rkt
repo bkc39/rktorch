@@ -8,6 +8,7 @@
          (only-in "../../train/private/hooks.rkt" log-rule))
 
 (provide expected-events
+         expected-logged-steps
          fixture
          lightning->rktorch
          log-permissions
@@ -58,6 +59,11 @@
                      (and mapped (append mapped (list epoch step batch lr)))]))
                 (hash-ref (hash-ref fixture 'scenarios) scenario)))
   ((hash-ref deviations scenario (lambda () values)) events))
+
+(define (expected-logged-steps scenario)
+  (for/list ([row (in-list (hash-ref (hash-ref fixture 'logged-steps) scenario))])
+    (match row
+      [(list step keys) (list step (sort (map hyphenated keys) symbol<?))])))
 
 (define (log-permissions)
   (for/hasheq ([(name opts) (in-hash (hash-ref fixture 'log-permissions))]

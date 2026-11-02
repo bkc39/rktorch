@@ -19,6 +19,7 @@
              global-step
              batch-size
              eval-batches
+             batches-stepped
              [current-stage #:auto]
              [batch-index #:auto]
              [hook #:auto]
@@ -44,7 +45,7 @@
                    #:global-step [global-step 0]
                    #:batch-size [batch-size 1])
   (make-run trainer entry device (make-book)
-            callbacks loggers optimizers schedulers epoch global-step batch-size 0))
+            callbacks loggers optimizers schedulers epoch global-step batch-size 0 0))
 
 (define (live? r) (and (run? r) (not (run-finished? r))))
 

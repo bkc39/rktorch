@@ -10,17 +10,13 @@
                   transfer)
          (only-in "hooks.rkt" loop-hook-names)
          (only-in "state.rkt"
-                  run-book run-current-stage run-device run-eval-batches run-global-step
-                  run-stepped? run-trainer set-run-batch-index! set-run-current-stage!
-                  set-run-eval-batches!))
+                  run-batches-stepped run-book run-current-stage run-device run-eval-batches
+                  run-trainer set-run-batch-index! set-run-current-stage! set-run-eval-batches!))
 
 (provide evaluate)
 
 (define stage-loops
   #hasheq((sanity-check . validation) (validate . validation) (test . test) (predict . predict)))
-
-(define (step-label r)
-  (if (run-stepped? r) (sub1 (run-global-step r)) (run-global-step r)))
 
 (define (eval-batch! r stage step batch-start batch-end values-in)
   (note-batch-size! r values-in)
@@ -60,7 +56,7 @@
           (set-run-batch-index! r #f)
           (epoch-end-reached! (run-book r) 'eval)
           (call-hooks r epoch-end)
-          (publish-epoch! r 'eval (step-label r))
+          (publish-epoch! r 'eval (run-batches-stepped r))
           (call-hooks r end)
           outputs))))
    (lambda () (set-run-current-stage! r outer))))

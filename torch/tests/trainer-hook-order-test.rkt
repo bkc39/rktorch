@@ -2,12 +2,14 @@
 
 (module+ test
   (require (only-in racket/list take)
-           (only-in racket/match match*)
+           (only-in racket/match match* match-define)
            rackunit
+           (only-in "../nn.rkt" Linear mse-loss parameters sgd)
            "../train.rkt"
-           (only-in "private/lightning-names.rkt" expected-events)
+           (only-in "private/lightning-names.rkt" expected-events expected-logged-steps)
            (only-in "private/trainer-kit.rkt"
-                    recorder Recorded scenario scenario-events scenario-exn toy-loader))
+                    collecting-logger collecting-rows recorder Recorded scenario
+                    scenario-events scenario-exn toy-loader))
 
   (define (same-event? a e)
     (match* (a e)
@@ -93,4 +95,32 @@
     (check-pred exn:break? caught)
     (check-eq? caught (scenario-exn sc) "fit re-raises the break on-exception received")
     (check-false late "the break issued inside on-exception reached the caller")
-    (check-events 'exception sc)))
+    (check-events 'exception sc))
+
+  (define-trainer Skipping (net skip)
+    (define-init (s) (set! net (Linear 2 1)) (set! skip s))
+    (define-optimizers (sgd (parameters net) #:lr 0.1))
+    (define-training-step (x y)
+      (log! 'tl 1.0 #:on-step? #t #:on-epoch? #t)
+      (define loss (mse-loss (net x) y))
+      (match* (skip (list (run-epoch run) (run-batch-index run)))
+        [('loss '(0 1)) #f]
+        [('step '(0 1)) (skip-step! run) loss]
+        [(_ _) loss]))
+    (define-validation-step (x y)
+      (log! 'vl 2.0)
+      (mse-loss (net x) y)))
+
+  (test-case "LO-10: a skipped window advances the logged step, by a #f loss or skip-step!"
+    (for ([c (in-list '((skip-loss loss 6 1) (skip-step step 6 1)
+                        (skip-loss-accumulate loss 10 2)))])
+      (match-define (list name skip n accumulate) c)
+      (define l (collecting-logger))
+      (fit (Skipping skip) (toy-loader n)
+           #:val (toy-loader 4)
+           #:max-epochs 2
+           #:num-sanity-val-steps 1
+           #:accumulate-grad-batches accumulate
+           #:log-every-n-steps 1
+           #:logger l)
+      (check-equal? (collecting-rows l) (expected-logged-steps name) (format "~a" name)))))

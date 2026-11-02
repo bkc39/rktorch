@@ -1,16 +1,18 @@
 """Lightning 2.6.5's hook order, the oracle of trainer-hook-order-test.rkt.
 
 Records every hook a LightningModule and a Callback can override, in the order
-Lightning calls them, for the scenarios LO-1..LO-8 of the T0 spec (#383), and
-dumps _FxValidator.functions. Writes torch/tests/lightning-hooks.rktd, or the
-path given as the first argument; lightning-hooks-parity-test.rkt regenerates
-it and compares.
+Lightning calls them, for the scenarios LO-1..LO-8 of the T0 spec (#383),
+dumps _FxValidator.functions, and records the step each logger row is labelled
+with in fits that skip a window (#445). Writes torch/tests/lightning-hooks.rktd,
+or the path given as the first argument; lightning-hooks-parity-test.rkt
+regenerates it and compares.
 
 Each event is (name epoch global-step batch-idx lr): the raw Lightning name
 (Callback.<hook> for the callback), trainer.current_epoch,
 trainer.global_step, the hook's own batch_idx argument (#f when it takes
 none) and the first parameter group's learning rate (#f before
-configure_optimizers and outside fit).
+configure_optimizers and outside fit). Each logged row is (step (key ...)):
+the step log_metrics received and the row's keys, sorted.
 """
 
 import inspect
@@ -22,6 +24,7 @@ import lightning.pytorch as pl
 import torch
 from lightning.pytorch.callbacks import Callback
 from lightning.pytorch.core.hooks import CheckpointHooks, DataHooks, ModelHooks
+from lightning.pytorch.loggers.logger import Logger
 from lightning.pytorch.trainer.connectors.logger_connector.fx_validator import (
     _FxValidator,
 )
@@ -59,8 +62,10 @@ CALLBACK_HOOKS = public_hooks(Callback)
 
 class Scenario:
     def __init__(self, skip_epoch=None, fail_at=None, stop_at=None,
-                 step_scheduler=False):
+                 step_scheduler=False, skip_loss=None, skip_step=None):
         self.skip_epoch = skip_epoch
+        self.skip_loss = skip_loss
+        self.skip_step = skip_step
         self.fail_at = fail_at
         self.stop_at = stop_at
         self.step_scheduler = step_scheduler
@@ -162,19 +167,19 @@ def loader(n):
     return DataLoader(TensorDataset(xs, xs.sum(1, keepdim=True)), batch_size=2)
 
 
-def trainer(scenario, **kwargs):
+def trainer(callbacks, logger=False, **kwargs):
     return pl.Trainer(max_epochs=2, num_sanity_val_steps=1,
-                      enable_checkpointing=False, logger=False,
+                      enable_checkpointing=False, logger=logger,
                       enable_progress_bar=False, enable_model_summary=False,
                       accelerator="cpu", devices=1,
-                      callbacks=[Recorded(scenario)], **kwargs)
+                      callbacks=callbacks, **kwargs)
 
 
 def run(entry, scenario_kwargs=None, train=6, trainer_kwargs=None):
     torch.manual_seed(0)
     scenario = Scenario(**(scenario_kwargs or {}))
     model = Recorder(scenario)
-    t = trainer(scenario, **(trainer_kwargs or {}))
+    t = trainer([Recorded(scenario)], **(trainer_kwargs or {}))
     scenario.trainer = t
     try:
         if entry == "fit":
@@ -200,6 +205,61 @@ SCENARIOS = {
         "fit", train=10, trainer_kwargs={"val_check_interval": 2}),
     "test": lambda: run("test"),
     "predict": lambda: run("predict"),
+}
+
+
+class Rows(Logger):
+    def __init__(self):
+        super().__init__()
+        self.rows = []
+
+    @property
+    def name(self):
+        return "rows"
+
+    @property
+    def version(self):
+        return 0
+
+    def log_hyperparams(self, *args, **kwargs):
+        pass
+
+    def log_metrics(self, metrics, step=None):
+        self.rows.append((step, [Symbol(k) for k in sorted(metrics)]))
+
+
+class Logged(Base):
+    def training_step(self, batch, batch_idx):
+        self.log("tl", 1.0, on_step=True, on_epoch=True)
+        if self.at(self.scenario.skip_loss, batch_idx):
+            return None
+        return super().training_step(batch, batch_idx)
+
+    def optimizer_step(self, epoch, batch_idx, optimizer, optimizer_closure=None):
+        if self.at(self.scenario.skip_step, batch_idx):
+            optimizer_closure()
+        else:
+            optimizer.step(closure=optimizer_closure)
+
+    def validation_step(self, batch, batch_idx):
+        self.log("vl", 2.0)
+        return super().validation_step(batch, batch_idx)
+
+
+def logged(scenario_kwargs, train=6, accumulate=1):
+    torch.manual_seed(0)
+    rows = Rows()
+    t = trainer([], logger=rows, log_every_n_steps=1,
+                accumulate_grad_batches=accumulate)
+    t.fit(Logged(Scenario(**scenario_kwargs)), loader(train), loader(4))
+    return rows.rows
+
+
+LOGGED = {
+    "skip-loss": lambda: logged({"skip_loss": (0, 1)}),
+    "skip-step": lambda: logged({"skip_step": (0, 1)}),
+    "skip-loss-accumulate": lambda: logged(
+        {"skip_loss": (0, 1)}, train=10, accumulate=2),
 }
 
 
@@ -237,12 +297,15 @@ def main():
     out = sys.argv[1] if len(sys.argv) > 1 else OUT
     scenarios = "\n".join(scenario_text(name, SCENARIOS[name]())
                           for name in sorted(SCENARIOS))
+    rows = "\n".join(scenario_text(name, LOGGED[name]())
+                     for name in sorted(LOGGED))
     text = ("#hasheq((lightning . %s)\n"
             "        (torch . %s)\n"
             "        (log-permissions\n         .\n         #hasheq(\n%s))\n"
+            "        (logged-steps\n         .\n         #hasheq(\n%s))\n"
             "        (scenarios\n         .\n         #hasheq(\n%s)))\n") % (
         rktd(lightning.__version__), rktd(torch.__version__.split("+")[0]),
-        permissions(), scenarios)
+        permissions(), rows, scenarios)
     os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
     with open(out, "w") as f:
         f.write(text)

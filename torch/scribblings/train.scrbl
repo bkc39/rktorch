@@ -171,19 +171,21 @@ Trains @racket[trainer] in the order of @secref["train-hooks"] and answers
 the finished run. Keywords follow Lightning's @tt{Trainer}. A
 @racket[#:device] of @racket[#f] leaves the trainer where it is and sends
 each batch to the trainer's device. @racket[log!] reduces on the device and
-reads to the host at every @racket[#:log-every-n-steps]-th optimizer step of
-the fit, counted across epochs, at the step of a @racket[request-stop!], and
-at each epoch end, in one transfer for all keys. As in Lightning, the logger
-gets a training row, and a validation epoch's row, labelled with the optimizer
-steps taken before the current batch's step; the first step's row is at
-step 0, and an epoch's training row before any step is at step -1. Each row carries
+reads to the host at the end of every @racket[#:log-every-n-steps]-th
+accumulation window of the fit, counted across epochs, at the step of a
+@racket[request-stop!], and at each epoch end, in one transfer for all keys.
+As in Lightning, the logger gets a training row, and a validation epoch's row,
+labelled with the windows ended before the current one, also those whose step
+was skipped; the first window's row is at step 0, and an epoch's training row
+before any window ends is at step -1. Each row carries
 the key @racket['epoch], @racket[run-epoch], unless one was logged. A
 per-step value logged in a validation loop reaches the logger at each
 validation batch, apart from the training values and without
 @racket['epoch], labelled 0, 1, … with the validation batches the fit has run
-outside the sanity check; in @racket[test], with the batches of that call. With @racket[#:max-epochs]
-@racket[#f], epochs continue until @racket[#:max-steps] steps are taken,
-also past epochs whose steps were skipped. @racket[#:fast-dev-run] runs that
+outside the sanity check; in @racket[test], with the batches of that call.
+@racket[#:max-steps] counts optimizer steps taken, @racket[run-global-step], so
+with @racket[#:max-epochs] @racket[#f] a fit that skips every step does not
+end. @racket[#:fast-dev-run] runs that
 many batches (one for @racket[#t]) of one epoch, with no sanity check, no loggers and no
 @racket[monitor] or @racket[checkpoint] callbacks. If an @racket[exn:fail]
 or @racket[exn:break] is raised, @racket[fit] runs each callback's
@@ -274,7 +276,8 @@ epoch's first batch, the epoch runs no batch.}
 @defproc[(skip-step! [r step-pending-run/c]) void?]{
 Drops the pending optimizer step. The window's remaining backward passes do
 not run, no step is taken, and @racket[run-global-step] does not advance,
-also when called from @racket[on-before-optimizer-step].}
+also when called from @racket[on-before-optimizer-step]. The window still
+advances the logged step label.}
 
 @defproc[(skip-epoch! [r batch-start-run/c]) void?]{
 Lightning's @racket[-1] from @tt{on_train_batch_start}. Once every

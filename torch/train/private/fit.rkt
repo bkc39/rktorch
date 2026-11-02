@@ -1,7 +1,6 @@
 #lang racket/base
 
-(require (only-in racket/contract/base unsupplied-arg?)
-         (only-in racket/match match match-define)
+(require (only-in racket/match match match-define)
          (only-in racket/math exact-floor)
          (only-in (submod "../../data/loader.rkt" private) with-traversal)
          (only-in "../../data/loader.rkt" dataloader-length)
@@ -9,6 +8,7 @@
          (only-in "../../foreign/autograd-ops.rkt" reset-grads!)
          (only-in "../../nn/layer.rkt" layer? parameters)
          (only-in "../../nn/optim.rkt" step! zero-grads!)
+         (only-in "../../private/contract.rkt" supplied)
          (only-in "../logging.rkt" logger-log-hyperparams!)
          (only-in "book.rkt" epoch-end-reached!)
          (only-in "dispatch.rkt"
@@ -17,10 +17,11 @@
                   warn-eval-layers! with-failure-protocol)
          (only-in "evaluate.rkt" evaluate)
          (only-in "state.rkt"
-                  run-book run-callbacks run-device run-epoch run-global-step run-loggers
-                  run-optimizers run-schedulers run-skip-epoch? run-skip-window? run-stepped?
-                  run-stop? run-trainer set-run-batch-index! set-run-current-stage!
-                  set-run-epoch! set-run-global-step! set-run-loggers! set-run-optimizers!
+                  run-batches-stepped run-book run-callbacks run-device run-epoch
+                  run-global-step run-loggers run-optimizers run-schedulers run-skip-epoch?
+                  run-skip-window? run-stop? run-trainer set-run-batch-index!
+                  set-run-batches-stepped! set-run-current-stage! set-run-epoch!
+                  set-run-global-step! set-run-loggers! set-run-optimizers!
                   set-run-schedulers! set-run-skip-epoch?! set-run-skip-window?!
                   set-run-step-pending?! set-run-stepped?!)
          (only-in "types.rkt"
@@ -28,17 +29,13 @@
                   scheduler-config-scheduler trainer-hook))
 
 (provide fit-plan
-         given
          limited-batches
          run-fit
          start-entry!)
 
-(define (given v [default #f])
-  (if (unsupplied-arg? v) default v))
-
 (define (limited-batches loader limit)
   (define n (dataloader-length loader))
-  (match (given limit 1.0)
+  (match (supplied limit 1.0)
     [(? exact-integer? k) (min k n)]
     [share (exact-floor (* n share))]))
 
@@ -158,14 +155,18 @@
   (when (last-batch? p i)
     (step-schedulers! r 'epoch (run-epoch r)))
   (apply call-hooks r 'on-train-batch-end (and scaled (detach scaled)) extra batch)
-  (when (and (run-stepped? r)
-             (or (run-stop? r) (zero? (modulo (run-global-step r) (plan-log-every p)))))
-    (publish-steps! r 'train (sub1 (run-global-step r))))
+  (define window-end (window-end? p i))
+  (define stepped (run-batches-stepped r))
+  (when (and window-end
+             (or (run-stop? r) (zero? (modulo (add1 stepped) (plan-log-every p)))))
+    (publish-steps! r 'train stepped))
   (define validate? (val-due? r p i))
-  (when (and validate? (window-end? p i))
+  (when (and validate? window-end)
     (reset-grads! (parameters (run-trainer r))))
   (when validate?
-    (validate! r p 'validate (plan-val-count p))))
+    (validate! r p 'validate (plan-val-count p)))
+  (when window-end
+    (set-run-batches-stepped! r (add1 stepped))))
 
 (define (train-batch! r p i raw)
   (set-run-batch-index! r i)
@@ -193,7 +194,7 @@
   (set-run-skip-epoch?! r #f)
   (epoch-end-reached! (run-book r) 'train)
   (call-hooks r 'on-train-epoch-end)
-  (publish-epoch! r 'train (sub1 (run-global-step r)))
+  (publish-epoch! r 'train (sub1 (run-batches-stepped r)))
   (set-run-epoch! r (add1 (run-epoch r))))
 
 (define (configure-optimizers! r)

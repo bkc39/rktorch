@@ -2,7 +2,7 @@
 
 (require (only-in racket/contract/base
                   -> ->* ->i </c >=/c and/c any/c between/c contract-out
-                  flat-named-contract listof or/c unsupplied-arg?)
+                  flat-named-contract listof or/c)
          (only-in racket/match match-define)
          (only-in racket/math infinite? nan? pi)
          (only-in threading ~>)
@@ -14,7 +14,7 @@
                   Conv2d Dropout Embedding GroupNorm LayerList Linear
                   define-layer in-layers named-children parameters
                   sinusoidal-positions)
-         (only-in "../private/contract.rkt" define/contract-out))
+         (only-in "../private/contract.rkt" define/contract-out supplied))
 
 (struct schedule (steps betas alphas alpha-bars) ;; noqa
   #:constructor-name make-schedule
@@ -190,8 +190,7 @@
                    #:classes [classes (or/c #f exact-positive-integer?)])
                   #:pre/name (mults attention)
                   "every attention resolution must be one of the levels' resolutions"
-                  (reachable? (if (unsupplied-arg? attention) '(16) attention)
-                              (if (unsupplied-arg? mults) '(1 2 2 2) mults))
+                  (reachable? (supplied attention '(16)) (supplied mults '(1 2 2 2)))
                   [result unet?])
   #:init (#:base [base 128] #:mults [mults '(1 2 2 2)] #:blocks [blocks 2]
           #:attention [attention '(16)] #:dropout [dropout 0.1]

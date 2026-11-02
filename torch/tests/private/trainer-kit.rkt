@@ -20,6 +20,7 @@
          collecting-hparams
          collecting-logger
          collecting-metrics
+         collecting-rows
          collecting-steps
          interval-message
          recorder
@@ -42,6 +43,10 @@
 
 (define (collecting-metrics l) (map cdr (collecting-steps l)))
 (define (collecting-steps l) (reverse (collecting-logger-metrics l)))
+(define (collecting-rows l)
+  (for/list ([row (in-list (collecting-steps l))])
+    (match row
+      [(cons step metrics) (list step (sort (hash-keys metrics) symbol<?))])))
 (define (collecting-hparams l) (reverse (collecting-logger-hparams l)))
 (define (collecting-finalized l) (reverse (collecting-logger-finalized l)))
 

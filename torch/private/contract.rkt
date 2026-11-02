@@ -3,10 +3,14 @@
 (require (for-syntax racket/base
                      ;; whole-module require on purpose
                      syntax/parse/pre)
-         (only-in racket/contract/base contract-out))
+         (only-in racket/contract/base contract-out unsupplied-arg?))
 
 (provide define/contract-out
-         define/checked-out)
+         define/checked-out
+         supplied)
+
+(define (supplied v [default #f])
+  (if (unsupplied-arg? v) default v))
 
 (begin-for-syntax
   (define (header-base h)

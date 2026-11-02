@@ -144,6 +144,8 @@
     (check-exn #rx"at-most-five-levels" (lambda () (UNet #:base 32 #:mults '(1 1 1 1 1 1))))
     (check-exn #rx"one of the levels' resolutions"
                (lambda () (UNet #:base 32 #:mults '(1 2) #:attention '(8))))
+    (check-exn #rx"one of the levels' resolutions" (lambda () (UNet #:base 32 #:mults '(1))))
+    (check-exn #rx"one of the levels' resolutions" (lambda () (UNet #:attention '(2))))
     (check-equal? (tensor-shape ((UNet #:base 32 #:mults '(2 2) #:blocks 1 #:attention '())
                                  (randn 1 3 32 32) (tensor '(5) #:dtype 'int64) #f))
                   '(1 3 32 32)
