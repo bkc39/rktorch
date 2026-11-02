@@ -1,4 +1,4 @@
-"""The multi-crop of examples/python/18_dino.py, for augment-parity-test.rkt.
+"""The multi-crop of examples/python/19_dino.py, for augment-parity-test.rkt.
 
 The first 16 CIFAR-10 fixture records, as uint8 on RKTORCH_PARITY_DEVICE,
 go through the twin's multi_crop under torch.Generator(device) seeded 0 and
@@ -24,7 +24,7 @@ device = os.environ.get("RKTORCH_PARITY_DEVICE", "cpu")
 
 def dino():
     spec = importlib.util.spec_from_file_location(
-        "dino", os.path.join(EXAMPLES, "18_dino.py"))
+        "dino", os.path.join(EXAMPLES, "19_dino.py"))
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
