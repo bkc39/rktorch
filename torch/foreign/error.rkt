@@ -1,9 +1,9 @@
 #lang racket/base
 
-(require (only-in ffi/unsafe/atomic call-as-atomic)
-         (only-in racket/contract/base -> any/c contract-out)
+(require (only-in racket/contract/base -> any/c contract-out)
          (only-in "raw/global.rkt" tr-last-error-kind/raw tr-last-error/raw)
-         (only-in "raw/race-points.rkt" race-point))
+         (only-in "raw/race-points.rkt" race-point)
+         (only-in "raw/regions.rkt" with-uninterruptible))
 
 (provide check-ok
          check-handle
@@ -15,10 +15,9 @@
 (module+ checked
   (provide (contract-out [exn:fail:rktorch:oom? (-> any/c boolean?)])))
 
-;; Atomic so the (message, kind) pair comes from ONE failure, not two.
 (define (last-failure)
-  (call-as-atomic
-   (lambda () (values (tr-last-error/raw) (tr-last-error-kind/raw)))))
+  (with-uninterruptible
+    (values (tr-last-error/raw) (tr-last-error-kind/raw))))
 
 (define (raise-torch-failure who describe)
   (race-point failure-reading who)

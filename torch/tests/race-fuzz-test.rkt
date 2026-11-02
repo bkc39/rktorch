@@ -4,6 +4,7 @@
   (require (only-in racket/list range)
            rackunit
            (only-in "../foreign.rkt" native-memory-limit)
+           (only-in "../foreign/raw/cas.rkt" cas-update!)
            (only-in "../foreign/raw/pressure.rkt" collect-at-trough!)
            (only-in "private/race-harness.rkt"
                     check-ledger churn-once! env-number fuzz-hook hooks
@@ -26,11 +27,21 @@
       (when (and (eqv? label 0) (zero? (modulo i 4)))
         (collect-at-trough!))))
 
+  (define expected-points
+    '(handle-registered entry-unaccounted handle-released unaccount-entry-read
+      collector-claiming finalizer-releasing free-unaccounted))
+
+  (define reached (box (hasheq)))
+
+  (define (note-point! name _subject)
+    (unless (hash-ref (unbox reached) name #f)
+      (cas-update! reached (lambda (seen) (hash-set seen name #t)))))
+
   (define (scenario seed)
     (settle!)
     (define base (ledger-snapshot))
     (define w (make-watch))
-    (with-race-hook (hooks (watch-hook w) (fuzz-hook seed))
+    (with-race-hook (hooks (watch-hook w) (fuzz-hook seed) note-point!)
       (parameterize ([native-memory-limit (* 4 mib)])
         (join-all
          (for/list ([k (in-range threads)])
@@ -45,4 +56,7 @@
 
   (test-case "seeded yields at every race point keep the ledger invariants"
     (for ([seed (in-list seeds)])
-      (scenario seed))))
+      (scenario seed))
+    (for ([point (in-list expected-points)])
+      (check-true (hash-ref (unbox reached) point #f)
+                  (format "no scenario reached ~a" point)))))

@@ -3,6 +3,8 @@
 (module+ test
   (require (only-in racket/list count)
            (only-in racket/match match struct*)
+           (only-in racket/place dynamic-place place-kill)
+           (only-in racket/runtime-path #%datum define-runtime-path)
            rackunit
            (only-in "../foreign.rkt" conv2d cpu-device cuda-device native-memory-use randn zeros)
            (only-in (submod "../foreign.rkt" unsafe) to!)
@@ -83,6 +85,28 @@
               (check-equal? yielded trials
                             (format "this thread yielded after ~a of ~a collections"
                                     yielded trials)))))
+
+  (define-runtime-path place-turn "private/place-turn.rkt")
+
+  (test-case "inside a place, an op after a collection lets a waiting green thread run"
+    (within 120
+            (lambda ()
+              (define p (dynamic-place place-turn 'main))
+              (define answer (sync/timeout 100 p))
+              (place-kill p)
+              (check-equal? answer '(#t #t)
+                            "(on the place's main OS thread?, yielded after each collection?)"))))
+
+  (define-runtime-path place-first-require "private/place-first-require.rkt")
+
+  (test-case "the collector knows main's OS thread when a parallel thread requires it first"
+    (within 120
+            (lambda ()
+              (define p (dynamic-place place-first-require 'main))
+              (define answer (sync/timeout 100 p))
+              (place-kill p)
+              (check-equal? answer '(#t #f)
+                            "(on main's OS thread? from main, from the parallel thread)"))))
 
   (test-case "after a collection a tensor op lets a waiting green thread run"
     (within 60

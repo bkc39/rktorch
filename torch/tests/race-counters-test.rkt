@@ -1,0 +1,263 @@
+#lang racket/base
+
+(module+ test
+  (require rackunit
+           (only-in "../foreign.rkt"
+                    backward! cpu-device grad native-memory-unaccounted sum zeros)
+           (only-in (submod "../foreign.rkt" unsafe) tensor-free!)
+           (only-in "../foreign/device-type.rkt" device)
+           (only-in "../foreign/raw/accounts.rkt"
+                    account-of account-trial live-bytes note-accounted! note-unaccounted!
+                    set-account-trial! since-sample-bytes with-ledger)
+           (only-in (submod "../foreign/raw/accounts.rkt" private) accounts)
+           (only-in "../foreign/raw/cas.rkt" cas-add! cas-update!)
+           (only-in "../foreign/raw/collector.rkt" finalizer-runs)
+           (only-in "../foreign/raw/device-queries.rkt" allocator-reading)
+           (only-in "../foreign/raw/memory.rkt"
+                    adopted-bytes finalizer-diagnostics finalizer-failures
+                    record-allocation! swallow-and-count-failure unaccount!)
+           (only-in "../foreign/raw/pressure.rkt"
+                    collect-under-pressure! native-memory-limit refresh-shadows!)
+           (only-in "../foreign/raw/regions.rkt" with-uninterruptible)
+           (only-in "../foreign/structs.rkt" tensor-handle)
+           (only-in "private/race-harness.rkt" join settle! spawn with-race-hook)
+           (only-in "private/within.rkt" within))
+
+  (define mib (* 1024 1024))
+
+  (define (forget-account! dev)
+    (cas-update! accounts (lambda (all) (hash-remove all dev))))
+
+  (define (wait-until done? seconds)
+    (define until (+ (current-inexact-milliseconds) (* 1000 seconds)))
+    (let poll ()
+      (unless (or (done?) (> (current-inexact-milliseconds) until))
+        (sleep 0.001)
+        (poll))))
+
+  (define (spin-until done? seconds)
+    (define until (+ (current-inexact-milliseconds) (* 1000 seconds)))
+    (let spin ()
+      (unless (or (done?) (> (current-inexact-milliseconds) until))
+        (spin))))
+
+  (define (two-samples-at-once dev)
+    (define a (account-of dev))
+    (define mark (* 64 mib))
+    (define accounted mib)
+    (define arrived (box 0))
+    (define reading-calls (box 0))
+    (define (both-at-gate name subject)
+      (when (and (eq? name 'gate-read) (eq? subject dev))
+        (cas-add! arrived 1)
+        (wait-until (lambda () (>= (unbox arrived) 2)) 10)))
+    (define (held-reading d)
+      (cond
+        [(eq? d dev)
+         (define n (cas-add! reading-calls 1))
+         (if (= n 2)
+             (note-accounted! a accounted)
+             (wait-until (lambda () (>= (unbox reading-calls) 2)) 10))
+         (* 16 mib)]
+        [else #f]))
+    (note-accounted! a (* 8 mib))
+    (with-race-hook both-at-gate
+      (parameterize ([native-memory-limit mark]
+                     [allocator-reading held-reading])
+        (define samplers
+          (for/list ([_ (in-range 2)])
+            (spawn (lambda () (collect-under-pressure! dev)) #:pool 'own)))
+        (for-each join samplers)))
+    (begin0
+      (list (unbox reading-calls) (since-sample-bytes a))
+      (note-unaccounted! a (* 9 mib))
+      (forget-account! dev)))
+
+  (test-case "two samples at once take each byte once"
+    (within 60
+            (lambda ()
+              (define-values (calls since-sample)
+                (apply values (two-samples-at-once (device 'cuda 18))))
+              (check-equal? calls 2 "the two threads did not both sample")
+              (check-true (>= since-sample mib)
+                          (format "~a bytes left toward the next sample, of ~a accounted after both took"
+                                  since-sample mib)))))
+
+  (define (trial-set-during-a-sample dev)
+    (define a (account-of dev))
+    (define mark (* 64 mib))
+    (define (reading-while-a-release-starts-a-trial d)
+      (cond
+        [(eq? d dev)
+         (join (spawn (lambda () (with-ledger (set-account-trial! a mark)))))
+         (* 16 mib)]
+        [else #f]))
+    (note-accounted! a (* 8 mib))
+    (parameterize ([native-memory-limit mark]
+                   [allocator-reading reading-while-a-release-starts-a-trial])
+      (join (spawn (lambda () (collect-under-pressure! dev)) #:pool 'own)))
+    (begin0
+      (account-trial a)
+      (note-unaccounted! a (* 8 mib))
+      (forget-account! dev)))
+
+  (test-case "a trial a release starts during a sample keeps its full length"
+    (within 60
+            (lambda ()
+              (check-equal? (trial-set-during-a-sample (device 'cuda 20)) (* 64 mib)
+                            "the sample shortened a trial set after its take"))))
+
+  (test-case "a drain polling from a parallel thread never counts a run before its release"
+    (within 60
+            (lambda ()
+              (define holding (box #f))
+              (define polled (box #f))
+              (define poller
+                (spawn (lambda ()
+                         (spin-until (lambda () (unbox holding)) 10)
+                         (set-box! polled (finalizer-runs)))
+                       #:pool 'own))
+              (sleep 0.02)
+              (define release-held
+                (swallow-and-count-failure
+                 (lambda (_h)
+                   (set-box! holding #t)
+                   (spin-until (lambda () (unbox polled)) 10))))
+              (define before
+                (with-uninterruptible
+                  (begin0 (finalizer-runs) (release-held 'handle))))
+              (join poller)
+              (check-eqv? (unbox polled) before "the run counted before its release finished")
+              (check-eqv? (finalizer-runs) (add1 before) "the finished run went uncounted"))))
+
+  (test-case "a release that raises still counts its run and its failure"
+    (define raising (swallow-and-count-failure (lambda (_h) (raise 'released-badly))))
+    (define-values (runs failures)
+      (with-uninterruptible
+        (define runs (finalizer-runs))
+        (define failures (finalizer-failures))
+        (raising 'handle)
+        (values (- (finalizer-runs) runs) (- (finalizer-failures) failures))))
+    (check-equal? (list runs failures) '(1 1)))
+
+  (define (ledger-entries)
+    (cdr (assq 'ledger-entries (finalizer-diagnostics))))
+
+  (test-case "the ledger's entry count is kept, not walked"
+    (within 120
+            (lambda ()
+              (settle!)
+              (define dev (device 'cuda 19))
+              (define n 200000)
+              (define keys (for/list ([i (in-range n)]) (box i)))
+              (define start (ledger-entries))
+              (for ([k (in-list keys)]) (record-allocation! k 64 dev))
+              (define held (ledger-entries))
+              (define-values (_results _cpu real _gc)
+                (time-apply (lambda () (for ([_ (in-range 100)]) (finalizer-diagnostics))) '()))
+              (for ([k (in-list keys)]) (unaccount! k))
+              (define after (ledger-entries))
+              (forget-account! dev)
+              (check-equal? (- held start) n)
+              (check-equal? after start)
+              (check-true (< real 100)
+                          (format "100 diagnostics over ~a entries took ~a ms" n real)))))
+
+  ;; the charge region cannot park, so the hook runs the rival unaccount
+  ;; itself, at the point a parallel thread's would land
+  (test-case "an unaccount racing a charge's publication never takes the count below its start"
+    (within 60
+            (lambda ()
+              (settle!)
+              (define dev (device 'cuda 22))
+              (define key (box 'racing))
+              (define start (ledger-entries))
+              (define mid-charge (box #f))
+              (define (unaccount-mid-charge name subject)
+                (when (and (eq? name 'entry-counted) (eq? subject key))
+                  (unaccount! key)
+                  (set-box! mid-charge (- (ledger-entries) start))))
+              (with-race-hook unaccount-mid-charge
+                (record-allocation! key 64 dev))
+              (define charged (- (ledger-entries) start))
+              (unaccount! key)
+              (define left (- (ledger-entries) start))
+              (forget-account! dev)
+              (check-equal? (list (unbox mid-charge) charged left) '(1 1 0)
+                            "(count after the rival unaccount, after the charge, after its own unaccount)"))))
+
+  (test-case "a second accounting of one handle keeps its first charge"
+    (settle!)
+    (define dev (device 'cuda 21))
+    (define key (box 'twice))
+    (define start (ledger-entries))
+    (record-allocation! key 64 dev)
+    (record-allocation! key 64 dev)
+    (define entries (- (ledger-entries) start))
+    (define live (live-bytes (account-of dev)))
+    (unaccount! key)
+    (define left (- (ledger-entries) start))
+    (forget-account! dev)
+    (check-equal? (list entries live left) '(1 64 0)
+                  "(entries, live bytes, entries after one unaccount)"))
+
+  (test-case "an unaccount racing a charge's publication takes back only the bytes it added"
+    (within 60
+            (lambda ()
+              (settle!)
+              (define dev (device 'cuda 23))
+              (define key (box 'published))
+              (define start (ledger-entries))
+              (define (unaccount-once-published name subject)
+                (when (and (eq? name 'ledger-entry-added) (eq? subject key))
+                  (unaccount! key)))
+              (with-race-hook unaccount-once-published
+                (record-allocation! key 64 dev))
+              (define live (live-bytes (account-of dev)))
+              (define left (- (ledger-entries) start))
+              (forget-account! dev)
+              (check-equal? (list live left) '(0 0)
+                            "(live bytes, entries) once the rival unaccount took the charge"))))
+
+  (define (cpu-unaccounted)
+    (cond [(assoc (cpu-device) (native-memory-unaccounted)) => cdr]
+          [else 0]))
+
+  ;; the freeing thread waits at the point between giving its live bytes back
+  ;; and its adoption, for a refresh that only a lock left open lets through
+  (define (refresh-against-adopted-free)
+    (settle!)
+    (define cpu (cpu-device))
+    (define p (zeros 256 256 #:requires-grad? #t))
+    (backward! (sum p))
+    (define reading (+ (live-bytes (account-of cpu)) (* 256 256 4)))
+    (define (refresh!)
+      (parameterize ([allocator-reading (lambda (dev) (and (equal? dev cpu) reading))])
+        (refresh-shadows!)))
+    (refresh!)
+    (define g (grad p))
+    (define h (tensor-handle g))
+    (define adopted (adopted-bytes h))
+    (define arrived (box #f))
+    (define refreshed (box #f))
+    (define (wait-in-the-gap name subject)
+      (when (and (eq? name 'live-returned) (eq? subject h))
+        (set-box! arrived #t)
+        (spin-until (lambda () (unbox refreshed)) 0.5)))
+    (with-race-hook wait-in-the-gap
+      (define freeing (spawn (lambda () (tensor-free! g)) #:pool 'own))
+      (wait-until (lambda () (unbox arrived)) 10)
+      (refresh!)
+      (set-box! refreshed #t)
+      (join freeing))
+    (begin0
+      (list (unbox arrived) adopted (cpu-unaccounted))
+      (void (sum p))
+      (settle!)))
+
+  (test-case "a refresh racing an adopted gradient's free charges its storage once"
+    (within 60
+            (lambda ()
+              (define n (* 256 256 4))
+              (check-equal? (refresh-against-adopted-free) (list #t n n)
+                            "(reached the gap, bytes adopted, charge after the free)")))))
