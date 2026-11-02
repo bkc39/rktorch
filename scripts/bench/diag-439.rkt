@@ -93,7 +93,7 @@
   (define c64 (zeros 64 64)) (define one64 (ones 64 64))
   (lambda ()
     (add-tensor! c8 b8 1.0)
-    (copy! c64 a64)
+    (copy! c64 a64 #f)
     (addcmul! c64 a64 b64 1.0)
     (mul-tensor! c64 one64)))
 
@@ -142,6 +142,7 @@
   (define go? (box #f))
   (define stop? (box #f))
   (define counts (make-vector n 0))
+  (define failure (box #f))
   (define tids (make-vector n #f))
   (define step! (and (eq? state 'train) (training-step)))
   (when step! (for ([_ (in-range 20)]) (step!)))
@@ -152,11 +153,12 @@
       (for/list ([mix (in-list ms)] [i (in-naturals)])
         (thread (lambda ()
                   (vector-set! tids i (gettid))
+                  (with-handlers ([(lambda (_) #t) (lambda (e) (set-box! failure e))])
                   (let loop ([k 0])
                     (cond
                       [(not (unbox go?)) (loop k)]
                       [(unbox stop?) (void)]
-                      [else (mix) (vector-set! counts i (add1 k)) (loop (add1 k))])))
+                      [else (mix) (vector-set! counts i (add1 k)) (loop (add1 k))]))))
                 #:pool 'own))))
   (let wait () (unless (for/and ([t (in-vector tids)]) t) (sleep 0.01) (wait)))
   (collect-garbage)
@@ -199,6 +201,7 @@
   (set-box! stop? #t)
   (for ([w (in-list workers)]) (unless (sync/timeout 30 w) (kill-thread w)))
   (define load1 (loadavg))
+  (when (unbox failure) (raise (unbox failure)))
   (define gcs
     (let loop ([acc '()])
       (match (sync/timeout 0 recv)
