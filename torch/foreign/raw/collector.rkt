@@ -4,6 +4,7 @@
          (only-in ffi/unsafe/atomic in-atomic-mode?)
          (only-in ffi/unsafe/vm vm-eval)
          (only-in "cas.rkt" cas-add! cas-claim-when!)
+         (only-in "diag.rkt" diag-count! diag-timed)
          (only-in "race-points.rkt" race-point))
 
 (provide call-as-the-collector
@@ -76,7 +77,7 @@
     [(not (on-main-os-thread?)) (void)]
     [else
      (thread-cell-set! collection-latch (make-weak-box (box 0)))
-     (sleep 0)]))
+     (diag-timed 'yield-sleep (sleep 0))]))
 
 ;; The canary shows the finalizer thread has started on this collection's
 ;; batch, not that it has finished: finalization order is unspecified and
@@ -89,11 +90,18 @@
 (define (collect-and-wait!)
   (define canary-finalized (make-semaphore 0))
   (register-finalizer (box 0) (lambda (_) (semaphore-post canary-finalized)))
-  (collect-garbage)
-  (define observed (sync/timeout 0.5 canary-finalized))
-  (values (and observed #t) (drain-finalizers!)))
+  (diag-timed 'collect-and-wait
+    (collect-garbage)
+    (define observed (diag-timed 'canary-wait (sync/timeout 0.5 canary-finalized)))
+    (values (and observed #t) (drain-finalizers!))))
 
 (define (drain-finalizers!)
+  (diag-timed 'drain
+    (let ([ok? (drain-finalizers!*)])
+      (unless ok? (diag-count! 'drain/timeout))
+      ok?)))
+
+(define (drain-finalizers!*)
   (define deadline (+ (current-inexact-milliseconds) (drain-deadline)))
   (let loop ([runs (finalizer-runs)] [quiet 0])
     (sleep 0)

@@ -22,6 +22,7 @@
          (only-in "collector.rkt"
                   call-as-the-collector collect-and-wait! drain-finalizers!
                   yield-to-finalizers!)
+         (only-in "diag.rkt" diag-timed)
          (only-in "device-queries.rkt"
                   allocator-reading queried-capacity release-query)
          (only-in "pressure-settings.rkt"
@@ -159,6 +160,9 @@
 ;; --- the backstop, from every accounting ---
 
 (define (collect-under-pressure! dev)
+  (diag-timed 'cup (collect-under-pressure!* dev)))
+
+(define (collect-under-pressure!* dev)
   (define mark (and (not (in-atomic-mode?)) (device-high-water dev)))
   (define base (and mark (quotient mark interval-divisor)))
   (define-values (gate-open? sample-due?)
@@ -168,7 +172,7 @@
     (sample-allocator! dev))
   (cond
     [(and gate-open? (> (pressure-reading dev) mark))
-     (call-as-the-collector (lambda () (pressure-collect! dev mark base)))]
+     (call-as-the-collector (lambda () (diag-timed 'pressure-collect (pressure-collect! dev mark base))))]
     [(and gate-open? sample-due?)
      (with-ledger (end-trial! (account-of dev) base))]
     [else (void)])
@@ -310,8 +314,9 @@
   (trough-stage! next-minor-ms
                  (lambda (s) (set-stats-trough-minors! s (add1 (stats-trough-minors s))))
                  (lambda ()
-                   (collect-garbage 'minor)
-                   (drain-finalizers!))
+                   (diag-timed 'trough/minor
+                     (collect-garbage 'minor)
+                     (drain-finalizers!)))
                  void
                  budget
                  over?))
@@ -321,7 +326,8 @@
                  (lambda (s)
                    (set-stats-trough-collections! s (add1 (stats-trough-collections s))))
                  (lambda ()
-                   (define-values (_observed drained?) (collect-and-wait!))
+                   (define-values (_observed drained?)
+                     (diag-timed 'trough/collect-and-wait (collect-and-wait!)))
                    drained?)
                  (lambda (seen)
                    (settle-floors!)
@@ -330,6 +336,9 @@
                  over?))
 
 (define (collect-at-trough! #:young? [young? #f])
+  (diag-timed 'trough (collect-at-trough!* young?)))
+
+(define (collect-at-trough!* young?)
   (unless (in-atomic-mode?)
     (lower-floors!)
     ;; read before the refresh: the charge it adds can bring on a collection

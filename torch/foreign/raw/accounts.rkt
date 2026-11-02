@@ -8,6 +8,7 @@
          (only-in racket/match match-define)
          (only-in syntax/parse/define define-syntax-parse-rule)
          (only-in "cas.rkt" cas-add! cas-take! cas-update!)
+         (only-in "diag.rkt" diag-timed)
          (only-in "pressure-settings.rkt" margin-over)
          (only-in "race-points.rkt" race-point))
 
@@ -62,7 +63,7 @@
     [else
      (dynamic-wind
       (lambda ()
-        (uninterruptible-lock-acquire ledger-lock)
+        (diag-timed 'ledger-acquire (uninterruptible-lock-acquire ledger-lock))
         (set-box! ledger-holder (current-thread)))
       thunk
       (lambda ()

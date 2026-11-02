@@ -6,10 +6,13 @@
          (only-in ffi/unsafe
                   _double _enum _fun _int _int64 _ptr _void register-finalizer
                   set-cpointer-tag!)
+         (only-in ffi/unsafe/vm vm-eval)
+         (only-in ffi/unsafe/custodian make-custodian-at-root)
          (only-in racket/list remove-duplicates)
          (only-in racket/match match-define match-lambda)
          (only-in "../device-type.rkt" device device-index device-type)
          (only-in "accounts.rkt" with-ledger)
+         (only-in "diag.rkt" diag-enabled? diag-finalizer-pool diag-no-phantom? diag-on-main? diag-timed)
          (only-in "cas.rkt" cas-add! cas-claim! cas-claim-when! cas-update!)
          (only-in "collector.rkt"
                   finalizer-runs
@@ -88,7 +91,7 @@
 (define (release! h lt)
   (with-uninterruptible
     (with-cleanup
-      (tr-tensor-free/unwrapped h)
+      (diag-timed 'release-native (tr-tensor-free/unwrapped h))
       (race-point handle-released h)
       #:finally
       (set-cpointer-tag! h 'Tensor-freed)
@@ -166,7 +169,8 @@
       (release t)
       (note-finalizer-run!))))
 
-(define (finalizer-for lt)
+(define (finalizer-for lt [worker-made? #f])
+  (define site (if worker-made? 'finalizer/worker-made 'finalizer/main-made))
   (define release-claimed
     (swallow-and-count-failure
      (lambda (h)
@@ -174,14 +178,39 @@
        (unaccount-lifetime! h lt)
        (release! h lt))))
   (lambda (h)
-    (with-uninterruptible
-      (when (claim-lifetime! lt 'finalizing)
-        (release-claimed h)))))
+    (diag-timed 'finalizer
+      (diag-timed site
+        (with-uninterruptible
+          (when (claim-lifetime! lt 'finalizing)
+            (release-claimed h)))))))
+
+;; PROTOTYPE (#439): with RKTORCH_DIAG439_FINALIZERS set, tensor finalizers
+;; leave ffi/unsafe's will executor, whose thread is a green thread on main's
+;; OS thread (and whose guardians are polled per OS thread). An ordered Chez
+;; guardian, matching the late executor, is polled by one parallel 'own
+;; reaper thread, so no finalizer runs on main.
+(define tensor-guardian
+  (and diag-finalizer-pool (vm-eval '(make-guardian))))
+
+(when tensor-guardian
+  (parameterize ([current-custodian (make-custodian-at-root)])
+    (thread (lambda ()
+              (let loop ()
+                (define rep (tensor-guardian))
+                (cond
+                  [rep (with-handlers ([(lambda (_) #t) void]) (rep))]
+                  [else (sleep 0.0005)])
+                (loop)))
+            #:pool 'own)))
 
 (define (register-tensor! h)
   (define lt (fresh-lifetime))
-  (hash-set! lifetimes h lt)
-  (register-finalizer h (finalizer-for lt))
+  (diag-timed 'register
+    (hash-set! lifetimes h lt)
+    (let ([fin (finalizer-for lt (and diag-enabled? (not (diag-on-main?))))])
+      (if tensor-guardian
+          (tensor-guardian h (lambda () (fin h)))
+          (register-finalizer h fin))))
   (race-point handle-registered h))
 
 ;; One uninterruptible region on the caller's OS thread: a kill or a break
@@ -233,6 +262,9 @@
       [else (values #f #f)])))
 
 (define (account! t #:adopt [adopt #f])
+  (diag-timed 'account (account!* t adopt)))
+
+(define (account!* t adopt)
   (define-values (nbytes dev) (native-placement t))
   (cond
     [dev (record-allocation! t nbytes dev #:adopt adopt)
@@ -246,7 +278,7 @@
 (define (record-allocation! key nbytes dev #:adopt [adopt #f])
   (define lt (lifetime-of! key))
   (define a (account-of dev))
-  (define entry (allocation (make-phantom-bytes nbytes) nbytes dev a 0 #f))
+  (define entry (allocation (make-phantom-bytes (if diag-no-phantom? 0 nbytes)) nbytes dev a 0 #f))
   (define (charge!)
     (with-uninterruptible
       (cas-add! entries 1)
