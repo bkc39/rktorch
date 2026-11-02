@@ -186,7 +186,7 @@
         (release-claimed h)))
     (when t0 (note-finalizer-time! t0))))
 
-(struct tensor-scope (parent owned [child #:mutable]))
+(struct tensor-scope (parent owned guard))
 
 (define current-tensor-scope (make-thread-cell #f))
 

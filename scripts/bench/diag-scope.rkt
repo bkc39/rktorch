@@ -69,7 +69,25 @@
            (for/fold ([k 0] [s 0]) ([vs (in-values-sequence loader)])
              (values (+ k (car (shape (car vs)))) (+ s (consume! (car vs))))))
          (loop (+ n k) (+ steps s))])))
-  (epochs-until (+ (clock-ms) (* 1000 warmup)))
+  ;; free: main steps flat out while a green thread drains the loader
+  (define consumed (box 0))
+  (define drainer
+    (and (eq? mode 'free)
+         (thread (lambda ()
+                   (let loop ()
+                     (for ([vs (in-values-sequence loader)])
+                       (sum (car vs))
+                       (set-box! consumed (+ (unbox consumed) (car (shape (car vs))))))
+                     (loop))))))
+  (define own (rand batch-size 3072))
+  (define (steps-until deadline)
+    (define c0 (unbox consumed))
+    (let loop ([steps 0])
+      (cond
+        [(>= (clock-ms) deadline) (values (- (unbox consumed) c0) steps)]
+        [else (sum (@ own w)) (sleep 0) (loop (add1 steps))])))
+  (define run-until (if drainer steps-until epochs-until))
+  (run-until (+ (clock-ms) (* 1000 warmup)))
   (define peak (box (ledger-entries)))
   (define sampler
     (thread (lambda ()
@@ -82,13 +100,14 @@
   (define scope0 (scope-diagnostics))
   (define gc0 (current-gc-milliseconds))
   (define t0 (clock-ms))
-  (define-values (n steps) (epochs-until (+ t0 (* 1000 seconds))))
+  (define-values (n steps) (run-until (+ t0 (* 1000 seconds))))
   (define elapsed (/ (- (clock-ms) t0) 1000.0))
   (define gc (- (current-gc-milliseconds) gc0))
   (define runs (- (finalizer-runs) runs0))
   (define-values (main1 us1) (finalizer-timing))
   (define scope1 (scope-diagnostics))
   (kill-thread sampler)
+  (when drainer (kill-thread drainer))
   (define (per-s v) (/ v elapsed))
   (append
    (list (cons 'samples/s (per-s n))
