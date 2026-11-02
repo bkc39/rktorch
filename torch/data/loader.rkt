@@ -12,6 +12,7 @@
                   device device-type draw-seed generator? index-select
                   make-generator narrow gen:sized length randperm select shape
                   tensor tensor? to)
+         (only-in "../foreign/scope.rkt" with-diag-scope)
          (only-in "../private/contract.rkt" define/contract-out)
          (only-in "dataset.rkt"
                   collate/c dataset-batch dataset-device dataset-length
@@ -186,7 +187,8 @@
           (for/list ([i (in-range start (+ start len))]) i)))
     (when (and partial-last? (= k (sub1 count)))
       (finish!))
-    (dataset-batch ds indices (dataloader-collate loader)))
+    (with-diag-scope #:build
+      (dataset-batch ds indices (dataloader-collate loader))))
   (values count batch finish! void))
 
 (define (sampler-draws loader)

@@ -12,8 +12,10 @@
          (only-in "accounts.rkt" with-ledger)
          (only-in "cas.rkt" cas-add! cas-claim! cas-claim-when! cas-update!)
          (only-in "collector.rkt"
+                  finalizer-clock
                   finalizer-runs
-                  note-finalizer-run!)
+                  note-finalizer-run!
+                  note-finalizer-time!)
          (only-in "fault.rkt" native-fault? note-native-fault!)
          (only-in "oom.rkt"
                   collect-and-drain!
@@ -39,6 +41,10 @@
          (only-in "syntax.rkt" _Tensor _Tensor/null define-torch))
 
 (provide adopted-bytes
+         (struct-out tensor-scope)
+         current-tensor-scope
+         finalize-owned!
+         free-owned!
          tr-tensor-free/checked
          collect-and-drain!
          swallow-and-count-failure
@@ -174,14 +180,33 @@
        (unaccount-lifetime! h lt)
        (release! h lt))))
   (lambda (h)
+    (define t0 (finalizer-clock))
     (with-uninterruptible
       (when (claim-lifetime! lt 'finalizing)
-        (release-claimed h)))))
+        (release-claimed h)))
+    (when t0 (note-finalizer-time! t0))))
+
+(struct tensor-scope (parent owned [child #:mutable]))
+
+(define current-tensor-scope (make-thread-cell #f))
+
+(define (finalize-owned! h lt)
+  (register-finalizer h (finalizer-for lt)))
+
+(define (free-owned! h lt)
+  (and (claim-lifetime! lt (current-thread))
+       (with-handlers ([(lambda (_) #t) (lambda (e) (record-failure! e) #f)])
+         (unaccount-lifetime! h lt)
+         (release! h lt)
+         #t)))
 
 (define (register-tensor! h)
   (define lt (fresh-lifetime))
   (hash-set! lifetimes h lt)
-  (register-finalizer h (finalizer-for lt))
+  (define scope (thread-cell-ref current-tensor-scope))
+  (if scope
+      (hash-set! (tensor-scope-owned scope) h lt)
+      (finalize-owned! h lt))
   (race-point handle-registered h))
 
 ;; One uninterruptible region on the caller's OS thread: a kill or a break

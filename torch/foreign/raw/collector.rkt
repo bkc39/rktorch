@@ -10,8 +10,11 @@
          collect-and-wait!
          drain-deadline
          drain-finalizers!
+         finalizer-clock
          finalizer-runs
+         finalizer-timing
          note-finalizer-run!
+         note-finalizer-time!
          on-main-os-thread?
          yield-to-finalizers!)
 
@@ -24,6 +27,16 @@
 (define (finalizer-runs)
   (unbox runs))
 
+(define timing? (and (getenv "RKTORCH_DIAG_SCOPE") #t))
+(define main-runs (box 0))
+(define finalizer-us (box 0))
+
+(define (finalizer-clock)
+  (and timing? (current-inexact-monotonic-milliseconds)))
+
+(define (finalizer-timing)
+  (values (unbox main-runs) (unbox finalizer-us)))
+
 ;; Green threads run on the place's main OS thread, whichever thread
 ;; instantiates this module.
 (define os-thread-id (vm-eval 'get-thread-id))
@@ -34,6 +47,11 @@
 
 (define (on-main-os-thread?)
   (eqv? (os-thread-id) main-os-thread))
+
+(define (note-finalizer-time! t0)
+  (define elapsed (- (current-inexact-monotonic-milliseconds) t0))
+  (cas-add! finalizer-us (inexact->exact (floor (* 1000.0 elapsed))))
+  (when (on-main-os-thread?) (cas-add! main-runs 1)))
 
 ;; --- one collection at a time ---
 

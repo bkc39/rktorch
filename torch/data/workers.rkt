@@ -10,6 +10,7 @@
          (only-in "../foreign.rkt"
                   current-generator device device-type make-generator tensor?)
          (only-in "../foreign/raw/race-points.rkt" race-point)
+         (only-in "../foreign/scope.rkt" with-diag-scope)
          (only-in "../private/contract.rkt" define/contract-out)
          (only-in "dataset.rkt" collate/c dataset-batch dataset? indices/c)
          (only-in "results-queue.rkt"
@@ -67,7 +68,8 @@
 (define (build ds collate index indices)
   (with-handlers ([(lambda (v) (not (exn:break? v))) raised])
     (define values-list
-      (call-with-values (lambda () (dataset-batch ds indices collate)) list))
+      (with-diag-scope #:build
+        (call-with-values (lambda () (dataset-batch ds indices collate)) list)))
     (cond
       [(on-host? values-list) (built values-list)]
       [else

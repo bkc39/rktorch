@@ -15,6 +15,7 @@
          (only-in "../foreign.rkt"
                   device device? dtype gen:sized length shape stack
                   tensor->list tensor?)
+         (only-in "../foreign/scope.rkt" with-diag-scope)
          (only-in "../private/contract.rkt" define/contract-out))
 
 ;; the noqa'd exports are macro expansions raco review cannot see
@@ -183,7 +184,7 @@
                 len.body))
             (define (dataset-ref self ref.index)
               (let ([field.id (field-acc self)] ...)
-                ((lambda (ref.index) ref.body ...) ref.index)))
+                ((lambda (ref.index) (with-diag-scope #:ref ref.body ...)) ref.index)))
             batch-method ...
             device-method ...]
            #:methods gen:sized
