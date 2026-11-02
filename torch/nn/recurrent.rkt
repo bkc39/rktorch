@@ -8,6 +8,7 @@
                   tensor? with-no-grad zeros)
          (only-in "../foreign/addresses.rkt"
                   tensor-data-ptr tensor-storage-ptr)
+         (only-in "../foreign/raw/cas.rkt" cas-add!)
          (only-in "../foreign/raw/fault.rkt" native-fault?)
          (only-in "../generated.rkt"
                   cudnn-rnn-flatten-weight gru-input lstm-input)
@@ -114,11 +115,7 @@
     [else #f]))
 
 (define (count-move! weights)
-  (define moves (guard-moves (guard-of (car weights))))
-  (let retry ()
-    (define seen (unbox moves))
-    (unless (box-cas! moves seen (add1 seen))
-      (retry))))
+  (void (cas-add! (guard-moves (guard-of (car weights))) 1)))
 
 (define (repack! spec weights)
   ((packing-hook) 'before)
