@@ -91,6 +91,7 @@ jobs:
           nix develop .#ci --command raco test --timeout 600
           scripts/resyntax-rules-test.rkt scripts/resyntax-lp2.rkt
           scripts/resyntax-wrapper-test.rkt scripts/check-paths-test.rkt
+          scripts/coverage.rkt
       - name: Every path the prose names resolves
         run: nix develop .#ci --command racket scripts/check-paths.rkt
       - name: Resyntax lint

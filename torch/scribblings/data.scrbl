@@ -234,21 +234,14 @@ inside the pairs, vectors, boxes, hash tables, and transparent or prefab
 structures a collate returns. @racket[#:prefetch]
 needs @racket[workers] above 0. A dataset's @racket[#:ref] and
 @racket[#:batch], and @racket[collate], run in several threads at once, so
-any state they share must be synchronized. Until
-@hyperlink["https://github.com/bkc39/rktorch/issues/296"]{#296}, torch calls
-made inside a worker are serialized through the main thread: Racket code in a
-dataset runs in parallel, but a dataset whose per-item work is torch calls
-can be slower with workers than without. While the main thread is in a long
-run of foreign calls, as in a training step, a worker's torch call can stall
-the loader until the main thread blocks or yields; its first allocating
-tensor operation after each collection yields once. A native error from a
-worker's torch call carries the main thread's last error message, which can
-belong to another call. Until
-@hyperlink["https://github.com/bkc39/rktorch/issues/194"]{#194} is fixed,
-the consumer's @racket[with-autocast], @racket[with-no-grad] and
-@racket[default-device] also apply to the batches workers build while the
-consumer is inside them, so a batch can differ from the one
-@racket[#:workers 0] builds.
+any state they share must be synchronized. Each worker is a thread made
+with @racket[#:pool 'own]: a native error from one is that call's own, and
+the consumer's
+@racket[with-autocast] and @racket[with-no-grad] do not reach the batches
+workers build. The default device is one for the whole process, so until
+@hyperlink["https://github.com/bkc39/rktorch/issues/194"]{#194} is fixed
+a @racket[default-device] the consumer sets also applies to them, and a batch
+can differ from the one @racket[#:workers 0] builds.
 
 @torch-examples[
 (require torch/data/loader)

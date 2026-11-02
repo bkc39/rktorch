@@ -4,7 +4,7 @@
   (require (only-in racket/match match match-define)
            rackunit
            (only-in "../foreign.rkt"
-                    backward! finalizer-diagnostics native-memory-limit ones
+                    backward! finalizer-diagnostics mul! native-memory-limit ones
                     sum)
            (only-in "../nn.rkt" Linear)
            (only-in "private/race-harness.rkt"
@@ -59,14 +59,28 @@
       ['adversary (adversary-step)]
       [k (worker-step k)]))
 
-  (define (phase width)
+  (define (sleep-through-phase)
+    (sleep seconds-per-phase))
+
+  ;; Main in plain foreign calls, yielding only every 5 ms: the workers'
+  ;; ops must not wait for it.
+  (define (foreign-calls-through-phase)
+    (define t (ones 64 64))
+    (define end (+ (current-inexact-milliseconds) (* 1000 seconds-per-phase)))
+    (let loop ([next-yield (+ (current-inexact-milliseconds) 5)])
+      (define now (current-inexact-milliseconds))
+      (cond
+        [(>= now end) (void)]
+        [(>= now next-yield) (sleep 0) (loop (+ now 5))]
+        [else (mul! t 1.0) (loop next-yield)])))
+
+  (define (phase labels meanwhile)
     (settle!)
     (define base (ledger-snapshot))
     (define entries (ledger-entries))
     (define before (diagnostic 'pressure-collections))
     (define w (make-watch))
     (define r (make-roster))
-    (define labels (append (build-list width values) '(trainer adversary)))
     (define counts
       (with-race-hook (watch-hook w)
         (define workers
@@ -76,16 +90,15 @@
                      #:pool 'own
                      #:label label))))
         (await-roles! r labels #:seconds start-deadline-seconds)
-        (sleep seconds-per-phase)
+        (meanwhile)
         (stop-roles! r)
         (begin0 (join-all workers #:seconds 300)
                 (settle!))))
-    (match-define (list worker-steps ... trainer-steps _adversary-steps) counts) ;; noqa
-    (printf "stress: ~a workers, ~a steps, ~a trainer steps, ~a collections\n"
-            width
-            (apply + worker-steps)
-            trainer-steps
-            (- (diagnostic 'pressure-collections) before))
+    (define worker-steps
+      (for/sum ([label (in-list labels)] [n (in-list counts)] #:when (exact-integer? label))
+        n))
+    (printf "stress: ~a, ~a worker steps, ~a collections\n"
+            labels worker-steps (- (diagnostic 'pressure-collections) before))
     (check-ledger base w)
     (check-equal? (ledger-entries) entries "ledger entries left behind")
     (for ([label (in-list labels)]
@@ -96,7 +109,10 @@
     (define rss-before (rss-bytes))
     (for ([width (in-list widths)])
       (with-check-info (['workers width])
-        (phase width)))
+        (phase (append (build-list width values) '(trainer adversary))
+               sleep-through-phase)))
+    (with-check-info (['workers 8] ['main 'foreign-calls])
+      (phase (build-list 8 values) foreign-calls-through-phase))
     (define rss-after (rss-bytes))
     (cond
       [rss-before
