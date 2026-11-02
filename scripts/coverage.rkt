@@ -55,9 +55,29 @@
 
 ;;; Running
 
+;; 0 and 1 are cover's own answers; anything else ended it before it wrote a
+;; report, and a report left from an earlier run must not stand in for one.
+(define (cover-outcome code)
+  (case code
+    [(0) 'passed]
+    [(1) 'failed]
+    [(142) "raco cover was ended by SIGALRM: a test's process deadline fired (its notice is above)"]
+    [else (if (> code 128)
+              (format "raco cover was ended by signal ~a" (- code 128))
+              (format "raco cover exited with status ~a" code))]))
+
+;; Racket also exits 1 on a signal or an uncaught error, so an earlier
+;; run's report goes first: a cover that wrote nothing then has nothing to read.
+(define (index-path)
+  (build-path (report-dir) "index.html"))
+
 (define (run-cover!)
+  (when (file-exists? (index-path)) (delete-file (index-path)))
   (displayln "running raco cover over torch/ (instrumented; runs the suite)")
-  (zero? (system*/exit-code (raco) "cover" "-b" "-d" (report-dir) "torch/")))
+  (define outcome (cover-outcome (system*/exit-code (raco) "cover" "-b" "-d" (report-dir) "torch/")))
+  (when (string? outcome)
+    (die "coverage: ~a\n" outcome))
+  (eq? outcome 'passed))
 
 ;;; Reading the report
 
@@ -94,7 +114,7 @@
   (length (regexp-match* #px"<tr\\s+class=\"file-info\"" html)))
 
 (define (read-entries)
-  (define index (build-path (report-dir) "index.html"))
+  (define index (index-path))
   (unless (file-exists? index)
     (die "coverage: no report at ~a\n" index))
   (define html (file->string index))
@@ -249,7 +269,9 @@
 ;; run with `raco test scripts/coverage.rkt`.
 
 (module+ test
-  (require (only-in rackunit check-equal? test-case))
+  (require (only-in racket/file delete-directory/files make-temporary-directory)
+           (only-in racket/port open-output-nowhere)
+           (only-in rackunit check-equal? check-false check-regexp-match test-case))
 
   (define (row name percent cov unc total)
     (string-append
@@ -307,6 +329,43 @@
     (check-equal? (length (parse-entries html)) 1)
     (check-equal? (count-rows html) 2
                   "the discrepancy is what read-entries refuses to average over"))
+
+  (test-case "a cover run ended by a signal is an error, not a report"
+    (check-equal? (map cover-outcome '(0 1)) '(passed failed))
+    (check-regexp-match #rx"SIGALRM: a test's process deadline fired" (cover-outcome 142))
+    (check-regexp-match #rx"ended by signal 9" (cover-outcome 137))
+    (check-regexp-match #rx"exited with status 2" (cover-outcome 2)))
+
+  (define this-script (variable-reference->module-source (#%variable-reference)))
+
+  ;; a stub `raco` that exits 1 having written nothing, as a killed one can
+  (define (gate-over-stale-report)
+    (define dir (make-temporary-directory "coverage-test~a"))
+    (define bin (build-path dir "bin"))
+    (define report (build-path dir "report"))
+    (make-directory bin)
+    (make-directory report)
+    (with-output-to-file (build-path bin "raco")
+      (lambda () (display "#!/bin/sh\nexit 1\n")))
+    (file-or-directory-permissions (build-path bin "raco") #o755)
+    (with-output-to-file (build-path report "index.html")
+      (lambda () (display (string-append "<tbody>" (row "torch/main" "100" "1" "0" "1")
+                                         "</tbody>"))))
+    (define racket (find-executable-path (find-system-path 'exec-file)))
+    (define env (environment-variables-copy (current-environment-variables)))
+    (environment-variables-set!
+     env #"PATH"
+     (bytes-append (path->bytes bin) #":" (or (environment-variables-ref env #"PATH") #"")))
+    (begin0
+      (parameterize ([current-environment-variables env]
+                     [current-output-port (open-output-nowhere)]
+                     [current-error-port (open-output-nowhere)])
+        (system*/exit-code racket
+                           this-script "-d" (path->string report)))
+      (delete-directory/files dir)))
+
+  (test-case "a cover that exits 1 with no report fails the gate, whatever report an earlier run left"
+    (check-false (zero? (gate-over-stale-report))))
 
   (test-case "a file's area is its directory, with raw/ kept apart"
     (check-equal? (map area '("torch/main.rkt"

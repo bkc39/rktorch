@@ -12,7 +12,7 @@
            "../main.rkt"
            (only-in "../vision/transforms.rkt" random-crop random-horizontal-flip)
            (only-in "private/race-harness.rkt"
-                    check-known-failure check-ledger hooks ledger-snapshot make-watch
+                    check-ledger hooks ledger-snapshot make-watch
                     settle! watch-hook with-race-hook)
            (only-in "private/within.rkt" within))
 
@@ -1212,10 +1212,8 @@
   (test-case "autocast and grad mode on the trainer do not reach worker collates"
     (define reference (gated-run 0))
     (check-true (andmap (lambda (b) (match b [(list _ 'float32 #t) #t] [_ #f])) reference))
-    (check-known-failure
-     "#194"
-     "batches built while the trainer is in autocast or no-grad match workers 0"
-     (equal? (gated-run 2) reference)))
+    (check-equal? (gated-run 2) reference
+                  "batches built while the trainer is in autocast or no-grad match workers 0"))
 
   (test-case "worker batches are CPU tensors"
     (define acc (accelerator-if-available))
