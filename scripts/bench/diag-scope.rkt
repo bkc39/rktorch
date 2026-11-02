@@ -8,14 +8,16 @@
 (require (only-in racket/cmdline command-line)
          (only-in racket/math exact-round)
          (only-in racket/port with-output-to-string)
-         (only-in racket/string string-split string-trim)
+         (only-in racket/string string-split)
          (only-in racket/system process*/ports)
          (only-in torch
-                  * / @ - copy! finalizer-diagnostics flip narrow rand reshape select
+                  * / @ - copy! flip narrow rand reshape select
                   shape sum tensor to-dtype zeros ~>)
          (only-in torch/data/loader dataloader define-dataset)
          (only-in torch/foreign/raw/collector finalizer-runs finalizer-timing)
-         (only-in torch/foreign/raw/scope scope-diagnostics))
+         (only-in torch/foreign/raw/scope scope-diagnostics)
+         (only-in "diag-counters.rkt"
+                  clock-ms ledger-entries load-average median-record peak-rss-kb))
 
 (define samples 4096)
 (define batch-size 64)
@@ -30,17 +32,6 @@
   (copy! (~> canvas (narrow 1 4 32) (narrow 2 4 32)) flipped)
   (values (~> canvas (narrow 1 (random 9) 32) (narrow 2 (random 9) 32) (- mean) (/ std))
           (select ys 0 i)))
-
-(define (clock-ms) (current-inexact-monotonic-milliseconds))
-
-(define (ledger-entries)
-  (cdr (assq 'ledger-entries (finalizer-diagnostics))))
-
-(define (peak-rss-kb)
-  (with-handlers ([exn:fail? (lambda (_) #f)])
-    (for/or ([line (in-lines (open-input-file "/proc/self/status"))])
-      (define m (regexp-match #rx"^VmHWM:[ \t]*([0-9]+)" line))
-      (and m (string->number (cadr m))))))
 
 (define (run-cell workers mode seconds warmup)
   (define xs (to-dtype (* (rand samples 3 32 32) 255.0) 'uint8))
@@ -142,19 +133,6 @@
              4))
           (p 'wait)))))
   (read (open-input-string out)))
-
-(define (median xs)
-  (define sorted (sort xs <))
-  (list-ref sorted (quotient (length sorted) 2)))
-
-(define (median-record records)
-  (for/list ([k (in-list (map car (car records)))])
-    (define vs (filter real? (map (lambda (r) (cdr (or (assq k r) (cons k #f)))) records)))
-    (cons k (if (null? vs) #f (median vs)))))
-
-(define (load-average)
-  (with-handlers ([exn:fail? (lambda (_) "?")])
-    (string-trim (call-with-input-file "/proc/loadavg" read-line))))
 
 (define (show v)
   (cond
