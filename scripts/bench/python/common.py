@@ -13,6 +13,8 @@ import time
 
 import torch
 
+from cache_dirs import cache_dir
+
 
 def env_number(name, default):
     supplied = os.environ.get(name)
@@ -163,15 +165,6 @@ def steps_out():
     if len(sys.argv) != 2:
         sys.exit(f"usage: {sys.argv[0]} STEPS-FILE")
     return sys.argv[1]
-
-
-def cache_dir(variable, name):
-    override = os.environ.get(variable)
-    if override:
-        return override
-    base = os.environ.get("XDG_CACHE_HOME") or os.path.join(
-        os.path.expanduser("~"), ".cache")
-    return os.path.join(base, "rktorch", name)
 
 
 def idx_payload(data):

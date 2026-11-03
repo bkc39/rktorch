@@ -1,6 +1,7 @@
 #lang racket/base
 
-(require (only-in file/sha1 bytes->hex-string)
+(require (only-in ffi/unsafe _fun _int get-ffi-obj lookup-errno saved-errno)
+         (only-in file/sha1 bytes->hex-string)
          (only-in racket/contract/base ->* or/c)
          (only-in racket/file
                   delete-directory/files file->bytes file->string make-directory*
@@ -8,6 +9,7 @@
          (only-in racket/format ~r)
          (only-in racket/list append-map)
          (only-in racket/match match match-lambda)
+         (only-in racket/os getpid)
          (only-in racket/path path-only)
          (only-in racket/string string-join string-trim)
          (only-in threading ~>)
@@ -80,11 +82,34 @@
 
 (define (partial-prefix dataset) (format ".~a-partial-" dataset))
 
+(define (partial-template dataset) (format "~apid~a-~~a" (partial-prefix dataset) (getpid)))
+
+(define signal-process
+  (get-ffi-obj "kill" #f (_fun #:save-errno 'posix _int _int -> _int)))
+
+(define (process-alive? pid)
+  (or (zero? (signal-process pid 0)) (= (saved-errno) (lookup-errno 'EPERM))))
+
+(define (partial-owner prefix name)
+  (match (~> (string-append "^" (regexp-quote prefix) "(pid([0-9]+)-)?") pregexp (regexp-match name))
+    [#f #f]
+    [(list _ _ #f) 'none]
+    [(list _ _ pid) (string->number pid)]))
+
 (define (remove-stale-partials! base dataset)
   (define prefix (partial-prefix dataset))
-  (for ([p (in-list (directory-list base))]
-        #:when (regexp-match? (regexp (string-append "^" (regexp-quote prefix))) (path->string p)))
-    (delete-directory/files (build-path base p) #:must-exist? #f)))
+  (for ([p (in-list (directory-list base))])
+    (match (partial-owner prefix (path->string p))
+      [#f (void)]
+      [(? exact-positive-integer? pid) #:when (process-alive? pid) (void)]
+      [_ (delete-directory/files (build-path base p) #:must-exist? #f)])))
+
+(define (publish! partial root)
+  (with-handlers ([exn:fail:filesystem? (lambda (e)
+                                          (unless (file-exists? (digest-path root))
+                                            (raise e)))])
+    (unless (directory-exists? root)
+      (rename-file-or-directory partial root))))
 
 (define/contract-out (ensure-cifar10-folder! dataset #:base [base (cifar10-folder-base)])
   (->* (dataset/c) (#:base path-string?) string?)
@@ -94,11 +119,10 @@
     [else
      (make-directory* base)
      (remove-stale-partials! base dataset)
-     (with-temporary-path (partial (~> dataset partial-prefix (string-append "~a")
+     (with-temporary-path (partial (~> dataset partial-template
                                        (make-temporary-directory #:base-dir base)))
        (write-tree! partial dataset)
-       (unless (directory-exists? root)
-         (rename-file-or-directory partial root)))])
+       (publish! partial root))])
   (cifar10-folder-digest dataset #:base base))
 
 (module+ main
@@ -163,4 +187,42 @@
       (make-directory* stale)
       (call-with-output-file (build-path stale "00000.png") void)
       (ensure-cifar10-folder! "fixture" #:base base)
-      (check-equal? (partials base) '()))))
+      (check-equal? (partials base) '())))
+
+  (define (spawn-racket expr)
+    (define-values (p out in err)
+      (subprocess #f #f #f (find-system-path 'exec-file) "-e" expr))
+    (close-input-port out)
+    (close-input-port err)
+    (values p in))
+
+  (test-case "a write removes dead writers' partials and leaves a live writer's"
+    (define-values (live live-in) (spawn-racket "(read-line)"))
+    (define-values (dead dead-in) (spawn-racket "(void)"))
+    (close-output-port dead-in)
+    (subprocess-wait dead)
+    (dynamic-wind
+     void
+     (lambda ()
+       (with-temporary-path (base (make-temporary-directory "cifar-folder-~a"))
+         (define live-partial (format ".fixture-partial-pid~a-live" (subprocess-pid live)))
+         (define scenario
+           `((,live-partial kept)
+             (,(format ".fixture-partial-pid~a-dead" (subprocess-pid dead)) removed)
+             (".fixture-partial-pid0-none" removed)
+             (".fixture-partial-1234" removed)))
+         (for ([s (in-list scenario)])
+           (define dir (build-path base (car s) "train" "airplane"))
+           (make-directory* dir)
+           (call-with-output-file (build-path dir "00000.png") void))
+         (ensure-cifar10-folder! "fixture" #:base base)
+         (check-equal? (for/list ([s (in-list scenario)])
+                         (list (car s)
+                               (if (directory-exists? (build-path base (car s))) 'kept 'removed)))
+                       scenario)
+         (check-true (file-exists? (build-path base live-partial "train" "airplane" "00000.png")))))
+     (lambda ()
+       (close-output-port live-in)
+       (subprocess-kill live #t)
+       (subprocess-wait live)))))
+

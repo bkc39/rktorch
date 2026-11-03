@@ -61,7 +61,9 @@
   (define either (or rk py))
   (define rk-device (ref rk 'meta 'device))
   (define py-device (ref py 'meta 'device))
-  (define paired? (and rk py (equal? rk-device py-device)))
+  (define (timed r) (and r (format "~a (~a)" (ref r 'unit) (ref r 'timing))))
+  (define timed-alike? (equal? (timed rk) (timed py)))
+  (define paired? (and rk py (equal? rk-device py-device) timed-alike?))
   (define loader? (equal? c "cifar-loader"))
   (define (rate r)
     (cond
@@ -72,12 +74,18 @@
   (define notes
     (filter values
             (list (and (not (and rk py)) "no twin")
-                  (and rk py (not paired?) (format "device ~a≠~a" rk-device py-device))
+                  (and rk py (not (equal? rk-device py-device))
+                       (format "device ~a≠~a" rk-device py-device))
+                  (and rk py (not timed-alike?) (format "timing ~a≠~a" (timed rk) (timed py)))
                   (and (eq? (ref py 'meta 'pin_memory) #t) "pin_memory (PyTorch only)")
                   (and py (equal? pipeline "batched") "twin crops per image")
                   (load-note rk py))))
   (list (if loader? "loader only" "09 ResNet") pipeline (or (ref either 'settings 'WORKERS) "-")
-        (or rk-device py-device "-") (if loader? "images/s" "s/epoch")
+        (or rk-device py-device "-")
+        (cond
+          [loader? "images/s"]
+          [timed-alike? (or (ref either 'unit) "-")]
+          [else "-"])
         (rate rk) (rate py) (if paired? (ratio (median-of rk) (median-of py)) "-")
         (percent (and paired? (floor-of rk py)))
         (num (ref rk 'steps_per_s 'median) 1) (num (ref py 'steps_per_s 'median) 1)
@@ -114,9 +122,10 @@
 
   (define (h c impl variant s rate step host gc
              #:iqr [q 0.0] #:n [n 3] #:pin [pin #f] #:device [device "cuda"]
-             #:loads [loads '(1.0)] #:max-load [max-load 4])
+             #:loads [loads '(1.0)] #:max-load [max-load 4]
+             #:unit [unit "s/epoch"] #:timing [timing "steps"])
     (hasheq 'suite "e2e" 'group "summary" 'case c 'impl impl 'variant variant 'run_id "r1"
-            'unit "s/epoch" 'stats (hasheq 'median s 'iqr q 'n n)
+            'unit unit 'timing timing 'stats (hasheq 'median s 'iqr q 'n n)
             'steps_per_s (hasheq 'median rate) 'step_ms (list step) 'host_ms (list host)
             'epoch_gc_ms (list gc) 'run_loads loads 'max_load max-load
             'settings (hasheq 'PIPELINE (regexp-replace #rx"-[0-9]+$" variant "")
@@ -202,4 +211,21 @@
      #rx"\\| twin crops per image \\|$"
      (row-of (h-section (list (h "cifar-loader" "rktorch" "batched-8" 1.0 10.0 4.0 3.0 0.0)
                               (h "py-cifar-loader" "pytorch" "batched-8" 1.0 10.0 4.0 3.0 0.0)))
-             "| loader only"))))
+             "| loader only")))
+
+  (test-case "H pairs no rows timed differently: a wall-timed run is not an epoch"
+    (define md
+      (h-section
+       (list (h "cifar-resnet" "rktorch" "batched-2" 95.0 13.0 75.0 20.0 3000.0 #:iqr 1.5
+                #:unit "s/run" #:timing "wall")
+             (h "py-cifar-resnet" "pytorch" "batched-2" 10.0 39.0 25.0 5.0 0.0)
+             (h "cifar-loader" "rktorch" "batched-2" 1.0 10.0 4.0 3.0 0.0
+                #:unit "s/run" #:timing "wall")
+             (h "py-cifar-loader" "pytorch" "batched-2" 1.0 10.0 4.0 3.0 0.0))))
+    (check-regexp-match
+     #rx"^\\| 09 ResNet \\| batched \\| 2 \\| cuda \\| - \\| 95\\.00 \\| 10\\.00 \\| - \\| - \\|"
+     (row-of md "| 09 ResNet"))
+    (for ([prefix (in-list '("| 09 ResNet" "| loader only"))])
+      (check-regexp-match #rx"timing s/run \\(wall\\)≠s/epoch \\(steps\\)" (row-of md prefix)))
+    (check-regexp-match #rx"^\\| loader only \\|[^|]*\\|[^|]*\\|[^|]*\\| images/s \\| 1280 \\| 1280 \\| - \\| - \\|"
+                        (row-of md "| loader only"))))

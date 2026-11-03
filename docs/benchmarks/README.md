@@ -120,11 +120,12 @@ median, quartiles and IQR, and the load average before and after.
   `ImageFolder` tree (`<split>/<class>/<n>.png`) that
   `racket scripts/bench/cifar-folder.rkt [full|fixture]` writes once from
   the archive `load-cifar10` caches (or the committed 256-image fixture)
-  under `RKTORCH_CIFAR10_PNG_DIR` (`~/.cache/rktorch/cifar10-png`, or
-  `DIR/cifar10-png` under `--cache`), with a `SHA256SUMS` of its files and
-  their `digest`. The script prints the digest and leaves a written tree
-  alone; the partial directory of a write killed part way is removed by
-  the next write. Both runners read it through `image-folder` and the loader, with
+  under `RKTORCH_CIFAR10_PNG_DIR` (`rktorch/cifar10-png` in Racket's
+  `(find-system-path 'cache-dir)`, or `DIR/cifar10-png` under `--cache`),
+  with a `SHA256SUMS` of its files and their `digest`. The script prints
+  the digest and leaves a written tree alone; the partial directory of a
+  write killed part way is removed by the next write, and one whose
+  writer is still running is not. Both runners read it through `image-folder` and the loader, with
   `WORKERS` (0) workers, batches of `BATCH` (128), and `PIPELINE`:
   `per-sample` is torchvision's CIFAR augmentation in the workers
   (`random-crop` with padding 4, `random-horizontal-flip`, the float
