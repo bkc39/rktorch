@@ -1,11 +1,8 @@
 #lang racket/base
 
 (require (only-in ffi/unsafe _fun _symbol)
-         (only-in "memory.rkt"
-                  define-binary/raw
-                  define-scalar/raw
-                  define-unary/raw
-                  tensor-allocator)
+         (only-in "definers.rkt" define-binary/raw define-scalar/raw define-unary/raw)
+         (only-in "memory.rkt" tensor-allocator)
          (only-in "syntax.rkt" _Tensor _Tensor/null define-torch))
 
 (provide tr-add/raw

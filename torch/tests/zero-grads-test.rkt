@@ -13,9 +13,8 @@
            (only-in "../foreign/autograd-ops.rkt" reset-grads!)
            (only-in "../foreign/raw/device-queries.rkt" allocator-reading)
            (only-in "../foreign/raw/fault.rkt" with-crossing-hook)
-           (only-in "../foreign/raw/memory.rkt" adopted-bytes)
-           (only-in "../foreign/raw/pressure.rkt"
-                    native-collect-margin refresh-shadows!)
+           (only-in "../foreign/raw/memory.rkt" adopted-bytes native-memory-use/fold)
+           (only-in "../foreign/raw/pressure.rkt" refresh-shadows!)
            (only-in "../main.rkt"
                     * + backward! grad has-grad? ones sum tensor tensor->list
                     zeros)
@@ -24,6 +23,7 @@
                     zero-grads!)
            (only-in "../foreign/structs.rkt" tensor-handle tensor-impl wrap-tensor)
            (only-in "private/race-harness.rkt" hooks settle! with-race-hook)
+           (only-in "private/unseen-gradient.rkt" with-unseen-gradient)
            (only-in "private/within.rkt" bounded-test))
 
   (define (crossings-of thunk)
@@ -163,15 +163,33 @@
     (check-equal? (released-during (lambda () (zero-grads! opt #:set-to-none? #f)))
                   (length (parameters net))))
 
-  (bounded-test "a raise on the third gradient fetch releases the two already taken"
+  (bounded-test "a raise accounting the second fetched gradient releases every handle fetched"
+    (define ps (parameters (backed-up 3 2)))
+    (define (raise-injected) (raise 'injected))
+    (settle!)
+    (define before (native-memory-use))
+    (define released
+      (released-during
+       (lambda ()
+         (with-handlers ([(lambda (e) (eq? e 'injected)) void])
+           (clip-grad-norm! ps 0.1)))
+       #:also (on-nth 'ledger-entry-added/batched 2 raise-injected)))
+    (settle!)
+    (check-equal? (native-memory-use) before "the ledger is back where it was")
+    (check-equal? (native-memory-use)
+                  (filter (lambda (entry) (positive? (cdr entry))) (native-memory-use/fold))
+                  "the running totals agree with the entries")
+    (check-equal? released (length ps)))
+
+  (bounded-test "a raise on the first op after the batched fetch releases every handle it took"
     (define ps (parameters (backed-up 3 2)))
     (define (raise-injected) (raise 'injected))
     (check-equal? (released-during
                    (lambda ()
                      (with-handlers ([(lambda (e) (eq? e 'injected)) void])
                        (clip-grad-norm! ps 0.1)))
-                   #:also (on-nth 'op-returned 3 raise-injected))
-                  2))
+                   #:also (on-nth 'op-returned 1 raise-injected))
+                  (length ps)))
 
   (define mib (* 1024 1024))
 
@@ -184,11 +202,6 @@
 
   (define (cpu-unaccounted)
     (cpu-entry-of (native-memory-unaccounted)))
-
-  (define (with-unseen-gradient unseen thunk)
-    (parameterize ([allocator-reading (lambda (_dev) (+ (cpu-bytes) (unbox unseen)))]
-                   [native-collect-margin (* 1024 1024 mib)])
-      (thunk)))
 
   (bounded-test "a gradient handle released after a reset leaves the ledger exact"
     (settle!)

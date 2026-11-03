@@ -20,7 +20,7 @@
                     backward! dtype grad manual-seed! ones randn sum
                     tensor->list to)
            (only-in "../nn.rkt"
-                    Conv2d Flatten Linear MaxPool2d Sequential adam
+                    Conv2d Flatten Linear MaxPool2d Sequential adam adamw
                     define-layer parameters rmsprop sgd step! zero-grads!)
            (only-in (submod "../nn/optim.rkt" private) optimizer-state)
            (only-in "../vision/resnet.rkt" ResNet)
@@ -66,27 +66,34 @@
 
   (define optimizers
     (list (list "sgd" 5
-                (lambda (ps) (sgd ps #:lr 0.1))
+                (lambda (ps) (sgd ps #:lr 0.1 #:foreach? #f))
                 (lambda () (reference-sgd #:lr 0.1)))
           (list "sgd, Nesterov momentum and weight decay" 19
                 (lambda (ps)
                   (sgd ps #:lr 0.1 #:momentum 0.9 #:nesterov? #t
-                       #:weight-decay 5e-4))
+                       #:weight-decay 5e-4 #:foreach? #f))
                 (lambda ()
                   (reference-sgd #:lr 0.1 #:momentum 0.9 #:nesterov? #t
                                  #:weight-decay 5e-4)))
           (list "adam" 14
-                (lambda (ps) (adam ps))
+                (lambda (ps) (adam ps #:foreach? #f))
                 (lambda () (reference-adam)))
           (list "adam, weight decay" 20
-                (lambda (ps) (adam ps #:lr 0.01 #:weight-decay 1e-2))
+                (lambda (ps) (adam ps #:lr 0.01 #:weight-decay 1e-2
+                                   #:foreach? #f))
                 (lambda () (reference-adam #:lr 0.01 #:weight-decay 1e-2)))
+          (list "adamw" 15
+                (lambda (ps) (adamw ps #:lr 0.01 #:foreach? #f))
+                (lambda ()
+                  (reference-adam #:lr 0.01 #:weight-decay 1e-2
+                                  #:decoupled? #t)))
           (list "rmsprop" 11
-                (lambda (ps) (rmsprop ps #:lr 0.01))
+                (lambda (ps) (rmsprop ps #:lr 0.01 #:foreach? #f))
                 (lambda () (reference-rmsprop #:lr 0.01)))
           (list "rmsprop, momentum and weight decay" 19
                 (lambda (ps)
-                  (rmsprop ps #:lr 0.01 #:momentum 0.5 #:weight-decay 1e-3))
+                  (rmsprop ps #:lr 0.01 #:momentum 0.5 #:weight-decay 1e-3
+                           #:foreach? #f))
                 (lambda ()
                   (reference-rmsprop #:lr 0.01 #:momentum 0.5
                                      #:weight-decay 1e-3)))))

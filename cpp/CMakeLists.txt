@@ -113,6 +113,7 @@ if(BUILD_TESTING)
   torchrkt_apply_nix_cflags(torchrkt_c_api_compile_test)
 
   add_executable(torchrkt_tests
+    tests/torchrkt/alloc_failure_test.cpp
     tests/torchrkt/audio_test.cpp
     tests/torchrkt/autocast_test.cpp
     tests/torchrkt/autograd_test.cpp
@@ -122,6 +123,7 @@ if(BUILD_TESTING)
     tests/torchrkt/finalizer_death_test.cpp
     tests/torchrkt/generated_asr_test.cpp
     tests/torchrkt/generated_golden_test.cpp
+    tests/torchrkt/generated_optim_test.cpp
     tests/torchrkt/generated_tranche2_test.cpp
     tests/torchrkt/generated_tranche3_test.cpp
     tests/torchrkt/generated_tranche4_test.cpp
