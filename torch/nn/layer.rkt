@@ -22,6 +22,7 @@
                   define/checked-out define/contract-out)
          (only-in "buffer.rkt" Buffer?)
          (only-in "parameter.rkt" Parameter?)
+         (only-in "private/field-walk.rkt" rebuilt-value)
          (only-in "private/layer-containers.rkt"
                   Children% Children%-alist Children%? Fn% Parameters% Parameters%?
                   check-names fn-forward)
@@ -32,8 +33,7 @@
                   registry registry-mode registry? set-registry-mode! with-mode)
          (only-in "private/layer-fields.rkt"
                   assemble check-entry-arity entry-procedure layer-methods-of
-                  layer-methods? no-forward prop:layer-methods write-field!)
-         (only-in "private/layer-rebuild.rkt" rebuilt-value))
+                  layer-methods? no-forward prop:layer-methods write-field!))
 
 (provide gen:layer
          layer?

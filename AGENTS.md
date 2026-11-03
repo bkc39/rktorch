@@ -842,7 +842,7 @@ Runtime paths take `(only-in racket/runtime-path #%datum define-runtime-path)`.
   `Parameters` and `Children` structs, `classify`, `check-names`),
   `torch/nn/private/layer-fields.rkt`
   (the expansion's runtime: `assemble`, the `set!` check, entry procedures)
-  and `torch/nn/private/layer-rebuild.rkt` (`rebuilt-value`, the field walk
+  and `torch/nn/private/field-walk.rkt` (`rebuilt-value`, the field walk
   `layer-rebuild` uses); `torch/nn/mode.rkt` = `train!`, `eval!`,
   `call-with-mode` and `in-mode`; `torch/nn/parameter.rkt`, `torch/nn/buffer.rkt`, `torch/nn/linear.rkt`,
   `torch/nn/init.rkt`, `torch/nn/optim.rkt`, `torch/nn/ema.rkt`, `torch/nn/loss.rkt`, `torch/nn/recurrent.rkt`,
