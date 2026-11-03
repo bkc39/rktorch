@@ -271,6 +271,7 @@ median, quartiles and IQR, and the load average before and after.
 | 13-translation | `EPOCHS=3` | `EPOCHS=30` | epochs after the first |
 | 15-finetune | `FINETUNE_EPOCHS=3` | `FINETUNE_EPOCHS=15` | the fine-tune phase (`FEATURE_EPOCHS=0`) |
 | 16-style-transfer | `STEPS=100` | `STEPS=1000` | steps after 20 |
+| 18-vit | `EPOCHS=3` | `EPOCHS=30` | epochs after the first |
 
 An A/B run alternates its variants every round, and each variant is a set
 of environment variables; `PLTUSERHOME=<checkout>/.racket-user` runs the

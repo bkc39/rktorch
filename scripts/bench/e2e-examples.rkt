@@ -34,6 +34,7 @@
         (example "16-style-transfer" '(("STEPS" . 100)) '(("STEPS" . 1000)) #f 20 'first)
         (example "loader" '(("EPOCHS" . 2)) '(("EPOCHS" . 5)) "EPOCHS" 0 'first)
         (example "17-workers" '(("EPOCHS" . 2)) '(("EPOCHS" . 3)) "EPOCHS" 0 'first)
+        (example "18-vit" '(("EPOCHS" . 3)) '(("EPOCHS" . 30)) "EPOCHS" 0 'first)
         (example "cifar-loader" two-epochs-of-128 two-epochs-of-128 "EPOCHS" 0 'first)
         (example "cifar-resnet" two-epochs-of-128 '(("EPOCHS" . 3) ("BATCH" . 128))
                  "EPOCHS" 0 'first)))
