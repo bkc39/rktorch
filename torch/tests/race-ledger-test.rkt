@@ -33,6 +33,18 @@
   (define mib (* 1024 1024))
   (define cpu (device 'cpu 0))
   (define pools '(#f own))
+  ;; 'own + break-thread wedges Racket 9.3 CS: #443
+  (define stops-by-pool '((#f kill break) (own kill)))
+  (define (stops-for pool) (cdr (assq pool stops-by-pool)))
+  (define (pools-stopped-by stop-by)
+    (filter (lambda (pool) (memq stop-by (stops-for pool))) pools))
+
+  (test-case "a thread of its own pool is stopped by kill, never by break (#443)"
+    (check-false (memq 'break (stops-for 'own)))
+    (check-not-false (memq 'kill (stops-for 'own)))
+    (check-not-false (memq 'break (stops-for #f)))
+    (check-equal? (pools-stopped-by 'kill) pools)
+    (check-equal? (pools-stopped-by 'break) '(#f)))
 
   (define (handle-gate point h)
     (make-gate point #:when (lambda (subject) (eq? subject h))))
@@ -161,7 +173,7 @@
 
   (test-case "a break during an explicit free waits until the release"
     (for* ([point (in-list '(free-taken free-unaccounted))]
-           [pool (in-list pools)])
+           [pool (in-list (pools-stopped-by 'break))])
       (break-mid-free point pool)))
 
   (define (stop-mid-free! point pool stop-by)
@@ -386,8 +398,8 @@
     (check-ledger base w))
 
   (test-case "a thread stopped mid-registration leaves no handle unguarded"
-    (for* ([stop-by (in-list '(kill break))]
-           [pool (in-list pools)])
+    (for* ([pool (in-list pools)]
+           [stop-by (in-list (stops-for pool))])
       (call-with-process-deadline 120 (lambda () (stopped-mid-registration pool stop-by)))))
 
   (test-case "eight parallel threads accounting and unaccounting keep the counter at the fold"

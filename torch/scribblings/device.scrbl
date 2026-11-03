@@ -1,7 +1,8 @@
 #lang scribble/manual
 
 @(require "common.rkt"
-          torch/scribblings/labels)
+          torch/scribblings/labels
+          (for-label torch/data/loader))
 
 @title{Devices and dtypes}
 
@@ -574,6 +575,12 @@ their pool thread's, and coroutine threads share the main thread's
 (@hyperlink["https://github.com/bkc39/rktorch/issues/194"]{#194}). Two threads may
 free one tensor explicitly: the handle is released once, and the other
 free raises @racket[exn:fail:contract].
+
+On Racket 9.3 CS, a @racket[break-thread] sent to a parallel thread while
+it runs tensor operations can wedge the process
+(@hyperlink["https://github.com/bkc39/rktorch/issues/443"]{#443}). Stop such
+a thread with @racket[kill-thread] or by shutting down its custodian, as
+@racket[dataloader] stops its @racket[#:workers] threads.
 
 A tensor must not be sent to another place. It is accepted as a place
 message but arrives as a bare pointer to the same native storage, with no
