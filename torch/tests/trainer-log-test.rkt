@@ -239,7 +239,7 @@
       (fit (Labelled) (label-loader) #:max-epochs 2 #:log-every-n-steps 1 #:logger l
            #:callbacks (list skip-first)))
     (check-equal? (logged-steps l) '(0 1 2 2 3 4 5 5))
-    (check-equal? (run-global-step r) 3))
+    (check-equal? (run-global-step r) 6))
 
   (define-trainer EpochStart (net)
     (define-init () (set! net (Linear 1 1)))

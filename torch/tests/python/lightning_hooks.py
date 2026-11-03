@@ -1,8 +1,9 @@
 """Lightning 2.6.5's hook order, the oracle of trainer-hook-order-test.rkt.
 
 Records every hook a LightningModule and a Callback can override, in the order
-Lightning calls them, for the scenarios LO-1..LO-8 of the T0 spec (#383),
-dumps _FxValidator.functions, and records the step each logger row is labelled
+Lightning calls them, for the scenarios LO-1..LO-8 of the T0 spec (#383)
+and for fits that skip a window by a None loss or an optimizer_step that does
+not step (#446), dumps _FxValidator.functions, and records the step each logger row is labelled
 with in fits that skip a window (#445). Writes torch/tests/lightning-hooks.rktd,
 or the path given as the first argument; lightning-hooks-parity-test.rkt
 regenerates it and compares.
@@ -104,15 +105,23 @@ class Base(pl.LightningModule):
         return self.layer(x)
 
     def at(self, place, batch_idx):
-        return place == (self.current_epoch, batch_idx)
+        return place == "every" or place == (self.current_epoch, batch_idx)
 
     def training_step(self, batch, batch_idx):
         if self.at(self.scenario.fail_at, batch_idx):
             raise Failure("training-step")
         if self.at(self.scenario.stop_at, batch_idx):
             self.trainer.should_stop = True
+        if self.at(self.scenario.skip_loss, batch_idx):
+            return None
         x, y = batch
         return nn.functional.mse_loss(self(x), y)
+
+    def optimizer_step(self, epoch, batch_idx, optimizer, optimizer_closure=None):
+        if self.at(self.scenario.skip_step, batch_idx):
+            optimizer_closure()
+        else:
+            optimizer.step(closure=optimizer_closure)
 
     def validation_step(self, batch, batch_idx):
         x, y = batch
@@ -168,11 +177,12 @@ def loader(n):
 
 
 def trainer(callbacks, logger=False, **kwargs):
-    return pl.Trainer(max_epochs=2, num_sanity_val_steps=1,
-                      enable_checkpointing=False, logger=logger,
+    options = {"max_epochs": 2, "num_sanity_val_steps": 1}
+    options.update(kwargs)
+    return pl.Trainer(enable_checkpointing=False, logger=logger,
                       enable_progress_bar=False, enable_model_summary=False,
                       accelerator="cpu", devices=1,
-                      callbacks=callbacks, **kwargs)
+                      callbacks=callbacks, **options)
 
 
 def run(entry, scenario_kwargs=None, train=6, trainer_kwargs=None):
@@ -203,6 +213,17 @@ SCENARIOS = {
     "request-stop": lambda: run("fit", {"stop_at": (0, 1)}),
     "val-check-interval": lambda: run(
         "fit", train=10, trainer_kwargs={"val_check_interval": 2}),
+    "skip-loss": lambda: run("fit", {"skip_loss": (0, 1)}),
+    "skip-step": lambda: run("fit", {"skip_step": (0, 1)}),
+    "skip-loss-accumulate": lambda: run(
+        "fit", {"skip_loss": (0, 0), "step_scheduler": True}, train=10,
+        trainer_kwargs={"accumulate_grad_batches": 2}),
+    "skip-step-accumulate": lambda: run(
+        "fit", {"skip_step": (0, 1), "step_scheduler": True}, train=10,
+        trainer_kwargs={"accumulate_grad_batches": 2}),
+    "skip-every-max-steps": lambda: run(
+        "fit", {"skip_loss": "every"},
+        trainer_kwargs={"max_epochs": -1, "max_steps": 4}),
     "test": lambda: run("test"),
     "predict": lambda: run("predict"),
 }
@@ -231,15 +252,7 @@ class Rows(Logger):
 class Logged(Base):
     def training_step(self, batch, batch_idx):
         self.log("tl", 1.0, on_step=True, on_epoch=True)
-        if self.at(self.scenario.skip_loss, batch_idx):
-            return None
         return super().training_step(batch, batch_idx)
-
-    def optimizer_step(self, epoch, batch_idx, optimizer, optimizer_closure=None):
-        if self.at(self.scenario.skip_step, batch_idx):
-            optimizer_closure()
-        else:
-            optimizer.step(closure=optimizer_closure)
 
     def validation_step(self, batch, batch_idx):
         self.log("vl", 2.0)

@@ -17,10 +17,9 @@
                   warn-eval-layers! with-failure-protocol)
          (only-in "evaluate.rkt" evaluate)
          (only-in "state.rkt"
-                  run-batches-stepped run-book run-callbacks run-device run-epoch
-                  run-global-step run-loggers run-optimizers run-schedulers run-skip-epoch?
-                  run-skip-window? run-stop? run-trainer set-run-batch-index!
-                  set-run-batches-stepped! set-run-current-stage! set-run-epoch!
+                  run-book run-callbacks run-device run-epoch run-global-step run-loggers
+                  run-optimizers run-schedulers run-skip-epoch? run-skip-window? run-stop?
+                  run-trainer set-run-batch-index! set-run-current-stage! set-run-epoch!
                   set-run-global-step! set-run-loggers! set-run-optimizers!
                   set-run-schedulers! set-run-skip-epoch?! set-run-skip-window?!
                   set-run-step-pending?! set-run-stepped?!)
@@ -122,23 +121,19 @@
   (evaluate r (plan-val p) count stage))
 
 (define (backward-pass! r scaled)
-  (cond
-    [(not scaled) (set-run-skip-window?! r #t)]
-    [(run-skip-window? r) (void)]
-    [else
-     (call-hooks r 'on-before-backward scaled)
-     (unless (run-skip-window? r)
-       (backward! scaled)
-       (call-hooks r 'on-after-backward))]))
+  (call-hooks r 'on-before-backward scaled)
+  (backward! scaled)
+  (call-hooks r 'on-after-backward))
 
 (define (optimizer-step! r i)
-  (for ([opt (in-list (run-optimizers r))])
-    (call-hooks r 'on-before-optimizer-step opt))
   (unless (run-skip-window? r)
-    (for-each step! (run-optimizers r))
-    (set-run-global-step! r (add1 (run-global-step r)))
-    (set-run-stepped?! r #t)
-    (step-schedulers! r 'step i)))
+    (for ([opt (in-list (run-optimizers r))])
+      (call-hooks r 'on-before-optimizer-step opt)))
+  (unless (run-skip-window? r)
+    (for-each step! (run-optimizers r)))
+  (set-run-global-step! r (add1 (run-global-step r)))
+  (set-run-stepped?! r #t)
+  (step-schedulers! r 'step i))
 
 (define (train-step! r p i batch)
   (match-define (list loss extra) (call-trainer/values r 'training-step batch))
@@ -148,25 +143,24 @@
       (zero-grads! opt)))
   (define a (plan-accumulate p))
   (define scaled (and loss (if (= a 1) loss (/ loss a))))
-  (backward-pass! r scaled)
-  (when (and (window-end? p i) (not (run-skip-window? r)))
+  (when scaled
+    (backward-pass! r scaled))
+  (define window-end (window-end? p i))
+  (when window-end
     (optimizer-step! r i))
   (set-run-step-pending?! r #f)
   (when (last-batch? p i)
     (step-schedulers! r 'epoch (run-epoch r)))
   (apply call-hooks r 'on-train-batch-end (and scaled (detach scaled)) extra batch)
-  (define window-end (window-end? p i))
-  (define stepped (run-batches-stepped r))
+  (define step (run-global-step r))
   (when (and window-end
-             (or (run-stop? r) (zero? (modulo (add1 stepped) (plan-log-every p)))))
-    (publish-steps! r 'train stepped))
+             (or (run-stop? r) (zero? (modulo step (plan-log-every p)))))
+    (publish-steps! r 'train (sub1 step)))
   (define validate? (val-due? r p i))
   (when (and validate? window-end)
     (reset-grads! (parameters (run-trainer r))))
   (when validate?
-    (validate! r p 'validate (plan-val-count p)))
-  (when window-end
-    (set-run-batches-stepped! r (add1 stepped))))
+    (validate! r p 'validate (plan-val-count p))))
 
 (define (train-batch! r p i raw)
   (set-run-batch-index! r i)
@@ -194,7 +188,7 @@
   (set-run-skip-epoch?! r #f)
   (epoch-end-reached! (run-book r) 'train)
   (call-hooks r 'on-train-epoch-end)
-  (publish-epoch! r 'train (sub1 (run-batches-stepped r)))
+  (publish-epoch! r 'train (sub1 (run-global-step r)))
   (set-run-epoch! r (add1 (run-epoch r))))
 
 (define (configure-optimizers! r)

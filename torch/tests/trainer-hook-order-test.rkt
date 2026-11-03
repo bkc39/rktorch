@@ -9,7 +9,8 @@
            (only-in "private/lightning-names.rkt" expected-events expected-logged-steps)
            (only-in "private/trainer-kit.rkt"
                     collecting-logger collecting-rows recorder Recorded scenario
-                    scenario-events scenario-exn toy-loader))
+                    scenario-events scenario-exn toy-loader)
+           (only-in "private/within.rkt" bounded-test))
 
   (define (same-event? a e)
     (match* (a e)
@@ -34,10 +35,13 @@
   (define (fit-scenario sc
                         #:train [n 6]
                         #:accumulate [accumulate 1]
-                        #:val-check-interval [interval #f])
+                        #:val-check-interval [interval #f]
+                        #:max-epochs [max-epochs 2]
+                        #:max-steps [max-steps #f])
     (fit (Recorded sc) (toy-loader n)
          #:val (toy-loader 4)
-         #:max-epochs 2
+         #:max-epochs max-epochs
+         #:max-steps max-steps
          #:num-sanity-val-steps 1
          #:accumulate-grad-batches accumulate
          #:val-check-interval interval
@@ -73,6 +77,26 @@
     (define sc (scenario))
     (fit-scenario sc #:train 10 #:val-check-interval 2)
     (check-events 'val-check-interval sc))
+
+  (test-case "LO-11: a #f loss skips its backward pass; the window still steps"
+    (define sc (scenario #:skip-loss '(0 1)))
+    (fit-scenario sc)
+    (check-events 'skip-loss sc))
+
+  (test-case "LO-11: skip-step! drops the step, not the backward passes or the step count"
+    (define sc (scenario #:skip-step '(0 1)))
+    (fit-scenario sc)
+    (check-events 'skip-step sc))
+
+  (test-case "LO-11: a #f loss at a window's start, under a per-step scheduler"
+    (define sc (scenario #:skip-loss '(0 0) #:step-scheduler? #t))
+    (fit-scenario sc #:train 10 #:accumulate 2)
+    (check-events 'skip-loss-accumulate sc))
+
+  (test-case "LO-11: a per-step scheduler steps on a window skip-step! dropped"
+    (define sc (scenario #:skip-step '(0 1) #:step-scheduler? #t))
+    (fit-scenario sc #:train 10 #:accumulate 2)
+    (check-events 'skip-step-accumulate sc))
 
   (test-case "LO-7: test"
     (define sc (scenario))
@@ -123,4 +147,9 @@
            #:accumulate-grad-batches accumulate
            #:log-every-n-steps 1
            #:logger l)
-      (check-equal? (collecting-rows l) (expected-logged-steps name) (format "~a" name)))))
+      (check-equal? (collecting-rows l) (expected-logged-steps name) (format "~a" name))))
+
+  (bounded-test "LO-11: #:max-steps alone ends a fit whose every loss is #f"
+    (define sc (scenario #:skip-loss 'every))
+    (fit-scenario sc #:max-epochs #f #:max-steps 4)
+    (check-events 'skip-every-max-steps sc)))

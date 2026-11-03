@@ -137,14 +137,33 @@
                     step)
                   '(2 4)))
 
-  (test-case "L-C5: skip-step! and a #f loss drop the window's step"
-    (for ([t (list (new-tally #:skip-at '(0 0)) (new-tally #:false-at '(0 0)))])
-      (define r (fit (Counted t) (ones-loader 4) #:max-epochs 1
-                     #:accumulate-grad-batches 2 #:logger #f))
-      (check-equal? (run-global-step r) 1)
-      (check-equal? (length (notes t 'optimizer-step)) 1)
-      (check-equal? (length (notes t 'zero-grad)) 2)
-      (check-equal? (notes t 'after-backward) '((0 2) (0 3)))))
+  (test-case "L-C5: a #f loss skips its backward pass, and its window steps on the others'"
+    (define t (new-tally #:false-at '(0 0)))
+    (define r (fit (Counted t) (ones-loader 4) #:max-epochs 1
+                   #:accumulate-grad-batches 2 #:logger #f))
+    (check-equal? (run-global-step r) 2)
+    (check-equal? (length (notes t 'zero-grad)) 2)
+    (check-equal? (notes t 'after-backward) '((0 1) (0 2) (0 3)))
+    (check-equal? (for/list ([gs (in-list (notes t 'optimizer-step))]) (andmap list? gs))
+                  '(#t #t)
+                  "each window's step sees gradients"))
+
+  (test-case "L-C5: a window whose only loss is #f steps on no gradient"
+    (define t (new-tally #:false-at '(0 1)))
+    (define tr (Counted t))
+    (fit tr (ones-loader 2) #:max-epochs 1 #:logger #f)
+    (check-equal? (notes t 'after-backward) '((0 0)))
+    (match-define (list _ skipped) (notes t 'optimizer-step))
+    (check-equal? skipped '(#f #f)))
+
+  (test-case "L-C5: skip-step! drops the window's step, not its backward passes or its count"
+    (define t (new-tally #:skip-at '(0 0)))
+    (define r (fit (Counted t) (ones-loader 4) #:max-epochs 1
+                   #:accumulate-grad-batches 2 #:logger #f))
+    (check-equal? (run-global-step r) 2)
+    (check-equal? (length (notes t 'optimizer-step)) 1)
+    (check-equal? (length (notes t 'zero-grad)) 2)
+    (check-equal? (notes t 'after-backward) '((0 0) (0 1) (0 2) (0 3))))
 
   (test-case "L-C5: skip-step! from on-before-optimizer-step drops the step"
     (define t (new-tally))
@@ -153,7 +172,7 @@
     (define skipper
       (lambda-callback #:on-before-optimizer-step (lambda (r opt) (skip-step! r))))
     (define r (fit tr (ones-loader 4) #:max-epochs 1 #:logger #f #:callbacks (list skipper)))
-    (check-equal? (run-global-step r) 0)
+    (check-equal? (run-global-step r) 4)
     (check-equal? (length (notes t 'optimizer-step)) 4)
     (check-equal? (map tensor->list (parameters tr)) before))
 

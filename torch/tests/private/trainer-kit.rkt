@@ -58,16 +58,17 @@
   (string-append "an integer #:val-check-interval exceeds the training batches"
                  " #:limit-train-batches selects"))
 
-(struct scenario (skip-epoch fail-at stop-at break-twice? step-scheduler?
-                  event-box [exn #:mutable])
+(struct scenario (skip-epoch skip-loss skip-step fail-at stop-at break-twice?
+                  step-scheduler? event-box [exn #:mutable])
   #:name scenario-struct
   #:constructor-name scenario-state)
 
-(define (scenario #:skip-epoch [skip-epoch #f] #:fail-at [fail-at #f]
+(define (scenario #:skip-epoch [skip-epoch #f] #:skip-loss [skip-loss #f]
+                  #:skip-step [skip-step #f] #:fail-at [fail-at #f]
                   #:stop-at [stop-at #f] #:break-twice? [break-twice? #f]
                   #:step-scheduler? [step-scheduler? #f])
-  (scenario-state skip-epoch fail-at stop-at break-twice? step-scheduler?
-                  (box '()) #f))
+  (scenario-state skip-epoch skip-loss skip-step fail-at stop-at break-twice?
+                  step-scheduler? (box '()) #f))
 
 (define (scenario-events sc) (reverse (unbox (scenario-event-box sc))))
 
@@ -88,7 +89,7 @@
                   (unbox events))))
 
 (define (at? place r)
-  (equal? place (list (run-epoch r) (run-batch-index r))))
+  (or (eq? place 'every) (equal? place (list (run-epoch r) (run-batch-index r)))))
 
 (define (raise-planned sc)
   (cond
@@ -138,7 +139,8 @@
       (record! sc 'trainer 'training-step run)
       (when (at? (scenario-fail-at sc) run) (raise-planned sc))
       (when (at? (scenario-stop-at sc) run) (request-stop! run))
-      (mse-loss (net x) y))
+      (when (at? (scenario-skip-step sc) run) (skip-step! run))
+      (and (not (at? (scenario-skip-loss sc) run)) (mse-loss (net x) y)))
     (define-validation-step (x y)
       (record! sc 'trainer 'validation-step run)
       (mse-loss (net x) y))
