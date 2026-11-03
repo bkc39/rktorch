@@ -302,4 +302,75 @@
   (bounded-test "a hand-written layer-rebuild sees a child copy fully built"
     (define c (~> (vector 1 (box 2)) box holder (wrapper #f) layer-copy))
     (check-equal? (wrapper-seen c) (vector 1 (box 2)))
-    (check-equal? (unbox ((c))) (vector 1 (box 2)))))
+    (check-equal? (unbox ((c))) (vector 1 (box 2))))
+
+  (bounded-test "a layer reached through a delegating rebuild and a field is copied once"
+    (define h (holder (box 1)))
+    (match-define (list d2 h2) (~> (deleg h) (twin h) copied-field))
+    (check-eq? (deleg-inner d2) h2)
+    (check-false (eq? h2 h))
+    (match-define (list h3 d3) (copied-field (twin h (deleg h))))
+    (check-eq? (deleg-inner d3) h3)
+    (check-false (eq? h3 h)))
+
+  (struct back ([outer #:mutable])
+    #:methods gen:layer
+    [(define (layer-forward self . _inputs) (back-outer self))
+     (define (layer-rebuild self child tensor)
+       (~> (back-outer self) (rebuild-directly child tensor) back))])
+
+  (memory-bounded-test "a cycle closed through a delegating rebuild is refused naming its field"
+    (define w (back #f))
+    (define h (holder w))
+    (set-back-outer! w h)
+    (check-refused "slot" h))
+
+  (bounded-test "a weak table stays keyed by the original, not the field's copy"
+    (define k (box 1))
+    (match-define (list k2 t2) (copied-field (twin k (make-weak-hasheq (list (cons k 'v))))))
+    (check-false (eq? k2 k))
+    (check-eq? (hash-ref t2 k #f) 'v)
+    (check-false (hash-ref t2 k2 #f)))
+
+  (memory-bounded-test "a weak hash whose key holds the hash copies, sharing the key"
+    (for ([make (in-list (list make-weak-hasheq make-ephemeron-hasheq))])
+      (define h (make))
+      (define k (box h))
+      (hash-set! h k 1)
+      (match-define (list h2 k2) (copied-field (holder (list h k))))
+      (check-false (eq? h2 h))
+      (check-equal? (hash-count h2) 1)
+      (check-eq? (hash-ref h2 k #f) 1)
+      (check-false (eq? k2 k))
+      (check-eq? (unbox k2) h2)))
+
+  (memory-bounded-test "a weak hash holding itself as a value is refused"
+    (for ([make (in-list (list make-weak-hasheq make-ephemeron-hasheq))])
+      (define h (make))
+      (hash-set! h 'me h)
+      (check-refused "slot" (holder h))))
+
+  (define stash #f)
+
+  (struct stasher (inner)
+    #:methods gen:layer
+    [(define (layer-forward self . _inputs) (stasher-inner self))
+     (define (layer-rebuild self child _tensor)
+       (set! stash child)
+       (stasher (child "inner" (stasher-inner self))))])
+
+  (define (check-closed b)
+    (define closed #rx"^layer-copy: a child callback used after layer-copy returned")
+    (check-exn closed (lambda () (stash "inner" (holder b))))
+    (check-exn closed (lambda () (layer-rebuild (holder b) stash values))))
+
+  (bounded-test "a child callback kept past layer-copy refuses later use"
+    (define b (box 1))
+    (~> (holder b) stasher layer-copy)
+    (check-closed b)
+    (define f
+      (procedure->Layer (lambda (x) x) #:parameters (list (cons "w" (Parameter (ones 1))))))
+    (set! stash #f)
+    (check-exn #rx"^layer-copy: a procedure->Layer" (lambda () (layer-copy (stasher f))))
+    (check-true (procedure? stash))
+    (check-closed b)))

@@ -9,7 +9,7 @@
          (only-in "parameter.rkt" Parameter Parameter?)
          (only-in "private/field-walk.rkt" refuse-cycles)
          (only-in "private/layer-core.rkt" layer-rebuild-in)
-         (only-in "private/memo.rkt" memo remembered remembering))
+         (only-in "private/memo.rkt" memo remembered with-remembering))
 
 (define (fresh-tensor t)
   (define copy (zeros-like t))
@@ -26,10 +26,9 @@
   (define seen (memo 'layer-copy))
   (define (copy-tensor t)
     (remembered seen t (lambda () (fresh-tensor t))))
-  (define (rebuilt c)
-    (layer-rebuild-in seen c copy-child copy-tensor))
-  (define copy-child
-    (remembering seen
-                 (lambda (name c)
-                   (remembered seen c (lambda () (rebuilt c)) #:field name))))
-  (remembered seen m (lambda () (rebuilt m))))
+  (define (rebuilt child c)
+    (layer-rebuild-in seen c child copy-tensor))
+  (define (copy-child child name c)
+    (remembered seen c (lambda () (rebuilt child c)) #:field name))
+  (with-remembering ([child seen copy-child])
+    (remembered seen m (lambda () (rebuilt child m)))))
