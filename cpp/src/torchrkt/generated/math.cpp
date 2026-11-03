@@ -18,6 +18,16 @@ tr_tensor* tr_gen_abs(const tr_tensor* self) {
                                 [&] { return at::abs(self->value); });
 }
 
+tr_tensor* tr_gen_add_tensor(const tr_tensor* self, const tr_tensor* other,
+                             double alpha) {
+  if (!self || !other) {
+    return torchrkt::null_arg("tr_gen_add_tensor");
+  }
+  return torchrkt::alloc_result("tr_gen_add_tensor", [&] {
+    return at::add(self->value, other->value, alpha);
+  });
+}
+
 tr_tensor* tr_gen_clamp(const tr_tensor* self, double min, bool min_has,
                         double max, bool max_has) {
   if (!self) {
