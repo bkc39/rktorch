@@ -271,10 +271,10 @@ class Logged(Base):
         return super().validation_step(batch, batch_idx)
 
 
-def logged(scenario_kwargs, train=6, accumulate=1):
+def logged(scenario_kwargs, train=6, accumulate=1, log_every=1):
     torch.manual_seed(0)
     rows = Rows()
-    t = trainer([], logger=rows, log_every_n_steps=1,
+    t = trainer([], logger=rows, log_every_n_steps=log_every,
                 accumulate_grad_batches=accumulate)
     t.fit(Logged(Scenario(**scenario_kwargs)), loader(train), loader(4))
     return rows.rows
@@ -285,6 +285,8 @@ LOGGED = {
     "skip-step": lambda: logged({"skip_step": (0, 1)}),
     "skip-loss-accumulate": lambda: logged(
         {"skip_loss": (0, 1)}, train=10, accumulate=2),
+    "skip-loss-log-every-2": lambda: logged(
+        {"skip_loss": (0, 1)}, log_every=2),
 }
 
 

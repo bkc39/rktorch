@@ -2,6 +2,7 @@
 
 (module+ test
   (require (for-syntax racket/base (only-in syntax/parse/pre ~optional ~seq expr id))
+           (only-in racket/dict in-dict)
            (only-in racket/list drop-right make-list)
            (only-in racket/match match-define)
            (only-in racket/math exact-ceiling)
@@ -157,11 +158,15 @@
     (match-define (list _ skipped) (notes t 'optimizer-step))
     (check-equal? skipped '(#f #f)))
 
-  (define-trainer Decaying (net make-optimizer)
-    (define-init (m) (set! net (Linear 1 1)) (set! make-optimizer m))
+  (define-trainer Decaying (net make-optimizer skipped)
+    (define-init (n m s) (set! net n) (set! make-optimizer m) (set! skipped s))
     (define-optimizers (make-optimizer (parameters net)))
     (define-training-step (x y)
-      (and (zero? (run-batch-index run)) (mse-loss (net x) y))))
+      (and (not (memv (run-batch-index run) skipped)) (mse-loss (net x) y))))
+
+  (define optimizer-makers
+    (list (cons 'sgd (lambda (ps) (sgd ps #:lr 0.1 #:momentum 0.9 #:weight-decay 0.1)))
+          (cons 'adam (lambda (ps) (adam ps #:lr 0.1 #:weight-decay 0.1)))))
 
   (define (batch-end-states make-optimizer)
     (define states '())
@@ -173,17 +178,26 @@
          (set! states (cons (list (map tensor->list (parameters (run-trainer r)))
                                   (map tensor->list (optimizer-state opt)))
                             states)))))
-    (fit (Decaying make-optimizer) (ones-loader 2) #:max-epochs 1 #:logger #f
-         #:callbacks (list snapshot))
+    (fit (Decaying (Linear 1 1) make-optimizer '(1)) (ones-loader 2) #:max-epochs 1
+         #:logger #f #:callbacks (list snapshot))
     (reverse states))
 
+  (define (fitted-weights base make-optimizer batches skipped)
+    (define tr (Decaying (layer-copy base) make-optimizer skipped))
+    (fit tr (ones-loader batches) #:max-epochs 1 #:logger #f)
+    (map tensor->list (parameters tr)))
+
   (test-case "L-C5: a window whose every loss is #f keeps the weights and the optimizer state"
-    (for ([name (in-list '(sgd adam))]
-          [make (in-list (list (lambda (ps) (sgd ps #:lr 0.1 #:momentum 0.9 #:weight-decay 0.1))
-                               (lambda (ps) (adam ps #:lr 0.1 #:weight-decay 0.1))))])
+    (for ([(name make) (in-dict optimizer-makers)])
       (match-define (list (and stepped (list _ state)) skipped) (batch-end-states make))
       (check-pred pair? state (format "~a: the first window's step leaves state" name))
       (check-equal? skipped stepped (format "~a" name))))
+
+  (test-case "L-C5: a later step after an all-#f window matches a fit that never had it"
+    (for ([(name make) (in-dict optimizer-makers)])
+      (define base (Linear 1 1))
+      (check-equal? (fitted-weights base make 3 '(1)) (fitted-weights base make 2 '())
+                    (format "~a" name))))
 
   (test-case "L-C5: skip-step! drops the window's step, not its backward passes or its count"
     (define t (new-tally #:skip-at '(0 0)))

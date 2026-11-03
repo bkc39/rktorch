@@ -97,6 +97,16 @@
      (5 (epoch tl_step))
      (5 (epoch vl))
      (5 (epoch tl_epoch))))
+   (skip-loss-log-every-2
+    .
+    (
+     (1 (epoch tl_step))
+     (2 (epoch vl))
+     (2 (epoch tl_epoch))
+     (3 (epoch tl_step))
+     (5 (epoch tl_step))
+     (5 (epoch vl))
+     (5 (epoch tl_epoch))))
    (skip-step
     .
     (
