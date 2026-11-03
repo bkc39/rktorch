@@ -5,7 +5,8 @@
            rackunit
            "../main.rkt"
            "../nn.rkt"
-           (only-in "private/within.rkt" bounded-test))
+           (only-in "private/within.rkt" bounded-test)
+           (only-in "private/within-memory.rkt" memory-bounded-test))
 
   (define-layer holder (slot)
     #:init (v)
@@ -57,34 +58,34 @@
     (placeholder-set! p (list 1 p))
     (make-reader-graph p))
 
-  (bounded-test "a self-referential box is refused naming its field"
+  (memory-bounded-test "a self-referential box is refused naming its field"
     (check-refused "slot" (holder (self-box))))
 
-  (bounded-test "a self-referential vector is refused naming its field"
+  (memory-bounded-test "a self-referential vector is refused naming its field"
     (check-refused "slot" (holder (self-vector))))
 
-  (bounded-test "a hash holding itself as a value is refused"
+  (memory-bounded-test "a hash holding itself as a value is refused"
     (check-refused "slot" (holder (self-hash))))
 
-  (bounded-test "a hash whose key holds the hash is refused"
+  (memory-bounded-test "a hash whose key holds the hash is refused"
     (check-refused "slot" (holder (self-keyed-hash))))
 
-  (bounded-test "a box filled later with an ancestor layer is refused"
+  (memory-bounded-test "a box filled later with an ancestor layer is refused"
     (define b (box #f))
     (define outer (twin (holder b) 0))
     (set-box! b outer)
     (check-refused "slot" outer))
 
-  (bounded-test "a layer set into a vector in its own field is refused"
+  (memory-bounded-test "a layer set into a vector in its own field is refused"
     (define v (vector #f))
     (define m (holder v))
     (vector-set! v 0 m)
     (check-refused "slot" m))
 
-  (bounded-test "an immutable make-reader-graph cycle is refused"
+  (memory-bounded-test "an immutable make-reader-graph cycle is refused"
     (check-refused "slot" (holder (reader-graph-cycle))))
 
-  (bounded-test "a box and a list that hold each other are refused from either"
+  (memory-bounded-test "a box and a list that hold each other are refused from either"
     (define t (ones 1))
     (define b (box #f))
     (define l (list t b))
@@ -181,42 +182,83 @@
     (check-eq? a2 b2)
     (check-false (eq? a2 b)))
 
-  (bounded-test "a direct layer-rebuild refuses a cycle naming its field"
+  (memory-bounded-test "a direct layer-rebuild refuses a cycle naming its field"
     (check-exn #rx"^layer-rebuild: .*field: \"slot\""
                (lambda ()
                  (layer-rebuild (holder (self-box)) (lambda (_name c) c) values))))
 
+  (struct looped ([inner #:mutable])
+    #:methods gen:layer
+    [(define (layer-forward self . _inputs) (looped-inner self))
+     (define (layer-rebuild self child _tensor)
+       (looped (child "inner" (looped-inner self))))])
+
+  (memory-bounded-test "a cycle only rebuilds can see is refused while copying"
+    (define w (looped #f))
+    (set-looped-inner! w (holder w))
+    (check-refused "slot" w))
+
+  (struct named ([back #:mutable])
+    #:methods gen:layer
+    [(define (layer-forward self . _inputs) (named-back self))
+     (define (layer-named-children self)
+       (list (cons "back" (named-back self))))])
+
+  (memory-bounded-test "a cycle through layer-named-children is refused naming it"
+    (define n (named #f))
+    (define h (holder (list n)))
+    (set-named-back! n h)
+    (check-refused "back" h))
+
+  (define rebuild-directly layer-rebuild)
+
+  (struct pair-of (inner seen)
+    #:methods gen:layer
+    [(define (layer-forward self . _inputs) (pair-of-seen self))
+     (define (layer-named-children self)
+       (list (cons "inner" (pair-of-inner self))))
+     (define (layer-rebuild self child _tensor)
+       (define inner (pair-of-inner self))
+       (pair-of (child "inner" inner)
+                (list (inner)
+                      ((child "inner" inner))
+                      ((rebuild-directly inner (lambda (_name c) c) values)))))])
+
   (bounded-test "a direct layer-rebuild inside a layer-copy keeps its own memo"
-    (define rebuild-directly layer-rebuild)
-    (struct pair-of (inner)
-      #:methods gen:layer
-      [(define (layer-forward self . _inputs) (pair-of-inner self))
-       (define (layer-named-children self)
-         (list (cons "inner" (pair-of-inner self))))
-       (define (layer-rebuild self child _tensor)
-         (define inner (pair-of-inner self))
-         (set! slots (list (inner)
-                           ((child "inner" inner))
-                           ((rebuild-directly inner (lambda (_name c) c) values))))
-         (pair-of (child "inner" inner)))])
-    (define slots '())
-    (~> (box 1) holder pair-of layer-copy)
-    (match-define (list original copied direct) slots)
+    (match-define (list original copied direct)
+      (~> (box 1) holder (pair-of '()) layer-copy pair-of-seen))
     (check-false (eq? copied original))
     (check-false (eq? direct original))
     (check-false (eq? direct copied)))
 
+  (struct via (inner direct)
+    #:methods gen:layer
+    [(define (layer-forward self . _inputs) (via-direct self))
+     (define (layer-named-children self)
+       (list (cons "inner" (via-inner self))))
+     (define (layer-rebuild self child tensor)
+       (define inner (via-inner self))
+       (via (child "inner" inner) (rebuild-directly inner child tensor)))])
+
+  (bounded-test "a direct layer-rebuild given layer-copy's child copies children into it"
+    (define leaf (holder 0))
+    (define c (~> (twin leaf (box 1)) (via #f) layer-copy))
+    (match-define (list leaf-copy box-copy) ((via-inner c)))
+    (match-define (list leaf-direct box-direct) ((c)))
+    (check-false (eq? leaf-copy leaf))
+    (check-eq? leaf-direct leaf-copy)
+    (check-false (eq? box-direct box-copy)))
+
+  (struct wrapper (inner seen)
+    #:methods gen:layer
+    [(define (layer-forward self . _inputs) (wrapper-inner self))
+     (define (layer-named-children self)
+       (list (cons "inner" (wrapper-inner self))))
+     (define (layer-rebuild self child _tensor)
+       (define copy (child "inner" (wrapper-inner self)))
+       (wrapper copy (unbox (copy))))])
+
   (bounded-test "a hand-written layer-rebuild sees a child copy fully built"
-    (struct wrapper (inner)
-      #:methods gen:layer
-      [(define (layer-forward self . _inputs) (wrapper-inner self))
-       (define (layer-named-children self)
-         (list (cons "inner" (wrapper-inner self))))
-       (define (layer-rebuild self child _tensor)
-         (define copy (child "inner" (wrapper-inner self)))
-         (set! seen (unbox (copy)))
-         (wrapper copy))])
-    (define seen #f)
-    (define c (~> (vector 1 (box 2)) box holder wrapper layer-copy))
-    (check-equal? seen (vector 1 (box 2)))
+    (define c (~> (vector 1 (box 2)) box holder (wrapper #f) layer-copy))
+    (check-equal? (wrapper-seen c) (vector 1 (box 2)))
     (check-equal? (unbox ((c))) (vector 1 (box 2)))))

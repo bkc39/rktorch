@@ -286,7 +286,7 @@
            (struct sid registry (field-spec ...)
              #:reflection-name (~? o.reflect 'name)
              #:property prop:rebuilder
-             (lambda (self child tensor) (rebuild self child tensor))
+             (lambda (self child tensor seen) (rebuild self child tensor seen))
              #:property prop:fields
              (lambda (self) (map cons '(field-name ...) (field-values self)))
              moved-property ...
@@ -297,9 +297,10 @@
            me.checker-def ... ...
            (define (field-values self)
              (list (acc self) ...))
-           (define (rebuild self child tensor)
+           (define (rebuild self child tensor seen)
              (assemble 'name sid forward-proc (registry-mode self) '(field-name ...)
-                       (rebuilt-values '(field-name ...) (field-values self) child tensor)))
+                       (rebuilt-values seen '(field-name ...) (field-values self)
+                                       child tensor)))
            (define forward-proc forward-expr)
            (define (name . formals)
              (let ([absent #f] ...)

@@ -404,22 +404,15 @@ its own values); the stack contract rejects layer keywords or `#:norm #t`
 beside a layer or thunk. `layer-copy` (`torch/nn/copy.rkt`) is a deep copy
 with no RNG draws: fresh tensors with the same values, device, dtype and
 requires-grad (no gradients), children copied recursively, modes kept.
-It first refuses a cycle (`refuse-cycles` in
-`torch/nn/private/field-walk.rkt`, a depth-first walk with an on-stack
-set and a done set, so DAG sharing passes): any field whose value reaches
-itself through a pair, vector, box, hash (keys too) or layer raises
-`layer-copy:` naming the field. Then it copies as a DAG with one memo for
-layers, tensors and plain containers, carried to the walk by its private
-`copy-child` callback (no parameter or mark); a direct `layer-rebuild`
-gets a fresh memo per call. It runs on the `gen:layer` method
-`layer-rebuild layer child tensor`, which `define-layer` derives (the
-generated `rebuild` remakes the struct with each registered child through
-`child` and every tensor in its fields through `tensor`, plain pairs,
-vectors, boxes and hashes rebuilt children first, keeping mutability and
-a hash's comparison and weakness, then reclassifies; `LSTM`'s plain
-`entries` list is why plain fields are walked); a stateless
-`procedure->Layer` copies, one with state refuses,
-and a hand-written `gen:layer` without the method refuses, naming
+It refuses a cycle before copying anything, then copies as a DAG with one
+memo per call, passed explicitly (`layer-rebuild-in`); the public
+`layer-rebuild` starts a fresh memo, so a hand-written rebuild that passes
+on the copy's `child` joins the copy for children, not for containers. A
+container is built only from finished parts, never filled afterwards. It
+runs on the `gen:layer` method `layer-rebuild layer child tensor`, which
+`define-layer` derives (`LSTM`'s plain `entries` list is why plain fields
+are walked); a stateless `procedure->Layer` copies, one with state
+refuses, and a hand-written `gen:layer` without the method refuses, naming
 `layer-copy`. The layer constructor contracts come from one
 `transformer/c` macro.
 `sinusoidal-positions` (`#:layout 'interleaved | 'halves`, a length or a
@@ -846,12 +839,16 @@ Runtime paths take `(only-in racket/runtime-path #%datum define-runtime-path)`.
   values (structs and mpairs are not looked inside); `torch/nn/layer.rkt` holds the
   contracted public definitions and the macros over
   `torch/nn/private/layer-core.rkt` (`gen:layer`, the registry struct,
-  moves, `call-layer`), `torch/nn/private/layer-containers.rkt` (the `Fn`,
-  `Parameters` and `Children` structs, `classify`, `check-names`),
+  moves, `call-layer`, `layer-rebuild-in`),
+  `torch/nn/private/layer-containers.rkt` (the `Fn`, `Parameters` and
+  `Children` structs, `classify`, `check-names`),
   `torch/nn/private/layer-fields.rkt`
-  (the expansion's runtime: `assemble`, the `set!` check, entry procedures)
-  and `torch/nn/private/field-walk.rkt` (`rebuilt-value`, the field walk
-  `layer-rebuild` uses); `torch/nn/mode.rkt` = `train!`, `eval!`,
+  (the expansion's runtime: `assemble`, the `set!` check, entry procedures),
+  `torch/nn/private/field-walk.rkt` (`children-of`, the one listing of a
+  node's children; `refuse-cycles`, `layer-copy`'s up-front check; and
+  `rebuilt-values`, the field walk `layer-rebuild` uses) and
+  `torch/nn/private/memo.rkt` (the per-call memo with its in-progress set,
+  shared by both walks); `torch/nn/mode.rkt` = `train!`, `eval!`,
   `call-with-mode` and `in-mode`; `torch/nn/parameter.rkt`, `torch/nn/buffer.rkt`, `torch/nn/linear.rkt`,
   `torch/nn/init.rkt`, `torch/nn/optim.rkt`, `torch/nn/ema.rkt`, `torch/nn/loss.rkt`, `torch/nn/recurrent.rkt`,
   `torch/nn/attention.rkt`, `torch/nn/transformer.rkt`, `torch/nn/positions.rkt`, `torch/nn/copy.rkt`, `torch/nn/clip.rkt`).

@@ -18,7 +18,7 @@
 (struct Fn% registry (proc)
   #:reflection-name 'Fn
   #:property prop:rebuilder
-  (lambda (self _child _tensor)
+  (lambda (self _child _tensor _seen)
     (unless (null? (append (registry-params self) (registry-buffers self)
                            (registry-children self)))
       (raise-arguments-error
