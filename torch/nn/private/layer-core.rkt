@@ -8,7 +8,8 @@
          (only-in syntax/parse/define define-syntax-parse-rule)
          (only-in "../../foreign.rkt" device dtype prop:to)
          (only-in (submod "../../foreign.rkt" unsafe) to!)
-         (only-in "../../foreign/autograd-ops.rkt" collect-at-forward-trough!))
+         (only-in "../../foreign/autograd-ops.rkt" collect-at-forward-trough!)
+         (only-in "memo.rkt" memo))
 
 ;; the noqa'd exports are macro expansions raco review cannot see
 (provide gen:layer
@@ -21,6 +22,7 @@
          layer-mode ;; noqa
          layer-set-mode! ;; noqa
          layer-rebuild ;; noqa
+         layer-rebuild-in
          fields-of
          fields?
          prop:fields
@@ -210,13 +212,18 @@
    (define (layer-mode self)
      (registry-mode self))
    (define (layer-rebuild self child tensor)
-     ((rebuilder-of self) self child tensor))])
+     ((rebuilder-of self) self child tensor (memo 'layer-rebuild)))])
 
 (define-values (prop:rebuilder rebuilder? rebuilder-of) ;; noqa
   (make-struct-type-property 'rebuilder))
 
 (define-values (prop:fields fields? fields-of)
   (make-struct-type-property 'fields))
+
+(define (layer-rebuild-in seen m child tensor)
+  (cond
+    [(rebuilder? m) ((rebuilder-of m) m child tensor seen)]
+    [else (layer-rebuild m child tensor)]))
 
 (define (child-parameters c)
   (layer-parameters (cdr c)))

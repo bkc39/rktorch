@@ -650,7 +650,9 @@ children, appears twice in the copy as one value.
 
 A cycle cannot be copied. Before copying anything, @racket[layer-copy]
 raises @racket[exn:fail:contract], naming the field, when a field's value
-reaches itself, through a container, a hash key or a layer.
+reaches itself, through a container, a hash key or a layer. A cycle
+through a hand-written layer that does not list the layers it holds is
+found while copying instead, and refused the same way.
 
 Every layer @racket[define-layer] builds can be copied, the built-in ones
 included, and so can a @racket[procedure->Layer] layer with no
@@ -684,9 +686,12 @@ what each child becomes. @racket[layer-copy] passes a @racket[child] that
 copies each child the same way and a @racket[tensor] that copies each
 tensor, both remembering what they have done, so shared values stay
 shared. Plain fields are rebuilt as @racket[layer-copy] copies them, a
-container shared between fields staying shared. A direct call remembers
-only its own containers and refuses a field whose plain value reaches
-itself, naming the field. A @racket[child] that answers some children with other layers
+container shared between fields staying shared. A direct call, from a
+hand-written @racket[layer-rebuild] included, remembers only the
+containers of its own call and refuses a field whose plain value reaches
+itself, naming the field; children go to the @racket[child] it is given,
+so passing on @racket[layer-copy]'s @racket[child] copies them into that
+copy. A @racket[child] that answers some children with other layers
 rebuilds the tree with those leaves replaced, the shape a wrapper over
 named layers takes.
 

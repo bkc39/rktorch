@@ -1,19 +1,14 @@
 #lang racket/base
 
-(require (only-in racket/dict in-dict in-dict-values)
-         (only-in racket/match == match match-lambda)
+(require (only-in racket/dict dict-values in-dict)
+         (only-in racket/match match match* match-lambda)
          (only-in "../../foreign.rkt" tensor?)
          (only-in "layer-containers.rkt" Children% Children%? Parameters%)
-         (only-in "layer-core.rkt" fields-of fields? layer-named-children layer?))
+         (only-in "layer-core.rkt" fields-of fields? layer-named-children layer?)
+         (only-in "memo.rkt" memo remembered))
 
-(provide copy-child
-         rebuilt-values
+(provide rebuilt-values
          refuse-cycles)
-
-(struct copy-child (memo proc)
-  #:property prop:procedure (struct-field-index proc))
-
-(define building (string->uninterned-symbol "building"))
 
 (define (node? v)
   (or (layer? v) (Children%? v) (pair? v) (vector? v) (box? v) (hash? v)))
@@ -21,59 +16,34 @@
 (define (entries-of m)
   (append (if (fields? m) ((fields-of m) m) '()) (layer-named-children m)))
 
-(define (refuse-cycles m)
-  (define open (make-hasheq))
-  (define done (make-hasheq))
-  (let visit ([owner #f] [field #f] [v m])
-    (cond
-      [(not (node? v)) (void)]
-      [(hash-ref open v #f)
-       (raise-arguments-error 'layer-copy
-                              "a field's value reaches itself, and a cycle cannot be copied"
-                              "field" field
-                              "layer" owner)]
-      [(hash-ref done v #f) (void)]
-      [else
-       (hash-set! open v #t)
-       (match v
-         [(? layer?)
-          (for ([(name x) (in-dict (entries-of v))])
-            (visit v name x))]
-         [(Children% alist)
-          (for ([x (in-dict-values alist)])
-            (visit owner field x))]
-         [(cons a d)
-          (visit owner field a)
-          (visit owner field d)]
-         [(? vector?)
-          (for ([x (in-vector v)])
-            (visit owner field x))]
-         [(box x) (visit owner field x)]
-         [(? hash?)
-          (for ([(k x) (in-hash v)])
-            (visit owner field k)
-            (visit owner field x))])
-       (hash-remove! open v)
-       (hash-set! done v #t)])))
+(define (children-of v field)
+  (define (labelled parts)
+    (map (lambda (x) (cons field x)) parts))
+  (match v
+    [(? layer?) (entries-of v)]
+    [(Children% alist) (labelled (dict-values alist))]
+    [(cons a d) (labelled (list a d))]
+    [(? vector?) (labelled (vector->list v))]
+    [(box x) (labelled (list x))]
+    [(? hash?)
+     (labelled (for*/list ([(k x) (in-hash v)] [part (in-list (list k x))])
+                 part))]))
 
-(define (rebuilt-values names vals child tensor) ;; noqa
-  (define memo (if (copy-child? child) (copy-child-memo child) (make-hasheq)))
+(define (refuse-cycles who m)
+  (define seen (memo who))
+  (define (visit-all entries)
+    (for ([(name x) (in-dict entries)])
+      (visit name x)))
+  (define (visit field v)
+    (when (node? v)
+      (remembered seen v (lambda () (visit-all (children-of v field))) #:field field)))
+  (remembered seen m (lambda () (visit-all (entries-of m)))))
+
+(define (rebuilt-values seen names vals child tensor)
   (for/list ([name (in-list names)] [v (in-list vals)])
-    (rebuilt-value memo name v child tensor)))
+    (rebuilt-value seen name v child tensor)))
 
-(define (rebuilt-value memo name v child tensor)
-  (define (shared original build)
-    (match (hash-ref memo original #f)
-      [#f
-       (hash-set! memo original building)
-       (define copy (build))
-       (hash-set! memo original copy)
-       copy]
-      [(== building eq?)
-       (raise-arguments-error 'layer-rebuild
-                              "a field's value reaches itself, and a cycle cannot be rebuilt"
-                              "field" name)]
-      [copy copy]))
+(define (rebuilt-value seen name v child tensor)
   (let walk ([v v])
     (match v
       [(? layer?) (child name v)]
@@ -82,28 +52,27 @@
        (Parameters% (map (match-lambda [(cons k t) (cons k (tensor t))]) alist))]
       [(Children% alist)
        (Children% (map (match-lambda [(cons k c) (cons k (child k c))]) alist))]
-      [(cons a d) (shared v (lambda () (cons (walk a) (walk d))))]
-      [(? vector?) (shared v (lambda () (rebuilt-vector v walk)))]
-      [(box x)
-       (shared v (lambda () ((if (immutable? v) box-immutable box) (walk x))))]
-      [(? hash?) (shared v (lambda () (rebuilt-hash v walk)))]
+      [(? node?)
+       (remembered seen v
+                   (lambda () (reassembled v (dict-values (children-of v name)) walk))
+                   #:field name)]
       [_ v])))
 
-(define (rebuilt-vector v walk)
-  (define copy (for/vector #:length (vector-length v) ([x (in-vector v)])
-                 (walk x)))
-  (if (immutable? v) (vector->immutable-vector copy) copy))
+(define (reassembled v parts walk)
+  (match* (v parts)
+    [((? pair?) (list a d)) (cons (walk a) (walk d))]
+    [((? vector?) _) (apply (if (immutable? v) vector-immutable vector) (map walk parts))]
+    [((? box?) (list x)) ((if (immutable? v) box-immutable box) (walk x))]
+    [((? hash?) _) (refilled (hash-copy-clear v) parts walk)]))
 
-(define (rebuilt-hash h walk)
-  (define-values (ks xs)
-    (for/lists (ks xs) ([(k x) (in-hash h)])
-      (values (walk k) (walk x))))
+(define (refilled h parts walk)
+  (match parts
+    ['() h]
+    [(list* k x more) (refilled (hash-put h (walk k) (walk x)) more walk)]))
+
+(define (hash-put h k x)
   (cond
-    [(immutable? h)
-     (for/fold ([acc (hash-copy-clear h)]) ([k (in-list ks)] [x (in-list xs)])
-       (hash-set acc k x))]
+    [(immutable? h) (hash-set h k x)]
     [else
-     (define copy (hash-copy-clear h))
-     (for ([k (in-list ks)] [x (in-list xs)])
-       (hash-set! copy k x))
-     copy]))
+     (hash-set! h k x)
+     h]))
