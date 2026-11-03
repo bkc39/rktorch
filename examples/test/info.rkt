@@ -21,4 +21,5 @@
     ("13-translation.rkt" 600)
     ("14-imagenet.rkt" 300)
     ("15-finetune.rkt" 600)
-    ("17-workers.rkt" 300)))
+    ("17-workers.rkt" 300)
+    ("18-vit.rkt" 600)))

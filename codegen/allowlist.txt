@@ -192,3 +192,16 @@ rnn _cudnn_rnn_flatten_weight
 # kind (float? -> double + presence flag, like Scalar?). A positive
 # dropout_p draws its mask from the global stream, hence the no-retry flag.
 attention scaled_dot_product_attention no-retry
+
+# --- tranche 9 (#389): sampling grids and truncated-normal init -------------
+
+# affine-grid, grid-sample and bicubic resizing: the on-device crops of a
+# batched augmentation, and a ViT's position-embedding interpolation.
+vision affine_grid_generator
+vision grid_sampler_2d
+vision upsample_bicubic2d
+
+# floor and fmod are the device-side arithmetic of per-sample augmentation
+# parameters.
+math floor
+math fmod.Scalar

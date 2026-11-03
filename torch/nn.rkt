@@ -149,6 +149,7 @@
 
 (provide uniform-init
          normal-init
+         trunc-normal-init
          kaiming-uniform
          fan-in)
 
