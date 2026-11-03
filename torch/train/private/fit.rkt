@@ -8,7 +8,7 @@
          (only-in "../../foreign/autograd-ops.rkt" reset-grads!)
          (only-in "../../nn/layer.rkt" layer? parameters)
          (only-in "../../nn/optim.rkt" step! zero-grads!)
-         (only-in "../../private/contract.rkt" supplied)
+         (only-in "../../private/contract.rkt" supplied-or)
          (only-in "../logging.rkt" logger-log-hyperparams!)
          (only-in "book.rkt" epoch-end-reached!)
          (only-in "dispatch.rkt"
@@ -34,7 +34,7 @@
 
 (define (limited-batches loader limit)
   (define n (dataloader-length loader))
-  (match (supplied limit 1.0)
+  (match (supplied-or limit 1.0)
     [(? exact-integer? k) (min k n)]
     [share (exact-floor (* n share))]))
 

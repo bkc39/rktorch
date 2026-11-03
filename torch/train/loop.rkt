@@ -4,7 +4,7 @@
          (only-in racket/match match match*)
          (only-in "../data/loader.rkt" dataloader?)
          (only-in "../foreign.rkt" device?)
-         (only-in "../private/contract.rkt" define/contract-out supplied)
+         (only-in "../private/contract.rkt" define/contract-out supplied-or)
          (only-in "logging.rkt" logger-spec/c stdout-logger)
          (only-in "private/dispatch.rkt" finish! tear-down! trainer-device with-failure-protocol)
          (only-in "private/evaluate.rkt" evaluate)
@@ -87,29 +87,29 @@
         #:ckpt-path [ckpt-path (or/c #f path-string?)])
        #:pre/name (max-epochs max-steps fast-dev-run)
        "fit needs #:max-epochs or #:max-steps"
-       (or (supplied max-epochs) (supplied max-steps) (supplied fast-dev-run))
+       (or (supplied-or max-epochs) (supplied-or max-steps) (supplied-or fast-dev-run))
        #:pre/name (trainer) "the trainer has no define-training-step"
        (trainer-defines? trainer 'define-training-step)
        #:pre/name (trainer) "automatic optimization needs define-optimizers"
        (or (not (trainer-automatic? trainer))
            (trainer-defines? trainer 'define-optimizers))
        #:pre/name (trainer val) "a #:val loader needs a define-validation-step"
-       (or (not (supplied val)) (trainer-defines? trainer 'define-validation-step))
+       (or (not (supplied-or val)) (trainer-defines? trainer 'define-validation-step))
        #:pre/name (train limit-train)
        "#:limit-train-batches selects no batch from this loader"
        (selects-a-batch? train limit-train)
        #:pre/name (val limit-val)
        "#:limit-val-batches selects no batch from this loader"
-       (or (not (supplied val)) (selects-a-batch? val limit-val))
+       (or (not (supplied-or val)) (selects-a-batch? val limit-val))
        #:pre/name (train limit-train val-interval)
        "an integer #:val-check-interval exceeds the training batches #:limit-train-batches selects"
-       (match (supplied val-interval)
+       (match (supplied-or val-interval)
          [(? exact-integer? k) (<= k (limited-batches train limit-train))]
          [_ #t])
        #:pre/name (trainer accumulate clip-val)
        "manual optimization takes no #:accumulate-grad-batches above 1 and no #:gradient-clip-val"
        (or (trainer-automatic? trainer)
-           (and (= 1 (supplied accumulate 1)) (not (supplied clip-val))))
+           (and (= 1 (supplied-or accumulate 1)) (not (supplied-or clip-val))))
        [result run?])
   (check-supported! #:precision precision #:clip-val clip-val #:ckpt-path ckpt-path
                     #:automatic? (trainer-automatic? trainer))

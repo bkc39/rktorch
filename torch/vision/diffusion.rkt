@@ -14,7 +14,7 @@
                   Conv2d Dropout Embedding GroupNorm LayerList Linear
                   define-layer in-layers named-children parameters
                   sinusoidal-positions)
-         (only-in "../private/contract.rkt" define/contract-out supplied))
+         (only-in "../private/contract.rkt" define/contract-out supplied-or))
 
 (struct schedule (steps betas alphas alpha-bars) ;; noqa
   #:constructor-name make-schedule
@@ -190,7 +190,7 @@
                    #:classes [classes (or/c #f exact-positive-integer?)])
                   #:pre/name (mults attention)
                   "every attention resolution must be one of the levels' resolutions"
-                  (reachable? (supplied attention '(16)) (supplied mults '(1 2 2 2)))
+                  (reachable? (supplied-or attention '(16)) (supplied-or mults '(1 2 2 2)))
                   [result unet?])
   #:init (#:base [base 128] #:mults [mults '(1 2 2 2)] #:blocks [blocks 2]
           #:attention [attention '(16)] #:dropout [dropout 0.1]

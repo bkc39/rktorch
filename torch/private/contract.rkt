@@ -7,10 +7,7 @@
 
 (provide define/contract-out
          define/checked-out
-         supplied)
-
-(define (supplied v [default #f])
-  (if (unsupplied-arg? v) default v))
+         supplied-or)
 
 (begin-for-syntax
   (define (header-base h)
@@ -54,3 +51,6 @@
          (define header body ...)
          (provide name)
          (module+ checked (provide (contract-out [name contract]))))]))
+
+(define (supplied-or v [default #f])
+  (if (unsupplied-arg? v) default v))

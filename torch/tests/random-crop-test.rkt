@@ -3,9 +3,6 @@
 (module+ test
   (require rackunit
            (only-in racket/contract exn:fail:contract:blame?)
-           (only-in "../foreign/raw/fault.rkt" with-crossing-hook)
-           (only-in "../foreign/raw/pressure-settings.rkt"
-                    native-collect-at-troughs)
            (only-in "../main.rkt"
                     + > ~> arange cuda-available? cuda-device cuda-memory-stats
                     cuda-reset-peak-stats! current-generator device dtype
@@ -13,7 +10,7 @@
                     randn reclaim-native-memory! reshape tensor tensor->list
                     tensor-shape to to-dtype transpose zeros)
            (only-in "../vision/transforms.rkt" random-crop)
-           (only-in "private/race-harness.rkt" with-race-hook)
+           (only-in "private/op-calls.rkt" op-calls-of)
            (only-in "private/reference-crop.rkt" reference-crop)
            (only-in "private/within.rkt" bounded-test))
 
@@ -73,24 +70,6 @@
                 (tensor->list (crop x #:padding 4)))))
       (check-equal? (twice random-crop) (twice reference-crop)
                     (format "~a" on))))
-
-  (define (op-calls-of thunk)
-    (define here (current-thread))
-    (define crossings 0)
-    (define frees 0)
-    (define tensors 0)
-    (parameterize ([native-collect-at-troughs #f])
-      (with-crossing-hook (lambda ()
-                            (when (eq? (current-thread) here)
-                              (set! crossings (add1 crossings))))
-        (with-race-hook (lambda (name _subject)
-                          (case (and (eq? (current-thread) here) name)
-                            [(ledger-entry-added) (set! tensors (add1 tensors))]
-                            [(free-released finalizer-releasing)
-                             (set! frees (add1 frees))]
-                            [else (void)]))
-          (thunk))))
-    (- crossings frees (* 2 tensors)))
 
   (define (crop-op-calls n on)
     (define x (to (randn n 3 32 32) on))
