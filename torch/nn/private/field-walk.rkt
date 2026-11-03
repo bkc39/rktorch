@@ -63,12 +63,16 @@
     [((? pair?) (list a d)) (cons (walk a) (walk d))]
     [((? vector?) _) (apply (if (immutable? v) vector-immutable vector) (map walk parts))]
     [((? box?) (list x)) ((if (immutable? v) box-immutable box) (walk x))]
-    [((? hash?) _) (refilled (hash-copy-clear v) parts walk)]))
+    [((? hash?) _)
+     (refilled (hash-copy-clear v) parts (if (weakly-keyed? v) values walk) walk)]))
 
-(define (refilled h parts walk)
+(define (weakly-keyed? h)
+  (or (hash-weak? h) (hash-ephemeron? h)))
+
+(define (refilled h parts key walk)
   (match parts
     ['() h]
-    [(list* k x more) (refilled (hash-put h (walk k) (walk x)) more walk)]))
+    [(list* k x more) (refilled (hash-put h (key k) (walk x)) more key walk)]))
 
 (define (hash-put h k x)
   (cond

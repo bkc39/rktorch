@@ -9,7 +9,7 @@
          (only-in "../../foreign.rkt" device dtype prop:to)
          (only-in (submod "../../foreign.rkt" unsafe) to!)
          (only-in "../../foreign/autograd-ops.rkt" collect-at-forward-trough!)
-         (only-in "memo.rkt" memo))
+         (only-in "memo.rkt" memo remembering-seen remembering?))
 
 ;; the noqa'd exports are macro expansions raco review cannot see
 (provide gen:layer
@@ -212,7 +212,11 @@
    (define (layer-mode self)
      (registry-mode self))
    (define (layer-rebuild self child tensor)
-     ((rebuilder-of self) self child tensor (memo 'layer-rebuild)))])
+     (define seen
+       (cond
+         [(remembering? child) (remembering-seen child)]
+         [else (memo 'layer-rebuild)]))
+     ((rebuilder-of self) self child tensor seen))])
 
 (define-values (prop:rebuilder rebuilder? rebuilder-of) ;; noqa
   (make-struct-type-property 'rebuilder))

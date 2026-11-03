@@ -1,11 +1,17 @@
 #lang racket/base
 
 (provide memo
-         remembered)
+         remembered
+         remembering
+         remembering?
+         remembering-seen)
 
 (struct memo (who done open)
   #:constructor-name make-memo
   #:omit-define-syntaxes)
+
+(struct remembering (seen proc)
+  #:property prop:procedure (struct-field-index proc))
 
 (define (memo who)
   (make-memo who (make-hasheq) (make-hasheq)))
@@ -20,8 +26,9 @@
                             "a field's value reaches itself, and a cycle cannot be copied"
                             "field" field)]
     [else
-     (hash-set! open v #t)
-     (define made (build))
-     (hash-remove! open v)
+     (define made
+       (dynamic-wind (lambda () (hash-set! open v #t))
+                     build
+                     (lambda () (hash-remove! open v))))
      (hash-set! done v made)
      made]))
