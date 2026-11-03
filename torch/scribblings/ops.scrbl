@@ -399,6 +399,52 @@ both spatial axes.
 
 @torch-examples[(shape (upsample-nearest2d (zeros 1 1 4 4)))]}
 
+@defproc[(upsample-bicubic2d [t tensor?]
+                             [size (list/c exact-positive-integer?
+                                           exact-positive-integer?)]
+                             [#:align-corners? align-corners? boolean? #f])
+         tensor?]{
+A floating @tt{[N C H W]} batch resized bicubically to @racket[size], as
+@tt{F.interpolate(mode="bicubic", size=...)} without antialiasing.
+
+@torch-examples[(shape (upsample-bicubic2d (randn 1 3 4 4) '(7 9)))]}
+
+@defproc[(affine-grid [theta tensor?]
+                      [size (list/c exact-positive-integer?
+                                    exact-positive-integer?
+                                    exact-positive-integer?
+                                    exact-positive-integer?)]
+                      [#:align-corners? align-corners? boolean? #f])
+         tensor?]{
+@tt{F.affine_grid}: the @tt{[N H W 2]} sampling grid of a batch of
+@tt{[N 2 3]} affine maps @racket[theta], for an output of size
+@racket[(list N C H W)], in the normalised coordinates @racket[grid-sample]
+reads. @racket[theta] is floating and its @tt{N} is @racket[size]'s.
+
+@torch-examples[(shape (affine-grid (randn 2 2 3) '(2 3 8 8)))]}
+
+@defproc[(grid-sample [t tensor?]
+                      [grid tensor?]
+                      [#:mode mode (or/c 'bilinear 'nearest 'bicubic) 'bilinear]
+                      [#:padding-mode padding-mode
+                                      (or/c 'zeros 'border 'reflection)
+                                      'zeros]
+                      [#:align-corners? align-corners? boolean? #f])
+         tensor?]{
+@tt{F.grid_sample} on a floating @tt{[N C H W]} batch: each point of an
+@tt{[N Ho Wo 2]} @racket[grid], with @racket[t]'s @tt{N}, dtype and device,
+reads @racket[t] at its normalised @tt{(x, y)}. Differentiable in both
+arguments.
+
+@torch-examples[
+(define x (randn 1 1 3 4))
+(define (sampled a)
+  (grid-sample x (affine-grid (tensor `(((,a 0.0 0.0) (0.0 1.0 0.0))))
+                              '(1 1 3 4))
+               #:mode 'nearest))
+(item (max (abs (- (sampled 1.0) x))))
+(item (max (abs (- (sampled -1.0) (flip x 3)))))]}
+
 @section{Normalization}
 
 @defproc[(batch-norm [t tensor?]
