@@ -405,11 +405,16 @@ beside a layer or thunk. `layer-copy` (`torch/nn/copy.rkt`) is a deep copy
 with no RNG draws: fresh tensors with the same values, device, dtype and
 requires-grad (no gradients), children copied recursively, modes kept.
 It refuses a cycle before copying anything, then copies as a DAG with one
-memo per call, passed explicitly (`layer-rebuild-in`); the public
-`layer-rebuild` starts a fresh memo, so a hand-written rebuild that passes
-on the copy's `child` joins the copy for children, not for containers. A
-container is built only from finished parts, never filled afterwards. It
-runs on the `gen:layer` method `layer-rebuild layer child tensor`, which
+memo per call, passed explicitly (`layer-rebuild-in`). `layer-copy`'s
+`child` is a `remembering` struct (`prop:procedure` plus the memo); the
+public `layer-rebuild` takes the memo from such a `child` and starts a
+fresh one for any other, so a hand-written rebuild that passes on the
+copy's `child` joins the copy, its layers and its containers both. That
+check lives only at the public boundary. The memo drops a value from its
+in-progress set on any exit, so a refusal a rebuild catches is not later
+read as a cycle. Keys of weak and ephemeron hashes are shared, values
+copied. A container is built only from finished parts, never filled
+afterwards. It runs on the `gen:layer` method `layer-rebuild layer child tensor`, which
 `define-layer` derives (`LSTM`'s plain `entries` list is why plain fields
 are walked); a stateless `procedure->Layer` copies, one with state
 refuses, and a hand-written `gen:layer` without the method refuses, naming
@@ -849,7 +854,7 @@ Runtime paths take `(only-in racket/runtime-path #%datum define-runtime-path)`.
   node's children; `refuse-cycles`, `layer-copy`'s up-front check; and
   `rebuilt-values`, the field walk `layer-rebuild` uses) and
   `torch/nn/private/memo.rkt` (the per-call memo with its in-progress set,
-  shared by both walks); `torch/nn/mode.rkt` = `train!`, `eval!`,
+  shared by both walks, and `remembering`, the callback that carries it); `torch/nn/mode.rkt` = `train!`, `eval!`,
   `call-with-mode` and `in-mode`; `torch/nn/parameter.rkt`, `torch/nn/buffer.rkt`, `torch/nn/linear.rkt`,
   `torch/nn/init.rkt`, `torch/nn/optim.rkt`, `torch/nn/ema.rkt`, `torch/nn/loss.rkt`, `torch/nn/recurrent.rkt`,
   `torch/nn/attention.rkt`, `torch/nn/transformer.rkt`, `torch/nn/positions.rkt`, `torch/nn/copy.rkt`, `torch/nn/clip.rkt`).

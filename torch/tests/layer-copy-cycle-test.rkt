@@ -240,14 +240,55 @@
        (define inner (via-inner self))
        (via (child "inner" inner) (rebuild-directly inner child tensor)))])
 
-  (bounded-test "a direct layer-rebuild given layer-copy's child copies children into it"
+  (bounded-test "a direct layer-rebuild given layer-copy's child shares its layers and containers"
     (define leaf (holder 0))
     (define c (~> (twin leaf (box 1)) (via #f) layer-copy))
     (match-define (list leaf-copy box-copy) ((via-inner c)))
     (match-define (list leaf-direct box-direct) ((c)))
     (check-false (eq? leaf-copy leaf))
     (check-eq? leaf-direct leaf-copy)
-    (check-false (eq? box-direct box-copy)))
+    (check-eq? box-direct box-copy))
+
+  (struct deleg (inner)
+    #:methods gen:layer
+    [(define (layer-forward self . _inputs) (deleg-inner self))
+     (define (layer-rebuild self child tensor)
+       (~> (deleg-inner self) (rebuild-directly child tensor) deleg))])
+
+  (bounded-test "a container shared through a delegating layer stays shared"
+    (define b (box 1))
+    (match-define (list d2 h2) (copied-field (twin (deleg (holder b)) (holder b))))
+    (check-eq? ((deleg-inner d2)) (h2))
+    (check-false (eq? (h2) b)))
+
+  (bounded-test "a hash key shared through a delegating layer finds the other copy"
+    (define b (box 1))
+    (match-define (list d2 h2)
+      (~> (list (cons b 'x)) make-hasheq holder deleg (twin (holder b)) copied-field))
+    (check-eq? (hash-ref ((deleg-inner d2)) (h2) #f) 'x))
+
+  (struct fallback (f)
+    #:methods gen:layer
+    [(define (layer-forward self . _inputs) (fallback-f self))
+     (define (layer-rebuild self child _tensor)
+       (define f (fallback-f self))
+       (fallback (with-handlers ([exn:fail:contract? (lambda (_e) f)])
+                   (child "a" f))))])
+
+  (bounded-test "a refused child caught by a rebuild does not read as a cycle"
+    (define f
+      (procedure->Layer (lambda (x) x) #:parameters (list (cons "w" (Parameter (ones 1))))))
+    (check-exn #rx"^layer-copy: a procedure->Layer layer with parameters"
+               (lambda () (layer-copy (twin (fallback f) f)))))
+
+  (bounded-test "a weak or ephemeron hash keeps its keys and copies its values"
+    (define k (box 1))
+    (for ([make (in-list (list make-weak-hasheq make-ephemeron-hasheq))])
+      (define v (box 2))
+      (define c (~> (list (cons k v)) make holder copied-field))
+      (collect-garbage 'major)
+      (check-equal? (hash-ref c k #f) (box 2))
+      (check-false (eq? (hash-ref c k #f) v))))
 
   (struct wrapper (inner seen)
     #:methods gen:layer
