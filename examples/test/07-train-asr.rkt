@@ -5,6 +5,7 @@
          (only-in racket/runtime-path define-runtime-path)
          rackunit
          (only-in torch/private/util with-temporary-directory)
+         (only-in torch/tests/private/blame blames-caller?)
          (only-in "../../scripts/train-asr.rkt" env-number))
 
 (define-runtime-path train-asr "../../scripts/train-asr.rkt")
@@ -30,6 +31,11 @@
     (lambda ()
       (check-equal? (env-number "EPOCHS" 20) 3)
       (check-equal? (env-number "WORKERS" 0 exact-nonnegative-integer?) 0))))
+
+(test-case "a bad argument to env-number blames its caller"
+  (define blames-test? (blames-caller? "test/07-train-asr.rkt"))
+  (check-exn blames-test? (lambda () (env-number 'EPOCHS 20)))
+  (check-exn blames-test? (lambda () (env-number "EPOCHS" 20 (vector 'positive)))))
 
 (test-case "a bad value is an error naming its variable"
   (for ([bad (in-list (list (list "EPOCHS" "0" exact-positive-integer?

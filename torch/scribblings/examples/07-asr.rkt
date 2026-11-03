@@ -25,7 +25,7 @@ CTC aligns, attention spells.
 
 @chunk[<r07-require>
 (require (only-in racket/contract
-                  ->* ->i </c >=/c and/c contract-out flat-named-contract
+                  -> ->* ->i </c >=/c and/c contract-out flat-named-contract
                   listof non-empty-listof or/c)
          (only-in racket/list last make-list)
          (only-in racket/sequence sequence-ref)
@@ -38,40 +38,15 @@ CTC aligns, attention spells.
          (only-in torch/audio/librispeech
                   librispeech librispeech-fixture-utterance
                   librispeech-utterances load-utterance utterance-path
-                  utterance-transcript)
-         (only-in torch/data/loader dataloader)
+                  utterance-transcript utterance?)
+         (only-in torch/data/loader dataloader dataloader?)
          (only-in torch/audio/metrics cer wer)
          (only-in torch/text/data decode encode text->vocab)
          (only-in torch/train loss/c))]
 
 @chunk[<r07-provide>
-(provide asr asr-loader pick-device run-example greedy-decode transcribe
-         mel-frames utterance-features evaluate
-         (contract-out
-          [hybrid-batch-loss
-           (->i ([net layer?]
-                 [vocab vector?]
-                 [x rank-3-tensor/c]
-                 [frame-lengths (non-empty-listof exact-positive-integer?)]
-                 [transcripts (listof string?)])
-                #:pre/name (x frame-lengths transcripts)
-                "one frame length and one transcript per row of x"
-                (= (car (shape x)) (length frame-lengths) (length transcripts))
-                #:pre/name (x frame-lengths)
-                "no frame length past the last dimension of x"
-                (for/and ([t (in-list frame-lengths)]) (<= t (last (shape x))))
-                [loss loss/c])]
-          [train-librispeech
-           (->* ()
-                (#:epochs exact-positive-integer?
-                 #:limit (or/c #f exact-positive-integer?)
-                 #:batch exact-positive-integer?
-                 #:n-embd exact-positive-integer?
-                 #:dropout (and/c real? (>=/c 0) (</c 1))
-                 #:device device/c
-                 #:workers exact-nonnegative-integer?
-                 #:log-every exact-positive-integer?)
-                (values layer? vector?))]))]
+(provide asr pick-device run-example greedy-decode transcribe
+         utterance-features evaluate)]
 
 The transformer half of the model is the library's: the encoder and
 decoder blocks are @racket[TransformerEncoderLayer] and
@@ -325,6 +300,14 @@ encoder frames --- the per-utterance CTC input lengths.
 (define bank-16k
   (mel-filterbank #:n-freqs 201 #:n-mels 80 #:sample-rate 16000 #:device 'cpu))
 
+(define (rank-tensor/c n)
+  (flat-named-contract (string->symbol (format "rank-~a-tensor/c" n))
+                       (lambda (x) (and (tensor? x) (= n (length (shape x)))))))
+
+(provide
+ (contract-out
+  [mel-frames (-> (rank-tensor/c 2) exact-positive-integer? tensor?)]))
+
 (define (mel-frames samples rate)
   (log-mel-spectrogram
    (ref samples 0)
@@ -351,8 +334,9 @@ with @tt{-100} (the @racket[cross-entropy] ignore index, so padded
 positions contribute nothing), the CTC targets with @tt{0} (only the
 first @tt{target-length} entries of each row are ever read).
 @racket[ctc-loss] then gets the @emph{true} per-row frame and character
-counts, and the frame counts travel into the forward so the padding is
-hidden from the convolutions and from attention alike.
+counts, and whenever any row is padded, a lone row included, the frame
+counts travel into the forward so the padding is hidden from the
+convolutions and from attention alike.
 An utterance spoken faster than the encoder's frame rate --- more
 characters than downsampled frames --- has @emph{no} valid CTC alignment
 and an infinite loss by definition; @racket[#:zero-infinity?] zeroes
@@ -363,19 +347,34 @@ it outside whatever extent built the net; it runs on the mels' device.
 @chunk[<r07-loss>
 (define ctc-weight 0.3)
 
-(define rank-3-tensor/c
-  (flat-named-contract 'rank-3-tensor/c
-                       (lambda (x) (and (tensor? x) (= 3 (length (shape x)))))))
+(define rank-3-tensor/c (rank-tensor/c 3))
 
 (define (pad-row ids fill s-max)
   (append ids (make-list (- s-max (length ids)) fill)))
+
+(provide
+ (contract-out
+  [hybrid-batch-loss
+   (->i ([net layer?]
+         [vocab vector?]
+         [x rank-3-tensor/c]
+         [frame-lengths (non-empty-listof exact-positive-integer?)]
+         [transcripts (listof string?)])
+        #:pre/name (x frame-lengths transcripts)
+        "one frame length and one transcript per row of x"
+        (= (car (shape x)) (length frame-lengths) (length transcripts))
+        #:pre/name (x frame-lengths)
+        "no frame length past the last dimension of x"
+        (for/and ([t (in-list frame-lengths)]) (<= t (last (shape x))))
+        [loss loss/c])]))
 
 (define (hybrid-batch-loss net vocab x frame-lengths transcripts)
   (with-default-device (device x)
     (define v-size (vector-length vocab))
     (define eos v-size)
     (define sos (add1 v-size))
-    (define batched? (< 1 (length frame-lengths)))
+    (define padded?
+      (for/or ([t (in-list frame-lengths)]) (< t (last (shape x)))))
     (define ids-rows
       (for/list ([tr (in-list transcripts)]) (transcript-ids vocab tr)))
     (define target-lengths (map length ids-rows))
@@ -392,7 +391,7 @@ it outside whatever extent built the net; it runs on the mels' device.
       (rows->int64 (for/list ([ids (in-list ids-rows)])
                      (pad-row ids 0 s-max))))
     (define-values (ctc-lp logits)
-      (net x dec-in (and batched? frame-lengths)))
+      (net x dec-in (and padded? frame-lengths)))
     (define loss-ctc
       (ctc-loss (transpose ctc-lp 0 1) ctc-targets
                 #:input-lengths (map downsampled-length frame-lengths)
@@ -418,6 +417,13 @@ unshuffled; @racket[w] worker threads build them ahead of the loop.
 (define (utterance-frames u)
   (define-values (frames _rate _channels) (audio-info (utterance-path u)))
   frames)
+
+(provide
+ (contract-out
+  [asr-loader (->* [(listof utterance?)]
+                   [#:batch-size exact-positive-integer?
+                    #:workers exact-nonnegative-integer?]
+                   dataloader?)]))
 
 (define (asr-loader utterances #:batch-size [b 16] #:workers [w 0])
   (~> (sort utterances < #:key utterance-frames #:cache-keys? #t)
@@ -553,6 +559,19 @@ same checkpoint's attention decoder lands at 0.79 CER and 1.20 WER, with
 decode, scored the same way, reaches 0.51 CER.
 
 @chunk[<r07-train>
+(provide
+ (contract-out
+  [train-librispeech (->* []
+                          [#:epochs exact-positive-integer?
+                           #:limit (or/c #f exact-positive-integer?)
+                           #:batch exact-positive-integer?
+                           #:n-embd exact-positive-integer?
+                           #:dropout (and/c real? (>=/c 0) (</c 1))
+                           #:device device/c
+                           #:workers exact-nonnegative-integer?
+                           #:log-every exact-positive-integer?]
+                          (values layer? vector?))]))
+
 (define (train-librispeech #:epochs [epochs 20] #:limit [limit #f]
                            #:batch [batch 16]
                            #:n-embd [n-embd 256]

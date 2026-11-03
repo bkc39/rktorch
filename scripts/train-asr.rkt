@@ -6,15 +6,13 @@
 (require (only-in racket/contract/base
                   ->i any/c contract-name contract? or/c rename-contract
                   unsupplied-arg?)
-         (only-in racket/contract/region define/contract))
-
-(provide env-number)
+         (only-in "../torch/private/contract.rkt" define/contract-out))
 
 (define (env-value/c name accept/c)
   (rename-contract (or/c #f accept/c)
                    (string->symbol (format "~a:~a" name (contract-name accept/c)))))
 
-(define/contract (env-number name default [accept/c exact-positive-integer?])
+(define/contract-out (env-number name default [accept/c exact-positive-integer?])
   (->i ([name string?] [default any/c])
        ([accept/c contract?])
        [result (name accept/c)
@@ -37,7 +35,8 @@
            torch/nn
            (only-in torch/scribblings/examples/07-asr
                     evaluate greedy-decode pick-device train-librispeech
-                    transcribe utterance-features))
+                    transcribe utterance-features)
+           (only-in (submod "..") env-number))
 
   (define epochs (env-number "EPOCHS" 20))
   (define limit (env-number "LIMIT" #f))

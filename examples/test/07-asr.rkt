@@ -31,9 +31,13 @@
           (wer transcript hypothesis) (cer transcript hypothesis)))
 
 (module+ test
-  (require rackunit
-           (only-in torch/tests/private/blame blamed contract-violation?))
+  (require (only-in racket/list flatten)
+           (only-in racket/match match match*)
+           rackunit
+           (only-in torch/tests/private/blame
+                    blamed blames-caller? contract-violation?))
   (define caller (blamed "test/07-asr.rkt"))
+  (define blames-test? (blames-caller? "test/07-asr.rkt"))
   (define (padded m t-max)
     (cat (list m (zeros 80 (- t-max (last (shape m))) #:device (device m))) 1))
   (define (pre-loader-losses steps)
@@ -148,6 +152,59 @@
              (lambda ()
                (hybrid-batch-loss 'net vocab (two-rows mel) (list t-max 200)
                                   (list transcript "MISTER QUILTER"))))
+  ;; a lone row padded past its true length must train exactly as the
+  ;; unpadded row: the frame lengths reach the forward whenever padding exists
+  (let ()
+    (define short (narrow mel 1 0 200))
+    (define opt (sgd (parameters net) #:lr 0.0))
+    (define (loss+grads x)
+      (zero-grads! opt)
+      (define loss
+        (hybrid-batch-loss net vocab x (list 200) (list "MISTER QUILTER")))
+      (backward! loss)
+      (values (item loss)
+              (for/list ([named (in-list (named-parameters net))])
+                (cons (car named) (grad (cdr named))))))
+    (define-values (alone alone-grads) (loss+grads (unsqueeze short 0)))
+    (define-values (wide wide-grads)
+      (~> (padded short t-max) (unsqueeze 0) loss+grads))
+    (zero-grads! opt)
+    (check-= wide alone 1e-4 "padding a lone row changed its loss")
+    (for ([a (in-list alone-grads)] [b (in-list wide-grads)])
+      (check-true (~> (- (cdr a) (cdr b)) abs max item (< 1e-4))
+                  (format "padding a lone row changed the gradient of ~a"
+                          (car a)))))
+  ;; every contract is provided for one name, beside that name's definition
+  (let ()
+    (define chunk-forms
+      (match (parameterize ([read-accept-reader #t] [read-accept-lang #t])
+               (call-with-input-file
+                 (collection-file-path "07-asr.rkt" "torch" "scribblings" "examples")
+                 read))
+        [(list 'module _ _ (list* '#%module-begin body))
+         (for/list ([form (in-list body)]
+                    #:when (and (pair? form) (eq? (car form) 'chunk)))
+           (cddr form))]))
+    (define contracted
+      (for*/list ([forms (in-list chunk-forms)]
+                  [(form next) (in-parallel (in-list forms)
+                                            (in-list (append (cdr forms) '(#f))))]
+                  #:when (and (pair? form) (eq? (car form) 'provide)
+                              (memq 'contract-out (flatten form))))
+        (match* (form next)
+          [((list 'provide (list 'contract-out (list name _)))
+            (list* 'define (cons name _) _))
+           name]
+          [(_ _) form])))
+    (check-equal? contracted
+                  '(mel-frames hybrid-batch-loss asr-loader train-librispeech)))
+  (let ()
+    (define missing (utterance "1272-128104-x" "no/such/utterance.flac" "X"))
+    (check-exn blames-test? (lambda () (asr-loader (list missing) #:batch-size 0)))
+    (check-exn blames-test? (lambda () (asr-loader (list missing) #:workers -1)))
+    (check-exn blames-test? (lambda () (asr-loader (list "no/such/utterance.flac")))))
+  (check-exn blames-test? (lambda () (mel-frames samples 0)))
+  (check-exn blames-test? (lambda () (mel-frames (ref samples 0) rate)))
   (check-exn (contract-violation? caller #rx"#:workers")
              (lambda () (train-librispeech #:workers -1)))
   (check-exn (contract-violation? caller #rx"#:limit")
