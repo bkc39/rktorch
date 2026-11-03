@@ -91,6 +91,18 @@ class JpegCycle(Dataset):
         return self.augment(image), self.labels[k]
 
 
+class JpegMem(JpegCycle):
+    def __init__(self, n):
+        super().__init__(n)
+        # bytes, not tensors: forkserver workers cannot unpickle 244 shared fds
+        self.blobs = [read_file(path).numpy().tobytes() for path, _ in self.files]
+
+    def __getitem__(self, i):
+        k = i % len(self.files)
+        blob = torch.frombuffer(self.blobs[k], dtype=torch.uint8)
+        return self.augment(decode(blob)), self.labels[k]
+
+
 class CifarCycle(Dataset):
     def __init__(self, n):
         self.images, self.labels = cifar_sources()
@@ -120,6 +132,8 @@ class MaskedText(Dataset):
 
 
 PIPELINES = {"jpeg": (JpegCycle, 2048, 32),
+             "jpeg-mem": (JpegMem, 2048, 32),
+             "jpeg-parts": (JpegCycle, 2048, 32),
              "cifar": (CifarCycle, 8192, 128),
              "text": (MaskedText, 8192, 64)}
 

@@ -23,7 +23,7 @@
          (only-in "diag-counters.rkt"
                   counter-delta counter-snapshot ledger-entries load-average
                   median-record peak-rss-kb)
-         (only-in "workloads/pipelines.rkt" pipeline))
+         (only-in "workloads/pipelines.rkt" part-timings pipeline))
 
 (define-runtime-path twin "python/pipelines.py")
 (define-runtime-path self "scope-pipelines.rkt")
@@ -55,14 +55,24 @@
                 (sleep 0.02)
                 (loop)))))
   (define s0 (counter-snapshot))
+  (define parts0 (part-timings))
   (define n (for/sum ([_ (in-range timed-epochs)]) (epoch! loader)))
   (define delta (counter-delta s0 (counter-snapshot)))
+  (define parts
+    (for/list ([kv (in-list (part-timings))])
+      (cons (car kv) (- (cdr kv) (cdr (assq (car kv) parts0))))))
+  (define part-samples (cdr (assq 'part-samples parts)))
   (kill-thread sampler)
   (define elapsed (cdr (assq 'elapsed-s delta)))
   (append (list (cons 'samples n)
                 (cons 'samples/s (/ n elapsed))
                 (cons 'peak-ledger-entries (unbox peak))
                 (cons 'peak-rss-mb (let ([kb (peak-rss-kb)]) (and kb (quotient kb 1024)))))
+          (if (zero? part-samples)
+              '()
+              (for/list ([kv (in-list parts)] #:unless (eq? (car kv) 'part-samples))
+                (cons (string->symbol (format "~a/sample" (car kv)))
+                      (/ (cdr kv) (exact->inexact part-samples)))))
           delta))
 
 (define (child-env arm)

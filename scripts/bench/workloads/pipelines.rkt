@@ -6,7 +6,8 @@
 ;; here, outside any scope.
 
 (require (for-syntax racket/base)
-         (only-in racket/file file->string)
+         (only-in racket/file file->bytes file->string)
+         (only-in racket/math exact-round)
          (only-in racket/runtime-path define-runtime-path)
          (only-in torch
                   + * / < narrow rand select shape tensor to-dtype unsqueeze where ~>)
@@ -14,7 +15,8 @@
          (only-in torch/text/data encode text->vocab)
          (only-in torch/vision/cifar10 load-cifar10-fixture)
          (only-in torch/vision/hymenoptera hymenoptera-root)
-         (only-in torch/vision/image read-image)
+         (only-in torch/foreign/raw/cas cas-add!)
+         (only-in torch/vision/image decode-image read-image)
          (only-in torch/vision/image-folder image-folder-samples)
          (only-in torch/vision/transforms
                   convert-image-dtype imagenet-mean imagenet-std normalize
@@ -27,6 +29,7 @@
          flip-one
          jpeg-augment
          jpeg-files
+         part-timings
          pipeline
          pipeline-names
          text-sources
@@ -34,7 +37,7 @@
 
 (define-runtime-path text-fixture "../../../torch/text/fixtures/heart-of-darkness-excerpt.txt")
 
-(define pipeline-names '(jpeg cifar text))
+(define pipeline-names '(jpeg jpeg-mem jpeg-parts cifar text))
 
 (define cifar-mean '(0.4914 0.4822 0.4465))
 (define cifar-std '(0.2470 0.2435 0.2616))
@@ -99,13 +102,56 @@
   #:ref (_i)
   (text-window ids (random (- (car (shape ids)) window)) mask-id))
 
+;; jpeg with every file's bytes read once up front: no port I/O in a worker
+(define-dataset jpeg-mem-cycle (blobs labels n)
+  #:length n
+  #:ref (i)
+  (define k (modulo i (vector-length blobs)))
+  (values (jpeg-augment (decode-image (vector-ref blobs k) #:mode 'rgb))
+          (select labels 0 k)))
+
+;; jpeg with read-image split into its read and its decode, each part's wall
+;; time summed over every worker
+(define part-names '(read-us decode-us augment-us))
+(define part-totals (for/hasheq ([p (in-list part-names)]) (values p (box 0))))
+(define parts-counted (box 0))
+
+(define (timed-part! part thunk)
+  (define t0 (current-inexact-monotonic-milliseconds))
+  (begin0 (thunk)
+    (cas-add! (hash-ref part-totals part)
+              (exact-round (* 1000 (- (current-inexact-monotonic-milliseconds) t0))))))
+
+(define (part-timings)
+  (cons (cons 'part-samples (unbox parts-counted))
+        (for/list ([p (in-list part-names)]) (cons p (unbox (hash-ref part-totals p))))))
+
+(define-dataset jpeg-parts-cycle (files labels n)
+  #:length n
+  #:ref (i)
+  (define k (modulo i (vector-length files)))
+  (define bs (timed-part! 'read-us (lambda () (file->bytes (car (vector-ref files k))))))
+  (define image (timed-part! 'decode-us (lambda () (decode-image bs #:mode 'rgb))))
+  (define out (timed-part! 'augment-us (lambda () (jpeg-augment image))))
+  (cas-add! parts-counted 1)
+  (values out (select labels 0 k)))
+
+(define (jpeg-labels files)
+  (tensor (for/list ([f (in-vector files)]) (cdr f))))
+
 ;; (values dataset batch-size samples-per-epoch)
 (define (pipeline name)
   (case name
     [(jpeg)
      (define files (jpeg-files))
-     (define labels (tensor (for/list ([f (in-vector files)]) (cdr f))))
-     (values (jpeg-cycle files labels 2048) 32 2048)]
+     (values (jpeg-cycle files (jpeg-labels files) 2048) 32 2048)]
+    [(jpeg-mem)
+     (define files (jpeg-files))
+     (define blobs (for/vector ([f (in-vector files)]) (file->bytes (car f))))
+     (values (jpeg-mem-cycle blobs (jpeg-labels files) 2048) 32 2048)]
+    [(jpeg-parts)
+     (define files (jpeg-files))
+     (values (jpeg-parts-cycle files (jpeg-labels files) 2048) 32 2048)]
     [(cifar)
      (define-values (images labels) (cifar-sources))
      (values (cifar-cycle images labels 8192) 128 8192)]
