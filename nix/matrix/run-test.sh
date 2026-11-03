@@ -1,15 +1,19 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-farm=${DRIVER_FARM:-$1/../cuda-driver-farm.sh}
+abs() { case $1 in /*) echo "$1" ;; *) echo "$PWD/$1" ;; esac; }
+
+matrix=$(abs "${1%/}")
+self=$(abs "$0")
+farm=$(abs "${DRIVER_FARM:-$matrix/../cuda-driver-farm.sh}")
 t=$(mktemp -d)
 runner=$t/run.sh
 cell=$t/cuda-cell.sh
-cat "$1/drain.sh" "$1/run.sh" >"$runner"
-cat "$1/drain.sh" "$1/cuda-cell.sh" >"$cell"
-racket_cell=$1/racket-cell.sh
-racket_dev=${RACKET_DEV_CONFIG:-$1/../../.racket-dev.rktd}
-build_docs=${BUILD_DOCS:-$1/../../scripts/build-docs}
+cat "$matrix/drain.sh" "$matrix/run.sh" >"$runner"
+cat "$matrix/drain.sh" "$matrix/cuda-cell.sh" >"$cell"
+racket_cell=$matrix/racket-cell.sh
+racket_dev=$(abs "${RACKET_DEV_CONFIG:-$matrix/../../.racket-dev.rktd}")
+build_docs=$(abs "${BUILD_DOCS:-$matrix/../../scripts/build-docs}")
 shift
 bash=$(command -v bash)
 set -m
@@ -608,7 +612,7 @@ cuda_cell_threads() {
   status=0
   (
     unset OMP_NUM_THREADS MKL_NUM_THREADS
-    [ "$#" -lt 2 ] || export "$2"
+    [ "$#" -lt 2 ] || export "${2?}"
     run_cell
   ) || status=$?
   status_is 1
@@ -622,11 +626,20 @@ case_cuda_cell_threads() {
   cuda_cell_threads 4/unset OMP_NUM_THREADS=4
 }
 
+case_relative_matrix() {
+  (cd "$matrix/.." && timeout -k 5 120 bash "$self" "${matrix##*/}" racket_cell_threads gate_threads) \
+    >"$t/table" 2>"$t/err" || {
+    echo "run-test: $case: the harness failed with a relative matrix dir" >&2
+    cat "$t/table" "$t/err" >&2
+    exit 1
+  }
+}
+
 cases=("$@")
 [ "${#cases[@]}" -gt 0 ] || cases=(rows no_match failure_line interrupt interrupt_deaf terminate deadline linger
     kill_after durations killed guard
     cuda_cell cuda_cell_deaf cuda_cell_linger cuda_cell_load zombie driver_farm
-    racket_cell_threads gate_threads cuda_cell_threads)
+    racket_cell_threads gate_threads cuda_cell_threads relative_matrix)
 for case in "${cases[@]}"; do
   "case_$case"
   echo "run-test: $case ok"
