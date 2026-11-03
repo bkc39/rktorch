@@ -640,20 +640,26 @@ other on its device. Gradients are not copied, as PyTorch's deep copy of a
 parameter does not copy them either. Plain fields are copied all the way
 down: pairs, vectors, boxes and hashes, a hash's keys included, each
 keeping its mutability and a hash its comparison and weakness, with the
-layers and tensors inside them copied as children and parameters are. The
-keys of a weak or ephemeron hash are shared, not copied, since a fresh key
-only the copy's table holds would be collected with its entry; their
-values are copied. Any other value a field holds, a number or a
-procedure, is shared. Within one
+layers and tensors inside them copied as children and parameters are. Any
+other value a field holds, a number or a procedure, is shared. Within one
 copy, sharing is kept: a layer, a tensor or a container that appears twice
 in @racket[m], as tied weights do, in one layer or across a layer and its
 children, appears twice in the copy as one value.
 
+The keys of a weak or ephemeron hash are the exception: they are shared,
+not copied, and only its values are copied, as Python's deep copy of a
+@tt{WeakKeyDictionary} does, since a fresh key only the copy's table held
+would be collected with its entry. A weak key that @racket[m] also holds
+in a field is therefore not mapped to that field's copy: the copy's table
+stays keyed by the original, and keeps an entry only while the original
+key is alive.
+
 A cycle cannot be copied. Before copying anything, @racket[layer-copy]
 raises @racket[exn:fail:contract], naming the field, when a field's value
-reaches itself, through a container, a hash key or a layer. A cycle
-through a hand-written layer that does not list the layers it holds is
-found while copying instead, and refused the same way.
+reaches itself, through a container, a hash key or a layer. The keys of a
+weak or ephemeron hash are not copied and so close no cycle; its values
+are. A cycle through a hand-written layer that does not list the layers it
+holds is found while copying instead, and refused the same way.
 
 Every layer @racket[define-layer] builds can be copied, the built-in ones
 included, and so can a @racket[procedure->Layer] layer with no
@@ -691,7 +697,10 @@ container shared between fields staying shared. A call given
 @racket[layer-copy]'s @racket[child], as a hand-written
 @racket[layer-rebuild] that passes on its own @racket[child] makes, joins
 that copy: its children and its containers are the ones the rest of the
-copy holds. A call given any other @racket[child] remembers only the
+copy holds, @racket[m] included. @racket[layer-copy]'s @racket[child]
+works only until @racket[layer-copy] returns or raises; called after, or
+passed to @racket[layer-rebuild] after, it raises
+@racket[exn:fail:contract]. A call given any other @racket[child] remembers only the
 containers of its own call and refuses a field whose plain value reaches
 itself, naming the field. A @racket[child] that answers some children
 with other layers rebuilds the tree with those leaves replaced, the shape a wrapper over

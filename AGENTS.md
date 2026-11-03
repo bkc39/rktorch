@@ -410,11 +410,22 @@ memo per call, passed explicitly (`layer-rebuild-in`). `layer-copy`'s
 public `layer-rebuild` takes the memo from such a `child` and starts a
 fresh one for any other, so a hand-written rebuild that passes on the
 copy's `child` joins the copy, its layers and its containers both. That
-check lives only at the public boundary. The memo drops a value from its
+check lives only at the public boundary, which also records the layer it
+rebuilds in that memo (falling back to a plain rebuild when the layer is
+already in progress, so a cycle is refused at the next field, named);
+`copy-child` reaches `layer-rebuild-in` directly, so nothing is memoized
+twice. `with-remembering` closes the callback when `layer-copy` exits by
+any route and clears the memo: a stashed callback, called or passed to
+`layer-rebuild`, then raises. The memo drops a value from its
 in-progress set on any exit, so a refusal a rebuild catches is not later
-read as a cycle. Keys of weak and ephemeron hashes are shared, values
-copied. A container is built only from finished parts, never filled
-afterwards. It runs on the `gen:layer` method `layer-rebuild layer child tensor`, which
+read as a cycle. Keys of weak and ephemeron hashes are shared and not
+walked (`walked-entry`, used by `children-of` and the rebuild alike, so
+the cycle check sees the graph the copy walks); values are copied. This
+follows Python's `WeakKeyDictionary.__deepcopy__`: a weak key the model
+also holds in a field is not mapped to that field's copy, so the copy's
+table stays keyed by the original and keeps an entry only while the
+original key is alive. A container is built only from finished parts,
+never filled afterwards. It runs on the `gen:layer` method `layer-rebuild layer child tensor`, which
 `define-layer` derives (`LSTM`'s plain `entries` list is why plain fields
 are walked); a stateless `procedure->Layer` copies, one with state
 refuses, and a hand-written `gen:layer` without the method refuses, naming
@@ -853,7 +864,8 @@ Runtime paths take `(only-in racket/runtime-path #%datum define-runtime-path)`.
   node's children; `refuse-cycles`, `layer-copy`'s up-front check; and
   `rebuilt-values`, the field walk `layer-rebuild` uses) and
   `torch/nn/private/memo.rkt` (the per-call memo with its in-progress set,
-  shared by both walks, and `remembering`, the callback that carries it); `torch/nn/mode.rkt` = `train!`, `eval!`,
+  shared by both walks, and `remembering`, the closable callback that
+  carries it, made by `with-remembering`); `torch/nn/mode.rkt` = `train!`, `eval!`,
   `call-with-mode` and `in-mode`; `torch/nn/parameter.rkt`, `torch/nn/buffer.rkt`, `torch/nn/linear.rkt`,
   `torch/nn/init.rkt`, `torch/nn/optim.rkt`, `torch/nn/ema.rkt`, `torch/nn/loss.rkt`, `torch/nn/recurrent.rkt`,
   `torch/nn/attention.rkt`, `torch/nn/transformer.rkt`, `torch/nn/positions.rkt`, `torch/nn/copy.rkt`, `torch/nn/clip.rkt`).
