@@ -107,8 +107,8 @@
   (cond
     [(and done (zero? (subprocess-status sub)) (hash? record)) record]
     [else
-     (define tail (let ([s (unbox err-text)])
-                    (substring s (max 0 (- (string-length s) 2000)))))
+     (define s (unbox err-text))
+     (define tail (substring s (max 0 (- (string-length s) 2000))))
      (hash 'error (if done tail (string-append "timed out\n" tail)))]))
 
 (define (run-side side name workers)
@@ -172,7 +172,11 @@
   (and (pair? rs) (cons (length rs) (median-record rs))))
 
 (define (field m k)
-  (and m (let ([kv (assq k (cdr m))]) (and kv (cdr kv)))))
+  (cond
+    [m
+     (define kv (assq k (cdr m)))
+     (and kv (cdr kv))]
+    [else #f]))
 
 (define (spread runs pipeline workers side)
   (define vs
@@ -211,8 +215,9 @@
       (printf "| ~a | ~a | ~a | ~a |\n" w (cell "pytorch")
               (string-join (map cell arms) " | ")
               (if (and py best) (real->decimal-string (/ best py) 2) "-")))
-    (printf "\n| workers | arm | finalizer runs | on main | exit-frees | escaped-to-finalizer | peak RSS MB | GC ms | load |\n")
-    (printf "|---|---|---|---|---|---|---|---|---|\n")
+    (displayln
+     "\n| workers | arm | finalizer runs | on main | exit-frees | escaped-to-finalizer | peak RSS MB | GC ms | load |")
+    (displayln "|---|---|---|---|---|---|---|---|---|")
     (for* ([w (in-list workers-list)] [a (in-list arms)])
       (define m (medians runs pipeline w a))
       (when m

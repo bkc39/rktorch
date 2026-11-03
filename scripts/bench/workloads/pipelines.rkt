@@ -71,7 +71,7 @@
           (narrow span 0 1 window)))
 
 (define (jpeg-files)
-  (list->vector (image-folder-samples (build-path (hymenoptera-root) "train"))))
+  (~> (build-path (hymenoptera-root) "train") image-folder-samples list->vector))
 
 ;; the fixture's floats are (byte / 127.5) - 1: +0.5 and truncation recover
 ;; each byte exactly
@@ -120,7 +120,7 @@
   (define t0 (current-inexact-monotonic-milliseconds))
   (begin0 (thunk)
     (cas-add! (hash-ref part-totals part)
-              (exact-round (* 1000 (- (current-inexact-monotonic-milliseconds) t0))))))
+              (~> (- (current-inexact-monotonic-milliseconds) t0) (* 1000) exact-round))))
 
 (define (part-timings)
   (cons (cons 'part-samples (unbox parts-counted))
