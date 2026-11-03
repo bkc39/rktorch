@@ -16,11 +16,11 @@
 
 (provide evaluate)
 
-(define (step-label r)
-  (if (run-stepped? r) (sub1 (run-global-step r)) (run-global-step r)))
-
 (define stage-loops
   #hasheq((sanity-check . validation) (validate . validation) (test . test) (predict . predict)))
+
+(define (step-label r)
+  (if (run-stepped? r) (sub1 (run-global-step r)) (run-global-step r)))
 
 (define (eval-batch! r stage step batch-start batch-end values-in)
   (note-batch-size! r values-in)

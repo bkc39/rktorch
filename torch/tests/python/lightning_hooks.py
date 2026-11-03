@@ -3,10 +3,10 @@
 Records every hook a LightningModule and a Callback can override, in the order
 Lightning calls them, for the scenarios LO-1..LO-8 of the T0 spec (#383)
 and for fits that skip a window by a None loss or an optimizer_step that does
-not step (#446), dumps _FxValidator.functions, and records the step each logger row is labelled
-with in fits that skip a window (#445). Writes torch/tests/lightning-hooks.rktd,
-or the path given as the first argument; lightning-hooks-parity-test.rkt
-regenerates it and compares.
+not step (#446), dumps _FxValidator.functions, and records the step each
+logger row is labelled with in fits that skip a window (#445). Writes
+torch/tests/lightning-hooks.rktd, or the path given as the first argument;
+lightning-hooks-parity-test.rkt regenerates it and compares.
 
 Each event is (name epoch global-step batch-idx lr): the raw Lightning name
 (Callback.<hook> for the callback), trainer.current_epoch,
@@ -105,7 +105,9 @@ class Base(pl.LightningModule):
         return self.layer(x)
 
     def at(self, place, batch_idx):
-        return place == "every" or place == (self.current_epoch, batch_idx)
+        here = (self.current_epoch, batch_idx)
+        return place == "every" or place == here or (
+            isinstance(place, list) and here in place)
 
     def training_step(self, batch, batch_idx):
         if self.at(self.scenario.fail_at, batch_idx):
@@ -117,7 +119,8 @@ class Base(pl.LightningModule):
         x, y = batch
         return nn.functional.mse_loss(self(x), y)
 
-    def optimizer_step(self, epoch, batch_idx, optimizer, optimizer_closure=None):
+    def optimizer_step(self, epoch, batch_idx, optimizer,
+                       optimizer_closure=None):
         if self.at(self.scenario.skip_step, batch_idx):
             optimizer_closure()
         else:
@@ -218,6 +221,15 @@ SCENARIOS = {
     "skip-loss-accumulate": lambda: run(
         "fit", {"skip_loss": (0, 0), "step_scheduler": True}, train=10,
         trainer_kwargs={"accumulate_grad_batches": 2}),
+    "skip-loss-end-accumulate": lambda: run(
+        "fit", {"skip_loss": (0, 1), "step_scheduler": True}, train=10,
+        trainer_kwargs={"accumulate_grad_batches": 2}),
+    "skip-loss-last-accumulate": lambda: run(
+        "fit", {"skip_loss": (0, 4), "step_scheduler": True}, train=10,
+        trainer_kwargs={"accumulate_grad_batches": 2}),
+    "skip-window-accumulate": lambda: run(
+        "fit", {"skip_loss": [(0, 0), (0, 1)], "step_scheduler": True},
+        train=10, trainer_kwargs={"accumulate_grad_batches": 2}),
     "skip-step-accumulate": lambda: run(
         "fit", {"skip_step": (0, 1), "step_scheduler": True}, train=10,
         trainer_kwargs={"accumulate_grad_batches": 2}),

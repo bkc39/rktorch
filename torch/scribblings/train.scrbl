@@ -179,7 +179,9 @@ per-step value logged in a validation loop reaches the logger at each
 validation batch, apart from the training values and without
 @racket['epoch], labelled 0, 1, … with the validation batches the fit has run
 outside the sanity check; in @racket[test], with the batches of that call.
-@racket[#:max-steps] bounds @racket[run-global-step]. @racket[#:fast-dev-run] runs that
+@racket[#:max-steps] bounds @racket[run-global-step]; a @racket[skip-epoch!] at
+every epoch's first batch ends no window, so a fit bounded by
+@racket[#:max-steps] alone does not end, as in Lightning. @racket[#:fast-dev-run] runs that
 many batches (one for @racket[#t]) of one epoch, with no sanity check, no loggers and no
 @racket[monitor] or @racket[checkpoint] callbacks. If an @racket[exn:fail]
 or @racket[exn:break] is raised, @racket[fit] runs each callback's
@@ -245,8 +247,9 @@ Recognize the instances of @racket[define-trainer] and
 The loop state. @racket[run-stage] is the entry's stage from @racket[setup]
 to @racket[teardown], and @racket[#f] once the run has finished.
 @racket[run-epoch] is Lightning's @tt{current_epoch}.
-@racket[run-global-step] counts the accumulation windows ended, also those
-whose step a @racket[#f] loss or @racket[skip-step!] left without effect.
+@racket[run-global-step] counts the accumulation windows ended, also a
+window whose step @racket[skip-step!] dropped or whose every loss was
+@racket[#f].
 @racket[run-stepped?] is whether the current training batch ended one.
 @racket[run-metric] reads one key to the host: inside an epoch the latest
 step value, in an epoch-end hook and after the epoch its reduction, and for a
@@ -373,10 +376,10 @@ arguments.
          scheduler-config?]{
 Lightning's @tt{lr_scheduler} dictionary. An @racket['epoch] scheduler
 steps at the end of every @racket[frequency]-th epoch; a @racket['step]
-scheduler steps after an optimizer step whose batch is a multiple of
-@racket[frequency] batches into the epoch, so with
-@racket[#:accumulate-grad-batches] 2 and @racket[frequency] 2 it steps after
-every optimizer step. Return it from @racket[define-optimizers].}
+scheduler steps at the end of an accumulation window whose last batch is a
+multiple of @racket[frequency] batches into the epoch, also when the window's
+step was dropped, so with @racket[#:accumulate-grad-batches] 2 and
+@racket[frequency] 2 it steps at every window end. Return it from @racket[define-optimizers].}
 
 @defproc[(scheduler-config? [v any/c]) boolean?]{
 Recognizes @racket[scheduler-config] values.}

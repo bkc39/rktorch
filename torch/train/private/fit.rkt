@@ -103,7 +103,7 @@
 (define (last-batch? p i)
   (= i (sub1 (plan-train-count p))))
 
-(define (window-end? p i)
+(define (ends-window? p i)
   (or (last-batch? p i) (zero? (modulo (add1 i) (plan-accumulate p)))))
 
 (define (val-check-batches p)
@@ -121,16 +121,21 @@
   (evaluate r (plan-val p) count stage))
 
 (define (backward-pass! r scaled)
-  (call-hooks r 'on-before-backward scaled)
-  (backward! scaled)
-  (call-hooks r 'on-after-backward))
+  (when scaled
+    (call-hooks r 'on-before-backward scaled)
+    (backward! scaled)
+    (call-hooks r 'on-after-backward)))
+
+(define (hooks-keep-step? r)
+  (for ([opt (in-list (run-optimizers r))])
+    (call-hooks r 'on-before-optimizer-step opt))
+  (not (run-skip-window? r)))
 
 (define (optimizer-step! r i)
-  (unless (run-skip-window? r)
-    (for ([opt (in-list (run-optimizers r))])
-      (call-hooks r 'on-before-optimizer-step opt)))
-  (unless (run-skip-window? r)
-    (for-each step! (run-optimizers r)))
+  (cond
+    [(run-skip-window? r) (void)]
+    [(hooks-keep-step? r) (for-each step! (run-optimizers r))]
+    [else (void)])
   (set-run-global-step! r (add1 (run-global-step r)))
   (set-run-stepped?! r #t)
   (step-schedulers! r 'step i))
@@ -143,21 +148,20 @@
       (zero-grads! opt)))
   (define a (plan-accumulate p))
   (define scaled (and loss (if (= a 1) loss (/ loss a))))
-  (when scaled
-    (backward-pass! r scaled))
-  (define window-end (window-end? p i))
-  (when window-end
+  (backward-pass! r scaled)
+  (define window-end? (ends-window? p i))
+  (when window-end?
     (optimizer-step! r i))
   (set-run-step-pending?! r #f)
   (when (last-batch? p i)
     (step-schedulers! r 'epoch (run-epoch r)))
   (apply call-hooks r 'on-train-batch-end (and scaled (detach scaled)) extra batch)
-  (define step (run-global-step r))
-  (when (and window-end
-             (or (run-stop? r) (zero? (modulo step (plan-log-every p)))))
-    (publish-steps! r 'train (sub1 step)))
+  (define global-step (run-global-step r))
+  (when (and window-end?
+             (or (run-stop? r) (zero? (modulo global-step (plan-log-every p)))))
+    (publish-steps! r 'train (sub1 global-step)))
   (define validate? (val-due? r p i))
-  (when (and validate? window-end)
+  (when (and validate? window-end?)
     (reset-grads! (parameters (run-trainer r))))
   (when validate?
     (validate! r p 'validate (plan-val-count p))))

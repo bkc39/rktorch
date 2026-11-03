@@ -5,7 +5,7 @@
                      (only-in "../../train/private/hooks.rkt"
                               callback-hook? definable-hooks hook-batch?
                               hook-formals hook-name trainer-hook?))
-         (only-in racket/match match)
+         (only-in racket/match match match-lambda)
          (only-in syntax/parse/define define-syntax-parse-rule)
          (only-in "../../data/loader.rkt" dataloader tensor-dataset)
          (only-in "../../main.rkt" ones zeros)
@@ -44,9 +44,9 @@
 (define (collecting-metrics l) (map cdr (collecting-steps l)))
 (define (collecting-steps l) (reverse (collecting-logger-metrics l)))
 (define (collecting-rows l)
-  (for/list ([row (in-list (collecting-steps l))])
-    (match row
-      [(cons step metrics) (list step (sort (hash-keys metrics) symbol<?))])))
+  (map (match-lambda
+         [(cons step metrics) (list step (sort (hash-keys metrics) symbol<?))])
+       (collecting-steps l)))
 (define (collecting-hparams l) (reverse (collecting-logger-hparams l)))
 (define (collecting-finalized l) (reverse (collecting-logger-finalized l)))
 
@@ -89,7 +89,11 @@
                   (unbox events))))
 
 (define (at? place r)
-  (or (eq? place 'every) (equal? place (list (run-epoch r) (run-batch-index r)))))
+  (define here (list (run-epoch r) (run-batch-index r)))
+  (match place
+    ['every #t]
+    [(list (? pair? places) ...) (and (member here places) #t)]
+    [_ (equal? place here)]))
 
 (define (raise-planned sc)
   (cond

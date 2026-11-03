@@ -2,7 +2,7 @@
 
 (module+ test
   (require (only-in racket/list take)
-           (only-in racket/match match* match-define)
+           (only-in racket/match match*)
            rackunit
            (only-in "../nn.rkt" Linear mse-loss parameters sgd)
            "../train.rkt"
@@ -93,6 +93,21 @@
     (fit-scenario sc #:train 10 #:accumulate 2)
     (check-events 'skip-loss-accumulate sc))
 
+  (test-case "LO-11: a #f loss at a window's end, under a per-step scheduler"
+    (define sc (scenario #:skip-loss '(0 1) #:step-scheduler? #t))
+    (fit-scenario sc #:train 10 #:accumulate 2)
+    (check-events 'skip-loss-end-accumulate sc))
+
+  (test-case "LO-11: a #f loss in the last, one-batch window, under a per-step scheduler"
+    (define sc (scenario #:skip-loss '(0 4) #:step-scheduler? #t))
+    (fit-scenario sc #:train 10 #:accumulate 2)
+    (check-events 'skip-loss-last-accumulate sc))
+
+  (test-case "LO-11: a two-batch window whose every loss is #f, under a per-step scheduler"
+    (define sc (scenario #:skip-loss '((0 0) (0 1)) #:step-scheduler? #t))
+    (fit-scenario sc #:train 10 #:accumulate 2)
+    (check-events 'skip-window-accumulate sc))
+
   (test-case "LO-11: a per-step scheduler steps on a window skip-step! dropped"
     (define sc (scenario #:skip-step '(0 1) #:step-scheduler? #t))
     (fit-scenario sc #:train 10 #:accumulate 2)
@@ -127,27 +142,30 @@
     (define-training-step (x y)
       (log! 'tl 1.0 #:on-step? #t #:on-epoch? #t)
       (define loss (mse-loss (net x) y))
-      (match* (skip (list (run-epoch run) (run-batch-index run)))
-        [('loss '(0 1)) #f]
-        [('step '(0 1)) (skip-step! run) loss]
-        [(_ _) loss]))
+      (define here? (equal? (list (run-epoch run) (run-batch-index run)) '(0 1)))
+      (cond
+        [(and here? (eq? skip 'loss)) #f]
+        [(and here? (eq? skip 'step)) (skip-step! run) loss]
+        [else loss]))
     (define-validation-step (x y)
       (log! 'vl 2.0)
       (mse-loss (net x) y)))
 
+  (define (check-logged-steps name skip #:train [n 6] #:accumulate [accumulate 1])
+    (define l (collecting-logger))
+    (fit (Skipping skip) (toy-loader n)
+         #:val (toy-loader 4)
+         #:max-epochs 2
+         #:num-sanity-val-steps 1
+         #:accumulate-grad-batches accumulate
+         #:log-every-n-steps 1
+         #:logger l)
+    (check-equal? (collecting-rows l) (expected-logged-steps name) (format "~a" name)))
+
   (test-case "LO-10: a skipped window advances the logged step, by a #f loss or skip-step!"
-    (for ([c (in-list '((skip-loss loss 6 1) (skip-step step 6 1)
-                        (skip-loss-accumulate loss 10 2)))])
-      (match-define (list name skip n accumulate) c)
-      (define l (collecting-logger))
-      (fit (Skipping skip) (toy-loader n)
-           #:val (toy-loader 4)
-           #:max-epochs 2
-           #:num-sanity-val-steps 1
-           #:accumulate-grad-batches accumulate
-           #:log-every-n-steps 1
-           #:logger l)
-      (check-equal? (collecting-rows l) (expected-logged-steps name) (format "~a" name))))
+    (check-logged-steps 'skip-loss 'loss)
+    (check-logged-steps 'skip-step 'step)
+    (check-logged-steps 'skip-loss-accumulate 'loss #:train 10 #:accumulate 2))
 
   (bounded-test "LO-11: #:max-steps alone ends a fit whose every loss is #f"
     (define sc (scenario #:skip-loss 'every))
