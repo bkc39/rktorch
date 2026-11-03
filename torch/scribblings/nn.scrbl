@@ -661,7 +661,9 @@ raises @racket[exn:fail:contract], naming the field, when a field's value
 reaches itself, through a container, a hash key or a layer. The keys of a
 weak or ephemeron hash are not copied and so close no cycle; its values
 are. A cycle through a hand-written layer that does not list the layers it
-holds is found while copying instead, and refused the same way.
+holds is found while copying instead, and refused the same way, or naming
+the layer when the cycle runs only through hand-written
+@racket[layer-rebuild] methods.
 
 Every layer @racket[define-layer] builds can be copied, the built-in ones
 included, and so can a @racket[procedure->Layer] layer with no
@@ -699,10 +701,13 @@ container shared between fields staying shared. A call given
 @racket[layer-copy]'s @racket[child], as a hand-written
 @racket[layer-rebuild] that passes on its own @racket[child] makes, joins
 that copy: its children and its containers are the ones the rest of the
-copy holds, @racket[m] included. @racket[layer-copy]'s @racket[child]
-works only until @racket[layer-copy] returns or raises; called after, or
-passed to @racket[layer-rebuild] after, it raises
-@racket[exn:fail:contract]. A call given any other @racket[child] remembers only the
+copy holds, @racket[m] included, whether @racket[m] is a
+@racket[define-layer] layer or a hand-written one. @racket[layer-copy]'s
+@racket[child] works only until @racket[layer-copy] returns or raises;
+called after, or passed to @racket[layer-rebuild] after, it raises
+@racket[exn:fail:contract]. It may be used from a thread a rebuild starts,
+one thread at a time: a layer reached from a second thread while another
+is still rebuilding it raises @racket[exn:fail:contract]. A call given any other @racket[child] remembers only the
 containers of its own call and refuses a field whose plain value reaches
 itself, naming the field. A @racket[child] that answers some children
 with other layers rebuilds the tree with those leaves replaced, the shape a wrapper over

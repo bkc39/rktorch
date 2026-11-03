@@ -410,11 +410,19 @@ memo per call, passed explicitly (`layer-rebuild-in`). `layer-copy`'s
 public `layer-rebuild` takes the memo from such a `child` and starts a
 fresh one for any other, so a hand-written rebuild that passes on the
 copy's `child` joins the copy, its layers and its containers both. That
-check lives only at the public boundary, which also records the layer it
-rebuilds in that memo (falling back to a plain rebuild when the layer is
-already in progress, so a cycle is refused at the next field, named);
-`copy-child` reaches `layer-rebuild-in` directly, so nothing is memoized
-twice. `with-remembering` closes the callback when `layer-copy` exits by
+check lives only at the public boundary: the exported `layer-rebuild`
+(`torch/nn/layer.rkt`) is a plain procedure over the raw generic method,
+which `#:methods gen:layer` blocks still define by name (`define-generics`
+binds methods by symbol at the use site; a `define/generic` of it reaches
+the raw method and so does not join). The wrapper records the layer it
+rebuilds in the memo, hand-written or not; a layer re-entered while in
+progress (`layer-rebuild-reentered`) is rebuilt plainly when it has
+`prop:rebuilder`, so a cycle is refused at the next field, named, and a
+hand-written one is refused at once, naming the layer. `copy-child` and
+`layer-rebuild-in` reach the raw method directly, so nothing is memoized
+twice. An open memo entry holds the thread building it (claimed under the
+memo's semaphore); a key open in another thread raises, so a rebuild's
+worker thread joins the copy only one at a time. `with-remembering` closes the callback when `layer-copy` exits by
 any route and clears the memo: a stashed callback, called or passed to
 `layer-rebuild`, then raises. The memo drops a value from its
 in-progress set on any exit, so a refusal a rebuild catches is not later
