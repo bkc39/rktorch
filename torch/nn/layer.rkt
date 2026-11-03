@@ -29,12 +29,13 @@
          (only-in "private/layer-core.rkt"
                   gen:layer layer-buffers layer-mode layer-named-buffers
                   layer-named-children layer-named-parameters layer-parameters
-                  layer-rebuild layer-set-mode! layer? prop:fields prop:on-move
-                  prop:rebuilder
+                  layer-rebuild-in layer-rebuild-reentered layer-set-mode! layer?
+                  prop:fields prop:on-move prop:rebuilder
                   registry registry-mode registry? set-registry-mode! with-mode)
          (only-in "private/layer-fields.rkt"
                   assemble check-entry-arity entry-procedure layer-methods-of
-                  layer-methods? no-forward prop:layer-methods write-field!))
+                  layer-methods? no-forward prop:layer-methods write-field!)
+         (only-in "private/memo.rkt" memo remembered remembering-memo remembering?))
 
 (provide gen:layer
          layer?
@@ -61,6 +62,15 @@
 (define/contract-out (evaluating? mode) ;; noqa
   (-> mode/c boolean?)
   (eq? mode 'eval))
+
+(define (layer-rebuild m child tensor)
+  (cond
+    [(remembering? child)
+     (define seen (remembering-memo child))
+     (remembered seen m
+                 (lambda () (layer-rebuild-in seen m child tensor))
+                 #:reentered (lambda () (layer-rebuild-reentered seen m child tensor)))]
+    [else (layer-rebuild-in (memo 'layer-rebuild) m child tensor)]))
 
 (module+ checked
   (provide (contract-out [layer? (-> any/c boolean?)])))

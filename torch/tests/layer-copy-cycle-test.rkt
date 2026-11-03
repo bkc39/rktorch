@@ -1,7 +1,8 @@
 #lang racket/base
 
 (module+ test
-  (require (only-in racket/match match-define)
+  (require (only-in racket/generic define/generic)
+           (only-in racket/match match-define)
            rackunit
            "../main.rkt"
            "../nn.rkt"
@@ -267,6 +268,22 @@
       (~> (list (cons b 'x)) make-hasheq holder deleg (twin (holder b)) copied-field))
     (check-eq? (hash-ref ((deleg-inner d2)) (h2) #f) 'x))
 
+  (struct generic-deleg (inner)
+    #:methods gen:layer
+    [(define/generic raw-rebuild layer-rebuild)
+     (define (layer-forward self . _inputs) (generic-deleg-inner self))
+     (define (layer-rebuild self child tensor)
+       (~> self generic-deleg-inner (raw-rebuild child tensor) generic-deleg))])
+
+  (bounded-test "a define/generic rebuild of a define-layer layer copies it"
+    (define b (box 1))
+    (define c (~> (holder b) generic-deleg layer-copy generic-deleg-inner))
+    (check-false (eq? (c) b))
+    (check-equal? (c) (box 1))
+    (define d (~> (holder b) generic-deleg (layer-rebuild (lambda (_name c) c) values)))
+    (check-false (eq? ((generic-deleg-inner d)) b))
+    (check-equal? ((generic-deleg-inner d)) (box 1)))
+
   (struct fallback (f)
     #:methods gen:layer
     [(define (layer-forward self . _inputs) (fallback-f self))
@@ -305,13 +322,13 @@
     (check-equal? (unbox ((c))) (vector 1 (box 2))))
 
   (bounded-test "a layer reached through a delegating rebuild and a field is copied once"
-    (define h (holder (box 1)))
-    (match-define (list d2 h2) (~> (deleg h) (twin h) copied-field))
-    (check-eq? (deleg-inner d2) h2)
-    (check-false (eq? h2 h))
-    (match-define (list h3 d3) (copied-field (twin h (deleg h))))
-    (check-eq? (deleg-inner d3) h3)
-    (check-false (eq? h3 h)))
+    (for ([h (in-list (list (holder (box 1)) (~> 1 box holder deleg)))])
+      (match-define (list d2 h2) (~> (deleg h) (twin h) copied-field))
+      (check-eq? (deleg-inner d2) h2)
+      (check-false (eq? h2 h))
+      (match-define (list h3 d3) (copied-field (twin h (deleg h))))
+      (check-eq? (deleg-inner d3) h3)
+      (check-false (eq? h3 h))))
 
   (struct back ([outer #:mutable])
     #:methods gen:layer
@@ -324,6 +341,12 @@
     (define h (holder w))
     (set-back-outer! w h)
     (check-refused "slot" h))
+
+  (memory-bounded-test "mutually delegating hand-written layers are refused"
+    (define b1 (back #f))
+    (set-back-outer! b1 (back b1))
+    (check-exn #rx"^layer-copy: a hand-written layer-rebuild reaches the layer itself"
+               (lambda () (layer-copy b1))))
 
   (bounded-test "a weak table stays keyed by the original, not the field's copy"
     (define k (box 1))
@@ -373,4 +396,59 @@
     (set! stash #f)
     (check-exn #rx"^layer-copy: a procedure->Layer" (lambda () (layer-copy (stasher f))))
     (check-true (procedure? stash))
-    (check-closed b)))
+    (check-closed b))
+
+  (struct escaper (leave inner)
+    #:methods gen:layer
+    [(define (layer-forward self . _inputs) (escaper-inner self))
+     (define (layer-rebuild self child _tensor)
+       (set! stash child)
+       ((escaper-leave self) 'left))])
+
+  (bounded-test "a child callback is closed when a rebuild escapes layer-copy"
+    (define b (box 1))
+    (set! stash #f)
+    (check-eq? (let/ec leave (layer-copy (escaper leave (holder b)))) 'left)
+    (check-true (procedure? stash))
+    (check-closed b))
+
+  (struct slow ()
+    #:methods gen:layer
+    [(define (layer-forward _self . _inputs) 0)
+     (define (layer-rebuild _self _child _tensor)
+       (sleep 0.1)
+       (slow))])
+
+  (struct forked (inner sequential? copies)
+    #:methods gen:layer
+    [(define (layer-forward self . _inputs) (forked-copies self))
+     (define (layer-rebuild self child tensor)
+       (define inner (forked-inner self))
+       (define (worker)
+         (define result (box #f))
+         (define (rebuilt)
+           (set-box! result (with-handlers ([exn:fail? values])
+                              (rebuild-directly inner child tensor))))
+         (define t (thread rebuilt))
+         (when (forked-sequential? self)
+           (thread-wait t))
+         (lambda ()
+           (thread-wait t)
+           (unbox result)))
+       (define copies (map (lambda (finished) (finished)) (list (worker) (worker))))
+       (define failure (findf exn? copies))
+       (when failure
+         (raise failure))
+       (forked (child "inner" inner) #t copies))])
+
+  (bounded-test "one copy's child used from two threads at once is refused"
+    (check-exn #rx"^layer-copy: a child callback used from two threads at once"
+               (lambda () (layer-copy (forked (holder (slow)) #f '())))))
+
+  (bounded-test "a worker thread that finishes inside the rebuild joins the copy"
+    (define s (holder (slow)))
+    (define c (layer-copy (forked s #t '())))
+    (match-define (list x y) (forked-copies c))
+    (check-eq? x y)
+    (check-eq? x (forked-inner c))
+    (check-false (eq? x s))))
