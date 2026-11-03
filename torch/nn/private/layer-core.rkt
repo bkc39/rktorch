@@ -21,6 +21,9 @@
          layer-mode ;; noqa
          layer-set-mode! ;; noqa
          layer-rebuild ;; noqa
+         fields-of
+         fields?
+         prop:fields
          prop:on-move
          prop:rebuilder
          (struct-out registry)
@@ -211,6 +214,9 @@
 
 (define-values (prop:rebuilder rebuilder? rebuilder-of) ;; noqa
   (make-struct-type-property 'rebuilder))
+
+(define-values (prop:fields fields? fields-of)
+  (make-struct-type-property 'fields))
 
 (define (child-parameters c)
   (layer-parameters (cdr c)))

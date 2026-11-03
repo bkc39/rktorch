@@ -403,14 +403,22 @@ PyTorch's deep copies), or a thunk (called `n` times, each layer drawing
 its own values); the stack contract rejects layer keywords or `#:norm #t`
 beside a layer or thunk. `layer-copy` (`torch/nn/copy.rkt`) is a deep copy
 with no RNG draws: fresh tensors with the same values, device, dtype and
-requires-grad (no gradients), children copied recursively, modes kept,
-shared layers and tensors kept shared through a memo. It runs on the
-`gen:layer` method `layer-rebuild layer child tensor`, which
-`define-layer` derives (the generated `rebuild` remakes the struct with
-each registered child through `child` and every tensor in its fields,
-plain lists, vectors and boxes included, through `tensor`, then
-reclassifies; `LSTM`'s plain `entries` list is why plain fields are
-walked); a stateless `procedure->Layer` copies, one with state refuses,
+requires-grad (no gradients), children copied recursively, modes kept.
+It first refuses a cycle (`refuse-cycles` in
+`torch/nn/private/field-walk.rkt`, a depth-first walk with an on-stack
+set and a done set, so DAG sharing passes): any field whose value reaches
+itself through a pair, vector, box, hash (keys too) or layer raises
+`layer-copy:` naming the field. Then it copies as a DAG with one memo for
+layers, tensors and plain containers, carried to the walk by its private
+`copy-child` callback (no parameter or mark); a direct `layer-rebuild`
+gets a fresh memo per call. It runs on the `gen:layer` method
+`layer-rebuild layer child tensor`, which `define-layer` derives (the
+generated `rebuild` remakes the struct with each registered child through
+`child` and every tensor in its fields through `tensor`, plain pairs,
+vectors, boxes and hashes rebuilt children first, keeping mutability and
+a hash's comparison and weakness, then reclassifies; `LSTM`'s plain
+`entries` list is why plain fields are walked); a stateless
+`procedure->Layer` copies, one with state refuses,
 and a hand-written `gen:layer` without the method refuses, naming
 `layer-copy`. The layer constructor contracts come from one
 `transformer/c` macro.

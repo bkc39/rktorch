@@ -637,12 +637,18 @@ stream.
 The copy shares nothing that training changes: an optimizer stepping one
 leaves the other where it was, and moving one with @racket[to] leaves the
 other on its device. Gradients are not copied, as PyTorch's deep copy of a
-parameter does not copy them either. Within one copy, sharing is kept: a
-layer or a tensor that appears twice in @racket[m], as tied weights do,
-appears twice in the copy as one layer or one tensor. Tensors a layer
-keeps outside its parameters and buffers, in a plain field or inside a
-list, vector or box there, are copied too; any other value a field holds,
-a number or a procedure, is shared.
+parameter does not copy them either. Plain fields are copied all the way
+down: pairs, vectors, boxes and hashes, a hash's keys included, each
+keeping its mutability and a hash its comparison and weakness, with the
+layers and tensors inside them copied as children and parameters are. Any
+other value a field holds, a number or a procedure, is shared. Within one
+copy, sharing is kept: a layer, a tensor or a container that appears twice
+in @racket[m], as tied weights do, in one layer or across a layer and its
+children, appears twice in the copy as one value.
+
+A cycle cannot be copied. Before copying anything, @racket[layer-copy]
+raises @racket[exn:fail:contract], naming the field, when a field's value
+reaches itself, through a container, a hash key or a layer.
 
 Every layer @racket[define-layer] builds can be copied, the built-in ones
 included, and so can a @racket[procedure->Layer] layer with no
@@ -675,7 +681,10 @@ buffers and the tensors in its plain fields, is replaced by
 what each child becomes. @racket[layer-copy] passes a @racket[child] that
 copies each child the same way and a @racket[tensor] that copies each
 tensor, both remembering what they have done, so shared values stay
-shared. A @racket[child] that answers some children with other layers
+shared. Plain fields are rebuilt as @racket[layer-copy] copies them, a
+container shared between fields staying shared. A direct call remembers
+only its own containers and refuses a field whose plain value reaches
+itself, naming the field. A @racket[child] that answers some children with other layers
 rebuilds the tree with those leaves replaced, the shape a wrapper over
 named layers takes.
 

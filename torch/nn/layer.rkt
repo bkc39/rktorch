@@ -22,14 +22,15 @@
                   define/checked-out define/contract-out)
          (only-in "buffer.rkt" Buffer?)
          (only-in "parameter.rkt" Parameter?)
-         (only-in "private/field-walk.rkt" rebuilt-value)
+         (only-in "private/field-walk.rkt" rebuilt-values)
          (only-in "private/layer-containers.rkt"
                   Children% Children%-alist Children%? Fn% Parameters% Parameters%?
                   check-names fn-forward)
          (only-in "private/layer-core.rkt"
                   gen:layer layer-buffers layer-mode layer-named-buffers
                   layer-named-children layer-named-parameters layer-parameters
-                  layer-rebuild layer-set-mode! layer? prop:on-move prop:rebuilder
+                  layer-rebuild layer-set-mode! layer? prop:fields prop:on-move
+                  prop:rebuilder
                   registry registry-mode registry? set-registry-mode! with-mode)
          (only-in "private/layer-fields.rkt"
                   assemble check-entry-arity entry-procedure layer-methods-of
@@ -286,15 +287,19 @@
              #:reflection-name (~? o.reflect 'name)
              #:property prop:rebuilder
              (lambda (self child tensor) (rebuild self child tensor))
+             #:property prop:fields
+             (lambda (self) (map cons '(field-name ...) (field-values self)))
              moved-property ...
              methods-property ...
              (~@ #:property prop prop-val) ...)
            (define name? sid?)
            fe.checker-def ... ...
            me.checker-def ... ...
+           (define (field-values self)
+             (list (acc self) ...))
            (define (rebuild self child tensor)
              (assemble 'name sid forward-proc (registry-mode self) '(field-name ...)
-                       (list (rebuilt-value 'field-name (acc self) child tensor) ...)))
+                       (rebuilt-values '(field-name ...) (field-values self) child tensor)))
            (define forward-proc forward-expr)
            (define (name . formals)
              (let ([absent #f] ...)
