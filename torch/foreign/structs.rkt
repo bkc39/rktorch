@@ -18,7 +18,7 @@
                   tensor-tree->pytorch-repr)
          (only-in "raw/cas.rkt" cas-field-claim!)
          (only-in "raw/fault.rkt" native-fault? note-native-fault!)
-         (only-in "raw/memory.rkt" tr-tensor-free/checked)
+         (only-in "raw/memory.rkt" free-handles! tr-tensor-free/checked)
          (only-in "raw/race-points.rkt" race-point)
          (only-in "raw/syntax.rkt" Tensor?)
          (only-in "raw/tensor.rkt"
@@ -38,7 +38,8 @@
          handle->repr
          wrap-tensor
          tensor-state-index
-         tensor-free!)
+         tensor-free!
+         tensors-free!)
 
 (define (shape->string dims)
   (if (null? dims) "scalar" (string-join (map number->string dims) "x")))
@@ -239,3 +240,14 @@
                              "the tensor is being freed or was freed"))
     (race-point free-taken h))
   (free-handle! h #:take take!))
+
+;; A tensor already freed, or being freed by another thread, is skipped.
+(define (tensors-free! ts)
+  (parameterize-break #f
+    (define hs
+      (for/list ([t (in-list ts)] #:when (take-state! t))
+        (define h (tensor-handle t))
+        (race-point free-taken h)
+        h))
+    (unless (null? hs)
+      (free-handles! hs))))

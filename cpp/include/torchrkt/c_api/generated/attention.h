@@ -15,7 +15,10 @@ extern "C" {
  * handle (NULL on error); an in-place op mutates its first handle
  * and returns an int status (0 ok, 1 with tr_last_error set). An op
  * with several Tensor returns also reports a status and writes one
- * new handle per trailing out pointer, every one NULL on error. */
+ * new handle per trailing out pointer, every one NULL on error. An
+ * op with no return updates the tensors of its non-const lists and
+ * reports a status; a failure partway may leave them partly
+ * updated. */
 
 tr_tensor* tr_gen_scaled_dot_product_attention(
     const tr_tensor* query, const tr_tensor* key, const tr_tensor* value,
