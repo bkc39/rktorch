@@ -6,7 +6,8 @@
          (only-in "../private/contract.rkt" define/checked-out)
          (only-in "buffer.rkt" Buffer Buffer?)
          (only-in "layer.rkt" layer-rebuild layer?)
-         (only-in "parameter.rkt" Parameter Parameter?))
+         (only-in "parameter.rkt" Parameter Parameter?)
+         (only-in "private/field-walk.rkt" copy-child refuse-cycles))
 
 (define (fresh-tensor t)
   (define copy (zeros-like t))
@@ -19,13 +20,12 @@
 
 (define/checked-out (layer-copy m) ;; noqa
   (-> layer? layer?)
-  (define layers (make-hasheq))
-  (define tensors (make-hasheq))
-  (let copy-of ([m m])
-    (hash-ref! layers m
-               (lambda ()
-                 (layer-rebuild m
-                                (lambda (_name child) (copy-of child))
-                                (lambda (t)
-                                  (hash-ref! tensors t
-                                             (lambda () (fresh-tensor t)))))))))
+  (refuse-cycles m)
+  (define memo (make-hasheq))
+  (define (copy-tensor t)
+    (hash-ref! memo t (lambda () (fresh-tensor t))))
+  (define copy-of
+    (copy-child memo
+                (lambda (_name c)
+                  (hash-ref! memo c (lambda () (layer-rebuild c copy-of copy-tensor))))))
+  (copy-of #f m))
