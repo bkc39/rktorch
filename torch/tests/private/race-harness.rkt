@@ -4,7 +4,7 @@
          (only-in ffi/unsafe/atomic
                   call-as-atomic in-atomic-mode? make-uninterruptible-lock
                   uninterruptible-lock-acquire uninterruptible-lock-release)
-         (only-in racket/contract/base ->i any contract-out flat-named-contract)
+         (only-in racket/contract/base ->i any flat-named-contract)
          (only-in racket/dict dict-ref)
          (only-in racket/list remove-duplicates)
          (only-in racket/match match)
@@ -22,7 +22,8 @@
          (only-in "../../foreign/raw/pressure.rkt"
                   live-bytes-by-device reset-pressure-state!)
          (only-in "../../foreign/raw/race-points.rkt" race-hook)
-         (only-in "../../foreign/raw/regions.rkt" with-cleanup))
+         (only-in "../../foreign/raw/regions.rkt" with-cleanup)
+         (only-in "../../private/contract.rkt" define/contract-out))
 
 (provide with-race-hook
          with-parked
@@ -46,10 +47,6 @@
          spawn
          join
          stop!
-         (contract-out
-          [stop-worker! (->i ([w worker?]
-                              [stop-by (w) (stop-for/c (worker-pool w))])
-                             any)])
          pools
          stops-for
          pools-stopped-by
@@ -249,7 +246,10 @@
   (unless (sync/timeout seconds (thread-dead-evt t))
     (error 'stop! "a killed worker was still running after ~a s" seconds)))
 
-(define (stop-worker! w stop-by)
+(define/contract-out (stop-worker! w stop-by)
+  (->i ([w worker?]
+        [stop-by (w) (stop-for/c (worker-pool w))])
+       any)
   (match stop-by
     ['kill (stop! w)]
     ['break (break-thread (worker-thread w))]))
