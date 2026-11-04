@@ -206,6 +206,16 @@
         (unless (box-cas! calls k (add1 k)) (retry))))
     (condition 'spin 'raw 0 (lambda () spin)))
 
+  ;; Racket 9.1's `sleep` on a parallel thread allocates ~90 kB and wakes
+  ;; main, so a worker's known op spins on fixnums and reads the clock rarely.
+  (define (busy ms)
+    (define deadline (+ (clock-ms) ms))
+    (let spin ([i 0])
+      (cond
+        [(< i 100000) (spin (add1 i))]
+        [(< (clock-ms) deadline) (spin 0)]
+        [else (void)])))
+
   (test-case "threaded conditions take every layer of the adds, and the facade of the rest"
     (define conds (conditions (ladder-ops '(scalar-add narrow)) '(2)))
     (define threaded
@@ -250,7 +260,7 @@
          (define junk (make-bytes 50000000))
          (define deadline (+ (clock-ms) 300))
          (let spin () (when (< (clock-ms) deadline) (spin)))
-         (lambda () (sleep (and junk 0.002))))
+         (lambda () (busy (and junk 2))))
        (define r (sample-condition (condition 'spin 'raw 2 costly-make) 0.2 #:rep 0))
        (check-true (< (hash-ref r 'heap_bytes_per_op) 100000) (format "~a" r))
        (when (hash-ref r 'main_cpu_ms)
