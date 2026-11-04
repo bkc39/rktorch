@@ -1,7 +1,7 @@
 import time
 import unittest
 
-from op_cost import thread_loop
+from op_cost import stack_inputs, thread_loop
 from pipelines import peak_rss_mb
 
 
@@ -11,6 +11,13 @@ class ThreadLoop(unittest.TestCase):
         ops, elapsed = thread_loop(1, lambda: time.sleep(step_s), 0.25)
         self.assertGreaterEqual(ops, 1)
         self.assertLessEqual(ops * step_s, elapsed, (ops, elapsed))
+
+
+class StackInputs(unittest.TestCase):
+    def test_stacks_32_distinct_tensors_as_the_racket_case_does(self):
+        ts = stack_inputs()
+        self.assertEqual(len(ts), 32)
+        self.assertEqual(len({t.data_ptr() for t in ts}), 32)
 
 
 class PeakRss(unittest.TestCase):

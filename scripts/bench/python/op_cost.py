@@ -32,8 +32,12 @@ def narrow():
     return lambda: x.narrow(1, 4, 32)
 
 
+def stack_inputs():
+    return [torch.randn(3, 32, 32) for _ in range(32)]
+
+
 def stack_32():
-    ts = [torch.randn(3, 32, 32)] * 32
+    ts = stack_inputs()
     return lambda: torch.stack(ts)
 
 
