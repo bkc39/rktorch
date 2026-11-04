@@ -16,6 +16,9 @@
 
   (define host-platform (if (eq? (system-type 'os) 'macosx) "darwin" "linux"))
 
+  (define (racket-cache platform)
+    (if (equal? platform "darwin") "Library/Caches/Racket" ".cache/racket"))
+
   ;; (platform environment directories-made expected), "@" the user's home
   (define cases
     '(("linux" () () "@/.cache/racket/rktorch/cifar10-png")
@@ -80,7 +83,7 @@
 
   ;; (environment, the cache directory below "@" that both read)
   (define hymenoptera-cases
-    '((() ".cache/racket/rktorch/hymenoptera")
+    `((() ,(string-append (racket-cache host-platform) "/rktorch/hymenoptera"))
       ((("RKTORCH_HYMENOPTERA_DIR" . "@/hy")) "hy")))
 
   (cond
@@ -101,6 +104,15 @@
   (cond
     [(not python) (displayln "[cache-dirs-test] skipped: no python3")]
     [else
+     (for ([platform (in-list '("linux" "darwin"))])
+       (test-case (format "the default cache below a bare home is ~a's: ~a"
+                          platform (racket-cache platform))
+         (with-temporary-path (root (make-temporary-directory "cache-dirs-~a"))
+           (define home (path->string (build-path root "home")))
+           (make-directory* home)
+           (check-equal? (python-reads python (environment home '()) platform)
+                         (path->string (build-path home (racket-cache platform)
+                                                   "rktorch" "cifar10-png"))))))
      (for ([c (in-list cases)])
        (match-define (list platform settings dirs expected) c)
        (test-case (format "the twins read the PNG tree where cifar-folder.rkt writes it: ~s" c)
