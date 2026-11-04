@@ -3,7 +3,9 @@
 (require (only-in racket/format ~a ~r)
          (only-in racket/list remove-duplicates)
          (only-in racket/string string-join string-trim)
-         (only-in threading ~>))
+         (only-in racket/math exact-round)
+         (only-in threading ~>)
+         (only-in "harness.rkt" list-median))
 
 (provide ref
          num
@@ -18,6 +20,13 @@
          table
          median
          iqr
+         median-of
+         median-at
+         ratio
+         whole
+         percent
+         share
+         find-record
          select
          by-context
          settings-text
@@ -79,6 +88,20 @@
 (define (median r) (ref r 'stats 'median))
 (define (iqr r) (ref r 'stats 'iqr))
 
+(define (median-of r) (and r (median r)))
+
+(define (median-at r key) (and r (list-median (ref r key))))
+
+(define (ratio a b [digits 2])
+  (if (and (real? a) (real? b) (positive? b)) (num (/ a b) digits) "-"))
+
+(define (whole x) (if (real? x) (number->string (exact-round x)) "-"))
+
+(define (percent x) (if (real? x) (format "~a%" (num x 1)) "-"))
+
+(define (share part total)
+  (if (and (real? part) (real? total) (positive? total)) (~> part (/ total) (* 100.0) percent) "-"))
+
 (define (select records suite group)
   (for/list ([r (in-list records)]
              #:when (and (equal? (ref r 'suite) suite) (or (not group) (equal? (ref r 'group) group))))
@@ -100,6 +123,13 @@
   (or (ref r 'impl) (ref r 'meta 'impl) "rktorch"))
 
 (define (rktorch? r) (equal? (impl-of r) "rktorch"))
+
+(define (find-record records #:case c #:impl impl #:variant [variant #f])
+  (for/last ([r (in-list records)]
+             #:when (and (equal? (ref r 'case) c)
+                         (equal? (impl-of r) impl)
+                         (or (not variant) (equal? (ref r 'variant) variant))))
+    r))
 
 (struct section (suite group title render context keep))
 

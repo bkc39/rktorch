@@ -4,7 +4,7 @@
   (require (for-syntax racket/base)
            (only-in racket/file file->lines make-temporary-directory)
            (only-in racket/list remove-duplicates second)
-           (only-in racket/match match match-lambda)
+           (only-in racket/match match match-define match-lambda)
            (only-in racket/port port->string)
            (only-in racket/runtime-path #%datum define-runtime-path)
            (only-in racket/string string-contains? string-prefix?)
@@ -17,7 +17,7 @@
   (define bash (find-executable-path "bash"))
 
   (define (run-baseline dir stage #:rounds [rounds #f] #:out [stem "l0"] #:smoke [smoke #f]
-                        #:threads [threads #f])
+                        #:folder-fails? [folder-fails? #f] #:threads [threads #f])
     (define env (environment-variables-copy (current-environment-variables)))
     (define (set-var! name value)
       (environment-variables-set! env (string->bytes/utf-8 name)
@@ -29,6 +29,7 @@
     (set-var! "BASELINE_DATE" "2026-01-02")
     (set-var! "BASELINE_SMOKE" (and smoke "1"))
     (set-var! "BASELINE_ROUNDS" rounds)
+    (set-var! "FAKE_FOLDER_FAILS" (and folder-fails? "1"))
     (for ([name (in-list '("OMP_NUM_THREADS" "MKL_NUM_THREADS"))])
       (set-var! name threads))
     (define-values (sp out in err)
@@ -45,10 +46,19 @@
     (close-input-port err)
     status)
 
-  (define (bench-calls dir)
+  (define (calls-of dir prefix)
     (for/list ([line (in-list (file->lines (build-path dir "calls.log")))]
-               #:when (string-prefix? line "racket scripts/bench/run.rkt"))
+               #:when (string-prefix? line prefix))
       line))
+
+  (define (bench-calls dir) (calls-of dir "racket scripts/bench/run.rkt"))
+
+  (define (folder-calls dir)
+    (for/list ([call (in-list (calls-of dir "racket scripts/bench/cifar-folder.rkt"))])
+      (regexp-replace #rx" threads=[^ ]*$" call "")))
+
+  (define (variants-of call)
+    (regexp-match* #px"--variant (\\S+)" call #:match-select cadr))
 
   (define call-thread-setting
     (match-lambda
@@ -127,7 +137,7 @@
         (test-case "BASELINE_ROUNDS reaches every suite"
           (in-fresh-dir
            (lambda (dir)
-             (for ([stage (in-list '("cpu" "cuda"))])
+             (for ([stage (in-list '("cpu" "cuda" "loader"))])
                (check-equal? (run-baseline dir stage #:rounds "7") 0))
              (define calls (bench-calls dir))
              (check-true (> (length calls) 4))
@@ -137,9 +147,48 @@
         (test-case "unset, BASELINE_ROUNDS leaves e2e at 3 and the others at their defaults"
           (in-fresh-dir
            (lambda (dir)
-             (for ([stage (in-list '("cpu" "cuda"))])
+             (for ([stage (in-list '("cpu" "cuda" "loader"))])
                (check-equal? (run-baseline dir stage) 0))
              (for ([call (in-list (bench-calls dir))])
                (if (string-contains? call " e2e ")
                    (check-true (string-contains? call " --rounds 3 ") call)
-                   (check-false (string-contains? call "--rounds") call))))))))]))
+                   (check-false (string-contains? call "--rounds") call))))))
+
+        (test-case "the loader stage writes the PNG tree, then runs each pipeline and worker count beside its twin"
+          (in-fresh-dir
+           (lambda (dir)
+             (check-equal? (run-baseline dir "loader") 0)
+             (check-equal? (folder-calls dir)
+                           '("racket scripts/bench/cifar-folder.rkt full"))
+             (match-define (list loader resnet) (bench-calls dir))
+             (for ([call (in-list (list loader resnet))])
+               (check-true (string-contains? call " --device cuda ") call))
+             (check-true (string-contains? loader " --only cifar-loader,py-cifar-loader ") loader)
+             (check-true (string-contains? resnet " --only cifar-resnet,py-cifar-resnet ") resnet)
+             (define (expected workers)
+               (for*/list ([p (in-list '("per-sample" "batched"))] [w (in-list workers)])
+                 (format "~a-~a:PIPELINE=~a,WORKERS=~a,PNG_DIGEST=0123456789ab" p w p w)))
+             (check-equal? (variants-of loader) (expected '(0 1 2 4 8)))
+             (check-equal? (variants-of resnet) (expected '(0 2 4))))))
+
+        (test-case "a smoke run of the loader stage takes the fixture tree and the smallest settings"
+          (in-fresh-dir
+           (lambda (dir)
+             (check-equal? (run-baseline dir "loader" #:smoke #t) 0)
+             (check-equal? (folder-calls dir)
+                           '("racket scripts/bench/cifar-folder.rkt fixture"))
+             (for ([call (in-list (bench-calls dir))])
+               (check-true (string-contains? call " --device cuda ") call))
+             (match-define (list loader resnet) (map variants-of (bench-calls dir)))
+             (check-equal? (length loader) 4)
+             (check-equal? (length resnet) 4)
+             (for ([v (in-list loader)])
+               (check-regexp-match #rx"WORKERS=[02],PNG_DIGEST=[0-9a-f]+,DATASET=fixture$" v))
+             (for ([v (in-list resnet)])
+               (check-regexp-match #rx",DATASET=fixture,BASE=4$" v)))))
+
+        (test-case "the loader stage fails, and measures nothing, when the PNG tree cannot be written"
+          (in-fresh-dir
+           (lambda (dir)
+             (check-not-equal? (run-baseline dir "loader" #:folder-fails? #t) 0)
+             (check-equal? (bench-calls dir) '()))))))]))
