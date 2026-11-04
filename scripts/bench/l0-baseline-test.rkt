@@ -3,7 +3,8 @@
 (module+ test
   (require (for-syntax racket/base)
            (only-in racket/file file->lines make-temporary-directory)
-           (only-in racket/match match-define)
+           (only-in racket/list remove-duplicates second)
+           (only-in racket/match match match-define match-lambda)
            (only-in racket/port port->string)
            (only-in racket/runtime-path #%datum define-runtime-path)
            (only-in racket/string string-contains? string-prefix?)
@@ -16,7 +17,7 @@
   (define bash (find-executable-path "bash"))
 
   (define (run-baseline dir stage #:rounds [rounds #f] #:out [stem "l0"] #:smoke [smoke #f]
-                        #:folder-fails? [folder-fails? #f])
+                        #:folder-fails? [folder-fails? #f] #:threads [threads #f])
     (define env (environment-variables-copy (current-environment-variables)))
     (define (set-var! name value)
       (environment-variables-set! env (string->bytes/utf-8 name)
@@ -29,6 +30,8 @@
     (set-var! "BASELINE_SMOKE" (and smoke "1"))
     (set-var! "BASELINE_ROUNDS" rounds)
     (set-var! "FAKE_FOLDER_FAILS" (and folder-fails? "1"))
+    (for ([name (in-list '("OMP_NUM_THREADS" "MKL_NUM_THREADS"))])
+      (set-var! name threads))
     (define-values (sp out in err)
       (parameterize ([current-environment-variables env])
         (subprocess #f #f #f bash (path->string script) stage)))
@@ -50,8 +53,22 @@
 
   (define (bench-calls dir) (calls-of dir "racket scripts/bench/run.rkt"))
 
+  (define (folder-calls dir)
+    (for/list ([call (in-list (calls-of dir "racket scripts/bench/cifar-folder.rkt"))])
+      (regexp-replace #rx" threads=[^ ]*$" call "")))
+
   (define (variants-of call)
     (regexp-match* #px"--variant (\\S+)" call #:match-select cadr))
+
+  (define call-thread-setting
+    (match-lambda
+      [(regexp #rx"--out [^ ]+ (--device [^ ]+ )?([^ ]+) .*threads=([^ ]*)$"
+               (list _ _ suite setting))
+       (list suite setting)]
+      [call (list call #f)]))
+
+  (define (thread-settings dir)
+    (map call-thread-setting (bench-calls dir)))
 
   (define (jsonl dir) (file->lines (build-path dir "l0.jsonl")))
 
@@ -74,6 +91,33 @@
              (check-false (member "stale" records))
              (check-equal? (length records) (length (bench-calls dir)))
              (check-true (> (length records) 1)))))
+
+        (test-case "a call logged without its thread settings parses to none"
+          (check-equal? (call-thread-setting "racket scripts/bench/run.rkt --out l0.jsonl ops")
+                        '("racket scripts/bench/run.rkt --out l0.jsonl ops" #f)))
+
+        (test-case "the default passes drop the caller's thread counts"
+          (for ([stage (in-list '("cpu" "cuda"))])
+            (in-fresh-dir
+             (lambda (dir)
+               (check-equal? (run-baseline dir stage #:threads "8") 0)
+               (define settings (thread-settings dir))
+               (with-check-info (['stage stage] ['settings settings])
+                 (match stage
+                   ["cpu" (check-not-false (member '("ops" "unset/unset") settings))]
+                   ["cuda"
+                    (check-true (> (length settings) 1))
+                    (check-equal? (remove-duplicates (map second settings)) (list "unset/unset"))])
+                 (check-false (member "8/8" (map second settings))))))))
+
+        (test-case "the one-thread passes set one thread"
+          (in-fresh-dir
+           (lambda (dir)
+             (check-equal? (run-baseline dir "cpu" #:threads "8") 0)
+             (define settings (thread-settings dir))
+             (with-check-info (['settings settings])
+               (check-not-false (member '("ops" "1/1") settings))
+               (check-not-false (member '("threads" "1/1") settings))))))
 
         (test-case "a single stage appends to the JSONL"
           (in-fresh-dir
@@ -114,7 +158,7 @@
           (in-fresh-dir
            (lambda (dir)
              (check-equal? (run-baseline dir "loader") 0)
-             (check-equal? (calls-of dir "racket scripts/bench/cifar-folder.rkt")
+             (check-equal? (folder-calls dir)
                            '("racket scripts/bench/cifar-folder.rkt full"))
              (match-define (list loader resnet) (bench-calls dir))
              (for ([call (in-list (list loader resnet))])
@@ -131,7 +175,7 @@
           (in-fresh-dir
            (lambda (dir)
              (check-equal? (run-baseline dir "loader" #:smoke #t) 0)
-             (check-equal? (calls-of dir "racket scripts/bench/cifar-folder.rkt")
+             (check-equal? (folder-calls dir)
                            '("racket scripts/bench/cifar-folder.rkt fixture"))
              (for ([call (in-list (bench-calls dir))])
                (check-true (string-contains? call " --device cuda ") call))

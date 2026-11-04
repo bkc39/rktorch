@@ -53,7 +53,7 @@ If it persists, clear the caches and redo:
 ### 3. Test
 
 ```bash
-nix develop .#ci --command raco test torch/
+OMP_NUM_THREADS=${OMP_NUM_THREADS:-1} nix develop .#ci --command raco test torch/
 ```
 
 Shell entry installs the package in link mode, so the `torch` collection
@@ -67,7 +67,7 @@ Examples have their own runners: `raco test examples/test/`.
 ### 4. Coverage — the floor is a gate
 
 ```bash
-nix develop .#ci --command racket scripts/coverage.rkt --changed
+OMP_NUM_THREADS=${OMP_NUM_THREADS:-1} nix develop .#ci --command racket scripts/coverage.rkt --changed
 ```
 
 It instruments the library, drives it with the suite, prints the total plus

@@ -345,17 +345,20 @@ faster) with a sign-test interval, which needs 6 rounds to reach 95%.
   a spread, and so a floor, needs 3 rounds. PyTorch's GC columns count
   Python's cyclic collector in the main process only, not its workers and
   not reference-count frees. The notes mark a row `no twin` when one side
-  has no summary, `device X≠Y` when the two ran on different devices
-  (neither gets a ratio), `pin_memory (PyTorch only)` when the twin pinned
+  has no summary, `device X≠Y` when the two ran on different devices and
+  `timing U (T)≠U′ (T′)` when they were timed differently, a wall-timed
+  run beside an epoch-timed one (neither gets a ratio, and the second
+  leaves the unit `-`), `pin_memory (PyTorch only)` when the twin pinned
   its batches (rktorch has no pinned memory, #307), `twin crops per image`
   on the `batched` rows, and `load L ≥ M` when a run of the pair ended
   with the one-minute load at or above `--max-load`. Its heading is the
   host and run, not the device, so a split pair stays in one table; the
   loader rows and the ResNet rows are two invocations, so two tables.
 
-`scripts/bench/l0-baseline.sh` takes the baseline from the host shell,
-entering one dev shell at a time: in `nix develop`, A on the CPU at the
-default thread count and at `OMP_NUM_THREADS=1`, and B at one ATen thread;
+`scripts/bench/l0-baseline.sh` (unsets `OMP_NUM_THREADS` and
+`MKL_NUM_THREADS`) takes the baseline from the host shell, entering one dev
+shell at a time: in `nix develop`, A on the CPU at the default thread count
+and at `OMP_NUM_THREADS=1`, and B at one ATen thread;
 in `env -u LD_LIBRARY_PATH nix develop .#cuda`, A, E and F on CUDA, C over
 `VARIANT` `pgm`/`crop` × `WORKERS` 0/2/4, D at the short settings, and G
 (05 and 09) with troughs off, then on at collect budgets 0.01, 0.05 (the
@@ -363,7 +366,9 @@ default), 0.2 and 1; then, in the same shell, the `loader` stage writes
 the CIFAR-10 PNG tree under `BASELINE_CACHE` and runs H with
 `--device cuda`: `cifar-loader` at `WORKERS` 0, 1, 2, 4 and 8 and
 `cifar-resnet` at 0, 2 and 4, each `PIPELINE` `per-sample` and `batched`,
-beside their twins, with `PNG_DIGEST` set to the tree's. An example and its twins run as one group, whose
+beside their twins, with `PNG_DIGEST` set to the tree's. Every stage runs
+at libtorch's default thread count unless a pass or variant sets one. An
+example and its twins run as one group, whose
 order rotates every round as the micro suites' cases do, so drift reaches
 both sides of a ratio alike. Each group waits for a load below 4; the
 records go to `baseline-<date>.jsonl` in `BASELINE_DIR`
