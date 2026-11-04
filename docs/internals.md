@@ -598,9 +598,10 @@ gets the point's name and a subject (a handle, a device, a thread).
   preemption, run it on fewer cores than threads:
   `taskset -c 0,1 raco test torch/tests/race-stress-test.rkt`. A last
   phase runs 8 churners while the main thread loops plain foreign calls,
-  yielding every 5 ms. On a
-  loaded host set `OMP_NUM_THREADS=1`: libtorch's OpenMP teams spin
-  against the load and slow each op tenfold.
+  yielding every 5 ms. On a loaded host set `OMP_NUM_THREADS=1`, as the
+  gates do ([building](building.md#development-shells)): libtorch's OpenMP
+  teams spin against the load and slow each op tenfold. One phase runs in
+  a subprocess at libtorch's default thread count.
 - `cpp/tests/torchrkt/threads_test.cpp`: `std::thread`s through the C API.
   Under ThreadSanitizer the shim is instrumented and libtorch is not.
   The threads tests are clean; the rest of the suite reports races only
