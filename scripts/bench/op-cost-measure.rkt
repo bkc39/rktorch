@@ -4,8 +4,7 @@
                   profile-total-time)
          (only-in profile/sampler create-sampler)
          (only-in racket/file file->string)
-         (only-in racket/list filter-map)
-         (only-in racket/match match match-define)
+         (only-in racket/match match match-define match-lambda)
          (only-in racket/os getpid)
          (only-in racket/string string-contains? string-split)
          (only-in threading ~>)
@@ -24,7 +23,7 @@
          crossing-record
          sampler-record
          sampler-pieces
-         piece-share
+         piece-shares
          main-cpu-ms
          run-rep
          warm-up!)
@@ -129,12 +128,13 @@
           'us_per_crossing (~> (clock-ms) (- t0) (* 1000.0) (/ calls))
           'load (load-average)))
 
-(define (contract-node? n)
-  (define src (node-src n))
-  (and src (string-contains? (format "~a" src) "racket/contract")))
+(define contract-frame?
+  (match-lambda
+    [(cons _ src) (and src (string-contains? (format "~a" src) "racket/contract"))]))
 
-(define ((named . names) n)
-  (and (memq (node-id n) names) #t))
+(define (named . names)
+  (match-lambda
+    [(cons id _) (and (memq id names) #t)]))
 
 ;; the drain the pressure check's yield runs is finalization's, not the check's
 (define sampler-pieces
@@ -142,12 +142,35 @@
           'pressure (named 'collect-under-pressure!)
           'finalizer (named 'register-tensor! 'yield-to-finalizers!)
           'shape (named 'handle-shape 'wrap-tensor)
-          'contract contract-node?))
+          'contract contract-frame?))
 
-(define (piece-share totals total)
-  (cond
-    [(or (null? totals) (not (positive? total))) 0.0]
-    [else (~> (apply max totals) (/ total) exact->inexact)]))
+(define piece-mark-src (srcloc 'sampler-piece #f #f #f #f))
+
+;; a sample counts once toward a piece however many of its frames match, so
+;; each piece's time is the union of its matching samples
+(define (piece-shares snapshots pieces)
+  (match-define (cons cpu-time samples) snapshots)
+  (define marks
+    (for/hasheq ([piece (in-hash-keys pieces)])
+      (values piece (cons piece piece-mark-src))))
+  (define marked
+    (for/list ([sample (in-list samples)])
+      (match-define (list* thread time stack) sample)
+      (define hits
+        (for/list ([(piece matches?) (in-hash pieces)]
+                   #:when (ormap matches? stack))
+          (hash-ref marks piece)))
+      (list* thread time (append stack hits))))
+  (define profile (analyze-samples (cons cpu-time marked)))
+  (define total (profile-total-time profile))
+  (define piece-ms
+    (for/hasheq ([n (in-list (profile-nodes profile))]
+                 #:when (eq? (node-src n) piece-mark-src))
+      (values (node-id n) (node-total n))))
+  (values total
+          (for/hasheq ([piece (in-hash-keys pieces)])
+            (define ms (hash-ref piece-ms piece 0))
+            (values piece (if (positive? total) (exact->inexact (/ ms total)) 0.0)))))
 
 (define (sampler-record c layer seconds)
   (define thunk (op-case-layer c layer))
@@ -155,9 +178,7 @@
   (define sampler (create-sampler (current-thread) 0.001))
   (define-values (ops elapsed-ms) (main-loop thunk seconds))
   (sampler 'stop)
-  (define profile (analyze-samples (sampler 'get-snapshots)))
-  (define nodes (profile-nodes profile))
-  (define total (profile-total-time profile))
+  (define-values (total shares) (piece-shares (sampler 'get-snapshots) sampler-pieces))
   (hasheq 'kind "sampler"
           'impl "rktorch"
           'op (symbol->string (op-case-name c))
@@ -165,11 +186,7 @@
           'ops ops
           'us_per_op (and (positive? ops) (/ (* 1000.0 elapsed-ms) ops))
           'total_ms (exact->inexact total)
-          'shares (for/hasheq ([(piece matches?) (in-hash sampler-pieces)])
-                    (values piece
-                            (piece-share (filter-map (lambda (n) (and (matches? n) (node-total n)))
-                                                     nodes)
-                                         total)))
+          'shares shares
           'load (load-average)))
 
 (define (warm-up! conds)
@@ -313,7 +330,32 @@
     (check-equal? (hash-ref r 'layer) "contracted")
     (check-true (jsexpr? r) (format "~a" r)))
 
-  (test-case "a sampler piece's share is its outermost function's time over the total"
-    (check-equal? (piece-share '(30 10 20) 100) 0.3)
-    (check-equal? (piece-share '() 100) 0.0)
-    (check-equal? (piece-share '(5) 0) 0.0)))
+  (define (snapshots . stacks)
+    (define frames (make-hasheq))
+    (define (frame id) (hash-ref! frames id (lambda () (cons id #f))))
+    (cons 0
+          (for/list ([stack (in-list (reverse stacks))]
+                     [ms (in-range (* 10 (sub1 (length stacks))) -1 -10)])
+            (list* 0 ms (map frame stack)))))
+
+  (define (finalizer-share . stacks)
+    (define-values (_ shares) (piece-shares (apply snapshots stacks) sampler-pieces))
+    (hash-ref shares 'finalizer))
+
+  (test-case "a piece's disjoint functions both count toward its share"
+    (check-equal? (finalizer-share '(register-tensor! op) '(register-tensor! op)
+                                   '(register-tensor! op) '(yield-to-finalizers! op)
+                                   '(yield-to-finalizers! op) '(op) '(op) '(op) '(op) '(op))
+                  0.5))
+
+  (test-case "a sample with nested functions of one piece counts once"
+    (check-equal? (finalizer-share '(yield-to-finalizers! register-tensor! op)
+                                   '(yield-to-finalizers! register-tensor! op)
+                                   '(yield-to-finalizers! register-tensor! op)
+                                   '(op) '(op) '(op) '(op) '(op) '(op) '(op))
+                  0.3))
+
+  (test-case "no samples give every piece a zero share"
+    (define-values (total shares) (piece-shares (cons 0 '()) sampler-pieces))
+    (check-equal? total 0)
+    (check-equal? (hash-ref shares 'contract) 0.0)))
