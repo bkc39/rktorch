@@ -83,9 +83,10 @@ def thread_loop(n, step, seconds):
     time.sleep(seconds)
     stop.set()
     elapsed = time.perf_counter() - t0
+    ops = sum(counts)
     for w in workers:
         w.join()
-    return sum(counts), elapsed
+    return ops, elapsed
 
 
 def load():
