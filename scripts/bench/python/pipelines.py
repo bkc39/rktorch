@@ -8,6 +8,7 @@ import json
 import os
 import random
 import resource
+import sys
 import time
 
 import numpy as np
@@ -141,9 +142,14 @@ def cell(name, workers, warmup, epochs, samples):
     t0 = time.perf_counter()
     n = sum(epoch(loader) for _ in range(epochs))
     elapsed = time.perf_counter() - t0
-    rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss // 1024
+    rss = peak_rss_mb(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss, sys.platform)
     return {"samples": n, "samples_per_s": n / elapsed, "elapsed_s": elapsed,
             "gc_ms": None, "peak_rss_mb": rss}
+
+
+def peak_rss_mb(maxrss, platform):
+    """ru_maxrss is bytes on macOS and KiB on Linux."""
+    return maxrss // (1024 * 1024 if platform == "darwin" else 1024)
 
 
 def main():
