@@ -190,8 +190,14 @@
            (only-in torch/tests/private/wedge call-with-process-deadline)
            (only-in "op-cost-ops.rkt" ladder-ops))
 
-  (define (sleeper ms)
-    (condition 'sleep 'raw 0 (lambda () (lambda () (sleep (/ ms 1000.0))))))
+  (define (spinner ms calls)
+    (define (spin)
+      (define deadline (+ (clock-ms) ms))
+      (let loop () (when (< (clock-ms) deadline) (loop)))
+      (let retry ()
+        (define k (unbox calls))
+        (unless (box-cas! calls k (add1 k)) (retry))))
+    (condition 'spin 'raw 0 (lambda () spin)))
 
   (test-case "threaded conditions take every layer of the adds, and the facade of the rest"
     (define conds (conditions (ladder-ops '(scalar-add narrow)) '(2)))
@@ -218,9 +224,13 @@
      120
      (lambda ()
        (for ([n (in-list '(0 2))])
-         (define r (sample-condition (struct-copy condition (sleeper 2) [threads n]) 0.2 #:rep 3))
+         (define calls (box 0))
+         (define r
+           (sample-condition (struct-copy condition (spinner 2 calls) [threads n]) 0.2 #:rep 3))
          (check-equal? (hash-ref r 'threads) n)
          (check-equal? (hash-ref r 'rep) 3)
+         (check-true (<= (* 3/4 (unbox calls)) (hash-ref r 'ops) (unbox calls))
+                     (format "~a calls ~a" (unbox calls) r))
          (check-true (< 1900 (hash-ref r 'us_per_op) 6000) (format "~a" r))
          (check-true (real? (hash-ref r 'heap_bytes_per_op)))
          (check-true (jsexpr? r) (format "~a" r))))))
