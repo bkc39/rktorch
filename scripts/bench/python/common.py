@@ -13,6 +13,8 @@ import time
 
 import torch
 
+from cache_dirs import cache_dir
+
 
 def env_number(name, default):
     supplied = os.environ.get(name)
@@ -120,8 +122,9 @@ def resolved_foreach(opt):
 
 
 class StepLog:
-    """One [optimizer, ms, gc_ms] row per optimizer step, the device settled
-    first, as the rktorch-step event logs them."""
+    """One [optimizer, ms, gc_ms, host_ms] row per optimizer step, host_ms
+    stamped before the device is settled, as the rktorch-step event logs
+    them."""
 
     def __init__(self, out, device):
         self.out = out
@@ -140,8 +143,9 @@ class StepLog:
         self.note(optimizer=style, foreach=resolved_foreach(opt))
 
     def step(self):
+        host_done = clock_ms()
         synchronize(self.device)
-        self.steps.append([1, clock_ms(), self.gc.ms()])
+        self.steps.append([1, clock_ms(), self.gc.ms(), host_done])
 
     def write(self, wall=None):
         data = {"meta": {**meta(self.device), **self.extra},
@@ -161,15 +165,6 @@ def steps_out():
     if len(sys.argv) != 2:
         sys.exit(f"usage: {sys.argv[0]} STEPS-FILE")
     return sys.argv[1]
-
-
-def cache_dir(variable, name):
-    override = os.environ.get(variable)
-    if override:
-        return override
-    base = os.environ.get("XDG_CACHE_HOME") or os.path.join(
-        os.path.expanduser("~"), ".cache")
-    return os.path.join(base, "rktorch", name)
 
 
 def idx_payload(data):
