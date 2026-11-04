@@ -37,7 +37,9 @@ def emit_wrappers(shards: dict[str, list[Op]]) -> str:
         ";; int-arrays); loss ops follow ATen (nll_loss wants log-probabilities,",
         ";; cross_entropy_loss wants raw logits).",
         ";; An op with several Tensor returns carries #:returns N and answers",
-        ";; them as multiple values, in schema order.",
+        ";; them as multiple values, in schema order. An op that returns",
+        ";; nothing updates its mutable-tensor-list arguments and answers the",
+        ";; first.",
         "",
         '(require (only-in "foreign/define-generated.rkt"',
         "                  define-generated-op))",
@@ -72,8 +74,9 @@ def emit_manifest(shards: dict[str, list[Op]]) -> str:
         ";; (racket-name python-attr (arg kinds ...) inplace? returns).",
         ";; inplace? is #t for ops checked against torch.Tensor.<attr>_ on a",
         ";; cloned receiver; returns counts the Tensor returns, compared",
-        ";; elementwise against the Python tuple when above 1. Consumed by",
-        ";; torch/tests/generated-parity-test.rkt.",
+        ";; elementwise against the Python tuple when above 1. returns 0:",
+        ";; every mutable-tensor-list argument is compared after the call.",
+        ";; Consumed by torch/tests/generated-parity-test.rkt.",
         "(",
     ]
     for op in all_ops:

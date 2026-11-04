@@ -40,8 +40,11 @@
     [(int-array)
      (values (list #`(#,arg : (_s64vector i)) #`(#,len-arg : _int64))
              (list #`(list->s64vector #,arg) #`(length #,arg)))]
-    [(tensor-list)
+    [(tensor-list mutable-tensor-list)
      (values (list #`(#,arg : (_list i _Tensor)) #`(#,len-arg : _int64))
+             (list arg #`(length #,arg)))]
+    [(scalar-list)
+     (values (list #`(#,arg : (_list i _double)) #`(#,len-arg : _int64))
              (list arg #`(length #,arg)))]
     [(optional-tensor-list)
      (values (list #`(#,arg : (_list i _Tensor/null)) #`(#,len-arg : _int64))
