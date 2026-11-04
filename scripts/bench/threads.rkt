@@ -78,23 +78,25 @@
                      #:seconds seconds
                      #:grace [grace 30]
                      #:mix [make-mix op-mix]
-                     #:ops-per-mix [ops-per-mix ops-per-iteration])
+                     #:ops-per-mix [ops-per-mix ops-per-iteration]
+                     #:probe [probe void])
   (define go? (box #f))
   (define stop? (box #f))
   (define counts (make-vector n 0))
   (define failure (box #f))
   (define-values (custodian workers) (start-workers n go? stop? counts failure make-mix))
   (define stopped #f)
+  (define probe-start (probe))
   (define t0 (clock-ms))
   (set-box! go? #t)
-  (define-values (main-steps elapsed-s ops)
+  (define-values (main-steps elapsed-s ops probe-stop)
     (dynamic-wind
      void
      (lambda ()
        (define steps (run-main state (+ t0 (* 1000.0 seconds))))
-       (values steps
-               (/ (- (clock-ms) t0) 1000.0)
-               (for/sum ([k (in-vector counts)]) k)))
+       (define elapsed (/ (- (clock-ms) t0) 1000.0))
+       (define ops (for/sum ([k (in-vector counts)]) k))
+       (values steps elapsed ops (probe)))
      (lambda ()
        (set-box! stop? #t)
        (set! stopped (reap! custodian workers grace)))))
@@ -104,7 +106,9 @@
                 'elapsed_s elapsed-s
                 'main_steps_per_s (/ main-steps elapsed-s)
                 'started_ms t0
-                'stopped stopped)]
+                'stopped stopped
+                'probe_start probe-start
+                'probe_stop probe-stop)]
     [e (raise e)]))
 
 (define (scaling-cases #:seconds seconds

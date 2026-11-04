@@ -59,10 +59,6 @@
       [(>= (clock-ms) deadline) (values n (- (clock-ms) t0))]
       [else (thunk) (loop (add1 n))])))
 
-(define (pool-loop n make seconds)
-  (define run (scaling-run n 'idle #:seconds seconds #:mix make #:ops-per-mix 1))
-  (values (hash-ref run 'mixes) (* 1000.0 (hash-ref run 'elapsed_s))))
-
 ;; Green threads, the finalizer thread among them, run on the process's
 ;; first OS thread, whose task id is the pid; Linux's USER_HZ is 100.
 (define main-task-stat (format "/proc/self/task/~a/stat" (getpid)))
@@ -81,14 +77,25 @@
           'finalizers (finalizer-runs)
           'main-cpu (main-cpu-ms)))
 
+(define (window n make seconds)
+  (cond
+    [(zero? n)
+     (define thunk (make))
+     (define before (counters))
+     (define-values (ops elapsed-ms) (main-loop thunk seconds))
+     (values ops elapsed-ms before (counters))]
+    [else
+     (define run (scaling-run n 'idle #:seconds seconds #:mix make #:ops-per-mix 1 #:probe counters))
+     (values (hash-ref run 'mixes)
+             (* 1000.0 (hash-ref run 'elapsed_s))
+             (hash-ref run 'probe_start)
+             (hash-ref run 'probe_stop))]))
+
 (define (sample-condition c seconds #:rep rep)
   (match-define (condition op layer n make) c)
   (settle-native-memory!)
   (define load (load-average))
-  (define before (counters))
-  (define-values (ops elapsed-ms)
-    (if (zero? n) (main-loop (make) seconds) (pool-loop n make seconds)))
-  (define after (counters))
+  (define-values (ops elapsed-ms before after) (window n make seconds))
   (define (moved key)
     (define b (hash-ref before key))
     (define a (hash-ref after key))
@@ -234,6 +241,20 @@
          (check-true (< 1900 (hash-ref r 'us_per_op) 6000) (format "~a" r))
          (check-true (real? (hash-ref r 'heap_bytes_per_op)))
          (check-true (jsexpr? r) (format "~a" r))))))
+
+  (test-case "a threaded sample's counters leave out building the workers' cases"
+    (call-with-process-deadline
+     120
+     (lambda ()
+       (define (costly-make)
+         (define junk (make-bytes 50000000))
+         (define deadline (+ (clock-ms) 300))
+         (let spin () (when (< (clock-ms) deadline) (spin)))
+         (lambda () (sleep (and junk 0.002))))
+       (define r (sample-condition (condition 'spin 'raw 2 costly-make) 0.2 #:rep 0))
+       (check-true (< (hash-ref r 'heap_bytes_per_op) 100000) (format "~a" r))
+       (when (hash-ref r 'main_cpu_ms)
+         (check-true (< (hash-ref r 'main_cpu_ms) 150) (format "~a" r))))))
 
   (test-case "main's OS thread CPU time grows while main spins, not while it sleeps"
     (when (main-cpu-ms)
