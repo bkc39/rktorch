@@ -1,8 +1,7 @@
 #lang racket/base
 
 (require (only-in racket/contract/base
-                  -> ->* ->i =/c >=/c and/c any/c listof or/c
-                  unsupplied-arg?)
+                  -> ->* ->i =/c >=/c and/c any/c listof or/c)
          (only-in threading ~>)
          (only-in "../foreign/error.rkt" check-handle)
          (only-in "../foreign/ops.rkt" float-dtype/c placement)
@@ -12,7 +11,7 @@
          (only-in "../main.rkt"
                   * + @ device device/c dtype log ref shape sqrt t tensor
                   tensor? to-dtype)
-         (only-in "../private/contract.rkt" define/contract-out))
+         (only-in "../private/contract.rkt" define/contract-out supplied-or))
 
 (define maybe-length/c (or/c #f exact-positive-integer?))
 
@@ -118,10 +117,7 @@
         #:device [device (or/c #f device/c)]
         #:dtype [dtype (or/c #f float-dtype/c)])
        #:pre/name (f-min f-max sample-rate) "f-min below the effective f-max"
-       (< (if (unsupplied-arg? f-min) 0.0 f-min)
-          (if (or (unsupplied-arg? f-max) (not f-max))
-              (/ sample-rate 2.0)
-              f-max))
+       (< (supplied-or f-min 0.0) (or (supplied-or f-max) (/ sample-rate 2.0)))
        [result tensor?])
   (define hi (or f-max (/ sample-rate 2.0)))
   (define all-freqs
@@ -174,11 +170,10 @@
         #:filterbank [filterbank (or/c #f tensor?)])
        #:pre/name (samples n-fft n-mels filterbank)
        "filterbank is [n-fft/2+1, n-mels] in samples' dtype, on samples' device"
-       (or (unsupplied-arg? filterbank)
-           (not filterbank)
+       (or (not (supplied-or filterbank))
            (filterbank-fits? filterbank samples
-                             #:n-fft (if (unsupplied-arg? n-fft) default-n-fft n-fft)
-                             #:n-mels (if (unsupplied-arg? n-mels) default-n-mels n-mels)))
+                             #:n-fft (supplied-or n-fft default-n-fft)
+                             #:n-mels (supplied-or n-mels default-n-mels)))
        [result tensor?])
   (define samples-device (device samples))
   (define spec
