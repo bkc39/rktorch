@@ -36,6 +36,13 @@
     (check-= (learning-rate s) (learning-rate opt) 0.0
              "the schedule reports its optimizer's rate"))
 
+  (test-case "the learning rate is a flonum, however it is written"
+    (define opt (sgd (list (Parameter (zeros 1))) #:lr 1/10))
+    (check-eqv? (learning-rate opt) 0.1)
+    (set-learning-rate! opt 1/5)
+    (check-eqv? (learning-rate opt) 0.2)
+    (check-eqv? (learning-rate (lambda-lr opt (lambda (_t) 0))) 0.0))
+
   (test-case "step-lr halves every two steps"
     (check-rates (rates (step-lr (fresh-opt) #:step-size 2 #:gamma 0.5) 5)
                  '(0.1 0.1 0.05 0.05 0.025 0.025)))

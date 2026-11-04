@@ -1,6 +1,6 @@
 #lang racket/base
 
-(require (only-in "memory.rkt" define-binary/raw))
+(require (only-in "definers.rkt" define-binary/raw))
 
 (provide tr-matmul/raw
          tr-mm/raw
