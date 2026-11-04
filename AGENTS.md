@@ -418,13 +418,16 @@ binds methods by symbol at the use site). The registry method records a
 cycle is refused at the next field, named; the wrapper records only a
 layer without `prop:rebuilder`, and refuses its re-entry at once
 (`layer-rebuild-reentered`), naming it. A `define/generic` delegation
-between hand-written layers reaches neither: it does not join the copy
-and its cycles are not caught (#466); delegate with `(child name inner)`.
+between hand-written layers reaches neither: the delegated layer itself
+is copied apart (what its method passes to `child` still joins), and a
+cycle of them does not terminate (#466); delegate with `(child name inner)`.
 `copy-child` and `layer-rebuild-in` call `rebuilder-of` directly, so
 nothing is memoized twice. An open memo entry holds the thread building
 it (claimed under the memo's semaphore); a key open in another live
 thread raises, so a rebuild's worker thread joins the copy only one at a
-time, and a killed one releases its keys. `with-remembering` closes the callback when `layer-copy` exits by
+time, and one killed while it rebuilds releases its keys. The memo
+serves one `layer-copy` call and is not kill-safe inside its own lock: a
+thread killed in `claim`'s critical section leaves it held. `with-remembering` closes the callback when `layer-copy` exits by
 any route and clears the memo: a stashed callback, called or passed to
 `layer-rebuild`, then raises. The memo drops a value from its
 in-progress set on any exit, so a refusal a rebuild catches is not later

@@ -661,12 +661,11 @@ raises @racket[exn:fail:contract], naming the field, when a field's value
 reaches itself, through a container, a hash key or a layer. The keys of a
 weak or ephemeron hash are not copied and so close no cycle; its values
 are. A cycle through a hand-written layer that does not list the layers it
-holds is found while copying instead, and refused the same way, or naming
-the layer when the cycle runs only through hand-written
-@racket[layer-rebuild] methods that delegate through @racket[child] or
-the exported @racket[layer-rebuild]. A cycle through a
-@racket[define/generic] delegation between hand-written layers is not
-caught.
+holds is found while copying instead: through @racket[child] it is refused
+naming the field, and closed by the exported @racket[layer-rebuild]
+between hand-written layers it is refused naming the layer. A copy
+through a cycle of @racket[define/generic] delegations between
+hand-written layers does not terminate.
 
 Every layer @racket[define-layer] builds can be copied, the built-in ones
 included, and so can a @racket[procedure->Layer] layer with no
@@ -707,8 +706,8 @@ that copy: its children and its containers are the ones the rest of the
 copy holds, @racket[m] included, whether @racket[m] is a
 @racket[define-layer] layer or a hand-written one. A hand-written
 @racket[m] reached through a @racket[define/generic] of
-@racket[layer-rebuild] does not join the copy and is copied apart;
-delegate with @racket[(child name inner)] instead. @racket[layer-copy]'s
+@racket[layer-rebuild] is itself copied apart from the rest of the copy,
+though what its method passes to @racket[child] joins it; delegate with @racket[(child name inner)] instead. @racket[layer-copy]'s
 @racket[child] works only until @racket[layer-copy] returns or raises;
 called after, or passed to @racket[layer-rebuild] after, it raises
 @racket[exn:fail:contract]. It may be used from a thread a rebuild starts,

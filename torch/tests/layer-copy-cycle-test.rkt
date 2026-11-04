@@ -364,6 +364,17 @@
     (check-exn #rx"^layer-copy: a hand-written layer-rebuild reaches the layer itself"
                (lambda () (layer-copy b1))))
 
+  (struct cb ([other #:mutable])
+    #:methods gen:layer
+    [(define (layer-forward self . _inputs) (cb-other self))
+     (define (layer-rebuild self child _tensor)
+       (cb (child "x" (cb-other self))))])
+
+  (memory-bounded-test "hand-written layers delegating through child are refused naming the field"
+    (define c1 (cb #f))
+    (set-cb-other! c1 (cb c1))
+    (check-refused "x" c1))
+
   (bounded-test "a weak table stays keyed by the original, not the field's copy"
     (define k (box 1))
     (match-define (list k2 t2) (copied-field (twin k (make-weak-hasheq (list (cons k 'v))))))
