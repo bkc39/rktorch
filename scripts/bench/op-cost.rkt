@@ -73,10 +73,13 @@
   (unless (eqv? aten 1)
     (raise-user-error 'op-cost "needs one ATen intra-op thread, got ~a: set OMP_NUM_THREADS=1"
                       aten))
+  (define-values (jsonl md) (out-paths dir))
+  (when (file-exists? jsonl)
+    (raise-user-error 'op-cost "~a exists; one records file holds one run (set BASELINE_DATE anew)"
+                      jsonl))
   (when (memq 'pytorch chosen) (require-pytorch 'op-cost))
   (make-directory* dir)
-  (define-values (jsonl md) (out-paths dir))
-  (call-with-output-file jsonl #:exists 'append
+  (call-with-output-file jsonl #:exists 'error
     (lambda (out)
       (define (emit r) (write-record r out))
       (emit (hasheq 'kind "meta"
@@ -175,7 +178,7 @@
                                                             #:samples samples))]))
 
 (module+ test
-  (require (only-in racket/file delete-directory/files make-temporary-directory)
+  (require (only-in racket/file delete-directory/files file->string make-temporary-directory)
            (only-in racket/port open-output-nowhere)
            rackunit)
 
@@ -193,6 +196,18 @@
     (check-regexp-match #rx"needs one ATen intra-op thread, got 4"
                         (refusal (build-path dir "out") #:aten-threads 4))
     (check-false (directory-exists? (build-path dir "out")))
+    (delete-directory/files dir))
+
+  (test-case "a run refuses a records file an earlier run wrote, and leaves it as it was"
+    (define dir (make-temporary-directory))
+    (define earlier "{\"kind\":\"meta\"}\n")
+    (parameterize ([current-environment-variables
+                    (environment-variables-copy (current-environment-variables))])
+      (putenv "BASELINE_DATE" "2026-11-04")
+      (define-values (jsonl _md) (out-paths dir))
+      (call-with-output-file jsonl (lambda (out) (write-string earlier out)))
+      (check-regexp-match #rx"op-cost-2026-11-04.jsonl exists" (refusal dir))
+      (check-equal? (file->string jsonl) earlier))
     (delete-directory/files dir))
 
   (test-case "results go outside the repository, to BASELINE_DIR when it is set"

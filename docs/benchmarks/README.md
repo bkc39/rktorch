@@ -459,8 +459,9 @@ racket scripts/bench/op-cost.rkt --summarize op-cost-<stamp>.jsonl
 
 It writes `op-cost-<stamp>.jsonl` and `op-cost-<stamp>.md` to `--out-dir`
 (default `BASELINE_DIR`, else `~/.local/share/rktorch/bench`), refuses a
-directory inside the repository, and refuses more than one ATen intra-op
-thread. `taskset` is optional; the meta row records the affinity. Pin
+directory inside the repository, a records file that already exists (one
+file is one run; a reused `BASELINE_DATE` needs a new value), and more than
+one ATen intra-op thread. `taskset` is optional; the meta row records the affinity. Pin
 n+1 CPUs for n threads: main runs the finalizers beside the workers.
 
 - **Ops:** scalar add (`(+ (zeros 1) 1.0)`), 8×8 add, `zeros 8 8`,
