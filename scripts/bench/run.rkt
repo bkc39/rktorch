@@ -9,7 +9,7 @@
          (only-in "contracts.rkt" contract-workloads getter-cases pipeline-case)
          (only-in "crossings.rkt" crossing-cases)
          (only-in "e2e-suite.rkt" run-e2e)
-         (only-in "e2e.rkt" examples find-examples)
+         (only-in "e2e-examples.rkt" examples find-examples)
          (only-in "harness.rkt" format-result host-meta measure result->record result-name)
          (only-in "l0.rkt" l0-suites run-l0-suite)
          (only-in "layers.rkt" layer-cases)
@@ -53,7 +53,7 @@
                     #:rounds [rounds #f]
                     #:warmup [warmup #f]
                     #:scale [scale 1]
-                    #:device [device 'cpu]
+                    #:device [device #f]
                     #:full? [full? #f]
                     #:only [only #f]
                     #:variants [variants '((#f))]
@@ -64,6 +64,7 @@
                     #:out [out (current-output-port)]
                     #:log [log (current-error-port)])
   (check-suites suites)
+  (define on-device (or device 'cpu))
   (define libtorch (torch-version))
   (define emit (record-writer run-id out))
   (define (n reps) (max 1 (inexact->exact (round (* reps scale)))))
@@ -89,8 +90,8 @@
       [(crossings) (measure-group 'crossings (crossing-cases #:reps (n 200000)))]
       [(layers) (measure-group 'layers (layer-cases #:reps (n 20000) #:drain (n 2000)))]
       [(ops)
-       (for ([o (in-list (op-cases #:device device #:scale scale))])
-         (measure-group 'ops (cdr o) #:case-name (car o) #:on-device device))]
+       (for ([o (in-list (op-cases #:device on-device #:scale scale))])
+         (measure-group 'ops (cdr o) #:case-name (car o) #:on-device on-device))]
       [(contracts)
        (for ([w (in-list (contract-workloads #:scale scale))])
          (measure-group 'contracts (cdr w) #:case-name (car w)))
@@ -99,13 +100,13 @@
       [(pytorch-ops threads pytorch-threads calls host-gpu)
        (wait-for-load max-load log)
        (fprintf log "~a\n" suite)
-       (run-l0-suite suite #:emit emit #:log log #:device device #:scale scale
+       (run-l0-suite suite #:emit emit #:log log #:device on-device #:scale scale
                      #:rounds rounds #:warmup warmup #:libtorch libtorch)]
       [(e2e)
        (run-e2e (if only (find-examples only) examples)
                 #:rounds (or rounds 1) #:full? full? #:variants variants #:cache cache
                 #:max-load max-load #:time-limit time-limit #:libtorch libtorch #:run-id run-id
-                #:out out #:log log)])))
+                #:device device #:out out #:log log)])))
 
 (define (parse-arguments argv)
   (define options (make-hasheq))
@@ -131,7 +132,8 @@
                     (option! 'scale
                              (flag-value "--scale" string->number finite-positive-real?
                                          "a finite positive number" x))]
-       [("--device") d "Device for ops, pytorch-ops, calls and host-gpu: cpu, cuda or mps"
+       [("--device") d ("Device for ops, pytorch-ops, calls and host-gpu: cpu, cuda or mps;"
+                        "for e2e, the device every child must run on")
                      (option! 'device
                               (flag-value "--device" string->symbol ops-device? "cpu, cuda or mps"
                                           d))]
@@ -172,7 +174,7 @@
     (run-suites suites
                 #:rounds (option 'rounds)
                 #:warmup (option 'warmup #f) #:scale (option 'scale 1)
-                #:device (option 'device 'cpu) #:full? (option 'full?) #:only (option 'only)
+                #:device (option 'device) #:full? (option 'full?) #:only (option 'only)
                 #:variants (option 'variants '((#f)))
                 #:cache (option 'cache) #:max-load (option 'max-load)
                 #:time-limit (option 'time-limit) #:out out))
