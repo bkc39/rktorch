@@ -7,11 +7,10 @@
          (only-in racket/future processor-count)
          (only-in racket/list drop filter-map remove-duplicates take)
          (only-in racket/match match match-define)
-         (only-in racket/port open-output-nowhere port->string with-output-to-string)
          (only-in racket/string string-prefix? string-split string-trim)
-         (only-in racket/system process*/ports)
          (only-in syntax/parse/define define-syntax-parse-rule)
-         (only-in threading ~>))
+         (only-in threading ~>)
+         (only-in "system-tools.rkt" command-output))
 
 (provide bench-case
          bench-case?
@@ -155,19 +154,6 @@
                 #:when (real? x))
       (exact->inexact x)))
   (and (>= (length numbers) 3) (take numbers 3)))
-
-(define (command-output program . args)
-  (define path (find-executable-path program))
-  (cond
-    [(not path) #f]
-    [else
-     (match-define (list out in _pid _err control)
-       (apply process*/ports #f #f (open-output-nowhere) path args))
-     (close-output-port in)
-     (define text (port->string out))
-     (close-input-port out)
-     (control 'wait)
-     (and (zero? (control 'exit-code)) (string-trim text))]))
 
 (define (read-first-line path)
   (and (file-exists? path)
@@ -331,6 +317,7 @@
   (require (only-in json string->jsexpr)
            (only-in racket/file make-temporary-directory make-temporary-file)
            (only-in racket/list make-list)
+           (only-in racket/port with-output-to-string)
            rackunit)
 
   (test-case "quantiles interpolate between order statistics"

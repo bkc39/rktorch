@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "torchrkt/c_api.h"
+#include "torchrkt/c_api/generated.h"
 
 namespace {
 
@@ -173,6 +174,128 @@ TEST(TorchrktAutograd, ResetGradRejectsNullArguments) {
   EXPECT_EQ(tr_tensors_reset_grad(with_null.data(), -1), 1);
   EXPECT_EQ(std::string(tr_last_error()),
             "tr_tensors_reset_grad: negative length");
+}
+
+TEST(TorchrktAutograd, TensorsGradMatchesTheOneAtATimeQueries) {
+  Handle x = make({1.0F, 2.0F}, {2});
+  Handle w = make({3.0F}, {1});
+  Handle idle = make({5.0F}, {1});
+  for (tr_tensor* t : {x.t, w.t, idle.t}) {
+    ASSERT_EQ(tr_tensor_requires_grad_(t, 1), 0) << tr_last_error();
+  }
+  {
+    const Handle sq(tr_mul(x.t, x.t));
+    const Handle wx(tr_mul(sq.t, w.t));
+    Handle y(tr_sum(wx.t));
+    ASSERT_EQ(tr_tensor_backward(y.t), 0) << tr_last_error();
+  }
+  std::vector<tr_tensor*> ts{x.t, idle.t, w.t};
+  std::vector<tr_tensor*> grads(3, nullptr);
+  std::vector<int64_t> nbytes(3, -1);
+  std::vector<int> types(3, -1);
+  std::vector<int64_t> indices(3, -1);
+  ASSERT_EQ(tr_tensors_grad(ts.data(), 3, grads.data(), nbytes.data(),
+                            types.data(), indices.data()),
+            0)
+      << tr_last_error();
+  EXPECT_EQ(grads[1], nullptr);
+  EXPECT_EQ(nbytes[1], 0) << "a missing gradient's outputs are defined";
+  EXPECT_EQ(types[1], static_cast<int>(TR_DEVICE_CPU));
+  EXPECT_EQ(indices[1], 0);
+  for (size_t i : {size_t{0}, size_t{2}}) {
+    ASSERT_NE(grads[i], nullptr);
+    const Handle one(tr_tensor_grad(ts[i]));
+    EXPECT_EQ(data_of(grads[i]), data_of(one.t));
+    int64_t want_nbytes = -1;
+    ASSERT_EQ(tr_tensor_nbytes(one.t, &want_nbytes), 0) << tr_last_error();
+    EXPECT_EQ(nbytes[i], want_nbytes);
+    tr_device_type type = TR_DEVICE_KEEP;
+    int64_t index = -1;
+    ASSERT_EQ(tr_tensor_device(one.t, &type, &index), 0) << tr_last_error();
+    EXPECT_EQ(types[i], static_cast<int>(type));
+    EXPECT_EQ(indices[i], index);
+  }
+  ASSERT_EQ(tr_tensor_zero_(grads[0]), 0) << tr_last_error();
+  const Handle live(tr_tensor_grad(x.t));
+  EXPECT_EQ(data_of(live.t), (std::vector<float>{0.0F, 0.0F}))
+      << "a fetched handle aliases the live gradient";
+  tr_tensors_free(grads.data(), 3);
+  tr_tensors_free(nullptr, 2);
+}
+
+TEST(TorchrktAutograd, TensorsGradRefusesANullListWithEveryOutputNull) {
+  Handle x = make({1.0F}, {1});
+  ASSERT_EQ(tr_tensor_requires_grad_(x.t, 1), 0) << tr_last_error();
+  const Handle y(tr_sum(x.t));
+  ASSERT_EQ(tr_tensor_backward(y.t), 0) << tr_last_error();
+  tr_tensor* stale = x.t;
+  std::vector<tr_tensor*> grads{stale, stale};
+  std::vector<int64_t> nbytes(2);
+  std::vector<int> types(2);
+  std::vector<int64_t> indices(2);
+  const std::string null_argument = "tr_tensors_grad: null argument";
+
+  EXPECT_EQ(tr_tensors_grad(nullptr, 2, grads.data(), nbytes.data(),
+                            types.data(), indices.data()),
+            1);
+  EXPECT_EQ(tr_last_error(), null_argument);
+  EXPECT_EQ(grads, (std::vector<tr_tensor*>{nullptr, nullptr}));
+
+  grads = {stale, stale};
+  std::vector<tr_tensor*> with_null{x.t, nullptr};
+  EXPECT_EQ(tr_tensors_grad(with_null.data(), 2, grads.data(), nbytes.data(),
+                            types.data(), indices.data()),
+            1);
+  EXPECT_EQ(grads, (std::vector<tr_tensor*>{nullptr, nullptr}));
+
+  EXPECT_EQ(tr_tensors_grad(nullptr, 0, nullptr, nullptr, nullptr, nullptr), 0)
+      << tr_last_error();
+}
+
+TEST(TorchrktAutograd, TensorsGradFetchesASparseGradientWithoutItsBytes) {
+  Handle weight = make({1.0F, 2.0F, 3.0F, 4.0F, 5.0F, 6.0F}, {3, 2});
+  ASSERT_EQ(tr_tensor_requires_grad_(weight.t, 1), 0) << tr_last_error();
+  const std::vector<int64_t> rows{0, 2};
+  const std::vector<int64_t> dims{2};
+  const Handle indices(
+      tr_from_data_i64(rows.data(), rows.size(), dims.data(), 1));
+  {
+    const Handle looked_up(
+        tr_gen_embedding(weight.t, indices.t, -1, false, true));
+    const Handle y(tr_sum(looked_up.t));
+    ASSERT_EQ(tr_tensor_backward(y.t), 0) << tr_last_error();
+  }
+  std::vector<tr_tensor*> ts{weight.t};
+  std::vector<tr_tensor*> grads{nullptr};
+  std::vector<int64_t> nbytes{0};
+  std::vector<int> types{-1};
+  std::vector<int64_t> indices_out{-1};
+
+  ASSERT_EQ(tr_tensors_grad(ts.data(), 1, grads.data(), nbytes.data(),
+                            types.data(), indices_out.data()),
+            0)
+      << tr_last_error();
+  EXPECT_NE(grads[0], nullptr);
+  EXPECT_EQ(nbytes[0], -1);
+  EXPECT_EQ(types[0], static_cast<int>(TR_DEVICE_CPU));
+  tr_tensors_free(grads.data(), 1);
+}
+
+TEST(TorchrktAutograd, TensorsGradRefusesANegativeLengthWritingNothing) {
+  const Handle x = make({1.0F}, {1});
+  std::vector<tr_tensor*> grads{x.t};
+  std::vector<int64_t> nbytes{7};
+  std::vector<int> types{7};
+  std::vector<int64_t> indices{7};
+
+  EXPECT_EQ(tr_tensors_grad(nullptr, -1, grads.data(), nbytes.data(),
+                            types.data(), indices.data()),
+            1);
+  EXPECT_EQ(std::string(tr_last_error()), "tr_tensors_grad: negative length");
+  EXPECT_EQ(grads, (std::vector<tr_tensor*>{x.t}));
+  EXPECT_EQ(nbytes, (std::vector<int64_t>{7}));
+  EXPECT_EQ(types, (std::vector<int>{7}));
+  EXPECT_EQ(indices, (std::vector<int64_t>{7}));
 }
 
 }  // namespace

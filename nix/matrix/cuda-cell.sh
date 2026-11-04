@@ -37,6 +37,8 @@ export HOME="$work/home"
 mkdir -p "$HOME"
 export PLTUSERHOME="$work/plt"
 
+export OMP_NUM_THREADS=${OMP_NUM_THREADS:-1}
+
 echo "matrix-stage: gtests"
 step "$CELL_SHIM/libexec/torchrkt/torchrkt_tests"
 

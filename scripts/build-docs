@@ -5,6 +5,7 @@
 #
 #   nix develop .#ci --command scripts/build-docs
 set -euo pipefail
+export OMP_NUM_THREADS=${OMP_NUM_THREADS:-1}
 
 cd "$(git rev-parse --show-toplevel)"
 

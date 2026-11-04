@@ -26,6 +26,17 @@ reference; the buffer is released when the last reference goes. On
 CUDA and MPS the caching allocators usually just return the block to
 their pools.
 
+## Generated ops in library code
+
+Library modules call an op through its `torch/foreign.rkt` name (`mul!`,
+`sub!`, `copy!`, `addcmul!`, `addcdiv!`) wherever one exists, and
+through `torch/generated.rkt` under a `g:` prefix only for the ATen
+overloads `torch/foreign.rkt` does not bind: `add-tensor` and `add-tensor!`
+with an `alpha`, `div-scalar!`, `lerp-scalar!` (`lerp!` takes a tensor
+weight), and the `_foreach_*` and `_fused_*` kernels. The prefix keeps
+a generated name from shadowing the public one, and shows at the call
+site that the binding is uncontracted.
+
 ## Tensor lifetime
 
 Every tensor-returning binding carries the `tensor-allocator` wrap
@@ -66,6 +77,11 @@ holds. Killed at `free-unaccounted`, after the unaccounting, it leaves
 a live, usable tensor that is off the ledger, its phantom bytes zeroed,
 until the finalizer releases it. The `state` setter is not exported by
 name, though the struct info still carries it.
+
+The batched free (`tensors-free!`, `free-handles!`, one `tr_tensors_free`
+crossing) takes and claims each handle the same way, skipping a wrapper
+or lifetime it does not win instead of raising, and releases only the
+handles it claimed, in one region that flips every tag and lifetime.
 
 The finalizer does not read the wrapper's state, and cannot: it is
 registered on the handle inside the raw call's region, before any wrapper
@@ -435,7 +451,10 @@ the CPU, whose allocator keeps no count.
   and `clip-grad-norm!` release each gradient
   handle as its block ends (`with-gradient`, `with-gradients`), so after
   a step only the parameter holds a gradient and a reset frees it before
-  the next backward writes another.
+  the next backward writes another. `with-gradients` fetches every
+  gradient in one native call that also reports each one's size and
+  device, so its handles are accounted, and adopted, from those figures
+  without reading them again.
   `reclaim-native-memory!` refreshes it too, once the caches are
   emptied, so memory a dropped graph held stops being charged at once.
   An allocator that cannot answer at a refresh leaves its device's charge
@@ -535,6 +554,8 @@ gets the point's name and a subject (a handle, a device, a thread).
 | `free-unaccounted` | an explicit free has unaccounted, before the native release | handle |
 | `handle-released` | inside the release region, between the native release and the tag flip | handle |
 | `free-released` | an explicit free's native release has returned | handle |
+| `frees-released/batched` | a batched free's native release has returned | the handles it released |
+| `ledger-entry-added/batched` | a batched gradient fetch has charged one gradient | handle |
 | `finalizer-releasing` | a finalizer's release, before it unaccounts | handle |
 | `live-returned` | an unaccounting of an adopted gradient holds the ledger, its live bytes given back, before its adoption | handle |
 | `adoption-returning` | an unaccounting holds the ledger, before it gives a gradient's adoption back | handle |
@@ -577,9 +598,10 @@ gets the point's name and a subject (a handle, a device, a thread).
   preemption, run it on fewer cores than threads:
   `taskset -c 0,1 raco test torch/tests/race-stress-test.rkt`. A last
   phase runs 8 churners while the main thread loops plain foreign calls,
-  yielding every 5 ms. On a
-  loaded host set `OMP_NUM_THREADS=1`: libtorch's OpenMP teams spin
-  against the load and slow each op tenfold.
+  yielding every 5 ms. On a loaded host set `OMP_NUM_THREADS=1`, as the
+  gates do ([building](building.md#development-shells)): libtorch's OpenMP
+  teams spin against the load and slow each op tenfold. One phase runs in
+  a subprocess at libtorch's default thread count.
 - `cpp/tests/torchrkt/threads_test.cpp`: `std::thread`s through the C API.
   Under ThreadSanitizer the shim is instrumented and libtorch is not.
   The threads tests are clean; the rest of the suite reports races only

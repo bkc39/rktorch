@@ -461,7 +461,8 @@ a change to a build target or a shell belongs in both. The ordered local loop
 for a change, and the gates it has to pass before it is done, are the
 `cpp-dev` and `racket-dev` skills under `.claude/skills/`; `.racket-dev.rktd`
 declares the Racket gates for the racket-dev plugin (`docs/building.md`,
-"Development shells").
+"Development shells"). The gates run libtorch on one intra-op thread
+([`docs/building.md`](docs/building.md#development-shells)).
 
 ```bash
 nix build              # builds cpp, installs the pkg, runs raco test + examples
@@ -915,8 +916,13 @@ Conventions:
   `ScalarType?` a -1 sentinel, and `Generator?` a `tr_generator` handle
   (NULL for the global stream; an op that draws still needs the allowlist
   `no-retry` flag); `Tensor?[]` (#365, `index.Tensor`) is the TensorList
-  encoding whose NULL entries are `None`. In-place ops (`add_`) emit a mutable receiver
-  plus an integer status. An op with several Tensor returns (`topk`,
+  encoding whose NULL entries are `None`; `Scalar[]` (#305) is a `double`
+  array plus a length. In-place ops (`add_`) emit a mutable receiver
+  plus an integer status. An op with a `()` return whose `Tensor(a!)[]`
+  arguments it updates (#305, `_foreach_*`, `_fused_*`) is a
+  `mutable-tensor-list` op with `returns 0`: an integer status, a call to
+  the `at::` free function, and in Racket the `#:inplace` clause, answering
+  its first list. An op with several Tensor returns (`topk`,
   `sort`, #154) emits an integer status plus trailing out pointers in C
   and a `#:returns N` clause in Racket, where it answers multiple values
   in schema order; any non-Tensor return still skips. A private ATen name

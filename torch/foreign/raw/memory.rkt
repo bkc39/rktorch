@@ -1,12 +1,9 @@
 #lang racket/base
 
-(require (for-syntax racket/base
-                     ;; whole-module require on purpose
-                     syntax/parse/pre)
-         (only-in ffi/unsafe
-                  _double _enum _fun _int _int64 _ptr _void register-finalizer
+(require (only-in ffi/unsafe
+                  _enum _fun _int _int64 _list _ptr _void register-finalizer
                   set-cpointer-tag!)
-         (only-in racket/list remove-duplicates)
+         (only-in racket/list filter-map remove-duplicates)
          (only-in racket/match match-define match-lambda)
          (only-in "../device-type.rkt" device device-index device-type)
          (only-in "accounts.rkt" with-ledger)
@@ -36,15 +33,19 @@
                   unaccounted-bytes-by-device)
          (only-in "race-points.rkt" race-point)
          (only-in "regions.rkt" with-cleanup with-uninterruptible)
-         (only-in "syntax.rkt" _Tensor _Tensor/null define-torch))
+         (only-in "syntax.rkt" _Tensor define-torch))
 
 (provide adopted-bytes
          tr-tensor-free/checked
+         free-handles!
          collect-and-drain!
          swallow-and-count-failure
          finalizer-failures
          finalizer-diagnostics
          forget-gradient-adoptions!
+         adopt-gradient!
+         registered
+         register-tensors!
          registering
          registering/release
          tensor-allocator
@@ -64,14 +65,15 @@
          native-memory-use/fold
          native-memory-unaccounted
          _tr-device-type ;; noqa
-         tr-tensor-device/raw
-         define-unary/raw
-         define-binary/raw
-         define-scalar/raw)
+         tr-tensor-device/raw)
 
 (define-torch tr-tensor-free/unwrapped
   (_fun _Tensor -> _void)
   #:c-id tr_tensor_free)
+
+(define-torch tr-tensors-free/unwrapped
+  (_fun (hs : (_list i _Tensor)) (_int64 = (length hs)) -> _void)
+  #:c-id tr_tensors_free)
 
 (struct lifetime (state charge))
 
@@ -85,14 +87,25 @@
 
 ;; The tag flips even when the release raises: an attempted free consumes
 ;; the finalizer backstop, so a live-looking tag would invite use-after-free.
+(define (mark-freed! h lt)
+  (set-cpointer-tag! h 'Tensor-freed)
+  (when lt (set-box! (lifetime-state lt) 'freed)))
+
 (define (release! h lt)
   (with-uninterruptible
     (with-cleanup
       (tr-tensor-free/unwrapped h)
       (race-point handle-released h)
       #:finally
-      (set-cpointer-tag! h 'Tensor-freed)
-      (when lt (set-box! (lifetime-state lt) 'freed)))))
+      (mark-freed! h lt))))
+
+(define (release-all! hs lts)
+  (with-uninterruptible
+    (with-cleanup
+      (tr-tensors-free/unwrapped hs)
+      (for-each (lambda (h) (race-point handle-released h)) hs)
+      #:finally
+      (for-each mark-freed! hs lts))))
 
 ;; a free killed before its release region leaves its dead thread as claimant
 (define (claimable? held)
@@ -109,6 +122,26 @@
       (race-point free-unaccounted h)
       (release! h lt)
       (race-point free-released h))))
+
+;; Each handle is claimed as `tr-tensor-free/checked` claims it; only the
+;; handles this call claimed reach the one native release.
+(define (free-handles! hs)
+  (parameterize-break #f
+    (define claimed
+      (filter-map (lambda (h)
+                    (define lt (hash-ref lifetimes h #f))
+                    (and (or (not lt) (claim-lifetime! lt (current-thread)))
+                         (cons h lt)))
+                  hs))
+    (define held (map car claimed))
+    (define lts (map cdr claimed))
+    (for ([h (in-list held)] [lt (in-list lts)])
+      (when lt (unaccount-lifetime! h lt))
+      (race-point free-unaccounted h))
+    (unless (null? held)
+      (release-all! held lts))
+    (for-each (lambda (h) (race-point free-released h)) held)
+    (race-point frees-released/batched held)))
 
 (struct failed (count messages))
 
@@ -194,10 +227,11 @@
 
 (define registering (registered register-tensor!))
 
-(define registering/outputs
-  (registered (lambda (handles)
-                (for ([h (in-list handles)] #:when h)
-                  (register-tensor! h)))))
+(define (register-tensors! handles)
+  (for ([h (in-list handles)] #:when h)
+    (register-tensor! h)))
+
+(define registering/outputs (registered register-tensors!))
 
 (define (registering/release release)
   (define finalize (swallow-and-count-failure release))
@@ -440,30 +474,6 @@
 
 (define (tensor-allocator/outputs/no-retry raw-fn)
   (accounted-outputs (registering/outputs raw-fn)))
-
-(define-syntax (define-unary/raw stx)
-  (syntax-parse stx
-    [(_ name:id c-id:id)
-     #'(define-torch name
-         (_fun (t : _Tensor) -> _Tensor/null)
-         #:c-id c-id
-         #:wrap tensor-allocator)]))
-
-(define-syntax (define-binary/raw stx)
-  (syntax-parse stx
-    [(_ name:id c-id:id)
-     #'(define-torch name
-         (_fun (a : _Tensor) (b : _Tensor) -> _Tensor/null)
-         #:c-id c-id
-         #:wrap tensor-allocator)]))
-
-(define-syntax (define-scalar/raw stx)
-  (syntax-parse stx
-    [(_ name:id c-id:id)
-     #'(define-torch name
-         (_fun (a : _Tensor) (b : _double) -> _Tensor/null)
-         #:c-id c-id
-         #:wrap tensor-allocator)]))
 
 (define mem-trace-handle
   (and (getenv "RKTORCH_MEM_TRACE")
