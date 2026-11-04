@@ -2,7 +2,9 @@
 
 (require (for-syntax racket/base)
          (only-in compiler/find-exe find-exe)
+         (only-in racket/match match match-define)
          (only-in racket/runtime-path #%datum define-runtime-path)
+         (only-in threading ~>)
          (only-in torch shape sum)
          (only-in torch/data/loader dataloader)
          (only-in torch/foreign/raw/collector finalizer-runs)
@@ -17,26 +19,25 @@
 
 (define-runtime-path self "op-cost.rkt")
 
+;; the sum reads the batch, as the twin's batch[0].sum() does
 (define (epoch! loader)
   (for/sum ([vs (in-values-sequence loader)])
-    (sum (car vs))
-    (car (shape (car vs)))))
+    (match-define (cons x _) vs)
+    (void (sum x))
+    (~> x shape car)))
 
 (define (peak-rss-kb)
   (with-handlers ([exn:fail? (lambda (_e) #f)])
     (call-with-input-file "/proc/self/status"
       (lambda (in)
         (for/or ([line (in-lines in)])
-          (define m (regexp-match #rx"^VmHWM:[ \t]*([0-9]+)" line))
-          (and m (string->number (cadr m))))))))
+          (match (regexp-match #rx"^VmHWM:[ \t]*([0-9]+)" line)
+            [(list _ kb) (string->number kb)]
+            [#f #f]))))))
 
 (define (run-cell pipeline-name workers #:warmup warmup #:epochs epochs #:samples samples)
-  (define-values (ds batch-size _n)
-    (pipeline pipeline-name #:samples samples))
-  (define loader
-    (if (zero? workers)
-        (dataloader ds #:batch-size batch-size #:shuffle? #t)
-        (dataloader ds #:batch-size batch-size #:shuffle? #t #:workers workers)))
+  (define-values (ds batch-size) (pipeline pipeline-name #:samples samples))
+  (define loader (dataloader ds #:batch-size batch-size #:shuffle? #t #:workers workers))
   (for ([_ (in-range warmup)]) (epoch! loader))
   (define gc0 (current-gc-milliseconds))
   (define runs0 (finalizer-runs))
@@ -61,13 +62,13 @@
 
 (define (side-record side pipeline workers settings log time-limit)
   (define args (append (list "--cell" pipeline workers) settings))
-  (define records
+  (match-define (list record)
     (parameterize ([current-environment-variables (single-threaded-environment)])
-      (case side
-        [(pytorch) (twin-records "pipelines.py" args #:log log #:time-limit time-limit)]
-        [else (child-records (find-exe) (cons self args)
-                             #:log log #:time-limit time-limit #:who 'op-cost-cell)])))
-  (car records))
+      (match side
+        ['pytorch (twin-records "pipelines.py" args #:log log #:time-limit time-limit)]
+        ['rktorch (child-records (find-exe) (cons self args)
+                                 #:log log #:time-limit time-limit #:who 'op-cost-cell)])))
+  record)
 
 (define (pipeline-records pipelines workers-list reps
                           #:settings settings #:emit emit #:log log

@@ -2,6 +2,7 @@
 
 (require (for-syntax racket/base)
          (only-in racket/file file->string)
+         (only-in racket/match match match-define match-lambda)
          (only-in racket/runtime-path define-runtime-path)
          (only-in torch
                   + * / < narrow rand select shape tensor to-dtype unsqueeze where ~>)
@@ -69,7 +70,8 @@
   #:length n
   #:ref (i)
   (define k (modulo i (vector-length files)))
-  (values (~> (vector-ref files k) car (read-image #:mode 'rgb) jpeg-augment)
+  (match-define (cons path _label) (vector-ref files k))
+  (values (~> path (read-image #:mode 'rgb) jpeg-augment)
           (select labels 0 k)))
 
 (define-dataset cifar-cycle (images labels n)
@@ -84,19 +86,18 @@
   (text-window ids (~> (shape ids) car (- window) random) mask-id))
 
 (define (jpeg-labels files)
-  (tensor (for/list ([f (in-vector files)]) (cdr f))))
+  (tensor (map (match-lambda [(cons _path label) label]) (vector->list files))))
 
+;; a pipeline's dataset of `samples` items, or its own count, and its batch size
 (define (pipeline name #:samples [samples #f])
-  (case name
-    [(jpeg)
+  (define (n default) (or samples default))
+  (match name
+    ['jpeg
      (define files (jpeg-files))
-     (define n (or samples 2048))
-     (values (jpeg-cycle files (jpeg-labels files) n) 32 n)]
-    [(cifar)
+     (values (jpeg-cycle files (jpeg-labels files) (n 2048)) 32)]
+    ['cifar
      (define-values (images labels) (cifar-sources))
-     (define n (or samples 8192))
-     (values (cifar-cycle images labels n) 128 n)]
-    [(text)
+     (values (cifar-cycle images labels (n 8192)) 128)]
+    ['text
      (define-values (ids mask-id) (text-sources))
-     (define n (or samples 8192))
-     (values (masked-text ids mask-id n) 64 n)]))
+     (values (masked-text ids mask-id (n 8192)) 64)]))

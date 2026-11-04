@@ -3,7 +3,7 @@
 (module+ test
   (require (only-in racket/file make-directory* make-temporary-directory)
            (only-in racket/match match-define)
-           (only-in racket/port with-output-to-string)
+           (only-in racket/port open-output-nowhere with-output-to-string)
            (only-in racket/runtime-path #%datum define-runtime-path)
            (only-in racket/string string-replace string-trim)
            (only-in racket/system system*)
@@ -12,6 +12,7 @@
 
   (define-runtime-path writer "cifar-folder.rkt")
   (define-runtime-path resolver "python/cache_dirs.py")
+  (define-runtime-path twins "python")
 
   (define host-platform (if (eq? (system-type 'os) 'macosx) "darwin" "linux"))
 
@@ -32,7 +33,8 @@
       ("darwin" (("PLTUSERHOME" . "@/pu")) ("pu") "@/pu/Library/Caches/Racket/rktorch/cifar10-png")
       ("darwin" (("RKTORCH_CIFAR10_PNG_DIR" . "@/png")) () "@/png")))
 
-  (define cleared '(#"HOME" #"PLTUSERHOME" #"XDG_CACHE_HOME" #"RKTORCH_CIFAR10_PNG_DIR"))
+  (define cleared
+    '(#"HOME" #"PLTUSERHOME" #"XDG_CACHE_HOME" #"RKTORCH_CIFAR10_PNG_DIR" #"RKTORCH_HYMENOPTERA_DIR"))
 
   (define (environment home settings)
     (define env (environment-variables-copy (current-environment-variables)))
@@ -58,7 +60,43 @@
     (output env python "-P" (path->string resolver) "RKTORCH_CIFAR10_PNG_DIR" "cifar10-png"
             platform))
 
+  (define (racket-hymenoptera env)
+    (output env (find-executable-path (find-system-path 'exec-file)) "-l" "racket/base" "-e"
+            (format "~s" '(begin (require (only-in torch/vision/hymenoptera hymenoptera-root))
+                                 (display (build-path (hymenoptera-root) "train"))))))
+
+  (define (python-hymenoptera python env)
+    (output env python "-P" "-c"
+            (format "import sys; sys.path.insert(0, ~s); import pipelines; print(pipelines.HYMENOPTERA)"
+                    (path->string twins))))
+
   (define python (find-executable-path "python3"))
+
+  (define (twin-imports? interpreter)
+    (and interpreter
+         (parameterize ([current-output-port (open-output-nowhere)]
+                        [current-error-port (open-output-nowhere)])
+           (system* interpreter "-c" "import numpy, torch, torchvision"))))
+
+  ;; (environment, the cache directory below "@" that both read)
+  (define hymenoptera-cases
+    '((() ".cache/racket/rktorch/hymenoptera")
+      ((("RKTORCH_HYMENOPTERA_DIR" . "@/hy")) "hy")))
+
+  (cond
+    [(not (twin-imports? python))
+     (displayln "[cache-dirs-test] jpeg twin skipped: no python3 with torch and torchvision")]
+    [else
+     (for ([c (in-list hymenoptera-cases)])
+       (match-define (list settings dir) c)
+       (test-case (format "the jpeg twin reads the hymenoptera tree where Racket keeps it: ~s" c)
+         (with-temporary-path (root (make-temporary-directory "cache-dirs-~a"))
+           (define home (path->string (build-path root "home")))
+           (make-directory* (build-path home dir "hymenoptera_data"))
+           (define env (environment home settings))
+           (define racket-side (racket-hymenoptera env))
+           (check-equal? racket-side (path->string (build-path home dir "hymenoptera_data" "train")))
+           (check-equal? (python-hymenoptera python env) racket-side))))])
 
   (cond
     [(not python) (displayln "[cache-dirs-test] skipped: no python3")]

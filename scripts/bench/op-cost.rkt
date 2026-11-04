@@ -4,15 +4,18 @@
          (only-in racket/date current-date date->string date-display-format)
          (only-in racket/file make-directory*)
          (only-in racket/runtime-path #%datum define-runtime-path)
-         (only-in racket/string string-join string-prefix?)
+         (only-in racket/string string-prefix? string-split)
+         (only-in threading ~>)
          (only-in torch torch-version)
-         (only-in "harness.rkt" busy-cores host-meta load-average rotate write-record)
+         (only-in "harness.rkt" busy-cores comma-list host-meta load-average rotate write-record)
+         (only-in "op-cost-layers.rkt" pure-overhead-ops)
          (only-in "op-cost-measure.rkt" conditions run-rep sampler-record warm-up!)
-         (only-in "op-cost-ops.rkt" ladder-ops op-case-name)
+         (only-in "op-cost-ops.rkt" ladder-ops op-case-layer op-case-name)
          (only-in "op-cost-pipelines.rkt" pipeline-records single-threaded-environment)
          (only-in "pytorch.rkt" require-pytorch twin-records)
          (only-in "shim.rkt" aten-threads)
-         (only-in "summary-op-cost.rkt" op-cost-markdown read-records))
+         (only-in "summary-op-cost.rkt" op-cost-markdown)
+         (only-in "summary.rkt" read-records))
 
 (provide default-out-dir
          inside-repo?
@@ -24,18 +27,19 @@
 
 (define (default-out-dir)
   (or (getenv "BASELINE_DIR")
-      (path->string (build-path (or (getenv "XDG_DATA_HOME")
-                                    (build-path (find-system-path 'home-dir) ".local" "share"))
-                                "rktorch" "bench"))))
+      (~> (or (getenv "XDG_DATA_HOME") (build-path (find-system-path 'home-dir) ".local" "share"))
+          (build-path "rktorch" "bench")
+          path->string)))
 
 (define (inside-repo? dir [root repo-root])
-  (define (dir-string p) (path->string (path->directory-path (simplify-path (path->complete-path p)))))
+  (define (dir-string p)
+    (~> p path->complete-path simplify-path path->directory-path path->string))
   (string-prefix? (dir-string dir) (dir-string root)))
 
 (define (stamp)
   (or (getenv "BASELINE_DATE")
       (parameterize ([date-display-format 'iso-8601])
-        (regexp-replace* #rx":" (date->string (current-date) #t) ""))))
+        (~> (current-date) (date->string #t) (regexp-replace* #rx":" _ "")))))
 
 (define (out-paths dir [tag (stamp)])
   (values (build-path dir (format "op-cost-~a.jsonl" tag))
@@ -48,19 +52,27 @@
                                     #:log log)))])
     (emit (hash-set r 'rep rep))))
 
-(define (comma xs) (string-join (map (lambda (x) (format "~a" x)) xs) ","))
+(define sampled-ops (append pure-overhead-ops '(zeros-8x8 narrow)))
+
+(define (sampler-records cases seconds emit)
+  (for* ([c (in-list cases)]
+         #:when (memq (op-case-name c) sampled-ops)
+         [layer (in-list '(facade contracted))]
+         #:when (op-case-layer c layer))
+    (emit (sampler-record c layer seconds))))
 
 (define (run-scoreboard #:out-dir dir #:suites chosen #:ops ops #:threads threads #:reps reps
                         #:seconds seconds #:thread-seconds thread-seconds
                         #:pipelines pipelines #:pipeline-workers pipeline-workers
                         #:pipeline-reps pipeline-reps #:pipeline-settings p-settings
-                        #:log [log (current-error-port)])
+                        #:log [log (current-error-port)]
+                        #:aten-threads [aten (aten-threads)])
   (when (inside-repo? dir)
     (raise-user-error 'op-cost "~a is inside the repository; bench results are never committed"
                       dir))
-  (unless (eqv? (aten-threads) 1)
+  (unless (eqv? aten 1)
     (raise-user-error 'op-cost "needs one ATen intra-op thread, got ~a: set OMP_NUM_THREADS=1"
-                      (aten-threads)))
+                      aten))
   (when (memq 'pytorch chosen) (require-pytorch 'op-cost))
   (make-directory* dir)
   (define-values (jsonl md) (out-paths dir))
@@ -69,7 +81,7 @@
       (define (emit r) (write-record r out))
       (emit (hasheq 'kind "meta"
                     'meta (host-meta #:device 'cpu #:libtorch (torch-version)
-                                     #:threads (aten-threads) #:repo repo-root)
+                                     #:threads aten #:repo repo-root)
                     'settings (hasheq 'reps reps 'seconds seconds 'thread_seconds thread-seconds
                                       'threads threads 'ops (map symbol->string ops))
                     'load (load-average)))
@@ -77,7 +89,7 @@
       (define conds (conditions cases threads))
       (define twin-settings
         (list "--seconds" seconds "--thread-seconds" thread-seconds
-              "--threads" (comma threads) "--ops" (comma ops)))
+              "--threads" (comma-list threads) "--ops" (comma-list ops)))
       (define sides (filter (lambda (s) (memq s chosen)) '(ops pytorch)))
       (when (memq 'ops chosen) (warm-up! conds))
       (for* ([rep (in-range reps)] [side (in-list (rotate sides rep))])
@@ -89,22 +101,22 @@
                           #:emit emit)]
           [(pytorch) (twin-rep rep twin-settings log emit)]))
       (when (memq 'sampler chosen)
-        (for ([c (in-list cases)] #:when (memq (op-case-name c) '(scalar-add add-8x8)))
-          (emit (sampler-record c 'facade (* 4 seconds)))))
+        (sampler-records cases (* 4 seconds) emit))
       (when (memq 'pipelines chosen)
         (pipeline-records pipelines pipeline-workers pipeline-reps
                           #:settings p-settings #:emit emit #:log log))))
   (call-with-output-file md #:exists 'truncate
-    (lambda (out) (write-string (op-cost-markdown (read-records jsonl)) out)))
+    (lambda (out) (~> jsonl read-records op-cost-markdown (write-string out))))
   (fprintf log "records: ~a\nsummary: ~a\n" jsonl md))
 
 (module+ main
   (require (only-in json write-json)
            (only-in racket/cmdline command-line)
-           (only-in racket/string string-split)
-           (only-in "op-cost-layers.rkt" op-cost-names)
+           (only-in racket/match match-define)
+           (only-in "op-cost-ops.rkt" op-cost-names)
            (only-in "op-cost-pipelines.rkt" pipeline-settings run-cell)
-           (only-in "threads.rkt" thread-counts))
+           (only-in "threads.rkt" thread-counts)
+           (only-in "workloads/pipelines.rkt" pipeline-names))
 
   (define out-dir (default-out-dir))
   (define chosen suites)
@@ -113,7 +125,7 @@
   (define reps 5)
   (define seconds 0.5)
   (define thread-seconds 1.0)
-  (define pipelines '(jpeg cifar text))
+  (define pipelines pipeline-names)
   (define pipeline-workers '(0 8))
   (define pipeline-reps 3)
   (define warmup 1)
@@ -150,10 +162,10 @@
    [("--summarize") p "Print the markdown summary of a records file" (set! summary p)])
   (cond
     [cell
-     (write-json (run-cell (car cell) (cadr cell) #:warmup warmup #:epochs epochs
-                           #:samples samples))
+     (match-define (list name workers) cell)
+     (write-json (run-cell name workers #:warmup warmup #:epochs epochs #:samples samples))
      (newline)]
-    [summary (write-string (op-cost-markdown (read-records summary)))]
+    [summary (~> summary read-records op-cost-markdown write-string)]
     [else
      (run-scoreboard #:out-dir out-dir #:suites chosen #:ops ops #:threads threads #:reps reps
                      #:seconds seconds #:thread-seconds thread-seconds
@@ -164,7 +176,24 @@
 
 (module+ test
   (require (only-in racket/file delete-directory/files make-temporary-directory)
+           (only-in racket/port open-output-nowhere)
            rackunit)
+
+  (define (refusal dir #:aten-threads [aten 1])
+    (with-handlers ([exn:fail:user? exn-message])
+      (run-scoreboard #:out-dir dir #:suites '() #:ops '() #:threads '() #:reps 1
+                      #:seconds 0.1 #:thread-seconds 0.1 #:pipelines '() #:pipeline-workers '()
+                      #:pipeline-reps 1 #:pipeline-settings '() #:log (open-output-nowhere)
+                      #:aten-threads aten)
+      #f))
+
+  (test-case "a run refuses a directory inside the repository, and more than one ATen thread"
+    (check-regexp-match #rx"is inside the repository" (refusal (build-path repo-root "scripts")))
+    (define dir (make-temporary-directory))
+    (check-regexp-match #rx"needs one ATen intra-op thread, got 4"
+                        (refusal (build-path dir "out") #:aten-threads 4))
+    (check-false (directory-exists? (build-path dir "out")))
+    (delete-directory/files dir))
 
   (test-case "results go outside the repository, to BASELINE_DIR when it is set"
     (check-true (inside-repo? (build-path repo-root "scripts" "bench")))

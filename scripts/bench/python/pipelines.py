@@ -11,6 +11,7 @@ import resource
 import time
 
 import numpy as np
+from cache_dirs import cache_dir
 from torch.utils.data import DataLoader, Dataset
 from torchvision.io import ImageReadMode, decode_jpeg, read_file
 from torchvision.transforms import v2
@@ -18,8 +19,8 @@ from torchvision.transforms import v2
 import torch
 
 REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
-HYMENOPTERA = os.path.expanduser(
-    "~/.cache/rktorch/hymenoptera/hymenoptera_data/train")
+HYMENOPTERA = os.path.join(cache_dir("RKTORCH_HYMENOPTERA_DIR", "hymenoptera"),
+                           "hymenoptera_data", "train")
 CIFAR = os.path.join(REPO, "torch/vision/fixtures/cifar10-256.bin")
 TEXT = os.path.join(REPO, "torch/text/fixtures/heart-of-darkness-excerpt.txt")
 IMAGENET_MEAN, IMAGENET_STD = [0.485, 0.456, 0.406], [0.229, 0.224, 0.225]
