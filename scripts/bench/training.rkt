@@ -125,6 +125,11 @@
   (define ms (column measured 1))
   (define gc (column measured 2))
   (define intervals (if (pair? ms) (differences ms) '()))
+  (define host-intervals
+    (if (and (pair? measured) (andmap (lambda (e) (> (vector-length e) 3)) measured))
+        (for/list ([a (in-list measured)] [b (in-list (cdr measured))])
+          (- (vector-ref b 3) (vector-ref a 1)))
+        '()))
   (define boundaries (if per-epoch (every-nth steps per-epoch) '()))
   (define epoch-ms (if (pair? boundaries) (differences (column boundaries 1)) '()))
   (define epoch-gc (if (pair? boundaries) (differences (column boundaries 2)) '()))
@@ -140,6 +145,7 @@
              'steps_per_epoch per-epoch
              'measured_steps (length intervals)
              'step_ms step-stats
+             'host_ms (and (pair? host-intervals) (summarize host-intervals))
              'steps_per_s (/ (* 1000.0 (length intervals)) span)
              'steps_per_s_median (/ 1000.0 (hash-ref step-stats 'median))
              'epoch_s (map (lambda (x) (/ x 1000.0)) epoch-ms)
@@ -170,6 +176,16 @@
     (check-= (hash-ref a 'steps_per_s_median) (/ 1000.0 12) 1e-9)
     (check-equal? (hash-ref a 'epoch_gc_ms) '(10 10))
     (check-equal? (hash-ref a 'gc_ms) 20))
+
+  (test-case "a step stamped before its settle gives the host's share of the interval"
+    (define events
+      (for/list ([t (in-list '(100 110 120 130))])
+        (vector 7 (exact->inexact t) 0 (exact->inexact (- t 7)))))
+    (define a (analyze-steps events))
+    (check-equal? (hash-ref (hash-ref a 'step_ms) 'median) 10.0)
+    (check-equal? (hash-ref (hash-ref a 'host_ms) 'median) 3.0)
+    (check-false (hash-ref (analyze-steps (steps-at '(100 110 120))) 'host_ms)
+                 "a step logged without the stamp has no host time"))
 
   (test-case "the first optimizer to step is timed, or the last to start"
     (define events
