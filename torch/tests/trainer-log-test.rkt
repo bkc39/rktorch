@@ -233,11 +233,13 @@
     (lambda-callback #:on-before-optimizer-step
                      (lambda (r opt) (when (zero? (run-epoch r)) (skip-step! r)))))
 
-  (test-case "an epoch with no step yet labels its training row -1, as Lightning"
+  (test-case "an epoch whose every step is skipped still logs its rows and advances the label"
     (define l (collecting-logger))
-    (fit (Labelled) (label-loader) #:max-epochs 2 #:log-every-n-steps 1 #:logger l
-         #:callbacks (list skip-first))
-    (check-equal? (logged-steps l) '(-1 0 1 2 2)))
+    (define r
+      (fit (Labelled) (label-loader) #:max-epochs 2 #:log-every-n-steps 1 #:logger l
+           #:callbacks (list skip-first)))
+    (check-equal? (logged-steps l) '(0 1 2 2 3 4 5 5))
+    (check-equal? (run-global-step r) 6))
 
   (define-trainer EpochStart (net)
     (define-init () (set! net (Linear 1 1)))

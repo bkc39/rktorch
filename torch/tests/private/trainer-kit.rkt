@@ -5,7 +5,7 @@
                      (only-in "../../train/private/hooks.rkt"
                               callback-hook? definable-hooks hook-batch?
                               hook-formals hook-name trainer-hook?))
-         (only-in racket/match match)
+         (only-in racket/match match match-lambda)
          (only-in syntax/parse/define define-syntax-parse-rule)
          (only-in "../../data/loader.rkt" dataloader tensor-dataset)
          (only-in "../../main.rkt" ones zeros)
@@ -20,6 +20,7 @@
          collecting-hparams
          collecting-logger
          collecting-metrics
+         collecting-rows
          collecting-steps
          interval-message
          recorder
@@ -42,6 +43,10 @@
 
 (define (collecting-metrics l) (map cdr (collecting-steps l)))
 (define (collecting-steps l) (reverse (collecting-logger-metrics l)))
+(define (collecting-rows l)
+  (map (match-lambda
+         [(cons step metrics) (list step (sort (hash-keys metrics) symbol<?))])
+       (collecting-steps l)))
 (define (collecting-hparams l) (reverse (collecting-logger-hparams l)))
 (define (collecting-finalized l) (reverse (collecting-logger-finalized l)))
 
@@ -53,16 +58,17 @@
   (string-append "an integer #:val-check-interval exceeds the training batches"
                  " #:limit-train-batches selects"))
 
-(struct scenario (skip-epoch fail-at stop-at break-twice? step-scheduler?
-                  event-box [exn #:mutable])
+(struct scenario (skip-epoch skip-loss skip-step fail-at stop-at break-twice?
+                  step-scheduler? event-box [exn #:mutable])
   #:name scenario-struct
   #:constructor-name scenario-state)
 
-(define (scenario #:skip-epoch [skip-epoch #f] #:fail-at [fail-at #f]
+(define (scenario #:skip-epoch [skip-epoch #f] #:skip-loss [skip-loss #f]
+                  #:skip-step [skip-step #f] #:fail-at [fail-at #f]
                   #:stop-at [stop-at #f] #:break-twice? [break-twice? #f]
                   #:step-scheduler? [step-scheduler? #f])
-  (scenario-state skip-epoch fail-at stop-at break-twice? step-scheduler?
-                  (box '()) #f))
+  (scenario-state skip-epoch skip-loss skip-step fail-at stop-at break-twice?
+                  step-scheduler? (box '()) #f))
 
 (define (scenario-events sc) (reverse (unbox (scenario-event-box sc))))
 
@@ -83,7 +89,11 @@
                   (unbox events))))
 
 (define (at? place r)
-  (equal? place (list (run-epoch r) (run-batch-index r))))
+  (define here (list (run-epoch r) (run-batch-index r)))
+  (match place
+    ['every #t]
+    [(list (? pair? places) ...) (and (member here places) #t)]
+    [_ (equal? place here)]))
 
 (define (raise-planned sc)
   (cond
@@ -133,7 +143,8 @@
       (record! sc 'trainer 'training-step run)
       (when (at? (scenario-fail-at sc) run) (raise-planned sc))
       (when (at? (scenario-stop-at sc) run) (request-stop! run))
-      (mse-loss (net x) y))
+      (when (at? (scenario-skip-step sc) run) (skip-step! run))
+      (and (not (at? (scenario-skip-loss sc) run)) (mse-loss (net x) y)))
     (define-validation-step (x y)
       (record! sc 'trainer 'validation-step run)
       (mse-loss (net x) y))

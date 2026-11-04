@@ -2,12 +2,13 @@
 
 (require (only-in racket/file file->value)
          (only-in racket/list filter-map last)
-         (only-in racket/match match)
+         (only-in racket/match match match-lambda)
          (only-in racket/runtime-path #%datum define-runtime-path)
          (only-in racket/string string-replace)
          (only-in "../../train/private/hooks.rkt" log-rule))
 
 (provide expected-events
+         expected-logged-steps
          fixture
          lightning->rktorch
          log-permissions
@@ -58,6 +59,11 @@
                      (and mapped (append mapped (list epoch step batch lr)))]))
                 (hash-ref (hash-ref fixture 'scenarios) scenario)))
   ((hash-ref deviations scenario (lambda () values)) events))
+
+(define (expected-logged-steps scenario)
+  (map (match-lambda
+         [(list step keys) (list step (sort (map hyphenated keys) symbol<?))])
+       (hash-ref (hash-ref fixture 'logged-steps) scenario)))
 
 (define (log-permissions)
   (for/hasheq ([(name opts) (in-hash (hash-ref fixture 'log-permissions))]
