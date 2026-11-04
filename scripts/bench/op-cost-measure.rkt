@@ -94,7 +94,7 @@
     (define a (hash-ref after key))
     (and a b (- a b)))
   (define main-ms (and (positive? n) (moved 'main-cpu)))
-  (define (per-op x) (and x (positive? ops) (/ x ops)))
+  (define (per-op x) (and x (positive? ops) (exact->inexact (/ x ops))))
   (define thread-ms (* elapsed-ms (max 1 n)))
   (hasheq 'kind "op"
           'impl "rktorch"
@@ -157,7 +157,7 @@
           'layer (symbol->string layer)
           'ops ops
           'us_per_op (and (positive? ops) (/ (* 1000.0 elapsed-ms) ops))
-          'total_ms total
+          'total_ms (exact->inexact total)
           'shares (for/hasheq ([(piece matches?) (in-hash sampler-pieces)])
                     (values piece
                             (piece-share (filter-map (lambda (n) (and (matches? n) (node-total n)))
@@ -185,7 +185,8 @@
                             #:rep rep))))
 
 (module+ test
-  (require rackunit
+  (require (only-in json jsexpr?)
+           rackunit
            (only-in torch/tests/private/wedge call-with-process-deadline)
            (only-in "op-cost-ops.rkt" ladder-ops))
 
@@ -221,7 +222,8 @@
          (check-equal? (hash-ref r 'threads) n)
          (check-equal? (hash-ref r 'rep) 3)
          (check-true (< 1900 (hash-ref r 'us_per_op) 6000) (format "~a" r))
-         (check-true (real? (hash-ref r 'heap_bytes_per_op)))))))
+         (check-true (real? (hash-ref r 'heap_bytes_per_op)))
+         (check-true (jsexpr? r) (format "~a" r))))))
 
   (test-case "main's OS thread CPU time grows while main spins, not while it sleeps"
     (when (main-cpu-ms)
@@ -258,11 +260,17 @@
                                           (conditions (list c) '(2)))
                                    0.3 #:rep 0))
        (check-true (positive? (hash-ref r 'finalizer_runs)))
+       (check-true (jsexpr? r) (format "~a" r))
        (when (hash-ref r 'main_cpu_ms)
          (check-= (hash-ref r 'us_per_op)
                   (+ (hash-ref r 'thread_us_per_op)
                      (/ (* 1000.0 (hash-ref r 'main_cpu_ms)) (hash-ref r 'ops)))
                   1e-6)))))
+
+  (test-case "a sampler record of the contracted add is one JSON row"
+    (define r (sampler-record (car (ladder-ops '(scalar-add))) 'contracted 0.3))
+    (check-equal? (hash-ref r 'layer) "contracted")
+    (check-true (jsexpr? r) (format "~a" r)))
 
   (test-case "a sampler piece's share is its outermost function's time over the total"
     (check-equal? (piece-share '(30 10 20) 100) 0.3)

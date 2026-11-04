@@ -267,7 +267,7 @@
                                                 ""
                                                 (format " per tensor (~a per op, ~a tensors)"
                                                         (whole (ref f 'bytes))
-                                                        (num (ref f 'tensors) 0)))))
+                                                        (whole (ref f 'tensors))))))
                                   "; "))
                (list "K5" "pipeline samples/s ÷ PyTorch"
                      (if (null? pipelines)
