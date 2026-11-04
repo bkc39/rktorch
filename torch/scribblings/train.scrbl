@@ -5,15 +5,11 @@
                       (only-in torch/train/private/hooks
                                callback-hook? definable-hooks hook-batch?
                                hook-formals hook-name))
-          (only-in racket/string string-join)
           (only-in syntax/parse/define define-syntax-parse-rule)
           "common.rkt"
           torch/scribblings/labels
           (for-label (only-in torch/data/loader dataloader dataloader?
-                              tensor-dataset))
-          (only-in torch/train/private/hooks
-                   epoch-log epoch-only-log hook-batch? hook-form hook-formals
-                   hook-log hook-name hook-order hook-sides hooks step-log))
+                              tensor-dataset)))
 
 @title[#:tag "train"]{Training}
 
@@ -121,8 +117,9 @@ checkpoints carry them.}
               @defform[(define-predict-step step-formals body ...+)])]{
 The steps; @racket[step-formals] receive the values of one batch. The
 training step answers a loss (a floating @racket[scalar-tensor/c]),
-@racket[(values loss extra)], or @racket[#f], which skips the step as
-@racket[skip-step!] does. The other steps answer one value, which reaches
+@racket[(values loss extra)], or @racket[#f], which skips that batch's
+backward pass; the window's optimizer step still runs, on the gradients of
+its other batches. The other steps answer one value, which reaches
 their batch-end hook. The predict step's values are collected by
 @racket[predict].}
 
@@ -171,19 +168,20 @@ Trains @racket[trainer] in the order of @secref["train-hooks"] and answers
 the finished run. Keywords follow Lightning's @tt{Trainer}. A
 @racket[#:device] of @racket[#f] leaves the trainer where it is and sends
 each batch to the trainer's device. @racket[log!] reduces on the device and
-reads to the host at every @racket[#:log-every-n-steps]-th optimizer step of
-the fit, counted across epochs, at the step of a @racket[request-stop!], and
-at each epoch end, in one transfer for all keys. As in Lightning, the logger
-gets a training row, and a validation epoch's row, labelled with the optimizer
-steps taken before the current batch's step; the first step's row is at
-step 0, and an epoch's training row before any step is at step -1. Each row carries
+reads to the host at the end of every @racket[#:log-every-n-steps]-th
+accumulation window of the fit, counted across epochs, at the step of a
+@racket[request-stop!], and at each epoch end, in one transfer for all keys.
+The logger gets a training row, and a validation epoch's row, labelled with
+the windows ended before the current one; the first window's row is at step
+0, and an epoch's training row before any window ends is at step -1. Each row carries
 the key @racket['epoch], @racket[run-epoch], unless one was logged. A
 per-step value logged in a validation loop reaches the logger at each
 validation batch, apart from the training values and without
 @racket['epoch], labelled 0, 1, … with the validation batches the fit has run
-outside the sanity check; in @racket[test], with the batches of that call. With @racket[#:max-epochs]
-@racket[#f], epochs continue until @racket[#:max-steps] steps are taken,
-also past epochs whose steps were skipped. @racket[#:fast-dev-run] runs that
+outside the sanity check; in @racket[test], with the batches of that call.
+@racket[#:max-steps] bounds @racket[run-global-step]; a @racket[skip-epoch!] at
+every epoch's first batch ends no window, so a fit bounded by
+@racket[#:max-steps] alone does not end, as in Lightning. @racket[#:fast-dev-run] runs that
 many batches (one for @racket[#t]) of one epoch, with no sanity check, no loggers and no
 @racket[monitor] or @racket[checkpoint] callbacks. If an @racket[exn:fail]
 or @racket[exn:break] is raised, @racket[fit] runs each callback's
@@ -249,8 +247,10 @@ Recognize the instances of @racket[define-trainer] and
 The loop state. @racket[run-stage] is the entry's stage from @racket[setup]
 to @racket[teardown], and @racket[#f] once the run has finished.
 @racket[run-epoch] is Lightning's @tt{current_epoch}.
-@racket[run-global-step] counts optimizer steps taken.
-@racket[run-stepped?] is whether the current training batch took one.
+@racket[run-global-step] counts the accumulation windows ended, also a
+window whose step @racket[skip-step!] dropped or whose every loss was
+@racket[#f].
+@racket[run-stepped?] is whether the current training batch ended one.
 @racket[run-metric] reads one key to the host: inside an epoch the latest
 step value, in an epoch-end hook and after the epoch its reduction, and for a
 key logged both per step and per epoch the newer of the two. Inside the
@@ -272,9 +272,9 @@ validation loop and the epoch-end and fit-end hooks run. Requested before an
 epoch's first batch, the epoch runs no batch.}
 
 @defproc[(skip-step! [r step-pending-run/c]) void?]{
-Drops the pending optimizer step. The window's remaining backward passes do
-not run, no step is taken, and @racket[run-global-step] does not advance,
-also when called from @racket[on-before-optimizer-step].}
+Drops the pending optimizer step. The window's backward passes still run,
+@racket[on-before-optimizer-step] is not called unless it is the caller, and
+@racket[run-global-step] and the per-step schedulers still advance.}
 
 @defproc[(skip-epoch! [r batch-start-run/c]) void?]{
 Lightning's @racket[-1] from @tt{on_train_batch_start}. Once every
@@ -376,10 +376,10 @@ arguments.
          scheduler-config?]{
 Lightning's @tt{lr_scheduler} dictionary. An @racket['epoch] scheduler
 steps at the end of every @racket[frequency]-th epoch; a @racket['step]
-scheduler steps after an optimizer step whose batch is a multiple of
-@racket[frequency] batches into the epoch, so with
-@racket[#:accumulate-grad-batches] 2 and @racket[frequency] 2 it steps after
-every optimizer step. Return it from @racket[define-optimizers].}
+scheduler steps at the end of an accumulation window whose last batch is a
+multiple of @racket[frequency] batches into the epoch, also when the window's
+step was dropped, so with @racket[#:accumulate-grad-batches] 2 and
+@racket[frequency] 2 it steps at every window end. Return it from @racket[define-optimizers].}
 
 @defproc[(scheduler-config? [v any/c]) boolean?]{
 Recognizes @racket[scheduler-config] values.}
@@ -436,72 +436,4 @@ A run inside an active @racket[fit]; inside an @racket[on-train-batch-start]
 hook; in a training batch whose optimizer step is pending; in a hook that
 may log; inside a manual training step.}
 
-@section[#:tag "train-hooks"]{Hooks}
-
-Callbacks are C and the trainer is T. A hook defined by both runs the
-callbacks first, in order, then the trainer, except where the table says
-otherwise. Arguments follow the run; @tt{batch…} is the batch values.
-@racket[log!] gives where a hook may log and its default: @tt{step} and
-@tt{epoch} allow both with that default, @tt{epoch only} allows only per
-epoch.
-
-@(define (who h)
-   (define sides (hook-sides h))
-   (cond
-     [(not (memq 'trainer sides)) "C"]
-     [(not (memq 'callback sides)) "T"]
-     [(eq? (hook-order h) 'trainer-first) "T, C"]
-     [(eq? (hook-order h) 'by-kind) "C plain, T, C monitor and checkpoint"]
-     [else "C, T"]))
-@(define (arguments h)
-   (define names (map symbol->string (hook-formals h)))
-   (string-join (if (hook-batch? h) (append names (list "batch…")) names)))
-@(define (log-cell h)
-   (define rule (hook-log h))
-   (cond
-     [(equal? rule step-log) "step"]
-     [(equal? rule epoch-log) "epoch"]
-     [(equal? rule epoch-only-log) "epoch only"]
-     [else "no"]))
-@(define (defined-by h)
-   (if (hook-form h)
-       (racketidfont (symbol->string (hook-form h)))
-       (tt "define-hook")))
-@(define (hook-row h)
-   (list (tt (symbol->string (hook-name h))) (defined-by h) (who h)
-         (arguments h) (log-cell h)))
-
-@tabular[#:sep @hspace[2]
-         #:style 'boxed
-         (cons (list @bold{hook} @bold{defined by} @bold{who}
-                     @bold{arguments} @bold{@racket[log!]})
-               (map hook-row hooks))]
-
-The order of one @racket[fit], after Lightning 2.6.5, with
-@italic{A} the @racket[#:accumulate-grad-batches]:
-
-@itemlist[
- @item{@tt{configure-callbacks}; @tt{setup}; the device move;
-       @tt{configure-optimizers}; @tt{on-fit-start}.}
- @item{With @racket[#:val] and sanity steps: @tt{on-sanity-check-start},
-       a validation loop whose metrics are discarded,
-       @tt{on-sanity-check-end}.}
- @item{As in Lightning, @racket[fit] leaves each layer's mode as the caller
-       set it. A trainer with a layer in eval mode warns once, before
-       @tt{on-train-start}, on the @racket['rktorch-train] topic and on
-       @racket[(current-error-port)], where Lightning's warning is printed too.}
- @item{@tt{on-train-start}, then per epoch @tt{on-train-epoch-start} and per
-       batch: the transfer hooks, @tt{on-train-batch-start}, the training
-       step, @tt{on-before-zero-grad} on a window's first batch,
-       @tt{on-before-backward} with the loss ÷ @italic{A},
-       @tt{on-after-backward}, @tt{on-before-optimizer-step} at a window's
-       end, the schedulers, @tt{on-train-batch-end}, and a validation loop
-       when one is due.}
- @item{@tt{on-train-epoch-end} after the epoch's validation loop, then
-       @tt{on-train-end}, @tt{on-fit-end} and @tt{teardown}.}
- @item{A validation loop runs in eval mode with gradients off:
-       @tt{on-validation-start}, @tt{on-validation-epoch-start}, per batch
-       the transfer hooks, @tt{on-validation-batch-start}, the validation
-       step and @tt{on-validation-batch-end}, then
-       @tt{on-validation-epoch-end} and @tt{on-validation-end}; each layer
-       then returns to the mode it had before the loop.}]
+@include-section["train-hooks.scrbl"]

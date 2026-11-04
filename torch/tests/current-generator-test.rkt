@@ -6,9 +6,10 @@
            (prefix-in g: (only-in "../generated.rkt" multinomial))
            "../main.rkt"
            (only-in "../vision/transforms.rkt"
-                    random-crop random-horizontal-flip random-resized-crop))
+                    random-crop random-horizontal-flip random-resized-crop)
+           (only-in "private/blame.rkt" blamed contract-violation?))
 
-  (define blamed #rx"blaming: [(][^)]*current-generator-test[.]rkt")
+  (define caller (blamed "current-generator-test.rkt"))
 
   (define (drawn v)
     (if (tensor? v) (tensor->list v) v))
@@ -86,11 +87,9 @@
     (check-equal? (tensor->list (randn 4)) baseline))
 
   (test-case "current-generator rejects a non-generator, blaming the caller"
-    (check-exn (lambda (e) (and (exn:fail:contract? e)
-                                (regexp-match? blamed (exn-message e))))
+    (check-exn (contract-violation? caller #rx"generator")
                (lambda () (parameterize ([current-generator 5]) (randperm 3))))
-    (check-exn (lambda (e) (and (exn:fail:contract? e)
-                                (regexp-match? blamed (exn-message e))))
+    (check-exn (contract-violation? caller #rx"generator")
                (lambda () (current-generator 'x))))
 
   (test-case "a loader without a generator draws from current-generator"

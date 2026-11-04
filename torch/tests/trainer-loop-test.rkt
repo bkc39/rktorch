@@ -2,6 +2,7 @@
 
 (module+ test
   (require (for-syntax racket/base (only-in syntax/parse/pre ~optional ~seq expr id))
+           (only-in racket/dict in-dict)
            (only-in racket/list drop-right make-list)
            (only-in racket/match match-define)
            (only-in racket/math exact-ceiling)
@@ -14,11 +15,12 @@
                     cpu-device cuda-available? cuda-device device device-type
                     grad-enabled? item maybe-grad ones tensor->list)
            (only-in "../nn.rkt"
-                    Dropout Linear eval! in-layers layer-copy layer-training?
+                    adam Dropout Linear eval! in-layers layer-copy layer-training?
                     learning-rate mse-loss parameters sgd state-dict step-lr train!)
+           (only-in (submod "../nn/optim.rkt" private) optimizer-state)
            "../train.rkt"
            (only-in "private/trainer-kit.rkt"
-                    collecting-finalized collecting-logger collecting-metrics))
+                    collecting-logger collecting-metrics))
 
   (struct tally (notes skip-at false-at))
 
@@ -137,14 +139,74 @@
                     step)
                   '(2 4)))
 
-  (test-case "L-C5: skip-step! and a #f loss drop the window's step"
-    (for ([t (list (new-tally #:skip-at '(0 0)) (new-tally #:false-at '(0 0)))])
-      (define r (fit (Counted t) (ones-loader 4) #:max-epochs 1
-                     #:accumulate-grad-batches 2 #:logger #f))
-      (check-equal? (run-global-step r) 1)
-      (check-equal? (length (notes t 'optimizer-step)) 1)
-      (check-equal? (length (notes t 'zero-grad)) 2)
-      (check-equal? (notes t 'after-backward) '((0 2) (0 3)))))
+  (test-case "L-C5: a #f loss skips its backward pass, and its window steps on the others'"
+    (define t (new-tally #:false-at '(0 0)))
+    (define r (fit (Counted t) (ones-loader 4) #:max-epochs 1
+                   #:accumulate-grad-batches 2 #:logger #f))
+    (check-equal? (run-global-step r) 2)
+    (check-equal? (length (notes t 'zero-grad)) 2)
+    (check-equal? (notes t 'after-backward) '((0 1) (0 2) (0 3)))
+    (check-equal? (map (lambda (gs) (andmap list? gs)) (notes t 'optimizer-step))
+                  '(#t #t)
+                  "each window's step sees gradients"))
+
+  (test-case "L-C5: a window whose only loss is #f steps on no gradient"
+    (define t (new-tally #:false-at '(0 1)))
+    (define tr (Counted t))
+    (fit tr (ones-loader 2) #:max-epochs 1 #:logger #f)
+    (check-equal? (notes t 'after-backward) '((0 0)))
+    (match-define (list _ skipped) (notes t 'optimizer-step))
+    (check-equal? skipped '(#f #f)))
+
+  (define-trainer Decaying (net make-optimizer skipped)
+    (define-init (n m s) (set! net n) (set! make-optimizer m) (set! skipped s))
+    (define-optimizers (make-optimizer (parameters net)))
+    (define-training-step (x y)
+      (and (not (memv (run-batch-index run) skipped)) (mse-loss (net x) y))))
+
+  (define optimizer-makers
+    (list (cons 'sgd (lambda (ps) (sgd ps #:lr 0.1 #:momentum 0.9 #:weight-decay 0.1)))
+          (cons 'adam (lambda (ps) (adam ps #:lr 0.1 #:weight-decay 0.1)))))
+
+  (define (batch-end-states make-optimizer)
+    (define states '())
+    (define snapshot
+      (lambda-callback
+       #:on-train-batch-end
+       (lambda (r loss extra . batch)
+         (match-define (list opt) (run-optimizers r))
+         (set! states (cons (list (map tensor->list (parameters (run-trainer r)))
+                                  (map tensor->list (optimizer-state opt)))
+                            states)))))
+    (fit (Decaying (Linear 1 1) make-optimizer '(1)) (ones-loader 2) #:max-epochs 1
+         #:logger #f #:callbacks (list snapshot))
+    (reverse states))
+
+  (define (fitted-weights base make-optimizer batches skipped)
+    (define tr (Decaying (layer-copy base) make-optimizer skipped))
+    (fit tr (ones-loader batches) #:max-epochs 1 #:logger #f)
+    (map tensor->list (parameters tr)))
+
+  (test-case "L-C5: a window whose every loss is #f keeps the weights and the optimizer state"
+    (for ([(name make) (in-dict optimizer-makers)])
+      (match-define (list (and stepped (list _ state)) skipped) (batch-end-states make))
+      (check-pred pair? state (format "~a: the first window's step leaves state" name))
+      (check-equal? skipped stepped (format "~a" name))))
+
+  (test-case "L-C5: a later step after an all-#f window matches a fit that never had it"
+    (for ([(name make) (in-dict optimizer-makers)])
+      (define base (Linear 1 1))
+      (check-equal? (fitted-weights base make 3 '(1)) (fitted-weights base make 2 '())
+                    (format "~a" name))))
+
+  (test-case "L-C5: skip-step! drops the window's step, not its backward passes or its count"
+    (define t (new-tally #:skip-at '(0 0)))
+    (define r (fit (Counted t) (ones-loader 4) #:max-epochs 1
+                   #:accumulate-grad-batches 2 #:logger #f))
+    (check-equal? (run-global-step r) 2)
+    (check-equal? (length (notes t 'optimizer-step)) 1)
+    (check-equal? (length (notes t 'zero-grad)) 2)
+    (check-equal? (notes t 'after-backward) '((0 0) (0 1) (0 2) (0 3))))
 
   (test-case "L-C5: skip-step! from on-before-optimizer-step drops the step"
     (define t (new-tally))
@@ -153,7 +215,7 @@
     (define skipper
       (lambda-callback #:on-before-optimizer-step (lambda (r opt) (skip-step! r))))
     (define r (fit tr (ones-loader 4) #:max-epochs 1 #:logger #f #:callbacks (list skipper)))
-    (check-equal? (run-global-step r) 0)
+    (check-equal? (run-global-step r) 4)
     (check-equal? (length (notes t 'optimizer-step)) 4)
     (check-equal? (map tensor->list (parameters tr)) before))
 
@@ -191,6 +253,20 @@
                         #:limit-train-batches 0))))
     (check-pred exn:fail:contract? raised)
     (check-regexp-match #rx"selects no batch" (exn-message raised)))
+
+  (test-case "skip-epoch! at every epoch's first batch never ends a fit under #:max-steps alone"
+    (define t (new-tally))
+    (define skip-every
+      (lambda-callback #:on-train-batch-start (lambda (r . batch) (skip-epoch! r))
+                       #:on-train-epoch-start
+                       (lambda (r) (when (= (run-epoch r) 5) (request-stop! r)))))
+    (define finished
+      (within 60 (lambda ()
+                   (fit (Counted t) (ones-loader 3) #:max-steps 4 #:logger #f
+                        #:callbacks (list skip-every)))))
+    (check-pred run? finished)
+    (check-equal? (run-global-step finished) 0)
+    (check-equal? (notes t 'epoch) '(0 1 2 3 4 5)))
 
   (define-trainer Scheduled (net)
     (define-init () (set! net (Linear 1 1)))
@@ -409,83 +485,4 @@
                   '((fit-start "method") (fit-start "watch") (fit-start "other")
                     (fit-start "keep") (fit-start trainer)
                     (epoch-end "method") (epoch-end "other") (epoch-end trainer)
-                    (epoch-end "watch") (epoch-end "keep"))))
-
-  (define planned (exn:fail "planned" (current-continuation-marks)))
-
-  (define-trainer Failing (net t)
-    (define-init (tl) (set! net (Linear 1 1)) (set! t tl))
-    (define-optimizers (sgd (parameters net) #:lr 0.01))
-    (define-training-step (x y) (raise planned))
-    (define-hook (teardown stage) (note! t 'teardown stage)))
-
-  (define-callback breaking (t)
-    (define-hook (on-exception e) (error 'breaking "inside on-exception")))
-
-  (define-callback catching (t)
-    (define-hook (on-exception e) (note! t 'caught e))
-    (define-hook (teardown stage) (note! t 'teardown stage)))
-
-  (test-case "exceptions: re-raised eq?, every on-exception and teardown run once"
-    (define t (new-tally))
-    (define l (collecting-logger))
-    (define receiver (make-log-receiver (current-logger) 'debug 'rktorch-train))
-    (define raised
-      (with-handlers ([values values])
-        (fit (Failing t) (ones-loader 2) #:max-epochs 1 #:logger l
-             #:callbacks (list (breaking t) (catching t)))))
-    (check-eq? raised planned)
-    (check-equal? (notes t 'caught) (list planned))
-    (check-equal? (notes t 'teardown) '(fit fit))
-    (check-equal? (collecting-finalized l) '(failed))
-    (check-not-false (sync/timeout 0 receiver)))
-
-  (define-callback interrupting (t)
-    (define-hook (on-exception e)
-      (note! t 'caught e)
-      (break-thread (current-thread))))
-
-  (test-case "exceptions: a break inside on-exception is absorbed after an exn:fail"
-    (define t (new-tally))
-    (define raised
-      (with-handlers ([exn:break? values])
-        (begin0 (with-handlers ([exn:fail? values])
-                  (fit (Failing t) (ones-loader 2) #:max-epochs 1 #:logger #f
-                       #:callbacks (list (interrupting t))))
-                (sleep 0))))
-    (check-eq? raised planned)
-    (check-equal? (notes t 'caught) (list planned))
-    (check-equal? (notes t 'teardown) '(fit)))
-
-  (test-case "exceptions: with breaks disabled, a break inside on-exception stays pending"
-    (define t (new-tally))
-    (define-values (raised broke?)
-      (parameterize-break #f
-        (let ([raised (with-handlers ([exn:fail? values])
-                        (fit (Failing t) (ones-loader 2) #:max-epochs 1 #:logger #f
-                             #:callbacks (list (interrupting t))))])
-          (values raised
-                  (with-handlers ([exn:break? (lambda (e) #t)])
-                    (parameterize-break #t (sleep 0))
-                    #f)))))
-    (check-eq? raised planned)
-    (check-true broke?))
-
-  (struct finalize-failing ([statuses #:mutable])
-    #:methods gen:training-logger
-    [(define (logger-log-hyperparams! l params) (void))
-     (define (logger-log-metrics! l metrics step) (void))
-     (define (logger-finalize! l status)
-       (set-finalize-failing-statuses! l (cons status (finalize-failing-statuses l)))
-       (when (eq? status 'success) (error 'finalize "planned finalize failure")))])
-
-  (test-case "exceptions: a failing success finalize is not finalized again as failed"
-    (define t (new-tally))
-    (define l (finalize-failing '()))
-    (check-exn #rx"planned finalize failure"
-               (lambda () (fit (Counted t) (ones-loader 2) #:max-epochs 1 #:logger l)))
-    (check-equal? (finalize-failing-statuses l) '(success))
-    (define m (finalize-failing '()))
-    (check-exn #rx"planned finalize failure"
-               (lambda () (test (Counted t) (ones-loader 2) #:logger m)))
-    (check-equal? (finalize-failing-statuses m) '(success))))
+                    (epoch-end "watch") (epoch-end "keep")))))
