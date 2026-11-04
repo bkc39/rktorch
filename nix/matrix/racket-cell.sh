@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+export OMP_NUM_THREADS=${OMP_NUM_THREADS:-1}
 
 stage() { echo "matrix-stage: $1"; }
 
