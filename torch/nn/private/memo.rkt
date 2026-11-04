@@ -45,7 +45,7 @@
     (define owner (hash-ref open v #f))
     (cond
       [(hash-has-key? (memo-done seen) v) 'done]
-      [(not owner)
+      [(or (not owner) (thread-dead? owner))
        (hash-set! open v (current-thread))
        'claimed]
       [(eq? owner (current-thread)) 'reentered]

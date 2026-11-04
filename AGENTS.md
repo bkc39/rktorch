@@ -413,16 +413,18 @@ copy's `child` joins the copy, its layers and its containers both. That
 check lives only at the public boundary: the exported `layer-rebuild`
 (`torch/nn/layer.rkt`) is a plain procedure over the raw generic method,
 which `#:methods gen:layer` blocks still define by name (`define-generics`
-binds methods by symbol at the use site; a `define/generic` of it reaches
-the raw method and so does not join). The wrapper records the layer it
-rebuilds in the memo, hand-written or not; a layer re-entered while in
-progress (`layer-rebuild-reentered`) is rebuilt plainly when it has
-`prop:rebuilder`, so a cycle is refused at the next field, named, and a
-hand-written one is refused at once, naming the layer. `copy-child` and
-`layer-rebuild-in` reach the raw method directly, so nothing is memoized
-twice. An open memo entry holds the thread building it (claimed under the
-memo's semaphore); a key open in another thread raises, so a rebuild's
-worker thread joins the copy only one at a time. `with-remembering` closes the callback when `layer-copy` exits by
+binds methods by symbol at the use site). The registry method records a
+`define-layer` layer in the memo, re-entry rebuilding it plainly so a
+cycle is refused at the next field, named; the wrapper records only a
+layer without `prop:rebuilder`, and refuses its re-entry at once
+(`layer-rebuild-reentered`), naming it. A `define/generic` delegation
+between hand-written layers reaches neither: it does not join the copy
+and its cycles are not caught (#466); delegate with `(child name inner)`.
+`copy-child` and `layer-rebuild-in` call `rebuilder-of` directly, so
+nothing is memoized twice. An open memo entry holds the thread building
+it (claimed under the memo's semaphore); a key open in another live
+thread raises, so a rebuild's worker thread joins the copy only one at a
+time, and a killed one releases its keys. `with-remembering` closes the callback when `layer-copy` exits by
 any route and clears the memo: a stashed callback, called or passed to
 `layer-rebuild`, then raises. The memo drops a value from its
 in-progress set on any exit, so a refusal a rebuild catches is not later

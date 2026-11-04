@@ -29,8 +29,8 @@
          (only-in "private/layer-core.rkt"
                   gen:layer layer-buffers layer-mode layer-named-buffers
                   layer-named-children layer-named-parameters layer-parameters
-                  layer-rebuild-in layer-rebuild-reentered layer-set-mode! layer?
-                  prop:fields prop:on-move prop:rebuilder
+                  [layer-rebuild raw-layer-rebuild] layer-rebuild-in layer-rebuild-reentered
+                  layer-set-mode! layer? prop:fields prop:on-move prop:rebuilder rebuilder?
                   registry registry-mode registry? set-registry-mode! with-mode)
          (only-in "private/layer-fields.rkt"
                   assemble check-entry-arity entry-procedure layer-methods-of
@@ -65,11 +65,12 @@
 
 (define (layer-rebuild m child tensor)
   (cond
+    [(rebuilder? m) (raw-layer-rebuild m child tensor)]
     [(remembering? child)
      (define seen (remembering-memo child))
      (remembered seen m
                  (lambda () (layer-rebuild-in seen m child tensor))
-                 #:reentered (lambda () (layer-rebuild-reentered seen m child tensor)))]
+                 #:reentered (lambda () (layer-rebuild-reentered m)))]
     [else (layer-rebuild-in (memo 'layer-rebuild) m child tensor)]))
 
 (module+ checked
