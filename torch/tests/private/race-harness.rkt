@@ -4,7 +4,8 @@
          (only-in ffi/unsafe/atomic
                   call-as-atomic in-atomic-mode? make-uninterruptible-lock
                   uninterruptible-lock-acquire uninterruptible-lock-release)
-         (only-in racket/contract/base ->i any flat-named-contract)
+         (only-in racket/contract/base
+                  -> ->* ->i >/c any flat-named-contract listof or/c)
          (only-in racket/dict dict-ref)
          (only-in racket/list remove-duplicates)
          (only-in racket/match match)
@@ -47,10 +48,6 @@
          spawn
          join
          stop!
-         pools
-         stops-for
-         pools-stopped-by
-         await-flag
          worker-thread
          join-all
          make-roster
@@ -213,13 +210,19 @@
 
 (struct worker (thread outcome pool))
 
-(define pools '(#f own))
+(define pool/c (or/c #f 'own))
+(define stop-by/c (or/c 'kill 'break))
+
+(define/contract-out pools (listof pool/c) '(#f own))
 ;; break-thread on a thread of its own pool can wedge Racket CS: #443
 (define stops-by-pool (hash #f '(kill break) 'own '(kill)))
-(define (stops-for pool) (hash-ref stops-by-pool pool))
+(define/contract-out (stops-for pool)
+  (-> pool/c (listof stop-by/c))
+  (hash-ref stops-by-pool pool))
 (define (stop-for/c pool)
   (flat-named-contract `(stops-for ,pool) (lambda (stop-by) (memq stop-by (stops-for pool)))))
-(define (pools-stopped-by stop-by)
+(define/contract-out (pools-stopped-by stop-by)
+  (-> stop-by/c (listof pool/c))
   (filter (lambda (pool) (memq stop-by (stops-for pool))) pools))
 
 (define (spawn thunk #:pool [pool #f] #:label [label #f])
@@ -254,7 +257,8 @@
     ['kill (stop! w)]
     ['break (break-thread (worker-thread w))]))
 
-(define (await-flag w flag #:seconds [seconds 30])
+(define/contract-out (await-flag w flag #:seconds [seconds 30])
+  (->* [worker? box?] [#:seconds (>/c 0)] any)
   (define deadline (+ (current-inexact-milliseconds) (* 1000 seconds)))
   (let poll ()
     (define dead? (thread-dead? (worker-thread w)))

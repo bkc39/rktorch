@@ -4,10 +4,11 @@
   (require (only-in racket/format ~a)
            rackunit
            (only-in "../foreign/raw/race-points.rkt" race-point)
+           (only-in "private/blame.rkt" blames-caller?)
            (only-in "private/race-harness.rkt"
                     await-flag await-roles! join join-all make-gate make-roster pools
-                    release-pending? spawn stop-roles! stop-worker! until-stopped
-                    wait-for-arrival with-parked worker-thread))
+                    pools-stopped-by release-pending? spawn stop! stop-roles! stop-worker!
+                    stops-for until-stopped wait-for-arrival with-parked worker-thread))
 
   (define (left-parked pool)
     (define g (make-gate 'harness-parked))
@@ -56,6 +57,17 @@
     (check-false (thread-dead? (worker-thread a)) "a refused break reached the thread")
     (stop-worker! a 'kill)
     (check-true (thread-dead? (worker-thread a))))
+
+  (test-case "the stop policy and the flag wait check their arguments at the boundary"
+    (define blamed? (blames-caller? "race-harness-test.rkt"))
+    (check-exn blamed? (lambda () (stops-for 'shared)))
+    (check-exn blamed? (lambda () (pools-stopped-by 'interrupt)))
+    (define a (spawn (lambda () (sync never-evt))))
+    (check-exn blamed? (lambda () (await-flag a #t)))
+    (check-exn blamed? (lambda () (await-flag a (box #f) #:seconds 0)))
+    (check-false (thread-dead? (worker-thread a)) "a refused wait stopped the worker")
+    (stop! a)
+    (check-equal? (pools-stopped-by 'break) '(#f)))
 
   (test-case "a green thread is stopped by break"
     (define running (box #f))
