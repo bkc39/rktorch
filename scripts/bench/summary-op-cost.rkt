@@ -168,6 +168,12 @@
       (map (lambda (r) (ref r 'op)) _)
       remove-duplicates))
 
+;; finalizer runs per tensor the op registers, so a chain reads like one op
+(define (finalized-share records op layer threads #:impl [impl "rktorch"])
+  (define per-op (layer-median records op layer #:impl impl #:threads threads #:key 'finalized_per_op))
+  (define tensors (counts records op layer 'tensors_per_op))
+  (and per-op (real? tensors) (positive? tensors) (/ per-op tensors)))
+
 (define (k3-thread-scaling records #:impl [impl "rktorch"] #:layer [layer "facade"])
   (define ns (filter positive? (threads-present records impl)))
   (define top (and (pair? ns) (last ns)))
@@ -176,7 +182,7 @@
               #:when one)
     (define many (and top (layer-median records op layer #:impl impl #:threads top)))
     (define finalized
-      (and top (layer-median records op layer #:impl impl #:threads top #:key 'finalized_per_op)))
+      (and top (finalized-share records op layer top #:impl impl)))
     (hasheq 'op op 'threads top 'one one 'many many 'finalized finalized
             'value (and many (positive? one) (/ many one)))))
 
@@ -326,7 +332,7 @@
                 (define (m key) (layer-median records op layer #:impl impl #:threads n #:key key))
                 (format "~a / ~a / ~a / ~a / ~a / ~a" (num (m 'us_per_op) 2) (whole (m 'ops_per_s))
                         (whole (m 'heap_bytes_per_op)) (whole (m 'gc_ms))
-                        (whole (m 'main_cpu_ms)) (pct (m 'finalized_per_op)))))))
+                        (whole (m 'main_cpu_ms)) (pct (finalized-share records op layer n #:impl impl)))))))
   (table (append '("impl" "op" "layer" "main")
                  (map (lambda (n) (format "~a threads" n)) ns))
          rows))

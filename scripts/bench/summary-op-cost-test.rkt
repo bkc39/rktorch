@@ -108,6 +108,15 @@
   (define raw (row-of (k3-thread-scaling records #:layer "raw") 'op "scalar-add"))
   (check-near (ref raw 'value) 1.5))
 
+(test-case "K3's finalized share counts finalizer runs per tensor the op registers"
+  (define (row threads finalized)
+    (hasheq 'kind "op" 'impl "rktorch" 'op "chain" 'layer "facade" 'threads threads 'rep 0
+            'us_per_op 10.0 'finalized_per_op finalized))
+  (define extra (list (row 1 44.0) (row 8 11.0)
+                      (hasheq 'kind "counts" 'op "chain" 'layer "facade" 'tensors_per_op 44)))
+  (check-near (ref (row-of (k3-thread-scaling (append records extra)) 'op "chain") 'finalized)
+              0.25))
+
 (test-case "K4 is the facade's heap bytes per tensor it registers"
   (define four (row-of (k4-heap records) 'op "scalar-add"))
   (check-near (ref four 'value) 8000)
