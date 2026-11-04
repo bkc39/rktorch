@@ -62,7 +62,7 @@
   (define rk-device (ref rk 'meta 'device))
   (define py-device (ref py 'meta 'device))
   (define (timed r) (and r (format "~a (~a)" (ref r 'unit) (ref r 'timing))))
-  (define timed-alike? (equal? (timed rk) (timed py)))
+  (define timed-alike? (or (not (and rk py)) (equal? (timed rk) (timed py))))
   (define paired? (and rk py (equal? rk-device py-device) timed-alike?))
   (define loader? (equal? c "cifar-loader"))
   (define (rate r)
@@ -76,7 +76,7 @@
             (list (and (not (and rk py)) "no twin")
                   (and rk py (not (equal? rk-device py-device))
                        (format "device ~a≠~a" rk-device py-device))
-                  (and rk py (not timed-alike?) (format "timing ~a≠~a" (timed rk) (timed py)))
+                  (and (not timed-alike?) (format "timing ~a≠~a" (timed rk) (timed py)))
                   (and (eq? (ref py 'meta 'pin_memory) #t) "pin_memory (PyTorch only)")
                   (and py (equal? pipeline "batched") "twin crops per image")
                   (load-note rk py))))
@@ -228,4 +228,14 @@
     (for ([prefix (in-list '("| 09 ResNet" "| loader only"))])
       (check-regexp-match #rx"timing s/run \\(wall\\)≠s/epoch \\(steps\\)" (row-of md prefix)))
     (check-regexp-match #rx"^\\| loader only \\|[^|]*\\|[^|]*\\|[^|]*\\| images/s \\| 1280 \\| 1280 \\| - \\| - \\|"
-                        (row-of md "| loader only"))))
+                        (row-of md "| loader only")))
+
+  (test-case "H gives a row without a twin its own unit"
+    (for ([unit (in-list '("s/epoch" "s/run"))])
+      (define md (h-section (list (h "cifar-resnet" "rktorch" "batched-0" 0.25 13.0 75.0 20.0 0.0
+                                     #:unit unit))))
+      (check-regexp-match
+       (regexp (string-append "^\\| 09 ResNet \\| batched \\| 0 \\| cuda \\| " (regexp-quote unit)
+                              " \\| 0\\.25 \\| - \\| - \\|.*\\| no twin \\|$"))
+       (row-of md "| 09 ResNet")))))
+
