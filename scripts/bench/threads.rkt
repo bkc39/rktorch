@@ -74,7 +74,11 @@
       [(sync/timeout grace w) 1]
       [else (parameterize ([current-custodian custodian]) (kill-thread w)) 0])))
 
-(define (scaling-run n state #:seconds seconds #:grace [grace 30] #:mix [make-mix op-mix])
+(define (scaling-run n state
+                     #:seconds seconds
+                     #:grace [grace 30]
+                     #:mix [make-mix op-mix]
+                     #:ops-per-mix [ops-per-mix ops-per-iteration])
   (define go? (box #f))
   (define stop? (box #f))
   (define counts (make-vector n 0))
@@ -95,7 +99,9 @@
        (set-box! stop? #t)
        (set! stopped (reap! custodian workers grace)))))
   (match (unbox failure)
-    [#f (hasheq 'ops_per_s (/ (* ops-per-iteration ops) elapsed-s)
+    [#f (hasheq 'ops_per_s (/ (* ops-per-mix ops) elapsed-s)
+                'mixes ops
+                'elapsed_s elapsed-s
                 'main_steps_per_s (/ main-steps elapsed-s)
                 'started_ms t0
                 'stopped stopped)]

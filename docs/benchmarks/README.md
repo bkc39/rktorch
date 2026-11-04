@@ -445,3 +445,44 @@ Results are not committed. A leg's review packet carries its tables, and
 it compares against its base by running both checkouts in one run (see
 `PLTUSERHOME` above) rather than against stored records. The L0 tables are
 on #380.
+
+## Per-op cost scoreboard (#255)
+
+`scripts/bench/op-cost.rkt` prices rktorch's fixed per-op cost against
+PyTorch, and is the before/after table every #255 leg reports:
+
+```bash
+OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 nix develop -c \
+  taskset -c 0-7 racket scripts/bench/op-cost.rkt --reps 5
+racket scripts/bench/op-cost.rkt --summarize op-cost-<stamp>.jsonl
+```
+
+It writes `op-cost-<stamp>.jsonl` and `op-cost-<stamp>.md` to `--out-dir`
+(default `BASELINE_DIR`, else `~/.local/share/rktorch/bench`), refuses a
+directory inside the repository, and refuses more than one ATen intra-op
+thread. `taskset` is optional; the meta row records the affinity.
+
+- **Ops:** scalar add (`(+ (zeros 1) 1.0)`), 8×8 add, `zeros 8 8`,
+  `narrow`, `stack` of 32 cifar images, and one cifar sample through
+  `scripts/bench/workloads/pipelines.rkt`'s augmentation (44 tensors).
+- **Conditions:** the main thread, then 1/2/4/8 `#:pool 'own` threads
+  running the same loop (`--threads`), `--reps` interleaved repetitions,
+  PyTorch's rep between rktorch's. Each row records µs/op per thread,
+  ops/s summed, Racket heap bytes per op, GC ms and the load average.
+- **Attribution:** a ladder of layers, each adding one piece of the
+  op path, built in the bench from the library's own wrappers (no library
+  switch): `raw` (the C call and an explicit free), `registered`
+  (`registering`), `retry` (`oom-retry`), `accounted` (placement and
+  `record-allocation!`), `checked` (`tensor-allocator`, so the pressure
+  check), `wrapped` (shape readback), `unchecked`, `facade`. A piece is
+  the median of its paired per-rep step; the summary reports the pieces'
+  sum against the facade's own median and flags a gap over 10%. The
+  sampler (`profile-lib`) cross-checks the shares; crossings per op come
+  from the crossing hook.
+- **Pipelines (K5, K6):** `--suites pipelines` runs the jpeg, cifar and
+  text loaders of `scripts/bench/workloads/pipelines.rkt` against
+  `scripts/bench/python/pipelines.py` at `--pipeline-workers` (default 0
+  and 8), one child process per cell.
+  `--samples`, `--warmup` and `--epochs` shorten them.
+
+The summary's K1–K6 table follows the #255 metrics comment.

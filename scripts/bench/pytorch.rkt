@@ -17,6 +17,7 @@
          require-pytorch
          python-child-environment
          twin-records
+         child-records
          twin-record
          merged-meta)
 
@@ -37,9 +38,18 @@
    (lambda () (environment-variables-copy (current-environment-variables)))))
 
 (define (twin-records script args #:time-limit [time-limit 3600] #:log [log (current-error-port)])
+  (child-records python (cons (twin-script script) args)
+                 #:environment (python-child-environment) #:time-limit time-limit #:log log
+                 #:who script))
+
+(define (child-records program args
+                       #:environment [environment (current-environment-variables)]
+                       #:time-limit [time-limit 3600]
+                       #:log [log (current-error-port)]
+                       #:who [who program])
   (define-values (child out in err)
-    (parameterize ([current-environment-variables (python-child-environment)])
-      (apply subprocess #f #f #f python (path->string (twin-script script)) (map ~a args))))
+    (parameterize ([current-environment-variables environment])
+      (apply subprocess #f #f #f program (map ~a args))))
   (close-output-port in)
   (define relay (thread (lambda () (copy-port err log))))
   (define records (box '()))
@@ -56,9 +66,9 @@
   (close-input-port out)
   (close-input-port err)
   (match status
-    ['no-exit (raise-user-error 'pytorch "~a: no exit within ~a s" script time-limit)]
+    ['no-exit (raise-user-error 'pytorch "~a: no exit within ~a s" who time-limit)]
     [0 (reverse (unbox records))]
-    [code (raise-user-error 'pytorch "~a exited with ~a" script code)]))
+    [code (raise-user-error 'pytorch "~a exited with ~a" who code)]))
 
 (define (merged-meta parent child)
   (define twin (or child (hasheq)))
