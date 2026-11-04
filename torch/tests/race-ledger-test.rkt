@@ -22,8 +22,9 @@
            (only-in "../foreign/structs.rkt" tensor-handle)
            (only-in "private/race-harness.rkt"
                     await-flag check-ledger hooks join join-all labelled
-                    ledger-snapshot ledger-violations make-gate make-watch
-                    release-gate! seeded-generator settle! spawn stop! wait-for-arrival
+                    ledger-snapshot ledger-violations make-gate make-watch pools
+                    pools-stopped-by release-gate! seeded-generator settle! spawn stop!
+                    stop-worker! stops-for wait-for-arrival
                     watch-finalized watch-freed-count watch-hook
                     watch-max-holders watch-registered watch-release-count watch-released
                     while-inside with-parked with-race-hook worker-thread)
@@ -32,19 +33,6 @@
 
   (define mib (* 1024 1024))
   (define cpu (device 'cpu 0))
-  (define pools '(#f own))
-  ;; 'own + break-thread wedges Racket 9.3 CS: #443
-  (define stops-by-pool '((#f kill break) (own kill)))
-  (define (stops-for pool) (cdr (assq pool stops-by-pool)))
-  (define (pools-stopped-by stop-by)
-    (filter (lambda (pool) (memq stop-by (stops-for pool))) pools))
-
-  (test-case "a thread of its own pool is stopped by kill, never by break (#443)"
-    (check-false (memq 'break (stops-for 'own)))
-    (check-not-false (memq 'kill (stops-for 'own)))
-    (check-not-false (memq 'break (stops-for #f)))
-    (check-equal? (pools-stopped-by 'kill) pools)
-    (check-equal? (pools-stopped-by 'break) '(#f)))
 
   (define (handle-gate point h)
     (make-gate point #:when (lambda (subject) (eq? subject h))))
@@ -162,7 +150,7 @@
       (with-parked [a (spawn (lambda () (tensor-free! t)) #:pool pool #:label 'a)
                     #:at g #:watch w]
         (check-eq? (wait-for-arrival g) 'parked)
-        (break-thread (worker-thread a))
+        (stop-worker! a 'break)
         (release-gate! g)
         (check-exn exn:break? (lambda () (join a)))
         (check-equal? (watch-freed-count w h) 1
@@ -360,6 +348,7 @@
   (define-torch neg/bare (_fun _Tensor -> _Tensor/null) #:c-id tr_neg)
 
   (define trials 200)
+  (define registration-deadline-seconds 120)
 
   (define (stopped-mid-registration pool stop-by)
     (settle!)
@@ -382,12 +371,9 @@
                  #:pool pool))
         (await-flag a started)
         (sleep (* 0.002 (random rng)))
-        (case stop-by
-          [(kill) (stop! a)]
-          [(break)
-           (break-thread (worker-thread a))
-           (check-not-false (sync/timeout 30 (thread-dead-evt (worker-thread a)))
-                            "a broken worker kept running")]))
+        (stop-worker! a stop-by)
+        (check-not-false (sync/timeout 30 (thread-dead-evt (worker-thread a)))
+                         "a stopped worker kept running"))
       (settle!))
     (tensor-free! x)
     (define where (format "~a, ~a" (or pool 'ordinary) stop-by))
@@ -400,7 +386,8 @@
   (test-case "a thread stopped mid-registration leaves no handle unguarded"
     (for* ([pool (in-list pools)]
            [stop-by (in-list (stops-for pool))])
-      (call-with-process-deadline 120 (lambda () (stopped-mid-registration pool stop-by)))))
+      (call-with-process-deadline registration-deadline-seconds
+                                  (lambda () (stopped-mid-registration pool stop-by)))))
 
   (test-case "eight parallel threads accounting and unaccounting keep the counter at the fold"
     (define dev (device 'cuda 16))

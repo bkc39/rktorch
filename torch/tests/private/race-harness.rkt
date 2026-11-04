@@ -4,6 +4,7 @@
          (only-in ffi/unsafe/atomic
                   call-as-atomic in-atomic-mode? make-uninterruptible-lock
                   uninterruptible-lock-acquire uninterruptible-lock-release)
+         (only-in racket/contract/base ->i any contract-out flat-named-contract)
          (only-in racket/dict dict-ref)
          (only-in racket/list remove-duplicates)
          (only-in racket/match match)
@@ -45,6 +46,13 @@
          spawn
          join
          stop!
+         (contract-out
+          [stop-worker! (->i ([w worker?]
+                              [stop-by (w) (stop-for/c (worker-pool w))])
+                             any)])
+         pools
+         stops-for
+         pools-stopped-by
          await-flag
          worker-thread
          join-all
@@ -206,7 +214,16 @@
     (unless (in-atomic-mode?)
       (~> (generator) random perturb!))))
 
-(struct worker (thread outcome))
+(struct worker (thread outcome pool))
+
+(define pools '(#f own))
+;; break-thread on a thread of its own pool can wedge Racket CS: #443
+(define stops-by-pool (hash #f '(kill break) 'own '(kill)))
+(define (stops-for pool) (hash-ref stops-by-pool pool))
+(define (stop-for/c pool)
+  (flat-named-contract `(stops-for ,pool) (lambda (stop-by) (memq stop-by (stops-for pool)))))
+(define (pools-stopped-by stop-by)
+  (filter (lambda (pool) (memq stop-by (stops-for pool))) pools))
 
 (define (spawn thunk #:pool [pool #f] #:label [label #f])
   (define outcome (box #f))
@@ -215,7 +232,7 @@
     (set-box! outcome
               (with-handlers ([(lambda (_) #t) (lambda (e) (cons 'raised e))])
                 (cons 'returned (thunk)))))
-  (worker (if pool (thread body #:pool pool) (thread body)) outcome))
+  (worker (if pool (thread body #:pool pool) (thread body)) outcome pool))
 
 (define (join w #:seconds [seconds 60])
   (sync/timeout seconds (thread-dead-evt (worker-thread w)))
@@ -232,15 +249,23 @@
   (unless (sync/timeout seconds (thread-dead-evt t))
     (error 'stop! "a killed worker was still running after ~a s" seconds)))
 
+(define (stop-worker! w stop-by)
+  (match stop-by
+    ['kill (stop! w)]
+    ['break (break-thread (worker-thread w))]))
+
 (define (await-flag w flag #:seconds [seconds 30])
   (define deadline (+ (current-inexact-milliseconds) (* 1000 seconds)))
   (let poll ()
+    (define dead? (thread-dead? (worker-thread w)))
+    (define seen (unbox flag))
     (cond
-      [(unbox flag) (unbox flag)]
-      [(thread-dead? (worker-thread w))
+      [seen seen]
+      [dead?
        (join w)
        (error 'await-flag "a worker ended without setting its flag")]
       [(> (current-inexact-milliseconds) deadline)
+       (stop! w)
        (error 'await-flag "a worker did not set its flag within ~a s" seconds)]
       [else (sleep 0.001) (poll)])))
 

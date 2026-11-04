@@ -576,11 +576,12 @@ their pool thread's, and coroutine threads share the main thread's
 free one tensor explicitly: the handle is released once, and the other
 free raises @racket[exn:fail:contract].
 
-On Racket 9.3 CS, a @racket[break-thread] sent to a parallel thread while
-it runs tensor operations can wedge the process
+On Racket CS (seen on 9.1 and 9.3), a @racket[break-thread] sent to a
+thread made with @racket[#:pool 'own] while it runs tensor operations can
+wedge the process
 (@hyperlink["https://github.com/bkc39/rktorch/issues/443"]{#443}). Stop such
-a thread with @racket[kill-thread] or by shutting down its custodian, as
-@racket[dataloader] stops its @racket[#:workers] threads.
+a thread with @racket[kill-thread] or @racket[custodian-shutdown-all], as
+@racket[dataloader] does to its workers when their custodian is shut down.
 
 A tensor must not be sent to another place. It is accepted as a place
 message but arrives as a bare pointer to the same native storage, with no
