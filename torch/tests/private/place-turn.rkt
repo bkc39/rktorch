@@ -2,27 +2,18 @@
 
 (require (only-in racket/place place-channel-put)
          (only-in "../../foreign.rkt" zeros)
-         (only-in "../../foreign/raw/collector.rkt" on-main-os-thread?)
-         (only-in (submod "../../runtime/reaper.rkt" private) reaper-statistics))
+         (only-in "../../foreign/raw/collector.rkt" on-main-os-thread?))
 
 (provide main)
 
-(define (wakes)
-  (hash-ref (reaper-statistics) 'wakes))
-
-(define (wakes-a-reaper-after-a-collection?)
-  (sleep 0.02)
-  (define before (wakes))
+(define (yields-after-a-collection?)
   (collect-garbage)
+  (define ran? (box #f))
+  (thread (lambda () (set-box! ran? #t)))
   (zeros 1)
-  (define deadline (+ (current-inexact-milliseconds) 1000))
-  (let spin ()
-    (cond
-      [(> (wakes) before) #t]
-      [(> (current-inexact-milliseconds) deadline) #f]
-      [else (spin)])))
+  (unbox ran?))
 
 (define (main ch)
   (place-channel-put ch (list (on-main-os-thread?)
                               (for/and ([_ (in-range 5)])
-                                (wakes-a-reaper-after-a-collection?)))))
+                                (yields-after-a-collection?)))))

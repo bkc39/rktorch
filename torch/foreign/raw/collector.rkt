@@ -1,7 +1,10 @@
 #lang racket/base
 
-(require (only-in "../../runtime/main-thread.rkt" on-main-os-thread?)
-         (only-in "../../runtime/reaper.rkt" drain-deadline drain-reapers! wake-reapers!)
+(require (only-in ffi/unsafe/atomic in-atomic-mode?)
+         (only-in "../../runtime/main-thread.rkt" main-place? on-main-os-thread?)
+         (only-in "../../runtime/reaper.rkt"
+                  collect-and-drain-reapers! drain-deadline drain-reapers!
+                  reap-after-collection! wake-reapers!)
          (only-in "cas.rkt" cas-add! cas-claim-when!)
          (only-in "race-points.rkt" race-point))
 
@@ -52,14 +55,22 @@
 
 (define collection-latch (make-thread-cell (make-weak-box (box 0))))
 
+(define (rearm-latch!)
+  (thread-cell-set! collection-latch (make-weak-box (box 0))))
+
+;; Outside the main place there are no reapers: ffi's finalizer thread
+;; releases, and it runs only when the place's main OS thread yields.
 (define (wake-after-collection!)
-  (unless (weak-box-value (thread-cell-ref collection-latch))
-    (thread-cell-set! collection-latch (make-weak-box (box 0)))
-    (wake-reapers!)))
+  (cond
+    [(weak-box-value (thread-cell-ref collection-latch)) (void)]
+    [(main-place?)
+     (rearm-latch!)
+     (if (in-atomic-mode?) (wake-reapers!) (reap-after-collection!))]
+    [(or (in-atomic-mode?) (not (on-main-os-thread?))) (void)]
+    [else (rearm-latch!) (sleep 0)]))
 
 (define (drain-finalizers!)
   (drain-reapers!))
 
 (define (collect-and-wait!)
-  (collect-garbage)
-  (drain-finalizers!))
+  (collect-and-drain-reapers!))

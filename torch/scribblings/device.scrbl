@@ -371,11 +371,19 @@ nothing: a mark that @racket['pressure-collections] in
 raised.
 
 Dead tensors are released by reapers, parallel threads made with
-@racket[#:pool 'own] when @racketmodname[torch] is instantiated, never on the
-main OS thread. The environment variable @tt{RKTORCH_REAPERS} sets how many,
-from 1 to 16, and 2 by default; it is read once, when the library loads. The
-first tensor operation on any thread after a collection wakes them, and a
-tensor operation no longer yields after a collection.
+@racket[#:pool 'own] when @racketmodname[torch] is instantiated in the main
+place. The environment variable @tt{RKTORCH_REAPERS} sets how many, from 1
+to 16, and 2 by default; it is read once, when the library loads. The first
+tensor operation on any thread after a collection releases a batch of what
+that collection found, at most 32 tensors, then wakes a reaper for the rest;
+a tensor operation no longer yields after a collection. Nothing stops a
+reaper: @racket[plumber-flush-all] leaves them running, and the process exits
+with them parked.
+
+Any other place starts no reapers. There a finalizer on the place's main OS
+thread releases each dead tensor, and a coroutine thread's first tensor
+operation that allocates or moves after each collection yields once, outside
+any uninterruptible region, so that the finalizer thread runs.
 
 The ledger also charges Racket's collector for what it cannot see. At every
 trough, before collecting, it reads each device's allocator and charges the

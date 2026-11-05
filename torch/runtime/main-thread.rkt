@@ -2,7 +2,8 @@
 
 (require (only-in ffi/unsafe/vm vm-eval))
 
-(provide on-main-os-thread?)
+(provide main-place?
+         on-main-os-thread?)
 
 ;; Green threads run on the place's main OS thread, whichever thread
 ;; instantiates this module.
@@ -14,3 +15,8 @@
 
 (define (on-main-os-thread?)
   (eqv? (os-thread-id) main-os-thread))
+
+;; Chez numbers the process's first OS thread 0, and only the main place
+;; runs its green threads there.
+(define (main-place?)
+  (eqv? main-os-thread 0))

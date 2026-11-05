@@ -2,7 +2,9 @@
 
 (require (only-in ffi/unsafe/atomic call-as-atomic)
          (only-in threading ~>)
-         (only-in "../../foreign.rkt" native-memory-unaccounted native-memory-use))
+         (only-in "../../foreign.rkt" native-memory-unaccounted native-memory-use)
+         (only-in "../../foreign/raw/collector.rkt" drain-finalizers!)
+         (only-in (submod "../../runtime/reaper.rkt" private) reaper-statistics reaper-threads))
 
 (provide median-allocation)
 
@@ -12,8 +14,25 @@
   (for/sum ([entry (in-list (append (native-memory-use) (native-memory-unaccounted)))])
     (cdr entry)))
 
+;; A reaper counts its park before it waits and its wake after.
+(define (reapers-parked?)
+  (define stats (reaper-statistics))
+  (= (- (hash-ref stats 'parks) (hash-ref stats 'wakes)) (length (reaper-threads))))
+
+(define (await-parked-reapers)
+  (define deadline (+ (current-inexact-milliseconds) 2000))
+  (let wait ()
+    (unless (or (reapers-parked?) (> (current-inexact-milliseconds) deadline))
+      (sleep 0)
+      (wait))))
+
+;; Earlier runs' garbage is released, and every reaper parked again, before
+;; the window opens: the heap counts every thread's allocation, and a woken
+;; reaper's is not this run's.
 (define (racket-heap-allocation thunk)
   (collect-garbage 'minor)
+  (drain-finalizers!)
+  (await-parked-reapers)
   (define start
     (call-as-atomic
      (lambda ()

@@ -95,14 +95,14 @@
 
   (define-runtime-path place-turn "private/place-turn.rkt")
 
-  (test-case "L20: inside a place, an op after a collection wakes a parked reaper"
+  (test-case "inside a place, which has no reapers, an op after a collection lets a waiting green thread run"
     (within 120
             (lambda ()
               (define p (dynamic-place place-turn 'main))
               (define answer (sync/timeout 100 p))
               (place-kill p)
               (check-equal? answer '(#t #t)
-                            "(on the place's main OS thread?, woke a reaper after each collection?)"))))
+                            "(on the place's main OS thread?, yielded after each collection?)"))))
 
   (define-runtime-path place-first-require "private/place-first-require.rkt")
 

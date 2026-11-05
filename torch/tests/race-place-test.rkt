@@ -47,4 +47,26 @@
           (exit (if (and churned dead) 0 3))))))
 
   (test-case "L14: a place whose 'own workers made tensors dies when its body returns"
-    (check-equal? (exit-status-of place-exit-program #:within 90) 0)))
+    (check-equal? (exit-status-of place-exit-program #:within 90) 0))
+
+  (define place-exits 100)
+
+  (define place-exits-program
+    `(begin
+       (require (only-in racket/place dynamic-place place-dead-evt)
+                (only-in torch/tests/private/wedge call-with-process-deadline))
+       (call-with-process-deadline
+        280
+        (lambda ()
+          (define module (collection-file-path "place-exit.rkt" "torch" "tests" "private"))
+          (define exited
+            (for/sum ([_ (in-range ,place-exits)])
+              (define p (dynamic-place module 'main))
+              (define made (sync/timeout 30 p))
+              (define dead (sync/timeout 10 (place-dead-evt p)))
+              (if (and made dead) 1 0)))
+          (eprintf "~a of ~a places made tensors and exited\n" exited ,place-exits)
+          (exit (if (= exited ,place-exits) 0 3))))))
+
+  (test-case "a hundred places that load torch and make tensors exit without crashing the process"
+    (check-equal? (exit-status-of place-exits-program #:within 300) 0)))

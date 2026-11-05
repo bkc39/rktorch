@@ -786,10 +786,12 @@ Runtime paths take `(only-in racket/runtime-path #%datum define-runtime-path)`.
   `shape-ops`, `elementwise`, `reduce`, `linalg`, `autograd`.
 - `torch/runtime/reaper.rkt` — the reapers: one ordered Chez guardian per
   kind (`reaped`), `reap-when-dead!` (the hot registration, no contract),
-  `drain-reapers!`, `wake-reapers!`, and `RKTORCH_REAPERS` parallel
-  threads that release dead handles off main (#439); it requires nothing
-  from `memory`, `pressure` or `collector`. `torch/runtime/main-thread.rkt`
-  — `on-main-os-thread?`. The loader's own "reaper" in
+  `drain-reapers!`, `collect-and-drain-reapers!`, `wake-reapers!`, and
+  `RKTORCH_REAPERS` parallel threads that release dead handles off main
+  (#439), in the main place only; any other place falls back to
+  `register-finalizer`. It requires nothing from `memory`, `pressure` or
+  `collector`. `torch/runtime/main-thread.rkt` — `on-main-os-thread?`,
+  `main-place?`. The loader's own "reaper" in
   `torch/data/workers.rkt` is unrelated.
   **`docs/internals.md` is the canonical memory-management narrative**
   (lifetime chain, phantom-bytes pressure, typed OOM + retry). The
@@ -818,7 +820,8 @@ Runtime paths take `(only-in racket/runtime-path #%datum define-runtime-path)`.
   `cas-take!`, `cas-claim!`, `cas-claim-when!`, `cas-field-claim!`), whose
   `#:site` must be one of `torch/foreign/raw/cas.rkt`'s enumerated sites or the call is a
   syntax error; and no comment under `torch/foreign/` or `torch/runtime/`
-  cites an issue number. Nothing kills or breaks a reaper. The rarely touched ledger fields are written only under
+  cites an issue number. Reapers run only in the main place, and nothing
+  kills, breaks or stops one; process exit leaves them parked. The rarely touched ledger fields are written only under
   `with-ledger`, inside which nothing blocks, sleeps or posts.
   Explicit synchronous release first takes the handle with one CAS on the
   wrapper's `state`, from `'live` to `'freeing`. A loser raises

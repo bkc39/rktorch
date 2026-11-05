@@ -146,18 +146,21 @@
           (define spent (- (main-cpu-ms) before))
           (check-true (<= spent 20) (format "main spent ~a ms of CPU" spent))))]))
 
-  (define-runtime-path place-parked-reapers "private/place-parked-reapers.rkt")
+  (define-runtime-path place-releases "private/place-releases.rkt")
 
-  (define place-dies-program
+  (define place-releases-program
     `(begin
        (require (only-in racket/place dynamic-place place-dead-evt))
-       (define p (dynamic-place (string->path ,(path->string place-parked-reapers)) 'main))
-       (define parked (sync/timeout 30 p))
-       (exit (if (and (eqv? parked 2) (sync/timeout 10 (place-dead-evt p))) 0 1))))
+       (define p (dynamic-place (string->path ,(path->string place-releases)) 'main))
+       (define answer (sync/timeout 60 p))
+       (define dead (sync/timeout 10 (place-dead-evt p)))
+       (eprintf "place: ~s, dead ~a\n" answer (and dead #t))
+       (exit (if (and (equal? answer '(#t #t #t #t #t)) dead) 0 1))))
 
-  (test-case "a place whose two reapers are parked is dead within 10 s of its body returning"
-    (check-equal? (with-reapers 2 (lambda () (exit-status-of place-dies-program #:within 60)))
-                  0))
+  (test-case "a place other than the main one starts no reapers and still releases its tensors"
+    (check-equal? (exit-status-of place-releases-program #:within 120) 0
+                  (string-append "(no reaper threads?, drained?, back to baseline?,"
+                                 " a run per tensor?, every release on the place's main OS thread?)")))
 
   (define both-wake-program
     '(begin
@@ -196,30 +199,81 @@
   (define flushed-program
     '(begin
        (require (only-in torch + native-memory-use sum zeros)
-                (only-in torch/foreign/raw/collector collect-and-wait!)
-                (only-in (submod torch/runtime/reaper private) reaper-threads)
+                (only-in (submod torch/runtime/reaper private) reaper-statistics reaper-threads)
                 (only-in torch/tests/private/wedge call-with-process-deadline))
        (define (cpu-bytes)
          (for/sum ([entry (in-list (native-memory-use))]) (cdr entry)))
        (define (churn!)
          (for ([_ (in-range 2000)])
            (sum (+ (zeros 64 64) 1.0))))
+       (define (released)
+         (hash-ref (reaper-statistics) 'released))
        (call-with-process-deadline
         50
         (lambda ()
           (zeros 1)
           (define baseline (cpu-bytes))
           (plumber-flush-all (current-plumber))
-          (define ended? (andmap thread-dead? (reaper-threads)))
+          (define running? (not (ormap thread-dead? (reaper-threads))))
+          (define before (released))
           (for-each thread-wait (for/list ([_ (in-range 2)]) (thread churn! #:pool 'own)))
-          (define drained? (collect-and-wait!))
-          (define back? (<= (cpu-bytes) (+ baseline (* 2 64 64 4))))
-          (eprintf "reapers ended ~a, drained ~a, baseline ~a, now ~a\n"
-                   ended? drained? baseline (cpu-bytes))
-          (exit (if (and ended? drained? back?) 0 1))))))
+          (collect-garbage)
+          (zeros 1)
+          (define deadline (+ (current-inexact-milliseconds) 10000))
+          (define back?
+            (let wait ()
+              (cond
+                [(<= (cpu-bytes) (+ baseline (* 2 64 64 4))) #t]
+                [(> (current-inexact-milliseconds) deadline) #f]
+                [else (sleep 0.01) (wait)])))
+          (eprintf "reapers running ~a, released ~a, back ~a (baseline ~a, now ~a)\n"
+                   running? (- (released) before) back? baseline (cpu-bytes))
+          (exit (if (and running? back? (> (released) before)) 0 1))))))
 
-  (test-case "a plumber-flush-all ends the reapers before it returns, and a drain still releases"
+  (test-case "a plumber-flush-all in a live program leaves the reapers reclaiming"
     (check-equal? (exit-status-of flushed-program #:within 60) 0))
+
+  (define held-reaper-program
+    '(begin
+       (require (only-in torch zeros)
+                (only-in torch/foreign/raw/cas cas-add! cas-claim!)
+                (only-in torch/foreign/raw/race-points race-hook)
+                (only-in torch/runtime/reaper reap-when-dead! reaped wake-reapers!)
+                (only-in (submod torch/runtime/reaper private) reaper-threads)
+                (only-in torch/tests/private/wedge call-with-process-deadline))
+       (define holding (box #f))
+       (define go (box #f))
+       (set-box! race-hook
+                 (lambda (name subject)
+                   (when (and (eq? name 'reaper-taken)
+                              (memq subject (reaper-threads))
+                              (cas-claim! holding #f subject #:site 'gate))
+                     (let spin () (unless (unbox go) (spin))))))
+       (define released (box 0))
+       (define kind (reaped 'counted (lambda (_v) (cas-add! released 1))))
+       (define (drop-and-collect! n)
+         (for ([_ (in-range n)]) (reap-when-dead! kind (make-vector 1 0)))
+         (collect-garbage))
+       (call-with-process-deadline
+        50
+        (lambda ()
+          (zeros 1)
+          (let hold ()
+            (unless (unbox holding)
+              (drop-and-collect! 1)
+              (wake-reapers!)
+              (sleep 0.01)
+              (hold)))
+          (define before (unbox released))
+          (drop-and-collect! 5)
+          (zeros 1)
+          (define by-the-op (- (unbox released) before))
+          (set-box! go #t)
+          (eprintf "released by the op after the collection: ~a of 5\n" by-the-op)
+          (exit (if (= by-the-op 5) 0 1))))))
+
+  (test-case "with its one reaper held mid-batch, the first op after a collection releases what it found"
+    (check-equal? (with-reapers 1 (lambda () (exit-status-of held-reaper-program #:within 60))) 0))
 
   (test-case "L15: a process exits with status 0 while its reapers are parked"
     (check-equal? (exit-status-of '(begin

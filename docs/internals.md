@@ -177,7 +177,11 @@ representative, no closure and no lock.
   posts nothing. The latch,
   `wake-after-collection!` in `torch/foreign/raw/collector.rkt`, runs at
   the end of `collect-under-pressure!`: a thread's first accounting after
-  a collection, on any thread, wakes them. The latch is per thread, a weak
+  a collection, on any thread, takes and releases one batch itself
+  (`reap-after-collection!`), then wakes a reaper. A reaper woken first
+  could take the batch and lose its CPU while holding it: on two pinned
+  CPUs the #377 conv loop then ended with up to 4 results still charged
+  that only a drain released, and 1 run in 20 went over L19's bound. The latch is per thread, a weak
   box in a thread cell that the collection clears. The canary is a
   `register-finalizer` box that wakes them and re-arms itself; it runs on
   the finalizer thread whenever main's scheduler runs, and covers main
@@ -188,8 +192,8 @@ representative, no closure and no lock.
 - **Count and lifetime.** `RKTORCH_REAPERS` (1 to 16, default 2) reapers,
   read once at load, start as `#:pool 'own` threads under
   `make-custodian-at-root`, so a user's `custodian-shutdown-all` leaves
-  them running. They start once per namespace (each sandbox evaluator has
-  its own) and never exit while their place lives. One reaper saturates
+  them running. They start once per namespace of the main place (each
+  sandbox evaluator has its own) and never exit. One reaper saturates
   near 130k frees/s.
 
 A native fault is the exception to "swallowed and counted". Racket CS reports a
@@ -594,7 +598,8 @@ than a second wrapper over the same storage.
   adoption back. Nothing inside it blocks, sleeps or posts; the one
   foreign call inside is `tr_tensors_reset_grad`.
 - No reaper runs on main's OS thread; main releases tensors only inside a
-  drain it called itself (R2). Taking and releasing are one uninterruptible
+  drain it called itself, or as the one batch its first accounting after
+  a collection takes (R2). Taking and releasing are one uninterruptible
   region, and no reaper parks inside a region or while holding the take
   lock (R6). A reaper waits only on its own park semaphore, and nothing
   in the library kills or breaks a reaper (R7): `kill-thread` on an
@@ -607,18 +612,22 @@ than a second wrapper over the same storage.
   or any semaphore but their own, and never account, so they never reach
   `collect-under-pressure!`: the drainer waits only on the take lock and
   on batches, which cannot wait on it.
-- An exiting place's custodian kills its threads, and that kill hangs on
-  a reaper parked on its OS semaphore; a reaper returning from that wait
-  while the place is torn down, or one started during the exit, kills the
-  whole process. So a flush callback on the place's plumber, which is
-  flushed before the custodian shuts down, while a custodian's `#:at-exit?`
-  shutdown callback is not (`race-place-test`, L14), calls
-  `stop-reapers!`: it sets a flag every reaper reads after each park and
-  batch, posts every reaper, and waits up to `drain-deadline` for them to
-  end. Any `plumber-flush-all` ends them, not only exit; drains still
-  release on the calling thread. `place-kill` does not wait for the flush
-  and still kills the process (open). Whatever is still unreleased when a
-  place dies leaks natively, as before.
+- Reapers run only in the main place, and nothing kills, breaks or stops
+  one: a process exits with status 0 while its reapers are parked
+  (`reaper-test`, L15), and `plumber-flush-all` in a live program leaves
+  them reclaiming. In any other place `reaped` returns a kind whose
+  `reap-when-dead!` is `register-finalizer` with one finalizer per kind,
+  no reaper thread starts, a drain settles ffi's finalizer thread by quiet
+  turns, `collect-and-wait!` first waits for a canary will, and an op
+  after a collection yields on the place's main OS thread, all as before
+  F1. `'own` reaper threads do not survive a place's exit on Racket CS: a
+  place whose reapers park on OS semaphores crashed its parent process
+  within a few exits (`application: not a procedure; given:
+  [?error-value->string-handler not ready?]`), whether a plumber flush
+  re-parked them on a Racket semaphore or waited for them, and
+  `place-kill` raced the place's own exit the same way. A hundred places
+  that load torch and make tensors exit cleanly (`race-place-test`).
+  Whatever is still unreleased when a place dies leaks natively, as before.
 - A run is counted after its release, so a drain polling from any thread
   never counts a run that has not released; the release path uses only
   CAS, `eq?` tables and the ledger lock.
