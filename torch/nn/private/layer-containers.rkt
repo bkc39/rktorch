@@ -6,7 +6,8 @@
          (only-in "layer-core.rkt"
                   layer-named-buffers layer-named-children layer-named-parameters layer?
                   prop:rebuilder registry registry-buffers registry-children
-                  registry-mode registry-params))
+                  registry-mode registry-params)
+         (only-in "memo.rkt" remembered))
 
 (provide (struct-out Children%)
          (struct-out Fn%)
@@ -18,16 +19,19 @@
 (struct Fn% registry (proc)
   #:reflection-name 'Fn
   #:property prop:rebuilder
-  (lambda (self _child _tensor _seen)
-    (unless (null? (append (registry-params self) (registry-buffers self)
-                           (registry-children self)))
-      (raise-arguments-error
-       'layer-copy
-       (string-append "a procedure->Layer layer with parameters, buffers or"
-                      " children cannot be copied: its procedure would"
-                      " still read the original's")
-       "layer" self))
-    (Fn% fn-forward '() '() '() (registry-mode self) (Fn%-proc self))))
+  (lambda (self _child _tensor seen)
+    (remembered seen self (lambda () (rebuilt-fn self)))))
+
+(define (rebuilt-fn self)
+  (unless (null? (append (registry-params self) (registry-buffers self)
+                         (registry-children self)))
+    (raise-arguments-error
+     'layer-copy
+     (string-append "a procedure->Layer layer with parameters, buffers or"
+                    " children cannot be copied: its procedure would"
+                    " still read the original's")
+     "layer" self))
+  (Fn% fn-forward '() '() '() (registry-mode self) (Fn%-proc self)))
 
 (define fn-forward
   (make-keyword-procedure

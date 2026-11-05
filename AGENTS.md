@@ -404,41 +404,60 @@ its own values); the stack contract rejects layer keywords or `#:norm #t`
 beside a layer or thunk. `layer-copy` (`torch/nn/copy.rkt`) is a deep copy
 with no RNG draws: fresh tensors with the same values, device, dtype and
 requires-grad (no gradients), children copied recursively, modes kept.
-It refuses a cycle before copying anything, then copies as a DAG with one
-memo per call, passed explicitly (`layer-rebuild-in`). `layer-copy`'s
+It follows Python's `copy.deepcopy`, cycles included, with one memo per
+call (`private/memo.rkt`), passed explicitly (`layer-rebuild-in`).
+`define-layer` layers (`rebuilt-layer`, `private/field-walk.rkt`; the
+struct's fields and the registry's lists are mutable for this) and mutable
+containers (`allocated`) are made empty, recorded, then filled, so a
+back-edge gets the part-built copy, as Python's reduce and its list and
+dict copies give. Immutable pairs, vectors, boxes and hashes
+(`rebuilt-immutable`) copy their parts first and re-check the memo, the
+tuple rule, with a frame per value in progress: re-entering a pair hands
+out a shell that is filled in place when its frame ends
+(`unsafe-set-immutable-car!`); re-entering another kind after an anchor (an
+allocation or a pair entered since its frame began) walks it again, as
+Python does; a cycle with no anchor, only immutable vectors, boxes and
+hashes, gets placeholders, resolved per strongly connected set with
+`make-reader-graph`, which copies every cycle it reaches, so
+`check-survived` raises when the set holds another cycle or is keyed by a
+placeholder. After the walk (`finish!`) every copied strong mutable
+`equal?` hash is re-keyed (a key copied part-built hashed differently;
+`eqv?` and `equal-always?` compare mutable values by identity and need
+none), immutable `equal?` hashes are checked (`check-keys`) to find each
+key as the original does, else raise, and `check-names` runs on every
+`define-layer` copy. A hand-written layer is recorded only when its
+rebuild returns (`remembered`): re-entering it raises
+(`layer-rebuild-reentered`), Python's `RecursionError`, so whether a cycle
+through one copies depends on where the copy starts. `layer-copy`'s
 `child` is a `remembering` struct (`prop:procedure` plus the memo); the
 public `layer-rebuild` takes the memo from such a `child` and starts a
-fresh one for any other, so a hand-written rebuild that passes on the
-copy's `child` joins the copy, its layers and its containers both. That
-check lives only at the public boundary: the exported `layer-rebuild`
-(`torch/nn/layer.rkt`) is a plain procedure over the raw generic method,
-which `#:methods gen:layer` blocks still define by name (`define-generics`
-binds methods by symbol at the use site). The registry method records a
-`define-layer` layer in the memo, re-entry rebuilding it plainly so a
-cycle is refused at the next field, named; the wrapper records only a
-layer without `prop:rebuilder`, and refuses its re-entry at once
-(`layer-rebuild-reentered`), naming it. A `define/generic` delegation
-between hand-written layers reaches neither: the delegated layer itself
-is copied apart (what its method passes to `child` still joins), and a
-cycle of them does not terminate (#466); delegate with `(child name inner)`.
-`copy-child` and `layer-rebuild-in` call `rebuilder-of` directly, so
-nothing is memoized twice. An open memo entry holds the thread building
-it (claimed under the memo's semaphore); a key open in another live
-thread raises, so a rebuild's worker thread joins the copy only one at a
-time, and one killed while it rebuilds releases its keys. The memo
-serves one `layer-copy` call and is not kill-safe inside its own lock: a
-thread killed in `claim`'s critical section leaves it held. `with-remembering` closes the callback when `layer-copy` exits by
-any route and clears the memo: a stashed callback, called or passed to
-`layer-rebuild`, then raises. The memo drops a value from its
+fresh one (`call-with-memo`) for any other, so a hand-written rebuild that
+passes on the copy's `child` joins the copy, its layers and its containers
+both. That check lives only at the public boundary: the exported
+`layer-rebuild` (`torch/nn/layer.rkt`) is a plain procedure over the raw
+generic method, which `#:methods gen:layer` blocks still define by name
+(`define-generics` binds methods by symbol at the use site). A
+`define/generic` delegation between hand-written layers reaches neither:
+the delegated layer itself is copied apart (what its method passes to
+`child` still joins), and a cycle of them does not terminate (#466);
+delegate with `(child name inner)`. An open memo entry holds the thread
+building or filling it (claimed under the memo's semaphore); a key open in
+another live thread raises, so a rebuild's worker thread joins the copy
+only one at a time, and one killed while it rebuilds releases its keys.
+The memo serves one call and is not kill-safe inside its own lock: a
+thread killed in `claim`'s critical section leaves it held.
+`with-remembering` closes the callback when `layer-copy` exits by any
+route, and `call-with-memo` clears the memo: a stashed callback, called or
+passed to `layer-rebuild`, then raises. The memo drops a value from its
 in-progress set on any exit, so a refusal a rebuild catches is not later
 read as a cycle. Keys of weak and ephemeron hashes are shared and not
-walked (`walked-entry`, used by `children-of` and the rebuild alike, so
-the cycle check sees the graph the copy walks); values are copied. This
-follows Python's `WeakKeyDictionary.__deepcopy__`: a weak key the model
-also holds in a field is not mapped to that field's copy, so the copy's
-table stays keyed by the original and keeps an entry only while the
-original key is alive. A container is built only from finished parts,
-never filled afterwards. It runs on the `gen:layer` method `layer-rebuild layer child tensor`, which
+walked; values are copied. This follows Python's
+`WeakKeyDictionary.__deepcopy__`: a weak key the model also holds in a
+field is not mapped to that field's copy, so the copy's table stays keyed
+by the original and keeps an entry only while the original key is alive.
+An `equal?` key on a cycle through a mutable hash is one Racket's
+`equal-hash-code` does not terminate on; copying it into an `equal?` table
+may not either. It runs on the `gen:layer` method `layer-rebuild layer child tensor`, which
 `define-layer` derives (`LSTM`'s plain `entries` list is why plain fields
 are walked); a stateless `procedure->Layer` copies, one with state
 refuses, and a hand-written `gen:layer` without the method refuses, naming
@@ -874,12 +893,11 @@ Runtime paths take `(only-in racket/runtime-path #%datum define-runtime-path)`.
   `Children` structs, `classify`, `check-names`),
   `torch/nn/private/layer-fields.rkt`
   (the expansion's runtime: `assemble`, the `set!` check, entry procedures),
-  `torch/nn/private/field-walk.rkt` (`children-of`, the one listing of a
-  node's children; `refuse-cycles`, `layer-copy`'s up-front check; and
-  `rebuilt-values`, the field walk `layer-rebuild` uses) and
-  `torch/nn/private/memo.rkt` (the per-call memo with its in-progress set,
-  shared by both walks, and `remembering`, the closable callback that
-  carries it, made by `with-remembering`); `torch/nn/mode.rkt` = `train!`, `eval!`,
+  `torch/nn/private/field-walk.rkt` (`rebuilt-layer`, the allocate-and-fill
+  field walk `layer-rebuild` uses) and `torch/nn/private/memo.rkt` (the
+  per-call memo with its in-progress set and immutable frames, and
+  `remembering`, the closable callback that carries it, made by
+  `with-remembering`); `torch/nn/mode.rkt` = `train!`, `eval!`,
   `call-with-mode` and `in-mode`; `torch/nn/parameter.rkt`, `torch/nn/buffer.rkt`, `torch/nn/linear.rkt`,
   `torch/nn/init.rkt`, `torch/nn/optim.rkt`, `torch/nn/ema.rkt`, `torch/nn/loss.rkt`, `torch/nn/recurrent.rkt`,
   `torch/nn/attention.rkt`, `torch/nn/transformer.rkt`, `torch/nn/positions.rkt`, `torch/nn/copy.rkt`, `torch/nn/clip.rkt`).

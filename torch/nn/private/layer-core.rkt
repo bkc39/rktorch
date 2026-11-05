@@ -9,7 +9,7 @@
          (only-in "../../foreign.rkt" device dtype prop:to)
          (only-in (submod "../../foreign.rkt" unsafe) to!)
          (only-in "../../foreign/autograd-ops.rkt" collect-at-forward-trough!)
-         (only-in "memo.rkt" memo remembered remembering-memo remembering?))
+         (only-in "memo.rkt" call-with-memo remembered remembering-memo remembering?))
 
 ;; the noqa'd exports are macro expansions raco review cannot see
 (provide gen:layer
@@ -23,11 +23,7 @@
          layer-set-mode! ;; noqa
          layer-rebuild ;; noqa
          layer-rebuild-in
-         layer-rebuild-reentered
          rebuilder?
-         fields-of
-         fields?
-         prop:fields
          prop:on-move
          prop:rebuilder
          (struct-out registry)
@@ -182,7 +178,8 @@
   (define forward (if (registry? m) (registry-forward m) layer-forward))
   (at-forward-trough (keyword-apply forward kws kw-args m inputs)))
 
-(struct registry (forward params buffers children [mode #:mutable])
+(struct registry (forward [params #:mutable] [buffers #:mutable] [children #:mutable]
+                          [mode #:mutable])
   #:methods gen:layer
   [(define (layer-forward self . inputs)
      (apply (registry-forward self) self inputs))
@@ -214,29 +211,26 @@
    (define (layer-mode self)
      (registry-mode self))
    (define (layer-rebuild self child tensor)
-     (cond
-       [(remembering? child)
-        (define seen (remembering-memo child))
-        (define (rebuilt)
-          ((rebuilder-of self) self child tensor seen))
-        (remembered seen self rebuilt #:reentered rebuilt)]
-       [else ((rebuilder-of self) self child tensor (memo 'layer-rebuild))]))])
+     (define (rebuilt seen)
+       ((rebuilder-of self) self child tensor seen))
+     (if (remembering? child)
+         (rebuilt (remembering-memo child))
+         (call-with-memo 'layer-rebuild rebuilt)))])
 
 (define-values (prop:rebuilder rebuilder? rebuilder-of) ;; noqa
   (make-struct-type-property 'rebuilder))
 
-(define-values (prop:fields fields? fields-of)
-  (make-struct-type-property 'fields))
-
 (define (layer-rebuild-in seen m child tensor)
-  (cond
-    [(rebuilder? m) ((rebuilder-of m) m child tensor seen)]
-    [else (layer-rebuild m child tensor)]))
+  (if (rebuilder? m)
+      ((rebuilder-of m) m child tensor seen)
+      (remembered seen m
+                  (lambda () (layer-rebuild m child tensor))
+                  (lambda () (layer-rebuild-reentered m)))))
 
 (define (layer-rebuild-reentered m)
   (raise-arguments-error
    'layer-copy
-   "a hand-written layer-rebuild reaches the layer itself, and a cycle cannot be copied"
+   "a cycle re-enters a hand-written layer-rebuild before it returns"
    "layer" m))
 
 (define (child-parameters c)

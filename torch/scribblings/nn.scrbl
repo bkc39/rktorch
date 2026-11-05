@@ -643,10 +643,21 @@ parameter does not copy them either. Plain fields are copied all the way
 down: pairs, vectors, boxes and hashes, a hash's keys included, each
 keeping its mutability and a hash its comparison and weakness, with the
 layers and tensors inside them copied as children and parameters are. Any
-other value a field holds, a number or a procedure, is shared. Within one
-copy, sharing is kept: a layer, a tensor or a container that appears twice
-in @racket[m], as tied weights do, in one layer or across a layer and its
-children, appears twice in the copy as one value.
+other value a field holds, a number or a procedure, is shared.
+
+Copying follows Python's @tt{copy.deepcopy}, so sharing and cycles are
+kept: a layer, a tensor or a container reached twice in @racket[m], as tied
+weights are or through a cycle, is one value in the copy. A
+@racket[define-layer] layer and a mutable container are made empty,
+remembered, then filled, as Python's default reduce and its list and dict
+copies are, so a cycle back to one finds its copy part-built. An immutable
+one is built from its copied parts, as a tuple is; a pair on an immutable
+cycle is filled in place, and a cycle of immutable vectors and hashes
+alone is closed with @racket[make-reader-graph], which raises when the
+cycle holds another cycle, since that would be copied too. A copied
+mutable @racket[equal?]-based hash is keyed again once the copy is whole;
+an immutable one that cannot be, as one copied while a key was still
+part-built, raises.
 
 The keys of a weak or ephemeron hash are the exception: they are shared,
 not copied, and only its values are copied, as Python's deep copy of a
@@ -656,16 +667,15 @@ in a field is therefore not mapped to that field's copy: the copy's table
 stays keyed by the original, and keeps an entry only while the original
 key is alive.
 
-A cycle cannot be copied. Before copying anything, @racket[layer-copy]
-raises @racket[exn:fail:contract], naming the field, when a field's value
-reaches itself, through a container, a hash key or a layer. The keys of a
-weak or ephemeron hash are not copied and so close no cycle; its values
-are. A cycle through a hand-written layer that does not list the layers it
-holds is found while copying instead: through @racket[child] it is refused
-naming the field, and closed by the exported @racket[layer-rebuild]
-between hand-written layers it is refused naming the layer. A copy
-through a cycle of @racket[define/generic] delegations between
-hand-written layers does not terminate.
+A hand-written layer is not remembered until its @racket[layer-rebuild]
+returns, Python's @tt{__deepcopy__} that does not record itself first: a
+cycle back to it while it rebuilds raises @racket[exn:fail:contract],
+naming the layer, and whether one does can depend on where the copy
+starts, entered at a @racket[define-layer] layer the same cycle finds that
+layer's part-built copy and closes. Its rebuild can see part-built
+containers and part-filled @racket[define-layer] copies. A copy through a
+cycle of @racket[define/generic] delegations between hand-written layers
+does not terminate.
 
 Every layer @racket[define-layer] builds can be copied, the built-in ones
 included, and so can a @racket[procedure->Layer] layer with no
@@ -712,9 +722,9 @@ though what its method passes to @racket[child] joins it; delegate with @racket[
 called after, or passed to @racket[layer-rebuild] after, it raises
 @racket[exn:fail:contract]. It may be used from a thread a rebuild starts,
 one thread at a time: a layer reached from a second thread while another
-is still rebuilding it raises @racket[exn:fail:contract]. A call given any other @racket[child] remembers only the
-containers of its own call and refuses a field whose plain value reaches
-itself, naming the field. A @racket[child] that answers some children
+is still rebuilding it raises @racket[exn:fail:contract]. A call given any other @racket[child] remembers the containers
+and layers of its own call, copying a cycle among them as
+@racket[layer-copy] does. A @racket[child] that answers some children
 with other layers rebuilds the tree with those leaves replaced, the shape a wrapper over
 named layers takes.
 

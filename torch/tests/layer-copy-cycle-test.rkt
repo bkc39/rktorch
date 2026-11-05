@@ -1,38 +1,12 @@
 #lang racket/base
 
 (module+ test
-  (require (only-in racket/generic define/generic)
-           (only-in racket/match match-define)
+  (require (only-in racket/match match-define)
            rackunit
            "../main.rkt"
            "../nn.rkt"
-           (only-in "private/within.rkt" bounded-test)
+           (only-in "private/copy-layers.rkt" copied-field holder rebuild-directly twin)
            (only-in "private/within-memory.rkt" memory-bounded-test))
-
-  (define-layer holder (slot)
-    #:init (v)
-    (set! slot v)
-    #:forward ()
-    slot)
-
-  (define-layer twin (a b)
-    #:init (x y)
-    (set! a x)
-    (set! b y)
-    #:forward ()
-    (list a b))
-
-  (define ((refusal field) e)
-    (and (exn:fail:contract? e)
-         (regexp-match? (pregexp (string-append "^layer-copy: .*field: \""
-                                                field "\""))
-                        (regexp-replace* #rx"[ \n]+" (exn-message e) " "))))
-
-  (define (check-refused field m)
-    (check-exn (refusal field) (lambda () (layer-copy m))))
-
-  (define (copied-field m)
-    ((layer-copy m)))
 
   (define (self-box)
     (define b (box #f))
@@ -44,14 +18,9 @@
     (vector-set! v 0 v)
     v)
 
-  (define (self-hash)
-    (define h (make-hash))
+  (define (self-valued make)
+    (define h (make))
     (hash-set! h 'me h)
-    h)
-
-  (define (self-keyed-hash)
-    (define h (make-hasheq))
-    (hash-set! h (box h) 1)
     h)
 
   (define (reader-graph-cycle)
@@ -59,134 +28,157 @@
     (placeholder-set! p (list 1 p))
     (make-reader-graph p))
 
-  (memory-bounded-test "a self-referential box is refused naming its field"
-    (check-refused "slot" (holder (self-box))))
+  (define reentered #rx"^layer-copy: a cycle re-enters a hand-written layer-rebuild")
 
-  (memory-bounded-test "a self-referential vector is refused naming its field"
-    (check-refused "slot" (holder (self-vector))))
+  (memory-bounded-test "a self-referential box copies to a fresh self-referential box"
+    (define b (self-box))
+    (define c (copied-field (holder b)))
+    (check-false (eq? c b))
+    (check-eq? (unbox c) c))
 
-  (memory-bounded-test "a hash holding itself as a value is refused"
-    (check-refused "slot" (holder (self-hash))))
+  (memory-bounded-test "a self-referential vector copies to a fresh one"
+    (define v (self-vector))
+    (define c (copied-field (holder v)))
+    (check-false (eq? c v))
+    (check-eq? (vector-ref c 0) c))
 
-  (memory-bounded-test "a hash whose key holds the hash is refused"
-    (check-refused "slot" (holder (self-keyed-hash))))
+  (memory-bounded-test "a hash holding itself as a value copies, holding its copy"
+    (for ([make (in-list (list make-hash make-hasheq make-weak-hasheq make-ephemeron-hasheq))])
+      (define h (self-valued make))
+      (define c (copied-field (holder h)))
+      (check-false (eq? c h))
+      (check-eq? (hash-ref c 'me) c)
+      (check-equal? (hash-weak? c) (hash-weak? h))
+      (check-equal? (hash-equal? c) (hash-equal? h))))
 
-  (memory-bounded-test "a box filled later with an ancestor layer is refused"
-    (define b (box #f))
-    (define outer (twin (holder b) 0))
-    (set-box! b outer)
-    (check-refused "slot" outer))
+  (memory-bounded-test "an eq? hash keyed by itself copies, keyed by its copy"
+    (define h (make-hasheq))
+    (hash-set! h h 1)
+    (define c (copied-field (holder h)))
+    (check-false (eq? c h))
+    (check-equal? (hash-keys c) (list c))
+    (check-eq? (hash-ref c c) 1))
 
-  (memory-bounded-test "a layer set into a vector in its own field is refused"
+  (memory-bounded-test "a hash keyed by a box holding the hash copies, the key holding the copy"
+    (define h (make-hasheq))
+    (hash-set! h (box h) 1)
+    (define c (copied-field (holder h)))
+    (match-define (list k) (hash-keys c))
+    (check-false (eq? c h))
+    (check-eq? (unbox k) c)
+    (check-eq? (hash-ref c k) 1))
+
+  (memory-bounded-test "an equal? hash keyed by a box holding the hash copies alike"
+    (define k (box #f))
+    (define h (hash k 1))
+    (set-box! k h)
+    (define c (copied-field (holder h)))
+    (match-define (list k2) (hash-keys c))
+    (check-false (eq? k2 k))
+    (check-eq? (unbox k2) c)
+    (check-true (immutable? c))
+    (check-equal? (hash-has-key? c k2) (hash-has-key? h k)))
+
+  (memory-bounded-test "a layer whose plain field holds the layer copies to its copy"
     (define v (vector #f))
     (define m (holder v))
     (vector-set! v 0 m)
-    (check-refused "slot" m))
+    (define c (layer-copy m))
+    (check-false (eq? c m))
+    (check-eq? (vector-ref (c) 0) c))
 
-  (memory-bounded-test "an immutable make-reader-graph cycle is refused"
-    (check-refused "slot" (holder (reader-graph-cycle))))
+  (memory-bounded-test "a box filled later with an ancestor layer holds the ancestor's copy"
+    (define b (box #f))
+    (define outer (twin (holder b) 0))
+    (set-box! b outer)
+    (define c (layer-copy outer))
+    (match-define (list inner _) (c))
+    (check-false (eq? inner (car (outer))))
+    (check-eq? (unbox (inner)) c))
 
-  (memory-bounded-test "a box and a list that hold each other are refused from either"
+  (memory-bounded-test "a child's back-pointer to its parent points at the parent's copy"
+    (define up (vector #f))
+    (define kid (holder up))
+    (define parent (twin kid (Parameter (ones 2))))
+    (vector-set! up 0 parent)
+    (for ([copy (in-list (list (layer-copy parent)
+                               (vector-ref ((layer-copy kid)) 0)))])
+      (match-define (list kid2 w2) (copy))
+      (check-false (eq? copy parent))
+      (check-eq? (vector-ref (kid2) 0) copy)
+      (check-equal? (children copy) (list kid2))
+      (check-equal? (parameters copy) (list w2))
+      (check-false (eq? w2 (cadr (parent))))))
+
+  (memory-bounded-test "an immutable make-reader-graph cycle copies to a fresh cycle"
+    (define l (reader-graph-cycle))
+    (define c (copied-field (holder l)))
+    (check-false (eq? c l))
+    (check-pred pair? c)
+    (check-equal? (car c) 1)
+    (check-eq? (cadr c) c))
+
+  (define (vector-cycle extra)
+    (define p (make-placeholder #f))
+    (placeholder-set! p (vector-immutable (hasheq 'v p) p extra))
+    (make-reader-graph p))
+
+  (memory-bounded-test "an immutable cycle of a vector and a hash copies whole"
+    (define l (vector-cycle (box 1)))
+    (define c (copied-field (holder l)))
+    (check-false (eq? c l))
+    (check-true (immutable? c))
+    (check-true (immutable? (vector-ref c 0)))
+    (check-eq? (hash-ref (vector-ref c 0) 'v) c)
+    (check-eq? (vector-ref c 1) c)
+    (check-false (eq? (vector-ref c 2) (vector-ref l 2)))
+    (check-equal? (vector-ref c 2) (box 1)))
+
+  (memory-bounded-test "an immutable vector cycle that holds another cycle raises"
+    (define l (vector-cycle (self-box)))
+    (check-exn #rx"^layer-copy: a cycle of immutable vectors, boxes or hashes reaches another cycle"
+               (lambda () (layer-copy (holder l)))))
+
+  (memory-bounded-test "a box and a list that hold each other copy from either"
     (define t (ones 1))
     (define b (box #f))
     (define l (list t b))
     (set-box! b l)
-    (check-refused "a" (twin b 0))
-    (check-refused "b" (twin 0 l)))
+    (for ([m (in-list (list (twin b 0) (twin 0 l)))])
+      (match-define (list x y) ((layer-copy m)))
+      (define b2 (if (box? x) x (cadr y)))
+      (match-define (list t2 b3) (unbox b2))
+      (check-eq? b3 b2)
+      (check-false (eq? b2 b))
+      (check-false (eq? t2 t))))
 
-  (bounded-test "two fields sharing a box share one fresh box in the copy"
-    (define b (box 1))
-    (match-define (list a2 b2) (copied-field (twin b b)))
-    (check-eq? a2 b2)
-    (check-false (eq? a2 b))
-    (check-equal? (unbox a2) 1))
+  (memory-bounded-test "an equal? hash keyed by a box on a cycle is found by the key's copy"
+    (define back (box #f))
+    (define table (make-hash))
+    (define key (box (holder back)))
+    (hash-set! table key 'x)
+    (set-box! back table)
+    (match-define (list key2 table2) (copied-field (twin key table)))
+    (check-false (eq? key2 key))
+    (check-eq? (unbox ((unbox key2))) table2)
+    (check-eq? (hash-ref table2 key2 #f) 'x))
 
-  (bounded-test "a parent and its child sharing a box still share it"
-    (define b (box 1))
-    (match-define (list inner b2) (~> (holder b) (twin b) copied-field))
-    (check-eq? (inner) b2)
-    (check-false (eq? b2 b)))
+  (memory-bounded-test "an immutable equal? hash copied while its key is half built raises"
+    (define back (box #f))
+    (define key (vector 7 (holder back)))
+    (define table (hash key 1))
+    (set-box! back table)
+    (check-exn #rx"^layer-copy: an immutable equal[?]-based hash was copied while one of its keys"
+               (lambda () (layer-copy (holder key))))
+    (match-define (list layer2 _) (copied-field (twin (vector-ref key 1) 0)))
+    (define table2 (unbox (layer2)))
+    (match-define (list key2) (hash-keys table2))
+    (check-eq? (vector-ref key2 1) layer2)
+    (check-eq? (hash-ref table2 key2 #f) 1))
 
-  (bounded-test "vector and box keys of an equal? hash are found in the copy"
-    (define h (make-hash (list (cons (vector 1 2) 'v) (cons (box 3) 'b))))
-    (define c (copied-field (holder h)))
-    (define vk (findf vector? (hash-keys c)))
-    (define bk (findf box? (hash-keys c)))
-    (check-false (memq vk (hash-keys h)))
-    (check-false (memq bk (hash-keys h)))
-    (check-eq? (hash-ref c vk) 'v)
-    (check-eq? (hash-ref c bk) 'b)
-    (check-eq? (hash-ref c (vector 1 2)) 'v)
-    (check-eq? (hash-ref c (box 3)) 'b))
-
-  (bounded-test "a key sharing a sub-container with its value is copied"
-    (define shared (vector 1))
-    (define h (make-hash (list (cons (list shared) shared))))
-    (define c (copied-field (holder h)))
-    (match-define (list k) (hash-keys c))
-    (check-eq? (car k) (hash-ref c k))
-    (check-false (eq? (car k) shared)))
-
-  (define entries (list (cons 'k (box 1))))
-
-  (bounded-test "a copied hash keeps its comparison"
-    (for ([h (in-list (list (make-hash entries) (make-hasheqv entries)
-                            (make-hasheq entries) (make-hashalw entries)
-                            (hash 'k (box 1)) (hasheqv 'k (box 1))
-                            (hasheq 'k (box 1)) (hashalw 'k (box 1))))])
-      (define c (copied-field (holder h)))
-      (check-false (eq? c h))
-      (check-false (eq? (hash-ref c 'k) (hash-ref h 'k)))
-      (check-equal? (immutable? c) (immutable? h))
-      (check-equal? (hash-equal? c) (hash-equal? h))
-      (check-equal? (hash-eqv? c) (hash-eqv? h))
-      (check-equal? (hash-eq? c) (hash-eq? h))
-      (check-equal? (hash-equal-always? c) (hash-equal-always? h))))
-
-  (bounded-test "a copied hash keeps its weakness"
-    (for ([h (in-list (list (make-weak-hash entries)
-                            (make-ephemeron-hasheq entries)
-                            (make-hash entries)))])
-      (define c (copied-field (holder h)))
-      (check-false (eq? c h))
-      (check-equal? (hash-weak? c) (hash-weak? h))
-      (check-equal? (hash-ephemeron? c) (hash-ephemeron? h))))
-
-  (bounded-test "tensor and layer keys map to the copies the fields hold"
-    (define w (Parameter (ones 2)))
-    (define inner (holder 0))
-    (define table (make-hasheq (list (cons w 'w) (cons inner 'inner))))
-    (match-define (list fields table2) (~> (twin w inner) (twin table) copied-field))
-    (match-define (list w2 inner2) (fields))
-    (check-false (eq? w2 w))
-    (check-false (eq? inner2 inner))
-    (check-eq? (hash-ref table2 w2 #f) 'w)
-    (check-eq? (hash-ref table2 inner2 #f) 'inner)
-    (check-false (hash-ref table2 w #f)))
-
-  (bounded-test "a layer in a hash value is copied, not shared"
-    (define inner (holder 0))
-    (match-define (list inner2 h2)
-      (copied-field (twin inner (make-hasheq (list (cons 'k inner))))))
-    (check-eq? (hash-ref h2 'k) inner2)
-    (check-false (eq? inner2 inner)))
-
-  (bounded-test "an immutable box stays immutable"
-    (define c (~> (box-immutable 1) holder copied-field))
-    (check-true (immutable? c))
-    (check-equal? (unbox c) 1))
-
-  (bounded-test "a direct layer-rebuild keeps sharing within the call"
-    (define b (box 1))
-    (define rebuilt (layer-rebuild (twin b b) (lambda (_name c) c) values))
-    (match-define (list a2 b2) (rebuilt))
-    (check-eq? a2 b2)
-    (check-false (eq? a2 b)))
-
-  (memory-bounded-test "a direct layer-rebuild refuses a cycle naming its field"
-    (check-exn #rx"^layer-rebuild: .*field: \"slot\""
-               (lambda ()
-                 (layer-rebuild (holder (self-box)) (lambda (_name c) c) values))))
+  (memory-bounded-test "a direct layer-rebuild with plain callbacks copies a cycle"
+    (define c ((layer-rebuild (holder (self-box)) (lambda (_name c) c) values)))
+    (check-eq? (unbox c) c))
 
   (struct looped ([inner #:mutable])
     #:methods gen:layer
@@ -194,10 +186,19 @@
      (define (layer-rebuild self child _tensor)
        (looped (child "inner" (looped-inner self))))])
 
-  (memory-bounded-test "a cycle only rebuilds can see is refused while copying"
+  (memory-bounded-test "a cycle re-entering a hand-written rebuild raises, naming the layer"
     (define w (looped #f))
     (set-looped-inner! w (holder w))
-    (check-refused "slot" w))
+    (check-exn reentered (lambda () (layer-copy w))))
+
+  (memory-bounded-test "the same cycle entered at its define-layer layer copies"
+    (define w (looped #f))
+    (define h (holder w))
+    (set-looped-inner! w h)
+    (define h2 (layer-copy h))
+    (check-false (eq? h2 h))
+    (check-pred looped? (h2))
+    (check-eq? (looped-inner (h2)) h2))
 
   (struct named ([back #:mutable])
     #:methods gen:layer
@@ -205,164 +206,31 @@
      (define (layer-named-children self)
        (list (cons "back" (named-back self))))])
 
-  (memory-bounded-test "a cycle through layer-named-children is refused naming it"
+  (memory-bounded-test "a hand-written layer with no layer-rebuild on a cycle is refused"
     (define n (named #f))
     (define h (holder (list n)))
     (set-named-back! n h)
-    (check-refused "back" h))
-
-  (define rebuild-directly layer-rebuild)
-
-  (struct pair-of (inner seen)
-    #:methods gen:layer
-    [(define (layer-forward self . _inputs) (pair-of-seen self))
-     (define (layer-named-children self)
-       (list (cons "inner" (pair-of-inner self))))
-     (define (layer-rebuild self child _tensor)
-       (define inner (pair-of-inner self))
-       (pair-of (child "inner" inner)
-                (list (inner)
-                      ((child "inner" inner))
-                      ((rebuild-directly inner (lambda (_name c) c) values)))))])
-
-  (bounded-test "a direct layer-rebuild inside a layer-copy keeps its own memo"
-    (match-define (list original copied direct)
-      (~> (box 1) holder (pair-of '()) layer-copy pair-of-seen))
-    (check-false (eq? copied original))
-    (check-false (eq? direct original))
-    (check-false (eq? direct copied)))
-
-  (struct via (inner direct)
-    #:methods gen:layer
-    [(define (layer-forward self . _inputs) (via-direct self))
-     (define (layer-named-children self)
-       (list (cons "inner" (via-inner self))))
-     (define (layer-rebuild self child tensor)
-       (define inner (via-inner self))
-       (via (child "inner" inner) (rebuild-directly inner child tensor)))])
-
-  (bounded-test "a direct layer-rebuild given layer-copy's child shares its layers and containers"
-    (define leaf (holder 0))
-    (define c (~> (twin leaf (box 1)) (via #f) layer-copy))
-    (match-define (list leaf-copy box-copy) ((via-inner c)))
-    (match-define (list leaf-direct box-direct) ((c)))
-    (check-false (eq? leaf-copy leaf))
-    (check-eq? leaf-direct leaf-copy)
-    (check-eq? box-direct box-copy))
-
-  (struct deleg (inner)
-    #:methods gen:layer
-    [(define (layer-forward self . _inputs) (deleg-inner self))
-     (define (layer-rebuild self child tensor)
-       (~> (deleg-inner self) (rebuild-directly child tensor) deleg))])
-
-  (bounded-test "a container shared through a delegating layer stays shared"
-    (define b (box 1))
-    (match-define (list d2 h2) (copied-field (twin (deleg (holder b)) (holder b))))
-    (check-eq? ((deleg-inner d2)) (h2))
-    (check-false (eq? (h2) b)))
-
-  (bounded-test "a hash key shared through a delegating layer finds the other copy"
-    (define b (box 1))
-    (match-define (list d2 h2)
-      (~> (list (cons b 'x)) make-hasheq holder deleg (twin (holder b)) copied-field))
-    (check-eq? (hash-ref ((deleg-inner d2)) (h2) #f) 'x))
-
-  (struct generic-deleg (inner)
-    #:methods gen:layer
-    [(define/generic raw-rebuild layer-rebuild)
-     (define (layer-forward self . _inputs) (generic-deleg-inner self))
-     (define (layer-rebuild self child tensor)
-       (~> self generic-deleg-inner (raw-rebuild child tensor) generic-deleg))])
-
-  (bounded-test "a define/generic rebuild of a define-layer layer copies it"
-    (define b (box 1))
-    (define c (~> (holder b) generic-deleg layer-copy generic-deleg-inner))
-    (check-false (eq? (c) b))
-    (check-equal? (c) (box 1))
-    (define d (~> (holder b) generic-deleg (layer-rebuild (lambda (_name c) c) values)))
-    (check-false (eq? ((generic-deleg-inner d)) b))
-    (check-equal? ((generic-deleg-inner d)) (box 1))
-    (define h (holder (box 1)))
-    (match-define (list d2 h2) (~> h generic-deleg (twin h) copied-field))
-    (check-eq? (generic-deleg-inner d2) h2)
-    (check-false (eq? h2 h)))
-
-  (struct leaf (v)
-    #:methods gen:layer
-    [(define (layer-forward self . _inputs) (leaf-v self))
-     (define (layer-rebuild self _child _tensor)
-       (leaf (leaf-v self)))])
-
-  (bounded-test "#466: a define/generic rebuild of a hand-written layer copies it apart"
-    (define l (leaf 1))
-    (match-define (list d2 l2) (~> l generic-deleg (twin l) copied-field))
-    (check-false (eq? (generic-deleg-inner d2) l2))
-    (check-false (eq? l2 l)))
-
-  (struct fallback (f)
-    #:methods gen:layer
-    [(define (layer-forward self . _inputs) (fallback-f self))
-     (define (layer-rebuild self child _tensor)
-       (define f (fallback-f self))
-       (fallback (with-handlers ([exn:fail:contract? (lambda (_e) f)])
-                   (child "a" f))))])
-
-  (bounded-test "a refused child caught by a rebuild does not read as a cycle"
-    (define f
-      (procedure->Layer (lambda (x) x) #:parameters (list (cons "w" (Parameter (ones 1))))))
-    (check-exn #rx"^layer-copy: a procedure->Layer layer with parameters"
-               (lambda () (layer-copy (twin (fallback f) f)))))
-
-  (bounded-test "a weak or ephemeron hash keeps its keys and copies its values"
-    (define k (box 1))
-    (for ([make (in-list (list make-weak-hasheq make-ephemeron-hasheq))])
-      (define v (box 2))
-      (define c (~> (list (cons k v)) make holder copied-field))
-      (collect-garbage 'major)
-      (check-equal? (hash-ref c k #f) (box 2))
-      (check-false (eq? (hash-ref c k #f) v))))
-
-  (struct wrapper (inner seen)
-    #:methods gen:layer
-    [(define (layer-forward self . _inputs) (wrapper-inner self))
-     (define (layer-named-children self)
-       (list (cons "inner" (wrapper-inner self))))
-     (define (layer-rebuild self child _tensor)
-       (define copy (child "inner" (wrapper-inner self)))
-       (wrapper copy (unbox (copy))))])
-
-  (bounded-test "a hand-written layer-rebuild sees a child copy fully built"
-    (define c (~> (vector 1 (box 2)) box holder (wrapper #f) layer-copy))
-    (check-equal? (wrapper-seen c) (vector 1 (box 2)))
-    (check-equal? (unbox ((c))) (vector 1 (box 2))))
-
-  (bounded-test "a layer reached through a delegating rebuild and a field is copied once"
-    (for ([h (in-list (list (holder (box 1)) (~> 1 box holder deleg)))])
-      (match-define (list d2 h2) (~> (deleg h) (twin h) copied-field))
-      (check-eq? (deleg-inner d2) h2)
-      (check-false (eq? h2 h))
-      (match-define (list h3 d3) (copied-field (twin h (deleg h))))
-      (check-eq? (deleg-inner d3) h3)
-      (check-false (eq? h3 h))))
+    (check-exn #rx"^layer-copy: a hand-written gen:layer has no layer-rebuild method"
+               (lambda () (layer-copy h))))
 
   (struct back ([outer #:mutable])
     #:methods gen:layer
     [(define (layer-forward self . _inputs) (back-outer self))
      (define (layer-rebuild self child tensor)
-       (~> (back-outer self) (rebuild-directly child tensor) back))])
+       (back (rebuild-directly (back-outer self) child tensor)))])
 
-  (memory-bounded-test "a cycle closed through a delegating rebuild is refused naming its field"
+  (memory-bounded-test "a cycle closed through a delegating rebuild copies from the define-layer side"
     (define w (back #f))
     (define h (holder w))
     (set-back-outer! w h)
-    (check-refused "slot" h))
+    (define h2 (layer-copy h))
+    (check-eq? (back-outer (h2)) h2)
+    (check-exn reentered (lambda () (layer-copy w))))
 
-  (memory-bounded-test "mutually delegating hand-written layers are refused"
+  (memory-bounded-test "mutually delegating hand-written layers raise"
     (define b1 (back #f))
     (set-back-outer! b1 (back b1))
-    (check-exn #rx"^layer-copy: a hand-written layer-rebuild reaches the layer itself"
-               (lambda () (layer-copy b1))))
+    (check-exn reentered (lambda () (layer-copy b1))))
 
   (struct cb ([other #:mutable])
     #:methods gen:layer
@@ -370,17 +238,10 @@
      (define (layer-rebuild self child _tensor)
        (cb (child "x" (cb-other self))))])
 
-  (memory-bounded-test "hand-written layers delegating through child are refused naming the field"
+  (memory-bounded-test "hand-written layers delegating through child raise"
     (define c1 (cb #f))
     (set-cb-other! c1 (cb c1))
-    (check-refused "x" c1))
-
-  (bounded-test "a weak table stays keyed by the original, not the field's copy"
-    (define k (box 1))
-    (match-define (list k2 t2) (copied-field (twin k (make-weak-hasheq (list (cons k 'v))))))
-    (check-false (eq? k2 k))
-    (check-eq? (hash-ref t2 k #f) 'v)
-    (check-false (hash-ref t2 k2 #f)))
+    (check-exn reentered (lambda () (layer-copy c1))))
 
   (memory-bounded-test "a weak hash whose key holds the hash copies, sharing the key"
     (for ([make (in-list (list make-weak-hasheq make-ephemeron-hasheq))])
@@ -392,49 +253,4 @@
       (check-equal? (hash-count h2) 1)
       (check-eq? (hash-ref h2 k #f) 1)
       (check-false (eq? k2 k))
-      (check-eq? (unbox k2) h2)))
-
-  (memory-bounded-test "a weak hash holding itself as a value is refused"
-    (for ([make (in-list (list make-weak-hasheq make-ephemeron-hasheq))])
-      (define h (make))
-      (hash-set! h 'me h)
-      (check-refused "slot" (holder h))))
-
-  (define stash #f)
-
-  (struct stasher (inner)
-    #:methods gen:layer
-    [(define (layer-forward self . _inputs) (stasher-inner self))
-     (define (layer-rebuild self child _tensor)
-       (set! stash child)
-       (stasher (child "inner" (stasher-inner self))))])
-
-  (define (check-closed b)
-    (define closed #rx"^layer-copy: a child callback used after layer-copy returned")
-    (check-exn closed (lambda () (stash "inner" (holder b))))
-    (check-exn closed (lambda () (layer-rebuild (holder b) stash values))))
-
-  (bounded-test "a child callback kept past layer-copy refuses later use"
-    (define b (box 1))
-    (~> (holder b) stasher layer-copy)
-    (check-closed b)
-    (define f
-      (procedure->Layer (lambda (x) x) #:parameters (list (cons "w" (Parameter (ones 1))))))
-    (set! stash #f)
-    (check-exn #rx"^layer-copy: a procedure->Layer" (lambda () (layer-copy (stasher f))))
-    (check-true (procedure? stash))
-    (check-closed b))
-
-  (struct escaper (leave inner)
-    #:methods gen:layer
-    [(define (layer-forward self . _inputs) (escaper-inner self))
-     (define (layer-rebuild self child _tensor)
-       (set! stash child)
-       ((escaper-leave self) 'left))])
-
-  (bounded-test "a child callback is closed when a rebuild escapes layer-copy"
-    (define b (box 1))
-    (set! stash #f)
-    (check-eq? (let/ec leave (layer-copy (escaper leave (holder b)))) 'left)
-    (check-true (procedure? stash))
-    (check-closed b)))
+      (check-eq? (unbox k2) h2))))
