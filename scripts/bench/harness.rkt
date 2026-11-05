@@ -7,7 +7,7 @@
          (only-in racket/future processor-count)
          (only-in racket/list drop filter-map remove-duplicates take)
          (only-in racket/match match match-define)
-         (only-in racket/string string-prefix? string-split string-trim)
+         (only-in racket/string string-join string-prefix? string-split string-trim)
          (only-in syntax/parse/define define-syntax-parse-rule)
          (only-in threading ~>)
          (only-in "system-tools.rkt" command-output))
@@ -25,6 +25,7 @@
          list-median
          paired-ratio
          rotate
+         comma-list
          parse-load-average
          load-average
          parse-cpu-times
@@ -48,6 +49,9 @@
   (make-bench-case name run reps before self-timed?))
 
 (struct result (name reps per-call gc-ms load) #:transparent)
+
+(define (comma-list xs)
+  (string-join (map ~a xs) ","))
 
 (define (rotate xs k)
   (define n (length xs))

@@ -35,7 +35,8 @@
          (only-in "regions.rkt" with-cleanup with-uninterruptible)
          (only-in "syntax.rkt" _Tensor define-torch))
 
-(provide adopted-bytes
+(provide account!
+         adopted-bytes
          tr-tensor-free/checked
          free-handles!
          collect-and-drain!
@@ -65,7 +66,8 @@
          native-memory-use/fold
          native-memory-unaccounted
          _tr-device-type ;; noqa
-         tr-tensor-device/raw)
+         tr-tensor-device/raw
+         tr-tensor-free/unwrapped)
 
 (define-torch tr-tensor-free/unwrapped
   (_fun _Tensor -> _void)

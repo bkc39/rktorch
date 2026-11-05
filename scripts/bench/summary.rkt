@@ -21,7 +21,8 @@
     r))
 
 (define (read-records paths)
-  (append-map (lambda (p) (call-with-input-file p records-in)) paths))
+  (append-map (lambda (p) (call-with-input-file p records-in))
+              (if (list? paths) paths (list paths))))
 
 (define ((plain-section label) records)
   (table (list label (ref (car records) 'unit) "IQR" "load")
