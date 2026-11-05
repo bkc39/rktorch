@@ -56,7 +56,7 @@
     (check-equal? (with-reapers 4 (lambda () (exit-status-of exactly-once-program #:within 120)))
                   0))
 
-  (define n 1000)
+  (define objects 1000)
 
   (test-case "L2: an object a pending will still reaches is released only after the will"
     (within
@@ -68,7 +68,7 @@
        (define kind (reaped 'ordered (lambda (v)
                                         (vector-set! v 1 'released)
                                         (cas-add! released 1))))
-       (for ([i (in-range n)])
+       (for ([i (in-range objects)])
          (define obj (make-vector 2 i))
          (reap-when-dead! kind obj)
          (register-finalizer (vector obj)
@@ -83,29 +83,29 @@
          (sync/timeout 0.05 never-evt)
          (collect-garbage)
          (drain-reapers!)
-         (when (and (< k 40) (< (unbox released) n))
+         (when (and (< k 40) (< (unbox released) objects))
            (settle (add1 k))))
-       (check-equal? (unbox wills) n)
+       (check-equal? (unbox wills) objects)
        (check-equal? (unbox early) 0)
-       (check-equal? (unbox released) n))))
+       (check-equal? (unbox released) objects))))
 
   (test-case "L3: an ordered guardian never reports an object its representative reaches"
     (within
      60
      (lambda ()
        (define g (vm-eval '(make-guardian #t)))
-       (for ([i (in-range n)])
+       (for ([i (in-range objects)])
          (define obj (make-vector 2 i))
          (g obj (lambda () (vector-ref obj 0))))
        (for ([_ (in-range 3)]) (collect-garbage))
        (check-equal? (let loop ([k 0]) (if (g) (loop (add1 k)) k)) 0)
        (define released (box 0))
        (define kind (reaped 'plain (lambda (_v) (cas-add! released 1))))
-       (for ([i (in-range n)])
+       (for ([i (in-range objects)])
          (reap-when-dead! kind (make-vector 2 i)))
        (collect-garbage)
        (check-true (drain-reapers!))
-       (check-equal? (unbox released) n))))
+       (check-equal? (unbox released) objects))))
 
   (test-case "reaper-count starts K reapers, each alive and of its own pool"
     (check-equal? (length (reaper-threads)) reaper-count)
@@ -165,12 +165,12 @@
                 (only-in torch/foreign/raw/cas cas-update!)
                 (only-in torch/foreign/raw/race-points race-hook)
                 (only-in torch/tests/private/wedge call-with-process-deadline))
-       (define parked (box '()))
+       (define arrivals (box '()))
        (set-box! race-hook (lambda (name subject)
                              (when (eq? name 'reaper-parking)
-                               (cas-update! parked (lambda (ts) (cons subject ts))))))
+                               (cas-update! arrivals (lambda (ts) (cons subject ts))))))
        (define (parked-reapers)
-         (length (remove-duplicates (unbox parked) eq?)))
+         (length (remove-duplicates (unbox arrivals) eq?)))
        (define (await-parked k)
          (let wait ()
            (when (< (parked-reapers) k)
@@ -182,7 +182,7 @@
         (lambda ()
           (await-parked 2)
           (sleep 0.1)
-          (set-box! parked '())
+          (set-box! arrivals '())
           (wake-reapers!)
           (wake-reapers!)
           (sync/timeout 5 (thread (lambda () (await-parked 2))))

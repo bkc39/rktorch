@@ -118,6 +118,15 @@
 (define (claim-lifetime! lt by)
   (cas-claim-when! (lifetime-state lt) claimable? by #:site 'lifetime))
 
+;; A free in progress keeps its handle reachable from the freeing thread, so
+;; a thread holding a dead handle's lifetime left the free before releasing.
+;; A reaper cannot ask `thread-dead?`: inside its region, that would suspend.
+(define (orphaned? held)
+  (or (eq? held 'live) (thread? held)))
+
+(define (claim-dead-lifetime! lt)
+  (cas-claim-when! (lifetime-state lt) orphaned? 'finalizing #:site 'lifetime))
+
 (define (tr-tensor-free/checked h)
   (parameterize-break #f
     (define lt (hash-ref lifetimes h #f))
@@ -210,7 +219,7 @@
   (define lt (hash-ref lifetimes h #f))
   (cond
     [(not lt) (count-failed-run! "a dead handle with no lifetime")]
-    [(claim-lifetime! lt 'finalizing)
+    [(claim-dead-lifetime! lt)
      (counting-failures
       (race-point finalizer-releasing h)
       (unaccount-lifetime! h lt)

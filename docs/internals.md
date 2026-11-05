@@ -74,7 +74,10 @@ when the free raises, since an attempted free consumes the reaper
 backstop and a live-looking tag would invite use-after-free. A thread
 killed mid-free, before that region, leaves the wrapper `'freeing` and the
 handle to the reapers, which may claim a lifetime its dead claimant
-holds. Killed at `free-unaccounted`, after the unaccounting, it leaves
+holds. A reaper takes any thread's claim on a dead handle without asking
+`thread-dead?`, which suspends and so cannot run in its region: a free in
+progress keeps its handle reachable from the freeing thread, so a thread
+holding a dead handle's lifetime has left the free before its release. Killed at `free-unaccounted`, after the unaccounting, it leaves
 a live, usable tensor that is off the ledger, its phantom bytes zeroed,
 until a reaper releases it. The `state` setter is not exported by
 name, though the struct info still carries it.
@@ -159,12 +162,18 @@ representative, no closure and no lock.
   on arm64 no drain sees `#f` before the frees. Taking and releasing are
   one uninterruptible region, so a kill waits for the whole batch. A
   reaper that took a full batch while another is parked wakes one more.
-- **Parking.** `parked += 1`, one more take, and if it finds nothing,
-  `os-semaphore-wait` outside any region. A parked reaper is deactivated
-  at the Chez level and never holds up a collection. A Racket semaphore
-  or `sleep` would cost the main thread's scheduler a turn on every wake.
-- **Wakes.** Two sources, both tied to collections, and `wake-reapers!`
-  posts only while a reaper is parked. The latch,
+- **Parking.** A reaper marks itself parked with a CAS, takes once more,
+  and if that finds nothing waits on its own OS semaphore outside any
+  region. A parked reaper is deactivated at the Chez level and never
+  holds up a collection. A Racket semaphore or `sleep` would cost the main
+  thread's scheduler a turn on every wake. Each reaper has its own
+  semaphore because Racket's `os-semaphore-post` signals only when the
+  count was 0: two posts to one shared semaphore wake one of two waiters,
+  and the other sleeps with the count at 1.
+- **Wakes.** Two sources, both tied to collections. `wake-reapers!`
+  claims one parked reaper with a CAS on its mark and posts that reaper's
+  semaphore, so each wake reaches a different reaper; with none parked it
+  posts nothing. The latch,
   `wake-after-collection!` in `torch/foreign/raw/collector.rkt`, runs at
   the end of `collect-under-pressure!`: a thread's first accounting after
   a collection, on any thread, wakes them. The latch is per thread, a weak
@@ -586,26 +595,28 @@ than a second wrapper over the same storage.
 - No reaper runs on main's OS thread; main releases tensors only inside a
   drain it called itself (R2). Taking and releasing are one uninterruptible
   region, and no reaper parks inside a region or while holding the take
-  lock (R6). A reaper waits only on its park semaphore, and nothing kills
-  or breaks a reaper (R7): `kill-thread` on an `'own` thread parked in
+  lock (R6). A reaper waits only on its own park semaphore, and nothing
+  in the library kills or breaks a reaper (R7): `kill-thread` on an `'own` thread parked in
   `os-semaphore-wait`, or in a timed Chez `condition-wait`, never returned
   on 9.1 or 9.3, and one on a thread running back-to-back uninterruptible
   regions returns only once it catches the thread between two. A
   reaper's release must not block, sleep, `sync`, allocate tensors, take
   the collector claim or drain; a raise is caught and counted in
   `'escapes`. Reapers never wait on a drainer, the collector claim, main
-  or a Racket semaphore, and never account, so they never reach
+  or any semaphore but their own, and never account, so they never reach
   `collect-under-pressure!`: the drainer waits only on the take lock and
   on batches, which cannot wait on it.
-- A place waits for its threads before it dies, and a parked reaper never
-  ends, so the reapers stop by a flag they read after every park and every
-  batch. `stop-reapers!` sets it and posts once per reaper; a flush
-  callback on the place's plumber calls it, since the plumber is flushed
-  before the place waits, while a custodian's `#:at-exit?` shutdown
-  callback is not (`race-place-test`, L14). Whatever is still unreleased
-  then leaks natively, as before. A program that calls `plumber-flush-all`
-  on that plumber itself stops its reapers too; drains still release on
-  the calling thread.
+- An exiting place's custodian kills its threads, and that kill hangs on
+  a reaper parked on its OS semaphore. So a flush callback on the place's
+  plumber, which is flushed before the custodian shuts down, while a
+  custodian's `#:at-exit?` shutdown callback is not (`race-place-test`,
+  L14), calls `stop-reapers!`: it sets a flag and posts every reaper's OS
+  semaphore, and from then on reapers park on their own Racket semaphore,
+  where the kill returns. Reapers never exit, because a plumber is
+  flushed by any `plumber-flush-all`, not only at exit: a program that
+  flushes and runs on keeps its reapers, at the Racket semaphore's cost
+  per wake. Whatever is still unreleased when a place dies leaks
+  natively, as before.
 - A run is counted after its release, so a drain polling from any thread
   never counts a run that has not released; the release path uses only
   CAS, `eq?` tables and the ledger lock.
