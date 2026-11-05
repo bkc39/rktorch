@@ -1,15 +1,14 @@
 #lang racket/base
 
 (module+ test
-  (require rackunit
+  (require (only-in racket/format ~a)
+           rackunit
            (only-in "../foreign.rkt" mps-device)
            (only-in "../foreign/accelerator.rkt" make-mps-probe pick-accelerator)
            (only-in "../foreign/raw/fault.rkt" native-fault?)
            (only-in "private/race-harness.rkt"
-                    gate-hook hooks join join-all make-gate release-gate! spawn
-                    stop! wait-for-arrival with-race-hook worker-thread))
-
-  (define pools '(#f own))
+                    gate-hook hooks join join-all make-gate pools pools-stopped-by
+                    release-gate! spawn stop! stop-worker! wait-for-arrival with-race-hook))
 
   (define (counted outcome)
     (define calls 0)
@@ -55,7 +54,7 @@
           (release-gate! claimed)
           (check-equal? (join-all (list claimant waiter) #:seconds 5)
                         (list (mps-device) (mps-device)))
-          (check-equal? (calls) 1 (format "~a" pool))))))
+          (check-equal? (calls) 1 (~a pool))))))
 
   (test-case "a claimant killed after storing the answer leaves its waiter that answer"
     (for ([pool (in-list pools)])
@@ -71,11 +70,11 @@
           (release-gate! claimed)
           (check-true (parked? settled))
           (stop! claimant)
-          (check-equal? (outcome-within 5 waiter) (mps-device) (format "~a" pool))
-          (check-equal? (calls) 1 (format "~a" pool))))))
+          (check-equal? (outcome-within 5 waiter) (mps-device) (~a pool))
+          (check-equal? (calls) 1 (~a pool))))))
 
   (test-case "a break delivered at the claim boundary is deferred past the stored answer"
-    (for ([pool (in-list pools)])
+    (for ([pool (in-list (pools-stopped-by 'break))])
       (define-values (run calls) (counted void))
       (define probe (make-mps-probe run))
       (define broke (make-semaphore 0))
@@ -88,13 +87,13 @@
         (λ (start claimed)
           (define claimant (start broken-then-lingering))
           (check-true (parked? claimed))
-          (break-thread (worker-thread claimant))
+          (stop-worker! claimant 'break)
           (release-gate! claimed)
           (check-not-false (sync/timeout 5 broke) "the break was lost")
           (check-equal? (outcome-within 5 (start (asking probe))) (mps-device)
                         (format "another thread waited on a claim its living holder abandoned (~a)"
                                 pool))
-          (check-equal? (calls) 1 (format "~a" pool))))))
+          (check-equal? (calls) 1 (~a pool))))))
 
   (define (fault)
     (raise (exn:fail "invalid memory reference.  Some debugging context lost"
@@ -114,5 +113,5 @@
             (release-gate! waiting)
             (release-gate! claimed)
             (for ([w (list claimant waiter (start (asking probe)))])
-              (check-pred native-fault? (outcome-within 5 w) (format "~a" pool)))
-            (check-equal? (calls) 1 (format "~a" pool))))))))
+              (check-pred native-fault? (outcome-within 5 w) (~a pool)))
+            (check-equal? (calls) 1 (~a pool))))))))
