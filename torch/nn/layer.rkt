@@ -29,13 +29,11 @@
          (only-in "private/layer-core.rkt"
                   gen:layer layer-buffers layer-mode layer-named-buffers
                   layer-named-children layer-named-parameters layer-parameters
-                  [layer-rebuild raw-layer-rebuild] layer-rebuild-in layer-set-mode! layer?
-                  prop:on-move prop:rebuilder rebuilder?
+                  layer-rebuild-joined layer-set-mode! layer? prop:on-move prop:rebuilder
                   registry registry-mode registry? set-registry-mode! with-mode)
          (only-in "private/layer-fields.rkt"
                   assemble check-entry-arity entry-procedure layer-methods-of
-                  layer-methods? no-forward prop:layer-methods write-field!)
-         (only-in "private/memo.rkt" call-with-memo remembering-memo remembering?))
+                  layer-methods? no-forward prop:layer-methods write-field!))
 
 (provide gen:layer
          layer?
@@ -46,7 +44,6 @@
          layer-named-children
          layer-mode
          layer-set-mode!
-         layer-rebuild
          registry?
          set-registry-mode!
          with-mode
@@ -63,11 +60,9 @@
   (-> mode/c boolean?)
   (eq? mode 'eval))
 
-(define (layer-rebuild m child tensor)
-  (cond
-    [(rebuilder? m) (raw-layer-rebuild m child tensor)]
-    [(remembering? child) (layer-rebuild-in (remembering-memo child) m child tensor)]
-    [else (call-with-memo 'layer-rebuild (lambda (seen) (layer-rebuild-in seen m child tensor)))]))
+(define/checked-out (layer-rebuild m child tensor)
+  (-> layer? (-> string? layer? layer?) (-> tensor? tensor?) layer?)
+  (layer-rebuild-joined m child tensor))
 
 (module+ checked
   (provide (contract-out [layer? (-> any/c boolean?)])))
@@ -302,8 +297,10 @@
            me.checker-def ... ...
            (define (rebuild self child tensor seen)
              (rebuilt-layer seen self child tensor 'name '(field-name ...) (list (acc self) ...)
+                            #:allocate
                             (lambda ()
                               (sid forward-proc '() '() '() (registry-mode self) blank ...))
+                            #:fill
                             (lambda (copy filled ...) (mut copy filled) ... (void))))
            (define forward-proc forward-expr)
            (define (name . formals)

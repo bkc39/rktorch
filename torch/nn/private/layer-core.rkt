@@ -9,7 +9,7 @@
          (only-in "../../foreign.rkt" device dtype prop:to)
          (only-in (submod "../../foreign.rkt" unsafe) to!)
          (only-in "../../foreign/autograd-ops.rkt" collect-at-forward-trough!)
-         (only-in "memo.rkt" call-with-memo remembered remembering-memo remembering?))
+         (only-in "memo.rkt" remembered remembering-seen remembering? with-memo))
 
 ;; the noqa'd exports are macro expansions raco review cannot see
 (provide gen:layer
@@ -23,7 +23,7 @@
          layer-set-mode! ;; noqa
          layer-rebuild ;; noqa
          layer-rebuild-in
-         rebuilder?
+         layer-rebuild-joined
          prop:on-move
          prop:rebuilder
          (struct-out registry)
@@ -211,11 +211,7 @@
    (define (layer-mode self)
      (registry-mode self))
    (define (layer-rebuild self child tensor)
-     (define (rebuilt seen)
-       ((rebuilder-of self) self child tensor seen))
-     (if (remembering? child)
-         (rebuilt (remembering-memo child))
-         (call-with-memo 'layer-rebuild rebuilt)))])
+     (layer-rebuild-joined self child tensor))])
 
 (define-values (prop:rebuilder rebuilder? rebuilder-of) ;; noqa
   (make-struct-type-property 'rebuilder))
@@ -223,15 +219,13 @@
 (define (layer-rebuild-in seen m child tensor)
   (if (rebuilder? m)
       ((rebuilder-of m) m child tensor seen)
-      (remembered seen m
-                  (lambda () (layer-rebuild m child tensor))
-                  (lambda () (layer-rebuild-reentered m)))))
+      (remembered seen m (lambda () (layer-rebuild m child tensor)))))
 
-(define (layer-rebuild-reentered m)
-  (raise-arguments-error
-   'layer-copy
-   "a cycle re-enters a hand-written layer-rebuild before it returns"
-   "layer" m))
+(define (layer-rebuild-joined m child tensor)
+  (if (remembering? child)
+      (layer-rebuild-in (remembering-seen child) m child tensor)
+      (with-memo (seen 'layer-rebuild)
+        (layer-rebuild-in seen m child tensor))))
 
 (define (child-parameters c)
   (layer-parameters (cdr c)))

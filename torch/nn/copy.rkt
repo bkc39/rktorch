@@ -8,7 +8,7 @@
          (only-in "layer.rkt" layer?)
          (only-in "parameter.rkt" Parameter Parameter?)
          (only-in "private/layer-core.rkt" layer-rebuild-in)
-         (only-in "private/memo.rkt" call-with-memo remembered with-remembering))
+         (only-in "private/memo.rkt" remembered remembering with-memo))
 
 (define (fresh-tensor t)
   (define copy (zeros-like t))
@@ -19,13 +19,13 @@
     [(requires-grad? t) (requires-grad! copy)]
     [else copy]))
 
+(define ((tensor-copier seen) t)
+  (remembered seen t (lambda () (fresh-tensor t))))
+
+(define (copy-child seen child _name c)
+  (layer-rebuild-in seen c child (tensor-copier seen)))
+
 (define/checked-out (layer-copy m) ;; noqa
   (-> layer? layer?)
-  (define (copied seen)
-    (define (copy-tensor t)
-      (remembered seen t (lambda () (fresh-tensor t))))
-    (define (copy-child child _name c)
-      (layer-rebuild-in seen c child copy-tensor))
-    (with-remembering ([child seen copy-child])
-      (layer-rebuild-in seen m child copy-tensor)))
-  (call-with-memo 'layer-copy copied))
+  (with-memo (seen 'layer-copy)
+    (layer-rebuild-in seen m (remembering seen copy-child) (tensor-copier seen))))

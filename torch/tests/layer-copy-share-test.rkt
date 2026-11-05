@@ -38,9 +38,9 @@
     (define shared (vector 1))
     (define h (make-hash (list (cons (list shared) shared))))
     (define c (copied-field (holder h)))
-    (match-define (list k) (hash-keys c))
-    (check-eq? (car k) (hash-ref c k))
-    (check-false (eq? (car k) shared)))
+    (match-define (list (and k (list part))) (hash-keys c))
+    (check-eq? part (hash-ref c k))
+    (check-false (eq? part shared)))
 
   (define entries (list (cons 'k (box 1))))
 
@@ -198,6 +198,14 @@
       (procedure->Layer (lambda (x) x) #:parameters (list (cons "w" (Parameter (ones 1))))))
     (check-exn #rx"^layer-copy: a procedure->Layer layer with parameters"
                (lambda () (layer-copy (twin (fallback f) f)))))
+
+  (bounded-test "a refusal caught by a rebuild fails a copy left part-built"
+    (define f
+      (procedure->Layer (lambda (x) x) #:parameters (list (cons "w" (Parameter (ones 1))))))
+    (define m (mcons #f '()))
+    (set-mcar! m (cons m f))
+    (check-exn #rx"^layer-copy: a rebuild raised, escaped or was killed while a copy was part-built"
+               (lambda () (layer-copy (twin (fallback (holder (mcar m))) (holder m))))))
 
   (bounded-test "a weak or ephemeron hash keeps its keys and copies its values"
     (define k (box 1))

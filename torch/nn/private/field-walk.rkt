@@ -2,16 +2,15 @@
 
 (require (only-in racket/match match match-lambda)
          (only-in "../../foreign.rkt" tensor?)
-         (only-in "hash-keys.rkt" check-hashable)
+         (only-in "hash-keys.rkt" check-hashable hash-parts rekeyed!)
          (only-in "layer-containers.rkt" Children% Parameters% check-names classify)
          (only-in "layer-core.rkt"
                   layer? set-registry-buffers! set-registry-children! set-registry-params!)
-         (only-in "memo.rkt"
-                  after-walk! allocated copy-of memo-who rebuilt-immutable rekey-after-walk!))
+         (only-in "memo.rkt" after-walk! allocated copy-of memo-who rebuilt-immutable))
 
 (provide rebuilt-layer)
 
-(define (rebuilt-layer seen self child tensor who names vals allocate fill!)
+(define (rebuilt-layer seen self child tensor who names vals #:allocate allocate #:fill fill!)
   (define (filled! copy)
     (define copies
       (for/list ([name (in-list names)] [v (in-list vals)])
@@ -25,7 +24,12 @@
   (allocated seen self allocate filled!))
 
 (define (rebuilt-value seen name v child tensor)
-  (let walk ([v v])
+  (define (immutable v parts make)
+    (define (built)
+      (define copies (map walk parts))
+      (if (andmap eq? parts copies) v (apply make copies)))
+    (rebuilt-immutable seen name v built))
+  (define (walk v)
     (match v
       [(? layer?) (child name v)]
       [(? tensor?) (tensor v)]
@@ -33,67 +37,54 @@
        (Parameters% (map (match-lambda [(cons k t) (cons k (tensor t))]) alist))]
       [(Children% alist)
        (Children% (map (match-lambda [(cons k c) (cons k (child k c))]) alist))]
-      [(? mutable-container?)
-       (allocated seen v (lambda () (emptied v)) (lambda (c) (filled! seen c v walk)))]
-      [(? immutable-container?)
-       (rebuilt-immutable seen v (lambda () (reassembled seen v walk)))]
-      [_ v])))
+      [(mcons a d)
+       (allocated seen v
+                  (lambda () (mcons #f #f))
+                  (lambda (c) (set-mcar! c (walk a)) (set-mcdr! c (walk d))))]
+      [(cons a d) (immutable v (list a d) cons)]
+      [(? immutable? (box x)) (immutable v (list x) box-immutable)]
+      [(box x) (allocated seen v (lambda () (box #f)) (lambda (c) (set-box! c (walk x))))]
+      [(? immutable? (? vector?)) (immutable v (vector->list v) vector-immutable)]
+      [(? vector?)
+       (allocated seen v
+                  (lambda () (make-vector (vector-length v) #f))
+                  (lambda (c)
+                    (for ([x (in-vector v)] [i (in-naturals)])
+                      (vector-set! c i (walk x)))))]
+      [(? immutable? (? hash?)) (immutable v (hash-parts v) (lambda copies (rehashed seen v copies)))]
+      [(? hash?)
+       (allocated seen v (lambda () (hash-copy-clear v)) (lambda (c) (filled-hash! seen c v walk)))]
+      [_ v]))
+  (walk v))
 
-(define (mutable-container? v)
-  (or (mpair? v)
-      (and (or (box? v) (vector? v) (hash? v)) (not (immutable? v)))))
+(define (rehashed seen h copies)
+  (when (hash-equal? h)
+    (after-walk! seen (lambda () (check-keys seen h))))
+  (hash-from (hash-copy-clear h) copies))
 
-(define (immutable-container? v)
-  (or (pair? v) (vector? v) (box? v) (hash? v)))
+(define (hash-from h kxs)
+  (match kxs
+    ['() h]
+    [(list* k x more) (hash-from (hash-set h k x) more)]))
 
-(define (emptied v)
-  (match v
-    [(? mpair?) (mcons #f #f)]
-    [(? box?) (box #f)]
-    [(? vector?) (make-vector (vector-length v) #f)]
-    [(? hash?) (hash-copy-clear v)]))
-
-(define (filled! seen c v walk)
-  (match v
-    [(mcons a d)
-     (set-mcar! c (walk a))
-     (set-mcdr! c (walk d))]
-    [(box x) (set-box! c (walk x))]
-    [(? vector?)
-     (for ([x (in-vector v)] [i (in-naturals)])
-       (vector-set! c i (walk x)))]
-    [(? hash?)
-     (define weak? (weakly-keyed? v))
-     (for ([(k x) (in-hash v)])
-       (define k2 (if weak? k (walk k)))
-       (when (hash-equal? c)
-         (check-hashable (memo-who seen) k2 c))
-       (hash-set! c k2 (walk x)))
-     (when (and (hash-equal? c) (not weak?))
-       (rekey-after-walk! seen c))]))
-
-(define (reassembled seen v walk)
-  (match v
-    [(cons a d) (cons (walk a) (walk d))]
-    [(? vector?) (vector->immutable-vector (for/vector ([x (in-vector v)]) (walk x)))]
-    [(box x) (box-immutable (walk x))]
-    [(? hash?)
-     (define entries
-       (for/list ([(k x) (in-hash v)])
-         (cons (walk k) (walk x))))
-     (when (hash-equal? v)
-       (after-walk! seen (lambda () (check-keys seen v))))
-     (for/fold ([h (hash-copy-clear v)]) ([e (in-list entries)])
-       (hash-set h (car e) (cdr e)))]))
+(define (filled-hash! seen c v walk)
+  (define weak? (or (hash-weak? v) (hash-ephemeron? v)))
+  (define entries
+    (for/list ([(k x) (in-hash v)])
+      (define k2 (if weak? k (walk k)))
+      (when (hash-equal? c)
+        (check-hashable (memo-who seen) k2 c))
+      (define x2 (walk x))
+      (hash-set! c k2 x2)
+      (cons k2 x2)))
+  (when (and (hash-equal? c) (not weak?))
+    (after-walk! seen (lambda () (rekeyed! (memo-who seen) c entries)))))
 
 (define (check-keys seen h)
   (define copy (copy-of seen h h))
-  (for ([k (in-hash-keys h)])
-    (unless (eq? (hash-has-key? h k) (hash-has-key? copy (copy-of seen k k)))
-      (raise-arguments-error
-       (memo-who seen)
-       (string-append "an immutable equal?-based hash was copied while one of its keys"
-                      " was still being built, so the copy cannot find that key")))))
-
-(define (weakly-keyed? h)
-  (or (hash-weak? h) (hash-ephemeron? h)))
+  (unless (for/and ([k (in-hash-keys h)])
+           (eq? (hash-has-key? h k) (hash-has-key? copy (copy-of seen k k))))
+    (raise-arguments-error
+     (memo-who seen)
+     (string-append "an immutable equal?-based hash was copied while one of its keys"
+                    " was still being built, so the copy cannot find that key"))))

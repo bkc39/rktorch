@@ -15,25 +15,34 @@
     #:forward ()
     (list weight up))
 
-  (define-layer holder (kid loop)
+  (define (tuple-in-list)
+    (define l (vector #f))
+    (define t (vector-immutable l))
+    (vector-set! l 0 t)
+    t)
+
+  (define-layer holder (kid loop twice const)
     #:init (k)
     (set! kid k)
     (set! loop (let ([v (vector #f)]) (vector-set! v 0 v) v))
+    (set! twice (let ([t (tuple-in-list)]) (vector-immutable t t)))
+    (set! const (vector-immutable 1 2))
     #:forward ()
-    (list kid loop))
+    (list kid loop twice const))
 
   (define (kind-of x)
     (cond
       [(leaf? x) "leaf"]
       [(holder? x) "holder"]
       [(tensor? x) "tensor"]
+      [(immutable? x) "tuple"]
       [else "list"]))
 
   (define (parts-of x)
     (cond
       [(layer? x) (x)]
       [(tensor? x) '()]
-      [else (vector->list x)]))
+      [else (filter (lambda (p) (not (number? p))) (vector->list x))]))
 
   (define (shape root)
     (define ids (make-hasheq))
@@ -57,7 +66,7 @@
     [else
      (define j (python-check "deepcopy_cycles.py"))
      (define h (holder (leaf)))
-     (match-define (list kid _) (h))
+     (match-define (list kid _ _ _) (h))
      (match-define (list _ up) (kid))
      (vector-set! up 0 h)
      (define-values (original original-nodes) (shape h))
@@ -66,6 +75,7 @@
        (check-equal? original (hash-ref j 'original)))
      (test-case "layer-copy's copy has the shape of copy.deepcopy's"
        (check-equal? copied (hash-ref j 'copy)))
-     (test-case "the copy shares no node with the original, as copy.deepcopy's"
-       (check-equal? (length (filter (lambda (n) (memq n original-nodes)) copied-nodes))
+     (test-case "the copy shares with the original what copy.deepcopy's does"
+       (define originals (for/hasheq ([n (in-list original-nodes)]) (values n #t)))
+       (check-equal? (for/sum ([n (in-list copied-nodes)]) (if (hash-ref originals n #f) 1 0))
                      (hash-ref j 'shared)))]))

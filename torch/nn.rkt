@@ -25,6 +25,7 @@
                     children-by-key
                     parameters-by-key
                     in-layers
+                    layer-rebuild
                     layer?
                     mode/c
                     named-buffers

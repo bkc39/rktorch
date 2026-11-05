@@ -1,6 +1,6 @@
 #lang racket/base
 
-(require (for-syntax racket/base syntax/parse)
+(require (for-syntax (only-in syntax/parse/pre ...+ expr))
          (only-in racket/function const)
          (only-in rackunit fail test-case)
          (only-in syntax/parse/define define-syntax-parse-rule))

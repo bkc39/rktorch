@@ -1,7 +1,7 @@
 #lang racket/base
 
 (module+ test
-  (require (only-in racket/match match-define)
+  (require (only-in racket/match match match-define)
            rackunit
            "../main.rkt"
            "../nn.rkt"
@@ -13,43 +13,76 @@
     (set-box! b b)
     b)
 
-  (define (self-vector)
-    (define v (vector #f))
-    (vector-set! v 0 v)
-    v)
-
   (define (self-valued make)
     (define h (make))
     (hash-set! h 'me h)
     h)
 
-  (define (reader-graph-cycle)
+  (define self-cycles
+    (list (list "box" self-box unbox)
+          (list "vector" (lambda () (define v (vector #f)) (vector-set! v 0 v) v)
+                (lambda (v) (vector-ref v 0)))
+          (list "mpair" (lambda () (define p (mcons 1 #f)) (set-mcdr! p p) p) mcdr)
+          (list "hash" (lambda () (self-valued make-hash)) (lambda (h) (hash-ref h 'me)))
+          (list "hasheq" (lambda () (self-valued make-hasheq)) (lambda (h) (hash-ref h 'me)))
+          (list "weak hasheq" (lambda () (self-valued make-weak-hasheq))
+                (lambda (h) (hash-ref h 'me)))
+          (list "ephemeron hasheq" (lambda () (self-valued make-ephemeron-hasheq))
+                (lambda (h) (hash-ref h 'me)))))
+
+  (define (reader-graph make)
     (define p (make-placeholder #f))
-    (placeholder-set! p (list 1 p))
+    (placeholder-set! p (make p))
     (make-reader-graph p))
+
+  (define immutable-cycles
+    (list (list "a list" (lambda (p) (list 1 p)))
+          (list "a pair" (lambda (p) (cons 1 p)))
+          (list "a vector and a hash" (lambda (p) (vector-immutable (hasheq 'v p) p)))
+          (list "a vector holding a mutable vector" (lambda (p) (vector-immutable p (vector 1))))
+          (list "a vector holding a pair cycle"
+                (lambda (p) (vector-immutable (reader-graph (lambda (q) (cons 1 q))) p)))))
 
   (define reentered #rx"^layer-copy: a cycle re-enters a hand-written layer-rebuild")
 
-  (memory-bounded-test "a self-referential box copies to a fresh self-referential box"
-    (define b (self-box))
-    (define c (copied-field (holder b)))
-    (check-false (eq? c b))
-    (check-eq? (unbox c) c))
+  (memory-bounded-test "a self-referential mutable container copies to a fresh one holding itself"
+    (for ([case (in-list self-cycles)])
+      (match-define (list name make back) case)
+      (define v (make))
+      (define c (copied-field (holder v)))
+      (check-false (eq? c v) name)
+      (check-eq? (back c) c name)
+      (when (hash? v)
+        (check-equal? (hash-weak? c) (hash-weak? v) name)
+        (check-equal? (hash-ephemeron? c) (hash-ephemeron? v) name)
+        (check-equal? (hash-equal? c) (hash-equal? v) name))))
 
-  (memory-bounded-test "a self-referential vector copies to a fresh one"
-    (define v (self-vector))
-    (define c (copied-field (holder v)))
-    (check-false (eq? c v))
-    (check-eq? (vector-ref c 0) c))
+  (memory-bounded-test "a cycle of immutable values alone raises, naming the field"
+    (for ([case (in-list immutable-cycles)])
+      (match-define (list name make) case)
+      (check-exn #rx"^layer-copy: a cycle of immutable values cannot be copied\n  field: \"slot\""
+                 (lambda () (layer-copy (holder (reader-graph make))))
+                 name)))
 
-  (memory-bounded-test "a hash holding itself as a value copies, holding its copy"
-    (for ([make (in-list (list make-hash make-hasheq make-weak-hasheq make-ephemeron-hasheq))])
-      (define h (self-valued make))
-      (define c (copied-field (holder h)))
-      (check-false (eq? c h))
-      (check-eq? (hash-ref c 'me) c)
-      (check-equal? (hash-weak? c) (hash-weak? h))
-      (check-equal? (hash-equal? c) (hash-equal? h))))
+  (memory-bounded-test "an immutable cycle closed through a mutable box copies, as a tuple does"
+    (define b (box #f))
+    (define v (vector-immutable (hasheq 'v b) b (self-box) (vector-immutable 1 'a)))
+    (set-box! b v)
+    (for ([m (in-list (list (holder v) (holder b) (twin b v) (twin v b)))])
+      (define v2
+        (match (copied-field m)
+          [(? box? b2) (unbox b2)]
+          [(or (list (? box?) v2) (list v2 (? box?))) v2]
+          [v2 v2]))
+      (match-define (vector table2 b2 inner2 shared2) v2)
+      (check-true (immutable? v2))
+      (check-false (eq? v2 v))
+      (check-false (eq? b2 b))
+      (check-eq? (unbox b2) v2)
+      (check-eq? (hash-ref table2 'v) b2)
+      (check-false (eq? inner2 (vector-ref v 2)))
+      (check-eq? (unbox inner2) inner2)
+      (check-eq? shared2 (vector-ref v 3))))
 
   (memory-bounded-test "an eq? hash keyed by itself copies, keyed by its copy"
     (define h (make-hasheq))
@@ -93,7 +126,8 @@
     (set-box! b outer)
     (define c (layer-copy outer))
     (match-define (list inner _) (c))
-    (check-false (eq? inner (car (outer))))
+    (match-define (list original-inner _) (outer))
+    (check-false (eq? inner original-inner))
     (check-eq? (unbox (inner)) c))
 
   (memory-bounded-test "a child's back-pointer to its parent points at the parent's copy"
@@ -101,6 +135,7 @@
     (define kid (holder up))
     (define parent (twin kid (Parameter (ones 2))))
     (vector-set! up 0 parent)
+    (match-define (list _ w) (parent))
     (for ([copy (in-list (list (layer-copy parent)
                                (vector-ref ((layer-copy kid)) 0)))])
       (match-define (list kid2 w2) (copy))
@@ -108,36 +143,7 @@
       (check-eq? (vector-ref (kid2) 0) copy)
       (check-equal? (children copy) (list kid2))
       (check-equal? (parameters copy) (list w2))
-      (check-false (eq? w2 (cadr (parent))))))
-
-  (memory-bounded-test "an immutable make-reader-graph cycle copies to a fresh cycle"
-    (define l (reader-graph-cycle))
-    (define c (copied-field (holder l)))
-    (check-false (eq? c l))
-    (check-pred pair? c)
-    (check-equal? (car c) 1)
-    (check-eq? (cadr c) c))
-
-  (define (vector-cycle extra)
-    (define p (make-placeholder #f))
-    (placeholder-set! p (vector-immutable (hasheq 'v p) p extra))
-    (make-reader-graph p))
-
-  (memory-bounded-test "an immutable cycle of a vector and a hash copies whole"
-    (define l (vector-cycle (box 1)))
-    (define c (copied-field (holder l)))
-    (check-false (eq? c l))
-    (check-true (immutable? c))
-    (check-true (immutable? (vector-ref c 0)))
-    (check-eq? (hash-ref (vector-ref c 0) 'v) c)
-    (check-eq? (vector-ref c 1) c)
-    (check-false (eq? (vector-ref c 2) (vector-ref l 2)))
-    (check-equal? (vector-ref c 2) (box 1)))
-
-  (memory-bounded-test "an immutable vector cycle that holds another cycle raises"
-    (define l (vector-cycle (self-box)))
-    (check-exn #rx"^layer-copy: a cycle of immutable vectors, boxes or hashes reaches another cycle"
-               (lambda () (layer-copy (holder l)))))
+      (check-false (eq? w2 w))))
 
   (memory-bounded-test "a box and a list that hold each other copy from either"
     (define t (ones 1))
@@ -145,8 +151,10 @@
     (define l (list t b))
     (set-box! b l)
     (for ([m (in-list (list (twin b 0) (twin 0 l)))])
-      (match-define (list x y) ((layer-copy m)))
-      (define b2 (if (box? x) x (cadr y)))
+      (define b2
+        (match ((layer-copy m))
+          [(list (? box? b2) _) b2]
+          [(list _ (list _ b2)) b2]))
       (match-define (list t2 b3) (unbox b2))
       (check-eq? b3 b2)
       (check-false (eq? b2 b))
@@ -287,4 +295,35 @@
       (check-equal? (hash-count h2) 1)
       (check-eq? (hash-ref h2 k #f) 1)
       (check-false (eq? k2 k))
-      (check-eq? (unbox k2) h2))))
+      (check-eq? (unbox k2) h2)))
+
+  (memory-bounded-test "an immutable value over no mutable value or layer is shared, as a tuple is"
+    (define pure (list 1 (vector-immutable 'a "s") (box-immutable 2) (hash 'k (list 3)) (hasheq)))
+    (define over (list 1 (vector-immutable (box 2))))
+    (match-define (list pure2 over2) (copied-field (twin pure over)))
+    (check-eq? pure2 pure)
+    (check-false (eq? over2 over))
+    (match-define (list 1 (vector b2)) over2)
+    (match-define (list _ (vector b)) over)
+    (check-false (eq? b2 b))
+    (check-equal? b2 (box 2)))
+
+  (struct peek (d seen)
+    #:methods gen:layer
+    [(define (layer-forward self . _inputs) (peek-seen self))
+     (define (layer-rebuild self child _tensor)
+       (define d2 (child "d" (peek-d self)))
+       (peek d2 (list? (unbox (d2)))))])
+
+  (memory-bounded-test "a long list closed through a box is a list in the copy"
+    (define b (box #f))
+    (define p (list b (peek (holder b) #f)))
+    (define long (append (build-list 256 values) p))
+    (set-box! b long)
+    (define p2 (copied-field (holder p)))
+    (match-define (list b2 peek2) p2)
+    (define long2 (unbox b2))
+    (check-true (list? long2))
+    (check-equal? (length long2) 258)
+    (check-eq? (list-tail long2 256) p2)
+    (check-false (peek-seen peek2))))

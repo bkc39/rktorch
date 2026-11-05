@@ -2,7 +2,8 @@
 
 A Holder module registers a Leaf child and keeps a plain list that holds
 itself; the Leaf keeps a plain list holding its parent, a back-pointer
-outside the module registry. Each graph is printed as its identity shape:
+outside the module registry. The Holder also keeps a tuple shared twice
+whose list holds the tuple, and a tuple of numbers the copy shares. Each graph is printed as its identity shape:
 nodes numbered in depth-first order over the fields named in FIELDS, each
 with its kind and the numbers of the nodes its fields reach.
 """
@@ -26,9 +27,13 @@ class Holder(nn.Module):
         self.kid = kid
         self.loop = [None]
         self.loop[0] = self.loop
+        t = ([],)
+        t[0].append(t)
+        self.twice = (t, t)
+        self.const = (1, 2)
 
 
-FIELDS = {Holder: ["kid", "loop"], Leaf: ["weight", "up"]}
+FIELDS = {Holder: ["kid", "loop", "twice", "const"], Leaf: ["weight", "up"]}
 
 
 def kind_of(x):
@@ -36,6 +41,8 @@ def kind_of(x):
         return type(x).__name__.lower()
     if isinstance(x, torch.Tensor):
         return "tensor"
+    if isinstance(x, tuple):
+        return "tuple"
     return "list"
 
 
@@ -44,7 +51,7 @@ def parts_of(x):
         return [getattr(x, f) for f in FIELDS[type(x)]]
     if isinstance(x, torch.Tensor):
         return []
-    return list(x)
+    return [p for p in x if not isinstance(p, int)]
 
 
 def shape(root):
