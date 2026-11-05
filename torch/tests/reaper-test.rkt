@@ -6,6 +6,7 @@
            (only-in racket/file file->string)
            (only-in racket/match match)
            (only-in racket/os getpid)
+           (only-in racket/runtime-path #%datum define-runtime-path)
            (only-in racket/string string-split)
            rackunit
            (only-in "../foreign/raw/cas.rkt" cas-add!)
@@ -144,6 +145,84 @@
           (thread-wait (thread wake-parked-reapers! #:pool 'own))
           (define spent (- (main-cpu-ms) before))
           (check-true (<= spent 20) (format "main spent ~a ms of CPU" spent))))]))
+
+  (define-runtime-path place-parked-reapers "private/place-parked-reapers.rkt")
+
+  (define place-dies-program
+    `(begin
+       (require (only-in racket/place dynamic-place place-dead-evt))
+       (define p (dynamic-place (string->path ,(path->string place-parked-reapers)) 'main))
+       (define parked (sync/timeout 30 p))
+       (exit (if (and (eqv? parked 2) (sync/timeout 10 (place-dead-evt p))) 0 1))))
+
+  (test-case "a place whose two reapers are parked is dead within 10 s of its body returning"
+    (check-equal? (with-reapers 2 (lambda () (exit-status-of place-dies-program #:within 60)))
+                  0))
+
+  (define both-wake-program
+    '(begin
+       (require (only-in racket/list remove-duplicates)
+                (only-in torch/foreign/raw/cas cas-update!)
+                (only-in torch/foreign/raw/race-points race-hook)
+                (only-in torch/tests/private/wedge call-with-process-deadline))
+       (define parked (box '()))
+       (set-box! race-hook (lambda (name subject)
+                             (when (eq? name 'reaper-parking)
+                               (cas-update! parked (lambda (ts) (cons subject ts))))))
+       (define (parked-reapers)
+         (length (remove-duplicates (unbox parked) eq?)))
+       (define (await-parked k)
+         (let wait ()
+           (when (< (parked-reapers) k)
+             (sleep 0.01)
+             (wait))))
+       (define wake-reapers! (dynamic-require 'torch/runtime/reaper 'wake-reapers!))
+       (call-with-process-deadline
+        50
+        (lambda ()
+          (await-parked 2)
+          (sleep 0.1)
+          (set-box! parked '())
+          (wake-reapers!)
+          (wake-reapers!)
+          (sync/timeout 5 (thread (lambda () (await-parked 2))))
+          (eprintf "reapers woken by two wakes: ~a\n" (parked-reapers))
+          (exit (if (= 2 (parked-reapers)) 0 1))))))
+
+  (test-case "two wakes in quick succession wake both of two parked reapers"
+    (check-equal? (with-reapers 2 (lambda () (exit-status-of both-wake-program #:within 60)))
+                  0))
+
+  (define flushed-program
+    '(begin
+       (require (only-in torch + native-memory-use sum zeros)
+                (only-in (submod torch/runtime/reaper private) reaper-statistics)
+                (only-in torch/tests/private/wedge call-with-process-deadline))
+       (define (cpu-bytes)
+         (for/sum ([entry (in-list (native-memory-use))]) (cdr entry)))
+       (define (churn!)
+         (for ([_ (in-range 2000)])
+           (sum (+ (zeros 64 64) 1.0)))
+         (collect-garbage)
+         (zeros 1))
+       (call-with-process-deadline
+        50
+        (lambda ()
+          (zeros 1)
+          (define baseline (cpu-bytes))
+          (plumber-flush-all (current-plumber))
+          (define released (hash-ref (reaper-statistics) 'released))
+          (for-each thread-wait (for/list ([_ (in-range 2)]) (thread churn! #:pool 'own)))
+          (define back?
+            (for/or ([_ (in-range 200)])
+              (sync/timeout 0.05 never-evt)
+              (<= (cpu-bytes) (+ baseline (* 2 64 64 4)))))
+          (eprintf "baseline ~a, now ~a, reaper releases ~a\n" baseline (cpu-bytes)
+                   (- (hash-ref (reaper-statistics) 'released) released))
+          (exit (if back? 0 1))))))
+
+  (test-case "after a plumber-flush-all, reapers still release a live program's tensors"
+    (check-equal? (exit-status-of flushed-program #:within 60) 0))
 
   (test-case "L15: a process exits with status 0 while its reapers are parked"
     (check-equal? (exit-status-of '(begin

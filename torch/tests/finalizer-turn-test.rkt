@@ -112,8 +112,9 @@
               (define p (dynamic-place place-first-require 'main))
               (define answer (sync/timeout 100 p))
               (place-kill p)
-              (check-equal? answer '(#t #f)
-                            "(on main's OS thread? from main, from the parallel thread)"))))
+              (check-equal? answer '(#t #f #t)
+                            (string-append "(on main's OS thread? from main, from the parallel"
+                                           " thread, from a register-finalizer finalizer)")))))
 
   (test-case "a break taken in to!'s re-accounting leaves the move's own error"
     (within 60
