@@ -77,8 +77,9 @@ handle to the reapers, which may claim a lifetime its dead claimant
 holds. A reaper takes any thread's claim on a dead handle without asking
 `thread-dead?`, which suspends and so cannot run in its region: a free in
 progress keeps its handle reachable from the freeing thread, so a thread
-holding a dead handle's lifetime has left the free before its release. Killed at `free-unaccounted`, after the unaccounting, it leaves
-a live, usable tensor that is off the ledger, its phantom bytes zeroed,
+holding a dead handle's lifetime has left the free before its release.
+Killed at `free-unaccounted`, after the unaccounting, it leaves a live,
+usable tensor that is off the ledger, its phantom bytes zeroed,
 until a reaper releases it. The `state` setter is not exported by
 name, though the struct info still carries it.
 
@@ -596,8 +597,8 @@ than a second wrapper over the same storage.
   drain it called itself (R2). Taking and releasing are one uninterruptible
   region, and no reaper parks inside a region or while holding the take
   lock (R6). A reaper waits only on its own park semaphore, and nothing
-  in the library kills or breaks a reaper (R7): `kill-thread` on an `'own` thread parked in
-  `os-semaphore-wait`, or in a timed Chez `condition-wait`, never returned
+  in the library kills or breaks a reaper (R7): `kill-thread` on an
+  `'own` thread parked in `os-semaphore-wait`, or in a timed Chez `condition-wait`, never returned
   on 9.1 or 9.3, and one on a thread running back-to-back uninterruptible
   regions returns only once it catches the thread between two. A
   reaper's release must not block, sleep, `sync`, allocate tensors, take
