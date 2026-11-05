@@ -608,16 +608,17 @@ than a second wrapper over the same storage.
   `collect-under-pressure!`: the drainer waits only on the take lock and
   on batches, which cannot wait on it.
 - An exiting place's custodian kills its threads, and that kill hangs on
-  a reaper parked on its OS semaphore. So a flush callback on the place's
-  plumber, which is flushed before the custodian shuts down, while a
-  custodian's `#:at-exit?` shutdown callback is not (`race-place-test`,
-  L14), calls `stop-reapers!`: it sets a flag and posts every reaper's OS
-  semaphore, and from then on reapers park on their own Racket semaphore,
-  where the kill returns. Reapers never exit, because a plumber is
-  flushed by any `plumber-flush-all`, not only at exit: a program that
-  flushes and runs on keeps its reapers, at the Racket semaphore's cost
-  per wake. Whatever is still unreleased when a place dies leaks
-  natively, as before.
+  a reaper parked on its OS semaphore; a reaper returning from that wait
+  while the place is torn down, or one started during the exit, kills the
+  whole process. So a flush callback on the place's plumber, which is
+  flushed before the custodian shuts down, while a custodian's `#:at-exit?`
+  shutdown callback is not (`race-place-test`, L14), calls
+  `stop-reapers!`: it sets a flag every reaper reads after each park and
+  batch, posts every reaper, and waits up to `drain-deadline` for them to
+  end. Any `plumber-flush-all` ends them, not only exit; drains still
+  release on the calling thread. `place-kill` does not wait for the flush
+  and still kills the process (open). Whatever is still unreleased when a
+  place dies leaks natively, as before.
 - A run is counted after its release, so a drain polling from any thread
   never counts a run that has not released; the release path uses only
   CAS, `eq?` tables and the ledger lock.

@@ -38,7 +38,7 @@
 
 (struct reaper-fence (ticket))
 
-(struct reaper (held os-wake wake parked [thread #:mutable]))
+(struct reaper (held wake parked [thread #:mutable]))
 
 (define batch-size 32)
 
@@ -123,37 +123,24 @@
         (cas-claim! held first #f #:site 'reaper)))
     (values n (+ first n) fenced?)))
 
-(define (post! r how)
-  (if (eq? how 'os)
-      (os-semaphore-post (reaper-os-wake r))
-      (semaphore-post (reaper-wake r))))
-
-;; Each reaper parks on its own semaphores: Racket's OS semaphore signals
+;; Each reaper parks on its own semaphore: Racket's OS semaphore signals
 ;; only when its count was 0, so two posts to one shared semaphore can wake
 ;; one of two waiters. A waker claims a parked reaper before posting it.
 (define (wake-one!)
   (for/or ([r (in-list reapers)])
-    (define parked (reaper-parked r))
-    (define how (unbox parked))
-    (and how
-         (cas-claim! parked how #f #:site 'reaper)
-         (begin (post! r how) #t))))
+    (and (cas-claim! (reaper-parked r) #t #f #:site 'reaper)
+         (begin (os-semaphore-post (reaper-wake r)) #t))))
 
-;; Once stopping, a reaper parks on a Racket semaphore, which a custodian
-;; shutdown can kill; a kill of a reaper parked on its OS semaphore hangs.
 (define (park! r slots)
-  (define how (if (unbox stopping) 'killable 'os))
   (define parked (reaper-parked r))
-  (cas-claim! parked #f how #:site 'reaper)
+  (cas-claim! parked #f #t #:site 'reaper)
   (define-values (n _d _fenced?) (reap-batch! slots (reaper-held r) #f))
   (cond
-    [(positive? n) (void (cas-claim! parked how #f #:site 'reaper))]
+    [(positive? n) (void (cas-claim! parked #t #f #:site 'reaper))]
     [else
      (race-point reaper-parking (current-thread))
      (cas-add! parks 1)
-     (if (eq? how 'os)
-         (os-semaphore-wait (reaper-os-wake r))
-         (semaphore-wait (reaper-wake r)))
+     (os-semaphore-wait (reaper-wake r))
      (set-box! parked #f)
      (cas-add! wakes 1)]))
 
@@ -165,7 +152,8 @@
       [(= n batch-size) (wake-one!)]
       [(zero? n) (park! r slots)]
       [else (void)])
-    (loop)))
+    (unless (unbox stopping)
+      (loop))))
 
 (define/contract-out (wake-reapers!) (-> void?)
   (void (wake-one!)))
@@ -216,17 +204,21 @@
 (define (arm-canary!)
   (register-finalizer (box 0) (lambda (_) (wake-reapers!) (arm-canary!))))
 
-;; The place-exit hook's body. Reapers keep running: a plumber is flushed by
-;; any `plumber-flush-all`, not only at exit, so stopping means parking where
-;; the exiting place's custodian can kill them.
+;; The place-exit hook's body. A reaper returning from its OS wait while its
+;; place is torn down, or one started during the exit, kills the whole
+;; process, so reapers end at the first flush and the flush waits for them.
 (define (stop-reapers!)
-  (set-box! stopping #t)
-  (for ([r (in-list reapers)])
-    (os-semaphore-post (reaper-os-wake r))))
+  (when (cas-claim! stopping #f #t #:site 'reaper)
+    (for ([r (in-list reapers)])
+      (os-semaphore-post (reaper-wake r)))
+    (define deadline (+ (current-inexact-milliseconds) (drain-deadline)))
+    (for ([r (in-list reapers)])
+      (sync/timeout (/ (max 0 (- deadline (current-inexact-milliseconds))) 1000.0)
+                    (reaper-thread r)))))
 
 (define reapers
   (for/list ([_ (in-range reaper-count)])
-    (reaper (box #f) (make-os-semaphore) (make-semaphore 0) (box #f) #f)))
+    (reaper (box #f) (make-os-semaphore) (box #f) #f)))
 
 (for-each start-reaper! reapers)
 

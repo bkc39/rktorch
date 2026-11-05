@@ -196,32 +196,29 @@
   (define flushed-program
     '(begin
        (require (only-in torch + native-memory-use sum zeros)
-                (only-in (submod torch/runtime/reaper private) reaper-statistics)
+                (only-in torch/foreign/raw/collector collect-and-wait!)
+                (only-in (submod torch/runtime/reaper private) reaper-threads)
                 (only-in torch/tests/private/wedge call-with-process-deadline))
        (define (cpu-bytes)
          (for/sum ([entry (in-list (native-memory-use))]) (cdr entry)))
        (define (churn!)
          (for ([_ (in-range 2000)])
-           (sum (+ (zeros 64 64) 1.0)))
-         (collect-garbage)
-         (zeros 1))
+           (sum (+ (zeros 64 64) 1.0))))
        (call-with-process-deadline
         50
         (lambda ()
           (zeros 1)
           (define baseline (cpu-bytes))
           (plumber-flush-all (current-plumber))
-          (define released (hash-ref (reaper-statistics) 'released))
+          (define ended? (andmap thread-dead? (reaper-threads)))
           (for-each thread-wait (for/list ([_ (in-range 2)]) (thread churn! #:pool 'own)))
-          (define back?
-            (for/or ([_ (in-range 200)])
-              (sync/timeout 0.05 never-evt)
-              (<= (cpu-bytes) (+ baseline (* 2 64 64 4)))))
-          (eprintf "baseline ~a, now ~a, reaper releases ~a\n" baseline (cpu-bytes)
-                   (- (hash-ref (reaper-statistics) 'released) released))
-          (exit (if back? 0 1))))))
+          (define drained? (collect-and-wait!))
+          (define back? (<= (cpu-bytes) (+ baseline (* 2 64 64 4))))
+          (eprintf "reapers ended ~a, drained ~a, baseline ~a, now ~a\n"
+                   ended? drained? baseline (cpu-bytes))
+          (exit (if (and ended? drained? back?) 0 1))))))
 
-  (test-case "after a plumber-flush-all, reapers still release a live program's tensors"
+  (test-case "a plumber-flush-all ends the reapers before it returns, and a drain still releases"
     (check-equal? (exit-status-of flushed-program #:within 60) 0))
 
   (test-case "L15: a process exits with status 0 while its reapers are parked"
