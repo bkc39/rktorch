@@ -24,7 +24,8 @@
          (only-in "harness.rkt" bench-case))
 
 (provide op-cases
-         op-names)
+         op-names
+         settle-native-memory!)
 
 (define-torch conv2d/raw
   (_fun _Tensor _Tensor _Tensor/null

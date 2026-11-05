@@ -3,12 +3,12 @@
 (require (only-in racket/format ~a)
          (only-in racket/list take-right)
          (only-in racket/match match)
-         (only-in racket/string string-join)
          (only-in threading ~>)
          (only-in torch/tests/private/wedge call-with-process-deadline)
          (only-in "calls.rkt" call-records)
          (only-in "harness.rkt"
-                  host-meta load-average measure result->record result-name result-per-call)
+                  comma-list host-meta load-average measure result->record result-name
+                  result-per-call)
          (only-in "host-gpu.rkt" host-gpu-records)
          (only-in "pytorch.rkt" require-pytorch twin-record twin-records)
          (only-in "shim.rkt" aten-threads)
@@ -34,9 +34,6 @@
                     #:extra (hasheq 'impl "rktorch" 'case (~a state) 'variant (~a n)
                                     'threads_run n 'main_steps_per_s (of 'main_steps_per_s)
                                     'stopped (of 'stopped) 'settings settings))))
-
-(define (comma-list xs)
-  (string-join (map ~a xs) ","))
 
 (define (name->case name)
   (match (regexp-match #rx"^([^/]*)/([0-9]+)$" (symbol->string name))
