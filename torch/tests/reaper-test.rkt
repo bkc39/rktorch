@@ -136,7 +136,7 @@
   (test-case "L10: a thousand wakes of idle reapers cost main at most 20 ms of CPU"
     (cond
       [(not (file-exists? (format "/proc/self/task/~a/stat" (getpid))))
-       (printf "skipped: no /proc/self/task on this host\n")]
+       (displayln "skipped: no /proc/self/task on this host")]
       [else
        (within
         120

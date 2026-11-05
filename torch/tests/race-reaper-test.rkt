@@ -150,7 +150,7 @@
                                     (watch-released w) (watch-registered w))))
               (settle!))))
 
-  (define ((collecting-step label))
+  (define ((collecting-step _label))
     (garbage! 32)
     (when (zero? (random 64))
       (collect-garbage 'minor)))

@@ -32,7 +32,7 @@
     (lambda (v) (not (or (fixnum? v) (char? v) (boolean? v) (null? v)
                          (void? v) (eof-object? v))))))
 
-(struct reaped (name release guardian)
+(struct reaped (name release guardian) ;; noqa
   #:constructor-name reaped/guardian
   #:omit-define-syntaxes)
 
@@ -61,7 +61,7 @@
 (define wakes (box 0))
 (define escapes (box 0))
 
-(define/contract-out (reaped name release)
+(define/contract-out (reaped name release) ;; noqa
   (-> symbol? (-> any/c any) reaped?)
   (define kind (reaped/guardian name release (vm-eval '(make-guardian #t))))
   (cas-update! kinds (lambda (known) (append known (list kind))))
@@ -197,8 +197,8 @@
          (sleep 0))
        (loop)])))
 
-(define/contract-out (drain-reapers! #:deadline-ms [ms (drain-deadline)])
-  (->* () (#:deadline-ms (and/c real? (not/c negative?))) boolean?)
+(define/contract-out (drain-reapers! #:deadline-ms [ms (drain-deadline)]) ;; noqa
+  (->* [] [#:deadline-ms (and/c real? (not/c negative?))] boolean?)
   (define deadline (+ (current-inexact-milliseconds) ms))
   (wake-reapers!)
   (define fences (map plant-fence! (unbox kinds)))
