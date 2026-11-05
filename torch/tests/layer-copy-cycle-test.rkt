@@ -186,6 +186,30 @@
     (check-exn #rx"^layer-copy: an equal[?]-based hash's key reaches that hash"
                (lambda () (layer-copy (holder key)))))
 
+  (memory-bounded-test "an equal? hash key reaching the hash through an mpair or a hash raises"
+    (define (keyed make-key close!)
+      (define table (make-hash))
+      (define-values (key slot) (make-key))
+      (hash-set! table key 1)
+      (close! slot table)
+      table)
+    (define through-mpair
+      (keyed (lambda () (define p (mcons #f #f)) (values p p)) set-mcar!))
+    (define through-hash
+      (keyed (lambda () (define b (box #f)) (values (hash 'in b) b)) set-box!))
+    (for ([table (list through-mpair through-hash)])
+      (check-exn #rx"^layer-copy: an equal[?]-based hash's key reaches that hash"
+                 (lambda () (layer-copy (holder table))))))
+
+  (memory-bounded-test "an equal? hash key sharing a part twice is not a cycle"
+    (define part (box 1))
+    (define table (make-hash (list (cons (list part part) 'v))))
+    (define table2 (copied-field (holder table)))
+    (match-define (list (list a b)) (hash-keys table2))
+    (check-false (eq? a part))
+    (check-eq? a b)
+    (check-eq? (hash-ref table2 (list (box 1) (box 1)) #f) 'v))
+
   (memory-bounded-test "a direct layer-rebuild with plain callbacks copies a cycle"
     (define c ((layer-rebuild (holder (self-box)) (lambda (_name c) c) values)))
     (check-eq? (unbox c) c))
