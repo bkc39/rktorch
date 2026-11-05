@@ -12,6 +12,20 @@ class ThreadLoop(unittest.TestCase):
         self.assertGreaterEqual(ops, 1)
         self.assertLessEqual(ops * step_s, elapsed, (ops, elapsed))
 
+    def test_a_failed_worker_fails_the_sample_and_ends_the_window(self):
+        calls = []
+
+        def step():
+            calls.append(None)
+            if len(calls) == 5:
+                raise MemoryError("worker step failed")
+            time.sleep(0.001)
+
+        t0 = time.perf_counter()
+        with self.assertRaisesRegex(MemoryError, "worker step failed"):
+            thread_loop(2, step, 30)
+        self.assertLess(time.perf_counter() - t0, 10)
+
 
 class StackInputs(unittest.TestCase):
     def test_stacks_32_distinct_tensors_as_the_racket_case_does(self):

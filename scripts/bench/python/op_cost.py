@@ -71,25 +71,33 @@ def thread_loop(n, step, seconds):
     go = threading.Event()
     stop = threading.Event()
 
+    errors = []
+
     def work(i):
         go.wait()
         k = 0
-        while not stop.is_set():
-            step()
-            k += 1
-            counts[i] = k
+        try:
+            while not stop.is_set():
+                step()
+                k += 1
+                counts[i] = k
+        except BaseException as e:
+            errors.append(e)
+            stop.set()
 
     workers = [threading.Thread(target=work, args=(i,)) for i in range(n)]
     for w in workers:
         w.start()
     t0 = time.perf_counter()
     go.set()
-    time.sleep(seconds)
+    stop.wait(seconds)
     stop.set()
     elapsed = time.perf_counter() - t0
     ops = sum(counts)
     for w in workers:
         w.join()
+    if errors:
+        raise errors[0]
     return ops, elapsed
 
 
