@@ -9,7 +9,7 @@
          (only-in torch/foreign/creation-ops [zeros unchecked-zeros])
          (only-in torch/foreign/device-type device)
          (only-in torch/foreign/error check-handle)
-         (only-in torch/foreign/raw/collector yield-to-finalizers!)
+         (only-in torch/foreign/raw/collector wake-after-collection!)
          (only-in torch/foreign/raw/fault with-crossing-hook)
          (only-in torch/foreign/raw/memory
                   _tr-device-type account! oom-retry registering tensor-allocator
@@ -64,11 +64,11 @@
 
 (define cpu (device 'cpu 0))
 
-;; The library's accounting drains the finalizer thread inside its pressure
-;; check, so every lower layer that registers yields the same way: the drain
-;; then lands in the piece that made the finalizers, not in the check.
-(define ((yielding f) . args)
-  (begin0 (apply f args) (yield-to-finalizers!)))
+;; The library's accounting wakes the reapers inside its pressure check, so
+;; every lower layer that registers wakes them the same way: the releases
+;; then keep pace with the piece that made the handles, not with the check.
+(define ((waking f) . args)
+  (begin0 (apply f args) (wake-after-collection!)))
 
 (define ((accounting f) . args)
   (define t (apply f args))
@@ -88,7 +88,7 @@
   (define (wrapping f) (lambda () (wrap-tensor (check-handle who (apply f args)))))
   (define registered (registering c-call))
   (define retried ((oom-retry) registered))
-  (define accounted (~> retried accounting yielding))
+  (define accounted (~> retried accounting waking))
   (define checked (tensor-allocator c-call))
   (define layers
     (hasheq 'raw (lambda () (tr-tensor-free/unwrapped (apply c-call args)))
@@ -100,8 +100,8 @@
   (if large?
       layers
       (hash-set* layers
-                 'registered (call (yielding registered))
-                 'retry (call (yielding retried))
+                 'registered (call (waking registered))
+                 'retry (call (waking retried))
                  'without-accounting (wrapping (pressure-checked retried)))))
 
 (define (scalar-add-layers)

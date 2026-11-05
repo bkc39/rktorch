@@ -6,7 +6,7 @@
            (only-in "../foreign/raw/cas.rkt" cas-claim!)
            (only-in "../foreign/raw/collector.rkt" collect-and-wait! on-main-os-thread?)
            (only-in "../runtime/reaper.rkt" drain-reapers! wake-reapers!)
-           (only-in (submod "../runtime/reaper.rkt" private) reaper-threads)
+           (only-in (submod "../runtime/reaper.rkt" private) reaper-statistics reaper-threads)
            (only-in "private/race-harness.rkt"
                     check-ledger churn-once! hooks join-all ledger-snapshot
                     ledger-violations make-roster make-watch seeded-generator
@@ -55,10 +55,19 @@
     (settle!)
     (check-ledger base #f))
 
+  (define (await-other-reapers!)
+    (let quiet ([seen -1])
+      (sleep 0.05)
+      (define now (hash-ref (reaper-statistics) 'released))
+      (unless (= now seen)
+        (quiet now))))
+
   (test-case "L4: while a reaper holds a taken batch the counters equal the fold"
     (within 60 (lambda ()
                  (call-with-a-held-batch
-                  (lambda () (check-equal? (ledger-violations) '()))))))
+                  (lambda ()
+                    (await-other-reapers!)
+                    (check-equal? (ledger-violations) '()))))))
 
   (test-case "L5: a drain waits for a batch taken before it began, and gives up at its deadline"
     (within 60 (lambda ()
@@ -177,14 +186,23 @@
                          ledger-snapshot ledger-violations settle! with-race-hook)
                 (only-in torch/tests/private/wedge call-with-process-deadline))
        (define victim (box #f))
-       (define go (box #f))
+       (define killing (box #f))
+       (define killed-mid-batch (box #f))
        (define released (box 0))
+       (define (spin-ms ms)
+         (define until (+ (current-inexact-milliseconds) ms))
+         (let spin () (when (< (current-inexact-milliseconds) until) (spin))))
        (define (hook name subject)
          (cond
            [(and (eq? name 'reaper-taken)
                  (memq subject (reaper-threads))
                  (cas-claim! victim #f subject #:site 'gate))
-            (let spin () (unless (unbox go) (spin)))]
+            (define until (+ (current-inexact-milliseconds) 10000))
+            (let spin ()
+              (unless (or (unbox killing) (> (current-inexact-milliseconds) until))
+                (spin)))
+            (spin-ms 100)
+            (set-box! killed-mid-batch (unbox killing))]
            [(and (eq? name 'reaper-parking) (eq? subject (unbox victim)))
             (let spin () (spin))]
            [(and (eq? name 'finalizer-releasing) (eq? (current-thread) (unbox victim)))
@@ -200,16 +218,19 @@
             (collect-garbage)
             (wake-reapers!)
             (let wait () (unless (unbox victim) (sleep 0.001) (wait)))
-            (define killer (thread (lambda () (kill-thread (unbox victim))) #:pool 'own))
-            (sleep 0.1)
-            (set-box! go #t)
-            (thread-wait killer))
+            (thread-wait (thread (lambda ()
+                                   (set-box! killing #t)
+                                   (kill-thread (unbox victim)))
+                                 #:pool 'own)))
           (define drained? (drain-reapers!))
           (settle!)
           (define violations (ledger-violations #:baseline base))
-          (eprintf "drained ~a, the killed reaper released ~a, violations ~s\n"
-                   drained? (unbox released) violations)
-          (exit (if (and drained? (positive? (unbox released)) (null? violations)) 0 1))))))
+          (eprintf "killed mid-batch ~a, drained ~a, the killed reaper released ~a, violations ~s\n"
+                   (unbox killed-mid-batch) drained? (unbox released) violations)
+          (exit (if (and (unbox killed-mid-batch) drained? (positive? (unbox released))
+                         (null? violations))
+                    0
+                    1))))))
 
   (test-case "L16: a reaper killed mid-batch still releases the whole batch"
     (check-equal? (exit-status-of kill-mid-free-program #:within 120) 0)))

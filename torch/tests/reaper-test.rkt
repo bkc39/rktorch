@@ -8,6 +8,7 @@
            (only-in racket/os getpid)
            (only-in racket/string string-split)
            rackunit
+           (only-in "../foreign/raw/cas.rkt" cas-add!)
            (only-in "../runtime/reaper.rkt"
                     drain-reapers! reap-when-dead! reaped reaper-count wake-reapers!)
            (only-in (submod "../runtime/reaper.rkt" private)
@@ -56,11 +57,6 @@
 
   (define n 1000)
 
-  (define (released-by kind-of)
-    (define released (make-weak-hasheq))
-    (define kind (kind-of (lambda (v) (hash-set! released v #t))))
-    (values kind released))
-
   (test-case "L2: an object a pending will still reaches is released only after the will"
     (within
      60
@@ -68,18 +64,17 @@
        (define released (box 0))
        (define early (box 0))
        (define wills (box 0))
-       (define seen (make-weak-hasheq))
        (define kind (reaped 'ordered (lambda (v)
-                                        (hash-set! seen v #t)
-                                        (set-box! released (add1 (unbox released))))))
+                                        (vector-set! v 1 'released)
+                                        (cas-add! released 1))))
        (for ([i (in-range n)])
          (define obj (make-vector 2 i))
          (reap-when-dead! kind obj)
          (register-finalizer (vector obj)
                              (lambda (u)
-                               (set-box! wills (add1 (unbox wills)))
-                               (when (hash-ref seen (vector-ref u 0) #f)
-                                 (set-box! early (add1 (unbox early)))))))
+                               (cas-add! wills 1)
+                               (when (eq? 'released (vector-ref (vector-ref u 0) 1))
+                                 (cas-add! early 1)))))
        (collect-garbage)
        (check-true (drain-reapers!))
        (check-equal? (unbox released) 0 "released while a will still reached it")
@@ -104,7 +99,7 @@
        (for ([_ (in-range 3)]) (collect-garbage))
        (check-equal? (let loop ([k 0]) (if (g) (loop (add1 k)) k)) 0)
        (define released (box 0))
-       (define kind (reaped 'plain (lambda (_v) (set-box! released (add1 (unbox released))))))
+       (define kind (reaped 'plain (lambda (_v) (cas-add! released 1))))
        (for ([i (in-range n)])
          (reap-when-dead! kind (make-vector 2 i)))
        (collect-garbage)

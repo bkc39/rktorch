@@ -41,22 +41,23 @@ site that the binding is uncontracted.
 
 Every tensor-returning binding carries the `tensor-allocator` wrap
 from `torch/foreign/raw/memory.rkt` (for generated ops, the
-`define-generated-op` expansion inserts it). The wrap does two things: registers a GC finalizer for
-the handle, in one `call-as-uninterruptible` region with the raw call, and
-charges the pressure ledger below. The region stays on the caller's OS
-thread, and a break or a `kill-thread` waits for it, so no handle escapes
-without its finalizer. Nothing in `torch/foreign` uses `ffi/unsafe/alloc`
-or enters atomic mode: a parallel thread's atomic section runs on the main
-OS thread and waits for it. A bare `register-finalizer` on a tensor
-is never written — it would skip the ledger.
+`define-generated-op` expansion inserts it). The wrap does two things: registers
+the handle with its kind's guardian (`reap-when-dead!`, below), in one
+`call-as-uninterruptible` region with the raw call, and charges the pressure
+ledger below. The region stays on the caller's OS thread, and a break or a
+`kill-thread` waits for it, so no handle escapes unregistered. Nothing in
+`torch/foreign` or `torch/runtime` uses `ffi/unsafe/alloc` or enters atomic
+mode: a parallel thread's atomic section runs on the main OS thread and waits
+for it. Nothing under `torch/foreign` calls `register-finalizer`, and only
+`torch/runtime/reaper.rkt` makes a guardian.
 
 Death has two paths:
 
-| | explicit (`tensor-free!`) | GC finalizer |
+| | explicit (`tensor-free!`) | reaper |
 |---|---|---|
-| entry | `tr-tensor-free/checked` | `finalizer-for` the handle's lifetime |
+| entry | `tr-tensor-free/checked` | `release-dead-handle!` |
 | error behavior | raises | swallowed + counted |
-| finalizer | loses the lifetime's claim | is the finalizer |
+| the other path | the reaper loses the lifetime's claim | the explicit free already claimed it |
 | when | deterministic release | the default |
 
 The explicit path first takes the handle: with breaks disabled, one
@@ -65,17 +66,17 @@ Only the thread whose swap succeeds goes on; every other free of that
 wrapper raises `exn:fail:contract`. The take retries a spurious CAS
 failure and loses only when the state is no longer `'live`. The winner then claims the handle's
 *lifetime* (`torch/foreign/raw/memory.rkt`): a second CAS on the state box
-the finalizer claims too, from `'live` to the freeing thread. It unaccounts
+the reaper claims too, from `'live` to the freeing thread. It unaccounts
 the handle and releases it, and the native release, the `'Tensor-freed`
 cpointer tag and the lifetime's `'freed` share one uninterruptible region,
 so no kill leaves a released handle tagged live. The tag flips even
-when the free raises, since an attempted free consumes the finalizer
+when the free raises, since an attempted free consumes the reaper
 backstop and a live-looking tag would invite use-after-free. A thread
 killed mid-free, before that region, leaves the wrapper `'freeing` and the
-handle to the finalizer, which may claim a lifetime its dead claimant
+handle to the reapers, which may claim a lifetime its dead claimant
 holds. Killed at `free-unaccounted`, after the unaccounting, it leaves
 a live, usable tensor that is off the ledger, its phantom bytes zeroed,
-until the finalizer releases it. The `state` setter is not exported by
+until a reaper releases it. The `state` setter is not exported by
 name, though the struct info still carries it.
 
 The batched free (`tensors-free!`, `free-handles!`, one `tr_tensors_free`
@@ -83,20 +84,20 @@ crossing) takes and claims each handle the same way, skipping a wrapper
 or lifetime it does not win instead of raising, and releases only the
 handles it claimed, in one region that flips every tag and lifetime.
 
-The finalizer does not read the wrapper's state, and cannot: it is
-registered on the handle inside the raw call's region, before any wrapper
-exists, and some handles never get one (the printer's slices). It closes
-over the handle's lifetime instead, `(struct lifetime (state charge))`, and
-makes the same claim. A handle a live explicit free took is not its to
-release, and it neither releases it nor counts the run. The finalizer can
-run only once no thread can still call `tensor-free!` on a wrapper holding
-the handle, so the wrapper's claim and the lifetime's never disagree.
+The reaper does not read the wrapper's state, and cannot: the handle is
+registered inside the raw call's region, before any wrapper exists, and
+some handles never get one (the printer's slices). `release-dead-handle!`
+looks the handle's lifetime up in `lifetimes` instead,
+`(struct lifetime (state charge))`, and makes the same claim. A handle a
+live explicit free took is not its to release, and it neither releases it
+nor counts the run; a handle with no lifetime is a counted failure. A
+handle is reported only once no thread can still call `tensor-free!` on a
+wrapper holding it, so the wrapper's claim and the lifetime's never
+disagree. Chez has no way to unregister one object, and none is needed.
 
-The finalizer path is wrapped in `swallow-and-count-failure`, whose
-catch is total: it runs each finalizer in an **uninterruptible region**
-on the finalizer thread (a plain `register-finalizer` would run it
-interruptibly), where raising or blocking is not an option, so a failed
-native free becomes
+The reaper's release runs under `counting-failures`, whose catch is total,
+inside the batch's **uninterruptible region** on a reaper thread, where
+raising or blocking is not an option, so a failed native free becomes
 an incremented counter (`finalizer-failures`) plus, up to a bound of
 eight, the exception's message — read both with
 `(finalizer-diagnostics)`, which also reports total runs and live
@@ -111,14 +112,75 @@ before any handler can run — `finalizer_death_test.cpp` pins this.
 Racket starts a finalizer thread at the first registration in each
 namespace (each instance of `ffi/unsafe`'s finalizer module, so each
 module registry and each place), and parallel threads that race that
-registration can each start one: a drain's canary registers outside an
-atomic section, so several workers whose first registration is a drain
-do race it (`torch/tests/finalizer-thread-test.rkt`). `torch/foreign/raw/collector.rkt` therefore
-registers a finalizer as `torch/foreign` is instantiated. Every
-finalizer then runs on one thread, provided `torch` is required before
-any parallel thread registers a finalizer in that namespace; a program
-whose parallel threads register through another FFI library first can
-already have several.
+registration can each start one (`torch/tests/finalizer-thread-test.rkt`).
+Tensors no longer use it, but the loader's workers, scope guards and user
+code do, so `torch/runtime/reaper.rkt` registers its canary (below) as it
+is instantiated. Every finalizer then runs on one thread, provided `torch`
+is required before any parallel thread registers a finalizer in that
+namespace; a program whose parallel threads register through another FFI
+library first can already have several.
+
+### Reapers
+
+`torch/runtime/reaper.rkt` releases dead handles. A *kind*, `(reaped name
+release)`, is one ordered Chez guardian and its release procedure, made
+once at module level: `tensor-reaped` for tensors (`release-dead-handle!`)
+and one per `registering/release` call site (the generator). The loader's
+own "reaper" in `torch/data/workers.rkt` is unrelated.
+
+`reap-when-dead!` is the hot path and carries no contract. Its contract,
+in prose: `(-> reaped? heap-object/c void?)`, where `heap-object/c` rejects
+fixnums, characters, booleans, `'()`, `#<void>` and `eof`. It is one
+guardian registration, a push onto the calling thread's own list, with no
+representative, no closure and no lock.
+
+- **Ordered, with no representative.** An ordered guardian reports an
+  object only when nothing it reaches is reachable from another pending
+  ordered entry, which `register-finalizer` is too (Racket's late will
+  executor is an ordered guardian keyed by the object alone). Chez's
+  `gc.c` sweeps the representative of an ordered entry as reachable, so a
+  representative that reaches the object, a closure over it or a pair,
+  keeps it from ever being reported: 0 of 1000 against 1000 of 1000 with
+  none. An unordered guardian reported all 1000 objects that a
+  `register-finalizer`'d holder still reached while every holder's will
+  was pending, which would free a tensor a user's finalizer is about to
+  use; ordered reported none until the wills had run (`reaper-test`, L2
+  and L3). A pending object's weak keys survive in both modes, so
+  `lifetimes`, the fold and I1 agree between a collection and its release.
+- **The take lock.** The guardian's take is an unsynchronized
+  read-modify-write: four parallel threads taking from one guardian
+  without a lock faulted with `invalid memory reference`. Every take holds
+  `make-uninterruptible-lock` for at most a batch of 32 primitive takes
+  and nothing else; the lock order is the take lock, then the ledger lock.
+- **Batches and tickets.** Under the lock a reaper takes up to 32 objects
+  across the kinds, numbers them from a ticket counter, and sets its
+  `held` box to the batch's first ticket with a CAS at site `'reaper`. It
+  releases the batch, then sets `held` back to `#f` with a second CAS, so
+  on arm64 no drain sees `#f` before the frees. Taking and releasing are
+  one uninterruptible region, so a kill waits for the whole batch. A
+  reaper that took a full batch while another is parked wakes one more.
+- **Parking.** `parked += 1`, one more take, and if it finds nothing,
+  `os-semaphore-wait` outside any region. A parked reaper is deactivated
+  at the Chez level and never holds up a collection. A Racket semaphore
+  or `sleep` would cost the main thread's scheduler a turn on every wake.
+- **Wakes.** Two sources, both tied to collections, and `wake-reapers!`
+  posts only while a reaper is parked. The latch,
+  `wake-after-collection!` in `torch/foreign/raw/collector.rkt`, runs at
+  the end of `collect-under-pressure!`: a thread's first accounting after
+  a collection, on any thread, wakes them. The latch is per thread, a weak
+  box in a thread cell that the collection clears. The canary is a
+  `register-finalizer` box that wakes them and re-arms itself; it runs on
+  the finalizer thread whenever main's scheduler runs, and covers main
+  doing pure-Racket work with no tensor ops. Neither alone suffices: with
+  main blocked and only workers collecting, the canary woke the reapers
+  once in 1695 collections. A tensor op no longer yields after a
+  collection.
+- **Count and lifetime.** `RKTORCH_REAPERS` (1 to 16, default 2) reapers,
+  read once at load, start as `#:pool 'own` threads under
+  `make-custodian-at-root`, so a user's `custodian-shutdown-all` leaves
+  them running. They start once per namespace (each sandbox evaluator has
+  its own) and never exit while their place lives. One reaper saturates
+  near 130k frees/s.
 
 A native fault is the exception to "swallowed and counted". Racket CS reports a
 segfault as an exception whose message begins `invalid memory reference`. One
@@ -180,25 +242,18 @@ mid-collection, whose `dynamic-wind` exit never runs, stops holding it.
 
 Phantom pressure keeps Racket's generational collections running, and
 on a GPU training loop they free most of a step's intermediates within
-the step, provided the finalizer thread gets its turn. A collection only
-finds a dead handle; its storage and its phantom stay until the
-finalizer runs, and that thread runs only when the main thread yields or
-its quantum expires, which a loop of native calls seldom reaches. Without
-a turn the charge of every dead result piles up until Racket's next
-major, which reclaims nothing but that backlog: 8 MiB results ran three
-majors per hundred calls, about 1 ms a call on any device (#377). So the
-backstop, `collect-under-pressure!`, ends with `yield-to-finalizers!`
-(`torch/foreign/raw/collector.rkt`): a thread's first accounting after a collection
-sleeps once. The latch is per thread, a weak box in a thread cell that
-the collection clears. Off the place's main OS thread (`on-main-os-thread?`,
-the OS thread a green thread runs on, read when `torch/foreign/raw/collector.rkt`
-is instantiated, even from a parallel thread) it skips: a parallel
-thread's sleep would migrate to the
-main pool and wait there for the main thread to switch out, which gives the
-finalizer thread nothing it would not get anyway. Inside an atomic section
-or an uninterruptible region, where sleeping is an error, it skips too.
-That makes an allocating tensor op a green-thread switch point once per
-collection (`torch/tests/finalizer-turn-test.rkt` pins both).
+the step, provided the reapers release them. A collection only finds a
+dead handle; its storage and its phantom stay until a reaper releases
+it. Without that the charge of every dead result piles up until Racket's
+next major, which reclaims nothing but that backlog: 8 MiB results ran
+three majors per hundred calls, about 1 ms a call on any device (#377).
+So the backstop, `collect-under-pressure!`, ends with
+`wake-after-collection!` (`torch/foreign/raw/collector.rkt`): a thread's
+first accounting after a collection wakes the parked reapers, which run
+on cores of their own while the op goes on (`torch/tests/finalizer-turn-test.rkt`).
+`on-main-os-thread?` (`torch/runtime/main-thread.rkt`, re-exported by the
+collector) is the OS thread a green thread runs on, read when the module
+is instantiated, even from a parallel thread.
 
 Two things escape them (#145, measured with
 `scripts/bench-memory-pressure.rkt`):
@@ -347,13 +402,23 @@ the last defence when a trough collection is not yet due:
   cache are charged again by the trough's refresh after its collection;
   a backstop collection, mid-forward, does not raise the charge for them,
   and the backstop itself still reads `driver-allocated` in full.
-- `collect-and-wait!` must really drain. The canary shows the finalizer
-  thread has started on the batch, not finished it: finalization order
-  is unspecified, and that thread runs only while the main one yields,
-  which a loop of FFI calls does not do. So after the canary it yields
-  until `finalizer-run-count` has stood still for three turns, within
-  two seconds. Without this a collection found 13 GB of garbage and
-  the next `backward!` still failed, the frees not yet made.
+- `collect-and-wait!` must really drain: without it a collection found
+  13 GB of garbage and the next `backward!` still failed, the frees not yet
+  made. It is `(collect-garbage)` and then `drain-reapers!`, which wakes
+  the reapers and plants a fence in each kind's guardian: a fresh
+  `reaper-fence`, registered and dropped, which the next collection
+  reports after everything earlier, since the guardian queue is FIFO
+  across collections. The drainer then helps, taking and releasing
+  batches on its own thread until it sees every fence taken (by itself,
+  or by a reaper, which writes the fence's ticket and drops it) or finds
+  the guardians empty. That gives the ticket D₀; it then waits until
+  every reaper's `held` is `#f`, at least D₀, or belongs to a dead
+  thread, yielding with `(sleep 0)` on main's OS thread and spinning
+  elsewhere. `#t` means everything any collection had found before the
+  drain began has been released, however fast workers allocate; `#f`
+  comes only at `drain-deadline` (2000 ms), which now guards against a
+  hanging native free. The trough gets `#t` from the help and the fence,
+  instead of running to the deadline.
 - The mark is a share of the device's capacity: `tr_cuda_mem_get_info`'s
   total on CUDA and `tr_mps_memory_info`'s recommended maximum on MPS. The
   share is `native-memory-fraction` when set; unset, it is 80% on CUDA and
@@ -514,19 +579,40 @@ than a second wrapper over the same storage.
 - The rarely touched fields (sample, interval, capacity, floor, the
   shadow, release-after, trial, stats, schedule, generation, adoptions)
   are written under `with-ledger`, a re-entrant uninterruptible lock
-  (`make-uninterruptible-lock`), not a semaphore: finalizers take it in
+  (`make-uninterruptible-lock`), not a semaphore: reapers take it in
   an uninterruptible region, where blocking is an internal error, and only to give an
   adoption back. Nothing inside it blocks, sleeps or posts; the one
   foreign call inside is `tr_tensors_reset_grad`.
-- Finalizers run on the main OS thread, each in one uninterruptible
-  region, so no green thread runs inside one. A run is counted after its
-  release, so a drain polling from any thread never counts a run that has
-  not released; the finalizer path uses only CAS, `eq?` tables and the
-  ledger lock.
-- A finalizer closes over its handle's lifetime, and the fold reads the
-  same lifetimes through `lifetimes`, an ordinary weak table: Chez keeps a
-  weak key whose object still has a pending finalizer, so the fold and the
-  counters agree between a collection and the finalizer that follows it.
+- No reaper runs on main's OS thread; main releases tensors only inside a
+  drain it called itself (R2). Taking and releasing are one uninterruptible
+  region, and no reaper parks inside a region or while holding the take
+  lock (R6). A reaper waits only on its park semaphore, and nothing kills
+  or breaks a reaper (R7): `kill-thread` on an `'own` thread parked in
+  `os-semaphore-wait`, or in a timed Chez `condition-wait`, never returned
+  on 9.1 or 9.3, and one on a thread running back-to-back uninterruptible
+  regions returns only once it catches the thread between two. A
+  reaper's release must not block, sleep, `sync`, allocate tensors, take
+  the collector claim or drain; a raise is caught and counted in
+  `'escapes`. Reapers never wait on a drainer, the collector claim, main
+  or a Racket semaphore, and never account, so they never reach
+  `collect-under-pressure!`: the drainer waits only on the take lock and
+  on batches, which cannot wait on it.
+- A place waits for its threads before it dies, and a parked reaper never
+  ends, so the reapers stop by a flag they read after every park and every
+  batch. `stop-reapers!` sets it and posts once per reaper; a flush
+  callback on the place's plumber calls it, since the plumber is flushed
+  before the place waits, while a custodian's `#:at-exit?` shutdown
+  callback is not (`race-place-test`, L14). Whatever is still unreleased
+  then leaks natively, as before. A program that calls `plumber-flush-all`
+  on that plumber itself stops its reapers too; drains still release on
+  the calling thread.
+- A run is counted after its release, so a drain polling from any thread
+  never counts a run that has not released; the release path uses only
+  CAS, `eq?` tables and the ledger lock.
+- `release-dead-handle!` reads the handle's lifetime through `lifetimes`,
+  an ordinary weak table, as the fold does: Chez keeps a weak key whose
+  object is pending in a guardian, so the fold and the counters agree
+  between a collection and the release that follows it (R4).
 
 ### Race harness (#40)
 
@@ -541,8 +627,8 @@ gets the point's name and a subject (a handle, a device, a thread).
 
 | point | where | subject |
 |---|---|---|
-| `handle-registered` | inside the registration region, the finalizer just registered | handle |
-| `op-returned` | the op and its finalizer registration are done, nothing accounted | handle |
+| `handle-registered` | inside the registration region, the handle just registered with its guardian | handle |
+| `op-returned` | the op and its registration are done, nothing accounted | handle |
 | `entry-counted` | inside the charge region, the entry and its live bytes counted, before the CAS that publishes it | handle |
 | `ledger-entry-added` | inside the charge region, between the charge and the check counters | handle |
 | `account-created` | a device's first account made, before the CAS that inserts it | device |
@@ -556,7 +642,10 @@ gets the point's name and a subject (a handle, a device, a thread).
 | `free-released` | an explicit free's native release has returned | handle |
 | `frees-released/batched` | a batched free's native release has returned | the handles it released |
 | `ledger-entry-added/batched` | a batched gradient fetch has charged one gradient | handle |
-| `finalizer-releasing` | a finalizer's release, before it unaccounts | handle |
+| `finalizer-releasing` | a reaper's or a drain's release, before it unaccounts | handle |
+| `reaper-taken` | inside the batch region, a batch taken and the take lock released; a hook here can only spin, not park | the taking thread |
+| `reaper-parking` | outside any region, before a reaper parks | the reaper thread |
+| `drain-fenced` | the drainer has seen its fences or empty guardians | the ticket D₀ |
 | `live-returned` | an unaccounting of an adopted gradient holds the ledger, its live bytes given back, before its adoption | handle |
 | `adoption-returning` | an unaccounting holds the ledger, before it gives a gradient's adoption back | handle |
 | `collector-claiming` | the claim read, before the CAS that takes it | whether free |
@@ -628,23 +717,21 @@ an ordinary check:
   pool thread's; coroutine threads share the main OS thread, so an
   ordinary thread's modes reach every ordinary thread, and a failure
   parked before `last-failure` reads its error gets another ordinary
-  thread's message or OOM kind. An op yields once after each collection,
-  so another green thread's ops run under a thread's modes far more often
-  than at quantum ends.
+  thread's message or OOM kind.
 
 **Futures and places.** A tensor op inside a future runs its raw call and
-registers the handle's finalizer in the future, before the future is
+registers the handle with its guardian in the future, before the future is
 touched; the future then blocks before the ledger charge, which runs when
 the future is touched. A tensor sent
 through a place channel arrives as a bare `cpointer` to the same handle,
-with no finalizer and no ledger entry, while the sender's finalizer still
-frees it; the manual says not to. `torch/tests/race-place-test.rkt` runs an op in a
+with no registration and no ledger entry, while the sender's reapers still
+free it; the manual says not to. `torch/tests/race-place-test.rkt` runs an op in a
 future and sends a tensor through a place.
 
 ## Allocation failure
 
 When an allocation fails and classifies as out-of-memory, the wrapper
-collects, drains pending finalizers (a bounded, best-effort drain),
+collects, drains the reapers (`drain-reapers!`, bounded by its deadline),
 and retries the call exactly once; a second failure
 raises the typed `exn:fail:rktorch:oom`. Classification is by exception
 type (`c10::OutOfMemoryError`, `std::bad_alloc`) plus message shape for
@@ -659,7 +746,7 @@ retry, because a retried draw would advance the generator stream and
 break seeded reproducibility, and a retried update would apply twice. An op with several tensor outputs (`topk`,
 `sort`) reports an integer status and writes its handles through out
 pointers; `tensor-allocator/outputs` runs the call and registers every
-handle's finalizer inside one uninterruptible region, accounts each in the
+handle inside one uninterruptible region, accounts each in the
 ledger, and retries the whole call on OOM exactly as the single-output
 wrap does (`tensor-allocator/outputs/no-retry` omits the retry). The shim
 writes no out pointer until every handle exists, so a failed call leaves

@@ -36,8 +36,11 @@
 (define (memory-limit-from-env)
   (setting-from-env "RKTORCH_MEMORY_LIMIT" mib->bytes #f "a positive number of MiB"))
 
+(define (reapers n)
+  (and (exact-integer? n) (<= 1 n 16) n))
+
 (define (reaper-count-from-env)
-  (error 'unimplemented))
+  (setting-from-env "RKTORCH_REAPERS" reapers 2 "an integer from 1 to 16"))
 
 (define (memory-fraction-from-env)
   (setting-from-env "RKTORCH_MEMORY_FRACTION" fraction #f "a number in (0, 1]"))

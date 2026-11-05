@@ -1,8 +1,7 @@
 #lang racket/base
 
-(require (only-in ffi/unsafe register-finalizer)
-         (only-in ffi/unsafe/atomic in-atomic-mode?)
-         (only-in ffi/unsafe/vm vm-eval)
+(require (only-in "../../runtime/main-thread.rkt" on-main-os-thread?)
+         (only-in "../../runtime/reaper.rkt" drain-deadline drain-reapers! wake-reapers!)
          (only-in "cas.rkt" cas-add! cas-claim-when!)
          (only-in "race-points.rkt" race-point))
 
@@ -13,9 +12,9 @@
          finalizer-runs
          note-finalizer-run!
          on-main-os-thread?
-         yield-to-finalizers!)
+         wake-after-collection!)
 
-;; Bumped by every finalizer that releases a handle.
+;; Bumped by every release of a dead handle, by a reaper or a drain.
 (define runs (box 0))
 
 (define (note-finalizer-run!)
@@ -23,17 +22,6 @@
 
 (define (finalizer-runs)
   (unbox runs))
-
-;; Green threads run on the place's main OS thread, whichever thread
-;; instantiates this module.
-(define os-thread-id (vm-eval 'get-thread-id))
-(define main-os-thread
-  (let ([id (box #f)])
-    (thread-wait (thread (lambda () (set-box! id (os-thread-id)))))
-    (unbox id)))
-
-(define (on-main-os-thread?)
-  (eqv? (os-thread-id) main-os-thread))
 
 ;; --- one collection at a time ---
 
@@ -62,44 +50,16 @@
 
 ;; --- a collection that has really finished ---
 
-(define (start-finalizer-thread!)
-  (register-finalizer (box 0) void))
-
-(start-finalizer-thread!)
-
 (define collection-latch (make-thread-cell (make-weak-box (box 0))))
 
-(define (yield-to-finalizers!)
-  (cond
-    [(weak-box-value (thread-cell-ref collection-latch)) (void)]
-    [(in-atomic-mode?) (void)]
-    [(not (on-main-os-thread?)) (void)]
-    [else
-     (thread-cell-set! collection-latch (make-weak-box (box 0)))
-     (sleep 0)]))
-
-;; The canary shows the finalizer thread has started on this collection's
-;; batch, not that it has finished: finalization order is unspecified and
-;; the thread runs only while this one yields. So yield until the run count
-;; has stood still for a few turns, within a deadline. Two results: whether
-;; the canary was seen, and whether the drain finished inside the deadline.
-(define drain-deadline (make-parameter 2000))
-(define quiet-turns 3)
-
-(define (collect-and-wait!)
-  (define canary-finalized (make-semaphore 0))
-  (register-finalizer (box 0) (lambda (_) (semaphore-post canary-finalized)))
-  (collect-garbage)
-  (define observed (sync/timeout 0.5 canary-finalized))
-  (values (and observed #t) (drain-finalizers!)))
+(define (wake-after-collection!)
+  (unless (weak-box-value (thread-cell-ref collection-latch))
+    (thread-cell-set! collection-latch (make-weak-box (box 0)))
+    (wake-reapers!)))
 
 (define (drain-finalizers!)
-  (define deadline (+ (current-inexact-milliseconds) (drain-deadline)))
-  (let loop ([runs (finalizer-runs)] [quiet 0])
-    (sleep 0)
-    (define now (finalizer-runs))
-    (cond
-      [(>= (current-inexact-milliseconds) deadline) #f]
-      [(not (= now runs)) (loop now 0)]
-      [(< (add1 quiet) quiet-turns) (loop now (add1 quiet))]
-      [else #t])))
+  (drain-reapers!))
+
+(define (collect-and-wait!)
+  (collect-garbage)
+  (drain-finalizers!))

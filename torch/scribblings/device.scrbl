@@ -309,8 +309,8 @@ however the parameter got there.
 
 @section{Native memory}
 
-Every tensor's native storage is released by a finalizer when Racket's
-collector finds its handle unreachable. The ledger charges each allocation
+Every tensor's native storage is released by the library's reaper threads
+after Racket's collector finds its handle unreachable. The ledger charges each allocation
 to the collector as phantom bytes, so ordinary programs never call the
 collector by hand. A training loop is the exception. Handles that survive
 the collections of a step wait for a full one, and when Racket happens to
@@ -326,8 +326,8 @@ in two places. The first is the trough of a training step:
 intermediates are dead and little is live, so a full collection there
 reclaims the most and promotes the least. When the ledger has grown by more
 than a margin (between 256 MiB and 1 GiB) over its size after the previous
-such collection, @racket[backward!] runs one before it returns and yields
-until the finalizers have drained; the collections are spaced so that they
+such collection, @racket[backward!] runs one before it returns and waits
+until everything that collection found has been released; the collections are spaced so that they
 take about 5% of wall-clock time. A program whose residue never reaches the
 margin never sees one. A sampling or evaluation loop never calls
 @racket[backward!]; its trough is the return of an outermost layer call
@@ -370,10 +370,12 @@ nothing: a mark that @racket['pressure-collections] in
 @racket[finalizer-diagnostics] shows firing step after step is better
 raised.
 
-Finalizers run on a Racket thread of their own, so a coroutine thread's
-first tensor operation that allocates or moves after each collection yields
-once, outside any uninterruptible region, and other threads can run there as
-at any yield. A parallel thread's operations do not yield.
+Dead tensors are released by reapers, parallel threads made with
+@racket[#:pool 'own] when @racketmodname[torch] is instantiated, never on the
+main OS thread. The environment variable @tt{RKTORCH_REAPERS} sets how many,
+from 1 to 16, and 2 by default; it is read once, when the library loads. The
+first tensor operation on any thread after a collection wakes them, and a
+tensor operation no longer yields after a collection.
 
 The ledger also charges Racket's collector for what it cannot see. At every
 trough, before collecting, it reads each device's allocator and charges the
@@ -540,7 +542,8 @@ loop no longer needs it.
 
 @defproc[(finalizer-diagnostics)
          (listof (cons/c symbol? any/c))]{
-An association list with the finalizer run and failure counts, the captured
+An association list with the finalizer run and failure counts (a run is one
+release of a dead tensor, by a reaper or by a drain), the captured
 failure messages, the number of ledger entries, and the collections the
 ledger has made: @racket['trough-collections] and @racket['trough-minors],
 the full and minor collections at a trough, @racket['pressure-collections]
@@ -553,7 +556,7 @@ covered.
 against, summed over the devices; @racket[native-collect-margin] is the
 room allowed above it, so residue within the margin is left alone. It moves
 two ways. A trough whose drain finished settles it on what the ledger still
-holds, while one whose finalizers do not finish draining in time leaves it
+holds, while one whose releases do not finish draining in time leaves it
 where it was, so the bytes still waiting to be freed stay visible to the
 next trough. Every trough also lowers it to the live size first if that is
 smaller, whether or not it goes on to collect, so a floor left high by an
@@ -563,7 +566,7 @@ earlier peak cannot hide later growth.
 @section{Threads and places}
 
 Racket threads of one place share tensors, parallel threads made with
-@racket[#:pool] included: they share one ledger, one set of finalizers and
+@racket[#:pool] included: they share one ledger, one set of reapers and
 one collector. That sharing covers reading a tensor from several threads at
 once, not writing it. An in-place mutation, @racket[copy!] or an optimizer's
 @racket[step!], writes the native storage the other threads read, and
@@ -597,7 +600,7 @@ that calls a native function sees the fault as an exception it can catch,
 and the library carries on.
 
 Where no caller is waiting, a fault is taken as evidence that native memory
-can no longer be trusted. That covers a finalizer freeing a dead tensor, the
+can no longer be trusted. That covers a reaper freeing a dead tensor, the
 printer rendering one, and the library measuring a new one for the collector.
 One line goes to standard error, and the native library is disabled for the
 rest of the process. Every later native call raises an exception saying so,
