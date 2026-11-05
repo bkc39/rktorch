@@ -8,6 +8,7 @@
                   stack zeros)
          (only-in torch/foreign/creation-ops [zeros unchecked-zeros])
          (only-in torch/foreign/device-type device)
+         (only-in torch/foreign/raw/cas cas-add!)
          (only-in torch/foreign/error check-handle)
          (only-in torch/foreign/raw/collector wake-after-collection!)
          (only-in torch/foreign/raw/fault with-crossing-hook)
@@ -172,11 +173,12 @@
 (define (ladder-ops [names op-cost-names])
   (map build-case names))
 
-;; the finalizers' deferred frees count too, so the window drains them
+;; the deferred frees count too, so the window drains them; they cross on
+;; reaper threads and main at once, so the count is a CAS
 (define (per-call thunk calls call-counting)
   (define n (box 0))
   (settle-native-memory!)
-  (call-counting (lambda () (set-box! n (add1 (unbox n))))
+  (call-counting (lambda () (cas-add! n 1))
                  (lambda ()
                    (for ([_ (in-range calls)]) (thunk))
                    (settle-native-memory!)))
