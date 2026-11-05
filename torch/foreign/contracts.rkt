@@ -6,6 +6,7 @@
                   and/c
                   any/c
                   case->
+                  flat-contract-predicate
                   flat-named-contract
                   list/c
                   listof
@@ -26,7 +27,11 @@
          index/c
          index-vector/c
          int64-tensor/c
+         gather-index/c
+         same-rank-index/c
+         take-index/c
          tensor-or-real/c
+         tensors/c
          pool-size/c
          pos-size-1d/c
          nonneg-size-1d/c
@@ -79,6 +84,33 @@
                               (memv (length (tensor-shape x)) '(2 3))
                               #t))))
 
+(define int64-tensor? (flat-contract-predicate int64-tensor/c))
+
+(define take-index/c
+  (or/c int64-tensor/c (listof exact-integer?) (vectorof exact-integer?)))
+
+(define (same-rank-index/c t)
+  (flat-named-contract
+   'int64-index-of-the-input-rank
+   (lambda (x)
+     (and (int64-tensor? x)
+          (= (length (tensor-shape x)) (length (tensor-shape t)))))))
+
+;; ATen skips the extent check for an empty index (verified)
+(define (gather-index/c t dim)
+  (flat-named-contract
+   'int64-index-within-the-input
+   (lambda (x)
+     (define td (tensor-shape t))
+     (define rank (length td))
+     (define g (if (negative? dim) (+ dim rank) dim))
+     (define (within? xd)
+       (and (= (length xd) rank)
+            (or (zero? (apply * xd))
+                (for/and ([xi (in-list xd)] [ti (in-list td)] [i (in-naturals)])
+                  (or (= i g) (<= xi ti))))))
+     (and (int64-tensor? x) (within? (tensor-shape x))))))
+
 (define index-vector/c
   (and/c int64-tensor/c (lambda (x) (< (length (tensor-shape x)) 2))))
 
@@ -98,9 +130,15 @@
 
 (define tensor-or-real/c (or/c tensor? real?))
 
+(define tensors/c (listof tensor?))
+
+(define reals/c (listof real?))
+
+;; A dependent clause selects among contracts built once here: building an
+;; `or/c` or `listof` inside the clause costs microseconds on every call.
 (define binary-arith/c
-  (->i ([a (or/c tensor? real?)]
-        [b (a) (if (tensor? a) (or/c tensor? real?) tensor?)])
+  (->i ([a tensor-or-real/c]
+        [b (a) (if (tensor? a) tensor-or-real/c tensor?)])
        [result tensor?]))
 
 (define unary-numeric/c
@@ -118,7 +156,7 @@
 
 (define reduce-or-variadic/c
   (->i ([v (or/c tensor? real?)])
-       #:rest [rest (v) (if (tensor? v) null? (listof real?))]
+       #:rest [rest (v) (if (tensor? v) null? reals/c)]
        [result (v) (if (tensor? v) tensor? real?)]))
 
 (define argmax/c

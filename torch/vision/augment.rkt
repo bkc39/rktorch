@@ -91,8 +91,10 @@
        [result tensor?])
   (blend x (luma x) (column x factor)))
 
+(define hue-shift/c (real-in -0.5 0.5))
+
 (define/contract-out (adjust-hue x factor) ;; noqa
-  (->i ([x rgb-float-batch/c] [factor (x) (per-sample/c x (real-in -0.5 0.5))])
+  (->i ([x rgb-float-batch/c] [factor (x) (per-sample/c x hue-shift/c)])
        [result tensor?])
   (hue-turned x (column x factor)))
 

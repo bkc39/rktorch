@@ -151,10 +151,14 @@
             (define-values (ch cw) (size->hw size))
             (and (<= ch h) (<= cw w))))))
 
-(define (channel-values/c x [element/c real?])
+(define (positive-real? v)
+  (and (real? v) (positive? v)))
+
+(define (channel-values/c x [element? real?])
   (flat-named-contract
    'one-value-per-channel
-   (and/c (listof element/c) (lambda (vs) (= (length vs) (channels x))))))
+   (lambda (vs)
+     (and (list? vs) (andmap element? vs) (= (length vs) (channels x))))))
 
 ;; torchvision: an int is the short side's new length and the long side is
 ;; truncated to keep the aspect ratio
@@ -240,7 +244,7 @@
 (define/contract-out (normalize x mean std) ;; noqa
   (->i ([x float-image/c]
         [mean (x) (channel-values/c x)]
-        [std (x) (channel-values/c x (and/c real? positive?))])
+        [std (x) (channel-values/c x positive-real?)])
        [result tensor?])
   (define (per-channel vs)
     (reshape (tensor (map exact->inexact vs)

@@ -430,12 +430,14 @@
 (define/contract-out dtype (-> tensor? dtype/c) tensor-dtype) ;; noqa
 (define/contract-out numel (-> tensor? exact-nonnegative-integer?) tensor-numel) ;; noqa
 
+(define zero-index/c (and/c exact-integer? zero?))
+
 (define/contract-out (device target [index 0])
   (->i ([target (or/c tensor? 'cpu 'cuda 'mps)])
        ([index (target)
                (match target
                  ['cuda exact-nonnegative-integer?]
-                 [(or 'cpu 'mps) (and/c exact-integer? zero?)]
+                 [(or 'cpu 'mps) zero-index/c]
                  [_ none/c])])
        [result device?])
   (match target

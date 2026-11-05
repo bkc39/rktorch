@@ -20,7 +20,6 @@
          (only-in "raw/fault.rkt" native-fault? note-native-fault!)
          (only-in "raw/memory.rkt" free-handles! tr-tensor-free/checked)
          (only-in "raw/race-points.rkt" race-point)
-         (only-in "raw/syntax.rkt" Tensor?)
          (only-in "raw/tensor.rkt"
                   dtype-code->symbol
                   tr-tensor-copy-data-f64/raw
@@ -208,7 +207,9 @@
 
 (define/checked-out (tensor? v) ;; noqa
   (-> any/c boolean?)
-  (and (tensor-impl? v) (Tensor? v)))
+  ;; the handle directly: `Tensor?` on the struct goes through prop:cpointer
+  ;; at ~20x the cost, and every tensor contract calls this
+  (and (tensor-impl? v) (cpointer-has-tag? (tensor-impl-handle v) 'Tensor)))
 
 (define tensor-handle tensor-impl-handle)
 
