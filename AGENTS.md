@@ -1072,20 +1072,19 @@ on the hot tensor surface are the expensive part of `torch/foreign.rkt`.
 
 **Cheap accessors are the other extreme.**  `tensor-shape` is a struct
 field read at ~7 ns, so a boundary contract on it is 19x and even a hand
-guard is 10x, because `tensor?` alone was ~60-130 ns (~15 ns since #255
-reads the handle's tag directly).  There the question is whether to
-validate at all.
+guard costs a multiple of the read, because `tensor?` -- a struct test and
+a read of the handle's tag -- is itself dearer than the read.  There the
+question is whether to validate at all.
 
 **Build a contract once, never in a dependent clause.**  An `->i`
-dependent clause runs on every call, so building a combinator there is
-paid per op: `or/c` costs ~1.8 µs to build, `and/c` ~1.5 µs, against
-~0.35 µs for a `flat-named-contract`.  `binary-arith/c` building
-`(or/c tensor? real?)` per call was ~2.1 µs of contract per `add` (#255);
-selecting the module-level `tensor-or-real/c` brings it to ~0.5 µs.  A
-check over an argument's value is one `flat-named-contract` over a
-predicate, not an `and/c` chain.  `torch/tests/contract-cost-test.rkt`
-scans every `->i` for a combinator in a dependent clause.  What remains
-is `->i` itself: the same checks under a literal `->` cost ~0.08 µs, but
+dependent clause runs on every call, so a combinator built there
+(`or/c`, `and/c`, `listof`, a literal `->`) is paid on every op.  A
+dependent clause selects among contracts built at module level, or calls
+a helper that returns one `flat-named-contract` over a predicate.  A
+check that relates two arguments, each with a contract of its own, is a
+`#:pre/name`, which builds nothing.  `torch/tests/contract-cost-test.rkt`
+scans every dependent clause, and the module-level helpers it calls, for
+a combinator.  `->i` itself still costs more than a literal `->`, but
 `->` cannot state that `b` must be a tensor when `a` is a real, and
 `contract-out` takes its direct-call fast path only for a literal `->` or
 `->*`, never for a named contract.

@@ -110,6 +110,8 @@
 
 (define float-dtype/c (or/c 'float32 'float64))
 
+(define zero-index/c (and/c exact-integer? zero?))
+
 ;; randn and rand construct at the dtype they are given, half included;
 ;; the spectral helpers in torch/audio take float-dtype/c and do not
 (define/checked-out any-float-dtype/c contract? ;; noqa
@@ -429,8 +431,6 @@
   tensor-shape)
 (define/contract-out dtype (-> tensor? dtype/c) tensor-dtype) ;; noqa
 (define/contract-out numel (-> tensor? exact-nonnegative-integer?) tensor-numel) ;; noqa
-
-(define zero-index/c (and/c exact-integer? zero?))
 
 (define/contract-out (device target [index 0])
   (->i ([target (or/c tensor? 'cpu 'cuda 'mps)])

@@ -1,6 +1,6 @@
 #lang racket/base
 
-(require (only-in ffi/unsafe cpointer-has-tag? prop:cpointer)
+(require (only-in ffi/unsafe cpointer-has-tag? cpointer? prop:cpointer)
          (only-in ffi/vector
                   f32vector->list
                   f64vector->list
@@ -207,9 +207,8 @@
 
 (define/checked-out (tensor? v) ;; noqa
   (-> any/c boolean?)
-  ;; the handle directly: `Tensor?` on the struct goes through prop:cpointer
-  ;; at ~20x the cost, and every tensor contract calls this
-  (and (tensor-impl? v) (cpointer-has-tag? (tensor-impl-handle v) 'Tensor)))
+  (define h (and (tensor-impl? v) (tensor-impl-handle v)))
+  (and h (cpointer? h) (cpointer-has-tag? h 'Tensor)))
 
 (define tensor-handle tensor-impl-handle)
 

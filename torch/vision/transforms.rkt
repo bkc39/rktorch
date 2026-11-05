@@ -4,8 +4,8 @@
                   f32vector-set! f64vector-set! make-f32vector make-f64vector
                   make-s64vector s64vector-set!)
          (only-in racket/contract/base
-                  -> ->* ->i and/c flat-named-contract list/c listof or/c
-                  real-in)
+                  -> ->* ->i and/c flat-contract-predicate flat-named-contract
+                  list/c listof or/c real-in)
          (only-in racket/match match-define)
          (only-in racket/math exact-floor exact-round exact-truncate)
          (only-in threading ~>)
@@ -142,14 +142,17 @@
 (define (size->hw size)
   (if (pair? size) (values (car size) (cadr size)) (values size size)))
 
+(define image-size? (flat-contract-predicate size/c))
+
+(define (fits? size h w)
+  (define-values (ch cw) (size->hw size))
+  (and (<= ch h) (<= cw w)))
+
 (define (crop-size/c x)
   (define-values (h w) (spatial-size x))
   (flat-named-contract
-   'crop-size-within-the-image
-   (and/c size/c
-          (lambda (size)
-            (define-values (ch cw) (size->hw size))
-            (and (<= ch h) (<= cw w))))))
+   'crop-size-within-image
+   (lambda (size) (and (image-size? size) (fits? size h w)))))
 
 (define (positive-real? v)
   (and (real? v) (positive? v)))

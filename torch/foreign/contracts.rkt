@@ -3,10 +3,8 @@
 (require (only-in racket/contract/base
                   ->
                   ->i
-                  and/c
                   any/c
                   case->
-                  flat-contract-predicate
                   flat-named-contract
                   list/c
                   listof
@@ -29,6 +27,7 @@
          int64-tensor/c
          gather-index/c
          same-rank-index/c
+         same-rank?
          take-index/c
          tensor-or-real/c
          tensors/c
@@ -53,11 +52,16 @@
        (bound? (slice-end x))
        (exact-integer? (slice-step x))))
 
-(define bool-tensor/c
-  (and/c tensor? (lambda (x) (eq? (tensor-dtype x) 'bool))))
+(define (dtype-tensor? x dtype)
+  (and (tensor? x) (eq? (tensor-dtype x) dtype)))
 
-(define int64-tensor/c
-  (and/c tensor? (lambda (x) (eq? (tensor-dtype x) 'int64))))
+(define bool-tensor/c
+  (flat-named-contract 'bool-tensor (lambda (x) (dtype-tensor? x 'bool))))
+
+(define (int64-tensor? x)
+  (dtype-tensor? x 'int64))
+
+(define int64-tensor/c (flat-named-contract 'int64-tensor int64-tensor?))
 
 (define image-batch/c
   (flat-named-contract 'image-batch
@@ -84,22 +88,21 @@
                               (memv (length (tensor-shape x)) '(2 3))
                               #t))))
 
-(define int64-tensor? (flat-contract-predicate int64-tensor/c))
-
 (define take-index/c
   (or/c int64-tensor/c (listof exact-integer?) (vectorof exact-integer?)))
 
+(define (same-rank? t x)
+  (= (length (tensor-shape x)) (length (tensor-shape t))))
+
 (define (same-rank-index/c t)
   (flat-named-contract
-   'int64-index-of-the-input-rank
-   (lambda (x)
-     (and (int64-tensor? x)
-          (= (length (tensor-shape x)) (length (tensor-shape t)))))))
+   'int64-index-of-matching-rank
+   (lambda (x) (and (int64-tensor? x) (same-rank? t x)))))
 
-;; ATen skips the extent check for an empty index (verified)
+;; ATen skips the extent check for an empty index
 (define (gather-index/c t dim)
   (flat-named-contract
-   'int64-index-within-the-input
+   'int64-index-within-input-shape
    (lambda (x)
      (define td (tensor-shape t))
      (define rank (length td))
@@ -112,7 +115,9 @@
      (and (int64-tensor? x) (within? (tensor-shape x))))))
 
 (define index-vector/c
-  (and/c int64-tensor/c (lambda (x) (< (length (tensor-shape x)) 2))))
+  (flat-named-contract
+   'int64-index-vector
+   (lambda (x) (and (int64-tensor? x) (< (length (tensor-shape x)) 2)))))
 
 (define (index-tensor-spec? x)
   (and (tensor? x)
@@ -134,8 +139,6 @@
 
 (define reals/c (listof real?))
 
-;; A dependent clause selects among contracts built once here: building an
-;; `or/c` or `listof` inside the clause costs microseconds on every call.
 (define binary-arith/c
   (->i ([a tensor-or-real/c]
         [b (a) (if (tensor? a) tensor-or-real/c tensor?)])

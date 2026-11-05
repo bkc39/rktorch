@@ -44,8 +44,8 @@
          (only-in "contracts.rkt"
                   bool-tensor/c compare/c flatten/c gather-index/c index-spec/c
                   index-vector/c index/c int64-tensor/c same-rank-index/c
-                  take-index/c tensor-or-real/c tensors/c unary-numeric/c
-                  unary-real/c)
+                  same-rank? take-index/c tensor-or-real/c tensors/c
+                  unary-numeric/c unary-real/c)
          (only-in "creation-ops.rkt" tensor)
          (only-in "device-type.rkt" device-type)
          (only-in "ops.rkt"
@@ -201,12 +201,10 @@
   (g:gather t dim index #f))
 
 (define/contract-out (take-along-dim t indices [dim #f]) ;; noqa
-  (->i ([t tensor?]
-        [indices (t dim)
-                 (if (or (unsupplied-arg? dim) (not dim))
-                     int64-tensor/c
-                     (same-rank-index/c t))])
+  (->i ([t tensor?] [indices int64-tensor/c])
        ([dim (or/c #f index/c)])
+       #:pre/name (t indices dim) "indices of the input's rank when dim is given"
+       (or (unsupplied-arg? dim) (not dim) (same-rank? t indices))
        [result tensor?])
   (g:take-along-dim t indices dim))
 
