@@ -9,6 +9,7 @@
            (only-in "../foreign.rkt" conv2d cpu-device cuda-device native-memory-use randn zeros)
            (only-in (submod "../foreign.rkt" unsafe) to!)
            (only-in "../foreign/raw/collector.rkt" collect-and-wait! finalizer-runs)
+           (only-in (submod "../runtime/reaper.rkt" private) reaper-statistics)
            (only-in "private/race-harness.rkt" with-race-hook)
            (only-in "private/wedge.rkt" exit-status-of)
            (only-in "private/within.rkt" within))
@@ -65,37 +66,43 @@
   (test-case "a loop of 8 MiB convs releases each result within a collection (#377)"
     (within 120 check-conv-loop-releases))
 
-  (define (ran-during? op)
-    (define ran? (box #f))
-    (thread (lambda () (set-box! ran? #t)))
-    (op)
-    (unbox ran?))
+  (define (wakes)
+    (hash-ref (reaper-statistics) 'wakes))
 
-  (define (yields-after-a-parallel-turn?)
+  (define (op-after-a-collection-wakes-a-reaper?)
+    (sleep 0.02)
+    (define before (wakes))
     (collect-garbage 'minor)
-    (thread-wait (thread (lambda () (zeros 1)) #:pool 'own))
-    (ran-during? (lambda () (zeros 1))))
+    (zeros 1)
+    (define deadline (+ (current-inexact-milliseconds) 1000))
+    (let spin ()
+      (cond
+        [(> (wakes) before) #t]
+        [(> (current-inexact-milliseconds) deadline) #f]
+        [else (spin)])))
 
-  (test-case "a parallel thread's turn after a collection leaves this thread its own (#377)"
+  (define (woken-after trials)
+    (count values (for/list ([_ (in-range trials)])
+                    (op-after-a-collection-wakes-a-reaper?))))
+
+  (test-case "L20: an op after a collection wakes a parked reaper, on main and off it"
     (within 60
             (lambda ()
-              (define trials 20)
-              (define yielded (count values (for/list ([_ (in-range trials)])
-                                              (yields-after-a-parallel-turn?))))
-              (check-equal? yielded trials
-                            (format "this thread yielded after ~a of ~a collections"
-                                    yielded trials)))))
+              (check-equal? (woken-after 20) 20 "on main")
+              (define off-main (box #f))
+              (thread-wait (thread (lambda () (set-box! off-main (woken-after 20))) #:pool 'own))
+              (check-equal? (unbox off-main) 20 "on a parallel thread"))))
 
   (define-runtime-path place-turn "private/place-turn.rkt")
 
-  (test-case "inside a place, an op after a collection lets a waiting green thread run"
+  (test-case "L20: inside a place, an op after a collection wakes a parked reaper"
     (within 120
             (lambda ()
               (define p (dynamic-place place-turn 'main))
               (define answer (sync/timeout 100 p))
               (place-kill p)
               (check-equal? answer '(#t #t)
-                            "(on the place's main OS thread?, yielded after each collection?)"))))
+                            "(on the place's main OS thread?, woke a reaper after each collection?)"))))
 
   (define-runtime-path place-first-require "private/place-first-require.rkt")
 
@@ -107,21 +114,6 @@
               (place-kill p)
               (check-equal? answer '(#t #f)
                             "(on main's OS thread? from main, from the parallel thread)"))))
-
-  (test-case "after a collection a tensor op lets a waiting green thread run"
-    (within 60
-            (lambda ()
-              (define x (randn 128 3 32 32))
-              (define w (randn 16 3 3 3))
-              (define done (box 0))
-              (define ran-after (box #f))
-              (collect-garbage 'minor)
-              (thread (lambda () (set-box! ran-after (unbox done))))
-              (for ([i (in-range 50)] #:break (unbox ran-after))
-                (conv2d x w #:padding 1)
-                (set-box! done (add1 i)))
-              (check-equal? (unbox ran-after) 0
-                            "the waiting thread did not run during the first op"))))
 
   (test-case "a break taken in to!'s re-accounting leaves the move's own error"
     (within 60
@@ -143,7 +135,7 @@
               (check-pred exn:fail? (unbox raised)
                           "the move to a missing device did not fail"))))
 
-  (test-case "an op inside an atomic section after a collection does not yield"
+  (test-case "an op inside an atomic section after a collection does not block"
     (check-equal? (exit-status-of
                    '(begin
                       (require (only-in ffi/unsafe/atomic call-as-atomic)
@@ -158,4 +150,4 @@
                             (zeros 1))))))
                    #:within 60)
                   0
-                  "the op slept inside an atomic section")))
+                  "the op blocked inside an atomic section")))

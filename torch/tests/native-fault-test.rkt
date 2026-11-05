@@ -17,7 +17,9 @@
                (only-in torch/foreign/structs tensor-impl)
                (only-in torch/foreign/raw/tensor tr-tensor-dtype/raw)
                (only-in torch/foreign/raw/memory
-                        registering finalizer-failures))
+                        registering finalizer-failures)
+               (only-in (submod torch/runtime/reaper private)
+                        reaper-statistics reaper-threads))
       (define (bad) (cast 8 _intptr _Tensor))
       (define (then-probe)
         (with-handlers ([exn:fail? (lambda (e)
@@ -31,6 +33,9 @@
       (for ([_ (in-range 3)]) (collect-garbage))
       (sleep 1)
       (printf "survived failures=~a\n" (finalizer-failures))
+      (printf "reapers alive=~a released=~a\n"
+              (andmap (lambda (t) (not (thread-dead? t))) (reaper-threads))
+              (hash-ref (reaper-statistics) 'released))
       (then-probe)))
 
   (define printer-fault
@@ -95,9 +100,10 @@
   (test-case "the default policy raises"
     (check-equal? native-fault-policy 'raise))
 
-  (test-case "a finalizer fault disables the library and is survived"
+  (test-case "L12: a fault in a reaper's release latches, counts, and leaves every reaper alive"
     (define-values (stdout faulted) (run-in-sandbox finalizer-fault))
     (check-true (regexp-match? #rx"survived failures=5" stdout) stdout)
+    (check-true (regexp-match? #rx"reapers alive=#t released=5\n" stdout) stdout)
     (check-true (regexp-match? disabled stdout) stdout)
     (check-equal? faulted "running a finalizer"))
 

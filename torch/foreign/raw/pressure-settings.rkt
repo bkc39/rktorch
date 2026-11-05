@@ -11,6 +11,7 @@
          native-collect-margin
          native-memory-fraction
          native-memory-limit
+         reaper-count-from-env
          release-spacing)
 
 (define mib (* 1024 1024))
@@ -34,6 +35,9 @@
 
 (define (memory-limit-from-env)
   (setting-from-env "RKTORCH_MEMORY_LIMIT" mib->bytes #f "a positive number of MiB"))
+
+(define (reaper-count-from-env)
+  (error 'unimplemented))
 
 (define (memory-fraction-from-env)
   (setting-from-env "RKTORCH_MEMORY_FRACTION" fraction #f "a number in (0, 1]"))
