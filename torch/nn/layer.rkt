@@ -22,18 +22,20 @@
                   define/checked-out define/contract-out)
          (only-in "buffer.rkt" Buffer?)
          (only-in "parameter.rkt" Parameter?)
-         (only-in "private/field-walk.rkt" rebuilt-value)
+         (only-in "private/field-walk.rkt" rebuilt-values)
          (only-in "private/layer-containers.rkt"
                   Children% Children%-alist Children%? Fn% Parameters% Parameters%?
                   check-names fn-forward)
          (only-in "private/layer-core.rkt"
                   gen:layer layer-buffers layer-mode layer-named-buffers
                   layer-named-children layer-named-parameters layer-parameters
-                  layer-rebuild layer-set-mode! layer? prop:on-move prop:rebuilder
+                  [layer-rebuild raw-layer-rebuild] layer-rebuild-in layer-rebuild-reentered
+                  layer-set-mode! layer? prop:fields prop:on-move prop:rebuilder rebuilder?
                   registry registry-mode registry? set-registry-mode! with-mode)
          (only-in "private/layer-fields.rkt"
                   assemble check-entry-arity entry-procedure layer-methods-of
-                  layer-methods? no-forward prop:layer-methods write-field!))
+                  layer-methods? no-forward prop:layer-methods write-field!)
+         (only-in "private/memo.rkt" memo remembered remembering-memo remembering?))
 
 (provide gen:layer
          layer?
@@ -60,6 +62,16 @@
 (define/contract-out (evaluating? mode) ;; noqa
   (-> mode/c boolean?)
   (eq? mode 'eval))
+
+(define (layer-rebuild m child tensor)
+  (cond
+    [(rebuilder? m) (raw-layer-rebuild m child tensor)]
+    [(remembering? child)
+     (define seen (remembering-memo child))
+     (remembered seen m
+                 (lambda () (layer-rebuild-in seen m child tensor))
+                 #:reentered (lambda () (layer-rebuild-reentered m)))]
+    [else (layer-rebuild-in (memo 'layer-rebuild) m child tensor)]))
 
 (module+ checked
   (provide (contract-out [layer? (-> any/c boolean?)])))
@@ -285,16 +297,21 @@
            (struct sid registry (field-spec ...)
              #:reflection-name (~? o.reflect 'name)
              #:property prop:rebuilder
-             (lambda (self child tensor) (rebuild self child tensor))
+             (lambda (self child tensor seen) (rebuild self child tensor seen))
+             #:property prop:fields
+             (lambda (self) (map cons '(field-name ...) (field-values self)))
              moved-property ...
              methods-property ...
              (~@ #:property prop prop-val) ...)
            (define name? sid?)
            fe.checker-def ... ...
            me.checker-def ... ...
-           (define (rebuild self child tensor)
+           (define (field-values self)
+             (list (acc self) ...))
+           (define (rebuild self child tensor seen)
              (assemble 'name sid forward-proc (registry-mode self) '(field-name ...)
-                       (list (rebuilt-value 'field-name (acc self) child tensor) ...)))
+                       (rebuilt-values seen '(field-name ...) (field-values self)
+                                       child tensor)))
            (define forward-proc forward-expr)
            (define (name . formals)
              (let ([absent #f] ...)
