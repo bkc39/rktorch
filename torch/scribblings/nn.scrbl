@@ -657,7 +657,8 @@ alone is closed with @racket[make-reader-graph], which raises when the
 cycle holds another cycle, since that would be copied too. A copied
 mutable @racket[equal?]-based hash is keyed again once the copy is whole;
 an immutable one that cannot be, as one copied while a key was still
-part-built, raises.
+part-built, raises, and so does a key that reaches its own table or a
+cycle through a mutable hash, which @racket[equal-hash-code] cannot hash.
 
 The keys of a weak or ephemeron hash are the exception: they are shared,
 not copied, and only its values are copied, as Python's deep copy of a

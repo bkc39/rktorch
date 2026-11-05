@@ -170,11 +170,21 @@
     (set-box! back table)
     (check-exn #rx"^layer-copy: an immutable equal[?]-based hash was copied while one of its keys"
                (lambda () (layer-copy (holder key))))
-    (match-define (list layer2 _) (copied-field (twin (vector-ref key 1) 0)))
+    (match-define (list layer2 _) (~> (vector-ref key 1) (twin 0) copied-field))
     (define table2 (unbox (layer2)))
     (match-define (list key2) (hash-keys table2))
     (check-eq? (vector-ref key2 1) layer2)
     (check-eq? (hash-ref table2 key2 #f) 1))
+
+  (memory-bounded-test "an equal? hash keyed by a box that came to hold the hash raises"
+    (define table (make-hash))
+    (define key (box #f))
+    (hash-set! table key 1)
+    (set-box! key table)
+    (check-exn #rx"^layer-copy: an equal[?]-based hash's key reaches that hash"
+               (lambda () (layer-copy (holder table))))
+    (check-exn #rx"^layer-copy: an equal[?]-based hash's key reaches that hash"
+               (lambda () (layer-copy (holder key)))))
 
   (memory-bounded-test "a direct layer-rebuild with plain callbacks copies a cycle"
     (define c ((layer-rebuild (holder (self-box)) (lambda (_name c) c) values)))
@@ -217,7 +227,7 @@
     #:methods gen:layer
     [(define (layer-forward self . _inputs) (back-outer self))
      (define (layer-rebuild self child tensor)
-       (back (rebuild-directly (back-outer self) child tensor)))])
+       (~> (back-outer self) (rebuild-directly child tensor) back))])
 
   (memory-bounded-test "a cycle closed through a delegating rebuild copies from the define-layer side"
     (define w (back #f))

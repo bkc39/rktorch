@@ -42,10 +42,10 @@
       ['pair (cons (ref) (ref))]
       ['ivector (apply vector-immutable (for/list ([_ (in-range (random 1 4))]) (ref)))]
       ['ibox (box-immutable (ref))]
-      ['ihasheq (for/fold ([h (hasheq)]) ([_ (in-range (random 1 3))])
-                  (hash-set h (hash-key keys) (ref)))]
-      ['ihash (for/fold ([h (hash)]) ([_ (in-range (random 1 3))])
-                (hash-set h (pick '(k1 k2 k3 4 5)) (ref)))]))
+      ['ihasheq (for/hasheq ([_ (in-range (random 1 3))])
+                  (values (hash-key keys) (ref)))]
+      ['ihash (for/hash ([_ (in-range (random 1 3))])
+                (values (pick '(k1 k2 k3 4 5)) (ref)))]))
 
   (define (fill! m refs keys)
     (define (ref) (pick refs))
@@ -80,7 +80,7 @@
     (for ([m (in-list mutables)])
       (fill! m (append (list 1 'b) everything) keys))
     (define nodes (append mutables keys early immutables late))
-    (graph (twin (shuffle nodes) 0) nodes))
+    (~> (shuffle nodes) (twin 0) (graph nodes)))
 
   (define (atomic? v)
     (or (number? v) (symbol? v) (string? v) (null? v) (boolean? v)))

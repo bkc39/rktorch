@@ -1,9 +1,11 @@
 #lang racket/base
 
 (require (for-syntax racket/base syntax/parse)
+         (only-in racket/dict in-dict)
          (only-in racket/match match match*)
          (only-in racket/unsafe/ops unsafe-set-immutable-car! unsafe-set-immutable-cdr!)
-         (only-in syntax/parse/define define-syntax-parse-rule))
+         (only-in syntax/parse/define define-syntax-parse-rule)
+         (only-in "hash-keys.rkt" check-hashable))
 
 (provide after-walk!
          allocated
@@ -57,9 +59,11 @@
 (define (finish! seen)
   (for ([h (in-list (reverse (memo-rekeyed seen)))])
     (define entries (hash->list h))
+    (for ([k (in-hash-keys h)])
+      (check-hashable (memo-who seen) k h))
     (hash-clear! h)
-    (for ([e (in-list entries)])
-      (hash-set! h (car e) (cdr e))))
+    (for ([(k x) (in-dict entries)])
+      (hash-set! h k x)))
   (for ([after (in-list (reverse (memo-afters seen)))])
     (after)))
 
@@ -228,15 +232,15 @@
   (for ([v (in-list nodes)] [final (in-list finals)])
     (hash-set! done v final))
   (when graph?
-    (for ([v (in-list nodes)] [c (in-list targets)] [final (in-list finals)])
-      (check-survived seen v c final (placeholder-nodes scc))))
+    (for ([c (in-list targets)] [final (in-list finals)])
+      (check-survived seen c final (placeholder-nodes scc))))
   (dropped! seen scc))
 
 (define (placeholder-nodes scc)
   (for/hasheq ([f (in-list scc)] #:when (frame-placeholder f))
     (values (frame-placeholder f) (frame-node f))))
 
-(define (check-survived seen v c final nodes)
+(define (check-survived seen c final nodes)
   (define (expected x)
     (if (placeholder? x) (hash-ref (memo-done seen) (hash-ref nodes x)) x))
   (define (kept? x y)
@@ -255,5 +259,4 @@
      (memo-who seen)
      (string-append "a cycle of immutable vectors, boxes or hashes reaches another cycle"
                     " or keys a hash by the cycle, and make-reader-graph cannot rebuild it"
-                    " without copying that too")
-     "value" v)))
+                    " without copying that too"))))

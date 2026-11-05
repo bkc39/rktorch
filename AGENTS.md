@@ -405,8 +405,8 @@ beside a layer or thunk. `layer-copy` (`torch/nn/copy.rkt`) is a deep copy
 with no RNG draws: fresh tensors with the same values, device, dtype and
 requires-grad (no gradients), children copied recursively, modes kept.
 It follows Python's `copy.deepcopy`, cycles included, with one memo per
-call (`private/memo.rkt`), passed explicitly (`layer-rebuild-in`).
-`define-layer` layers (`rebuilt-layer`, `private/field-walk.rkt`; the
+call (`torch/nn/private/memo.rkt`), passed explicitly (`layer-rebuild-in`).
+`define-layer` layers (`rebuilt-layer`, `torch/nn/private/field-walk.rkt`; the
 struct's fields and the registry's lists are mutable for this) and mutable
 containers (`allocated`) are made empty, recorded, then filled, so a
 back-edge gets the part-built copy, as Python's reduce and its list and
@@ -455,9 +455,10 @@ walked; values are copied. This follows Python's
 `WeakKeyDictionary.__deepcopy__`: a weak key the model also holds in a
 field is not mapped to that field's copy, so the copy's table stays keyed
 by the original and keeps an entry only while the original key is alive.
-An `equal?` key on a cycle through a mutable hash is one Racket's
-`equal-hash-code` does not terminate on; copying it into an `equal?` table
-may not either. It runs on the `gen:layer` method `layer-rebuild layer child tensor`, which
+`equal-hash-code` does not terminate on an `equal?` key on a cycle through
+a mutable hash, and `hash-set!` deadlocks on a key that reaches its own
+table, so `check-hashable` (`torch/nn/private/hash-keys.rkt`) raises
+before either, during the fill and again before re-keying. It runs on the `gen:layer` method `layer-rebuild layer child tensor`, which
 `define-layer` derives (`LSTM`'s plain `entries` list is why plain fields
 are walked); a stateless `procedure->Layer` copies, one with state
 refuses, and a hand-written `gen:layer` without the method refuses, naming
@@ -894,7 +895,8 @@ Runtime paths take `(only-in racket/runtime-path #%datum define-runtime-path)`.
   `torch/nn/private/layer-fields.rkt`
   (the expansion's runtime: `assemble`, the `set!` check, entry procedures),
   `torch/nn/private/field-walk.rkt` (`rebuilt-layer`, the allocate-and-fill
-  field walk `layer-rebuild` uses) and `torch/nn/private/memo.rkt` (the
+  field walk `layer-rebuild` uses), `torch/nn/private/hash-keys.rkt`
+  (`check-hashable`) and `torch/nn/private/memo.rkt` (the
   per-call memo with its in-progress set and immutable frames, and
   `remembering`, the closable callback that carries it, made by
   `with-remembering`); `torch/nn/mode.rkt` = `train!`, `eval!`,

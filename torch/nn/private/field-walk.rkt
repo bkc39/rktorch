@@ -2,6 +2,7 @@
 
 (require (only-in racket/match match match-lambda)
          (only-in "../../foreign.rkt" tensor?)
+         (only-in "hash-keys.rkt" check-hashable)
          (only-in "layer-containers.rkt" Children% Parameters% check-names classify)
          (only-in "layer-core.rkt"
                   layer? set-registry-buffers! set-registry-children! set-registry-params!)
@@ -64,7 +65,10 @@
     [(? hash?)
      (define weak? (weakly-keyed? v))
      (for ([(k x) (in-hash v)])
-       (hash-set! c (if weak? k (walk k)) (walk x)))
+       (define k2 (if weak? k (walk k)))
+       (when (hash-equal? c)
+         (check-hashable (memo-who seen) k2 c))
+       (hash-set! c k2 (walk x)))
      (when (and (hash-equal? c) (not weak?))
        (rekey-after-walk! seen c))]))
 
@@ -89,8 +93,7 @@
       (raise-arguments-error
        (memo-who seen)
        (string-append "an immutable equal?-based hash was copied while one of its keys"
-                      " was still being built, so the copy cannot find that key")
-       "key" k))))
+                      " was still being built, so the copy cannot find that key")))))
 
 (define (weakly-keyed? h)
   (or (hash-weak? h) (hash-ephemeron? h)))
