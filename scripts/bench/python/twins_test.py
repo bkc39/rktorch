@@ -8,7 +8,7 @@ from pipelines import peak_rss_mb
 class ThreadLoop(unittest.TestCase):
     def test_counts_only_the_steps_the_window_finished(self):
         step_s = 0.1
-        ops, elapsed = thread_loop(1, lambda: time.sleep(step_s), 0.25)
+        ops, elapsed = thread_loop(1, lambda: lambda: time.sleep(step_s), 0.25)
         self.assertGreaterEqual(ops, 1)
         self.assertLessEqual(ops * step_s, elapsed, (ops, elapsed))
 
@@ -23,8 +23,20 @@ class ThreadLoop(unittest.TestCase):
 
         t0 = time.perf_counter()
         with self.assertRaisesRegex(MemoryError, "worker step failed"):
-            thread_loop(2, step, 30)
+            thread_loop(2, lambda: step, 30)
         self.assertLess(time.perf_counter() - t0, 10)
+
+    def test_each_worker_runs_its_own_case_as_the_racket_workers_do(self):
+        cases = []
+
+        def make_step():
+            calls = []
+            cases.append(calls)
+            return lambda: (calls.append(None), time.sleep(0.001))
+
+        thread_loop(3, make_step, 0.1)
+        self.assertEqual(len(cases), 3)
+        self.assertTrue(all(cases), [len(c) for c in cases])
 
 
 class StackInputs(unittest.TestCase):

@@ -66,7 +66,8 @@ def main_loop(step, seconds):
     return n, time.perf_counter() - t0
 
 
-def thread_loop(n, step, seconds):
+def thread_loop(n, make_step, seconds):
+    steps = [make_step() for _ in range(n)]
     counts = [0] * n
     go = threading.Event()
     stop = threading.Event()
@@ -74,6 +75,7 @@ def thread_loop(n, step, seconds):
     errors = []
 
     def work(i):
+        step = steps[i]
         go.wait()
         k = 0
         try:
@@ -108,7 +110,8 @@ def load():
 def sample(op, threads, step, seconds, gc_clock):
     gc0 = gc_clock.ms()
     run_load = load()
-    ops, elapsed = main_loop(step, seconds) if threads == 0 else thread_loop(threads, step, seconds)
+    ops, elapsed = (main_loop(step, seconds) if threads == 0
+                    else thread_loop(threads, OPS[op], seconds))
     return {"kind": "op", "impl": "pytorch", "op": op, "layer": "facade", "threads": threads,
             "ops": ops, "elapsed_ms": 1000.0 * elapsed,
             "us_per_op": 1e6 * elapsed * max(1, threads) / ops if ops else None,
