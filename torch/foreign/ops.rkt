@@ -110,6 +110,8 @@
 
 (define float-dtype/c (or/c 'float32 'float64))
 
+(define zero-index/c (and/c exact-integer? zero?))
+
 ;; randn and rand construct at the dtype they are given, half included;
 ;; the spectral helpers in torch/audio take float-dtype/c and do not
 (define/checked-out any-float-dtype/c contract? ;; noqa
@@ -435,7 +437,7 @@
        ([index (target)
                (match target
                  ['cuda exact-nonnegative-integer?]
-                 [(or 'cpu 'mps) (and/c exact-integer? zero?)]
+                 [(or 'cpu 'mps) zero-index/c]
                  [_ none/c])])
        [result device?])
   (match target

@@ -12,10 +12,13 @@
          (only-in "ops.rkt" tensor-device tensor-shape)
          (only-in "structs.rkt" tensor?))
 
+(define less-than/c (-> any/c any/c any/c))
+(define key/c (or/c #f (-> any/c any/c)))
+
 (define sort/c
   (->i ([v (or/c tensor? list?)])
-       ([less-than? (v) (if (tensor? v) none/c (any/c any/c . -> . any/c))]
-        #:key [key (v) (if (tensor? v) none/c (or/c #f (any/c . -> . any/c)))]
+       ([less-than? (v) (if (tensor? v) none/c less-than/c)]
+        #:key [key (v) (if (tensor? v) none/c key/c)]
         #:cache-keys? [cache-keys? (v) (if (tensor? v) none/c boolean?)]
         #:dim [dim (v) (if (tensor? v) index/c none/c)]
         #:descending? [descending? (v) (if (tensor? v) boolean? none/c)])

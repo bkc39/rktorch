@@ -65,7 +65,7 @@
       (dataset-batch ds (tensor '(4 1) #:dtype 'int64) default-collate))
     (check-equal? (tensor->list yt) '(4 1) "an index tensor gathers too")
     (check-exn exn:fail:contract? (lambda () (tensor-dataset xs (ones 5))))
-    (check-exn #rx"same-leading-dimension" (lambda () (tensor-dataset xs (ones 5))))
+    (check-exn #rx"same leading dimension" (lambda () (tensor-dataset xs (ones 5))))
     (check-exn #rx"batched-tensor" (lambda () (tensor-dataset (tensor 1.0))))
     (check-exn #rx"int64-vector"
                (lambda () (dataset-batch ds (tensor '(1.0 2.0)) default-collate)))
@@ -87,7 +87,7 @@
                (lambda () (dataset-batch ds '(-6 -5 -4) default-collate))
                "indices are natural numbers, not end-relative")
     (check-exn exn:fail:contract? (lambda () (dataset-ref ds -1)))
-    (check-exn #rx"same-leading-dimension"
+    (check-exn #rx"same leading dimension"
                (lambda () (tensor-dataset xs (ones 5 2))))
     (check-equal? (format "~a" ds) "#<tensor-dataset>")
     ;; the native path hands out views: a run's batch follows the source
@@ -296,7 +296,7 @@
     (for ([dev (in-list (list (and (cuda-available?) (cuda-device))
                               (and (mps-available?) (mps-device))))]
           #:when dev)
-      (check-exn #rx"same-device" (lambda () (tensor-dataset (to xs dev) ys)))
+      (check-exn #rx"same device" (lambda () (tensor-dataset (to xs dev) ys)))
       (check-exn #rx"stackable-tensor-items"
                  (lambda () (default-collate (list (list (ones 2)) (list (to (ones 2) dev))))))
       (define ds (tensor-dataset (to xs dev) (to ys dev)))

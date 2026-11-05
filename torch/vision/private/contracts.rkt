@@ -11,17 +11,18 @@
          (only-in "../../foreign/ops.rkt" any-float-dtype/c)
          (only-in "../../private/contract.rkt" supplied-or))
 
-(provide batch-for/c
+(provide batch-on-generator-device?
          crop-boxes/c
          default-ratio
          default-scale
+         flip-mask/c
          float-batch/c
          generator/c
          image-size/c
          jitter-strengths/c
+         nonnegative-real?
          nonnegative/c
          ordered-pair/c
-         per-sample-mask/c
          per-sample/c
          ratio/c
          rgb-float-batch/c
@@ -36,6 +37,9 @@
 
 (define (same-device? a b)
   (equal? (device a) (device b)))
+
+(define (nonnegative-real? v)
+  (and (real? v) (>= v 0)))
 
 (define nonnegative/c (and/c real? (>=/c 0)))
 
@@ -70,11 +74,8 @@
 
 (define generator/c (or/c generator? #f))
 
-(define (batch-for/c batch/c generator)
-  (and/c batch/c
-         (flat-named-contract
-          'on-the-generator-device
-          (lambda (x) (generator-on? (supplied-or generator) (device x))))))
+(define (batch-on-generator-device? x generator)
+  (generator-on? (supplied-or generator) (device x)))
 
 (define (rows-of? t x row-shape)
   (match* ((shape t) (shape x))
@@ -89,21 +90,22 @@
           (rows-of? boxes x '(4))
           (same-device? boxes x)))))
 
-(define (per-sample/c x [real/c real?])
+(define (per-sample/c x [factor? real?])
   (flat-named-contract
    'per-sample-factor
-   (or/c real/c
-         (lambda (f)
-           (and (float-tensor? f) (rows-of? f x '()) (same-device? f x))))))
+   (lambda (f)
+     (or (factor? f)
+         (and (float-tensor? f) (rows-of? f x '()) (same-device? f x))))))
 
-(define (per-sample-mask/c x)
+(define (flip-mask/c x)
   (flat-named-contract
-   'per-sample-mask
+   'per-sample-mask-or-false
    (lambda (m)
-     (and (tensor? m)
-          (eq? (dtype m) 'bool)
-          (rows-of? m x '())
-          (same-device? m x)))))
+     (or (not m)
+         (and (tensor? m)
+              (eq? (dtype m) 'bool)
+              (rows-of? m x '())
+              (same-device? m x))))))
 
 (define jitter-strengths/c
   (flat-named-contract
