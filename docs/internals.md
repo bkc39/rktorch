@@ -239,13 +239,13 @@ instead costs 30%.
 
 **The no-grad trough.** A sampling or evaluation loop never reaches
 `backward!`. Its trough is the return of an *outermost* layer call with
-gradients off: `call-layer` in `torch/nn/layer.rkt` marks the
+gradients off: `call-layer` in `torch/nn/private/layer-core.rkt` marks the
 continuation for the extent of a call, so a nested call sees the mark
 and only the outermost return reaches `collect-at-forward-trough!`,
 which checks the grad mode and calls `collect-at-trough! #:young? #t`.
 `gen:layer` derives `prop:procedure` from `call-layer`, so applying any
 layer, hand-written ones included, goes through it, and the generic's own
-dispatch never leaves `torch/nn/layer.rkt`: a hand-written `gen:layer` defines the
+dispatch never leaves `torch/nn/private/layer-core.rkt`: a hand-written `gen:layer` defines the
 method and gets the trough without knowing it (#176). Applying a layer is
 the only way to call one; a structure that also sets `prop:procedure`
 itself is rejected as a duplicate property. `native-collect-at-troughs #f`
