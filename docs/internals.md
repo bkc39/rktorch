@@ -173,7 +173,9 @@ representative, no closure and no lock.
   and the other sleeps with the count at 1.
 - **Wakes.** Two sources, both tied to collections. `wake-reapers!`
   claims one parked reaper with a CAS on its mark and posts that reaper's
-  semaphore, so each wake reaches a different reaper; with none parked it
+  semaphore, so a second wake reaches another reaper while the first one
+  woken is still awake. A woken reaper that found nothing and marked itself
+  parked again can take the next wake itself; with none parked a wake
   posts nothing. The latch,
   `wake-after-collection!` in `torch/foreign/raw/collector.rkt`, runs at
   the end of `collect-under-pressure!`: a thread's first accounting after
@@ -667,6 +669,7 @@ gets the point's name and a subject (a handle, a device, a thread).
 | `finalizer-releasing` | a reaper's or a drain's release, before it unaccounts | handle |
 | `reaper-taken` | inside the batch region, a batch taken and the take lock released; a hook here can only spin, not park | the taking thread |
 | `reaper-parking` | outside any region, before a reaper parks | the reaper thread |
+| `reaper-woken` | outside any region, a reaper back from its wait, before it clears its own mark | the reaper thread |
 | `drain-fenced` | the drainer has seen its fences or empty guardians | the ticket D₀ |
 | `live-returned` | an unaccounting of an adopted gradient holds the ledger, its live bytes given back, before its adoption | handle |
 | `adoption-returning` | an unaccounting holds the ledger, before it gives a gradient's adoption back | handle |

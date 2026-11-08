@@ -165,34 +165,51 @@
   (define both-wake-program
     '(begin
        (require (only-in racket/list remove-duplicates)
-                (only-in torch/foreign/raw/cas cas-update!)
+                (only-in torch/foreign/raw/cas cas-claim! cas-update!)
                 (only-in torch/foreign/raw/race-points race-hook)
                 (only-in torch/tests/private/wedge call-with-process-deadline))
        (define arrivals (box '()))
-       (set-box! race-hook (lambda (name subject)
-                             (when (eq? name 'reaper-parking)
-                               (cas-update! arrivals (lambda (ts) (cons subject ts))))))
-       (define (parked-reapers)
-         (length (remove-duplicates (unbox arrivals) eq?)))
-       (define (await-parked k)
-         (let wait ()
-           (when (< (parked-reapers) k)
-             (sleep 0.01)
-             (wait))))
+       (define woken (box '()))
+       (define armed (box #f))
+       (define held (box #f))
+       (define resumed (box #f))
+       (set-box! race-hook
+                 (lambda (name subject)
+                   (case name
+                     [(reaper-parking) (cas-update! arrivals (lambda (ts) (cons subject ts)))]
+                     [(reaper-woken)
+                      (when (unbox armed)
+                        (cas-update! woken (lambda (ts) (cons subject ts)))
+                        (when (cas-claim! held #f subject #:site 'gate)
+                          (let spin () (unless (unbox resumed) (spin)))))]
+                     [else (void)])))
+       (define (distinct b)
+         (length (remove-duplicates (unbox b) eq?)))
+       (define (await k b)
+         (sync/timeout 10 (thread (lambda ()
+                                    (let wait ()
+                                      (when (< (distinct b) k)
+                                        (sleep 0.001)
+                                        (wait)))))))
        (define wake-reapers! (dynamic-require 'torch/runtime/reaper 'wake-reapers!))
        (call-with-process-deadline
         50
         (lambda ()
-          (await-parked 2)
-          (sleep 0.1)
+          (await 2 arrivals)
           (set-box! arrivals '())
+          (set-box! armed #t)
           (wake-reapers!)
+          (await 1 woken)
           (wake-reapers!)
-          (sync/timeout 5 (thread (lambda () (await-parked 2))))
-          (eprintf "reapers woken by two wakes: ~a\n" (parked-reapers))
-          (exit (if (= 2 (parked-reapers)) 0 1))))))
+          (await 2 woken)
+          (define both-woken (distinct woken))
+          (set-box! resumed #t)
+          (await 2 arrivals)
+          (eprintf "reapers woken while the first stayed awake: ~a, parked again: ~a\n"
+                   both-woken (distinct arrivals))
+          (exit (if (= 2 both-woken (distinct arrivals)) 0 1))))))
 
-  (test-case "two wakes in quick succession wake both of two parked reapers"
+  (test-case "a second wake reaches the other parked reaper while the first one woken is awake"
     (check-equal? (with-reapers 2 (lambda () (exit-status-of both-wake-program #:within 60)))
                   0))
 

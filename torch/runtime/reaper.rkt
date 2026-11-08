@@ -151,6 +151,7 @@
      (race-point reaper-parking (current-thread))
      (cas-add! parks 1)
      (os-semaphore-wait (reaper-wake r))
+     (race-point reaper-woken (current-thread))
      (set-box! parked #f)
      (cas-add! wakes 1)]))
 
