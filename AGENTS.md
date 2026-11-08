@@ -409,12 +409,14 @@ that `define-layer` derives (`LSTM`'s plain `entries` list is why plain
 fields are walked). Invariants of the walk:
 - One memo per call (`torch/nn/private/memo.rkt`, passed explicitly through
   `layer-rebuild-in`); `layer-copy`'s `child` is a `remembering` that
-  carries it, and `layer-rebuild-joined` (`layer-core.rkt`, behind both the
-  exported `layer-rebuild` and the registry's method) joins that memo or
-  opens a fresh one. A `define/generic` delegation bypasses both, so a cycle
+  carries it, and `layer-rebuild-joined`
+  (`torch/nn/private/layer-core.rkt`, behind both the exported
+  `layer-rebuild` and the registry's method) joins that memo or opens a
+  fresh one. A `define/generic` delegation bypasses both, so a cycle
   of them does not terminate (#466).
-- `define-layer` layers (`rebuilt-layer`, `field-walk.rkt`) and mutable
-  containers are recorded empty, then filled (`allocated`): a back edge
+- `define-layer` layers (`rebuilt-layer`,
+  `torch/nn/private/field-walk.rkt`) and mutable containers are recorded
+  empty, then filled (`allocated`): a back edge
   gets the part-built copy, as Python's reduce and list/dict copies do.
 - Immutable pairs, vectors, boxes and hashes copy their parts, then re-check
   the memo (`rebuilt-immutable`, `_deepcopy_tuple`); re-entering one walks
@@ -424,8 +426,8 @@ fields are walked). Invariants of the walk:
   themselves is returned as is.
 - A hand-written layer is recorded when its rebuild returns (`remembered`);
   re-entering it raises, Python's `RecursionError`.
-- `claim.rkt` owns the tables: one thread walks at a time (the caller, or
-  one worker while the caller waits); another live thread raises. A fill
+- `torch/nn/private/claim.rkt` owns the tables: one thread walks at a
+  time (the caller, or one worker while the caller waits); another live thread raises. A fill
   that does not return, or a claim that finds a dead claimant, fails the
   memo, and every later claim raises, so no part-built value is handed
   out. The memo is closed when the call exits; a stashed callback raises.
@@ -436,8 +438,8 @@ fields are walked). Invariants of the walk:
   every key (`check-keys`), and `check-names` runs. `equal-always?` and
   `eqv?` hashes need neither: an immutable key is whole when inserted and a
   mutable one hashes by identity.
-- `check-hashable` (`hash-keys.rkt`) raises before `equal-hash-code` would
-  loop (a mutable hash on a cycle in the key, prefab and transparent struct
+- `check-hashable` (`torch/nn/private/hash-keys.rkt`) raises before
+  `equal-hash-code` would loop (a mutable hash on a cycle in the key, prefab and transparent struct
   fields included) or `hash-set!` deadlock (a key reaching its own table).
 - Weak and ephemeron hash keys are shared, not walked, as Python's
   `WeakKeyDictionary.__deepcopy__`.

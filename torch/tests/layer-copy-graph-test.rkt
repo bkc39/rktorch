@@ -1,7 +1,8 @@
 #lang racket/base
 
 (module+ test
-  (require (only-in racket/list shuffle)
+  (require (only-in racket/dict in-dict in-dict-keys)
+           (only-in racket/list shuffle)
            (only-in racket/match match match* match-define match-lambda)
            rackunit
            "../main.rkt"
@@ -68,14 +69,13 @@
       [(? box?) (set-box! m (ref))]
       [(? vector?) (for ([i (in-range (vector-length m))]) (vector-set! m i (ref)))]
       [(? hash?)
-       (for ([e (in-list (entries kind keys refs))])
-         (match e
-           [(cons k x) (hash-set! m k x)]))]))
+       (for ([(k x) (in-dict (entries kind keys refs))])
+         (hash-set! m k x))]))
 
   (define (random-graph)
     (define w (Parameter (ones 1)))
     (define kinds (for/list ([_ (in-range (random 1 6))]) (pick fresh-mutables)))
-    (define mutables (for/list ([k (in-list kinds)]) (match k [(list _ make) (make)])))
+    (define mutables (map (match-lambda [(list _ make) (make)]) kinds))
     (define mutable-keys (for/list ([i (in-range (random 0 3))]) (mutable-key (+ 1000 i))))
     (define (layers-over refs n)
       (for/fold ([made '()]) ([_ (in-range n)])
@@ -148,9 +148,8 @@
     (let visit ([v v] [seen (hasheq)])
       (and (not (hash-ref seen v #f))
            (or (fresh? v)
-               (for/or ([oc (in-list (paired v v))])
-                 (match oc
-                   [(cons part _) (visit part (hash-set seen v #t))]))))))
+               (for/or ([part (in-dict-keys (paired v v))])
+                 (visit part (hash-set seen v #t)))))))
 
   (define (image-map orig copy)
     (define φ (make-hasheq))
@@ -164,9 +163,8 @@
          (check-true (same-kind? o c) (format "kind of ~a" o))
          (hash-set! φ o c)
          (hash-set! ψ c o)
-         (for ([oc (in-list (paired o c))])
-           (match oc
-             [(cons o2 c2) (walk o2 c2)]))]))
+         (for ([(o2 c2) (in-dict (paired o c))])
+           (walk o2 c2))]))
     φ)
 
   (define (check-registry φ)
