@@ -279,5 +279,6 @@
   (hash 'taken (unbox taken)
         'released (unbox released)
         'parks (unbox parks)
+        'parked (for/sum ([r (in-list reapers)]) (if (unbox (reaper-parked r)) 1 0))
         'wakes (unbox wakes)
         'escapes (unbox escapes)))

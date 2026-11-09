@@ -3,7 +3,7 @@
 (require (only-in ffi/unsafe/atomic call-as-atomic)
          (only-in threading ~>)
          (only-in "../../foreign.rkt" native-memory-unaccounted native-memory-use)
-         (only-in "../../foreign/raw/collector.rkt" drain-finalizers!)
+         (only-in "../../foreign/raw/collector.rkt" drain-finalizers! wake-after-collection!)
          (only-in (submod "../../runtime/reaper.rkt" private) reaper-statistics reaper-threads))
 
 (provide median-allocation)
@@ -14,24 +14,30 @@
   (for/sum ([entry (in-list (append (native-memory-use) (native-memory-unaccounted)))])
     (cdr entry)))
 
-;; A reaper counts its park before it waits and its wake after.
+;; A reaper counts its park before it waits and its wake after it returns, so
+;; one already posted still counts as parked: its mark, which the waker clears,
+;; tells them apart. The first yield runs a canary the collection left pending.
 (define (reapers-parked?)
   (define stats (reaper-statistics))
-  (= (- (hash-ref stats 'parks) (hash-ref stats 'wakes)) (length (reaper-threads))))
+  (define k (length (reaper-threads)))
+  (and (= (hash-ref stats 'parked) k)
+       (= (- (hash-ref stats 'parks) (hash-ref stats 'wakes)) k)))
 
 (define (await-parked-reapers)
   (define deadline (+ (current-inexact-milliseconds) 2000))
   (let wait ()
+    (sleep 0)
     (unless (or (reapers-parked?) (> (current-inexact-milliseconds) deadline))
-      (sleep 0)
       (wait))))
 
-;; Earlier runs' garbage is released, and every reaper parked again, before
-;; the window opens: the heap counts every thread's allocation, and a woken
-;; reaper's is not this run's.
+;; Earlier runs' garbage is released, main's latch is spent (or its first
+;; accounting in the window would wake a reaper), and every reaper parked
+;; again, before the window opens: the heap counts every thread's allocation,
+;; and a woken reaper's is not this run's.
 (define (racket-heap-allocation thunk)
   (collect-garbage 'minor)
   (drain-finalizers!)
+  (wake-after-collection!)
   (await-parked-reapers)
   (define start
     (call-as-atomic
