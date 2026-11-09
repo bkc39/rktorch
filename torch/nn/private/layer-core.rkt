@@ -3,6 +3,10 @@
 (require (for-syntax racket/base
                      (only-in syntax/parse/pre expr))
          (only-in racket/generic define-generics)
+         (only-in racket/private/generic-methods
+                  generic-info-accessor generic-info-method-names generic-info-methods
+                  generic-info-name generic-info-predicate generic-info-property
+                  generic-info-required-methods make-generic-info)
          (only-in racket/list append-map remove-duplicates)
          (only-in racket/stxparam define-syntax-parameter)
          (only-in syntax/parse/define define-syntax-parse-rule)
@@ -12,7 +16,7 @@
          (only-in "memo.rkt" remembered remembering-seen remembering? with-memo))
 
 ;; the noqa'd exports are macro expansions raco review cannot see
-(provide gen:layer
+(provide (rename-out [gen:joined-layer gen:layer])
          layer?
          layer-parameters ;; noqa
          layer-named-parameters ;; noqa
@@ -21,7 +25,6 @@
          layer-named-children ;; noqa
          layer-mode ;; noqa
          layer-set-mode! ;; noqa
-         layer-rebuild ;; noqa
          layer-rebuild-in
          prop:on-move
          prop:rebuilder
@@ -38,7 +41,7 @@
   (layer-own-tensors layer)
   (layer-mode layer)
   (layer-set-mode! layer mode)
-  (layer-rebuild layer child tensor)
+  (layer-rebuild-method layer child tensor)
   #:derive-property prop:to (lambda (m dev dtype) (move-layer! m dev dtype))
   #:derive-property prop:procedure
   (make-keyword-procedure
@@ -53,11 +56,27 @@
    (define (layer-own-tensors self) (own-tensors self)) ;; noqa
    (define (layer-mode self) 'train) ;; noqa
    (define (layer-set-mode! self mode) (void)) ;; noqa
-   (define (layer-rebuild self child tensor) ;; noqa
+   (define (layer-rebuild-method self child tensor) ;; noqa
      (raise-arguments-error
       'layer-copy
-      "a hand-written gen:layer has no layer-rebuild method to copy it with"
+      "a hand-written gen:layer has no layer-rebuild-method to copy it with"
       "layer" self))])
+
+;; define/generic reaches layer-rebuild-in, not the raw method, so no rebuild
+;; body is entered past the memo
+(define-syntax gen:joined-layer
+  (let ([info (syntax-local-value (quote-syntax gen:layer))])
+    (make-generic-info
+     (generic-info-name info)
+     (generic-info-property info)
+     (generic-info-predicate info)
+     (generic-info-accessor info)
+     (generic-info-method-names info)
+     (for/list ([m (in-list (generic-info-methods info))])
+       (if (free-identifier=? m (quote-syntax layer-rebuild-method))
+           (quote-syntax layer-rebuild-in)
+           m))
+     (generic-info-required-methods info))))
 
 ;; PyTorch: "nn.Module.to only accepts floating point or complex dtypes",
 ;; and its convert forwards the dtype only to floating-point tensors — an
@@ -209,20 +228,40 @@
        (child-set-mode! c mode)))
    (define (layer-mode self)
      (registry-mode self))
-   (define (layer-rebuild self child tensor)
+   (define (layer-rebuild-method self child tensor)
      (layer-rebuild-in self child tensor))])
 
 (define-values (prop:rebuilder rebuilder? rebuilder-of) ;; noqa
   (make-struct-type-property 'rebuilder))
 
-(define (layer-rebuild-in m child tensor
-                          #:memo [seen (and (remembering? child) (remembering-seen child))])
+(struct direct (child tensor seen))
+
+(define direct-rebuilds (make-continuation-mark-key 'layer-rebuild))
+
+(define (same? f g)
+  (or (chaperone-of? f g) (chaperone-of? g f)))
+
+;; a contract wraps the callbacks again at each call, hence chaperone-of?
+(define (joined child tensor directs)
+  (for/first ([d (in-list directs)]
+              #:when (and (same? child (direct-child d)) (same? tensor (direct-tensor d))))
+    (direct-seen d)))
+
+(define (layer-rebuild-in m child tensor)
+  (define directs (continuation-mark-set-first #f direct-rebuilds '()))
+  (define seen
+    (if (remembering? child) (remembering-seen child) (joined child tensor directs)))
   (cond
-    [(not seen)
+    [seen (rebuilt m child tensor seen)]
+    [else
      (with-memo (fresh 'layer-rebuild)
-       (layer-rebuild-in m child tensor #:memo fresh))]
-    [(rebuilder? m) ((rebuilder-of m) m child tensor seen)]
-    [else (remembered seen m (lambda () (layer-rebuild m child tensor)))]))
+       (with-continuation-mark direct-rebuilds (cons (direct child tensor fresh) directs)
+         (rebuilt m child tensor fresh)))]))
+
+(define (rebuilt m child tensor seen)
+  (if (rebuilder? m)
+      ((rebuilder-of m) m child tensor seen)
+      (remembered seen m (lambda () (layer-rebuild-method m child tensor)))))
 
 (define (child-parameters c)
   (layer-parameters (cdr c)))

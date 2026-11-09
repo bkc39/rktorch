@@ -592,7 +592,7 @@ The generic interface, with methods @racket[layer-forward],
 @racket[layer-parameters], @racket[layer-named-parameters],
 @racket[layer-buffers], @racket[layer-named-buffers],
 @racket[layer-named-children], @racket[layer-own-tensors],
-@racket[layer-mode], @racket[layer-set-mode!] and @racket[layer-rebuild].
+@racket[layer-mode], @racket[layer-set-mode!] and @racket[layer-rebuild-method].
 A structure implements
 it with @racket[#:methods]; it derives @racket[prop:to], so every layer is
 @racket[to-able?], and @racket[prop:procedure], so every layer applies to
@@ -652,7 +652,7 @@ a weak or ephemeron hash shares its keys.
 
 @racket[layer-copy] raises @racket[exn:fail:contract] on a cycle made only of
 immutable values, which Python cannot build, and on a cycle back into a
-hand-written layer whose @racket[layer-rebuild] has not returned. It also
+hand-written layer whose @racket[layer-rebuild-method] has not returned. It also
 raises where an @racket[equal?]-based hash cannot be copied: a key that
 reaches its own table, a key that reaches a mutable @racket[equal?]-based
 hash whose own keys reach it (both can hang @racket[equal-hash-code]), and keys
@@ -665,7 +665,7 @@ Every layer @racket[define-layer] builds can be copied, the built-in ones
 included, and so can a @racket[procedure->Layer] layer with no
 parameters, buffers or children. One with them is refused, since its
 procedure reads the original's tensors. A hand-written layer is copied
-through its @racket[layer-rebuild] method, and refused when it has none.
+through its @racket[layer-rebuild-method], and refused when it has none.
 
 @torch-examples[
 (manual-seed! 0)
@@ -683,7 +683,8 @@ through its @racket[layer-rebuild] method, and refused when it has none.
                         [child (-> string? layer? layer?)]
                         [tensor (-> tensor? tensor?)])
          layer?]{
-The @racket[gen:layer] method @racket[layer-copy] is built on: a new layer
+What @racket[layer-copy] is built on, through the @racket[gen:layer] method
+@racket[layer-rebuild-method], which takes the same arguments: a new layer
 of @racket[m]'s kind and configuration, in its mode, whose every child
 @racket[c] registered under @racket[name] is replaced by
 @racket[(child name c)], and whose every tensor, its own parameters and
@@ -694,15 +695,20 @@ copies each child the same way and a @racket[tensor] that copies each
 tensor, both remembering what they have done, so shared values stay
 shared. Plain fields are rebuilt as @racket[layer-copy] copies them.
 
-A hand-written @racket[layer-rebuild] passes each child to its
-@racket[child], as @racket[(child name inner)], and returns a new layer. A
-call given @racket[layer-copy]'s @racket[child] joins that copy, so what it
-reaches is shared with the rest of it; a call given any other
-@racket[child] copies its own containers as @racket[layer-copy] does. One
-that calls a hand-written inner layer's method through a
-@racket[define/generic] instead copies that inner layer apart from the rest
-of the copy. The rebuild may see part-built copies of containers and
-@racket[define-layer] layers on a cycle. A child callback may be used by one
+A hand-written @racket[layer-rebuild-method] passes each child to its
+@racket[child], as @racket[(child name inner)], or to @racket[layer-rebuild],
+and returns a new layer. A call given @racket[layer-copy]'s @racket[child]
+joins that copy, so what it reaches is shared with the rest of it; a call made
+while another @racket[layer-rebuild] on the same @racket[child] and
+@racket[tensor] has not returned, on its thread, joins that one; any other call
+copies its own containers as @racket[layer-copy] does. A method body is
+entered only through @racket[layer-rebuild], which a @racket[define/generic]
+of @racket[layer-rebuild-method] binds, so a layer reached twice is rebuilt
+once, unlike a direct @tt{__deepcopy__} call in Python, and a cycle back into
+a body that has not returned raises, naming the layer. Inside the block, the
+name @racket[layer-rebuild-method] is the structure's own definition, which a
+call enters without the memo. The rebuild may see part-built copies of
+containers and @racket[define-layer] layers on a cycle. A child callback may be used by one
 thread a rebuild starts while the rebuild waits; a second thread at once, a
 use after @racket[layer-copy] returns, and any use after a rebuild raised or
 was killed raise @racket[exn:fail:contract], except a thread killed inside
@@ -711,9 +717,9 @@ some children with other layers rebuilds the tree with those leaves replaced,
 and raises when two keys of one hash, of any comparison, are replaced by keys
 that comparison equates.
 
-@racket[define-layer] supplies the method. A hand-written layer that
-should be copyable defines it in its @racket[#:methods gen:layer] block,
-returning a new structure of its own:
+@racket[define-layer] supplies @racket[layer-rebuild-method]. A hand-written
+layer that should be copyable defines it in its @racket[#:methods gen:layer]
+block, returning a new structure of its own:
 
 @racketblock[
 (struct Scaled (weight)
@@ -722,7 +728,7 @@ returning a new structure of its own:
      (* (car inputs) (Scaled-weight self)))
    (define (layer-parameters self)
      (list (Scaled-weight self)))
-   (define (layer-rebuild self child tensor)
+   (define (layer-rebuild-method self child tensor)
      (Scaled (tensor (Scaled-weight self))))])
 ]
 

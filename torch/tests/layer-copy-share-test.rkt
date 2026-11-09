@@ -6,7 +6,7 @@
            rackunit
            "../main.rkt"
            "../nn.rkt"
-           (only-in "private/copy-layers.rkt" copied-field holder rebuild-directly twin)
+           (only-in "private/copy-layers.rkt" copied-field holder twin)
            (only-in "private/within.rkt" bounded-test))
 
   (bounded-test "two fields sharing a box share one fresh box in the copy"
@@ -103,12 +103,12 @@
     [(define (layer-forward self . _inputs) (pair-of-seen self))
      (define (layer-named-children self)
        (list (cons "inner" (pair-of-inner self))))
-     (define (layer-rebuild self child _tensor)
+     (define (layer-rebuild-method self child _tensor)
        (define inner (pair-of-inner self))
        (pair-of (child "inner" inner)
                 (list (inner)
                       ((child "inner" inner))
-                      ((rebuild-directly inner (lambda (_name c) c) values)))))])
+                      ((layer-rebuild inner (lambda (_name c) c) values)))))])
 
   (bounded-test "a direct layer-rebuild inside a layer-copy keeps its own memo"
     (match-define (list original copied direct)
@@ -122,9 +122,9 @@
     [(define (layer-forward self . _inputs) (via-direct self))
      (define (layer-named-children self)
        (list (cons "inner" (via-inner self))))
-     (define (layer-rebuild self child tensor)
+     (define (layer-rebuild-method self child tensor)
        (define inner (via-inner self))
-       (via (child "inner" inner) (rebuild-directly inner child tensor)))])
+       (via (child "inner" inner) (layer-rebuild inner child tensor)))])
 
   (bounded-test "a direct layer-rebuild given layer-copy's child shares its layers and containers"
     (define leaf (holder 0))
@@ -138,8 +138,8 @@
   (struct deleg (inner)
     #:methods gen:layer
     [(define (layer-forward self . _inputs) (deleg-inner self))
-     (define (layer-rebuild self child tensor)
-       (~> (deleg-inner self) (rebuild-directly child tensor) deleg))])
+     (define (layer-rebuild-method self child tensor)
+       (~> (deleg-inner self) (layer-rebuild child tensor) deleg))])
 
   (bounded-test "a container shared through a delegating layer stays shared"
     (define b (box 1))
@@ -155,9 +155,9 @@
 
   (struct generic-deleg (inner)
     #:methods gen:layer
-    [(define/generic raw-rebuild layer-rebuild)
+    [(define/generic raw-rebuild layer-rebuild-method)
      (define (layer-forward self . _inputs) (generic-deleg-inner self))
-     (define (layer-rebuild self child tensor)
+     (define (layer-rebuild-method self child tensor)
        (~> self generic-deleg-inner (raw-rebuild child tensor) generic-deleg))])
 
   (bounded-test "a define/generic rebuild of a define-layer layer copies it"
@@ -176,19 +176,56 @@
   (struct leaf (v)
     #:methods gen:layer
     [(define (layer-forward self . _inputs) (leaf-v self))
-     (define (layer-rebuild self _child _tensor)
+     (define (layer-rebuild-method self _child _tensor)
        (leaf (leaf-v self)))])
 
-  (bounded-test "#466: a define/generic rebuild of a hand-written layer copies it apart"
+  (bounded-test "a hand-written layer reached twice through a define/generic rebuild is copied once"
     (define l (leaf 1))
     (match-define (list d2 l2) (~> l generic-deleg (twin l) copied-field))
-    (check-false (eq? (generic-deleg-inner d2) l2))
+    (check-eq? (generic-deleg-inner d2) l2)
     (check-false (eq? l2 l)))
+
+  (struct plain-deleg (inner)
+    #:methods gen:layer
+    [(define (layer-forward self . _inputs) (plain-deleg-inner self))
+     (define (layer-rebuild-method self child tensor)
+       (~> self plain-deleg-inner (layer-rebuild child tensor) plain-deleg))])
+
+  (bounded-test "a hand-written layer reached twice through the plain name is copied once"
+    (define l (leaf 1))
+    (match-define (list d2 l2) (~> l plain-deleg (twin l) copied-field))
+    (check-eq? (plain-deleg-inner d2) l2)
+    (check-false (eq? l2 l)))
+
+  (struct both (a b)
+    #:methods gen:layer
+    [(define (layer-forward self . _inputs) (list (both-a self) (both-b self)))
+     (define (layer-rebuild-method self child tensor)
+       (both (layer-rebuild (both-a self) child tensor)
+             (layer-rebuild (both-b self) child tensor)))])
+
+  (bounded-test "a hand-written layer reached twice by one direct rebuild is rebuilt once"
+    (define l (leaf 1))
+    (define r (layer-rebuild (both l l) (lambda (_name c) c) values))
+    (check-eq? (both-a r) (both-b r))
+    (check-false (eq? (both-a r) l)))
+
+  (struct apart (a b)
+    #:methods gen:layer
+    [(define (layer-forward self . _inputs) (list (apart-a self) (apart-b self)))
+     (define (layer-rebuild-method self child tensor)
+       (apart (layer-rebuild (apart-a self) child tensor)
+              (layer-rebuild (apart-b self) (lambda (name c) (child name c)) tensor)))])
+
+  (bounded-test "a nested direct rebuild on other callbacks keeps its own memo"
+    (define l (leaf 1))
+    (define r (layer-rebuild (apart l l) (lambda (_name c) c) values))
+    (check-false (eq? (apart-a r) (apart-b r))))
 
   (struct fallback (f)
     #:methods gen:layer
     [(define (layer-forward self . _inputs) (fallback-f self))
-     (define (layer-rebuild self child _tensor)
+     (define (layer-rebuild-method self child _tensor)
        (define f (fallback-f self))
        (fallback (with-handlers ([exn:fail:contract? (lambda (_e) f)])
                    (child "a" f))))])
@@ -221,7 +258,7 @@
     [(define (layer-forward self . _inputs) (wrapper-inner self))
      (define (layer-named-children self)
        (list (cons "inner" (wrapper-inner self))))
-     (define (layer-rebuild self child _tensor)
+     (define (layer-rebuild-method self child _tensor)
        (define copy (child "inner" (wrapper-inner self)))
        (wrapper copy (unbox (copy))))])
 
@@ -251,7 +288,7 @@
   (struct stasher (inner)
     #:methods gen:layer
     [(define (layer-forward self . _inputs) (stasher-inner self))
-     (define (layer-rebuild self child _tensor)
+     (define (layer-rebuild-method self child _tensor)
        (set! stash child)
        (stasher (child "inner" (stasher-inner self))))])
 
@@ -274,7 +311,7 @@
   (struct escaper (leave inner)
     #:methods gen:layer
     [(define (layer-forward self . _inputs) (escaper-inner self))
-     (define (layer-rebuild self child _tensor)
+     (define (layer-rebuild-method self child _tensor)
        (set! stash child)
        ((escaper-leave self) 'left))])
 

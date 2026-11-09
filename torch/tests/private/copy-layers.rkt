@@ -1,11 +1,10 @@
 #lang racket/base
 
-(require (only-in "../../nn.rkt" define-layer layer-copy layer-rebuild))
+(require (only-in "../../nn.rkt" define-layer layer-copy))
 
 (provide copied-field
          holder
          holder?
-         rebuild-directly
          twin
          twin?)
 
@@ -24,5 +23,3 @@
 
 (define (copied-field m)
   ((layer-copy m)))
-
-(define rebuild-directly layer-rebuild)

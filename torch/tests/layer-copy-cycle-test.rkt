@@ -1,11 +1,12 @@
 #lang racket/base
 
 (module+ test
-  (require (only-in racket/match match match-define)
+  (require (only-in racket/generic define/generic)
+           (only-in racket/match match match-define)
            rackunit
            "../main.rkt"
            "../nn.rkt"
-           (only-in "private/copy-layers.rkt" copied-field holder rebuild-directly twin)
+           (only-in "private/copy-layers.rkt" copied-field holder twin)
            (only-in "private/within-memory.rkt" memory-bounded-test))
 
   (define (self-box)
@@ -245,7 +246,7 @@
   (struct looped ([inner #:mutable])
     #:methods gen:layer
     [(define (layer-forward self . _inputs) (looped-inner self))
-     (define (layer-rebuild self child _tensor)
+     (define (layer-rebuild-method self child _tensor)
        (looped (child "inner" (looped-inner self))))])
 
   (memory-bounded-test "a cycle re-entering a hand-written rebuild raises, naming the layer"
@@ -268,18 +269,18 @@
      (define (layer-named-children self)
        (list (cons "back" (named-back self))))])
 
-  (memory-bounded-test "a hand-written layer with no layer-rebuild on a cycle is refused"
+  (memory-bounded-test "a hand-written layer with no layer-rebuild-method on a cycle is refused"
     (define n (named #f))
     (define h (holder (list n)))
     (set-named-back! n h)
-    (check-exn #rx"^layer-copy: a hand-written gen:layer has no layer-rebuild method"
+    (check-exn #rx"^layer-copy: a hand-written gen:layer has no layer-rebuild-method"
                (lambda () (layer-copy h))))
 
   (struct back ([outer #:mutable])
     #:methods gen:layer
     [(define (layer-forward self . _inputs) (back-outer self))
-     (define (layer-rebuild self child tensor)
-       (~> (back-outer self) (rebuild-directly child tensor) back))])
+     (define (layer-rebuild-method self child tensor)
+       (~> (back-outer self) (layer-rebuild child tensor) back))])
 
   (memory-bounded-test "a cycle through a delegating rebuild copies from the define-layer side"
     (define w (back #f))
@@ -294,10 +295,35 @@
     (set-back-outer! b1 (back b1))
     (check-exn reentered (lambda () (layer-copy b1))))
 
+  (memory-bounded-test "mutually delegating layers rebuilt directly with a plain child raise"
+    (define b1 (back #f))
+    (set-back-outer! b1 (back b1))
+    (check-exn #rx"^layer-rebuild: a cycle re-enters a hand-written layer-rebuild-method"
+               (lambda () (layer-rebuild b1 (lambda (_name c) c) values))))
+
+  (struct gback ([outer #:mutable])
+    #:methods gen:layer
+    [(define/generic raw-rebuild layer-rebuild-method)
+     (define (layer-forward self . _inputs) (gback-outer self))
+     (define (layer-rebuild-method self child tensor)
+       (~> (gback-outer self) (raw-rebuild child tensor) gback))])
+
+  (memory-bounded-test "#466: layers delegating through define/generic raise, naming the layer"
+    (define b1 (gback #f))
+    (define b2 (gback b1))
+    (set-gback-outer! b1 b2)
+    (check-exn (lambda (e)
+                 (and (exn:fail:contract? e)
+                      (regexp-match? reentered (exn-message e))
+                      (regexp-match? #rx"layer: #<procedure:gback>" (exn-message e))))
+               (lambda () (layer-copy b1)))
+    (check-exn #rx"^layer-rebuild: a cycle re-enters"
+               (lambda () (layer-rebuild b1 (lambda (_name c) c) values))))
+
   (struct cb ([other #:mutable])
     #:methods gen:layer
     [(define (layer-forward self . _inputs) (cb-other self))
-     (define (layer-rebuild self child _tensor)
+     (define (layer-rebuild-method self child _tensor)
        (cb (child "x" (cb-other self))))])
 
   (memory-bounded-test "hand-written layers delegating through child raise"
