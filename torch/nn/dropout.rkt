@@ -2,7 +2,10 @@
 
 (require (only-in racket/contract/base
                   ->* ->i </c >=/c and/c contract flat-contract-predicate or/c)
-         (only-in "../foreign.rkt" current-generator device dtype generator? tensor?)
+         (only-in threading ~>)
+         (only-in "../foreign.rkt"
+                  * / < current-generator device dtype generator? rand-like tensor?
+                  to-dtype)
          (only-in "../foreign/generator.rkt" generator-on?)
          (only-in "../foreign/ops.rkt" any-float-dtype/c)
          (prefix-in g: (only-in "../generated.rkt" dropout))
@@ -33,7 +36,12 @@
 (define/contract-out (dropout x #:p [p 0.5] #:training? [training? #t] ;; noqa
                               #:generator [generator #f])
   dropout/c
-  (g:dropout x (exact->inexact p) training?))
+  (define drawn-from (drawing p training? generator))
+  (cond
+    [drawn-from
+     (define keep (- 1.0 p))
+     (* x (~> (rand-like x #:generator drawn-from) (< keep) (to-dtype (dtype x)) (/ keep)))]
+    [else (g:dropout x (exact->inexact p) training?)]))
 
 (define layer-dropout (contract dropout/c dropout 'Dropout 'caller 'Dropout #f))
 
