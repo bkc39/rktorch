@@ -2,13 +2,15 @@
 
 ;; Runner + tests for the literate torch/scribblings/examples/06-gpt.rkt.
 
-(require (only-in racket/list first last)
-         (only-in racket/math nan?)
-         (only-in racket/string string-contains? string-prefix?)
-         torch
-         torch/nn
-         torch/scribblings/examples/06-gpt
-         (only-in torch/text/data encode))
+;; the noqa'd requires are used only in the main and test submodules,
+;; which raco review's unused-require check does not see
+(require (only-in racket/list first last) ;; noqa
+         (only-in racket/math nan?) ;; noqa
+         (only-in racket/string string-contains? string-prefix?) ;; noqa
+         torch ;; noqa
+         torch/nn ;; noqa
+         torch/scribblings/examples/06-gpt ;; noqa
+         (only-in torch/text/data encode)) ;; noqa
 
 (module+ main
   (require (only-in "private/env.rkt" env-number))

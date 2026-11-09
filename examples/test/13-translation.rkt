@@ -1,11 +1,13 @@
 #lang racket/base
 
-(require (only-in racket/list first last [take list-take])
-         (only-in racket/math nan?)
-         torch
-         torch/nn
-         torch/scribblings/examples/13-translation
-         torch/text/translation)
+;; the noqa'd requires are used only in the main and test submodules,
+;; which raco review's unused-require check does not see
+(require (only-in racket/list first last [take list-take]) ;; noqa
+         (only-in racket/math nan?) ;; noqa
+         torch ;; noqa
+         torch/nn ;; noqa
+         torch/scribblings/examples/13-translation ;; noqa
+         torch/text/translation) ;; noqa
 
 (module+ main
   (require (only-in "private/env.rkt" env-number))

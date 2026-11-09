@@ -2,14 +2,16 @@
 
 ;; Runner + tests for the literate torch/scribblings/examples/05-mnist.rkt.
 
-(require (except-in racket/list argmax flatten take)
-         (only-in racket/math nan?)
-         torch
-         torch/data/loader
-         torch/nn
-         torch/scribblings/examples/05-mnist
-         (only-in torch/train fit run-metric)
-         (only-in torch/vision/mnist load-mnist-fixture))
+;; the noqa'd requires are used only in the main and test submodules,
+;; which raco review's unused-require check does not see
+(require (except-in racket/list argmax flatten take) ;; noqa
+         (only-in racket/math nan?) ;; noqa
+         torch ;; noqa
+         torch/data/loader ;; noqa
+         torch/nn ;; noqa
+         torch/scribblings/examples/05-mnist ;; noqa
+         (only-in torch/train fit run-metric) ;; noqa
+         (only-in torch/vision/mnist load-mnist-fixture)) ;; noqa
 
 (module twin racket/base
   (require (only-in racket/runtime-path #%datum define-runtime-path))
@@ -37,12 +39,12 @@
   (define hand-losses
     (with-default-device 'cpu
       (manual-seed! 0)
-      (define-values (xs ys) (load-mnist-fixture))
+      (define-values (hxs hys) (load-mnist-fixture))
       (define net (convnet))
       (define opt (adam (parameters net) #:lr 0.001))
       (for/list ([_ (in-range 5)])
         (zero-grads! opt)
-        (define loss (cross-entropy (net xs) ys))
+        (define loss (cross-entropy (net hxs) hys))
         (backward! loss)
         (step! opt)
         (item loss))))
