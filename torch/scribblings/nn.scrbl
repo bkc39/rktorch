@@ -96,8 +96,9 @@ updated in place.
 (define-layer Dropout (p)
   #:contract (->* [] [#:p (and/c (>=/c 0) (</c 1))] dropout?)
   #:init (#:p [p 0.5])
-  #:forward (x)
-  (with-mode (dropout x p (training? mode))))
+  #:forward (x #:generator [generator #f])
+  (with-mode
+    (dropout x #:p p #:training? (training? mode) #:generator generator)))
 ]
 
 What a field holds when @racket[init-body] finishes decides what it is:
