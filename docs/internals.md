@@ -682,6 +682,7 @@ gets the point's name and a subject (a handle, a device, a thread).
 | `frees-released/batched` | a batched free's native release has returned | the handles it released |
 | `ledger-entry-added/batched` | a batched gradient fetch has charged one gradient | handle |
 | `finalizer-releasing` | a reaper's or a drain's release, before it unaccounts | handle |
+| `generator-releasing` | a reaper's or a drain's release of a generator, before its native release | handle |
 | `reaper-taken` | inside the batch region, a batch taken and the take lock released; a hook here can only spin, not park | the taking thread |
 | `reaper-parking` | outside any region, before a reaper parks | the reaper thread |
 | `reaper-woken` | outside any region, a reaper back from its wait, before it clears its own mark | the reaper thread |

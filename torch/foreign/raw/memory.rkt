@@ -247,7 +247,10 @@
 (define registering/outputs (registered register-tensors!))
 
 (define (registering/release release)
-  (define kind (reaped 'generator (swallow-and-count-failure release)))
+  (define (release-generator! h)
+    (race-point generator-releasing h)
+    (release h))
+  (define kind (reaped 'generator (swallow-and-count-failure release-generator!)))
   (registered (lambda (h) (reap-when-dead! kind h))))
 
 (struct allocation (phantom nbytes device account [adopted #:mutable] [adopter #:mutable]))
