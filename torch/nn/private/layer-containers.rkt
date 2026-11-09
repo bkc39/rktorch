@@ -23,8 +23,8 @@
     (remembered seen self (lambda () (rebuilt-fn self)))))
 
 (define (rebuilt-fn self)
-  (unless (null? (append (registry-params self) (registry-buffers self)
-                         (registry-children self)))
+  (unless (andmap null? (list (registry-params self) (registry-buffers self)
+                              (registry-children self)))
     (raise-arguments-error
      'layer-copy
      (string-append "a procedure->Layer layer with parameters, buffers or"

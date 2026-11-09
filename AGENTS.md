@@ -407,42 +407,35 @@ device, dtype and requires-grad (no gradients), modes kept, sharing and
 cycles kept, over the `gen:layer` method `layer-rebuild layer child tensor`
 that `define-layer` derives (`LSTM`'s plain `entries` list is why plain
 fields are walked). Invariants of the walk:
-- One memo per call (`torch/nn/private/memo.rkt`, passed explicitly through
-  `layer-rebuild-in`); `layer-copy`'s `child` is a `remembering` that
-  carries it, and `layer-rebuild-joined`
-  (`torch/nn/private/layer-core.rkt`, behind both the exported
-  `layer-rebuild` and the registry's method) joins that memo or opens a
-  fresh one. A `define/generic` delegation bypasses both, so a cycle
-  of them does not terminate (#466).
-- `define-layer` layers (`rebuilt-layer`,
-  `torch/nn/private/field-walk.rkt`) and mutable containers are recorded
-  empty, then filled (`allocated`): a back edge
-  gets the part-built copy, as Python's reduce and list/dict copies do.
-- Immutable pairs, vectors, boxes and hashes copy their parts, then re-check
-  the memo (`rebuilt-immutable`, `_deepcopy_tuple`); re-entering one walks
-  it again, and the cycle ends at a recorded mutable value or layer. If
-  nothing was recorded since the value was entered, the cycle is immutable
-  only and raises, naming the field. A value whose parts all copy to
-  themselves is returned as is.
-- A hand-written layer is recorded when its rebuild returns (`remembered`);
-  re-entering it raises, Python's `RecursionError`.
-- `torch/nn/private/claim.rkt` owns the tables: one thread walks at a
-  time (the caller, or one worker while the caller waits); another live thread raises. A fill
-  that does not return, or a claim that finds a dead claimant, fails the
-  memo, and every later claim raises, so no part-built value is handed
-  out. The memo is closed when the call exits; a stashed callback raises.
-  A thread killed inside the claim lock leaves it held.
-- After the walk, each copied mutable `equal?` hash is re-keyed from the
-  entries its fill recorded (a part-built key hashed differently; keys that
-  became `equal?` raise), immutable `equal?` hashes are checked to find
-  every key (`check-keys`), and `check-names` runs. `equal-always?` and
-  `eqv?` hashes need neither: an immutable key is whole when inserted and a
-  mutable one hashes by identity.
-- `check-hashable` (`torch/nn/private/hash-keys.rkt`) raises before
-  `equal-hash-code` would loop (a mutable hash on a cycle in the key, prefab and transparent struct
-  fields included) or `hash-set!` deadlock (a key reaching its own table).
-- Weak and ephemeron hash keys are shared, not walked, as Python's
-  `WeakKeyDictionary.__deepcopy__`.
+- One memo per call (`torch/nn/private/memo.rkt`), carried by `layer-copy`'s
+  `remembering` child. `layer-rebuild-in`
+  (`torch/nn/private/layer-core.rkt`) is the one dispatch, behind
+  `layer-copy`, `layer-rebuild` and the registry method. A
+  `define/generic` call into a hand-written layer bypasses it, so a cycle
+  through that layer does not terminate (#466).
+- Layers, mutable containers and mutable strings are recorded empty, then
+  filled (`allocated`): a back edge gets the part-built copy, as in Python.
+- Immutable values, `Children` and `Parameters` included, copy their parts
+  and re-check the memo (`rebuilt-immutable`, `_deepcopy_tuple`); a cycle
+  with nothing recorded since entry is immutable only and raises. The walk
+  has no unwind handler: it runs inside a fill, and a fill that does not
+  return fails the memo. Structures other than layers, prefab and
+  transparent ones included, are shared.
+- `torch/nn/private/claim.rkt` owns the tables: one thread walks at a time
+  (the caller, or one worker while it waits); a failed fill or a dead
+  claimant fails the memo; the memo closes on exit. A hit with no other
+  claimant skips the lock. A thread killed inside the lock leaves it held
+  (#469).
+- After the walk, mutable `equal?` hashes are re-keyed, immutable ones
+  checked (`check-keys`), and `check-names` runs; collapsed keys raise.
+- `check-hashable` (`torch/nn/private/hash-keys.rkt`) runs before each
+  `equal?` insertion: one Tarjan pass over the edges `equal-hash-code`
+  follows (keys of mutable `equal?` hashes, all hash values, containers,
+  struct fields), memoising components with no part-built node. A key
+  reaching its table, or a mutable `equal?` hash in a component with its
+  own key, raises; value-only cycles hash. `gen:equal+hash` keys and sets
+  are opaque to it.
+- Weak and ephemeron hash keys are shared, as `WeakKeyDictionary`.
 
 A stateless `procedure->Layer` copies, one with state refuses, and a
 hand-written `gen:layer` without the method refuses, naming

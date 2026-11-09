@@ -23,9 +23,9 @@
   (remembered seen t (lambda () (fresh-tensor t))))
 
 (define (copy-child seen child _name c)
-  (layer-rebuild-in seen c child (tensor-copier seen)))
+  (layer-rebuild-in c child (tensor-copier seen)))
 
 (define/checked-out (layer-copy m) ;; noqa
   (-> layer? layer?)
   (with-memo (seen 'layer-copy)
-    (layer-rebuild-in seen m (remembering seen copy-child) (tensor-copier seen))))
+    (layer-rebuild-in m (remembering seen copy-child) (tensor-copier seen))))

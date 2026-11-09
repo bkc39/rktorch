@@ -283,4 +283,30 @@
     (set! stash #f)
     (check-eq? (let/ec leave (layer-copy (escaper leave (holder b)))) 'left)
     (check-true (procedure? stash))
-    (check-closed b)))
+    (check-closed b))
+
+  (bounded-test "a Children value held twice is one value in the copy"
+    (define kids (children-by-index (list (holder 0))))
+    (match-define (list kids2 b2) (copied-field (twin kids (box kids))))
+    (check-eq? (unbox b2) kids2))
+
+  (bounded-test "an immutable equal? hash keyed by a Children value copies"
+    (define kids (children-by-index (list (holder 0))))
+    (check-equal? (hash-count (copied-field (holder (hash kids 1)))) 1))
+
+  (bounded-test "a mutable string or byte string held twice is copied once"
+    (for ([s (in-list (list (string-copy "ab") (bytes 1 2)))])
+      (match-define (list s2 b2) (copied-field (twin s (box s))))
+      (check-false (eq? s2 s))
+      (check-false (immutable? s2))
+      (check-equal? s2 s)
+      (check-eq? (unbox b2) s2)))
+
+  (struct settings (b) #:transparent)
+
+  (bounded-test "immutable strings and transparent structs are shared"
+    (define fixed "fixed")
+    (define open-settings (settings (box 1)))
+    (match-define (list s2 c2) (copied-field (twin fixed open-settings)))
+    (check-eq? s2 fixed)
+    (check-eq? c2 open-settings)))

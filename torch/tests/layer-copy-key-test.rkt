@@ -7,7 +7,71 @@
            (only-in "private/copy-layers.rkt" copied-field holder)
            (only-in "private/within-memory.rkt" memory-bounded-test within-memory))
 
-  (define unhashable #rx"^layer-copy: an equal[?]-based hash's key reaches that hash")
+  (define unhashable #rx"^layer-copy: an equal[?]-based hash's key reaches ")
+  (define own-table #rx"^layer-copy: an equal[?]-based hash's key reaches that hash")
+  (define collapsed #rx"^layer-copy: two keys of an equal[?]-based hash copied to equal[?] keys")
+
+  (define (keyed-by-holder-of make-holder)
+    (define table (make-hash))
+    (define-values (key close!) (make-holder))
+    (hash-set! table key 1)
+    (close! table)
+    table)
+
+  (define (vector-holder)
+    (define v (vector #f))
+    (values v (lambda (table) (vector-set! v 0 table))))
+
+  (define (value-holder)
+    (define g (make-hash))
+    (values (list g) (lambda (table) (hash-set! g 'back table))))
+
+  (define (self-valued)
+    (define g (make-hash))
+    (hash-set! g 'self g)
+    g)
+
+  (define (vector-valued)
+    (define h (make-hash))
+    (hash-set! h 'k (vector h))
+    h)
+
+  (define (eq-keyed-cycle)
+    (define e (make-hasheq))
+    (hash-set! e (vector e) 1)
+    e)
+
+  (memory-bounded-test "a key that reaches its table directly or through another hash raises"
+    (for ([make-holder (in-list (list vector-holder value-holder))])
+      (check-exn own-table (lambda () (copied-field (holder (keyed-by-holder-of make-holder)))))))
+
+  (memory-bounded-test "a key reaching a hash whose cycle runs through values or eq? keys copies"
+    (for ([make (in-list (list self-valued vector-valued eq-keyed-cycle))])
+      (define inner (make))
+      (define table (make-hash (list (cons (list inner) 'x))))
+      (define table2 (copied-field (holder table)))
+      (match-define (list (and key2 (list inner2))) (hash-keys table2))
+      (check-false (eq? inner2 inner))
+      (check-equal? (hash-count inner2) 1)
+      (check-eq? (hash-ref table2 key2 #f) 'x)))
+
+  (test-case "a hundred keys over one shared graph of mutable hashes check in one pass"
+    (within-memory
+     512
+     (lambda ()
+       (define blob (for/list ([i (in-range 2000)]) (box i)))
+       (define hashes (for/list ([_ (in-range 100)]) (make-hasheq (list (cons 'blob blob)))))
+       (define table (make-hash (for/list ([i (in-range 100)]) (cons (vector i hashes) i))))
+       (check-equal? (hash-count (copied-field (holder table))) 100))
+     #:seconds 10))
+
+  (memory-bounded-test "an immutable equal? hash whose keys copy to equal? keys raises"
+    (define k1 (vector #f 'a))
+    (define k2 (vector #f 'b))
+    (define frozen (hash k1 1 k2 2))
+    (vector-set! k1 0 frozen)
+    (vector-set! k2 0 frozen)
+    (check-exn collapsed (lambda () (copied-field (holder k1)))))
 
   (memory-bounded-test "a mutable equal? hash keyed by a pair on its cycle keeps every entry"
     (define table (make-hash))

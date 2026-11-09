@@ -2,7 +2,7 @@
 
 (require (for-syntax racket/base
                      (only-in syntax/parse/pre ...+ expr))
-         (only-in racket/match match)
+         (only-in racket/match == match)
          (only-in syntax/parse/define define-syntax-parse-rule))
 
 (provide claimed
@@ -10,6 +10,7 @@
          claims-who
          copied
          finished!
+         locked
          recorded-count
          remember!
          settled!
@@ -22,21 +23,27 @@
   #:omit-define-syntaxes)
 
 (define (claims who)
-  (build-claims who (make-hasheq) (make-hasheq) (make-hasheq) (current-thread) (make-semaphore 1)))
+  (build-claims who (make-hasheq) (make-hasheq) (make-hasheq) (current-thread)
+                (make-semaphore 1)))
+
+(define (call-with-exit body on-exit)
+  (define returned? #f)
+  (dynamic-wind void
+                (lambda () (begin0 (body) (set! returned? #t)))
+                (lambda () (on-exit returned?))))
 
 (define-syntax-parse-rule (with-closed c:expr body:expr ...+)
   (let ([cs c])
-    (dynamic-wind void (lambda () body ...) (lambda () (close! cs)))))
+    (call-with-exit (lambda () body ...) (lambda (_returned?) (close! cs)))))
 
 (define-syntax-parse-rule (with-claim c:expr v:expr body:expr ...+)
   (let ([cs c] [x v])
-    (dynamic-wind void (lambda () body ...) (lambda () (release! cs x)))))
+    (call-with-exit (lambda () body ...) (lambda (_returned?) (release! cs x)))))
 
 (define-syntax-parse-rule (with-fill c:expr body:expr ...+)
-  (let ([cs c] [filled? (box #f)])
-    (dynamic-wind void
-                  (lambda () (begin0 (let () body ...) (set-box! filled? #t)))
-                  (lambda () (unless (unbox filled?) (set-claims-state! cs 'failed))))))
+  (let ([cs c])
+    (call-with-exit (lambda () body ...)
+                    (lambda (returned?) (unless returned? (set-claims-state! cs 'failed))))))
 
 (define (locked c thunk)
   (call-with-semaphore (claims-lock c) thunk))
@@ -63,14 +70,20 @@
 
 (define (check-owner! c)
   (define me (current-thread))
-  (define others
-    (for/list ([t (in-hash-keys (claims-threads c))] #:unless (eq? t me))
-      t))
   (check-live! c)
-  (cond
-    [(ormap thread-dead? others) (abandon! c)]
-    [(not (member others (list '() (list (claims-starter c)))))
-     (raise-arguments-error (claims-who c) "a child callback used from two threads at once")]))
+  (match (for/list ([t (in-hash-keys (claims-threads c))] #:unless (eq? t me)) t)
+    [(list _ ... (? thread-dead?) _ ...) (abandon! c)]
+    ['() (void)]
+    [(list (== (claims-starter c) eq?)) (void)]
+    [_ (raise-arguments-error (claims-who c) "a child callback used from two threads at once")]))
+
+(define (alone? c)
+  (define threads (claims-threads c))
+  (and (eq? (claims-state c) 'live)
+       (match (hash-count threads)
+         [0 #t]
+         [1 (hash-has-key? threads (current-thread))]
+         [_ #f])))
 
 (define (claim! c v)
   (check-owner! c)
@@ -95,13 +108,14 @@
   (locked c released))
 
 (define (claimed c v build)
-  (match (locked c (lambda () (claim! c v)))
-    [(cons 'done copy) copy]
-    ['open
-     (raise-arguments-error (claims-who c)
-                            "a cycle re-enters a hand-written layer-rebuild before it returns"
-                            "layer" v)]
-    ['claimed (with-claim c v (build))]))
+  (or (and (alone? c) (hash-ref (claims-done c) v #f))
+      (match (locked c (lambda () (claim! c v)))
+        [(cons 'done copy) copy]
+        ['open
+         (raise-arguments-error (claims-who c)
+                                "a cycle re-enters a hand-written layer-rebuild before it returns"
+                                "layer" v)]
+        ['claimed (with-claim c v (build))])))
 
 (define (copied c v default)
   (check-live! c)

@@ -16,45 +16,56 @@
 
   (define rebuild-directly layer-rebuild)
 
-  (define part-built #rx"^layer-copy: a rebuild raised, escaped or was killed while a copy was part-built")
+  (define part-built
+    #rx"^layer-copy: a rebuild raised, escaped or was killed while a copy was part-built")
   (define two-threads #rx"^layer-copy: a child callback used from two threads at once")
 
-  (struct slow ()
+  (define (running thunk)
+    (define result (box #f))
+    (values (thread (lambda () (set-box! result (with-handlers ([exn:fail? values]) (thunk)))))
+            result))
+
+  (define (copying child name x)
+    (running (lambda () (child name x))))
+
+  (struct gate (in go)
     #:methods gen:layer
     [(define (layer-forward _self . _inputs) 0)
-     (define (layer-rebuild _self _child _tensor)
-       (sleep 0.1)
-       (slow))])
+     (define (layer-rebuild self _child _tensor)
+       (semaphore-post (gate-in self))
+       (semaphore-wait (gate-go self))
+       (gate (make-semaphore 0) (make-semaphore 1)))])
 
-  (struct forked (inner sequential? copies)
+  (define (closed-gate)
+    (gate (make-semaphore 0) (make-semaphore 0)))
+
+  (struct forked (inner g copies)
     #:methods gen:layer
     [(define (layer-forward self . _inputs) (forked-copies self))
      (define (layer-rebuild self child tensor)
-       (define inner (forked-inner self))
-       (define (worker)
-         (define result (box #f))
-         (define (rebuilt)
-           (set-box! result (with-handlers ([exn:fail? values])
-                              (rebuild-directly inner child tensor))))
-         (define t (thread rebuilt))
-         (when (forked-sequential? self)
-           (thread-wait t))
-         (lambda ()
-           (thread-wait t)
-           (unbox result)))
-       (define copies (map (lambda (finished) (finished)) (list (worker) (worker))))
+       (match-define (forked inner g _) self)
+       (define (rebuilt)
+         (rebuild-directly inner child tensor))
+       (define-values (first first-result) (running rebuilt))
+       (if g (semaphore-wait (gate-in g)) (thread-wait first))
+       (define-values (second second-result) (running rebuilt))
+       (thread-wait second)
+       (when g
+         (semaphore-post (gate-go g)))
+       (thread-wait first)
+       (define copies (map unbox (list first-result second-result)))
        (define failure (findf exn? copies))
        (when failure
          (raise failure))
-       (forked (child "inner" inner) #t copies))])
+       (forked (child "inner" inner) g copies))])
 
   (bounded-test "one copy's child used from two threads at once is refused"
-    (check-exn two-threads
-               (lambda () (layer-copy (forked (holder (slow)) #f '())))))
+    (define g (closed-gate))
+    (check-exn two-threads (lambda () (layer-copy (forked (holder g) g '())))))
 
   (bounded-test "a worker thread that finishes inside the rebuild joins the copy"
-    (define s (holder (slow)))
-    (define c (layer-copy (forked s #t '())))
+    (define s (holder 0))
+    (define c (layer-copy (forked s #f '())))
     (match-define (list x y) (forked-copies c))
     (check-eq? x y)
     (check-eq? x (forked-inner c))
@@ -83,33 +94,28 @@
        (thread-wait t)
        (abandoned (child "first" first) (child "second" second) stall))])
 
+  (define (itself s)
+    (values s s))
+
+  (define (held s)
+    (define h (holder s))
+    (values h h))
+
+  (define (paired s)
+    (define p (cons s 'x))
+    (values (holder p) (holder p)))
+
   (define killed-cases
-    (list (list "a hand-written layer" (lambda (s) (values s s)))
-          (list "a define-layer layer" (lambda (s) (define h (holder s)) (values h h)))
-          (list "a pair two layers hold" (lambda (s) (define p (cons s 'x)) (values (holder p) (holder p))))))
+    `(("a hand-written layer" ,itself)
+      ("a define-layer layer" ,held)
+      ("a pair two layers hold" ,paired)))
 
   (memory-bounded-test "a worker thread killed mid-rebuild fails the copy"
-    (for ([case (in-list killed-cases)])
-      (match-define (list name make) case)
+    (for ([c (in-list killed-cases)])
+      (match-define (list name make) c)
       (define s (stalled (box #t) (make-semaphore 0)))
       (define-values (first second) (make s))
       (check-exn part-built (lambda () (layer-copy (abandoned first second s))) name)))
-
-  (struct gate (in go)
-    #:methods gen:layer
-    [(define (layer-forward _self . _inputs) 0)
-     (define (layer-rebuild self _child _tensor)
-       (semaphore-post (gate-in self))
-       (semaphore-wait (gate-go self))
-       (gate (make-semaphore 0) (make-semaphore 1)))])
-
-  (define (closed-gate)
-    (gate (make-semaphore 0) (make-semaphore 0)))
-
-  (define (copying child name x)
-    (define result (box #f))
-    (values (thread (lambda () (set-box! result (with-handlers ([exn:fail? values]) (child name x)))))
-            result))
 
   (struct both (a b g)
     #:methods gen:layer

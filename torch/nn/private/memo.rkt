@@ -5,12 +5,14 @@
          (only-in racket/match match)
          (only-in syntax/parse/define define-syntax-parse-rule)
          (only-in "claim.rkt"
-                  claimed claims claims-who copied finished! recorded-count remember! settled!
-                  with-closed with-fill))
+                  claimed claims claims-who copied finished! locked recorded-count remember!
+                  settled! with-closed with-fill)
+         (only-in "hash-keys.rkt" filled! filling! key-check))
 
 (provide after-walk!
          allocated
          copy-of
+         memo-keys
          memo-who
          rebuilt-immutable
          remembered
@@ -19,12 +21,12 @@
          remembering?
          with-memo)
 
-(struct memo (claims entered [afters #:mutable])
+(struct memo (claims entered keys [afters #:mutable])
   #:constructor-name build-memo
   #:omit-define-syntaxes)
 
 (define (memo who)
-  (build-memo (claims who) (make-hasheq) '()))
+  (build-memo (claims who) (make-hasheq) (key-check) '()))
 
 (struct remembering (seen proc)
   #:property prop:procedure
@@ -44,7 +46,8 @@
   (copied (memo-claims seen) v default))
 
 (define (after-walk! seen thunk)
-  (set-memo-afters! seen (cons thunk (memo-afters seen))))
+  (locked (memo-claims seen)
+          (lambda () (set-memo-afters! seen (cons thunk (memo-afters seen))))))
 
 (define (finish! seen)
   (finished! (memo-claims seen))
@@ -57,9 +60,13 @@
 
 (define (allocated seen v allocate fill!)
   (define c (memo-claims seen))
+  (define keys (memo-keys seen))
   (define (filled)
     (define made (remember! c v (allocate)))
-    (with-fill c (fill! made))
+    (with-fill c
+      (filling! keys made)
+      (fill! made)
+      (filled! keys made))
     made)
   (claimed c v filled))
 
@@ -77,8 +84,6 @@
                             "field" field)]
     [else (walked seen v since build)]))
 
-;; no unwind handler: every immutable walk runs inside a fill, and a fill that
-;; does not return fails the memo, so a stale entry is never read
 (define (walked seen v since build)
   (define entered (memo-entered seen))
   (hash-update! entered v (lambda (counts) (cons since counts)) '())

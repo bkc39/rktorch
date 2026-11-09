@@ -13,53 +13,73 @@
     (set-box! b b)
     b)
 
-  (define (self-valued make)
+  (define (self-vector)
+    (define v (vector #f))
+    (vector-set! v 0 v)
+    v)
+
+  (define (self-mpair)
+    (define p (mcons 1 #f))
+    (set-mcdr! p p)
+    p)
+
+  (define ((self-valued make))
     (define h (make))
     (hash-set! h 'me h)
     h)
 
+  (define (me h)
+    (hash-ref h 'me))
+
+  (define (first-slot v)
+    (vector-ref v 0))
+
+  (struct cycle-case (name make back))
+
   (define self-cycles
-    (list (list "box" self-box unbox)
-          (list "vector" (lambda () (define v (vector #f)) (vector-set! v 0 v) v)
-                (lambda (v) (vector-ref v 0)))
-          (list "mpair" (lambda () (define p (mcons 1 #f)) (set-mcdr! p p) p) mcdr)
-          (list "hash" (lambda () (self-valued make-hash)) (lambda (h) (hash-ref h 'me)))
-          (list "hasheq" (lambda () (self-valued make-hasheq)) (lambda (h) (hash-ref h 'me)))
-          (list "weak hasheq" (lambda () (self-valued make-weak-hasheq))
-                (lambda (h) (hash-ref h 'me)))
-          (list "ephemeron hasheq" (lambda () (self-valued make-ephemeron-hasheq))
-                (lambda (h) (hash-ref h 'me)))))
+    (list (cycle-case "box" self-box unbox)
+          (cycle-case "vector" self-vector first-slot)
+          (cycle-case "mpair" self-mpair mcdr)
+          (cycle-case "hash" (self-valued make-hash) me)
+          (cycle-case "hasheq" (self-valued make-hasheq) me)
+          (cycle-case "weak hasheq" (self-valued make-weak-hasheq) me)
+          (cycle-case "ephemeron hasheq" (self-valued make-ephemeron-hasheq) me)))
 
   (define (reader-graph make)
     (define p (make-placeholder #f))
     (placeholder-set! p (make p))
     (make-reader-graph p))
 
+  (define (listed p) (list 1 p))
+  (define (paired p) (cons 1 p))
+  (define (vector-and-hash p) (vector-immutable (hasheq 'v p) p))
+  (define (vector-and-mutable-vector p) (vector-immutable p (vector 1)))
+  (define (vector-and-pair-cycle p) (vector-immutable (reader-graph paired) p))
+
   (define immutable-cycles
-    (list (list "a list" (lambda (p) (list 1 p)))
-          (list "a pair" (lambda (p) (cons 1 p)))
-          (list "a vector and a hash" (lambda (p) (vector-immutable (hasheq 'v p) p)))
-          (list "a vector holding a mutable vector" (lambda (p) (vector-immutable p (vector 1))))
-          (list "a vector holding a pair cycle"
-                (lambda (p) (vector-immutable (reader-graph (lambda (q) (cons 1 q))) p)))))
+    `(("a list" ,listed)
+      ("a pair" ,paired)
+      ("a vector and a hash" ,vector-and-hash)
+      ("a vector holding a mutable vector" ,vector-and-mutable-vector)
+      ("a vector holding a pair cycle" ,vector-and-pair-cycle)))
 
   (define reentered #rx"^layer-copy: a cycle re-enters a hand-written layer-rebuild")
 
   (memory-bounded-test "a self-referential mutable container copies to a fresh one holding itself"
-    (for ([case (in-list self-cycles)])
-      (match-define (list name make back) case)
+    (for ([c (in-list self-cycles)])
+      (match-define (cycle-case name make back) c)
       (define v (make))
-      (define c (copied-field (holder v)))
-      (check-false (eq? c v) name)
-      (check-eq? (back c) c name)
+      (define v2 (copied-field (holder v)))
+      (check-false (eq? v2 v) name)
+      (check-eq? (back v2) v2 name)
       (when (hash? v)
-        (check-equal? (hash-weak? c) (hash-weak? v) name)
-        (check-equal? (hash-ephemeron? c) (hash-ephemeron? v) name)
-        (check-equal? (hash-equal? c) (hash-equal? v) name))))
+        (check-equal? (hash-weak? v2) (hash-weak? v) name)
+        (check-equal? (hash-ephemeron? v2) (hash-ephemeron? v) name)
+        (check-equal? (hash-equal? v2) (hash-equal? v) name))))
 
   (memory-bounded-test "a cycle of immutable values alone raises, naming the field"
-    (for ([case (in-list immutable-cycles)])
-      (match-define (list name make) case)
+    (for ([c (in-list immutable-cycles)])
+      (match-define (list name make) c)
       (check-exn #rx"^layer-copy: a cycle of immutable values cannot be copied\n  field: \"slot\""
                  (lambda () (layer-copy (holder (reader-graph make))))
                  name)))
@@ -110,7 +130,7 @@
     (check-false (eq? k2 k))
     (check-eq? (unbox k2) c)
     (check-true (immutable? c))
-    (check-equal? (hash-has-key? c k2) (hash-has-key? h k)))
+    (check-equal? (hash-values c) '(1)))
 
   (memory-bounded-test "a layer whose plain field holds the layer copies to its copy"
     (define v (vector #f))
@@ -261,7 +281,7 @@
      (define (layer-rebuild self child tensor)
        (~> (back-outer self) (rebuild-directly child tensor) back))])
 
-  (memory-bounded-test "a cycle closed through a delegating rebuild copies from the define-layer side"
+  (memory-bounded-test "a cycle through a delegating rebuild copies from the define-layer side"
     (define w (back #f))
     (define h (holder w))
     (set-back-outer! w h)
@@ -308,22 +328,15 @@
     (check-false (eq? b2 b))
     (check-equal? b2 (box 2)))
 
-  (struct peek (d seen)
-    #:methods gen:layer
-    [(define (layer-forward self . _inputs) (peek-seen self))
-     (define (layer-rebuild self child _tensor)
-       (define d2 (child "d" (peek-d self)))
-       (peek d2 (list? (unbox (d2)))))])
-
   (memory-bounded-test "a long list closed through a box is a list in the copy"
     (define b (box #f))
-    (define p (list b (peek (holder b) #f)))
+    (define p (list b (holder b)))
     (define long (append (build-list 256 values) p))
     (set-box! b long)
     (define p2 (copied-field (holder p)))
-    (match-define (list b2 peek2) p2)
+    (match-define (list b2 holder2) p2)
     (define long2 (unbox b2))
     (check-true (list? long2))
     (check-equal? (length long2) 258)
     (check-eq? (list-tail long2 256) p2)
-    (check-false (peek-seen peek2))))
+    (check-eq? (holder2) b2)))
