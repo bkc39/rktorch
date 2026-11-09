@@ -9,7 +9,8 @@
 
   (define unhashable #rx"^layer-copy: an equal[?]-based hash's key reaches ")
   (define own-table #rx"^layer-copy: an equal[?]-based hash's key reaches that hash")
-  (define collapsed #rx"^layer-copy: two keys of an equal[?]-based hash copied to equal[?] keys")
+  (define part-built
+    #rx"^layer-copy: an immutable equal[?]-based hash was copied while one of its keys was still")
 
   (define (keyed-by-holder-of make-holder)
     (define table (make-hash))
@@ -55,23 +56,29 @@
       (check-equal? (hash-count inner2) 1)
       (check-eq? (hash-ref table2 key2 #f) 'x)))
 
-  (test-case "a hundred keys over one shared graph of mutable hashes check in one pass"
+  (define (box-tree n)
+    (cond
+      [(= n 1) (box n)]
+      [else (cons (box-tree (quotient n 2)) (box-tree (- n (quotient n 2))))]))
+
+  (test-case "a thousand keys over one shared tree of twenty thousand boxes check in one pass"
     (within-memory
      512
      (lambda ()
-       (define blob (for/list ([i (in-range 2000)]) (box i)))
-       (define hashes (for/list ([_ (in-range 100)]) (make-hasheq (list (cons 'blob blob)))))
-       (define table (make-hash (for/list ([i (in-range 100)]) (cons (vector i hashes) i))))
-       (check-equal? (hash-count (copied-field (holder table))) 100))
+       (define shared (box-tree 20000))
+       (define table (make-hash (for/list ([i (in-range 1000)]) (cons (vector i shared) i))))
+       (check-equal? (hash-count (copied-field (holder table))) 1000))
      #:seconds 10))
 
-  (memory-bounded-test "an immutable equal? hash whose keys copy to equal? keys raises"
-    (define k1 (vector #f 'a))
-    (define k2 (vector #f 'b))
-    (define frozen (hash k1 1 k2 2))
-    (vector-set! k1 0 frozen)
-    (vector-set! k2 0 frozen)
-    (check-exn collapsed (lambda () (copied-field (holder k1)))))
+  (memory-bounded-test "an immutable equal? hash whose keys are equal? only while part-built raises"
+    (for ([wrap (in-list (list values list))])
+      (define k1 (vector #f 'a))
+      (define k2 (vector #f 'b))
+      (define frozen (hash (wrap k1) 1 (wrap k2) 2))
+      (vector-set! k1 0 frozen)
+      (vector-set! k2 0 frozen)
+      (check-false (equal? k1 k2))
+      (check-exn part-built (lambda () (copied-field (holder k1))))))
 
   (memory-bounded-test "a mutable equal? hash keyed by a pair on its cycle keeps every entry"
     (define table (make-hash))
@@ -136,6 +143,20 @@
     (check-exn #rx"^layer-rebuild: two keys of an equal[?]-based hash copied to equal[?] keys"
                (lambda () (layer-rebuild (holder table) (lambda (_name _c) one) values))))
 
+  (memory-bounded-test "keys of an eq?, eqv? or equal-always? hash replaced by one layer raise"
+    (define one (holder 0))
+    (for ([kind (in-list (list (list "eq" make-hasheq make-immutable-hasheq)
+                               (list "eqv" make-hasheqv make-immutable-hasheqv)
+                               (list "equal-always" make-hashalw make-immutable-hashalw)))])
+      (match-define (list same makes ...) kind)
+      (define message
+        (regexp (format "^layer-rebuild: two keys of an ~a[?]-based hash copied to ~a[?] keys"
+                        same same)))
+      (for ([make (in-list makes)])
+        (define table (make (list (cons (holder 1) 'a) (cons (holder 2) 'b))))
+        (check-exn message
+                   (lambda () (layer-rebuild (holder table) (lambda (_name _c) one) values))))))
+
   (memory-bounded-test "a key holding a mutable hash beside a cycle without one copies"
     (define v (vector #f))
     (vector-set! v 0 v)
@@ -148,6 +169,22 @@
     (match-define (list inner2 v2) key2)
     (check-eq? (vector-ref v2 0) v2)
     (check-equal? (hash-ref inner2 'a) 1))
+
+  (struct named-key (name [table #:mutable])
+    #:transparent
+    #:property prop:equal+hash
+    (list (lambda (a b recur) (recur (named-key-name a) (named-key-name b)))
+          (lambda (a recur) (recur (named-key-name a)))
+          (lambda (a recur) (recur (named-key-name a)))))
+
+  (memory-bounded-test "a transparent key whose own hash ignores its table copies"
+    (define table (make-hash))
+    (define key (named-key "w" #f))
+    (hash-set! table key 1)
+    (set-named-key-table! key table)
+    (define table2 (copied-field (holder table)))
+    (check-equal? (hash-count table2) 1)
+    (check-eq? (hash-ref table2 key #f) 1))
 
   (struct prefab-key ([table #:mutable]) #:prefab)
   (struct open-key ([table #:mutable]) #:transparent)

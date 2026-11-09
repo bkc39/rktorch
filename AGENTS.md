@@ -424,17 +424,21 @@ fields are walked). Invariants of the walk:
 - `torch/nn/private/claim.rkt` owns the tables: one thread walks at a time
   (the caller, or one worker while it waits); a failed fill or a dead
   claimant fails the memo; the memo closes on exit. A hit with no other
-  claimant skips the lock. A thread killed inside the lock leaves it held
+  claimant skips the lock, reading the done table, then the claim count,
+  then the state. A thread killed inside the lock leaves it held
   (#469).
 - After the walk, mutable `equal?` hashes are re-keyed, immutable ones
-  checked (`check-keys`), and `check-names` runs; collapsed keys raise.
+  checked (`check-keys`), and `check-names` runs; collapsed keys raise for
+  every non-weak table kind, naming its comparison, and as part-built when
+  an immutable `equal?` hash's keys collapse while one is still being built.
 - `check-hashable` (`torch/nn/private/hash-keys.rkt`) runs before each
   `equal?` insertion: one Tarjan pass over the edges `equal-hash-code`
   follows (keys of mutable `equal?` hashes, all hash values, containers,
-  struct fields), memoising components with no part-built node. A key
-  reaching its table, or a mutable `equal?` hash in a component with its
-  own key, raises; value-only cycles hash. `gen:equal+hash` keys and sets
-  are opaque to it.
+  the fields of a struct hashed by its fields), memoising components with
+  no part-built node. A key reaching its table, or a mutable `equal?` hash
+  in a component with its own key, raises; value-only cycles hash.
+  `gen:equal+hash` keys, transparent ones included, and sets are opaque to
+  it.
 - Weak and ephemeron hash keys are shared, as `WeakKeyDictionary`.
 
 A stateless `procedure->Layer` copies, one with state refuses, and a

@@ -79,11 +79,11 @@
 
 (define (alone? c)
   (define threads (claims-threads c))
-  (and (eq? (claims-state c) 'live)
-       (match (hash-count threads)
+  (and (match (hash-count threads)
          [0 #t]
          [1 (hash-has-key? threads (current-thread))]
-         [_ #f])))
+         [_ #f])
+       (eq? (claims-state c) 'live)))
 
 (define (claim! c v)
   (check-owner! c)
@@ -108,7 +108,8 @@
   (locked c released))
 
 (define (claimed c v build)
-  (or (and (alone? c) (hash-ref (claims-done c) v #f))
+  (define done (hash-ref (claims-done c) v #f))
+  (or (and done (alone? c) done)
       (match (locked c (lambda () (claim! c v)))
         [(cons 'done copy) copy]
         ['open

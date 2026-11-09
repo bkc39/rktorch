@@ -78,17 +78,20 @@
 
 (define (rehashed seen h copies)
   (define who (memo-who seen))
-  (define (keyed k)
-    (when (hash-equal? h)
-      (check-hashable who (memo-keys seen) k #f))
-    k)
-  (define made
-    (let fill ([made (hash-copy-clear h)] [kxs copies])
+  (define equal-keyed? (hash-equal? h))
+  (define (settled? k)
+    (or (not equal-keyed?) (check-hashable who (memo-keys seen) k #f)))
+  (define-values (made built?)
+    (let fill ([made (hash-copy-clear h)] [built? #t] [kxs copies])
       (match kxs
-        ['() made]
-        [(list* k x more) (fill (hash-set made (keyed k) x) more)])))
-  (collapsed! who (hash-count h) made)
-  (when (hash-equal? h)
+        ['() (values made built?)]
+        [(list* k x more)
+         (define settled (settled? k))
+         (fill (hash-set made k x) (and settled built?) more)])))
+  (cond
+    [(and (not built?) (< (hash-count made) (hash-count h))) (part-built! who)]
+    [else (collapsed! who (hash-count h) made)])
+  (when equal-keyed?
     (after-walk! seen (lambda () (check-keys seen h))))
   made)
 
@@ -103,14 +106,19 @@
         (check-hashable who (memo-keys seen) k2 c))
       (hash-set! c k2 x2)
       (cons k2 x2)))
-  (when (and (hash-equal? c) (not weak?))
-    (after-walk! seen (lambda () (rekeyed! who (memo-keys seen) c entries)))))
+  (cond
+    [weak? (void)]
+    [(hash-equal? c) (after-walk! seen (lambda () (rekeyed! who (memo-keys seen) c entries)))]
+    [else (collapsed! who (length entries) c)]))
 
 (define (check-keys seen h)
   (define copy (copy-of seen h h))
   (unless (for/and ([k (in-hash-keys h)])
             (eq? (hash-has-key? h k) (hash-has-key? copy (copy-of seen k k))))
-    (raise-arguments-error
-     (memo-who seen)
-     (string-append "an immutable equal?-based hash was copied while one of its keys"
-                    " was still being built, so the copy cannot find that key"))))
+    (part-built! (memo-who seen))))
+
+(define (part-built! who)
+  (raise-arguments-error
+   who
+   (string-append "an immutable equal?-based hash was copied while one of its keys"
+                  " was still being built, so the copy cannot find that key")))

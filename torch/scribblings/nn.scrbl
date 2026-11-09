@@ -655,11 +655,11 @@ immutable values, which Python cannot build, and on a cycle back into a
 hand-written layer whose @racket[layer-rebuild] has not returned. It also
 raises where an @racket[equal?]-based hash cannot be copied: a key that
 reaches its own table, a key that reaches a mutable @racket[equal?]-based
-hash whose own keys reach it (both hang @racket[equal-hash-code]), and keys
+hash whose own keys reach it (both can hang @racket[equal-hash-code]), and keys
 that copy to @racket[equal?] keys or were part-built when an immutable hash
 was copied. Only the values @racket[layer-copy] walks are checked; a key
 whose own @racket[equal?] or hash method, as a @racketmodname[racket/set] set
-has, reaches its table hangs the copy as it hangs the original.
+has, reaches its table can hang the copy as it can hang the original.
 
 Every layer @racket[define-layer] builds can be copied, the built-in ones
 included, and so can a @racket[procedure->Layer] layer with no
@@ -707,7 +707,9 @@ thread a rebuild starts while the rebuild waits; a second thread at once, a
 use after @racket[layer-copy] returns, and any use after a rebuild raised or
 was killed raise @racket[exn:fail:contract], except a thread killed inside
 the copy's lock, which leaves the copy waiting. A @racket[child] that answers
-some children with other layers rebuilds the tree with those leaves replaced.
+some children with other layers rebuilds the tree with those leaves replaced,
+and raises when two keys of one hash, of any comparison, are replaced by keys
+that comparison equates.
 
 @racket[define-layer] supplies the method. A hand-written layer that
 should be copyable defines it in its @racket[#:methods gen:layer] block,

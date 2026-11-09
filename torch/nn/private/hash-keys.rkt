@@ -29,11 +29,19 @@
   (for-each (match-lambda [(cons k x) (hash-set! table k x)]) entries)
   (collapsed! who (length entries) table))
 
+(define (comparison table)
+  (cond
+    [(hash-equal? table) "equal?"]
+    [(hash-equal-always? table) "equal-always?"]
+    [(hash-eqv? table) "eqv?"]
+    [else "eq?"]))
+
 (define (collapsed! who expected table)
+  (define same (comparison table))
   (unless (= (hash-count table) expected)
     (raise-arguments-error
      who
-     (string-append "two keys of an equal?-based hash copied to equal? keys,"
+     (string-append "two keys of an " same "-based hash copied to " same " keys,"
                     " so the copy would hold fewer entries than the original"))))
 
 (define (hash-parts h)
@@ -55,7 +63,16 @@
             [(? vector?) (vector->list v)]
             [(? keys-hashed?) (hash-parts v)]
             [(? hash?) (hash-values v)]
-            [(? struct?) (match (vector->list (struct->vector v)) [(list* _ fields) fields])])))
+            [(? struct?) (struct-edges v)])))
+
+(define (struct-edges v)
+  (define fields (match (vector->list (struct->vector v)) [(list* _ fields) fields]))
+  (define hashed '())
+  (equal-hash-code/recur v (lambda (x) (set! hashed (cons x hashed)) 0))
+  (if (equal-length-eq? fields (reverse hashed)) fields '()))
+
+(define (equal-length-eq? xs ys)
+  (and (= (length xs) (length ys)) (andmap eq? xs ys)))
 
 (struct search (who kc table index low settled component [stack #:mutable])
   #:constructor-name build-search
@@ -65,9 +82,8 @@
   (build-search who kc table (make-hasheq) (make-hasheq) (make-hasheq) (make-hasheq) '()))
 
 (define (check-hashable who kc k table)
-  (when (compound? k)
-    (reached (search who kc table) k))
-  (void))
+  (or (not (compound? k))
+      (reached (search who kc table) k)))
 
 (define (reached s v)
   (cond
