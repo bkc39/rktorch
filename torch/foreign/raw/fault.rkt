@@ -62,9 +62,6 @@
      " at the first fault instead.")
     (current-continuation-marks))))
 
-;; Racket 9.1 returns from a native fault with Chez's interrupts disabled once
-;; more than before the call, and a parallel thread left so never joins a
-;; collection: every later one waits on it.
 (define interrupt-depth
   (vm-eval '(lambda () (let ([n (disable-interrupts)]) (enable-interrupts) n))))
 
