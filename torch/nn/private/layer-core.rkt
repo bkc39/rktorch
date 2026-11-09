@@ -8,7 +8,8 @@
          (only-in syntax/parse/define define-syntax-parse-rule)
          (only-in "../../foreign.rkt" device dtype prop:to)
          (only-in (submod "../../foreign.rkt" unsafe) to!)
-         (only-in "../../foreign/autograd-ops.rkt" collect-at-forward-trough!))
+         (only-in "../../foreign/autograd-ops.rkt" collect-at-forward-trough!)
+         (only-in "memo.rkt" remembered remembering-seen remembering? with-memo))
 
 ;; the noqa'd exports are macro expansions raco review cannot see
 (provide gen:layer
@@ -21,6 +22,7 @@
          layer-mode ;; noqa
          layer-set-mode! ;; noqa
          layer-rebuild ;; noqa
+         layer-rebuild-in
          prop:on-move
          prop:rebuilder
          (struct-out registry)
@@ -175,7 +177,8 @@
   (define forward (if (registry? m) (registry-forward m) layer-forward))
   (at-forward-trough (keyword-apply forward kws kw-args m inputs)))
 
-(struct registry (forward params buffers children [mode #:mutable])
+(struct registry (forward [params #:mutable] [buffers #:mutable] [children #:mutable]
+                          [mode #:mutable])
   #:methods gen:layer
   [(define (layer-forward self . inputs)
      (apply (registry-forward self) self inputs))
@@ -207,10 +210,19 @@
    (define (layer-mode self)
      (registry-mode self))
    (define (layer-rebuild self child tensor)
-     ((rebuilder-of self) self child tensor))])
+     (layer-rebuild-in self child tensor))])
 
 (define-values (prop:rebuilder rebuilder? rebuilder-of) ;; noqa
   (make-struct-type-property 'rebuilder))
+
+(define (layer-rebuild-in m child tensor
+                          #:memo [seen (and (remembering? child) (remembering-seen child))])
+  (cond
+    [(not seen)
+     (with-memo (fresh 'layer-rebuild)
+       (layer-rebuild-in m child tensor #:memo fresh))]
+    [(rebuilder? m) ((rebuilder-of m) m child tensor seen)]
+    [else (remembered seen m (lambda () (layer-rebuild m child tensor)))]))
 
 (define (child-parameters c)
   (layer-parameters (cdr c)))

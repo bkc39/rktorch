@@ -22,15 +22,15 @@
                   define/checked-out define/contract-out)
          (only-in "buffer.rkt" Buffer?)
          (only-in "parameter.rkt" Parameter?)
-         (only-in "private/field-walk.rkt" rebuilt-value)
+         (only-in "private/field-walk.rkt" rebuilt-layer)
          (only-in "private/layer-containers.rkt"
                   Children% Children%-alist Children%? Fn% Parameters% Parameters%?
                   check-names fn-forward)
          (only-in "private/layer-core.rkt"
                   gen:layer layer-buffers layer-mode layer-named-buffers
                   layer-named-children layer-named-parameters layer-parameters
-                  layer-rebuild layer-set-mode! layer? prop:on-move prop:rebuilder
-                  registry registry-mode registry? set-registry-mode! with-mode)
+                  layer-rebuild-in layer-set-mode! layer? prop:on-move prop:rebuilder
+                  registry registry? set-registry-mode! with-mode)
          (only-in "private/layer-fields.rkt"
                   assemble check-entry-arity entry-procedure layer-methods-of
                   layer-methods? no-forward prop:layer-methods write-field!))
@@ -44,7 +44,6 @@
          layer-named-children
          layer-mode
          layer-set-mode!
-         layer-rebuild
          registry?
          set-registry-mode!
          with-mode
@@ -60,6 +59,10 @@
 (define/contract-out (evaluating? mode) ;; noqa
   (-> mode/c boolean?)
   (eq? mode 'eval))
+
+(define/checked-out (layer-rebuild m child tensor)
+  (-> layer? (-> string? layer? layer?) (-> tensor? tensor?) layer?)
+  (layer-rebuild-in m child tensor))
 
 (module+ checked
   (provide (contract-out [layer? (-> any/c boolean?)])))
@@ -216,12 +219,11 @@
       [(_ arg ...) #`((#,acc #,self) arg ...)]
       [_:id #`(#,acc #,self)]))
 
-  (struct field-access (binder binding spec))
+  (struct field-access (binder binding))
 
   (define immutable-fields
     (field-access #'let
-                  (lambda (_who field acc _mut) #`[#,field (#,acc self)])
-                  values))
+                  (lambda (_who field acc _mut) #`[#,field (#,acc self)])))
 
   (define mutable-fields
     (field-access #'let-syntax
@@ -230,8 +232,7 @@
                                 (field-transformer (quote-syntax self)
                                                    (quote-syntax #,acc)
                                                    (quote-syntax #,mut)
-                                                   '#,who '#,field))])
-                  (lambda (field) #`[#,field #:mutable])))
+                                                   '#,who '#,field))])))
 
   (define (field-ids struct-id fields pattern)
     (map (lambda (f) (format-id struct-id pattern struct-id f)) fields))
@@ -250,7 +251,8 @@
        #:with (acc ...) (field-ids #'sid (attribute f.id) "~a-~a")
        #:with (mut ...) (field-ids #'sid (attribute f.id) "set-~a-~a!")
        #:with (field-name ...) (map (lambda (f) (symbol->string (syntax-e f))) (attribute f.id))
-       #:with (field-spec ...) (map (field-access-spec access) (attribute f.id))
+       #:with (field-spec ...) (map (lambda (f) #`[#,f #:mutable]) (attribute f.id))
+       #:with (filled ...) (generate-temporaries (attribute f.id))
        #:with binder (field-access-binder access)
        #:with (binding ...)
        (for/list ([fid (in-list (attribute f.id))]
@@ -285,16 +287,19 @@
            (struct sid registry (field-spec ...)
              #:reflection-name (~? o.reflect 'name)
              #:property prop:rebuilder
-             (lambda (self child tensor) (rebuild self child tensor))
+             (lambda (self child tensor seen) (rebuild self child tensor seen))
              moved-property ...
              methods-property ...
              (~@ #:property prop prop-val) ...)
            (define name? sid?)
            fe.checker-def ... ...
            me.checker-def ... ...
-           (define (rebuild self child tensor)
-             (assemble 'name sid forward-proc (registry-mode self) '(field-name ...)
-                       (list (rebuilt-value 'field-name (acc self) child tensor) ...)))
+           (define (rebuild self child tensor seen)
+             (rebuilt-layer self
+                            #:memo seen #:child child #:tensor tensor #:who 'name
+                            #:make sid #:forward forward-proc
+                            #:names '(field-name ...) #:values (list (acc self) ...)
+                            #:fill (lambda (copy filled ...) (mut copy filled) ... (void))))
            (define forward-proc forward-expr)
            (define (name . formals)
              (let ([absent #f] ...)
