@@ -13,7 +13,7 @@
          (only-in "collector.rkt"
                   finalizer-runs
                   note-finalizer-run!)
-         (only-in "fault.rkt" native-fault? note-native-fault!)
+         (only-in "fault.rkt" native-fault? note-native-fault! with-fault-handlers)
          (only-in "oom.rkt"
                   collect-and-drain!
                   oom-retry
@@ -205,7 +205,7 @@
 
 (define-syntax-parse-rule (counting-failures body:expr ...+)
   (with-uninterruptible
-    (with-handlers ([(lambda (_) #t) count-failed-run!])
+    (with-fault-handlers ([(lambda (_) #t) count-failed-run!])
       body ...
       (note-finalizer-run!))))
 
@@ -271,10 +271,10 @@
   #:c-id tr_tensor_device)
 
 (define (native-placement t)
-  (with-handlers ([exn:fail? (lambda (e)
-                               (when (native-fault? e)
-                                 (note-native-fault! "accounting a tensor"))
-                               (values #f #f))])
+  (with-fault-handlers ([exn:fail? (lambda (e)
+                                     (when (native-fault? e)
+                                       (note-native-fault! "accounting a tensor"))
+                                     (values #f #f))])
     (define-values (nb-rc nbytes) (tr-tensor-nbytes/raw t))
     (define-values (dev-rc type index) (tr-tensor-device/raw t))
     (cond

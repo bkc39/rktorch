@@ -17,7 +17,7 @@
                   tensor->pytorch-repr
                   tensor-tree->pytorch-repr)
          (only-in "raw/cas.rkt" cas-field-claim!)
-         (only-in "raw/fault.rkt" native-fault? note-native-fault!)
+         (only-in "raw/fault.rkt" native-fault? note-native-fault! with-fault-handlers)
          (only-in "raw/memory.rkt" free-handles! tr-tensor-free/checked)
          (only-in "raw/race-points.rkt" race-point)
          (only-in "raw/syntax.rkt" Tensor?)
@@ -196,13 +196,13 @@
      (cond
        [(not (cpointer-has-tag? h 'Tensor)) "#<tensor (freed)>"]
        [else
-        (with-handlers ([(lambda (e) (not (exn:break? e)))
-                         (lambda (e)
-                           (when (native-fault? e)
-                             (note-native-fault! "printing a tensor"))
-                           (string-append "#<tensor:"
-                                          (shape->string (tensor-impl-shape t))
-                                          ">"))])
+        (with-fault-handlers ([(lambda (e) (not (exn:break? e)))
+                               (lambda (e)
+                                 (when (native-fault? e)
+                                   (note-native-fault! "printing a tensor"))
+                                 (string-append "#<tensor:"
+                                                (shape->string (tensor-impl-shape t))
+                                                ">"))])
           (handle->repr h (tensor-impl-shape t)))])
      port)))
 

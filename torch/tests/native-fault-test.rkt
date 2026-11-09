@@ -36,7 +36,23 @@
       (printf "reapers alive=~a released=~a\n"
               (andmap (lambda (t) (not (thread-dead? t))) (reaper-threads))
               (hash-ref (reaper-statistics) 'released))
-      (then-probe)))
+      (then-probe)
+      (collect-garbage)
+      (printf "latched: ~a, collected after the fault\n" (native-faulted))))
+
+  (define parallel-catch
+    '((require (only-in ffi/unsafe -> _fun _size get-ffi-obj)
+               (only-in torch/foreign/raw/fault with-fault-handlers))
+      (define strlen (get-ffi-obj "strlen" #f (_fun _intptr -> _size)))
+      (define caught (box #f))
+      (void (thread (lambda ()
+                      (with-fault-handlers ([exn:fail? (lambda (e) (set-box! caught (exn-message e)))])
+                        (strlen 8))
+                      (let idle () (sleep 0.01) (idle)))
+                    #:pool 'own))
+      (let wait () (unless (unbox caught) (sleep 0.01) (wait)))
+      (collect-garbage)
+      (printf "caught: ~a; collected\n" (unbox caught))))
 
   (define printer-fault
     '((printf "~a\n" (tensor-impl (bad) '(2 2)))
@@ -65,7 +81,8 @@
         (values (get-output ev) (ev '(native-faulted))))))
 
   ;; The exit policy ends the process, and its notice goes to file
-  ;; descriptor 2 past every port, so those cases run in a child racket.
+  ;; descriptor 2 past every port, and a stalled collection stops every
+  ;; thread, so those cases run in a child racket.
   (define (run-racket program #:policy policy)
     (parameterize ([current-environment-variables (environment-with policy)])
       (define-values (sp out in err)
@@ -77,14 +94,14 @@
       (define out-t (thread (lambda () (set-box! stdout (port->string out)))))
       (define err-t (thread (lambda () (set-box! stderr (port->string err)))))
       (define exited?
-        (and (sync/timeout 120 (thread (lambda () (subprocess-wait sp)))) #t))
+        (and (sync/timeout 60 (thread (lambda () (subprocess-wait sp)))) #t))
       (unless exited? (subprocess-kill sp #t))
       (sync/timeout 10 out-t)
       (sync/timeout 10 err-t)
       (close-input-port out)
       (close-input-port err)
       (unless exited?
-        (error 'run-racket "child did not exit within 120s"))
+        (error 'run-racket "child did not exit within 60s"))
       (values (subprocess-status sp) (unbox stdout) (unbox stderr))))
 
   (define disabled #rx"then: rktorch: native code faulted earlier, while ")
@@ -100,12 +117,19 @@
   (test-case "the default policy raises"
     (check-equal? native-fault-policy 'raise))
 
-  (test-case "L12: a fault in a reaper's release latches, counts, and leaves every reaper alive"
-    (define-values (stdout faulted) (run-in-sandbox finalizer-fault))
+  (test-case "L12: a fault in a reaper's release latches, counts, leaves every reaper alive, and the process still collects"
+    (define-values (code stdout stderr) (run-racket finalizer-fault #:policy #f))
+    (check-equal? code 0 stderr)
     (check-true (regexp-match? #rx"survived failures=5" stdout) stdout)
     (check-true (regexp-match? #rx"reapers alive=#t released=5\n" stdout) stdout)
     (check-true (regexp-match? disabled stdout) stdout)
-    (check-equal? faulted "running a finalizer"))
+    (check-true (regexp-match? #rx"latched: running a finalizer, collected after the fault\n" stdout)
+                stdout))
+
+  (test-case "a parallel thread that caught a native fault in with-fault-handlers still joins a collection"
+    (define-values (code stdout stderr) (run-racket parallel-catch #:policy #f))
+    (check-equal? code 0 stderr)
+    (check-true (regexp-match? #rx"^caught: invalid memory reference.*; collected\n$" stdout) stdout))
 
   (test-case "under the exit policy a finalizer fault stops the process"
     (define-values (code stdout stderr) (run-racket finalizer-fault #:policy "exit"))
