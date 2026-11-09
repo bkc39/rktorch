@@ -1,12 +1,12 @@
 #lang racket/base
 
 (module+ test
-  (require (only-in racket/generic define/generic)
-           (only-in racket/match match match-define)
+  (require (only-in racket/match match match-define)
            rackunit
            "../main.rkt"
            "../nn.rkt"
-           (only-in "private/copy-layers.rkt" copied-field holder twin)
+           (only-in "private/copy-layers.rkt"
+                    copied-field deleg deleg-inner holder keep set-deleg-inner! twin)
            (only-in "private/within-memory.rkt" memory-bounded-test))
 
   (define (self-box)
@@ -276,49 +276,27 @@
     (check-exn #rx"^layer-copy: a hand-written gen:layer has no layer-rebuild-method"
                (lambda () (layer-copy h))))
 
-  (struct back ([outer #:mutable])
-    #:methods gen:layer
-    [(define (layer-forward self . _inputs) (back-outer self))
-     (define (layer-rebuild-method self child tensor)
-       (~> (back-outer self) (layer-rebuild child tensor) back))])
-
   (memory-bounded-test "a cycle through a delegating rebuild copies from the define-layer side"
-    (define w (back #f))
-    (define h (holder w))
-    (set-back-outer! w h)
+    (define d (deleg #f 'plain))
+    (define h (holder d))
+    (set-deleg-inner! d h)
     (define h2 (layer-copy h))
-    (check-eq? (back-outer (h2)) h2)
-    (check-exn reentered (lambda () (layer-copy w))))
+    (check-eq? (deleg-inner (h2)) h2)
+    (check-exn reentered (lambda () (layer-copy d))))
 
-  (memory-bounded-test "mutually delegating hand-written layers raise"
-    (define b1 (back #f))
-    (set-back-outer! b1 (back b1))
-    (check-exn reentered (lambda () (layer-copy b1))))
+  (memory-bounded-test "#466: layers delegating through the plain name raise, naming the layer"
+    (define d (deleg #f 'plain))
+    (set-deleg-inner! d (deleg d 'plain))
+    (check-exn #rx"^layer-copy: a cycle re-enters [^\n]*\n  layer: #<procedure:deleg>"
+               (lambda () (layer-copy d)))
+    (check-exn #rx"^layer-rebuild: a cycle re-enters [^\n]*\n  layer: #<procedure:deleg>"
+               (lambda () (layer-rebuild d keep values))))
 
-  (memory-bounded-test "mutually delegating layers rebuilt directly with a plain child raise"
-    (define b1 (back #f))
-    (set-back-outer! b1 (back b1))
-    (check-exn #rx"^layer-rebuild: a cycle re-enters a hand-written layer-rebuild-method"
-               (lambda () (layer-rebuild b1 (lambda (_name c) c) values))))
-
-  (struct gback ([outer #:mutable])
-    #:methods gen:layer
-    [(define/generic raw-rebuild layer-rebuild-method)
-     (define (layer-forward self . _inputs) (gback-outer self))
-     (define (layer-rebuild-method self child tensor)
-       (~> (gback-outer self) (raw-rebuild child tensor) gback))])
-
-  (memory-bounded-test "#466: layers delegating through define/generic raise, naming the layer"
-    (define b1 (gback #f))
-    (define b2 (gback b1))
-    (set-gback-outer! b1 b2)
-    (check-exn (lambda (e)
-                 (and (exn:fail:contract? e)
-                      (regexp-match? reentered (exn-message e))
-                      (regexp-match? #rx"layer: #<procedure:gback>" (exn-message e))))
-               (lambda () (layer-copy b1)))
-    (check-exn #rx"^layer-rebuild: a cycle re-enters"
-               (lambda () (layer-rebuild b1 (lambda (_name c) c) values))))
+  (memory-bounded-test "layers delegating with callbacks of their own raise, naming the layer"
+    (define d (deleg #f 'fixed))
+    (set-deleg-inner! d (deleg d 'fixed))
+    (check-exn #rx"^layer-rebuild: a cycle re-enters [^\n]*\n  layer: #<procedure:deleg>"
+               (lambda () (layer-rebuild d keep values))))
 
   (struct cb ([other #:mutable])
     #:methods gen:layer

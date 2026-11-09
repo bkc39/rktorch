@@ -3,10 +3,6 @@
 (require (for-syntax racket/base
                      (only-in syntax/parse/pre expr))
          (only-in racket/generic define-generics)
-         (only-in racket/private/generic-methods
-                  generic-info-accessor generic-info-method-names generic-info-methods
-                  generic-info-name generic-info-predicate generic-info-property
-                  generic-info-required-methods make-generic-info)
          (only-in racket/list append-map remove-duplicates)
          (only-in racket/stxparam define-syntax-parameter)
          (only-in syntax/parse/define define-syntax-parse-rule)
@@ -16,7 +12,7 @@
          (only-in "memo.rkt" remembered remembering-seen remembering? with-memo))
 
 ;; the noqa'd exports are macro expansions raco review cannot see
-(provide (rename-out [gen:joined-layer gen:layer])
+(provide gen:layer
          layer?
          layer-parameters ;; noqa
          layer-named-parameters ;; noqa
@@ -25,6 +21,7 @@
          layer-named-children ;; noqa
          layer-mode ;; noqa
          layer-set-mode! ;; noqa
+         layer-rebuild-alone
          layer-rebuild-in
          prop:on-move
          prop:rebuilder
@@ -61,22 +58,6 @@
       'layer-copy
       "a hand-written gen:layer has no layer-rebuild-method to copy it with"
       "layer" self))])
-
-;; define/generic reaches layer-rebuild-in, not the raw method, so no rebuild
-;; body is entered past the memo
-(define-syntax gen:joined-layer
-  (let ([info (syntax-local-value (quote-syntax gen:layer))])
-    (make-generic-info
-     (generic-info-name info)
-     (generic-info-property info)
-     (generic-info-predicate info)
-     (generic-info-accessor info)
-     (generic-info-method-names info)
-     (for/list ([m (in-list (generic-info-methods info))])
-       (if (free-identifier=? m (quote-syntax layer-rebuild-method))
-           (quote-syntax layer-rebuild-in)
-           m))
-     (generic-info-required-methods info))))
 
 ;; PyTorch: "nn.Module.to only accepts floating point or complex dtypes",
 ;; and its convert forwards the dtype only to floating-point tensors — an
@@ -234,29 +215,33 @@
 (define-values (prop:rebuilder rebuilder? rebuilder-of) ;; noqa
   (make-struct-type-property 'rebuilder))
 
-(struct direct (child tensor seen))
+(struct direct-rebuild (child tensor memo))
 
 (define direct-rebuilds (make-continuation-mark-key 'layer-rebuild))
 
-(define (same? f g)
-  (or (chaperone-of? f g) (chaperone-of? g f)))
+(define (callbacks-equal? r child tensor)
+  (and (equal-always? child (direct-rebuild-child r))
+       (equal-always? tensor (direct-rebuild-tensor r))))
 
-;; a contract wraps the callbacks again at each call, hence chaperone-of?
-(define (joined child tensor directs)
-  (for/first ([d (in-list directs)]
-              #:when (and (same? child (direct-child d)) (same? tensor (direct-tensor d))))
-    (direct-seen d)))
+(define (joined-memo child tensor enclosing)
+  (for/first ([r (in-list enclosing)]
+              #:when (callbacks-equal? r child tensor))
+    (direct-rebuild-memo r)))
 
 (define (layer-rebuild-in m child tensor)
-  (define directs (continuation-mark-set-first #f direct-rebuilds '()))
-  (define seen
-    (if (remembering? child) (remembering-seen child) (joined child tensor directs)))
+  (define enclosing (continuation-mark-set-first #f direct-rebuilds '()))
+  (define joined (and (not (remembering? child)) (joined-memo child tensor enclosing)))
   (cond
-    [seen (rebuilt m child tensor seen)]
+    [(remembering? child) (rebuilt m child tensor (remembering-seen child))]
+    [joined (rebuilt m child tensor joined)]
     [else
      (with-memo (fresh 'layer-rebuild)
-       (with-continuation-mark direct-rebuilds (cons (direct child tensor fresh) directs)
+       (with-continuation-mark direct-rebuilds (cons (direct-rebuild child tensor fresh) enclosing)
          (rebuilt m child tensor fresh)))]))
+
+(define (layer-rebuild-alone m child tensor)
+  (with-continuation-mark direct-rebuilds '()
+    (layer-rebuild-in m child tensor)))
 
 (define (rebuilt m child tensor seen)
   (if (rebuilder? m)

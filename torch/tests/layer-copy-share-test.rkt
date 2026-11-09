@@ -1,12 +1,11 @@
 #lang racket/base
 
 (module+ test
-  (require (only-in racket/generic define/generic)
-           (only-in racket/match match-define)
+  (require (only-in racket/match match-define)
            rackunit
            "../main.rkt"
            "../nn.rkt"
-           (only-in "private/copy-layers.rkt" copied-field holder twin)
+           (only-in "private/copy-layers.rkt" copied-field deleg deleg-inner holder keep twin)
            (only-in "private/within.rkt" bounded-test))
 
   (bounded-test "two fields sharing a box share one fresh box in the copy"
@@ -135,42 +134,29 @@
     (check-eq? leaf-direct leaf-copy)
     (check-eq? box-direct box-copy))
 
-  (struct deleg (inner)
-    #:methods gen:layer
-    [(define (layer-forward self . _inputs) (deleg-inner self))
-     (define (layer-rebuild-method self child tensor)
-       (~> (deleg-inner self) (layer-rebuild child tensor) deleg))])
-
   (bounded-test "a container shared through a delegating layer stays shared"
     (define b (box 1))
-    (match-define (list d2 h2) (copied-field (twin (deleg (holder b)) (holder b))))
+    (match-define (list d2 h2) (copied-field (twin (deleg (holder b) 'plain) (holder b))))
     (check-eq? ((deleg-inner d2)) (h2))
     (check-false (eq? (h2) b)))
 
   (bounded-test "a hash key shared through a delegating layer finds the other copy"
     (define b (box 1))
     (match-define (list d2 h2)
-      (~> (list (cons b 'x)) make-hasheq holder deleg (twin (holder b)) copied-field))
+      (~> (list (cons b 'x)) make-hasheq holder (deleg 'plain) (twin (holder b)) copied-field))
     (check-eq? (hash-ref ((deleg-inner d2)) (h2) #f) 'x))
-
-  (struct generic-deleg (inner)
-    #:methods gen:layer
-    [(define/generic raw-rebuild layer-rebuild-method)
-     (define (layer-forward self . _inputs) (generic-deleg-inner self))
-     (define (layer-rebuild-method self child tensor)
-       (~> self generic-deleg-inner (raw-rebuild child tensor) generic-deleg))])
 
   (bounded-test "a define/generic rebuild of a define-layer layer copies it"
     (define b (box 1))
-    (define c (~> (holder b) generic-deleg layer-copy generic-deleg-inner))
+    (define c (~> (holder b) (deleg 'generic) layer-copy deleg-inner))
     (check-false (eq? (c) b))
     (check-equal? (c) (box 1))
-    (define d (~> (holder b) generic-deleg (layer-rebuild (lambda (_name c) c) values)))
-    (check-false (eq? ((generic-deleg-inner d)) b))
-    (check-equal? ((generic-deleg-inner d)) (box 1))
+    (define d (~> (holder b) (deleg 'generic) (layer-rebuild keep values)))
+    (check-false (eq? ((deleg-inner d)) b))
+    (check-equal? ((deleg-inner d)) (box 1))
     (define h (holder (box 1)))
-    (match-define (list d2 h2) (~> h generic-deleg (twin h) copied-field))
-    (check-eq? (generic-deleg-inner d2) h2)
+    (match-define (list d2 h2) (~> h (deleg 'generic) (twin h) copied-field))
+    (check-eq? (deleg-inner d2) h2)
     (check-false (eq? h2 h)))
 
   (struct leaf (v)
@@ -179,36 +165,38 @@
      (define (layer-rebuild-method self _child _tensor)
        (leaf (leaf-v self)))])
 
-  (bounded-test "a hand-written layer reached twice through a define/generic rebuild is copied once"
-    (define l (leaf 1))
-    (match-define (list d2 l2) (~> l generic-deleg (twin l) copied-field))
-    (check-eq? (generic-deleg-inner d2) l2)
-    (check-false (eq? l2 l)))
-
-  (struct plain-deleg (inner)
-    #:methods gen:layer
-    [(define (layer-forward self . _inputs) (plain-deleg-inner self))
-     (define (layer-rebuild-method self child tensor)
-       (~> self plain-deleg-inner (layer-rebuild child tensor) plain-deleg))])
-
   (bounded-test "a hand-written layer reached twice through the plain name is copied once"
     (define l (leaf 1))
-    (match-define (list d2 l2) (~> l plain-deleg (twin l) copied-field))
-    (check-eq? (plain-deleg-inner d2) l2)
+    (match-define (list d2 l2) (~> l (deleg 'plain) (twin l) copied-field))
+    (check-eq? (deleg-inner d2) l2)
     (check-false (eq? l2 l)))
+
+  (bounded-test "a define/generic rebuild of a hand-written layer copies it apart, as __deepcopy__"
+    (define l (leaf 1))
+    (match-define (list d2 l2) (~> l (deleg 'generic) (twin l) copied-field))
+    (check-false (eq? (deleg-inner d2) l2)))
 
   (struct both (a b)
     #:methods gen:layer
     [(define (layer-forward self . _inputs) (list (both-a self) (both-b self)))
-     (define (layer-rebuild-method self child tensor)
-       (both (layer-rebuild (both-a self) child tensor)
-             (layer-rebuild (both-b self) child tensor)))])
+     (define (layer-rebuild-method self child _tensor)
+       (both (layer-rebuild (both-a self) child values)
+             (layer-rebuild (both-b self) child values)))])
 
   (bounded-test "a hand-written layer reached twice by one direct rebuild is rebuilt once"
     (define l (leaf 1))
-    (define r (layer-rebuild (both l l) (lambda (_name c) c) values))
+    (define r (layer-rebuild (both l l) keep values))
     (check-eq? (both-a r) (both-b r))
     (check-false (eq? (both-a r) l)))
+
+  (define (deep _name c)
+    (layer-rebuild c deep values))
+
+  (bounded-test "a child that rebuilds directly keeps a layer reached twice shared"
+    (define h (holder 0))
+    (match-define (list a b) ((layer-rebuild (twin h h) deep values)))
+    (check-eq? a b)
+    (check-false (eq? a h)))
 
   (struct apart (a b)
     #:methods gen:layer
@@ -219,8 +207,20 @@
 
   (bounded-test "a nested direct rebuild on other callbacks keeps its own memo"
     (define l (leaf 1))
-    (define r (layer-rebuild (apart l l) (lambda (_name c) c) values))
+    (define r (layer-rebuild (apart l l) keep values))
     (check-false (eq? (apart-a r) (apart-b r))))
+
+  (struct outer (a d)
+    #:methods gen:layer
+    [(define (layer-forward self . _inputs) (outer-d self))
+     (define (layer-rebuild-method self child tensor)
+       (outer (layer-rebuild (outer-a self) child tensor) (layer-copy (outer-d self))))])
+
+  (bounded-test "a layer-copy inside a direct rebuild shares nothing with it"
+    (define l (leaf 1))
+    (match-define (outer a2 d2) (layer-rebuild (outer l (deleg l 'fixed)) keep values))
+    (check-false (eq? (deleg-inner d2) a2))
+    (check-false (eq? (deleg-inner d2) l)))
 
   (struct fallback (f)
     #:methods gen:layer
@@ -268,11 +268,11 @@
     (check-equal? (unbox ((c))) (vector 1 (box 2))))
 
   (bounded-test "a layer reached through a delegating rebuild and a field is copied once"
-    (for ([h (in-list (list (holder (box 1)) (~> 1 box holder deleg)))])
-      (match-define (list d2 h2) (~> (deleg h) (twin h) copied-field))
+    (for ([h (in-list (list (holder (box 1)) (~> 1 box holder (deleg 'plain))))])
+      (match-define (list d2 h2) (~> (deleg h 'plain) (twin h) copied-field))
       (check-eq? (deleg-inner d2) h2)
       (check-false (eq? h2 h))
-      (match-define (list h3 d3) (copied-field (twin h (deleg h))))
+      (match-define (list h3 d3) (copied-field (twin h (deleg h 'plain))))
       (check-eq? (deleg-inner d3) h3)
       (check-false (eq? h3 h))))
 
